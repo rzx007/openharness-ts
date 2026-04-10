@@ -1,0 +1,42 @@
+{
+  "name": "web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "serve": "vite preview",
+    "start": "vite",
+    "check-types": "vite build && tsc --noEmit"
+  },
+  "dependencies": {
+    "@OpenHarness-ts/env": "workspace:*",
+    "@OpenHarness-ts/ui": "workspace:*",
+    "@hookform/resolvers": "^5.1.1",
+    "@libsql/client": "catalog:",
+    "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/react-router": "^1.141.1",
+    "dotenv": "catalog:",
+    "libsql": "catalog:",
+    "lucide-react": "catalog:",
+    "next-themes": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "sonner": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@OpenHarness-ts/config": "workspace:*",
+    "@tanstack/react-router-devtools": "^1.141.1",
+    "@tanstack/router-plugin": "^1.141.1",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "^4.3.4",
+    "postcss": "^8.5.3",
+    "tailwindcss": "catalog:",
+    "typescript": "^5",
+    "vite": "^6.2.2"
+  }
+}

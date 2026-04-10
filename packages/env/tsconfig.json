@@ -1,0 +1,3 @@
+{
+  "extends": "@OpenHarness-ts/config/tsconfig.base.json"
+}
