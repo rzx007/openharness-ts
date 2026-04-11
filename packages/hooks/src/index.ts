@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import type {
   HookEvent,
   HookType,
@@ -18,9 +19,6 @@ export class HookExecutor implements IHookExecutor {
   private hooks = new Map<string, HookDefinition>();
 
   register(hook: HookDefinition): void {
-    if (this.hooks.has(hook.id)) {
-      throw new Error(`Hook already registered: ${hook.id}`);
-    }
     this.hooks.set(hook.id, hook);
   }
 
@@ -112,15 +110,48 @@ export class HookExecutor implements IHookExecutor {
     }
   }
 
-  private async executeCommand(
-    _command: string,
-    _signal: AbortSignal
-  ): Promise<void> {}
+  async executeCommand(
+    command: string,
+    signal: AbortSignal
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const proc = spawn(command, [], {
+        shell: true,
+        signal,
+      });
 
-  private async executeHttp(
-    _url: string,
-    _method: string,
-    _body: unknown,
-    _signal: AbortSignal
-  ): Promise<void> {}
+      let stderr = "";
+
+      proc.stderr?.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Hook command exited with code ${code}: ${stderr}`));
+      });
+
+      proc.on("error", (err) => {
+        reject(err);
+      });
+    });
+  }
+
+  async executeHttp(
+    url: string,
+    method: string,
+    body: unknown,
+    signal: AbortSignal
+  ): Promise<void> {
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Hook HTTP request failed: ${response.status} ${response.statusText}`);
+    }
+  }
 }

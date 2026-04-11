@@ -1,62 +1,128 @@
 import OpenAI from "openai";
-import type { StreamingMessageClient, StreamMessageParams, StreamEvent } from "@openharness/core";
+import type {
+  StreamingMessageClient,
+  StreamMessageParams,
+  StreamEvent,
+  Message,
+  ToolDefinition,
+} from "@openharness/core";
 import { retryWithBackoff } from "@openharness/core";
 import type { ProviderConfig } from "./registry";
 
+const MAX_RETRIES = 3;
+const BASE_DELAY = 1000;
+const MAX_DELAY = 30000;
+
 export class OpenAICompatibleClient implements StreamingMessageClient {
-  private client: OpenAI;
+  private _client: OpenAI;
 
   constructor(private config: ProviderConfig) {
-    this.client = new OpenAI({
+    this._client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
     });
   }
 
+  get client(): OpenAI {
+    return this._client;
+  }
+
+  set client(value: OpenAI) {
+    this._client = value;
+  }
+
   async *streamMessage(params: StreamMessageParams): AsyncIterable<StreamEvent> {
     const messages = this.convertMessages(params);
-    const tools = params.tools?.map(this.convertTool);
+    const tools = params.tools?.length ? params.tools.map(this.convertTool) : undefined;
 
-    const stream = await this.client.chat.completions.create({
+    const createParams: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: params.model,
       messages,
-      tools: tools?.length ? tools : undefined,
       max_tokens: params.maxTokens ?? 8192,
       temperature: params.temperature,
       stream: true,
-    });
+      stream_options: tools ? undefined : { include_usage: true },
+      tools,
+    };
+
+    let collectedContent = "";
+    const collectedToolCalls: Map<number, { id: string; name: string; arguments: string }> =
+      new Map();
+    let finishReason: string | null = null;
+    let usageData = { inputTokens: 0, outputTokens: 0 };
+
+    const stream = await this._client.chat.completions.create(createParams);
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      if (!delta) continue;
+      if (!chunk.choices || chunk.choices.length === 0) {
+        if (chunk.usage) {
+          usageData = {
+            inputTokens: chunk.usage.prompt_tokens ?? 0,
+            outputTokens: chunk.usage.completion_tokens ?? 0,
+          };
+        }
+        continue;
+      }
+
+      const choice = chunk.choices[0]!;
+      const delta = choice.delta;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
 
       if (delta.content) {
+        collectedContent += delta.content;
         yield { type: "text_delta", delta: delta.content };
       }
 
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
-          if (tc.function?.name) {
-            yield {
-              type: "tool_use_start",
-              toolUse: {
-                type: "tool_use",
-                id: tc.id ?? "",
-                name: tc.function.name,
-                input: JSON.parse(tc.function.arguments ?? "{}"),
-              },
-            };
+          const idx = tc.index;
+          if (!collectedToolCalls.has(idx)) {
+            collectedToolCalls.set(idx, { id: tc.id ?? "", name: "", arguments: "" });
           }
+          const entry = collectedToolCalls.get(idx)!;
+          if (tc.id) entry.id = tc.id;
+          if (tc.function?.name) entry.name = tc.function.name;
+          if (tc.function?.arguments) entry.arguments += tc.function.arguments;
         }
+      }
+
+      if (chunk.usage) {
+        usageData = {
+          inputTokens: chunk.usage.prompt_tokens ?? 0,
+          outputTokens: chunk.usage.completion_tokens ?? 0,
+        };
       }
     }
 
-    yield { type: "complete", stopReason: "stop" };
+    for (const [, tc] of collectedToolCalls) {
+      if (!tc.name) continue;
+      let input: Record<string, unknown>;
+      try {
+        input = JSON.parse(tc.arguments || "{}");
+      } catch {
+        input = {};
+      }
+      yield {
+        type: "tool_use_start",
+        toolUse: { type: "tool_use", id: tc.id, name: tc.name, input },
+      };
+    }
+
+    yield {
+      type: "usage",
+      usage: {
+        inputTokens: usageData.inputTokens,
+        outputTokens: usageData.outputTokens,
+      },
+    };
+
+    yield {
+      type: "complete",
+      stopReason: finishReason === "tool_calls" ? "tool_use" : finishReason ?? "end_turn",
+    };
   }
 
-  private convertMessages(
-    params: StreamMessageParams
-  ): OpenAI.ChatCompletionMessageParam[] {
+  private convertMessages(params: StreamMessageParams): OpenAI.ChatCompletionMessageParam[] {
     const messages: OpenAI.ChatCompletionMessageParam[] = [];
 
     if (params.system) {
@@ -71,14 +137,29 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
             content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
           });
           break;
-        case "assistant":
-          messages.push({ role: "assistant", content: msg.content });
+        case "assistant": {
+          const assistantMsg: OpenAI.ChatCompletionAssistantMessageParam = {
+            role: "assistant",
+            content: typeof msg.content === "string" ? msg.content : null,
+          };
+          if (msg.toolUses?.length) {
+            assistantMsg.tool_calls = msg.toolUses.map((tc) => ({
+              id: tc.id,
+              type: "function" as const,
+              function: {
+                name: tc.name,
+                arguments: typeof tc.input === "string" ? tc.input : JSON.stringify(tc.input),
+              },
+            }));
+          }
+          messages.push(assistantMsg);
           break;
+        }
         case "tool_result":
           messages.push({
             role: "tool",
             tool_call_id: msg.toolUseId,
-            content: JSON.stringify(msg.content),
+            content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
           });
           break;
       }
@@ -87,15 +168,13 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
     return messages;
   }
 
-  private convertTool(
-    tool: import("@openharness/core").ToolDefinition
-  ): OpenAI.ChatCompletionTool {
+  private convertTool(tool: ToolDefinition): OpenAI.ChatCompletionTool {
     return {
       type: "function",
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: tool.inputSchema,
+        parameters: tool.inputSchema as OpenAI.FunctionParameters,
       },
     };
   }

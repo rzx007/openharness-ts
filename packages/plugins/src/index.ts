@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { readFile, readdir, stat, rm, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
 
 export interface PluginManifest {
@@ -68,10 +70,11 @@ export class PluginLoader {
     this.loaded.delete(name);
   }
 
-  private async resolveManifest(
-    _pluginPath: string
-  ): Promise<PluginManifest> {
-    return { name: "placeholder", version: "0.1.0" };
+  async resolveManifest(pluginPath: string): Promise<PluginManifest> {
+    const manifestPath = join(pluginPath, "plugin.json");
+    const raw = await readFile(manifestPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    return PluginManifestSchema.parse(parsed) as PluginManifest;
   }
 }
 
@@ -83,15 +86,38 @@ export class PluginInstaller {
   }
 
   async install(source: string): Promise<string> {
-    return source;
+    const name = source.split("/").pop() ?? source;
+    const target = join(this.installDir, name);
+    await mkdir(target, { recursive: true });
+    const manifest: PluginManifest = { name, version: "1.0.0" };
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(target, "plugin.json"), JSON.stringify(manifest, null, 2));
+    return target;
   }
 
   async uninstall(name: string): Promise<boolean> {
-    void name;
-    return false;
+    const target = join(this.installDir, name);
+    try {
+      await stat(target);
+      await rm(target, { recursive: true, force: true });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async listInstalled(): Promise<string[]> {
-    return [];
+    try {
+      const entries = await readdir(this.installDir);
+      const result: string[] = [];
+      for (const entry of entries) {
+        const full = join(this.installDir, entry);
+        const s = await stat(full);
+        if (s.isDirectory()) result.push(entry);
+      }
+      return result;
+    } catch {
+      return [];
+    }
   }
 }

@@ -73,7 +73,7 @@ export { ToolRegistry } from "./engine/tool-registry";
 export { RuntimeBuilder } from "./engine/runtime-builder";
 export { CompactService } from "./engine/compact-service";
 
-export { loadSettings } from "./config/settings";
+export { loadSettings, saveSettings } from "./config/settings";
 export { resolvePaths } from "./config/paths";
 
 export type { AppState } from "./state/app-state";
