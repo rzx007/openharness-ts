@@ -77,7 +77,7 @@ describe("HookExecutor", () => {
       command: "exit 1",
       enabled: true,
     });
-    await expect(executor.execute("session_start", {})).resolves.toBeUndefined();
+    await expect(executor.execute("session_start", {})).resolves.toEqual({ blocked: false });
   });
 
   it("executeWithResults returns results", async () => {

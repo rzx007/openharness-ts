@@ -1,4 +1,4 @@
-export type BackendType = "anthropic" | "openai_compat" | "copilot";
+export type BackendType = "anthropic" | "openai_compat";
 
 export interface ProviderConfig {
   apiKey: string;
@@ -21,19 +21,6 @@ export interface ProviderSpec {
 }
 
 export const PROVIDERS: ProviderSpec[] = [
-  {
-    name: "github_copilot",
-    keywords: ["copilot"],
-    envKey: "",
-    displayName: "GitHub Copilot",
-    backendType: "copilot",
-    defaultBaseURL: "",
-    detectByKeyPrefix: "",
-    detectByBaseKeyword: "",
-    isGateway: false,
-    isLocal: false,
-    isOAuth: true,
-  },
   {
     name: "openrouter",
     keywords: ["openrouter"],

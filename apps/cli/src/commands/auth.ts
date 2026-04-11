@@ -7,37 +7,48 @@ export function createAuthCommand(): Command {
     .command("login")
     .description("Login with API key or OAuth")
     .option("-k, --api-key <key>", "API key")
-    .option("-p, --provider <provider>", "Provider name")
+    .option("-p, --provider <provider>", "Provider name (anthropic | openai)")
     .action(async (opts: { apiKey?: string; provider?: string }) => {
       const chalk = (await import("chalk")).default;
       if (opts.apiKey) {
-        console.log(chalk.green("API key configured"));
-      } else {
-        const { AuthManager, DeviceCodeFlow } = await import("@openharness/auth");
-        const mgr = new AuthManager();
-        const flow = new DeviceCodeFlow("openharness", "https://github.com/login/device/code", "https://github.com/login/oauth/access_token");
-        mgr.registerProvider(flow);
-        try {
-          const creds = await mgr.authenticate("device-code");
-          console.log(chalk.green(`Authenticated as ${creds.provider}`));
-        } catch (err: any) {
-          console.error(chalk.red(`Authentication failed: ${err.message}`));
-          process.exit(1);
-        }
+        const provider = opts.provider ?? guessProviderFromKey(opts.apiKey);
+        console.log(chalk.green(`API key configured for ${provider}`));
+        console.log(chalk.gray("Set the appropriate environment variable to persist:"));
+        console.log(chalk.gray(`  ${provider.toUpperCase()}_API_KEY=${opts.apiKey.slice(0, 8)}...`));
+        return;
       }
+
+      console.error(chalk.red("No OAuth flow available. Use --api-key to set an API key directly."));
+      process.exit(1);
     });
 
   cmd
     .command("status")
-    .description("Show authentication status")
+    .description("Show authentication status for all providers")
     .action(async () => {
       const chalk = (await import("chalk")).default;
-      const hasKey = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.GITHUB_TOKEN);
-      if (hasKey) {
-        console.log(chalk.green("✓ Authenticated (env key found)"));
-      } else {
-        console.log(chalk.yellow("✗ No authentication configured"));
-        console.log(chalk.gray("  Run 'oh auth login' to authenticate"));
+      const providers: Array<{ name: string; key: string | undefined; source: string }> = [
+        { name: "Anthropic", key: process.env.ANTHROPIC_API_KEY, source: "ANTHROPIC_API_KEY" },
+        { name: "OpenAI", key: process.env.OPENAI_API_KEY, source: "OPENAI_API_KEY" },
+        { name: "OpenRouter", key: process.env.OPENROUTER_API_KEY, source: "OPENROUTER_API_KEY" },
+        { name: "Google", key: process.env.GOOGLE_API_KEY, source: "GOOGLE_API_KEY" },
+        { name: "Groq", key: process.env.GROQ_API_KEY, source: "GROQ_API_KEY" },
+        { name: "DeepSeek", key: process.env.DEEPSEEK_API_KEY, source: "DEEPSEEK_API_KEY" },
+      ];
+
+      let anyConfigured = false;
+      for (const p of providers) {
+        if (p.key) {
+          anyConfigured = true;
+          console.log(chalk.green(`  ✓ ${p.name}: configured (${p.source})`));
+        } else {
+          console.log(chalk.gray(`  ✗ ${p.name}: not set (${p.source})`));
+        }
+      }
+
+      if (!anyConfigured) {
+        console.log(chalk.yellow("\nNo authentication configured."));
+        console.log(chalk.gray("  Run 'oh auth login --api-key <key>' to authenticate."));
       }
     });
 
@@ -46,40 +57,15 @@ export function createAuthCommand(): Command {
     .description("Clear stored credentials")
     .action(async () => {
       const chalk = (await import("chalk")).default;
-      console.log(chalk.green("Credentials cleared"));
-    });
-
-  cmd
-    .command("copilot-login")
-    .description("Login to GitHub Copilot")
-    .action(async () => {
-      const chalk = (await import("chalk")).default;
-      console.log(chalk.gray("Starting Copilot OAuth flow..."));
-      const { CopilotClient } = await import("@openharness/api");
-      try {
-        new CopilotClient(undefined, { githubToken: process.env.GITHUB_TOKEN });
-        console.log(chalk.green("Copilot authentication verified"));
-      } catch (err: any) {
-        console.error(chalk.red(`Copilot login failed: ${err.message}`));
-        process.exit(1);
-      }
-    });
-
-  cmd
-    .command("copilot-logout")
-    .description("Logout from GitHub Copilot")
-    .action(async () => {
-      const { unlink } = await import("node:fs/promises");
-      const { join } = await import("node:path");
-      const { homedir } = await import("node:os");
-      const chalk = (await import("chalk")).default;
-      try {
-        await unlink(join(homedir(), ".openharness", "copilot_auth.json"));
-        console.log(chalk.green("Copilot credentials removed"));
-      } catch {
-        console.log(chalk.yellow("No Copilot credentials found"));
-      }
+      console.log(chalk.green("Credentials cleared."));
+      console.log(chalk.gray("Note: Environment variable keys are not cleared automatically."));
     });
 
   return cmd;
+}
+
+function guessProviderFromKey(key: string): string {
+  if (key.startsWith("sk-ant-")) return "anthropic";
+  if (key.startsWith("sk-")) return "openai";
+  return "unknown";
 }

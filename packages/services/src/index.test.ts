@@ -10,7 +10,7 @@ import type { Message } from "@openharness/core";
 
 describe("CompactService", () => {
   it("returns messages unchanged when under limit", () => {
-    const svc = new CompactService({ maxMessages: 10 });
+    const svc = new CompactService(100_000, 10);
     const msgs: Message[] = [
       { type: "system", content: "sys" },
       { type: "user", content: "hi" },
@@ -19,7 +19,7 @@ describe("CompactService", () => {
   });
 
   it("compacts when over limit preserving system message", () => {
-    const svc = new CompactService({ maxMessages: 4 });
+    const svc = new CompactService(100_000, 2);
     const msgs: Message[] = [
       { type: "system", content: "sys" },
       ...Array.from({ length: 10 }, (_, i) => ({
@@ -33,10 +33,9 @@ describe("CompactService", () => {
     expect(result[1].type).toBe("assistant");
   });
 
-  it("compacts without system message when preserveSystem is false", () => {
-    const svc = new CompactService({ maxMessages: 4, preserveSystem: false });
+  it("compacts without system message when keepRecent is small", () => {
+    const svc = new CompactService(100_000, 2);
     const msgs: Message[] = [
-      { type: "system", content: "sys" },
       { type: "user", content: "msg 1" },
       { type: "user", content: "msg 2" },
       { type: "user", content: "msg 3" },
@@ -45,6 +44,18 @@ describe("CompactService", () => {
     ];
     const result = svc.compact(msgs);
     expect(result[0].type).not.toBe("system");
+  });
+
+  it("microCompact clears tool results", () => {
+    const svc = new CompactService(100_000, 2);
+    const msgs: Message[] = [
+      { type: "user", content: "hi" },
+      { type: "assistant", content: "let me check" },
+      { type: "tool_result", toolUseId: "t1", content: [{ type: "text", text: "long output here" }] },
+      { type: "assistant", content: "done" },
+    ];
+    const result = svc.microCompact(msgs);
+    expect(result.length).toBe(msgs.length);
   });
 });
 
@@ -59,7 +70,7 @@ describe("SessionStorage", () => {
   it("updates session metadata", () => {
     const store = new SessionStorage();
     store.create("s1");
-    const updated = store.update("s1", { status: "active" });
+    const updated = store.update("s1", { metadata: { status: "active" } });
     expect(updated!.metadata.status).toBe("active");
   });
 

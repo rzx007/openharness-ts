@@ -3,26 +3,53 @@ import type {
   PermissionRule,
   PermissionDecision,
   IPermissionChecker,
+  PermissionSettings,
+  PathRuleConfig,
 } from "@openharness/core";
 
 export type {
   PermissionMode,
   PermissionRule,
   PermissionDecision,
+  PermissionSettings,
+  PathRuleConfig,
 };
 
 export interface PermissionCheckOptions {
   mode: PermissionMode;
-  rules: PermissionRule[];
+  rules?: PermissionRule[];
+  allowedTools?: string[];
+  deniedTools?: string[];
+  pathRules?: PathRuleConfig[];
+  deniedCommands?: string[];
 }
 
 export class PermissionChecker implements IPermissionChecker {
   private mode: PermissionMode;
   private rules: PermissionRule[];
+  private allowedTools: Set<string>;
+  private deniedTools: Set<string>;
+  private pathRules: PathRuleConfig[];
+  private deniedCommands: string[];
 
-  constructor(options: PermissionCheckOptions) {
-    this.mode = options.mode;
-    this.rules = options.rules;
+  constructor(options: PermissionCheckOptions | PermissionSettings) {
+    if ("mode" in options && "allowedTools" in options) {
+      const s = options as PermissionSettings;
+      this.mode = s.mode;
+      this.rules = [];
+      this.allowedTools = new Set(s.allowedTools ?? []);
+      this.deniedTools = new Set(s.deniedTools ?? []);
+      this.pathRules = s.pathRules ?? [];
+      this.deniedCommands = s.deniedCommands ?? [];
+    } else {
+      const o = options as PermissionCheckOptions;
+      this.mode = o.mode;
+      this.rules = o.rules ?? [];
+      this.allowedTools = new Set(o.allowedTools ?? []);
+      this.deniedTools = new Set(o.deniedTools ?? []);
+      this.pathRules = o.pathRules ?? [];
+      this.deniedCommands = o.deniedCommands ?? [];
+    }
   }
 
   async checkTool(
@@ -31,6 +58,35 @@ export class PermissionChecker implements IPermissionChecker {
   ): Promise<PermissionDecision> {
     if (this.mode === "full_auto") {
       return { action: "allow", reason: "Full auto mode" };
+    }
+
+    if (this.deniedTools.size > 0 && this.deniedTools.has(toolName)) {
+      return { action: "deny", reason: `Tool '${toolName}' is in denied list` };
+    }
+
+    if (this.allowedTools.size > 0 && !this.allowedTools.has(toolName)) {
+      return { action: "deny", reason: `Tool '${toolName}' is not in allowed list` };
+    }
+
+    if (this.deniedCommands.length > 0 && typeof input.command === "string") {
+      for (const pattern of this.deniedCommands) {
+        if (matchPattern(pattern, input.command)) {
+          return { action: "deny", reason: `Command matches denied pattern: ${pattern}` };
+        }
+      }
+    }
+
+    if (this.pathRules.length > 0) {
+      const path = typeof input.path === "string" ? input.path : typeof input.filePath === "string" ? input.filePath : "";
+      if (path) {
+        for (const rule of this.pathRules) {
+          if (matchPattern(rule.pattern, path)) {
+            return rule.allow
+              ? { action: "allow", reason: `Path matched allow rule: ${rule.pattern}` }
+              : { action: "deny", reason: `Path matched deny rule: ${rule.pattern}` };
+          }
+        }
+      }
     }
 
     for (const rule of this.rules) {

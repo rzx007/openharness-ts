@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@openharness/channels",
   "version": "0.1.0",
   "type": "module",
@@ -18,6 +18,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.60.0",
     "@openharness/core": "workspace:*"
   },
   "devDependencies": {

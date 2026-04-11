@@ -25,7 +25,7 @@ program
   .option("-s, --system-prompt <prompt>", "Override system prompt")
   .option("--api-key <key>", "API key override")
   .option("--base-url <url>", "API base URL override")
-  .option("--api-format <format>", "API format (anthropic | openai | copilot)")
+  .option("--api-format <format>", "API format (anthropic | openai)")
   .option("--theme <theme>", "Theme name")
   .option("--mcp-config <path>", "Path to MCP config JSON")
   .option("--cwd <dir>", "Working directory")
@@ -36,6 +36,9 @@ program
   .option("--dangerously-skip-permissions", "Skip all permission checks")
   .option("--allowed-tools <tools>", "Comma-separated allowed tools")
   .option("--disallowed-tools <tools>", "Comma-separated disallowed tools")
+  .option("--output-format <format>", "Output format (text | json | stream-json)")
+  .option("--append-system-prompt <prompt>", "Append to default system prompt")
+  .option("--bare", "Skip hooks/plugins/MCP loading")
   .action(mainAction);
 
 program.addCommand(createAuthCommand());
@@ -96,6 +99,17 @@ program
 
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
     checks.push({ label: "API key", ok: !!apiKey, detail: apiKey ? "found" : "not set" });
+
+    try {
+      const { readFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const { homedir } = await import("node:os");
+      const claudeMd = join(process.cwd(), "CLAUDE.md");
+      await readFile(claudeMd, "utf-8");
+      checks.push({ label: "CLAUDE.md", ok: true, detail: "found in cwd" });
+    } catch {
+      checks.push({ label: "CLAUDE.md", ok: false, detail: "not found in cwd" });
+    }
 
     for (const c of checks) {
       const icon = c.ok ? chalk.green("✓") : chalk.red("✗");

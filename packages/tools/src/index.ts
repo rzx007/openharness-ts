@@ -7,3 +7,5 @@ export { globTool } from "./file/glob";
 export { grepTool } from "./search/grep";
 export { webFetchTool } from "./web/fetch";
 export { webSearchTool } from "./web/search";
+export { taskUpdateTool } from "./task";
+export { mcpAuthTool } from "./mcp";

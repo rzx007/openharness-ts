@@ -43,6 +43,7 @@ export type {
   HookEvent,
   HookType,
   HookDefinition,
+  HookResult,
   CommandHookDefinition,
   HttpHookDefinition,
   PromptHookDefinition,
@@ -55,6 +56,8 @@ export type {
   McpServerConfig,
   MemoryConfig,
   SandboxConfig,
+  PermissionSettings,
+  PathRuleConfig,
 } from "./types/settings";
 
 export type {
@@ -66,15 +69,17 @@ export type {
   RuntimeBundle,
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
+  PermissionPrompt,
 } from "./types/runtime";
 
-export { QueryEngine } from "./engine/query-engine";
+export { QueryEngine, MaxTurnsExceeded } from "./engine/query-engine";
 export { ToolRegistry } from "./engine/tool-registry";
 export { RuntimeBuilder } from "./engine/runtime-builder";
 export { CompactService } from "./engine/compact-service";
+export { CostTracker } from "./engine/cost-tracker";
 
 export { loadSettings, saveSettings } from "./config/settings";
-export { resolvePaths } from "./config/paths";
+export { resolvePaths, getConfigDir, getConfigFilePath, getDataDir, getLogsDir, getSessionsDir, getTasksDir, getPluginsDir, getSkillsDir, getMemoryDir, getFeedbackDir, getCronRegistryPath, getCronHistoryPath, getCronLogsDir } from "./config/paths";
 
 export type { AppState } from "./state/app-state";
 export { AppStateStore } from "./state/state-store";

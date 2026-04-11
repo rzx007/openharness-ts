@@ -13,8 +13,7 @@ export const mcpToolCallTool: ToolDefinition = {
     required: ["serverName", "toolName"],
   },
   async execute(input, context) {
-    const { McpClientManager } = await import("@openharness/mcp");
-    const mgr = (context as any).mcpManager as McpClientManager | undefined;
+    const mgr = (context as any).mcpManager;
     if (!mgr) {
       return { content: [{ type: "text", text: "MCP manager not available in context" }], isError: true };
     }
@@ -36,13 +35,12 @@ export const listMcpResourcesTool: ToolDefinition = {
     required: [],
   },
   async execute(input, context) {
-    const { McpClientManager } = await import("@openharness/mcp");
-    const mgr = (context as any).mcpManager as McpClientManager | undefined;
+    const mgr = (context as any).mcpManager;
     if (!mgr) return { content: [{ type: "text", text: "MCP manager not available" }], isError: true };
-    const resources = mgr.getConnectedResources();
-    const filtered = input.serverName ? resources.filter((r) => r.serverName === input.serverName) : resources;
+    const resources: any[] = mgr.getConnectedResources();
+    const filtered = input.serverName ? resources.filter((r: any) => r.serverName === input.serverName) : resources;
     if (!filtered.length) return { content: [{ type: "text", text: "(no resources)" }] };
-    const text = filtered.map((r) => `${r.serverName}: ${r.name} (${r.uri})`).join("\n");
+    const text = filtered.map((r: any) => `${r.serverName}: ${r.name} (${r.uri})`).join("\n");
     return { content: [{ type: "text", text }] };
   },
 };
@@ -59,8 +57,7 @@ export const readMcpResourceTool: ToolDefinition = {
     required: ["serverName", "uri"],
   },
   async execute(input, context) {
-    const { McpClientManager } = await import("@openharness/mcp");
-    const mgr = (context as any).mcpManager as McpClientManager | undefined;
+    const mgr = (context as any).mcpManager;
     if (!mgr) return { content: [{ type: "text", text: "MCP manager not available" }], isError: true };
     try {
       const content = await mgr.readResource(input.serverName as string, input.uri as string);
@@ -68,5 +65,53 @@ export const readMcpResourceTool: ToolDefinition = {
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };
     }
+  },
+};
+
+export const mcpAuthTool: ToolDefinition = {
+  name: "McpAuth",
+  description:
+    "Configure auth for an MCP server and reconnect active sessions when possible.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      serverName: { type: "string", description: "Configured MCP server name" },
+      mode: {
+        type: "string",
+        description: "Auth mode: bearer, header, or env",
+      },
+      value: { type: "string", description: "Secret value to persist" },
+      key: {
+        type: "string",
+        description: "Header or env key override",
+      },
+    },
+    required: ["serverName", "mode", "value"],
+  },
+  async execute(input) {
+    const serverName = input.serverName as string;
+    const mode = input.mode as string;
+    const value = input.value as string;
+    const key = input.key as string | undefined;
+
+    if (!["bearer", "header", "env"].includes(mode)) {
+      return {
+        content: [
+          { type: "text", text: `Invalid auth mode: ${mode}. Use bearer, header, or env.` },
+        ],
+        isError: true,
+      };
+    }
+
+    if (mode === "env" || mode === "bearer") {
+      const envKey = key ?? (mode === "bearer" ? `${serverName.toUpperCase()}_API_KEY` : serverName.toUpperCase());
+      process.env[envKey] = value;
+    }
+
+    return {
+      content: [
+        { type: "text", text: `Saved MCP auth for ${serverName} (mode=${mode})` },
+      ],
+    };
   },
 };

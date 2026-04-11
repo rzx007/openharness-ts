@@ -117,3 +117,47 @@ export const taskStopTool: ToolDefinition = {
     }
   },
 };
+
+export const taskUpdateTool: ToolDefinition = {
+  name: "TaskUpdate",
+  description: "Update a task description, progress, or status note.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      taskId: { type: "string", description: "Task identifier" },
+      description: { type: "string", description: "Updated task description" },
+      progress: {
+        type: "number",
+        description: "Progress percentage (0-100)",
+      },
+      statusNote: {
+        type: "string",
+        description: "Short human-readable task note",
+      },
+    },
+    required: ["taskId"],
+  },
+  async execute(input) {
+    const { getTaskManager } = await import("@openharness/services");
+    const mgr = getTaskManager();
+    const task = mgr.getTask(input.taskId as string);
+    if (!task) {
+      return {
+        content: [{ type: "text", text: `Task not found: ${input.taskId}` }],
+        isError: true,
+      };
+    }
+    const parts = [`Updated task ${task.id}`];
+    if (input.description) {
+      (task as any).description = input.description;
+      parts.push(`description=${input.description}`);
+    }
+    if (input.progress !== undefined) {
+      parts.push(`progress=${input.progress}%`);
+    }
+    if (input.statusNote) {
+      parts.push(`note=${input.statusNote}`);
+    }
+    return { content: [{ type: "text", text: parts.join(" ") }] };
+  },
+};

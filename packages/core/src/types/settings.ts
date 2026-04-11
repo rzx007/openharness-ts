@@ -9,25 +9,49 @@ export interface McpServerConfig {
 
 export interface MemoryConfig {
   enabled: boolean;
-  maxEntries?: number;
+  maxFiles?: number;
+  maxEntrypointLines?: number;
 }
 
 export interface SandboxConfig {
   enabled: boolean;
   runtime?: string;
+  failIfUnavailable?: boolean;
+}
+
+export interface PathRuleConfig {
+  pattern: string;
+  allow: boolean;
+}
+
+export interface PermissionSettings {
+  mode: PermissionMode;
+  allowedTools?: string[];
+  deniedTools?: string[];
+  pathRules?: PathRuleConfig[];
+  deniedCommands?: string[];
 }
 
 export interface Settings {
   apiKey?: string;
   model: string;
-  apiFormat: "anthropic" | "openai" | "copilot";
-  permissionMode: PermissionMode;
+  apiFormat: "anthropic" | "openai";
+  maxTokens?: number;
+  baseUrl?: string;
   maxTurns: number;
-  theme?: string;
-  outputStyle?: string;
-  plugins?: string[];
-  mcpServers?: Record<string, McpServerConfig>;
+  systemPrompt?: string;
+  permission: PermissionSettings;
   hooks?: HookDefinition[];
   memory?: MemoryConfig;
   sandbox?: SandboxConfig;
+  plugins?: Record<string, boolean>;
+  mcpServers?: Record<string, McpServerConfig>;
+  theme?: string;
+  outputStyle?: string;
+  vimMode?: boolean;
+  voiceMode?: boolean;
+  fastMode?: boolean;
+  effort?: "low" | "medium" | "high";
+  passes?: number;
+  verbose?: boolean;
 }

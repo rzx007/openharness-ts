@@ -14,14 +14,14 @@ import { skillTool } from "./meta/skill";
 import { toolSearchTool } from "./meta/tool-search";
 import { askUserTool } from "./meta/ask-user";
 import { briefTool } from "./meta/brief";
-import { taskCreateTool, taskGetTool, taskListTool, taskOutputTool, taskStopTool } from "./task";
+import { taskCreateTool, taskGetTool, taskListTool, taskOutputTool, taskStopTool, taskUpdateTool } from "./task";
 import { enterPlanModeTool, exitPlanModeTool } from "./mode/plan-mode";
 import { enterWorktreeTool, exitWorktreeTool } from "./mode/worktree";
 import { notebookEditTool } from "./notebook";
 import { agentTool, sendMessageTool } from "./agent";
 import { teamCreateTool, teamDeleteTool } from "./agent/team";
-import { cronCreateTool, cronDeleteTool, cronListTool, cronToggleTool } from "./schedule";
-import { mcpToolCallTool, listMcpResourcesTool, readMcpResourceTool } from "./mcp";
+import { cronCreateTool, cronDeleteTool, cronListTool, cronToggleTool, remoteTriggerTool } from "./schedule";
+import { mcpToolCallTool, listMcpResourcesTool, readMcpResourceTool, mcpAuthTool } from "./mcp";
 import { lspTool } from "./search/lsp";
 
 export function createDefaultToolRegistry(): ToolRegistry {
@@ -46,6 +46,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(taskListTool);
   registry.register(taskOutputTool);
   registry.register(taskStopTool);
+  registry.register(taskUpdateTool);
   registry.register(enterPlanModeTool);
   registry.register(exitPlanModeTool);
   registry.register(enterWorktreeTool);
@@ -59,9 +60,11 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(cronDeleteTool);
   registry.register(cronListTool);
   registry.register(cronToggleTool);
+  registry.register(remoteTriggerTool);
   registry.register(mcpToolCallTool);
   registry.register(listMcpResourcesTool);
   registry.register(readMcpResourceTool);
+  registry.register(mcpAuthTool);
   registry.register(lspTool);
   return registry;
 }

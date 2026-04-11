@@ -10,6 +10,16 @@ export interface QueryEngine {
   submitMessage(content: string): AsyncIterable<StreamEvent>;
   getHistory(): Message[];
   compact(): Promise<void>;
+  clear(): void;
+  setSystemPrompt(prompt: string): void;
+  setModel(model: string): void;
+  setMaxTurns(max: number): void;
+  loadMessages(messages: Message[]): void;
+  getTotalUsage(): import("./usage").UsageSnapshot;
+}
+
+export interface PermissionPrompt {
+  (toolName: string, reason?: string): Promise<boolean>;
 }
 
 export interface QueryEngineOptions {
@@ -18,6 +28,7 @@ export interface QueryEngineOptions {
   model?: string;
   maxTokens?: number;
   compactKeepRecent?: number;
+  permissionPrompt?: PermissionPrompt;
 }
 
 export interface RuntimeBundle {

@@ -1,4 +1,4 @@
-import type { Message, StreamEvent, ToolUseBlock } from "../index";
+import type { Message, StreamEvent, ToolUseBlock, UsageSnapshot } from "../index";
 import type {
   StreamingMessageClient,
   ToolRegistry as IToolRegistry,
@@ -6,13 +6,28 @@ import type {
   IHookExecutor,
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
+  PermissionPrompt,
   ToolContext,
+  ToolExecutionResult,
 } from "../index";
 import { CompactService } from "./compact-service";
+import { CostTracker } from "./cost-tracker";
+
+export class MaxTurnsExceeded extends Error {
+  constructor(public readonly maxTurns: number) {
+    super(`Exceeded maximum agentic turns (${maxTurns})`);
+    this.name = "MaxTurnsExceeded";
+  }
+}
 
 export class QueryEngine implements IQueryEngine {
   private messages: Message[] = [];
   private compactService: CompactService;
+  private costTracker: CostTracker;
+  private systemPrompt: string | undefined;
+  private model: string;
+  private maxTurns: number;
+  private permissionPrompt?: PermissionPrompt;
 
   constructor(
     private apiClient: StreamingMessageClient,
@@ -25,30 +40,33 @@ export class QueryEngine implements IQueryEngine {
       options.maxTokens ?? 100_000,
       options.compactKeepRecent ?? 10,
     );
+    this.costTracker = new CostTracker();
+    this.systemPrompt = options.systemPrompt;
+    this.model = options.model ?? "claude-sonnet-4-20250514";
+    this.maxTurns = options.maxTurns ?? 50;
+    this.permissionPrompt = options.permissionPrompt;
   }
 
   async *submitMessage(content: string): AsyncIterable<StreamEvent> {
     this.messages.push({ type: "user", content });
 
-    const maxTurns = this.options.maxTurns ?? 50;
     let turnCount = 0;
 
     await this.hookExecutor.execute("session_start", {});
 
-    while (turnCount < maxTurns) {
+    while (turnCount < this.maxTurns) {
       this.messages = await this.compactService.autoCompact(this.messages);
 
       const tools = this.toolRegistry.getAll();
       const stream = this.apiClient.streamMessage({
-        model: this.options.model ?? "claude-sonnet-4-20250514",
+        model: this.model,
         messages: this.messages,
-        system: this.options.systemPrompt,
+        system: this.systemPrompt,
         tools: tools.length > 0 ? tools : undefined,
       });
 
       let assistantText = "";
       const toolUses: ToolUseBlock[] = [];
-      let stopReason = "";
 
       for await (const event of stream) {
         yield event;
@@ -57,8 +75,8 @@ export class QueryEngine implements IQueryEngine {
           assistantText += event.delta;
         } else if (event.type === "tool_use_start") {
           toolUses.push(event.toolUse);
-        } else if (event.type === "complete") {
-          stopReason = event.stopReason;
+        } else if (event.type === "usage") {
+          this.costTracker.addUsage(event.usage);
         }
       }
 
@@ -85,6 +103,8 @@ export class QueryEngine implements IQueryEngine {
 
       turnCount++;
     }
+
+    throw new MaxTurnsExceeded(this.maxTurns);
   }
 
   getHistory(): Message[] {
@@ -100,63 +120,126 @@ export class QueryEngine implements IQueryEngine {
     this.messages = await this.compactService.autoCompact(this.messages);
   }
 
-  private async executeTools(toolUses: ToolUseBlock[]) {
-    const results = [];
+  clear(): void {
+    this.messages = [];
+    this.costTracker.reset();
+  }
 
-    for (const toolUse of toolUses) {
-      const decision = await this.permissionChecker.checkTool(
-        toolUse.name,
-        toolUse.input
-      );
+  setSystemPrompt(prompt: string): void {
+    this.systemPrompt = prompt;
+  }
+
+  setModel(model: string): void {
+    this.model = model;
+  }
+
+  setMaxTurns(max: number): void {
+    this.maxTurns = max;
+  }
+
+  loadMessages(messages: Message[]): void {
+    this.messages = [...messages];
+  }
+
+  getTotalUsage(): UsageSnapshot {
+    return this.costTracker.getTotal();
+  }
+
+  private async executeTools(toolUses: ToolUseBlock[]): Promise<ToolExecutionResult[]> {
+    const checks = await Promise.all(
+      toolUses.map((tu) =>
+        this.permissionChecker.checkTool(tu.name, tu.input)
+      )
+    );
+
+    const executable: { idx: number; toolUse: ToolUseBlock }[] = [];
+    const results: ToolExecutionResult[] = new Array(toolUses.length);
+
+    for (let i = 0; i < toolUses.length; i++) {
+      const toolUse = toolUses[i]!;
+      const decision = checks[i]!;
 
       if (decision.action === "deny") {
-        results.push({
+        results[i] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          content: [{ type: "text" as const, text: "Permission denied" }],
+          content: [{ type: "text" as const, text: `Permission denied: ${decision.reason ?? "not allowed"}` }],
           isError: true,
-        });
+        };
         continue;
       }
 
-      await this.hookExecutor.execute("pre_tool_use", {
+      if (decision.action === "ask") {
+        let allowed = false;
+        if (this.permissionPrompt) {
+          allowed = await this.permissionPrompt(toolUse.name, decision.reason);
+        }
+        if (!allowed) {
+          results[i] = {
+            toolUseId: toolUse.id,
+            toolName: toolUse.name,
+            content: [{ type: "text" as const, text: `Permission denied by user: ${decision.reason ?? "not confirmed"}` }],
+            isError: true,
+          };
+          continue;
+        }
+      }
+
+      const hookResult = await this.hookExecutor.execute("pre_tool_use", {
         tool: toolUse.name,
         input: toolUse.input,
       });
 
-      const tool = this.toolRegistry.get(toolUse.name);
-      if (!tool) {
-        results.push({
+      if (hookResult.blocked) {
+        results[i] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          content: [
-            { type: "text" as const, text: `Unknown tool: ${toolUse.name}` },
-          ],
+          content: [{ type: "text" as const, text: `Blocked by hook: ${hookResult.reason ?? "pre-tool hook blocked execution"}` }],
           isError: true,
-        });
+        };
         continue;
       }
 
-      try {
-        const context: ToolContext = { cwd: process.cwd() };
-        const result = await tool.execute(toolUse.input, context);
-        results.push({
+      const tool = this.toolRegistry.get(toolUse.name);
+      if (!tool) {
+        results[i] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          ...result,
-        });
-      } catch (error) {
-        results.push({
-          toolUseId: toolUse.id,
-          toolName: toolUse.name,
-          content: [{ type: "text" as const, text: String(error) }],
+          content: [{ type: "text" as const, text: `Unknown tool: ${toolUse.name}` }],
           isError: true,
-        });
+        };
+        continue;
       }
 
+      executable.push({ idx: i, toolUse });
+    }
+
+    const execResults = await Promise.all(
+      executable.map(async ({ idx, toolUse }) => {
+        const tool = this.toolRegistry.get(toolUse.name)!;
+        try {
+          const context: ToolContext = { cwd: process.cwd() };
+          const result = await tool.execute(toolUse.input, context);
+          return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };
+        } catch (error) {
+          return {
+            idx,
+            result: {
+              toolUseId: toolUse.id,
+              toolName: toolUse.name,
+              content: [{ type: "text" as const, text: String(error) }],
+              isError: true,
+            } as ToolExecutionResult,
+          };
+        }
+      })
+    );
+
+    for (const { idx, result } of execResults) {
+      results[idx] = result;
       await this.hookExecutor.execute("post_tool_use", {
-        tool: toolUse.name,
-        result: results[results.length - 1],
+        tool: result.toolName,
+        result,
       });
     }
 

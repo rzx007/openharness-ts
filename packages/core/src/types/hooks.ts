@@ -41,10 +41,15 @@ export type HookDefinition =
   | PromptHookDefinition
   | AgentHookDefinition;
 
+export interface HookResult {
+  blocked: boolean;
+  reason?: string;
+}
+
 export interface HookExecutor {
   register(hook: HookDefinition): void;
   execute(
     event: HookEvent,
     context: Record<string, unknown>
-  ): Promise<void>;
+  ): Promise<HookResult>;
 }

@@ -32,7 +32,7 @@ function denyAll(): any {
 }
 
 function noopHooks(): any {
-  return { execute: async () => {} };
+  return { execute: async () => ({ blocked: false }) };
 }
 
 function makeTool(name: string, fn?: (input: Record<string, unknown>) => string): ToolDefinition {
@@ -283,7 +283,7 @@ describe("Integration: Full Agent Loop", () => {
     expect(toolEnds).toHaveLength(3);
   });
 
-  it("respects maxTurns limit", async () => {
+  it("respects maxTurns limit and throws MaxTurnsExceeded", async () => {
     const registry = new ToolRegistry();
     registry.register(makeTool("Loop"));
 
@@ -299,11 +299,14 @@ describe("Integration: Full Agent Loop", () => {
       },
     };
 
+    const { MaxTurnsExceeded } = await import("./query-engine.js");
     const engine = new QueryEngine(client, registry, allowAll(), noopHooks(), { maxTurns: 2 });
     const events: StreamEvent[] = [];
-    for await (const e of engine.submitMessage("loop")) {
-      events.push(e);
-    }
+    await expect(async () => {
+      for await (const e of engine.submitMessage("loop")) {
+        events.push(e);
+      }
+    }).rejects.toThrow(MaxTurnsExceeded);
 
     const toolEnds = events.filter((e) => e.type === "tool_use_end");
     expect(toolEnds.length).toBeLessThanOrEqual(2);
@@ -349,7 +352,7 @@ describe("Integration: RuntimeBuilder", () => {
       .setPermissionChecker(checker)
       .setHookExecutor(hooks)
       .setQueryEngine(engine)
-      .build({ model: "test", apiFormat: "anthropic", permissionMode: "default", maxTurns: 10 });
+      .build({ model: "test", apiFormat: "anthropic", permission: { mode: "default" }, maxTurns: 10 });
 
     expect(bundle.settings.model).toBe("test");
     expect(bundle.apiClient).toBe(mockClient);
@@ -357,7 +360,7 @@ describe("Integration: RuntimeBuilder", () => {
   });
 
   it("throws if missing required components", () => {
-    expect(() => new RuntimeBuilder().build({ model: "x", apiFormat: "anthropic", permissionMode: "default", maxTurns: 1 }))
+    expect(() => new RuntimeBuilder().build({ model: "x", apiFormat: "anthropic", permission: { mode: "default" }, maxTurns: 1 }))
       .toThrow("ApiClient is required");
   });
 });
@@ -424,6 +427,199 @@ describe("Integration: AutoCompact in Agent Loop", () => {
     const afterCompact = engine.getHistory().length;
 
     expect(afterCompact).toBeLessThanOrEqual(beforeCompact);
+  });
+});
+
+describe("Integration: MaxTurnsExceeded", () => {
+  it("throws MaxTurnsExceeded when turn limit reached", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("Loop"));
+
+    let callCount = 0;
+    const client = {
+      streamMessage: async function* () {
+        callCount++;
+        yield {
+          type: "tool_use_start" as const,
+          toolUse: { type: "tool_use", id: `tu${callCount}`, name: "Loop", input: {} },
+        };
+        yield { type: "complete" as const, stopReason: "tool_use" };
+      },
+    };
+
+    const { MaxTurnsExceeded } = await import("./query-engine.js");
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks(), { maxTurns: 2 });
+
+    await expect(async () => {
+      for await (const _ of engine.submitMessage("loop")) {}
+    }).rejects.toThrow(MaxTurnsExceeded);
+  });
+});
+
+describe("Integration: Runtime Methods", () => {
+  it("clear resets history and usage", async () => {
+    const { client } = createMockStreamClient([
+      [{ type: "text_delta", delta: "hi" }, { type: "complete", stopReason: "end_turn" }],
+    ]);
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+    for await (const _ of engine.submitMessage("hello")) {}
+    expect(engine.getHistory().length).toBeGreaterThan(0);
+    engine.clear();
+    expect(engine.getHistory()).toHaveLength(0);
+  });
+
+  it("setModel changes model for subsequent calls", async () => {
+    let usedModel = "";
+    const client = {
+      streamMessage: async function* (params: any) {
+        usedModel = params.model;
+        yield { type: "text_delta" as const, delta: "ok" };
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+    engine.setModel("gpt-4o");
+    for await (const _ of engine.submitMessage("hi")) {}
+    expect(usedModel).toBe("gpt-4o");
+  });
+
+  it("setSystemPrompt changes system prompt", async () => {
+    let usedSystem = "";
+    const client = {
+      streamMessage: async function* (params: any) {
+        usedSystem = params.system;
+        yield { type: "text_delta" as const, delta: "ok" };
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+    engine.setSystemPrompt("custom prompt");
+    for await (const _ of engine.submitMessage("hi")) {}
+    expect(usedSystem).toBe("custom prompt");
+  });
+
+  it("loadMessages replaces history", async () => {
+    const { client } = createMockStreamClient([
+      [{ type: "text_delta", delta: "ok" }, { type: "complete", stopReason: "end_turn" }],
+    ]);
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+    engine.loadMessages([{ type: "user", content: "loaded" }]);
+    expect(engine.getHistory()).toHaveLength(1);
+    expect((engine.getHistory()[0] as any).content).toBe("loaded");
+  });
+});
+
+describe("Integration: Permission Prompt (ask mode)", () => {
+  it("asks user and allows on confirmation", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("Bash"));
+
+    const { client } = createMockStreamClient([
+      [
+        { type: "tool_use_start", toolUse: { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } } },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const askMode = { checkTool: async () => ({ action: "ask" as const, reason: "confirm?" }) };
+    const prompt = async () => true;
+
+    const engine = new QueryEngine(client, registry, askMode, noopHooks(), { permissionPrompt: prompt });
+    const events: StreamEvent[] = [];
+    for await (const e of engine.submitMessage("ls")) { events.push(e); }
+
+    const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
+    expect(toolEnd).toBeDefined();
+    expect(toolEnd.result.isError).toBeFalsy();
+  });
+
+  it("denies when user rejects", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("Bash"));
+
+    const { client } = createMockStreamClient([
+      [
+        { type: "tool_use_start", toolUse: { type: "tool_use", id: "tu1", name: "Bash", input: {} } },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "ok" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const askMode = { checkTool: async () => ({ action: "ask" as const, reason: "confirm?" }) };
+    const prompt = async () => false;
+
+    const engine = new QueryEngine(client, registry, askMode, noopHooks(), { permissionPrompt: prompt });
+    const events: StreamEvent[] = [];
+    for await (const e of engine.submitMessage("run")) { events.push(e); }
+
+    const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
+    expect(toolEnd.result.isError).toBe(true);
+    expect(toolEnd.result.content[0].text).toContain("denied by user");
+  });
+});
+
+describe("Integration: Hook Blocking", () => {
+  it("pre-tool hook can block execution", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("Bash"));
+
+    const { client } = createMockStreamClient([
+      [
+        { type: "tool_use_start", toolUse: { type: "tool_use", id: "tu1", name: "Bash", input: {} } },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "ok" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const blockingHooks = {
+      execute: async (event: string) => {
+        if (event === "pre_tool_use") return { blocked: true, reason: "not allowed" };
+        return { blocked: false };
+      },
+    };
+
+    const engine = new QueryEngine(client, registry, allowAll(), blockingHooks);
+    const events: StreamEvent[] = [];
+    for await (const e of engine.submitMessage("run")) { events.push(e); }
+
+    const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
+    expect(toolEnd.result.isError).toBe(true);
+    expect(toolEnd.result.content[0].text).toContain("Blocked by hook");
+  });
+});
+
+describe("Integration: CostTracker", () => {
+  it("accumulates usage across turns", async () => {
+    const { client } = createMockStreamClient([
+      [
+        { type: "text_delta", delta: "first" },
+        { type: "usage", usage: { inputTokens: 100, outputTokens: 50 } },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", delta: "second" },
+        { type: "usage", usage: { inputTokens: 200, outputTokens: 75 } },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+    for await (const _ of engine.submitMessage("a")) {}
+    for await (const _ of engine.submitMessage("b")) {}
+
+    const total = engine.getTotalUsage();
+    expect(total.inputTokens).toBe(300);
+    expect(total.outputTokens).toBe(125);
   });
 });
 

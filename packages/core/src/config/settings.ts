@@ -6,10 +6,13 @@ import type { Settings } from "../index";
 const DEFAULT_SETTINGS: Settings = {
   model: "claude-sonnet-4-20250514",
   apiFormat: "anthropic",
-  permissionMode: "default",
+  maxTokens: 16384,
   maxTurns: 50,
-  memory: { enabled: true },
+  permission: { mode: "default" },
+  memory: { enabled: true, maxFiles: 5, maxEntrypointLines: 200 },
   sandbox: { enabled: false },
+  effort: "medium",
+  passes: 1,
 };
 
 export async function loadSettings(
@@ -37,8 +40,14 @@ function loadFromEnv(): Partial<Settings> {
   const result: Partial<Settings> = {};
   const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY;
   if (apiKey !== undefined) result.apiKey = apiKey;
+  if (process.env.ANTHROPIC_MODEL !== undefined) result.model = process.env.ANTHROPIC_MODEL;
   if (process.env.OPENHARNESS_MODEL !== undefined) result.model = process.env.OPENHARNESS_MODEL;
   if (process.env.OPENHARNESS_API_FORMAT !== undefined) result.apiFormat = process.env.OPENHARNESS_API_FORMAT as Settings["apiFormat"];
+  if (process.env.ANTHROPIC_BASE_URL !== undefined || process.env.OPENHARNESS_BASE_URL !== undefined) {
+    result.baseUrl = process.env.ANTHROPIC_BASE_URL ?? process.env.OPENHARNESS_BASE_URL;
+  }
+  if (process.env.OPENHARNESS_MAX_TOKENS !== undefined) result.maxTokens = parseInt(process.env.OPENHARNESS_MAX_TOKENS, 10);
+  if (process.env.OPENHARNESS_MAX_TURNS !== undefined) result.maxTurns = parseInt(process.env.OPENHARNESS_MAX_TURNS, 10);
   return result;
 }
 

@@ -3,12 +3,13 @@ import type {
   HookEvent,
   HookType,
   HookDefinition,
+  HookResult,
   IHookExecutor,
 } from "@openharness/core";
 
-export type { HookEvent, HookType, HookDefinition };
+export type { HookEvent, HookType, HookDefinition, HookResult };
 
-export interface HookResult {
+export interface DetailedHookResult {
   hookId: string;
   success: boolean;
   error?: Error;
@@ -29,24 +30,26 @@ export class HookExecutor implements IHookExecutor {
   async execute(
     event: HookEvent,
     context: Record<string, unknown>
-  ): Promise<void> {
+  ): Promise<HookResult> {
     const matching = this.getHooksForEvent(event);
 
     for (const hook of matching) {
       try {
         await this.executeSingle(hook, context);
       } catch {
-        // hooks should not throw, errors are logged internally
+        return { blocked: false };
       }
     }
+
+    return { blocked: false };
   }
 
   async executeWithResults(
     event: HookEvent,
     context: Record<string, unknown>
-  ): Promise<HookResult[]> {
+  ): Promise<DetailedHookResult[]> {
     const matching = this.getHooksForEvent(event);
-    const results: HookResult[] = [];
+    const results: DetailedHookResult[] = [];
 
     for (const hook of matching) {
       const start = performance.now();

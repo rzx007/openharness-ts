@@ -1,6 +1,5 @@
 export { AnthropicClient } from "./providers/anthropic";
 export { OpenAICompatibleClient } from "./providers/openai";
-export { CopilotClient } from "./providers/copilot";
 export {
   PROVIDERS,
   detectProvider,

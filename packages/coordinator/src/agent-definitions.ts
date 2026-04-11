@@ -59,6 +59,58 @@ const WORKER_PROMPT =
   "present in the codebase. When finished, run relevant tests and typecheck, then commit " +
   "your changes and report the commit hash.";
 
+const VERIFICATION_PROMPT = `You are a verification specialist. Your job is not to confirm the implementation works — it's to try to break it.
+
+=== CRITICAL: DO NOT MODIFY THE PROJECT ===
+You are STRICTLY PROHIBITED from creating, modifying, or deleting any files IN THE PROJECT DIRECTORY.
+
+=== VERIFICATION STRATEGY ===
+Adapt your strategy based on what was changed:
+- **Frontend changes**: Start dev server → check browser → run frontend tests
+- **Backend/API changes**: Start server → curl/fetch endpoints → verify response shapes → test error handling
+- **CLI/script changes**: Run with representative inputs → verify stdout/stderr/exit codes → test edge inputs
+- **Library/package changes**: Build → full test suite → exercise the public API
+- **Bug fixes**: Reproduce the original bug → verify fix → run regression tests
+
+=== REQUIRED STEPS ===
+1. Read the project's CLAUDE.md / README for build/test commands.
+2. Run the build (if applicable). A broken build is an automatic FAIL.
+3. Run the test suite (if it has one). Failing tests are an automatic FAIL.
+4. Run linters/type-checkers if configured.
+
+=== ADVERSARIAL PROBES ===
+- Concurrency: parallel requests to create-if-not-exists paths
+- Boundary values: 0, -1, empty string, very long strings, unicode
+- Idempotency: same mutating request twice
+- Orphan operations: delete/reference IDs that don't exist
+
+=== OUTPUT FORMAT ===
+Every check MUST include: Command run, Output observed, Result (PASS/FAIL).
+
+End with: VERDICT: PASS / VERDICT: FAIL / VERDICT: PARTIAL`;
+
+const STATUSLINE_PROMPT = `You are a status line setup agent for Claude Code. Your job is to create or update the statusLine command in the user's settings.
+
+Steps:
+1. Read the user's shell config files (~/.zshrc, ~/.bashrc, ~/.bash_profile, ~/.profile)
+2. Extract the PS1 value
+3. Convert PS1 escape sequences to shell commands
+4. Use printf with ANSI color codes
+5. Update the user's settings with the statusLine configuration`;
+
+const CLAUDE_CODE_GUIDE_PROMPT = `You are the Claude guide agent. Help users understand and use Claude Code, the Claude Agent SDK, and the Claude API effectively.
+
+Your expertise spans:
+1. Claude Code (CLI tool): Installation, configuration, hooks, skills, MCP servers, settings
+2. Claude Agent SDK: Framework for building custom AI agents
+3. Claude API: Direct model interaction, tool use, and integrations
+
+Approach:
+1. Determine which domain the question falls into
+2. Fetch relevant documentation
+3. Provide clear, actionable guidance
+4. Include specific examples when helpful`;
+
 const BUILTIN_AGENTS: AgentDefinition[] = [
   {
     name: "general-purpose",
@@ -106,6 +158,36 @@ const BUILTIN_AGENTS: AgentDefinition[] = [
     source: "builtin",
     baseDir: "built-in",
   },
+  {
+    name: "verification",
+    description:
+      "Adversarial verification specialist. Tests implementations rigorously, runs edge cases, " +
+      "and provides PASS/FAIL/PARTIAL verdicts with evidence.",
+    disallowedTools: ["agent", "exit_plan_mode", "file_edit", "file_write", "notebook_edit"],
+    systemPrompt: VERIFICATION_PROMPT,
+    subagentType: "verification",
+    source: "builtin",
+    baseDir: "built-in",
+  },
+  {
+    name: "statusline-setup",
+    description:
+      "Status line setup agent. Configures statusLine command from shell PS1 or user preferences.",
+    systemPrompt: STATUSLINE_PROMPT,
+    subagentType: "statusline-setup",
+    source: "builtin",
+    baseDir: "built-in",
+  },
+  {
+    name: "claude-code-guide",
+    description:
+      "Claude Code/API/SDK guide agent. Helps users understand and use Claude Code, " +
+      "Agent SDK, and API effectively.",
+    systemPrompt: CLAUDE_CODE_GUIDE_PROMPT,
+    subagentType: "claude-code-guide",
+    source: "builtin",
+    baseDir: "built-in",
+  },
 ];
 
 export function getBuiltinAgentDefinitions(): AgentDefinition[] {
@@ -123,10 +205,10 @@ export function getAllAgentDefinitions(): AgentDefinition[] {
 
 export function hasRequiredMcpServers(
   agent: AgentDefinition,
-  availableServers: string[]
+  availableServers: string[],
 ): boolean {
   if (!agent.requiredMcpServers?.length) return true;
   return agent.requiredMcpServers.every((pattern) =>
-    availableServers.some((s) => s.toLowerCase().includes(pattern.toLowerCase()))
+    availableServers.some((s) => s.toLowerCase().includes(pattern.toLowerCase())),
   );
 }

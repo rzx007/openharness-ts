@@ -29,7 +29,7 @@ function createMockPermissionChecker(allow = true): any {
 
 function createMockHookExecutor(): any {
   return {
-    execute: async () => {},
+    execute: async () => ({ blocked: false }),
   };
 }
 
@@ -254,7 +254,7 @@ describe("loadSettings", () => {
     const settings = await loadSettings();
     expect(settings.model).toBe("claude-sonnet-4-20250514");
     expect(settings.apiFormat).toBe("anthropic");
-    expect(settings.permissionMode).toBe("default");
+    expect(settings.permission.mode).toBe("default");
     expect(settings.maxTurns).toBe(50);
   });
 

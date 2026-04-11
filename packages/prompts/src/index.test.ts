@@ -1,22 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildSystemPrompt, discoverClaudeMd } from "../src/index.js";
-import type { PromptContext } from "../src/index.js";
+import { buildSystemPrompt, discoverClaudeMd, getBaseSystemPrompt, formatEnvironmentSection, buildRuntimeSystemPrompt } from "./index.js";
+import type { EnvironmentInfo } from "./index.js";
 import * as fs from "node:fs/promises";
 
 vi.mock("node:fs/promises", () => ({
   access: vi.fn(),
   readFile: vi.fn(),
+  readdir: vi.fn(),
 }));
 
 const mockedAccess = vi.mocked(fs.access);
 const mockedReadFile = vi.mocked(fs.readFile);
-
-const defaultCtx: PromptContext = {
-  cwd: "/project",
-  platform: "linux",
-  shell: "bash",
-  date: "2026-04-11",
-};
+const mockedReaddir = vi.mocked(fs.readdir);
 
 describe("discoverClaudeMd", () => {
   beforeEach(() => {
@@ -48,25 +43,85 @@ describe("discoverClaudeMd", () => {
   });
 });
 
-describe("buildSystemPrompt", () => {
+describe("getBaseSystemPrompt", () => {
+  it("returns a non-empty string", () => {
+    const prompt = getBaseSystemPrompt();
+    expect(prompt.length).toBeGreaterThan(100);
+    expect(prompt).toContain("OpenHarness");
+  });
+});
+
+describe("formatEnvironmentSection", () => {
+  it("formats env info with git branch", () => {
+    const env: EnvironmentInfo = {
+      osName: "Linux",
+      osVersion: "linux",
+      platformMachine: "x86_64",
+      shell: "bash",
+      cwd: "/project",
+      homeDir: "/home/user",
+      date: "2026-04-11",
+      nodeVersion: "v20.0.0",
+      isGitRepo: true,
+      gitBranch: "main",
+      hostname: "dev",
+    };
+    const section = formatEnvironmentSection(env);
+    expect(section).toContain("Linux");
+    expect(section).toContain("bash");
+    expect(section).toContain("/project");
+    expect(section).toContain("main");
+  });
+
+  it("formats env info without git", () => {
+    const env: EnvironmentInfo = {
+      osName: "Windows",
+      osVersion: "win32",
+      platformMachine: "x64",
+      shell: "cmd.exe",
+      cwd: "C:\\project",
+      homeDir: "C:\\Users",
+      date: "2026-04-11",
+      nodeVersion: "v20.0.0",
+      isGitRepo: false,
+      hostname: "pc",
+    };
+    const section = formatEnvironmentSection(env);
+    expect(section).toContain("Windows");
+    expect(section).not.toContain("Git: yes");
+  });
+});
+
+describe("buildRuntimeSystemPrompt", () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  it("builds prompt without CLAUDE.md", async () => {
+  it("includes fast mode section", async () => {
     mockedAccess.mockRejectedValue(new Error("not found"));
-    const result = await buildSystemPrompt("You are helpful.", defaultCtx);
-    expect(result).toContain("You are helpful.");
-    expect(result).toContain("Platform: linux");
-    expect(result).toContain("Shell: bash");
-    expect(result).toContain("Working directory: /project");
+    const result = await buildRuntimeSystemPrompt({ fastMode: true });
+    expect(result).toContain("Fast mode");
   });
 
-  it("builds prompt with CLAUDE.md", async () => {
-    mockedAccess.mockImplementation(async () => {});
-    mockedReadFile.mockResolvedValue("# Rules\nBe nice");
-    const result = await buildSystemPrompt("You are helpful.", defaultCtx);
-    expect(result).toContain("Project Context");
-    expect(result).toContain("Be nice");
+  it("includes reasoning settings", async () => {
+    mockedAccess.mockRejectedValue(new Error("not found"));
+    const result = await buildRuntimeSystemPrompt({ effort: "high", passes: 3 });
+    expect(result).toContain("high");
+    expect(result).toContain("3");
+  });
+
+  it("includes skills list", async () => {
+    mockedAccess.mockRejectedValue(new Error("not found"));
+    const result = await buildRuntimeSystemPrompt({
+      skillsList: [{ name: "react", description: "React patterns" }],
+    });
+    expect(result).toContain("react");
+    expect(result).toContain("React patterns");
+  });
+
+  it("includes memory content", async () => {
+    mockedAccess.mockRejectedValue(new Error("not found"));
+    const result = await buildRuntimeSystemPrompt({ memoryContent: "remember this" });
+    expect(result).toContain("remember this");
   });
 });

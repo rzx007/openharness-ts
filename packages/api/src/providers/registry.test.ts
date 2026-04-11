@@ -7,8 +7,8 @@ import {
 } from "./registry.js";
 
 describe("PROVIDERS", () => {
-  it("has 21 providers", () => {
-    expect(PROVIDERS).toHaveLength(21);
+  it("has 20 providers", () => {
+    expect(PROVIDERS).toHaveLength(20);
   });
 
   it("each provider has required fields", () => {
@@ -34,13 +34,6 @@ describe("PROVIDERS", () => {
     const o = findByName("openai");
     expect(o).toBeDefined();
     expect(o!.backendType).toBe("openai_compat");
-  });
-
-  it("copilot is OAuth provider", () => {
-    const c = findByName("github_copilot");
-    expect(c).toBeDefined();
-    expect(c!.isOAuth).toBe(true);
-    expect(c!.backendType).toBe("copilot");
   });
 
   it("ollama is local provider", () => {

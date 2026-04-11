@@ -7,7 +7,7 @@ export const enterPlanModeTool: ToolDefinition = {
   async execute() {
     const { loadSettings, saveSettings } = await import("@openharness/core");
     const settings = await loadSettings();
-    settings.permissionMode = "plan";
+    settings.permission = { ...settings.permission, mode: "plan" };
     await saveSettings(settings);
     return { content: [{ type: "text", text: "Permission mode set to plan" }] };
   },
@@ -20,7 +20,7 @@ export const exitPlanModeTool: ToolDefinition = {
   async execute() {
     const { loadSettings, saveSettings } = await import("@openharness/core");
     const settings = await loadSettings();
-    settings.permissionMode = "default";
+    settings.permission = { ...settings.permission, mode: "default" };
     await saveSettings(settings);
     return { content: [{ type: "text", text: "Permission mode set to default" }] };
   },
