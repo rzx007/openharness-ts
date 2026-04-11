@@ -1,0 +1,20 @@
+export type PermissionMode = "default" | "plan" | "full_auto";
+
+export interface PermissionRule {
+  tool?: string;
+  pathPattern?: string;
+  commandPattern?: string;
+  action: "allow" | "deny" | "ask";
+}
+
+export interface PermissionDecision {
+  action: "allow" | "deny" | "ask";
+  reason?: string;
+}
+
+export interface PermissionChecker {
+  checkTool(
+    toolName: string,
+    input: Record<string, unknown>
+  ): Promise<PermissionDecision>;
+}

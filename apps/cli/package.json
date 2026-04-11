@@ -1,0 +1,31 @@
+{
+  "name": "@openharness/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "oh": "./dist/index.js",
+    "openharness": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@openharness/api": "workspace:*",
+    "@openharness/commands": "workspace:*",
+    "@openharness/core": "workspace:*",
+    "@openharness/hooks": "workspace:*",
+    "@openharness/permissions": "workspace:*",
+    "@openharness/themes": "workspace:*",
+    "@openharness/tools": "workspace:*",
+    "@openharness/utils": "workspace:*",
+    "chalk": "catalog:",
+    "commander": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "^5.7.3"
+  }
+}

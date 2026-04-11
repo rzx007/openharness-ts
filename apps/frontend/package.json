@@ -1,0 +1,25 @@
+{
+  "name": "@openharness/frontend",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.tsx",
+    "build": "echo Frontend uses tsx at runtime, no build needed",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@openharness/core": "workspace:*",
+    "@openharness/themes": "workspace:*",
+    "chalk": "catalog:",
+    "ink": "catalog:",
+    "ink-text-input": "catalog:",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

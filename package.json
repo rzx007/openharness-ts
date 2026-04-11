@@ -1,5 +1,5 @@
 {
-  "name": "OpenHarness-ts",
+  "name": "openharness-ts",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -9,25 +9,17 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "lint": "turbo lint",
     "check-types": "turbo check-types",
-    "dev:web": "turbo -F web dev",
-    "dev:server": "turbo -F server dev",
-    "db:push": "turbo -F @OpenHarness-ts/db db:push",
-    "db:studio": "turbo -F @OpenHarness-ts/db db:studio",
-    "db:generate": "turbo -F @OpenHarness-ts/db db:generate",
-    "db:migrate": "turbo -F @OpenHarness-ts/db db:migrate",
-    "db:local": "turbo -F @OpenHarness-ts/db db:local"
-  },
-  "dependencies": {
-    "@OpenHarness-ts/env": "workspace:*",
-    "dotenv": "catalog:",
-    "zod": "catalog:"
+    "test": "turbo test",
+    "clean": "turbo clean"
   },
   "devDependencies": {
-    "@OpenHarness-ts/config": "workspace:*",
     "@types/node": "catalog:",
+    "tsup": "catalog:",
     "turbo": "^2.8.12",
-    "typescript": "^5"
+    "typescript": "^5.7.3",
+    "vitest": "^3.1.1"
   },
   "packageManager": "pnpm@10.30.2"
 }
