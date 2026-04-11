@@ -15,3 +15,5 @@ export interface ChannelAdapter {
 }
 
 export { EventBus } from "./bus";
+export { StdioAdapter } from "./impl/stdio";
+export { HttpAdapter } from "./impl/http";

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { TeamRegistry, Mailbox } from "../src/index.js";
-import type { TeamMember, SwarmMessage } from "../src/index.js";
+import { TeamRegistry, Mailbox, BackendRegistry, getBackendRegistry } from "./index.js";
+import type { TeamMember, SwarmMessage, SwarmBackend, SpawnResult, TeammateSpawnConfig, TeammateMessage } from "./index.js";
 
 describe("TeamRegistry", () => {
   it("registers a team", () => {
@@ -109,5 +109,52 @@ describe("Mailbox", () => {
     expect(box.receive("a")).toHaveLength(1);
     expect(box.receive("b")).toHaveLength(1);
     expect(box.receive("c")).toHaveLength(1);
+  });
+});
+
+const mockBackend: SwarmBackend = {
+  async spawn(config: TeammateSpawnConfig): Promise<SpawnResult> {
+    return { success: true, agentId: `agent-${config.name}`, taskId: "task-1", backendType: "mock" };
+  },
+  async sendMessage(agentId: string, message: TeammateMessage): Promise<void> {},
+  async terminate(agentId: string): Promise<void> {},
+};
+
+describe("BackendRegistry", () => {
+  it("registers and retrieves backend", () => {
+    const reg = new BackendRegistry();
+    reg.register("mock", mockBackend);
+    expect(reg.getExecutor("mock")).toBe(mockBackend);
+  });
+
+  it("throws for unknown backend", () => {
+    const reg = new BackendRegistry();
+    expect(() => reg.getExecutor("nope")).toThrow("not found");
+  });
+
+  it("returns first backend when no name given", () => {
+    const reg = new BackendRegistry();
+    reg.register("mock", mockBackend);
+    expect(reg.getExecutor()).toBe(mockBackend);
+  });
+
+  it("throws when no backends registered", () => {
+    const reg = new BackendRegistry();
+    expect(() => reg.getExecutor()).toThrow("No backends");
+  });
+
+  it("lists registered backends", () => {
+    const reg = new BackendRegistry();
+    reg.register("a", mockBackend);
+    reg.register("b", mockBackend);
+    expect(reg.list()).toEqual(["a", "b"]);
+  });
+});
+
+describe("getBackendRegistry", () => {
+  it("returns a singleton", () => {
+    const a = getBackendRegistry();
+    const b = getBackendRegistry();
+    expect(a).toBe(b);
   });
 });

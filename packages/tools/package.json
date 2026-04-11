@@ -18,8 +18,12 @@
         "clean": "rm -rf dist"
     },
     "dependencies": {
+        "@openharness/coordinator": "workspace:*",
         "@openharness/core": "workspace:*",
+        "@openharness/mcp": "workspace:*",
+        "@openharness/services": "workspace:*",
         "@openharness/skills": "workspace:*",
+        "@openharness/swarm": "workspace:*",
         "@openharness/utils": "workspace:*",
         "zod": "catalog:"
     },

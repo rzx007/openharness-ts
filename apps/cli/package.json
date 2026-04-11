@@ -10,14 +10,20 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "check-types": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
     "@openharness/api": "workspace:*",
+    "@openharness/auth": "workspace:*",
     "@openharness/commands": "workspace:*",
     "@openharness/core": "workspace:*",
     "@openharness/hooks": "workspace:*",
+    "@openharness/mcp": "workspace:*",
     "@openharness/permissions": "workspace:*",
+    "@openharness/prompts": "workspace:*",
+    "@openharness/plugins": "workspace:*",
+    "@openharness/services": "workspace:*",
     "@openharness/themes": "workspace:*",
     "@openharness/tools": "workspace:*",
     "@openharness/utils": "workspace:*",
@@ -26,6 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "catalog:"
   }
 }

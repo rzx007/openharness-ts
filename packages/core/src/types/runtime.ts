@@ -16,6 +16,8 @@ export interface QueryEngineOptions {
   maxTurns?: number;
   systemPrompt?: string;
   model?: string;
+  maxTokens?: number;
+  compactKeepRecent?: number;
 }
 
 export interface RuntimeBundle {

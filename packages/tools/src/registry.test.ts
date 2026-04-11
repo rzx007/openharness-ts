@@ -21,7 +21,29 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("ToolSearch");
     expect(names).toContain("AskUser");
     expect(names).toContain("Brief");
-    expect(tools).toHaveLength(15);
+    expect(names).toContain("TaskCreate");
+    expect(names).toContain("TaskGet");
+    expect(names).toContain("TaskList");
+    expect(names).toContain("TaskOutput");
+    expect(names).toContain("TaskStop");
+    expect(names).toContain("EnterPlanMode");
+    expect(names).toContain("ExitPlanMode");
+    expect(names).toContain("EnterWorktree");
+    expect(names).toContain("ExitWorktree");
+    expect(names).toContain("NotebookEdit");
+    expect(names).toContain("Agent");
+    expect(names).toContain("SendMessage");
+    expect(names).toContain("TeamCreate");
+    expect(names).toContain("TeamDelete");
+    expect(names).toContain("CronCreate");
+    expect(names).toContain("CronDelete");
+    expect(names).toContain("CronList");
+    expect(names).toContain("CronToggle");
+    expect(names).toContain("McpToolCall");
+    expect(names).toContain("ListMcpResources");
+    expect(names).toContain("ReadMcpResource");
+    expect(names).toContain("Lsp");
+    expect(tools).toHaveLength(37);
   });
 
   it("each tool has required fields", () => {

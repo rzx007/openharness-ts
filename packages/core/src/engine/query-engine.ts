@@ -8,9 +8,11 @@ import type {
   QueryEngineOptions,
   ToolContext,
 } from "../index";
+import { CompactService } from "./compact-service";
 
 export class QueryEngine implements IQueryEngine {
   private messages: Message[] = [];
+  private compactService: CompactService;
 
   constructor(
     private apiClient: StreamingMessageClient,
@@ -18,7 +20,12 @@ export class QueryEngine implements IQueryEngine {
     private permissionChecker: IPermissionChecker,
     private hookExecutor: IHookExecutor,
     private options: QueryEngineOptions = {}
-  ) {}
+  ) {
+    this.compactService = new CompactService(
+      options.maxTokens ?? 100_000,
+      options.compactKeepRecent ?? 10,
+    );
+  }
 
   async *submitMessage(content: string): AsyncIterable<StreamEvent> {
     this.messages.push({ type: "user", content });
@@ -29,6 +36,8 @@ export class QueryEngine implements IQueryEngine {
     await this.hookExecutor.execute("session_start", {});
 
     while (turnCount < maxTurns) {
+      this.messages = await this.compactService.autoCompact(this.messages);
+
       const tools = this.toolRegistry.getAll();
       const stream = this.apiClient.streamMessage({
         model: this.options.model ?? "claude-sonnet-4-20250514",
@@ -83,7 +92,12 @@ export class QueryEngine implements IQueryEngine {
   }
 
   async compact(): Promise<void> {
-    // TODO: implement context compaction
+    const microResult = this.compactService.microCompact(this.messages);
+    if (this.compactService.estimateTokens(microResult) < (this.options.maxTokens ?? 100_000)) {
+      this.messages = microResult;
+      return;
+    }
+    this.messages = await this.compactService.autoCompact(this.messages);
   }
 
   private async executeTools(toolUses: ToolUseBlock[]) {

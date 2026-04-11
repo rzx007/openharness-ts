@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { CompactService } from "../src/compact/index.js";
-import { SessionStorage } from "../src/session/index.js";
-import { CronScheduler } from "../src/cron/index.js";
-import { estimateTokens } from "../src/token-estimation/index.js";
-import { LspClient } from "../src/lsp/index.js";
-import { OAuthFlow } from "../src/oauth/index.js";
+import { CompactService } from "./compact/index.js";
+import { SessionStorage } from "./session/index.js";
+import { CronScheduler } from "./cron/index.js";
+import { estimateTokens } from "./token-estimation/index.js";
+import { LspClient } from "./lsp/index.js";
+import { OAuthFlow } from "./oauth/index.js";
+import { TaskManager } from "./tasks/index.js";
 import type { Message } from "@openharness/core";
 
 describe("CompactService", () => {
@@ -192,5 +193,64 @@ describe("OAuthFlow", () => {
     });
     const tokens = await oauth.refreshTokens("refresh-123");
     expect(tokens.accessToken).toBeTruthy();
+  });
+});
+
+describe("TaskManager", () => {
+  it("creates a shell task and tracks it", async () => {
+    const mgr = new TaskManager();
+    const task = await mgr.createShellTask("echo hello", "test echo", process.cwd());
+    expect(task.id).toMatch(/^task_\d+$/);
+    expect(task.type).toBe("shell");
+    expect(task.status).toBe("running");
+    expect(mgr.getTask(task.id)).toBe(task);
+  });
+
+  it("lists tasks", async () => {
+    const mgr = new TaskManager();
+    await mgr.createShellTask("echo 1", "t1", process.cwd());
+    await mgr.createAgentTask("do stuff", "t2", process.cwd());
+    const tasks = mgr.listTasks();
+    expect(tasks).toHaveLength(2);
+  });
+
+  it("filters tasks by status", async () => {
+    const mgr = new TaskManager();
+    await mgr.createAgentTask("pending task", "desc", process.cwd());
+    const pending = mgr.listTasks("pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.type).toBe("agent");
+  });
+
+  it("creates an agent task", async () => {
+    const mgr = new TaskManager();
+    const task = await mgr.createAgentTask("write tests", "agent task", process.cwd(), "gpt-4");
+    expect(task.type).toBe("agent");
+    expect(task.status).toBe("pending");
+    expect(task.prompt).toBe("write tests");
+  });
+
+  it("readTaskOutput throws for unknown task", () => {
+    const mgr = new TaskManager();
+    expect(() => mgr.readTaskOutput("nope")).toThrow("not found");
+  });
+
+  it("stopTask throws for unknown task", async () => {
+    const mgr = new TaskManager();
+    await expect(mgr.stopTask("nope")).rejects.toThrow("not found");
+  });
+
+  it("writeToTask throws for unknown task", async () => {
+    const mgr = new TaskManager();
+    await expect(mgr.writeToTask("nope", "msg")).rejects.toThrow("not found");
+  });
+
+  it("shell task completes and produces output", async () => {
+    const mgr = new TaskManager();
+    const task = await mgr.createShellTask("echo done", "test", process.cwd());
+    await new Promise((r) => setTimeout(r, 500));
+    const output = mgr.readTaskOutput(task.id);
+    expect(output).toContain("done");
+    expect(task.status).toBe("completed");
   });
 });

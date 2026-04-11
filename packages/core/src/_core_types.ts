@@ -1,4 +1,4 @@
 export type {
   StreamEvent,
   ToolDefinition,
-} from "../index.js";
+} from "./index.js";

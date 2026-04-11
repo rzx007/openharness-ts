@@ -98,6 +98,28 @@ export class MemoryManager {
     return this.entries.size;
   }
 
+  async saveToFile(filePath: string): Promise<void> {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(filePath), { recursive: true });
+    const data = [...this.entries.values()];
+    await writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+  }
+
+  async loadFromFile(filePath: string): Promise<number> {
+    const { readFile } = await import("node:fs/promises");
+    try {
+      const raw = await readFile(filePath, "utf-8");
+      const data: MemoryEntry[] = JSON.parse(raw);
+      for (const entry of data) {
+        this.entries.set(entry.id, entry);
+      }
+      return data.length;
+    } catch {
+      return 0;
+    }
+  }
+
   private computeScore(entry: MemoryEntry, queryLower: string): number {
     const contentLower = entry.content.toLowerCase();
     let score = 0;

@@ -155,3 +155,63 @@ export class HookExecutor implements IHookExecutor {
     }
   }
 }
+
+export class HookLoader {
+  private executor: HookExecutor;
+  private watchers: Array<{ close: () => void }> = [];
+
+  constructor(executor?: HookExecutor) {
+    this.executor = executor ?? new HookExecutor();
+  }
+
+  async loadFromConfig(
+    hooks: HookDefinition[]
+  ): Promise<number> {
+    let count = 0;
+    for (const hook of hooks) {
+      this.executor.register(hook);
+      count++;
+    }
+    return count;
+  }
+
+  async loadFromDirectory(
+    dir: string,
+    pattern = "*.hook.{js,ts}"
+  ): Promise<number> {
+    const { readdir } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    let count = 0;
+    try {
+      const entries = await readdir(dir);
+      for (const file of entries) {
+        if (!file.endsWith(".hook.js") && !file.endsWith(".hook.ts")) continue;
+        try {
+          const mod = await import(join(dir, file));
+          const hooks: HookDefinition[] = mod?.hooks ?? mod?.default?.hooks ?? [];
+          for (const hook of hooks) {
+            this.executor.register(hook);
+            count++;
+          }
+        } catch {}
+      }
+    } catch {}
+    return count;
+  }
+
+  watch(directory: string, intervalMs = 5000): void {
+    const timer = setInterval(() => {
+      this.loadFromDirectory(directory).catch(() => {});
+    }, intervalMs);
+    this.watchers.push({ close: () => clearInterval(timer) });
+  }
+
+  stopWatching(): void {
+    for (const w of this.watchers) w.close();
+    this.watchers = [];
+  }
+
+  getExecutor(): HookExecutor {
+    return this.executor;
+  }
+}

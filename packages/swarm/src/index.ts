@@ -1,4 +1,32 @@
-import type { Message } from "@openharness/core";
+export interface TeammateSpawnConfig {
+  name: string;
+  team: string;
+  prompt: string;
+  cwd: string;
+  parentSessionId: string;
+  model?: string;
+  systemPrompt?: string;
+  permissions?: string[];
+}
+
+export interface TeammateMessage {
+  text: string;
+  fromAgent: string;
+}
+
+export interface SpawnResult {
+  success: boolean;
+  agentId: string;
+  taskId: string;
+  backendType: string;
+  error?: string;
+}
+
+export interface SwarmBackend {
+  spawn(config: TeammateSpawnConfig): Promise<SpawnResult>;
+  sendMessage(agentId: string, message: TeammateMessage): Promise<void>;
+  terminate(agentId: string): Promise<void>;
+}
 
 export interface TeamMember {
   id: string;
@@ -113,4 +141,36 @@ export class Mailbox {
       return msg;
     });
   }
+}
+
+export class BackendRegistry {
+  private backends = new Map<string, SwarmBackend>();
+
+  register(name: string, backend: SwarmBackend): void {
+    this.backends.set(name, backend);
+  }
+
+  getExecutor(name?: string): SwarmBackend {
+    if (name) {
+      const backend = this.backends.get(name);
+      if (!backend) throw new Error(`Backend not found: ${name}`);
+      return backend;
+    }
+    const first = this.backends.values().next().value;
+    if (!first) throw new Error("No backends registered");
+    return first;
+  }
+
+  list(): string[] {
+    return [...this.backends.keys()];
+  }
+}
+
+let _defaultBackendRegistry: BackendRegistry | undefined;
+
+export function getBackendRegistry(): BackendRegistry {
+  if (!_defaultBackendRegistry) {
+    _defaultBackendRegistry = new BackendRegistry();
+  }
+  return _defaultBackendRegistry;
 }

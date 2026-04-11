@@ -41,15 +41,80 @@ export class DeviceCodeFlow implements AuthProvider {
   }
 
   async authenticate(): Promise<AuthCredentials> {
-    void this.clientId;
-    void this.deviceCodeUrl;
-    void this.tokenUrl;
-    return { provider: this.name, accessToken: "placeholder" };
+    const codeResp = await fetch(this.deviceCodeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ client_id: this.clientId, scope: "read:user" }),
+    });
+
+    if (!codeResp.ok) {
+      throw new Error(`Device code request failed: ${codeResp.status}`);
+    }
+
+    const codeData = (await codeResp.json()) as {
+      device_code: string;
+      user_code: string;
+      verification_uri: string;
+      interval?: number;
+      expires_in?: number;
+    };
+
+    console.log(`Enter code: ${codeData.user_code} at ${codeData.verification_uri}`);
+
+    const interval = (codeData.interval ?? 5) * 1000;
+    const expiresAt = Date.now() + (codeData.expires_in ?? 900) * 1000;
+
+    while (Date.now() < expiresAt) {
+      await new Promise((r) => setTimeout(r, interval));
+      const tokenResp = await fetch(this.tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          client_id: this.clientId,
+          device_code: codeData.device_code,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+      });
+
+      const tokenData = (await tokenResp.json()) as any;
+      if (tokenData.access_token) {
+        return {
+          provider: this.name,
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token,
+          expiresAt: tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : undefined,
+        };
+      }
+      if (tokenData.error === "authorization_pending") continue;
+      if (tokenData.error === "slow_down") {
+        await new Promise((r) => setTimeout(r, 5000));
+        continue;
+      }
+      throw new Error(`Token error: ${tokenData.error ?? "unknown"}`);
+    }
+
+    throw new Error("Device code flow timed out");
   }
 
   async refresh(credentials: AuthCredentials): Promise<AuthCredentials> {
-    void this.tokenUrl;
-    return { ...credentials, accessToken: "placeholder" };
+    if (!credentials.refreshToken) return credentials;
+    const resp = await fetch(this.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        client_id: this.clientId,
+        refresh_token: credentials.refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+    if (!resp.ok) return credentials;
+    const data = (await resp.json()) as any;
+    return {
+      provider: credentials.provider,
+      accessToken: data.access_token ?? credentials.accessToken,
+      refreshToken: data.refresh_token ?? credentials.refreshToken,
+      expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : credentials.expiresAt,
+    };
   }
 }
 
