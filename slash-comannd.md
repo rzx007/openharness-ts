@@ -1,0 +1,3 @@
+| TS 已有命令 | Python 有但 TS 缺失的命令 |
+| --- | --- |
+| /help, /model, /clear, /compact, /usage, /session, /exit | /status, /context, /summary, /cost, /memory, /hooks, /resume, /export, /share, /copy, /tag, /rewind, /files, /init, /bridge, /login, /logout, /feedback, /onboarding, /skills, /config, /mcp, /plugin, /reload-plugins, /permissions, /plan, /fast, /effort, /passes, /turns, /continue, /theme, /output-style, /keybindings, /vim, /voice, /doctor, /diff, /branch, /commit, /issue, /pr_comments, /privacy-settings, /rate-limit-options, /release-notes, /upgrade, /agents, /tasks, /version |

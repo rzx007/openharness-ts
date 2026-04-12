@@ -33,6 +33,7 @@ program
   .option("--verbose", "Verbose output")
   .option("-d, --debug", "Debug mode")
   .option("--backend-only", "Run as backend host for TUI")
+  .option("--tui", "Launch terminal UI (React/Ink frontend)")
   .option("--dangerously-skip-permissions", "Skip all permission checks")
   .option("--allowed-tools <tools>", "Comma-separated allowed tools")
   .option("--disallowed-tools <tools>", "Comma-separated disallowed tools")

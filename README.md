@@ -48,11 +48,17 @@ pnpm test
 # 设置 API Key
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# 启动 CLI
-pnpm --filter @openharness/cli dev -- "hello"
-
-# 或全局安装后
+# 单次执行
 oh "explain this codebase"
+
+# 交互式 REPL
+oh
+
+# 启动 TUI（React/Ink 终端 UI）
+oh --tui
+
+# TUI 带初始提示
+oh --tui "explain this project"
 ```
 
 ### CLI 常用参数
@@ -74,6 +80,8 @@ Options:
   --mcp-config <path>          MCP 服务器配置文件
   --theme <theme>              终端主题
   --effort <level>             推理强度: low | medium | high
+  --tui                        启动 React/Ink TUI 界面
+  --backend-only               以 TUI 后端模式运行（内部使用）
   --verbose                    详细输出
   --continue                   继续上次会话
   --resume <session>           恢复指定会话
@@ -129,13 +137,19 @@ OpenHarness-ts/
 │                          User Interface                            │
 │  ┌────────────────────┐  ┌──────────────────────────────────────┐  │
 │  │   CLI (oh)         │  │   TUI Frontend (React/Ink)          │  │
-│  │   Commander.js     │  │   StatusBar / PromptInput / Events  │  │
+│  │   Commander.js     │  │   ConversationView / StatusBar /    │  │
+│  │   REPL / Print     │  │   PromptInput / ModalHost / Picker  │  │
 │  └────────┬───────────┘  └──────────────┬───────────────────────┘  │
-│           │                             │                          │
-│           │   ┌─────────────────┐       │                          │
-│           └──►│  Runtime        │◄──────┘                          │
-│               │  Bootstrap      │                                  │
-│               └────────┬────────┘                                  │
+│           │               OHJSON:      │ spawn                    │
+│           │               protocol     ▼                          │
+│           │          ┌──────────────────────┐                      │
+│           │          │  BackendHost         │                      │
+│           │          │  (--backend-only)    │                      │
+│           │          └────────┬─────────────┘                      │
+│           │                   │                                    │
+│           │   ┌───────────────▼──────────────┐                    │
+│           └──►│  Runtime Bootstrap           │                    │
+│               └────────┬─────────────────────┘                    │
 └────────────────────────┼───────────────────────────────────────────┘
                          │
 ┌────────────────────────┼───────────────────────────────────────────┐
@@ -293,8 +307,9 @@ OpenHarness-ts/
 | 模块 | 说明 |
 |------|------|
 | `CLI` | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/config 子命令，20+ CLI flags |
-| `REPL` | 交互式循环：`> ` 提示符，斜杠命令（`/help, /model, /clear, /compact, /usage, /session, /exit`） |
-| `TUI Frontend` | React/Ink 终端 UI：StatusBar + 事件显示 + PromptInput，通过 `OPENHARNESS_BACKEND_COMMAND` 连接后端 |
+| `REPL` | 交互式循环：`> ` 提示符，32 个斜杠命令（`/help, /model, /clear, /compact, /permissions, /plan, /resume` 等） |
+| `TUI Frontend` | React/Ink 终端 UI：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。通过 `--tui` 启动，前端 spawn 后端 `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲 |
+| `BackendHost` | 后端协议实现：处理 5 种请求（submit_line / permission_response / question_response / list_sessions / shutdown），发出 17 种结构化事件（assistant_delta / tool_started / tool_completed / modal_request / todo_update / plan_mode_change 等） |
 | `ThemeManager` | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题 |
 | `VimModeHandler` | Vim 模态编辑：normal / insert / visual / command 模式切换 |
 | `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析 |

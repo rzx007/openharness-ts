@@ -1,10 +1,53 @@
 import * as readline from "node:readline";
-import type { Settings } from "@openharness/core";
-import { loadSettings } from "@openharness/core";
+import { randomUUID } from "node:crypto";
+import type { Settings, StreamEvent } from "@openharness/core";
+import { loadSettings, saveSettings as saveSettingsCore } from "@openharness/core";
 import { CommandRegistry } from "@openharness/commands";
+import { HookExecutor } from "@openharness/hooks";
+import { McpClientManager } from "@openharness/mcp";
+import { MemoryManager } from "@openharness/memory";
+import { SkillRegistry } from "@openharness/skills";
+import { ThemeManager } from "@openharness/themes";
+import { TaskManager } from "@openharness/services";
+import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { bootstrap } from "../runtime.js";
 import { EventRenderer } from "../renderer.js";
-import { registerBuiltinCommands } from "./slash-commands.js";
+import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands.js";
+
+type BackendHostEvent = {
+  type: string;
+  message?: string | null;
+  item?: {
+    role: string;
+    text: string;
+    tool_name?: string;
+    tool_input?: Record<string, unknown>;
+    is_error?: boolean;
+  } | null;
+  state?: Record<string, unknown> | null;
+  tasks?: Array<{ id: string; type: string; status: string; description: string; metadata: Record<string, string> }> | null;
+  mcp_servers?: unknown[] | null;
+  bridge_sessions?: unknown[] | null;
+  commands?: string[] | null;
+  modal?: Record<string, unknown> | null;
+  select_options?: Array<{ value: string; label: string; description?: string }> | null;
+  tool_name?: string | null;
+  tool_input?: Record<string, unknown> | null;
+  output?: string | null;
+  is_error?: boolean | null;
+  todo_markdown?: string | null;
+  plan_mode?: string | null;
+  swarm_teammates?: unknown[] | null;
+  swarm_notifications?: unknown[] | null;
+};
+
+type FrontendRequest = {
+  type: string;
+  line?: string | null;
+  request_id?: string | null;
+  allowed?: boolean | null;
+  answer?: string | null;
+};
 
 interface MainOptions {
   model?: string;
@@ -26,6 +69,7 @@ interface MainOptions {
   verbose?: boolean;
   debug?: boolean;
   backendOnly?: boolean;
+  tui?: boolean;
   dangerouslySkipPermissions?: boolean;
   allowedTools?: string;
   disallowedTools?: string;
@@ -66,6 +110,11 @@ export async function mainAction(
 
   if (options.backendOnly) {
     await runBackendHost(settings, options);
+    return;
+  }
+
+  if (options.tui) {
+    await runTuiMode(settings, options, prompt);
     return;
   }
 
@@ -113,6 +162,7 @@ async function runRepl(
 
   let currentModel = settings.model;
   let sessionId: string | undefined;
+  let currentSettings = settings;
 
   if (options.continue || options.resume) {
     sessionId = await loadSessionAndResume(
@@ -127,8 +177,57 @@ async function runRepl(
     }
   }
 
+  const { join } = await import("node:path");
+  const { homedir } = await import("node:os");
+  const memoryDir = join(homedir(), ".openharness", "data", "memory");
+
+  const mcpManager = new McpClientManager();
+  if (currentSettings.mcpServers) {
+    await mcpManager.connectAll(currentSettings.mcpServers).catch(() => {});
+  }
+
+  const memoryManager = new MemoryManager(1000, memoryDir);
+  const memoryFile = join(memoryDir, "memory.json");
+  await memoryManager.loadFromFile(memoryFile).catch(() => {});
+
+  const skillRegistry = new SkillRegistry();
+  const themeManager = new ThemeManager();
+  const taskManager = new TaskManager();
+
+  const refreshSystemPrompt = async () => {
+    const prompt = await buildRuntimeSystemPrompt({
+      customPrompt: currentSettings.systemPrompt,
+      cwd: process.cwd(),
+      fastMode: currentSettings.fastMode,
+      effort: currentSettings.effort,
+      passes: currentSettings.passes,
+    });
+    bundle.queryEngine.setSystemPrompt(prompt);
+  };
+
   const commandRegistry = new CommandRegistry();
-  registerBuiltinCommands(commandRegistry, () => bundle.queryEngine, () => currentModel);
+
+  const slashCtx: SlashCommandContext = {
+    getEngine: () => bundle.queryEngine as any,
+    getModel: () => currentModel,
+    setModel: (m: string) => { currentModel = m; bundle.queryEngine.setModel(m); },
+    getSettings: () => currentSettings,
+    updateSettings: async (patch: Partial<Settings>) => {
+      currentSettings = { ...currentSettings, ...patch };
+      await saveSettingsCore(currentSettings);
+    },
+    hookExecutor: bundle.hookExecutor as HookExecutor,
+    memoryManager,
+    mcpManager,
+    skillRegistry,
+    themeManager,
+    taskManager,
+    sessionId,
+    exitRepl: () => {},
+    refreshSystemPrompt,
+  };
+
+  registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 
   console.log("OpenHarness Interactive Mode");
   console.log(`Model: ${currentModel}`);
@@ -208,28 +307,378 @@ async function runRepl(
   rl.prompt();
 }
 
+async function runTuiMode(
+  settings: Settings,
+  options: MainOptions,
+  prompt?: string,
+): Promise<void> {
+  const { spawn } = await import("node:child_process");
+  const cliPath = process.argv[1];
+
+  const args = [cliPath, "--backend-only"];
+  if (options.model) args.push("-m", options.model);
+  if (options.provider) args.push("--provider", options.provider);
+  if (options.permissionMode) args.push("--permission-mode", options.permissionMode);
+  if (options.maxTurns) args.push("--max-turns", String(options.maxTurns));
+  if (options.systemPrompt) args.push("-s", options.systemPrompt);
+  if (options.apiKey) args.push("--api-key", options.apiKey);
+  if (options.baseUrl) args.push("--base-url", options.baseUrl);
+  if (options.apiFormat) args.push("--api-format", options.apiFormat);
+  if (options.theme) args.push("--theme", options.theme);
+  if (options.cwd) args.push("--cwd", options.cwd);
+  if (options.effort) args.push("--effort", options.effort);
+  if (options.dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
+  if (options.allowedTools) args.push("--allowed-tools", options.allowedTools);
+  if (options.disallowedTools) args.push("--disallowed-tools", options.disallowedTools);
+  if (options.bare) args.push("--bare");
+
+  const frontendConfig = JSON.stringify({
+    backend_command: [process.execPath, ...args],
+    initial_prompt: prompt ?? null,
+    theme: options.theme ?? "default",
+  });
+
+  const frontendPath = (await import("node:path")).resolve(
+    (await import("node:url")).fileURLToPath(new URL("../../frontend/src/index.tsx", import.meta.url)),
+  );
+
+  const child = spawn(process.execPath, ["--import", "tsx", frontendPath], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      OPENHARNESS_FRONTEND_CONFIG: frontendConfig,
+    },
+  });
+
+  child.on("exit", (code) => {
+    process.exit(code ?? 0);
+  });
+}
+
 async function runBackendHost(
   settings: Settings,
   options: MainOptions,
 ): Promise<void> {
-  const { ProtocolHost } = await import("@openharness/core");
+  const permissionRequests = new Map<string, Promise<boolean> & { resolve: (v: boolean) => void }>();
+  const questionRequests = new Map<string, Promise<string> & { resolve: (v: string) => void }>();
+  let busy = false;
+  let running = true;
+  const lastToolInputs = new Map<string, Record<string, unknown>>();
+
+  const writeLock = { locked: false, queue: [] as Array<() => void> };
+  const acquireWrite = async (): Promise<void> => {
+    if (!writeLock.locked) { writeLock.locked = true; return; }
+    return new Promise<void>((resolve) => { writeLock.queue.push(resolve); });
+  };
+  const releaseWrite = (): void => {
+    if (writeLock.queue.length > 0) {
+      writeLock.queue.shift()!();
+    } else {
+      writeLock.locked = false;
+    }
+  };
+
+  const emit = async (event: BackendHostEvent): Promise<void> => {
+    await acquireWrite();
+    try {
+      const payload = `OHJSON:${JSON.stringify(event)}\n`;
+      const buf = (process.stdout as any).buffer;
+      if (buf && typeof buf.write === "function" && typeof buf.flush === "function") {
+        buf.write(payload);
+        buf.flush();
+      } else {
+        process.stdout.write(payload);
+      }
+    } finally {
+      releaseWrite();
+    }
+  };
+
+  const askPermission = async (toolName: string, reason?: string): Promise<boolean> => {
+    const requestId = randomUUID({ disableEntropyCache: true }).replace(/-/g, "");
+    let resolve!: (v: boolean) => void;
+    const promise = new Promise<boolean>((r) => { resolve = r; }) as Promise<boolean> & { resolve: (v: boolean) => void };
+    promise.resolve = resolve;
+    permissionRequests.set(requestId, promise);
+    await emit({
+      type: "modal_request",
+      modal: {
+        kind: "permission",
+        request_id: requestId,
+        tool_name: toolName,
+        reason: reason ?? null,
+      },
+    });
+    try {
+      return await promise;
+    } finally {
+      permissionRequests.delete(requestId);
+    }
+  };
+
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
+    permissionPrompt: askPermission,
   });
 
-  const host = new ProtocolHost();
+  const commandRegistry = new CommandRegistry();
+  const mcpManager = new McpClientManager();
+  const memoryManager = new MemoryManager(1000, "");
+  const skillRegistry = new SkillRegistry();
+  const themeManager = new ThemeManager();
+  const taskManager = new TaskManager();
 
-  for await (const request of host.listen<{ type: string; content?: string }>()) {
-    if (request.type === "submit_line" && request.content) {
-      const events: unknown[] = [];
-      for await (const event of bundle.queryEngine.submitMessage(request.content)) {
-        events.push(event);
-        await host.emit({ type: "stream_event", event });
+  const slashCtx: SlashCommandContext = {
+    getEngine: () => bundle.queryEngine as any,
+    getModel: () => settings.model,
+    setModel: (m: string) => { bundle.queryEngine.setModel(m); },
+    getSettings: () => settings,
+    updateSettings: async () => {},
+    hookExecutor: bundle.hookExecutor as HookExecutor,
+    memoryManager,
+    mcpManager,
+    skillRegistry,
+    themeManager,
+    taskManager,
+    sessionId: generateSessionId(),
+    exitRepl: () => {},
+    refreshSystemPrompt: async () => {},
+  };
+  registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
+
+  const commands = commandRegistry.list().map((c) => `/${c.name}`);
+
+  await emit({
+    type: "ready",
+    state: buildStatePayload(settings),
+    tasks: [],
+    mcp_servers: [],
+    bridge_sessions: [],
+    commands,
+  });
+  await emit({
+    type: "state_snapshot",
+    state: buildStatePayload(settings),
+    mcp_servers: [],
+    bridge_sessions: [],
+  });
+
+  const rl = readline.createInterface({ input: process.stdin });
+  const requestQueue: FrontendRequest[] = [];
+  let requestResolve: ((req: FrontendRequest | null) => void) | null = null;
+
+  rl.on("line", (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    try {
+      const request = JSON.parse(trimmed) as FrontendRequest;
+      if (requestResolve) {
+        requestResolve(request);
+        requestResolve = null;
+      } else {
+        requestQueue.push(request);
       }
-      await host.emit({ type: "turn_complete", events: events.length });
+    } catch (exc) {
+      emit({ type: "error", message: `Invalid request: ${exc}` });
+    }
+  });
+
+  rl.on("close", () => {
+    running = false;
+    if (requestResolve) {
+      requestResolve(null);
+      requestResolve = null;
+    }
+  });
+
+  const nextRequest = (): Promise<FrontendRequest | null> => {
+    if (requestQueue.length > 0) return Promise.resolve(requestQueue.shift()!);
+    if (!running) return Promise.resolve(null);
+    return new Promise<FrontendRequest | null>((resolve) => { requestResolve = resolve; });
+  };
+
+  while (running) {
+    const request = await nextRequest();
+    if (!request || request.type === "shutdown") {
+      await emit({ type: "shutdown" });
+      break;
+    }
+    if (request.type === "permission_response") {
+      const rid = request.request_id;
+      if (rid && permissionRequests.has(rid)) {
+        permissionRequests.get(rid)!.resolve(!!request.allowed);
+      }
+      continue;
+    }
+    if (request.type === "question_response") {
+      const rid = request.request_id;
+      if (rid && questionRequests.has(rid)) {
+        questionRequests.get(rid)!.resolve(request.answer ?? "");
+      }
+      continue;
+    }
+    if (request.type === "list_sessions") {
+      await emit({
+        type: "select_request",
+        modal: { kind: "select", title: "Resume Session", submit_prefix: "/resume " },
+        select_options: [],
+      });
+      continue;
+    }
+    if (request.type !== "submit_line") {
+      await emit({ type: "error", message: `Unknown request type: ${request.type}` });
+      continue;
+    }
+    if (busy) {
+      await emit({ type: "error", message: "Session is busy" });
+      continue;
+    }
+    const line = (request.line ?? "").trim();
+    if (!line) continue;
+
+    busy = true;
+    try {
+      await processLineForHost(line, bundle, emit, lastToolInputs);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await emit({ type: "error", message: msg });
+    } finally {
+      busy = false;
     }
   }
+
+  rl.close();
+}
+
+async function processLineForHost(
+  line: string,
+  bundle: any,
+  emit: (event: BackendHostEvent) => Promise<void>,
+  lastToolInputs: Map<string, Record<string, unknown>>,
+): Promise<void> {
+  await emit({
+    type: "transcript_item",
+    item: { role: "user", text: line },
+  });
+
+  let assistantText = "";
+
+  try {
+    for await (const event of bundle.queryEngine.submitMessage(line) as AsyncIterable<StreamEvent>) {
+      if (event.type === "text_delta") {
+        await emit({ type: "assistant_delta", message: event.delta });
+        assistantText += event.delta;
+      } else if (event.type === "tool_use_start") {
+        const tu = event.toolUse;
+        lastToolInputs.set(tu.name, tu.input ?? {});
+        await emit({
+          type: "tool_started",
+          tool_name: tu.name,
+          tool_input: tu.input,
+          item: {
+            role: "tool",
+            text: `${tu.name} ${JSON.stringify(tu.input ?? {})}`,
+            tool_name: tu.name,
+            tool_input: tu.input,
+          },
+        });
+      } else if (event.type === "tool_use_end") {
+        const result = event.result;
+        const outputText = result.content?.map((b: any) => b.text ?? "").join("\n") ?? "";
+        const isError = !!result.isError;
+        await emit({
+          type: "tool_completed",
+          tool_name: (result as any).toolName ?? "unknown",
+          output: outputText,
+          is_error: isError,
+          item: {
+            role: "tool_result",
+            text: outputText,
+            tool_name: (result as any).toolName ?? "unknown",
+            is_error: isError,
+          },
+        });
+        await emit({
+          type: "state_snapshot",
+          state: buildStatePayload(bundle.settings),
+          mcp_servers: [],
+          bridge_sessions: [],
+        });
+
+        const toolName = (result as any).toolName ?? "";
+        if (toolName === "TodoWrite" || toolName === "todo_write") {
+          const toolInput = lastToolInputs.get(toolName) ?? {};
+          const todos = (toolInput as any).todos ?? (toolInput as any).content ?? [];
+          if (Array.isArray(todos) && todos.length > 0) {
+            const lines: string[] = [];
+            for (const item of todos) {
+              if (typeof item === "object" && item !== null) {
+                const checked = (item as any).status
+                  ? ["done", "completed", "x", true].includes((item as any).status)
+                  : false;
+                const text = (item as any).content ?? (item as any).text ?? String(item);
+                lines.push(`- [${checked ? "x" : " "}] ${text}`);
+              }
+            }
+            if (lines.length > 0) {
+              await emit({ type: "todo_update", todo_markdown: lines.join("\n") });
+            }
+          } else {
+            const mdLines = outputText.split("\n").filter((l: string) => l.trim().startsWith("- ["));
+            if (mdLines.length > 0) {
+              await emit({ type: "todo_update", todo_markdown: mdLines.join("\n") });
+            }
+          }
+        }
+      } else if (event.type === "error") {
+        const err = event.error;
+        await emit({
+          type: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await emit({ type: "error", message: msg });
+  }
+
+  const finalText = assistantText.trim();
+  await emit({
+    type: "assistant_complete",
+    message: finalText,
+    item: { role: "assistant", text: finalText },
+  });
+  await emit({
+    type: "state_snapshot",
+    state: buildStatePayload(bundle.settings),
+    mcp_servers: [],
+    bridge_sessions: [],
+  });
+  await emit({ type: "line_complete" });
+}
+
+function buildStatePayload(settings: Settings): Record<string, unknown> {
+  return {
+    model: settings.model,
+    cwd: process.cwd(),
+    provider: "unknown",
+    auth_status: settings.apiKey ? "configured" : "missing",
+    base_url: settings.baseUrl ?? null,
+    permission_mode: settings.permission?.mode ?? "default",
+    theme: settings.theme ?? "default",
+    vim_enabled: settings.vimMode ?? false,
+    voice_enabled: settings.voiceMode ?? false,
+    voice_available: false,
+    fast_mode: settings.fastMode ?? false,
+    effort: settings.effort ?? "medium",
+    passes: settings.passes ?? 1,
+    mcp_connected: 0,
+    mcp_failed: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+  };
 }
 
 function buildCliOverrides(options: MainOptions) {

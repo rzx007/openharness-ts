@@ -89,6 +89,9 @@ importers:
       '@openharness/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@openharness/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@openharness/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -101,6 +104,9 @@ importers:
       '@openharness/services':
         specifier: workspace:*
         version: link:../../packages/services
+      '@openharness/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       '@openharness/themes':
         specifier: workspace:*
         version: link:../../packages/themes

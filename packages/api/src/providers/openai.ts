@@ -118,8 +118,11 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
         lastError = this.classifyError(error);
         const status = (error as any)?.status ?? (error as any)?.statusCode;
         if (attempt < MAX_RETRIES && status && RETRYABLE_CODES.has(status)) {
+          const retryAfter = this.getRetryAfter(error);
           const jitter = Math.random() * 1000;
-          const delay = Math.min(BASE_DELAY * 2 ** attempt + jitter, MAX_DELAY);
+          const delay = retryAfter > 0
+            ? Math.min(retryAfter * 1000, MAX_DELAY)
+            : Math.min(BASE_DELAY * 2 ** attempt + jitter, MAX_DELAY);
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
@@ -158,6 +161,15 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
       type: "complete",
       stopReason: finishReason === "tool_calls" ? "tool_use" : finishReason ?? "end_turn",
     };
+  }
+
+  private getRetryAfter(error: any): number {
+    const header = error?.headers?.get?.("retry-after") ?? error?.headers?.["retry-after"];
+    if (header) {
+      const secs = Number(header);
+      if (!isNaN(secs)) return secs;
+    }
+    return 0;
   }
 
   private classifyError(error: any): Error {

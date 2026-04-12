@@ -7,6 +7,8 @@ import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 
+export type PermissionPromptFn = (toolName: string, reason?: string) => Promise<boolean>;
+
 export interface BootstrapOptions {
   settings: Settings;
   cliOverrides?: {
@@ -22,6 +24,7 @@ export interface BootstrapOptions {
     effort?: string;
     fastMode?: boolean;
   };
+  permissionPrompt?: PermissionPromptFn;
 }
 
 export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundle> {
@@ -87,6 +90,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     maxTurns: overrides.maxTurns ?? settings.maxTurns,
     systemPrompt,
     model: settings.model,
+    permissionPrompt: options.permissionPrompt,
   };
 
   const queryEngine = new QueryEngine(

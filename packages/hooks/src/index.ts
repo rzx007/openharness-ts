@@ -34,10 +34,9 @@ export class HookExecutor implements IHookExecutor {
     const matching = this.getHooksForEvent(event);
 
     for (const hook of matching) {
-      try {
-        await this.executeSingle(hook, context);
-      } catch {
-        return { blocked: false };
+      const result = await this.executeSingle(hook, context);
+      if (result.blocked) {
+        return result;
       }
     }
 
@@ -53,21 +52,14 @@ export class HookExecutor implements IHookExecutor {
 
     for (const hook of matching) {
       const start = performance.now();
-      try {
-        await this.executeSingle(hook, context);
-        results.push({
-          hookId: hook.id,
-          success: true,
-          durationMs: performance.now() - start,
-        });
-      } catch (err) {
-        results.push({
-          hookId: hook.id,
-          success: false,
-          error: err instanceof Error ? err : new Error(String(err)),
-          durationMs: performance.now() - start,
-        });
-      }
+      const hookResult = await this.executeSingle(hook, context);
+      const durationMs = performance.now() - start;
+      results.push({
+        hookId: hook.id,
+        success: !hookResult.blocked,
+        durationMs,
+        error: hookResult.blocked ? new Error(hookResult.reason ?? "blocked") : undefined,
+      });
     }
 
     return results;
@@ -85,8 +77,8 @@ export class HookExecutor implements IHookExecutor {
 
   private async executeSingle(
     hook: HookDefinition,
-    _context: Record<string, unknown>
-  ): Promise<void> {
+    context: Record<string, unknown>
+  ): Promise<HookResult> {
     const timeout = hook.timeout ?? 30_000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
@@ -94,20 +86,20 @@ export class HookExecutor implements IHookExecutor {
     try {
       switch (hook.type) {
         case "command":
-          await this.executeCommand(hook.command, controller.signal);
-          break;
+          return await this.executeCommand(hook.command, controller.signal);
         case "http":
-          await this.executeHttp(
+          return await this.executeHttp(
             hook.url,
             hook.method ?? "POST",
-            _context,
+            context,
             controller.signal
           );
-          break;
         case "prompt":
         case "agent":
-          break;
+          return { blocked: false };
       }
+    } catch {
+      return { blocked: false };
     } finally {
       clearTimeout(timer);
     }
@@ -116,26 +108,37 @@ export class HookExecutor implements IHookExecutor {
   async executeCommand(
     command: string,
     signal: AbortSignal
-  ): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+  ): Promise<HookResult> {
+    return new Promise<HookResult>((resolve, reject) => {
       const proc = spawn(command, [], {
         shell: true,
         signal,
       });
 
+      let stdout = "";
       let stderr = "";
+
+      proc.stdout?.on("data", (data: Buffer) => {
+        stdout += data.toString();
+      });
 
       proc.stderr?.on("data", (data: Buffer) => {
         stderr += data.toString();
       });
 
       proc.on("close", (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`Hook command exited with code ${code}: ${stderr}`));
+        if (code === 2) {
+          const reason = stdout.trim() || stderr.trim() || "blocked by command hook";
+          resolve({ blocked: true, reason });
+        } else if (code === 0) {
+          resolve({ blocked: false });
+        } else {
+          resolve({ blocked: false });
+        }
       });
 
       proc.on("error", (err) => {
-        reject(err);
+        resolve({ blocked: false, reason: err.message });
       });
     });
   }
@@ -145,7 +148,7 @@ export class HookExecutor implements IHookExecutor {
     method: string,
     body: unknown,
     signal: AbortSignal
-  ): Promise<void> {
+  ): Promise<HookResult> {
     const response = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
@@ -154,8 +157,17 @@ export class HookExecutor implements IHookExecutor {
     });
 
     if (!response.ok) {
-      throw new Error(`Hook HTTP request failed: ${response.status} ${response.statusText}`);
+      return { blocked: false, reason: `Hook HTTP request failed: ${response.status}` };
     }
+
+    try {
+      const json = await response.json() as Record<string, unknown>;
+      if (json.blocked === true) {
+        return { blocked: true, reason: (json.reason as string) ?? "blocked by HTTP hook" };
+      }
+    } catch {}
+
+    return { blocked: false };
   }
 }
 

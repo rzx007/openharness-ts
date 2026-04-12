@@ -102,7 +102,7 @@ describe("HookExecutor", () => {
       id: "h1",
       event: "session_start",
       type: "command",
-      command: "exit 1",
+      command: "exit 2",
       enabled: true,
     });
     const results = await executor.executeWithResults("session_start", {});
@@ -134,14 +134,48 @@ describe("HookExecutor", () => {
     const controller = new AbortController();
     await expect(
       executor.executeCommand("echo hello", controller.signal)
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ blocked: false });
   });
 
-  it("executeCommand rejects for failing command", async () => {
+  it("executeCommand returns blocked for exit code 2", async () => {
     const executor = new HookExecutor();
     const controller = new AbortController();
-    await expect(
-      executor.executeCommand("exit 42", controller.signal)
-    ).rejects.toThrow();
+    const result = await executor.executeCommand("exit 2", controller.signal);
+    expect(result.blocked).toBe(true);
+  });
+
+  it("executeCommand returns not blocked for non-zero exit", async () => {
+    const executor = new HookExecutor();
+    const controller = new AbortController();
+    const result = await executor.executeCommand("exit 42", controller.signal);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("execute returns blocked when hook exits with code 2", async () => {
+    const executor = new HookExecutor();
+    executor.register({
+      id: "h1",
+      event: "pre_tool_use",
+      type: "command",
+      command: "echo blocked && exit 2",
+      enabled: true,
+    });
+    const result = await executor.execute("pre_tool_use", { tool: "bash" });
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("blocked");
+  });
+
+  it("execute returns blocked with reason from stdout", async () => {
+    const executor = new HookExecutor();
+    executor.register({
+      id: "h1",
+      event: "pre_tool_use",
+      type: "command",
+      command: "echo 'dangerous operation detected' && exit 2",
+      enabled: true,
+    });
+    const result = await executor.execute("pre_tool_use", { tool: "bash" });
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("dangerous");
   });
 });
