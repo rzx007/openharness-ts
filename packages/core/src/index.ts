@@ -66,11 +66,12 @@ export type {
 } from "./types/usage";
 
 export type {
-  RuntimeBundle,
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
   PermissionPrompt,
 } from "./types/runtime";
+
+export { RuntimeBundle } from "./types/runtime";
 
 export { QueryEngine, MaxTurnsExceeded } from "./engine/query-engine";
 export { ToolRegistry } from "./engine/tool-registry";

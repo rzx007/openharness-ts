@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.tsx",
+    "dev": "tsx dist/index.js",
     "build": "tsup",
     "check-types": "tsc --noEmit",
     "clean": "rm -rf dist"

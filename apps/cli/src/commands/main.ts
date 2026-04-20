@@ -272,6 +272,7 @@ async function runRepl(
     sessionId,
     exitRepl: () => { },
     refreshSystemPrompt,
+    getBundle: () => bundle,
   };
 
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
@@ -519,6 +520,7 @@ async function runBackendHost(
     sessionId: generateSessionId(),
     exitRepl: () => { },
     refreshSystemPrompt: async () => { },
+    getBundle: () => bundle,
   };
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 

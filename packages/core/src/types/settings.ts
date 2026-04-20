@@ -38,6 +38,8 @@ export interface Settings {
   apiFormat: "anthropic" | "openai";
   maxTokens?: number;
   baseUrl?: string;
+  provider?: string;
+  apiKeys?: Record<string, string>;
   maxTurns: number;
   systemPrompt?: string;
   permission: PermissionSettings;

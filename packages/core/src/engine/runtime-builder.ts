@@ -1,4 +1,5 @@
-import type { RuntimeBundle, Settings } from "../index";
+import { RuntimeBundle } from "../types/runtime";
+import type { Settings } from "../index";
 import type {
   StreamingMessageClient,
   ToolRegistry as IToolRegistry,
@@ -46,13 +47,13 @@ export class RuntimeBuilder {
     if (!this.hookExecutor) throw new Error("HookExecutor is required");
     if (!this.queryEngine) throw new Error("QueryEngine is required");
 
-    return {
+    return new RuntimeBundle(
       settings,
-      apiClient: this.apiClient,
-      toolRegistry: this.toolRegistry,
-      permissionChecker: this.permissionChecker,
-      hookExecutor: this.hookExecutor,
-      queryEngine: this.queryEngine,
-    };
+      this.apiClient,
+      this.toolRegistry,
+      this.permissionChecker,
+      this.hookExecutor,
+      this.queryEngine,
+    );
   }
 }

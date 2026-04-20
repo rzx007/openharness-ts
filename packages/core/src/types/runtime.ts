@@ -32,11 +32,17 @@ export interface QueryEngineOptions {
   skillRegistry?: unknown;
 }
 
-export interface RuntimeBundle {
-  settings: Settings;
-  apiClient: StreamingMessageClient;
-  toolRegistry: ToolRegistry;
-  permissionChecker: PermissionChecker;
-  hookExecutor: HookExecutor;
-  queryEngine: QueryEngine;
+export class RuntimeBundle {
+  constructor(
+    public settings: Settings,
+    public apiClient: StreamingMessageClient,
+    public toolRegistry: ToolRegistry,
+    public permissionChecker: PermissionChecker,
+    public hookExecutor: HookExecutor,
+    public queryEngine: QueryEngine,
+  ) {}
+
+  switchApiClient(newClient: StreamingMessageClient): void {
+    this.apiClient = newClient;
+  }
 }

@@ -1,5 +1,5 @@
-import type { Settings, RuntimeBundle, StreamingMessageClient } from "@openharness/core";
-import { QueryEngine, ToolRegistry, RuntimeBuilder } from "@openharness/core";
+import type { Settings, StreamingMessageClient } from "@openharness/core";
+import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
 import { AnthropicClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { PermissionChecker } from "@openharness/permissions";
@@ -75,10 +75,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
 
   const hookExecutor = new HookExecutor();
 
-  if (overrides.systemPrompt) {
-    // use as-is
-  }
-
   const systemPrompt = overrides.systemPrompt ?? await buildRuntimeSystemPrompt({
     customPrompt: settings.systemPrompt,
     cwd: process.cwd(),
@@ -112,13 +108,13 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     .build(settings);
 }
 
-function resolveApiClient(
+export function resolveApiClient(
   settings: Settings,
-  overrides: BootstrapOptions["cliOverrides"],
+  overrides?: BootstrapOptions["cliOverrides"],
 ): StreamingMessageClient {
-  const apiKey = overrides?.apiKey ?? settings.apiKey ?? "";
+  const apiKey = resolveApiKey(settings, overrides);
   const baseURL = overrides?.baseUrl ?? settings.baseUrl;
-  const providerName = overrides?.provider;
+  const providerName = overrides?.provider ?? settings.provider;
 
   let spec: ProviderSpec | undefined;
   if (providerName) {
@@ -147,6 +143,77 @@ function resolveApiClient(
         baseURL,
       });
   }
+}
+
+export function switchApiClientForBundle(
+  bundle: RuntimeBundle,
+  providerName: string,
+  model?: string,
+): string | null {
+  const settings = { ...bundle.settings };
+
+  if (model) {
+    settings.model = model;
+  }
+
+  const apiKey = resolveApiKey(settings);
+  const spec = findByName(providerName);
+  if (!spec) return `Unknown provider: ${providerName}`;
+
+  const baseURL = settings.baseUrl ?? spec.defaultBaseURL;
+  const backendType: BackendType = spec.backendType;
+
+  let newClient: StreamingMessageClient;
+  switch (backendType) {
+    case "openai_compat":
+      newClient = new OpenAICompatibleClient({
+        apiKey,
+        baseURL: baseURL || undefined,
+        model: settings.model,
+      });
+      break;
+    case "anthropic":
+    default:
+      newClient = new AnthropicClient({
+        apiKey,
+        baseURL: baseURL || undefined,
+      });
+      break;
+  }
+
+  bundle.switchApiClient(newClient);
+  bundle.settings.provider = providerName;
+  if (model) {
+    bundle.settings.model = model;
+    bundle.queryEngine.setModel(model);
+  }
+
+  return null;
+}
+
+export function resolveApiKey(
+  settings: Settings,
+  overrides?: BootstrapOptions["cliOverrides"],
+): string {
+  const explicit = overrides?.apiKey ?? settings.apiKey;
+  if (explicit) return explicit;
+
+  const providerName = overrides?.provider ?? settings.provider;
+  if (providerName && settings.apiKeys?.[providerName]) {
+    return settings.apiKeys[providerName]!;
+  }
+
+  const spec = detectProvider(settings.model, undefined, settings.baseUrl);
+  if (spec && settings.apiKeys?.[spec.name]) {
+    return settings.apiKeys[spec.name]!;
+  }
+
+  if (settings.apiKeys) {
+    const keys = Object.values(settings.apiKeys);
+    if (keys.length > 0) return keys[0]!;
+  }
+
+  return "";
 }
 
 function resolveBackendFromFormat(format: string): BackendType {

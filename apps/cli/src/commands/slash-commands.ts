@@ -1,5 +1,5 @@
 import type { CommandRegistry } from "@openharness/commands";
-import type { QueryEngine, Settings, Message } from "@openharness/core";
+import type { QueryEngine, Settings, Message, RuntimeBundle } from "@openharness/core";
 import { saveSettings, getMemoryDir } from "@openharness/core";
 import type { McpClientManager } from "@openharness/mcp";
 import type { HookExecutor } from "@openharness/hooks";
@@ -8,6 +8,8 @@ import type { SkillRegistry } from "@openharness/skills";
 import type { ThemeManager } from "@openharness/themes";
 import type { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
+import { PROVIDERS, detectProvider, findByName } from "@openharness/api";
+import { switchApiClientForBundle, resolveApiKey } from "../runtime.js";
 
 export interface SlashCommandContext {
   getEngine: () => QueryEngine;
@@ -24,6 +26,7 @@ export interface SlashCommandContext {
   sessionId?: string;
   exitRepl: () => void;
   refreshSystemPrompt: () => Promise<void>;
+  getBundle: () => RuntimeBundle;
 }
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
@@ -55,9 +58,7 @@ function parseArgs(raw: string): string[] {
 }
 
 export function registerBuiltinCommands(ctx: SlashCommandContext): void {
-  const { getEngine, getModel, setModel, getSettings, updateSettings, hookExecutor, memoryManager, mcpManager, refreshSystemPrompt } = ctx;
-
-  const registry = ctx as unknown as CommandRegistry;
+  const { getEngine, getModel, setModel, getSettings, updateSettings, hookExecutor, memoryManager, mcpManager, refreshSystemPrompt, getBundle } = ctx;
 
   // We'll return a function that registers on a CommandRegistry
   // Actually let's restructure: the caller passes registry, we use ctx for deps
@@ -67,7 +68,7 @@ export function registerBuiltinCommandsOnRegistry(
   registry: CommandRegistry,
   ctx: SlashCommandContext,
 ): void {
-  const { getEngine, getModel, setModel, getSettings, updateSettings, hookExecutor, memoryManager, mcpManager, refreshSystemPrompt } = ctx;
+  const { getEngine, getModel, setModel, getSettings, updateSettings, hookExecutor, memoryManager, mcpManager, refreshSystemPrompt, getBundle } = ctx;
 
   // ── /help ──────────────────────────────────────────────
   registry.register({
@@ -95,10 +96,67 @@ export function registerBuiltinCommandsOnRegistry(
     handler: async (cmdCtx) => {
       const newModel = cmdCtx.args.model || cmdCtx.args._0;
       if (newModel) {
+        const settings = getSettings();
+        const apiKey = resolveApiKey(settings);
+        const baseURL = settings.baseUrl;
+        const newSpec = detectProvider(newModel, apiKey, baseURL);
+        const currentSpec = detectProvider(getModel(), apiKey, baseURL);
+        const providerChanged = newSpec && currentSpec && newSpec.name !== currentSpec.name;
+
+        if (providerChanged && newSpec) {
+          const err = switchApiClientForBundle(getBundle(), newSpec.name, newModel);
+          if (err) return { success: false, error: err };
+          return { success: true, output: `Model changed to: ${newModel} (provider: ${newSpec.displayName})` };
+        }
+
         setModel(newModel);
         return { success: true, output: `Model changed to: ${newModel}` };
       }
-      return { success: true, output: `Current model: ${getModel()}` };
+      const settings = getSettings();
+      const spec = detectProvider(getModel(), settings.apiKey, settings.baseUrl);
+      const providerInfo = spec ? ` (provider: ${spec.displayName})` : "";
+      return { success: true, output: `Current model: ${getModel()}${providerInfo}` };
+    },
+  });
+
+  // ── /provider ──────────────────────────────────────────
+  registry.register({
+    name: "/provider",
+    description: "Show or switch API provider",
+    args: [{ name: "provider", description: "Provider name or 'auto'", required: false }],
+    handler: async (cmdCtx) => {
+      const providerName = cmdCtx.args.provider || cmdCtx.args._0;
+      const settings = getSettings();
+
+      if (!providerName) {
+        const currentSpec = detectProvider(getModel(), settings.apiKey, settings.baseUrl);
+        const lines = ["Available providers:", ""];
+        const currentName = settings.provider ?? currentSpec?.name ?? "auto";
+        for (const spec of PROVIDERS) {
+          const hasKey = settings.apiKeys?.[spec.name] ? true : !!process.env[spec.envKey];
+          const marker = spec.name === currentName ? " (active)" : "";
+          const keyStatus = spec.envKey ? (hasKey ? "[key]" : "[no key]") : "[local]";
+          lines.push(`  ${spec.name.padEnd(14)} ${spec.displayName.padEnd(14)} ${keyStatus}${marker}`);
+        }
+        lines.push("");
+        lines.push(`Current provider: ${currentName}`);
+        return { success: true, output: lines.join("\n") };
+      }
+
+      if (providerName === "auto") {
+        delete getBundle().settings.provider;
+        const spec = detectProvider(getModel(), resolveApiKey(settings), settings.baseUrl);
+        if (spec) {
+          const err = switchApiClientForBundle(getBundle(), spec.name);
+          if (err) return { success: false, error: err };
+        }
+        return { success: true, output: "Provider set to auto-detect" };
+      }
+
+      const err = switchApiClientForBundle(getBundle(), providerName);
+      if (err) return { success: false, error: err };
+      const spec = findByName(providerName);
+      return { success: true, output: `Provider switched to: ${spec?.displayName ?? providerName}` };
     },
   });
 

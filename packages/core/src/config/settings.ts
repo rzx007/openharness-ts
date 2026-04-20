@@ -48,6 +48,34 @@ function loadFromEnv(): Partial<Settings> {
   }
   if (process.env.OPENHARNESS_MAX_TOKENS !== undefined) result.maxTokens = parseInt(process.env.OPENHARNESS_MAX_TOKENS, 10);
   if (process.env.OPENHARNESS_MAX_TURNS !== undefined) result.maxTurns = parseInt(process.env.OPENHARNESS_MAX_TURNS, 10);
+
+  const apiKeys: Record<string, string> = {};
+  const envKeyMap: Record<string, string> = {
+    anthropic: "ANTHROPIC_API_KEY",
+    openai: "OPENAI_API_KEY",
+    deepseek: "DEEPSEEK_API_KEY",
+    gemini: "GEMINI_API_KEY",
+    dashscope: "DASHSCOPE_API_KEY",
+    moonshot: "MOONSHOT_API_KEY",
+    minimax: "MINIMAX_API_KEY",
+    zhipu: "ZHIPUAI_API_KEY",
+    groq: "GROQ_API_KEY",
+    mistral: "MISTRAL_API_KEY",
+    stepfun: "STEPFUN_API_KEY",
+    baidu: "QIANFAN_ACCESS_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+    bedrock: "AWS_ACCESS_KEY_ID",
+    vertex: "GOOGLE_APPLICATION_CREDENTIALS",
+    aihubmix: "OPENAI_API_KEY",
+    siliconflow: "OPENAI_API_KEY",
+    volcengine: "OPENAI_API_KEY",
+  };
+  for (const [provider, envKey] of Object.entries(envKeyMap)) {
+    const val = process.env[envKey];
+    if (val) apiKeys[provider] = val;
+  }
+  if (Object.keys(apiKeys).length > 0) result.apiKeys = apiKeys;
+
   return result;
 }
 
