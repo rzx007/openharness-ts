@@ -10,7 +10,7 @@ import type { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { PROVIDERS, detectProvider, findByName } from "@openharness/api";
 import type { CredentialStorage } from "@openharness/auth";
-import { switchApiClientForBundle, resolveApiKey } from "../runtime.js";
+import { switchApiClientForBundle, resolveApiKey } from "../runtime";
 
 export interface SlashCommandContext {
   getEngine: () => QueryEngine;

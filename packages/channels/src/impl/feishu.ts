@@ -1,4 +1,4 @@
-import type { ChannelAdapter, ChannelMessage } from "../index.js";
+import type { ChannelAdapter, ChannelMessage } from "../index";
 
 export interface FeishuConfig {
   appId: string;
@@ -86,9 +86,9 @@ export class FeishuAdapter implements ChannelAdapter {
         const isAtBot =
           this.replyAtBotNames.length > 0
             ? mentions.some((m) =>
-                m.name &&
-                this.replyAtBotNames.includes(m.name.toLowerCase()),
-              )
+              m.name &&
+              this.replyAtBotNames.includes(m.name.toLowerCase()),
+            )
             : true;
 
         if (!isAtBot && isGroupChat) return;

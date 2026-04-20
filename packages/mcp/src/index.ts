@@ -110,7 +110,7 @@ export class McpClientManager {
     if (client) {
       try {
         await client.close();
-      } catch {}
+      } catch { }
     }
     this.clients.delete(name);
     this.transports.delete(name);

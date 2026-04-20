@@ -1,4 +1,4 @@
-import type { ChannelAdapter, ChannelMessage } from "../index.js";
+import type { ChannelAdapter, ChannelMessage } from "../index";
 
 export class HttpAdapter implements ChannelAdapter {
   name = "http";
@@ -9,9 +9,9 @@ export class HttpAdapter implements ChannelAdapter {
     this.url = url;
   }
 
-  async connect(): Promise<void> {}
+  async connect(): Promise<void> { }
 
-  async disconnect(): Promise<void> {}
+  async disconnect(): Promise<void> { }
 
   async send(message: ChannelMessage): Promise<void> {
     if (!this.url) return;

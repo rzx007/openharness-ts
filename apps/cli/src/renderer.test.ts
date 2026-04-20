@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { EventRenderer } from "./renderer.js";
+import { EventRenderer } from "./renderer";
 
 describe("EventRenderer", () => {
   let writeSpy: any;

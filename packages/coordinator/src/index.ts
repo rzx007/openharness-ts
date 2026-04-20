@@ -250,4 +250,4 @@ export {
   getAgentDefinition,
   getAllAgentDefinitions,
   hasRequiredMcpServers,
-} from "./agent-definitions.js";
+} from "./agent-definitions";

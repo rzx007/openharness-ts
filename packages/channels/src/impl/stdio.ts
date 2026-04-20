@@ -1,12 +1,12 @@
-import type { ChannelAdapter, ChannelMessage } from "../index.js";
+import type { ChannelAdapter, ChannelMessage } from "../index";
 
 export class StdioAdapter implements ChannelAdapter {
   name = "stdio";
   private handler?: (message: ChannelMessage) => void;
 
-  async connect(): Promise<void> {}
+  async connect(): Promise<void> { }
 
-  async disconnect(): Promise<void> {}
+  async disconnect(): Promise<void> { }
 
   async send(message: ChannelMessage): Promise<void> {
     process.stdout.write(`${message.content}\n`);

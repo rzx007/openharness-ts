@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "@openharness/api";
-import { formatApiError } from "./format-error.js";
+import { formatApiError } from "./format-error";
 import type { Settings } from "@openharness/core";
 
 const SETTINGS: Settings = {

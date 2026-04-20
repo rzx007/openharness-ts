@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveApiKey } from "./runtime.js";
+import { resolveApiKey } from "./runtime";
 import { CredentialStorage } from "@openharness/auth";
 import type { Settings } from "@openharness/core";
 

@@ -1,9 +1,9 @@
 import { Command } from "commander";
-import { mainAction } from "./commands/main.js";
-import { createAuthCommand } from "./commands/auth.js";
-import { createMcpCommand } from "./commands/mcp.js";
-import { createPluginCommand } from "./commands/plugin.js";
-import { createCronCommand } from "./commands/cron.js";
+import { mainAction } from "./commands/main";
+import { createAuthCommand } from "./commands/auth";
+import { createMcpCommand } from "./commands/mcp";
+import { createPluginCommand } from "./commands/plugin";
+import { createCronCommand } from "./commands/cron";
 
 const program = new Command();
 

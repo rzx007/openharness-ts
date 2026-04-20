@@ -11,7 +11,7 @@ export const toolSearchTool: ToolDefinition = {
     required: ["query"],
   },
   async execute(input) {
-    const { createDefaultToolRegistry } = await import("../registry.js");
+    const { createDefaultToolRegistry } = await import("../registry");
     const query = (input.query as string).toLowerCase();
     const registry = createDefaultToolRegistry();
     const allTools = registry.getAll();

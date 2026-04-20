@@ -16,6 +16,7 @@ import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
 import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 
 type BackendHostEvent = {
   type: string;
@@ -436,7 +437,12 @@ async function runTuiMode(
   });
 
   const cliDir = path.dirname(url.fileURLToPath(import.meta.url));
-  const frontendDistPath = path.resolve(cliDir, "../../frontend/dist/index.js");
+  let root = cliDir;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(path.join(root, "apps"))) break;
+    root = path.dirname(root);
+  }
+  const frontendDistPath = path.join(root, "apps", "frontend", "dist", "index.js");
 
   const child = spawn(process.execPath, [frontendDistPath], {
     stdio: "inherit",

@@ -7,7 +7,7 @@ import type {
   ToolDefinition,
 } from "@openharness/core";
 import type { ProviderConfig } from "./registry";
-import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index.js";
+import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY = 1000;

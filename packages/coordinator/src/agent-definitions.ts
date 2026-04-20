@@ -1,4 +1,4 @@
-import type { AgentDefinition } from "./index.js";
+import type { AgentDefinition } from "./index";
 
 const SHARED_AGENT_PREFIX =
   "You are an agent for Claude Code, Anthropic's official CLI for Claude. " +
