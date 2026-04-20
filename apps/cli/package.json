@@ -7,10 +7,10 @@
     "openharness": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "bun run build.ts",
+    "dev": "bun --watch src/index.ts",
     "check-types": "tsc --noEmit",
-    "clean": "rm -rf dist",
+    "clean": "rimraf dist",
     "test": "vitest run"
   },
   "dependencies": {

@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx dist/index.js",
-    "build": "tsup",
+    "dev": "bun --watch src/index.tsx",
+    "build": "bun run build.ts",
     "check-types": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rimraf dist"
   },
   "dependencies": {
     "@openharness/core": "workspace:*",
@@ -19,8 +19,6 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/react": "catalog:",
-    "tsup": "catalog:",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
 }
