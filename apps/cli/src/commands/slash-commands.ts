@@ -91,6 +91,8 @@ export function registerBuiltinCommandsOnRegistry(
   });
 
   // ── /model ─────────────────────────────────────────────
+  // 切换模型跨 Provider 时自动重建 API Client
+  // 切换后调 updateSettings() 持久化 model 和 provider
   registry.register({
     name: "/model",
     description: "Show or change the current model",
@@ -125,6 +127,7 @@ export function registerBuiltinCommandsOnRegistry(
   });
 
   // ── /provider ──────────────────────────────────────────
+  // 切换后持久化 provider 到 settings.json
   registry.register({
     name: "/provider",
     description: "Show or switch API provider",
@@ -171,6 +174,9 @@ export function registerBuiltinCommandsOnRegistry(
   });
 
   // ── /auth ──────────────────────────────────────────────
+  // /auth status — 显示所有已配置凭据
+  // /auth login <provider> <api-key> — 存储到 credentials.json
+  // /auth logout <provider> — 清除
   registry.register({
     name: "/auth",
     description: "Manage API credentials",

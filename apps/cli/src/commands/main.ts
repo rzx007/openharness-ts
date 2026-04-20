@@ -13,6 +13,7 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
 import { EventRenderer } from "../renderer";
+import { formatApiError } from "../format-error";
 import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
 import { join } from "node:path";
 
@@ -182,8 +183,15 @@ async function runPrintMode(
     printMode: true,
   });
 
-  for await (const event of bundle.queryEngine.submitMessage(prompt)) {
-    await renderer.render(event);
+  try {
+    for await (const event of bundle.queryEngine.submitMessage(prompt)) {
+      await renderer.render(event);
+    }
+  } catch (err) {
+    if (err instanceof Error) {
+      process.stderr.write(`${formatApiError(err, settings)}\n`);
+    }
+    process.exit(1);
   }
 }
 
@@ -363,7 +371,7 @@ async function runRepl(
       }
     } catch (err) {
       if (err instanceof Error) {
-        process.stderr.write(`Error: ${err.message}\n`);
+        process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
       }
     }
 
@@ -648,9 +656,9 @@ async function runBackendHost(
 
     busy = true;
     try {
-      await processLineForHost(line, bundle, emit, lastToolInputs);
+      await processLineForHost(line, bundle, emit, lastToolInputs, settings);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
       await emit({ type: "error", message: msg });
     } finally {
       busy = false;
@@ -678,6 +686,7 @@ async function processLineForHost(
   bundle: any,
   emit: (event: BackendHostEvent) => Promise<void>,
   lastToolInputs: Map<string, Record<string, unknown>>,
+  settings: Settings,
 ): Promise<void> {
   await emit({
     type: "transcript_item",
@@ -762,7 +771,7 @@ async function processLineForHost(
       }
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
     await emit({ type: "error", message: msg });
   }
 

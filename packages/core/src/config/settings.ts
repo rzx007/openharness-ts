@@ -4,8 +4,9 @@ import { homedir } from "node:os";
 import type { Settings } from "../index";
 
 const DEFAULT_SETTINGS: Settings = {
-  model: "claude-sonnet-4-20250514",
-  apiFormat: "anthropic",
+  model: "minimax/minimax-m2.5:free",
+  apiFormat: "openai",
+  provider: "openrouter",
   maxTokens: 16384,
   maxTurns: 50,
   permission: { mode: "default" },
