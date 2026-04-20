@@ -25,6 +25,7 @@ export interface BootstrapOptions {
     fastMode?: boolean;
   };
   permissionPrompt?: PermissionPromptFn;
+  skillRegistry?: unknown;
 }
 
 export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundle> {
@@ -91,6 +92,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     systemPrompt,
     model: settings.model,
     permissionPrompt: options.permissionPrompt,
+    skillRegistry: options.skillRegistry,
   };
 
   const queryEngine = new QueryEngine(

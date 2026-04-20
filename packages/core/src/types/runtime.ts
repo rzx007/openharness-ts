@@ -29,6 +29,7 @@ export interface QueryEngineOptions {
   maxTokens?: number;
   compactKeepRecent?: number;
   permissionPrompt?: PermissionPrompt;
+  skillRegistry?: unknown;
 }
 
 export interface RuntimeBundle {

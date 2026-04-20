@@ -28,6 +28,7 @@ export class QueryEngine implements IQueryEngine {
   private model: string;
   private maxTurns: number;
   private permissionPrompt?: PermissionPrompt;
+  private skillRegistry?: unknown;
 
   constructor(
     private apiClient: StreamingMessageClient,
@@ -45,6 +46,7 @@ export class QueryEngine implements IQueryEngine {
     this.model = options.model ?? "claude-sonnet-4-20250514";
     this.maxTurns = options.maxTurns ?? 50;
     this.permissionPrompt = options.permissionPrompt;
+    this.skillRegistry = options.skillRegistry;
   }
 
   async *submitMessage(content: string): AsyncIterable<StreamEvent> {
@@ -218,7 +220,7 @@ export class QueryEngine implements IQueryEngine {
       executable.map(async ({ idx, toolUse }) => {
         const tool = this.toolRegistry.get(toolUse.name)!;
         try {
-          const context: ToolContext = { cwd: process.cwd() };
+          const context: ToolContext = { cwd: process.cwd(), skillRegistry: this.skillRegistry };
           const result = await tool.execute(toolUse.input, context);
           return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };
         } catch (error) {

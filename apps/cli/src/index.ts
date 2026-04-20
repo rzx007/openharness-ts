@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { Command } from "commander";
 import { mainAction } from "./commands/main.js";
 import { createAuthCommand } from "./commands/auth.js";

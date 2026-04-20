@@ -13,8 +13,8 @@ export function createPluginCommand(): Command {
         console.log("No plugins installed.");
         return;
       }
-      for (const p of plugins) {
-        console.log(`  ${p.name} v${p.version ?? "?"}${p.enabled ? "" : " (disabled)"}`);
+      for (const name of plugins) {
+        console.log(`  ${name}`);
       }
     });
 

@@ -3,6 +3,7 @@ import type { ContentBlock } from "./messages";
 export interface ToolContext {
   cwd: string;
   abortSignal?: AbortSignal;
+  skillRegistry?: unknown;
 }
 
 export interface ToolResult {

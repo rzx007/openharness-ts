@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.tsx",
-    "build": "echo Frontend uses tsx at runtime, no build needed",
+    "build": "tsup",
     "check-types": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -19,6 +19,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/react": "catalog:",
+    "tsup": "catalog:",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

@@ -121,3 +121,23 @@ export class PluginInstaller {
     }
   }
 }
+
+async function getInstaller(): Promise<PluginInstaller> {
+  const { getPluginsDir } = await import("@openharness/core");
+  return new PluginInstaller(getPluginsDir());
+}
+
+export async function listInstalled(): Promise<string[]> {
+  const installer = await getInstaller();
+  return installer.listInstalled();
+}
+
+export async function installPlugin(source: string): Promise<string> {
+  const installer = await getInstaller();
+  return installer.install(source);
+}
+
+export async function uninstallPlugin(name: string): Promise<boolean> {
+  const installer = await getInstaller();
+  return installer.uninstall(name);
+}

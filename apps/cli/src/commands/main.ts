@@ -1,18 +1,19 @@
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import type { Settings, StreamEvent } from "@openharness/core";
-import { loadSettings, saveSettings as saveSettingsCore } from "@openharness/core";
+import { loadSettings, saveSettings as saveSettingsCore, getSkillsDir } from "@openharness/core";
 import { CommandRegistry } from "@openharness/commands";
 import { HookExecutor } from "@openharness/hooks";
 import { McpClientManager } from "@openharness/mcp";
 import { MemoryManager } from "@openharness/memory";
-import { SkillRegistry } from "@openharness/skills";
+import { SkillRegistry, SkillLoader } from "@openharness/skills";
 import { ThemeManager } from "@openharness/themes";
 import { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { bootstrap } from "../runtime.js";
 import { EventRenderer } from "../renderer.js";
 import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands.js";
+import { join } from "node:path";
 
 type BackendHostEvent = {
   type: string;
@@ -88,6 +89,19 @@ interface SessionSnapshot {
   usage: { inputTokens: number; outputTokens: number };
 }
 
+/**
+ * 应用程序的主入口点，根据提供的选项和提示决定执行模式。
+ * 
+ * 该函数首先处理设置覆盖，然后根据标志位依次尝试以下模式：
+ * 1. 后端主机模式 (backendOnly)
+ * 2. TUI 交互模式 (tui)
+ * 3. 打印/非交互模式 (print 或存在 prompt)
+ * 4. REPL 交互模式 (默认)
+ * 
+ * @param prompt - 用户输入的初始提示词，如果未提供则进入交互模式
+ * @param options - 命令行选项配置对象，包含模型、权限、路径等设置
+ * @returns Promise<void>
+ */
 export async function mainAction(
   prompt: string | undefined,
   options: MainOptions,
@@ -131,14 +145,32 @@ export async function mainAction(
   await runRepl(settings, options);
 }
 
+/**
+ * 执行打印模式，处理单个提示并输出结果后退出。
+ * 
+ * 此模式适用于脚本化调用或非交互式环境。它会加载技能，初始化运行时环境，
+ * 并将所有事件通过 EventRenderer 渲染到标准输出。
+ * 
+ * @param settings -当前加载的应用设置
+ * @param prompt - 要处理的用户提示词
+ * @param options - 命令行选项，用于控制渲染行为（如 verbose）
+ * @returns Promise<void>
+ */
 async function runPrintMode(
   settings: Settings,
   prompt: string,
   options: MainOptions,
 ): Promise<void> {
+  const { join } = await import("node:path");
+  const skillRegistry = new SkillRegistry();
+  const skillLoader = new SkillLoader(skillRegistry);
+  await skillLoader.loadFromDirectory(getSkillsDir());
+  await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
+
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
+    skillRegistry,
   });
 
   const renderer = new EventRenderer({
@@ -151,13 +183,30 @@ async function runPrintMode(
   }
 }
 
+/**
+ * 启动 REPL (Read-Eval-Print Loop) 交互模式。
+ * 
+ * 此模式提供完整的交互式体验，包括会话管理、记忆加载、MCP 连接、
+ * 命令注册以及基于 readline 的用户输入处理。支持会话恢复和持久化。
+ * 
+ * @param settings - 当前加载的应用设置
+ * @param options - 命令行选项，影响会话ID生成和行为配置
+ * @returns Promise<void>
+ */
 async function runRepl(
   settings: Settings,
   options: MainOptions,
 ): Promise<void> {
+  const { join } = await import("node:path");
+  const skillRegistry = new SkillRegistry();
+  const skillLoader = new SkillLoader(skillRegistry);
+  await skillLoader.loadFromDirectory(getSkillsDir());
+  await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
+
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
+    skillRegistry,
   });
 
   let currentModel = settings.model;
@@ -177,20 +226,18 @@ async function runRepl(
     }
   }
 
-  const { join } = await import("node:path");
   const { homedir } = await import("node:os");
   const memoryDir = join(homedir(), ".openharness", "data", "memory");
 
   const mcpManager = new McpClientManager();
   if (currentSettings.mcpServers) {
-    await mcpManager.connectAll(currentSettings.mcpServers).catch(() => {});
+    await mcpManager.connectAll(currentSettings.mcpServers).catch(() => { });
   }
 
   const memoryManager = new MemoryManager(1000, memoryDir);
   const memoryFile = join(memoryDir, "memory.json");
-  await memoryManager.loadFromFile(memoryFile).catch(() => {});
+  await memoryManager.loadFromFile(memoryFile).catch(() => { });
 
-  const skillRegistry = new SkillRegistry();
   const themeManager = new ThemeManager();
   const taskManager = new TaskManager();
 
@@ -223,7 +270,7 @@ async function runRepl(
     themeManager,
     taskManager,
     sessionId,
-    exitRepl: () => {},
+    exitRepl: () => { },
     refreshSystemPrompt,
   };
 
@@ -307,12 +354,25 @@ async function runRepl(
   rl.prompt();
 }
 
+/**
+ * 启动 TUI (Terminal User Interface)模式。
+ * 
+ * 此模式通过 spawn 子进程启动前端界面，并将当前进程作为后端服务运行。
+ * 它构建必要的命令行参数和环境变量配置，以便前端能够正确连接和控制后端。
+ * 
+ * @param settings - 当前加载的应用设置
+ * @param options - 命令行选项，用于构建后端启动参数
+ * @param prompt - 可选的初始提示词，传递给前端
+ * @returns Promise<void>
+ */
 async function runTuiMode(
   settings: Settings,
   options: MainOptions,
   prompt?: string,
 ): Promise<void> {
   const { spawn } = await import("node:child_process");
+  const path = await import("node:path");
+  const url = await import("node:url");
   const cliPath = process.argv[1];
 
   const args = [cliPath, "--backend-only"];
@@ -338,11 +398,10 @@ async function runTuiMode(
     theme: options.theme ?? "default",
   });
 
-  const frontendPath = (await import("node:path")).resolve(
-    (await import("node:url")).fileURLToPath(new URL("../../frontend/src/index.tsx", import.meta.url)),
-  );
+  const cliDir = path.dirname(url.fileURLToPath(import.meta.url));
+  const frontendDistPath = path.resolve(cliDir, "../../frontend/dist/index.js");
 
-  const child = spawn(process.execPath, ["--import", "tsx", frontendPath], {
+  const child = spawn(process.execPath, [frontendDistPath], {
     stdio: "inherit",
     env: {
       ...process.env,
@@ -355,6 +414,17 @@ async function runTuiMode(
   });
 }
 
+/**
+ * 运行后端主机模式，负责处理来自前端的 JSON-RPC 风格请求。
+ * 
+ * 此模式通过 stdin/stdout 与前端通信，使用特定的协议格式 OHJSON。
+ * 它管理权限请求、问题询问、会话状态同步以及核心查询引擎的执行。
+ * 包含并发控制机制以确保输出顺序正确。
+ * 
+ * @param settings - 当前加载的应用设置
+ * @param options - 命令行选项，用于初始化运行时环境
+ * @returns Promise<void>
+ */
 async function runBackendHost(
   settings: Settings,
   options: MainOptions,
@@ -416,16 +486,21 @@ async function runBackendHost(
     }
   };
 
+  const skillRegistry = new SkillRegistry();
+  const skillLoader = new SkillLoader(skillRegistry);
+  await skillLoader.loadFromDirectory(getSkillsDir());
+  await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
+
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
     permissionPrompt: askPermission,
+    skillRegistry,
   });
 
   const commandRegistry = new CommandRegistry();
   const mcpManager = new McpClientManager();
   const memoryManager = new MemoryManager(1000, "");
-  const skillRegistry = new SkillRegistry();
   const themeManager = new ThemeManager();
   const taskManager = new TaskManager();
 
@@ -434,7 +509,7 @@ async function runBackendHost(
     getModel: () => settings.model,
     setModel: (m: string) => { bundle.queryEngine.setModel(m); },
     getSettings: () => settings,
-    updateSettings: async () => {},
+    updateSettings: async () => { },
     hookExecutor: bundle.hookExecutor as HookExecutor,
     memoryManager,
     mcpManager,
@@ -442,8 +517,8 @@ async function runBackendHost(
     themeManager,
     taskManager,
     sessionId: generateSessionId(),
-    exitRepl: () => {},
-    refreshSystemPrompt: async () => {},
+    exitRepl: () => { },
+    refreshSystemPrompt: async () => { },
   };
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 
@@ -551,6 +626,19 @@ async function runBackendHost(
   rl.close();
 }
 
+/**
+ * 处理后端主机模式下接收到的单行用户输入。
+ * 
+ * 该函数将用户消息提交给查询引擎，监听流式事件，并将相应的事件类型
+ * （如文本增量、工具使用、错误等转换为后端协议事件并通过 emit 发送。
+ * 它还特别处理 TodoWrite 工具的结果以更新待办事项列表显示。
+ * 
+ * @param line - 用户输入的原始文本行
+ * @param bundle - 包含查询引擎和其他核心服务的运行时Bundle对象
+ * @param emit - 用于向后端发送事件的回调函数
+ * @param lastToolInputs - 存储最近一次工具调用输入的Map，用于后续处理
+ * @returns Promise<void>
+ */
 async function processLineForHost(
   line: string,
   bundle: any,
@@ -659,6 +747,12 @@ async function processLineForHost(
   await emit({ type: "line_complete" });
 }
 
+/**
+ * 构建当前应用状态的有效载荷对象，用于前端显示或状态同步。
+ * 
+ * @param settings - 当前应用设置
+ * @returns Record<string, unknown> 包含模型、CWD、认证状态、主题等信息的状态对象
+ */
 function buildStatePayload(settings: Settings): Record<string, unknown> {
   return {
     model: settings.model,
@@ -681,6 +775,12 @@ function buildStatePayload(settings: Settings): Record<string, unknown> {
   };
 }
 
+/**
+ * 根据命令行选项构建 CLI 覆盖配置对象。
+ * 
+ * @param options - 命令行选项
+ * @returns 包含 API 密钥、基础 URL、提供商、系统提示等覆盖值的对象
+ */
 function buildCliOverrides(options: MainOptions) {
   return {
     apiKey: options.apiKey,
@@ -697,6 +797,14 @@ function buildCliOverrides(options: MainOptions) {
   };
 }
 
+/**
+ * 解析命令参数字符串为键值对对象。
+ * 
+ * 支持 key=value 格式，以及位置参数（第一个参数视为 model，其余视为 _index）。
+ * 
+ * @param argsStr - 原始参数字符串
+ * @returns Record<string, string> 解析后的参数映射
+ */
 function parseCommandArgs(argsStr: string): Record<string, string> {
   const args: Record<string, string> = {};
   if (!argsStr) return args;
@@ -716,12 +824,30 @@ function parseCommandArgs(argsStr: string): Record<string, string> {
   return args;
 }
 
+/**
+ * 生成唯一的会话 ID。
+ * 
+ * 基于时间戳和随机数生成简短的唯一标识符。
+ * 
+ * @returns string 生成的会话 ID
+ */
 function generateSessionId(): string {
   const timestamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 6);
   return `${timestamp}-${rand}`;
 }
 
+/**
+ * 加载并恢复之前的会话状态。
+ * 
+ * 如果提供了 resumeId，则尝试加载该会话；否则查找最新的会话。
+ * 如果找到有效的会话快照，则将消息加载到引擎中并设置模型。
+ * 
+ * @param engine - 查询引擎实例
+ * @param resumeId - 可选的指定恢复会话 ID
+ * @param _name - 可选的会话名称（当前未使用）
+ * @returns Promise<string> 恢复后的会话 ID
+ */
 async function loadSessionAndResume(
   engine: any,
   resumeId?: string,
@@ -743,6 +869,13 @@ async function loadSessionAndResume(
   return generateSessionId();
 }
 
+/**
+ * 查找最新的会话 ID。
+ * 
+ * 读取会话目录下的 JSON 文件，按文件名排序后返回最新的一个。
+ * 
+ * @returns Promise<string | undefined> 最新会话 ID，如果没有则返回 undefined
+ */
 async function findLatestSessionId(): Promise<string | undefined> {
   const { readdir } = await import("node:fs/promises");
   const { join } = await import("node:path");
@@ -758,6 +891,12 @@ async function findLatestSessionId(): Promise<string | undefined> {
   }
 }
 
+/**
+ * 从磁盘加载会话快照数据。
+ * 
+ * @param id - 会话 ID
+ * @returns Promise<SessionSnapshot | undefined> 会话快照对象，如果加载失败则返回 undefined
+ */
 async function loadSessionSnapshot(id: string): Promise<SessionSnapshot | undefined> {
   const { readFile } = await import("node:fs/promises");
   const { join } = await import("node:path");
@@ -771,6 +910,17 @@ async function loadSessionSnapshot(id: string): Promise<SessionSnapshot | undefi
   }
 }
 
+/**
+ * 保存当前会话快照到磁盘。
+ * 
+ * 包含会话 ID、消息历史、模型信息和 Token 使用情况。
+ * 如果保存失败，错误将被静默忽略。
+ * 
+ * @param sessionId - 会话 ID
+ * @param engine - 查询引擎实例，用于获取消息和使用情况
+ * @param model - 当前使用的模型名称
+ * @returns Promise<void>
+ */
 async function saveSessionSnapshot(
   sessionId: string | undefined,
   engine: any,

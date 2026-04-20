@@ -61,6 +61,29 @@ oh --tui
 oh --tui "explain this project"
 ```
 
+### 开发阶段运行
+
+```bash
+# 方式一：pnpm link --global（推荐，需先 build）
+pnpm build
+cd apps/cli
+pnpm link --global
+openharness "hello"        # 任意目录可用
+openharness --tui
+# 取消链接：pnpm unlink --global
+
+# 方式二：tsx 直跑源码（改代码立刻生效，无需 build）
+pnpm --filter @openharness/cli exec tsx src/index.ts -- "hello"
+pnpm --filter @openharness/cli exec tsx src/index.ts -- --tui
+
+# 方式三：tsup watch（自动重编译）
+pnpm --filter @openharness/cli dev
+# 然后另开终端运行
+node apps/cli/dist/index.js "hello"
+```
+
+开发阶段建议用 **方式二**（tsx 直跑，改了代码立刻生效），稳定后用方式一。
+
 ### CLI 常用参数
 
 ```bash
@@ -307,7 +330,7 @@ OpenHarness-ts/
 | 模块 | 说明 |
 |------|------|
 | `CLI` | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/config 子命令，20+ CLI flags |
-| `REPL` | 交互式循环：`> ` 提示符，32 个斜杠命令（`/help, /model, /clear, /compact, /permissions, /plan, /resume` 等） |
+| `REPL` | 交互式循环：`>` 提示符，32 个斜杠命令（`/help, /model, /clear, /compact, /permissions, /plan, /resume` 等） |
 | `TUI Frontend` | React/Ink 终端 UI：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。通过 `--tui` 启动，前端 spawn 后端 `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲 |
 | `BackendHost` | 后端协议实现：处理 5 种请求（submit_line / permission_response / question_response / list_sessions / shutdown），发出 17 种结构化事件（assistant_delta / tool_started / tool_completed / modal_request / todo_update / plan_mode_change 等） |
 | `ThemeManager` | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题 |
@@ -481,7 +504,7 @@ oh --continue          oh --resume <id>
 
 ## 配置
 
-配置文件路径：`~/.openharness/settings.json`
+配置文件路径：`~/.openharness/settings.json`（首次运行无需手动创建，使用默认值即可）
 
 ```json
 {
@@ -510,15 +533,56 @@ oh --continue          oh --resume <id>
 }
 ```
 
+### 设置 API Key
+
+**Linux / macOS：**
+
+```bash
+# 当前会话
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# 持久化（写入 shell 配置文件）
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**Windows PowerShell：**
+
+```powershell
+# 当前会话
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+
+# 持久化（写入用户环境变量）
+[Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-...", "User")
+
+# 持久化后重启终端生效，或立即生效：
+$env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KEY", "User")
+```
+
+**Windows CMD：**
+
+```cmd
+:: 当前会话
+set ANTHROPIC_API_KEY=sk-ant-...
+
+:: 持久化（系统环境变量）
+setx ANTHROPIC_API_KEY "sk-ant-..."
+```
+
+也可以通过 `settings.json` 或 `--api-key` 参数传入，优先级：CLI 参数 > 环境变量 > 配置文件 > 默认值。
+
 ### 环境变量
 
 | 变量 | 说明 |
 |------|------|
 | `ANTHROPIC_API_KEY` | Anthropic API Key |
 | `OPENAI_API_KEY` | OpenAI API Key |
-| `OPENHARNESS_CONFIG_DIR` | 自定义配置目录（默认 `~/.openharness`） |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key |
 | `ZHIPU_API_KEY` | 智谱 AI（GLM）API Key |
+| `OPENHARNESS_CONFIG_DIR` | 自定义配置目录（默认 `~/.openharness`） |
+| `OPENHARNESS_MODEL` | 默认模型名称 |
+| `OPENHARNESS_BASE_URL` | API Base URL 覆盖 |
+| `OPENHARNESS_API_FORMAT` | API 格式（anthropic / openai） |
 
 ---
 

@@ -11,6 +11,7 @@ build
 *.swp
 *.swo
 .DS_Store
+.history
 
 logs
 *.log

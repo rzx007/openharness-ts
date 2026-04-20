@@ -2,8 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { EventRenderer } from "./renderer.js";
 
 describe("EventRenderer", () => {
-  let writeSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let writeSpy: any;
+  let errorSpy: any;
 
   afterEach(() => {
     writeSpy?.mockRestore();

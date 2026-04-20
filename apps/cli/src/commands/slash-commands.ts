@@ -989,7 +989,7 @@ export function registerBuiltinCommandsOnRegistry(
       if (sub === "list") {
         if (ctx.themeManager) {
           const themes = ctx.themeManager.list();
-          const active = ctx.themeManager.getActiveName();
+          const active = ctx.themeManager.getActive().name;
           const lines = themes.map((t) => `  ${t.name === active ? "* " : "  "}${t.name}: ${t.displayName}`);
           return { success: true, output: `Themes:\n${lines.join("\n")}` };
         }

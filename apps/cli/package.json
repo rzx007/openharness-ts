@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "oh": "./dist/index.js",
+    "ohs": "./dist/index.js",
     "openharness": "./dist/index.js"
   },
   "scripts": {
