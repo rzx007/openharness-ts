@@ -1,3 +1,6 @@
+export { CredentialStorage } from "./credential-storage";
+export type { CredentialData } from "./credential-storage";
+
 export interface AuthCredentials {
   provider: string;
   accessToken: string;

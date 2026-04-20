@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiKeyFlow, DeviceCodeFlow, AuthManager } from "./index.js";
+import { CredentialStorage } from "./credential-storage.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("ApiKeyFlow", () => {
   it("returns credentials with the provided key", async () => {
@@ -105,5 +109,71 @@ describe("AuthManager", () => {
     mgr.registerProvider(new ApiKeyFlow("second"));
     const creds = await mgr.authenticate("api-key");
     expect(creds.accessToken).toBe("second");
+  });
+});
+
+describe("CredentialStorage", () => {
+  let tempDir: string;
+  let storage: CredentialStorage;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "oh-test-creds-"));
+    storage = new CredentialStorage(join(tempDir, "credentials.json"));
+  });
+
+  afterEach(() => {
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  it("stores and loads a credential", async () => {
+    await storage.storeApiKey("anthropic", "sk-ant-test123");
+    const key = await storage.loadApiKey("anthropic");
+    expect(key).toBe("sk-ant-test123");
+  });
+
+  it("returns undefined for missing provider", async () => {
+    const key = await storage.loadApiKey("nonexistent");
+    expect(key).toBeUndefined();
+  });
+
+  it("lists stored providers", async () => {
+    await storage.storeApiKey("anthropic", "sk-ant-1");
+    await storage.storeApiKey("deepseek", "sk-ds-1");
+    const providers = await storage.listStoredProviders();
+    expect(providers).toContain("anthropic");
+    expect(providers).toContain("deepseek");
+    expect(providers.length).toBe(2);
+  });
+
+  it("clears provider credentials", async () => {
+    await storage.storeApiKey("anthropic", "sk-ant-1");
+    await storage.storeApiKey("deepseek", "sk-ds-1");
+    await storage.clearProviderCredentials("anthropic");
+    const key = await storage.loadApiKey("anthropic");
+    expect(key).toBeUndefined();
+    const dsKey = await storage.loadApiKey("deepseek");
+    expect(dsKey).toBe("sk-ds-1");
+  });
+
+  it("handles clear for non-existent provider gracefully", async () => {
+    await expect(storage.clearProviderCredentials("nope")).resolves.toBeUndefined();
+  });
+
+  it("overwrites existing key", async () => {
+    await storage.storeApiKey("anthropic", "old-key");
+    await storage.storeApiKey("anthropic", "new-key");
+    const key = await storage.loadApiKey("anthropic");
+    expect(key).toBe("new-key");
+  });
+
+  it("stores arbitrary credential keys", async () => {
+    await storage.storeCredential("custom", "token", "abc123");
+    const val = await storage.loadCredential("custom", "token");
+    expect(val).toBe("abc123");
+  });
+
+  it("returns empty list when no credentials stored", async () => {
+    const providers = await storage.listStoredProviders();
+    expect(providers).toEqual([]);
   });
 });

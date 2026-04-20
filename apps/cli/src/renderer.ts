@@ -5,12 +5,25 @@ export interface RenderOptions {
   printMode?: boolean;
 }
 
+/**
+ * 事件渲染器类，用于处理流式事件并将其格式化输出到控制台。
+ * 支持文本增量、工具调用、用量统计、完成状态及错误信息的渲染。
+ */
 export class EventRenderer {
   private buffer = "";
   private currentTool: string | null = null;
 
-  constructor(private options: RenderOptions = {}) {}
+  /**
+   * 构造函数
+   * @param options - 渲染配置选项
+   */
+  constructor(private options: RenderOptions = {}) { }
 
+  /**
+   * 根据事件类型异步渲染对应的内容
+   * @param event - 流式事件对象，包含类型及具体数据
+   * @returns Promise<void>
+   */
   async render(event: StreamEvent): Promise<void> {
     switch (event.type) {
       case "text_delta":
@@ -23,6 +36,7 @@ export class EventRenderer {
         this.renderToolEnd(event.toolUseId, event.result.content, event.result.isError);
         break;
       case "usage":
+        // 仅在 verbose 模式下渲染用量信息
         if (this.options.verbose) {
           this.renderUsage(event.usage);
         }
@@ -36,6 +50,11 @@ export class EventRenderer {
     }
   }
 
+  /**
+   * 渲染文本增量内容
+   * 如果当前处于工具调用状态，先换行并重置工具状态，再输出文本
+   * @param delta - 文本增量字符串
+   */
   private renderText(delta: string): void {
     if (this.currentTool) {
       process.stdout.write("\n");
@@ -45,12 +64,25 @@ export class EventRenderer {
     this.buffer += delta;
   }
 
+  /**
+   * 渲染工具调用开始信息
+   * 显示工具名称及输入参数的摘要
+   * @param name - 工具名称
+   * @param input - 工具输入参数对象
+   */
   private renderToolStart(name: string, input: Record<string, unknown>): void {
     const summary = this.summarizeToolInput(name, input);
     process.stdout.write(`\n  ○ ${name}(${summary})\n`);
     this.currentTool = name;
   }
 
+  /**
+   * 渲染工具调用结束信息
+   * 在 verbose 模式下显示工具执行结果的前几行内容
+   * @param _toolUseId - 工具使用ID（未直接使用）
+   * @param content - 工具返回的内容数组
+   * @param isError - 是否发生错误
+   */
   private renderToolEnd(
     _toolUseId: string,
     content: Array<{ type: string; text?: string }>,
@@ -67,6 +99,7 @@ export class EventRenderer {
         for (const line of lines) {
           process.stdout.write(`${prefix}${line}\n`);
         }
+        // 如果内容超过5行，显示剩余行数提示
         if (text.split("\n").length > 5) {
           process.stdout.write(`${prefix}... (${text.split("\n").length - 5} more lines)\n`);
         }
@@ -75,22 +108,42 @@ export class EventRenderer {
     this.currentTool = null;
   }
 
+  /**
+   * 渲染 Token 用量信息
+   * @param usage - 包含输入和输出 Token 数量的对象
+   */
   private renderUsage(usage: { inputTokens?: number; outputTokens?: number }): void {
     process.stdout.write(
       `\n  [tokens: ${usage.inputTokens ?? 0}in / ${usage.outputTokens ?? 0}out]\n`,
     );
   }
 
+  /**
+   * 渲染完成状态
+   * 根据 printMode 决定是否输出换行符
+   * @param stopReason - 停止原因
+   */
   private renderComplete(stopReason: string): void {
     if (!this.options.printMode) {
       process.stdout.write("\n");
     }
   }
 
+  /**
+   * 渲染错误信息到标准错误输出
+   * @param error - 错误对象
+   */
   private renderError(error: Error): void {
     process.stderr.write(`\n  Error: ${error.message}\n`);
   }
 
+  /**
+   * 生成工具输入参数的摘要字符串
+   * 根据不同工具类型提取关键信息并截断
+   * @param name - 工具名称
+   * @param input - 工具输入参数对象
+   * @returns 截断后的摘要字符串
+   */
   private summarizeToolInput(name: string, input: Record<string, unknown>): string {
     switch (name) {
       case "Bash":
@@ -107,10 +160,17 @@ export class EventRenderer {
     }
   }
 
+  /**
+   * 获取累积的缓冲内容
+   * @returns 缓冲字符串
+   */
   getBuffer(): string {
     return this.buffer;
   }
 
+  /**
+   * 重置渲染器状态，清空缓冲区和当前工具状态
+   */
   reset(): void {
     this.buffer = "";
     this.currentTool = null;

@@ -10,9 +10,10 @@ import { SkillRegistry, SkillLoader } from "@openharness/skills";
 import { ThemeManager } from "@openharness/themes";
 import { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
-import { bootstrap } from "../runtime.js";
-import { EventRenderer } from "../renderer.js";
-import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands.js";
+import { CredentialStorage } from "@openharness/auth";
+import { bootstrap } from "../runtime";
+import { EventRenderer } from "../renderer";
+import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
 import { join } from "node:path";
 
 type BackendHostEvent = {
@@ -167,10 +168,13 @@ async function runPrintMode(
   await skillLoader.loadFromDirectory(getSkillsDir());
   await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
 
+  const credentialStorage = new CredentialStorage();
+
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
     skillRegistry,
+    credentialStorage,
   });
 
   const renderer = new EventRenderer({
@@ -184,7 +188,7 @@ async function runPrintMode(
 }
 
 /**
- * 启动 REPL (Read-Eval-Print Loop) 交互模式。
+ * 启动终端 REPL (Read-Eval-Print Loop) 交互模式。
  * 
  * 此模式提供完整的交互式体验，包括会话管理、记忆加载、MCP 连接、
  * 命令注册以及基于 readline 的用户输入处理。支持会话恢复和持久化。
@@ -198,15 +202,20 @@ async function runRepl(
   options: MainOptions,
 ): Promise<void> {
   const { join } = await import("node:path");
+
+  // ==================加载并注册技能==================
   const skillRegistry = new SkillRegistry();
   const skillLoader = new SkillLoader(skillRegistry);
   await skillLoader.loadFromDirectory(getSkillsDir());
   await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
 
+  const credentialStorage = new CredentialStorage();
+
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
     skillRegistry,
+    credentialStorage,
   });
 
   let currentModel = settings.model;
@@ -229,19 +238,31 @@ async function runRepl(
   const { homedir } = await import("node:os");
   const memoryDir = join(homedir(), ".openharness", "data", "memory");
 
+  // ==================创建 MCP 客户端==================
   const mcpManager = new McpClientManager();
   if (currentSettings.mcpServers) {
     await mcpManager.connectAll(currentSettings.mcpServers).catch(() => { });
   }
 
+  // ==================创建 MemoryManager 客户端==================
   const memoryManager = new MemoryManager(1000, memoryDir);
   const memoryFile = join(memoryDir, "memory.json");
   await memoryManager.loadFromFile(memoryFile).catch(() => { });
 
+
+  // ==================创建主题管理器==================
   const themeManager = new ThemeManager();
+
+  // ==================创建任务管理器==================
   const taskManager = new TaskManager();
 
+  /**
+   * 异步刷新系统提示词。
+   *
+   * 该函数根据当前设置构建运行时系统提示词，并将其更新到查询引擎中。
+   */
   const refreshSystemPrompt = async () => {
+    // 根据当前配置构建运行时系统提示词
     const prompt = await buildRuntimeSystemPrompt({
       customPrompt: currentSettings.systemPrompt,
       cwd: process.cwd(),
@@ -249,11 +270,14 @@ async function runRepl(
       effort: currentSettings.effort,
       passes: currentSettings.passes,
     });
+    // 将生成的提示词设置到查询引擎中
     bundle.queryEngine.setSystemPrompt(prompt);
   };
 
+  // ==================创建slash命令注册器==================
   const commandRegistry = new CommandRegistry();
 
+  // 命令注册器上下文
   const slashCtx: SlashCommandContext = {
     getEngine: () => bundle.queryEngine as any,
     getModel: () => currentModel,
@@ -273,8 +297,10 @@ async function runRepl(
     exitRepl: () => { },
     refreshSystemPrompt,
     getBundle: () => bundle,
+    credentialStorage,
   };
 
+  // 注册内置命令
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 
   console.log("OpenHarness Interactive Mode");
@@ -282,6 +308,8 @@ async function runRepl(
   console.log(`Session: ${sessionId}`);
   console.log("Type /help for commands, or Ctrl+C to exit.\n");
 
+
+  // 创建逐行读取输入流  readline 接口， 用户在 终端输入
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -492,11 +520,14 @@ async function runBackendHost(
   await skillLoader.loadFromDirectory(getSkillsDir());
   await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
 
+  const credentialStorage = new CredentialStorage();
+
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
     permissionPrompt: askPermission,
     skillRegistry,
+    credentialStorage,
   });
 
   const commandRegistry = new CommandRegistry();
@@ -521,6 +552,7 @@ async function runBackendHost(
     exitRepl: () => { },
     refreshSystemPrompt: async () => { },
     getBundle: () => bundle,
+    credentialStorage,
   };
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 

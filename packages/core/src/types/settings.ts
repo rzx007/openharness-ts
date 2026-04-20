@@ -39,7 +39,6 @@ export interface Settings {
   maxTokens?: number;
   baseUrl?: string;
   provider?: string;
-  apiKeys?: Record<string, string>;
   maxTurns: number;
   systemPrompt?: string;
   permission: PermissionSettings;

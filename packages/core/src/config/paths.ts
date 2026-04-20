@@ -16,6 +16,7 @@ export interface ResolvedPaths {
   cronHistoryPath: string;
   cronLogsDir: string;
   configFilePath: string;
+  credentialsFilePath: string;
 }
 
 let _cached: ResolvedPaths | undefined;
@@ -43,6 +44,7 @@ export function resolvePaths(projectRoot?: string): ResolvedPaths {
     cronHistoryPath: join(dataDir, "cron", "cron_history.jsonl"),
     cronLogsDir: join(dataDir, "cron", "logs"),
     configFilePath: join(configDir, "settings.json"),
+    credentialsFilePath: join(configDir, "credentials.json"),
   };
 
   if (!projectRoot) _cached = paths;
@@ -99,4 +101,8 @@ export function getCronHistoryPath(): string {
 
 export function getCronLogsDir(): string {
   return resolvePaths().cronLogsDir;
+}
+
+export function getCredentialsFilePath(): string {
+  return resolvePaths().credentialsFilePath;
 }

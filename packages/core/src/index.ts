@@ -80,7 +80,7 @@ export { CompactService } from "./engine/compact-service";
 export { CostTracker } from "./engine/cost-tracker";
 
 export { loadSettings, saveSettings } from "./config/settings";
-export { resolvePaths, getConfigDir, getConfigFilePath, getDataDir, getLogsDir, getSessionsDir, getTasksDir, getPluginsDir, getSkillsDir, getMemoryDir, getFeedbackDir, getCronRegistryPath, getCronHistoryPath, getCronLogsDir } from "./config/paths";
+export { resolvePaths, getConfigDir, getConfigFilePath, getDataDir, getLogsDir, getSessionsDir, getTasksDir, getPluginsDir, getSkillsDir, getMemoryDir, getFeedbackDir, getCronRegistryPath, getCronHistoryPath, getCronLogsDir, getCredentialsFilePath } from "./config/paths";
 
 export type { AppState } from "./state/app-state";
 export { AppStateStore } from "./state/state-store";

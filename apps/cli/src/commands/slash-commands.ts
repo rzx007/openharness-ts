@@ -9,6 +9,7 @@ import type { ThemeManager } from "@openharness/themes";
 import type { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { PROVIDERS, detectProvider, findByName } from "@openharness/api";
+import type { CredentialStorage } from "@openharness/auth";
 import { switchApiClientForBundle, resolveApiKey } from "../runtime.js";
 
 export interface SlashCommandContext {
@@ -27,6 +28,7 @@ export interface SlashCommandContext {
   exitRepl: () => void;
   refreshSystemPrompt: () => Promise<void>;
   getBundle: () => RuntimeBundle;
+  credentialStorage: CredentialStorage;
 }
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
@@ -97,23 +99,26 @@ export function registerBuiltinCommandsOnRegistry(
       const newModel = cmdCtx.args.model || cmdCtx.args._0;
       if (newModel) {
         const settings = getSettings();
-        const apiKey = resolveApiKey(settings);
+        const apiKey = await resolveApiKey(settings, undefined, ctx.credentialStorage);
         const baseURL = settings.baseUrl;
         const newSpec = detectProvider(newModel, apiKey, baseURL);
         const currentSpec = detectProvider(getModel(), apiKey, baseURL);
         const providerChanged = newSpec && currentSpec && newSpec.name !== currentSpec.name;
 
         if (providerChanged && newSpec) {
-          const err = switchApiClientForBundle(getBundle(), newSpec.name, newModel);
+          const err = await switchApiClientForBundle(getBundle(), newSpec.name, newModel, ctx.credentialStorage);
           if (err) return { success: false, error: err };
+          await updateSettings({ model: newModel, provider: newSpec.name });
           return { success: true, output: `Model changed to: ${newModel} (provider: ${newSpec.displayName})` };
         }
 
         setModel(newModel);
+        await updateSettings({ model: newModel });
         return { success: true, output: `Model changed to: ${newModel}` };
       }
       const settings = getSettings();
-      const spec = detectProvider(getModel(), settings.apiKey, settings.baseUrl);
+      const apiKey = await resolveApiKey(settings, undefined, ctx.credentialStorage);
+      const spec = detectProvider(getModel(), apiKey, settings.baseUrl);
       const providerInfo = spec ? ` (provider: ${spec.displayName})` : "";
       return { success: true, output: `Current model: ${getModel()}${providerInfo}` };
     },
@@ -127,13 +132,16 @@ export function registerBuiltinCommandsOnRegistry(
     handler: async (cmdCtx) => {
       const providerName = cmdCtx.args.provider || cmdCtx.args._0;
       const settings = getSettings();
+      const storage = ctx.credentialStorage;
 
       if (!providerName) {
-        const currentSpec = detectProvider(getModel(), settings.apiKey, settings.baseUrl);
+        const apiKey = await resolveApiKey(settings, undefined, storage);
+        const currentSpec = detectProvider(getModel(), apiKey, settings.baseUrl);
         const lines = ["Available providers:", ""];
         const currentName = settings.provider ?? currentSpec?.name ?? "auto";
         for (const spec of PROVIDERS) {
-          const hasKey = settings.apiKeys?.[spec.name] ? true : !!process.env[spec.envKey];
+          const storedKey = await storage.loadApiKey(spec.name);
+          const hasKey = !!storedKey || (spec.envKey ? !!process.env[spec.envKey] : false);
           const marker = spec.name === currentName ? " (active)" : "";
           const keyStatus = spec.envKey ? (hasKey ? "[key]" : "[no key]") : "[local]";
           lines.push(`  ${spec.name.padEnd(14)} ${spec.displayName.padEnd(14)} ${keyStatus}${marker}`);
@@ -145,18 +153,86 @@ export function registerBuiltinCommandsOnRegistry(
 
       if (providerName === "auto") {
         delete getBundle().settings.provider;
-        const spec = detectProvider(getModel(), resolveApiKey(settings), settings.baseUrl);
+        const apiKey = await resolveApiKey(settings, undefined, storage);
+        const spec = detectProvider(getModel(), apiKey, settings.baseUrl);
         if (spec) {
-          const err = switchApiClientForBundle(getBundle(), spec.name);
+          const err = await switchApiClientForBundle(getBundle(), spec.name, undefined, storage);
           if (err) return { success: false, error: err };
         }
         return { success: true, output: "Provider set to auto-detect" };
       }
 
-      const err = switchApiClientForBundle(getBundle(), providerName);
+      const err = await switchApiClientForBundle(getBundle(), providerName, undefined, storage);
       if (err) return { success: false, error: err };
       const spec = findByName(providerName);
+      await updateSettings({ provider: providerName });
       return { success: true, output: `Provider switched to: ${spec?.displayName ?? providerName}` };
+    },
+  });
+
+  // ── /auth ──────────────────────────────────────────────
+  registry.register({
+    name: "/auth",
+    description: "Manage API credentials",
+    args: [{ name: "subcommand", description: "login|logout|status", required: false }],
+    handler: async (cmdCtx) => {
+      const sub = cmdCtx.args.subcommand || cmdCtx.args._0;
+      const storage = ctx.credentialStorage;
+
+      if (!sub || sub === "status") {
+        const providers = await storage.listStoredProviders();
+        const envProviders: string[] = [];
+        for (const spec of PROVIDERS) {
+          if (spec.envKey && process.env[spec.envKey]) envProviders.push(spec.name);
+        }
+        const lines = ["Credential status:", ""];
+        if (providers.length > 0) {
+          lines.push("  Stored credentials:");
+          for (const p of providers) {
+            lines.push(`    ${p}: configured`);
+          }
+        }
+        if (envProviders.length > 0) {
+          lines.push("  Environment variables:");
+          for (const p of envProviders) {
+            const spec = findByName(p);
+            lines.push(`    ${p}: ${spec?.envKey ?? "unknown"}`);
+          }
+        }
+        if (providers.length === 0 && envProviders.length === 0) {
+          lines.push("  No credentials configured.");
+          lines.push("  Use /auth login <provider> to store an API key.");
+        }
+        return { success: true, output: lines.join("\n") };
+      }
+
+      if (sub === "login") {
+        const providerName = cmdCtx.args._1;
+        if (!providerName) {
+          return { success: false, error: "Usage: /auth login <provider> <api-key>" };
+        }
+        const apiKey = cmdCtx.args._2;
+        if (!apiKey) {
+          return { success: false, error: "Usage: /auth login <provider> <api-key>" };
+        }
+        const spec = findByName(providerName);
+        if (!spec) {
+          return { success: false, error: `Unknown provider: ${providerName}. Use /provider to see available providers.` };
+        }
+        await storage.storeApiKey(providerName, apiKey);
+        return { success: true, output: `API key stored for ${spec.displayName} (${spec.name}).` };
+      }
+
+      if (sub === "logout") {
+        const providerName = cmdCtx.args._1;
+        if (!providerName) {
+          return { success: false, error: "Usage: /auth logout <provider>" };
+        }
+        await storage.clearProviderCredentials(providerName);
+        return { success: true, output: `Credentials cleared for ${providerName}.` };
+      }
+
+      return { success: false, error: `Unknown subcommand: ${sub}. Use login, logout, or status.` };
     },
   });
 

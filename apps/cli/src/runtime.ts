@@ -2,6 +2,7 @@ import type { Settings, StreamingMessageClient } from "@openharness/core";
 import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
 import { AnthropicClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
+import { CredentialStorage } from "@openharness/auth";
 import { PermissionChecker } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
@@ -26,13 +27,15 @@ export interface BootstrapOptions {
   };
   permissionPrompt?: PermissionPromptFn;
   skillRegistry?: unknown;
+  credentialStorage?: CredentialStorage;
 }
 
 export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundle> {
   const { settings } = options;
   const overrides = options.cliOverrides ?? {};
+  const storage = options.credentialStorage ?? new CredentialStorage();
 
-  const apiClient = resolveApiClient(settings, overrides);
+  const apiClient = await resolveApiClient(settings, overrides, storage);
 
   let toolRegistry = createDefaultToolRegistry();
 
@@ -108,11 +111,13 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     .build(settings);
 }
 
-export function resolveApiClient(
+export async function resolveApiClient(
   settings: Settings,
   overrides?: BootstrapOptions["cliOverrides"],
-): StreamingMessageClient {
-  const apiKey = resolveApiKey(settings, overrides);
+  storage?: CredentialStorage,
+): Promise<StreamingMessageClient> {
+  const resolvedStorage = storage ?? new CredentialStorage();
+  const apiKey = await resolveApiKey(settings, overrides, resolvedStorage);
   const baseURL = overrides?.baseUrl ?? settings.baseUrl;
   const providerName = overrides?.provider ?? settings.provider;
 
@@ -145,18 +150,20 @@ export function resolveApiClient(
   }
 }
 
-export function switchApiClientForBundle(
+export async function switchApiClientForBundle(
   bundle: RuntimeBundle,
   providerName: string,
   model?: string,
-): string | null {
+  storage?: CredentialStorage,
+): Promise<string | null> {
+  const resolvedStorage = storage ?? new CredentialStorage();
   const settings = { ...bundle.settings };
 
   if (model) {
     settings.model = model;
   }
 
-  const apiKey = resolveApiKey(settings);
+  const apiKey = await resolveApiKey(settings, undefined, resolvedStorage);
   const spec = findByName(providerName);
   if (!spec) return `Unknown provider: ${providerName}`;
 
@@ -191,27 +198,33 @@ export function switchApiClientForBundle(
   return null;
 }
 
-export function resolveApiKey(
+export async function resolveApiKey(
   settings: Settings,
   overrides?: BootstrapOptions["cliOverrides"],
-): string {
+  storage?: CredentialStorage,
+): Promise<string> {
   const explicit = overrides?.apiKey ?? settings.apiKey;
   if (explicit) return explicit;
 
+  const resolvedStorage = storage ?? new CredentialStorage();
+
   const providerName = overrides?.provider ?? settings.provider;
-  if (providerName && settings.apiKeys?.[providerName]) {
-    return settings.apiKeys[providerName]!;
+  if (providerName) {
+    const stored = await resolvedStorage.loadApiKey(providerName);
+    if (stored) return stored;
+    const spec = findByName(providerName);
+    if (spec?.envKey && process.env[spec.envKey]) return process.env[spec.envKey]!;
   }
 
   const spec = detectProvider(settings.model, undefined, settings.baseUrl);
-  if (spec && settings.apiKeys?.[spec.name]) {
-    return settings.apiKeys[spec.name]!;
+  if (spec) {
+    const stored = await resolvedStorage.loadApiKey(spec.name);
+    if (stored) return stored;
+    if (spec.envKey && process.env[spec.envKey]) return process.env[spec.envKey]!;
   }
 
-  if (settings.apiKeys) {
-    const keys = Object.values(settings.apiKeys);
-    if (keys.length > 0) return keys[0]!;
-  }
+  const envFallback = process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY;
+  if (envFallback) return envFallback;
 
   return "";
 }
