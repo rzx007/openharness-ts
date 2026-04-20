@@ -11,7 +11,8 @@
     }
   },
   "scripts": {
-    "build": "exit 0",
+    "build": "tsc --noEmit",
+    "dev": "tsc --noEmit --watch",
     "check-types": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rimraf dist"
