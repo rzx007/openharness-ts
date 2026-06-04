@@ -52,6 +52,8 @@ export type {
   HookExecutor as IHookExecutor,
 } from "./types/hooks";
 
+export { HOOK_EVENTS } from "./types/hooks";
+
 export type {
   Settings,
   McpServerConfig,

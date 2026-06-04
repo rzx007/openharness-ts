@@ -1,5 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { MemoryManager, tokenize } from "../src/index.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  MemoryManager,
+  tokenize,
+  splitMemoryFile,
+  renderMemoryFile,
+  renderFrontmatter,
+  parseFrontmatter,
+  computeMemorySignature,
+} from "../src/index.js";
 
 describe("MemoryManager", () => {
   it("adds and retrieves an entry", async () => {
@@ -159,14 +170,200 @@ describe("MemoryManager search tokenization", () => {
 
   it("weights metadata matches higher than body matches", async () => {
     const mgr = new MemoryManager();
-    const bodyMatch = await mgr.add("apple in body text");
-    const metaMatch = await mgr.add("unrelated content", undefined, {
-      topic: "apple",
+    // bodyMatch: term only in body, with a description that does not contain it.
+    const bodyMatch = await mgr.add("see notes mentioning apple here", undefined, undefined, {
+      name: "general note",
+      description: "general notes",
+    });
+    // metaMatch: term in the structured name/description (frontmatter), and
+    // also once in the body so its body contribution matches bodyMatch's.
+    const metaMatch = await mgr.add("apple unrelated content", undefined, undefined, {
+      name: "apple preferences",
+      description: "apple related context",
     });
     const results = await mgr.search({ query: "apple" });
     expect(results).toHaveLength(2);
     const meta = results.find((r) => r.entry.id === metaMatch.id)!;
     const body = results.find((r) => r.entry.id === bodyMatch.id)!;
     expect(meta.score).toBeGreaterThan(body.score);
+  });
+});
+
+describe("frontmatter parse/render round-trip", () => {
+  it("renders fields in stable order and parses back", () => {
+    const meta = {
+      schema_version: 1,
+      id: "mem-1",
+      name: "test note",
+      description: "a description",
+      type: "project",
+      scope: "project",
+      importance: 2,
+      signature: "abc123",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-02T00:00:00Z",
+      use_count: 3,
+      tags: ["one", "two"],
+    };
+    const file = renderMemoryFile(meta, "body line one\nbody line two");
+    expect(file.startsWith("---\n")).toBe(true);
+    // field order: schema_version must come before id, etc.
+    const fmText = file.slice(4, file.indexOf("\n---", 4));
+    expect(fmText.indexOf("schema_version")).toBeLessThan(fmText.indexOf("id:"));
+    expect(fmText.indexOf("name:")).toBeLessThan(fmText.indexOf("description:"));
+
+    const { metadata, body } = splitMemoryFile(file);
+    expect(metadata.id).toBe("mem-1");
+    expect(metadata.name).toBe("test note");
+    expect(metadata.importance).toBe(2);
+    expect(metadata.use_count).toBe(3);
+    expect(metadata.tags).toEqual(["one", "two"]);
+    expect(body.trim()).toBe("body line one\nbody line two");
+  });
+
+  it("handles content with no frontmatter", () => {
+    const { metadata, body, hasClosedFrontmatter } = splitMemoryFile("just text\n");
+    expect(metadata).toEqual({});
+    expect(body).toBe("just text\n");
+    expect(hasClosedFrontmatter).toBe(false);
+  });
+
+  it("parses CJK string values losslessly", () => {
+    const fm = renderFrontmatter({ name: "中文笔记", tags: ["缓存"] });
+    const parsed = parseFrontmatter(fm);
+    expect(parsed.name).toBe("中文笔记");
+    expect(parsed.tags).toEqual(["缓存"]);
+  });
+});
+
+describe("computeMemorySignature", () => {
+  it("is stable across whitespace/case/punctuation differences", () => {
+    const a = computeMemorySignature("Hello,  World!", "project", "knowledge");
+    const b = computeMemorySignature("hello world", "project", "knowledge");
+    expect(a).toBe(b);
+  });
+
+  it("differs for different content", () => {
+    const a = computeMemorySignature("alpha", "project", "knowledge");
+    const b = computeMemorySignature("beta", "project", "knowledge");
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("MemoryManager weighted factors", () => {
+  it("ranks higher-importance memory above an equal-text one", async () => {
+    const mgr = new MemoryManager();
+    const low = await mgr.add("kubernetes deploy notes", undefined, undefined, {
+      importance: 0,
+    });
+    const high = await mgr.add("kubernetes deploy guide", undefined, undefined, {
+      importance: 5,
+    });
+    const results = await mgr.search({ query: "kubernetes" });
+    const hi = results.find((r) => r.entry.id === high.id)!;
+    const lo = results.find((r) => r.entry.id === low.id)!;
+    expect(hi.score).toBeGreaterThan(lo.score);
+  });
+
+  it("use_count boosts ranking via markMemoryUsed", async () => {
+    const mgr = new MemoryManager();
+    const a = await mgr.add("redis cache config alpha");
+    const b = await mgr.add("redis cache config beta");
+    await mgr.markMemoryUsed(b.id);
+    await mgr.markMemoryUsed(b.id);
+    const results = await mgr.search({ query: "redis" });
+    const rb = results.find((r) => r.entry.id === b.id)!;
+    const ra = results.find((r) => r.entry.id === a.id)!;
+    expect(rb.score).toBeGreaterThan(ra.score);
+    expect((await mgr.get(b.id))!.useCount).toBe(2);
+  });
+});
+
+describe("MemoryManager Markdown store", () => {
+  let dir: string;
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("persists a memory as a .md file with frontmatter and reloads it", async () => {
+    dir = await mkdtemp(join(tmpdir(), "ohmem-"));
+    const mgr = new MemoryManager(1000, dir);
+    const entry = await mgr.add("project uses pnpm workspaces", ["build"], undefined, {
+      name: "build tooling",
+      importance: 3,
+    });
+
+    const files = await readdir(dir);
+    expect(files).toContain(`${entry.id}.md`);
+    const raw = await readFile(join(dir, `${entry.id}.md`), "utf-8");
+    expect(raw.startsWith("---\n")).toBe(true);
+    expect(raw).toContain("type:");
+    expect(raw).toContain("project uses pnpm workspaces");
+
+    // Fresh manager loads it from disk.
+    const mgr2 = new MemoryManager(1000, dir);
+    const loaded = await mgr2.get(entry.id);
+    expect(loaded).toBeDefined();
+    expect(loaded!.content).toBe("project uses pnpm workspaces");
+    expect(loaded!.importance).toBe(3);
+    expect(loaded!.name).toBe("build tooling");
+    const results = await mgr2.search({ query: "pnpm" });
+    expect(results.length).toBe(1);
+  });
+
+  it("deduplicates identical content by signature", async () => {
+    dir = await mkdtemp(join(tmpdir(), "ohmem-"));
+    const mgr = new MemoryManager(1000, dir);
+    const first = await mgr.add("the API key lives in env");
+    const second = await mgr.add("The  API key lives in env!");
+    expect(second.id).toBe(first.id);
+    expect(mgr.count()).toBe(1);
+    const mdFiles = (await readdir(dir)).filter((f) => f.endsWith(".md") && f !== "MEMORY.md");
+    expect(mdFiles).toHaveLength(1);
+  });
+
+  it("maintains a MEMORY.md index with one pointer per entry", async () => {
+    dir = await mkdtemp(join(tmpdir(), "ohmem-"));
+    const mgr = new MemoryManager(1000, dir);
+    const a = await mgr.add("first memory note");
+    const b = await mgr.add("second memory note");
+    const index = await readFile(join(dir, "MEMORY.md"), "utf-8");
+    expect(index).toContain(a.id);
+    expect(index).toContain(b.id);
+    expect(index.split("\n").filter((l) => l.startsWith("- [")).length).toBe(2);
+  });
+
+  it("markMemoryUsed persists use_count to disk", async () => {
+    dir = await mkdtemp(join(tmpdir(), "ohmem-"));
+    const mgr = new MemoryManager(1000, dir);
+    const e = await mgr.add("track usage memory");
+    await mgr.markMemoryUsed(e.id);
+    const raw = await readFile(join(dir, `${e.id}.md`), "utf-8");
+    expect(raw).toContain("use_count: 1");
+  });
+
+  it("loadFromFile falls back to the Markdown store when no JSON exists", async () => {
+    dir = await mkdtemp(join(tmpdir(), "ohmem-"));
+    // Pre-seed a .md file directly.
+    const md = renderMemoryFile(
+      {
+        schema_version: 1,
+        id: "mem-seed",
+        name: "seed",
+        description: "seeded memory",
+        type: "project",
+        scope: "project",
+        importance: 0,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        use_count: 0,
+      },
+      "seeded body content",
+    );
+    await writeFile(join(dir, "mem-seed.md"), md, "utf-8");
+    const mgr = new MemoryManager(1000, dir);
+    const n = await mgr.loadFromFile(join(dir, "memory.json"));
+    expect(n).toBe(1);
+    expect((await mgr.get("mem-seed"))!.content).toBe("seeded body content");
   });
 });

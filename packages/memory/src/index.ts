@@ -1,6 +1,59 @@
 import { join } from "node:path";
-import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promises";
 
+// ──────────────────────────────────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Canonical memory taxonomy, mirroring Python `schema.MemoryType`. */
+export type MemoryType = "user" | "feedback" | "project" | "reference";
+/** Canonical scope taxonomy, mirroring Python `schema.MemoryScope`. */
+export type MemoryScope = "private" | "project" | "team";
+
+export const MEMORY_TYPES: readonly MemoryType[] = [
+  "user",
+  "feedback",
+  "project",
+  "reference",
+];
+export const MEMORY_SCOPES: readonly MemoryScope[] = [
+  "private",
+  "project",
+  "team",
+];
+
+export const DEFAULT_MEMORY_TYPE: MemoryType = "project";
+export const DEFAULT_MEMORY_SCOPE: MemoryScope = "project";
+
+export const SCHEMA_VERSION = 1;
+
+/** Stable frontmatter field order (subset of Python `FRONTMATTER_FIELDS`). */
+export const FRONTMATTER_FIELDS = [
+  "schema_version",
+  "id",
+  "name",
+  "description",
+  "type",
+  "scope",
+  "importance",
+  "signature",
+  "created_at",
+  "updated_at",
+  "use_count",
+  "last_used_at",
+  "tags",
+] as const;
+
+// Entrypoint (MEMORY.md) truncation limits, mirroring Python.
+export const MAX_ENTRYPOINT_LINES = 200;
+export const MAX_ENTRYPOINT_BYTES = 25_000;
+
+/**
+ * A single memory entry. The legacy flat-JSON fields (`id`, `content`, `tags`,
+ * `createdAt`, `updatedAt`, `metadata`) are preserved for caller
+ * compatibility; the structured Markdown+frontmatter fields are added on top.
+ */
 export interface MemoryEntry {
   id: string;
   content: string;
@@ -8,6 +61,15 @@ export interface MemoryEntry {
   createdAt: number;
   updatedAt: number;
   metadata?: Record<string, unknown>;
+  // Structured frontmatter fields (aligned with Python schema v1):
+  name?: string;
+  description?: string;
+  type?: MemoryType;
+  scope?: MemoryScope;
+  importance?: number;
+  signature?: string;
+  useCount?: number;
+  lastUsedAt?: number;
 }
 
 export interface MemorySearchResult {
@@ -21,11 +83,24 @@ export interface MemorySearchOptions {
   limit?: number;
 }
 
+/** Optional structured fields accepted by {@link MemoryManager.add}. */
+export interface MemoryAddOptions {
+  name?: string;
+  description?: string;
+  type?: MemoryType;
+  scope?: MemoryScope;
+  importance?: number;
+}
+
 const METADATA_WEIGHT = 2;
 const CONTENT_WEIGHT = 1;
 
 const ASCII_TOKEN_RE = /[a-z0-9_]+/g;
 const HAN_CHAR_RE = /[一-鿿㐀-䶿]/g;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Tokenizer (A.4 — keep as-is)
+// ──────────────────────────────────────────────────────────────────────────
 
 /**
  * Extract search tokens from {@link text}, handling ASCII words and Han
@@ -53,21 +128,227 @@ export function tokenize(text: string): string[] {
   return [...tokens];
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Content signature (dedup) — mirrors Python schema.py
+// ──────────────────────────────────────────────────────────────────────────
+
+const PUNCTUATION_RE = /[!-/:-@[-`{-~]/g;
+
+/** Normalize memory content for deterministic signatures. */
+export function normalizeMemoryContent(text: string): string {
+  const lowered = text.toLowerCase();
+  const collapsed = lowered.replace(/\s+/g, " ");
+  return collapsed.replace(PUNCTUATION_RE, "").trim();
+}
+
+/** Compute a deterministic sha256 content signature for duplicate detection. */
+export function computeMemorySignature(
+  content: string,
+  type: string,
+  category: string,
+): string {
+  const normalized = normalizeMemoryContent(content);
+  const payload = `${normalized}|${type.trim().toLowerCase()}|${category
+    .trim()
+    .toLowerCase()}`;
+  return createHash("sha256").update(payload, "utf-8").digest("hex");
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Frontmatter parse / render — mirrors Python schema.py
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Split a memory file into frontmatter metadata and body text.
+ * Returns `{ metadata, body, hasClosedFrontmatter }`. Unclosed frontmatter is
+ * treated as body content after the opening delimiter.
+ */
+export function splitMemoryFile(content: string): {
+  metadata: Record<string, unknown>;
+  body: string;
+  hasClosedFrontmatter: boolean;
+} {
+  const lines = content.split(/(?<=\n)/); // keep line endings
+  if (lines.length === 0 || lines[0]!.trim() !== "---") {
+    return { metadata: {}, body: content, hasClosedFrontmatter: false };
+  }
+
+  for (let idx = 1; idx < lines.length; idx++) {
+    if (lines[idx]!.trim() === "---") {
+      const rawFrontmatter = lines.slice(1, idx).join("");
+      const metadata = parseFrontmatter(rawFrontmatter);
+      const body = lines.slice(idx + 1).join("");
+      return { metadata, body, hasClosedFrontmatter: true };
+    }
+  }
+
+  return { metadata: {}, body: lines.slice(1).join(""), hasClosedFrontmatter: false };
+}
+
+/**
+ * Parse frontmatter text into a metadata object. This is a small subset of
+ * YAML matching how the Python renderer emits values: `key: <json-value>`
+ * one per line, where values are JSON scalars/arrays (the Python renderer uses
+ * `json.dumps`), plus tolerance for plain unquoted scalars and `[a, b]` lists.
+ */
+export function parseFrontmatter(raw: string): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const colon = line.indexOf(":");
+    if (colon === -1) continue;
+    const key = line.slice(0, colon).trim();
+    const rawValue = line.slice(colon + 1).trim();
+    if (!key) continue;
+    result[key] = parseScalar(rawValue);
+  }
+  return result;
+}
+
+function parseScalar(raw: string): unknown {
+  if (raw === "" || raw === "null" || raw === "~") return null;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  // JSON-encoded value (string / array / number) from the renderer.
+  if (
+    raw.startsWith('"') ||
+    raw.startsWith("[") ||
+    raw.startsWith("{")
+  ) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      // fall through to plain handling
+    }
+  }
+  if (/^-?\d+$/.test(raw)) return Number.parseInt(raw, 10);
+  if (/^-?\d*\.\d+$/.test(raw)) return Number.parseFloat(raw);
+  return raw;
+}
+
+/** Render memory frontmatter in the stable field order. */
+export function renderFrontmatter(metadata: Record<string, unknown>): string {
+  const ordered: Array<[string, unknown]> = [];
+  const fieldSet = new Set<string>(FRONTMATTER_FIELDS);
+  for (const field of FRONTMATTER_FIELDS) {
+    if (field in metadata) ordered.push([field, metadata[field]]);
+  }
+  for (const [key, value] of Object.entries(metadata)) {
+    if (!fieldSet.has(key)) ordered.push([key, value]);
+  }
+  return ordered
+    .map(([key, value]) => `${key}: ${formatYamlValue(value)}\n`)
+    .join("");
+}
+
+function formatYamlValue(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number" && Number.isInteger(value)) return String(value);
+  if (Array.isArray(value)) return JSON.stringify(value);
+  return JSON.stringify(String(value));
+}
+
+/** Render metadata and body as a memory markdown file. */
+export function renderMemoryFile(
+  metadata: Record<string, unknown>,
+  body: string,
+): string {
+  const frontmatter = renderFrontmatter(metadata);
+  let normalizedBody = body.replace(/^\n+/, "");
+  if (normalizedBody && !normalizedBody.endsWith("\n")) {
+    normalizedBody += "\n";
+  }
+  return `---\n${frontmatter}---\n\n${normalizedBody}`;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Datetime helpers (ISO-8601 UTC <-> epoch millis)
+// ──────────────────────────────────────────────────────────────────────────
+
+function toIso(ms: number): string {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function fromIso(value: unknown): number | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Entrypoint (MEMORY.md) truncation — mirrors Python schema.py
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface EntrypointView {
+  content: string;
+  wasTruncated: boolean;
+  reason: string;
+}
+
+/** Bound `MEMORY.md` by line count and UTF-8 byte count. */
+export function truncateEntrypointContent(
+  raw: string,
+  maxLines = MAX_ENTRYPOINT_LINES,
+  maxBytes = MAX_ENTRYPOINT_BYTES,
+): EntrypointView {
+  const lines = raw.split(/\r?\n/);
+  const wasLineTruncated = lines.length > maxLines;
+  let text = lines.slice(0, maxLines).join("\n");
+  let encoded = Buffer.from(text, "utf-8");
+  const wasByteTruncated = encoded.length > maxBytes;
+  if (wasByteTruncated) {
+    encoded = encoded.subarray(0, maxBytes);
+    text = encoded.toString("utf-8");
+    const cutAt = text.lastIndexOf("\n");
+    if (cutAt > 0) text = text.slice(0, cutAt);
+  }
+  if (!wasLineTruncated && !wasByteTruncated) {
+    return { content: text, wasTruncated: false, reason: "" };
+  }
+  const reason = wasByteTruncated
+    ? `${Buffer.from(raw, "utf-8").length} bytes (limit: ${maxBytes})`
+    : `${lines.length} lines (limit: ${maxLines})`;
+  const warning = `\n\n> WARNING: MEMORY.md is ${reason}. Only part of it was loaded. Keep index entries one line and move detail into topic notes.\n`;
+  return { content: text.trimEnd() + warning, wasTruncated: true, reason };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// MemoryManager
+// ──────────────────────────────────────────────────────────────────────────
+
+const RECENCY_DAY_MS = 86_400_000;
+
 export class MemoryManager {
   private entries = new Map<string, MemoryEntry>();
   private maxEntries: number;
   private storageDir: string | undefined;
+  private loaded = false;
 
   constructor(maxEntries = 1000, storageDir?: string) {
     this.maxEntries = maxEntries;
-    this.storageDir = storageDir;
+    this.storageDir = storageDir && storageDir.length > 0 ? storageDir : undefined;
   }
 
   async add(
     content: string,
     tags?: string[],
     metadata?: Record<string, unknown>,
+    options?: MemoryAddOptions,
   ): Promise<MemoryEntry> {
+    await this.ensureLoaded();
+
+    const type = options?.type ?? DEFAULT_MEMORY_TYPE;
+    const signature = computeMemorySignature(content, type, "knowledge");
+
+    // Signature dedup: if identical content already exists, return it instead
+    // of writing a duplicate file.
+    for (const existing of this.entries.values()) {
+      if (existing.signature === signature) {
+        return existing;
+      }
+    }
+
     const id = this.generateId();
     const now = Date.now();
     const entry: MemoryEntry = {
@@ -77,60 +358,138 @@ export class MemoryManager {
       createdAt: now,
       updatedAt: now,
       metadata,
+      name: options?.name ?? firstContentLine(content) ?? id,
+      description: options?.description ?? firstContentLine(content) ?? "",
+      type,
+      scope: options?.scope ?? DEFAULT_MEMORY_SCOPE,
+      importance: options?.importance ?? 0,
+      signature,
+      useCount: 0,
     };
     this.entries.set(id, entry);
     this.evictIfNeeded();
 
     if (this.storageDir) {
       await this.persistEntry(entry);
+      await this.writeIndex();
     }
 
     return entry;
   }
 
   async get(id: string): Promise<MemoryEntry | undefined> {
-    const cached = this.entries.get(id);
-    if (cached) return cached;
-    if (this.storageDir) {
-      return this.loadEntry(id);
-    }
-    return undefined;
+    await this.ensureLoaded();
+    return this.entries.get(id);
   }
 
   async update(
     id: string,
-    updates: Partial<Pick<MemoryEntry, "content" | "tags" | "metadata">>,
+    updates: Partial<
+      Pick<
+        MemoryEntry,
+        | "content"
+        | "tags"
+        | "metadata"
+        | "name"
+        | "description"
+        | "type"
+        | "scope"
+        | "importance"
+      >
+    >,
   ): Promise<MemoryEntry | undefined> {
+    await this.ensureLoaded();
     const entry = this.entries.get(id);
     if (!entry) return undefined;
     if (updates.content !== undefined) entry.content = updates.content;
     if (updates.tags !== undefined) entry.tags = updates.tags;
     if (updates.metadata !== undefined) entry.metadata = updates.metadata;
+    if (updates.name !== undefined) entry.name = updates.name;
+    if (updates.description !== undefined) entry.description = updates.description;
+    if (updates.type !== undefined) entry.type = updates.type;
+    if (updates.scope !== undefined) entry.scope = updates.scope;
+    if (updates.importance !== undefined) entry.importance = updates.importance;
     entry.updatedAt = Date.now();
+    if (updates.content !== undefined) {
+      entry.signature = computeMemorySignature(
+        entry.content,
+        entry.type ?? DEFAULT_MEMORY_TYPE,
+        "knowledge",
+      );
+    }
 
     if (this.storageDir) {
       await this.persistEntry(entry);
+      await this.writeIndex();
     }
 
     return entry;
   }
 
   async delete(id: string): Promise<boolean> {
+    await this.ensureLoaded();
     const deleted = this.entries.delete(id);
     if (deleted && this.storageDir) {
       await this.removeEntryFile(id);
+      await this.writeIndex();
     }
     return deleted;
   }
 
+  /** Record that a memory entry was recalled, bumping use_count/last_used_at. */
+  async markMemoryUsed(ids: string | string[]): Promise<void> {
+    await this.ensureLoaded();
+    const list = Array.isArray(ids) ? ids : [ids];
+    const now = Date.now();
+    const touched: MemoryEntry[] = [];
+    for (const id of list) {
+      const entry = this.entries.get(id);
+      if (!entry) continue;
+      entry.useCount = (entry.useCount ?? 0) + 1;
+      entry.lastUsedAt = now;
+      touched.push(entry);
+    }
+    if (this.storageDir) {
+      for (const entry of touched) {
+        await this.persistEntry(entry);
+      }
+    }
+  }
+
+  /**
+   * Return low-value unused memories (stale candidates) for pruning review.
+   * Mirrors Python `find_stale_memory_candidates`.
+   */
+  async findStaleCandidates(
+    staleDays = 60,
+    maxImportance = 1,
+  ): Promise<MemoryEntry[]> {
+    await this.ensureLoaded();
+    const now = Date.now();
+    const candidates: MemoryEntry[] = [];
+    for (const entry of this.entries.values()) {
+      if ((entry.importance ?? 0) > maxImportance) continue;
+      if ((entry.useCount ?? 0) > 0) continue;
+      const base = entry.updatedAt ?? entry.createdAt;
+      if (now - base >= staleDays * RECENCY_DAY_MS) {
+        candidates.push(entry);
+      }
+    }
+    candidates.sort(
+      (a, b) =>
+        (a.importance ?? 0) - (b.importance ?? 0) ||
+        (a.updatedAt ?? 0) - (b.updatedAt ?? 0),
+    );
+    return candidates;
+  }
+
   async search(options: MemorySearchOptions): Promise<MemorySearchResult[]> {
+    await this.ensureLoaded();
     const { query, tags, limit = 10 } = options;
     const queryTerms = tokenize(query);
     const results: MemorySearchResult[] = [];
 
-    const allEntries = await this.getAll();
-
-    for (const entry of allEntries) {
+    for (const entry of this.entries.values()) {
       if (tags?.length && !tags.some((t) => entry.tags?.includes(t))) {
         continue;
       }
@@ -140,27 +499,29 @@ export class MemoryManager {
       }
     }
 
-    results.sort((a, b) => b.score - a.score);
+    results.sort(
+      (a, b) => b.score - a.score || b.entry.updatedAt - a.entry.updatedAt,
+    );
     return results.slice(0, limit);
   }
 
   async getAll(): Promise<readonly MemoryEntry[]> {
-    if (this.storageDir && this.entries.size === 0) {
-      await this.loadAllEntries();
-    }
+    await this.ensureLoaded();
     return [...this.entries.values()];
   }
 
   async clear(): Promise<void> {
     this.entries.clear();
+    this.loaded = true;
     if (this.storageDir) {
       try {
         const files = await readdir(this.storageDir);
         for (const file of files) {
-          if (file.endsWith(".json")) {
+          if (file.endsWith(".md") && file !== "MEMORY.md") {
             await unlink(join(this.storageDir, file));
           }
         }
+        await this.writeIndex();
       } catch {
         // directory may not exist
       }
@@ -171,49 +532,80 @@ export class MemoryManager {
     return this.entries.size;
   }
 
+  /** Legacy JSON export; retained for compatibility with old callers. */
   async saveToFile(filePath: string): Promise<void> {
     await mkdir(join(filePath, ".."), { recursive: true });
     const data = [...this.entries.values()];
     await writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
   }
 
+  /**
+   * Load entries. Accepts either a legacy JSON file (array of entries) or — if
+   * the path does not resolve to a JSON file — falls back to loading the
+   * Markdown store from {@link storageDir}. Returns the number loaded.
+   */
   async loadFromFile(filePath: string): Promise<number> {
     try {
       const raw = await readFile(filePath, "utf-8");
       const data: MemoryEntry[] = JSON.parse(raw);
       for (const entry of data) {
-        this.entries.set(entry.id, entry);
+        this.entries.set(entry.id, this.hydrateLegacy(entry));
       }
+      this.loaded = true;
       return data.length;
     } catch {
-      return 0;
+      // No legacy JSON — load the Markdown store instead.
+      const before = this.entries.size;
+      await this.ensureLoaded();
+      return this.entries.size - before;
     }
   }
 
-  buildMemoryPrompt(maxEntries = 10): string {
-    const entries = [...this.entries.values()]
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, maxEntries);
+  buildMemoryPrompt(maxEntries = 10, query?: string): string {
+    let entries: MemoryEntry[];
+    if (query) {
+      // Relevance-ordered selection when a query is supplied.
+      const terms = tokenize(query);
+      entries = [...this.entries.values()]
+        .map((e) => ({ e, s: this.computeScore(e, terms) }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => b.s - a.s || b.e.updatedAt - a.e.updatedAt)
+        .slice(0, maxEntries)
+        .map((x) => x.e);
+    } else {
+      entries = [...this.entries.values()]
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, maxEntries);
+    }
     if (!entries.length) return "";
     const lines = ["<memory>", "Relevant memories from previous interactions:"];
     for (const entry of entries) {
       const tags = entry.tags?.length ? ` [${entry.tags.join(", ")}]` : "";
-      lines.push(`- ${entry.content}${tags}`);
+      const age = this.freshnessNote(entry);
+      lines.push(`- ${entry.content}${tags}${age}`);
     }
     lines.push("</memory>");
     return lines.join("\n");
   }
 
-  private computeScore(entry: MemoryEntry, queryTerms: string[]): number {
-    let score = 0;
+  // ── scoring ──────────────────────────────────────────────
 
-    const contentLower = entry.content.toLowerCase();
+  private computeScore(entry: MemoryEntry, queryTerms: string[]): number {
+    // Frontmatter (name/description/tags) weighted higher than body, plus
+    // importance, use_count and recency factors (mirrors Python search.py).
+    const metaText = `${entry.name ?? ""} ${entry.description ?? ""}`.toLowerCase();
+    const bodyLower = entry.content.toLowerCase();
+
+    let metaHits = 0;
+    let bodyHits = 0;
+
     for (const term of queryTerms) {
-      let idx = contentLower.indexOf(term);
+      let idx = bodyLower.indexOf(term);
       while (idx !== -1) {
-        score += CONTENT_WEIGHT;
-        idx = contentLower.indexOf(term, idx + 1);
+        bodyHits += CONTENT_WEIGHT;
+        idx = bodyLower.indexOf(term, idx + 1);
       }
+      if (metaText.includes(term)) metaHits += 1;
     }
 
     if (entry.metadata) {
@@ -221,7 +613,7 @@ export class MemoryManager {
       for (const term of queryTerms) {
         let idx = metaStr.indexOf(term);
         while (idx !== -1) {
-          score += METADATA_WEIGHT;
+          metaHits += 1;
           idx = metaStr.indexOf(term, idx + 1);
         }
       }
@@ -229,16 +621,42 @@ export class MemoryManager {
 
     if (entry.tags) {
       for (const tag of entry.tags) {
+        const tagLower = tag.toLowerCase();
         for (const term of queryTerms) {
-          if (tag.toLowerCase().includes(term)) {
-            score += METADATA_WEIGHT;
-          }
+          if (tagLower.includes(term)) metaHits += 1;
         }
       }
     }
 
+    if (metaHits === 0 && bodyHits === 0) return 0;
+
+    const score =
+      metaHits * METADATA_WEIGHT +
+      bodyHits +
+      (entry.importance ?? 0) * 0.4 +
+      Math.min(entry.useCount ?? 0, 5) * 0.1 +
+      this.recencyBoost(entry);
     return score;
   }
+
+  private recencyBoost(entry: MemoryEntry): number {
+    const ts = entry.updatedAt ?? entry.createdAt;
+    if (!ts) return 0;
+    const ageDays = (Date.now() - ts) / RECENCY_DAY_MS;
+    if (ageDays <= 14) return 0.3;
+    if (ageDays <= 30) return 0.1;
+    return 0;
+  }
+
+  private freshnessNote(entry: MemoryEntry): string {
+    const ts = entry.updatedAt ?? entry.createdAt;
+    if (!ts) return "";
+    const days = Math.floor((Date.now() - ts) / RECENCY_DAY_MS);
+    if (days <= 1) return "";
+    return ` (memory is ${days} days old; verify before relying on it)`;
+  }
+
+  // ── persistence ──────────────────────────────────────────
 
   private generateId(): string {
     return `mem_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -249,53 +667,214 @@ export class MemoryManager {
       const oldest = [...this.entries.values()].sort(
         (a, b) => a.createdAt - b.createdAt,
       )[0];
-      if (oldest) this.entries.delete(oldest.id);
-      else break;
+      if (oldest) {
+        this.entries.delete(oldest.id);
+        if (this.storageDir) void this.removeEntryFile(oldest.id);
+      } else break;
     }
+  }
+
+  private entryToMetadata(entry: MemoryEntry): Record<string, unknown> {
+    const meta: Record<string, unknown> = {
+      schema_version: SCHEMA_VERSION,
+      id: entry.id,
+      name: entry.name ?? entry.id,
+      description: entry.description ?? "",
+      type: entry.type ?? DEFAULT_MEMORY_TYPE,
+      scope: entry.scope ?? DEFAULT_MEMORY_SCOPE,
+      importance: entry.importance ?? 0,
+      signature: entry.signature ?? "",
+      created_at: toIso(entry.createdAt),
+      updated_at: toIso(entry.updatedAt),
+      use_count: entry.useCount ?? 0,
+    };
+    if (entry.lastUsedAt) meta.last_used_at = toIso(entry.lastUsedAt);
+    if (entry.tags?.length) meta.tags = entry.tags;
+    if (entry.metadata) {
+      for (const [k, v] of Object.entries(entry.metadata)) {
+        if (!(k in meta)) meta[k] = v;
+      }
+    }
+    return meta;
+  }
+
+  private metadataToEntry(
+    metadata: Record<string, unknown>,
+    body: string,
+    fallbackId: string,
+    fallbackTime: number,
+  ): MemoryEntry {
+    const knownKeys = new Set<string>([
+      ...FRONTMATTER_FIELDS,
+      "category",
+      "source",
+    ]);
+    const extra: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(metadata)) {
+      if (!knownKeys.has(k)) extra[k] = v;
+    }
+    const createdAt = fromIso(metadata.created_at) ?? fallbackTime;
+    const updatedAt = fromIso(metadata.updated_at) ?? createdAt;
+    const tagsRaw = metadata.tags;
+    const tags = Array.isArray(tagsRaw)
+      ? tagsRaw.map((t) => String(t))
+      : typeof tagsRaw === "string" && tagsRaw
+        ? [tagsRaw]
+        : undefined;
+    return {
+      id: String(metadata.id || fallbackId),
+      content: body.replace(/^\n+/, "").replace(/\n+$/, ""),
+      tags,
+      createdAt,
+      updatedAt,
+      metadata: Object.keys(extra).length ? extra : undefined,
+      name: metadata.name ? String(metadata.name) : undefined,
+      description: metadata.description ? String(metadata.description) : undefined,
+      type: parseMemoryType(metadata.type) ?? DEFAULT_MEMORY_TYPE,
+      scope: parseMemoryScope(metadata.scope) ?? DEFAULT_MEMORY_SCOPE,
+      importance: coerceInt(metadata.importance),
+      signature: metadata.signature ? String(metadata.signature) : undefined,
+      useCount: coerceInt(metadata.use_count),
+      lastUsedAt: fromIso(metadata.last_used_at),
+    };
+  }
+
+  private hydrateLegacy(entry: MemoryEntry): MemoryEntry {
+    return {
+      ...entry,
+      type: entry.type ?? DEFAULT_MEMORY_TYPE,
+      scope: entry.scope ?? DEFAULT_MEMORY_SCOPE,
+      importance: entry.importance ?? 0,
+      useCount: entry.useCount ?? 0,
+      signature:
+        entry.signature ??
+        computeMemorySignature(
+          entry.content,
+          entry.type ?? DEFAULT_MEMORY_TYPE,
+          "knowledge",
+        ),
+    };
   }
 
   private async persistEntry(entry: MemoryEntry): Promise<void> {
     if (!this.storageDir) return;
     await mkdir(this.storageDir, { recursive: true });
-    const filePath = join(this.storageDir, `${entry.id}.json`);
-    await writeFile(filePath, JSON.stringify(entry, null, 2), "utf-8");
-  }
-
-  private async loadEntry(id: string): Promise<MemoryEntry | undefined> {
-    if (!this.storageDir) return undefined;
-    try {
-      const filePath = join(this.storageDir, `${id}.json`);
-      const raw = await readFile(filePath, "utf-8");
-      const entry = JSON.parse(raw) as MemoryEntry;
-      this.entries.set(entry.id, entry);
-      return entry;
-    } catch {
-      return undefined;
-    }
+    const filePath = join(this.storageDir, `${entry.id}.md`);
+    const rendered = renderMemoryFile(this.entryToMetadata(entry), entry.content);
+    await writeFile(filePath, rendered, "utf-8");
   }
 
   private async removeEntryFile(id: string): Promise<void> {
     if (!this.storageDir) return;
     try {
-      await unlink(join(this.storageDir, `${id}.json`));
+      await unlink(join(this.storageDir, `${id}.md`));
     } catch {
       // file may not exist
     }
   }
 
-  private async loadAllEntries(): Promise<void> {
-    if (!this.storageDir) return;
+  private async ensureLoaded(): Promise<void> {
+    if (this.loaded || !this.storageDir) {
+      this.loaded = true;
+      return;
+    }
+    this.loaded = true;
     try {
       const files = await readdir(this.storageDir);
       for (const file of files) {
-        if (!file.endsWith(".json")) continue;
-        const id = file.replace(/\.json$/, "");
-        if (!this.entries.has(id)) {
-          await this.loadEntry(id);
+        if (!file.endsWith(".md") || file === "MEMORY.md") continue;
+        const path = join(this.storageDir, file);
+        let raw: string;
+        try {
+          raw = await readFile(path, "utf-8");
+        } catch {
+          continue;
         }
+        const { metadata, body } = splitMemoryFile(raw);
+        let mtime = Date.now();
+        try {
+          mtime = (await stat(path)).mtimeMs;
+        } catch {
+          // keep default
+        }
+        const fallbackId = file.replace(/\.md$/, "");
+        const entry = this.metadataToEntry(metadata, body, fallbackId, mtime);
+        if (!entry.signature) {
+          entry.signature = computeMemorySignature(
+            entry.content,
+            entry.type ?? DEFAULT_MEMORY_TYPE,
+            "knowledge",
+          );
+        }
+        this.entries.set(entry.id, entry);
       }
     } catch {
-      // directory may not exist
+      // directory may not exist yet
     }
   }
+
+  /** Maintain the MEMORY.md index (one pointer line per memory, truncated). */
+  private async writeIndex(): Promise<void> {
+    if (!this.storageDir) return;
+    const entries = [...this.entries.values()].sort(
+      (a, b) => b.updatedAt - a.updatedAt,
+    );
+    const lines: string[] = ["# Memory", ""];
+    for (const entry of entries) {
+      const desc =
+        entry.description ||
+        entry.name ||
+        firstContentLine(entry.content) ||
+        entry.content.slice(0, 80);
+      lines.push(`- [${entry.id}] ${desc}`);
+    }
+    const raw = lines.join("\n") + "\n";
+    const view = truncateEntrypointContent(raw);
+    try {
+      await mkdir(this.storageDir, { recursive: true });
+      await writeFile(join(this.storageDir, "MEMORY.md"), view.content, "utf-8");
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Standalone parse helpers
+// ──────────────────────────────────────────────────────────────────────────
+
+export function parseMemoryType(raw: unknown): MemoryType | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().toLowerCase();
+  if ((MEMORY_TYPES as readonly string[]).includes(v)) return v as MemoryType;
+  return undefined;
+}
+
+export function parseMemoryScope(raw: unknown): MemoryScope | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().toLowerCase();
+  if ((MEMORY_SCOPES as readonly string[]).includes(v)) return v as MemoryScope;
+  if (v === "personal" || v === "user") return "private";
+  if (v === "shared") return "team";
+  return undefined;
+}
+
+function coerceInt(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === "string") {
+    const n = Number.parseInt(value, 10);
+    if (!Number.isNaN(n)) return n;
+  }
+  return fallback;
+}
+
+/** Return the first useful body line for descriptions. */
+export function firstContentLine(body: string, limit = 200): string {
+  for (const line of body.split(/\r?\n/)) {
+    const stripped = line.trim();
+    if (stripped && stripped !== "---" && !stripped.startsWith("#")) {
+      return stripped.slice(0, limit);
+    }
+  }
+  return "";
 }
