@@ -168,6 +168,60 @@ describe("MemoryManager search tokenization", () => {
     expect(results[0].entry.content).toContain("kubernetes");
   });
 
+  it("scores body by distinct token presence, not occurrence count", async () => {
+    const mgr = new MemoryManager();
+    // `repeated` has the single query token "cache" repeated many times but
+    // matches only one distinct query token.
+    const repeated = await mgr.add("cache cache cache cache cache cache");
+    // `distinct` matches two distinct query tokens once each.
+    const distinct = await mgr.add("cache redis");
+    const results = await mgr.search({ query: "cache redis" });
+    const rep = results.find((r) => r.entry.id === repeated.id)!;
+    const dis = results.find((r) => r.entry.id === distinct.id)!;
+    // The memory hitting more distinct tokens must outrank the one that only
+    // repeats a single token. Under the old occurrence-counting logic the
+    // 6x-repeated memory would have won.
+    expect(dis.score).toBeGreaterThan(rep.score);
+    expect(results[0].entry.id).toBe(distinct.id);
+  });
+
+  it("does not amplify a memory just because a token repeats", async () => {
+    const mgr = new MemoryManager();
+    // Same single distinct-token hit ("redis"), but one repeats it heavily.
+    const once = await mgr.add("redis notes");
+    const many = await mgr.add("redis redis redis redis redis notes");
+    const results = await mgr.search({ query: "redis" });
+    const rOnce = results.find((r) => r.entry.id === once.id)!;
+    const rMany = results.find((r) => r.entry.id === many.id)!;
+    // Both hit the same distinct token; repetition alone must not raise the
+    // body contribution (scores equal modulo recency/importance, which are
+    // identical here).
+    expect(rMany.score).toBe(rOnce.score);
+  });
+
+  it("counts a metadata/tag token as a single distinct meta hit", async () => {
+    const mgr = new MemoryManager();
+    // Token "redis" appears in body, AND in tags + metadata. Name/description
+    // are set to text that does not contain the token so the only meta surface
+    // is tags+metadata.
+    const a = await mgr.add("uses redis here", ["redis"], { topic: "redis" }, {
+      name: "alpha note",
+      description: "alpha description",
+    });
+    // Token "redis" appears in body only (name/description/tags/metadata have
+    // no overlap). Distinct content so signature dedup does not merge it.
+    const b = await mgr.add("uses redis too", undefined, undefined, {
+      name: "beta note",
+      description: "beta description",
+    });
+    const results = await mgr.search({ query: "redis" });
+    const ra = results.find((r) => r.entry.id === a.id)!;
+    const rb = results.find((r) => r.entry.id === b.id)!;
+    // `a` gets exactly +1 distinct meta hit (METADATA_WEIGHT = 2) over `b`; the
+    // meta hit is counted once, not double-counted across tags AND metadata.
+    expect(ra.score - rb.score).toBeCloseTo(2, 5);
+  });
+
   it("weights metadata matches higher than body matches", async () => {
     const mgr = new MemoryManager();
     // bodyMatch: term only in body, with a description that does not contain it.

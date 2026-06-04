@@ -332,8 +332,11 @@ export class CompactService {
     const compactableIds: string[] = [];
     for (const msg of messages) {
       if (msg.type === "tool_result") {
+        // Unknown / unmatched tool results default to *retained* (matches
+        // Python `_collect_compactable_tool_ids`, which only clears results for
+        // tools in COMPACTABLE_TOOLS). Do not over-clear orphaned results.
         const name = toolNameById.get(msg.toolUseId) ?? "";
-        if (COMPACTABLE_TOOLS.includes(name) || name === "") {
+        if (COMPACTABLE_TOOLS.includes(name)) {
           compactableIds.push(msg.toolUseId);
         }
       }

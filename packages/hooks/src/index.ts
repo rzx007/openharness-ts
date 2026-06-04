@@ -282,23 +282,18 @@ export class HookExecutor implements IHookExecutor {
       });
 
       proc.on("close", (code) => {
-        if (code === 2) {
-          const reason =
-            stdout.trim() || stderr.trim() || "blocked by command hook";
-          resolve({ blocked: true, reason });
-        } else if (code === 0) {
+        // Mirror Python's executor: success = (returncode === 0);
+        // blocked = blockOnFailure && !success. No exit-code-2 special case
+        // (that is a Claude Code convention, not an openharness one).
+        const success = code === 0;
+        if (success || !blockOnFailure) {
           resolve({ blocked: false });
         } else {
-          // Non-zero (non-2) exit: block only if configured to do so.
-          if (blockOnFailure) {
-            const reason =
-              stdout.trim() ||
-              stderr.trim() ||
-              `command hook failed with exit code ${code}`;
-            resolve({ blocked: true, reason });
-          } else {
-            resolve({ blocked: false });
-          }
+          const reason =
+            stdout.trim() ||
+            stderr.trim() ||
+            `command hook failed with exit code ${code}`;
+          resolve({ blocked: true, reason });
         }
       });
 

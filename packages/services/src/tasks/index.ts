@@ -262,25 +262,20 @@ export class TaskManager {
       if (task.type !== "agent") {
         throw new Error(`Task ${task.id} does not accept input`);
       }
-      state = this.restartAgentTask(task);
+      // Lazily resurrect the dead agent before writing (restart limit enforced
+      // inside restartAgentTask).
+      state = await this.restartAgentTask(task);
     }
     const stdin = state!.child.stdin!;
-    await new Promise<void>((resolve, reject) => {
-      stdin.write(payload, (err) => {
-        if (!err) return resolve();
-        // Broken pipe: restart the agent once and retry.
-        if (task.type === "agent") {
-          try {
-            const restarted = this.restartAgentTask(task);
-            restarted.child.stdin!.write(payload, (e2) => (e2 ? reject(e2) : resolve()));
-          } catch (e) {
-            reject(e);
-          }
-        } else {
-          reject(err);
-        }
-      });
-    });
+    try {
+      await writeToStdin(stdin, payload);
+    } catch (err) {
+      // Broken pipe mid-write: restart the agent once and retry (still bounded
+      // by the restart limit). Non-agent tasks just propagate the error.
+      if (task.type !== "agent") throw err;
+      const restarted = await this.restartAgentTask(task);
+      await writeToStdin(restarted.child.stdin!, payload);
+    }
   }
 
   // ── stop / shutdown ─────────────────────────────────────
@@ -364,12 +359,20 @@ export class TaskManager {
 
     const env = task.env ? { ...process.env, ...task.env } : process.env;
 
+    // On POSIX, run each task in its own process group (detached) so that, on
+    // stop, we can signal the whole tree (the shell plus any grandchildren it
+    // spawned) via `process.kill(-pid)`. Without this, a `shell: true` task's
+    // grandchildren survive a `child.kill()` and leak. Windows uses
+    // `taskkill /T` instead (see killProcessTree).
+    const detached = process.platform !== "win32";
+
     let child: ChildProcess;
     if (task.argv != null) {
       const [cmd, ...args] = task.argv;
       child = spawn(cmd!, args, {
         cwd: task.cwd,
         env,
+        detached,
         stdio: ["pipe", "pipe", "pipe"],
       });
     } else {
@@ -377,6 +380,7 @@ export class TaskManager {
         cwd: task.cwd,
         env,
         shell: true,
+        detached,
         stdio: ["pipe", "pipe", "pipe"],
       });
     }
@@ -419,16 +423,11 @@ export class TaskManager {
 
     const exitCode = code ?? 1;
 
-    // Auto-restart agent tasks that crash, up to MAX_RESTARTS.
-    if (task.type === "agent" && exitCode !== 0 && task.status !== "stopped") {
-      const restarts = parseInt(task.metadata.restart_count ?? "0", 10);
-      if (restarts < MAX_RESTARTS) {
-        this.restartAgentTask(task);
-        return;
-      }
-      task.metadata.status_note = `Agent task exited (code ${exitCode}); restart limit (${MAX_RESTARTS}) reached.`;
-    }
-
+    // Process exit only records terminal state. Unlike a naive "restart on any
+    // non-zero exit" loop, this mirrors Python's `_watch_process`: a dead
+    // process is just marked completed/failed and never proactively restarted.
+    // Agent tasks are resurrected lazily, only when something tries to write to
+    // a dead agent's stdin (see `doWrite` -> `restartAgentTask`).
     task.exitCode = exitCode;
     if (task.status !== "stopped") {
       task.status = exitCode === 0 ? "completed" : "failed";
@@ -438,11 +437,35 @@ export class TaskManager {
     await this.notifyCompletion(task);
   }
 
-  private restartAgentTask(task: TaskInfo): RunState {
+  /**
+   * Restart a dead agent task on demand (e.g. a write hit a broken pipe).
+   *
+   * This is the single chokepoint for the restart limit — every restart path
+   * funnels through here, so it can never exceed `MAX_RESTARTS`. Before
+   * spawning the replacement it reaps any lingering old child (mirroring
+   * Python's `_restart_agent_task`, which awaits the prior waiter), so we never
+   * leak an un-reaped subprocess.
+   */
+  private async restartAgentTask(task: TaskInfo): Promise<RunState> {
     if (task.command == null && task.argv == null) {
       throw new Error(`Task ${task.id} does not have a restart command or argv`);
     }
     const restartCount = parseInt(task.metadata.restart_count ?? "0", 10) + 1;
+    if (restartCount > MAX_RESTARTS) {
+      task.metadata.status_note = `Agent task restart limit (${MAX_RESTARTS}) reached.`;
+      throw new Error(`Task ${task.id} exceeded restart limit (${MAX_RESTARTS})`);
+    }
+
+    // Reap any still-tracked previous child before spawning a replacement so we
+    // never leave an orphaned subprocess behind.
+    const prev = this.states.get(task.id);
+    if (prev) {
+      // Bump generation so the old child's exit watcher does not clobber state.
+      this.generations.set(task.id, (this.generations.get(task.id) ?? 0) + 1);
+      this.states.delete(task.id);
+      await terminateProcess(prev.child, STOP_GRACE_MS);
+    }
+
     task.metadata.restart_count = String(restartCount);
     task.metadata.status_note = "Task restarted; prior interactive context was not preserved.";
     task.status = "running";
@@ -479,6 +502,13 @@ function defaultTasksDir(): string {
   } catch {
     return join(process.cwd(), ".openharness", "tasks");
   }
+}
+
+/** Write a frame to stdin, resolving on flush or rejecting on a pipe error. */
+function writeToStdin(stdin: NodeJS.WritableStream, payload: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    stdin.write(payload, (err) => (err ? reject(err) : resolve()));
+  });
 }
 
 /** Serialize one worker input as a single newline-terminated frame. */
@@ -519,11 +549,18 @@ function terminateProcess(child: ChildProcess, graceMs: number): Promise<void> {
     if (process.platform === "win32") {
       // Windows has no real SIGTERM for console apps; kill the whole tree.
       killProcessTree(child);
-    } else {
+    } else if (child.pid != null) {
+      // Graceful SIGTERM to the whole process group (the child leads its own
+      // group via `detached`), so shell-spawned grandchildren get a chance to
+      // exit cleanly. Fall back to the single child if the group send fails.
       try {
-        child.kill("SIGTERM");
+        process.kill(-child.pid, "SIGTERM");
       } catch {
-        /* ignore */
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          /* ignore */
+        }
       }
     }
     const timer = setTimeout(() => {
@@ -556,10 +593,18 @@ function killProcessTree(child: ChildProcess): void {
       }
     }
   } else {
+    // The child was spawned `detached`, so it leads its own process group whose
+    // gid equals its pid. Signalling the negative pid kills the whole group —
+    // the shell plus any grandchildren it forked. Fall back to a single-process
+    // kill if the group send fails (e.g. the group is already gone).
     try {
-      child.kill("SIGKILL");
+      process.kill(-child.pid, "SIGKILL");
     } catch {
-      /* ignore */
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

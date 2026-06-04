@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HookExecutor } from "../src/index.js";
 import type {
   HookDefinition,
@@ -6,6 +9,14 @@ import type {
   StreamMessageParams,
   StreamingMessageClient,
 } from "@openharness/core";
+
+/**
+ * POSIX-only: shellQuote produces POSIX single-quote escaping, which is only
+ * honored when {shell:true} resolves to /bin/sh. On win32, spawn uses cmd.exe,
+ * where this escaping does not apply, so these injection guarantees are tested
+ * where they are meaningful.
+ */
+const itPosix = it.skipIf(process.platform === "win32");
 
 /** A client that streams a fixed text response, capturing the last params. */
 function fakeClient(responseText: string): {
@@ -125,6 +136,7 @@ describe("HookExecutor", () => {
       type: "command",
       command: "exit 2",
       enabled: true,
+      blockOnFailure: true,
     });
     const results = await executor.executeWithResults("session_start", {});
     expect(results[0].success).toBe(false);
@@ -158,10 +170,26 @@ describe("HookExecutor", () => {
     ).resolves.toEqual({ blocked: false });
   });
 
-  it("executeCommand returns blocked for exit code 2", async () => {
+  it("executeCommand does NOT special-case exit code 2 (aligns with Python)", async () => {
+    // Python's executor has no exit-2 convention: success = (returncode == 0),
+    // blocked = block_on_failure && !success. With blockOnFailure unset, exit 2
+    // must NOT block.
     const executor = new HookExecutor();
     const controller = new AbortController();
     const result = await executor.executeCommand("exit 2", controller.signal);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("executeCommand blocks on exit code 2 only when blockOnFailure is set", async () => {
+    const executor = new HookExecutor();
+    const controller = new AbortController();
+    const result = await executor.executeCommand(
+      "exit 2",
+      controller.signal,
+      "pre_tool_use",
+      {},
+      true
+    );
     expect(result.blocked).toBe(true);
   });
 
@@ -172,7 +200,7 @@ describe("HookExecutor", () => {
     expect(result.blocked).toBe(false);
   });
 
-  it("execute returns blocked when hook exits with code 2", async () => {
+  it("execute does NOT block on exit 2 without blockOnFailure", async () => {
     const executor = new HookExecutor();
     executor.register({
       id: "h1",
@@ -182,11 +210,10 @@ describe("HookExecutor", () => {
       enabled: true,
     });
     const result = await executor.execute("pre_tool_use", { tool: "bash" });
-    expect(result.blocked).toBe(true);
-    expect(result.reason).toContain("blocked");
+    expect(result.blocked).toBe(false);
   });
 
-  it("execute returns blocked with reason from stdout", async () => {
+  it("execute returns blocked with reason from stdout when blockOnFailure is set", async () => {
     const executor = new HookExecutor();
     executor.register({
       id: "h1",
@@ -194,6 +221,7 @@ describe("HookExecutor", () => {
       type: "command",
       command: "echo 'dangerous operation detected' && exit 2",
       enabled: true,
+      blockOnFailure: true,
     });
     const result = await executor.execute("pre_tool_use", { tool: "bash" });
     expect(result.blocked).toBe(true);
@@ -409,47 +437,107 @@ describe("HookExecutor — $ARGUMENTS injection + shell escaping", () => {
     spy.mockRestore();
   });
 
-  it("injects and shell-escapes the payload when running a command", async () => {
-    const executor = new HookExecutor();
-    const controller = new AbortController();
-    // Payload contains a single quote and spaces; must survive shell parsing
-    // and arrive intact as one argument.
-    const payload = { msg: "it's a test", n: 5 };
-    const result = await executor.executeCommand(
-      "node -e \"process.stdout.write(process.argv[1])\" -- $ARGUMENTS",
-      controller.signal,
-      "pre_tool_use",
-      payload
-    );
-    // command does not block; we just assert it ran without throwing.
-    expect(result.blocked).toBe(false);
-  });
+  itPosix(
+    "delivers the escaped payload to the child as one intact argv element",
+    async () => {
+      const executor = new HookExecutor();
+      const controller = new AbortController();
+      const dir = mkdtempSync(join(tmpdir(), "oh-hook-"));
+      const sentinel = join(dir, "argv.txt");
+      const sentinelPosix = sentinel.replace(/\\/g, "/");
+      try {
+        // Payload has a single quote and spaces; with correct shlex-style
+        // escaping the child must receive the *exact* serialized JSON as a
+        // single argv element. The child writes argv[1] to a sentinel file.
+        const payload = { msg: "it's a test", n: 5 };
+        const expected = JSON.stringify(payload);
+        const script = `require('fs').writeFileSync(process.argv[1], process.argv[2])`;
+        const result = await executor.executeCommand(
+          `node -e ${JSON.stringify(script)} -- ${JSON.stringify(
+            sentinelPosix
+          )} $ARGUMENTS`,
+          controller.signal,
+          "pre_tool_use",
+          payload
+        );
+        expect(result.blocked).toBe(false);
+        // The captured argv must equal the serialized JSON byte-for-byte: not
+        // split on the space, not truncated at the quote.
+        expect(readFileSync(sentinel, "utf8")).toBe(expected);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  );
 
-  it("escapes payloads so injected quotes cannot break out", async () => {
-    const executor = new HookExecutor();
-    const controller = new AbortController();
-    // If escaping failed, the `; touch HACKED` would execute as a command.
-    const payload = { evil: "'; echo PWNED; '" };
-    const result = await executor.executeCommand(
-      "printf '%s' $ARGUMENTS",
-      controller.signal,
-      "pre_tool_use",
-      payload
-    );
-    expect(result.blocked).toBe(false);
-  });
+  itPosix(
+    "does not execute injected commands hidden in the payload",
+    async () => {
+      const executor = new HookExecutor();
+      const controller = new AbortController();
+      const dir = mkdtempSync(join(tmpdir(), "oh-hook-"));
+      // Use forward-slash paths in the shell text so the payload is path-free of
+      // backslashes (keeps the literal-equality assertion portable).
+      const sentinel = join(dir, "received.txt");
+      const sentinelPosix = sentinel.replace(/\\/g, "/");
+      // Marker the attacker would create IF command substitution / chaining ran.
+      const pwned = join(dir, "PWNED");
+      const pwnedPosix = pwned.replace(/\\/g, "/");
+      try {
+        // A payload packed with shell metacharacters: command substitution
+        // ($() and backticks), command chaining (; touch), and quotes. If any of
+        // these were evaluated by the shell, the PWNED marker would be created.
+        const evil =
+          `$(touch '${pwnedPosix}')` +
+          " `touch '" +
+          pwnedPosix +
+          "'` ; touch '" +
+          pwnedPosix +
+          "' && touch '" +
+          pwnedPosix +
+          "' '\"injected\"'";
+        const payload = { evil };
+        const expected = JSON.stringify(payload);
+        // The child writes the literal arg it received; if escaping worked, the
+        // file holds the literal JSON (with $(...)/backticks unevaluated) and the
+        // PWNED marker is never created.
+        const script = `require('fs').writeFileSync(process.argv[1], process.argv[2])`;
+        const result = await executor.executeCommand(
+          `node -e ${JSON.stringify(script)} -- ${JSON.stringify(
+            sentinelPosix
+          )} $ARGUMENTS`,
+          controller.signal,
+          "pre_tool_use",
+          payload
+        );
+        expect(result.blocked).toBe(false);
+        // Proof of non-execution: the injected commands left no marker file...
+        expect(existsSync(pwned)).toBe(false);
+        // ...and the child received the malicious payload as a literal string,
+        // i.e. $(...) and backticks are still present, unevaluated.
+        const received = readFileSync(sentinel, "utf8");
+        expect(received).toBe(expected);
+        expect(received).toContain("$(touch");
+        expect(received).toContain("`touch");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  );
 
   it("injects OPENHARNESS_HOOK_EVENT and OPENHARNESS_HOOK_PAYLOAD env vars", async () => {
     const executor = new HookExecutor();
     const controller = new AbortController();
-    // exit 2 with the event name echoed proves env injection reached the shell.
+    // A non-zero exit gated on the env var, combined with blockOnFailure, proves
+    // env injection reached the shell (only blocks if the var matched).
     const result = await executor.executeCommand(
       process.platform === "win32"
-        ? "if \"%OPENHARNESS_HOOK_EVENT%\"==\"pre_tool_use\" (exit 2)"
-        : 'test "$OPENHARNESS_HOOK_EVENT" = "pre_tool_use" && exit 2',
+        ? 'if "%OPENHARNESS_HOOK_EVENT%"=="pre_tool_use" (exit 1)'
+        : 'test "$OPENHARNESS_HOOK_EVENT" = "pre_tool_use" && exit 1',
       controller.signal,
       "pre_tool_use",
-      {}
+      {},
+      true
     );
     expect(result.blocked).toBe(true);
   });

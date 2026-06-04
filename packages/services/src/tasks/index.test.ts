@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TaskManager } from "./index.js";
@@ -8,6 +8,17 @@ const NODE = process.execPath;
 
 function tempTasksDir(): string {
   return mkdtempSync(join(tmpdir(), "oh-tasks-"));
+}
+
+/** Probe whether a pid is still alive. `kill(pid, 0)` performs no signalling. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // ESRCH => no such process. EPERM => alive but not ours (treat as alive).
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
@@ -146,22 +157,101 @@ describe("TaskManager real execution", () => {
     expect(seen).toContain("stopped");
   });
 
-  it("auto-restarts a crashing agent task up to the limit", async () => {
+  it("stopping a shell task kills shell-spawned grandchildren (whole process tree)", async () => {
     const mgr = makeManager();
-    // Agent task with an explicit argv that always exits non-zero quickly.
+    const dir = tempTasksDir();
+    const pidFile = join(dir, "grandchild.pid");
+    const readyFile = join(dir, "ready");
+
+    // A node grandchild that records its own pid, signals readiness, and then
+    // sleeps forever. It is launched as a *child of the shell*, so a naive
+    // single-process kill of the shell would leave it orphaned and alive.
+    const grandchildJs =
+      `const fs=require('fs');` +
+      `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));` +
+      `fs.writeFileSync(${JSON.stringify(readyFile)}, '1');` +
+      `setInterval(()=>{},1000);`;
+
+    let command: string;
+    if (process.platform === "win32") {
+      // Start the grandchild as a separate process, then keep the shell alive.
+      command =
+        `start /b "" "${NODE}" -e "${grandchildJs.replace(/"/g, '""')}" & ` +
+        `"${NODE}" -e "setInterval(()=>{},1000)"`;
+    } else {
+      // Background the grandchild under the shell, then keep the shell alive.
+      command =
+        `'${NODE}' -e '${grandchildJs.replace(/'/g, "'\\''")}' & ` +
+        `'${NODE}' -e 'setInterval(()=>{},1000)'`;
+    }
+
+    const task = await mgr.createShellTask(command, "tree with grandchild", process.cwd());
+    await waitFor(() => existsSync(pidFile) && existsSync(readyFile), 8000);
+    const grandPid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+    expect(Number.isFinite(grandPid)).toBe(true);
+
+    await mgr.stopTask(task.id);
+
+    // After stop, the grandchild must no longer be alive. On POSIX we probe via
+    // signal 0; on Windows the process-group kill is exercised through the same
+    // stop path (taskkill /T), and we likewise verify the pid is gone.
+    await waitFor(() => !isAlive(grandPid), 8000);
+    expect(isAlive(grandPid)).toBe(false);
+  });
+
+  it("does NOT auto-restart an agent task that exits on its own (mirrors Python _watch_process)", async () => {
+    const mgr = makeManager();
+    // Agent task whose argv exits non-zero immediately. Python's _watch_process
+    // only records terminal state; it never proactively restarts on exit.
     const task = await mgr.createAgentTask({
       prompt: "go",
-      description: "crash loop agent",
+      description: "crash-on-exit agent",
       cwd: process.cwd(),
       argv: [NODE, "-e", "process.exit(1)"],
     });
-    // It should burn through restarts and finally land in failed with the limit note.
-    await waitFor(() => {
-      const t = mgr.getTask(task.id)!;
-      return t.status === "failed" && (t.metadata.status_note ?? "").includes("restart limit");
-    }, 15000);
+    await waitFor(() => mgr.getTask(task.id)!.status === "failed");
+    // Give any (incorrect) restart loop a window to fire — it must not.
+    await new Promise((r) => setTimeout(r, 400));
     const t = mgr.getTask(task.id)!;
-    expect(parseInt(t.metadata.restart_count ?? "0", 10)).toBeGreaterThanOrEqual(5);
+    expect(t.status).toBe("failed");
+    expect(t.exitCode).toBe(1);
+    // No restart was triggered by the exit itself.
+    expect(parseInt(t.metadata.restart_count ?? "0", 10)).toBe(0);
+  });
+
+  it("restarts a dead agent on write (broken pipe) and bounds restarts by the limit", async () => {
+    const mgr = makeManager();
+    // Agent that reads one line, echoes it, then exits — so each write after the
+    // first lands on a dead process and forces a lazy restart.
+    const script =
+      "let b='';process.stdin.on('data',d=>{b+=d;const i=b.indexOf('\\n');" +
+      "if(i>=0){process.stdout.write('echo:'+b.slice(0,i)+'\\n');process.exit(0);}});";
+    const task = await mgr.createAgentTask({
+      prompt: "first",
+      description: "restart-on-write agent",
+      cwd: process.cwd(),
+      argv: [NODE, "-e", script],
+    });
+    // Wait for the initial process to consume the prompt and exit.
+    await waitFor(() => mgr.getTask(task.id)!.status === "completed");
+    expect(parseInt(mgr.getTask(task.id)!.metadata.restart_count ?? "0", 10)).toBe(0);
+
+    // Each subsequent write must lazily restart the dead agent. Drive it past
+    // the restart limit (5) so the (limit+1)-th write rejects.
+    let rejected = false;
+    for (let i = 0; i < 7; i++) {
+      try {
+        await mgr.writeToTask(task.id, `msg-${i}`);
+        // Let the freshly spawned child consume the line and exit again.
+        await waitFor(() => mgr.getTask(task.id)!.status === "completed", 5000);
+      } catch (e) {
+        rejected = true;
+        expect((e as Error).message).toMatch(/restart limit/);
+        break;
+      }
+    }
+    expect(rejected).toBe(true);
+    expect(parseInt(mgr.getTask(task.id)!.metadata.restart_count ?? "0", 10)).toBe(5);
   });
 
   it("agent task without argv/command is failed with needs-argv, not pending", async () => {

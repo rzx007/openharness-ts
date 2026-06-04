@@ -75,6 +75,67 @@ function bigConversation(turns: number): Message[] {
 const SMALL_MAX = 20_000 + 13_000 + 100; // threshold ~= 100 tokens
 
 // ---------------------------------------------------------------------------
+// 0. microCompact tool-result clearing policy
+// ---------------------------------------------------------------------------
+
+describe("microCompact clearing policy", () => {
+  it("clears old results for compactable (known) tools", () => {
+    const svc = new CompactService(100_000, 1);
+    const msgs: Message[] = [];
+    for (let i = 0; i < 4; i++) {
+      msgs.push({
+        type: "assistant",
+        content: "",
+        toolUses: [{ type: "tool_use", id: `b${i}`, name: "Bash", input: {} }],
+      });
+      msgs.push({
+        type: "tool_result",
+        toolUseId: `b${i}`,
+        content: [{ type: "text", text: `output ${i}` }],
+      });
+    }
+    const result = svc.microCompact(msgs);
+    // keepRecent=1 → the oldest Bash results are cleared, most recent retained.
+    const clearedCount = result.filter(
+      (m) =>
+        m.type === "tool_result" &&
+        m.content.length === 1 &&
+        (m.content[0] as { text: string }).text === "[Old tool result content cleared]",
+    ).length;
+    expect(clearedCount).toBeGreaterThan(0);
+  });
+
+  it("does NOT clear results for unknown / unmatched tool names", () => {
+    const svc = new CompactService(100_000, 1);
+    // Tool results whose tool_use has an unknown name, and orphaned results
+    // (no matching tool_use at all). Both must be retained verbatim.
+    const msgs: Message[] = [
+      {
+        type: "assistant",
+        content: "",
+        toolUses: [{ type: "tool_use", id: "u1", name: "CustomMcpThing", input: {} }],
+      },
+      { type: "tool_result", toolUseId: "u1", content: [{ type: "text", text: "keep me 1" }] },
+      {
+        type: "assistant",
+        content: "",
+        toolUses: [{ type: "tool_use", id: "u2", name: "CustomMcpThing", input: {} }],
+      },
+      { type: "tool_result", toolUseId: "u2", content: [{ type: "text", text: "keep me 2" }] },
+      // Orphaned result — no tool_use emitted its id (name resolves to "").
+      { type: "tool_result", toolUseId: "orphan", content: [{ type: "text", text: "keep orphan" }] },
+    ];
+    const result = svc.microCompact(msgs);
+    // Nothing cleared: all original texts survive.
+    const texts = result
+      .filter((m) => m.type === "tool_result")
+      .map((m) => (m as { content: { text: string }[] }).content[0]!.text);
+    expect(texts).toEqual(["keep me 1", "keep me 2", "keep orphan"]);
+    expect(texts).not.toContain("[Old tool result content cleared]");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 1. PTL error detection + head-truncation retry
 // ---------------------------------------------------------------------------
 

@@ -591,41 +591,38 @@ export class MemoryManager {
   // ── scoring ──────────────────────────────────────────────
 
   private computeScore(entry: MemoryEntry, queryTerms: string[]): number {
-    // Frontmatter (name/description/tags) weighted higher than body, plus
-    // importance, use_count and recency factors (mirrors Python search.py).
+    // Frontmatter (name/description/tags/metadata) weighted higher than body,
+    // plus importance, use_count and recency factors (mirrors Python
+    // search.py). Each query token counts as *at most one* distinct hit per
+    // bucket — presence, not occurrence count — so high-frequency repeated
+    // words are not artificially amplified (aligns with Python's
+    // `sum(1 for t in tokens if t in meta/body)`).
     const metaText = `${entry.name ?? ""} ${entry.description ?? ""}`.toLowerCase();
     const bodyLower = entry.content.toLowerCase();
+    // Fold metadata JSON and tags into the same "meta" surface the Python
+    // implementation derives from title/description, then dedupe per token.
+    const metadataText = entry.metadata
+      ? JSON.stringify(entry.metadata).toLowerCase()
+      : "";
+    const tagsText = entry.tags?.length
+      ? entry.tags.join(" ").toLowerCase()
+      : "";
 
     let metaHits = 0;
     let bodyHits = 0;
 
     for (const term of queryTerms) {
-      let idx = bodyLower.indexOf(term);
-      while (idx !== -1) {
-        bodyHits += CONTENT_WEIGHT;
-        idx = bodyLower.indexOf(term, idx + 1);
+      // distinct meta hit: token present in name/description, metadata, or tags
+      if (
+        metaText.includes(term) ||
+        (metadataText && metadataText.includes(term)) ||
+        (tagsText && tagsText.includes(term))
+      ) {
+        metaHits += 1;
       }
-      if (metaText.includes(term)) metaHits += 1;
-    }
-
-    if (entry.metadata) {
-      const metaStr = JSON.stringify(entry.metadata).toLowerCase();
-      for (const term of queryTerms) {
-        let idx = metaStr.indexOf(term);
-        while (idx !== -1) {
-          metaHits += 1;
-          idx = metaStr.indexOf(term, idx + 1);
-        }
-      }
-    }
-
-    if (entry.tags) {
-      for (const tag of entry.tags) {
-        const tagLower = tag.toLowerCase();
-        for (const term of queryTerms) {
-          if (tagLower.includes(term)) metaHits += 1;
-        }
-      }
+      // distinct body hit: token present in body content (once, regardless of
+      // how many times it repeats)
+      if (bodyLower.includes(term)) bodyHits += CONTENT_WEIGHT;
     }
 
     if (metaHits === 0 && bodyHits === 0) return 0;
