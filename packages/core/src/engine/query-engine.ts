@@ -40,6 +40,7 @@ export class QueryEngine implements IQueryEngine {
     this.compactService = new CompactService(
       options.maxTokens ?? 100_000,
       options.compactKeepRecent ?? 10,
+      { hookExecutor: this.hookExecutor },
     );
     this.costTracker = new CostTracker();
     this.systemPrompt = options.systemPrompt;

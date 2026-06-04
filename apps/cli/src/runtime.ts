@@ -81,6 +81,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   const systemPrompt = overrides.systemPrompt ?? await buildRuntimeSystemPrompt({
     customPrompt: settings.systemPrompt,
     cwd: process.cwd(),
+    permissionMode: mode,
     fastMode: overrides.fastMode ?? settings.fastMode,
     effort: overrides.effort ?? settings.effort,
     passes: settings.passes,
