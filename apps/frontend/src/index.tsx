@@ -28,7 +28,7 @@ if (rawConfig) {
   const backendCmd = process.env.OPENHARNESS_BACKEND_COMMAND;
   const command = backendCmd
     ? backendCmd.split(" ")
-    : ["oh", "--backend-only"];
+    : ["ohs", "--backend-only"];
 
   config = {
     backend_command: command,

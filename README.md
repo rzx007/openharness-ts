@@ -1,19 +1,23 @@
 # OpenHarness-ts
 
-OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式编码助手体验。本项目是其完整的 TypeScript 实现。
+OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式编码助手体验。本项目是其 TypeScript 复刻实现，核心 harness（引擎 / 工具 / 权限 / 会话 / TUI）已可用，仍在持续向 Python 原版 v0.1.9 对齐中。
 
 ## 特性
 
-- **多模型支持** — 20+ API Provider 自动检测（Anthropic、OpenAI、DeepSeek、Gemini、Qwen、GLM 等）
-- **40 内置工具** — 文件读写、Bash 执行、Web 搜索/抓取、Grep、MCP 协议、Cron 调度等
-- **多 Agent 编排** — Coordinator 模式支持 sequential/parallel/pipeline 三种编排策略
-- **MCP 协议** — 通过 stdio 传输连接外部 MCP Server，动态扩展工具集
-- **权限系统** — 工具黑白名单、路径规则、命令拒绝、交互式确认
-- **Hook 生命周期** — pre/post tool use、session start/end 事件钩子
-- **会话持久化** — Session 存储、历史恢复、Cron 定时任务
-- **插件系统** — 动态加载工具、Hook、自定义扩展
-- **Channel 适配器** — Stdio、HTTP、飞书（Feishu）多通道接入
-- **TUI 前端** — React/Ink 终端 UI，支持主题和 Vim 模式
+> ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
+
+- ✅ **多模型支持** — 20 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容）。🟡 暂缺 Codex/Copilot 订阅、reasoning effort、vision/图片传递
+- 🟡 **内置工具（40）** — 文件 / Bash / Web / Grep / Cron / MCP / Task 等齐全；Bash/Grep/Glob 为简化实现，暂无图片类工具
+- 🟠 **多 Agent 编排** — Coordinator 的 7 个 agent 定义与 XML 任务通知就绪；swarm 真实派发后端、sequential/parallel/pipeline 调度**尚未实现**
+- 🟡 **MCP 协议** — 支持 stdio 传输连接外部 MCP Server；暂无 HTTP/SSE 与 headers 鉴权
+- ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝
+- 🟡 **Hook 生命周期** — pre/post tool use、session start/end；prompt/agent 类型、priority 排序、其余事件待补
+- 🟡 **会话持久化** — Session 存储 / `--continue` / `--resume` / Cron（均为基础版）
+- 🟠 **插件系统** — 可读 `plugin.json`；工具自动发现与 commands/agents/hooks 贡献加载待补
+- 🟠 **Channel 适配器** — Stdio / HTTP / 飞书（基础）；Telegram/Discord/Slack 等多通道、附件、群组路由待补
+- 🟡 **TUI 前端** — React/Ink 终端 UI；暂无 Markdown/diff 渲染
+- 🔴 **尚未复刻** — `personalization`（环境事实抽取）、`ohmo`（个人助理 + 多渠道网关）、`sandbox`（Docker 隔离，当前为占位）
+- ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
 
 ## 快速开始
 
@@ -43,7 +47,7 @@ pnpm build
 pnpm test
 ```
 
-### 运行
+### 运行·
 
 ```bash
 # 设置 API Key（按所用 Provider 选择，见下方“配置”）
@@ -277,74 +281,86 @@ OpenHarness-ts/
 
 ### 核心引擎（Core）
 
-| 模块 | 说明 |
-|------|------|
-| `QueryEngine` | Agent 循环核心：提交消息 → 流式调用 API → 解析工具调用 → 权限检查 → 执行工具 → 循环直到完成 |
+
+| 模块               | 说明                                                                |
+| ---------------- | ----------------------------------------------------------------- |
+| `QueryEngine`    | Agent 循环核心：提交消息 → 流式调用 API → 解析工具调用 → 权限检查 → 执行工具 → 循环直到完成        |
 | `CompactService` | 上下文管理：token 估算 + 自动摘要（LLM 生成 `<analysis>/<summary>`），连续失败 3 次自动退回 |
-| `CostTracker` | 费用追踪：记录 input/output/cache token 用量和估算成本 |
-| `ToolRegistry` | 工具注册中心：按名称查找、批量注册、可过滤 |
-| `RuntimeBuilder` | 运行时组装：Builder 模式将 API Client、工具、权限、Hook 组装为 `RuntimeBundle` |
-| `Settings` | 配置管理：默认值 < 配置文件 < 环境变量 < CLI 参数，四层优先级 |
+| `CostTracker`    | 费用追踪：记录 input/output/cache token 用量和估算成本                          |
+| `ToolRegistry`   | 工具注册中心：按名称查找、批量注册、可过滤                                             |
+| `RuntimeBuilder` | 运行时组装：Builder 模式将 API Client、工具、权限、Hook 组装为 `RuntimeBundle`       |
+| `Settings`       | 配置管理：默认值 < 配置文件 < 环境变量 < CLI 参数，四层优先级                             |
+
 
 ### API 层
 
-| 模块 | 说明 |
-|------|------|
-| `AnthropicClient` | Anthropic 原生 SDK 客户端，流式聚合 `input_json_delta`，429/5xx 指数退避重试 |
+
+| 模块                       | 说明                                                          |
+| ------------------------ | ----------------------------------------------------------- |
+| `AnthropicClient`        | Anthropic 原生 SDK 客户端，流式聚合 `input_json_delta`，429/5xx 指数退避重试 |
 | `OpenAICompatibleClient` | OpenAI 兼容客户端，支持 reasoning_content（o1/o3 系列），Kimi workaround |
-| `Provider Registry` | 20+ Provider 自动检测：apiKey 前缀 → baseURL 关键字 → model 关键字，三级匹配 |
-| `detectProvider()` | 从 `(model, apiKey, baseURL)` 三元组自动推断 Provider 和 BackendType |
+| `Provider Registry`      | 20+ Provider 自动检测：apiKey 前缀 → baseURL 关键字 → model 关键字，三级匹配  |
+| `detectProvider()`       | 从 `(model, apiKey, baseURL)` 三元组自动推断 Provider 和 BackendType |
+
 
 ### 工具层（40 Tools）
 
-| 分类 | 工具 |
-|------|------|
-| **文件操作** | `Bash`（命令执行）、`Read`（文件读取）、`Write`（文件写入）、`Edit`（精确字符串替换）、`Glob`（文件模式匹配）、`NotebookEdit`（Jupyter 编辑） |
-| **搜索** | `Grep`（ripgrep 优先 + JS fallback）、`LspTool`（LSP 集成） |
-| **Web** | `WebFetch`（URL 抓取 + HTML→Text）、`WebSearch`（DuckDuckGo HTML 搜索） |
-| **任务管理** | `TaskCreate/Get/List/Output/Stop/Update`（6 个任务生命周期工具） |
-| **Agent/团队** | `Agent`（子 Agent 派发）、`SendMessage`（Agent 间通信）、`TeamCreate/Delete`（团队管理） |
-| **调度** | `CronCreate/Delete/List/Toggle/RemoteTrigger`（5 个 Cron 工具） |
-| **MCP** | `McpToolCall/ListMcpResources/ReadMcpResource/McpAuth`（4 个 MCP 工具） |
-| **元工具** | `TodoWrite、Config、Sleep、Skill、ToolSearch、AskUser、Brief、EnterPlanMode、ExitPlanMode、EnterWorktree、ExitWorktree` |
+
+| 分类           | 工具                                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| **文件操作**     | `Bash`（命令执行）、`Read`（文件读取）、`Write`（文件写入）、`Edit`（精确字符串替换）、`Glob`（文件模式匹配）、`NotebookEdit`（Jupyter 编辑）             |
+| **搜索**       | `Grep`（ripgrep 优先 + JS fallback）、`LspTool`（LSP 集成）                                                            |
+| **Web**      | `WebFetch`（URL 抓取 + HTML→Text）、`WebSearch`（DuckDuckGo HTML 搜索）                                                |
+| **任务管理**     | `TaskCreate/Get/List/Output/Stop/Update`（6 个任务生命周期工具）                                                         |
+| **Agent/团队** | `Agent`（子 Agent 派发）、`SendMessage`（Agent 间通信）、`TeamCreate/Delete`（团队管理）                                        |
+| **调度**       | `CronCreate/Delete/List/Toggle/RemoteTrigger`（5 个 Cron 工具）                                                    |
+| **MCP**      | `McpToolCall/ListMcpResources/ReadMcpResource/McpAuth`（4 个 MCP 工具）                                            |
+| **元工具**      | `TodoWrite、Config、Sleep、Skill、ToolSearch、AskUser、Brief、EnterPlanMode、ExitPlanMode、EnterWorktree、ExitWorktree` |
+
 
 ### 服务层
 
-| 模块 | 说明 |
-|------|------|
+
+| 模块               | 说明                                                          |
+| ---------------- | ----------------------------------------------------------- |
 | `CompactService` | LLM 驱动的对话摘要：当 token 接近阈值时自动触发，结构化 `<analysis>/<summary>` 输出 |
-| `SessionStorage` | 会话持久化：JSON 文件存储，支持 `--continue` / `--resume` 恢复 |
-| `CronScheduler` | 定时任务：cron 表达式解析 + `computeNextRunTime` + 执行历史记录 |
-| `TaskManager` | 任务管理：创建/查询/停止/输出，文件持久化 |
-| `MemoryManager` | 记忆存储：加权关键词搜索（metadata 权重 2x），最大 1000 条，LRU 淘汰 |
-| `LspClient` | LSP 客户端：与 Language Server Protocol 通信 |
-| `OAuthFlow` | OAuth 认证：Device Code Flow + token 刷新 |
+| `SessionStorage` | 会话持久化：JSON 文件存储，支持 `--continue` / `--resume` 恢复             |
+| `CronScheduler`  | 定时任务：cron 表达式解析 + `computeNextRunTime` + 执行历史记录             |
+| `TaskManager`    | 任务管理：创建/查询/停止/输出，文件持久化                                      |
+| `MemoryManager`  | 记忆存储：加权关键词搜索（metadata 权重 2x），最大 1000 条，LRU 淘汰               |
+| `LspClient`      | LSP 客户端：与 Language Server Protocol 通信                       |
+| `OAuthFlow`      | OAuth 认证：Device Code Flow + token 刷新                        |
+
 
 ### 扩展层
 
-| 模块 | 说明 |
-|------|------|
-| `Coordinator` | 多 Agent 编排：7 个内置 Agent 定义 + system prompt + sequential/parallel/pipeline 模式 |
-| `McpClientManager` | MCP 协议客户端：stdio 传输连接外部 MCP Server，动态获取工具和资源 |
-| `ChannelAdapter` | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人） |
-| `HookExecutor` | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
-| `Swarm/TeamRegistry` | 多 Agent 团队：Agent 注册、派发、消息路由 |
-| `PluginLoader` | 插件加载器：读取 `plugin.json` 清单，校验 schema，动态注册工具和 Hook |
-| `SkillRegistry` | Skill 管理：Markdown + frontmatter 解析，支持文件/目录批量加载 |
-| `BridgeManager` | 会话桥接：多进程间共享会话状态 |
-| `PermissionChecker` | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝 |
+
+| 模块                   | 说明                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `Coordinator`        | 多 Agent 编排：7 个内置 Agent 定义 + system prompt + sequential/parallel/pipeline 模式                                 |
+| `McpClientManager`   | MCP 协议客户端：stdio 传输连接外部 MCP Server，动态获取工具和资源                                                                 |
+| `ChannelAdapter`     | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                              |
+| `HookExecutor`       | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
+| `Swarm/TeamRegistry` | 多 Agent 团队：Agent 注册、派发、消息路由                                                                                 |
+| `PluginLoader`       | 插件加载器：读取 `plugin.json` 清单，校验 schema，动态注册工具和 Hook                                                            |
+| `SkillRegistry`      | Skill 管理：Markdown + frontmatter 解析，支持文件/目录批量加载                                                              |
+| `BridgeManager`      | 会话桥接：多进程间共享会话状态                                                                                             |
+| `PermissionChecker`  | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                               |
+
 
 ### UI 层
 
-| 模块 | 说明 |
-|------|------|
-| `CLI` | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/config 子命令，20+ CLI flags |
-| `REPL` | 交互式循环：`>` 提示符，34 个斜杠命令（`/help, /model, /provider, /clear, /compact, /permissions, /plan, /resume, /memory, /mcp, /skills, /agents` 等） |
-| `TUI Frontend` | React/Ink 终端 UI：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。通过 `--tui` 启动，前端 spawn 后端 `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲 |
-| `BackendHost` | 后端协议实现：处理 5 种请求（submit_line / permission_response / question_response / list_sessions / shutdown），发出 17 种结构化事件（assistant_delta / tool_started / tool_completed / modal_request / todo_update / plan_mode_change 等） |
-| `ThemeManager` | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题 |
-| `VimModeHandler` | Vim 模态编辑：normal / insert / visual / command 模式切换 |
-| `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析 |
+
+| 模块                  | 说明                                                                                                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/config 子命令，20+ CLI flags                                                                                                                                               |
+| `REPL`              | 交互式循环：`>` 提示符，34 个斜杠命令（`/help, /model, /provider, /clear, /compact, /permissions, /plan, /resume, /memory, /mcp, /skills, /agents` 等）                                                                              |
+| `TUI Frontend`      | React/Ink 终端 UI：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。通过 `--tui` 启动，前端 spawn 后端 `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲              |
+| `BackendHost`       | 后端协议实现：处理 5 种请求（submit_line / permission_response / question_response / list_sessions / shutdown），发出 17 种结构化事件（assistant_delta / tool_started / tool_completed / modal_request / todo_update / plan_mode_change 等） |
+| `ThemeManager`      | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题                                                                                                                                                      |
+| `VimModeHandler`    | Vim 模态编辑：normal / insert / visual / command 模式切换                                                                                                                                                                   |
+| `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析                                                                                                                                                                                                  |
+
 
 ---
 
@@ -497,19 +513,21 @@ ohs --continue         ohs --resume <id>
 
 ## 技术栈
 
-| 层 | 技术 |
-|----|------|
-| 语言 | TypeScript 5.7+（ESM） |
-| 构建 | Turborepo（任务编排）+ Bun（CLI 打包，`apps/cli/build.ts`） |
-| 测试 | Vitest |
-| 包管理 | pnpm 10（monorepo） |
-| CLI | Commander.js |
-| API | @anthropic-ai/sdk, openai |
-| MCP | @modelcontextprotocol/sdk |
-| 飞书 | @larksuiteoapi/node-sdk |
-| TUI | React + Ink |
-| Schema | Zod |
-| Cron | cron-parser |
+
+| 层      | 技术                                               |
+| ------ | ------------------------------------------------ |
+| 语言     | TypeScript 5.7+（ESM）                             |
+| 构建     | Turborepo（任务编排）+ Bun（CLI 打包，`apps/cli/build.ts`） |
+| 测试     | Vitest                                           |
+| 包管理    | pnpm 10（monorepo）                                |
+| CLI    | Commander.js                                     |
+| API    | @anthropic-ai/sdk, openai                        |
+| MCP    | @modelcontextprotocol/sdk                        |
+| 飞书     | @larksuiteoapi/node-sdk                          |
+| TUI    | React + Ink                                      |
+| Schema | Zod                                              |
+| Cron   | cron-parser                                      |
+
 
 ## 配置
 
@@ -582,16 +600,18 @@ setx ANTHROPIC_API_KEY "sk-ant-..."
 
 ### 环境变量
 
-| 变量 | 说明 |
-|------|------|
-| `ANTHROPIC_API_KEY` | Anthropic API Key |
-| `OPENAI_API_KEY` | OpenAI API Key |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key |
-| `ZHIPU_API_KEY` | 智谱 AI（GLM）API Key |
+
+| 变量                       | 说明                           |
+| ------------------------ | ---------------------------- |
+| `ANTHROPIC_API_KEY`      | Anthropic API Key            |
+| `OPENAI_API_KEY`         | OpenAI API Key               |
+| `DEEPSEEK_API_KEY`       | DeepSeek API Key             |
+| `ZHIPU_API_KEY`          | 智谱 AI（GLM）API Key            |
 | `OPENHARNESS_CONFIG_DIR` | 自定义配置目录（默认 `~/.openharness`） |
-| `OPENHARNESS_MODEL` | 默认模型名称 |
-| `OPENHARNESS_BASE_URL` | API Base URL 覆盖 |
-| `OPENHARNESS_API_FORMAT` | API 格式（anthropic / openai） |
+| `OPENHARNESS_MODEL`      | 默认模型名称                       |
+| `OPENHARNESS_BASE_URL`   | API Base URL 覆盖              |
+| `OPENHARNESS_API_FORMAT` | API 格式（anthropic / openai）   |
+
 
 ---
 
@@ -665,16 +685,18 @@ ohs --model glm-4-plus \
 
 **可用模型：**
 
-| 模型 | 说明 |
-|------|------|
-| `glm-4-plus` | GLM-4 增强版，综合能力最强 |
-| `glm-4` | GLM-4 标准版 |
-| `glm-4-flash` | GLM-4 快速版，低延迟低成本 |
-| `glm-4-long` | GLM-4 长上下文版（128K） |
-| `glm-4-air` | GLM-4 轻量版 |
-| `glm-4-airx` | GLM-4 轻量增强版 |
-| `glm-4v` | GLM-4 视觉版（支持图片输入） |
-| `glm-3-turbo` | GLM-3 快速版 |
+
+| 模型            | 说明                |
+| ------------- | ----------------- |
+| `glm-4-plus`  | GLM-4 增强版，综合能力最强  |
+| `glm-4`       | GLM-4 标准版         |
+| `glm-4-flash` | GLM-4 快速版，低延迟低成本  |
+| `glm-4-long`  | GLM-4 长上下文版（128K） |
+| `glm-4-air`   | GLM-4 轻量版         |
+| `glm-4-airx`  | GLM-4 轻量增强版       |
+| `glm-4v`      | GLM-4 视觉版（支持图片输入） |
+| `glm-3-turbo` | GLM-3 快速版         |
+
 
 ---
 
@@ -682,11 +704,13 @@ ohs --model glm-4-plus \
 
 框架支持三级自动检测，无需手动指定 provider：
 
-| 检测级别 | 规则 | 示例 |
-|----------|------|------|
-| API Key 前缀 | 匹配 `sk-` 后的特征字符 | Anthropic: `sk-ant-` |
-| Base URL 关键字 | 匹配域名关键词 | DeepSeek: `deepseek.com`，GLM: `bigmodel.cn` |
-| 模型名称关键字 | 匹配模型名前缀/关键词 | DeepSeek: `deepseek-*`，GLM: `glm-*` |
+
+| 检测级别         | 规则              | 示例                                          |
+| ------------ | --------------- | ------------------------------------------- |
+| API Key 前缀   | 匹配 `sk-` 后的特征字符 | Anthropic: `sk-ant-`                        |
+| Base URL 关键字 | 匹配域名关键词         | DeepSeek: `deepseek.com`，GLM: `bigmodel.cn` |
+| 模型名称关键字      | 匹配模型名前缀/关键词     | DeepSeek: `deepseek-`*，GLM: `glm-`*         |
+
 
 因此在设置好对应环境变量后，通常只需指定 `--model` 即可：
 

@@ -1,376 +1,213 @@
-# OpenHarness TypeScript — 补全计划
+# OpenHarness-ts — 补齐计划（对比 Python 原版 v0.1.9）
 
-基于全面审计（对比 Python 源码），Phase 1-7 已完成基础迁移，以下是剩余差距的补全计划。
+基于对 Python 原版 `openharness` **v0.1.9** 源码的逐模块审计整理。核心 harness（引擎 / 工具 / 权限 / 会话 / 前端协议）已可用，但相对原版仍有大量功能未对齐。本文档按**影响面 + 优先级**排序，给出可执行的补齐路线。
+
+> 状态图例：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现 · ⛔ 不在复刻范围
 
 ## 原则
 
-1. **每步完成 = `pnpm build` 通过 + `pnpm test` 通过**
-2. 按 **影响面从广到窄** 排序：先修引擎核心，再修工具，最后修 CLI 细节
-3. 每步可独立验证，不依赖后续步骤
-4. 标记 `// FUTURE` 的：sandbox、voice、React/Ink TUI、Channel 集成（Telegram/Discord 等）
+1. 每步完成 = `pnpm check-types` 通过 + `pnpm test` 通过（pre-commit 与 CI 已接入）。
+2. **先修正确性、再补能力、最后做大模块**：Phase A 不增功能只修 bug，Phase B/C 补核心与扩展，Phase D/E 做大模块与体验。
+3. 每步可独立验证，不依赖后续步骤。
+4. ⛔ 不在范围：`autopilot`（仓库级自动驾驶 + dashboard）、`voice`（STT/TTS）。
 
 ---
 
-## Phase 8: 引擎核心修复（关键）
+## 对齐总览
 
-### 8.1 API 客户端 retry + 错误翻译
-
-**问题**: 三个 API 客户端（Anthropic/OpenAI/Copilot）零重试，429/500 瞬间报错；`retryWithBackoff` 已 import 但未使用。
-
-**工作**:
-- Anthropic 客户端：包裹 `streamMessage` 逻辑，用 `retryWithBackoff`（429/500/502/503/529 重试，指数退避）
-- OpenAI 客户端：同上（429/500/502/503），移除死代码常量，实际调用 `retryWithBackoff`
-- Copilot 客户端：同上
-- 错误翻译：catch SDK 错误，包装为 `AuthenticationFailure` / `RateLimitFailure` / `RequestFailure`
-- 增强 `retryWithBackoff`：支持 Retry-After header、区分 retryable vs non-retryable
-
-**文件**: `packages/api/src/providers/anthropic.ts`, `openai.ts`, `copilot.ts`, `packages/core/src/utils/retry.ts`
-
-### 8.2 Anthropic 流式 tool_use 输入聚合
-
-**问题**: Anthropic 客户端只读 `content_block_start` 的 input（始终 `{}`），未处理 `input_json_delta` 事件，导致工具调用参数永远为空。
-
-**工作**:
-- 在流式循环中跟踪当前 tool_use block，累加 `input_json_delta` 的 `partial_json`
-- 在 `content_block_stop` 时解析完整 JSON 为 tool input
-- `tool_use_start` 事件延后到参数完整后再 yield（或在 end 时 yield 完整 input）
-
-**文件**: `packages/api/src/providers/anthropic.ts`
-
-### 8.3 Hooks 阻塞能力
-
-**问题**: TS hooks 返回 `void`（fire-and-forget），无法阻止工具执行。Python hooks 返回 `AggregatedHookResult.blocked`。
-
-**工作**:
-- `IHookExecutor.execute()` 返回类型改为 `Promise<HookResult>`
-- `HookResult` 增加 `blocked: boolean` + `reason?: string`
-- `HookExecutor` 的 `executeSingle()` 返回执行结果，command/http hook 解析输出决定是否 block
-- `QueryEngine.executeTools()` 检查 `blocked`，若为 true 则跳过工具执行
-- 更新所有 mock 和测试
-
-**文件**: `packages/core/src/types/hooks.ts`, `packages/hooks/src/index.ts`, `packages/core/src/engine/query-engine.ts`
-
-### 8.4 工具并行执行
-
-**问题**: TS 用 `for...of` 串行执行工具；Python 用 `asyncio.gather` 并行。
-
-**工作**:
-- `executeTools()` 改为 `Promise.all()` 并行执行所有 tool_use
-- 保持权限检查和 hook 的顺序（先全部 check，再并行 exec）
-
-**文件**: `packages/core/src/engine/query-engine.ts`
-
-### 8.5 Permission "ask" 交互确认
-
-**问题**: `action: "ask"` 无 UI 升级路径，等同 deny。
-
-**工作**:
-- `QueryEngine` 构造函数增加可选 `permissionPrompt` 回调：`(tool, reason) => Promise<boolean>`
-- 当 `decision.action === "ask"` 时，调用 `permissionPrompt`，用户确认则 allow，否则 deny
-- CLI REPL 中实现 readline 确认提示
-- Print mode / backend host 中默认 deny
-
-**文件**: `packages/core/src/engine/query-engine.ts`, `packages/core/src/types/runtime.ts`, `apps/cli/src/commands/main.ts`
-
-### 8.6 QueryEngine 运行时方法补全
-
-**问题**: 缺 `clear()`, `setSystemPrompt()`, `setModel()`, `setMaxTurns()`, `loadMessages()`, `continuePending()`, `hasPendingContinuation()`。
-
-**工作**:
-- 添加所有方法到 `QueryEngine` 类
-- 更新 `IQueryEngine` 接口
-- `continuePending()` 恢复上次中断的工具执行循环
-- MaxTurns 超限时抛 `MaxTurnsExceeded` 异常（而非静默退出）
-
-**文件**: `packages/core/src/engine/query-engine.ts`, `packages/core/src/types/runtime.ts`
-
-### 8.7 CostTracker 实现
-
-**问题**: 只有 `ICostTracker` 接口，无具体实现，未接入 QueryEngine。
-
-**工作**:
-- 实现 `CostTracker` 类：`add(snapshot)`, `total`, `reset()`
-- `QueryEngine` 持有 `CostTracker` 实例，每轮累加 usage
-- `totalUsage` 公开属性
-
-**文件**: `packages/core/src/types/usage.ts`, 新建 `packages/core/src/engine/cost-tracker.ts`, `packages/core/src/engine/query-engine.ts`
+| 模块 | 状态 | 一句话差距 |
+|------|------|-----------|
+| api | 🟡 | 缺 Codex/Copilot client、reasoning effort、`<think>` 过滤、vision/图片传递、modelscope |
+| tools | 🟡 | 缺 image_to_text/image_generation；bash/grep/glob 大幅简化 |
+| mcp | 🟡 | 仅 stdio，无 HTTP/SSE 传输与 headers 鉴权 |
+| engine/compact | 🟡 | 缺 context collapse、PTL 重试、compact attachments、hooks/checkpoint |
+| hooks | 🟡 | prompt/agent 空实现、无 priority、事件仅 4/10、无 `$ARGUMENTS`/matcher |
+| memory | 🟡 | 无 frontmatter/分类、无加权搜索、无使用索引、无团队隔离、**无中文分词** |
+| prompts | 🟡 | CLAUDE.md 不向上遍历、无相关记忆检索、无 personalization/permission-mode 段 |
+| coordinator | 🟡 | system prompt 精简、无用户/plugin agent 加载、编排仅声明 |
+| auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
+| plugins | 🟠 | 仅读 plugin.json，无 tools_dir 发现 / commands/agents/hooks 贡献加载 |
+| bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
+| swarm | 🟠 | ~4%，无真实派发后端、文件邮箱、权限同步、团队持久化、worktree 隔离 |
+| channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
+| sandbox | 🔴 | 占位 stub，无 Docker backend |
+| services(autodream/memory_extract/session_memory/tool_outputs) | 🔴 | 整体缺失 |
+| personalization | 🔴 | 整模块缺失（环境事实抽取） |
+| ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
+| autopilot | ⛔ | 不复刻 |
 
 ---
 
-## Phase 9: Settings + Prompts 补全
+## Phase A — 正确性修复（P0，不增功能）
 
-### 9.1 Settings 字段补全
+先把"看起来实现了但实际有 bug / 行为不对"的地方修对，影响面最广、成本最低。
 
-**问题**: 缺 `base_url`, `max_tokens`, `effort`, `passes`, `fast_mode`, `vim_mode`, `verbose` 等字段。Permissions 简化为单一 mode。
+### A.1 API 客户端正确性
+- OpenAI 兼容流式补 `<think>` 块跨 chunk 过滤（对齐 `_strip_think_blocks`）。
+- 图片消息转换：`convertMessages` 对非字符串 content 用 `JSON.stringify`，导致 ImageBlock 无法传给 OpenAI 端 → 转为 `image_url` data-uri。
+- gpt-5 / o1 / o3 / o4 系列改用 `max_completion_tokens`（当前恒用 `max_tokens` 会报错）。
+- reasoning_content 重放加 `OPENHARNESS_REQUIRE_EMPTY_REASONING_CONTENT` 开关（当前无条件发空 reasoning_content，严格端点会 400）。
+- **文件**：`packages/api/src/providers/openai.ts`、`anthropic.ts`
 
-**工作**:
-- 扩展 `Settings` 接口：添加 `baseUrl?`, `maxTokens?`, `effort?`, `passes?`, `fastMode?`, `vimMode?`, `verbose?`, `systemPrompt?`
-- 扩展 permissions：`allowedTools?: string[]`, `deniedTools?: string[]`, `pathRules?: PathRule[]`, `deniedCommands?: string[]`
-- 更新 `loadSettings()` 环境变量读取
-- 更新 CLI overrides 传递
-- 所有新字段有默认值
+### A.2 channels Feishu 修复
+- `FeishuAdapter.send` 用 `message.id` 当 `receive_id`（疑似 bug）→ 用正确的会话 ID。
+- `FeishuAdapter` 未在 `packages/channels/src/index.ts` 导出 → 导出。
+- **文件**：`packages/channels/src/feishu.ts`、`index.ts`
 
-**文件**: `packages/core/src/types/settings.ts`, `packages/core/src/config/settings.ts`
+### A.3 工具健壮性（对齐 v0.1.8 修复）
+- grep/glob：ripgrep stderr 重定向到 DEVNULL（避免 pipe 填满阻塞）；超长行（>64KB）跳过而非崩溃；grep 加 `--hidden`。
+- bash：超时后抓取 partial output；统一大输出截断（~12000 字符）。
+- glob：尊重 `.gitignore`、跳过 `.venv`/重目录、支持 limit。
+- **文件**：`packages/tools/src/search/grep.ts`、`glob.ts`、`shell/bash.ts`
 
-### 9.2 Prompts 增强
+### A.4 memory 中文检索
+- 搜索分词支持 CJK 逐字（`一-鿿`），当前 `split(/\s+/)` 对中文整句视作一个 term。
+- 搜索匹配 body 内容（不只 metadata）。
+- **文件**：`packages/memory/src/index.ts`
 
-**问题**: 无环境自动检测、无 CLAUDE.md 目录树遍历、无 skills/issues/memory 集成。
-
-**工作**:
-- 环境自动检测：OS、arch、shell、git branch、hostname（自动填充 PromptContext）
-- CLAUDE.md 发现：向上遍历目录树，检查 `CLAUDE.md` + `.claude/CLAUDE.md` + `.claude/rules/*.md`
-- `buildRuntimeSystemPrompt()`: 拼接 base prompt + environment + skills + CLAUDE.md + memory + effort settings
-- 默认系统 prompt 模板（对标 Python 的 55 行 base prompt）
-
-**文件**: `packages/prompts/src/index.ts`
-
-### 9.3 PermissionChecker 增强
-
-**问题**: 只有 mode 级别控制，无工具黑白名单、无路径规则、无命令拒绝模式。
-
-**工作**:
-- `PermissionChecker` 构造函数接受完整配置：mode + allowedTools + deniedTools + pathRules + deniedCommands
-- `checkTool()` 实现：先检查工具黑白名单 → 再检查路径/命令规则 → 最后 fallback to mode
-- 为 Bash 工具传递 `command` 字段，为文件工具传递 `path` 字段
-
-**文件**: `packages/permissions/src/index.ts`, `packages/core/src/engine/query-engine.ts`
+### A.5 coordinator mode env 一致性
+- `isCoordinatorMode()` 读取与原版一致的 `CLAUDE_CODE_COORDINATOR_MODE`（当前读的 env 名不一致）。
+- **文件**：`packages/coordinator/src/index.ts`
 
 ---
 
-## Phase 10: 工具修复 + 补全
+## Phase B — 核心能力补齐（P1）
 
-### 10.1 WebSearch 真实实现
+### B.1 Hooks 完整化
+- 补 `priority` 字段 + 同事件内按 priority 降序稳定排序。
+- 事件类型补齐到 10 种（新增 pre/post_compact、user_prompt_submit、notification、stop、subagent_stop）。
+- 实现 prompt / agent 类型 hook（真正调模型返回 `{ok, reason}`）。
+- `$ARGUMENTS` 注入 + shell 转义（防注入）；matcher（fnmatch）过滤；`OPENHARNESS_HOOK_EVENT/PAYLOAD` 环境变量。
+- **文件**：`packages/hooks/src/index.ts`、`packages/core/src/types/hooks.ts`
 
-**问题**: 返回固定字符串 stub。
+### B.2 Compact 高级链路
+- context collapse（确定性折叠超长文本）、PTL（prompt-too-long）重试 + 头部截断、tool_use/result 配对保护、图片占位替换。
+- compact attachments（task_focus / recent_files / plan / work_log 等）、boundary marker、PRE/POST_COMPACT hooks、progress/checkpoint。
+- **文件**：`packages/core/src/engine/compact-service.ts`
 
-**工作**:
-- 实现 DuckDuckGo HTML 搜索（对标 Python 的 `_ddg_search`）
-- 解析搜索结果：title + URL + snippet
-- 支持 `max_results` 参数
+### B.3 Tasks 真实执行
+- `TaskManager.createAgentTask` 真正拉起子进程（当前只建记录不执行）、stdin 流式写入、输出落盘 + tail。
+- completion listener 注册/通知、agent 任务断管自动重启、优雅关停。
+- **文件**：`packages/services/src/tasks/index.ts`
 
-**文件**: `packages/tools/src/web/search.ts`
+### B.4 Memory 模型升级
+- Markdown + YAML frontmatter 格式（type/scope/importance/ttl/disabled/supersedes/signature）。
+- 加权搜索（frontmatter×2 / body×1 + recency / importance / use_count）、使用次数索引、stale 候选挖掘。
+- `MEMORY.md` 索引维护、content signature 去重、按项目(cwd) 隔离。
+- **文件**：`packages/memory/src/index.ts`
 
-### 10.2 Grep 增强
-
-**问题**: 只返回文件路径，无行号、无匹配内容、无大小写切换。
-
-**工作**:
-- 返回 `file:line:content` 格式
-- 支持 `caseSensitive` 参数
-- 支持 `include` glob 过滤
-- 支持 `limit` 参数
-
-**文件**: `packages/tools/src/search/grep.ts`
-
-### 10.3 WebFetch 增强
-
-**问题**: 无 HTML→text 转换、无 `max_chars` 截断。
-
-**工作**:
-- 简易 HTML→text：去除 tags，保留文本内容
-- `maxChars` 参数截断
-- content-type 检测
-
-**文件**: `packages/tools/src/web/fetch.ts`
-
-### 10.4 缺失工具实现
-
-**问题**: 缺 `task_update`, `mcp_auth`, `remote_trigger` 三个工具。
-
-**工作**:
-- `TaskUpdate`: 更新任务 description/progress/statusNote
-- `McpAuth`: 配置 MCP server auth（bearer/header/env），触发 reconnect
-- `RemoteTrigger`: 立即执行已注册的 cron job，捕获输出
-
-**文件**: `packages/tools/src/task/index.ts`, `packages/tools/src/mcp/index.ts`, `packages/tools/src/schedule/index.ts`
-
-### 10.5 Cron 工具修复
-
-**问题**: CronCreate/Delete/List/Toggle 四个工具全是 stub，不操作真实数据。
-
-**工作**:
-- 注入 `CronScheduler` 实例到工具 execute context
-- CronCreate: 调用 `scheduler.addJob()`
-- CronDelete: 调用 `scheduler.removeJob()`
-- CronList: 调用 `scheduler.listJobs()`
-- CronToggle: 调用 `scheduler.toggleJob()`
-
-**文件**: `packages/tools/src/schedule/index.ts`
+### B.5 Prompts 上下文增强
+- CLAUDE.md 从 cwd **向上逐级遍历**累积（含 `.claude/CLAUDE.md`、`.claude/rules/*.md`）。
+- 相关记忆检索（select_relevant_memories + mark_memory_used）注入。
+- permission-mode 段、delegation/subagent 段。
+- **文件**：`packages/prompts/src/index.ts`
 
 ---
 
-## Phase 11: CLI + REPL 增强
+## Phase C — 扩展层补齐（P2）
 
-### 11.1 斜杠命令系统接入
+### C.1 Plugins 贡献加载
+- `tools_dir` 工具自动发现并实例化注册。
+- commands / agents / hooks / MCP 贡献加载；`.claude-plugin/` 备用路径；`${CLAUDE_PLUGIN_ROOT}` 替换。
+- project 信任门控 + 路径穿越防护（卸载时拒绝 `..`/绝对路径）。
+- **文件**：`packages/plugins/src/index.ts`
 
-**问题**: `@openharness/commands` 包存在但零命令注册，REPL 只认 exit/quit。
+### C.2 Auth ProviderProfile 体系
+- 命名 ProviderProfile（list/use/add/edit/remove/switch；base_url/api_format/model/credential_slot 等字段）。
+- 凭证存储支持系统 keyring + 文件回退（0o600 权限），与 settings 联动。
+- auth source 多源状态探测（env/file/keyring/external）。
+- **文件**：`packages/auth/src/index.ts`、`credential-storage.ts`
 
-**工作**:
-- 注册内置命令：`/help`, `/model`, `/clear`, `/compact`, `/session`, `/exit`
-- REPL 主循环中调用 `CommandRegistry.execute(line)`
-- 命令处理器访问 QueryEngine（clear/compact/model 切换）
+### C.3 MCP HTTP/SSE 传输
+- 增加 streamable-http / SSE 传输；HTTP headers 鉴权 + `auth_configured` 追踪。
+- resources 区分 "Method not found" 与真实错误；`updateServerConfig`/`getServerConfig`。
+- **文件**：`packages/mcp/src/index.ts`
 
-**文件**: `apps/cli/src/commands/main.ts`, 新建 `apps/cli/src/commands/registry.ts`
+### C.4 Coordinator 加载与 prompt 还原
+- 用户 `.md` agent 加载器（YAML frontmatter）+ plugin agent 合并。
+- 还原 coordinator / verification system prompt 的完整行为约束（当前大幅精简）。
+- scratchpad / worker-tools 上下文注入、`match_session_mode` 会话对齐。
+- **文件**：`packages/coordinator/src/`
 
-### 11.2 Session 持久化 + Continue/Resume
-
-**问题**: `--continue`/`--resume`/`--name` flags 存在但未接入；BridgeManager 不存消息历史。
-
-**工作**:
-- `BridgeManager` 扩展：存储 messages + model + systemPrompt + usage
-- `mainAction` 读取 `--continue` → 加载最近 session → `engine.loadMessages()`
-- `mainAction` 读取 `--resume` → 按 ID 加载 session
-- `mainAction` 读取 `--name` → 命名 session
-- REPL 退出时自动保存 session
-
-**文件**: `packages/bridge/src/index.ts`, `apps/cli/src/commands/main.ts`
-
-### 11.3 Auth 子命令补全
-
-**问题**: auth login/status/logout 多数是 stub。
-
-**工作**:
-- `auth login`: 多 provider 选择器 + 对应认证流程
-- `auth status`: 逐 provider 显示配置状态/来源
-- `auth logout`: 实际清除 credentials
-- `auth switch`: 切换 active provider（新增子命令）
-
-**文件**: `apps/cli/src/commands/auth.ts`
-
-### 11.4 Cron CLI 修复
-
-**问题**: 7 个 cron 子命令全是 stub。
-
-**工作**:
-- `cron start/stop`: 启停 CronScheduler（in-process）
-- `cron status`: 显示 scheduler 状态 + job 列表
-- `cron list`: 列出所有 jobs + schedule + enabled
-- `cron toggle`: 启禁用指定 job
-- `cron history/logs`: 读取执行历史
-
-**文件**: `apps/cli/src/commands/cron.ts`
-
-### 11.5 CLI flags 补全
-
-**问题**: `--effort`, `--mcp-config`, `--theme` 未接入；缺 `--output-format`, `--append-system-prompt`, `--bare`。
-
-**工作**:
-- `--effort`: 传入 Settings 并注入 system prompt
-- `--mcp-config`: 读取指定 MCP 配置文件
-- `--output-format`: text/json/stream-json（print mode）
-- `--append-system-prompt`: 追加到默认 prompt
-- `--bare`: 跳过 hooks/plugins/MCP 加载
-
-**文件**: `apps/cli/src/index.ts`, `apps/cli/src/commands/main.ts`, `apps/cli/src/runtime.ts`
+### C.5 Personalization（新模块）
+- 新建 `packages/personalization`：会话历史正则抽取环境事实（SSH/IP/conda/端点/env/git remote 等）。
+- `~/.openharness/local_rules/` 下 rules.md + facts.json 持久化 + 去重合并。
+- session-end 钩子触发，结果注入 system prompt。
+- **依赖**：B.5（prompts 注入）、B.1（session_end hook）
 
 ---
 
-## Phase 12: 服务层增强
+## Phase D — 大模块（P3）
 
-### 12.1 CompactService LLM 摘要
+### D.1 Swarm 真实派发
+- 至少实现 `subprocess` 后端（对齐 spawn_utils：继承 CLI flags + env var，`shlex.quote` 防注入）。
+- 文件式邮箱（原子写 + 文件锁，进程间可用）替换内存队列。
+- 权限同步（read-only 工具自动批准、permission request/response 文件流、leader/worker 检测）。
+- 团队磁盘持久化 `team.json`、git worktree 隔离。
+- **文件**：`packages/swarm/src/`、依赖 B.3（BackgroundTaskManager）
 
-**问题**: 只有简单 token 裁剪，无 LLM 结构化总结。
+### D.2 Channels 多通道 + 引擎桥接
+- 基座：`BaseChannel`（统一 ACL）、`ChannelManager`（启停/出站分发）、`MessageBus`（inbound/outbound 双队列）、`ChannelBridge`（接入 QueryEngine 并回传）。
+- 通道：优先 Telegram / Discord / Slack；附件/媒体收发、群组/线程路由、命令系统、长消息分片、Markdown 渲染。
+- **文件**：`packages/channels/src/`
 
-**工作**:
-- 注入 `StreamingMessageClient` 到 CompactService
-- 实现 `llmCompact()`: 用 LLM 生成 `<analysis>/<summary>` 结构化摘要
-- 模型感知上下文窗口阈值
-- 连续失败计数（最多 3 次后退回 microCompact）
+### D.3 Sandbox Docker backend
+- 实现 Docker backend：`docker run` + 资源限制（`--cpus`/`--memory`）+ 网络隔离（`--network none` + allowed/denied_domains fail-closed）+ 镜像管理 + path validator。
+- 接入 bash 工具的 sandbox 执行路径。
+- **文件**：`packages/sandbox/src/index.ts`
 
-**文件**: `packages/core/src/engine/compact-service.ts`
-
-### 12.2 Session 存储持久化
-
-**问题**: 服务层 SessionStorage 纯内存。
-
-**工作**:
-- 文件存储：`.openharness/sessions/<id>.json`
-- `saveSessionSnapshot()` / `loadSessionSnapshot()` / `listSessionSnapshots()`
-- 按 cwd SHA1 分目录
-
-**文件**: `packages/services/src/session/index.ts`（新建或扩展）
-
-### 12.3 Cron 真实调度
-
-**问题**: cron 表达式解析只支持分钟级，无真实调度。
-
-**工作**:
-- 集成 `cron` 或 `node-cron` npm 包
-- 完整 5 字段 cron 表达式解析
-- `nextRunTime()` 计算
-- 执行历史 JSONL 记录
-
-**文件**: `packages/services/src/cron/index.ts`
-
-### 12.4 Memory 增强
-
-**问题**: 纯内存 Map，无文件存储、无系统 prompt 集成。
-
-**工作**:
-- 默认文件存储：`.openharness/memory/` 目录
-- `addMemoryEntry()` 创建 .md + 更新 index
-- 搜索增加 metadata 权重（2x）+ 内容（1x）
-- 系统 prompt 注入相关 memory
-
-**文件**: `packages/memory/src/index.ts`
-
-### 12.5 Coordinator 编排逻辑
-
-**问题**: 无系统 prompt、无模式检测、无 XML 任务通知。
-
-**工作**:
-- 实现 coordinator system prompt（~250 行，对标 Python）
-- `isCoordinatorMode()` 环境变量检测
-- `formatTaskNotification()` / `parseTaskNotification()` XML 格式
-- 补全 3 个内置 agent：`statusline-setup`, `claude-code-guide`, `verification`
-- YAML frontmatter agent 定义加载
-
-**文件**: `packages/coordinator/src/index.ts`, `packages/coordinator/src/agent-definitions.ts`
+### D.4 Bridge 多进程会话（按需）
+- 多进程会话 spawn + stdout 捕获到日志 + kill/terminate；work-secret 编解码 + SDK WS URL 构造。
+- **文件**：`packages/bridge/src/index.ts`
 
 ---
 
-## Phase 13: API 层完善
+## Phase E — CLI / TUI 体验 + 订阅 Provider（P4）
 
-### 13.1 OpenAI reasoning_content 处理
+### E.1 CLI 子命令补齐
+- `oh setup` 首次引导向导；`oh provider`（list/use/add/edit/remove，含 `--api-key` 更新，对齐 v0.1.9）。
+- `oh --dry-run` 安全预览（resolved settings / auth / prompt / commands / skills / tools / MCP，readiness verdict）。
+- auth 子命令补 switch / copilot-login / codex-login。
+- **文件**：`apps/cli/src/commands/`、`apps/cli/src/index.ts`
 
-**问题**: 思考模型（DeepSeek-R1、Kimi k2.5）多轮工具调用会断裂。
+### E.2 缺失斜杠命令
+- 补齐 `/stats` `/output-style` `/keybindings` `/vim` `/passes` `/release-notes` `/subagents` `/login` `/logout` `/reload-plugins` `/plugin` 等（按需，约 30 个）。
+- 用户可调用 skill 作为 `/<skill>` 斜杠命令（对齐 v0.1.9）。
+- **文件**：`apps/cli/src/commands/slash-commands.ts`
 
-**工作**:
-- 流式循环中累加 `reasoning_content` delta
-- 转发 assistant message 时回放 reasoning_content
-- 多轮 tool call 场景下保持 reasoning 一致性
+### E.3 TUI 渲染
+- 引入 markdown 渲染（标题/列表/代码块/表格）+ 语法高亮；edit/write 的 unified diff 预览（approve once / session / full_auto 自动跳过）。
+- codex output style（紧凑低噪）；tool 行分组折叠。
+- **文件**：`apps/frontend/src/components/`、`packages/output-styles`
 
-**文件**: `packages/api/src/providers/openai.ts`
+### E.4 订阅 Provider（按需）
+- Codex client（chatgpt.com Responses API + reasoning effort `xhigh`）；Copilot client（OAuth device flow + token 持久化）。
+- vision/multimodal 检测 + image_to_text fallback 工具；`--vision-model` 覆盖。
+- 补 modelscope provider profile。
+- **文件**：`packages/api/src/providers/`、`packages/tools/src/`
 
-### 13.2 Copilot OAuth Device Flow
+### E.5 Skills 增强
+- frontmatter 补 user-invocable / disable-model-invocation / model / argument-hint。
+- 内置 bundled skills（skill-creator / diagnose 等）；user/project/plugin 多源 + 向上遍历 + 覆盖优先级 + 信任门控。
+- 布局对齐 `<dir>/SKILL.md` 约定。
+- **文件**：`packages/skills/src/`
 
-**问题**: 无法从 TS 端完成 GitHub Copilot 认证。
-
-**工作**:
-- 实现 `requestDeviceCode()`: POST to `https://github.com/login/device/code`
-- 实现 `pollForAccessToken()`: POST to `https://github.com/login/oauth/access_token`
-- Token 持久化：保存到 `~/.openharness/copilot-token.json`，权限 0600
-- GitHub Enterprise URL 支持
-
-**文件**: `packages/api/src/providers/copilot.ts`, `packages/auth/src/index.ts`
+### E.6 Services 杂项
+- 新增 `autodream`（记忆梦境整合）、`memory_extract`（对话提取 durable 记忆）、`session_memory`（checkpoint）、`tool_outputs`（microcompactable 判定）。
+- cron 升级到 croniter 级表达式 + 时区 + 独立调度守护进程 + 子进程执行 + 通知。
+- session 存储补 cwd 哈希分目录 + latest/id 双写 + tool_metadata 持久化 + Markdown 导出。
+- lsp 用真实 AST 解析（当前为正则/rg 近似）。
 
 ---
 
 ## 执行顺序建议
 
 ```
-Phase 8  (引擎核心)     → 最高优先，影响所有上层功能
-Phase 9  (Settings)     → 依赖 Phase 8 的接口变更
-Phase 10 (工具修复)     → 依赖 Phase 9 的 Settings 扩展
-Phase 11 (CLI)          → 依赖 Phase 10 的工具完善
-Phase 12 (服务层)       → 可与 Phase 10-11 部分并行
-Phase 13 (API 完善)     → 可与 Phase 11-12 并行
+Phase A (正确性)   → 最高优先，低成本，立即提升可用性
+Phase B (核心)     → 引擎/工具/记忆/prompt 能力，影响上层
+Phase C (扩展)     → 插件/auth/mcp/coordinator/personalization
+Phase D (大模块)   → swarm/channels/sandbox（工作量大，可挑选）
+Phase E (体验)     → CLI/TUI/订阅 provider，可与 C/D 并行
 ```
 
-## 不在范围内（FUTURE）
-
-- Sandbox 真实实现（Docker/gVisor）
-- Voice 真实实现（STT/TTS）
-- React/Ink TUI 前端
-- Channel 集成（Telegram/Discord/WhatsApp/飞书/钉钉等）
-- LSP hover 真实实现（需 language server）
+> ⛔ 明确不做：`autopilot`、`voice`。`ohmo` 视为可选的上层应用（依赖 channels 网关成熟后再评估）。
