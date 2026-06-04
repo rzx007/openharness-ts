@@ -24,6 +24,35 @@ export interface MemorySearchOptions {
 const METADATA_WEIGHT = 2;
 const CONTENT_WEIGHT = 1;
 
+const ASCII_TOKEN_RE = /[a-z0-9_]+/g;
+const HAN_CHAR_RE = /[一-鿿㐀-䶿]/g;
+
+/**
+ * Extract search tokens from {@link text}, handling ASCII words and Han
+ * ideographs. Mirrors the Python `_tokenize` heuristic:
+ * - ASCII word tokens (letters/digits/underscore) of length >= 3
+ * - each CJK ideograph as its own token (each character carries meaning)
+ *
+ * Returns a de-duplicated list so each distinct token is scored once per
+ * occurrence in the target text.
+ */
+export function tokenize(text: string): string[] {
+  const lower = text.toLowerCase();
+  const tokens = new Set<string>();
+
+  for (const match of lower.matchAll(ASCII_TOKEN_RE)) {
+    if (match[0].length >= 3) {
+      tokens.add(match[0]);
+    }
+  }
+  // Match Han chars against the original text (case-folding is a no-op for CJK).
+  for (const match of text.matchAll(HAN_CHAR_RE)) {
+    tokens.add(match[0]);
+  }
+
+  return [...tokens];
+}
+
 export class MemoryManager {
   private entries = new Map<string, MemoryEntry>();
   private maxEntries: number;
@@ -96,8 +125,7 @@ export class MemoryManager {
 
   async search(options: MemorySearchOptions): Promise<MemorySearchResult[]> {
     const { query, tags, limit = 10 } = options;
-    const queryLower = query.toLowerCase();
-    const queryTerms = queryLower.split(/\s+/).filter(Boolean);
+    const queryTerms = tokenize(query);
     const results: MemorySearchResult[] = [];
 
     const allEntries = await this.getAll();
@@ -106,7 +134,7 @@ export class MemoryManager {
       if (tags?.length && !tags.some((t) => entry.tags?.includes(t))) {
         continue;
       }
-      const score = this.computeScore(entry, queryLower, queryTerms);
+      const score = this.computeScore(entry, queryTerms);
       if (score > 0) {
         results.push({ entry, score });
       }
@@ -176,11 +204,7 @@ export class MemoryManager {
     return lines.join("\n");
   }
 
-  private computeScore(
-    entry: MemoryEntry,
-    queryLower: string,
-    queryTerms: string[],
-  ): number {
+  private computeScore(entry: MemoryEntry, queryTerms: string[]): number {
     let score = 0;
 
     const contentLower = entry.content.toLowerCase();

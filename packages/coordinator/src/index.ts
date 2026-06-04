@@ -188,11 +188,24 @@ export function getTeamRegistry(): TeamRegistry {
   return _defaultTeamRegistry;
 }
 
+const COORDINATOR_TRUTHY_VALUES = new Set(["1", "true", "yes"]);
+
+function isTruthyEnv(value: string | undefined): boolean {
+  return value !== undefined && COORDINATOR_TRUTHY_VALUES.has(value.toLowerCase());
+}
+
 export function isCoordinatorMode(): boolean {
+  // Primary env var, matching the Python original (openharness):
+  // is_coordinator_mode() reads CLAUDE_CODE_COORDINATOR_MODE and treats
+  // "1"/"true"/"yes" (case-insensitive) as enabled.
+  if (isTruthyEnv(process.env.CLAUDE_CODE_COORDINATOR_MODE)) {
+    return true;
+  }
+  // Legacy env vars kept for backward compatibility.
   return (
-    process.env.COORDINATOR_MODE === "1" ||
-    process.env.OPENHARNESS_COORDINATOR === "1" ||
-    process.env.CLAUDE_CODE_COORDINATOR === "1"
+    isTruthyEnv(process.env.COORDINATOR_MODE) ||
+    isTruthyEnv(process.env.OPENHARNESS_COORDINATOR) ||
+    isTruthyEnv(process.env.CLAUDE_CODE_COORDINATOR)
   );
 }
 

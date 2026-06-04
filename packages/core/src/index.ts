@@ -7,6 +7,7 @@ export type {
   TextBlock,
   ImageBlock,
   ToolUseBlock,
+  ContentBlock,
 } from "./types/messages";
 
 export type {
