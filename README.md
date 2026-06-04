@@ -21,6 +21,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 - Node.js >= 18
 - pnpm >= 10
+- Bun >= 1.0（CLI 通过 Bun 构建/运行）
 
 ### 安装
 
@@ -45,20 +46,22 @@ pnpm test
 ### 运行
 
 ```bash
-# 设置 API Key
+# 设置 API Key（按所用 Provider 选择，见下方“配置”）
 export ANTHROPIC_API_KEY="sk-ant-..."
 
+# CLI 安装后提供两个等价命令：ohs 与 openharness
+
 # 单次执行
-oh "explain this codebase"
+ohs "explain this codebase"
 
 # 交互式 REPL
-oh
+ohs
 
 # 启动 TUI（React/Ink 终端 UI）
-oh --tui
+ohs --tui
 
 # TUI 带初始提示
-oh --tui "explain this project"
+ohs --tui "explain this project"
 ```
 
 ### 开发阶段运行
@@ -68,29 +71,27 @@ oh --tui "explain this project"
 pnpm build
 cd apps/cli
 pnpm link --global
-openharness "hello"        # 任意目录可用
+openharness "hello"        # 任意目录可用（ohs 等价）
 openharness --tui
 # 取消链接：pnpm unlink --global
 
-# 方式二：tsx 直跑源码（改代码立刻生效，无需 build）
-pnpm --filter @openharness/cli exec tsx src/index.ts -- "hello"
-pnpm --filter @openharness/cli exec tsx src/index.ts -- --tui
+# 方式二：Bun 直跑源码（改代码立刻生效，无需 build）
+bun apps/cli/src/index.ts "hello"
+bun apps/cli/src/index.ts --tui
 
-# 方式三：tsup watch（自动重编译）
-pnpm --filter @openharness/cli dev
-# 然后另开终端运行
-node apps/cli/dist/index.js "hello"
+# 方式三：Bun watch（自动重载源码）
+pnpm --filter @openharness/cli dev   # = bun --watch src/index.ts
 ```
 
-开发阶段建议用 **方式二**（tsx 直跑，改了代码立刻生效），稳定后用方式一。
+开发阶段建议用 **方式二**（Bun 直跑源码，改了代码立刻生效），稳定后用方式一。
 
 ### CLI 常用参数
 
 ```bash
-oh [options] [prompt]
+ohs [options] [prompt]
 
 Options:
-  --model <model>              模型名称（默认 claude-sonnet-4-20250514）
+  --model <model>              模型名称（默认 minimax/minimax-m2.5:free）
   --provider <provider>        强制指定 provider
   --permission-mode <mode>     权限模式: default | plan | full_auto
   --max-turns <n>              最大 agent 轮次（默认 50）
@@ -108,6 +109,14 @@ Options:
   --verbose                    详细输出
   --continue                   继续上次会话
   --resume <session>           恢复指定会话
+  -p, --print                  打印响应后退出（非交互）
+  -n, --name <name>            命名会话
+  --output-format <format>     输出格式: text | json | stream-json
+  --append-system-prompt <p>   追加到默认 system prompt
+  --cwd <dir>                  工作目录
+  --bare                       跳过 hooks/plugins/MCP 加载
+  -d, --debug                  调试模式
+  --dangerously-skip-permissions  跳过所有权限检查
 ```
 
 ---
@@ -159,7 +168,7 @@ OpenHarness-ts/
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          User Interface                            │
 │  ┌────────────────────┐  ┌──────────────────────────────────────┐  │
-│  │   CLI (oh)         │  │   TUI Frontend (React/Ink)          │  │
+│  │   CLI (ohs)        │  │   TUI Frontend (React/Ink)          │  │
 │  │   Commander.js     │  │   ConversationView / StatusBar /    │  │
 │  │   REPL / Print     │  │   PromptInput / ModalHost / Picker  │  │
 │  └────────┬───────────┘  └──────────────┬───────────────────────┘  │
@@ -330,7 +339,7 @@ OpenHarness-ts/
 | 模块 | 说明 |
 |------|------|
 | `CLI` | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/config 子命令，20+ CLI flags |
-| `REPL` | 交互式循环：`>` 提示符，32 个斜杠命令（`/help, /model, /clear, /compact, /permissions, /plan, /resume` 等） |
+| `REPL` | 交互式循环：`>` 提示符，34 个斜杠命令（`/help, /model, /provider, /clear, /compact, /permissions, /plan, /resume, /memory, /mcp, /skills, /agents` 等） |
 | `TUI Frontend` | React/Ink 终端 UI：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。通过 `--tui` 启动，前端 spawn 后端 `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲 |
 | `BackendHost` | 后端协议实现：处理 5 种请求（submit_line / permission_response / question_response / list_sessions / shutdown），发出 17 种结构化事件（assistant_delta / tool_started / tool_completed / modal_request / todo_update / plan_mode_change 等） |
 | `ThemeManager` | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题 |
@@ -468,7 +477,7 @@ submitMessage(userInput)
 ### 会话恢复流程
 
 ```
-oh --continue          oh --resume <id>
+ohs --continue         ohs --resume <id>
        │                      │
        ▼                      ▼
   加载最新 session       加载指定 session
@@ -491,7 +500,7 @@ oh --continue          oh --resume <id>
 | 层 | 技术 |
 |----|------|
 | 语言 | TypeScript 5.7+（ESM） |
-| 构建 | Turborepo + tsup |
+| 构建 | Turborepo（任务编排）+ Bun（CLI 打包，`apps/cli/build.ts`） |
 | 测试 | Vitest |
 | 包管理 | pnpm 10（monorepo） |
 | CLI | Commander.js |
@@ -508,8 +517,8 @@ oh --continue          oh --resume <id>
 
 ```json
 {
-  "model": "claude-sonnet-4-20250514",
-  "apiFormat": "anthropic",
+  "model": "minimax/minimax-m2.5:free",
+  "apiFormat": "openai",
   "maxTurns": 50,
   "effort": "medium",
   "permission": {
@@ -612,7 +621,7 @@ export DEEPSEEK_API_KEY="sk-xxxxxxxxxxxxxxxx"
 **方式三：CLI 参数**
 
 ```bash
-oh --model deepseek-chat \
+ohs --model deepseek-chat \
    --api-format openai \
    --base-url https://api.deepseek.com \
    --api-key sk-xxxxxxxxxxxxxxxx \
@@ -647,7 +656,7 @@ export ZHIPU_API_KEY="xxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx"
 **方式三：CLI 参数**
 
 ```bash
-oh --model glm-4-plus \
+ohs --model glm-4-plus \
    --api-format openai \
    --base-url https://open.bigmodel.cn/api/paas/v4 \
    --api-key "xxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx" \
@@ -683,10 +692,10 @@ oh --model glm-4-plus \
 
 ```bash
 # DeepSeek — 自动检测（DEEPSEEK_API_KEY 已设置）
-oh --model deepseek-chat "hello"
+ohs --model deepseek-chat "hello"
 
 # GLM — 自动检测（ZHIPU_API_KEY 已设置）
-oh --model glm-4-plus "hello"
+ohs --model glm-4-plus "hello"
 ```
 
 ## License
