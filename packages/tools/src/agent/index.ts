@@ -48,7 +48,6 @@ export const agentTool: ToolDefinition = {
         parentSessionId: "main",
         model: (input.model as string) ?? agentDef?.model,
         systemPrompt: agentDef?.systemPrompt,
-        permissions: agentDef?.permissions,
       });
       if (!result.success) {
         return { content: [{ type: "text", text: result.error ?? "Failed to spawn agent" }], isError: true };

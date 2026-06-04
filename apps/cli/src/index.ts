@@ -8,8 +8,8 @@ import { createCronCommand } from "./commands/cron";
 const program = new Command();
 
 program
-  .name("oh")
-  .description("OpenHarness - Open Source AI Agent Framework")
+  .name("ohs")
+  .description("OpenHarness-ts - Open Source AI Agent Framework")
   .version("0.1.0")
   .argument("[prompt]", "Initial prompt to send")
   .option("-m, --model <model>", "Model to use")
@@ -18,7 +18,7 @@ program
   .option("-r, --resume <session>", "Resume a specific session")
   .option("-n, --name <name>", "Name the session")
   .option("--provider <provider>", "API provider")
-  .option("--permission-mode <mode>", "Permission mode (default | plan | acceptEdits | bypassPermissions | dontAsk)")
+  .option("--permission-mode <mode>", "Permission mode (default | plan | full_auto)")
   .option("--max-turns <n>", "Maximum agentic turns", parseInt)
   .option("-s, --system-prompt <prompt>", "Override system prompt")
   .option("--api-key <key>", "API key override")
