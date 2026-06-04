@@ -4,6 +4,9 @@
 
 > 状态图例：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现 · ⛔ 不在复刻范围
 
+> **进度（分支 `feat/align-phase-ab`）**：**Phase A、Phase B 已完成**（4 commit，`check-types` 26/26、`test` 25/25 全绿）。
+> 遗留 TODO：① B.2 compact attachments（依赖 QueryEngine 元数据通道）；② B.5 per-turn 相关记忆检索（需轮级管线）；③ bash 在无 Git Bash 的 Windows 上的优雅降级。下一步从 **Phase C** 开始。
+
 ## 原则
 
 1. 每步完成 = `pnpm check-types` 通过 + `pnpm test` 通过（pre-commit 与 CI 已接入）。
@@ -17,14 +20,15 @@
 
 | 模块 | 状态 | 一句话差距 |
 |------|------|-----------|
-| api | 🟡 | 缺 Codex/Copilot client、reasoning effort、`<think>` 过滤、vision/图片传递、modelscope |
-| tools | 🟡 | 缺 image_to_text/image_generation；bash/grep/glob 大幅简化 |
+| api | 🟡 | ✅`<think>`过滤/图片传递/max_completion_tokens(A.1)；仍缺 Codex/Copilot client、reasoning effort、modelscope |
+| tools | 🟡 | ✅bash/grep/glob 健壮性(A.3)；仍缺 image_to_text/image_generation |
 | mcp | 🟡 | 仅 stdio，无 HTTP/SSE 传输与 headers 鉴权 |
-| engine/compact | 🟡 | 缺 context collapse、PTL 重试、compact attachments、hooks/checkpoint |
-| hooks | 🟡 | prompt/agent 空实现、无 priority、事件仅 4/10、无 `$ARGUMENTS`/matcher |
-| memory | 🟡 | 无 frontmatter/分类、无加权搜索、无使用索引、无团队隔离、**无中文分词** |
-| prompts | 🟡 | CLAUDE.md 不向上遍历、无相关记忆检索、无 personalization/permission-mode 段 |
-| coordinator | 🟡 | system prompt 精简、无用户/plugin agent 加载、编排仅声明 |
+| engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint 已补(B.2)且 LLM 摘要已接入引擎；attachments 留 TODO |
+| hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
+| memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
+| prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段(B.5)；per-turn 记忆检索 TODO；personalization 段待 C |
+| tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
+| coordinator | 🟡 | ✅mode env 对齐(A.5)；system prompt 精简、用户/plugin agent 加载、编排仍待(C) |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
 | plugins | 🟠 | 仅读 plugin.json，无 tools_dir 发现 / commands/agents/hooks 贡献加载 |
 | bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
@@ -38,7 +42,9 @@
 
 ---
 
-## Phase A — 正确性修复（P0，不增功能）
+## Phase A — 正确性修复（P0，不增功能）✅ 已完成
+
+> 已在 `feat/align-phase-ab` 完成（commit `8a31413`）。A.1–A.5 全部实现并测试。
 
 先把"看起来实现了但实际有 bug / 行为不对"的地方修对，影响面最广、成本最低。
 
@@ -71,7 +77,10 @@
 
 ---
 
-## Phase B — 核心能力补齐（P1）
+## Phase B — 核心能力补齐（P1）✅ 已完成
+
+> 已在 `feat/align-phase-ab` 完成（commit `998b1c7`、`46aa5e5`，审查修复 `8be7984`）。B.1–B.5 全部实现并测试。
+> **遗留 TODO**：B.2 compact attachments（task_focus/recent_files 等，依赖 QueryEngine 元数据通道）；B.5 per-turn 相关记忆检索（需轮级管线）。
 
 ### B.1 Hooks 完整化
 - 补 `priority` 字段 + 同事件内按 priority 降序稳定排序。
