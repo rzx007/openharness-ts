@@ -1,8 +1,11 @@
 # OpenHarness-ts 后续计划
 
-## 当前状态
+> ⚠️ **本文档已过时（早于 v0.1.9 对齐审计）。** 下方"Phase 1-14 全部完成"指的只是 TS 自身骨架跑通，**不代表与 Python 原版对齐**——实际差距很大（见对照审计）。
+> **当前权威计划以 [PLAN-REMAINING.md](PLAN-REMAINING.md) 为准。** 本文件仅保留其中的 TUI 前端 backlog（P0–P5）作为参考，后续应并入 PLAN-REMAINING 的 Phase E。
 
-Phase 1-14 全部完成（后端 26 packages + 前端 TUI），`pnpm build` + `pnpm test` 通过。
+## 历史状态（仅 TS 骨架，非对齐）
+
+TS 自身的 Phase 1-14 骨架跑通（后端 26 packages + 前端 TUI），`pnpm build` + `pnpm test` 通过。
 Provider 运行时切换功能已完成（/model 自动重检测 + /provider 命令 + RuntimeBundle class + Settings.apiKeys）。
 
 ---
