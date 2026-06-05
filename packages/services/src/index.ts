@@ -16,5 +16,12 @@ export type { LspServerConfig } from "./lsp";
 export { OAuthFlow } from "./oauth";
 export type { OAuthConfig, OAuthTokens } from "./oauth";
 
-export { TaskManager, getTaskManager } from "./tasks";
-export type { TaskInfo } from "./tasks";
+export { TaskManager, getTaskManager, resetTaskManager } from "./tasks";
+export type {
+  TaskInfo,
+  TaskType,
+  TaskStatus,
+  CompletionListener,
+  CreateShellTaskOptions,
+  CreateAgentTaskOptions,
+} from "./tasks";

@@ -4,6 +4,11 @@ export interface ChannelMessage {
   sender: string;
   content: string;
   timestamp: Date;
+  /**
+   * Conversation/reply target for outbound replies (e.g. a Feishu chat_id or
+   * sender open_id). When unset, adapters fall back to `sender`.
+   */
+  replyTo?: string;
 }
 
 export interface ChannelAdapter {
@@ -17,3 +22,5 @@ export interface ChannelAdapter {
 export { EventBus } from "./bus";
 export { StdioAdapter } from "./impl/stdio";
 export { HttpAdapter } from "./impl/http";
+export { FeishuAdapter } from "./impl/feishu";
+export type { FeishuConfig } from "./impl/feishu";

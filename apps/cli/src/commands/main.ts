@@ -271,13 +271,23 @@ async function runRepl(
    * 该函数根据当前设置构建运行时系统提示词，并将其更新到查询引擎中。
    */
   const refreshSystemPrompt = async () => {
+    // 构建 system-prompt 期的项目记忆段（top-N，无 per-turn query）。
+    // 注意：per-turn 按本轮用户输入的相关性检索属于 QueryEngine 轮级管线，
+    // 此处只做构建期注入，详见 buildRuntimeSystemPrompt 的 TODO。
+    const memoryContent =
+      currentSettings.memory?.enabled !== false
+        ? memoryManager.buildMemoryPrompt(currentSettings.memory?.maxFiles ?? 10)
+        : undefined;
+
     // 根据当前配置构建运行时系统提示词
     const prompt = await buildRuntimeSystemPrompt({
       customPrompt: currentSettings.systemPrompt,
       cwd: process.cwd(),
+      permissionMode: currentSettings.permission.mode,
       fastMode: currentSettings.fastMode,
       effort: currentSettings.effort,
       passes: currentSettings.passes,
+      memoryContent,
     });
     // 将生成的提示词设置到查询引擎中
     bundle.queryEngine.setSystemPrompt(prompt);

@@ -542,6 +542,7 @@ export function registerBuiltinCommandsOnRegistry(
       const prompt = await buildRuntimeSystemPrompt({
         customPrompt: settings.systemPrompt,
         cwd: process.cwd(),
+        permissionMode: settings.permission.mode,
         fastMode: settings.fastMode,
         effort: settings.effort,
         passes: settings.passes,

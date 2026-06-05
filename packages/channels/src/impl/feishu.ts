@@ -65,7 +65,7 @@ export class FeishuAdapter implements ChannelAdapter {
           chat_type?: string;
           content?: string;
           create_time?: string;
-          sender?: { sender_id?: { user_id?: string } };
+          sender?: { sender_id?: { open_id?: string; user_id?: string } };
           mentions?: FeishuMention[];
         };
       }) => {
@@ -100,10 +100,17 @@ export class FeishuAdapter implements ChannelAdapter {
         contentText = contentText.replace(/\s+/g, " ").trim();
         if (!contentText) return;
 
+        const senderOpenId = msg.sender?.sender_id?.open_id;
         const senderId =
-          msg.sender?.sender_id?.user_id ?? msg.chat_id;
+          senderOpenId ?? msg.sender?.sender_id?.user_id ?? msg.chat_id;
         const allowFrom = this.config.allowFrom ?? [];
         if (allowFrom.length > 0 && !allowFrom.includes(senderId)) return;
+
+        // Reply target mirrors the Python channel: group chats reply back to
+        // the chat (chat_id), direct chats reply to the sender (open_id).
+        const replyTo = isGroupChat
+          ? msg.chat_id
+          : (senderOpenId ?? msg.chat_id);
 
         const inbound: ChannelMessage = {
           id: `feishu_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -111,6 +118,7 @@ export class FeishuAdapter implements ChannelAdapter {
           sender: senderId,
           content: contentText,
           timestamp: new Date(Number(msg.create_time) || Date.now()),
+          replyTo,
         };
 
         if (this.handler) {
@@ -144,10 +152,17 @@ export class FeishuAdapter implements ChannelAdapter {
     if (!this.client) {
       throw new Error("Feishu client not connected");
     }
+    // The reply target is the inbound conversation, not the synthetic message
+    // id. Prefer `replyTo` (chat_id for groups, sender open_id for direct
+    // chats); fall back to `sender` for adapters that don't set `replyTo`.
+    const receiveId = message.replyTo ?? message.sender;
+    // Mirror the Python channel's heuristic: chat ids start with "oc_" and use
+    // the "chat_id" id-type; everything else is an open_id.
+    const receiveIdType = receiveId.startsWith("oc_") ? "chat_id" : "open_id";
     await this.client.im.message.create({
-      params: { receive_id_type: "chat_id" },
+      params: { receive_id_type: receiveIdType },
       data: {
-        receive_id: message.id,
+        receive_id: receiveId,
         content: JSON.stringify({ text: message.content }),
         msg_type: "text",
       },

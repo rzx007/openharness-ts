@@ -402,6 +402,60 @@ describe("Integration: AutoCompact in Agent Loop", () => {
     expect(history.length).toBeLessThan(10);
   });
 
+  it("routes auto-compaction through the LLM summarizer (llmCompact is reachable)", async () => {
+    // The engine wires its API client into CompactService as the summarizer.
+    // A summarization request is identifiable by the summarizer system prompt
+    // and a single user message carrying the compaction prompt.
+    const compactPrompts: string[] = [];
+    const longContent = "padding ".repeat(80);
+
+    const client = {
+      streamMessage: async function* (params: any) {
+        const isCompactRequest =
+          params.system === "You are a conversation summarizer." &&
+          Array.isArray(params.messages) &&
+          params.messages.length === 1;
+        if (isCompactRequest) {
+          compactPrompts.push(params.messages[0].content);
+          yield { type: "text_delta" as const, delta: "<summary>compacted by llm</summary>" };
+          yield { type: "complete" as const, stopReason: "end_turn" };
+          return;
+        }
+        // Normal agent turn: emit a long assistant reply to grow the context.
+        yield { type: "text_delta" as const, delta: longContent };
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+
+    const engine = new QueryEngine(
+      client,
+      new ToolRegistry(),
+      allowAll(),
+      noopHooks(),
+      { maxTokens: 100, compactKeepRecent: 2 },
+    );
+
+    // Drive several turns so the context crosses the autocompact threshold and
+    // the deterministic passes (micro/collapse) are insufficient on their own.
+    for (let i = 0; i < 6; i++) {
+      for await (const _ of engine.submitMessage(`turn ${i} ${longContent}`)) {}
+    }
+
+    // The summarizer (LLM compact path) was actually invoked.
+    expect(compactPrompts.length).toBeGreaterThan(0);
+    // The LLM-produced summary was inserted into the compacted history.
+    const history = engine.getHistory();
+    const hasLlmSummary = history.some(
+      (m) => m.type === "assistant" && typeof m.content === "string" && m.content.includes("compacted by llm"),
+    );
+    expect(hasLlmSummary).toBe(true);
+    // A compact boundary marker accompanies the full (LLM) compaction.
+    const hasBoundary = history.some(
+      (m) => typeof m.content === "string" && m.content.includes("[Compact boundary marker]"),
+    );
+    expect(hasBoundary).toBe(true);
+  });
+
   it("manual compact() call triggers micro then auto", async () => {
     const { client } = createMockStreamClient([
       [

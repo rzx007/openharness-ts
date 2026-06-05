@@ -227,17 +227,19 @@ describe("TaskManager", () => {
 
   it("filters tasks by status", async () => {
     const mgr = new TaskManager();
-    await mgr.createAgentTask("pending task", "desc", process.cwd());
-    const pending = mgr.listTasks("pending");
-    expect(pending).toHaveLength(1);
-    expect(pending[0]!.type).toBe("agent");
+    // Agent task without argv/command is marked failed (needs-argv), not silently pending.
+    await mgr.createAgentTask("no-argv task", "desc", process.cwd());
+    const failed = mgr.listTasks("failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.type).toBe("agent");
   });
 
-  it("creates an agent task", async () => {
+  it("creates an agent task without argv as failed needs-argv (no silent pending)", async () => {
     const mgr = new TaskManager();
     const task = await mgr.createAgentTask("write tests", "agent task", process.cwd(), "gpt-4");
     expect(task.type).toBe("agent");
-    expect(task.status).toBe("pending");
+    expect(task.status).toBe("failed");
+    expect(task.metadata.needs_argv).toBe("1");
     expect(task.prompt).toBe("write tests");
   });
 

@@ -6,12 +6,12 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 > ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
 
-- ✅ **多模型支持** — 20 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容）。🟡 暂缺 Codex/Copilot 订阅、reasoning effort、vision/图片传递
-- 🟡 **内置工具（40）** — 文件 / Bash / Web / Grep / Cron / MCP / Task 等齐全；Bash/Grep/Glob 为简化实现，暂无图片类工具
+- ✅ **多模型支持** — 20 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Codex/Copilot 订阅、reasoning effort
+- 🟡 **内置工具（40）** — 文件 / Bash / Web / Grep / Cron / MCP / Task 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
 - 🟠 **多 Agent 编排** — Coordinator 的 7 个 agent 定义与 XML 任务通知就绪；swarm 真实派发后端、sequential/parallel/pipeline 调度**尚未实现**
 - 🟡 **MCP 协议** — 支持 stdio 传输连接外部 MCP Server；暂无 HTTP/SSE 与 headers 鉴权
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝
-- 🟡 **Hook 生命周期** — pre/post tool use、session start/end；prompt/agent 类型、priority 排序、其余事件待补
+- ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
 - 🟡 **会话持久化** — Session 存储 / `--continue` / `--resume` / Cron（均为基础版）
 - 🟠 **插件系统** — 可读 `plugin.json`；工具自动发现与 commands/agents/hooks 贡献加载待补
 - 🟠 **Channel 适配器** — Stdio / HTTP / 飞书（基础）；Telegram/Discord/Slack 等多通道、附件、群组路由待补

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   Coordinator,
   TeamRegistry,
@@ -6,6 +6,7 @@ import {
   getBuiltinAgentDefinitions,
   getAgentDefinition,
   hasRequiredMcpServers,
+  isCoordinatorMode,
 } from "./index.js";
 
 describe("Coordinator", () => {
@@ -65,6 +66,52 @@ describe("TeamRegistry", () => {
     reg.createTeam("beta");
     reg.createTeam("alpha");
     expect(reg.listTeams().map((t) => t.name)).toEqual(["alpha", "beta"]);
+  });
+});
+
+describe("isCoordinatorMode", () => {
+  const ENV_KEYS = [
+    "CLAUDE_CODE_COORDINATOR_MODE",
+    "COORDINATOR_MODE",
+    "OPENHARNESS_COORDINATOR",
+    "CLAUDE_CODE_COORDINATOR",
+  ];
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = {};
+    for (const key of ENV_KEYS) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = saved[key];
+      }
+    }
+  });
+
+  it("returns false when no env var is set", () => {
+    expect(isCoordinatorMode()).toBe(false);
+  });
+
+  it("returns true for CLAUDE_CODE_COORDINATOR_MODE truthy values", () => {
+    for (const value of ["1", "true", "yes", "TRUE", "Yes"]) {
+      process.env.CLAUDE_CODE_COORDINATOR_MODE = value;
+      expect(isCoordinatorMode()).toBe(true);
+    }
+  });
+
+  it("returns false for CLAUDE_CODE_COORDINATOR_MODE falsy values", () => {
+    for (const value of ["0", "false", "no", "", "off"]) {
+      process.env.CLAUDE_CODE_COORDINATOR_MODE = value;
+      expect(isCoordinatorMode()).toBe(false);
+    }
   });
 });
 

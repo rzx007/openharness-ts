@@ -10,8 +10,39 @@ import type {
   ToolContext,
   ToolExecutionResult,
 } from "../index";
-import { CompactService } from "./compact-service";
+import { CompactService, type CompactClient } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
+
+const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
+const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
+
+/**
+ * Adapt a {@link StreamingMessageClient} into the {@link CompactClient} shape
+ * that {@link CompactService} expects for LLM summarization.
+ *
+ * The summarizer is driven with a single user-role message carrying the
+ * compaction prompt, no tools, and a bounded output budget — mirroring the
+ * Python `_collect_summary` call (`stream_message(... system_prompt, tools=[],
+ * max_tokens=MAX_OUTPUT_TOKENS_FOR_SUMMARY)`). The underlying stream is passed
+ * straight through so `CompactService` can aggregate `text_delta` events and
+ * surface `error` events as PTL-detectable failures.
+ */
+function toCompactClient(
+  apiClient: StreamingMessageClient,
+  model: string,
+): CompactClient {
+  return {
+    submitMessage(content: string): AsyncIterable<StreamEvent> {
+      return apiClient.streamMessage({
+        model,
+        messages: [{ type: "user", content }],
+        system: COMPACT_SUMMARIZER_SYSTEM_PROMPT,
+        maxTokens: MAX_COMPACT_OUTPUT_TOKENS,
+        tools: undefined,
+      });
+    },
+  };
+}
 
 export class MaxTurnsExceeded extends Error {
   constructor(public readonly maxTurns: number) {
@@ -37,13 +68,17 @@ export class QueryEngine implements IQueryEngine {
     private hookExecutor: IHookExecutor,
     private options: QueryEngineOptions = {}
   ) {
+    this.model = options.model ?? "deepchat-chat";
     this.compactService = new CompactService(
       options.maxTokens ?? 100_000,
       options.compactKeepRecent ?? 10,
+      {
+        hookExecutor: this.hookExecutor,
+        client: toCompactClient(this.apiClient, this.model),
+      },
     );
     this.costTracker = new CostTracker();
     this.systemPrompt = options.systemPrompt;
-    this.model = options.model ?? "deepchat-chat";
     this.maxTurns = options.maxTurns ?? 50;
     this.permissionPrompt = options.permissionPrompt;
     this.skillRegistry = options.skillRegistry;
@@ -148,6 +183,8 @@ export class QueryEngine implements IQueryEngine {
 
   setModel(model: string): void {
     this.model = model;
+    // Keep the summarizer client pointed at the current model.
+    this.compactService.setClient(toCompactClient(this.apiClient, this.model));
   }
 
   setMaxTurns(max: number): void {

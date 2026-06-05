@@ -7,6 +7,7 @@ export type {
   TextBlock,
   ImageBlock,
   ToolUseBlock,
+  ContentBlock,
 } from "./types/messages";
 
 export type {
@@ -50,6 +51,8 @@ export type {
   AgentHookDefinition,
   HookExecutor as IHookExecutor,
 } from "./types/hooks";
+
+export { HOOK_EVENTS } from "./types/hooks";
 
 export type {
   Settings,
