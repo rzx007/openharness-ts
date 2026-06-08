@@ -72,6 +72,7 @@ export type {
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
   PermissionPrompt,
+  MemoryRetriever,
 } from "./types/runtime";
 
 export { RuntimeBundle } from "./types/runtime";

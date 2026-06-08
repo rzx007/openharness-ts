@@ -6,6 +6,7 @@
     "dev": "bun --watch src/index.tsx",
     "build": "bun run build.ts",
     "check-types": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rimraf dist"
   },
   "dependencies": {
@@ -14,11 +15,15 @@
     "chalk": "catalog:",
     "ink": "catalog:",
     "ink-text-input": "catalog:",
-    "react": "catalog:"
+    "marked": "^18.0.0",
+    "react": "catalog:",
+    "string-width": "^7.2.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/react": "catalog:",
-    "typescript": "^5.7.3"
+    "ink-testing-library": "^4.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "catalog:"
   }
 }

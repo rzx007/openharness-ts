@@ -264,6 +264,27 @@ async function runRepl(
   const memoryFile = join(memoryDir, "memory.json");
   await memoryManager.loadFromFile(memoryFile).catch(() => { });
 
+  // ==================接线 per-turn 相关记忆检索==================
+  // 每轮按本轮用户输入选相关记忆，作为瞬态 system-reminder 注入（不进持久历史，
+  // 不改写常驻 systemPrompt）。同时对命中的记忆 markMemoryUsed 记使用。
+  // 参考 Python prompts/context.py 的 select_relevant_memories + mark_memory_used。
+  bundle.queryEngine.setMemoryRetriever(async (userInput: string) => {
+    if (currentSettings.memory?.enabled === false) return null;
+    const maxEntries = currentSettings.memory?.maxFiles ?? 10;
+    // 注入与“标记已使用”取同一批条目：selectRelevantForPrompt 返回它实际
+    // 渲染进 text 的那批条目（及其 ids），保证 use_count 反馈与注入一致。
+    const { text, ids } = memoryManager.selectRelevantForPrompt(maxEntries, userInput);
+    if (!text) return null;
+    try {
+      if (ids.length > 0) {
+        await memoryManager.markMemoryUsed(ids);
+      }
+    } catch {
+      // markMemoryUsed 失败不应阻断本轮注入
+    }
+    return text;
+  });
+
 
   // ==================创建主题管理器==================
   const themeManager = new ThemeManager();

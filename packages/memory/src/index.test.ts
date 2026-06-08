@@ -333,6 +333,67 @@ describe("MemoryManager weighted factors", () => {
   });
 });
 
+describe("MemoryManager selectRelevantForPrompt", () => {
+  it("returns entries that exactly match what is rendered into text", async () => {
+    const mgr = new MemoryManager();
+    const a = await mgr.add("redis cache config alpha");
+    const b = await mgr.add("postgres index notes");
+    const c = await mgr.add("redis pubsub channel beta");
+
+    const { text, entries, ids } = mgr.selectRelevantForPrompt(10, "redis");
+    // Only redis-matching entries selected; postgres excluded.
+    expect([...ids].sort()).toEqual([a.id, c.id].sort());
+    expect(ids).not.toContain(b.id);
+    // ids derive from entries.
+    expect(ids).toEqual(entries.map((e) => e.id));
+    // Every selected entry's content appears in the rendered text; the
+    // excluded one does not.
+    for (const e of entries) {
+      expect(text).toContain(e.content);
+    }
+    expect(text).not.toContain("postgres index notes");
+  });
+
+  it("matches buildMemoryPrompt text and selection (query + no-query)", async () => {
+    const mgr = new MemoryManager();
+    await mgr.add("alpha kubernetes deploy");
+    await mgr.add("beta kubernetes scale");
+    await mgr.add("gamma unrelated note");
+
+    // With a query.
+    const sel = mgr.selectRelevantForPrompt(10, "kubernetes");
+    expect(sel.text).toBe(mgr.buildMemoryPrompt(10, "kubernetes"));
+
+    // Without a query (recency order).
+    const selAll = mgr.selectRelevantForPrompt(10);
+    expect(selAll.text).toBe(mgr.buildMemoryPrompt(10));
+    expect(selAll.ids).toEqual(selAll.entries.map((e) => e.id));
+  });
+
+  it("respects ordering and truncation identical to buildMemoryPrompt", async () => {
+    const mgr = new MemoryManager();
+    await mgr.add("redis one");
+    await mgr.add("redis two");
+    await mgr.add("redis three");
+
+    const sel = mgr.selectRelevantForPrompt(2, "redis");
+    // Truncated to maxEntries.
+    expect(sel.entries.length).toBe(2);
+    expect(sel.ids.length).toBe(2);
+    // Same selection/order as the legacy prompt builder.
+    expect(sel.text).toBe(mgr.buildMemoryPrompt(2, "redis"));
+  });
+
+  it("returns empty text/entries/ids when nothing matches", async () => {
+    const mgr = new MemoryManager();
+    await mgr.add("redis cache config");
+    const sel = mgr.selectRelevantForPrompt(10, "nonexistentxyz");
+    expect(sel.text).toBe("");
+    expect(sel.entries).toEqual([]);
+    expect(sel.ids).toEqual([]);
+  });
+});
+
 describe("MemoryManager Markdown store", () => {
   let dir: string;
   afterEach(async () => {

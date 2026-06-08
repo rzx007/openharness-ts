@@ -7,6 +7,7 @@ import {
   getAgentDefinition,
   hasRequiredMcpServers,
   isCoordinatorMode,
+  COORDINATOR_SYSTEM_PROMPT,
 } from "./index.js";
 
 describe("Coordinator", () => {
@@ -144,10 +145,146 @@ describe("AgentDefinitions", () => {
     expect(getAgentDefinition("nonexistent")).toBeUndefined();
   });
 
+  it("inherit-model agents omit a hardcoded model (OpenRouter/non-Anthropic safe)", () => {
+    // 对齐 Python v0.1.9：Explore/Plan/verification/claude-code-guide/general-purpose
+    // 用 inherit（TS 以省略 model 表示继承会话模型）。硬编码 haiku 会让非 Anthropic
+    // provider 解析失败——防回归。
+    for (const name of ["Explore", "Plan", "verification", "claude-code-guide", "general-purpose"]) {
+      expect(getAgentDefinition(name)!.model).toBeUndefined();
+    }
+    // statusline-setup 与 Python 一致保留 sonnet（Anthropic 向工具，刻意取舍）。
+    expect(getAgentDefinition("statusline-setup")!.model).toBe("sonnet");
+  });
+
   it("has required MCP servers check", () => {
     const agent = { name: "x", description: "", requiredMcpServers: ["github"] };
     expect(hasRequiredMcpServers(agent, ["github-copilot"])).toBe(true);
     expect(hasRequiredMcpServers(agent, ["other"])).toBe(false);
     expect(hasRequiredMcpServers({ name: "y", description: "" }, [])).toBe(true);
+  });
+
+  it("ships all 7 built-in agents aligned with the Python original", () => {
+    const names = getBuiltinAgentDefinitions().map((a) => a.name);
+    expect(names).toEqual([
+      "general-purpose",
+      "Explore",
+      "Plan",
+      "worker",
+      "verification",
+      "statusline-setup",
+      "claude-code-guide",
+    ]);
+  });
+
+  it("every built-in agent has a non-empty system prompt", () => {
+    for (const agent of getBuiltinAgentDefinitions()) {
+      expect(agent.systemPrompt, agent.name).toBeTruthy();
+      expect((agent.systemPrompt ?? "").trim().length, agent.name).toBeGreaterThan(0);
+    }
+  });
+});
+
+// These anchor strings come verbatim from the Python original
+// (openharness/coordinator/agent_definitions.py). They guard against the
+// prompts being silently truncated again in the future.
+describe("built-in agent prompt anchors (Python v0.1.9 alignment)", () => {
+  const anchorsByAgent: Record<string, string[]> = {
+    "general-purpose": [
+      "You are an agent for Claude Code, Anthropic's official CLI for Claude.",
+      "the caller will relay this to the user",
+      "NEVER proactively create documentation files",
+    ],
+    Explore: [
+      "You are a file search specialist for Claude Code",
+      "=== CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS ===",
+      "Using redirect operators (>, >>, |) or heredocs to write to files",
+      "You are meant to be a fast agent that returns output as quickly as possible",
+    ],
+    Plan: [
+      "You are a software architect and planning specialist for Claude Code.",
+      "=== CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS ===",
+      "### Critical Files for Implementation",
+      "You CANNOT and MUST NOT write, edit, or modify any files.",
+    ],
+    worker: [
+      "You are an implementation-focused worker agent.",
+      "run relevant tests and typecheck, then commit",
+    ],
+    verification: [
+      "You are a verification specialist.",
+      "verification avoidance",
+      "seduced by the first 80%",
+      "=== RECOGNIZE YOUR OWN RATIONALIZATIONS ===",
+      "reading is not verification. Run it.",
+      "=== ADVERSARIAL PROBES (adapt to the change type) ===",
+      "=== BEFORE ISSUING PASS ===",
+      "=== BEFORE ISSUING FAIL ===",
+      "=== OUTPUT FORMAT (REQUIRED) ===",
+      "VERDICT: PASS",
+      "VERDICT: FAIL",
+      "VERDICT: PARTIAL",
+    ],
+    "statusline-setup": [
+      "You are a status line setup agent for Claude Code.",
+      "~/.claude/settings.json",
+      '"statusLine"',
+      'this "statusline-setup" agent must be used for further status line changes',
+    ],
+    "claude-code-guide": [
+      "You are the Claude guide agent.",
+      "Claude Agent SDK",
+      "https://code.claude.com/docs/en/claude_code_docs_map.md",
+      "https://platform.claude.com/llms.txt",
+    ],
+  };
+
+  for (const [name, anchors] of Object.entries(anchorsByAgent)) {
+    it(`${name} prompt contains all Python anchors`, () => {
+      const agent = getAgentDefinition(name);
+      expect(agent, name).toBeDefined();
+      const prompt = agent!.systemPrompt ?? "";
+      for (const anchor of anchors) {
+        expect(prompt, `${name} missing anchor: ${anchor}`).toContain(anchor);
+      }
+    });
+  }
+
+  it("verification agent carries its critical reminder and verdict format", () => {
+    const agent = getAgentDefinition("verification");
+    expect(agent?.criticalSystemReminder).toContain("VERIFICATION-ONLY task");
+    expect(agent?.criticalSystemReminder).toContain("VERDICT: PASS");
+    expect(agent?.background).toBe(true);
+    expect(agent?.color).toBe("red");
+  });
+});
+
+describe("COORDINATOR_SYSTEM_PROMPT anchors (Python v0.1.9 alignment)", () => {
+  const anchors = [
+    "You are Claude Code, an AI assistant that orchestrates software engineering tasks across multiple workers.",
+    "## 1. Your Role",
+    "## 2. Your Tools",
+    "### agent Results",
+    "## 3. Workers",
+    "## 4. Task Workflow",
+    "### What Real Verification Looks Like",
+    "### Stopping Workers",
+    "## 5. Writing Worker Prompts",
+    "### Always synthesize — your most important job",
+    "### Choose continue vs. spawn by context overlap",
+    "### Prompt tips",
+    "## 6. Example Session",
+    "<task-notification>",
+    "subscribe_pr_activity / unsubscribe_pr_activity",
+    "Parallelism is your superpower",
+  ];
+
+  for (const anchor of anchors) {
+    it(`contains: ${anchor.slice(0, 48)}`, () => {
+      expect(COORDINATOR_SYSTEM_PROMPT).toContain(anchor);
+    });
+  }
+
+  it("is substantially longer than the truncated version (>5000 chars)", () => {
+    expect(COORDINATOR_SYSTEM_PROMPT.length).toBeGreaterThan(5000);
   });
 });
