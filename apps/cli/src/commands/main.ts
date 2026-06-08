@@ -135,6 +135,7 @@ export async function mainAction(
     return;
   }
 
+  // print 模式 = 「一次性 Agent 调用 + stdout 流式输出 + 退出」
   if (options.print && prompt) {
     await runPrintMode(settings, prompt, options);
     return;
@@ -164,14 +165,17 @@ async function runPrintMode(
   prompt: string,
   options: MainOptions,
 ): Promise<void> {
+  // ==================加载并注册技能==================
   const { join } = await import("node:path");
   const skillRegistry = new SkillRegistry();
   const skillLoader = new SkillLoader(skillRegistry);
   await skillLoader.loadFromDirectory(getSkillsDir());
   await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
 
+  // ==================创建凭证存储器==================
   const credentialStorage = new CredentialStorage();
 
+  // ==================创建运行时环境==================
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
@@ -179,11 +183,13 @@ async function runPrintMode(
     credentialStorage,
   });
 
+  // ==================创建事件渲染器==================
   const renderer = new EventRenderer({
     verbose: options.verbose,
     printMode: true,
   });
 
+  // ==================提交消息并渲染事件==================
   try {
     for await (const event of bundle.queryEngine.submitMessage(prompt)) {
       await renderer.render(event);
