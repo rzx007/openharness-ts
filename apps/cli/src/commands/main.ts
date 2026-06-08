@@ -607,7 +607,7 @@ async function runBackendHost(
   };
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 
-  const commands = commandRegistry.list().map((c) => `/${c.name}`);
+  const commands = buildHostCommandList(commandRegistry);
 
   await emit({
     type: "ready",
@@ -696,6 +696,28 @@ async function runBackendHost(
     }
     const line = (request.line ?? "").trim();
     if (!line) continue;
+
+    // 斜杠命令在后端本地路由（对齐 REPL），不发给模型。
+    if (line.startsWith("/")) {
+      await emit({ type: "transcript_item", item: { role: "user", text: line } });
+      const outcome = await runHostSlashCommand(line, commandRegistry);
+      if (outcome.exit) {
+        await emit({ type: "shutdown" });
+        running = false;
+        break;
+      }
+      if (outcome.clearTranscript) {
+        await emit({ type: "clear_transcript" });
+      }
+      if (outcome.output) {
+        await emit({ type: "transcript_item", item: { role: "system", text: outcome.output } });
+      }
+      if (outcome.error) {
+        await emit({ type: "transcript_item", item: { role: "system", text: `Error: ${outcome.error}` } });
+      }
+      await emit({ type: "line_complete" });
+      continue;
+    }
 
     busy = true;
     try {
@@ -1032,4 +1054,42 @@ async function saveSessionSnapshot(
   } catch {
     // silently fail
   }
+}
+
+/**
+ * 构建发给前端的斜杠命令列表。命令注册名本身已带前导 "/"（如 "/help"），
+ * 因此不要再额外加 "/"（否则会出现 "//help" 双斜杠 bug）。
+ */
+export function buildHostCommandList(registry: CommandRegistry): string[] {
+  return registry.list().map((c) => c.name);
+}
+
+export interface HostSlashOutcome {
+  exit?: boolean;
+  clearTranscript?: boolean;
+  output?: string;
+  error?: string;
+}
+
+/**
+ * 在 TUI 后端主机里路由斜杠命令（对齐 REPL 的 processLine 斜杠分支）。
+ * 返回 host 应当 emit 的结果，由调用方翻译成 OHJSON 事件。**不调用模型。**
+ */
+export async function runHostSlashCommand(
+  line: string,
+  registry: CommandRegistry,
+): Promise<HostSlashOutcome> {
+  const spaceIdx = line.indexOf(" ");
+  const name = spaceIdx >= 0 ? line.slice(0, spaceIdx) : line;
+  const argsStr = spaceIdx >= 0 ? line.slice(spaceIdx + 1) : "";
+  const result = await registry.execute(name, {
+    args: parseCommandArgs(argsStr),
+    raw: line,
+  });
+  if (result.output === "__EXIT__") return { exit: true };
+  return {
+    output: result.output ? result.output : undefined,
+    error: result.error,
+    clearTranscript: name === "/clear",
+  };
 }
