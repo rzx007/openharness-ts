@@ -21,27 +21,33 @@ export interface DetailedHookResult {
 /** Options for configuring a {@link HookExecutor}. */
 export interface HookExecutorOptions {
   /**
-   * Optional model client used to evaluate `prompt`/`agent` hooks. When absent,
-   * those hook types behave as non-blocking no-ops.
+   * （可选）用于评估 `prompt`/`agent` 钩子的模型客户端。
+   * 如果未提供，则这类钩子类型为非阻塞无操作（no-op）。
    */
   client?: StreamingMessageClient;
-  /** Default model id used when a prompt/agent hook does not specify one. */
+  /** 默认模型 ID，当 `prompt`/`agent` 钩子未指定时使用。 */
   defaultModel?: string;
 }
 
 /**
- * Quote a string for safe use inside a POSIX shell command, mirroring Python's
- * `shlex.quote`. Wraps in single quotes and escapes embedded single quotes.
+ * 将字符串安全地用于 POSIX shell 命令的引号处理，行为与 Python 的 `shlex.quote` 类似。
+ * 用单引号包裹字符串，并对嵌入的单引号进行转义。
+ * 
+ * @param value - 需要转义的字符串值
+ * @returns 转义后的安全字符串，可直接用于POSIX shell命令中
  */
 function shellQuote(value: string): string {
+  // 处理空字符串的特殊情况
   if (value === "") return "''";
-  // If it only contains safe characters, no quoting needed.
+
+  // 如果只包含安全字符，无需转义
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
-  // Wrap in single quotes; close-escape-reopen any single quote.
+
+  // 用单引号包裹字符串，并转义其中嵌入的单引号
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
-/** Inject the serialized payload into a `$ARGUMENTS` placeholder. */
+/** 将序列化的负载注入 `$ARGUMENTS` 占位符。 */
 function injectArguments(
   template: string,
   payload: Record<string, unknown>,
@@ -55,11 +61,12 @@ function injectArguments(
 }
 
 /**
- * fnmatch/glob-style match (case-insensitive, like Python's `fnmatch.fnmatch`
- * on case-insensitive platforms is not guaranteed; here we match Python's
- * `fnmatch` translate semantics: `*`, `?`, `[seq]`).
+ * 实现 fnmatch/glob 风格的字符串匹配（与 Python 的 `fnmatch` 语义类似）。
+ * 支持通配符：`*`（任意字符任意长度），`?`（任意单个字符），`[seq]`（字符集）。
+ * 匹配不区分大小写，但与 Python 在区分大小写平台的行为不完全一致。
  */
 function fnmatch(name: string, pattern: string): boolean {
+  // 将模式转换为正则表达式
   let re = "";
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i] as string;
@@ -434,7 +441,7 @@ export class HookLoader {
 
   watch(directory: string, intervalMs = 5000): void {
     const timer = setInterval(() => {
-      this.loadFromDirectory(directory).catch(() => {});
+      this.loadFromDirectory(directory).catch(() => { });
     }, intervalMs);
     this.watchers.push({ close: () => clearInterval(timer) });
   }
