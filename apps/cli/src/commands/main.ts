@@ -135,6 +135,7 @@ export async function mainAction(
     return;
   }
 
+  // print 模式 = 「一次性 Agent 调用 + stdout 流式输出 + 退出」
   if (options.print && prompt) {
     await runPrintMode(settings, prompt, options);
     return;
@@ -164,14 +165,17 @@ async function runPrintMode(
   prompt: string,
   options: MainOptions,
 ): Promise<void> {
+  // ==================加载并注册技能==================
   const { join } = await import("node:path");
   const skillRegistry = new SkillRegistry();
   const skillLoader = new SkillLoader(skillRegistry);
   await skillLoader.loadFromDirectory(getSkillsDir());
   await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
 
+  // ==================创建凭证存储器==================
   const credentialStorage = new CredentialStorage();
 
+  // ==================创建运行时环境==================
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
@@ -179,11 +183,13 @@ async function runPrintMode(
     credentialStorage,
   });
 
+  // ==================创建事件渲染器==================
   const renderer = new EventRenderer({
     verbose: options.verbose,
     printMode: true,
   });
 
+  // ==================提交消息并渲染事件==================
   try {
     for await (const event of bundle.queryEngine.submitMessage(prompt)) {
       await renderer.render(event);
@@ -257,6 +263,27 @@ async function runRepl(
   const memoryManager = new MemoryManager(1000, memoryDir);
   const memoryFile = join(memoryDir, "memory.json");
   await memoryManager.loadFromFile(memoryFile).catch(() => { });
+
+  // ==================接线 per-turn 相关记忆检索==================
+  // 每轮按本轮用户输入选相关记忆，作为瞬态 system-reminder 注入（不进持久历史，
+  // 不改写常驻 systemPrompt）。同时对命中的记忆 markMemoryUsed 记使用。
+  // 参考 Python prompts/context.py 的 select_relevant_memories + mark_memory_used。
+  bundle.queryEngine.setMemoryRetriever(async (userInput: string) => {
+    if (currentSettings.memory?.enabled === false) return null;
+    const maxEntries = currentSettings.memory?.maxFiles ?? 10;
+    // 注入与“标记已使用”取同一批条目：selectRelevantForPrompt 返回它实际
+    // 渲染进 text 的那批条目（及其 ids），保证 use_count 反馈与注入一致。
+    const { text, ids } = memoryManager.selectRelevantForPrompt(maxEntries, userInput);
+    if (!text) return null;
+    try {
+      if (ids.length > 0) {
+        await memoryManager.markMemoryUsed(ids);
+      }
+    } catch {
+      // markMemoryUsed 失败不应阻断本轮注入
+    }
+    return text;
+  });
 
 
   // ==================创建主题管理器==================
@@ -580,7 +607,7 @@ async function runBackendHost(
   };
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 
-  const commands = commandRegistry.list().map((c) => `/${c.name}`);
+  const commands = buildHostCommandList(commandRegistry);
 
   await emit({
     type: "ready",
@@ -669,6 +696,28 @@ async function runBackendHost(
     }
     const line = (request.line ?? "").trim();
     if (!line) continue;
+
+    // 斜杠命令在后端本地路由（对齐 REPL），不发给模型。
+    if (line.startsWith("/")) {
+      await emit({ type: "transcript_item", item: { role: "user", text: line } });
+      const outcome = await runHostSlashCommand(line, commandRegistry);
+      if (outcome.exit) {
+        await emit({ type: "shutdown" });
+        running = false;
+        break;
+      }
+      if (outcome.clearTranscript) {
+        await emit({ type: "clear_transcript" });
+      }
+      if (outcome.output) {
+        await emit({ type: "transcript_item", item: { role: "system", text: outcome.output } });
+      }
+      if (outcome.error) {
+        await emit({ type: "transcript_item", item: { role: "system", text: `Error: ${outcome.error}` } });
+      }
+      await emit({ type: "line_complete" });
+      continue;
+    }
 
     busy = true;
     try {
@@ -1005,4 +1054,42 @@ async function saveSessionSnapshot(
   } catch {
     // silently fail
   }
+}
+
+/**
+ * 构建发给前端的斜杠命令列表。命令注册名本身已带前导 "/"（如 "/help"），
+ * 因此不要再额外加 "/"（否则会出现 "//help" 双斜杠 bug）。
+ */
+export function buildHostCommandList(registry: CommandRegistry): string[] {
+  return registry.list().map((c) => c.name);
+}
+
+export interface HostSlashOutcome {
+  exit?: boolean;
+  clearTranscript?: boolean;
+  output?: string;
+  error?: string;
+}
+
+/**
+ * 在 TUI 后端主机里路由斜杠命令（对齐 REPL 的 processLine 斜杠分支）。
+ * 返回 host 应当 emit 的结果，由调用方翻译成 OHJSON 事件。**不调用模型。**
+ */
+export async function runHostSlashCommand(
+  line: string,
+  registry: CommandRegistry,
+): Promise<HostSlashOutcome> {
+  const spaceIdx = line.indexOf(" ");
+  const name = spaceIdx >= 0 ? line.slice(0, spaceIdx) : line;
+  const argsStr = spaceIdx >= 0 ? line.slice(spaceIdx + 1) : "";
+  const result = await registry.execute(name, {
+    args: parseCommandArgs(argsStr),
+    raw: line,
+  });
+  if (result.output === "__EXIT__") return { exit: true };
+  return {
+    output: result.output ? result.output : undefined,
+    error: result.error,
+    clearTranscript: name === "/clear",
+  };
 }

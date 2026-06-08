@@ -562,22 +562,27 @@ export class MemoryManager {
   }
 
   buildMemoryPrompt(maxEntries = 10, query?: string): string {
-    let entries: MemoryEntry[];
-    if (query) {
-      // Relevance-ordered selection when a query is supplied.
-      const terms = tokenize(query);
-      entries = [...this.entries.values()]
-        .map((e) => ({ e, s: this.computeScore(e, terms) }))
-        .filter((x) => x.s > 0)
-        .sort((a, b) => b.s - a.s || b.e.updatedAt - a.e.updatedAt)
-        .slice(0, maxEntries)
-        .map((x) => x.e);
-    } else {
-      entries = [...this.entries.values()]
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, maxEntries);
-    }
-    if (!entries.length) return "";
+    return this.selectRelevantForPrompt(maxEntries, query).text;
+  }
+
+  /**
+   * Select the same batch of entries {@link buildMemoryPrompt} would render and
+   * return both the rendered prompt text and the chosen entries (and their
+   * ids). Callers can inject `text` and feed the *same* `ids` to
+   * {@link markMemoryUsed}, guaranteeing use_count feedback tracks exactly what
+   * was injected (mirrors Python `select_relevant_memories` +
+   * `mark_memory_used`). When nothing is selected, `text` is `""` and
+   * `entries`/`ids` are empty.
+   *
+   * The selection (filter + sort + truncation) is identical to
+   * {@link buildMemoryPrompt}; both share this method.
+   */
+  selectRelevantForPrompt(
+    maxEntries = 10,
+    query?: string,
+  ): { text: string; entries: MemoryEntry[]; ids: string[] } {
+    const entries = this.selectPromptEntries(maxEntries, query);
+    if (!entries.length) return { text: "", entries: [], ids: [] };
     const lines = ["<memory>", "Relevant memories from previous interactions:"];
     for (const entry of entries) {
       const tags = entry.tags?.length ? ` [${entry.tags.join(", ")}]` : "";
@@ -585,7 +590,28 @@ export class MemoryManager {
       lines.push(`- ${entry.content}${tags}${age}`);
     }
     lines.push("</memory>");
-    return lines.join("\n");
+    return {
+      text: lines.join("\n"),
+      entries,
+      ids: entries.map((e) => e.id),
+    };
+  }
+
+  /** Shared filter + sort + truncation used by the prompt builders. */
+  private selectPromptEntries(maxEntries: number, query?: string): MemoryEntry[] {
+    if (query) {
+      // Relevance-ordered selection when a query is supplied.
+      const terms = tokenize(query);
+      return [...this.entries.values()]
+        .map((e) => ({ e, s: this.computeScore(e, terms) }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => b.s - a.s || b.e.updatedAt - a.e.updatedAt)
+        .slice(0, maxEntries)
+        .map((x) => x.e);
+    }
+    return [...this.entries.values()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, maxEntries);
   }
 
   // ── scoring ──────────────────────────────────────────────

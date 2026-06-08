@@ -7,6 +7,7 @@ import type {
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
   PermissionPrompt,
+  MemoryRetriever,
   ToolContext,
   ToolExecutionResult,
 } from "../index";
@@ -60,6 +61,7 @@ export class QueryEngine implements IQueryEngine {
   private maxTurns: number;
   private permissionPrompt?: PermissionPrompt;
   private skillRegistry?: unknown;
+  private memoryRetriever?: MemoryRetriever;
 
   constructor(
     private apiClient: StreamingMessageClient,
@@ -82,6 +84,33 @@ export class QueryEngine implements IQueryEngine {
     this.maxTurns = options.maxTurns ?? 50;
     this.permissionPrompt = options.permissionPrompt;
     this.skillRegistry = options.skillRegistry;
+    this.memoryRetriever = options.memoryRetriever;
+  }
+
+  /**
+   * 设置/替换 per-turn 记忆检索回调。传入 undefined 可清除（恢复无记忆注入行为）。
+   * 详见 {@link MemoryRetriever}。
+   */
+  setMemoryRetriever(retriever: MemoryRetriever | undefined): void {
+    this.memoryRetriever = retriever;
+  }
+
+  /**
+   * 组合本轮发往 API 的 system 提示。
+   *
+   * 把常驻 systemPrompt 与本轮检索到的相关记忆（瞬态）拼接，仅用于这一次
+   * streamMessage 调用，不写入 this.systemPrompt，也不进入 this.messages。
+   * 注入风格参考 Python 的「# Relevant Memories」段（追加在 system 末尾）。
+   */
+  private composeTurnSystemPrompt(memoryContext: string | null): string | undefined {
+    if (!memoryContext || !memoryContext.trim()) {
+      return this.systemPrompt;
+    }
+    const reminder = `<system-reminder>\n${memoryContext.trim()}\n</system-reminder>`;
+    if (this.systemPrompt && this.systemPrompt.trim()) {
+      return `${this.systemPrompt}\n\n${reminder}`;
+    }
+    return reminder;
   }
 
   /**
@@ -94,6 +123,16 @@ export class QueryEngine implements IQueryEngine {
    */
   async *submitMessage(content: string): AsyncIterable<StreamEvent> {
     this.messages.push({ type: "user", content });
+
+    // per-turn 相关记忆检索：按本轮用户输入选相关记忆，作为瞬态上下文。
+    // 仅在本轮（这次 submitMessage）拼进发往 API 的 system，不污染持久历史，
+    // 也不改写常驻 systemPrompt。缺省未设 retriever 时该值为 undefined，
+    // turnSystemPrompt 退化为 this.systemPrompt，行为与之前完全一致。
+    let memoryContext: string | null = null;
+    if (this.memoryRetriever) {
+      memoryContext = await this.memoryRetriever(content);
+    }
+    const turnSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
 
     let turnCount = 0;
 
@@ -108,7 +147,7 @@ export class QueryEngine implements IQueryEngine {
       const stream = this.apiClient.streamMessage({
         model: this.model,
         messages: this.messages,
-        system: this.systemPrompt,
+        system: turnSystemPrompt,
         tools: tools.length > 0 ? tools : undefined,
       });
 
