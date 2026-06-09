@@ -88,16 +88,26 @@ program
     console.log();
     const checks: Array<{ label: string; ok: boolean; detail?: string }> = [];
 
+    let settings: import("@openharness/core").Settings | undefined;
     try {
       const { loadSettings } = await import("@openharness/core");
-      const settings = await loadSettings();
-      checks.push({ label: "Settings loaded", ok: true, detail: `model: ${settings.model}` });
+      settings = await loadSettings();
+      checks.push({
+        label: "Settings loaded",
+        ok: true,
+        detail: `provider: ${settings.provider ?? "auto"}, model: ${settings.model}`,
+      });
     } catch (err: any) {
       checks.push({ label: "Settings loaded", ok: false, detail: err.message });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
-    checks.push({ label: "API key", ok: !!apiKey, detail: apiKey ? "found" : "not set" });
+    if (settings) {
+      const { checkApiKey } = await import("./doctor");
+      const keyCheck = await checkApiKey(settings);
+      checks.push({ label: "API key", ok: keyCheck.ok, detail: keyCheck.source });
+    } else {
+      checks.push({ label: "API key", ok: false, detail: "settings not loaded" });
+    }
 
     try {
       const { readFile } = await import("node:fs/promises");
