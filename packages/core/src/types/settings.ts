@@ -2,9 +2,15 @@ import type { PermissionMode } from "./permissions";
 import type { HookDefinition } from "./hooks";
 
 export interface McpServerConfig {
-  command: string;
+  /** Explicit transport type. When omitted it is inferred from url/command. */
+  type?: "stdio" | "http" | "sse";
+  // stdio
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  // http / sse
+  url?: string;
+  headers?: Record<string, string>;
 }
 
 export interface MemoryConfig {

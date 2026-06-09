@@ -22,7 +22,7 @@
 |------|------|-----------|
 | api | 🟡 | ✅`<think>`过滤/图片传递/max_completion_tokens(A.1)；仍缺 Codex/Copilot client、reasoning effort、modelscope |
 | tools | 🟡 | ✅bash/grep/glob 健壮性(A.3)；仍缺 image_to_text/image_generation |
-| mcp | 🟡 | 仅 stdio，无 HTTP/SSE 传输与 headers 鉴权 |
+| mcp | ✅ | stdio + HTTP(streamable)/SSE 传输 + headers 鉴权 + 失败隔离已补(C.3)；仅 MCP OAuth flow 待补 |
 | engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint 已补(B.2)且 LLM 摘要已接入引擎；attachments 留 TODO |
 | hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
 | memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
@@ -127,10 +127,11 @@
 - auth source 多源状态探测（env/file/keyring/external）。
 - **文件**：`packages/auth/src/index.ts`、`credential-storage.ts`
 
-### C.3 MCP HTTP/SSE 传输
-- 增加 streamable-http / SSE 传输；HTTP headers 鉴权 + `auth_configured` 追踪。
-- resources 区分 "Method not found" 与真实错误；`updateServerConfig`/`getServerConfig`。
-- **文件**：`packages/mcp/src/index.ts`
+### C.3 MCP HTTP/SSE 传输 ✅ 已完成
+- ✅ streamable-http / SSE 传输；HTTP headers 鉴权 + `authConfigured` 追踪；失败隔离保持。
+- ✅ resources 区分 "Method not found" 与真实错误。
+- 留待：`updateServerConfig`/`getServerConfig` 运行时改配置、MCP OAuth flow。
+- **文件**：`packages/mcp/src/index.ts`、`packages/core/src/types/settings.ts`（commit `1a18988`）
 
 ### C.4 Coordinator 加载与 prompt 还原
 - 用户 `.md` agent 加载器（YAML frontmatter）+ plugin agent 合并。

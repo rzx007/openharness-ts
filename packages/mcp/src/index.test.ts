@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { McpClientManager } from "./index.js";
+import { McpClientManager, resolveTransportKind } from "./index.js";
 import type { McpConnection, McpToolInfo, McpResourceInfo } from "./index.js";
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
@@ -29,7 +29,17 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
 });
 
 vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
-  StdioClientTransport: vi.fn().mockImplementation(() => ({})),
+  StdioClientTransport: vi.fn().mockImplementation(() => ({ kind: "stdio" })),
+}));
+
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+  StreamableHTTPClientTransport: vi
+    .fn()
+    .mockImplementation(() => ({ kind: "http" })),
+}));
+
+vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
+  SSEClientTransport: vi.fn().mockImplementation(() => ({ kind: "sse" })),
 }));
 
 describe("McpClientManager", () => {
@@ -83,6 +93,8 @@ describe("McpClientManager", () => {
       name: "dead",
       config: { command: "node" },
       status: "error",
+      transport: "stdio",
+      authConfigured: false,
       tools: [{ serverName: "dead", name: "x", description: "", inputSchema: {} }],
       resources: [],
       error: new Error("fail"),
@@ -153,5 +165,186 @@ describe("McpClientManager", () => {
     const resources = manager.getConnectedResources();
     expect(resources).toHaveLength(1);
     expect(resources[0]!.uri).toBe("file:///config.json");
+  });
+
+  it("uses StreamableHTTPClientTransport with headers for http servers", async () => {
+    const { StreamableHTTPClientTransport } = await import(
+      "@modelcontextprotocol/sdk/client/streamableHttp.js"
+    );
+    vi.mocked(StreamableHTTPClientTransport).mockClear();
+
+    const headers = { Authorization: "Bearer token-123" };
+    const conn = await manager.connect("http-srv", {
+      url: "https://example.com/mcp",
+      headers,
+    });
+
+    expect(conn.status).toBe("connected");
+    expect(conn.transport).toBe("http");
+    expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(1);
+    const [url, opts] = vi.mocked(StreamableHTTPClientTransport).mock
+      .calls[0]!;
+    expect(url).toBeInstanceOf(URL);
+    expect((url as URL).href).toBe("https://example.com/mcp");
+    expect(opts!.requestInit!.headers).toEqual(headers);
+  });
+
+  it("uses SSEClientTransport with headers for sse servers", async () => {
+    const { SSEClientTransport } = await import(
+      "@modelcontextprotocol/sdk/client/sse.js"
+    );
+    vi.mocked(SSEClientTransport).mockClear();
+
+    const headers = { "X-Api-Key": "secret" };
+    const conn = await manager.connect("sse-srv", {
+      type: "sse",
+      url: "https://example.com/sse",
+      headers,
+    });
+
+    expect(conn.status).toBe("connected");
+    expect(conn.transport).toBe("sse");
+    expect(SSEClientTransport).toHaveBeenCalledTimes(1);
+    const [url, opts] = vi.mocked(SSEClientTransport).mock.calls[0]!;
+    expect(url).toBeInstanceOf(URL);
+    expect((url as URL).href).toBe("https://example.com/sse");
+    expect(opts!.requestInit!.headers).toEqual(headers);
+  });
+
+  it("stdio servers still go through StdioClientTransport", async () => {
+    const { StdioClientTransport } = await import(
+      "@modelcontextprotocol/sdk/client/stdio.js"
+    );
+    vi.mocked(StdioClientTransport).mockClear();
+
+    const conn = await manager.connect("stdio-srv", {
+      command: "node",
+      args: ["server.js"],
+    });
+
+    expect(conn.status).toBe("connected");
+    expect(conn.transport).toBe("stdio");
+    expect(StdioClientTransport).toHaveBeenCalledTimes(1);
+  });
+
+  it("authConfigured reflects headers (http) and env (stdio)", async () => {
+    const http = await manager.connect("http-auth", {
+      url: "https://example.com/mcp",
+      headers: { Authorization: "Bearer x" },
+    });
+    expect(http.authConfigured).toBe(true);
+
+    const stdioAuth = await manager.connect("stdio-auth", {
+      command: "node",
+      env: { TOKEN: "abc" },
+    });
+    expect(stdioAuth.authConfigured).toBe(true);
+
+    const stdioNoAuth = await manager.connect("stdio-noauth", {
+      command: "node",
+    });
+    expect(stdioNoAuth.authConfigured).toBe(false);
+
+    const httpNoAuth = await manager.connect("http-noauth", {
+      url: "https://example.com/mcp",
+    });
+    expect(httpNoAuth.authConfigured).toBe(false);
+  });
+
+  it("invalid config sets status=error without throwing, in isolation", async () => {
+    await manager.connectAll({
+      bad: {} as any,
+      good: { command: "node" },
+    });
+
+    const bad = manager.getConnection("bad");
+    const good = manager.getConnection("good");
+    expect(bad!.status).toBe("error");
+    expect(bad!.error).toBeDefined();
+    expect(good!.status).toBe("connected");
+  });
+
+  it("resources Method-not-found returns [] and does not fail connect", async () => {
+    vi.mocked(
+      (await import("@modelcontextprotocol/sdk/client/index.js")).Client
+    ).mockImplementationOnce(
+      () =>
+        ({
+          connect: vi.fn().mockResolvedValue(undefined),
+          close: vi.fn().mockResolvedValue(undefined),
+          listTools: vi.fn().mockResolvedValue({ tools: [] }),
+          listResources: vi
+            .fn()
+            .mockRejectedValue(new Error("MCP error -32601: Method not found")),
+        }) as any
+    );
+
+    const conn = await manager.connect("no-resources", { command: "node" });
+    expect(conn.status).toBe("connected");
+    expect(conn.resources).toEqual([]);
+    expect(conn.resourceError).toBeUndefined();
+  });
+
+  it("other resource errors are recorded but connect still succeeds", async () => {
+    vi.mocked(
+      (await import("@modelcontextprotocol/sdk/client/index.js")).Client
+    ).mockImplementationOnce(
+      () =>
+        ({
+          connect: vi.fn().mockResolvedValue(undefined),
+          close: vi.fn().mockResolvedValue(undefined),
+          listTools: vi.fn().mockResolvedValue({ tools: [] }),
+          listResources: vi
+            .fn()
+            .mockRejectedValue(new Error("connection reset")),
+        }) as any
+    );
+
+    const conn = await manager.connect("flaky-resources", { command: "node" });
+    expect(conn.status).toBe("connected");
+    expect(conn.resources).toEqual([]);
+    expect(conn.resourceError).toBeDefined();
+    expect(conn.resourceError!.message).toContain("connection reset");
+  });
+});
+
+describe("resolveTransportKind", () => {
+  it("infers http from url", () => {
+    expect(resolveTransportKind({ url: "https://x/mcp" })).toBe("http");
+  });
+
+  it("infers stdio from command", () => {
+    expect(resolveTransportKind({ command: "node" })).toBe("stdio");
+  });
+
+  it("explicit type wins over inference (type=stdio with url)", () => {
+    expect(
+      resolveTransportKind({ type: "stdio", command: "node", url: "https://x" })
+    ).toBe("stdio");
+  });
+
+  it("type=sse with url resolves to sse", () => {
+    expect(resolveTransportKind({ type: "sse", url: "https://x/sse" })).toBe(
+      "sse"
+    );
+  });
+
+  it("missing both command and url returns error", () => {
+    const r = resolveTransportKind({});
+    expect(typeof r).toBe("object");
+    expect((r as { error: string }).error).toMatch(/command|url/);
+  });
+
+  it("http/sse without url returns error", () => {
+    expect((resolveTransportKind({ type: "http" }) as any).error).toMatch(
+      /url/
+    );
+    expect((resolveTransportKind({ type: "sse" }) as any).error).toMatch(/url/);
+  });
+
+  it("stdio without command returns error", () => {
+    expect(
+      (resolveTransportKind({ type: "stdio" }) as any).error
+    ).toMatch(/command/);
   });
 });

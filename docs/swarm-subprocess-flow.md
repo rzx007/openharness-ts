@@ -6,6 +6,7 @@
 
 - **D.1**：subprocess 派发后端（spawn → 后台子进程 → 轮询取结果）。
 - **D.2**：用 `TaskWait` 阻塞等待替代 Sleep 盲轮询；emit `swarm_status` 点亮 SwarmPanel。
+- **D.4**：teammate 带 `--swarm-worker`，只读工具自动放行（Explore/Plan 默认 permission 即可）。
 
 ## 涉及的模块
 
@@ -20,83 +21,145 @@
 | swarm_status emit | `apps/cli/src/commands/main.ts` + `swarm-status.ts` | 订阅任务状态，emit `swarm_status`（D.2）|
 | SwarmPanel | `apps/frontend/src/components/SwarmPanel.tsx` | TUI 显示 teammate 列表 + 状态 |
 
-## 架构图（组件视角）
+## 整体模型（两进程 + 一个单例）
 
-```mermaid
-flowchart TB
-    subgraph Leader["Leader 进程 · ohs"]
-        direction TB
-        LLM["LLM / QueryEngine"]
-        Agent["Agent 工具"]
-        Wait["TaskWait 工具"]
-        subgraph SwarmReg["swarm 单例 (getBackendRegistry)"]
-            Sub["SubprocessBackend"]
-        end
-        Build["buildTeammateCommand<br/>(cli/teammate.ts)"]
-        TM["TaskManager 单例<br/>(getTaskManager)"]
-        Host["BackendHost<br/>(--backend-only, 仅 TUI)"]
-    end
+Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **TaskManager 单例** 衔接：
 
-    subgraph Mate["Teammate 进程 · ohs --print"]
-        MQE["自己的 QueryEngine<br/>(Explore 人格 + 父模型)"]
-        Log[("task 日志文件")]
-    end
-
-    subgraph FE["TUI 前端 · React/Ink"]
-        Panel["SwarmPanel"]
-    end
-
-    LLM -->|① spawn| Agent -->|getExecutor| Sub
-    Sub -->|buildCommand| Build
-    Sub -->|② createShellTask type:agent| TM
-    TM -->|③ spawn 子进程| MQE
-    MQE -->|输出落盘| Log
-
-    LLM -->|④ 取结果| Wait -->|awaitTask| TM
-    TM -.->|读日志| Log
-
-    TM -.->|registerTaskListener<br/>created/completed| Host -.->|OHJSON swarm_status| Panel
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Leader 进程 · ohs（REPL / --print / --tui 的后端）                  │
+│                                                                     │
+│  ┌──────────────┐    tool call     ┌────────────┐    spawn        │
+│  │ QueryEngine  │ ───────────────► │ Agent 工具 │ ───────────────┐│
+│  │ （主 LLM）   │                  └────────────┘                ││
+│  └──────┬───────┘                                                ││
+│         │ tool call                                              ││
+│         │         ┌────────────┐    awaitTask                   ││
+│         └────────►│ TaskWait   │ ◄──────────────────────────────┤│
+│                   │ 工具       │                                 ││
+│                   └────────────┘                                 ││
+│                          ▲                                       ││
+│                          │ 读日志 / 等终态                        ││
+│                   ┌──────┴───────────────────────────────────┐   ││
+│                   │ TaskManager 单例 · getTaskManager()      │◄──┘│
+│                   │  spawn · 捕获 stdout · 写 task 日志       │    │
+│                   └──────────────────┬───────────────────────┘    │
+└──────────────────────────────────────┼────────────────────────────┘
+                                       │ spawn 子进程
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Teammate 进程 · ohs --print（一次性，跑完即退出）                    │
+│                                                                     │
+│  Explore / Plan / worker 等人格（-s systemPrompt）                   │
+│  继承父 model / provider / permission-mode（api-key 不进 argv）      │
+│  可选 isolate → 独立 git worktree（SubprocessBackend + WorktreeManager）│
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-## 时序图（含 D.2 的 TaskWait + swarm_status）
+**包边界（和 README「分层」对齐）：**
 
-```mermaid
-sequenceDiagram
-    actor User as 用户
-    participant Leader as Leader Agent<br/>(ohs 主 QueryEngine)
-    participant Tool as Agent 工具
-    participant Backend as SubprocessBackend
-    participant Tasks as TaskManager 单例
-    participant Mate as Teammate 子进程<br/>(ohs --print)
-    participant Host as BackendHost
-    participant Panel as TUI SwarmPanel
+| 层 | 谁 | 做什么 |
+|----|-----|--------|
+| 工具层 | `Agent` / `TaskWait` | LLM 的 spawn / join 入口 |
+| swarm 层 | `SubprocessBackend` | 不依赖 services，只认 `TaskRunner` 接口 |
+| CLI 层 | `buildTeammateCommand` | 配置 → `ohs --print …` argv |
+| 服务层 | `TaskManager` | 真 spawn、日志、`awaitTask`、状态 listener |
 
-    User->>Leader: "用 Explore 子agent 看 packages/core"
-    Leader->>Tool: Agent{subagentType:Explore, prompt}
-    Tool->>Backend: getExecutor("subprocess").spawn(config)
-    Backend->>Tasks: createShellTask({argv, type:"agent"})
-    Tasks->>Mate: spawn 独立子进程
-    Tasks-->>Host: task created → emit swarm_status(running)
-    Host-->>Panel: 显示 teammate = running
-    Tasks-->>Backend: { id: task_1 }
-    Backend-->>Tool: SpawnResult{ taskId: task_1 }
-    Tool-->>Leader: "Spawned (task_1)，用 TaskWait 取结果" （立即返回）
+`bootstrap()` 里把三者接成一条链：`SubprocessBackend` → `TaskRunner` 适配器（强制 `type:"agent"`）→ `TaskManager`。
 
-    Note over Mate: 运行自己的 QueryEngine，输出写入 task 日志
+---
 
-    Leader->>Tool: TaskWait{ taskIds:[task_1] }
-    Tool->>Tasks: awaitTask(task_1)  （阻塞，非 Sleep 轮询）
-    Mate-->>Tasks: 完成，输出落盘后退出
-    Tasks-->>Host: task completed → emit swarm_status(done)
-    Host-->>Panel: 显示 teammate = done
-    Tasks-->>Tool: { status, output }
-    Tool-->>Leader: "task_1 (completed): <输出>"
-    Leader->>User: 汇总 packages/core 结构
+## Swarm teammate 运行流程（主路径）
+
+这是 Leader LLM **必须走的两步工具调用**（D.2 之后不再 Sleep 盲轮询）：
+
+```
+用户："用 Explore 子 agent 看 packages/core"
+         │
+         ▼
+┌──────────────────────────────────────────────────────────┐
+│ Step 1 · Leader 决策                                      │
+│ LLM 根据任务委派 → 调用 Agent 工具                         │
+│   { subagentType:"Explore", prompt:"...", description }  │
+└──────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│ Step 2 · Agent 工具（packages/tools/src/agent）           │
+│                                                          │
+│  getAgentDefinition(subagentType)  → 人格 systemPrompt   │
+│  getBackendRegistry().getExecutor("subprocess")            │
+│  SubprocessBackend.spawn(config)                         │
+│    ├─ buildTeammateCommand → [node, ohs, --print, …]     │
+│    └─ TaskManager.createShellTask({ argv, type:"agent" })│
+│                                                          │
+│  立即返回 LLM："Spawned … task_id=task_1"（不阻塞）       │
+└──────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│ Step 3 · Teammate 子进程（后台）                          │
+│                                                          │
+│  ohs --print + Explore 人格                               │
+│  自己的 QueryEngine 跑一轮 → stdout 写入 task 日志         │
+│  正常结束 exit 0 / 失败非 0                               │
+└──────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│ Step 4 · Leader 取结果                                    │
+│ LLM 调用 TaskWait{ taskIds:["task_1"], timeoutSeconds }   │
+│                                                          │
+│  TaskManager.awaitTask(task_1)  阻塞直到终态或超时        │
+│  返回可读摘要："task_1 (completed): <输出>"               │
+│                                                          │
+│  ✗ 旧 D.1：Sleep + TaskGet/TaskOutput 循环轮询            │
+│  ✓ 新 D.2：一次 TaskWait 阻塞 join                        │
+│  ✓ 多个 teammate：spawn 多次 → 一次 TaskWait 并行等       │
+└──────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
+                    Leader 汇总回复用户
 ```
 
-> 对比 D.1：原来 leader 是 `Sleep + TaskGet/TaskOutput` 盲轮询取结果；D.2 后改为
-> **一次 `TaskWait` 阻塞**（内部 `awaitTask` 等任务终态），并支持「spawn 多个 → 一次
-> TaskWait 全等」。
+**要点：**
+
+- Subagent **不是**框架自动识别用户话术；是 Leader LLM **主动调 `Agent` 工具**。
+- Teammate 是 **one-shot** `--print`，不支持 `SendMessage` 多轮（会抛错）。
+- Teammate argv 自动带 **`--swarm-worker`**（D.4）：只读工具集自动放行，**Explore/Plan 在父进程 `default` 下即可工作**；写/执行类工具（Write/Edit/Bash 等）仍会被拒（`--print` 无交互确认）。
+
+---
+
+## TUI 侧路（仅 `--tui`，与主路径并行）
+
+SwarmPanel **不参与** Leader 取结果，只是可视化；只有 TUI 的 BackendHost 会 emit：
+
+```
+TaskManager.registerTaskListener
+         │  仅 type === "agent" 的任务
+         ▼
+BackendHost（--backend-only）
+         │  OHJSON 事件 swarm_status
+         ▼
+SwarmPanel（React/Ink）
+
+created   → status: running
+completed → status: done / error（按 exitCode）
+```
+
+REPL / 普通 `--print` 模式下没有 BackendHost，**不会** emit `swarm_status`。
+
+---
+
+## 和 D.1 的对比
+
+| | D.1 | D.2（当前） |
+|---|-----|------------|
+| 取结果 | Sleep + TaskGet/TaskOutput 轮询 | **TaskWait** 一次阻塞 |
+| UI | 无 | TUI 下 **swarm_status** → SwarmPanel |
+| 任务标记 | — | subprocess 任务统一 `type:"agent"` |
+
+---
 
 ## 关键点
 
@@ -106,7 +169,10 @@ sequenceDiagram
   都用 **全局 `getTaskManager()` 单例**，三者对得上。
 - **一次性 `--print`**：teammate 跑一轮即退出；足够覆盖 Explore/Plan/verification。
 - **配置继承**：argv 带 `--model (config.model ?? settings.model)`、provider/permission-mode、
-  `-s <人格>`；**不把 api-key 放 argv**，teammate 复用 `settings.json` + 继承 env。
+  `-s <人格>`、**`--swarm-worker`**；**不把 api-key 放 argv**，teammate 复用 `settings.json` + 继承 env。
+- **只读自动放行（D.4）**：`--swarm-worker` → `PermissionChecker.autoApproveTools = READ_ONLY_TOOLS`
+  （Read/Glob/Grep/WebFetch/WebSearch/TaskGet/TaskList/TaskOutput/TaskWait/CronList/Lsp）；
+  `deniedTools` 仍优先于 autoApprove。
 - **TaskWait（D.2）**：阻塞 `awaitTask`，per-item 错误隔离，超时返回提示而非挂死；
   Agent 工具描述与 coordinator prompt 都引导用它、别 Sleep 轮询。
 - **swarm_status（D.2）**：teammate（`type:"agent"`）任务 created/completed 时 emit，
@@ -114,13 +180,28 @@ sequenceDiagram
 
 ## 使用前提
 
-teammate 继承父进程的 `--permission-mode`。默认 `default` 模式下，teammate 的工具会被拒
-（`--print` 无交互确认）。**要让 teammate 真正工作，父进程需用 `--permission-mode full_auto`**：
+teammate **继承父进程的 `--permission-mode`**，且 argv 一律带 **`--swarm-worker`**（由
+`buildTeammateCommand` 注入，用户无需手动传）。
+
+| 场景 | 父进程 permission | 是否够用 |
+|------|-------------------|----------|
+| Explore / Plan / verification（只读探索、规划、验证） | `default`（默认） | ✅ 只读工具自动放行 |
+| worker（写代码、跑 Bash/测试） | `default` | ❌ Write/Edit/Bash 等需确认，`--print` 无 UI → 等同拒绝 |
+| worker 或任意需写/执行的 teammate | `full_auto` 或 `--dangerously-skip-permissions` | ✅ |
+
+`--print` 模式下没有 `permissionPrompt`：`checkTool` 返回 `ask` 时默认 **不允许**（见
+`QueryEngine`：无 prompt 则 `allowed = false`）。D.4 的 `--swarm-worker` 让只读工具直接
+`allow`，绕过这一步。
 
 ```bash
-ohs --permission-mode full_auto "用一个 Explore 子 agent 看看 packages/core 的结构，再汇总"
-# TUI 下还能看到 SwarmPanel 里 teammate 的 running → done：
-ohs --tui --permission-mode full_auto
+# 只读 Explore：默认 permission 即可
+ohs "用一个 Explore 子 agent 看看 packages/core 的结构，再汇总"
+
+# worker 写代码 / 跑测试：父进程需 full_auto
+ohs --permission-mode full_auto "用 worker 子 agent 修这个 bug"
+
+# TUI 下 SwarmPanel 可视化（permission 要求同上，与 REPL/--print 一致）
+ohs --tui
 ```
 
 ## 留待后续
@@ -128,4 +209,4 @@ ohs --tui --permission-mode full_auto
 - **SwarmPanel duration 实时滚动**：当前只在 created/completed emit，运行中显示 ~0s；
   需补一个周期性 `updated` 事件。
 - **多轮 `sendMessage`**：需长驻 worker 模式（当前 subprocess teammate 抛错）。
-- **worktree 隔离 / 文件邮箱 / 权限同步（只读自动放行）**：swarm 完整版能力。
+- **写操作转 leader 审批 / 文件邮箱**：完整版 permission_sync（D.4 只做了只读 autoApprove）。
