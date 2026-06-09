@@ -7,15 +7,15 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 > ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
 
 - ✅ **多模型支持** — 20 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Codex/Copilot 订阅、reasoning effort
-- 🟡 **内置工具（40）** — 文件 / Bash / Web / Grep / Cron / MCP / Task 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
-- 🟠 **多 Agent 编排** — Coordinator 的 7 个 agent 定义与 XML 任务通知就绪；swarm 真实派发后端、sequential/parallel/pipeline 调度**尚未实现**
+- 🟡 **内置工具（41）** — 文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
+- 🟡 **多 Agent 编排** — `agent` 工具可真实派发子进程 teammate：独立 git worktree 隔离、只读工具自动放行、`TaskWait` 阻塞取结果、TUI 显示 teammate 状态；Coordinator 7 个 agent + XML 任务通知就绪。暂缺写操作转 leader 审批、多轮 worker、sequential/parallel/pipeline 调度
 - 🟡 **MCP 协议** — 支持 stdio 传输连接外部 MCP Server；暂无 HTTP/SSE 与 headers 鉴权
-- ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝
+- ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读工具自动放行
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
 - 🟡 **会话持久化** — Session 存储 / `--continue` / `--resume` / Cron（均为基础版）
 - 🟠 **插件系统** — 可读 `plugin.json`；工具自动发现与 commands/agents/hooks 贡献加载待补
 - 🟠 **Channel 适配器** — Stdio / HTTP / 飞书（基础）；Telegram/Discord/Slack 等多通道、附件、群组路由待补
-- 🟡 **TUI 前端** — React/Ink 终端 UI；暂无 Markdown/diff 渲染
+- 🟡 **TUI 前端** — React/Ink 终端 UI，助手消息 Markdown 渲染（标题/列表/代码块高亮/表格）、SwarmPanel 显示子 agent 状态、启动清屏；diff 预览待补
 - 🔴 **尚未复刻** — `personalization`（环境事实抽取）、`ohmo`（个人助理 + 多渠道网关）、`sandbox`（Docker 隔离，当前为占位）
 - ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
 
@@ -135,7 +135,7 @@ OpenHarness-ts/
 ├── packages/
 │   ├── core/                 # 核心引擎（QueryEngine、类型、配置）
 │   ├── api/                  # API Provider 抽象层
-│   ├── tools/                # 40 内置工具实现
+│   ├── tools/                # 41 内置工具实现
 │   ├── services/             # 服务层（Compact、Session、Cron、Task、LSP、OAuth）
 │   ├── coordinator/          # 多 Agent 编排器
 │   ├── mcp/                  # MCP 协议客户端
@@ -233,7 +233,7 @@ OpenHarness-ts/
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Tool Layer (40 tools)                            │
+│                    Tool Layer (41 tools)                            │
 │                                                                     │
 │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐ ┌─────────┐ │
 │  │ Bash    │ │ Read     │ │ Write    │ │ Edit      │ │ Glob    │ │
@@ -341,7 +341,7 @@ OpenHarness-ts/
 | `McpClientManager`   | MCP 协议客户端：stdio 传输连接外部 MCP Server，动态获取工具和资源                                                                 |
 | `ChannelAdapter`     | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                              |
 | `HookExecutor`       | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
-| `Swarm/TeamRegistry` | 多 Agent 团队：Agent 注册、派发、消息路由                                                                                 |
+| `Swarm` | 多 Agent 团队：subprocess 后端把子代理派发为 `ohs --print` 子进程、git worktree 隔离、只读工具自动放行；teammate 注册 / 消息路由 |
 | `PluginLoader`       | 插件加载器：读取 `plugin.json` 清单，校验 schema，动态注册工具和 Hook                                                            |
 | `SkillRegistry`      | Skill 管理：Markdown + frontmatter 解析，支持文件/目录批量加载                                                              |
 | `BridgeManager`      | 会话桥接：多进程间共享会话状态                                                                                             |
