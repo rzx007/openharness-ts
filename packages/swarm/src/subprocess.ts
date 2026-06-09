@@ -13,6 +13,8 @@ export interface TaskRunner {
     description: string;
     cwd: string;
     env?: Record<string, string>;
+    /** Optional task type marker (e.g. "agent" for teammate tasks). */
+    type?: string;
   }): Promise<{ id: string }>;
   stopTask(id: string): Promise<void>;
 }

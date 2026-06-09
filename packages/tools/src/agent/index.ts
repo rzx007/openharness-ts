@@ -2,7 +2,10 @@ import type { ToolDefinition } from "@openharness/core";
 
 export const agentTool: ToolDefinition = {
   name: "Agent",
-  description: "Spawn a local background agent task.",
+  description:
+    "Spawn a local background agent task. Returns a task_id. " +
+    "Use TaskWait with that task_id to block until the task finishes and retrieve its result — " +
+    "do not poll with Sleep.",
   inputSchema: {
     type: "object",
     properties: {

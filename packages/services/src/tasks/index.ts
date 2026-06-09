@@ -32,6 +32,24 @@ export interface TaskInfo {
 /** Fired whenever a task reaches a terminal state (completed/failed/stopped). */
 export type CompletionListener = (task: TaskInfo) => void | Promise<void>;
 
+/** Lifecycle event passed to a {@link TaskListener}. */
+export type TaskEvent = "created" | "updated" | "completed";
+
+/**
+ * Fired on task lifecycle transitions: `created` right after a task is
+ * registered, `completed` when it reaches a terminal state. The `updated`
+ * event is reserved for intermediate status changes.
+ */
+export type TaskListener = (task: TaskInfo, event: TaskEvent) => void | Promise<void>;
+
+/** Result of {@link TaskManager.awaitTask}. */
+export interface AwaitTaskResult {
+  status: TaskStatus;
+  output: string;
+  exitCode?: number;
+  timedOut?: boolean;
+}
+
 export interface CreateShellTaskOptions {
   command?: string;
   argv?: string[];
@@ -79,6 +97,7 @@ export class TaskManager {
   private generations = new Map<string, number>();
   private writeChains = new Map<string, Promise<void>>();
   private completionListeners = new Map<string, CompletionListener>();
+  private taskListeners = new Map<string, TaskListener>();
   private idCounter = 0;
   private readonly tasksDir: string;
 
@@ -134,6 +153,7 @@ export class TaskManager {
     this.ensureTasksDir();
     writeFileSync(outputFile, "");
     this.tasks.set(id, task);
+    this.notifyTaskEvent(task, "created");
     this.startProcess(id);
     return task;
   }
@@ -191,6 +211,7 @@ export class TaskManager {
         metadata: { needs_argv: "1", status_note: "Missing argv/command for agent task" },
       };
       this.tasks.set(id, task);
+      this.notifyTaskEvent(task, "created");
       await this.notifyCompletion(task);
       return task;
     }
@@ -311,6 +332,103 @@ export class TaskManager {
     return () => {
       this.completionListeners.delete(id);
     };
+  }
+
+  /**
+   * Subscribe to task lifecycle events (`created` / `updated` / `completed`),
+   * the symmetric counterpart to {@link registerCompletionListener}. Returns an
+   * unregister callback. Listeners receive an immutable snapshot; a throwing
+   * listener is isolated from the others.
+   */
+  registerTaskListener(listener: TaskListener): () => void {
+    const id = `tasklistener_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    this.taskListeners.set(id, listener);
+    return () => {
+      this.taskListeners.delete(id);
+    };
+  }
+
+  /**
+   * Block until a task reaches a terminal state, then return its final status
+   * and output tail.
+   *
+   * - Already terminal (completed/failed/stopped) → resolves immediately.
+   * - Otherwise registers a one-shot completion listener scoped to `taskId` and
+   *   resolves when that task completes (the listener unregisters itself).
+   * - With `timeoutMs`, a timeout resolves `{ timedOut: true }` carrying the
+   *   current status/output instead of rejecting; the timer and listener are
+   *   both cleaned up to avoid leaks.
+   * - Unknown `taskId` → throws.
+   */
+  awaitTask(taskId: string, opts?: { timeoutMs?: number }): Promise<AwaitTaskResult> {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+
+    if (isTerminal(task.status)) {
+      return Promise.resolve({
+        status: task.status,
+        output: this.readTaskOutput(taskId),
+        exitCode: task.exitCode,
+      });
+    }
+
+    return new Promise<AwaitTaskResult>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // Forward-declared so cleanup can reference the unregister handle even
+      // though it is assigned just below.
+      let unregister: () => void = () => {};
+
+      const cleanup = () => {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        unregister();
+      };
+
+      unregister = this.registerCompletionListener((finished) => {
+        if (settled || finished.id !== taskId) return;
+        settled = true;
+        cleanup();
+        resolve({
+          status: finished.status,
+          output: this.readTaskOutput(taskId),
+          exitCode: finished.exitCode,
+        });
+      });
+
+      // Late-binding guard: if the task became terminal between the snapshot
+      // above and the listener registration, resolve from current state.
+      const now = this.tasks.get(taskId);
+      if (now && isTerminal(now.status) && !settled) {
+        settled = true;
+        cleanup();
+        resolve({
+          status: now.status,
+          output: this.readTaskOutput(taskId),
+          exitCode: now.exitCode,
+        });
+        return;
+      }
+
+      if (opts?.timeoutMs != null) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          const current = this.tasks.get(taskId);
+          resolve({
+            status: current?.status ?? "running",
+            output: this.readTaskOutput(taskId),
+            exitCode: current?.exitCode,
+            timedOut: true,
+          });
+        }, opts.timeoutMs);
+        // Don't let a pending await timer keep the process alive on its own.
+        if (typeof timer.unref === "function") timer.unref();
+      }
+    });
   }
 
   /** Best-effort synchronous cleanup of all tracked subprocesses. */
@@ -491,10 +609,42 @@ export class TaskManager {
         /* a failing listener must not break others */
       }
     }
+    // Terminal state is also a lifecycle event: drive the (symmetric) task
+    // listeners from the same chokepoint so the two notification paths can
+    // never diverge. Reuse the same immutable snapshot.
+    this.notifyTaskEvent(snapshot, "completed");
+  }
+
+  /**
+   * Fan a lifecycle event out to every registered {@link TaskListener} using an
+   * immutable snapshot. A throwing listener is isolated and never blocks the
+   * others. Synchronous on purpose so `created` fires before the caller of a
+   * create method observes the returned task.
+   */
+  private notifyTaskEvent(task: TaskInfo, event: TaskEvent): void {
+    const snapshot: TaskInfo = { ...task, metadata: { ...task.metadata } };
+    for (const listener of [...this.taskListeners.values()]) {
+      try {
+        const r = listener(snapshot, event);
+        // A listener may be async; swallow its rejection so it can't surface as
+        // an unhandled rejection and so one slow/failing listener can't break
+        // the others.
+        if (r && typeof (r as Promise<void>).then === "function") {
+          (r as Promise<void>).catch(() => {});
+        }
+      } catch {
+        /* a failing listener must not break others */
+      }
+    }
   }
 }
 
 // ── helpers ───────────────────────────────────────────────
+
+/** A task in a terminal state will receive no further status transitions. */
+function isTerminal(status: TaskStatus): boolean {
+  return status === "completed" || status === "failed" || status === "stopped";
+}
 
 function defaultTasksDir(): string {
   try {

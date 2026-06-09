@@ -94,6 +94,8 @@ Format:
 - The \`<summary>\` describes the outcome: "completed", "failed: {error}", or "was stopped"
 - The \`<task-id>\` value is the agent ID — use send_message with that ID as \`to\` to continue that worker
 
+When you spawn a worker, the agent tool returns a \`task_id\`. To wait for that worker's result, call the \`TaskWait\` tool with its \`task_id\` — it blocks until the worker finishes and returns the result directly. Never poll with Sleep plus repeated \`TaskOutput\` calls; that wastes turns and tokens. \`TaskWait\` is always the way to block on a worker you launched.
+
 ### Example
 
 Each "You:" block is a separate coordinator turn. The "User:" block is a \`<task-notification>\` delivered between turns.

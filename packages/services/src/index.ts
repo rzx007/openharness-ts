@@ -22,6 +22,9 @@ export type {
   TaskType,
   TaskStatus,
   CompletionListener,
+  TaskListener,
+  TaskEvent,
+  AwaitTaskResult,
   CreateShellTaskOptions,
   CreateAgentTaskOptions,
 } from "./tasks";

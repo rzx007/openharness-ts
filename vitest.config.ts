@@ -22,6 +22,11 @@ export default defineConfig({
   test: {
     globals: true,
     include: ["src/**/*.test.ts"],
+    // 不少测试会 spawn 真实子进程（bash/grep/glob、task、swarm teammate 等）。
+    // turbo 并行跑全量时 CPU 争抢可能让子进程变慢；默认 5s/用例偏紧，给足余量
+    // 避免环境抖动导致的偶发超时（非断言失败）。
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
   resolve: {
     alias: aliases,

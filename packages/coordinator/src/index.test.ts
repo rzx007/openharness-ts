@@ -276,6 +276,7 @@ describe("COORDINATOR_SYSTEM_PROMPT anchors (Python v0.1.9 alignment)", () => {
     "<task-notification>",
     "subscribe_pr_activity / unsubscribe_pr_activity",
     "Parallelism is your superpower",
+    "call the `TaskWait` tool with its `task_id`",
   ];
 
   for (const anchor of anchors) {

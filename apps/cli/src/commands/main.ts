@@ -8,7 +8,12 @@ import { McpClientManager } from "@openharness/mcp";
 import { MemoryManager } from "@openharness/memory";
 import { SkillRegistry, SkillLoader } from "@openharness/skills";
 import { ThemeManager } from "@openharness/themes";
-import { TaskManager } from "@openharness/services";
+import { TaskManager, getTaskManager } from "@openharness/services";
+import {
+  applyTaskEventToSnapshotMap,
+  snapshotMapToList,
+  type SwarmTeammateSnapshot,
+} from "../swarm-status";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
@@ -549,6 +554,29 @@ async function runBackendHost(
     }
   };
 
+  // ── swarm_status: 订阅 teammate 任务生命周期，点亮前端 SwarmPanel ──
+  // 关键：subprocess swarm 后端（runtime.ts bootstrap 里）用的是全局
+  // getTaskManager() 单例，而非下方 host 局部 new 的 TaskManager。必须订阅同一
+  // 个单例，才能收到 teammate 任务的 created/completed 事件。
+  const swarmSnapshots = new Map<string, SwarmTeammateSnapshot>();
+  const swarmTaskManager = getTaskManager();
+  const emitSwarmStatus = async (): Promise<void> => {
+    // listener 回调是 sync，这里 fire-and-forget；emit 自身带 writeLock 串行化，
+    // 不会与主循环 emit 抢锁出问题。错误被吞，绝不冒泡成未处理拒绝。
+    try {
+      await emit({
+        type: "swarm_status",
+        swarm_teammates: snapshotMapToList(swarmSnapshots),
+      });
+    } catch {
+      /* emit 失败不应影响 teammate 执行 */
+    }
+  };
+  const unregisterSwarmListener = swarmTaskManager.registerTaskListener((task, event) => {
+    const changed = applyTaskEventToSnapshotMap(swarmSnapshots, task, event);
+    if (changed) void emitSwarmStatus();
+  });
+
   const askPermission = async (toolName: string, reason?: string): Promise<boolean> => {
     const requestId = randomUUID({ disableEntropyCache: true }).replace(/-/g, "");
     let resolve!: (v: boolean) => void;
@@ -735,6 +763,8 @@ async function runBackendHost(
     }
   }
 
+  // 退出/shutdown：注销 swarm listener，避免泄漏与对已关闭 stdout 的写入。
+  unregisterSwarmListener();
   rl.close();
 }
 

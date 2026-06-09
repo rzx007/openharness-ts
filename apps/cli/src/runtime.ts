@@ -118,7 +118,10 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
         // 适配 TaskManager 到 TaskRunner 结构化接口：stopTask 丢弃返回的
         // TaskInfo（后端只需 Promise<void>）。
         taskRunner: {
-          createShellTask: (opts) => taskManager.createShellTask(opts),
+          // 该适配器只服务 subprocess teammate 后端，所以它创建的每个任务都是
+          // teammate：统一打上 type: "agent"，让 backend host 的 swarm_status
+          // listener 能据此过滤出 teammate 任务并点亮 SwarmPanel。
+          createShellTask: (opts) => taskManager.createShellTask({ ...opts, type: "agent" }),
           stopTask: async (id) => {
             await taskManager.stopTask(id);
           },
