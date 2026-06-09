@@ -9,7 +9,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **多模型支持** — 20 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Codex/Copilot 订阅、reasoning effort
 - 🟡 **内置工具（41）** — 文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
 - 🟡 **多 Agent 编排** — `agent` 工具可真实派发子进程 teammate：独立 git worktree 隔离、只读工具自动放行、`TaskWait` 阻塞取结果、TUI 显示 teammate 状态；Coordinator 7 个 agent + XML 任务通知就绪。暂缺写操作转 leader 审批、多轮 worker、sequential/parallel/pipeline 调度
-- 🟡 **MCP 协议** — 支持 stdio 传输连接外部 MCP Server；暂无 HTTP/SSE 与 headers 鉴权
+- ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读工具自动放行
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
 - 🟡 **会话持久化** — Session 存储 / `--continue` / `--resume` / Cron（均为基础版）
@@ -552,13 +552,20 @@ ohs --continue         ohs --resume <id>
     "maxEntrypointLines": 200
   },
   "mcpServers": {
-    "my-server": {
+    "my-stdio-server": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+    },
+    "my-http-server": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
     }
   }
 }
 ```
+
+> MCP 传输自动推断：有 `command` 走 stdio、有 `url` 走 HTTP（streamable）；也可用 `type` 显式指定 `stdio` / `http` / `sse`。HTTP/SSE 用 `headers` 鉴权。
 
 ### 设置 API Key
 
