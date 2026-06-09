@@ -84,7 +84,7 @@ program
   .description("Check environment and dependencies")
   .action(async () => {
     const chalk = (await import("chalk")).default;
-    console.log(chalk.cyan("OpenHarness Doctor"));
+    console.log(chalk.cyan("OpenHarness-ts Doctor"));
     console.log();
     const checks: Array<{ label: string; ok: boolean; detail?: string }> = [];
 

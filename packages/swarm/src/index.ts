@@ -1,3 +1,9 @@
+export {
+  SubprocessBackend,
+  type TaskRunner,
+  type SubprocessBackendOptions,
+} from "./subprocess.js";
+
 export interface TeammateSpawnConfig {
   name: string;
   team: string;

@@ -7,6 +7,9 @@ import { PermissionChecker } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
+import { getBackendRegistry, SubprocessBackend } from "@openharness/swarm";
+import { getTaskManager } from "@openharness/services";
+import { buildTeammateCommand } from "./teammate.js";
 
 export type PermissionPromptFn = (toolName: string, reason?: string) => Promise<boolean>;
 
@@ -102,6 +105,28 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     hookExecutor,
     engineOptions,
   );
+
+  // 注册 swarm subprocess 后端（幂等）：让 Agent 工具能真正把子代理拉起为
+  // 子进程。teammate 命令由 buildTeammateCommand 构建（继承 model/provider/
+  // 权限模式，不暴露 api-key）。
+  const backendRegistry = getBackendRegistry();
+  if (!backendRegistry.list().includes("subprocess")) {
+    const taskManager = getTaskManager();
+    backendRegistry.register(
+      "subprocess",
+      new SubprocessBackend({
+        // 适配 TaskManager 到 TaskRunner 结构化接口：stopTask 丢弃返回的
+        // TaskInfo（后端只需 Promise<void>）。
+        taskRunner: {
+          createShellTask: (opts) => taskManager.createShellTask(opts),
+          stopTask: async (id) => {
+            await taskManager.stopTask(id);
+          },
+        },
+        buildCommand: (cfg) => buildTeammateCommand(cfg, settings),
+      }),
+    );
+  }
 
   return new RuntimeBuilder()
     .setApiClient(apiClient)
