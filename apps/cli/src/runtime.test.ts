@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveApiKey } from "./runtime";
+import { createHash } from "node:crypto";
+import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit } from "./runtime";
 import { CredentialStorage } from "@openharness/auth";
 import type { Settings } from "@openharness/core";
 
@@ -94,5 +95,65 @@ describe("resolveApiKey", () => {
     await storage.storeApiKey("deepseek", "sk-ds-key");
     const key = await resolveApiKey(BASE_SETTINGS, undefined, storage);
     expect(key).not.toBe("sk-ds-key");
+  });
+});
+
+describe("computeWorktreeBaseDir", () => {
+  it("puts worktrees under <configDir>/worktrees/<repoId>", () => {
+    const base = computeWorktreeBaseDir("/home/me/proj", "/cfg");
+    expect(base.replace(/\\/g, "/")).toMatch(/^\/cfg\/worktrees\/[0-9a-f]{12}$/);
+  });
+
+  it("uses a 12-char sha1 prefix of the normalized repoRoot as repoId", () => {
+    const repoRoot = "/home/me/proj";
+    const key = process.platform === "win32" ? repoRoot.toLowerCase() : repoRoot;
+    const expected = createHash("sha1").update(key).digest("hex").slice(0, 12);
+    const base = computeWorktreeBaseDir(repoRoot, "/cfg");
+    expect(base.replace(/\\/g, "/")).toBe(`/cfg/worktrees/${expected}`);
+  });
+
+  it("is stable across trailing slash and separator differences", () => {
+    const a = computeWorktreeBaseDir("/home/me/proj", "/cfg");
+    const b = computeWorktreeBaseDir("/home/me/proj/", "/cfg");
+    expect(a).toBe(b);
+  });
+
+  it("distinguishes different repos", () => {
+    const a = computeWorktreeBaseDir("/home/me/proj-a", "/cfg");
+    const b = computeWorktreeBaseDir("/home/me/proj-b", "/cfg");
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("nodeRunGit", () => {
+  it("returns {code,stdout,stderr} for a successful git command", async () => {
+    const { code, stdout } = await nodeRunGit(["--version"], process.cwd());
+    expect(code).toBe(0);
+    expect(stdout.toLowerCase()).toContain("git version");
+  });
+
+  it("returns a non-zero code for an unknown subcommand (no throw)", async () => {
+    const { code } = await nodeRunGit(["definitely-not-a-git-command"], process.cwd());
+    expect(code).not.toBe(0);
+  });
+});
+
+describe("resolveRepoRoot", () => {
+  it("resolves the git toplevel for a repo cwd", async () => {
+    const top = await resolveRepoRoot(process.cwd());
+    // 该测试在本仓库内跑：toplevel 必须存在且包含 package.json 不是这里要点，
+    // 只断言返回的是一个非空目录（git 的 toplevel 或回退 cwd）。
+    expect(typeof top).toBe("string");
+    expect(top.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the given cwd when not a git repo", async () => {
+    const nonRepo = mkdtempSync(join(tmpdir(), "oh-nonrepo-"));
+    try {
+      const top = await resolveRepoRoot(nonRepo);
+      expect(top).toBe(nonRepo);
+    } finally {
+      rmSync(nonRepo, { recursive: true, force: true });
+    }
   });
 });

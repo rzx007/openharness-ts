@@ -4,6 +4,15 @@ export {
   type SubprocessBackendOptions,
 } from "./subprocess.js";
 
+export {
+  WorktreeManager,
+  validateWorktreeSlug,
+  type GitRunner,
+  type WorktreeManagerOptions,
+  type WorktreeCreateResult,
+  type WorktreeListEntry,
+} from "./worktree.js";
+
 export interface TeammateSpawnConfig {
   name: string;
   team: string;
@@ -13,6 +22,8 @@ export interface TeammateSpawnConfig {
   model?: string;
   systemPrompt?: string;
   permissions?: string[];
+  /** 隔离到独立 git worktree（并行写任务）。缺省 false → 走共享 cwd。 */
+  isolate?: boolean;
 }
 
 export interface TeammateMessage {
@@ -26,6 +37,10 @@ export interface SpawnResult {
   taskId: string;
   backendType: string;
   error?: string;
+  /** 隔离成功时填充：teammate 改动所在的 worktree 路径与分支。 */
+  worktree?: { path: string; branch: string };
+  /** 可选提示（如 isolate 退化为 no-op 的警告）。 */
+  notice?: string;
 }
 
 export interface SwarmBackend {
