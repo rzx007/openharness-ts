@@ -481,6 +481,11 @@ async function runTuiMode(
   }
   const frontendDistPath = path.join(root, "apps", "frontend", "dist", "index.js");
 
+  // 启动 TUI 前清空当前终端（含滚动历史），让 Ink 界面从干净屏幕开始渲染。
+  if (process.stdout.isTTY) {
+    process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+  }
+
   const child = spawn(process.execPath, [frontendDistPath], {
     stdio: "inherit",
     env: {
