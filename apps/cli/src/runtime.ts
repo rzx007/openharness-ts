@@ -6,7 +6,7 @@ import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, getConfigDir 
 import { AnthropicClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { CredentialStorage } from "@openharness/auth";
-import { PermissionChecker } from "@openharness/permissions";
+import { PermissionChecker, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
@@ -30,6 +30,7 @@ export interface BootstrapOptions {
     disallowedTools?: string;
     effort?: string;
     fastMode?: boolean;
+    swarmWorker?: boolean;
   };
   permissionPrompt?: PermissionPromptFn;
   skillRegistry?: unknown;
@@ -74,12 +75,17 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     ? "full_auto"
     : (overrides.permissionMode as "default" | "plan" | "full_auto") ?? settings.permission.mode;
 
+  // swarm worker（teammate 子进程）对只读工具自动放行，无需父进程开 full_auto。
+  // denied 永远优先于 autoApprove；只对带 --swarm-worker 的进程生效，不动主会话。
+  const autoApproveTools = overrides.swarmWorker ? [...READ_ONLY_TOOLS] : undefined;
+
   const permissionChecker = new PermissionChecker({
     mode,
     allowedTools: [...effectiveAllowed],
     deniedTools: [...effectiveDenied],
     pathRules: settings.permission.pathRules,
     deniedCommands: settings.permission.deniedCommands,
+    autoApproveTools,
   });
 
   const hookExecutor = new HookExecutor();

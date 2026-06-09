@@ -38,6 +38,7 @@ program
   .option("--output-format <format>", "Output format (text | json | stream-json)")
   .option("--append-system-prompt <prompt>", "Append to default system prompt")
   .option("--bare", "Skip hooks/plugins/MCP loading")
+  .option("--swarm-worker", "以 swarm worker 身份运行：只读工具自动放行（内部用）")
   .action(mainAction);
 
 program.addCommand(createAuthCommand());

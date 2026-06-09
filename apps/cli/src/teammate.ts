@@ -45,5 +45,9 @@ export function buildTeammateCommand(
   // 各自人格（Explore/Plan/verification 等）。
   if (config.systemPrompt) argv.push("-s", config.systemPrompt);
 
+  // 所有 teammate 都以 swarm worker 身份运行：只读工具自动放行（D.4）。
+  // 只读放行本就安全，让 Explore/Plan 默认就能干活，不必父进程开 full_auto。
+  argv.push("--swarm-worker");
+
   return { argv };
 }

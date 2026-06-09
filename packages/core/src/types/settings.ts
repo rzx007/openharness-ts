@@ -30,6 +30,7 @@ export interface PermissionSettings {
   deniedTools?: string[];
   pathRules?: PathRuleConfig[];
   deniedCommands?: string[];
+  autoApproveTools?: string[];
 }
 
 export interface Settings {

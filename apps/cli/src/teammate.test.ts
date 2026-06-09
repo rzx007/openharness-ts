@@ -87,6 +87,11 @@ describe("buildTeammateCommand", () => {
     expect(argv).not.toContain("--base-url");
   });
 
+  it("includes --swarm-worker for all teammates (read-only auto-approval)", () => {
+    const { argv } = buildTeammateCommand(makeConfig(), BASE_SETTINGS);
+    expect(argv).toContain("--swarm-worker");
+  });
+
   it("never includes the api-key", () => {
     const { argv } = buildTeammateCommand(makeConfig(), {
       ...BASE_SETTINGS,

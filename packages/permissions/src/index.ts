@@ -15,6 +15,26 @@ export type {
   PathRuleConfig,
 };
 
+/**
+ * 只读工具集：swarm worker（teammate）对这些工具自动放行，无需父进程开 full_auto。
+ * 对齐 Python `_READ_ONLY_TOOLS`（read_file/glob/grep/web_fetch/web_search/
+ * task_get/task_list/task_output/cron_list），TS 额外加 TaskWait、Lsp。
+ * 不含 Write/Edit/Bash 等写/执行类工具。
+ */
+export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "WebFetch",
+  "WebSearch",
+  "TaskGet",
+  "TaskList",
+  "TaskOutput",
+  "TaskWait",
+  "CronList",
+  "Lsp",
+]);
+
 export interface PermissionCheckOptions {
   mode: PermissionMode;
   rules?: PermissionRule[];
@@ -22,6 +42,7 @@ export interface PermissionCheckOptions {
   deniedTools?: string[];
   pathRules?: PathRuleConfig[];
   deniedCommands?: string[];
+  autoApproveTools?: string[];
 }
 
 export class PermissionChecker implements IPermissionChecker {
@@ -31,6 +52,7 @@ export class PermissionChecker implements IPermissionChecker {
   private deniedTools: Set<string>;
   private pathRules: PathRuleConfig[];
   private deniedCommands: string[];
+  private autoApproveTools: Set<string>;
 
   constructor(options: PermissionCheckOptions | PermissionSettings) {
     if ("mode" in options && "allowedTools" in options) {
@@ -41,6 +63,7 @@ export class PermissionChecker implements IPermissionChecker {
       this.deniedTools = new Set(s.deniedTools ?? []);
       this.pathRules = s.pathRules ?? [];
       this.deniedCommands = s.deniedCommands ?? [];
+      this.autoApproveTools = new Set(s.autoApproveTools ?? []);
     } else {
       const o = options as PermissionCheckOptions;
       this.mode = o.mode;
@@ -49,6 +72,7 @@ export class PermissionChecker implements IPermissionChecker {
       this.deniedTools = new Set(o.deniedTools ?? []);
       this.pathRules = o.pathRules ?? [];
       this.deniedCommands = o.deniedCommands ?? [];
+      this.autoApproveTools = new Set(o.autoApproveTools ?? []);
     }
   }
 
@@ -62,6 +86,12 @@ export class PermissionChecker implements IPermissionChecker {
 
     if (this.deniedTools.size > 0 && this.deniedTools.has(toolName)) {
       return { action: "deny", reason: `Tool '${toolName}' is in denied list` };
+    }
+
+    // 只读工具自动放行（swarm worker）：在 deniedTools 否决之后、allowedTools
+    // 白名单之前。denied 永远优先于 autoApprove（安全优先）。
+    if (this.autoApproveTools.size > 0 && this.autoApproveTools.has(toolName)) {
+      return { action: "allow", reason: "Auto-approved read-only tool (swarm worker)" };
     }
 
     if (this.allowedTools.size > 0 && !this.allowedTools.has(toolName)) {

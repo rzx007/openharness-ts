@@ -85,6 +85,7 @@ interface MainOptions {
   outputFormat?: string;
   appendSystemPrompt?: string;
   bare?: boolean;
+  swarmWorker?: boolean;
 }
 
 interface SessionSnapshot {
@@ -937,6 +938,7 @@ function buildCliOverrides(options: MainOptions) {
     disallowedTools: options.disallowedTools,
     effort: options.effort,
     fastMode: options.bare ? true : undefined,
+    swarmWorker: options.swarmWorker,
   };
 }
 
