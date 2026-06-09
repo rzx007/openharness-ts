@@ -1,12 +1,18 @@
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 import type { Settings, StreamingMessageClient } from "@openharness/core";
-import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
+import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, getConfigDir } from "@openharness/core";
 import { AnthropicClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { CredentialStorage } from "@openharness/auth";
-import { PermissionChecker } from "@openharness/permissions";
+import { PermissionChecker, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
+import { getBackendRegistry, SubprocessBackend, WorktreeManager, type GitRunner } from "@openharness/swarm";
+import { getTaskManager } from "@openharness/services";
+import { buildTeammateCommand } from "./teammate.js";
 
 export type PermissionPromptFn = (toolName: string, reason?: string) => Promise<boolean>;
 
@@ -24,6 +30,7 @@ export interface BootstrapOptions {
     disallowedTools?: string;
     effort?: string;
     fastMode?: boolean;
+    swarmWorker?: boolean;
   };
   permissionPrompt?: PermissionPromptFn;
   skillRegistry?: unknown;
@@ -68,12 +75,17 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     ? "full_auto"
     : (overrides.permissionMode as "default" | "plan" | "full_auto") ?? settings.permission.mode;
 
+  // swarm worker（teammate 子进程）对只读工具自动放行，无需父进程开 full_auto。
+  // denied 永远优先于 autoApprove；只对带 --swarm-worker 的进程生效，不动主会话。
+  const autoApproveTools = overrides.swarmWorker ? [...READ_ONLY_TOOLS] : undefined;
+
   const permissionChecker = new PermissionChecker({
     mode,
     allowedTools: [...effectiveAllowed],
     deniedTools: [...effectiveDenied],
     pathRules: settings.permission.pathRules,
     deniedCommands: settings.permission.deniedCommands,
+    autoApproveTools,
   });
 
   const hookExecutor = new HookExecutor();
@@ -102,6 +114,40 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     hookExecutor,
     engineOptions,
   );
+
+  // 注册 swarm subprocess 后端（幂等）：让 Agent 工具能真正把子代理拉起为
+  // 子进程。teammate 命令由 buildTeammateCommand 构建（继承 model/provider/
+  // 权限模式，不暴露 api-key）。
+  const backendRegistry = getBackendRegistry();
+  if (!backendRegistry.list().includes("subprocess")) {
+    const taskManager = getTaskManager();
+    // 构造真实 WorktreeManager 注入 subprocess 后端：让 isolate=true 的 teammate
+    // 在独立 git worktree 里跑。repoRoot 取 cwd 的 git 顶层，baseDir 按 repo 区分。
+    const repoRoot = await resolveRepoRoot(process.cwd());
+    const worktreeManager = new WorktreeManager({
+      runGit: nodeRunGit,
+      repoRoot,
+      baseDir: computeWorktreeBaseDir(repoRoot, getConfigDir()),
+    });
+    backendRegistry.register(
+      "subprocess",
+      new SubprocessBackend({
+        // 适配 TaskManager 到 TaskRunner 结构化接口：stopTask 丢弃返回的
+        // TaskInfo（后端只需 Promise<void>）。
+        taskRunner: {
+          // 该适配器只服务 subprocess teammate 后端，所以它创建的每个任务都是
+          // teammate：统一打上 type: "agent"，让 backend host 的 swarm_status
+          // listener 能据此过滤出 teammate 任务并点亮 SwarmPanel。
+          createShellTask: (opts) => taskManager.createShellTask({ ...opts, type: "agent" }),
+          stopTask: async (id) => {
+            await taskManager.stopTask(id);
+          },
+        },
+        buildCommand: (cfg) => buildTeammateCommand(cfg, settings),
+        worktreeManager,
+      }),
+    );
+  }
 
   return new RuntimeBuilder()
     .setApiClient(apiClient)
@@ -282,4 +328,64 @@ function resolveBackendFromFormat(format: string): BackendType {
     case "openai": return "openai_compat";
     default: return "anthropic";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Worktree wiring helpers (D.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * 计算某个 repo 的 worktree 存放根：`<configDir>/worktrees/<repoId>`。
+ *
+ * repoId 用 repoRoot 路径的 sha1 前 12 位，避免不同仓库的 worktree 互相串扰，
+ * 且不暴露绝对路径。归一化路径分隔符 + Windows 下小写，让同一仓库始终落到同一目录。
+ */
+export function computeWorktreeBaseDir(repoRoot: string, configDir: string): string {
+  const normalized = repoRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+  const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  const repoId = createHash("sha1").update(key).digest("hex").slice(0, 12);
+  return join(configDir, "worktrees", repoId);
+}
+
+/**
+ * 注入给 WorktreeManager 的 git 运行器：用 node child_process spawn 'git'。
+ *
+ * 用参数数组（非 shell 拼接）避免注入/转义问题，跨平台安全；捕获 {code, stdout, stderr}。
+ */
+export const nodeRunGit: GitRunner = (args, cwd) =>
+  new Promise((resolve) => {
+    // GIT_TERMINAL_PROMPT=0：禁止 git 弹凭据提示而挂起子进程（与测试 realRunGit 一致，
+    // 也对齐 Python _run_git）。数组传参（非 shell 拼接）避免注入/转义问题。
+    const child = spawn("git", args, {
+      cwd,
+      windowsHide: true,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
+    child.on("error", (err) => {
+      resolve({ code: 127, stdout, stderr: stderr || (err as Error).message });
+    });
+    child.on("close", (code) => {
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+
+/**
+ * 解析 *cwd* 所在 git 仓库的顶层目录（`git rev-parse --show-toplevel`）。
+ * 失败（非 git 仓库 / git 不可用）回退到 cwd 本身。
+ */
+export async function resolveRepoRoot(cwd: string): Promise<string> {
+  const { code, stdout } = await nodeRunGit(["rev-parse", "--show-toplevel"], cwd);
+  if (code === 0) {
+    const top = stdout.trim();
+    if (top) return top;
+  }
+  return cwd;
 }

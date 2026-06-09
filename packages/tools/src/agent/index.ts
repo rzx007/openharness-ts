@@ -2,7 +2,10 @@ import type { ToolDefinition } from "@openharness/core";
 
 export const agentTool: ToolDefinition = {
   name: "Agent",
-  description: "Spawn a local background agent task.",
+  description:
+    "Spawn a local background agent task. Returns a task_id. " +
+    "Use TaskWait with that task_id to block until the task finishes and retrieve its result — " +
+    "do not poll with Sleep.",
   inputSchema: {
     type: "object",
     properties: {
@@ -12,6 +15,12 @@ export const agentTool: ToolDefinition = {
       model: { type: "string", description: "Model override" },
       team: { type: "string", description: "Optional team to attach the agent to" },
       mode: { type: "string", description: "Agent mode", default: "local_agent" },
+      isolate: {
+        type: "boolean",
+        description:
+          "For parallel write tasks, isolate the sub-agent into its own git worktree (separate branch) " +
+          "so concurrent file edits don't conflict. Not needed for read-only exploration.",
+      },
     },
     required: ["description", "prompt"],
   },
@@ -48,6 +57,7 @@ export const agentTool: ToolDefinition = {
         parentSessionId: "main",
         model: (input.model as string) ?? agentDef?.model,
         systemPrompt: agentDef?.systemPrompt,
+        isolate: input.isolate === true,
       });
       if (!result.success) {
         return { content: [{ type: "text", text: result.error ?? "Failed to spawn agent" }], isError: true };
@@ -55,7 +65,15 @@ export const agentTool: ToolDefinition = {
       if (input.team) {
         try { getTeamRegistry().addAgent(input.team as string, result.taskId); } catch {}
       }
-      return { content: [{ type: "text", text: `Spawned agent ${result.agentId} (task_id=${result.taskId}, backend=${result.backendType})` }] };
+      let text = `Spawned agent ${result.agentId} (task_id=${result.taskId}, backend=${result.backendType})`;
+      if (result.worktree) {
+        text += `\nIsolated: changes land on branch \`${result.worktree.branch}\`, worktree path \`${result.worktree.path}\` — review/merge it yourself.`;
+        text += `\nWhen done reviewing, clean it up with \`git worktree remove ${result.worktree.path}\` (or \`git worktree remove --force ${result.worktree.path}\` to discard uncommitted changes).`;
+      }
+      if (result.notice) {
+        text += `\nNotice: ${result.notice}`;
+      }
+      return { content: [{ type: "text", text }] };
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };
     }

@@ -14,7 +14,7 @@ import { skillTool } from "./meta/skill";
 import { toolSearchTool } from "./meta/tool-search";
 import { askUserTool } from "./meta/ask-user";
 import { briefTool } from "./meta/brief";
-import { taskCreateTool, taskGetTool, taskListTool, taskOutputTool, taskStopTool, taskUpdateTool } from "./task";
+import { taskCreateTool, taskGetTool, taskListTool, taskOutputTool, taskStopTool, taskUpdateTool, taskWaitTool } from "./task";
 import { enterPlanModeTool, exitPlanModeTool } from "./mode/plan-mode";
 import { enterWorktreeTool, exitWorktreeTool } from "./mode/worktree";
 import { notebookEditTool } from "./notebook";
@@ -47,6 +47,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(taskOutputTool);
   registry.register(taskStopTool);
   registry.register(taskUpdateTool);
+  registry.register(taskWaitTool);
   registry.register(enterPlanModeTool);
   registry.register(exitPlanModeTool);
   registry.register(enterWorktreeTool);

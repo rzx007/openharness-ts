@@ -312,3 +312,154 @@ describe("TaskManager real execution", () => {
     await expect(mgr.writeToTask(task.id, "late")).rejects.toThrow(/does not accept input/);
   });
 });
+
+describe("TaskManager.awaitTask", () => {
+  it("returns immediately for an already-terminal task with its output/status", async () => {
+    const mgr = makeManager();
+    const task = await mgr.createShellTask(
+      `${NODE} -e "process.stdout.write('done-out'); process.exit(0)"`,
+      "fast",
+      process.cwd(),
+    );
+    await waitFor(() => mgr.getTask(task.id)!.status === "completed");
+    const res = await mgr.awaitTask(task.id);
+    expect(res.status).toBe("completed");
+    expect(res.exitCode).toBe(0);
+    expect(res.output).toContain("done-out");
+    expect(res.timedOut).toBeUndefined();
+  });
+
+  it("resolves with failed status for a non-zero exit", async () => {
+    const mgr = makeManager();
+    const task = await mgr.createShellTask(
+      `${NODE} -e "process.stderr.write('nope'); process.exit(2)"`,
+      "fails",
+      process.cwd(),
+    );
+    await waitFor(() => mgr.getTask(task.id)!.status === "failed");
+    const res = await mgr.awaitTask(task.id);
+    expect(res.status).toBe("failed");
+    expect(res.exitCode).toBe(2);
+    expect(res.output).toContain("nope");
+  });
+
+  it("resolves when a still-running task completes", async () => {
+    const mgr = makeManager();
+    // Sleep briefly, then emit output and exit — task is running at await time.
+    const task = await mgr.createShellTask(
+      `${NODE} -e "setTimeout(()=>{process.stdout.write('late-out');process.exit(0);},300)"`,
+      "slow",
+      process.cwd(),
+    );
+    expect(mgr.getTask(task.id)!.status).toBe("running");
+    const res = await mgr.awaitTask(task.id);
+    expect(res.status).toBe("completed");
+    expect(res.exitCode).toBe(0);
+    expect(res.output).toContain("late-out");
+    expect(res.timedOut).toBeUndefined();
+  });
+
+  it("returns timedOut:true for a long-running task that exceeds timeoutMs", async () => {
+    const mgr = makeManager();
+    const task = await mgr.createShellTask(
+      `${NODE} -e "setInterval(()=>{},1000)"`,
+      "long",
+      process.cwd(),
+    );
+    const res = await mgr.awaitTask(task.id, { timeoutMs: 200 });
+    expect(res.timedOut).toBe(true);
+    expect(res.status).toBe("running");
+    // Still running after the timeout — not yet terminal.
+    expect(mgr.getTask(task.id)!.status).toBe("running");
+  });
+
+  it("does not resolve early before the timeout when the task keeps running", async () => {
+    const mgr = makeManager();
+    const task = await mgr.createShellTask(
+      `${NODE} -e "setInterval(()=>{},1000)"`,
+      "long2",
+      process.cwd(),
+    );
+    const start = Date.now();
+    const res = await mgr.awaitTask(task.id, { timeoutMs: 250 });
+    expect(res.timedOut).toBe(true);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(200);
+  });
+
+  it("throws for an unknown taskId", () => {
+    const mgr = makeManager();
+    expect(() => mgr.awaitTask("task_does_not_exist")).toThrow(/not found/i);
+  });
+});
+
+describe("TaskManager.registerTaskListener", () => {
+  it("fires 'created' when a task is created", async () => {
+    const mgr = makeManager();
+    const events: Array<{ id: string; event: string; status: string }> = [];
+    mgr.registerTaskListener((t, event) => {
+      events.push({ id: t.id, event, status: t.status });
+    });
+    const task = await mgr.createShellTask(
+      `${NODE} -e "process.exit(0)"`,
+      "create-event",
+      process.cwd(),
+    );
+    const created = events.find((e) => e.id === task.id && e.event === "created");
+    expect(created).toBeTruthy();
+    expect(created!.status).toBe("running");
+  });
+
+  it("fires 'completed' when a task reaches a terminal state", async () => {
+    const mgr = makeManager();
+    const events: Array<{ id: string; event: string; status: string }> = [];
+    mgr.registerTaskListener((t, event) => {
+      events.push({ id: t.id, event, status: t.status });
+    });
+    const task = await mgr.createShellTask(
+      `${NODE} -e "process.exit(0)"`,
+      "complete-event",
+      process.cwd(),
+    );
+    await waitFor(() => events.some((e) => e.id === task.id && e.event === "completed"));
+    const completed = events.find((e) => e.id === task.id && e.event === "completed");
+    expect(completed!.status).toBe("completed");
+  });
+
+  it("the returned unregister callback stops further events", async () => {
+    const mgr = makeManager();
+    let count = 0;
+    const unregister = mgr.registerTaskListener(() => {
+      count++;
+    });
+    unregister();
+    await mgr.createShellTask(`${NODE} -e "process.exit(0)"`, "x", process.cwd());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(count).toBe(0);
+  });
+
+  it("isolates a throwing listener from the others", async () => {
+    const mgr = makeManager();
+    const seen: string[] = [];
+    mgr.registerTaskListener(() => {
+      throw new Error("boom in listener");
+    });
+    mgr.registerTaskListener((t, event) => {
+      if (event === "created") seen.push(t.id);
+    });
+    const task = await mgr.createShellTask(
+      `${NODE} -e "process.exit(0)"`,
+      "isolate",
+      process.cwd(),
+    );
+    expect(seen).toContain(task.id);
+  });
+
+  it("fires both 'created' and 'completed' for an agent task missing argv (failed early)", async () => {
+    const mgr = makeManager();
+    const events: string[] = [];
+    mgr.registerTaskListener((_t, event) => events.push(event));
+    await mgr.createAgentTask("do work", "no argv", process.cwd());
+    expect(events).toContain("created");
+    expect(events).toContain("completed");
+  });
+});

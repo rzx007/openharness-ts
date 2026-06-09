@@ -118,6 +118,83 @@ export const taskStopTool: ToolDefinition = {
   },
 };
 
+export const taskWaitTool: ToolDefinition = {
+  name: "TaskWait",
+  description:
+    "Block until one or more background tasks finish and return their results. " +
+    "Use this to wait for sub-tasks spawned by the Agent tool (it returns a task_id): " +
+    "after spawning, call TaskWait with those task_id(s) instead of polling with Sleep. " +
+    "Accepts taskIds (string[] — also tolerates a single string) and an optional " +
+    "timeoutSeconds (default 300). Each task is awaited independently, so one failed, " +
+    "timed-out, or unknown task_id does not affect the others; the result is a readable " +
+    "per-task summary with each task's final status and output.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      taskIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Task identifiers to wait for (a single string is also accepted)",
+      },
+      timeoutSeconds: {
+        type: "number",
+        description: "Per-task wait timeout in seconds before giving up",
+        default: 300,
+      },
+    },
+    required: ["taskIds"],
+  },
+  async execute(input) {
+    const { getTaskManager } = await import("@openharness/services");
+    const mgr = getTaskManager();
+
+    // Normalize taskIds: accept a single string or an array of strings.
+    const raw = input.taskIds;
+    let taskIds: string[];
+    if (typeof raw === "string") {
+      taskIds = [raw];
+    } else if (Array.isArray(raw)) {
+      taskIds = raw.filter((t): t is string => typeof t === "string");
+    } else {
+      taskIds = [];
+    }
+    if (taskIds.length === 0) {
+      return { content: [{ type: "text", text: "taskIds is required (string or string[])" }], isError: true };
+    }
+
+    const timeoutSeconds = typeof input.timeoutSeconds === "number" ? input.timeoutSeconds : 300;
+    const timeoutMs = timeoutSeconds * 1000;
+
+    // Await every task independently so a single failed/unknown id never drags
+    // down the rest. awaitTask throws synchronously on an unknown id, so wrap
+    // each call in its own try/catch via an async closure.
+    const segments = await Promise.all(
+      taskIds.map(async (taskId) => {
+        try {
+          const res = await mgr.awaitTask(taskId, { timeoutMs });
+          if (res.timedOut) {
+            return (
+              `${taskId} (${res.status}): did not finish within ${timeoutSeconds}s — ` +
+              `you can keep waiting with TaskWait or stop it with TaskStop.\n` +
+              `Output so far:\n${res.output}`
+            );
+          }
+          const exit = res.exitCode != null ? ` exit=${res.exitCode}` : "";
+          return `${taskId} (${res.status}${exit}):\n${res.output}`;
+        } catch (err) {
+          return `${taskId} (error): ${(err as Error).message}`;
+        }
+      }),
+    );
+
+    const anyError = segments.some((s) => s.includes("(error):"));
+    return {
+      content: [{ type: "text", text: segments.join("\n\n") }],
+      ...(anyError ? { isError: true } : {}),
+    };
+  },
+};
+
 export const taskUpdateTool: ToolDefinition = {
   name: "TaskUpdate",
   description: "Update a task description, progress, or status note.",

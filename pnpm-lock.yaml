@@ -107,6 +107,9 @@ importers:
       '@openharness/skills':
         specifier: workspace:*
         version: link:../../packages/skills
+      '@openharness/swarm':
+        specifier: workspace:*
+        version: link:../../packages/swarm
       '@openharness/themes':
         specifier: workspace:*
         version: link:../../packages/themes

@@ -27,6 +27,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("TaskOutput");
     expect(names).toContain("TaskStop");
     expect(names).toContain("TaskUpdate");
+    expect(names).toContain("TaskWait");
     expect(names).toContain("EnterPlanMode");
     expect(names).toContain("ExitPlanMode");
     expect(names).toContain("EnterWorktree");
@@ -46,7 +47,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("McpAuth");
     expect(names).toContain("RemoteTrigger");
     expect(names).toContain("Lsp");
-    expect(tools).toHaveLength(40);
+    expect(tools).toHaveLength(41);
   });
 
   it("each tool has required fields", () => {
