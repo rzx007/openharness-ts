@@ -70,8 +70,12 @@ function loadFromEnv(): Partial<Settings> {
   if (process.env.ANTHROPIC_MODEL !== undefined) result.model = process.env.ANTHROPIC_MODEL;
   if (process.env.OPENHARNESS_MODEL !== undefined) result.model = process.env.OPENHARNESS_MODEL;
   if (process.env.OPENHARNESS_API_FORMAT !== undefined) result.apiFormat = process.env.OPENHARNESS_API_FORMAT as Settings["apiFormat"];
-  if (process.env.ANTHROPIC_BASE_URL !== undefined || process.env.OPENHARNESS_BASE_URL !== undefined) {
-    result.baseUrl = process.env.ANTHROPIC_BASE_URL ?? process.env.OPENHARNESS_BASE_URL;
+  // 通用 baseUrl 只认 OPENHARNESS_BASE_URL。不要用 ANTHROPIC_BASE_URL ——
+  // 它是 Anthropic 专属（很多人为 Claude Code 设了 ANTHROPIC_BASE_URL=api.anthropic.com），
+  // 灌进通用 baseUrl 会污染非 Anthropic provider（如 deepseek 的请求被发到 anthropic 端点）。
+  // anthropic provider 的 baseURL 由 Anthropic SDK 自行读取 ANTHROPIC_BASE_URL。
+  if (process.env.OPENHARNESS_BASE_URL !== undefined) {
+    result.baseUrl = process.env.OPENHARNESS_BASE_URL;
   }
   if (process.env.OPENHARNESS_MAX_TOKENS !== undefined) result.maxTokens = parseInt(process.env.OPENHARNESS_MAX_TOKENS, 10);
   if (process.env.OPENHARNESS_MAX_TURNS !== undefined) result.maxTurns = parseInt(process.env.OPENHARNESS_MAX_TURNS, 10);

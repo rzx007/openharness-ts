@@ -264,4 +264,27 @@ describe("loadSettings", () => {
     expect(settings.model).toBe("gpt-4o");
     expect(settings.maxTurns).toBe(10);
   });
+
+  it("ANTHROPIC_BASE_URL does not pollute the generic baseUrl", async () => {
+    const savedA = process.env.ANTHROPIC_BASE_URL;
+    const savedO = process.env.OPENHARNESS_BASE_URL;
+    try {
+      // 用户为 Claude Code 设的 ANTHROPIC_BASE_URL 不该灌进通用 baseUrl
+      // （否则 deepseek 等非 Anthropic provider 的请求会被发到 anthropic 端点）。
+      process.env.ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+      delete process.env.OPENHARNESS_BASE_URL;
+      const s1 = await loadSettings();
+      expect(s1.baseUrl).not.toBe("https://api.anthropic.com");
+
+      // 通用覆盖仍走 OPENHARNESS_BASE_URL。
+      process.env.OPENHARNESS_BASE_URL = "https://my.proxy/v1";
+      const s2 = await loadSettings();
+      expect(s2.baseUrl).toBe("https://my.proxy/v1");
+    } finally {
+      if (savedA === undefined) delete process.env.ANTHROPIC_BASE_URL;
+      else process.env.ANTHROPIC_BASE_URL = savedA;
+      if (savedO === undefined) delete process.env.OPENHARNESS_BASE_URL;
+      else process.env.OPENHARNESS_BASE_URL = savedO;
+    }
+  });
 });

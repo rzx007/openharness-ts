@@ -174,11 +174,12 @@
 
 ## Phase E — CLI / TUI 体验 + 订阅 Provider（P4）
 
-### E.1 CLI 子命令补齐
-- `oh setup` 首次引导向导；`oh provider`（list/use/add/edit/remove，含 `--api-key` 更新，对齐 v0.1.9）。
-- `oh --dry-run` 安全预览（resolved settings / auth / prompt / commands / skills / tools / MCP，readiness verdict）。
-- auth 子命令补 switch / copilot-login / codex-login。
-- **文件**：`apps/cli/src/commands/`、`apps/cli/src/index.ts`
+### E.1 CLI 子命令补齐 ✅ 已完成（最小版）
+- ✅ `oh setup` 首次引导向导；`oh provider`（list/use/add/edit/remove，含 `--api-key`）。最小版：settings.provider + credentials key，**不做**命名 ProviderProfile/keyring（C.2）。
+- ✅ `oh --dry-run` 安全预览（model/provider/key 来源/有效 baseURL/工具数/skills/MCP/readiness）。
+- 留待：auth switch / copilot-login / codex-login（OAuth 订阅属 E.4）。
+- 顺带修：`ANTHROPIC_BASE_URL` 污染通用 baseUrl（dry-run 实测发现，commit `f6fed64`）。
+- **文件**：`apps/cli/src/commands/provider.ts`、`setup.ts`、`apps/cli/src/dry-run.ts`
 
 ### E.2 缺失斜杠命令
 - 补齐 `/stats` `/output-style` `/keybindings` `/vim` `/passes` `/release-notes` `/subagents` `/login` `/logout` `/reload-plugins` `/plugin` 等（按需，约 30 个）。

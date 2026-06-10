@@ -4,6 +4,8 @@ import { createAuthCommand } from "./commands/auth";
 import { createMcpCommand } from "./commands/mcp";
 import { createPluginCommand } from "./commands/plugin";
 import { createCronCommand } from "./commands/cron";
+import { createProviderCommand } from "./commands/provider";
+import { createSetupCommand } from "./commands/setup";
 
 const program = new Command();
 
@@ -38,6 +40,7 @@ program
   .option("--output-format <format>", "Output format (text | json | stream-json)")
   .option("--append-system-prompt <prompt>", "Append to default system prompt")
   .option("--bare", "Skip hooks/plugins/MCP loading")
+  .option("--dry-run", "预览解析后的运行时配置，不调用模型")
   .option("--swarm-worker", "以 swarm worker 身份运行：只读工具自动放行（内部用）")
   .action(mainAction);
 
@@ -45,6 +48,8 @@ program.addCommand(createAuthCommand());
 program.addCommand(createMcpCommand());
 program.addCommand(createPluginCommand());
 program.addCommand(createCronCommand());
+program.addCommand(createProviderCommand());
+program.addCommand(createSetupCommand());
 
 program
   .command("config")

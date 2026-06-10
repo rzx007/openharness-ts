@@ -121,6 +121,19 @@ Options:
   --bare                       跳过 hooks/plugins/MCP 加载
   -d, --debug                  调试模式
   --dangerously-skip-permissions  跳过所有权限检查
+  --dry-run                    预览解析后的运行时配置(不调模型)
+```
+
+### 子命令
+
+```bash
+ohs setup                     # 交互式首次配置向导(选 provider→输 key→选 model)
+ohs provider list             # 列出 provider + key 来源,标注 active
+ohs provider use <name> [-m]  # 切换 active provider(写 settings)
+ohs provider add <name> -k <key> [--use]   # 存 key 到 credentials
+ohs provider remove <name>    # 删 provider 的 key
+ohs doctor                    # 检查环境/配置/key 来源
+ohs auth | mcp | plugin | cron | config | version
 ```
 
 ---
@@ -569,6 +582,19 @@ ohs --continue         ohs --resume <id>
 
 ### 设置 API Key
 
+**方式一：CLI（推荐）—— 存进 `~/.openharness/credentials.json`，无需手改文件**
+
+```bash
+ohs setup                                   # 交互向导：选 provider → 输 key → 选 model
+# 或非交互直接配：
+ohs provider add deepseek -k sk-xxxx --use --model deepseek-v4-flash
+ohs provider list                           # 查看 provider + key 来源，标注 active
+ohs doctor                                  # 验证 key 来源
+ohs --dry-run                               # 预览解析后的运行时配置(不调模型)
+```
+
+**方式二：环境变量**
+
 **Linux / macOS：**
 
 ```bash
@@ -616,8 +642,10 @@ setx ANTHROPIC_API_KEY "sk-ant-..."
 | `ZHIPU_API_KEY`          | 智谱 AI（GLM）API Key            |
 | `OPENHARNESS_CONFIG_DIR` | 自定义配置目录（默认 `~/.openharness`） |
 | `OPENHARNESS_MODEL`      | 默认模型名称                       |
-| `OPENHARNESS_BASE_URL`   | API Base URL 覆盖              |
+| `OPENHARNESS_BASE_URL`   | 通用 API Base URL 覆盖（**所有 provider**）  |
 | `OPENHARNESS_API_FORMAT` | API 格式（anthropic / openai）   |
+
+> ⚠️ `ANTHROPIC_BASE_URL` 仅 Anthropic provider 生效（由 Anthropic SDK 自行读取），**不会**影响 deepseek/openrouter 等其它 provider——要全局覆盖 baseURL 请用 `OPENHARNESS_BASE_URL`。
 
 
 ---
@@ -626,9 +654,15 @@ setx ANTHROPIC_API_KEY "sk-ant-..."
 
 ### DeepSeek
 
-DeepSeek 使用 OpenAI 兼容格式，框架会根据 `deepseek.com` base URL 自动检测。
+DeepSeek 使用 OpenAI 兼容格式，框架会根据 `provider: deepseek` 或 `deepseek` 模型/域名关键字自动检测。当前模型：`deepseek-v4-flash`、`deepseek-v4-pro`（旧名 `deepseek-chat`/`deepseek-reasoner` 将于 2026-07 弃用）。
 
-**方式一：环境变量（推荐）**
+**方式一：CLI（推荐）**
+
+```bash
+ohs provider add deepseek -k sk-xxxxxxxx --use --model deepseek-v4-flash
+```
+
+**方式二：环境变量**
 
 ```bash
 export DEEPSEEK_API_KEY="sk-xxxxxxxxxxxxxxxx"
