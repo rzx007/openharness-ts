@@ -10,6 +10,7 @@ import type { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { PROVIDERS, detectProvider, findByName } from "@openharness/api";
 import type { CredentialStorage } from "@openharness/auth";
+import { loadOutputStyles, isKnownOutputStyle, type OutputStyleDefinition } from "@openharness/output-styles";
 import { switchApiClientForBundle, resolveApiKey } from "../runtime";
 
 export interface SlashCommandContext {
@@ -29,6 +30,50 @@ export interface SlashCommandContext {
   refreshSystemPrompt: () => Promise<void>;
   getBundle: () => RuntimeBundle;
   credentialStorage: CredentialStorage;
+  /** 可选:热切换 REPL 渲染器的输出样式(TUI 无 EventRenderer,不传)。 */
+  setRendererStyle?: (name: string) => void;
+}
+
+/**
+ * 解析 `/output-style` 参数,返回展示消息 + 是否切换(纯函数,便于单测)。
+ *
+ * 语义对齐 Python `_output_style_handler`:
+ * - 无参 / `show` → 显示当前样式
+ * - `list` → 列出全部 `<name> [<source>]`,当前项加 `*` 标记
+ * - `set <NAME>` 或裸 `<NAME>` → 校验后切换;未知 → 报错消息(isError)
+ * - 其它 → 用法提示
+ */
+export function buildOutputStyleResult(
+  rawArgs: string,
+  styles: OutputStyleDefinition[],
+  current: string,
+): { message: string; newStyle?: string; isError?: boolean } {
+  const tokens = rawArgs.trim().split(/\s+/).filter(Boolean);
+
+  if (tokens.length === 0 || tokens[0] === "show") {
+    return { message: `Output style: ${current}` };
+  }
+  if (tokens[0] === "list") {
+    const lines = styles.map(
+      (s) => `${s.name === current ? "* " : "  "}${s.name} [${s.source}]`,
+    );
+    return { message: lines.join("\n") };
+  }
+
+  let styleName: string | undefined;
+  if (tokens[0] === "set" && tokens.length >= 2) {
+    styleName = tokens[1];
+  } else if (tokens.length === 1) {
+    styleName = tokens[0];
+  }
+
+  if (styleName !== undefined) {
+    if (!isKnownOutputStyle(styleName, styles)) {
+      return { message: `Unknown output style: ${styleName}`, isError: true };
+    }
+    return { message: `Output style set to ${styleName}`, newStyle: styleName };
+  }
+  return { message: "Usage: /output-style [show|list|NAME]" };
 }
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
@@ -495,6 +540,26 @@ export function registerBuiltinCommandsOnRegistry(
       getEngine().setMaxTurns(n);
       await updateSettings({ maxTurns: n });
       return { success: true, output: `Max turns set to: ${n}` };
+    },
+  });
+
+  // ── /output-style ──────────────────────────────────────
+  registry.register({
+    name: "/output-style",
+    description: "Show or set output style (show | list | NAME)",
+    handler: async (cmdCtx) => {
+      const rawArgs = cmdCtx.raw.replace(/^\/\S+\s*/, "");
+      const styles = loadOutputStyles();
+      const current = getSettings().outputStyle ?? "default";
+      const result = buildOutputStyleResult(rawArgs, styles, current);
+      if (result.isError) {
+        return { success: false, error: result.message };
+      }
+      if (result.newStyle) {
+        await updateSettings({ outputStyle: result.newStyle });
+        ctx.setRendererStyle?.(result.newStyle);
+      }
+      return { success: true, output: result.message };
     },
   });
 

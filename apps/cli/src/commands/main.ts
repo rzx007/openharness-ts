@@ -360,6 +360,8 @@ async function runRepl(
     refreshSystemPrompt,
     getBundle: () => bundle,
     credentialStorage,
+    // renderer 在下方声明,闭包在命令调用时(已初始化)解析,不存在 TDZ 问题。
+    setRendererStyle: (name: string) => { renderer.setStyle(name); },
   };
 
   // 注册内置命令
@@ -1010,6 +1012,7 @@ function buildStatePayload(settings: Settings): Record<string, unknown> {
     voice_available: false,
     fast_mode: settings.fastMode ?? false,
     effort: settings.effort ?? "medium",
+    output_style: settings.outputStyle ?? "default",
     passes: settings.passes ?? 1,
     mcp_connected: 0,
     mcp_failed: 0,
