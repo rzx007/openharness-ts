@@ -83,6 +83,33 @@ function QuestionModal({
   );
 }
 
+/** \u6700\u591A\u6E32\u67D3\u591A\u5C11\u884C diff\uFF0C\u907F\u514D\u8D85\u957F\u6539\u52A8\u6491\u7206 TUI\u3002 */
+const MAX_DIFF_LINES = 40;
+
+/** \u6E32\u67D3\u4E00\u6BB5 unified diff\uFF1A+ \u7EFF / - \u7EA2 / @@ \u9752 / \u5176\u4F59\u6309\u9ED8\u8BA4\u8272\u3002 */
+function DiffView({ diff }: { diff: string }): React.JSX.Element {
+  const allLines = diff.replace(/\n$/, "").split("\n");
+  const lines = allLines.slice(0, MAX_DIFF_LINES);
+  const truncated = allLines.length - lines.length;
+  return (
+    <Box flexDirection="column" marginLeft={2}>
+      {lines.map((line, i) => {
+        // \u8DF3\u8FC7 jsdiff \u7684\u6587\u4EF6\u5934 --- / +++\uFF08\u5DF2\u77E5\u5197\u4F59\uFF09\uFF0C\u5176\u4F59\u6309\u9996\u5B57\u7B26\u7740\u8272\u3002
+        if (line.startsWith("+++") || line.startsWith("---")) {
+          return <Text key={i} dimColor>{line}</Text>;
+        }
+        if (line.startsWith("@@")) return <Text key={i} color="cyan">{line}</Text>;
+        if (line.startsWith("+")) return <Text key={i} color="green">{line}</Text>;
+        if (line.startsWith("-")) return <Text key={i} color="red">{line}</Text>;
+        return <Text key={i} dimColor>{line}</Text>;
+      })}
+      {truncated > 0 ? (
+        <Text dimColor>{`  \u2026 ${truncated} more line(s)`}</Text>
+      ) : null}
+    </Box>
+  );
+}
+
 export function ModalHost({
   modal,
   modalInput,
@@ -95,6 +122,8 @@ export function ModalHost({
   onSubmit: (value: string) => void;
 }): React.JSX.Element | null {
   if (modal?.kind === "permission") {
+    const diff = modal.diff ? String(modal.diff) : null;
+    const diffPath = modal.diff_path ? String(modal.diff_path) : null;
     return (
       <Box flexDirection="column" marginTop={1}>
         <Text>
@@ -109,9 +138,17 @@ export function ModalHost({
             <Text dimColor>{String(modal.reason)}</Text>
           </Text>
         ) : null}
+        {diff ? (
+          <Box flexDirection="column" marginTop={1}>
+            {diffPath ? <Text dimColor>{"  "}{diffPath}</Text> : null}
+            <DiffView diff={diff} />
+          </Box>
+        ) : null}
         <Text>
           <Text color="yellow">{"\u2514 "}</Text>
           <Text color="green">[y] Allow</Text>
+          <Text>{"  "}</Text>
+          <Text color="green">[a] Allow for session</Text>
           <Text>{"  "}</Text>
           <Text color="red">[n] Deny</Text>
         </Text>

@@ -89,5 +89,7 @@ export type FrontendRequest = {
   line?: string | null;
   request_id?: string | null;
   allowed?: boolean | null;
+  /** 权限批准范围："once"（本次）| "session"（整个会话该工具放行）。 */
+  scope?: "once" | "session" | null;
   answer?: string | null;
 };

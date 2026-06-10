@@ -175,6 +175,18 @@ function AppInner({ config }: { config: FrontendConfig }): React.JSX.Element {
           type: "permission_response",
           request_id: session.modal.request_id as string,
           allowed: true,
+          scope: "once",
+        });
+        session.setModal(null);
+        return;
+      }
+      if (chunk.toLowerCase() === "a") {
+        // 整个会话批准该工具：后续同名工具的 ask 自动放行。
+        session.sendRequest({
+          type: "permission_response",
+          request_id: session.modal.request_id as string,
+          allowed: true,
+          scope: "session",
         });
         session.setModal(null);
         return;

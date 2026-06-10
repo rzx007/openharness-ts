@@ -15,6 +15,7 @@ import {
   type SwarmTeammateSnapshot,
 } from "../swarm-status";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
+import { computeToolDiff } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
 import { EventRenderer } from "../renderer";
@@ -55,6 +56,8 @@ type FrontendRequest = {
   line?: string | null;
   request_id?: string | null;
   allowed?: boolean | null;
+  /** 权限确认的批准范围："once"（本次）| "session"（整个会话该工具放行）。 */
+  scope?: string | null;
   answer?: string | null;
 };
 
@@ -555,6 +558,10 @@ async function runBackendHost(
 ): Promise<void> {
   const permissionRequests = new Map<string, Promise<boolean> & { resolve: (v: boolean) => void }>();
   const questionRequests = new Map<string, Promise<string> & { resolve: (v: string) => void }>();
+  // 会话级批准：用户对某工具选过"整个会话"后，该工具后续 ask 直接放行（按工具名粒度）。
+  const approvedForSessionTools = new Set<string>();
+  // request_id → toolName，供 permission_response 在 scope==="session" 时登记会话批准。
+  const pendingPermissionTools = new Map<string, string>();
   let busy = false;
   let running = true;
   const lastToolInputs = new Map<string, Record<string, unknown>>();
@@ -611,12 +618,36 @@ async function runBackendHost(
     if (changed) void emitSwarmStatus();
   });
 
-  const askPermission = async (toolName: string, reason?: string): Promise<boolean> => {
+  const askPermission = async (
+    toolName: string,
+    reason?: string,
+    input?: Record<string, unknown>,
+  ): Promise<boolean> => {
+    // 会话级批准：之前对该工具选过"整个会话"则直接放行，不再弹框。
+    if (approvedForSessionTools.has(toolName)) return true;
+
     const requestId = randomUUID({ disableEntropyCache: true }).replace(/-/g, "");
+
+    // Edit/Write 改文件前算 unified diff 预览；失败/无改动则不带 diff，回退普通确认。
+    let diff: string | null = null;
+    let diffPath: string | null = null;
+    if (input) {
+      try {
+        const preview = await computeToolDiff(toolName, input);
+        if (preview) {
+          diff = preview.diff;
+          diffPath = preview.path;
+        }
+      } catch {
+        /* 预览计算失败不应阻断权限确认 */
+      }
+    }
+
     let resolve!: (v: boolean) => void;
     const promise = new Promise<boolean>((r) => { resolve = r; }) as Promise<boolean> & { resolve: (v: boolean) => void };
     promise.resolve = resolve;
     permissionRequests.set(requestId, promise);
+    pendingPermissionTools.set(requestId, toolName);
     await emit({
       type: "modal_request",
       modal: {
@@ -624,12 +655,15 @@ async function runBackendHost(
         request_id: requestId,
         tool_name: toolName,
         reason: reason ?? null,
+        diff,
+        diff_path: diffPath,
       },
     });
     try {
       return await promise;
     } finally {
       permissionRequests.delete(requestId);
+      pendingPermissionTools.delete(requestId);
     }
   };
 
@@ -733,7 +767,13 @@ async function runBackendHost(
     if (request.type === "permission_response") {
       const rid = request.request_id;
       if (rid && permissionRequests.has(rid)) {
-        permissionRequests.get(rid)!.resolve(!!request.allowed);
+        const allowed = !!request.allowed;
+        // scope==="session"：把该工具记入会话批准集合，之后同名工具的 ask 自动放行。
+        if (allowed && request.scope === "session") {
+          const tool = pendingPermissionTools.get(rid);
+          if (tool) approvedForSessionTools.add(tool);
+        }
+        permissionRequests.get(rid)!.resolve(allowed);
       }
       continue;
     }
