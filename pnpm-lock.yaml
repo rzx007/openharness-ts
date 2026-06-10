@@ -12,6 +12,9 @@ catalogs:
     '@modelcontextprotocol/sdk':
       specifier: ^1.29.0
       version: 1.29.0
+    '@types/diff':
+      specifier: ^7.0.0
+      version: 7.0.2
     '@types/node':
       specifier: ^22.13.14
       version: 22.19.17
@@ -27,6 +30,9 @@ catalogs:
     cron-parser:
       specifier: ^1.1.0
       version: 1.1.1
+    diff:
+      specifier: ^7.0.0
+      version: 7.0.0
     ink:
       specifier: ^5.1.0
       version: 5.2.1
@@ -546,10 +552,16 @@ importers:
       '@openharness/utils':
         specifier: workspace:*
         version: link:../utils
+      diff:
+        specifier: 'catalog:'
+        version: 7.0.0
       zod:
         specifier: 'catalog:'
         version: 3.25.76
     devDependencies:
+      '@types/diff':
+        specifier: 'catalog:'
+        version: 7.0.2
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.17
@@ -995,6 +1007,9 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
+  '@types/diff@7.0.2':
+    resolution: {integrity: sha512-JSWRMozjFKsGlEjiiKajUjIJVKuKdE3oVy2DNtK+fUo8q82nhFZ2CPQwicAIkXrofahDXrWJ7mjelvZphMS98Q==}
+
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -1210,6 +1225,10 @@ packages:
   depd@2.0.0:
     resolution: {integrity: sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw==}
     engines: {node: '>= 0.8'}
+
+  diff@7.0.0:
+    resolution: {integrity: sha512-PJWHUb1RFevKCwaFA9RlG5tCd+FO5iRh9A8HEtkmBH2Li03iJriB6m6JIN4rGz3K3JLawI7/veA1xzRKP6ISBw==}
+    engines: {node: '>=0.3.1'}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -2252,6 +2271,8 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
+  '@types/diff@7.0.2': {}
+
   '@types/estree@1.0.8': {}
 
   '@types/node-fetch@2.6.13':
@@ -2463,6 +2484,8 @@ snapshots:
   delayed-stream@1.0.0: {}
 
   depd@2.0.0: {}
+
+  diff@7.0.0: {}
 
   dunder-proto@1.0.1:
     dependencies:

@@ -24,9 +24,11 @@
     "@openharness/skills": "workspace:*",
     "@openharness/swarm": "workspace:*",
     "@openharness/utils": "workspace:*",
+    "diff": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/diff": "catalog:",
     "@types/node": "catalog:",
     "typescript": "^5.7.3",
     "vitest": "catalog:"

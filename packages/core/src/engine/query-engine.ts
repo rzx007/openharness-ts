@@ -279,7 +279,7 @@ export class QueryEngine implements IQueryEngine {
       if (decision.action === "ask") {
         let allowed = false;
         if (this.permissionPrompt) {
-          allowed = await this.permissionPrompt(toolUse.name, decision.reason);
+          allowed = await this.permissionPrompt(toolUse.name, decision.reason, toolUse.input);
         }
         if (!allowed) {
           results[i] = {
