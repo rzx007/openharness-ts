@@ -69,6 +69,9 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
     child.stdin.write(JSON.stringify(payload) + "\n");
   };
 
+  /**
+   * 启动后端进程，并监听其 stdout 事件。
+   */
   useEffect(() => {
     const command = config.backend_command[0];
     if (!command) return;

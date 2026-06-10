@@ -48,12 +48,16 @@ export function buildOutputStyleResult(
   styles: OutputStyleDefinition[],
   current: string,
 ): { message: string; newStyle?: string; isError?: boolean } {
-  const tokens = rawArgs.trim().split(/\s+/).filter(Boolean);
+  // 对齐 Python `args.split(maxsplit=1)`:最多切成 [first, rest],rest 保留空格。
+  const trimmed = rawArgs.trim();
+  const firstSpace = trimmed.search(/\s/);
+  const first = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
+  const rest = firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1).trim();
 
-  if (tokens.length === 0 || tokens[0] === "show") {
+  if (first === "" || first === "show") {
     return { message: `Output style: ${current}` };
   }
-  if (tokens[0] === "list") {
+  if (first === "list") {
     const lines = styles.map(
       (s) => `${s.name === current ? "* " : "  "}${s.name} [${s.source}]`,
     );
@@ -61,10 +65,10 @@ export function buildOutputStyleResult(
   }
 
   let styleName: string | undefined;
-  if (tokens[0] === "set" && tokens.length >= 2) {
-    styleName = tokens[1];
-  } else if (tokens.length === 1) {
-    styleName = tokens[0];
+  if (first === "set" && rest !== "") {
+    styleName = rest; // `set foo bar` → 整段 "foo bar"(对齐 Python maxsplit=1)
+  } else if (rest === "") {
+    styleName = first; // 裸名(含裸 "set" → "set",Python 同样如此)
   }
 
   if (styleName !== undefined) {

@@ -68,4 +68,16 @@ describe("buildOutputStyleResult", () => {
     expect(r.message).toContain("Usage:");
     expect(r.newStyle).toBeUndefined();
   });
+
+  it("'set' keeps the whole remainder as the name (maxsplit=1 parity)", () => {
+    // `set foo bar` → 名为 "foo bar"(未知),不静默丢掉 "bar"。
+    const r = buildOutputStyleResult("set foo bar", STYLES, "default");
+    expect(r.isError).toBe(true);
+    expect(r.message).toBe("Unknown output style: foo bar");
+  });
+
+  it("'set NAME' with extra spaces still resolves a known style", () => {
+    const r = buildOutputStyleResult("set   minimal", STYLES, "default");
+    expect(r.newStyle).toBe("minimal");
+  });
 });

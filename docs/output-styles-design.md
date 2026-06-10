@@ -84,3 +84,12 @@
 - TUI render 分支、TUI 图形化样式选择器 UI。
 - system-prompt 注入(Python 不做)。
 - 项目级 `.openharness/output_styles`(最小版只 user 级 `~/.openharness/output_styles`,对齐 Python)。
+
+## 与 Python 的已知差异(刻意)
+
+- **`list` 输出**加 `*`/空格 active 标记(Python 是纯 `name [source]`)——便于 REPL 直观看当前项。
+- **config 目录**:`getOutputStylesDir()` 硬编码 `~/.openharness/output_styles`,不读 `OPENHARNESS_CONFIG_DIR`
+  ——与本仓 `settings.ts` 的 IO 一致(整个 TS app 都硬编码 homedir);若将来 settings 接入
+  `OPENHARNESS_CONFIG_DIR`,这里一并改以保持 parity。
+- **TUI `/output-style set` 当前不持久化**:TUI host 的 `updateSettings` 是 no-op(对**所有**
+  设置类命令的既有限制),且 TUI 不 render-branch,故 TUI 改样式无视觉效果;实际生效面是 REPL。
