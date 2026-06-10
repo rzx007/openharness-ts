@@ -196,11 +196,12 @@
 - 补 modelscope provider profile。
 - **文件**：`packages/api/src/providers/`、`packages/tools/src/`
 
-### E.5 Skills 增强
-- frontmatter 补 user-invocable / disable-model-invocation / model / argument-hint。
-- 内置 bundled skills（skill-creator / diagnose 等）；user/project/plugin 多源 + 向上遍历 + 覆盖优先级 + 信任门控。
-- 布局对齐 `<dir>/SKILL.md` 约定。
-- **文件**：`packages/skills/src/`
+### E.5 Skills 增强 ✅ 已完成（最小版）
+- ✅ frontmatter 补 user-invocable / disable-model-invocation / model / argument-hint。
+- ✅ 内置 bundled skills（commit/review/test/plan/debug，TS 内嵌）；user/project 多源（bundled<user<project）+ 同名覆盖。
+- ✅ user-invocable skill 作 `/<skill>` 斜杠命令（REPL + backend；内置命令优先）；model 可见性过滤（disable-model-invocation 不进 system prompt，三模式一致）。
+- 留待：project skills 的 git-root 向上逐级遍历、信任门控/路径穿越防护、每命令 model 覆盖、skill-creator/diagnose 重工作流 skill。
+- **文件**：`packages/skills/src/`、`apps/cli/src/commands/main.ts`（commit `8fa8a93`）
 
 ### E.6 Services 杂项
 - 新增 `autodream`（记忆梦境整合）、`memory_extract`（对话提取 durable 记忆）、`session_memory`（checkpoint）、`tool_outputs`（microcompactable 判定）。

@@ -343,7 +343,7 @@ OpenHarness-ts/
 | `HookExecutor`       | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
 | `Swarm` | 多 Agent 团队：subprocess 后端把子代理派发为 `ohs --print` 子进程、git worktree 隔离、只读工具自动放行；teammate 注册 / 消息路由 |
 | `PluginLoader`       | 插件加载器：读取 `plugin.json` 清单，校验 schema，动态注册工具和 Hook                                                            |
-| `SkillRegistry`      | Skill 管理：Markdown + frontmatter 解析，支持文件/目录批量加载                                                              |
+| `SkillRegistry`      | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；user-invocable skill 可作 `/<skill>` 斜杠命令；model 可见性过滤 |
 | `BridgeManager`      | 会话桥接：多进程间共享会话状态                                                                                             |
 | `PermissionChecker`  | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                               |
 
