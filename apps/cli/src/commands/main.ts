@@ -202,6 +202,7 @@ async function runPrintMode(
   const renderer = new EventRenderer({
     verbose: options.verbose,
     printMode: true,
+    outputStyle: settings.outputStyle,
   });
 
   // ==================提交消息并渲染事件==================
@@ -383,6 +384,7 @@ async function runRepl(
 
   const renderer = new EventRenderer({
     verbose: options.verbose,
+    outputStyle: settings.outputStyle,
   });
 
   const processLine = async (line: string): Promise<void> => {

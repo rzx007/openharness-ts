@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS: Settings = {
   sandbox: { enabled: false },
   effort: "medium",
   passes: 1,
+  outputStyle: "default",
 };
 
 /**
