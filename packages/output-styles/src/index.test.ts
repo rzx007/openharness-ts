@@ -1,59 +1,70 @@
-import { describe, it, expect } from "vitest";
-import { OutputStyleLoader } from "../src/index.js";
-import type { OutputStyleDefinition } from "../src/index.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir, homedir } from "node:os";
+import { loadOutputStyles, getOutputStylesDir, isKnownOutputStyle } from "./index.js";
 
-describe("OutputStyleLoader", () => {
-  it("has default style built-in", () => {
-    const loader = new OutputStyleLoader();
-    expect(loader.get("default")).toBeDefined();
-    expect(loader.get("default")!.name).toBe("Default");
+describe("loadOutputStyles (builtin)", () => {
+  it("includes the three builtin styles", () => {
+    const styles = loadOutputStyles();
+    const names = styles.map((s) => s.name);
+    expect(names).toEqual(expect.arrayContaining(["default", "minimal", "codex"]));
   });
 
-  it("getAll includes default", () => {
-    const loader = new OutputStyleLoader();
-    expect(loader.getAll()).toHaveLength(1);
+  it("marks builtin styles with source=builtin", () => {
+    const styles = loadOutputStyles();
+    for (const name of ["default", "minimal", "codex"]) {
+      const s = styles.find((x) => x.name === name)!;
+      expect(s.source).toBe("builtin");
+      expect(s.content.length).toBeGreaterThan(0);
+    }
   });
 
-  it("registers a custom style", () => {
-    const loader = new OutputStyleLoader();
-    const style: OutputStyleDefinition = {
-      id: "markdown",
-      name: "Markdown",
-      description: "Formats as markdown",
-      format: (c) => `> ${c}`,
-    };
-    loader.register(style);
-    expect(loader.get("markdown")).toBe(style);
-    expect(loader.getAll()).toHaveLength(2);
+  it("builtins come first and in fixed order", () => {
+    const styles = loadOutputStyles();
+    expect(styles.slice(0, 3).map((s) => s.name)).toEqual(["default", "minimal", "codex"]);
+  });
+});
+
+describe("isKnownOutputStyle", () => {
+  it("accepts builtin names and rejects unknown", () => {
+    const styles = loadOutputStyles();
+    expect(isKnownOutputStyle("minimal", styles)).toBe(true);
+    expect(isKnownOutputStyle("nope", styles)).toBe(false);
+  });
+});
+
+describe("getOutputStylesDir", () => {
+  it("points at ~/.openharness/output_styles", () => {
+    expect(getOutputStylesDir()).toBe(join(homedir(), ".openharness", "output_styles"));
+  });
+});
+
+// 用户样式加载:把一个 .md 放进真实的 output_styles 目录,断言被加载为 source=user,用后清理。
+describe("loadOutputStyles (user .md)", () => {
+  const dir = getOutputStylesDir();
+  let tmpName: string;
+
+  beforeEach(() => {
+    // 用唯一文件名避免与真实用户样式冲突。
+    const stamp = mkdtempSync(join(tmpdir(), "os-")).split(/[\\/]/).pop()!;
+    tmpName = `__test_${stamp}`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${tmpName}.md`), "My custom style.", "utf-8");
+  });
+  afterEach(() => {
+    try {
+      rmSync(join(dir, `${tmpName}.md`));
+    } catch {
+      /* ignore */
+    }
   });
 
-  it("get returns undefined for unknown style", () => {
-    const loader = new OutputStyleLoader();
-    expect(loader.get("nope")).toBeUndefined();
-  });
-
-  it("default style formats content as-is", () => {
-    const loader = new OutputStyleLoader();
-    const style = loader.get("default")!;
-    expect(style.format("hello")).toBe("hello");
-  });
-
-  it("overwrites existing style on re-register", () => {
-    const loader = new OutputStyleLoader();
-    const v1: OutputStyleDefinition = {
-      id: "test",
-      name: "V1",
-      description: "first",
-      format: (c) => c.toUpperCase(),
-    };
-    const v2: OutputStyleDefinition = {
-      id: "test",
-      name: "V2",
-      description: "second",
-      format: (c) => c.toLowerCase(),
-    };
-    loader.register(v1);
-    loader.register(v2);
-    expect(loader.get("test")!.name).toBe("V2");
+  it("loads a user .md as source=user with file content", () => {
+    const styles = loadOutputStyles();
+    const mine = styles.find((s) => s.name === tmpName);
+    expect(mine).toBeDefined();
+    expect(mine!.source).toBe("user");
+    expect(mine!.content).toBe("My custom style.");
   });
 });

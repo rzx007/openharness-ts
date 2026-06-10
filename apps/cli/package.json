@@ -21,6 +21,7 @@
     "@openharness/hooks": "workspace:*",
     "@openharness/mcp": "workspace:*",
     "@openharness/memory": "workspace:*",
+    "@openharness/output-styles": "workspace:*",
     "@openharness/permissions": "workspace:*",
     "@openharness/prompts": "workspace:*",
     "@openharness/plugins": "workspace:*",

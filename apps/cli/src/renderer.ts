@@ -3,6 +3,8 @@ import type { StreamEvent } from "@openharness/core";
 export interface RenderOptions {
   verbose?: boolean;
   printMode?: boolean;
+  /** 输出样式名。"minimal" 走极简纯文本渲染;其余(default/codex/未知)走常规渲染。 */
+  outputStyle?: string;
 }
 
 /**
@@ -18,6 +20,16 @@ export class EventRenderer {
    * @param options - 渲染配置选项
    */
   constructor(private options: RenderOptions = {}) { }
+
+  /** 是否极简样式(渲染层唯一被特判的样式,对齐 Python)。 */
+  private get isMinimal(): boolean {
+    return this.options.outputStyle === "minimal";
+  }
+
+  /** 热切换输出样式(供 /output-style set 在 REPL 实时生效)。 */
+  setStyle(name: string): void {
+    this.options.outputStyle = name;
+  }
 
   /**
    * 根据事件类型异步渲染对应的内容
@@ -72,7 +84,12 @@ export class EventRenderer {
    */
   private renderToolStart(name: string, input: Record<string, unknown>): void {
     const summary = this.summarizeToolInput(name, input);
-    process.stdout.write(`\n  ○ ${name}(${summary})\n`);
+    // minimal:极简纯文本 `  > name summary`;default/codex:`  ○ name(summary)`。
+    if (this.isMinimal) {
+      process.stdout.write(`\n  > ${name} ${summary}\n`);
+    } else {
+      process.stdout.write(`\n  ○ ${name}(${summary})\n`);
+    }
     this.currentTool = name;
   }
 
@@ -94,7 +111,8 @@ export class EventRenderer {
         .map((c) => c.text!)
         .join("\n");
       if (text) {
-        const prefix = isError ? "  ✗ " : "  ✓ ";
+        // minimal:纯缩进无图标;default/codex:`  ✓/✗ ` 前缀。
+        const prefix = this.isMinimal ? "    " : isError ? "  ✗ " : "  ✓ ";
         const lines = text.split("\n").slice(0, 5);
         for (const line of lines) {
           process.stdout.write(`${prefix}${line}\n`);

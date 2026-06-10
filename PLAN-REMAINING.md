@@ -190,8 +190,12 @@
 - ✅ **Edit/Write unified diff 预览**（approve once / session / full_auto 自动跳过）——
   改文件前在 TUI 权限框显示 +/− 着色 diff，`[y]` 本次 / `[a]` 整个会话(按工具名) / `[n]` 拒绝。
   仅 TUI（REPL/print 无交互权限确认）。详见 `docs/permission-flow.md`。
-- markdown 渲染已在 Tier-1 落地；语法高亮、codex output style（紧凑低噪）、tool 行分组折叠待做。
-- **文件**：`packages/tools/src/file/{preview,diff}.ts`、`apps/cli/src/commands/main.ts`、`apps/frontend/src/components/ModalHost.tsx`、`apps/frontend/src/App.tsx`
+- ✅ **Output styles**（输出样式,忠实复刻 v0.1.9）——`default/minimal/codex` 三内置 +
+  用户 `~/.openharness/output_styles/*.md`;REPL `EventRenderer` 按 name 分支(`minimal` 极简纯文本);
+  `/output-style [show|list|NAME]` 命令(REPL 热切换+持久化);TUI state 带 `output_style`(仅 track,
+  不 render-branch)。详见 `docs/output-styles-design.md`。
+- markdown 渲染已在 Tier-1 落地；**语法高亮、TUI render-branch、tool 行分组折叠**待做。
+- **文件**：`packages/tools/src/file/{preview,diff}.ts`、`packages/output-styles/src/index.ts`、`apps/cli/src/renderer.ts`、`apps/cli/src/commands/{main,slash-commands}.ts`、`apps/frontend/src/components/ModalHost.tsx`、`apps/frontend/src/App.tsx`
 
 ### E.4 订阅 Provider（按需）
 - Codex client（chatgpt.com Responses API + reasoning effort `xhigh`）；Copilot client（OAuth device flow + token 持久化）。

@@ -98,6 +98,9 @@ importers:
       '@openharness/memory':
         specifier: workspace:*
         version: link:../../packages/memory
+      '@openharness/output-styles':
+        specifier: workspace:*
+        version: link:../../packages/output-styles
       '@openharness/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions

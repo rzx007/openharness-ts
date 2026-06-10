@@ -114,4 +114,68 @@ describe("EventRenderer", () => {
     const calls = writeSpy.mock.calls.map((c: any) => String(c[0])).join("");
     expect(calls).toContain("...");
   });
+
+  describe("outputStyle: minimal", () => {
+    it("tool_use_start uses '> name summary' (no ○ glyph)", async () => {
+      spy();
+      const renderer = new EventRenderer({ outputStyle: "minimal" });
+      await renderer.render({
+        type: "tool_use_start",
+        toolUse: { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } },
+      });
+      const out = writeSpy.mock.calls.map((c: any) => String(c[0])).join("");
+      expect(out).toContain("> Bash ls");
+      expect(out).not.toContain("○");
+    });
+
+    it("verbose tool_use_end uses plain indent (no ✓/✗ glyph)", async () => {
+      spy();
+      const renderer = new EventRenderer({ outputStyle: "minimal", verbose: true });
+      await renderer.render({
+        type: "tool_use_end",
+        toolUseId: "tu1",
+        result: { content: [{ type: "text", text: "done" }], isError: false },
+      });
+      const out = writeSpy.mock.calls.map((c: any) => String(c[0])).join("");
+      expect(out).toContain("    done");
+      expect(out).not.toContain("✓");
+    });
+  });
+
+  describe("outputStyle: default/codex keep glyphs", () => {
+    it("default tool_use_start keeps ○ glyph", async () => {
+      spy();
+      const renderer = new EventRenderer({ outputStyle: "default" });
+      await renderer.render({
+        type: "tool_use_start",
+        toolUse: { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } },
+      });
+      const out = writeSpy.mock.calls.map((c: any) => String(c[0])).join("");
+      expect(out).toContain("○ Bash(ls)");
+    });
+
+    it("codex renders like default (○ glyph)", async () => {
+      spy();
+      const renderer = new EventRenderer({ outputStyle: "codex" });
+      await renderer.render({
+        type: "tool_use_start",
+        toolUse: { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } },
+      });
+      const out = writeSpy.mock.calls.map((c: any) => String(c[0])).join("");
+      expect(out).toContain("○ Bash(ls)");
+    });
+  });
+
+  it("setStyle switches rendering for subsequent events", async () => {
+    spy();
+    const renderer = new EventRenderer({ outputStyle: "default" });
+    renderer.setStyle("minimal");
+    await renderer.render({
+      type: "tool_use_start",
+      toolUse: { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } },
+    });
+    const out = writeSpy.mock.calls.map((c: any) => String(c[0])).join("");
+    expect(out).toContain("> Bash ls");
+    expect(out).not.toContain("○");
+  });
 });
