@@ -10,6 +10,7 @@ import { PermissionChecker, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
+import type { SkillRegistry } from "@openharness/skills";
 import { getBackendRegistry, SubprocessBackend, WorktreeManager, type GitRunner } from "@openharness/swarm";
 import { getTaskManager } from "@openharness/services";
 import { buildTeammateCommand } from "./teammate.js";
@@ -33,7 +34,7 @@ export interface BootstrapOptions {
     swarmWorker?: boolean;
   };
   permissionPrompt?: PermissionPromptFn;
-  skillRegistry?: unknown;
+  skillRegistry?: SkillRegistry;
   credentialStorage?: CredentialStorage;
 }
 
@@ -90,6 +91,9 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
 
   const hookExecutor = new HookExecutor();
 
+  // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt
+  // 时才注入 model 可见的 skills 段，使 print/backend 三模式与 REPL 一致——REPL
+  // 由 refreshSystemPrompt 注入，print/backend 走 bootstrap 由此处注入。
   const systemPrompt = overrides.systemPrompt ?? await buildRuntimeSystemPrompt({
     customPrompt: settings.systemPrompt,
     cwd: process.cwd(),
@@ -97,6 +101,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     fastMode: overrides.fastMode ?? settings.fastMode,
     effort: overrides.effort ?? settings.effort,
     passes: settings.passes,
+    skillsList: options.skillRegistry?.modelVisibleList(),
   });
 
   const engineOptions = {

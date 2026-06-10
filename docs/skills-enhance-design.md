@@ -35,6 +35,7 @@
 - **backend host**（runBackendHost 的 submit_line）：同样在 runHostSlashCommand 之前拦截 user-invocable skill → 走 processLineForHost（注入 skill prompt）。
 - **命令列表**：buildHostCommandList / REPL 的命令补全把 user-invocable skill 显示为 `/<name>`（描述用 skill.description）。
 - 若 skill.model 设了：最小版**先不做**每命令 model 覆盖（注 TODO）；统一用当前会话 model。
+- **与内置斜杠命令同名的处理**：bundled 的 `commit` / `plan` 与内置斜杠命令 `/commit`（git-commit）/`/plan`（plan-mode）同名。按"内置命令优先"，这两个 skill **作为 `/<skill>` 不可达**——用户输入 `/commit` 走内置 git-commit、`/plan` 走 plan-mode。但它们**仍可经 Skill 工具 / system prompt 被模型使用**（model 可见性不受同名影响）。此为与 Python 一致的行为。`review` / `test` / `debug` 三个不与内置命令撞名，可正常通过 `/<skill>` 调用。
 
 ### d) model 可见性
 - Skill 工具（packages/tools/src/meta/skill.ts）：列出/可发现 skill 时排除 `disableModelInvocation`（但若模型显式按名取且该 skill disableModelInvocation，可仍拒绝或允许——最小版：Skill 工具仍能按名取，但**system prompt 的 skills 段**排除 disableModelInvocation 的，使模型不会主动发现/调用）。

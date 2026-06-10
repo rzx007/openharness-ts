@@ -6,7 +6,7 @@ import { CommandRegistry } from "@openharness/commands";
 import { HookExecutor } from "@openharness/hooks";
 import { McpClientManager } from "@openharness/mcp";
 import { MemoryManager } from "@openharness/memory";
-import { SkillRegistry, SkillLoader } from "@openharness/skills";
+import { SkillRegistry, SkillLoader, type SkillDefinition } from "@openharness/skills";
 import { ThemeManager } from "@openharness/themes";
 import { TaskManager, getTaskManager } from "@openharness/services";
 import {
@@ -171,12 +171,9 @@ async function runPrintMode(
   prompt: string,
   options: MainOptions,
 ): Promise<void> {
-  // ==================加载并注册技能==================
-  const { join } = await import("node:path");
+  // ==================加载并注册技能（三源：bundled < user < project）==================
   const skillRegistry = new SkillRegistry();
-  const skillLoader = new SkillLoader(skillRegistry);
-  await skillLoader.loadFromDirectory(getSkillsDir());
-  await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
+  await loadSkillsThreeSources(skillRegistry, process.cwd());
 
   // ==================创建凭证存储器==================
   const credentialStorage = new CredentialStorage();
@@ -224,11 +221,9 @@ async function runRepl(
 ): Promise<void> {
   const { join } = await import("node:path");
 
-  // ==================加载并注册技能==================
+  // ==================加载并注册技能（三源：bundled < user < project）==================
   const skillRegistry = new SkillRegistry();
-  const skillLoader = new SkillLoader(skillRegistry);
-  await skillLoader.loadFromDirectory(getSkillsDir());
-  await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
+  await loadSkillsThreeSources(skillRegistry, process.cwd());
 
   const credentialStorage = new CredentialStorage();
 
@@ -312,7 +307,8 @@ async function runRepl(
         ? memoryManager.buildMemoryPrompt(currentSettings.memory?.maxFiles ?? 10)
         : undefined;
 
-    // 根据当前配置构建运行时系统提示词
+    // 根据当前配置构建运行时系统提示词。skillsList 过滤掉 disableModelInvocation
+    // 的技能（model 可见性：模型只看到可被它发现/调用的技能）。
     const prompt = await buildRuntimeSystemPrompt({
       customPrompt: currentSettings.systemPrompt,
       cwd: process.cwd(),
@@ -321,6 +317,7 @@ async function runRepl(
       effort: currentSettings.effort,
       passes: currentSettings.passes,
       memoryContent,
+      skillsList: skillRegistry.modelVisibleList(),
     });
     // 将生成的提示词设置到查询引擎中
     bundle.queryEngine.setSystemPrompt(prompt);
@@ -355,6 +352,10 @@ async function runRepl(
   // 注册内置命令
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 
+  // 启动时刷新一次 system prompt，把（model 可见的）技能段注入。
+  // bootstrap 期的 system prompt 不带 skillsList，这里补上。
+  await refreshSystemPrompt();
+
   console.log("OpenHarness Interactive Mode");
   console.log(`Model: ${currentModel}`);
   console.log(`Session: ${sessionId}`);
@@ -383,6 +384,29 @@ async function runRepl(
     }
 
     if (input.startsWith("/")) {
+      // 先尝试 user-invocable skill 的 /<skill>（内置命令优先，不被覆盖）。
+      // 命中 → 把 skill prompt 当作一次普通输入跑一轮，再 return。
+      const skillMatch = matchUserInvocableSkill(
+        input,
+        skillRegistry,
+        (name) => commandRegistry.get(name) !== undefined,
+      );
+      if (skillMatch) {
+        renderer.reset();
+        const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
+        try {
+          for await (const event of bundle.queryEngine.submitMessage(skillPrompt)) {
+            await renderer.render(event);
+          }
+        } catch (err) {
+          if (err instanceof Error) {
+            process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
+          }
+        }
+        rl.prompt();
+        return;
+      }
+
       const spaceIdx = input.indexOf(" ");
       const cmdName = spaceIdx >= 0 ? input.slice(0, spaceIdx) : input;
       const argsStr = spaceIdx >= 0 ? input.slice(spaceIdx + 1) : "";
@@ -600,10 +624,9 @@ async function runBackendHost(
     }
   };
 
+  // 加载并注册技能（三源：bundled < user < project）
   const skillRegistry = new SkillRegistry();
-  const skillLoader = new SkillLoader(skillRegistry);
-  await skillLoader.loadFromDirectory(getSkillsDir());
-  await skillLoader.loadFromDirectory(join(process.cwd(), ".openharness", "skills"));
+  await loadSkillsThreeSources(skillRegistry, process.cwd());
 
   const credentialStorage = new CredentialStorage();
 
@@ -641,7 +664,7 @@ async function runBackendHost(
   };
   registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
 
-  const commands = buildHostCommandList(commandRegistry);
+  const commands = buildHostCommandList(commandRegistry, skillRegistry);
 
   await emit({
     type: "ready",
@@ -730,6 +753,29 @@ async function runBackendHost(
     }
     const line = (request.line ?? "").trim();
     if (!line) continue;
+
+    // 先尝试 user-invocable skill 的 /<skill>（内置命令优先）。命中 → 注入 skill
+    // prompt 跑一轮（emit 事件），与普通输入同路径；busy 标志处理与下方一致。
+    if (line.startsWith("/")) {
+      const skillMatch = matchUserInvocableSkill(
+        line,
+        skillRegistry,
+        (name) => commandRegistry.get(name) !== undefined,
+      );
+      if (skillMatch) {
+        busy = true;
+        try {
+          const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
+          await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, settings);
+        } catch (err) {
+          const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
+          await emit({ type: "error", message: msg });
+        } finally {
+          busy = false;
+        }
+        continue;
+      }
+    }
 
     // 斜杠命令在后端本地路由（对齐 REPL），不发给模型。
     if (line.startsWith("/")) {
@@ -1094,11 +1140,129 @@ async function saveSessionSnapshot(
 }
 
 /**
+ * 三源加载技能到给定 registry：bundled（最先）→ user（getSkillsDir）→
+ * project（cwd/.openharness/skills + cwd/.claude/skills）。register 是覆盖语义，
+ * 同名后者覆盖前者，故顺序即优先级：bundled < user < project。
+ * 1. 创建 SkillRegistry 实例
+       ↓
+ * 2. 调用 registerBundled() 加载内置技能
+       ↓
+ * 3. 创建 SkillLoader(registry)
+       ↓
+ * 4. 调用 loadFromDirectory("/path/to/skills")
+       ↓
+ * 5. 对每个 .md 文件：
+       ├─ readFile() 读取内容
+       ├─ parseSkillMarkdown() 解析元数据
+       ├─ 构建 SkillDefinition 对象
+       └─ registry.register() 注册到内存
+       ↓
+  * 6. 通过 registry.get(name) 查询和使用技能
+ */
+export async function loadSkillsThreeSources(
+  skillRegistry: SkillRegistry,
+  cwd: string,
+): Promise<void> {
+  skillRegistry.registerBundled();
+  const loader = new SkillLoader(skillRegistry);
+  await loader.loadFromDirectory(getSkillsDir());
+  await loader.loadFromDirectory(join(cwd, ".openharness", "skills"));
+  await loader.loadFromDirectory(join(cwd, ".claude", "skills"));
+}
+
+/**
+ * 判断输入 `/<word> [args]` 是否命中一个 user-invocable 的技能，命中则返回
+ * {skill, args}（args 为去掉命令名后的剩余串），否则返回 null。
+ *
+ * 规则（内置命令优先）：
+ * - 先解析 cmdName=`/<word>`、word=去掉前导 `/`。
+ * - 若 cmdName 是内置命令（isBuiltinCommand 为 true）→ 返回 null（内置优先，
+ *   不被 skill 覆盖，如 /help）。
+ * - 否则按 word 命中 skill（精确名 / 小写 / 首字母大写 / commandName）且该 skill
+ *   userInvocable → 返回 {skill, args}；否则 null。
+ */
+export function matchUserInvocableSkill(
+  input: string,
+  skillRegistry: SkillRegistry,
+  isBuiltinCommand: (name: string) => boolean,
+): { skill: SkillDefinition; args: string } | null {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/")) return null;
+
+  const spaceIdx = trimmed.indexOf(" ");
+  const cmdName = spaceIdx >= 0 ? trimmed.slice(0, spaceIdx) : trimmed;
+  const args = spaceIdx >= 0 ? trimmed.slice(spaceIdx + 1).trim() : "";
+  const word = cmdName.slice(1);
+  if (!word) return null;
+
+  // 内置命令优先：不被 skill 覆盖。
+  if (isBuiltinCommand(cmdName)) return null;
+
+  // 按名解析 skill（对齐 Skill 工具的容错取法），并匹配 commandName。
+  let skill =
+    skillRegistry.get(word) ??
+    skillRegistry.get(word.toLowerCase()) ??
+    skillRegistry.get(word.charAt(0).toUpperCase() + word.slice(1));
+  if (!skill) {
+    for (const s of skillRegistry.getAll()) {
+      if (s.commandName && s.commandName === word) {
+        skill = s;
+        break;
+      }
+    }
+  }
+  if (!skill || !skill.userInvocable) return null;
+
+  return { skill, args };
+}
+
+/**
+ * 把一个 user-invocable 技能构造成一次注入引擎的 prompt：skill.content
+ * 为主体，args 非空时在末尾追加一段 `## Arguments`。
+ */
+export function buildSkillPrompt(skill: SkillDefinition, args: string): string {
+  const base = skill.content;
+  const trimmedArgs = args.trim();
+  if (!trimmedArgs) return base;
+  return `${base.trimEnd()}\n\n## Arguments\n${trimmedArgs}\n`;
+}
+
+/**
+ * 构建"给模型看"的技能列表（进 system prompt 的 skillsList 来源）。
+ *
+ * @deprecated 薄封装，直接转发 {@link SkillRegistry.modelVisibleList}。新代码请
+ * 直接调用 `skillRegistry.modelVisibleList()`。保留此导出仅为兼容既有测试/调用。
+ */
+export function buildModelVisibleSkillsList(
+  skillRegistry: SkillRegistry,
+): Array<{ name: string; description: string }> {
+  return skillRegistry.modelVisibleList();
+}
+
+/**
  * 构建发给前端的斜杠命令列表。命令注册名本身已带前导 "/"（如 "/help"），
  * 因此不要再额外加 "/"（否则会出现 "//help" 双斜杠 bug）。
+ *
+ * 若传入 skillRegistry，则追加 user-invocable 技能的 `/<name>`（去重，内置命令
+ * 名优先：与已有命令同名的 skill 不重复加入）。注意命令列表是给用户看的，
+ * user-invocable 即可出现，即使 disableModelInvocation（那只挡模型不挡用户）。
  */
-export function buildHostCommandList(registry: CommandRegistry): string[] {
-  return registry.list().map((c) => c.name);
+export function buildHostCommandList(
+  registry: CommandRegistry,
+  skillRegistry?: SkillRegistry,
+): string[] {
+  const names = registry.list().map((c) => c.name);
+  if (!skillRegistry) return names;
+
+  const seen = new Set(names);
+  for (const skill of skillRegistry.getAll()) {
+    if (!skill.userInvocable) continue;
+    const cmd = `/${skill.commandName ?? skill.name}`;
+    if (seen.has(cmd)) continue; // 内置命令名优先，不重复
+    seen.add(cmd);
+    names.push(cmd);
+  }
+  return names;
 }
 
 export interface HostSlashOutcome {
