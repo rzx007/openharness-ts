@@ -32,7 +32,7 @@ program
   .option("--effort <level>", "Effort level (low | medium | high)")
   .option("--verbose", "Verbose output")
   .option("-d, --debug", "Debug mode")
-  .option("--backend-only", "Run as backend host for TUI")
+  .option("--backend-only", "Run as BackendHost for TUI (spawned by Ink frontend; OHJSON on stdin/stdout)")
   .option("--tui", "Launch terminal UI (React/Ink frontend)")
   .option("--dangerously-skip-permissions", "Skip all permission checks")
   .option("--allowed-tools <tools>", "Comma-separated allowed tools")

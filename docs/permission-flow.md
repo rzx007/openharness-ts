@@ -93,7 +93,7 @@ if (decision.action === "ask") {
 
 ## TUI 下"问用户"的跨进程往返
 
-TUI 是**前端（React/Ink）+ 后端（`--backend-only` 子进程）双进程**，靠 OHJSON 事件通信。
+TUI 是**启动器 + 前端（Ink）+ BackendHost（`--backend-only`）三进程**，靠 OHJSON 行协议通信；详见 [tui-flow.md](./tui-flow.md)。
 一次权限确认的完整往返：
 
 ```

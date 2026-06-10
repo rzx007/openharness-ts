@@ -106,8 +106,8 @@ interface SessionSnapshot {
  * 应用程序的主入口点，根据提供的选项和提示决定执行模式。
  * 
  * 该函数首先处理设置覆盖，然后根据标志位依次尝试以下模式：
- * 1. 后端主机模式 (backendOnly)
- * 2. TUI 交互模式 (tui)
+ * 1. 后端主机模式 (backendOnly) — TUI 的前端会 spawn 此模式；也可单独调试
+ * 2. TUI 交互模式 (tui) — spawn Ink 前端，前端再 spawn backend-only（见 docs/tui-flow.md）
  * 3. 打印/非交互模式 (print 或存在 prompt)
  * 4. REPL 交互模式 (默认)
  * 
@@ -476,14 +476,16 @@ async function runRepl(
 }
 
 /**
- * 启动 TUI (Terminal User Interface)模式。
- * 
- * 此模式通过 spawn 子进程启动前端界面，并将当前进程作为后端服务运行。
- * 它构建必要的命令行参数和环境变量配置，以便前端能够正确连接和控制后端。
- * 
+ * 启动 TUI (Terminal User Interface) 模式。
+ *
+ * 本进程（ohs --tui）仅作**启动器**：spawn React/Ink 前端子进程，经
+ * `OPENHARNESS_FRONTEND_CONFIG` 传入 `backend_command`（含 `--backend-only` 及 CLI flags）。
+ * 由前端 `useBackendSession` 再 spawn BackendHost 子进程；OHJSON 协议在前后端 pipe 间通信。
+ * 本进程 stdio inherit 终端给 Ink，等前端退出后 process.exit。详见 docs/tui-flow.md。
+ *
  * @param settings - 当前加载的应用设置
- * @param options - 命令行选项，用于构建后端启动参数
- * @param prompt - 可选的初始提示词，传递给前端
+ * @param options - 命令行选项，写入 backend_command 供 BackendHost 使用
+ * @param prompt - 可选的初始提示词，写入 frontendConfig.initial_prompt
  * @returns Promise<void>
  */
 async function runTuiMode(
@@ -546,12 +548,13 @@ async function runTuiMode(
 }
 
 /**
- * 运行后端主机模式，负责处理来自前端的 JSON-RPC 风格请求。
- * 
- * 此模式通过 stdin/stdout 与前端通信，使用特定的协议格式 OHJSON。
- * 它管理权限请求、问题询问、会话状态同步以及核心查询引擎的执行。
- * 包含并发控制机制以确保输出顺序正确。
- * 
+ * 运行 BackendHost（`ohs --backend-only`）。
+ *
+ * TUI 下由 Ink 前端 spawn 的本进程；也可单独运行用于协议调试。经 stdin/stdout
+ * 与前端通信：出站 `OHJSON:{...}\n`，入站 JSON 行（FrontendRequest）。负责
+ * bootstrap、权限 modal（askPermission）、斜杠命令本地路由、QueryEngine 流式 emit。
+ * emit 带 writeLock 串行化。详见 docs/tui-flow.md 与 docs/permission-flow.md。
+ *
  * @param settings - 当前加载的应用设置
  * @param options - 命令行选项，用于初始化运行时环境
  * @returns Promise<void>

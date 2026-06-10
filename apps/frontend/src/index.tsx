@@ -1,3 +1,8 @@
+/**
+ * TUI 前端入口（进程 B）。配置来自 `OPENHARNESS_FRONTEND_CONFIG`（由 runTuiMode 注入）
+ * 或 dev 时的 `OPENHARNESS_BACKEND_COMMAND`；backend 由 useBackendSession spawn。
+ * 详见 docs/tui-flow.md。
+ */
 import React from "react";
 import { render } from "ink";
 import { App } from "./App";

@@ -132,6 +132,8 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 
 ## TUI 侧路（仅 `--tui`，与主路径并行）
 
+> TUI 三进程启动与 OHJSON 协议见 [tui-flow.md](./tui-flow.md)。
+
 SwarmPanel **不参与** Leader 取结果，只是可视化；只有 TUI 的 BackendHost 会 emit：
 
 ```

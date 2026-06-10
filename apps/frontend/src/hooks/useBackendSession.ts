@@ -15,6 +15,7 @@ import type {
   TranscriptItem,
 } from "../types";
 
+/** BackendHost（ohs --backend-only）出站事件行前缀；见 docs/tui-flow.md */
 const PROTOCOL_PREFIX = "OHJSON:";
 const ASSISTANT_DELTA_FLUSH_MS = 33;
 const ASSISTANT_DELTA_FLUSH_CHARS = 256;
@@ -69,9 +70,7 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
     child.stdin.write(JSON.stringify(payload) + "\n");
   };
 
-  /**
-   * 启动后端进程，并监听其 stdout 事件。
-   */
+  // TUI 三进程模型之「进程 C」：spawn BackendHost，stdio pipe 传 OHJSON（见 docs/tui-flow.md）。
   useEffect(() => {
     const command = config.backend_command[0];
     if (!command) return;
