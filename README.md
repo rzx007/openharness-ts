@@ -10,12 +10,12 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - 🟡 **内置工具（41）** — 文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
 - 🟡 **多 Agent 编排** — `agent` 工具可真实派发子进程 teammate：独立 git worktree 隔离、只读工具自动放行、`TaskWait` 阻塞取结果、TUI 显示 teammate 状态；Coordinator 7 个 agent + XML 任务通知就绪。暂缺写操作转 leader 审批、多轮 worker、sequential/parallel/pipeline 调度
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
-- ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读工具自动放行
+- ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读工具自动放行；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
 - 🟡 **会话持久化** — Session 存储 / `--continue` / `--resume` / Cron（均为基础版）
 - 🟠 **插件系统** — 可读 `plugin.json`；工具自动发现与 commands/agents/hooks 贡献加载待补
 - 🟠 **Channel 适配器** — Stdio / HTTP / 飞书（基础）；Telegram/Discord/Slack 等多通道、附件、群组路由待补
-- 🟡 **TUI 前端** — React/Ink 终端 UI，助手消息 Markdown 渲染（标题/列表/代码块高亮/表格）、SwarmPanel 显示子 agent 状态、启动清屏；diff 预览待补
+- 🟡 **TUI 前端** — React/Ink 终端 UI，助手消息 Markdown 渲染（标题/列表/代码块高亮/表格）、SwarmPanel 显示子 agent 状态、启动清屏、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）；语法高亮、output style 待补
 - 🔴 **尚未复刻** — `personalization`（环境事实抽取）、`ohmo`（个人助理 + 多渠道网关）、`sandbox`（Docker 隔离，当前为占位）
 - ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
 

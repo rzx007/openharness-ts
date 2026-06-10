@@ -15,7 +15,11 @@ import { getBackendRegistry, SubprocessBackend, WorktreeManager, type GitRunner 
 import { getTaskManager } from "@openharness/services";
 import { buildTeammateCommand } from "./teammate.js";
 
-export type PermissionPromptFn = (toolName: string, reason?: string) => Promise<boolean>;
+export type PermissionPromptFn = (
+  toolName: string,
+  reason?: string,
+  input?: Record<string, unknown>,
+) => Promise<boolean>;
 
 export interface BootstrapOptions {
   settings: Settings;

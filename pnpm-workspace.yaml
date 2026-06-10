@@ -13,6 +13,8 @@ catalog:
   clipboardy: ^4.0.0
   commander: ^13.1.0
   cron-parser: ^1.1.0
+  diff: ^7.0.0
+  '@types/diff': ^7.0.0
   ink: ^5.1.0
   ink-text-input: ^6.0.0
   js-yaml: ^4.1.0

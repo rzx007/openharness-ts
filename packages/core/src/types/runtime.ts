@@ -21,7 +21,15 @@ export interface QueryEngine {
 }
 
 export interface PermissionPrompt {
-  (toolName: string, reason?: string): Promise<boolean>;
+  /**
+   * 询问用户是否放行某次工具调用。
+   *
+   * @param toolName 工具名。
+   * @param reason   决策层给出的原因（来自 checkTool）。
+   * @param input    工具入参；权限层可据此生成预览（如 Edit/Write 的 diff）。
+   *                 向后兼容：旧实现可忽略该参数。
+   */
+  (toolName: string, reason?: string, input?: Record<string, unknown>): Promise<boolean>;
 }
 
 /**

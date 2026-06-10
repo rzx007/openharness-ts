@@ -187,9 +187,11 @@
 - **文件**：`apps/cli/src/commands/slash-commands.ts`
 
 ### E.3 TUI 渲染
-- 引入 markdown 渲染（标题/列表/代码块/表格）+ 语法高亮；edit/write 的 unified diff 预览（approve once / session / full_auto 自动跳过）。
-- codex output style（紧凑低噪）；tool 行分组折叠。
-- **文件**：`apps/frontend/src/components/`、`packages/output-styles`
+- ✅ **Edit/Write unified diff 预览**（approve once / session / full_auto 自动跳过）——
+  改文件前在 TUI 权限框显示 +/− 着色 diff，`[y]` 本次 / `[a]` 整个会话(按工具名) / `[n]` 拒绝。
+  仅 TUI（REPL/print 无交互权限确认）。详见 `docs/permission-flow.md`。
+- markdown 渲染已在 Tier-1 落地；语法高亮、codex output style（紧凑低噪）、tool 行分组折叠待做。
+- **文件**：`packages/tools/src/file/{preview,diff}.ts`、`apps/cli/src/commands/main.ts`、`apps/frontend/src/components/ModalHost.tsx`、`apps/frontend/src/App.tsx`
 
 ### E.4 订阅 Provider（按需）
 - Codex client（chatgpt.com Responses API + reasoning effort `xhigh`）；Copilot client（OAuth device flow + token 持久化）。
