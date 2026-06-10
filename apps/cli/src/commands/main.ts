@@ -86,6 +86,7 @@ interface MainOptions {
   appendSystemPrompt?: string;
   bare?: boolean;
   swarmWorker?: boolean;
+  dryRun?: boolean;
 }
 
 interface SessionSnapshot {
@@ -129,6 +130,14 @@ export async function mainAction(
 
   if (options.debug) {
     console.log("Settings:", JSON.stringify(settings, null, 2));
+  }
+
+  // dry-run：预览解析后的运行时配置 + readiness，不创建 client、不调模型。
+  // 放在 backendOnly/tui/print 之前，让任何模式下加 --dry-run 都只预览不执行。
+  if (options.dryRun) {
+    const { runDryRun } = await import("../dry-run");
+    await runDryRun(settings, options);
+    return;
   }
 
   if (options.backendOnly) {
