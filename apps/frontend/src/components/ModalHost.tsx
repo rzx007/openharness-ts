@@ -88,7 +88,11 @@ const MAX_DIFF_LINES = 40;
 
 /** \u6E32\u67D3\u4E00\u6BB5 unified diff\uFF1A+ \u7EFF / - \u7EA2 / @@ \u9752 / \u5176\u4F59\u6309\u9ED8\u8BA4\u8272\u3002 */
 function DiffView({ diff }: { diff: string }): React.JSX.Element {
-  const allLines = diff.replace(/\n$/, "").split("\n");
+  const allLines = diff
+    .replace(/\n$/, "")
+    .split("\n")
+    // jsdiff 会插入 "\ No newline at end of file" 噪声行，去掉避免误读为内容。
+    .filter((l) => !l.startsWith("\\ No newline"));
   const lines = allLines.slice(0, MAX_DIFF_LINES);
   const truncated = allLines.length - lines.length;
   return (

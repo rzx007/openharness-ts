@@ -769,9 +769,11 @@ async function runBackendHost(
       if (rid && permissionRequests.has(rid)) {
         const allowed = !!request.allowed;
         // scope==="session"：把该工具记入会话批准集合，之后同名工具的 ask 自动放行。
-        if (allowed && request.scope === "session") {
-          const tool = pendingPermissionTools.get(rid);
-          if (tool) approvedForSessionTools.add(tool);
+        const tool = pendingPermissionTools.get(rid);
+        // 在此处幂等清理：不依赖 askPermission 的 finally，避免重复/迟到响应留垃圾。
+        pendingPermissionTools.delete(rid);
+        if (allowed && request.scope === "session" && tool) {
+          approvedForSessionTools.add(tool);
         }
         permissionRequests.get(rid)!.resolve(allowed);
       }

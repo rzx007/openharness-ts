@@ -25,11 +25,24 @@ export function buildUnifiedDiff(
   return lines.join("\n");
 }
 
+/** 跨进程传输的 diff 最多保留多少行，避免超大 Write 把 diff 全量塞进事件载荷。 */
+export const MAX_DIFF_PAYLOAD_LINES = 400;
+
+/** 把 diff 文本截到 maxLines 行，超出时追加省略提示（按源截断，控制载荷大小）。 */
+export function truncateDiff(diff: string, maxLines = MAX_DIFF_PAYLOAD_LINES): string {
+  const lines = diff.replace(/\n$/, "").split("\n");
+  if (lines.length <= maxLines) return diff;
+  const kept = lines.slice(0, maxLines);
+  kept.push(`… diff truncated (${lines.length - maxLines} more line(s))`);
+  return kept.join("\n");
+}
+
 /**
  * 便捷组合：对 Edit/Write 工具调用算出改动并生成 unified diff。
  *
  * 非文件工具、或无法预览（见 {@link computeFileChange}）时返回 `null`。
  * 改动前后内容相同（无实际改动）时也返回 `null`。
+ * diff 文本按 {@link MAX_DIFF_PAYLOAD_LINES} 截断，避免超大改动撑爆事件载荷。
  */
 export async function computeToolDiff(
   toolName: string,
@@ -39,5 +52,6 @@ export async function computeToolDiff(
   const change = await computeFileChange(toolName, input);
   if (!change) return null;
   if (change.before === change.after) return null;
-  return { path: change.path, diff: buildUnifiedDiff(change.path, change.before, change.after, context) };
+  const full = buildUnifiedDiff(change.path, change.before, change.after, context);
+  return { path: change.path, diff: truncateDiff(full) };
 }

@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { computeFileChange } from "./preview.js";
-import { buildUnifiedDiff, computeToolDiff } from "./diff.js";
+import { buildUnifiedDiff, computeToolDiff, truncateDiff } from "./diff.js";
 
 let dir: string;
 
@@ -86,6 +86,21 @@ describe("buildUnifiedDiff", () => {
     expect(diff).toContain("+++ f.txt");
     expect(diff).toContain("-line2");
     expect(diff).toContain("+CHANGED");
+  });
+});
+
+describe("truncateDiff", () => {
+  it("leaves short diffs untouched", () => {
+    const d = "a\nb\nc";
+    expect(truncateDiff(d, 10)).toBe(d);
+  });
+
+  it("truncates long diffs and appends a marker", () => {
+    const d = Array.from({ length: 50 }, (_, i) => `line${i}`).join("\n");
+    const out = truncateDiff(d, 10);
+    const lines = out.split("\n");
+    expect(lines).toHaveLength(11); // 10 kept + 1 marker
+    expect(lines[10]).toContain("40 more line(s)");
   });
 });
 
