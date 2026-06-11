@@ -55,10 +55,12 @@ Python v0.1.9 的 `mailbox.py` / `team_lifecycle.py` / `permission_sync.py` 是
 - `TeammateMailbox(teamName, agentId)`：
   - `write(msg)`：锁内 `.tmp` 写 + rename 原子落盘，文件名 `<timestamp>_<id>.json`
     （timestamp 6 位小数定宽，保字典序==时间序）。
-  - `readAll(unreadOnly=true)`：按文件名排序、跳过 `.`/`.tmp`/损坏 JSON。
-  - `markRead(messageId)`：锁内原位更新 `read:true`。
-  - `clear()`：锁内删除全部消息文件。
-- 目录助手：`getTeamDir(team)` / `getAgentMailboxDir(team, agentId)`（mkdir -p）。
+  - `readAll(unreadOnly=true)`：按文件名排序、跳过 `.`/`.tmp`/损坏 JSON；
+    收件箱不存在视为空。
+  - `markRead(messageId)`：锁内原位更新 `read:true`；收件箱不存在则 no-op。
+  - `clear()`：锁内删除全部消息文件；收件箱不存在则 no-op。
+- 目录助手：`getTeamDir(team, {ensure?})` / `getAgentMailboxDir(team, agentId, {ensure?})`
+  （默认纯路径计算，写路径显式传 `ensure:true` 才 mkdir -p）。
 - 工厂：`createUserMessage` / `createShutdownRequest` / `createIdleNotification` /
   `createPermissionRequestMessage` / `createPermissionResponseMessage`。
 - 类型守卫：`isPermissionRequest` / `isPermissionResponse`（兼容 payload.text
@@ -148,6 +150,8 @@ Python v0.1.9 的 `mailbox.py` / `team_lifecycle.py` / `permission_sync.py` 是
 | async 形态 | sync + `run_in_executor` 双轨 | 全 async（Node fs/promises） | Node 无需线程池规避阻塞 |
 | 路径安全 | `sanitize_name` 定义而未调用，`get_team_dir` 直接拼接 | `getTeamDir`/`getAgentMailboxDir` 校验名字（`[A-Za-z0-9._@-]+`，拒绝 `..`/分隔符）+ 删除前断言在 teams 根之下 | TS 接了线：team/agent 名来自 LLM 工具入参，且团队目录随会话退出递归删除——不校验等于任意目录删除 |
 | team.json 锁 | 无锁读-改-写 | 同样无锁（沿用），仅修 createTeam TOCTOU（并行 spawn 撞「already exists」时继续 addMember） | 忠实复刻；并行 spawn 丢成员登记的窗口极小，留待需要时加 `.team_lock` |
+| 目录创建时机 | `get_team_dir` 调用即 mkdir | `getTeamDir`/`getAgentMailboxDir` 默认纯路径，写路径显式 `ensure:true` | Python 版查询不存在的团队也留下空目录；读路径不应有写副作用 |
+| worker 权限模式 | worker 继承 leader 模式 | 缺省一律 `default`（`TeammateSpawnConfig.permissionMode` / Agent 工具 `permissionMode` 入参可覆盖） | 继承是死循环：leader full_auto → worker 自行放行，文件流批准路径成死代码；固定 default 让写操作必走 leader 集中裁决（审计点） |
 
 ## 范围外
 

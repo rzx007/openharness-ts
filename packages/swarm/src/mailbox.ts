@@ -1,4 +1,4 @@
-import { promises as fs, mkdirSync } from "node:fs";
+import { promises as fs, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -45,7 +45,8 @@ export interface MailboxMessage {
 }
 
 // ---------------------------------------------------------------------------
-// 目录助手（对齐 Python get_team_dir / get_agent_mailbox_dir：调用即建目录）
+// 目录助手（与 Python get_team_dir 不同：默认纯路径计算，写路径显式 ensure。
+// Python 的「调用即建目录」让查询不存在的团队也留下空目录）
 // ---------------------------------------------------------------------------
 
 const SAFE_PATH_COMPONENT = /^[A-Za-z0-9._@-]+$/;
@@ -62,17 +63,21 @@ function assertSafePathComponent(name: string, what: string): void {
   }
 }
 
-export function getTeamDir(teamName: string): string {
+export function getTeamDir(teamName: string, options?: { ensure?: boolean }): string {
   assertSafePathComponent(teamName, "team name");
   const dir = join(homedir(), ".openharness", "teams", teamName);
-  mkdirSync(dir, { recursive: true });
+  if (options?.ensure) mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-export function getAgentMailboxDir(teamName: string, agentId: string): string {
+export function getAgentMailboxDir(
+  teamName: string,
+  agentId: string,
+  options?: { ensure?: boolean },
+): string {
   assertSafePathComponent(agentId, "agent id");
   const dir = join(getTeamDir(teamName), "agents", agentId, "inbox");
-  mkdirSync(dir, { recursive: true });
+  if (options?.ensure) mkdirSync(dir, { recursive: true });
   return dir;
 }
 
@@ -110,7 +115,7 @@ export class TeammateMailbox {
 
   /** 锁内 `.tmp` + rename 原子写；文件名 <timestamp>_<id>.json（6 位小数，字典序≈时间序）。 */
   async write(msg: MailboxMessage): Promise<void> {
-    const inbox = this.getMailboxDir();
+    const inbox = getAgentMailboxDir(this.teamName, this.agentId, { ensure: true });
     const filename = `${msg.timestamp.toFixed(6)}_${msg.id}.json`;
     const finalPath = join(inbox, filename);
     const tmpPath = `${finalPath}.tmp`;
@@ -122,9 +127,10 @@ export class TeammateMailbox {
     });
   }
 
-  /** 按文件名（≈时间）排序返回；跳过点文件/.tmp/损坏 JSON。 */
+  /** 按文件名（≈时间）排序返回；跳过点文件/.tmp/损坏 JSON；收件箱不存在视为空。 */
   async readAll(unreadOnly = true): Promise<MailboxMessage[]> {
     const inbox = this.getMailboxDir();
+    if (!existsSync(inbox)) return [];
     const entries = (await fs.readdir(inbox)).filter(
       (name) => name.endsWith(".json") && !name.startsWith(".") && !name.endsWith(".tmp"),
     );
@@ -144,9 +150,10 @@ export class TeammateMailbox {
     return messages;
   }
 
-  /** 原位把消息标为已读（锁内 `.tmp` + rename）。 */
+  /** 原位把消息标为已读（锁内 `.tmp` + rename）；收件箱不存在则 no-op。 */
   async markRead(messageId: string): Promise<void> {
     const inbox = this.getMailboxDir();
+    if (!existsSync(inbox)) return;
     await exclusiveFileLock(this.lockPath(), async () => {
       const entries = (await fs.readdir(inbox)).filter(
         (name) => name.endsWith(".json") && !name.startsWith(".") && !name.endsWith(".tmp"),
@@ -170,9 +177,10 @@ export class TeammateMailbox {
     });
   }
 
-  /** 清空收件箱（保留目录与锁文件）。 */
+  /** 清空收件箱（保留目录与锁文件）；收件箱不存在则 no-op。 */
   async clear(): Promise<void> {
     const inbox = this.getMailboxDir();
+    if (!existsSync(inbox)) return;
     await exclusiveFileLock(this.lockPath(), async () => {
       const entries = (await fs.readdir(inbox)).filter((name) => !name.startsWith("."));
       for (const name of entries) {
