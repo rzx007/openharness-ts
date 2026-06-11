@@ -39,8 +39,11 @@ export function buildTeammateCommand(
   if (settings.baseUrl) argv.push("--base-url", settings.baseUrl);
   if (settings.apiFormat) argv.push("--api-format", settings.apiFormat);
 
-  // 权限模式继承父进程。
-  argv.push("--permission-mode", settings.permission.mode);
+  // 权限模式：缺省一律 default，不继承 leader。继承会形成死循环——leader
+  // full_auto → worker 也 full_auto 自行放行，permission-sync 文件流的批准
+  // 路径成为死代码；leader default 又派不出 Agent。default 让 worker 写操作
+  // 经文件流由 leader 集中裁决（leader full_auto 时 checker 照批，留审计点）。
+  argv.push("--permission-mode", config.permissionMode ?? "default");
 
   // 各自人格（Explore/Plan/verification 等）。
   if (config.systemPrompt) argv.push("-s", config.systemPrompt);

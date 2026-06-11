@@ -51,7 +51,8 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 │  Teammate 进程 · ohs --print（一次性，跑完即退出）                    │
 │                                                                     │
 │  Explore / Plan / worker 等人格（-s systemPrompt）                   │
-│  继承父 model / provider / permission-mode（api-key 不进 argv）      │
+│  继承父 model / provider（api-key 不进 argv）                        │
+│  permission-mode 缺省 default（不继承父；可经 permissionMode 覆盖）   │
 │  可选 isolate → 独立 git worktree（SubprocessBackend + WorktreeManager）│
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -170,8 +171,12 @@ REPL / 普通 `--print` 模式下没有 BackendHost，**不会** emit `swarm_sta
 - **同一个单例**：派发（SubprocessBackend）、取结果（TaskWait）、emit 状态（BackendHost）
   都用 **全局 `getTaskManager()` 单例**，三者对得上。
 - **一次性 `--print`**：teammate 跑一轮即退出；足够覆盖 Explore/Plan/verification。
-- **配置继承**：argv 带 `--model (config.model ?? settings.model)`、provider/permission-mode、
+- **配置继承**：argv 带 `--model (config.model ?? settings.model)`、provider、
   `-s <人格>`、**`--swarm-worker`**；**不把 api-key 放 argv**，teammate 复用 `settings.json` + 继承 env。
+- **权限模式不继承**：`--permission-mode` 取 `config.permissionMode ?? "default"`，不读父进程
+  settings。继承会形成死循环：leader full_auto → worker 也 full_auto 自行放行，D.5 文件流的
+  批准路径成为死代码。worker 固定 default 后写操作经文件流由 leader 集中裁决（leader full_auto
+  时 checker 照批，但留下集中审计点）。Agent 工具的 `permissionMode` 入参可显式覆盖。
 - **只读自动放行（D.4）**：`--swarm-worker` → `PermissionChecker.autoApproveTools = READ_ONLY_TOOLS`
   （Read/Glob/Grep/WebFetch/WebSearch/TaskGet/TaskList/TaskOutput/TaskWait/CronList/Lsp）；
   `deniedTools` 仍优先于 autoApprove。
@@ -182,24 +187,27 @@ REPL / 普通 `--print` 模式下没有 BackendHost，**不会** emit `swarm_sta
 
 ## 使用前提
 
-teammate **继承父进程的 `--permission-mode`**，且 argv 一律带 **`--swarm-worker`**（由
-`buildTeammateCommand` 注入，用户无需手动传）。
+teammate 的 `--permission-mode` **缺省一律 `default`（不继承父进程）**，且 argv 一律带
+**`--swarm-worker`**（由 `buildTeammateCommand` 注入，用户无需手动传）。Agent 工具的
+`permissionMode` 入参可按 teammate 显式覆盖。
 
-| 场景 | 父进程 permission | 是否够用 |
-|------|-------------------|----------|
-| Explore / Plan / verification（只读探索、规划、验证） | `default`（默认） | ✅ 只读工具自动放行 |
-| worker（写代码、跑 Bash/测试） | `default` | ❌ Write/Edit/Bash 等需确认，`--print` 无 UI → 等同拒绝 |
-| worker 或任意需写/执行的 teammate | `full_auto` 或 `--dangerously-skip-permissions` | ✅ |
+| 场景 | leader permission | worker 行为 |
+|------|-------------------|-------------|
+| Explore / Plan / verification（只读探索、规划、验证） | `default`（默认） | ✅ 只读工具自动放行（D.4） |
+| worker（写代码、跑 Bash/测试） | `default` | ❌ 写操作经文件流转 leader，leader checker `ask`→拒（带 reason 回传） |
+| worker（写代码、跑 Bash/测试） | `full_auto` 或配 allowedTools | ✅ 写操作经文件流转 leader，checker `allow`→批；leader 处留集中审计点 |
 
-`--print` 模式下没有 `permissionPrompt`：`checkTool` 返回 `ask` 时默认 **不允许**（见
-`QueryEngine`：无 prompt 则 `allowed = false`）。D.4 的 `--swarm-worker` 让只读工具直接
-`allow`，绕过这一步。
+注意：leader 自己跑 `default` 时，**Agent 工具本身**在 `--print`/REPL 下也会因
+`ask` 即拒派不出去（无 `permissionPrompt`，见 `QueryEngine`：无 prompt 则
+`allowed = false`）——派写型 worker 的实际组合是「leader `full_auto` + worker
+缺省 `default`」。
 
 ```bash
 # 只读 Explore：默认 permission 即可
 ohs "用一个 Explore 子 agent 看看 packages/core 的结构，再汇总"
 
-# worker 写代码 / 跑测试：父进程需 full_auto
+# worker 写代码 / 跑测试：leader 开 full_auto，worker 仍以 default 跑、
+# 写操作经文件流由 leader 自动裁决
 ohs --permission-mode full_auto "用 worker 子 agent 修这个 bug"
 
 # TUI 下 SwarmPanel 可视化（permission 要求同上，与 REPL/--print 一致）
@@ -228,8 +236,11 @@ worker（teammate 进程）                     leader 进程
   `~/.openharness/teams/<team>/team.json`；本会话隐式建的团队随 leader 退出清理
   （exit/SIGINT/SIGTERM）。
 - leader 是 `default` 模式时写操作仍会被拒（checker `ask`→拒）；要让 worker 写盘，
-  leader 开 `full_auto` 或配 allowedTools——与 D.4 的表格语义一致，但现在拒绝
+  leader 开 `full_auto` 或配 allowedTools——与上文表格语义一致，但现在拒绝
   发生在 leader 裁决处、带 reason 回传。
+- worker 缺省固定 `default`（不继承 leader 的 full_auto），保证写操作必然走这条
+  文件流；需要特例（如信任的自动化流水线）时经 Agent 工具 `permissionMode: "full_auto"`
+  显式放开。
 
 ## 留待后续
 

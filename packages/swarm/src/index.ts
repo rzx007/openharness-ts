@@ -94,6 +94,12 @@ export interface TeammateSpawnConfig {
   model?: string;
   systemPrompt?: string;
   permissions?: string[];
+  /**
+   * teammate 子进程的权限模式（与 core 的 PermissionMode 同形；swarm 不依赖
+   * core，这里本地声明）。缺省 "default"：worker 写操作经文件流由 leader 集中
+   * 裁决——即使 leader 自己跑 full_auto，也保留集中审计点，而不是 worker 自行放行。
+   */
+  permissionMode?: "default" | "plan" | "full_auto";
   /** 隔离到独立 git worktree（并行写任务）。缺省 false → 走共享 cwd。 */
   isolate?: boolean;
 }
