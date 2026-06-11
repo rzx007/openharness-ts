@@ -5,6 +5,28 @@ export {
 } from "./subprocess.js";
 
 export {
+  exclusiveFileLock,
+  SwarmLockError,
+  type ExclusiveFileLockOptions,
+} from "./lockfile.js";
+
+export {
+  TeammateMailbox,
+  getTeamDir,
+  getAgentMailboxDir,
+  createUserMessage,
+  createShutdownRequest,
+  createIdleNotification,
+  createPermissionRequestMessage,
+  createPermissionResponseMessage,
+  isPermissionRequest,
+  isPermissionResponse,
+  writeToMailbox,
+  type MailboxMessage,
+  type MessageType,
+} from "./mailbox.js";
+
+export {
   WorktreeManager,
   validateWorktreeSlug,
   type GitRunner,
