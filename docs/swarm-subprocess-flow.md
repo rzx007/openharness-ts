@@ -206,9 +206,34 @@ ohs --permission-mode full_auto "用 worker 子 agent 修这个 bug"
 ohs --tui
 ```
 
+## D.5 之后：写操作转 leader 审批
+
+D.5 落地了文件邮箱 + team.json 持久化 + 权限同步（设计与差异见
+[swarm-file-infra-design.md](./swarm-file-infra-design.md)）。teammate 的写/执行类
+工具不再「无确认即拒」：
+
+```
+worker（teammate 进程）                     leader 进程
+  checkTool → ask
+  permissionPrompt（swarm 版）
+    │ 写 pending/<id>.json                   后台裁决器（1s 轮询 watch 的团队）
+    │ 0.5s 轮询 resolved/，60s 超时    ◄──── readPendingPermissions
+    │                                        handlePermissionRequest(checker)
+    │                                          只读→批；其余 allow→批、deny/ask→拒
+    ▼                                        resolvePermission → resolved/<id>.json
+  approved → 放行工具；其余 → 拒
+```
+
+- spawn 时注入 env `CLAUDE_CODE_TEAM_NAME/AGENT_ID/AGENT_NAME`，成员写进
+  `~/.openharness/teams/<team>/team.json`；本会话隐式建的团队随 leader 退出清理
+  （exit/SIGINT/SIGTERM）。
+- leader 是 `default` 模式时写操作仍会被拒（checker `ask`→拒）；要让 worker 写盘，
+  leader 开 `full_auto` 或配 allowedTools——与 D.4 的表格语义一致，但现在拒绝
+  发生在 leader 裁决处、带 reason 回传。
+
 ## 留待后续
 
 - **SwarmPanel duration 实时滚动**：当前只在 created/completed emit，运行中显示 ~0s；
   需补一个周期性 `updated` 事件。
 - **多轮 `sendMessage`**：需长驻 worker 模式（当前 subprocess teammate 抛错）。
-- **写操作转 leader 审批 / 文件邮箱**：完整版 permission_sync（D.4 只做了只读 autoApprove）。
+- **`ask` 转 TUI 人工裁决**：当前 leader checker 自动裁决；可在 ask 分支接 E.3 权限弹框。
