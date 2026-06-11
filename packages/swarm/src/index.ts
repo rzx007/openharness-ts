@@ -27,6 +27,32 @@ export {
 } from "./mailbox.js";
 
 export {
+  generateRequestId,
+  createPermissionRequest,
+  writePermissionRequest,
+  readPendingPermissions,
+  readResolvedPermission,
+  resolvePermission,
+  deleteResolvedPermission,
+  pollForResponse,
+  cleanupOldResolutions,
+  isTeamLeader,
+  isSwarmWorker,
+  getLeaderName,
+  handlePermissionRequest,
+  sendPermissionRequest,
+  pollPermissionResponse,
+  sendPermissionResponse,
+  sendPermissionRequestViaMailbox,
+  sendPermissionResponseViaMailbox,
+  type SwarmPermissionRequest,
+  type PermissionResolution,
+  type PermissionResponse,
+  type SwarmPermissionResponse,
+  type PermissionDecider,
+} from "./permission-sync.js";
+
+export {
   sanitizeName,
   sanitizeAgentName,
   getTeamFilePath,
