@@ -15,6 +15,13 @@ export const agentTool: ToolDefinition = {
       model: { type: "string", description: "Model override" },
       team: { type: "string", description: "Optional team to attach the agent to" },
       mode: { type: "string", description: "Agent mode", default: "local_agent" },
+      permissionMode: {
+        type: "string",
+        enum: ["default", "plan", "full_auto"],
+        description:
+          "Permission mode for the spawned agent. Defaults to 'default': write operations are " +
+          "escalated to the leader for approval via the swarm permission file flow.",
+      },
       isolate: {
         type: "boolean",
         description:
@@ -31,6 +38,11 @@ export const agentTool: ToolDefinition = {
     const mode = (input.mode as string) ?? "local_agent";
     if (!["local_agent", "remote_agent", "in_process_teammate"].includes(mode)) {
       return { content: [{ type: "text", text: "Invalid mode. Use local_agent, remote_agent, or in_process_teammate." }], isError: true };
+    }
+
+    const permissionMode = input.permissionMode as string | undefined;
+    if (permissionMode !== undefined && !["default", "plan", "full_auto"].includes(permissionMode)) {
+      return { content: [{ type: "text", text: "Invalid permissionMode. Use default, plan, or full_auto." }], isError: true };
     }
 
     const subagentType = input.subagentType as string | undefined;
@@ -57,6 +69,7 @@ export const agentTool: ToolDefinition = {
         parentSessionId: "main",
         model: (input.model as string) ?? agentDef?.model,
         systemPrompt: agentDef?.systemPrompt,
+        permissionMode: permissionMode as "default" | "plan" | "full_auto" | undefined,
         isolate: input.isolate === true,
       });
       if (!result.success) {

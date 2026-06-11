@@ -89,6 +89,52 @@ describe("agentTool isolate", () => {
     expect(text).toContain("/wt/alpha-build-xyz");
   });
 
+  it("passes permissionMode through to executor.spawn", async () => {
+    const { calls } = installFakeBackend(() => ({
+      success: true,
+      agentId: "Build@alpha",
+      taskId: "task_pm1",
+      backendType: "subprocess",
+    }));
+
+    await agentTool.execute(
+      { description: "d", prompt: "do work", permissionMode: "full_auto" },
+      ctx,
+    );
+
+    expect(calls.at(-1)?.permissionMode).toBe("full_auto");
+  });
+
+  it("leaves permissionMode undefined when omitted (backend decides the default)", async () => {
+    const { calls } = installFakeBackend(() => ({
+      success: true,
+      agentId: "Explore@default",
+      taskId: "task_pm2",
+      backendType: "subprocess",
+    }));
+
+    await agentTool.execute({ description: "d", prompt: "explore" }, ctx);
+
+    expect(calls.at(-1)?.permissionMode).toBeUndefined();
+  });
+
+  it("rejects an invalid permissionMode with isError instead of spawning", async () => {
+    const { calls } = installFakeBackend(() => ({
+      success: true,
+      agentId: "Build@alpha",
+      taskId: "task_pm3",
+      backendType: "subprocess",
+    }));
+
+    const result = await agentTool.execute(
+      { description: "d", prompt: "do work", permissionMode: "yolo" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
   it("includes notice in the returned text when present", async () => {
     installFakeBackend(() => ({
       success: true,

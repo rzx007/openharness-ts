@@ -67,17 +67,33 @@ describe("buildTeammateCommand", () => {
     expect(argv).not.toContain("-s");
   });
 
-  it("passes through provider, base-url, api-format, permission-mode", () => {
+  it("passes through provider, base-url, api-format", () => {
     const { argv } = buildTeammateCommand(makeConfig(), {
       ...BASE_SETTINGS,
       provider: "openrouter",
       baseUrl: "https://example.test/v1",
       apiFormat: "openai",
-      permission: { mode: "full_auto" },
     });
     expect(argv[argv.indexOf("--provider") + 1]).toBe("openrouter");
     expect(argv[argv.indexOf("--base-url") + 1]).toBe("https://example.test/v1");
     expect(argv[argv.indexOf("--api-format") + 1]).toBe("openai");
+  });
+
+  it("defaults --permission-mode to default even when leader runs full_auto", () => {
+    // worker 不继承 leader 的宽模式：写操作必须走文件流由 leader 集中裁决，
+    // 否则 worker 自己放行，permission-sync 的批准路径成为死代码。
+    const { argv } = buildTeammateCommand(makeConfig(), {
+      ...BASE_SETTINGS,
+      permission: { mode: "full_auto" },
+    });
+    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("default");
+  });
+
+  it("config.permissionMode overrides the default permission mode", () => {
+    const { argv } = buildTeammateCommand(
+      makeConfig({ permissionMode: "full_auto" }),
+      BASE_SETTINGS,
+    );
     expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("full_auto");
   });
 

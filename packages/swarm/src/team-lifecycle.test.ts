@@ -108,7 +108,11 @@ describe("TeamLifecycleManager CRUD", () => {
 
   it("getTeam returns null for a missing or corrupted team", () => {
     const manager = new TeamLifecycleManager();
+    // 旧实现的 getTeamDir 读路径也 mkdir，可能留有历史空目录：先清掉再验证。
+    rmSync(join(homedir(), ".openharness", "teams", "__test_tl_never_created"), { recursive: true, force: true });
     expect(manager.getTeam("__test_tl_never_created")).toBeNull();
+    // 查询不存在的团队不应留下空目录（getTeamDir 读路径不再 mkdir）。
+    expect(existsSync(join(homedir(), ".openharness", "teams", "__test_tl_never_created"))).toBe(false);
 
     const team = uniqueTeam();
     mkdirSync(join(homedir(), ".openharness", "teams", team), { recursive: true });

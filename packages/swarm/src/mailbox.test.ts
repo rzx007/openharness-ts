@@ -52,15 +52,25 @@ describe("directory helpers", () => {
     expect(() => getAgentMailboxDir(team, "../../sneaky")).toThrow(/Unsafe/);
   });
 
-  it("getTeamDir points at ~/.openharness/teams/<team> and creates it", () => {
+  it("getTeamDir points at ~/.openharness/teams/<team> without creating it by default", () => {
     const dir = getTeamDir(team);
     expect(dir).toBe(join(homedir(), ".openharness", "teams", team));
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("getTeamDir with ensure:true creates the directory", () => {
+    const dir = getTeamDir(team, { ensure: true });
     expect(existsSync(dir)).toBe(true);
   });
 
-  it("getAgentMailboxDir nests agents/<id>/inbox under the team dir", () => {
+  it("getAgentMailboxDir nests agents/<id>/inbox under the team dir without creating it", () => {
     const dir = getAgentMailboxDir(team, "bob");
     expect(dir).toBe(join(getTeamDir(team), "agents", "bob", "inbox"));
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("getAgentMailboxDir with ensure:true creates the inbox", () => {
+    const dir = getAgentMailboxDir(team, "bob", { ensure: true });
     expect(existsSync(dir)).toBe(true);
   });
 });
@@ -111,6 +121,12 @@ describe("TeammateMailbox.readAll", () => {
     expect((await mailbox.readAll(false)).map((m) => m.id)).toEqual(["seen", "new"]);
   });
 
+  it("returns [] for a never-written mailbox without leaving an empty dir behind", async () => {
+    const mailbox = new TeammateMailbox(team, "ghost");
+    expect(await mailbox.readAll()).toEqual([]);
+    expect(existsSync(join(homedir(), ".openharness", "teams", team))).toBe(false);
+  });
+
   it("skips dotfiles, .tmp files, and corrupted JSON instead of crashing", async () => {
     const mailbox = new TeammateMailbox(team, "bob");
     const inbox = mailbox.getMailboxDir();
@@ -141,6 +157,13 @@ describe("TeammateMailbox.markRead / clear", () => {
     await mailbox.clear();
     expect(await mailbox.readAll(false)).toEqual([]);
     expect(existsSync(mailbox.getMailboxDir())).toBe(true);
+  });
+
+  it("markRead and clear are no-ops on a never-written mailbox and leave no dir", async () => {
+    const mailbox = new TeammateMailbox(team, "ghost");
+    await mailbox.markRead("nope");
+    await mailbox.clear();
+    expect(existsSync(join(homedir(), ".openharness", "teams", team))).toBe(false);
   });
 });
 
