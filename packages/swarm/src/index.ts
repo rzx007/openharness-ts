@@ -5,6 +5,78 @@ export {
 } from "./subprocess.js";
 
 export {
+  exclusiveFileLock,
+  SwarmLockError,
+  type ExclusiveFileLockOptions,
+} from "./lockfile.js";
+
+export {
+  TeammateMailbox,
+  getTeamDir,
+  getAgentMailboxDir,
+  createUserMessage,
+  createShutdownRequest,
+  createIdleNotification,
+  createPermissionRequestMessage,
+  createPermissionResponseMessage,
+  isPermissionRequest,
+  isPermissionResponse,
+  writeToMailbox,
+  type MailboxMessage,
+  type MessageType,
+} from "./mailbox.js";
+
+export {
+  generateRequestId,
+  createPermissionRequest,
+  writePermissionRequest,
+  readPendingPermissions,
+  readResolvedPermission,
+  resolvePermission,
+  deleteResolvedPermission,
+  pollForResponse,
+  cleanupOldResolutions,
+  isTeamLeader,
+  isSwarmWorker,
+  getLeaderName,
+  handlePermissionRequest,
+  sendPermissionRequest,
+  pollPermissionResponse,
+  sendPermissionResponse,
+  sendPermissionRequestViaMailbox,
+  sendPermissionResponseViaMailbox,
+  type SwarmPermissionRequest,
+  type PermissionResolution,
+  type PermissionResponse,
+  type SwarmPermissionResponse,
+  type PermissionDecider,
+} from "./permission-sync.js";
+
+export {
+  sanitizeName,
+  sanitizeAgentName,
+  getTeamFilePath,
+  readTeamFile,
+  writeTeamFile,
+  TeamLifecycleManager,
+  removeTeammateFromTeamFile,
+  removeMemberByAgentId,
+  setMemberMode,
+  setMultipleMemberModes,
+  syncTeammateMode,
+  setMemberActive,
+  registerTeammateInTeamFile,
+  registerTeamForSessionCleanup,
+  unregisterTeamForSessionCleanup,
+  cleanupSessionTeams,
+  cleanupSessionTeamsSync,
+  cleanupTeamDirectories,
+  type AllowedPath,
+  type TeamMember as PersistedTeamMember,
+  type TeamFile,
+} from "./team-lifecycle.js";
+
+export {
   WorktreeManager,
   validateWorktreeSlug,
   type GitRunner,

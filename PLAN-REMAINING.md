@@ -32,7 +32,7 @@
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
 | plugins | 🟠 | 仅读 plugin.json，无 tools_dir 发现 / commands/agents/hooks 贡献加载 |
 | bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
-| swarm | 🟠 | ~4%，无真实派发后端、文件邮箱、权限同步、团队持久化、worktree 隔离 |
+| swarm | 🟡 | ✅subprocess 派发/TaskWait/worktree 隔离/只读放行(D.1-D.4)+文件邮箱/team.json/权限同步(D.5)；缺长驻 worker 多轮 sendMessage、TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🔴 | 整体缺失 |
@@ -149,12 +149,15 @@
 
 ## Phase D — 大模块（P3）
 
-### D.1 Swarm 真实派发
-- 至少实现 `subprocess` 后端（对齐 spawn_utils：继承 CLI flags + env var，`shlex.quote` 防注入）。
-- 文件式邮箱（原子写 + 文件锁，进程间可用）替换内存队列。
-- 权限同步（read-only 工具自动批准、permission request/response 文件流、leader/worker 检测）。
-- 团队磁盘持久化 `team.json`、git worktree 隔离。
-- **文件**：`packages/swarm/src/`、依赖 B.3（BackgroundTaskManager）
+### D.1 Swarm 真实派发 ✅ 基本完成（D.1–D.5）
+- ✅ `subprocess` 后端（spawn → 后台子进程 → TaskWait 取结果，swarm D.1/D.2）。
+- ✅ 文件式邮箱（每消息一文件 + `.tmp`+rename 原子写 + wx 锁文件，D.5-R1）。
+- ✅ 权限同步（read-only 自动批准 D.4；pending/resolved 文件流 + leader/worker 检测 +
+  **worker 写操作转 leader checker 自动裁决**——接线超出 Python 原版，见
+  `docs/swarm-file-infra-design.md` 差异表，D.5-R3）。
+- ✅ 团队磁盘持久化 `team.json`（D.5-R2）、git worktree 隔离（D.3）。
+- 留待：长驻 worker / 多轮 `sendMessage`；`ask` 时 TUI 弹框人工裁决（当前 checker 自动）。
+- **文件**：`packages/swarm/src/{lockfile,mailbox,team-lifecycle,permission-sync}.ts`、`apps/cli/src/swarm-permission.ts`
 
 ### D.2 Channels 多通道 + 引擎桥接
 - 基座：`BaseChannel`（统一 ACL）、`ChannelManager`（启停/出站分发）、`MessageBus`（inbound/outbound 双队列）、`ChannelBridge`（接入 QueryEngine 并回传）。

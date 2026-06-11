@@ -107,6 +107,80 @@ describe("SubprocessBackend", () => {
     ).rejects.toThrow("one-shot");
   });
 
+  describe("registerTeammate hook", () => {
+    it("spawn invokes registerTeammate with the effective config and spawn result", async () => {
+      const runner: TaskRunner = {
+        createShellTask: vi.fn().mockResolvedValue({ id: "task_9" }),
+        stopTask: vi.fn(),
+      };
+      const registerTeammate = vi.fn();
+      const backend = new SubprocessBackend({
+        taskRunner: runner,
+        buildCommand: () => ({ argv: ["node"] }),
+        registerTeammate,
+      });
+      const result = await backend.spawn(makeConfig({ name: "Explore", team: "alpha" }));
+
+      expect(result.success).toBe(true);
+      expect(registerTeammate).toHaveBeenCalledTimes(1);
+      const [cfg, res] = registerTeammate.mock.calls[0]!;
+      expect(cfg.name).toBe("Explore");
+      expect(res.agentId).toBe("Explore@alpha");
+      expect(res.taskId).toBe("task_9");
+    });
+
+    it("registerTeammate failure does not fail the spawn", async () => {
+      const runner: TaskRunner = {
+        createShellTask: vi.fn().mockResolvedValue({ id: "task_10" }),
+        stopTask: vi.fn(),
+      };
+      const backend = new SubprocessBackend({
+        taskRunner: runner,
+        buildCommand: () => ({ argv: ["node"] }),
+        registerTeammate: () => {
+          throw new Error("disk full");
+        },
+      });
+      const result = await backend.spawn(makeConfig());
+      expect(result.success).toBe(true);
+    });
+
+    it("isolated spawn passes the worktree path as the hook config cwd", async () => {
+      const runner: TaskRunner = {
+        createShellTask: vi.fn().mockResolvedValue({ id: "task_iso" }),
+        stopTask: vi.fn(),
+      };
+      const registerTeammate = vi.fn();
+      const backend = new SubprocessBackend({
+        taskRunner: runner,
+        buildCommand: () => ({ argv: ["node"] }),
+        worktreeManager: mockWorktreeManager(),
+        registerTeammate,
+      });
+      await backend.spawn(makeConfig({ name: "Build", team: "alpha", isolate: true }));
+
+      const [cfg, res] = registerTeammate.mock.calls[0]!;
+      expect(cfg.cwd).toBe("/wt/path");
+      expect(res.worktree).toEqual({ path: "/wt/path", branch: "worktree-s" });
+    });
+
+    it("failed spawn does not invoke registerTeammate", async () => {
+      const runner: TaskRunner = {
+        createShellTask: vi.fn().mockRejectedValue(new Error("boom")),
+        stopTask: vi.fn(),
+      };
+      const registerTeammate = vi.fn();
+      const backend = new SubprocessBackend({
+        taskRunner: runner,
+        buildCommand: () => ({ argv: ["node"] }),
+        registerTeammate,
+      });
+      const result = await backend.spawn(makeConfig());
+      expect(result.success).toBe(false);
+      expect(registerTeammate).not.toHaveBeenCalled();
+    });
+  });
+
   describe("isolate", () => {
     it("isolate=true creates a worktree and uses its path as cwd", async () => {
       const createShellTask = vi.fn().mockResolvedValue({ id: "task_iso" });

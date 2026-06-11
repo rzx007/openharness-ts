@@ -18,6 +18,8 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { computeToolDiff } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
+import { isSwarmWorker } from "@openharness/swarm";
+import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
 import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
@@ -191,11 +193,17 @@ async function runPrintMode(
   const credentialStorage = new CredentialStorage();
 
   // ==================创建运行时环境==================
+  // swarm worker（teammate 子进程，带 --swarm-worker + swarm env）：permissionPrompt
+  // 接文件流——写 pending 请求并阻塞轮询 leader 裁决（D.5）。写操作从「无确认即拒」
+  // 变「转 leader 审批」；非 worker 的 print 模式保持无 prompt（ask 即拒）。
+  const swarmPermissionPrompt =
+    options.swarmWorker && isSwarmWorker() ? buildSwarmWorkerPermissionPrompt() : undefined;
   const bundle = await bootstrap({
     settings,
     cliOverrides: buildCliOverrides(options),
     skillRegistry,
     credentialStorage,
+    permissionPrompt: swarmPermissionPrompt,
   });
 
   // ==================创建事件渲染器==================

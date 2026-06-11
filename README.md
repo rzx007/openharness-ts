@@ -354,7 +354,7 @@ OpenHarness-ts/
 | `McpClientManager`   | MCP 协议客户端：stdio 传输连接外部 MCP Server，动态获取工具和资源                                                                 |
 | `ChannelAdapter`     | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                              |
 | `HookExecutor`       | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
-| `Swarm` | 多 Agent 团队：subprocess 后端把子代理派发为 `ohs --print` 子进程、git worktree 隔离、只读工具自动放行；teammate 注册 / 消息路由 |
+| `Swarm` | 多 Agent 团队：subprocess 后端把子代理派发为 `ohs --print` 子进程、git worktree 隔离、只读工具自动放行；文件邮箱（原子写+文件锁）、team.json 持久化（随会话退出清理）、权限同步（worker 写操作经 pending/resolved 文件流转 leader checker 自动裁决）。详见 [docs/swarm-file-infra-design.md](docs/swarm-file-infra-design.md) |
 | `PluginLoader`       | 插件加载器：读取 `plugin.json` 清单，校验 schema，动态注册工具和 Hook                                                            |
 | `SkillRegistry`      | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；user-invocable skill 可作 `/<skill>` 斜杠命令；model 可见性过滤 |
 | `BridgeManager`      | 会话桥接：多进程间共享会话状态                                                                                             |

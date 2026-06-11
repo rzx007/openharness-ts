@@ -21,7 +21,7 @@ import type { TeammateSpawnConfig } from "@openharness/swarm";
 export function buildTeammateCommand(
   config: TeammateSpawnConfig,
   settings: Settings,
-): { argv: string[] } {
+): { argv: string[]; env: Record<string, string> } {
   const cliEntry = process.argv[1] ?? "";
   const model = config.model ?? settings.model;
 
@@ -49,5 +49,13 @@ export function buildTeammateCommand(
   // 只读放行本就安全，让 Explore/Plan 默认就能干活，不必父进程开 full_auto。
   argv.push("--swarm-worker");
 
-  return { argv };
+  // swarm 身份环境变量（D.5）：worker 侧 isSwarmWorker()/createPermissionRequest
+  // 据此识别自己并寻址团队的 permission pending 目录。命名沿用 Python 原版。
+  const env: Record<string, string> = {
+    CLAUDE_CODE_TEAM_NAME: config.team,
+    CLAUDE_CODE_AGENT_ID: `${config.name}@${config.team}`,
+    CLAUDE_CODE_AGENT_NAME: config.name,
+  };
+
+  return { argv, env };
 }
