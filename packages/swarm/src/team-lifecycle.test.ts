@@ -126,8 +126,8 @@ describe("TeamLifecycleManager CRUD", () => {
   });
 
   it("listTeams includes created teams sorted by directory name", () => {
-    const a = uniqueTeam();
-    const b = uniqueTeam();
+    // 同毫秒生成的两个名字随机后缀顺序不定：显式排序保证 a < b（曾偶发 flake）。
+    const [a, b] = [uniqueTeam(), uniqueTeam()].sort() as [string, string];
     const manager = new TeamLifecycleManager();
     manager.createTeam(b);
     manager.createTeam(a);
