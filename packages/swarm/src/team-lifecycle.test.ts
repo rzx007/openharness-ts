@@ -1,0 +1,317 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import {
+  type TeamMember,
+  sanitizeName,
+  sanitizeAgentName,
+  readTeamFile,
+  writeTeamFile,
+  TeamLifecycleManager,
+  removeTeammateFromTeamFile,
+  removeMemberByAgentId,
+  setMemberMode,
+  setMultipleMemberModes,
+  syncTeammateMode,
+  setMemberActive,
+  registerTeamForSessionCleanup,
+  unregisterTeamForSessionCleanup,
+  cleanupSessionTeams,
+  cleanupTeamDirectories,
+} from "./team-lifecycle.js";
+
+// 与 mailbox 测试同一套约定：唯一团队名写真实 ~/.openharness/teams，用后清理。
+const createdTeams: string[] = [];
+
+function uniqueTeam(): string {
+  const name = `__test_tl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  createdTeams.push(name);
+  return name;
+}
+
+function teamJsonPath(team: string): string {
+  return join(homedir(), ".openharness", "teams", team, "team.json");
+}
+
+function makeMember(overrides: Partial<TeamMember> = {}): TeamMember {
+  return {
+    agentId: "agent-1",
+    name: "worker-1",
+    backendType: "subprocess",
+    joinedAt: 1000,
+    agentType: null,
+    model: null,
+    prompt: null,
+    color: null,
+    planModeRequired: false,
+    sessionId: null,
+    subscriptions: [],
+    isActive: true,
+    mode: null,
+    tmuxPaneId: "",
+    cwd: "",
+    worktreePath: null,
+    permissions: [],
+    status: "active",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  delete process.env.CLAUDE_CODE_TEAM_NAME;
+  delete process.env.CLAUDE_CODE_AGENT_NAME;
+});
+
+afterEach(async () => {
+  for (const team of createdTeams.splice(0)) {
+    unregisterTeamForSessionCleanup(team);
+    rmSync(join(homedir(), ".openharness", "teams", team), { recursive: true, force: true });
+  }
+  delete process.env.CLAUDE_CODE_TEAM_NAME;
+  delete process.env.CLAUDE_CODE_AGENT_NAME;
+});
+
+describe("name sanitisation", () => {
+  it("sanitizeName lowercases and replaces non-alphanumerics with hyphens", () => {
+    expect(sanitizeName("My Team!Name")).toBe("my-team-name");
+  });
+
+  it("sanitizeAgentName only replaces @", () => {
+    expect(sanitizeAgentName("worker@team")).toBe("worker-team");
+    expect(sanitizeAgentName("Worker_1")).toBe("Worker_1");
+  });
+});
+
+describe("TeamLifecycleManager CRUD", () => {
+  it("createTeam persists team.json with snake_case keys", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team, "a test team");
+
+    const raw = JSON.parse(readFileSync(teamJsonPath(team), "utf-8"));
+    expect(raw.name).toBe(team);
+    expect(raw.description).toBe("a test team");
+    expect(raw.created_at).toBeTypeOf("number");
+    expect(raw.lead_agent_id).toBe("");
+    expect(raw.members).toEqual({});
+  });
+
+  it("createTeam throws when the team already exists", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    expect(() => manager.createTeam(team)).toThrow(/already exists/);
+  });
+
+  it("getTeam returns null for a missing or corrupted team", () => {
+    const manager = new TeamLifecycleManager();
+    expect(manager.getTeam("__test_tl_never_created")).toBeNull();
+
+    const team = uniqueTeam();
+    mkdirSync(join(homedir(), ".openharness", "teams", team), { recursive: true });
+    writeFileSync(teamJsonPath(team), "not json");
+    expect(manager.getTeam(team)).toBeNull();
+  });
+
+  it("deleteTeam removes the whole team directory and throws if missing", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.deleteTeam(team);
+    expect(existsSync(teamJsonPath(team))).toBe(false);
+    expect(() => manager.deleteTeam(team)).toThrow(/does not exist/);
+  });
+
+  it("listTeams includes created teams sorted by directory name", () => {
+    const a = uniqueTeam();
+    const b = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(b);
+    manager.createTeam(a);
+    const names = manager.listTeams().map((t) => t.name);
+    expect(names).toContain(a);
+    expect(names).toContain(b);
+    expect(names.indexOf(a)).toBeLessThan(names.indexOf(b));
+  });
+});
+
+describe("member management", () => {
+  it("addMember persists and replaces members with the same agentId", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.addMember(team, makeMember());
+    manager.addMember(team, makeMember({ name: "renamed" }));
+
+    const file = manager.getTeam(team)!;
+    expect(Object.keys(file.members)).toEqual(["agent-1"]);
+    expect(file.members["agent-1"]!.name).toBe("renamed");
+  });
+
+  it("addMember throws for a missing team", () => {
+    expect(() => new TeamLifecycleManager().addMember("__test_tl_nope", makeMember())).toThrow(
+      /does not exist/,
+    );
+  });
+
+  it("removeMember deletes by agentId and throws when absent", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.addMember(team, makeMember());
+    manager.removeMember(team, "agent-1");
+    expect(manager.getTeam(team)!.members).toEqual({});
+    expect(() => manager.removeMember(team, "agent-1")).toThrow(/not a member/);
+  });
+
+  it("removeTeammateFromTeamFile matches by agentId or name", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.addMember(team, makeMember({ agentId: "a1", name: "alice" }));
+    manager.addMember(team, makeMember({ agentId: "a2", name: "bob" }));
+
+    expect(removeTeammateFromTeamFile(team, { name: "alice" })).toBe(true);
+    expect(removeTeammateFromTeamFile(team, { agentId: "a2" })).toBe(true);
+    expect(removeTeammateFromTeamFile(team, { name: "ghost" })).toBe(false);
+    expect(manager.getTeam(team)!.members).toEqual({});
+  });
+
+  it("removeMemberByAgentId returns false when team or member is missing", () => {
+    const team = uniqueTeam();
+    new TeamLifecycleManager().createTeam(team);
+    expect(removeMemberByAgentId(team, "ghost")).toBe(false);
+    expect(removeMemberByAgentId("__test_tl_nope", "x")).toBe(false);
+  });
+});
+
+describe("mode and active-status helpers", () => {
+  it("setMemberMode updates by member *name* and persists", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.addMember(team, makeMember({ agentId: "a1", name: "alice" }));
+
+    expect(setMemberMode(team, "alice", "full_auto")).toBe(true);
+    expect(manager.getTeam(team)!.members["a1"]!.mode).toBe("full_auto");
+    expect(setMemberMode(team, "ghost", "x")).toBe(false);
+    expect(setMemberMode("__test_tl_nope", "alice", "x")).toBe(false);
+  });
+
+  it("setMultipleMemberModes applies a batch in one write", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.addMember(team, makeMember({ agentId: "a1", name: "alice" }));
+    manager.addMember(team, makeMember({ agentId: "a2", name: "bob" }));
+
+    expect(
+      setMultipleMemberModes(team, [
+        { memberName: "alice", mode: "plan" },
+        { memberName: "bob", mode: "default" },
+      ]),
+    ).toBe(true);
+    const file = manager.getTeam(team)!;
+    expect(file.members["a1"]!.mode).toBe("plan");
+    expect(file.members["a2"]!.mode).toBe("default");
+  });
+
+  it("syncTeammateMode reads team/agent from env and is a no-op without them", () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.addMember(team, makeMember({ agentId: "a1", name: "alice" }));
+
+    syncTeammateMode("full_auto"); // env 未设 → no-op
+    expect(manager.getTeam(team)!.members["a1"]!.mode).toBeNull();
+
+    process.env.CLAUDE_CODE_TEAM_NAME = team;
+    process.env.CLAUDE_CODE_AGENT_NAME = "alice";
+    syncTeammateMode("full_auto");
+    expect(manager.getTeam(team)!.members["a1"]!.mode).toBe("full_auto");
+  });
+
+  it("setMemberActive flips is_active by member name", async () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    manager.addMember(team, makeMember({ agentId: "a1", name: "alice", isActive: true }));
+    await setMemberActive(team, "alice", false);
+    expect(manager.getTeam(team)!.members["a1"]!.isActive).toBe(false);
+  });
+});
+
+describe("serialization compatibility", () => {
+  it("writes snake_case to disk and reads camelCase fallback", () => {
+    const team = uniqueTeam();
+    new TeamLifecycleManager().createTeam(team);
+    writeTeamFile(team, {
+      name: team,
+      description: "",
+      createdAt: 1,
+      leadAgentId: "lead-1",
+      leadSessionId: null,
+      hiddenPaneIds: [],
+      members: { m1: makeMember({ agentId: "m1", worktreePath: "/wt" }) },
+      teamAllowedPaths: [],
+      allowedPaths: [],
+      metadata: {},
+    });
+
+    const raw = JSON.parse(readFileSync(teamJsonPath(team), "utf-8"));
+    expect(raw.lead_agent_id).toBe("lead-1");
+    expect(raw.members.m1.agent_id).toBe("m1");
+    expect(raw.members.m1.worktree_path).toBe("/wt");
+
+    // camelCase 写盘（其他实现产出）也能读回。
+    writeFileSync(
+      teamJsonPath(team),
+      JSON.stringify({
+        name: team,
+        createdAt: 2,
+        leadAgentId: "lead-camel",
+        members: {
+          m2: { agentId: "m2", name: "n", backendType: "subprocess", joinedAt: 3 },
+        },
+      }),
+    );
+    const file = readTeamFile(team)!;
+    expect(file.createdAt).toBe(2);
+    expect(file.leadAgentId).toBe("lead-camel");
+    expect(file.members["m2"]!.agentId).toBe("m2");
+  });
+});
+
+describe("cleanup", () => {
+  it("cleanupTeamDirectories removes member worktrees and the team dir", async () => {
+    const team = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team);
+    const fakeWorktree = join(tmpdir(), `ohs-wt-${Date.now()}`);
+    mkdirSync(fakeWorktree, { recursive: true });
+    manager.addMember(team, makeMember({ worktreePath: fakeWorktree }));
+
+    await cleanupTeamDirectories(team);
+    expect(existsSync(teamJsonPath(team))).toBe(false);
+    expect(existsSync(fakeWorktree)).toBe(false);
+  });
+
+  it("cleanupSessionTeams removes registered teams only, and unregister opts out", async () => {
+    const kept = uniqueTeam();
+    const gone = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(kept);
+    manager.createTeam(gone);
+    registerTeamForSessionCleanup(kept);
+    registerTeamForSessionCleanup(gone);
+    unregisterTeamForSessionCleanup(kept);
+
+    await cleanupSessionTeams();
+    expect(existsSync(teamJsonPath(kept))).toBe(true);
+    expect(existsSync(teamJsonPath(gone))).toBe(false);
+
+    // 幂等：再次调用不抛错。
+    await cleanupSessionTeams();
+  });
+});

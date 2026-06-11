@@ -27,6 +27,28 @@ export {
 } from "./mailbox.js";
 
 export {
+  sanitizeName,
+  sanitizeAgentName,
+  getTeamFilePath,
+  readTeamFile,
+  writeTeamFile,
+  TeamLifecycleManager,
+  removeTeammateFromTeamFile,
+  removeMemberByAgentId,
+  setMemberMode,
+  setMultipleMemberModes,
+  syncTeammateMode,
+  setMemberActive,
+  registerTeamForSessionCleanup,
+  unregisterTeamForSessionCleanup,
+  cleanupSessionTeams,
+  cleanupTeamDirectories,
+  type AllowedPath,
+  type TeamMember as PersistedTeamMember,
+  type TeamFile,
+} from "./team-lifecycle.js";
+
+export {
   WorktreeManager,
   validateWorktreeSlug,
   type GitRunner,
