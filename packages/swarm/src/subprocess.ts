@@ -34,6 +34,11 @@ export interface SubprocessBackendOptions {
    * 缺省（或仓库非 git）时 isolate 退化为 no-op + 警告，不报错。
    */
   worktreeManager?: WorktreeManager;
+  /**
+   * 可选的 teammate 登记钩子：spawn 成功后调用（如把成员写进 team.json）。
+   * best-effort——钩子抛错只吞掉，不让 spawn 失败。注入而非内联，保持后端可单测。
+   */
+  registerTeammate?: (config: TeammateSpawnConfig, result: SpawnResult) => void;
 }
 
 /**
@@ -49,6 +54,7 @@ export class SubprocessBackend implements SwarmBackend {
   private readonly taskRunner: TaskRunner;
   private readonly buildCommand: SubprocessBackendOptions["buildCommand"];
   private readonly worktreeManager?: WorktreeManager;
+  private readonly registerTeammate?: SubprocessBackendOptions["registerTeammate"];
   /** agentId(`name@team`) -> taskId 映射，用于 terminate。 */
   private readonly agentTasks = new Map<string, string>();
   /** agentId -> 隔离信息（仅隔离的 teammate 有），用于 terminate 时清理 worktree。 */
@@ -58,6 +64,7 @@ export class SubprocessBackend implements SwarmBackend {
     this.taskRunner = options.taskRunner;
     this.buildCommand = options.buildCommand;
     this.worktreeManager = options.worktreeManager;
+    this.registerTeammate = options.registerTeammate;
   }
 
   async spawn(config: TeammateSpawnConfig): Promise<SpawnResult> {
@@ -103,6 +110,13 @@ export class SubprocessBackend implements SwarmBackend {
       };
       if (worktree != null) result.worktree = worktree;
       if (notice != null) result.notice = notice;
+      if (this.registerTeammate) {
+        try {
+          this.registerTeammate({ ...config, cwd }, result);
+        } catch {
+          // 登记失败不影响已成功的 spawn
+        }
+      }
       return result;
     } catch (err) {
       // 若本次已建了隔离 worktree（拿到 slug）但后续 createShellTask 抛错，

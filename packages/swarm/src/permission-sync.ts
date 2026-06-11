@@ -88,7 +88,12 @@ export interface SwarmPermissionResponse {
 
 /** 结构化裁决接口：对齐 @openharness/permissions 的 PermissionChecker.checkTool，避免跨包依赖。 */
 export interface PermissionDecider {
-  checkTool(toolName: string, input: Record<string, unknown>): { action: "allow" | "deny" | "ask"; reason?: string };
+  checkTool(
+    toolName: string,
+    input: Record<string, unknown>,
+  ):
+    | { action: "allow" | "deny" | "ask"; reason?: string }
+    | Promise<{ action: "allow" | "deny" | "ask"; reason?: string }>;
 }
 
 type Raw = Record<string, unknown>;
@@ -415,7 +420,7 @@ export async function handlePermissionRequest(
     return { requestId: request.id, allowed: true, feedback: null, updatedRules: [] };
   }
 
-  const decision = checker.checkTool(request.toolName, request.input);
+  const decision = await checker.checkTool(request.toolName, request.input);
   const allowed = decision.action === "allow";
   return {
     requestId: request.id,

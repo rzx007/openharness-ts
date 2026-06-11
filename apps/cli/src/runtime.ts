@@ -11,9 +11,16 @@ import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import type { SkillRegistry } from "@openharness/skills";
-import { getBackendRegistry, SubprocessBackend, WorktreeManager, type GitRunner } from "@openharness/swarm";
+import {
+  getBackendRegistry,
+  SubprocessBackend,
+  WorktreeManager,
+  registerTeammateInTeamFile,
+  type GitRunner,
+} from "@openharness/swarm";
 import { getTaskManager } from "@openharness/services";
 import { buildTeammateCommand } from "./teammate.js";
+import { startSwarmPermissionResolver, watchTeamForPermissions } from "./swarm-permission.js";
 
 export type PermissionPromptFn = (
   toolName: string,
@@ -154,6 +161,33 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
         },
         buildCommand: (cfg) => buildTeammateCommand(cfg, settings),
         worktreeManager,
+        // D.5 接线：spawn 成功 → 成员写进 team.json（隐式建团队随会话退出清理），
+        // 团队纳入 leader 权限轮询，并启动后台裁决器（幂等）。worker 的写操作
+        // 经文件流转 leader 的 permissionChecker 自动裁决。
+        registerTeammate: (cfg, res) => {
+          registerTeammateInTeamFile(cfg.team, {
+            agentId: res.agentId,
+            name: cfg.name,
+            backendType: res.backendType,
+            joinedAt: Date.now() / 1000,
+            agentType: null,
+            model: cfg.model ?? null,
+            prompt: cfg.prompt,
+            color: null,
+            planModeRequired: false,
+            sessionId: null,
+            subscriptions: [],
+            isActive: true,
+            mode: null,
+            tmuxPaneId: "",
+            cwd: cfg.cwd,
+            worktreePath: res.worktree?.path ?? null,
+            permissions: cfg.permissions ?? [],
+            status: "active",
+          });
+          watchTeamForPermissions(cfg.team);
+          startSwarmPermissionResolver(permissionChecker, READ_ONLY_TOOLS);
+        },
       }),
     );
   }

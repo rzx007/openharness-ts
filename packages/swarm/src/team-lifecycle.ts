@@ -7,7 +7,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -403,6 +402,23 @@ export async function setMemberActive(
 }
 
 // ---------------------------------------------------------------------------
+// teammate 落盘登记（spawn 接线用）
+// ---------------------------------------------------------------------------
+
+/**
+ * 把一个 teammate 登记进 team.json：团队不存在则创建（并登记会话清理——
+ * 本会话隐式建的团队随 leader 退出删除）；同 agentId 重复登记为替换。
+ */
+export function registerTeammateInTeamFile(teamName: string, member: TeamMember): void {
+  const manager = new TeamLifecycleManager();
+  if (!readTeamFile(teamName)) {
+    manager.createTeam(teamName);
+    registerTeamForSessionCleanup(teamName);
+  }
+  manager.addMember(teamName, member);
+}
+
+// ---------------------------------------------------------------------------
 // 会话清理
 // ---------------------------------------------------------------------------
 
@@ -424,14 +440,27 @@ export async function cleanupSessionTeams(): Promise<void> {
   sessionCreatedTeams.clear();
 }
 
+/** 同步版会话清理：进程 `exit` 钩子里不能 await，整条链用同步 I/O。 */
+export function cleanupSessionTeamsSync(): void {
+  if (sessionCreatedTeams.size === 0) return;
+  for (const team of [...sessionCreatedTeams]) {
+    try {
+      cleanupTeamDirectoriesSync(team);
+    } catch {
+      // best-effort：退出路径不抛
+    }
+  }
+  sessionCreatedTeams.clear();
+}
+
 /**
  * 销毁一个 git worktree：优先从主仓库跑 `git worktree remove --force`，
  * 失败回退递归删除（对齐 Python _destroy_worktree 的 best-effort 语义）。
  */
-async function destroyWorktree(worktreePath: string): Promise<void> {
+function destroyWorktreeSync(worktreePath: string): void {
   let mainRepoPath: string | null = null;
   try {
-    const content = (await fs.readFile(join(worktreePath, ".git"), "utf-8")).trim();
+    const content = readFileSync(join(worktreePath, ".git"), "utf-8").trim();
     const match = /^gitdir:\s*(.+)$/.exec(content);
     if (match) {
       // <repo>/.git/worktrees/<slug> → 主仓库根 = gitdir/../../..
@@ -459,7 +488,7 @@ async function destroyWorktree(worktreePath: string): Promise<void> {
 }
 
 /** 清理团队目录：先销毁成员 worktree（删团队目录前收集路径），再删团队目录。 */
-export async function cleanupTeamDirectories(teamName: string): Promise<void> {
+function cleanupTeamDirectoriesSync(teamName: string): void {
   const team = readTeamFile(teamName);
   const worktreePaths: string[] = [];
   if (team) {
@@ -469,8 +498,12 @@ export async function cleanupTeamDirectories(teamName: string): Promise<void> {
   }
 
   for (const wtPath of worktreePaths) {
-    await destroyWorktree(wtPath);
+    destroyWorktreeSync(wtPath);
   }
 
   rmSync(getTeamDir(teamName), { recursive: true, force: true });
+}
+
+export async function cleanupTeamDirectories(teamName: string): Promise<void> {
+  cleanupTeamDirectoriesSync(teamName);
 }

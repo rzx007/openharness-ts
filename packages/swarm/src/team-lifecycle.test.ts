@@ -15,9 +15,11 @@ import {
   setMultipleMemberModes,
   syncTeammateMode,
   setMemberActive,
+  registerTeammateInTeamFile,
   registerTeamForSessionCleanup,
   unregisterTeamForSessionCleanup,
   cleanupSessionTeams,
+  cleanupSessionTeamsSync,
   cleanupTeamDirectories,
 } from "./team-lifecycle.js";
 
@@ -283,6 +285,29 @@ describe("serialization compatibility", () => {
   });
 });
 
+describe("registerTeammateInTeamFile", () => {
+  it("creates the team on first use, adds the member, and registers session cleanup", async () => {
+    const team = uniqueTeam();
+    registerTeammateInTeamFile(team, makeMember({ agentId: "w1@t", name: "w1", worktreePath: "/wt" }));
+
+    const file = readTeamFile(team)!;
+    expect(file.members["w1@t"]!.worktreePath).toBe("/wt");
+
+    // 已登记会话清理：cleanupSessionTeams 会删掉它。
+    await cleanupSessionTeams();
+    expect(readTeamFile(team)).toBeNull();
+  });
+
+  it("reuses an existing team without throwing and replaces same-id members", () => {
+    const team = uniqueTeam();
+    new TeamLifecycleManager().createTeam(team);
+    registerTeammateInTeamFile(team, makeMember({ agentId: "a", name: "one" }));
+    registerTeammateInTeamFile(team, makeMember({ agentId: "a", name: "two" }));
+    expect(readTeamFile(team)!.members["a"]!.name).toBe("two");
+    // 不是本会话建的团队 → 不应被 session cleanup 登记删除（unregister 兜底在 afterEach）。
+  });
+});
+
 describe("cleanup", () => {
   it("cleanupTeamDirectories removes member worktrees and the team dir", async () => {
     const team = uniqueTeam();
@@ -313,5 +338,21 @@ describe("cleanup", () => {
 
     // 幂等：再次调用不抛错。
     await cleanupSessionTeams();
+  });
+
+  it("cleanupSessionTeamsSync removes registered teams synchronously (exit-hook safe)", () => {
+    const team1 = uniqueTeam();
+    const manager = new TeamLifecycleManager();
+    manager.createTeam(team1);
+    const fakeWorktree = join(tmpdir(), `ohs-wt-sync-${Date.now()}`);
+    mkdirSync(fakeWorktree, { recursive: true });
+    manager.addMember(team1, makeMember({ worktreePath: fakeWorktree }));
+    registerTeamForSessionCleanup(team1);
+
+    cleanupSessionTeamsSync();
+    expect(existsSync(teamJsonPath(team1))).toBe(false);
+    expect(existsSync(fakeWorktree)).toBe(false);
+    // 幂等。
+    cleanupSessionTeamsSync();
   });
 });

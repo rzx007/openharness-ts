@@ -92,6 +92,15 @@ describe("buildTeammateCommand", () => {
     expect(argv).toContain("--swarm-worker");
   });
 
+  it("injects swarm identity env vars (team / agent id / agent name)", () => {
+    const { env } = buildTeammateCommand(makeConfig({ name: "Explore", team: "alpha" }), BASE_SETTINGS);
+    expect(env).toEqual({
+      CLAUDE_CODE_TEAM_NAME: "alpha",
+      CLAUDE_CODE_AGENT_ID: "Explore@alpha",
+      CLAUDE_CODE_AGENT_NAME: "Explore",
+    });
+  });
+
   it("never includes the api-key", () => {
     const { argv } = buildTeammateCommand(makeConfig(), {
       ...BASE_SETTINGS,
