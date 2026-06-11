@@ -19,7 +19,11 @@ export class SwarmLockError extends Error {}
 export interface ExclusiveFileLockOptions {
   /** 锁被占用时的重试间隔，缺省 50ms。 */
   retryIntervalMs?: number;
-  /** 锁文件多旧视为陈旧（持有者崩溃），缺省 10s。 */
+  /**
+   * 锁文件多旧视为陈旧（持有者崩溃），缺省 10s。
+   * 注意：活着但临界区超过 staleMs 的持有者会被误偷——当前所有临界区都是
+   * 小文件操作（远小于 10s）；若将来出现长临界区，需在持有期间周期 touch 锁。
+   */
   staleMs?: number;
   /** 获取锁的总超时，超过抛 SwarmLockError，缺省 30s。 */
   timeoutMs?: number;
@@ -41,15 +45,19 @@ async function acquire(lockPath: string, options: Required<ExclusiveFileLockOpti
       if (code !== "EEXIST") throw err;
     }
 
-    // 锁被占用：先看是否陈旧（持有者崩溃残留），是则删掉立刻重试。
+    // 锁被占用：先看是否陈旧（持有者崩溃残留）。窃取用 rename 而非 unlink——
+    // rename 同目录内原子，多个等待者只有一个成功；unlink 会有「删掉别人刚建的
+    // 新锁」竞态（A 偷锁重建后被 B 的 unlink 误删 → 双持有）。
     try {
       const st = await fs.stat(lockPath);
       if (Date.now() - st.mtimeMs > options.staleMs) {
-        await fs.unlink(lockPath).catch(() => {});
+        const stealPath = `${lockPath}.steal-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+        await fs.rename(lockPath, stealPath); // 输家拿 ENOENT，走 catch 重试
+        await fs.unlink(stealPath).catch(() => {});
         continue;
       }
     } catch {
-      // 锁文件在 stat 前被释放了，立刻重试获取。
+      // 锁文件在 stat/rename 前被释放或被别人偷走了，立刻重试获取。
       continue;
     }
 

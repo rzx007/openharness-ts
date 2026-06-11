@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 
@@ -248,6 +248,7 @@ export class TeamLifecycleManager {
     if (!existsSync(path)) {
       throw new Error(`Team '${name}' does not exist`);
     }
+    assertInsideTeamsBase(dirname(path));
     rmSync(dirname(path), { recursive: true, force: true });
   }
 
@@ -412,8 +413,14 @@ export async function setMemberActive(
 export function registerTeammateInTeamFile(teamName: string, member: TeamMember): void {
   const manager = new TeamLifecycleManager();
   if (!readTeamFile(teamName)) {
-    manager.createTeam(teamName);
-    registerTeamForSessionCleanup(teamName);
+    try {
+      manager.createTeam(teamName);
+      registerTeamForSessionCleanup(teamName);
+    } catch (err) {
+      // TOCTOU：并行 spawn 在 read 与 create 之间另一方先建了团队 → 继续 addMember；
+      // 其余错误（如非法名字）照常抛。
+      if (!(err instanceof Error) || !err.message.includes("already exists")) throw err;
+    }
   }
   manager.addMember(teamName, member);
 }
@@ -487,6 +494,15 @@ function destroyWorktreeSync(worktreePath: string): void {
   rmSync(worktreePath, { recursive: true, force: true });
 }
 
+/** 纵深防御：递归删除前确认目标确实在 `~/.openharness/teams/` 之下。 */
+function assertInsideTeamsBase(dir: string): void {
+  const base = resolve(homedir(), ".openharness", "teams");
+  const target = resolve(dir);
+  if (target === base || !target.startsWith(base + sep)) {
+    throw new Error(`Refusing to delete outside teams dir: ${target}`);
+  }
+}
+
 /** 清理团队目录：先销毁成员 worktree（删团队目录前收集路径），再删团队目录。 */
 function cleanupTeamDirectoriesSync(teamName: string): void {
   const team = readTeamFile(teamName);
@@ -501,7 +517,9 @@ function cleanupTeamDirectoriesSync(teamName: string): void {
     destroyWorktreeSync(wtPath);
   }
 
-  rmSync(getTeamDir(teamName), { recursive: true, force: true });
+  const teamDir = getTeamDir(teamName);
+  assertInsideTeamsBase(teamDir);
+  rmSync(teamDir, { recursive: true, force: true });
 }
 
 export async function cleanupTeamDirectories(teamName: string): Promise<void> {

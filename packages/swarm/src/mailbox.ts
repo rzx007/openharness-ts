@@ -48,13 +48,29 @@ export interface MailboxMessage {
 // 目录助手（对齐 Python get_team_dir / get_agent_mailbox_dir：调用即建目录）
 // ---------------------------------------------------------------------------
 
+const SAFE_PATH_COMPONENT = /^[A-Za-z0-9._@-]+$/;
+
+/**
+ * 校验拼进 teams 路径的名字（team/agentId 来自 LLM 工具入参与环境变量）。
+ * 不安全的名字（路径分隔符、`..` 等）直接抛错——这些目录会在会话退出时被
+ * 递归删除，穿越出 teams 根目录等于任意目录删除。Python 原版未接线所以没暴露
+ * 这一面；TS 接线后必须收紧（sanitize_name 在 Python 中也是定义而未用）。
+ */
+function assertSafePathComponent(name: string, what: string): void {
+  if (!SAFE_PATH_COMPONENT.test(name) || name === "." || name === "..") {
+    throw new Error(`Unsafe ${what} for filesystem path: ${JSON.stringify(name)}`);
+  }
+}
+
 export function getTeamDir(teamName: string): string {
+  assertSafePathComponent(teamName, "team name");
   const dir = join(homedir(), ".openharness", "teams", teamName);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 export function getAgentMailboxDir(teamName: string, agentId: string): string {
+  assertSafePathComponent(agentId, "agent id");
   const dir = join(getTeamDir(teamName), "agents", agentId, "inbox");
   mkdirSync(dir, { recursive: true });
   return dir;

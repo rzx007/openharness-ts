@@ -43,6 +43,15 @@ function makeMessage(overrides: Partial<MailboxMessage> = {}): MailboxMessage {
 }
 
 describe("directory helpers", () => {
+  it("rejects path-traversal team and agent names", () => {
+    expect(() => getTeamDir("../escape")).toThrow(/Unsafe/);
+    expect(() => getTeamDir("a/b")).toThrow(/Unsafe/);
+    expect(() => getTeamDir("a\\b")).toThrow(/Unsafe/);
+    expect(() => getTeamDir("..")).toThrow(/Unsafe/);
+    expect(() => getTeamDir("")).toThrow(/Unsafe/);
+    expect(() => getAgentMailboxDir(team, "../../sneaky")).toThrow(/Unsafe/);
+  });
+
   it("getTeamDir points at ~/.openharness/teams/<team> and creates it", () => {
     const dir = getTeamDir(team);
     expect(dir).toBe(join(homedir(), ".openharness", "teams", team));

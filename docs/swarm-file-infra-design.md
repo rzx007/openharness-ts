@@ -101,7 +101,8 @@ Python v0.1.9 的 `mailbox.py` / `team_lifecycle.py` / `permission_sync.py` 是
   - worker：`writePermissionRequest(request)` → `pending/<id>.json`（锁内原子写）。
   - leader：`readPendingPermissions(team)`（oldest-first）→
     `resolvePermission(id, resolution, team)`（锁内 pending→resolved 原子搬移）。
-  - worker：`readResolvedPermission(id)` / `pollForResponse(id)`（0.5s 间隔轮询）/
+  - worker：`readResolvedPermission(id)` / `pollForResponse(id)`（**单次**查询，
+    对齐 Python；0.5s 循环在接线层 `buildSwarmWorkerPermissionPrompt` 里）/
     `deleteResolvedPermission(id)`。
   - 维护：`cleanupOldResolutions(team, maxAgeSeconds=3600)`。
 - 角色检测：`isTeamLeader()`（无 agent id 或 `"team-lead"`）/ `isSwarmWorker()`。
@@ -145,6 +146,8 @@ Python v0.1.9 的 `mailbox.py` / `team_lifecycle.py` / `permission_sync.py` 是
 | sandbox 授权 | 消息工厂 + mailbox 收发 | 仅保留消息类型联合，不做工厂/收发 | TS sandbox 是 stub（D.3 未做） |
 | 只读工具集 | `_READ_ONLY_TOOLS`（9 个，snake_case 名） | 复用 `packages/permissions` 的 `READ_ONLY_TOOLS`（11 个，TS 工具名） | 与 D.4 保持单一事实来源 |
 | async 形态 | sync + `run_in_executor` 双轨 | 全 async（Node fs/promises） | Node 无需线程池规避阻塞 |
+| 路径安全 | `sanitize_name` 定义而未调用，`get_team_dir` 直接拼接 | `getTeamDir`/`getAgentMailboxDir` 校验名字（`[A-Za-z0-9._@-]+`，拒绝 `..`/分隔符）+ 删除前断言在 teams 根之下 | TS 接了线：team/agent 名来自 LLM 工具入参，且团队目录随会话退出递归删除——不校验等于任意目录删除 |
+| team.json 锁 | 无锁读-改-写 | 同样无锁（沿用），仅修 createTeam TOCTOU（并行 spawn 撞「already exists」时继续 addMember） | 忠实复刻；并行 spawn 丢成员登记的窗口极小，留待需要时加 `.team_lock` |
 
 ## 范围外
 

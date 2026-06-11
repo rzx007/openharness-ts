@@ -51,15 +51,16 @@ export function buildSwarmWorkerPermissionPrompt(options?: {
     await writePermissionRequest(request);
 
     const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
+    for (;;) {
       const response = await pollForResponse(request.id, request.teamName);
       if (response) {
         await deleteResolvedPermission(request.id, request.teamName);
         return response.decision === "approved";
       }
+      // 超时判定放在 poll 之后：裁决落在最后一个 sleep 期间也能被取到。
+      if (Date.now() >= deadline) return false; // 超时按拒绝处理（leader 可能已退出）
       await sleep(intervalMs);
     }
-    return false; // 超时按拒绝处理（leader 可能已退出）
   };
 }
 
@@ -70,6 +71,7 @@ export function buildSwarmWorkerPermissionPrompt(options?: {
 const watchedTeams = new Set<string>();
 let resolverTimer: NodeJS.Timeout | null = null;
 let exitHookInstalled = false;
+let pollInFlight = false;
 
 /** 把一个团队纳入 leader 的权限轮询范围（spawn teammate 时调用）。 */
 export function watchTeamForPermissions(teamName: string): void {
@@ -113,13 +115,29 @@ export function startSwarmPermissionResolver(
   if (resolverTimer) return;
   const intervalMs = options?.intervalMs ?? 1_000;
   resolverTimer = setInterval(() => {
-    void pollSwarmPermissionsOnce(checker, readOnlyTools).catch(() => {});
+    // 上一轮还没跑完（锁等待可达 30s）就跳过本 tick，避免重叠裁决。
+    if (pollInFlight) return;
+    pollInFlight = true;
+    void pollSwarmPermissionsOnce(checker, readOnlyTools)
+      .catch(() => {})
+      .finally(() => {
+        pollInFlight = false;
+      });
   }, intervalMs);
   resolverTimer.unref?.();
 
   if (!exitHookInstalled) {
     exitHookInstalled = true;
+    // 正常退出走 exit 钩子（同步清理）；信号路径 Node 不发 exit 事件，
+    // 用「清理 → 摘掉自己 → 重发信号」恢复默认终止行为。REPL 下 readline
+    // raw mode 拦截 Ctrl+C 不产生 SIGINT，不受影响（/exit 走正常 exit）。
     process.on("exit", cleanupSessionTeamsSync);
+    const onSignal = (signal: NodeJS.Signals): void => {
+      cleanupSessionTeamsSync();
+      process.kill(process.pid, signal);
+    };
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
   }
 }
 

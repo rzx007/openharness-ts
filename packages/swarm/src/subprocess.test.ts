@@ -145,6 +145,25 @@ describe("SubprocessBackend", () => {
       expect(result.success).toBe(true);
     });
 
+    it("isolated spawn passes the worktree path as the hook config cwd", async () => {
+      const runner: TaskRunner = {
+        createShellTask: vi.fn().mockResolvedValue({ id: "task_iso" }),
+        stopTask: vi.fn(),
+      };
+      const registerTeammate = vi.fn();
+      const backend = new SubprocessBackend({
+        taskRunner: runner,
+        buildCommand: () => ({ argv: ["node"] }),
+        worktreeManager: mockWorktreeManager(),
+        registerTeammate,
+      });
+      await backend.spawn(makeConfig({ name: "Build", team: "alpha", isolate: true }));
+
+      const [cfg, res] = registerTeammate.mock.calls[0]!;
+      expect(cfg.cwd).toBe("/wt/path");
+      expect(res.worktree).toEqual({ path: "/wt/path", branch: "worktree-s" });
+    });
+
     it("failed spawn does not invoke registerTeammate", async () => {
       const runner: TaskRunner = {
         createShellTask: vi.fn().mockRejectedValue(new Error("boom")),
