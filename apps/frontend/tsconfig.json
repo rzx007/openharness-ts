@@ -3,6 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "declaration": false,
+    "declarationMap": false,
     "jsx": "react-jsx",
     "jsxImportSource": "@opentui/react"
   },

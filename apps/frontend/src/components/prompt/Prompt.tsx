@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, type ReactElement } from "react";
 import { useKeyboard } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import type { TextareaRenderable } from "@opentui/core";
@@ -45,7 +45,7 @@ export function Prompt({
   onCycleMode,
   draft,
   onDraftChange,
-}: PromptProps): React.ReactNode {
+}: PromptProps) {
   const { theme } = useTheme();
 
   // Content state (synced from textarea via onContentChange)
@@ -62,7 +62,7 @@ export function Prompt({
   const [spinnerFrame, setSpinnerFrame] = useState(0);
 
   // Dynamic textarea height (1–6 lines)
-  const [textareaHeight, setTextareaHeight] = useState(1);
+  const [textareaHeight, setTextareaHeight] = useState(2);
 
   // Textarea ref for imperative operations
   const textareaRef = useRef<TextareaRenderable | null>(null);
