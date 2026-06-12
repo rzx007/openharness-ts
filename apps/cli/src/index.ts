@@ -7,13 +7,14 @@ import { createCronCommand } from "./commands/cron";
 import { createChannelsCommand } from "./commands/channels";
 import { createProviderCommand } from "./commands/provider";
 import { createSetupCommand } from "./commands/setup";
+import { VERSION } from "./version";
 
 const program = new Command();
 
 program
   .name("ohs")
   .description("OpenHarness-ts - Open Source AI Agent Framework")
-  .version("0.1.0")
+  .version(VERSION)
   .argument("[prompt]", "Initial prompt to send")
   .option("-m, --model <model>", "Model to use")
   .option("-p, --print", "Print response and exit (non-interactive)")
@@ -83,7 +84,7 @@ program
   .command("version")
   .description("Show version information")
   .action(() => {
-    console.log("OpenHarness v0.1.0");
+    console.log(`OpenHarness v${VERSION}`);
     console.log(`Node ${process.version}`);
     console.log(`Platform: ${process.platform} ${process.arch}`);
   });

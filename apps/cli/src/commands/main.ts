@@ -27,6 +27,7 @@ import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
 import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
 import { resolveBun } from "./resolveBun";
+import { VERSION } from "../version";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -667,7 +668,7 @@ async function runTuiMode(
     backend_command: [process.execPath, ...args],
     initial_prompt: prompt ?? null,
     theme: options.theme ?? "default",
-    version: "0.1.0",
+    version: VERSION,
   });
 
   const cliDir = path.dirname(url.fileURLToPath(import.meta.url));
