@@ -3,6 +3,18 @@ export type { CompactOptions } from "./compact";
 
 export { SessionStorage } from "./session";
 export type { SessionData, SessionMessage } from "./session";
+export {
+  getProjectSessionDir,
+  saveSessionSnapshot,
+  loadSessionSnapshot,
+  listSessionSnapshots,
+  loadSessionById,
+  exportSessionMarkdown,
+  type StoredMessageLike,
+  type SessionSnapshotPayload,
+  type SessionListItem,
+  type SaveSessionOptions,
+} from "./session";
 
 export { CronScheduler, getCronScheduler, validateCronExpression, computeNextRunTime } from "./cron";
 export type { CronJob } from "./cron";

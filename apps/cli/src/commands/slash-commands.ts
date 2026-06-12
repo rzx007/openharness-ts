@@ -322,8 +322,7 @@ export function registerBuiltinCommandsOnRegistry(
         return { success: false, output: "memory 目录不可用(仅 REPL 支持 /dream)。" };
       }
       const settings = ctx.getSettings();
-      const { startDreamNow } = await import("@openharness/services");
-      const { getSessionsDir } = await import("@openharness/core");
+      const { startDreamNow, getProjectSessionDir } = await import("@openharness/services");
       let staleSection = "";
       if (ctx.memoryManager) {
         const stale = await ctx.memoryManager.findStaleCandidates();
@@ -337,7 +336,7 @@ export function registerBuiltinCommandsOnRegistry(
         // 手动 /dream:memory 开关缺省视为开启(force 路径仍要求 enabled)。
         settings: { ...settings, memory: { enabled: true, ...settings.memory } },
         memoryDir: ctx.memoryDir,
-        sessionDir: getSessionsDir(),
+        sessionDir: getProjectSessionDir(process.cwd()),
         force: true,
         preview: (args?.raw ?? "").includes("--preview"),
         currentSessionId: ctx.sessionId,

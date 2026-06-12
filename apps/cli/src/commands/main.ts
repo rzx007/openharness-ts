@@ -1149,10 +1149,26 @@ async function loadSessionAndResume(
   resumeId?: string,
   _name?: string,
 ): Promise<string> {
-  const sessionId = resumeId ?? await findLatestSessionId();
-  if (!sessionId) {
+  // 新存储优先（项目分目录；--continue 走 latest.json，--resume <id> 走 named）。
+  try {
+    const { loadSessionSnapshot: loadLatest, loadSessionById } = await import("@openharness/services");
+    const payload = resumeId ? loadSessionById(process.cwd(), resumeId) : loadLatest(process.cwd());
+    if (payload) {
+      engine.loadMessages(payload.messages);
+      if (payload.model) engine.setModel(payload.model);
+      console.log(`Resumed session: ${payload.session_id} (${payload.message_count} messages)`);
+      return payload.session_id;
+    }
+  } catch {
+    // 回退旧平铺存储
+  }
+
+  // 向后兼容：旧平铺 <sessionsDir>/<id>.json——仅显式 --resume <id> 时回退。
+  // 裸 --continue 不回退全局平铺池（会串到别的项目的会话）。
+  if (!resumeId) {
     return generateSessionId();
   }
+  const sessionId = resumeId;
 
   const snapshot = await loadSessionSnapshot(sessionId);
   if (snapshot) {
@@ -1223,22 +1239,17 @@ async function saveSessionSnapshot(
   model: string,
 ): Promise<void> {
   if (!sessionId) return;
-  const { writeFile, mkdir } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const { homedir } = await import("node:os");
-  const dir = join(homedir(), ".openharness", "sessions");
   try {
-    await mkdir(dir, { recursive: true });
-    const usage = engine.getTotalUsage();
-    const snapshot: SessionSnapshot = {
-      id: sessionId,
-      messages: [],
+    // E.6 存储增强：项目分目录 + latest/id 双写 + 完整消息历史（旧实现存空数组）。
+    const { saveSessionSnapshot: save } = await import("@openharness/services");
+    save({
+      cwd: process.cwd(),
       model,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      usage,
-    };
-    await writeFile(join(dir, `${sessionId}.json`), JSON.stringify(snapshot, null, 2), "utf-8");
+      systemPrompt: "",
+      messages: engine.getHistory(),
+      usage: engine.getTotalUsage() as Record<string, unknown>,
+      sessionId,
+    });
   } catch {
     // silently fail
   }

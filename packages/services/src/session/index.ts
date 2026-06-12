@@ -114,3 +114,16 @@ export class SessionStorage {
     return this.sessions.delete(id);
   }
 }
+
+export {
+  getProjectSessionDir,
+  saveSessionSnapshot,
+  loadSessionSnapshot,
+  listSessionSnapshots,
+  loadSessionById,
+  exportSessionMarkdown,
+  type StoredMessageLike,
+  type SessionSnapshotPayload,
+  type SessionListItem,
+  type SaveSessionOptions,
+} from "./storage.js";
