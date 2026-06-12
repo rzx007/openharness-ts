@@ -6,7 +6,7 @@ import { ThemeProvider, useTheme } from "./theme/ThemeContext";
 import { DialogProvider, useDialog } from "./ui/DialogContext";
 import { ToastProvider } from "./ui/Toast";
 import { DialogSelect } from "./ui/DialogSelect";
-import { buildRegistry } from "./keymap/commands";
+import { buildRegistry, type CommandRegistry } from "./keymap/commands";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { Home } from "./routes/Home";
 import { Session } from "./routes/session/Session";
@@ -370,45 +370,12 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
   );
 
   // ── openCommandPalette helper ────────────────────────────────────────────────
+  // 复用下方 useMemo 的注册表（经 ref 解循环依赖：registry.local 里的
+  // app.palette.run 也要能打开面板）。
+  const registryRef = useRef<CommandRegistry | null>(null);
   const openCommandPalette = useCallback(() => {
-    const registry = buildRegistry({
-      backendCommands: session.commands,
-      local: [
-        {
-          id: "app.palette",
-          title: "Open Command Palette",
-          keybinding: "ctrl+p",
-          run: () => {
-            // re-opens itself — handled externally
-          },
-        },
-        {
-          id: "app.theme",
-          title: "Change Theme",
-          run: () => handleCommand("/theme"),
-        },
-        {
-          id: "app.permissions",
-          title: "Change Permission Mode",
-          run: () => handleCommand("/permissions"),
-        },
-        {
-          id: "app.exit",
-          title: "Exit",
-          keybinding: "ctrl+c",
-          run: () => {
-            session.sendRequest({ type: "shutdown" });
-            renderer.destroy();
-            process.exit(0);
-          },
-        },
-      ],
-      submitLine: (line: string) => {
-        session.sendRequest({ type: "submit_line", line });
-        session.setBusy(true);
-      },
-    });
-
+    const registry = registryRef.current;
+    if (!registry) return;
     const allCmds = registry.all();
     dialog.replace(
       <DialogSelect
@@ -426,7 +393,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
         }}
       />,
     );
-  }, [dialog, handleCommand, renderer, session]);
+  }, [dialog]);
 
   // ── onSubmit ─────────────────────────────────────────────────────────────────
   const onSubmit = useCallback(
@@ -492,6 +459,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
       }),
     [handleCommand, openCommandPalette, renderer, session],
   );
+  registryRef.current = registry;
 
   // ── Dialog wiring for modal/selectRequest ────────────────────────────────────
   useEffect(() => {
@@ -621,7 +589,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
       todoMarkdown={session.todoMarkdown}
       swarmTeammates={session.swarmTeammates}
       swarmNotifications={session.swarmNotifications}
-      version={null}
+      version={config.version ?? null}
       history={history}
       slashCommands={registry.slashCommands()}
       onSubmit={onSubmit}
