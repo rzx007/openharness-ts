@@ -15,7 +15,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **会话持久化** — 按项目分目录的 Session 快照（latest/id 双写、load 侧 tool 配对修复）、`--continue` / `--resume`、每轮 session checkpoint；Cron 仍为基础版
 - ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents 五类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 动态加载待补
 - 🟠 **Channel 适配器** — Stdio / HTTP / 飞书（基础）；Telegram/Discord/Slack 等多通道、附件、群组路由待补
-- ✅ **TUI 前端** — React/Ink 终端 UI：Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、SwarmPanel、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）
+- ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、SwarmPanel、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）、`sandbox`（Docker 隔离，当前为占位）
 - ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
@@ -62,7 +62,7 @@ ohs "explain this codebase"
 # 交互式 REPL
 ohs
 
-# 启动 TUI（React/Ink 终端 UI）
+# 启动 TUI（opentui + React 19 终端 UI，需安装 Bun）
 ohs --tui
 
 # TUI 带初始提示
@@ -109,7 +109,7 @@ Options:
   --mcp-config <path>          MCP 服务器配置文件
   --theme <theme>              终端主题
   --effort <level>             推理强度: low | medium | high
-  --tui                        启动 React/Ink TUI 界面
+  --tui                        启动 opentui TUI 界面（需安装 Bun）
   --backend-only               以 TUI 后端模式运行（内部使用）
   --verbose                    详细输出
   --continue                   继续上次会话
@@ -187,7 +187,7 @@ OpenHarness-ts/
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          User Interface                            │
 │  ┌────────────────────┐  ┌──────────────────────────────────────┐  │
-│  │   CLI (ohs)        │  │   TUI Frontend (React/Ink)          │  │
+│  │   CLI (ohs)        │  │   TUI Frontend (opentui/React 19)   │  │
 │  │   Commander.js     │  │   ConversationView / StatusBar /    │  │
 │  │   REPL / Print     │  │   PromptInput / ModalHost / Picker  │  │
 │  └────────┬───────────┘  └──────────────┬───────────────────────┘  │
@@ -370,7 +370,7 @@ OpenHarness-ts/
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/config 子命令，20+ CLI flags                                                                                                                                               |
 | `REPL`              | 交互式循环：`>` 提示符，41 个斜杠命令（完整清单见 [docs/slash-commands.md](docs/slash-commands.md)）；支持输出样式 `default/minimal/codex`（`minimal` 极简纯文本渲染） |
-| `TUI Frontend`      | React/Ink 终端 UI：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。`ohs --tui` spawn 前端，前端再 spawn `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
+| `TUI Frontend`      | opentui + React 19 终端 UI（Bun 运行时）：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。`ohs --tui` 通过 `resolveBun` 检测 Bun 路径后 spawn 前端，前端再 spawn `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
 | `BackendHost`       | 后端协议实现：处理 5 种请求（submit_line / permission_response / question_response / list_sessions / shutdown），发出结构化事件（assistant_delta / tool_started / modal_request / swarm_status 等）。详见 [docs/tui-flow.md](docs/tui-flow.md) |
 | `ThemeManager`      | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题                                                                                                                                                      |
 | `VimModeHandler`    | Vim 模态编辑：normal / insert / visual / command 模式切换                                                                                                                                                                   |
@@ -539,7 +539,7 @@ ohs --continue         ohs --resume <id>
 | API    | @anthropic-ai/sdk, openai                        |
 | MCP    | @modelcontextprotocol/sdk                        |
 | 飞书     | @larksuiteoapi/node-sdk                          |
-| TUI    | React + Ink                                      |
+| TUI    | opentui + React 19（Bun 运行时）                  |
 | Schema | Zod                                              |
 | Cron   | cron-parser                                      |
 
