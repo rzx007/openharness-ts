@@ -53,6 +53,8 @@ export interface Settings {
   memory?: MemoryConfig;
   sandbox?: SandboxConfig;
   plugins?: Record<string, boolean>;
+  /** 是否加载项目目录（<cwd>/.openharness/plugins）的插件。缺省 false：信任门控。 */
+  allowProjectPlugins?: boolean;
   mcpServers?: Record<string, McpServerConfig>;
   theme?: string;
   outputStyle?: string;

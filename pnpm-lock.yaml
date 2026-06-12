@@ -419,6 +419,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/skills':
+        specifier: workspace:*
+        version: link:../skills
       zod:
         specifier: 'catalog:'
         version: 3.25.76

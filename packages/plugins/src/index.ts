@@ -1,83 +1,38 @@
-import { z } from "zod";
-import { readFile, readdir, stat, rm, mkdir } from "node:fs/promises";
+export {
+  PluginManifestSchema,
+  findManifest,
+  getUserPluginsDir,
+  getProjectPluginsDir,
+  discoverPluginPaths,
+  loadPlugin,
+  loadPlugins,
+  type PluginManifest,
+  type LoadedPlugin,
+  type PluginDiscoverySettings,
+} from "./discovery.js";
+
+export {
+  loadPluginSkills,
+  loadPluginCommands,
+  type PluginCommandDefinition,
+} from "./contributions.js";
+
+export { loadPluginHooks, loadPluginMcp } from "./hooks-mcp.js";
+
+import { readdir, stat, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ToolDefinition } from "@openharness/core";
 
-export interface PluginManifest {
-  name: string;
-  version: string;
-  description?: string;
-  tools?: ToolDefinition[];
-  hooks?: unknown[];
-  init?: (context: PluginContext) => Promise<void>;
+/**
+ * 校验拼进 plugins 目录的名字：拒绝路径分隔符、`.`/`..`、空串。
+ * uninstall 会递归删除目标目录——名字穿越出 plugins 根等于任意目录删除。
+ */
+function isSafePluginName(name: string): boolean {
+  return /^[A-Za-z0-9._@-]+$/.test(name) && name !== "." && name !== "..";
 }
 
-export interface PluginContext {
-  pluginDir: string;
-  config: Record<string, unknown>;
-}
-
-export const PluginManifestSchema = z.object({
-  name: z.string().min(1),
-  version: z.string().min(1),
-  description: z.string().optional(),
-});
-
-export interface PluginLoadResult {
-  manifest: PluginManifest;
-  path: string;
-  loaded: boolean;
-  error?: Error;
-}
-
-export class PluginLoader {
-  private loaded = new Map<string, PluginLoadResult>();
-
-  async loadFromPath(pluginPath: string): Promise<PluginLoadResult> {
-    try {
-      const manifest = await this.resolveManifest(pluginPath);
-      const result: PluginLoadResult = {
-        manifest,
-        path: pluginPath,
-        loaded: true,
-      };
-      this.loaded.set(manifest.name, result);
-      return result;
-    } catch (err) {
-      const result: PluginLoadResult = {
-        manifest: { name: "", version: "0.0.0" },
-        path: pluginPath,
-        loaded: false,
-        error: err instanceof Error ? err : new Error(String(err)),
-      };
-      return result;
-    }
-  }
-
-  async loadMany(paths: string[]): Promise<PluginLoadResult[]> {
-    return Promise.all(paths.map((p) => this.loadFromPath(p)));
-  }
-
-  getLoaded(): readonly PluginLoadResult[] {
-    return [...this.loaded.values()];
-  }
-
-  get(name: string): PluginLoadResult | undefined {
-    return this.loaded.get(name);
-  }
-
-  unload(name: string): void {
-    this.loaded.delete(name);
-  }
-
-  async resolveManifest(pluginPath: string): Promise<PluginManifest> {
-    const manifestPath = join(pluginPath, "plugin.json");
-    const raw = await readFile(manifestPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    return PluginManifestSchema.parse(parsed) as PluginManifest;
-  }
-}
-
+/**
+ * 插件安装器（最小版）：`oh plugin install/uninstall/list` 子命令的后端。
+ */
 export class PluginInstaller {
   private installDir: string;
 
@@ -87,15 +42,18 @@ export class PluginInstaller {
 
   async install(source: string): Promise<string> {
     const name = source.split("/").pop() ?? source;
+    if (!isSafePluginName(name)) {
+      throw new Error(`Unsafe plugin name: ${JSON.stringify(name)}`);
+    }
     const target = join(this.installDir, name);
     await mkdir(target, { recursive: true });
-    const manifest: PluginManifest = { name, version: "1.0.0" };
-    const { writeFile } = await import("node:fs/promises");
+    const manifest = { name, version: "1.0.0" };
     await writeFile(join(target, "plugin.json"), JSON.stringify(manifest, null, 2));
     return target;
   }
 
   async uninstall(name: string): Promise<boolean> {
+    if (!isSafePluginName(name)) return false;
     const target = join(this.installDir, name);
     try {
       await stat(target);

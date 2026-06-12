@@ -18,6 +18,7 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { computeToolDiff } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
+import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers } from "../plugin-contributions";
 import { isSwarmWorker } from "@openharness/swarm";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
@@ -187,7 +188,7 @@ async function runPrintMode(
 ): Promise<void> {
   // ==================加载并注册技能（三源：bundled < user < project）==================
   const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd());
+  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
 
   // ==================创建凭证存储器==================
   const credentialStorage = new CredentialStorage();
@@ -205,6 +206,8 @@ async function runPrintMode(
     credentialStorage,
     permissionPrompt: swarmPermissionPrompt,
   });
+  // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
+  registerPluginHooks(bundle.hookExecutor);
 
   // ==================创建事件渲染器==================
   const renderer = new EventRenderer({
@@ -244,7 +247,7 @@ async function runRepl(
 
   // ==================加载并注册技能（三源：bundled < user < project）==================
   const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd());
+  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
 
   const credentialStorage = new CredentialStorage();
 
@@ -254,6 +257,8 @@ async function runRepl(
     skillRegistry,
     credentialStorage,
   });
+  // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
+  registerPluginHooks(bundle.hookExecutor);
 
   let currentModel = settings.model;
   let sessionId: string | undefined;
@@ -277,8 +282,10 @@ async function runRepl(
 
   // ==================创建 MCP 客户端==================
   const mcpManager = new McpClientManager();
-  if (currentSettings.mcpServers) {
-    await mcpManager.connectAll(currentSettings.mcpServers).catch(() => { });
+  // 插件 MCP 贡献合并：用户 settings 同名 server 优先，插件不覆盖（C.1-R3）。
+  const mcpServers = mergePluginMcpServers(currentSettings.mcpServers);
+  if (Object.keys(mcpServers).length > 0) {
+    await mcpManager.connectAll(mcpServers).catch(() => { });
   }
 
   // ==================创建 MemoryManager 客户端==================
@@ -684,7 +691,7 @@ async function runBackendHost(
 
   // 加载并注册技能（三源：bundled < user < project）
   const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd());
+  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
 
   const credentialStorage = new CredentialStorage();
 
@@ -695,6 +702,8 @@ async function runBackendHost(
     skillRegistry,
     credentialStorage,
   });
+  // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
+  registerPluginHooks(bundle.hookExecutor);
 
   const commandRegistry = new CommandRegistry();
   const mcpManager = new McpClientManager();
@@ -1229,8 +1238,17 @@ async function saveSessionSnapshot(
 export async function loadSkillsThreeSources(
   skillRegistry: SkillRegistry,
   cwd: string,
+  settings?: Settings,
 ): Promise<void> {
   skillRegistry.registerBundled();
+  // 插件贡献插在 bundled 之后、user/project 之前：bundled < plugin < user < project
+  // （register 覆盖语义）。信任门控告警直接打到 stderr，三模式一致。
+  if (settings) {
+    const { warnings } = await loadPluginContributions(skillRegistry, settings, cwd);
+    for (const warning of warnings) {
+      process.stderr.write(`[plugins] ${warning}\n`);
+    }
+  }
   const loader = new SkillLoader(skillRegistry);
   await loader.loadFromDirectory(getSkillsDir());
   await loader.loadFromDirectory(join(cwd, ".openharness", "skills"));

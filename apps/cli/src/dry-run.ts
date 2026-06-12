@@ -170,7 +170,7 @@ export async function runDryRun(settings: Settings, options: DryRunOptions): Pro
   const allToolNames = toolRegistry.getAll().map((t) => t.name);
 
   const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd());
+  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
   const skillCount = skillRegistry.getAll().length;
 
   const report = buildDryRunReport({
