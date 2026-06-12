@@ -44,6 +44,11 @@ function makeRegistry(): CommandRegistry {
     description: "clear",
     handler: async () => ({ success: true, output: "cleared" }),
   });
+  reg.register({
+    name: "/new",
+    description: "new conversation",
+    handler: async () => ({ success: true, output: "new conversation" }),
+  });
   return reg;
 }
 
@@ -72,6 +77,12 @@ describe("runHostSlashCommand", () => {
     const out = await runHostSlashCommand("/clear", makeRegistry());
     expect(out.clearTranscript).toBe(true);
     expect(out.output).toBe("cleared");
+  });
+
+  it("flags clearTranscript for /new (start a new conversation)", async () => {
+    const out = await runHostSlashCommand("/new", makeRegistry());
+    expect(out.clearTranscript).toBe(true);
+    expect(out.output).toBe("new conversation");
   });
 
   it("parses the command name and arguments", async () => {

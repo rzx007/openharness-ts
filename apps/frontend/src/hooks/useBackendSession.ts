@@ -83,11 +83,20 @@ export function useBackendSession(
     const command = config.backend_command[0];
     if (!command) return;
     const args = config.backend_command.slice(1);
+    // stderr 走 pipe 缓存：inherit 会让后端的 Node 警告（如 punycode
+    // DeprecationWarning）直接打穿 opentui 渲染区；仅在异常退出时回放尾部。
     const child = spawn(command, args, {
-      stdio: ["pipe", "pipe", "inherit"],
+      stdio: ["pipe", "pipe", "pipe"],
       env: process.env as Record<string, string>,
     });
     childRef.current = child;
+
+    const stderrTail: string[] = [];
+    const stderrReader = readline.createInterface({ input: child.stderr! });
+    stderrReader.on("line", (line: string) => {
+      stderrTail.push(line);
+      if (stderrTail.length > 20) stderrTail.shift();
+    });
 
     const reader = readline.createInterface({ input: child.stdout! });
     reader.on("line", (line: string) => {
@@ -104,7 +113,13 @@ export function useBackendSession(
     });
 
     child.on("exit", (code: number | null) => {
-      setTranscript((items) => [...items, { role: "system", text: `backend exited with code ${code ?? 0}` }]);
+      setTranscript((items) => {
+        const next = [...items, { role: "system", text: `backend exited with code ${code ?? 0}` } as TranscriptItem];
+        if ((code ?? 0) !== 0 && stderrTail.length > 0) {
+          next.push({ role: "system", text: `backend stderr:\n${stderrTail.join("\n")}` });
+        }
+        return next;
+      });
       process.exitCode = code ?? 0;
       onExit(code);
     });
@@ -128,6 +143,7 @@ export function useBackendSession(
 
     return () => {
       reader.close();
+      stderrReader.close();
       killChild();
       process.removeListener("exit", killChild);
       process.removeListener("SIGINT", killChild);

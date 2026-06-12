@@ -303,6 +303,18 @@ export function registerBuiltinCommandsOnRegistry(
     },
   });
 
+  // ── /new ───────────────────────────────────────────────
+  // 开新对话（对齐 opencode /new）：语义同 /clear——清空模型对话历史；
+  // TUI 下 runHostSlashCommand 会同时下发 clear_transcript，前端回到首页。
+  registry.register({
+    name: "/new",
+    description: "Start a new conversation",
+    handler: async () => {
+      getEngine().clear();
+      return { success: true, output: "Started a new conversation." };
+    },
+  });
+
   // ── /compact ───────────────────────────────────────────
   registry.register({
     name: "/compact",

@@ -1528,6 +1528,6 @@ export async function runHostSlashCommand(
   return {
     output: result.output ? result.output : undefined,
     error: result.error,
-    clearTranscript: name === "/clear",
+    clearTranscript: name === "/clear" || name === "/new",
   };
 }
