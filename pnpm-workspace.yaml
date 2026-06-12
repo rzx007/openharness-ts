@@ -3,10 +3,11 @@ packages:
   - packages/*
 
 catalog:
-  '@opentui/core': ^0.4.1
-  '@opentui/react': ^0.4.1
   '@anthropic-ai/sdk': ^0.40.0
   '@modelcontextprotocol/sdk': ^1.29.0
+  '@opentui/core': ^0.4.1
+  '@opentui/react': ^0.4.1
+  '@types/diff': ^7.0.2
   '@types/node': ^22.13.14
   '@types/react': ^19.0.0
   chalk: ^5.4.1
@@ -15,7 +16,6 @@ catalog:
   commander: ^13.1.0
   cron-parser: ^1.1.0
   diff: ^7.0.0
-  '@types/diff': ^7.0.0
   js-yaml: ^4.1.0
   openai: ^4.91.0
   react: ^19.2.0
