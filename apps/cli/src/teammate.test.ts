@@ -22,16 +22,14 @@ function makeConfig(overrides: Partial<TeammateSpawnConfig> = {}): TeammateSpawn
 }
 
 describe("buildTeammateCommand", () => {
-  it("produces --print one-shot argv with prompt and model", () => {
+  it("produces --task-worker argv with model; prompt stays OUT of argv (fed via stdin)", () => {
     const { argv } = buildTeammateCommand(makeConfig(), BASE_SETTINGS);
-    expect(argv).toContain("--print");
-    expect(argv).toContain("investigate the bug");
+    expect(argv).toContain("--task-worker");
+    expect(argv).not.toContain("--print");
+    expect(argv).not.toContain("investigate the bug");
     const modelIdx = argv.indexOf("--model");
     expect(modelIdx).toBeGreaterThan(-1);
     expect(argv[modelIdx + 1]).toBe("claude-sonnet-4-20250514");
-    // --print immediately precedes the prompt positional
-    const printIdx = argv.indexOf("--print");
-    expect(argv[printIdx + 1]).toBe("investigate the bug");
   });
 
   it("config.model takes priority over settings.model", () => {

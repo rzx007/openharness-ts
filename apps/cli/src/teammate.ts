@@ -5,10 +5,9 @@ import type { TeammateSpawnConfig } from "@openharness/swarm";
 /**
  * 把一个 teammate spawn 配置翻译成一次性子进程的 argv。
  *
- * 我们没有 Python 端的 `--task-worker` 长驻 worker 模式，所以这里用 CLI 的
- * `--print`（非交互一次性）模式：teammate 跑完 prompt 输出结果即退出。这让
- * Explore/Plan/verification 等子代理可以用各自的人格（systemPrompt）独立完成
- * 一轮工作；多轮对话（sendMessage）留待后续 worker 后端。
+ * teammate 走 `--task-worker` 模式(对齐 Python):每次读一行 stdin 跑一轮即退;
+ * 多轮对话 = SendMessage 写 stdin 时 TaskManager 懒复活重启进程(重启不保留
+ * 上下文,与 Python 同)。prompt 经 stdin 而非 argv。
  *
  * 关键点：
  * - cliEntry 取自 `process.argv[1]`（与 runTuiMode 同样的拿入口路径写法）。
@@ -25,11 +24,12 @@ export function buildTeammateCommand(
   const cliEntry = process.argv[1] ?? "";
   const model = config.model ?? settings.model;
 
+  // --task-worker:prompt 不进 argv(经 stdin 喂,createAgentTask 负责),
+  // 顺带消掉超长 prompt 撑爆 Windows argv 的隐患;多轮 = TaskManager 懒复活重启。
   const argv: string[] = [
     process.execPath,
     cliEntry,
-    "--print",
-    config.prompt,
+    "--task-worker",
     "--model",
     model,
   ];

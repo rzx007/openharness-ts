@@ -29,14 +29,27 @@ function makeConfig(overrides: Partial<TeammateSpawnConfig> = {}): TeammateSpawn
   };
 }
 
-describe("SubprocessBackend", () => {
-  it("spawn builds argv via buildCommand and creates a shell task", async () => {
-    const createShellTask = vi.fn().mockResolvedValue({ id: "task_42" });
-    const stopTask = vi.fn().mockResolvedValue(undefined);
-    const runner: TaskRunner = { createShellTask, stopTask };
 
+/** 完整 TaskRunner mock(createAgentTask/writeToTask/createShellTask/stopTask)。 */
+function makeRunner(over: Record<string, unknown> = {}) {
+  return {
+    createShellTask: vi.fn().mockResolvedValue({ id: "task_shell" }),
+    createAgentTask: vi.fn().mockResolvedValue({ id: "task_42" }),
+    writeToTask: vi.fn().mockResolvedValue(undefined),
+    stopTask: vi.fn().mockResolvedValue(undefined),
+    ...over,
+  } as unknown as TaskRunner & {
+    createAgentTask: ReturnType<typeof vi.fn>;
+    writeToTask: ReturnType<typeof vi.fn>;
+    stopTask: ReturnType<typeof vi.fn>;
+  };
+}
+
+describe("SubprocessBackend", () => {
+  it("spawn builds argv via buildCommand and creates an agent task (prompt via stdin)", async () => {
+    const runner = makeRunner();
     const buildCommand = vi.fn(() => ({
-      argv: ["node", "cli.js", "--print", "go investigate"],
+      argv: ["node", "cli.js", "--task-worker"],
       env: { FOO: "bar" },
     }));
 
@@ -45,8 +58,9 @@ describe("SubprocessBackend", () => {
     const result = await backend.spawn(config);
 
     expect(buildCommand).toHaveBeenCalledWith(config);
-    expect(createShellTask).toHaveBeenCalledWith({
-      argv: ["node", "cli.js", "--print", "go investigate"],
+    expect(runner.createAgentTask).toHaveBeenCalledWith({
+      prompt: "go investigate",
+      argv: ["node", "cli.js", "--task-worker"],
       description: "Explore@default",
       cwd: "/work",
       env: { FOO: "bar" },
@@ -60,9 +74,7 @@ describe("SubprocessBackend", () => {
   });
 
   it("terminate stops the mapped task", async () => {
-    const createShellTask = vi.fn().mockResolvedValue({ id: "task_7" });
-    const stopTask = vi.fn().mockResolvedValue(undefined);
-    const runner: TaskRunner = { createShellTask, stopTask };
+    const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_7" }) });
 
     const backend = new SubprocessBackend({
       taskRunner: runner,
@@ -72,15 +84,13 @@ describe("SubprocessBackend", () => {
     await backend.spawn(makeConfig({ name: "Plan", team: "alpha" }));
     await backend.terminate("Plan@alpha");
 
-    expect(stopTask).toHaveBeenCalledWith("task_7");
+    expect(runner.stopTask).toHaveBeenCalledWith("task_7");
     // mapping cleared after terminate
     await expect(backend.terminate("Plan@alpha")).rejects.toThrow("No active subprocess");
   });
 
   it("spawn returns success:false with error when createShellTask throws", async () => {
-    const createShellTask = vi.fn().mockRejectedValue(new Error("boom"));
-    const stopTask = vi.fn();
-    const runner: TaskRunner = { createShellTask, stopTask };
+    const runner = makeRunner({ createAgentTask: vi.fn().mockRejectedValue(new Error("boom")) });
 
     const backend = new SubprocessBackend({
       taskRunner: runner,
@@ -97,22 +107,31 @@ describe("SubprocessBackend", () => {
     });
   });
 
-  it("sendMessage throws (one-shot, multi-turn unsupported)", async () => {
+  it("sendMessage writes a JSON line to the task stdin (lazy-restart multi-turn)", async () => {
+    const runner = makeRunner();
     const backend = new SubprocessBackend({
-      taskRunner: { createShellTask: vi.fn(), stopTask: vi.fn() },
+      taskRunner: runner,
       buildCommand: () => ({ argv: ["node"] }),
     });
+    await backend.spawn(makeConfig());
+    await backend.sendMessage("Explore@default", { text: "hi again", fromAgent: "coordinator" });
+
+    expect(runner.writeToTask).toHaveBeenCalledTimes(1);
+    const [taskId, line] = runner.writeToTask.mock.calls[0]!;
+    expect(taskId).toBe("task_42");
+    const payload = JSON.parse(line as string);
+    expect(payload.text).toBe("hi again");
+    expect(payload.from).toBe("coordinator");
+    expect(typeof payload.timestamp).toBe("string");
+
     await expect(
-      backend.sendMessage("Explore@default", { text: "hi", fromAgent: "coordinator" }),
-    ).rejects.toThrow("one-shot");
+      backend.sendMessage("Ghost@nowhere", { text: "x", fromAgent: "c" }),
+    ).rejects.toThrow("No active subprocess");
   });
 
   describe("registerTeammate hook", () => {
     it("spawn invokes registerTeammate with the effective config and spawn result", async () => {
-      const runner: TaskRunner = {
-        createShellTask: vi.fn().mockResolvedValue({ id: "task_9" }),
-        stopTask: vi.fn(),
-      };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_9" }) });
       const registerTeammate = vi.fn();
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -130,10 +149,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("registerTeammate failure does not fail the spawn", async () => {
-      const runner: TaskRunner = {
-        createShellTask: vi.fn().mockResolvedValue({ id: "task_10" }),
-        stopTask: vi.fn(),
-      };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_10" }) });
       const backend = new SubprocessBackend({
         taskRunner: runner,
         buildCommand: () => ({ argv: ["node"] }),
@@ -146,10 +162,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("isolated spawn passes the worktree path as the hook config cwd", async () => {
-      const runner: TaskRunner = {
-        createShellTask: vi.fn().mockResolvedValue({ id: "task_iso" }),
-        stopTask: vi.fn(),
-      };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_iso" }) });
       const registerTeammate = vi.fn();
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -165,10 +178,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("failed spawn does not invoke registerTeammate", async () => {
-      const runner: TaskRunner = {
-        createShellTask: vi.fn().mockRejectedValue(new Error("boom")),
-        stopTask: vi.fn(),
-      };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockRejectedValue(new Error("boom")) });
       const registerTeammate = vi.fn();
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -183,9 +193,7 @@ describe("SubprocessBackend", () => {
 
   describe("isolate", () => {
     it("isolate=true creates a worktree and uses its path as cwd", async () => {
-      const createShellTask = vi.fn().mockResolvedValue({ id: "task_iso" });
-      const stopTask = vi.fn().mockResolvedValue(undefined);
-      const runner: TaskRunner = { createShellTask, stopTask };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_iso" }) });
       const buildCommand = vi.fn((c: TeammateSpawnConfig) => ({ argv: ["node", c.cwd] }));
       const wt = mockWorktreeManager();
 
@@ -198,7 +206,7 @@ describe("SubprocessBackend", () => {
 
       // buildCommand 与 createShellTask 都收到 worktree path 当 cwd
       expect(buildCommand.mock.calls[0]?.[0].cwd).toBe("/wt/path");
-      expect(createShellTask).toHaveBeenCalledWith(
+      expect(runner.createAgentTask).toHaveBeenCalledWith(
         expect.objectContaining({ cwd: "/wt/path", argv: ["node", "/wt/path"] }),
       );
       expect(wt.create).toHaveBeenCalledTimes(1);
@@ -207,10 +215,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("terminate removes the worktree (non-force)", async () => {
-      const runner: TaskRunner = {
-        createShellTask: vi.fn().mockResolvedValue({ id: "task_iso" }),
-        stopTask: vi.fn().mockResolvedValue(undefined),
-      };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_iso" }) });
       const wt = mockWorktreeManager();
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -227,10 +232,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("terminate swallows remove failure (dirty worktree kept)", async () => {
-      const runner: TaskRunner = {
-        createShellTask: vi.fn().mockResolvedValue({ id: "task_iso" }),
-        stopTask: vi.fn().mockResolvedValue(undefined),
-      };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_iso" }) });
       const wt = mockWorktreeManager({
         remove: vi.fn().mockRejectedValue(new Error("has changes")),
       });
@@ -245,8 +247,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("isolate=true: createShellTask throws after worktree created → removes worktree (force) and returns success:false", async () => {
-      const createShellTask = vi.fn().mockRejectedValue(new Error("spawn boom"));
-      const runner: TaskRunner = { createShellTask, stopTask: vi.fn() };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockRejectedValue(new Error("spawn boom")) });
       const wt = mockWorktreeManager();
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -271,8 +272,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("isolate=true: cleanup remove failure is swallowed, still returns the original error", async () => {
-      const createShellTask = vi.fn().mockRejectedValue(new Error("spawn boom"));
-      const runner: TaskRunner = { createShellTask, stopTask: vi.fn() };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockRejectedValue(new Error("spawn boom")) });
       const wt = mockWorktreeManager({
         remove: vi.fn().mockRejectedValue(new Error("cleanup failed")),
       });
@@ -290,15 +290,14 @@ describe("SubprocessBackend", () => {
     });
 
     it("isolate=true without worktreeManager is a no-op with notice (uses original cwd)", async () => {
-      const createShellTask = vi.fn().mockResolvedValue({ id: "task_x" });
-      const runner: TaskRunner = { createShellTask, stopTask: vi.fn() };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_x" }) });
       const backend = new SubprocessBackend({
         taskRunner: runner,
         buildCommand: (c) => ({ argv: ["node", c.cwd] }),
       });
       const result = await backend.spawn(makeConfig({ isolate: true, cwd: "/work" }));
 
-      expect(createShellTask).toHaveBeenCalledWith(
+      expect(runner.createAgentTask).toHaveBeenCalledWith(
         expect.objectContaining({ cwd: "/work" }),
       );
       expect(result.success).toBe(true);
@@ -307,8 +306,7 @@ describe("SubprocessBackend", () => {
     });
 
     it("isolate=true but not a git repo degrades to original cwd", async () => {
-      const createShellTask = vi.fn().mockResolvedValue({ id: "task_x" });
-      const runner: TaskRunner = { createShellTask, stopTask: vi.fn() };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_x" }) });
       const wt = mockWorktreeManager({ isGitRepo: vi.fn().mockResolvedValue(false) });
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -318,14 +316,13 @@ describe("SubprocessBackend", () => {
       const result = await backend.spawn(makeConfig({ isolate: true, cwd: "/work" }));
 
       expect(wt.create).not.toHaveBeenCalled();
-      expect(createShellTask).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work" }));
+      expect(runner.createAgentTask).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work" }));
       expect(result.worktree).toBeUndefined();
       expect(result.notice).toMatch(/isolate/);
     });
 
     it("isolate=false never touches the worktree manager", async () => {
-      const createShellTask = vi.fn().mockResolvedValue({ id: "task_x" });
-      const runner: TaskRunner = { createShellTask, stopTask: vi.fn() };
+      const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_x" }) });
       const wt = mockWorktreeManager();
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -338,7 +335,7 @@ describe("SubprocessBackend", () => {
       expect(wt.isGitRepo).not.toHaveBeenCalled();
       expect(wt.create).not.toHaveBeenCalled();
       expect(wt.remove).not.toHaveBeenCalled();
-      expect(createShellTask).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work" }));
+      expect(runner.createAgentTask).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work" }));
       expect(result.worktree).toBeUndefined();
     });
   });

@@ -1,6 +1,6 @@
 # Swarm 子进程派发运行流程（D.1 + D.2）
 
-`agent` 工具如何把一个子代理（teammate）作为独立 `ohs --print` 子进程拉起、
+`agent` 工具如何把一个子代理（teammate）作为独立 `ohs --task-worker` 子进程拉起、
 后台运行，leader 用 `TaskWait` 阻塞取回结果，并在 TUI 的 SwarmPanel 显示状态。
 这是 swarm 当前的最小可用多 Agent 闭环。
 
@@ -15,7 +15,7 @@
 | `agent` 工具 | `packages/tools/src/agent/index.ts` | LLM spawn 入口，取后端并派发，返回 task_id |
 | `TaskWait` 工具 | `packages/tools/src/task/index.ts` | leader 阻塞等待 teammate 完成并取结果（D.2）|
 | `SubprocessBackend` | `packages/swarm/src/subprocess.ts` | 实现 `SwarmBackend`，经 `TaskRunner` 派发 |
-| `buildTeammateCommand` | `apps/cli/src/teammate.ts` | 配置 → `ohs --print …` 的 argv |
+| `buildTeammateCommand` | `apps/cli/src/teammate.ts` | 配置 → `ohs --task-worker …` 的 argv（prompt 经 stdin） |
 | 后端注册 | `apps/cli/src/runtime.ts`（bootstrap） | 注册 subprocess 后端 + 给 teammate 任务打 `type:"agent"` 标 |
 | `TaskManager` | `packages/services/src/tasks/index.ts` | 真正 spawn 子进程、捕获输出；`awaitTask`/`registerTaskListener`（D.2）|
 | swarm_status emit | `apps/cli/src/commands/main.ts` + `swarm-status.ts` | 订阅任务状态，emit `swarm_status`（D.2）|
@@ -48,7 +48,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
                                        │ spawn 子进程
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Teammate 进程 · ohs --print（一次性，跑完即退出）                    │
+│  Teammate 进程 · ohs --task-worker（读一行跑一轮即退;可重启多轮）     │
 │                                                                     │
 │  Explore / Plan / worker 等人格（-s systemPrompt）                   │
 │  继承父 model / provider（api-key 不进 argv）                        │
@@ -63,7 +63,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 |----|-----|--------|
 | 工具层 | `Agent` / `TaskWait` | LLM 的 spawn / join 入口 |
 | swarm 层 | `SubprocessBackend` | 不依赖 services，只认 `TaskRunner` 接口 |
-| CLI 层 | `buildTeammateCommand` | 配置 → `ohs --print …` argv |
+| CLI 层 | `buildTeammateCommand` | 配置 → `ohs --task-worker …` argv |
 | 服务层 | `TaskManager` | 真 spawn、日志、`awaitTask`、状态 listener |
 
 `bootstrap()` 里把三者接成一条链：`SubprocessBackend` → `TaskRunner` 适配器（强制 `type:"agent"`）→ `TaskManager`。
@@ -91,8 +91,8 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 │  getAgentDefinition(subagentType)  → 人格 systemPrompt   │
 │  getBackendRegistry().getExecutor("subprocess")            │
 │  SubprocessBackend.spawn(config)                         │
-│    ├─ buildTeammateCommand → [node, ohs, --print, …]     │
-│    └─ TaskManager.createShellTask({ argv, type:"agent" })│
+│    ├─ buildTeammateCommand → [node, ohs, --task-worker]  │
+│    └─ TaskManager.createAgentTask({argv,prompt,type:…}) │
 │                                                          │
 │  立即返回 LLM："Spawned … task_id=task_1"（不阻塞）       │
 └──────────────────────────┬───────────────────────────────┘
@@ -101,7 +101,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 ┌──────────────────────────────────────────────────────────┐
 │ Step 3 · Teammate 子进程（后台）                          │
 │                                                          │
-│  ohs --print + Explore 人格                               │
+│  ohs --task-worker + Explore 人格(prompt 经 stdin)        │
 │  自己的 QueryEngine 跑一轮 → stdout 写入 task 日志         │
 │  正常结束 exit 0 / 失败非 0                               │
 └──────────────────────────┬───────────────────────────────┘
@@ -126,8 +126,8 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 **要点：**
 
 - Subagent **不是**框架自动识别用户话术；是 Leader LLM **主动调 `Agent` 工具**。
-- Teammate 是 **one-shot** `--print`，不支持 `SendMessage` 多轮（会抛错）。
-- Teammate argv 自动带 **`--swarm-worker`**（D.4）：只读工具集自动放行，**Explore/Plan 在父进程 `default` 下即可工作**；写/执行类工具（Write/Edit/Bash 等）仍会被拒（`--print` 无交互确认）。
+- Teammate 走 `--task-worker`：读一行 stdin 跑一轮即退；**SendMessage 多轮可用**——写 stdin 时 TaskManager 懒复活重启进程（重启不保留上下文，与 Python 同）。
+- Teammate argv 自动带 **`--swarm-worker`**（D.4）：只读工具集自动放行，**Explore/Plan 在父进程 `default` 下即可工作**；写/执行类工具经 D.5 权限文件流转 leader 裁决（leader 没放行则拒）。
 
 ---
 
@@ -150,7 +150,7 @@ created   → status: running
 completed → status: done / error（按 exitCode）
 ```
 
-REPL / 普通 `--print` 模式下没有 BackendHost，**不会** emit `swarm_status`。
+REPL / 普通 print 模式下没有 BackendHost，**不会** emit `swarm_status`。
 
 ---
 
@@ -167,10 +167,10 @@ REPL / 普通 `--print` 模式下没有 BackendHost，**不会** emit `swarm_sta
 ## 关键点
 
 - **解耦**：`swarm` 不直接依赖 `services`；`SubprocessBackend` 经结构化 `TaskRunner`
-  接口拿 `createShellTask`，真实 `TaskManager` 在 `bootstrap()` 注入。
+  接口拿 `createAgentTask`/`writeToTask`，真实 `TaskManager` 在 `bootstrap()` 注入。
 - **同一个单例**：派发（SubprocessBackend）、取结果（TaskWait）、emit 状态（BackendHost）
   都用 **全局 `getTaskManager()` 单例**，三者对得上。
-- **一次性 `--print`**：teammate 跑一轮即退出；足够覆盖 Explore/Plan/verification。
+- **task-worker 一轮一进程**：读一行 stdin 跑一轮即退；SendMessage 触发懒复活重启（重启不保留上下文）。
 - **配置继承**：argv 带 `--model (config.model ?? settings.model)`、provider、
   `-s <人格>`、**`--swarm-worker`**；**不把 api-key 放 argv**，teammate 复用 `settings.json` + 继承 env。
 - **权限模式不继承**：`--permission-mode` 取 `config.permissionMode ?? "default"`，不读父进程
@@ -246,5 +246,5 @@ worker（teammate 进程）                     leader 进程
 
 - **SwarmPanel duration 实时滚动**：当前只在 created/completed emit，运行中显示 ~0s；
   需补一个周期性 `updated` 事件。
-- **多轮 `sendMessage`**：需长驻 worker 模式（当前 subprocess teammate 抛错）。
+- ~~多轮 `sendMessage`~~：已落地（task-worker 重启式多轮，见 [swarm-task-worker-design.md](./swarm-task-worker-design.md)）。留待：重启时经 session 快照恢复上下文。
 - **`ask` 转 TUI 人工裁决**：当前 leader checker 自动裁决；可在 ask 分支接 E.3 权限弹框。

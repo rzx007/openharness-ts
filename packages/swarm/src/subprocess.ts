@@ -8,15 +8,27 @@ import type { WorktreeManager } from "./worktree.js";
  * 真实实现由调用方（apps/cli）注入 `getTaskManager()`，测试可注入 mock。
  */
 export interface TaskRunner {
-  createShellTask(opts: {
+  /** 可选:历史遗留(teammate 已全走 createAgentTask),保留兼容旧注入方。 */
+  createShellTask?(opts: {
     argv?: string[];
     command?: string;
     description: string;
     cwd: string;
     env?: Record<string, string>;
-    /** Optional task type marker (e.g. "agent" for teammate tasks). */
     type?: string;
   }): Promise<{ id: string }>;
+  /** agent 任务:spawn 后把 prompt 经 stdin 喂给子进程(task-worker 多轮承载)。 */
+  createAgentTask(opts: {
+    prompt: string;
+    argv?: string[];
+    command?: string;
+    description: string;
+    cwd: string;
+    env?: Record<string, string>;
+    type?: string;
+  }): Promise<{ id: string }>;
+  /** 往任务 stdin 写一行;任务已结束时由实现方懒复活重启(多轮 sendMessage)。 */
+  writeToTask(id: string, data: string): Promise<void>;
   stopTask(id: string): Promise<void>;
 }
 
@@ -44,10 +56,9 @@ export interface SubprocessBackendOptions {
 /**
  * 最小可用的 subprocess swarm 后端。
  *
- * 每个 teammate 被拉起为一个独立子进程（通过 TaskRunner.createShellTask），
- * 复刻自 Python 的 SubprocessBackend，但 TS 端没有 `--task-worker` 长驻模式，
- * 改用 `--print` 一次性模式（见 apps/cli/src/teammate.ts）。因此当前是 one-shot：
- * teammate 跑完 prompt 即退出，多轮 sendMessage 留待后续 worker 后端。
+ * 每个 teammate 被拉起为一个独立子进程（TaskRunner.createAgentTask，prompt 经
+ * stdin），跑 `--task-worker` 模式：读一行跑一轮即退（对齐 Python）。多轮 =
+ * sendMessage 写 stdin 时 TaskManager 懒复活重启进程（重启不保留上下文）。
  */
 export class SubprocessBackend implements SwarmBackend {
   readonly backendType = "subprocess";
@@ -92,7 +103,9 @@ export class SubprocessBackend implements SwarmBackend {
 
       // buildCommand 拿到的 config 的 cwd 必须指向 worktree（若隔离）。
       const { argv, env } = this.buildCommand({ ...config, cwd });
-      const task = await this.taskRunner.createShellTask({
+      // createAgentTask:prompt 经 stdin(--task-worker 读一行跑一轮)。
+      const task = await this.taskRunner.createAgentTask({
+        prompt: config.prompt,
         argv,
         description: agentId,
         cwd,
@@ -119,7 +132,7 @@ export class SubprocessBackend implements SwarmBackend {
       }
       return result;
     } catch (err) {
-      // 若本次已建了隔离 worktree（拿到 slug）但后续 createShellTask 抛错，
+      // 若本次已建了隔离 worktree（拿到 slug）但后续 createAgentTask 抛错，
       // 该 worktree 从未写进 agentWorktrees、terminate 永远清不到它 → 孤儿泄漏。
       // 尽力 force 清理（吞错），再返回失败。
       if (isolateSlug != null && this.worktreeManager != null) {
@@ -139,10 +152,21 @@ export class SubprocessBackend implements SwarmBackend {
     }
   }
 
-  async sendMessage(_agentId: string, _message: TeammateMessage): Promise<void> {
-    throw new Error(
-      "subprocess teammate is one-shot (--print); multi-turn messaging requires the worker backend — Phase D follow-up",
-    );
+  /**
+   * 给 teammate 发后续消息:JSON 行写任务 stdin。任务已结束时 TaskManager
+   * 懒复活重启进程再写入(重启不保留上下文,对齐 Python)。
+   */
+  async sendMessage(agentId: string, message: TeammateMessage): Promise<void> {
+    const taskId = this.agentTasks.get(agentId);
+    if (taskId == null) {
+      throw new Error(`No active subprocess for agent ${agentId}`);
+    }
+    const payload: Record<string, unknown> = {
+      text: message.text,
+      from: message.fromAgent,
+      timestamp: new Date().toISOString(),
+    };
+    await this.taskRunner.writeToTask(taskId, JSON.stringify(payload));
   }
 
   async terminate(agentId: string): Promise<void> {

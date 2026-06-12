@@ -155,6 +155,8 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
           // teammate：统一打上 type: "agent"，让 backend host 的 swarm_status
           // listener 能据此过滤出 teammate 任务并点亮 SwarmPanel。
           createShellTask: (opts) => taskManager.createShellTask({ ...opts, type: "agent" }),
+          createAgentTask: (opts) => taskManager.createAgentTask({ ...opts, type: "agent" }),
+          writeToTask: (id, data) => taskManager.writeToTask(id, data),
           stopTask: async (id) => {
             await taskManager.stopTask(id);
           },

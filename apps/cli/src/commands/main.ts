@@ -94,6 +94,7 @@ interface MainOptions {
   appendSystemPrompt?: string;
   bare?: boolean;
   swarmWorker?: boolean;
+  taskWorker?: boolean;
   dryRun?: boolean;
 }
 
@@ -148,6 +149,13 @@ export async function mainAction(
     return;
   }
 
+  // task-worker 模式 = 「stdin 读一行 → 跑一轮 → 退出」(teammate 多轮的承载,
+  // send_message 写 stdin 时 TaskManager 懒复活重启本进程)。无 TTY,先于其余模式。
+  if (options.taskWorker) {
+    await runTaskWorker(settings, options);
+    return;
+  }
+
   if (options.backendOnly) {
     await runBackendHost(settings, options);
     return;
@@ -183,6 +191,97 @@ export async function mainAction(
  * @param options - 命令行选项，用于控制渲染行为（如 verbose）
  * @returns Promise<void>
  */
+/**
+ * stdin 驱动的无 TTY worker(对齐 Python ui/app.py run_task_worker):
+ * 读一行(JSON {text,...} 或纯文本)→ submitMessage 流式 stdout → 退出。
+ * 多轮 = TaskManager 懒复活重启 + 写下一行 stdin;重启不保留上下文。
+ */
+async function runTaskWorker(
+  settings: Settings,
+  options: MainOptions,
+): Promise<void> {
+  const skillRegistry = new SkillRegistry();
+  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
+  const credentialStorage = new CredentialStorage();
+  const swarmPermissionPrompt =
+    options.swarmWorker && isSwarmWorker() ? buildSwarmWorkerPermissionPrompt() : undefined;
+  const bundle = await bootstrap({
+    settings,
+    cliOverrides: buildCliOverrides(options),
+    skillRegistry,
+    credentialStorage,
+    permissionPrompt: swarmPermissionPrompt,
+  });
+  registerPluginHooks(bundle.hookExecutor);
+  const renderer = new EventRenderer({ verbose: options.verbose, printMode: true, outputStyle: settings.outputStyle });
+
+  const line = await readOneStdinLine();
+  const decoded = decodeTaskWorkerLine(line);
+  if (!decoded) return;
+
+  try {
+    for await (const event of bundle.queryEngine.submitMessage(decoded)) {
+      await renderer.render(event);
+    }
+  } catch (err) {
+    if (err instanceof Error) {
+      process.stderr.write(`${formatApiError(err, settings)}\n`);
+    }
+    process.exit(1);
+  }
+
+  try {
+    updateRulesFromSession(bundle.queryEngine.getHistory());
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * 读 stdin 第一行(EOF 返回空串)。chunk 迭代而非 readline(后者在 Windows 管道
+ * stdin 下偶现 close 先于 line)。关键:destroyOnReturn:false + pause——若早退时
+ * destroy 掉 stdin,leader 在本轮进行中 SendMessage 会撞断管 → TaskManager 误判
+ * 死进程而 terminate+重启,杀掉进行中的工作;pause 后句柄不再撑事件循环,
+ * 跑完一轮仍可干净退出。
+ */
+async function readOneStdinLine(): Promise<string> {
+  let buffer = "";
+  process.stdin.setEncoding("utf-8");
+  const iterator = (process.stdin as unknown as {
+    iterator(opts: { destroyOnReturn: boolean }): AsyncIterableIterator<string>;
+  }).iterator({ destroyOnReturn: false });
+  for await (const chunk of iterator) {
+    buffer += chunk;
+    const idx = buffer.indexOf(String.fromCharCode(10));
+    if (idx >= 0) {
+      process.stdin.pause();
+      return buffer.slice(0, idx);
+    }
+  }
+  return buffer;
+}
+
+/**
+ * 解码 worker 收到的一行:JSON 对象取 text 字段(send_message 的结构化信封),
+ * 非 JSON 按纯文本 prompt(对齐 Python _decode_task_worker_line)。
+ */
+export function decodeTaskWorkerLine(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const text = (parsed as { text?: unknown }).text;
+      if (typeof text === "string") return text.trim();
+    }
+    // 对齐 Python:无 text 字段的 JSON(或数组/数字)按原始行当 prompt,
+    // 而非静默空转(空转还会白烧一次懒复活重启额度)。
+  } catch {
+    // 纯文本
+  }
+  return trimmed;
+}
+
 async function runPrintMode(
   settings: Settings,
   prompt: string,
