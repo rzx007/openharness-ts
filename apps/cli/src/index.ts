@@ -42,6 +42,7 @@ program
   .option("--bare", "Skip hooks/plugins/MCP loading")
   .option("--dry-run", "预览解析后的运行时配置，不调用模型")
   .option("--swarm-worker", "以 swarm worker 身份运行：只读工具自动放行（内部用）")
+  .option("--task-worker", "stdin 驱动的无 TTY worker:读一行跑一轮即退(内部用,teammate 多轮)")
   .action(mainAction);
 
 program.addCommand(createAuthCommand());
