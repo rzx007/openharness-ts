@@ -32,7 +32,7 @@
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
 | plugins | 🟡 | ✅skills/commands/hooks/MCP/agents 贡献+信任门控+卸载防护(C.1+C.4)；缺 tools_dir 动态加载 |
 | bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
-| swarm | 🟡 | ✅subprocess 派发/TaskWait/worktree 隔离/只读放行(D.1-D.4)+文件邮箱/team.json/权限同步(D.5)；缺长驻 worker 多轮 sendMessage、TUI 人工裁决 |
+| swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage；缺 TUI 人工裁决、重启上下文恢复 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；缺 compact 读回接线、cron 升级、lsp 真 AST |
@@ -168,7 +168,8 @@
   **worker 写操作转 leader checker 自动裁决**——接线超出 Python 原版，见
   `docs/swarm-file-infra-design.md` 差异表，D.5-R3）。
 - ✅ 团队磁盘持久化 `team.json`（D.5-R2）、git worktree 隔离（D.3）。
-- 留待：长驻 worker / 多轮 `sendMessage`；`ask` 时 TUI 弹框人工裁决（当前 checker 自动）。
+- ✅ 多轮 `sendMessage`（task-worker 重启式，对齐 Python；重启不保留上下文）。
+- 留待：重启经 session 快照恢复上下文；`ask` 时 TUI 弹框人工裁决（当前 checker 自动）。
 - **文件**：`packages/swarm/src/{lockfile,mailbox,team-lifecycle,permission-sync}.ts`、`apps/cli/src/swarm-permission.ts`
 
 ### D.2 Channels 多通道 + 引擎桥接

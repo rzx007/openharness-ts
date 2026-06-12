@@ -126,7 +126,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 **要点：**
 
 - Subagent **不是**框架自动识别用户话术；是 Leader LLM **主动调 `Agent` 工具**。
-- Teammate 是 **one-shot** `--print`，不支持 `SendMessage` 多轮（会抛错）。
+- Teammate 走 `--task-worker`：读一行 stdin 跑一轮即退；**SendMessage 多轮可用**——写 stdin 时 TaskManager 懒复活重启进程（重启不保留上下文，与 Python 同）。
 - Teammate argv 自动带 **`--swarm-worker`**（D.4）：只读工具集自动放行，**Explore/Plan 在父进程 `default` 下即可工作**；写/执行类工具（Write/Edit/Bash 等）仍会被拒（`--print` 无交互确认）。
 
 ---
@@ -246,5 +246,5 @@ worker（teammate 进程）                     leader 进程
 
 - **SwarmPanel duration 实时滚动**：当前只在 created/completed emit，运行中显示 ~0s；
   需补一个周期性 `updated` 事件。
-- **多轮 `sendMessage`**：需长驻 worker 模式（当前 subprocess teammate 抛错）。
+- ~~多轮 `sendMessage`~~：已落地（task-worker 重启式多轮，见 [swarm-task-worker-design.md](./swarm-task-worker-design.md)）。留待：重启时经 session 快照恢复上下文。
 - **`ask` 转 TUI 人工裁决**：当前 leader checker 自动裁决；可在 ask 分支接 E.3 权限弹框。
