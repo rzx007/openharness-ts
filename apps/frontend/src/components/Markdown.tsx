@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
+import { highlight } from "cli-highlight";
 
 import { useTheme } from "../theme/ThemeContext";
 import type { ThemeConfig } from "../theme/builtinThemes";
@@ -13,6 +14,21 @@ import {
   type Token,
   type Tokens,
 } from "./markdownParser";
+
+/**
+ * 代码块语法高亮（cli-highlight → ANSI，Ink Text 原样透传）。
+ * 未知语言/高亮器异常回退原文，绝不让渲染崩。
+ */
+export function highlightCode(text: string, lang?: string): string {
+  // 无语言不猜：highlight.js 的 auto-detect 会给纯文本/日志乱着色（"to"、
+  // "some" 这类词被当关键字），无 lang 围栏一律原样返回。
+  if (!lang) return text;
+  try {
+    return highlight(text, { language: lang, ignoreIllegals: true });
+  } catch {
+    return text;
+  }
+}
 
 // 行内 token 渲染：返回一组 <Text> 元素。
 function renderInline(
@@ -151,7 +167,7 @@ function MarkdownBlock({
 
     case "code": {
       const c = token as Tokens.Code;
-      const lines = c.text.split("\n");
+      const lines = highlightCode(c.text, c.lang).split("\n");
       return (
         <Box
           flexDirection="column"
@@ -163,7 +179,8 @@ function MarkdownBlock({
         >
           {c.lang ? <Text dimColor>{c.lang}</Text> : null}
           {lines.map((line, i) => (
-            <Text key={i} color={theme.colors.accent}>
+            // 有 lang：ANSI 已着色不叠主题色；无 lang：保留原主题 accent。
+            <Text key={i} color={c.lang ? undefined : theme.colors.accent}>
               {line}
             </Text>
           ))}

@@ -281,6 +281,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.JSX.Element {
           items={session.transcript}
           assistantBuffer={session.assistantBuffer}
           showWelcome={session.ready}
+          outputStyle={String(session.status.output_style ?? "default")}
         />
       </Box>
 

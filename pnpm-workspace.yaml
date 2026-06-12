@@ -3,6 +3,7 @@ packages:
   - packages/*
 
 catalog:
+  cli-highlight: ^2.1.11
   '@anthropic-ai/sdk': ^0.40.0
   '@modelcontextprotocol/sdk': ^1.29.0
   '@types/node': ^22.13.14

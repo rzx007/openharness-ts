@@ -3,12 +3,27 @@ import { Box, Text } from "ink";
 import { useTheme } from "../theme/ThemeContext";
 import type { TranscriptItem } from "../types";
 
-export function ToolCallDisplay({ item }: { item: TranscriptItem }): React.JSX.Element {
+export function ToolCallDisplay({
+  item,
+  outputStyle = "default",
+}: {
+  item: TranscriptItem;
+  /** E.3：minimal 走极简纯文本（无图标/色彩），与 REPL EventRenderer 同语义。 */
+  outputStyle?: string;
+}): React.JSX.Element {
   const { theme } = useTheme();
+  const minimal = outputStyle === "minimal";
 
   if (item.role === "tool") {
     const toolName = item.tool_name ?? "tool";
     const summary = summarizeInput(toolName, item.tool_input, item.text);
+    if (minimal) {
+      return (
+        <Box marginLeft={2} flexDirection="column">
+          <Text>{`> ${toolName} ${summary}`}</Text>
+        </Box>
+      );
+    }
     return (
       <Box marginLeft={2} flexDirection="column">
         <Text>

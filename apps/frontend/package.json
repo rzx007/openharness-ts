@@ -17,7 +17,8 @@
     "ink-text-input": "catalog:",
     "marked": "^18.0.0",
     "react": "catalog:",
-    "string-width": "^7.2.0"
+    "string-width": "^7.2.0",
+    "cli-highlight": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
