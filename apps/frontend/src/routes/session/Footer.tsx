@@ -36,6 +36,11 @@ function formatTokens(n: number): string {
 }
 
 function truncateCwd(cwd: string, maxLen = 40): string {
+  // home 目录前缀缩写为 ~（对齐 opencode 的 "~\Desktop" 风格）
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  if (home && cwd.startsWith(home)) {
+    cwd = "~" + cwd.slice(home.length);
+  }
   if (cwd.length <= maxLen) return cwd;
   return "…" + cwd.slice(cwd.length - (maxLen - 1));
 }
@@ -74,19 +79,17 @@ export function Footer({ status, mcpServers, version }: FooterProps): React.Reac
   const leftLabel = cwd + branchSuffix;
 
   return (
-    <box flexDirection="row" justifyContent="space-between">
-      {/* Left: cwd + branch + optional plan indicator */}
+    <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1}>
+      {/* Left: cwd:branch ⊙N MCP /status（对齐 opencode 左侧信息区） */}
       <text fg={c.muted}>
         {leftLabel}
         {isPlan ? <span fg={c.warning}>{" [PLAN]"}</span> : null}
+        {mcpCount > 0 ? <span fg={mcpColor}>{`  ⊙ ${mcpCount} MCP`}</span> : null}
+        <span fg={c.muted}>{"  /status"}</span>
       </text>
 
-      {/* Right: MCP count · tokens · version */}
+      {/* Right: tokens · version */}
       <text fg={c.muted}>
-        {mcpCount > 0 ? (
-          <span fg={mcpColor}>{`⊙ ${mcpCount} MCP`}</span>
-        ) : null}
-        {mcpCount > 0 ? <span fg={c.muted}>{" · "}</span> : null}
         {hasTokens ? (
           <span fg={c.muted}>{`${formatTokens(inputTokens)}↓ ${formatTokens(outputTokens)}↑`}</span>
         ) : null}

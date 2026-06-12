@@ -240,8 +240,9 @@ export function Prompt({
     { name: "return", action: "submit" as const },
   ];
 
+  // flexShrink=0：防止 Session 路由下被 scrollbox 挤压裁掉 meta 行
   return (
-    <box flexDirection="row">
+    <box flexDirection="row" flexShrink={0}>
       {/* Left accent bar */}
       <box width={1} backgroundColor={theme.colors.accent} />
 
@@ -282,6 +283,9 @@ export function Prompt({
           height={textareaHeight}
           flexShrink={0}
         />
+
+        {/* 输入区与元信息行之间留一行（对齐 opencode 观感） */}
+        <text>{""}</text>
 
         {/* Meta info row */}
         {busy ? (

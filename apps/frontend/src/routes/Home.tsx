@@ -28,14 +28,16 @@ export function Home({ children }: { children: React.ReactNode }): React.ReactNo
         <box width={promptWidth}>{children}</box>
       </box>
 
-      {/* Hint row: right-aligned, muted with accent keywords */}
-      <box flexDirection="row" justifyContent="flex-end">
-        <text fg={theme.colors.muted}>
-          <span fg={theme.colors.accent}>tab</span>
-          <span fg={theme.colors.muted}>{" mode   "}</span>
-          <span fg={theme.colors.accent}>ctrl+p</span>
-          <span fg={theme.colors.muted}>{" commands"}</span>
-        </text>
+      {/* Hint row: 对齐输入框右缘（与 opencode 一致），不是屏幕右缘 */}
+      <box flexDirection="row" justifyContent="center">
+        <box width={promptWidth} flexDirection="row" justifyContent="flex-end">
+          <text fg={theme.colors.muted}>
+            <span fg={theme.colors.foreground}>tab</span>
+            <span fg={theme.colors.muted}>{" mode   "}</span>
+            <span fg={theme.colors.foreground}>ctrl+p</span>
+            <span fg={theme.colors.muted}>{" commands"}</span>
+          </text>
+        </box>
       </box>
 
       {/* Bottom spacer */}
