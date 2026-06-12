@@ -7,6 +7,7 @@ import { Autocomplete } from "./Autocomplete";
 import type { AutocompleteItem } from "./Autocomplete";
 import { fuzzyFilterScored } from "../../ui/fuzzy";
 import type { Command } from "../../keymap/commands";
+import { listProjectFiles, detectAtToken, buildAtItems } from "./fileCompletion";
 
 export type PromptProps = {
   busy: boolean;
@@ -56,6 +57,14 @@ export function Prompt({
   // Autocomplete state
   const [acOpen, setAcOpen] = useState(false);
   const [acIndex, setAcIndex] = useState(0);
+
+  // File @ completion state
+  const [fileAcOpen, setFileAcOpen] = useState(false);
+  const [fileAcItems, setFileAcItems] = useState<AutocompleteItem[]>([]);
+  const [fileAcIndex, setFileAcIndex] = useState(0);
+  const [filesLoaded, setFilesLoaded] = useState(false);
+  const filesRef = useRef<string[]>([]);
+  const fileAtRef = useRef<{ atStart: number; atEnd: number } | null>(null);
 
   // History navigation state
   const [histIdx, setHistIdx] = useState<number | null>(null);
@@ -138,6 +147,22 @@ export function Prompt({
   const handleTextareaSubmit = useCallback(() => {
     if (busy) return;
 
+    // If file @ completion is open, insert the selected file path
+    if (fileAcOpen) {
+      const selected = fileAcItems[fileAcIndex];
+      if (selected && textareaRef.current) {
+        const full = textareaRef.current.plainText;
+        const at = fileAtRef.current;
+        if (at) {
+          const next = full.slice(0, at.atStart) + "@" + selected.id + " " + full.slice(at.atEnd);
+          textareaRef.current.setText(next);
+          setContent(next);
+        }
+      }
+      setFileAcOpen(false);
+      return;
+    }
+
     // If autocomplete is open, handle through autocomplete (don't also submit text)
     if (acOpen) {
       const suggestion = acRawCommands[acIndex];
@@ -155,11 +180,25 @@ export function Prompt({
 
     onSubmit(trimmed);
     clearTextarea();
-  }, [busy, acOpen, acRawCommands, acIndex, content, onSubmit, clearTextarea]);
+  }, [busy, fileAcOpen, fileAcItems, fileAcIndex, acOpen, acRawCommands, acIndex, content, onSubmit, clearTextarea]);
 
   // Global keyboard handler
   useKeyboard((key) => {
     if (key.name === "tab") {
+      if (fileAcOpen) {
+        const selected = fileAcItems[fileAcIndex];
+        if (selected && textareaRef.current) {
+          const full = textareaRef.current.plainText;
+          const at = fileAtRef.current;
+          if (at) {
+            const next = full.slice(0, at.atStart) + "@" + selected.id + " " + full.slice(at.atEnd);
+            textareaRef.current.setText(next);
+            setContent(next);
+          }
+        }
+        setFileAcOpen(false);
+        return;
+      }
       if (acOpen) {
         // Complete with highlighted suggestion
         const suggestion = acSuggestions[acIndex];
@@ -178,6 +217,10 @@ export function Prompt({
     }
 
     if (key.name === "up") {
+      if (fileAcOpen) {
+        setFileAcIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
       if (acOpen) {
         setAcIndex((prev) => Math.max(0, prev - 1));
       } else {
@@ -203,6 +246,10 @@ export function Prompt({
     }
 
     if (key.name === "down") {
+      if (fileAcOpen) {
+        setFileAcIndex((prev) => Math.min(Math.max(0, fileAcItems.length - 1), prev + 1));
+        return;
+      }
       if (acOpen) {
         setAcIndex((prev) =>
           Math.min(Math.max(0, acSuggestions.length - 1), prev + 1),
@@ -233,6 +280,11 @@ export function Prompt({
     }
 
     if (key.name === "escape") {
+      if (fileAcOpen) {
+        setFileAcOpen(false);
+        setFileAcIndex(0);
+        return;
+      }
       if (acOpen) {
         setAcOpen(false);
         setAcIndex(0);
@@ -285,7 +337,12 @@ export function Prompt({
         paddingTop={1}
         paddingBottom={1}
       >
-        {/* Autocomplete floats above textarea */}
+        {/* File @ completion floats above textarea */}
+        {fileAcOpen && fileAcItems.length > 0 && (
+          <Autocomplete items={fileAcItems} selectedIndex={fileAcIndex} />
+        )}
+
+        {/* Slash command autocomplete floats above textarea */}
         {acOpen && acSuggestions.length > 0 && (
           <Autocomplete
             items={acSuggestions}
@@ -309,6 +366,24 @@ export function Prompt({
             // Bug 3: update height based on line count (1–6 rows)
             const lineCount = textareaRef.current?.lineCount ?? 1;
             setTextareaHeight(Math.min(6, Math.max(1, lineCount)));
+            // Detect @ token for file completion
+            const atResult = detectAtToken(text);
+            if (!busy && atResult !== null) {
+              if (!filesLoaded) {
+                listProjectFiles(process.cwd()).then((files) => {
+                  filesRef.current = files;
+                  setFilesLoaded(true);
+                });
+              }
+              fileAtRef.current = { atStart: atResult.atStart, atEnd: atResult.atEnd };
+              setFileAcItems(buildAtItems(filesRef.current, atResult.token));
+              setFileAcIndex(0);
+              setFileAcOpen(true);
+              setAcOpen(false);
+            } else {
+              setFileAcOpen(false);
+              fileAtRef.current = null;
+            }
           }}
           height={textareaHeight}
           flexShrink={0}
