@@ -466,3 +466,11 @@ export {
   MEMORY_SCOPES,
   ISOLATION_MODES,
 } from "./agent-loader.js";
+
+export {
+  isSimpleMode,
+  matchSessionMode,
+  getCoordinatorTools,
+  getCoordinatorUserContext,
+  getCoordinatorSystemPrompt,
+} from "./coordinator-mode.js";
