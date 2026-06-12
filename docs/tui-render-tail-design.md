@@ -9,6 +9,8 @@
 - `Markdown.tsx` 的 `case "code"`：`highlight(text, { language: lang,
   ignoreIllegals: true })` 后按行 `<Text>{line}</Text>`——Ink 透传 ANSI 转义。
 - 未知/坏语言名（ignoreIllegals 兜不住时 try/catch）回退无色纯文本。
+- **无 lang 的围栏不做 auto-detect**（highlight.js 会给纯文本/日志乱着色），
+  原样返回并保留主题 accent 色（审查后定型）。
 - REPL（EventRenderer）无 markdown 渲染路径（assistant 文本原样直出），
   本轮不动——差异记录：高亮仅 TUI。
 

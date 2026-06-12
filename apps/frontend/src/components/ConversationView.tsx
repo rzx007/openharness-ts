@@ -59,7 +59,8 @@ export function ConversationView({
   outputStyle?: string;
 }): React.JSX.Element {
   const { theme } = useTheme();
-  const cells = foldTranscript(items.slice(-40));
+  // 先折叠全量再截窗口：窗口切断 tool 段会让折叠计数说谎（极端出 0 个调用）。
+  const cells = foldTranscript(items).slice(-40);
 
   return (
     <Box flexDirection="column" flexGrow={1}>

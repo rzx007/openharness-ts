@@ -32,3 +32,49 @@ describe("foldTranscript (E.3 tool 行折叠)", () => {
     expect(foldTranscript([u("hi"), a("hello")]).every((c) => c.kind === "item")).toBe(true);
   });
 });
+
+describe("render-level checks (审查补)", () => {
+  it("minimal style renders plain '> name summary' without the tool icon", async () => {
+    const React = (await import("react")).default;
+    const { render } = await import("ink-testing-library");
+    const { ThemeProvider } = await import("../theme/ThemeContext.js");
+    const { ToolCallDisplay } = await import("./ToolCallDisplay.js");
+    const { lastFrame } = render(
+      React.createElement(
+        ThemeProvider,
+        null,
+        React.createElement(ToolCallDisplay, {
+          item: { role: "tool", text: "", tool_name: "Bash", tool_input: { command: "ls" } },
+          outputStyle: "minimal",
+        }),
+      ),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("> Bash ls");
+    expect(frame).not.toContain("○");
+  });
+
+  it("folded summary line renders count and deduped names", async () => {
+    const React = (await import("react")).default;
+    const { render } = await import("ink-testing-library");
+    const { ThemeProvider } = await import("../theme/ThemeContext.js");
+    const { ConversationView } = await import("./ConversationView.js");
+    const items = [
+      u("q1"), t("Read"), r(), t("Grep"), r(), a("a1"),
+      u("q2"), t("Bash"), r(),
+    ];
+    const { lastFrame } = render(
+      React.createElement(
+        ThemeProvider,
+        null,
+        React.createElement(ConversationView, {
+          items,
+          assistantBuffer: "",
+          showWelcome: false,
+        }),
+      ),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("▸ 2 个工具调用（Read, Grep）");
+  });
+});

@@ -20,8 +20,11 @@ import {
  * 未知语言/高亮器异常回退原文，绝不让渲染崩。
  */
 export function highlightCode(text: string, lang?: string): string {
+  // 无语言不猜：highlight.js 的 auto-detect 会给纯文本/日志乱着色（"to"、
+  // "some" 这类词被当关键字），无 lang 围栏一律原样返回。
+  if (!lang) return text;
   try {
-    return highlight(text, { language: lang || undefined, ignoreIllegals: true });
+    return highlight(text, { language: lang, ignoreIllegals: true });
   } catch {
     return text;
   }
@@ -176,8 +179,10 @@ function MarkdownBlock({
         >
           {c.lang ? <Text dimColor>{c.lang}</Text> : null}
           {lines.map((line, i) => (
-            // 已含 ANSI 着色，不再叠主题色（Ink Text 透传 ANSI）。
-            <Text key={i}>{line}</Text>
+            // 有 lang：ANSI 已着色不叠主题色；无 lang：保留原主题 accent。
+            <Text key={i} color={c.lang ? undefined : theme.colors.accent}>
+              {line}
+            </Text>
           ))}
         </Box>
       );
