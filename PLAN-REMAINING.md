@@ -208,8 +208,8 @@
   仅 TUI（REPL/print 无交互权限确认）。详见 `docs/permission-flow.md`。
 - ✅ **Output styles**（输出样式,忠实复刻 v0.1.9）——`default/minimal/codex` 三内置 +
   用户 `~/.openharness/output_styles/*.md`;REPL `EventRenderer` 按 name 分支(`minimal` 极简纯文本);
-  `/output-style [show|list|NAME]` 命令(REPL 热切换+持久化);TUI state 带 `output_style`(仅 track,
-  不 render-branch)。详见 `docs/output-styles-design.md`。
+  `/output-style [show|list|NAME]` 命令(REPL 热切换+持久化);TUI render-branch 已随
+  E.3 收口补齐。详见 `docs/output-styles-design.md`。
 - ✅ 语法高亮（cli-highlight，无 lang 不 auto-detect）、TUI output-style
   render-branch（minimal 极简工具行 + /output-style 热切换）、tool 行分组
   折叠（最新组展开，旧组摘要行）——E.3 全部收口，详见 `docs/tui-render-tail-design.md`。

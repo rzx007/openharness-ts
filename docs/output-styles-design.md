@@ -92,4 +92,4 @@
   ——与本仓 `settings.ts` 的 IO 一致(整个 TS app 都硬编码 homedir);若将来 settings 接入
   `OPENHARNESS_CONFIG_DIR`,这里一并改以保持 parity。
 - **TUI `/output-style set` 当前不持久化**:TUI host 的 `updateSettings` 是 no-op(对**所有**
-  设置类命令的既有限制),且 TUI 不 render-branch,故 TUI 改样式无视觉效果;实际生效面是 REPL。
+  设置类命令的既有限制)。~~且 TUI 不 render-branch~~——E.3 收口后 TUI 已有 minimal 工具行分支（详见 tui-render-tail-design.md），热切换经 state_snapshot 即时生效。
