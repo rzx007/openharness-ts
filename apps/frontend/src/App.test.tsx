@@ -24,6 +24,8 @@ const baseProps: AppViewProps = {
   onSubmit: () => {},
   onCycleMode: () => {},
   dialogOpen: false,
+  sidebarOpen: false,
+  onToggleSidebar: () => {},
 };
 
 // ─── Test 1: ready=false → shows Connecting text ─────────────────────────────

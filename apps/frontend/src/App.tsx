@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useKeyboard, useRenderer } from "@opentui/react";
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { useBackendSession } from "./hooks/useBackendSession";
 import { ThemeProvider, useTheme } from "./theme/ThemeContext";
@@ -38,6 +38,8 @@ export type AppViewProps = {
   /** 草稿提升：dialogOpen 卸载 Prompt 时由 AppInner 持有，重挂载恢复 */
   draft?: string;
   onDraftChange?: (text: string) => void;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
 };
 
 // ─── AppView — pure rendering layer (testable) ───────────────────────────────
@@ -60,6 +62,8 @@ export function AppView({
   dialogOpen,
   draft,
   onDraftChange,
+  sidebarOpen,
+  onToggleSidebar: _onToggleSidebar,
 }: AppViewProps) {
   const { theme } = useTheme();
 
@@ -108,9 +112,19 @@ export function AppView({
 
   return (
     <box flexDirection="column" width="100%" height="100%">
-      <Session items={transcript} assistantBuffer={assistantBuffer} />
-      {todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
-      {(swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (
+      <Session
+        items={transcript}
+        assistantBuffer={assistantBuffer}
+        sidebarOpen={sidebarOpen}
+        status={status}
+        mcpServers={mcpServers}
+        todoMarkdown={todoMarkdown}
+        swarmTeammates={swarmTeammates}
+        swarmNotifications={swarmNotifications}
+        version={version}
+      />
+      {!sidebarOpen && todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
+      {!sidebarOpen && (swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (
         <SwarmPanel teammates={swarmTeammates} notifications={swarmNotifications} />
       ) : null}
       {prompt}
@@ -282,6 +296,8 @@ const PERMISSION_MODES = [
 
 function AppInner({ config }: { config: FrontendConfig }) {
   const renderer = useRenderer();
+  const { width: terminalWidth } = useTerminalDimensions();
+  const [sidebarOpen, setSidebarOpen] = useState(() => terminalWidth >= 110);
   const dialog = useDialog();
   const { setThemeName, theme } = useTheme();
   const { toast } = useToast();
@@ -465,6 +481,11 @@ function AppInner({ config }: { config: FrontendConfig }) {
             run: () => handleCommand("/permissions"),
           },
           {
+            id: "app.sidebar",
+            title: "Toggle Sidebar",
+            run: () => setSidebarOpen((v) => !v),
+          },
+          {
             id: "app.exit",
             title: "Exit",
             keybinding: "ctrl+c",
@@ -610,6 +631,9 @@ function AppInner({ config }: { config: FrontendConfig }) {
       if (dialog.isOpen) return;
       openCommandPalette();
     }
+    if (key.ctrl && key.name === "b") {
+      setSidebarOpen((v) => !v);
+    }
   });
 
   return (
@@ -631,6 +655,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
       dialogOpen={dialog.isOpen}
       draft={draft}
       onDraftChange={setDraft}
+      sidebarOpen={sidebarOpen}
+      onToggleSidebar={() => setSidebarOpen((v) => !v)}
     />
   );
 }
