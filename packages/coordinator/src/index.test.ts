@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { beforeAll, afterAll } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join as joinPath } from "node:path";
+import { tmpdir } from "node:os";
 import {
   Coordinator,
   TeamRegistry,
@@ -9,6 +13,18 @@ import {
   isCoordinatorMode,
   COORDINATOR_SYSTEM_PROMPT,
 } from "./index.js";
+
+// getAllAgentDefinitions 现在会读 ~/.openharness/agents：把配置目录指到临时
+// 目录，避免开发机上的真实用户 agent 影响断言（环境隔离）。
+let cfgDir: string;
+beforeAll(() => {
+  cfgDir = mkdtempSync(joinPath(tmpdir(), "ohs-coord-cfg-"));
+  process.env.OPENHARNESS_CONFIG_DIR = cfgDir;
+});
+afterAll(() => {
+  delete process.env.OPENHARNESS_CONFIG_DIR;
+  rmSync(cfgDir, { recursive: true, force: true });
+});
 
 describe("Coordinator", () => {
   it("stores config", () => {

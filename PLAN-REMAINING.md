@@ -28,7 +28,7 @@
 | memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
 | prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段(B.5)；per-turn 记忆检索 TODO；personalization 段待 C |
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
-| coordinator | 🟡 | ✅mode env 对齐(A.5)；system prompt 精简、用户/plugin agent 加载、编排仍待(C) |
+| coordinator | 🟡 | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助(C.4)；缺 mode 辅助的 CLI 接线、agent 级字段运行时生效 |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
 | plugins | 🟡 | ✅skills/commands/hooks/MCP 贡献+信任门控+卸载防护(C.1 核心集)；缺 tools_dir 动态加载、plugin agents |
 | bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
@@ -137,11 +137,16 @@
 - 留待：`updateServerConfig`/`getServerConfig` 运行时改配置、MCP OAuth flow。
 - **文件**：`packages/mcp/src/index.ts`、`packages/core/src/types/settings.ts`（commit `1a18988`）
 
-### C.4 Coordinator 加载与 prompt 还原
-- 用户 `.md` agent 加载器（YAML frontmatter）+ plugin agent 合并。
-- 还原 coordinator / verification system prompt 的完整行为约束（当前大幅精简）。
-- scratchpad / worker-tools 上下文注入、`match_session_mode` 会话对齐。
-- **文件**：`packages/coordinator/src/`
+### C.4 Coordinator 加载与 prompt 还原 ✅ 基本完成
+- ✅ 用户 `.md` agent 加载器（真 YAML frontmatter + 行级回退，~20 字段）；
+  `getAllAgentDefinitions` 三源合并 builtin < user < plugin。
+- ✅ plugin agents（`plugin:ns:name` 命名，hooks/mcpServers/omitClaudeMd 信任面剥除）。
+- ✅ coordinator system prompt 经核对本就全量（「大幅精简」描述过时）；补
+  `CLAUDE_CODE_SIMPLE` 简单模式分支、`matchSessionMode`、`getCoordinatorTools`、
+  `getCoordinatorUserContext`（scratchpad/worker-tools 注入）。
+- 留待：上述函数在 CLI 会话恢复/用户轮的实际接线（session 尚未存 mode）；
+  agent 级 hooks/mcpServers/effort/memory/isolation 的运行时生效（swarm 后续）。
+- **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`
 
 ### C.5 Personalization（新模块）
 - 新建 `packages/personalization`：会话历史正则抽取环境事实（SSH/IP/conda/端点/env/git remote 等）。

@@ -71,6 +71,12 @@ describe("getCoordinatorUserContext", () => {
 });
 
 describe("getCoordinatorSystemPrompt", () => {
+  it("RICH_CAPABILITIES stays in sync with the static prompt (replace guard)", async () => {
+    const { COORDINATOR_SYSTEM_PROMPT } = await import("./index.js");
+    const { RICH_CAPABILITIES } = await import("./coordinator-mode.js");
+    expect(COORDINATOR_SYSTEM_PROMPT).toContain(RICH_CAPABILITIES);
+  });
+
   it("uses the rich worker capabilities by default", () => {
     const prompt = getCoordinatorSystemPrompt();
     expect(prompt).toContain("project skills via the Skill tool");

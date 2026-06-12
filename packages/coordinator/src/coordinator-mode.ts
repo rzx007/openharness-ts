@@ -85,7 +85,7 @@ export function getCoordinatorUserContext(
   return { workerToolsContext: content };
 }
 
-const RICH_CAPABILITIES =
+export const RICH_CAPABILITIES =
   "Workers have access to standard tools, MCP tools from configured MCP servers, " +
   "and project skills via the Skill tool. Delegate skill invocations (e.g. /commit, /verify) to workers.";
 

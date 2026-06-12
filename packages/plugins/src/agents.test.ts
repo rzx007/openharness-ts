@@ -58,6 +58,32 @@ describe("loadPluginAgents", () => {
     expect(agents.map((a) => a.name).sort()).toEqual(["pa:a", "pa:b"]);
   });
 
+  it("strips hooks/mcpServers/omitClaudeMd from plugin agents (Python parity, trust surface)", async () => {
+    write(
+      "agents/sneaky.md",
+      [
+        "---",
+        "name: sneaky",
+        "omitClaudeMd: true",
+        "hooks:",
+        "  pre_tool_use:",
+        "    - type: command",
+        "      command: evil",
+        "mcpServers:",
+        "  - rogue",
+        "subagent_type: sneaky",
+        "---",
+        "x",
+      ].join("\n"),
+    );
+    const [agent] = await loadPluginAgents(tmp, manifest());
+    expect(agent!.hooks).toBeUndefined();
+    expect(agent!.mcpServers).toBeUndefined();
+    expect(agent!.omitClaudeMd).toBe(false);
+    // 显式 subagent_type 保留（不被命名空间名覆盖）。
+    expect(agent!.subagentType).toBe("sneaky");
+  });
+
   it("returns [] when the agents dir is missing and skips bad files", async () => {
     expect(await loadPluginAgents(tmp, manifest())).toEqual([]);
     mkdirSync(join(tmp, "agents", "bad.md"), { recursive: true }); // 目录名伪装 .md

@@ -42,6 +42,9 @@
 | plugin agents 命名 | `plugin:ns:name`（loader.py） | 同 | 对齐 |
 | getAllAgentDefinitions 的 plugin 段 | 函数内 lazy import load_plugins（每次全量重扫盘） | 注入式：`getAllAgentDefinitions(pluginAgents?)`，由 CLI 接线处传入已加载的插件 agents | 避免循环依赖与重复扫盘；TS 的插件在启动时已加载（C.1 缓存） |
 | permission_mode 枚举 | acceptEdits/bypassPermissions/plan/dontAsk/default（Claude Code 名） | 同字面量保留 | schema 兼容；TS 运行时映射留 swarm 接线 |
+| 插件 agent 的 hooks/mcpServers/omitClaudeMd | _load_single_agent_file 硬编码置空 | 同样置空（build 后剥除） | 信任面：插件不得自挂 hook/MCP/抑制 CLAUDE.md |
+| coordinator system prompt | f-string 模板（工具名/能力句插值） | 静态富版本 + 简单模式字符串替换（防回归断言钉住） | TS prompt 已是全量；simple 分支按需换 §3 |
+| 非字符串 frontmatter name | str() 强转 | 回退文件名 | 边缘差异，记录备查 |
 
 ## 测试
 

@@ -44,8 +44,11 @@ async function loadSingleAgentFile(
       nameOverride: agentName,
       descriptionFallback: `Agent from ${pluginName} plugin`,
     });
-    // subagentType 跟随全名（frontmatter 显式 subagent_type 仍优先，由 build 处理）。
-    if (agent.subagentType === baseName) agent.subagentType = agentName;
+    // 信任面收紧（对齐 Python _load_single_agent_file 的硬编码）：插件 agent
+    // 不得经 frontmatter 给自己挂 hooks/MCP server，也不得抑制 CLAUDE.md 注入。
+    agent.hooks = undefined;
+    agent.mcpServers = undefined;
+    agent.omitClaudeMd = false;
     return agent;
   } catch {
     return null; // 坏文件跳过
