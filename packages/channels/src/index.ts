@@ -20,6 +20,13 @@ export interface ChannelAdapter {
 }
 
 export { EventBus } from "./bus";
+export { MessageBus } from "./bus/queue";
+export type { InboundMessage, OutboundMessage } from "./bus/queue";
+export { isAllowed } from "./bus/acl";
+export { ChannelManager } from "./manager";
+export type { ChannelManagerOptions, ChannelStatus } from "./manager";
+export { ChannelBridge } from "./bridge";
+export type { BridgeEngine } from "./bridge";
 export { StdioAdapter } from "./impl/stdio";
 export { HttpAdapter } from "./impl/http";
 export { FeishuAdapter } from "./impl/feishu";

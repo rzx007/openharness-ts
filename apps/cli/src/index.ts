@@ -4,6 +4,7 @@ import { createAuthCommand } from "./commands/auth";
 import { createMcpCommand } from "./commands/mcp";
 import { createPluginCommand } from "./commands/plugin";
 import { createCronCommand } from "./commands/cron";
+import { createChannelsCommand } from "./commands/channels";
 import { createProviderCommand } from "./commands/provider";
 import { createSetupCommand } from "./commands/setup";
 
@@ -49,6 +50,7 @@ program.addCommand(createAuthCommand());
 program.addCommand(createMcpCommand());
 program.addCommand(createPluginCommand());
 program.addCommand(createCronCommand());
+program.addCommand(createChannelsCommand());
 program.addCommand(createProviderCommand());
 program.addCommand(createSetupCommand());
 
