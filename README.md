@@ -337,7 +337,7 @@ OpenHarness-ts/
 | 模块               | 说明                                                          |
 | ---------------- | ----------------------------------------------------------- |
 | `CompactService` | LLM 驱动的对话摘要：当 token 接近阈值时自动触发，结构化 `<analysis>/<summary>` 输出 |
-| `SessionStorage` | 会话持久化：JSON 文件存储，支持 `--continue` / `--resume` 恢复             |
+| `SessionStorage` | 会话持久化（E.6 增强）：按项目分目录（cwd 哈希）、latest/id 双写、load 侧 tool_use/result 配对修复、tool_metadata 白名单、transcript.md 导出；`--continue` 读 latest，`--resume <id>` 读 named。详见 [docs/session-storage-design.md](docs/session-storage-design.md) |
 | `CronScheduler`  | 定时任务：cron 表达式解析 + `computeNextRunTime` + 执行历史记录             |
 | `TaskManager`    | 任务管理：创建/查询/停止/输出，文件持久化                                      |
 | `MemoryManager`  | 四层记忆体系的持久层：frontmatter + 加权搜索 + MEMORY.md 索引；配套 `/remember`（LLM 提取持久记忆）、`/dream`（梦境整合）、会话 checkpoint 与环境事实抽取。详见 [docs/memory-system.md](docs/memory-system.md) |
