@@ -1,45 +1,31 @@
 /**
- * TUI 前端入口（进程 B）。配置来自 `OPENHARNESS_FRONTEND_CONFIG`（由 runTuiMode 注入）
- * 或 dev 时的 `OPENHARNESS_BACKEND_COMMAND`；backend 由 useBackendSession spawn。
- * 详见 docs/tui-flow.md。
+ * TUI 前端入口（进程 B，Bun 运行时）。配置经 OPENHARNESS_FRONTEND_CONFIG 注入；
+ * backend 由 useBackendSession spawn。详见 docs/tui-flow.md。
  */
-import React from "react";
-import { render } from "ink";
+import { createCliRenderer } from "@opentui/core";
+import { createRoot } from "@opentui/react";
 import { App } from "./App";
 import type { FrontendConfig } from "./types";
 
-interface IndexConfig extends FrontendConfig {
-  theme?: string;
-}
-
 const rawConfig = process.env.OPENHARNESS_FRONTEND_CONFIG;
-let config: IndexConfig;
-
-if (rawConfig) {
-  try {
-    const parsed = JSON.parse(rawConfig);
-    config = {
-      backend_command: parsed.backend_command ?? ["node", "--experimental-strip-types", "placeholder"],
-      initial_prompt: parsed.initial_prompt ?? null,
-      theme: parsed.theme ?? "default",
-    };
-  } catch {
-    config = {
-      backend_command: ["node", "--experimental-strip-types", "placeholder"],
-      theme: "default",
-    };
-  }
-} else {
-  const backendCmd = process.env.OPENHARNESS_BACKEND_COMMAND;
-  const command = backendCmd
-    ? backendCmd.split(" ")
-    : ["ohs", "--backend-only"];
-
+let config: FrontendConfig;
+try {
+  const parsed = rawConfig ? JSON.parse(rawConfig) : {};
   config = {
-    backend_command: command,
-    initial_prompt: process.env.OPENHARNESS_INITIAL_PROMPT ?? null,
-    theme: process.env.OPENHARNESS_THEME ?? "default",
+    backend_command: parsed.backend_command
+      ?? (process.env.OPENHARNESS_BACKEND_COMMAND?.split(" ") ?? ["ohs", "--backend-only"]),
+    initial_prompt: parsed.initial_prompt ?? process.env.OPENHARNESS_INITIAL_PROMPT ?? null,
+    theme: parsed.theme ?? process.env.OPENHARNESS_THEME ?? "default",
+    version: parsed.version ?? null,
   };
+} catch {
+  config = { backend_command: ["ohs", "--backend-only"], theme: "default" };
 }
 
-render(React.createElement(App, { config }));
+try {
+  const renderer = await createCliRenderer({ exitOnCtrlC: false });
+  createRoot(renderer).render(<App config={config} />);
+} catch (err) {
+  console.error("[openharness] 终端渲染器初始化失败（需要 Bun + 支持的平台）：", err);
+  process.exit(1);
+}

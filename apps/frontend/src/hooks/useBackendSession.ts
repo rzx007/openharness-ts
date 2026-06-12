@@ -20,7 +20,11 @@ const PROTOCOL_PREFIX = "OHJSON:";
 const ASSISTANT_DELTA_FLUSH_MS = 33;
 const ASSISTANT_DELTA_FLUSH_CHARS = 256;
 
-export function useBackendSession(config: FrontendConfig, onExit: (code?: number | null) => void) {
+export function useBackendSession(
+  config: FrontendConfig,
+  onExit: (code?: number | null) => void,
+  onError?: (message: string) => void,
+) {
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [status, setStatus] = useState<Record<string, unknown>>({});
@@ -41,6 +45,10 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
   const [swarmNotifications, setSwarmNotifications] = useState<SwarmNotificationSnapshot[]>([]);
   const childRef = useRef<ChildProcess | null>(null);
   const sentInitialPrompt = useRef(false);
+
+  // ref 中转：reader 的 line 监听闭包定格在首次渲染，直接捕获 onError 会失效
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   const assistantBufferRef = useRef("");
   const pendingAssistantDeltaRef = useRef("");
@@ -218,7 +226,9 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
       return;
     }
     if (event.type === "error") {
-      setTranscript((items) => [...items, { role: "system", text: `error: ${event.message ?? "unknown error"}` }]);
+      const message = event.message ?? "unknown error";
+      setTranscript((items) => [...items, { role: "system", text: `error: ${message}` }]);
+      onErrorRef.current?.(message);
       clearAssistantDelta();
       setBusy(false);
       return;

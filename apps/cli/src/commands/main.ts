@@ -26,6 +26,8 @@ import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
 import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
+import { resolveBun } from "./resolveBun";
+import { VERSION } from "../version";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -615,10 +617,10 @@ async function runRepl(
 /**
  * 启动 TUI (Terminal User Interface) 模式。
  *
- * 本进程（ohs --tui）仅作**启动器**：spawn React/Ink 前端子进程，经
+ * 本进程（ohs --tui）仅作**启动器**：spawn opentui 前端（Bun 运行时）子进程，经
  * `OPENHARNESS_FRONTEND_CONFIG` 传入 `backend_command`（含 `--backend-only` 及 CLI flags）。
  * 由前端 `useBackendSession` 再 spawn BackendHost 子进程；OHJSON 协议在前后端 pipe 间通信。
- * 本进程 stdio inherit 终端给 Ink，等前端退出后 process.exit。详见 docs/tui-flow.md。
+ * 本进程 stdio inherit 终端给 opentui，等前端退出后 process.exit。详见 docs/tui-flow.md。
  *
  * @param settings - 当前加载的应用设置
  * @param options - 命令行选项，写入 backend_command 供 BackendHost 使用
@@ -630,6 +632,16 @@ async function runTuiMode(
   options: MainOptions,
   prompt?: string,
 ): Promise<void> {
+  const bun = resolveBun();
+  if (!bun) {
+    console.error(
+      "openharness TUI 需要 Bun 运行时（opentui 原生渲染器）。\n" +
+      "安装：https://bun.sh — Windows: powershell -c \"irm bun.sh/install.ps1 | iex\"\n" +
+      "或使用 -p/--print 模式无 TUI 运行。",
+    );
+    process.exit(1);
+  }
+
   const { spawn } = await import("node:child_process");
   const path = await import("node:path");
   const url = await import("node:url");
@@ -656,6 +668,7 @@ async function runTuiMode(
     backend_command: [process.execPath, ...args],
     initial_prompt: prompt ?? null,
     theme: options.theme ?? "default",
+    version: VERSION,
   });
 
   const cliDir = path.dirname(url.fileURLToPath(import.meta.url));
@@ -671,7 +684,7 @@ async function runTuiMode(
     process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   }
 
-  const child = spawn(process.execPath, [frontendDistPath], {
+  const child = spawn(bun, [frontendDistPath], {
     stdio: "inherit",
     env: {
       ...process.env,

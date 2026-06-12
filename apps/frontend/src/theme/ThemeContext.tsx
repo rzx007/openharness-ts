@@ -19,7 +19,7 @@ export function ThemeProvider({
 }: {
   children: React.ReactNode;
   initialTheme?: string;
-}): React.JSX.Element {
+}): React.ReactNode {
   const [theme, setTheme] = useState<ThemeConfig>(() => getTheme(initialTheme));
 
   const setThemeName = (name: string): void => {
