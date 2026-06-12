@@ -9,7 +9,7 @@ const externals = [
 const result = await Bun.build({
   entrypoints: ["src/index.tsx"],
   outdir: "dist",
-  target: "node",
+  target: "bun",
   format: "esm",
   sourcemap: "external",
   external: externals,
@@ -25,7 +25,7 @@ if (!result.success) {
 
 for (const output of result.outputs) {
   if (output.path.endsWith("index.js")) {
-    const content = "#!/usr/bin/env node\n" + await output.text();
+    const content = "#!/usr/bin/env bun\n" + await output.text();
     await Bun.write(output.path, content);
   }
 }

@@ -3,11 +3,13 @@ packages:
   - packages/*
 
 catalog:
+  '@opentui/core': ^0.4.1
+  '@opentui/react': ^0.4.1
   cli-highlight: ^2.1.11
   '@anthropic-ai/sdk': ^0.40.0
   '@modelcontextprotocol/sdk': ^1.29.0
   '@types/node': ^22.13.14
-  '@types/react': ^18.3.12
+  '@types/react': ^19.0.0
   '@types/react-dom': ^18.3.1
   chalk: ^5.4.1
   chokidar: ^4.0.3
@@ -20,7 +22,7 @@ catalog:
   ink-text-input: ^6.0.0
   js-yaml: ^4.1.0
   openai: ^4.91.0
-  react: ^18.3.1
+  react: ^19.2.0
   react-dom: ^18.3.1
   undici: ^7.7.0
   vitest: ^3.1.1
