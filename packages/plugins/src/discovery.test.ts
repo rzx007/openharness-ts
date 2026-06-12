@@ -155,6 +155,20 @@ describe("loadPlugin", () => {
   });
 });
 
+describe("loadPlugin fills contributions", () => {
+  it("loads skills and commands from the plugin layout", async () => {
+    const dir = makePlugin(tmp, "rich");
+    mkdirSync(join(dir, "skills", "deploy"), { recursive: true });
+    writeFileSync(join(dir, "skills", "deploy", "SKILL.md"), "Deploy skill.");
+    mkdirSync(join(dir, "commands"), { recursive: true });
+    writeFileSync(join(dir, "commands", "lint.md"), "Lint command.");
+
+    const plugin = (await loadPlugin(dir, {}))!;
+    expect(plugin.skills.map((s) => s.commandName)).toEqual(["deploy"]);
+    expect(plugin.commands.map((c) => c.name)).toEqual(["rich:lint"]);
+  });
+});
+
 describe("loadPlugins (end to end over extraRoots)", () => {
   it("loads all discovered plugins with enabled flags and surfaces warnings", async () => {
     const root = join(tmp, "root");

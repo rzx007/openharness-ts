@@ -3,6 +3,12 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import type { SkillDefinition } from "@openharness/skills";
+import {
+  loadPluginSkills,
+  loadPluginCommands,
+  type PluginCommandDefinition,
+} from "./contributions.js";
 
 /**
  * 插件发现与加载（移植自 Python plugins/loader.py 的发现段）。
@@ -48,9 +54,9 @@ export interface LoadedPlugin {
   manifest: PluginManifest;
   path: string;
   enabled: boolean;
-  /** R2 起填充；disabled 插件不加载贡献。 */
-  skills: unknown[];
-  commands: unknown[];
+  /** 与 Python 一致：disabled 插件也加载贡献（供 /plugin 展示），注册时按 enabled 过滤。 */
+  skills: SkillDefinition[];
+  commands: PluginCommandDefinition[];
   hooks: Record<string, unknown[]>;
   mcpServers: Record<string, unknown>;
 }
@@ -161,8 +167,8 @@ export async function loadPlugin(
     manifest,
     path,
     enabled,
-    skills: [],
-    commands: [],
+    skills: await loadPluginSkills(path, manifest),
+    commands: await loadPluginCommands(path, manifest),
     hooks: {},
     mcpServers: {},
   };

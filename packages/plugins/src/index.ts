@@ -11,6 +11,12 @@ export {
   type PluginDiscoverySettings,
 } from "./discovery.js";
 
+export {
+  loadPluginSkills,
+  loadPluginCommands,
+  type PluginCommandDefinition,
+} from "./contributions.js";
+
 import { readdir, stat, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
