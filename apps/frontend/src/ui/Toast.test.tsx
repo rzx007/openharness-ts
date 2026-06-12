@@ -13,7 +13,7 @@ test("toast appears in frame after toast()", async () => {
     return null;
   }
 
-  const { renderer, renderOnce, waitForFrame } = await testRender(
+  const { renderer, renderOnce, waitForFrame, captureCharFrame } = await testRender(
     <ThemeProvider>
       <ToastProvider>
         <Capture />
@@ -27,7 +27,7 @@ test("toast appears in frame after toast()", async () => {
     toastApi!.toast("hello toast");
   });
   await waitForFrame((f) => f.includes("hello toast"));
-  expect(true).toBe(true); // waitForFrame would throw if not found
+  expect(captureCharFrame()).toContain("hello toast");
 
   renderer.destroy();
 });
@@ -74,7 +74,7 @@ test("error toast uses error level (renders without crashing)", async () => {
     return null;
   }
 
-  const { renderer, renderOnce, waitForFrame } = await testRender(
+  const { renderer, renderOnce, waitForFrame, captureCharFrame } = await testRender(
     <ThemeProvider>
       <ToastProvider>
         <Capture />

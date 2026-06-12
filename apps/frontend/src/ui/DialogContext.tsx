@@ -96,7 +96,7 @@ export function DialogProvider({
   // Compute dialog box dimensions
   const dialogWidth = Math.min(64, Math.max(40, Math.floor(width * 0.6)));
   const dialogTop = Math.max(1, Math.floor(height / 4));
-  const dialogLeft = Math.floor((width - dialogWidth) / 2);
+  const dialogLeft = Math.max(0, Math.floor((width - dialogWidth) / 2));
 
   const api = useMemo<DialogApi>(
     () => ({ push, replace, close, closeAll, isOpen }),
