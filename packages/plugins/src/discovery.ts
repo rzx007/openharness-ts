@@ -78,7 +78,9 @@ export interface PluginDiscoverySettings {
 // ---------------------------------------------------------------------------
 
 export function getUserPluginsDir(): string {
-  return join(homedir(), ".openharness", "plugins");
+  // 与 core/paths 同约定:OPENHARNESS_CONFIG_DIR 可重定向(测试隔离)。
+  const base = process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness");
+  return join(base, "plugins");
 }
 
 export function getProjectPluginsDir(cwd: string): string {

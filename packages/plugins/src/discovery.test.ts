@@ -82,8 +82,14 @@ describe("findManifest", () => {
 });
 
 describe("plugins dir helpers", () => {
-  it("getUserPluginsDir points at ~/.openharness/plugins without creating it", () => {
+  it("getUserPluginsDir points at ~/.openharness/plugins, honoring OPENHARNESS_CONFIG_DIR", () => {
     expect(getUserPluginsDir()).toBe(join(homedir(), ".openharness", "plugins"));
+    process.env.OPENHARNESS_CONFIG_DIR = tmp;
+    try {
+      expect(getUserPluginsDir()).toBe(join(tmp, "plugins"));
+    } finally {
+      delete process.env.OPENHARNESS_CONFIG_DIR;
+    }
   });
 
   it("getProjectPluginsDir is <cwd>/.openharness/plugins and does not mkdir", () => {

@@ -401,6 +401,121 @@ export function registerBuiltinCommandsOnRegistry(
     },
   });
 
+  // ── /stats ─────────────────────────────────────────────
+  registry.register({
+    name: "/stats",
+    description: "Show session statistics (对齐 Python /stats)",
+    handler: async () => {
+      const history = getEngine().getHistory();
+      const { estimateTokens } = await import("@openharness/services");
+      const text = history
+        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+        .join(" ");
+      // 差异:Python 报 memory_files(文件数),TS 报会话内 MemoryManager 条目数。
+      const memoryCount = ctx.memoryManager ? (await ctx.memoryManager.getAll()).length : 0;
+      const taskCount = ctx.taskManager ? ctx.taskManager.listTasks().length : 0;
+      const toolCount = getBundle().toolRegistry.getAll().length;
+      const lines = [
+        "Session stats:",
+        `- messages: ${history.length}`,
+        `- estimated_tokens: ${estimateTokens(text).tokens}`,
+        `- tools: ${toolCount}`,
+        `- memory_entries: ${memoryCount}`,
+        `- background_tasks: ${taskCount}`,
+        `- output_style: ${getSettings().outputStyle ?? "default"}`,
+      ];
+      return { success: true, output: lines.join(String.fromCharCode(10)) };
+    },
+  });
+
+  // ── /reload-plugins ────────────────────────────────────
+  registry.register({
+    name: "/reload-plugins",
+    description: "Rediscover plugins and re-register contributions",
+    handler: async () => {
+      if (!ctx.skillRegistry) {
+        return { success: false, output: "SkillRegistry 不可用(仅 REPL 支持)。" };
+      }
+      const { loadPluginContributions, registerPluginHooks } = await import("../plugin-contributions.js");
+      // 先清后注册:被 disable 的插件其 skills/hooks 必须真正下线,
+      // 否则 enable/disable 的"立即生效"是谎话(agents 由 wholesale 替换天然覆盖)。
+      const hookExecutor = getBundle().hookExecutor;
+      for (const skill of ctx.skillRegistry.getAll()) {
+        if (skill.source === "plugin") ctx.skillRegistry.unregister(skill.name);
+      }
+      for (const hook of hookExecutor.getAll?.() ?? []) {
+        if (hook.id.startsWith("plugin:")) hookExecutor.unregister?.(hook.id);
+      }
+      const { plugins, warnings } = await loadPluginContributions(
+        ctx.skillRegistry,
+        getSettings(),
+        process.cwd(),
+      );
+      registerPluginHooks(hookExecutor, plugins);
+      if (plugins.length === 0) {
+        return { success: true, output: "No plugins discovered." };
+      }
+      const lines = ["Reloaded plugins:"];
+      for (const plugin of plugins) {
+        lines.push(`- ${plugin.manifest.name} [${plugin.enabled ? "enabled" : "disabled"}]`);
+      }
+      for (const warning of warnings) lines.push(`! ${warning}`);
+      return { success: true, output: lines.join(String.fromCharCode(10)) };
+    },
+  });
+
+  // ── /subagents ─────────────────────────────────────────
+  // 与 Python 差异:Python /subagents 是 worker 任务视角(TS 已有 /agents 覆盖),
+  // TS 版改列「可用 agent 人格」(builtin/user/plugin 三源,C.4)——信息量互补。
+  registry.register({
+    name: "/subagents",
+    description: "List available agent personas (builtin/user/plugin)",
+    handler: async () => {
+      const { getAllAgentDefinitions } = await import("@openharness/coordinator");
+      const agents = getAllAgentDefinitions();
+      const lines = [`Available subagent personas (${agents.length}):`, ""];
+      for (const agent of agents) {
+        const model = agent.model ? ` model=${agent.model}` : "";
+        lines.push(`- ${agent.name} [${agent.source ?? "builtin"}]${model}`);
+        lines.push(`    ${agent.description.split(String.fromCharCode(10))[0]?.slice(0, 100) ?? ""}`);
+      }
+      lines.push("", '用法: Agent 工具 subagentType="<name>" 派发;/agents 查看运行中任务。');
+      return { success: true, output: lines.join(String.fromCharCode(10)) };
+    },
+  });
+
+  // ── /plugin ────────────────────────────────────────────
+  registry.register({
+    name: "/plugin",
+    description: "List or enable/disable plugins (list|enable NAME|disable NAME)",
+    handler: async (cmdCtx) => {
+      const tokens = parseArgs(cmdCtx.raw.replace(/^\/\S+\s*/, ""));
+      const { loadPlugins } = await import("@openharness/plugins");
+      const settings = getSettings();
+
+      if (tokens.length === 0 || tokens[0] === "list") {
+        const { plugins, warnings } = await loadPlugins(settings, process.cwd());
+        if (plugins.length === 0) return { success: true, output: "No plugins discovered." };
+        const lines = plugins.map(
+          (plugin) =>
+            `- ${plugin.manifest.name}@${plugin.manifest.version} [${plugin.enabled ? "enabled" : "disabled"}] ` +
+            `skills=${plugin.skills.length} commands=${plugin.commands.length} hooks=${plugin.hooks.length} agents=${plugin.agents.length}`,
+        );
+        for (const warning of warnings) lines.push(`! ${warning}`);
+        return { success: true, output: lines.join(String.fromCharCode(10)) };
+      }
+      if ((tokens[0] === "enable" || tokens[0] === "disable") && tokens.length === 2) {
+        const enabled = tokens[0] === "enable";
+        await updateSettings({ plugins: { ...(settings.plugins ?? {}), [tokens[1]!]: enabled } });
+        return {
+          success: true,
+          output: `${enabled ? "Enabled" : "Disabled"} plugin '${tokens[1]}'. 用 /reload-plugins 立即生效。`,
+        };
+      }
+      return { success: true, output: "Usage: /plugin [list|enable NAME|disable NAME]" };
+    },
+  });
+
   // ── /session ───────────────────────────────────────────
   registry.register({
     name: "/session",

@@ -198,9 +198,14 @@
 - **文件**：`apps/cli/src/commands/provider.ts`、`setup.ts`、`apps/cli/src/dry-run.ts`
 
 ### E.2 缺失斜杠命令
-- 补齐 `/stats` `/output-style` `/keybindings` `/vim` `/passes` `/release-notes` `/subagents` `/login` `/logout` `/reload-plugins` `/plugin` 等（按需，约 30 个）。
-- 用户可调用 skill 作为 `/<skill>` 斜杠命令（对齐 v0.1.9）。
-- **文件**：`apps/cli/src/commands/slash-commands.ts`
+- ✅ 高价值批次：`/stats`（messages/tokens/tools/memory/tasks/output_style）、
+  `/reload-plugins`（先清后注册，disable 立即生效）、`/subagents`（三源人格列表；
+  差异：Python 为任务视图，TS 由既有 `/agents` 覆盖）、`/plugin list|enable|disable`
+  （持久化 settings.plugins；install/uninstall 不做——无插件市场）。
+  顺带修：`getUserPluginsDir` 尊重 `OPENHARNESS_CONFIG_DIR`。
+- `/export` `/agents` `/output-style` 此前已有；skill 作 `/<skill>` 已随 E.5 落地。
+- 留待：`/keybindings` `/vim` `/passes` `/release-notes` `/login` `/logout` 等低频项（按需）。
+- **文件**：`apps/cli/src/commands/slash-commands.ts`、`packages/plugins/src/discovery.ts`
 
 ### E.3 TUI 渲染
 - ✅ **Edit/Write unified diff 预览**（approve once / session / full_auto 自动跳过）——
