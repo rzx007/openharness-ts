@@ -411,6 +411,7 @@ export function registerBuiltinCommandsOnRegistry(
       const text = history
         .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
         .join(" ");
+      // 差异:Python 报 memory_files(文件数),TS 报会话内 MemoryManager 条目数。
       const memoryCount = ctx.memoryManager ? (await ctx.memoryManager.getAll()).length : 0;
       const taskCount = ctx.taskManager ? ctx.taskManager.listTasks().length : 0;
       const toolCount = getBundle().toolRegistry.getAll().length;
@@ -436,12 +437,21 @@ export function registerBuiltinCommandsOnRegistry(
         return { success: false, output: "SkillRegistry 不可用(仅 REPL 支持)。" };
       }
       const { loadPluginContributions, registerPluginHooks } = await import("../plugin-contributions.js");
+      // 先清后注册:被 disable 的插件其 skills/hooks 必须真正下线,
+      // 否则 enable/disable 的"立即生效"是谎话(agents 由 wholesale 替换天然覆盖)。
+      const hookExecutor = getBundle().hookExecutor;
+      for (const skill of ctx.skillRegistry.getAll()) {
+        if (skill.source === "plugin") ctx.skillRegistry.unregister(skill.name);
+      }
+      for (const hook of hookExecutor.getAll?.() ?? []) {
+        if (hook.id.startsWith("plugin:")) hookExecutor.unregister?.(hook.id);
+      }
       const { plugins, warnings } = await loadPluginContributions(
         ctx.skillRegistry,
         getSettings(),
         process.cwd(),
       );
-      registerPluginHooks(getBundle().hookExecutor, plugins);
+      registerPluginHooks(hookExecutor, plugins);
       if (plugins.length === 0) {
         return { success: true, output: "No plugins discovered." };
       }
