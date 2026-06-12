@@ -210,7 +210,9 @@
   用户 `~/.openharness/output_styles/*.md`;REPL `EventRenderer` 按 name 分支(`minimal` 极简纯文本);
   `/output-style [show|list|NAME]` 命令(REPL 热切换+持久化);TUI state 带 `output_style`(仅 track,
   不 render-branch)。详见 `docs/output-styles-design.md`。
-- markdown 渲染已在 Tier-1 落地；**语法高亮、TUI render-branch、tool 行分组折叠**待做。
+- ✅ 语法高亮（cli-highlight，无 lang 不 auto-detect）、TUI output-style
+  render-branch（minimal 极简工具行 + /output-style 热切换）、tool 行分组
+  折叠（最新组展开，旧组摘要行）——E.3 全部收口，详见 `docs/tui-render-tail-design.md`。
 - **文件**：`packages/tools/src/file/{preview,diff}.ts`、`packages/output-styles/src/index.ts`、`apps/cli/src/renderer.ts`、`apps/cli/src/commands/{main,slash-commands}.ts`、`apps/frontend/src/components/ModalHost.tsx`、`apps/frontend/src/App.tsx`
 
 ### E.4 订阅 Provider（按需）
