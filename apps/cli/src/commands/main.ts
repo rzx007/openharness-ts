@@ -225,7 +225,7 @@ async function runTaskWorker(
     }
   } catch (err) {
     if (err instanceof Error) {
-      process.stderr.write(`${formatApiError(err, settings)}` + String.fromCharCode(10));
+      process.stderr.write(`${formatApiError(err, settings)}\n`);
     }
     process.exit(1);
   }
@@ -237,15 +237,26 @@ async function runTaskWorker(
   }
 }
 
-/** 读 stdin 第一行(EOF 返回空串)。用 chunk 迭代而非 readline——与 backend host
- * 同一读法;readline 在管道 stdin 下偶现 close 先于 line(Windows)。 */
+/**
+ * 读 stdin 第一行(EOF 返回空串)。chunk 迭代而非 readline(后者在 Windows 管道
+ * stdin 下偶现 close 先于 line)。关键:destroyOnReturn:false + pause——若早退时
+ * destroy 掉 stdin,leader 在本轮进行中 SendMessage 会撞断管 → TaskManager 误判
+ * 死进程而 terminate+重启,杀掉进行中的工作;pause 后句柄不再撑事件循环,
+ * 跑完一轮仍可干净退出。
+ */
 async function readOneStdinLine(): Promise<string> {
   let buffer = "";
   process.stdin.setEncoding("utf-8");
-  for await (const chunk of process.stdin) {
+  const iterator = (process.stdin as unknown as {
+    iterator(opts: { destroyOnReturn: boolean }): AsyncIterableIterator<string>;
+  }).iterator({ destroyOnReturn: false });
+  for await (const chunk of iterator) {
     buffer += chunk;
     const idx = buffer.indexOf(String.fromCharCode(10));
-    if (idx >= 0) return buffer.slice(0, idx);
+    if (idx >= 0) {
+      process.stdin.pause();
+      return buffer.slice(0, idx);
+    }
   }
   return buffer;
 }
@@ -259,11 +270,12 @@ export function decodeTaskWorkerLine(raw: string): string {
   if (!trimmed) return "";
   try {
     const parsed = JSON.parse(trimmed) as unknown;
-    if (parsed && typeof parsed === "object") {
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const text = (parsed as { text?: unknown }).text;
       if (typeof text === "string") return text.trim();
-      return "";
     }
+    // 对齐 Python:无 text 字段的 JSON(或数组/数字)按原始行当 prompt,
+    // 而非静默空转(空转还会白烧一次懒复活重启额度)。
   } catch {
     // 纯文本
   }

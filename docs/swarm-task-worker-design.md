@@ -51,6 +51,8 @@ TS 底子已齐：`TaskManager.writeToTask` 懒复活（B.3）、`createAgentTas
 | api-key | argv `--api-key` | 不进 argv（settings/env） | TS teammate 既有约定 |
 | 上下文连续性 | 重启不保留（注释明示） | 同 | 对齐；将来可经 session 快照恢复（已有 E.6 存储，留待） |
 | `system_prompt_mode`/`plan_mode_required` flags | 有 | 暂不传（TS spawn 配置无对应） | 字段缺口，留待 |
+| 空行/纯空白 stdin | continue 继续等下一行 | 直接退出（懒复活会重投下一条） | 退出比无限等更稳健 |
+| 无 text 的 JSON 对象 | 原始行当 prompt | 同（审查修复后对齐） | 防静默空转烧重启额度 |
 
 ## 测试
 

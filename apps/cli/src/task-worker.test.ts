@@ -11,7 +11,8 @@ describe("decodeTaskWorkerLine", () => {
     expect(decodeTaskWorkerLine("   ")).toBe("");
   });
 
-  it("JSON object without text yields empty (structured non-prompt message)", () => {
-    expect(decodeTaskWorkerLine('{"type":"shutdown"}')).toBe("");
+  it("JSON object without text falls back to the raw line (Python parity)", () => {
+    expect(decodeTaskWorkerLine('{"type":"shutdown"}')).toBe('{"type":"shutdown"}');
+    expect(decodeTaskWorkerLine("[1,2]")).toBe("[1,2]");
   });
 });

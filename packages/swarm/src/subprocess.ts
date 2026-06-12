@@ -8,13 +8,13 @@ import type { WorktreeManager } from "./worktree.js";
  * 真实实现由调用方（apps/cli）注入 `getTaskManager()`，测试可注入 mock。
  */
 export interface TaskRunner {
-  createShellTask(opts: {
+  /** 可选:历史遗留(teammate 已全走 createAgentTask),保留兼容旧注入方。 */
+  createShellTask?(opts: {
     argv?: string[];
     command?: string;
     description: string;
     cwd: string;
     env?: Record<string, string>;
-    /** Optional task type marker (e.g. "agent" for teammate tasks). */
     type?: string;
   }): Promise<{ id: string }>;
   /** agent 任务:spawn 后把 prompt 经 stdin 喂给子进程(task-worker 多轮承载)。 */
@@ -132,7 +132,7 @@ export class SubprocessBackend implements SwarmBackend {
       }
       return result;
     } catch (err) {
-      // 若本次已建了隔离 worktree（拿到 slug）但后续 createShellTask 抛错，
+      // 若本次已建了隔离 worktree（拿到 slug）但后续 createAgentTask 抛错，
       // 该 worktree 从未写进 agentWorktrees、terminate 永远清不到它 → 孤儿泄漏。
       // 尽力 force 清理（吞错），再返回失败。
       if (isolateSlug != null && this.worktreeManager != null) {
