@@ -56,6 +56,9 @@ export function Prompt({
   // Spinner state for busy
   const [spinnerFrame, setSpinnerFrame] = useState(0);
 
+  // Dynamic textarea height (1–6 lines)
+  const [textareaHeight, setTextareaHeight] = useState(1);
+
   // Textarea ref for imperative operations
   const textareaRef = useRef<TextareaRenderable | null>(null);
 
@@ -82,9 +85,12 @@ export function Prompt({
     setAcIndex(0);
   }, [content]);
 
-  // Spinner interval when busy
+  // Spinner interval when busy; reset frame when no longer busy (Bug 4)
   useEffect(() => {
-    if (!busy) return;
+    if (!busy) {
+      setSpinnerFrame(0);
+      return;
+    }
     const frames = theme.icons.spinner;
     const id = setInterval(() => {
       setSpinnerFrame((f) => (f + 1) % frames.length);
@@ -131,8 +137,12 @@ export function Prompt({
         // Complete with highlighted suggestion
         const suggestion = acSuggestions[acIndex];
         if (suggestion && textareaRef.current) {
+          const completed = suggestion.id + " ";
           textareaRef.current.clear();
-          textareaRef.current.insertText(suggestion.id);
+          textareaRef.current.insertText(completed);
+          // Bug 2: sync content state immediately so derived acSuggestions/acOpen
+          // use the updated value without waiting for the async onContentChange event.
+          setContent(completed);
         }
       } else {
         onCycleMode();
@@ -143,18 +153,22 @@ export function Prompt({
     if (key.name === "up") {
       if (acOpen) {
         setAcIndex((prev) => Math.max(0, prev - 1));
-      } else if (content === "") {
-        // History navigation: up → older
-        const newIdx =
-          histIdx === null
-            ? history.length - 1
-            : Math.max(0, histIdx - 1);
-        if (history.length > 0 && newIdx >= 0) {
-          setHistIdx(newIdx);
-          const entry = history[newIdx];
-          if (entry !== undefined && textareaRef.current) {
-            textareaRef.current.clear();
-            textareaRef.current.insertText(entry);
+      } else {
+        // Bug 1: read from ref to avoid stale closure — content state may lag
+        const currentText = textareaRef.current?.plainText ?? "";
+        if (currentText === "") {
+          // History navigation: up → older
+          const newIdx =
+            histIdx === null
+              ? history.length - 1
+              : Math.max(0, histIdx - 1);
+          if (history.length > 0 && newIdx >= 0) {
+            setHistIdx(newIdx);
+            const entry = history[newIdx];
+            if (entry !== undefined && textareaRef.current) {
+              textareaRef.current.clear();
+              textareaRef.current.insertText(entry);
+            }
           }
         }
       }
@@ -166,20 +180,24 @@ export function Prompt({
         setAcIndex((prev) =>
           Math.min(Math.max(0, acSuggestions.length - 1), prev + 1),
         );
-      } else if (content === "") {
-        // History navigation: down → newer
-        if (histIdx !== null) {
-          const newIdx = histIdx + 1;
-          if (newIdx >= history.length) {
-            // Past the end: clear input
-            setHistIdx(null);
-            clearTextarea();
-          } else {
-            setHistIdx(newIdx);
-            const entry = history[newIdx];
-            if (entry !== undefined && textareaRef.current) {
-              textareaRef.current.clear();
-              textareaRef.current.insertText(entry);
+      } else {
+        // Bug 1: read from ref to avoid stale closure
+        const currentText = textareaRef.current?.plainText ?? "";
+        if (currentText === "") {
+          // History navigation: down → newer
+          if (histIdx !== null) {
+            const newIdx = histIdx + 1;
+            if (newIdx >= history.length) {
+              // Past the end: clear input
+              setHistIdx(null);
+              clearTextarea();
+            } else {
+              setHistIdx(newIdx);
+              const entry = history[newIdx];
+              if (entry !== undefined && textareaRef.current) {
+                textareaRef.current.clear();
+                textareaRef.current.insertText(entry);
+              }
             }
           }
         }
@@ -241,8 +259,11 @@ export function Prompt({
             // Read plainText from ref on next tick (event has no content)
             const text = textareaRef.current?.plainText ?? "";
             setContent(text);
+            // Bug 3: update height based on line count (1–6 rows)
+            const lineCount = textareaRef.current?.lineCount ?? 1;
+            setTextareaHeight(Math.min(6, Math.max(1, lineCount)));
           }}
-          height={1}
+          height={textareaHeight}
           flexShrink={0}
         />
 

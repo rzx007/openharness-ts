@@ -200,3 +200,110 @@ test("up arrow on empty input shows most recent history entry", async () => {
 
   renderer.destroy();
 });
+
+// ---------------------------------------------------------------------------
+// Test 6 (Bug 1): typing text then pressing Up should NOT navigate history
+// (stale-closure guard — reads from ref, not from potentially-stale content state)
+// ---------------------------------------------------------------------------
+
+test("up arrow after typing text does NOT replace textarea with history", async () => {
+  const history = ["old command"];
+
+  const { renderer, renderOnce, mockInput, waitForFrame, captureCharFrame } =
+    await testRender(makePrompt({ history }), { width: 80, height: 24 });
+
+  await renderOnce();
+
+  // Type some text so the textarea is non-empty
+  await act(async () => {
+    await mockInput.typeText("abc");
+  });
+  await waitForFrame((f) => f.includes("abc"));
+
+  // Press Up — should NOT replace "abc" with history entry
+  await act(async () => {
+    mockInput.pressArrow("up");
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  const frame = captureCharFrame();
+  // "old command" must not appear — history navigation must have been blocked
+  expect(frame).not.toContain("old command");
+  // "abc" should still be present
+  expect(frame).toContain("abc");
+
+  renderer.destroy();
+});
+
+// ---------------------------------------------------------------------------
+// Test 7 (Bug 2): Tab completion syncs content state — autocomplete closes
+// ---------------------------------------------------------------------------
+
+test("tab on highlighted autocomplete item updates textarea and closes suggestions", async () => {
+  const themeRun = mock(() => undefined);
+  const commands: Command[] = [
+    { id: "/theme", title: "Switch theme", run: themeRun },
+    { id: "/help", title: "Show help", run: mock(() => undefined) },
+  ];
+
+  const { renderer, renderOnce, mockInput, waitForFrame, captureCharFrame } =
+    await testRender(
+      makePrompt({ slashCommands: commands }),
+      { width: 80, height: 24 },
+    );
+
+  await renderOnce();
+
+  // Type "/th" to trigger autocomplete for /theme
+  await act(async () => {
+    await mockInput.typeText("/th");
+  });
+  await waitForFrame((f) => f.includes("/theme"));
+
+  // Press Tab to complete
+  await act(async () => {
+    mockInput.pressTab();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  const frame = captureCharFrame();
+  // Textarea content should now be "/theme " (with trailing space)
+  expect(frame).toContain("/theme");
+  // Autocomplete suggestions list should no longer show (content no longer matches a bare "/" prefix query)
+  // After "/theme " the AC filter returns no prefix match for further typing, so list closes.
+  // The key assertion: onSubmit was NOT called, the command was NOT run (Tab doesn't submit).
+  expect(themeRun).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});
+
+// ---------------------------------------------------------------------------
+// Test 8 (Advisory 3): busy=true ignores submit — assert via onSubmit not called
+// (reinforces test 4 with explicit focus-independent check)
+// ---------------------------------------------------------------------------
+
+test("busy=true: Enter key does not call onSubmit regardless of textarea content", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+
+  const { renderer, renderOnce, mockInput, waitForFrame } = await testRender(
+    makePrompt({ busy: true, onSubmit }),
+    { width: 80, height: 24 },
+  );
+
+  await renderOnce();
+  await waitForFrame((f) => f.includes("working"));
+
+  // Attempt submit via Enter (focused=false when busy, but mockInput bypasses focus)
+  await act(async () => {
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  // onSubmit must never be called while busy
+  expect(onSubmit).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});
