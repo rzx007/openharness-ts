@@ -1,348 +1,626 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
-
-import { CommandPicker } from "./components/CommandPicker";
-import { ConversationView } from "./components/ConversationView";
-import { ModalHost } from "./components/ModalHost";
-import { PromptInput } from "./components/PromptInput";
-import { SelectModal, type SelectOption } from "./components/SelectModal";
-import { StatusBar } from "./components/StatusBar";
-import { SwarmPanel } from "./components/SwarmPanel";
-import { TodoPanel } from "./components/TodoPanel";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useKeyboard, useRenderer } from "@opentui/react";
+import { TextAttributes } from "@opentui/core";
 import { useBackendSession } from "./hooks/useBackendSession";
 import { ThemeProvider, useTheme } from "./theme/ThemeContext";
-import type { FrontendConfig } from "./types";
+import { DialogProvider, useDialog } from "./ui/DialogContext";
+import { ToastProvider } from "./ui/Toast";
+import { DialogSelect } from "./ui/DialogSelect";
+import { buildRegistry, type CommandRegistry } from "./keymap/commands";
+import { BUILTIN_THEMES } from "./theme/builtinThemes";
+import { Home } from "./routes/Home";
+import { Session } from "./routes/session/Session";
+import { Footer } from "./routes/session/Footer";
+import { Prompt } from "./components/prompt/Prompt";
+import { TodoPanel } from "./components/TodoPanel";
+import { SwarmPanel } from "./components/SwarmPanel";
+import type { FrontendConfig, McpServerSnapshot, SwarmNotificationSnapshot, SwarmTeammateSnapshot, TranscriptItem } from "./types";
+import type { Command } from "./keymap/commands";
 
-const PERMISSION_MODES: SelectOption[] = [
-  { value: "default", label: "Default", description: "Ask before write/execute operations" },
-  { value: "full_auto", label: "Auto", description: "Allow all tools automatically" },
-  { value: "plan", label: "Plan Mode", description: "Block all write operations" },
-];
+// ─── AppViewProps ────────────────────────────────────────────────────────────
 
-type SelectModalState = {
-  title: string;
-  options: SelectOption[];
-  onSelect: (value: string) => void;
-} | null;
+export type AppViewProps = {
+  transcript: TranscriptItem[];
+  assistantBuffer: string;
+  ready: boolean;
+  busy: boolean;
+  status: Record<string, unknown>;
+  mcpServers: McpServerSnapshot[];
+  todoMarkdown: string;
+  swarmTeammates: SwarmTeammateSnapshot[];
+  swarmNotifications: SwarmNotificationSnapshot[];
+  version?: string | null;
+  history: string[];
+  slashCommands: Command[];
+  onSubmit: (line: string) => void;
+  onCycleMode: () => void;
+  dialogOpen: boolean;
+};
 
-export function App({ config }: { config: FrontendConfig & { theme?: string } }): React.JSX.Element {
-  const initialTheme = String((config as Record<string, unknown>).theme ?? "default");
+// ─── AppView — pure rendering layer (testable) ───────────────────────────────
+
+export function AppView({
+  transcript,
+  assistantBuffer,
+  ready,
+  busy,
+  status,
+  mcpServers,
+  todoMarkdown,
+  swarmTeammates,
+  swarmNotifications,
+  version,
+  history,
+  slashCommands,
+  onSubmit,
+  onCycleMode,
+  dialogOpen,
+}: AppViewProps): React.ReactNode {
+  const { theme } = useTheme();
+
+  if (!ready) {
+    return (
+      <box flexDirection="column" width="100%" height="100%">
+        <text fg={theme.colors.warning}>Connecting to backend...</text>
+      </box>
+    );
+  }
+
+  // Route: Home if no user/assistant items yet and not busy and no streaming
+  const hasConversation = transcript.some(
+    (item) => item.role === "user" || item.role === "assistant",
+  );
+  const isHome = !hasConversation && !busy && !assistantBuffer;
+
+  const mode = String(status.permission_mode ?? "default");
+  const model = String(status.model ?? "");
+  const effortRaw = status.effort;
+  const effort = typeof effortRaw === "string" && effortRaw !== "" ? effortRaw : undefined;
+
+  const prompt = dialogOpen ? null : (
+    <Prompt
+      busy={busy}
+      mode={mode}
+      model={model}
+      effort={effort}
+      history={history}
+      slashCommands={slashCommands}
+      onSubmit={onSubmit}
+      onCycleMode={onCycleMode}
+    />
+  );
+
+  if (isHome) {
+    return (
+      <box flexDirection="column" width="100%" height="100%">
+        <Home>{prompt}</Home>
+        <Footer status={status} mcpServers={mcpServers} version={version} />
+      </box>
+    );
+  }
+
   return (
-    <ThemeProvider initialTheme={initialTheme}>
-      <AppInner config={config} />
-    </ThemeProvider>
+    <box flexDirection="column" width="100%" height="100%">
+      <Session items={transcript} assistantBuffer={assistantBuffer} />
+      {todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
+      {(swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (
+        <SwarmPanel teammates={swarmTeammates} notifications={swarmNotifications} />
+      ) : null}
+      {prompt}
+      <Footer status={status} mcpServers={mcpServers} version={version} />
+    </box>
   );
 }
 
-function AppInner({ config }: { config: FrontendConfig }): React.JSX.Element {
-  const { exit } = useApp();
-  const { theme, setThemeName } = useTheme();
-  const [input, setInput] = useState("");
-  const [modalInput, setModalInput] = useState("");
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [pickerIndex, setPickerIndex] = useState(0);
-  const [selectModal, setSelectModal] = useState<SelectModalState>(null);
-  const [selectIndex, setSelectIndex] = useState(0);
-  const session = useBackendSession(config, () => exit());
+// ─── Permission dialog component ─────────────────────────────────────────────
 
-  const currentToolName = useMemo(() => {
-    for (let i = session.transcript.length - 1; i >= 0; i--) {
-      const item = session.transcript[i]!;
-      if (item.role === "tool") return item.tool_name ?? "tool";
-      if (item.role === "tool_result" || item.role === "assistant") break;
+const MAX_DIFF_LINES = 40;
+
+function DiffView({ diff }: { diff: string }): React.ReactNode {
+  const allLines = diff
+    .replace(/\n$/, "")
+    .split("\n")
+    .filter((l) => !l.startsWith("\\ No newline"));
+  const lines = allLines.slice(0, MAX_DIFF_LINES);
+  const truncated = allLines.length - lines.length;
+
+  return (
+    <box flexDirection="column">
+      {lines.map((line, i) => {
+        if (line.startsWith("+++") || line.startsWith("---")) {
+          return <text key={i} fg="#5c6370">{line}</text>;
+        }
+        if (line.startsWith("@@")) return <text key={i} fg="#56b6c2">{line}</text>;
+        if (line.startsWith("+")) return <text key={i} fg="#98c379">{line}</text>;
+        if (line.startsWith("-")) return <text key={i} fg="#e06c75">{line}</text>;
+        return <text key={i} fg="#5c6370">{line}</text>;
+      })}
+      {truncated > 0 && (
+        <text fg="#5c6370">{`  … ${truncated} more line(s)`}</text>
+      )}
+    </box>
+  );
+}
+
+function PermissionDialog({
+  modal,
+  onRespond,
+}: {
+  modal: Record<string, unknown>;
+  onRespond: (allowed: boolean, scope: "once" | "session") => void;
+}): React.ReactNode {
+  const { theme } = useTheme();
+  const respondedRef = useRef(false);
+
+  const respond = useCallback(
+    (allowed: boolean, scope: "once" | "session") => {
+      if (respondedRef.current) return;
+      respondedRef.current = true;
+      onRespond(allowed, scope);
+    },
+    [onRespond],
+  );
+
+  useKeyboard((key) => {
+    if (key.name === "y") {
+      respond(true, "once");
+    } else if (key.name === "a") {
+      respond(true, "session");
+    } else if (key.name === "n") {
+      respond(false, "once");
     }
-    return undefined;
-  }, [session.transcript]);
+  });
 
-  const commandHints = useMemo(() => {
-    const value = input.trim();
-    if (!value.startsWith("/")) return [] as string[];
-    return session.commands.filter((cmd) => cmd.startsWith(value)).slice(0, 10);
-  }, [session.commands, input]);
+  const toolName = modal.tool_name ? String(modal.tool_name) : "tool";
+  const reason = modal.reason ? String(modal.reason) : null;
+  const diff = modal.diff ? String(modal.diff) : null;
+  const diffPath = modal.diff_path ? String(modal.diff_path) : null;
 
-  const showPicker = commandHints.length > 0 && !session.busy && !session.modal && !selectModal;
+  return (
+    <box flexDirection="column">
+      <text>
+        <span fg={theme.colors.warning} attributes={TextAttributes.BOLD}>{"┌ "}</span>
+        <span attributes={TextAttributes.BOLD}>{"Allow "}</span>
+        <span fg={theme.colors.info} attributes={TextAttributes.BOLD}>{toolName}</span>
+        <span attributes={TextAttributes.BOLD}>{"?"}</span>
+      </text>
+      {reason ? (
+        <text>
+          <span fg={theme.colors.warning}>{"│ "}</span>
+          <span fg={theme.colors.muted}>{reason}</span>
+        </text>
+      ) : null}
+      {diff ? (
+        <box flexDirection="column">
+          {diffPath ? <text fg={theme.colors.muted}>{`  ${diffPath}`}</text> : null}
+          <DiffView diff={diff} />
+        </box>
+      ) : null}
+      <text>
+        <span fg={theme.colors.warning}>{"└ "}</span>
+        <span fg={theme.colors.success}>{"[y] Allow"}</span>
+        <span>{"  "}</span>
+        <span fg={theme.colors.success}>{"[a] Allow for session"}</span>
+        <span>{"  "}</span>
+        <span fg={theme.colors.error}>{"[n] Deny"}</span>
+      </text>
+    </box>
+  );
+}
+
+function QuestionDialog({
+  modal,
+  onSubmit,
+}: {
+  modal: Record<string, unknown>;
+  onSubmit: (answer: string) => void;
+}): React.ReactNode {
+  const { theme } = useTheme();
+  const [inputValue, setInputValue] = useState("");
+  const question = String(modal.question ?? "Question");
+  const toolName = modal.tool_name ? String(modal.tool_name) : null;
+  const reason = modal.reason ? String(modal.reason) : null;
+
+  useKeyboard((key) => {
+    if (key.name === "return") {
+      const trimmed = inputValue.trim();
+      if (trimmed) onSubmit(trimmed);
+    }
+  });
+
+  return (
+    <box flexDirection="column">
+      <text fg={theme.colors.accent} attributes={TextAttributes.BOLD}>
+        {"? " + question}
+      </text>
+      {toolName ? (
+        <text fg={theme.colors.muted}>{`  Tool: ${toolName}`}</text>
+      ) : null}
+      {reason ? (
+        <text fg={theme.colors.muted}>{`  Reason: ${reason}`}</text>
+      ) : null}
+      <input
+        focused
+        placeholder="Answer..."
+        onInput={(value: string) => setInputValue(value)}
+      />
+      <text fg={theme.colors.muted}>{"  enter: submit"}</text>
+    </box>
+  );
+}
+
+// ─── PERMISSION_MODES (for /permissions dialog) ───────────────────────────────
+
+const PERMISSION_MODES = [
+  {
+    value: "default",
+    label: "default",
+    description: "Ask for approval on sensitive operations",
+  },
+  {
+    value: "full_auto",
+    label: "full_auto",
+    description: "Allow all operations without asking",
+  },
+  {
+    value: "plan",
+    label: "plan",
+    description: "Plan mode — propose changes before executing",
+  },
+];
+
+// ─── AppInner — session + dialog wiring ──────────────────────────────────────
+
+function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
+  const renderer = useRenderer();
+  const dialog = useDialog();
+  const { setThemeName, theme } = useTheme();
+
+  const session = useBackendSession(config, (code) => {
+    process.exit(code ?? 0);
+  });
+
+  // Local input history (up to 100 entries)
+  const [history, setHistory] = useState<string[]>([]);
+
+  const appendHistory = useCallback((line: string) => {
+    setHistory((prev) => {
+      const next = [...prev, line];
+      return next.length > 100 ? next.slice(next.length - 100) : next;
+    });
+  }, []);
+
+  // ── handleCommand: intercept special slash commands ─────────────────────────
+  const handleCommand = useCallback(
+    (line: string): boolean => {
+      // /theme set X
+      const themeSetMatch = line.match(/^\/theme\s+set\s+(\S+)$/);
+      if (themeSetMatch?.[1]) {
+        setThemeName(themeSetMatch[1]);
+        return true;
+      }
+
+      // /theme (no args) — open theme picker
+      if (line.trim() === "/theme") {
+        const themeKeys = Object.keys(BUILTIN_THEMES);
+        const currentTheme = theme.name;
+        dialog.replace(
+          <DialogSelect
+            title="Select Theme"
+            items={themeKeys.map((k) => ({
+              value: k,
+              label: k,
+              active: k === currentTheme,
+            }))}
+            onSelect={(value) => {
+              setThemeName(value);
+              dialog.close();
+            }}
+          />,
+        );
+        return true;
+      }
+
+      // /permissions or /permissions show — open permissions picker
+      if (line.trim() === "/permissions" || line.trim() === "/permissions show") {
+        const currentMode = String(session.status.permission_mode ?? "default");
+        const currentIndex = PERMISSION_MODES.findIndex((m) => m.value === currentMode);
+        dialog.replace(
+          <DialogSelect
+            title="Permission Mode"
+            items={PERMISSION_MODES.map((m) => ({
+              value: m.value,
+              label: m.label,
+              description: m.description,
+              active: m.value === currentMode,
+            }))}
+            onSelect={(value) => {
+              session.sendRequest({ type: "submit_line", line: `/permissions set ${value}` });
+              session.setBusy(true);
+              dialog.close();
+            }}
+            searchable={false}
+            initialIndex={currentIndex >= 0 ? currentIndex : 0}
+          />,
+        );
+        return true;
+      }
+
+      // /plan — toggle plan mode
+      if (line.trim() === "/plan") {
+        const currentMode = String(session.status.permission_mode ?? "default");
+        const isPlan = currentMode === "plan";
+        session.sendRequest({
+          type: "submit_line",
+          line: isPlan ? "/plan off" : "/plan on",
+        });
+        session.setBusy(true);
+        return true;
+      }
+
+      // /resume — list sessions
+      if (line.trim() === "/resume") {
+        session.sendRequest({ type: "list_sessions" });
+        return true;
+      }
+
+      return false;
+    },
+    [dialog, session, setThemeName, theme.name],
+  );
+
+  // ── openCommandPalette helper ────────────────────────────────────────────────
+  // 复用下方 useMemo 的注册表（经 ref 解循环依赖：registry.local 里的
+  // app.palette.run 也要能打开面板）。
+  const registryRef = useRef<CommandRegistry | null>(null);
+  const openCommandPalette = useCallback(() => {
+    const registry = registryRef.current;
+    if (!registry) return;
+    const allCmds = registry.all();
+    dialog.replace(
+      <DialogSelect
+        title="Commands"
+        items={allCmds.map((cmd) => ({
+          value: cmd.id,
+          label: cmd.title !== cmd.id ? cmd.title : cmd.id,
+          description: cmd.title !== cmd.id ? cmd.title : undefined,
+          hint: cmd.keybinding,
+        }))}
+        onSelect={(id) => {
+          dialog.close();
+          const cmd = registry.get(id);
+          cmd?.run();
+        }}
+      />,
+    );
+  }, [dialog]);
+
+  // ── onSubmit ─────────────────────────────────────────────────────────────────
+  const onSubmit = useCallback(
+    (line: string) => {
+      if (handleCommand(line)) {
+        appendHistory(line);
+        return;
+      }
+      session.sendRequest({ type: "submit_line", line });
+      session.setBusy(true);
+      appendHistory(line);
+    },
+    [appendHistory, handleCommand, session],
+  );
+
+  // ── onCycleMode ──────────────────────────────────────────────────────────────
+  const onCycleMode = useCallback(() => {
+    const currentMode = String(session.status.permission_mode ?? "default");
+    const modeOrder = ["default", "full_auto", "plan"];
+    const idx = modeOrder.indexOf(currentMode);
+    const nextMode = modeOrder[(idx + 1) % modeOrder.length] ?? "default";
+    session.sendRequest({ type: "submit_line", line: `/permissions set ${nextMode}` });
+    session.setBusy(true);
+  }, [session]);
+
+  // ── Command registry for slashCommands prop ──────────────────────────────────
+  const registry = useMemo(
+    () =>
+      buildRegistry({
+        backendCommands: session.commands,
+        local: [
+          {
+            id: "app.palette",
+            title: "Open Command Palette",
+            keybinding: "ctrl+p",
+            run: openCommandPalette,
+          },
+          {
+            id: "app.theme",
+            title: "Change Theme",
+            run: () => handleCommand("/theme"),
+          },
+          {
+            id: "app.permissions",
+            title: "Change Permission Mode",
+            run: () => handleCommand("/permissions"),
+          },
+          {
+            id: "app.exit",
+            title: "Exit",
+            keybinding: "ctrl+c",
+            run: () => {
+              session.sendRequest({ type: "shutdown" });
+              renderer.destroy();
+              process.exit(0);
+            },
+          },
+        ],
+        submitLine: (line: string) => {
+          session.sendRequest({ type: "submit_line", line });
+          session.setBusy(true);
+        },
+      }),
+    [handleCommand, openCommandPalette, renderer, session],
+  );
+  registryRef.current = registry;
+
+  // ── Dialog wiring for modal/selectRequest ────────────────────────────────────
+  useEffect(() => {
+    const modal = session.modal;
+    if (!modal) return;
+
+    if (modal.kind === "permission") {
+      const requestId = modal.request_id;
+      const respondedRef = { current: false };
+
+      const sendResponse = (allowed: boolean, scope: "once" | "session"): void => {
+        if (respondedRef.current) return;
+        respondedRef.current = true;
+        session.sendRequest({
+          type: "permission_response",
+          request_id: requestId,
+          allowed,
+          scope,
+        });
+        session.setModal(null);
+        dialog.close();
+      };
+
+      const onClose = (): void => {
+        // ESC fallback: deny if not already responded
+        if (!respondedRef.current) {
+          respondedRef.current = true;
+          session.sendRequest({
+            type: "permission_response",
+            request_id: requestId,
+            allowed: false,
+            scope: "once",
+          });
+          session.setModal(null);
+        }
+      };
+
+      dialog.replace(
+        <PermissionDialog
+          modal={modal}
+          onRespond={sendResponse}
+        />,
+        onClose,
+      );
+      return;
+    }
+
+    if (modal.kind === "question") {
+      const requestId = modal.request_id;
+      const respondedRef = { current: false };
+
+      const sendAnswer = (answer: string): void => {
+        if (respondedRef.current) return;
+        respondedRef.current = true;
+        session.sendRequest({
+          type: "question_response",
+          request_id: requestId,
+          answer,
+        });
+        session.setModal(null);
+      };
+
+      const onClose = (): void => {
+        // esc 兜底：必须应答，否则后端 questionRequests 永久挂起。
+        sendAnswer("");
+      };
+
+      dialog.replace(
+        <QuestionDialog
+          modal={modal}
+          onSubmit={(answer) => {
+            sendAnswer(answer);
+            dialog.close();
+          }}
+        />,
+        onClose,
+      );
+    }
+  }, [session.modal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    setPickerIndex(0);
-  }, [commandHints.length, input]);
-
-  useEffect(() => {
-    if (!session.selectRequest) return;
     const req = session.selectRequest;
+    if (!req) return;
+
+    // Discard empty options
     if (req.options.length === 0) {
       session.setSelectRequest(null);
       return;
     }
-    setSelectIndex(0);
-    setSelectModal({
-      title: req.title,
-      options: req.options.map((o) => ({ value: o.value, label: o.label, description: o.description })),
-      onSelect: (value) => {
-        session.sendRequest({ type: "submit_line", line: `${req.submitPrefix}${value}` });
-        session.setBusy(true);
-        setSelectModal(null);
-      },
-    });
-    session.setSelectRequest(null);
-  }, [session.selectRequest]);
 
-  const handleCommand = (cmd: string): boolean => {
-    const trimmed = cmd.trim();
-
-    const themeMatch = /^\/theme\s+set\s+(\S+)$/.exec(trimmed);
-    if (themeMatch && themeMatch[1]) {
-      setThemeName(themeMatch[1]);
-      return true;
-    }
-
-    if (trimmed === "/permissions" || trimmed === "/permissions show") {
-      const currentMode = String(session.status.permission_mode ?? "default");
-      const options = PERMISSION_MODES.map((opt) => ({
-        ...opt,
-        active: opt.value === currentMode,
-      }));
-      const initialIdx = options.findIndex((o) => o.active);
-      setSelectIndex(initialIdx >= 0 ? initialIdx : 0);
-      setSelectModal({
-        title: "Permission Mode",
-        options,
-        onSelect: (value) => {
-          session.sendRequest({ type: "submit_line", line: `/permissions set ${value}` });
+    dialog.replace(
+      <DialogSelect
+        title={req.title}
+        items={req.options.map((opt) => ({
+          value: opt.value,
+          label: opt.label ?? opt.value,
+          description: opt.description,
+        }))}
+        onSelect={(value) => {
+          session.sendRequest({
+            type: "submit_line",
+            line: `${req.submitPrefix}${value}`,
+          });
           session.setBusy(true);
-          setSelectModal(null);
-        },
-      });
-      return true;
-    }
+          dialog.close();
+          session.setSelectRequest(null);
+        }}
+      />,
+      () => {
+        session.setSelectRequest(null);
+      },
+    );
+  }, [session.selectRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    if (trimmed === "/plan") {
-      const currentMode = String(session.status.permission_mode ?? "default");
-      if (currentMode === "plan") {
-        session.sendRequest({ type: "submit_line", line: "/plan off" });
-      } else {
-        session.sendRequest({ type: "submit_line", line: "/plan on" });
-      }
-      session.setBusy(true);
-      return true;
-    }
-
-    if (trimmed === "/resume") {
-      session.sendRequest({ type: "list_sessions" });
-      return true;
-    }
-
-    return false;
-  };
-
-  useInput((chunk, key) => {
-    if (key.ctrl && chunk === "c") {
+  // ── Global keyboard handler ──────────────────────────────────────────────────
+  useKeyboard((key) => {
+    if (key.ctrl && key.name === "c") {
       session.sendRequest({ type: "shutdown" });
-      exit();
-      return;
+      renderer.destroy();
+      process.exit(0);
     }
-
-    if (selectModal) {
-      if (key.upArrow) {
-        setSelectIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setSelectIndex((i) => Math.min(selectModal.options.length - 1, i + 1));
-        return;
-      }
-      if (key.return) {
-        const selected = selectModal.options[selectIndex];
-        if (selected) selectModal.onSelect(selected.value);
-        return;
-      }
-      if (key.escape) {
-        setSelectModal(null);
-        return;
-      }
-      const num = parseInt(chunk, 10);
-      if (num >= 1 && num <= selectModal.options.length) {
-        const selected = selectModal.options[num - 1];
-        if (selected) selectModal.onSelect(selected.value);
-        return;
-      }
-      return;
-    }
-
-    if (session.modal?.kind === "permission") {
-      if (chunk.toLowerCase() === "y") {
-        session.sendRequest({
-          type: "permission_response",
-          request_id: session.modal.request_id as string,
-          allowed: true,
-          scope: "once",
-        });
-        session.setModal(null);
-        return;
-      }
-      if (chunk.toLowerCase() === "a") {
-        // 整个会话批准该工具：后续同名工具的 ask 自动放行。
-        session.sendRequest({
-          type: "permission_response",
-          request_id: session.modal.request_id as string,
-          allowed: true,
-          scope: "session",
-        });
-        session.setModal(null);
-        return;
-      }
-      if (chunk.toLowerCase() === "n" || key.escape) {
-        session.sendRequest({
-          type: "permission_response",
-          request_id: session.modal.request_id as string,
-          allowed: false,
-        });
-        session.setModal(null);
-        return;
-      }
-      return;
-    }
-
-    if (session.busy) return;
-
-    if (showPicker) {
-      if (key.upArrow) {
-        setPickerIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setPickerIndex((i) => Math.min(commandHints.length - 1, i + 1));
-        return;
-      }
-      if (key.return) {
-        const selected = commandHints[pickerIndex];
-        if (selected) {
-          setInput("");
-          if (!handleCommand(selected)) onSubmit(selected);
-        }
-        return;
-      }
-      if (key.tab) {
-        const selected = commandHints[pickerIndex];
-        if (selected) setInput(selected + " ");
-        return;
-      }
-      if (key.escape) {
-        setInput("");
-        return;
-      }
-    }
-
-    if (!showPicker && key.upArrow) {
-      const nextIndex = Math.min(history.length - 1, historyIndex + 1);
-      if (nextIndex >= 0) {
-        setHistoryIndex(nextIndex);
-        setInput(history[history.length - 1 - nextIndex] ?? "");
-      }
-      return;
-    }
-    if (!showPicker && key.downArrow) {
-      const nextIndex = Math.max(-1, historyIndex - 1);
-      setHistoryIndex(nextIndex);
-      setInput(nextIndex === -1 ? "" : (history[history.length - 1 - nextIndex] ?? ""));
-      return;
+    if (key.ctrl && key.name === "p") {
+      // 已有弹层（含后端 permission/question/select）时不顶掉：
+      // dialog.replace 会触发被顶层的 onClose（permission 会被当作拒绝）。
+      if (dialog.isOpen) return;
+      openCommandPalette();
     }
   });
 
-  const onSubmit = (value: string): void => {
-    if (session.modal?.kind === "question") {
-      session.sendRequest({
-        type: "question_response",
-        request_id: session.modal.request_id as string,
-        answer: value,
-      });
-      session.setModal(null);
-      setModalInput("");
-      return;
-    }
-    if (!value.trim() || session.busy || !session.ready) return;
-    if (handleCommand(value)) {
-      setHistory((items) => [...items, value]);
-      setHistoryIndex(-1);
-      setInput("");
-      return;
-    }
-    session.sendRequest({ type: "submit_line", line: value });
-    setHistory((items) => [...items, value]);
-    setHistoryIndex(-1);
-    setInput("");
-    session.setBusy(true);
-  };
-
   return (
-    <Box flexDirection="column" paddingX={1} height="100%">
-      <Box flexDirection="column" flexGrow={1}>
-        <ConversationView
-          items={session.transcript}
-          assistantBuffer={session.assistantBuffer}
-          showWelcome={session.ready}
-          outputStyle={String(session.status.output_style ?? "default")}
-        />
-      </Box>
+    <AppView
+      transcript={session.transcript}
+      assistantBuffer={session.assistantBuffer}
+      ready={session.ready}
+      busy={session.busy}
+      status={session.status}
+      mcpServers={session.mcpServers}
+      todoMarkdown={session.todoMarkdown}
+      swarmTeammates={session.swarmTeammates}
+      swarmNotifications={session.swarmNotifications}
+      version={config.version ?? null}
+      history={history}
+      slashCommands={registry.slashCommands()}
+      onSubmit={onSubmit}
+      onCycleMode={onCycleMode}
+      dialogOpen={dialog.isOpen}
+    />
+  );
+}
 
-      {session.modal ? (
-        <ModalHost
-          modal={session.modal}
-          modalInput={modalInput}
-          setModalInput={setModalInput}
-          onSubmit={onSubmit}
-        />
-      ) : null}
+// ─── App — root with providers ───────────────────────────────────────────────
 
-      {selectModal ? (
-        <SelectModal
-          title={selectModal.title}
-          options={selectModal.options}
-          selectedIndex={selectIndex}
-        />
-      ) : null}
-
-      {showPicker ? (
-        <CommandPicker hints={commandHints} selectedIndex={pickerIndex} />
-      ) : null}
-
-      {session.ready && session.todoMarkdown ? (
-        <TodoPanel markdown={session.todoMarkdown} />
-      ) : null}
-
-      {session.ready && (session.swarmTeammates.length > 0 || session.swarmNotifications.length > 0) ? (
-        <SwarmPanel teammates={session.swarmTeammates} notifications={session.swarmNotifications} />
-      ) : null}
-
-      {session.ready ? (
-        <StatusBar status={session.status} tasks={session.tasks} activeToolName={session.busy ? currentToolName : undefined} />
-      ) : null}
-
-      {!session.ready ? (
-        <Box>
-          <Text color={theme.colors.warning}>Connecting to backend...</Text>
-        </Box>
-      ) : session.modal || selectModal ? null : (
-        <PromptInput
-          busy={session.busy}
-          input={input}
-          setInput={setInput}
-          onSubmit={onSubmit}
-          toolName={session.busy ? currentToolName : undefined}
-          suppressSubmit={showPicker}
-        />
-      )}
-
-      {session.ready && !session.modal && !session.busy && !selectModal ? (
-        <Box>
-          <Text dimColor>
-            <Text color={theme.colors.primary}>enter</Text> send{"  "}
-            <Text color={theme.colors.primary}>/</Text> commands{"  "}
-            <Text color={theme.colors.primary}>{"\u2191\u2193"}</Text> history{"  "}
-            <Text color={theme.colors.primary}>ctrl+c</Text> exit
-          </Text>
-        </Box>
-      ) : null}
-    </Box>
+export function App({ config }: { config: FrontendConfig }): React.ReactNode {
+  const initialTheme = String(config.theme ?? "default");
+  return (
+    <ThemeProvider initialTheme={initialTheme}>
+      <DialogProvider>
+        <ToastProvider>
+          <AppInner config={config} />
+        </ToastProvider>
+      </DialogProvider>
+    </ThemeProvider>
   );
 }

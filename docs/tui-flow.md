@@ -1,6 +1,6 @@
 # TUI 运行流程
 
-`ohs --tui` 如何启动 React/Ink 终端 UI，以及 **BackendHost**（`ohs --backend-only`）
+`ohs --tui` 如何启动 opentui + React 19 终端 UI，以及 **BackendHost**（`ohs --backend-only`）
 如何通过 **OHJSON 行协议** 与前端通信。权限弹框、SwarmPanel 等能力都建立在这条链上。
 
 ## 三进程模型
@@ -15,13 +15,13 @@ TUI **不是**单进程：启动器、前端、后端是三个独立进程。
 │ 进程 A · 启动器（ohs --tui，runTuiMode）                  │
 │  · 拼 backend_command = [node, ohs, --backend-only, …]   │
 │  · spawn 进程 B，env: OPENHARNESS_FRONTEND_CONFIG          │
-│  · stdio: inherit（终端交给 Ink）                          │
+│  · stdio: inherit（终端交给 opentui）                       │
 │  · 等 B 退出 → process.exit(code)                         │
 └──────────────────────────┬───────────────────────────────┘
                            │ spawn
                            ▼
 ┌──────────────────────────────────────────────────────────┐
-│ 进程 B · TUI 前端（apps/frontend/dist/index.js · Ink）   │
+│ 进程 B · TUI 前端（apps/frontend/src/index.tsx · opentui + React 19，Bun 运行时）│
 │  · useBackendSession mount → spawn 进程 C                 │
 │  · C.stdout → 读 OHJSON 事件 → 更新 React 状态           │
 │  · C.stdin  ← 写 JSON 请求（submit_line / permission_…） │
@@ -37,7 +37,7 @@ TUI **不是**单进程：启动器、前端、后端是三个独立进程。
 └──────────────────────────────────────────────────────────┘
 ```
 
-**和 REPL / `--print` 的区别**：BackendHost 把流式输出转成结构化事件给 Ink 渲染；
+**和 REPL / `--print` 的区别**：BackendHost 把流式输出转成结构化事件给 opentui 渲染；
 REPL 用 readline + EventRenderer 直接写终端。
 
 ---
@@ -48,7 +48,7 @@ REPL 用 readline + EventRenderer 直接写终端。
 |------|------|------|
 | CLI 入口 / 模式分发 | `apps/cli/src/index.ts` + `commands/main.ts` | `--tui` → `runTuiMode`；`--backend-only` → `runBackendHost` |
 | `runTuiMode` | `apps/cli/src/commands/main.ts` | 拼 `backend_command`，spawn 前端，传 `OPENHARNESS_FRONTEND_CONFIG` |
-| 前端入口 | `apps/frontend/src/index.tsx` | 解析 env 配置，`render(<App />)` |
+| 前端入口 | `apps/frontend/src/index.tsx` | 解析 env 配置，`render(<App />)`；由 Bun 运行（CLI 通过 `resolveBun` 检测 Bun 路径，找不到时友好报错） |
 | `useBackendSession` | `apps/frontend/src/hooks/useBackendSession.ts` | spawn backend、解析 OHJSON、发请求、30fps assistant delta 缓冲 |
 | `App` + 组件 | `apps/frontend/src/App.tsx` 等 | ConversationView / ModalHost / PromptInput / SwarmPanel … |
 | `runBackendHost` | `apps/cli/src/commands/main.ts` | bootstrap、请求循环、emit 事件、TUI 权限 `askPermission` |
@@ -75,7 +75,8 @@ ohs --tui -m gpt-4 --permission-mode default
 │ args = [cliPath, "--backend-only", …透传 flags…]        │
 │ frontendConfig = { backend_command, initial_prompt, theme }│
 │ TTY 时清屏 \x1b[2J\x1b[3J\x1b[H                         │
-│ spawn(node, apps/frontend/dist/index.js)                 │
+│ spawn(bun, apps/frontend/dist/index.js)                   │
+│   bun 路径由 resolveBun() 检测，缺失时抛出友好错误        │
 │   env.OPENHARNESS_FRONTEND_CONFIG = JSON.stringify(…)    │
 └──────────────────────────┬───────────────────────────────┘
                            │
@@ -107,7 +108,7 @@ ohs --tui -m gpt-4 --permission-mode default
 `--base-url` / `--api-format` / `--theme` / `--cwd` / `--effort` /
 `--dangerously-skip-permissions` / `--allowed-tools` / `--disallowed-tools` / `--bare`
 
-`theme` 同时进 `frontendConfig` 供 Ink 主题，不进 backend argv。
+`theme` 同时进 `frontendConfig` 供 opentui 主题，不进 backend argv。
 
 ---
 
@@ -178,7 +179,7 @@ BackendHost: processLineForHost → QueryEngine.submitMessage
 
 | 方式 | 说明 |
 |------|------|
-| `ohs --backend-only` | 单独跑 BackendHost（调试协议 / 无 Ink） |
+| `ohs --backend-only` | 单独跑 BackendHost（调试协议 / 无 TUI 前端） |
 | 前端 dev + `OPENHARNESS_BACKEND_COMMAND` | 不经过 `runTuiMode`，前端自行 spawn backend |
 | `ohs --tui "prompt"` | `initial_prompt` 在 ready 后自动 `submit_line` |
 

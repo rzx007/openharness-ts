@@ -1,77 +1,51 @@
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import React from "react";
+import { useTheme } from "../theme/ThemeContext";
 
 export type TodoItem = {
   text: string;
   checked: boolean;
 };
 
-function parseTodoItems(markdown: string): TodoItem[] {
+export function parseTodoItems(markdown: string): TodoItem[] {
   const lines = markdown.split("\n");
   const items: TodoItem[] = [];
   for (const line of lines) {
     const m = line.match(/^\s*-\s+\[([ xX])\]\s+(.+)/);
-    if (m && m[1] && m[2]) {
+    if (m && m[1] !== undefined && m[2] !== undefined) {
       items.push({ checked: m[1].toLowerCase() === "x", text: m[2].trim() });
     }
   }
   return items;
 }
 
-export function TodoPanel({
-  markdown,
-  compact: initialCompact = false,
-}: {
+export type TodoPanelProps = {
   markdown: string;
-  compact?: boolean;
-}): React.JSX.Element | null {
-  const [compact, setCompact] = useState(initialCompact);
+};
+
+export function TodoPanel({ markdown }: TodoPanelProps): React.ReactNode {
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   const items = parseTodoItems(markdown);
-
-  useInput((chunk, key) => {
-    if (key.ctrl && chunk === "t") {
-      setCompact((c) => !c);
-    }
-  });
-
   if (items.length === 0) return null;
 
   const done = items.filter((i) => i.checked).length;
   const total = items.length;
+  const allDone = done === total;
 
-  if (compact) {
+  if (allDone) {
     return (
-      <Box>
-        <Text color="yellow" bold>{"\u2611 "}</Text>
-        <Text dimColor>Todos: {done}/{total} done</Text>
-        <Text dimColor> [ctrl+t expand]</Text>
-      </Box>
+      <text fg={c.success}>{"▣ ✓ all done"}</text>
     );
   }
 
+  const firstPending = items.find((i) => !i.checked);
+  const pendingText = firstPending ? firstPending.text.slice(0, 50) : "";
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
-      <Box>
-        <Text color="yellow" bold>{"\u2611 "}</Text>
-        <Text bold>Todo List{" "}</Text>
-        <Text dimColor>({done}/{total})</Text>
-        <Text dimColor> [ctrl+t compact]</Text>
-      </Box>
-      {items.map((item, i) => (
-        <Box key={i}>
-          <Text color={item.checked ? "green" : "white"}>
-            {item.checked ? "  \u2611 " : "  \u2610 "}
-          </Text>
-          <Text
-            color={item.checked ? "green" : undefined}
-            dimColor={item.checked}
-          >
-            {item.text}
-          </Text>
-        </Box>
-      ))}
-    </Box>
+    <text fg={c.muted}>
+      {`▣ ${done}/${total} `}
+      {pendingText}
+    </text>
   );
 }
-
-export { parseTodoItems };

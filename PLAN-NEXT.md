@@ -84,7 +84,7 @@ Provider 运行时切换功能已完成（/model 自动重检测 + /provider 命
 ## P4: 质量与测试
 
 ### 12. 前端组件测试
-- 使用 ink-testing-library 为核心组件写测试
+- 使用 opentui 测试工具为核心组件写测试
 - 测试 ConversationView 消息渲染
 - 测试 PromptInput busy/idle 状态
 - 测试 StatusBar 格式化

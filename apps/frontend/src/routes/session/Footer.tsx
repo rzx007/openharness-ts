@@ -1,0 +1,85 @@
+import React from "react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { useTheme } from "../../theme/ThemeContext";
+import type { McpServerSnapshot } from "../../types";
+
+/** Read git branch once at module load time. Returns branch name or null. */
+function readGitBranch(): string | null {
+  try {
+    const headPath = join(process.cwd(), ".git", "HEAD");
+    const content = readFileSync(headPath, "utf8").trim();
+    const match = content.match(/^ref: refs\/heads\/(.+)$/);
+    return match ? (match[1] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+const GIT_BRANCH: string | null = readGitBranch();
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function truncateCwd(cwd: string, maxLen = 40): string {
+  if (cwd.length <= maxLen) return cwd;
+  return "…" + cwd.slice(cwd.length - (maxLen - 1));
+}
+
+export type FooterProps = {
+  status: Record<string, unknown>;
+  mcpServers: McpServerSnapshot[];
+  version?: string | null;
+};
+
+export function Footer({ status, mcpServers, version }: FooterProps): React.ReactNode {
+  const { theme } = useTheme();
+  const c = theme.colors;
+
+  const mode = String(status.permission_mode ?? "");
+  const isPlan = mode === "plan" || mode === "Plan Mode";
+
+  const inputTokens = Number(status.input_tokens ?? 0);
+  const outputTokens = Number(status.output_tokens ?? 0);
+  const hasTokens = inputTokens > 0 || outputTokens > 0;
+
+  const mcpCount = mcpServers.length;
+  const allConnected =
+    mcpCount > 0 &&
+    mcpServers.every(
+      (s) => s.state === "connected" || s.state === "ok",
+    );
+  const hasError = mcpServers.some(
+    (s) => s.state === "error" || s.state === "failed",
+  );
+  const mcpColor = hasError ? c.error : allConnected ? c.success : c.muted;
+
+  const cwd = truncateCwd(process.cwd());
+  const branchSuffix = GIT_BRANCH ? `:${GIT_BRANCH}` : "";
+  const leftLabel = cwd + branchSuffix;
+
+  return (
+    <box flexDirection="row" justifyContent="space-between">
+      {/* Left: cwd + branch + optional plan indicator */}
+      <text fg={c.muted}>
+        {leftLabel}
+        {isPlan ? <span fg={c.warning}>{" [PLAN]"}</span> : null}
+      </text>
+
+      {/* Right: MCP count · tokens · version */}
+      <text fg={c.muted}>
+        {mcpCount > 0 ? (
+          <span fg={mcpColor}>{`⊙ ${mcpCount} MCP`}</span>
+        ) : null}
+        {mcpCount > 0 ? <span fg={c.muted}>{" · "}</span> : null}
+        {hasTokens ? (
+          <span fg={c.muted}>{`${formatTokens(inputTokens)}↓ ${formatTokens(outputTokens)}↑`}</span>
+        ) : null}
+        {hasTokens && version ? <span fg={c.muted}>{" · "}</span> : null}
+        {version ? <span fg={c.muted}>{version}</span> : null}
+      </text>
+    </box>
+  );
+}
