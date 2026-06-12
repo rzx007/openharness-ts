@@ -59,6 +59,8 @@ export interface DreamTaskRunner {
     type?: string;
   }): Promise<TaskInfo>;
   registerTaskListener(listener: (task: TaskInfo, event: string) => void): () => void;
+  /** 取活任务对象（监听器收到的是快照；缺省实现可不提供）。 */
+  getTask?(id: string): TaskInfo | undefined;
 }
 
 export interface StartDreamOptions {
@@ -147,7 +149,8 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
     "Tool constraints for this run: only modify files under the memory directory. " +
     "Use shell commands only for read-only inspection.\n\n" +
     `Sessions since last consolidation (${sessionIds.length}):\n` +
-    sessionIds.map((id) => `- ${id}`).join("\n") +
+    sessionIds.slice(0, 200).map((id) => `- ${id}`).join("\n") +
+    (sessionIds.length > 200 ? `\n- ... and ${sessionIds.length - 200} more` : "") +
     "\n\nUsage-based stale candidates:\n" +
     (options.staleSection?.trim() || "- (none)");
   const prompt = buildConsolidationPrompt(memoryDir, sessionDir, extra, { preview: options.preview });
@@ -164,6 +167,32 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
   if (settings.baseUrl) argv.push("--base-url", settings.baseUrl);
   if (settings.apiFormat) argv.push("--api-format", settings.apiFormat);
 
+  // 完成监听先于 spawn 注册（对齐 Python 时序）：子进程秒退也不漏回滚。
+  // 同一 memoryDir 的 dream 被锁互斥，env 标记可唯一定位本任务。
+  const unregister = runner.registerTaskListener((done, event) => {
+    if (event !== "completed") return;
+    if (done.type !== "dream" || done.env?.OPENHARNESS_AUTODREAM_MEMORY_DIR !== memoryDir) return;
+    unregister();
+    const status = done.status as string;
+    if (status === "failed" || status === "stopped" || (done.exitCode ?? 0) !== 0 || options.preview) {
+      rollbackConsolidationLock(memoryDir, priorMtime);
+      return;
+    }
+    // 监听器拿到的是快照：取活任务再写 metadata（getTask 可选）。
+    const live = runner.getTask?.(done.id) ?? done;
+    const changed = filesChangedSince(memoryDir, before);
+    if (backupDir) {
+      const diff = diffMemoryDirs(backupDir, memoryDir);
+      live.metadata.files_added = diff.added.join("\n");
+      live.metadata.files_changed = diff.changed.join("\n");
+      live.metadata.files_removed = diff.removed.join("\n");
+    }
+    if (changed.length > 0) {
+      live.metadata.phase = "updating";
+      live.metadata.files_touched = changed.join("\n");
+    }
+  });
+
   let task: TaskInfo;
   try {
     task = await runner.createShellTask({
@@ -174,6 +203,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
       type: "dream",
     });
   } catch (err) {
+    unregister();
     rollbackConsolidationLock(memoryDir, priorMtime);
     throw err;
   }
@@ -189,32 +219,6 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
     preview: String(options.preview ?? false),
     backup_dir: backupDir ?? "",
   };
-
-  // 完成监听：失败/被杀回滚锁；成功记 diff 与触碰文件。
-  const unregister = runner.registerTaskListener((done, event) => {
-    if (done.id !== task.id || event !== "completed") return;
-    unregister();
-    const status = done.status as string;
-    // TS TaskStatus 的终态命名与 Python 不同（stopped≈killed，无 failed 字面量，
-    // 失败以 exitCode 非 0 体现）——两套都判。
-    if (status === "failed" || status === "killed" || status === "stopped" || (done.exitCode ?? 0) !== 0 || options.preview) {
-      rollbackConsolidationLock(memoryDir, priorMtime);
-      return;
-    }
-    const changed = filesChangedSince(memoryDir, before);
-    if (backupDir) {
-      const diff = diffMemoryDirs(backupDir, memoryDir);
-      done.metadata = {
-        ...done.metadata,
-        files_added: diff.added.join("\n"),
-        files_changed: diff.changed.join("\n"),
-        files_removed: diff.removed.join("\n"),
-      };
-    }
-    if (changed.length > 0) {
-      done.metadata = { ...done.metadata, phase: "updating", files_touched: changed.join("\n") };
-    }
-  });
 
   return task;
 }

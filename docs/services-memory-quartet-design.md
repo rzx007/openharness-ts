@@ -27,8 +27,9 @@
 - **team memory secrets 检查**：Python memory_extract 调
   check_team_memory_secrets/validate_team_memory_write_path——TS memory 没有
   团队隔离（PLAN 已记 Phase C 缺口）→ 本轮跳过，差异表记录。
-- **autodream 锁**：Python autodream/lock.py 自带锁——TS 复用
-  `@openharness/swarm` 的 `exclusiveFileLock`（D.5 已建，语义等价），不重复造。
+- **autodream 锁**：实现时改为自写 lock.ts——mtime 即「上次整合时间」+
+  PID 活性检测 + 失败回滚 mtime 的语义与 swarm 的 exclusiveFileLock（互斥临界区）
+  并不同构，复用反而别扭。
 - **dataDir**：session_memory 用 `get_data_dir()`——TS 对应 core 的数据目录
   助手（若只有 getConfigDir 则用其下 `data/`，实现时核对）。
 - **触发接线**（最后一轮，对照 Python 消费点 grep 确认）：
@@ -54,3 +55,12 @@
 - autodream：备份/回滚、锁互斥、prompt 构建、fake client 整合循环。
 
 每轮 `pnpm check-types` + `pnpm test` 全绿；TDD。
+
+## 接线现状（审查后补记）
+
+- ✅ /dream、/remember 斜杠命令（REPL）；REPL 每轮 checkpoint 写入。
+- 留待：compact 边界的 checkpoint **读回**（sessionMemoryToCompactText 已导出
+  未消费）；tool_outputs 阈值接进 compact/microcompact 链路；executeAutoDream
+  自动触发（归 cron 刀）。即 checkpoint 当前只写不读，保护性接线在 compact 侧。
+- 会话文件命名：TS 是 `<id>.json`（Python `session-*.json`），扫描器两者兼容；
+  整合 prompt 里的 `session-*.json` 提示文案沿用 Python 原文。

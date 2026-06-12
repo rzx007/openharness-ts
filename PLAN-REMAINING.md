@@ -35,7 +35,7 @@
 | swarm | 🟡 | ✅subprocess 派发/TaskWait/worktree 隔离/只读放行(D.1-D.4)+文件邮箱/team.json/权限同步(D.5)；缺长驻 worker 多轮 sendMessage、TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
-| services(autodream/memory_extract/session_memory/tool_outputs) | 🔴 | 整体缺失 |
+| services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；缺 compact 读回接线、cron 升级、lsp 真 AST |
 | personalization | ✅ | 10 类事实抽取+local_rules 持久化+prompt 注入+三模式 session-end 触发(C.5) |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
 | autopilot | ⛔ | 不复刻 |
@@ -226,7 +226,10 @@
 - **文件**：`packages/skills/src/`、`apps/cli/src/commands/main.ts`（commit `8fa8a93`）
 
 ### E.6 Services 杂项
-- 新增 `autodream`（记忆梦境整合）、`memory_extract`（对话提取 durable 记忆）、`session_memory`（checkpoint）、`tool_outputs`（microcompactable 判定）。
+- ✅ 记忆四件套（第一刀）：`autodream`（/dream 命令+锁/备份/回滚）、`memory_extract`
+  （/remember 命令）、`session_memory`（REPL 每轮 checkpoint）、`tool_outputs`
+  （预算函数）。留待：compact 侧读回 checkpoint、tool_outputs 接 microcompact、
+  executeAutoDream 自动触发（归 cron）。详见 `docs/services-memory-quartet-design.md`。
 - cron 升级到 croniter 级表达式 + 时区 + 独立调度守护进程 + 子进程执行 + 通知。
 - session 存储补 cwd 哈希分目录 + latest/id 双写 + tool_metadata 持久化 + Markdown 导出。
 - lsp 用真实 AST 解析（当前为正则/rg 近似）。

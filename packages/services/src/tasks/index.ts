@@ -4,7 +4,7 @@ import { join } from "node:path";
 import process from "node:process";
 import { getTasksDir } from "@openharness/core";
 
-export type TaskType = "shell" | "agent";
+export type TaskType = "shell" | "agent" | "dream";
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "stopped";
 
 export interface TaskInfo {

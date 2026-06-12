@@ -329,7 +329,7 @@ export function registerBuiltinCommandsOnRegistry(
         const stale = await ctx.memoryManager.findStaleCandidates();
         staleSection = stale
           .slice(0, 20)
-          .map((e) => `- ${e.id}: importance=${String(e.metadata?.importance ?? "?")}`)
+          .map((e) => `- ${e.id}: ${e.id}.md (importance=${e.importance ?? 0}, updated_at=${new Date(e.updatedAt).toISOString().slice(0, 10)})`)
           .join("\n");
       }
       const task = await startDreamNow({
@@ -360,11 +360,17 @@ export function registerBuiltinCommandsOnRegistry(
       }
       const { extractMemoriesFromTurn } = await import("@openharness/services");
       const bundle = ctx.getBundle();
+      // 现有记忆清单进提取 prompt(防概念性重复;签名去重只挡完全相同内容)。
+      const manifest = (await ctx.memoryManager.getAll())
+        .slice(0, 80)
+        .map((e) => `- ${String(e.metadata?.name ?? e.id)}: ${String(e.metadata?.description ?? "").slice(0, 80)}`)
+        .join("\n");
       const result = await extractMemoriesFromTurn({
         apiClient: bundle.apiClient,
         model: ctx.getModel(),
         messages: getEngine().getHistory(),
         manager: ctx.memoryManager,
+        existingManifest: manifest,
         memoryDir: ctx.memoryDir,
         cwd: process.cwd(),
       });
