@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useKeyboard } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../theme/ThemeContext";
@@ -8,7 +8,6 @@ export type DialogSelectItem = {
   value: string;
   label: string;
   description?: string;
-  category?: string;
   hint?: string;
   active?: boolean;
 };
@@ -27,13 +26,18 @@ export function DialogSelect(props: {
 
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(initialIndex);
+  const mountedRef = useRef(false);
 
   const filtered = searchable
     ? fuzzyFilter(items, query, (i) => i.label)
     : items;
 
-  // Reset selection when query changes
+  // Reset selection when query changes（跳过挂载帧，保住 initialIndex）
   useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
     setSelectedIndex(0);
   }, [query]);
 

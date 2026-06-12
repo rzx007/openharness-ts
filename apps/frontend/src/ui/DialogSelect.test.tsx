@@ -174,3 +174,29 @@ test("digit shortcut works when searchable=false", async () => {
 
   renderer.destroy();
 });
+
+test("initialIndex preselects item and survives mount", async () => {
+  let selected: string | undefined;
+  const { renderer, renderOnce, mockInput } = await testRender(
+    <ThemeProvider>
+      <DialogSelect
+        title="Mode"
+        items={sampleItems}
+        searchable={false}
+        initialIndex={2}
+        onSelect={(v) => (selected = v)}
+      />
+    </ThemeProvider>,
+    { width: 80, height: 24 },
+  );
+
+  await renderOnce();
+  await act(async () => {
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(selected).toBe("plan");
+  renderer.destroy();
+});
