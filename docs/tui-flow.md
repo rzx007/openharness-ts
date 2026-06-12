@@ -75,7 +75,7 @@ ohs --tui -m gpt-4 --permission-mode default
 │ args = [cliPath, "--backend-only", …透传 flags…]        │
 │ frontendConfig = { backend_command, initial_prompt, theme }│
 │ TTY 时清屏 \x1b[2J\x1b[3J\x1b[H                         │
-│ spawn(bun, apps/frontend/src/index.tsx)                   │
+│ spawn(bun, apps/frontend/dist/index.js)                   │
 │   bun 路径由 resolveBun() 检测，缺失时抛出友好错误        │
 │   env.OPENHARNESS_FRONTEND_CONFIG = JSON.stringify(…)    │
 └──────────────────────────┬───────────────────────────────┘
