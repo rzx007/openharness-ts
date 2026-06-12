@@ -354,7 +354,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
               active: m.value === currentMode,
             }))}
             onSelect={(value) => {
-              session.sendRequest({ type: "submit_line", line: `/permissions set ${value}` });
+              session.sendRequest({ type: "submit_line", line: `/permissions ${value}` });
               session.setBusy(true);
               dialog.close();
             }}
@@ -434,7 +434,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     const modeOrder = ["default", "full_auto", "plan"];
     const idx = modeOrder.indexOf(currentMode);
     const nextMode = modeOrder[(idx + 1) % modeOrder.length] ?? "default";
-    session.sendRequest({ type: "submit_line", line: `/permissions set ${nextMode}` });
+    session.sendRequest({ type: "submit_line", line: `/permissions ${nextMode}` });
     session.setBusy(true);
   }, [session]);
 
