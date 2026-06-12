@@ -14,9 +14,9 @@ import { getSessionsDir } from "@openharness/core";
  * - summary（首条 user 消息前 80 字符）与 message_count；
  * - transcript.md Markdown 导出。
  *
- * 与 Python 差异：消息形状宽松（不做 pydantic 校验）；
- * sanitize_conversation_messages 的 tool_use/result 配对修复由 compact 链路负责，
- * 存储层原样持久化。
+ * 与 Python 差异：消息形状宽松（不做 pydantic 校验）；配对修复只做 load 侧
+ * （Python save/load 双侧）——保存原样落盘，读回时剔除尾部悬挂 tool_use 与
+ * 孤儿 tool_result，防止 resume 出 API 必拒的断链历史。
  */
 
 const PERSISTED_TOOL_METADATA_KEYS = [
@@ -162,6 +162,48 @@ export function saveSessionSnapshot(options: SaveSessionOptions): string {
   return latestPath;
 }
 
+
+/** 块级探测：消息是否含 tool_use / 是否为 tool_result 消息。 */
+function hasToolUseBlock(message: StoredMessageLike): boolean {
+  return Array.isArray(message.content) &&
+    message.content.some((b) => (b as { type?: unknown } | null)?.type === "tool_use");
+}
+
+function isToolResultMessage(message: StoredMessageLike): boolean {
+  if (message.type === "tool_result" || message.role === "tool_result") return true;
+  return Array.isArray(message.content) &&
+    message.content.length > 0 &&
+    message.content.every((b) => (b as { type?: unknown } | null)?.type === "tool_result");
+}
+
+/**
+ * load 侧配对修复（对齐 Python _sanitize_snapshot_payload 的意图）：
+ * - 尾部悬挂 tool_use（崩溃/MaxTurns 中断落盘）→ 截掉，否则下一轮 API 必 400；
+ * - 孤儿 tool_result（前一条没有 tool_use）→ 丢弃。
+ */
+export function sanitizeStoredMessages(messages: unknown[]): unknown[] {
+  const kept: unknown[] = [];
+  for (const raw of messages) {
+    const message = raw as StoredMessageLike | null;
+    if (!message || typeof message !== "object") continue;
+    if (isToolResultMessage(message)) {
+      const prev = kept[kept.length - 1] as StoredMessageLike | undefined;
+      if (!prev || !hasToolUseBlock(prev)) continue; // 孤儿
+    }
+    kept.push(raw);
+  }
+  while (kept.length > 0 && hasToolUseBlock(kept[kept.length - 1] as StoredMessageLike)) {
+    kept.pop(); // 尾部悬挂 tool_use
+  }
+  return kept;
+}
+
+function sanitizePayload(payload: SessionSnapshotPayload | null): SessionSnapshotPayload | null {
+  if (!payload) return null;
+  const messages = sanitizeStoredMessages(Array.isArray(payload.messages) ? payload.messages : []);
+  return { ...payload, messages, message_count: messages.length };
+}
+
 function readPayload(path: string): SessionSnapshotPayload | null {
   try {
     return JSON.parse(readFileSync(path, "utf-8")) as SessionSnapshotPayload;
@@ -174,7 +216,7 @@ function readPayload(path: string): SessionSnapshotPayload | null {
 export function loadSessionSnapshot(cwd: string): SessionSnapshotPayload | null {
   const path = join(getProjectSessionDir(cwd), "latest.json");
   if (!existsSync(path)) return null;
-  return readPayload(path);
+  return sanitizePayload(readPayload(path));
 }
 
 /** 列出项目会话（新→旧，latest 去重补位）。 */
@@ -221,14 +263,16 @@ export function listSessionSnapshots(cwd: string, limit = 20): SessionListItem[]
 
 /** 按 ID 读会话：named 优先，latest 兜底（id 匹配或 "latest"）。 */
 export function loadSessionById(cwd: string, sessionId: string): SessionSnapshotPayload | null {
+  // id 进文件名：拒绝路径分隔符/..（--resume 入参不可穿越会话目录）。
+  if (/[\/]/.test(sessionId) || sessionId.includes("..")) return null;
   const sessionDir = getProjectSessionDir(cwd);
   const namedPath = join(sessionDir, `session-${sessionId}.json`);
-  if (existsSync(namedPath)) return readPayload(namedPath);
+  if (existsSync(namedPath)) return sanitizePayload(readPayload(namedPath));
 
   const latestPath = join(sessionDir, "latest.json");
   if (existsSync(latestPath)) {
     const data = readPayload(latestPath);
-    if (data && (data.session_id === sessionId || sessionId === "latest")) return data;
+    if (data && (data.session_id === sessionId || sessionId === "latest")) return sanitizePayload(data);
   }
   return null;
 }

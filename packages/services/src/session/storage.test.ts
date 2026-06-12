@@ -95,8 +95,9 @@ describe("load / list / loadById", () => {
     expect(loadSessionSnapshot(projDir)!.session_id).toBe("a");
   });
 
-  it("listSessionSnapshots returns newest-first with dedup against latest", () => {
+  it("listSessionSnapshots returns newest-first with dedup against latest", async () => {
     saveSessionSnapshot({ ...baseArgs(), sessionId: "one", messages: [{ type: "user", content: "first session" }] });
+    await new Promise((r) => setTimeout(r, 1100)); // created_at 秒级,确保可分序
     saveSessionSnapshot({ ...baseArgs(), sessionId: "two", messages: [{ type: "user", content: "second session" }] });
     const list = listSessionSnapshots(projDir);
     expect(list.map((s) => s.session_id)).toEqual(["two", "one"]);
@@ -136,5 +137,41 @@ describe("exportSessionMarkdown", () => {
     expect(md).toContain('Bash {"command":"ls"}');
     expect(md).toContain("```tool-result");
     expect(md).toContain("file1");
+  });
+});
+
+describe("sanitizeStoredMessages (load-side pairing repair)", () => {
+  it("drops trailing dangling tool_use and orphan tool_result on load", () => {
+    saveSessionSnapshot({
+      ...baseArgs(),
+      sessionId: "broken",
+      messages: [
+        { type: "tool_result", content: [{ type: "tool_result", content: "orphan" }] },
+        { type: "user", content: "hi" },
+        { type: "assistant", content: [{ type: "tool_use", name: "Bash", input: {} }] },
+      ],
+    });
+    const loaded = loadSessionById(projDir, "broken")!;
+    expect(loaded.message_count).toBe(1);
+    expect((loaded.messages[0] as { type: string }).type).toBe("user");
+  });
+
+  it("keeps well-paired tool_use/tool_result", () => {
+    saveSessionSnapshot({
+      ...baseArgs(),
+      sessionId: "good",
+      messages: [
+        { type: "user", content: "hi" },
+        { type: "assistant", content: [{ type: "tool_use", name: "Bash", input: {} }] },
+        { type: "tool_result", content: [{ type: "tool_result", content: "out" }] },
+        { type: "assistant", content: "done" },
+      ],
+    });
+    expect(loadSessionById(projDir, "good")!.message_count).toBe(4);
+  });
+
+  it("loadSessionById rejects path traversal ids", () => {
+    expect(loadSessionById(projDir, "../../x")).toBeNull();
+    expect(loadSessionById(projDir, "a/b")).toBeNull();
   });
 });

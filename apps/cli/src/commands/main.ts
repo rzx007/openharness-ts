@@ -1163,11 +1163,12 @@ async function loadSessionAndResume(
     // 回退旧平铺存储
   }
 
-  // 向后兼容：旧平铺 <sessionsDir>/<id>.json。
-  const sessionId = resumeId ?? await findLatestSessionId();
-  if (!sessionId) {
+  // 向后兼容：旧平铺 <sessionsDir>/<id>.json——仅显式 --resume <id> 时回退。
+  // 裸 --continue 不回退全局平铺池（会串到别的项目的会话）。
+  if (!resumeId) {
     return generateSessionId();
   }
+  const sessionId = resumeId;
 
   const snapshot = await loadSessionSnapshot(sessionId);
   if (snapshot) {
