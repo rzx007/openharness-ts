@@ -17,12 +17,21 @@ export {
   type PluginCommandDefinition,
 } from "./contributions.js";
 
+export { loadPluginHooks, loadPluginMcp } from "./hooks-mcp.js";
+
 import { readdir, stat, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
+ * 校验拼进 plugins 目录的名字：拒绝路径分隔符、`.`/`..`、空串。
+ * uninstall 会递归删除目标目录——名字穿越出 plugins 根等于任意目录删除。
+ */
+function isSafePluginName(name: string): boolean {
+  return /^[A-Za-z0-9._@-]+$/.test(name) && name !== "." && name !== "..";
+}
+
+/**
  * 插件安装器（最小版）：`oh plugin install/uninstall/list` 子命令的后端。
- * R3 将补卸载路径穿越防护。
  */
 export class PluginInstaller {
   private installDir: string;
@@ -33,6 +42,9 @@ export class PluginInstaller {
 
   async install(source: string): Promise<string> {
     const name = source.split("/").pop() ?? source;
+    if (!isSafePluginName(name)) {
+      throw new Error(`Unsafe plugin name: ${JSON.stringify(name)}`);
+    }
     const target = join(this.installDir, name);
     await mkdir(target, { recursive: true });
     const manifest = { name, version: "1.0.0" };
@@ -41,6 +53,7 @@ export class PluginInstaller {
   }
 
   async uninstall(name: string): Promise<boolean> {
+    if (!isSafePluginName(name)) return false;
     const target = join(this.installDir, name);
     try {
       await stat(target);

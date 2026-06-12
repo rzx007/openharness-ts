@@ -45,6 +45,7 @@ export async function loadPluginContributions(
   cwd: string,
 ): Promise<{ plugins: LoadedPlugin[]; warnings: string[] }> {
   const { plugins, warnings } = await loadPlugins(settings, cwd);
+  loadedPluginsCache = plugins;
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
     for (const skill of plugin.skills) {
@@ -55,4 +56,42 @@ export async function loadPluginContributions(
     }
   }
   return { plugins, warnings };
+}
+
+// ---------------------------------------------------------------------------
+// hooks / MCP（bootstrap 之后才有 HookExecutor / connectAll，故经缓存二段接线）
+// ---------------------------------------------------------------------------
+
+let loadedPluginsCache: LoadedPlugin[] = [];
+
+/** 最近一次 loadPluginContributions 的插件列表（同进程缓存）。 */
+export function getLoadedPlugins(): readonly LoadedPlugin[] {
+  return loadedPluginsCache;
+}
+
+/** 把 enabled 插件的 hooks 注册进执行器（bundle.hookExecutor），返回注册数。 */
+export function registerPluginHooks(executor: {
+  register(hook: LoadedPlugin["hooks"][number]): void;
+}): number {
+  let count = 0;
+  for (const plugin of loadedPluginsCache) {
+    if (!plugin.enabled) continue;
+    for (const hook of plugin.hooks) {
+      executor.register(hook);
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/** 插件 MCP server 合并进用户配置：**用户 settings 同名优先**，插件不覆盖。 */
+export function mergePluginMcpServers<T>(userServers: Record<string, T> | undefined): Record<string, T> {
+  const merged: Record<string, T> = {};
+  for (const plugin of loadedPluginsCache) {
+    if (!plugin.enabled) continue;
+    for (const [name, config] of Object.entries(plugin.mcpServers)) {
+      merged[name] = config as T;
+    }
+  }
+  return { ...merged, ...(userServers ?? {}) };
 }

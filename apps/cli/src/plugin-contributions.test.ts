@@ -3,7 +3,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SkillRegistry } from "@openharness/skills";
-import { pluginCommandToSkill, loadPluginContributions } from "./plugin-contributions.js";
+import {
+  pluginCommandToSkill,
+  loadPluginContributions,
+  registerPluginHooks,
+  mergePluginMcpServers,
+  getLoadedPlugins,
+} from "./plugin-contributions.js";
 
 let tmp: string;
 
@@ -61,6 +67,26 @@ describe("loadPluginContributions", () => {
     expect(registry.get("dev:lint")).toBeDefined();
     expect(registry.get("deploy")!.source).toBe("plugin");
     expect(warnings).toEqual([]);
+  });
+
+  it("caches loaded plugins, registers hooks, and merges MCP with user priority", async () => {
+    makeProjectPlugin("full", {
+      "hooks.json": JSON.stringify({ stop: [{ type: "command", command: "echo bye" }] }),
+      "mcp.json": JSON.stringify({ mcpServers: { db: { command: "plugin-db" }, web: { url: "http://p" } } }),
+    });
+    const registry = new SkillRegistry();
+    await loadPluginContributions(registry, { allowProjectPlugins: true }, tmp);
+    expect(getLoadedPlugins().map((p) => p.manifest.name)).toContain("full");
+
+    const registered: unknown[] = [];
+    const count = registerPluginHooks({ register: (h) => registered.push(h) });
+    expect(count).toBe(1);
+    expect((registered[0] as { event: string }).event).toBe("stop");
+
+    // 用户 settings 同名 server 优先，插件不覆盖。
+    const merged = mergePluginMcpServers({ db: { command: "user-db" } } as never);
+    expect((merged.db as { command: string }).command).toBe("user-db");
+    expect(merged.web).toBeDefined();
   });
 
   it("skips disabled plugins and surfaces trust warnings", async () => {

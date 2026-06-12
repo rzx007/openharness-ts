@@ -9,6 +9,8 @@ import {
   loadPluginCommands,
   type PluginCommandDefinition,
 } from "./contributions.js";
+import { loadPluginHooks, loadPluginMcp } from "./hooks-mcp.js";
+import type { HookDefinition } from "@openharness/core";
 
 /**
  * 插件发现与加载（移植自 Python plugins/loader.py 的发现段）。
@@ -57,7 +59,7 @@ export interface LoadedPlugin {
   /** 与 Python 一致：disabled 插件也加载贡献（供 /plugin 展示），注册时按 enabled 过滤。 */
   skills: SkillDefinition[];
   commands: PluginCommandDefinition[];
-  hooks: Record<string, unknown[]>;
+  hooks: HookDefinition[];
   mcpServers: Record<string, unknown>;
 }
 
@@ -169,8 +171,8 @@ export async function loadPlugin(
     enabled,
     skills: await loadPluginSkills(path, manifest),
     commands: await loadPluginCommands(path, manifest),
-    hooks: {},
-    mcpServers: {},
+    hooks: await loadPluginHooks(path, manifest),
+    mcpServers: await loadPluginMcp(path, manifest),
   };
 }
 

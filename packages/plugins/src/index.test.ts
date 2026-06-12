@@ -64,4 +64,23 @@ describe("PluginInstaller", () => {
     const list = await installer.listInstalled();
     expect(list).toEqual([]);
   });
+
+  it("uninstall rejects path traversal and absolute names without touching fs", async () => {
+    const installer = new PluginInstaller("/plugins");
+    expect(await installer.uninstall("../outside")).toBe(false);
+    expect(await installer.uninstall("a/b")).toBe(false);
+    expect(await installer.uninstall("a\\b")).toBe(false);
+    expect(await installer.uninstall("..")).toBe(false);
+    expect(await installer.uninstall("/abs")).toBe(false);
+    expect(mockedRm).not.toHaveBeenCalled();
+    expect(mockedStat).not.toHaveBeenCalled();
+  });
+
+  it("install rejects unsafe target names", async () => {
+    const installer = new PluginInstaller("/plugins");
+    await expect(installer.install("..")).rejects.toThrow(/Unsafe/);
+    // source 取最后一段：path 形式取 basename，仍须安全。
+    await expect(installer.install("owner/..")).rejects.toThrow(/Unsafe/);
+    expect(mockedMkdir).not.toHaveBeenCalled();
+  });
 });
