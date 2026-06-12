@@ -89,6 +89,9 @@ importers:
       '@openharness/commands':
         specifier: workspace:*
         version: link:../../packages/commands
+      '@openharness/coordinator':
+        specifier: workspace:*
+        version: link:../../packages/coordinator
       '@openharness/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -422,6 +425,9 @@ importers:
 
   packages/plugins:
     dependencies:
+      '@openharness/coordinator':
+        specifier: workspace:*
+        version: link:../coordinator
       '@openharness/core':
         specifier: workspace:*
         version: link:../core

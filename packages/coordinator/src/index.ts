@@ -451,10 +451,13 @@ export {
   getAllAgentDefinitions,
   hasRequiredMcpServers,
   getUserAgentsDir,
+  registerPluginAgents,
 } from "./agent-definitions";
 
 export {
   parseAgentFrontmatter,
+  buildAgentDefinition,
+  type BuildAgentOptions,
   loadAgentsDir,
   mergeAgentDefinitions,
   AGENT_COLORS,

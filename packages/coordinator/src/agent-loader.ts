@@ -105,6 +105,92 @@ function pick(fm: Record<string, unknown>, camel: string, snake: string): unknow
 // 目录加载
 // ---------------------------------------------------------------------------
 
+export interface BuildAgentOptions {
+  /** 文件名去 .md（filename 字段与 name 缺省值）。 */
+  stem: string;
+  baseDir: string;
+  source: AgentDefinition["source"];
+  /** 覆盖最终 agent 名（插件用 `plugin:ns:base` 命名时传入）。 */
+  nameOverride?: string;
+  /** description 缺省文案（缺省 `Agent: <name>`；插件传 `Agent from X plugin`）。 */
+  descriptionFallback?: string;
+}
+
+/** 从已解析的 frontmatter+body 构造 AgentDefinition（loadAgentsDir 与插件侧共用）。 */
+export function buildAgentDefinition(
+  fm: Record<string, unknown>,
+  body: string,
+  options: BuildAgentOptions,
+): AgentDefinition {
+  const baseName = (typeof fm.name === "string" && fm.name.trim()) || options.stem;
+  const name = options.nameOverride ?? baseName;
+  const description =
+    ((typeof fm.description === "string" && fm.description.trim()) ||
+      options.descriptionFallback ||
+      `Agent: ${name}`)
+      .replace(/\\n/g, "\n");
+
+  const bgRaw = fm.background;
+  const ocmRaw = pick(fm, "omitClaudeMd", "omit_claude_md");
+  const ipRaw = pick(fm, "initialPrompt", "initial_prompt");
+  const csrRaw = pick(fm, "criticalSystemReminder", "critical_system_reminder");
+  const permsRaw = fm.permissions;
+
+  const modelRaw = fm.model;
+  let model: string | undefined;
+  if (typeof modelRaw === "string" && modelRaw.trim()) {
+    const trimmed = modelRaw.trim();
+    model = trimmed.toLowerCase() === "inherit" ? "inherit" : trimmed;
+  }
+
+  let effort: string | number | undefined;
+  const effortRaw = fm.effort;
+  if (typeof effortRaw === "number") {
+    effort = Number.isInteger(effortRaw) && effortRaw > 0 ? effortRaw : undefined;
+  } else {
+    effort = pickEnum(effortRaw, EFFORT_LEVELS);
+  }
+
+  const mcpRaw = pick(fm, "mcpServers", "mcp_servers");
+  const mcpServers = Array.isArray(mcpRaw) && mcpRaw.length > 0 ? mcpRaw : undefined;
+
+  const hooksRaw = fm.hooks;
+  const hooks =
+    hooksRaw && typeof hooksRaw === "object" && !Array.isArray(hooksRaw)
+      ? (hooksRaw as Record<string, unknown>)
+      : undefined;
+
+  return {
+    name,
+    description,
+    systemPrompt: body || undefined,
+    tools: parseStrList(fm.tools),
+    disallowedTools: parseStrList(pick(fm, "disallowedTools", "disallowed_tools")),
+    model,
+    effort,
+    permissionMode: pickEnum(pick(fm, "permissionMode", "permission_mode"), PERMISSION_MODES),
+    maxTurns: parsePositiveInt(pick(fm, "maxTurns", "max_turns")),
+    skills: parseStrList(fm.skills) ?? [],
+    mcpServers,
+    hooks,
+    color: pickEnum(fm.color, AGENT_COLORS),
+    background: bgRaw === true || bgRaw === "true",
+    initialPrompt: typeof ipRaw === "string" && ipRaw.trim() ? ipRaw : undefined,
+    memory: pickEnum(fm.memory, MEMORY_SCOPES),
+    isolation: pickEnum(fm.isolation, ISOLATION_MODES),
+    omitClaudeMd: ocmRaw === true || ocmRaw === "true",
+    criticalSystemReminder: typeof csrRaw === "string" && csrRaw.trim() ? csrRaw : undefined,
+    requiredMcpServers: parseStrList(pick(fm, "requiredMcpServers", "required_mcp_servers")),
+    permissions: permsRaw
+      ? String(permsRaw).split(",").map((p) => p.trim()).filter(Boolean)
+      : [],
+    filename: options.stem,
+    baseDir: options.baseDir,
+    subagentType: typeof fm.subagent_type === "string" ? fm.subagent_type : name,
+    source: options.source,
+  };
+}
+
 export function loadAgentsDir(
   directory: string,
   source: AgentDefinition["source"] = "user",
@@ -121,75 +207,15 @@ export function loadAgentsDir(
 
   for (const file of entries) {
     try {
-      const path = join(directory, file);
-      const content = readFileSync(path, "utf-8");
-      const { frontmatter: fm, body } = parseAgentFrontmatter(content);
-
-      const stem = basename(file, ".md");
-      const name = (typeof fm.name === "string" && fm.name.trim()) || stem;
-      const description =
-        ((typeof fm.description === "string" && fm.description.trim()) || `Agent: ${name}`)
-          .replace(/\\n/g, "\n");
-
-      const modelRaw = fm.model;
-      let model: string | undefined;
-      if (typeof modelRaw === "string" && modelRaw.trim()) {
-        const trimmed = modelRaw.trim();
-        model = trimmed.toLowerCase() === "inherit" ? "inherit" : trimmed;
-      }
-
-      let effort: string | number | undefined;
-      const effortRaw = fm.effort;
-      if (typeof effortRaw === "number") {
-        effort = Number.isInteger(effortRaw) && effortRaw > 0 ? effortRaw : undefined;
-      } else {
-        effort = pickEnum(effortRaw, EFFORT_LEVELS);
-      }
-
-      const mcpRaw = pick(fm, "mcpServers", "mcp_servers");
-      const mcpServers = Array.isArray(mcpRaw) && mcpRaw.length > 0 ? mcpRaw : undefined;
-
-      const hooksRaw = fm.hooks;
-      const hooks =
-        hooksRaw && typeof hooksRaw === "object" && !Array.isArray(hooksRaw)
-          ? (hooksRaw as Record<string, unknown>)
-          : undefined;
-
-      const bgRaw = fm.background;
-      const ocmRaw = pick(fm, "omitClaudeMd", "omit_claude_md");
-      const ipRaw = pick(fm, "initialPrompt", "initial_prompt");
-      const csrRaw = pick(fm, "criticalSystemReminder", "critical_system_reminder");
-      const permsRaw = fm.permissions;
-
-      agents.push({
-        name,
-        description,
-        systemPrompt: body || undefined,
-        tools: parseStrList(fm.tools),
-        disallowedTools: parseStrList(pick(fm, "disallowedTools", "disallowed_tools")),
-        model,
-        effort,
-        permissionMode: pickEnum(pick(fm, "permissionMode", "permission_mode"), PERMISSION_MODES),
-        maxTurns: parsePositiveInt(pick(fm, "maxTurns", "max_turns")),
-        skills: parseStrList(fm.skills) ?? [],
-        mcpServers,
-        hooks,
-        color: pickEnum(fm.color, AGENT_COLORS),
-        background: bgRaw === true || bgRaw === "true",
-        initialPrompt: typeof ipRaw === "string" && ipRaw.trim() ? ipRaw : undefined,
-        memory: pickEnum(fm.memory, MEMORY_SCOPES),
-        isolation: pickEnum(fm.isolation, ISOLATION_MODES),
-        omitClaudeMd: ocmRaw === true || ocmRaw === "true",
-        criticalSystemReminder: typeof csrRaw === "string" && csrRaw.trim() ? csrRaw : undefined,
-        requiredMcpServers: parseStrList(pick(fm, "requiredMcpServers", "required_mcp_servers")),
-        permissions: permsRaw
-          ? String(permsRaw).split(",").map((p) => p.trim()).filter(Boolean)
-          : [],
-        filename: stem,
-        baseDir: directory,
-        subagentType: typeof fm.subagent_type === "string" ? fm.subagent_type : name,
-        source,
-      });
+      const content = readFileSync(join(directory, file), "utf-8");
+      const { frontmatter, body } = parseAgentFrontmatter(content);
+      agents.push(
+        buildAgentDefinition(frontmatter, body, {
+          stem: basename(file, ".md"),
+          baseDir: directory,
+          source,
+        }),
+      );
     } catch {
       continue; // 坏文件跳过
     }

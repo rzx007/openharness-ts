@@ -19,6 +19,8 @@ export {
 
 export { loadPluginHooks, loadPluginMcp } from "./hooks-mcp.js";
 
+export { loadPluginAgents } from "./agents.js";
+
 import { readdir, stat, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 

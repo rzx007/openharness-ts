@@ -485,7 +485,15 @@ export function getAgentDefinition(name: string, agents?: AgentDefinition[]): Ag
  */
 export function getAllAgentDefinitions(pluginAgents?: AgentDefinition[]): AgentDefinition[] {
   const userAgents = loadAgentsDir(getUserAgentsDir(), "user");
-  return mergeAgentDefinitions([...BUILTIN_AGENTS], userAgents, pluginAgents ?? []);
+  return mergeAgentDefinitions([...BUILTIN_AGENTS], userAgents, pluginAgents ?? registeredPluginAgents);
+}
+
+// CLI 启动时把已加载插件的 agents 登记进来，Agent 工具经
+// getAgentDefinition → getAllAgentDefinitions 即可见（无需穿参）。
+let registeredPluginAgents: AgentDefinition[] = [];
+
+export function registerPluginAgents(agents: AgentDefinition[]): void {
+  registeredPluginAgents = agents;
 }
 
 /** 用户 agent 定义目录：`<configDir>/agents`。 */

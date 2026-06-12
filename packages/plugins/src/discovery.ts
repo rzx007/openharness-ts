@@ -10,6 +10,8 @@ import {
   type PluginCommandDefinition,
 } from "./contributions.js";
 import { loadPluginHooks, loadPluginMcp } from "./hooks-mcp.js";
+import { loadPluginAgents } from "./agents.js";
+import type { AgentDefinition } from "@openharness/coordinator";
 import type { HookDefinition } from "@openharness/core";
 
 /**
@@ -61,6 +63,7 @@ export interface LoadedPlugin {
   commands: PluginCommandDefinition[];
   hooks: HookDefinition[];
   mcpServers: Record<string, unknown>;
+  agents: AgentDefinition[];
 }
 
 /** loadPlugins 需要的最小 settings 面（与 @openharness/core Settings 结构兼容）。 */
@@ -174,6 +177,7 @@ export async function loadPlugin(
       commands: await loadPluginCommands(path, manifest),
       hooks: await loadPluginHooks(path, manifest),
       mcpServers: await loadPluginMcp(path, manifest),
+      agents: await loadPluginAgents(path, manifest),
     };
   } catch {
     // 贡献文件不可读（EACCES/EISDIR 等）→ 整个插件跳过，
