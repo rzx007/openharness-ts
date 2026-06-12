@@ -32,6 +32,8 @@ export interface SlashCommandContext {
   credentialStorage: CredentialStorage;
   /** 可选:热切换 REPL 渲染器的输出样式(TUI 无 EventRenderer,不传)。 */
   setRendererStyle?: (name: string) => void;
+  /** memory 落盘目录(/dream 与 /remember 用;REPL 注入)。 */
+  memoryDir?: string;
 }
 
 /**
@@ -308,6 +310,69 @@ export function registerBuiltinCommandsOnRegistry(
     handler: async () => {
       await getEngine().compact();
       return { success: true, output: "Conversation compacted." };
+    },
+  });
+
+  // ── /dream ─────────────────────────────────────────────
+  registry.register({
+    name: "/dream",
+    description: "记忆梦境整合:后台拉子进程重组 memory 目录(--preview 只提方案)",
+    handler: async (args) => {
+      if (!ctx.memoryDir) {
+        return { success: false, output: "memory 目录不可用(仅 REPL 支持 /dream)。" };
+      }
+      const settings = ctx.getSettings();
+      const { startDreamNow } = await import("@openharness/services");
+      const { getSessionsDir } = await import("@openharness/core");
+      let staleSection = "";
+      if (ctx.memoryManager) {
+        const stale = await ctx.memoryManager.findStaleCandidates();
+        staleSection = stale
+          .slice(0, 20)
+          .map((e) => `- ${e.id}: importance=${String(e.metadata?.importance ?? "?")}`)
+          .join("\n");
+      }
+      const task = await startDreamNow({
+        cwd: process.cwd(),
+        // 手动 /dream:memory 开关缺省视为开启(force 路径仍要求 enabled)。
+        settings: { ...settings, memory: { enabled: true, ...settings.memory } },
+        memoryDir: ctx.memoryDir,
+        sessionDir: getSessionsDir(),
+        force: true,
+        preview: (args?.raw ?? "").includes("--preview"),
+        currentSessionId: ctx.sessionId,
+        staleSection,
+      });
+      if (!task) {
+        return { success: false, output: "Dream 未启动:整合锁被占用或在 dream 子进程内。" };
+      }
+      return { success: true, output: `Dream 已启动(task ${task.id})。用 /tasks 或 TaskWait 观察进度。` };
+    },
+  });
+
+  // ── /remember ──────────────────────────────────────────
+  registry.register({
+    name: "/remember",
+    description: "立刻从本会话提取持久记忆(LLM 提议,签名去重)",
+    handler: async () => {
+      if (!ctx.memoryManager) {
+        return { success: false, output: "MemoryManager 不可用(仅 REPL 支持 /remember)。" };
+      }
+      const { extractMemoriesFromTurn } = await import("@openharness/services");
+      const bundle = ctx.getBundle();
+      const result = await extractMemoriesFromTurn({
+        apiClient: bundle.apiClient,
+        model: ctx.getModel(),
+        messages: getEngine().getHistory(),
+        manager: ctx.memoryManager,
+        memoryDir: ctx.memoryDir,
+        cwd: process.cwd(),
+      });
+      if (result.skipped) {
+        return { success: true, output: `未写入记忆:${result.reason}` };
+      }
+      const titles = result.records.map((r) => r.title).join("、");
+      return { success: true, output: `已写入 ${result.writtenIds.length} 条记忆:${titles}` };
     },
   });
 
