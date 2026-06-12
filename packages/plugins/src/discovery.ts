@@ -165,15 +165,21 @@ export async function loadPlugin(
   }
 
   const enabled = enabledPlugins[manifest.name] ?? manifest.enabled_by_default;
-  return {
-    manifest,
-    path,
-    enabled,
-    skills: await loadPluginSkills(path, manifest),
-    commands: await loadPluginCommands(path, manifest),
-    hooks: await loadPluginHooks(path, manifest),
-    mcpServers: await loadPluginMcp(path, manifest),
-  };
+  try {
+    return {
+      manifest,
+      path,
+      enabled,
+      skills: await loadPluginSkills(path, manifest),
+      commands: await loadPluginCommands(path, manifest),
+      hooks: await loadPluginHooks(path, manifest),
+      mcpServers: await loadPluginMcp(path, manifest),
+    };
+  } catch {
+    // 贡献文件不可读（EACCES/EISDIR 等）→ 整个插件跳过，
+    // 坏插件不拖垮 CLI 启动（Python 此处未捕获，会整体崩，TS 改进）。
+    return null;
+  }
 }
 
 /** 发现 + 逐个加载（disabled 也在列表里，供 /plugin 展示；其贡献由消费方按 enabled 过滤）。 */

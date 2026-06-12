@@ -69,12 +69,17 @@ export function getLoadedPlugins(): readonly LoadedPlugin[] {
   return loadedPluginsCache;
 }
 
-/** 把 enabled 插件的 hooks 注册进执行器（bundle.hookExecutor），返回注册数。 */
-export function registerPluginHooks(executor: {
-  register(hook: LoadedPlugin["hooks"][number]): void;
-}): number {
+/**
+ * 把 enabled 插件的 hooks 注册进执行器（bundle.hookExecutor），返回注册数。
+ * plugins 缺省取缓存；新增调用点建议显式传 loadPluginContributions 的返回值，
+ * 避免「先注册后加载」的时序耦合（缓存为空时静默注册 0 个）。
+ */
+export function registerPluginHooks(
+  executor: { register(hook: LoadedPlugin["hooks"][number]): void },
+  plugins: readonly LoadedPlugin[] = loadedPluginsCache,
+): number {
   let count = 0;
-  for (const plugin of loadedPluginsCache) {
+  for (const plugin of plugins) {
     if (!plugin.enabled) continue;
     for (const hook of plugin.hooks) {
       executor.register(hook);

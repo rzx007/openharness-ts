@@ -26,7 +26,8 @@
 | 目录式 skill（`<dir>/SKILL.md`） | commands 递归遇 SKILL.md 截断；skills_dir 同布局 |
 | `hooks/hooks.json` 结构化格式（matcher + hooks[]） | 支持，`${CLAUDE_PLUGIN_ROOT}` 替换为插件根绝对路径 |
 | `.mcp.json` | 与 manifest 指定的 `mcp.json` 二选一 |
-| frontmatter：`description/argument-hint/model/allowed-tools/user-invocable/disable-model-invocation` | 解析并保留 |
+| frontmatter：`description/argument-hint/model/user-invocable/disable-model-invocation` | 解析并保留 |
+| frontmatter：`allowed-tools/when_to_use/version/effort` | 不解析（TS 斜杠命令消费面用不到，留待需要时补） |
 
 ## 目录与发现（R1）
 
@@ -113,9 +114,9 @@ LoadedPlugin {
 - **MCP**：`mcp_file`（缺省 `mcp.json`）→ 回退 `.mcp.json`；解析为
   `mcpServers` map；接线时合并进 MCP 配置，**用户 settings 同名 server 优先**，
   插件不覆盖。
-- **installer 防护**：`uninstall(name)` 校验 name 无路径分隔符/`..`，且
-  resolve 后严格在 plugins 根之下才 rm（对齐 PLAN-REMAINING 的「卸载时拒绝
-  `..`/绝对路径」）。`install` 同样校验目标名。
+- **installer 防护**：`install`/`uninstall` 校验插件名（`[A-Za-z0-9._@-]+`，
+  拒绝 `..`/路径分隔符/绝对路径）——字符集白名单本身已排除一切穿越构造，
+  无需额外 resolve 断言（对齐 PLAN-REMAINING 的「卸载时拒绝 `..`/绝对路径」）。
 
 ## 与 Python 差异
 
@@ -125,6 +126,10 @@ LoadedPlugin {
 | agents / tools 贡献 | loader 里有 | 本轮不做（字段保留） | agents 依赖 C.4 解析器；tools 是代码执行面 |
 | YAML frontmatter | PyYAML safe_load | 复用 skills 包现有解析 | 不引新依赖 |
 | 贡献消费 | cli.py/registry/mcp config 多点合并 | apps/cli 统一接线函数 | TS 三模式共用一条加载链 |
+| commands/ 根级 SKILL.md | `relative_to` 抛 ValueError（crash） | `basename(dir)` 兜底正常加载 | 修 Python 的边界崩溃 |
+| 坏贡献文件 | `load_plugin` 未捕获，整体崩 | try/catch → 该插件跳过 | 坏插件不拖垮 CLI 启动 |
+| flat hooks 事件名 | 不校验 | 按 `HOOK_EVENTS` 白名单过滤 | 错事件名静默挂不上不如显式丢弃 |
+| flat hooks 为空对象时 | 不回退结构化 | 回退 `hooks/hooks.json` | 空平铺视作未提供更合理 |
 
 ## 测试
 

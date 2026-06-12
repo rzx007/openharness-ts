@@ -285,7 +285,7 @@ async function runRepl(
   // 插件 MCP 贡献合并：用户 settings 同名 server 优先，插件不覆盖（C.1-R3）。
   const mcpServers = mergePluginMcpServers(currentSettings.mcpServers);
   if (Object.keys(mcpServers).length > 0) {
-    await mcpManager.connectAll(mcpServers as never).catch(() => { });
+    await mcpManager.connectAll(mcpServers).catch(() => { });
   }
 
   // ==================创建 MemoryManager 客户端==================

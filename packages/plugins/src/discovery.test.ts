@@ -143,6 +143,13 @@ describe("loadPlugin", () => {
     expect((await loadPlugin(dir3, { p3: true }))!.enabled).toBe(true);
   });
 
+  it("returns null when a contribution file is unreadable (e.g. a directory named SKILL.md)", async () => {
+    const dir = makePlugin(tmp, "broken");
+    // EISDIR：SKILL.md 是目录而非文件 → readFile 抛错，坏插件不拖垮整体。
+    mkdirSync(join(dir, "skills", "x", "SKILL.md"), { recursive: true });
+    expect(await loadPlugin(dir, {})).toBeNull();
+  });
+
   it("returns null for corrupt or missing manifests", async () => {
     const bad = join(tmp, "bad");
     mkdirSync(bad);

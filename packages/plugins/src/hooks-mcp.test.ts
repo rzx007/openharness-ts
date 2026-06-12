@@ -51,6 +51,45 @@ describe("loadPluginHooks (flat hooks.json)", () => {
     expect((hooks[0] as { command: string }).command).toBe("ok");
   });
 
+  it("supports all four hook types with their required fields", async () => {
+    writeFileSync(
+      join(tmp, "hooks.json"),
+      JSON.stringify({
+        pre_tool_use: [
+          { type: "command", command: "echo c" },
+          { type: "http", url: "http://h" },
+          { type: "prompt", prompt: "judge this" },
+          { type: "agent", prompt: "agent judge" },
+          { type: "http" }, // 缺 url → 非法跳过
+        ],
+      }),
+    );
+    const hooks = await loadPluginHooks(tmp, manifest());
+    expect(hooks.map((h) => h.type)).toEqual(["command", "http", "prompt", "agent"]);
+  });
+
+  it("structured format: multiple matcher groups and hooks keep matcher + unique ids", async () => {
+    mkdirSync(join(tmp, "hooks"), { recursive: true });
+    writeFileSync(
+      join(tmp, "hooks", "hooks.json"),
+      JSON.stringify({
+        hooks: {
+          pre_tool_use: [
+            { matcher: "Bash", hooks: [{ type: "command", command: "a" }, { type: "command", command: "b" }] },
+            { matcher: "Edit", hooks: [{ type: "command", command: "c" }] },
+          ],
+        },
+      }),
+    );
+    const hooks = await loadPluginHooks(tmp, manifest());
+    expect(hooks.map((h) => [h.matcher, (h as { command: string }).command])).toEqual([
+      ["Bash", "a"],
+      ["Bash", "b"],
+      ["Edit", "c"],
+    ]);
+    expect(new Set(hooks.map((h) => h.id)).size).toBe(3);
+  });
+
   it("returns [] when the hooks file is missing or corrupt", async () => {
     expect(await loadPluginHooks(tmp, manifest())).toEqual([]);
     writeFileSync(join(tmp, "hooks.json"), "not json");
