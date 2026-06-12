@@ -17,6 +17,10 @@ export interface MemoryConfig {
   enabled: boolean;
   maxFiles?: number;
   maxEntrypointLines?: number;
+  /** autodream（记忆梦境整合）开关与触发门槛（E.6）。 */
+  autoDreamEnabled?: boolean;
+  autoDreamMinHours?: number;
+  autoDreamMinSessions?: number;
 }
 
 export interface SandboxConfig {

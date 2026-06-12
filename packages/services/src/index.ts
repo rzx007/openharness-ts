@@ -62,3 +62,4 @@ export {
   type ExtractionResult,
   type ExtractMemoriesOptions,
 } from "./memory-extract.js";
+export * from "./autodream/index.js";
