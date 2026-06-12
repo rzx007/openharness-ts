@@ -32,7 +32,8 @@
     "@openharness/tools": "workspace:*",
     "@openharness/utils": "workspace:*",
     "chalk": "catalog:",
-    "commander": "catalog:"
+    "commander": "catalog:",
+    "@openharness/coordinator": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

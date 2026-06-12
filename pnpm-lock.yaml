@@ -48,6 +48,9 @@ catalogs:
     vitest:
       specifier: ^3.1.1
       version: 3.2.4
+    yaml:
+      specifier: ^2.7.1
+      version: 2.9.0
     zod:
       specifier: ^3.24.3
       version: 3.25.76
@@ -73,7 +76,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.1.1
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   apps/cli:
     dependencies:
@@ -86,6 +89,9 @@ importers:
       '@openharness/commands':
         specifier: workspace:*
         version: link:../../packages/commands
+      '@openharness/coordinator':
+        specifier: workspace:*
+        version: link:../../packages/coordinator
       '@openharness/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -143,7 +149,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   apps/frontend:
     dependencies:
@@ -186,7 +192,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/api:
     dependencies:
@@ -211,7 +217,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/auth:
     dependencies:
@@ -227,7 +233,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/bridge:
     dependencies:
@@ -243,7 +249,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/channels:
     dependencies:
@@ -262,7 +268,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/commands:
     dependencies:
@@ -278,13 +284,16 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/coordinator:
     dependencies:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -294,7 +303,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/core:
     dependencies:
@@ -313,7 +322,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/hooks:
     dependencies:
@@ -329,7 +338,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/keybindings:
     dependencies:
@@ -345,7 +354,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/mcp:
     dependencies:
@@ -364,7 +373,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/memory:
     dependencies:
@@ -380,7 +389,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/output-styles:
     dependencies:
@@ -396,7 +405,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/permissions:
     dependencies:
@@ -412,10 +421,13 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/plugins:
     dependencies:
+      '@openharness/coordinator':
+        specifier: workspace:*
+        version: link:../coordinator
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
@@ -434,7 +446,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/prompts:
     dependencies:
@@ -450,7 +462,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/sandbox:
     dependencies:
@@ -466,7 +478,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/services:
     dependencies:
@@ -485,7 +497,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/skills:
     dependencies:
@@ -501,7 +513,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/swarm:
     dependencies:
@@ -517,7 +529,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/themes:
     dependencies:
@@ -533,7 +545,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/tools:
     dependencies:
@@ -576,7 +588,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/utils:
     devDependencies:
@@ -588,7 +600,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/vim:
     dependencies:
@@ -604,7 +616,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/voice:
     dependencies:
@@ -620,7 +632,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
 packages:
 
@@ -2004,6 +2016,11 @@ packages:
       utf-8-validate:
         optional: true
 
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yoga-layout@3.2.1:
     resolution: {integrity: sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==}
 
@@ -2309,13 +2326,13 @@ snapshots:
       chai: 5.3.3
       tinyrainbow: 2.0.0
 
-  '@vitest/mocker@3.2.4(vite@7.3.2(@types/node@22.19.17)(tsx@4.21.0))':
+  '@vitest/mocker@3.2.4(vite@7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 3.2.4
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.2(@types/node@22.19.17)(tsx@4.21.0)
+      vite: 7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   '@vitest/pretty-format@3.2.4':
     dependencies:
@@ -3179,13 +3196,13 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vite-node@3.2.4(@types/node@22.19.17)(tsx@4.21.0):
+  vite-node@3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0):
     dependencies:
       cac: 6.7.14
       debug: 4.4.3
       es-module-lexer: 1.7.0
       pathe: 2.0.3
-      vite: 7.3.2(@types/node@22.19.17)(tsx@4.21.0)
+      vite: 7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@types/node'
       - jiti
@@ -3200,7 +3217,7 @@ snapshots:
       - tsx
       - yaml
 
-  vite@7.3.2(@types/node@22.19.17)(tsx@4.21.0):
+  vite@7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0):
     dependencies:
       esbuild: 0.27.7
       fdir: 6.5.0(picomatch@4.0.4)
@@ -3212,12 +3229,13 @@ snapshots:
       '@types/node': 22.19.17
       fsevents: 2.3.3
       tsx: 4.21.0
+      yaml: 2.9.0
 
-  vitest@3.2.4(@types/node@22.19.17)(tsx@4.21.0):
+  vitest@3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
-      '@vitest/mocker': 3.2.4(vite@7.3.2(@types/node@22.19.17)(tsx@4.21.0))
+      '@vitest/mocker': 3.2.4(vite@7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0))
       '@vitest/pretty-format': 3.2.4
       '@vitest/runner': 3.2.4
       '@vitest/snapshot': 3.2.4
@@ -3235,8 +3253,8 @@ snapshots:
       tinyglobby: 0.2.16
       tinypool: 1.1.1
       tinyrainbow: 2.0.0
-      vite: 7.3.2(@types/node@22.19.17)(tsx@4.21.0)
-      vite-node: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+      vite: 7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
+      vite-node: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.19.17
@@ -3285,6 +3303,8 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@8.20.0: {}
+
+  yaml@2.9.0: {}
 
   yoga-layout@3.2.1: {}
 

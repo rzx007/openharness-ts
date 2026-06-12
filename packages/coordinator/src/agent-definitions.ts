@@ -1,4 +1,7 @@
 import type { AgentDefinition } from "./index";
+import { join } from "node:path";
+import { getConfigDir } from "@openharness/core";
+import { loadAgentsDir, mergeAgentDefinitions } from "./agent-loader.js";
 
 const SHARED_AGENT_PREFIX =
   "You are an agent for Claude Code, Anthropic's official CLI for Claude. " +
@@ -472,8 +475,30 @@ export function getAgentDefinition(name: string, agents?: AgentDefinition[]): Ag
   return all.find((a) => a.name === name);
 }
 
-export function getAllAgentDefinitions(): AgentDefinition[] {
-  return [...BUILTIN_AGENTS];
+/**
+ * 全量 agent 定义：builtin < user(~/.openharness/agents) < plugin，
+ * 同名后者覆盖（对齐 Python get_all_agent_definitions 的 merge order）。
+ *
+ * 与 Python 差异：plugin agents 由调用方注入（Python 在函数内 lazy import
+ * load_plugins 每次重扫盘）——TS 的插件在 CLI 启动时已加载（C.1 缓存），
+ * 注入式避免循环依赖与重复 IO。
+ */
+export function getAllAgentDefinitions(pluginAgents?: AgentDefinition[]): AgentDefinition[] {
+  const userAgents = loadAgentsDir(getUserAgentsDir(), "user");
+  return mergeAgentDefinitions([...BUILTIN_AGENTS], userAgents, pluginAgents ?? registeredPluginAgents);
+}
+
+// CLI 启动时把已加载插件的 agents 登记进来，Agent 工具经
+// getAgentDefinition → getAllAgentDefinitions 即可见（无需穿参）。
+let registeredPluginAgents: AgentDefinition[] = [];
+
+export function registerPluginAgents(agents: AgentDefinition[]): void {
+  registeredPluginAgents = agents;
+}
+
+/** 用户 agent 定义目录：`<configDir>/agents`。 */
+export function getUserAgentsDir(): string {
+  return join(getConfigDir(), "agents");
 }
 
 export function hasRequiredMcpServers(

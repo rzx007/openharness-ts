@@ -23,6 +23,8 @@ export interface AgentDefinition {
   baseDir?: string;
   source?: "builtin" | "user" | "plugin";
   subagentType?: string;
+  /** 额外权限规则串（Python-specific，仅存字段）。 */
+  permissions?: string[];
 }
 
 export type CoordinatorMode = "sequential" | "parallel" | "pipeline";
@@ -448,4 +450,27 @@ export {
   getAgentDefinition,
   getAllAgentDefinitions,
   hasRequiredMcpServers,
+  getUserAgentsDir,
+  registerPluginAgents,
 } from "./agent-definitions";
+
+export {
+  parseAgentFrontmatter,
+  buildAgentDefinition,
+  type BuildAgentOptions,
+  loadAgentsDir,
+  mergeAgentDefinitions,
+  AGENT_COLORS,
+  EFFORT_LEVELS,
+  PERMISSION_MODES,
+  MEMORY_SCOPES,
+  ISOLATION_MODES,
+} from "./agent-loader.js";
+
+export {
+  isSimpleMode,
+  matchSessionMode,
+  getCoordinatorTools,
+  getCoordinatorUserContext,
+  getCoordinatorSystemPrompt,
+} from "./coordinator-mode.js";

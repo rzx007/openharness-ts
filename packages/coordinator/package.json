@@ -17,7 +17,8 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@openharness/core": "workspace:*"
+    "@openharness/core": "workspace:*",
+    "yaml": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -19,7 +19,8 @@
   "dependencies": {
     "@openharness/core": "workspace:*",
     "zod": "catalog:",
-    "@openharness/skills": "workspace:*"
+    "@openharness/skills": "workspace:*",
+    "@openharness/coordinator": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

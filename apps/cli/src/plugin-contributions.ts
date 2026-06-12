@@ -1,4 +1,5 @@
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
+import { registerPluginAgents } from "@openharness/coordinator";
 import {
   loadPlugins,
   type LoadedPlugin,
@@ -46,6 +47,9 @@ export async function loadPluginContributions(
 ): Promise<{ plugins: LoadedPlugin[]; warnings: string[] }> {
   const { plugins, warnings } = await loadPlugins(settings, cwd);
   loadedPluginsCache = plugins;
+  // 插件 agents 登记进 coordinator（builtin < user < plugin 同名覆盖），
+  // Agent 工具的 getAgentDefinition 即时可见。
+  registerPluginAgents(plugins.filter((p) => p.enabled).flatMap((p) => p.agents));
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
     for (const skill of plugin.skills) {
