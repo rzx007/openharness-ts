@@ -5,6 +5,10 @@ export interface FeishuConfig {
   appSecret: string;
   encryptKey?: string;
   verificationToken?: string;
+  /**
+   * @deprecated ACL 已上移 ChannelManager 集中处理（fail-closed：空 = 全拒）。
+   * adapter 不再过滤；保留字段仅为旧调用方类型兼容。
+   */
   allowFrom?: string[];
   replyAtBotNames?: string[];
 }
@@ -103,8 +107,8 @@ export class FeishuAdapter implements ChannelAdapter {
         const senderOpenId = msg.sender?.sender_id?.open_id;
         const senderId =
           senderOpenId ?? msg.sender?.sender_id?.user_id ?? msg.chat_id;
-        const allowFrom = this.config.allowFrom ?? [];
-        if (allowFrom.length > 0 && !allowFrom.includes(senderId)) return;
+        // ACL 不在 adapter 做——ChannelManager 集中 fail-closed 过滤,
+        // 避免"空列表=全放"的旧语义留在通道侧成为旁路。
 
         // Reply target mirrors the Python channel: group chats reply back to
         // the chat (chat_id), direct chats reply to the sender (open_id).

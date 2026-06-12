@@ -61,6 +61,8 @@ export type {
   SandboxConfig,
   PermissionSettings,
   PathRuleConfig,
+  ChannelsConfig,
+  FeishuChannelSettings,
 } from "./types/settings";
 
 export type {

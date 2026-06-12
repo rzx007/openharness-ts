@@ -89,6 +89,9 @@ importers:
       '@openharness/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@openharness/channels':
+        specifier: workspace:*
+        version: link:../../packages/channels
       '@openharness/commands':
         specifier: workspace:*
         version: link:../../packages/commands
