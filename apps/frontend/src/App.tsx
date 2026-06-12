@@ -35,6 +35,9 @@ export type AppViewProps = {
   onSubmit: (line: string) => void;
   onCycleMode: () => void;
   dialogOpen: boolean;
+  /** 草稿提升：dialogOpen 卸载 Prompt 时由 AppInner 持有，重挂载恢复 */
+  draft?: string;
+  onDraftChange?: (text: string) => void;
 };
 
 // ─── AppView — pure rendering layer (testable) ───────────────────────────────
@@ -55,6 +58,8 @@ export function AppView({
   onSubmit,
   onCycleMode,
   dialogOpen,
+  draft,
+  onDraftChange,
 }: AppViewProps): React.ReactNode {
   const { theme } = useTheme();
 
@@ -87,6 +92,8 @@ export function AppView({
       slashCommands={slashCommands}
       onSubmit={onSubmit}
       onCycleMode={onCycleMode}
+      draft={draft}
+      onDraftChange={onDraftChange}
     />
   );
 
@@ -282,6 +289,9 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
 
   // Local input history (up to 100 entries)
   const [history, setHistory] = useState<string[]>([]);
+
+  // Prompt 草稿：dialog 打开会卸载 Prompt，提升到这里保证弹层关闭后草稿不丢
+  const [draft, setDraft] = useState("");
 
   const appendHistory = useCallback((line: string) => {
     setHistory((prev) => {
@@ -606,6 +616,8 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
       onSubmit={onSubmit}
       onCycleMode={onCycleMode}
       dialogOpen={dialog.isOpen}
+      draft={draft}
+      onDraftChange={setDraft}
     />
   );
 }

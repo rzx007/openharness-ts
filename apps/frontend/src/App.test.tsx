@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import React from "react";
+import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ThemeProvider } from "./theme/ThemeContext";
 import { AppView } from "./App";
@@ -126,6 +127,48 @@ test("AppView with dialogOpen=true does not render Prompt", async () => {
   // When dialog is open, the Prompt's placeholder text should not appear
   // The default placeholder includes "Ask anything"
   expect(frame).not.toContain("Ask anything");
+
+  renderer.destroy();
+});
+
+// ─── Test 4b: draft survives dialog open/close (Prompt unmount/remount) ──────
+
+test("AppView preserves prompt draft across dialog open/close", async () => {
+  let setDialogOpen: (v: boolean) => void = () => {};
+
+  function Harness(): React.ReactNode {
+    const [open, setOpen] = React.useState(false);
+    const [draft, setDraft] = React.useState("draft-text-123");
+    setDialogOpen = setOpen;
+    return (
+      <AppView {...baseProps} dialogOpen={open} draft={draft} onDraftChange={setDraft} />
+    );
+  }
+
+  const { renderer, renderOnce, captureCharFrame, waitForFrame } = await testRender(
+    <ThemeProvider>
+      <Harness />
+    </ThemeProvider>,
+    { width: 100, height: 30 },
+  );
+
+  await renderOnce();
+  await waitForFrame((f) => f.includes("draft-text-123"), { maxPasses: 30 });
+  expect(captureCharFrame()).toContain("draft-text-123");
+
+  // Open dialog → Prompt unmounts, draft text disappears
+  await act(async () => {
+    setDialogOpen(true);
+  });
+  await waitForFrame((f) => !f.includes("draft-text-123"), { maxPasses: 30 });
+  expect(captureCharFrame()).not.toContain("draft-text-123");
+
+  // Close dialog → Prompt remounts and restores the lifted draft
+  await act(async () => {
+    setDialogOpen(false);
+  });
+  await waitForFrame((f) => f.includes("draft-text-123"), { maxPasses: 30 });
+  expect(captureCharFrame()).toContain("draft-text-123");
 
   renderer.destroy();
 });

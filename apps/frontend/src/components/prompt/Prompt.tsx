@@ -16,6 +16,9 @@ export type PromptProps = {
   slashCommands: Command[];
   onSubmit: (line: string) => void;
   onCycleMode: () => void;
+  /** 草稿提升：弹层打开会卸载 Prompt，草稿由父级持有，重挂载时恢复 */
+  draft?: string;
+  onDraftChange?: (text: string) => void;
 };
 
 const DEFAULT_PLACEHOLDER = 'Ask anything... "Fix broken tests"';
@@ -40,6 +43,8 @@ export function Prompt({
   slashCommands,
   onSubmit,
   onCycleMode,
+  draft,
+  onDraftChange,
 }: PromptProps): React.ReactNode {
   const { theme } = useTheme();
 
@@ -61,6 +66,15 @@ export function Prompt({
 
   // Textarea ref for imperative operations
   const textareaRef = useRef<TextareaRenderable | null>(null);
+
+  // Restore lifted draft once on mount (Prompt is unmounted while dialogs are open)
+  useEffect(() => {
+    if (draft && textareaRef.current) {
+      textareaRef.current.insertText(draft);
+      setContent(draft);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Derive autocomplete suggestions
   const acSuggestions = acOpen
@@ -105,7 +119,8 @@ export function Prompt({
     }
     setContent("");
     setHistIdx(null);
-  }, []);
+    onDraftChange?.("");
+  }, [onDraftChange]);
 
   // Handle textarea onSubmit (triggered by Return key)
   const handleTextareaSubmit = useCallback(() => {
@@ -259,6 +274,7 @@ export function Prompt({
             // Read plainText from ref on next tick (event has no content)
             const text = textareaRef.current?.plainText ?? "";
             setContent(text);
+            onDraftChange?.(text);
             // Bug 3: update height based on line count (1–6 rows)
             const lineCount = textareaRef.current?.lineCount ?? 1;
             setTextareaHeight(Math.min(6, Math.max(1, lineCount)));
