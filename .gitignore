@@ -24,6 +24,9 @@ npm-debug.log*
 coverage
 .nyc_output
 
+# OpenHarness 项目级运行时目录（<cwd>/.openharness/），本仓库内 dogfood CLI 时会生成
+.openharness/
+
 *.tgz
 .cache
 tmp
