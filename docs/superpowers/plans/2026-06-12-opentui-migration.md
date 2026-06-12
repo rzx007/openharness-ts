@@ -6,12 +6,14 @@
 
 **Architecture:** 三进程模型不变（CLI 启动器 → 前端 TUI → Node BackendHost，OHJSON/stdio）。前端进程改由 Bun 运行；组件层按 opencode 架构重建（routes/Home+Session、栈式 Dialog、命令注册表、textarea Prompt），`useBackendSession`/协议/后端零改动。
 
-**Tech Stack:** Bun、@opentui/core 0.4.x、@opentui/react 0.4.x、React 18、bun test（前端测试，替代 vitest）。
+**Tech Stack:** Bun、@opentui/core 0.4.x、@opentui/react 0.4.x、React 19（@opentui/react peer 要求 ≥19.2，Task 0 实测）、bun test（前端测试，替代 vitest）。
+
+**Task 0 冒烟结论（2026-06-12，已通过）：** Windows + Bun 1.3.10 下 `@opentui/core-win32-x64` 原生 DLL 正常加载；Bun spawn Node + piped stdio + readline 链路正常。两个修正已并入下文：① React 必须 19（18 会报 `ReactSharedInternals.S` 错误）；② 组件测试统一用 `@opentui/react/test-utils` 的 `testRender(node, options)`（createRoot + renderOnce 有异步 commit 时序问题）；③ `@opentui/react` 无顶层 `render` 导出，入口用 `createRoot(renderer).render(...)`。冒烟产物在 `D:\tmp\opentui-smoke` 可参考。
 
 **通用约定：**
 
 - 工作目录：仓库根（worktree）。前端包目录 `apps/frontend`。
-- opentui 原生渲染器**只能在 Bun 下跑**，前端所有测试用 `bun test`（jest 风格 API，`import { test, expect } from "bun:test"`），不要用 vitest。
+- opentui 原生渲染器**只能在 Bun 下跑**，前端所有测试用 `bun test`（jest 风格 API，`import { test, expect } from "bun:test"`），不要用 vitest。React 组件测试用 `import { testRender } from "@opentui/react/test-utils"`（返回 renderer/renderOnce/captureCharFrame/mockInput 等，规避 createRoot 异步 commit 时序问题）；后文测试代码片段中的 `createTestRenderer + createRoot` 写法一律按此替换。
 - 每个任务结束跑 `pnpm --filter @openharness/frontend check-types`（build/test 不查类型，这是本仓已知坑）。
 - 提交信息末尾加 `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`。
 - opentui API 参考：本机 skill 文档 `C:\Users\ruanz\.claude\skills\opentui\docs\`（components/、bindings/react.mdx、core-concepts/testing.mdx）。交互参考源码（已克隆）：`$TEMP/opencode-ref/packages/tui/src/`（Solid 实现，只抄交互语义不抄代码）。
@@ -125,7 +127,7 @@ Expected: PASS。
   '@opentui/react': ^0.4.1
 ```
 
-保留 `ink`/`ink-text-input`（catalog 删除会影响 lockfile 一致性，等 Task 13 清理时一并删）。
+并把 `react` 改为 `^19.2.0`、`@types/react` 改为 `^19.0.0`（全仓只有 frontend 引用 react，已确认无他包受影响）。保留 `ink`/`ink-text-input`（catalog 删除会影响 lockfile 一致性，等 Task 13 清理时一并删）。
 
 - [ ] **Step 2: frontend package.json**
 
