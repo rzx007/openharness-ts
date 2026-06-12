@@ -32,12 +32,18 @@ export type CommandRegistry = {
   slashCommands: () => Command[];
 };
 
+export type BackendCommandDetail = { name: string; description?: string };
+
 export function buildRegistry(opts: {
-  backendCommands: string[];
+  backendCommands: Array<string | BackendCommandDetail>;
   local: Command[];
   submitLine: (line: string) => void;
 }): CommandRegistry {
-  const { backendCommands, local, submitLine } = opts;
+  const { local, submitLine } = opts;
+  // 兼容两种来源：纯名称（旧后端 commands）或带描述（command_details）
+  const backendCommands = opts.backendCommands.map((c) =>
+    typeof c === "string" ? { name: c, description: undefined } : c,
+  );
 
   // Build a map of local commands by id for quick lookup
   const localMap = new Map<string, Command>();
@@ -51,15 +57,15 @@ export function buildRegistry(opts: {
 
   // Add backend commands first (or their local overrides if present)
   for (const backendCmd of backendCommands) {
-    seenIds.add(backendCmd);
-    const localOverride = localMap.get(backendCmd);
+    seenIds.add(backendCmd.name);
+    const localOverride = localMap.get(backendCmd.name);
     if (localOverride) {
       mergedCommands.push(localOverride);
     } else {
       mergedCommands.push({
-        id: backendCmd,
-        title: backendCmd,
-        run: () => submitLine(backendCmd),
+        id: backendCmd.name,
+        title: backendCmd.description || backendCmd.name,
+        run: () => submitLine(backendCmd.name),
       });
     }
   }

@@ -1,10 +1,10 @@
 import React from "react";
-import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";
 import { fuzzyFilter } from "../../ui/fuzzy";
 import type { Command } from "../../keymap/commands";
 
-const MAX_SUGGESTIONS = 8;
+// 对齐 opencode：补全面板最多 10 行，贴输入框上方全宽展开
+const MAX_SUGGESTIONS = 10;
 
 export type AutocompleteProps = {
   query: string;
@@ -19,43 +19,35 @@ export function Autocomplete({
 }: AutocompleteProps): React.ReactNode {
   const { theme } = useTheme();
 
-  const filtered = fuzzyFilter(commands, query, (c) => c.id).slice(
-    0,
-    MAX_SUGGESTIONS,
-  );
-
+  const filtered = getAutocompleteSuggestions(query, commands);
   if (filtered.length === 0) return null;
 
+  // 命令名列定宽：描述竖向对齐（opencode 同款两列布局）
+  const nameColWidth = Math.max(...filtered.map((c) => c.id.length)) + 4;
+
   return (
-    <box
-      flexDirection="column"
-      backgroundColor={theme.colors.backgroundPanel}
-      borderStyle="single"
-      borderColor={theme.colors.muted}
-    >
+    <box flexDirection="column" backgroundColor={theme.colors.backgroundPanel}>
       {filtered.map((cmd, idx) => {
         const isSelected = idx === selectedIndex;
+        const hasDesc = cmd.title !== cmd.id;
         return (
           <box
             key={cmd.id}
             flexDirection="row"
+            width="100%"
+            paddingLeft={1}
+            paddingRight={1}
             backgroundColor={isSelected ? theme.colors.accent : undefined}
           >
             <text
-              fg={
-                isSelected
-                  ? theme.colors.background
-                  : theme.colors.foreground
-              }
-              attributes={isSelected ? TextAttributes.BOLD : TextAttributes.NONE}
+              fg={isSelected ? theme.colors.background : theme.colors.foreground}
+              flexShrink={0}
             >
-              {`  ${cmd.id}`}
+              {cmd.id.padEnd(nameColWidth)}
             </text>
-            {cmd.title !== cmd.id && (
-              <text
-                fg={isSelected ? theme.colors.background : theme.colors.muted}
-              >
-                {`  ${cmd.title}`}
+            {hasDesc && (
+              <text fg={isSelected ? theme.colors.background : theme.colors.muted}>
+                {cmd.title}
               </text>
             )}
           </box>
@@ -66,7 +58,7 @@ export function Autocomplete({
 }
 
 /**
- * Given a query and command list, return the filtered suggestions (max 8).
+ * Given a query and command list, return the filtered suggestions (max 10).
  */
 export function getAutocompleteSuggestions(
   query: string,

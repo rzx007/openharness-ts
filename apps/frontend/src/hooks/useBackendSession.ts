@@ -30,6 +30,7 @@ export function useBackendSession(
   const [status, setStatus] = useState<Record<string, unknown>>({});
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [commands, setCommands] = useState<string[]>([]);
+  const [commandDetails, setCommandDetails] = useState<Array<{ name: string; description?: string }>>([]);
   const [mcpServers, setMcpServers] = useState<McpServerSnapshot[]>([]);
   const [bridgeSessions, setBridgeSessions] = useState<BridgeSessionSnapshot[]>([]);
   const [modal, setModal] = useState<Record<string, unknown> | null>(null);
@@ -157,6 +158,7 @@ export function useBackendSession(
       setStatus(event.state ?? {});
       setTasks(event.tasks ?? []);
       setCommands(event.commands ?? []);
+      setCommandDetails(event.command_details ?? []);
       setMcpServers(event.mcp_servers ?? []);
       setBridgeSessions(event.bridge_sessions ?? []);
       if (config.initial_prompt && !sentInitialPrompt.current) {
@@ -282,6 +284,7 @@ export function useBackendSession(
       status,
       tasks,
       commands,
+      commandDetails,
       mcpServers,
       bridgeSessions,
       modal,
@@ -296,6 +299,6 @@ export function useBackendSession(
       setBusy,
       sendRequest,
     }),
-    [assistantBuffer, bridgeSessions, busy, commands, mcpServers, modal, ready, selectRequest, status, swarmNotifications, swarmTeammates, tasks, todoMarkdown, transcript],
+    [assistantBuffer, bridgeSessions, busy, commandDetails, commands, mcpServers, modal, ready, selectRequest, status, swarmNotifications, swarmTeammates, tasks, todoMarkdown, transcript],
   );
 }

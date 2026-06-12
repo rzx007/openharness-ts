@@ -3,6 +3,7 @@ import { CommandRegistry } from "@openharness/commands";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
 import {
   buildHostCommandList,
+  buildHostCommandDetails,
   runHostSlashCommand,
   matchUserInvocableSkill,
   buildSkillPrompt,
@@ -57,6 +58,16 @@ describe("buildHostCommandList", () => {
     const list = buildHostCommandList(makeRegistry());
     expect(list).toContain("/help");
     expect(list.every((n) => !n.startsWith("//"))).toBe(true);
+  });
+});
+
+describe("buildHostCommandDetails", () => {
+  it("returns name + description pairs for registered commands", () => {
+    const details = buildHostCommandDetails(makeRegistry());
+    const help = details.find((d) => d.name === "/help");
+    expect(help).toEqual({ name: "/help", description: "help" });
+    const newCmd = details.find((d) => d.name === "/new");
+    expect(newCmd?.description).toBe("new conversation");
   });
 });
 

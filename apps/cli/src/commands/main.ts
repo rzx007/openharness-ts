@@ -46,6 +46,8 @@ type BackendHostEvent = {
   mcp_servers?: unknown[] | null;
   bridge_sessions?: unknown[] | null;
   commands?: string[] | null;
+  /** 斜杠命令明细（名称 + 描述），供前端补全浮窗/命令面板展示 */
+  command_details?: Array<{ name: string; description: string }> | null;
   modal?: Record<string, unknown> | null;
   select_options?: Array<{ value: string; label: string; description?: string }> | null;
   tool_name?: string | null;
@@ -875,6 +877,7 @@ async function runBackendHost(
     mcp_servers: [],
     bridge_sessions: [],
     commands,
+    command_details: buildHostCommandDetails(commandRegistry, skillRegistry),
   });
   await emit({
     type: "state_snapshot",
@@ -1500,6 +1503,28 @@ export function buildHostCommandList(
     names.push(cmd);
   }
   return names;
+}
+
+/**
+ * 构建发给前端的斜杠命令明细（名称 + 描述），供补全浮窗 / 命令面板展示。
+ * 命名与去重规则同 {@link buildHostCommandList}：内置命令优先，追加 user-invocable 技能。
+ */
+export function buildHostCommandDetails(
+  registry: CommandRegistry,
+  skillRegistry?: SkillRegistry,
+): Array<{ name: string; description: string }> {
+  const details = registry.list().map((c) => ({ name: c.name, description: c.description ?? "" }));
+  if (!skillRegistry) return details;
+
+  const seen = new Set(details.map((d) => d.name));
+  for (const skill of skillRegistry.getAll()) {
+    if (!skill.userInvocable) continue;
+    const cmd = `/${skill.commandName ?? skill.name}`;
+    if (seen.has(cmd)) continue;
+    seen.add(cmd);
+    details.push({ name: cmd, description: skill.description ?? "" });
+  }
+  return details;
 }
 
 export interface HostSlashOutcome {

@@ -401,7 +401,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
         title="Commands"
         items={allCmds.map((cmd) => ({
           value: cmd.id,
-          label: cmd.title !== cmd.id ? cmd.title : cmd.id,
+          label: cmd.id,
           description: cmd.title !== cmd.id ? cmd.title : undefined,
           hint: cmd.keybinding,
         }))}
@@ -442,7 +442,11 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
   const registry = useMemo(
     () =>
       buildRegistry({
-        backendCommands: session.commands,
+        // 优先用带描述的 command_details（补全/面板展示描述），旧后端回退纯名称；按名称排序对齐 opencode
+        backendCommands: (session.commandDetails.length > 0
+          ? [...session.commandDetails]
+          : session.commands.map((name) => ({ name }))
+        ).sort((a, b) => a.name.localeCompare(b.name)),
         local: [
           {
             id: "app.palette",

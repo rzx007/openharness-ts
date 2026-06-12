@@ -74,6 +74,8 @@ export type BackendEvent = {
   mcp_servers?: McpServerSnapshot[] | null;
   bridge_sessions?: BridgeSessionSnapshot[] | null;
   commands?: string[] | null;
+  /** 斜杠命令明细（名称 + 描述），补全浮窗/命令面板展示用；旧后端可能缺省 */
+  command_details?: Array<{ name: string; description?: string }> | null;
   modal?: Record<string, unknown> | null;
   select_options?: SelectOptionPayload[] | null;
   tool_name?: string | null;
