@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, renameSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import {
   extractFactsFromText,
   factsToRulesMarkdown,
@@ -14,22 +14,20 @@ import {
   updateRulesFromSession,
 } from "./index.js";
 
-// local_rules 目录是全局单一路径：测试前后备份/清理，避免动真实数据。
-const dir = join(homedir(), ".openharness", "local_rules");
-const backup = `${dir}.test-backup`;
+// 经 OPENHARNESS_CONFIG_DIR 指向临时目录（仓库既有约定）：完全不碰真实
+// ~/.openharness，崩溃也不会伤用户数据。
+let cfgDir: string;
+let dir: string;
 
 beforeEach(() => {
-  if (existsSync(dir)) {
-    rmSync(backup, { recursive: true, force: true });
-    renameSync(dir, backup);
-  }
+  cfgDir = mkdtempSync(join(tmpdir(), "ohs-pers-"));
+  process.env.OPENHARNESS_CONFIG_DIR = cfgDir;
+  dir = join(cfgDir, "local_rules");
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
-  if (existsSync(backup)) {
-    renameSync(backup, dir);
-  }
+  delete process.env.OPENHARNESS_CONFIG_DIR;
+  rmSync(cfgDir, { recursive: true, force: true });
 });
 
 describe("extractFactsFromText", () => {

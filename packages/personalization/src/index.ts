@@ -121,7 +121,9 @@ export function factsToRulesMarkdown(facts: ExtractedFact[]): string {
 // ---------------------------------------------------------------------------
 
 export function getLocalRulesDir(): string {
-  return join(homedir(), ".openharness", "local_rules");
+  // 与 core/paths、auth 同约定：OPENHARNESS_CONFIG_DIR 可重定向（测试隔离/Electron 预留）。
+  const base = process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness");
+  return join(base, "local_rules");
 }
 
 const rulesFile = (): string => join(getLocalRulesDir(), "rules.md");

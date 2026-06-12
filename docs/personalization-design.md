@@ -43,7 +43,11 @@ local_rules/
 |----|--------|----|------|
 | 触发点 | ui/runtime 关停一处 | REPL/print/backend 三模式各自结束路径 | TS 无统一关停层 |
 | 日志 | logging.info | 无（静默） | TS 无 logger 基建 |
-| 消息形状 | ConversationMessage.content blocks | 宽松 `{content: string \| {text}[]}` | 适配 TS 引擎消息 |
+| 消息形状 | ConversationMessage.content blocks | 宽松 `{role?, content: string \| unknown[]}` | 适配 TS 引擎消息（SystemMessage 无 role） |
+| git_remote 正则 | 懒惰 `\S+?` 后仅跟可选组 → 恒捕获 1 字符,被长度过滤丢弃(死代码) | 追加 `(?=\s\|$)` 锚,真正捕获 `owner/repo` | 修 Python 的失效模式 |
+| prompt 注入包装 | 外层再包一层 `# Local Environment Rules` 标题(与 rules.md 自带标题重复) | 直接注入 rules.md 原文 | 避免双标题 |
+| 信号路径 | 单一关停钩子,同样不覆盖信号杀进程 | SIGINT/SIGTERM 杀 backend 时丢当轮事实(swarm 信号钩子保持最小,不挂载) | 对齐 Python 留待 |
+| 配置目录 | 硬编码 ~/.openharness | 尊重 OPENHARNESS_CONFIG_DIR(仓库既有约定) | 测试隔离/Electron 预留 |
 
 ## 测试
 
