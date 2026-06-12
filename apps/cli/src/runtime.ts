@@ -43,10 +43,34 @@ export interface BootstrapOptions {
     effort?: string;
     fastMode?: boolean;
     swarmWorker?: boolean;
+    /** 只读工具自动放行(Read/Glob/Grep 等)。channels serve 等无头模式用:
+     *  default 模式下 ask 无人确认会全拒,放行只读让"看"可用、"写/执行"仍拒。 */
+    autoApproveReadOnly?: boolean;
+    /** 显式追加自动放行的工具名(与其他来源合并;denied 类检查仍优先)。 */
+    autoApproveTools?: string[];
   };
   permissionPrompt?: PermissionPromptFn;
   skillRegistry?: SkillRegistry;
   credentialStorage?: CredentialStorage;
+}
+
+/**
+ * 合并自动放行工具：settings.permission.autoApproveTools（用户显式配置）
+ * + swarm worker / autoApproveReadOnly 注入的 READ_ONLY_TOOLS。
+ * 空合并返回 undefined（checker 走默认行为）。
+ */
+export function resolveAutoApproveTools(
+  settings: Settings,
+  overrides: { swarmWorker?: boolean; autoApproveReadOnly?: boolean; autoApproveTools?: string[] },
+): string[] | undefined {
+  const merged = new Set([
+    ...(settings.permission.autoApproveTools ?? []),
+    ...(overrides.autoApproveTools ?? []),
+  ]);
+  if (overrides.swarmWorker || overrides.autoApproveReadOnly) {
+    for (const tool of READ_ONLY_TOOLS) merged.add(tool);
+  }
+  return merged.size > 0 ? [...merged] : undefined;
 }
 
 export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundle> {
@@ -87,9 +111,10 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     ? "full_auto"
     : (overrides.permissionMode as "default" | "plan" | "full_auto") ?? settings.permission.mode;
 
-  // swarm worker（teammate 子进程）对只读工具自动放行，无需父进程开 full_auto。
-  // denied 永远优先于 autoApprove；只对带 --swarm-worker 的进程生效，不动主会话。
-  const autoApproveTools = overrides.swarmWorker ? [...READ_ONLY_TOOLS] : undefined;
+  // 自动放行三来源合并:settings.permission.autoApproveTools(用户显式配置,
+  // 此前从未接线)+ swarm worker / 无头只读模式注入 READ_ONLY_TOOLS。
+  // denied 永远优先于 autoApprove(checker 内保证)。
+  const autoApproveTools = resolveAutoApproveTools(settings, overrides);
 
   const permissionChecker = new PermissionChecker({
     mode,

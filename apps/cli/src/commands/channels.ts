@@ -70,9 +70,17 @@ async function runChannelsServe(): Promise<void> {
   const { loadSkillsThreeSources } = await import("./main");
   const skillRegistry = new SkillRegistry();
   await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
+  // 无头模式 ask 无人确认会全拒——放行只读工具让"看"可用,写/Bash 仍拒。
+  // 比 swarm 的 READ_ONLY_TOOLS 再剔除 WebFetch/WebSearch:远程通道语境下
+  // Read+WebFetch 构成"读本地文件→出站外带"链(且 WebFetch 可打内网)。
+  // 信任环境想要联网,自己加 settings.permission.autoApproveTools: ["WebFetch"]。
+  const { READ_ONLY_TOOLS } = await import("@openharness/permissions");
+  const channelSafeTools = [...READ_ONLY_TOOLS].filter(
+    (t) => t !== "WebFetch" && t !== "WebSearch",
+  );
   const bundle = await bootstrap({
     settings,
-    cliOverrides: {},
+    cliOverrides: { autoApproveTools: channelSafeTools },
     skillRegistry,
     credentialStorage: new CredentialStorage(),
   });

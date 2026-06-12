@@ -123,7 +123,7 @@ describe("autoApproveTools (swarm worker read-only auto-approval)", () => {
     });
     const result = await checker.checkTool("Read", { path: "/foo" });
     expect(result.action).toBe("allow");
-    expect(result.reason).toBe("Auto-approved read-only tool (swarm worker)");
+    expect(result.reason).toBe("Tool 'Read' is auto-approved");
   });
 
   it("still asks for non-auto-approved tools in default mode", async () => {
@@ -167,13 +167,43 @@ describe("autoApproveTools (swarm worker read-only auto-approval)", () => {
     });
     const result = await checker.checkTool("Read", { path: "/foo" });
     expect(result.action).toBe("allow");
-    expect(result.reason).toBe("Auto-approved read-only tool (swarm worker)");
+    expect(result.reason).toBe("Tool 'Read' is auto-approved");
   });
 
   it("no autoApproveTools → behavior unchanged (default mode asks)", async () => {
     const checker = new PermissionChecker({ mode: "default", rules: [] });
     const result = await checker.checkTool("Read", { path: "/foo" });
     expect(result.action).toBe("ask");
+  });
+
+  it("pathRules deny 优先于 autoApprove(.env 类路径保护不可被放行绕过)", async () => {
+    const checker = new PermissionChecker({
+      mode: "default",
+      autoApproveTools: ["Read"],
+      pathRules: [{ pattern: "*.env", allow: false }],
+    });
+    expect((await checker.checkTool("Read", { path: "/app/.env" })).action).toBe("deny");
+    expect((await checker.checkTool("Read", { path: "/app/a.ts" })).action).toBe("allow");
+  });
+
+  it("deniedCommands 优先于 autoApprove(Bash 进放行名单也拦黑名单命令)", async () => {
+    const checker = new PermissionChecker({
+      mode: "default",
+      autoApproveTools: ["Bash"],
+      deniedCommands: ["rm -rf*"],
+    });
+    expect((await checker.checkTool("Bash", { command: "rm -rf /" })).action).toBe("deny");
+    expect((await checker.checkTool("Bash", { command: "ls" })).action).toBe("allow");
+  });
+
+  it("pathRules allow 仍受 allowedTools 白名单收窄(原序语义保留)", async () => {
+    const checker = new PermissionChecker({
+      mode: "default",
+      allowedTools: ["Grep"],
+      pathRules: [{ pattern: "/app/*", allow: true }],
+    });
+    expect((await checker.checkTool("Read", { path: "/app/a.ts" })).action).toBe("deny");
+    expect((await checker.checkTool("Grep", { path: "/app/a.ts" })).action).toBe("allow");
   });
 });
 
