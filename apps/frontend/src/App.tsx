@@ -509,21 +509,29 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
 
     if (modal.kind === "question") {
       const requestId = modal.request_id;
+      const respondedRef = { current: false };
+
+      const sendAnswer = (answer: string): void => {
+        if (respondedRef.current) return;
+        respondedRef.current = true;
+        session.sendRequest({
+          type: "question_response",
+          request_id: requestId,
+          answer,
+        });
+        session.setModal(null);
+      };
 
       const onClose = (): void => {
-        session.setModal(null);
+        // esc 兜底：必须应答，否则后端 questionRequests 永久挂起。
+        sendAnswer("");
       };
 
       dialog.replace(
         <QuestionDialog
           modal={modal}
           onSubmit={(answer) => {
-            session.sendRequest({
-              type: "question_response",
-              request_id: requestId,
-              answer,
-            });
-            session.setModal(null);
+            sendAnswer(answer);
             dialog.close();
           }}
         />,
@@ -574,6 +582,9 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
       process.exit(0);
     }
     if (key.ctrl && key.name === "p") {
+      // 已有弹层（含后端 permission/question/select）时不顶掉：
+      // dialog.replace 会触发被顶层的 onClose（permission 会被当作拒绝）。
+      if (dialog.isOpen) return;
       openCommandPalette();
     }
   });
