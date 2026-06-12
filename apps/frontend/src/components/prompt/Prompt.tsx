@@ -240,19 +240,38 @@ export function Prompt({
     { name: "return", action: "submit" as const },
   ];
 
-  // flexShrink=0：防止 Session 路由下被 scrollbox 挤压裁掉 meta 行
+  // flexShrink=0：防止 Session 路由下被 scrollbox 挤压裁掉 meta 行。
+  // 左竖条对齐 opencode：border-left + 细线字符 ┃（半格宽字形），
+  // 而非 width=1 实心背景块（整格填色观感过粗）。
   return (
-    <box flexDirection="row" flexShrink={0}>
-      {/* Left accent bar */}
-      <box width={1} backgroundColor={theme.colors.accent} />
-
-      {/* Right content column */}
+    <box
+      flexDirection="row"
+      flexShrink={0}
+      border={["left"]}
+      borderColor={theme.colors.accent}
+      customBorderChars={{
+        topLeft: "",
+        bottomLeft: "",
+        vertical: "┃",
+        topRight: "",
+        bottomRight: "",
+        horizontal: " ",
+        bottomT: "",
+        topT: "",
+        cross: "",
+        leftT: "",
+        rightT: "",
+      }}
+    >
+      {/* Content column（padding 对齐 opencode：左右 2、上下 1） */}
       <box
         flexDirection="column"
         flexGrow={1}
         backgroundColor={theme.colors.backgroundPanel}
-        paddingLeft={1}
-        paddingRight={1}
+        paddingLeft={2}
+        paddingRight={2}
+        paddingTop={1}
+        paddingBottom={1}
       >
         {/* Autocomplete floats above textarea */}
         {acOpen && acSuggestions.length > 0 && (
@@ -284,19 +303,16 @@ export function Prompt({
           flexShrink={0}
         />
 
-        {/* 输入区与元信息行之间留一行（对齐 opencode 观感） */}
-        <text>{""}</text>
-
-        {/* Meta info row */}
+        {/* Meta info row（paddingTop=1 即输入区与元信息行之间的空隙，对齐 opencode） */}
         {busy ? (
-          <box flexDirection="row">
+          <box flexDirection="row" paddingTop={1}>
             <text fg={theme.colors.accent}>
               {theme.icons.spinner[spinnerFrame] ?? "⠋"}
             </text>
             <text fg={theme.colors.muted}>{" working..."}</text>
           </box>
         ) : (
-          <box flexDirection="row">
+          <box flexDirection="row" paddingTop={1}>
             <text
               fg={theme.colors.accent}
               attributes={TextAttributes.BOLD}
