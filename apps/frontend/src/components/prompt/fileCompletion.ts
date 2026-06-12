@@ -73,10 +73,14 @@ export function detectAtToken(
   return { token, atStart, atEnd };
 }
 
-export function buildAtItems(files: string[], token: string): AutocompleteItem[] {
+export function buildAtItems(
+  files: string[],
+  token: string,
+  frecencyScores?: Map<string, number>,
+): AutocompleteItem[] {
   const lower = token.toLowerCase();
   const filtered = token === ""
-    ? files
+    ? [...files].sort((a, b) => (frecencyScores?.get(b) ?? 0) - (frecencyScores?.get(a) ?? 0))
     : files.filter((f) => f.toLowerCase().includes(lower));
   return filtered.slice(0, MAX_ITEMS).map((f) => ({ id: f, label: f }));
 }

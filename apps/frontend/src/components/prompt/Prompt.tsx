@@ -8,6 +8,7 @@ import type { AutocompleteItem } from "./Autocomplete";
 import { fuzzyFilterScored } from "../../ui/fuzzy";
 import type { Command } from "../../keymap/commands";
 import { listProjectFiles, detectAtToken, buildAtItems } from "./fileCompletion";
+import { record as frecencyRecord, rank as frecencyRank } from "../../services/frecency";
 
 export type PromptProps = {
   busy: boolean;
@@ -89,17 +90,32 @@ export function Prompt({
 
   // Derive autocomplete suggestions
   const acSuggestions: AutocompleteItem[] = acOpen
-    ? fuzzyFilterScored(slashCommands, content, (c) => c.id)
-        .map(({ item: cmd }) => ({
-          id: cmd.id,
-          label: cmd.id,
-          detail: cmd.title !== cmd.id ? cmd.title : undefined,
-        }))
+    ? (() => {
+        const scores = frecencyRank("command");
+        return fuzzyFilterScored(slashCommands, content, (c) => c.id)
+          .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return (scores.get(b.item.id) ?? 0) - (scores.get(a.item.id) ?? 0);
+          })
+          .map(({ item: cmd }) => ({
+            id: cmd.id,
+            label: cmd.id,
+            detail: cmd.title !== cmd.id ? cmd.title : undefined,
+          }));
+      })()
     : [];
 
   // Keep raw Command objects accessible for .run() calls
   const acRawCommands: Command[] = acOpen
-    ? fuzzyFilterScored(slashCommands, content, (c) => c.id).map(({ item }) => item)
+    ? (() => {
+        const scores = frecencyRank("command");
+        return fuzzyFilterScored(slashCommands, content, (c) => c.id)
+          .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return (scores.get(b.item.id) ?? 0) - (scores.get(a.item.id) ?? 0);
+          })
+          .map(({ item }) => item);
+      })()
     : [];
 
   // Determine if autocomplete should be open
@@ -157,6 +173,7 @@ export function Prompt({
           const next = full.slice(0, at.atStart) + "@" + selected.id + " " + full.slice(at.atEnd);
           textareaRef.current.setText(next);
           setContent(next);
+          frecencyRecord("file", selected.id);
         }
       }
       setFileAcOpen(false);
@@ -168,6 +185,7 @@ export function Prompt({
       const suggestion = acRawCommands[acIndex];
       if (suggestion) {
         suggestion.run();
+        frecencyRecord("command", suggestion.id);
         clearTextarea();
         setAcOpen(false);
       }
@@ -194,6 +212,7 @@ export function Prompt({
             const next = full.slice(0, at.atStart) + "@" + selected.id + " " + full.slice(at.atEnd);
             textareaRef.current.setText(next);
             setContent(next);
+            frecencyRecord("file", selected.id);
           }
         }
         setFileAcOpen(false);
@@ -376,7 +395,8 @@ export function Prompt({
                 });
               }
               fileAtRef.current = { atStart: atResult.atStart, atEnd: atResult.atEnd };
-              setFileAcItems(buildAtItems(filesRef.current, atResult.token));
+              const fileScores = frecencyRank("file");
+              setFileAcItems(buildAtItems(filesRef.current, atResult.token, fileScores));
               setFileAcIndex(0);
               setFileAcOpen(true);
               setAcOpen(false);
