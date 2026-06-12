@@ -173,9 +173,17 @@
 - **文件**：`packages/swarm/src/{lockfile,mailbox,team-lifecycle,permission-sync}.ts`、`apps/cli/src/swarm-permission.ts`
 
 ### D.2 Channels 多通道 + 引擎桥接
-- 基座：`BaseChannel`（统一 ACL）、`ChannelManager`（启停/出站分发）、`MessageBus`（inbound/outbound 双队列）、`ChannelBridge`（接入 QueryEngine 并回传）。
-- 通道：优先 Telegram / Discord / Slack；附件/媒体收发、群组/线程路由、命令系统、长消息分片、Markdown 渲染。
-- **文件**：`packages/channels/src/`
+- ✅ 基座：`MessageBus`（双异步队列，AbortSignal 退出）、ACL（fail-closed：
+  空全拒/`"*"`全放/`"|"`分段）、`ChannelManager`（注入式 adapter、启停/出站
+  分发、单通道失败不拖垮）、`ChannelBridge`（inbound → `engine.submitMessage`
+  聚合 text_delta → outbound）。
+- ✅ 接线（TS 自有，Python 侧是 ohmo 消费的库）：`ohs channels serve|status`
+  长驻模式 + `settings.channels` 配置段；飞书基础版（文本收发 + @bot 过滤，
+  ACL 上移 manager）。微信不做（用户裁决，Python 本无）。
+  详见 `docs/channels-bridge-design.md`。
+- 留待：Telegram/Discord/Slack 等其余通道、媒体收发、长消息分片、飞书消息
+  去重 + bot 消息跳过、线程级会话隔离。
+- **文件**：`packages/channels/src/`、`apps/cli/src/commands/channels.ts`
 
 ### D.3 Sandbox Docker backend
 - 实现 Docker backend：`docker run` + 资源限制（`--cpus`/`--memory`）+ 网络隔离（`--network none` + allowed/denied_domains fail-closed）+ 镜像管理 + path validator。
