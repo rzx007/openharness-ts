@@ -117,7 +117,12 @@ type AutocompleteProps = {
 - 新增文件补全状态（`fileAcOpen`, `fileAcItems`, `fileAcIndex`）
 - `@` token 检测用正则 `/(?:^|\s)@(\S*)$/`（取光标前文本的最后匹配）
 - 文件列表懒加载（首次触发时 `await listProjectFiles(process.cwd())`）
-- 选中后替换 token：读取 `textareaRef.current.plainText`，手动切割字符串（`text.slice(0, atStart) + "@" + relativePath + " " + text.slice(atEnd)`），调用 `textareaRef.current.setText(newText)` 重置缓冲区；`atStart`/`atEnd` 为 `@` 起始与 token 末尾的字符偏移（注意 `TextareaRenderable` 没有 `replaceRange` API，必须用 `setText` 全量替换）
+- 选中后替换 token：
+  1. `const full = textareaRef.current.plainText`（UTF-16 字符串）
+  2. 在 `full` 中用正则 `/(?:^|\s)@(\S*)$/`（取最后匹配）定位 `@` 的字符索引 `atStart` 和 token 末尾索引 `atEnd`
+  3. `const next = full.slice(0, atStart) + "@" + relativePath + " " + full.slice(atEnd)`
+  4. `textareaRef.current.setText(next)`（`TextareaRenderable` 无 `replaceRange`，必须全量替换）
+  - 注：`cursorOffset`（`EditBufferRenderable` 的字符索引属性）可辅助验证当前光标处于 `@token` 之后，但 token 边界应直接从 `plainText` 字符串正则推导，不依赖 `cursorOffset` 做切割
 
 ---
 
@@ -169,11 +174,13 @@ Session 路由横向分为 `[消息区 flexGrow=1] [Sidebar width=40]`。Sidebar
 
 ### 显隐规则
 
-```
-visible = (terminalWidth >= 110 && !userOverride) || (terminalWidth < 110 && userOverride)
-```
+使用简单布尔 `sidebarOpen: boolean`（存于 `AppInner` state）：
 
-即：宽屏默认显，用户 `ctrl+b` 反转该默认。`userOverride` 存 React state，进程生命周期内有效（不持久化）。
+- 挂载时：`sidebarOpen = terminalWidth >= 110`（宽屏默认开）
+- `ctrl+b`：`setSidebarOpen(v => !v)`（无论当前宽度，直接取反）
+- `terminalWidth` 变化时**不**自动重置 `sidebarOpen`（避免用户手动调整后被宽度变化覆盖）
+
+不持久化，进程生命周期内有效。
 
 命令注册表新增 `app.sidebar`（label: `Toggle Sidebar`），让 ctrl+p 面板也能操作。
 
