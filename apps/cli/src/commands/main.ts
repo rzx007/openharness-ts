@@ -19,6 +19,7 @@ import { computeToolDiff } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
 import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers } from "../plugin-contributions";
+import { updateRulesFromSession } from "@openharness/personalization";
 import { isSwarmWorker } from "@openharness/swarm";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
@@ -226,6 +227,13 @@ async function runPrintMode(
       process.stderr.write(`${formatApiError(err, settings)}\n`);
     }
     process.exit(1);
+  }
+
+  // 个性化（C.5）：会话结束 best-effort 抽取环境事实，绝不阻塞退出。
+  try {
+    updateRulesFromSession(bundle.queryEngine.getHistory());
+  } catch {
+    // best-effort
   }
 }
 
@@ -484,6 +492,12 @@ async function runRepl(
   });
 
   rl.on("close", () => {
+    // 个性化（C.5）：REPL 退出时 best-effort 抽取环境事实。
+    try {
+      updateRulesFromSession(bundle.queryEngine.getHistory());
+    } catch {
+      // best-effort
+    }
     process.exit(0);
   });
 
@@ -785,6 +799,12 @@ async function runBackendHost(
   while (running) {
     const request = await nextRequest();
     if (!request || request.type === "shutdown") {
+      // 个性化（C.5）：backend 关停时 best-effort 抽取环境事实。
+      try {
+        updateRulesFromSession(bundle.queryEngine.getHistory());
+      } catch {
+        // best-effort
+      }
       await emit({ type: "shutdown" });
       break;
     }

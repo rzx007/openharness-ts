@@ -265,3 +265,31 @@ describe("buildRuntimeSystemPrompt", () => {
     expect(result).toContain("OpenHarness");
   });
 });
+
+describe("local rules injection (C.5)", () => {
+  it("injects rules.md into the runtime prompt and skips when absent", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+
+    const cfgDir = mkdtempSync(join(tmpdir(), "ohs-prompts-cfg-"));
+    process.env.OPENHARNESS_CONFIG_DIR = cfgDir;
+    try {
+      // 无 rules.md → 不注入。
+      const without = await buildRuntimeSystemPrompt({ cwd: cfgDir });
+      expect(without).not.toContain("# Local Environment Rules");
+
+      mkdirSync(join(cfgDir, "local_rules"), { recursive: true });
+      writeFileSync(
+        join(cfgDir, "local_rules", "rules.md"),
+        ["# Local Environment Rules", "", "## SSH Hosts", "", "- `ops@10.0.0.9`", ""].join("\n"),
+      );
+      const withRules = await buildRuntimeSystemPrompt({ cwd: cfgDir });
+      expect(withRules).toContain("# Local Environment Rules");
+      expect(withRules).toContain("ops@10.0.0.9");
+    } finally {
+      delete process.env.OPENHARNESS_CONFIG_DIR;
+      rmSync(cfgDir, { recursive: true, force: true });
+    }
+  });
+});
