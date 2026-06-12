@@ -28,3 +28,38 @@ export type {
   CreateShellTaskOptions,
   CreateAgentTaskOptions,
 } from "./tasks";
+
+export {
+  DEFAULT_TOOL_OUTPUT_INLINE_CHARS,
+  DEFAULT_TOOL_OUTPUT_PREVIEW_CHARS,
+  DEFAULT_MICROCOMPACT_TOOL_RESULT_CHARS,
+  toolOutputInlineChars,
+  toolOutputPreviewChars,
+  microcompactToolResultChars,
+  isMicrocompactableToolResult,
+} from "./tool-outputs.js";
+
+export {
+  MAX_SESSION_MEMORY_CHARS,
+  getSessionMemoryDir,
+  getSessionMemoryPath,
+  prepareSessionMemoryMetadata,
+  getSessionMemoryContent,
+  updateSessionMemoryFile,
+  buildSessionMemoryDocument,
+  sessionMemoryToCompactText,
+  type CheckpointMessageLike,
+} from "./session-memory.js";
+
+export {
+  EXTRACTION_SYSTEM_PROMPT,
+  hasMemoryWritesSince,
+  buildExtractionPrompt,
+  parseExtractionRecords,
+  applyExtractionRecords,
+  extractMemoriesFromTurn,
+  type ExtractionRecord,
+  type ExtractionResult,
+  type ExtractMemoriesOptions,
+} from "./memory-extract.js";
+export * from "./autodream/index.js";

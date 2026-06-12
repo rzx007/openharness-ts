@@ -20,6 +20,7 @@ import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
 import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers } from "../plugin-contributions";
 import { updateRulesFromSession } from "@openharness/personalization";
+import { updateSessionMemoryFile } from "@openharness/services";
 import { isSwarmWorker } from "@openharness/swarm";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
@@ -374,6 +375,7 @@ async function runRepl(
     },
     hookExecutor: bundle.hookExecutor as HookExecutor,
     memoryManager,
+    memoryDir,
     mcpManager,
     skillRegistry,
     themeManager,
@@ -480,6 +482,13 @@ async function runRepl(
       if (err instanceof Error) {
         process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
       }
+    }
+
+    // 会话记忆 checkpoint（E.6）：每轮后写确定性快照，compact 连续性的底座。
+    try {
+      updateSessionMemoryFile(process.cwd(), bundle.queryEngine.getHistory(), { sessionId });
+    } catch {
+      // best-effort
     }
 
     rl.prompt();

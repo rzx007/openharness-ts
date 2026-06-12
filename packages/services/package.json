@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@openharness/core": "workspace:*",
-    "cron-parser": "catalog:"
+    "cron-parser": "catalog:",
+    "@openharness/memory": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
