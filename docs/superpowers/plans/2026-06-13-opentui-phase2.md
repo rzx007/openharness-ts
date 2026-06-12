@@ -516,11 +516,12 @@ export function Autocomplete({ items, selectedIndex }: AutocompleteProps) {
 
 ### Step 3: Add `fuzzyFilterScored` to fuzzy.ts
 
-- [ ] Append to `apps/frontend/src/ui/fuzzy.ts`:
+- [ ] Append **only** the following to `apps/frontend/src/ui/fuzzy.ts` (do NOT add `scoreSubsequence` — it already exists in the file):
 
 ```ts
 /**
  * Like fuzzyFilter but returns items with their scores, useful for frecency tie-breaking.
+ * Reuses the private scoreSubsequence function already defined above.
  */
 export function fuzzyFilterScored<T>(
   items: T[],
@@ -546,28 +547,9 @@ export function fuzzyFilterScored<T>(
   scored.sort((a, b) => b.score - a.score || a.index - b.index);
   return scored.map(({ item, score }) => ({ item, score }));
 }
-
-// re-export internal helper so fuzzyFilterScored can call it
-function scoreSubsequence(label: string, query: string): number {
-  let qi = 0;
-  let score = 0;
-  let consecutive = 0;
-  for (let li = 0; li < label.length && qi < query.length; li++) {
-    if (label[li] === query[qi]) {
-      consecutive++;
-      score += consecutive * 2;
-      if (li === 0 && qi === 0) score += 10;
-      qi++;
-    } else {
-      consecutive = 0;
-    }
-  }
-  if (qi < query.length) return 0;
-  return score;
-}
 ```
 
-**Note:** `scoreSubsequence` already exists in `fuzzy.ts` — do NOT duplicate it. Instead, move the existing private function just before the new export and remove its duplicate. The final file should have `scoreSubsequence` defined once, used by both `fuzzyFilter` and `fuzzyFilterScored`.
+`scoreSubsequence` is already defined as a private function at the bottom of `fuzzy.ts`. Do not add it again — `fuzzyFilterScored` calls the existing one directly.
 
 ### Step 4: Update Prompt.tsx to use new Autocomplete API
 
@@ -646,7 +628,30 @@ if (suggestion) {
 }
 ```
 
-Similarly update the Tab handler in `useKeyboard` to use `acRawCommands[acIndex]`.
+Update the Tab handler in `useKeyboard`. Find the existing Tab block (currently calls `suggestion.run()` via `acSuggestions`):
+
+```tsx
+// EXISTING (to be replaced):
+if (key.name === "tab") {
+  if (acOpen) {
+    // Complete with highlighted suggestion
+    const suggestion = acSuggestions[acIndex];
+    if (suggestion && textareaRef.current) {
+      const completed = suggestion.id + " ";
+      textareaRef.current.clear();
+      textareaRef.current.insertText(completed);
+      setContent(completed);
+    }
+  } else {
+    onCycleMode();
+  }
+  return;
+}
+```
+
+After refactor, `acSuggestions` is `AutocompleteItem[]` which has no `.run()`. The Tab completion for slash commands should remain as-is (insert `id + " "`), but the autocomplete complete-and-run (Enter) goes through `acRawCommands`. The Tab block stays structurally the same — it inserts `acSuggestions[acIndex].id + " "` into the textarea — no change needed here since `AutocompleteItem` still has `.id`.
+
+The only change needed in the Tab block is confirming that `acSuggestions[acIndex]` is still accessed (it is — `AutocompleteItem` has `.id`). No modification required to the Tab handler beyond ensuring `acSuggestions` is now `AutocompleteItem[]` (done in the import/derivation steps above).
 
 - [ ] Run build to verify no type errors:
 
