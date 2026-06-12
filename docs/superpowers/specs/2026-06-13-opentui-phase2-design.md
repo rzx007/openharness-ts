@@ -117,7 +117,7 @@ type AutocompleteProps = {
 - 新增文件补全状态（`fileAcOpen`, `fileAcItems`, `fileAcIndex`）
 - `@` token 检测用正则 `/(?:^|\s)@(\S*)$/`（取光标前文本的最后匹配）
 - 文件列表懒加载（首次触发时 `await listProjectFiles(process.cwd())`）
-- 选中后用 `textareaRef.current.replaceRange(start, end, "@" + relativePath + " ")` 替换 token（start/end 为 @ 位置）
+- 选中后替换 token：读取 `textareaRef.current.plainText`，手动切割字符串（`text.slice(0, atStart) + "@" + relativePath + " " + text.slice(atEnd)`），调用 `textareaRef.current.setText(newText)` 重置缓冲区；`atStart`/`atEnd` 为 `@` 起始与 token 末尾的字符偏移（注意 `TextareaRenderable` 没有 `replaceRange` API，必须用 `setText` 全量替换）
 
 ---
 
@@ -156,8 +156,9 @@ type SidebarProps = {
   status: Record<string, unknown>;
   transcript: TranscriptItem[];
   mcpServers: McpServerSnapshot[];
-  todoItems: TodoItemSnapshot[];
+  todoMarkdown: string;           // 与 App.tsx 现有类型一致，Sidebar 自行渲染（复用 TodoPanel 逻辑）
   swarmTeammates: SwarmTeammateSnapshot[];
+  swarmNotifications: SwarmNotificationSnapshot[];
   version?: string | null;
 };
 ```
@@ -186,7 +187,18 @@ visible = (terminalWidth >= 110 && !userOverride) || (terminalWidth < 110 && use
 
 ### 与 TodoPanel/SwarmPanel 的关系
 
-Sidebar 显示时，Session 路由不再渲染 Prompt 上方的 `TodoPanel`/`SwarmPanel`（以 `sidebarVisible` 控制条件渲染），避免重复。窄屏 / 手动关闭时恢复原面板位置。
+`sidebarVisible` 状态提升到 `AppInner`（与 `Session` 路由同层），通过 props 向下传给 `Session`（控制 Sidebar 渲染）以及控制 App.tsx 中已有的 `TodoPanel`/`SwarmPanel` 条件渲染：
+
+```tsx
+// App.tsx 中（示意）
+const [sidebarOpen, setSidebarOpen] = useState(false);
+// ...
+{!sidebarOpen && todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
+{!sidebarOpen && <SwarmPanel ... />}
+<Session sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(v => !v)} ... />
+```
+
+Sidebar 显示时 `TodoPanel`/`SwarmPanel` 不重复渲染；窄屏 / 手动关闭时恢复原面板位置。`ctrl+b` 快捷键在 `AppInner` 的全局键盘监听里调用 `setSidebarOpen`。
 
 ---
 
