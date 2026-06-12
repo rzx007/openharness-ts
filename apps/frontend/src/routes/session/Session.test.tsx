@@ -32,15 +32,19 @@ test("Session renders mixed transcript items", async () => {
   );
 
   await renderOnce();
-  // Wait for all items to render (hex color fg elements may need an extra frame)
-  await waitForFrame((f) => f.includes("Hello from user"), { maxPasses: 30 });
+  // markdown 解析是异步的：轮询渲染直到 assistant 内容出现
+  for (let i = 0; i < 40; i++) {
+    await renderOnce();
+    await new Promise((r) => setTimeout(r, 20));
+    if (captureCharFrame().includes("assistant response")) break;
+  }
   const frame = captureCharFrame();
 
   // User text present
   expect(frame).toContain("Hello from user");
 
-  // Note: non-streaming <markdown> inside scrollbox renders as blank chars in captureCharFrame
-  // due to test renderer limitations. Markdown rendering is verified separately in test 2.
+  // assistant markdown rendered (async parse, polled above)
+  expect(frame).toContain("Some assistant response text here");
 
   // Tool name present
   expect(frame).toContain("bash_tool");
