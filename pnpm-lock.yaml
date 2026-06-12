@@ -172,6 +172,9 @@ importers:
         specifier: 'catalog:'
         version: 19.2.7
     devDependencies:
+      '@types/bun':
+        specifier: ^1.3.14
+        version: 1.3.14
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.17
@@ -1075,6 +1078,9 @@ packages:
     cpu: [arm64]
     os: [win32]
 
+  '@types/bun@1.3.14':
+    resolution: {integrity: sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw==}
+
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
@@ -1181,6 +1187,9 @@ packages:
     resolution: {integrity: sha512-pgJiXP+hEgFo9qG51J6ItfY4ocs3vniwNzJ9WhoakB3QB2GdzQxX2EXssentPYlB2hOfJrTjO6iIQkWYzUodpg==}
     peerDependencies:
       typescript: ^5
+
+  bun-types@1.3.14:
+    resolution: {integrity: sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ==}
 
   bytes@3.1.2:
     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
@@ -2288,6 +2297,10 @@ snapshots:
   '@turbo/windows-arm64@2.9.6':
     optional: true
 
+  '@types/bun@1.3.14':
+    dependencies:
+      bun-types: 1.3.14
+
   '@types/chai@5.2.3':
     dependencies:
       '@types/deep-eql': 4.0.2
@@ -2419,6 +2432,10 @@ snapshots:
   bun-ffi-structs@0.2.3(typescript@5.9.3):
     dependencies:
       typescript: 5.9.3
+
+  bun-types@1.3.14:
+    dependencies:
+      '@types/node': 22.19.17
 
   bytes@3.1.2: {}
 
