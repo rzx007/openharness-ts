@@ -237,16 +237,17 @@ async function runTaskWorker(
   }
 }
 
-/** 读 stdin 第一行(EOF 返回空串)。 */
-function readOneStdinLine(): Promise<string> {
-  return new Promise((resolvePromise) => {
-    const rl = readline.createInterface({ input: process.stdin });
-    rl.once("line", (line) => {
-      rl.close();
-      resolvePromise(line);
-    });
-    rl.once("close", () => resolvePromise(""));
-  });
+/** 读 stdin 第一行(EOF 返回空串)。用 chunk 迭代而非 readline——与 backend host
+ * 同一读法;readline 在管道 stdin 下偶现 close 先于 line(Windows)。 */
+async function readOneStdinLine(): Promise<string> {
+  let buffer = "";
+  process.stdin.setEncoding("utf-8");
+  for await (const chunk of process.stdin) {
+    buffer += chunk;
+    const idx = buffer.indexOf(String.fromCharCode(10));
+    if (idx >= 0) return buffer.slice(0, idx);
+  }
+  return buffer;
 }
 
 /**
