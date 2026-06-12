@@ -110,6 +110,9 @@ importers:
       '@openharness/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
+      '@openharness/personalization':
+        specifier: workspace:*
+        version: link:../../packages/personalization
       '@openharness/plugins':
         specifier: workspace:*
         version: link:../../packages/plugins
@@ -465,6 +468,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/personalization':
+        specifier: workspace:*
+        version: link:../personalization
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

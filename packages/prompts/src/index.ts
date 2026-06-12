@@ -2,6 +2,7 @@ import { readFile, access, readdir } from "node:fs/promises";
 import { join, basename, resolve, dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { platform, machine, homedir, hostname } from "node:os";
+import { loadLocalRules } from "@openharness/personalization";
 
 export type PromptPermissionMode = "default" | "plan" | "full_auto";
 
@@ -355,6 +356,11 @@ export async function buildRuntimeSystemPrompt(
 
   const claudeMd = await loadClaudeMdPrompt(env.cwd);
   if (claudeMd) sections.push(claudeMd);
+
+  // 个性化环境事实（C.5）：session-end 抽取的 local_rules（SSH 主机/数据
+  // 路径/conda 环境等）注入，与 Python prompts/context.py 同位（CLAUDE.md 后）。
+  const localRules = loadLocalRules();
+  if (localRules) sections.push(localRules);
 
   if (options.memoryContent && options.memoryContent.trim()) {
     sections.push(`# Project Memory\n\n${options.memoryContent.trim()}`);

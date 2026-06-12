@@ -23,9 +23,10 @@ export interface FactsFile {
   last_updated?: string | null;
 }
 
+/** 宽松的消息形状：兼容引擎 Message 联合（SystemMessage 无 role，块按 unknown 收）。 */
 export interface SessionMessageLike {
-  role: string;
-  content: string | Array<{ text?: string }>;
+  role?: string;
+  content: string | ReadonlyArray<unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +191,9 @@ export function updateRulesFromSession(messages: SessionMessageLike[]): number {
       if (msg.content) allText.push(msg.content);
     } else if (Array.isArray(msg.content)) {
       for (const block of msg.content) {
-        if (block && typeof block.text === "string" && block.text) {
-          allText.push(block.text);
+        const text = (block as { text?: unknown } | null)?.text;
+        if (typeof text === "string" && text) {
+          allText.push(text);
         }
       }
     }
