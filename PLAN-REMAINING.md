@@ -36,7 +36,7 @@
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🔴 | 整体缺失 |
-| personalization | 🔴 | 整模块缺失（环境事实抽取） |
+| personalization | ✅ | 10 类事实抽取+local_rules 持久化+prompt 注入+三模式 session-end 触发(C.5) |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
 | autopilot | ⛔ | 不复刻 |
 
@@ -149,11 +149,13 @@
   agent 级 hooks/mcpServers/effort/memory/isolation 的运行时生效（swarm 后续）。
 - **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`
 
-### C.5 Personalization（新模块）
-- 新建 `packages/personalization`：会话历史正则抽取环境事实（SSH/IP/conda/端点/env/git remote 等）。
-- `~/.openharness/local_rules/` 下 rules.md + facts.json 持久化 + 去重合并。
-- session-end 钩子触发，结果注入 system prompt。
-- **依赖**：B.5（prompts 注入）、B.1（session_end hook）
+### C.5 Personalization（新模块）✅ 已完成
+- ✅ `packages/personalization`：10 类环境事实正则抽取（SSH/IP/数据路径/conda/
+  Python/端点/env/git remote/Ray/cron），去重合并 + 置信度胜出。
+- ✅ `local_rules/` rules.md + facts.json 持久化（尊重 OPENHARNESS_CONFIG_DIR）。
+- ✅ 三模式结束路径 best-effort 抽取；rules.md 注入 system prompt（CLAUDE.md 后）。
+- 顺带修了 Python git_remote 正则的失效模式（恒捕获 1 字符被过滤）。
+- **文件**：`packages/personalization/src/index.ts`、`packages/prompts/src/index.ts`
 
 ---
 
