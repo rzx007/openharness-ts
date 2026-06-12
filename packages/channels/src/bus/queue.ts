@@ -54,19 +54,24 @@ class AsyncQueue<T> {
       return Promise.resolve(head);
     }
     return new Promise<T>((resolve, reject) => {
-      const waiter = { resolve, reject };
-      this.waiters.push(waiter);
-      signal?.addEventListener(
-        "abort",
-        () => {
-          const idx = this.waiters.indexOf(waiter);
-          if (idx >= 0) {
-            this.waiters.splice(idx, 1);
-            reject(new Error("consume aborted"));
-          }
+      // 长驻消费循环复用同一个 signal:正常 resolve 必须摘掉 abort 监听器,
+      // 否则每条消息在 signal 上漏一个死监听器(无界增长 + MaxListeners 告警)。
+      const onAbort = () => {
+        const idx = this.waiters.indexOf(waiter);
+        if (idx >= 0) {
+          this.waiters.splice(idx, 1);
+          reject(new Error("consume aborted"));
+        }
+      };
+      const waiter = {
+        resolve: (v: T) => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(v);
         },
-        { once: true },
-      );
+        reject,
+      };
+      this.waiters.push(waiter);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 

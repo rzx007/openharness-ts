@@ -45,6 +45,7 @@ export class ChannelManager {
   }
 
   async startAll(): Promise<void> {
+    if (this.dispatchAbort) return; // 重入保护:二次 start 会泄漏旧分发循环
     for (const [name, allowList] of Object.entries(this.opts.allowFrom)) {
       if (allowList.length === 0) {
         this.opts.onWarning?.(

@@ -85,7 +85,11 @@ async function runChannelsServe(): Promise<void> {
     sendToolHints: settings.channels?.sendToolHints,
     onWarning: (w) => console.warn(`[channels] ${w}`),
   });
-  const bridge = new ChannelBridge({ engine: bundle.queryEngine, bus });
+  const bridge = new ChannelBridge({
+    engine: bundle.queryEngine,
+    bus,
+    onWarning: (w) => console.warn(`[channels] ${w}`),
+  });
 
   bridge.start();
   await manager.startAll();
@@ -98,7 +102,10 @@ async function runChannelsServe(): Promise<void> {
   }
   if (Object.values(status).every((s) => !s.running)) {
     console.error("[channels] 所有通道启动失败，退出。");
+    // manager 也要停:出站分发循环已启动,半连接 adapter(如 lark WS 重连
+    // 定时器)不清理会让进程挂着不退。
     await bridge.stop();
+    await manager.stopAll();
     process.exitCode = 1;
     return;
   }
@@ -107,9 +114,14 @@ async function runChannelsServe(): Promise<void> {
   await new Promise<void>((resolve) => {
     let stopping = false;
     const shutdown = () => {
-      if (stopping) return;
+      if (stopping) {
+        // bridge.stop 不打断 in-flight 的引擎流(与 Python task.cancel 的
+        // 已记录差异)——引擎卡死时给用户强退逃生口。
+        console.error("\n[channels] 强制退出。");
+        process.exit(130);
+      }
       stopping = true;
-      console.log("\n[channels] 正在停止…");
+      console.log("\n[channels] 正在停止…(再按一次 Ctrl+C 强制退出)");
       void (async () => {
         await bridge.stop();
         await manager.stopAll();

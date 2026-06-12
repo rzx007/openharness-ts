@@ -17,7 +17,14 @@ export class ChannelBridge {
   private abort: AbortController | null = null;
   private done: Promise<void> | null = null;
 
-  constructor(private readonly deps: { engine: BridgeEngine; bus: MessageBus }) {}
+  constructor(
+    private readonly deps: {
+      engine: BridgeEngine;
+      bus: MessageBus;
+      /** 运维侧日志钩子（引擎错误等）；通道用户只看到兜底文案。 */
+      onWarning?: (message: string) => void;
+    },
+  ) {}
 
   start(): void {
     if (this.abort) return;
@@ -40,7 +47,14 @@ export class ChannelBridge {
       } catch {
         break; // aborted
       }
-      await this.handle(msg);
+      try {
+        await this.handle(msg);
+      } catch (err) {
+        // 对齐 Python _loop 的兜底 except:单条失败不杀整个循环。
+        this.deps.onWarning?.(
+          `bridge 处理消息失败:${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 
@@ -52,8 +66,11 @@ export class ChannelBridge {
           parts.push(event.delta);
         }
       }
-    } catch {
+    } catch (err) {
       // 对齐 Python 的兜底文案——通道侧用户必须收到失败信号。
+      this.deps.onWarning?.(
+        `引擎处理失败(${msg.channel}/${msg.chatId}):${err instanceof Error ? err.message : String(err)}`,
+      );
       parts.length = 0;
       parts.push("[Error: failed to process your message]");
     }

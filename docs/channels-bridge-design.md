@@ -81,6 +81,8 @@ TS 现状：`packages/channels/` 仅有 `ChannelAdapter` 接口 + stdio/http/fei
 | 队列退出 | wait_for 1s 轮询 | AbortSignal | TS 惯例，免空转 |
 | 接线 | 库（ohmo 消费） | `ohs channels` 长驻模式 | 按 swarm 既例移植+接线 |
 | 媒体下载目录 | resolve_channel_media_dir | 留待 | 基础版仅文本 |
+| 飞书消息去重 / bot 消息跳过 | _processed_message_ids + sender_type 过滤 | 留待 | 基础版；WS 重投与 bot 互怼风险已知（审查 S3 记录） |
+| 停止打断 in-flight | task.cancel 可打断处理中消息 | bridge.stop 只断挂起消费，处理中等其完成 | serve 模式二次 Ctrl+C 强退兜底 |
 
 ## 测试
 

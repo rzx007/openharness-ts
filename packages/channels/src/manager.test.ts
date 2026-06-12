@@ -122,6 +122,45 @@ describe("ChannelManager", () => {
     await mgr.stopAll();
   });
 
+  it("tool_hint 门控独立于 progress 门控(四象限)", async () => {
+    const bus = new MessageBus();
+    const fake = makeAdapter("t");
+    // sendToolHints=false 但 sendProgress 默认 true:
+    // 丢 hint 类 progress,放普通 progress。
+    const mgr = new ChannelManager([fake.adapter], bus, {
+      allowFrom: { t: ["*"] },
+      sendToolHints: false,
+    });
+    await mgr.startAll();
+    bus.publishOutbound({
+      channel: "t",
+      chatId: "c",
+      content: "using Bash…",
+      metadata: { _progress: true, _tool_hint: true },
+    });
+    bus.publishOutbound({
+      channel: "t",
+      chatId: "c",
+      content: "thinking…",
+      metadata: { _progress: true },
+    });
+    await tick();
+    expect(fake.sent.map((m) => m.content)).toEqual(["thinking…"]);
+    await mgr.stopAll();
+  });
+
+  it("startAll 重入保护:二次调用不另起分发循环", async () => {
+    const bus = new MessageBus();
+    const fake = makeAdapter("t");
+    const mgr = new ChannelManager([fake.adapter], bus, { allowFrom: { t: ["*"] } });
+    await mgr.startAll();
+    await mgr.startAll(); // 不应泄漏旧循环
+    bus.publishOutbound({ channel: "t", chatId: "c", content: "once" });
+    await tick();
+    expect(fake.sent).toHaveLength(1);
+    await mgr.stopAll();
+  });
+
   it("空 allowFrom 在启动时给告警", async () => {
     const warnings: string[] = [];
     const bus = new MessageBus();
@@ -204,7 +243,38 @@ describe("ChannelBridge", () => {
     });
     await tick();
     await tick();
+    expect(bus.inboundSize).toBe(0); // 确认消息确实被消费(防 bridge 没跑的假绿)
     expect(spy).not.toHaveBeenCalled();
+    await bridge.stop();
+  });
+
+  it("单条处理抛错不杀循环,经 onWarning 上报", async () => {
+    const bus = new MessageBus();
+    const warnings: string[] = [];
+    const engine: BridgeEngine = {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async *submitMessage(content: string) {
+        if (content === "boom") throw new Error("engine down");
+        yield { type: "text_delta" as const, delta: "ok" };
+      },
+    };
+    const bridge = new ChannelBridge({ engine, bus, onWarning: (w) => warnings.push(w) });
+    bridge.start();
+    const base = {
+      channel: "t",
+      senderId: "u1",
+      chatId: "c1",
+      timestamp: new Date(0),
+      media: [],
+      metadata: {},
+    };
+    bus.publishInbound({ ...base, content: "boom" });
+    bus.publishInbound({ ...base, content: "fine" });
+    const first = await bus.consumeOutbound();
+    const second = await bus.consumeOutbound();
+    expect(first.content).toBe("[Error: failed to process your message]");
+    expect(second.content).toBe("ok"); // 循环还活着
+    expect(warnings.some((w) => w.includes("engine down"))).toBe(true);
     await bridge.stop();
   });
 
