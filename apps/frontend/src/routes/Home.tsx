@@ -1,9 +1,9 @@
-import React from "react";
+import type { UiNode } from "../types/ui";
 import { useTerminalDimensions } from "@opentui/react";
 import { useTheme } from "../theme/ThemeContext";
 import { Logo } from "../components/Logo";
 
-export function Home({ children }: { children: React.ReactNode }): React.ReactNode {
+export function Home({ children }: { children?: UiNode }) {
   const { theme } = useTheme();
   const { width } = useTerminalDimensions();
 

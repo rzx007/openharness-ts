@@ -51,7 +51,7 @@ export type FooterProps = {
   version?: string | null;
 };
 
-export function Footer({ status, mcpServers, version }: FooterProps): React.ReactNode {
+export function Footer({ status, mcpServers, version }: FooterProps) {
   const { theme } = useTheme();
   const c = theme.colors;
   const gitBranch = useGitBranch();

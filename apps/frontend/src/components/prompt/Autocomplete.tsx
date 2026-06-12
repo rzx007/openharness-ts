@@ -16,7 +16,7 @@ export function Autocomplete({
   query,
   commands,
   selectedIndex,
-}: AutocompleteProps): React.ReactNode {
+}: AutocompleteProps) {
   const { theme } = useTheme();
 
   const filtered = getAutocompleteSuggestions(query, commands);

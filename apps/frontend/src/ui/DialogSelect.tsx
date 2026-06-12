@@ -20,7 +20,7 @@ export function DialogSelect(props: {
   onSelect: (value: string) => void;
   searchable?: boolean;
   initialIndex?: number;
-}): React.ReactNode {
+}) {
   const { title, items, onSelect, searchable = true, initialIndex = 0 } = props;
   const { theme } = useTheme();
 

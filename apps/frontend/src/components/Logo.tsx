@@ -8,7 +8,7 @@ import { useTheme } from "../theme/ThemeContext";
 const BLOCK_MIN_WIDTH = 104;
 const SLICK_MIN_WIDTH = 78;
 
-export function Logo(): React.ReactNode {
+export function Logo() {
   const { theme } = useTheme();
   const { width } = useTerminalDimensions();
 

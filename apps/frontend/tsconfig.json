@@ -6,7 +6,11 @@
     "declaration": false,
     "declarationMap": false,
     "jsx": "react-jsx",
-    "jsxImportSource": "@opentui/react"
+    "jsxImportSource": "@opentui/react",
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"]
+    }
   },
   "include": ["src"]
 }

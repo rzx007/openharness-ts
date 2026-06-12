@@ -60,7 +60,7 @@ export function AppView({
   dialogOpen,
   draft,
   onDraftChange,
-}: AppViewProps): React.ReactNode {
+}: AppViewProps) {
   const { theme } = useTheme();
 
   if (!ready) {
@@ -123,7 +123,7 @@ export function AppView({
 
 const MAX_DIFF_LINES = 40;
 
-function DiffView({ diff }: { diff: string }): React.ReactNode {
+function DiffView({ diff }: { diff: string }) {
   const { theme } = useTheme();
   const c = theme.colors;
   const allLines = diff
@@ -157,7 +157,7 @@ function PermissionDialog({
 }: {
   modal: Record<string, unknown>;
   onRespond: (allowed: boolean, scope: "once" | "session") => void;
-}): React.ReactNode {
+}) {
   const { theme } = useTheme();
   const respondedRef = useRef(false);
 
@@ -223,7 +223,7 @@ function QuestionDialog({
 }: {
   modal: Record<string, unknown>;
   onSubmit: (answer: string) => void;
-}): React.ReactNode {
+}) {
   const { theme } = useTheme();
   const [inputValue, setInputValue] = useState("");
   const question = String(modal.question ?? "Question");
@@ -280,7 +280,7 @@ const PERMISSION_MODES = [
 
 // ─── AppInner — session + dialog wiring ──────────────────────────────────────
 
-function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
+function AppInner({ config }: { config: FrontendConfig }) {
   const renderer = useRenderer();
   const dialog = useDialog();
   const { setThemeName, theme } = useTheme();
@@ -637,7 +637,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
 
 // ─── App — root with providers ───────────────────────────────────────────────
 
-export function App({ config }: { config: FrontendConfig }): React.ReactNode {
+export function App({ config }: { config: FrontendConfig }) {
   const initialTheme = String(config.theme ?? "default");
   return (
     <ThemeProvider initialTheme={initialTheme}>

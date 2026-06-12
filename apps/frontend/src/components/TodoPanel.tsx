@@ -22,7 +22,7 @@ export type TodoPanelProps = {
   markdown: string;
 };
 
-export function TodoPanel({ markdown }: TodoPanelProps): React.ReactNode {
+export function TodoPanel({ markdown }: TodoPanelProps) {
   const { theme } = useTheme();
   const c = theme.colors;
 

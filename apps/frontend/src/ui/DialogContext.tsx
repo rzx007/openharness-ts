@@ -1,4 +1,5 @@
-import React, {
+import type { UiNode } from "../types/ui";
+import {
   createContext,
   useCallback,
   useContext,
@@ -9,12 +10,12 @@ import React, {
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useTheme } from "../theme/ThemeContext";
 
-type DialogEntry = { node: React.ReactNode; onClose?: () => void };
+type DialogEntry = { node: UiNode; onClose?: () => void };
 
 export type DialogApi = {
-  push: (node: React.ReactNode, onClose?: () => void) => void;
+  push: (node: UiNode, onClose?: () => void) => void;
   /** Close the whole stack and push a new entry (for mutually exclusive dialogs like command palette). */
-  replace: (node: React.ReactNode, onClose?: () => void) => void;
+  replace: (node: UiNode, onClose?: () => void) => void;
   close: () => void;
   closeAll: () => void;
   isOpen: boolean;
@@ -35,8 +36,8 @@ export function useDialog(): DialogApi {
 export function DialogProvider({
   children,
 }: {
-  children: React.ReactNode;
-}): React.ReactNode {
+  children: UiNode;
+}) {
   const [stack, setStack] = useState<DialogEntry[]>([]);
   // Ref for stack length to avoid stale closure in useKeyboard handler
   const stackLenRef = useRef(0);
@@ -45,14 +46,14 @@ export function DialogProvider({
   const { width, height } = useTerminalDimensions();
 
   const push = useCallback(
-    (node: React.ReactNode, onClose?: () => void) => {
+    (node: UiNode, onClose?: () => void) => {
       setStack((prev) => [...prev, { node, onClose }]);
     },
     [],
   );
 
   const replace = useCallback(
-    (node: React.ReactNode, onClose?: () => void) => {
+    (node: UiNode, onClose?: () => void) => {
       setStack((prev) => {
         // Call onClose for all existing entries being removed
         for (const entry of prev) {

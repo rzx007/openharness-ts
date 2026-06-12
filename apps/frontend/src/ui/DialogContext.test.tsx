@@ -8,7 +8,7 @@ import { ThemeProvider } from "../theme/ThemeContext";
 test("dialog renders above content when pushed and closes", async () => {
   let api: ReturnType<typeof useDialog> | null = null;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     api = useDialog();
     return null;
   }
@@ -49,7 +49,7 @@ test("dialog renders above content when pushed and closes", async () => {
 test("dialog replace replaces entire stack", async () => {
   let api: ReturnType<typeof useDialog> | null = null;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     api = useDialog();
     return null;
   }
@@ -85,7 +85,7 @@ test("onClose callback is called when dialog closes", async () => {
   let api: ReturnType<typeof useDialog> | null = null;
   let closedCount = 0;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     api = useDialog();
     return null;
   }
@@ -120,7 +120,7 @@ test("closeAll calls onClose for every stacked entry", async () => {
   let api: ReturnType<typeof useDialog> | null = null;
   let closedCount = 0;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     api = useDialog();
     return null;
   }
@@ -158,7 +158,7 @@ test("closeAll calls onClose for every stacked entry", async () => {
 test("esc key closes top dialog", async () => {
   let api: ReturnType<typeof useDialog> | null = null;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     api = useDialog();
     return null;
   }

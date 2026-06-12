@@ -8,7 +8,7 @@ import { ThemeProvider } from "../theme/ThemeContext";
 test("toast appears in frame after toast()", async () => {
   let toastApi: ReturnType<typeof useToast> | null = null;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     toastApi = useToast();
     return null;
   }
@@ -35,7 +35,7 @@ test("toast appears in frame after toast()", async () => {
 test("toast disappears after ttl expires", async () => {
   let toastApi: ReturnType<typeof useToast> | null = null;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     toastApi = useToast();
     return null;
   }
@@ -69,7 +69,7 @@ test("toast disappears after ttl expires", async () => {
 test("error toast uses error level (renders without crashing)", async () => {
   let toastApi: ReturnType<typeof useToast> | null = null;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     toastApi = useToast();
     return null;
   }
@@ -95,7 +95,7 @@ test("error toast uses error level (renders without crashing)", async () => {
 test("multiple toasts are stacked", async () => {
   let toastApi: ReturnType<typeof useToast> | null = null;
 
-  function Capture(): React.ReactNode {
+  function Capture() {
     toastApi = useToast();
     return null;
   }

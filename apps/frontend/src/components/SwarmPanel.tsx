@@ -30,7 +30,7 @@ export type SwarmPanelProps = {
 export function SwarmPanel({
   teammates,
   notifications,
-}: SwarmPanelProps): React.ReactNode {
+}: SwarmPanelProps) {
   const { theme } = useTheme();
   const c = theme.colors;
 

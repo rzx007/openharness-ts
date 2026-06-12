@@ -9,7 +9,7 @@ export type SessionProps = {
   assistantBuffer: string;
 };
 
-export function Session({ items, assistantBuffer }: SessionProps): React.ReactNode {
+export function Session({ items, assistantBuffer }: SessionProps) {
   const { theme } = useTheme();
   const syntax = useMemo(() => createSyntaxStyle(theme), [theme]);
 

@@ -1,4 +1,5 @@
-import React, {
+import type { UiNode } from "../types/ui";
+import {
   createContext,
   useCallback,
   useContext,
@@ -49,7 +50,7 @@ function ToastItem({
   zIndex: number;
   onExpire: (id: number) => void;
   ttlMs: number;
-}): React.ReactNode {
+}) {
   const { theme } = useTheme();
 
   useEffect(() => {
@@ -85,8 +86,8 @@ type ToastWithTtl = ToastEntry & { ttlMs: number };
 export function ToastProvider({
   children,
 }: {
-  children: React.ReactNode;
-}): React.ReactNode {
+  children: UiNode;
+}) {
   const [toasts, setToasts] = useState<ToastWithTtl[]>([]);
   const { width } = useTerminalDimensions();
 

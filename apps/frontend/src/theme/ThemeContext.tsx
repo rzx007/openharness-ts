@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState } from "react";
+import type { UiNode } from "../types/ui";
+import { createContext, useContext, useState } from "react";
 import { type ThemeConfig, BUILTIN_THEMES, defaultTheme, getTheme } from "./builtinThemes";
 
 export type { ThemeConfig };
@@ -17,9 +18,9 @@ export function ThemeProvider({
   children,
   initialTheme = "default",
 }: {
-  children: React.ReactNode;
+  children: UiNode;
   initialTheme?: string;
-}): React.ReactNode {
+}) {
   const [theme, setTheme] = useState<ThemeConfig>(() => getTheme(initialTheme));
 
   const setThemeName = (name: string): void => {

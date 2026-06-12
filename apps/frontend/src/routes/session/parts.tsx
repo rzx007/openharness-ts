@@ -36,7 +36,7 @@ export function TranscriptPart({
 }: {
   item: TranscriptItem;
   syntax: SyntaxStyle;
-}): React.ReactNode {
+}) {
   const { theme } = useTheme();
   const c = theme.colors;
   const icons = theme.icons;

@@ -136,7 +136,7 @@ test("AppView with dialogOpen=true does not render Prompt", async () => {
 test("AppView preserves prompt draft across dialog open/close", async () => {
   let setDialogOpen: (v: boolean) => void = () => {};
 
-  function Harness(): React.ReactNode {
+  function Harness() {
     const [open, setOpen] = React.useState(false);
     const [draft, setDraft] = React.useState("draft-text-123");
     setDialogOpen = setOpen;
