@@ -3,7 +3,9 @@ import { useKeyboard } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import type { TextareaRenderable } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";
-import { Autocomplete, getAutocompleteSuggestions } from "./Autocomplete";
+import { Autocomplete } from "./Autocomplete";
+import type { AutocompleteItem } from "./Autocomplete";
+import { fuzzyFilterScored } from "../../ui/fuzzy";
 import type { Command } from "../../keymap/commands";
 
 export type PromptProps = {
@@ -77,8 +79,18 @@ export function Prompt({
   }, []);
 
   // Derive autocomplete suggestions
-  const acSuggestions = acOpen
-    ? getAutocompleteSuggestions(content, slashCommands)
+  const acSuggestions: AutocompleteItem[] = acOpen
+    ? fuzzyFilterScored(slashCommands, content, (c) => c.id)
+        .map(({ item: cmd }) => ({
+          id: cmd.id,
+          label: cmd.id,
+          detail: cmd.title !== cmd.id ? cmd.title : undefined,
+        }))
+    : [];
+
+  // Keep raw Command objects accessible for .run() calls
+  const acRawCommands: Command[] = acOpen
+    ? fuzzyFilterScored(slashCommands, content, (c) => c.id).map(({ item }) => item)
     : [];
 
   // Determine if autocomplete should be open
@@ -128,7 +140,7 @@ export function Prompt({
 
     // If autocomplete is open, handle through autocomplete (don't also submit text)
     if (acOpen) {
-      const suggestion = acSuggestions[acIndex];
+      const suggestion = acRawCommands[acIndex];
       if (suggestion) {
         suggestion.run();
         clearTextarea();
@@ -143,7 +155,7 @@ export function Prompt({
 
     onSubmit(trimmed);
     clearTextarea();
-  }, [busy, acOpen, acSuggestions, acIndex, content, onSubmit, clearTextarea]);
+  }, [busy, acOpen, acRawCommands, acIndex, content, onSubmit, clearTextarea]);
 
   // Global keyboard handler
   useKeyboard((key) => {
@@ -276,8 +288,7 @@ export function Prompt({
         {/* Autocomplete floats above textarea */}
         {acOpen && acSuggestions.length > 0 && (
           <Autocomplete
-            query={content}
-            commands={slashCommands}
+            items={acSuggestions}
             selectedIndex={acIndex}
           />
         )}

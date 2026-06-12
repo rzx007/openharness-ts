@@ -1,38 +1,33 @@
 import React from "react";
 import { useTheme } from "../../theme/ThemeContext";
-import { fuzzyFilter } from "../../ui/fuzzy";
-import type { Command } from "../../keymap/commands";
 
-// 对齐 opencode：补全面板最多 10 行，贴输入框上方全宽展开
 const MAX_SUGGESTIONS = 10;
 
+export type AutocompleteItem = {
+  id: string;
+  label: string;
+  detail?: string;
+};
+
 export type AutocompleteProps = {
-  query: string;
-  commands: Command[];
+  items: AutocompleteItem[];
   selectedIndex: number;
 };
 
-export function Autocomplete({
-  query,
-  commands,
-  selectedIndex,
-}: AutocompleteProps) {
+export function Autocomplete({ items, selectedIndex }: AutocompleteProps) {
   const { theme } = useTheme();
+  const visible = items.slice(0, MAX_SUGGESTIONS);
+  if (visible.length === 0) return null;
 
-  const filtered = getAutocompleteSuggestions(query, commands);
-  if (filtered.length === 0) return null;
-
-  // 命令名列定宽：描述竖向对齐（opencode 同款两列布局）
-  const nameColWidth = Math.max(...filtered.map((c) => c.id.length)) + 4;
+  const nameColWidth = Math.max(...visible.map((c) => c.label.length)) + 4;
 
   return (
     <box flexDirection="column" backgroundColor={theme.colors.backgroundPanel}>
-      {filtered.map((cmd, idx) => {
+      {visible.map((item, idx) => {
         const isSelected = idx === selectedIndex;
-        const hasDesc = cmd.title !== cmd.id;
         return (
           <box
-            key={cmd.id}
+            key={item.id}
             flexDirection="row"
             width="100%"
             paddingLeft={1}
@@ -43,26 +38,16 @@ export function Autocomplete({
               fg={isSelected ? theme.colors.background : theme.colors.foreground}
               flexShrink={0}
             >
-              {cmd.id.padEnd(nameColWidth)}
+              {item.label.padEnd(nameColWidth)}
             </text>
-            {hasDesc && (
+            {item.detail ? (
               <text fg={isSelected ? theme.colors.background : theme.colors.muted}>
-                {cmd.title}
+                {item.detail}
               </text>
-            )}
+            ) : null}
           </box>
         );
       })}
     </box>
   );
-}
-
-/**
- * Given a query and command list, return the filtered suggestions (max 10).
- */
-export function getAutocompleteSuggestions(
-  query: string,
-  commands: Command[],
-): Command[] {
-  return fuzzyFilter(commands, query, (c) => c.id).slice(0, MAX_SUGGESTIONS);
 }

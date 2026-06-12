@@ -44,6 +44,35 @@ export function fuzzyFilter<T>(
   return scored.map((s) => s.item);
 }
 
+/**
+ * Like fuzzyFilter but returns items with their scores, useful for frecency tie-breaking.
+ * Reuses the private scoreSubsequence function already defined below.
+ */
+export function fuzzyFilterScored<T>(
+  items: T[],
+  query: string,
+  key: (t: T) => string,
+): Array<{ item: T; score: number }> {
+  if (query === "") return items.map((item) => ({ item, score: 0 }));
+  const q = query.toLowerCase();
+  const hasSeparator = q.includes("/");
+
+  const scored: Array<{ item: T; score: number; index: number }> = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    const label = key(item).toLowerCase();
+    let score: number;
+    if (hasSeparator) {
+      score = label.startsWith(q) ? 100 + (q.length === label.length ? 10 : 0) : 0;
+    } else {
+      score = scoreSubsequence(label, q);
+    }
+    if (score > 0) scored.push({ item, score, index: i });
+  }
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  return scored.map(({ item, score }) => ({ item, score }));
+}
+
 function scoreSubsequence(label: string, query: string): number {
   let qi = 0;
   let score = 0;
