@@ -4,7 +4,7 @@ import { TextAttributes } from "@opentui/core";
 import { useBackendSession } from "./hooks/useBackendSession";
 import { ThemeProvider, useTheme } from "./theme/ThemeContext";
 import { DialogProvider, useDialog } from "./ui/DialogContext";
-import { ToastProvider } from "./ui/Toast";
+import { ToastProvider, useToast } from "./ui/Toast";
 import { DialogSelect } from "./ui/DialogSelect";
 import { buildRegistry, type CommandRegistry } from "./keymap/commands";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
@@ -282,10 +282,15 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
   const renderer = useRenderer();
   const dialog = useDialog();
   const { setThemeName, theme } = useTheme();
+  const { toast } = useToast();
 
-  const session = useBackendSession(config, (code) => {
-    process.exit(code ?? 0);
-  });
+  const session = useBackendSession(
+    config,
+    (code) => {
+      process.exit(code ?? 0);
+    },
+    (message) => toast(message, "error"),
+  );
 
   // Local input history (up to 100 entries)
   const [history, setHistory] = useState<string[]>([]);
@@ -307,6 +312,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
       const themeSetMatch = line.match(/^\/theme\s+set\s+(\S+)$/);
       if (themeSetMatch?.[1]) {
         setThemeName(themeSetMatch[1]);
+        toast(`Theme: ${themeSetMatch[1]}`);
         return true;
       }
 
@@ -324,6 +330,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
             }))}
             onSelect={(value) => {
               setThemeName(value);
+              toast(`Theme: ${value}`);
               dialog.close();
             }}
           />,
@@ -376,7 +383,7 @@ function AppInner({ config }: { config: FrontendConfig }): React.ReactNode {
 
       return false;
     },
-    [dialog, session, setThemeName, theme.name],
+    [dialog, session, setThemeName, theme.name, toast],
   );
 
   // ── openCommandPalette helper ────────────────────────────────────────────────
