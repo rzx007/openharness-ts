@@ -88,16 +88,10 @@ export class PermissionChecker implements IPermissionChecker {
       return { action: "deny", reason: `Tool '${toolName}' is in denied list` };
     }
 
-    // 只读工具自动放行（swarm worker）：在 deniedTools 否决之后、allowedTools
-    // 白名单之前。denied 永远优先于 autoApprove（安全优先）。
-    if (this.autoApproveTools.size > 0 && this.autoApproveTools.has(toolName)) {
-      return { action: "allow", reason: "Auto-approved read-only tool (swarm worker)" };
-    }
-
-    if (this.allowedTools.size > 0 && !this.allowedTools.has(toolName)) {
-      return { action: "deny", reason: `Tool '${toolName}' is not in allowed list` };
-    }
-
+    // 全部否决类检查先行（deniedTools/deniedCommands/pathRules 的 deny），
+    // 任何放行机制（autoApprove/allowedTools/pathRules allow）都不得短路它们
+    // ——否则 autoApprove("Bash") 会让 rm -rf 黑名单失效、autoApprove("Read")
+    // 会绕过 .env 类路径保护。
     if (this.deniedCommands.length > 0 && typeof input.command === "string") {
       for (const pattern of this.deniedCommands) {
         if (matchPattern(pattern, input.command)) {
@@ -106,17 +100,34 @@ export class PermissionChecker implements IPermissionChecker {
       }
     }
 
+    // pathRules 首条命中即定结果；deny 立即否决，allow 暂存（仍需先过
+    // allowedTools 白名单收窄，语义与原实现一致）。
+    let pathAllowReason: string | null = null;
     if (this.pathRules.length > 0) {
       const path = typeof input.path === "string" ? input.path : typeof input.filePath === "string" ? input.filePath : "";
       if (path) {
         for (const rule of this.pathRules) {
           if (matchPattern(rule.pattern, path)) {
-            return rule.allow
-              ? { action: "allow", reason: `Path matched allow rule: ${rule.pattern}` }
-              : { action: "deny", reason: `Path matched deny rule: ${rule.pattern}` };
+            if (!rule.allow) {
+              return { action: "deny", reason: `Path matched deny rule: ${rule.pattern}` };
+            }
+            pathAllowReason = `Path matched allow rule: ${rule.pattern}`;
+            break;
           }
         }
       }
+    }
+
+    if (this.autoApproveTools.size > 0 && this.autoApproveTools.has(toolName)) {
+      return { action: "allow", reason: `Tool '${toolName}' is auto-approved` };
+    }
+
+    if (this.allowedTools.size > 0 && !this.allowedTools.has(toolName)) {
+      return { action: "deny", reason: `Tool '${toolName}' is not in allowed list` };
+    }
+
+    if (pathAllowReason !== null) {
+      return { action: "allow", reason: pathAllowReason };
     }
 
     for (const rule of this.rules) {

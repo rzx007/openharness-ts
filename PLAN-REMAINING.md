@@ -179,8 +179,9 @@
   聚合 text_delta → outbound）。
 - ✅ 接线（TS 自有，Python 侧是 ohmo 消费的库）：`ohs channels serve|status`
   长驻模式 + `settings.channels` 配置段；飞书基础版（文本收发 + @bot 过滤，
-  ACL 上移 manager）。微信不做（用户裁决，Python 本无）。
-  详见 `docs/channels-bridge-design.md`。
+  ACL 上移 manager）。微信不做（用户裁决，Python 本无）。serve 无头模式
+  只读工具自动放行（写/Bash 仍拒）；`settings.permission.autoApproveTools`
+  顺带接线。详见 `docs/channels-bridge-design.md`。
 - 留待：Telegram/Discord/Slack 等其余通道、媒体收发、长消息分片、飞书消息
   去重 + bot 消息跳过、线程级会话隔离。
 - **文件**：`packages/channels/src/`、`apps/cli/src/commands/channels.ts`

@@ -68,6 +68,18 @@ TS 现状：`packages/channels/` 仅有 `ChannelAdapter` 接口 + stdio/http/fei
   mention 清洗、回复目标启发（`oc_` 前缀→chat_id）保持现状。
 - 启动安全提示：通道 `allowFrom` 为空时打告警（对齐 Python
   `_validate_allow_from`）。
+- 工具权限（增补）：serve 是无头进程，default 模式下 `ask` 无人确认 →
+  全拒。serve 自动放行**收窄版只读集**：`READ_ONLY_TOOLS` 剔除
+  WebFetch/WebSearch——远程通道语境下 Read+WebFetch 构成"读本地文件→
+  出站外带"链且可打内网（审查 I1），信任环境自行加
+  `settings.permission.autoApproveTools: ["WebFetch"]`；写文件/Bash 仍拒。
+  顺带接线 `settings.permission.autoApproveTools`（此前 runtime 忽略该
+  配置，现多来源合并 `resolveAutoApproveTools`）。否决优先级修正（审查
+  C1）：checker 中 deniedCommands 与 pathRules 的 deny 提到所有放行机制
+  之前——autoApprove("Bash") 不再使 rm -rf 黑名单失效、autoApprove("Read")
+  不再绕过 .env 类路径保护。full_auto 对远程通道等于任意命令执行，明确
+  不建议。TaskGet/TaskOutput 会向通道用户暴露本机任务输出（已知信息披露，
+  可接受）。
 
 ## 与 Python v0.1.9 差异
 
