@@ -124,6 +124,8 @@ export function AppView({
 const MAX_DIFF_LINES = 40;
 
 function DiffView({ diff }: { diff: string }): React.ReactNode {
+  const { theme } = useTheme();
+  const c = theme.colors;
   const allLines = diff
     .replace(/\n$/, "")
     .split("\n")
@@ -135,15 +137,15 @@ function DiffView({ diff }: { diff: string }): React.ReactNode {
     <box flexDirection="column">
       {lines.map((line, i) => {
         if (line.startsWith("+++") || line.startsWith("---")) {
-          return <text key={i} fg="#5c6370">{line}</text>;
+          return <text key={i} fg={c.muted}>{line}</text>;
         }
-        if (line.startsWith("@@")) return <text key={i} fg="#56b6c2">{line}</text>;
-        if (line.startsWith("+")) return <text key={i} fg="#98c379">{line}</text>;
-        if (line.startsWith("-")) return <text key={i} fg="#e06c75">{line}</text>;
-        return <text key={i} fg="#5c6370">{line}</text>;
+        if (line.startsWith("@@")) return <text key={i} fg={c.primary}>{line}</text>;
+        if (line.startsWith("+")) return <text key={i} fg={c.success}>{line}</text>;
+        if (line.startsWith("-")) return <text key={i} fg={c.error}>{line}</text>;
+        return <text key={i} fg={c.muted}>{line}</text>;
       })}
       {truncated > 0 && (
-        <text fg="#5c6370">{`  … ${truncated} more line(s)`}</text>
+        <text fg={c.muted}>{`  … ${truncated} more line(s)`}</text>
       )}
     </box>
   );
