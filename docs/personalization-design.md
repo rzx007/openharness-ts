@@ -1,6 +1,7 @@
 # 设计：Personalization 环境事实抽取（C.5）
 
-> 状态：已批准。新建 `packages/personalization`，移植 Python
+> 状态：已实现合并。记忆体系全景见 [memory-system.md](./memory-system.md)。
+> 新建 `packages/personalization`，移植 Python
 > `personalization/{extractor,rules,session_hook}.py`（共 273 行）。
 
 ## 它做什么

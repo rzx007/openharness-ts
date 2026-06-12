@@ -340,7 +340,7 @@ OpenHarness-ts/
 | `SessionStorage` | 会话持久化：JSON 文件存储，支持 `--continue` / `--resume` 恢复             |
 | `CronScheduler`  | 定时任务：cron 表达式解析 + `computeNextRunTime` + 执行历史记录             |
 | `TaskManager`    | 任务管理：创建/查询/停止/输出，文件持久化                                      |
-| `MemoryManager`  | 记忆存储：加权关键词搜索（metadata 权重 2x），最大 1000 条，LRU 淘汰               |
+| `MemoryManager`  | 四层记忆体系的持久层：frontmatter + 加权搜索 + MEMORY.md 索引；配套 `/remember`（LLM 提取持久记忆）、`/dream`（梦境整合）、会话 checkpoint 与环境事实抽取。详见 [docs/memory-system.md](docs/memory-system.md) |
 | `LspClient`      | LSP 客户端：与 Language Server Protocol 通信                       |
 | `OAuthFlow`      | OAuth 认证：Device Code Flow + token 刷新                        |
 
