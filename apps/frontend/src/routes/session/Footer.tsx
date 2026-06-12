@@ -1,10 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useTheme } from "../../theme/ThemeContext";
 import type { McpServerSnapshot } from "../../types";
 
-/** Read git branch once at module load time. Returns branch name or null. */
+/** Read current git branch from .git/HEAD. Returns branch name or null. */
 function readGitBranch(): string | null {
   try {
     const headPath = join(process.cwd(), ".git", "HEAD");
@@ -16,7 +16,19 @@ function readGitBranch(): string | null {
   }
 }
 
-const GIT_BRANCH: string | null = readGitBranch();
+const BRANCH_POLL_MS = 10_000;
+
+/** 低频轮询 .git/HEAD：会话中切分支后 Footer 跟着刷新（同值 setState 会被 React 跳过） */
+function useGitBranch(): string | null {
+  const [branch, setBranch] = useState<string | null>(() => readGitBranch());
+  useEffect(() => {
+    const id = setInterval(() => {
+      setBranch(readGitBranch());
+    }, BRANCH_POLL_MS);
+    return () => clearInterval(id);
+  }, []);
+  return branch;
+}
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -37,6 +49,7 @@ export type FooterProps = {
 export function Footer({ status, mcpServers, version }: FooterProps): React.ReactNode {
   const { theme } = useTheme();
   const c = theme.colors;
+  const gitBranch = useGitBranch();
 
   const mode = String(status.permission_mode ?? "");
   const isPlan = mode === "plan" || mode === "Plan Mode";
@@ -57,7 +70,7 @@ export function Footer({ status, mcpServers, version }: FooterProps): React.Reac
   const mcpColor = hasError ? c.error : allConnected ? c.success : c.muted;
 
   const cwd = truncateCwd(process.cwd());
-  const branchSuffix = GIT_BRANCH ? `:${GIT_BRANCH}` : "";
+  const branchSuffix = gitBranch ? `:${gitBranch}` : "";
   const leftLabel = cwd + branchSuffix;
 
   return (
