@@ -30,7 +30,7 @@
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
 | coordinator | 🟡 | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助(C.4)；缺 mode 辅助的 CLI 接线、agent 级字段运行时生效 |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
-| plugins | 🟡 | ✅skills/commands/hooks/MCP 贡献+信任门控+卸载防护(C.1 核心集)；缺 tools_dir 动态加载、plugin agents |
+| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents 贡献+信任门控+卸载防护(C.1+C.4)；缺 tools_dir 动态加载 |
 | bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
 | swarm | 🟡 | ✅subprocess 派发/TaskWait/worktree 隔离/只读放行(D.1-D.4)+文件邮箱/team.json/权限同步(D.5)；缺长驻 worker 多轮 sendMessage、TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
@@ -120,9 +120,10 @@
   `.claude-plugin/` 备用路径、SKILL.md 目录式、结构化 hooks.json、`.mcp.json`、
   `${CLAUDE_PLUGIN_ROOT}` 替换）；`/plugin:cmd` 斜杠路由复用 skill 链路。
 - ✅ project 信任门控（allowProjectPlugins，默认禁）+ 卸载路径穿越防护。
-- 留待：`tools_dir` 动态 import 工具（代码执行面，单独评估）；plugin agents
-  （依赖 C.4 的 agent .md 解析器）；backend host 的 MCP connectAll 本就缺失，
-  插件 MCP 当前仅 REPL 生效。详见 `docs/plugins-contributions-design.md`。
+- ✅ plugin agents 已随 C.4 收口（`packages/plugins/src/agents.ts`）。
+- 留待：`tools_dir` 动态 import 工具（代码执行面，单独评估）；backend host 的
+  MCP connectAll 本就缺失，插件 MCP 当前仅 REPL 生效。详见
+  `docs/plugins-contributions-design.md`。
 - **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`apps/cli/src/plugin-contributions.ts`
 
 ### C.2 Auth ProviderProfile 体系
