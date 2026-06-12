@@ -231,7 +231,9 @@
   （预算函数）。留待：compact 侧读回 checkpoint、tool_outputs 接 microcompact、
   executeAutoDream 自动触发（归 cron）。详见 `docs/services-memory-quartet-design.md`。
 - cron 升级到 croniter 级表达式 + 时区 + 独立调度守护进程 + 子进程执行 + 通知。
-- session 存储补 cwd 哈希分目录 + latest/id 双写 + tool_metadata 持久化 + Markdown 导出。
+- ✅ session 存储（第二刀）：cwd 哈希分目录 + latest/id 双写 + load 侧配对修复 +
+  Markdown 导出；--continue/--resume 已接线（裸 continue 不串项目）。留待：
+  toolMetadata 投喂、/export 命令、Ctrl+C 时保存。详见 `docs/session-storage-design.md`。
 - lsp 用真实 AST 解析（当前为正则/rg 近似）。
 
 ---
