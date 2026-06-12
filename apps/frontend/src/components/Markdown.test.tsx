@@ -63,3 +63,18 @@ describe("Markdown component (smoke)", () => {
     expect(out).toContain("• c");
   });
 });
+
+describe("highlightCode (E.3 语法高亮)", () => {
+  it("preserves code content for known languages (colors are TTY-dependent)", async () => {
+    const { highlightCode } = await import("./Markdown.js");
+    const out = highlightCode('const x = "hi";', "typescript");
+    // 无 TTY 下 chalk 关色，只断内容保真；真 TUI 中输出含 ANSI。
+    expect(stripAnsi(out)).toBe('const x = "hi";');
+  });
+
+  it("falls back to plain text for unknown languages and never throws", async () => {
+    const { highlightCode } = await import("./Markdown.js");
+    expect(highlightCode("plain stuff", "no-such-lang-xyz")).toContain("plain stuff");
+    expect(highlightCode("no lang at all")).toContain("no lang at all");
+  });
+});

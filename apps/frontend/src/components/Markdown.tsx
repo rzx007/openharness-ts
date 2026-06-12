@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
+import { highlight } from "cli-highlight";
 
 import { useTheme } from "../theme/ThemeContext";
 import type { ThemeConfig } from "../theme/builtinThemes";
@@ -13,6 +14,18 @@ import {
   type Token,
   type Tokens,
 } from "./markdownParser";
+
+/**
+ * 代码块语法高亮（cli-highlight → ANSI，Ink Text 原样透传）。
+ * 未知语言/高亮器异常回退原文，绝不让渲染崩。
+ */
+export function highlightCode(text: string, lang?: string): string {
+  try {
+    return highlight(text, { language: lang || undefined, ignoreIllegals: true });
+  } catch {
+    return text;
+  }
+}
 
 // 行内 token 渲染：返回一组 <Text> 元素。
 function renderInline(
@@ -151,7 +164,7 @@ function MarkdownBlock({
 
     case "code": {
       const c = token as Tokens.Code;
-      const lines = c.text.split("\n");
+      const lines = highlightCode(c.text, c.lang).split("\n");
       return (
         <Box
           flexDirection="column"
@@ -163,9 +176,8 @@ function MarkdownBlock({
         >
           {c.lang ? <Text dimColor>{c.lang}</Text> : null}
           {lines.map((line, i) => (
-            <Text key={i} color={theme.colors.accent}>
-              {line}
-            </Text>
+            // 已含 ANSI 着色，不再叠主题色（Ink Text 透传 ANSI）。
+            <Text key={i}>{line}</Text>
           ))}
         </Box>
       );
