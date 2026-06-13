@@ -726,6 +726,8 @@ async function runBackendHost(
   let busy = false;
   let interruptRequested = false;
   let running = true;
+  // 当前会话 ID：每轮对话后保存快照供 /sessions 列表与恢复；/resume 后切到目标 id。
+  let currentSessionId = generateSessionId();
   const lastToolInputs = new Map<string, Record<string, unknown>>();
 
   const writeLock = { locked: false, queue: [] as Array<() => void> };
@@ -875,7 +877,7 @@ async function runBackendHost(
     skillRegistry,
     themeManager,
     taskManager,
-    sessionId: generateSessionId(),
+    sessionId: currentSessionId,
     exitRepl: () => { },
     refreshSystemPrompt: async () => { },
     getBundle: () => bundle,
@@ -974,10 +976,26 @@ async function runBackendHost(
       continue;
     }
     if (request.type === "list_sessions") {
+      let options: Array<{ value: string; label: string; description?: string }> = [];
+      try {
+        const { listSessionSnapshots } = await import("@openharness/services");
+        options = listSessionSnapshots(process.cwd()).map((s) => ({
+          value: s.session_id,
+          label: s.summary || "(empty session)",
+          description: formatSessionMeta(s),
+        }));
+      } catch {
+        // best-effort：列不出来就给空列表
+      }
+      if (options.length === 0) {
+        // 前端会丢弃空 select_options 且 Home 路由不渲染 transcript，故用 error → toast 可见。
+        await emit({ type: "error", message: "暂无已保存的会话" });
+        continue;
+      }
       await emit({
         type: "select_request",
-        modal: { kind: "select", title: "Resume Session", submit_prefix: "/resume " },
-        select_options: [],
+        modal: { kind: "select", title: "Sessions", submit_prefix: "/resume " },
+        select_options: options,
       });
       continue;
     }
@@ -991,6 +1009,43 @@ async function runBackendHost(
     }
     const line = (request.line ?? "").trim();
     if (!line) continue;
+
+    // /resume <id>：恢复历史会话到当前引擎，并把消息回放成 transcript（在通用 slash
+    // 路由前拦截——host 版 /resume 只 loadMessages 不 emit transcript，前端会看不到历史）。
+    const resumeMatch = line.match(/^\/resume\s+(\S+)$/);
+    if (resumeMatch?.[1]) {
+      const resumeId = resumeMatch[1];
+      try {
+        const { loadSessionById } = await import("@openharness/services");
+        const payload = loadSessionById(process.cwd(), resumeId);
+        if (!payload) {
+          await emit({ type: "transcript_item", item: { role: "system", text: `Session not found: ${resumeId}` } });
+          await emit({ type: "line_complete" });
+          continue;
+        }
+        bundle.queryEngine.loadMessages(payload.messages as any);
+        if (payload.model) bundle.queryEngine.setModel(payload.model);
+        currentSessionId = payload.session_id;
+        await emit({ type: "clear_transcript" });
+        for (const item of messagesToTranscriptItems(payload.messages)) {
+          await emit({ type: "transcript_item", item });
+        }
+        await emit({
+          type: "transcript_item",
+          item: { role: "system", text: `Resumed session ${payload.session_id} (${payload.message_count} messages)` },
+        });
+        await emit({
+          type: "state_snapshot",
+          state: buildStatePayload(currentSettings),
+          mcp_servers: [],
+          bridge_sessions: [],
+        });
+      } catch (err) {
+        await emit({ type: "error", message: `Failed to resume: ${err instanceof Error ? err.message : String(err)}` });
+      }
+      await emit({ type: "line_complete" });
+      continue;
+    }
 
     // 先尝试 user-invocable skill 的 /<skill>（内置命令优先）。命中 → 注入 skill
     // prompt 跑一轮（emit 事件），与普通输入同路径；busy 标志处理与下方一致。
@@ -1012,6 +1067,7 @@ async function runBackendHost(
         } finally {
           busy = false;
         }
+        await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
         continue;
       }
     }
@@ -1048,6 +1104,7 @@ async function runBackendHost(
     } finally {
       busy = false;
     }
+    await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
   }
 
   // 退出/shutdown：注销 swarm listener，避免泄漏与对已关闭 stdout 的写入。
@@ -1068,6 +1125,80 @@ async function runBackendHost(
  * @param lastToolInputs - 存储最近一次工具调用输入的Map，用于后续处理
  * @returns Promise<void>
  */
+/** /sessions 列表条目的副标题：相对日期 + 消息数 + 模型。 */
+export function formatSessionMeta(s: { created_at: number; message_count: number; model: string }): string {
+  const parts: string[] = [];
+  if (s.created_at) {
+    // created_at 是 Unix 秒；转本地日期时间，精简显示。
+    const d = new Date(s.created_at * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    parts.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  }
+  parts.push(`${s.message_count} msg${s.message_count === 1 ? "" : "s"}`);
+  if (s.model) parts.push(s.model);
+  return parts.join(" · ");
+}
+
+/**
+ * 把已存储的会话消息（Anthropic Message[]）回放成前端 TranscriptItem[]。
+ * user/assistant 文本、tool_use 摘要、tool_result 输出分别映射，跳过空白块。
+ */
+export function messagesToTranscriptItems(messages: unknown[]): Array<{
+  role: "system" | "user" | "assistant" | "tool" | "tool_result" | "log";
+  text: string;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  is_error?: boolean;
+}> {
+  const items: Array<{
+    role: "system" | "user" | "assistant" | "tool" | "tool_result" | "log";
+    text: string;
+    tool_name?: string;
+    tool_input?: Record<string, unknown>;
+    is_error?: boolean;
+  }> = [];
+
+  for (const raw of messages) {
+    const msg = raw as { role?: string; type?: string; content?: unknown } | null;
+    if (!msg) continue;
+    const role = msg.role ?? msg.type ?? "system";
+
+    if (typeof msg.content === "string") {
+      const text = msg.content.trim();
+      if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
+      continue;
+    }
+    if (!Array.isArray(msg.content)) continue;
+
+    for (const block of msg.content) {
+      const b = block as
+        | { type?: string; text?: string; name?: string; input?: unknown; content?: unknown; is_error?: boolean }
+        | null;
+      if (!b) continue;
+      if (b.type === "text" && typeof b.text === "string") {
+        const text = b.text.trim();
+        if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
+      } else if (b.type === "tool_use" && typeof b.name === "string") {
+        items.push({
+          role: "tool",
+          text: `${b.name} ${JSON.stringify(b.input ?? {})}`,
+          tool_name: b.name,
+          tool_input: (b.input ?? {}) as Record<string, unknown>,
+        });
+      } else if (b.type === "tool_result") {
+        const content = typeof b.content === "string"
+          ? b.content
+          : Array.isArray(b.content)
+            ? (b.content as Array<{ text?: string }>).map((c) => c?.text ?? "").join("\n")
+            : JSON.stringify(b.content ?? "");
+        items.push({ role: "tool_result", text: content, is_error: !!b.is_error });
+      }
+    }
+  }
+
+  return items;
+}
+
 async function processLineForHost(
   line: string,
   bundle: any,

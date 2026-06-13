@@ -8,6 +8,8 @@ import {
   matchUserInvocableSkill,
   buildSkillPrompt,
   buildModelVisibleSkillsList,
+  formatSessionMeta,
+  messagesToTranscriptItems,
 } from "./main";
 
 /** 构造一个最小 SkillDefinition（补齐新增必填字段的默认值）。 */
@@ -242,5 +244,71 @@ describe("buildModelVisibleSkillsList", () => {
     const skills = makeSkillRegistry([makeSkill({ name: "commit", description: "do commit" })]);
     const list = buildModelVisibleSkillsList(skills);
     expect(list).toEqual([{ name: "commit", description: "do commit" }]);
+  });
+});
+
+describe("formatSessionMeta", () => {
+  it("includes message count and model, pluralizes msgs", () => {
+    const meta = formatSessionMeta({ created_at: 0, message_count: 3, model: "claude-opus" });
+    expect(meta).toContain("3 msgs");
+    expect(meta).toContain("claude-opus");
+  });
+
+  it("uses singular 'msg' for one message", () => {
+    const meta = formatSessionMeta({ created_at: 0, message_count: 1, model: "" });
+    expect(meta).toContain("1 msg");
+    expect(meta).not.toContain("1 msgs");
+  });
+
+  it("omits model segment when empty", () => {
+    const meta = formatSessionMeta({ created_at: 0, message_count: 2, model: "" });
+    expect(meta).toBe("2 msgs");
+  });
+});
+
+describe("messagesToTranscriptItems", () => {
+  it("maps string-content user and assistant messages", () => {
+    const items = messagesToTranscriptItems([
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi there" },
+    ]);
+    expect(items).toEqual([
+      { role: "user", text: "hello" },
+      { role: "assistant", text: "hi there" },
+    ]);
+  });
+
+  it("maps text/tool_use/tool_result content blocks", () => {
+    const items = messagesToTranscriptItems([
+      { role: "assistant", content: [
+        { type: "text", text: "let me run it" },
+        { type: "tool_use", name: "bash", input: { command: "ls" } },
+      ] },
+      { role: "user", content: [
+        { type: "tool_result", content: "file1\nfile2", is_error: false },
+      ] },
+    ]);
+    expect(items[0]).toEqual({ role: "assistant", text: "let me run it" });
+    expect(items[1]).toMatchObject({ role: "tool", tool_name: "bash" });
+    expect(items[1]!.text).toContain("ls");
+    expect(items[2]).toEqual({ role: "tool_result", text: "file1\nfile2", is_error: false });
+  });
+
+  it("joins array-form tool_result content and flags errors", () => {
+    const items = messagesToTranscriptItems([
+      { role: "user", content: [
+        { type: "tool_result", content: [{ text: "line1" }, { text: "line2" }], is_error: true },
+      ] },
+    ]);
+    expect(items[0]).toEqual({ role: "tool_result", text: "line1\nline2", is_error: true });
+  });
+
+  it("skips empty text blocks and null entries", () => {
+    const items = messagesToTranscriptItems([
+      null,
+      { role: "assistant", content: [{ type: "text", text: "   " }] },
+      { role: "user", content: "real" },
+    ]);
+    expect(items).toEqual([{ role: "user", text: "real" }]);
   });
 });
