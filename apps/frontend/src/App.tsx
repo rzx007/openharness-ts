@@ -119,8 +119,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
         return true;
       }
 
-      // /resume — list sessions
-      if (line.trim() === "/resume") {
+      // /sessions — list and restore sessions（/resume 作为别名保留）
+      if (line.trim() === "/sessions" || line.trim() === "/resume") {
         session.sendRequest({ type: "list_sessions" });
         return true;
       }
@@ -204,6 +204,11 @@ function AppInner({ config }: { config: FrontendConfig }) {
             id: "app.permissions",
             title: "Change Permission Mode",
             run: () => handleCommand("/permissions"),
+          },
+          {
+            id: "/sessions",
+            title: "List & restore sessions",
+            run: () => handleCommand("/sessions"),
           },
           {
             id: "app.sidebar",

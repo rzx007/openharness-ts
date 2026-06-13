@@ -178,8 +178,8 @@ export function useBackendSession(
       setTasks(event.tasks ?? []);
       return;
     }
-    if (event.type === "transcript_item" && event.item) {
-      setTranscript((items) => [...items, event.item as TranscriptItem]);
+    if (event.type === "transcript_item") {
+      setTranscript((items) => [...items, event.item]);
       return;
     }
     if (event.type === "assistant_delta") {
@@ -262,7 +262,8 @@ export function useBackendSession(
         setSwarmTeammates(event.swarm_teammates);
       }
       if (event.swarm_notifications != null) {
-        setSwarmNotifications((prev) => [...prev, ...event.swarm_notifications!].slice(-20));
+        const incoming = event.swarm_notifications;
+        setSwarmNotifications((prev) => [...prev, ...incoming].slice(-20));
       }
       return;
     }

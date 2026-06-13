@@ -65,28 +65,56 @@ export type SwarmNotificationSnapshot = {
   timestamp: number;
 };
 
-export type BackendEvent = {
-  type: string;
-  message?: string | null;
-  item?: TranscriptItem | null;
-  state?: Record<string, unknown> | null;
-  tasks?: TaskSnapshot[] | null;
-  mcp_servers?: McpServerSnapshot[] | null;
-  bridge_sessions?: BridgeSessionSnapshot[] | null;
-  commands?: string[] | null;
-  /** 斜杠命令明细（名称 + 描述），补全浮窗/命令面板展示用；旧后端可能缺省 */
-  command_details?: Array<{ name: string; description?: string }> | null;
-  modal?: Record<string, unknown> | null;
-  select_options?: SelectOptionPayload[] | null;
-  tool_name?: string | null;
-  output?: string | null;
-  is_error?: boolean | null;
-  todo_items?: TodoItemSnapshot[] | null;
-  todo_markdown?: string | null;
-  plan_mode?: string | null;
-  swarm_teammates?: SwarmTeammateSnapshot[] | null;
-  swarm_notifications?: SwarmNotificationSnapshot[] | null;
-};
+export type BackendEvent =
+  | {
+      type: "ready";
+      state?: Record<string, unknown> | null;
+      tasks?: TaskSnapshot[] | null;
+      commands?: string[] | null;
+      /** 斜杠命令明细（名称 + 描述），旧后端可能缺省 */
+      command_details?: Array<{ name: string; description?: string }> | null;
+      mcp_servers?: McpServerSnapshot[] | null;
+      bridge_sessions?: BridgeSessionSnapshot[] | null;
+    }
+  | {
+      type: "state_snapshot";
+      state?: Record<string, unknown> | null;
+      mcp_servers?: McpServerSnapshot[] | null;
+      bridge_sessions?: BridgeSessionSnapshot[] | null;
+    }
+  | { type: "tasks_snapshot"; tasks?: TaskSnapshot[] | null }
+  | { type: "transcript_item"; item: TranscriptItem }
+  | { type: "assistant_delta"; message: string }
+  | { type: "assistant_complete"; message?: string | null }
+  | { type: "line_complete" }
+  | {
+      type: "tool_started";
+      item: TranscriptItem;
+      tool_name?: string | null;
+      is_error?: boolean | null;
+    }
+  | {
+      type: "tool_completed";
+      item: TranscriptItem;
+      tool_name?: string | null;
+      is_error?: boolean | null;
+    }
+  | { type: "clear_transcript" }
+  | {
+      type: "select_request";
+      modal?: Record<string, unknown> | null;
+      select_options?: SelectOptionPayload[] | null;
+    }
+  | { type: "modal_request"; modal?: Record<string, unknown> | null }
+  | { type: "error"; message?: string | null }
+  | { type: "todo_update"; todo_markdown?: string | null }
+  | {
+      type: "swarm_status";
+      swarm_teammates?: SwarmTeammateSnapshot[] | null;
+      swarm_notifications?: SwarmNotificationSnapshot[] | null;
+    }
+  | { type: "plan_mode_change"; plan_mode?: string | null }
+  | { type: "shutdown" };
 
 export type FrontendRequest = {
   type: "submit_line" | "permission_response" | "question_response" | "list_sessions" | "shutdown" | "interrupt";

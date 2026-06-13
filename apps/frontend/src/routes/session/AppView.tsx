@@ -14,6 +14,7 @@ import type {
   TranscriptItem,
 } from "../../types";
 import type { Command } from "../../keymap/commands";
+import { parseStatus } from "../../services/status";
 
 export type AppViewProps = {
   transcript: TranscriptItem[];

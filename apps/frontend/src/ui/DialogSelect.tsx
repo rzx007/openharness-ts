@@ -3,6 +3,7 @@ import { useKeyboard } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../theme/ThemeContext";
 import { fuzzyFilter } from "./fuzzy";
+import { useListNavigation } from "../hooks/useListNavigation";
 
 export type DialogSelectItem = {
   value: string;
@@ -25,17 +26,20 @@ export function DialogSelect(props: {
   const { theme } = useTheme();
 
   const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(initialIndex);
   const mountedRef = useRef(false);
 
   const filtered = searchable
     ? fuzzyFilter(items, query, (i) => i.label)
     : items;
 
+  const { index: selectedIndex, setIndex: setSelectedIndex, moveUp, moveDown } =
+    useListNavigation(filtered.length);
+
   // Reset selection when query changes（跳过挂载帧，保住 initialIndex）
   useEffect(() => {
     if (!mountedRef.current) {
       mountedRef.current = true;
+      setSelectedIndex(initialIndex);
       return;
     }
     setSelectedIndex(0);
@@ -54,14 +58,8 @@ export function DialogSelect(props: {
   useKeyboard((key) => {
     if (filtered.length === 0) return;
 
-    if (key.name === "up") {
-      setSelectedIndex((prev) => Math.max(0, prev - 1));
-      return;
-    }
-    if (key.name === "down") {
-      setSelectedIndex((prev) => Math.min(filtered.length - 1, prev + 1));
-      return;
-    }
+    if (key.name === "up") { moveUp(); return; }
+    if (key.name === "down") { moveDown(); return; }
     if (key.name === "return") {
       const item = filtered[selectedIndex];
       if (item) onSelect(item.value);

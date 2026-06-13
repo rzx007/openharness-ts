@@ -9,6 +9,7 @@ import type { Command } from "../../keymap/commands";
 import { rankSlashCommands } from "../../ui/commandRanking";
 import { listProjectFiles, detectAtToken, buildAtItems } from "./fileCompletion";
 import { record as frecencyRecord, rank as frecencyRank } from "../../services/frecency";
+import { useListNavigation } from "../../hooks/useListNavigation";
 
 export type PromptProps = {
   busy: boolean;
@@ -60,12 +61,10 @@ export function Prompt({
 
   // Autocomplete state
   const [acOpen, setAcOpen] = useState(false);
-  const [acIndex, setAcIndex] = useState(0);
 
   // File @ completion state
   const [fileAcOpen, setFileAcOpen] = useState(false);
   const [fileAcItems, setFileAcItems] = useState<AutocompleteItem[]>([]);
-  const [fileAcIndex, setFileAcIndex] = useState(0);
   const [filesLoaded, setFilesLoaded] = useState(false);
   const filesRef = useRef<string[]>([]);
   const fileAtRef = useRef<{ atStart: number; atEnd: number } | null>(null);
@@ -99,6 +98,10 @@ export function Prompt({
     detail: cmd.title !== cmd.id ? cmd.title : undefined,
   }));
 
+  // 列表导航钩子（count 跟随派生值动态更新）
+  const acNav = useListNavigation(acRawCommands.length);
+  const fileAcNav = useListNavigation(fileAcItems.length);
+
   // Determine if autocomplete should be open
   const shouldShowAc = !busy && content.startsWith("/") && content.length > 0;
 
@@ -106,15 +109,15 @@ export function Prompt({
   useEffect(() => {
     if (!shouldShowAc) {
       setAcOpen(false);
-      setAcIndex(0);
+      acNav.setIndex(0);
     } else {
       setAcOpen(true);
     }
   }, [shouldShowAc]);
 
-  // Reset acIndex when content changes (new filter)
+  // Reset ac selection when content changes (new filter)
   useEffect(() => {
-    setAcIndex(0);
+    acNav.setIndex(0);
   }, [content]);
 
   // Spinner interval when busy; reset frame when no longer busy (Bug 4)
@@ -129,6 +132,21 @@ export function Prompt({
     }, 100);
     return () => clearInterval(id);
   }, [busy, theme.icons.spinner]);
+
+  // 把 @token 替换为选中的文件路径；无法应用时返回 null
+  const fileApplySelected = useCallback((text: string): string | null => {
+    const at = fileAtRef.current;
+    const selected = fileAcItems[fileAcNav.index];
+    if (!at || !selected) return null;
+    return text.slice(0, at.atStart) + selected.id + text.slice(at.atEnd);
+  }, [fileAcItems, fileAcNav.index]);
+
+  // 关闭文件补全浮窗并重置状态
+  const fileClose = useCallback(() => {
+    setFileAcOpen(false);
+    fileAcNav.setIndex(0);
+    fileAtRef.current = null;
+  }, [fileAcNav.setIndex]);
 
   // Clear textarea imperatively
   const clearTextarea = useCallback(() => {
@@ -159,7 +177,7 @@ export function Prompt({
 
     // If autocomplete is open, handle through autocomplete (don't also submit text)
     if (acOpen) {
-      const suggestion = acRawCommands[acIndex];
+      const suggestion = acRawCommands[acNav.index];
       if (suggestion) {
         suggestion.run();
         frecencyRecord("command", suggestion.id);
@@ -175,7 +193,7 @@ export function Prompt({
 
     onSubmit(trimmed);
     clearTextarea();
-  }, [busy, fileAcOpen, fileAcItems, fileAcIndex, acOpen, acRawCommands, acIndex, content, onSubmit, clearTextarea]);
+  }, [busy, fileAcOpen, fileApplySelected, fileClose, acOpen, acRawCommands, acNav.index, content, onSubmit, clearTextarea]);
 
   // Global keyboard handler
   useKeyboard((key) => {
@@ -193,7 +211,7 @@ export function Prompt({
       }
       if (acOpen) {
         // Complete with highlighted suggestion
-        const suggestion = acSuggestions[acIndex];
+        const suggestion = acSuggestions[acNav.index];
         if (suggestion && textareaRef.current) {
           const completed = suggestion.id + " ";
           textareaRef.current.clear();
@@ -209,12 +227,9 @@ export function Prompt({
     }
 
     if (key.name === "up") {
-      if (fileAcOpen) {
-        setFileAcIndex((prev) => Math.max(0, prev - 1));
-        return;
-      }
+      if (fileAcOpen) { fileAcNav.moveUp(); return; }
       if (acOpen) {
-        setAcIndex((prev) => Math.max(0, prev - 1));
+        acNav.moveUp();
       } else {
         // Bug 1: read from ref to avoid stale closure — content state may lag
         const currentText = textareaRef.current?.plainText ?? "";
@@ -238,14 +253,9 @@ export function Prompt({
     }
 
     if (key.name === "down") {
-      if (fileAcOpen) {
-        setFileAcIndex((prev) => Math.min(Math.max(0, fileAcItems.length - 1), prev + 1));
-        return;
-      }
+      if (fileAcOpen) { fileAcNav.moveDown(); return; }
       if (acOpen) {
-        setAcIndex((prev) =>
-          Math.min(Math.max(0, acSuggestions.length - 1), prev + 1),
-        );
+        acNav.moveDown();
       } else {
         // Bug 1: read from ref to avoid stale closure
         const currentText = textareaRef.current?.plainText ?? "";
@@ -272,14 +282,10 @@ export function Prompt({
     }
 
     if (key.name === "escape") {
-      if (fileAcOpen) {
-        setFileAcOpen(false);
-        setFileAcIndex(0);
-        return;
-      }
+      if (fileAcOpen) { fileClose(); return; }
       if (acOpen) {
         setAcOpen(false);
-        setAcIndex(0);
+        acNav.setIndex(0);
       } else {
         clearTextarea();
       }
@@ -331,14 +337,14 @@ export function Prompt({
       >
         {/* File @ completion floats above textarea */}
         {fileAcOpen && fileAcItems.length > 0 && (
-          <Autocomplete items={fileAcItems} selectedIndex={fileAcIndex} />
+          <Autocomplete items={fileAcItems} selectedIndex={fileAcNav.index} />
         )}
 
         {/* Slash command autocomplete floats above textarea */}
         {acOpen && acSuggestions.length > 0 && (
           <Autocomplete
             items={acSuggestions}
-            selectedIndex={acIndex}
+            selectedIndex={acNav.index}
           />
         )}
 
@@ -370,7 +376,7 @@ export function Prompt({
               fileAtRef.current = { atStart: atResult.atStart, atEnd: atResult.atEnd };
               const fileScores = frecencyRank("file");
               setFileAcItems(buildAtItems(filesRef.current, atResult.token, fileScores));
-              setFileAcIndex(0);
+              fileAcNav.setIndex(0);
               setFileAcOpen(true);
               setAcOpen(false);
             } else {
