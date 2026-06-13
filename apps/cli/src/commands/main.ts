@@ -724,6 +724,7 @@ async function runBackendHost(
   // request_id → toolName，供 permission_response 在 scope==="session" 时登记会话批准。
   const pendingPermissionTools = new Map<string, string>();
   let busy = false;
+  let interruptRequested = false;
   let running = true;
   const lastToolInputs = new Map<string, Record<string, unknown>>();
 
@@ -909,6 +910,10 @@ async function runBackendHost(
     if (!trimmed) return;
     try {
       const request = JSON.parse(trimmed) as FrontendRequest;
+      if (request.type === "interrupt") {
+        interruptRequested = true;
+        return;
+      }
       if (requestResolve) {
         requestResolve(request);
         requestResolve = null;
@@ -997,9 +1002,10 @@ async function runBackendHost(
       );
       if (skillMatch) {
         busy = true;
+        interruptRequested = false;
         try {
           const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
-          await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, currentSettings);
+          await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested);
         } catch (err) {
           const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
           await emit({ type: "error", message: msg });
@@ -1033,8 +1039,9 @@ async function runBackendHost(
     }
 
     busy = true;
+    interruptRequested = false;
     try {
-      await processLineForHost(line, bundle, emit, lastToolInputs, currentSettings);
+      await processLineForHost(line, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested);
     } catch (err) {
       const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
       await emit({ type: "error", message: msg });
@@ -1067,6 +1074,7 @@ async function processLineForHost(
   emit: (event: BackendHostEvent) => Promise<void>,
   lastToolInputs: Map<string, Record<string, unknown>>,
   settings: Settings,
+  shouldInterrupt?: () => boolean,
 ): Promise<void> {
   await emit({
     type: "transcript_item",
@@ -1077,6 +1085,7 @@ async function processLineForHost(
 
   try {
     for await (const event of bundle.queryEngine.submitMessage(line) as AsyncIterable<StreamEvent>) {
+      if (shouldInterrupt?.()) break;
       if (event.type === "text_delta") {
         await emit({ type: "assistant_delta", message: event.delta });
         assistantText += event.delta;

@@ -41,6 +41,7 @@ export type AppViewProps = {
   onDraftChange?: (text: string) => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  escHint?: boolean;
 };
 
 // ─── AppView — pure rendering layer (testable) ───────────────────────────────
@@ -65,6 +66,7 @@ export function AppView({
   onDraftChange,
   sidebarOpen,
   onToggleSidebar: _onToggleSidebar,
+  escHint,
 }: AppViewProps) {
   const { theme } = useTheme();
 
@@ -99,6 +101,7 @@ export function AppView({
       onCycleMode={onCycleMode}
       draft={draft}
       onDraftChange={onDraftChange}
+      escHint={escHint}
     />
   );
 
@@ -321,6 +324,20 @@ function AppInner({ config }: { config: FrontendConfig }) {
 
   // Prompt 草稿：dialog 打开会卸载 Prompt，提升到这里保证弹层关闭后草稿不丢
   const [draft, setDraft] = useState("");
+
+  // Double-Esc cancel: first press shows hint, second press sends interrupt
+  const [escHint, setEscHint] = useState(false);
+  const escHintRef = useRef(false);
+  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!session.busy) {
+      if (escTimerRef.current) clearTimeout(escTimerRef.current);
+      escTimerRef.current = null;
+      escHintRef.current = false;
+      setEscHint(false);
+    }
+  }, [session.busy]);
 
   const appendHistory = useCallback((line: string) => {
     setHistory((prev) => {
@@ -640,6 +657,25 @@ function AppInner({ config }: { config: FrontendConfig }) {
     if (key.ctrl && key.name === "b") {
       setSidebarOpen((v) => !v);
     }
+    if (key.name === "escape" && session.busy && !dialog.isOpen) {
+      if (escHintRef.current) {
+        // Second press — interrupt running turn
+        if (escTimerRef.current) clearTimeout(escTimerRef.current);
+        escTimerRef.current = null;
+        escHintRef.current = false;
+        setEscHint(false);
+        session.sendRequest({ type: "interrupt" });
+      } else {
+        // First press — show hint for 2s
+        escHintRef.current = true;
+        setEscHint(true);
+        escTimerRef.current = setTimeout(() => {
+          escHintRef.current = false;
+          setEscHint(false);
+          escTimerRef.current = null;
+        }, 2000);
+      }
+    }
   });
 
   return (
@@ -663,6 +699,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
       onDraftChange={setDraft}
       sidebarOpen={sidebarOpen}
       onToggleSidebar={() => setSidebarOpen((v) => !v)}
+      escHint={escHint}
     />
   );
 }

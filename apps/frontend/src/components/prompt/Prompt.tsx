@@ -23,6 +23,8 @@ export type PromptProps = {
   /** 草稿提升：弹层打开会卸载 Prompt，草稿由父级持有，重挂载时恢复 */
   draft?: string;
   onDraftChange?: (text: string) => void;
+  /** 双击 Esc 取消：第一次 Esc 后显示提示 */
+  escHint?: boolean;
 };
 
 const DEFAULT_PLACEHOLDER = 'Ask anything... "Fix broken tests"';
@@ -49,6 +51,7 @@ export function Prompt({
   onCycleMode,
   draft,
   onDraftChange,
+  escHint,
 }: PromptProps) {
   const { theme } = useTheme();
 
@@ -416,6 +419,9 @@ export function Prompt({
               {theme.icons.spinner[spinnerFrame] ?? "⠋"}
             </text>
             <text fg={theme.colors.muted}>{" working..."}</text>
+            {escHint && (
+              <text fg={theme.colors.warning}>{" (再按 Esc 取消)"}</text>
+            )}
           </box>
         ) : (
           <box flexDirection="row" paddingTop={1}>

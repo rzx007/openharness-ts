@@ -89,7 +89,7 @@ export type BackendEvent = {
 };
 
 export type FrontendRequest = {
-  type: "submit_line" | "permission_response" | "question_response" | "list_sessions" | "shutdown";
+  type: "submit_line" | "permission_response" | "question_response" | "list_sessions" | "shutdown" | "interrupt";
   line?: string | null;
   request_id?: string | null;
   allowed?: boolean | null;
