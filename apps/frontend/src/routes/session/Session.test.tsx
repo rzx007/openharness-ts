@@ -29,12 +29,6 @@ test("Session renders mixed transcript items", async () => {
       <Session
         items={items}
         assistantBuffer=""
-        sidebarOpen={false}
-        status={{}}
-        mcpServers={[]}
-        todoMarkdown=""
-        swarmTeammates={[]}
-        swarmNotifications={[]}
       />
     </ThemeProvider>,
     { width: 100, height: 40 },
@@ -78,12 +72,6 @@ test("Session renders streaming assistantBuffer", async () => {
       <Session
         items={[]}
         assistantBuffer="Streaming content here"
-        sidebarOpen={false}
-        status={{}}
-        mcpServers={[]}
-        todoMarkdown=""
-        swarmTeammates={[]}
-        swarmNotifications={[]}
       />
     </ThemeProvider>,
     { width: 100, height: 20 },

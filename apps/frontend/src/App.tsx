@@ -10,6 +10,7 @@ import { buildRegistry, type CommandRegistry } from "./keymap/commands";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { Home } from "./routes/Home";
 import { Session } from "./routes/session/Session";
+import { Sidebar } from "./routes/session/Sidebar";
 import { Footer } from "./routes/session/Footer";
 import { Prompt } from "./components/prompt/Prompt";
 import { TodoPanel } from "./components/TodoPanel";
@@ -111,24 +112,29 @@ export function AppView({
   }
 
   return (
-    <box flexDirection="column" width="100%" height="100%">
-      <Session
-        items={transcript}
-        assistantBuffer={assistantBuffer}
-        sidebarOpen={sidebarOpen}
-        status={status}
-        mcpServers={mcpServers}
-        todoMarkdown={todoMarkdown}
-        swarmTeammates={swarmTeammates}
-        swarmNotifications={swarmNotifications}
-        version={version}
-      />
-      {!sidebarOpen && todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
-      {!sidebarOpen && (swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (
-        <SwarmPanel teammates={swarmTeammates} notifications={swarmNotifications} />
+    <box flexDirection="row" width="100%" height="100%">
+      {/* Left column: messages + panels + prompt + footer */}
+      <box flexDirection="column" flexGrow={1}>
+        <Session items={transcript} assistantBuffer={assistantBuffer} />
+        {!sidebarOpen && todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
+        {!sidebarOpen && (swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (
+          <SwarmPanel teammates={swarmTeammates} notifications={swarmNotifications} />
+        ) : null}
+        {prompt}
+        <Footer status={status} mcpServers={mcpServers} version={version} />
+      </box>
+      {/* Right column: Sidebar */}
+      {sidebarOpen ? (
+        <Sidebar
+          status={status}
+          transcript={transcript}
+          mcpServers={mcpServers}
+          todoMarkdown={todoMarkdown}
+          swarmTeammates={swarmTeammates}
+          swarmNotifications={swarmNotifications}
+          version={version}
+        />
       ) : null}
-      {prompt}
-      <Footer status={status} mcpServers={mcpServers} version={version} />
     </box>
   );
 }
