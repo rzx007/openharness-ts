@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join, basename, dirname, resolve, sep } from "node:path";
 import { BUNDLED_SKILLS } from "./bundled.js";
 
 export { BUNDLED_SKILLS } from "./bundled.js";
@@ -366,10 +366,14 @@ export class SkillLoader {
     recursive?: boolean
   ): Promise<string[]> {
     try {
+      const resolvedDir = resolve(dirPath);
       const entries = await readdir(dirPath, { withFileTypes: true });
       const files: string[] = [];
       for (const entry of entries) {
         const full = join(dirPath, entry.name);
+        // 路径穿越防护：确保解析后的路径在 dirPath 内（防止 symlink 或 .. 逃逸）。
+        const resolvedFull = resolve(full);
+        if (!resolvedFull.startsWith(resolvedDir + sep)) continue;
         if (entry.isFile() && entry.name.endsWith(".md")) {
           files.push(full);
         } else if (recursive && entry.isDirectory()) {
@@ -381,6 +385,40 @@ export class SkillLoader {
       return [];
     }
   }
+}
+
+/**
+ * 从 cwd 向上遍历到 git-root，收集每一层的 project skill 目录。
+ * 返回的目录列表按"低优先级在前、高优先级在后"排序（root 先、cwd 后），
+ * 调用方按顺序加载时，cwd 层技能会覆盖 git-root 层的同名技能。
+ *
+ * 每层收集顺序：.openharness/skills → .claude/skills（后者优先级更高）。
+ */
+export async function findProjectSkillDirs(cwd: string): Promise<string[]> {
+  const levels: string[] = [];
+  let current = resolve(cwd);
+
+  while (true) {
+    levels.push(current);
+    // 遇到 .git 目录/文件即停止（git-root 标志）。
+    try {
+      await stat(join(current, ".git"));
+      break;
+    } catch {}
+    const parent = dirname(current);
+    if (parent === current) break; // 到达文件系统根
+    current = parent;
+  }
+
+  // 反转：root 在前，cwd 在后（确保 cwd 层覆盖 root 层）。
+  levels.reverse();
+
+  const dirs: string[] = [];
+  for (const level of levels) {
+    dirs.push(join(level, ".openharness", "skills"));
+    dirs.push(join(level, ".claude", "skills"));
+  }
+  return dirs;
 }
 
 /**

@@ -14,7 +14,7 @@ export interface CronJob {
 
 export class CronScheduler {
   private jobs = new Map<string, CronJob>();
-  private timers = new Map<string, ReturnType<typeof setInterval>>();
+  private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private history: Array<{
     name: string;
     timestamp: number;
@@ -84,37 +84,33 @@ export class CronScheduler {
     if (!job.enabled) return false;
     if (job.running) return true;
     job.running = true;
-    const ms = parseCronToInterval(job.expression);
-    const handler = job.handler ?? (() => {});
-    this.timers.set(
-      id,
-      setInterval(async () => {
+
+    const scheduleNext = () => {
+      const delay = Math.max(0, computeNextRunTime(job.expression) - Date.now());
+      const timer = setTimeout(async () => {
+        const handler = job.handler ?? (() => {});
         try {
           await handler();
           job.lastRun = Date.now();
-          job.nextRun = computeNextRunTime(job.expression);
-          this.history.push({
-            name: job.name,
-            timestamp: Date.now(),
-            success: true,
-          });
+          this.history.push({ name: job.name, timestamp: Date.now(), success: true });
         } catch (err) {
-          this.history.push({
-            name: job.name,
-            timestamp: Date.now(),
-            success: false,
-            output: String(err),
-          });
+          this.history.push({ name: job.name, timestamp: Date.now(), success: false, output: String(err) });
         }
-      }, ms),
-    );
+        job.nextRun = computeNextRunTime(job.expression);
+        if (job.running) scheduleNext();
+      }, delay);
+      this.timers.set(id, timer);
+    };
+
+    job.nextRun = computeNextRunTime(job.expression);
+    scheduleNext();
     return true;
   }
 
   stop(id: string): boolean {
     const timer = this.timers.get(id);
     if (timer) {
-      clearInterval(timer);
+      clearTimeout(timer);
       this.timers.delete(id);
     }
     const job = this.jobs.get(id);

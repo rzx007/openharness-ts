@@ -6,7 +6,7 @@ import { CommandRegistry } from "@openharness/commands";
 import { HookExecutor } from "@openharness/hooks";
 import { McpClientManager } from "@openharness/mcp";
 import { MemoryManager } from "@openharness/memory";
-import { SkillRegistry, SkillLoader, type SkillDefinition } from "@openharness/skills";
+import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
 import { ThemeManager } from "@openharness/themes";
 import { TaskManager, getTaskManager } from "@openharness/services";
 import {
@@ -604,13 +604,17 @@ async function runRepl(
   });
 
   rl.on("close", () => {
-    // 个性化（C.5）：REPL 退出时 best-effort 抽取环境事实。
-    try {
-      updateRulesFromSession(bundle.queryEngine.getHistory());
-    } catch {
-      // best-effort
-    }
-    process.exit(0);
+    (async () => {
+      // 个性化（C.5）：REPL 退出时 best-effort 抽取环境事实。
+      try {
+        updateRulesFromSession(bundle.queryEngine.getHistory());
+      } catch {
+        // best-effort
+      }
+      // Ctrl+C / EOF 退出前保存会话快照。
+      await saveSessionSnapshot(sessionId, bundle.queryEngine, currentModel);
+      process.exit(0);
+    })();
   });
 
   rl.prompt();
@@ -1518,6 +1522,7 @@ async function saveSessionSnapshot(
       messages: engine.getHistory(),
       usage: engine.getTotalUsage() as Record<string, unknown>,
       sessionId,
+      toolMetadata: engine.getToolMetadata?.() as Record<string, unknown> | undefined,
     });
   } catch {
     // silently fail
@@ -1560,8 +1565,11 @@ export async function loadSkillsThreeSources(
   }
   const loader = new SkillLoader(skillRegistry);
   await loader.loadFromDirectory(getSkillsDir());
-  await loader.loadFromDirectory(join(cwd, ".openharness", "skills"));
-  await loader.loadFromDirectory(join(cwd, ".claude", "skills"));
+  // 从 cwd 向上遍历到 git-root，收集所有层级的 project skill 目录（低优先→高优先）。
+  const projectSkillDirs = await findProjectSkillDirs(cwd);
+  for (const dir of projectSkillDirs) {
+    await loader.loadFromDirectory(dir);
+  }
 }
 
 /**
