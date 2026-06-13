@@ -4,6 +4,7 @@ import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../theme/ThemeContext";
 import { fuzzyFilter } from "./fuzzy";
 import { useListNavigation } from "../hooks/useListNavigation";
+import { AC_VISIBLE_ITEMS } from "./constants";
 
 export type DialogSelectItem = {
   value: string;
@@ -12,8 +13,6 @@ export type DialogSelectItem = {
   hint?: string;
   active?: boolean;
 };
-
-const MAX_VISIBLE = 10;
 
 export function DialogSelect(props: {
   title: string;
@@ -49,11 +48,11 @@ export function DialogSelect(props: {
   const windowStart = Math.max(
     0,
     Math.min(
-      selectedIndex - Math.floor(MAX_VISIBLE / 2),
-      filtered.length - MAX_VISIBLE,
+      selectedIndex - Math.floor(AC_VISIBLE_ITEMS / 2),
+      filtered.length - AC_VISIBLE_ITEMS,
     ),
   );
-  const visibleItems = filtered.slice(windowStart, windowStart + MAX_VISIBLE);
+  const visibleItems = filtered.slice(windowStart, windowStart + AC_VISIBLE_ITEMS);
 
   useKeyboard((key) => {
     if (filtered.length === 0) return;

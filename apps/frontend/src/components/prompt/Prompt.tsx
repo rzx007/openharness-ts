@@ -10,6 +10,7 @@ import { rankSlashCommands } from "../../ui/commandRanking";
 import { listProjectFiles, detectAtToken, buildAtItems } from "./fileCompletion";
 import { record as frecencyRecord, rank as frecencyRank } from "../../services/frecency";
 import { useListNavigation } from "../../hooks/useListNavigation";
+import { SPINNER_INTERVAL_MS, TEXTAREA_MAX_LINES } from "../../ui/constants";
 
 export type PromptProps = {
   busy: boolean;
@@ -129,7 +130,7 @@ export function Prompt({
     const frames = theme.icons.spinner;
     const id = setInterval(() => {
       setSpinnerFrame((f) => (f + 1) % frames.length);
-    }, 100);
+    }, SPINNER_INTERVAL_MS);
     return () => clearInterval(id);
   }, [busy, theme.icons.spinner]);
 
@@ -363,7 +364,7 @@ export function Prompt({
             onDraftChange?.(text);
             // Bug 3: update height based on line count (1–6 rows)
             const lineCount = textareaRef.current?.lineCount ?? 1;
-            setTextareaHeight(Math.min(6, Math.max(1, lineCount)));
+            setTextareaHeight(Math.min(TEXTAREA_MAX_LINES, Math.max(1, lineCount)));
             // Detect @ token for file completion
             const atResult = detectAtToken(text);
             if (!busy && atResult !== null) {

@@ -2,8 +2,9 @@ import { join, relative } from "node:path";
 import { readdirSync, statSync } from "node:fs";
 import type { AutocompleteItem } from "./Autocomplete";
 
+import { AC_VISIBLE_ITEMS } from "../../ui/constants";
+
 const MAX_FILES = 5000;
-const MAX_ITEMS = 10;
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".next", ".turbo", "build", "coverage"]);
 
@@ -82,5 +83,5 @@ export function buildAtItems(
   const filtered = token === ""
     ? [...files].sort((a, b) => (frecencyScores?.get(b) ?? 0) - (frecencyScores?.get(a) ?? 0))
     : files.filter((f) => f.toLowerCase().includes(lower));
-  return filtered.slice(0, MAX_ITEMS).map((f) => ({ id: f, label: f }));
+  return filtered.slice(0, AC_VISIBLE_ITEMS).map((f) => ({ id: f, label: f }));
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ESC_HINT_TIMEOUT_MS } from "../ui/constants";
 
 /**
  * 双击 Esc 取消运行中的对话（对齐 opencode）。
@@ -40,7 +41,7 @@ export function useEscToCancel(busy: boolean, onInterrupt: () => void) {
         escHintRef.current = false;
         setEscHint(false);
         escTimerRef.current = null;
-      }, 2000);
+      }, ESC_HINT_TIMEOUT_MS);
     }
   };
 

@@ -1,7 +1,6 @@
 import React from "react";
 import { useTheme } from "../../theme/ThemeContext";
-
-const MAX_SUGGESTIONS = 10;
+import { AC_VISIBLE_ITEMS } from "../../ui/constants";
 
 export type AutocompleteItem = {
   id: string;
@@ -23,11 +22,11 @@ export function Autocomplete({ items, selectedIndex }: AutocompleteProps) {
   const windowStart = Math.max(
     0,
     Math.min(
-      selectedIndex - Math.floor(MAX_SUGGESTIONS / 2),
-      total - MAX_SUGGESTIONS,
+      selectedIndex - Math.floor(AC_VISIBLE_ITEMS / 2),
+      total - AC_VISIBLE_ITEMS,
     ),
   );
-  const visible = items.slice(windowStart, windowStart + MAX_SUGGESTIONS);
+  const visible = items.slice(windowStart, windowStart + AC_VISIBLE_ITEMS);
 
   const nameColWidth = Math.max(...visible.map((c) => c.label.length)) + 4;
 

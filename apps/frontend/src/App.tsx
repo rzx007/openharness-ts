@@ -9,6 +9,7 @@ import { ToastProvider, useToast } from "./ui/Toast";
 import { DialogSelect } from "./ui/DialogSelect";
 import { buildRegistry, type CommandRegistry } from "./keymap/commands";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "./keymap/permissionModes";
+import { HISTORY_LIMIT, SIDEBAR_AUTO_OPEN_WIDTH } from "./ui/constants";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { AppView } from "./routes/session/AppView";
 import type { FrontendConfig } from "./types";
@@ -18,7 +19,7 @@ import type { FrontendConfig } from "./types";
 function AppInner({ config }: { config: FrontendConfig }) {
   const renderer = useRenderer();
   const { width: terminalWidth } = useTerminalDimensions();
-  const [sidebarOpen, setSidebarOpen] = useState(() => terminalWidth >= 110);
+  const [sidebarOpen, setSidebarOpen] = useState(() => terminalWidth >= SIDEBAR_AUTO_OPEN_WIDTH);
   const dialog = useDialog();
   const { setThemeName, theme } = useTheme();
   const { toast } = useToast();
@@ -45,7 +46,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
   const appendHistory = useCallback((line: string) => {
     setHistory((prev) => {
       const next = [...prev, line];
-      return next.length > 100 ? next.slice(next.length - 100) : next;
+      return next.length > HISTORY_LIMIT ? next.slice(next.length - HISTORY_LIMIT) : next;
     });
   }, []);
 

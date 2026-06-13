@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import readline from "node:readline";
 
+import { SWARM_NOTIFICATION_TAIL } from "../ui/constants";
 import type {
   BackendEvent,
   BridgeSessionSnapshot,
@@ -263,7 +264,7 @@ export function useBackendSession(
       }
       if (event.swarm_notifications != null) {
         const incoming = event.swarm_notifications;
-        setSwarmNotifications((prev) => [...prev, ...incoming].slice(-20));
+        setSwarmNotifications((prev) => [...prev, ...incoming].slice(-SWARM_NOTIFICATION_TAIL));
       }
       return;
     }

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useTheme } from "../../theme/ThemeContext";
 import { parseStatus } from "../../services/status";
+import { CWD_DISPLAY_MAX_LEN, TOKEN_K_THRESHOLD } from "../../ui/constants";
 import type { McpServerSnapshot } from "../../types";
 
 /** Read current git branch from .git/HEAD. Returns branch name or null. */
@@ -32,11 +33,11 @@ function useGitBranch(): string | null {
 }
 
 function formatTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= TOKEN_K_THRESHOLD) return `${(n / TOKEN_K_THRESHOLD).toFixed(1)}k`;
   return String(n);
 }
 
-function truncateCwd(cwd: string, maxLen = 40): string {
+function truncateCwd(cwd: string, maxLen = CWD_DISPLAY_MAX_LEN): string {
   // home 目录前缀缩写为 ~（对齐 opencode 的 "~\Desktop" 风格）
   const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
   if (home && cwd.startsWith(home)) {
