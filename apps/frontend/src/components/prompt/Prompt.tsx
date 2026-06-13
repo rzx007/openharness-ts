@@ -5,8 +5,8 @@ import type { TextareaRenderable } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";
 import { Autocomplete } from "./Autocomplete";
 import type { AutocompleteItem } from "./Autocomplete";
-import { fuzzyFilterScored } from "../../ui/fuzzy";
 import type { Command } from "../../keymap/commands";
+import { rankSlashCommands } from "../../ui/commandRanking";
 import { listProjectFiles, detectAtToken, buildAtItems } from "./fileCompletion";
 import { record as frecencyRecord, rank as frecencyRank } from "../../services/frecency";
 
@@ -91,35 +91,13 @@ export function Prompt({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Derive autocomplete suggestions
-  const acSuggestions: AutocompleteItem[] = acOpen
-    ? (() => {
-        const scores = frecencyRank("command");
-        return fuzzyFilterScored(slashCommands, content, (c) => c.id)
-          .sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return (scores.get(b.item.id) ?? 0) - (scores.get(a.item.id) ?? 0);
-          })
-          .map(({ item: cmd }) => ({
-            id: cmd.id,
-            label: cmd.id,
-            detail: cmd.title !== cmd.id ? cmd.title : undefined,
-          }));
-      })()
-    : [];
-
-  // Keep raw Command objects accessible for .run() calls
-  const acRawCommands: Command[] = acOpen
-    ? (() => {
-        const scores = frecencyRank("command");
-        return fuzzyFilterScored(slashCommands, content, (c) => c.id)
-          .sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return (scores.get(b.item.id) ?? 0) - (scores.get(a.item.id) ?? 0);
-          })
-          .map(({ item }) => item);
-      })()
-    : [];
+  // 排序一次，补全浮窗（展示项）和回车执行（原始 Command）共用，避免重复计算。
+  const acRawCommands: Command[] = acOpen ? rankSlashCommands(slashCommands, content) : [];
+  const acSuggestions: AutocompleteItem[] = acRawCommands.map((cmd) => ({
+    id: cmd.id,
+    label: cmd.id,
+    detail: cmd.title !== cmd.id ? cmd.title : undefined,
+  }));
 
   // Determine if autocomplete should be open
   const shouldShowAc = !busy && content.startsWith("/") && content.length > 0;
@@ -168,18 +146,14 @@ export function Prompt({
 
     // If file @ completion is open, insert the selected file path
     if (fileAcOpen) {
-      const selected = fileAcItems[fileAcIndex];
-      if (selected && textareaRef.current) {
-        const full = textareaRef.current.plainText;
-        const at = fileAtRef.current;
-        if (at) {
-          const next = full.slice(0, at.atStart) + "@" + selected.id + " " + full.slice(at.atEnd);
+      if (textareaRef.current) {
+        const next = fileApplySelected(textareaRef.current.plainText);
+        if (next !== null) {
           textareaRef.current.setText(next);
           setContent(next);
-          frecencyRecord("file", selected.id);
         }
       }
-      setFileAcOpen(false);
+      fileClose();
       return;
     }
 
@@ -207,18 +181,14 @@ export function Prompt({
   useKeyboard((key) => {
     if (key.name === "tab") {
       if (fileAcOpen) {
-        const selected = fileAcItems[fileAcIndex];
-        if (selected && textareaRef.current) {
-          const full = textareaRef.current.plainText;
-          const at = fileAtRef.current;
-          if (at) {
-            const next = full.slice(0, at.atStart) + "@" + selected.id + " " + full.slice(at.atEnd);
+        if (textareaRef.current) {
+          const next = fileApplySelected(textareaRef.current.plainText);
+          if (next !== null) {
             textareaRef.current.setText(next);
             setContent(next);
-            frecencyRecord("file", selected.id);
           }
         }
-        setFileAcOpen(false);
+        fileClose();
         return;
       }
       if (acOpen) {

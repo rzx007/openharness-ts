@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useTheme } from "../../theme/ThemeContext";
+import { parseStatus } from "../../services/status";
 import type { McpServerSnapshot } from "../../types";
 
 /** Read current git branch from .git/HEAD. Returns branch name or null. */
@@ -56,11 +57,8 @@ export function Footer({ status, mcpServers, version }: FooterProps) {
   const c = theme.colors;
   const gitBranch = useGitBranch();
 
-  const mode = String(status.permission_mode ?? "");
+  const { mode, inputTokens, outputTokens } = parseStatus(status);
   const isPlan = mode === "plan" || mode === "Plan Mode";
-
-  const inputTokens = Number(status.input_tokens ?? 0);
-  const outputTokens = Number(status.output_tokens ?? 0);
   const hasTokens = inputTokens > 0 || outputTokens > 0;
 
   const mcpCount = mcpServers.length;

@@ -1,305 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { TextAttributes } from "@opentui/core";
 import { useBackendSession } from "./hooks/useBackendSession";
+import { useEscToCancel } from "./hooks/useEscToCancel";
+import { useModalWiring } from "./hooks/useModalWiring";
 import { ThemeProvider, useTheme } from "./theme/ThemeContext";
 import { DialogProvider, useDialog } from "./ui/DialogContext";
 import { ToastProvider, useToast } from "./ui/Toast";
 import { DialogSelect } from "./ui/DialogSelect";
 import { buildRegistry, type CommandRegistry } from "./keymap/commands";
+import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "./keymap/permissionModes";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
-import { Home } from "./routes/Home";
-import { Session } from "./routes/session/Session";
-import { Sidebar } from "./routes/session/Sidebar";
-import { Footer } from "./routes/session/Footer";
-import { Prompt } from "./components/prompt/Prompt";
-import { TodoPanel } from "./components/TodoPanel";
-import { SwarmPanel } from "./components/SwarmPanel";
-import type { FrontendConfig, McpServerSnapshot, SwarmNotificationSnapshot, SwarmTeammateSnapshot, TranscriptItem } from "./types";
-import type { Command } from "./keymap/commands";
-
-// ─── AppViewProps ────────────────────────────────────────────────────────────
-
-export type AppViewProps = {
-  transcript: TranscriptItem[];
-  assistantBuffer: string;
-  ready: boolean;
-  busy: boolean;
-  status: Record<string, unknown>;
-  mcpServers: McpServerSnapshot[];
-  todoMarkdown: string;
-  swarmTeammates: SwarmTeammateSnapshot[];
-  swarmNotifications: SwarmNotificationSnapshot[];
-  version?: string | null;
-  history: string[];
-  slashCommands: Command[];
-  onSubmit: (line: string) => void;
-  onCycleMode: () => void;
-  dialogOpen: boolean;
-  /** 草稿提升：dialogOpen 卸载 Prompt 时由 AppInner 持有，重挂载恢复 */
-  draft?: string;
-  onDraftChange?: (text: string) => void;
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
-  escHint?: boolean;
-};
-
-// ─── AppView — pure rendering layer (testable) ───────────────────────────────
-
-export function AppView({
-  transcript,
-  assistantBuffer,
-  ready,
-  busy,
-  status,
-  mcpServers,
-  todoMarkdown,
-  swarmTeammates,
-  swarmNotifications,
-  version,
-  history,
-  slashCommands,
-  onSubmit,
-  onCycleMode,
-  dialogOpen,
-  draft,
-  onDraftChange,
-  sidebarOpen,
-  onToggleSidebar: _onToggleSidebar,
-  escHint,
-}: AppViewProps) {
-  const { theme } = useTheme();
-
-  if (!ready) {
-    return (
-      <box flexDirection="column" width="100%" height="100%">
-        <text fg={theme.colors.warning}>Connecting to backend...</text>
-      </box>
-    );
-  }
-
-  // Route: Home if no user/assistant items yet and not busy and no streaming
-  const hasConversation = transcript.some(
-    (item) => item.role === "user" || item.role === "assistant",
-  );
-  const isHome = !hasConversation && !busy && !assistantBuffer;
-
-  const mode = String(status.permission_mode ?? "default");
-  const model = String(status.model ?? "");
-  const effortRaw = status.effort;
-  const effort = typeof effortRaw === "string" && effortRaw !== "" ? effortRaw : undefined;
-
-  const prompt = dialogOpen ? null : (
-    <Prompt
-      busy={busy}
-      mode={mode}
-      model={model}
-      effort={effort}
-      history={history}
-      slashCommands={slashCommands}
-      onSubmit={onSubmit}
-      onCycleMode={onCycleMode}
-      draft={draft}
-      onDraftChange={onDraftChange}
-      escHint={escHint}
-    />
-  );
-
-  if (isHome) {
-    return (
-      <box flexDirection="column" width="100%" height="100%">
-        <Home>{prompt}</Home>
-        <Footer status={status} mcpServers={mcpServers} version={version} />
-      </box>
-    );
-  }
-
-  return (
-    <box flexDirection="row" width="100%" height="100%">
-      {/* Left column: messages + panels + prompt + footer */}
-      <box flexDirection="column" flexGrow={1}>
-        <Session items={transcript} assistantBuffer={assistantBuffer} />
-        {!sidebarOpen && todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
-        {!sidebarOpen && (swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (
-          <SwarmPanel teammates={swarmTeammates} notifications={swarmNotifications} />
-        ) : null}
-        {prompt}
-        <Footer status={status} mcpServers={mcpServers} version={version} />
-      </box>
-      {/* Right column: Sidebar */}
-      {sidebarOpen ? (
-        <Sidebar
-          status={status}
-          transcript={transcript}
-          mcpServers={mcpServers}
-          todoMarkdown={todoMarkdown}
-          swarmTeammates={swarmTeammates}
-          swarmNotifications={swarmNotifications}
-          version={version}
-        />
-      ) : null}
-    </box>
-  );
-}
-
-// ─── Permission dialog component ─────────────────────────────────────────────
-
-const MAX_DIFF_LINES = 40;
-
-function DiffView({ diff }: { diff: string }) {
-  const { theme } = useTheme();
-  const c = theme.colors;
-  const allLines = diff
-    .replace(/\n$/, "")
-    .split("\n")
-    .filter((l) => !l.startsWith("\\ No newline"));
-  const lines = allLines.slice(0, MAX_DIFF_LINES);
-  const truncated = allLines.length - lines.length;
-
-  return (
-    <box flexDirection="column">
-      {lines.map((line, i) => {
-        if (line.startsWith("+++") || line.startsWith("---")) {
-          return <text key={i} fg={c.muted}>{line}</text>;
-        }
-        if (line.startsWith("@@")) return <text key={i} fg={c.primary}>{line}</text>;
-        if (line.startsWith("+")) return <text key={i} fg={c.success}>{line}</text>;
-        if (line.startsWith("-")) return <text key={i} fg={c.error}>{line}</text>;
-        return <text key={i} fg={c.muted}>{line}</text>;
-      })}
-      {truncated > 0 && (
-        <text fg={c.muted}>{`  … ${truncated} more line(s)`}</text>
-      )}
-    </box>
-  );
-}
-
-function PermissionDialog({
-  modal,
-  onRespond,
-}: {
-  modal: Record<string, unknown>;
-  onRespond: (allowed: boolean, scope: "once" | "session") => void;
-}) {
-  const { theme } = useTheme();
-  const respondedRef = useRef(false);
-
-  const respond = useCallback(
-    (allowed: boolean, scope: "once" | "session") => {
-      if (respondedRef.current) return;
-      respondedRef.current = true;
-      onRespond(allowed, scope);
-    },
-    [onRespond],
-  );
-
-  useKeyboard((key) => {
-    if (key.name === "y") {
-      respond(true, "once");
-    } else if (key.name === "a") {
-      respond(true, "session");
-    } else if (key.name === "n") {
-      respond(false, "once");
-    }
-  });
-
-  const toolName = modal.tool_name ? String(modal.tool_name) : "tool";
-  const reason = modal.reason ? String(modal.reason) : null;
-  const diff = modal.diff ? String(modal.diff) : null;
-  const diffPath = modal.diff_path ? String(modal.diff_path) : null;
-
-  return (
-    <box flexDirection="column">
-      <text>
-        <span fg={theme.colors.warning} attributes={TextAttributes.BOLD}>{"┌ "}</span>
-        <span attributes={TextAttributes.BOLD}>{"Allow "}</span>
-        <span fg={theme.colors.info} attributes={TextAttributes.BOLD}>{toolName}</span>
-        <span attributes={TextAttributes.BOLD}>{"?"}</span>
-      </text>
-      {reason ? (
-        <text>
-          <span fg={theme.colors.warning}>{"│ "}</span>
-          <span fg={theme.colors.muted}>{reason}</span>
-        </text>
-      ) : null}
-      {diff ? (
-        <box flexDirection="column">
-          {diffPath ? <text fg={theme.colors.muted}>{`  ${diffPath}`}</text> : null}
-          <DiffView diff={diff} />
-        </box>
-      ) : null}
-      <text>
-        <span fg={theme.colors.warning}>{"└ "}</span>
-        <span fg={theme.colors.success}>{"[y] Allow"}</span>
-        <span>{"  "}</span>
-        <span fg={theme.colors.success}>{"[a] Allow for session"}</span>
-        <span>{"  "}</span>
-        <span fg={theme.colors.error}>{"[n] Deny"}</span>
-      </text>
-    </box>
-  );
-}
-
-function QuestionDialog({
-  modal,
-  onSubmit,
-}: {
-  modal: Record<string, unknown>;
-  onSubmit: (answer: string) => void;
-}) {
-  const { theme } = useTheme();
-  const [inputValue, setInputValue] = useState("");
-  const question = String(modal.question ?? "Question");
-  const toolName = modal.tool_name ? String(modal.tool_name) : null;
-  const reason = modal.reason ? String(modal.reason) : null;
-
-  useKeyboard((key) => {
-    if (key.name === "return") {
-      const trimmed = inputValue.trim();
-      if (trimmed) onSubmit(trimmed);
-    }
-  });
-
-  return (
-    <box flexDirection="column">
-      <text fg={theme.colors.accent} attributes={TextAttributes.BOLD}>
-        {"? " + question}
-      </text>
-      {toolName ? (
-        <text fg={theme.colors.muted}>{`  Tool: ${toolName}`}</text>
-      ) : null}
-      {reason ? (
-        <text fg={theme.colors.muted}>{`  Reason: ${reason}`}</text>
-      ) : null}
-      <input
-        focused
-        placeholder="Answer..."
-        onInput={(value: string) => setInputValue(value)}
-      />
-      <text fg={theme.colors.muted}>{"  enter: submit"}</text>
-    </box>
-  );
-}
-
-// ─── PERMISSION_MODES (for /permissions dialog) ───────────────────────────────
-
-const PERMISSION_MODES = [
-  {
-    value: "default",
-    label: "default",
-    description: "Ask for approval on sensitive operations",
-  },
-  {
-    value: "full_auto",
-    label: "full_auto",
-    description: "Allow all operations without asking",
-  },
-  {
-    value: "plan",
-    label: "plan",
-    description: "Plan mode — propose changes before executing",
-  },
-];
+import { AppView } from "./routes/session/AppView";
+import type { FrontendConfig } from "./types";
 
 // ─── AppInner — session + dialog wiring ──────────────────────────────────────
 
@@ -325,19 +37,10 @@ function AppInner({ config }: { config: FrontendConfig }) {
   // Prompt 草稿：dialog 打开会卸载 Prompt，提升到这里保证弹层关闭后草稿不丢
   const [draft, setDraft] = useState("");
 
-  // Double-Esc cancel: first press shows hint, second press sends interrupt
-  const [escHint, setEscHint] = useState(false);
-  const escHintRef = useRef(false);
-  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!session.busy) {
-      if (escTimerRef.current) clearTimeout(escTimerRef.current);
-      escTimerRef.current = null;
-      escHintRef.current = false;
-      setEscHint(false);
-    }
-  }, [session.busy]);
+  // 双击 Esc 取消运行中的对话
+  const { escHint, handleEscape } = useEscToCancel(session.busy, () => {
+    session.sendRequest({ type: "interrupt" });
+  });
 
   const appendHistory = useCallback((line: string) => {
     setHistory((prev) => {
@@ -470,9 +173,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
   // ── onCycleMode ──────────────────────────────────────────────────────────────
   const onCycleMode = useCallback(() => {
     const currentMode = String(session.status.permission_mode ?? "default");
-    const modeOrder = ["default", "full_auto", "plan"];
-    const idx = modeOrder.indexOf(currentMode);
-    const nextMode = modeOrder[(idx + 1) % modeOrder.length] ?? "default";
+    const idx = PERMISSION_MODE_ORDER.indexOf(currentMode);
+    const nextMode = PERMISSION_MODE_ORDER[(idx + 1) % PERMISSION_MODE_ORDER.length] ?? "default";
     session.sendRequest({ type: "submit_line", line: `/permissions ${nextMode}` });
     session.setBusy(true);
   }, [session]);
@@ -528,118 +230,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
   );
   registryRef.current = registry;
 
-  // ── Dialog wiring for modal/selectRequest ────────────────────────────────────
-  useEffect(() => {
-    const modal = session.modal;
-    if (!modal) return;
-
-    if (modal.kind === "permission") {
-      const requestId = modal.request_id;
-      const respondedRef = { current: false };
-
-      const sendResponse = (allowed: boolean, scope: "once" | "session"): void => {
-        if (respondedRef.current) return;
-        respondedRef.current = true;
-        session.sendRequest({
-          type: "permission_response",
-          request_id: requestId,
-          allowed,
-          scope,
-        });
-        session.setModal(null);
-        dialog.close();
-      };
-
-      const onClose = (): void => {
-        // ESC fallback: deny if not already responded
-        if (!respondedRef.current) {
-          respondedRef.current = true;
-          session.sendRequest({
-            type: "permission_response",
-            request_id: requestId,
-            allowed: false,
-            scope: "once",
-          });
-          session.setModal(null);
-        }
-      };
-
-      dialog.replace(
-        <PermissionDialog
-          modal={modal}
-          onRespond={sendResponse}
-        />,
-        onClose,
-      );
-      return;
-    }
-
-    if (modal.kind === "question") {
-      const requestId = modal.request_id;
-      const respondedRef = { current: false };
-
-      const sendAnswer = (answer: string): void => {
-        if (respondedRef.current) return;
-        respondedRef.current = true;
-        session.sendRequest({
-          type: "question_response",
-          request_id: requestId,
-          answer,
-        });
-        session.setModal(null);
-      };
-
-      const onClose = (): void => {
-        // esc 兜底：必须应答，否则后端 questionRequests 永久挂起。
-        sendAnswer("");
-      };
-
-      dialog.replace(
-        <QuestionDialog
-          modal={modal}
-          onSubmit={(answer) => {
-            sendAnswer(answer);
-            dialog.close();
-          }}
-        />,
-        onClose,
-      );
-    }
-  }, [session.modal]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const req = session.selectRequest;
-    if (!req) return;
-
-    // Discard empty options
-    if (req.options.length === 0) {
-      session.setSelectRequest(null);
-      return;
-    }
-
-    dialog.replace(
-      <DialogSelect
-        title={req.title}
-        items={req.options.map((opt) => ({
-          value: opt.value,
-          label: opt.label ?? opt.value,
-          description: opt.description,
-        }))}
-        onSelect={(value) => {
-          session.sendRequest({
-            type: "submit_line",
-            line: `${req.submitPrefix}${value}`,
-          });
-          session.setBusy(true);
-          dialog.close();
-          session.setSelectRequest(null);
-        }}
-      />,
-      () => {
-        session.setSelectRequest(null);
-      },
-    );
-  }, [session.selectRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Dialog wiring for backend modal/select requests ──────────────────────────
+  useModalWiring(session, dialog);
 
   // ── Global keyboard handler ──────────────────────────────────────────────────
   useKeyboard((key) => {
@@ -658,23 +250,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
       setSidebarOpen((v) => !v);
     }
     if (key.name === "escape" && session.busy && !dialog.isOpen) {
-      if (escHintRef.current) {
-        // Second press — interrupt running turn
-        if (escTimerRef.current) clearTimeout(escTimerRef.current);
-        escTimerRef.current = null;
-        escHintRef.current = false;
-        setEscHint(false);
-        session.sendRequest({ type: "interrupt" });
-      } else {
-        // First press — show hint for 2s
-        escHintRef.current = true;
-        setEscHint(true);
-        escTimerRef.current = setTimeout(() => {
-          escHintRef.current = false;
-          setEscHint(false);
-          escTimerRef.current = null;
-        }, 2000);
-      }
+      handleEscape();
     }
   });
 

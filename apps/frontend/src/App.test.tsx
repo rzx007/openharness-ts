@@ -3,8 +3,8 @@ import React from "react";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ThemeProvider } from "./theme/ThemeContext";
-import { AppView } from "./App";
-import type { AppViewProps } from "./App";
+import { AppView } from "./routes/session/AppView";
+import type { AppViewProps } from "./routes/session/AppView";
 import type { TranscriptItem } from "./types";
 
 // Shared base props for AppView tests
