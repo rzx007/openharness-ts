@@ -235,22 +235,29 @@
 - 补 modelscope provider profile。
 - **文件**：`packages/api/src/providers/`、`packages/tools/src/`
 
-### E.5 Skills 增强 ✅ 已完成（最小版）
+### E.5 Skills 增强 ✅ 已完成
 - ✅ frontmatter 补 user-invocable / disable-model-invocation / model / argument-hint。
 - ✅ 内置 bundled skills（commit/review/test/plan/debug，TS 内嵌）；user/project 多源（bundled<user<project）+ 同名覆盖。
 - ✅ user-invocable skill 作 `/<skill>` 斜杠命令（REPL + backend；内置命令优先）；model 可见性过滤（disable-model-invocation 不进 system prompt，三模式一致）。
-- 留待：project skills 的 git-root 向上逐级遍历、信任门控/路径穿越防护、每命令 model 覆盖、skill-creator/diagnose 重工作流 skill。
-- **文件**：`packages/skills/src/`、`apps/cli/src/commands/main.ts`（commit `8fa8a93`）
+- ✅ project skills **git-root 向上逐级遍历**：`findProjectSkillDirs(cwd)` 从 cwd 走到 `.git` 根，每层各收 `.openharness/skills` + `.claude/skills`，root→cwd 顺序加载（cwd 层最高优先）。
+- ✅ **路径穿越防护**：`discoverMarkdownFiles` 用 `resolve + sep` 校验每个文件的绝对路径必须在 `dirPath` 内（防 symlink/`..` 逃逸）。
+- 留待：每命令 model 覆盖（frontmatter `model` 暂未让 `/<skill>` 切模型）、skill-creator/diagnose 重工作流 skill。
+- **文件**：`packages/skills/src/index.ts`、`apps/cli/src/commands/main.ts`
 
 ### E.6 Services 杂项
 - ✅ 记忆四件套（第一刀）：`autodream`（/dream 命令+锁/备份/回滚）、`memory_extract`
   （/remember 命令）、`session_memory`（REPL 每轮 checkpoint）、`tool_outputs`
   （预算函数）。留待：compact 侧读回 checkpoint、tool_outputs 接 microcompact、
   executeAutoDream 自动触发（归 cron）。详见 `docs/services-memory-quartet-design.md`。
-- cron 升级到 croniter 级表达式 + 时区 + 独立调度守护进程 + 子进程执行 + 通知。
+- ✅ cron 调度升级（第一刀）：`CronScheduler.start()` 改为 `setTimeout` 自重调度，
+  每次触发后用 `computeNextRunTime()` 精确计算下一次绝对时刻，替代近似 `setInterval`。
+  留待：时区支持、独立调度守护进程（子进程执行）、外部命令 `command` 字段接线、通知回调。
 - ✅ session 存储（第二刀）：cwd 哈希分目录 + latest/id 双写 + load 侧配对修复 +
-  Markdown 导出；--continue/--resume 已接线（裸 continue 不串项目）。留待：
-  toolMetadata 投喂、/export 命令、Ctrl+C 时保存。详见 `docs/session-storage-design.md`。
+  Markdown 导出；--continue/--resume 已接线（裸 continue 不串项目）。
+- ✅ toolMetadata 投喂：`saveSessionSnapshot()` 传入 `engine.getToolMetadata?.()` 。
+- ✅ Ctrl+C 保存：REPL `rl.on("close")` 退出前 `await saveSessionSnapshot`。
+- 留待：/export 命令、compact 侧读回 checkpoint、tool_outputs 接 microcompact。
+  详见 `docs/session-storage-design.md`。
 - lsp 用真实 AST 解析（当前为正则/rg 近似）。
 
 ---

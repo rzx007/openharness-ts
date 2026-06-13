@@ -20,11 +20,11 @@ skill 从哪加载、怎么进 system prompt、两条路径分别怎么跑。
 ## 整体模型（三来源 → 一注册表 → 两消费者）
 
 ```
-┌──────────────── 加载（三来源，bundled < user < project，同名覆盖） ────────────────┐
-│  registerBundled()          loadFromDirectory(getSkillsDir())     cwd/.openharness/skills │
-│  内置 5 个(TS 内嵌)    <     ~/.openharness/skills(用户)     <     + cwd/.claude/skills    │
-│  source:"bundled"           source:"user"                        source:"project"         │
-└───────────────────────────────────────┬───────────────────────────────────────────────────┘
+┌──────────────── 加载（三来源，bundled < user < project，同名覆盖） ────────────────────────────────────────┐
+│  registerBundled()      loadFromDirectory(getSkillsDir())   findProjectSkillDirs(cwd)                      │
+│  内置 5 个(TS 内嵌) <   ~/.openharness/skills(用户)      <  git-root→cwd 每层 .openharness/skills          │
+│  source:"bundled"       source:"user"                        + .claude/skills（cwd 层最高优先）             │
+└───────────────────────────────────────────────────┬──────────────────────────────────────────────────────┘
                                         ▼
                               ┌────────────────────┐
                               │   SkillRegistry    │  每个 SkillDefinition:
@@ -123,7 +123,7 @@ Skill 工具返回 skill.content → 模型据此行事
 
 ## 关键点
 
-- **三源优先级**：`bundled < user < project`，按加载顺序 `register` 覆盖（后者赢）。
+- **三源优先级**：`bundled < user < project`，按加载顺序 `register` 覆盖（后者赢）。project 层内部，`git-root` 层 < `cwd` 层（`findProjectSkillDirs` 以 root→cwd 顺序返回，cwd 最后加载故最高优先）。
 - **内置命令优先**：`/<skill>` 撞内置斜杠命令时内置赢——内置 `commit`/`plan` 因此遮蔽了
   同名 bundled skill 的**用户**入口（仍可被模型经 Skill 工具使用）；`review`/`test`/`debug`
   不撞名、可正常 `/<skill>` 调用。与 Python 一致。
@@ -135,7 +135,13 @@ Skill 工具返回 skill.content → 模型据此行事
 
 ## 留待后续
 
-- project skills 的 **git-root 向上逐级遍历** + least→most 覆盖（当前 cwd 单层）。
-- **信任门控** + 路径穿越防护（project skills 来自本地，最小版略）。
 - **每命令 model 覆盖**（frontmatter `model` 暂未让 `/<skill>` 切模型）。
 - `command_name`/`display_name` 完整路由；skill-creator / diagnose 等重工作流 skill。
+
+## 已完成的增强（E.5 尾巴）
+
+- ✅ **git-root 向上逐级遍历**：`findProjectSkillDirs(cwd)` 从 cwd 走到 `.git` 根，每层收
+  `.openharness/skills` 和 `.claude/skills`，以 root→cwd 顺序返回（cwd 层优先级最高）。
+  `loadSkillsThreeSources` 已改用此函数，替代原来只加载 `join(cwd, ...)` 单层的实现。
+- ✅ **路径穿越防护**：`discoverMarkdownFiles` 对每个 entry 用 `path.resolve + path.sep`
+  校验绝对路径必须位于 `dirPath` 之内，防止 symlink 或含 `..` 的文件名逃逸到目录外。
