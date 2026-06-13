@@ -715,6 +715,8 @@ async function runBackendHost(
   settings: Settings,
   options: MainOptions,
 ): Promise<void> {
+  // Mutable copy — updated by /permissions, /model etc. so mode changes take effect immediately.
+  let currentSettings = settings;
   const permissionRequests = new Map<string, Promise<boolean> & { resolve: (v: boolean) => void }>();
   const questionRequests = new Map<string, Promise<string> & { resolve: (v: string) => void }>();
   // 会话级批准：用户对某工具选过"整个会话"后，该工具后续 ask 直接放行（按工具名粒度）。
@@ -782,6 +784,8 @@ async function runBackendHost(
     reason?: string,
     input?: Record<string, unknown>,
   ): Promise<boolean> => {
+    // full_auto 模式：直接放行，不弹权限框（尊重运行时 /permissions full_auto 变更）。
+    if (currentSettings.permission?.mode === "full_auto") return true;
     // 会话级批准：之前对该工具选过"整个会话"则直接放行，不再弹框。
     if (approvedForSessionTools.has(toolName)) return true;
 
@@ -850,10 +854,20 @@ async function runBackendHost(
 
   const slashCtx: SlashCommandContext = {
     getEngine: () => bundle.queryEngine as any,
-    getModel: () => settings.model,
+    getModel: () => currentSettings.model,
     setModel: (m: string) => { bundle.queryEngine.setModel(m); },
-    getSettings: () => settings,
-    updateSettings: async () => { },
+    getSettings: () => currentSettings,
+    updateSettings: async (patch: Partial<Settings>) => {
+      currentSettings = { ...currentSettings, ...patch };
+      // Keep bundle.settings in sync so processLineForHost state_snapshots reflect new mode.
+      bundle.settings = currentSettings;
+      await emit({
+        type: "state_snapshot",
+        state: buildStatePayload(currentSettings),
+        mcp_servers: [],
+        bridge_sessions: [],
+      });
+    },
     hookExecutor: bundle.hookExecutor as HookExecutor,
     memoryManager,
     mcpManager,
@@ -985,7 +999,7 @@ async function runBackendHost(
         busy = true;
         try {
           const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
-          await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, settings);
+          await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, currentSettings);
         } catch (err) {
           const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
           await emit({ type: "error", message: msg });
@@ -1020,7 +1034,7 @@ async function runBackendHost(
 
     busy = true;
     try {
-      await processLineForHost(line, bundle, emit, lastToolInputs, settings);
+      await processLineForHost(line, bundle, emit, lastToolInputs, currentSettings);
     } catch (err) {
       const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
       await emit({ type: "error", message: msg });
