@@ -62,6 +62,7 @@ export class QueryEngine implements IQueryEngine {
   private permissionPrompt?: PermissionPrompt;
   private skillRegistry?: unknown;
   private memoryRetriever?: MemoryRetriever;
+  private allowedTools: string[] | null = null;
 
   constructor(
     private apiClient: StreamingMessageClient,
@@ -98,6 +99,10 @@ export class QueryEngine implements IQueryEngine {
   /** 注册 compact 附件提供者（B.2）：compact 时注入 taskFocus/plan 等结构化上下文。 */
   setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void {
     this.compactService.setAttachmentsProvider(fn);
+  }
+
+  setAllowedTools(tools: string[] | null): void {
+    this.allowedTools = tools;
   }
 
   /**
@@ -148,7 +153,10 @@ export class QueryEngine implements IQueryEngine {
       // 自动压缩消息历史以控制上下文长度
       this.messages = await this.compactService.autoCompact(this.messages);
 
-      const tools = this.toolRegistry.getAll();
+      const allTools = this.toolRegistry.getAll();
+      const tools = this.allowedTools
+        ? allTools.filter((t) => this.allowedTools!.includes(t.name))
+        : allTools;
       const stream = this.apiClient.streamMessage({
         model: this.model,
         messages: this.messages,

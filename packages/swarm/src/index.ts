@@ -91,6 +91,8 @@ export interface TeammateSpawnConfig {
   prompt: string;
   cwd: string;
   parentSessionId: string;
+  /** 预分配给 worker 的会话 ID，用于跨重启保持上下文（D.1）。 */
+  sessionId?: string;
   model?: string;
   systemPrompt?: string;
   permissions?: string[];

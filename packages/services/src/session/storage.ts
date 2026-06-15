@@ -50,6 +50,8 @@ export interface SessionSnapshotPayload {
   created_at: number;
   summary: string;
   message_count: number;
+  /** coordinator / worker / undefined（普通会话）。 */
+  session_mode?: string;
 }
 
 export interface SessionListItem {
@@ -135,6 +137,8 @@ export interface SaveSessionOptions {
   usage: Record<string, unknown>;
   sessionId?: string;
   toolMetadata?: Record<string, unknown>;
+  /** 会话模式：coordinator / worker，普通会话不传。 */
+  sessionMode?: string;
 }
 
 /** 保存快照：latest.json + session-<id>.json 双写，返回 latest 路径。 */
@@ -153,6 +157,7 @@ export function saveSessionSnapshot(options: SaveSessionOptions): string {
     created_at: Date.now() / 1000,
     summary: extractSummary(options.messages),
     message_count: options.messages.length,
+    ...(options.sessionMode ? { session_mode: options.sessionMode } : {}),
   };
   const data = JSON.stringify(payload, null, 2) + "\n";
 

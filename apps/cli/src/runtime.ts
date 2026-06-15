@@ -202,7 +202,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
             prompt: cfg.prompt,
             color: null,
             planModeRequired: false,
-            sessionId: null,
+            sessionId: cfg.sessionId ?? null,
             subscriptions: [],
             isActive: true,
             mode: null,

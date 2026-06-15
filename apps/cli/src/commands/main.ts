@@ -18,10 +18,11 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { computeToolDiff } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
-import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers } from "../plugin-contributions";
+import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
 import { updateRulesFromSession } from "@openharness/personalization";
 import { updateSessionMemoryFile } from "@openharness/services";
 import { isSwarmWorker } from "@openharness/swarm";
+import { isCoordinatorMode, getCoordinatorTools, matchSessionMode } from "@openharness/coordinator";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
@@ -100,6 +101,7 @@ interface MainOptions {
   swarmWorker?: boolean;
   taskWorker?: boolean;
   dryRun?: boolean;
+  sessionId?: string;
 }
 
 interface SessionSnapshot {
@@ -217,7 +219,23 @@ async function runTaskWorker(
     permissionPrompt: swarmPermissionPrompt,
   });
   registerPluginHooks(bundle.hookExecutor);
+  await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
   const renderer = new EventRenderer({ verbose: options.verbose, printMode: true, outputStyle: settings.outputStyle });
+
+  // D.1 Swarm context recovery：从预分配的会话 ID 恢复历史，跨重启保持上下文。
+  const workerSessionId = options.sessionId ?? generateSessionId();
+  if (options.sessionId) {
+    try {
+      const { loadSessionById } = await import("@openharness/services");
+      const payload = loadSessionById(process.cwd(), options.sessionId);
+      if (payload?.messages?.length) {
+        bundle.queryEngine.loadMessages(payload.messages as any);
+        if (payload.model) bundle.queryEngine.setModel(payload.model);
+      }
+    } catch {
+      // best-effort：快照不存在时静默忽略，从空历史开始
+    }
+  }
 
   const line = await readOneStdinLine();
   const decoded = decodeTaskWorkerLine(line);
@@ -239,6 +257,9 @@ async function runTaskWorker(
   } catch {
     // best-effort
   }
+
+  // D.1：每轮结束后保存快照，供下次重启恢复上下文。
+  await saveSessionSnapshot(workerSessionId, bundle.queryEngine, settings.model);
 }
 
 /**
@@ -371,6 +392,12 @@ async function runRepl(
   });
   // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
   registerPluginHooks(bundle.hookExecutor);
+  // C.1 插件 tools_dir：动态加载插件工具目录，注册进 toolRegistry。
+  await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
+  // C.4 coordinator 模式：限制工具集为 Agent/SendMessage/TaskStop。
+  if (isCoordinatorMode()) {
+    bundle.queryEngine.setAllowedTools(getCoordinatorTools());
+  }
 
   let currentModel = settings.model;
   let sessionId: string | undefined;
@@ -547,6 +574,8 @@ async function runRepl(
       if (skillMatch) {
         renderer.reset();
         const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
+        const overrideModel = skillMatch.skill.model;
+        if (overrideModel) bundle.queryEngine.setModel(overrideModel);
         try {
           for await (const event of bundle.queryEngine.submitMessage(skillPrompt)) {
             await renderer.render(event);
@@ -555,6 +584,8 @@ async function runRepl(
           if (err instanceof Error) {
             process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
           }
+        } finally {
+          if (overrideModel) bundle.queryEngine.setModel(currentModel);
         }
         rl.prompt();
         return;
@@ -861,6 +892,12 @@ async function runBackendHost(
   });
   // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
   registerPluginHooks(bundle.hookExecutor);
+  // C.1 插件 tools_dir：动态加载插件工具目录，注册进 toolRegistry。
+  await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
+  // C.4 coordinator 模式：限制工具集为 Agent/SendMessage/TaskStop。
+  if (isCoordinatorMode()) {
+    bundle.queryEngine.setAllowedTools(getCoordinatorTools());
+  }
 
   const commandRegistry = new CommandRegistry();
   const mcpManager = new McpClientManager();
@@ -1101,6 +1138,8 @@ async function runBackendHost(
       if (skillMatch) {
         busy = true;
         interruptRequested = false;
+        const overrideModel = skillMatch.skill.model;
+        if (overrideModel) bundle.queryEngine.setModel(overrideModel);
         try {
           const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
           await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested);
@@ -1109,6 +1148,7 @@ async function runBackendHost(
           await emit({ type: "error", message: msg });
         } finally {
           busy = false;
+          if (overrideModel) bundle.queryEngine.setModel(currentSettings.model);
         }
         await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
         continue;
@@ -1468,6 +1508,8 @@ async function loadSessionAndResume(
     if (payload) {
       engine.loadMessages(payload.messages);
       if (payload.model) engine.setModel(payload.model);
+      const modeMsg = matchSessionMode(payload.session_mode);
+      if (modeMsg) console.log(modeMsg);
       console.log(`Resumed session: ${payload.session_id} (${payload.message_count} messages)`);
       return payload.session_id;
     }
@@ -1562,6 +1604,7 @@ async function saveSessionSnapshot(
       usage: engine.getTotalUsage() as Record<string, unknown>,
       sessionId,
       toolMetadata: engine.getToolMetadata?.() as Record<string, unknown> | undefined,
+      sessionMode: isCoordinatorMode() ? "coordinator" : undefined,
     });
   } catch {
     // silently fail

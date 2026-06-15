@@ -52,6 +52,9 @@ export function buildTeammateCommand(
   // 只读放行本就安全，让 Explore/Plan 默认就能干活，不必父进程开 full_auto。
   argv.push("--swarm-worker");
 
+  // D.1 Swarm context recovery：预分配的会话 ID 让 worker 跨重启加载自己的历史。
+  if (config.sessionId) argv.push("--session-id", config.sessionId);
+
   // swarm 身份环境变量（D.5）：worker 侧 isSwarmWorker()/createPermissionRequest
   // 据此识别自己并寻址团队的 permission pending 目录。命名沿用 Python 原版。
   const env: Record<string, string> = {

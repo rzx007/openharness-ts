@@ -61,12 +61,16 @@ export const agentTool: ToolDefinition = {
     }
 
     try {
+      // Pre-generate a stable session ID so the worker can persist and restore
+      // its context across lazy restarts (D.1 Swarm context recovery).
+      const workerSessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const result = await executor.spawn({
         name: agentName,
         team,
         prompt: input.prompt as string,
         cwd: context.cwd,
         parentSessionId: "main",
+        sessionId: workerSessionId,
         model: (input.model as string) ?? agentDef?.model,
         systemPrompt: agentDef?.systemPrompt,
         permissionMode: permissionMode as "default" | "plan" | "full_auto" | undefined,

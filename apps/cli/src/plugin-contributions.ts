@@ -1,3 +1,5 @@
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
 import { registerPluginAgents } from "@openharness/coordinator";
 import {
@@ -6,6 +8,7 @@ import {
   type PluginCommandDefinition,
   type PluginDiscoverySettings,
 } from "@openharness/plugins";
+import type { ToolDefinition } from "@openharness/core";
 
 /**
  * 插件贡献 → 运行时注册（C.1 接线）。
@@ -88,6 +91,48 @@ export function registerPluginHooks(
     for (const hook of plugin.hooks) {
       executor.register(hook);
       count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * 把 enabled 插件的 tools_dir 下的工具动态加载并注册进 toolRegistry（C.1）。
+ * 每个 .js/.ts 文件的 default export 应为 ToolDefinition 或 ToolDefinition[]。
+ * 返回注册成功的工具数量；import 失败只打 stderr 警告，不抛出。
+ */
+export async function registerPluginTools(
+  toolRegistry: { register(tool: ToolDefinition): void },
+  plugins: readonly LoadedPlugin[] = loadedPluginsCache,
+): Promise<number> {
+  let count = 0;
+  for (const plugin of plugins) {
+    if (!plugin.enabled) continue;
+    const toolsPath = join(plugin.path, plugin.manifest.tools_dir);
+    if (!existsSync(toolsPath)) continue;
+    let entries: string[];
+    try {
+      entries = readdirSync(toolsPath);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!/\.(js|ts)$/.test(entry)) continue;
+      const filePath = join(toolsPath, entry);
+      try {
+        const mod = await import(filePath) as { default?: unknown };
+        const raw = mod.default;
+        const tools: unknown[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
+        for (const tool of tools) {
+          const t = tool as Partial<ToolDefinition>;
+          if (t && typeof t.name === "string" && typeof t.execute === "function") {
+            toolRegistry.register(t as ToolDefinition);
+            count++;
+          }
+        }
+      } catch (err) {
+        process.stderr.write(`[plugins] Failed to load tool ${filePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
   }
   return count;

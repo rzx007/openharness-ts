@@ -45,6 +45,7 @@ program
   .option("--dry-run", "预览解析后的运行时配置，不调用模型")
   .option("--swarm-worker", "以 swarm worker 身份运行：只读工具自动放行（内部用）")
   .option("--task-worker", "stdin 驱动的无 TTY worker:读一行跑一轮即退(内部用,teammate 多轮)")
+  .option("--session-id <id>", "预分配的会话 ID（task-worker 用，跨重启保持上下文；内部用）")
   .action(mainAction);
 
 program.addCommand(createAuthCommand());

@@ -21,6 +21,11 @@ export interface QueryEngine {
   setMemoryRetriever(retriever: MemoryRetriever | undefined): void;
   /** 注册 compact 附件提供者（B.2）：compact 时注入 taskFocus/plan 等结构化上下文。 */
   setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void;
+  /**
+   * 限制本会话可调用的工具集（coordinator 模式用）。传 null 解除限制，恢复全集。
+   * 过滤在 submitMessage 内 streamMessage 调用前生效，不影响 toolRegistry 注册表。
+   */
+  setAllowedTools(tools: string[] | null): void;
 }
 
 export interface PermissionPrompt {

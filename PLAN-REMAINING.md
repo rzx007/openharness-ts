@@ -28,11 +28,11 @@
 | memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
 | prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段(B.5)；per-turn 记忆检索 TODO；personalization 段待 C |
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
-| coordinator | 🟡 | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助(C.4)；缺 mode 辅助的 CLI 接线、agent 级字段运行时生效 |
+| coordinator | 🟡 | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；缺 agent 级字段运行时生效 |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
-| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents 贡献+信任门控+卸载防护(C.1+C.4)；缺 tools_dir 动态加载 |
+| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；backend host MCP 仅 REPL |
 | bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
-| swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage；缺 TUI 人工裁决、重启上下文恢复 |
+| swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
@@ -116,15 +116,16 @@
 
 ## Phase C — 扩展层补齐（P2）
 
-### C.1 Plugins 贡献加载 ✅ 基本完成（核心集）
+### C.1 Plugins 贡献加载 ✅ 完成
 - ✅ skills / commands / hooks / MCP 四类贡献加载与注册（Claude Code 布局兼容：
   `.claude-plugin/` 备用路径、SKILL.md 目录式、结构化 hooks.json、`.mcp.json`、
   `${CLAUDE_PLUGIN_ROOT}` 替换）；`/plugin:cmd` 斜杠路由复用 skill 链路。
 - ✅ project 信任门控（allowProjectPlugins，默认禁）+ 卸载路径穿越防护。
 - ✅ plugin agents 已随 C.4 收口（`packages/plugins/src/agents.ts`）。
-- 留待：`tools_dir` 动态 import 工具（代码执行面，单独评估）；backend host 的
-  MCP connectAll 本就缺失，插件 MCP 当前仅 REPL 生效。详见
-  `docs/plugins-contributions-design.md`。
+- ✅ `tools_dir` 动态 import（`registerPluginTools`，二段注册在 bootstrap 后，
+  REPL/BackendHost/task-worker 三路均接线；default export ToolDefinition | ToolDefinition[]）。
+- 留待：backend host 的 MCP connectAll 本就缺失，插件 MCP 当前仅 REPL 生效。
+  详见 `docs/plugins-contributions-design.md`。
 - **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`apps/cli/src/plugin-contributions.ts`
 
 ### C.2 Auth ProviderProfile 体系
@@ -139,16 +140,20 @@
 - 留待：`updateServerConfig`/`getServerConfig` 运行时改配置、MCP OAuth flow。
 - **文件**：`packages/mcp/src/index.ts`、`packages/core/src/types/settings.ts`（commit `1a18988`）
 
-### C.4 Coordinator 加载与 prompt 还原 ✅ 基本完成
+### C.4 Coordinator 加载与 prompt 还原 ✅ 完成
 - ✅ 用户 `.md` agent 加载器（真 YAML frontmatter + 行级回退，~20 字段）；
   `getAllAgentDefinitions` 三源合并 builtin < user < plugin。
 - ✅ plugin agents（`plugin:ns:name` 命名，hooks/mcpServers/omitClaudeMd 信任面剥除）。
 - ✅ coordinator system prompt 经核对本就全量（「大幅精简」描述过时）；补
   `CLAUDE_CODE_SIMPLE` 简单模式分支、`matchSessionMode`、`getCoordinatorTools`、
   `getCoordinatorUserContext`（scratchpad/worker-tools 注入）。
-- 留待：上述函数在 CLI 会话恢复/用户轮的实际接线（session 尚未存 mode）；
-  agent 级 hooks/mcpServers/effort/memory/isolation 的运行时生效（swarm 后续）。
-- **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`
+- ✅ CLI 接线：session 快照存 `session_mode`；`--continue/--resume` 恢复时调
+  `matchSessionMode` 自动同步 env；REPL/BackendHost 启动时若 coordinator 模式
+  调 `queryEngine.setAllowedTools(getCoordinatorTools())`（Agent/SendMessage/TaskStop）。
+- `QueryEngine.setAllowedTools(string[]|null)`：在 submitMessage 内 streamMessage
+  调用前过滤 toolRegistry，null 解除限制。
+- 留待：agent 级 hooks/mcpServers/effort/memory/isolation 的运行时生效（swarm 后续）。
+- **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`、`packages/core/src/{types/runtime,engine/query-engine}.ts`、`packages/services/src/session/storage.ts`、`apps/cli/src/commands/main.ts`
 
 ### C.5 Personalization（新模块）✅ 已完成
 - ✅ `packages/personalization`：10 类环境事实正则抽取（SSH/IP/数据路径/conda/
@@ -162,16 +167,19 @@
 
 ## Phase D — 大模块（P3）
 
-### D.1 Swarm 真实派发 ✅ 基本完成（D.1–D.5）
+### D.1 Swarm 真实派发 ✅ 完成（D.1–D.5 + 重启上下文恢复）
 - ✅ `subprocess` 后端（spawn → 后台子进程 → TaskWait 取结果，swarm D.1/D.2）。
 - ✅ 文件式邮箱（每消息一文件 + `.tmp`+rename 原子写 + wx 锁文件，D.5-R1）。
 - ✅ 权限同步（read-only 自动批准 D.4；pending/resolved 文件流 + leader/worker 检测 +
   **worker 写操作转 leader checker 自动裁决**——接线超出 Python 原版，见
   `docs/swarm-file-infra-design.md` 差异表，D.5-R3）。
 - ✅ 团队磁盘持久化 `team.json`（D.5-R2）、git worktree 隔离（D.3）。
-- ✅ 多轮 `sendMessage`（task-worker 重启式，对齐 Python；重启不保留上下文）。
-- 留待：重启经 session 快照恢复上下文；`ask` 时 TUI 弹框人工裁决（当前 checker 自动）。
-- **文件**：`packages/swarm/src/{lockfile,mailbox,team-lifecycle,permission-sync}.ts`、`apps/cli/src/swarm-permission.ts`
+- ✅ 多轮 `sendMessage`（task-worker 重启式，对齐 Python）。
+- ✅ 重启上下文恢复：Agent 工具预生成 `sessionId` → `TeammateSpawnConfig.sessionId`
+  → `--session-id <id>` → task-worker 启动时 `loadSessionById` 加载快照注入引擎；
+  每轮结束后 `saveSessionSnapshot` 持久化，下次重启无缝续接。team.json 也记录 sessionId。
+- 留待：`ask` 时 TUI 弹框人工裁决（当前 checker 自动）。
+- **文件**：`packages/swarm/src/{lockfile,mailbox,team-lifecycle,permission-sync,index}.ts`、`packages/tools/src/agent/index.ts`、`apps/cli/src/teammate.ts`、`apps/cli/src/index.ts`、`apps/cli/src/commands/main.ts`、`apps/cli/src/runtime.ts`
 
 ### D.2 Channels 多通道 + 引擎桥接
 - ✅ 基座：`MessageBus`（双异步队列，AbortSignal 退出）、ACL（fail-closed：
@@ -236,13 +244,15 @@
 - 补 modelscope provider profile。
 - **文件**：`packages/api/src/providers/`、`packages/tools/src/`
 
-### E.5 Skills 增强 ✅ 已完成
+### E.5 Skills 增强 ✅ 完成
 - ✅ frontmatter 补 user-invocable / disable-model-invocation / model / argument-hint。
 - ✅ 内置 bundled skills（commit/review/test/plan/debug，TS 内嵌）；user/project 多源（bundled<user<project）+ 同名覆盖。
 - ✅ user-invocable skill 作 `/<skill>` 斜杠命令（REPL + backend；内置命令优先）；model 可见性过滤（disable-model-invocation 不进 system prompt，三模式一致）。
 - ✅ project skills **git-root 向上逐级遍历**：`findProjectSkillDirs(cwd)` 从 cwd 走到 `.git` 根，每层各收 `.openharness/skills` + `.claude/skills`，root→cwd 顺序加载（cwd 层最高优先）。
 - ✅ **路径穿越防护**：`discoverMarkdownFiles` 用 `resolve + sep` 校验每个文件的绝对路径必须在 `dirPath` 内（防 symlink/`..` 逃逸）。
-- 留待：每命令 model 覆盖（frontmatter `model` 暂未让 `/<skill>` 切模型）、skill-creator/diagnose 重工作流 skill。
+- ✅ **每命令 model 覆盖**：`/<skill>` 调用时若 `skill.model` 非空，在 `submitMessage` 前
+  临时 `setModel(skill.model)`，finally 块恢复原 model（REPL + BackendHost 两路均接线）。
+- 留待：skill-creator/diagnose 重工作流 skill。
 - **文件**：`packages/skills/src/index.ts`、`apps/cli/src/commands/main.ts`
 
 ### E.6 Services 杂项
