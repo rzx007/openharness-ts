@@ -263,7 +263,10 @@
   Markdown 导出；--continue/--resume 已接线（裸 continue 不串项目）。
 - ✅ toolMetadata 投喂：`saveSessionSnapshot()` 传入 `engine.getToolMetadata?.()` 。
 - ✅ Ctrl+C 保存：REPL `rl.on("close")` 退出前 `await saveSessionSnapshot`。
-- 留待：/export 命令、compact 侧读回 checkpoint、tool_outputs 接 microcompact。
+- ✅ `/export` 命令：`/export [filename] [--json]`，文件名 `.json` 后缀或 `--json` 标志
+  输出结构化 JSON（session_id/model/exported_at/messages），否则输出 Markdown；
+  默认写入 `~/.openharness/data/exports/`。
+- 留待：compact 侧读回 checkpoint、tool_outputs 接 microcompact。
   详见 `docs/session-storage-design.md`。
 - lsp 用真实 AST 解析（当前为正则/rg 近似）。
 

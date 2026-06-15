@@ -879,42 +879,15 @@ export function registerBuiltinCommandsOnRegistry(
   // ── /export ────────────────────────────────────────────
   registry.register({
     name: "/export",
-    description: "Export conversation to a Markdown file",
+    description: "Export conversation to Markdown or JSON. Usage: /export [filename] [--json]",
     handler: async (cmdCtx) => {
-      const args = parseArgs(cmdCtx.raw.replace(/^\/\S+\s*/, ""));
-      const history = getEngine().getHistory();
+      const rawArgs = parseArgs(cmdCtx.raw.replace(/^\/\S+\s*/, ""));
+      const forceJson = rawArgs.includes("--json");
+      const filenameArg = rawArgs.find((a) => !a.startsWith("--"));
 
+      const history = getEngine().getHistory();
       if (history.length === 0) {
         return { success: false, error: "No messages to export." };
-      }
-
-      const lines: string[] = [
-        `# OpenHarness Conversation Export`,
-        ``,
-        `Date: ${new Date().toISOString()}`,
-        `Model: ${getModel()}`,
-        `Session: ${ctx.sessionId ?? "unknown"}`,
-        ``,
-        `---`,
-        ``,
-      ];
-
-      for (const msg of history) {
-        if (msg.type === "user") {
-          const content = typeof (msg as any).content === "string" ? (msg as any).content : JSON.stringify((msg as any).content);
-          lines.push(`## User`, ``, content, ``, `---`, ``);
-        } else if (msg.type === "assistant") {
-          lines.push(`## Assistant`, ``, (msg as any).content || "(no text)", ``);
-          if ((msg as any).toolUses?.length) {
-            for (const tu of (msg as any).toolUses) {
-              lines.push(`**Tool: ${tu.name}**`, "```json", JSON.stringify(tu.input, null, 2), "```", "");
-            }
-          }
-          lines.push(`---`, ``);
-        } else if (msg.type === "tool_result") {
-          const text = (msg as any).content?.map((c: any) => c.text ?? JSON.stringify(c)).join("\n") ?? "";
-          lines.push(`### Tool Result (${(msg as any).isError ? "error" : "ok"})`, "```", text.slice(0, 2000), "```", "");
-        }
       }
 
       const { writeFile, mkdir } = await import("node:fs/promises");
@@ -922,11 +895,82 @@ export function registerBuiltinCommandsOnRegistry(
       const { homedir } = await import("node:os");
       const dir = join(homedir(), ".openharness", "data", "exports");
       await mkdir(dir, { recursive: true });
-      const filename = args[0] ?? `export-${Date.now()}.md`;
-      const filepath = filename.includes("/") || filename.includes("\\") ? filename : join(dir, filename);
-      await writeFile(filepath, lines.join("\n"), "utf-8");
 
-      return { success: true, output: `Conversation exported to: ${filepath}` };
+      // Determine format: explicit --json flag, or .json extension, else Markdown.
+      const isJson = forceJson || (filenameArg?.endsWith(".json") ?? false);
+      const defaultName = `export-${Date.now()}.${isJson ? "json" : "md"}`;
+      const filename = filenameArg ?? defaultName;
+      const filepath = filename.includes("/") || filename.includes("\\") ? filename : join(dir, filename);
+
+      if (isJson) {
+        const exportData = {
+          session_id: ctx.sessionId ?? null,
+          model: getModel(),
+          exported_at: new Date().toISOString(),
+          message_count: history.length,
+          messages: history.map((msg) => {
+            if (msg.type === "user") {
+              return {
+                role: "user",
+                content: typeof (msg as any).content === "string"
+                  ? (msg as any).content
+                  : (msg as any).content,
+              };
+            }
+            if (msg.type === "assistant") {
+              return {
+                role: "assistant",
+                content: (msg as any).content ?? null,
+                tool_uses: (msg as any).toolUses ?? [],
+              };
+            }
+            // tool_result
+            return {
+              role: "tool_result",
+              tool_use_id: (msg as any).toolUseId,
+              content: (msg as any).content,
+              is_error: (msg as any).isError ?? false,
+            };
+          }),
+        };
+        await writeFile(filepath, JSON.stringify(exportData, null, 2), "utf-8");
+      } else {
+        const lines: string[] = [
+          `# OpenHarness Conversation Export`,
+          ``,
+          `- **Date:** ${new Date().toISOString()}`,
+          `- **Model:** ${getModel()}`,
+          `- **Session:** ${ctx.sessionId ?? "unknown"}`,
+          `- **Messages:** ${history.length}`,
+          ``,
+          `---`,
+          ``,
+        ];
+
+        for (const msg of history) {
+          if (msg.type === "user") {
+            const content = typeof (msg as any).content === "string"
+              ? (msg as any).content
+              : JSON.stringify((msg as any).content);
+            lines.push(`## User`, ``, content, ``, `---`, ``);
+          } else if (msg.type === "assistant") {
+            lines.push(`## Assistant`, ``, (msg as any).content || "", ``);
+            for (const tu of (msg as any).toolUses ?? []) {
+              lines.push(`**Tool call: \`${tu.name}\`**`, "```json", JSON.stringify(tu.input, null, 2), "```", "");
+            }
+            lines.push(`---`, ``);
+          } else if (msg.type === "tool_result") {
+            const text = Array.isArray((msg as any).content)
+              ? (msg as any).content.map((c: any) => c.text ?? JSON.stringify(c)).join("\n")
+              : String((msg as any).content ?? "");
+            const status = (msg as any).isError ? "error" : "ok";
+            lines.push(`### Tool result (${status})`, "```", text.slice(0, 4000), "```", "");
+          }
+        }
+        await writeFile(filepath, lines.join("\n"), "utf-8");
+      }
+
+      return { success: true, output: `Exported ${isJson ? "JSON" : "Markdown"} to: ${filepath}` };
     },
   });
 
