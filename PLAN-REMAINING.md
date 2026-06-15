@@ -31,7 +31,7 @@
 | coordinator | 🟡 | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；缺 agent 级字段运行时生效 |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
 | plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；backend host MCP 仅 REPL |
-| bridge | 🟠 | 仅会话元数据登记，无多进程 spawn / 输出捕获 / work-secret |
+| bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
@@ -201,7 +201,12 @@
 - **文件**：`packages/sandbox/src/index.ts`
 
 ### D.4 Bridge 多进程会话（按需）
-- 多进程会话 spawn + stdout 捕获到日志 + kill/terminate；work-secret 编解码 + SDK WS URL 构造。
+- ✅ `spawn(command, cwd)`：`child_process.spawn(shell:true)`，stdout+stderr 并行泵入 `~/.openharness/bridge/logs/<id>.log`。
+- ✅ `stop(sessionId)`：SIGTERM → 3s 超时 → SIGKILL，对齐 Python `SessionHandle.kill()`。
+- ✅ `listSpawnedSessions()`：返回 `BridgeSessionRecord`（pid / status / outputPath），按启动时间倒序。
+- ✅ `readOutput(sessionId, maxBytes=12000)`：读末尾日志，对齐 Python `read_output()`。
+- ✅ `getBridgeManager()` 单例导出。
+- 留待：work-secret 编解码 + SDK WS URL 构造（云端专用，按需）。
 - **文件**：`packages/bridge/src/index.ts`
 
 ---
