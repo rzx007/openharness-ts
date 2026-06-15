@@ -864,7 +864,11 @@ async function runBackendHost(
 
   const commandRegistry = new CommandRegistry();
   const mcpManager = new McpClientManager();
-  const memoryManager = new MemoryManager(1000, "");
+  const { homedir } = await import("node:os");
+  const memoryDir = join(homedir(), ".openharness", "data", "memory");
+  const memoryManager = new MemoryManager(1000, memoryDir);
+  const memoryFile = join(memoryDir, "memory.json");
+  await memoryManager.loadFromFile(memoryFile).catch(() => { });
   const themeManager = new ThemeManager();
   const taskManager = new TaskManager();
 
@@ -886,6 +890,7 @@ async function runBackendHost(
     },
     hookExecutor: bundle.hookExecutor as HookExecutor,
     memoryManager,
+    memoryDir,
     mcpManager,
     skillRegistry,
     themeManager,
@@ -923,6 +928,22 @@ async function runBackendHost(
       ? running.map((t) => t.description).join("; ")
       : undefined;
     return { taskFocus };
+  });
+
+  // B.5 per-turn 相关记忆检索：与 REPL 模式对称，每轮按用户输入相关性检索记忆。
+  bundle.queryEngine.setMemoryRetriever(async (userInput: string) => {
+    if (currentSettings.memory?.enabled === false) return null;
+    const maxEntries = currentSettings.memory?.maxFiles ?? 10;
+    const { text, ids } = memoryManager.selectRelevantForPrompt(maxEntries, userInput);
+    if (!text) return null;
+    try {
+      if (ids.length > 0) {
+        await memoryManager.markMemoryUsed(ids);
+      }
+    } catch {
+      // markMemoryUsed 失败不应阻断本轮注入
+    }
+    return text;
   });
 
   const rl = readline.createInterface({ input: process.stdin });
