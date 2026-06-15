@@ -499,6 +499,15 @@ async function runRepl(
   // bootstrap 期的 system prompt 不带 skillsList，这里补上。
   await refreshSystemPrompt();
 
+  // B.2 compact attachments：compact 时注入当前运行中任务的描述（task_focus）。
+  bundle.queryEngine.setAttachmentsProvider(() => {
+    const running = taskManager.listTasks("running");
+    const taskFocus = running.length > 0
+      ? running.map((t) => t.description).join("; ")
+      : undefined;
+    return { taskFocus };
+  });
+
   console.log("OpenHarness Interactive Mode");
   console.log(`Model: ${currentModel}`);
   console.log(`Session: ${sessionId}`);
@@ -905,6 +914,15 @@ async function runBackendHost(
     state: buildStatePayload(settings),
     mcp_servers: [],
     bridge_sessions: [],
+  });
+
+  // B.2 compact attachments：compact 时注入当前运行中任务的描述（task_focus）。
+  bundle.queryEngine.setAttachmentsProvider(() => {
+    const running = taskManager.listTasks("running");
+    const taskFocus = running.length > 0
+      ? running.map((t) => t.description).join("; ")
+      : undefined;
+    return { taskFocus };
   });
 
   const rl = readline.createInterface({ input: process.stdin });

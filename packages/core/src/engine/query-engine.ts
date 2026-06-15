@@ -11,7 +11,7 @@ import type {
   ToolContext,
   ToolExecutionResult,
 } from "../index";
-import { CompactService, type CompactClient } from "./compact-service";
+import { CompactService, type CompactClient, type CompactAttachmentsProvider } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
 
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
@@ -93,6 +93,11 @@ export class QueryEngine implements IQueryEngine {
    */
   setMemoryRetriever(retriever: MemoryRetriever | undefined): void {
     this.memoryRetriever = retriever;
+  }
+
+  /** 注册 compact 附件提供者（B.2）：compact 时注入 taskFocus/plan 等结构化上下文。 */
+  setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void {
+    this.compactService.setAttachmentsProvider(fn);
   }
 
   /**

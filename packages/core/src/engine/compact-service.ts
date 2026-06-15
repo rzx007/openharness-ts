@@ -88,11 +88,33 @@ export interface CompactCheckpoint {
   [key: string]: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Compact attachments (B.2) — structured context injected into the summary prompt.
+// ---------------------------------------------------------------------------
+
+/** 压缩摘要时附加的结构化上下文（对齐 Python compact attachments）。 */
+export interface CompactAttachments {
+  /** 当前正在进行的任务描述（来自 TaskManager）。 */
+  taskFocus?: string;
+  /** 本会话访问过的文件路径（auto-extracted 或外部注入）。 */
+  recentFiles?: string[];
+  /** 当前计划/TODO 内容。 */
+  plan?: string;
+  /** 工具调用摘要（auto-derived from history）。 */
+  workLog?: string;
+}
+
+/** 由调用方（QueryEngine / CLI）提供外部上下文。 */
+export type CompactAttachmentsProvider = () =>
+  | CompactAttachments
+  | Promise<CompactAttachments>;
+
 export interface CompactServiceOptions {
   client?: CompactClient;
   hookExecutor?: IHookExecutor;
   progressCallback?: CompactProgressCallback;
   imageTokenEstimate?: number;
+  attachmentsProvider?: CompactAttachmentsProvider;
 }
 
 export interface CompactClient {
@@ -172,6 +194,7 @@ export class CompactService {
   private imageTokenEstimate: number;
   private consecutiveFailures = 0;
   private checkpoints: CompactCheckpoint[] = [];
+  private attachmentsProvider: CompactAttachmentsProvider | undefined;
 
   constructor(
     maxTokens = 100_000,
@@ -194,12 +217,84 @@ export class CompactService {
       this.progressCallback = opts.progressCallback;
       this.imageTokenEstimate =
         opts.imageTokenEstimate ?? DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE;
+      this.attachmentsProvider = opts.attachmentsProvider;
     }
   }
 
   /** Replace the summarizer client (e.g. when switching API client). */
   setClient(client: CompactClient | undefined): void {
     this.client = client;
+  }
+
+  /** 注册/替换附件提供者（由 QueryEngine 或 CLI 接线后注入 TaskManager 等上下文）。 */
+  setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void {
+    this.attachmentsProvider = fn;
+  }
+
+  // -------------------------------------------------------------------------
+  // Attachments helpers (B.2)
+  // -------------------------------------------------------------------------
+
+  /** 从消息历史自动提取最近访问的文件路径（Read/Write/Edit 工具 file_path 字段）。 */
+  private extractRecentFiles(messages: Message[]): string[] {
+    const FILE_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit"]);
+    const seen = new Set<string>();
+    const files: string[] = [];
+    for (const msg of messages) {
+      if (msg.type === "assistant" && msg.toolUses) {
+        for (const tu of msg.toolUses) {
+          if (FILE_TOOLS.has(tu.name)) {
+            const fp = (tu.input as Record<string, unknown>)?.file_path;
+            if (typeof fp === "string" && !seen.has(fp)) {
+              seen.add(fp);
+              files.push(fp);
+            }
+          }
+        }
+      }
+    }
+    return files.slice(-20);
+  }
+
+  /** 从消息历史派生工具调用摘要（tool×count 格式）。 */
+  private deriveWorkLog(messages: Message[]): string | undefined {
+    const counts = new Map<string, number>();
+    for (const msg of messages) {
+      if (msg.type === "assistant" && msg.toolUses) {
+        for (const tu of msg.toolUses) {
+          counts.set(tu.name, (counts.get(tu.name) ?? 0) + 1);
+        }
+      }
+    }
+    if (counts.size === 0) return undefined;
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => `${name}×${count}`)
+      .join(", ");
+  }
+
+  /** 构建附带结构化上下文的 compact prompt。 */
+  private buildCompactPrompt(attachments: CompactAttachments): string {
+    const sections: string[] = [];
+    if (attachments.taskFocus) {
+      sections.push(`## Current Task\n${attachments.taskFocus}`);
+    }
+    if (attachments.recentFiles?.length) {
+      sections.push(`## Recently Accessed Files\n${attachments.recentFiles.join("\n")}`);
+    }
+    if (attachments.plan) {
+      sections.push(`## Current Plan\n${attachments.plan}`);
+    }
+    if (attachments.workLog) {
+      sections.push(`## Work Log\n${attachments.workLog}`);
+    }
+    if (sections.length === 0) return COMPACT_PROMPT;
+    return (
+      COMPACT_PROMPT +
+      "\n\n<context>\n" +
+      sections.join("\n\n") +
+      "\n</context>\n\nIncorporate the above context into your summary to help resume work effectively."
+    );
   }
 
   /** Wire a hook executor so PRE/POST_COMPACT events fire. */
@@ -477,13 +572,32 @@ export class CompactService {
     // Build the summarizer request from older messages, with image payloads
     // replaced by placeholders (do not ship big images to the summarizer).
     let summarizable = this.replaceImagesWithPlaceholders(older);
+
+    // Gather compact attachments (B.2): auto-derived + provider-supplied.
+    const autoFiles = this.extractRecentFiles(messages);
+    const autoWorkLog = this.deriveWorkLog(messages);
+    let attachments: CompactAttachments = {
+      recentFiles: autoFiles.length > 0 ? autoFiles : undefined,
+      workLog: autoWorkLog,
+    };
+    if (this.attachmentsProvider) {
+      const external = await this.attachmentsProvider();
+      attachments = {
+        taskFocus: external.taskFocus ?? attachments.taskFocus,
+        recentFiles: external.recentFiles ?? attachments.recentFiles,
+        plan: external.plan ?? attachments.plan,
+        workLog: external.workLog ?? attachments.workLog,
+      };
+    }
+    const compactPrompt = this.buildCompactPrompt(attachments);
+
     let summaryText = "";
     let ptlRetries = 0;
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
-        summaryText = await this.collectSummary(summarizable);
+        summaryText = await this.collectSummary(summarizable, compactPrompt);
         break;
       } catch (err) {
         if (isPromptTooLongError(err) && ptlRetries < MAX_PTL_RETRIES) {
@@ -557,7 +671,7 @@ export class CompactService {
     return result;
   }
 
-  private async collectSummary(messages: Message[]): Promise<string> {
+  private async collectSummary(messages: Message[], customPrompt?: string): Promise<string> {
     if (!this.client) throw new Error("No LLM client");
 
     const conversationText = messages
@@ -578,7 +692,8 @@ export class CompactService {
       })
       .join("\n\n");
 
-    const prompt = `${COMPACT_PROMPT}\n\n<conversation>\n${conversationText}\n</conversation>`;
+    const basePrompt = customPrompt ?? COMPACT_PROMPT;
+    const prompt = `${basePrompt}\n\n<conversation>\n${conversationText}\n</conversation>`;
 
     let summaryText = "";
     for await (const event of this.client.submitMessage(prompt)) {
