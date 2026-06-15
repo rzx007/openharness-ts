@@ -52,7 +52,8 @@ export class FeishuAdapter implements ChannelAdapter {
   private readonly seenMessageIds = new Map<string, number>();
 
   constructor(private readonly config: FeishuConfig) {
-    this.replyAtBotNames = config.replyAtBotNames ?? [];
+    // 统一转小写，使 @mention 匹配大小写不敏感。
+    this.replyAtBotNames = (config.replyAtBotNames ?? []).map((n) => n.toLowerCase());
   }
 
   async connect(): Promise<void> {

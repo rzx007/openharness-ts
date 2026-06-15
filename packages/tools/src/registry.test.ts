@@ -47,7 +47,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("McpAuth");
     expect(names).toContain("RemoteTrigger");
     expect(names).toContain("Lsp");
-    expect(tools).toHaveLength(41);
+    expect(tools).toHaveLength(43);
   });
 
   it("each tool has required fields", () => {

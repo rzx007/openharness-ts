@@ -145,7 +145,11 @@ export class QueryEngine implements IQueryEngine {
     // turnSystemPrompt 退化为 this.systemPrompt，行为与之前完全一致。
     let memoryContext: string | null = null;
     if (this.memoryRetriever) {
-      memoryContext = await this.memoryRetriever(content);
+      try {
+        memoryContext = await this.memoryRetriever(content);
+      } catch {
+        // retriever failure is non-fatal; continue without memory context
+      }
     }
     const turnSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
 
@@ -156,7 +160,11 @@ export class QueryEngine implements IQueryEngine {
 
     while (turnCount < this.maxTurns) {
       // 自动压缩消息历史以控制上下文长度
-      this.messages = await this.compactService.autoCompact(this.messages);
+      try {
+        this.messages = await this.compactService.autoCompact(this.messages);
+      } catch {
+        // compact failure is non-fatal; continue with current messages
+      }
 
       const allTools = this.toolRegistry.getAll();
       const tools = this.allowedTools
@@ -212,7 +220,11 @@ export class QueryEngine implements IQueryEngine {
       turnCount++;
     }
 
-    // 当达到最大轮次限制时抛出异常
+    // 达到最大轮次：移除末尾的 tool_result 消息（它们没有对应的后续 assistant 回复），
+    // 避免下次 submitMessage 时向 API 发送末尾为 tool_result 的非法历史序列。
+    while (this.messages.length > 0 && this.messages[this.messages.length - 1]!.type === "tool_result") {
+      this.messages.pop();
+    }
     throw new MaxTurnsExceeded(this.maxTurns);
   }
 

@@ -1,5 +1,18 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { resolve, isAbsolute } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
+
+// System directories that must never be edited, regardless of permission mode.
+const SYSTEM_DIR_PREFIXES = [
+  "/etc/", "/sys/", "/proc/", "/dev/", "/boot/",
+  "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/",
+  "c:\\windows\\", "c:\\program files\\", "c:\\program files (x86)\\",
+];
+
+function isSystemPath(p: string): boolean {
+  const normalized = p.replace(/\\/g, "/").toLowerCase();
+  return SYSTEM_DIR_PREFIXES.some((prefix) => normalized.startsWith(prefix.replace(/\\/g, "/")));
+}
 
 export const fileEditTool: ToolDefinition = {
   name: "Edit",
@@ -15,11 +28,28 @@ export const fileEditTool: ToolDefinition = {
     },
     required: ["file_path", "old_string", "new_string"],
   },
-  async execute(input) {
-    const filePath = input.file_path as string;
+  async execute(input, context) {
+    const rawPath = input.file_path as string;
     const oldString = input.old_string as string;
     const newString = input.new_string as string;
     const replaceAll = (input.replace_all as boolean) ?? false;
+    const cwd = (context as { cwd?: string } | undefined)?.cwd ?? process.cwd();
+
+    if (!oldString) {
+      return {
+        content: [{ type: "text", text: "old_string must not be empty." }],
+        isError: true,
+      };
+    }
+
+    const filePath = isAbsolute(rawPath) ? rawPath : resolve(cwd, rawPath);
+
+    if (isSystemPath(filePath)) {
+      return {
+        content: [{ type: "text", text: `Error: editing system directory files is not allowed: ${filePath}` }],
+        isError: true,
+      };
+    }
 
     try {
       const content = await readFile(filePath, "utf-8");
@@ -48,7 +78,6 @@ export const fileEditTool: ToolDefinition = {
         ? content.replaceAll(oldString, newString)
         : content.replace(oldString, newString);
 
-      const { writeFile } = await import("node:fs/promises");
       await writeFile(filePath, updated, "utf-8");
 
       return {

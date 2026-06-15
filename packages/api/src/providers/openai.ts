@@ -167,6 +167,11 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // Reset per-attempt accumulated state so a retry starts from a clean slate.
+      collectedToolCalls.clear();
+      finishReason = null;
+      collectedReasoning = "";
+      thinkBuf = "";
       try {
         const stream = await this._client.chat.completions.create(createParams);
 
@@ -220,6 +225,11 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
           }
         }
 
+        // Flush any remaining buffered content (e.g. a partial <think> prefix at EOF).
+        if (thinkBuf) {
+          yield { type: "text_delta", delta: thinkBuf };
+          thinkBuf = "";
+        }
         break;
       } catch (error) {
         lastError = this.classifyError(error);
@@ -345,13 +355,32 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
           turnIdx++;
           break;
         }
-        case "tool_result":
+        case "tool_result": {
+          // OpenAI tool messages support text content only; extract text blocks and
+          // represent image blocks as a placeholder so the model knows they existed.
+          let toolContent: string;
+          if (typeof msg.content === "string") {
+            toolContent = msg.content;
+          } else if (Array.isArray(msg.content)) {
+            const parts: string[] = [];
+            for (const block of msg.content as ContentBlock[]) {
+              if (block.type === "text") {
+                parts.push(block.text);
+              } else if (block.type === "image") {
+                parts.push("[image]");
+              }
+            }
+            toolContent = parts.join("\n");
+          } else {
+            toolContent = JSON.stringify(msg.content);
+          }
           messages.push({
             role: "tool",
             tool_call_id: msg.toolUseId,
-            content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+            content: toolContent,
           });
           break;
+        }
       }
     }
 
