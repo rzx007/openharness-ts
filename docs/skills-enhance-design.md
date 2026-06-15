@@ -1,6 +1,6 @@
 # 设计：Skills 增强 + 内置 skills（E.5）
 
-> 状态：已批准，待实现。
+> 状态：✅ 已完成（E.5）。`/<skill>` 斜杠路由、frontmatter 扩展、内置 bundled skills、model 可见性均已实现并通过类型检查。
 
 ## 目标
 
@@ -34,7 +34,7 @@
 - **REPL**（apps/cli/src/commands/main.ts `processLine`）：在走 commandRegistry 之前，若 `/<word>` 匹配某个 `userInvocable` skill 名（且不与内置命令冲突，内置优先）→ 构造 prompt = `skill.content`（+ 末尾拼用户 args，按 argumentHint 提示）→ 走与普通输入相同的 `queryEngine.submitMessage` 路径**跑一轮**（不是返回文本）。
 - **backend host**（runBackendHost 的 submit_line）：同样在 runHostSlashCommand 之前拦截 user-invocable skill → 走 processLineForHost（注入 skill prompt）。
 - **命令列表**：buildHostCommandList / REPL 的命令补全把 user-invocable skill 显示为 `/<name>`（描述用 skill.description）。
-- 若 skill.model 设了：最小版**先不做**每命令 model 覆盖（注 TODO）；统一用当前会话 model。
+- 若 skill.model 设了：✅ **已实现每命令 model 覆盖**——调用前 `queryEngine.setModel(skill.model)`，`finally` 块保证出错时也恢复会话 model；REPL 与 BackendHost 均已接线。
 - **与内置斜杠命令同名的处理**：bundled 的 `commit` / `plan` 与内置斜杠命令 `/commit`（git-commit）/`/plan`（plan-mode）同名。按"内置命令优先"，这两个 skill **作为 `/<skill>` 不可达**——用户输入 `/commit` 走内置 git-commit、`/plan` 走 plan-mode。但它们**仍可经 Skill 工具 / system prompt 被模型使用**（model 可见性不受同名影响）。此为与 Python 一致的行为。`review` / `test` / `debug` 三个不与内置命令撞名，可正常通过 `/<skill>` 调用。
 
 ### d) model 可见性
@@ -52,4 +52,4 @@
 
 - project skills 的 git-root 向上逐级遍历 + least→most（最小版 cwd 单层 + 三源覆盖）。
 - 信任门控 + 路径穿越防护（留 TODO）。
-- 每命令 model 覆盖、command_name/display_name 的完整路由、skill-creator/diagnose 重工作流 skill。
+- command_name/display_name 的完整路由、skill-creator/diagnose 重工作流 skill。

@@ -10,9 +10,10 @@
 `${CLAUDE_PLUGIN_ROOT}` + 卸载路径穿越防护。
 
 **范围外（留后续）**：
-- `tools_dir` 动态 import 工具（任意代码执行面，单独一轮配信任评估）；
 - plugin agents（依赖 C.4 的 agent .md frontmatter 解析器）；
 - bundled plugins（Python 侧也是空目录）。
+
+**已补充完成（C.1 二刀）**：`tools_dir` 动态 import 工具——`registerPluginTools` 函数遍历 `<plugin>/<tools_dir>/*.js|ts`，动态 import 后验证 `name` 与 `execute` 字段，通过则注册进 `toolRegistry`；import 失败只打 stderr 警告，不影响其他工具与插件加载。REPL / BackendHost / task-worker 三路均已在 `registerPluginHooks` 之后调用。
 
 ## Claude Code 兼容
 
@@ -54,7 +55,7 @@ PluginManifest {
   description: string = "";
   enabled_by_default: boolean = true;
   skills_dir: string = "skills";
-  tools_dir: string = "tools";     // 本轮只存不加载
+  tools_dir: string = "tools";     // 动态 import（registerPluginTools，C.1 二刀已实现）
   hooks_file: string = "hooks.json";
   mcp_file: string = "mcp.json";
   author?: object;

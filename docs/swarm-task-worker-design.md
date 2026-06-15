@@ -10,8 +10,7 @@ Python 的"长驻 worker"**不是常驻进程**，而是**重启式多轮**：
   （`ui/app.py run_task_worker`，显式注释 one-shot）；
 - `send_message` = 往任务 stdin 写一行 JSON；任务已结束时由
   BackgroundTaskManager **懒复活重启**进程再写入；
-- **重启不保留上下文**——TS TaskManager 已有同款提示文案
-  （"prior interactive context was not preserved"）。
+- **重启通过 session 快照恢复上下文（D.1 已实现）**——Agent 工具预分配 `workerSessionId`，经 `TeammateSpawnConfig.sessionId` → `--session-id` CLI flag 传入；task-worker 启动时用 `loadSessionById` 恢复消息历史，退出前 `saveSessionSnapshot` 持久化；TS TaskManager 仍保留"prior interactive context was not preserved"提示文案（懒复活首次无快照时显示）。
 
 TS 底子已齐：`TaskManager.writeToTask` 懒复活（B.3）、`createAgentTask`
 （prompt 经 stdin）、`type:"agent"` 任务标记、TaskWait。
@@ -49,7 +48,7 @@ TS 底子已齐：`TaskManager.writeToTask` 懒复活（B.3）、`createAgentTas
 | 点 | Python | TS | 原因 |
 |----|--------|----|------|
 | api-key | argv `--api-key` | 不进 argv（settings/env） | TS teammate 既有约定 |
-| 上下文连续性 | 重启不保留（注释明示） | 同 | 对齐；将来可经 session 快照恢复（已有 E.6 存储，留待） |
+| 上下文连续性 | 重启不保留（注释明示） | ✅ 经 session 快照恢复（D.1）：预分配 sessionId → loadSessionById 恢复 → saveSessionSnapshot 持久化 | D.1 已实现 |
 | `system_prompt_mode`/`plan_mode_required` flags | 有 | 暂不传（TS spawn 配置无对应） | 字段缺口，留待 |
 | 空行/纯空白 stdin | continue 继续等下一行 | 直接退出（懒复活会重投下一条） | 退出比无限等更稳健 |
 | 无 text 的 JSON 对象 | 原始行当 prompt | 同（审查修复后对齐） | 防静默空转烧重启额度 |

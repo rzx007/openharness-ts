@@ -1,8 +1,6 @@
 # 设计：Coordinator agent 加载与 prompt 还原（C.4）
 
-> 状态：已批准。移植 Python `coordinator/agent_definitions.py`（975 行）的加载段
-> 与 `coordinator_mode.py`（520 行）的 prompt/上下文段。同时收口 C.1 留下的
-> plugin agents 尾巴。
+> 状态：✅ 已完成（C.4）。R1–R3 全部实现并通过类型检查；CLI 接线已补齐（见下方"CLI 接线"小节）。
 
 ## 范围
 
@@ -56,3 +54,30 @@
   coordinator tools 列表、user context 含 scratchpad/worker-tools。
 
 每轮 `pnpm check-types` + `pnpm test` 全绿。
+
+## CLI 接线（C.4 补充）
+
+R3 函数本身在 `@openharness/coordinator` 包里实现后，还需三处 CLI 接线：
+
+### 1. session_mode 存储
+
+`SessionSnapshotPayload` 新增 `session_mode?: string` 字段；`saveSessionSnapshot` 的 `options.sessionMode` 在 coordinator 模式下传 `"coordinator"`，会话文件写入后可被恢复端识别。
+
+### 2. matchSessionMode 在会话恢复时调用
+
+`loadSessionAndResume`（`main.ts`）恢复快照后调用 `matchSessionMode(payload.session_mode)`：若快照中有 `session_mode: "coordinator"` 则设置 `CLAUDE_CODE_COORDINATOR_MODE` 环境变量并向用户打印提示；若模式不匹配当前环境则警告——对齐 Python `match_session_mode` 行为。
+
+### 3. setAllowedTools 在 coordinator 模式启动时调用
+
+`QueryEngine` 新增 `setAllowedTools(tools: string[] | null): void`，在 `submitMessage` 时按白名单过滤 `toolRegistry.getAll()`。
+
+REPL / BackendHost 启动时（`registerPluginHooks` 之后）：
+
+```typescript
+if (isCoordinatorMode()) {
+  bundle.queryEngine.setAllowedTools(getCoordinatorTools());
+  // getCoordinatorTools() = ["Agent", "SendMessage", "TaskStop"]
+}
+```
+
+这样 coordinator 只能调用 swarm 工具，无法直接操作文件/运行 shell——对齐 Python coordinator 的工具隔离。
