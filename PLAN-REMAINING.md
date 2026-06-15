@@ -5,7 +5,7 @@
 > 状态图例：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现 · ⛔ 不在复刻范围
 
 > **进度（分支 `feat/align-phase-ab`）**：**Phase A、Phase B 已完成**（4 commit，`check-types` 26/26、`test` 25/25 全绿）。
-> 遗留 TODO：① B.2 compact attachments（依赖 QueryEngine 元数据通道）；② B.5 per-turn 相关记忆检索（需轮级管线）；③ bash 在无 Git Bash 的 Windows 上的优雅降级。下一步从 **Phase C** 开始。
+> 遗留 TODO：① bash 在无 Git Bash 的 Windows 上的优雅降级。B.2 compact attachments、B.5 per-turn 记忆检索均已完成；Phase C/D 大部分已完成，见下表。
 
 ## 原则
 
@@ -26,11 +26,11 @@
 | engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint/attachments 全部完成(B.2) |
 | hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
 | memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
-| prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段(B.5)；per-turn 记忆检索 TODO；personalization 段待 C |
+| prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段+per-turn 记忆检索(B.5)；personalization 段待 C |
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
 | coordinator | 🟡 | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；缺 agent 级字段运行时生效 |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
-| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；backend host MCP 仅 REPL |
+| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；✅MCP connectAll+工具注册(REPL+BackendHost) |
 | bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
@@ -80,7 +80,7 @@
 ## Phase B — 核心能力补齐（P1）✅ 已完成
 
 > 已在 `feat/align-phase-ab` 完成（commit `998b1c7`、`46aa5e5`，审查修复 `8be7984`）。B.1–B.5 全部实现并测试。
-> **遗留 TODO**：B.5 per-turn 相关记忆检索（需轮级管线）。
+> **遗留 TODO**：（已全部完成）
 
 ### B.1 Hooks 完整化
 - 补 `priority` 字段 + 同事件内按 priority 降序稳定排序。
@@ -112,6 +112,8 @@
 - permission-mode 段、delegation/subagent 段。
 - **文件**：`packages/prompts/src/index.ts`
 
+> B.5 per-turn 相关记忆检索已于后续完成：`QueryEngine.memoryRetriever` 回调 + `composeTurnSystemPrompt()` 瞬态注入，REPL 和 BackendHost 两路均接线。B.5 全部完成。
+
 ---
 
 ## Phase C — 扩展层补齐（P2）
@@ -124,8 +126,7 @@
 - ✅ plugin agents 已随 C.4 收口（`packages/plugins/src/agents.ts`）。
 - ✅ `tools_dir` 动态 import（`registerPluginTools`，二段注册在 bootstrap 后，
   REPL/BackendHost/task-worker 三路均接线；default export ToolDefinition | ToolDefinition[]）。
-- 留待：backend host 的 MCP connectAll 本就缺失，插件 MCP 当前仅 REPL 生效。
-  详见 `docs/plugins-contributions-design.md`。
+- ✅ BackendHost MCP 已修：补 `connectAll` + `getAsToolDefinitions()` 注册 + `setMcpManager()` 注入 ToolContext，REPL 和 BackendHost 均生效。
 - **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`apps/cli/src/plugin-contributions.ts`
 
 ### C.2 Auth ProviderProfile 体系
