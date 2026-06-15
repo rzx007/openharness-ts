@@ -35,14 +35,30 @@ export interface OutboundMessage {
 class AsyncQueue<T> {
   private buffer: T[] = [];
   private waiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }> = [];
+  private droppedCount = 0;
 
-  push(item: T): void {
+  constructor(private readonly maxSize: number = 0) {}
+
+  /**
+   * Push an item into the queue. Returns true if accepted, false if dropped
+   * because the buffer is at capacity (maxSize > 0 and no waiting consumer).
+   */
+  push(item: T): boolean {
     const waiter = this.waiters.shift();
     if (waiter) {
       waiter.resolve(item);
-    } else {
-      this.buffer.push(item);
+      return true;
     }
+    if (this.maxSize > 0 && this.buffer.length >= this.maxSize) {
+      this.droppedCount++;
+      return false;
+    }
+    this.buffer.push(item);
+    return true;
+  }
+
+  get dropped(): number {
+    return this.droppedCount;
   }
 
   pull(signal?: AbortSignal): Promise<T> {
@@ -80,12 +96,19 @@ class AsyncQueue<T> {
   }
 }
 
+/** Default backpressure cap per direction. Keeps memory bounded under burst traffic. */
+const DEFAULT_MAX_QUEUE_SIZE = 1_000;
+
 export class MessageBus {
-  private readonly inbound = new AsyncQueue<InboundMessage>();
-  private readonly outbound = new AsyncQueue<OutboundMessage>();
+  private readonly inbound = new AsyncQueue<InboundMessage>(DEFAULT_MAX_QUEUE_SIZE);
+  private readonly outbound = new AsyncQueue<OutboundMessage>(DEFAULT_MAX_QUEUE_SIZE);
 
   publishInbound(msg: InboundMessage): void {
-    this.inbound.push(msg);
+    const accepted = this.inbound.push(msg);
+    if (!accepted) {
+      // Inbound queue is full — log and drop. Callers can check inboundDropped.
+      console.warn(`[MessageBus] inbound queue full (${DEFAULT_MAX_QUEUE_SIZE}), message dropped`);
+    }
   }
 
   consumeInbound(signal?: AbortSignal): Promise<InboundMessage> {
@@ -93,7 +116,10 @@ export class MessageBus {
   }
 
   publishOutbound(msg: OutboundMessage): void {
-    this.outbound.push(msg);
+    const accepted = this.outbound.push(msg);
+    if (!accepted) {
+      console.warn(`[MessageBus] outbound queue full (${DEFAULT_MAX_QUEUE_SIZE}), message dropped`);
+    }
   }
 
   consumeOutbound(signal?: AbortSignal): Promise<OutboundMessage> {
@@ -106,6 +132,14 @@ export class MessageBus {
 
   get outboundSize(): number {
     return this.outbound.size;
+  }
+
+  get inboundDropped(): number {
+    return this.inbound.dropped;
+  }
+
+  get outboundDropped(): number {
+    return this.outbound.dropped;
   }
 
   /** 会话键：override 优先，否则 `channel:chatId`（对齐 Python session_key）。 */

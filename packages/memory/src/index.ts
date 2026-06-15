@@ -324,10 +324,23 @@ export class MemoryManager {
   private maxEntries: number;
   private storageDir: string | undefined;
   private loaded = false;
+  /** 写串行队列：所有持久化操作链在同一 Promise 上，防止并发写入撕裂文件。 */
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(maxEntries = 1000, storageDir?: string) {
     this.maxEntries = maxEntries;
     this.storageDir = storageDir && storageDir.length > 0 ? storageDir : undefined;
+  }
+
+  /**
+   * 将 fn 排入写队列串行执行，返回该次写入的 Promise。
+   * 队列尾部始终是 settled 的 Promise（不带 rejection），
+   * 保证即使某次写失败也不会卡死后续写入。
+   */
+  private enqueueWrite(fn: () => Promise<void>): Promise<void> {
+    const next = this.writeQueue.then(fn, fn);
+    this.writeQueue = next.then(() => {}, () => {});
+    return next;
   }
 
   async add(
@@ -370,8 +383,11 @@ export class MemoryManager {
     this.evictIfNeeded();
 
     if (this.storageDir) {
-      await this.persistEntry(entry);
-      await this.writeIndex();
+      const snapshot = { ...entry };
+      await this.enqueueWrite(async () => {
+        await this.persistEntry(snapshot);
+        await this.writeIndex();
+      });
     }
 
     return entry;
@@ -419,8 +435,11 @@ export class MemoryManager {
     }
 
     if (this.storageDir) {
-      await this.persistEntry(entry);
-      await this.writeIndex();
+      const snapshot = { ...entry };
+      await this.enqueueWrite(async () => {
+        await this.persistEntry(snapshot);
+        await this.writeIndex();
+      });
     }
 
     return entry;
@@ -430,8 +449,11 @@ export class MemoryManager {
     await this.ensureLoaded();
     const deleted = this.entries.delete(id);
     if (deleted && this.storageDir) {
-      await this.removeEntryFile(id);
-      await this.writeIndex();
+      const deletedId = id;
+      await this.enqueueWrite(async () => {
+        await this.removeEntryFile(deletedId);
+        await this.writeIndex();
+      });
     }
     return deleted;
   }
@@ -450,9 +472,10 @@ export class MemoryManager {
       touched.push(entry);
     }
     if (this.storageDir) {
-      for (const entry of touched) {
-        await this.persistEntry(entry);
-      }
+      const snapshots = touched.map((e) => ({ ...e }));
+      await this.enqueueWrite(async () => {
+        for (const s of snapshots) await this.persistEntry(s);
+      });
     }
   }
 

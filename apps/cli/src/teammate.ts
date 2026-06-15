@@ -45,9 +45,6 @@ export function buildTeammateCommand(
   // 经文件流由 leader 集中裁决（leader full_auto 时 checker 照批，留审计点）。
   argv.push("--permission-mode", config.permissionMode ?? "default");
 
-  // 各自人格（Explore/Plan/verification 等）。
-  if (config.systemPrompt) argv.push("-s", config.systemPrompt);
-
   // agent 级字段运行时生效：将 AgentDefinition 中解析的约束传给子进程。
   if (config.maxTurns != null) argv.push("--max-turns", String(config.maxTurns));
   if (config.effort) argv.push("--effort", config.effort);
@@ -68,6 +65,10 @@ export function buildTeammateCommand(
     CLAUDE_CODE_AGENT_ID: `${config.name}@${config.team}`,
     CLAUDE_CODE_AGENT_NAME: config.name,
   };
+
+  // 各自人格（Explore/Plan/verification 等）：走 env var 而非 argv，
+  // 避免超长 systemPrompt 在 Windows 上突破 32767 字符命令行长度限制。
+  if (config.systemPrompt) env["OPENHARNESS_TASK_SYSTEM_PROMPT"] = config.systemPrompt;
 
   return { argv, env };
 }

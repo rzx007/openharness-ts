@@ -130,7 +130,9 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt
   // 时才注入 model 可见的 skills 段，使 print/backend 三模式与 REPL 一致——REPL
   // 由 refreshSystemPrompt 注入，print/backend 走 bootstrap 由此处注入。
-  const systemPrompt = overrides.systemPrompt ?? await buildRuntimeSystemPrompt({
+  // task-worker 子进程的 systemPrompt 通过 env 传递（避免 Windows argv 长度限制）。
+  const envSystemPrompt = process.env["OPENHARNESS_TASK_SYSTEM_PROMPT"] || undefined;
+  const systemPrompt = overrides.systemPrompt ?? envSystemPrompt ?? await buildRuntimeSystemPrompt({
     customPrompt: settings.systemPrompt,
     cwd: process.cwd(),
     permissionMode: mode,

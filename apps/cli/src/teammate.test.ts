@@ -50,19 +50,18 @@ describe("buildTeammateCommand", () => {
     expect(argv[modelIdx + 1]).toBe("minimax-parent");
   });
 
-  it("includes -s when systemPrompt present", () => {
-    const { argv } = buildTeammateCommand(
+  it("passes systemPrompt via env var (not argv) to avoid Windows argv length limit", () => {
+    const { argv, env } = buildTeammateCommand(
       makeConfig({ systemPrompt: "You are Explore." }),
       BASE_SETTINGS,
     );
-    const sIdx = argv.indexOf("-s");
-    expect(sIdx).toBeGreaterThan(-1);
-    expect(argv[sIdx + 1]).toBe("You are Explore.");
+    expect(argv).not.toContain("-s");
+    expect(env["OPENHARNESS_TASK_SYSTEM_PROMPT"]).toBe("You are Explore.");
   });
 
-  it("omits -s when no systemPrompt", () => {
-    const { argv } = buildTeammateCommand(makeConfig(), BASE_SETTINGS);
-    expect(argv).not.toContain("-s");
+  it("omits OPENHARNESS_TASK_SYSTEM_PROMPT when no systemPrompt", () => {
+    const { env } = buildTeammateCommand(makeConfig(), BASE_SETTINGS);
+    expect(env["OPENHARNESS_TASK_SYSTEM_PROMPT"]).toBeUndefined();
   });
 
   it("passes through provider, base-url, api-format", () => {

@@ -280,11 +280,15 @@ export class QueryEngine implements IQueryEngine {
    *          包含工具ID、名称、执行内容（或错误信息）以及是否出错的标志。
    */
   private async executeTools(toolUses: ToolUseBlock[]): Promise<ToolExecutionResult[]> {
-    // 并行检查所有工具的权限状态
+    // 并行检查所有工具的权限状态（单个 checkTool 抛错不应波及其他工具）
     const checks = await Promise.all(
-      toolUses.map((tu) =>
-        this.permissionChecker.checkTool(tu.name, tu.input)
-      )
+      toolUses.map(async (tu) => {
+        try {
+          return await this.permissionChecker.checkTool(tu.name, tu.input);
+        } catch {
+          return { action: "deny" as const, reason: "permission check failed" };
+        }
+      })
     );
 
     const executable: { idx: number; toolUse: ToolUseBlock }[] = [];
@@ -322,11 +326,16 @@ export class QueryEngine implements IQueryEngine {
         }
       }
 
-      // 执行工具使用前的钩子，若被钩子拦截则终止执行
-      const hookResult = await this.hookExecutor.execute("pre_tool_use", {
-        tool: toolUse.name,
-        input: toolUse.input,
-      });
+      // 执行工具使用前的钩子，若被钩子拦截则终止执行（hook 本身抛错时放行，不阻断执行）
+      let hookResult: { blocked: boolean; reason?: string };
+      try {
+        hookResult = await this.hookExecutor.execute("pre_tool_use", {
+          tool: toolUse.name,
+          input: toolUse.input,
+        });
+      } catch {
+        hookResult = { blocked: false };
+      }
 
       if (hookResult.blocked) {
         results[i] = {
