@@ -28,7 +28,7 @@
 | memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
 | prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段+per-turn 记忆检索(B.5)；personalization 段待 C |
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
-| coordinator | 🟡 | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；缺 agent 级字段运行时生效 |
+| coordinator | ✅ | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；✅agent 级字段运行时生效(tools/disallowedTools/maxTurns/effort/permissionMode) |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
 | plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；✅MCP connectAll+工具注册(REPL+BackendHost) |
 | bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
@@ -153,7 +153,7 @@
   调 `queryEngine.setAllowedTools(getCoordinatorTools())`（Agent/SendMessage/TaskStop）。
 - `QueryEngine.setAllowedTools(string[]|null)`：在 submitMessage 内 streamMessage
   调用前过滤 toolRegistry，null 解除限制。
-- 留待：agent 级 hooks/mcpServers/effort/memory/isolation 的运行时生效（swarm 后续）。
+- ✅ agent 级字段运行时生效：`tools/disallowedTools/maxTurns/effort/permissionMode` 经 `TeammateSpawnConfig` → `buildTeammateCommand` → CLI argv 传给子进程，bootstrap 应用。留待：agent 级 `hooks/mcpServers` 的运行时生效（需 env var 传 JSON，较复杂）。
 - **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`、`packages/core/src/{types/runtime,engine/query-engine}.ts`、`packages/services/src/session/storage.ts`、`apps/cli/src/commands/main.ts`
 
 ### C.5 Personalization（新模块）✅ 已完成
