@@ -35,7 +35,7 @@
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage；缺 TUI 人工裁决、重启上下文恢复 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
-| services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；缺 compact 读回接线、cron 升级、lsp 真 AST |
+| services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
 | personalization | ✅ | 10 类事实抽取+local_rules 持久化+prompt 注入+三模式 session-end 触发(C.5) |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
 | autopilot | ⛔ | 不复刻 |
@@ -252,7 +252,13 @@
   executeAutoDream 自动触发（归 cron）。详见 `docs/services-memory-quartet-design.md`。
 - ✅ cron 调度升级（第一刀）：`CronScheduler.start()` 改为 `setTimeout` 自重调度，
   每次触发后用 `computeNextRunTime()` 精确计算下一次绝对时刻，替代近似 `setInterval`。
-  留待：时区支持、独立调度守护进程（子进程执行）、外部命令 `command` 字段接线、通知回调。
+- ✅ cron 升级（第二刀）：
+  - `command` 字段接线：触发时 `execAsync()` 运行 shell 命令（5 min 超时，输出写日志）。
+  - 时区支持：`CronJob.timezone`（IANA 名），`computeNextRunTime(expr, base?, tz?)` 用
+    `Intl.DateTimeFormat + hourCycle:'h23'` 按时区计算触发时刻；无效 tz 安全回退本地。
+  - 独立守护进程：`saveJobs`/`loadJobs` 持久化 job 定义；`ohs cron add/remove/daemon`；
+    `ohs cron start` spawn detached daemon + PID 文件；`ohs cron stop` 按 PID 发 SIGTERM。
+  留待：通知回调（job 完成后 webhook/channel 通知）。
 - ✅ session 存储（第二刀）：cwd 哈希分目录 + latest/id 双写 + load 侧配对修复 +
   Markdown 导出；--continue/--resume 已接线（裸 continue 不串项目）。
 - ✅ toolMetadata 投喂：`saveSessionSnapshot()` 传入 `engine.getToolMetadata?.()` 。
