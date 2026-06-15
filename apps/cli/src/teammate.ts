@@ -48,6 +48,12 @@ export function buildTeammateCommand(
   // 各自人格（Explore/Plan/verification 等）。
   if (config.systemPrompt) argv.push("-s", config.systemPrompt);
 
+  // agent 级字段运行时生效：将 AgentDefinition 中解析的约束传给子进程。
+  if (config.maxTurns != null) argv.push("--max-turns", String(config.maxTurns));
+  if (config.effort) argv.push("--effort", config.effort);
+  if (config.allowedTools?.length) argv.push("--allowed-tools", config.allowedTools.join(","));
+  if (config.disallowedTools?.length) argv.push("--disallowed-tools", config.disallowedTools.join(","));
+
   // 所有 teammate 都以 swarm worker 身份运行：只读工具自动放行（D.4）。
   // 只读放行本就安全，让 Explore/Plan 默认就能干活，不必父进程开 full_auto。
   argv.push("--swarm-worker");

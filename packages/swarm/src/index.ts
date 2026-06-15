@@ -104,6 +104,14 @@ export interface TeammateSpawnConfig {
   permissionMode?: "default" | "plan" | "full_auto";
   /** 隔离到独立 git worktree（并行写任务）。缺省 false → 走共享 cwd。 */
   isolate?: boolean;
+  /** agent 定义里的工具白名单（tools 字段）；传给 --allowed-tools。 */
+  allowedTools?: string[];
+  /** agent 定义里的工具黑名单（disallowedTools 字段）；传给 --disallowed-tools。 */
+  disallowedTools?: string[];
+  /** agent 定义里的最大轮次（maxTurns 字段）；传给 --max-turns。 */
+  maxTurns?: number;
+  /** agent 定义里的推理强度（effort 字段）；传给 --effort。 */
+  effort?: string;
 }
 
 export interface TeammateMessage {

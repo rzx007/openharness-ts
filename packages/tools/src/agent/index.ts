@@ -73,8 +73,12 @@ export const agentTool: ToolDefinition = {
         sessionId: workerSessionId,
         model: (input.model as string) ?? agentDef?.model,
         systemPrompt: agentDef?.systemPrompt,
-        permissionMode: permissionMode as "default" | "plan" | "full_auto" | undefined,
+        permissionMode: (permissionMode ?? agentDef?.permissionMode) as "default" | "plan" | "full_auto" | undefined,
         isolate: input.isolate === true,
+        allowedTools: agentDef?.tools,
+        disallowedTools: agentDef?.disallowedTools,
+        maxTurns: agentDef?.maxTurns,
+        effort: agentDef?.effort != null ? String(agentDef.effort) : undefined,
       });
       if (!result.success) {
         return { content: [{ type: "text", text: result.error ?? "Failed to spawn agent" }], isError: true };
