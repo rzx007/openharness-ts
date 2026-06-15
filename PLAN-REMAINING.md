@@ -21,7 +21,7 @@
 | 模块 | 状态 | 一句话差距 |
 |------|------|-----------|
 | api | 🟡 | ✅`<think>`过滤/图片传递/max_completion_tokens(A.1)；仍缺 Codex/Copilot client、reasoning effort、modelscope |
-| tools | 🟡 | ✅bash/grep/glob 健壮性(A.3)；仍缺 image_to_text/image_generation |
+| tools | 🟡 | ✅bash/grep/glob 健壮性(A.3)；✅ImageToText(视觉 fallback)/ImageGeneration(DALL-E 兼容) |
 | mcp | ✅ | stdio + HTTP(streamable)/SSE 传输 + headers 鉴权 + 失败隔离已补(C.3)；仅 MCP OAuth flow 待补 |
 | engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint/attachments 全部完成(B.2) |
 | hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
