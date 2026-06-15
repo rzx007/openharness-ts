@@ -1,6 +1,6 @@
 # 设计：Coordinator agent 加载与 prompt 还原（C.4）
 
-> 状态：✅ 已完成（C.4）。R1–R3 全部实现并通过类型检查；CLI 接线已补齐（见下方"CLI 接线"小节）。
+> 状态：✅ 已完成（C.4 + agent 级字段运行时生效）。R1–R3 全部实现并通过类型检查；CLI 接线已补齐；agent 级字段（tools/disallowedTools/maxTurns/effort/permissionMode）已在 spawn worker 时实际传给子进程。
 
 ## 范围
 
@@ -13,8 +13,9 @@
   `match_session_mode`、`get_coordinator_tools`、`get_coordinator_user_context`
   （scratchpad / worker-tools 注入）。
 
-**范围外**：agent 级 hooks/mcpServers 的运行时生效（字段解析保留，spawn 接线
-属 swarm 后续）；`effort`/`memory`/`isolation` 的行为接线（同上，只存字段）。
+**已实现（后续补充）**：`tools`/`disallowedTools`/`maxTurns`/`effort`/`permissionMode` 五个字段在 spawn worker 时经 `TeammateSpawnConfig` → `buildTeammateCommand` → CLI argv 实际传给子进程，bootstrap 应用（见下方"agent 级字段运行时生效"小节）。
+
+**仍留待**：agent 级 `hooks`/`mcpServers` 的运行时生效（需 env var 传 JSON，再在 worker 侧解析注册，较复杂）；`memory`/`isolation` 的行为接线（字段已解析，接线待后续）。
 
 ## 关键决策
 
@@ -81,3 +82,47 @@ if (isCoordinatorMode()) {
 ```
 
 这样 coordinator 只能调用 swarm 工具，无法直接操作文件/运行 shell——对齐 Python coordinator 的工具隔离。
+
+## agent 级字段运行时生效
+
+`AgentDefinition` 里的约束字段现在会随 spawn 实际传给 worker 子进程。完整链路：
+
+```
+agent.md frontmatter
+  tools: [Read, Write]
+  disallowedTools: [Bash]
+  maxTurns: 5
+  effort: high
+  permissionMode: plan
+
+↓ packages/tools/src/agent/index.ts（Agent 工具）
+  agentDef → TeammateSpawnConfig.{allowedTools, disallowedTools, maxTurns, effort, permissionMode}
+
+↓ apps/cli/src/teammate.ts（buildTeammateCommand）
+  argv: [..., "--allowed-tools", "Read,Write",
+               "--disallowed-tools", "Bash",
+               "--max-turns", "5",
+               "--effort", "high",
+               "--permission-mode", "plan"]
+
+↓ apps/cli/src/commands/main.ts（buildCliOverrides → bootstrap）
+  PermissionChecker 工具白/黑名单 + queryEngine maxTurns + effort 注入
+```
+
+### 各字段说明
+
+| 字段 | CLI 参数 | bootstrap 应用点 |
+|------|----------|-----------------|
+| `tools` | `--allowed-tools A,B` | `bootstrap` 构建 `toolRegistry` 时过滤，只保留白名单工具 |
+| `disallowedTools` | `--disallowed-tools X` | `bootstrap` 构建 `toolRegistry` 时排除黑名单工具 |
+| `maxTurns` | `--max-turns N` | `buildCliOverrides` → `settings.maxTurns` → `QueryEngine.setMaxTurns` |
+| `effort` | `--effort high` | `buildCliOverrides` → `settings.effort` → API 调用时 reasoning effort |
+| `permissionMode` | `--permission-mode plan` | `buildCliOverrides` → `PermissionChecker.mode`（Agent 工具传入值 > agentDef 值 > "default"） |
+
+### permissionMode 优先级
+
+Agent 工具调用时 `input.permissionMode`（运行时显式指定）> `agentDef.permissionMode`（agent.md 定义）> 默认 `"default"`，允许调用方按需覆盖。
+
+### 仍留待（hooks/mcpServers）
+
+`hooks` 和 `mcpServers` 是嵌套对象，无法直接序列化成 CLI 参数，需要通过环境变量传 JSON 并在 worker 侧解析注册，留待后续实现。
