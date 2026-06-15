@@ -23,7 +23,7 @@
 | api | 🟡 | ✅`<think>`过滤/图片传递/max_completion_tokens(A.1)；仍缺 Codex/Copilot client、reasoning effort、modelscope |
 | tools | 🟡 | ✅bash/grep/glob 健壮性(A.3)；仍缺 image_to_text/image_generation |
 | mcp | ✅ | stdio + HTTP(streamable)/SSE 传输 + headers 鉴权 + 失败隔离已补(C.3)；仅 MCP OAuth flow 待补 |
-| engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint 已补(B.2)且 LLM 摘要已接入引擎；attachments 留 TODO |
+| engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint/attachments 全部完成(B.2) |
 | hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
 | memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
 | prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段(B.5)；per-turn 记忆检索 TODO；personalization 段待 C |
@@ -80,7 +80,7 @@
 ## Phase B — 核心能力补齐（P1）✅ 已完成
 
 > 已在 `feat/align-phase-ab` 完成（commit `998b1c7`、`46aa5e5`，审查修复 `8be7984`）。B.1–B.5 全部实现并测试。
-> **遗留 TODO**：B.2 compact attachments（task_focus/recent_files 等，依赖 QueryEngine 元数据通道）；B.5 per-turn 相关记忆检索（需轮级管线）。
+> **遗留 TODO**：B.5 per-turn 相关记忆检索（需轮级管线）。
 
 ### B.1 Hooks 完整化
 - 补 `priority` 字段 + 同事件内按 priority 降序稳定排序。
@@ -89,10 +89,11 @@
 - `$ARGUMENTS` 注入 + shell 转义（防注入）；matcher（fnmatch）过滤；`OPENHARNESS_HOOK_EVENT/PAYLOAD` 环境变量。
 - **文件**：`packages/hooks/src/index.ts`、`packages/core/src/types/hooks.ts`
 
-### B.2 Compact 高级链路
-- context collapse（确定性折叠超长文本）、PTL（prompt-too-long）重试 + 头部截断、tool_use/result 配对保护、图片占位替换。
-- compact attachments（task_focus / recent_files / plan / work_log 等）、boundary marker、PRE/POST_COMPACT hooks、progress/checkpoint。
-- **文件**：`packages/core/src/engine/compact-service.ts`
+### B.2 Compact 高级链路 ✅ 已完成
+- ✅ context collapse（确定性折叠超长文本）、PTL（prompt-too-long）重试 + 头部截断、tool_use/result 配对保护、图片占位替换。
+- ✅ boundary marker、PRE/POST_COMPACT hooks、progress/checkpoint。
+- ✅ compact attachments（B.2 尾巴）：`extractRecentFiles()`（Read/Write/Edit tool_use 历史，最近 20）、`deriveWorkLog()`（工具调用计数摘要）、`buildCompactPrompt()`（拼入 `<context>` 段）；`setAttachmentsProvider()` 外部注入 taskFocus/plan；REPL + BackendHost 两处接线 TaskManager.listTasks("running") 提供 task_focus。
+- **文件**：`packages/core/src/engine/compact-service.ts`、`packages/core/src/types/runtime.ts`、`packages/core/src/engine/query-engine.ts`、`apps/cli/src/commands/main.ts`
 
 ### B.3 Tasks 真实执行
 - `TaskManager.createAgentTask` 真正拉起子进程（当前只建记录不执行）、stdin 流式写入、输出落盘 + tail。
