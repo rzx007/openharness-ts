@@ -63,6 +63,7 @@ export class QueryEngine implements IQueryEngine {
   private skillRegistry?: unknown;
   private memoryRetriever?: MemoryRetriever;
   private allowedTools: string[] | null = null;
+  private mcpManager: unknown = undefined;
 
   constructor(
     private apiClient: StreamingMessageClient,
@@ -103,6 +104,10 @@ export class QueryEngine implements IQueryEngine {
 
   setAllowedTools(tools: string[] | null): void {
     this.allowedTools = tools;
+  }
+
+  setMcpManager(mgr: unknown): void {
+    this.mcpManager = mgr;
   }
 
   /**
@@ -341,7 +346,7 @@ export class QueryEngine implements IQueryEngine {
       executable.map(async ({ idx, toolUse }) => {
         const tool = this.toolRegistry.get(toolUse.name)!;
         try {
-          const context: ToolContext = { cwd: process.cwd(), skillRegistry: this.skillRegistry };
+          const context: ToolContext = { cwd: process.cwd(), skillRegistry: this.skillRegistry, mcpManager: this.mcpManager };
           const result = await tool.execute(toolUse.input, context);
           return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };
         } catch (error) {

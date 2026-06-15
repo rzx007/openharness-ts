@@ -426,6 +426,12 @@ async function runRepl(
   if (Object.keys(mcpServers).length > 0) {
     await mcpManager.connectAll(mcpServers).catch(() => { });
   }
+  // MCP 工具注册进 toolRegistry：已连接 server 的工具以 mcp__<server>__<tool>
+  // 形式注册，模型可直接调用；注入 mcpManager 使 McpToolCall 元工具可用。
+  for (const tool of mcpManager.getAsToolDefinitions()) {
+    bundle.toolRegistry.register(tool);
+  }
+  bundle.queryEngine.setMcpManager(mcpManager);
 
   // ==================创建 MemoryManager 客户端==================
   const memoryManager = new MemoryManager(1000, memoryDir);
@@ -901,6 +907,16 @@ async function runBackendHost(
 
   const commandRegistry = new CommandRegistry();
   const mcpManager = new McpClientManager();
+  // BackendHost MCP 连接：与 REPL 对称，合并插件 MCP 后 connectAll，
+  // 已连接 server 的工具以 mcp__<server>__<tool> 形式注册进 toolRegistry。
+  const mcpServersHost = mergePluginMcpServers(currentSettings.mcpServers);
+  if (Object.keys(mcpServersHost).length > 0) {
+    await mcpManager.connectAll(mcpServersHost).catch(() => { });
+  }
+  for (const tool of mcpManager.getAsToolDefinitions()) {
+    bundle.toolRegistry.register(tool);
+  }
+  bundle.queryEngine.setMcpManager(mcpManager);
   const { homedir } = await import("node:os");
   const memoryDir = join(homedir(), ".openharness", "data", "memory");
   const memoryManager = new MemoryManager(1000, memoryDir);
@@ -920,7 +936,7 @@ async function runBackendHost(
       bundle.settings = currentSettings;
       await emit({
         type: "state_snapshot",
-        state: buildStatePayload(currentSettings),
+        state: buildStatePayload(currentSettings, mcpManager),
         mcp_servers: [],
         bridge_sessions: [],
       });
@@ -944,7 +960,7 @@ async function runBackendHost(
 
   await emit({
     type: "ready",
-    state: buildStatePayload(settings),
+    state: buildStatePayload(settings, mcpManager),
     tasks: [],
     mcp_servers: [],
     bridge_sessions: [],
@@ -953,7 +969,7 @@ async function runBackendHost(
   });
   await emit({
     type: "state_snapshot",
-    state: buildStatePayload(settings),
+    state: buildStatePayload(settings, mcpManager),
     mcp_servers: [],
     bridge_sessions: [],
   });
@@ -1116,7 +1132,7 @@ async function runBackendHost(
         });
         await emit({
           type: "state_snapshot",
-          state: buildStatePayload(currentSettings),
+          state: buildStatePayload(currentSettings, mcpManager),
           mcp_servers: [],
           bridge_sessions: [],
         });
@@ -1399,7 +1415,10 @@ async function processLineForHost(
  * @param settings - 当前应用设置
  * @returns Record<string, unknown> 包含模型、CWD、认证状态、主题等信息的状态对象
  */
-function buildStatePayload(settings: Settings): Record<string, unknown> {
+function buildStatePayload(settings: Settings, mcpManager?: McpClientManager): Record<string, unknown> {
+  const connections = mcpManager?.getConnections() ?? [];
+  const mcp_connected = connections.filter((c) => c.status === "connected").length;
+  const mcp_failed = connections.filter((c) => c.status === "error").length;
   return {
     model: settings.model,
     cwd: process.cwd(),
@@ -1415,8 +1434,8 @@ function buildStatePayload(settings: Settings): Record<string, unknown> {
     effort: settings.effort ?? "medium",
     output_style: settings.outputStyle ?? "default",
     passes: settings.passes ?? 1,
-    mcp_connected: 0,
-    mcp_failed: 0,
+    mcp_connected,
+    mcp_failed,
     input_tokens: 0,
     output_tokens: 0,
   };

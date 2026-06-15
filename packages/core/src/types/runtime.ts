@@ -26,6 +26,8 @@ export interface QueryEngine {
    * 过滤在 submitMessage 内 streamMessage 调用前生效，不影响 toolRegistry 注册表。
    */
   setAllowedTools(tools: string[] | null): void;
+  /** 注入 MCP 客户端管理器，工具执行时通过 ToolContext.mcpManager 传递。 */
+  setMcpManager(mgr: unknown): void;
 }
 
 export interface PermissionPrompt {

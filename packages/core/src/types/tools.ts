@@ -4,6 +4,8 @@ export interface ToolContext {
   cwd: string;
   abortSignal?: AbortSignal;
   skillRegistry?: unknown;
+  /** MCP 客户端管理器，供 McpToolCall / ListMcpResources / ReadMcpResource 元工具使用。 */
+  mcpManager?: unknown;
 }
 
 export interface ToolResult {
