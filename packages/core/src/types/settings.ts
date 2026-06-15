@@ -90,4 +90,8 @@ export interface Settings {
   effort?: "low" | "medium" | "high";
   passes?: number;
   verbose?: boolean;
+  /** 视觉模型（image_to_text fallback 用）。缺省用主模型（需支持视觉）。 */
+  visionModel?: string;
+  /** 图像生成端点基础 URL（缺省复用 baseUrl）。 */
+  imageGenerationBaseUrl?: string;
 }

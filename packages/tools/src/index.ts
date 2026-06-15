@@ -11,3 +11,5 @@ export { webFetchTool } from "./web/fetch";
 export { webSearchTool } from "./web/search";
 export { taskUpdateTool } from "./task";
 export { mcpAuthTool } from "./mcp";
+export { imageToTextTool } from "./media/image-to-text";
+export { imageGenerationTool } from "./media/image-generation";

@@ -23,6 +23,8 @@ import { teamCreateTool, teamDeleteTool } from "./agent/team";
 import { cronCreateTool, cronDeleteTool, cronListTool, cronToggleTool, remoteTriggerTool } from "./schedule";
 import { mcpToolCallTool, listMcpResourcesTool, readMcpResourceTool, mcpAuthTool } from "./mcp";
 import { lspTool } from "./search/lsp";
+import { imageToTextTool } from "./media/image-to-text";
+import { imageGenerationTool } from "./media/image-generation";
 
 export function createDefaultToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
@@ -67,5 +69,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(readMcpResourceTool);
   registry.register(mcpAuthTool);
   registry.register(lspTool);
+  registry.register(imageToTextTool);
+  registry.register(imageGenerationTool);
   return registry;
 }
