@@ -11,11 +11,6 @@ import { estimateTokens } from "../utils/token-counter";
 // Constants (aligned with Python openharness v0.1.9 services/compact)
 // ---------------------------------------------------------------------------
 
-const COMPACTABLE_TOOLS = [
-  "Bash", "Read", "Write", "Edit", "Glob", "Grep",
-  "WebFetch", "WebSearch",
-];
-
 const AUTOCOMPACT_BUFFER_TOKENS = 13_000;
 const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 20_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -23,6 +18,20 @@ const MAX_PTL_RETRIES = 3;
 
 const TIME_BASED_MC_CLEARED_MESSAGE = "[Old tool result content cleared]";
 const PTL_RETRY_MARKER = "[earlier conversation truncated for compaction retry]";
+
+// ---------------------------------------------------------------------------
+// microCompact eligibility
+// ---------------------------------------------------------------------------
+
+const MICROCOMPACTABLE_TOOLS = new Set([
+  "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+  "WebFetch", "WebSearch",
+]);
+
+/** 已知内置工具和所有 MCP 工具的老结果可被清理；其余保留。 */
+function isMicrocompactable(toolName: string): boolean {
+  return MICROCOMPACTABLE_TOOLS.has(toolName) || toolName.startsWith("mcp__");
+}
 
 // Context collapse — deterministic shrink of oversized text/tool results.
 const CONTEXT_COLLAPSE_TEXT_CHAR_LIMIT = 2_400;
@@ -94,6 +103,8 @@ export interface CompactCheckpoint {
 
 /** 压缩摘要时附加的结构化上下文（对齐 Python compact attachments）。 */
 export interface CompactAttachments {
+  /** session_memory checkpoint 内容（帮助压缩后恢复任务状态，由 CLI 读入注入）。 */
+  sessionMemory?: string;
   /** 当前正在进行的任务描述（来自 TaskManager）。 */
   taskFocus?: string;
   /** 本会话访问过的文件路径（auto-extracted 或外部注入）。 */
@@ -276,6 +287,9 @@ export class CompactService {
   /** 构建附带结构化上下文的 compact prompt。 */
   private buildCompactPrompt(attachments: CompactAttachments): string {
     const sections: string[] = [];
+    if (attachments.sessionMemory) {
+      sections.push(`## Session Memory Checkpoint\n${attachments.sessionMemory}`);
+    }
     if (attachments.taskFocus) {
       sections.push(`## Current Task\n${attachments.taskFocus}`);
     }
@@ -427,11 +441,8 @@ export class CompactService {
     const compactableIds: string[] = [];
     for (const msg of messages) {
       if (msg.type === "tool_result") {
-        // Unknown / unmatched tool results default to *retained* (matches
-        // Python `_collect_compactable_tool_ids`, which only clears results for
-        // tools in COMPACTABLE_TOOLS). Do not over-clear orphaned results.
         const name = toolNameById.get(msg.toolUseId) ?? "";
-        if (COMPACTABLE_TOOLS.includes(name)) {
+        if (isMicrocompactable(name)) {
           compactableIds.push(msg.toolUseId);
         }
       }

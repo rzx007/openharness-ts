@@ -1,4 +1,4 @@
-import type { Message, StreamEvent, ToolUseBlock, UsageSnapshot } from "../index";
+import type { Message, StreamEvent, ToolUseBlock, UsageSnapshot, ContentBlock } from "../index";
 import type {
   StreamingMessageClient,
   ToolRegistry as IToolRegistry,
@@ -16,6 +16,60 @@ import { CostTracker } from "./cost-tracker";
 
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
 const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
+
+// ---------------------------------------------------------------------------
+// Tool output budget — mirrors packages/services/src/tool-outputs.ts
+// ---------------------------------------------------------------------------
+
+function readPositiveIntEnv(name: string, defaultValue: number, minimum: number): number {
+  const raw = (process.env[name] ?? "").trim();
+  if (!raw) return defaultValue;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) return defaultValue;
+  return Math.max(minimum, parsed);
+}
+
+function toolOutputInlineChars(): number {
+  return readPositiveIntEnv("OPENHARNESS_TOOL_OUTPUT_INLINE_CHARS", 16_000, 256);
+}
+
+function toolOutputPreviewChars(): number {
+  return readPositiveIntEnv("OPENHARNESS_TOOL_OUTPUT_PREVIEW_CHARS", 3_000, 128);
+}
+
+/**
+ * 若工具输出总文本超过 inline 阈值，截断至 preview 阈值并附提示。
+ * 图像块原样保留（由 token estimator 独立计算）。
+ */
+function applyToolOutputBudget(content: ContentBlock[]): ContentBlock[] {
+  const inlineChars = toolOutputInlineChars();
+  const previewChars = toolOutputPreviewChars();
+
+  const totalText = content.reduce(
+    (sum, b) => sum + (b.type === "text" ? b.text.length : 0),
+    0,
+  );
+  if (totalText <= inlineChars) return content;
+
+  const notice = `\n[输出已截断：原始长度 ${totalText} 字符，仅保留前 ${previewChars} 字符]`;
+  let remaining = previewChars;
+  const out: ContentBlock[] = [];
+  for (const block of content) {
+    if (block.type === "image") {
+      out.push(block);
+      continue;
+    }
+    if (remaining <= 0) continue;
+    if (block.text.length <= remaining) {
+      out.push(block);
+      remaining -= block.text.length;
+    } else {
+      out.push({ type: "text", text: block.text.slice(0, remaining) + notice });
+      remaining = 0;
+    }
+  }
+  return out;
+}
 
 /**
  * Adapt a {@link StreamingMessageClient} into the {@link CompactClient} shape
@@ -190,6 +244,7 @@ export class QueryEngine implements IQueryEngine {
 
       let assistantText = "";
       const toolUses: ToolUseBlock[] = [];
+      let stopReason = "end_turn";
 
       // 处理流式响应事件，累积文本和工具调用信息
       for await (const event of stream) {
@@ -201,7 +256,16 @@ export class QueryEngine implements IQueryEngine {
           toolUses.push(event.toolUse);
         } else if (event.type === "usage") {
           this.costTracker.addUsage(event.usage);
+        } else if (event.type === "complete") {
+          stopReason = event.stopReason;
         }
+      }
+
+      // 输出 token 用尽时追加截断提示，避免静默截断
+      if (stopReason === "max_tokens" && toolUses.length === 0) {
+        const notice = "\n\n⚠️ *输出已被截断（达到 max_tokens 上限）。可用 /compact 压缩上下文后继续。*";
+        assistantText += notice;
+        yield { type: "text_delta", delta: notice };
       }
 
       // 如果助手有文本回复或工具调用，则将其添加到消息历史中
@@ -222,7 +286,7 @@ export class QueryEngine implements IQueryEngine {
         this.messages.push({
           type: "tool_result",
           toolUseId: result.toolUseId,
-          content: result.content,
+          content: applyToolOutputBudget(result.content),
           isError: result.isError,
         });
         yield { type: "tool_use_end", toolUseId: result.toolUseId, result };
