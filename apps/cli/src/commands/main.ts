@@ -237,6 +237,27 @@ async function runTaskWorker(
     }
   }
 
+  // 启动时检查自己的 mailbox：若 leader 已发送 shutdown，提前退出，不处理本轮 stdin。
+  // worker 每轮运行完即退出，mailbox 在下次懒复活重启时才被检查，这是正常路径。
+  if (isSwarmWorker()) {
+    const agentName = process.env["CLAUDE_CODE_AGENT_NAME"] ?? "";
+    const teamName = process.env["CLAUDE_CODE_TEAM_NAME"] ?? "default";
+    if (agentName) {
+      try {
+        const { TeammateMailbox } = await import("@openharness/swarm");
+        const mailbox = new TeammateMailbox(teamName, agentName);
+        const pending = await mailbox.readAll();
+        const shutdownMsg = pending.find((m) => m.type === "shutdown");
+        if (shutdownMsg) {
+          await mailbox.markRead(shutdownMsg.id);
+          return;
+        }
+      } catch {
+        // mailbox 读取失败时继续正常执行，不阻断 worker
+      }
+    }
+  }
+
   const line = await readOneStdinLine();
   const decoded = decodeTaskWorkerLine(line);
   if (!decoded) return;
@@ -260,6 +281,29 @@ async function runTaskWorker(
 
   // D.1：每轮结束后保存快照，供下次重启恢复上下文。
   await saveSessionSnapshot(workerSessionId, bundle.queryEngine, settings.model);
+
+  // 轮次结束后读一次 mailbox：消费掉本轮期间积压的 shutdown/其他消息，
+  // 并向 leader 推送 idle 通知（leader 据此更新 swarm 状态面板）。
+  if (isSwarmWorker()) {
+    const agentName = process.env["CLAUDE_CODE_AGENT_NAME"] ?? "";
+    const teamName = process.env["CLAUDE_CODE_TEAM_NAME"] ?? "default";
+    if (agentName) {
+      try {
+        const { TeammateMailbox, createIdleNotification } = await import("@openharness/swarm");
+        const mailbox = new TeammateMailbox(teamName, agentName);
+        const pending = await mailbox.readAll();
+        for (const msg of pending) {
+          await mailbox.markRead(msg.id);
+        }
+        // 向 leader 发送 idle 通知
+        const leaderMailbox = new TeammateMailbox(teamName, "leader");
+        const idleMsg = createIdleNotification(agentName, "leader", "turn complete");
+        await leaderMailbox.write(idleMsg);
+      } catch {
+        // best-effort：通知失败不影响主流程
+      }
+    }
+  }
 }
 
 /**
