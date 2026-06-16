@@ -50,7 +50,9 @@ REPL 用 readline + EventRenderer 直接写终端。
 | `runTuiMode` | `apps/cli/src/commands/main.ts` | 拼 `backend_command`，spawn 前端，传 `OPENHARNESS_FRONTEND_CONFIG` |
 | 前端入口 | `apps/frontend/src/index.tsx` | 解析 env 配置，`render(<App />)`；由 Bun 运行（CLI 通过 `resolveBun` 检测 Bun 路径，找不到时友好报错） |
 | `useBackendSession` | `apps/frontend/src/hooks/useBackendSession.ts` | spawn backend、解析 OHJSON、发请求、30fps assistant delta 缓冲 |
-| `App` + 组件 | `apps/frontend/src/App.tsx` 等 | ConversationView / ModalHost / PromptInput / SwarmPanel … |
+| `App` + 组件 | `apps/frontend/src/App.tsx` 等 | Session/Home 路由、Prompt、SwarmPanel、Sidebar … |
+| `DialogContext` + `useModalWiring` | `apps/frontend/src/ui/DialogContext.tsx` + `hooks/useModalWiring.tsx` | 弹层栈管理；把 modal_request / select_request 接到 PermissionDialog / QuestionDialog / DialogSelect |
+| `PermissionDialog` / `QuestionDialog` | `apps/frontend/src/components/dialogs/` | 权限确认弹层（y/a/n/Esc）；工具提问弹层（input + Esc）|
 | `runBackendHost` | `apps/cli/src/commands/main.ts` | bootstrap、请求循环、emit 事件、TUI 权限 `askPermission` |
 | OHJSON 协议 | `packages/core/src/protocol/protocol-host.ts`（参考） | 行前缀 `OHJSON:` + JSON |
 | 权限 TUI 链路 | 见 [permission-flow.md](./permission-flow.md) | checkTool → ask → modal_request → permission_response |
@@ -128,9 +130,10 @@ ohs --tui -m gpt-4 --permission-mode default
 | type | 用途 |
 |------|------|
 | `submit_line` | 用户输入或 initial_prompt |
-| `permission_response` | ModalHost 权限确认（含 `scope: once \| session`） |
-| `question_response` | 问题模态回答 |
-| `list_sessions` | `/resume` 等触发会话列表 |
+| `permission_response` | PermissionDialog 权限确认（含 `scope: once \| session`；readline handler 直接 resolve，不经主循环队列） |
+| `question_response` | QuestionDialog 工具提问回答（同上，readline handler 直接 resolve） |
+| `list_sessions` | `/resume` 触发会话列表弹层 |
+| `delete_session` | ctrl+d 删除选中的历史会话 |
 | `shutdown` | Ctrl+C / 退出 |
 
 ### 后端 → 前端（部分 BackendEvent）
@@ -143,7 +146,7 @@ ohs --tui -m gpt-4 --permission-mode default
 | `tool_started` / `tool_completed` | 工具调用展示 |
 | `modal_request` | 权限 / 问题 / 选择器 |
 | `line_complete` | 本轮结束（清 busy） |
-| `clear_transcript` | `/clear` |
+| `clear_transcript` | 清空 transcript（`/new` 触发；`/clear` 命令已移除） |
 | `todo_update` / `plan_mode_change` | TodoPanel / 计划模式 |
 | `swarm_status` | SwarmPanel teammate 列表（见 [swarm-subprocess-flow.md](./swarm-subprocess-flow.md)） |
 | `shutdown` / `error` | 结束或错误 |
@@ -166,7 +169,7 @@ BackendHost: processLineForHost → QueryEngine.submitMessage
     ├─ emit assistant_delta (多次)  →  B 合并缓冲 → ConversationView
     ├─ emit tool_started / tool_completed
     ├─ 若 checkTool→ask: emit modal_request(permission)
-    │       → B ModalHost → permission_response → C 继续执行工具
+    │       → B PermissionDialog(y/a/n/Esc) → permission_response → C readline handler 直接 resolve → 继续执行工具
     └─ emit assistant_complete / line_complete  →  B setBusy(false)
 ```
 

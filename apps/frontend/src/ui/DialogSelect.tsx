@@ -18,10 +18,11 @@ export function DialogSelect(props: {
   title: string;
   items: DialogSelectItem[];
   onSelect: (value: string) => void;
+  onDelete?: (value: string) => void;
   searchable?: boolean;
   initialIndex?: number;
 }) {
-  const { title, items, onSelect, searchable = true, initialIndex = 0 } = props;
+  const { title, items, onSelect, onDelete, searchable = true, initialIndex = 0 } = props;
   const { theme } = useTheme();
 
   const [query, setQuery] = useState("");
@@ -64,6 +65,11 @@ export function DialogSelect(props: {
       if (item) onSelect(item.value);
       return;
     }
+    if (key.ctrl && key.name === "d" && onDelete) {
+      const item = filtered[selectedIndex];
+      if (item) onDelete(item.value);
+      return;
+    }
 
     // Digit shortcuts 1-9 only when not searchable
     if (!searchable) {
@@ -96,37 +102,35 @@ export function DialogSelect(props: {
       {filtered.length === 0 ? (
         <text fg={theme.colors.muted}>no matches</text>
       ) : (
-        visibleItems.map((item, visibleIdx) => {
-          const absoluteIdx = windowStart + visibleIdx;
-          const isSelected = absoluteIdx === selectedIndex;
-          const prefix = item.active ? "✓ " : "  ";
+        <>
+          {visibleItems.map((item, visibleIdx) => {
+            const absoluteIdx = windowStart + visibleIdx;
+            const isSelected = absoluteIdx === selectedIndex;
+            const prefix = item.active ? "✓ " : "  ";
 
-          return (
-            <box
-              key={item.value}
-              flexDirection="row"
-              backgroundColor={
-                isSelected ? theme.colors.accent : undefined
-              }
-            >
-              <text
-                fg={isSelected ? theme.colors.background : theme.colors.foreground}
+            return (
+              <box
+                key={item.value}
+                flexDirection="row"
+                backgroundColor={isSelected ? theme.colors.accent : undefined}
               >
-                {prefix}
-                {item.label}
-              </text>
-              {item.description != null && (
-                <text fg={theme.colors.muted}>
-                  {" "}
-                  {item.description}
+                <text fg={isSelected ? theme.colors.background : theme.colors.foreground}>
+                  {prefix}
+                  {item.label}
                 </text>
-              )}
-              {item.hint != null && (
-                <text fg={theme.colors.muted}> {item.hint}</text>
-              )}
-            </box>
-          );
-        })
+                {item.description != null && (
+                  <text fg={theme.colors.muted}> {item.description}</text>
+                )}
+                {item.hint != null && (
+                  <text fg={theme.colors.muted}> {item.hint}</text>
+                )}
+              </box>
+            );
+          })}
+          {onDelete && (
+            <text fg={theme.colors.muted}>  ctrl+d delete</text>
+          )}
+        </>
       )}
     </box>
   );

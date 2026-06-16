@@ -137,6 +137,17 @@ export class QueryEngine implements IQueryEngine {
    * @returns 一个异步迭代器，yield 出流式事件（StreamEvent），包括文本增量、工具使用开始/结束、用量信息等
    */
   async *submitMessage(content: string): AsyncIterable<StreamEvent> {
+    // 防御：若历史末尾是含 toolUses 的 assistant 消息但没有对应的 tool_result，
+    // 说明上轮执行被中断/崩溃，历史不完整。直接删掉它，避免 API 返回 400。
+    while (this.messages.length > 0) {
+      const last = this.messages[this.messages.length - 1]!;
+      if (last.type === "assistant" && last.toolUses?.length) {
+        this.messages.pop();
+      } else {
+        break;
+      }
+    }
+
     this.messages.push({ type: "user", content });
 
     // per-turn 相关记忆检索：按本轮用户输入选相关记忆，作为瞬态上下文。

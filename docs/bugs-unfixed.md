@@ -75,12 +75,14 @@ API 调用时收到 400。
 undefined，工具抛 `Cannot read property of undefined`，错误信息对用户不友好。  
 **修复**：加非 null 断言，manager 为 undefined 时返回友好错误文本而非让 JS 抛错。
 
-### M-9 SubprocessBackend spawn 失败时 agentTasks 脏条目
+### ~~M-9 SubprocessBackend spawn 失败时 agentTasks 脏条目~~ ✅ 已修复
 **文件**：`packages/swarm/src/subprocess.ts`  
 **描述**：`createAgentTask` 成功写入 `agentTasks` 映射后，若后续 `registerTeammate`
 hook 失败，映射里留有已不存在进程的 agentId。后续 `terminate(agentId)` 会尝试
 stopTask，stopTask 对已结束任务是 no-op，影响有限，但状态不干净。  
-**修复**：`registerTeammate` 失败时从 `agentTasks` 删除对应条目并 stopTask。
+**修复**：移除 `registerTeammate` 的 inner try-catch，使失败传播到 outer catch；
+outer catch 中清理 `agentTasks`/`agentWorktrees` 条目并调用 `stopTask` 停止孤儿任务。
+spawn 现在在 `registerTeammate` 失败时返回 `success: false`，状态保持一致。
 
 ### M-10 TaskManager writeToTask 懒复活有竞态
 **文件**：`packages/services/src/tasks/index.ts`  
@@ -138,5 +140,16 @@ stopTask，stopTask 对已结束任务是 no-op，影响有限，但状态不干
 推送。
 
 ---
+
+---
+
+## 本轮（2026-06-16）第二次审计修复记录
+
+以下问题在本轮代码审计后**已修复**（未单独立条，直接记录于此）：
+
+- **QuestionDialog ESC 无响应**：`<input>` 组件吞掉 ESC 键，`DialogContext` ESC handler 不触发。在 `QuestionDialog.useKeyboard` 中直接处理 `escape` → `onSubmit("")`；同时移除 Enter 提交的 `if (trimmed)` 空值拦截。
+- **PermissionDialog 缺少 ESC 快捷键**：在 `useKeyboard` 中加 `escape` → `respond(false, "once")`，UI 提示更新为 `[n/esc] Deny`。
+- **main.ts 主循环冗余死代码**：`permission_response`/`question_response` 已在 readline handler 中 `return`，主循环中同名分支永远不可达。已删除。
+- **deleteSessionById Windows 路径穿越**：正则 `/[\/]/` 改为 `/[/\\]/`，覆盖 Windows 反斜杠。
 
 *最后更新：2026-06-16*

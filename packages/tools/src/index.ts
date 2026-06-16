@@ -13,3 +13,4 @@ export { taskUpdateTool } from "./task";
 export { mcpAuthTool } from "./mcp";
 export { imageToTextTool } from "./media/image-to-text";
 export { imageGenerationTool } from "./media/image-generation";
+export { feishuPushTool } from "./channels/feishu-push";

@@ -168,8 +168,16 @@ export function saveSessionSnapshot(options: SaveSessionOptions): string {
 }
 
 
-/** 块级探测：消息是否含 tool_use / 是否为 tool_result 消息。 */
+/** 块级探测：消息是否含 tool_use / 是否为 tool_result 消息。
+ *  兼容两种格式：
+ *  - 引擎内部格式：{type:"assistant", toolUses:[...]}
+ *  - Anthropic 内容块格式：{content:[{type:"tool_use",...}]}
+ */
 function hasToolUseBlock(message: StoredMessageLike): boolean {
+  const m = message as unknown as Record<string, unknown>;
+  if (Array.isArray(m.toolUses) && (m.toolUses as unknown[]).length > 0) {
+    return true;
+  }
   return Array.isArray(message.content) &&
     message.content.some((b) => (b as { type?: unknown } | null)?.type === "tool_use");
 }
@@ -264,6 +272,26 @@ export function listSessionSnapshots(cwd: string, limit = 20): SessionListItem[]
 
   sessions.sort((a, b) => b.created_at - a.created_at);
   return sessions.slice(0, limit);
+}
+
+/** 按 ID 删除会话：named 文件 + latest（若 id 匹配）一并删除，返回是否找到。 */
+export function deleteSessionById(cwd: string, sessionId: string): boolean {
+  if (/[/\\]/.test(sessionId) || sessionId.includes("..")) return false;
+  const sessionDir = getProjectSessionDir(cwd);
+  const { unlinkSync } = require("node:fs") as typeof import("node:fs");
+  let deleted = false;
+  const namedPath = join(sessionDir, `session-${sessionId}.json`);
+  if (existsSync(namedPath)) {
+    try { unlinkSync(namedPath); deleted = true; } catch { /* ignore */ }
+  }
+  const latestPath = join(sessionDir, "latest.json");
+  if (existsSync(latestPath)) {
+    const data = readPayload(latestPath);
+    if (data?.session_id === sessionId) {
+      try { unlinkSync(latestPath); } catch { /* ignore */ }
+    }
+  }
+  return deleted;
 }
 
 /** 按 ID 读会话：named 优先，latest 兜底（id 匹配或 "latest"）。 */

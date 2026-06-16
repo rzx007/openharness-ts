@@ -103,6 +103,7 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
       return;
     }
 
+    const isSessions = req.submitPrefix === "/resume ";
     dialog.replace(
       <DialogSelect
         title={req.title}
@@ -120,6 +121,9 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
           dialog.close();
           session.setSelectRequest(null);
         }}
+        onDelete={isSessions ? (value) => {
+          session.sendRequest({ type: "delete_session", session_id: value });
+        } : undefined}
       />,
       () => {
         session.setSelectRequest(null);

@@ -22,10 +22,10 @@
 |------|------|------|
 | `PermissionChecker` | `packages/permissions/src/index.ts` | `checkTool` 规则判定（mode/denied/autoApprove/allowed/path/command/rules）|
 | `QueryEngine.executeTools` | `packages/core/src/engine/query-engine.ts` | 对每个工具调用先 checkTool；`ask` → 调 `permissionPrompt` |
-| `PermissionPrompt` 类型 | `packages/core/src/types/runtime.ts` | `(toolName, reason?) => Promise<boolean>` |
-| `askPermission`（TUI 后端）| `apps/cli/src/commands/main.ts` | 把"问用户"翻成 `modal_request` 事件，等前端回 `permission_response` |
-| `ModalHost` | `apps/frontend/src/components/ModalHost.tsx` | 渲染 permission 框（tool_name + reason + y/n）|
-| `App.tsx` 输入处理 | `apps/frontend/src/App.tsx` | 捕获 y/n 按键 → `sendRequest(permission_response)` |
+| `PermissionPrompt` 类型 | `packages/core/src/types/runtime.ts` | `(toolName, reason?, input?) => Promise<boolean>`（input 供 diff 预览） |
+| `askPermission`（TUI 后端）| `apps/cli/src/commands/main.ts` | 把"问用户"翻成 `modal_request` 事件（含 diff/diff_path），等前端回 `permission_response` |
+| `PermissionDialog` | `apps/frontend/src/components/dialogs/PermissionDialog.tsx` | 渲染权限框（tool_name + reason + diff 预览 + y/a/n/Esc）|
+| `useModalWiring` | `apps/frontend/src/hooks/useModalWiring.tsx` | 把 modal_request 接到 DialogContext；y→once，a→session，n/Esc→deny |
 
 ## 决策层：checkTool 的判定顺序
 
@@ -84,9 +84,9 @@ if (decision.action === "ask") {
 
 | 模式 | 入口 | 是否注入 permissionPrompt | `ask` 的实际效果 |
 |------|------|--------------------------|-----------------|
-| **TUI**（`--tui` 的后端 `--backend-only`）| `runBackendHost` | ✅ `askPermission`（main.ts:645）| 弹 ModalHost，用户 y/n |
-| **REPL**（交互式）| `runRepl`（main.ts:239）| ❌ 不传 | **自动拒绝**（无交互确认）|
-| **print**（`--print` 一次性）| `runPrintMode`（main.ts:191）| ❌ 不传 | **自动拒绝**（无交互确认）|
+| **TUI**（`--tui` 的后端 `--backend-only`）| `runBackendHost` | ✅ `askPermission` | 弹 PermissionDialog，用户 y/a/n/Esc |
+| **REPL**（交互式）| `runRepl` | ❌ 不传 | **自动拒绝**（无交互确认）|
+| **print**（`--print` 一次性）| `runPrintMode` | ❌ 不传 | **自动拒绝**（无交互确认）|
 
 所以当前**只有 TUI 能"问用户并放行"**；REPL/print 下 `ask` 一律变拒绝。
 （实战中常配 `--permission-mode full_auto` 或 allowed/denied 名单来规避 REPL/print 的 ask。）
@@ -100,24 +100,28 @@ TUI 是**启动器 + 前端（Ink）+ BackendHost（`--backend-only`）三进程
 QueryEngine（后端进程）
    │ decision==="ask"
    ▼
-askPermission(toolName, reason)              main.ts:614
+askPermission(toolName, reason, input)
    │ 生成 request_id；建一个待 resolve 的 Promise，存入 permissionRequests[request_id]
+   │ 若 Edit/Write：computeFileChange(input) → createTwoFilesPatch → unified diff 字符串
    ▼
 emit modal_request {                          后端 → 前端
-   kind:"permission", request_id, tool_name, reason
+   kind:"permission", request_id, tool_name, reason, diff?, diff_path?
 }
    ▼
-前端收到 → session.setModal(...)              App.tsx
+前端收到 → session.setModal(...)              useBackendSession.ts
    ▼
-ModalHost 渲染 permission 框                  ModalHost.tsx:97
+useModalWiring → DialogContext.replace(PermissionDialog, onClose)
    ┌ Allow <tool_name>?
    │ <reason>
-   └ [y] Allow   [n] Deny
+   │ <diff_path>
+   │ <DiffView>（diff 预览，可滚动）
+   └ [y] Allow   [a] Allow for session   [n/esc] Deny
    ▼
-用户按 y / n / Esc                            App.tsx:172
-   │ sendRequest permission_response { request_id, allowed }   前端 → 后端
+用户按 y / a / n / Esc
+   │ sendRequest permission_response { request_id, allowed, scope }   前端 → 后端
    ▼
-后端 onRequest 收到 permission_response       main.ts:733
+后端 readline handler 收到 permission_response（不经主循环队列）
+   │ scope==="session" → approvedForSessionTools.add(toolName)
    │ permissionRequests[request_id].resolve(allowed)
    ▼
 askPermission 的 await 返回 → QueryEngine 拿到 boolean，放行或拒绝
@@ -125,50 +129,31 @@ askPermission 的 await 返回 → QueryEngine 拿到 boolean，放行或拒绝
 
 要点：
 - **request_id 串起一次确认**：后端用它把异步 resolve 和前端回包对上号。
-- ModalHost 当前只显示 `tool_name` + `reason`（**无 diff**）；按键只有 y（allow）/ n、Esc（deny）。
+- `permission_response` 在 **readline handler** 中直接 resolve，不入主循环队列，避免 busy 时死锁。
+- `scope: "session"` → `approvedForSessionTools` 集合记住该工具名，同名工具后续 ask 直接放行（会话级，无撤销入口，粒度为工具名而非文件路径）。
+- Esc 在 PermissionDialog 的 `useKeyboard` 中直接处理（`n/escape → deny`），无需依赖 DialogContext ESC 冒泡。
 - 是 **fire-and-forget Promise**：后端 emit 后 `await` 挂起，直到前端回 `permission_response` 才 resolve。
 
 ---
 
-## E.3 扩展计划：Edit/Write 改文件前的 diff 预览
+## E.3 Edit/Write diff 预览（已实现）
 
-> 状态：设计已认可，待实现。在上面的「ask」分支与 TUI 往返上做**加法**，不改判定顺序。
+> 状态：✅ 已实现。Edit/Write 改文件前在 TUI 权限框显示 unified diff，支持"整个会话放行"。
 
-### 目标
-agent 调 **Edit/Write** 改文件前，在 TUI 权限框里显示 unified diff，让用户看清改动再批准
-（**一次** / **整个会话**）；`full_auto` 已自动跳过（checkTool 步骤 1）。
+### 实现覆盖（5 组件）
 
-### 现状缺口（本文已确认）
-- `PermissionPrompt` 签名 `(toolName, reason?)` **不带工具入参**，拿不到 Edit/Write 的 path/内容。
-- `askPermission` 的 `modal_request` 只带 tool_name + reason，**无 diff 字段**。
-- ModalHost 只有 y/n，**无 diff 渲染、无"整个会话"选项**。
-- **无 diff 库**。
-- REPL/print 无 permissionPrompt → 本期 diff 预览**只做 TUI**，不碰 REPL（REPL 连 ask 都没接）。
+- **core**：`PermissionPrompt` 签名 `(toolName, reason?, input?) => Promise<boolean>`，`executeTools` 把 `tu.input` 透传。
+- **tools**：`computeFileChange(toolName, input)` 纯函数（不写盘），Edit/Write 返回 `{path, before, after}`，其余返回 null。
+- **diff 工具**：`diff`(jsdiff) 依赖，`createTwoFilesPatch` → unified diff 字符串。
+- **backend host**：`askPermission` 算 diff 后，`modal_request` 带 `diff`/`diff_path` 字段；`approvedForSessionTools` 集合处理 scope=session。
+- **frontend**：`PermissionDialog` 渲染 `DiffView`（可滚动，16行可见区）+ 按键 **y**(本次)/**a**(整个会话)/**n/Esc**(拒)。
 
-### 组件（5 小块，跨 core/tools/cli/frontend）
-- **a) core**：`PermissionPrompt` 签名加 `input` → `(toolName, reason?, input?) => Promise<boolean>`；
-  `executeTools` 把 `tu.input` 传下去。向后兼容（input 可选）。
-- **b) tools**：抽**预览纯函数** `computeFileChange(toolName, input) → {path, before, after} | null`
-  （**不写盘**，复用 Edit/Write 的替换逻辑；非文件工具返回 null）。
-- **c) diff 工具**：加 `diff`(jsdiff) 依赖，`createTwoFilesPatch(before, after)` → unified diff 字符串。
-- **d) backend host**：`askPermission` 拿到 input 后，若 Edit/Write → 算 diff，`modal_request` 带 `diff`
-  字段；维护**会话批准集合**（"整个会话"按工具名记住，后续同工具的 ask 直接放行）。
-- **e) frontend ModalHost**：permission 框渲染 `diff`（+绿 −红），按键 **y**(本次)/**a**(整个会话)/**n**(拒)。
-
-### 分轮
-- **R1** core(传 input) + tools(computeFileChange) + diff 工具
-- **R2** backend host(算 diff + emit + 会话批准)
-- **R3** frontend ModalHost(渲染 diff + a 键)
-
-### 范围外（保持最小）
+### 范围外（已确认）
 - 非 Edit/Write 工具不预览（Bash 等无 diff 概念）。
-- 不做语法高亮，仅 jsdiff unified diff + 简单 +/− 着色。
-- "整个会话批准"**按工具名**粒度，不做按文件路径细粒度。
-- REPL/print 的交互式权限确认（当前根本没有，属另一项工作）。
+- 不做语法高亮，仅 +/− 着色（`DiffView` 组件）。
+- REPL/print 无 permissionPrompt，ask 直接拒绝，不受影响。
 
-> ⚠️ **"整个会话批准"的锐利边缘**：对某次（哪怕很无害的）Edit 选了 `[a] Allow for
-> session`，会把 **Edit 这个工具整体**记入会话批准集合（`approvedForSessionTools`，
-> 按工具名）。此后**该 backend 进程存活期间所有 Edit**——包括用户从没看过 diff 的、
-> 改其它文件的 Edit——都会被自动放行，且当前**无撤销入口**。这是刻意的最小粒度取舍；
-> 若要更细的"按文件/按改动批准"，需引入路径级 scope（后续）。
+> ⚠️ **"整个会话批准"的锐利边缘**：选 `[a]` 后，**同名工具后续所有调用**均自动放行
+> （`approvedForSessionTools` 按工具名粒度），当前无撤销入口。若要更细的按文件路径批准，
+> 需引入路径级 scope（后续）。
 

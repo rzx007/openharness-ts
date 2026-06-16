@@ -18,9 +18,12 @@ export function QuestionDialog({
   const reason = modal.reason ? String(modal.reason) : null;
 
   useKeyboard((key) => {
+    if (key.name === "escape") {
+      onSubmit("");
+      return;
+    }
     if (key.name === "return") {
-      const trimmed = inputValue.trim();
-      if (trimmed) onSubmit(trimmed);
+      onSubmit(inputValue);
     }
   });
 
@@ -40,7 +43,7 @@ export function QuestionDialog({
         placeholder="Answer..."
         onInput={(value: string) => setInputValue(value)}
       />
-      <text fg={theme.colors.muted}>{"  enter: submit"}</text>
+      <text fg={theme.colors.muted}>{"  enter: submit  esc: cancel"}</text>
     </box>
   );
 }

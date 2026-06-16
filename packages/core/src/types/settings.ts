@@ -49,8 +49,8 @@ export interface FeishuChannelSettings {
   appSecret: string;
   encryptKey?: string;
   verificationToken?: string;
-  /** ACL 白名单：空 = 全拒（fail-closed），"*" = 全放。 */
-  allowFrom: string[];
+  /** ACL 白名单：name→chat_id 映射，空 = 全拒（fail-closed），{ "*": "*" } = 全放。 */
+  allowFrom: Record<string, string>;
   /** 群聊中只响应 @ 这些名字的消息；空 = 群聊全响应。 */
   replyAtBotNames?: string[];
 }

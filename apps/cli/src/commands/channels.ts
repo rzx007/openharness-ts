@@ -42,7 +42,7 @@ export async function assembleChannelAdapters(
           // ACL 不传给 adapter——集中在 ChannelManager（fail-closed）。
         }),
       );
-      allowFrom["feishu"] = feishu.allowFrom ?? [];
+      allowFrom["feishu"] = Object.values(feishu.allowFrom ?? {});
     }
   }
 
@@ -162,10 +162,11 @@ export function createChannelsCommand(): Command {
         console.log("channels: (none configured)");
         return;
       }
+      const entries = Object.entries(feishu.allowFrom ?? {});
       const acl =
-        (feishu.allowFrom ?? []).length === 0
+        entries.length === 0
           ? "allowFrom empty — ALL DENIED"
-          : `allowFrom: ${feishu.allowFrom.join(", ")}`;
+          : `allowFrom: ${entries.map(([n, id]) => `${n}(${id})`).join(", ")}`;
       console.log(`feishu: ${feishu.enabled ? "enabled" : "disabled"} (${acl})`);
     });
 

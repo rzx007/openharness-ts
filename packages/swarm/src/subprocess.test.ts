@@ -148,7 +148,7 @@ describe("SubprocessBackend", () => {
       expect(res.taskId).toBe("task_9");
     });
 
-    it("registerTeammate failure does not fail the spawn", async () => {
+    it("registerTeammate failure causes spawn to fail, cleans agentTasks, and stops the orphan task", async () => {
       const runner = makeRunner({ createAgentTask: vi.fn().mockResolvedValue({ id: "task_10" }) });
       const backend = new SubprocessBackend({
         taskRunner: runner,
@@ -158,7 +158,12 @@ describe("SubprocessBackend", () => {
         },
       });
       const result = await backend.spawn(makeConfig());
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("disk full");
+      // agentTasks 必须已清空，不能留孤儿条目
+      expect(backend.getTaskId("Explore@default")).toBeUndefined();
+      // 孤儿任务必须被 stop
+      expect(runner.stopTask).toHaveBeenCalledWith("task_10");
     });
 
     it("isolated spawn passes the worktree path as the hook config cwd", async () => {

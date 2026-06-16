@@ -20,7 +20,7 @@ import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
 import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
 import { updateRulesFromSession } from "@openharness/personalization";
-import { updateSessionMemoryFile } from "@openharness/services";
+import { updateSessionMemoryFile, getSessionMemoryPath, getSessionMemoryContent, sessionMemoryToCompactText } from "@openharness/services";
 import { isSwarmWorker } from "@openharness/swarm";
 import { isCoordinatorMode, getCoordinatorTools, matchSessionMode } from "@openharness/coordinator";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
@@ -69,6 +69,8 @@ type FrontendRequest = {
   /** 权限确认的批准范围："once"（本次）| "session"（整个会话该工具放行）。 */
   scope?: string | null;
   answer?: string | null;
+  /** delete_session 请求携带的会话 ID。 */
+  session_id?: string | null;
 };
 
 interface MainOptions {
@@ -576,13 +578,15 @@ async function runRepl(
   // bootstrap 期的 system prompt 不带 skillsList，这里补上。
   await refreshSystemPrompt();
 
-  // B.2 compact attachments：compact 时注入当前运行中任务的描述（task_focus）。
+  // B.2 compact attachments：compact 时注入 taskFocus + session_memory checkpoint。
   bundle.queryEngine.setAttachmentsProvider(() => {
     const running = taskManager.listTasks("running");
     const taskFocus = running.length > 0
       ? running.map((t) => t.description).join("; ")
       : undefined;
-    return { taskFocus };
+    const smPath = getSessionMemoryPath(process.cwd(), sessionId);
+    const sessionMemory = sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined;
+    return { taskFocus, sessionMemory };
   });
 
   console.log("OpenHarness Interactive Mode");
@@ -1026,13 +1030,15 @@ async function runBackendHost(
     bridge_sessions: [],
   });
 
-  // B.2 compact attachments：compact 时注入当前运行中任务的描述（task_focus）。
+  // B.2 compact attachments：compact 时注入 taskFocus + session_memory checkpoint。
   bundle.queryEngine.setAttachmentsProvider(() => {
     const running = taskManager.listTasks("running");
     const taskFocus = running.length > 0
       ? running.map((t) => t.description).join("; ")
       : undefined;
-    return { taskFocus };
+    const smPath = getSessionMemoryPath(process.cwd(), currentSessionId);
+    const sessionMemory = sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined;
+    return { taskFocus, sessionMemory };
   });
 
   // B.5 per-turn 相关记忆检索：与 REPL 模式对称，每轮按用户输入相关性检索记忆。
@@ -1064,6 +1070,31 @@ async function runBackendHost(
         interruptRequested = true;
         return;
       }
+      // permission_response / question_response 在 processLineForHost 持有主循环期间到达。
+      // 此时 requestResolve 为 null，若入队则主循环无法消费（死锁）。
+      // 直接在此 resolve 对应 Promise，让 askPermission / askQuestion 继续执行。
+      if (request.type === "permission_response") {
+        const rid = request.request_id;
+        if (rid && permissionRequests.has(rid)) {
+          const tool = pendingPermissionTools.get(rid);
+          pendingPermissionTools.delete(rid);
+          const allowed = !!request.allowed;
+          if (allowed && request.scope === "session" && tool) {
+            approvedForSessionTools.add(tool);
+          }
+          permissionRequests.get(rid)!.resolve(allowed);
+          permissionRequests.delete(rid);
+        }
+        return;
+      }
+      if (request.type === "question_response") {
+        const rid = request.request_id;
+        if (rid && questionRequests.has(rid)) {
+          questionRequests.get(rid)!.resolve(request.answer ?? "");
+          questionRequests.delete(rid);
+        }
+        return;
+      }
       if (requestResolve) {
         requestResolve(request);
         requestResolve = null;
@@ -1081,6 +1112,17 @@ async function runBackendHost(
       requestResolve(null);
       requestResolve = null;
     }
+    // stdin 关闭（前端退出 / Ctrl+C）：把所有挂起的权限/问题请求当拒绝/空串处理，
+    // 防止 askPermission / askQuestion 的 Promise 永远悬挂导致进程卡死。
+    for (const [, promise] of permissionRequests) {
+      promise.resolve(false);
+    }
+    permissionRequests.clear();
+    pendingPermissionTools.clear();
+    for (const [, promise] of questionRequests) {
+      promise.resolve("");
+    }
+    questionRequests.clear();
   });
 
   const nextRequest = (): Promise<FrontendRequest | null> => {
@@ -1100,28 +1142,6 @@ async function runBackendHost(
       }
       await emit({ type: "shutdown" });
       break;
-    }
-    if (request.type === "permission_response") {
-      const rid = request.request_id;
-      if (rid && permissionRequests.has(rid)) {
-        const allowed = !!request.allowed;
-        // scope==="session"：把该工具记入会话批准集合，之后同名工具的 ask 自动放行。
-        const tool = pendingPermissionTools.get(rid);
-        // 在此处幂等清理：不依赖 askPermission 的 finally，避免重复/迟到响应留垃圾。
-        pendingPermissionTools.delete(rid);
-        if (allowed && request.scope === "session" && tool) {
-          approvedForSessionTools.add(tool);
-        }
-        permissionRequests.get(rid)!.resolve(allowed);
-      }
-      continue;
-    }
-    if (request.type === "question_response") {
-      const rid = request.request_id;
-      if (rid && questionRequests.has(rid)) {
-        questionRequests.get(rid)!.resolve(request.answer ?? "");
-      }
-      continue;
     }
     if (request.type === "list_sessions") {
       let options: Array<{ value: string; label: string; description?: string }> = [];
@@ -1145,6 +1165,33 @@ async function runBackendHost(
         modal: { kind: "select", title: "Sessions", submit_prefix: "/resume " },
         select_options: options,
       });
+      continue;
+    }
+    if (request.type === "delete_session") {
+      const sid = request.session_id;
+      if (sid) {
+        try {
+          const { deleteSessionById, listSessionSnapshots } = await import("@openharness/services");
+          deleteSessionById(process.cwd(), sid);
+          // 删除后刷新列表，继续显示对话框；列表为空则关闭
+          const options = listSessionSnapshots(process.cwd()).map((s) => ({
+            value: s.session_id,
+            label: s.summary || "(empty session)",
+            description: formatSessionMeta(s),
+          }));
+          if (options.length === 0) {
+            await emit({ type: "error", message: "已删除，暂无其他会话" });
+          } else {
+            await emit({
+              type: "select_request",
+              modal: { kind: "select", title: "Sessions", submit_prefix: "/resume " },
+              select_options: options,
+            });
+          }
+        } catch {
+          await emit({ type: "error", message: "删除会话失败" });
+        }
+      }
       continue;
     }
     if (request.type !== "submit_line") {
@@ -1254,6 +1301,12 @@ async function runBackendHost(
       await emit({ type: "error", message: msg });
     } finally {
       busy = false;
+    }
+    // session_memory checkpoint：compact 连续性底座，与 REPL 模式对称。
+    try {
+      updateSessionMemoryFile(process.cwd(), bundle.queryEngine.getHistory(), { sessionId: currentSessionId });
+    } catch {
+      // best-effort
     }
     await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
   }

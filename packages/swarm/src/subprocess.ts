@@ -48,7 +48,8 @@ export interface SubprocessBackendOptions {
   worktreeManager?: WorktreeManager;
   /**
    * 可选的 teammate 登记钩子：spawn 成功后调用（如把成员写进 team.json）。
-   * best-effort——钩子抛错只吞掉，不让 spawn 失败。注入而非内联，保持后端可单测。
+   * 钩子抛错会让 spawn 失败并清理已创建的任务，保持 agentTasks 与登记状态一致。
+   * 注入而非内联，保持后端可单测。
    */
   registerTeammate?: (config: TeammateSpawnConfig, result: SpawnResult) => void;
 }
@@ -124,15 +125,25 @@ export class SubprocessBackend implements SwarmBackend {
       if (worktree != null) result.worktree = worktree;
       if (notice != null) result.notice = notice;
       if (this.registerTeammate) {
-        try {
-          this.registerTeammate({ ...config, cwd }, result);
-        } catch {
-          // 登记失败不影响已成功的 spawn
-        }
+        // 若钩子抛错，让错误传播到 outer catch：此时 agentTasks 已有条目但登记未完成，
+        // outer catch 负责清理，确保 agentTasks 与外部登记状态一致。
+        this.registerTeammate({ ...config, cwd }, result);
       }
       return result;
     } catch (err) {
-      // 若本次已建了隔离 worktree（拿到 slug）但后续 createAgentTask 抛错，
+      // createAgentTask 成功后 registerTeammate 失败会到这里：agentTasks 已写入
+      // 但进程登记不完整，需主动清理并停止孤儿任务。
+      const orphanTaskId = this.agentTasks.get(agentId);
+      if (orphanTaskId != null) {
+        this.agentTasks.delete(agentId);
+        this.agentWorktrees.delete(agentId);
+        try {
+          await this.taskRunner.stopTask(orphanTaskId);
+        } catch {
+          // stopTask 失败不应掩盖原始错误。
+        }
+      }
+      // 若本次已建了隔离 worktree（拿到 slug）但后续步骤抛错，
       // 该 worktree 从未写进 agentWorktrees、terminate 永远清不到它 → 孤儿泄漏。
       // 尽力 force 清理（吞错），再返回失败。
       if (isolateSlug != null && this.worktreeManager != null) {

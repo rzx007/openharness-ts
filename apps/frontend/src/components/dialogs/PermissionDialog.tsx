@@ -29,7 +29,7 @@ export function PermissionDialog({
       respond(true, "once");
     } else if (key.name === "a") {
       respond(true, "session");
-    } else if (key.name === "n") {
+    } else if (key.name === "n" || key.name === "escape") {
       respond(false, "once");
     }
   });
@@ -65,7 +65,7 @@ export function PermissionDialog({
         <span>{"  "}</span>
         <span fg={theme.colors.success}>{"[a] Allow for session"}</span>
         <span>{"  "}</span>
-        <span fg={theme.colors.error}>{"[n] Deny"}</span>
+        <span fg={theme.colors.error}>{"[n/esc] Deny"}</span>
       </text>
     </box>
   );

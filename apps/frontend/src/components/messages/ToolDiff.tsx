@@ -50,6 +50,10 @@ export function ToolDiff({ filePath, oldText, newText, syntaxStyle }: ToolDiffPr
   const patch = truncatePatch(rawPatch);
   const filetype = filetypeFromPath(filePath);
 
+  // Derive faint row backgrounds (~15% opacity) so text stays legible.
+  // Signs (+/-) and line-number gutters carry the full theme color instead.
+  const toFaintBg = (hex: string) => hex.replace(/^(#[\da-fA-F]{6}).*$/, "$126");
+
   return (
     <diff
       diff={patch}
@@ -57,8 +61,12 @@ export function ToolDiff({ filePath, oldText, newText, syntaxStyle }: ToolDiffPr
       showLineNumbers={true}
       filetype={filetype}
       syntaxStyle={syntaxStyle}
-      addedBg={c.success}
-      removedBg={c.error}
+      addedBg={toFaintBg(c.success)}
+      removedBg={toFaintBg(c.error)}
+      addedSignColor={c.success}
+      removedSignColor={c.error}
+      addedLineNumberBg={toFaintBg(c.success)}
+      removedLineNumberBg={toFaintBg(c.error)}
     />
   );
 }

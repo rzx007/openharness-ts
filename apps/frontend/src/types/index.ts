@@ -117,11 +117,13 @@ export type BackendEvent =
   | { type: "shutdown" };
 
 export type FrontendRequest = {
-  type: "submit_line" | "permission_response" | "question_response" | "list_sessions" | "shutdown" | "interrupt";
+  type: "submit_line" | "permission_response" | "question_response" | "list_sessions" | "delete_session" | "shutdown" | "interrupt";
   line?: string | null;
   request_id?: string | null;
   allowed?: boolean | null;
   /** 权限批准范围："once"（本次）| "session"（整个会话该工具放行）。 */
   scope?: "once" | "session" | null;
   answer?: string | null;
+  /** delete_session 时携带的会话 ID。 */
+  session_id?: string | null;
 };

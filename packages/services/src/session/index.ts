@@ -121,6 +121,7 @@ export {
   loadSessionSnapshot,
   listSessionSnapshots,
   loadSessionById,
+  deleteSessionById,
   exportSessionMarkdown,
   type StoredMessageLike,
   type SessionSnapshotPayload,

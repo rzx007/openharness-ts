@@ -25,6 +25,7 @@ import { mcpToolCallTool, listMcpResourcesTool, readMcpResourceTool, mcpAuthTool
 import { lspTool } from "./search/lsp";
 import { imageToTextTool } from "./media/image-to-text";
 import { imageGenerationTool } from "./media/image-generation";
+import { feishuPushTool } from "./channels/feishu-push";
 
 export function createDefaultToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
@@ -71,5 +72,6 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(lspTool);
   registry.register(imageToTextTool);
   registry.register(imageGenerationTool);
+  registry.register(feishuPushTool);
   return registry;
 }
