@@ -96,7 +96,7 @@ stopTask，stopTask 对已结束任务是 no-op，影响有限，但状态不干
 **已知限制**：Python 原版 `asyncio.sleep` 有相同问题。可记录为已知行为，或在
 触发时检查距上次实际运行的时间，超过 N 分钟则跳过本次。
 
-### M-12 plugin 路径穿越防护在 Windows symlink 跨盘符下可能失效
+### ~~M-12 plugin 路径穿越防护在 Windows symlink 跨盘符下可能失效~~ ✅ 已验证 + 补测试
 **文件**：`packages/plugins/src/discovery.ts`  
 **描述**：`discoverMarkdownFiles` 用 `resolve + sep` 校验路径，symlink 指向另一
 盘符（如 `D:` → `C:`）时，resolve 后的路径前缀不同，防护会正确拒绝。需确认

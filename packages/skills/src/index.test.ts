@@ -350,3 +350,69 @@ describe("SkillLoader", () => {
     expect(skills[0].name).toBe("Deep");
   });
 });
+
+// M-12: 路径穿越防护测试
+// discoverMarkdownFiles 有两层防护：
+//   1. resolve + sep 检查：过滤名称中带 ".." 的条目（路径字符串逃逸）。
+//   2. entry.isFile() / isDirectory()：Node.js 以 withFileTypes 模式 readdir 时，
+//      symlink 的 Dirent 两个方法均返回 false，自然跳过——包括 Windows 跨盘符 symlink。
+describe("SkillLoader.discoverMarkdownFiles path-traversal protection", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("symlink entries (isFile=false, isDirectory=false) are silently skipped", async () => {
+    // Node.js readdir({ withFileTypes: true }) 对 symlink 返回 isFile()=false,
+    // isDirectory()=false（不解引用），所以 symlink——包括 Windows 跨盘符 symlink——
+    // 在第二层检查（isFile）前就已被自然排除。
+    mockedReaddir.mockResolvedValue([
+      { name: "legit.md", isFile: () => true, isDirectory: () => false } as any,
+      { name: "evil-link", isFile: () => false, isDirectory: () => false } as any, // symlink
+    ]);
+    mockedReadFile.mockResolvedValue("# Legit\n\nOK skill");
+
+    const reg = new SkillRegistry();
+    const loader = new SkillLoader(reg);
+    const skills = await loader.loadFromDirectory("/skills");
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe("Legit");
+  });
+
+  it("symlink-to-directory (isDirectory=false) is not recursed into", async () => {
+    // symlink 指向目录时，Dirent.isDirectory() 仍为 false，不会被递归扫描。
+    // Windows 跨盘符 symlink 目录 (D: → C:) 触发同样路径。
+    mockedReaddir.mockResolvedValueOnce([
+      { name: "real-sub", isFile: () => false, isDirectory: () => true } as any,
+      { name: "evil-dir-link", isFile: () => false, isDirectory: () => false } as any, // symlink to dir
+    ]);
+    mockedReaddir.mockResolvedValueOnce([
+      { name: "nested.md", isFile: () => true, isDirectory: () => false } as any,
+    ]);
+    mockedReadFile.mockResolvedValue("# Nested\n\nNested skill");
+
+    const reg = new SkillRegistry();
+    const loader = new SkillLoader(reg);
+    const skills = await loader.loadFromDirectory("/skills", true);
+    // 只有 real-sub/nested.md 被加载；evil-dir-link 被忽略
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe("Nested");
+  });
+
+  it("resolve+sep guard: entry whose path resolves outside root is filtered", async () => {
+    // 第一层防护：路径字符串含 ".." 时，resolve 解析后不以 resolvedDir+sep 开头，
+    // 在到达 isFile() 检查前即被跳过。
+    // Windows 场景等价：若 resolve 得到不同盘符前缀（如 C:\\），startsWith("D:\\skills\\") 为 false。
+    const outsideName = path.join("..", "escape.md"); // resolves to /escape.md, not /skills/...
+    mockedReaddir.mockResolvedValue([
+      { name: "good.md", isFile: () => true, isDirectory: () => false } as any,
+      { name: outsideName, isFile: () => true, isDirectory: () => false } as any,
+    ]);
+    mockedReadFile.mockResolvedValueOnce("# Good\n\nGood skill");
+
+    const reg = new SkillRegistry();
+    const loader = new SkillLoader(reg);
+    const skills = await loader.loadFromDirectory("/skills");
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe("Good");
+  });
+});
