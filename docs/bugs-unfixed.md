@@ -7,7 +7,7 @@
 
 ## 🔴 High
 
-### H-1 task-worker 不读邮箱，shutdown 协议形同虚设
+### ~~H-1 task-worker 不读邮箱，shutdown 协议形同虚设~~ ✅ 已修复（commit `15f18fe`）
 **文件**：`apps/cli/src/commands/main.ts` — `runTaskWorker()`  
 **描述**：`runTaskWorker` 采用"读一行 stdin → 跑一轮 → 退出"模型，完全不轮询自己的
 `TeammateMailbox`。leader 通过 mailbox 发送的 `shutdown` 类型消息永远堆积在收件箱
