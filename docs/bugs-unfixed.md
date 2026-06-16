@@ -20,7 +20,7 @@ mailbox，若有 `shutdown` 消息则上报 idle 并提前退出。
 
 ## 🟡 Medium
 
-### M-1 executeTools results 数组有 undefined 槽
+### ~~M-1 executeTools results 数组有 undefined 槽~~ ✅ 已修复
 **文件**：`packages/core/src/engine/query-engine.ts:279`  
 **描述**：`results` 初始化为 `new Array(toolUses.length)` 的稀疏数组。若某个 toolUse
 既不进 `deny/ask` 分支也不进 `executable`（理论上不应发生，但 hook 逻辑变化时可能触发），
@@ -29,33 +29,33 @@ NPE。
 **修复**：初始化为 `results.fill(null)` 并在调用方 filter，或在 for 循环末尾断言
 `results[i] !== undefined`。
 
-### M-2 bash 超时后 partial output 有竞态
+### ~~M-2 bash 超时后 partial output 有竞态~~ ✅ 已修复（grace timer 前先 pause 流）
 **文件**：`packages/tools/src/shell/bash.ts`  
 **描述**：超时后 kill 进程时，stdout pipe buffer 中可能还有数据尚未触发 `data` 事件，
 这部分数据在 kill 后丢失，截断位置不确定。大输出场景下问题更明显。  
 **修复**：kill 前先 `pause()` stream，收完剩余 data 事件再 kill；或用 `drain` promise。
 
-### M-3 ImageToText/ImageGeneration 每次调用读磁盘
+### ~~M-3 ImageToText/ImageGeneration 每次调用读磁盘~~ ✅ 已修复（模块级 settings 缓存）
 **文件**：`packages/tools/src/media/image-to-text.ts:56`、`image-generation.ts:49`  
 **描述**：每次 `execute` 都调 `loadSettings()`（读 `~/.openharness/settings.json`）。
 高频调用下造成大量磁盘 I/O；若 settings 在两次调用间被修改，工具行为会不一致。  
 **修复**：在工具注册时注入 `settings` 或 `apiClient`，而非运行时读盘。参考其他工具
 通过 `ToolContext` 获取配置的模式。
 
-### M-4 ToolRegistry 工具名冲突时静默覆盖
+### ~~M-4 ToolRegistry 工具名冲突时静默覆盖~~ ✅ 已修复（冲突时 console.warn）
 **文件**：`packages/core/src/tools/registry.ts`  
 **描述**：`register()` 在工具名已存在时直接覆盖，无任何警告日志。两个 MCP server 暴
 露同名工具，或 MCP 工具与内置工具同名时，后注册的静默替换前者。  
 **修复**：冲突时 `console.warn` 记录被覆盖的工具名和来源，方便用户排查意外替换。
 
-### M-5 ChannelBridge engine 报错时截断消息行为不明确
+### ~~M-5 ChannelBridge engine 报错时截断消息行为不明确~~ ✅ 已正确实现（catch 清空 parts 并发错误文案）
 **文件**：`packages/channels/src/bridge.ts`  
 **描述**：`handleInbound` 调用 `engine.submitMessage` 并聚合输出发 outbound。若
 `submitMessage` 在中途抛错（如 `MaxTurnsExceeded`），已聚合的部分文本是否发出取决于
 实现。用户可能收到截断消息而无任何错误提示。  
 **修复**：在 catch 里明确发送一条错误消息给用户（"抱歉，处理出错：…"），而非静默截断。
 
-### M-6 REPL Ctrl+C 和正常退出可能双写 session 快照
+### ~~M-6 REPL Ctrl+C 和正常退出可能双写 session 快照~~ ✅ 已修复（saveOnce flag）
 **文件**：`apps/cli/src/commands/main.ts`  
 **描述**：`rl.on('close')` 触发保存，同时正常退出时可能也有保存逻辑。Ctrl+C 后进程
 如果未立即退出，两次保存可能以不完整状态覆盖第一次。  
@@ -139,4 +139,4 @@ stopTask，stopTask 对已结束任务是 no-op，影响有限，但状态不干
 
 ---
 
-*最后更新：2026-06-15*
+*最后更新：2026-06-16*

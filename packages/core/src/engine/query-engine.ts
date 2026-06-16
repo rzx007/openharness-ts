@@ -393,6 +393,19 @@ export class QueryEngine implements IQueryEngine {
       });
     }
 
+    // 防御性兜底：正常情况下每个槽位都已被 deny/ask/hook/unknown-tool/exec 之一填充；
+    // 若未来逻辑变动导致某个槽位漏填，在此补一个错误结果，避免调用方遇到 undefined NPE。
+    for (let i = 0; i < toolUses.length; i++) {
+      if (!results[i]) {
+        results[i] = {
+          toolUseId: toolUses[i]!.id,
+          toolName: toolUses[i]!.name,
+          content: [{ type: "text" as const, text: "Internal error: tool result was not computed" }],
+          isError: true,
+        };
+      }
+    }
+
     return results;
   }
 }

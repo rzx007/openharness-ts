@@ -103,7 +103,14 @@ function runShell(
       // if `close` never fires (a leaked grandchild keeping the pipe alive).
       timedOut = true;
       killTree(child.pid);
-      graceTimer = setTimeout(() => finish(child.exitCode), TIMEOUT_GRACE_MS);
+      graceTimer = setTimeout(() => {
+        // Pause before resolving to stop new OS reads; data already delivered
+        // via 'data' events (in buffer) is captured; late OS-buffered bytes are
+        // deliberately dropped — this is a timeout path, partial output is expected.
+        child.stdout?.pause();
+        child.stderr?.pause();
+        finish(child.exitCode);
+      }, TIMEOUT_GRACE_MS);
       // Don't keep the event loop alive solely for the grace timer.
       graceTimer.unref?.();
     }, timeout);

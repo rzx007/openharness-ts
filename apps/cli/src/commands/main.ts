@@ -598,6 +598,14 @@ async function runRepl(
     prompt: "> ",
   });
 
+  // 用于保证 session 快照只保存一次，防止 exit/quit 命令路径与 rl.close 事件路径双写。
+  let sessionSaved = false;
+  const saveOnce = async () => {
+    if (sessionSaved) return;
+    sessionSaved = true;
+    await saveSessionSnapshot(sessionId, bundle.queryEngine, currentModel);
+  };
+
   const renderer = new EventRenderer({
     verbose: options.verbose,
     outputStyle: settings.outputStyle,
@@ -608,7 +616,7 @@ async function runRepl(
     if (!input) return;
 
     if (input === "exit" || input === "quit") {
-      await saveSessionSnapshot(sessionId, bundle.queryEngine, currentModel);
+      await saveOnce();
       rl.close();
       return;
     }
@@ -650,7 +658,7 @@ async function runRepl(
       });
 
       if (result.output === "__EXIT__") {
-        await saveSessionSnapshot(sessionId, bundle.queryEngine, currentModel);
+        await saveOnce();
         rl.close();
         return;
       }
@@ -701,8 +709,8 @@ async function runRepl(
       } catch {
         // best-effort
       }
-      // Ctrl+C / EOF 退出前保存会话快照。
-      await saveSessionSnapshot(sessionId, bundle.queryEngine, currentModel);
+      // Ctrl+C / EOF 退出前保存会话快照（saveOnce 保证只写一次，防止与 exit/quit 双写）。
+      await saveOnce();
       process.exit(0);
     })();
   });

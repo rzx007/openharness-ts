@@ -1,7 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { ToolDefinition } from "@openharness/core";
-import { loadSettings } from "@openharness/core";
+import { loadSettings, type Settings } from "@openharness/core";
+
+// Cache settings per process; avoids a disk read on every tool invocation.
+// Settings don't change during a process's lifetime (changes restart the process).
+let _settingsCache: Settings | undefined;
+async function getCachedSettings(): Promise<Settings> {
+  if (!_settingsCache) _settingsCache = await loadSettings();
+  return _settingsCache;
+}
 
 const MAX_DESCRIPTION_TOKENS = 1024;
 
@@ -53,7 +61,7 @@ export const imageToTextTool: ToolDefinition = {
       return { content: [{ type: "text", text: "image_to_text: provide image_path or image_url" }], isError: true };
     }
 
-    const settings = await loadSettings();
+    const settings = await getCachedSettings();
     const model = settings.visionModel ?? settings.model;
     const apiKey = settings.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? "";
     const baseUrl = (settings.baseUrl ?? "https://api.openai.com").replace(/\/$/, "");

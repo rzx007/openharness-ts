@@ -4,6 +4,9 @@ export class ToolRegistry implements IToolRegistry {
   private tools = new Map<string, ToolDefinition>();
 
   register(tool: ToolDefinition): void {
+    if (this.tools.has(tool.name)) {
+      console.warn(`[ToolRegistry] overwriting existing tool: "${tool.name}"`);
+    }
     this.tools.set(tool.name, tool);
   }
 
