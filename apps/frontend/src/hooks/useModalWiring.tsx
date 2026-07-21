@@ -97,12 +97,6 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
     const req = session.selectRequest;
     if (!req) return;
 
-    // Discard empty options
-    if (req.options.length === 0) {
-      session.setSelectRequest(null);
-      return;
-    }
-
     const isSessions = req.submitPrefix === "/resume ";
     dialog.replace(
       <DialogSelect

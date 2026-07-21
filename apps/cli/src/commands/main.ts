@@ -1156,11 +1156,6 @@ async function runBackendHost(
       } catch {
         // best-effort：列不出来就给空列表
       }
-      if (options.length === 0) {
-        // 前端会丢弃空 select_options 且 Home 路由不渲染 transcript，故用 error → toast 可见。
-        await emit({ type: "error", message: "暂无已保存的会话" });
-        continue;
-      }
       await emit({
         type: "select_request",
         modal: { kind: "select", title: "Sessions", submit_prefix: "/resume " },
