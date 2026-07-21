@@ -1392,13 +1392,40 @@ export function messagesToTranscriptItems(messages: unknown[]): Array<{
   }> = [];
 
   for (const raw of messages) {
-    const msg = raw as { role?: string; type?: string; content?: unknown } | null;
+    const msg = raw as {
+      role?: string;
+      type?: string;
+      content?: unknown;
+      toolUses?: Array<{ name?: string; input?: unknown }> | null;
+      isError?: boolean;
+    } | null;
     if (!msg) continue;
     const role = msg.role ?? msg.type ?? "system";
+
+    if (role === "tool_result") {
+      const text = typeof msg.content === "string"
+        ? msg.content
+        : Array.isArray(msg.content)
+          ? (msg.content as Array<{ text?: string }>).map((b) => b?.text ?? "").join("\n")
+          : JSON.stringify(msg.content ?? "");
+      items.push({ role: "tool_result", text, is_error: !!msg.isError });
+      continue;
+    }
 
     if (typeof msg.content === "string") {
       const text = msg.content.trim();
       if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
+      if (role === "assistant" && Array.isArray(msg.toolUses)) {
+        for (const toolUse of msg.toolUses) {
+          if (typeof toolUse?.name !== "string") continue;
+          items.push({
+            role: "tool",
+            text: `${toolUse.name} ${JSON.stringify(toolUse.input ?? {})}`,
+            tool_name: toolUse.name,
+            tool_input: (toolUse.input ?? {}) as Record<string, unknown>,
+          });
+        }
+      }
       continue;
     }
     if (!Array.isArray(msg.content)) continue;
@@ -1408,9 +1435,13 @@ export function messagesToTranscriptItems(messages: unknown[]): Array<{
         | { type?: string; text?: string; name?: string; input?: unknown; content?: unknown; is_error?: boolean }
         | null;
       if (!b) continue;
-      if (b.type === "text" && typeof b.text === "string") {
-        const text = b.text.trim();
-        if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
+      if (b.type === "tool_result") {
+        const content = typeof b.content === "string"
+          ? b.content
+          : Array.isArray(b.content)
+            ? (b.content as Array<{ text?: string }>).map((c) => c?.text ?? "").join("\n")
+            : JSON.stringify(b.content ?? "");
+        items.push({ role: "tool_result", text: content, is_error: !!b.is_error });
       } else if (b.type === "tool_use" && typeof b.name === "string") {
         items.push({
           role: "tool",
@@ -1418,13 +1449,9 @@ export function messagesToTranscriptItems(messages: unknown[]): Array<{
           tool_name: b.name,
           tool_input: (b.input ?? {}) as Record<string, unknown>,
         });
-      } else if (b.type === "tool_result") {
-        const content = typeof b.content === "string"
-          ? b.content
-          : Array.isArray(b.content)
-            ? (b.content as Array<{ text?: string }>).map((c) => c?.text ?? "").join("\n")
-            : JSON.stringify(b.content ?? "");
-        items.push({ role: "tool_result", text: content, is_error: !!b.is_error });
+      } else if (b.type === "text" && typeof b.text === "string") {
+        const text = b.text.trim();
+        if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
       }
     }
   }

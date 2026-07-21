@@ -303,6 +303,36 @@ describe("messagesToTranscriptItems", () => {
     expect(items[0]).toEqual({ role: "tool_result", text: "line1\nline2", is_error: true });
   });
 
+  it("maps stored tool_result messages instead of treating their text blocks as user input", () => {
+    const items = messagesToTranscriptItems([
+      {
+        type: "tool_result",
+        toolUseId: "tu-1",
+        content: [{ type: "text", text: "dir output" }, { type: "text", text: "file2" }],
+        isError: false,
+      },
+    ]);
+    expect(items).toEqual([{ role: "tool_result", text: "dir output\nfile2", is_error: false }]);
+  });
+
+  it("replays assistant toolUses from engine history as tool transcript items", () => {
+    const items = messagesToTranscriptItems([
+      {
+        type: "assistant",
+        content: "",
+        toolUses: [{ type: "tool_use", id: "tu-1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        type: "tool_result",
+        toolUseId: "tu-1",
+        content: [{ type: "text", text: "file1" }],
+      },
+    ]);
+    expect(items[0]).toMatchObject({ role: "tool", tool_name: "Bash" });
+    expect(items[0]!.text).toContain("ls");
+    expect(items[1]).toEqual({ role: "tool_result", text: "file1", is_error: false });
+  });
+
   it("skips empty text blocks and null entries", () => {
     const items = messagesToTranscriptItems([
       null,
