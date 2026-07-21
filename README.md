@@ -31,7 +31,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 ### 安装
 
 ```bash
-git clone <repo-url> OpenHarness-ts
+git clone https://github.com/rzx007/openharness-ts.git
 cd OpenHarness-ts
 pnpm install
 ```
@@ -48,7 +48,7 @@ pnpm build
 pnpm test
 ```
 
-### 运行·
+### 运行
 
 ```bash
 # 设置 API Key（按所用 Provider 选择，见下方“配置”）
@@ -90,6 +90,29 @@ pnpm --filter @openharness/cli dev   # = bun --watch src/index.ts
 
 开发阶段建议用 **方式二**（Bun 直跑源码，改了代码立刻生效），稳定后用方式一。
 
+### 常用开发命令
+
+```bash
+# monorepo 根目录命令（走 turbo）
+pnpm dev           # 启动所有 workspace 的 dev 任务；CLI/frontend 都是 Bun watch
+pnpm build         # 构建所有 workspace；CLI/frontend 会输出 dist
+pnpm test          # 跑所有 workspace 测试
+pnpm check-types   # 跑 TypeScript 类型检查
+pnpm lint          # 跑所有 workspace lint 任务（如果对应包定义了 lint）
+pnpm clean         # 清理各 workspace 的构建产物
+
+# 只跑某个包
+pnpm --filter @openharness/cli build
+pnpm --filter @openharness/cli test
+pnpm --filter @openharness/frontend dev
+pnpm --filter @openharness/tools test
+
+# 本地调试 CLI 源码（不需要先 build）
+bun apps/cli/src/index.ts --dry-run
+bun apps/cli/src/index.ts "hello"
+bun apps/cli/src/index.ts --tui
+```
+
 ### CLI 常用参数
 
 ```bash
@@ -128,14 +151,54 @@ Options:
 ### 子命令
 
 ```bash
-ohs setup                     # 交互式首次配置向导(选 provider→输 key→选 model)
-ohs provider list             # 列出 provider + key 来源,标注 active
-ohs provider use <name> [-m]  # 切换 active provider(写 settings)
-ohs provider add <name> -k <key> [--use]   # 存 key 到 credentials
-ohs provider remove <name>    # 删 provider 的 key
-ohs doctor                    # 检查环境/配置/key 来源
-ohs auth | mcp | plugin | cron | config | version
+# 首次配置 / 健康检查
+ohs setup
+ohs doctor
+ohs version
+
+# Provider 与密钥
+ohs provider list
+ohs provider use <name> [-m <model>]
+ohs provider add <name> -k <key> [-m <model>] [-b <base-url>] [--use]
+ohs provider edit <name> [-k <key>] [-m <model>] [-b <base-url>]
+ohs provider remove <name>
+
+# auth 子命令目前主要用于查看/提示环境变量；持久化 API key 推荐用 provider add/setup
+ohs auth login --api-key <key> [--provider <provider>]
+ohs auth status
+ohs auth logout
+
+# MCP server 配置（写入 settings.mcpServers）
+ohs mcp list
+ohs mcp add <name> <command> [args...] [-e KEY=VALUE ...]
+ohs mcp remove <name>
+
+# 插件
+ohs plugin list
+ohs plugin install <path-or-package>
+ohs plugin uninstall <name>
+
+# Cron 定时任务（持久化到 ~/.openharness/cron_jobs.json）
+ohs cron add <name> "<min hour dom month dow>" "<command>" [--cwd <dir>] [--timezone <tz>] [--disabled]
+ohs cron list
+ohs cron status
+ohs cron start
+ohs cron stop
+ohs cron toggle <name> on|off
+ohs cron history [-n <limit>]
+ohs cron logs <name> [-n <lines>]
+ohs cron remove <name>
+
+# Channels 长驻桥接（当前实现：feishu）
+ohs channels status
+ohs channels serve
+
+# 配置
+ohs config show
+ohs config set <top-level-key> <value>
 ```
+
+交互式 REPL/TUI 内还有 `/help`、`/model`、`/provider`、`/memory`、`/tasks`、`/diff`、`/output-style` 等斜杠命令；完整清单见 [docs/slash-commands.md](docs/slash-commands.md)，运行时以 `/help` 为准。
 
 ---
 
@@ -145,7 +208,8 @@ ohs auth | mcp | plugin | cron | config | version
 OpenHarness-ts/
 ├── apps/
 │   ├── cli/                  # CLI 应用（Commander.js）
-│   └── frontend/             # TUI 前端（React + Ink）
+│   ├── frontend/             # TUI 前端（opentui + React 19）
+│   └── mcp-feishu/           # 飞书 MCP 辅助入口（独立源码目录）
 ├── packages/
 │   ├── core/                 # 核心引擎（QueryEngine、类型、配置）
 │   ├── api/                  # API Provider 抽象层
@@ -296,7 +360,6 @@ OpenHarness-ts/
 
 ### 核心引擎（Core）
 
-
 | 模块               | 说明                                                                |
 | ---------------- | ----------------------------------------------------------------- |
 | `QueryEngine`    | Agent 循环核心：提交消息 → 流式调用 API → 解析工具调用 → 权限检查 → 执行工具 → 循环直到完成        |
@@ -306,9 +369,7 @@ OpenHarness-ts/
 | `RuntimeBuilder` | 运行时组装：Builder 模式将 API Client、工具、权限、Hook 组装为 `RuntimeBundle`       |
 | `Settings`       | 配置管理：默认值 < 配置文件 < 环境变量 < CLI 参数，四层优先级                             |
 
-
 ### API 层
-
 
 | 模块                       | 说明                                                          |
 | ------------------------ | ----------------------------------------------------------- |
@@ -317,9 +378,7 @@ OpenHarness-ts/
 | `Provider Registry`      | 20+ Provider 自动检测：apiKey 前缀 → baseURL 关键字 → model 关键字，三级匹配  |
 | `detectProvider()`       | 从 `(model, apiKey, baseURL)` 三元组自动推断 Provider 和 BackendType |
 
-
 ### 工具层（40 Tools）
-
 
 | 分类           | 工具                                                                                                            |
 | ------------ | ------------------------------------------------------------------------------------------------------------- |
@@ -332,9 +391,7 @@ OpenHarness-ts/
 | **MCP**      | `McpToolCall/ListMcpResources/ReadMcpResource/McpAuth`（4 个 MCP 工具）                                            |
 | **元工具**      | `TodoWrite、Config、Sleep、Skill、ToolSearch、AskUser、Brief、EnterPlanMode、ExitPlanMode、EnterWorktree、ExitWorktree` |
 
-
 ### 服务层
-
 
 | 模块               | 说明                                                          |
 | ---------------- | ----------------------------------------------------------- |
@@ -346,9 +403,7 @@ OpenHarness-ts/
 | `LspClient`      | LSP 客户端：与 Language Server Protocol 通信                       |
 | `OAuthFlow`      | OAuth 认证：Device Code Flow + token 刷新                        |
 
-
 ### 扩展层
-
 
 | 模块                   | 说明                                                                                                          |
 | -------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -362,9 +417,7 @@ OpenHarness-ts/
 | `BridgeManager`      | 会话桥接：多进程间共享会话状态                                                                                             |
 | `PermissionChecker`  | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                               |
 
-
 ### UI 层
-
 
 | 模块                  | 说明                                                                                                                                                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -375,7 +428,6 @@ OpenHarness-ts/
 | `ThemeManager`      | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题                                                                                                                                                      |
 | `VimModeHandler`    | Vim 模态编辑：normal / insert / visual / command 模式切换                                                                                                                                                                   |
 | `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析                                                                                                                                                                                                  |
-
 
 ---
 
@@ -528,7 +580,6 @@ ohs --continue         ohs --resume <id>
 
 ## 技术栈
 
-
 | 层      | 技术                                               |
 | ------ | ------------------------------------------------ |
 | 语言     | TypeScript 5.7+（ESM）                             |
@@ -543,13 +594,13 @@ ohs --continue         ohs --resume <id>
 | Schema | Zod                                              |
 | Cron   | cron-parser                                      |
 
-
 ## 配置
 
 配置文件路径：`~/.openharness/settings.json`（首次运行无需手动创建，使用默认值即可）
 
 ```json
 {
+  "provider": "openrouter",
   "model": "minimax/minimax-m2.5:free",
   "apiFormat": "openai",
   "maxTurns": 50,
@@ -589,7 +640,7 @@ ohs --continue         ohs --resume <id>
 ```bash
 ohs setup                                   # 交互向导：选 provider → 输 key → 选 model
 # 或非交互直接配：
-ohs provider add deepseek -k sk-xxxx --use --model deepseek-v4-flash
+ohs provider add deepseek -k sk-xxxx --use --model deepseek-chat
 ohs provider list                           # 查看 provider + key 来源，标注 active
 ohs doctor                                  # 验证 key 来源
 ohs --dry-run                               # 预览解析后的运行时配置(不调模型)
@@ -635,20 +686,26 @@ setx ANTHROPIC_API_KEY "sk-ant-..."
 
 ### 环境变量
 
-
 | 变量                       | 说明                           |
 | ------------------------ | ---------------------------- |
 | `ANTHROPIC_API_KEY`      | Anthropic API Key            |
 | `OPENAI_API_KEY`         | OpenAI API Key               |
+| `OPENROUTER_API_KEY`     | OpenRouter API Key           |
 | `DEEPSEEK_API_KEY`       | DeepSeek API Key             |
-| `ZHIPU_API_KEY`          | 智谱 AI（GLM）API Key            |
-| `OPENHARNESS_CONFIG_DIR` | 自定义配置目录（默认 `~/.openharness`） |
+| `GEMINI_API_KEY`         | Gemini API Key               |
+| `DASHSCOPE_API_KEY`      | DashScope/Qwen API Key       |
+| `MOONSHOT_API_KEY`       | Moonshot/Kimi API Key        |
+| `MINIMAX_API_KEY`        | MiniMax API Key              |
+| `ZHIPUAI_API_KEY`        | 智谱 AI（GLM）API Key         |
+| `OPENHARNESS_CONFIG_DIR` | 自定义 credentials/plugins/data 等目录（默认 `~/.openharness`） |
 | `OPENHARNESS_MODEL`      | 默认模型名称                       |
 | `OPENHARNESS_BASE_URL`   | 通用 API Base URL 覆盖（**所有 provider**）  |
 | `OPENHARNESS_API_FORMAT` | API 格式（anthropic / openai）   |
+| `OPENHARNESS_MAX_TOKENS` | 最大输出 token 数                 |
+| `OPENHARNESS_MAX_TURNS`  | 最大 agent 轮次                  |
 
 > ⚠️ `ANTHROPIC_BASE_URL` 仅 Anthropic provider 生效（由 Anthropic SDK 自行读取），**不会**影响 deepseek/openrouter 等其它 provider——要全局覆盖 baseURL 请用 `OPENHARNESS_BASE_URL`。
-
+> ⚠️ 当前 `credentials.json`、plugins、sessions 等路径支持 `OPENHARNESS_CONFIG_DIR`；`settings.json` 的 `loadSettings/saveSettings` 仍固定读写 `~/.openharness/settings.json`。
 
 ---
 
@@ -656,12 +713,12 @@ setx ANTHROPIC_API_KEY "sk-ant-..."
 
 ### DeepSeek
 
-DeepSeek 使用 OpenAI 兼容格式，框架会根据 `provider: deepseek` 或 `deepseek` 模型/域名关键字自动检测。当前模型：`deepseek-v4-flash`、`deepseek-v4-pro`（旧名 `deepseek-chat`/`deepseek-reasoner` 将于 2026-07 弃用）。
+DeepSeek 使用 OpenAI 兼容格式，框架会根据 `provider: deepseek`、`deepseek` 模型关键字或 `deepseek` base URL 关键字自动检测。模型名由上游/API 网关决定，代码侧只负责 provider 识别与 OpenAI 兼容请求格式。
 
 **方式一：CLI（推荐）**
 
 ```bash
-ohs provider add deepseek -k sk-xxxxxxxx --use --model deepseek-v4-flash
+ohs provider add deepseek -k sk-xxxxxxxx --use --model deepseek-chat
 ```
 
 **方式二：环境变量**
@@ -670,28 +727,29 @@ ohs provider add deepseek -k sk-xxxxxxxx --use --model deepseek-v4-flash
 export DEEPSEEK_API_KEY="sk-xxxxxxxxxxxxxxxx"
 ```
 
-**方式二：settings.json**
+**方式三：settings.json**
 
 ```json
 {
+  "provider": "deepseek",
   "model": "deepseek-chat",
   "apiFormat": "openai",
-  "baseUrl": "https://api.deepseek.com",
+  "baseUrl": "https://api.deepseek.com/v1",
   "apiKey": "sk-xxxxxxxxxxxxxxxx"
 }
 ```
 
-**方式三：CLI 参数**
+**方式四：CLI 参数**
 
 ```bash
 ohs --model deepseek-chat \
    --api-format openai \
-   --base-url https://api.deepseek.com \
+   --base-url https://api.deepseek.com/v1 \
    --api-key sk-xxxxxxxxxxxxxxxx \
    "解释这个项目"
 ```
 
-**可用模型：** `deepseek-chat`（DeepSeek-V3）、`deepseek-reasoner`（DeepSeek-R1，支持 reasoning_content）
+**常见模型示例：** `deepseek-chat`、`deepseek-reasoner`。代码不校验模型清单，实际可用模型以你接入的上游/API 网关为准。
 
 ---
 
@@ -702,13 +760,14 @@ ohs --model deepseek-chat \
 **方式一：环境变量（推荐）**
 
 ```bash
-export ZHIPU_API_KEY="xxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx"
+export ZHIPUAI_API_KEY="xxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx"
 ```
 
 **方式二：settings.json**
 
 ```json
 {
+  "provider": "zhipu",
   "model": "glm-4-plus",
   "apiFormat": "openai",
   "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
@@ -726,8 +785,7 @@ ohs --model glm-4-plus \
    "帮我写一个快速排序"
 ```
 
-**可用模型：**
-
+**常见模型示例：**
 
 | 模型            | 说明                |
 | ------------- | ----------------- |
@@ -740,13 +798,11 @@ ohs --model glm-4-plus \
 | `glm-4v`      | GLM-4 视觉版（支持图片输入） |
 | `glm-3-turbo` | GLM-3 快速版         |
 
-
 ---
 
 ### 自动检测规则
 
 框架支持三级自动检测，无需手动指定 provider：
-
 
 | 检测级别         | 规则              | 示例                                          |
 | ------------ | --------------- | ------------------------------------------- |
@@ -754,14 +810,13 @@ ohs --model glm-4-plus \
 | Base URL 关键字 | 匹配域名关键词         | DeepSeek: `deepseek.com`，GLM: `bigmodel.cn` |
 | 模型名称关键字      | 匹配模型名前缀/关键词     | DeepSeek: `deepseek-`*，GLM: `glm-`*         |
 
-
 因此在设置好对应环境变量后，通常只需指定 `--model` 即可：
 
 ```bash
 # DeepSeek — 自动检测（DEEPSEEK_API_KEY 已设置）
 ohs --model deepseek-chat "hello"
 
-# GLM — 自动检测（ZHIPU_API_KEY 已设置）
+# GLM — 自动检测（ZHIPUAI_API_KEY 已设置）
 ohs --model glm-4-plus "hello"
 ```
 
