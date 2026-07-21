@@ -86,6 +86,38 @@ test("Session renders streaming assistantBuffer", async () => {
   renderer.destroy();
 });
 
+test("Session keeps tool output collapsed by default and expands on click", async () => {
+  const items: TranscriptItem[] = [
+    { role: "tool_result", text: "hello\nmore output" },
+  ];
+
+  const { renderer, renderOnce, waitForFrame, captureCharFrame, mockMouse } = await testRender(
+    <ThemeProvider>
+      <Session
+        items={items}
+        assistantBuffer=""
+      />
+    </ThemeProvider>,
+    { width: 100, height: 20 },
+  );
+
+  await renderOnce();
+  await waitForFrame((f) => f.includes("output 2 lines"));
+
+  let frame = captureCharFrame();
+  expect(frame).toContain("hello");
+  expect(frame).not.toContain("more output");
+
+  await mockMouse.click(1, 0);
+  await renderOnce();
+  await waitForFrame((f) => f.includes("more output"));
+
+  frame = captureCharFrame();
+  expect(frame).toContain("more output");
+
+  renderer.destroy();
+});
+
 // ─── Test 3: Footer renders plan mode, tokens, MCP count, version ────────
 
 test("Footer renders plan indicator, MCP count, tokens, version", async () => {

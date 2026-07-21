@@ -1,5 +1,5 @@
 import React from "react";
-import { TextAttributes } from "@opentui/core";
+import { KeyEvent, TextAttributes } from "@opentui/core";
 import type { SyntaxStyle } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";
 import type { TranscriptItem } from "../../types";
@@ -29,6 +29,56 @@ function summarizeToolInput(
     }
   }
   return "";
+}
+
+function summarizeText(text: string, maxLen = 72): string {
+  const firstLine = text.split("\n")[0] ?? "";
+  if (firstLine.length <= maxLen) return firstLine;
+  return firstLine.slice(0, Math.max(0, maxLen - 1)) + "...";
+}
+
+function countLines(text: string): number {
+  return Math.max(1, text.split("\n").length);
+}
+
+function CollapsibleTranscriptBlock({
+  summary,
+  children,
+  tone,
+}: {
+  summary: React.ReactNode;
+  children: React.ReactNode;
+  tone: string;
+}) {
+  const { theme } = useTheme();
+  const [expanded, setExpanded] = React.useState(false);
+
+  const toggle = React.useCallback(() => {
+    setExpanded((value) => !value);
+  }, []);
+
+  const handleKeyDown = React.useCallback((event: KeyEvent) => {
+    if (event.name === "enter" || event.name === "space") {
+      toggle();
+    }
+  }, [toggle]);
+
+  return (
+    <box flexDirection="column">
+      <box
+        focusable
+        onMouseUp={toggle}
+        onKeyDown={handleKeyDown}
+        backgroundColor={expanded ? theme.colors.backgroundPanel : undefined}
+      >
+        <text fg={tone}>
+          <span fg={theme.colors.muted}>{expanded ? "[-] " : "[+] "}</span>
+          {summary}
+        </text>
+      </box>
+      {expanded ? <box paddingLeft={2}>{children}</box> : null}
+    </box>
+  );
 }
 
 export function TranscriptPart({
@@ -64,14 +114,18 @@ export function TranscriptPart({
         const addedLines = newText.split("\n").length - oldText.split("\n").length;
         const sign = addedLines >= 0 ? `+${addedLines}` : `${addedLines}`;
         return (
-          <box flexDirection="column">
-            <text fg={c.muted}>
-              <span fg={c.muted}>{icons.tool}</span>
-              <span fg={c.foreground} attributes={TextAttributes.BOLD}>{filePath}</span>
-              <span fg={addedLines >= 0 ? c.success : c.error}>{" " + sign}</span>
-            </text>
+          <CollapsibleTranscriptBlock
+            tone={c.muted}
+            summary={(
+              <>
+                <span fg={c.muted}>{icons.tool}</span>
+                <span fg={c.foreground} attributes={TextAttributes.BOLD}>{filePath}</span>
+                <span fg={addedLines >= 0 ? c.success : c.error}>{" " + sign}</span>
+              </>
+            )}
+          >
             <ToolDiff filePath={filePath} oldText={oldText} newText={newText} syntaxStyle={syntax} />
-          </box>
+          </CollapsibleTranscriptBlock>
         );
       }
 
@@ -79,14 +133,18 @@ export function TranscriptPart({
         const filePath = String(item.tool_input.path ?? item.tool_input.file_path ?? "file");
         const content = String(item.tool_input.content);
         return (
-          <box flexDirection="column">
-            <text fg={c.muted}>
-              <span fg={c.muted}>{icons.tool}</span>
-              <span fg={c.foreground} attributes={TextAttributes.BOLD}>{filePath}</span>
-              <span fg={c.success}>{` +${content.split("\n").length}`}</span>
-            </text>
+          <CollapsibleTranscriptBlock
+            tone={c.muted}
+            summary={(
+              <>
+                <span fg={c.muted}>{icons.tool}</span>
+                <span fg={c.foreground} attributes={TextAttributes.BOLD}>{filePath}</span>
+                <span fg={c.success}>{` +${content.split("\n").length}`}</span>
+              </>
+            )}
+          >
             <ToolDiff filePath={filePath} oldText="" newText={content} syntaxStyle={syntax} />
-          </box>
+          </CollapsibleTranscriptBlock>
         );
       }
 
@@ -105,18 +163,35 @@ export function TranscriptPart({
     case "tool_result": {
       if (item.is_error) {
         return (
-          <text fg={c.error} wrapMode="word">
-            {"└ "}
-            {item.text}
-          </text>
+          <CollapsibleTranscriptBlock
+            tone={c.error}
+            summary={(
+              <>
+                <span fg={c.error}>{icons.error}</span>
+                <span fg={c.foreground} attributes={TextAttributes.BOLD}>tool error</span>
+                <span fg={c.muted}>{` ${countLines(item.text)} lines`}</span>
+                {item.text ? <span fg={c.error}>{`: ${summarizeText(item.text)}`}</span> : null}
+              </>
+            )}
+          >
+            <text fg={c.error} wrapMode="word">{item.text}</text>
+          </CollapsibleTranscriptBlock>
         );
       }
-      const firstLine = item.text.split("\n")[0] ?? "";
       return (
-        <text fg={c.muted}>
-          {"└ "}
-          {firstLine.slice(0, 80)}
-        </text>
+        <CollapsibleTranscriptBlock
+          tone={c.muted}
+          summary={(
+            <>
+              <span fg={c.muted}>{icons.tool}</span>
+              <span fg={c.foreground} attributes={TextAttributes.BOLD}>output</span>
+              <span fg={c.muted}>{` ${countLines(item.text)} lines`}</span>
+              {item.text ? <span fg={c.muted}>{`: ${summarizeText(item.text)}`}</span> : null}
+            </>
+          )}
+        >
+          <text fg={c.muted} wrapMode="word">{item.text}</text>
+        </CollapsibleTranscriptBlock>
       );
     }
 
