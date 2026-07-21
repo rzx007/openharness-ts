@@ -25,12 +25,21 @@ export function Session({ items, assistantBuffer }: SessionProps) {
         },
       }}
     >
-      {items.map((item, i) => (
-        <TranscriptPart key={i} item={item} syntax={syntax} />
-      ))}
-      {assistantBuffer ? (
-        <markdown content={assistantBuffer} syntaxStyle={syntax} streaming />
-      ) : null}
+      <box
+        flexDirection="column"
+        paddingLeft={2}
+        paddingRight={2}
+        paddingTop={1}
+        paddingBottom={1}
+        rowGap={1}
+      >
+        {items.map((item, i) => (
+          <TranscriptPart key={i} item={item} syntax={syntax} />
+        ))}
+        {assistantBuffer ? (
+          <markdown content={assistantBuffer} syntaxStyle={syntax} streaming />
+        ) : null}
+      </box>
     </scrollbox>
   );
 }

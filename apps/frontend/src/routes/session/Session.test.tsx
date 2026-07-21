@@ -108,7 +108,7 @@ test("Session keeps tool output collapsed by default and expands on click", asyn
   expect(frame).toContain("hello");
   expect(frame).not.toContain("more output");
 
-  await mockMouse.click(1, 0);
+  await mockMouse.click(4, 1);
   await renderOnce();
   await waitForFrame((f) => f.includes("more output"));
 

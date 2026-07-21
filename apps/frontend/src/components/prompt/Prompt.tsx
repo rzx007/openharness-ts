@@ -330,7 +330,7 @@ export function Prompt({
       <box
         flexDirection="column"
         flexGrow={1}
-        backgroundColor={theme.colors.backgroundPanel}
+        backgroundColor={theme.colors.backgroundPrompt}
         paddingLeft={2}
         paddingRight={2}
         paddingTop={1}

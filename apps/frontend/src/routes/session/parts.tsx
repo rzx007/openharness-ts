@@ -76,7 +76,15 @@ function CollapsibleTranscriptBlock({
           {summary}
         </text>
       </box>
-      {expanded ? <box paddingLeft={2}>{children}</box> : null}
+      {expanded ? (
+        <box
+          paddingLeft={2}
+          paddingTop={1}
+          paddingBottom={1}
+        >
+          {children}
+        </box>
+      ) : null}
     </box>
   );
 }

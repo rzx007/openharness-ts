@@ -7,6 +7,7 @@ export type ThemeConfig = {
     foreground: string;
     background: string;
     backgroundPanel: string;
+    backgroundPrompt: string;
     muted: string;
     success: string;
     warning: string;
@@ -34,6 +35,7 @@ export const defaultTheme: ThemeConfig = {
     foreground: "#abb2bf",
     background: "#1e2127",
     backgroundPanel: "#262a33",
+    backgroundPrompt: "#262626",
     muted: "#5c6370",
     success: "#98c379",
     warning: "#e5c07b",
@@ -61,6 +63,7 @@ export const lightTheme: ThemeConfig = {
     foreground: "#24292f",
     background: "#ffffff",
     backgroundPanel: "#f6f8fa",
+    backgroundPrompt: "#f3f4f6",
     muted: "#6e7781",
     success: "#1a7f37",
     warning: "#9a6700",
@@ -88,6 +91,7 @@ export const draculaTheme: ThemeConfig = {
     foreground: "#f8f8f2",
     background: "#282a36",
     backgroundPanel: "#343746",
+    backgroundPrompt: "#2f313d",
     muted: "#6272a4",
     success: "#50fa7b",
     warning: "#ffb86c",
