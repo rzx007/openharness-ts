@@ -117,8 +117,17 @@ export type BackendEvent =
   | { type: "shutdown" };
 
 export type FrontendRequest = {
-  type: "submit_line" | "permission_response" | "question_response" | "list_sessions" | "delete_session" | "shutdown" | "interrupt";
+  type:
+    | "submit_line"
+    | "set_permission_mode"
+    | "permission_response"
+    | "question_response"
+    | "list_sessions"
+    | "delete_session"
+    | "shutdown"
+    | "interrupt";
   line?: string | null;
+  permission_mode?: "default" | "plan" | "full_auto" | null;
   request_id?: string | null;
   allowed?: boolean | null;
   /** 权限批准范围："once"（本次）| "session"（整个会话该工具放行）。 */

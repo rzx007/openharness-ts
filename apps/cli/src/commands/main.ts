@@ -64,6 +64,7 @@ type BackendHostEvent = {
 type FrontendRequest = {
   type: string;
   line?: string | null;
+  permission_mode?: "default" | "plan" | "full_auto" | null;
   request_id?: string | null;
   allowed?: boolean | null;
   /** 权限确认的批准范围："once"（本次）| "session"（整个会话该工具放行）。 */
@@ -1164,6 +1165,34 @@ async function runBackendHost(
         type: "select_request",
         modal: { kind: "select", title: "Sessions", submit_prefix: "/resume " },
         select_options: options,
+      });
+      continue;
+    }
+    if (request.type === "set_permission_mode") {
+      const mode = request.permission_mode;
+      if (mode !== "default" && mode !== "plan" && mode !== "full_auto") {
+        await emit({ type: "error", message: `Invalid permission mode: ${String(mode ?? "")}` });
+        continue;
+      }
+      currentSettings = {
+        ...currentSettings,
+        permission: {
+          ...currentSettings.permission,
+          mode,
+        },
+      };
+      await saveSettingsCore(currentSettings);
+      await bundle.queryEngine.setSystemPrompt(
+        await buildRuntimeSystemPrompt({
+          cwd: process.cwd(),
+          permissionMode: currentSettings.permission.mode,
+        }),
+      );
+      await emit({
+        type: "state_snapshot",
+        state: buildStatePayload(currentSettings, mcpManager),
+        mcp_servers: [],
+        bridge_sessions: [],
       });
       continue;
     }

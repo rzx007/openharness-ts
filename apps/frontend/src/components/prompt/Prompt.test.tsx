@@ -307,3 +307,26 @@ test("busy=true: Enter key does not call onSubmit regardless of textarea content
 
   renderer.destroy();
 });
+
+test("tab on plain prompt cycles permission mode without submitting", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+  const onCycleMode = mock(() => undefined);
+
+  const { renderer, renderOnce, mockInput } = await testRender(
+    makePrompt({ onSubmit, onCycleMode }),
+    { width: 80, height: 24 },
+  );
+
+  await renderOnce();
+
+  await act(async () => {
+    mockInput.pressTab();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(onCycleMode).toHaveBeenCalledTimes(1);
+  expect(onSubmit).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});

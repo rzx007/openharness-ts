@@ -44,18 +44,20 @@ REPL 用 readline + EventRenderer 直接写终端。
 
 ## 涉及的模块
 
-| 组件 | 文件 | 职责 |
-|------|------|------|
-| CLI 入口 / 模式分发 | `apps/cli/src/index.ts` + `commands/main.ts` | `--tui` → `runTuiMode`；`--backend-only` → `runBackendHost` |
-| `runTuiMode` | `apps/cli/src/commands/main.ts` | 拼 `backend_command`，spawn 前端，传 `OPENHARNESS_FRONTEND_CONFIG` |
-| 前端入口 | `apps/frontend/src/index.tsx` | 解析 env 配置，`render(<App />)`；由 Bun 运行（CLI 通过 `resolveBun` 检测 Bun 路径，找不到时友好报错） |
-| `useBackendSession` | `apps/frontend/src/hooks/useBackendSession.ts` | spawn backend、解析 OHJSON、发请求、30fps assistant delta 缓冲 |
-| `App` + 组件 | `apps/frontend/src/App.tsx` 等 | Session/Home 路由、Prompt、SwarmPanel、Sidebar … |
-| `DialogContext` + `useModalWiring` | `apps/frontend/src/ui/DialogContext.tsx` + `hooks/useModalWiring.tsx` | 弹层栈管理；把 modal_request / select_request 接到 PermissionDialog / QuestionDialog / DialogSelect |
-| `PermissionDialog` / `QuestionDialog` | `apps/frontend/src/components/dialogs/` | 权限确认弹层（y/a/n/Esc）；工具提问弹层（input + Esc）|
-| `runBackendHost` | `apps/cli/src/commands/main.ts` | bootstrap、请求循环、emit 事件、TUI 权限 `askPermission` |
-| OHJSON 协议 | `packages/core/src/protocol/protocol-host.ts`（参考） | 行前缀 `OHJSON:` + JSON |
-| 权限 TUI 链路 | 见 [permission-flow.md](./permission-flow.md) | checkTool → ask → modal_request → permission_response |
+
+| 组件                                    | 文件                                                                    | 职责                                                                                         |
+| ------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| CLI 入口 / 模式分发                         | `apps/cli/src/index.ts` + `commands/main.ts`                          | `--tui` → `runTuiMode`；`--backend-only` → `runBackendHost`                                 |
+| `runTuiMode`                          | `apps/cli/src/commands/main.ts`                                       | 拼 `backend_command`，spawn 前端，传 `OPENHARNESS_FRONTEND_CONFIG`                               |
+| 前端入口                                  | `apps/frontend/src/index.tsx`                                         | 解析 env 配置，`render(<App />)`；由 Bun 运行（CLI 通过 `resolveBun` 检测 Bun 路径，找不到时友好报错）               |
+| `useBackendSession`                   | `apps/frontend/src/hooks/useBackendSession.ts`                        | spawn backend、解析 OHJSON、发请求、30fps assistant delta 缓冲                                       |
+| `App` + 组件                            | `apps/frontend/src/App.tsx` 等                                         | Session/Home 路由、Prompt、SwarmPanel、Sidebar …                                                |
+| `DialogContext` + `useModalWiring`    | `apps/frontend/src/ui/DialogContext.tsx` + `hooks/useModalWiring.tsx` | 弹层栈管理；把 modal_request / select_request 接到 PermissionDialog / QuestionDialog / DialogSelect |
+| `PermissionDialog` / `QuestionDialog` | `apps/frontend/src/components/dialogs/`                               | 权限确认弹层（y/a/n/Esc）；工具提问弹层（input + Esc）                                                      |
+| `runBackendHost`                      | `apps/cli/src/commands/main.ts`                                       | bootstrap、请求循环、emit 事件、TUI 权限 `askPermission`                                              |
+| OHJSON 协议                             | `packages/core/src/protocol/protocol-host.ts`（参考）                     | 行前缀 `OHJSON:` + JSON                                                                       |
+| 权限 TUI 链路                             | 见 [permission-flow.md](./permission-flow.md)                          | checkTool → ask → modal_request → permission_response                                      |
+
 
 ---
 
@@ -118,38 +120,44 @@ ohs --tui -m gpt-4 --permission-mode default
 
 **传输**：一行一条消息；backend → frontend 带前缀，frontend → backend 纯 JSON。
 
-| 方向 | 格式 | 示例 |
-|------|------|------|
+
+| 方向                 | 格式               | 示例                                      |
+| ------------------ | ---------------- | --------------------------------------- |
 | Backend → Frontend | `OHJSON:{...}\n` | `OHJSON:{"type":"ready","state":{...}}` |
-| Frontend → Backend | `{...}\n`（无前缀） | `{"type":"submit_line","line":"hello"}` |
+| Frontend → Backend | `{...}\n`（无前缀）   | `{"type":"submit_line","line":"hello"}` |
+
 
 非 `OHJSON:` 开头的 backend stdout 行会被前端当作 `{ role: "log" }` 写入 transcript。
 
 ### 前端 → 后端（FrontendRequest）
 
-| type | 用途 |
-|------|------|
-| `submit_line` | 用户输入或 initial_prompt |
-| `permission_response` | PermissionDialog 权限确认（含 `scope: once \| session`；readline handler 直接 resolve，不经主循环队列） |
-| `question_response` | QuestionDialog 工具提问回答（同上，readline handler 直接 resolve） |
-| `list_sessions` | `/resume` 触发会话列表弹层 |
-| `delete_session` | ctrl+d 删除选中的历史会话 |
-| `shutdown` | Ctrl+C / 退出 |
+
+| type                  | 用途                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `submit_line`         | 用户输入或 initial_prompt                                                                 |
+| `permission_response` | PermissionDialog 权限确认（含 `scope: once | session`；readline handler 直接 resolve，不经主循环队列） |
+| `question_response`   | QuestionDialog 工具提问回答（同上，readline handler 直接 resolve）                                |
+| `list_sessions`       | `/resume` 触发会话列表弹层                                                                   |
+| `delete_session`      | ctrl+d 删除选中的历史会话                                                                     |
+| `shutdown`            | Ctrl+C / 退出                                                                          |
+
 
 ### 后端 → 前端（部分 BackendEvent）
 
-| type | 用途 |
-|------|------|
-| `ready` | 连接就绪，带 state / commands / tasks |
-| `assistant_delta` / `assistant_complete` | 流式助手输出（前端 30fps 合并 delta） |
-| `transcript_item` | 用户/系统/工具消息 |
-| `tool_started` / `tool_completed` | 工具调用展示 |
-| `modal_request` | 权限 / 问题 / 选择器 |
-| `line_complete` | 本轮结束（清 busy） |
-| `clear_transcript` | 清空 transcript（`/new` 触发；`/clear` 命令已移除） |
-| `todo_update` / `plan_mode_change` | TodoPanel / 计划模式 |
-| `swarm_status` | SwarmPanel teammate 列表（见 [swarm-subprocess-flow.md](./swarm-subprocess-flow.md)） |
-| `shutdown` / `error` | 结束或错误 |
+
+| type                                     | 用途                                                                               |
+| ---------------------------------------- | -------------------------------------------------------------------------------- |
+| `ready`                                  | 连接就绪，带 state / commands / tasks                                                  |
+| `assistant_delta` / `assistant_complete` | 流式助手输出（前端 30fps 合并 delta）                                                        |
+| `transcript_item`                        | 用户/系统/工具消息                                                                       |
+| `tool_started` / `tool_completed`        | 工具调用展示                                                                           |
+| `modal_request`                          | 权限 / 问题 / 选择器                                                                    |
+| `line_complete`                          | 本轮结束（清 busy）                                                                     |
+| `clear_transcript`                       | 清空 transcript（`/new` 触发；`/clear` 命令已移除）                                          |
+| `todo_update` / `plan_mode_change`       | TodoPanel / 计划模式                                                                 |
+| `swarm_status`                           | SwarmPanel teammate 列表（见 [swarm-subprocess-flow.md](./swarm-subprocess-flow.md)） |
+| `shutdown` / `error`                     | 结束或错误                                                                            |
+
 
 `emit` 使用 writeLock 串行写 stdout，避免并发事件乱序。
 
@@ -180,11 +188,13 @@ BackendHost: processLineForHost → QueryEngine.submitMessage
 
 ## 其他入口
 
-| 方式 | 说明 |
-|------|------|
-| `ohs --backend-only` | 单独跑 BackendHost（调试协议 / 无 TUI 前端） |
-| 前端 dev + `OPENHARNESS_BACKEND_COMMAND` | 不经过 `runTuiMode`，前端自行 spawn backend |
-| `ohs --tui "prompt"` | `initial_prompt` 在 ready 后自动 `submit_line` |
+
+| 方式                                     | 说明                                         |
+| -------------------------------------- | ------------------------------------------ |
+| `ohs --backend-only`                   | 单独跑 BackendHost（调试协议 / 无 TUI 前端）           |
+| 前端 dev + `OPENHARNESS_BACKEND_COMMAND` | 不经过 `runTuiMode`，前端自行 spawn backend        |
+| `ohs --tui "prompt"`                   | `initial_prompt` 在 ready 后自动 `submit_line` |
+
 
 ---
 
@@ -208,3 +218,4 @@ ohs --tui -m anthropic/claude-sonnet-4 "explain this repo"
 # 仅调试 backend（需另开终端或用脚本往 stdin 写 JSON）
 ohs --backend-only --permission-mode default
 ```
+

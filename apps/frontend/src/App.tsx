@@ -50,6 +50,13 @@ function AppInner({ config }: { config: FrontendConfig }) {
     });
   }, []);
 
+  const setPermissionMode = useCallback(
+    (mode: "default" | "plan" | "full_auto") => {
+      session.sendRequest({ type: "set_permission_mode", permission_mode: mode });
+    },
+    [session],
+  );
+
   // ── handleCommand: intercept special slash commands ─────────────────────────
   const handleCommand = useCallback(
     (line: string): boolean => {
@@ -97,8 +104,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
               active: m.value === currentMode,
             }))}
             onSelect={(value) => {
-              session.sendRequest({ type: "submit_line", line: `/permissions ${value}` });
-              session.setBusy(true);
+              setPermissionMode(value as "default" | "plan" | "full_auto");
               dialog.close();
             }}
             searchable={false}
@@ -176,9 +182,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
     const currentMode = String(session.status.permission_mode ?? "default");
     const idx = PERMISSION_MODE_ORDER.indexOf(currentMode);
     const nextMode = PERMISSION_MODE_ORDER[(idx + 1) % PERMISSION_MODE_ORDER.length] ?? "default";
-    session.sendRequest({ type: "submit_line", line: `/permissions ${nextMode}` });
-    session.setBusy(true);
-  }, [session]);
+    setPermissionMode(nextMode as "default" | "plan" | "full_auto");
+  }, [session.status.permission_mode, setPermissionMode]);
 
   // ── Command registry for slashCommands prop ──────────────────────────────────
   const registry = useMemo(
