@@ -13,8 +13,9 @@ import { HISTORY_LIMIT, SIDEBAR_AUTO_OPEN_WIDTH } from "./ui/constants";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { AppView } from "./routes/session/AppView";
 import type { FrontendConfig } from "./types";
+import { copySelectionToClipboard } from "./utils/selection";
 
-// ─── AppInner — session + dialog wiring ──────────────────────────────────────
+// ─────────── AppInner — session + dialog wiring ─────────────
 
 function AppInner({ config }: { config: FrontendConfig }) {
   const renderer = useRenderer();
@@ -57,7 +58,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     [session],
   );
 
-  // ── handleCommand: intercept special slash commands ─────────────────────────
+  // ──────────── handleCommand: intercept special slash commands ───────────────
   const handleCommand = useCallback(
     (line: string): boolean => {
       // /theme set X
@@ -137,7 +138,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     [dialog, session, setThemeName, theme.name, toast],
   );
 
-  // ── openCommandPalette helper ────────────────────────────────────────────────
+  // ─────────────────────── openCommandPalette helper ───────────────────────────
   // 复用下方 useMemo 的注册表（经 ref 解循环依赖：registry.local 里的
   // app.palette.run 也要能打开面板）。
   const registryRef = useRef<CommandRegistry | null>(null);
@@ -163,7 +164,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     );
   }, [dialog]);
 
-  // ── onSubmit ─────────────────────────────────────────────────────────────────
+  // ─────────────────────────────── onSubmit ────────────────────────────────────
   const onSubmit = useCallback(
     (line: string) => {
       if (handleCommand(line)) {
@@ -177,7 +178,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     [appendHistory, handleCommand, session],
   );
 
-  // ── onCycleMode ──────────────────────────────────────────────────────────────
+  // ────────────────────────────────── onCycleMode ──────────────────────────────
   const onCycleMode = useCallback(() => {
     const currentMode = String(session.status.permission_mode ?? "default");
     const idx = PERMISSION_MODE_ORDER.indexOf(currentMode);
@@ -185,7 +186,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     setPermissionMode(nextMode as "default" | "plan" | "full_auto");
   }, [session.status.permission_mode, setPermissionMode]);
 
-  // ── Command registry for slashCommands prop ──────────────────────────────────
+  // ──────────────── Command registry for slashCommands prop ────────────────────
   const registry = useMemo(
     () =>
       buildRegistry({
@@ -241,12 +242,17 @@ function AppInner({ config }: { config: FrontendConfig }) {
   );
   registryRef.current = registry;
 
-  // ── Dialog wiring for backend modal/select requests ──────────────────────────
+  // ──────────── Dialog wiring for backend modal/select requests ────────────────
   useModalWiring(session, dialog);
 
-  // ── Global keyboard handler ──────────────────────────────────────────────────
+  // ──────────────────────── Global keyboard handler ────────────────────────────
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
+      if (copySelectionToClipboard(renderer, toast)) {
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      }
       session.sendRequest({ type: "shutdown" });
       renderer.destroy();
       process.exit(0);
@@ -291,7 +297,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
   );
 }
 
-// ─── App — root with providers ───────────────────────────────────────────────
+// ───────────────────────── App — root with providers ─────────────────────────
 
 export function App({ config }: { config: FrontendConfig }) {
   const initialTheme = String(config.theme ?? "default");
