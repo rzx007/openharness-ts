@@ -5,9 +5,22 @@ import { briefTool } from "./brief.js";
 import { configTool } from "./config.js";
 import { toolSearchTool } from "./tool-search.js";
 import { askUserTool } from "./ask-user.js";
+import { skillTool } from "./skill.js";
+import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+
+function makeSkill(partial: Partial<SkillDefinition> & { name: string }): SkillDefinition {
+  return {
+    description: "",
+    content: "",
+    path: "",
+    userInvocable: true,
+    disableModelInvocation: false,
+    ...partial,
+  };
+}
 
 describe("todoWriteTool", () => {
   it("appends an unchecked item to TODO.md", async () => {
@@ -93,6 +106,25 @@ describe("toolSearchTool", () => {
     const result = await toolSearchTool.execute!({ query: "zzznonexistent" }, { cwd: process.cwd() });
     const text = (result.content[0] as any).text;
     expect(text).toContain("no matches");
+  });
+});
+
+describe("skillTool", () => {
+  it("resolves skills by commandName through the shared registry", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({
+      name: "do-thing",
+      commandName: "dt",
+      content: "# do-thing\n\nRun the thing.",
+    }));
+
+    const result = await skillTool.execute!({ name: "dt" }, {
+      cwd: process.cwd(),
+      skillRegistry: registry,
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect((result.content[0] as any).text).toContain("Run the thing.");
   });
 });
 

@@ -74,6 +74,15 @@ describe("SkillRegistry", () => {
     expect(reg.resolveContent("x")).toBe("hello");
     expect(reg.resolveContent("nope")).toBeUndefined();
   });
+
+  it("resolves by tolerant name and commandName", () => {
+    const reg = new SkillRegistry();
+    const skill = makeSkill({ name: "Dothing", commandName: "dt" });
+    reg.register(skill);
+    expect(reg.resolve("dothing")).toBe(skill);
+    expect(reg.resolve("dt")).toBe(skill);
+    expect(reg.resolve("missing")).toBeUndefined();
+  });
 });
 
 describe("SkillRegistry.modelVisibleList", () => {
@@ -293,6 +302,15 @@ describe("SkillLoader", () => {
     expect(reg.has("Test Skill")).toBe(true);
   });
 
+  it("marks loaded markdown with the provided source", async () => {
+    mockedReadFile.mockResolvedValue("# User Skill\n\nA user skill.");
+    const reg = new SkillRegistry();
+    const loader = new SkillLoader(reg);
+    const skill = await loader.loadFromMarkdown("/skills/user.md", { source: "user" });
+    expect(skill!.source).toBe("user");
+    expect(reg.get("User Skill")!.source).toBe("user");
+  });
+
   it("returns undefined for unreadable file", async () => {
     mockedReadFile.mockRejectedValue(new Error("not found"));
     const reg = new SkillRegistry();
@@ -320,8 +338,9 @@ describe("SkillLoader", () => {
       .mockResolvedValueOnce("# Beta\n\nBeta skill");
     const reg = new SkillRegistry();
     const loader = new SkillLoader(reg);
-    const skills = await loader.loadFromDirectory("/skills");
+    const skills = await loader.loadFromDirectory("/skills", { source: "project" });
     expect(skills).toHaveLength(2);
+    expect(skills.map((s) => s.source)).toEqual(["project", "project"]);
     expect(reg.has("Alpha")).toBe(true);
     expect(reg.has("Beta")).toBe(true);
   });

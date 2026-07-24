@@ -180,6 +180,9 @@ export function useBackendSession(
       return;
     }
     if (event.type === "transcript_item") {
+      if (event.item.role === "assistant") {
+        clearAssistantDelta();
+      }
       setTranscript((items) => [...items, event.item]);
       return;
     }
@@ -206,7 +209,9 @@ export function useBackendSession(
       }
       flushAssistantDelta();
       const text = event.message ?? assistantBufferRef.current;
-      setTranscript((items) => [...items, { role: "assistant", text }]);
+      if (text.trim()) {
+        setTranscript((items) => [...items, { role: "assistant", text }]);
+      }
       clearAssistantDelta();
       setBusy(false);
       return;

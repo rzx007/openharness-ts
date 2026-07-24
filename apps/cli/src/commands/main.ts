@@ -1245,6 +1245,7 @@ async function runBackendHost(
         bundle.queryEngine.loadMessages(payload.messages as any);
         if (payload.model) bundle.queryEngine.setModel(payload.model);
         currentSessionId = payload.session_id;
+        slashCtx.sessionId = currentSessionId;
         await emit({ type: "clear_transcript" });
         for (const item of messagesToTranscriptItems(payload.messages)) {
           await emit({ type: "transcript_item", item });
@@ -1296,6 +1297,10 @@ async function runBackendHost(
 
     // 斜杠命令在后端本地路由（对齐 REPL），不发给模型。
     if (line.startsWith("/")) {
+      const startsNewConversation = isNewConversationSlashCommand(line);
+      if (startsNewConversation && bundle.queryEngine.getHistory().length > 0) {
+        await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
+      }
       await emit({ type: "transcript_item", item: { role: "user", text: line } });
       const outcome = await runHostSlashCommand(line, commandRegistry);
       if (outcome.exit) {
@@ -1304,6 +1309,10 @@ async function runBackendHost(
         break;
       }
       if (outcome.clearTranscript) {
+        if (startsNewConversation && !outcome.error) {
+          currentSessionId = generateSessionId();
+          slashCtx.sessionId = currentSessionId;
+        }
         await emit({ type: "clear_transcript" });
       }
       if (outcome.output) {
@@ -1454,7 +1463,7 @@ export function messagesToTranscriptItems(messages: unknown[]): Array<{
   return items;
 }
 
-async function processLineForHost(
+export async function processLineForHost(
   line: string,
   bundle: any,
   emit: (event: BackendHostEvent) => Promise<void>,
@@ -1468,6 +1477,15 @@ async function processLineForHost(
   });
 
   let assistantText = "";
+  const emitAssistantSegment = async (): Promise<void> => {
+    const text = assistantText.trim();
+    assistantText = "";
+    if (!text) return;
+    await emit({
+      type: "transcript_item",
+      item: { role: "assistant", text },
+    });
+  };
 
   try {
     for await (const event of bundle.queryEngine.submitMessage(line) as AsyncIterable<StreamEvent>) {
@@ -1476,6 +1494,7 @@ async function processLineForHost(
         await emit({ type: "assistant_delta", message: event.delta });
         assistantText += event.delta;
       } else if (event.type === "tool_use_start") {
+        await emitAssistantSegment();
         const tu = event.toolUse;
         lastToolInputs.set(tu.name, tu.input ?? {});
         await emit({
@@ -1821,11 +1840,11 @@ export async function loadSkillsThreeSources(
     }
   }
   const loader = new SkillLoader(skillRegistry);
-  await loader.loadFromDirectory(getSkillsDir());
+  await loader.loadFromDirectory(getSkillsDir(), { source: "user" });
   // 从 cwd 向上遍历到 git-root，收集所有层级的 project skill 目录（低优先→高优先）。
   const projectSkillDirs = await findProjectSkillDirs(cwd);
   for (const dir of projectSkillDirs) {
-    await loader.loadFromDirectory(dir);
+    await loader.loadFromDirectory(dir, { source: "project" });
   }
 }
 
@@ -1858,18 +1877,7 @@ export function matchUserInvocableSkill(
   if (isBuiltinCommand(cmdName)) return null;
 
   // 按名解析 skill（对齐 Skill 工具的容错取法），并匹配 commandName。
-  let skill =
-    skillRegistry.get(word) ??
-    skillRegistry.get(word.toLowerCase()) ??
-    skillRegistry.get(word.charAt(0).toUpperCase() + word.slice(1));
-  if (!skill) {
-    for (const s of skillRegistry.getAll()) {
-      if (s.commandName && s.commandName === word) {
-        skill = s;
-        break;
-      }
-    }
-  }
+  const skill = skillRegistry.resolve(word);
   if (!skill || !skill.userInvocable) return null;
 
   return { skill, args };
@@ -1951,6 +1959,10 @@ export interface HostSlashOutcome {
   clearTranscript?: boolean;
   output?: string;
   error?: string;
+}
+
+export function isNewConversationSlashCommand(line: string): boolean {
+  return line === "/new" || line.startsWith("/new ");
 }
 
 /**

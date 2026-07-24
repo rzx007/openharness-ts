@@ -10,6 +10,8 @@ import {
   buildModelVisibleSkillsList,
   formatSessionMeta,
   messagesToTranscriptItems,
+  isNewConversationSlashCommand,
+  processLineForHost,
 } from "./main";
 
 /** 构造一个最小 SkillDefinition（补齐新增必填字段的默认值）。 */
@@ -120,6 +122,18 @@ describe("runHostSlashCommand", () => {
     const out = await runHostSlashCommand("/nope", makeRegistry());
     expect(out.error).toContain("Unknown command");
     expect(out.exit).toBeUndefined();
+  });
+});
+
+describe("isNewConversationSlashCommand", () => {
+  it("matches /new exactly and with arguments", () => {
+    expect(isNewConversationSlashCommand("/new")).toBe(true);
+    expect(isNewConversationSlashCommand("/new keep cwd")).toBe(true);
+  });
+
+  it("does not match command prefixes that only start with /new", () => {
+    expect(isNewConversationSlashCommand("/newer")).toBe(false);
+    expect(isNewConversationSlashCommand("/new-session")).toBe(false);
   });
 });
 
@@ -340,5 +354,62 @@ describe("messagesToTranscriptItems", () => {
       { role: "user", content: "real" },
     ]);
     expect(items).toEqual([{ role: "user", text: "real" }]);
+  });
+});
+
+describe("processLineForHost", () => {
+  it("flushes streaming assistant text before tool events so realtime order matches history", async () => {
+    const emitted: any[] = [];
+    const bundle = {
+      settings: {},
+      queryEngine: {
+        async *submitMessage() {
+          yield { type: "text_delta", delta: "I will check first." };
+          yield {
+            type: "tool_use_start",
+            toolUse: {
+              type: "tool_use",
+              id: "tu-1",
+              name: "Bash",
+              input: { command: "echo ok" },
+            },
+          };
+          yield {
+            type: "tool_use_end",
+            toolUseId: "tu-1",
+            result: {
+              toolUseId: "tu-1",
+              toolName: "Bash",
+              content: [{ type: "text", text: "ok" }],
+            },
+          };
+          yield { type: "text_delta", delta: "Done." };
+        },
+      },
+    };
+
+    await processLineForHost(
+      "run it",
+      bundle,
+      async (event) => { emitted.push(event); },
+      new Map(),
+      {} as any,
+    );
+
+    const transcriptRoles = emitted
+      .filter((event) => event.type === "transcript_item" || event.type === "tool_started" || event.type === "tool_completed" || event.type === "assistant_complete")
+      .map((event) => event.type === "assistant_complete" ? "assistant_complete" : event.item?.role ?? event.type);
+
+    expect(transcriptRoles).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "tool_result",
+      "assistant_complete",
+    ]);
+    expect(emitted.find((event) => event.type === "transcript_item" && event.item.role === "assistant")?.item.text)
+      .toBe("I will check first.");
+    expect(emitted.find((event) => event.type === "assistant_complete")?.message)
+      .toBe("Done.");
   });
 });

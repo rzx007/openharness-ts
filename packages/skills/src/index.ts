@@ -4,6 +4,8 @@ import { BUNDLED_SKILLS } from "./bundled.js";
 
 export { BUNDLED_SKILLS } from "./bundled.js";
 
+export type SkillSource = "bundled" | "user" | "project" | "plugin";
+
 /**
  * 定义技能（Skill）的结构信息。
  */
@@ -12,7 +14,7 @@ export interface SkillDefinition {
   description: string;
   content: string;
   path: string;
-  source?: "bundled" | "user" | "project" | "plugin";
+  source?: SkillSource;
   metadata?: Record<string, unknown>;
   /** 是否允许用户通过 /<name> 斜杠命令调用。缺省 true。 */
   userInvocable: boolean;
@@ -33,6 +35,14 @@ export interface SkillDefinition {
  */
 export interface SkillLoadOptions {
   paths: string[];
+  recursive?: boolean;
+}
+
+export interface SkillMarkdownLoadOptions {
+  source?: SkillSource;
+}
+
+export interface SkillDirectoryLoadOptions extends SkillMarkdownLoadOptions {
   recursive?: boolean;
 }
 
@@ -70,6 +80,17 @@ export class SkillRegistry {
    */
   get(name: string): SkillDefinition | undefined {
     return this.skills.get(name);
+  }
+
+  resolve(name: string): SkillDefinition | undefined {
+    const trimmed = name.trim();
+    if (!trimmed) return undefined;
+    const skill =
+      this.get(trimmed) ??
+      this.get(trimmed.toLowerCase()) ??
+      this.get(trimmed.charAt(0).toUpperCase() + trimmed.slice(1));
+    if (skill) return skill;
+    return this.getAll().find((candidate) => candidate.commandName === trimmed);
   }
 
   /**
@@ -277,11 +298,14 @@ export class SkillLoader {
    * @param filePath - Markdown 文件的路径。
    * @returns 如果加载成功则返回 SkillDefinition，否则返回 undefined。
    */
-  async loadFromMarkdown(filePath: string): Promise<SkillDefinition | undefined> {
+  async loadFromMarkdown(
+    filePath: string,
+    options: SkillMarkdownLoadOptions = {},
+  ): Promise<SkillDefinition | undefined> {
     const content = await this.readFile(filePath);
     if (!content) return undefined;
 
-    const skill = this.parseMarkdown(filePath, content);
+    const skill = this.parseMarkdown(filePath, content, options);
     if (skill) {
       this.registry.register(skill);
     }
@@ -296,12 +320,16 @@ export class SkillLoader {
    */
   async loadFromDirectory(
     dirPath: string,
-    recursive?: boolean
+    recursiveOrOptions?: boolean | SkillDirectoryLoadOptions
   ): Promise<SkillDefinition[]> {
-    const files = await this.discoverMarkdownFiles(dirPath, recursive);
+    const options: SkillDirectoryLoadOptions =
+      typeof recursiveOrOptions === "boolean"
+        ? { recursive: recursiveOrOptions }
+        : recursiveOrOptions ?? {};
+    const files = await this.discoverMarkdownFiles(dirPath, options.recursive);
     const skills: SkillDefinition[] = [];
     for (const file of files) {
-      const skill = await this.loadFromMarkdown(file);
+      const skill = await this.loadFromMarkdown(file, options);
       if (skill) skills.push(skill);
     }
     return skills;
@@ -315,7 +343,8 @@ export class SkillLoader {
    */
   private parseMarkdown(
     filePath: string,
-    content: string
+    content: string,
+    options: SkillMarkdownLoadOptions = {},
   ): SkillDefinition {
     const defaultName = this.pathToName(filePath);
     const meta = parseSkillMarkdown(defaultName, content);
@@ -324,6 +353,7 @@ export class SkillLoader {
       description: meta.description,
       content,
       path: filePath,
+      ...(options.source !== undefined ? { source: options.source } : {}),
       userInvocable: meta.userInvocable,
       disableModelInvocation: meta.disableModelInvocation,
       ...(meta.model !== undefined ? { model: meta.model } : {}),

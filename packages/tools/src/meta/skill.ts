@@ -23,14 +23,11 @@ export const skillTool: ToolDefinition = {
     if (!registry) {
       registry = new SkillRegistry();
       const loader = new SkillLoader(registry);
-      await loader.loadFromDirectory(getSkillsDir());
-      await loader.loadFromDirectory(join(context.cwd, ".openharness", "skills"));
+      await loader.loadFromDirectory(getSkillsDir(), { source: "user" });
+      await loader.loadFromDirectory(join(context.cwd, ".openharness", "skills"), { source: "project" });
     }
 
-    const skill =
-      registry.get(name) ??
-      registry.get(name.toLowerCase()) ??
-      registry.get(name.charAt(0).toUpperCase() + name.slice(1));
+    const skill = registry.resolve(name);
     if (!skill) {
       return {
         content: [{ type: "text", text: `Skill not found: ${name}` }],
