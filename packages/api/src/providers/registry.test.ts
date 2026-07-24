@@ -7,8 +7,8 @@ import {
 } from "./registry.js";
 
 describe("PROVIDERS", () => {
-  it("has 20 providers", () => {
-    expect(PROVIDERS).toHaveLength(20);
+  it("has 21 providers", () => {
+    expect(PROVIDERS).toHaveLength(21);
   });
 
   it("each provider has required fields", () => {
@@ -34,6 +34,13 @@ describe("PROVIDERS", () => {
     const o = findByName("openai");
     expect(o).toBeDefined();
     expect(o!.backendType).toBe("openai_compat");
+  });
+
+  it("codex subscription is listed", () => {
+    const c = findByName("codex");
+    expect(c).toBeDefined();
+    expect(c!.backendType).toBe("codex");
+    expect(c!.isOAuth).toBe(true);
   });
 
   it("ollama is local provider", () => {
@@ -98,6 +105,12 @@ describe("detectProvider", () => {
     const result = detectProvider("model", undefined, "https://dashscope.aliyuncs.com");
     expect(result).toBeDefined();
     expect(result!.name).toBe("dashscope");
+  });
+
+  it("detects codex by chatgpt backend base url", () => {
+    const result = detectProvider("gpt-5.4", undefined, "https://chatgpt.com/backend-api");
+    expect(result).toBeDefined();
+    expect(result!.name).toBe("codex");
   });
 
   it("detects by model keyword (claude)", () => {

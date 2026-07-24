@@ -2,7 +2,8 @@ import { Command } from "commander";
 import type { ProviderSpec } from "@openharness/api";
 import type { Settings } from "@openharness/core";
 
-export type KeySource = "credentials" | "env" | "none";
+export type KeySource = "credentials" | "env" | "external" | "none";
+const CODEX_DEFAULT_MODEL = "gpt-5.4";
 
 /**
  * 判定某个 provider 的 API key 来源：
@@ -38,6 +39,7 @@ export function applyProviderConfig(settings: Settings, input: ApplyProviderConf
   const next: Settings = { ...settings };
   if (input.setActive) next.provider = input.name;
   if (input.model !== undefined) next.model = input.model;
+  else if (input.setActive && input.name === "codex") next.model = CODEX_DEFAULT_MODEL;
   if (input.baseUrl !== undefined) next.baseUrl = input.baseUrl;
   return next;
 }
@@ -51,7 +53,7 @@ export function createProviderCommand(): Command {
     .action(async () => {
       const chalk = (await import("chalk")).default;
       const { PROVIDERS } = await import("@openharness/api");
-      const { CredentialStorage } = await import("@openharness/auth");
+      const { CredentialStorage, describeCodexAuthState } = await import("@openharness/auth");
       const { loadSettings } = await import("@openharness/core");
 
       const settings = await loadSettings();
@@ -65,9 +67,13 @@ export function createProviderCommand(): Command {
         if (!specByName.has(stored)) names.push(stored);
       }
 
+      const codexState = await describeCodexAuthState();
       const rows = names.map((name) => {
         const spec = specByName.get(name);
-        const source = resolveKeySource(name, storedProviders, process.env, spec);
+        const source =
+          name === "codex" && codexState.configured
+            ? "external"
+            : resolveKeySource(name, storedProviders, process.env, spec);
         return {
           name,
           active: settings.provider === name,
@@ -89,6 +95,8 @@ export function createProviderCommand(): Command {
             ? chalk.cyan("credentials")
             : r.source === "env"
               ? chalk.blue("env")
+              : r.source === "external"
+                ? chalk.magenta("external")
               : chalk.gray("none");
         const display = r.displayName.padEnd(displayWidth);
         const base = r.baseURL ? chalk.gray(r.baseURL) : chalk.gray("(provider default)");
@@ -121,7 +129,7 @@ export function createProviderCommand(): Command {
       await saveSettings(next);
 
       console.log(chalk.green(`Active provider set to ${name}`));
-      if (opts.model) console.log(chalk.gray(`  model: ${opts.model}`));
+      if (next.model) console.log(chalk.gray(`  model: ${next.model}`));
     });
 
   cmd

@@ -1,5 +1,5 @@
 import type { Settings } from "@openharness/core";
-import { CredentialStorage } from "@openharness/auth";
+import { CredentialStorage, describeCodexAuthState } from "@openharness/auth";
 import { findByName, detectProvider } from "@openharness/api";
 import { resolveApiKey } from "./runtime";
 
@@ -29,6 +29,11 @@ export async function checkApiKey(
 
   const providerName = settings.provider;
   if (providerName) {
+    if (providerName === "codex") {
+      const state = await describeCodexAuthState();
+      if (state.configured) return { ok: true, source: `codex_subscription [${state.source}]` };
+      return { ok: false, source: `codex_subscription ${state.state}` };
+    }
     if (await storage.loadApiKey(providerName)) {
       return { ok: true, source: `credentials.json [${providerName}]` };
     }

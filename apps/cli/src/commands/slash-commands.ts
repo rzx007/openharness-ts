@@ -216,11 +216,18 @@ export function registerBuiltinCommandsOnRegistry(
         return { success: true, output: "Provider set to auto-detect" };
       }
 
-      const err = await switchApiClientForBundle(getBundle(), providerName, undefined, storage);
+      const nextModel = providerName === "codex" ? "gpt-5.4" : undefined;
+      const err = await switchApiClientForBundle(getBundle(), providerName, nextModel, storage);
       if (err) return { success: false, error: err };
       const spec = findByName(providerName);
-      await updateSettings({ provider: providerName });
-      return { success: true, output: `Provider switched to: ${spec?.displayName ?? providerName}` };
+      await updateSettings({
+        provider: providerName,
+        ...(nextModel ? { model: nextModel } : {}),
+      });
+      return {
+        success: true,
+        output: `Provider switched to: ${spec?.displayName ?? providerName}${nextModel ? ` (model: ${nextModel})` : ""}`,
+      };
     },
   });
 
@@ -231,19 +238,26 @@ export function registerBuiltinCommandsOnRegistry(
   registry.register({
     name: "/auth",
     description: "Manage API credentials",
-    args: [{ name: "subcommand", description: "login|logout|status", required: false }],
+    args: [{ name: "subcommand", description: "login|codex-login|logout|status", required: false }],
     handler: async (cmdCtx) => {
       const sub = cmdCtx.args.subcommand || cmdCtx.args._0;
       const storage = ctx.credentialStorage;
 
       if (!sub || sub === "status") {
+        const { describeCodexAuthState } = await import("@openharness/auth");
         const providers = await storage.listStoredProviders();
+        const codexState = await describeCodexAuthState();
         const envProviders: string[] = [];
         for (const spec of PROVIDERS) {
           if (spec.envKey && process.env[spec.envKey]) envProviders.push(spec.name);
         }
         const lines = ["Credential status:", ""];
+        lines.push("  Auth sources:");
+        lines.push(
+          `    codex_subscription: ${codexState.configured ? "ready" : codexState.state} (${codexState.source})`
+        );
         if (providers.length > 0) {
+          lines.push("");
           lines.push("  Stored credentials:");
           for (const p of providers) {
             lines.push(`    ${p}: configured`);
@@ -257,16 +271,47 @@ export function registerBuiltinCommandsOnRegistry(
           }
         }
         if (providers.length === 0 && envProviders.length === 0) {
+          lines.push("");
           lines.push("  No credentials configured.");
-          lines.push("  Use /auth login <provider> to store an API key.");
+          lines.push("  Use /auth login <provider> <api-key> to store an API key.");
+          lines.push("  Use /auth login codex to use a Codex subscription.");
         }
         return { success: true, output: lines.join("\n") };
       }
 
+      if (sub === "codex-login") {
+        const { describeCodexAuthState } = await import("@openharness/auth");
+        const state = await describeCodexAuthState();
+        if (!state.configured) {
+          return {
+            success: false,
+            error: `Codex Subscription ${state.state}: ${state.detail ?? state.source}`,
+          };
+        }
+        return {
+          success: true,
+          output: `Codex Subscription ready${state.profileLabel ? ` (${state.profileLabel})` : ""}. Use /provider codex to switch.`,
+        };
+      }
+
       if (sub === "login") {
-        const providerName = cmdCtx.args._1;
+        const providerName = normalizeSlashAuthTarget(cmdCtx.args._1);
         if (!providerName) {
-          return { success: false, error: "Usage: /auth login <provider> <api-key>" };
+          return { success: false, error: "Usage: /auth login <provider> <api-key> or /auth login codex" };
+        }
+        if (providerName === "codex") {
+          const { describeCodexAuthState } = await import("@openharness/auth");
+          const state = await describeCodexAuthState();
+          if (!state.configured) {
+            return {
+              success: false,
+              error: `Codex Subscription ${state.state}: ${state.detail ?? state.source}`,
+            };
+          }
+          return {
+            success: true,
+            output: `Codex Subscription ready${state.profileLabel ? ` (${state.profileLabel})` : ""}. Use /provider codex to switch.`,
+          };
         }
         const apiKey = cmdCtx.args._2;
         if (!apiKey) {
@@ -286,7 +331,8 @@ export function registerBuiltinCommandsOnRegistry(
           return { success: false, error: "Usage: /auth logout <provider>" };
         }
         await storage.clearProviderCredentials(providerName);
-        return { success: true, output: `Credentials cleared for ${providerName}.` };
+        const suffix = providerName === "codex" ? " Codex CLI auth.json was not removed." : "";
+        return { success: true, output: `Credentials cleared for ${providerName}.${suffix}` };
       }
 
       return { success: false, error: `Unknown subcommand: ${sub}. Use login, logout, or status.` };
@@ -1581,4 +1627,17 @@ function coerceConfigValue(key: string, value: string): unknown {
     default:
       return value;
   }
+}
+
+function normalizeSlashAuthTarget(target?: string): string | undefined {
+  const normalized = target?.trim().toLowerCase().replace(/_/g, "-");
+  if (!normalized) return undefined;
+  if (
+    normalized === "codex" ||
+    normalized === "openai-codex" ||
+    normalized === "codex-subscription"
+  ) {
+    return "codex";
+  }
+  return normalized;
 }

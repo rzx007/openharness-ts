@@ -78,6 +78,13 @@ describe("applyProviderConfig", () => {
     expect(next.model).toBe("gpt-5");
   });
 
+  it("sets the codex default model when activating codex without an explicit model", () => {
+    const settings = makeSettings({ model: "old-model", provider: "openrouter" });
+    const next = applyProviderConfig(settings, { name: "codex", setActive: true });
+    expect(next.provider).toBe("codex");
+    expect(next.model).toBe("gpt-5.4");
+  });
+
   it("sets baseUrl when provided", () => {
     const settings = makeSettings();
     const next = applyProviderConfig(settings, { name: "openai", baseUrl: "https://x/v1" });

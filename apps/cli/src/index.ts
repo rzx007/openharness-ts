@@ -10,6 +10,7 @@ import { createSetupCommand } from "./commands/setup";
 import { VERSION } from "./version";
 
 const program = new Command();
+program.enablePositionalOptions();
 
 program
   .name("ohs")

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { QueryEngine } from "./query-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { CompactService } from "./compact-service.js";
@@ -250,6 +250,20 @@ describe("CompactService", () => {
 });
 
 describe("loadSettings", () => {
+  let savedConfigDir: string | undefined;
+
+  beforeEach(async () => {
+    savedConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    process.env.OPENHARNESS_CONFIG_DIR = await fs.mkdtemp(
+      path.join(os.tmpdir(), "oh-settings-test-"),
+    );
+  });
+
+  afterEach(() => {
+    if (savedConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+    else process.env.OPENHARNESS_CONFIG_DIR = savedConfigDir;
+  });
+
   it("returns default settings with no overrides", async () => {
     const settings = await loadSettings();
     expect(typeof settings.model).toBe("string");
@@ -263,6 +277,31 @@ describe("loadSettings", () => {
     const settings = await loadSettings({ model: "gpt-4o", maxTurns: 10 });
     expect(settings.model).toBe("gpt-4o");
     expect(settings.maxTurns).toBe(10);
+  });
+
+  it("uses OPENHARNESS_CONFIG_DIR for settings.json", async () => {
+    const saved = process.env.OPENHARNESS_CONFIG_DIR;
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "oh-settings-"));
+    const configDir = path.join(tempDir, "config");
+    try {
+      process.env.OPENHARNESS_CONFIG_DIR = configDir;
+      await saveSettings({
+        model: "deepseek-chat",
+        apiFormat: "openai",
+        provider: "deepseek",
+        maxTurns: 12,
+        permission: { mode: "default" },
+      });
+
+      const raw = await fs.readFile(path.join(configDir, "settings.json"), "utf-8");
+      expect(JSON.parse(raw).provider).toBe("deepseek");
+
+      const loaded = await loadSettings();
+      expect(loaded.provider).toBe("deepseek");
+    } finally {
+      if (saved === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = saved;
+    }
   });
 
   it("ANTHROPIC_BASE_URL does not pollute the generic baseUrl", async () => {

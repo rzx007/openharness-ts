@@ -4,14 +4,19 @@ import type { Settings } from "@openharness/core";
 export function formatApiError(err: Error, settings: Settings): string {
   if (err instanceof AuthenticationFailure) {
     const provider = settings.provider ?? "auto";
+    const authHint = provider === "codex"
+      ? "    1. /auth login codex"
+      : "    1. /auth login <provider> <api-key>";
     return [
-      "Authentication failed (401). No valid API key found.",
+      provider === "codex"
+        ? "Authentication failed (401). Codex subscription auth is not ready."
+        : "Authentication failed (401). No valid API key found.",
       "",
       `  Current provider: ${provider}`,
       `  Current model:    ${settings.model}`,
       "",
       "  To fix:",
-      "    1. /auth login <provider> <api-key>",
+      authHint,
       "    2. Or set environment variable (e.g. OPENROUTER_API_KEY)",
       "    3. Use /provider to check available providers",
     ].join("\n");

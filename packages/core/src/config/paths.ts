@@ -22,10 +22,10 @@ export interface ResolvedPaths {
 let _cached: ResolvedPaths | undefined;
 
 export function resolvePaths(projectRoot?: string): ResolvedPaths {
-  if (_cached && !projectRoot) return _cached;
-
   const configDir =
     process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness");
+  if (_cached && !projectRoot && _cached.configDir === configDir) return _cached;
+
   const dataDir = join(configDir, "data");
   const projectRootResolved = projectRoot ?? process.cwd();
 

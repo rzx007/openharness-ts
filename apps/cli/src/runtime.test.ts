@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -64,6 +64,7 @@ describe("resolveApiKey", () => {
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
     "GEMINI_API_KEY", "DASHSCOPE_API_KEY", "MOONSHOT_API_KEY",
     "GROQ_API_KEY", "MISTRAL_API_KEY", "ZHIPUAI_API_KEY",
+    "CODEX_HOME",
   ];
   const saved: Record<string, string | undefined> = {};
 
@@ -138,7 +139,30 @@ describe("resolveApiKey", () => {
     const key = await resolveApiKey(BASE_SETTINGS, undefined, storage);
     expect(key).not.toBe("sk-ds-key");
   });
+
+  it("reads Codex subscription token from CODEX_HOME auth.json", async () => {
+    const token = makeJwt({
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      "https://api.openai.com/auth": { chatgpt_account_id: "acct_123" },
+    });
+    writeFileSync(join(tempDir, "auth.json"), JSON.stringify({
+      tokens: { access_token: token },
+    }));
+    process.env.CODEX_HOME = tempDir;
+    const key = await resolveApiKey(
+      { ...BASE_SETTINGS, provider: "codex", model: "gpt-5.4" },
+      undefined,
+      storage,
+    );
+    expect(key).toBe(token);
+  });
 });
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.sig`;
+}
 
 describe("computeWorktreeBaseDir", () => {
   it("puts worktrees under <configDir>/worktrees/<repoId>", () => {

@@ -6,7 +6,7 @@ import { applyProviderConfig } from "./provider";
 
 export interface SetupChoice {
   providerName: string;
-  apiKey: string;
+  apiKey?: string;
   /** Empty string means "leave model unset". */
   model: string;
 }
@@ -18,7 +18,7 @@ export interface SetupConfig {
     model?: string;
     apiFormat: Settings["apiFormat"];
   };
-  credential: {
+  credential?: {
     provider: string;
     type: "api_key";
     value: string;
@@ -39,18 +39,23 @@ export function buildSetupConfig(
   spec: Pick<ProviderSpec, "backendType"> | undefined,
 ): SetupConfig {
   const apiFormat: Settings["apiFormat"] = spec?.backendType === "anthropic" ? "anthropic" : "openai";
-  const trimmedModel = choice.model.trim();
+  const isCodex = spec?.backendType === "codex" || choice.providerName === "codex";
+  const trimmedModel = choice.model.trim() || (isCodex ? "gpt-5.4" : "");
   return {
     settingsPatch: {
       provider: choice.providerName,
       ...(trimmedModel ? { model: trimmedModel } : {}),
       apiFormat,
     },
-    credential: {
-      provider: choice.providerName,
-      type: "api_key",
-      value: choice.apiKey,
-    },
+    ...(isCodex
+      ? {}
+      : {
+          credential: {
+            provider: choice.providerName,
+            type: "api_key" as const,
+            value: choice.apiKey ?? "",
+          },
+        }),
   };
 }
 
@@ -65,7 +70,7 @@ export function createSetupCommand(): Command {
     .action(async () => {
       const chalk = (await import("chalk")).default;
       const { PROVIDERS } = await import("@openharness/api");
-      const { CredentialStorage } = await import("@openharness/auth");
+      const { CredentialStorage, describeCodexAuthState } = await import("@openharness/auth");
       const { loadSettings, saveSettings } = await import("@openharness/core");
 
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -108,8 +113,23 @@ export function createSetupCommand(): Command {
         }
 
         // ② 输 API key（最小版不做隐藏输入）。
-        console.log(chalk.gray("\nNote: the key will be echoed as you type (no hidden input)."));
-        const apiKey = (await ask(chalk.gray(`API key for ${spec.displayName}: `))).trim();
+        let apiKey = "";
+        if (spec.name === "codex") {
+          const codexState = await describeCodexAuthState();
+          if (!codexState.configured) {
+            console.log(chalk.red(`\nCodex Subscription is ${codexState.state}.`));
+            console.log(chalk.gray(`  source: ${codexState.source}`));
+            if (codexState.detail) console.log(chalk.gray(`  ${codexState.detail}`));
+            console.log(chalk.gray("Log in with the Codex CLI first, then re-run setup."));
+            return;
+          }
+          console.log(chalk.green("\nCodex Subscription ready."));
+          console.log(chalk.gray(`  source: ${codexState.source}`));
+          if (codexState.profileLabel) console.log(chalk.gray(`  account: ${codexState.profileLabel}`));
+        } else {
+          console.log(chalk.gray("\nNote: the key will be echoed as you type (no hidden input)."));
+          apiKey = (await ask(chalk.gray(`API key for ${spec.displayName}: `))).trim();
+        }
 
         // ③ 输 model（无内置默认，留空让用户填）。
         const model = (await ask(chalk.gray("Model (leave empty to set later): "))).trim();
@@ -121,9 +141,9 @@ export function createSetupCommand(): Command {
         );
         console.log(chalk.cyan.bold("\nAbout to write:"));
         console.log(`  provider:  ${chalk.white(config.settingsPatch.provider)}`);
-        console.log(`  model:     ${chalk.white(model || "(unset)")}`);
+        console.log(`  model:     ${chalk.white(config.settingsPatch.model || "(unset)")}`);
         console.log(`  apiFormat: ${chalk.white(config.settingsPatch.apiFormat)}`);
-        console.log(`  api key:   ${chalk.white(maskKey(apiKey))}`);
+        console.log(`  api key:   ${chalk.white(config.credential ? maskKey(apiKey) : "(external Codex login)")}`);
         const confirm = (await ask(chalk.gray("\nSave this configuration? [y/N] "))).trim().toLowerCase();
         if (confirm !== "y" && confirm !== "yes") {
           console.log(chalk.gray("Cancelled. Nothing was written."));
@@ -131,12 +151,14 @@ export function createSetupCommand(): Command {
         }
 
         // 确认后落盘：存 credential + 写 settings（复用 applyProviderConfig）。
-        const storage = new CredentialStorage();
-        await storage.storeCredential(
-          config.credential.provider,
-          config.credential.type,
-          config.credential.value,
-        );
+        if (config.credential) {
+          const storage = new CredentialStorage();
+          await storage.storeCredential(
+            config.credential.provider,
+            config.credential.type,
+            config.credential.value,
+          );
+        }
 
         const settings = await loadSettings();
         const next = applyProviderConfig(settings, {

@@ -61,6 +61,19 @@ describe("buildSetupConfig", () => {
     );
     expect(config.settingsPatch.apiFormat).toBe("openai");
   });
+
+  it("maps codex setup to external auth without storing an API key", () => {
+    const config = buildSetupConfig(
+      { providerName: "codex", model: "" },
+      { backendType: "codex" },
+    );
+    expect(config.settingsPatch).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+      apiFormat: "openai",
+    });
+    expect(config.credential).toBeUndefined();
+  });
 });
 
 describe("createSetupCommand", () => {

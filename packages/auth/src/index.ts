@@ -1,5 +1,14 @@
 export { CredentialStorage } from "./credential-storage";
 export type { CredentialData } from "./credential-storage";
+export {
+  CODEX_AUTH_SOURCE,
+  CODEX_PROVIDER,
+  describeCodexAuthState,
+  getCodexAuthPath,
+  isCredentialExpired,
+  loadCodexCredential,
+} from "./external";
+export type { ExternalAuthCredential, ExternalAuthState } from "./external";
 
 export interface AuthCredentials {
   provider: string;

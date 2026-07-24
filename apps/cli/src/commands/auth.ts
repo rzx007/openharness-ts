@@ -1,71 +1,153 @@
 import { Command } from "commander";
 
 export function createAuthCommand(): Command {
-  const cmd = new Command("auth").description("Manage authentication");
+  const cmd = new Command("auth").description("Manage auth sources");
 
   cmd
     .command("login")
-    .description("Login with API key or OAuth")
+    .description("Authenticate with a provider or auth workflow")
+    .argument("[target]", "Provider or auth workflow name")
+    .argument("[credential]", "API key for API-key providers")
     .option("-k, --api-key <key>", "API key")
-    .option("-p, --provider <provider>", "Provider name (anthropic | openai)")
-    .action(async (opts: { apiKey?: string; provider?: string }) => {
+    .option("-p, --provider <provider>", "Provider name")
+    .action(async (target?: string, credential?: string, opts?: { apiKey?: string; provider?: string }) => {
       const chalk = (await import("chalk")).default;
-      if (opts.apiKey) {
-        const provider = opts.provider ?? guessProviderFromKey(opts.apiKey);
-        console.log(chalk.green(`API key configured for ${provider}`));
-        console.log(chalk.gray("Set the appropriate environment variable to persist:"));
-        console.log(chalk.gray(`  ${provider.toUpperCase()}_API_KEY=${opts.apiKey.slice(0, 8)}...`));
+      const { CredentialStorage } = await import("@openharness/auth");
+
+      const normalizedTarget = normalizeAuthTarget(opts?.provider ?? target);
+      if (normalizedTarget === "codex") {
+        await reportCodexLogin(chalk);
         return;
       }
 
-      console.error(chalk.red("No OAuth flow available. Use --api-key to set an API key directly."));
-      process.exit(1);
+      const apiKey = opts?.apiKey ?? credential;
+      if (!apiKey) {
+        console.error(chalk.red("Usage: ohs auth login <provider> <api-key>"));
+        console.log(chalk.gray("Example: ohs auth login deepseek sk-..."));
+        console.log(chalk.gray("Codex subscription: ohs auth login codex"));
+        process.exitCode = 1;
+        return;
+      }
+
+      const provider = normalizedTarget ?? guessProviderFromKey(apiKey);
+      const storage = new CredentialStorage();
+      await storage.storeApiKey(provider, apiKey);
+      console.log(chalk.green(`Stored API key for ${provider} (${maskKey(apiKey)})`));
+      console.log(chalk.gray(`Use 'ohs provider use ${provider}' to make it active.`));
+    });
+
+  cmd
+    .command("codex-login")
+    .description("Alias for 'auth login codex'")
+    .action(async () => {
+      const chalk = (await import("chalk")).default;
+      await reportCodexLogin(chalk);
     });
 
   cmd
     .command("status")
-    .description("Show authentication status for all providers")
+    .description("Show authentication status")
     .action(async () => {
       const chalk = (await import("chalk")).default;
-      const providers: Array<{ name: string; key: string | undefined; source: string }> = [
-        { name: "Anthropic", key: process.env.ANTHROPIC_API_KEY, source: "ANTHROPIC_API_KEY" },
-        { name: "OpenAI", key: process.env.OPENAI_API_KEY, source: "OPENAI_API_KEY" },
-        { name: "OpenRouter", key: process.env.OPENROUTER_API_KEY, source: "OPENROUTER_API_KEY" },
-        { name: "Google", key: process.env.GOOGLE_API_KEY, source: "GOOGLE_API_KEY" },
-        { name: "Groq", key: process.env.GROQ_API_KEY, source: "GROQ_API_KEY" },
-        { name: "DeepSeek", key: process.env.DEEPSEEK_API_KEY, source: "DEEPSEEK_API_KEY" },
-      ];
+      const { CredentialStorage, describeCodexAuthState } = await import("@openharness/auth");
+      const { PROVIDERS } = await import("@openharness/api");
+      const storage = new CredentialStorage();
+      const stored = new Set(await storage.listStoredProviders());
+      const codexState = await describeCodexAuthState();
 
       let anyConfigured = false;
-      for (const p of providers) {
-        if (p.key) {
-          anyConfigured = true;
-          console.log(chalk.green(`  ✓ ${p.name}: configured (${p.source})`));
-        } else {
-          console.log(chalk.gray(`  ✗ ${p.name}: not set (${p.source})`));
+      for (const provider of PROVIDERS) {
+        if (provider.name === "codex") {
+          anyConfigured ||= codexState.configured;
+          const color = codexState.configured ? chalk.green : chalk.gray;
+          const detail = codexState.configured
+            ? `ready (${codexState.profileLabel ?? codexState.source})`
+            : `${codexState.state} (${codexState.source})`;
+          console.log(color(`  ${provider.displayName}: ${detail}`));
+          continue;
+        }
+
+        const hasStored = stored.has(provider.name);
+        const hasEnv = Boolean(provider.envKey && process.env[provider.envKey]);
+        anyConfigured ||= hasStored || hasEnv;
+        if (hasStored) {
+          console.log(chalk.green(`  ${provider.displayName}: configured (credentials.json)`));
+        } else if (hasEnv) {
+          console.log(chalk.green(`  ${provider.displayName}: configured (${provider.envKey})`));
+        } else if (!provider.isLocal) {
+          console.log(chalk.gray(`  ${provider.displayName}: not set${provider.envKey ? ` (${provider.envKey})` : ""}`));
         }
       }
 
       if (!anyConfigured) {
         console.log(chalk.yellow("\nNo authentication configured."));
-        console.log(chalk.gray("  Run 'oh auth login --api-key <key>' to authenticate."));
+        console.log(chalk.gray("  API key: ohs auth login <provider> <api-key>"));
+        console.log(chalk.gray("  Codex:   ohs auth login codex"));
       }
     });
 
   cmd
     .command("logout")
-    .description("Clear stored credentials")
-    .action(async () => {
+    .description("Clear stored credentials for a provider")
+    .argument("[provider]", "Provider name")
+    .action(async (provider?: string) => {
       const chalk = (await import("chalk")).default;
-      console.log(chalk.green("Credentials cleared."));
-      console.log(chalk.gray("Note: Environment variable keys are not cleared automatically."));
+      const { CredentialStorage } = await import("@openharness/auth");
+      if (!provider) {
+        console.error(chalk.red("Usage: ohs auth logout <provider>"));
+        console.log(chalk.gray("For Codex, this only clears OpenHarness state; Codex CLI login remains managed by Codex."));
+        process.exitCode = 1;
+        return;
+      }
+      const storage = new CredentialStorage();
+      await storage.clearProviderCredentials(provider);
+      console.log(chalk.green(`Credentials cleared for ${provider}.`));
+      if (provider === "codex") {
+        console.log(chalk.gray("Codex CLI auth.json was not removed."));
+      }
     });
 
   return cmd;
 }
 
+async function reportCodexLogin(chalk: typeof import("chalk").default): Promise<void> {
+  const { describeCodexAuthState } = await import("@openharness/auth");
+  const state = await describeCodexAuthState();
+  if (state.configured) {
+    console.log(chalk.green("Codex Subscription: ready"));
+    console.log(chalk.gray(`  source: ${state.source}`));
+    if (state.profileLabel) console.log(chalk.gray(`  account: ${state.profileLabel}`));
+    console.log(chalk.gray("Use 'ohs provider use codex' to make it active."));
+    return;
+  }
+
+  console.error(chalk.red(`Codex Subscription: ${state.state}`));
+  console.error(chalk.gray(`  source: ${state.source}`));
+  if (state.detail) console.error(chalk.gray(`  ${state.detail}`));
+  console.error(chalk.gray("Log in with the Codex CLI first, then re-run this command."));
+  process.exitCode = 1;
+}
+
+function normalizeAuthTarget(target?: string): string | undefined {
+  const normalized = target?.trim().toLowerCase().replace(/_/g, "-");
+  if (!normalized) return undefined;
+  if (
+    normalized === "codex" ||
+    normalized === "openai-codex" ||
+    normalized === "codex-subscription"
+  ) {
+    return "codex";
+  }
+  return normalized;
+}
+
 function guessProviderFromKey(key: string): string {
   if (key.startsWith("sk-ant-")) return "anthropic";
+  if (key.startsWith("sk-or-")) return "openrouter";
   if (key.startsWith("sk-")) return "openai";
   return "unknown";
+}
+
+function maskKey(key: string): string {
+  return key.length <= 8 ? `${key}...` : `${key.slice(0, 8)}...`;
 }

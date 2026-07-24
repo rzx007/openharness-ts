@@ -34,7 +34,9 @@ skill 动态注册为 `/<skill>`（E.5），插件命令注册为 `/插件名:�
 | `/provider` | 查看/切换 API provider（`auto` 自动探测） |
 | `/effort` | 推理力度 `low \| medium \| high` |
 | `/fast` | fast 模式 `on \| off \| toggle` |
-| `/auth` | 凭证管理 `login \| logout \| status` |
+| `/auth` | 凭证来源管理 `login \| logout \| status`（`codex-login` 为兼容别名） |
+
+`/auth` 准备认证来源，`/provider` 切换模型供应商，`/model` 切换模型名。普通 API key 与 Codex 订阅的完整流程见 [auth-provider-model.md](auth-provider-model.md)。
 
 ### 记忆
 

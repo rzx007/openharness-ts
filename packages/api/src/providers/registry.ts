@@ -1,4 +1,4 @@
-export type BackendType = "anthropic" | "openai_compat";
+export type BackendType = "anthropic" | "openai_compat" | "codex";
 
 export interface ProviderConfig {
   apiKey: string;
@@ -98,6 +98,19 @@ export const PROVIDERS: ProviderSpec[] = [
     isGateway: false,
     isLocal: false,
     isOAuth: false,
+  },
+  {
+    name: "codex",
+    keywords: ["codex", "gpt", "o1", "o3", "o4"],
+    envKey: "",
+    displayName: "Codex Subscription",
+    backendType: "codex",
+    defaultBaseURL: "https://chatgpt.com/backend-api",
+    detectByKeyPrefix: "",
+    detectByBaseKeyword: "chatgpt.com/backend-api",
+    isGateway: false,
+    isLocal: false,
+    isOAuth: true,
   },
   {
     name: "deepseek",

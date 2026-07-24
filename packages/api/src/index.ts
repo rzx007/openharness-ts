@@ -1,4 +1,5 @@
 export { AnthropicClient } from "./providers/anthropic";
+export { CodexSubscriptionClient, buildCodexHeaders, resolveCodexUrl } from "./providers/codex";
 export { OpenAICompatibleClient } from "./providers/openai";
 export {
   PROVIDERS,

@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Settings, StreamingMessageClient } from "@openharness/core";
 import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, getConfigDir } from "@openharness/core";
-import { AnthropicClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
+import { AnthropicClient, CodexSubscriptionClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
-import { CredentialStorage } from "@openharness/auth";
+import { CredentialStorage, loadCodexCredential } from "@openharness/auth";
 import { PermissionChecker, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
@@ -267,6 +267,12 @@ export async function resolveApiClient(
   const backendType: BackendType = spec?.backendType ?? resolveBackendFromFormat(settings.apiFormat);
 
   switch (backendType) {
+    case "codex":
+      return new CodexSubscriptionClient({
+        apiKey,
+        baseURL: baseURL ?? spec?.defaultBaseURL,
+        model: settings.model,
+      });
     case "openai_compat":
       return new OpenAICompatibleClient({
         apiKey,
@@ -306,6 +312,7 @@ export async function switchApiClientForBundle(
   if (model) {
     settings.model = model;
   }
+  settings.provider = providerName;
 
   // 解析 API 密钥并查找提供商规格配置
   const apiKey = await resolveApiKey(settings, undefined, resolvedStorage);
@@ -318,6 +325,13 @@ export async function switchApiClientForBundle(
   let newClient: StreamingMessageClient;
   // 根据后端类型实例化相应的 API 客户端
   switch (backendType) {
+    case "codex":
+      newClient = new CodexSubscriptionClient({
+        apiKey,
+        baseURL: baseURL || undefined,
+        model: settings.model,
+      });
+      break;
     case "openai_compat":
       newClient = new OpenAICompatibleClient({
         apiKey,
@@ -374,6 +388,13 @@ export async function resolveApiKey(
   // 尝试根据指定的提供商名称获取 API Key（从存储或环境变量）
   const providerName = overrides?.provider ?? settings.provider;
   if (providerName) {
+    if (providerName === "codex") {
+      try {
+        return (await loadCodexCredential()).value;
+      } catch {
+        return "";
+      }
+    }
     const stored = await resolvedStorage.loadApiKey(providerName);
     if (stored) return stored;
     const spec = findByName(providerName);

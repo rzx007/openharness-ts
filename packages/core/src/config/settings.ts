@@ -1,7 +1,6 @@
 import { readFile, writeFile, access, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type { Settings } from "../index";
+import { getConfigDir, getConfigFilePath } from "./paths";
 
 const DEFAULT_SETTINGS: Settings = {
   model: "minimax/minimax-m2.5:free",
@@ -54,8 +53,8 @@ export async function loadSettings(
  */
 export async function saveSettings(settings: Settings): Promise<void> {
   // 构建配置目录和文件路径
-  const configDir = join(homedir(), ".openharness");
-  const configPath = join(configDir, "settings.json");
+  const configDir = getConfigDir();
+  const configPath = getConfigFilePath();
 
   // 确保配置目录存在，若不存在则递归创建
   await mkdir(configDir, { recursive: true });
@@ -95,7 +94,7 @@ function loadFromEnv(): Partial<Settings> {
  */
 async function loadFromFile(): Promise<Partial<Settings> | null> {
   // 构建配置文件的完整路径
-  const configPath = join(homedir(), ".openharness", "settings.json");
+  const configPath = getConfigFilePath();
   try {
     // 检查配置文件是否存在且可访问
     await access(configPath);

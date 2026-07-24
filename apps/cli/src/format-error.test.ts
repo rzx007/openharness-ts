@@ -21,6 +21,13 @@ describe("formatApiError", () => {
     expect(msg).toContain("/auth login");
   });
 
+  it("formats Codex AuthenticationFailure with auth login codex guidance", () => {
+    const err = new AuthenticationFailure("401 Missing Authentication header");
+    const msg = formatApiError(err, { ...SETTINGS, provider: "codex", model: "gpt-5.4" });
+    expect(msg).toContain("Codex subscription auth is not ready");
+    expect(msg).toContain("/auth login codex");
+  });
+
   it("formats RateLimitFailure as rate limit message", () => {
     const err = new RateLimitFailure("429 Too many requests");
     const msg = formatApiError(err, SETTINGS);

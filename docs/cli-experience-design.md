@@ -2,6 +2,12 @@
 
 > 状态：已批准，待实现。E.2 选择性斜杠命令留后续规划，不在本批。
 
+> Current status: implemented behavior now separates `auth`, `provider`, and
+> `model`. API keys are stored by `auth login` / `provider add`; Codex
+> subscription auth is read from the external Codex CLI auth source. See
+> [auth-provider-model.md](auth-provider-model.md) for the current runtime
+> contract.
+
 ## 范围（本批）
 
 1. `oh provider`（list/use/add/edit/remove）—— 从 CLI 管 provider + key。
@@ -9,13 +15,13 @@
 3. `oh setup` —— 交互式首次配置向导。
 
 **oh provider 最小版**：只做 `settings.provider` + `credentials.json[name]` 的 API key；
-**不做**命名 ProviderProfile 体系 / keyring（那是 C.2，单独做）。copilot/codex OAuth 属 E.4，范围外。
+**不做**命名 ProviderProfile 体系 / keyring（那是 C.2，单独做）。原始规划中 copilot/codex OAuth 属 E.4；当前实现已接入 Codex 订阅外部 auth source，Copilot 仍未接入。
 
 ## 现状（可复用）
 
 - 子命令：auth/mcp/plugin/cron/config/version/doctor（无 provider/setup/dry-run）。
 - `CredentialStorage`（auth）：`storeCredential(p,'api_key',v)`/`loadApiKey(p)`/`clearProviderCredentials(p)`/`listStoredProviders()`。
-- `PROVIDERS`/`findByName`（api）：20 个内置 provider（name/envKey/defaultBaseURL/displayName）。
+- `PROVIDERS`/`findByName`（api）：21 个内置 provider（name/envKey/defaultBaseURL/displayName/backendType）。
 - `loadSettings`/`saveSettings`（core）。
 - doctor 的 `checkApiKey(settings, storage)`（apps/cli/src/doctor.ts）→ {ok, source}，dry-run 复用。
 

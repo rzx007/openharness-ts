@@ -6,7 +6,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 > ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
 
-- ✅ **多模型支持** — 20 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Codex/Copilot 订阅、reasoning effort
+- ✅ **多模型支持** — 21 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅、reasoning effort
 - 🟡 **内置工具（41）** — 文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
 - ✅ **多 Agent 编排** — `agent` 工具真实派发 `--task-worker` 子进程 teammate：`SendMessage` 重启式多轮续聊、独立 git worktree 隔离、只读自动放行、写操作经 pending/resolved 文件流转 leader 裁决、`TaskWait` 阻塞取结果、TUI SwarmPanel；内置 7 agent + 用户/插件自定义 agent（`~/.openharness/agents/*.md`）。暂缺 sequential/parallel/pipeline 调度
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
@@ -156,17 +156,17 @@ ohs setup
 ohs doctor
 ohs version
 
-# Provider 与密钥
+# Auth / Provider / Model
+ohs auth login <provider> <api-key>
+ohs auth login codex
+ohs auth status
+ohs auth logout <provider>
+
 ohs provider list
 ohs provider use <name> [-m <model>]
 ohs provider add <name> -k <key> [-m <model>] [-b <base-url>] [--use]
 ohs provider edit <name> [-k <key>] [-m <model>] [-b <base-url>]
 ohs provider remove <name>
-
-# auth 子命令目前主要用于查看/提示环境变量；持久化 API key 推荐用 provider add/setup
-ohs auth login --api-key <key> [--provider <provider>]
-ohs auth status
-ohs auth logout
 
 # MCP server 配置（写入 settings.mcpServers）
 ohs mcp list
@@ -197,6 +197,9 @@ ohs channels serve
 ohs config show
 ohs config set <top-level-key> <value>
 ```
+
+Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-model.md](docs/auth-provider-model.md)。
+`ohs provider use <name>` 默认只切换供应商；要同时切模型请加 `-m/--model`，例如 `ohs provider use deepseek -m deepseek-chat`。
 
 交互式 REPL/TUI 内还有 `/help`、`/model`、`/provider`、`/memory`、`/tasks`、`/diff`、`/output-style` 等斜杠命令；完整清单见 [docs/slash-commands.md](docs/slash-commands.md)，运行时以 `/help` 为准。
 
@@ -697,7 +700,7 @@ setx ANTHROPIC_API_KEY "sk-ant-..."
 | `MOONSHOT_API_KEY`       | Moonshot/Kimi API Key        |
 | `MINIMAX_API_KEY`        | MiniMax API Key              |
 | `ZHIPUAI_API_KEY`        | 智谱 AI（GLM）API Key         |
-| `OPENHARNESS_CONFIG_DIR` | 自定义 credentials/plugins/data 等目录（默认 `~/.openharness`） |
+| `OPENHARNESS_CONFIG_DIR` | 自定义 settings/credentials/plugins/data 等目录（默认 `~/.openharness`） |
 | `OPENHARNESS_MODEL`      | 默认模型名称                       |
 | `OPENHARNESS_BASE_URL`   | 通用 API Base URL 覆盖（**所有 provider**）  |
 | `OPENHARNESS_API_FORMAT` | API 格式（anthropic / openai）   |
@@ -705,7 +708,6 @@ setx ANTHROPIC_API_KEY "sk-ant-..."
 | `OPENHARNESS_MAX_TURNS`  | 最大 agent 轮次                  |
 
 > ⚠️ `ANTHROPIC_BASE_URL` 仅 Anthropic provider 生效（由 Anthropic SDK 自行读取），**不会**影响 deepseek/openrouter 等其它 provider——要全局覆盖 baseURL 请用 `OPENHARNESS_BASE_URL`。
-> ⚠️ 当前 `credentials.json`、plugins、sessions 等路径支持 `OPENHARNESS_CONFIG_DIR`；`settings.json` 的 `loadSettings/saveSettings` 仍固定读写 `~/.openharness/settings.json`。
 
 ---
 
