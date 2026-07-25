@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools } from "./runtime";
+import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel } from "./runtime";
 import { READ_ONLY_TOOLS } from "@openharness/permissions";
 import { CredentialStorage } from "@openharness/auth";
 import type { Settings } from "@openharness/core";
@@ -52,6 +52,16 @@ describe("resolveAutoApproveTools", () => {
     );
     expect(tools.has("TodoWrite")).toBe(true);
     expect(tools.size).toBe(READ_ONLY_TOOLS.size + 1); // Read 去重
+  });
+});
+
+describe("resolveRuntimeModel", () => {
+  it("prefers CLI override model over settings model", () => {
+    expect(resolveRuntimeModel(BASE_SETTINGS, { model: "deepseek-v4-flash" })).toBe("deepseek-v4-flash");
+  });
+
+  it("falls back to settings model when no override is provided", () => {
+    expect(resolveRuntimeModel(BASE_SETTINGS, {})).toBe(BASE_SETTINGS.model);
   });
 });
 
@@ -107,6 +117,12 @@ describe("resolveApiKey", () => {
     await storage.storeApiKey("anthropic", "sk-ant-stored");
     const key = await resolveApiKey(BASE_SETTINGS, undefined, storage);
     expect(key).toBe("sk-ant-stored");
+  });
+
+  it("detects provider from override model when resolving credentials", async () => {
+    await storage.storeApiKey("deepseek", "sk-ds-override-model");
+    const key = await resolveApiKey(BASE_SETTINGS, { model: "deepseek-v4-flash" }, storage);
+    expect(key).toBe("sk-ds-override-model");
   });
 
   it("falls back to env var", async () => {

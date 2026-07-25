@@ -34,6 +34,7 @@ export interface BootstrapOptions {
     apiKey?: string;
     baseUrl?: string;
     provider?: string;
+    model?: string;
     systemPrompt?: string;
     permissionMode?: string;
     maxTurns?: number;
@@ -71,6 +72,13 @@ export function resolveAutoApproveTools(
     for (const tool of READ_ONLY_TOOLS) merged.add(tool);
   }
   return merged.size > 0 ? [...merged] : undefined;
+}
+
+export function resolveRuntimeModel(
+  settings: Settings,
+  overrides: { model?: string | undefined },
+): string {
+  return overrides.model ?? settings.model;
 }
 
 export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundle> {
@@ -126,6 +134,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   });
 
   const hookExecutor = new HookExecutor();
+  const runtimeModel = resolveRuntimeModel(settings, overrides);
 
   // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt
   // 时才注入 model 可见的 skills 段，使 print/backend 三模式与 REPL 一致——REPL
@@ -145,7 +154,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   const engineOptions = {
     maxTurns: overrides.maxTurns ?? settings.maxTurns,
     systemPrompt,
-    model: settings.model,
+    model: runtimeModel,
     permissionPrompt: options.permissionPrompt,
     skillRegistry: options.skillRegistry,
   };
@@ -250,6 +259,7 @@ export async function resolveApiClient(
   const apiKey = await resolveApiKey(settings, overrides, resolvedStorage);
   const baseURL = overrides?.baseUrl ?? settings.baseUrl;
   const providerName = overrides?.provider ?? settings.provider;
+  const runtimeModel = resolveRuntimeModel(settings, overrides ?? {});
 
   // 按优先级顺序解析提供商规范：首先尝试通过名称查找，其次基于模型和凭据检测，最后尝试从环境变量检测
   let spec: ProviderSpec | undefined;
@@ -257,7 +267,7 @@ export async function resolveApiClient(
     spec = findByName(providerName);
   }
   if (!spec) {
-    spec = detectProvider(settings.model, apiKey, baseURL);
+    spec = detectProvider(runtimeModel, apiKey, baseURL);
   }
   if (!spec) {
     spec = detectProviderFromEnv(process.env);
@@ -271,13 +281,13 @@ export async function resolveApiClient(
       return new CodexSubscriptionClient({
         apiKey,
         baseURL: baseURL ?? spec?.defaultBaseURL,
-        model: settings.model,
+        model: runtimeModel,
       });
     case "openai_compat":
       return new OpenAICompatibleClient({
         apiKey,
         baseURL: baseURL ?? spec?.defaultBaseURL,
-        model: settings.model,
+        model: runtimeModel,
       });
     case "anthropic":
     default:
@@ -384,6 +394,7 @@ export async function resolveApiKey(
   if (explicit) return explicit;
 
   const resolvedStorage = storage ?? new CredentialStorage();
+  const runtimeModel = resolveRuntimeModel(settings, overrides ?? {});
 
   // 尝试根据指定的提供商名称获取 API Key（从存储或环境变量）
   const providerName = overrides?.provider ?? settings.provider;
@@ -402,7 +413,7 @@ export async function resolveApiKey(
   }
 
   // 尝试通过模型和基础 URL 自动检测提供商，并获取对应的 API Key
-  const spec = detectProvider(settings.model, undefined, settings.baseUrl);
+  const spec = detectProvider(runtimeModel, undefined, settings.baseUrl);
   if (spec) {
     const stored = await resolvedStorage.loadApiKey(spec.name);
     if (stored) return stored;

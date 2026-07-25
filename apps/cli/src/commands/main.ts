@@ -985,7 +985,11 @@ async function runBackendHost(
   const slashCtx: SlashCommandContext = {
     getEngine: () => bundle.queryEngine as any,
     getModel: () => currentSettings.model,
-    setModel: (m: string) => { bundle.queryEngine.setModel(m); },
+    setModel: (m: string) => {
+      currentSettings = { ...currentSettings, model: m };
+      bundle.settings = currentSettings;
+      bundle.queryEngine.setModel(m);
+    },
     getSettings: () => currentSettings,
     updateSettings: async (patch: Partial<Settings>) => {
       currentSettings = { ...currentSettings, ...patch };
@@ -1627,6 +1631,7 @@ function buildCliOverrides(options: MainOptions) {
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
     provider: options.provider,
+    model: options.model,
     systemPrompt: options.systemPrompt,
     permissionMode: options.permissionMode,
     maxTurns: options.maxTurns,
