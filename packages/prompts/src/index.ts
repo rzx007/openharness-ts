@@ -77,8 +77,14 @@ export async function getEnvironmentInfo(cwd?: string): Promise<EnvironmentInfo>
 }
 
 function detectShell(): string {
-  const shell = process.env.SHELL ?? process.env.COMSPEC ?? "";
-  if (shell) return basename(shell);
+  const hostShell = process.env.SHELL ?? process.env.COMSPEC ?? "";
+  const hostShellName = hostShell ? basename(hostShell) : "";
+  if (platform() === "win32") {
+    return hostShellName
+      ? `bash.exe (Bash tool on Windows; host shell: ${hostShellName})`
+      : "bash.exe (Bash tool on Windows)";
+  }
+  if (hostShellName) return hostShellName;
   return platform() === "win32" ? "cmd.exe" : "unknown";
 }
 

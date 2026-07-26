@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { resolve, isAbsolute } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
+import { resolveToolPath } from "./path.js";
 
 // System directories that must never be edited, regardless of permission mode.
 const SYSTEM_DIR_PREFIXES = [
@@ -42,7 +42,7 @@ export const fileEditTool: ToolDefinition = {
       };
     }
 
-    const filePath = isAbsolute(rawPath) ? rawPath : resolve(cwd, rawPath);
+    const filePath = resolveToolPath(rawPath, cwd);
 
     if (isSystemPath(filePath)) {
       return {

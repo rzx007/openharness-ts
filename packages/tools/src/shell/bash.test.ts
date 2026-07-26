@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { bashTool } from "./bash.js";
+import {
+  bashTool,
+  decodeShellChunk,
+  formatOutput,
+  looksLikeUtf16Le,
+} from "./bash.js";
 
 describe("bashTool", () => {
   it("captures stdout", async () => {
@@ -34,19 +39,19 @@ describe("bashTool", () => {
     expect(text).toContain("partial-marker");
   }, 10_000);
 
-  it("truncates large output at ~12000 chars", async () => {
-    // Print 20000 'a' characters.
-    const result = await bashTool.execute!(
-      {
-        command:
-          "for i in $(seq 1 20000); do printf a; done",
-        timeout: 30_000,
-      },
-      { cwd: process.cwd() }
-    );
-    const text = (result.content[0] as any).text as string;
+  it("truncates large output at ~12000 chars", () => {
+    const text = formatOutput("a".repeat(20_000));
+
     expect(text).toContain("...[truncated]...");
     // Output body is capped near the 12000 char limit.
     expect(text.length).toBeLessThan(13000);
-  }, 30_000);
+  });
+
+  it("decodes UTF-16LE Windows shell errors", () => {
+    const message = "Wsl/Service/CreateInstance/E_ACCESS_DENIED\r\n";
+    const chunk = Buffer.from(message, "utf16le");
+
+    expect(looksLikeUtf16Le(chunk)).toBe(true);
+    expect(decodeShellChunk(chunk)).toContain("E_ACCESS_DENIED");
+  });
 });

@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, relative } from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import type { ToolDefinition } from "@openharness/core";
+import { resolveToolPath } from "../file/path.js";
 
 // Lines longer than this are skipped rather than processed, mirroring the
 // Python implementation's 64 KB guard. This prevents pathological minified
@@ -37,7 +38,8 @@ export const grepTool: ToolDefinition = {
   },
   async execute(input) {
     const pattern = input.pattern as string;
-    const basePath = resolve((input.path as string) ?? process.cwd());
+    const cwd = process.cwd();
+    const basePath = resolveToolPath((input.path as string) ?? cwd, cwd);
     const include = input.include as string | undefined;
     const caseSensitive = (input.caseSensitive as boolean) ?? true;
     const limit = (input.limit as number) ?? 200;

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { join, relative } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
+import { resolveToolPath } from "./path.js";
 
 const DEFAULT_LIMIT = 200;
 const RG_TIMEOUT_MS = 30_000;
@@ -39,7 +40,8 @@ export const globTool: ToolDefinition = {
   },
   async execute(input) {
     const pattern = input.pattern as string;
-    const basePath = (input.path as string) ?? process.cwd();
+    const cwd = process.cwd();
+    const basePath = resolveToolPath((input.path as string) ?? cwd, cwd);
     const limit = (input.limit as number) ?? DEFAULT_LIMIT;
 
     try {

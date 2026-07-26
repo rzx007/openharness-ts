@@ -76,6 +76,14 @@ describe("getEnvironmentInfo (homeDir bug fix)", () => {
     expect(env.homeDir).not.toContain("[object Promise]");
     expect(env.hostname.length).toBeGreaterThan(0);
   });
+
+  it("describes the Bash tool shell on Windows instead of only the host shell", async () => {
+    const env = await getEnvironmentInfo(process.cwd());
+    if (process.platform === "win32") {
+      expect(env.shell).toContain("Bash tool on Windows");
+      expect(env.shell).toContain("bash.exe");
+    }
+  });
 });
 
 describe("buildPermissionModeSection", () => {

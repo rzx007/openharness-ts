@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
-import { dirname, resolve, isAbsolute } from "node:path";
+import { dirname } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
+import { resolveToolPath } from "./path.js";
 
 // System directories that must never be written to, regardless of permission mode.
 const SYSTEM_DIR_PREFIXES = [
@@ -32,7 +33,7 @@ export const fileWriteTool: ToolDefinition = {
     const cwd = (context as { cwd?: string } | undefined)?.cwd ?? process.cwd();
 
     // Resolve to absolute path, then guard against system directories.
-    const filePath = isAbsolute(rawPath) ? rawPath : resolve(cwd, rawPath);
+    const filePath = resolveToolPath(rawPath, cwd);
 
     if (isSystemPath(filePath)) {
       return {

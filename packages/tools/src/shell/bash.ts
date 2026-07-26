@@ -11,7 +11,7 @@ const TIMEOUT_GRACE_MS = 2000;
 export const bashTool: ToolDefinition = {
   name: "Bash",
   description:
-    "Execute a bash command in a persistent shell session. Use for git, npm, docker, etc.",
+    "Execute a bash command in a persistent shell session. On Windows this runs via bash.exe, not cmd.exe; use cmd.exe /c for Windows shell builtins such as start. Use for git, npm, docker, etc.",
   inputSchema: {
     type: "object",
     properties: {
@@ -82,7 +82,7 @@ function runShell(
     let graceTimer: NodeJS.Timeout | undefined;
 
     const append = (chunk: Buffer | string) => {
-      buffer += chunk.toString();
+      buffer += decodeShellChunk(chunk);
     };
 
     child.stdout?.on("data", append);
@@ -149,7 +149,37 @@ function normalize(raw: string): string {
   return raw.replace(/\r\n/g, "\n").trim();
 }
 
-function formatOutput(raw: string): string {
+export function decodeShellChunk(chunk: Buffer | string): string {
+  if (typeof chunk === "string") return chunk;
+
+  // Windows WSL launch errors are commonly emitted as UTF-16LE. Decoding them
+  // as UTF-8 turns actionable messages like E_ACCESS_DENIED into mojibake.
+  if (looksLikeUtf16Le(chunk)) {
+    return chunk.toString("utf16le");
+  }
+  return chunk.toString("utf8");
+}
+
+export function looksLikeUtf16Le(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false;
+  const sampleLength = Math.min(buffer.length, 200);
+  let oddNulls = 0;
+  let evenNulls = 0;
+
+  for (let i = 0; i < sampleLength; i++) {
+    if (buffer[i] !== 0) continue;
+    if (i % 2 === 0) {
+      evenNulls++;
+    } else {
+      oddNulls++;
+    }
+  }
+
+  const pairs = Math.floor(sampleLength / 2);
+  return oddNulls > pairs * 0.25 && evenNulls < pairs * 0.05;
+}
+
+export function formatOutput(raw: string): string {
   const text = normalize(raw);
   if (!text) return "(no output)";
   if (text.length > MAX_OUTPUT_CHARS) {
