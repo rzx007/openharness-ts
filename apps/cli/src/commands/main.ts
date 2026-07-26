@@ -1,7 +1,7 @@
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import type { Settings, StreamEvent } from "@openharness/core";
-import { loadSettings, saveSettings as saveSettingsCore, getSkillsDir } from "@openharness/core";
+import type { RuntimeBundle, Settings, StreamEvent } from "@openharness/core";
+import { loadSettings, saveSettings as saveSettingsCore, getProjectMemoryDir, getSkillsDir } from "@openharness/core";
 import { CommandRegistry } from "@openharness/commands";
 import { HookExecutor } from "@openharness/hooks";
 import { McpClientManager } from "@openharness/mcp";
@@ -382,6 +382,43 @@ async function runPrintMode(
   // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
   registerPluginHooks(bundle.hookExecutor);
 
+  const memoryDir = getProjectMemoryDir(process.cwd());
+  const memoryManager = new MemoryManager(1000, memoryDir);
+  const memoryFile = join(memoryDir, "memory.json");
+  await memoryManager.loadFromFile(memoryFile).catch(() => { });
+
+  const memoryContent =
+    settings.memory?.enabled !== false
+      ? memoryManager.buildMemoryPrompt(settings.memory?.maxFiles ?? 10)
+      : undefined;
+  bundle.queryEngine.setSystemPrompt(
+    await buildRuntimeSystemPrompt({
+      customPrompt: settings.systemPrompt,
+      cwd: process.cwd(),
+      permissionMode: settings.permission.mode,
+      fastMode: settings.fastMode,
+      effort: settings.effort,
+      passes: settings.passes,
+      memoryContent,
+      skillsList: skillRegistry.modelVisibleList(),
+    }),
+  );
+
+  bundle.queryEngine.setMemoryRetriever(async (userInput: string) => {
+    if (settings.memory?.enabled === false) return null;
+    const maxEntries = settings.memory?.maxFiles ?? 10;
+    const { text, ids } = memoryManager.selectRelevantForPrompt(maxEntries, userInput);
+    if (!text) return null;
+    try {
+      if (ids.length > 0) {
+        await memoryManager.markMemoryUsed(ids);
+      }
+    } catch {
+      // best-effort
+    }
+    return text;
+  });
+
   // ==================创建事件渲染器==================
   const renderer = new EventRenderer({
     verbose: options.verbose,
@@ -407,6 +444,15 @@ async function runPrintMode(
   } catch {
     // best-effort
   }
+
+  await maintainMemoryAfterTurn({
+    bundle,
+    settings,
+    model: settings.model,
+    memoryManager,
+    memoryDir,
+    sessionId: generateSessionId(),
+  });
 }
 
 /**
@@ -463,8 +509,7 @@ async function runRepl(
     }
   }
 
-  const { homedir } = await import("node:os");
-  const memoryDir = join(homedir(), ".openharness", "data", "memory");
+  const memoryDir = getProjectMemoryDir(process.cwd());
 
   // ==================创建 MCP 客户端==================
   const mcpManager = new McpClientManager();
@@ -585,8 +630,12 @@ async function runRepl(
     const taskFocus = running.length > 0
       ? running.map((t) => t.description).join("; ")
       : undefined;
-    const smPath = getSessionMemoryPath(process.cwd(), sessionId);
-    const sessionMemory = sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined;
+    const smPath = isSessionMemoryEnabled(currentSettings)
+      ? getSessionMemoryPath(process.cwd(), sessionId)
+      : undefined;
+    const sessionMemory = smPath
+      ? sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined
+      : undefined;
     return { taskFocus, sessionMemory };
   });
 
@@ -638,17 +687,29 @@ async function runRepl(
         renderer.reset();
         const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
         const overrideModel = skillMatch.skill.model;
+        let completed = false;
         if (overrideModel) bundle.queryEngine.setModel(overrideModel);
         try {
           for await (const event of bundle.queryEngine.submitMessage(skillPrompt)) {
             await renderer.render(event);
           }
+          completed = true;
         } catch (err) {
           if (err instanceof Error) {
             process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
           }
         } finally {
           if (overrideModel) bundle.queryEngine.setModel(currentModel);
+        }
+        if (completed) {
+          await maintainMemoryAfterTurn({
+            bundle,
+            settings: currentSettings,
+            model: currentModel,
+            memoryManager,
+            memoryDir,
+            sessionId,
+          });
         }
         rl.prompt();
         return;
@@ -680,21 +741,28 @@ async function runRepl(
 
     renderer.reset();
 
+    let completed = false;
     try {
       for await (const event of bundle.queryEngine.submitMessage(input)) {
         await renderer.render(event);
       }
+      completed = true;
     } catch (err) {
       if (err instanceof Error) {
         process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
       }
     }
 
-    // 会话记忆 checkpoint（E.6）：每轮后写确定性快照，compact 连续性的底座。
-    try {
-      updateSessionMemoryFile(process.cwd(), bundle.queryEngine.getHistory(), { sessionId });
-    } catch {
-      // best-effort
+    // End-of-turn memory maintenance: checkpoint, optional extraction, snapshot, auto-dream.
+    if (completed) {
+      await maintainMemoryAfterTurn({
+        bundle,
+        settings: currentSettings,
+        model: currentModel,
+        memoryManager,
+        memoryDir,
+        sessionId,
+      });
     }
 
     rl.prompt();
@@ -974,13 +1042,31 @@ async function runBackendHost(
     bundle.toolRegistry.register(tool);
   }
   bundle.queryEngine.setMcpManager(mcpManager);
-  const { homedir } = await import("node:os");
-  const memoryDir = join(homedir(), ".openharness", "data", "memory");
+  const memoryDir = getProjectMemoryDir(process.cwd());
   const memoryManager = new MemoryManager(1000, memoryDir);
   const memoryFile = join(memoryDir, "memory.json");
   await memoryManager.loadFromFile(memoryFile).catch(() => { });
   const themeManager = new ThemeManager();
   const taskManager = new TaskManager();
+
+  const refreshSystemPrompt = async () => {
+    const memoryContent =
+      currentSettings.memory?.enabled !== false
+        ? memoryManager.buildMemoryPrompt(currentSettings.memory?.maxFiles ?? 10)
+        : undefined;
+
+    const prompt = await buildRuntimeSystemPrompt({
+      customPrompt: currentSettings.systemPrompt,
+      cwd: process.cwd(),
+      permissionMode: currentSettings.permission.mode,
+      fastMode: currentSettings.fastMode,
+      effort: currentSettings.effort,
+      passes: currentSettings.passes,
+      memoryContent,
+      skillsList: skillRegistry.modelVisibleList(),
+    });
+    bundle.queryEngine.setSystemPrompt(prompt);
+  };
 
   const slashCtx: SlashCommandContext = {
     getEngine: () => bundle.queryEngine as any,
@@ -1011,7 +1097,7 @@ async function runBackendHost(
     taskManager,
     sessionId: currentSessionId,
     exitRepl: () => { },
-    refreshSystemPrompt: async () => { },
+    refreshSystemPrompt,
     getBundle: () => bundle,
     credentialStorage,
   };
@@ -1019,9 +1105,11 @@ async function runBackendHost(
 
   const commands = buildHostCommandList(commandRegistry, skillRegistry);
 
+  await refreshSystemPrompt();
+
   await emit({
     type: "ready",
-    state: buildStatePayload(settings, mcpManager),
+    state: buildStatePayload(currentSettings, mcpManager),
     tasks: [],
     mcp_servers: [],
     bridge_sessions: [],
@@ -1030,7 +1118,7 @@ async function runBackendHost(
   });
   await emit({
     type: "state_snapshot",
-    state: buildStatePayload(settings, mcpManager),
+    state: buildStatePayload(currentSettings, mcpManager),
     mcp_servers: [],
     bridge_sessions: [],
   });
@@ -1041,8 +1129,12 @@ async function runBackendHost(
     const taskFocus = running.length > 0
       ? running.map((t) => t.description).join("; ")
       : undefined;
-    const smPath = getSessionMemoryPath(process.cwd(), currentSessionId);
-    const sessionMemory = sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined;
+    const smPath = isSessionMemoryEnabled(currentSettings)
+      ? getSessionMemoryPath(process.cwd(), currentSessionId)
+      : undefined;
+    const sessionMemory = smPath
+      ? sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined
+      : undefined;
     return { taskFocus, sessionMemory };
   });
 
@@ -1283,10 +1375,12 @@ async function runBackendHost(
         busy = true;
         interruptRequested = false;
         const overrideModel = skillMatch.skill.model;
+        let completed = false;
         if (overrideModel) bundle.queryEngine.setModel(overrideModel);
         try {
           const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
           await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested);
+          completed = true;
         } catch (err) {
           const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
           await emit({ type: "error", message: msg });
@@ -1294,7 +1388,16 @@ async function runBackendHost(
           busy = false;
           if (overrideModel) bundle.queryEngine.setModel(currentSettings.model);
         }
-        await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
+        if (completed) {
+          await maintainMemoryAfterTurn({
+            bundle,
+            settings: currentSettings,
+            model: currentSettings.model,
+            memoryManager,
+            memoryDir,
+            sessionId: currentSessionId,
+          });
+        }
         continue;
       }
     }
@@ -1331,21 +1434,27 @@ async function runBackendHost(
 
     busy = true;
     interruptRequested = false;
+    let completed = false;
     try {
       await processLineForHost(line, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested);
+      completed = true;
     } catch (err) {
       const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
       await emit({ type: "error", message: msg });
     } finally {
       busy = false;
     }
-    // session_memory checkpoint：compact 连续性底座，与 REPL 模式对称。
-    try {
-      updateSessionMemoryFile(process.cwd(), bundle.queryEngine.getHistory(), { sessionId: currentSessionId });
-    } catch {
-      // best-effort
+    // End-of-turn memory maintenance, kept symmetric with REPL mode.
+    if (completed) {
+      await maintainMemoryAfterTurn({
+        bundle,
+        settings: currentSettings,
+        model: currentSettings.model,
+        memoryManager,
+        memoryDir,
+        sessionId: currentSessionId,
+      });
     }
-    await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
   }
 
   // 退出/shutdown：注销 swarm listener，避免泄漏与对已关闭 stdout 的写入。
@@ -1618,6 +1727,141 @@ function buildStatePayload(settings: Settings, mcpManager?: McpClientManager): R
     input_tokens: 0,
     output_tokens: 0,
   };
+}
+
+// End-of-turn memory maintenance shared by REPL and TUI backend.
+export function isSessionMemoryEnabled(settings: Settings): boolean {
+  return settings.memory?.enabled !== false && settings.memory?.sessionMemoryEnabled !== false;
+}
+
+export function isMemoryAutoExtractEnabled(settings: Settings): boolean {
+  return settings.memory?.enabled !== false && settings.memory?.autoExtractEnabled === true;
+}
+
+export function memoryAutoExtractMaxRecords(settings: Settings): number {
+  const configured = settings.memory?.autoExtractMaxRecords;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return 3;
+}
+
+export async function buildMemoryExtractionManifest(
+  memoryManager: MemoryManager,
+  limit = 80,
+): Promise<string> {
+  return (await memoryManager.getAll())
+    .slice(0, limit)
+    .map((entry) => {
+      const name = String(entry.metadata?.name ?? entry.id);
+      const description = String(entry.metadata?.description ?? "").slice(0, 80);
+      return `- ${name}: ${description}`;
+    })
+    .join("\n");
+}
+
+async function maybeExtractMemoriesAfterTurn(options: {
+  bundle: RuntimeBundle;
+  settings: Settings;
+  model: string;
+  memoryManager: MemoryManager;
+  memoryDir: string;
+  cwd: string;
+}): Promise<void> {
+  if (!isMemoryAutoExtractEnabled(options.settings)) return;
+
+  try {
+    const history = options.bundle.queryEngine.getHistory() as any[];
+    if (history.length < 2) return;
+
+    const { extractMemoriesFromTurn } = await import("@openharness/services");
+    await extractMemoriesFromTurn({
+      apiClient: options.bundle.apiClient,
+      model: options.model,
+      messages: history,
+      manager: options.memoryManager,
+      existingManifest: await buildMemoryExtractionManifest(options.memoryManager),
+      memoryDir: options.memoryDir,
+      cwd: options.cwd,
+      maxRecords: memoryAutoExtractMaxRecords(options.settings),
+    });
+  } catch {
+    // Memory extraction is opportunistic and must never disturb the main turn.
+  }
+}
+
+async function maybeRunAutoDreamAfterTurn(options: {
+  settings: Settings;
+  model: string;
+  memoryManager: MemoryManager;
+  memoryDir: string;
+  cwd: string;
+  sessionId?: string;
+}): Promise<void> {
+  if (!options.settings.memory?.enabled || !options.settings.memory.autoDreamEnabled) return;
+
+  try {
+    const { executeAutoDream, getProjectSessionDir } = await import("@openharness/services");
+    const stale = await options.memoryManager.findStaleCandidates();
+    const staleSection = stale.length
+      ? stale
+        .slice(0, 20)
+        .map((entry) => `- ${entry.id}: ${entry.id}.md (importance=${entry.importance ?? 0}, updated_at=${new Date(entry.updatedAt).toISOString().slice(0, 10)})`)
+        .join("\n")
+      : undefined;
+
+    await executeAutoDream({
+      cwd: options.cwd,
+      settings: options.settings,
+      memoryDir: options.memoryDir,
+      sessionDir: getProjectSessionDir(options.cwd),
+      model: options.model,
+      currentSessionId: options.sessionId,
+      appLabel: "openharness",
+      staleSection,
+    });
+  } catch {
+    // Auto-dream is a background maintenance hook; failures stay silent here.
+  }
+}
+
+async function maintainMemoryAfterTurn(options: {
+  bundle: RuntimeBundle;
+  settings: Settings;
+  model: string;
+  memoryManager: MemoryManager;
+  memoryDir: string;
+  sessionId?: string;
+}): Promise<void> {
+  const cwd = process.cwd();
+
+  if (isSessionMemoryEnabled(options.settings)) {
+    try {
+      updateSessionMemoryFile(cwd, options.bundle.queryEngine.getHistory(), { sessionId: options.sessionId });
+    } catch {
+      // best-effort
+    }
+  }
+
+  await maybeExtractMemoriesAfterTurn({
+    bundle: options.bundle,
+    settings: options.settings,
+    model: options.model,
+    memoryManager: options.memoryManager,
+    memoryDir: options.memoryDir,
+    cwd,
+  });
+
+  await saveSessionSnapshot(options.sessionId, options.bundle.queryEngine, options.model);
+
+  await maybeRunAutoDreamAfterTurn({
+    settings: options.settings,
+    model: options.model,
+    memoryManager: options.memoryManager,
+    memoryDir: options.memoryDir,
+    cwd,
+    sessionId: options.sessionId,
+  });
 }
 
 /**

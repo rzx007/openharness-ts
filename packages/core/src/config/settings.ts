@@ -9,7 +9,17 @@ const DEFAULT_SETTINGS: Settings = {
   maxTokens: 16384,
   maxTurns: 50,
   permission: { mode: "default" },
-  memory: { enabled: true, maxFiles: 5, maxEntrypointLines: 200 },
+  memory: {
+    enabled: true,
+    maxFiles: 5,
+    maxEntrypointLines: 200,
+    sessionMemoryEnabled: true,
+    autoExtractEnabled: false,
+    autoExtractMaxRecords: 3,
+    autoDreamEnabled: false,
+    autoDreamMinHours: 24,
+    autoDreamMinSessions: 5,
+  },
   sandbox: { enabled: false },
   effort: "medium",
   passes: 1,
@@ -37,12 +47,24 @@ export async function loadSettings(
   const fileSettings = await loadFromFile();
 
   // 按优先级合并所有配置源
-  return {
+  const merged = {
     ...DEFAULT_SETTINGS,
     ...fileSettings,
     ...envSettings,
     ...cliOverrides,
   };
+  merged.memory = {
+    ...DEFAULT_SETTINGS.memory,
+    ...fileSettings?.memory,
+    ...envSettings.memory,
+    ...cliOverrides?.memory,
+    enabled: cliOverrides?.memory?.enabled
+      ?? envSettings.memory?.enabled
+      ?? fileSettings?.memory?.enabled
+      ?? DEFAULT_SETTINGS.memory?.enabled
+      ?? true,
+  };
+  return merged;
 }
 
 /**

@@ -46,6 +46,8 @@ skill 动态注册为 `/<skill>`（E.5），插件命令注册为 `/插件名:�
 | `/remember` | 立刻从本会话提取持久记忆（LLM 提议 + 签名去重） |
 | `/dream` | 记忆梦境整合：后台子进程重组 memory 目录（`--preview` 只提方案；锁/备份/回滚见 [memory-system.md](memory-system.md)） |
 
+自动记忆提取与自动 dream 默认关闭，可分别通过 `/config set memory.autoExtractEnabled true`、`/config set memory.autoDreamEnabled true` 开启。session checkpoint 默认开启，可用 `/config set memory.sessionMemoryEnabled false` 关闭。
+
 ### 插件与扩展
 
 | 命令 | 用法 / 说明 |

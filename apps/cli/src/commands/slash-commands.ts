@@ -688,7 +688,14 @@ export function registerBuiltinCommandsOnRegistry(
 
         await updateSettings(patch as Partial<Settings>);
 
-        if (key === "effort" || key === "passes" || key === "fastMode" || key === "systemPrompt") {
+        if (
+          key === "effort" ||
+          key === "passes" ||
+          key === "fastMode" ||
+          key === "systemPrompt" ||
+          key === "memory" ||
+          key.startsWith("memory.")
+        ) {
           await refreshSystemPrompt();
         }
         if (key === "maxTurns" && typeof coerced === "number") {
@@ -1051,7 +1058,7 @@ export function registerBuiltinCommandsOnRegistry(
         lines.push(`API Key:        (not set)`);
       }
 
-      const memoryDir = getMemoryDir();
+      const memoryDir = ctx.memoryDir ?? getMemoryDir();
       lines.push("", `Memory dir:     ${memoryDir}`);
 
       if (memoryManager) {
@@ -1167,7 +1174,7 @@ export function registerBuiltinCommandsOnRegistry(
 
       const args = parseArgs(cmdCtx.raw.replace(/^\/\S+\s*/, ""));
       const sub = args[0];
-      const memoryDir = getMemoryDir();
+      const memoryDir = ctx.memoryDir ?? getMemoryDir();
 
       if (!sub || sub === "list") {
         const entries = await memoryManager.getAll();
@@ -1205,6 +1212,7 @@ export function registerBuiltinCommandsOnRegistry(
           return { success: false, error: "Usage: /memory add <content>" };
         }
         const entry = await memoryManager.add(content);
+        await refreshSystemPrompt();
         return { success: true, output: `Memory added: ${entry.id}` };
       }
 
@@ -1213,6 +1221,7 @@ export function registerBuiltinCommandsOnRegistry(
         if (!deleted) {
           return { success: false, error: `Entry not found: ${args[1]}` };
         }
+        await refreshSystemPrompt();
         return { success: true, output: `Memory removed: ${args[1]}` };
       }
 
@@ -1616,9 +1625,22 @@ function coerceConfigValue(key: string, value: string): unknown {
     case "vimMode":
     case "voiceMode":
     case "fastMode":
+    case "memory.enabled":
+    case "memory.sessionMemoryEnabled":
+    case "memory.autoExtractEnabled":
+    case "memory.autoDreamEnabled":
       if (value === "true" || value === "on") return true;
       if (value === "false" || value === "off") return false;
       return undefined;
+
+    case "memory.maxFiles":
+    case "memory.maxEntrypointLines":
+    case "memory.autoExtractMaxRecords":
+    case "memory.autoDreamMinHours":
+    case "memory.autoDreamMinSessions": {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    }
 
     case "permission.mode":
       if (["default", "plan", "full_auto"].includes(value)) return value;

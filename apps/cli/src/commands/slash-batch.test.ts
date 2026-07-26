@@ -62,6 +62,17 @@ afterEach(() => {
 });
 
 describe("E.2 批次命令", () => {
+  it("/config set coerces memory booleans and numbers", async () => {
+    const registry = makeRegistry();
+    const enabled = await registry.execute("/config", { args: {}, raw: "/config set memory.autoExtractEnabled true" });
+    expect(enabled.success).toBe(true);
+    expect(savedSettings).toEqual({ memory: { autoExtractEnabled: true } });
+
+    const maxRecords = await registry.execute("/config", { args: {}, raw: "/config set memory.autoExtractMaxRecords 5" });
+    expect(maxRecords.success).toBe(true);
+    expect(savedSettings).toEqual({ memory: { autoExtractMaxRecords: 5 } });
+  });
+
   it("/stats 输出会话统计各字段", async () => {
     const result = await makeRegistry().execute("/stats", { args: {}, raw: "/stats" });
     expect(result.success).toBe(true);

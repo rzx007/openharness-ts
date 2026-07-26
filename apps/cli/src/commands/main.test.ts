@@ -12,6 +12,9 @@ import {
   messagesToTranscriptItems,
   isNewConversationSlashCommand,
   processLineForHost,
+  isSessionMemoryEnabled,
+  isMemoryAutoExtractEnabled,
+  memoryAutoExtractMaxRecords,
 } from "./main";
 
 /** 构造一个最小 SkillDefinition（补齐新增必填字段的默认值）。 */
@@ -72,6 +75,26 @@ describe("buildHostCommandDetails", () => {
     expect(help).toEqual({ name: "/help", description: "help" });
     const newCmd = details.find((d) => d.name === "/new");
     expect(newCmd?.description).toBe("new conversation");
+  });
+});
+
+describe("memory auto extraction config", () => {
+  it("keeps session memory enabled by default but follows the global memory switch", () => {
+    expect(isSessionMemoryEnabled({ memory: { enabled: true } } as any)).toBe(true);
+    expect(isSessionMemoryEnabled({ memory: { enabled: true, sessionMemoryEnabled: false } } as any)).toBe(false);
+    expect(isSessionMemoryEnabled({ memory: { enabled: false, sessionMemoryEnabled: true } } as any)).toBe(false);
+  });
+
+  it("is opt-in even when memory itself is enabled", () => {
+    expect(isMemoryAutoExtractEnabled({ memory: { enabled: true } } as any)).toBe(false);
+    expect(isMemoryAutoExtractEnabled({ memory: { enabled: true, autoExtractEnabled: true } } as any)).toBe(true);
+    expect(isMemoryAutoExtractEnabled({ memory: { enabled: false, autoExtractEnabled: true } } as any)).toBe(false);
+  });
+
+  it("normalizes max extraction records", () => {
+    expect(memoryAutoExtractMaxRecords({ memory: { enabled: true } } as any)).toBe(3);
+    expect(memoryAutoExtractMaxRecords({ memory: { enabled: true, autoExtractMaxRecords: 2.8 } } as any)).toBe(2);
+    expect(memoryAutoExtractMaxRecords({ memory: { enabled: true, autoExtractMaxRecords: 0 } } as any)).toBe(3);
   });
 });
 

@@ -2,7 +2,7 @@
 
 > 状态：已实现合并。记忆体系全景见 [memory-system.md](./memory-system.md)。
 > 移植 Python services 的四个记忆/上下文内功模块（~1170 行），
-> 与 C.5 personalization 同脉。cron 升级 / session 存储增强 / lsp 真 AST 留后续刀。
+> 与 C.5 personalization 同脉。team scope / lsp 真 AST 留后续刀。
 
 ## 四个模块
 
@@ -31,19 +31,19 @@
 - **autodream 锁**：实现时改为自写 lock.ts——mtime 即「上次整合时间」+
   PID 活性检测 + 失败回滚 mtime 的语义与 swarm 的 exclusiveFileLock（互斥临界区）
   并不同构，复用反而别扭。
-- **dataDir**：session_memory 用 `get_data_dir()`——TS 对应 core 的数据目录
-  助手（若只有 getConfigDir 则用其下 `data/`，实现时核对）。
+- **dataDir**：session_memory 与 memory 目录都落在 core 的数据目录下，并按
+  `<项目名>-<sha1(cwd)前12>` 隔离项目。
 - **触发接线**（最后一轮，对照 Python 消费点 grep 确认）：
   - tool_outputs/session_memory → compact-service（B.2 的 compact 链路）；
   - memory_extract → 回合完成后 best-effort（参考 Python engine/loop 调用点）；
-  - autodream → 手动触发优先（`/dream` 或导出函数），定时属 cron 刀。
+  - autodream → `/dream` 手动触发，或每轮完成后按配置阈值自动触发。
 
 ## 与 Python 差异（实现中补全）
 
 | 点 | Python | TS | 原因 |
 |----|--------|----|------|
 | team secrets 检查 | memory_extract 写前校验 | 跳过 | TS memory 无团队隔离（Phase C 缺口） |
-| autodream 锁 | 自带 lock.py | 复用 swarm exclusiveFileLock | D.5 已建，语义等价 |
+| autodream 锁 | 自带 lock.py | 自写 mtime lock | 与 Python 语义对齐，兼作上次整合时间 |
 | 日志 | logging | 静默/返回值 | TS 无 logger 基建 |
 
 ## 测试
@@ -59,9 +59,10 @@
 
 ## 接线现状（审查后补记）
 
-- ✅ /dream、/remember 斜杠命令（REPL）；REPL 每轮 checkpoint 写入。
-- 留待：compact 边界的 checkpoint **读回**（sessionMemoryToCompactText 已导出
-  未消费）；tool_outputs 阈值接进 compact/microcompact 链路；executeAutoDream
-  自动触发（归 cron 刀）。即 checkpoint 当前只写不读，保护性接线在 compact 侧。
+- ✅ /dream、/remember 斜杠命令；REPL/TUI/print 每轮 checkpoint 写入。
+- ✅ compact 边界的 checkpoint 读回已接入 attachmentsProvider；tool_outputs 阈值已接进 compact/microcompact 链路。
+- ✅ memory_extract 每轮自动触发已接入，默认关闭，受 `memory.autoExtractEnabled` 控制。
+- ✅ executeAutoDream 自动触发已接入，默认关闭，受 `memory.autoDreamEnabled` 与 hours/sessions 阈值控制。
+- 留待：team scope 隔离与密钥扫描。
 - 会话文件命名：TS 是 `<id>.json`（Python `session-*.json`），扫描器两者兼容；
   整合 prompt 里的 `session-*.json` 提示文案沿用 Python 原文。

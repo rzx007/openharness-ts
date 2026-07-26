@@ -114,7 +114,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 ```
 
 > **当前实现状态：✅ 已完整接线。**
-> - 写入：REPL 和 TUI 模式每轮结束后自动写（print 模式不写）
+> - 写入：REPL、TUI、print 模式每轮结束后自动写（可用 `memory.sessionMemoryEnabled=false` 关闭）
 > - 读回：`/compact` 和 autocompact 触发时，通过 `setAttachmentsProvider` 读取 checkpoint，注入摘要 prompt 的 `## Session Memory Checkpoint` 段落
 
 ---
@@ -145,11 +145,11 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 ---
 
-### 层 3b · 持久记忆 `/remember`（跨会话，手动）
+### 层 3b · 持久记忆 `/remember`（跨会话，手动 / 可选自动）
 
 **解决什么问题**：personalization 只抓正则能匹配的机械事实；"我们决定不做 X 因为 Y"、"这个项目偏好方案 Z"这类**语义事实**需要 LLM 来理解。
 
-**触发方式**：你手动敲 `/remember`
+**触发方式**：你手动敲 `/remember`；也可用 `/config set memory.autoExtractEnabled true` 开启每轮结束后的 best-effort 自动提取。
 
 **原理**：
 1. LLM 读取本次会话，找出「值得长期保存、无法从代码/git 推导」的事实（每次 ≤3 条）
@@ -158,7 +158,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 **内置护栏**：提取 prompt 里写死：不存密钥/令牌、只存稳定且不可推导的事实。
 
-> 状态：✅ `/remember` 手动触发已实现；⏳ 按轮自动触发留待。
+> 状态：✅ `/remember` 手动触发已实现；✅ 按轮自动触发已实现，默认关闭，受 `memory.autoExtractEnabled` 与 `memory.autoExtractMaxRecords` 控制。team scope 暂不写入。
 
 ---
 
@@ -166,7 +166,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 **解决什么问题**：memory 目录积累久了会有重复条目、相互矛盾的内容、写着"明天"但已经是两年前的相对日期。
 
-**触发方式**：你手动敲 `/dream`（或 `/dream --preview` 只看方案不执行）
+**触发方式**：你手动敲 `/dream`（或 `/dream --preview` 只看方案不执行）；也可用 `/config set memory.autoDreamEnabled true` 开启阈值满足后的后台自动整合。
 
 **原理**：
 1. 整目录备份（`~/.openharness/data/memory-backups/`）
@@ -177,7 +177,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 **内置护栏**：整合 prompt 里焊死纪律——不从日志臆测用户、不保存密钥/令牌、敏感内容必须标 `Privacy` 标签、一次最多新建 2 个文件。
 
-> 状态：✅ 手动触发已实现；⏳ 自动定期触发（cron）留待。
+> 状态：✅ 手动触发已实现；✅ 自动触发已实现，默认关闭，受 `memory.autoDreamEnabled` 与 hours/sessions 阈值控制。
 
 ---
 
@@ -189,9 +189,9 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 | 时机 | 产生什么 | 写哪里 |
 |------|----------|--------|
-| 本轮结束 | session_memory checkpoint（goal + 消息摘要） | `~/.openharness/data/session-memory/<project>/<id>.md` |
+| 本轮结束 | session_memory checkpoint（goal + 消息摘要） | `~/.openharness/data/session-memory/<project>-<hash>/<id>.md` |
 | 会话结束 | personalization 抽出 `10.0.0.7`、`prod-ml` | `~/.openharness/local_rules/facts.json` + `rules.md` |
-| 你敲 `/remember` | LLM 提取"移除 /clear 的决策" | `~/.openharness/data/memory/<project>/xxx.md` |
+| 你敲 `/remember` | LLM 提取"移除 /clear 的决策" | `~/.openharness/data/memory/<project>-<hash>/xxx.md` |
 | 你敲 `/dream` | 整理 memory 目录，合并重复 | 原地修改 + 备份 |
 
 **下次启动时**：
@@ -204,11 +204,11 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 | | personalization | /remember（memory_extract） |
 |--|-----------------|----------------------------|
-| **触发** | 会话结束自动 | 手动 `/remember` |
+| **触发** | 会话结束自动 | 手动 `/remember`，或开启后每轮自动 |
 | **方法** | 正则（10 个模式） | LLM 语义理解 |
 | **抓什么** | 机械事实：IP、路径、环境名、端点 | 语义事实：决策、偏好、约束 |
 | **成本** | 零（无 LLM 调用） | 有成本（一次 LLM 调用） |
-| **存放位置** | `~/.openharness/local_rules/`（全局） | `memory/<项目>/`（项目级） |
+| **存放位置** | `~/.openharness/local_rules/`（全局） | `~/.openharness/data/memory/<项目>-<hash>/`（项目级） |
 
 ---
 
@@ -216,7 +216,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 | | session_memory checkpoint | session 快照 |
 |--|--------------------------|-------------|
-| **目录** | `~/.openharness/data/session-memory/` | `~/.openharness/data/sessions/` |
+| **目录** | `~/.openharness/data/session-memory/<项目>-<hash>/` | `~/.openharness/data/sessions/<项目>-<hash>/` |
 | **内容** | goal + 消息摘要（12k 上限） | 完整消息历史 + 元数据 |
 | **用途** | 给 compact 提供连续性 | 给 `/resume` 恢复会话 |
 | **由谁读** | compact 边界（attachmentsProvider 注入） | `--continue` / `--resume` |
@@ -231,13 +231,13 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 |------|------|------|
 | tool_outputs inline/preview 截断 | ✅ | applyToolOutputBudget 在 query-engine.ts，写入 messages 前截断 |
 | tool_outputs microCompact 接入 | ✅ | MCP 工具已纳入 microcompactable，同内置工具一起按 keepRecent 清理 |
-| session_memory 每轮写入 | ✅ REPL + TUI | print 模式不写 |
+| session_memory 每轮写入 | ✅ REPL + TUI + print | 受 `memory.enabled` 与 `memory.sessionMemoryEnabled` 控制 |
 | session_memory compact 读回 | ✅ | compact 时经 attachmentsProvider 注入摘要 prompt |
 | personalization 抽取 | ✅ | 10 个正则，会话结束自动 |
 | `/remember` 手动提取 | ✅ | LLM 提取，签名去重 |
-| `/remember` 按轮自动 | ⏳ | 留待 |
+| `/remember` 按轮自动 | ✅ | 默认关闭；`memory.autoExtractEnabled=true` 后每轮结束 best-effort 提取 |
 | `/dream` 手动整合 | ✅ | 备份 + 锁 + 回滚 |
-| `/dream` 自动定期触发 | ⏳ | 归 cron 留待 |
+| `/dream` 自动定期触发 | ✅ | 默认关闭；`memory.autoDreamEnabled=true` 后按 hours/sessions 阈值触发 |
 | memory 团队隔离 / 密钥扫描 | ⏳ | Phase C |
 
 ---

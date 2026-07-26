@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 export interface ResolvedPaths {
@@ -85,6 +86,13 @@ export function getSkillsDir(): string {
 
 export function getMemoryDir(projectRoot?: string): string {
   return resolvePaths(projectRoot).memoryDir;
+}
+
+export function getProjectMemoryDir(projectRoot?: string): string {
+  const root = resolve(projectRoot ?? process.cwd());
+  const key = process.platform === "win32" ? root.toLowerCase() : root;
+  const digest = createHash("sha1").update(key).digest("hex").slice(0, 12);
+  return join(getDataDir(), "memory", `${basename(root)}-${digest}`);
 }
 
 export function getFeedbackDir(): string {

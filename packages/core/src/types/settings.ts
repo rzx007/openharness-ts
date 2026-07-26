@@ -17,6 +17,11 @@ export interface MemoryConfig {
   enabled: boolean;
   maxFiles?: number;
   maxEntrypointLines?: number;
+  /** Keep a deterministic per-session checkpoint for compact continuity. */
+  sessionMemoryEnabled?: boolean;
+  /** Run a best-effort memory extraction pass after completed user turns. */
+  autoExtractEnabled?: boolean;
+  autoExtractMaxRecords?: number;
   /** autodream（记忆梦境整合）开关与触发门槛（E.6）。 */
   autoDreamEnabled?: boolean;
   autoDreamMinHours?: number;
