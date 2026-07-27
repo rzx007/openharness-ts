@@ -169,6 +169,28 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 > 状态：✅ `/remember` 手动触发已实现；✅ 按轮自动触发已实现，默认开启，受 `memory.autoExtractEnabled` 与 `memory.autoExtractMaxRecords` 控制。team scope 暂不写入。
 
+#### 按轮自动提取的精确流程
+
+当 `memory.enabled !== false` 且 `memory.autoExtractEnabled !== false` 时，每个成功完成的用户轮次结束后会进入 `maintainMemoryAfterTurn()`：
+
+1. 先写 session_memory checkpoint。
+2. 再调用 `maybeExtractMemoriesAfterTurn()` 尝试提取长期记忆。
+3. 保存 session snapshot。
+4. 最后按配置尝试 autoDream。
+
+自动提取是 best-effort，不影响主对话。以下情况会跳过或不写入：
+
+- 本轮没有成功完成。
+- 历史消息少于 2 条。
+- 本轮已经手动写过 memory 目录，避免重复提取。
+- 模型没有提出值得保存的长期记忆。
+- 提出的记录全部被拒绝，例如 team scope 暂不写入。
+- 提取过程报错，会被吞掉，不阻断当前对话。
+
+提取时只把最近 12 条消息摘要给模型，默认最多写入 `memory.autoExtractMaxRecords=3` 条。写入后由 `MemoryManager` 做签名去重。下一轮会按当前用户输入检索相关记忆，并以临时 `system-reminder` 注入，不写进消息历史。
+
+注意：代码默认开启不等于本机一定开启；用户 `settings.json` 里的显式配置会覆盖默认值。例如已有配置写了 `memory.autoExtractEnabled=false` 时，需要用 `/config set memory.autoExtractEnabled true` 重新打开。
+
 ---
 
 ### 层 4 · `/dream` 梦境整合（定期维护）
