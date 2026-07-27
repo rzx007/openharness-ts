@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { CommandRegistry } from "@openharness/commands";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
@@ -12,6 +15,7 @@ import {
   messagesToTranscriptItems,
   isNewConversationSlashCommand,
   processLineForHost,
+  buildUserContentWithAttachments,
   isSessionMemoryEnabled,
   isMemoryAutoExtractEnabled,
   memoryAutoExtractMaxRecords,
@@ -381,6 +385,51 @@ describe("messagesToTranscriptItems", () => {
 });
 
 describe("processLineForHost", () => {
+  it("builds multimodal user content from image attachments", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-attachment-"));
+    const previousCacheDir = process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR;
+    try {
+      process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR = join(dir, "cache");
+      const imagePath = join(dir, "shot.png");
+      await writeFile(imagePath, Buffer.from([1, 2, 3, 4]));
+
+      const content = await buildUserContentWithAttachments("what is this?", [
+        { type: "image", path: imagePath },
+      ]);
+
+      expect(Array.isArray(content)).toBe(true);
+      const blocks = content as any[];
+      expect(blocks[0]).toEqual({ type: "text", text: "what is this?" });
+      expect(blocks[1]).toMatchObject({
+        type: "image",
+        source: { type: "file", mediaType: "image/png", sizeBytes: 4 },
+      });
+      expect("data" in blocks[1].source).toBe(false);
+      expect(await readFile(blocks[1].source.path)).toEqual(Buffer.from([1, 2, 3, 4]));
+    } finally {
+      if (previousCacheDir === undefined) {
+        delete process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR;
+      } else {
+        process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR = previousCacheDir;
+      }
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsupported image attachment extensions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-attachment-"));
+    try {
+      const imagePath = join(dir, "vector.svg");
+      await writeFile(imagePath, "<svg />");
+
+      await expect(buildUserContentWithAttachments("look", [
+        { type: "image", path: imagePath },
+      ])).rejects.toThrow("Unsupported image attachment extension");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("flushes streaming assistant text before tool events so realtime order matches history", async () => {
     const emitted: any[] = [];
     const bundle = {

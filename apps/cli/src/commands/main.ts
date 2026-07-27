@@ -1,7 +1,7 @@
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import type { RuntimeBundle, Settings, StreamEvent } from "@openharness/core";
-import { loadSettings, saveSettings as saveSettingsCore, getProjectMemoryDir, getSkillsDir } from "@openharness/core";
+import type { ContentBlock, RuntimeBundle, Settings, StreamEvent } from "@openharness/core";
+import { loadSettings, saveSettings as saveSettingsCore, getProjectMemoryDir, getSkillsDir, getDataDir } from "@openharness/core";
 import { CommandRegistry } from "@openharness/commands";
 import { HookExecutor } from "@openharness/hooks";
 import { McpClientManager } from "@openharness/mcp";
@@ -15,7 +15,7 @@ import {
   type SwarmTeammateSnapshot,
 } from "../swarm-status";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
-import { computeToolDiff } from "@openharness/tools";
+import { computeToolDiff, resolveToolPath } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
 import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
@@ -31,6 +31,7 @@ import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 
 type BackendHostEvent = {
   type: string;
@@ -61,6 +62,14 @@ type BackendHostEvent = {
   swarm_notifications?: unknown[] | null;
 };
 
+type FrontendAttachment = {
+  type?: "image" | string | null;
+  path?: string | null;
+  data?: string | null;
+  media_type?: string | null;
+  mime_type?: string | null;
+};
+
 type FrontendRequest = {
   type: string;
   line?: string | null;
@@ -72,6 +81,7 @@ type FrontendRequest = {
   answer?: string | null;
   /** delete_session 请求携带的会话 ID。 */
   session_id?: string | null;
+  attachments?: FrontendAttachment[] | null;
 };
 
 interface MainOptions {
@@ -115,6 +125,153 @@ interface SessionSnapshot {
   createdAt: number;
   updatedAt: number;
   usage: { inputTokens: number; outputTokens: number };
+}
+
+const IMAGE_MEDIA_TYPES: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
+const DEFAULT_MAX_IMAGE_ATTACHMENTS = 4;
+const DEFAULT_MAX_IMAGE_BYTES = 5_000_000;
+
+function positiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.floor(value);
+}
+
+function maxImageAttachments(): number {
+  return positiveIntegerEnv("OPENHARNESS_MAX_IMAGE_ATTACHMENTS", DEFAULT_MAX_IMAGE_ATTACHMENTS);
+}
+
+function maxImageBytes(): number {
+  return positiveIntegerEnv("OPENHARNESS_MAX_IMAGE_BYTES", DEFAULT_MAX_IMAGE_BYTES);
+}
+
+function normalizeMediaType(mediaType: string): string {
+  const normalized = mediaType.trim().toLowerCase();
+  return normalized === "image/jpg" ? "image/jpeg" : normalized;
+}
+
+function mediaTypeForPath(filePath: string, fallback?: string | null): string {
+  if (fallback) return normalizeMediaType(fallback);
+  const ext = filePath.split(/[.]/).pop()?.toLowerCase() ?? "";
+  const mediaType = IMAGE_MEDIA_TYPES[ext];
+  if (!mediaType) {
+    throw new Error(`Unsupported image attachment extension: ${ext || "(none)"}`);
+  }
+  return mediaType;
+}
+
+function splitDataUri(data: string, fallbackMediaType: string): { mediaType: string; data: string } {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(data);
+  if (!match) return { mediaType: normalizeMediaType(fallbackMediaType), data };
+  return { mediaType: normalizeMediaType(match[1]!), data: match[2]! };
+}
+
+function assertSupportedImage(mediaType: string): void {
+  if (!IMAGE_EXTENSIONS[mediaType]) {
+    throw new Error(`Unsupported image attachment type: ${mediaType}`);
+  }
+}
+
+function assertImageSize(sizeBytes: number): void {
+  const limit = maxImageBytes();
+  if (sizeBytes > limit) {
+    throw new Error(`Image attachment is too large (${sizeBytes} bytes, max ${limit} bytes).`);
+  }
+}
+
+function imageAttachmentCacheDir(): string {
+  return process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR
+    ?? join(getDataDir(), "attachments", "images");
+}
+
+async function cacheImageBuffer(buffer: Buffer, mediaType: string): Promise<string> {
+  const dir = imageAttachmentCacheDir();
+  await mkdir(dir, { recursive: true });
+  const target = join(dir, `${randomUUID()}.${IMAGE_EXTENSIONS[mediaType] ?? "img"}`);
+  await writeFile(target, buffer);
+  return target;
+}
+
+async function cacheImageFile(filePath: string, mediaType: string): Promise<string> {
+  const dir = imageAttachmentCacheDir();
+  await mkdir(dir, { recursive: true });
+  const target = join(dir, `${randomUUID()}.${IMAGE_EXTENSIONS[mediaType] ?? "img"}`);
+  await copyFile(filePath, target);
+  return target;
+}
+
+async function attachmentToImageBlock(attachment: FrontendAttachment): Promise<ContentBlock | null> {
+  const mediaTypeHint = attachment.media_type ?? attachment.mime_type ?? null;
+  if (attachment.data) {
+    const { mediaType, data } = splitDataUri(attachment.data, mediaTypeHint ?? "image/jpeg");
+    assertSupportedImage(mediaType);
+    const buffer = Buffer.from(data, "base64");
+    assertImageSize(buffer.byteLength);
+    const path = await cacheImageBuffer(buffer, mediaType);
+    return {
+      type: "image",
+      source: { type: "file", mediaType, path, sizeBytes: buffer.byteLength },
+    };
+  }
+
+  if (!attachment.path) return null;
+  const filePath = resolveToolPath(attachment.path, process.cwd());
+  const mediaType = mediaTypeForPath(filePath, mediaTypeHint);
+  assertSupportedImage(mediaType);
+  const info = await stat(filePath);
+  if (!info.isFile()) {
+    throw new Error(`Image attachment is not a file: ${filePath}`);
+  }
+  assertImageSize(info.size);
+  const path = await cacheImageFile(filePath, mediaType);
+  return {
+    type: "image",
+    source: {
+      type: "file",
+      mediaType,
+      path,
+      sizeBytes: info.size,
+      originalPath: filePath,
+    },
+  };
+}
+
+export async function buildUserContentWithAttachments(
+  line: string,
+  attachments?: FrontendAttachment[] | null,
+): Promise<string | ContentBlock[]> {
+  if (!attachments?.length) return line;
+
+  const blocks: ContentBlock[] = [];
+  if (line.trim()) blocks.push({ type: "text", text: line });
+
+  let imageCount = 0;
+  const imageLimit = maxImageAttachments();
+  for (const attachment of attachments) {
+    if ((attachment.type ?? "image") !== "image") continue;
+    imageCount += 1;
+    if (imageCount > imageLimit) {
+      throw new Error(`Too many image attachments (max ${imageLimit}).`);
+    }
+    const block = await attachmentToImageBlock(attachment);
+    if (block) blocks.push(block);
+  }
+
+  return blocks.length > 0 ? blocks : line;
 }
 
 /**
@@ -1436,7 +1593,8 @@ async function runBackendHost(
     interruptRequested = false;
     let completed = false;
     try {
-      await processLineForHost(line, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested);
+      const userContent = await buildUserContentWithAttachments(line, request.attachments);
+      await processLineForHost(line, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested, userContent);
       completed = true;
     } catch (err) {
       const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
@@ -1569,6 +1727,8 @@ export function messagesToTranscriptItems(messages: unknown[]): Array<{
       } else if (b.type === "text" && typeof b.text === "string") {
         const text = b.text.trim();
         if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
+      } else if (b.type === "image") {
+        items.push({ role: role === "assistant" ? "assistant" : "user", text: "[image]" });
       }
     }
   }
@@ -1583,6 +1743,7 @@ export async function processLineForHost(
   lastToolInputs: Map<string, Record<string, unknown>>,
   settings: Settings,
   shouldInterrupt?: () => boolean,
+  userContent?: string | ContentBlock[],
 ): Promise<void> {
   await emit({
     type: "transcript_item",
@@ -1601,7 +1762,7 @@ export async function processLineForHost(
   };
 
   try {
-    for await (const event of bundle.queryEngine.submitMessage(line) as AsyncIterable<StreamEvent>) {
+    for await (const event of bundle.queryEngine.submitMessage(userContent ?? line) as AsyncIterable<StreamEvent>) {
       if (shouldInterrupt?.()) break;
       if (event.type === "text_delta") {
         await emit({ type: "assistant_delta", message: event.delta });

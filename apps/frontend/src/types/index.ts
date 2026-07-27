@@ -135,4 +135,11 @@ export type FrontendRequest = {
   answer?: string | null;
   /** delete_session 时携带的会话 ID。 */
   session_id?: string | null;
+  attachments?: Array<{
+    type?: "image" | string | null;
+    path?: string | null;
+    data?: string | null;
+    media_type?: string | null;
+    mime_type?: string | null;
+  }> | null;
 };
