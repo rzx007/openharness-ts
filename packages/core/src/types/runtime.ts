@@ -2,13 +2,13 @@ import type { StreamingMessageClient } from "./client";
 import type { ToolRegistry } from "./tools";
 import type { PermissionChecker } from "./permissions";
 import type { HookExecutor } from "./hooks";
-import type { Message } from "./messages";
+import type { ContentBlock, Message } from "./messages";
 import type { StreamEvent } from "./events";
 import type { Settings } from "./settings";
 import type { CompactAttachmentsProvider } from "../engine/compact-service";
 
 export interface QueryEngine {
-  submitMessage(content: string): AsyncIterable<StreamEvent>;
+  submitMessage(content: string | ContentBlock[]): AsyncIterable<StreamEvent>;
   getHistory(): Message[];
   compact(): Promise<void>;
   clear(): void;

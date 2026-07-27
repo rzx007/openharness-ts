@@ -97,6 +97,28 @@ describe("QueryEngine", () => {
     expect(history[1]!.type).toBe("assistant");
   });
 
+  it("preserves multimodal user content", async () => {
+    const events: StreamEvent[] = [
+      { type: "text_delta", delta: "seen" },
+      { type: "complete", stopReason: "end_turn" },
+    ];
+    const engine = new QueryEngine(
+      createMockStreamClient(events),
+      new ToolRegistry(),
+      createMockPermissionChecker(),
+      createMockHookExecutor()
+    );
+
+    const content = [
+      { type: "text" as const, text: "describe this" },
+      { type: "image" as const, source: { type: "file" as const, mediaType: "image/png", path: "/tmp/openharness-test.png" } },
+    ];
+    for await (const _ of engine.submitMessage(content)) {}
+
+    const history = engine.getHistory();
+    expect(history[0]).toMatchObject({ type: "user", content });
+  });
+
   it("executes tool calls", async () => {
     const tool: ToolDefinition = {
       name: "Echo",

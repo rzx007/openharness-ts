@@ -231,7 +231,7 @@ describe("image handling", () => {
         type: "user",
         content: [
           { type: "text", text: "look" },
-          { type: "image", source: { type: "base64", mediaType: "image/png", data: "AAAA" } },
+          { type: "image", source: { type: "file", mediaType: "image/png", path: "/tmp/compact-image.png" } },
         ],
       },
     ];
@@ -250,7 +250,7 @@ describe("image handling", () => {
         type: "user",
         content: [
           { type: "text", text: "screenshot:" },
-          { type: "image", source: { type: "base64", mediaType: "image/png", data: "HUGEPAYLOAD" } },
+          { type: "image", source: { type: "file", mediaType: "image/png", path: "/tmp/huge-payload.png" } },
         ],
       },
     ];
@@ -269,7 +269,7 @@ describe("image handling", () => {
         type: "user",
         content: [
           { type: "text", text: "here is an image" },
-          { type: "image", source: { type: "base64", mediaType: "image/png", data: "SECRETIMAGEDATA12345" } },
+          { type: "image", source: { type: "file", mediaType: "image/png", path: "/tmp/secret-image.png" } },
         ],
       },
       { type: "assistant", content: "got it" },
@@ -280,7 +280,31 @@ describe("image handling", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. context collapse — deterministic shrink of oversized text
+// 4. compact attachments
+// ---------------------------------------------------------------------------
+
+describe("compact attachments", () => {
+  it("includes provider session memory in the summarizer prompt", async () => {
+    const client = makeSummaryClient("<summary>ok</summary>");
+    const svc = new CompactService(SMALL_MAX, 2, {
+      client,
+      attachmentsProvider: () => ({
+        sessionMemory: "remember the current checkpoint",
+        taskFocus: "finish compact docs",
+      }),
+    });
+
+    await svc.autoCompact(bigConversation(15));
+
+    expect(client.lastPrompt).toContain("## Session Memory Checkpoint");
+    expect(client.lastPrompt).toContain("remember the current checkpoint");
+    expect(client.lastPrompt).toContain("## Current Task");
+    expect(client.lastPrompt).toContain("finish compact docs");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. context collapse — deterministic shrink of oversized text
 // ---------------------------------------------------------------------------
 
 describe("context collapse", () => {
@@ -320,7 +344,7 @@ describe("context collapse", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. boundary marker insertion
+// 6. boundary marker insertion
 // ---------------------------------------------------------------------------
 
 describe("boundary marker", () => {
@@ -346,7 +370,7 @@ describe("boundary marker", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. PRE/POST_COMPACT hooks
+// 7. PRE/POST_COMPACT hooks
 // ---------------------------------------------------------------------------
 
 describe("pre/post compact hooks", () => {
@@ -384,7 +408,7 @@ describe("pre/post compact hooks", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. progress callback + checkpoints
+// 8. progress callback + checkpoints
 // ---------------------------------------------------------------------------
 
 describe("progress callback and checkpoints", () => {

@@ -71,6 +71,16 @@ function applyToolOutputBudget(content: ContentBlock[]): ContentBlock[] {
   return out;
 }
 
+function userContentToText(content: string | ContentBlock[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((block) => {
+      if (block.type === "text") return block.text;
+      return "[image]";
+    })
+    .join("\n");
+}
+
 /**
  * Adapt a {@link StreamingMessageClient} into the {@link CompactClient} shape
  * that {@link CompactService} expects for LLM summarization.
@@ -190,7 +200,7 @@ export class QueryEngine implements IQueryEngine {
    * @param content - 用户发送的消息内容
    * @returns 一个异步迭代器，yield 出流式事件（StreamEvent），包括文本增量、工具使用开始/结束、用量信息等
    */
-  async *submitMessage(content: string): AsyncIterable<StreamEvent> {
+  async *submitMessage(content: string | ContentBlock[]): AsyncIterable<StreamEvent> {
     // 防御：若历史末尾是含 toolUses 的 assistant 消息但没有对应的 tool_result，
     // 说明上轮执行被中断/崩溃，历史不完整。直接删掉它，避免 API 返回 400。
     while (this.messages.length > 0) {
@@ -211,7 +221,7 @@ export class QueryEngine implements IQueryEngine {
     let memoryContext: string | null = null;
     if (this.memoryRetriever) {
       try {
-        memoryContext = await this.memoryRetriever(content);
+        memoryContext = await this.memoryRetriever(userContentToText(content));
       } catch {
         // retriever failure is non-fatal; continue without memory context
       }

@@ -34,11 +34,15 @@ export interface TextBlock {
 
 export interface ImageBlock {
   type: "image";
-  source: {
-    type: "base64";
-    mediaType: string;
-    data: string;
-  };
+  source: ImageSource;
+}
+
+export interface ImageSource {
+  type: "file";
+  mediaType: string;
+  path: string;
+  sizeBytes?: number;
+  originalPath?: string;
 }
 
 export interface ToolUseBlock {

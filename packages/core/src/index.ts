@@ -6,6 +6,7 @@ export type {
   ToolResultMessage,
   TextBlock,
   ImageBlock,
+  ImageSource,
   ToolUseBlock,
   ContentBlock,
 } from "./types/messages";

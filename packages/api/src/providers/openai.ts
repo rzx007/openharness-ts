@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { readFile } from "node:fs/promises";
 import type {
   StreamingMessageClient,
   StreamMessageParams,
@@ -99,15 +100,21 @@ function emptyReasoningRequired(): boolean {
  */
 export function convertUserContentToOpenAI(
   blocks: ContentBlock[],
-): string | OpenAI.ChatCompletionContentPart[] {
+): Promise<string | OpenAI.ChatCompletionContentPart[]> {
   const hasImage = blocks.some((b) => b.type === "image");
   if (!hasImage) {
-    return blocks
+    return Promise.resolve(blocks
       .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
       .map((b) => b.text)
-      .join("");
+      .join(""));
   }
 
+  return convertMultimodalContentToOpenAI(blocks);
+}
+
+async function convertMultimodalContentToOpenAI(
+  blocks: ContentBlock[],
+): Promise<OpenAI.ChatCompletionContentPart[]> {
   const content: OpenAI.ChatCompletionContentPart[] = [];
   for (const block of blocks) {
     if (block.type === "text" && block.text) {
@@ -115,13 +122,18 @@ export function convertUserContentToOpenAI(
     } else if (block.type === "image") {
       content.push({
         type: "image_url",
-        image_url: {
-          url: `data:${block.source.mediaType};base64,${block.source.data}`,
-        },
+        image_url: { url: await imageBlockToDataUrl(block) },
       });
     }
   }
   return content;
+}
+
+async function imageBlockToDataUrl(
+  block: Extract<ContentBlock, { type: "image" }>,
+): Promise<string> {
+  const raw = await readFile(block.source.path);
+  return `data:${block.source.mediaType};base64,${raw.toString("base64")}`;
 }
 
 export class OpenAICompatibleClient implements StreamingMessageClient {
@@ -144,7 +156,7 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
   }
 
   async *streamMessage(params: StreamMessageParams): AsyncIterable<StreamEvent> {
-    const messages = this.convertMessages(params);
+    const messages = await this.convertMessages(params);
     const tools = params.tools?.length ? params.tools.map(this.convertTool) : undefined;
 
     const createParams: OpenAI.ChatCompletionCreateParamsStreaming = {
@@ -305,7 +317,7 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
     return error instanceof Error ? error : new Error(message);
   }
 
-  private convertMessages(params: StreamMessageParams): OpenAI.ChatCompletionMessageParam[] {
+  private async convertMessages(params: StreamMessageParams): Promise<OpenAI.ChatCompletionMessageParam[]> {
     const messages: OpenAI.ChatCompletionMessageParam[] = [];
 
     if (params.system) {
@@ -319,7 +331,7 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
           if (typeof msg.content === "string") {
             messages.push({ role: "user", content: msg.content });
           } else {
-            const content = convertUserContentToOpenAI(msg.content);
+            const content = await convertUserContentToOpenAI(msg.content);
             if (typeof content === "string") {
               if (content.trim()) {
                 messages.push({ role: "user", content });

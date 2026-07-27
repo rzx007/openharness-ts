@@ -1,4 +1,5 @@
 import { platform, machine } from "node:os";
+import { readFile } from "node:fs/promises";
 import type {
   ContentBlock,
   Message,
@@ -72,12 +73,13 @@ export class CodexSubscriptionClient implements StreamingMessageClient {
   }
 
   private async *streamOnce(params: StreamMessageParams): AsyncIterable<StreamEvent> {
+    const input = await convertMessagesToCodex(params.messages);
     const body: Record<string, unknown> = {
       model: params.model,
       store: false,
       stream: true,
       instructions: params.system || "You are OpenHarness.",
-      input: convertMessagesToCodex(params.messages),
+      input,
       text: { verbosity: "medium" },
       include: ["reasoning.encrypted_content"],
       tool_choice: "auto",
@@ -178,11 +180,11 @@ function extractAccountId(token: string): string {
   return accountId;
 }
 
-function convertMessagesToCodex(messages: Message[]): Array<Record<string, unknown>> {
+async function convertMessagesToCodex(messages: Message[]): Promise<Array<Record<string, unknown>>> {
   const result: Array<Record<string, unknown>> = [];
   for (const msg of messages) {
     if (msg.type === "user") {
-      const userContent = convertUserContent(msg.content);
+      const userContent = await convertUserContent(msg.content);
       if (userContent.length) {
         result.push({ role: "user", content: userContent });
       }
@@ -214,7 +216,7 @@ function convertMessagesToCodex(messages: Message[]): Array<Record<string, unkno
   return result;
 }
 
-function convertUserContent(content: string | ContentBlock[]): Array<Record<string, string>> {
+async function convertUserContent(content: string | ContentBlock[]): Promise<Array<Record<string, string>>> {
   if (typeof content === "string") {
     return content.trim() ? [{ type: "input_text", text: content }] : [];
   }
@@ -225,11 +227,18 @@ function convertUserContent(content: string | ContentBlock[]): Array<Record<stri
     } else if (block.type === "image") {
       blocks.push({
         type: "input_image",
-        image_url: `data:${block.source.mediaType};base64,${block.source.data}`,
+        image_url: await imageBlockToDataUrl(block),
       });
     }
   }
   return blocks;
+}
+
+async function imageBlockToDataUrl(
+  block: Extract<ContentBlock, { type: "image" }>,
+): Promise<string> {
+  const raw = await readFile(block.source.path);
+  return `data:${block.source.mediaType};base64,${raw.toString("base64")}`;
 }
 
 function contentBlocksToText(blocks: ContentBlock[]): string {

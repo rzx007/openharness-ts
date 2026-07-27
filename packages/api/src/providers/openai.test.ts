@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Message } from "@openharness/core";
 import {
@@ -82,39 +85,53 @@ describe("tokenLimitParamForModel", () => {
 });
 
 describe("convertUserContentToOpenAI", () => {
-  it("joins text blocks into a string when no image present", () => {
-    const result = convertUserContentToOpenAI([
+  it("joins text blocks into a string when no image present", async () => {
+    const result = await convertUserContentToOpenAI([
       { type: "text", text: "hello " },
       { type: "text", text: "world" },
     ]);
     expect(result).toBe("hello world");
   });
 
-  it("converts an image block to image_url data URI", () => {
-    const result = convertUserContentToOpenAI([
-      { type: "text", text: "look:" },
-      { type: "image", source: { type: "base64", mediaType: "image/png", data: "AAAA" } },
-    ]);
-    expect(result).toEqual([
-      { type: "text", text: "look:" },
-      { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
-    ]);
+  it("converts a cached file image block to image_url data URI", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-openai-image-"));
+    try {
+      const imagePath = join(dir, "cached.png");
+      await writeFile(imagePath, Buffer.from([1, 2, 3, 4]));
+      const result = await convertUserContentToOpenAI([
+        { type: "text", text: "look:" },
+        { type: "image", source: { type: "file", mediaType: "image/png", path: imagePath } },
+      ]);
+      expect(result).toEqual([
+        { type: "text", text: "look:" },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${Buffer.from([1, 2, 3, 4]).toString("base64")}` } },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
-  it("omits empty text blocks in multimodal content", () => {
-    const result = convertUserContentToOpenAI([
-      { type: "text", text: "" },
-      { type: "image", source: { type: "base64", mediaType: "image/jpeg", data: "ZZZ" } },
-    ]);
-    expect(result).toEqual([
-      { type: "image_url", image_url: { url: "data:image/jpeg;base64,ZZZ" } },
-    ]);
+  it("omits empty text blocks in multimodal content", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-openai-image-"));
+    try {
+      const imagePath = join(dir, "cached.jpg");
+      await writeFile(imagePath, Buffer.from([5, 6, 7]));
+      const result = await convertUserContentToOpenAI([
+        { type: "text", text: "" },
+        { type: "image", source: { type: "file", mediaType: "image/jpeg", path: imagePath } },
+      ]);
+      expect(result).toEqual([
+        { type: "image_url", image_url: { url: `data:image/jpeg;base64,${Buffer.from([5, 6, 7]).toString("base64")}` } },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
 // Access the private convertMessages via a tiny subclass for reasoning tests.
 class TestableClient extends OpenAICompatibleClient {
-  build(messages: Message[]): any {
+  build(messages: Message[]): Promise<any> {
     // @ts-expect-error access private for testing
     return this.convertMessages({ model: "gpt-4o", messages });
   }
@@ -141,37 +158,44 @@ describe("convertMessages reasoning_content gating", () => {
     },
   ];
 
-  it("omits empty reasoning_content by default", () => {
-    const out = client.build(toolUseMsg);
+  it("omits empty reasoning_content by default", async () => {
+    const out = await client.build(toolUseMsg);
     const assistant = out.find((m: any) => m.role === "assistant");
     expect(assistant.reasoning_content).toBeUndefined();
   });
 
-  it("emits empty reasoning_content when env opt-in is set", () => {
+  it("emits empty reasoning_content when env opt-in is set", async () => {
     process.env[ENV] = "1";
-    const out = client.build(toolUseMsg);
+    const out = await client.build(toolUseMsg);
     const assistant = out.find((m: any) => m.role === "assistant");
     expect(assistant.reasoning_content).toBe("");
   });
 });
 
 describe("convertMessages image passing", () => {
-  it("produces structured image_url content for image user messages", () => {
+  it("produces structured image_url content for image user messages", async () => {
     const client = new TestableClient({ apiKey: "test", baseURL: undefined } as any);
-    const out = client.build([
-      {
-        type: "user",
-        content: [
-          { type: "text", text: "describe" },
-          { type: "image", source: { type: "base64", mediaType: "image/png", data: "QQ" } },
-        ],
-      },
-    ]);
-    const user = out.find((m: any) => m.role === "user");
-    expect(Array.isArray(user.content)).toBe(true);
-    expect(user.content).toContainEqual({
-      type: "image_url",
-      image_url: { url: "data:image/png;base64,QQ" },
-    });
+    const dir = await mkdtemp(join(tmpdir(), "oh-openai-image-"));
+    try {
+      const imagePath = join(dir, "cached.png");
+      await writeFile(imagePath, Buffer.from([65]));
+      const out = await client.build([
+        {
+          type: "user",
+          content: [
+            { type: "text", text: "describe" },
+            { type: "image", source: { type: "file", mediaType: "image/png", path: imagePath } },
+          ],
+        },
+      ]);
+      const user = out.find((m: any) => m.role === "user");
+      expect(Array.isArray(user.content)).toBe(true);
+      expect(user.content).toContainEqual({
+        type: "image_url",
+        image_url: { url: `data:image/png;base64,${Buffer.from([65]).toString("base64")}` },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
