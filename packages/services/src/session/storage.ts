@@ -145,18 +145,19 @@ export interface SaveSessionOptions {
 export function saveSessionSnapshot(options: SaveSessionOptions): string {
   const sessionDir = getProjectSessionDir(options.cwd);
   const sid = options.sessionId ?? randomBytes(6).toString("hex");
+  const messages = sanitizeStoredMessages(options.messages as unknown[]) as StoredMessageLike[];
 
   const payload: SessionSnapshotPayload = {
     session_id: sid,
     cwd: resolve(options.cwd),
     model: options.model,
     system_prompt: options.systemPrompt,
-    messages: options.messages as unknown[],
+    messages: messages as unknown[],
     usage: options.usage,
     tool_metadata: persistableToolMetadata(options.toolMetadata),
     created_at: Date.now() / 1000,
-    summary: extractSummary(options.messages),
-    message_count: options.messages.length,
+    summary: extractSummary(messages),
+    message_count: messages.length,
     ...(options.sessionMode ? { session_mode: options.sessionMode } : {}),
   };
   const data = JSON.stringify(payload, null, 2) + "\n";
@@ -189,6 +190,45 @@ function isToolResultMessage(message: StoredMessageLike): boolean {
     message.content.every((b) => (b as { type?: unknown } | null)?.type === "tool_result");
 }
 
+function getToolUseIds(message: StoredMessageLike): string[] {
+  const m = message as unknown as Record<string, unknown>;
+  if (Array.isArray(m.toolUses)) {
+    return (m.toolUses as unknown[])
+      .map((b) => (b as { id?: unknown } | null)?.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+  }
+  if (!Array.isArray(message.content)) return [];
+  return message.content
+    .filter((b) => (b as { type?: unknown } | null)?.type === "tool_use")
+    .map((b) => (b as { id?: unknown } | null)?.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+function countToolUses(message: StoredMessageLike): number {
+  const m = message as unknown as Record<string, unknown>;
+  if (Array.isArray(m.toolUses)) return (m.toolUses as unknown[]).length;
+  if (!Array.isArray(message.content)) return 0;
+  return message.content.filter((b) => (b as { type?: unknown } | null)?.type === "tool_use").length;
+}
+
+function getToolResultId(message: StoredMessageLike): string | undefined {
+  const m = message as unknown as Record<string, unknown>;
+  for (const key of ["toolUseId", "tool_use_id", "tool_call_id", "id"]) {
+    const value = m[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  if (!Array.isArray(message.content)) return undefined;
+  for (const block of message.content) {
+    const b = block as Record<string, unknown> | null;
+    if (!b || b.type !== "tool_result") continue;
+    for (const key of ["toolUseId", "tool_use_id", "tool_call_id", "id"]) {
+      const value = b[key];
+      if (typeof value === "string" && value.length > 0) return value;
+    }
+  }
+  return undefined;
+}
+
 /**
  * load 侧配对修复（对齐 Python _sanitize_snapshot_payload 的意图）：
  * - 尾部悬挂 tool_use（崩溃/MaxTurns 中断落盘）→ 截掉，否则下一轮 API 必 400；
@@ -196,12 +236,48 @@ function isToolResultMessage(message: StoredMessageLike): boolean {
  */
 export function sanitizeStoredMessages(messages: unknown[]): unknown[] {
   const kept: unknown[] = [];
-  for (const raw of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const raw = messages[i];
     const message = raw as StoredMessageLike | null;
     if (!message || typeof message !== "object") continue;
+    if (hasToolUseBlock(message)) {
+      const toolUseCount = countToolUses(message);
+      const expectedIds = getToolUseIds(message);
+      const expected = new Set(expectedIds);
+      const matched = new Set<string>();
+      const matchedResults: unknown[] = [];
+      let resultCount = 0;
+      let cursor = i + 1;
+
+      while (cursor < messages.length) {
+        const next = messages[cursor] as StoredMessageLike | null;
+        if (!next || typeof next !== "object" || !isToolResultMessage(next)) break;
+        resultCount++;
+
+        if (expected.size === 0) {
+          matchedResults.push(messages[cursor]);
+        } else {
+          const resultId = getToolResultId(next);
+          if (resultId && expected.has(resultId) && !matched.has(resultId)) {
+            matched.add(resultId);
+            matchedResults.push(messages[cursor]);
+          }
+        }
+        cursor++;
+      }
+
+      const isComplete = expected.size > 0
+        ? expectedIds.every((id) => matched.has(id))
+        : toolUseCount > 0 && resultCount >= toolUseCount;
+
+      if (isComplete) {
+        kept.push(raw, ...matchedResults);
+      }
+      i = cursor - 1;
+      continue;
+    }
     if (isToolResultMessage(message)) {
-      const prev = kept[kept.length - 1] as StoredMessageLike | undefined;
-      if (!prev || !hasToolUseBlock(prev)) continue; // 孤儿
+      continue;
     }
     kept.push(raw);
   }

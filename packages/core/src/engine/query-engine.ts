@@ -317,6 +317,9 @@ export class QueryEngine implements IQueryEngine {
     return [...this.messages];
   }
 
+  /**
+   * 用于手动调用压缩消息历史，以控制上下文长度
+   */
   async compact(): Promise<void> {
     const microResult = this.compactService.microCompact(this.messages);
     if (this.compactService.estimateTokens(microResult) < (this.options.maxTokens ?? 100_000)) {

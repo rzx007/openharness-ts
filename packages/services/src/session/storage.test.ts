@@ -9,6 +9,7 @@ import {
   listSessionSnapshots,
   loadSessionById,
   exportSessionMarkdown,
+  sanitizeStoredMessages,
 } from "./storage.js";
 
 let cfgDir: string;
@@ -85,6 +86,33 @@ describe("saveSessionSnapshot", () => {
     expect(payload.session_id).toMatch(/^[0-9a-f]{12}$/);
     // Set → 数组(可 JSON 化)
     expect(payload.tool_metadata.permission_mode).toEqual(["x"]);
+  });
+
+  it("sanitizes broken tool_use/tool_result chains before writing snapshots", () => {
+    const path = saveSessionSnapshot({
+      ...baseArgs(),
+      sessionId: "broken-save",
+      messages: [
+        { type: "user", content: "find hot topics" },
+        {
+          type: "assistant",
+          content: "",
+          toolUses: [
+            { type: "tool_use", id: "call_a", name: "WebSearch", input: {} },
+            { type: "tool_use", id: "call_b", name: "WebFetch", input: {} },
+          ],
+        },
+        { type: "tool_result", toolUseId: "call_a", content: [{ type: "text", text: "partial" }] },
+        { type: "assistant", content: "fallback" },
+      ],
+    });
+
+    const payload = JSON.parse(readFileSync(path, "utf-8"));
+    expect(payload.message_count).toBe(2);
+    expect(payload.messages).toEqual([
+      { type: "user", content: "find hot topics" },
+      { type: "assistant", content: "fallback" },
+    ]);
   });
 });
 
@@ -168,6 +196,29 @@ describe("sanitizeStoredMessages (load-side pairing repair)", () => {
       ],
     });
     expect(loadSessionById(projDir, "good")!.message_count).toBe(4);
+  });
+
+  it("drops an assistant tool_use group when any tool_result id is missing", () => {
+    const messages = sanitizeStoredMessages([
+      { type: "user", content: "weibo hot" },
+      {
+        type: "assistant",
+        content: "",
+        toolUses: [
+          { type: "tool_use", id: "call_1", name: "WebSearch", input: {} },
+          { type: "tool_use", id: "call_2", name: "WebFetch", input: {} },
+        ],
+      },
+      { type: "tool_result", toolUseId: "call_1", content: [{ type: "text", text: "search result" }] },
+      { type: "assistant", content: "fallback answer" },
+      { type: "user", content: "where did you remember it" },
+    ]);
+
+    expect(messages).toEqual([
+      { type: "user", content: "weibo hot" },
+      { type: "assistant", content: "fallback answer" },
+      { type: "user", content: "where did you remember it" },
+    ]);
   });
 
   it("loadSessionById rejects path traversal ids", () => {
