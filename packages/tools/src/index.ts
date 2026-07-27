@@ -6,6 +6,7 @@ export { fileEditTool } from "./file/edit";
 export { computeFileChange, type FileChangePreview } from "./file/preview";
 export { buildUnifiedDiff, computeToolDiff } from "./file/diff";
 export { globTool } from "./file/glob";
+export { normalizeToolPath, resolveToolPath } from "./file/path";
 export { grepTool } from "./search/grep";
 export { webFetchTool } from "./web/fetch";
 export { webSearchTool } from "./web/search";

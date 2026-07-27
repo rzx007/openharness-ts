@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { ToolDefinition } from "@openharness/core";
 import { loadSettings, type Settings } from "@openharness/core";
+import { resolveToolPath } from "../file/path.js";
 
 // Cache settings per process; avoids a disk read on every tool invocation.
 // Settings don't change during a process's lifetime (changes restart the process).
@@ -52,8 +53,10 @@ export const imageToTextTool: ToolDefinition = {
       },
     },
   },
-  async execute(input) {
-    const imagePath = input.image_path as string | undefined;
+  async execute(input, context) {
+    const rawImagePath = input.image_path as string | undefined;
+    const cwd = (context as { cwd?: string } | undefined)?.cwd ?? process.cwd();
+    const imagePath = rawImagePath ? resolveToolPath(rawImagePath, cwd) : undefined;
     const imageUrl = input.image_url as string | undefined;
     const prompt = (input.prompt as string | undefined) ?? "Describe this image in detail.";
 
