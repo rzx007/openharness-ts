@@ -89,9 +89,10 @@ describe("memory auto extraction config", () => {
     expect(isSessionMemoryEnabled({ memory: { enabled: false, sessionMemoryEnabled: true } } as any)).toBe(false);
   });
 
-  it("is opt-in even when memory itself is enabled", () => {
-    expect(isMemoryAutoExtractEnabled({ memory: { enabled: true } } as any)).toBe(false);
+  it("is enabled by default when memory itself is enabled", () => {
+    expect(isMemoryAutoExtractEnabled({ memory: { enabled: true } } as any)).toBe(true);
     expect(isMemoryAutoExtractEnabled({ memory: { enabled: true, autoExtractEnabled: true } } as any)).toBe(true);
+    expect(isMemoryAutoExtractEnabled({ memory: { enabled: true, autoExtractEnabled: false } } as any)).toBe(false);
     expect(isMemoryAutoExtractEnabled({ memory: { enabled: false, autoExtractEnabled: true } } as any)).toBe(false);
   });
 

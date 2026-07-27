@@ -61,7 +61,7 @@
 
 - ✅ /dream、/remember 斜杠命令；REPL/TUI/print 每轮 checkpoint 写入。
 - ✅ compact 边界的 checkpoint 读回已接入 attachmentsProvider；tool_outputs 阈值已接进 compact/microcompact 链路。
-- ✅ memory_extract 每轮自动触发已接入，默认关闭，受 `memory.autoExtractEnabled` 控制。
+- ✅ memory_extract 每轮自动触发已接入，默认开启，可用 `memory.autoExtractEnabled=false` 关闭。
 - ✅ executeAutoDream 自动触发已接入，默认关闭，受 `memory.autoDreamEnabled` 与 hours/sessions 阈值控制。
 - 留待：team scope 隔离与密钥扫描。
 - 会话文件命名：TS 是 `<id>.json`（Python `session-*.json`），扫描器两者兼容；

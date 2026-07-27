@@ -1896,7 +1896,7 @@ export function isSessionMemoryEnabled(settings: Settings): boolean {
 }
 
 export function isMemoryAutoExtractEnabled(settings: Settings): boolean {
-  return settings.memory?.enabled !== false && settings.memory?.autoExtractEnabled === true;
+  return settings.memory?.enabled !== false && settings.memory?.autoExtractEnabled !== false;
 }
 
 export function memoryAutoExtractMaxRecords(settings: Settings): number {
