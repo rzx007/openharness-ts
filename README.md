@@ -366,7 +366,7 @@ OpenHarness-ts/
 | 模块               | 说明                                                                |
 | ---------------- | ----------------------------------------------------------------- |
 | `QueryEngine`    | Agent 循环核心：提交消息 → 流式调用 API → 解析工具调用 → 权限检查 → 执行工具 → 循环直到完成        |
-| `CompactService` | 上下文管理：token 估算 + 自动摘要（LLM 生成 `<analysis>/<summary>`），连续失败 3 次自动退回 |
+| `CompactService` | 上下文管理：token 估算 + 自动摘要（LLM 生成 `<analysis>/<summary>`），连续失败 3 次自动退回。详见 [docs/compact-service-design.md](docs/compact-service-design.md) |
 | `CostTracker`    | 费用追踪：记录 input/output/cache token 用量和估算成本                          |
 | `ToolRegistry`   | 工具注册中心：按名称查找、批量注册、可过滤                                             |
 | `RuntimeBuilder` | 运行时组装：Builder 模式将 API Client、工具、权限、Hook 组装为 `RuntimeBundle`       |
@@ -398,7 +398,7 @@ OpenHarness-ts/
 
 | 模块               | 说明                                                          |
 | ---------------- | ----------------------------------------------------------- |
-| `CompactService` | LLM 驱动的对话摘要：当 token 接近阈值时自动触发，结构化 `<analysis>/<summary>` 输出 |
+| `CompactService` | LLM 驱动的对话摘要：当 token 接近阈值时自动触发，结构化 `<analysis>/<summary>` 输出。详见 [docs/compact-service-design.md](docs/compact-service-design.md) |
 | `SessionStorage` | 会话持久化（E.6 增强）：按项目分目录（cwd 哈希）、latest/id 双写、load 侧 tool_use/result 配对修复、tool_metadata 白名单、transcript.md 导出；`--continue` 读 latest，`--resume <id>` 读 named。详见 [docs/session-storage-design.md](docs/session-storage-design.md) |
 | `CronScheduler`  | 定时任务：cron 表达式解析 + `computeNextRunTime` + 执行历史记录             |
 | `TaskManager`    | 任务管理：创建/查询/停止/输出，文件持久化                                      |
