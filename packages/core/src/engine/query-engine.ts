@@ -13,6 +13,7 @@ import type {
 } from "../index";
 import { CompactService, type CompactClient, type CompactAttachmentsProvider } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
+import { sanitizeMessageHistory } from "../utils/message-history";
 
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
 const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
@@ -201,16 +202,7 @@ export class QueryEngine implements IQueryEngine {
    * @returns 一个异步迭代器，yield 出流式事件（StreamEvent），包括文本增量、工具使用开始/结束、用量信息等
    */
   async *submitMessage(content: string | ContentBlock[]): AsyncIterable<StreamEvent> {
-    // 防御：若历史末尾是含 toolUses 的 assistant 消息但没有对应的 tool_result，
-    // 说明上轮执行被中断/崩溃，历史不完整。直接删掉它，避免 API 返回 400。
-    while (this.messages.length > 0) {
-      const last = this.messages[this.messages.length - 1]!;
-      if (last.type === "assistant" && last.toolUses?.length) {
-        this.messages.pop();
-      } else {
-        break;
-      }
-    }
+    this.messages = sanitizeMessageHistory(this.messages);
 
     this.messages.push({ type: "user", content });
 
@@ -240,6 +232,7 @@ export class QueryEngine implements IQueryEngine {
       } catch {
         // compact failure is non-fatal; continue with current messages
       }
+      this.messages = sanitizeMessageHistory(this.messages);
 
       const allTools = this.toolRegistry.getAll();
       const tools = this.allowedTools
@@ -305,11 +298,6 @@ export class QueryEngine implements IQueryEngine {
       turnCount++;
     }
 
-    // 达到最大轮次：移除末尾的 tool_result 消息（它们没有对应的后续 assistant 回复），
-    // 避免下次 submitMessage 时向 API 发送末尾为 tool_result 的非法历史序列。
-    while (this.messages.length > 0 && this.messages[this.messages.length - 1]!.type === "tool_result") {
-      this.messages.pop();
-    }
     throw new MaxTurnsExceeded(this.maxTurns);
   }
 

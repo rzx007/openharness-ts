@@ -3,6 +3,7 @@ import { QueryEngine } from "./query-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { RuntimeBuilder } from "./runtime-builder.js";
 import type { StreamEvent, ToolDefinition, Message } from "../index.js";
+import { sanitizeMessageHistory } from "../utils/message-history.js";
 
 function createMockStreamClient(responses: StreamEvent[][]): {
   client: any;
@@ -310,6 +311,10 @@ describe("Integration: Full Agent Loop", () => {
 
     const toolEnds = events.filter((e) => e.type === "tool_use_end");
     expect(toolEnds.length).toBeLessThanOrEqual(2);
+    const history = engine.getHistory();
+    expect(history).toEqual(sanitizeMessageHistory(history));
+    expect(history.filter((m) => m.type === "assistant" && m.toolUses?.length)).toHaveLength(2);
+    expect(history.filter((m) => m.type === "tool_result")).toHaveLength(2);
   });
 
   it("multiple submitMessage calls maintain history", async () => {
@@ -335,6 +340,38 @@ describe("Integration: Full Agent Loop", () => {
     expect((history[0] as any).content).toBe("msg1");
     expect(history[2]!.type).toBe("user");
     expect((history[2] as any).content).toBe("msg2");
+  });
+
+  it("repairs incomplete parallel tool call history before sending the next request", async () => {
+    let sentMessages: Message[] = [];
+    const client = {
+      streamMessage: async function* (params: { messages: Message[] }) {
+        sentMessages = [...params.messages];
+        yield { type: "text_delta" as const, delta: "ok" };
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+    engine.loadMessages([
+      { type: "user", content: "run commands" },
+      {
+        type: "assistant",
+        content: "",
+        toolUses: [
+          { type: "tool_use", id: "t1", name: "Bash", input: { command: "pwd" } },
+          { type: "tool_use", id: "t2", name: "Bash", input: { command: "hostname" } },
+        ],
+      },
+      { type: "tool_result", toolUseId: "t1", content: [{ type: "text", text: "cwd" }] },
+    ]);
+
+    for await (const _ of engine.submitMessage("continue")) {}
+
+    expect(sentMessages).toEqual([
+      { type: "user", content: "run commands" },
+      { type: "user", content: "continue" },
+    ]);
   });
 });
 

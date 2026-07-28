@@ -217,6 +217,28 @@ describe("tool pairing protection", () => {
     );
     expect(assistantInOlder).toBe(resultInOlder);
   });
+
+  it("does not split sibling tool_results from the same assistant tool call group", () => {
+    const svc = new CompactService(100_000, 1);
+    const messages: Message[] = [
+      { type: "user", content: "run commands" },
+      {
+        type: "assistant",
+        content: "",
+        toolUses: [
+          { type: "tool_use", id: "t1", name: "Bash", input: { command: "pwd" } },
+          { type: "tool_use", id: "t2", name: "Bash", input: { command: "hostname" } },
+        ],
+      },
+      { type: "tool_result", toolUseId: "t1", content: [{ type: "text", text: "cwd" }] },
+      { type: "tool_result", toolUseId: "t2", content: [{ type: "text", text: "host" }] },
+    ];
+
+    const { older, recent } = svc.splitPreservingToolPairs(messages);
+
+    expect(older).toHaveLength(1);
+    expect(recent).toEqual(messages.slice(1));
+  });
 });
 
 // ---------------------------------------------------------------------------

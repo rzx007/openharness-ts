@@ -21,6 +21,9 @@ import type {
   IHookExecutor,
 } from "../index";
 import { estimateTokens } from "../utils/token-counter";
+import {
+  boundaryFallsInsideToolGroup as historyBoundaryFallsInsideToolGroup,
+} from "../utils/message-history";
 
 // ---------------------------------------------------------------------------
 // 常量（与 Python openharness v0.1.9 services/compact 对齐）
@@ -960,7 +963,7 @@ export class CompactService {
     let splitIndex = Math.max(0, messages.length - this.keepRecent);
     while (
       splitIndex > 0 &&
-      this.boundaryCrossesToolPair(messages[splitIndex - 1]!, messages, splitIndex)
+      historyBoundaryFallsInsideToolGroup(messages, splitIndex)
     ) {
       splitIndex--;
     }
@@ -968,25 +971,6 @@ export class CompactService {
       older: messages.slice(0, splitIndex),
       recent: messages.slice(splitIndex),
     };
-  }
-
-  /**
-   * 若把 messages[splitIndex..] 当作 recent，会导致 previous 里的某次 tool_use
-   * 找不到同段内的 tool_result（result 落在 recent），则返回 true。
-   */
-  private boundaryCrossesToolPair(
-    previous: Message,
-    messages: Message[],
-    splitIndex: number,
-  ): boolean {
-    const pendingIds = new Set(toolUseIds(previous));
-    if (pendingIds.size === 0) return false;
-    // recent 段是否包含 previous 挂起的任一 tool_result？
-    for (let i = splitIndex; i < messages.length; i++) {
-      const rid = toolResultId(messages[i]!);
-      if (rid && pendingIds.has(rid)) return true;
-    }
-    return false;
   }
 
   // -------------------------------------------------------------------------

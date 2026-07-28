@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
-import { getSessionsDir } from "@openharness/core";
+import { getSessionsDir, sanitizeMessageHistory } from "@openharness/core";
 
 /**
  * 会话快照持久化（移植自 Python services/session_storage.py）。
@@ -169,122 +169,13 @@ export function saveSessionSnapshot(options: SaveSessionOptions): string {
 }
 
 
-/** 块级探测：消息是否含 tool_use / 是否为 tool_result 消息。
- *  兼容两种格式：
- *  - 引擎内部格式：{type:"assistant", toolUses:[...]}
- *  - Anthropic 内容块格式：{content:[{type:"tool_use",...}]}
- */
-function hasToolUseBlock(message: StoredMessageLike): boolean {
-  const m = message as unknown as Record<string, unknown>;
-  if (Array.isArray(m.toolUses) && (m.toolUses as unknown[]).length > 0) {
-    return true;
-  }
-  return Array.isArray(message.content) &&
-    message.content.some((b) => (b as { type?: unknown } | null)?.type === "tool_use");
-}
-
-function isToolResultMessage(message: StoredMessageLike): boolean {
-  if (message.type === "tool_result" || message.role === "tool_result") return true;
-  return Array.isArray(message.content) &&
-    message.content.length > 0 &&
-    message.content.every((b) => (b as { type?: unknown } | null)?.type === "tool_result");
-}
-
-function getToolUseIds(message: StoredMessageLike): string[] {
-  const m = message as unknown as Record<string, unknown>;
-  if (Array.isArray(m.toolUses)) {
-    return (m.toolUses as unknown[])
-      .map((b) => (b as { id?: unknown } | null)?.id)
-      .filter((id): id is string => typeof id === "string" && id.length > 0);
-  }
-  if (!Array.isArray(message.content)) return [];
-  return message.content
-    .filter((b) => (b as { type?: unknown } | null)?.type === "tool_use")
-    .map((b) => (b as { id?: unknown } | null)?.id)
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
-}
-
-function countToolUses(message: StoredMessageLike): number {
-  const m = message as unknown as Record<string, unknown>;
-  if (Array.isArray(m.toolUses)) return (m.toolUses as unknown[]).length;
-  if (!Array.isArray(message.content)) return 0;
-  return message.content.filter((b) => (b as { type?: unknown } | null)?.type === "tool_use").length;
-}
-
-function getToolResultId(message: StoredMessageLike): string | undefined {
-  const m = message as unknown as Record<string, unknown>;
-  for (const key of ["toolUseId", "tool_use_id", "tool_call_id", "id"]) {
-    const value = m[key];
-    if (typeof value === "string" && value.length > 0) return value;
-  }
-  if (!Array.isArray(message.content)) return undefined;
-  for (const block of message.content) {
-    const b = block as Record<string, unknown> | null;
-    if (!b || b.type !== "tool_result") continue;
-    for (const key of ["toolUseId", "tool_use_id", "tool_call_id", "id"]) {
-      const value = b[key];
-      if (typeof value === "string" && value.length > 0) return value;
-    }
-  }
-  return undefined;
-}
-
 /**
- * load 侧配对修复（对齐 Python _sanitize_snapshot_payload 的意图）：
+ * 存储层复用 core 的消息历史不变量，读写两侧保持同一套 tool_use/tool_result 配对规则：
  * - 尾部悬挂 tool_use（崩溃/MaxTurns 中断落盘）→ 截掉，否则下一轮 API 必 400；
  * - 孤儿 tool_result（前一条没有 tool_use）→ 丢弃。
  */
 export function sanitizeStoredMessages(messages: unknown[]): unknown[] {
-  const kept: unknown[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const raw = messages[i];
-    const message = raw as StoredMessageLike | null;
-    if (!message || typeof message !== "object") continue;
-    if (hasToolUseBlock(message)) {
-      const toolUseCount = countToolUses(message);
-      const expectedIds = getToolUseIds(message);
-      const expected = new Set(expectedIds);
-      const matched = new Set<string>();
-      const matchedResults: unknown[] = [];
-      let resultCount = 0;
-      let cursor = i + 1;
-
-      while (cursor < messages.length) {
-        const next = messages[cursor] as StoredMessageLike | null;
-        if (!next || typeof next !== "object" || !isToolResultMessage(next)) break;
-        resultCount++;
-
-        if (expected.size === 0) {
-          matchedResults.push(messages[cursor]);
-        } else {
-          const resultId = getToolResultId(next);
-          if (resultId && expected.has(resultId) && !matched.has(resultId)) {
-            matched.add(resultId);
-            matchedResults.push(messages[cursor]);
-          }
-        }
-        cursor++;
-      }
-
-      const isComplete = expected.size > 0
-        ? expectedIds.every((id) => matched.has(id))
-        : toolUseCount > 0 && resultCount >= toolUseCount;
-
-      if (isComplete) {
-        kept.push(raw, ...matchedResults);
-      }
-      i = cursor - 1;
-      continue;
-    }
-    if (isToolResultMessage(message)) {
-      continue;
-    }
-    kept.push(raw);
-  }
-  while (kept.length > 0 && hasToolUseBlock(kept[kept.length - 1] as StoredMessageLike)) {
-    kept.pop(); // 尾部悬挂 tool_use
-  }
-  return kept;
+  return sanitizeMessageHistory(messages);
 }
 
 function sanitizePayload(payload: SessionSnapshotPayload | null): SessionSnapshotPayload | null {

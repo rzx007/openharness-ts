@@ -97,3 +97,10 @@ export { ProtocolHost } from "./protocol/protocol-host";
 export { retryWithBackoff } from "./utils/retry";
 export { estimateTokens } from "./utils/token-counter";
 export { parseJsonLines } from "./utils/json";
+export {
+  sanitizeMessageHistory,
+  boundaryFallsInsideToolGroup,
+  toolUseIds,
+  toolResultId,
+  isToolResultMessage,
+} from "./utils/message-history";
