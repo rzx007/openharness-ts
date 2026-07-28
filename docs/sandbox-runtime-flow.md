@@ -66,7 +66,21 @@ apps/cli/src/commands/main.ts
                    # packages/sandbox/src/lifecycle.ts
 ```
 
-常用环境变量：
+推荐用子命令切换 sandbox：
+
+```bash
+ohs sandbox on                         # Docker + bridge 网络（默认）
+ohs sandbox on --net none              # 离线 sandbox
+ohs sandbox on --backend srt           # 使用 Anthropic Sandbox Runtime
+ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
+ohs sandbox off
+ohs sandbox status
+ohs sandbox doctor
+```
+
+子命令写入 `settings.json`，已经运行中的 CLI/TUI 需要重启后才会挂载新的 sandbox runtime。
+
+常用环境变量（高级覆盖）：
 
 ```bash
 OPENHARNESS_SANDBOX_ENABLED=true

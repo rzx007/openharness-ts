@@ -15,6 +15,21 @@ Known gaps:
 
 - Docker/SRT E2E tests are optional and environment-gated; CI wiring is still pending.
 
+## CLI
+
+```bash
+ohs sandbox on
+ohs sandbox on --net none
+ohs sandbox on --backend srt
+ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
+ohs sandbox off
+ohs sandbox status
+ohs sandbox doctor
+```
+
+`ohs sandbox on` persists Docker sandbox settings with `network=bridge` by default. Restart the CLI/TUI
+after changing sandbox settings.
+
 ## Optional E2E
 
 ```bash

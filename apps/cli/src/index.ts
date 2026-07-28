@@ -7,6 +7,7 @@ import { createCronCommand } from "./commands/cron";
 import { createChannelsCommand } from "./commands/channels";
 import { createProviderCommand } from "./commands/provider";
 import { createSetupCommand } from "./commands/setup";
+import { createSandboxCommand } from "./commands/sandbox";
 import { VERSION } from "./version";
 
 const program = new Command();
@@ -56,6 +57,7 @@ program.addCommand(createCronCommand());
 program.addCommand(createChannelsCommand());
 program.addCommand(createProviderCommand());
 program.addCommand(createSetupCommand());
+program.addCommand(createSandboxCommand());
 
 program
   .command("config")

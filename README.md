@@ -169,6 +169,15 @@ ohs provider add <name> -k <key> [-m <model>] [-b <base-url>] [--use]
 ohs provider edit <name> [-k <key>] [-m <model>] [-b <base-url>]
 ohs provider remove <name>
 
+# Sandbox
+ohs sandbox on                         # enable Docker sandbox, network=bridge by default
+ohs sandbox on --net none              # offline sandbox
+ohs sandbox on --backend srt           # use Anthropic Sandbox Runtime
+ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
+ohs sandbox off
+ohs sandbox status
+ohs sandbox doctor
+
 # MCP server 配置（写入 settings.mcpServers）
 ohs mcp list
 ohs mcp add <name> <command> [args...] [-e KEY=VALUE ...]
@@ -601,6 +610,14 @@ ohs --continue         ohs --resume <id>
 ## 配置
 
 配置文件路径：`~/.openharness/settings.json`（首次运行无需手动创建，使用默认值即可）
+
+Sandbox 推荐用子命令切换，不必手写配置：
+
+```bash
+ohs sandbox on      # 默认 Docker + bridge 网络
+ohs sandbox off
+ohs sandbox status
+```
 
 ```json
 {
