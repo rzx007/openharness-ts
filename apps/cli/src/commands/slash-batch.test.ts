@@ -3,13 +3,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CommandRegistry } from "@openharness/commands";
-import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands.js";
+import { formatPromptLayersReport, registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands.js";
 
 // E.2 批次命令的最小 ctx 冒烟：handler 是已测功能的薄组合，这里只断输出形状。
 let tmp: string;
 let savedSettings: Record<string, unknown> | null = null;
 
-function makeCtx(): SlashCommandContext {
+function makeCtx(overrides: Partial<SlashCommandContext> = {}): SlashCommandContext {
   const settings = {
     model: "m",
     apiFormat: "anthropic",
@@ -32,7 +32,7 @@ function makeCtx(): SlashCommandContext {
     },
     hookExecutor: { register: () => {} } as never,
     taskManager: { listTasks: () => [] } as never,
-    skillRegistry: { register: () => {}, registerBundled: () => {}, getAll: () => [] } as never,
+    skillRegistry: { register: () => {}, registerBundled: () => {}, getAll: () => [], modelVisibleList: () => [] } as never,
     exitRepl: () => {},
     refreshSystemPrompt: async () => {},
     getBundle: () =>
@@ -41,12 +41,13 @@ function makeCtx(): SlashCommandContext {
         hookExecutor: { register: () => {} },
       }) as never,
     credentialStorage: {} as never,
+    ...overrides,
   } as SlashCommandContext;
 }
 
-function makeRegistry(): CommandRegistry {
+function makeRegistry(ctx: SlashCommandContext = makeCtx()): CommandRegistry {
   const registry = new CommandRegistry();
-  registerBuiltinCommandsOnRegistry(registry, makeCtx());
+  registerBuiltinCommandsOnRegistry(registry, ctx);
   return registry;
 }
 
@@ -105,5 +106,46 @@ describe("E.2 批次命令", () => {
     const result = await makeRegistry().execute("/reload-plugins", { args: {}, raw: "/reload-plugins" });
     expect(result.success).toBe(true);
     expect((result.output ?? "").length).toBeGreaterThan(0);
+  });
+
+  it("/context shows prompt layers and includes runtime skills/memory", async () => {
+    const ctx = makeCtx({
+      getSettings: () => ({
+        model: "m",
+        apiFormat: "anthropic",
+        maxTurns: 50,
+        systemPrompt: "CUSTOM BASE",
+        permission: { mode: "default" },
+        outputStyle: "minimal",
+      }) as never,
+      memoryManager: { buildMemoryPrompt: () => "memory from slash context" } as never,
+      skillRegistry: {
+        register: () => {},
+        registerBundled: () => {},
+        getAll: () => [],
+        modelVisibleList: () => [{ name: "review", description: "Review code" }],
+      } as never,
+    });
+    const result = await makeRegistry(ctx).execute("/context", { args: {}, raw: "/context" });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("Current system prompt layers:");
+    expect(result.output).toContain("- stable:");
+    expect(result.output).toContain("- context:");
+    expect(result.output).toContain("- volatile:");
+    expect(result.output).toContain("# Custom Instructions");
+    expect(result.output).toContain("CUSTOM BASE");
+    expect(result.output).toContain("review");
+    expect(result.output).toContain("memory from slash context");
+  });
+
+  it("formatPromptLayersReport truncates the flat preview and keeps total length", () => {
+    const report = formatPromptLayersReport({
+      stable: ["A".repeat(20)],
+      context: ["B".repeat(20)],
+      volatile: ["C".repeat(20)],
+    }, 25);
+    expect(report).toContain("... (truncated)");
+    expect(report).toContain("stable: 1 section(s), 20 characters");
+    expect(report).toContain("Total length: 64 characters");
   });
 });

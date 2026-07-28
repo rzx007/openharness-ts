@@ -20,7 +20,7 @@ skill 动态注册为 `/<skill>`（E.5），插件命令注册为 `/插件名:�
 | `/rewind` | 撤销最近 N 轮（默认 1） |
 | `/session` | 当前会话信息 |
 | `/export` | 导出对话为 Markdown 文件 |
-| `/context` | 显示当前发送给模型的 system prompt |
+| `/context` | 按 stable/context/volatile 三层显示当前发送给模型的 system prompt 摘要与预览 |
 | `/stats` | 会话统计：messages/estimated_tokens/tools/memory/tasks/output_style（差异：memory 报会话内条目数，Python 报文件数） |
 | `/cost` | 估算成本拆解 |
 | `/usage` | token 用量统计 |

@@ -285,6 +285,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 ## 相关文档
 
+- [prompt-layering-design.md](./prompt-layering-design.md) — stable/context/volatile prompt 分层，以及 SOUL.md / USER.md 迁移设计
 - [compact-service-design.md](./compact-service-design.md) — 上下文压缩服务：触发阈值、microCompact、LLM 摘要、PTL 重试与附件注入
 - [services-memory-quartet-design.md](./services-memory-quartet-design.md) — tool_outputs / session_memory / memory_extract / autodream 详细设计
 - [personalization-design.md](./personalization-design.md) — 环境事实抽取

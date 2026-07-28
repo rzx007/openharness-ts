@@ -7,7 +7,7 @@ import type { MemoryManager } from "@openharness/memory";
 import type { SkillRegistry } from "@openharness/skills";
 import type { ThemeManager } from "@openharness/themes";
 import type { TaskManager } from "@openharness/services";
-import { buildRuntimeSystemPrompt } from "@openharness/prompts";
+import { buildPromptLayers, buildRuntimeSystemPrompt, renderPromptLayers, type PromptLayers } from "@openharness/prompts";
 import { PROVIDERS, detectProvider, findByName } from "@openharness/api";
 import type { CredentialStorage } from "@openharness/auth";
 import { loadOutputStyles, isKnownOutputStyle, type OutputStyleDefinition } from "@openharness/output-styles";
@@ -108,6 +108,57 @@ function estimateCost(model: string, inputTokens: number, outputTokens: number):
 
 function parseArgs(raw: string): string[] {
   return raw.split(/\s+/).filter(Boolean);
+}
+
+const CONTEXT_PREVIEW_CHARS = 2_000;
+const SECTION_PREVIEW_CHARS = 350;
+
+function layerCharCount(parts: string[]): number {
+  return parts.filter((s) => s.trim()).join("\n\n").length;
+}
+
+function formatLayerPreview(name: keyof PromptLayers, parts: string[]): string {
+  const sections = parts.filter((s) => s.trim());
+  if (sections.length === 0) return [`[${name}]`, "(empty)"].join("\n");
+
+  const previews = sections.map((section, index) => {
+    const trimmed = section.trim();
+    const preview =
+      trimmed.length > SECTION_PREVIEW_CHARS
+        ? trimmed.slice(0, SECTION_PREVIEW_CHARS) + "\n... (truncated)"
+        : trimmed;
+    return `section ${index + 1}:\n${preview}`;
+  });
+
+  return [`[${name}]`, ...previews].join("\n\n");
+}
+
+export function formatPromptLayersReport(
+  layers: PromptLayers,
+  previewChars = CONTEXT_PREVIEW_CHARS,
+): string {
+  const prompt = renderPromptLayers(layers);
+  const preview =
+    prompt.length > previewChars
+      ? prompt.slice(0, previewChars) + "\n... (truncated)"
+      : prompt;
+  return [
+    "Current system prompt layers:",
+    `- stable: ${layers.stable.length} section(s), ${layerCharCount(layers.stable)} characters`,
+    `- context: ${layers.context.length} section(s), ${layerCharCount(layers.context)} characters`,
+    `- volatile: ${layers.volatile.length} section(s), ${layerCharCount(layers.volatile)} characters`,
+    "─".repeat(60),
+    formatLayerPreview("stable", layers.stable),
+    "─".repeat(60),
+    formatLayerPreview("context", layers.context),
+    "─".repeat(60),
+    formatLayerPreview("volatile", layers.volatile),
+    "─".repeat(60),
+    "Flat preview:",
+    preview,
+    "─".repeat(60),
+    `Total length: ${prompt.length} characters`,
+  ].join("\n");
 }
 
 export function registerBuiltinCommands(ctx: SlashCommandContext): void {
@@ -848,23 +899,22 @@ export function registerBuiltinCommandsOnRegistry(
     description: "Show the current system prompt sent to the model",
     handler: async () => {
       const settings = getSettings();
-      const prompt = await buildRuntimeSystemPrompt({
+      const memoryContent =
+        settings.memory?.enabled !== false && memoryManager
+          ? memoryManager.buildMemoryPrompt(settings.memory?.maxFiles ?? 10)
+          : undefined;
+      const layers = await buildPromptLayers({
         customPrompt: settings.systemPrompt,
         cwd: process.cwd(),
         permissionMode: settings.permission.mode,
         fastMode: settings.fastMode,
         effort: settings.effort,
         passes: settings.passes,
+        memoryContent,
+        skillsList: ctx.skillRegistry?.modelVisibleList(),
       });
 
-      const lines = [
-        "Current system prompt:",
-        "─".repeat(60),
-        prompt.length > 2000 ? prompt.slice(0, 2000) + "\n... (truncated)" : prompt,
-        "─".repeat(60),
-        `Total length: ${prompt.length} characters`,
-      ];
-      return { success: true, output: lines.join("\n") };
+      return { success: true, output: formatPromptLayersReport(layers) };
     },
   });
 

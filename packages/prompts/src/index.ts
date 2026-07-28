@@ -1,7 +1,9 @@
-import { readFile, access, readdir } from "node:fs/promises";
+import { readFile, access, readdir, mkdir, writeFile, rm } from "node:fs/promises";
 import { join, basename, resolve, dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { platform, machine, homedir, hostname } from "node:os";
+import { randomUUID } from "node:crypto";
+import { getConfigDir } from "@openharness/core";
 import { loadLocalRules } from "@openharness/personalization";
 
 export type PromptPermissionMode = "default" | "plan" | "full_auto";
@@ -20,9 +22,9 @@ export interface EnvironmentInfo {
   hostname: string;
 }
 
-const BASE_SYSTEM_PROMPT = `You are OpenHarness, an open-source AI coding assistant CLI. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
+const DEFAULT_IDENTITY = "You are OpenHarness, an open-source AI coding assistant CLI. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.";
 
-IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming.
+const INVARIANT_GUIDANCE = `IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming.
 
 # System
  - All text you output outside of tool use is displayed to the user. Output text to communicate with the user. You can use Github-flavored markdown for formatting.
@@ -50,8 +52,72 @@ Carefully consider the reversibility and blast radius of actions. For hard-to-re
  - When referencing code, include file_path:line_number for easy navigation.
  - If you can say it in one sentence, don't use three.`;
 
+const BASE_SYSTEM_PROMPT = `${DEFAULT_IDENTITY}\n\n${INVARIANT_GUIDANCE}`;
+
+const MAX_SOUL_CHARS = 12_000;
+const MAX_USER_PROFILE_CHARS = 8_000;
+const USER_PROFILE_PENDING_DIR = "user_profile_pending";
+
+const BLOCKING_PROMPT_FILE_PATTERNS: Array<{
+  code: string;
+  message: string;
+  pattern: RegExp;
+}> = [
+  {
+    code: "ignore_higher_priority_instructions",
+    message: "Attempts to ignore or override higher-priority instructions.",
+    pattern: /\b(?:ignore|disregard|override|bypass)\b.{0,80}\b(?:system|developer|previous|prior|above|higher[-\s]?priority)\b.{0,80}\b(?:instruction|instructions|rule|rules|message|messages)\b/i,
+  },
+  {
+    code: "reveal_sensitive_context",
+    message: "Attempts to reveal hidden prompts, credentials, or sensitive context.",
+    pattern: /\b(?:reveal|print|dump|show|exfiltrate|leak)\b.{0,80}\b(?:system prompt|developer message|hidden prompt|secret|secrets|token|tokens|api key|password|credentials?)\b/i,
+  },
+  {
+    code: "disable_permission_controls",
+    message: "Attempts to disable approval, permission, or sandbox controls.",
+    pattern: /\b(?:auto[-\s]?approve|always approve|never ask|without asking|without approval|without permission|disable sandbox|bypass sandbox|bypass permission|ignore permission)\b/i,
+  },
+  {
+    code: "force_tool_execution",
+    message: "Attempts to force unsafe tool execution without user control.",
+    pattern: /\b(?:run|execute|delete|modify|overwrite)\b.{0,80}\b(?:without approval|without permission|without asking|even if denied|silently)\b/i,
+  },
+];
+
+export interface PromptLayers {
+  stable: string[];
+  context: string[];
+  volatile: string[];
+}
+
+export type PromptFileIssueSeverity = "warning" | "block";
+
+export interface PromptFileScanIssue {
+  severity: PromptFileIssueSeverity;
+  code: string;
+  message: string;
+  match: string;
+}
+
+export interface UserProfilePendingUpdate {
+  id: string;
+  createdAt: string;
+  source: string;
+  content: string;
+  reason?: string;
+}
+
 export function getBaseSystemPrompt(): string {
   return BASE_SYSTEM_PROMPT;
+}
+
+export function getDefaultIdentity(): string {
+  return DEFAULT_IDENTITY;
+}
+
+export function getInvariantGuidance(): string {
+  return INVARIANT_GUIDANCE;
 }
 
 export async function getEnvironmentInfo(cwd?: string): Promise<EnvironmentInfo> {
@@ -169,16 +235,170 @@ export function buildDelegationSection(): string {
   ].join("\n");
 }
 
+function truncateMarkdownContent(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+  return content.slice(0, maxChars).trimEnd() + "\n...[truncated]...";
+}
+
+export function scanPersonalPromptFile(content: string): PromptFileScanIssue[] {
+  const issues: PromptFileScanIssue[] = [];
+  for (const rule of BLOCKING_PROMPT_FILE_PATTERNS) {
+    const match = content.match(rule.pattern);
+    if (!match?.[0]) continue;
+    issues.push({
+      severity: "block",
+      code: rule.code,
+      message: rule.message,
+      match: match[0],
+    });
+  }
+  return issues;
+}
+
+function hasBlockingPromptFileIssue(content: string): boolean {
+  return scanPersonalPromptFile(content).some((issue) => issue.severity === "block");
+}
+
+export async function loadSoulMd(maxChars: number = MAX_SOUL_CHARS): Promise<string | null> {
+  const path = join(getConfigDir(), "SOUL.md");
+  try {
+    const content = (await readFile(path, "utf-8")).trim();
+    if (!content) return null;
+    if (hasBlockingPromptFileIssue(content)) return null;
+    return truncateMarkdownContent(content, maxChars);
+  } catch {
+    return null;
+  }
+}
+
+export async function loadUserProfile(maxChars: number = MAX_USER_PROFILE_CHARS): Promise<string | null> {
+  const path = join(getConfigDir(), "USER.md");
+  try {
+    const content = (await readFile(path, "utf-8")).trim();
+    if (!content) return null;
+    if (hasBlockingPromptFileIssue(content)) return null;
+    return `# User Profile\n\n${truncateMarkdownContent(content, maxChars)}`;
+  } catch {
+    return null;
+  }
+}
+
+function getUserProfilePendingDir(): string {
+  return join(getConfigDir(), USER_PROFILE_PENDING_DIR);
+}
+
+function assertSafePendingUpdateId(id: string): void {
+  if (!/^[a-zA-Z0-9-]+$/.test(id)) {
+    throw new Error(`Invalid pending USER.md update id: ${id}`);
+  }
+}
+
+function pendingUserProfileUpdatePath(id: string): string {
+  assertSafePendingUpdateId(id);
+  return join(getUserProfilePendingDir(), `${id}.json`);
+}
+
+export async function queueUserProfileUpdate(
+  input: {
+    content: string;
+    source?: string;
+    reason?: string;
+  },
+): Promise<UserProfilePendingUpdate> {
+  const content = input.content.trim();
+  if (!content) throw new Error("Cannot queue an empty USER.md update.");
+  const issues = scanPersonalPromptFile(content);
+  const blocking = issues.find((issue) => issue.severity === "block");
+  if (blocking) {
+    throw new Error(`Blocked USER.md update: ${blocking.code}`);
+  }
+
+  const update: UserProfilePendingUpdate = {
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    source: input.source?.trim() || "unknown",
+    content,
+    ...(input.reason?.trim() ? { reason: input.reason.trim() } : {}),
+  };
+
+  await mkdir(getUserProfilePendingDir(), { recursive: true });
+  await writeFile(pendingUserProfileUpdatePath(update.id), JSON.stringify(update, null, 2) + "\n", "utf-8");
+  return update;
+}
+
+function isUserProfilePendingUpdate(value: unknown): value is UserProfilePendingUpdate {
+  const candidate = value as Partial<UserProfilePendingUpdate> | null;
+  return Boolean(
+    candidate &&
+    typeof candidate.id === "string" &&
+    typeof candidate.createdAt === "string" &&
+    typeof candidate.source === "string" &&
+    typeof candidate.content === "string",
+  );
+}
+
+export async function listPendingUserProfileUpdates(): Promise<UserProfilePendingUpdate[]> {
+  let entries: string[];
+  try {
+    entries = await readdir(getUserProfilePendingDir());
+  } catch {
+    return [];
+  }
+
+  const updates: UserProfilePendingUpdate[] = [];
+  for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
+    const id = entry.slice(0, -".json".length);
+    try {
+      const parsed = JSON.parse(await readFile(pendingUserProfileUpdatePath(id), "utf-8")) as unknown;
+      if (isUserProfilePendingUpdate(parsed)) updates.push(parsed);
+    } catch {
+      // Ignore malformed pending proposals; callers can remove them manually.
+    }
+  }
+  return updates.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export async function approvePendingUserProfileUpdate(id: string): Promise<string | null> {
+  const path = pendingUserProfileUpdatePath(id);
+  let update: UserProfilePendingUpdate;
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf-8")) as unknown;
+    if (!isUserProfilePendingUpdate(parsed)) return null;
+    update = parsed;
+  } catch {
+    return null;
+  }
+
+  const blocking = scanPersonalPromptFile(update.content).find((issue) => issue.severity === "block");
+  if (blocking) {
+    throw new Error(`Blocked USER.md update: ${blocking.code}`);
+  }
+
+  const userProfilePath = join(getConfigDir(), "USER.md");
+  let existing = "";
+  try {
+    existing = (await readFile(userProfilePath, "utf-8")).trim();
+  } catch {
+    existing = "";
+  }
+
+  await mkdir(getConfigDir(), { recursive: true });
+  const next = [existing, update.content.trim()].filter(Boolean).join("\n\n") + "\n";
+  await writeFile(userProfilePath, next, "utf-8");
+  await rm(path, { force: true });
+  return userProfilePath;
+}
+
 export async function buildSystemPrompt(
   customPrompt?: string,
   cwd?: string,
 ): Promise<string> {
   const env = await getEnvironmentInfo(cwd);
-  const base = customPrompt ?? BASE_SYSTEM_PROMPT;
   const envSection = formatEnvironmentSection(env);
 
   const claudeMd = await loadClaudeMdPrompt(env.cwd);
-  const sections = [base, envSection];
+  const sections = [BASE_SYSTEM_PROMPT, envSection];
+  if (customPrompt?.trim()) sections.push(`# Custom Instructions\n\n${customPrompt.trim()}`);
   if (claudeMd) sections.push(claudeMd);
 
   return sections.join("\n\n");
@@ -321,24 +541,46 @@ export async function buildRuntimeSystemPrompt(
     skillsList?: Array<{ name: string; description: string }>;
   } = {}
 ): Promise<string> {
+  return renderPromptLayers(await buildPromptLayers(options));
+}
+
+export async function buildPromptLayers(
+  options: {
+    customPrompt?: string;
+    cwd?: string;
+    permissionMode?: PromptPermissionMode;
+    fastMode?: boolean;
+    effort?: string;
+    passes?: number;
+    memoryContent?: string;
+    includeDelegation?: boolean;
+    skillsList?: Array<{ name: string; description: string }>;
+  } = {}
+): Promise<PromptLayers> {
   const env = await getEnvironmentInfo(options.cwd);
-  const base = options.customPrompt ?? BASE_SYSTEM_PROMPT;
   const envSection = formatEnvironmentSection(env);
 
-  const sections = [base, envSection];
+  const stable: string[] = [];
+  const context: string[] = [];
+  const volatile: string[] = [];
+
+  stable.push((await loadSoulMd()) ?? DEFAULT_IDENTITY);
+  stable.push(INVARIANT_GUIDANCE);
+
+  stable.push(envSection);
 
   // Permission-mode guidance (default when unspecified, mirroring Python).
-  sections.push(buildPermissionModeSection(options.permissionMode ?? "default"));
+  stable.push(buildPermissionModeSection(options.permissionMode ?? "default"));
 
   if (options.fastMode) {
-    sections.push("# Session Mode\nFast mode is enabled. Prefer concise replies, minimal tool use, and quicker progress.");
+    stable.push("# Session Mode\nFast mode is enabled. Prefer concise replies, minimal tool use, and quicker progress.");
   }
 
   if (options.effort || options.passes) {
     const parts: string[] = ["# Reasoning Settings"];
     if (options.effort) parts.push(`- Effort: ${options.effort}`);
     if (options.passes) parts.push(`- Passes: ${options.passes}`);
-    sections.push(parts.join("\n"));
+    stable.push(parts.join("\n"));
   }
 
   if (options.skillsList && options.skillsList.length > 0) {
@@ -351,26 +593,43 @@ export async function buildRuntimeSystemPrompt(
     for (const skill of options.skillsList) {
       lines.push(`- **${skill.name}**: ${skill.description}`);
     }
-    sections.push(lines.join("\n"));
+    stable.push(lines.join("\n"));
   }
 
   // Delegation / subagent guidance (on by default, mirroring Python which
   // always appends it outside coordinator mode).
   if (options.includeDelegation !== false) {
-    sections.push(buildDelegationSection());
+    stable.push(buildDelegationSection());
+  }
+
+  if (options.customPrompt?.trim()) {
+    context.push(`# Custom Instructions\n\n${options.customPrompt.trim()}`);
   }
 
   const claudeMd = await loadClaudeMdPrompt(env.cwd);
-  if (claudeMd) sections.push(claudeMd);
+  if (claudeMd) context.push(claudeMd);
+
+  const userProfile = await loadUserProfile();
+  if (userProfile) volatile.push(userProfile);
 
   // 个性化环境事实（C.5）：session-end 抽取的 local_rules（SSH 主机/数据
   // 路径/conda 环境等）注入，与 Python prompts/context.py 同位（CLAUDE.md 后）。
   const localRules = loadLocalRules();
-  if (localRules) sections.push(localRules);
+  if (localRules) volatile.push(localRules);
 
   if (options.memoryContent && options.memoryContent.trim()) {
-    sections.push(`# Project Memory\n\n${options.memoryContent.trim()}`);
+    volatile.push(`# Project Memory\n\n${options.memoryContent.trim()}`);
   }
 
-  return sections.filter((s) => s.trim()).join("\n\n");
+  return {
+    stable: stable.filter((s) => s.trim()),
+    context: context.filter((s) => s.trim()),
+    volatile: volatile.filter((s) => s.trim()),
+  };
+}
+
+export function renderPromptLayers(layers: PromptLayers): string {
+  return [...layers.stable, ...layers.context, ...layers.volatile]
+    .filter((s) => s.trim())
+    .join("\n\n");
 }
