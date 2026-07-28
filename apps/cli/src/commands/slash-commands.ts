@@ -707,6 +707,21 @@ export function registerBuiltinCommandsOnRegistry(
           ? `${sandbox.state} (${sandbox.backend})`
           : sandbox.state;
         lines.push(`  Sandbox:      ${detail}`);
+        if (sandbox.networkMode) {
+          lines.push(`  Network:      ${sandbox.networkMode}`);
+        }
+        if (sandbox.containerName) {
+          lines.push(`  Container:    ${sandbox.containerName}`);
+        }
+        if (sandbox.containerCwd) {
+          lines.push(`  Container cwd:${sandbox.containerCwd}`);
+        }
+        if (sandbox.dns && sandbox.dns.length > 0) {
+          lines.push(`  DNS:          ${sandbox.dns.join(", ")}`);
+        }
+        if (sandbox.proxy) {
+          lines.push(`  Proxy:        ${sandbox.proxy}`);
+        }
         if (sandbox.reason) {
           lines.push(`  Sandbox note: ${sandbox.reason}`);
         }

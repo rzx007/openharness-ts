@@ -232,6 +232,7 @@ describe("resolveRepoRoot", () => {
   it("falls back to the given cwd when not a git repo", async () => {
     const nonRepo = mkdtempSync(join(tmpdir(), "oh-nonrepo-"));
     try {
+      writeFileSync(join(nonRepo, ".git"), "gitdir: ./not-a-real-git-dir\n");
       const top = await resolveRepoRoot(nonRepo);
       expect(top).toBe(nonRepo);
     } finally {

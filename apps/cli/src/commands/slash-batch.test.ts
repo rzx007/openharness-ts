@@ -93,6 +93,11 @@ describe("E.2 批次命令", () => {
             active: true,
             backend: "docker",
             reason: "domain policy is not enforced",
+            networkMode: "bridge",
+            containerName: "openharness-sandbox-test",
+            containerCwd: "/workspace",
+            dns: ["1.1.1.1", "8.8.8.8"],
+            proxy: "not configured",
           },
           toolRegistry: { getAll: () => [{ name: "Bash" }] },
           hookExecutor: { register: () => {} },
@@ -101,6 +106,11 @@ describe("E.2 批次命令", () => {
 
     expect(result.success).toBe(true);
     expect(result.output).toContain("Sandbox:      degraded (docker)");
+    expect(result.output).toContain("Network:      bridge");
+    expect(result.output).toContain("Container:    openharness-sandbox-test");
+    expect(result.output).toContain("Container cwd:/workspace");
+    expect(result.output).toContain("DNS:          1.1.1.1, 8.8.8.8");
+    expect(result.output).toContain("Proxy:        not configured");
     expect(result.output).toContain("Sandbox note: domain policy is not enforced");
   });
 

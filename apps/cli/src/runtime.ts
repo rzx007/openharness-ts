@@ -10,6 +10,7 @@ import { PermissionChecker, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
+import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import {
   getBackendRegistry,
@@ -21,6 +22,9 @@ import {
 import { getTaskManager } from "@openharness/services";
 import { buildTeammateCommand } from "./teammate.js";
 import { startSwarmPermissionResolver, watchTeamForPermissions } from "./swarm-permission.js";
+
+const bundlesWithExitCleanup = new Set<RuntimeBundle>();
+let exitCleanupInstalled = false;
 
 export type PermissionPromptFn = (
   toolName: string,
@@ -155,6 +159,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     maxTurns: overrides.maxTurns ?? settings.maxTurns,
     systemPrompt,
     model: runtimeModel,
+    settings,
     permissionPrompt: options.permissionPrompt,
     skillRegistry: options.skillRegistry,
   };
@@ -230,13 +235,52 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     );
   }
 
-  return new RuntimeBuilder()
+  const bundle = new RuntimeBuilder()
     .setApiClient(apiClient)
     .setToolRegistry(toolRegistry)
     .setPermissionChecker(permissionChecker)
     .setHookExecutor(hookExecutor)
     .setQueryEngine(queryEngine)
     .build(settings);
+
+  await attachSandboxRuntime(bundle, process.cwd());
+  return bundle;
+}
+
+async function attachSandboxRuntime(bundle: RuntimeBundle, cwd: string): Promise<void> {
+  const sandboxRuntime = await startSandboxRuntime({
+    settings: bundle.settings,
+    cwd,
+    sessionId: createSandboxSessionId(cwd),
+  });
+  bundle.sandboxStatus = sandboxRuntime.status;
+
+  if (sandboxRuntime.status.backend !== "docker" || !sandboxRuntime.status.active) {
+    return;
+  }
+
+  bundle.addCleanup(
+    () => sandboxRuntime.stop(),
+    () => sandboxRuntime.stopSync(),
+  );
+  registerExitCleanup(bundle);
+}
+
+function createSandboxSessionId(cwd: string): string {
+  const repoId = createHash("sha1").update(cwd).digest("hex").slice(0, 12);
+  return `${process.pid}-${repoId}-${Date.now().toString(36)}`;
+}
+
+function registerExitCleanup(bundle: RuntimeBundle): void {
+  bundlesWithExitCleanup.add(bundle);
+  if (exitCleanupInstalled) return;
+  exitCleanupInstalled = true;
+  process.on("exit", () => {
+    for (const runtime of bundlesWithExitCleanup) {
+      runtime.closeSync();
+    }
+    bundlesWithExitCleanup.clear();
+  });
 }
 
 /**
