@@ -21,7 +21,7 @@
 | 组件 | 文件 | 职责 |
 |------|------|------|
 | `PermissionChecker` | `packages/permissions/src/index.ts` | `checkTool` 规则判定（mode/denied/autoApprove/allowed/path/command/rules）|
-| `QueryEngine.executeTools` | `packages/core/src/engine/query-engine.ts` | 对每个工具调用先 checkTool；`ask` → 调 `permissionPrompt` |
+| `QueryEngine.executeTools` | `packages/core/src/engine/query-engine.ts` | 查找工具、校验 `inputSchema`、checkTool；`ask` → 调 `permissionPrompt`；注入 `abortSignal` 并统一超时 |
 | `PermissionPrompt` 类型 | `packages/core/src/types/runtime.ts` | `(toolName, reason?, input?) => Promise<boolean>`（input 供 diff 预览） |
 | `askPermission`（TUI 后端）| `apps/cli/src/commands/main.ts` | 把"问用户"翻成 `modal_request` 事件（含 diff/diff_path），等前端回 `permission_response` |
 | `PermissionDialog` | `apps/frontend/src/components/dialogs/PermissionDialog.tsx` | 渲染权限框（tool_name + reason + diff 预览 + y/a/n/Esc）|
@@ -49,28 +49,52 @@
   是 swarm worker 经 `--swarm-worker` 灌进 `autoApproveTools` 的集合（见 D.4）。
 - `default` 模式下，没有任何白/黑名单或规则命中时，**写/执行类工具走兜底的 `ask`**。
 
-## 确认层：QueryEngine 如何处理三态
+## QueryEngine 工具执行管线
 
-`QueryEngine.executeTools`（`query-engine.ts:252`）对一批 `toolUses` 先**并行** checkTool，
-再逐个按决策处理：
+`QueryEngine.executeTools` 对一批 `toolUses` 按统一管线处理。当前已实现的顺序是：
+
+```
+ToolCall
+  → 查找工具定义
+  → inputSchema 校验
+  → Permission(checkTool / permissionPrompt)
+  → pre_tool_use hook（可拦截）
+  → Timeout / AbortSignal
+  → Execute
+  → post_tool_use hook
+  → 写入 tool_result 时应用 Output Budget
+```
+
+要点：
+- **未知工具**会直接返回 `Unknown tool` 错误，不进入权限检查。
+- **Schema 校验在 permission 之前**。模型参数不符合 `ToolDefinition.inputSchema` 时，直接返回
+  `Tool input validation failed: ...`，不会触发 permissionPrompt、pre hook 或工具执行。
+- `ToolContext.abortSignal` 由 QueryEngine 注入。工具实现应尽量把它传给 `fetch`、子任务等待、
+  长轮询等可取消操作；否则 QueryEngine 能按统一超时返回，但底层工作是否真正停止取决于工具是否配合。
+- 工具统一超时默认 **300000ms**，可通过 `QueryEngineOptions.toolTimeoutMs` 或环境变量
+  `OPENHARNESS_TOOL_TIMEOUT_MS` 调整。
+- Output Budget 在工具结果加入消息历史时应用，用于限制回灌给模型的文本量。
+- 独立 Audit 事件/日志尚未接线；目前可通过 `post_tool_use` hook 做审计类扩展。
+
+权限分支仍按三态处理：
 
 ```
 checkTool → decision
    ├─ "deny"  → 直接产出 isError 结果："Permission denied: <reason>"，不执行
-   ├─ "ask"   → allowed = permissionPrompt ? await permissionPrompt(name, reason) : false
+   ├─ "ask"   → allowed = permissionPrompt ? await permissionPrompt(name, reason, input) : false
    │              ├─ allowed=false → isError："Permission denied by user"，不执行
    │              └─ allowed=true  → 继续往下
    └─ "allow" → 继续往下
-继续 → pre_tool_use hook（可拦截）→ 执行工具 → post_tool_use hook
+继续 → pre_tool_use hook（可拦截）→ Timeout / AbortSignal → 执行工具 → post_tool_use hook
 ```
 
-关键代码（`query-engine.ts:279`）：
+关键代码：
 
 ```ts
 if (decision.action === "ask") {
   let allowed = false;
   if (this.permissionPrompt) {
-    allowed = await this.permissionPrompt(toolUse.name, decision.reason);
+    allowed = await this.permissionPrompt(toolUse.name, decision.reason, toolUse.input);
   }
   if (!allowed) { /* isError: Permission denied by user */ }
 }

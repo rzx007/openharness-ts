@@ -62,6 +62,8 @@ export interface QueryEngineOptions {
   systemPrompt?: string;
   model?: string;
   maxTokens?: number;
+  /** Default 300000 ms; can also be set with OPENHARNESS_TOOL_TIMEOUT_MS. */
+  toolTimeoutMs?: number;
   settings?: Settings;
   compactKeepRecent?: number;
   permissionPrompt?: PermissionPrompt;

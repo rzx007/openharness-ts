@@ -89,7 +89,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 │ Step 2 · Agent 工具（packages/tools/src/agent）           │
 │                                                          │
 │  getAgentDefinition(subagentType)  → 人格 systemPrompt   │
-│  getBackendRegistry().getExecutor("subprocess")            │
+│  当前主路径：getBackendRegistry().getExecutor("subprocess")│
 │  SubprocessBackend.spawn(config)                         │
 │    ├─ buildTeammateCommand → [node, ohs, --task-worker]  │
 │    └─ TaskManager.createAgentTask({argv,prompt,type:…}) │
@@ -177,6 +177,11 @@ REPL / 普通 print 模式下没有 BackendHost，**不会** emit `swarm_status`
   settings。继承会形成死循环：leader full_auto → worker 也 full_auto 自行放行，D.5 文件流的
   批准路径成为死代码。worker 固定 default 后写操作经文件流由 leader 集中裁决（leader full_auto
   时 checker 照批，但留下集中审计点）。Agent 工具的 `permissionMode` 入参可显式覆盖。
+- **Agent `mode` 仍未决定后端**：`Agent` 工具当前只校验
+  `local_agent | remote_agent | in_process_teammate`，实际 executor 选择仍是
+  `in_process → subprocess → first` fallback。预期应显式映射为
+  `local_agent → subprocess`、`in_process_teammate → in_process`、
+  `remote_agent → remote`；调用者显式指定的 mode 对应 backend 未注册时应返回错误。
 - **只读自动放行（D.4）**：`--swarm-worker` → `PermissionChecker.autoApproveTools = READ_ONLY_TOOLS`
   （Read/Glob/Grep/WebFetch/WebSearch/TaskGet/TaskList/TaskOutput/TaskWait/CronList/Lsp）；
   `deniedTools` 仍优先于 autoApprove。

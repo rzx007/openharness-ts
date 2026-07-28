@@ -14,9 +14,11 @@ import type {
 import { CompactService, type CompactClient, type CompactAttachmentsProvider } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
+import { validateToolInput } from "./tool-input-schema";
 
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
 const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
+const DEFAULT_TOOL_TIMEOUT_MS = 300_000;
 
 // ---------------------------------------------------------------------------
 // Tool output budget — mirrors packages/services/src/tool-outputs.ts
@@ -36,6 +38,18 @@ function toolOutputInlineChars(): number {
 
 function toolOutputPreviewChars(): number {
   return readPositiveIntEnv("OPENHARNESS_TOOL_OUTPUT_PREVIEW_CHARS", 3_000, 128);
+}
+
+function toolExecutionTimeoutMs(override: number | undefined): number {
+  if (typeof override === "number" && Number.isInteger(override) && override > 0) return override;
+  return readPositiveIntEnv("OPENHARNESS_TOOL_TIMEOUT_MS", DEFAULT_TOOL_TIMEOUT_MS, 1);
+}
+
+class ToolTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Tool execution timed out after ${timeoutMs} ms`);
+    this.name = "ToolTimeoutError";
+  }
 }
 
 /**
@@ -361,27 +375,65 @@ export class QueryEngine implements IQueryEngine {
    *          包含工具ID、名称、执行内容（或错误信息）以及是否出错的标志。
    */
   private async executeTools(toolUses: ToolUseBlock[]): Promise<ToolExecutionResult[]> {
+    const results: ToolExecutionResult[] = new Array(toolUses.length);
+    const readyForPermission: {
+      idx: number;
+      toolUse: ToolUseBlock;
+      tool: NonNullable<ReturnType<IToolRegistry["get"]>>;
+    }[] = [];
+
+    for (let i = 0; i < toolUses.length; i++) {
+      const toolUse = toolUses[i]!;
+
+      const tool = this.toolRegistry.get(toolUse.name);
+      if (!tool) {
+        results[i] = {
+          toolUseId: toolUse.id,
+          toolName: toolUse.name,
+          content: [{ type: "text" as const, text: `Unknown tool: ${toolUse.name}` }],
+          isError: true,
+        };
+        continue;
+      }
+
+      const validationError = validateToolInput(tool.inputSchema, toolUse.input);
+      if (validationError) {
+        results[i] = {
+          toolUseId: toolUse.id,
+          toolName: toolUse.name,
+          content: [{ type: "text" as const, text: `Tool input validation failed: ${validationError}` }],
+          isError: true,
+        };
+        continue;
+      }
+
+      readyForPermission.push({ idx: i, toolUse, tool });
+    }
+
     // 并行检查所有工具的权限状态（单个 checkTool 抛错不应波及其他工具）
     const checks = await Promise.all(
-      toolUses.map(async (tu) => {
+      readyForPermission.map(async ({ toolUse }) => {
         try {
-          return await this.permissionChecker.checkTool(tu.name, tu.input);
+          return await this.permissionChecker.checkTool(toolUse.name, toolUse.input);
         } catch {
           return { action: "deny" as const, reason: "permission check failed" };
         }
       })
     );
 
-    const executable: { idx: number; toolUse: ToolUseBlock }[] = [];
-    const results: ToolExecutionResult[] = new Array(toolUses.length);
+    const executable: {
+      idx: number;
+      toolUse: ToolUseBlock;
+      tool: NonNullable<ReturnType<IToolRegistry["get"]>>;
+    }[] = [];
 
-    for (let i = 0; i < toolUses.length; i++) {
-      const toolUse = toolUses[i]!;
-      const decision = checks[i]!;
+    for (let readyIndex = 0; readyIndex < readyForPermission.length; readyIndex++) {
+      const { idx, toolUse, tool } = readyForPermission[readyIndex]!;
+      const decision = checks[readyIndex]!;
 
       // 处理权限被直接拒绝的情况
       if (decision.action === "deny") {
-        results[i] = {
+        results[idx] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
           content: [{ type: "text" as const, text: `Permission denied: ${decision.reason ?? "not allowed"}` }],
@@ -397,7 +449,7 @@ export class QueryEngine implements IQueryEngine {
           allowed = await this.permissionPrompt(toolUse.name, decision.reason, toolUse.input);
         }
         if (!allowed) {
-          results[i] = {
+          results[idx] = {
             toolUseId: toolUse.id,
             toolName: toolUse.name,
             content: [{ type: "text" as const, text: `Permission denied by user: ${decision.reason ?? "not confirmed"}` }],
@@ -419,7 +471,7 @@ export class QueryEngine implements IQueryEngine {
       }
 
       if (hookResult.blocked) {
-        results[i] = {
+        results[idx] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
           content: [{ type: "text" as const, text: `Blocked by hook: ${hookResult.reason ?? "pre-tool hook blocked execution"}` }],
@@ -428,25 +480,13 @@ export class QueryEngine implements IQueryEngine {
         continue;
       }
 
-      // 验证工具是否存在，若不存在则返回错误结果
-      const tool = this.toolRegistry.get(toolUse.name);
-      if (!tool) {
-        results[i] = {
-          toolUseId: toolUse.id,
-          toolName: toolUse.name,
-          content: [{ type: "text" as const, text: `Unknown tool: ${toolUse.name}` }],
-          isError: true,
-        };
-        continue;
-      }
-
-      executable.push({ idx: i, toolUse });
+      executable.push({ idx, toolUse, tool });
     }
 
     // 并行执行所有通过校验的工具，并捕获执行过程中的异常
+    const timeoutMs = toolExecutionTimeoutMs(this.options.toolTimeoutMs);
     const execResults = await Promise.all(
-      executable.map(async ({ idx, toolUse }) => {
-        const tool = this.toolRegistry.get(toolUse.name)!;
+      executable.map(async ({ idx, toolUse, tool }) => {
         try {
           const context: ToolContext = {
             cwd: process.cwd(),
@@ -454,7 +494,7 @@ export class QueryEngine implements IQueryEngine {
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
           };
-          const result = await tool.execute(toolUse.input, context);
+          const result = await this.executeToolWithTimeout(tool, toolUse.input, context, timeoutMs);
           return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };
         } catch (error) {
           return {
@@ -493,5 +533,37 @@ export class QueryEngine implements IQueryEngine {
     }
 
     return results;
+  }
+
+  private async executeToolWithTimeout(
+    tool: NonNullable<ReturnType<IToolRegistry["get"]>>,
+    input: Record<string, unknown>,
+    context: ToolContext,
+    timeoutMs: number,
+  ): Promise<Awaited<ReturnType<NonNullable<ReturnType<IToolRegistry["get"]>>["execute"]>>> {
+    const controller = new AbortController();
+    const timeoutError = new ToolTimeoutError(timeoutMs);
+    let abortListener: (() => void) | undefined;
+    const timeout = setTimeout(() => {
+      controller.abort(timeoutError);
+    }, timeoutMs);
+    timeout.unref?.();
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      abortListener = () => reject(controller.signal.reason ?? timeoutError);
+      controller.signal.addEventListener("abort", abortListener, { once: true });
+    });
+
+    try {
+      return await Promise.race([
+        tool.execute(input, { ...context, abortSignal: controller.signal }),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timeout);
+      if (abortListener) {
+        controller.signal.removeEventListener("abort", abortListener);
+      }
+    }
   }
 }

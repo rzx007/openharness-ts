@@ -44,12 +44,43 @@ const tools = registry.getAll();
 registry.register({
   name: "MyTool",
   description: "My custom tool",
-  inputSchema: { type: "object", properties: {} },
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string" },
+    },
+    required: ["query"],
+  },
   execute: async (input, context) => {
+    context.abortSignal?.throwIfAborted();
     return { content: [{ type: "text", text: "result" }] };
   }
 });
 ```
+
+### 执行契约
+
+工具调用由 `QueryEngine` 统一包一层执行管线：
+
+```text
+ToolCall
+  → inputSchema 校验
+  → Permission
+  → pre_tool_use hook
+  → Timeout / AbortSignal
+  → execute(input, context)
+  → post_tool_use hook
+  → Output Budget
+```
+
+工具作者需要注意：
+
+- `inputSchema` 会在 `execute` 之前统一校验；无效输入不会进入工具函数。
+- `context.abortSignal` 总是由 QueryEngine 注入。长耗时工具应监听它，或把它传给支持
+  `AbortSignal` 的 API（如 `fetch`），以便统一超时时真正取消底层工作。
+- 默认统一超时是 `300000ms`，可通过 `QueryEngineOptions.toolTimeoutMs` 或
+  `OPENHARNESS_TOOL_TIMEOUT_MS` 调整。
+- 工具仍应保留领域内的错误处理和输出截断；统一 Output Budget 只负责限制结果回灌给模型的文本量。
 
 ## 测试
 

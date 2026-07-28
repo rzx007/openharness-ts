@@ -13,7 +13,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
 - ✅ **会话持久化** — 按项目分目录的 Session 快照（latest/id 双写、load 侧 tool 配对修复）、`--continue` / `--resume`、每轮 session checkpoint；Cron 仍为基础版
-- ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents 五类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 动态加载待补
+- ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents/tools_dir 六类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 支持动态 import 插件工具
 - ✅ **Channels 引擎桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 QueryEngine；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-bridge-design.md](docs/channels-bridge-design.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、SwarmPanel、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
@@ -414,18 +414,18 @@ OpenHarness-ts/
 | `TaskManager`    | 任务管理：创建/查询/停止/输出，文件持久化                                      |
 | `MemoryManager`  | 四层记忆体系的持久层：frontmatter + 加权搜索 + MEMORY.md 索引；配套 `/remember`（LLM 提取持久记忆）、`/dream`（梦境整合）、会话 checkpoint 与环境事实抽取。详见 [docs/memory-system.md](docs/memory-system.md) |
 | `LspClient`      | LSP 客户端：与 Language Server Protocol 通信                       |
-| `OAuthFlow`      | OAuth 认证：Device Code Flow + token 刷新                        |
+| `OAuthFlow`      | OAuth URL 生成骨架；token exchange / refresh 仍为 placeholder，生产 OAuth 链路待补 |
 
 ### 扩展层
 
 | 模块                   | 说明                                                                                                          |
 | -------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `Coordinator`        | 多 Agent 编排：7 个内置 Agent 定义 + system prompt + sequential/parallel/pipeline 模式                                 |
-| `McpClientManager`   | MCP 协议客户端：stdio 传输连接外部 MCP Server，动态获取工具和资源                                                                 |
+| `McpClientManager`   | MCP 协议客户端：stdio + HTTP/SSE 传输连接外部 MCP Server，headers 鉴权，动态获取工具和资源；MCP OAuth 待补 |
 | `ChannelAdapter`     | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                              |
 | `HookExecutor`       | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
 | `Swarm` | 多 Agent 团队：subprocess 后端把子代理派发为 `ohs --task-worker` 子进程（prompt 经 stdin），SendMessage 重启式多轮续聊；git worktree 隔离、只读工具自动放行；文件邮箱（原子写+文件锁）、team.json 持久化（随会话退出清理）、权限同步（worker 写操作经 pending/resolved 文件流转 leader checker 自动裁决）。详见 [docs/swarm-file-infra-design.md](docs/swarm-file-infra-design.md)、[docs/swarm-task-worker-design.md](docs/swarm-task-worker-design.md) |
-| `PluginLoader`       | 插件系统（Claude Code 布局兼容）：双源发现 + 项目插件信任门控；skills/commands/hooks/MCP 四类贡献注册（`/plugin:cmd` 斜杠命令、`${CLAUDE_PLUGIN_ROOT}`、`.mcp.json`）；卸载路径穿越防护。详见 [docs/plugins-contributions-design.md](docs/plugins-contributions-design.md) |
+| `PluginLoader`       | 插件系统（Claude Code 布局兼容）：双源发现 + 项目插件信任门控；skills/commands/hooks/MCP/agents/tools_dir 六类贡献注册（`/plugin:cmd` 斜杠命令、`${CLAUDE_PLUGIN_ROOT}`、`.mcp.json`、动态工具 import）；卸载路径穿越防护。详见 [docs/plugins-contributions-design.md](docs/plugins-contributions-design.md) |
 | `SkillRegistry`      | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；user-invocable skill 可作 `/<skill>` 斜杠命令；model 可见性过滤 |
 | `BridgeManager`      | 会话桥接：多进程间共享会话状态                                                                                             |
 | `PermissionChecker`  | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                               |

@@ -179,8 +179,11 @@ async function runAgentTurn(input, runtime) {
         }
 
         await runtime.hooks.emit("pre_tool_use", { call, args });
-        const result = await withTimeout(
-          tool.execute(args, runtime.toolContext),
+        const result = await withTimeout((abortSignal) =>
+          tool.execute(args, {
+            ...runtime.toolContext,
+            abortSignal,
+          }),
           tool.timeout,
         );
         await runtime.hooks.emit("post_tool_use", { call, result });
@@ -200,6 +203,25 @@ async function runAgentTurn(input, runtime) {
 这里有一个关键设计原则：**模型负责决策，Runtime 负责执行和约束。**
 
 不要指望 Prompt 替代权限检查、超时、参数校验或状态机。Prompt 是软约束，代码才是硬约束。
+
+当前 OpenHarness 的工具调用硬约束按以下顺序落地：
+
+```text
+ToolCall
+  → ToolDefinition 查找
+  → inputSchema 校验
+  → Permission
+  → pre_tool_use hook
+  → Timeout / AbortSignal
+  → Execute
+  → post_tool_use hook
+  → Output Budget（写入 tool_result 时）
+```
+
+`ToolContext.abortSignal` 会传给工具，长耗时或第三方工具应主动监听；否则 Runtime 能超时返回，
+但底层工作是否停止取决于工具自身是否配合取消。Output Budget 在工具结果写入 `tool_result`
+消息时应用。独立 Audit 事件/日志还不是核心管线的一环，
+现阶段审计类扩展可挂在 `post_tool_use` hook 上。
 
 ---
 

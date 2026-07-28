@@ -42,6 +42,44 @@
 
 ---
 
+## 生产平台缺口（当前明确未完成）
+
+这些能力不一定阻塞本地 coding agent 使用，但会影响“可托管、可审计、可多租户、可回归验证”的生产化程度。
+
+1. **Agent `mode` 尚未真正选择后端**
+   - 现状：`packages/tools/src/agent/index.ts` 校验 `mode` 只能是 `local_agent` / `remote_agent` / `in_process_teammate`，但实际取 executor 时仍固定按 `in_process` → `subprocess` → first fallback。
+   - 风险：未来同时注册 in-process、subprocess、remote backend 后，调用者显式指定的模式可能不生效。
+   - 预期：`local_agent` → `subprocess`，`in_process_teammate` → `in_process`，`remote_agent` → `remote`；显式指定的 backend 缺失时应报错，而不是静默 fallback。
+
+2. **OAuthFlow 仍是 placeholder**
+   - 现状：`packages/services/src/oauth/index.ts` 的 `exchangeCode()` / `refreshTokens()` 仍返回 `{ accessToken: "placeholder" }`。
+   - 含义：只能生成授权 URL，不能真的用 authorization code 换 access token，也不能 refresh 过期 token。
+   - 影响：Copilot、企业 OAuth provider、云端平台接入等需要 OAuth 的能力还不能作为生产认证链路使用。
+
+3. **MCP OAuth 未完成**
+   - 现状：MCP 已支持 stdio + HTTP/SSE + headers 鉴权，但 OAuth 授权流、token 存储/刷新、McpAuth 交互链路还未落地。
+   - 含义：只能用静态 headers/env token 连接需要鉴权的 MCP server；需要 OAuth 动态授权的 MCP server 仍缺闭环。
+
+4. **缺统一 run trace / tool trace / audit chain / cost metrics**
+   - 现状：核心里有 `CostTracker` 汇总 usage，也有 hooks 可做扩展；但没有统一的 run_id/span_id、工具调用 trace、审计事件链、可查询的成本指标存储。
+   - 含义：出了问题很难回答“这次 run 里模型调用了几次、每个工具耗时多少、谁批准了什么、总成本是多少、输出给了哪个 channel”。
+   - 影响：企业审计、SLO、成本看板、事故复盘、多租户治理都缺基础数据。
+
+5. **缺系统化 Agent evaluation / regression benchmark**
+   - 现状：有单元/集成测试，但没有一套固定任务集来评估 Agent 行为质量。
+   - 含义：改 prompt、工具管线、模型 provider、权限策略后，只能靠零散测试和人工试用判断是否退化。
+   - 预期：建立可重复的任务集、评分器、基线结果和 CI/手动回归入口。
+
+6. **Channels 仍偏单通道 MVP**
+   - 现状：Channels 基座 + 飞书文本对话跑通；媒体、长消息分片、去重、线程级会话隔离、Slack/Discord/Telegram 等平台仍待补。
+   - 影响：多平台生产网关、富媒体机器人、长上下文外部对话体验还不完整。
+
+7. **README/PLAN/代码状态仍需持续校准**
+   - 现状：部分文档比代码旧或比代码超前。例：`tools_dir` 动态工具加载已实现，但 README 曾仍写“待补”。
+   - 要求：能力落地或发现缺口时，同步更新 README / PLAN / 设计文档，避免把 placeholder 当生产能力。
+
+---
+
 ## Phase A — 正确性修复（P0，不增功能）✅ 已完成
 
 > 已在 `feat/align-phase-ab` 完成（commit `8a31413`）。A.1–A.5 全部实现并测试。

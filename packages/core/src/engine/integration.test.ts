@@ -205,6 +205,49 @@ describe("Integration: Full Agent Loop", () => {
     expect(toolEnd.result.content[0].text).toContain("Unknown tool");
   });
 
+  it("validates tool input schema before permission checks and execution", async () => {
+    const registry = new ToolRegistry();
+    const execute = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ran" }] }));
+    registry.register({
+      name: "NeedsCommand",
+      description: "requires command",
+      inputSchema: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+      execute,
+    });
+
+    const permissionChecker = { checkTool: vi.fn(async () => ({ action: "allow" as const })) };
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "NeedsCommand", input: { command: 123 } },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "recovered" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, permissionChecker, noopHooks());
+    const events: StreamEvent[] = [];
+    for await (const e of engine.submitMessage("run invalid")) {
+      events.push(e);
+    }
+
+    const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
+    expect(toolEnd.result.isError).toBe(true);
+    expect(toolEnd.result.content[0].text).toContain("Tool input validation failed");
+    expect(toolEnd.result.content[0].text).toContain("input.command must be string");
+    expect(permissionChecker.checkTool).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("tool execution error is captured", async () => {
     const registry = new ToolRegistry();
     registry.register({
@@ -237,6 +280,86 @@ describe("Integration: Full Agent Loop", () => {
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd.result.isError).toBe(true);
     expect(toolEnd.result.content[0].text).toContain("boom");
+  });
+
+  it("injects abortSignal into tool context", async () => {
+    const registry = new ToolRegistry();
+    let sawAbortSignal = false;
+    registry.register({
+      name: "ContextCheck",
+      description: "checks context",
+      inputSchema: { type: "object", properties: {} },
+      execute: async (_input, context) => {
+        sawAbortSignal = context.abortSignal instanceof AbortSignal;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    });
+
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "ContextCheck", input: {} },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
+    for await (const _ of engine.submitMessage("check context")) {}
+
+    expect(sawAbortSignal).toBe(true);
+  });
+
+  it("times out hung tools through the unified execution wrapper", async () => {
+    const registry = new ToolRegistry();
+    let aborted = false;
+    registry.register({
+      name: "Hang",
+      description: "never resolves",
+      inputSchema: { type: "object", properties: {} },
+      execute: async (_input, context) => {
+        context.abortSignal?.addEventListener("abort", () => {
+          aborted = true;
+        });
+        return await new Promise(() => {});
+      },
+    });
+
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "Hang", input: {} },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(
+      client,
+      registry,
+      allowAll(),
+      noopHooks(),
+      { toolTimeoutMs: 20 },
+    );
+    const events: StreamEvent[] = [];
+    for await (const e of engine.submitMessage("hang")) {
+      events.push(e);
+    }
+
+    const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
+    expect(toolEnd.result.isError).toBe(true);
+    expect(toolEnd.result.content[0].text).toContain("Tool execution timed out after 20 ms");
+    expect(aborted).toBe(true);
   });
 
   it("three-turn chained tool calls", async () => {
