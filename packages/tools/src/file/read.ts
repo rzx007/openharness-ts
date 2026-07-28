@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
+import { sandboxPathError } from "./sandbox-guard.js";
 
 export const fileReadTool: ToolDefinition = {
   name: "Read",
@@ -23,6 +24,14 @@ export const fileReadTool: ToolDefinition = {
     const limit = (input.limit as number) ?? 2000;
 
     try {
+      const sandboxError = await sandboxPathError(filePath, cwd, "read", context.settings);
+      if (sandboxError) {
+        return {
+          content: [{ type: "text", text: sandboxError }],
+          isError: true,
+        };
+      }
+
       const fileStat = await stat(filePath);
       if (fileStat.isDirectory()) {
         const entries = await readdir(filePath, { withFileTypes: true });

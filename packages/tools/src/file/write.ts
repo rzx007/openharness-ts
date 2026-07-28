@@ -2,6 +2,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
+import { sandboxPathError } from "./sandbox-guard.js";
 
 // System directories that must never be written to, regardless of permission mode.
 const SYSTEM_DIR_PREFIXES = [
@@ -43,6 +44,14 @@ export const fileWriteTool: ToolDefinition = {
     }
 
     try {
+      const sandboxError = await sandboxPathError(filePath, cwd, "write", context.settings);
+      if (sandboxError) {
+        return {
+          content: [{ type: "text", text: sandboxError }],
+          isError: true,
+        };
+      }
+
       await mkdir(dirname(filePath), { recursive: true });
       await writeFile(filePath, content, "utf-8");
       return {

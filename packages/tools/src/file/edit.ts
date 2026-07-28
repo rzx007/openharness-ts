@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
+import { sandboxPathError } from "./sandbox-guard.js";
 
 // System directories that must never be edited, regardless of permission mode.
 const SYSTEM_DIR_PREFIXES = [
@@ -52,6 +53,21 @@ export const fileEditTool: ToolDefinition = {
     }
 
     try {
+      const readSandboxError = await sandboxPathError(filePath, cwd, "read", context.settings);
+      if (readSandboxError) {
+        return {
+          content: [{ type: "text", text: readSandboxError }],
+          isError: true,
+        };
+      }
+      const writeSandboxError = await sandboxPathError(filePath, cwd, "write", context.settings);
+      if (writeSandboxError) {
+        return {
+          content: [{ type: "text", text: writeSandboxError }],
+          isError: true,
+        };
+      }
+
       const content = await readFile(filePath, "utf-8");
 
       if (!content.includes(oldString)) {

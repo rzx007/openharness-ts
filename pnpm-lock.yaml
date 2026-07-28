@@ -131,6 +131,9 @@ importers:
       '@openharness/skills':
         specifier: workspace:*
         version: link:../../packages/skills
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
       '@openharness/swarm':
         specifier: workspace:*
         version: link:../../packages/swarm
@@ -579,6 +582,9 @@ importers:
       '@openharness/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
       '@openharness/services':
         specifier: workspace:*
         version: link:../services

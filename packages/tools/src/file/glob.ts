@@ -4,6 +4,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { join, relative } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
+import { sandboxPathError } from "./sandbox-guard.js";
 
 const DEFAULT_LIMIT = 200;
 const RG_TIMEOUT_MS = 30_000;
@@ -38,13 +39,21 @@ export const globTool: ToolDefinition = {
     },
     required: ["pattern"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const pattern = input.pattern as string;
-    const cwd = process.cwd();
+    const cwd = context.cwd ?? process.cwd();
     const basePath = resolveToolPath((input.path as string) ?? cwd, cwd);
     const limit = (input.limit as number) ?? DEFAULT_LIMIT;
 
     try {
+      const sandboxError = await sandboxPathError(basePath, cwd, "read", context.settings);
+      if (sandboxError) {
+        return {
+          content: [{ type: "text" as const, text: sandboxError }],
+          isError: true,
+        };
+      }
+
       const rgFiles = await tryRipgrepFiles(basePath, pattern, limit);
       const files =
         rgFiles !== null ? rgFiles : await walkGlob(basePath, pattern, limit);
@@ -77,7 +86,11 @@ function findRipgrep(): string | null {
     })
       .toString()
       .trim();
-    const first = out.split(/\r?\n/)[0]?.trim();
+    const matches = out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const first =
+      process.platform === "win32"
+        ? matches.find((line) => line.toLowerCase().endsWith(".exe")) ?? matches[0]
+        : matches[0];
     return first || null;
   } catch {
     return null;
@@ -106,13 +119,6 @@ async function tryRipgrepFiles(
   args.push("--glob", pattern, ".");
 
   return new Promise<string[] | null>((resolvePromise) => {
-    const child = spawn(rgPath, args, {
-      cwd: basePath,
-      windowsHide: true,
-      // stderr -> ignore: an unread pipe could deadlock rg on noisy errors.
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-
     const files: string[] = [];
     let buffer = "";
     let settled = false;
@@ -123,6 +129,19 @@ async function tryRipgrepFiles(
       settled = true;
       resolvePromise(value);
     };
+
+    let child;
+    try {
+      child = spawn(rgPath, args, {
+        cwd: basePath,
+        windowsHide: true,
+        // stderr -> ignore: an unread pipe could deadlock rg on noisy errors.
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      finish(null);
+      return;
+    }
 
     const timer = setTimeout(() => {
       stopped = true;

@@ -1,5 +1,6 @@
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import type { ToolDefinition } from "@openharness/core";
+import { createShellProcess, SandboxUnavailableError } from "@openharness/sandbox";
 
 // Matches the Python implementation's output cap.
 const MAX_OUTPUT_CHARS = 12000;
@@ -11,7 +12,7 @@ const TIMEOUT_GRACE_MS = 2000;
 export const bashTool: ToolDefinition = {
   name: "Bash",
   description:
-    "Execute a bash command in a persistent shell session. On Windows this runs via bash.exe, not cmd.exe; use cmd.exe /c for Windows shell builtins such as start. Use for git, npm, docker, etc.",
+    "Execute a shell command. On Windows this prefers bash.exe when usable and falls back to PowerShell/cmd when bash.exe is unavailable. Use for git, npm, docker, etc.",
   inputSchema: {
     type: "object",
     properties: {
@@ -65,16 +66,10 @@ function runShell(
   timeout: number
 ): Promise<ShellResult> {
   return new Promise<ShellResult>((resolve) => {
-    const shell = process.platform === "win32" ? "bash.exe" : "/bin/sh";
-    const child = spawn(shell, ["-c", command], {
+    createShellProcess(command, {
       cwd,
-      windowsHide: true,
-      // On POSIX, run in its own process group so we can signal the whole tree
-      // (the shell plus any children it spawned) on timeout.
-      detached: process.platform !== "win32",
-      // Merge stderr into stdout ordering at the buffer level (collected below).
       stdio: ["ignore", "pipe", "pipe"],
-    });
+    }).then((child) => {
 
     let buffer = "";
     let settled = false;
@@ -122,6 +117,14 @@ function runShell(
 
     child.on("close", (code) => {
       finish(code);
+    });
+    }).catch((err) => {
+      const text = err instanceof SandboxUnavailableError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      resolve({ output: text, code: null, timedOut: false });
     });
   });
 }

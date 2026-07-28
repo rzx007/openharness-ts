@@ -326,6 +326,11 @@ export class QueryEngine implements IQueryEngine {
     this.systemPrompt = prompt;
   }
 
+  setApiClient(client: StreamingMessageClient): void {
+    this.apiClient = client;
+    this.compactService.setClient(toCompactClient(this.apiClient, this.model));
+  }
+
   setModel(model: string): void {
     this.model = model;
     // Keep the summarizer client pointed at the current model.
@@ -443,7 +448,12 @@ export class QueryEngine implements IQueryEngine {
       executable.map(async ({ idx, toolUse }) => {
         const tool = this.toolRegistry.get(toolUse.name)!;
         try {
-          const context: ToolContext = { cwd: process.cwd(), skillRegistry: this.skillRegistry, mcpManager: this.mcpManager };
+          const context: ToolContext = {
+            cwd: process.cwd(),
+            settings: this.options.settings,
+            skillRegistry: this.skillRegistry,
+            mcpManager: this.mcpManager,
+          };
           const result = await tool.execute(toolUse.input, context);
           return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };
         } catch (error) {

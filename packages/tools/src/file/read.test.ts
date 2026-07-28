@@ -42,4 +42,33 @@ describe("fileReadTool", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("rejects paths outside cwd when sandbox is enabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-read-sandbox-"));
+    const outside = await mkdtemp(join(tmpdir(), "oh-read-outside-"));
+    try {
+      const file = join(outside, "secret.txt");
+      await writeFile(file, "secret", "utf-8");
+
+      const result = await fileReadTool.execute!(
+        { file_path: file },
+        {
+          cwd: dir,
+          settings: {
+            model: "m",
+            apiFormat: "openai",
+            maxTurns: 1,
+            permission: { mode: "default" },
+            sandbox: { enabled: true },
+          },
+        },
+      );
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as any).text).toContain("outside the sandbox boundary");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });

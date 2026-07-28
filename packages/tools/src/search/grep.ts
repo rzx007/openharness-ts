@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "../file/path.js";
+import { sandboxPathError } from "../file/sandbox-guard.js";
 
 // Lines longer than this are skipped rather than processed, mirroring the
 // Python implementation's 64 KB guard. This prevents pathological minified
@@ -36,15 +37,23 @@ export const grepTool: ToolDefinition = {
     },
     required: ["pattern"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const pattern = input.pattern as string;
-    const cwd = process.cwd();
+    const cwd = context.cwd ?? process.cwd();
     const basePath = resolveToolPath((input.path as string) ?? cwd, cwd);
     const include = input.include as string | undefined;
     const caseSensitive = (input.caseSensitive as boolean) ?? true;
     const limit = (input.limit as number) ?? 200;
 
     try {
+      const sandboxError = await sandboxPathError(basePath, cwd, "read", context.settings);
+      if (sandboxError) {
+        return {
+          content: [{ type: "text", text: sandboxError }],
+          isError: true,
+        };
+      }
+
       const rgResult = await tryRipgrep(
         basePath,
         pattern,
@@ -98,7 +107,11 @@ function findRipgrep(): string | null {
     })
       .toString()
       .trim();
-    const first = out.split(/\r?\n/)[0]?.trim();
+    const matches = out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const first =
+      process.platform === "win32"
+        ? matches.find((line) => line.toLowerCase().endsWith(".exe")) ?? matches[0]
+        : matches[0];
     return first || null;
   } catch {
     return null;
@@ -128,14 +141,6 @@ async function tryRipgrep(
   args.push("--", pattern, ".");
 
   return new Promise<string[] | null>((resolvePromise) => {
-    // stderr is routed to "ignore" (not a pipe): an unread stderr pipe can fill
-    // the OS buffer and deadlock ripgrep on noisy errors. We don't need it.
-    const child = spawn(rgPath, args, {
-      cwd: basePath,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-
     const matches: string[] = [];
     let buffer = "";
     let settled = false;
@@ -146,6 +151,20 @@ async function tryRipgrep(
       settled = true;
       resolvePromise(value);
     };
+
+    let child;
+    try {
+      // stderr is routed to "ignore" (not a pipe): an unread stderr pipe can fill
+      // the OS buffer and deadlock ripgrep on noisy errors. We don't need it.
+      child = spawn(rgPath, args, {
+        cwd: basePath,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      finish(null);
+      return;
+    }
 
     const timer = setTimeout(() => {
       killedForLimit = true;

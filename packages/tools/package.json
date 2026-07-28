@@ -20,6 +20,7 @@
     "@openharness/coordinator": "workspace:*",
     "@openharness/core": "workspace:*",
     "@openharness/mcp": "workspace:*",
+    "@openharness/sandbox": "workspace:*",
     "@openharness/services": "workspace:*",
     "@openharness/skills": "workspace:*",
     "@openharness/swarm": "workspace:*",

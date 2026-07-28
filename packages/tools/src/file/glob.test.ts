@@ -10,9 +10,11 @@ async function makeTmpDir(): Promise<string> {
 }
 
 function hasRipgrep(): boolean {
-  const finder = process.platform === "win32" ? "where" : "which";
   try {
-    execFileSync(finder, ["rg"], { stdio: ["ignore", "ignore", "ignore"] });
+    execFileSync("rg", ["--version"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 3000,
+    });
     return true;
   } catch {
     return false;
