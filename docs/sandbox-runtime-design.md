@@ -11,7 +11,7 @@ Python 原版已经有两类 sandbox 后端：
 - `srt`：通过 `@anthropic-ai/sandbox-runtime` 的 `srt --settings <file> -c <command>` 包装 shell 命令。
 - `docker`：启动一个长驻容器，后续 shell 命令通过 `docker exec` 在容器内运行。
 
-TS 版当前只有 `packages/sandbox` 的占位实现，`Bash` 仍直接在宿主机上 `spawn`。本设计把 sandbox 接到统一 shell 执行层，同时明确文件工具仍在宿主进程执行，但受 sandbox 路径边界约束。
+TS 版当前已经有可用的 sandbox MVP：CLI 启动 runtime，`Bash` 通过统一 shell helper 进入 `srt` 或 Docker，文件工具仍在宿主进程执行但受 sandbox 路径边界约束。本文保留实现边界和后续收口事项。
 
 ## 目标
 

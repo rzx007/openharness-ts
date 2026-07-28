@@ -17,7 +17,8 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **Channels 引擎桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 QueryEngine；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-bridge-design.md](docs/channels-bridge-design.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、SwarmPanel、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
-- 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）、`sandbox`（Docker 隔离，当前为占位）
+- 🟡 **可用但仍在收口** — `sandbox`（Bash 走 SRT/Docker，文件工具宿主执行 + path guard；Docker proxy/自动构建/真实端到端测试待补）
+- 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
 - ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
 
 ## 快速开始
@@ -237,7 +238,7 @@ OpenHarness-ts/
 │   ├── output-styles/        # 输出格式化
 │   ├── keybindings/          # 键盘快捷键
 │   ├── vim/                  # Vim 模态编辑
-│   ├── sandbox/              # 沙箱执行（placeholder）
+│   ├── sandbox/              # 沙箱执行（SRT/Docker MVP）
 │   └── voice/                # 语音输入（placeholder）
 ├── turbo.json                # Turborepo 配置
 ├── vitest.config.ts          # 测试配置

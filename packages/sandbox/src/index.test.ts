@@ -24,14 +24,16 @@ import {
 } from "./index.js";
 
 describe("SandboxAdapter", () => {
-  it("isAvailable returns false while runtime execution is not wired", () => {
+  it("isAvailable returns false when sandbox is not configured", () => {
     const adapter = new SandboxAdapter();
     expect(adapter.isAvailable()).toBe(false);
   });
 
-  it("execute throws not implemented", async () => {
+  it("execute runs through the shared shell path", async () => {
     const adapter = new SandboxAdapter();
-    await expect(adapter.execute("ls")).rejects.toThrow("Sandbox not yet implemented");
+    const result = await adapter.execute("echo adapter-ok");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("adapter-ok");
   });
 });
 

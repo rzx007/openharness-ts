@@ -1,3 +1,8 @@
+import type { Settings } from "@openharness/core";
+import { getSandboxAvailability as getSandboxAvailabilityInternal } from "./availability.js";
+import { createShellProcess as createShellProcessInternal } from "./shell.js";
+import { startSandboxRuntime as startSandboxRuntimeInternal } from "./lifecycle.js";
+
 export type {
   ResolvedSandboxConfig,
   SandboxAvailability,
@@ -62,6 +67,9 @@ export interface SandboxConfig {
   runtime?: string;
   image?: string;
   workdir?: string;
+  enabled?: boolean;
+  failIfUnavailable?: boolean;
+  networkMode?: "none" | "bridge" | "host" | "proxy";
 }
 
 export interface SandboxResult {
@@ -74,11 +82,72 @@ export class SandboxAdapter {
   constructor(private readonly config: SandboxConfig = {}) {}
 
   async execute(command: string, _cwd?: string): Promise<SandboxResult> {
-    const runtime = this.config.runtime ? ` via ${this.config.runtime}` : "";
-    throw new Error(`Sandbox not yet implemented${runtime}. Tried to run: ${command}`);
+    const cwd = _cwd ?? this.config.workdir ?? process.cwd();
+    const settings = this.toSettings();
+    const runtime = await startSandboxRuntimeInternal({
+      settings,
+      cwd,
+      sessionId: `adapter-${process.pid}-${Date.now().toString(36)}`,
+    });
+
+    try {
+      return await runAdapterCommand(command, cwd, settings);
+    } finally {
+      await runtime.stop();
+    }
   }
 
   isAvailable(): boolean {
-    return false;
+    return getSandboxAvailabilityInternal(this.toSettings().sandbox).available;
   }
+
+  private toSettings(): Settings {
+    const backend = this.config.runtime === "docker" || this.config.runtime === "srt"
+      ? this.config.runtime
+      : undefined;
+    return {
+      model: "sandbox-adapter",
+      apiFormat: "openai",
+      maxTurns: 1,
+      permission: { mode: "default" },
+      sandbox: {
+        enabled: this.config.enabled ?? backend !== undefined,
+        backend,
+        failIfUnavailable: this.config.failIfUnavailable ?? false,
+        network: this.config.networkMode ? { mode: this.config.networkMode } : undefined,
+        docker: this.config.image ? { image: this.config.image } : undefined,
+      },
+    };
+  }
+}
+
+function runAdapterCommand(command: string, cwd: string, settings: Settings): Promise<SandboxResult> {
+  return new Promise((resolve) => {
+    createShellProcessInternal(command, {
+      cwd,
+      settings,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).then((child) => {
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr?.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.on("error", (error) => {
+        resolve({ exitCode: 1, stdout, stderr: stderr || error.message });
+      });
+      child.on("close", (code) => {
+        resolve({ exitCode: code ?? 1, stdout, stderr });
+      });
+    }).catch((error) => {
+      resolve({
+        exitCode: 1,
+        stdout: "",
+        stderr: error instanceof Error ? error.message : String(error),
+      });
+    });
+  });
 }
