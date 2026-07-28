@@ -2,7 +2,8 @@
 
 > 状态：基础实现已接入 `packages/prompts`：`SOUL.md` / `USER.md` 读取、
 > `PromptLayers` 分层构建与渲染、`/context` 分层展示已完成；
-> 安全扫描与 `USER.md` pending 写入队列底座已完成；自动抽取写入仍留后续显式接入。
+> 安全扫描、可见诊断、`/profile init` 初始化模板与 `USER.md` pending 写入队列底座已完成；
+> 自动抽取写入仍留后续显式接入。
 > 参考对象：Hermes Agent 的 `stable / context / volatile` prompt 分层。
 
 ## 背景
@@ -291,15 +292,16 @@ $OPENHARNESS_CONFIG_DIR/
 - `SOUL.md` 和 `USER.md` 均限制最大字符数：`SOUL.md` 12,000 字符，`USER.md` 8,000 字符。
 - `USER.md` 和生成型 section 带明确标题，避免和相邻层混淆；`SOUL.md` 作为 identity slot 原样注入。
 - 加载 `SOUL.md` / `USER.md` 前执行轻量 prompt-injection 扫描；明显要求忽略高优先级指令、泄露隐藏 prompt/密钥、绕过权限或强制无审批执行的内容会被阻断，不进入 system prompt。
+- `/context` 与 `/profile status` 会显示 `SOUL.md` / `USER.md` 的路径、加载状态、截断状态和阻断原因。
+- `/profile init` 会在 config 目录创建缺失的 `SOUL.md` / `USER.md` 模板；已有文件不会被覆盖。
 - `USER.md` 写入采用 pending 队列底座：`queueUserProfileUpdate()` 只写候选 JSON，`approvePendingUserProfileUpdate()` 才会合并到 `USER.md`。
-- 不自动创建或覆盖用户已有文件，除非后续引入显式 setup/init 流程。
+- 不自动覆盖用户已有文件。
 
 后续增强：
 
 - 为 pending 队列增加 CLI / UI 审批入口。
 - 将 `/remember` 或自动记忆抽取中的“用户长期偏好”显式接入 pending 队列。
-- 扩展扫描规则为可配置策略，并在 `/context` 中展示被阻断文件的诊断摘要。
-- `/context` 已按层显示 prompt 摘要与预览，方便调试。
+- 扩展扫描规则为可配置策略。
 
 ---
 
@@ -313,6 +315,8 @@ $OPENHARNESS_CONFIG_DIR/
 - `SOUL.md` 只从 config home 加载，不从 cwd 加载。
 - `USER.md` 空文件不注入。
 - 高风险 `SOUL.md` / `USER.md` 不注入。
+- `/context` 和 `/profile status` 展示加载、阻断与截断诊断。
+- `/profile init` 创建缺失模板且不覆盖已有文件。
 - `USER.md` pending 更新可入队、列出、批准合并；高风险候选不能入队。
 - 三模式一致：REPL、print、backend/TUI 走同一 prompt builder 语义。
 
@@ -324,3 +328,4 @@ $OPENHARNESS_CONFIG_DIR/
 - [personalization-design.md](./personalization-design.md) — `local_rules` 自动环境事实
 - [skills-flow.md](./skills-flow.md) — skills 如何进入 system prompt
 - [compact-service-design.md](./compact-service-design.md) — compact-only 的 session memory 附件
+- [prompt-runtime-audit.md](./prompt-runtime-audit.md) — prompt builder 全链路入口审计

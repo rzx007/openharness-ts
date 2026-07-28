@@ -58,6 +58,29 @@ const MAX_SOUL_CHARS = 12_000;
 const MAX_USER_PROFILE_CHARS = 8_000;
 const USER_PROFILE_PENDING_DIR = "user_profile_pending";
 
+const SOUL_TEMPLATE = `You are OpenHarness, a careful local coding agent.
+
+Default tone:
+- Be concise, warm, and technically direct.
+- Prefer concrete next steps over vague advice.
+- Preserve user agency around risky or irreversible actions.
+
+Long-term behavior:
+- Follow project instructions and current user requests over personality preferences.
+- Never use this file to override permission, sandbox, security, or tool-use rules.
+`;
+
+const USER_PROFILE_TEMPLATE = `# User Profile
+
+Communication preferences:
+- Prefer concise answers.
+
+Workflow preferences:
+- Call out assumptions when they materially affect the result.
+
+Do not store secrets, tokens, passwords, or temporary task state in this file.
+`;
+
 const BLOCKING_PROMPT_FILE_PATTERNS: Array<{
   code: string;
   message: string;
@@ -106,6 +129,26 @@ export interface UserProfilePendingUpdate {
   source: string;
   content: string;
   reason?: string;
+}
+
+export type PersonalPromptFileName = "SOUL.md" | "USER.md";
+export type PersonalPromptFileStatus = "loaded" | "missing" | "empty" | "blocked" | "error";
+
+export interface PersonalPromptFileDiagnostic {
+  file: PersonalPromptFileName;
+  path: string;
+  status: PersonalPromptFileStatus;
+  sizeChars: number;
+  maxChars: number;
+  truncated: boolean;
+  issues: PromptFileScanIssue[];
+  message?: string;
+}
+
+export interface PersonalPromptInitResult {
+  configDir: string;
+  created: string[];
+  skipped: string[];
 }
 
 export function getBaseSystemPrompt(): string {
@@ -255,32 +298,121 @@ export function scanPersonalPromptFile(content: string): PromptFileScanIssue[] {
   return issues;
 }
 
-function hasBlockingPromptFileIssue(content: string): boolean {
-  return scanPersonalPromptFile(content).some((issue) => issue.severity === "block");
+async function inspectPersonalPromptFile(
+  file: PersonalPromptFileName,
+  maxChars: number,
+): Promise<{ diagnostic: PersonalPromptFileDiagnostic; content: string | null }> {
+  const path = join(getConfigDir(), file);
+  try {
+    const raw = await readFile(path, "utf-8");
+    const content = raw.trim();
+    const base = {
+      file,
+      path,
+      sizeChars: content.length,
+      maxChars,
+      truncated: content.length > maxChars,
+      issues: scanPersonalPromptFile(content),
+    };
+
+    if (!content) {
+      return {
+        diagnostic: { ...base, status: "empty", truncated: false },
+        content: null,
+      };
+    }
+
+    if (base.issues.some((issue) => issue.severity === "block")) {
+      return {
+        diagnostic: {
+          ...base,
+          status: "blocked",
+          message: "Blocked by personal prompt safety scan.",
+        },
+        content: null,
+      };
+    }
+
+    return {
+      diagnostic: { ...base, status: "loaded" },
+      content: truncateMarkdownContent(content, maxChars),
+    };
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === "ENOENT") {
+      return {
+        diagnostic: {
+          file,
+          path,
+          status: "missing",
+          sizeChars: 0,
+          maxChars,
+          truncated: false,
+          issues: [],
+        },
+        content: null,
+      };
+    }
+
+    return {
+      diagnostic: {
+        file,
+        path,
+        status: "error",
+        sizeChars: 0,
+        maxChars,
+        truncated: false,
+        issues: [],
+        message: error instanceof Error ? error.message : "Unable to read personal prompt file.",
+      },
+      content: null,
+    };
+  }
+}
+
+export async function inspectPersonalPromptFiles(): Promise<PersonalPromptFileDiagnostic[]> {
+  const soul = await inspectPersonalPromptFile("SOUL.md", MAX_SOUL_CHARS);
+  const user = await inspectPersonalPromptFile("USER.md", MAX_USER_PROFILE_CHARS);
+  return [soul.diagnostic, user.diagnostic];
+}
+
+export async function initializePersonalPromptFiles(): Promise<PersonalPromptInitResult> {
+  const configDir = getConfigDir();
+  await mkdir(configDir, { recursive: true });
+
+  const files: Array<[PersonalPromptFileName, string]> = [
+    ["SOUL.md", SOUL_TEMPLATE],
+    ["USER.md", USER_PROFILE_TEMPLATE],
+  ];
+  const created: string[] = [];
+  const skipped: string[] = [];
+
+  for (const [file, template] of files) {
+    const path = join(configDir, file);
+    try {
+      await access(path);
+      skipped.push(path);
+      continue;
+    } catch {
+      // Missing files are created; existing files are never overwritten.
+    }
+    await writeFile(path, template.trimEnd() + "\n", "utf-8");
+    created.push(path);
+  }
+
+  return { configDir, created, skipped };
 }
 
 export async function loadSoulMd(maxChars: number = MAX_SOUL_CHARS): Promise<string | null> {
-  const path = join(getConfigDir(), "SOUL.md");
-  try {
-    const content = (await readFile(path, "utf-8")).trim();
-    if (!content) return null;
-    if (hasBlockingPromptFileIssue(content)) return null;
-    return truncateMarkdownContent(content, maxChars);
-  } catch {
-    return null;
-  }
+  return (await inspectPersonalPromptFile("SOUL.md", maxChars)).content;
 }
 
 export async function loadUserProfile(maxChars: number = MAX_USER_PROFILE_CHARS): Promise<string | null> {
-  const path = join(getConfigDir(), "USER.md");
-  try {
-    const content = (await readFile(path, "utf-8")).trim();
-    if (!content) return null;
-    if (hasBlockingPromptFileIssue(content)) return null;
-    return `# User Profile\n\n${truncateMarkdownContent(content, maxChars)}`;
-  } catch {
-    return null;
-  }
+  const content = (await inspectPersonalPromptFile("USER.md", maxChars)).content;
+  if (!content) return null;
+  return /^#\s+User Profile\b/i.test(content)
+    ? content
+    : `# User Profile\n\n${content}`;
 }
 
 function getUserProfilePendingDir(): string {

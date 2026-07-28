@@ -1430,12 +1430,7 @@ async function runBackendHost(
         },
       };
       await saveSettingsCore(currentSettings);
-      await bundle.queryEngine.setSystemPrompt(
-        await buildRuntimeSystemPrompt({
-          cwd: process.cwd(),
-          permissionMode: currentSettings.permission.mode,
-        }),
-      );
+      await refreshSystemPrompt();
       await emit({
         type: "state_snapshot",
         state: buildStatePayload(currentSettings, mcpManager),

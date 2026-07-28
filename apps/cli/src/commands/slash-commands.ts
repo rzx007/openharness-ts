@@ -7,7 +7,15 @@ import type { MemoryManager } from "@openharness/memory";
 import type { SkillRegistry } from "@openharness/skills";
 import type { ThemeManager } from "@openharness/themes";
 import type { TaskManager } from "@openharness/services";
-import { buildPromptLayers, buildRuntimeSystemPrompt, renderPromptLayers, type PromptLayers } from "@openharness/prompts";
+import {
+  buildPromptLayers,
+  buildRuntimeSystemPrompt,
+  initializePersonalPromptFiles,
+  inspectPersonalPromptFiles,
+  renderPromptLayers,
+  type PersonalPromptFileDiagnostic,
+  type PromptLayers,
+} from "@openharness/prompts";
 import { PROVIDERS, detectProvider, findByName } from "@openharness/api";
 import type { CredentialStorage } from "@openharness/auth";
 import { loadOutputStyles, isKnownOutputStyle, type OutputStyleDefinition } from "@openharness/output-styles";
@@ -133,9 +141,27 @@ function formatLayerPreview(name: keyof PromptLayers, parts: string[]): string {
   return [`[${name}]`, ...previews].join("\n\n");
 }
 
+function formatPersonalPromptDiagnostics(diagnostics: PersonalPromptFileDiagnostic[]): string {
+  const lines = ["Personal prompt files:"];
+  for (const item of diagnostics) {
+    const flags = [
+      item.truncated ? "truncated" : "",
+      item.issues.length > 0 ? `${item.issues.length} issue(s)` : "",
+    ].filter(Boolean);
+    lines.push(`- ${item.file}: ${item.status}${flags.length ? ` (${flags.join(", ")})` : ""}`);
+    lines.push(`  path: ${item.path}`);
+    if (item.message) lines.push(`  note: ${item.message}`);
+    for (const issue of item.issues) {
+      lines.push(`  ${issue.severity}: ${issue.code} - ${issue.message}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 export function formatPromptLayersReport(
   layers: PromptLayers,
   previewChars = CONTEXT_PREVIEW_CHARS,
+  diagnostics: PersonalPromptFileDiagnostic[] = [],
 ): string {
   const prompt = renderPromptLayers(layers);
   const preview =
@@ -157,6 +183,9 @@ export function formatPromptLayersReport(
     "Flat preview:",
     preview,
     "─".repeat(60),
+    ...(diagnostics.length > 0
+      ? [formatPersonalPromptDiagnostics(diagnostics), "─".repeat(60)]
+      : []),
     `Total length: ${prompt.length} characters`,
   ].join("\n");
 }
@@ -672,6 +701,16 @@ export function registerBuiltinCommandsOnRegistry(
         `  Permission:   ${settings.permission.mode}`,
         `  Fast mode:    ${settings.fastMode ? "on" : "off"}`,
       ];
+      const sandbox = getBundle().sandboxStatus;
+      if (sandbox) {
+        const detail = sandbox.backend
+          ? `${sandbox.state} (${sandbox.backend})`
+          : sandbox.state;
+        lines.push(`  Sandbox:      ${detail}`);
+        if (sandbox.reason) {
+          lines.push(`  Sandbox note: ${sandbox.reason}`);
+        }
+      }
       return { success: true, output: lines.join("\n") };
     },
   });
@@ -913,8 +952,45 @@ export function registerBuiltinCommandsOnRegistry(
         memoryContent,
         skillsList: ctx.skillRegistry?.modelVisibleList(),
       });
+      const diagnostics = await inspectPersonalPromptFiles();
 
-      return { success: true, output: formatPromptLayersReport(layers) };
+      return { success: true, output: formatPromptLayersReport(layers, CONTEXT_PREVIEW_CHARS, diagnostics) };
+    },
+  });
+
+  // ── /profile ───────────────────────────────────────────
+  registry.register({
+    name: "/profile",
+    description: "Show or initialize SOUL.md / USER.md personal prompt files",
+    handler: async (cmdCtx) => {
+      const args = parseArgs(cmdCtx.raw.replace(/^\/\S+\s*/, ""));
+      const action = args[0] ?? "status";
+
+      if (action === "status" || action === "show") {
+        const diagnostics = await inspectPersonalPromptFiles();
+        return { success: true, output: formatPersonalPromptDiagnostics(diagnostics) };
+      }
+
+      if (action === "init") {
+        const result = await initializePersonalPromptFiles();
+        await refreshSystemPrompt();
+        const diagnostics = await inspectPersonalPromptFiles();
+        const lines = [
+          `Personal prompt directory: ${result.configDir}`,
+          `Created: ${result.created.length}`,
+          ...result.created.map((path) => `  + ${path}`),
+          `Skipped existing: ${result.skipped.length}`,
+          ...result.skipped.map((path) => `  = ${path}`),
+          "",
+          formatPersonalPromptDiagnostics(diagnostics),
+        ];
+        return { success: true, output: lines.join("\n") };
+      }
+
+      return {
+        success: false,
+        error: "Usage: /profile [status|init]",
+      };
     },
   });
 

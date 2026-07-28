@@ -4,7 +4,7 @@
 > 列全部命令（CommandRegistry 自动生成）；工具以 `ToolRegistry.getAll()` 为准。
 > 各命令的设计取舍见对应 `docs/*-design.md`。
 
-## 斜杠命令（40 个内置）
+## 斜杠命令（41 个内置）
 
 注册处：`apps/cli/src/commands/slash-commands.ts`。除内置外，user-invocable
 skill 动态注册为 `/<skill>`（E.5），插件命令注册为 `/插件名:命令`（C.1）。
@@ -21,6 +21,7 @@ skill 动态注册为 `/<skill>`（E.5），插件命令注册为 `/插件名:�
 | `/session` | 当前会话信息 |
 | `/export` | 导出对话为 Markdown 文件 |
 | `/context` | 按 stable/context/volatile 三层显示当前发送给模型的 system prompt 摘要与预览 |
+| `/profile` | `status \| init` 查看或初始化 `SOUL.md` / `USER.md` 个人 prompt 文件 |
 | `/stats` | 会话统计：messages/estimated_tokens/tools/memory/tasks/output_style（差异：memory 报会话内条目数，Python 报文件数） |
 | `/cost` | 估算成本拆解 |
 | `/usage` | token 用量统计 |
