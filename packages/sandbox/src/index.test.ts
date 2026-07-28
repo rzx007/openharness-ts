@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   detectSandboxPlatform,
   buildDockerExecArgs,
+  buildDockerBuildArgs,
+  buildDockerImageInspectArgs,
   buildDockerRunArgs,
   dockerContainerName,
   dockerNetworkMode,
@@ -439,6 +441,32 @@ describe("docker backend argv builders", () => {
     expect(argv[argv.indexOf("-w") + 1]).toBe(toContainerWorkspacePath(resolve("D:/repo")));
     expect(argv).toContain("X=1");
     expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
+  });
+
+  it("builds docker image inspect args", () => {
+    expect(buildDockerImageInspectArgs("openharness-sandbox:latest", "/bin/docker")).toEqual([
+      "/bin/docker",
+      "image",
+      "inspect",
+      "openharness-sandbox:latest",
+    ]);
+  });
+
+  it("builds docker image build args", () => {
+    expect(buildDockerBuildArgs({
+      dockerCommand: "/bin/docker",
+      image: "openharness-sandbox:latest",
+      dockerfile: "/repo/packages/sandbox/Dockerfile",
+      context: "/repo/packages/sandbox",
+    })).toEqual([
+      "/bin/docker",
+      "build",
+      "-t",
+      "openharness-sandbox:latest",
+      "-f",
+      "/repo/packages/sandbox/Dockerfile",
+      "/repo/packages/sandbox",
+    ]);
   });
 
   it("sanitizes docker container names", () => {

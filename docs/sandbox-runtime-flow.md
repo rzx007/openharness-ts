@@ -95,11 +95,12 @@ normalizeSandboxConfig(settings.sandbox)
   │         不可用 + failIfUnavailable → 抛错
   │         不可用 + 可降级 → inertRuntime(unavailable)
   │
-  └─ backend === "docker"
-       └─ getDockerAvailability()
-            检测：平台 / docker CLI / daemon；host@macOS 等限制
-       └─ new DockerSandboxSession().start()
-            docker run -d --rm … image tail -f /dev/null
+       └─ backend === "docker"
+            └─ getDockerAvailability()
+                检测：平台 / docker CLI / daemon；host@macOS 等限制
+            └─ docker image inspect；镜像缺失且 autoBuildImage=true 时用内置 Dockerfile build
+            └─ new DockerSandboxSession().start()
+                docker run -d --rm … image tail -f /dev/null
        └─ setActiveSandboxSession(session)
        └─ CLI 仅在 docker active 时注册 cleanup（进程 exit → stop 容器）
 ```

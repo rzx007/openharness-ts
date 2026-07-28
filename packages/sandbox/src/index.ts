@@ -39,6 +39,8 @@ export {
 export type { SrtRuntimeConfig, WrappedSrtCommand } from "./srt-adapter.js";
 export {
   buildDockerExecArgs,
+  buildDockerBuildArgs,
+  buildDockerImageInspectArgs,
   buildDockerRunArgs,
   dockerContainerName,
   dockerNetworkMode,
@@ -46,7 +48,7 @@ export {
   SandboxUnavailableError,
   toContainerWorkspacePath,
 } from "./docker-backend.js";
-export type { DockerExecArgsOptions, DockerRunArgsOptions } from "./docker-backend.js";
+export type { DockerBuildArgsOptions, DockerExecArgsOptions, DockerRunArgsOptions } from "./docker-backend.js";
 export {
   getActiveSandboxSession,
   isSandboxSessionActive,

@@ -480,6 +480,6 @@ E2E 测试：
 
 - `proxy` 模式后续是否需要升级为严格域名代理（sidecar / DNS proxy / egress gateway），而不是当前的 bridge + proxy env MVP。
 - `allowedDomains` 是否应在 `srt` 和 Docker 中使用同一配置，但按 backend 能力给出不同可用性。
-- Docker image 是否应自动构建，还是要求用户显式安装。
+- Docker image 自动构建后续是否要支持自定义 Dockerfile 路径、build args 和缓存策略。
 - 是否需要把 hooks 也纳入同一个 shell helper。建议纳入，否则 hook 命令会绕过 sandbox。
 - 是否给 TUI 状态栏增加 `sandbox: active/degraded/off`。

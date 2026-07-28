@@ -1,5 +1,7 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
 import { normalizeSandboxConfig } from "./config.js";
@@ -24,6 +26,13 @@ export interface DockerExecArgsOptions {
   cwd: string;
   argv: string[];
   env?: Record<string, string>;
+  dockerCommand?: string;
+}
+
+export interface DockerBuildArgsOptions {
+  image: string;
+  dockerfile: string;
+  context: string;
   dockerCommand?: string;
 }
 
@@ -113,6 +122,22 @@ export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
   return argv;
 }
 
+export function buildDockerImageInspectArgs(image: string, dockerCommand = "docker"): string[] {
+  return [dockerCommand, "image", "inspect", image];
+}
+
+export function buildDockerBuildArgs(options: DockerBuildArgsOptions): string[] {
+  return [
+    options.dockerCommand ?? "docker",
+    "build",
+    "-t",
+    options.image,
+    "-f",
+    options.dockerfile,
+    options.context,
+  ];
+}
+
 export class DockerSandboxSession {
   private running = false;
   readonly containerName: string;
@@ -142,11 +167,16 @@ export class DockerSandboxSession {
   }
 
   async start(): Promise<void> {
+    const config = normalizeSandboxConfig(this.options.settings.sandbox);
     const availability = getDockerAvailability(this.options.settings.sandbox, this.options.deps);
     if (!availability.available) {
       throw new SandboxUnavailableError(availability.reason ?? "Docker sandbox is unavailable");
     }
     this.dockerCommand = availability.command ?? "docker";
+    await ensureDockerImage({
+      config,
+      dockerCommand: this.dockerCommand,
+    });
     const argv = buildDockerRunArgs({
       sessionId: this.options.sessionId,
       cwd: this.options.cwd,
@@ -193,6 +223,39 @@ export class DockerSandboxSession {
   }
 }
 
+async function ensureDockerImage(options: {
+  config: ReturnType<typeof normalizeSandboxConfig>;
+  dockerCommand: string;
+}): Promise<void> {
+  if (await runProbe(buildDockerImageInspectArgs(options.config.docker.image, options.dockerCommand))) {
+    return;
+  }
+
+  if (!options.config.docker.autoBuildImage) {
+    throw new SandboxUnavailableError(
+      `Docker image ${options.config.docker.image} is not available and autoBuildImage is disabled`,
+    );
+  }
+
+  const dockerfile = defaultDockerfilePath();
+  if (!existsSync(dockerfile)) {
+    throw new SandboxUnavailableError(
+      `Docker image ${options.config.docker.image} is not available and no sandbox Dockerfile was found`,
+    );
+  }
+
+  await runToCompletion(buildDockerBuildArgs({
+    image: options.config.docker.image,
+    dockerfile,
+    context: dirname(dockerfile),
+    dockerCommand: options.dockerCommand,
+  }));
+}
+
+function defaultDockerfilePath(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "Dockerfile");
+}
+
 export function dockerContainerName(sessionId: string, prefix = "openharness-sandbox"): string {
   const safeId = sessionId.replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 64);
   return `${prefix}-${safeId || "session"}`;
@@ -231,5 +294,16 @@ async function runToCompletion(argv: string[]): Promise<void> {
         ));
       }
     });
+  });
+}
+
+async function runProbe(argv: string[]): Promise<boolean> {
+  return await new Promise<boolean>((resolvePromise) => {
+    const child = spawn(argv[0]!, argv.slice(1), {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    child.on("error", () => resolvePromise(false));
+    child.on("close", (code) => resolvePromise(code === 0));
   });
 }
