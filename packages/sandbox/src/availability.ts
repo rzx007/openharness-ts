@@ -119,8 +119,8 @@ export function getDockerAvailability(
     return unavailable("docker", platform, "Docker host network mode is not supported on macOS in MVP");
   }
 
-  if (resolved.network.mode === "proxy") {
-    return unavailable("docker", platform, "Docker proxy network mode is not implemented yet");
+  if (resolved.network.mode === "proxy" && !hasProxyEnv(resolved.docker.extraEnv)) {
+    return unavailable("docker", platform, "Docker proxy network mode requires HTTP_PROXY or HTTPS_PROXY");
   }
 
   const hasDomainPolicy = resolved.network.allowedDomains.length > 0 ||
@@ -154,11 +154,24 @@ export function getDockerAvailability(
     backend: "docker",
     platform,
     command: docker,
-    degraded: hasDomainPolicy && (resolved.network.mode === "bridge" || resolved.network.mode === "host"),
-    reason: hasDomainPolicy && (resolved.network.mode === "bridge" || resolved.network.mode === "host")
+    degraded: hasDomainPolicy && dockerNetworkDoesNotEnforceDomains(resolved.network.mode),
+    reason: hasDomainPolicy && dockerNetworkDoesNotEnforceDomains(resolved.network.mode)
       ? `Docker ${resolved.network.mode} network mode does not enforce domain policy`
       : undefined,
   };
+}
+
+function dockerNetworkDoesNotEnforceDomains(mode: string): boolean {
+  return mode === "bridge" || mode === "host" || mode === "proxy";
+}
+
+function hasProxyEnv(extraEnv: Record<string, string>): boolean {
+  return Boolean(
+    extraEnv.HTTP_PROXY ||
+      extraEnv.HTTPS_PROXY ||
+      extraEnv.http_proxy ||
+      extraEnv.https_proxy
+  );
 }
 
 function unavailable(

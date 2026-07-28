@@ -29,8 +29,8 @@ export interface DockerExecArgsOptions {
 
 export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
   const config = normalizeSandboxConfig(options.config);
-  if (config.network.mode === "proxy") {
-    throw new SandboxUnavailableError("Docker proxy network mode is not implemented yet");
+  if (config.network.mode === "proxy" && !hasProxyEnv(config.docker.extraEnv)) {
+    throw new SandboxUnavailableError("Docker proxy network mode requires HTTP_PROXY or HTTPS_PROXY");
   }
   if (config.network.mode === "host" && process.platform === "darwin") {
     throw new SandboxUnavailableError("Docker host network mode is not supported on macOS in MVP");
@@ -59,7 +59,7 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
     "--name",
     containerName,
     "--network",
-    config.network.mode,
+    dockerNetworkMode(config.network.mode),
   ];
 
   if (config.docker.cpuLimit > 0) {
@@ -83,6 +83,19 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
 
   argv.push(config.docker.image, "tail", "-f", "/dev/null");
   return argv;
+}
+
+export function dockerNetworkMode(mode: ReturnType<typeof normalizeSandboxConfig>["network"]["mode"]): string {
+  return mode === "proxy" ? "bridge" : mode;
+}
+
+export function hasProxyEnv(extraEnv: Record<string, string>): boolean {
+  return Boolean(
+    extraEnv.HTTP_PROXY ||
+      extraEnv.HTTPS_PROXY ||
+      extraEnv.http_proxy ||
+      extraEnv.https_proxy
+  );
 }
 
 export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {

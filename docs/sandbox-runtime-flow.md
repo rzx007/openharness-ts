@@ -72,7 +72,7 @@ apps/cli/src/commands/main.ts
 OPENHARNESS_SANDBOX_ENABLED=true
 OPENHARNESS_SANDBOX_BACKEND=docker          # 或 srt
 OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE=true
-OPENHARNESS_SANDBOX_NETWORK_MODE=bridge     # none | bridge | host（proxy MVP 未实现）
+OPENHARNESS_SANDBOX_NETWORK_MODE=bridge     # none | bridge | host | proxy
 OPENHARNESS_SANDBOX_DOCKER_IMAGE=node:22-bookworm
 OPENHARNESS_SANDBOX_DOCKER_DNS=1.1.1.1,8.8.8.8
 OPENHARNESS_SANDBOX_HTTP_PROXY=http://host.docker.internal:7890
@@ -191,7 +191,8 @@ docker exec -w <container-workspace> <container> /bin/sh -c "<command>"
 - `bridge` 只表示允许 Docker 网络，**不保证** DNS 或外网一定通。
 - Windows Docker Desktop 上 DNS 失败时可用 `OPENHARNESS_SANDBOX_DOCKER_DNS`。
 - 访问本机代理常用 `host.docker.internal`（配合 `OPENHARNESS_SANDBOX_HTTP(S)_PROXY`）。
-- `proxy` 网络模式 MVP 未实现；macOS 上 `host` 网络直接拒绝。
+- `proxy` 网络模式当前是 bridge + proxy env；需要配置 `OPENHARNESS_SANDBOX_HTTP_PROXY` 或 `OPENHARNESS_SANDBOX_HTTPS_PROXY`。
+- macOS 上 `host` 网络直接拒绝。
 
 ## D. SRT 后端细节
 

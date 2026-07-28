@@ -7,6 +7,7 @@ import {
   buildDockerExecArgs,
   buildDockerRunArgs,
   dockerContainerName,
+  dockerNetworkMode,
   getDockerAvailability,
   getSandboxAvailability,
   getSrtAvailability,
@@ -144,6 +145,32 @@ describe("sandbox availability", () => {
         enabled: true,
         backend: "docker",
         network: { mode: "bridge", allowedDomains: ["github.com"] },
+      },
+      { platform: "linux", which: () => "/bin/docker", dockerInfo: () => true },
+    );
+
+    expect(availability.available).toBe(true);
+    expect(availability.degraded).toBe(true);
+    expect(availability.reason).toContain("does not enforce domain policy");
+  });
+
+  it("requires proxy env for Docker proxy network mode", () => {
+    const availability = getDockerAvailability(
+      { enabled: true, backend: "docker", network: { mode: "proxy" } },
+      { platform: "linux", which: () => "/bin/docker", dockerInfo: () => true },
+    );
+
+    expect(availability.available).toBe(false);
+    expect(availability.reason).toContain("requires HTTP_PROXY or HTTPS_PROXY");
+  });
+
+  it("allows Docker proxy mode when proxy env is configured", () => {
+    const availability = getDockerAvailability(
+      {
+        enabled: true,
+        backend: "docker",
+        network: { mode: "proxy", allowedDomains: ["github.com"] },
+        docker: { extraEnv: { HTTPS_PROXY: "http://proxy.local:7890" } },
       },
       { platform: "linux", which: () => "/bin/docker", dockerInfo: () => true },
     );
@@ -344,6 +371,41 @@ describe("docker backend argv builders", () => {
     });
 
     expect(argv[argv.indexOf("--network") + 1]).toBe("none");
+  });
+
+  it("maps docker proxy mode to bridge networking and injects proxy env", () => {
+    const argv = buildDockerRunArgs({
+      sessionId: "proxy",
+      cwd: "D:/repo",
+      config: {
+        enabled: true,
+        backend: "docker",
+        network: { mode: "proxy" },
+        docker: {
+          extraEnv: {
+            HTTP_PROXY: "http://host.docker.internal:7890",
+            HTTPS_PROXY: "http://host.docker.internal:7890",
+            NO_PROXY: "localhost,127.0.0.1",
+          },
+        },
+      },
+    });
+
+    expect(dockerNetworkMode("proxy")).toBe("bridge");
+    expect(argv[argv.indexOf("--network") + 1]).toBe("bridge");
+    expect(argv).toContain("HTTP_PROXY=http://host.docker.internal:7890");
+    expect(argv).toContain("HTTPS_PROXY=http://host.docker.internal:7890");
+    expect(argv).toContain("NO_PROXY=localhost,127.0.0.1");
+  });
+
+  it("fails closed for docker proxy mode without proxy env", () => {
+    expect(() =>
+      buildDockerRunArgs({
+        sessionId: "proxy",
+        cwd: "D:/repo",
+        config: { enabled: true, backend: "docker", network: { mode: "proxy" } },
+      }),
+    ).toThrow("requires HTTP_PROXY or HTTPS_PROXY");
   });
 
   it("fails closed for strict domain policy on bridge networking", () => {

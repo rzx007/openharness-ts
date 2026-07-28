@@ -41,6 +41,7 @@ export {
   buildDockerExecArgs,
   buildDockerRunArgs,
   dockerContainerName,
+  dockerNetworkMode,
   DockerSandboxSession,
   SandboxUnavailableError,
   toContainerWorkspacePath,

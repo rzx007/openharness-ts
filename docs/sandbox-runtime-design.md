@@ -197,7 +197,7 @@ export interface SrtSandboxConfig {
 - DNS proxy + egress gateway。
 - 后续也可以接公司内部代理或用户配置的 `HTTP_PROXY` / `HTTPS_PROXY`。
 
-MVP 可先接受 `network.mode="proxy"` 但返回 unavailable，错误信息说明暂未实现。
+MVP 中 `network.mode="proxy"` 落地为 Docker `bridge` 网络 + 注入 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量；未配置代理时 fail closed。它不提供 Docker 侧域名级 allow/deny 过滤，严格域名策略仍需要后续 sidecar / DNS proxy / egress gateway。
 
 ## 运行时架构
 
@@ -478,7 +478,7 @@ E2E 测试：
 
 ## 开放问题
 
-- `proxy` 模式是否需要 MVP 实现，还是只保留配置和 fail closed 行为。
+- `proxy` 模式后续是否需要升级为严格域名代理（sidecar / DNS proxy / egress gateway），而不是当前的 bridge + proxy env MVP。
 - `allowedDomains` 是否应在 `srt` 和 Docker 中使用同一配置，但按 backend 能力给出不同可用性。
 - Docker image 是否应自动构建，还是要求用户显式安装。
 - 是否需要把 hooks 也纳入同一个 shell helper。建议纳入，否则 hook 命令会绕过 sandbox。
