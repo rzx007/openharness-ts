@@ -396,6 +396,41 @@ describe("Integration: RuntimeBuilder", () => {
     expect(bundle.queryEngine).toBe(engine);
   });
 
+  it("switchApiClient updates the query engine client for subsequent calls", async () => {
+    const usedClients: string[] = [];
+    const clientA = {
+      streamMessage: async function* () {
+        usedClients.push("A");
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    const clientB = {
+      streamMessage: async function* () {
+        usedClients.push("B");
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    const registry = new ToolRegistry();
+    const checker = allowAll();
+    const hooks = noopHooks();
+    const engine = new QueryEngine(clientA, registry, checker, hooks);
+
+    const bundle = new RuntimeBuilder()
+      .setApiClient(clientA)
+      .setToolRegistry(registry)
+      .setPermissionChecker(checker)
+      .setHookExecutor(hooks)
+      .setQueryEngine(engine)
+      .build({ model: "test", apiFormat: "anthropic", permission: { mode: "default" }, maxTurns: 10 });
+
+    for await (const _ of bundle.queryEngine.submitMessage("before")) {}
+    bundle.switchApiClient(clientB);
+    for await (const _ of bundle.queryEngine.submitMessage("after")) {}
+
+    expect(bundle.apiClient).toBe(clientB);
+    expect(usedClients).toEqual(["A", "B"]);
+  });
+
   it("throws if missing required components", () => {
     expect(() => new RuntimeBuilder().build({ model: "x", apiFormat: "anthropic", permission: { mode: "default" }, maxTurns: 1 }))
       .toThrow("ApiClient is required");

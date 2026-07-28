@@ -13,6 +13,7 @@ export interface QueryEngine {
   compact(): Promise<void>;
   clear(): void;
   setSystemPrompt(prompt: string): void;
+  setApiClient(client: StreamingMessageClient): void;
   setModel(model: string): void;
   setMaxTurns(max: number): void;
   loadMessages(messages: Message[]): void;
@@ -61,6 +62,7 @@ export interface QueryEngineOptions {
   systemPrompt?: string;
   model?: string;
   maxTokens?: number;
+  settings?: Settings;
   compactKeepRecent?: number;
   permissionPrompt?: PermissionPrompt;
   skillRegistry?: unknown;
@@ -71,7 +73,28 @@ export interface QueryEngineOptions {
   memoryRetriever?: MemoryRetriever;
 }
 
+export type RuntimeSandboxState = "off" | "active" | "degraded" | "unavailable";
+
+export interface RuntimeSandboxStatus {
+  state: RuntimeSandboxState;
+  enabled: boolean;
+  active: boolean;
+  backend?: string;
+  platform?: string;
+  reason?: string;
+  degraded?: boolean;
+  containerName?: string;
+  containerCwd?: string;
+  networkMode?: string;
+  dns?: string[];
+  proxy?: "configured" | "not configured";
+}
+
 export class RuntimeBundle {
+  private cleanupCallbacks: Array<() => Promise<void> | void> = [];
+  private syncCleanupCallbacks: Array<() => void> = [];
+  sandboxStatus?: RuntimeSandboxStatus;
+
   constructor(
     public settings: Settings,
     public apiClient: StreamingMessageClient,
@@ -83,5 +106,27 @@ export class RuntimeBundle {
 
   switchApiClient(newClient: StreamingMessageClient): void {
     this.apiClient = newClient;
+    this.queryEngine.setApiClient(newClient);
+  }
+
+  addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void {
+    this.cleanupCallbacks.push(cleanup);
+    if (cleanupSync) this.syncCleanupCallbacks.push(cleanupSync);
+  }
+
+  async close(): Promise<void> {
+    const callbacks = this.cleanupCallbacks.splice(0).reverse();
+    this.syncCleanupCallbacks = [];
+    for (const cleanup of callbacks) {
+      await cleanup();
+    }
+  }
+
+  closeSync(): void {
+    const callbacks = this.syncCleanupCallbacks.splice(0).reverse();
+    this.cleanupCallbacks = [];
+    for (const cleanup of callbacks) {
+      cleanup();
+    }
   }
 }

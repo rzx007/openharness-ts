@@ -20,10 +20,44 @@ const DEFAULT_SETTINGS: Settings = {
     autoDreamMinHours: 24,
     autoDreamMinSessions: 5,
   },
-  sandbox: { enabled: false },
+  sandbox: {
+    enabled: false,
+    backend: "srt",
+    failIfUnavailable: false,
+    filesystem: {
+      allowRead: ["."],
+      denyRead: [],
+      allowWrite: ["."],
+      denyWrite: [],
+      extraAllowedRoots: [],
+    },
+    network: {
+      mode: "none",
+      allowedDomains: [],
+      deniedDomains: [],
+      strictDomainPolicy: false,
+    },
+    docker: {
+      image: "openharness-sandbox:latest",
+      autoBuildImage: true,
+      cpuLimit: 0,
+      memoryLimit: "",
+      dns: [],
+      extraMounts: [],
+      extraEnv: {},
+      containerNamePrefix: "openharness-sandbox",
+    },
+    srt: {
+      runtimeCommand: "srt",
+    },
+  },
   effort: "medium",
   passes: 1,
   outputStyle: "default",
+};
+
+type SettingsPatch = Partial<Omit<Settings, "sandbox">> & {
+  sandbox?: Partial<NonNullable<Settings["sandbox"]>>;
 };
 
 /**
@@ -52,7 +86,7 @@ export async function loadSettings(
     ...fileSettings,
     ...envSettings,
     ...cliOverrides,
-  };
+  } as Settings;
   merged.memory = {
     ...DEFAULT_SETTINGS.memory,
     ...fileSettings?.memory,
@@ -64,6 +98,12 @@ export async function loadSettings(
       ?? DEFAULT_SETTINGS.memory?.enabled
       ?? true,
   };
+  merged.sandbox = mergeSandboxConfig(
+    DEFAULT_SETTINGS.sandbox,
+    fileSettings?.sandbox,
+    envSettings.sandbox,
+    cliOverrides?.sandbox,
+  );
   return merged;
 }
 
@@ -85,8 +125,8 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await writeFile(configPath, JSON.stringify(settings, null, 2), "utf-8");
 }
 
-function loadFromEnv(): Partial<Settings> {
-  const result: Partial<Settings> = {};
+function loadFromEnv(): SettingsPatch {
+  const result: SettingsPatch = {};
   const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY;
   if (apiKey !== undefined) result.apiKey = apiKey;
   if (process.env.ANTHROPIC_MODEL !== undefined) result.model = process.env.ANTHROPIC_MODEL;
@@ -101,7 +141,88 @@ function loadFromEnv(): Partial<Settings> {
   }
   if (process.env.OPENHARNESS_MAX_TOKENS !== undefined) result.maxTokens = parseInt(process.env.OPENHARNESS_MAX_TOKENS, 10);
   if (process.env.OPENHARNESS_MAX_TURNS !== undefined) result.maxTurns = parseInt(process.env.OPENHARNESS_MAX_TURNS, 10);
+  const sandbox = buildSandboxEnvOverrides();
+  if (sandbox !== undefined) result.sandbox = sandbox;
 
+  return result;
+}
+
+function buildSandboxEnvOverrides(): Partial<NonNullable<Settings["sandbox"]>> | undefined {
+  const sandbox: Partial<NonNullable<Settings["sandbox"]>> = {};
+  if (process.env.OPENHARNESS_SANDBOX_ENABLED !== undefined) {
+    sandbox.enabled = parseBooleanEnv(process.env.OPENHARNESS_SANDBOX_ENABLED);
+  }
+  if (process.env.OPENHARNESS_SANDBOX_BACKEND !== undefined) {
+    const backend = process.env.OPENHARNESS_SANDBOX_BACKEND;
+    if (backend === "srt" || backend === "docker") sandbox.backend = backend;
+  }
+  if (process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE !== undefined) {
+    sandbox.failIfUnavailable = parseBooleanEnv(
+      process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE,
+    );
+  }
+  if (process.env.OPENHARNESS_SANDBOX_NETWORK_MODE !== undefined) {
+    const mode = process.env.OPENHARNESS_SANDBOX_NETWORK_MODE;
+    if (mode === "none" || mode === "bridge" || mode === "host" || mode === "proxy") {
+      sandbox.network = { mode };
+    }
+  }
+  if (process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE !== undefined) {
+    sandbox.docker = { image: process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE };
+  }
+  const dockerEnv: NonNullable<NonNullable<Settings["sandbox"]>["docker"]> = {
+    ...(sandbox.docker ?? {}),
+  };
+  if (process.env.OPENHARNESS_SANDBOX_DOCKER_DNS !== undefined) {
+    dockerEnv.dns = parseListEnv(process.env.OPENHARNESS_SANDBOX_DOCKER_DNS);
+  }
+  const extraEnv: Record<string, string> = { ...(dockerEnv.extraEnv ?? {}) };
+  if (process.env.OPENHARNESS_SANDBOX_HTTP_PROXY !== undefined) {
+    extraEnv.HTTP_PROXY = process.env.OPENHARNESS_SANDBOX_HTTP_PROXY;
+    extraEnv.http_proxy = process.env.OPENHARNESS_SANDBOX_HTTP_PROXY;
+  }
+  if (process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY !== undefined) {
+    extraEnv.HTTPS_PROXY = process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY;
+    extraEnv.https_proxy = process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY;
+  }
+  if (process.env.OPENHARNESS_SANDBOX_NO_PROXY !== undefined) {
+    extraEnv.NO_PROXY = process.env.OPENHARNESS_SANDBOX_NO_PROXY;
+    extraEnv.no_proxy = process.env.OPENHARNESS_SANDBOX_NO_PROXY;
+  }
+  if (Object.keys(extraEnv).length > 0) dockerEnv.extraEnv = extraEnv;
+  if (Object.keys(dockerEnv).length > 0) sandbox.docker = dockerEnv;
+  return Object.keys(sandbox).length > 0 ? sandbox : undefined;
+}
+
+function parseBooleanEnv(value: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function parseListEnv(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function mergeSandboxConfig(
+  ...configs: Array<Partial<NonNullable<Settings["sandbox"]>> | undefined | null>
+): Settings["sandbox"] {
+  const result: NonNullable<Settings["sandbox"]> = { enabled: false };
+  for (const config of configs) {
+    if (!config) continue;
+    const filesystem = result.filesystem;
+    const network = result.network;
+    const docker = result.docker;
+    const srt = result.srt;
+    Object.assign(result, config);
+    result.filesystem = { ...filesystem, ...config.filesystem };
+    result.network = { ...network, ...config.network };
+    result.docker = { ...docker, ...config.docker };
+    result.srt = { ...srt, ...config.srt };
+  }
+  if (!result.backend && result.runtime === "docker") result.backend = "docker";
+  if (!result.backend && result.runtime === "srt") result.backend = "srt";
   return result;
 }
 

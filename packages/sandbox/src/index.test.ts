@@ -1,21 +1,486 @@
-import { describe, it, expect } from "vitest";
-import { SandboxAdapter } from "./index.js";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  detectSandboxPlatform,
+  buildDockerExecArgs,
+  buildDockerRunArgs,
+  dockerContainerName,
+  getDockerAvailability,
+  getSandboxAvailability,
+  getSrtAvailability,
+  shellJoin,
+  normalizeSandboxConfig,
+  resolveContainerShellArgv,
+  resolveShellArgv,
+  resetHostShellCacheForTests,
+  SandboxAdapter,
+  validateSandboxPath,
+  wrapCommandForSrt,
+  SandboxUnavailableError,
+  startSandboxRuntime,
+  toContainerWorkspacePath,
+} from "./index.js";
 
 describe("SandboxAdapter", () => {
-  it("isAvailable returns false", () => {
+  it("isAvailable returns false while runtime execution is not wired", () => {
     const adapter = new SandboxAdapter();
     expect(adapter.isAvailable()).toBe(false);
   });
 
   it("execute throws not implemented", async () => {
     const adapter = new SandboxAdapter();
-    await expect(adapter.execute("ls")).rejects.toThrow(
-      "Sandbox not yet implemented"
+    await expect(adapter.execute("ls")).rejects.toThrow("Sandbox not yet implemented");
+  });
+});
+
+describe("normalizeSandboxConfig", () => {
+  it("fills defaults and preserves nested overrides", () => {
+    const config = normalizeSandboxConfig({
+      enabled: true,
+      backend: "docker",
+      filesystem: { allowWrite: ["src"] },
+      network: { mode: "bridge" },
+      docker: { image: "custom:latest" },
+    });
+
+    expect(config.enabled).toBe(true);
+    expect(config.backend).toBe("docker");
+    expect(config.filesystem.allowRead).toEqual(["."]);
+    expect(config.filesystem.allowWrite).toEqual(["src"]);
+    expect(config.network.mode).toBe("bridge");
+    expect(config.network.deniedDomains).toEqual([]);
+    expect(config.docker.image).toBe("custom:latest");
+    expect(config.docker.autoBuildImage).toBe(true);
+  });
+
+  it("accepts legacy runtime aliases", () => {
+    expect(normalizeSandboxConfig({ enabled: true, runtime: "docker" }).backend).toBe("docker");
+  });
+});
+
+describe("detectSandboxPlatform", () => {
+  it("detects WSL from Linux release or env", () => {
+    expect(detectSandboxPlatform({ platform: "linux", release: "microsoft-standard" })).toBe("wsl");
+    expect(detectSandboxPlatform({ platform: "linux", release: "generic", env: { WSL_DISTRO_NAME: "Ubuntu" } })).toBe("wsl");
+  });
+
+  it("maps native platforms", () => {
+    expect(detectSandboxPlatform({ platform: "win32" })).toBe("windows");
+    expect(detectSandboxPlatform({ platform: "darwin" })).toBe("macos");
+    expect(detectSandboxPlatform({ platform: "linux", release: "generic", env: {} })).toBe("linux");
+  });
+});
+
+describe("sandbox availability", () => {
+  it("reports disabled sandbox", () => {
+    expect(getSandboxAvailability({ enabled: false })).toMatchObject({
+      enabled: false,
+      available: false,
+      active: false,
+      reason: "sandbox is disabled",
+    });
+  });
+
+  it("rejects native Windows for srt", () => {
+    const availability = getSrtAvailability(
+      { enabled: true, backend: "srt" },
+      { platform: "windows", which: () => "tool" },
+    );
+
+    expect(availability.available).toBe(false);
+    expect(availability.reason).toContain("native Windows");
+  });
+
+  it("requires srt and bwrap on linux", () => {
+    const missingSrt = getSrtAvailability(
+      { enabled: true, backend: "srt" },
+      { platform: "linux", which: () => undefined },
+    );
+    expect(missingSrt.reason).toContain("sandbox runtime CLI not found");
+
+    const missingBwrap = getSrtAvailability(
+      { enabled: true, backend: "srt" },
+      { platform: "linux", which: (cmd) => cmd === "srt" ? "/bin/srt" : undefined },
+    );
+    expect(missingBwrap.reason).toContain("bwrap");
+  });
+
+  it("reports srt available when dependencies exist", () => {
+    const availability = getSrtAvailability(
+      { enabled: true, backend: "srt" },
+      { platform: "linux", which: (cmd) => `/bin/${cmd}` },
+    );
+
+    expect(availability).toMatchObject({
+      enabled: true,
+      available: true,
+      active: true,
+      backend: "srt",
+      command: "/bin/srt",
+    });
+  });
+
+  it("allows native Windows for Docker Desktop", () => {
+    const availability = getDockerAvailability(
+      { enabled: true, backend: "docker" },
+      { platform: "windows", which: () => "docker", dockerInfo: () => true },
+    );
+
+    expect(availability).toMatchObject({
+      available: true,
+      active: true,
+      backend: "docker",
+      platform: "windows",
+    });
+  });
+
+  it("allows Docker bridge mode while marking domain policy as degraded", () => {
+    const availability = getDockerAvailability(
+      {
+        enabled: true,
+        backend: "docker",
+        network: { mode: "bridge", allowedDomains: ["github.com"] },
+      },
+      { platform: "linux", which: () => "/bin/docker", dockerInfo: () => true },
+    );
+
+    expect(availability.available).toBe(true);
+    expect(availability.degraded).toBe(true);
+    expect(availability.reason).toContain("does not enforce domain policy");
+  });
+
+  it("fails closed for strict Docker domain policy on bridge mode", () => {
+    const availability = getDockerAvailability(
+      {
+        enabled: true,
+        backend: "docker",
+        network: {
+          mode: "bridge",
+          allowedDomains: ["github.com"],
+          strictDomainPolicy: true,
+        },
+      },
+      { platform: "linux", which: () => "/bin/docker" },
+    );
+
+    expect(availability.available).toBe(false);
+    expect(availability.reason).toContain("strict domain policy");
+  });
+
+  it("checks Docker daemon when a dockerInfo probe is provided", () => {
+    const availability = getDockerAvailability(
+      { enabled: true, backend: "docker" },
+      { platform: "linux", which: () => "/bin/docker", dockerInfo: () => false },
+    );
+
+    expect(availability.available).toBe(false);
+    expect(availability.reason).toContain("daemon");
+  });
+});
+
+describe("sandbox runtime lifecycle", () => {
+  const settings = {
+    model: "m",
+    apiFormat: "openai" as const,
+    maxTurns: 1,
+    permission: { mode: "default" as const },
+  };
+
+  it("returns off status when sandbox is disabled", async () => {
+    const runtime = await startSandboxRuntime({
+      settings: { ...settings, sandbox: { enabled: false } },
+      cwd: process.cwd(),
+      sessionId: "test",
+    });
+
+    expect(runtime.status).toMatchObject({
+      state: "off",
+      enabled: false,
+      active: false,
+      backend: "srt",
+    });
+  });
+
+  it("reports active srt status without starting a long-lived session", async () => {
+    const runtime = await startSandboxRuntime({
+      settings: { ...settings, sandbox: { enabled: true, backend: "srt" } },
+      cwd: process.cwd(),
+      sessionId: "test",
+      deps: { platform: "linux", which: (cmd) => `/bin/${cmd}` },
+    });
+
+    expect(runtime.status).toMatchObject({
+      state: "active",
+      enabled: true,
+      active: true,
+      backend: "srt",
+      platform: "linux",
+    });
+  });
+
+  it("throws when srt is unavailable in strict mode", async () => {
+    await expect(
+      startSandboxRuntime({
+        settings: {
+          ...settings,
+          sandbox: { enabled: true, backend: "srt", failIfUnavailable: true },
+        },
+        cwd: process.cwd(),
+        sessionId: "test",
+        deps: { platform: "linux", which: () => undefined },
+      }),
+    ).rejects.toThrow(SandboxUnavailableError);
+  });
+
+  it("reports unavailable Docker status without strict mode", async () => {
+    const runtime = await startSandboxRuntime({
+      settings: { ...settings, sandbox: { enabled: true, backend: "docker" } },
+      cwd: process.cwd(),
+      sessionId: "test",
+      deps: { platform: "linux", which: () => undefined },
+    });
+
+    expect(runtime.status).toMatchObject({
+      state: "unavailable",
+      enabled: true,
+      active: false,
+      backend: "docker",
+    });
+    expect(runtime.status.reason).toContain("Docker CLI not found");
+  });
+});
+
+describe("srt adapter", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "oh-srt-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("quotes argv as a single shell command", () => {
+    expect(shellJoin(["bash", "-lc", "echo 'hi there'"])).toBe(
+      "bash -lc 'echo '\\''hi there'\\'''",
     );
   });
 
-  it("accepts config", () => {
-    const adapter = new SandboxAdapter({ runtime: "docker", image: "node:20" });
-    expect(adapter.isAvailable()).toBe(false);
+  it("writes srt settings and returns wrapped argv", async () => {
+    const wrapped = await wrapCommandForSrt(
+      ["bash", "-lc", "echo hi"],
+      {
+        enabled: true,
+        backend: "srt",
+        network: { allowedDomains: ["github.com"] },
+        filesystem: { allowWrite: [".", "/tmp"], denyRead: ["~/.ssh"] },
+        srt: { runtimeCommand: "/bin/srt" },
+      },
+      { tmpRoot: tempRoot },
+    );
+
+    expect(wrapped.argv.slice(0, 4)).toEqual([
+      "/bin/srt",
+      "--settings",
+      wrapped.settingsPath,
+      "-c",
+    ]);
+    expect(wrapped.argv[4]).toBe("bash -lc 'echo hi'");
+
+    const settings = JSON.parse(await readFile(wrapped.settingsPath, "utf-8"));
+    expect(settings.network.allowedDomains).toEqual(["github.com"]);
+    expect(settings.filesystem.allowWrite).toEqual([".", "/tmp"]);
+    expect(settings.filesystem.denyRead).toEqual(["~/.ssh"]);
+
+    await wrapped.cleanup();
+    await expect(stat(wrapped.settingsPath)).rejects.toThrow();
+  });
+});
+
+describe("docker backend argv builders", () => {
+  it("builds docker run args with bridge networking and resource limits", () => {
+    const argv = buildDockerRunArgs({
+      sessionId: "abc/123",
+      cwd: "D:/repo",
+      dockerCommand: "/bin/docker",
+      config: {
+        enabled: true,
+        backend: "docker",
+        network: { mode: "bridge" },
+        docker: {
+          image: "custom:latest",
+          cpuLimit: 2,
+          memoryLimit: "4g",
+          dns: ["1.1.1.1"],
+          extraMounts: ["/cache:/cache"],
+          extraEnv: { A: "B" },
+        },
+      },
+    });
+
+    expect(argv.slice(0, 2)).toEqual(["/bin/docker", "run"]);
+    expect(argv).toContain("--network");
+    expect(argv[argv.indexOf("--network") + 1]).toBe("bridge");
+    expect(argv[argv.indexOf("--name") + 1]).toBe("openharness-sandbox-abc-123");
+    expect(argv[argv.indexOf("--cpus") + 1]).toBe("2");
+    expect(argv[argv.indexOf("--memory") + 1]).toBe("4g");
+    expect(argv[argv.indexOf("--dns") + 1]).toBe("1.1.1.1");
+    expect(argv[argv.indexOf("-w") + 1]).toBe(toContainerWorkspacePath(resolve("D:/repo")));
+    expect(argv).toContain("/cache:/cache");
+    expect(argv).toContain("A=B");
+    expect(argv.at(-4)).toBe("custom:latest");
+  });
+
+  it("defaults docker networking to none", () => {
+    const argv = buildDockerRunArgs({
+      sessionId: "s",
+      cwd: "D:/repo",
+      config: { enabled: true, backend: "docker" },
+    });
+
+    expect(argv[argv.indexOf("--network") + 1]).toBe("none");
+  });
+
+  it("fails closed for strict domain policy on bridge networking", () => {
+    expect(() =>
+      buildDockerRunArgs({
+        sessionId: "s",
+        cwd: "D:/repo",
+        config: {
+          enabled: true,
+          backend: "docker",
+          network: {
+            mode: "bridge",
+            allowedDomains: ["github.com"],
+            strictDomainPolicy: true,
+          },
+        },
+      }),
+    ).toThrow(SandboxUnavailableError);
+  });
+
+  it("builds docker exec args with cwd, env, and child argv", () => {
+    const argv = buildDockerExecArgs({
+      dockerCommand: "/bin/docker",
+      containerName: "oh-s",
+      cwd: "D:/repo",
+      env: { X: "1" },
+      argv: ["bash", "-lc", "echo hi"],
+    });
+
+    expect(argv.slice(0, 2)).toEqual(["/bin/docker", "exec"]);
+    expect(argv[argv.indexOf("-w") + 1]).toBe(toContainerWorkspacePath(resolve("D:/repo")));
+    expect(argv).toContain("X=1");
+    expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
+  });
+
+  it("sanitizes docker container names", () => {
+    expect(dockerContainerName("a/b c")).toBe("openharness-sandbox-a-b-c");
+    expect(dockerContainerName("")).toBe("openharness-sandbox-session");
+  });
+});
+
+describe("validateSandboxPath", () => {
+  let root: string;
+  let outside: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "oh-sandbox-root-"));
+    outside = await mkdtemp(join(tmpdir(), "oh-sandbox-outside-"));
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.txt"), "hello");
+    await writeFile(join(outside, "secret.txt"), "nope");
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("allows paths inside the sandbox root", async () => {
+    const result = await validateSandboxPath(join(root, "src", "a.txt"), {
+      sandboxRoot: root,
+      operation: "read",
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(result.resolvedPath).toBe(resolve(root, "src", "a.txt"));
+  });
+
+  it("rejects traversal outside the sandbox root", async () => {
+    const result = await validateSandboxPath(join(root, "..", "outside.txt"), {
+      sandboxRoot: root,
+      operation: "write",
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("outside the sandbox boundary");
+  });
+
+  it("allows explicitly configured extra roots", async () => {
+    const result = await validateSandboxPath(join(outside, "secret.txt"), {
+      sandboxRoot: root,
+      operation: "read",
+      extraAllowedRoots: [outside],
+    });
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("applies deny rules before allow rules", async () => {
+    const result = await validateSandboxPath(join(root, "src", "a.txt"), {
+      sandboxRoot: root,
+      operation: "read",
+      config: {
+        enabled: true,
+        filesystem: {
+          allowRead: ["."],
+          denyRead: ["src"],
+        },
+      },
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("denied by sandbox rule");
+  });
+});
+
+describe("resolveShellArgv", () => {
+  beforeEach(() => {
+    resetHostShellCacheForTests();
+  });
+
+  it("uses non-login -c for posix host shell", () => {
+    if (process.platform === "win32") return;
+    expect(resolveShellArgv("echo hi")).toEqual(["/bin/sh", "-c", "echo hi"]);
+  });
+
+  it("caches host shell detection across calls", () => {
+    if (process.platform === "win32") return;
+    const first = resolveShellArgv("one");
+    const second = resolveShellArgv("two");
+    expect(first[0]).toBe(second[0]);
+    expect(first[1]).toBe("-c");
+    expect(second[1]).toBe("-c");
+  });
+
+  it("uses bash.exe -c (not -lc) when bash is selected on Windows", () => {
+    if (process.platform !== "win32") return;
+    const argv = resolveShellArgv("echo hi");
+    if (argv[0] === "bash.exe") {
+      expect(argv).toEqual(["bash.exe", "-c", "echo hi"]);
+    } else {
+      expect(["-Command", "/c"]).toContain(argv[argv.length - 2]);
+      expect(argv.at(-1)).toBe("echo hi");
+    }
+  });
+});
+
+describe("resolveContainerShellArgv", () => {
+  it("always uses Linux /bin/sh -c regardless of host platform", () => {
+    expect(resolveContainerShellArgv("echo hi")).toEqual(["/bin/sh", "-c", "echo hi"]);
   });
 });

@@ -293,6 +293,14 @@ describe("loadSettings", () => {
     expect(["anthropic", "openai", "openai_compat"]).toContain(settings.apiFormat);
     expect(settings.permission.mode).toBe("default");
     expect(settings.maxTurns).toBe(50);
+    expect(settings.sandbox).toMatchObject({
+      enabled: false,
+      backend: "srt",
+      failIfUnavailable: false,
+      filesystem: { allowRead: ["."], allowWrite: ["."] },
+      network: { mode: "none" },
+      docker: { image: "openharness-sandbox:latest", autoBuildImage: true },
+    });
   });
 
   it("applies cli overrides", async () => {
@@ -323,6 +331,105 @@ describe("loadSettings", () => {
     } finally {
       if (saved === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
       else process.env.OPENHARNESS_CONFIG_DIR = saved;
+    }
+  });
+
+  it("deep merges sandbox file settings with defaults", async () => {
+    const configDir = process.env.OPENHARNESS_CONFIG_DIR!;
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "settings.json"),
+      JSON.stringify({
+        sandbox: {
+          enabled: true,
+          backend: "docker",
+          network: { mode: "bridge" },
+          docker: { memoryLimit: "2g" },
+        },
+      }),
+    );
+
+    const settings = await loadSettings();
+
+    expect(settings.sandbox).toMatchObject({
+      enabled: true,
+      backend: "docker",
+      network: {
+        mode: "bridge",
+        allowedDomains: [],
+        deniedDomains: [],
+        strictDomainPolicy: false,
+      },
+      docker: {
+        image: "openharness-sandbox:latest",
+        memoryLimit: "2g",
+        autoBuildImage: true,
+      },
+    });
+  });
+
+  it("applies sandbox environment overrides", async () => {
+    const saved = {
+      enabled: process.env.OPENHARNESS_SANDBOX_ENABLED,
+      backend: process.env.OPENHARNESS_SANDBOX_BACKEND,
+      fail: process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE,
+      network: process.env.OPENHARNESS_SANDBOX_NETWORK_MODE,
+      image: process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE,
+      dns: process.env.OPENHARNESS_SANDBOX_DOCKER_DNS,
+      httpProxy: process.env.OPENHARNESS_SANDBOX_HTTP_PROXY,
+      httpsProxy: process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY,
+      noProxy: process.env.OPENHARNESS_SANDBOX_NO_PROXY,
+    };
+    try {
+      process.env.OPENHARNESS_SANDBOX_ENABLED = "true";
+      process.env.OPENHARNESS_SANDBOX_BACKEND = "docker";
+      process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE = "1";
+      process.env.OPENHARNESS_SANDBOX_NETWORK_MODE = "bridge";
+      process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE = "custom:latest";
+      process.env.OPENHARNESS_SANDBOX_DOCKER_DNS = "1.1.1.1, 8.8.8.8";
+      process.env.OPENHARNESS_SANDBOX_HTTP_PROXY = "http://host.docker.internal:7890";
+      process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY = "http://host.docker.internal:7890";
+      process.env.OPENHARNESS_SANDBOX_NO_PROXY = "localhost,127.0.0.1";
+
+      const settings = await loadSettings();
+
+      expect(settings.sandbox).toMatchObject({
+        enabled: true,
+        backend: "docker",
+        failIfUnavailable: true,
+        network: { mode: "bridge" },
+        docker: {
+          image: "custom:latest",
+          dns: ["1.1.1.1", "8.8.8.8"],
+          extraEnv: {
+            HTTP_PROXY: "http://host.docker.internal:7890",
+            http_proxy: "http://host.docker.internal:7890",
+            HTTPS_PROXY: "http://host.docker.internal:7890",
+            https_proxy: "http://host.docker.internal:7890",
+            NO_PROXY: "localhost,127.0.0.1",
+            no_proxy: "localhost,127.0.0.1",
+          },
+        },
+      });
+    } finally {
+      if (saved.enabled === undefined) delete process.env.OPENHARNESS_SANDBOX_ENABLED;
+      else process.env.OPENHARNESS_SANDBOX_ENABLED = saved.enabled;
+      if (saved.backend === undefined) delete process.env.OPENHARNESS_SANDBOX_BACKEND;
+      else process.env.OPENHARNESS_SANDBOX_BACKEND = saved.backend;
+      if (saved.fail === undefined) delete process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE;
+      else process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE = saved.fail;
+      if (saved.network === undefined) delete process.env.OPENHARNESS_SANDBOX_NETWORK_MODE;
+      else process.env.OPENHARNESS_SANDBOX_NETWORK_MODE = saved.network;
+      if (saved.image === undefined) delete process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE;
+      else process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE = saved.image;
+      if (saved.dns === undefined) delete process.env.OPENHARNESS_SANDBOX_DOCKER_DNS;
+      else process.env.OPENHARNESS_SANDBOX_DOCKER_DNS = saved.dns;
+      if (saved.httpProxy === undefined) delete process.env.OPENHARNESS_SANDBOX_HTTP_PROXY;
+      else process.env.OPENHARNESS_SANDBOX_HTTP_PROXY = saved.httpProxy;
+      if (saved.httpsProxy === undefined) delete process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY;
+      else process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY = saved.httpsProxy;
+      if (saved.noProxy === undefined) delete process.env.OPENHARNESS_SANDBOX_NO_PROXY;
+      else process.env.OPENHARNESS_SANDBOX_NO_PROXY = saved.noProxy;
     }
   });
 

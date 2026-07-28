@@ -30,8 +30,45 @@ export interface MemoryConfig {
 
 export interface SandboxConfig {
   enabled: boolean;
+  backend?: "srt" | "docker";
+  /** Deprecated alias kept for old configs; prefer backend. */
   runtime?: string;
   failIfUnavailable?: boolean;
+  enabledPlatforms?: Array<"linux" | "wsl" | "macos">;
+  filesystem?: SandboxFilesystemConfig;
+  network?: SandboxNetworkConfig;
+  docker?: DockerSandboxConfig;
+  srt?: SrtSandboxConfig;
+}
+
+export interface SandboxFilesystemConfig {
+  allowRead?: string[];
+  denyRead?: string[];
+  allowWrite?: string[];
+  denyWrite?: string[];
+  extraAllowedRoots?: string[];
+}
+
+export interface SandboxNetworkConfig {
+  mode?: "none" | "bridge" | "host" | "proxy";
+  allowedDomains?: string[];
+  deniedDomains?: string[];
+  strictDomainPolicy?: boolean;
+}
+
+export interface DockerSandboxConfig {
+  image?: string;
+  autoBuildImage?: boolean;
+  cpuLimit?: number;
+  memoryLimit?: string;
+  dns?: string[];
+  extraMounts?: string[];
+  extraEnv?: Record<string, string>;
+  containerNamePrefix?: string;
+}
+
+export interface SrtSandboxConfig {
+  runtimeCommand?: string;
 }
 
 export interface PathRuleConfig {
