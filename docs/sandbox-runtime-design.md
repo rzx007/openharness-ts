@@ -457,7 +457,7 @@ type SandboxAvailability = {
   - unavailable + fail closed 返回 error。
   - timeout 仍杀进程树或容器内命令。
 
-E2E 测试：
+E2E 测试（当前为可选脚本，CI 接入待补）：
 
 - Docker sandbox 启动、执行 `echo`、停止。
 - `network.mode=none` 下 `curl` 外网失败。
@@ -473,7 +473,7 @@ E2E 测试：
 4. 抽出 shared shell helper，并让 `Bash` 走 helper。
 5. 在 CLI/TUI runtime bootstrap 和 close 阶段启动/停止 sandbox session。
 6. 给 `Read` / `Write` / `Edit` / `Glob` / `Grep` 接入 path validator。
-7. 补单测和 Docker E2E 脚本。
+7. 补单测和 Docker/SRT 可选 E2E 脚本。
 8. 更新 README / `/doctor` / `/config show` 输出。
 
 ## 开放问题

@@ -1,0 +1,58 @@
+import type { ChildProcess } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import type { Settings } from "@openharness/core";
+
+export const baseSettings = {
+  model: "e2e",
+  apiFormat: "openai",
+  maxTurns: 1,
+  permission: { mode: "default" },
+} satisfies Omit<Settings, "sandbox">;
+
+export function hasCommand(command: string): boolean {
+  const result = spawnSync(command, ["--version"], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+export function dockerAvailable(): boolean {
+  if (!hasCommand("docker")) return false;
+  const result = spawnSync("docker", ["info"], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+export function dockerImageAvailable(image: string): boolean {
+  const result = spawnSync("docker", ["image", "inspect", image], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+export function collectProcess(child: ChildProcess): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({ exitCode: 1, stdout, stderr: stderr || error.message });
+    });
+    child.on("close", (code) => {
+      resolve({ exitCode: code ?? 1, stdout, stderr });
+    });
+  });
+}

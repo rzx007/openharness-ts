@@ -13,4 +13,23 @@ Current MVP:
 
 Known gaps:
 
-- Real Docker/SRT end-to-end tests are manual; unit tests cover argv, config, lifecycle decisions, and path guards.
+- Docker/SRT E2E tests are optional and environment-gated; CI wiring is still pending.
+
+## Optional E2E
+
+```bash
+pnpm --filter @openharness/sandbox e2e:docker
+pnpm --filter @openharness/sandbox e2e:srt
+pnpm --filter @openharness/sandbox e2e
+```
+
+Docker E2E uses `node:22-bookworm` by default and skips when Docker or that image is unavailable. Set
+`OPENHARNESS_E2E_DOCKER_IMAGE` to test another local image.
+
+Docker bridge network E2E is opt-in because network availability is host-dependent:
+
+```bash
+OPENHARNESS_E2E_DOCKER_NETWORK=1 pnpm --filter @openharness/sandbox e2e:docker
+```
+
+SRT E2E skips when `srt` or its platform dependencies are unavailable.
