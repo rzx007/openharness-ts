@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { QueryEngine } from "./query-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { CompactService } from "./compact-service.js";
-import { loadSettings, saveSettings } from "../config/settings.js";
+import { loadSettings, saveProjectSettings, saveSettings } from "../config/settings.js";
 import type { StreamEvent, ToolDefinition } from "../index.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -364,6 +364,45 @@ describe("loadSettings", () => {
         image: "openharness-sandbox:latest",
         memoryLimit: "2g",
         autoBuildImage: true,
+      },
+    });
+  });
+
+  it("merges project settings above global settings when enabled", async () => {
+    const configDir = process.env.OPENHARNESS_CONFIG_DIR!;
+    const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "oh-project-settings-"));
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "settings.json"),
+      JSON.stringify({
+        sandbox: {
+          enabled: true,
+          backend: "docker",
+          network: { mode: "none" },
+        },
+      }),
+    );
+    await saveProjectSettings({
+      sandbox: {
+        enabled: true,
+        backend: "docker",
+        network: { mode: "bridge" },
+        docker: { reuseContainer: true },
+      },
+    }, projectRoot);
+
+    const settings = await loadSettings(undefined, {
+      includeProject: true,
+      projectRoot,
+    });
+
+    expect(settings.sandbox).toMatchObject({
+      enabled: true,
+      backend: "docker",
+      network: { mode: "bridge" },
+      docker: {
+        image: "openharness-sandbox:latest",
+        reuseContainer: true,
       },
     });
   });

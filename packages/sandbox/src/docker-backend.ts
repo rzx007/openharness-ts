@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
@@ -59,17 +60,21 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
 
   const cwd = resolve(options.cwd);
   const containerCwd = toContainerWorkspacePath(cwd);
-  const containerName = dockerContainerName(options.sessionId, config.docker.containerNamePrefix);
+  const containerName = config.docker.reuseContainer
+    ? dockerReusableContainerName(cwd, config.docker.containerNamePrefix)
+    : dockerContainerName(options.sessionId, config.docker.containerNamePrefix);
   const argv = [
     options.dockerCommand ?? "docker",
     "run",
     "-d",
-    "--rm",
     "--name",
     containerName,
     "--network",
     dockerNetworkMode(config.network.mode),
   ];
+  if (!config.docker.reuseContainer) {
+    argv.splice(3, 0, "--rm");
+  }
 
   if (config.docker.cpuLimit > 0) {
     argv.push("--cpus", String(config.docker.cpuLimit));
@@ -154,7 +159,9 @@ export class DockerSandboxSession {
   ) {
     const config = normalizeSandboxConfig(options.settings.sandbox);
     const cwd = resolve(options.cwd);
-    this.containerName = dockerContainerName(options.sessionId, config.docker.containerNamePrefix);
+    this.containerName = config.docker.reuseContainer
+      ? dockerReusableContainerName(cwd, config.docker.containerNamePrefix)
+      : dockerContainerName(options.sessionId, config.docker.containerNamePrefix);
     this.containerCwd = toContainerWorkspacePath(cwd);
   }
 
@@ -177,6 +184,13 @@ export class DockerSandboxSession {
       config,
       dockerCommand: this.dockerCommand,
     });
+    if (config.docker.reuseContainer && await dockerContainerExists(this.dockerCommand, this.containerName)) {
+      if (!await dockerContainerRunning(this.dockerCommand, this.containerName)) {
+        await runToCompletion([this.dockerCommand, "start", this.containerName]);
+      }
+      this.running = true;
+      return;
+    }
     const argv = buildDockerRunArgs({
       sessionId: this.options.sessionId,
       cwd: this.options.cwd,
@@ -189,6 +203,11 @@ export class DockerSandboxSession {
 
   async stop(): Promise<void> {
     if (!this.running) return;
+    const config = normalizeSandboxConfig(this.options.settings.sandbox);
+    if (config.docker.reuseContainer) {
+      this.running = false;
+      return;
+    }
     try {
       await runToCompletion([this.dockerCommand, "stop", "-t", "5", this.containerName]);
     } finally {
@@ -198,6 +217,11 @@ export class DockerSandboxSession {
 
   stopSync(): void {
     if (!this.running) return;
+    const config = normalizeSandboxConfig(this.options.settings.sandbox);
+    if (config.docker.reuseContainer) {
+      this.running = false;
+      return;
+    }
     try {
       spawnSync(this.dockerCommand, ["stop", "-t", "3", this.containerName], {
         windowsHide: true,
@@ -261,6 +285,14 @@ export function dockerContainerName(sessionId: string, prefix = "openharness-san
   return `${prefix}-${safeId || "session"}`;
 }
 
+export function dockerReusableContainerName(projectRoot: string, prefix = "openharness-sandbox"): string {
+  const root = resolve(projectRoot);
+  const normalized = process.platform === "win32" ? root.toLowerCase() : root;
+  const digest = createHash("sha1").update(normalized).digest("hex").slice(0, 12);
+  const name = basename(root).replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 32) || "workspace";
+  return `${prefix}-${name}-${digest}`;
+}
+
 export function toContainerWorkspacePath(hostPath: string): string {
   return process.platform === "win32" ? "/workspace" : hostPath;
 }
@@ -305,5 +337,30 @@ async function runProbe(argv: string[]): Promise<boolean> {
     });
     child.on("error", () => resolvePromise(false));
     child.on("close", (code) => resolvePromise(code === 0));
+  });
+}
+
+function dockerContainerExists(dockerCommand: string, containerName: string): Promise<boolean> {
+  return runProbe([dockerCommand, "container", "inspect", containerName]);
+}
+
+async function dockerContainerRunning(dockerCommand: string, containerName: string): Promise<boolean> {
+  return await new Promise<boolean>((resolvePromise) => {
+    const child = spawn(dockerCommand, [
+      "container",
+      "inspect",
+      "-f",
+      "{{.State.Running}}",
+      containerName,
+    ], {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let stdout = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.on("error", () => resolvePromise(false));
+    child.on("close", (code) => resolvePromise(code === 0 && stdout.trim() === "true"));
   });
 }

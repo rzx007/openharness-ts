@@ -26,6 +26,7 @@ describe("sandbox command config", () => {
       docker: {
         image: "openharness-sandbox:latest",
         autoBuildImage: true,
+        reuseContainer: true,
       },
     });
   });
@@ -36,12 +37,14 @@ describe("sandbox command config", () => {
       dns: "1.1.1.1, 8.8.8.8",
       proxy: "http://host.docker.internal:7890",
       build: false,
+      reuse: false,
       net: "proxy",
     });
 
     expect(next.sandbox?.network?.mode).toBe("proxy");
     expect(next.sandbox?.docker?.image).toBe("node:22-bookworm");
     expect(next.sandbox?.docker?.autoBuildImage).toBe(false);
+    expect(next.sandbox?.docker?.reuseContainer).toBe(false);
     expect(next.sandbox?.docker?.dns).toEqual(["1.1.1.1", "8.8.8.8"]);
     expect(next.sandbox?.docker?.extraEnv).toMatchObject({
       HTTP_PROXY: "http://host.docker.internal:7890",
@@ -78,9 +81,12 @@ describe("sandbox command config", () => {
     expect(status).toContain("Backend: docker");
     expect(status).toContain("Network: bridge");
     expect(status).toContain("Image: node:22-bookworm");
+    expect(status).toContain("Reuse container: true");
   });
 
   it("creates a sandbox command", () => {
-    expect(createSandboxCommand().name()).toBe("sandbox");
+    const cmd = createSandboxCommand();
+    expect(cmd.name()).toBe("sandbox");
+    expect(cmd.commands.map((sub) => sub.name())).toContain("clean");
   });
 });

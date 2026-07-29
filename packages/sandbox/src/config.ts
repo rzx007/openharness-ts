@@ -31,6 +31,7 @@ export function normalizeSandboxConfig(config?: SandboxConfig): ResolvedSandboxC
       extraMounts: config?.docker?.extraMounts ?? [],
       extraEnv: config?.docker?.extraEnv ?? {},
       containerNamePrefix: config?.docker?.containerNamePrefix ?? "openharness-sandbox",
+      reuseContainer: config?.docker?.reuseContainer ?? false,
     },
     srt: {
       runtimeCommand: config?.srt?.runtimeCommand ?? "srt",

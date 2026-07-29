@@ -722,6 +722,9 @@ export function registerBuiltinCommandsOnRegistry(
         if (sandbox.proxy) {
           lines.push(`  Proxy:        ${sandbox.proxy}`);
         }
+        if (sandbox.reuseContainer !== undefined) {
+          lines.push(`  Reuse:        ${sandbox.reuseContainer ? "on" : "off"}`);
+        }
         if (sandbox.reason) {
           lines.push(`  Sandbox note: ${sandbox.reason}`);
         }

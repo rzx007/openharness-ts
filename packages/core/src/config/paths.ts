@@ -60,6 +60,14 @@ export function getConfigFilePath(): string {
   return resolvePaths().configFilePath;
 }
 
+export function getProjectConfigDir(projectRoot?: string): string {
+  return join(resolve(projectRoot ?? process.cwd()), ".openharness");
+}
+
+export function getProjectSettingsFilePath(projectRoot?: string): string {
+  return join(getProjectConfigDir(projectRoot), "settings.json");
+}
+
 export function getDataDir(): string {
   return resolvePaths().dataDir;
 }

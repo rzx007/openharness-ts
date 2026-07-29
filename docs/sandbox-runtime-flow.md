@@ -55,7 +55,7 @@ Sandbox 有两条后端：
 ```text
 apps/cli/src/commands/main.ts
   mainAction()
-    └─ loadSettings(overrides)
+    └─ loadSettings(overrides, { includeProject: true })
          └─ mergeSandboxConfig / buildSandboxEnvOverrides
 
     └─ bootstrap(settings)                         # apps/cli/src/runtime.ts

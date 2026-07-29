@@ -20,15 +20,18 @@ Known gaps:
 ```bash
 ohs sandbox on
 ohs sandbox on --net none
+ohs sandbox on --no-reuse
+ohs sandbox on --global
 ohs sandbox on --backend srt
 ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
 ohs sandbox off
+ohs sandbox clean
 ohs sandbox status
 ohs sandbox doctor
 ```
 
-`ohs sandbox on` persists Docker sandbox settings with `network=bridge` by default. Restart the CLI/TUI
-after changing sandbox settings.
+`ohs sandbox on` persists project-local Docker sandbox settings with `network=bridge` and `reuseContainer=true`
+by default. Restart the CLI/TUI after changing sandbox settings.
 
 ## Optional E2E
 

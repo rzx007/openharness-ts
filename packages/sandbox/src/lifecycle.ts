@@ -133,6 +133,7 @@ function statusFromAvailability(
     networkMode: sandbox?.network.mode,
     dns: sandbox?.docker.dns,
     proxy: sandbox ? dockerProxyStatus(sandbox.docker.extraEnv) : undefined,
+    reuseContainer: sandbox?.docker.reuseContainer,
   };
 }
 

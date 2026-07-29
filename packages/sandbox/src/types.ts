@@ -34,6 +34,7 @@ export interface ResolvedSandboxConfig {
     extraMounts: string[];
     extraEnv: Record<string, string>;
     containerNamePrefix: string;
+    reuseContainer: boolean;
   };
   srt: {
     runtimeCommand: string;
@@ -66,6 +67,7 @@ export interface SandboxRuntimeStatus {
   networkMode?: SandboxNetworkMode;
   dns?: string[];
   proxy?: "configured" | "not configured";
+  reuseContainer?: boolean;
 }
 
 export interface ShellSpawnOptions {

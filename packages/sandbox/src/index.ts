@@ -43,6 +43,7 @@ export {
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
   dockerContainerName,
+  dockerReusableContainerName,
   dockerNetworkMode,
   DockerSandboxSession,
   SandboxUnavailableError,

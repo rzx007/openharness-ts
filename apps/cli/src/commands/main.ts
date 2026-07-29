@@ -291,17 +291,17 @@ export async function mainAction(
   prompt: string | undefined,
   options: MainOptions,
 ): Promise<void> {
+  if (options.cwd) {
+    process.chdir(options.cwd);
+  }
+
   const overrides: Partial<Settings> = {};
   if (options.model) overrides.model = options.model;
   if (options.apiFormat) overrides.apiFormat = options.apiFormat as Settings["apiFormat"];
   if (options.permissionMode) overrides.permission = { mode: options.permissionMode as Settings["permission"]["mode"] };
   if (options.maxTurns) overrides.maxTurns = options.maxTurns;
 
-  const settings = await loadSettings(overrides);
-
-  if (options.cwd) {
-    process.chdir(options.cwd);
-  }
+  const settings = await loadSettings(overrides, { includeProject: true, projectRoot: process.cwd() });
 
   if (options.debug) {
     console.log("Settings:", JSON.stringify(settings, null, 2));

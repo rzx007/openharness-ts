@@ -65,6 +65,7 @@ export interface DockerSandboxConfig {
   extraMounts?: string[];
   extraEnv?: Record<string, string>;
   containerNamePrefix?: string;
+  reuseContainer?: boolean;
 }
 
 export interface SrtSandboxConfig {

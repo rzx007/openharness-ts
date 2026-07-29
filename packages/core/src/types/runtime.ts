@@ -90,6 +90,7 @@ export interface RuntimeSandboxStatus {
   networkMode?: string;
   dns?: string[];
   proxy?: "configured" | "not configured";
+  reuseContainer?: boolean;
 }
 
 export class RuntimeBundle {

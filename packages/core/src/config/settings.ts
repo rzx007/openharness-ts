@@ -1,6 +1,6 @@
 import { readFile, writeFile, access, mkdir } from "node:fs/promises";
 import type { Settings } from "../index";
-import { getConfigDir, getConfigFilePath } from "./paths";
+import { getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath } from "./paths";
 
 const DEFAULT_SETTINGS: Settings = {
   model: "minimax/minimax-m2.5:free",
@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS: Settings = {
       extraMounts: [],
       extraEnv: {},
       containerNamePrefix: "openharness-sandbox",
+      reuseContainer: false,
     },
     srt: {
       runtimeCommand: "srt",
@@ -73,27 +74,34 @@ type SettingsPatch = Partial<Omit<Settings, "sandbox">> & {
  * @returns 合并后的完整 Settings 对象
  */
 export async function loadSettings(
-  cliOverrides?: Partial<Settings>
+  cliOverrides?: Partial<Settings>,
+  options: { projectRoot?: string; includeProject?: boolean } = {},
 ): Promise<Settings> {
   // 从环境变量加载配置
   const envSettings = loadFromEnv();
   // 从配置文件异步加载配置
   const fileSettings = await loadFromFile();
+  const projectSettings = options.includeProject
+    ? await loadProjectSettings(options.projectRoot)
+    : null;
 
   // 按优先级合并所有配置源
   const merged = {
     ...DEFAULT_SETTINGS,
     ...fileSettings,
+    ...projectSettings,
     ...envSettings,
     ...cliOverrides,
   } as Settings;
   merged.memory = {
     ...DEFAULT_SETTINGS.memory,
     ...fileSettings?.memory,
+    ...projectSettings?.memory,
     ...envSettings.memory,
     ...cliOverrides?.memory,
     enabled: cliOverrides?.memory?.enabled
       ?? envSettings.memory?.enabled
+      ?? projectSettings?.memory?.enabled
       ?? fileSettings?.memory?.enabled
       ?? DEFAULT_SETTINGS.memory?.enabled
       ?? true,
@@ -101,6 +109,7 @@ export async function loadSettings(
   merged.sandbox = mergeSandboxConfig(
     DEFAULT_SETTINGS.sandbox,
     fileSettings?.sandbox,
+    projectSettings?.sandbox,
     envSettings.sandbox,
     cliOverrides?.sandbox,
   );
@@ -122,6 +131,20 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await mkdir(configDir, { recursive: true });
 
   // 将设置对象写入 JSON 文件，使用 UTF-8 编码和缩进格式化
+  await writeFile(configPath, JSON.stringify(settings, null, 2), "utf-8");
+}
+
+export async function loadProjectSettings(projectRoot?: string): Promise<Partial<Settings> | null> {
+  return loadSettingsFile(getProjectSettingsFilePath(projectRoot));
+}
+
+export async function saveProjectSettings(
+  settings: Partial<Settings>,
+  projectRoot?: string,
+): Promise<void> {
+  const configDir = getProjectConfigDir(projectRoot);
+  const configPath = getProjectSettingsFilePath(projectRoot);
+  await mkdir(configDir, { recursive: true });
   await writeFile(configPath, JSON.stringify(settings, null, 2), "utf-8");
 }
 
@@ -238,6 +261,10 @@ function mergeSandboxConfig(
 async function loadFromFile(): Promise<Partial<Settings> | null> {
   // 构建配置文件的完整路径
   const configPath = getConfigFilePath();
+  return loadSettingsFile(configPath);
+}
+
+async function loadSettingsFile(configPath: string): Promise<Partial<Settings> | null> {
   try {
     // 检查配置文件是否存在且可访问
     await access(configPath);

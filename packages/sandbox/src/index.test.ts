@@ -9,6 +9,7 @@ import {
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
   dockerContainerName,
+  dockerReusableContainerName,
   dockerNetworkMode,
   getDockerAvailability,
   getSandboxAvailability,
@@ -375,6 +376,22 @@ describe("docker backend argv builders", () => {
     expect(argv[argv.indexOf("--network") + 1]).toBe("none");
   });
 
+  it("omits --rm and uses a project container name for reusable docker containers", () => {
+    const cwd = "D:/repo";
+    const argv = buildDockerRunArgs({
+      sessionId: "s",
+      cwd,
+      config: {
+        enabled: true,
+        backend: "docker",
+        docker: { reuseContainer: true },
+      },
+    });
+
+    expect(argv).not.toContain("--rm");
+    expect(argv[argv.indexOf("--name") + 1]).toBe(dockerReusableContainerName(resolve(cwd)));
+  });
+
   it("maps docker proxy mode to bridge networking and injects proxy env", () => {
     const argv = buildDockerRunArgs({
       sessionId: "proxy",
@@ -472,6 +489,16 @@ describe("docker backend argv builders", () => {
   it("sanitizes docker container names", () => {
     expect(dockerContainerName("a/b c")).toBe("openharness-sandbox-a-b-c");
     expect(dockerContainerName("")).toBe("openharness-sandbox-session");
+  });
+
+  it("generates stable reusable docker container names per project", () => {
+    const first = dockerReusableContainerName("D:/repo");
+    const second = dockerReusableContainerName("D:/repo");
+    const other = dockerReusableContainerName("D:/other");
+
+    expect(first).toBe(second);
+    expect(first).toMatch(/^openharness-sandbox-repo-[a-f0-9]{12}$/);
+    expect(first).not.toBe(other);
   });
 });
 

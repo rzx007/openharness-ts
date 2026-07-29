@@ -170,11 +170,14 @@ ohs provider edit <name> [-k <key>] [-m <model>] [-b <base-url>]
 ohs provider remove <name>
 
 # Sandbox
-ohs sandbox on                         # enable Docker sandbox, network=bridge by default
+ohs sandbox on                         # project-local Docker sandbox, network=bridge, reuse=on
 ohs sandbox on --net none              # offline sandbox
+ohs sandbox on --no-reuse              # temporary container per session
+ohs sandbox on --global                # write global user config instead of project config
 ohs sandbox on --backend srt           # use Anthropic Sandbox Runtime
 ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
 ohs sandbox off
+ohs sandbox clean                       # remove current project reusable container
 ohs sandbox status
 ohs sandbox doctor
 
@@ -614,8 +617,9 @@ ohs --continue         ohs --resume <id>
 Sandbox 推荐用子命令切换，不必手写配置：
 
 ```bash
-ohs sandbox on      # 默认 Docker + bridge 网络
+ohs sandbox on      # 默认写入项目配置：Docker + bridge 网络 + 复用容器
 ohs sandbox off
+ohs sandbox clean
 ohs sandbox status
 ```
 

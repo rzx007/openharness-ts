@@ -98,6 +98,7 @@ describe("E.2 批次命令", () => {
             containerCwd: "/workspace",
             dns: ["1.1.1.1", "8.8.8.8"],
             proxy: "not configured",
+            reuseContainer: true,
           },
           toolRegistry: { getAll: () => [{ name: "Bash" }] },
           hookExecutor: { register: () => {} },
@@ -111,6 +112,7 @@ describe("E.2 批次命令", () => {
     expect(result.output).toContain("Container cwd:/workspace");
     expect(result.output).toContain("DNS:          1.1.1.1, 8.8.8.8");
     expect(result.output).toContain("Proxy:        not configured");
+    expect(result.output).toContain("Reuse:        on");
     expect(result.output).toContain("Sandbox note: domain policy is not enforced");
   });
 
