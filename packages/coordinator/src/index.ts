@@ -71,6 +71,7 @@ Use Workflow for DAG-shaped or repeatable workflows where code should enforce or
 Workflow runs are persisted under the project \`.openharness/workflows\` directory by default, including running snapshots and terminal task results. Use the structured run id and task statuses from the workflow payload when reasoning about recovery or follow-up work.
 Use Workflow with \`action: "status"\` to inspect a persisted run, and \`action: "resume"\` to continue a running snapshot without rerunning completed terminal tasks.
 When a snapshot contains a running task with \`taskManagerTaskId\`, resume will first wait for that existing TaskManager task; only if it is unavailable should it spawn a replacement worker.
+Use task \`timeoutSeconds\` or workflow \`defaultTaskTimeoutSeconds\` when a worker attempt must have a hard wall-clock budget; timed-out attempts are reported as failed and follow the workflow failure/retry policy.
 For parallel write work, set \`writeScope\` on non-isolated tasks. The scheduler serializes overlapping non-isolated write scopes; \`readOnly: true\` and \`isolate: true\` tasks do not participate in shared-cwd write conflicts.
 Workflow status snapshots include \`blockedTaskIds\` and \`blockedTasks\` when ready tasks are waiting on writeScope conflicts; use those fields to explain scheduling pauses instead of treating them as stalled work.
 

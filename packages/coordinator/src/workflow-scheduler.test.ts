@@ -210,6 +210,27 @@ describe("runWorkflow", () => {
     expect(result.results.flaky?.attempts).toBe(3);
   });
 
+  it("fails a task attempt when its timeout budget is exceeded", async () => {
+    const result = await runWorkflow(
+      {
+        mode: "parallel",
+        tasks: [{ id: "slow", timeoutMs: 5 }],
+      },
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return { summary: "too late" };
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.results.slow).toEqual(expect.objectContaining({
+      status: "failed",
+      attempts: 1,
+      timedOut: true,
+      error: "Task timed out after 5ms",
+    }));
+  });
+
   it("serializes overlapping non-isolated write scopes while allowing unrelated work", async () => {
     const started: string[] = [];
     const snapshots: WorkflowRunSnapshot[] = [];

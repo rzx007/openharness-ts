@@ -23,6 +23,7 @@ export interface WorkflowTask {
   permissionMode?: "default" | "plan" | "full_auto";
   dependsOn?: string[];
   retry?: WorkflowRetryPolicy;
+  timeoutMs?: number;
   readOnly?: boolean;
   writeScope?: string[];
   isolate?: boolean;
@@ -33,6 +34,7 @@ export interface WorkflowSpec {
   mode: WorkflowMode;
   tasks: WorkflowTask[];
   maxConcurrency?: number;
+  defaultTaskTimeoutMs?: number;
   failurePolicy?: WorkflowFailurePolicy;
 }
 
@@ -40,6 +42,7 @@ export interface WorkflowPlan {
   mode: WorkflowMode;
   tasks: WorkflowTask[];
   maxConcurrency: number;
+  defaultTaskTimeoutMs?: number;
   executionOrder: string[];
   dependencyMap: Record<string, string[]>;
   dependentsMap: Record<string, string[]>;
@@ -63,6 +66,7 @@ export interface WorkflowTaskRunResult {
   startedAt: number;
   finishedAt: number;
   skippedReason?: string;
+  timedOut?: boolean;
   error?: string;
 }
 
@@ -92,6 +96,7 @@ export interface WorkflowRunSnapshotPlan {
   mode: WorkflowMode;
   tasks: WorkflowTask[];
   maxConcurrency: number | "unbounded";
+  defaultTaskTimeoutMs?: number;
   executionOrder: string[];
   dependencyMap: Record<string, string[]>;
   dependentsMap: Record<string, string[]>;
@@ -158,6 +163,7 @@ export interface WorkflowNotificationTask {
   result?: string;
   metadata?: Record<string, unknown>;
   skippedReason?: string;
+  timedOut?: boolean;
   error?: string;
 }
 
@@ -174,6 +180,7 @@ export interface WorkflowNotification {
 
 export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
   const tasks = normalizeTasksForMode(spec.mode, spec.tasks);
+  validateWorkflowTimeouts(spec.defaultTaskTimeoutMs, tasks);
   validateWorkflowTasks(tasks);
   const dependencyMap = buildDependencyMap(tasks);
   const dependentsMap = buildDependentsMap(tasks);
@@ -183,6 +190,7 @@ export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
     mode: spec.mode,
     tasks,
     maxConcurrency: resolveMaxConcurrency(spec.mode, spec.maxConcurrency),
+    defaultTaskTimeoutMs: spec.defaultTaskTimeoutMs,
     executionOrder,
     dependencyMap,
     dependentsMap,
@@ -210,6 +218,7 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
       result: task.result,
       metadata: task.metadata,
       skippedReason: task.skippedReason,
+      timedOut: task.timedOut,
       error: task.error,
     })),
   };
@@ -419,6 +428,7 @@ export async function runWorkflow(
           collectDependencyResults(task, results),
           pipelineInputFor(plan, task, results),
           resumeFrom,
+          resolveTaskTimeoutMs(plan, task),
           (progress) => {
             const current = runningTasks.get(taskId);
             if (!current) return;
@@ -529,6 +539,7 @@ async function runWorkflowTask(
   dependencyResults: Record<string, WorkflowTaskRunResult>,
   pipelineInput: WorkflowTaskRunResult | undefined,
   resumeFrom: WorkflowRunningTask | undefined,
+  timeoutMs: number | undefined,
   reportProgress: (progress: WorkflowTaskProgress) => void,
 ): Promise<WorkflowTaskRunResult> {
   const retry = normalizeRetry(task.retry);
@@ -541,14 +552,17 @@ async function runWorkflowTask(
       reportProgress({
         summary: attempt === 1 ? "Task running" : `Retry attempt ${attempt} running`,
       });
-      lastResult = await runner({
-        task,
-        attempt,
-        dependencyResults,
-        pipelineInput,
-        resumeFrom: attempt === 1 ? resumeFrom : undefined,
-        reportProgress,
-      });
+      lastResult = await runRunnerAttempt(
+        runner({
+          task,
+          attempt,
+          dependencyResults,
+          pipelineInput,
+          resumeFrom: attempt === 1 ? resumeFrom : undefined,
+          reportProgress,
+        }),
+        timeoutMs,
+      );
       const status = lastResult.status ?? "completed";
       if (status === "completed" || !retry.retryOn.includes(status) || attempt === retry.maxAttempts) {
         return {
@@ -563,6 +577,7 @@ async function runWorkflowTask(
       }
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      const timedOut = error instanceof WorkflowTaskTimeoutError;
       if (!retry.retryOn.includes("failed") || attempt === retry.maxAttempts) {
         return {
           taskId: task.id,
@@ -572,6 +587,7 @@ async function runWorkflowTask(
           dependencies: [...(task.dependsOn ?? [])],
           startedAt,
           finishedAt: Date.now(),
+          timedOut,
           error: lastError,
         };
       }
@@ -590,6 +606,32 @@ async function runWorkflowTask(
     finishedAt: Date.now(),
     error: lastError,
   };
+}
+
+async function runRunnerAttempt(
+  result: Promise<WorkflowWorkerResult> | WorkflowWorkerResult,
+  timeoutMs: number | undefined,
+): Promise<WorkflowWorkerResult> {
+  const resultPromise = Promise.resolve(result);
+  if (timeoutMs === undefined) return resultPromise;
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new WorkflowTaskTimeoutError(timeoutMs)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([resultPromise, timeoutPromise]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+class WorkflowTaskTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Task timed out after ${timeoutMs}ms`);
+    this.name = "WorkflowTaskTimeoutError";
+  }
 }
 
 function normalizeTasksForMode(mode: WorkflowMode, tasks: WorkflowTask[]): WorkflowTask[] {
@@ -612,6 +654,25 @@ function resolveMaxConcurrency(mode: WorkflowMode, value: number | undefined): n
     throw new Error("maxConcurrency must be a positive number");
   }
   return Math.floor(value);
+}
+
+function validateWorkflowTimeouts(defaultTaskTimeoutMs: number | undefined, tasks: WorkflowTask[]): void {
+  validateTimeoutMs(defaultTaskTimeoutMs, "defaultTaskTimeoutMs");
+  for (const task of tasks) {
+    validateTimeoutMs(task.timeoutMs, `tasks.${task.id}.timeoutMs`);
+  }
+}
+
+function validateTimeoutMs(value: number | undefined, label: string): void {
+  if (value === undefined) return;
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a positive number`);
+  }
+}
+
+function resolveTaskTimeoutMs(plan: WorkflowPlan, task: WorkflowTask): number | undefined {
+  const timeoutMs = task.timeoutMs ?? plan.defaultTaskTimeoutMs;
+  return timeoutMs === undefined ? undefined : Math.floor(timeoutMs);
 }
 
 function buildDependencyMap(tasks: WorkflowTask[]): Record<string, string[]> {

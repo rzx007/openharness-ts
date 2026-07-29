@@ -79,6 +79,10 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
                   },
                 },
               },
+              timeoutSeconds: {
+                type: "number",
+                description: "Hard timeout for each attempt of this task, in seconds.",
+              },
               readOnly: {
                 type: "boolean",
                 description: "Marks the task as read-only so it can run alongside write-scoped tasks.",
@@ -99,6 +103,10 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         maxConcurrency: {
           type: "number",
           description: "Parallel worker limit. Ignored by sequential and pipeline modes.",
+        },
+        defaultTaskTimeoutSeconds: {
+          type: "number",
+          description: "Default hard timeout for each task attempt, in seconds. Individual tasks can override it.",
         },
         failurePolicy: {
           type: "string",
@@ -226,6 +234,10 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   if (maxConcurrency !== undefined && typeof maxConcurrency !== "number") {
     return "maxConcurrency must be a number";
   }
+  const defaultTaskTimeoutMs = secondsToOptionalMs(input.defaultTaskTimeoutSeconds);
+  if (defaultTaskTimeoutMs === "invalid") {
+    return "defaultTaskTimeoutSeconds must be a positive number";
+  }
 
   const tasks: WorkflowTask[] = [];
   for (const [index, rawTask] of input.tasks.entries()) {
@@ -241,6 +253,7 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
     mode,
     tasks,
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
+    ...(defaultTaskTimeoutMs !== undefined ? { defaultTaskTimeoutMs } : {}),
     ...(failurePolicy !== undefined ? { failurePolicy } : {}),
   };
 }
@@ -259,6 +272,10 @@ function parseWorkflowTask(input: Record<string, unknown>, index: number): Workf
   }
   const retryOrError = parseRetry(input.retry, index);
   if (typeof retryOrError === "string") return retryOrError;
+  const timeoutMs = secondsToOptionalMs(input.timeoutSeconds);
+  if (timeoutMs === "invalid") {
+    return `tasks[${index}].timeoutSeconds must be a positive number`;
+  }
 
   return {
     id,
@@ -270,6 +287,7 @@ function parseWorkflowTask(input: Record<string, unknown>, index: number): Workf
     permissionMode: parsePermissionMode(input.permissionMode),
     dependsOn: parseStringArray(input.dependsOn),
     retry: retryOrError,
+    timeoutMs,
     readOnly: typeof input.readOnly === "boolean" ? input.readOnly : undefined,
     writeScope: parseStringArray(input.writeScope),
     isolate: typeof input.isolate === "boolean" ? input.isolate : undefined,
@@ -321,6 +339,12 @@ function parsePermissionMode(value: unknown): "default" | "plan" | "full_auto" |
 
 function secondsToMs(value: unknown, defaultSeconds: number): number {
   return (typeof value === "number" ? value : defaultSeconds) * 1000;
+}
+
+function secondsToOptionalMs(value: unknown): number | undefined | "invalid" {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "invalid";
+  return Math.floor(value * 1000);
 }
 
 function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot): string {

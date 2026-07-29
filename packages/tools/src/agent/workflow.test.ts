@@ -114,7 +114,7 @@ describe("workflowTool", () => {
     });
   });
 
-  it("passes write scheduling hints into workflow specs", async () => {
+  it("passes scheduling hints into workflow specs", async () => {
     const runner: WorkflowRunner = vi.fn(async ({ task }) => ({ summary: `${task.id} done` }));
     const run = vi.fn(async (spec: WorkflowSpec) => ({
       status: "completed" as const,
@@ -123,6 +123,7 @@ describe("workflowTool", () => {
         mode: spec.mode,
         tasks: spec.tasks,
         maxConcurrency: 2,
+        defaultTaskTimeoutMs: spec.defaultTaskTimeoutMs,
         executionOrder: spec.tasks.map((task) => task.id),
         dependencyMap: Object.fromEntries(spec.tasks.map((task) => [task.id, task.dependsOn ?? []])),
         dependentsMap: Object.fromEntries(spec.tasks.map((task) => [task.id, []])),
@@ -135,8 +136,9 @@ describe("workflowTool", () => {
     await tool.execute(
       {
         mode: "parallel",
+        defaultTaskTimeoutSeconds: 30,
         tasks: [
-          { id: "write", writeScope: ["packages/auth"], isolate: false },
+          { id: "write", writeScope: ["packages/auth"], isolate: false, timeoutSeconds: 10 },
           { id: "read", readOnly: true, writeScope: ["packages/auth"] },
         ],
       },
@@ -145,8 +147,9 @@ describe("workflowTool", () => {
 
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
+        defaultTaskTimeoutMs: 30_000,
         tasks: [
-          expect.objectContaining({ id: "write", writeScope: ["packages/auth"], isolate: false }),
+          expect.objectContaining({ id: "write", writeScope: ["packages/auth"], isolate: false, timeoutMs: 10_000 }),
           expect.objectContaining({ id: "read", readOnly: true, writeScope: ["packages/auth"] }),
         ],
       }),
