@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
 import { normalizeSandboxConfig } from "./config.js";
-import type { ShellSpawnOptions } from "./types.js";
+import type { SandboxRuntimeReporter, ShellSpawnOptions } from "./types.js";
 
 export class SandboxUnavailableError extends Error {
   constructor(message: string) {
@@ -155,6 +155,7 @@ export class DockerSandboxSession {
       sessionId: string;
       cwd: string;
       deps?: AvailabilityDeps;
+      reporter?: SandboxRuntimeReporter;
     },
   ) {
     const config = normalizeSandboxConfig(options.settings.sandbox);
@@ -183,14 +184,21 @@ export class DockerSandboxSession {
     await ensureDockerImage({
       config,
       dockerCommand: this.dockerCommand,
+      reporter: this.options.reporter,
     });
     if (config.docker.reuseContainer && await dockerContainerExists(this.dockerCommand, this.containerName)) {
+      this.options.reporter?.({ type: "start-container", containerName: this.containerName, reused: true });
       if (!await dockerContainerRunning(this.dockerCommand, this.containerName)) {
         await runToCompletion([this.dockerCommand, "start", this.containerName]);
       }
       this.running = true;
       return;
     }
+    this.options.reporter?.({
+      type: "start-container",
+      containerName: this.containerName,
+      reused: false,
+    });
     const argv = buildDockerRunArgs({
       sessionId: this.options.sessionId,
       cwd: this.options.cwd,
@@ -250,7 +258,9 @@ export class DockerSandboxSession {
 async function ensureDockerImage(options: {
   config: ReturnType<typeof normalizeSandboxConfig>;
   dockerCommand: string;
+  reporter?: SandboxRuntimeReporter;
 }): Promise<void> {
+  options.reporter?.({ type: "check-image", image: options.config.docker.image });
   if (await runProbe(buildDockerImageInspectArgs(options.config.docker.image, options.dockerCommand))) {
     return;
   }
@@ -268,6 +278,11 @@ async function ensureDockerImage(options: {
     );
   }
 
+  options.reporter?.({
+    type: "build-image",
+    image: options.config.docker.image,
+    dockerfile,
+  });
   await runToCompletion(buildDockerBuildArgs({
     image: options.config.docker.image,
     dockerfile,

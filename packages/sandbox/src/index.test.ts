@@ -267,11 +267,13 @@ describe("sandbox runtime lifecycle", () => {
   });
 
   it("reports unavailable Docker status without strict mode", async () => {
+    const events: string[] = [];
     const runtime = await startSandboxRuntime({
       settings: { ...settings, sandbox: { enabled: true, backend: "docker" } },
       cwd: process.cwd(),
       sessionId: "test",
       deps: { platform: "linux", which: () => undefined },
+      reporter: (event) => events.push(event.type),
     });
 
     expect(runtime.status).toMatchObject({
@@ -281,6 +283,7 @@ describe("sandbox runtime lifecycle", () => {
       backend: "docker",
     });
     expect(runtime.status.reason).toContain("Docker CLI not found");
+    expect(events).toEqual(["start", "check-availability", "unavailable"]);
   });
 });
 

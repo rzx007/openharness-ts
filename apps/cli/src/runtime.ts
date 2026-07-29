@@ -11,6 +11,7 @@ import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { startSandboxRuntime } from "@openharness/sandbox";
+import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import {
   getBackendRegistry,
@@ -57,6 +58,7 @@ export interface BootstrapOptions {
   permissionPrompt?: PermissionPromptFn;
   skillRegistry?: SkillRegistry;
   credentialStorage?: CredentialStorage;
+  sandboxReporter?: SandboxRuntimeReporter;
 }
 
 /**
@@ -243,15 +245,20 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     .setQueryEngine(queryEngine)
     .build(settings);
 
-  await attachSandboxRuntime(bundle, process.cwd());
+  await attachSandboxRuntime(bundle, process.cwd(), options.sandboxReporter);
   return bundle;
 }
 
-async function attachSandboxRuntime(bundle: RuntimeBundle, cwd: string): Promise<void> {
+async function attachSandboxRuntime(
+  bundle: RuntimeBundle,
+  cwd: string,
+  reporter?: SandboxRuntimeReporter,
+): Promise<void> {
   const sandboxRuntime = await startSandboxRuntime({
     settings: bundle.settings,
     cwd,
     sessionId: createSandboxSessionId(cwd),
+    reporter,
   });
   bundle.sandboxStatus = sandboxRuntime.status;
 

@@ -7,13 +7,14 @@ import {
 import { normalizeSandboxConfig } from "./config.js";
 import { DockerSandboxSession, SandboxUnavailableError } from "./docker-backend.js";
 import { setActiveSandboxSession } from "./session.js";
-import type { SandboxRuntimeStatus } from "./types.js";
+import type { SandboxRuntimeReporter, SandboxRuntimeStatus } from "./types.js";
 
 export interface SandboxRuntimeOptions {
   settings: Settings;
   cwd: string;
   sessionId: string;
   deps?: AvailabilityDeps;
+  reporter?: SandboxRuntimeReporter;
 }
 
 export interface StartedSandboxRuntime {
@@ -36,22 +37,42 @@ export async function startSandboxRuntime(
     });
   }
 
+  options.reporter?.({
+    type: "start",
+    backend: sandbox.backend,
+    image: sandbox.backend === "docker" ? sandbox.docker.image : undefined,
+    reuseContainer: sandbox.backend === "docker" ? sandbox.docker.reuseContainer : undefined,
+  });
+
   if (sandbox.backend === "srt") {
+    options.reporter?.({ type: "check-availability", backend: "srt" });
     const availability = getSrtAvailability(options.settings.sandbox, options.deps);
     if (!availability.available) {
       if (sandbox.failIfUnavailable) {
         throw new SandboxUnavailableError(availability.reason ?? "srt sandbox is unavailable");
       }
+      options.reporter?.({
+        type: "unavailable",
+        backend: "srt",
+        reason: availability.reason ?? "srt sandbox is unavailable",
+      });
       return inertRuntime(statusFromAvailability("unavailable", availability));
     }
+    options.reporter?.({ type: "ready", backend: "srt" });
     return inertRuntime(statusFromAvailability("active", availability));
   }
 
+  options.reporter?.({ type: "check-availability", backend: "docker" });
   const availability = getDockerAvailability(options.settings.sandbox, options.deps);
   if (!availability.available) {
     if (sandbox.failIfUnavailable) {
       throw new SandboxUnavailableError(availability.reason ?? "Docker sandbox is unavailable");
     }
+    options.reporter?.({
+      type: "unavailable",
+      backend: "docker",
+      reason: availability.reason ?? "Docker sandbox is unavailable",
+    });
     return inertRuntime(statusFromAvailability("unavailable", availability));
   }
 
@@ -60,11 +81,17 @@ export async function startSandboxRuntime(
     sessionId: options.sessionId,
     cwd: options.cwd,
     deps: options.deps,
+    reporter: options.reporter,
   });
   try {
     await session.start();
   } catch (error) {
     if (sandbox.failIfUnavailable) throw error;
+    options.reporter?.({
+      type: "unavailable",
+      backend: "docker",
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return inertRuntime(statusFromAvailability("unavailable", {
       ...availability,
       available: false,
@@ -73,6 +100,7 @@ export async function startSandboxRuntime(
     }));
   }
   setActiveSandboxSession(session);
+  options.reporter?.({ type: "ready", backend: "docker", containerName: session.containerName });
 
   const status = statusFromAvailability(
     availability.degraded ? "degraded" : "active",

@@ -11,6 +11,8 @@ export type {
   SandboxOperation,
   SandboxPathValidationResult,
   SandboxPlatform,
+  SandboxRuntimeEvent,
+  SandboxRuntimeReporter,
   SandboxRuntimeState,
   SandboxRuntimeStatus,
   SandboxSession,

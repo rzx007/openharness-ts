@@ -54,6 +54,17 @@ export interface SandboxAvailability {
 
 export type SandboxRuntimeState = "off" | "active" | "degraded" | "unavailable";
 
+export type SandboxRuntimeEvent =
+  | { type: "start"; backend: SandboxBackend; image?: string; reuseContainer?: boolean }
+  | { type: "check-availability"; backend: SandboxBackend }
+  | { type: "check-image"; image: string }
+  | { type: "build-image"; image: string; dockerfile: string }
+  | { type: "start-container"; containerName: string; reused: boolean }
+  | { type: "ready"; backend: SandboxBackend; containerName?: string }
+  | { type: "unavailable"; backend: SandboxBackend; reason: string };
+
+export type SandboxRuntimeReporter = (event: SandboxRuntimeEvent) => void;
+
 export interface SandboxRuntimeStatus {
   state: SandboxRuntimeState;
   enabled: boolean;

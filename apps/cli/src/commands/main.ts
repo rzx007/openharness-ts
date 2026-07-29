@@ -18,6 +18,7 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { computeToolDiff, resolveToolPath } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
+import type { SandboxRuntimeEvent, SandboxRuntimeReporter } from "@openharness/sandbox";
 import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
 import { updateRulesFromSession } from "@openharness/personalization";
 import { updateSessionMemoryFile, getSessionMemoryPath, getSessionMemoryContent, sessionMemoryToCompactText } from "@openharness/services";
@@ -639,6 +640,7 @@ async function runRepl(
     cliOverrides: buildCliOverrides(options),
     skillRegistry,
     credentialStorage,
+    sandboxReporter: createSandboxStartupReporter(process.stdout),
   });
   // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
   registerPluginHooks(bundle.hookExecutor);
@@ -948,6 +950,41 @@ async function runRepl(
   rl.prompt();
 }
 
+function createSandboxStartupReporter(stream: NodeJS.WritableStream): SandboxRuntimeReporter {
+  let started = false;
+  return (event: SandboxRuntimeEvent) => {
+    const line = formatSandboxStartupEvent(event, !started);
+    if (!line) return;
+    started = true;
+    stream.write(`${line}\n`);
+  };
+}
+
+function formatSandboxStartupEvent(event: SandboxRuntimeEvent, first: boolean): string | undefined {
+  switch (event.type) {
+    case "start":
+      return first
+        ? `Preparing ${event.backend === "docker" ? "Docker" : "SRT"} sandbox...`
+        : undefined;
+    case "check-availability":
+      return event.backend === "docker" ? "  Docker: checking" : "  SRT: checking";
+    case "check-image":
+      return `  Image: checking ${event.image}`;
+    case "build-image":
+      return `  Image: building ${event.image} from ${event.dockerfile}`;
+    case "start-container":
+      return `  Container: ${event.reused ? "reusing" : "starting"} ${event.containerName}`;
+    case "ready":
+      return event.containerName
+        ? `Sandbox ready: ${event.containerName}`
+        : "Sandbox ready.";
+    case "unavailable":
+      return `Sandbox unavailable: ${event.reason}`;
+    default:
+      return undefined;
+  }
+}
+
 /**
  * 启动 TUI (Terminal User Interface) 模式。
  *
@@ -1177,6 +1214,7 @@ async function runBackendHost(
     permissionPrompt: askPermission,
     skillRegistry,
     credentialStorage,
+    sandboxReporter: createSandboxStartupReporter(process.stderr),
   });
   // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
   registerPluginHooks(bundle.hookExecutor);
