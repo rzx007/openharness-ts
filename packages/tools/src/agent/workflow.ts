@@ -7,6 +7,7 @@ import {
   WorkflowRunStore,
   type WorkflowFailurePolicy,
   type WorkflowMode,
+  type WorkflowRunEvent,
   type WorkflowRunSnapshot,
   type WorkflowRunner,
   type WorkflowSpec,
@@ -188,7 +189,7 @@ function workflowStatus(input: Record<string, unknown>, cwd: string) {
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
   }
-  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot) }] };
+  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, store.loadEvents(snapshot.runId)) }] };
 }
 
 async function workflowResume(
@@ -347,10 +348,10 @@ function secondsToOptionalMs(value: unknown): number | undefined | "invalid" {
   return Math.floor(value * 1000);
 }
 
-function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot): string {
+function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[] = []): string {
   return [
     "<workflow-run-snapshot>",
-    `<payload>${escapeXml(JSON.stringify(snapshot))}</payload>`,
+    `<payload>${escapeXml(JSON.stringify({ snapshot, events }))}</payload>`,
     "</workflow-run-snapshot>",
   ].join("\n");
 }

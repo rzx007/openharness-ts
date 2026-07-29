@@ -74,6 +74,7 @@ When a snapshot contains a running task with \`taskManagerTaskId\`, resume will 
 Use task \`timeoutSeconds\` or workflow \`defaultTaskTimeoutSeconds\` when a worker attempt must have a hard wall-clock budget; timed-out attempts are reported as failed and follow the workflow failure/retry policy.
 For parallel write work, set \`writeScope\` on non-isolated tasks. The scheduler serializes overlapping non-isolated write scopes; \`readOnly: true\` and \`isolate: true\` tasks do not participate in shared-cwd write conflicts.
 Workflow status snapshots include \`blockedTaskIds\` and \`blockedTasks\` when ready tasks are waiting on writeScope conflicts; use those fields to explain scheduling pauses instead of treating them as stalled work.
+Workflow results can include \`needsReconciliation\`, \`reconciliationIssues\`, \`budget\`, and persisted event timeline data. Use those fields to decide whether a completed workflow still needs merge/reconcile follow-up.
 
 When calling agent:
 - Do not use one worker to check on another. Workers will notify you when they are done.
@@ -504,6 +505,8 @@ export {
   runWorkflow,
   validateWorkflowTasks,
   workflowTasksConflict,
+  type WorkflowBudgetUsage,
+  type WorkflowReconciliationIssue,
   type WorkflowFailurePolicy,
   type WorkflowMode,
   type WorkflowBlockedTask,
@@ -522,6 +525,7 @@ export {
   type WorkflowRunSnapshotPlan,
   type WorkflowRunSnapshotStatus,
   type WorkflowSpec,
+  type WorkflowTaskBudgetUsage,
   type WorkflowTaskProgress,
   type WorkflowTask,
   type WorkflowTaskRunResult,

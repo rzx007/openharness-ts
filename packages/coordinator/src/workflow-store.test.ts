@@ -53,6 +53,8 @@ describe("WorkflowRunStore", () => {
     unblock?.();
     const result = await workflow;
     expect(result.status).toBe("completed");
+    expect(store.loadEvents("run-progress").map((event) => event.type)).toContain("task_started");
+    expect(store.loadEvents("run-progress").map((event) => event.type)).toContain("workflow_finished");
   });
 
   it("loads and lists completed workflow snapshots", async () => {

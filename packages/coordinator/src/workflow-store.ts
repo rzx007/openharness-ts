@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { getProjectConfigDir } from "@openharness/core";
 import {
   createWorkflowResultFromSnapshot,
   runWorkflow,
+  type WorkflowRunEvent,
   type WorkflowRunSnapshot,
   type WorkflowRunner,
   type WorkflowRunResult,
@@ -19,10 +20,12 @@ export interface WorkflowRunStoreOptions {
 export interface RunPersistentWorkflowOptions extends WorkflowRunStoreOptions {
   runId?: string;
   store?: WorkflowRunStore;
+  onEvent?: (event: WorkflowRunEvent) => void;
 }
 
 export interface ResumePersistentWorkflowOptions extends WorkflowRunStoreOptions {
   store?: WorkflowRunStore;
+  onEvent?: (event: WorkflowRunEvent) => void;
 }
 
 export function getWorkflowRunsDir(cwd?: string): string {
@@ -40,9 +43,34 @@ export class WorkflowRunStore {
     return join(this.dir, `${sanitizeRunId(runId)}.json`);
   }
 
+  eventPathFor(runId: string): string {
+    return join(this.dir, `${sanitizeRunId(runId)}.events.ndjson`);
+  }
+
   save(snapshot: WorkflowRunSnapshot): void {
     mkdirSync(this.dir, { recursive: true });
     atomicWrite(this.pathFor(snapshot.runId), JSON.stringify(snapshot, null, 2) + "\n");
+  }
+
+  appendEvent(event: WorkflowRunEvent): void {
+    mkdirSync(this.dir, { recursive: true });
+    appendFileSync(this.eventPathFor(event.runId), JSON.stringify(event) + "\n", "utf-8");
+  }
+
+  loadEvents(runId: string): WorkflowRunEvent[] {
+    const path = this.eventPathFor(runId);
+    if (!existsSync(path)) return [];
+    const events: WorkflowRunEvent[] = [];
+    for (const line of readFileSync(path, "utf-8").split(/\r?\n/)) {
+      if (line.trim() === "") continue;
+      try {
+        const event = JSON.parse(line) as unknown;
+        if (isWorkflowRunEvent(event)) events.push(event);
+      } catch {
+        // Ignore corrupt event lines so a partial append doesn't hide the usable timeline.
+      }
+    }
+    return events;
   }
 
   load(runId: string): WorkflowRunSnapshot | undefined {
@@ -92,6 +120,10 @@ export async function runPersistentWorkflow(
   return runWorkflow(spec, runner, {
     runId: options.runId,
     onSnapshot: (snapshot) => store.save(snapshot),
+    onEvent: (event) => {
+      store.appendEvent(event);
+      options.onEvent?.(event);
+    },
   });
 }
 
@@ -117,6 +149,10 @@ export async function resumePersistentWorkflow(
     initialResults: snapshot.results,
     initialRunningTasks: snapshot.runningTasks,
     onSnapshot: (next) => store.save(next),
+    onEvent: (event) => {
+      store.appendEvent(event);
+      options.onEvent?.(event);
+    },
   });
 }
 
@@ -143,6 +179,7 @@ function parseWorkflowRunSnapshot(text: string): WorkflowRunSnapshot {
     blockedTaskIds: value.blockedTaskIds ?? [],
     blockedTasks: value.blockedTasks ?? {},
     runningTasks: value.runningTasks ?? {},
+    budget: value.budget ?? { tasks: {} },
   };
 }
 
@@ -166,7 +203,19 @@ function isWorkflowRunSnapshot(value: unknown): value is WorkflowRunSnapshot {
     (candidate.blockedTasks === undefined || (typeof candidate.blockedTasks === "object" && candidate.blockedTasks !== null)) &&
     Array.isArray(candidate.runningTaskIds) &&
     (candidate.runningTasks === undefined || (typeof candidate.runningTasks === "object" && candidate.runningTasks !== null)) &&
+    (candidate.budget === undefined || (typeof candidate.budget === "object" && candidate.budget !== null)) &&
     typeof candidate.createdAt === "number" &&
     typeof candidate.updatedAt === "number"
+  );
+}
+
+function isWorkflowRunEvent(value: unknown): value is WorkflowRunEvent {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as WorkflowRunEvent;
+  return (
+    candidate.version === 1 &&
+    typeof candidate.runId === "string" &&
+    typeof candidate.type === "string" &&
+    typeof candidate.timestamp === "number"
   );
 }

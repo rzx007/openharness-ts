@@ -55,12 +55,20 @@ export interface WorkflowWorkerResult {
   metadata?: Record<string, unknown>;
 }
 
+export interface WorkflowTaskBudgetUsage {
+  tokensUsed?: number;
+  tokenBudget?: number;
+  timeUsedMs?: number;
+  timeBudgetMs?: number;
+}
+
 export interface WorkflowTaskRunResult {
   taskId: string;
   status: WorkflowTaskTerminalStatus;
   summary: string;
   result?: string;
   metadata?: Record<string, unknown>;
+  budget?: WorkflowTaskBudgetUsage;
   attempts: number;
   dependencies: string[];
   startedAt: number;
@@ -90,6 +98,9 @@ export interface WorkflowRunResult {
   plan: WorkflowPlan;
   results: Record<string, WorkflowTaskRunResult>;
   orderedResults: WorkflowTaskRunResult[];
+  needsReconciliation?: boolean;
+  reconciliationIssues?: WorkflowReconciliationIssue[];
+  budget?: WorkflowBudgetUsage;
 }
 
 export interface WorkflowRunSnapshotPlan {
@@ -108,12 +119,14 @@ export interface WorkflowRunningTask {
   dependencies: string[];
   startedAt: number;
   summary: string;
+  budget?: WorkflowTaskBudgetUsage;
   metadata?: Record<string, unknown>;
 }
 
 export interface WorkflowTaskProgress {
   summary?: string;
   metadata?: Record<string, unknown>;
+  budget?: WorkflowTaskBudgetUsage;
 }
 
 export interface WorkflowBlockedTask {
@@ -122,6 +135,19 @@ export interface WorkflowBlockedTask {
   waitingForTaskIds: string[];
   writeScope?: string[];
   conflictingWriteScope?: string[];
+}
+
+export interface WorkflowReconciliationIssue {
+  issueId: string;
+  type: "write-scope-overlap";
+  severity: "needs-reconciliation";
+  taskIds: string[];
+  writeScope: string[];
+  summary: string;
+}
+
+export interface WorkflowBudgetUsage extends WorkflowTaskBudgetUsage {
+  tasks: Record<string, WorkflowTaskBudgetUsage>;
 }
 
 export type WorkflowRunSnapshotStatus = "running" | "completed" | "failed";
@@ -140,6 +166,7 @@ export interface WorkflowRunSnapshot {
   blockedTasks: Record<string, WorkflowBlockedTask>;
   runningTaskIds: string[];
   runningTasks: Record<string, WorkflowRunningTask>;
+  budget: WorkflowBudgetUsage;
   createdAt: number;
   updatedAt: number;
 }
@@ -185,6 +212,8 @@ export interface WorkflowNotificationTask {
   finishedAt: number;
   result?: string;
   metadata?: Record<string, unknown>;
+  budget?: WorkflowTaskBudgetUsage;
+  reconciliationIssueIds?: string[];
   skippedReason?: string;
   timedOut?: boolean;
   error?: string;
@@ -198,6 +227,9 @@ export interface WorkflowNotification {
   totalTasks: number;
   completedTasks: number;
   failedTasks: number;
+  needsReconciliation: boolean;
+  reconciliationIssues: WorkflowReconciliationIssue[];
+  budget: WorkflowBudgetUsage;
   tasks: WorkflowNotificationTask[];
 }
 
@@ -222,6 +254,8 @@ export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
 
 export function createWorkflowNotification(result: WorkflowRunResult): WorkflowNotification {
   const completedTasks = result.orderedResults.filter((task) => task.status === "completed").length;
+  const reconciliationIssues = result.reconciliationIssues ?? [];
+  const issueIdsByTask = createReconciliationIssueIdsByTask(reconciliationIssues);
   return {
     runId: result.runId,
     status: result.status,
@@ -230,6 +264,9 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
     totalTasks: result.plan.tasks.length,
     completedTasks,
     failedTasks: result.orderedResults.length - completedTasks,
+    needsReconciliation: result.needsReconciliation ?? reconciliationIssues.length > 0,
+    reconciliationIssues,
+    budget: result.budget ?? { tasks: {} },
     tasks: result.orderedResults.map((task) => ({
       taskId: task.taskId,
       status: task.status,
@@ -240,6 +277,8 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
       finishedAt: task.finishedAt,
       result: task.result,
       metadata: task.metadata,
+      budget: task.budget,
+      reconciliationIssueIds: issueIdsByTask[task.taskId],
       skippedReason: task.skippedReason,
       timedOut: task.timedOut,
       error: task.error,
@@ -505,6 +544,7 @@ export async function runWorkflow(
               ...current,
               summary: progress.summary ?? current.summary,
               metadata: progress.metadata ?? current.metadata,
+              budget: progress.budget ?? workflowBudgetFromMetadata(progress.metadata) ?? current.budget,
             });
             emitEvent({
               type: "task_progress",
@@ -551,16 +591,23 @@ export function createWorkflowResultFromSnapshot(snapshot: WorkflowRunSnapshot):
     snapshot.plan.maxConcurrency === "unbounded"
       ? Number.POSITIVE_INFINITY
       : snapshot.plan.maxConcurrency;
+  const reconciliationIssues = collectWorkflowReconciliationIssues(
+    { ...snapshot.plan, maxConcurrency },
+    snapshot.orderedResults,
+  );
   return {
     runId: snapshot.runId,
     status: snapshot.status === "completed" ? "completed" : "failed",
-    summary: snapshot.summary,
+    summary: summaryWithReconciliation(snapshot.summary, reconciliationIssues),
     plan: {
       ...snapshot.plan,
       maxConcurrency,
     },
     results: snapshot.results,
     orderedResults: snapshot.orderedResults,
+    needsReconciliation: reconciliationIssues.length > 0,
+    reconciliationIssues,
+    budget: snapshot.budget ?? collectWorkflowBudgetUsage(snapshot.orderedResults, Object.values(snapshot.runningTasks ?? {})),
   };
 }
 
@@ -608,9 +655,11 @@ export function createWorkflowRunSnapshot(input: {
     runningTasks: Object.fromEntries(
       [...(input.runningTasks ?? new Map()).entries()].map(([taskId, task]) => [taskId, {
         ...task,
+        budget: cloneBudgetUsage(task.budget),
         dependencies: [...task.dependencies],
       }]),
     ),
+    budget: collectWorkflowBudgetUsage(orderedResults, [...(input.runningTasks ?? new Map()).values()]),
     createdAt: input.createdAt,
     updatedAt: Date.now(),
   };
@@ -629,10 +678,18 @@ async function runWorkflowTask(
   const startedAt = Date.now();
   let lastResult: WorkflowWorkerResult | undefined;
   let lastError: string | undefined;
+  let lastProgressBudget: WorkflowTaskBudgetUsage | undefined;
+  const recordProgress = (progress: WorkflowTaskProgress) => {
+    lastProgressBudget = progress.budget ?? workflowBudgetFromMetadata(progress.metadata) ?? lastProgressBudget;
+    reportProgress({
+      ...progress,
+      budget: progress.budget ?? workflowBudgetFromMetadata(progress.metadata),
+    });
+  };
 
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
     try {
-      reportProgress({
+      recordProgress({
         summary: attempt === 1 ? "Task running" : `Retry attempt ${attempt} running`,
       });
       lastResult = await runRunnerAttempt(
@@ -642,7 +699,7 @@ async function runWorkflowTask(
           dependencyResults,
           pipelineInput,
           resumeFrom: attempt === 1 ? resumeFrom : undefined,
-          reportProgress,
+          reportProgress: recordProgress,
         }),
         timeoutMs,
       );
@@ -652,6 +709,7 @@ async function runWorkflowTask(
           ...lastResult,
           taskId: task.id,
           status,
+          budget: workflowBudgetFromMetadata(lastResult.metadata) ?? lastProgressBudget,
           attempts: attempt,
           dependencies: [...(task.dependsOn ?? [])],
           startedAt,
@@ -666,6 +724,7 @@ async function runWorkflowTask(
           taskId: task.id,
           status: "failed",
           summary: lastError,
+          budget: lastProgressBudget,
           attempts: attempt,
           dependencies: [...(task.dependsOn ?? [])],
           startedAt,
@@ -683,6 +742,7 @@ async function runWorkflowTask(
     summary: lastResult?.summary ?? lastError ?? "Task failed",
     result: lastResult?.result,
     metadata: lastResult?.metadata,
+    budget: workflowBudgetFromMetadata(lastResult?.metadata) ?? lastProgressBudget,
     attempts: retry.maxAttempts,
     dependencies: [...(task.dependsOn ?? [])],
     startedAt,
@@ -955,6 +1015,127 @@ function writeScopesOverlap(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
+function collectWorkflowReconciliationIssues(
+  plan: WorkflowPlan,
+  orderedResults: WorkflowTaskRunResult[],
+): WorkflowReconciliationIssue[] {
+  const completedTaskIds = new Set(
+    orderedResults
+      .filter((result) => result.status === "completed")
+      .map((result) => result.taskId),
+  );
+  const issues: WorkflowReconciliationIssue[] = [];
+  const tasks = plan.executionOrder
+    .map((taskId) => requireWorkflowTask(plan.tasks, taskId))
+    .filter((task) => completedTaskIds.has(task.id));
+
+  for (let i = 0; i < tasks.length; i += 1) {
+    const left = tasks[i]!;
+    const leftScopes = runnableWriteScopes(left);
+    if (leftScopes.length === 0) continue;
+    for (const right of tasks.slice(i + 1)) {
+      const rightScopes = runnableWriteScopes(right);
+      const overlap = leftScopes.filter((leftScope) =>
+        rightScopes.some((rightScope) => writeScopesOverlap(leftScope, rightScope)),
+      );
+      if (overlap.length === 0) continue;
+      const rightOverlap = rightScopes.filter((rightScope) =>
+        leftScopes.some((leftScope) => writeScopesOverlap(leftScope, rightScope)),
+      );
+      const writeScope = [...new Set([...overlap, ...rightOverlap])].sort();
+      issues.push({
+        issueId: `reconcile-${left.id}-${right.id}`,
+        type: "write-scope-overlap",
+        severity: "needs-reconciliation",
+        taskIds: [left.id, right.id],
+        writeScope,
+        summary: `Tasks '${left.id}' and '${right.id}' wrote overlapping scopes: ${writeScope.join(", ")}`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+function createReconciliationIssueIdsByTask(
+  issues: WorkflowReconciliationIssue[],
+): Record<string, string[]> {
+  const byTask: Record<string, string[]> = {};
+  for (const issue of issues) {
+    for (const taskId of issue.taskIds) {
+      byTask[taskId] = [...(byTask[taskId] ?? []), issue.issueId];
+    }
+  }
+  return byTask;
+}
+
+function summaryWithReconciliation(summary: string, issues: WorkflowReconciliationIssue[]): string {
+  return issues.length === 0 || summary.includes("reconciliation issue")
+    ? summary
+    : `${summary}; ${issues.length} reconciliation issue(s)`;
+}
+
+function workflowBudgetFromMetadata(metadata: Record<string, unknown> | undefined): WorkflowTaskBudgetUsage | undefined {
+  if (!metadata) return undefined;
+  const budget = isRecord(metadata.budget) ? metadata.budget : metadata;
+  return normalizeBudgetUsage({
+    tokensUsed: budget.tokensUsed,
+    tokenBudget: budget.tokenBudget,
+    timeUsedMs: budget.timeUsedMs,
+    timeBudgetMs: budget.timeBudgetMs,
+  });
+}
+
+function collectWorkflowBudgetUsage(
+  orderedResults: WorkflowTaskRunResult[],
+  runningTasks: WorkflowRunningTask[] = [],
+): WorkflowBudgetUsage {
+  const tasks: Record<string, WorkflowTaskBudgetUsage> = {};
+  for (const result of orderedResults) {
+    const budget = result.budget ?? workflowBudgetFromMetadata(result.metadata);
+    if (budget) tasks[result.taskId] = budget;
+  }
+  for (const task of runningTasks) {
+    const budget = task.budget ?? workflowBudgetFromMetadata(task.metadata);
+    if (budget) tasks[task.taskId] = budget;
+  }
+
+  return {
+    tasks,
+    tokensUsed: sumBudget(tasks, "tokensUsed"),
+    tokenBudget: sumBudget(tasks, "tokenBudget"),
+    timeUsedMs: sumBudget(tasks, "timeUsedMs"),
+    timeBudgetMs: sumBudget(tasks, "timeBudgetMs"),
+  };
+}
+
+function cloneBudgetUsage(budget: WorkflowTaskBudgetUsage | undefined): WorkflowTaskBudgetUsage | undefined {
+  return budget ? { ...budget } : undefined;
+}
+
+function normalizeBudgetUsage(input: Record<keyof WorkflowTaskBudgetUsage, unknown>): WorkflowTaskBudgetUsage | undefined {
+  const budget: WorkflowTaskBudgetUsage = {};
+  if (typeof input.tokensUsed === "number" && Number.isFinite(input.tokensUsed)) budget.tokensUsed = input.tokensUsed;
+  if (typeof input.tokenBudget === "number" && Number.isFinite(input.tokenBudget)) budget.tokenBudget = input.tokenBudget;
+  if (typeof input.timeUsedMs === "number" && Number.isFinite(input.timeUsedMs)) budget.timeUsedMs = input.timeUsedMs;
+  if (typeof input.timeBudgetMs === "number" && Number.isFinite(input.timeBudgetMs)) budget.timeBudgetMs = input.timeBudgetMs;
+  return Object.keys(budget).length > 0 ? budget : undefined;
+}
+
+function sumBudget(
+  tasks: Record<string, WorkflowTaskBudgetUsage>,
+  field: keyof WorkflowTaskBudgetUsage,
+): number | undefined {
+  const values = Object.values(tasks)
+    .map((budget) => budget[field])
+    .filter((value): value is number => typeof value === "number");
+  return values.length === 0 ? undefined : values.reduce((total, value) => total + value, 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function aggregateWorkflowResult(
   runId: string,
   plan: WorkflowPlan,
@@ -965,13 +1146,18 @@ function aggregateWorkflowResult(
     .filter((result): result is WorkflowTaskRunResult => result !== undefined);
   const completed = orderedResults.filter((result) => result.status === "completed").length;
   const failed = orderedResults.length - completed;
+  const reconciliationIssues = collectWorkflowReconciliationIssues(plan, orderedResults);
+  const baseSummary = `${completed}/${plan.tasks.length} tasks completed`;
   return {
     runId,
     status: failed === 0 ? "completed" : "failed",
-    summary: `${completed}/${plan.tasks.length} tasks completed`,
+    summary: summaryWithReconciliation(baseSummary, reconciliationIssues),
     plan,
     results: Object.fromEntries(orderedResults.map((result) => [result.taskId, result])),
     orderedResults,
+    needsReconciliation: reconciliationIssues.length > 0,
+    reconciliationIssues,
+    budget: collectWorkflowBudgetUsage(orderedResults),
   };
 }
 

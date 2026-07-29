@@ -356,6 +356,78 @@ describe("runWorkflow", () => {
     const result = await workflow;
     expect(result.status).toBe("completed");
   });
+
+  it("marks completed overlapping write scopes as needing reconciliation", async () => {
+    const result = await runWorkflow(
+      {
+        mode: "parallel",
+        maxConcurrency: 1,
+        tasks: [
+          { id: "auth-a", writeScope: ["packages/auth"] },
+          { id: "auth-b", writeScope: ["packages/auth/src"] },
+          { id: "docs", readOnly: true, writeScope: ["packages/auth"] },
+        ],
+      },
+      ({ task }) => ({ summary: `${task.id} done` }),
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.needsReconciliation).toBe(true);
+    expect(result.reconciliationIssues).toEqual([
+      expect.objectContaining({
+        issueId: "reconcile-auth-a-auth-b",
+        type: "write-scope-overlap",
+        taskIds: ["auth-a", "auth-b"],
+        writeScope: ["packages/auth", "packages/auth/src"],
+      }),
+    ]);
+
+    const notification = createWorkflowNotification(result);
+    expect(notification.needsReconciliation).toBe(true);
+    expect(notification.tasks.find((task) => task.taskId === "auth-a")?.reconciliationIssueIds).toEqual(["reconcile-auth-a-auth-b"]);
+    expect(notification.tasks.find((task) => task.taskId === "docs")?.reconciliationIssueIds).toBeUndefined();
+  });
+
+  it("aggregates budget usage from task progress metadata", async () => {
+    const snapshots: WorkflowRunSnapshot[] = [];
+    const result = await runWorkflow(
+      {
+        mode: "parallel",
+        tasks: [{ id: "build" }],
+      },
+      ({ reportProgress }) => {
+        reportProgress?.({
+          summary: "budget update",
+          metadata: {
+            budget: {
+              tokensUsed: 120,
+              tokenBudget: 500,
+              timeUsedMs: 250,
+              timeBudgetMs: 1_000,
+            },
+          },
+        });
+        return { summary: "built" };
+      },
+      {
+        onSnapshot: (snapshot) => snapshots.push(snapshot),
+      },
+    );
+
+    expect(result.results.build?.budget).toEqual({
+      tokensUsed: 120,
+      tokenBudget: 500,
+      timeUsedMs: 250,
+      timeBudgetMs: 1_000,
+    });
+    expect(result.budget).toMatchObject({
+      tokensUsed: 120,
+      tokenBudget: 500,
+      timeUsedMs: 250,
+      timeBudgetMs: 1_000,
+    });
+    expect(snapshots.some((snapshot) => snapshot.budget.tokensUsed === 120)).toBe(true);
+  });
 });
 
 describe("workflow notification envelope", () => {

@@ -235,6 +235,13 @@ describe("workflowTool", () => {
         running: new Set(["research"]),
         createdAt: 1,
       }));
+      store.appendEvent({
+        version: 1,
+        runId: "status-run",
+        type: "workflow_started",
+        timestamp: 2,
+        summary: "Workflow started",
+      });
 
       const tool = createWorkflowTool({ createRunner: vi.fn() });
       const result = await tool.execute({ action: "status", runId: "status-run" }, { cwd });
@@ -243,6 +250,7 @@ describe("workflowTool", () => {
       expect(textOf(result)).toContain("<workflow-run-snapshot>");
       expect(textOf(result)).toContain("status-run");
       expect(textOf(result)).toContain("research");
+      expect(textOf(result)).toContain("workflow_started");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
