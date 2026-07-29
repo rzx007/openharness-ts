@@ -46,11 +46,13 @@ export {
   buildDockerRunArgs,
   DOCKER_CONFIG_HASH_LABEL,
   DOCKER_WORKSPACE_LABEL,
+  dockerDefaultDockerfilePath,
   dockerContainerName,
   dockerReusableContainerName,
   dockerSandboxConfigHash,
   dockerNetworkMode,
   DockerSandboxSession,
+  inspectDockerSandbox,
   SandboxUnavailableError,
   toContainerWorkspacePath,
 } from "./docker-backend.js";

@@ -78,8 +78,8 @@ ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
 ohs sandbox off
 ohs sandbox clean                      # 删除当前项目的复用容器
 ohs sandbox rebuild                    # 配置变化后删除复用容器，下一次启动重建
-ohs sandbox status
-ohs sandbox doctor
+ohs sandbox status                     # 展示配置来源、容器、镜像、Dockerfile、config hash
+ohs sandbox doctor                     # status + backend 可用性检查
 ```
 
 子命令写入 `settings.json`，已经运行中的 CLI/TUI 需要重启后才会挂载新的 sandbox runtime。
@@ -297,3 +297,23 @@ Proxy:         configured
 ```
 
 代理只显示是否已配置，**不打印**具体 proxy URL。
+
+`ohs sandbox status` 会额外读取持久化配置和 Docker 元数据：
+
+```text
+Config scope: project+global+env
+Global config: ...
+Project config: ...
+Env overrides: ...
+Container: openharness-sandbox-...
+Container exists: yes
+Container running: yes
+Image exists: yes (openharness-sandbox:latest)
+Dockerfile: ...
+Config hash: ...
+Container config hash: ...
+Container config matches: yes
+```
+
+`ohs sandbox doctor` 在 status 基础上再输出 backend availability，例如 Docker CLI / daemon 是否可用、平台、
+降级原因等。

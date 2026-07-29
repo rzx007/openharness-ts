@@ -37,6 +37,19 @@ export interface DockerBuildArgsOptions {
   dockerCommand?: string;
 }
 
+export interface DockerSandboxDiagnostics {
+  containerName: string;
+  expectedConfigHash: string;
+  dockerfile: string;
+  dockerfileFound: boolean;
+  image: string;
+  imageExists: boolean;
+  containerExists: boolean;
+  containerRunning: boolean;
+  containerConfigHash: string;
+  containerConfigMatches: boolean | undefined;
+}
+
 export const DOCKER_CONFIG_HASH_LABEL = "org.openharness.sandbox.config-hash";
 export const DOCKER_WORKSPACE_LABEL = "org.openharness.sandbox.workspace";
 
@@ -285,7 +298,7 @@ async function ensureDockerImage(options: {
     );
   }
 
-  const dockerfile = defaultDockerfilePath();
+  const dockerfile = dockerDefaultDockerfilePath();
   if (!existsSync(dockerfile)) {
     throw new SandboxUnavailableError(
       `Docker image ${options.config.docker.image} is not available and no sandbox Dockerfile was found. Checked: ${dockerfile}`,
@@ -305,7 +318,7 @@ async function ensureDockerImage(options: {
   }));
 }
 
-function defaultDockerfilePath(): string {
+export function dockerDefaultDockerfilePath(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     resolve(here, "..", "Dockerfile"),
@@ -343,6 +356,42 @@ export function dockerSandboxConfigHash(
     extraEnv: stableRecord(config.docker.extraEnv),
   };
   return createHash("sha1").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
+}
+
+export async function inspectDockerSandbox(options: {
+  config?: SandboxConfig;
+  cwd: string;
+  dockerCommand?: string;
+}): Promise<DockerSandboxDiagnostics> {
+  const config = normalizeSandboxConfig(options.config);
+  const cwd = resolve(options.cwd);
+  const dockerCommand = options.dockerCommand ?? "docker";
+  const containerName = config.docker.reuseContainer
+    ? dockerReusableContainerName(cwd, config.docker.containerNamePrefix)
+    : dockerContainerName("session", config.docker.containerNamePrefix);
+  const expectedConfigHash = dockerSandboxConfigHash(config, cwd);
+  const dockerfile = dockerDefaultDockerfilePath();
+  const containerExists = await dockerContainerExists(dockerCommand, containerName);
+  const containerConfigHash = containerExists
+    ? await dockerContainerLabel(dockerCommand, containerName, DOCKER_CONFIG_HASH_LABEL)
+    : "";
+
+  return {
+    containerName,
+    expectedConfigHash,
+    dockerfile,
+    dockerfileFound: existsSync(dockerfile),
+    image: config.docker.image,
+    imageExists: await runProbe(buildDockerImageInspectArgs(config.docker.image, dockerCommand)),
+    containerExists,
+    containerRunning: containerExists
+      ? await dockerContainerRunning(dockerCommand, containerName)
+      : false,
+    containerConfigHash,
+    containerConfigMatches: containerExists && containerConfigHash
+      ? containerConfigHash === expectedConfigHash
+      : undefined,
+  };
 }
 
 export function toContainerWorkspacePath(hostPath: string): string {

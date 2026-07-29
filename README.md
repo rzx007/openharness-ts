@@ -179,8 +179,8 @@ ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
 ohs sandbox off
 ohs sandbox clean                       # remove current project reusable container
 ohs sandbox rebuild                     # recreate reusable container after config changes
-ohs sandbox status
-ohs sandbox doctor
+ohs sandbox status                      # show config scope, reusable container, image, and config hash
+ohs sandbox doctor                      # status plus backend availability checks
 
 # MCP server 配置（写入 settings.mcpServers）
 ohs mcp list

@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { Settings } from "@openharness/core";
 
 type SandboxBackend = "docker" | "srt";
@@ -153,9 +154,7 @@ export function createSandboxCommand(): Command {
     .description("Show persisted sandbox configuration")
     .option("--global", "Show only global user config")
     .action(async (options: { global?: boolean }) => {
-      const { loadSettings } = await import("@openharness/core");
-      const settings = await loadSettings(undefined, { includeProject: !options.global });
-      console.log(formatSandboxStatus(settings));
+      await printSandboxStatus({ global: options.global, doctor: false });
     });
 
   cmd
@@ -163,16 +162,7 @@ export function createSandboxCommand(): Command {
     .description("Check sandbox backend availability")
     .option("--global", "Check only global user config")
     .action(async (options: { global?: boolean }) => {
-      const { loadSettings } = await import("@openharness/core");
-      const { getSandboxAvailability } = await import("@openharness/sandbox");
-      const settings = await loadSettings(undefined, { includeProject: !options.global });
-      console.log(formatSandboxStatus(settings));
-      const availability = getSandboxAvailability(settings.sandbox);
-      console.log(`Available: ${availability.available ? "yes" : "no"}`);
-      if (availability.platform) console.log(`Platform: ${availability.platform}`);
-      if (availability.command) console.log(`Command: ${availability.command}`);
-      if (availability.degraded) console.log("Mode: degraded");
-      if (availability.reason) console.log(`Note: ${availability.reason}`);
+      await printSandboxStatus({ global: options.global, doctor: true });
     });
 
   cmd
@@ -227,6 +217,61 @@ async function removeReusableContainer(successPrefix: string): Promise<void> {
   } else {
     console.error(result.stderr || `Failed to remove sandbox container: ${containerName}`);
     process.exit(1);
+  }
+}
+
+async function printSandboxStatus(options: { global?: boolean; doctor: boolean }): Promise<void> {
+  const {
+    getConfigFilePath,
+    getProjectSettingsFilePath,
+    loadSettings,
+  } = await import("@openharness/core");
+  const {
+    getSandboxAvailability,
+    inspectDockerSandbox,
+  } = await import("@openharness/sandbox");
+  const includeProject = !options.global;
+  const settings = await loadSettings(undefined, { includeProject });
+  console.log(formatSandboxStatus(settings));
+  console.log(`Config scope: ${options.global ? "global+env" : "project+global+env"}`);
+  console.log(`Global config: ${existsSync(getConfigFilePath()) ? getConfigFilePath() : "not found"}`);
+  if (includeProject) {
+    const projectPath = getProjectSettingsFilePath();
+    console.log(`Project config: ${existsSync(projectPath) ? projectPath : "not found"}`);
+  }
+  const sandboxEnv = Object.keys(process.env).filter((key) => key.startsWith("OPENHARNESS_SANDBOX_"));
+  console.log(`Env overrides: ${sandboxEnv.length > 0 ? sandboxEnv.sort().join(", ") : "none"}`);
+
+  if (!settings.sandbox?.enabled) return;
+
+  const availability = getSandboxAvailability(settings.sandbox);
+  if (options.doctor) {
+    console.log(`Available: ${availability.available ? "yes" : "no"}`);
+    if (availability.platform) console.log(`Platform: ${availability.platform}`);
+    if (availability.command) console.log(`Command: ${availability.command}`);
+    if (availability.degraded) console.log("Mode: degraded");
+    if (availability.reason) console.log(`Note: ${availability.reason}`);
+  }
+
+  if ((settings.sandbox.backend ?? "srt") !== "docker") return;
+
+  const diagnostics = await inspectDockerSandbox({
+    config: settings.sandbox,
+    cwd: process.cwd(),
+    dockerCommand: availability.command,
+  });
+  console.log(`Container: ${diagnostics.containerName}`);
+  console.log(`Container exists: ${diagnostics.containerExists ? "yes" : "no"}`);
+  console.log(`Container running: ${diagnostics.containerRunning ? "yes" : "no"}`);
+  console.log(`Image exists: ${diagnostics.imageExists ? "yes" : "no"} (${diagnostics.image})`);
+  console.log(`Dockerfile: ${diagnostics.dockerfileFound ? diagnostics.dockerfile : `not found (${diagnostics.dockerfile})`}`);
+  console.log(`Config hash: ${diagnostics.expectedConfigHash}`);
+  if (diagnostics.containerExists) {
+    console.log(`Container config hash: ${diagnostics.containerConfigHash || "missing"}`);
+    console.log(`Container config matches: ${diagnostics.containerConfigMatches === true ? "yes" : "no"}`);
+    if (diagnostics.containerConfigMatches === false) {
+      console.log("Action: run 'ohs sandbox rebuild' to recreate the reusable container.");
+    }
   }
 }
 
