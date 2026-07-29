@@ -28,7 +28,7 @@ export interface AgentWorkflowRunnerOptions {
  * or swarm.
  */
 export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): WorkflowRunner {
-  return async ({ task, attempt, dependencyResults, pipelineInput }) => {
+  return async ({ task, attempt, dependencyResults, pipelineInput, resumeFrom, reportProgress }) => {
     const prompt = buildWorkerPrompt(task, dependencyResults, pipelineInput);
     const subagentType = task.subagentType ?? "worker";
     const agentDef = options.getAgentDefinition
@@ -37,6 +37,34 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
     const team = task.team ?? options.team ?? "default";
     const workerSessionId = createWorkerSessionId(task.id, attempt);
     const spawnWorker = options.spawnWorker ?? defaultSpawnWorker;
+    const awaitTask = options.awaitTask ?? defaultAwaitTask;
+
+    const resumedTaskId = getStringMetadata(resumeFrom?.metadata, "taskManagerTaskId");
+    if (resumedTaskId) {
+      try {
+        reportProgress?.({
+          summary: `Waiting for existing task ${resumedTaskId}`,
+          metadata: resumeFrom?.metadata,
+        });
+        const waited = await awaitTask(resumedTaskId, { timeoutMs: options.timeoutMs });
+        return mapAwaitedTaskToWorkerResult(task, {
+          success: true,
+          agentId: getStringMetadata(resumeFrom?.metadata, "agentId") ?? `${subagentType}@${team}`,
+          taskId: resumedTaskId,
+          backendType: getStringMetadata(resumeFrom?.metadata, "backendType") ?? "resumed",
+          worktree: getWorktreeMetadata(resumeFrom?.metadata),
+          notice: getStringMetadata(resumeFrom?.metadata, "notice"),
+        }, waited);
+      } catch (error) {
+        reportProgress?.({
+          summary: `Existing task ${resumedTaskId} unavailable; spawning replacement`,
+          metadata: {
+            ...resumeFrom?.metadata,
+            resumeError: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+    }
 
     const spawn = await spawnWorker({
       name: subagentType,
@@ -69,7 +97,10 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       };
     }
 
-    const awaitTask = options.awaitTask ?? defaultAwaitTask;
+    reportProgress?.({
+      summary: `Waiting for task ${spawn.taskId}`,
+      metadata: spawnMetadata(spawn),
+    });
     const waited = await awaitTask(spawn.taskId, { timeoutMs: options.timeoutMs });
     return mapAwaitedTaskToWorkerResult(task, spawn, waited);
   };
@@ -142,6 +173,30 @@ function mapAwaitedTaskToWorkerResult(
       ...(waited.timedOut ? { timedOut: true } : {}),
     },
   };
+}
+
+function spawnMetadata(spawn: SpawnResult): Record<string, unknown> {
+  return {
+    agentId: spawn.agentId,
+    taskManagerTaskId: spawn.taskId,
+    backendType: spawn.backendType,
+    ...(spawn.worktree ? { worktree: spawn.worktree } : {}),
+    ...(spawn.notice ? { notice: spawn.notice } : {}),
+  };
+}
+
+function getStringMetadata(metadata: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getWorktreeMetadata(metadata: Record<string, unknown> | undefined): SpawnResult["worktree"] | undefined {
+  const value = metadata?.worktree;
+  if (!value || typeof value !== "object") return undefined;
+  const worktree = value as { path?: unknown; branch?: unknown };
+  return typeof worktree.path === "string" && typeof worktree.branch === "string"
+    ? { path: worktree.path, branch: worktree.branch }
+    : undefined;
 }
 
 async function defaultSpawnWorker(config: TeammateSpawnConfig): Promise<SpawnResult> {

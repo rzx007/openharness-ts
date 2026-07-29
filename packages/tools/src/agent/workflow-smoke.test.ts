@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseWorkflowNotification } from "@openharness/coordinator";
+import { parseWorkflowNotification, WorkflowRunStore } from "@openharness/coordinator";
 import { getTaskManager, resetTaskManager } from "@openharness/services";
 import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
 import { createAgentWorkflowRunner } from "./workflow-runner";
@@ -49,7 +49,7 @@ describe("Workflow tool smoke", () => {
           { id: "verify", prompt: "verify using prior output" },
         ],
       },
-      { cwd: process.cwd() },
+      { cwd: tempDir! },
     );
 
     const text = textOf(result);
@@ -69,6 +69,11 @@ describe("Workflow tool smoke", () => {
     expect(spawned).toHaveLength(2);
     expect(spawned[1]!.prompt).toContain("Pipeline input:");
     expect(spawned[1]!.prompt).toContain("worker:research");
+
+    const stored = new WorkflowRunStore({ cwd: tempDir! }).list();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.status).toBe("completed");
+    expect(stored[0]?.orderedResults.map((task) => task.taskId)).toEqual(["research", "verify"]);
   });
 });
 

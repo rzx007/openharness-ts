@@ -5,6 +5,7 @@ import {
   formatWorkflowNotification,
   parseWorkflowNotification,
   runWorkflow,
+  type WorkflowRunSnapshot,
 } from "./workflow-scheduler.js";
 
 describe("createWorkflowPlan", () => {
@@ -207,6 +208,89 @@ describe("runWorkflow", () => {
     expect(attempts).toEqual([1, 2, 3]);
     expect(result.results.flaky?.status).toBe("completed");
     expect(result.results.flaky?.attempts).toBe(3);
+  });
+
+  it("serializes overlapping non-isolated write scopes while allowing unrelated work", async () => {
+    const started: string[] = [];
+    const snapshots: WorkflowRunSnapshot[] = [];
+    const unblock: Record<string, () => void> = {};
+    let running = 0;
+    let maxRunning = 0;
+
+    const workflow = runWorkflow(
+      {
+        mode: "parallel",
+        maxConcurrency: 3,
+        tasks: [
+          { id: "auth-a", writeScope: ["packages/auth"] },
+          { id: "auth-b", writeScope: ["packages/auth/src"] },
+          { id: "ui", writeScope: ["packages/ui"] },
+        ],
+      },
+      async ({ task }) => {
+        started.push(task.id);
+        running += 1;
+        maxRunning = Math.max(maxRunning, running);
+        await new Promise<void>((resolve) => {
+          unblock[task.id] = resolve;
+        });
+        running -= 1;
+        return { summary: `${task.id} done` };
+      },
+      {
+        onSnapshot: (snapshot) => snapshots.push(snapshot),
+      },
+    );
+
+    await vi.waitFor(() => expect(started).toEqual(["auth-a", "ui"]));
+    expect(maxRunning).toBe(2);
+    await vi.waitFor(() => {
+      const blockedSnapshot = snapshots.find((snapshot) => snapshot.blockedTaskIds.includes("auth-b"));
+      expect(blockedSnapshot?.blockedTasks["auth-b"]).toEqual(expect.objectContaining({
+        reason: expect.stringContaining("writeScope conflict"),
+        waitingForTaskIds: ["auth-a"],
+        writeScope: ["packages/auth/src"],
+        conflictingWriteScope: expect.arrayContaining(["packages/auth"]),
+      }));
+    });
+
+    unblock["ui"]?.();
+    await vi.waitFor(() => expect(started).toEqual(["auth-a", "ui"]));
+
+    unblock["auth-a"]?.();
+    await vi.waitFor(() => expect(started).toEqual(["auth-a", "ui", "auth-b"]));
+    unblock["auth-b"]?.();
+
+    const result = await workflow;
+    expect(result.status).toBe("completed");
+  });
+
+  it("allows overlapping write scopes when a task is isolated or read-only", async () => {
+    const started: string[] = [];
+    const unblock: Array<() => void> = [];
+
+    const workflow = runWorkflow(
+      {
+        mode: "parallel",
+        maxConcurrency: 3,
+        tasks: [
+          { id: "shared", writeScope: ["packages/auth"] },
+          { id: "isolated", writeScope: ["packages/auth"], isolate: true },
+          { id: "readonly", writeScope: ["packages/auth"], readOnly: true },
+        ],
+      },
+      async ({ task }) => {
+        started.push(task.id);
+        await new Promise<void>((resolve) => unblock.push(resolve));
+        return { summary: `${task.id} done` };
+      },
+    );
+
+    await vi.waitFor(() => expect(started).toEqual(["shared", "isolated", "readonly"]));
+    unblock.forEach((resolve) => resolve());
+
+    const result = await workflow;
+    expect(result.status).toBe("completed");
   });
 });
 

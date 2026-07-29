@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseWorkflowNotification, type WorkflowRunner, type WorkflowSpec } from "@openharness/coordinator";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createWorkflowPlan,
+  createWorkflowRunSnapshot,
+  parseWorkflowNotification,
+  WorkflowRunStore,
+  type WorkflowRunner,
+  type WorkflowSpec,
+  type WorkflowTaskRunResult,
+} from "@openharness/coordinator";
 import { createWorkflowTool } from "./workflow";
 import type { AgentWorkflowRunnerOptions } from "./workflow-runner";
 
@@ -103,6 +114,46 @@ describe("workflowTool", () => {
     });
   });
 
+  it("passes write scheduling hints into workflow specs", async () => {
+    const runner: WorkflowRunner = vi.fn(async ({ task }) => ({ summary: `${task.id} done` }));
+    const run = vi.fn(async (spec: WorkflowSpec) => ({
+      status: "completed" as const,
+      summary: "2/2 tasks completed",
+      plan: {
+        mode: spec.mode,
+        tasks: spec.tasks,
+        maxConcurrency: 2,
+        executionOrder: spec.tasks.map((task) => task.id),
+        dependencyMap: Object.fromEntries(spec.tasks.map((task) => [task.id, task.dependsOn ?? []])),
+        dependentsMap: Object.fromEntries(spec.tasks.map((task) => [task.id, []])),
+      },
+      results: {},
+      orderedResults: [],
+    }));
+
+    const tool = createWorkflowTool({ createRunner: () => runner, run });
+    await tool.execute(
+      {
+        mode: "parallel",
+        tasks: [
+          { id: "write", writeScope: ["packages/auth"], isolate: false },
+          { id: "read", readOnly: true, writeScope: ["packages/auth"] },
+        ],
+      },
+      ctx,
+    );
+
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({ id: "write", writeScope: ["packages/auth"], isolate: false }),
+          expect.objectContaining({ id: "read", readOnly: true, writeScope: ["packages/auth"] }),
+        ],
+      }),
+      runner,
+    );
+  });
+
   it("returns an error for invalid workflow input", async () => {
     const createRunner = vi.fn();
     const tool = createWorkflowTool({ createRunner });
@@ -165,9 +216,92 @@ describe("workflowTool", () => {
       summary: "boom",
     });
   });
+
+  it("returns persisted workflow status snapshots", async () => {
+    const cwd = makeTempDir();
+    try {
+      const store = new WorkflowRunStore({ cwd });
+      const spec = { mode: "parallel" as const, tasks: [{ id: "research" }] };
+      store.save(createWorkflowRunSnapshot({
+        runId: "status-run",
+        status: "running",
+        summary: "1 task running",
+        spec,
+        plan: createWorkflowPlan(spec),
+        results: new Map(),
+        running: new Set(["research"]),
+        createdAt: 1,
+      }));
+
+      const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const result = await tool.execute({ action: "status", runId: "status-run" }, { cwd });
+
+      expect(result.isError).toBeUndefined();
+      expect(textOf(result)).toContain("<workflow-run-snapshot>");
+      expect(textOf(result)).toContain("status-run");
+      expect(textOf(result)).toContain("research");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes persisted workflow snapshots through the tool", async () => {
+    const cwd = makeTempDir();
+    try {
+      const store = new WorkflowRunStore({ cwd });
+      const spec = {
+        mode: "pipeline" as const,
+        tasks: [{ id: "research" }, { id: "implement" }, { id: "verify" }],
+      };
+      const researchResult: WorkflowTaskRunResult = {
+        taskId: "research",
+        status: "completed",
+        summary: "research done",
+        result: "research result",
+        attempts: 1,
+        dependencies: [],
+        startedAt: 1,
+        finishedAt: 2,
+      };
+      store.save(createWorkflowRunSnapshot({
+        runId: "resume-run",
+        status: "running",
+        summary: "resume point",
+        spec,
+        plan: createWorkflowPlan(spec),
+        results: new Map([["research", researchResult]]),
+        running: new Set(["implement"]),
+        createdAt: 1,
+      }));
+
+      const executed: string[] = [];
+      const runner: WorkflowRunner = vi.fn(({ task }) => {
+        executed.push(task.id);
+        return { summary: `${task.id} done`, result: `${task.id} result` };
+      });
+      const tool = createWorkflowTool({ createRunner: () => runner });
+      const result = await tool.execute({ action: "resume", runId: "resume-run" }, { cwd });
+
+      expect(result.isError).toBeUndefined();
+      expect(executed).toEqual(["implement", "verify"]);
+      const notification = parseWorkflowNotification(textOf(result));
+      expect(notification).toMatchObject({
+        runId: "resume-run",
+        status: "completed",
+        summary: "3/3 tasks completed",
+      });
+      expect(notification?.tasks.map((task) => task.taskId)).toEqual(["research", "implement", "verify"]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 });
 
 function textOf(result: Awaited<ReturnType<ReturnType<typeof createWorkflowTool>["execute"]>>): string {
   const block = result.content[0];
   return block && "text" in block ? String(block.text) : "";
+}
+
+function makeTempDir(): string {
+  return mkdtempSync(join(tmpdir(), "oh-workflow-tool-"));
 }

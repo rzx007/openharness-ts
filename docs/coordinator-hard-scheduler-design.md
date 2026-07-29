@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V2.7：
+截至目前，已经落地到 V4.2：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -498,7 +498,14 @@ V1 内存调度核心
 - V2.5：已完成。默认工具注册表新增 `Workflow` 工具，Coordinator/Leader 可以一次提交 workflow spec，让代码负责调度顺序、依赖、重试和聚合。
 - V2.6：已完成。增加 smoke 测试，覆盖 `Workflow` 工具 -> scheduler -> agent runner -> 真实 `TaskManager.awaitTask` 的闭环。
 - V2.7：已完成。固定 `<workflow-notification>` envelope，提供 formatter/parser，并让 `Workflow` 工具返回结构化结果。
+- V3.1：已完成。新增 workflow snapshot / store：运行开始、worker 运行中、task terminal、最终完成都会产出快照；`Workflow` 工具默认把 run 写到项目 `.openharness/workflows`。
+- V3.2：已完成。新增恢复入口：scheduler 支持 `initialResults` 续跑；store 支持 `latest/load/resume/resumeLatest`；`Workflow` 工具支持 `action: "status"` 和 `action: "resume"`，恢复时不会重跑已完成 terminal task。
+- V3.3：已完成。running snapshot 会记录 runner 上报的 `taskManagerTaskId` 等 metadata；恢复时 agent runner 会优先 `awaitTask` 旧 TaskManager task，不可达时才 spawn replacement worker。
+- V4.1：已完成。scheduler 会检测声明了 `writeScope` 的非隔离写任务；重叠 scope 在共享 cwd 下自动串行，不重叠 scope 可以并行；`readOnly: true` 和 `isolate: true` 不参与共享 cwd 写冲突。
+- V4.2：已完成。snapshot/status 会记录 `blockedTaskIds` 和 `blockedTasks`，说明哪个 ready task 因为 `writeScope` 冲突暂缓、正在等待哪些 running task。
 
-下一步建议进入 V3 前的补强：
+下一步建议：
 
-- 进入 V3：workflow run 持久化和恢复。
+- V5.1：增加 workflow 级预算和 task 级预算，包括最大 worker 数、最大重试次数、超时、token/时间预算的预留与消耗记录。
+- V5.2：补更完整的观察性事件，例如 started/blocked/resumed/retried/completed 事件流，方便 UI 或日志面板展示长工作流。
+- V5.3：增强结果聚合和冲突处理，把“多个 worker 改同一区域”的结果显式标成需要 reconcile 的状态，而不是只靠最终 summary 判断。

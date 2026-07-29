@@ -180,6 +180,100 @@ describe("createAgentWorkflowRunner", () => {
     });
   });
 
+  it("waits for an existing TaskManager task when resuming a running workflow task", async () => {
+    const spawnWorker = vi.fn(async (): Promise<SpawnResult> => {
+      throw new Error("should not spawn");
+    });
+    const awaitTask = vi.fn(async (_taskId: string): Promise<AwaitTaskResult> => ({
+      status: "completed",
+      output: "resumed output",
+      exitCode: 0,
+    }));
+    const progress: unknown[] = [];
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker,
+      awaitTask,
+      getAgentDefinition: () => undefined,
+    });
+
+    const result = await runner({
+      task: { id: "implement", prompt: "patch it" },
+      attempt: 1,
+      dependencyResults: {},
+      resumeFrom: {
+        taskId: "implement",
+        attempt: 1,
+        dependencies: [],
+        startedAt: 1,
+        summary: "old task",
+        metadata: {
+          agentId: "worker@default",
+          taskManagerTaskId: "task_existing",
+          backendType: "subprocess",
+        },
+      },
+      reportProgress: (update) => progress.push(update),
+    });
+
+    expect(spawnWorker).not.toHaveBeenCalled();
+    expect(awaitTask).toHaveBeenCalledWith("task_existing", { timeoutMs: undefined });
+    expect(result).toMatchObject({
+      status: "completed",
+      result: "resumed output",
+      metadata: {
+        agentId: "worker@default",
+        taskManagerTaskId: "task_existing",
+        backendType: "subprocess",
+      },
+    });
+    expect(progress).toContainEqual(expect.objectContaining({
+      summary: "Waiting for existing task task_existing",
+    }));
+  });
+
+  it("spawns a replacement worker when the resumed TaskManager task is unavailable", async () => {
+    const spawnWorker = vi.fn(async (): Promise<SpawnResult> => ({
+      success: true,
+      agentId: "worker@default",
+      taskId: "task_new",
+      backendType: "subprocess",
+    }));
+    const awaitTask = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Task not found: task_old"))
+      .mockResolvedValueOnce({ status: "completed", output: "new output", exitCode: 0 } satisfies AwaitTaskResult);
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker,
+      awaitTask,
+      getAgentDefinition: () => undefined,
+    });
+
+    const result = await runner({
+      task: { id: "implement", prompt: "patch it" },
+      attempt: 1,
+      dependencyResults: {},
+      resumeFrom: {
+        taskId: "implement",
+        attempt: 1,
+        dependencies: [],
+        startedAt: 1,
+        summary: "old task",
+        metadata: { taskManagerTaskId: "task_old" },
+      },
+    });
+
+    expect(awaitTask).toHaveBeenNthCalledWith(1, "task_old", { timeoutMs: undefined });
+    expect(awaitTask).toHaveBeenNthCalledWith(2, "task_new", { timeoutMs: undefined });
+    expect(spawnWorker).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      status: "completed",
+      result: "new output",
+      metadata: { taskManagerTaskId: "task_new" },
+    });
+  });
+
   it("can be used by runWorkflow as a real runner adapter", async () => {
     const spawnWorker = vi.fn(async (config: TeammateSpawnConfig): Promise<SpawnResult> => ({
       success: true,

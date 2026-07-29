@@ -68,6 +68,12 @@ Every message you send is to the user. Worker results and system notifications a
 
 Use Workflow for DAG-shaped or repeatable workflows where code should enforce order, dependencies, concurrency, retry, and failure propagation. Use Agent plus TaskWait for simple one-off delegation or when you want to reason interactively between worker results.
 
+Workflow runs are persisted under the project \`.openharness/workflows\` directory by default, including running snapshots and terminal task results. Use the structured run id and task statuses from the workflow payload when reasoning about recovery or follow-up work.
+Use Workflow with \`action: "status"\` to inspect a persisted run, and \`action: "resume"\` to continue a running snapshot without rerunning completed terminal tasks.
+When a snapshot contains a running task with \`taskManagerTaskId\`, resume will first wait for that existing TaskManager task; only if it is unavailable should it spawn a replacement worker.
+For parallel write work, set \`writeScope\` on non-isolated tasks. The scheduler serializes overlapping non-isolated write scopes; \`readOnly: true\` and \`isolate: true\` tasks do not participate in shared-cwd write conflicts.
+Workflow status snapshots include \`blockedTaskIds\` and \`blockedTasks\` when ready tasks are waiting on writeScope conflicts; use those fields to explain scheduling pauses instead of treating them as stalled work.
+
 When calling agent:
 - Do not use one worker to check on another. Workers will notify you when they are done.
 - Do not use workers to trivially report file contents or run commands. Give them higher-level tasks.
@@ -489,23 +495,44 @@ export {
 export {
   createWorkflowPlan,
   createWorkflowNotification,
+  createWorkflowResultFromSnapshot,
+  createWorkflowRunId,
+  createWorkflowRunSnapshot,
   formatWorkflowNotification,
   parseWorkflowNotification,
   runWorkflow,
   validateWorkflowTasks,
+  workflowTasksConflict,
   type WorkflowFailurePolicy,
   type WorkflowMode,
+  type WorkflowBlockedTask,
   type WorkflowNotification,
   type WorkflowNotificationTask,
   type WorkflowPlan,
+  type WorkflowRunOptions,
   type WorkflowRetryPolicy,
   type WorkflowRunner,
   type WorkflowRunnerContext,
+  type WorkflowRunningTask,
   type WorkflowRunResult,
+  type WorkflowRunSnapshot,
+  type WorkflowRunSnapshotPlan,
+  type WorkflowRunSnapshotStatus,
   type WorkflowSpec,
+  type WorkflowTaskProgress,
   type WorkflowTask,
   type WorkflowTaskRunResult,
   type WorkflowTaskStatus,
   type WorkflowTaskTerminalStatus,
   type WorkflowWorkerResult,
 } from "./workflow-scheduler.js";
+
+export {
+  getWorkflowRunsDir,
+  resumePersistentWorkflow,
+  runPersistentWorkflow,
+  WorkflowRunStore,
+  type ResumePersistentWorkflowOptions,
+  type RunPersistentWorkflowOptions,
+  type WorkflowRunStoreOptions,
+} from "./workflow-store.js";

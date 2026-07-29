@@ -1,9 +1,13 @@
 import type { ToolDefinition } from "@openharness/core";
 import {
   formatWorkflowNotification,
+  resumePersistentWorkflow,
   runWorkflow,
+  runPersistentWorkflow,
+  WorkflowRunStore,
   type WorkflowFailurePolicy,
   type WorkflowMode,
+  type WorkflowRunSnapshot,
   type WorkflowRunner,
   type WorkflowSpec,
   type WorkflowTask,
@@ -12,6 +16,7 @@ import { createAgentWorkflowRunner } from "./workflow-runner";
 
 const WORKFLOW_MODES = new Set<WorkflowMode>(["parallel", "sequential", "pipeline"]);
 const FAILURE_POLICIES = new Set<WorkflowFailurePolicy>(["skip-dependents", "fail-fast", "continue"]);
+const WORKFLOW_ACTIONS = new Set(["run", "resume", "status"]);
 
 export interface WorkflowToolOptions {
   createRunner?: typeof createAgentWorkflowRunner;
@@ -31,6 +36,11 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
     inputSchema: {
       type: "object",
       properties: {
+        action: {
+          type: "string",
+          enum: ["run", "resume", "status"],
+          description: "Workflow action. Defaults to run. Use resume/status with runId or latest.",
+        },
         mode: {
           type: "string",
           enum: ["parallel", "sequential", "pipeline"],
@@ -69,6 +79,15 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
                   },
                 },
               },
+              readOnly: {
+                type: "boolean",
+                description: "Marks the task as read-only so it can run alongside write-scoped tasks.",
+              },
+              writeScope: {
+                type: "array",
+                items: { type: "string" },
+                description: "Paths this non-isolated write task may modify; overlapping scopes are serialized.",
+              },
               isolate: {
                 type: "boolean",
                 description: "Run worker in an isolated worktree when the backend supports it",
@@ -96,12 +115,33 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           enum: ["default", "plan", "full_auto"],
           description: "Default permission mode for tasks that do not set permissionMode",
         },
+        persist: {
+          type: "boolean",
+          description: "Persist workflow run snapshots under the project .openharness/workflows directory. Defaults to true.",
+        },
+        runId: {
+          type: "string",
+          description: "Optional stable workflow run id for persistence and recovery.",
+        },
+        latest: {
+          type: "boolean",
+          description: "For resume/status, use the latest persisted workflow run when runId is omitted.",
+        },
       },
-      required: ["mode", "tasks"],
+      required: [],
     },
     async execute(input, context) {
+      const action = parseAction(input.action);
+      if (!action) {
+        return { content: [{ type: "text", text: "action must be one of: run, resume, status" }], isError: true };
+      }
+
+      if (action === "status") {
+        return workflowStatus(input, context.cwd);
+      }
+
       const specOrError = parseWorkflowSpec(input);
-      if (typeof specOrError === "string") {
+      if (action === "run" && typeof specOrError === "string") {
         return { content: [{ type: "text", text: specOrError }], isError: true };
       }
 
@@ -112,7 +152,15 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           timeoutMs: secondsToMs(input.timeoutSeconds, 300),
           permissionMode: parsePermissionMode(input.permissionMode),
         });
-        const result = await run(specOrError, runner as WorkflowRunner);
+        const persist = input.persist !== false;
+        const runId = asOptionalString(input.runId);
+        const result = action === "resume"
+          ? await workflowResume(input, context.cwd, runner as WorkflowRunner)
+          : persist && options.run === undefined
+            ? await runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, { cwd: context.cwd, runId })
+            : runId
+              ? await run(specOrError as WorkflowSpec, runner as WorkflowRunner, { runId })
+              : await run(specOrError as WorkflowSpec, runner as WorkflowRunner);
         return {
           content: [{ type: "text", text: formatWorkflowNotification(result) }],
           ...(result.status === "failed" ? { isError: true } : {}),
@@ -125,6 +173,40 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
 }
 
 export const workflowTool: ToolDefinition = createWorkflowTool();
+
+function workflowStatus(input: Record<string, unknown>, cwd: string) {
+  const store = new WorkflowRunStore({ cwd });
+  const snapshot = loadWorkflowSnapshot(store, input);
+  if (typeof snapshot === "string") {
+    return { content: [{ type: "text" as const, text: snapshot }], isError: true };
+  }
+  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot) }] };
+}
+
+async function workflowResume(
+  input: Record<string, unknown>,
+  cwd: string,
+  runner: WorkflowRunner,
+) {
+  const store = new WorkflowRunStore({ cwd });
+  const snapshot = loadWorkflowSnapshot(store, input);
+  if (typeof snapshot === "string") {
+    throw new Error(snapshot);
+  }
+  return resumePersistentWorkflow(snapshot, runner, { store });
+}
+
+function loadWorkflowSnapshot(
+  store: WorkflowRunStore,
+  input: Record<string, unknown>,
+): WorkflowRunSnapshot | string {
+  const runId = asOptionalString(input.runId);
+  const snapshot = runId ? store.load(runId) : store.latest();
+  if (!snapshot) {
+    return runId ? `Workflow run not found: ${runId}` : "No workflow runs found";
+  }
+  return snapshot;
+}
 
 function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | string {
   const mode = input.mode;
@@ -163,6 +245,13 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   };
 }
 
+function parseAction(value: unknown): "run" | "resume" | "status" | undefined {
+  if (value === undefined) return "run";
+  return typeof value === "string" && WORKFLOW_ACTIONS.has(value)
+    ? value as "run" | "resume" | "status"
+    : undefined;
+}
+
 function parseWorkflowTask(input: Record<string, unknown>, index: number): WorkflowTask | string {
   const id = input.id;
   if (typeof id !== "string" || id.trim() === "") {
@@ -181,6 +270,8 @@ function parseWorkflowTask(input: Record<string, unknown>, index: number): Workf
     permissionMode: parsePermissionMode(input.permissionMode),
     dependsOn: parseStringArray(input.dependsOn),
     retry: retryOrError,
+    readOnly: typeof input.readOnly === "boolean" ? input.readOnly : undefined,
+    writeScope: parseStringArray(input.writeScope),
     isolate: typeof input.isolate === "boolean" ? input.isolate : undefined,
   };
 }
@@ -230,4 +321,19 @@ function parsePermissionMode(value: unknown): "default" | "plan" | "full_auto" |
 
 function secondsToMs(value: unknown, defaultSeconds: number): number {
   return (typeof value === "number" ? value : defaultSeconds) * 1000;
+}
+
+function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot): string {
+  return [
+    "<workflow-run-snapshot>",
+    `<payload>${escapeXml(JSON.stringify(snapshot))}</payload>`,
+    "</workflow-run-snapshot>",
+  ].join("\n");
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
