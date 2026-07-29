@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V6.3：
+截至目前，已经落地到 V7.3：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -511,9 +511,12 @@ V1 内存调度核心
 - V6.1：已完成基础版。`Workflow` status payload 包含结构化 `timeline` / `timelineText`，并支持 `view: "timeline"` 直接返回人类可读时间线。
 - V6.2：已完成基础版。reconcile issue 会区分声明层 `write-scope-overlap` 和 worker metadata 上报 `changedFiles` 形成的 `changed-file-overlap` 实际文件重叠。
 - V6.3：已完成基础版。`budgetPolicy` 支持 token/time 阈值；当已知消耗达到阈值后，scheduler 不再启动后续 worker，而是把未启动 task 标记为 skipped。
+- V7.1：已完成基础版。`Workflow` status timeline 支持按 `taskIds`、`eventTypes`、`statuses` 过滤，JSON payload 同步返回过滤后的 `timeline` / `timelineText`。
+- V7.2：已完成基础版。agent workflow runner 会在 worker 完成后自动读取对应 worktree/cwd 的 git changed files，并写入 result metadata，reconcile 不再完全依赖 worker 手工声明。
+- V7.3：已完成基础版。`budgetPolicy` 支持 soft limit 和 `onSoftLimit`，达到软阈值后可 serialize 后续 worker、进入 conserve prompt 模式，或两者同时启用。
 
 下一步建议：
 
-- V7.1：把 timeline 接到真实 CLI/UI 面板，支持 filter task/status/event type。
-- V7.2：让 runner 自动上报 changedFiles，而不是依赖 worker metadata 手工声明。
-- V7.3：增加更丰富的 budget policy，例如预算接近上限时自动降级为 sequential、缩短 worker prompt 或切换只读验证。
+- V8.1：把 timeline filter 接入真实 UI 控件，支持按 task/status/event type 交互式筛选。
+- V8.2：把 changedFiles 采集升级为 diff summary，包括新增/修改/删除分类和行数统计。
+- V8.3：让 conserve 模式可配置，例如只读验证、禁止大范围搜索、或自动降低 worker maxTurns。

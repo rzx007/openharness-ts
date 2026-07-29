@@ -67,6 +67,9 @@ export interface WorkflowTaskBudgetUsage {
 export interface WorkflowBudgetPolicy {
   maxTokensUsed?: number;
   maxTimeUsedMs?: number;
+  softMaxTokensUsed?: number;
+  softMaxTimeUsedMs?: number;
+  onSoftLimit?: "continue" | "serialize" | "conserve" | "serialize-and-conserve";
 }
 
 export interface WorkflowTaskRunResult {
@@ -91,6 +94,7 @@ export interface WorkflowRunnerContext {
   dependencyResults: Record<string, WorkflowTaskRunResult>;
   pipelineInput?: WorkflowTaskRunResult;
   resumeFrom?: WorkflowRunningTask;
+  budgetMode?: "normal" | "conserve";
   reportProgress?: (progress: WorkflowTaskProgress) => void;
 }
 
@@ -194,6 +198,7 @@ export type WorkflowRunEventType =
   | "task_started"
   | "task_progress"
   | "task_blocked"
+  | "workflow_budget_conserving"
   | "workflow_budget_exceeded"
   | "task_finished"
   | "workflow_finished";
@@ -365,6 +370,7 @@ export async function runWorkflow(
   const runId = options.runId ?? createWorkflowRunId();
   const createdAt = options.createdAt ?? Date.now();
   let failFastTriggered = failurePolicy === "fail-fast" && hasFailedInitialResult(results);
+  let lastSoftBudgetSignal: string | undefined;
 
   const emitSnapshot = (status: WorkflowRunSnapshotStatus, summary = `${results.size}/${plan.tasks.length} tasks finished`) => {
     try {
@@ -504,7 +510,8 @@ export async function runWorkflow(
     const scheduleMore = () => {
       if (failFastTriggered) return;
       while (running.size < plan.maxConcurrency && ready.length > 0) {
-        const exceededBudget = workflowBudgetPolicyExceeded(plan.budgetPolicy, collectWorkflowBudgetUsage([...results.values()], [...runningTasks.values()]));
+        const budget = collectWorkflowBudgetUsage([...results.values()], [...runningTasks.values()]);
+        const exceededBudget = workflowBudgetPolicyExceeded(plan.budgetPolicy, budget);
         if (exceededBudget) {
           emitEvent({
             type: "workflow_budget_exceeded",
@@ -512,6 +519,18 @@ export async function runWorkflow(
             summary: exceededBudget,
           });
           skipUnstarted(exceededBudget);
+          break;
+        }
+        const softBudget = workflowBudgetSoftLimit(plan.budgetPolicy, budget);
+        if (softBudget && lastSoftBudgetSignal !== softBudget.summary) {
+          lastSoftBudgetSignal = softBudget.summary;
+          emitEvent({
+            type: "workflow_budget_conserving",
+            status: "running",
+            summary: softBudget.summary,
+          });
+        }
+        if (softBudget?.serialize === true && running.size > 0) {
           break;
         }
         const readyIndex = findNextRunnableReadyIndex(ready, running, plan.tasks);
@@ -559,6 +578,7 @@ export async function runWorkflow(
           pipelineInputFor(plan, task, results),
           resumeFrom,
           resolveTaskTimeoutMs(plan, task),
+          softBudget?.conserve === true ? "conserve" : "normal",
           (progress) => {
             const current = runningTasks.get(taskId);
             if (!current) return;
@@ -694,6 +714,7 @@ async function runWorkflowTask(
   pipelineInput: WorkflowTaskRunResult | undefined,
   resumeFrom: WorkflowRunningTask | undefined,
   timeoutMs: number | undefined,
+  budgetMode: "normal" | "conserve",
   reportProgress: (progress: WorkflowTaskProgress) => void,
 ): Promise<WorkflowTaskRunResult> {
   const retry = normalizeRetry(task.retry);
@@ -721,6 +742,7 @@ async function runWorkflowTask(
           dependencyResults,
           pipelineInput,
           resumeFrom: attempt === 1 ? resumeFrom : undefined,
+          budgetMode,
           reportProgress: recordProgress,
         }),
         timeoutMs,
@@ -832,6 +854,17 @@ function validateWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy | undefined):
   if (!policy) return;
   validateBudgetPolicyNumber(policy.maxTokensUsed, "budgetPolicy.maxTokensUsed");
   validateBudgetPolicyNumber(policy.maxTimeUsedMs, "budgetPolicy.maxTimeUsedMs");
+  validateBudgetPolicyNumber(policy.softMaxTokensUsed, "budgetPolicy.softMaxTokensUsed");
+  validateBudgetPolicyNumber(policy.softMaxTimeUsedMs, "budgetPolicy.softMaxTimeUsedMs");
+  if (
+    policy.onSoftLimit !== undefined &&
+    policy.onSoftLimit !== "continue" &&
+    policy.onSoftLimit !== "serialize" &&
+    policy.onSoftLimit !== "conserve" &&
+    policy.onSoftLimit !== "serialize-and-conserve"
+  ) {
+    throw new Error("budgetPolicy.onSoftLimit must be one of: continue, serialize, conserve, serialize-and-conserve");
+  }
 }
 
 function validateBudgetPolicyNumber(value: number | undefined, label: string): void {
@@ -1176,6 +1209,26 @@ function workflowBudgetPolicyExceeded(
     return `Skipped because workflow time budget exceeded (${budget.timeUsedMs ?? 0}/${policy.maxTimeUsedMs}ms)`;
   }
   return undefined;
+}
+
+function workflowBudgetSoftLimit(
+  policy: WorkflowBudgetPolicy | undefined,
+  budget: WorkflowBudgetUsage,
+): { summary: string; serialize: boolean; conserve: boolean } | undefined {
+  if (!policy) return undefined;
+  const reason =
+    policy.softMaxTokensUsed !== undefined && (budget.tokensUsed ?? 0) >= policy.softMaxTokensUsed
+      ? `Workflow token soft budget reached (${budget.tokensUsed ?? 0}/${policy.softMaxTokensUsed})`
+      : policy.softMaxTimeUsedMs !== undefined && (budget.timeUsedMs ?? 0) >= policy.softMaxTimeUsedMs
+        ? `Workflow time soft budget reached (${budget.timeUsedMs ?? 0}/${policy.softMaxTimeUsedMs}ms)`
+        : undefined;
+  if (!reason) return undefined;
+  const action = policy.onSoftLimit ?? "serialize-and-conserve";
+  return {
+    summary: `${reason}; applying ${action}`,
+    serialize: action === "serialize" || action === "serialize-and-conserve",
+    conserve: action === "conserve" || action === "serialize-and-conserve",
+  };
 }
 
 function changedFilesFromResult(result: WorkflowTaskRunResult | undefined): string[] {

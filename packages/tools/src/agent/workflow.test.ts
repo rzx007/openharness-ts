@@ -137,7 +137,13 @@ describe("workflowTool", () => {
       {
         mode: "parallel",
         defaultTaskTimeoutSeconds: 30,
-        budgetPolicy: { maxTokensUsed: 1_000, maxTimeUsedSeconds: 60 },
+        budgetPolicy: {
+          maxTokensUsed: 1_000,
+          maxTimeUsedSeconds: 60,
+          softMaxTokensUsed: 800,
+          softMaxTimeUsedSeconds: 45,
+          onSoftLimit: "serialize-and-conserve",
+        },
         tasks: [
           { id: "write", writeScope: ["packages/auth"], isolate: false, timeoutSeconds: 10 },
           { id: "read", readOnly: true, writeScope: ["packages/auth"] },
@@ -149,7 +155,13 @@ describe("workflowTool", () => {
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultTaskTimeoutMs: 30_000,
-        budgetPolicy: { maxTokensUsed: 1_000, maxTimeUsedMs: 60_000 },
+        budgetPolicy: {
+          maxTokensUsed: 1_000,
+          maxTimeUsedMs: 60_000,
+          softMaxTokensUsed: 800,
+          softMaxTimeUsedMs: 45_000,
+          onSoftLimit: "serialize-and-conserve",
+        },
         tasks: [
           expect.objectContaining({ id: "write", writeScope: ["packages/auth"], isolate: false, timeoutMs: 10_000 }),
           expect.objectContaining({ id: "read", readOnly: true, writeScope: ["packages/auth"] }),
@@ -244,6 +256,24 @@ describe("workflowTool", () => {
         timestamp: 2,
         summary: "Workflow started",
       });
+      store.appendEvent({
+        version: 1,
+        runId: "status-run",
+        type: "task_started",
+        timestamp: 3,
+        taskId: "research",
+        status: "running",
+        summary: "Task running",
+      });
+      store.appendEvent({
+        version: 1,
+        runId: "status-run",
+        type: "task_finished",
+        timestamp: 4,
+        taskId: "other",
+        status: "completed",
+        summary: "Other done",
+      });
 
       const tool = createWorkflowTool({ createRunner: vi.fn() });
       const result = await tool.execute({ action: "status", runId: "status-run" }, { cwd });
@@ -257,6 +287,19 @@ describe("workflowTool", () => {
       const timelineResult = await tool.execute({ action: "status", runId: "status-run", view: "timeline" }, { cwd });
       expect(textOf(timelineResult)).toContain("Workflow status-run (running)");
       expect(textOf(timelineResult)).toContain("workflow_started");
+
+      const filteredTimeline = await tool.execute({
+        action: "status",
+        runId: "status-run",
+        view: "timeline",
+        taskIds: ["research"],
+        eventTypes: ["task_started"],
+        statuses: ["running"],
+      }, { cwd });
+      expect(textOf(filteredTimeline)).toContain("Filters: taskIds=research eventTypes=task_started statuses=running");
+      expect(textOf(filteredTimeline)).toContain("task_started research [running]");
+      expect(textOf(filteredTimeline)).not.toContain("workflow_started");
+      expect(textOf(filteredTimeline)).not.toContain("Other done");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

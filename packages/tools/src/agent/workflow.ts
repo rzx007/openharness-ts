@@ -47,6 +47,21 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           enum: ["json", "timeline"],
           description: "For status, choose the default structured JSON payload or a readable timeline view.",
         },
+        taskIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "For status timeline, include only events for these task ids.",
+        },
+        eventTypes: {
+          type: "array",
+          items: { type: "string" },
+          description: "For status timeline, include only these event types.",
+        },
+        statuses: {
+          type: "array",
+          items: { type: "string" },
+          description: "For status timeline, include only events with these statuses.",
+        },
         mode: {
           type: "string",
           enum: ["parallel", "sequential", "pipeline"],
@@ -119,6 +134,13 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           properties: {
             maxTokensUsed: { type: "number", description: "Stop scheduling new work once known token usage reaches this value." },
             maxTimeUsedSeconds: { type: "number", description: "Stop scheduling new work once known task time usage reaches this value." },
+            softMaxTokensUsed: { type: "number", description: "Enter soft budget mode once known token usage reaches this value." },
+            softMaxTimeUsedSeconds: { type: "number", description: "Enter soft budget mode once known task time usage reaches this value." },
+            onSoftLimit: {
+              type: "string",
+              enum: ["continue", "serialize", "conserve", "serialize-and-conserve"],
+              description: "How to schedule remaining work after a soft budget is reached.",
+            },
           },
         },
         failurePolicy: {
@@ -201,11 +223,12 @@ function workflowStatus(input: Record<string, unknown>, cwd: string) {
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
   }
-  const events = store.loadEvents(snapshot.runId);
+  const filters = parseTimelineFilters(input);
+  const events = filterWorkflowEvents(store.loadEvents(snapshot.runId), filters);
   if (input.view === "timeline") {
-    return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events) }] };
+    return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events, filters) }] };
   }
-  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, events) }] };
+  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, events, filters) }] };
 }
 
 async function workflowResume(
@@ -335,15 +358,36 @@ function parseBudgetPolicy(input: unknown): WorkflowSpec["budgetPolicy"] | strin
   if (!isRecord(input)) return "budgetPolicy must be an object";
   const maxTokensUsed = input.maxTokensUsed;
   const maxTimeUsedMs = secondsToOptionalMs(input.maxTimeUsedSeconds);
+  const softMaxTokensUsed = input.softMaxTokensUsed;
+  const softMaxTimeUsedMs = secondsToOptionalMs(input.softMaxTimeUsedSeconds);
+  const onSoftLimit = input.onSoftLimit;
   if (maxTokensUsed !== undefined && (typeof maxTokensUsed !== "number" || !Number.isFinite(maxTokensUsed) || maxTokensUsed <= 0)) {
     return "budgetPolicy.maxTokensUsed must be a positive number";
   }
   if (maxTimeUsedMs === "invalid") {
     return "budgetPolicy.maxTimeUsedSeconds must be a positive number";
   }
+  if (softMaxTokensUsed !== undefined && (typeof softMaxTokensUsed !== "number" || !Number.isFinite(softMaxTokensUsed) || softMaxTokensUsed <= 0)) {
+    return "budgetPolicy.softMaxTokensUsed must be a positive number";
+  }
+  if (softMaxTimeUsedMs === "invalid") {
+    return "budgetPolicy.softMaxTimeUsedSeconds must be a positive number";
+  }
+  if (
+    onSoftLimit !== undefined &&
+    onSoftLimit !== "continue" &&
+    onSoftLimit !== "serialize" &&
+    onSoftLimit !== "conserve" &&
+    onSoftLimit !== "serialize-and-conserve"
+  ) {
+    return "budgetPolicy.onSoftLimit must be one of: continue, serialize, conserve, serialize-and-conserve";
+  }
   return {
     ...(maxTokensUsed !== undefined ? { maxTokensUsed } : {}),
     ...(maxTimeUsedMs !== undefined ? { maxTimeUsedMs } : {}),
+    ...(softMaxTokensUsed !== undefined ? { softMaxTokensUsed } : {}),
+    ...(softMaxTimeUsedMs !== undefined ? { softMaxTimeUsedMs } : {}),
+    ...(onSoftLimit !== undefined ? { onSoftLimit } : {}),
   };
 }
 
@@ -384,17 +428,40 @@ function secondsToOptionalMs(value: unknown): number | undefined | "invalid" {
   return Math.floor(value * 1000);
 }
 
-function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[] = []): string {
+interface TimelineFilters {
+  taskIds?: string[];
+  eventTypes?: string[];
+  statuses?: string[];
+}
+
+function parseTimelineFilters(input: Record<string, unknown>): TimelineFilters {
+  return {
+    taskIds: parseStringArray(input.taskIds),
+    eventTypes: parseStringArray(input.eventTypes),
+    statuses: parseStringArray(input.statuses),
+  };
+}
+
+function filterWorkflowEvents(events: WorkflowRunEvent[], filters: TimelineFilters): WorkflowRunEvent[] {
+  return events.filter((event) => {
+    if (filters.taskIds && (!event.taskId || !filters.taskIds.includes(event.taskId))) return false;
+    if (filters.eventTypes && !filters.eventTypes.includes(event.type)) return false;
+    if (filters.statuses && (!event.status || typeof event.status !== "string" || !filters.statuses.includes(event.status))) return false;
+    return true;
+  });
+}
+
+function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[] = [], filters: TimelineFilters = {}): string {
   const timeline = createWorkflowTimeline(events);
   return [
     "<workflow-run-snapshot>",
-    `<payload>${escapeXml(JSON.stringify({ snapshot, events, timeline, timelineText: formatTimelineText(snapshot, timeline) }))}</payload>`,
+    `<payload>${escapeXml(JSON.stringify({ snapshot, events, filters, timeline, timelineText: formatTimelineText(snapshot, timeline, filters) }))}</payload>`,
     "</workflow-run-snapshot>",
   ].join("\n");
 }
 
-function formatWorkflowTimeline(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[]): string {
-  return formatTimelineText(snapshot, createWorkflowTimeline(events));
+function formatWorkflowTimeline(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[], filters: TimelineFilters = {}): string {
+  return formatTimelineText(snapshot, createWorkflowTimeline(events), filters);
 }
 
 function createWorkflowTimeline(events: WorkflowRunEvent[]): Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }> {
@@ -410,17 +477,29 @@ function createWorkflowTimeline(events: WorkflowRunEvent[]): Array<{ timestamp: 
 function formatTimelineText(
   snapshot: WorkflowRunSnapshot,
   timeline: Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }>,
+  filters: TimelineFilters = {},
 ): string {
   const lines = [
     `Workflow ${snapshot.runId} (${snapshot.status})`,
     snapshot.summary,
   ];
+  const filterText = formatTimelineFilters(filters);
+  if (filterText) lines.push(filterText);
   for (const event of timeline) {
     const task = event.taskId ? ` ${event.taskId}` : "";
     const status = event.status ? ` [${event.status}]` : "";
     lines.push(`- ${new Date(event.timestamp).toISOString()} ${event.type}${task}${status}: ${event.summary}`);
   }
   return lines.join("\n");
+}
+
+function formatTimelineFilters(filters: TimelineFilters): string | undefined {
+  const parts = [
+    filters.taskIds ? `taskIds=${filters.taskIds.join(",")}` : undefined,
+    filters.eventTypes ? `eventTypes=${filters.eventTypes.join(",")}` : undefined,
+    filters.statuses ? `statuses=${filters.statuses.join(",")}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length > 0 ? `Filters: ${parts.join(" ")}` : undefined;
 }
 
 function escapeXml(value: string): string {

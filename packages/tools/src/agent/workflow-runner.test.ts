@@ -125,6 +125,53 @@ describe("createAgentWorkflowRunner", () => {
     expect(prompt).toContain("changed src/auth.ts");
   });
 
+  it("shortens worker behavior in budget conservation mode", async () => {
+    const spawnWorker = vi.fn(async (_config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+      success: true,
+      agentId: "worker@default",
+      taskId: "task_conserve",
+      backendType: "subprocess",
+    }));
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker,
+      awaitTask: async () => ({ status: "completed", output: "ok" }),
+      getAgentDefinition: () => undefined,
+    });
+
+    await runner({
+      task: { id: "verify", prompt: "verify it" },
+      attempt: 1,
+      dependencyResults: {},
+      budgetMode: "conserve",
+    });
+
+    expect(spawnWorker.mock.calls[0]![0].prompt).toContain("Budget conservation mode");
+  });
+
+  it("adds changed files from the worker cwd to result metadata", async () => {
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker: async () => ({
+        success: true,
+        agentId: "worker@default",
+        taskId: "task_changed",
+        backendType: "subprocess",
+        worktree: { path: "/wt/worker", branch: "worktree-worker" },
+      }),
+      awaitTask: async () => ({ status: "completed", output: "ok", exitCode: 0 }),
+      getChangedFiles: vi.fn(async (cwd) => {
+        expect(cwd).toBe("/wt/worker");
+        return ["src/auth.ts", "src/auth.ts", "docs\\plan.md"];
+      }),
+      getAgentDefinition: () => undefined,
+    });
+
+    const result = await runner({ task: { id: "implement" }, attempt: 1, dependencyResults: {} });
+
+    expect(result.metadata?.changedFiles).toEqual(["docs/plan.md", "src/auth.ts"]);
+  });
+
   it("maps spawn failures, stopped tasks, and timed-out waits to workflow statuses", async () => {
     const spawnFailure = createAgentWorkflowRunner({
       cwd: "/repo",

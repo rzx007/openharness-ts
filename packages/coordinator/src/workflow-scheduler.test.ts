@@ -483,6 +483,56 @@ describe("runWorkflow", () => {
       summary: "Skipped because workflow token budget exceeded (120/100)",
     }));
   });
+
+  it("serializes and conserves later tasks after a soft budget policy is reached", async () => {
+    const started: string[] = [];
+    const budgetModes: Array<string | undefined> = [];
+    const unblock: Record<string, () => void> = {};
+    const events: WorkflowRunEvent[] = [];
+
+    const workflow = runWorkflow(
+      {
+        mode: "parallel",
+        maxConcurrency: 2,
+        budgetPolicy: { softMaxTokensUsed: 100, onSoftLimit: "serialize-and-conserve" },
+        tasks: [
+          { id: "first" },
+          { id: "second", dependsOn: ["first"] },
+          { id: "third", dependsOn: ["first"] },
+        ],
+      },
+      async ({ task, budgetMode }) => {
+        started.push(task.id);
+        budgetModes.push(budgetMode);
+        if (task.id === "first") {
+          return { summary: "first done", metadata: { budget: { tokensUsed: 120 } } };
+        }
+        await new Promise<void>((resolve) => {
+          unblock[task.id] = resolve;
+        });
+        return { summary: `${task.id} done` };
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    await vi.waitFor(() => expect(started).toEqual(["first", "second"]));
+    expect(budgetModes).toEqual(["normal", "conserve"]);
+    await vi.waitFor(() => {
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "workflow_budget_conserving",
+        summary: "Workflow token soft budget reached (120/100); applying serialize-and-conserve",
+      }));
+    });
+    expect(started).toEqual(["first", "second"]);
+
+    unblock["second"]?.();
+    await vi.waitFor(() => expect(started).toEqual(["first", "second", "third"]));
+    expect(budgetModes).toEqual(["normal", "conserve", "conserve"]);
+    unblock["third"]?.();
+
+    const result = await workflow;
+    expect(result.status).toBe("completed");
+  });
 });
 
 describe("workflow notification envelope", () => {
