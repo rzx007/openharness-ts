@@ -5,6 +5,7 @@ import {
   formatWorkflowNotification,
   parseWorkflowNotification,
   runWorkflow,
+  type WorkflowRunEvent,
   type WorkflowRunSnapshot,
 } from "./workflow-scheduler.js";
 
@@ -231,9 +232,43 @@ describe("runWorkflow", () => {
     }));
   });
 
+  it("emits structured workflow events", async () => {
+    const events: WorkflowRunEvent[] = [];
+
+    const result = await runWorkflow(
+      {
+        mode: "parallel",
+        tasks: [{ id: "build" }],
+      },
+      ({ reportProgress }) => {
+        reportProgress?.({ summary: "halfway" });
+        return { summary: "built" };
+      },
+      {
+        onEvent: (event) => events.push(event),
+      },
+    );
+
+    expect(result.status).toBe("completed");
+    expect(events.map((event) => event.type)).toEqual([
+      "workflow_started",
+      "task_started",
+      "task_progress",
+      "task_progress",
+      "task_finished",
+      "workflow_finished",
+    ]);
+    expect(events.find((event) => event.type === "task_progress" && event.summary === "halfway")).toEqual(expect.objectContaining({
+      taskId: "build",
+      status: "running",
+      summary: "halfway",
+    }));
+  });
+
   it("serializes overlapping non-isolated write scopes while allowing unrelated work", async () => {
     const started: string[] = [];
     const snapshots: WorkflowRunSnapshot[] = [];
+    const events: WorkflowRunEvent[] = [];
     const unblock: Record<string, () => void> = {};
     let running = 0;
     let maxRunning = 0;
@@ -260,6 +295,7 @@ describe("runWorkflow", () => {
       },
       {
         onSnapshot: (snapshot) => snapshots.push(snapshot),
+        onEvent: (event) => events.push(event),
       },
     );
 
@@ -274,6 +310,13 @@ describe("runWorkflow", () => {
         conflictingWriteScope: expect.arrayContaining(["packages/auth"]),
       }));
     });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "task_blocked",
+      taskId: "auth-b",
+      blockedTask: expect.objectContaining({
+        waitingForTaskIds: ["auth-a"],
+      }),
+    }));
 
     unblock["ui"]?.();
     await vi.waitFor(() => expect(started).toEqual(["auth-a", "ui"]));

@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V5.1：
+截至目前，已经落地到 V5.2：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -504,9 +504,10 @@ V1 内存调度核心
 - V4.1：已完成。scheduler 会检测声明了 `writeScope` 的非隔离写任务；重叠 scope 在共享 cwd 下自动串行，不重叠 scope 可以并行；`readOnly: true` 和 `isolate: true` 不参与共享 cwd 写冲突。
 - V4.2：已完成。snapshot/status 会记录 `blockedTaskIds` 和 `blockedTasks`，说明哪个 ready task 因为 `writeScope` 冲突暂缓、正在等待哪些 running task。
 - V5.1：已完成基础版。支持 workflow 默认 task timeout 和单 task timeout；超时 attempt 会标记为 `failed + timedOut`，继续走既有 retry / failurePolicy。
+- V5.2：已完成基础版。scheduler 支持 `onEvent` 结构化事件流，覆盖 workflow started/finished、task started/progress/blocked/finished。
 
 下一步建议：
 
-- V5.2：补更完整的观察性事件，例如 started/blocked/resumed/retried/completed 事件流，方便 UI 或日志面板展示长工作流。
 - V5.3：增强结果聚合和冲突处理，把“多个 worker 改同一区域”的结果显式标成需要 reconcile 的状态，而不是只靠最终 summary 判断。
-- V5.4：把 token/时间预算的预留与消耗记录接到 runner progress metadata，让预算不仅能限制 timeout，也能展示消耗趋势。
+- V5.4：把 `onEvent` 事件持久化为 workflow event log，并让 status/UI 能展示 started/blocked/retried/completed 时间线。
+- V5.5：把 token/时间预算的预留与消耗记录接到 runner progress metadata，让预算不仅能限制 timeout，也能展示消耗趋势。

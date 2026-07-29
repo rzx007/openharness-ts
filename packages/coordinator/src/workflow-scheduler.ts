@@ -147,9 +147,32 @@ export interface WorkflowRunSnapshot {
 export interface WorkflowRunOptions {
   runId?: string;
   onSnapshot?: (snapshot: WorkflowRunSnapshot) => void;
+  onEvent?: (event: WorkflowRunEvent) => void;
   initialResults?: Record<string, WorkflowTaskRunResult>;
   initialRunningTasks?: Record<string, WorkflowRunningTask>;
   createdAt?: number;
+}
+
+export type WorkflowRunEventType =
+  | "workflow_started"
+  | "task_started"
+  | "task_progress"
+  | "task_blocked"
+  | "task_finished"
+  | "workflow_finished";
+
+export interface WorkflowRunEvent {
+  version: 1;
+  runId: string;
+  type: WorkflowRunEventType;
+  timestamp: number;
+  summary?: string;
+  taskId?: string;
+  attempt?: number;
+  status?: WorkflowTaskStatus | WorkflowRunResult["status"];
+  runningTask?: WorkflowRunningTask;
+  blockedTask?: WorkflowBlockedTask;
+  result?: WorkflowTaskRunResult;
 }
 
 export interface WorkflowNotificationTask {
@@ -311,6 +334,19 @@ export async function runWorkflow(
     }
   };
 
+  const emitEvent = (event: Omit<WorkflowRunEvent, "version" | "runId" | "timestamp">) => {
+    try {
+      options.onEvent?.({
+        version: 1,
+        runId,
+        timestamp: Date.now(),
+        ...event,
+      });
+    } catch {
+      // Observability callbacks are best-effort and must not strand the scheduler.
+    }
+  };
+
   await new Promise<void>((resolve) => {
     const maybeResolve = () => {
       if (results.size === plan.tasks.length) resolve();
@@ -322,7 +358,7 @@ export async function runWorkflow(
       blockedTasks.delete(taskId);
       const now = Date.now();
       const task = requireWorkflowTask(plan.tasks, taskId);
-      results.set(taskId, {
+      const skippedResult: WorkflowTaskRunResult = {
         taskId,
         status: "skipped",
         summary: reason,
@@ -331,6 +367,14 @@ export async function runWorkflow(
         startedAt: now,
         finishedAt: now,
         skippedReason: reason,
+      };
+      results.set(taskId, skippedResult);
+      emitEvent({
+        type: "task_finished",
+        taskId,
+        status: "skipped",
+        summary: reason,
+        result: skippedResult,
       });
       emitSnapshot("running");
       for (const dependent of plan.dependentsMap[taskId] ?? []) {
@@ -365,6 +409,13 @@ export async function runWorkflow(
       runningTasks.delete(result.taskId);
       results.set(result.taskId, result);
       refreshBlockedTasks();
+      emitEvent({
+        type: "task_finished",
+        taskId: result.taskId,
+        status: result.status,
+        summary: result.summary,
+        result,
+      });
       emitSnapshot("running");
 
       if (result.status !== "completed") {
@@ -406,6 +457,15 @@ export async function runWorkflow(
         if (readyIndex < 0) {
           refreshBlockedTasks();
           emitSnapshot("running", `${results.size}/${plan.tasks.length} tasks finished; ${blockedTasks.size} task(s) blocked`);
+          for (const blockedTask of blockedTasks.values()) {
+            emitEvent({
+              type: "task_blocked",
+              taskId: blockedTask.taskId,
+              status: "pending",
+              summary: blockedTask.reason,
+              blockedTask,
+            });
+          }
           break;
         }
         const [taskId] = ready.splice(readyIndex, 1);
@@ -414,12 +474,21 @@ export async function runWorkflow(
         const task = requireWorkflowTask(plan.tasks, taskId);
         running.add(taskId);
         const resumeFrom = resumableRunningTasks.get(taskId);
-        runningTasks.set(taskId, resumeFrom ?? {
+        const runningTask = resumeFrom ?? {
           taskId,
           attempt: 1,
           dependencies: [...(task.dependsOn ?? [])],
           startedAt: Date.now(),
           summary: "Task running",
+        };
+        runningTasks.set(taskId, runningTask);
+        emitEvent({
+          type: "task_started",
+          taskId,
+          attempt: runningTask.attempt,
+          status: "running",
+          summary: runningTask.summary,
+          runningTask,
         });
         emitSnapshot("running");
         runWorkflowTask(
@@ -437,6 +506,14 @@ export async function runWorkflow(
               summary: progress.summary ?? current.summary,
               metadata: progress.metadata ?? current.metadata,
             });
+            emitEvent({
+              type: "task_progress",
+              taskId,
+              attempt: current.attempt,
+              status: "running",
+              summary: progress.summary ?? current.summary,
+              runningTask: runningTasks.get(taskId),
+            });
             emitSnapshot("running");
           },
         )
@@ -452,6 +529,7 @@ export async function runWorkflow(
       }
     };
 
+    emitEvent({ type: "workflow_started", status: "running", summary: "Workflow started" });
     emitSnapshot("running", "Workflow started");
     propagateInitialFailures();
     scheduleMore();
@@ -459,6 +537,11 @@ export async function runWorkflow(
   });
 
   const finalResult = aggregateWorkflowResult(runId, plan, results);
+  emitEvent({
+    type: "workflow_finished",
+    status: finalResult.status,
+    summary: finalResult.summary,
+  });
   emitSnapshot(finalResult.status, finalResult.summary);
   return finalResult;
 }

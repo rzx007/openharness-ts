@@ -511,6 +511,8 @@ export {
   type WorkflowNotificationTask,
   type WorkflowPlan,
   type WorkflowRunOptions,
+  type WorkflowRunEvent,
+  type WorkflowRunEventType,
   type WorkflowRetryPolicy,
   type WorkflowRunner,
   type WorkflowRunnerContext,
