@@ -69,11 +69,14 @@ apps/cli/src/commands/main.ts
 推荐用子命令切换 sandbox：
 
 ```bash
-ohs sandbox on                         # Docker + bridge 网络（默认）
+ohs sandbox on                         # 项目配置：Docker + bridge 网络 + 复用容器（默认）
 ohs sandbox on --net none              # 离线 sandbox
+ohs sandbox on --no-reuse              # 每次会话创建临时容器
+ohs sandbox on --global                # 写全局用户配置
 ohs sandbox on --backend srt           # 使用 Anthropic Sandbox Runtime
 ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
 ohs sandbox off
+ohs sandbox clean                      # 删除当前项目的复用容器
 ohs sandbox status
 ohs sandbox doctor
 ```
@@ -114,15 +117,18 @@ normalizeSandboxConfig(settings.sandbox)
                 检测：平台 / docker CLI / daemon；host@macOS 等限制
             └─ docker image inspect；镜像缺失且 autoBuildImage=true 时用内置 Dockerfile build
             └─ new DockerSandboxSession().start()
-                docker run -d --rm … image tail -f /dev/null
+                reuseContainer=true  → 复用/启动项目容器，缺失时 docker run -d … image tail -f /dev/null
+                reuseContainer=false → docker run -d --rm … image tail -f /dev/null
        └─ setActiveSandboxSession(session)
-       └─ CLI 仅在 docker active 时注册 cleanup（进程 exit → stop 容器）
+       └─ CLI 仅在 docker active 时注册 cleanup
+          reuseContainer=true  → 进程 exit 时保留容器
+          reuseContainer=false → 进程 exit 时 stop 临时容器
 ```
 
 要点：
 
 - `srt` 启动时**只检查可用性**，真正包装发生在每次 shell。
-- `docker` 启动时**起长驻容器**，后续 shell 用 `docker exec`。
+- `docker` 启动时**准备长驻容器**，后续 shell 用 `docker exec`；默认按项目复用，`--no-reuse` 才使用会话临时容器。
 - 未指定 `backend` 时默认 `"srt"`；旧字段 `runtime: "docker"|"srt"` 会映射到 `backend`。
 - `failIfUnavailable=true` 时启动失败即中断；否则记 `unavailable`，继续无沙箱跑。
 
@@ -176,10 +182,48 @@ Glob/Grep         → 宿主进程 + path guard
 
 ## C. Docker 后端细节
 
+### C0. 容器生命周期
+
+默认 `ohs sandbox on` 是“项目级复用容器”：
+
+```text
+ohs sandbox on
+  → 写入当前 workspace 的 .openharness/settings.json
+  → sandbox.backend=docker
+  → sandbox.network.mode=bridge
+  → sandbox.docker.reuseContainer=true
+
+CLI/TUI 启动
+  → 检查 Docker CLI / daemon
+  → docker image inspect <image>
+  → 镜像缺失且 autoBuildImage=true 时，从 packages/sandbox/Dockerfile 自动 build
+  → 根据 workspace 路径生成稳定容器名：openharness-sandbox-<project>-<hash>
+  → 容器已存在：必要时 docker start
+  → 容器不存在：docker run -d --name <project-container> ...
+  → Bash 每次通过 docker exec 进入该容器执行
+
+CLI/TUI 退出
+  → 复用容器保留，供下次同项目启动继续使用
+
+ohs sandbox clean
+  → docker rm -f <project-container>
+```
+
+`ohs sandbox on --no-reuse` 切换为“会话临时容器”：
+
+```text
+CLI/TUI 启动
+  → docker run -d --rm --name <session-container> ...
+
+CLI/TUI 退出
+  → docker stop <session-container>
+  → Docker 因 --rm 自动删除容器
+```
+
 长驻空闲容器大致为：
 
 ```text
-docker run -d --rm \
+docker run -d [--rm] \
   --name openharness-sandbox-... \
   --network <none|bridge|host> \
   --dns <server> \                 # 可选，来自 OPENHARNESS_SANDBOX_DOCKER_DNS
