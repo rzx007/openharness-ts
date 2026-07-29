@@ -264,7 +264,7 @@ async function ensureDockerImage(options: {
   const dockerfile = defaultDockerfilePath();
   if (!existsSync(dockerfile)) {
     throw new SandboxUnavailableError(
-      `Docker image ${options.config.docker.image} is not available and no sandbox Dockerfile was found`,
+      `Docker image ${options.config.docker.image} is not available and no sandbox Dockerfile was found. Checked: ${dockerfile}`,
     );
   }
 
@@ -277,7 +277,12 @@ async function ensureDockerImage(options: {
 }
 
 function defaultDockerfilePath(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "Dockerfile");
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(here, "..", "Dockerfile"),
+    resolve(here, "..", "..", "..", "packages", "sandbox", "Dockerfile"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates.join(", ");
 }
 
 export function dockerContainerName(sessionId: string, prefix = "openharness-sandbox"): string {
