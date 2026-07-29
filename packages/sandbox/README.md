@@ -1,21 +1,21 @@
 # @openharness/sandbox
 
-Sandbox runtime helpers for OpenHarness.
+OpenHarness 的 sandbox runtime 辅助层。
 
-Current MVP:
+当前 MVP：
 
-- `srt` backend wraps shell commands with Anthropic Sandbox Runtime.
-- `docker` backend starts a long-lived container and runs shell commands with `docker exec`.
-- Docker `proxy` network mode uses Docker bridge networking and injects configured proxy env.
-- Docker images are checked before startup; missing images can be built from the bundled Dockerfile when `autoBuildImage` is enabled.
-- `ohs sandbox on` enables a project-local reusable Docker container by default. The container is named from the
-  workspace path and survives CLI/TUI exits until `ohs sandbox clean` removes it.
-- File tools remain host-side and use path validation when sandboxing is enabled.
-- `SandboxAdapter` is a legacy compatibility facade over the shared runtime path.
+- **`srt` 后端**：用 Anthropic Sandbox Runtime 包装每条 shell 命令。
+- **`docker` 后端**：启动长驻容器，shell 命令通过 `docker exec` 执行。
+- Docker **`proxy` 网络模式**：走 Docker bridge，并注入配置的代理环境变量。
+- 启动前检查 Docker 镜像；镜像缺失且开启 `autoBuildImage` 时，可用内置 Dockerfile 构建。
+- `ohs sandbox on` 默认启用**项目本地、可复用**的 Docker 容器。容器名由工作区路径派生，
+  CLI/TUI 退出后仍保留，直到 `ohs sandbox clean` 删除。
+- 文件工具仍在宿主侧执行；开启 sandbox 时走路径校验。
+- `SandboxAdapter` 是兼容旧接口的门面，底层走统一 runtime 路径。
 
-Known gaps:
+已知缺口：
 
-- Docker/SRT E2E tests are optional and environment-gated; CI wiring is still pending.
+- Docker/SRT E2E 为可选、按环境跳过；CI 接线仍待完成。
 
 ## CLI
 
@@ -32,26 +32,25 @@ ohs sandbox status
 ohs sandbox doctor
 ```
 
-`ohs sandbox on` persists project-local Docker sandbox settings with `network=bridge` and `reuseContainer=true`
-by default. Restart the CLI/TUI after changing sandbox settings.
+`ohs sandbox on` 默认把**项目本地** Docker sandbox 配置写入 settings（`network=bridge`、
+`reuseContainer=true`）。修改 sandbox 设置后需重启 CLI/TUI 才会生效。
 
-## Docker Lifecycle
+## Docker 生命周期
 
-Default project mode:
+默认项目模式：
 
-1. `ohs sandbox on` writes `.openharness/settings.json` in the current workspace.
-2. On CLI/TUI startup, OpenHarness checks Docker availability and the configured image.
-3. If the image is missing and `autoBuildImage=true`, OpenHarness builds it from `packages/sandbox/Dockerfile`.
-4. The reusable container name is derived from the workspace path, for example
-   `openharness-sandbox-my-project-<hash>`.
-5. If that container already exists, OpenHarness starts it if needed and runs shell commands with `docker exec`.
-6. On CLI/TUI exit, reusable containers are left in place for the next run.
-7. `ohs sandbox clean` removes the reusable container for the current workspace.
+1. `ohs sandbox on` 写入当前工作区的 `.openharness/settings.json`。
+2. CLI/TUI 启动时检查 Docker 可用性与配置镜像。
+3. 镜像缺失且 `autoBuildImage=true` 时，从 `packages/sandbox/Dockerfile` 构建。
+4. 可复用容器名由工作区路径派生，例如 `openharness-sandbox-my-project-<hash>`。
+5. 若容器已存在：需要时先 start，再通过 `docker exec` 跑 shell。
+6. CLI/TUI 退出时**不删除**可复用容器，留给下次使用。
+7. `ohs sandbox clean` 删除当前工作区对应的可复用容器。
 
-With `ohs sandbox on --no-reuse`, each OpenHarness session creates a session-named Docker container with `--rm`
-and stops it during process cleanup.
+使用 `ohs sandbox on --no-reuse` 时，每次 OpenHarness 会话创建带 `--rm` 的会话级容器，
+并在进程清理时 stop。
 
-## Optional E2E
+## 可选 E2E
 
 ```bash
 pnpm --filter @openharness/sandbox e2e:docker
@@ -59,13 +58,13 @@ pnpm --filter @openharness/sandbox e2e:srt
 pnpm --filter @openharness/sandbox e2e
 ```
 
-Docker E2E uses `node:22-bookworm` by default and skips when Docker or that image is unavailable. Set
-`OPENHARNESS_E2E_DOCKER_IMAGE` to test another local image.
+Docker E2E 默认用 `node:22-bookworm`；Docker 或该镜像不可用时跳过。可用
+`OPENHARNESS_E2E_DOCKER_IMAGE` 指定本地其他镜像。
 
-Docker bridge network E2E is opt-in because network availability is host-dependent:
+Docker bridge 网络 E2E 为可选（依赖本机网络）：
 
 ```bash
 OPENHARNESS_E2E_DOCKER_NETWORK=1 pnpm --filter @openharness/sandbox e2e:docker
 ```
 
-SRT E2E skips when `srt` or its platform dependencies are unavailable.
+`srt` 或其平台依赖不可用时，SRT E2E 会跳过。

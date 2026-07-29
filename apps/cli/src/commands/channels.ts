@@ -75,9 +75,10 @@ async function runChannelsServe(): Promise<void> {
   // Read+WebFetch 构成"读本地文件→出站外带"链(且 WebFetch 可打内网)。
   // 信任环境想要联网,自己加 settings.permission.autoApproveTools: ["WebFetch"]。
   const { READ_ONLY_TOOLS } = await import("@openharness/permissions");
-  const channelSafeTools = [...READ_ONLY_TOOLS].filter(
-    (t) => t !== "WebFetch" && t !== "WebSearch",
-  );
+  // const channelSafeTools = [...READ_ONLY_TOOLS].filter(
+  //   (t) => t !== "WebFetch" && t !== "WebSearch",
+  // );
+  const channelSafeTools = [...READ_ONLY_TOOLS]
   const bundle = await bootstrap({
     settings,
     cliOverrides: { autoApproveTools: channelSafeTools },

@@ -3,6 +3,8 @@
 > 状态：已批准（用户裁决：**微信不做**——Python v0.1.9 本就无微信通道，
 > 最接近的 mochat 是 Mochat 平台的 Socket.IO 桥；飞书做**基础版接线**，
 > 媒体/卡片/分片等 1342 行全功能留待）。
+>
+> 实现后的完整调用链见 [`channels-flow.md`](./channels-flow.md)。
 
 ## 背景
 

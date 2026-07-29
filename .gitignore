@@ -12,6 +12,7 @@ build
 *.swo
 .DS_Store
 .history
+.pnpm-store/*
 
 logs
 *.log
