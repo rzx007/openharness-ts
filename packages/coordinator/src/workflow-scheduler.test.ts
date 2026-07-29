@@ -388,6 +388,32 @@ describe("runWorkflow", () => {
     expect(notification.tasks.find((task) => task.taskId === "docs")?.reconciliationIssueIds).toBeUndefined();
   });
 
+  it("distinguishes actual changed-file overlap from declared write-scope overlap", async () => {
+    const result = await runWorkflow(
+      {
+        mode: "parallel",
+        maxConcurrency: 1,
+        tasks: [
+          { id: "auth-a", writeScope: ["packages/auth"] },
+          { id: "auth-b", writeScope: ["packages/auth/src"] },
+        ],
+      },
+      ({ task }) => ({
+        summary: `${task.id} done`,
+        metadata: { changedFiles: ["packages/auth/src/index.ts"] },
+      }),
+    );
+
+    expect(result.reconciliationIssues).toEqual([
+      expect.objectContaining({
+        issueId: "reconcile-actual-auth-a-auth-b",
+        type: "changed-file-overlap",
+        severity: "actual-conflict",
+        changedFiles: ["packages/auth/src/index.ts"],
+      }),
+    ]);
+  });
+
   it("aggregates budget usage from task progress metadata", async () => {
     const snapshots: WorkflowRunSnapshot[] = [];
     const result = await runWorkflow(
@@ -427,6 +453,35 @@ describe("runWorkflow", () => {
       timeBudgetMs: 1_000,
     });
     expect(snapshots.some((snapshot) => snapshot.budget.tokensUsed === 120)).toBe(true);
+  });
+
+  it("stops scheduling new work after budget policy is exceeded", async () => {
+    const events: WorkflowRunEvent[] = [];
+    const result = await runWorkflow(
+      {
+        mode: "pipeline",
+        budgetPolicy: { maxTokensUsed: 100 },
+        tasks: [{ id: "research" }, { id: "implement" }],
+      },
+      ({ task }) => ({
+        summary: `${task.id} done`,
+        metadata: { budget: { tokensUsed: 120 } },
+      }),
+      {
+        onEvent: (event) => events.push(event),
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.results.research?.status).toBe("completed");
+    expect(result.results.implement).toEqual(expect.objectContaining({
+      status: "skipped",
+      skippedReason: "Skipped because workflow token budget exceeded (120/100)",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "workflow_budget_exceeded",
+      summary: "Skipped because workflow token budget exceeded (120/100)",
+    }));
   });
 });
 

@@ -137,6 +137,7 @@ describe("workflowTool", () => {
       {
         mode: "parallel",
         defaultTaskTimeoutSeconds: 30,
+        budgetPolicy: { maxTokensUsed: 1_000, maxTimeUsedSeconds: 60 },
         tasks: [
           { id: "write", writeScope: ["packages/auth"], isolate: false, timeoutSeconds: 10 },
           { id: "read", readOnly: true, writeScope: ["packages/auth"] },
@@ -148,6 +149,7 @@ describe("workflowTool", () => {
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultTaskTimeoutMs: 30_000,
+        budgetPolicy: { maxTokensUsed: 1_000, maxTimeUsedMs: 60_000 },
         tasks: [
           expect.objectContaining({ id: "write", writeScope: ["packages/auth"], isolate: false, timeoutMs: 10_000 }),
           expect.objectContaining({ id: "read", readOnly: true, writeScope: ["packages/auth"] }),
@@ -251,6 +253,10 @@ describe("workflowTool", () => {
       expect(textOf(result)).toContain("status-run");
       expect(textOf(result)).toContain("research");
       expect(textOf(result)).toContain("workflow_started");
+
+      const timelineResult = await tool.execute({ action: "status", runId: "status-run", view: "timeline" }, { cwd });
+      expect(textOf(timelineResult)).toContain("Workflow status-run (running)");
+      expect(textOf(timelineResult)).toContain("workflow_started");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

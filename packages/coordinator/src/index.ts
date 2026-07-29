@@ -75,6 +75,7 @@ Use task \`timeoutSeconds\` or workflow \`defaultTaskTimeoutSeconds\` when a wor
 For parallel write work, set \`writeScope\` on non-isolated tasks. The scheduler serializes overlapping non-isolated write scopes; \`readOnly: true\` and \`isolate: true\` tasks do not participate in shared-cwd write conflicts.
 Workflow status snapshots include \`blockedTaskIds\` and \`blockedTasks\` when ready tasks are waiting on writeScope conflicts; use those fields to explain scheduling pauses instead of treating them as stalled work.
 Workflow results can include \`needsReconciliation\`, \`reconciliationIssues\`, \`budget\`, and persisted event timeline data. Use those fields to decide whether a completed workflow still needs merge/reconcile follow-up.
+Use Workflow status with \`view: "timeline"\` when a human-readable run timeline is more useful than raw JSON. Use \`budgetPolicy\` to stop scheduling new worker tasks after known token/time usage crosses a workflow-level threshold.
 
 When calling agent:
 - Do not use one worker to check on another. Workers will notify you when they are done.
@@ -505,6 +506,7 @@ export {
   runWorkflow,
   validateWorkflowTasks,
   workflowTasksConflict,
+  type WorkflowBudgetPolicy,
   type WorkflowBudgetUsage,
   type WorkflowReconciliationIssue,
   type WorkflowFailurePolicy,

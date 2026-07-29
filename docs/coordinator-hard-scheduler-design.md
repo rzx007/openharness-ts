@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V5.5：
+截至目前，已经落地到 V6.3：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -508,9 +508,12 @@ V1 内存调度核心
 - V5.3：已完成基础版。最终结果和 notification 会输出 `needsReconciliation` / `reconciliationIssues`，把多个 completed worker 的重叠 `writeScope` 显式标为需要 reconcile。
 - V5.4：已完成基础版。persistent workflow 会把 `onEvent` 写入 `.events.ndjson`，`Workflow` 的 status payload 会返回 snapshot + events timeline。
 - V5.5：已完成基础版。worker 可通过 progress metadata 或 `budget` 字段上报 token/时间预算消耗，scheduler 会写入 running snapshot、task result、workflow budget 汇总。
+- V6.1：已完成基础版。`Workflow` status payload 包含结构化 `timeline` / `timelineText`，并支持 `view: "timeline"` 直接返回人类可读时间线。
+- V6.2：已完成基础版。reconcile issue 会区分声明层 `write-scope-overlap` 和 worker metadata 上报 `changedFiles` 形成的 `changed-file-overlap` 实际文件重叠。
+- V6.3：已完成基础版。`budgetPolicy` 支持 token/time 阈值；当已知消耗达到阈值后，scheduler 不再启动后续 worker，而是把未启动 task 标记为 skipped。
 
 下一步建议：
 
-- V6.1：让 UI / CLI 以时间线方式展示 workflow event log，而不是只返回原始 JSON。
-- V6.2：把 reconcile issue 接到真实 merge/patch 检测，区分“声明范围重叠”和“实际 diff 冲突”。
-- V6.3：增加 budget policy，例如超过 token/time 软预算时不再启动新 worker，或自动降级为 sequential。
+- V7.1：把 timeline 接到真实 CLI/UI 面板，支持 filter task/status/event type。
+- V7.2：让 runner 自动上报 changedFiles，而不是依赖 worker metadata 手工声明。
+- V7.3：增加更丰富的 budget policy，例如预算接近上限时自动降级为 sequential、缩短 worker prompt 或切换只读验证。

@@ -42,6 +42,11 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           enum: ["run", "resume", "status"],
           description: "Workflow action. Defaults to run. Use resume/status with runId or latest.",
         },
+        view: {
+          type: "string",
+          enum: ["json", "timeline"],
+          description: "For status, choose the default structured JSON payload or a readable timeline view.",
+        },
         mode: {
           type: "string",
           enum: ["parallel", "sequential", "pipeline"],
@@ -108,6 +113,13 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         defaultTaskTimeoutSeconds: {
           type: "number",
           description: "Default hard timeout for each task attempt, in seconds. Individual tasks can override it.",
+        },
+        budgetPolicy: {
+          type: "object",
+          properties: {
+            maxTokensUsed: { type: "number", description: "Stop scheduling new work once known token usage reaches this value." },
+            maxTimeUsedSeconds: { type: "number", description: "Stop scheduling new work once known task time usage reaches this value." },
+          },
         },
         failurePolicy: {
           type: "string",
@@ -189,7 +201,11 @@ function workflowStatus(input: Record<string, unknown>, cwd: string) {
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
   }
-  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, store.loadEvents(snapshot.runId)) }] };
+  const events = store.loadEvents(snapshot.runId);
+  if (input.view === "timeline") {
+    return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events) }] };
+  }
+  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, events) }] };
 }
 
 async function workflowResume(
@@ -239,6 +255,8 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   if (defaultTaskTimeoutMs === "invalid") {
     return "defaultTaskTimeoutSeconds must be a positive number";
   }
+  const budgetPolicyOrError = parseBudgetPolicy(input.budgetPolicy);
+  if (typeof budgetPolicyOrError === "string") return budgetPolicyOrError;
 
   const tasks: WorkflowTask[] = [];
   for (const [index, rawTask] of input.tasks.entries()) {
@@ -255,6 +273,7 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
     tasks,
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
     ...(defaultTaskTimeoutMs !== undefined ? { defaultTaskTimeoutMs } : {}),
+    ...(budgetPolicyOrError !== undefined ? { budgetPolicy: budgetPolicyOrError } : {}),
     ...(failurePolicy !== undefined ? { failurePolicy } : {}),
   };
 }
@@ -311,6 +330,23 @@ function parseRetry(input: unknown, taskIndex: number): WorkflowTask["retry"] | 
   };
 }
 
+function parseBudgetPolicy(input: unknown): WorkflowSpec["budgetPolicy"] | string {
+  if (input === undefined) return undefined;
+  if (!isRecord(input)) return "budgetPolicy must be an object";
+  const maxTokensUsed = input.maxTokensUsed;
+  const maxTimeUsedMs = secondsToOptionalMs(input.maxTimeUsedSeconds);
+  if (maxTokensUsed !== undefined && (typeof maxTokensUsed !== "number" || !Number.isFinite(maxTokensUsed) || maxTokensUsed <= 0)) {
+    return "budgetPolicy.maxTokensUsed must be a positive number";
+  }
+  if (maxTimeUsedMs === "invalid") {
+    return "budgetPolicy.maxTimeUsedSeconds must be a positive number";
+  }
+  return {
+    ...(maxTokensUsed !== undefined ? { maxTokensUsed } : {}),
+    ...(maxTimeUsedMs !== undefined ? { maxTimeUsedMs } : {}),
+  };
+}
+
 function isWorkflowMode(value: unknown): value is WorkflowMode {
   return typeof value === "string" && WORKFLOW_MODES.has(value as WorkflowMode);
 }
@@ -349,11 +385,42 @@ function secondsToOptionalMs(value: unknown): number | undefined | "invalid" {
 }
 
 function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[] = []): string {
+  const timeline = createWorkflowTimeline(events);
   return [
     "<workflow-run-snapshot>",
-    `<payload>${escapeXml(JSON.stringify({ snapshot, events }))}</payload>`,
+    `<payload>${escapeXml(JSON.stringify({ snapshot, events, timeline, timelineText: formatTimelineText(snapshot, timeline) }))}</payload>`,
     "</workflow-run-snapshot>",
   ].join("\n");
+}
+
+function formatWorkflowTimeline(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[]): string {
+  return formatTimelineText(snapshot, createWorkflowTimeline(events));
+}
+
+function createWorkflowTimeline(events: WorkflowRunEvent[]): Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }> {
+  return events.map((event) => ({
+    timestamp: event.timestamp,
+    type: event.type,
+    taskId: event.taskId,
+    status: typeof event.status === "string" ? event.status : undefined,
+    summary: event.summary ?? event.result?.summary ?? event.blockedTask?.reason ?? event.type,
+  }));
+}
+
+function formatTimelineText(
+  snapshot: WorkflowRunSnapshot,
+  timeline: Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }>,
+): string {
+  const lines = [
+    `Workflow ${snapshot.runId} (${snapshot.status})`,
+    snapshot.summary,
+  ];
+  for (const event of timeline) {
+    const task = event.taskId ? ` ${event.taskId}` : "";
+    const status = event.status ? ` [${event.status}]` : "";
+    lines.push(`- ${new Date(event.timestamp).toISOString()} ${event.type}${task}${status}: ${event.summary}`);
+  }
+  return lines.join("\n");
 }
 
 function escapeXml(value: string): string {

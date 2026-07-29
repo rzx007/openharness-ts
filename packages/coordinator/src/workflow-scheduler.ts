@@ -35,6 +35,7 @@ export interface WorkflowSpec {
   tasks: WorkflowTask[];
   maxConcurrency?: number;
   defaultTaskTimeoutMs?: number;
+  budgetPolicy?: WorkflowBudgetPolicy;
   failurePolicy?: WorkflowFailurePolicy;
 }
 
@@ -43,6 +44,7 @@ export interface WorkflowPlan {
   tasks: WorkflowTask[];
   maxConcurrency: number;
   defaultTaskTimeoutMs?: number;
+  budgetPolicy?: WorkflowBudgetPolicy;
   executionOrder: string[];
   dependencyMap: Record<string, string[]>;
   dependentsMap: Record<string, string[]>;
@@ -60,6 +62,11 @@ export interface WorkflowTaskBudgetUsage {
   tokenBudget?: number;
   timeUsedMs?: number;
   timeBudgetMs?: number;
+}
+
+export interface WorkflowBudgetPolicy {
+  maxTokensUsed?: number;
+  maxTimeUsedMs?: number;
 }
 
 export interface WorkflowTaskRunResult {
@@ -108,6 +115,7 @@ export interface WorkflowRunSnapshotPlan {
   tasks: WorkflowTask[];
   maxConcurrency: number | "unbounded";
   defaultTaskTimeoutMs?: number;
+  budgetPolicy?: WorkflowBudgetPolicy;
   executionOrder: string[];
   dependencyMap: Record<string, string[]>;
   dependentsMap: Record<string, string[]>;
@@ -139,10 +147,11 @@ export interface WorkflowBlockedTask {
 
 export interface WorkflowReconciliationIssue {
   issueId: string;
-  type: "write-scope-overlap";
-  severity: "needs-reconciliation";
+  type: "write-scope-overlap" | "changed-file-overlap";
+  severity: "needs-reconciliation" | "actual-conflict";
   taskIds: string[];
   writeScope: string[];
+  changedFiles?: string[];
   summary: string;
 }
 
@@ -185,6 +194,7 @@ export type WorkflowRunEventType =
   | "task_started"
   | "task_progress"
   | "task_blocked"
+  | "workflow_budget_exceeded"
   | "task_finished"
   | "workflow_finished";
 
@@ -236,6 +246,7 @@ export interface WorkflowNotification {
 export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
   const tasks = normalizeTasksForMode(spec.mode, spec.tasks);
   validateWorkflowTimeouts(spec.defaultTaskTimeoutMs, tasks);
+  validateWorkflowBudgetPolicy(spec.budgetPolicy);
   validateWorkflowTasks(tasks);
   const dependencyMap = buildDependencyMap(tasks);
   const dependentsMap = buildDependentsMap(tasks);
@@ -246,6 +257,7 @@ export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
     tasks,
     maxConcurrency: resolveMaxConcurrency(spec.mode, spec.maxConcurrency),
     defaultTaskTimeoutMs: spec.defaultTaskTimeoutMs,
+    budgetPolicy: spec.budgetPolicy,
     executionOrder,
     dependencyMap,
     dependentsMap,
@@ -492,6 +504,16 @@ export async function runWorkflow(
     const scheduleMore = () => {
       if (failFastTriggered) return;
       while (running.size < plan.maxConcurrency && ready.length > 0) {
+        const exceededBudget = workflowBudgetPolicyExceeded(plan.budgetPolicy, collectWorkflowBudgetUsage([...results.values()], [...runningTasks.values()]));
+        if (exceededBudget) {
+          emitEvent({
+            type: "workflow_budget_exceeded",
+            status: "running",
+            summary: exceededBudget,
+          });
+          skipUnstarted(exceededBudget);
+          break;
+        }
         const readyIndex = findNextRunnableReadyIndex(ready, running, plan.tasks);
         if (readyIndex < 0) {
           refreshBlockedTasks();
@@ -806,6 +828,19 @@ function validateWorkflowTimeouts(defaultTaskTimeoutMs: number | undefined, task
   }
 }
 
+function validateWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy | undefined): void {
+  if (!policy) return;
+  validateBudgetPolicyNumber(policy.maxTokensUsed, "budgetPolicy.maxTokensUsed");
+  validateBudgetPolicyNumber(policy.maxTimeUsedMs, "budgetPolicy.maxTimeUsedMs");
+}
+
+function validateBudgetPolicyNumber(value: number | undefined, label: string): void {
+  if (value === undefined) return;
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a positive number`);
+  }
+}
+
 function validateTimeoutMs(value: number | undefined, label: string): void {
   if (value === undefined) return;
   if (!Number.isFinite(value) || value <= 0) {
@@ -1019,21 +1054,41 @@ function collectWorkflowReconciliationIssues(
   plan: WorkflowPlan,
   orderedResults: WorkflowTaskRunResult[],
 ): WorkflowReconciliationIssue[] {
+  const resultByTaskId = new Map(orderedResults.map((result) => [result.taskId, result]));
   const completedTaskIds = new Set(
     orderedResults
       .filter((result) => result.status === "completed")
       .map((result) => result.taskId),
   );
   const issues: WorkflowReconciliationIssue[] = [];
+  const actualConflictPairs = new Set<string>();
   const tasks = plan.executionOrder
     .map((taskId) => requireWorkflowTask(plan.tasks, taskId))
     .filter((task) => completedTaskIds.has(task.id));
 
   for (let i = 0; i < tasks.length; i += 1) {
     const left = tasks[i]!;
+    const leftChangedFiles = changedFilesFromResult(resultByTaskId.get(left.id));
     const leftScopes = runnableWriteScopes(left);
-    if (leftScopes.length === 0) continue;
     for (const right of tasks.slice(i + 1)) {
+      const pairId = `${left.id}-${right.id}`;
+      const rightChangedFiles = changedFilesFromResult(resultByTaskId.get(right.id));
+      const changedFiles = leftChangedFiles.filter((leftFile) => rightChangedFiles.includes(leftFile));
+      if (changedFiles.length > 0) {
+        actualConflictPairs.add(pairId);
+        issues.push({
+          issueId: `reconcile-actual-${pairId}`,
+          type: "changed-file-overlap",
+          severity: "actual-conflict",
+          taskIds: [left.id, right.id],
+          writeScope: [...new Set([...runnableWriteScopes(left), ...runnableWriteScopes(right)])].sort(),
+          changedFiles: [...new Set(changedFiles)].sort(),
+          summary: `Tasks '${left.id}' and '${right.id}' both changed: ${[...new Set(changedFiles)].sort().join(", ")}`,
+        });
+        continue;
+      }
+
+      if (actualConflictPairs.has(pairId) || leftScopes.length === 0) continue;
       const rightScopes = runnableWriteScopes(right);
       const overlap = leftScopes.filter((leftScope) =>
         rightScopes.some((rightScope) => writeScopesOverlap(leftScope, rightScope)),
@@ -1107,6 +1162,35 @@ function collectWorkflowBudgetUsage(
     timeUsedMs: sumBudget(tasks, "timeUsedMs"),
     timeBudgetMs: sumBudget(tasks, "timeBudgetMs"),
   };
+}
+
+function workflowBudgetPolicyExceeded(
+  policy: WorkflowBudgetPolicy | undefined,
+  budget: WorkflowBudgetUsage,
+): string | undefined {
+  if (!policy) return undefined;
+  if (policy.maxTokensUsed !== undefined && (budget.tokensUsed ?? 0) >= policy.maxTokensUsed) {
+    return `Skipped because workflow token budget exceeded (${budget.tokensUsed ?? 0}/${policy.maxTokensUsed})`;
+  }
+  if (policy.maxTimeUsedMs !== undefined && (budget.timeUsedMs ?? 0) >= policy.maxTimeUsedMs) {
+    return `Skipped because workflow time budget exceeded (${budget.timeUsedMs ?? 0}/${policy.maxTimeUsedMs}ms)`;
+  }
+  return undefined;
+}
+
+function changedFilesFromResult(result: WorkflowTaskRunResult | undefined): string[] {
+  const metadata = result?.metadata;
+  if (!metadata) return [];
+  const value = Array.isArray(metadata.changedFiles)
+    ? metadata.changedFiles
+    : isRecord(metadata.diff) && Array.isArray(metadata.diff.changedFiles)
+      ? metadata.diff.changedFiles
+      : undefined;
+  if (!value) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map(normalizeWriteScope)
+    .filter((file) => file.length > 0);
 }
 
 function cloneBudgetUsage(budget: WorkflowTaskBudgetUsage | undefined): WorkflowTaskBudgetUsage | undefined {
