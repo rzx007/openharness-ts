@@ -317,3 +317,18 @@ Container config matches: yes
 
 `ohs sandbox doctor` 在 status 基础上再输出 backend availability，例如 Docker CLI / daemon 是否可用、平台、
 降级原因等。
+
+## G. Docker E2E
+
+`packages/sandbox/e2e/docker.e2e.test.ts` 覆盖真实 Docker 路径：
+
+- 启动 Docker runtime，并在挂载工作区内执行 shell。
+- `network=none` 时阻断外网。
+- `proxy` 模式缺少 proxy env 时 fail closed。
+- 项目级 `reuseContainer=true` 时，连续两次 runtime 启动复用同一个容器。
+- 复用容器的 config hash 过期时 fail fast，并提示 `ohs sandbox rebuild`。
+- `reuseContainer=false` 时，会话临时容器 stop 后被 Docker `--rm` 删除。
+- `OPENHARNESS_E2E_DOCKER_NETWORK=1` 时额外测试 bridge 网络访问 `https://example.com`。
+
+测试默认使用本地 `node:22-bookworm`；Docker daemon 或镜像不可用时跳过。可用
+`OPENHARNESS_E2E_DOCKER_IMAGE` 指定其他本地镜像。

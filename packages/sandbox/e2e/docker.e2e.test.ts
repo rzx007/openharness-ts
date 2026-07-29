@@ -9,7 +9,10 @@ import {
   baseSettings,
   collectProcess,
   dockerAvailable,
+  dockerContainerExists,
+  dockerContainerRunning,
   dockerImageAvailable,
+  dockerRmForce,
 } from "./helpers.js";
 
 const image = process.env.OPENHARNESS_E2E_DOCKER_IMAGE ?? "node:22-bookworm";
@@ -35,6 +38,19 @@ beforeAll(() => {
 });
 
 maybeDescribe("docker sandbox e2e", () => {
+  const reusablePrefix = `openharness-e2e-reuse-${process.pid}`;
+  const tempPrefix = `openharness-e2e-temp-${process.pid}`;
+  const ownedContainers = new Set<string>();
+
+  afterEach(async () => {
+    await runtime?.stop();
+    runtime = undefined;
+    for (const containerName of ownedContainers) {
+      dockerRmForce(containerName);
+    }
+    ownedContainers.clear();
+  });
+
   it("starts a docker runtime and executes shell commands inside the mounted workspace", async () => {
     runtime = await startSandboxRuntime({
       settings: {
@@ -77,6 +93,112 @@ maybeDescribe("docker sandbox e2e", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("node-ok");
+  }, 60_000);
+
+  it("reuses the same project container across runtime starts", async () => {
+    const sandbox = {
+      enabled: true,
+      backend: "docker" as const,
+      failIfUnavailable: true,
+      network: { mode: "none" as const },
+      docker: {
+        image,
+        autoBuildImage: false,
+        reuseContainer: true,
+        containerNamePrefix: reusablePrefix,
+      },
+    };
+
+    runtime = await startSandboxRuntime({
+      settings: { ...baseSettings, sandbox },
+      cwd: process.cwd(),
+      sessionId: `e2e-reuse-first-${Date.now()}`,
+    });
+    const containerName = runtime.status.containerName!;
+    ownedContainers.add(containerName);
+    expect(dockerContainerExists(containerName)).toBe(true);
+    expect(dockerContainerRunning(containerName)).toBe(true);
+    await runtime.stop();
+    runtime = undefined;
+    expect(dockerContainerExists(containerName)).toBe(true);
+
+    runtime = await startSandboxRuntime({
+      settings: { ...baseSettings, sandbox },
+      cwd: process.cwd(),
+      sessionId: `e2e-reuse-second-${Date.now()}`,
+    });
+
+    expect(runtime.status.containerName).toBe(containerName);
+    expect(dockerContainerExists(containerName)).toBe(true);
+    expect(dockerContainerRunning(containerName)).toBe(true);
+  }, 60_000);
+
+  it("fails fast when a reusable project container has stale config", async () => {
+    const baseSandbox = {
+      enabled: true,
+      backend: "docker" as const,
+      failIfUnavailable: true,
+      network: { mode: "none" as const },
+      docker: {
+        image,
+        autoBuildImage: false,
+        reuseContainer: true,
+        containerNamePrefix: `${reusablePrefix}-drift`,
+      },
+    };
+
+    runtime = await startSandboxRuntime({
+      settings: { ...baseSettings, sandbox: baseSandbox },
+      cwd: process.cwd(),
+      sessionId: `e2e-drift-first-${Date.now()}`,
+    });
+    const containerName = runtime.status.containerName!;
+    ownedContainers.add(containerName);
+    await runtime.stop();
+    runtime = undefined;
+
+    await expect(startSandboxRuntime({
+      settings: {
+        ...baseSettings,
+        sandbox: {
+          ...baseSandbox,
+          docker: {
+            ...baseSandbox.docker,
+            dns: ["1.1.1.1"],
+          },
+        },
+      },
+      cwd: process.cwd(),
+      sessionId: `e2e-drift-second-${Date.now()}`,
+    })).rejects.toThrow("ohs sandbox rebuild");
+  }, 60_000);
+
+  it("removes temporary session containers after runtime stop", async () => {
+    runtime = await startSandboxRuntime({
+      settings: {
+        ...baseSettings,
+        sandbox: {
+          enabled: true,
+          backend: "docker",
+          failIfUnavailable: true,
+          network: { mode: "none" },
+          docker: {
+            image,
+            autoBuildImage: false,
+            reuseContainer: false,
+            containerNamePrefix: tempPrefix,
+          },
+        },
+      },
+      cwd: process.cwd(),
+      sessionId: `temp-${Date.now()}`,
+    });
+    const containerName = runtime.status.containerName!;
+    expect(dockerContainerExists(containerName)).toBe(true);
+    await runtime.stop();
+    runtime = undefined;
+
+    expect(dockerContainerExists(containerName)).toBe(false);
   }, 60_000);
 
   it("blocks outbound network when Docker network mode is none", async () => {

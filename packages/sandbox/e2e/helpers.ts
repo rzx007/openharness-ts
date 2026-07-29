@@ -34,6 +34,35 @@ export function dockerImageAvailable(image: string): boolean {
   return result.status === 0;
 }
 
+export function dockerContainerExists(containerName: string): boolean {
+  const result = spawnSync("docker", ["container", "inspect", containerName], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+export function dockerContainerRunning(containerName: string): boolean {
+  const result = spawnSync("docker", [
+    "container",
+    "inspect",
+    "-f",
+    "{{.State.Running}}",
+    containerName,
+  ], {
+    windowsHide: true,
+    encoding: "utf-8",
+  });
+  return result.status === 0 && result.stdout.trim() === "true";
+}
+
+export function dockerRmForce(containerName: string): void {
+  spawnSync("docker", ["rm", "-f", containerName], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
+}
+
 export function collectProcess(child: ChildProcess): Promise<{
   exitCode: number;
   stdout: string;
