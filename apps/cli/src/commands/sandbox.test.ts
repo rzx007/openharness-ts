@@ -88,5 +88,6 @@ describe("sandbox command config", () => {
     const cmd = createSandboxCommand();
     expect(cmd.name()).toBe("sandbox");
     expect(cmd.commands.map((sub) => sub.name())).toContain("clean");
+    expect(cmd.commands.map((sub) => sub.name())).toContain("rebuild");
   });
 });

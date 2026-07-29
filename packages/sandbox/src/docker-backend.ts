@@ -37,6 +37,9 @@ export interface DockerBuildArgsOptions {
   dockerCommand?: string;
 }
 
+export const DOCKER_CONFIG_HASH_LABEL = "org.openharness.sandbox.config-hash";
+export const DOCKER_WORKSPACE_LABEL = "org.openharness.sandbox.workspace";
+
 export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
   const config = normalizeSandboxConfig(options.config);
   if (config.network.mode === "proxy" && !hasProxyEnv(config.docker.extraEnv)) {
@@ -75,6 +78,12 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
   if (!config.docker.reuseContainer) {
     argv.splice(3, 0, "--rm");
   }
+  argv.push(
+    "--label",
+    `${DOCKER_CONFIG_HASH_LABEL}=${dockerSandboxConfigHash(config, cwd)}`,
+    "--label",
+    `${DOCKER_WORKSPACE_LABEL}=${cwd}`,
+  );
 
   if (config.docker.cpuLimit > 0) {
     argv.push("--cpus", String(config.docker.cpuLimit));
@@ -187,6 +196,11 @@ export class DockerSandboxSession {
       reporter: this.options.reporter,
     });
     if (config.docker.reuseContainer && await dockerContainerExists(this.dockerCommand, this.containerName)) {
+      await assertReusableContainerMatchesConfig({
+        dockerCommand: this.dockerCommand,
+        containerName: this.containerName,
+        expectedHash: dockerSandboxConfigHash(config, resolve(this.options.cwd)),
+      });
       this.options.reporter?.({ type: "start-container", containerName: this.containerName, reused: true });
       if (!await dockerContainerRunning(this.dockerCommand, this.containerName)) {
         await runToCompletion([this.dockerCommand, "start", this.containerName]);
@@ -313,6 +327,24 @@ export function dockerReusableContainerName(projectRoot: string, prefix = "openh
   return `${prefix}-${name}-${digest}`;
 }
 
+export function dockerSandboxConfigHash(
+  config: ReturnType<typeof normalizeSandboxConfig>,
+  cwd: string,
+): string {
+  const payload = {
+    cwd: resolve(cwd),
+    containerCwd: toContainerWorkspacePath(cwd),
+    network: config.network.mode,
+    image: config.docker.image,
+    cpuLimit: config.docker.cpuLimit,
+    memoryLimit: config.docker.memoryLimit,
+    dns: [...config.docker.dns].sort(),
+    extraMounts: [...config.docker.extraMounts].sort(),
+    extraEnv: stableRecord(config.docker.extraEnv),
+  };
+  return createHash("sha1").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
+}
+
 export function toContainerWorkspacePath(hostPath: string): string {
   return process.platform === "win32" ? "/workspace" : hostPath;
 }
@@ -360,8 +392,53 @@ async function runProbe(argv: string[]): Promise<boolean> {
   });
 }
 
+async function assertReusableContainerMatchesConfig(options: {
+  dockerCommand: string;
+  containerName: string;
+  expectedHash: string;
+}): Promise<void> {
+  const existingHash = await dockerContainerLabel(
+    options.dockerCommand,
+    options.containerName,
+    DOCKER_CONFIG_HASH_LABEL,
+  );
+  if (existingHash === options.expectedHash) return;
+  throw new SandboxUnavailableError(
+    `Reusable Docker sandbox container ${options.containerName} was created with a different sandbox configuration. Run 'ohs sandbox rebuild' to recreate it.`,
+  );
+}
+
 function dockerContainerExists(dockerCommand: string, containerName: string): Promise<boolean> {
   return runProbe([dockerCommand, "container", "inspect", containerName]);
+}
+
+function dockerContainerLabel(
+  dockerCommand: string,
+  containerName: string,
+  label: string,
+): Promise<string> {
+  return new Promise<string>((resolvePromise) => {
+    const child = spawn(dockerCommand, [
+      "container",
+      "inspect",
+      "-f",
+      `{{ index .Config.Labels "${label}" }}`,
+      containerName,
+    ], {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let stdout = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.on("error", () => resolvePromise(""));
+    child.on("close", (code) => resolvePromise(code === 0 ? stdout.trim() : ""));
+  });
+}
+
+function stableRecord(record: Record<string, string>): Array<[string, string]> {
+  return Object.entries(record).sort(([a], [b]) => a.localeCompare(b));
 }
 
 async function dockerContainerRunning(dockerCommand: string, containerName: string): Promise<boolean> {

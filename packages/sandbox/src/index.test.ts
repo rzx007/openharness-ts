@@ -8,8 +8,11 @@ import {
   buildDockerBuildArgs,
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
+  DOCKER_CONFIG_HASH_LABEL,
+  DOCKER_WORKSPACE_LABEL,
   dockerContainerName,
   dockerReusableContainerName,
+  dockerSandboxConfigHash,
   dockerNetworkMode,
   getDockerAvailability,
   getSandboxAvailability,
@@ -360,6 +363,8 @@ describe("docker backend argv builders", () => {
     expect(argv).toContain("--network");
     expect(argv[argv.indexOf("--network") + 1]).toBe("bridge");
     expect(argv[argv.indexOf("--name") + 1]).toBe("openharness-sandbox-abc-123");
+    expect(argv).toContain("--label");
+    expect(argv).toContain(`${DOCKER_WORKSPACE_LABEL}=${resolve("D:/repo")}`);
     expect(argv[argv.indexOf("--cpus") + 1]).toBe("2");
     expect(argv[argv.indexOf("--memory") + 1]).toBe("4g");
     expect(argv[argv.indexOf("--dns") + 1]).toBe("1.1.1.1");
@@ -393,6 +398,10 @@ describe("docker backend argv builders", () => {
 
     expect(argv).not.toContain("--rm");
     expect(argv[argv.indexOf("--name") + 1]).toBe(dockerReusableContainerName(resolve(cwd)));
+    expect(argv).toContain(`${DOCKER_CONFIG_HASH_LABEL}=${dockerSandboxConfigHash(
+      normalizeSandboxConfig({ enabled: true, backend: "docker", docker: { reuseContainer: true } }),
+      resolve(cwd),
+    )}`);
   });
 
   it("maps docker proxy mode to bridge networking and injects proxy env", () => {
@@ -502,6 +511,24 @@ describe("docker backend argv builders", () => {
     expect(first).toBe(second);
     expect(first).toMatch(/^openharness-sandbox-repo-[a-f0-9]{12}$/);
     expect(first).not.toBe(other);
+  });
+
+  it("changes docker config hash when container-affecting settings change", () => {
+    const base = normalizeSandboxConfig({
+      enabled: true,
+      backend: "docker",
+      network: { mode: "bridge" },
+      docker: { image: "node:22-bookworm" },
+    });
+    const changed = normalizeSandboxConfig({
+      enabled: true,
+      backend: "docker",
+      network: { mode: "none" },
+      docker: { image: "node:22-bookworm" },
+    });
+
+    expect(dockerSandboxConfigHash(base, "D:/repo")).toBe(dockerSandboxConfigHash(base, "D:/repo"));
+    expect(dockerSandboxConfigHash(base, "D:/repo")).not.toBe(dockerSandboxConfigHash(changed, "D:/repo"));
   });
 });
 

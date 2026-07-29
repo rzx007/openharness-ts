@@ -178,6 +178,7 @@ ohs sandbox on --backend srt           # use Anthropic Sandbox Runtime
 ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
 ohs sandbox off
 ohs sandbox clean                       # remove current project reusable container
+ohs sandbox rebuild                     # recreate reusable container after config changes
 ohs sandbox status
 ohs sandbox doctor
 
@@ -620,6 +621,7 @@ Sandbox 推荐用子命令切换，不必手写配置：
 ohs sandbox on      # 默认写入项目配置：Docker + bridge 网络 + 复用容器
 ohs sandbox off
 ohs sandbox clean
+ohs sandbox rebuild
 ohs sandbox status
 ```
 

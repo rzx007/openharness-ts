@@ -77,6 +77,7 @@ ohs sandbox on --backend srt           # 使用 Anthropic Sandbox Runtime
 ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
 ohs sandbox off
 ohs sandbox clean                      # 删除当前项目的复用容器
+ohs sandbox rebuild                    # 配置变化后删除复用容器，下一次启动重建
 ohs sandbox status
 ohs sandbox doctor
 ```
@@ -198,7 +199,9 @@ CLI/TUI 启动
   → docker image inspect <image>
   → 镜像缺失且 autoBuildImage=true 时，从 packages/sandbox/Dockerfile 自动 build
   → 根据 workspace 路径生成稳定容器名：openharness-sandbox-<project>-<hash>
+  → 容器 label 记录当前 Docker sandbox 配置 hash
   → 容器已存在：必要时 docker start
+  → 容器已存在但 label hash 不匹配：拒绝复用，提示 ohs sandbox rebuild
   → 容器不存在：docker run -d --name <project-container> ...
   → Bash 每次通过 docker exec 进入该容器执行
 
@@ -207,6 +210,10 @@ CLI/TUI 退出
 
 ohs sandbox clean
   → docker rm -f <project-container>
+
+ohs sandbox rebuild
+  → docker rm -f <project-container>
+  → 下一次 CLI/TUI 启动按当前配置重新 docker run
 ```
 
 `ohs sandbox on --no-reuse` 切换为“会话临时容器”：

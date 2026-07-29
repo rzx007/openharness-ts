@@ -179,18 +179,15 @@ export function createSandboxCommand(): Command {
     .command("clean")
     .description("Remove the reusable Docker sandbox container for this project")
     .action(async () => {
-      const { loadSettings } = await import("@openharness/core");
-      const { dockerReusableContainerName } = await import("@openharness/sandbox");
-      const settings = await loadSettings(undefined, { includeProject: true });
-      const prefix = settings.sandbox?.docker?.containerNamePrefix ?? "openharness-sandbox";
-      const containerName = dockerReusableContainerName(process.cwd(), prefix);
-      const result = await runDocker(["rm", "-f", containerName]);
-      if (result.exitCode === 0) {
-        console.log(`Removed sandbox container: ${containerName}`);
-      } else {
-        console.error(result.stderr || `Failed to remove sandbox container: ${containerName}`);
-        process.exit(1);
-      }
+      await removeReusableContainer("Removed sandbox container");
+    });
+
+  cmd
+    .command("rebuild")
+    .description("Remove the reusable Docker sandbox container so it is recreated with current config")
+    .action(async () => {
+      await removeReusableContainer("Removed sandbox container for rebuild");
+      console.log("Start OpenHarness again to create the container with the current sandbox config.");
     });
 
   return cmd;
@@ -216,6 +213,21 @@ function parseList(value: string): string[] {
 function hasProxyEnv(extraEnv?: Record<string, string>): boolean {
   if (!extraEnv) return false;
   return Boolean(extraEnv.HTTP_PROXY || extraEnv.HTTPS_PROXY || extraEnv.http_proxy || extraEnv.https_proxy);
+}
+
+async function removeReusableContainer(successPrefix: string): Promise<void> {
+  const { loadSettings } = await import("@openharness/core");
+  const { dockerReusableContainerName } = await import("@openharness/sandbox");
+  const settings = await loadSettings(undefined, { includeProject: true });
+  const prefix = settings.sandbox?.docker?.containerNamePrefix ?? "openharness-sandbox";
+  const containerName = dockerReusableContainerName(process.cwd(), prefix);
+  const result = await runDocker(["rm", "-f", containerName]);
+  if (result.exitCode === 0) {
+    console.log(`${successPrefix}: ${containerName}`);
+  } else {
+    console.error(result.stderr || `Failed to remove sandbox container: ${containerName}`);
+    process.exit(1);
+  }
 }
 
 function runDocker(args: string[]): Promise<{ exitCode: number; stderr: string }> {
