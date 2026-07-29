@@ -646,7 +646,7 @@ async function runRepl(
   registerPluginHooks(bundle.hookExecutor);
   // C.1 插件 tools_dir：动态加载插件工具目录，注册进 toolRegistry。
   await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
-  // C.4 coordinator 模式：限制工具集为 Agent/SendMessage/TaskStop。
+  // C.4 coordinator 模式：限制工具集为 orchestration tools。
   if (isCoordinatorMode()) {
     bundle.queryEngine.setAllowedTools(getCoordinatorTools());
   }
@@ -1220,7 +1220,7 @@ async function runBackendHost(
   registerPluginHooks(bundle.hookExecutor);
   // C.1 插件 tools_dir：动态加载插件工具目录，注册进 toolRegistry。
   await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
-  // C.4 coordinator 模式：限制工具集为 Agent/SendMessage/TaskStop。
+  // C.4 coordinator 模式：限制工具集为 orchestration tools。
   if (isCoordinatorMode()) {
     bundle.queryEngine.setAllowedTools(getCoordinatorTools());
   }

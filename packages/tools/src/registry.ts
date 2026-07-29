@@ -19,6 +19,7 @@ import { enterPlanModeTool, exitPlanModeTool } from "./mode/plan-mode";
 import { enterWorktreeTool, exitWorktreeTool } from "./mode/worktree";
 import { notebookEditTool } from "./notebook";
 import { agentTool, sendMessageTool } from "./agent";
+import { workflowTool } from "./agent/workflow";
 import { teamCreateTool, teamDeleteTool } from "./agent/team";
 import { cronCreateTool, cronDeleteTool, cronListTool, cronToggleTool, remoteTriggerTool } from "./schedule";
 import { mcpToolCallTool, listMcpResourcesTool, readMcpResourceTool, mcpAuthTool } from "./mcp";
@@ -58,6 +59,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(notebookEditTool);
   registry.register(agentTool);
   registry.register(sendMessageTool);
+  registry.register(workflowTool);
   registry.register(teamCreateTool);
   registry.register(teamDeleteTool);
   registry.register(cronCreateTool);

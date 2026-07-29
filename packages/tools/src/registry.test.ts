@@ -35,6 +35,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("NotebookEdit");
     expect(names).toContain("Agent");
     expect(names).toContain("SendMessage");
+    expect(names).toContain("Workflow");
     expect(names).toContain("TeamCreate");
     expect(names).toContain("TeamDelete");
     expect(names).toContain("CronCreate");
@@ -48,7 +49,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("RemoteTrigger");
     expect(names).toContain("Lsp");
     expect(names).toContain("FeishuPush");
-    expect(tools).toHaveLength(44);
+    expect(tools).toHaveLength(45);
   });
 
   it("each tool has required fields", () => {

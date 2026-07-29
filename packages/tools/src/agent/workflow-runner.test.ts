@@ -1,0 +1,218 @@
+import { describe, expect, it, vi } from "vitest";
+import { runWorkflow, type WorkflowTaskRunResult } from "@openharness/coordinator";
+import type { AwaitTaskResult } from "@openharness/services";
+import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
+import { createAgentWorkflowRunner } from "./workflow-runner.js";
+
+function completedDependency(taskId: string, result: string): WorkflowTaskRunResult {
+  return {
+    taskId,
+    status: "completed",
+    summary: `${taskId} summary`,
+    result,
+    attempts: 1,
+    dependencies: [],
+    startedAt: 1,
+    finishedAt: 2,
+  };
+}
+
+describe("createAgentWorkflowRunner", () => {
+  it("spawns a swarm worker and waits for its TaskManager task", async () => {
+    const spawnWorker = vi.fn(async (_config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+      success: true,
+      agentId: "worker@alpha",
+      taskId: "task_1",
+      backendType: "subprocess",
+      worktree: { path: "/wt/worker", branch: "worktree-worker" },
+    }));
+    const awaitTask = vi.fn(async (_taskId: string): Promise<AwaitTaskResult> => ({
+      status: "completed",
+      output: "worker result",
+      exitCode: 0,
+    }));
+    const getAgentDefinition = vi.fn(() => ({
+      name: "worker",
+      description: "Worker",
+      systemPrompt: "system",
+      tools: ["Read"],
+      disallowedTools: ["Bash"],
+      maxTurns: 5,
+      effort: "high",
+      permissionMode: "plan",
+    }));
+
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      team: "alpha",
+      timeoutMs: 500,
+      spawnWorker,
+      awaitTask,
+      getAgentDefinition,
+    });
+
+    const result = await runner({
+      task: { id: "implement", prompt: "patch it", subagentType: "worker", isolate: true },
+      attempt: 2,
+      dependencyResults: {},
+    });
+
+    expect(spawnWorker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "worker",
+        team: "alpha",
+        prompt: "patch it",
+        cwd: "/repo",
+        model: undefined,
+        systemPrompt: "system",
+        permissionMode: "plan",
+        isolate: true,
+        allowedTools: ["Read"],
+        disallowedTools: ["Bash"],
+        maxTurns: 5,
+        effort: "high",
+      }),
+    );
+    expect(spawnWorker.mock.calls[0]![0].sessionId).toContain("wf-implement-2-");
+    expect(awaitTask).toHaveBeenCalledWith("task_1", { timeoutMs: 500 });
+    expect(result).toEqual({
+      status: "completed",
+      summary: "implement finished with exit code 0",
+      result: "worker result",
+      metadata: {
+        agentId: "worker@alpha",
+        taskManagerTaskId: "task_1",
+        backendType: "subprocess",
+        worktree: { path: "/wt/worker", branch: "worktree-worker" },
+      },
+    });
+  });
+
+  it("injects dependency results and pipeline input into the worker prompt", async () => {
+    const spawnWorker = vi.fn(async (_config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+      success: true,
+      agentId: "worker@default",
+      taskId: "task_2",
+      backendType: "subprocess",
+    }));
+    const awaitTask = vi.fn(async (): Promise<AwaitTaskResult> => ({
+      status: "completed",
+      output: "ok",
+    }));
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker,
+      awaitTask,
+      getAgentDefinition: () => undefined,
+    });
+
+    await runner({
+      task: { id: "verify", prompt: "verify it" },
+      attempt: 1,
+      dependencyResults: {
+        research: completedDependency("research", "found src/auth.ts"),
+      },
+      pipelineInput: completedDependency("implement", "changed src/auth.ts"),
+    });
+
+    const prompt = spawnWorker.mock.calls[0]![0].prompt;
+    expect(prompt).toContain("verify it");
+    expect(prompt).toContain("Dependency results:");
+    expect(prompt).toContain("- research: completed - research summary");
+    expect(prompt).toContain("found src/auth.ts");
+    expect(prompt).toContain("Pipeline input:");
+    expect(prompt).toContain("- previous: completed - implement summary");
+    expect(prompt).toContain("changed src/auth.ts");
+  });
+
+  it("maps spawn failures, stopped tasks, and timed-out waits to workflow statuses", async () => {
+    const spawnFailure = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker: async () => ({
+        success: false,
+        agentId: "worker@default",
+        taskId: "",
+        backendType: "subprocess",
+        error: "no backend",
+      }),
+      awaitTask: async () => ({ status: "completed", output: "unreachable" }),
+      getAgentDefinition: () => undefined,
+    });
+
+    await expect(
+      spawnFailure({ task: { id: "spawn" }, attempt: 1, dependencyResults: {} }),
+    ).resolves.toMatchObject({ status: "failed", summary: "no backend" });
+
+    const stopped = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker: async () => ({
+        success: true,
+        agentId: "worker@default",
+        taskId: "task_stopped",
+        backendType: "subprocess",
+      }),
+      awaitTask: async () => ({ status: "stopped", output: "stopped" }),
+      getAgentDefinition: () => undefined,
+    });
+
+    await expect(
+      stopped({ task: { id: "stop" }, attempt: 1, dependencyResults: {} }),
+    ).resolves.toMatchObject({ status: "killed", result: "stopped" });
+
+    const timedOut = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker: async () => ({
+        success: true,
+        agentId: "worker@default",
+        taskId: "task_timeout",
+        backendType: "subprocess",
+      }),
+      awaitTask: async () => ({ status: "running", output: "still working", timedOut: true }),
+      getAgentDefinition: () => undefined,
+    });
+
+    await expect(
+      timedOut({ task: { id: "slow" }, attempt: 1, dependencyResults: {} }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      summary: "slow did not finish before timeout",
+      metadata: expect.objectContaining({ timedOut: true }),
+    });
+  });
+
+  it("can be used by runWorkflow as a real runner adapter", async () => {
+    const spawnWorker = vi.fn(async (config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+      success: true,
+      agentId: `${config.name}@${config.team}`,
+      taskId: `task_${config.prompt.includes("implement") ? "implement" : "research"}`,
+      backendType: "subprocess",
+    }));
+    const awaitTask = vi.fn(async (taskId: string): Promise<AwaitTaskResult> => ({
+      status: "completed",
+      output: `${taskId} output`,
+      exitCode: 0,
+    }));
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker,
+      awaitTask,
+      getAgentDefinition: () => undefined,
+    });
+
+    const result = await runWorkflow(
+      {
+        mode: "pipeline",
+        tasks: [
+          { id: "research", prompt: "research" },
+          { id: "implement", prompt: "implement" },
+        ],
+      },
+      runner,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.results.research?.metadata?.taskManagerTaskId).toBe("task_research");
+    expect(result.results.implement?.metadata?.taskManagerTaskId).toBe("task_implement");
+    expect(spawnWorker.mock.calls[1]![0].prompt).toContain("Pipeline input:");
+  });
+});

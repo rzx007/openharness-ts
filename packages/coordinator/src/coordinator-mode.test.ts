@@ -40,8 +40,8 @@ describe("matchSessionMode", () => {
 });
 
 describe("getCoordinatorTools", () => {
-  it("reserves Agent / SendMessage / TaskStop for the coordinator", () => {
-    expect(getCoordinatorTools()).toEqual(["Agent", "SendMessage", "TaskStop"]);
+  it("reserves orchestration tools for the coordinator", () => {
+    expect(getCoordinatorTools()).toEqual(["Agent", "SendMessage", "TaskStop", "Workflow"]);
   });
 });
 
@@ -80,6 +80,7 @@ describe("getCoordinatorSystemPrompt", () => {
   it("uses the rich worker capabilities by default", () => {
     const prompt = getCoordinatorSystemPrompt();
     expect(prompt).toContain("project skills via the Skill tool");
+    expect(prompt).toContain("Workflow");
     expect(prompt).toContain("## 1. Your Role");
   });
 

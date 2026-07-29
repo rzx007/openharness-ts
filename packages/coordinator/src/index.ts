@@ -63,7 +63,10 @@ Every message you send is to the user. Worker results and system notifications a
 - **agent** - Spawn a new worker
 - **send_message** - Continue an existing worker (send a follow-up to its \`to\` agent ID)
 - **task_stop** - Stop a running worker
+- **Workflow** - Run a hard-scheduled multi-agent workflow when the work has explicit dependencies, sequence, pipeline, retries, failure policy, or concurrency limits
 - **subscribe_pr_activity / unsubscribe_pr_activity** (if available) - Subscribe to GitHub PR events (review comments, CI results). Events arrive as user messages. Merge conflict transitions do NOT arrive — GitHub doesn't webhook \`mergeable_state\` changes, so poll \`gh pr view N --json mergeable\` if tracking conflict status. Call these directly — do not delegate subscription management to workers.
+
+Use Workflow for DAG-shaped or repeatable workflows where code should enforce order, dependencies, concurrency, retry, and failure propagation. Use Agent plus TaskWait for simple one-off delegation or when you want to reason interactively between worker results.
 
 When calling agent:
 - Do not use one worker to check on another. Workers will notify you when they are done.
@@ -97,6 +100,14 @@ Format:
 - The \`<task-id>\` value is the agent ID — use send_message with that ID as \`to\` to continue that worker
 
 When you spawn a worker, the agent tool returns a \`task_id\`. To wait for that worker's result, call the \`TaskWait\` tool with its \`task_id\` — it blocks until the worker finishes and returns the result directly. Never poll with Sleep plus repeated \`TaskOutput\` calls; that wastes turns and tokens. \`TaskWait\` is always the way to block on a worker you launched.
+
+### Workflow Results
+
+Workflow returns a **structured** \`<workflow-notification>\` envelope. The envelope contains an XML-escaped JSON \`payload\` with:
+- overall \`status\`, \`summary\`, \`mode\`, and task counts
+- per-task \`taskId\`, \`status\`, \`summary\`, \`attempts\`, dependencies, timings, optional result, and optional metadata
+
+Use this structured payload to decide what completed, failed, or was skipped. Do not infer workflow status by skimming free-form worker text.
 
 ### Example
 
@@ -474,3 +485,27 @@ export {
   getCoordinatorUserContext,
   getCoordinatorSystemPrompt,
 } from "./coordinator-mode.js";
+
+export {
+  createWorkflowPlan,
+  createWorkflowNotification,
+  formatWorkflowNotification,
+  parseWorkflowNotification,
+  runWorkflow,
+  validateWorkflowTasks,
+  type WorkflowFailurePolicy,
+  type WorkflowMode,
+  type WorkflowNotification,
+  type WorkflowNotificationTask,
+  type WorkflowPlan,
+  type WorkflowRetryPolicy,
+  type WorkflowRunner,
+  type WorkflowRunnerContext,
+  type WorkflowRunResult,
+  type WorkflowSpec,
+  type WorkflowTask,
+  type WorkflowTaskRunResult,
+  type WorkflowTaskStatus,
+  type WorkflowTaskTerminalStatus,
+  type WorkflowWorkerResult,
+} from "./workflow-scheduler.js";

@@ -54,7 +54,7 @@ export function matchSessionMode(sessionMode?: string): string | undefined {
 
 /** coordinator 专属工具集。 */
 export function getCoordinatorTools(): string[] {
-  return ["Agent", "SendMessage", "TaskStop"];
+  return ["Agent", "SendMessage", "TaskStop", "Workflow"];
 }
 
 /**
