@@ -141,6 +141,18 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
               enum: ["continue", "serialize", "conserve", "serialize-and-conserve"],
               description: "How to schedule remaining work after a soft budget is reached.",
             },
+            conserve: {
+              type: "object",
+              properties: {
+                promptHint: { type: "string", description: "Extra prompt guidance for workers started in budget conservation mode." },
+                permissionMode: {
+                  type: "string",
+                  enum: ["default", "plan"],
+                  description: "Permission mode override for conservation workers.",
+                },
+                maxTurns: { type: "number", description: "Max turns override for conservation workers." },
+              },
+            },
           },
         },
         failurePolicy: {
@@ -361,6 +373,7 @@ function parseBudgetPolicy(input: unknown): WorkflowSpec["budgetPolicy"] | strin
   const softMaxTokensUsed = input.softMaxTokensUsed;
   const softMaxTimeUsedMs = secondsToOptionalMs(input.softMaxTimeUsedSeconds);
   const onSoftLimit = input.onSoftLimit;
+  const conserveOrError = parseConservePolicy(input.conserve);
   if (maxTokensUsed !== undefined && (typeof maxTokensUsed !== "number" || !Number.isFinite(maxTokensUsed) || maxTokensUsed <= 0)) {
     return "budgetPolicy.maxTokensUsed must be a positive number";
   }
@@ -382,12 +395,33 @@ function parseBudgetPolicy(input: unknown): WorkflowSpec["budgetPolicy"] | strin
   ) {
     return "budgetPolicy.onSoftLimit must be one of: continue, serialize, conserve, serialize-and-conserve";
   }
+  if (typeof conserveOrError === "string") return conserveOrError;
   return {
     ...(maxTokensUsed !== undefined ? { maxTokensUsed } : {}),
     ...(maxTimeUsedMs !== undefined ? { maxTimeUsedMs } : {}),
     ...(softMaxTokensUsed !== undefined ? { softMaxTokensUsed } : {}),
     ...(softMaxTimeUsedMs !== undefined ? { softMaxTimeUsedMs } : {}),
     ...(onSoftLimit !== undefined ? { onSoftLimit } : {}),
+    ...(conserveOrError !== undefined ? { conserve: conserveOrError } : {}),
+  };
+}
+
+function parseConservePolicy(input: unknown): NonNullable<WorkflowSpec["budgetPolicy"]>["conserve"] | string {
+  if (input === undefined) return undefined;
+  if (!isRecord(input)) return "budgetPolicy.conserve must be an object";
+  const promptHint = asOptionalString(input.promptHint);
+  const permissionMode = input.permissionMode;
+  const maxTurns = input.maxTurns;
+  if (permissionMode !== undefined && permissionMode !== "default" && permissionMode !== "plan") {
+    return "budgetPolicy.conserve.permissionMode must be one of: default, plan";
+  }
+  if (maxTurns !== undefined && (typeof maxTurns !== "number" || !Number.isInteger(maxTurns) || maxTurns < 1)) {
+    return "budgetPolicy.conserve.maxTurns must be a positive integer";
+  }
+  return {
+    ...(promptHint !== undefined ? { promptHint } : {}),
+    ...(permissionMode !== undefined ? { permissionMode } : {}),
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
   };
 }
 
@@ -453,15 +487,18 @@ function filterWorkflowEvents(events: WorkflowRunEvent[], filters: TimelineFilte
 
 function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[] = [], filters: TimelineFilters = {}): string {
   const timeline = createWorkflowTimeline(events);
+  const timelineControls = createTimelineControls(snapshot, events);
+  const timelineSummary = createTimelineSummary(timeline);
   return [
     "<workflow-run-snapshot>",
-    `<payload>${escapeXml(JSON.stringify({ snapshot, events, filters, timeline, timelineText: formatTimelineText(snapshot, timeline, filters) }))}</payload>`,
+    `<payload>${escapeXml(JSON.stringify({ snapshot, events, filters, timelineControls, timelineSummary, timeline, timelineText: formatTimelineText(snapshot, timeline, filters, timelineSummary) }))}</payload>`,
     "</workflow-run-snapshot>",
   ].join("\n");
 }
 
 function formatWorkflowTimeline(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[], filters: TimelineFilters = {}): string {
-  return formatTimelineText(snapshot, createWorkflowTimeline(events), filters);
+  const timeline = createWorkflowTimeline(events);
+  return formatTimelineText(snapshot, timeline, filters, createTimelineSummary(timeline));
 }
 
 function createWorkflowTimeline(events: WorkflowRunEvent[]): Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }> {
@@ -478,10 +515,12 @@ function formatTimelineText(
   snapshot: WorkflowRunSnapshot,
   timeline: Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }>,
   filters: TimelineFilters = {},
+  summary = createTimelineSummary(timeline),
 ): string {
   const lines = [
     `Workflow ${snapshot.runId} (${snapshot.status})`,
     snapshot.summary,
+    `Events: ${summary.total} total; ${Object.entries(summary.byType).map(([type, count]) => `${type}=${count}`).join(" ")}`,
   ];
   const filterText = formatTimelineFilters(filters);
   if (filterText) lines.push(filterText);
@@ -491,6 +530,31 @@ function formatTimelineText(
     lines.push(`- ${new Date(event.timestamp).toISOString()} ${event.type}${task}${status}: ${event.summary}`);
   }
   return lines.join("\n");
+}
+
+function createTimelineControls(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[]) {
+  return {
+    taskIds: [...new Set([...snapshot.plan.tasks.map((task) => task.id), ...events.map((event) => event.taskId).filter((id): id is string => id !== undefined)])].sort(),
+    eventTypes: [...new Set(events.map((event) => event.type))].sort(),
+    statuses: [...new Set(events.map((event) => event.status).filter((status) => typeof status === "string").map(String))].sort(),
+  };
+}
+
+function createTimelineSummary(
+  timeline: Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }>,
+) {
+  return {
+    total: timeline.length,
+    byType: countBy(timeline.map((event) => event.type)),
+    byStatus: countBy(timeline.map((event) => event.status).filter((status): status is string => status !== undefined)),
+    byTaskId: countBy(timeline.map((event) => event.taskId).filter((taskId): taskId is string => taskId !== undefined)),
+  };
+}
+
+function countBy(values: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
+  return counts;
 }
 
 function formatTimelineFilters(filters: TimelineFilters): string | undefined {

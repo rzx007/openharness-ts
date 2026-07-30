@@ -487,6 +487,7 @@ describe("runWorkflow", () => {
   it("serializes and conserves later tasks after a soft budget policy is reached", async () => {
     const started: string[] = [];
     const budgetModes: Array<string | undefined> = [];
+    const conservePolicies: Array<unknown> = [];
     const unblock: Record<string, () => void> = {};
     const events: WorkflowRunEvent[] = [];
 
@@ -494,16 +495,21 @@ describe("runWorkflow", () => {
       {
         mode: "parallel",
         maxConcurrency: 2,
-        budgetPolicy: { softMaxTokensUsed: 100, onSoftLimit: "serialize-and-conserve" },
+        budgetPolicy: {
+          softMaxTokensUsed: 100,
+          onSoftLimit: "serialize-and-conserve",
+          conserve: { promptHint: "small steps", permissionMode: "plan", maxTurns: 2 },
+        },
         tasks: [
           { id: "first" },
           { id: "second", dependsOn: ["first"] },
           { id: "third", dependsOn: ["first"] },
         ],
       },
-      async ({ task, budgetMode }) => {
+      async ({ task, budgetMode, budgetConserve }) => {
         started.push(task.id);
         budgetModes.push(budgetMode);
+        conservePolicies.push(budgetConserve);
         if (task.id === "first") {
           return { summary: "first done", metadata: { budget: { tokensUsed: 120 } } };
         }
@@ -517,6 +523,7 @@ describe("runWorkflow", () => {
 
     await vi.waitFor(() => expect(started).toEqual(["first", "second"]));
     expect(budgetModes).toEqual(["normal", "conserve"]);
+    expect(conservePolicies[1]).toEqual({ promptHint: "small steps", permissionMode: "plan", maxTurns: 2 });
     await vi.waitFor(() => {
       expect(events).toContainEqual(expect.objectContaining({
         type: "workflow_budget_conserving",

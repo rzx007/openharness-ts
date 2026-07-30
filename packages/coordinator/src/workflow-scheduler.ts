@@ -70,6 +70,32 @@ export interface WorkflowBudgetPolicy {
   softMaxTokensUsed?: number;
   softMaxTimeUsedMs?: number;
   onSoftLimit?: "continue" | "serialize" | "conserve" | "serialize-and-conserve";
+  conserve?: WorkflowConservePolicy;
+}
+
+export interface WorkflowConservePolicy {
+  promptHint?: string;
+  permissionMode?: "default" | "plan";
+  maxTurns?: number;
+}
+
+export interface WorkflowDiffFileSummary {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "untracked" | "other";
+  insertions?: number;
+  deletions?: number;
+}
+
+export interface WorkflowDiffSummary {
+  changedFiles: string[];
+  files: WorkflowDiffFileSummary[];
+  added: number;
+  modified: number;
+  deleted: number;
+  renamed: number;
+  untracked: number;
+  insertions: number;
+  deletions: number;
 }
 
 export interface WorkflowTaskRunResult {
@@ -95,6 +121,7 @@ export interface WorkflowRunnerContext {
   pipelineInput?: WorkflowTaskRunResult;
   resumeFrom?: WorkflowRunningTask;
   budgetMode?: "normal" | "conserve";
+  budgetConserve?: WorkflowConservePolicy;
   reportProgress?: (progress: WorkflowTaskProgress) => void;
 }
 
@@ -579,6 +606,7 @@ export async function runWorkflow(
           resumeFrom,
           resolveTaskTimeoutMs(plan, task),
           softBudget?.conserve === true ? "conserve" : "normal",
+          softBudget?.conserve === true ? plan.budgetPolicy?.conserve : undefined,
           (progress) => {
             const current = runningTasks.get(taskId);
             if (!current) return;
@@ -715,6 +743,7 @@ async function runWorkflowTask(
   resumeFrom: WorkflowRunningTask | undefined,
   timeoutMs: number | undefined,
   budgetMode: "normal" | "conserve",
+  budgetConserve: WorkflowConservePolicy | undefined,
   reportProgress: (progress: WorkflowTaskProgress) => void,
 ): Promise<WorkflowTaskRunResult> {
   const retry = normalizeRetry(task.retry);
@@ -743,6 +772,7 @@ async function runWorkflowTask(
           pipelineInput,
           resumeFrom: attempt === 1 ? resumeFrom : undefined,
           budgetMode,
+          budgetConserve,
           reportProgress: recordProgress,
         }),
         timeoutMs,
@@ -864,6 +894,16 @@ function validateWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy | undefined):
     policy.onSoftLimit !== "serialize-and-conserve"
   ) {
     throw new Error("budgetPolicy.onSoftLimit must be one of: continue, serialize, conserve, serialize-and-conserve");
+  }
+  if (policy.conserve?.maxTurns !== undefined && (!Number.isInteger(policy.conserve.maxTurns) || policy.conserve.maxTurns < 1)) {
+    throw new Error("budgetPolicy.conserve.maxTurns must be a positive integer");
+  }
+  if (
+    policy.conserve?.permissionMode !== undefined &&
+    policy.conserve.permissionMode !== "default" &&
+    policy.conserve.permissionMode !== "plan"
+  ) {
+    throw new Error("budgetPolicy.conserve.permissionMode must be one of: default, plan");
   }
 }
 
@@ -1238,6 +1278,8 @@ function changedFilesFromResult(result: WorkflowTaskRunResult | undefined): stri
     ? metadata.changedFiles
     : isRecord(metadata.diff) && Array.isArray(metadata.diff.changedFiles)
       ? metadata.diff.changedFiles
+      : isRecord(metadata.diff) && Array.isArray(metadata.diff.files)
+        ? metadata.diff.files.map((file) => isRecord(file) ? file.path : undefined)
       : undefined;
   if (!value) return [];
   return value

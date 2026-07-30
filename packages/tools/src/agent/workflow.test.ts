@@ -143,6 +143,7 @@ describe("workflowTool", () => {
           softMaxTokensUsed: 800,
           softMaxTimeUsedSeconds: 45,
           onSoftLimit: "serialize-and-conserve",
+          conserve: { promptHint: "stay tiny", permissionMode: "plan", maxTurns: 4 },
         },
         tasks: [
           { id: "write", writeScope: ["packages/auth"], isolate: false, timeoutSeconds: 10 },
@@ -161,6 +162,7 @@ describe("workflowTool", () => {
           softMaxTokensUsed: 800,
           softMaxTimeUsedMs: 45_000,
           onSoftLimit: "serialize-and-conserve",
+          conserve: { promptHint: "stay tiny", permissionMode: "plan", maxTurns: 4 },
         },
         tasks: [
           expect.objectContaining({ id: "write", writeScope: ["packages/auth"], isolate: false, timeoutMs: 10_000 }),
@@ -283,6 +285,8 @@ describe("workflowTool", () => {
       expect(textOf(result)).toContain("status-run");
       expect(textOf(result)).toContain("research");
       expect(textOf(result)).toContain("workflow_started");
+      expect(textOf(result)).toContain("timelineControls");
+      expect(textOf(result)).toContain("timelineSummary");
 
       const timelineResult = await tool.execute({ action: "status", runId: "status-run", view: "timeline" }, { cwd });
       expect(textOf(timelineResult)).toContain("Workflow status-run (running)");

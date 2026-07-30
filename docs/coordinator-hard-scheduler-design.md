@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V7.3：
+截至目前，已经落地到 V8.3：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -514,9 +514,12 @@ V1 内存调度核心
 - V7.1：已完成基础版。`Workflow` status timeline 支持按 `taskIds`、`eventTypes`、`statuses` 过滤，JSON payload 同步返回过滤后的 `timeline` / `timelineText`。
 - V7.2：已完成基础版。agent workflow runner 会在 worker 完成后自动读取对应 worktree/cwd 的 git changed files，并写入 result metadata，reconcile 不再完全依赖 worker 手工声明。
 - V7.3：已完成基础版。`budgetPolicy` 支持 soft limit 和 `onSoftLimit`，达到软阈值后可 serialize 后续 worker、进入 conserve prompt 模式，或两者同时启用。
+- V8.1：已完成基础版。`Workflow` status JSON 增加 `timelineControls` 和 `timelineSummary`，让 UI 可以直接渲染 task/status/event type filter 控件和汇总计数。
+- V8.2：已完成基础版。agent workflow runner 会采集 git diff summary，输出 changed files、文件状态分类以及 insertions/deletions 汇总，并继续兼容旧的 `changedFiles` 字段。
+- V8.3：已完成基础版。`budgetPolicy.conserve` 支持配置 conserve prompt hint、permission mode 和 maxTurns，soft budget 后的 worker 可以更明确地降成本运行。
 
 下一步建议：
 
-- V8.1：把 timeline filter 接入真实 UI 控件，支持按 task/status/event type 交互式筛选。
-- V8.2：把 changedFiles 采集升级为 diff summary，包括新增/修改/删除分类和行数统计。
-- V8.3：让 conserve 模式可配置，例如只读验证、禁止大范围搜索、或自动降低 worker maxTurns。
+- V9.1：把 `timelineControls` 真正接入前端组件，提供交互式筛选和保存筛选状态。
+- V9.2：把 diff summary 接入 reconcile UI，支持按文件查看冲突任务和变更规模。
+- V9.3：增加 budget policy preset，例如 `cheap-review`、`safe-write`、`fast-parallel`，减少手写策略参数。

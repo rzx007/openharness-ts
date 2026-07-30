@@ -1,5 +1,7 @@
 import type {
   AgentDefinition,
+  WorkflowConservePolicy,
+  WorkflowDiffSummary,
   WorkflowRunner,
   WorkflowTask,
   WorkflowWorkerResult,
@@ -21,6 +23,7 @@ export interface AgentWorkflowRunnerOptions {
   spawnWorker?: (config: TeammateSpawnConfig) => Promise<SpawnResult>;
   awaitTask?: (taskId: string, options?: { timeoutMs?: number }) => Promise<AwaitTaskResult>;
   getChangedFiles?: (cwd: string) => Promise<string[]>;
+  getDiffSummary?: (cwd: string) => Promise<WorkflowDiffSummary>;
   getAgentDefinition?: (name: string) => AgentDefinition | undefined;
 }
 
@@ -33,8 +36,8 @@ export interface AgentWorkflowRunnerOptions {
  * or swarm.
  */
 export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): WorkflowRunner {
-  return async ({ task, attempt, dependencyResults, pipelineInput, resumeFrom, budgetMode, reportProgress }) => {
-    const prompt = buildWorkerPrompt(task, dependencyResults, pipelineInput, budgetMode);
+  return async ({ task, attempt, dependencyResults, pipelineInput, resumeFrom, budgetMode, budgetConserve, reportProgress }) => {
+    const prompt = buildWorkerPrompt(task, dependencyResults, pipelineInput, budgetMode, budgetConserve);
     const subagentType = task.subagentType ?? "worker";
     const agentDef = options.getAgentDefinition
       ? options.getAgentDefinition(subagentType)
@@ -60,8 +63,8 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
           worktree: getWorktreeMetadata(resumeFrom?.metadata),
           notice: getStringMetadata(resumeFrom?.metadata, "notice"),
         } satisfies SpawnResult;
-        const changedFiles = await getChangedFilesForWorker(options, spawn);
-        return mapAwaitedTaskToWorkerResult(task, spawn, waited, changedFiles);
+        const diff = await getDiffSummaryForWorker(options, spawn);
+        return mapAwaitedTaskToWorkerResult(task, spawn, waited, diff);
       } catch (error) {
         reportProgress?.({
           summary: `Existing task ${resumedTaskId} unavailable; spawning replacement`,
@@ -83,12 +86,14 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       model: task.model ?? agentDef?.model,
       systemPrompt: agentDef?.systemPrompt,
       permissionMode: normalizePermissionMode(
-        task.permissionMode ?? options.permissionMode ?? agentDef?.permissionMode,
+        budgetMode === "conserve"
+          ? budgetConserve?.permissionMode ?? task.permissionMode ?? options.permissionMode ?? agentDef?.permissionMode
+          : task.permissionMode ?? options.permissionMode ?? agentDef?.permissionMode,
       ),
       isolate: task.isolate === true,
       allowedTools: agentDef?.tools,
       disallowedTools: agentDef?.disallowedTools,
-      maxTurns: agentDef?.maxTurns,
+      maxTurns: budgetMode === "conserve" ? budgetConserve?.maxTurns ?? agentDef?.maxTurns : agentDef?.maxTurns,
       effort: agentDef?.effort != null ? String(agentDef.effort) : undefined,
     });
 
@@ -109,8 +114,8 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       metadata: spawnMetadata(spawn),
     });
     const waited = await awaitTask(spawn.taskId, { timeoutMs: options.timeoutMs });
-    const changedFiles = await getChangedFilesForWorker(options, spawn);
-    return mapAwaitedTaskToWorkerResult(task, spawn, waited, changedFiles);
+    const diff = await getDiffSummaryForWorker(options, spawn);
+    return mapAwaitedTaskToWorkerResult(task, spawn, waited, diff);
   };
 }
 
@@ -119,10 +124,14 @@ function buildWorkerPrompt(
   dependencyResults: Record<string, { status: string; summary: string; result?: string }>,
   pipelineInput: { status: string; summary: string; result?: string } | undefined,
   budgetMode: "normal" | "conserve" | undefined,
+  budgetConserve: WorkflowConservePolicy | undefined,
 ): string {
   const parts = [task.prompt ?? task.description ?? task.id];
   if (budgetMode === "conserve") {
-    parts.push("\nBudget conservation mode: keep the response concise, avoid broad exploration, and prefer read-only verification unless edits are essential.");
+    parts.push(
+      "\nBudget conservation mode:",
+      budgetConserve?.promptHint ?? "Keep the response concise, avoid broad exploration, and prefer read-only verification unless edits are essential.",
+    );
   }
   const dependencyEntries = Object.entries(dependencyResults);
   if (dependencyEntries.length > 0) {
@@ -159,7 +168,7 @@ function mapAwaitedTaskToWorkerResult(
   task: WorkflowTask,
   spawn: SpawnResult,
   waited: AwaitTaskResult,
-  changedFiles: string[] = [],
+  diff: WorkflowDiffSummary | undefined,
 ): WorkflowWorkerResult {
   const status = waited.timedOut
     ? "failed"
@@ -183,7 +192,7 @@ function mapAwaitedTaskToWorkerResult(
       backendType: spawn.backendType,
       ...(spawn.worktree ? { worktree: spawn.worktree } : {}),
       ...(spawn.notice ? { notice: spawn.notice } : {}),
-      ...(changedFiles.length > 0 ? { changedFiles } : {}),
+      ...(diff && diff.changedFiles.length > 0 ? { changedFiles: diff.changedFiles, diff } : {}),
       ...(waited.timedOut ? { timedOut: true } : {}),
     },
   };
@@ -213,37 +222,144 @@ function getWorktreeMetadata(metadata: Record<string, unknown> | undefined): Spa
     : undefined;
 }
 
-async function getChangedFilesForWorker(
+async function getDiffSummaryForWorker(
   options: AgentWorkflowRunnerOptions,
   spawn: SpawnResult,
-): Promise<string[]> {
+): Promise<WorkflowDiffSummary | undefined> {
   const cwd = spawn.worktree?.path ?? options.cwd;
-  const getChangedFiles = options.getChangedFiles ?? defaultGetChangedFiles;
   try {
-    return normalizeChangedFiles(await getChangedFiles(cwd));
+    if (options.getDiffSummary) return normalizeDiffSummary(await options.getDiffSummary(cwd));
+    const changedFiles = options.getChangedFiles
+      ? normalizeChangedFiles(await options.getChangedFiles(cwd))
+      : undefined;
+    return normalizeDiffSummary(await defaultGetDiffSummary(cwd, changedFiles));
   } catch {
-    return [];
+    return undefined;
   }
 }
 
-async function defaultGetChangedFiles(cwd: string): Promise<string[]> {
-  const { stdout } = await execFileAsync("git", ["-C", cwd, "status", "--porcelain", "--untracked-files=all"], {
+async function defaultGetDiffSummary(cwd: string, knownChangedFiles?: string[]): Promise<WorkflowDiffSummary> {
+  const statusResult = await execFileAsync("git", ["-C", cwd, "status", "--porcelain", "--untracked-files=all"], {
     windowsHide: true,
   });
-  return parseGitStatusPorcelain(stdout);
+  const numstatResult = await execFileAsync("git", ["-C", cwd, "diff", "--numstat", "HEAD", "--"], {
+    windowsHide: true,
+  }).catch(() => ({ stdout: "" }));
+  return buildDiffSummary(parseGitStatusPorcelain(statusResult.stdout), parseGitDiffNumstat(numstatResult.stdout), knownChangedFiles);
 }
 
-function parseGitStatusPorcelain(output: string): string[] {
+function parseGitStatusPorcelain(output: string): Array<{ path: string; status: WorkflowDiffSummary["files"][number]["status"] }> {
   return output
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter((line) => line.length > 0)
-    .map((line) => line.slice(3).split(" -> ").pop() ?? line.slice(3))
-    .filter((file) => file.length > 0);
+    .map((line) => {
+      const code = line.slice(0, 2);
+      const path = line.slice(3).split(" -> ").pop() ?? line.slice(3);
+      return { path, status: statusFromPorcelainCode(code) };
+    })
+    .filter((file) => file.path.length > 0);
+}
+
+function parseGitDiffNumstat(output: string): Map<string, { insertions: number; deletions: number }> {
+  const stats = new Map<string, { insertions: number; deletions: number }>();
+  for (const line of output.split(/\r?\n/)) {
+    if (line.trim() === "") continue;
+    const [insertions, deletions, ...pathParts] = line.split(/\t/);
+    const path = pathParts.join("\t").split(" => ").pop();
+    if (!path) continue;
+    stats.set(path, {
+      insertions: parseNumstatCount(insertions),
+      deletions: parseNumstatCount(deletions),
+    });
+  }
+  return stats;
+}
+
+function buildDiffSummary(
+  statusFiles: Array<{ path: string; status: WorkflowDiffSummary["files"][number]["status"] }>,
+  stats: Map<string, { insertions: number; deletions: number }>,
+  knownChangedFiles: string[] | undefined,
+): WorkflowDiffSummary {
+  const filesByPath = new Map<string, WorkflowDiffSummary["files"][number]>();
+  for (const file of statusFiles) {
+    const path = normalizeChangedFile(file.path);
+    if (!path) continue;
+    const stat = stats.get(file.path) ?? stats.get(path);
+    filesByPath.set(path, {
+      path,
+      status: file.status,
+      ...(stat ? { insertions: stat.insertions, deletions: stat.deletions } : {}),
+    });
+  }
+  for (const file of knownChangedFiles ?? []) {
+    const path = normalizeChangedFile(file);
+    if (!path || filesByPath.has(path)) continue;
+    const stat = stats.get(file) ?? stats.get(path);
+    filesByPath.set(path, {
+      path,
+      status: "other",
+      ...(stat ? { insertions: stat.insertions, deletions: stat.deletions } : {}),
+    });
+  }
+  return normalizeDiffSummary({
+    changedFiles: [...filesByPath.keys()],
+    files: [...filesByPath.values()],
+    added: 0,
+    modified: 0,
+    deleted: 0,
+    renamed: 0,
+    untracked: 0,
+    insertions: 0,
+    deletions: 0,
+  });
+}
+
+function statusFromPorcelainCode(code: string): WorkflowDiffSummary["files"][number]["status"] {
+  if (code.includes("?")) return "untracked";
+  if (code.includes("A")) return "added";
+  if (code.includes("D")) return "deleted";
+  if (code.includes("R")) return "renamed";
+  if (code.includes("M")) return "modified";
+  return "other";
+}
+
+function parseNumstatCount(value: string | undefined): number {
+  if (!value || value === "-") return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function normalizeChangedFiles(files: string[]): string[] {
-  return [...new Set(files.map((file) => file.trim().replace(/\\/g, "/")).filter((file) => file.length > 0))].sort();
+  return [...new Set(files.map(normalizeChangedFile).filter((file) => file.length > 0))].sort();
+}
+
+function normalizeChangedFile(file: string): string {
+  return file.trim().replace(/\\/g, "/");
+}
+
+function normalizeDiffSummary(diff: WorkflowDiffSummary): WorkflowDiffSummary {
+  const files = diff.files
+    .map((file) => ({
+      ...file,
+      path: normalizeChangedFile(file.path),
+      insertions: file.insertions,
+      deletions: file.deletions,
+    }))
+    .filter((file) => file.path.length > 0)
+    .sort((a, b) => a.path.localeCompare(b.path));
+  const count = (status: WorkflowDiffSummary["files"][number]["status"]) => files.filter((file) => file.status === status).length;
+  return {
+    changedFiles: normalizeChangedFiles(diff.changedFiles.length > 0 ? diff.changedFiles : files.map((file) => file.path)),
+    files,
+    added: count("added"),
+    modified: count("modified"),
+    deleted: count("deleted"),
+    renamed: count("renamed"),
+    untracked: count("untracked"),
+    insertions: files.reduce((total, file) => total + (file.insertions ?? 0), 0),
+    deletions: files.reduce((total, file) => total + (file.deletions ?? 0), 0),
+  };
 }
 
 async function defaultSpawnWorker(config: TeammateSpawnConfig): Promise<SpawnResult> {

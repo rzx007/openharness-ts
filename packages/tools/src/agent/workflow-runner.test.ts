@@ -125,7 +125,7 @@ describe("createAgentWorkflowRunner", () => {
     expect(prompt).toContain("changed src/auth.ts");
   });
 
-  it("shortens worker behavior in budget conservation mode", async () => {
+  it("applies configurable worker behavior in budget conservation mode", async () => {
     const spawnWorker = vi.fn(async (_config: TeammateSpawnConfig): Promise<SpawnResult> => ({
       success: true,
       agentId: "worker@default",
@@ -144,12 +144,21 @@ describe("createAgentWorkflowRunner", () => {
       attempt: 1,
       dependencyResults: {},
       budgetMode: "conserve",
+      budgetConserve: {
+        promptHint: "Only inspect the smallest relevant files.",
+        permissionMode: "plan",
+        maxTurns: 3,
+      },
     });
 
-    expect(spawnWorker.mock.calls[0]![0].prompt).toContain("Budget conservation mode");
+    expect(spawnWorker.mock.calls[0]![0]).toEqual(expect.objectContaining({
+      permissionMode: "plan",
+      maxTurns: 3,
+    }));
+    expect(spawnWorker.mock.calls[0]![0].prompt).toContain("Only inspect the smallest relevant files.");
   });
 
-  it("adds changed files from the worker cwd to result metadata", async () => {
+  it("adds changed files and diff summary from the worker cwd to result metadata", async () => {
     const runner = createAgentWorkflowRunner({
       cwd: "/repo",
       spawnWorker: async () => ({
@@ -160,9 +169,22 @@ describe("createAgentWorkflowRunner", () => {
         worktree: { path: "/wt/worker", branch: "worktree-worker" },
       }),
       awaitTask: async () => ({ status: "completed", output: "ok", exitCode: 0 }),
-      getChangedFiles: vi.fn(async (cwd) => {
+      getDiffSummary: vi.fn(async (cwd) => {
         expect(cwd).toBe("/wt/worker");
-        return ["src/auth.ts", "src/auth.ts", "docs\\plan.md"];
+        return {
+          changedFiles: ["src/auth.ts", "docs\\plan.md"],
+          files: [
+            { path: "src/auth.ts", status: "modified", insertions: 10, deletions: 2 },
+            { path: "docs\\plan.md", status: "added", insertions: 5, deletions: 0 },
+          ],
+          added: 0,
+          modified: 0,
+          deleted: 0,
+          renamed: 0,
+          untracked: 0,
+          insertions: 0,
+          deletions: 0,
+        };
       }),
       getAgentDefinition: () => undefined,
     });
@@ -170,6 +192,12 @@ describe("createAgentWorkflowRunner", () => {
     const result = await runner({ task: { id: "implement" }, attempt: 1, dependencyResults: {} });
 
     expect(result.metadata?.changedFiles).toEqual(["docs/plan.md", "src/auth.ts"]);
+    expect(result.metadata?.diff).toEqual(expect.objectContaining({
+      added: 1,
+      modified: 1,
+      insertions: 15,
+      deletions: 2,
+    }));
   });
 
   it("maps spawn failures, stopped tasks, and timed-out waits to workflow statuses", async () => {
