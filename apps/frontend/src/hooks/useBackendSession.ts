@@ -14,6 +14,7 @@ import type {
   SwarmTeammateSnapshot,
   TaskSnapshot,
   TranscriptItem,
+  WorkflowTuiState,
 } from "../types";
 
 /** BackendHost（ohs --backend-only）出站事件行前缀；见 docs/tui-flow.md */
@@ -45,6 +46,7 @@ export function useBackendSession(
   const [todoMarkdown, setTodoMarkdown] = useState("");
   const [swarmTeammates, setSwarmTeammates] = useState<SwarmTeammateSnapshot[]>([]);
   const [swarmNotifications, setSwarmNotifications] = useState<SwarmNotificationSnapshot[]>([]);
+  const [workflowState, setWorkflowState] = useState<WorkflowTuiState | null>(null);
   const childRef = useRef<ChildProcess | null>(null);
   const sentInitialPrompt = useRef(false);
 
@@ -273,6 +275,10 @@ export function useBackendSession(
       }
       return;
     }
+    if (event.type === "workflow_state") {
+      setWorkflowState(event.workflow_state ?? null);
+      return;
+    }
     if (event.type === "plan_mode_change") {
       if (event.plan_mode != null) {
         setStatus((s) => ({ ...s, permission_mode: event.plan_mode }));
@@ -301,11 +307,12 @@ export function useBackendSession(
       todoMarkdown,
       swarmTeammates,
       swarmNotifications,
+      workflowState,
       setModal,
       setSelectRequest,
       setBusy,
       sendRequest,
     }),
-    [assistantBuffer, bridgeSessions, busy, commandDetails, commands, mcpServers, modal, ready, selectRequest, status, swarmNotifications, swarmTeammates, tasks, todoMarkdown, transcript],
+    [assistantBuffer, bridgeSessions, busy, commandDetails, commands, mcpServers, modal, ready, selectRequest, status, swarmNotifications, swarmTeammates, tasks, todoMarkdown, transcript, workflowState],
   );
 }

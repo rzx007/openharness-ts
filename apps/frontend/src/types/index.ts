@@ -65,6 +65,72 @@ export type SwarmNotificationSnapshot = {
   timestamp: number;
 };
 
+export type WorkflowRunSummarySnapshot = {
+  runId: string;
+  status: "running" | "completed" | "failed" | string;
+  summary: string;
+  mode: string;
+  totalTasks: number;
+  completedTasks: number;
+  failedTasks: number;
+  pendingTasks: number;
+  runningTasks: number;
+  blockedTasks: number;
+  needsReconciliation: boolean;
+  budgetPolicyPreset?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type WorkflowTuiTaskSnapshot = {
+  taskId: string;
+  status: string;
+  summary?: string;
+  dependencies: string[];
+  taskManagerTaskId?: string;
+};
+
+export type WorkflowTuiTimelineItem = {
+  timestamp: number;
+  type: string;
+  taskId?: string;
+  status?: string;
+  summary: string;
+};
+
+export type WorkflowTuiState = {
+  runs: WorkflowRunSummarySnapshot[];
+  selectedRunId?: string;
+  snapshot?: Record<string, unknown>;
+  tasks: WorkflowTuiTaskSnapshot[];
+  timeline: WorkflowTuiTimelineItem[];
+  filters: {
+    taskId?: string;
+    eventType?: string;
+    status?: string;
+  };
+  available: {
+    taskIds: string[];
+    eventTypes: string[];
+    statuses: string[];
+  };
+  reconciliation?: {
+    needed: boolean;
+    summary: string;
+    actions: Array<{
+      actionId: string;
+      issueIds: string[];
+      taskId: string;
+      description: string;
+      prompt: string;
+      writeScope: string[];
+      dependsOn: string[];
+    }>;
+  };
+  reconciliationSpec?: unknown;
+  error?: string;
+};
+
 export type BackendEvent =
   | {
       type: "ready";
@@ -113,6 +179,10 @@ export type BackendEvent =
       swarm_teammates?: SwarmTeammateSnapshot[] | null;
       swarm_notifications?: SwarmNotificationSnapshot[] | null;
     }
+  | {
+      type: "workflow_state";
+      workflow_state?: WorkflowTuiState | null;
+    }
   | { type: "plan_mode_change"; plan_mode?: string | null }
   | { type: "shutdown" };
 
@@ -123,6 +193,7 @@ export type FrontendRequest = {
     | "permission_response"
     | "question_response"
     | "list_sessions"
+    | "workflow_request"
     | "delete_session"
     | "shutdown"
     | "interrupt";
@@ -142,4 +213,11 @@ export type FrontendRequest = {
     media_type?: string | null;
     mime_type?: string | null;
   }> | null;
+  workflow_action?: string | null;
+  workflow_run_id?: string | null;
+  workflow_task_id?: string | null;
+  workflow_event_type?: string | null;
+  workflow_status?: string | null;
+  workflow_reconcile_action_id?: string | null;
+  workflow_cancel_reason?: string | null;
 };

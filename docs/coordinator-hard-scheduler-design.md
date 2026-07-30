@@ -532,9 +532,10 @@ V1 内存调度核心
 - V12.2：已完成基础版。新增 `cancelPersistentWorkflow` 和 `Workflow action: "cancel"`，会停止 backing TaskManager task，并把 running task 标记为 killed、未启动 task 标记为 skipped 后持久化 terminal snapshot。
 - V12.3：已完成基础版。内置 workflow templates 增加 `version` 字段，模板输出可明确说明模板版本和含义。
 - V13.1：已完成基础版。新增普通 CLI 管理面 `ohs workflow list/status/validate/template/reconcile/cancel`，对接同一份 `.openharness/workflows` 持久化数据，输出 JSON，方便脚本和后续 TUI/Web 复用。完整用法见 [`workflow-cli.md`](./workflow-cli.md)。
+- V13.2：已完成基础版。TUI 新增 Workflow Runs 管理面板，接入同一份 workflow JSON 状态，支持 run 列表、详情、timeline task/event/status filter、reconcile action 选择和 running workflow 取消。
 
 下一步建议：
 
-- 产品化 backlog：把 `ohs workflow` 已有 JSON 面接到 TUI/Web，做 run 列表、详情抽屉、timeline filter、冲突 action 选择和取消按钮。
+- 产品化 backlog：Web workflow 管理面、TUI reconcile follow-up spec 一键提交执行、timeline 更细粒度搜索，以及长期历史清理/分页。
 - 运维化 backlog：补 metrics/export、长期历史清理、run artifact 打包，以及跨进程/多实例 claim lock。
 - 智能化 backlog：让 planner 基于目标自动选择模板、填参数、validate 后再提交 workflow。

@@ -23,7 +23,19 @@ import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers, re
 import { updateRulesFromSession } from "@openharness/personalization";
 import { updateSessionMemoryFile, getSessionMemoryPath, getSessionMemoryContent, sessionMemoryToCompactText } from "@openharness/services";
 import { isSwarmWorker } from "@openharness/swarm";
-import { isCoordinatorMode, getCoordinatorTools, matchSessionMode } from "@openharness/coordinator";
+import {
+  WorkflowRunStore,
+  cancelPersistentWorkflow,
+  createWorkflowNotification,
+  createWorkflowResultFromSnapshot,
+  createWorkflowSpecFromReconciliationPlan,
+  isCoordinatorMode,
+  getCoordinatorTools,
+  matchSessionMode,
+  type WorkflowRunEvent,
+  type WorkflowRunSnapshot,
+  type WorkflowRunSummary,
+} from "@openharness/coordinator";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
@@ -61,6 +73,7 @@ type BackendHostEvent = {
   plan_mode?: string | null;
   swarm_teammates?: unknown[] | null;
   swarm_notifications?: unknown[] | null;
+  workflow_state?: WorkflowTuiState | null;
 };
 
 type FrontendAttachment = {
@@ -83,6 +96,50 @@ type FrontendRequest = {
   /** delete_session 请求携带的会话 ID。 */
   session_id?: string | null;
   attachments?: FrontendAttachment[] | null;
+  workflow_action?: string | null;
+  workflow_run_id?: string | null;
+  workflow_task_id?: string | null;
+  workflow_event_type?: string | null;
+  workflow_status?: string | null;
+  workflow_reconcile_action_id?: string | null;
+  workflow_cancel_reason?: string | null;
+};
+
+type WorkflowTuiTimelineItem = {
+  timestamp: number;
+  type: string;
+  taskId?: string;
+  status?: string;
+  summary: string;
+};
+
+type WorkflowTuiTask = {
+  taskId: string;
+  status: string;
+  summary?: string;
+  dependencies: string[];
+  taskManagerTaskId?: string;
+};
+
+type WorkflowTuiState = {
+  runs: WorkflowRunSummary[];
+  selectedRunId?: string;
+  snapshot?: WorkflowRunSnapshot;
+  tasks: WorkflowTuiTask[];
+  timeline: WorkflowTuiTimelineItem[];
+  filters: {
+    taskId?: string;
+    eventType?: string;
+    status?: string;
+  };
+  available: {
+    taskIds: string[];
+    eventTypes: string[];
+    statuses: string[];
+  };
+  reconciliation?: ReturnType<typeof createWorkflowNotification>["reconciliationPlan"];
+  reconciliationSpec?: unknown;
+  error?: string;
 };
 
 interface MainOptions {
@@ -1151,6 +1208,23 @@ async function runBackendHost(
     if (changed) void emitSwarmStatus();
   });
 
+  const workflowStore = new WorkflowRunStore({ cwd: process.cwd() });
+  let workflowSelectedRunId: string | undefined;
+  let workflowFilters: WorkflowTuiState["filters"] = {};
+
+  const emitWorkflowState = async (
+    options: { reconciliationActionId?: string; error?: string } = {},
+  ): Promise<void> => {
+    const state = buildWorkflowTuiState(workflowStore, {
+      selectedRunId: workflowSelectedRunId,
+      filters: workflowFilters,
+      reconciliationActionId: options.reconciliationActionId,
+      error: options.error,
+    });
+    workflowSelectedRunId = state.selectedRunId;
+    await emit({ type: "workflow_state", workflow_state: state });
+  };
+
   const askPermission = async (
     toolName: string,
     reason?: string,
@@ -1435,6 +1509,60 @@ async function runBackendHost(
       await emit({ type: "shutdown" });
       break;
     }
+    if (request.type === "workflow_request") {
+      const action = request.workflow_action ?? "refresh";
+      try {
+        if (action === "refresh" || action === "open") {
+          await emitWorkflowState();
+          continue;
+        }
+        if (action === "select_run") {
+          workflowSelectedRunId = request.workflow_run_id ?? undefined;
+          workflowFilters = {};
+          await emitWorkflowState();
+          continue;
+        }
+        if (action === "set_filter") {
+          workflowFilters = {
+            taskId: request.workflow_task_id === "" ? undefined : request.workflow_task_id ?? workflowFilters.taskId,
+            eventType: request.workflow_event_type === "" ? undefined : request.workflow_event_type ?? workflowFilters.eventType,
+            status: request.workflow_status === "" ? undefined : request.workflow_status ?? workflowFilters.status,
+          };
+          await emitWorkflowState();
+          continue;
+        }
+        if (action === "clear_filters") {
+          workflowFilters = {};
+          await emitWorkflowState();
+          continue;
+        }
+        if (action === "cancel") {
+          const runId = request.workflow_run_id ?? workflowSelectedRunId;
+          const snapshot = runId ? workflowStore.load(runId) : workflowStore.latest();
+          if (!snapshot) {
+            await emitWorkflowState({ error: runId ? `Workflow run not found: ${runId}` : "No workflow runs found" });
+            continue;
+          }
+          workflowSelectedRunId = snapshot.runId;
+          await cancelPersistentWorkflow(snapshot, {
+            store: workflowStore,
+            reason: request.workflow_cancel_reason ?? "Cancelled from TUI",
+            stopTask: (taskId) => getTaskManager().stopTask(taskId),
+          });
+          await emitWorkflowState();
+          continue;
+        }
+        if (action === "reconcile") {
+          workflowSelectedRunId = request.workflow_run_id ?? workflowSelectedRunId;
+          await emitWorkflowState({ reconciliationActionId: request.workflow_reconcile_action_id ?? undefined });
+          continue;
+        }
+        await emitWorkflowState({ error: `Unknown workflow action: ${action}` });
+      } catch (error) {
+        await emitWorkflowState({ error: error instanceof Error ? error.message : String(error) });
+      }
+      continue;
+    }
     if (request.type === "list_sessions") {
       let options: Array<{ value: string; label: string; description?: string }> = [];
       try {
@@ -1678,6 +1806,113 @@ export function formatSessionMeta(s: { created_at: number; message_count: number
   parts.push(`${s.message_count} msg${s.message_count === 1 ? "" : "s"}`);
   if (s.model) parts.push(s.model);
   return parts.join(" · ");
+}
+
+type WorkflowTuiBuildOptions = {
+  selectedRunId?: string;
+  filters?: WorkflowTuiState["filters"];
+  reconciliationActionId?: string;
+  error?: string;
+};
+
+function buildWorkflowTuiState(
+  store: WorkflowRunStore,
+  options: WorkflowTuiBuildOptions = {},
+): WorkflowTuiState {
+  const runs = store.listSummaries();
+  const selectedRunId = options.selectedRunId ?? runs[0]?.runId;
+  const snapshot = selectedRunId ? store.load(selectedRunId) : undefined;
+  if (!snapshot) {
+    return {
+      runs,
+      selectedRunId,
+      tasks: [],
+      timeline: [],
+      filters: options.filters ?? {},
+      available: { taskIds: [], eventTypes: [], statuses: [] },
+      error: options.error ?? (selectedRunId ? `Workflow run not found: ${selectedRunId}` : undefined),
+    };
+  }
+
+  const events = store.loadEvents(snapshot.runId);
+  const filters = options.filters ?? {};
+  const taskIds = uniqueSorted([
+    ...snapshot.plan.tasks.map((task) => task.id),
+    ...events.map((event) => event.taskId).filter((id): id is string => typeof id === "string"),
+  ]);
+  const eventTypes = uniqueSorted(events.map((event) => String(event.type)));
+  const statuses = uniqueSorted([
+    snapshot.status,
+    ...snapshot.orderedResults.map((task) => task.status),
+    ...events.map((event) => event.status).filter((status) => typeof status === "string").map(String),
+  ]);
+  const timeline = events
+    .filter((event) => workflowEventMatchesFilters(event, filters))
+    .map(workflowEventToTuiTimelineItem);
+  const notification = createWorkflowNotification(createWorkflowResultFromSnapshot(snapshot));
+  const reconciliationActionId = options.reconciliationActionId;
+  const reconciliationSpec = reconciliationActionId
+    ? createWorkflowSpecFromReconciliationPlan(notification.reconciliationPlan, { actionIds: [reconciliationActionId] })
+    : undefined;
+
+  return {
+    runs,
+    selectedRunId: snapshot.runId,
+    snapshot,
+    tasks: workflowSnapshotTasks(snapshot),
+    timeline,
+    filters,
+    available: { taskIds, eventTypes, statuses },
+    reconciliation: notification.reconciliationPlan,
+    reconciliationSpec,
+    error: options.error,
+  };
+}
+
+function workflowSnapshotTasks(snapshot: WorkflowRunSnapshot): WorkflowTuiTask[] {
+  return snapshot.plan.tasks.map((task) => {
+    const result = snapshot.results[task.id];
+    const running = snapshot.runningTasks[task.id];
+    const blocked = snapshot.blockedTasks[task.id];
+    const status =
+      result?.status
+      ?? (blocked ? "blocked" : undefined)
+      ?? (running ? "running" : undefined)
+      ?? (snapshot.pendingTaskIds.includes(task.id) ? "pending" : undefined)
+      ?? "pending";
+    return {
+      taskId: task.id,
+      status,
+      summary: result?.summary ?? running?.summary ?? blocked?.reason ?? task.description,
+      dependencies: [...(task.dependsOn ?? [])],
+      taskManagerTaskId: stringFromUnknown(result?.metadata?.taskManagerTaskId ?? running?.metadata?.taskManagerTaskId),
+    };
+  });
+}
+
+function workflowEventMatchesFilters(event: WorkflowRunEvent, filters: WorkflowTuiState["filters"]): boolean {
+  if (filters.taskId && event.taskId !== filters.taskId) return false;
+  if (filters.eventType && event.type !== filters.eventType) return false;
+  if (filters.status && event.status !== filters.status) return false;
+  return true;
+}
+
+function workflowEventToTuiTimelineItem(event: WorkflowRunEvent): WorkflowTuiTimelineItem {
+  return {
+    timestamp: event.timestamp,
+    type: event.type,
+    taskId: event.taskId,
+    status: typeof event.status === "string" ? event.status : undefined,
+    summary: event.summary ?? event.result?.summary ?? event.blockedTask?.reason ?? event.type,
+  };
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+function stringFromUnknown(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /**

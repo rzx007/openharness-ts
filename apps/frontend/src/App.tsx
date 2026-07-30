@@ -12,6 +12,7 @@ import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "./keymap/permissionMode
 import { HISTORY_LIMIT, SIDEBAR_AUTO_OPEN_WIDTH } from "./ui/constants";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { AppView } from "./routes/session/AppView";
+import { WorkflowRunsPanel } from "./components/WorkflowRunsPanel";
 import type { FrontendConfig } from "./types";
 import { copySelectionToClipboard } from "./utils/selection";
 
@@ -21,6 +22,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
   const renderer = useRenderer();
   const { width: terminalWidth } = useTerminalDimensions();
   const [sidebarOpen, setSidebarOpen] = useState(() => terminalWidth >= SIDEBAR_AUTO_OPEN_WIDTH);
+  const [workflowPanelOpen, setWorkflowPanelOpen] = useState(false);
   const dialog = useDialog();
   const { setThemeName, theme } = useTheme();
   const { toast } = useToast();
@@ -133,6 +135,12 @@ function AppInner({ config }: { config: FrontendConfig }) {
         return true;
       }
 
+      if (line.trim() === "/workflows" || line.trim() === "/workflow") {
+        setWorkflowPanelOpen(true);
+        session.sendRequest({ type: "workflow_request", workflow_action: "open" });
+        return true;
+      }
+
       return false;
     },
     [dialog, session, setThemeName, theme.name, toast],
@@ -223,6 +231,14 @@ function AppInner({ config }: { config: FrontendConfig }) {
             run: () => setSidebarOpen((v) => !v),
           },
           {
+            id: "app.workflow",
+            title: "Workflow Runs",
+            run: () => {
+              setWorkflowPanelOpen(true);
+              session.sendRequest({ type: "workflow_request", workflow_action: "open" });
+            },
+          },
+          {
             id: "app.exit",
             title: "Exit",
             keybinding: "ctrl+c",
@@ -263,6 +279,10 @@ function AppInner({ config }: { config: FrontendConfig }) {
       if (dialog.isOpen) return;
       openCommandPalette();
     }
+    if (key.name === "escape" && workflowPanelOpen) {
+      setWorkflowPanelOpen(false);
+      return;
+    }
     if (key.ctrl && key.name === "b") {
       setSidebarOpen((v) => !v);
     }
@@ -271,29 +291,79 @@ function AppInner({ config }: { config: FrontendConfig }) {
     }
   });
 
+  const workflowPanelWidth = Math.min(78, Math.max(54, Math.floor(terminalWidth * 0.7)));
+  const workflowPanelLeft = Math.max(0, Math.floor((terminalWidth - workflowPanelWidth) / 2));
+
   return (
-    <AppView
-      transcript={session.transcript}
-      assistantBuffer={session.assistantBuffer}
-      ready={session.ready}
-      busy={session.busy}
-      status={session.status}
-      mcpServers={session.mcpServers}
-      todoMarkdown={session.todoMarkdown}
-      swarmTeammates={session.swarmTeammates}
-      swarmNotifications={session.swarmNotifications}
-      version={config.version ?? null}
-      history={history}
-      slashCommands={registry.slashCommands()}
-      onSubmit={onSubmit}
-      onCycleMode={onCycleMode}
-      dialogOpen={dialog.isOpen}
-      draft={draft}
-      onDraftChange={setDraft}
-      sidebarOpen={sidebarOpen}
-      onToggleSidebar={() => setSidebarOpen((v) => !v)}
-      escHint={escHint}
-    />
+    <>
+      <AppView
+        transcript={session.transcript}
+        assistantBuffer={session.assistantBuffer}
+        ready={session.ready}
+        busy={session.busy}
+        status={session.status}
+        mcpServers={session.mcpServers}
+        todoMarkdown={session.todoMarkdown}
+        swarmTeammates={session.swarmTeammates}
+        swarmNotifications={session.swarmNotifications}
+        version={config.version ?? null}
+        history={history}
+        slashCommands={registry.slashCommands()}
+        onSubmit={onSubmit}
+        onCycleMode={onCycleMode}
+        dialogOpen={dialog.isOpen || workflowPanelOpen}
+        draft={draft}
+        onDraftChange={setDraft}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        escHint={escHint}
+      />
+      {workflowPanelOpen ? (
+        <box
+          position="absolute"
+          top={2}
+          left={workflowPanelLeft}
+          width={workflowPanelWidth}
+          zIndex={90}
+          border={true}
+          borderColor={theme.colors.accent}
+          backgroundColor={theme.colors.backgroundPanel}
+          padding={1}
+          flexDirection="column"
+        >
+          <WorkflowRunsPanel
+            state={session.workflowState}
+            onRefresh={() => session.sendRequest({ type: "workflow_request", workflow_action: "refresh" })}
+            onSelectRun={(runId) => session.sendRequest({ type: "workflow_request", workflow_action: "select_run", workflow_run_id: runId })}
+            onSetFilter={(filter) => {
+              const hasTaskId = Object.prototype.hasOwnProperty.call(filter, "taskId");
+              const hasEventType = Object.prototype.hasOwnProperty.call(filter, "eventType");
+              const hasStatus = Object.prototype.hasOwnProperty.call(filter, "status");
+              session.sendRequest({
+                type: "workflow_request",
+                workflow_action: "set_filter",
+                workflow_task_id: hasTaskId ? filter.taskId ?? "" : undefined,
+                workflow_event_type: hasEventType ? filter.eventType ?? "" : undefined,
+                workflow_status: hasStatus ? filter.status ?? "" : undefined,
+              });
+            }}
+            onClearFilters={() => session.sendRequest({ type: "workflow_request", workflow_action: "clear_filters" })}
+            onCancelRun={(runId) => session.sendRequest({
+              type: "workflow_request",
+              workflow_action: "cancel",
+              workflow_run_id: runId,
+              workflow_cancel_reason: "Cancelled from TUI",
+            })}
+            onSelectReconcileAction={(runId, actionId) => session.sendRequest({
+              type: "workflow_request",
+              workflow_action: "reconcile",
+              workflow_run_id: runId,
+              workflow_reconcile_action_id: actionId,
+            })}
+          />
+        </box>
+      ) : null}
+    </>
   );
 }
 
