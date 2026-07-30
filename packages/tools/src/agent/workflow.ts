@@ -3,6 +3,7 @@ import {
   WORKFLOW_SPEC_TEMPLATES,
   cancelPersistentWorkflow,
   createWorkflowNotification,
+  createWorkflowRunId,
   createWorkflowResultFromSnapshot,
   createWorkflowValidationReport,
   createWorkflowSpecFromReconciliationPlan,
@@ -231,7 +232,11 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         team: { type: "string", description: "Default team for tasks that do not set team" },
         timeoutSeconds: {
           type: "number",
-          description: "Per-worker wait timeout in seconds. Defaults to 300.",
+          description: "Optional per-worker wait timeout in seconds. Omit it to let detached workflows continue until workers finish or task-level timeouts fire.",
+        },
+        waitForCompletion: {
+          type: "boolean",
+          description: "For action=run, wait for the full workflow result instead of returning after the persisted run is submitted. Defaults to false for persisted runs.",
         },
         permissionMode: {
           type: "string",
@@ -288,14 +293,34 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
       }
 
       try {
+        const runnerTimeoutMs = secondsToOptionalMs(input.timeoutSeconds);
+        if (runnerTimeoutMs === "invalid") {
+          return { content: [{ type: "text", text: "timeoutSeconds must be a positive number" }], isError: true };
+        }
         const runner = createRunner({
           cwd: context.cwd,
           team: asOptionalString(input.team),
-          timeoutMs: secondsToMs(input.timeoutSeconds, 300),
+          timeoutMs: runnerTimeoutMs,
           permissionMode: parsePermissionMode(input.permissionMode),
         });
         const persist = input.persist !== false;
-        const runId = asOptionalString(input.runId);
+        const runId = asOptionalString(input.runId) ?? (action === "run" && persist && options.run === undefined ? createWorkflowRunId() : undefined);
+        const waitForCompletion = input.waitForCompletion === true || !persist || options.run !== undefined;
+        if (action === "run" && persist && options.run === undefined && !waitForCompletion) {
+          const store = new WorkflowRunStore({ cwd: context.cwd });
+          void runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, { cwd: context.cwd, runId, store })
+            .catch((error) => {
+              // The scheduler normally records task-level failures in snapshots. This
+              // catch only prevents detached background runs from surfacing as
+              // unhandled rejections if startup fails unexpectedly.
+              console.error(`Detached workflow ${runId ?? "(unknown)"} failed: ${error instanceof Error ? error.message : String(error)}`);
+            });
+          const snapshot = runId ? store.load(runId) : store.latest();
+          if (!snapshot) {
+            return { content: [{ type: "text", text: "Workflow submitted, but no running snapshot was written yet. Use Workflow status/latest or /workflow to refresh." }] };
+          }
+          return { content: [{ type: "text", text: formatWorkflowSnapshot(snapshot, store.loadEvents(snapshot.runId)) }] };
+        }
         const result = action === "resume"
           ? await workflowResume(input, context.cwd, runner as WorkflowRunner)
           : persist && options.run === undefined

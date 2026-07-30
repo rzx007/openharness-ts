@@ -533,6 +533,7 @@ V1 内存调度核心
 - V12.3：已完成基础版。内置 workflow templates 增加 `version` 字段，模板输出可明确说明模板版本和含义。
 - V13.1：已完成基础版。新增普通 CLI 管理面 `ohs workflow list/status/validate/template/reconcile/cancel`，对接同一份 `.openharness/workflows` 持久化数据，输出 JSON，方便脚本和后续 TUI/Web 复用。完整用法见 [`workflow-cli.md`](./workflow-cli.md)。
 - V13.2：已完成基础版。TUI 新增 Workflow Runs 管理面板，接入同一份 workflow JSON 状态，支持 run 列表、详情、timeline task/event/status filter、reconcile action 选择和 running workflow 取消。
+- V13.3：已完成基础版。持久化 `Workflow action: "run"` 默认 detached 提交，快速返回 running snapshot 和 runId，后台继续调度 worker；不再给 worker wait 隐式套 300s 默认超时，只有显式 `timeoutSeconds` / task timeout 才会判超时。
 
 下一步建议：
 

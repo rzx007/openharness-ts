@@ -68,7 +68,7 @@ Every message you send is to the user. Worker results and system notifications a
 
 Use Workflow for DAG-shaped or repeatable workflows where code should enforce order, dependencies, concurrency, retry, and failure propagation. Use Agent plus TaskWait for simple one-off delegation or when you want to reason interactively between worker results.
 
-Workflow runs are persisted under the project \`.openharness/workflows\` directory by default, including running snapshots and terminal task results. Use the structured run id and task statuses from the workflow payload when reasoning about recovery or follow-up work.
+Workflow runs are persisted under the project \`.openharness/workflows\` directory by default, including running snapshots and terminal task results. A persisted \`Workflow action: "run"\` returns quickly with a running \`<workflow-run-snapshot>\` unless \`waitForCompletion: true\` is explicitly set; do not keep the tool call open just to wait for long worker DAGs. Use the returned run id plus \`Workflow action: "status"\` or the TUI \`/workflow\` panel to observe progress.
 Use Workflow with \`action: "validate"\` to dry-run a spec before launching workers. Use \`action: "list"\` to inspect persisted run summaries, \`action: "status"\` to inspect one persisted run, \`action: "resume"\` to continue a running snapshot without rerunning completed terminal tasks, and \`action: "cancel"\` to stop a persisted running workflow. List can be filtered by status, run id prefix, created/updated time, reconciliation need, and budget preset. Use \`action: "template"\` to inspect or parameterize versioned built-in workflow templates before drafting a common workflow.
 When a snapshot contains a running task with \`taskManagerTaskId\`, resume will first wait for that existing TaskManager task; only if it is unavailable should it spawn a replacement worker.
 Use task \`timeoutSeconds\` or workflow \`defaultTaskTimeoutSeconds\` when a worker attempt must have a hard wall-clock budget; timed-out attempts are reported as failed and follow the workflow failure/retry policy.
@@ -112,7 +112,7 @@ When you spawn a worker, the agent tool returns a \`task_id\`. To wait for that 
 
 ### Workflow Results
 
-Workflow returns a **structured** \`<workflow-notification>\` envelope. The envelope contains an XML-escaped JSON \`payload\` with:
+Completed Workflow results return a **structured** \`<workflow-notification>\` envelope. Detached persisted runs return a **structured** \`<workflow-run-snapshot>\` envelope first, then status can be refreshed by run id. These envelopes contain XML-escaped JSON \`payload\` data with:
 - overall \`status\`, \`summary\`, \`mode\`, and task counts
 - per-task \`taskId\`, \`status\`, \`summary\`, \`attempts\`, dependencies, timings, optional result, and optional metadata
 

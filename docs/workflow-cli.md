@@ -83,6 +83,8 @@ ohs workflow validate --spec ./workflow.json
 
 真正启动 workflow 仍由 Coordinator/Leader 调 `Workflow` 工具完成；CLI 当前负责“看、验、收口、取消”，不直接替代模型入口提交执行。
 
+`Workflow action: "run"` 默认会快速返回一个 running snapshot，并把真实 worker DAG 留在后台继续跑；不要依赖单次工具调用一直阻塞到全部 task 完成。需要同步等待完整结果时显式传 `waitForCompletion: true`，但 TUI 场景推荐用 `/workflow` 或 `ohs workflow status <runId>` 观察进度。
+
 ## Template 参数示例
 
 ```json

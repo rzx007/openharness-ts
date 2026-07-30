@@ -175,6 +175,48 @@ describe("workflowTool", () => {
     );
   });
 
+  it("submits persisted workflow runs detached by default", async () => {
+    const cwd = makeTempDir();
+    try {
+      const runner: WorkflowRunner = vi.fn(() => new Promise(() => undefined));
+      const createRunner = vi.fn((_options: AgentWorkflowRunnerOptions) => runner);
+      const tool = createWorkflowTool({ createRunner });
+
+      const result = await tool.execute(
+        {
+          mode: "pipeline",
+          runId: "detached-run",
+          tasks: [
+            { id: "research", description: "Research" },
+            { id: "summarize", description: "Summarize" },
+          ],
+        },
+        { cwd },
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(createRunner).toHaveBeenCalledWith({
+        cwd,
+        team: undefined,
+        timeoutMs: undefined,
+        permissionMode: undefined,
+      });
+      expect(textOf(result)).toContain("<workflow-run-snapshot>");
+      expect(textOf(result)).toContain('"runId":"detached-run"');
+      expect(textOf(result)).toContain('"status":"running"');
+
+      const snapshot = new WorkflowRunStore({ cwd }).load("detached-run");
+      expect(snapshot).toMatchObject({
+        runId: "detached-run",
+        status: "running",
+        runningTaskIds: ["research"],
+        pendingTaskIds: ["summarize"],
+      });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("returns an error for invalid workflow input", async () => {
     const createRunner = vi.fn();
     const tool = createWorkflowTool({ createRunner });
