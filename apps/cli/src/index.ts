@@ -8,6 +8,7 @@ import { createChannelsCommand } from "./commands/channels";
 import { createProviderCommand } from "./commands/provider";
 import { createSetupCommand } from "./commands/setup";
 import { createSandboxCommand } from "./commands/sandbox";
+import { createWorkflowCommand } from "./commands/workflow";
 import { VERSION } from "./version";
 
 const program = new Command();
@@ -58,6 +59,7 @@ program.addCommand(createChannelsCommand());
 program.addCommand(createProviderCommand());
 program.addCommand(createSetupCommand());
 program.addCommand(createSandboxCommand());
+program.addCommand(createWorkflowCommand());
 
 program
   .command("config")
