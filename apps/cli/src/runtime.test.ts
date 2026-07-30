@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel } from "./runtime";
+import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel, formatSandboxUnavailableError } from "./runtime";
 import { READ_ONLY_TOOLS } from "@openharness/permissions";
 import { CredentialStorage } from "@openharness/auth";
 import type { Settings } from "@openharness/core";
@@ -62,6 +62,26 @@ describe("resolveRuntimeModel", () => {
 
   it("falls back to settings model when no override is provided", () => {
     expect(resolveRuntimeModel(BASE_SETTINGS, {})).toBe(BASE_SETTINGS.model);
+  });
+});
+
+describe("formatSandboxUnavailableError", () => {
+  it("formats Docker sandbox startup failures without a stack trace", () => {
+    const message = formatSandboxUnavailableError("Docker CLI not found", {
+      ...BASE_SETTINGS,
+      sandbox: {
+        enabled: true,
+        backend: "docker",
+        failIfUnavailable: true,
+      },
+    } as Settings);
+
+    expect(message).toContain("Sandbox is enabled, but the docker backend is not available.");
+    expect(message).toContain("Reason: Docker CLI not found");
+    expect(message).toContain("ohs sandbox doctor");
+    expect(message).toContain("ohs sandbox off");
+    expect(message).not.toContain("SandboxUnavailableError");
+    expect(message).not.toContain(" at ");
   });
 });
 

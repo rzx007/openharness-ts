@@ -10,7 +10,7 @@ import { PermissionChecker, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
-import { startSandboxRuntime } from "@openharness/sandbox";
+import { SandboxUnavailableError, startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import {
@@ -254,12 +254,21 @@ async function attachSandboxRuntime(
   cwd: string,
   reporter?: SandboxRuntimeReporter,
 ): Promise<void> {
-  const sandboxRuntime = await startSandboxRuntime({
-    settings: bundle.settings,
-    cwd,
-    sessionId: createSandboxSessionId(cwd),
-    reporter,
-  });
+  let sandboxRuntime;
+  try {
+    sandboxRuntime = await startSandboxRuntime({
+      settings: bundle.settings,
+      cwd,
+      sessionId: createSandboxSessionId(cwd),
+      reporter,
+    });
+  } catch (error) {
+    if (error instanceof SandboxUnavailableError) {
+      console.error(formatSandboxUnavailableError(error.message, bundle.settings));
+      process.exit(1);
+    }
+    throw error;
+  }
   bundle.sandboxStatus = sandboxRuntime.status;
 
   if (sandboxRuntime.status.backend !== "docker" || !sandboxRuntime.status.active) {
@@ -276,6 +285,33 @@ async function attachSandboxRuntime(
 function createSandboxSessionId(cwd: string): string {
   const repoId = createHash("sha1").update(cwd).digest("hex").slice(0, 12);
   return `${process.pid}-${repoId}-${Date.now().toString(36)}`;
+}
+
+export function formatSandboxUnavailableError(reason: string, settings: Settings): string {
+  const backend = settings.sandbox?.backend ?? "srt";
+  const lines = [
+    "",
+    `Sandbox is enabled, but the ${backend} backend is not available.`,
+    `Reason: ${reason}`,
+    "",
+    "Next steps:",
+  ];
+
+  if (backend === "docker") {
+    lines.push(
+      "- Install/start Docker Desktop or Docker Engine, then run: ohs sandbox doctor",
+      "- Or disable sandbox for this project: ohs sandbox off",
+      "- Or allow startup without sandbox: ohs sandbox on --fail-open",
+    );
+  } else {
+    lines.push(
+      "- Install @anthropic-ai/sandbox-runtime and required platform dependencies, then run: ohs sandbox doctor",
+      "- Or switch to Docker sandbox: ohs sandbox on --backend docker",
+      "- Or disable sandbox for this project: ohs sandbox off",
+    );
+  }
+
+  return lines.join("\n");
 }
 
 function registerExitCleanup(bundle: RuntimeBundle): void {
