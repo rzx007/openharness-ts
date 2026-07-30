@@ -436,7 +436,8 @@ async function runTaskWorker(
     credentialStorage,
     permissionPrompt: swarmPermissionPrompt,
   });
-  registerPluginHooks(bundle.hookExecutor);
+  try {
+    registerPluginHooks(bundle.hookExecutor);
   await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
   const renderer = new EventRenderer({ verbose: options.verbose, printMode: true, outputStyle: settings.outputStyle });
 
@@ -488,7 +489,8 @@ async function runTaskWorker(
     if (err instanceof Error) {
       process.stderr.write(`${formatApiError(err, settings)}\n`);
     }
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   try {
@@ -522,6 +524,10 @@ async function runTaskWorker(
       }
     }
   }
+  } finally {
+    closeTaskWorkerInputForExit();
+    await bundle.close().catch(() => {});
+  }
 }
 
 /**
@@ -546,6 +552,32 @@ async function readOneStdinLine(): Promise<string> {
     }
   }
   return buffer;
+}
+
+export function closeTaskWorkerInputForExit(input: NodeJS.ReadStream = process.stdin): void {
+  // A task-worker consumes exactly one framed stdin message. Keeping the pipe
+  // paused after that frame can keep the child process alive on Windows, so
+  // release it once the turn has fully finished and future messages can use
+  // TaskManager's lazy restart path.
+  try {
+    input.pause();
+  } catch {
+    // best-effort shutdown
+  }
+  for (const eventName of ["data", "readable", "end"] as const) {
+    try {
+      input.removeAllListeners(eventName);
+    } catch {
+      // best-effort shutdown
+    }
+  }
+  try {
+    if (!(input as { destroyed?: boolean }).destroyed) {
+      input.destroy();
+    }
+  } catch {
+    // best-effort shutdown
+  }
 }
 
 /**
