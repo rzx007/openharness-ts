@@ -77,11 +77,11 @@ REPL / BackendHost 启动时（`registerPluginHooks` 之后）：
 ```typescript
 if (isCoordinatorMode()) {
   bundle.queryEngine.setAllowedTools(getCoordinatorTools());
-  // getCoordinatorTools() = ["Agent", "SendMessage", "TaskStop"]
+  // getCoordinatorTools() = ["Agent", "SendMessage", "TaskStop", "Workflow"]
 }
 ```
 
-这样 coordinator 只能调用 swarm 工具，无法直接操作文件/运行 shell——对齐 Python coordinator 的工具隔离。
+这样 coordinator 只能调用 swarm / 硬调度相关工具，无法直接操作文件/运行 shell——对齐 Python coordinator 的工具隔离。`Workflow` 为后续硬调度器入口，调用链见 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md)。
 
 ## agent 级字段运行时生效
 

@@ -424,7 +424,7 @@ OpenHarness-ts/
 
 | 模块                   | 说明                                                                                                          |
 | -------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `Coordinator`        | 多 Agent 编排：7 个内置 Agent 定义 + system prompt + sequential/parallel/pipeline 模式                                 |
+| `Coordinator`        | 多 Agent 编排：内置/用户/插件 Agent 定义 + coordinator prompt；硬调度器（`Workflow` / DAG / 持久化恢复）。详见 [docs/coordinator-hard-scheduler-flow.md](docs/coordinator-hard-scheduler-flow.md) |
 | `McpClientManager`   | MCP 协议客户端：stdio + HTTP/SSE 传输连接外部 MCP Server，headers 鉴权，动态获取工具和资源；MCP OAuth 待补 |
 | `ChannelAdapter`     | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                              |
 | `HookExecutor`       | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
