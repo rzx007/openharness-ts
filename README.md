@@ -8,7 +8,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅、reasoning effort
 - 🟡 **内置工具（41）** — 文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
-- ✅ **多 Agent 编排** — `agent` 工具真实派发 `--task-worker` 子进程 teammate：`SendMessage` 重启式多轮续聊、独立 git worktree 隔离、只读自动放行、写操作经 pending/resolved 文件流转 leader 裁决、`TaskWait` 阻塞取结果、TUI SwarmPanel；内置 7 agent + 用户/插件自定义 agent（`~/.openharness/agents/*.md`）。暂缺 sequential/parallel/pipeline 调度
+- ✅ **多 Agent 编排** — `agent` 工具真实派发 `--task-worker` 子进程 teammate：`SendMessage` 重启式多轮续聊、独立 git worktree 隔离、只读自动放行、写操作经 pending/resolved 文件流转 leader 裁决、`TaskWait` 阻塞取结果、TUI SwarmPanel；内置 7 agent + 用户/插件自定义 agent（`~/.openharness/agents/*.md`）。Coordinator 硬调度器已支持 `Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel 和 `ohs workflow` 管理命令
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
@@ -203,6 +203,14 @@ ohs cron history [-n <limit>]
 ohs cron logs <name> [-n <lines>]
 ohs cron remove <name>
 
+# Workflow run 管理（持久化到项目 .openharness/workflows）
+ohs workflow list [--status running,failed] [--limit 10] [--needs-reconciliation]
+ohs workflow status [runId] [--no-events]
+ohs workflow validate --spec <path>
+ohs workflow template [research-implement-verify|parallel-review|safe-write]
+ohs workflow reconcile [runId] [--action-ids <ids>] [--budget-preset <preset>]
+ohs workflow cancel [runId] [--reason <reason>]
+
 # Channels 长驻桥接（当前实现：feishu）
 ohs channels status
 ohs channels serve
@@ -213,6 +221,7 @@ ohs config set <top-level-key> <value>
 ```
 
 Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-model.md](docs/auth-provider-model.md)。
+Workflow CLI 的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
 `ohs provider use <name>` 默认只切换供应商；要同时切模型请加 `-m/--model`，例如 `ohs provider use deepseek -m deepseek-chat`。
 
 交互式 REPL/TUI 内还有 `/help`、`/model`、`/provider`、`/memory`、`/tasks`、`/diff`、`/output-style` 等斜杠命令；完整清单见 [docs/slash-commands.md](docs/slash-commands.md)，运行时以 `/help` 为准。
@@ -424,7 +433,7 @@ OpenHarness-ts/
 
 | 模块                   | 说明                                                                                                          |
 | -------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `Coordinator`        | 多 Agent 编排：内置/用户/插件 Agent 定义 + coordinator prompt；硬调度器（`Workflow` / DAG / 持久化恢复）。详见 [docs/coordinator-hard-scheduler-flow.md](docs/coordinator-hard-scheduler-flow.md) |
+| `Coordinator`        | 多 Agent 编排：内置/用户/插件 Agent 定义 + coordinator prompt；硬调度器（`Workflow` / DAG / 持久化恢复 / timeline / budget / reconcile / cancel）。详见 [docs/coordinator-hard-scheduler-flow.md](docs/coordinator-hard-scheduler-flow.md) |
 | `McpClientManager`   | MCP 协议客户端：stdio + HTTP/SSE 传输连接外部 MCP Server，headers 鉴权，动态获取工具和资源；MCP OAuth 待补 |
 | `ChannelAdapter`     | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                              |
 | `HookExecutor`       | Hook 系统：`pre_tool_use / post_tool_use / session_start / session_end` 四种事件，支持 command/http/prompt/agent 四种类型 |
@@ -438,7 +447,7 @@ OpenHarness-ts/
 
 | 模块                  | 说明                                                                                                                                                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/channels/config 子命令，20+ CLI flags                                                                                                                                               |
+| `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/channels/workflow/config 子命令，20+ CLI flags                                                                                                                                               |
 | `REPL`              | 交互式循环：`>` 提示符，41 个斜杠命令（完整清单见 [docs/slash-commands.md](docs/slash-commands.md)）；支持输出样式 `default/minimal/codex`（`minimal` 极简纯文本渲染） |
 | `TUI Frontend`      | opentui + React 19 终端 UI（Bun 运行时）：ConversationView + StatusBar + PromptInput + ModalHost（权限/问题/MCP认证）+ CommandPicker + TodoPanel + SwarmPanel。`ohs --tui` 通过 `resolveBun` 检测 Bun 路径后 spawn 前端，前端再 spawn `--backend-only` 子进程，OHJSON 协议通信，30fps delta 缓冲。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
 | `BackendHost`       | 后端协议实现：处理 5 种请求（submit_line / permission_response / question_response / list_sessions / shutdown），发出结构化事件（assistant_delta / tool_started / modal_request / swarm_status 等）。详见 [docs/tui-flow.md](docs/tui-flow.md) |

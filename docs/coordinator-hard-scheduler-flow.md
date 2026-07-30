@@ -58,6 +58,7 @@ Agent runner → 通过 swarm / TaskManager 真正跑 worker
 | Agent runner | `packages/tools/src/agent/workflow-runner.ts` | spawn swarm worker + `awaitTask` + changed files / diff |
 | 工具注册 | `packages/tools/src/registry.ts` | 默认注册表挂上 `workflowTool` |
 | CLI 白名单 | `apps/cli/src/commands/main.ts` | coordinator 模式 `setAllowedTools(getCoordinatorTools())` |
+| Workflow CLI | `apps/cli/src/commands/workflow.ts` | `ohs workflow list/status/validate/template/reconcile/cancel`；JSON-first 管理面 |
 
 ## A. 入口阶段
 
@@ -73,6 +74,21 @@ apps/cli/src/commands/main.ts
 ```
 
 Leader 不能直接 Read/Bash；简单委托仍用 `Agent` + `TaskWait`，有明确 DAG / 重试 / 失败策略时用 `Workflow`。
+
+### A1.5. Workflow CLI 管理面
+
+`ohs workflow` 是面向人和 UI 的普通 CLI，不是 Coordinator 模式本身。它读取同一份 `.openharness/workflows/` 持久化数据：
+
+```text
+ohs workflow list       # 历史 run 列表，可按状态/时间/reconcile/budget 过滤
+ohs workflow status     # latest 或指定 runId 的 snapshot + events
+ohs workflow validate   # dry-run 校验 spec，不启动 worker
+ohs workflow template   # 展示/参数化内置 workflow spec 模板
+ohs workflow reconcile  # 从 reconciliationPlan 生成 follow-up spec
+ohs workflow cancel     # stop backing task，并写 terminal snapshot
+```
+
+完整命令和示例见 [`workflow-cli.md`](./workflow-cli.md)。后续 TUI/Web 可以直接消费这些 JSON payload，而不是重新实现一套 workflow store 读取逻辑。
 
 ### A2. Workflow 工具
 
