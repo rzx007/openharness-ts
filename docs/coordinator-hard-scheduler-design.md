@@ -492,7 +492,7 @@ V1 内存调度核心
 
 运行时细节（工具入口、调度循环、持久化路径、信封格式）见 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md)。
 
-截至目前，已经落地到 V9.3：
+截至目前，已经落地到 V11.3：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -522,9 +522,15 @@ V1 内存调度核心
 - V9.1：已完成基础版。`Workflow` status JSON 的 `timelineControls` 同时返回 `available` 和 `selected`，前端可以直接渲染筛选控件并保存/恢复筛选状态，同时继续兼容旧的顶层 `taskIds` / `eventTypes` / `statuses`。
 - V9.2：已完成基础版。`<workflow-notification>` 增加 `reconciliationSummary`，按文件和任务聚合 reconcile issue、diff status、insertions/deletions，让 UI 可以按文件查看冲突任务和变更规模。
 - V9.3：已完成基础版。新增 `budgetPreset`，支持 `cheap-review`、`safe-write`、`fast-parallel` 三种常用预算策略；显式 `budgetPolicy` 字段仍可覆盖 preset 默认值。
+- V10.1：已完成基础版。`WorkflowRunStore` 增加轻量 `listSummaries()`，`Workflow` 工具支持 `action: "list"`，可以按 run status 和 limit 浏览历史 workflow run。
+- V10.2：已完成基础版。`<workflow-notification>` 增加 `reconciliationPlan`，为每个 reconcile issue 生成稳定 follow-up action、推荐 task id、prompt、依赖 task 和 writeScope。
+- V10.3：已完成基础版。新增内置 workflow spec templates，并通过 `Workflow action: "template"` 暴露 `research-implement-verify`、`parallel-review`、`safe-write` 模板，减少重复手写工作流。
+- V11.1：已完成基础版。`Workflow action: "list"` 支持按 `runIdPrefix`、created/updated 时间范围、`needsReconciliation` 和 `budgetPreset` 过滤历史 run。
+- V11.2：已完成基础版。新增 `createWorkflowSpecFromReconciliationPlan` 和 `Workflow action: "reconcile"`，可把已持久化 run 的 `reconciliationPlan.actions` 转成 follow-up workflow spec。
+- V11.3：已完成基础版。`Workflow action: "template"` 支持 `templateParameters`，可覆盖 task prompt、writeScope、maxConcurrency、budgetPreset 和 failurePolicy。
 
 下一步建议：
 
-- V10.1：增加 workflow run 列表/索引能力，让 UI 或 CLI 可以按时间、状态、runId 浏览历史 run。
-- V10.2：增加 reconcile follow-up action 契约，例如生成一个专门的 reconcile task 或导出冲突处理清单。
-- V10.3：增加 workflow spec 模板/示例库，把常见 `research -> implement -> verify`、并行审查、安全写入等流程固化为可复用模板。
+- V12.1：增加 workflow dry-run / validate 动作，让 Coordinator 可以在启动 worker 前检查 spec 展开的 DAG、预算 preset 和写范围冲突。
+- V12.2：增加 workflow cancellation 契约，把 running workflow 的未完成 worker 批量 stop，并持久化为 terminal snapshot。
+- V12.3：增加模板版本字段和说明，让长期演进时可以兼容旧模板输出。

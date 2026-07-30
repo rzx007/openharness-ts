@@ -1,5 +1,9 @@
 import type { ToolDefinition } from "@openharness/core";
 import {
+  WORKFLOW_SPEC_TEMPLATES,
+  createWorkflowNotification,
+  createWorkflowResultFromSnapshot,
+  createWorkflowSpecFromReconciliationPlan,
   formatWorkflowNotification,
   resumePersistentWorkflow,
   runWorkflow,
@@ -9,16 +13,18 @@ import {
   type WorkflowFailurePolicy,
   type WorkflowMode,
   type WorkflowRunEvent,
+  type WorkflowRunSummary,
   type WorkflowRunSnapshot,
   type WorkflowRunner,
   type WorkflowSpec,
   type WorkflowTask,
+  type WorkflowTemplateName,
 } from "@openharness/coordinator";
 import { createAgentWorkflowRunner } from "./workflow-runner";
 
 const WORKFLOW_MODES = new Set<WorkflowMode>(["parallel", "sequential", "pipeline"]);
 const FAILURE_POLICIES = new Set<WorkflowFailurePolicy>(["skip-dependents", "fail-fast", "continue"]);
-const WORKFLOW_ACTIONS = new Set(["run", "resume", "status"]);
+const WORKFLOW_ACTIONS = new Set(["run", "resume", "status", "list", "template", "reconcile"]);
 const BUDGET_POLICY_PRESETS = new Set<WorkflowBudgetPolicyPreset>(["cheap-review", "safe-write", "fast-parallel"]);
 
 export interface WorkflowToolOptions {
@@ -41,8 +47,8 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
       properties: {
         action: {
           type: "string",
-          enum: ["run", "resume", "status"],
-          description: "Workflow action. Defaults to run. Use resume/status with runId or latest.",
+          enum: ["run", "resume", "status", "list", "template", "reconcile"],
+          description: "Workflow action. Defaults to run. Use resume/status with runId or latest, list for persisted runs, template for built-in specs, reconcile for a follow-up spec.",
         },
         view: {
           type: "string",
@@ -63,6 +69,58 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           type: "array",
           items: { type: "string" },
           description: "For status timeline, include only events with these statuses.",
+        },
+        runStatuses: {
+          type: "array",
+          items: { type: "string", enum: ["running", "completed", "failed"] },
+          description: "For action=list, include only workflow runs with these statuses.",
+        },
+        limit: {
+          type: "number",
+          description: "For action=list, maximum number of workflow runs to return.",
+        },
+        runIdPrefix: {
+          type: "string",
+          description: "For action=list, include only workflow runs whose runId starts with this prefix.",
+        },
+        createdAfter: {
+          description: "For action=list, include runs created at or after this timestamp. Accepts epoch milliseconds or an ISO date string.",
+        },
+        createdBefore: {
+          description: "For action=list, include runs created at or before this timestamp. Accepts epoch milliseconds or an ISO date string.",
+        },
+        updatedAfter: {
+          description: "For action=list, include runs updated at or after this timestamp. Accepts epoch milliseconds or an ISO date string.",
+        },
+        updatedBefore: {
+          description: "For action=list, include runs updated at or before this timestamp. Accepts epoch milliseconds or an ISO date string.",
+        },
+        needsReconciliation: {
+          type: "boolean",
+          description: "For action=list, include only runs matching this reconciliation state.",
+        },
+        actionIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "For action=reconcile, include only these reconciliation follow-up action ids.",
+        },
+        issueIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "For action=reconcile, include only actions linked to these reconciliation issue ids.",
+        },
+        verifyTaskId: {
+          type: "string",
+          description: "For action=reconcile, override the generated verification task id.",
+        },
+        templateName: {
+          type: "string",
+          enum: ["research-implement-verify", "parallel-review", "safe-write"],
+          description: "For action=template, return one built-in workflow template instead of all templates.",
+        },
+        templateParameters: {
+          type: "object",
+          description: "For action=template, override reusable template fields such as taskPrompts, writeScope, maxConcurrency, budgetPreset, or failurePolicy.",
         },
         mode: {
           type: "string",
@@ -195,11 +253,20 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
     async execute(input, context) {
       const action = parseAction(input.action);
       if (!action) {
-        return { content: [{ type: "text", text: "action must be one of: run, resume, status" }], isError: true };
+        return { content: [{ type: "text", text: "action must be one of: run, resume, status, list, template, reconcile" }], isError: true };
       }
 
       if (action === "status") {
         return workflowStatus(input, context.cwd);
+      }
+      if (action === "list") {
+        return workflowList(input, context.cwd);
+      }
+      if (action === "template") {
+        return workflowTemplate(input);
+      }
+      if (action === "reconcile") {
+        return workflowReconcile(input, context.cwd);
       }
 
       const specOrError = parseWorkflowSpec(input);
@@ -248,6 +315,60 @@ function workflowStatus(input: Record<string, unknown>, cwd: string) {
     return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events, filters) }] };
   }
   return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, events, filters) }] };
+}
+
+function workflowList(input: Record<string, unknown>, cwd: string) {
+  const store = new WorkflowRunStore({ cwd });
+  const filters = parseRunListFilters(input);
+  if (typeof filters === "string") {
+    return { content: [{ type: "text" as const, text: filters }], isError: true };
+  }
+  const runs = filterWorkflowRunSummaries(store.listSummaries(), filters)
+    .slice(0, filters.limit ?? undefined);
+  return {
+    content: [{ type: "text" as const, text: formatWorkflowRunList(runs, filters) }],
+  };
+}
+
+function workflowTemplate(input: Record<string, unknown>) {
+  const templateName = input.templateName;
+  if (templateName !== undefined && !isWorkflowTemplateName(templateName)) {
+    return {
+      content: [{ type: "text" as const, text: "templateName must be one of: research-implement-verify, parallel-review, safe-write" }],
+      isError: true,
+    };
+  }
+  const templates = templateName
+    ? [applyWorkflowTemplateParameters(WORKFLOW_SPEC_TEMPLATES[templateName], input.templateParameters)]
+    : Object.values(WORKFLOW_SPEC_TEMPLATES).map((template) => applyWorkflowTemplateParameters(template, input.templateParameters));
+  return {
+    content: [{ type: "text" as const, text: formatWorkflowTemplates(templates) }],
+  };
+}
+
+function workflowReconcile(input: Record<string, unknown>, cwd: string) {
+  const store = new WorkflowRunStore({ cwd });
+  const snapshot = loadWorkflowSnapshot(store, input);
+  if (typeof snapshot === "string") {
+    return { content: [{ type: "text" as const, text: snapshot }], isError: true };
+  }
+  const budgetPolicyPreset = input.budgetPreset;
+  if (budgetPolicyPreset !== undefined && !isBudgetPolicyPreset(budgetPolicyPreset)) {
+    return { content: [{ type: "text" as const, text: "budgetPreset must be one of: cheap-review, safe-write, fast-parallel" }], isError: true };
+  }
+  const notification = createWorkflowNotification(createWorkflowResultFromSnapshot(snapshot));
+  const spec = createWorkflowSpecFromReconciliationPlan(notification.reconciliationPlan, {
+    actionIds: parseStringArray(input.actionIds),
+    issueIds: parseStringArray(input.issueIds),
+    verifyTaskId: asOptionalString(input.verifyTaskId),
+    budgetPolicyPreset,
+  });
+  if (!spec) {
+    return { content: [{ type: "text" as const, text: "No reconciliation actions matched the requested workflow run" }], isError: true };
+  }
+  return {
+    content: [{ type: "text" as const, text: formatWorkflowReconcileSpec(snapshot.runId, notification.reconciliationPlan, spec) }],
+  };
 }
 
 async function workflowResume(
@@ -325,10 +446,10 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   };
 }
 
-function parseAction(value: unknown): "run" | "resume" | "status" | undefined {
+function parseAction(value: unknown): "run" | "resume" | "status" | "list" | "template" | "reconcile" | undefined {
   if (value === undefined) return "run";
   return typeof value === "string" && WORKFLOW_ACTIONS.has(value)
-    ? value as "run" | "resume" | "status"
+    ? value as "run" | "resume" | "status" | "list" | "template" | "reconcile"
     : undefined;
 }
 
@@ -449,6 +570,14 @@ function isBudgetPolicyPreset(value: unknown): value is WorkflowBudgetPolicyPres
   return typeof value === "string" && BUDGET_POLICY_PRESETS.has(value as WorkflowBudgetPolicyPreset);
 }
 
+function isWorkflowTemplateName(value: unknown): value is WorkflowTemplateName {
+  return (
+    value === "research-implement-verify" ||
+    value === "parallel-review" ||
+    value === "safe-write"
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -478,10 +607,75 @@ function secondsToOptionalMs(value: unknown): number | undefined | "invalid" {
   return Math.floor(value * 1000);
 }
 
+function parsePositiveInteger(value: unknown): number | undefined | "invalid" {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) return "invalid";
+  return value;
+}
+
+function parseRunListFilters(input: Record<string, unknown>): RunListFilters | string {
+  const statuses = parseRunStatuses(input.runStatuses);
+  if (typeof statuses === "string") return statuses;
+  const limit = parsePositiveInteger(input.limit);
+  if (limit === "invalid") return "limit must be a positive integer";
+  const createdAfter = parseTimestampFilter(input.createdAfter, "createdAfter");
+  if (typeof createdAfter === "string") return createdAfter;
+  const createdBefore = parseTimestampFilter(input.createdBefore, "createdBefore");
+  if (typeof createdBefore === "string") return createdBefore;
+  const updatedAfter = parseTimestampFilter(input.updatedAfter, "updatedAfter");
+  if (typeof updatedAfter === "string") return updatedAfter;
+  const updatedBefore = parseTimestampFilter(input.updatedBefore, "updatedBefore");
+  if (typeof updatedBefore === "string") return updatedBefore;
+  const budgetPreset = input.budgetPreset;
+  if (budgetPreset !== undefined && !isBudgetPolicyPreset(budgetPreset)) {
+    return "budgetPreset must be one of: cheap-review, safe-write, fast-parallel";
+  }
+  return {
+    statuses,
+    limit,
+    runIdPrefix: asOptionalString(input.runIdPrefix),
+    createdAfter,
+    createdBefore,
+    updatedAfter,
+    updatedBefore,
+    needsReconciliation: typeof input.needsReconciliation === "boolean" ? input.needsReconciliation : undefined,
+    budgetPreset,
+  };
+}
+
+function parseRunStatuses(value: unknown): Array<WorkflowRunSummary["status"]> | string | undefined {
+  const statuses = parseStringArray(value);
+  if (statuses === undefined) return undefined;
+  const invalid = statuses.find((status) => status !== "running" && status !== "completed" && status !== "failed");
+  return invalid ? "runStatuses must contain only: running, completed, failed" : statuses as Array<WorkflowRunSummary["status"]>;
+}
+
+function parseTimestampFilter(value: unknown, field: string): number | string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const timestamp = Date.parse(value);
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return `${field} must be an epoch millisecond number or ISO date string`;
+}
+
 interface TimelineFilters {
   taskIds?: string[];
   eventTypes?: string[];
   statuses?: string[];
+}
+
+interface RunListFilters {
+  statuses?: Array<WorkflowRunSummary["status"]>;
+  limit?: number;
+  runIdPrefix?: string;
+  createdAfter?: number;
+  createdBefore?: number;
+  updatedAfter?: number;
+  updatedBefore?: number;
+  needsReconciliation?: boolean;
+  budgetPreset?: WorkflowBudgetPolicyPreset;
 }
 
 function parseTimelineFilters(input: Record<string, unknown>): TimelineFilters {
@@ -497,6 +691,20 @@ function filterWorkflowEvents(events: WorkflowRunEvent[], filters: TimelineFilte
     if (filters.taskIds && (!event.taskId || !filters.taskIds.includes(event.taskId))) return false;
     if (filters.eventTypes && !filters.eventTypes.includes(event.type)) return false;
     if (filters.statuses && (!event.status || typeof event.status !== "string" || !filters.statuses.includes(event.status))) return false;
+    return true;
+  });
+}
+
+function filterWorkflowRunSummaries(runs: WorkflowRunSummary[], filters: RunListFilters): WorkflowRunSummary[] {
+  return runs.filter((run) => {
+    if (filters.statuses && !filters.statuses.includes(run.status)) return false;
+    if (filters.runIdPrefix && !run.runId.startsWith(filters.runIdPrefix)) return false;
+    if (filters.createdAfter !== undefined && run.createdAt < filters.createdAfter) return false;
+    if (filters.createdBefore !== undefined && run.createdAt > filters.createdBefore) return false;
+    if (filters.updatedAfter !== undefined && run.updatedAt < filters.updatedAfter) return false;
+    if (filters.updatedBefore !== undefined && run.updatedAt > filters.updatedBefore) return false;
+    if (filters.needsReconciliation !== undefined && run.needsReconciliation !== filters.needsReconciliation) return false;
+    if (filters.budgetPreset !== undefined && run.budgetPolicyPreset !== filters.budgetPreset) return false;
     return true;
   });
 }
@@ -591,6 +799,69 @@ function formatTimelineFilters(filters: TimelineFilters): string | undefined {
     filters.statuses ? `statuses=${filters.statuses.join(",")}` : undefined,
   ].filter((part): part is string => part !== undefined);
   return parts.length > 0 ? `Filters: ${parts.join(" ")}` : undefined;
+}
+
+function formatWorkflowRunList(
+  runs: WorkflowRunSummary[],
+  filters: RunListFilters = {},
+): string {
+  return [
+    "<workflow-run-list>",
+    `<payload>${escapeXml(JSON.stringify({ runs, total: runs.length, filters }))}</payload>`,
+    "</workflow-run-list>",
+  ].join("\n");
+}
+
+function formatWorkflowReconcileSpec(
+  sourceRunId: string,
+  reconciliationPlan: ReturnType<typeof createWorkflowNotification>["reconciliationPlan"],
+  spec: WorkflowSpec,
+): string {
+  return [
+    "<workflow-reconcile-spec>",
+    `<payload>${escapeXml(JSON.stringify({ sourceRunId, reconciliationPlan, spec }))}</payload>`,
+    "</workflow-reconcile-spec>",
+  ].join("\n");
+}
+
+function formatWorkflowTemplates(templates: Array<(typeof WORKFLOW_SPEC_TEMPLATES)[WorkflowTemplateName]>): string {
+  return [
+    "<workflow-templates>",
+    `<payload>${escapeXml(JSON.stringify({ templates, total: templates.length }))}</payload>`,
+    "</workflow-templates>",
+  ].join("\n");
+}
+
+function applyWorkflowTemplateParameters(
+  template: (typeof WORKFLOW_SPEC_TEMPLATES)[WorkflowTemplateName],
+  parameters: unknown,
+): (typeof WORKFLOW_SPEC_TEMPLATES)[WorkflowTemplateName] {
+  if (!isRecord(parameters)) {
+    return template;
+  }
+  const taskPrompts = isRecord(parameters.taskPrompts) ? parameters.taskPrompts : undefined;
+  const writeScope = parseStringArray(parameters.writeScope);
+  const maxConcurrency = typeof parameters.maxConcurrency === "number" ? Math.max(1, Math.floor(parameters.maxConcurrency)) : undefined;
+  const budgetPolicyPreset = isBudgetPolicyPreset(parameters.budgetPreset) ? parameters.budgetPreset : undefined;
+  const failurePolicy = isFailurePolicy(parameters.failurePolicy) ? parameters.failurePolicy : undefined;
+  return {
+    ...template,
+    spec: {
+      ...template.spec,
+      ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
+      ...(budgetPolicyPreset !== undefined ? { budgetPolicyPreset } : {}),
+      ...(failurePolicy !== undefined ? { failurePolicy } : {}),
+      tasks: template.spec.tasks.map((task) => {
+        const promptValue = taskPrompts?.[task.id];
+        const prompt = typeof promptValue === "string" ? promptValue : undefined;
+        return {
+          ...task,
+          ...(prompt !== undefined ? { prompt } : {}),
+          ...(writeScope && task.readOnly !== true ? { writeScope: [...writeScope] } : {}),
+        };
+      }),
+    },
+  };
 }
 
 function escapeXml(value: string): string {

@@ -173,6 +173,24 @@ export interface WorkflowRunResult {
   budget?: WorkflowBudgetUsage;
 }
 
+export interface WorkflowRunSummary {
+  runId: string;
+  status: WorkflowRunSnapshotStatus;
+  summary: string;
+  mode: WorkflowMode;
+  totalTasks: number;
+  completedTasks: number;
+  failedTasks: number;
+  pendingTasks: number;
+  runningTasks: number;
+  blockedTasks: number;
+  needsReconciliation: boolean;
+  budget: WorkflowBudgetUsage;
+  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface WorkflowRunSnapshotPlan {
   mode: WorkflowMode;
   tasks: WorkflowTask[];
@@ -242,6 +260,29 @@ export interface WorkflowReconciliationSummary {
   declaredScopeOverlaps: number;
   files: WorkflowReconciliationFileSummary[];
   tasks: WorkflowReconciliationTaskSummary[];
+}
+
+export interface WorkflowReconciliationFollowUpAction {
+  actionId: string;
+  issueIds: string[];
+  taskId: string;
+  description: string;
+  prompt: string;
+  writeScope: string[];
+  dependsOn: string[];
+}
+
+export interface WorkflowReconciliationPlan {
+  needed: boolean;
+  summary: string;
+  actions: WorkflowReconciliationFollowUpAction[];
+}
+
+export interface WorkflowReconciliationSpecOptions {
+  actionIds?: string[];
+  issueIds?: string[];
+  verifyTaskId?: string;
+  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
 }
 
 export interface WorkflowBudgetUsage extends WorkflowTaskBudgetUsage {
@@ -330,9 +371,62 @@ export interface WorkflowNotification {
   needsReconciliation: boolean;
   reconciliationIssues: WorkflowReconciliationIssue[];
   reconciliationSummary: WorkflowReconciliationSummary;
+  reconciliationPlan: WorkflowReconciliationPlan;
   budget: WorkflowBudgetUsage;
   tasks: WorkflowNotificationTask[];
 }
+
+export type WorkflowTemplateName = "research-implement-verify" | "parallel-review" | "safe-write";
+
+export interface WorkflowSpecTemplate {
+  name: WorkflowTemplateName;
+  description: string;
+  spec: WorkflowSpec;
+}
+
+export const WORKFLOW_SPEC_TEMPLATES: Record<WorkflowTemplateName, WorkflowSpecTemplate> = {
+  "research-implement-verify": {
+    name: "research-implement-verify",
+    description: "Pipeline for one focused change: inspect context, implement the change, then verify behavior.",
+    spec: {
+      mode: "pipeline",
+      budgetPolicyPreset: "safe-write",
+      tasks: [
+        { id: "research", description: "Inspect the relevant code and identify the minimal change." },
+        { id: "implement", description: "Apply the focused code change.", writeScope: ["."], isolate: true },
+        { id: "verify", description: "Run targeted checks and summarize the result.", readOnly: true },
+      ],
+    },
+  },
+  "parallel-review": {
+    name: "parallel-review",
+    description: "Parallel read-only review for independent areas before a Coordinator summary.",
+    spec: {
+      mode: "parallel",
+      maxConcurrency: 3,
+      budgetPolicyPreset: "cheap-review",
+      tasks: [
+        { id: "review-code", description: "Review implementation risks.", readOnly: true },
+        { id: "review-tests", description: "Review test coverage and likely gaps.", readOnly: true },
+        { id: "review-docs", description: "Review documentation or user-facing contract impact.", readOnly: true },
+      ],
+    },
+  },
+  "safe-write": {
+    name: "safe-write",
+    description: "Serial write workflow for risky edits where each step should finish before the next begins.",
+    spec: {
+      mode: "sequential",
+      budgetPolicyPreset: "safe-write",
+      failurePolicy: "fail-fast",
+      tasks: [
+        { id: "plan", description: "Confirm exact files and risk before editing.", readOnly: true },
+        { id: "write", description: "Make the smallest safe edit.", writeScope: ["."], isolate: true },
+        { id: "check", description: "Run checks and report remaining risk.", readOnly: true },
+      ],
+    },
+  },
+};
 
 export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
   const tasks = normalizeTasksForMode(spec.mode, spec.tasks);
@@ -363,6 +457,7 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
   const reconciliationIssues = result.reconciliationIssues ?? [];
   const issueIdsByTask = createReconciliationIssueIdsByTask(reconciliationIssues);
   const reconciliationSummary = createWorkflowReconciliationSummary(reconciliationIssues, result.orderedResults);
+  const reconciliationPlan = createWorkflowReconciliationPlan(reconciliationIssues);
   return {
     runId: result.runId,
     status: result.status,
@@ -374,6 +469,7 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
     needsReconciliation: result.needsReconciliation ?? reconciliationIssues.length > 0,
     reconciliationIssues,
     reconciliationSummary,
+    reconciliationPlan,
     budget: result.budget ?? { tasks: {} },
     tasks: result.orderedResults.map((task) => ({
       taskId: task.taskId,
@@ -391,6 +487,29 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
       timedOut: task.timedOut,
       error: task.error,
     })),
+  };
+}
+
+export function createWorkflowRunSummary(snapshot: WorkflowRunSnapshot): WorkflowRunSummary {
+  const completedTasks = snapshot.orderedResults.filter((task) => task.status === "completed").length;
+  const failedTasks = snapshot.orderedResults.length - completedTasks;
+  const result = createWorkflowResultFromSnapshot(snapshot);
+  return {
+    runId: snapshot.runId,
+    status: snapshot.status,
+    summary: snapshot.summary,
+    mode: snapshot.plan.mode,
+    totalTasks: snapshot.plan.tasks.length,
+    completedTasks,
+    failedTasks,
+    pendingTasks: snapshot.pendingTaskIds.length,
+    runningTasks: snapshot.runningTaskIds.length,
+    blockedTasks: snapshot.blockedTaskIds.length,
+    needsReconciliation: result.needsReconciliation ?? false,
+    budget: snapshot.budget ?? { tasks: {} },
+    budgetPolicyPreset: snapshot.plan.budgetPolicyPreset,
+    createdAt: snapshot.createdAt,
+    updatedAt: snapshot.updatedAt,
   };
 }
 
@@ -1382,6 +1501,91 @@ export function createWorkflowReconciliationSummary(
         deletions: sumMapValues(summary.deletionsByFile),
       }))
       .sort((left, right) => left.taskId.localeCompare(right.taskId)),
+  };
+}
+
+export function createWorkflowReconciliationPlan(
+  issues: WorkflowReconciliationIssue[],
+): WorkflowReconciliationPlan {
+  if (issues.length === 0) {
+    return {
+      needed: false,
+      summary: "No reconciliation follow-up needed",
+      actions: [],
+    };
+  }
+
+  const actions = issues.map((issue) => {
+    const taskId = `reconcile-${issue.issueId}`.replace(/[^A-Za-z0-9._-]/g, "-");
+    const changedFiles = issue.changedFiles?.length ? `Changed files: ${issue.changedFiles.join(", ")}.` : "";
+    const writeScope = issue.changedFiles?.length ? issue.changedFiles : issue.writeScope;
+    return {
+      actionId: `followup-${issue.issueId}`,
+      issueIds: [issue.issueId],
+      taskId,
+      description: `Reconcile ${issue.type} for ${issue.taskIds.join(" and ")}`,
+      prompt: [
+        `Reconcile workflow issue ${issue.issueId}.`,
+        issue.summary,
+        `Affected tasks: ${issue.taskIds.join(", ")}.`,
+        writeScope.length > 0 ? `Write scope: ${writeScope.join(", ")}.` : undefined,
+        changedFiles || undefined,
+        "Inspect the task outputs and current files, apply the smallest safe fix, and report any remaining conflict.",
+      ].filter((line): line is string => line !== undefined && line.length > 0).join("\n"),
+      writeScope: [...new Set(writeScope)].sort(),
+      dependsOn: [...issue.taskIds],
+    };
+  });
+
+  return {
+    needed: true,
+    summary: `${issues.length} reconciliation follow-up action(s) available`,
+    actions,
+  };
+}
+
+export function createWorkflowSpecFromReconciliationPlan(
+  plan: WorkflowReconciliationPlan,
+  options: WorkflowReconciliationSpecOptions = {},
+): WorkflowSpec | undefined {
+  const actions = plan.actions.filter((action) => {
+    const matchesAction = !options.actionIds || options.actionIds.includes(action.actionId);
+    const matchesIssue = !options.issueIds || action.issueIds.some((issueId) => options.issueIds?.includes(issueId));
+    return matchesAction && matchesIssue;
+  });
+  if (actions.length === 0) return undefined;
+
+  const reconcileTasks: WorkflowTask[] = actions.map((action) => ({
+    id: action.taskId,
+    description: action.description,
+    prompt: action.prompt,
+    writeScope: [...action.writeScope],
+    isolate: true,
+    metadata: {
+      reconciliationActionId: action.actionId,
+      reconciliationIssueIds: [...action.issueIds],
+    },
+  }));
+  const verifyTaskId = options.verifyTaskId ?? "verify-reconciliation";
+  return {
+    mode: "parallel",
+    maxConcurrency: 1,
+    failurePolicy: "fail-fast",
+    budgetPolicyPreset: options.budgetPolicyPreset ?? "safe-write",
+    tasks: [
+      ...reconcileTasks,
+      {
+        id: verifyTaskId,
+        description: "Verify reconciliation changes and summarize any remaining conflicts.",
+        prompt: [
+          "Verify the reconciliation work from the preceding tasks.",
+          `Reconciled tasks: ${reconcileTasks.map((task) => task.id).join(", ")}.`,
+          "Run targeted checks where practical, inspect the touched files, and report any remaining conflict.",
+        ].join("\n"),
+        readOnly: true,
+        dependsOn: reconcileTasks.map((task) => task.id),
+      },
+    ],
   };
 }
 

@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   WORKFLOW_BUDGET_POLICY_PRESETS,
+  WORKFLOW_SPEC_TEMPLATES,
   createWorkflowNotification,
   createWorkflowPlan,
+  createWorkflowSpecFromReconciliationPlan,
   formatWorkflowNotification,
   parseWorkflowNotification,
   runWorkflow,
@@ -475,6 +477,51 @@ describe("runWorkflow", () => {
           deletions: 0,
         },
       ],
+    });
+    expect(notification.reconciliationPlan).toMatchObject({
+      needed: true,
+      summary: "1 reconciliation follow-up action(s) available",
+      actions: [{
+        actionId: "followup-reconcile-actual-auth-a-auth-b",
+        issueIds: ["reconcile-actual-auth-a-auth-b"],
+        taskId: "reconcile-reconcile-actual-auth-a-auth-b",
+        dependsOn: ["auth-a", "auth-b"],
+        writeScope: ["packages/auth/src/index.ts"],
+      }],
+    });
+    expect(notification.reconciliationPlan.actions[0]?.prompt).toContain("Affected tasks: auth-a, auth-b.");
+    expect(createWorkflowSpecFromReconciliationPlan(notification.reconciliationPlan)).toMatchObject({
+      mode: "parallel",
+      maxConcurrency: 1,
+      failurePolicy: "fail-fast",
+      budgetPolicyPreset: "safe-write",
+      tasks: [
+        {
+          id: "reconcile-reconcile-actual-auth-a-auth-b",
+          isolate: true,
+          writeScope: ["packages/auth/src/index.ts"],
+        },
+        {
+          id: "verify-reconciliation",
+          readOnly: true,
+          dependsOn: ["reconcile-reconcile-actual-auth-a-auth-b"],
+        },
+      ],
+    });
+  });
+
+  it("exposes built-in workflow spec templates", () => {
+    expect(WORKFLOW_SPEC_TEMPLATES["research-implement-verify"]).toMatchObject({
+      name: "research-implement-verify",
+      spec: {
+        mode: "pipeline",
+        budgetPolicyPreset: "safe-write",
+        tasks: [
+          { id: "research" },
+          { id: "implement" },
+          { id: "verify" },
+        ],
+      },
     });
   });
 
