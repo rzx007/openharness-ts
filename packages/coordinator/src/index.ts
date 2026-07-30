@@ -74,8 +74,8 @@ When a snapshot contains a running task with \`taskManagerTaskId\`, resume will 
 Use task \`timeoutSeconds\` or workflow \`defaultTaskTimeoutSeconds\` when a worker attempt must have a hard wall-clock budget; timed-out attempts are reported as failed and follow the workflow failure/retry policy.
 For parallel write work, set \`writeScope\` on non-isolated tasks. The scheduler serializes overlapping non-isolated write scopes; \`readOnly: true\` and \`isolate: true\` tasks do not participate in shared-cwd write conflicts.
 Workflow status snapshots include \`blockedTaskIds\` and \`blockedTasks\` when ready tasks are waiting on writeScope conflicts; use those fields to explain scheduling pauses instead of treating them as stalled work.
-Workflow results can include \`needsReconciliation\`, \`reconciliationIssues\`, \`budget\`, and persisted event timeline data. Use those fields to decide whether a completed workflow still needs merge/reconcile follow-up.
-Use Workflow status with \`view: "timeline"\` when a human-readable run timeline is more useful than raw JSON; filter it with \`taskIds\`, \`eventTypes\`, or \`statuses\` when focusing on a subset. Status JSON also includes timeline controls and summary data for UI rendering. Use \`budgetPolicy\` hard limits to stop scheduling new worker tasks, or soft limits to serialize/conserve later work after known token/time usage crosses a threshold; \`budgetPolicy.conserve\` can tune conserve prompts, permission mode, and max turns.
+Workflow results can include \`needsReconciliation\`, \`reconciliationIssues\`, \`reconciliationSummary\`, \`budget\`, and persisted event timeline data. Use those fields to decide whether a completed workflow still needs merge/reconcile follow-up.
+Use Workflow status with \`view: "timeline"\` when a human-readable run timeline is more useful than raw JSON; filter it with \`taskIds\`, \`eventTypes\`, or \`statuses\` when focusing on a subset. Status JSON also includes timeline controls and summary data for UI rendering, including available and selected filter state. Use \`budgetPreset\` for common policies such as \`cheap-review\`, \`safe-write\`, or \`fast-parallel\`; use \`budgetPolicy\` hard limits to stop scheduling new worker tasks, or soft limits to serialize/conserve later work after known token/time usage crosses a threshold. \`budgetPolicy.conserve\` can tune conserve prompts, permission mode, and max turns.
 
 When calling agent:
 - Do not use one worker to check on another. Workers will notify you when they are done.
@@ -506,12 +506,18 @@ export {
   runWorkflow,
   validateWorkflowTasks,
   workflowTasksConflict,
+  WORKFLOW_BUDGET_POLICY_PRESETS,
+  createWorkflowReconciliationSummary,
+  type WorkflowBudgetPolicyPreset,
   type WorkflowBudgetPolicy,
   type WorkflowBudgetUsage,
   type WorkflowConservePolicy,
   type WorkflowDiffFileSummary,
   type WorkflowDiffSummary,
+  type WorkflowReconciliationFileSummary,
   type WorkflowReconciliationIssue,
+  type WorkflowReconciliationSummary,
+  type WorkflowReconciliationTaskSummary,
   type WorkflowFailurePolicy,
   type WorkflowMode,
   type WorkflowBlockedTask,

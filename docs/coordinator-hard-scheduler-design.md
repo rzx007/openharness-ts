@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V8.3：
+截至目前，已经落地到 V9.3：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -517,9 +517,12 @@ V1 内存调度核心
 - V8.1：已完成基础版。`Workflow` status JSON 增加 `timelineControls` 和 `timelineSummary`，让 UI 可以直接渲染 task/status/event type filter 控件和汇总计数。
 - V8.2：已完成基础版。agent workflow runner 会采集 git diff summary，输出 changed files、文件状态分类以及 insertions/deletions 汇总，并继续兼容旧的 `changedFiles` 字段。
 - V8.3：已完成基础版。`budgetPolicy.conserve` 支持配置 conserve prompt hint、permission mode 和 maxTurns，soft budget 后的 worker 可以更明确地降成本运行。
+- V9.1：已完成基础版。`Workflow` status JSON 的 `timelineControls` 同时返回 `available` 和 `selected`，前端可以直接渲染筛选控件并保存/恢复筛选状态，同时继续兼容旧的顶层 `taskIds` / `eventTypes` / `statuses`。
+- V9.2：已完成基础版。`<workflow-notification>` 增加 `reconciliationSummary`，按文件和任务聚合 reconcile issue、diff status、insertions/deletions，让 UI 可以按文件查看冲突任务和变更规模。
+- V9.3：已完成基础版。新增 `budgetPreset`，支持 `cheap-review`、`safe-write`、`fast-parallel` 三种常用预算策略；显式 `budgetPolicy` 字段仍可覆盖 preset 默认值。
 
 下一步建议：
 
-- V9.1：把 `timelineControls` 真正接入前端组件，提供交互式筛选和保存筛选状态。
-- V9.2：把 diff summary 接入 reconcile UI，支持按文件查看冲突任务和变更规模。
-- V9.3：增加 budget policy preset，例如 `cheap-review`、`safe-write`、`fast-parallel`，减少手写策略参数。
+- V10.1：增加 workflow run 列表/索引能力，让 UI 或 CLI 可以按时间、状态、runId 浏览历史 run。
+- V10.2：增加 reconcile follow-up action 契约，例如生成一个专门的 reconcile task 或导出冲突处理清单。
+- V10.3：增加 workflow spec 模板/示例库，把常见 `research -> implement -> verify`、并行审查、安全写入等流程固化为可复用模板。

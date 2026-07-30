@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  WORKFLOW_BUDGET_POLICY_PRESETS,
   createWorkflowNotification,
   createWorkflowPlan,
   formatWorkflowNotification,
@@ -40,6 +41,28 @@ describe("createWorkflowPlan", () => {
       clean: [],
       build: ["clean"],
       test: ["build"],
+    });
+  });
+
+  it("merges budget policy presets with explicit overrides", () => {
+    const plan = createWorkflowPlan({
+      mode: "parallel",
+      budgetPolicyPreset: "safe-write",
+      budgetPolicy: {
+        softMaxTokensUsed: 12_000,
+        conserve: { maxTurns: 1 },
+      },
+      tasks: [{ id: "write" }],
+    });
+
+    expect(plan.budgetPolicyPreset).toBe("safe-write");
+    expect(plan.budgetPolicy).toEqual({
+      ...WORKFLOW_BUDGET_POLICY_PRESETS["safe-write"],
+      softMaxTokensUsed: 12_000,
+      conserve: {
+        ...WORKFLOW_BUDGET_POLICY_PRESETS["safe-write"].conserve,
+        maxTurns: 1,
+      },
     });
   });
 
@@ -400,7 +423,17 @@ describe("runWorkflow", () => {
       },
       ({ task }) => ({
         summary: `${task.id} done`,
-        metadata: { changedFiles: ["packages/auth/src/index.ts"] },
+        metadata: {
+          diff: {
+            changedFiles: ["packages/auth/src/index.ts"],
+            files: [{
+              path: "packages/auth/src/index.ts",
+              status: task.id === "auth-a" ? "modified" : "added",
+              insertions: task.id === "auth-a" ? 2 : 5,
+              deletions: task.id === "auth-a" ? 1 : 0,
+            }],
+          },
+        },
       }),
     );
 
@@ -412,6 +445,37 @@ describe("runWorkflow", () => {
         changedFiles: ["packages/auth/src/index.ts"],
       }),
     ]);
+
+    const notification = createWorkflowNotification(result);
+    expect(notification.reconciliationSummary).toMatchObject({
+      totalIssues: 1,
+      actualConflicts: 1,
+      declaredScopeOverlaps: 0,
+      files: [{
+        path: "packages/auth/src/index.ts",
+        issueIds: ["reconcile-actual-auth-a-auth-b"],
+        taskIds: ["auth-a", "auth-b"],
+        statuses: { "auth-a": "modified", "auth-b": "added" },
+        insertions: 7,
+        deletions: 1,
+      }],
+      tasks: [
+        {
+          taskId: "auth-a",
+          issueIds: ["reconcile-actual-auth-a-auth-b"],
+          changedFiles: ["packages/auth/src/index.ts"],
+          insertions: 2,
+          deletions: 1,
+        },
+        {
+          taskId: "auth-b",
+          issueIds: ["reconcile-actual-auth-a-auth-b"],
+          changedFiles: ["packages/auth/src/index.ts"],
+          insertions: 5,
+          deletions: 0,
+        },
+      ],
+    });
   });
 
   it("aggregates budget usage from task progress metadata", async () => {

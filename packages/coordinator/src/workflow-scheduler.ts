@@ -35,6 +35,7 @@ export interface WorkflowSpec {
   tasks: WorkflowTask[];
   maxConcurrency?: number;
   defaultTaskTimeoutMs?: number;
+  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
   budgetPolicy?: WorkflowBudgetPolicy;
   failurePolicy?: WorkflowFailurePolicy;
 }
@@ -44,6 +45,7 @@ export interface WorkflowPlan {
   tasks: WorkflowTask[];
   maxConcurrency: number;
   defaultTaskTimeoutMs?: number;
+  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
   budgetPolicy?: WorkflowBudgetPolicy;
   executionOrder: string[];
   dependencyMap: Record<string, string[]>;
@@ -78,6 +80,36 @@ export interface WorkflowConservePolicy {
   permissionMode?: "default" | "plan";
   maxTurns?: number;
 }
+
+export type WorkflowBudgetPolicyPreset = "cheap-review" | "safe-write" | "fast-parallel";
+
+export const WORKFLOW_BUDGET_POLICY_PRESETS: Record<WorkflowBudgetPolicyPreset, WorkflowBudgetPolicy> = {
+  "cheap-review": {
+    maxTokensUsed: 12_000,
+    softMaxTokensUsed: 8_000,
+    onSoftLimit: "serialize-and-conserve",
+    conserve: {
+      permissionMode: "plan",
+      maxTurns: 2,
+      promptHint: "Prefer inspection, focused summaries, and minimal follow-up work once the workflow is over its cheap-review budget.",
+    },
+  },
+  "safe-write": {
+    maxTokensUsed: 24_000,
+    softMaxTokensUsed: 16_000,
+    onSoftLimit: "serialize-and-conserve",
+    conserve: {
+      permissionMode: "plan",
+      maxTurns: 4,
+      promptHint: "Prefer small, reviewable write steps and stop to report uncertainty once the workflow is over its safe-write budget.",
+    },
+  },
+  "fast-parallel": {
+    maxTokensUsed: 45_000,
+    softMaxTokensUsed: 30_000,
+    onSoftLimit: "continue",
+  },
+};
 
 export interface WorkflowDiffFileSummary {
   path: string;
@@ -146,6 +178,7 @@ export interface WorkflowRunSnapshotPlan {
   tasks: WorkflowTask[];
   maxConcurrency: number | "unbounded";
   defaultTaskTimeoutMs?: number;
+  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
   budgetPolicy?: WorkflowBudgetPolicy;
   executionOrder: string[];
   dependencyMap: Record<string, string[]>;
@@ -184,6 +217,31 @@ export interface WorkflowReconciliationIssue {
   writeScope: string[];
   changedFiles?: string[];
   summary: string;
+}
+
+export interface WorkflowReconciliationFileSummary {
+  path: string;
+  issueIds: string[];
+  taskIds: string[];
+  statuses: Record<string, WorkflowDiffFileSummary["status"]>;
+  insertions: number;
+  deletions: number;
+}
+
+export interface WorkflowReconciliationTaskSummary {
+  taskId: string;
+  issueIds: string[];
+  changedFiles: string[];
+  insertions: number;
+  deletions: number;
+}
+
+export interface WorkflowReconciliationSummary {
+  totalIssues: number;
+  actualConflicts: number;
+  declaredScopeOverlaps: number;
+  files: WorkflowReconciliationFileSummary[];
+  tasks: WorkflowReconciliationTaskSummary[];
 }
 
 export interface WorkflowBudgetUsage extends WorkflowTaskBudgetUsage {
@@ -271,6 +329,7 @@ export interface WorkflowNotification {
   failedTasks: number;
   needsReconciliation: boolean;
   reconciliationIssues: WorkflowReconciliationIssue[];
+  reconciliationSummary: WorkflowReconciliationSummary;
   budget: WorkflowBudgetUsage;
   tasks: WorkflowNotificationTask[];
 }
@@ -278,7 +337,9 @@ export interface WorkflowNotification {
 export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
   const tasks = normalizeTasksForMode(spec.mode, spec.tasks);
   validateWorkflowTimeouts(spec.defaultTaskTimeoutMs, tasks);
-  validateWorkflowBudgetPolicy(spec.budgetPolicy);
+  validateWorkflowBudgetPolicyPreset(spec.budgetPolicyPreset);
+  const budgetPolicy = resolveWorkflowBudgetPolicy(spec.budgetPolicyPreset, spec.budgetPolicy);
+  validateWorkflowBudgetPolicy(budgetPolicy);
   validateWorkflowTasks(tasks);
   const dependencyMap = buildDependencyMap(tasks);
   const dependentsMap = buildDependentsMap(tasks);
@@ -289,7 +350,8 @@ export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
     tasks,
     maxConcurrency: resolveMaxConcurrency(spec.mode, spec.maxConcurrency),
     defaultTaskTimeoutMs: spec.defaultTaskTimeoutMs,
-    budgetPolicy: spec.budgetPolicy,
+    budgetPolicyPreset: spec.budgetPolicyPreset,
+    budgetPolicy,
     executionOrder,
     dependencyMap,
     dependentsMap,
@@ -300,6 +362,7 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
   const completedTasks = result.orderedResults.filter((task) => task.status === "completed").length;
   const reconciliationIssues = result.reconciliationIssues ?? [];
   const issueIdsByTask = createReconciliationIssueIdsByTask(reconciliationIssues);
+  const reconciliationSummary = createWorkflowReconciliationSummary(reconciliationIssues, result.orderedResults);
   return {
     runId: result.runId,
     status: result.status,
@@ -310,6 +373,7 @@ export function createWorkflowNotification(result: WorkflowRunResult): WorkflowN
     failedTasks: result.orderedResults.length - completedTasks,
     needsReconciliation: result.needsReconciliation ?? reconciliationIssues.length > 0,
     reconciliationIssues,
+    reconciliationSummary,
     budget: result.budget ?? { tasks: {} },
     tasks: result.orderedResults.map((task) => ({
       taskId: task.taskId,
@@ -907,6 +971,47 @@ function validateWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy | undefined):
   }
 }
 
+function validateWorkflowBudgetPolicyPreset(preset: WorkflowBudgetPolicyPreset | undefined): void {
+  if (preset === undefined) return;
+  if (!(preset in WORKFLOW_BUDGET_POLICY_PRESETS)) {
+    throw new Error("budgetPolicyPreset must be one of: cheap-review, safe-write, fast-parallel");
+  }
+}
+
+function resolveWorkflowBudgetPolicy(
+  preset: WorkflowBudgetPolicyPreset | undefined,
+  policy: WorkflowBudgetPolicy | undefined,
+): WorkflowBudgetPolicy | undefined {
+  if (!preset) return policy;
+  return mergeWorkflowBudgetPolicy(WORKFLOW_BUDGET_POLICY_PRESETS[preset], policy);
+}
+
+function mergeWorkflowBudgetPolicy(
+  presetPolicy: WorkflowBudgetPolicy,
+  policy: WorkflowBudgetPolicy | undefined,
+): WorkflowBudgetPolicy {
+  if (!policy) {
+    return cloneWorkflowBudgetPolicy(presetPolicy);
+  }
+  return {
+    ...cloneWorkflowBudgetPolicy(presetPolicy),
+    ...policy,
+    conserve: presetPolicy.conserve || policy.conserve
+      ? {
+          ...presetPolicy.conserve,
+          ...policy.conserve,
+        }
+      : undefined,
+  };
+}
+
+function cloneWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy): WorkflowBudgetPolicy {
+  return {
+    ...policy,
+    conserve: policy.conserve ? { ...policy.conserve } : undefined,
+  };
+}
+
 function validateBudgetPolicyNumber(value: number | undefined, label: string): void {
   if (value === undefined) return;
   if (!Number.isFinite(value) || value <= 0) {
@@ -1197,6 +1302,89 @@ function createReconciliationIssueIdsByTask(
   return byTask;
 }
 
+export function createWorkflowReconciliationSummary(
+  issues: WorkflowReconciliationIssue[],
+  orderedResults: WorkflowTaskRunResult[],
+): WorkflowReconciliationSummary {
+  const resultByTaskId = new Map(orderedResults.map((result) => [result.taskId, result]));
+  const fileSummaries = new Map<string, {
+    issueIds: Set<string>;
+    taskIds: Set<string>;
+    statuses: Record<string, WorkflowDiffFileSummary["status"]>;
+    insertionsByTask: Map<string, number>;
+    deletionsByTask: Map<string, number>;
+  }>();
+  const taskSummaries = new Map<string, {
+    issueIds: Set<string>;
+    changedFiles: Set<string>;
+    insertionsByFile: Map<string, number>;
+    deletionsByFile: Map<string, number>;
+  }>();
+
+  for (const issue of issues) {
+    const issueFiles = issue.changedFiles?.map(normalizeWriteScope).filter((file) => file.length > 0);
+    for (const taskId of issue.taskIds) {
+      const taskSummary = taskSummaries.get(taskId) ?? {
+        issueIds: new Set<string>(),
+        changedFiles: new Set<string>(),
+        insertionsByFile: new Map<string, number>(),
+        deletionsByFile: new Map<string, number>(),
+      };
+      taskSummary.issueIds.add(issue.issueId);
+      taskSummaries.set(taskId, taskSummary);
+
+      const diffFiles = diffFilesFromResult(resultByTaskId.get(taskId));
+      const filesForTask = issueFiles?.length
+        ? diffFiles.filter((file) => issueFiles.includes(file.path))
+        : diffFiles.filter((file) => issue.writeScope.some((scope) => writeScopesOverlap(file.path, normalizeWriteScope(scope))));
+      for (const file of filesForTask) {
+        taskSummary.changedFiles.add(file.path);
+        taskSummary.insertionsByFile.set(file.path, file.insertions ?? 0);
+        taskSummary.deletionsByFile.set(file.path, file.deletions ?? 0);
+
+        const fileSummary = fileSummaries.get(file.path) ?? {
+          issueIds: new Set<string>(),
+          taskIds: new Set<string>(),
+          statuses: {},
+          insertionsByTask: new Map<string, number>(),
+          deletionsByTask: new Map<string, number>(),
+        };
+        fileSummary.issueIds.add(issue.issueId);
+        fileSummary.taskIds.add(taskId);
+        fileSummary.statuses[taskId] = file.status;
+        fileSummary.insertionsByTask.set(taskId, file.insertions ?? 0);
+        fileSummary.deletionsByTask.set(taskId, file.deletions ?? 0);
+        fileSummaries.set(file.path, fileSummary);
+      }
+    }
+  }
+
+  return {
+    totalIssues: issues.length,
+    actualConflicts: issues.filter((issue) => issue.severity === "actual-conflict").length,
+    declaredScopeOverlaps: issues.filter((issue) => issue.type === "write-scope-overlap").length,
+    files: [...fileSummaries.entries()]
+      .map(([path, summary]) => ({
+        path,
+        issueIds: [...summary.issueIds].sort(),
+        taskIds: [...summary.taskIds].sort(),
+        statuses: Object.fromEntries(Object.entries(summary.statuses).sort(([left], [right]) => left.localeCompare(right))),
+        insertions: sumMapValues(summary.insertionsByTask),
+        deletions: sumMapValues(summary.deletionsByTask),
+      }))
+      .sort((left, right) => left.path.localeCompare(right.path)),
+    tasks: [...taskSummaries.entries()]
+      .map(([taskId, summary]) => ({
+        taskId,
+        issueIds: [...summary.issueIds].sort(),
+        changedFiles: [...summary.changedFiles].sort(),
+        insertions: sumMapValues(summary.insertionsByFile),
+        deletions: sumMapValues(summary.deletionsByFile),
+      }))
+      .sort((left, right) => left.taskId.localeCompare(right.taskId)),
+  };
+}
+
 function summaryWithReconciliation(summary: string, issues: WorkflowReconciliationIssue[]): string {
   return issues.length === 0 || summary.includes("reconciliation issue")
     ? summary
@@ -1286,6 +1474,41 @@ function changedFilesFromResult(result: WorkflowTaskRunResult | undefined): stri
     .filter((item): item is string => typeof item === "string")
     .map(normalizeWriteScope)
     .filter((file) => file.length > 0);
+}
+
+function diffFilesFromResult(result: WorkflowTaskRunResult | undefined): WorkflowDiffFileSummary[] {
+  const metadata = result?.metadata;
+  if (!metadata) return [];
+  if (isRecord(metadata.diff) && Array.isArray(metadata.diff.files)) {
+    return metadata.diff.files
+      .filter(isRecord)
+      .map((file) => ({
+        path: typeof file.path === "string" ? normalizeWriteScope(file.path) : "",
+        status: normalizeDiffFileStatus(file.status),
+        insertions: typeof file.insertions === "number" && Number.isFinite(file.insertions) ? file.insertions : undefined,
+        deletions: typeof file.deletions === "number" && Number.isFinite(file.deletions) ? file.deletions : undefined,
+      }))
+      .filter((file) => file.path.length > 0);
+  }
+  return changedFilesFromResult(result).map((path) => ({
+    path,
+    status: "other",
+  }));
+}
+
+function normalizeDiffFileStatus(status: unknown): WorkflowDiffFileSummary["status"] {
+  return status === "added" ||
+    status === "modified" ||
+    status === "deleted" ||
+    status === "renamed" ||
+    status === "untracked" ||
+    status === "other"
+    ? status
+    : "other";
+}
+
+function sumMapValues(values: Map<string, number>): number {
+  return [...values.values()].reduce((total, value) => total + value, 0);
 }
 
 function cloneBudgetUsage(budget: WorkflowTaskBudgetUsage | undefined): WorkflowTaskBudgetUsage | undefined {

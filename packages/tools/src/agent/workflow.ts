@@ -5,6 +5,7 @@ import {
   runWorkflow,
   runPersistentWorkflow,
   WorkflowRunStore,
+  type WorkflowBudgetPolicyPreset,
   type WorkflowFailurePolicy,
   type WorkflowMode,
   type WorkflowRunEvent,
@@ -18,6 +19,7 @@ import { createAgentWorkflowRunner } from "./workflow-runner";
 const WORKFLOW_MODES = new Set<WorkflowMode>(["parallel", "sequential", "pipeline"]);
 const FAILURE_POLICIES = new Set<WorkflowFailurePolicy>(["skip-dependents", "fail-fast", "continue"]);
 const WORKFLOW_ACTIONS = new Set(["run", "resume", "status"]);
+const BUDGET_POLICY_PRESETS = new Set<WorkflowBudgetPolicyPreset>(["cheap-review", "safe-write", "fast-parallel"]);
 
 export interface WorkflowToolOptions {
   createRunner?: typeof createAgentWorkflowRunner;
@@ -155,6 +157,11 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
             },
           },
         },
+        budgetPreset: {
+          type: "string",
+          enum: ["cheap-review", "safe-write", "fast-parallel"],
+          description: "Optional budget policy preset. Explicit budgetPolicy fields override preset defaults.",
+        },
         failurePolicy: {
           type: "string",
           enum: ["skip-dependents", "fail-fast", "continue"],
@@ -236,7 +243,7 @@ function workflowStatus(input: Record<string, unknown>, cwd: string) {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
   }
   const filters = parseTimelineFilters(input);
-  const events = filterWorkflowEvents(store.loadEvents(snapshot.runId), filters);
+  const events = store.loadEvents(snapshot.runId);
   if (input.view === "timeline") {
     return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events, filters) }] };
   }
@@ -292,6 +299,10 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   }
   const budgetPolicyOrError = parseBudgetPolicy(input.budgetPolicy);
   if (typeof budgetPolicyOrError === "string") return budgetPolicyOrError;
+  const budgetPolicyPreset = input.budgetPreset;
+  if (budgetPolicyPreset !== undefined && !isBudgetPolicyPreset(budgetPolicyPreset)) {
+    return "budgetPreset must be one of: cheap-review, safe-write, fast-parallel";
+  }
 
   const tasks: WorkflowTask[] = [];
   for (const [index, rawTask] of input.tasks.entries()) {
@@ -308,6 +319,7 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
     tasks,
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
     ...(defaultTaskTimeoutMs !== undefined ? { defaultTaskTimeoutMs } : {}),
+    ...(budgetPolicyPreset !== undefined ? { budgetPolicyPreset } : {}),
     ...(budgetPolicyOrError !== undefined ? { budgetPolicy: budgetPolicyOrError } : {}),
     ...(failurePolicy !== undefined ? { failurePolicy } : {}),
   };
@@ -433,6 +445,10 @@ function isFailurePolicy(value: unknown): value is WorkflowFailurePolicy {
   return typeof value === "string" && FAILURE_POLICIES.has(value as WorkflowFailurePolicy);
 }
 
+function isBudgetPolicyPreset(value: unknown): value is WorkflowBudgetPolicyPreset {
+  return typeof value === "string" && BUDGET_POLICY_PRESETS.has(value as WorkflowBudgetPolicyPreset);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -486,18 +502,19 @@ function filterWorkflowEvents(events: WorkflowRunEvent[], filters: TimelineFilte
 }
 
 function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[] = [], filters: TimelineFilters = {}): string {
-  const timeline = createWorkflowTimeline(events);
-  const timelineControls = createTimelineControls(snapshot, events);
+  const filteredEvents = filterWorkflowEvents(events, filters);
+  const timeline = createWorkflowTimeline(filteredEvents);
+  const timelineControls = createTimelineControls(snapshot, events, filters);
   const timelineSummary = createTimelineSummary(timeline);
   return [
     "<workflow-run-snapshot>",
-    `<payload>${escapeXml(JSON.stringify({ snapshot, events, filters, timelineControls, timelineSummary, timeline, timelineText: formatTimelineText(snapshot, timeline, filters, timelineSummary) }))}</payload>`,
+    `<payload>${escapeXml(JSON.stringify({ snapshot, events: filteredEvents, filters, timelineControls, timelineSummary, timeline, timelineText: formatTimelineText(snapshot, timeline, filters, timelineSummary) }))}</payload>`,
     "</workflow-run-snapshot>",
   ].join("\n");
 }
 
 function formatWorkflowTimeline(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[], filters: TimelineFilters = {}): string {
-  const timeline = createWorkflowTimeline(events);
+  const timeline = createWorkflowTimeline(filterWorkflowEvents(events, filters));
   return formatTimelineText(snapshot, timeline, filters, createTimelineSummary(timeline));
 }
 
@@ -532,11 +549,21 @@ function formatTimelineText(
   return lines.join("\n");
 }
 
-function createTimelineControls(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[]) {
-  return {
+function createTimelineControls(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[], filters: TimelineFilters = {}) {
+  const available = {
     taskIds: [...new Set([...snapshot.plan.tasks.map((task) => task.id), ...events.map((event) => event.taskId).filter((id): id is string => id !== undefined)])].sort(),
     eventTypes: [...new Set(events.map((event) => event.type))].sort(),
     statuses: [...new Set(events.map((event) => event.status).filter((status) => typeof status === "string").map(String))].sort(),
+  };
+  const selected = {
+    taskIds: filters.taskIds ?? [],
+    eventTypes: filters.eventTypes ?? [],
+    statuses: filters.statuses ?? [],
+  };
+  return {
+    ...available,
+    available,
+    selected,
   };
 }
 

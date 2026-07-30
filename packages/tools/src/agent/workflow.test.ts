@@ -136,6 +136,7 @@ describe("workflowTool", () => {
     await tool.execute(
       {
         mode: "parallel",
+        budgetPreset: "safe-write",
         defaultTaskTimeoutSeconds: 30,
         budgetPolicy: {
           maxTokensUsed: 1_000,
@@ -156,6 +157,7 @@ describe("workflowTool", () => {
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultTaskTimeoutMs: 30_000,
+        budgetPolicyPreset: "safe-write",
         budgetPolicy: {
           maxTokensUsed: 1_000,
           maxTimeUsedMs: 60_000,
@@ -287,6 +289,8 @@ describe("workflowTool", () => {
       expect(textOf(result)).toContain("workflow_started");
       expect(textOf(result)).toContain("timelineControls");
       expect(textOf(result)).toContain("timelineSummary");
+      expect(textOf(result)).toContain("available");
+      expect(textOf(result)).toContain("selected");
 
       const timelineResult = await tool.execute({ action: "status", runId: "status-run", view: "timeline" }, { cwd });
       expect(textOf(timelineResult)).toContain("Workflow status-run (running)");
@@ -304,6 +308,17 @@ describe("workflowTool", () => {
       expect(textOf(filteredTimeline)).toContain("task_started research [running]");
       expect(textOf(filteredTimeline)).not.toContain("workflow_started");
       expect(textOf(filteredTimeline)).not.toContain("Other done");
+
+      const filteredSnapshot = await tool.execute({
+        action: "status",
+        runId: "status-run",
+        taskIds: ["research"],
+        eventTypes: ["task_started"],
+        statuses: ["running"],
+      }, { cwd });
+      expect(textOf(filteredSnapshot)).toContain('"selected":{"taskIds":["research"],"eventTypes":["task_started"],"statuses":["running"]}');
+      expect(textOf(filteredSnapshot)).toContain('"eventTypes":["task_finished","task_started","workflow_started"]');
+      expect(textOf(filteredSnapshot)).not.toContain("Other done");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
