@@ -188,7 +188,7 @@
   `getCoordinatorUserContext`（scratchpad/worker-tools 注入）。
 - ✅ CLI 接线：session 快照存 `session_mode`；`--continue/--resume` 恢复时调
   `matchSessionMode` 自动同步 env；REPL/BackendHost 启动时若 coordinator 模式
-  调 `queryEngine.setAllowedTools(getCoordinatorTools())`（Agent/SendMessage/TaskStop）。
+  调 `queryEngine.setAllowedTools(getCoordinatorTools())`（Agent/SendMessage/TaskStop/Workflow）。
 - `QueryEngine.setAllowedTools(string[]|null)`：在 submitMessage 内 streamMessage
   调用前过滤 toolRegistry，null 解除限制。
 - ✅ agent 级字段运行时生效：`tools/disallowedTools/maxTurns/effort/permissionMode` 经 `TeammateSpawnConfig` → `buildTeammateCommand` → CLI argv 传给子进程，bootstrap 应用。留待：agent 级 `hooks/mcpServers` 的运行时生效（需 env var 传 JSON，较复杂）。

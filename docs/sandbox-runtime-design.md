@@ -330,6 +330,86 @@ validateSandboxPath(path, {
 - `Grep`
 - 后续任何直接读写宿主 filesystem 的工具
 
+## 文件工具容器化路线
+
+当前 MVP 是“宿主文件工具 + sandbox path guard”。这不是最终形态，但它有两个好处：
+
+- 保留现有 permission、diff approval、错误展示和测试行为。
+- Docker / SRT 先把高风险 shell 执行边界收住，避免一次性重写所有文件工具。
+
+对照上游和参考项目：
+
+- Python OpenHarness：`Read` / `Write` / `Edit` 仍由宿主 `Path` 执行，只在 Docker active 时校验 sandbox path；`Glob` / `Grep` 在 `rg` 可用时通过 active Docker session `exec_command()` 跑进容器。
+- Hermes-agent：文件工具统一封装为 `ShellFileOperations`，再交给当前 execution environment；environment 可以是 local、Docker、SSH、Modal、Daytona 等。这个模型更完整，但大量依赖 shell quoting、POSIX 工具、BOM/CRLF 保留、原子写、回读验证和 cwd tracking。
+
+OpenHarness-ts 推荐吸收 Hermes 的抽象，而不是直接照搬 shell 实现：
+
+```ts
+export interface FileOperations {
+  readText(path: string, options: ReadTextOptions): Promise<ReadTextResult>;
+  writeText(path: string, content: string, options: WriteTextOptions): Promise<WriteTextResult>;
+  stat(path: string): Promise<FileStatResult>;
+  glob(pattern: string, options: GlobOptions): Promise<GlobResult>;
+  grep(pattern: string, options: GrepOptions): Promise<GrepResult>;
+}
+```
+
+实现分层：
+
+```text
+HostFileOperations
+  使用宿主 fs / fast-glob / ripgrep，保持当前行为。
+
+DockerFileOperations
+  先做宿主 permission + validateSandboxPath。
+  再把宿主路径翻译为容器路径。
+  最后通过 active DockerSandboxSession.execCommand() 执行。
+
+SrtFileOperations
+  每次操作通过 srt 包装宿主命令。
+  适合后续接入；MVP 可先不做。
+```
+
+Docker 路径翻译必须集中实现：
+
+| 平台 | 宿主路径 | 容器路径 |
+|------|----------|----------|
+| Linux / WSL / macOS | `<cwd>/src/a.ts` | `<cwd>/src/a.ts` |
+| Windows Docker Desktop | `D:\repo\src\a.ts` | `/workspace/src/a.ts` |
+
+迁移顺序：
+
+1. `Glob` / `Grep`：优先迁移。它们本来就常调用 `rg`，通过 `docker exec rg ...` 成本最低。
+2. `Read`：容器内读取文本、二进制检测、分页；返回结构化结果。
+3. `Write`：宿主生成 diff 和 approval，容器内原子写入。
+4. `Edit`：容器读旧内容，宿主计算替换和 diff，批准后容器写回并回读验证。
+
+如果 Docker shell 拼接开始变复杂，再引入容器内 helper：
+
+```text
+docker exec -i <container> node /opt/openharness/file-helper.mjs
+stdin:  { "op": "readText", "path": "/workspace/src/a.ts", "offset": 0, "limit": 200 }
+stdout: { "ok": true, "content": "...", "totalLines": 123, "truncated": false }
+```
+
+helper 的好处是避免把多行文本、特殊字符、JSON、Windows 路径、错误码都塞进 shell 字符串；缺点是镜像需要携带 helper，Dockerfile 和 autoBuildImage 要保证版本匹配。
+
+建议新增配置：
+
+```ts
+export interface SandboxFileToolsConfig {
+  mode?: "host-guarded" | "container-search" | "container";
+}
+```
+
+语义：
+
+- `host-guarded`：当前 MVP，文件工具宿主执行，必须 path guard。
+- `container-search`：`Glob` / `Grep` 进容器，读写编辑仍宿主执行。
+- `container`：读写搜索都进容器，宿主只负责 permission、path guard、diff approval 编排。
+
+默认先保持 `host-guarded`。当 Docker E2E 覆盖 `Glob` / `Grep` 容器执行、Windows `/workspace` 映射、`Write` / `Edit` diff approval 和回读验证后，再考虑提升默认级别。
+
 ## Permission 与 sandbox 的关系
 
 两者是叠加关系：

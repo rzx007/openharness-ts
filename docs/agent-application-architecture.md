@@ -683,8 +683,14 @@ Coordinator 负责：
 
 - 分解任务和建立依赖关系。
 - 选择 Agent Profile、模型、预算和隔离方式。
-- 决定串行、并行或 pipeline。
-- 汇总结果、处理冲突和判断是否重试。
+- 简单委托用 `Agent`；有明确 DAG / 重试 / 失败策略时提交 `Workflow` spec。
+- 汇总结构化结果、判断是否需要 reconcile。
+
+硬调度器（代码）负责：
+
+- 按 `parallel` / `sequential` / `pipeline` 排班；
+- 并发上限、失败传播、retry、timeout、writeScope 串行、budget；
+- 把 run 快照落到 `.openharness/workflows`（可 resume）。
 
 Worker 负责：
 
@@ -692,7 +698,9 @@ Worker 负责：
 - 输出结构化结果、证据和未决问题。
 - 不私自扩大任务范围。
 
-并行编排伪代码：
+调用链见 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md)。
+
+并行编排伪代码（软编排，适合一次性调研）：
 
 ```ts
 async function mapReduceResearch(topics: string[]) {
@@ -708,6 +716,8 @@ async function mapReduceResearch(topics: string[]) {
   return coordinator.synthesize(results);
 }
 ```
+
+硬编排则一次提交 `Workflow` spec（`dependsOn` / `failurePolicy` / `maxConcurrency`），由 `runWorkflow` 保证顺序与失败策略。
 
 多 Agent 最难的不是 spawn，而是：任务依赖、结果契约、写冲突、权限转发、取消传播和失败恢复。
 

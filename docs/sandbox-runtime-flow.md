@@ -181,6 +181,66 @@ Glob/Grep         → 宿主进程 + path guard
             默认只允许 sandboxRoot（cwd）及 allow / extraAllowedRoots
 ```
 
+### B3. 文件工具容器化演进
+
+Python 原版 OpenHarness 和 Hermes-agent 的做法不同：
+
+| 项目 | 文件工具执行模型 | 可借鉴点 |
+|------|------------------|----------|
+| Python OpenHarness | `Read` / `Write` / `Edit` 仍由宿主 `Path` 读写；Docker active 时加 path guard。`Glob` / `Grep` 在可用 `rg` 时通过 Docker session `exec_command()` 进容器。 | 适合作为稳定 MVP：先隔离 Bash，再把搜索类工具迁到容器。 |
+| Hermes-agent | 文件工具统一走 `ShellFileOperations`，文件操作被表达为 shell 命令，再交给当前 `Environment.execute()`；environment 可以是 local / docker / ssh / modal / daytona。 | 适合作为最终架构：文件工具不直接依赖宿主 fs，而是依赖执行环境。 |
+
+OpenHarness-ts 推荐走中间路线：先补统一文件操作抽象，再分批迁移。
+
+```text
+Read / Write / Edit / Glob / Grep
+  └─ FileOperations
+       ├─ HostFileOperations
+       │    └─ 宿主 fs / fast-glob / ripgrep
+       └─ SandboxFileOperations
+            ├─ Docker: active session.execCommand(...)
+            └─ SRT: wrapCommandForSrt(...) 后 spawn
+```
+
+迁移原则：
+
+- **宿主先判权**：permission 和 `validateSandboxPath` 仍在宿主执行；通过后再把路径翻译到容器路径。
+- **实际 IO 可进容器**：Docker active 且 file tool mode 支持时，真实 read/write/search 在容器内发生。
+- **diff/approval 不变**：`Write` / `Edit` 的审批和 diff 仍由宿主编排；宿主从容器读取旧内容，生成 diff，批准后再写回容器。
+- **先搜索，后读写**：`Glob` / `Grep` 最容易先迁到 Docker `rg`；`Read` 次之；`Write` / `Edit` 最后迁移。
+- **路径翻译集中处理**：Windows Docker Desktop 下宿主 workspace 映射到 `/workspace`，不能让各工具分散拼路径。
+
+推荐阶段：
+
+1. 引入 `FileOperations` 接口，当前所有文件工具先接到 `HostFileOperations`，行为不变。
+2. 给 Docker runtime 增加 `runFileCommand()` 或复用 `execCommand()`，让 `Glob` / `Grep` 在容器内跑 `rg`。
+3. 增加 `hostPathToContainerPath()` / `containerPathToHostPath()`，覆盖 Windows `/workspace` 映射和 POSIX 同路径映射。
+4. 迁移 `Read`：宿主 path guard 后，容器内读取文本、做二进制检测和分页，返回结构化结果。
+5. 迁移 `Write` / `Edit`：容器读旧内容，宿主 diff/approval，容器原子写入并回读验证。
+6. 若 shell 拼接复杂度上升，再引入容器内 helper，例如 `/opt/openharness/file-helper.mjs`，用 JSON stdin/stdout 承载 read/write/glob/grep。
+
+初期建议配置为显式开关：
+
+```json
+{
+  "sandbox": {
+    "fileTools": {
+      "mode": "host-guarded"
+    }
+  }
+}
+```
+
+可选值：
+
+| 值 | 行为 |
+|----|------|
+| `host-guarded` | 当前 MVP：宿主执行 + path guard。 |
+| `container-search` | `Glob` / `Grep` 进容器，`Read` / `Write` / `Edit` 仍宿主执行。 |
+| `container` | 文件工具真实 IO 进容器；permission/path guard 仍宿主判定。 |
+
+默认值先保持 `host-guarded`，等 Docker E2E 覆盖读写、diff、Windows 路径映射后，再考虑让 Docker sandbox 默认 `container-search` 或 `container`。
+
 ## C. Docker 后端细节
 
 ### C0. 容器生命周期

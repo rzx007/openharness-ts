@@ -1,12 +1,12 @@
 # 设计：Coordinator 硬调度器演进
 
-> 状态：设计草案。目标是先把方向讲清楚，不直接改运行时代码。
+> 状态：演进设计文档（V0–V9.3 已落地）。**当前运行时调用链与模块真相以 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md) 为准**；本文保留动机、分工边界与版本路线图。
 
 ## 一句话
 
-现在 OpenHarness-ts 已经能拉起子 agent，也能用 swarm 管通信、任务和 worktree。
+OpenHarness-ts 已经能拉起子 agent，也能用 swarm 管通信、任务和 worktree。
 
-缺的是一层“排班表”：由代码明确决定哪个子 agent 先跑、哪个后跑、哪些能并行、失败后怎么办，而不是只靠 Coordinator prompt 让模型自己记住。
+硬调度器补的是一层“排班表”：由代码明确决定哪个子 agent 先跑、哪个后跑、哪些能并行、失败后怎么办，而不是只靠 Coordinator prompt 让模型自己记住。
 
 ## 和现有系统的关系
 
@@ -489,6 +489,8 @@ V1 内存调度核心
 这就是从“模型软编排”到“代码硬编排”的第一步。
 
 ## 当前实现状态
+
+运行时细节（工具入口、调度循环、持久化路径、信封格式）见 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md)。
 
 截至目前，已经落地到 V12.3：
 
