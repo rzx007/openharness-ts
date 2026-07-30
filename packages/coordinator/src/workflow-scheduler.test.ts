@@ -4,6 +4,7 @@ import {
   WORKFLOW_SPEC_TEMPLATES,
   createWorkflowNotification,
   createWorkflowPlan,
+  createWorkflowSpecFromReconciliationPlan,
   formatWorkflowNotification,
   parseWorkflowNotification,
   runWorkflow,
@@ -489,6 +490,24 @@ describe("runWorkflow", () => {
       }],
     });
     expect(notification.reconciliationPlan.actions[0]?.prompt).toContain("Affected tasks: auth-a, auth-b.");
+    expect(createWorkflowSpecFromReconciliationPlan(notification.reconciliationPlan)).toMatchObject({
+      mode: "parallel",
+      maxConcurrency: 1,
+      failurePolicy: "fail-fast",
+      budgetPolicyPreset: "safe-write",
+      tasks: [
+        {
+          id: "reconcile-reconcile-actual-auth-a-auth-b",
+          isolate: true,
+          writeScope: ["packages/auth/src/index.ts"],
+        },
+        {
+          id: "verify-reconciliation",
+          readOnly: true,
+          dependsOn: ["reconcile-reconcile-actual-auth-a-auth-b"],
+        },
+      ],
+    });
   });
 
   it("exposes built-in workflow spec templates", () => {

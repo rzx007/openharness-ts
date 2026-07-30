@@ -330,6 +330,14 @@ describe("workflowTool", () => {
       const store = new WorkflowRunStore({ cwd });
       const completedSpec = { mode: "parallel" as const, tasks: [{ id: "done" }] };
       const runningSpec = { mode: "pipeline" as const, budgetPolicyPreset: "safe-write" as const, tasks: [{ id: "research" }, { id: "write" }] };
+      const conflictSpec = {
+        mode: "parallel" as const,
+        budgetPolicyPreset: "safe-write" as const,
+        tasks: [
+          { id: "auth-a", writeScope: ["packages/auth"] },
+          { id: "auth-b", writeScope: ["packages/auth/src"] },
+        ],
+      };
       const doneResult: WorkflowTaskRunResult = {
         taskId: "done",
         status: "completed",
@@ -339,6 +347,26 @@ describe("workflowTool", () => {
         startedAt: 1,
         finishedAt: 2,
       };
+      const conflictResults = new Map<string, WorkflowTaskRunResult>([
+        ["auth-a", {
+          taskId: "auth-a",
+          status: "completed",
+          summary: "auth-a done",
+          attempts: 1,
+          dependencies: [],
+          startedAt: 1,
+          finishedAt: 2,
+        }],
+        ["auth-b", {
+          taskId: "auth-b",
+          status: "completed",
+          summary: "auth-b done",
+          attempts: 1,
+          dependencies: [],
+          startedAt: 3,
+          finishedAt: 4,
+        }],
+      ]);
       store.save(createWorkflowRunSnapshot({
         runId: "completed-run",
         status: "completed",
@@ -359,15 +387,34 @@ describe("workflowTool", () => {
         running: new Set(["research"]),
         createdAt: 2,
       }));
+      store.save(createWorkflowRunSnapshot({
+        runId: "conflict-run",
+        status: "completed",
+        summary: "2/2 tasks completed",
+        spec: conflictSpec,
+        plan: createWorkflowPlan(conflictSpec),
+        results: conflictResults,
+        running: new Set(),
+        createdAt: 3,
+      }));
 
       const tool = createWorkflowTool({ createRunner: vi.fn() });
-      const result = await tool.execute({ action: "list", runStatuses: ["running"], limit: 1 }, { cwd });
+      const result = await tool.execute({
+        action: "list",
+        runIdPrefix: "conflict",
+        createdAfter: 3,
+        needsReconciliation: true,
+        budgetPreset: "safe-write",
+        limit: 1,
+      }, { cwd });
 
       expect(result.isError).toBeUndefined();
       expect(textOf(result)).toContain("<workflow-run-list>");
-      expect(textOf(result)).toContain('"runId":"running-run"');
+      expect(textOf(result)).toContain('"runId":"conflict-run"');
       expect(textOf(result)).toContain('"budgetPolicyPreset":"safe-write"');
+      expect(textOf(result)).toContain('"needsReconciliation":true');
       expect(textOf(result)).not.toContain("completed-run");
+      expect(textOf(result)).not.toContain("running-run");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -375,14 +422,85 @@ describe("workflowTool", () => {
 
   it("returns built-in workflow templates", async () => {
     const tool = createWorkflowTool({ createRunner: vi.fn() });
-    const result = await tool.execute({ action: "template", templateName: "research-implement-verify" }, ctx);
+    const result = await tool.execute({
+      action: "template",
+      templateName: "research-implement-verify",
+      templateParameters: {
+        taskPrompts: { implement: "Patch exactly these files" },
+        writeScope: ["packages/tools"],
+        maxConcurrency: 2,
+        budgetPreset: "fast-parallel",
+      },
+    }, ctx);
 
     expect(result.isError).toBeUndefined();
     expect(textOf(result)).toContain("<workflow-templates>");
     expect(textOf(result)).toContain('"name":"research-implement-verify"');
     expect(textOf(result)).toContain('"mode":"pipeline"');
-    expect(textOf(result)).toContain('"budgetPolicyPreset":"safe-write"');
+    expect(textOf(result)).toContain('"budgetPolicyPreset":"fast-parallel"');
+    expect(textOf(result)).toContain('"maxConcurrency":2');
+    expect(textOf(result)).toContain('"prompt":"Patch exactly these files"');
+    expect(textOf(result)).toContain('"writeScope":["packages/tools"]');
     expect(textOf(result)).not.toContain('"name":"parallel-review"');
+  });
+
+  it("creates a reconciliation follow-up workflow spec for a persisted run", async () => {
+    const cwd = makeTempDir();
+    try {
+      const store = new WorkflowRunStore({ cwd });
+      const spec = {
+        mode: "parallel" as const,
+        tasks: [
+          { id: "auth-a", writeScope: ["packages/auth"] },
+          { id: "auth-b", writeScope: ["packages/auth/src"] },
+        ],
+      };
+      const results = new Map<string, WorkflowTaskRunResult>([
+        ["auth-a", {
+          taskId: "auth-a",
+          status: "completed",
+          summary: "auth-a done",
+          metadata: { changedFiles: ["packages/auth/src/index.ts"] },
+          attempts: 1,
+          dependencies: [],
+          startedAt: 1,
+          finishedAt: 2,
+        }],
+        ["auth-b", {
+          taskId: "auth-b",
+          status: "completed",
+          summary: "auth-b done",
+          metadata: { changedFiles: ["packages/auth/src/index.ts"] },
+          attempts: 1,
+          dependencies: [],
+          startedAt: 3,
+          finishedAt: 4,
+        }],
+      ]);
+      store.save(createWorkflowRunSnapshot({
+        runId: "reconcile-source",
+        status: "completed",
+        summary: "2/2 tasks completed",
+        spec,
+        plan: createWorkflowPlan(spec),
+        results,
+        running: new Set(),
+        createdAt: 1,
+      }));
+
+      const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const result = await tool.execute({ action: "reconcile", runId: "reconcile-source", budgetPreset: "cheap-review" }, { cwd });
+
+      expect(result.isError).toBeUndefined();
+      expect(textOf(result)).toContain("<workflow-reconcile-spec>");
+      expect(textOf(result)).toContain('"sourceRunId":"reconcile-source"');
+      expect(textOf(result)).toContain('"budgetPolicyPreset":"cheap-review"');
+      expect(textOf(result)).toContain('"id":"reconcile-reconcile-actual-auth-a-auth-b"');
+      expect(textOf(result)).toContain('"id":"verify-reconciliation"');
+      expect(textOf(result)).toContain('"writeScope":["packages/auth/src/index.ts"]');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("resumes persisted workflow snapshots through the tool", async () => {

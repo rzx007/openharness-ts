@@ -278,6 +278,13 @@ export interface WorkflowReconciliationPlan {
   actions: WorkflowReconciliationFollowUpAction[];
 }
 
+export interface WorkflowReconciliationSpecOptions {
+  actionIds?: string[];
+  issueIds?: string[];
+  verifyTaskId?: string;
+  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
+}
+
 export interface WorkflowBudgetUsage extends WorkflowTaskBudgetUsage {
   tasks: Record<string, WorkflowTaskBudgetUsage>;
 }
@@ -1534,6 +1541,51 @@ export function createWorkflowReconciliationPlan(
     needed: true,
     summary: `${issues.length} reconciliation follow-up action(s) available`,
     actions,
+  };
+}
+
+export function createWorkflowSpecFromReconciliationPlan(
+  plan: WorkflowReconciliationPlan,
+  options: WorkflowReconciliationSpecOptions = {},
+): WorkflowSpec | undefined {
+  const actions = plan.actions.filter((action) => {
+    const matchesAction = !options.actionIds || options.actionIds.includes(action.actionId);
+    const matchesIssue = !options.issueIds || action.issueIds.some((issueId) => options.issueIds?.includes(issueId));
+    return matchesAction && matchesIssue;
+  });
+  if (actions.length === 0) return undefined;
+
+  const reconcileTasks: WorkflowTask[] = actions.map((action) => ({
+    id: action.taskId,
+    description: action.description,
+    prompt: action.prompt,
+    writeScope: [...action.writeScope],
+    isolate: true,
+    metadata: {
+      reconciliationActionId: action.actionId,
+      reconciliationIssueIds: [...action.issueIds],
+    },
+  }));
+  const verifyTaskId = options.verifyTaskId ?? "verify-reconciliation";
+  return {
+    mode: "parallel",
+    maxConcurrency: 1,
+    failurePolicy: "fail-fast",
+    budgetPolicyPreset: options.budgetPolicyPreset ?? "safe-write",
+    tasks: [
+      ...reconcileTasks,
+      {
+        id: verifyTaskId,
+        description: "Verify reconciliation changes and summarize any remaining conflicts.",
+        prompt: [
+          "Verify the reconciliation work from the preceding tasks.",
+          `Reconciled tasks: ${reconcileTasks.map((task) => task.id).join(", ")}.`,
+          "Run targeted checks where practical, inspect the touched files, and report any remaining conflict.",
+        ].join("\n"),
+        readOnly: true,
+        dependsOn: reconcileTasks.map((task) => task.id),
+      },
+    ],
   };
 }
 

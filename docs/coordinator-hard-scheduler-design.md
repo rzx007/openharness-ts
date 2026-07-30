@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V10.3：
+截至目前，已经落地到 V11.3：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -523,9 +523,12 @@ V1 内存调度核心
 - V10.1：已完成基础版。`WorkflowRunStore` 增加轻量 `listSummaries()`，`Workflow` 工具支持 `action: "list"`，可以按 run status 和 limit 浏览历史 workflow run。
 - V10.2：已完成基础版。`<workflow-notification>` 增加 `reconciliationPlan`，为每个 reconcile issue 生成稳定 follow-up action、推荐 task id、prompt、依赖 task 和 writeScope。
 - V10.3：已完成基础版。新增内置 workflow spec templates，并通过 `Workflow action: "template"` 暴露 `research-implement-verify`、`parallel-review`、`safe-write` 模板，减少重复手写工作流。
+- V11.1：已完成基础版。`Workflow action: "list"` 支持按 `runIdPrefix`、created/updated 时间范围、`needsReconciliation` 和 `budgetPreset` 过滤历史 run。
+- V11.2：已完成基础版。新增 `createWorkflowSpecFromReconciliationPlan` 和 `Workflow action: "reconcile"`，可把已持久化 run 的 `reconciliationPlan.actions` 转成 follow-up workflow spec。
+- V11.3：已完成基础版。`Workflow action: "template"` 支持 `templateParameters`，可覆盖 task prompt、writeScope、maxConcurrency、budgetPreset 和 failurePolicy。
 
 下一步建议：
 
-- V11.1：为 `Workflow action: "list"` 增加更细的查询条件，例如 runId 前缀、时间范围、needsReconciliation、budgetPreset。
-- V11.2：让 `reconciliationPlan.actions` 可以一键转成新的 workflow spec，例如自动生成 reconcile worker + verify worker。
-- V11.3：支持模板参数化，把模板里的 task prompt、writeScope、maxConcurrency 等从固定样板升级为可填变量。
+- V12.1：增加 workflow dry-run / validate 动作，让 Coordinator 可以在启动 worker 前检查 spec 展开的 DAG、预算 preset 和写范围冲突。
+- V12.2：增加 workflow cancellation 契约，把 running workflow 的未完成 worker 批量 stop，并持久化为 terminal snapshot。
+- V12.3：增加模板版本字段和说明，让长期演进时可以兼容旧模板输出。
