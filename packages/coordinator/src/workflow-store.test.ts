@@ -8,7 +8,7 @@ import {
   createWorkflowRunSnapshot,
   type WorkflowTaskRunResult,
 } from "./workflow-scheduler.js";
-import { resumePersistentWorkflow, runPersistentWorkflow, WorkflowRunStore } from "./workflow-store.js";
+import { cancelPersistentWorkflow, resumePersistentWorkflow, runPersistentWorkflow, WorkflowRunStore } from "./workflow-store.js";
 
 const tempDirs: string[] = [];
 
@@ -197,5 +197,58 @@ describe("WorkflowRunStore", () => {
 
     expect(result.status).toBe("completed");
     expect(result.orderedResults.map((task) => task.taskId)).toEqual(["done"]);
+  });
+
+  it("cancels a running snapshot and stops backing TaskManager tasks", async () => {
+    const store = new WorkflowRunStore({ dir: tempDir() });
+    const spec = {
+      mode: "parallel" as const,
+      tasks: [{ id: "running" }, { id: "pending", dependsOn: ["running"] }],
+    };
+    store.save(createWorkflowRunSnapshot({
+      runId: "run-cancel",
+      status: "running",
+      summary: "in progress",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(["running"]),
+      runningTasks: new Map([[
+        "running",
+        {
+          taskId: "running",
+          attempt: 1,
+          dependencies: [],
+          startedAt: 10,
+          summary: "Waiting for task task_running",
+          metadata: { taskManagerTaskId: "task_running" },
+        },
+      ]]),
+      createdAt: 1,
+    }));
+
+    const stopTask = vi.fn(async () => undefined);
+    const result = await cancelPersistentWorkflow("run-cancel", {
+      store,
+      stopTask,
+      reason: "user cancelled",
+    });
+
+    expect(stopTask).toHaveBeenCalledWith("task_running");
+    expect(result.status).toBe("failed");
+    expect(result.results.running).toMatchObject({ status: "killed", summary: "user cancelled" });
+    expect(result.results.pending).toMatchObject({ status: "skipped", skippedReason: "user cancelled" });
+
+    const snapshot = store.load("run-cancel");
+    expect(snapshot).toMatchObject({
+      status: "failed",
+      summary: "user cancelled",
+      pendingTaskIds: [],
+      runningTaskIds: [],
+    });
+    expect(store.loadEvents("run-cancel")).toContainEqual(expect.objectContaining({
+      type: "workflow_cancelled",
+      summary: "user cancelled",
+    }));
   });
 });

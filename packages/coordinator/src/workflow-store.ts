@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { getProjectConfigDir } from "@openharness/core";
 import {
+  createWorkflowPlan,
+  createWorkflowRunSnapshot,
   createWorkflowRunSummary,
   createWorkflowResultFromSnapshot,
   runWorkflow,
@@ -12,6 +14,7 @@ import {
   type WorkflowRunner,
   type WorkflowRunResult,
   type WorkflowSpec,
+  type WorkflowTaskRunResult,
 } from "./workflow-scheduler.js";
 
 export interface WorkflowRunStoreOptions {
@@ -27,6 +30,13 @@ export interface RunPersistentWorkflowOptions extends WorkflowRunStoreOptions {
 
 export interface ResumePersistentWorkflowOptions extends WorkflowRunStoreOptions {
   store?: WorkflowRunStore;
+  onEvent?: (event: WorkflowRunEvent) => void;
+}
+
+export interface CancelPersistentWorkflowOptions extends WorkflowRunStoreOptions {
+  store?: WorkflowRunStore;
+  reason?: string;
+  stopTask?: (taskId: string) => Promise<unknown>;
   onEvent?: (event: WorkflowRunEvent) => void;
 }
 
@@ -162,11 +172,105 @@ export async function resumePersistentWorkflow(
   });
 }
 
+export async function cancelPersistentWorkflow(
+  snapshotOrRunId: WorkflowRunSnapshot | string,
+  options: CancelPersistentWorkflowOptions = {},
+): Promise<WorkflowRunResult> {
+  const store = options.store ?? new WorkflowRunStore({ cwd: options.cwd, dir: options.dir });
+  const snapshot =
+    typeof snapshotOrRunId === "string"
+      ? store.load(snapshotOrRunId)
+      : snapshotOrRunId;
+  if (!snapshot) {
+    throw new Error(`Workflow run not found: ${snapshotOrRunId}`);
+  }
+  if (snapshot.status !== "running") {
+    return createWorkflowResultFromSnapshot(snapshot);
+  }
+
+  const reason = options.reason ?? "Workflow cancelled";
+  const stopErrors: Record<string, string> = {};
+  for (const runningTask of Object.values(snapshot.runningTasks)) {
+    const taskManagerTaskId = taskManagerTaskIdFromMetadata(runningTask.metadata);
+    if (!taskManagerTaskId || !options.stopTask) continue;
+    try {
+      await options.stopTask(taskManagerTaskId);
+    } catch (error) {
+      stopErrors[taskManagerTaskId] = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  const plan = createWorkflowPlan(snapshot.spec);
+  const results = new Map<string, WorkflowTaskRunResult>(Object.entries(snapshot.results));
+  const now = Date.now();
+  for (const taskId of plan.executionOrder) {
+    if (results.has(taskId)) continue;
+    const runningTask = snapshot.runningTasks[taskId];
+    const taskManagerTaskId = taskManagerTaskIdFromMetadata(runningTask?.metadata);
+    if (runningTask) {
+      results.set(taskId, {
+        taskId,
+        status: "killed",
+        summary: reason,
+        attempts: runningTask.attempt,
+        dependencies: [...(plan.dependencyMap[taskId] ?? [])],
+        startedAt: runningTask.startedAt,
+        finishedAt: now,
+        metadata: {
+          ...runningTask.metadata,
+          cancelled: true,
+          ...(taskManagerTaskId && stopErrors[taskManagerTaskId] ? { stopError: stopErrors[taskManagerTaskId] } : {}),
+        },
+      });
+    } else {
+      results.set(taskId, {
+        taskId,
+        status: "skipped",
+        summary: reason,
+        attempts: 0,
+        dependencies: [...(plan.dependencyMap[taskId] ?? [])],
+        startedAt: now,
+        finishedAt: now,
+        skippedReason: reason,
+      });
+    }
+  }
+
+  const cancelledSnapshot = createWorkflowRunSnapshot({
+    runId: snapshot.runId,
+    status: "failed",
+    summary: reason,
+    spec: snapshot.spec,
+    plan,
+    results,
+    running: new Set(),
+    runningTasks: new Map(),
+    blockedTasks: new Map(),
+    createdAt: snapshot.createdAt,
+  });
+  store.save(cancelledSnapshot);
+  const event: WorkflowRunEvent = {
+    version: 1,
+    runId: snapshot.runId,
+    type: "workflow_cancelled",
+    timestamp: now,
+    status: "failed",
+    summary: reason,
+  };
+  store.appendEvent(event);
+  options.onEvent?.(event);
+  return createWorkflowResultFromSnapshot(cancelledSnapshot);
+}
+
 function sanitizeRunId(runId: string): string {
   if (!/^[A-Za-z0-9._-]+$/.test(runId)) {
     throw new Error(`Invalid workflow run id '${runId}'`);
   }
   return runId;
+}
+
+function taskManagerTaskIdFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
+  return typeof metadata?.taskManagerTaskId === "string" ? metadata.taskManagerTaskId : undefined;
 }
 
 function atomicWrite(path: string, data: string): void {

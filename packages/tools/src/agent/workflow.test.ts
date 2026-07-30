@@ -186,6 +186,26 @@ describe("workflowTool", () => {
     expect(createRunner).not.toHaveBeenCalled();
   });
 
+  it("validates workflow specs without creating a runner", async () => {
+    const createRunner = vi.fn();
+    const tool = createWorkflowTool({ createRunner });
+
+    const result = await tool.execute({
+      action: "validate",
+      mode: "parallel",
+      tasks: [
+        { id: "a", writeScope: ["packages/auth"] },
+        { id: "b", writeScope: ["packages/auth/src"] },
+      ],
+    }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect(createRunner).not.toHaveBeenCalled();
+    expect(textOf(result)).toContain("<workflow-validation>");
+    expect(textOf(result)).toContain('"valid":true');
+    expect(textOf(result)).toContain('"code":"write-scope-overlap"');
+  });
+
   it("marks failed workflow results as tool errors", async () => {
     const runner: WorkflowRunner = vi.fn();
     const tool = createWorkflowTool({
@@ -498,6 +518,57 @@ describe("workflowTool", () => {
       expect(textOf(result)).toContain('"id":"reconcile-reconcile-actual-auth-a-auth-b"');
       expect(textOf(result)).toContain('"id":"verify-reconciliation"');
       expect(textOf(result)).toContain('"writeScope":["packages/auth/src/index.ts"]');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels persisted running workflow snapshots", async () => {
+    const cwd = makeTempDir();
+    try {
+      const store = new WorkflowRunStore({ cwd });
+      const spec = {
+        mode: "parallel" as const,
+        tasks: [{ id: "running" }, { id: "pending", dependsOn: ["running"] }],
+      };
+      store.save(createWorkflowRunSnapshot({
+        runId: "cancel-run",
+        status: "running",
+        summary: "in progress",
+        spec,
+        plan: createWorkflowPlan(spec),
+        results: new Map(),
+        running: new Set(["running"]),
+        runningTasks: new Map([[
+          "running",
+          {
+            taskId: "running",
+            attempt: 1,
+            dependencies: [],
+            startedAt: 1,
+            summary: "Waiting for task task_running",
+            metadata: { taskManagerTaskId: "task_running" },
+          },
+        ]]),
+        createdAt: 1,
+      }));
+      const stopTask = vi.fn(async () => undefined);
+      const tool = createWorkflowTool({ createRunner: vi.fn(), stopTask });
+
+      const result = await tool.execute({ action: "cancel", runId: "cancel-run", cancelReason: "stop now" }, { cwd });
+
+      expect(result.isError).toBeUndefined();
+      expect(stopTask).toHaveBeenCalledWith("task_running");
+      const notification = parseWorkflowNotification(textOf(result));
+      expect(notification).toMatchObject({
+        runId: "cancel-run",
+        status: "failed",
+        summary: "stop now",
+      });
+      expect(notification?.tasks.map((task) => [task.taskId, task.status])).toEqual([
+        ["running", "killed"],
+        ["pending", "skipped"],
+      ]);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

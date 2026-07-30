@@ -69,7 +69,7 @@ Every message you send is to the user. Worker results and system notifications a
 Use Workflow for DAG-shaped or repeatable workflows where code should enforce order, dependencies, concurrency, retry, and failure propagation. Use Agent plus TaskWait for simple one-off delegation or when you want to reason interactively between worker results.
 
 Workflow runs are persisted under the project \`.openharness/workflows\` directory by default, including running snapshots and terminal task results. Use the structured run id and task statuses from the workflow payload when reasoning about recovery or follow-up work.
-Use Workflow with \`action: "list"\` to inspect persisted run summaries, \`action: "status"\` to inspect one persisted run, and \`action: "resume"\` to continue a running snapshot without rerunning completed terminal tasks. List can be filtered by status, run id prefix, created/updated time, reconciliation need, and budget preset. Use \`action: "template"\` to inspect or parameterize built-in workflow templates before drafting a common workflow.
+Use Workflow with \`action: "validate"\` to dry-run a spec before launching workers. Use \`action: "list"\` to inspect persisted run summaries, \`action: "status"\` to inspect one persisted run, \`action: "resume"\` to continue a running snapshot without rerunning completed terminal tasks, and \`action: "cancel"\` to stop a persisted running workflow. List can be filtered by status, run id prefix, created/updated time, reconciliation need, and budget preset. Use \`action: "template"\` to inspect or parameterize versioned built-in workflow templates before drafting a common workflow.
 When a snapshot contains a running task with \`taskManagerTaskId\`, resume will first wait for that existing TaskManager task; only if it is unavailable should it spawn a replacement worker.
 Use task \`timeoutSeconds\` or workflow \`defaultTaskTimeoutSeconds\` when a worker attempt must have a hard wall-clock budget; timed-out attempts are reported as failed and follow the workflow failure/retry policy.
 For parallel write work, set \`writeScope\` on non-isolated tasks. The scheduler serializes overlapping non-isolated write scopes; \`readOnly: true\` and \`isolate: true\` tasks do not participate in shared-cwd write conflicts.
@@ -512,6 +512,7 @@ export {
   createWorkflowReconciliationPlan,
   createWorkflowSpecFromReconciliationPlan,
   createWorkflowRunSummary,
+  createWorkflowValidationReport,
   type WorkflowReconciliationFollowUpAction,
   type WorkflowBudgetPolicyPreset,
   type WorkflowBudgetPolicy,
@@ -546,6 +547,8 @@ export {
   type WorkflowSpec,
   type WorkflowSpecTemplate,
   type WorkflowTemplateName,
+  type WorkflowValidationIssue,
+  type WorkflowValidationReport,
   type WorkflowTaskBudgetUsage,
   type WorkflowTaskProgress,
   type WorkflowTask,
@@ -557,8 +560,10 @@ export {
 
 export {
   getWorkflowRunsDir,
+  cancelPersistentWorkflow,
   resumePersistentWorkflow,
   runPersistentWorkflow,
+  type CancelPersistentWorkflowOptions,
   WorkflowRunStore,
   type ResumePersistentWorkflowOptions,
   type RunPersistentWorkflowOptions,

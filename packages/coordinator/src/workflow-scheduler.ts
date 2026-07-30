@@ -327,6 +327,7 @@ export type WorkflowRunEventType =
   | "workflow_budget_conserving"
   | "workflow_budget_exceeded"
   | "task_finished"
+  | "workflow_cancelled"
   | "workflow_finished";
 
 export interface WorkflowRunEvent {
@@ -380,6 +381,7 @@ export type WorkflowTemplateName = "research-implement-verify" | "parallel-revie
 
 export interface WorkflowSpecTemplate {
   name: WorkflowTemplateName;
+  version: number;
   description: string;
   spec: WorkflowSpec;
 }
@@ -387,6 +389,7 @@ export interface WorkflowSpecTemplate {
 export const WORKFLOW_SPEC_TEMPLATES: Record<WorkflowTemplateName, WorkflowSpecTemplate> = {
   "research-implement-verify": {
     name: "research-implement-verify",
+    version: 1,
     description: "Pipeline for one focused change: inspect context, implement the change, then verify behavior.",
     spec: {
       mode: "pipeline",
@@ -400,6 +403,7 @@ export const WORKFLOW_SPEC_TEMPLATES: Record<WorkflowTemplateName, WorkflowSpecT
   },
   "parallel-review": {
     name: "parallel-review",
+    version: 1,
     description: "Parallel read-only review for independent areas before a Coordinator summary.",
     spec: {
       mode: "parallel",
@@ -414,6 +418,7 @@ export const WORKFLOW_SPEC_TEMPLATES: Record<WorkflowTemplateName, WorkflowSpecT
   },
   "safe-write": {
     name: "safe-write",
+    version: 1,
     description: "Serial write workflow for risky edits where each step should finish before the next begins.",
     spec: {
       mode: "sequential",
@@ -427,6 +432,19 @@ export const WORKFLOW_SPEC_TEMPLATES: Record<WorkflowTemplateName, WorkflowSpecT
     },
   },
 };
+
+export interface WorkflowValidationIssue {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  taskIds?: string[];
+}
+
+export interface WorkflowValidationReport {
+  valid: boolean;
+  issues: WorkflowValidationIssue[];
+  plan?: WorkflowPlan;
+}
 
 export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
   const tasks = normalizeTasksForMode(spec.mode, spec.tasks);
@@ -450,6 +468,39 @@ export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
     dependencyMap,
     dependentsMap,
   };
+}
+
+export function createWorkflowValidationReport(spec: WorkflowSpec): WorkflowValidationReport {
+  try {
+    const plan = createWorkflowPlan(spec);
+    const issues: WorkflowValidationIssue[] = [];
+    for (let i = 0; i < plan.tasks.length; i += 1) {
+      const left = plan.tasks[i]!;
+      for (const right of plan.tasks.slice(i + 1)) {
+        if (!workflowTasksConflict(left, right)) continue;
+        issues.push({
+          severity: "warning",
+          code: "write-scope-overlap",
+          message: `Tasks '${left.id}' and '${right.id}' have overlapping non-isolated write scopes and will be serialized.`,
+          taskIds: [left.id, right.id],
+        });
+      }
+    }
+    return {
+      valid: issues.every((issue) => issue.severity !== "error"),
+      issues,
+      plan,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      issues: [{
+        severity: "error",
+        code: "invalid-workflow-spec",
+        message: error instanceof Error ? error.message : String(error),
+      }],
+    };
+  }
 }
 
 export function createWorkflowNotification(result: WorkflowRunResult): WorkflowNotification {

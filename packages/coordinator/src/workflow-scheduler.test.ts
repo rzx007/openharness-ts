@@ -5,6 +5,7 @@ import {
   createWorkflowNotification,
   createWorkflowPlan,
   createWorkflowSpecFromReconciliationPlan,
+  createWorkflowValidationReport,
   formatWorkflowNotification,
   parseWorkflowNotification,
   runWorkflow,
@@ -65,6 +66,34 @@ describe("createWorkflowPlan", () => {
         ...WORKFLOW_BUDGET_POLICY_PRESETS["safe-write"].conserve,
         maxTurns: 1,
       },
+    });
+  });
+
+  it("validates expanded workflow specs without running workers", () => {
+    const report = createWorkflowValidationReport({
+      mode: "parallel",
+      tasks: [
+        { id: "a", writeScope: ["packages/auth"] },
+        { id: "b", writeScope: ["packages/auth/src"] },
+      ],
+    });
+
+    expect(report.valid).toBe(true);
+    expect(report.plan?.executionOrder).toEqual(["a", "b"]);
+    expect(report.issues).toEqual([
+      expect.objectContaining({
+        severity: "warning",
+        code: "write-scope-overlap",
+        taskIds: ["a", "b"],
+      }),
+    ]);
+
+    expect(createWorkflowValidationReport({
+      mode: "parallel",
+      tasks: [{ id: "a", dependsOn: ["missing"] }],
+    })).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ severity: "error", code: "invalid-workflow-spec" })],
     });
   });
 
@@ -240,10 +269,12 @@ describe("runWorkflow", () => {
     const result = await runWorkflow(
       {
         mode: "parallel",
-        tasks: [{ id: "slow", timeoutMs: 5 }],
+        tasks: [{ id: "slow", timeoutMs: 1 }],
       },
       async () => {
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise(() => {
+          // Intentionally never resolves; the workflow timeout should decide the attempt.
+        });
         return { summary: "too late" };
       },
     );
@@ -253,7 +284,7 @@ describe("runWorkflow", () => {
       status: "failed",
       attempts: 1,
       timedOut: true,
-      error: "Task timed out after 5ms",
+      error: "Task timed out after 1ms",
     }));
   });
 
@@ -513,6 +544,7 @@ describe("runWorkflow", () => {
   it("exposes built-in workflow spec templates", () => {
     expect(WORKFLOW_SPEC_TEMPLATES["research-implement-verify"]).toMatchObject({
       name: "research-implement-verify",
+      version: 1,
       spec: {
         mode: "pipeline",
         budgetPolicyPreset: "safe-write",

@@ -490,7 +490,7 @@ V1 内存调度核心
 
 ## 当前实现状态
 
-截至目前，已经落地到 V11.3：
+截至目前，已经落地到 V12.3：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -526,9 +526,12 @@ V1 内存调度核心
 - V11.1：已完成基础版。`Workflow action: "list"` 支持按 `runIdPrefix`、created/updated 时间范围、`needsReconciliation` 和 `budgetPreset` 过滤历史 run。
 - V11.2：已完成基础版。新增 `createWorkflowSpecFromReconciliationPlan` 和 `Workflow action: "reconcile"`，可把已持久化 run 的 `reconciliationPlan.actions` 转成 follow-up workflow spec。
 - V11.3：已完成基础版。`Workflow action: "template"` 支持 `templateParameters`，可覆盖 task prompt、writeScope、maxConcurrency、budgetPreset 和 failurePolicy。
+- V12.1：已完成基础版。新增 `createWorkflowValidationReport` 和 `Workflow action: "validate"`，可在启动 worker 前 dry-run 展开 DAG、预算 preset 和非隔离写范围冲突。
+- V12.2：已完成基础版。新增 `cancelPersistentWorkflow` 和 `Workflow action: "cancel"`，会停止 backing TaskManager task，并把 running task 标记为 killed、未启动 task 标记为 skipped 后持久化 terminal snapshot。
+- V12.3：已完成基础版。内置 workflow templates 增加 `version` 字段，模板输出可明确说明模板版本和含义。
 
 下一步建议：
 
-- V12.1：增加 workflow dry-run / validate 动作，让 Coordinator 可以在启动 worker 前检查 spec 展开的 DAG、预算 preset 和写范围冲突。
-- V12.2：增加 workflow cancellation 契约，把 running workflow 的未完成 worker 批量 stop，并持久化为 terminal snapshot。
-- V12.3：增加模板版本字段和说明，让长期演进时可以兼容旧模板输出。
+- 产品化 backlog：把 workflow list/status/validate/reconcile/cancel 接到真实 UI，做筛选、详情、冲突处理和取消按钮。
+- 运维化 backlog：补 metrics/export、长期历史清理、run artifact 打包，以及跨进程/多实例 claim lock。
+- 智能化 backlog：让 planner 基于目标自动选择模板、填参数、validate 后再提交 workflow。

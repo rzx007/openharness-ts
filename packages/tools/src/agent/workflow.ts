@@ -1,8 +1,10 @@
 import type { ToolDefinition } from "@openharness/core";
 import {
   WORKFLOW_SPEC_TEMPLATES,
+  cancelPersistentWorkflow,
   createWorkflowNotification,
   createWorkflowResultFromSnapshot,
+  createWorkflowValidationReport,
   createWorkflowSpecFromReconciliationPlan,
   formatWorkflowNotification,
   resumePersistentWorkflow,
@@ -24,12 +26,13 @@ import { createAgentWorkflowRunner } from "./workflow-runner";
 
 const WORKFLOW_MODES = new Set<WorkflowMode>(["parallel", "sequential", "pipeline"]);
 const FAILURE_POLICIES = new Set<WorkflowFailurePolicy>(["skip-dependents", "fail-fast", "continue"]);
-const WORKFLOW_ACTIONS = new Set(["run", "resume", "status", "list", "template", "reconcile"]);
+const WORKFLOW_ACTIONS = new Set(["run", "resume", "status", "list", "template", "reconcile", "validate", "cancel"]);
 const BUDGET_POLICY_PRESETS = new Set<WorkflowBudgetPolicyPreset>(["cheap-review", "safe-write", "fast-parallel"]);
 
 export interface WorkflowToolOptions {
   createRunner?: typeof createAgentWorkflowRunner;
   run?: typeof runWorkflow;
+  stopTask?: (taskId: string) => Promise<unknown>;
 }
 
 export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefinition {
@@ -47,8 +50,8 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
       properties: {
         action: {
           type: "string",
-          enum: ["run", "resume", "status", "list", "template", "reconcile"],
-          description: "Workflow action. Defaults to run. Use resume/status with runId or latest, list for persisted runs, template for built-in specs, reconcile for a follow-up spec.",
+          enum: ["run", "resume", "status", "list", "template", "reconcile", "validate", "cancel"],
+          description: "Workflow action. Defaults to run. Use validate before launching workers, cancel to stop a persisted running workflow.",
         },
         view: {
           type: "string",
@@ -247,15 +250,22 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           type: "boolean",
           description: "For resume/status, use the latest persisted workflow run when runId is omitted.",
         },
+        cancelReason: {
+          type: "string",
+          description: "For action=cancel, reason written into the terminal workflow snapshot.",
+        },
       },
       required: [],
     },
     async execute(input, context) {
       const action = parseAction(input.action);
       if (!action) {
-        return { content: [{ type: "text", text: "action must be one of: run, resume, status, list, template, reconcile" }], isError: true };
+        return { content: [{ type: "text", text: "action must be one of: run, resume, status, list, template, reconcile, validate, cancel" }], isError: true };
       }
 
+      if (action === "validate") {
+        return workflowValidate(input);
+      }
       if (action === "status") {
         return workflowStatus(input, context.cwd);
       }
@@ -267,6 +277,9 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
       }
       if (action === "reconcile") {
         return workflowReconcile(input, context.cwd);
+      }
+      if (action === "cancel") {
+        return workflowCancel(input, context.cwd, options.stopTask);
       }
 
       const specOrError = parseWorkflowSpec(input);
@@ -302,6 +315,21 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
 }
 
 export const workflowTool: ToolDefinition = createWorkflowTool();
+
+function workflowValidate(input: Record<string, unknown>) {
+  const specOrError = parseWorkflowSpec(input);
+  const report = typeof specOrError === "string"
+    ? {
+        valid: false,
+        issues: [{
+          severity: "error" as const,
+          code: "invalid-workflow-input",
+          message: specOrError,
+        }],
+      }
+    : createWorkflowValidationReport(specOrError);
+  return { content: [{ type: "text" as const, text: formatWorkflowValidationReport(report) }] };
+}
 
 function workflowStatus(input: Record<string, unknown>, cwd: string) {
   const store = new WorkflowRunStore({ cwd });
@@ -368,6 +396,26 @@ function workflowReconcile(input: Record<string, unknown>, cwd: string) {
   }
   return {
     content: [{ type: "text" as const, text: formatWorkflowReconcileSpec(snapshot.runId, notification.reconciliationPlan, spec) }],
+  };
+}
+
+async function workflowCancel(
+  input: Record<string, unknown>,
+  cwd: string,
+  stopTask: ((taskId: string) => Promise<unknown>) | undefined,
+) {
+  const store = new WorkflowRunStore({ cwd });
+  const snapshot = loadWorkflowSnapshot(store, input);
+  if (typeof snapshot === "string") {
+    return { content: [{ type: "text" as const, text: snapshot }], isError: true };
+  }
+  const result = await cancelPersistentWorkflow(snapshot, {
+    store,
+    reason: asOptionalString(input.cancelReason),
+    stopTask: stopTask ?? defaultStopTask,
+  });
+  return {
+    content: [{ type: "text" as const, text: formatWorkflowNotification(result) }],
   };
 }
 
@@ -446,10 +494,10 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   };
 }
 
-function parseAction(value: unknown): "run" | "resume" | "status" | "list" | "template" | "reconcile" | undefined {
+function parseAction(value: unknown): "run" | "resume" | "status" | "list" | "template" | "reconcile" | "validate" | "cancel" | undefined {
   if (value === undefined) return "run";
   return typeof value === "string" && WORKFLOW_ACTIONS.has(value)
-    ? value as "run" | "resume" | "status" | "list" | "template" | "reconcile"
+    ? value as "run" | "resume" | "status" | "list" | "template" | "reconcile" | "validate" | "cancel"
     : undefined;
 }
 
@@ -812,6 +860,14 @@ function formatWorkflowRunList(
   ].join("\n");
 }
 
+function formatWorkflowValidationReport(report: ReturnType<typeof createWorkflowValidationReport>): string {
+  return [
+    "<workflow-validation>",
+    `<payload>${escapeXml(JSON.stringify(report))}</payload>`,
+    "</workflow-validation>",
+  ].join("\n");
+}
+
 function formatWorkflowReconcileSpec(
   sourceRunId: string,
   reconciliationPlan: ReturnType<typeof createWorkflowNotification>["reconciliationPlan"],
@@ -869,4 +925,9 @@ function escapeXml(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+async function defaultStopTask(taskId: string): Promise<unknown> {
+  const { getTaskManager } = await import("@openharness/services");
+  return getTaskManager().stopTask(taskId);
 }
