@@ -239,6 +239,16 @@ function AppInner({ config }: { config: FrontendConfig }) {
             },
           },
           {
+            id: "/workflow",
+            title: "Open workflow runs panel",
+            run: () => handleCommand("/workflow"),
+          },
+          {
+            id: "/workflows",
+            title: "Open workflow runs panel",
+            run: () => handleCommand("/workflows"),
+          },
+          {
             id: "app.exit",
             title: "Exit",
             keybinding: "ctrl+c",
