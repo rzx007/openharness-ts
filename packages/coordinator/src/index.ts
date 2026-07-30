@@ -69,12 +69,12 @@ Every message you send is to the user. Worker results and system notifications a
 Use Workflow for DAG-shaped or repeatable workflows where code should enforce order, dependencies, concurrency, retry, and failure propagation. Use Agent plus TaskWait for simple one-off delegation or when you want to reason interactively between worker results.
 
 Workflow runs are persisted under the project \`.openharness/workflows\` directory by default, including running snapshots and terminal task results. Use the structured run id and task statuses from the workflow payload when reasoning about recovery or follow-up work.
-Use Workflow with \`action: "status"\` to inspect a persisted run, and \`action: "resume"\` to continue a running snapshot without rerunning completed terminal tasks.
+Use Workflow with \`action: "list"\` to inspect persisted run summaries, \`action: "status"\` to inspect one persisted run, and \`action: "resume"\` to continue a running snapshot without rerunning completed terminal tasks. Use \`action: "template"\` to inspect built-in workflow templates before drafting a common workflow.
 When a snapshot contains a running task with \`taskManagerTaskId\`, resume will first wait for that existing TaskManager task; only if it is unavailable should it spawn a replacement worker.
 Use task \`timeoutSeconds\` or workflow \`defaultTaskTimeoutSeconds\` when a worker attempt must have a hard wall-clock budget; timed-out attempts are reported as failed and follow the workflow failure/retry policy.
 For parallel write work, set \`writeScope\` on non-isolated tasks. The scheduler serializes overlapping non-isolated write scopes; \`readOnly: true\` and \`isolate: true\` tasks do not participate in shared-cwd write conflicts.
 Workflow status snapshots include \`blockedTaskIds\` and \`blockedTasks\` when ready tasks are waiting on writeScope conflicts; use those fields to explain scheduling pauses instead of treating them as stalled work.
-Workflow results can include \`needsReconciliation\`, \`reconciliationIssues\`, \`reconciliationSummary\`, \`budget\`, and persisted event timeline data. Use those fields to decide whether a completed workflow still needs merge/reconcile follow-up.
+Workflow results can include \`needsReconciliation\`, \`reconciliationIssues\`, \`reconciliationSummary\`, \`reconciliationPlan\`, \`budget\`, and persisted event timeline data. Use those fields to decide whether a completed workflow still needs merge/reconcile follow-up. \`reconciliationPlan.actions\` provides stable follow-up task prompts when conflicts need another worker.
 Use Workflow status with \`view: "timeline"\` when a human-readable run timeline is more useful than raw JSON; filter it with \`taskIds\`, \`eventTypes\`, or \`statuses\` when focusing on a subset. Status JSON also includes timeline controls and summary data for UI rendering, including available and selected filter state. Use \`budgetPreset\` for common policies such as \`cheap-review\`, \`safe-write\`, or \`fast-parallel\`; use \`budgetPolicy\` hard limits to stop scheduling new worker tasks, or soft limits to serialize/conserve later work after known token/time usage crosses a threshold. \`budgetPolicy.conserve\` can tune conserve prompts, permission mode, and max turns.
 
 When calling agent:
@@ -507,7 +507,11 @@ export {
   validateWorkflowTasks,
   workflowTasksConflict,
   WORKFLOW_BUDGET_POLICY_PRESETS,
+  WORKFLOW_SPEC_TEMPLATES,
   createWorkflowReconciliationSummary,
+  createWorkflowReconciliationPlan,
+  createWorkflowRunSummary,
+  type WorkflowReconciliationFollowUpAction,
   type WorkflowBudgetPolicyPreset,
   type WorkflowBudgetPolicy,
   type WorkflowBudgetUsage,
@@ -516,6 +520,7 @@ export {
   type WorkflowDiffSummary,
   type WorkflowReconciliationFileSummary,
   type WorkflowReconciliationIssue,
+  type WorkflowReconciliationPlan,
   type WorkflowReconciliationSummary,
   type WorkflowReconciliationTaskSummary,
   type WorkflowFailurePolicy,
@@ -527,6 +532,7 @@ export {
   type WorkflowRunOptions,
   type WorkflowRunEvent,
   type WorkflowRunEventType,
+  type WorkflowRunSummary,
   type WorkflowRetryPolicy,
   type WorkflowRunner,
   type WorkflowRunnerContext,
@@ -536,6 +542,8 @@ export {
   type WorkflowRunSnapshotPlan,
   type WorkflowRunSnapshotStatus,
   type WorkflowSpec,
+  type WorkflowSpecTemplate,
+  type WorkflowTemplateName,
   type WorkflowTaskBudgetUsage,
   type WorkflowTaskProgress,
   type WorkflowTask,

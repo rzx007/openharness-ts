@@ -87,6 +87,18 @@ describe("WorkflowRunStore", () => {
     expect(snapshot?.orderedResults.map((task) => task.taskId)).toEqual(["research", "verify"]);
     expect(snapshot?.results.verify?.result).toBe("verify result");
     expect(store.list().map((item) => item.runId)).toEqual(["run-complete"]);
+    expect(store.listSummaries()).toEqual([
+      expect.objectContaining({
+        runId: "run-complete",
+        status: "completed",
+        mode: "pipeline",
+        totalTasks: 2,
+        completedTasks: 2,
+        failedTasks: 0,
+        pendingTasks: 0,
+        runningTasks: 0,
+      }),
+    ]);
   });
 
   it("rejects unsafe run ids", () => {

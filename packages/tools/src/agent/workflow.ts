@@ -1,5 +1,6 @@
 import type { ToolDefinition } from "@openharness/core";
 import {
+  WORKFLOW_SPEC_TEMPLATES,
   formatWorkflowNotification,
   resumePersistentWorkflow,
   runWorkflow,
@@ -9,16 +10,18 @@ import {
   type WorkflowFailurePolicy,
   type WorkflowMode,
   type WorkflowRunEvent,
+  type WorkflowRunSummary,
   type WorkflowRunSnapshot,
   type WorkflowRunner,
   type WorkflowSpec,
   type WorkflowTask,
+  type WorkflowTemplateName,
 } from "@openharness/coordinator";
 import { createAgentWorkflowRunner } from "./workflow-runner";
 
 const WORKFLOW_MODES = new Set<WorkflowMode>(["parallel", "sequential", "pipeline"]);
 const FAILURE_POLICIES = new Set<WorkflowFailurePolicy>(["skip-dependents", "fail-fast", "continue"]);
-const WORKFLOW_ACTIONS = new Set(["run", "resume", "status"]);
+const WORKFLOW_ACTIONS = new Set(["run", "resume", "status", "list", "template"]);
 const BUDGET_POLICY_PRESETS = new Set<WorkflowBudgetPolicyPreset>(["cheap-review", "safe-write", "fast-parallel"]);
 
 export interface WorkflowToolOptions {
@@ -41,8 +44,8 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
       properties: {
         action: {
           type: "string",
-          enum: ["run", "resume", "status"],
-          description: "Workflow action. Defaults to run. Use resume/status with runId or latest.",
+          enum: ["run", "resume", "status", "list", "template"],
+          description: "Workflow action. Defaults to run. Use resume/status with runId or latest, list for persisted runs, template for built-in specs.",
         },
         view: {
           type: "string",
@@ -63,6 +66,20 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           type: "array",
           items: { type: "string" },
           description: "For status timeline, include only events with these statuses.",
+        },
+        runStatuses: {
+          type: "array",
+          items: { type: "string", enum: ["running", "completed", "failed"] },
+          description: "For action=list, include only workflow runs with these statuses.",
+        },
+        limit: {
+          type: "number",
+          description: "For action=list, maximum number of workflow runs to return.",
+        },
+        templateName: {
+          type: "string",
+          enum: ["research-implement-verify", "parallel-review", "safe-write"],
+          description: "For action=template, return one built-in workflow template instead of all templates.",
         },
         mode: {
           type: "string",
@@ -195,11 +212,17 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
     async execute(input, context) {
       const action = parseAction(input.action);
       if (!action) {
-        return { content: [{ type: "text", text: "action must be one of: run, resume, status" }], isError: true };
+        return { content: [{ type: "text", text: "action must be one of: run, resume, status, list, template" }], isError: true };
       }
 
       if (action === "status") {
         return workflowStatus(input, context.cwd);
+      }
+      if (action === "list") {
+        return workflowList(input, context.cwd);
+      }
+      if (action === "template") {
+        return workflowTemplate(input);
       }
 
       const specOrError = parseWorkflowSpec(input);
@@ -248,6 +271,40 @@ function workflowStatus(input: Record<string, unknown>, cwd: string) {
     return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events, filters) }] };
   }
   return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, events, filters) }] };
+}
+
+function workflowList(input: Record<string, unknown>, cwd: string) {
+  const store = new WorkflowRunStore({ cwd });
+  const statuses = parseRunStatuses(input.runStatuses);
+  if (typeof statuses === "string") {
+    return { content: [{ type: "text" as const, text: statuses }], isError: true };
+  }
+  const limit = parsePositiveInteger(input.limit);
+  if (limit === "invalid") {
+    return { content: [{ type: "text" as const, text: "limit must be a positive integer" }], isError: true };
+  }
+  const runs = store.listSummaries()
+    .filter((run) => statuses === undefined || statuses.includes(run.status))
+    .slice(0, limit ?? undefined);
+  return {
+    content: [{ type: "text" as const, text: formatWorkflowRunList(runs, { statuses, limit }) }],
+  };
+}
+
+function workflowTemplate(input: Record<string, unknown>) {
+  const templateName = input.templateName;
+  if (templateName !== undefined && !isWorkflowTemplateName(templateName)) {
+    return {
+      content: [{ type: "text" as const, text: "templateName must be one of: research-implement-verify, parallel-review, safe-write" }],
+      isError: true,
+    };
+  }
+  const templates = templateName
+    ? [WORKFLOW_SPEC_TEMPLATES[templateName]]
+    : Object.values(WORKFLOW_SPEC_TEMPLATES);
+  return {
+    content: [{ type: "text" as const, text: formatWorkflowTemplates(templates) }],
+  };
 }
 
 async function workflowResume(
@@ -325,10 +382,10 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   };
 }
 
-function parseAction(value: unknown): "run" | "resume" | "status" | undefined {
+function parseAction(value: unknown): "run" | "resume" | "status" | "list" | "template" | undefined {
   if (value === undefined) return "run";
   return typeof value === "string" && WORKFLOW_ACTIONS.has(value)
-    ? value as "run" | "resume" | "status"
+    ? value as "run" | "resume" | "status" | "list" | "template"
     : undefined;
 }
 
@@ -449,6 +506,14 @@ function isBudgetPolicyPreset(value: unknown): value is WorkflowBudgetPolicyPres
   return typeof value === "string" && BUDGET_POLICY_PRESETS.has(value as WorkflowBudgetPolicyPreset);
 }
 
+function isWorkflowTemplateName(value: unknown): value is WorkflowTemplateName {
+  return (
+    value === "research-implement-verify" ||
+    value === "parallel-review" ||
+    value === "safe-write"
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -476,6 +541,19 @@ function secondsToOptionalMs(value: unknown): number | undefined | "invalid" {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "invalid";
   return Math.floor(value * 1000);
+}
+
+function parsePositiveInteger(value: unknown): number | undefined | "invalid" {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) return "invalid";
+  return value;
+}
+
+function parseRunStatuses(value: unknown): Array<WorkflowRunSummary["status"]> | string | undefined {
+  const statuses = parseStringArray(value);
+  if (statuses === undefined) return undefined;
+  const invalid = statuses.find((status) => status !== "running" && status !== "completed" && status !== "failed");
+  return invalid ? "runStatuses must contain only: running, completed, failed" : statuses as Array<WorkflowRunSummary["status"]>;
 }
 
 interface TimelineFilters {
@@ -591,6 +669,25 @@ function formatTimelineFilters(filters: TimelineFilters): string | undefined {
     filters.statuses ? `statuses=${filters.statuses.join(",")}` : undefined,
   ].filter((part): part is string => part !== undefined);
   return parts.length > 0 ? `Filters: ${parts.join(" ")}` : undefined;
+}
+
+function formatWorkflowRunList(
+  runs: WorkflowRunSummary[],
+  filters: { statuses?: Array<WorkflowRunSummary["status"]>; limit?: number } = {},
+): string {
+  return [
+    "<workflow-run-list>",
+    `<payload>${escapeXml(JSON.stringify({ runs, total: runs.length, filters }))}</payload>`,
+    "</workflow-run-list>",
+  ].join("\n");
+}
+
+function formatWorkflowTemplates(templates: Array<(typeof WORKFLOW_SPEC_TEMPLATES)[WorkflowTemplateName]>): string {
+  return [
+    "<workflow-templates>",
+    `<payload>${escapeXml(JSON.stringify({ templates, total: templates.length }))}</payload>`,
+    "</workflow-templates>",
+  ].join("\n");
 }
 
 function escapeXml(value: string): string {

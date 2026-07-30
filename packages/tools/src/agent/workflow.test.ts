@@ -324,6 +324,67 @@ describe("workflowTool", () => {
     }
   });
 
+  it("lists persisted workflow run summaries", async () => {
+    const cwd = makeTempDir();
+    try {
+      const store = new WorkflowRunStore({ cwd });
+      const completedSpec = { mode: "parallel" as const, tasks: [{ id: "done" }] };
+      const runningSpec = { mode: "pipeline" as const, budgetPolicyPreset: "safe-write" as const, tasks: [{ id: "research" }, { id: "write" }] };
+      const doneResult: WorkflowTaskRunResult = {
+        taskId: "done",
+        status: "completed",
+        summary: "done",
+        attempts: 1,
+        dependencies: [],
+        startedAt: 1,
+        finishedAt: 2,
+      };
+      store.save(createWorkflowRunSnapshot({
+        runId: "completed-run",
+        status: "completed",
+        summary: "1/1 tasks completed",
+        spec: completedSpec,
+        plan: createWorkflowPlan(completedSpec),
+        results: new Map([["done", doneResult]]),
+        running: new Set(),
+        createdAt: 1,
+      }));
+      store.save(createWorkflowRunSnapshot({
+        runId: "running-run",
+        status: "running",
+        summary: "1 task running",
+        spec: runningSpec,
+        plan: createWorkflowPlan(runningSpec),
+        results: new Map(),
+        running: new Set(["research"]),
+        createdAt: 2,
+      }));
+
+      const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const result = await tool.execute({ action: "list", runStatuses: ["running"], limit: 1 }, { cwd });
+
+      expect(result.isError).toBeUndefined();
+      expect(textOf(result)).toContain("<workflow-run-list>");
+      expect(textOf(result)).toContain('"runId":"running-run"');
+      expect(textOf(result)).toContain('"budgetPolicyPreset":"safe-write"');
+      expect(textOf(result)).not.toContain("completed-run");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("returns built-in workflow templates", async () => {
+    const tool = createWorkflowTool({ createRunner: vi.fn() });
+    const result = await tool.execute({ action: "template", templateName: "research-implement-verify" }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect(textOf(result)).toContain("<workflow-templates>");
+    expect(textOf(result)).toContain('"name":"research-implement-verify"');
+    expect(textOf(result)).toContain('"mode":"pipeline"');
+    expect(textOf(result)).toContain('"budgetPolicyPreset":"safe-write"');
+    expect(textOf(result)).not.toContain('"name":"parallel-review"');
+  });
+
   it("resumes persisted workflow snapshots through the tool", async () => {
     const cwd = makeTempDir();
     try {

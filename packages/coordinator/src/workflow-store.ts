@@ -3,9 +3,11 @@ import { join } from "node:path";
 
 import { getProjectConfigDir } from "@openharness/core";
 import {
+  createWorkflowRunSummary,
   createWorkflowResultFromSnapshot,
   runWorkflow,
   type WorkflowRunEvent,
+  type WorkflowRunSummary,
   type WorkflowRunSnapshot,
   type WorkflowRunner,
   type WorkflowRunResult,
@@ -92,6 +94,10 @@ export class WorkflowRunStore {
       }
     }
     return snapshots.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  listSummaries(): WorkflowRunSummary[] {
+    return this.list().map(createWorkflowRunSummary);
   }
 
   latest(): WorkflowRunSnapshot | undefined {
