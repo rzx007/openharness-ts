@@ -66,7 +66,7 @@ R3 函数本身在 `@openharness/coordinator` 包里实现后，还需三处 CLI
 
 ### 2. matchSessionMode 在会话恢复时调用
 
-`loadSessionAndResume`（`main.ts`）恢复快照后调用 `matchSessionMode(payload.session_mode)`：若快照中有 `session_mode: "coordinator"` 则设置 `CLAUDE_CODE_COORDINATOR_MODE` 环境变量并向用户打印提示；若模式不匹配当前环境则警告——对齐 Python `match_session_mode` 行为。
+`loadSessionAndResume`（`main.ts`）恢复快照后调用 `matchSessionMode(payload.session_mode)`：若快照中有 `session_mode: "coordinator"` 则设置 `OPENHARNESS_COORDINATOR_MODE` 环境变量并向用户打印提示；若模式不匹配当前环境则警告。
 
 ### 3. setAllowedTools 在 coordinator 模式启动时调用
 

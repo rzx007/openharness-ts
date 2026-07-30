@@ -64,7 +64,7 @@ Agent runner → 通过 swarm / TaskManager 真正跑 worker
 
 ### A1. Coordinator 模式工具面
 
-开启 `CLAUDE_CODE_COORDINATOR_MODE`（或遗留兼容 env）后，CLI 启动时：
+开启 `OPENHARNESS_COORDINATOR_MODE` 后，CLI 启动时：
 
 ```text
 apps/cli/src/commands/main.ts

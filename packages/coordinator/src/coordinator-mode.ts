@@ -1,4 +1,4 @@
-import { COORDINATOR_SYSTEM_PROMPT, isCoordinatorMode } from "./index.js";
+import { COORDINATOR_MODE_ENV, COORDINATOR_SYSTEM_PROMPT, isCoordinatorMode } from "./index.js";
 
 /**
  * Coordinator 模式辅助（移植自 Python coordinator_mode.py 的 mode/上下文段）。
@@ -27,10 +27,11 @@ const WORKER_TOOLS = [
 const SIMPLE_WORKER_TOOLS = ["Bash", "Read", "Edit"] as const;
 
 const TRUTHY = new Set(["1", "true", "yes"]);
+export const COORDINATOR_SIMPLE_MODE_ENV = "OPENHARNESS_COORDINATOR_SIMPLE";
 
-/** CLAUDE_CODE_SIMPLE：worker 只配最小工具集的「简单模式」。 */
+/** 简单模式：worker 只配最小工具集。 */
 export function isSimpleMode(): boolean {
-  return TRUTHY.has((process.env.CLAUDE_CODE_SIMPLE ?? "").toLowerCase());
+  return TRUTHY.has((process.env[COORDINATOR_SIMPLE_MODE_ENV] ?? "").toLowerCase());
 }
 
 /**
@@ -45,10 +46,10 @@ export function matchSessionMode(sessionMode?: string): string | undefined {
   if (currentIsCoordinator === sessionIsCoordinator) return undefined;
 
   if (sessionIsCoordinator) {
-    process.env.CLAUDE_CODE_COORDINATOR_MODE = "1";
+    process.env[COORDINATOR_MODE_ENV] = "1";
     return "Entered coordinator mode to match resumed session.";
   }
-  delete process.env.CLAUDE_CODE_COORDINATOR_MODE;
+  delete process.env[COORDINATOR_MODE_ENV];
   return "Exited coordinator mode to match resumed session.";
 }
 

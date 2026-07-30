@@ -109,9 +109,10 @@
 - 搜索匹配 body 内容（不只 metadata）。
 - **文件**：`packages/memory/src/index.ts`
 
-### A.5 coordinator mode env 一致性
-- `isCoordinatorMode()` 读取与原版一致的 `CLAUDE_CODE_COORDINATOR_MODE`（当前读的 env 名不一致）。
-- **文件**：`packages/coordinator/src/index.ts`
+### A.5 coordinator mode env 一致性 ✅ 已收口
+- `isCoordinatorMode()` 统一读取 `OPENHARNESS_COORDINATOR_MODE`；不再兼容 `CLAUDE_CODE_COORDINATOR_MODE` / `COORDINATOR_MODE` / `OPENHARNESS_COORDINATOR` / `CLAUDE_CODE_COORDINATOR`。
+- 简单模式统一读取 `OPENHARNESS_COORDINATOR_SIMPLE`。
+- **文件**：`packages/coordinator/src/index.ts`、`packages/coordinator/src/coordinator-mode.ts`
 
 ---
 
@@ -184,7 +185,7 @@
   `getAllAgentDefinitions` 三源合并 builtin < user < plugin。
 - ✅ plugin agents（`plugin:ns:name` 命名，hooks/mcpServers/omitClaudeMd 信任面剥除）。
 - ✅ coordinator system prompt 经核对本就全量（「大幅精简」描述过时）；补
-  `CLAUDE_CODE_SIMPLE` 简单模式分支、`matchSessionMode`、`getCoordinatorTools`、
+  `OPENHARNESS_COORDINATOR_SIMPLE` 简单模式分支、`matchSessionMode`、`getCoordinatorTools`、
   `getCoordinatorUserContext`（scratchpad/worker-tools 注入）。
 - ✅ CLI 接线：session 快照存 `session_mode`；`--continue/--resume` 恢复时调
   `matchSessionMode` 自动同步 env；REPL/BackendHost 启动时若 coordinator 模式

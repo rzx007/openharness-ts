@@ -88,6 +88,7 @@ describe("TeamRegistry", () => {
 
 describe("isCoordinatorMode", () => {
   const ENV_KEYS = [
+    "OPENHARNESS_COORDINATOR_MODE",
     "CLAUDE_CODE_COORDINATOR_MODE",
     "COORDINATOR_MODE",
     "OPENHARNESS_COORDINATOR",
@@ -117,17 +118,27 @@ describe("isCoordinatorMode", () => {
     expect(isCoordinatorMode()).toBe(false);
   });
 
-  it("returns true for CLAUDE_CODE_COORDINATOR_MODE truthy values", () => {
+  it("returns true for OPENHARNESS_COORDINATOR_MODE truthy values", () => {
     for (const value of ["1", "true", "yes", "TRUE", "Yes"]) {
-      process.env.CLAUDE_CODE_COORDINATOR_MODE = value;
+      process.env.OPENHARNESS_COORDINATOR_MODE = value;
       expect(isCoordinatorMode()).toBe(true);
+      delete process.env.OPENHARNESS_COORDINATOR_MODE;
     }
   });
 
-  it("returns false for CLAUDE_CODE_COORDINATOR_MODE falsy values", () => {
+  it("returns false for OPENHARNESS_COORDINATOR_MODE falsy values", () => {
     for (const value of ["0", "false", "no", "", "off"]) {
-      process.env.CLAUDE_CODE_COORDINATOR_MODE = value;
+      process.env.OPENHARNESS_COORDINATOR_MODE = value;
       expect(isCoordinatorMode()).toBe(false);
+      delete process.env.OPENHARNESS_COORDINATOR_MODE;
+    }
+  });
+
+  it("ignores legacy coordinator env names", () => {
+    for (const key of ["CLAUDE_CODE_COORDINATOR_MODE", "COORDINATOR_MODE", "OPENHARNESS_COORDINATOR", "CLAUDE_CODE_COORDINATOR"]) {
+      process.env[key] = "1";
+      expect(isCoordinatorMode()).toBe(false);
+      delete process.env[key];
     }
   });
 });

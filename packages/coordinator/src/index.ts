@@ -395,6 +395,8 @@ export function getTeamRegistry(): TeamRegistry {
   return _defaultTeamRegistry;
 }
 
+export const COORDINATOR_MODE_ENV = "OPENHARNESS_COORDINATOR_MODE";
+
 const COORDINATOR_TRUTHY_VALUES = new Set(["1", "true", "yes"]);
 
 function isTruthyEnv(value: string | undefined): boolean {
@@ -402,18 +404,7 @@ function isTruthyEnv(value: string | undefined): boolean {
 }
 
 export function isCoordinatorMode(): boolean {
-  // Primary env var, matching the Python original (openharness):
-  // is_coordinator_mode() reads CLAUDE_CODE_COORDINATOR_MODE and treats
-  // "1"/"true"/"yes" (case-insensitive) as enabled.
-  if (isTruthyEnv(process.env.CLAUDE_CODE_COORDINATOR_MODE)) {
-    return true;
-  }
-  // Legacy env vars kept for backward compatibility.
-  return (
-    isTruthyEnv(process.env.COORDINATOR_MODE) ||
-    isTruthyEnv(process.env.OPENHARNESS_COORDINATOR) ||
-    isTruthyEnv(process.env.CLAUDE_CODE_COORDINATOR)
-  );
+  return isTruthyEnv(process.env[COORDINATOR_MODE_ENV]);
 }
 
 export function formatTaskNotification(notification: TaskNotification): string {
