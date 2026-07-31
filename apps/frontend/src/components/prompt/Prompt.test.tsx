@@ -95,6 +95,31 @@ test("typeText + pressEnter triggers onSubmit and clears input", async () => {
   renderer.destroy();
 });
 
+test("bracketed paste + pressEnter submits pasted text immediately", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+
+  const { renderer, renderOnce, mockInput, waitForFrame } =
+    await testRender(makePrompt({ onSubmit }), { width: 80, height: 24 });
+
+  await renderOnce();
+
+  await act(async () => {
+    await mockInput.pasteBracketedText("line one\r\nline two");
+  });
+  await waitForFrame((f) => f.includes("line one"));
+
+  await act(async () => {
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  expect(onSubmit.mock.calls[0]?.[0]).toBe("line one\nline two");
+
+  renderer.destroy();
+});
+
 // ---------------------------------------------------------------------------
 // Test 3: typing "/th" shows autocomplete with /theme; pressEnter runs command
 // ---------------------------------------------------------------------------
@@ -143,6 +168,39 @@ test("slash prefix shows autocomplete; enter executes highlighted command", asyn
 // ---------------------------------------------------------------------------
 // Test 4: busy=true → spinner + "working...", no submit on Enter
 // ---------------------------------------------------------------------------
+
+test("busy state still allows slash autocomplete and command selection", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+  const themeRun = mock(() => undefined);
+  const commands: Command[] = [
+    { id: "/theme", title: "Switch theme", run: themeRun },
+    { id: "/help", title: "Show help", run: mock(() => undefined) },
+  ];
+
+  const { renderer, renderOnce, mockInput, waitForFrame } =
+    await testRender(
+      makePrompt({ busy: true, onSubmit, slashCommands: commands }),
+      { width: 80, height: 24 },
+    );
+
+  await renderOnce();
+
+  await act(async () => {
+    await mockInput.typeText("/th");
+  });
+  await waitForFrame((f) => f.includes("/theme"));
+
+  await act(async () => {
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(themeRun).toHaveBeenCalledTimes(1);
+  expect(onSubmit).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});
 
 test("busy state shows spinner/working and ignores submit", async () => {
   const onSubmit = mock((_line: string) => undefined);
@@ -295,7 +353,7 @@ test("busy=true: Enter key does not call onSubmit regardless of textarea content
   await renderOnce();
   await waitForFrame((f) => f.includes("working"));
 
-  // Attempt submit via Enter (focused=false when busy, but mockInput bypasses focus)
+  // Attempt submit via Enter while busy.
   await act(async () => {
     mockInput.pressEnter();
   });

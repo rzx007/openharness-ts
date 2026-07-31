@@ -127,7 +127,9 @@ export type WorkflowTuiState = {
       dependsOn: string[];
     }>;
   };
+  selectedReconciliationActionId?: string;
   reconciliationSpec?: unknown;
+  notice?: string;
   error?: string;
 };
 

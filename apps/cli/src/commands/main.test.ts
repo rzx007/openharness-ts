@@ -5,6 +5,14 @@ import { describe, it, expect } from "vitest";
 import { CommandRegistry } from "@openharness/commands";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
 import {
+  createWorkflowNotification,
+  createWorkflowPlan,
+  createWorkflowResultFromSnapshot,
+  createWorkflowRunSnapshot,
+  type WorkflowSpec,
+  type WorkflowTaskRunResult,
+} from "@openharness/coordinator";
+import {
   buildHostCommandList,
   buildHostCommandDetails,
   runHostSlashCommand,
@@ -19,6 +27,7 @@ import {
   isSessionMemoryEnabled,
   isMemoryAutoExtractEnabled,
   memoryAutoExtractMaxRecords,
+  createSelectedWorkflowReconciliationSpec,
 } from "./main";
 
 /** 构造一个最小 SkillDefinition（补齐新增必填字段的默认值）。 */
@@ -102,6 +111,77 @@ describe("memory auto extraction config", () => {
     expect(memoryAutoExtractMaxRecords({ memory: { enabled: true, autoExtractMaxRecords: 0 } } as any)).toBe(3);
   });
 });
+
+describe("createSelectedWorkflowReconciliationSpec", () => {
+  it("uses the only available reconciliation action when no action id is provided", () => {
+    const snapshot = makeWorkflowSnapshotWithConflicts([
+      ["auth-a", ["src/auth.ts"]],
+      ["auth-b", ["src/auth.ts"]],
+    ]);
+
+    const spec = createSelectedWorkflowReconciliationSpec(snapshot);
+
+    expect(spec.tasks).toHaveLength(2);
+    expect(spec.tasks[0]?.metadata?.reconciliationActionId).toBeDefined();
+    expect(spec.tasks[1]?.id).toBe("verify-reconciliation");
+  });
+
+  it("requires an explicit action id when multiple reconciliation actions are available", () => {
+    const snapshot = makeWorkflowSnapshotWithConflicts([
+      ["auth-a", ["src/auth.ts"]],
+      ["auth-b", ["src/auth.ts"]],
+      ["api-a", ["src/api.ts"]],
+      ["api-b", ["src/api.ts"]],
+    ]);
+    const notification = createWorkflowNotification(createWorkflowResultFromSnapshot(snapshot));
+    expect(notification.reconciliationPlan.actions.length).toBeGreaterThan(1);
+
+    expect(() => createSelectedWorkflowReconciliationSpec(snapshot)).toThrow("Select one reconciliation action");
+
+    const actionId = notification.reconciliationPlan.actions[0]!.actionId;
+    const spec = createSelectedWorkflowReconciliationSpec(snapshot, actionId);
+    expect(spec.tasks[0]?.metadata?.reconciliationActionId).toBe(actionId);
+  });
+});
+
+function makeWorkflowSnapshotWithConflicts(
+  entries: Array<[taskId: string, changedFiles: string[]]>,
+) {
+  const spec: WorkflowSpec = {
+    mode: "parallel",
+    tasks: entries.map(([taskId, changedFiles]) => ({
+      id: taskId,
+      writeScope: changedFiles,
+      prompt: `Run ${taskId}`,
+    })),
+  };
+  const now = Date.now();
+  const results = new Map<string, WorkflowTaskRunResult>(
+    entries.map(([taskId, changedFiles]) => [
+      taskId,
+      {
+        taskId,
+        status: "completed",
+        summary: `${taskId} done`,
+        attempts: 1,
+        dependencies: [],
+        startedAt: now,
+        finishedAt: now,
+        metadata: { changedFiles },
+      },
+    ]),
+  );
+  return createWorkflowRunSnapshot({
+    runId: "wf-reconcile-test",
+    status: "completed",
+    summary: "completed with conflicts",
+    spec,
+    plan: createWorkflowPlan(spec),
+    results,
+    running: new Set(),
+    createdAt: now,
+  });
+}
 
 describe("runHostSlashCommand", () => {
   it("routes a command through the registry and returns its output (never the model)", async () => {

@@ -54,6 +54,9 @@ const state: WorkflowTuiState = {
       },
     ],
   },
+  selectedReconciliationActionId: "reconcile-research",
+  reconciliationSpec: { mode: "parallel", tasks: [] },
+  notice: "Submitted follow-up wf-next from wf-running",
 };
 
 test("WorkflowRunsPanel renders run list, detail, filters, timeline, and reconcile actions", async () => {
@@ -67,6 +70,7 @@ test("WorkflowRunsPanel renders run list, detail, filters, timeline, and reconci
         onClearFilters={() => {}}
         onCancelRun={() => {}}
         onSelectReconcileAction={() => {}}
+        onRunReconcileAction={() => {}}
       />
     </ThemeProvider>,
     { width: 90, height: 36 },
@@ -84,6 +88,8 @@ test("WorkflowRunsPanel renders run list, detail, filters, timeline, and reconci
   expect(frame).toContain("task_started");
   expect(frame).toContain("RECONCILE");
   expect(frame).toContain("reconcile-research");
+  expect(frame).toContain("Submitted follow-up");
+  expect(frame).toContain("press f to run");
 
   renderer.destroy();
 });
@@ -99,6 +105,7 @@ test("WorkflowRunsPanel handles empty state", async () => {
         onClearFilters={() => {}}
         onCancelRun={() => {}}
         onSelectReconcileAction={() => {}}
+        onRunReconcileAction={() => {}}
       />
     </ThemeProvider>,
     { width: 80, height: 12 },

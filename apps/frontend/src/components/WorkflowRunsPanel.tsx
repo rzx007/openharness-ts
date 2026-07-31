@@ -13,6 +13,7 @@ export type WorkflowRunsPanelProps = {
   onClearFilters: () => void;
   onCancelRun: (runId: string) => void;
   onSelectReconcileAction: (runId: string, actionId: string) => void;
+  onRunReconcileAction: (runId: string, actionId?: string) => void;
 };
 
 const VISIBLE_RUNS = 5;
@@ -27,6 +28,7 @@ export function WorkflowRunsPanel({
   onClearFilters,
   onCancelRun,
   onSelectReconcileAction,
+  onRunReconcileAction,
 }: WorkflowRunsPanelProps) {
   const { theme } = useTheme();
   const c = theme.colors;
@@ -48,6 +50,10 @@ export function WorkflowRunsPanel({
     if (key.name === "x") { onClearFilters(); return; }
     if (key.name === "c" && state?.snapshot && selectedRun?.status === "running") {
       onCancelRun(selectedRun.runId);
+      return;
+    }
+    if (key.name === "f" && state?.reconciliation?.needed && selectedRun) {
+      onRunReconcileAction(selectedRun.runId, state.selectedReconciliationActionId);
       return;
     }
     if (key.name === "t" && state) {
@@ -76,7 +82,8 @@ export function WorkflowRunsPanel({
   return (
     <box flexDirection="column">
       <text attributes={TextAttributes.BOLD} fg={c.accent}>Workflow Runs</text>
-      <text fg={c.muted}>r refresh  enter detail  t/e/s filter  x clear  c cancel</text>
+      <text fg={c.muted}>r refresh  enter detail  t/e/s filter  x clear  c cancel  f follow-up</text>
+      {state?.notice ? <text fg={c.success}>{state.notice}</text> : null}
       {state?.error ? <text fg={c.error}>{state.error}</text> : null}
 
       {runs.length === 0 ? (
@@ -139,12 +146,13 @@ export function WorkflowRunsPanel({
           <text>{" "}</text>
           <text attributes={TextAttributes.BOLD} fg={c.warning}>RECONCILE</text>
           <text fg={c.warning}>{" " + truncate(state.reconciliation.summary, 52)}</text>
+          <text fg={c.muted}>{" 1-9 select action; f run follow-up"}</text>
           {state.reconciliation.actions.slice(0, 3).map((action, i) => (
-            <text key={action.actionId} fg={c.muted}>
-              {` ${i + 1}. ${truncate(action.actionId, 18)} ${truncate(action.description, 28)}`}
+            <text key={action.actionId} fg={action.actionId === state.selectedReconciliationActionId ? c.success : c.muted}>
+              {`${action.actionId === state.selectedReconciliationActionId ? ">" : " "} ${i + 1}. ${truncate(action.actionId, 18)} ${truncate(action.description, 28)}`}
             </text>
           ))}
-          {state.reconciliationSpec ? <text fg={c.success}> follow-up spec selected</text> : null}
+          {state.reconciliationSpec ? <text fg={c.success}> follow-up spec selected; press f to run</text> : null}
         </box>
       ) : null}
     </box>

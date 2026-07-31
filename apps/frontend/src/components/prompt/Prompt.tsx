@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, type ReactElement } from "react";
 import { useKeyboard } from "@opentui/react";
-import { TextAttributes } from "@opentui/core";
-import type { TextareaRenderable } from "@opentui/core";
+import { TextAttributes, decodePasteBytes, stripAnsiSequences } from "@opentui/core";
+import type { PasteEvent, TextareaRenderable } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";
 import { Autocomplete } from "./Autocomplete";
 import type { AutocompleteItem } from "./Autocomplete";
@@ -104,7 +104,7 @@ export function Prompt({
   const fileAcNav = useListNavigation(fileAcItems.length);
 
   // Determine if autocomplete should be open
-  const shouldShowAc = !busy && content.startsWith("/") && content.length > 0;
+  const shouldShowAc = content.startsWith("/") && content.length > 0;
 
   // Sync acOpen with shouldShowAc
   useEffect(() => {
@@ -149,6 +149,36 @@ export function Prompt({
     fileAtRef.current = null;
   }, [fileAcNav.setIndex]);
 
+  const syncTextareaContent = useCallback((): string => {
+    const text = textareaRef.current?.plainText ?? "";
+    setContent(text);
+    onDraftChange?.(text);
+    const lineCount = textareaRef.current?.lineCount ?? 1;
+    setTextareaHeight(Math.min(TEXTAREA_MAX_LINES, Math.max(1, lineCount)));
+    return text;
+  }, [onDraftChange]);
+
+  const updateFileCompletion = useCallback((text: string) => {
+    const atResult = detectAtToken(text);
+    if (atResult !== null) {
+      if (!filesLoaded) {
+        listProjectFiles(process.cwd()).then((files) => {
+          filesRef.current = files;
+          setFilesLoaded(true);
+        });
+      }
+      fileAtRef.current = { atStart: atResult.atStart, atEnd: atResult.atEnd };
+      const fileScores = frecencyRank("file");
+      setFileAcItems(buildAtItems(filesRef.current, atResult.token, fileScores));
+      fileAcNav.setIndex(0);
+      setFileAcOpen(true);
+      setAcOpen(false);
+    } else {
+      setFileAcOpen(false);
+      fileAtRef.current = null;
+    }
+  }, [filesLoaded, fileAcNav.setIndex]);
+
   // Clear textarea imperatively
   const clearTextarea = useCallback(() => {
     if (textareaRef.current) {
@@ -161,12 +191,16 @@ export function Prompt({
 
   // Handle textarea onSubmit (triggered by Return key)
   const handleTextareaSubmit = useCallback(() => {
-    if (busy) return;
+    const text = textareaRef.current?.plainText ?? content;
+    if (text !== content) {
+      setContent(text);
+      onDraftChange?.(text);
+    }
 
     // If file @ completion is open, insert the selected file path
     if (fileAcOpen) {
       if (textareaRef.current) {
-        const next = fileApplySelected(textareaRef.current.plainText);
+        const next = fileApplySelected(text);
         if (next !== null) {
           textareaRef.current.setText(next);
           setContent(next);
@@ -188,13 +222,29 @@ export function Prompt({
       return;
     }
 
-    const text = textareaRef.current?.plainText ?? content;
+    if (busy) return;
+
     const trimmed = text.trim();
     if (trimmed === "") return;
 
     onSubmit(trimmed);
     clearTextarea();
-  }, [busy, fileAcOpen, fileApplySelected, fileClose, acOpen, acRawCommands, acNav.index, content, onSubmit, clearTextarea]);
+  }, [busy, fileAcOpen, fileApplySelected, fileClose, acOpen, acRawCommands, acNav.index, content, onDraftChange, onSubmit, clearTextarea]);
+
+  const handleTextareaPaste = useCallback((event: PasteEvent) => {
+    const text = stripAnsiSequences(decodePasteBytes(event.bytes))
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+
+    event.preventDefault();
+    if (!text || !textareaRef.current) return;
+
+    textareaRef.current.insertText(text);
+    setTimeout(() => {
+      const current = syncTextareaContent();
+      updateFileCompletion(current);
+    }, 0);
+  }, [syncTextareaContent, updateFileCompletion]);
 
   // Global keyboard handler
   useKeyboard((key) => {
@@ -352,22 +402,19 @@ export function Prompt({
         {/* Multiline textarea */}
         <textarea
           ref={textareaRef}
-          focused={!busy}
+          focused={true}
           placeholder={placeholder}
           placeholderColor={theme.colors.muted}
           keyBindings={keyBindings}
           onSubmit={handleTextareaSubmit}
+          onPaste={handleTextareaPaste}
           onContentChange={() => {
             // Read plainText from ref on next tick (event has no content)
-            const text = textareaRef.current?.plainText ?? "";
-            setContent(text);
-            onDraftChange?.(text);
+            const text = syncTextareaContent();
             // Bug 3: update height based on line count (1–6 rows)
-            const lineCount = textareaRef.current?.lineCount ?? 1;
-            setTextareaHeight(Math.min(TEXTAREA_MAX_LINES, Math.max(1, lineCount)));
             // Detect @ token for file completion
             const atResult = detectAtToken(text);
-            if (!busy && atResult !== null) {
+            if (atResult !== null) {
               if (!filesLoaded) {
                 listProjectFiles(process.cwd()).then((files) => {
                   filesRef.current = files;

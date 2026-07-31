@@ -15,7 +15,7 @@ import {
   type SwarmTeammateSnapshot,
 } from "../swarm-status";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
-import { computeToolDiff, resolveToolPath } from "@openharness/tools";
+import { computeToolDiff, createAgentWorkflowRunner, resolveToolPath } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
 import type { SandboxRuntimeEvent, SandboxRuntimeReporter } from "@openharness/sandbox";
@@ -28,13 +28,16 @@ import {
   cancelPersistentWorkflow,
   createWorkflowNotification,
   createWorkflowResultFromSnapshot,
+  createWorkflowRunId,
   createWorkflowSpecFromReconciliationPlan,
   isCoordinatorMode,
   getCoordinatorTools,
   matchSessionMode,
+  runPersistentWorkflow,
   type WorkflowRunEvent,
   type WorkflowRunSnapshot,
   type WorkflowRunSummary,
+  type WorkflowSpec,
 } from "@openharness/coordinator";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
@@ -138,7 +141,9 @@ type WorkflowTuiState = {
     statuses: string[];
   };
   reconciliation?: ReturnType<typeof createWorkflowNotification>["reconciliationPlan"];
+  selectedReconciliationActionId?: string;
   reconciliationSpec?: unknown;
+  notice?: string;
   error?: string;
 };
 
@@ -1243,14 +1248,16 @@ async function runBackendHost(
   const workflowStore = new WorkflowRunStore({ cwd: process.cwd() });
   let workflowSelectedRunId: string | undefined;
   let workflowFilters: WorkflowTuiState["filters"] = {};
+  let workflowReconciliationActionId: string | undefined;
 
   const emitWorkflowState = async (
-    options: { reconciliationActionId?: string; error?: string } = {},
+    options: { reconciliationActionId?: string; notice?: string; error?: string } = {},
   ): Promise<void> => {
     const state = buildWorkflowTuiState(workflowStore, {
       selectedRunId: workflowSelectedRunId,
       filters: workflowFilters,
-      reconciliationActionId: options.reconciliationActionId,
+      reconciliationActionId: options.reconciliationActionId ?? workflowReconciliationActionId,
+      notice: options.notice,
       error: options.error,
     });
     workflowSelectedRunId = state.selectedRunId;
@@ -1551,6 +1558,7 @@ async function runBackendHost(
         if (action === "select_run") {
           workflowSelectedRunId = request.workflow_run_id ?? undefined;
           workflowFilters = {};
+          workflowReconciliationActionId = undefined;
           await emitWorkflowState();
           continue;
         }
@@ -1586,7 +1594,26 @@ async function runBackendHost(
         }
         if (action === "reconcile") {
           workflowSelectedRunId = request.workflow_run_id ?? workflowSelectedRunId;
-          await emitWorkflowState({ reconciliationActionId: request.workflow_reconcile_action_id ?? undefined });
+          workflowReconciliationActionId = request.workflow_reconcile_action_id ?? undefined;
+          await emitWorkflowState({ reconciliationActionId: workflowReconciliationActionId });
+          continue;
+        }
+        if (action === "run_reconcile") {
+          const runId = request.workflow_run_id ?? workflowSelectedRunId;
+          const snapshot = runId ? workflowStore.load(runId) : workflowStore.latest();
+          if (!snapshot) {
+            await emitWorkflowState({ error: runId ? `Workflow run not found: ${runId}` : "No workflow runs found" });
+            continue;
+          }
+          const actionId = request.workflow_reconcile_action_id ?? workflowReconciliationActionId;
+          const submittedRunId = submitWorkflowReconciliationFollowUp(snapshot, workflowStore, {
+            actionId,
+            permissionMode: currentSettings.permission.mode,
+          });
+          workflowSelectedRunId = submittedRunId;
+          workflowFilters = {};
+          workflowReconciliationActionId = undefined;
+          await emitWorkflowState({ notice: `Submitted follow-up ${submittedRunId} from ${snapshot.runId}` });
           continue;
         }
         await emitWorkflowState({ error: `Unknown workflow action: ${action}` });
@@ -1844,8 +1871,48 @@ type WorkflowTuiBuildOptions = {
   selectedRunId?: string;
   filters?: WorkflowTuiState["filters"];
   reconciliationActionId?: string;
+  notice?: string;
   error?: string;
 };
+
+function submitWorkflowReconciliationFollowUp(
+  snapshot: WorkflowRunSnapshot,
+  store: WorkflowRunStore,
+  options: { actionId?: string; permissionMode?: string } = {},
+): string {
+  const spec = createSelectedWorkflowReconciliationSpec(snapshot, options.actionId);
+  const runId = createWorkflowRunId();
+  const runner = createAgentWorkflowRunner({
+    cwd: process.cwd(),
+    permissionMode: normalizeWorkflowPermissionMode(options.permissionMode),
+  });
+  void runPersistentWorkflow(spec, runner, { cwd: process.cwd(), runId, store })
+    .catch((error) => {
+      console.error(`Detached follow-up workflow ${runId} failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  return runId;
+}
+
+export function createSelectedWorkflowReconciliationSpec(
+  snapshot: WorkflowRunSnapshot,
+  actionId?: string,
+): WorkflowSpec {
+  const notification = createWorkflowNotification(createWorkflowResultFromSnapshot(snapshot));
+  const actionIds =
+    actionId
+      ? [actionId]
+      : notification.reconciliationPlan.actions.length === 1
+        ? [notification.reconciliationPlan.actions[0]!.actionId]
+        : undefined;
+  if (!actionIds) {
+    throw new Error("Select one reconciliation action before running a follow-up workflow");
+  }
+  const spec = createWorkflowSpecFromReconciliationPlan(notification.reconciliationPlan, { actionIds });
+  if (!spec) {
+    throw new Error("No reconciliation actions matched the selected workflow run");
+  }
+  return spec;
+}
 
 function buildWorkflowTuiState(
   store: WorkflowRunStore,
@@ -1896,7 +1963,9 @@ function buildWorkflowTuiState(
     filters,
     available: { taskIds, eventTypes, statuses },
     reconciliation: notification.reconciliationPlan,
+    selectedReconciliationActionId: reconciliationActionId,
     reconciliationSpec,
+    notice: options.notice,
     error: options.error,
   };
 }
@@ -1945,6 +2014,11 @@ function uniqueSorted(values: string[]): string[] {
 
 function stringFromUnknown(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function normalizeWorkflowPermissionMode(value: string | undefined): "default" | "plan" | "full_auto" | undefined {
+  if (value === "default" || value === "plan" || value === "full_auto") return value;
+  return undefined;
 }
 
 /**

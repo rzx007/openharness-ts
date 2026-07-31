@@ -8,7 +8,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅、reasoning effort
 - 🟡 **内置工具（41）** — 文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait 等齐全，bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）；暂无图片类工具
-- ✅ **多 Agent 编排** — `agent` 工具真实派发 `--task-worker` 子进程 teammate：`SendMessage` 重启式多轮续聊、独立 git worktree 隔离、只读自动放行、写操作经 pending/resolved 文件流转 leader 裁决、`TaskWait` 阻塞取结果、TUI SwarmPanel；内置 7 agent + 用户/插件自定义 agent（`~/.openharness/agents/*.md`）。Coordinator 硬调度器已支持 `Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel 和 `ohs workflow` 管理命令
+- ✅ **多 Agent 编排** — `agent` 工具真实派发 `--task-worker` 子进程 teammate：`SendMessage` 重启式多轮续聊、独立 git worktree 隔离、只读自动放行、写操作经 pending/resolved 文件流转 leader 裁决、`TaskWait` 阻塞取结果、TUI SwarmPanel；内置 7 agent + 用户/插件自定义 agent（`~/.openharness/agents/*.md`）。Coordinator 硬调度器已支持 `Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、TUI follow-up 执行和 `ohs workflow` 管理命令
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
@@ -221,7 +221,7 @@ ohs config set <top-level-key> <value>
 ```
 
 Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-model.md](docs/auth-provider-model.md)。
-Workflow CLI 的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
+Workflow CLI 和 TUI `/workflow` 面板的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
 `ohs provider use <name>` 默认只切换供应商；要同时切模型请加 `-m/--model`，例如 `ohs provider use deepseek -m deepseek-chat`。
 
 交互式 REPL/TUI 内还有 `/help`、`/model`、`/provider`、`/memory`、`/tasks`、`/diff`、`/output-style` 等斜杠命令；完整清单见 [docs/slash-commands.md](docs/slash-commands.md)，运行时以 `/help` 为准。

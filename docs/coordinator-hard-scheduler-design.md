@@ -535,9 +535,10 @@ V1 内存调度核心
 - V13.2：已完成基础版。TUI 新增 Workflow Runs 管理面板，接入同一份 workflow JSON 状态，支持 run 列表、详情、timeline task/event/status filter、reconcile action 选择和 running workflow 取消。
 - V13.3：已完成基础版。持久化 `Workflow action: "run"` 默认 detached 提交，快速返回 running snapshot 和 runId，后台继续调度 worker；不再给 worker wait 隐式套 300s 默认超时，只有显式 `timeoutSeconds` / task timeout 才会判超时。
 - V13.4：已完成基础版。修复 subprocess task-worker 一轮完成后 stdin pipe 未释放导致 child process 不退出、TaskManager task 长时间停留在 running、Workflow awaitTask 卡住的问题；worker 结束时会释放 stdin 并关闭 runtime cleanup。
+- V14.1：已完成基础版。TUI `/workflow` 面板支持 reconciliation follow-up 一键提交执行：数字键选择 action，`f` 将选中 action 转成 follow-up workflow spec，并以 detached 方式提交新的持久化 run，面板自动切到新 run。
 
 下一步建议：
 
-- 产品化 backlog：Web workflow 管理面、TUI reconcile follow-up spec 一键提交执行、timeline 更细粒度搜索，以及长期历史清理/分页。
+- 产品化 backlog：Web workflow 管理面、follow-up run 与 origin run 的结构化关联展示、timeline 更细粒度搜索，以及长期历史清理/分页。
 - 运维化 backlog：补 metrics/export、长期历史清理、run artifact 打包，以及跨进程/多实例 claim lock。
 - 智能化 backlog：让 planner 基于目标自动选择模板、填参数、validate 后再提交 workflow。

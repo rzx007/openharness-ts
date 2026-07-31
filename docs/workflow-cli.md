@@ -114,4 +114,12 @@ ohs workflow template research-implement-verify --params ./workflow-template-par
 - `reconcile` 把冲突/重叠写入转换成下一轮可执行 spec；
 - `cancel` 是后续 UI 取消按钮可以调用的同一条控制路径。
 
-后续接到 TUI 时，优先做 run 列表、详情抽屉、timeline filter、reconciliation action 选择和 cancel 按钮；命令本身会继续保持 JSON-first。
+TUI 的 `/workflow` 面板已经接上这条底层路径：
+
+- `r` 刷新 run 列表；
+- `enter` 选中 run；
+- `t/e/s` 轮换 task / event type / status filter，`x` 清空筛选；
+- `c` 取消 running run；
+- `1`-`9` 选择 reconciliation action，`f` 把选中的 action 提交为 follow-up workflow。
+
+通俗地说：`ohs workflow reconcile` 负责“把失败后的修复计划生出来”，TUI 的 `f follow-up` 负责“把这个修复计划直接作为新的硬调度 workflow 跑起来”。多 action 时要先按数字选中一个；只有一个 action 时可以直接按 `f`。

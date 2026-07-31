@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { useBackendSession } from "./hooks/useBackendSession";
 import { useEscToCancel } from "./hooks/useEscToCancel";
@@ -26,6 +26,11 @@ function AppInner({ config }: { config: FrontendConfig }) {
   const dialog = useDialog();
   const { setThemeName, theme } = useTheme();
   const { toast } = useToast();
+
+  // 主题切换时同步 renderer 底色（含 OSC 11，避免透出终端背景）
+  useEffect(() => {
+    renderer.setBackgroundColor(theme.colors.background);
+  }, [renderer, theme.colors.background]);
 
   const session = useBackendSession(
     config,
@@ -367,6 +372,12 @@ function AppInner({ config }: { config: FrontendConfig }) {
             onSelectReconcileAction={(runId, actionId) => session.sendRequest({
               type: "workflow_request",
               workflow_action: "reconcile",
+              workflow_run_id: runId,
+              workflow_reconcile_action_id: actionId,
+            })}
+            onRunReconcileAction={(runId, actionId) => session.sendRequest({
+              type: "workflow_request",
+              workflow_action: "run_reconcile",
               workflow_run_id: runId,
               workflow_reconcile_action_id: actionId,
             })}
