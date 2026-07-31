@@ -103,6 +103,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 │                                                          │
 │  ohs --task-worker + Explore 人格(prompt 经 stdin)        │
 │  自己的 QueryEngine 跑一轮 → stdout 写入 task 日志         │
+│  saveSessionSnapshot / idle notify → 释放 stdin/runtime   │
 │  正常结束 exit 0 / 失败非 0                               │
 └──────────────────────────┬───────────────────────────────┘
                            │
@@ -127,6 +128,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 
 - Subagent **不是**框架自动识别用户话术；是 Leader LLM **主动调 `Agent` 工具**。
 - Teammate 走 `--task-worker`：读一行 stdin 跑一轮即退；**SendMessage 多轮可用**——写 stdin 时 TaskManager 懒复活重启进程（重启不保留上下文，与 Python 同）。
+- task-worker 的退出以 child process exit 为准；只写完 stdout 不等于 TaskManager terminal。结束时必须释放 stdin pipe 并关闭 runtime cleanup，否则 Windows 下可能出现日志已完成但 task 仍为 `running`。
 - Teammate argv 自动带 **`--swarm-worker`**（D.4）：只读工具集自动放行，**Explore/Plan 在父进程 `default` 下即可工作**；写/执行类工具经 D.5 权限文件流转 leader 裁决（leader 没放行则拒）。
 
 ---
@@ -170,7 +172,7 @@ REPL / 普通 print 模式下没有 BackendHost，**不会** emit `swarm_status`
   接口拿 `createAgentTask`/`writeToTask`，真实 `TaskManager` 在 `bootstrap()` 注入。
 - **同一个单例**：派发（SubprocessBackend）、取结果（TaskWait）、emit 状态（BackendHost）
   都用 **全局 `getTaskManager()` 单例**，三者对得上。
-- **task-worker 一轮一进程**：读一行 stdin 跑一轮即退；SendMessage 触发懒复活重启（重启不保留上下文）。
+- **task-worker 一轮一进程**：读一行 stdin 跑一轮，完成后释放 stdin pipe、关闭 runtime cleanup 并退出；SendMessage 触发懒复活重启（重启不保留上下文）。
 - **配置继承**：argv 带 `--model (config.model ?? settings.model)`、provider、
   `-s <人格>`、**`--swarm-worker`**；**不把 api-key 放 argv**，teammate 复用 `settings.json` + 继承 env。
 - **权限模式不继承**：`--permission-mode` 取 `config.permissionMode ?? "default"`，不读父进程

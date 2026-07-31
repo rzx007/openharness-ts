@@ -11,6 +11,7 @@ Python 的"长驻 worker"**不是常驻进程**，而是**重启式多轮**：
 - `send_message` = 往任务 stdin 写一行 JSON；任务已结束时由
   BackgroundTaskManager **懒复活重启**进程再写入；
 - **重启通过 session 快照恢复上下文（D.1 已实现）**——Agent 工具预分配 `workerSessionId`，经 `TeammateSpawnConfig.sessionId` → `--session-id` CLI flag 传入；task-worker 启动时用 `loadSessionById` 恢复消息历史，退出前 `saveSessionSnapshot` 持久化；TS TaskManager 仍保留"prior interactive context was not preserved"提示文案（懒复活首次无快照时显示）。
+- **退出边界也是协议的一部分**：一轮 `submitMessage` 完成后，task-worker 会保存 session snapshot、消费 shutdown/idle mailbox、释放 stdin pipe，并关闭 runtime cleanup；TaskManager 依赖 child process 的 exit 事件把 task 从 `running` 推到 `completed/failed`。
 
 TS 底子已齐：`TaskManager.writeToTask` 懒复活（B.3）、`createAgentTask`
 （prompt 经 stdin）、`type:"agent"` 任务标记、TaskWait。
@@ -23,7 +24,7 @@ TS 底子已齐：`TaskManager.writeToTask` 懒复活（B.3）、`createAgentTas
   - bootstrap 同 print（含 D.5 的 swarm worker permissionPrompt 文件流）；
   - `decodeTaskWorkerLine(raw)`：JSON 解析取 `text` 字段，非 JSON 按纯文本
     （对齐 Python `_decode_task_worker_line`）；
-  - stdin readline 读一行 → `submitMessage` 流式 stdout → break → 退出；
+  - stdin readline 读一行 → `submitMessage` 流式 stdout → saveSessionSnapshot / idle notify → 释放 stdin pipe + close runtime cleanup → 退出；
   - 个性化/checkpoint 钩子照 print 模式挂。
 
 ### R2 — backend 改造
@@ -57,6 +58,7 @@ TS 底子已齐：`TaskManager.writeToTask` 懒复活（B.3）、`createAgentTas
 
 - decodeTaskWorkerLine：JSON 行取 text、坏 JSON 当纯文本、空行跳过；
 - buildTeammateCommand：argv 含 --task-worker、不含 prompt；
+- closeTaskWorkerInputForExit：一轮完成后 pause/remove listeners/destroy stdin，避免 Windows 管道保持进程存活；
 - SubprocessBackend：spawn 走 createAgentTask（prompt 透传）、sendMessage
   写 JSON 行（fake runner 断言）、shutdown 清映射；
 - E2E（手动）：两轮往返。
