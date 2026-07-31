@@ -11,7 +11,7 @@ export function Home({ children }: { children?: UiNode }) {
   const promptWidth = Math.min(80, Math.max(40, Math.floor(width * 0.6)));
 
   return (
-    <box flexDirection="column" width="100%" height="100%">
+    <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.colors.background}>
       {/* Top spacer */}
       <box flexGrow={1} />
 

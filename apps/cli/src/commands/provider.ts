@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { detectProvider } from "@openharness/api";
 import type { ProviderSpec } from "@openharness/api";
 import type { Settings } from "@openharness/core";
 
@@ -37,11 +38,23 @@ export interface ApplyProviderConfigInput {
  */
 export function applyProviderConfig(settings: Settings, input: ApplyProviderConfigInput): Settings {
   const next: Settings = { ...settings };
+  const previousProvider = settings.provider;
   if (input.setActive) next.provider = input.name;
   if (input.model !== undefined) next.model = input.model;
   else if (input.setActive && input.name === "codex") next.model = CODEX_DEFAULT_MODEL;
-  if (input.baseUrl !== undefined) next.baseUrl = input.baseUrl;
+  if (input.baseUrl !== undefined) {
+    next.baseUrl = input.baseUrl;
+  } else if (input.setActive && previousProvider !== input.name) {
+    next.baseUrl = resolveScopedBaseUrl(settings.baseUrl, input.name);
+  }
   return next;
+}
+
+function resolveScopedBaseUrl(baseUrl: string | undefined, providerName: string): string | undefined {
+  if (!baseUrl) return baseUrl;
+  const detected = detectProvider("", undefined, baseUrl);
+  if (detected && detected.name !== providerName) return undefined;
+  return baseUrl;
 }
 
 export function createProviderCommand(): Command {

@@ -116,6 +116,24 @@ describe("E.2 批次命令", () => {
     expect(result.output).toContain("Sandbox note: domain policy is not enforced");
   });
 
+  it("/model prefers explicit provider over stale baseUrl detection", async () => {
+    const result = await makeRegistry(makeCtx({
+      getModel: () => "gpt-5.4",
+      getSettings: () => ({
+        model: "gpt-5.4",
+        provider: "codex",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        apiFormat: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" },
+      }) as never,
+    })).execute("/model", { args: {}, raw: "/model" });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("Current model: gpt-5.4 (provider: Codex Subscription)");
+    expect(result.output).not.toContain("Zhipu");
+  });
+
   it("/subagents 列出三源人格并标注来源", async () => {
     const result = await makeRegistry().execute("/subagents", { args: {}, raw: "/subagents" });
     expect(result.success).toBe(true);

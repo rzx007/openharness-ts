@@ -85,6 +85,25 @@ describe("applyProviderConfig", () => {
     expect(next.model).toBe("gpt-5.4");
   });
 
+  it("clears a stale baseUrl from another provider when switching active provider", () => {
+    const settings = makeSettings({
+      provider: "zhipu",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    });
+    const next = applyProviderConfig(settings, { name: "codex", setActive: true });
+    expect(next.provider).toBe("codex");
+    expect(next.baseUrl).toBeUndefined();
+  });
+
+  it("keeps custom baseUrl when re-activating the same provider", () => {
+    const settings = makeSettings({
+      provider: "openai",
+      baseUrl: "https://custom-openai.example/v1",
+    });
+    const next = applyProviderConfig(settings, { name: "openai", setActive: true });
+    expect(next.baseUrl).toBe("https://custom-openai.example/v1");
+  });
+
   it("sets baseUrl when provided", () => {
     const settings = makeSettings();
     const next = applyProviderConfig(settings, { name: "openai", baseUrl: "https://x/v1" });
@@ -104,7 +123,7 @@ describe("applyProviderConfig", () => {
     expect(next.baseUrl).toBe("https://or/v1");
   });
 
-  it("leaves unrelated fields untouched", () => {
+  it("keeps unrelated fields when switching provider without a provider-scoped baseUrl", () => {
     const settings = makeSettings({ model: "keep", baseUrl: "https://keep/v1" });
     const next = applyProviderConfig(settings, { name: "openai", setActive: true });
     expect(next.model).toBe("keep");

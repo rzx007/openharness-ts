@@ -5,6 +5,7 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { App } from "./App";
+import { getTheme } from "./theme/builtinThemes";
 import type { FrontendConfig } from "./types";
 
 const rawConfig = process.env.OPENHARNESS_FRONTEND_CONFIG;
@@ -23,7 +24,12 @@ try {
 }
 
 try {
-  const renderer = await createCliRenderer({ exitOnCtrlC: false });
+  // OpenTUI 默认 backgroundColor 为 transparent，会透出终端配色；启动时铺上主题底色。
+  const initialBg = getTheme(String(config.theme ?? "default")).colors.background;
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: false,
+    backgroundColor: initialBg,
+  });
   createRoot(renderer).render(<App config={config} />);
 } catch (err) {
   console.error("[openharness] 终端渲染器初始化失败（需要 Bun + 支持的平台）：", err);

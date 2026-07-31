@@ -19,7 +19,7 @@ import {
 import { PROVIDERS, detectProvider, findByName } from "@openharness/api";
 import type { CredentialStorage } from "@openharness/auth";
 import { loadOutputStyles, isKnownOutputStyle, type OutputStyleDefinition } from "@openharness/output-styles";
-import { switchApiClientForBundle, resolveApiKey } from "../runtime";
+import { switchApiClientForBundle, resolveApiKey, resolveProviderScopedBaseUrl } from "../runtime";
 
 export interface SlashCommandContext {
   getEngine: () => QueryEngine;
@@ -233,9 +233,11 @@ export function registerBuiltinCommandsOnRegistry(
       if (newModel) {
         const settings = getSettings();
         const apiKey = await resolveApiKey(settings, undefined, ctx.credentialStorage);
-        const baseURL = settings.baseUrl;
+        const baseURL = resolveProviderScopedBaseUrl(settings.baseUrl, settings.provider);
         const newSpec = detectProvider(newModel, apiKey, baseURL);
-        const currentSpec = detectProvider(getModel(), apiKey, baseURL);
+        const currentSpec = settings.provider
+          ? findByName(settings.provider) ?? detectProvider(getModel(), apiKey, baseURL)
+          : detectProvider(getModel(), apiKey, baseURL);
         const providerChanged = newSpec && currentSpec && newSpec.name !== currentSpec.name;
 
         if (providerChanged && newSpec) {
@@ -251,7 +253,10 @@ export function registerBuiltinCommandsOnRegistry(
       }
       const settings = getSettings();
       const apiKey = await resolveApiKey(settings, undefined, ctx.credentialStorage);
-      const spec = detectProvider(getModel(), apiKey, settings.baseUrl);
+      const baseURL = resolveProviderScopedBaseUrl(settings.baseUrl, settings.provider);
+      const spec = settings.provider
+        ? findByName(settings.provider) ?? detectProvider(getModel(), apiKey, baseURL)
+        : detectProvider(getModel(), apiKey, baseURL);
       const providerInfo = spec ? ` (provider: ${spec.displayName})` : "";
       return { success: true, output: `Current model: ${getModel()}${providerInfo}` };
     },
@@ -270,7 +275,8 @@ export function registerBuiltinCommandsOnRegistry(
 
       if (!providerName) {
         const apiKey = await resolveApiKey(settings, undefined, storage);
-        const currentSpec = detectProvider(getModel(), apiKey, settings.baseUrl);
+        const baseURL = resolveProviderScopedBaseUrl(settings.baseUrl, settings.provider);
+        const currentSpec = detectProvider(getModel(), apiKey, baseURL);
         const lines = ["Available providers:", ""];
         const currentName = settings.provider ?? currentSpec?.name ?? "auto";
         for (const spec of PROVIDERS) {
@@ -302,6 +308,7 @@ export function registerBuiltinCommandsOnRegistry(
       const spec = findByName(providerName);
       await updateSettings({
         provider: providerName,
+        baseUrl: resolveProviderScopedBaseUrl(settings.baseUrl, providerName),
         ...(nextModel ? { model: nextModel } : {}),
       });
       return {

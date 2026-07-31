@@ -344,8 +344,11 @@ export async function resolveApiClient(
 ): Promise<StreamingMessageClient> {
   const resolvedStorage = storage ?? new CredentialStorage();
   const apiKey = await resolveApiKey(settings, overrides, resolvedStorage);
-  const baseURL = overrides?.baseUrl ?? settings.baseUrl;
   const providerName = overrides?.provider ?? settings.provider;
+  const rawBaseURL = overrides?.baseUrl ?? settings.baseUrl;
+  const baseURL = providerName
+    ? resolveProviderScopedBaseUrl(rawBaseURL, providerName)
+    : rawBaseURL;
   const runtimeModel = resolveRuntimeModel(settings, overrides ?? {});
 
   // 按优先级顺序解析提供商规范：首先尝试通过名称查找，其次基于模型和凭据检测，最后尝试从环境变量检测
@@ -416,7 +419,7 @@ export async function switchApiClientForBundle(
   const spec = findByName(providerName);
   if (!spec) return `Unknown provider: ${providerName}`;
 
-  const baseURL = settings.baseUrl ?? spec.defaultBaseURL;
+  const baseURL = resolveProviderScopedBaseUrl(settings.baseUrl, providerName) ?? spec.defaultBaseURL;
   const backendType: BackendType = spec.backendType;
 
   let newClient: StreamingMessageClient;
@@ -448,6 +451,7 @@ export async function switchApiClientForBundle(
   // 更新 Bundle 的客户端实例、提供商设置以及可选的模型配置
   bundle.switchApiClient(newClient);
   bundle.settings.provider = providerName;
+  bundle.settings.baseUrl = resolveProviderScopedBaseUrl(bundle.settings.baseUrl, providerName);
   if (model) {
     bundle.settings.model = model;
     bundle.queryEngine.setModel(model);
@@ -512,6 +516,16 @@ export async function resolveApiKey(
   if (envFallback) return envFallback;
 
   return "";
+}
+
+export function resolveProviderScopedBaseUrl(
+  baseURL: string | undefined,
+  providerName: string | undefined,
+): string | undefined {
+  if (!baseURL || !providerName) return baseURL;
+  const detected = detectProvider("", undefined, baseURL);
+  if (detected && detected.name !== providerName) return undefined;
+  return baseURL;
 }
 
 function resolveBackendFromFormat(format: string): BackendType {

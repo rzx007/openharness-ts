@@ -70,7 +70,7 @@ export function AppView({
 
   if (!ready) {
     return (
-      <box flexDirection="column" width="100%" height="100%">
+      <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.colors.background}>
         <text fg={theme.colors.warning}>Connecting to backend...</text>
       </box>
     );
@@ -102,7 +102,7 @@ export function AppView({
 
   if (isHome) {
     return (
-      <box flexDirection="column" width="100%" height="100%">
+      <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.colors.background}>
         <Home>{prompt}</Home>
         <Footer status={status} mcpServers={mcpServers} version={version} />
       </box>
@@ -110,9 +110,9 @@ export function AppView({
   }
 
   return (
-    <box flexDirection="row" width="100%" height="100%">
+    <box flexDirection="row" width="100%" height="100%" backgroundColor={theme.colors.background}>
       {/* Left column: messages + panels + prompt + footer */}
-      <box flexDirection="column" flexGrow={1}>
+      <box flexDirection="column" flexGrow={1} backgroundColor={theme.colors.background}>
         <Session items={transcript} assistantBuffer={assistantBuffer} />
         {!sidebarOpen && todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
         {!sidebarOpen && (swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (

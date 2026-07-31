@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel, formatSandboxUnavailableError } from "./runtime";
+import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel, formatSandboxUnavailableError, resolveProviderScopedBaseUrl } from "./runtime";
 import { READ_ONLY_TOOLS } from "@openharness/permissions";
 import { CredentialStorage } from "@openharness/auth";
 import type { Settings } from "@openharness/core";
@@ -82,6 +82,20 @@ describe("formatSandboxUnavailableError", () => {
     expect(message).toContain("ohs sandbox off");
     expect(message).not.toContain("SandboxUnavailableError");
     expect(message).not.toContain(" at ");
+  });
+});
+
+describe("resolveProviderScopedBaseUrl", () => {
+  it("drops a baseUrl that belongs to a different known provider", () => {
+    expect(
+      resolveProviderScopedBaseUrl("https://open.bigmodel.cn/api/paas/v4", "codex"),
+    ).toBeUndefined();
+  });
+
+  it("keeps custom baseUrl when it does not identify another provider", () => {
+    expect(
+      resolveProviderScopedBaseUrl("https://custom.example/v1", "openai"),
+    ).toBe("https://custom.example/v1");
   });
 });
 
