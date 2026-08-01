@@ -16,7 +16,7 @@ $OPENHARNESS_CONFIG_DIR/credentials.json
 When `OPENHARNESS_CONFIG_DIR` is not set, the default path is:
 
 ```text
-~/.openharness/credentials.json
+~/.openharness-ts/credentials.json
 ```
 
 Example shape:

@@ -284,7 +284,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         return workflowReconcile(input, context.cwd);
       }
       if (action === "cancel") {
-        return workflowCancel(input, context.cwd, options.stopTask);
+        return workflowCancel(input, context.cwd, context.sessionId, options.stopTask, (event) => emitWorkflowRuntimeEvent(context, event));
       }
 
       const specOrError = parseWorkflowSpec(input);
@@ -299,6 +299,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         }
         const runner = createRunner({
           cwd: context.cwd,
+          sessionId: context.sessionId,
           team: asOptionalString(input.team),
           timeoutMs: runnerTimeoutMs,
           permissionMode: parsePermissionMode(input.permissionMode),
@@ -308,7 +309,12 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         const waitForCompletion = input.waitForCompletion === true || !persist || options.run !== undefined;
         if (action === "run" && persist && options.run === undefined && !waitForCompletion) {
           const store = new WorkflowRunStore({ cwd: context.cwd });
-          void runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, { cwd: context.cwd, runId, store })
+          void runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
+            cwd: context.cwd,
+            runId,
+            store,
+            onEvent: (event) => emitWorkflowRuntimeEvent(context, event),
+          })
             .catch((error) => {
               // The scheduler normally records task-level failures in snapshots. This
               // catch only prevents detached background runs from surfacing as
@@ -322,9 +328,13 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           return { content: [{ type: "text", text: formatWorkflowSnapshot(snapshot, store.loadEvents(snapshot.runId)) }] };
         }
         const result = action === "resume"
-          ? await workflowResume(input, context.cwd, runner as WorkflowRunner)
+          ? await workflowResume(input, context.cwd, runner as WorkflowRunner, (event) => emitWorkflowRuntimeEvent(context, event))
           : persist && options.run === undefined
-            ? await runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, { cwd: context.cwd, runId })
+            ? await runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
+                cwd: context.cwd,
+                runId,
+                onEvent: (event) => emitWorkflowRuntimeEvent(context, event),
+              })
             : runId
               ? await run(specOrError as WorkflowSpec, runner as WorkflowRunner, { runId })
               : await run(specOrError as WorkflowSpec, runner as WorkflowRunner);
@@ -427,7 +437,9 @@ function workflowReconcile(input: Record<string, unknown>, cwd: string) {
 async function workflowCancel(
   input: Record<string, unknown>,
   cwd: string,
+  sessionId: string | undefined,
   stopTask: ((taskId: string) => Promise<unknown>) | undefined,
+  onEvent?: (event: WorkflowRunEvent) => void,
 ) {
   const store = new WorkflowRunStore({ cwd });
   const snapshot = loadWorkflowSnapshot(store, input);
@@ -437,7 +449,8 @@ async function workflowCancel(
   const result = await cancelPersistentWorkflow(snapshot, {
     store,
     reason: asOptionalString(input.cancelReason),
-    stopTask: stopTask ?? defaultStopTask,
+    stopTask: stopTask ?? ((taskId) => stopTaskInCwd(cwd, sessionId, taskId)),
+    onEvent,
   });
   return {
     content: [{ type: "text" as const, text: formatWorkflowNotification(result) }],
@@ -448,13 +461,31 @@ async function workflowResume(
   input: Record<string, unknown>,
   cwd: string,
   runner: WorkflowRunner,
+  onEvent?: (event: WorkflowRunEvent) => void,
 ) {
   const store = new WorkflowRunStore({ cwd });
   const snapshot = loadWorkflowSnapshot(store, input);
   if (typeof snapshot === "string") {
     throw new Error(snapshot);
   }
-  return resumePersistentWorkflow(snapshot, runner, { store });
+  return resumePersistentWorkflow(snapshot, runner, { store, onEvent });
+}
+
+function emitWorkflowRuntimeEvent(
+  context: { runtimeEventSink?: (event: { type: string; payload?: Record<string, unknown> }) => void | Promise<void> },
+  event: WorkflowRunEvent,
+): void {
+  try {
+    const emitted = context.runtimeEventSink?.({
+      type: `workflow.${event.type}`,
+      payload: { event },
+    });
+    if (emitted && typeof (emitted as Promise<void>).then === "function") {
+      (emitted as Promise<void>).catch(() => {});
+    }
+  } catch {
+    // Runtime telemetry should never change workflow execution behavior.
+  }
 }
 
 function loadWorkflowSnapshot(
@@ -952,7 +983,7 @@ function escapeXml(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-async function defaultStopTask(taskId: string): Promise<unknown> {
+async function stopTaskInCwd(cwd: string, sessionId: string | undefined, taskId: string): Promise<unknown> {
   const { getTaskManager } = await import("@openharness/services");
-  return getTaskManager().stopTask(taskId);
+  return getTaskManager({ cwd, sessionId }).stopTask(taskId);
 }

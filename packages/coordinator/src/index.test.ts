@@ -14,7 +14,7 @@ import {
   COORDINATOR_SYSTEM_PROMPT,
 } from "./index.js";
 
-// getAllAgentDefinitions 现在会读 ~/.openharness/agents：把配置目录指到临时
+// getAllAgentDefinitions 现在会读 ~/.openharness-ts/agents：把配置目录指到临时
 // 目录，避免开发机上的真实用户 agent 影响断言（环境隔离）。
 let cfgDir: string;
 beforeAll(() => {

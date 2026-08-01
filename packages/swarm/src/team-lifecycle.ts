@@ -16,7 +16,7 @@ import { getTeamDir } from "./mailbox.js";
 /**
  * 团队磁盘持久化（移植自 Python swarm/team_lifecycle.py）。
  *
- * 团队元数据存为 `~/.openharness/teams/<name>/team.json`，与邮箱共用同一团队
+ * 团队元数据存为 `~/.openharness-ts/teams/<name>/team.json`，与邮箱共用同一团队
  * 目录——这里建好的目录 TeammateMailbox 直接可用。TS 内部属性 camelCase，
  * 落盘 snake_case（与 Python 互通），读取时 camelCase 容错。
  *
@@ -257,7 +257,7 @@ export class TeamLifecycleManager {
   }
 
   listTeams(): TeamFile[] {
-    const base = join(homedir(), ".openharness", "teams");
+    const base = join(homedir(), ".openharness-ts", "teams");
     if (!existsSync(base)) return [];
     const teams: TeamFile[] = [];
     for (const entry of readdirSync(base).sort()) {
@@ -483,6 +483,7 @@ function destroyWorktreeSync(worktreePath: string): void {
         cwd: mainRepoPath,
         encoding: "utf-8",
         timeout: 30_000,
+        windowsHide: true,
       });
       if (result.status === 0) return;
       if ((result.stderr ?? "").includes("not a working tree")) return;
@@ -494,9 +495,9 @@ function destroyWorktreeSync(worktreePath: string): void {
   rmSync(worktreePath, { recursive: true, force: true });
 }
 
-/** 纵深防御：递归删除前确认目标确实在 `~/.openharness/teams/` 之下。 */
+/** 纵深防御：递归删除前确认目标确实在 `~/.openharness-ts/teams/` 之下。 */
 function assertInsideTeamsBase(dir: string): void {
-  const base = resolve(homedir(), ".openharness", "teams");
+  const base = resolve(homedir(), ".openharness-ts", "teams");
   const target = resolve(dir);
   if (target === base || !target.startsWith(base + sep)) {
     throw new Error(`Refusing to delete outside teams dir: ${target}`);

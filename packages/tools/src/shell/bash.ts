@@ -133,7 +133,7 @@ function killTree(pid: number | undefined): void {
   if (pid === undefined) return;
   if (process.platform === "win32") {
     // taskkill /T terminates the process and its descendants.
-    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], () => {});
+    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
     return;
   }
   try {

@@ -157,4 +157,23 @@ describe("getBackendRegistry", () => {
     const b = getBackendRegistry();
     expect(a).toBe(b);
   });
+
+  it("scopes registries by location", () => {
+    const a = getBackendRegistry("/repo/a");
+    const sameA = getBackendRegistry("/repo/a/");
+    const b = getBackendRegistry("/repo/b");
+    expect(a).toBe(sameA);
+    expect(a).not.toBe(b);
+  });
+
+  it("scopes registries by session within the same location", () => {
+    const cwdOnly = getBackendRegistry("/repo/sessioned");
+    const sessionA = getBackendRegistry({ cwd: "/repo/sessioned", sessionId: "s-a" });
+    const sameSessionA = getBackendRegistry({ cwd: "/repo/sessioned/", sessionId: "s-a" });
+    const sessionB = getBackendRegistry({ cwd: "/repo/sessioned", sessionId: "s-b" });
+
+    expect(sessionA).toBe(sameSessionA);
+    expect(sessionA).not.toBe(sessionB);
+    expect(sessionA).not.toBe(cwdOnly);
+  });
 });

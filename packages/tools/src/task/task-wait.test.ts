@@ -1,9 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getTaskManager, resetTaskManager } from "@openharness/services";
 import { taskWaitTool } from "./index.js";
 
 const NODE = process.execPath;
-const CWD = process.cwd();
+const CWD = mkdtempSync(join(tmpdir(), "oh-task-wait-"));
 
 function textOf(result: { content: { type: string; text?: string }[] }): string {
   return result.content.map((c) => c.text ?? "").join("");
@@ -11,7 +14,7 @@ function textOf(result: { content: { type: string; text?: string }[] }): string 
 
 async function waitForStatus(taskId: string, status: string, timeoutMs = 8000): Promise<void> {
   const start = Date.now();
-  const mgr = getTaskManager();
+  const mgr = getTaskManager(CWD);
   while (mgr.getTask(taskId)?.status !== status) {
     if (Date.now() - start > timeoutMs) throw new Error(`task ${taskId} never reached ${status}`);
     await new Promise((r) => setTimeout(r, 25));
@@ -19,12 +22,12 @@ async function waitForStatus(taskId: string, status: string, timeoutMs = 8000): 
 }
 
 afterEach(() => {
-  resetTaskManager();
+  resetTaskManager(CWD);
 });
 
 describe("taskWaitTool", () => {
   it("waits for a single task and returns its output and status", async () => {
-    const mgr = getTaskManager();
+    const mgr = getTaskManager(CWD);
     const task = await mgr.createShellTask(
       `${NODE} -e "process.stdout.write('done-single')"`,
       "quick task",
@@ -40,7 +43,7 @@ describe("taskWaitTool", () => {
   });
 
   it("accepts a single taskId passed as a bare string", async () => {
-    const mgr = getTaskManager();
+    const mgr = getTaskManager(CWD);
     const task = await mgr.createShellTask(
       `${NODE} -e "process.stdout.write('bare-string')"`,
       "quick task",
@@ -54,7 +57,7 @@ describe("taskWaitTool", () => {
   });
 
   it("waits for multiple tasks and reports each in its own segment", async () => {
-    const mgr = getTaskManager();
+    const mgr = getTaskManager(CWD);
     const a = await mgr.createShellTask(`${NODE} -e "process.stdout.write('out-A')"`, "A", CWD);
     const b = await mgr.createShellTask(`${NODE} -e "process.stdout.write('out-B')"`, "B", CWD);
 
@@ -67,7 +70,7 @@ describe("taskWaitTool", () => {
   });
 
   it("reports a non-zero-exit task as failed with its output", async () => {
-    const mgr = getTaskManager();
+    const mgr = getTaskManager(CWD);
     const task = await mgr.createShellTask(
       `${NODE} -e "process.stderr.write('boom'); process.exit(3)"`,
       "failing task",
@@ -82,7 +85,7 @@ describe("taskWaitTool", () => {
   });
 
   it("marks a task that does not finish in time as timed out", async () => {
-    const mgr = getTaskManager();
+    const mgr = getTaskManager(CWD);
     // Long-running task; we time out almost immediately.
     const task = await mgr.createShellTask(
       `${NODE} -e "setTimeout(() => {}, 60000)"`,
@@ -100,7 +103,7 @@ describe("taskWaitTool", () => {
   });
 
   it("isolates an unknown taskId without dragging down the others", async () => {
-    const mgr = getTaskManager();
+    const mgr = getTaskManager(CWD);
     const good = await mgr.createShellTask(
       `${NODE} -e "process.stdout.write('good-output')"`,
       "good task",
@@ -127,7 +130,7 @@ describe("taskWaitTool", () => {
   });
 
   it("returns immediately for an already-finished task", async () => {
-    const mgr = getTaskManager();
+    const mgr = getTaskManager(CWD);
     const task = await mgr.createShellTask(
       `${NODE} -e "process.stdout.write('already-done')"`,
       "quick task",

@@ -78,7 +78,7 @@ export class BridgeManager {
   private readonly metaSessions = new Map<string, BridgeSession>();
 
   constructor(baseDir?: string) {
-    const root = baseDir ?? join(homedir(), ".openharness");
+    const root = baseDir ?? join(homedir(), ".openharness-ts");
     this.metaDir = join(root, "bridge", "sessions");
     this.logDir = join(root, "bridge", "logs");
   }
@@ -104,6 +104,7 @@ export class BridgeManager {
       cwd: options.cwd,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     const pumpDone = this._pumpOutput(proc, outputPath);

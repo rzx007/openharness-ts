@@ -275,6 +275,7 @@ export class HookExecutor implements IHookExecutor {
         shell: true,
         signal,
         env,
+        windowsHide: true,
       });
 
       let stdout = "";

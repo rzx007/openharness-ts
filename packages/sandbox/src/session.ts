@@ -1,33 +1,57 @@
+import { resolve } from "node:path";
 import type { SandboxSession } from "./types.js";
 
-let activeSession: SandboxSession | null = null;
+const activeSessions = new Map<string, SandboxSession>();
+let lastActiveKey: string | null = null;
 
-export function getActiveSandboxSession(): SandboxSession | null {
-  return activeSession;
+function keyForCwd(cwd: string): string {
+  const resolved = resolve(cwd);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-export function setActiveSandboxSession(session: SandboxSession | null): void {
-  activeSession = session;
+export function getActiveSandboxSession(cwd?: string): SandboxSession | null {
+  if (cwd) return activeSessions.get(keyForCwd(cwd)) ?? null;
+  return lastActiveKey ? activeSessions.get(lastActiveKey) ?? null : null;
 }
 
-export function isSandboxSessionActive(): boolean {
-  return activeSession?.active === true;
+export function setActiveSandboxSession(session: SandboxSession | null, cwd?: string): void {
+  if (session === null) {
+    if (cwd) {
+      const key = keyForCwd(cwd);
+      activeSessions.delete(key);
+      if (lastActiveKey === key) lastActiveKey = activeSessions.keys().next().value ?? null;
+      return;
+    }
+    activeSessions.clear();
+    lastActiveKey = null;
+    return;
+  }
+
+  const key = keyForCwd(cwd ?? session.cwd);
+  activeSessions.set(key, session);
+  lastActiveKey = key;
 }
 
-export async function stopActiveSandboxSession(): Promise<void> {
-  if (activeSession === null) return;
+export function isSandboxSessionActive(cwd?: string): boolean {
+  return getActiveSandboxSession(cwd)?.active === true;
+}
+
+export async function stopActiveSandboxSession(cwd?: string): Promise<void> {
+  const session = getActiveSandboxSession(cwd);
+  if (session === null) return;
   try {
-    await activeSession.stop();
+    await session.stop();
   } finally {
-    activeSession = null;
+    setActiveSandboxSession(null, cwd ?? session.cwd);
   }
 }
 
-export function stopActiveSandboxSessionSync(): void {
-  if (activeSession === null) return;
+export function stopActiveSandboxSessionSync(cwd?: string): void {
+  const session = getActiveSandboxSession(cwd);
+  if (session === null) return;
   try {
-    activeSession.stopSync?.();
+    session.stopSync?.();
   } finally {
-    activeSession = null;
+    setActiveSandboxSession(null, cwd ?? session.cwd);
   }
 }

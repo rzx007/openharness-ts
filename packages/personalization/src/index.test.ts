@@ -15,7 +15,7 @@ import {
 } from "./index.js";
 
 // 经 OPENHARNESS_CONFIG_DIR 指向临时目录（仓库既有约定）：完全不碰真实
-// ~/.openharness，崩溃也不会伤用户数据。
+// ~/.openharness-ts，崩溃也不会伤用户数据。
 let cfgDir: string;
 let dir: string;
 

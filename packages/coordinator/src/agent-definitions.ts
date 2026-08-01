@@ -476,7 +476,7 @@ export function getAgentDefinition(name: string, agents?: AgentDefinition[]): Ag
 }
 
 /**
- * 全量 agent 定义：builtin < user(~/.openharness/agents) < plugin，
+ * 全量 agent 定义：builtin < user(~/.openharness-ts/agents) < plugin，
  * 同名后者覆盖（对齐 Python get_all_agent_definitions 的 merge order）。
  *
  * 与 Python 差异：plugin agents 由调用方注入（Python 在函数内 lazy import

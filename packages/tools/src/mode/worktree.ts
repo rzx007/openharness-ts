@@ -25,7 +25,7 @@ export const enterWorktreeTool: ToolDefinition = {
 
     let topLevel: string;
     try {
-      const { stdout } = await execAsync("git rev-parse --show-toplevel", { cwd: context.cwd });
+      const { stdout } = await execAsync("git rev-parse --show-toplevel", { cwd: context.cwd, windowsHide: true });
       topLevel = stdout.trim();
     } catch {
       return { content: [{ type: "text", text: "enter_worktree requires a git repository" }], isError: true };
@@ -41,7 +41,7 @@ export const enterWorktreeTool: ToolDefinition = {
       : `git worktree add "${worktreePath}" "${branch}"`;
 
     try {
-      const { stdout, stderr } = await execAsync(cmd, { cwd: topLevel });
+      const { stdout, stderr } = await execAsync(cmd, { cwd: topLevel, windowsHide: true });
       const output = (stdout || stderr).trim() || `Created worktree ${worktreePath}`;
       return { content: [{ type: "text", text: `${output}\nPath: ${worktreePath}` }] };
     } catch (err: any) {
@@ -69,7 +69,7 @@ export const exitWorktreeTool: ToolDefinition = {
     if (!resolve(path).startsWith("/")) path = resolve(context.cwd, path);
 
     try {
-      const { stdout, stderr } = await execAsync(`git worktree remove --force "${path}"`, { cwd: context.cwd });
+      const { stdout, stderr } = await execAsync(`git worktree remove --force "${path}"`, { cwd: context.cwd, windowsHide: true });
       const output = (stdout || stderr).trim() || `Removed worktree ${path}`;
       return { content: [{ type: "text", text: output }] };
     } catch (err: any) {

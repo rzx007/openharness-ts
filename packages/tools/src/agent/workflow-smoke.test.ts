@@ -24,7 +24,7 @@ afterEach(() => {
   resetTaskManager();
   if (savedConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
   else process.env.OPENHARNESS_CONFIG_DIR = savedConfigDir;
-  if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  if (tempDir) rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   tempDir = undefined;
 });
 
@@ -43,6 +43,7 @@ describe("Workflow tool smoke", () => {
     const result = await tool.execute(
       {
         mode: "pipeline",
+        waitForCompletion: true,
         timeoutSeconds: 5,
         tasks: [
           { id: "research", prompt: "find relevant files" },
@@ -82,7 +83,7 @@ async function spawnNodeWorker(
   spawned: TeammateSpawnConfig[],
 ): Promise<SpawnResult> {
   spawned.push(config);
-  const task = await getTaskManager().createShellTask({
+  const task = await getTaskManager(config.cwd).createShellTask({
     argv: [
       NODE,
       "-e",

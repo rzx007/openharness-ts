@@ -99,7 +99,7 @@ export async function startSandboxRuntime(
       reason: error instanceof Error ? error.message : String(error),
     }));
   }
-  setActiveSandboxSession(session);
+  setActiveSandboxSession(session, options.cwd);
   options.reporter?.({ type: "ready", backend: "docker", containerName: session.containerName });
 
   const status = statusFromAvailability(
@@ -118,14 +118,14 @@ export async function startSandboxRuntime(
       try {
         await session.stop();
       } finally {
-        setActiveSandboxSession(null);
+        setActiveSandboxSession(null, options.cwd);
       }
     },
     stopSync() {
       try {
         session.stopSync();
       } finally {
-        setActiveSandboxSession(null);
+        setActiveSandboxSession(null, options.cwd);
       }
     },
   };

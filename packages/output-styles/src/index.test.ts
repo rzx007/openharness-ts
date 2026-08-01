@@ -35,8 +35,8 @@ describe("isKnownOutputStyle", () => {
 });
 
 describe("getOutputStylesDir", () => {
-  it("points at ~/.openharness/output_styles", () => {
-    expect(getOutputStylesDir()).toBe(join(homedir(), ".openharness", "output_styles"));
+  it("points at ~/.openharness-ts/output_styles", () => {
+    expect(getOutputStylesDir()).toBe(join(homedir(), ".openharness-ts", "output_styles"));
   });
 });
 

@@ -196,6 +196,10 @@ export class DockerSandboxSession {
     return "docker";
   }
 
+  get cwd(): string {
+    return resolve(this.options.cwd);
+  }
+
   async start(): Promise<void> {
     const config = normalizeSandboxConfig(this.options.settings.sandbox);
     const availability = getDockerAvailability(this.options.settings.sandbox, this.options.deps);

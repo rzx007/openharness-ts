@@ -27,6 +27,9 @@ import {
   wrapCommandForSrt,
   SandboxUnavailableError,
   startSandboxRuntime,
+  getActiveSandboxSession,
+  isSandboxSessionActive,
+  setActiveSandboxSession,
   toContainerWorkspacePath,
 } from "./index.js";
 
@@ -287,6 +290,40 @@ describe("sandbox runtime lifecycle", () => {
     });
     expect(runtime.status.reason).toContain("Docker CLI not found");
     expect(events).toEqual(["start", "check-availability", "unavailable"]);
+  });
+});
+
+describe("sandbox active session registry", () => {
+  afterEach(() => {
+    setActiveSandboxSession(null);
+  });
+
+  it("tracks active sessions by cwd", () => {
+    const first = {
+      backend: "docker" as const,
+      cwd: resolve("D:/repo-a"),
+      active: true,
+      start: async () => {},
+      stop: async () => {},
+      stopSync: () => {},
+    };
+    const second = {
+      backend: "docker" as const,
+      cwd: resolve("D:/repo-b"),
+      active: true,
+      start: async () => {},
+      stop: async () => {},
+      stopSync: () => {},
+    };
+
+    setActiveSandboxSession(first);
+    setActiveSandboxSession(second);
+
+    expect(getActiveSandboxSession(first.cwd)).toBe(first);
+    expect(getActiveSandboxSession(second.cwd)).toBe(second);
+    expect(isSandboxSessionActive(first.cwd)).toBe(true);
+    expect(isSandboxSessionActive(second.cwd)).toBe(true);
+    expect(getActiveSandboxSession()).toBe(second);
   });
 });
 

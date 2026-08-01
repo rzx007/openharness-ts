@@ -1,9 +1,8 @@
 import { readFile, access, readdir, mkdir, writeFile, rm } from "node:fs/promises";
 import { join, basename, resolve, dirname } from "node:path";
-import { execFile } from "node:child_process";
 import { platform, machine, homedir, hostname } from "node:os";
 import { randomUUID } from "node:crypto";
-import { getConfigDir } from "@openharness/core";
+import { getConfigDir, resolveGitRepository } from "@openharness/core";
 import { loadLocalRules } from "@openharness/personalization";
 
 export type PromptPermissionMode = "default" | "plan" | "full_auto";
@@ -198,17 +197,8 @@ function detectShell(): string {
 }
 
 async function detectGitInfo(cwd: string): Promise<[boolean, string | null]> {
-  return new Promise((resolve) => {
-    execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd, timeout: 5000 }, (err, stdout) => {
-      const isGit = !err && stdout.trim() === "true";
-      if (!isGit) return resolve([false, null]);
-
-      execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd, timeout: 5000 }, (err2, stdout2) => {
-        const branch = !err2 ? stdout2.trim() : null;
-        resolve([true, branch]);
-      });
-    });
-  });
+  const repository = resolveGitRepository(cwd);
+  return [!!repository, repository?.branch ?? null];
 }
 
 export function formatEnvironmentSection(env: EnvironmentInfo): string {

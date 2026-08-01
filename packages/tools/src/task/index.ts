@@ -16,7 +16,7 @@ export const taskCreateTool: ToolDefinition = {
   },
   async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
-    const mgr = getTaskManager();
+    const mgr = getTaskManager({ cwd: context.cwd, sessionId: context.sessionId });
     const type = (input.type as string) ?? "local_bash";
     const desc = input.description as string;
 
@@ -25,7 +25,7 @@ export const taskCreateTool: ToolDefinition = {
       if (!command) {
         return { content: [{ type: "text", text: "command is required for local_bash tasks" }], isError: true };
       }
-      const task = await mgr.createShellTask(command, desc, context.cwd);
+      const task = await mgr.createShellTask({ command, description: desc, cwd: context.cwd, sessionId: context.sessionId });
       return { content: [{ type: "text", text: `Created task ${task.id} (${task.type})` }] };
     }
 
@@ -34,7 +34,7 @@ export const taskCreateTool: ToolDefinition = {
       if (!prompt) {
         return { content: [{ type: "text", text: "prompt is required for local_agent tasks" }], isError: true };
       }
-      const task = await mgr.createAgentTask(prompt, desc, context.cwd, input.model as string);
+      const task = await mgr.createAgentTask({ prompt, description: desc, cwd: context.cwd, sessionId: context.sessionId, model: input.model as string });
       return { content: [{ type: "text", text: `Created task ${task.id} (${task.type})` }] };
     }
 
@@ -50,9 +50,9 @@ export const taskGetTool: ToolDefinition = {
     properties: { taskId: { type: "string", description: "Task identifier" } },
     required: ["taskId"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
-    const task = getTaskManager().getTask(input.taskId as string);
+    const task = getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).getTask(input.taskId as string);
     if (!task) {
       return { content: [{ type: "text", text: `No task found with ID: ${input.taskId}` }], isError: true };
     }
@@ -68,9 +68,9 @@ export const taskListTool: ToolDefinition = {
     properties: { status: { type: "string", description: "Optional status filter" } },
     required: [],
   },
-  async execute(input) {
+  async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
-    const tasks = getTaskManager().listTasks(input.status as string | undefined);
+    const tasks = getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).listTasks(input.status as string | undefined);
     if (!tasks.length) return { content: [{ type: "text", text: "(no tasks)" }] };
     const text = tasks.map((t) => `${t.id} ${t.type} ${t.status} ${t.description}`).join("\n");
     return { content: [{ type: "text", text }] };
@@ -88,10 +88,10 @@ export const taskOutputTool: ToolDefinition = {
     },
     required: ["taskId"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
     try {
-      const output = getTaskManager().readTaskOutput(input.taskId as string, (input.maxBytes as number) ?? 12000);
+      const output = getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).readTaskOutput(input.taskId as string, (input.maxBytes as number) ?? 12000);
       return { content: [{ type: "text", text: output || "(no output)" }] };
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };
@@ -107,10 +107,10 @@ export const taskStopTool: ToolDefinition = {
     properties: { taskId: { type: "string", description: "Task identifier" } },
     required: ["taskId"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
     try {
-      const task = await getTaskManager().stopTask(input.taskId as string);
+      const task = await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).stopTask(input.taskId as string);
       return { content: [{ type: "text", text: `Stopped task ${task.id}` }] };
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };
@@ -144,9 +144,9 @@ export const taskWaitTool: ToolDefinition = {
     },
     required: ["taskIds"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
-    const mgr = getTaskManager();
+    const mgr = getTaskManager({ cwd: context.cwd, sessionId: context.sessionId });
 
     // Normalize taskIds: accept a single string or an array of strings.
     const raw = input.taskIds;
@@ -214,9 +214,9 @@ export const taskUpdateTool: ToolDefinition = {
     },
     required: ["taskId"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
-    const mgr = getTaskManager();
+    const mgr = getTaskManager({ cwd: context.cwd, sessionId: context.sessionId });
     const task = mgr.getTask(input.taskId as string);
     if (!task) {
       return {

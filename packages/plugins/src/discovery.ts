@@ -21,7 +21,7 @@ import type { HookDefinition } from "@openharness/core";
  * `.claude-plugin/plugin.json`（根级优先）。
  *
  * 双源 + 信任门控：
- * - 用户插件 `~/.openharness/plugins/`：默认加载；
+ * - 用户插件 `~/.openharness-ts/plugins/`：默认加载；
  * - 项目插件 `<cwd>/.openharness/plugins/`：默认**不**加载（clone 恶意仓库
  *   即中招），须 `settings.allowProjectPlugins=true`；存在但被门控时给告警。
  *
@@ -79,7 +79,7 @@ export interface PluginDiscoverySettings {
 
 export function getUserPluginsDir(): string {
   // 与 core/paths 同约定:OPENHARNESS_CONFIG_DIR 可重定向(测试隔离)。
-  const base = process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness");
+  const base = process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness-ts");
   return join(base, "plugins");
 }
 

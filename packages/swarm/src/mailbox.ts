@@ -9,7 +9,7 @@ import { exclusiveFileLock } from "./lockfile.js";
  * 文件式邮箱（移植自 Python swarm/mailbox.py）：leader/worker 跨进程通信的底座。
  *
  * 每条消息一个 JSON 文件：
- *   ~/.openharness/teams/<team>/agents/<agentId>/inbox/<timestamp>_<msgId>.json
+ *   ~/.openharness-ts/teams/<team>/agents/<agentId>/inbox/<timestamp>_<msgId>.json
  *
  * 原子写：先写 `.tmp` 再 rename，读者永远看不到半截消息；写/改/删都在
  * `.write_lock` 排他锁内进行（见 lockfile.ts）。
@@ -65,7 +65,7 @@ function assertSafePathComponent(name: string, what: string): void {
 
 export function getTeamDir(teamName: string, options?: { ensure?: boolean }): string {
   assertSafePathComponent(teamName, "team name");
-  const dir = join(homedir(), ".openharness", "teams", teamName);
+  const dir = join(homedir(), ".openharness-ts", "teams", teamName);
   if (options?.ensure) mkdirSync(dir, { recursive: true });
   return dir;
 }

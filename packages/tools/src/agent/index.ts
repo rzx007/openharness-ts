@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
+import type { SwarmBackend } from "@openharness/swarm";
 
 export const agentTool: ToolDefinition = {
   name: "Agent",
@@ -50,14 +51,13 @@ export const agentTool: ToolDefinition = {
     const agentName = subagentType ?? "agent";
     const team = (input.team as string) ?? "default";
 
-    const registry = getBackendRegistry();
-    let executor;
-    try { executor = registry.getExecutor("in_process"); } catch {
-      try { executor = registry.getExecutor("subprocess"); } catch {
-        try { executor = registry.getExecutor(); } catch {
-          return { content: [{ type: "text", text: "No swarm backend registered" }], isError: true };
-        }
-      }
+    const executor = pickSwarmExecutor(
+      context.sessionId
+        ? [getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId }), getBackendRegistry()]
+        : [getBackendRegistry(context.cwd), getBackendRegistry()],
+    );
+    if (!executor) {
+      return { content: [{ type: "text", text: "No swarm backend registered" }], isError: true };
     }
 
     try {
@@ -112,33 +112,47 @@ export const sendMessageTool: ToolDefinition = {
     },
     required: ["taskId", "message"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const { getTaskManager } = await import("@openharness/services");
     const { getBackendRegistry } = await import("@openharness/swarm");
     const taskId = input.taskId as string;
     const message = input.message as string;
 
     if (taskId.includes("@")) {
-      const registry = getBackendRegistry();
-      try {
-        const executor = registry.getExecutor("in_process");
-        await executor.sendMessage(taskId, { text: message, fromAgent: "coordinator" });
-      } catch {
-        try {
-          const executor = registry.getExecutor("subprocess");
-          await executor.sendMessage(taskId, { text: message, fromAgent: "coordinator" });
-        } catch (err) {
-          return { content: [{ type: "text", text: (err as Error).message }], isError: true };
-        }
+      const executor = pickSwarmExecutor(
+        context.sessionId
+          ? [getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId }), getBackendRegistry()]
+          : [getBackendRegistry(context.cwd), getBackendRegistry()],
+      );
+      if (!executor) {
+        return { content: [{ type: "text", text: "No swarm backend registered" }], isError: true };
       }
+      await executor.sendMessage(taskId, { text: message, fromAgent: "coordinator" });
       return { content: [{ type: "text", text: `Sent message to agent ${taskId}` }] };
     }
 
     try {
-      await getTaskManager().writeToTask(taskId, message);
+      await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).writeToTask(taskId, message);
       return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };
     }
   },
 };
+
+type BackendRegistryLike = {
+  getExecutor(name?: string): SwarmBackend;
+};
+
+function pickSwarmExecutor(registries: BackendRegistryLike[]): SwarmBackend | undefined {
+  for (const registry of registries) {
+    for (const name of ["in_process", "subprocess", undefined] as const) {
+      try {
+        return registry.getExecutor(name);
+      } catch {
+        continue;
+      }
+    }
+  }
+  return undefined;
+}

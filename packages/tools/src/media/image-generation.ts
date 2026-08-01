@@ -11,7 +11,7 @@ async function getCachedSettings(): Promise<Settings> {
   return _settingsCache;
 }
 
-const IMAGES_DIR = join(homedir(), ".openharness", "images");
+const IMAGES_DIR = join(homedir(), ".openharness-ts", "images");
 
 export const imageGenerationTool: ToolDefinition = {
   name: "ImageGeneration",

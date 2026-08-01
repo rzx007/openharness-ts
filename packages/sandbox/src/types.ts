@@ -90,6 +90,7 @@ export interface ShellSpawnOptions {
 
 export interface SandboxSession {
   readonly backend: SandboxBackend;
+  readonly cwd: string;
   readonly active: boolean;
   start(): Promise<void>;
   stop(): Promise<void>;

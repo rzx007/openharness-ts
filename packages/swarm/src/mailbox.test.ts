@@ -17,7 +17,7 @@ import {
   writeToMailbox,
 } from "./mailbox.js";
 
-// 测试写入真实 ~/.openharness/teams 下的唯一团队名，用后整目录清理
+// 测试写入真实 ~/.openharness-ts/teams 下的唯一团队名，用后整目录清理
 // （与 output-styles 用户样式测试同一套约定）。
 let team: string;
 
@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(join(homedir(), ".openharness", "teams", team), { recursive: true, force: true });
+  rmSync(join(homedir(), ".openharness-ts", "teams", team), { recursive: true, force: true });
   delete process.env.CLAUDE_CODE_TEAM_NAME;
 });
 
@@ -52,9 +52,9 @@ describe("directory helpers", () => {
     expect(() => getAgentMailboxDir(team, "../../sneaky")).toThrow(/Unsafe/);
   });
 
-  it("getTeamDir points at ~/.openharness/teams/<team> without creating it by default", () => {
+  it("getTeamDir points at ~/.openharness-ts/teams/<team> without creating it by default", () => {
     const dir = getTeamDir(team);
-    expect(dir).toBe(join(homedir(), ".openharness", "teams", team));
+    expect(dir).toBe(join(homedir(), ".openharness-ts", "teams", team));
     expect(existsSync(dir)).toBe(false);
   });
 
@@ -124,7 +124,7 @@ describe("TeammateMailbox.readAll", () => {
   it("returns [] for a never-written mailbox without leaving an empty dir behind", async () => {
     const mailbox = new TeammateMailbox(team, "ghost");
     expect(await mailbox.readAll()).toEqual([]);
-    expect(existsSync(join(homedir(), ".openharness", "teams", team))).toBe(false);
+    expect(existsSync(join(homedir(), ".openharness-ts", "teams", team))).toBe(false);
   });
 
   it("skips dotfiles, .tmp files, and corrupted JSON instead of crashing", async () => {
@@ -163,7 +163,7 @@ describe("TeammateMailbox.markRead / clear", () => {
     const mailbox = new TeammateMailbox(team, "ghost");
     await mailbox.markRead("nope");
     await mailbox.clear();
-    expect(existsSync(join(homedir(), ".openharness", "teams", team))).toBe(false);
+    expect(existsSync(join(homedir(), ".openharness-ts", "teams", team))).toBe(false);
   });
 });
 

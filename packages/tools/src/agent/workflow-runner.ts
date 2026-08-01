@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile);
 
 export interface AgentWorkflowRunnerOptions {
   cwd: string;
+  sessionId?: string;
   team?: string;
   mode?: "local_agent" | "remote_agent" | "in_process_teammate";
   timeoutMs?: number;
@@ -44,8 +45,8 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       : await defaultGetAgentDefinition(subagentType);
     const team = task.team ?? options.team ?? "default";
     const workerSessionId = createWorkerSessionId(task.id, attempt);
-    const spawnWorker = options.spawnWorker ?? defaultSpawnWorker;
-    const awaitTask = options.awaitTask ?? defaultAwaitTask;
+    const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, options.sessionId, config));
+    const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions));
 
     const resumedTaskId = getStringMetadata(resumeFrom?.metadata, "taskManagerTaskId");
     if (resumedTaskId) {
@@ -362,26 +363,58 @@ function normalizeDiffSummary(diff: WorkflowDiffSummary): WorkflowDiffSummary {
   };
 }
 
-async function defaultSpawnWorker(config: TeammateSpawnConfig): Promise<SpawnResult> {
+async function defaultSpawnWorker(cwd: string, sessionId: string | undefined, config: TeammateSpawnConfig): Promise<SpawnResult> {
   const { getBackendRegistry } = await import("@openharness/swarm");
-  const registry = getBackendRegistry();
+  const registries = sessionId
+    ? [getBackendRegistry({ cwd, sessionId })]
+    : [getBackendRegistry(cwd)];
   try {
-    return await registry.getExecutor("in_process").spawn(config);
+    return await registries[0]!.getExecutor("in_process").spawn(config);
   } catch {
     try {
-      return await registry.getExecutor("subprocess").spawn(config);
+      return await registries[0]!.getExecutor("subprocess").spawn(config);
     } catch {
-      return await registry.getExecutor().spawn(config);
+      try {
+        return await registries[0]!.getExecutor().spawn(config);
+      } catch {
+        for (const registry of registries.slice(1)) {
+          try {
+            return await registry.getExecutor("in_process").spawn(config);
+          } catch {
+            try {
+              return await registry.getExecutor("subprocess").spawn(config);
+            } catch {
+              try {
+                return await registry.getExecutor().spawn(config);
+              } catch {
+                continue;
+              }
+            }
+          }
+        }
+        const globalRegistry = getBackendRegistry();
+        try {
+          return await globalRegistry.getExecutor("in_process").spawn(config);
+        } catch {
+          try {
+            return await globalRegistry.getExecutor("subprocess").spawn(config);
+          } catch {
+            return await globalRegistry.getExecutor().spawn(config);
+          }
+        }
+      }
     }
   }
 }
 
 async function defaultAwaitTask(
+  cwd: string,
+  sessionId: string | undefined,
   taskId: string,
   options?: { timeoutMs?: number },
 ): Promise<AwaitTaskResult> {
   const { getTaskManager } = await import("@openharness/services");
-  return getTaskManager().awaitTask(taskId, options);
+  return getTaskManager({ cwd, sessionId }).awaitTask(taskId, options);
 }
 
 async function defaultGetAgentDefinition(name: string): Promise<AgentDefinition | undefined> {

@@ -37,7 +37,7 @@ export async function createShellProcess(
   if (sandbox.backend === "docker") {
     // Container image is Linux; never reuse host (e.g. Windows bash.exe) argv.
     const argv = resolveContainerShellArgv(command);
-    const session = getActiveSandboxSession();
+    const session = getActiveSandboxSession(options.cwd);
     if (session?.backend === "docker" && session.active && session.execCommand) {
       return session.execCommand(argv, {
         cwd: options.cwd,

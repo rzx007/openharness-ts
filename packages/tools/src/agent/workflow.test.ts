@@ -175,6 +175,36 @@ describe("workflowTool", () => {
     );
   });
 
+  it("emits persistent workflow events to the runtime event sink", async () => {
+    const cwd = makeTempDir();
+    const emitted: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+    try {
+      const runner: WorkflowRunner = vi.fn(async ({ task }) => ({
+        summary: `${task.id} done`,
+        result: `${task.id} result`,
+      }));
+      const tool = createWorkflowTool({ createRunner: () => runner });
+
+      const result = await tool.execute(
+        {
+          mode: "pipeline",
+          waitForCompletion: true,
+          runId: "sink-run",
+          tasks: [{ id: "research", prompt: "research" }],
+        },
+        { cwd, runtimeEventSink: (event) => emitted.push(event) },
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(emitted.map((event) => event.type)).toContain("workflow.workflow_started");
+      expect(emitted.map((event) => event.type)).toContain("workflow.task_started");
+      expect(emitted.map((event) => event.type)).toContain("workflow.workflow_finished");
+      expect(emitted[0]?.payload?.event).toMatchObject({ runId: "sink-run" });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("submits persisted workflow runs detached by default", async () => {
     const cwd = makeTempDir();
     try {

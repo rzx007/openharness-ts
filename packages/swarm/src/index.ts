@@ -276,8 +276,33 @@ export class BackendRegistry {
 }
 
 let _defaultBackendRegistry: BackendRegistry | undefined;
+const scopedBackendRegistries = new Map<string, BackendRegistry>();
 
-export function getBackendRegistry(): BackendRegistry {
+export interface BackendRegistryScope {
+  cwd: string;
+  sessionId?: string;
+}
+
+function normalizeRegistryScope(scope: string | BackendRegistryScope): string {
+  if (typeof scope !== "string") {
+    const normalizedCwd = normalizeRegistryScope(scope.cwd);
+    const sessionId = scope.sessionId?.trim();
+    return sessionId ? `${normalizedCwd}::session=${sessionId}` : normalizedCwd;
+  }
+  const normalized = scope.replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+export function getBackendRegistry(scope?: string | BackendRegistryScope): BackendRegistry {
+  if (scope) {
+    const key = normalizeRegistryScope(scope);
+    let scoped = scopedBackendRegistries.get(key);
+    if (!scoped) {
+      scoped = new BackendRegistry();
+      scopedBackendRegistries.set(key, scoped);
+    }
+    return scoped;
+  }
   if (!_defaultBackendRegistry) {
     _defaultBackendRegistry = new BackendRegistry();
   }

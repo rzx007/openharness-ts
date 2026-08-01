@@ -11,7 +11,7 @@ export interface GitRunner {
 
 export interface WorktreeManagerOptions {
   runGit: GitRunner;
-  /** worktree 目录的存放根（如 `~/.openharness/worktrees/<repo-id>`）。 */
+  /** worktree 目录的存放根（如 `~/.openharness-ts/worktrees/<repo-id>`）。 */
   baseDir: string;
   /** 主仓库根目录；`git worktree add` 基于这里的当前 HEAD 派生。 */
   repoRoot: string;
