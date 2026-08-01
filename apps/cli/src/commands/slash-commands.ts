@@ -428,7 +428,7 @@ export function registerBuiltinCommandsOnRegistry(
 
   // ── /new ───────────────────────────────────────────────
   // 开新对话（对齐 opencode /new）：清空模型对话历史；
-  // TUI 下 runHostSlashCommand 会同时下发 clear_transcript，前端回到首页。
+  // REPL 清空当前引擎；daemon TUI 的 /new 由 session API 创建并切换新会话。
   registry.register({
     name: "/new",
     description: "Start a new conversation",
@@ -1030,7 +1030,7 @@ export function registerBuiltinCommandsOnRegistry(
       const { readdir, readFile, mkdir } = await import("node:fs/promises");
       const { join } = await import("node:path");
       const { homedir } = await import("node:os");
-      const dir = join(homedir(), ".openharness", "sessions");
+      const dir = join(homedir(), ".openharness-ts", "sessions");
 
       try {
         await mkdir(dir, { recursive: true });
@@ -1087,7 +1087,7 @@ export function registerBuiltinCommandsOnRegistry(
       const { writeFile, mkdir } = await import("node:fs/promises");
       const { join } = await import("node:path");
       const { homedir } = await import("node:os");
-      const dir = join(homedir(), ".openharness", "data", "exports");
+      const dir = join(homedir(), ".openharness-ts", "data", "exports");
       await mkdir(dir, { recursive: true });
 
       // Determine format: explicit --json flag, or .json extension, else Markdown.
@@ -1429,10 +1429,10 @@ export function registerBuiltinCommandsOnRegistry(
       const execAsync = promisify(execFile);
       try {
         if (full) {
-          const { stdout } = await execAsync("git", ["diff", "HEAD"], { cwd: process.cwd(), maxBuffer: 1024 * 1024 });
+          const { stdout } = await execAsync("git", ["diff", "HEAD"], { cwd: process.cwd(), maxBuffer: 1024 * 1024, windowsHide: true });
           return { success: true, output: stdout || "(no diff)" };
         }
-        const { stdout } = await execAsync("git", ["diff", "--stat"], { cwd: process.cwd() });
+        const { stdout } = await execAsync("git", ["diff", "--stat"], { cwd: process.cwd(), windowsHide: true });
         return { success: true, output: stdout || "(no changes)" };
       } catch (err) {
         return { success: false, error: `git diff failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -1453,10 +1453,10 @@ export function registerBuiltinCommandsOnRegistry(
 
       try {
         if (sub === "list") {
-          const { stdout } = await execAsync("git", ["branch", "-a"], { cwd: process.cwd() });
+          const { stdout } = await execAsync("git", ["branch", "-a"], { cwd: process.cwd(), windowsHide: true });
           return { success: true, output: stdout || "(no branches)" };
         }
-        const { stdout } = await execAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: process.cwd() });
+        const { stdout } = await execAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: process.cwd(), windowsHide: true });
         return { success: true, output: `Current branch: ${stdout.trim()}` };
       } catch (err) {
         return { success: false, error: `git branch failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -1476,12 +1476,12 @@ export function registerBuiltinCommandsOnRegistry(
 
       try {
         if (!rawArgs) {
-          const { stdout } = await execAsync("git", ["status", "--short"], { cwd: process.cwd() });
+          const { stdout } = await execAsync("git", ["status", "--short"], { cwd: process.cwd(), windowsHide: true });
           return { success: true, output: stdout || "(working tree clean)" };
         }
 
-        await execAsync("git", ["add", "-A"], { cwd: process.cwd() });
-        const { stdout } = await execAsync("git", ["commit", "-m", rawArgs], { cwd: process.cwd() });
+        await execAsync("git", ["add", "-A"], { cwd: process.cwd(), windowsHide: true });
+        const { stdout } = await execAsync("git", ["commit", "-m", rawArgs], { cwd: process.cwd(), windowsHide: true });
         return { success: true, output: stdout.trim() };
       } catch (err) {
         return { success: false, error: `git commit failed: ${err instanceof Error ? err.message : String(err)}` };

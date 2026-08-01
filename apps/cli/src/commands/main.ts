@@ -1,6 +1,6 @@
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import type { ContentBlock, RuntimeBundle, Settings, StreamEvent } from "@openharness/core";
+import type { ContentBlock, RuntimeBundle, Settings } from "@openharness/core";
 import { loadSettings, saveSettings as saveSettingsCore, getProjectMemoryDir, getSkillsDir, getDataDir } from "@openharness/core";
 import { CommandRegistry } from "@openharness/commands";
 import { HookExecutor } from "@openharness/hooks";
@@ -8,36 +8,20 @@ import { McpClientManager } from "@openharness/mcp";
 import { MemoryManager } from "@openharness/memory";
 import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
 import { ThemeManager } from "@openharness/themes";
-import { TaskManager, getTaskManager } from "@openharness/services";
-import {
-  applyTaskEventToSnapshotMap,
-  snapshotMapToList,
-  type SwarmTeammateSnapshot,
-} from "../swarm-status";
+import { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
-import { computeToolDiff, createAgentWorkflowRunner, resolveToolPath } from "@openharness/tools";
+import { resolveToolPath } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
-import { bootstrap } from "../runtime";
+import { bootstrap, registerSubprocessBackend } from "../runtime";
 import type { SandboxRuntimeEvent, SandboxRuntimeReporter } from "@openharness/sandbox";
 import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
 import { updateRulesFromSession } from "@openharness/personalization";
 import { updateSessionMemoryFile, getSessionMemoryPath, getSessionMemoryContent, sessionMemoryToCompactText } from "@openharness/services";
 import { isSwarmWorker } from "@openharness/swarm";
 import {
-  WorkflowRunStore,
-  cancelPersistentWorkflow,
-  createWorkflowNotification,
-  createWorkflowResultFromSnapshot,
-  createWorkflowRunId,
-  createWorkflowSpecFromReconciliationPlan,
   isCoordinatorMode,
   getCoordinatorTools,
   matchSessionMode,
-  runPersistentWorkflow,
-  type WorkflowRunEvent,
-  type WorkflowRunSnapshot,
-  type WorkflowRunSummary,
-  type WorkflowSpec,
 } from "@openharness/coordinator";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
@@ -45,39 +29,10 @@ import { formatApiError } from "../format-error";
 import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
 import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
+import { probeDaemonRegistry, terminateDaemonProcess } from "../daemon-lifecycle";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
-
-type BackendHostEvent = {
-  type: string;
-  message?: string | null;
-  item?: {
-    role: string;
-    text: string;
-    tool_name?: string;
-    tool_input?: Record<string, unknown>;
-    is_error?: boolean;
-  } | null;
-  state?: Record<string, unknown> | null;
-  tasks?: Array<{ id: string; type: string; status: string; description: string; metadata: Record<string, string> }> | null;
-  mcp_servers?: unknown[] | null;
-  bridge_sessions?: unknown[] | null;
-  commands?: string[] | null;
-  /** 斜杠命令明细（名称 + 描述），供前端补全浮窗/命令面板展示 */
-  command_details?: Array<{ name: string; description: string }> | null;
-  modal?: Record<string, unknown> | null;
-  select_options?: Array<{ value: string; label: string; description?: string }> | null;
-  tool_name?: string | null;
-  tool_input?: Record<string, unknown> | null;
-  output?: string | null;
-  is_error?: boolean | null;
-  todo_markdown?: string | null;
-  plan_mode?: string | null;
-  swarm_teammates?: unknown[] | null;
-  swarm_notifications?: unknown[] | null;
-  workflow_state?: WorkflowTuiState | null;
-};
 
 type FrontendAttachment = {
   type?: "image" | string | null;
@@ -85,66 +40,6 @@ type FrontendAttachment = {
   data?: string | null;
   media_type?: string | null;
   mime_type?: string | null;
-};
-
-type FrontendRequest = {
-  type: string;
-  line?: string | null;
-  permission_mode?: "default" | "plan" | "full_auto" | null;
-  request_id?: string | null;
-  allowed?: boolean | null;
-  /** 权限确认的批准范围："once"（本次）| "session"（整个会话该工具放行）。 */
-  scope?: string | null;
-  answer?: string | null;
-  /** delete_session 请求携带的会话 ID。 */
-  session_id?: string | null;
-  attachments?: FrontendAttachment[] | null;
-  workflow_action?: string | null;
-  workflow_run_id?: string | null;
-  workflow_task_id?: string | null;
-  workflow_event_type?: string | null;
-  workflow_status?: string | null;
-  workflow_reconcile_action_id?: string | null;
-  workflow_cancel_reason?: string | null;
-};
-
-type WorkflowTuiTimelineItem = {
-  timestamp: number;
-  type: string;
-  taskId?: string;
-  status?: string;
-  summary: string;
-};
-
-type WorkflowTuiTask = {
-  taskId: string;
-  status: string;
-  summary?: string;
-  dependencies: string[];
-  taskManagerTaskId?: string;
-};
-
-type WorkflowTuiState = {
-  runs: WorkflowRunSummary[];
-  selectedRunId?: string;
-  snapshot?: WorkflowRunSnapshot;
-  tasks: WorkflowTuiTask[];
-  timeline: WorkflowTuiTimelineItem[];
-  filters: {
-    taskId?: string;
-    eventType?: string;
-    status?: string;
-  };
-  available: {
-    taskIds: string[];
-    eventTypes: string[];
-    statuses: string[];
-  };
-  reconciliation?: ReturnType<typeof createWorkflowNotification>["reconciliationPlan"];
-  selectedReconciliationActionId?: string;
-  reconciliationSpec?: unknown;
-  notice?: string;
-  error?: string;
 };
 
 interface MainOptions {
@@ -166,7 +61,6 @@ interface MainOptions {
   effort?: string;
   verbose?: boolean;
   debug?: boolean;
-  backendOnly?: boolean;
   tui?: boolean;
   dangerouslySkipPermissions?: boolean;
   allowedTools?: string;
@@ -178,16 +72,6 @@ interface MainOptions {
   taskWorker?: boolean;
   dryRun?: boolean;
   sessionId?: string;
-}
-
-interface SessionSnapshot {
-  id: string;
-  name?: string;
-  messages: Array<{ type: string; content: string }>;
-  model: string;
-  createdAt: number;
-  updatedAt: number;
-  usage: { inputTokens: number; outputTokens: number };
 }
 
 const IMAGE_MEDIA_TYPES: Record<string, string> = {
@@ -341,10 +225,9 @@ export async function buildUserContentWithAttachments(
  * 应用程序的主入口点，根据提供的选项和提示决定执行模式。
  * 
  * 该函数首先处理设置覆盖，然后根据标志位依次尝试以下模式：
- * 1. 后端主机模式 (backendOnly) — TUI 的前端会 spawn 此模式；也可单独调试
- * 2. TUI 交互模式 (tui) — spawn Ink 前端，前端再 spawn backend-only（见 docs/tui-flow.md）
- * 3. 打印/非交互模式 (print 或存在 prompt)
- * 4. REPL 交互模式 (默认)
+ * 1. TUI 交互模式 (tui) — 启动/attach daemon，再 spawn opentui 前端
+ * 2. 打印/非交互模式 (print 或存在 prompt)
+ * 3. REPL 交互模式 (默认)
  * 
  * @param prompt - 用户输入的初始提示词，如果未提供则进入交互模式
  * @param options - 命令行选项配置对象，包含模型、权限、路径等设置
@@ -371,7 +254,7 @@ export async function mainAction(
   }
 
   // dry-run：预览解析后的运行时配置 + readiness，不创建 client、不调模型。
-  // 放在 backendOnly/tui/print 之前，让任何模式下加 --dry-run 都只预览不执行。
+  // 放在 tui/print 之前，让任何模式下加 --dry-run 都只预览不执行。
   if (options.dryRun) {
     const { runDryRun } = await import("../dry-run");
     await runDryRun(settings, options);
@@ -382,11 +265,6 @@ export async function mainAction(
   // send_message 写 stdin 时 TaskManager 懒复活重启本进程)。无 TTY,先于其余模式。
   if (options.taskWorker) {
     await runTaskWorker(settings, options);
-    return;
-  }
-
-  if (options.backendOnly) {
-    await runBackendHost(settings, options);
     return;
   }
 
@@ -440,6 +318,7 @@ async function runTaskWorker(
     skillRegistry,
     credentialStorage,
     permissionPrompt: swarmPermissionPrompt,
+    sessionId: options.sessionId,
   });
   try {
     registerPluginHooks(bundle.hookExecutor);
@@ -630,6 +509,7 @@ async function runPrintMode(
     skillRegistry,
     credentialStorage,
     permissionPrompt: swarmPermissionPrompt,
+    sessionId: options.sessionId,
   });
   // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
   registerPluginHooks(bundle.hookExecutor);
@@ -761,6 +641,13 @@ async function runRepl(
       sessionId = `${sessionId}:${options.name}`;
     }
   }
+  bundle.queryEngine.setSessionId(sessionId);
+  await registerSubprocessBackend({
+    cwd: process.cwd(),
+    sessionId,
+    settings,
+    permissionChecker: bundle.permissionChecker,
+  });
 
   const memoryDir = getProjectMemoryDir(process.cwd());
 
@@ -1083,12 +970,12 @@ function formatSandboxStartupEvent(event: SandboxRuntimeEvent, first: boolean): 
  * 启动 TUI (Terminal User Interface) 模式。
  *
  * 本进程（ohs --tui）仅作**启动器**：spawn opentui 前端（Bun 运行时）子进程，经
- * `OPENHARNESS_FRONTEND_CONFIG` 传入 `backend_command`（含 `--backend-only` 及 CLI flags）。
- * 由前端 `useBackendSession` 再 spawn BackendHost 子进程；OHJSON 协议在前后端 pipe 间通信。
+ * `OPENHARNESS_FRONTEND_CONFIG` 传入 daemon attach 信息。
+ * 前端通过 `useServerSync` 与 daemon 通信。
  * 本进程 stdio inherit 终端给 opentui，等前端退出后 process.exit。详见 docs/tui-flow.md。
  *
  * @param settings - 当前加载的应用设置
- * @param options - 命令行选项，写入 backend_command 供 BackendHost 使用
+ * @param options - 命令行选项，用于启动/attach daemon 并传给前端
  * @param prompt - 可选的初始提示词，写入 frontendConfig.initial_prompt
  * @returns Promise<void>
  */
@@ -1111,26 +998,43 @@ async function runTuiMode(
   const path = await import("node:path");
   const url = await import("node:url");
   const cliPath = process.argv[1];
+  if (!cliPath) throw new Error("Cannot locate CLI entrypoint.");
+  const daemonProbeOptions = {
+    expectedVersion: VERSION,
+    minimumStartedAt: (await stat(cliPath)).mtimeMs,
+  };
+  const {
+    clearDaemonRegistry,
+    readDaemonRegistry,
+  } = await import("@openharness/server");
 
-  const args = [cliPath, "--backend-only"];
-  if (options.model) args.push("-m", options.model);
-  if (options.provider) args.push("--provider", options.provider);
-  if (options.permissionMode) args.push("--permission-mode", options.permissionMode);
-  if (options.maxTurns) args.push("--max-turns", String(options.maxTurns));
-  if (options.systemPrompt) args.push("-s", options.systemPrompt);
-  if (options.apiKey) args.push("--api-key", options.apiKey);
-  if (options.baseUrl) args.push("--base-url", options.baseUrl);
-  if (options.apiFormat) args.push("--api-format", options.apiFormat);
-  if (options.theme) args.push("--theme", options.theme);
-  if (options.cwd) args.push("--cwd", options.cwd);
-  if (options.effort) args.push("--effort", options.effort);
-  if (options.dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
-  if (options.allowedTools) args.push("--allowed-tools", options.allowedTools);
-  if (options.disallowedTools) args.push("--disallowed-tools", options.disallowedTools);
-  if (options.bare) args.push("--bare");
+  const waitForDaemonRegistry = async (): Promise<NonNullable<ReturnType<typeof readDaemonRegistry>>> => {
+    for (let i = 0; i < 40; i += 1) {
+      const registry = readDaemonRegistry();
+      if (registry && await probeDaemonRegistry(registry, daemonProbeOptions) === "ready") return registry;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("The OpenHarness daemon was not ready after starting ohs serve.");
+  };
+
+  let daemon = readDaemonRegistry();
+  const daemonStatus = daemon ? await probeDaemonRegistry(daemon, daemonProbeOptions) : "unreachable";
+  if (!daemon || daemonStatus !== "ready") {
+    if (daemon && daemonStatus === "stale") terminateDaemonProcess(daemon.pid);
+    clearDaemonRegistry();
+    const serveArgs = [cliPath, "serve", "--register", "--host", "127.0.0.1", "--port", "0"];
+    const daemonChild = spawn(process.execPath, serveArgs, { detached: true, stdio: "ignore", windowsHide: true });
+    daemonChild.unref();
+    daemon = await waitForDaemonRegistry();
+  }
 
   const frontendConfig = JSON.stringify({
-    backend_command: [process.execPath, ...args],
+    daemon: {
+      url: daemon.url,
+      token: daemon.token,
+      cwd: options.cwd ? path.resolve(options.cwd) : process.cwd(),
+      model: options.model ?? settings.model,
+    },
     initial_prompt: prompt ?? null,
     theme: options.theme ?? "default",
     version: VERSION,
@@ -1151,6 +1055,7 @@ async function runTuiMode(
 
   const child = spawn(bun, [frontendDistPath], {
     stdio: "inherit",
+    windowsHide: true,
     env: {
       ...process.env,
       OPENHARNESS_FRONTEND_CONFIG: frontendConfig,
@@ -1162,1109 +1067,7 @@ async function runTuiMode(
   });
 }
 
-/**
- * 运行 BackendHost（`ohs --backend-only`）。
- *
- * TUI 下由 Ink 前端 spawn 的本进程；也可单独运行用于协议调试。经 stdin/stdout
- * 与前端通信：出站 `OHJSON:{...}\n`，入站 JSON 行（FrontendRequest）。负责
- * bootstrap、权限 modal（askPermission）、斜杠命令本地路由、QueryEngine 流式 emit。
- * emit 带 writeLock 串行化。详见 docs/tui-flow.md 与 docs/permission-flow.md。
- *
- * @param settings - 当前加载的应用设置
- * @param options - 命令行选项，用于初始化运行时环境
- * @returns Promise<void>
- */
-async function runBackendHost(
-  settings: Settings,
-  options: MainOptions,
-): Promise<void> {
-  // Mutable copy — updated by /permissions, /model etc. so mode changes take effect immediately.
-  let currentSettings = settings;
-  const permissionRequests = new Map<string, Promise<boolean> & { resolve: (v: boolean) => void }>();
-  const questionRequests = new Map<string, Promise<string> & { resolve: (v: string) => void }>();
-  // 会话级批准：用户对某工具选过"整个会话"后，该工具后续 ask 直接放行（按工具名粒度）。
-  const approvedForSessionTools = new Set<string>();
-  // request_id → toolName，供 permission_response 在 scope==="session" 时登记会话批准。
-  const pendingPermissionTools = new Map<string, string>();
-  let busy = false;
-  let interruptRequested = false;
-  let running = true;
-  // 当前会话 ID：每轮对话后保存快照供 /sessions 列表与恢复；/resume 后切到目标 id。
-  let currentSessionId = generateSessionId();
-  const lastToolInputs = new Map<string, Record<string, unknown>>();
-
-  const writeLock = { locked: false, queue: [] as Array<() => void> };
-  const acquireWrite = async (): Promise<void> => {
-    if (!writeLock.locked) { writeLock.locked = true; return; }
-    return new Promise<void>((resolve) => { writeLock.queue.push(resolve); });
-  };
-  const releaseWrite = (): void => {
-    if (writeLock.queue.length > 0) {
-      writeLock.queue.shift()!();
-    } else {
-      writeLock.locked = false;
-    }
-  };
-
-  const emit = async (event: BackendHostEvent): Promise<void> => {
-    await acquireWrite();
-    try {
-      const payload = `OHJSON:${JSON.stringify(event)}\n`;
-      const buf = (process.stdout as any).buffer;
-      if (buf && typeof buf.write === "function" && typeof buf.flush === "function") {
-        buf.write(payload);
-        buf.flush();
-      } else {
-        process.stdout.write(payload);
-      }
-    } finally {
-      releaseWrite();
-    }
-  };
-
-  // ── swarm_status: 订阅 teammate 任务生命周期，点亮前端 SwarmPanel ──
-  // 关键：subprocess swarm 后端（runtime.ts bootstrap 里）用的是全局
-  // getTaskManager() 单例，而非下方 host 局部 new 的 TaskManager。必须订阅同一
-  // 个单例，才能收到 teammate 任务的 created/completed 事件。
-  const swarmSnapshots = new Map<string, SwarmTeammateSnapshot>();
-  const swarmTaskManager = getTaskManager();
-  const emitSwarmStatus = async (): Promise<void> => {
-    // listener 回调是 sync，这里 fire-and-forget；emit 自身带 writeLock 串行化，
-    // 不会与主循环 emit 抢锁出问题。错误被吞，绝不冒泡成未处理拒绝。
-    try {
-      await emit({
-        type: "swarm_status",
-        swarm_teammates: snapshotMapToList(swarmSnapshots),
-      });
-    } catch {
-      /* emit 失败不应影响 teammate 执行 */
-    }
-  };
-  const unregisterSwarmListener = swarmTaskManager.registerTaskListener((task, event) => {
-    const changed = applyTaskEventToSnapshotMap(swarmSnapshots, task, event);
-    if (changed) void emitSwarmStatus();
-  });
-
-  const workflowStore = new WorkflowRunStore({ cwd: process.cwd() });
-  let workflowSelectedRunId: string | undefined;
-  let workflowFilters: WorkflowTuiState["filters"] = {};
-  let workflowReconciliationActionId: string | undefined;
-
-  const emitWorkflowState = async (
-    options: { reconciliationActionId?: string; notice?: string; error?: string } = {},
-  ): Promise<void> => {
-    const state = buildWorkflowTuiState(workflowStore, {
-      selectedRunId: workflowSelectedRunId,
-      filters: workflowFilters,
-      reconciliationActionId: options.reconciliationActionId ?? workflowReconciliationActionId,
-      notice: options.notice,
-      error: options.error,
-    });
-    workflowSelectedRunId = state.selectedRunId;
-    await emit({ type: "workflow_state", workflow_state: state });
-  };
-
-  const askPermission = async (
-    toolName: string,
-    reason?: string,
-    input?: Record<string, unknown>,
-  ): Promise<boolean> => {
-    // full_auto 模式：直接放行，不弹权限框（尊重运行时 /permissions full_auto 变更）。
-    if (currentSettings.permission?.mode === "full_auto") return true;
-    // 会话级批准：之前对该工具选过"整个会话"则直接放行，不再弹框。
-    if (approvedForSessionTools.has(toolName)) return true;
-
-    const requestId = randomUUID({ disableEntropyCache: true }).replace(/-/g, "");
-
-    // Edit/Write 改文件前算 unified diff 预览；失败/无改动则不带 diff，回退普通确认。
-    let diff: string | null = null;
-    let diffPath: string | null = null;
-    if (input) {
-      try {
-        const preview = await computeToolDiff(toolName, input);
-        if (preview) {
-          diff = preview.diff;
-          diffPath = preview.path;
-        }
-      } catch {
-        /* 预览计算失败不应阻断权限确认 */
-      }
-    }
-
-    let resolve!: (v: boolean) => void;
-    const promise = new Promise<boolean>((r) => { resolve = r; }) as Promise<boolean> & { resolve: (v: boolean) => void };
-    promise.resolve = resolve;
-    permissionRequests.set(requestId, promise);
-    pendingPermissionTools.set(requestId, toolName);
-    await emit({
-      type: "modal_request",
-      modal: {
-        kind: "permission",
-        request_id: requestId,
-        tool_name: toolName,
-        reason: reason ?? null,
-        diff,
-        diff_path: diffPath,
-      },
-    });
-    try {
-      return await promise;
-    } finally {
-      permissionRequests.delete(requestId);
-      pendingPermissionTools.delete(requestId);
-    }
-  };
-
-  // 加载并注册技能（三源：bundled < user < project）
-  const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
-
-  const credentialStorage = new CredentialStorage();
-
-  const bundle = await bootstrap({
-    settings,
-    cliOverrides: buildCliOverrides(options),
-    permissionPrompt: askPermission,
-    skillRegistry,
-    credentialStorage,
-    sandboxReporter: createSandboxStartupReporter(process.stderr),
-  });
-  // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
-  registerPluginHooks(bundle.hookExecutor);
-  // C.1 插件 tools_dir：动态加载插件工具目录，注册进 toolRegistry。
-  await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
-  // C.4 coordinator 模式：限制工具集为 orchestration tools。
-  if (isCoordinatorMode()) {
-    bundle.queryEngine.setAllowedTools(getCoordinatorTools());
-  }
-
-  const commandRegistry = new CommandRegistry();
-  const mcpManager = new McpClientManager();
-  // BackendHost MCP 连接：与 REPL 对称，合并插件 MCP 后 connectAll，
-  // 已连接 server 的工具以 mcp__<server>__<tool> 形式注册进 toolRegistry。
-  const mcpServersHost = mergePluginMcpServers(currentSettings.mcpServers);
-  if (Object.keys(mcpServersHost).length > 0) {
-    await mcpManager.connectAll(mcpServersHost).catch(() => { });
-  }
-  for (const tool of mcpManager.getAsToolDefinitions()) {
-    bundle.toolRegistry.register(tool);
-  }
-  bundle.queryEngine.setMcpManager(mcpManager);
-  const memoryDir = getProjectMemoryDir(process.cwd());
-  const memoryManager = new MemoryManager(1000, memoryDir);
-  const memoryFile = join(memoryDir, "memory.json");
-  await memoryManager.loadFromFile(memoryFile).catch(() => { });
-  const themeManager = new ThemeManager();
-  const taskManager = new TaskManager();
-
-  const refreshSystemPrompt = async () => {
-    const memoryContent =
-      currentSettings.memory?.enabled !== false
-        ? memoryManager.buildMemoryPrompt(currentSettings.memory?.maxFiles ?? 10)
-        : undefined;
-
-    const prompt = await buildRuntimeSystemPrompt({
-      customPrompt: currentSettings.systemPrompt,
-      cwd: process.cwd(),
-      permissionMode: currentSettings.permission.mode,
-      fastMode: currentSettings.fastMode,
-      effort: currentSettings.effort,
-      passes: currentSettings.passes,
-      memoryContent,
-      skillsList: skillRegistry.modelVisibleList(),
-    });
-    bundle.queryEngine.setSystemPrompt(prompt);
-  };
-
-  const slashCtx: SlashCommandContext = {
-    getEngine: () => bundle.queryEngine as any,
-    getModel: () => currentSettings.model,
-    setModel: (m: string) => {
-      currentSettings = { ...currentSettings, model: m };
-      bundle.settings = currentSettings;
-      bundle.queryEngine.setModel(m);
-    },
-    getSettings: () => currentSettings,
-    updateSettings: async (patch: Partial<Settings>) => {
-      currentSettings = { ...currentSettings, ...patch };
-      // Keep bundle.settings in sync so processLineForHost state_snapshots reflect new mode.
-      bundle.settings = currentSettings;
-      await emit({
-        type: "state_snapshot",
-        state: buildStatePayload(currentSettings, mcpManager),
-        mcp_servers: [],
-        bridge_sessions: [],
-      });
-    },
-    hookExecutor: bundle.hookExecutor as HookExecutor,
-    memoryManager,
-    memoryDir,
-    mcpManager,
-    skillRegistry,
-    themeManager,
-    taskManager,
-    sessionId: currentSessionId,
-    exitRepl: () => { },
-    refreshSystemPrompt,
-    getBundle: () => bundle,
-    credentialStorage,
-  };
-  registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
-
-  const commands = buildHostCommandList(commandRegistry, skillRegistry);
-
-  await refreshSystemPrompt();
-
-  await emit({
-    type: "ready",
-    state: buildStatePayload(currentSettings, mcpManager),
-    tasks: [],
-    mcp_servers: [],
-    bridge_sessions: [],
-    commands,
-    command_details: buildHostCommandDetails(commandRegistry, skillRegistry),
-  });
-  await emit({
-    type: "state_snapshot",
-    state: buildStatePayload(currentSettings, mcpManager),
-    mcp_servers: [],
-    bridge_sessions: [],
-  });
-
-  // B.2 compact attachments：compact 时注入 taskFocus + session_memory checkpoint。
-  bundle.queryEngine.setAttachmentsProvider(() => {
-    const running = taskManager.listTasks("running");
-    const taskFocus = running.length > 0
-      ? running.map((t) => t.description).join("; ")
-      : undefined;
-    const smPath = isSessionMemoryEnabled(currentSettings)
-      ? getSessionMemoryPath(process.cwd(), currentSessionId)
-      : undefined;
-    const sessionMemory = smPath
-      ? sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined
-      : undefined;
-    return { taskFocus, sessionMemory };
-  });
-
-  // B.5 per-turn 相关记忆检索：与 REPL 模式对称，每轮按用户输入相关性检索记忆。
-  bundle.queryEngine.setMemoryRetriever(async (userInput: string) => {
-    if (currentSettings.memory?.enabled === false) return null;
-    const maxEntries = currentSettings.memory?.maxFiles ?? 10;
-    const { text, ids } = memoryManager.selectRelevantForPrompt(maxEntries, userInput);
-    if (!text) return null;
-    try {
-      if (ids.length > 0) {
-        await memoryManager.markMemoryUsed(ids);
-      }
-    } catch {
-      // markMemoryUsed 失败不应阻断本轮注入
-    }
-    return text;
-  });
-
-  const rl = readline.createInterface({ input: process.stdin });
-  const requestQueue: FrontendRequest[] = [];
-  let requestResolve: ((req: FrontendRequest | null) => void) | null = null;
-
-  rl.on("line", (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    try {
-      const request = JSON.parse(trimmed) as FrontendRequest;
-      if (request.type === "interrupt") {
-        interruptRequested = true;
-        return;
-      }
-      // permission_response / question_response 在 processLineForHost 持有主循环期间到达。
-      // 此时 requestResolve 为 null，若入队则主循环无法消费（死锁）。
-      // 直接在此 resolve 对应 Promise，让 askPermission / askQuestion 继续执行。
-      if (request.type === "permission_response") {
-        const rid = request.request_id;
-        if (rid && permissionRequests.has(rid)) {
-          const tool = pendingPermissionTools.get(rid);
-          pendingPermissionTools.delete(rid);
-          const allowed = !!request.allowed;
-          if (allowed && request.scope === "session" && tool) {
-            approvedForSessionTools.add(tool);
-          }
-          permissionRequests.get(rid)!.resolve(allowed);
-          permissionRequests.delete(rid);
-        }
-        return;
-      }
-      if (request.type === "question_response") {
-        const rid = request.request_id;
-        if (rid && questionRequests.has(rid)) {
-          questionRequests.get(rid)!.resolve(request.answer ?? "");
-          questionRequests.delete(rid);
-        }
-        return;
-      }
-      if (requestResolve) {
-        requestResolve(request);
-        requestResolve = null;
-      } else {
-        requestQueue.push(request);
-      }
-    } catch (exc) {
-      emit({ type: "error", message: `Invalid request: ${exc}` });
-    }
-  });
-
-  rl.on("close", () => {
-    running = false;
-    if (requestResolve) {
-      requestResolve(null);
-      requestResolve = null;
-    }
-    // stdin 关闭（前端退出 / Ctrl+C）：把所有挂起的权限/问题请求当拒绝/空串处理，
-    // 防止 askPermission / askQuestion 的 Promise 永远悬挂导致进程卡死。
-    for (const [, promise] of permissionRequests) {
-      promise.resolve(false);
-    }
-    permissionRequests.clear();
-    pendingPermissionTools.clear();
-    for (const [, promise] of questionRequests) {
-      promise.resolve("");
-    }
-    questionRequests.clear();
-  });
-
-  const nextRequest = (): Promise<FrontendRequest | null> => {
-    if (requestQueue.length > 0) return Promise.resolve(requestQueue.shift()!);
-    if (!running) return Promise.resolve(null);
-    return new Promise<FrontendRequest | null>((resolve) => { requestResolve = resolve; });
-  };
-
-  while (running) {
-    const request = await nextRequest();
-    if (!request || request.type === "shutdown") {
-      // 个性化（C.5）：backend 关停时 best-effort 抽取环境事实。
-      try {
-        updateRulesFromSession(bundle.queryEngine.getHistory());
-      } catch {
-        // best-effort
-      }
-      await emit({ type: "shutdown" });
-      break;
-    }
-    if (request.type === "workflow_request") {
-      const action = request.workflow_action ?? "refresh";
-      try {
-        if (action === "refresh" || action === "open") {
-          await emitWorkflowState();
-          continue;
-        }
-        if (action === "select_run") {
-          workflowSelectedRunId = request.workflow_run_id ?? undefined;
-          workflowFilters = {};
-          workflowReconciliationActionId = undefined;
-          await emitWorkflowState();
-          continue;
-        }
-        if (action === "set_filter") {
-          workflowFilters = {
-            taskId: request.workflow_task_id === "" ? undefined : request.workflow_task_id ?? workflowFilters.taskId,
-            eventType: request.workflow_event_type === "" ? undefined : request.workflow_event_type ?? workflowFilters.eventType,
-            status: request.workflow_status === "" ? undefined : request.workflow_status ?? workflowFilters.status,
-          };
-          await emitWorkflowState();
-          continue;
-        }
-        if (action === "clear_filters") {
-          workflowFilters = {};
-          await emitWorkflowState();
-          continue;
-        }
-        if (action === "cancel") {
-          const runId = request.workflow_run_id ?? workflowSelectedRunId;
-          const snapshot = runId ? workflowStore.load(runId) : workflowStore.latest();
-          if (!snapshot) {
-            await emitWorkflowState({ error: runId ? `Workflow run not found: ${runId}` : "No workflow runs found" });
-            continue;
-          }
-          workflowSelectedRunId = snapshot.runId;
-          await cancelPersistentWorkflow(snapshot, {
-            store: workflowStore,
-            reason: request.workflow_cancel_reason ?? "Cancelled from TUI",
-            stopTask: (taskId) => getTaskManager().stopTask(taskId),
-          });
-          await emitWorkflowState();
-          continue;
-        }
-        if (action === "reconcile") {
-          workflowSelectedRunId = request.workflow_run_id ?? workflowSelectedRunId;
-          workflowReconciliationActionId = request.workflow_reconcile_action_id ?? undefined;
-          await emitWorkflowState({ reconciliationActionId: workflowReconciliationActionId });
-          continue;
-        }
-        if (action === "run_reconcile") {
-          const runId = request.workflow_run_id ?? workflowSelectedRunId;
-          const snapshot = runId ? workflowStore.load(runId) : workflowStore.latest();
-          if (!snapshot) {
-            await emitWorkflowState({ error: runId ? `Workflow run not found: ${runId}` : "No workflow runs found" });
-            continue;
-          }
-          const actionId = request.workflow_reconcile_action_id ?? workflowReconciliationActionId;
-          const submittedRunId = submitWorkflowReconciliationFollowUp(snapshot, workflowStore, {
-            actionId,
-            permissionMode: currentSettings.permission.mode,
-          });
-          workflowSelectedRunId = submittedRunId;
-          workflowFilters = {};
-          workflowReconciliationActionId = undefined;
-          await emitWorkflowState({ notice: `Submitted follow-up ${submittedRunId} from ${snapshot.runId}` });
-          continue;
-        }
-        await emitWorkflowState({ error: `Unknown workflow action: ${action}` });
-      } catch (error) {
-        await emitWorkflowState({ error: error instanceof Error ? error.message : String(error) });
-      }
-      continue;
-    }
-    if (request.type === "list_sessions") {
-      let options: Array<{ value: string; label: string; description?: string }> = [];
-      try {
-        const { listSessionSnapshots } = await import("@openharness/services");
-        options = listSessionSnapshots(process.cwd()).map((s) => ({
-          value: s.session_id,
-          label: s.summary || "(empty session)",
-          description: formatSessionMeta(s),
-        }));
-      } catch {
-        // best-effort：列不出来就给空列表
-      }
-      await emit({
-        type: "select_request",
-        modal: { kind: "select", title: "Sessions", submit_prefix: "/resume " },
-        select_options: options,
-      });
-      continue;
-    }
-    if (request.type === "set_permission_mode") {
-      const mode = request.permission_mode;
-      if (mode !== "default" && mode !== "plan" && mode !== "full_auto") {
-        await emit({ type: "error", message: `Invalid permission mode: ${String(mode ?? "")}` });
-        continue;
-      }
-      currentSettings = {
-        ...currentSettings,
-        permission: {
-          ...currentSettings.permission,
-          mode,
-        },
-      };
-      await saveSettingsCore(currentSettings);
-      await refreshSystemPrompt();
-      await emit({
-        type: "state_snapshot",
-        state: buildStatePayload(currentSettings, mcpManager),
-        mcp_servers: [],
-        bridge_sessions: [],
-      });
-      continue;
-    }
-    if (request.type === "delete_session") {
-      const sid = request.session_id;
-      if (sid) {
-        try {
-          const { deleteSessionById, listSessionSnapshots } = await import("@openharness/services");
-          deleteSessionById(process.cwd(), sid);
-          // 删除后刷新列表，继续显示对话框；列表为空则关闭
-          const options = listSessionSnapshots(process.cwd()).map((s) => ({
-            value: s.session_id,
-            label: s.summary || "(empty session)",
-            description: formatSessionMeta(s),
-          }));
-          if (options.length === 0) {
-            await emit({ type: "error", message: "已删除，暂无其他会话" });
-          } else {
-            await emit({
-              type: "select_request",
-              modal: { kind: "select", title: "Sessions", submit_prefix: "/resume " },
-              select_options: options,
-            });
-          }
-        } catch {
-          await emit({ type: "error", message: "删除会话失败" });
-        }
-      }
-      continue;
-    }
-    if (request.type !== "submit_line") {
-      await emit({ type: "error", message: `Unknown request type: ${request.type}` });
-      continue;
-    }
-    if (busy) {
-      await emit({ type: "error", message: "Session is busy" });
-      continue;
-    }
-    const line = (request.line ?? "").trim();
-    if (!line) continue;
-
-    // /resume <id>：恢复历史会话到当前引擎，并把消息回放成 transcript（在通用 slash
-    // 路由前拦截——host 版 /resume 只 loadMessages 不 emit transcript，前端会看不到历史）。
-    const resumeMatch = line.match(/^\/resume\s+(\S+)$/);
-    if (resumeMatch?.[1]) {
-      const resumeId = resumeMatch[1];
-      try {
-        const { loadSessionById } = await import("@openharness/services");
-        const payload = loadSessionById(process.cwd(), resumeId);
-        if (!payload) {
-          await emit({ type: "transcript_item", item: { role: "system", text: `Session not found: ${resumeId}` } });
-          await emit({ type: "line_complete" });
-          continue;
-        }
-        bundle.queryEngine.loadMessages(payload.messages as any);
-        if (payload.model) bundle.queryEngine.setModel(payload.model);
-        currentSessionId = payload.session_id;
-        slashCtx.sessionId = currentSessionId;
-        await emit({ type: "clear_transcript" });
-        for (const item of messagesToTranscriptItems(payload.messages)) {
-          await emit({ type: "transcript_item", item });
-        }
-        await emit({
-          type: "transcript_item",
-          item: { role: "system", text: `Resumed session ${payload.session_id} (${payload.message_count} messages)` },
-        });
-        await emit({
-          type: "state_snapshot",
-          state: buildStatePayload(currentSettings, mcpManager),
-          mcp_servers: [],
-          bridge_sessions: [],
-        });
-      } catch (err) {
-        await emit({ type: "error", message: `Failed to resume: ${err instanceof Error ? err.message : String(err)}` });
-      }
-      await emit({ type: "line_complete" });
-      continue;
-    }
-
-    // 先尝试 user-invocable skill 的 /<skill>（内置命令优先）。命中 → 注入 skill
-    // prompt 跑一轮（emit 事件），与普通输入同路径；busy 标志处理与下方一致。
-    if (line.startsWith("/")) {
-      const skillMatch = matchUserInvocableSkill(
-        line,
-        skillRegistry,
-        (name) => commandRegistry.get(name) !== undefined,
-      );
-      if (skillMatch) {
-        busy = true;
-        interruptRequested = false;
-        const overrideModel = skillMatch.skill.model;
-        let completed = false;
-        if (overrideModel) bundle.queryEngine.setModel(overrideModel);
-        try {
-          const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
-          await processLineForHost(skillPrompt, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested);
-          completed = true;
-        } catch (err) {
-          const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
-          await emit({ type: "error", message: msg });
-        } finally {
-          busy = false;
-          if (overrideModel) bundle.queryEngine.setModel(currentSettings.model);
-        }
-        if (completed) {
-          await maintainMemoryAfterTurn({
-            bundle,
-            settings: currentSettings,
-            model: currentSettings.model,
-            memoryManager,
-            memoryDir,
-            sessionId: currentSessionId,
-          });
-        }
-        continue;
-      }
-    }
-
-    // 斜杠命令在后端本地路由（对齐 REPL），不发给模型。
-    if (line.startsWith("/")) {
-      const startsNewConversation = isNewConversationSlashCommand(line);
-      if (startsNewConversation && bundle.queryEngine.getHistory().length > 0) {
-        await saveSessionSnapshot(currentSessionId, bundle.queryEngine, currentSettings.model);
-      }
-      await emit({ type: "transcript_item", item: { role: "user", text: line } });
-      const outcome = await runHostSlashCommand(line, commandRegistry);
-      if (outcome.exit) {
-        await emit({ type: "shutdown" });
-        running = false;
-        break;
-      }
-      if (outcome.clearTranscript) {
-        if (startsNewConversation && !outcome.error) {
-          currentSessionId = generateSessionId();
-          slashCtx.sessionId = currentSessionId;
-        }
-        await emit({ type: "clear_transcript" });
-      }
-      if (outcome.output) {
-        await emit({ type: "transcript_item", item: { role: "system", text: outcome.output } });
-      }
-      if (outcome.error) {
-        await emit({ type: "transcript_item", item: { role: "system", text: `Error: ${outcome.error}` } });
-      }
-      await emit({ type: "line_complete" });
-      continue;
-    }
-
-    busy = true;
-    interruptRequested = false;
-    let completed = false;
-    try {
-      const userContent = await buildUserContentWithAttachments(line, request.attachments);
-      await processLineForHost(line, bundle, emit, lastToolInputs, currentSettings, () => interruptRequested, userContent);
-      completed = true;
-    } catch (err) {
-      const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
-      await emit({ type: "error", message: msg });
-    } finally {
-      busy = false;
-    }
-    // End-of-turn memory maintenance, kept symmetric with REPL mode.
-    if (completed) {
-      await maintainMemoryAfterTurn({
-        bundle,
-        settings: currentSettings,
-        model: currentSettings.model,
-        memoryManager,
-        memoryDir,
-        sessionId: currentSessionId,
-      });
-    }
-  }
-
-  // 退出/shutdown：注销 swarm listener，避免泄漏与对已关闭 stdout 的写入。
-  unregisterSwarmListener();
-  rl.close();
-}
-
-/**
- * 处理后端主机模式下接收到的单行用户输入。
- * 
- * 该函数将用户消息提交给查询引擎，监听流式事件，并将相应的事件类型
- * （如文本增量、工具使用、错误等转换为后端协议事件并通过 emit 发送。
- * 它还特别处理 TodoWrite 工具的结果以更新待办事项列表显示。
- * 
- * @param line - 用户输入的原始文本行
- * @param bundle - 包含查询引擎和其他核心服务的运行时Bundle对象
- * @param emit - 用于向后端发送事件的回调函数
- * @param lastToolInputs - 存储最近一次工具调用输入的Map，用于后续处理
- * @returns Promise<void>
- */
-/** /sessions 列表条目的副标题：相对日期 + 消息数 + 模型。 */
-export function formatSessionMeta(s: { created_at: number; message_count: number; model: string }): string {
-  const parts: string[] = [];
-  if (s.created_at) {
-    // created_at 是 Unix 秒；转本地日期时间，精简显示。
-    const d = new Date(s.created_at * 1000);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    parts.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
-  }
-  parts.push(`${s.message_count} msg${s.message_count === 1 ? "" : "s"}`);
-  if (s.model) parts.push(s.model);
-  return parts.join(" · ");
-}
-
-type WorkflowTuiBuildOptions = {
-  selectedRunId?: string;
-  filters?: WorkflowTuiState["filters"];
-  reconciliationActionId?: string;
-  notice?: string;
-  error?: string;
-};
-
-function submitWorkflowReconciliationFollowUp(
-  snapshot: WorkflowRunSnapshot,
-  store: WorkflowRunStore,
-  options: { actionId?: string; permissionMode?: string } = {},
-): string {
-  const spec = createSelectedWorkflowReconciliationSpec(snapshot, options.actionId);
-  const runId = createWorkflowRunId();
-  const runner = createAgentWorkflowRunner({
-    cwd: process.cwd(),
-    permissionMode: normalizeWorkflowPermissionMode(options.permissionMode),
-  });
-  void runPersistentWorkflow(spec, runner, { cwd: process.cwd(), runId, store })
-    .catch((error) => {
-      console.error(`Detached follow-up workflow ${runId} failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  return runId;
-}
-
-export function createSelectedWorkflowReconciliationSpec(
-  snapshot: WorkflowRunSnapshot,
-  actionId?: string,
-): WorkflowSpec {
-  const notification = createWorkflowNotification(createWorkflowResultFromSnapshot(snapshot));
-  const actionIds =
-    actionId
-      ? [actionId]
-      : notification.reconciliationPlan.actions.length === 1
-        ? [notification.reconciliationPlan.actions[0]!.actionId]
-        : undefined;
-  if (!actionIds) {
-    throw new Error("Select one reconciliation action before running a follow-up workflow");
-  }
-  const spec = createWorkflowSpecFromReconciliationPlan(notification.reconciliationPlan, { actionIds });
-  if (!spec) {
-    throw new Error("No reconciliation actions matched the selected workflow run");
-  }
-  return spec;
-}
-
-function buildWorkflowTuiState(
-  store: WorkflowRunStore,
-  options: WorkflowTuiBuildOptions = {},
-): WorkflowTuiState {
-  const runs = store.listSummaries();
-  const selectedRunId = options.selectedRunId ?? runs[0]?.runId;
-  const snapshot = selectedRunId ? store.load(selectedRunId) : undefined;
-  if (!snapshot) {
-    return {
-      runs,
-      selectedRunId,
-      tasks: [],
-      timeline: [],
-      filters: options.filters ?? {},
-      available: { taskIds: [], eventTypes: [], statuses: [] },
-      error: options.error ?? (selectedRunId ? `Workflow run not found: ${selectedRunId}` : undefined),
-    };
-  }
-
-  const events = store.loadEvents(snapshot.runId);
-  const filters = options.filters ?? {};
-  const taskIds = uniqueSorted([
-    ...snapshot.plan.tasks.map((task) => task.id),
-    ...events.map((event) => event.taskId).filter((id): id is string => typeof id === "string"),
-  ]);
-  const eventTypes = uniqueSorted(events.map((event) => String(event.type)));
-  const statuses = uniqueSorted([
-    snapshot.status,
-    ...snapshot.orderedResults.map((task) => task.status),
-    ...events.map((event) => event.status).filter((status) => typeof status === "string").map(String),
-  ]);
-  const timeline = events
-    .filter((event) => workflowEventMatchesFilters(event, filters))
-    .map(workflowEventToTuiTimelineItem);
-  const notification = createWorkflowNotification(createWorkflowResultFromSnapshot(snapshot));
-  const reconciliationActionId = options.reconciliationActionId;
-  const reconciliationSpec = reconciliationActionId
-    ? createWorkflowSpecFromReconciliationPlan(notification.reconciliationPlan, { actionIds: [reconciliationActionId] })
-    : undefined;
-
-  return {
-    runs,
-    selectedRunId: snapshot.runId,
-    snapshot,
-    tasks: workflowSnapshotTasks(snapshot),
-    timeline,
-    filters,
-    available: { taskIds, eventTypes, statuses },
-    reconciliation: notification.reconciliationPlan,
-    selectedReconciliationActionId: reconciliationActionId,
-    reconciliationSpec,
-    notice: options.notice,
-    error: options.error,
-  };
-}
-
-function workflowSnapshotTasks(snapshot: WorkflowRunSnapshot): WorkflowTuiTask[] {
-  return snapshot.plan.tasks.map((task) => {
-    const result = snapshot.results[task.id];
-    const running = snapshot.runningTasks[task.id];
-    const blocked = snapshot.blockedTasks[task.id];
-    const status =
-      result?.status
-      ?? (blocked ? "blocked" : undefined)
-      ?? (running ? "running" : undefined)
-      ?? (snapshot.pendingTaskIds.includes(task.id) ? "pending" : undefined)
-      ?? "pending";
-    return {
-      taskId: task.id,
-      status,
-      summary: result?.summary ?? running?.summary ?? blocked?.reason ?? task.description,
-      dependencies: [...(task.dependsOn ?? [])],
-      taskManagerTaskId: stringFromUnknown(result?.metadata?.taskManagerTaskId ?? running?.metadata?.taskManagerTaskId),
-    };
-  });
-}
-
-function workflowEventMatchesFilters(event: WorkflowRunEvent, filters: WorkflowTuiState["filters"]): boolean {
-  if (filters.taskId && event.taskId !== filters.taskId) return false;
-  if (filters.eventType && event.type !== filters.eventType) return false;
-  if (filters.status && event.status !== filters.status) return false;
-  return true;
-}
-
-function workflowEventToTuiTimelineItem(event: WorkflowRunEvent): WorkflowTuiTimelineItem {
-  return {
-    timestamp: event.timestamp,
-    type: event.type,
-    taskId: event.taskId,
-    status: typeof event.status === "string" ? event.status : undefined,
-    summary: event.summary ?? event.result?.summary ?? event.blockedTask?.reason ?? event.type,
-  };
-}
-
-function uniqueSorted(values: string[]): string[] {
-  return [...new Set(values)].sort();
-}
-
-function stringFromUnknown(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function normalizeWorkflowPermissionMode(value: string | undefined): "default" | "plan" | "full_auto" | undefined {
-  if (value === "default" || value === "plan" || value === "full_auto") return value;
-  return undefined;
-}
-
-/**
- * 把已存储的会话消息（Anthropic Message[]）回放成前端 TranscriptItem[]。
- * user/assistant 文本、tool_use 摘要、tool_result 输出分别映射，跳过空白块。
- */
-export function messagesToTranscriptItems(messages: unknown[]): Array<{
-  role: "system" | "user" | "assistant" | "tool" | "tool_result" | "log";
-  text: string;
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  is_error?: boolean;
-}> {
-  const items: Array<{
-    role: "system" | "user" | "assistant" | "tool" | "tool_result" | "log";
-    text: string;
-    tool_name?: string;
-    tool_input?: Record<string, unknown>;
-    is_error?: boolean;
-  }> = [];
-
-  for (const raw of messages) {
-    const msg = raw as {
-      role?: string;
-      type?: string;
-      content?: unknown;
-      toolUses?: Array<{ name?: string; input?: unknown }> | null;
-      isError?: boolean;
-    } | null;
-    if (!msg) continue;
-    const role = msg.role ?? msg.type ?? "system";
-
-    if (role === "tool_result") {
-      const text = typeof msg.content === "string"
-        ? msg.content
-        : Array.isArray(msg.content)
-          ? (msg.content as Array<{ text?: string }>).map((b) => b?.text ?? "").join("\n")
-          : JSON.stringify(msg.content ?? "");
-      items.push({ role: "tool_result", text, is_error: !!msg.isError });
-      continue;
-    }
-
-    if (typeof msg.content === "string") {
-      const text = msg.content.trim();
-      if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
-      if (role === "assistant" && Array.isArray(msg.toolUses)) {
-        for (const toolUse of msg.toolUses) {
-          if (typeof toolUse?.name !== "string") continue;
-          items.push({
-            role: "tool",
-            text: `${toolUse.name} ${JSON.stringify(toolUse.input ?? {})}`,
-            tool_name: toolUse.name,
-            tool_input: (toolUse.input ?? {}) as Record<string, unknown>,
-          });
-        }
-      }
-      continue;
-    }
-    if (!Array.isArray(msg.content)) continue;
-
-    for (const block of msg.content) {
-      const b = block as
-        | { type?: string; text?: string; name?: string; input?: unknown; content?: unknown; is_error?: boolean }
-        | null;
-      if (!b) continue;
-      if (b.type === "tool_result") {
-        const content = typeof b.content === "string"
-          ? b.content
-          : Array.isArray(b.content)
-            ? (b.content as Array<{ text?: string }>).map((c) => c?.text ?? "").join("\n")
-            : JSON.stringify(b.content ?? "");
-        items.push({ role: "tool_result", text: content, is_error: !!b.is_error });
-      } else if (b.type === "tool_use" && typeof b.name === "string") {
-        items.push({
-          role: "tool",
-          text: `${b.name} ${JSON.stringify(b.input ?? {})}`,
-          tool_name: b.name,
-          tool_input: (b.input ?? {}) as Record<string, unknown>,
-        });
-      } else if (b.type === "text" && typeof b.text === "string") {
-        const text = b.text.trim();
-        if (text) items.push({ role: role === "assistant" ? "assistant" : "user", text });
-      } else if (b.type === "image") {
-        items.push({ role: role === "assistant" ? "assistant" : "user", text: "[image]" });
-      }
-    }
-  }
-
-  return items;
-}
-
-export async function processLineForHost(
-  line: string,
-  bundle: any,
-  emit: (event: BackendHostEvent) => Promise<void>,
-  lastToolInputs: Map<string, Record<string, unknown>>,
-  settings: Settings,
-  shouldInterrupt?: () => boolean,
-  userContent?: string | ContentBlock[],
-): Promise<void> {
-  await emit({
-    type: "transcript_item",
-    item: { role: "user", text: line },
-  });
-
-  let assistantText = "";
-  const emitAssistantSegment = async (): Promise<void> => {
-    const text = assistantText.trim();
-    assistantText = "";
-    if (!text) return;
-    await emit({
-      type: "transcript_item",
-      item: { role: "assistant", text },
-    });
-  };
-
-  try {
-    for await (const event of bundle.queryEngine.submitMessage(userContent ?? line) as AsyncIterable<StreamEvent>) {
-      if (shouldInterrupt?.()) break;
-      if (event.type === "text_delta") {
-        await emit({ type: "assistant_delta", message: event.delta });
-        assistantText += event.delta;
-      } else if (event.type === "tool_use_start") {
-        await emitAssistantSegment();
-        const tu = event.toolUse;
-        lastToolInputs.set(tu.name, tu.input ?? {});
-        await emit({
-          type: "tool_started",
-          tool_name: tu.name,
-          tool_input: tu.input,
-          item: {
-            role: "tool",
-            text: `${tu.name} ${JSON.stringify(tu.input ?? {})}`,
-            tool_name: tu.name,
-            tool_input: tu.input,
-          },
-        });
-      } else if (event.type === "tool_use_end") {
-        const result = event.result;
-        const outputText = result.content?.map((b: any) => b.text ?? "").join("\n") ?? "";
-        const isError = !!result.isError;
-        await emit({
-          type: "tool_completed",
-          tool_name: (result as any).toolName ?? "unknown",
-          output: outputText,
-          is_error: isError,
-          item: {
-            role: "tool_result",
-            text: outputText,
-            tool_name: (result as any).toolName ?? "unknown",
-            is_error: isError,
-          },
-        });
-        await emit({
-          type: "state_snapshot",
-          state: buildStatePayload(bundle.settings),
-          mcp_servers: [],
-          bridge_sessions: [],
-        });
-
-        const toolName = (result as any).toolName ?? "";
-        if (toolName === "TodoWrite" || toolName === "todo_write") {
-          const toolInput = lastToolInputs.get(toolName) ?? {};
-          const todos = (toolInput as any).todos ?? (toolInput as any).content ?? [];
-          if (Array.isArray(todos) && todos.length > 0) {
-            const lines: string[] = [];
-            for (const item of todos) {
-              if (typeof item === "object" && item !== null) {
-                const checked = (item as any).status
-                  ? ["done", "completed", "x", true].includes((item as any).status)
-                  : false;
-                const text = (item as any).content ?? (item as any).text ?? String(item);
-                lines.push(`- [${checked ? "x" : " "}] ${text}`);
-              }
-            }
-            if (lines.length > 0) {
-              await emit({ type: "todo_update", todo_markdown: lines.join("\n") });
-            }
-          } else {
-            const mdLines = outputText.split("\n").filter((l: string) => l.trim().startsWith("- ["));
-            if (mdLines.length > 0) {
-              await emit({ type: "todo_update", todo_markdown: mdLines.join("\n") });
-            }
-          }
-        }
-      } else if (event.type === "error") {
-        const err = event.error;
-        await emit({
-          type: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? formatApiError(err, settings) : String(err);
-    await emit({ type: "error", message: msg });
-  }
-
-  const finalText = assistantText.trim();
-  await emit({
-    type: "assistant_complete",
-    message: finalText,
-    item: { role: "assistant", text: finalText },
-  });
-  await emit({
-    type: "state_snapshot",
-    state: buildStatePayload(bundle.settings),
-    mcp_servers: [],
-    bridge_sessions: [],
-  });
-  await emit({ type: "line_complete" });
-}
-
-/**
- * 构建当前应用状态的有效载荷对象，用于前端显示或状态同步。
- * 
- * @param settings - 当前应用设置
- * @returns Record<string, unknown> 包含模型、CWD、认证状态、主题等信息的状态对象
- */
-function buildStatePayload(settings: Settings, mcpManager?: McpClientManager): Record<string, unknown> {
-  const connections = mcpManager?.getConnections() ?? [];
-  const mcp_connected = connections.filter((c) => c.status === "connected").length;
-  const mcp_failed = connections.filter((c) => c.status === "error").length;
-  return {
-    model: settings.model,
-    cwd: process.cwd(),
-    provider: "unknown",
-    auth_status: settings.apiKey ? "configured" : "missing",
-    base_url: settings.baseUrl ?? null,
-    permission_mode: settings.permission?.mode ?? "default",
-    theme: settings.theme ?? "default",
-    vim_enabled: settings.vimMode ?? false,
-    voice_enabled: settings.voiceMode ?? false,
-    voice_available: false,
-    fast_mode: settings.fastMode ?? false,
-    effort: settings.effort ?? "medium",
-    output_style: settings.outputStyle ?? "default",
-    passes: settings.passes ?? 1,
-    mcp_connected,
-    mcp_failed,
-    input_tokens: 0,
-    output_tokens: 0,
-  };
-}
-
-// End-of-turn memory maintenance shared by REPL and TUI backend.
+// End-of-turn memory maintenance shared by interactive and print runtimes.
 export function isSessionMemoryEnabled(settings: Settings): boolean {
   return settings.memory?.enabled !== false && settings.memory?.sessionMemoryEnabled !== false;
 }
@@ -2479,79 +1282,18 @@ async function loadSessionAndResume(
   resumeId?: string,
   _name?: string,
 ): Promise<string> {
-  // 新存储优先（项目分目录；--continue 走 latest.json，--resume <id> 走 named）。
-  try {
-    const { loadSessionSnapshot: loadLatest, loadSessionById } = await import("@openharness/services");
-    const payload = resumeId ? loadSessionById(process.cwd(), resumeId) : loadLatest(process.cwd());
-    if (payload) {
-      engine.loadMessages(payload.messages);
-      if (payload.model) engine.setModel(payload.model);
-      const modeMsg = matchSessionMode(payload.session_mode);
-      if (modeMsg) console.log(modeMsg);
-      console.log(`Resumed session: ${payload.session_id} (${payload.message_count} messages)`);
-      return payload.session_id;
-    }
-  } catch {
-    // 回退旧平铺存储
-  }
-
-  // 向后兼容：旧平铺 <sessionsDir>/<id>.json——仅显式 --resume <id> 时回退。
-  // 裸 --continue 不回退全局平铺池（会串到别的项目的会话）。
-  if (!resumeId) {
-    return generateSessionId();
-  }
-  const sessionId = resumeId;
-
-  const snapshot = await loadSessionSnapshot(sessionId);
-  if (snapshot) {
-    engine.loadMessages(snapshot.messages);
-    if (snapshot.model) engine.setModel(snapshot.model);
-    console.log(`Resumed session: ${sessionId} (${snapshot.messages.length} messages)`);
-    return sessionId;
+  const { loadSessionSnapshot: loadLatest, loadSessionById } = await import("@openharness/services");
+  const payload = resumeId ? loadSessionById(process.cwd(), resumeId) : loadLatest(process.cwd());
+  if (payload) {
+    engine.loadMessages(payload.messages);
+    if (payload.model) engine.setModel(payload.model);
+    const modeMsg = matchSessionMode(payload.session_mode);
+    if (modeMsg) console.log(modeMsg);
+    console.log(`Resumed session: ${payload.session_id} (${payload.message_count} messages)`);
+    return payload.session_id;
   }
 
   return generateSessionId();
-}
-
-/**
- * 查找最新的会话 ID。
- * 
- * 读取会话目录下的 JSON 文件，按文件名排序后返回最新的一个。
- * 
- * @returns Promise<string | undefined> 最新会话 ID，如果没有则返回 undefined
- */
-async function findLatestSessionId(): Promise<string | undefined> {
-  const { readdir } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const { homedir } = await import("node:os");
-  const dir = join(homedir(), ".openharness", "sessions");
-  try {
-    const files = await readdir(dir);
-    const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
-    if (!jsonFiles.length) return undefined;
-    return jsonFiles[0]!.replace(/\.json$/, "");
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * 从磁盘加载会话快照数据。
- * 
- * @param id - 会话 ID
- * @returns Promise<SessionSnapshot | undefined> 会话快照对象，如果加载失败则返回 undefined
- */
-async function loadSessionSnapshot(id: string): Promise<SessionSnapshot | undefined> {
-  const { readFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const { homedir } = await import("node:os");
-  const path = join(homedir(), ".openharness", "sessions", `${id}.json`);
-  try {
-    const raw = await readFile(path, "utf-8");
-    return JSON.parse(raw) as SessionSnapshot;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -2613,15 +1355,15 @@ export async function loadSkillsThreeSources(
   skillRegistry: SkillRegistry,
   cwd: string,
   settings?: Settings,
-): Promise<void> {
+) {
   skillRegistry.registerBundled();
+  const pluginContributions = settings
+    ? await loadPluginContributions(skillRegistry, settings, cwd)
+    : { plugins: [], warnings: [] };
   // 插件贡献插在 bundled 之后、user/project 之前：bundled < plugin < user < project
   // （register 覆盖语义）。信任门控告警直接打到 stderr，三模式一致。
-  if (settings) {
-    const { warnings } = await loadPluginContributions(skillRegistry, settings, cwd);
-    for (const warning of warnings) {
-      process.stderr.write(`[plugins] ${warning}\n`);
-    }
+  for (const warning of pluginContributions.warnings) {
+    process.stderr.write(`[plugins] ${warning}\n`);
   }
   const loader = new SkillLoader(skillRegistry);
   await loader.loadFromDirectory(getSkillsDir(), { source: "user" });
@@ -2630,6 +1372,7 @@ export async function loadSkillsThreeSources(
   for (const dir of projectSkillDirs) {
     await loader.loadFromDirectory(dir, { source: "project" });
   }
+  return pluginContributions;
 }
 
 /**
@@ -2698,7 +1441,7 @@ export function buildModelVisibleSkillsList(
  * 名优先：与已有命令同名的 skill 不重复加入）。注意命令列表是给用户看的，
  * user-invocable 即可出现，即使 disableModelInvocation（那只挡模型不挡用户）。
  */
-export function buildHostCommandList(
+export function buildSlashCommandList(
   registry: CommandRegistry,
   skillRegistry?: SkillRegistry,
 ): string[] {
@@ -2718,9 +1461,9 @@ export function buildHostCommandList(
 
 /**
  * 构建发给前端的斜杠命令明细（名称 + 描述），供补全浮窗 / 命令面板展示。
- * 命名与去重规则同 {@link buildHostCommandList}：内置命令优先，追加 user-invocable 技能。
+ * 命名与去重规则同 {@link buildSlashCommandList}：内置命令优先，追加 user-invocable 技能。
  */
-export function buildHostCommandDetails(
+export function buildSlashCommandDetails(
   registry: CommandRegistry,
   skillRegistry?: SkillRegistry,
 ): Array<{ name: string; description: string }> {
@@ -2736,38 +1479,4 @@ export function buildHostCommandDetails(
     details.push({ name: cmd, description: skill.description ?? "" });
   }
   return details;
-}
-
-export interface HostSlashOutcome {
-  exit?: boolean;
-  clearTranscript?: boolean;
-  output?: string;
-  error?: string;
-}
-
-export function isNewConversationSlashCommand(line: string): boolean {
-  return line === "/new" || line.startsWith("/new ");
-}
-
-/**
- * 在 TUI 后端主机里路由斜杠命令（对齐 REPL 的 processLine 斜杠分支）。
- * 返回 host 应当 emit 的结果，由调用方翻译成 OHJSON 事件。**不调用模型。**
- */
-export async function runHostSlashCommand(
-  line: string,
-  registry: CommandRegistry,
-): Promise<HostSlashOutcome> {
-  const spaceIdx = line.indexOf(" ");
-  const name = spaceIdx >= 0 ? line.slice(0, spaceIdx) : line;
-  const argsStr = spaceIdx >= 0 ? line.slice(spaceIdx + 1) : "";
-  const result = await registry.execute(name, {
-    args: parseCommandArgs(argsStr),
-    raw: line,
-  });
-  if (result.output === "__EXIT__") return { exit: true };
-  return {
-    output: result.output ? result.output : undefined,
-    error: result.error,
-    clearTranscript: name === "/clear" || name === "/new",
-  };
 }

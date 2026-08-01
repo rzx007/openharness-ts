@@ -15,7 +15,7 @@ import type { TeammateSpawnConfig } from "@openharness/swarm";
  *   agentDef.model 为 undefined，必须回退到父进程模型，否则 teammate 会退回
  *   CLI 默认 provider/model。
  * - 不把 api-key 放进 argv（进程列表对其他用户可见）；teammate 复用同一份
- *   ~/.openharness/settings.json，并从继承的 env 里取 key。
+ *   ~/.openharness-ts/settings.json，并从继承的 env 里取 key。
  */
 export function buildTeammateCommand(
   config: TeammateSpawnConfig,

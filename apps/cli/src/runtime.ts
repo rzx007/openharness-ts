@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Settings, StreamingMessageClient } from "@openharness/core";
-import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, getConfigDir } from "@openharness/core";
+import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, getConfigDir, resolveGitRepository } from "@openharness/core";
 import { AnthropicClient, CodexSubscriptionClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { CredentialStorage, loadCodexCredential } from "@openharness/auth";
@@ -35,6 +35,7 @@ export type PermissionPromptFn = (
 
 export interface BootstrapOptions {
   settings: Settings;
+  cwd?: string;
   cliOverrides?: {
     apiKey?: string;
     baseUrl?: string;
@@ -59,6 +60,7 @@ export interface BootstrapOptions {
   skillRegistry?: SkillRegistry;
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
+  sessionId?: string;
 }
 
 /**
@@ -89,6 +91,7 @@ export function resolveRuntimeModel(
 
 export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundle> {
   const { settings } = options;
+  const cwd = options.cwd ?? process.cwd();
   const overrides = options.cliOverrides ?? {};
   const storage = options.credentialStorage ?? new CredentialStorage();
 
@@ -149,7 +152,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   const envSystemPrompt = process.env["OPENHARNESS_TASK_SYSTEM_PROMPT"] || undefined;
   const systemPrompt = overrides.systemPrompt ?? envSystemPrompt ?? await buildRuntimeSystemPrompt({
     customPrompt: settings.systemPrompt,
-    cwd: process.cwd(),
+    cwd,
     permissionMode: mode,
     fastMode: overrides.fastMode ?? settings.fastMode,
     effort: overrides.effort ?? settings.effort,
@@ -161,6 +164,8 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     maxTurns: overrides.maxTurns ?? settings.maxTurns,
     systemPrompt,
     model: runtimeModel,
+    cwd,
+    sessionId: options.sessionId,
     settings,
     permissionPrompt: options.permissionPrompt,
     skillRegistry: options.skillRegistry,
@@ -177,66 +182,12 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   // 注册 swarm subprocess 后端（幂等）：让 Agent 工具能真正把子代理拉起为
   // 子进程。teammate 命令由 buildTeammateCommand 构建（继承 model/provider/
   // 权限模式，不暴露 api-key）。
-  const backendRegistry = getBackendRegistry();
-  if (!backendRegistry.list().includes("subprocess")) {
-    const taskManager = getTaskManager();
-    // 构造真实 WorktreeManager 注入 subprocess 后端：让 isolate=true 的 teammate
-    // 在独立 git worktree 里跑。repoRoot 取 cwd 的 git 顶层，baseDir 按 repo 区分。
-    const repoRoot = await resolveRepoRoot(process.cwd());
-    const worktreeManager = new WorktreeManager({
-      runGit: nodeRunGit,
-      repoRoot,
-      baseDir: computeWorktreeBaseDir(repoRoot, getConfigDir()),
-    });
-    backendRegistry.register(
-      "subprocess",
-      new SubprocessBackend({
-        // 适配 TaskManager 到 TaskRunner 结构化接口：stopTask 丢弃返回的
-        // TaskInfo（后端只需 Promise<void>）。
-        taskRunner: {
-          // 该适配器只服务 subprocess teammate 后端，所以它创建的每个任务都是
-          // teammate：统一打上 type: "agent"，让 backend host 的 swarm_status
-          // listener 能据此过滤出 teammate 任务并点亮 SwarmPanel。
-          createShellTask: (opts) => taskManager.createShellTask({ ...opts, type: "agent" }),
-          createAgentTask: (opts) => taskManager.createAgentTask({ ...opts, type: "agent" }),
-          writeToTask: (id, data) => taskManager.writeToTask(id, data),
-          stopTask: async (id) => {
-            await taskManager.stopTask(id);
-          },
-        },
-        buildCommand: (cfg) => buildTeammateCommand(cfg, settings),
-        worktreeManager,
-        // D.5 接线：spawn 成功 → 成员写进 team.json（隐式建团队随会话退出清理），
-        // 团队纳入 leader 权限轮询，并启动后台裁决器（幂等）。worker 的写操作
-        // 经文件流转 leader 的 permissionChecker 自动裁决。
-        registerTeammate: (cfg, res) => {
-          registerTeammateInTeamFile(cfg.team, {
-            agentId: res.agentId,
-            name: cfg.name,
-            backendType: res.backendType,
-            joinedAt: Date.now() / 1000,
-            agentType: null,
-            model: cfg.model ?? null,
-            prompt: cfg.prompt,
-            color: null,
-            planModeRequired: false,
-            sessionId: cfg.sessionId ?? null,
-            subscriptions: [],
-            isActive: true,
-            mode: null,
-            tmuxPaneId: "",
-            cwd: cfg.cwd,
-            worktreePath: res.worktree?.path ?? null,
-            permissions: cfg.permissions ?? [],
-            status: "active",
-          });
-          watchTeamForPermissions(cfg.team);
-          startSwarmPermissionResolver(permissionChecker, READ_ONLY_TOOLS);
-        },
-      }),
-    );
-  }
-
+  await registerSubprocessBackend({
+    cwd,
+    sessionId: options.sessionId,
+    settings,
+    permissionChecker,
+  });
   const bundle = new RuntimeBuilder()
     .setApiClient(apiClient)
     .setToolRegistry(toolRegistry)
@@ -245,21 +196,80 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     .setQueryEngine(queryEngine)
     .build(settings);
 
-  await attachSandboxRuntime(bundle, process.cwd(), options.sandboxReporter);
+  await attachSandboxRuntime(bundle, cwd, options.sandboxReporter, options.sessionId);
   return bundle;
+}
+export async function registerSubprocessBackend(options: {
+  cwd: string;
+  sessionId?: string;
+  settings: Settings;
+  permissionChecker: Parameters<typeof startSwarmPermissionResolver>[0];
+}): Promise<void> {
+  const { cwd, sessionId, settings, permissionChecker } = options;
+  const runtimeScope = { cwd, sessionId };
+  const backendRegistry = getBackendRegistry(runtimeScope);
+  if (backendRegistry.list().includes("subprocess")) return;
+
+  const taskManager = getTaskManager(runtimeScope);
+  const repoRoot = await resolveRepoRoot(cwd);
+  const worktreeManager = new WorktreeManager({
+    runGit: nodeRunGit,
+    repoRoot,
+    baseDir: computeWorktreeBaseDir(repoRoot, getConfigDir()),
+  });
+  backendRegistry.register(
+    "subprocess",
+    new SubprocessBackend({
+      taskRunner: {
+        createShellTask: (opts) => taskManager.createShellTask({ ...opts, sessionId, type: "agent" }),
+        createAgentTask: (opts) => taskManager.createAgentTask({ ...opts, sessionId, type: "agent" }),
+        writeToTask: (id, data) => taskManager.writeToTask(id, data),
+        stopTask: async (id) => {
+          await taskManager.stopTask(id);
+        },
+      },
+      buildCommand: (cfg) => buildTeammateCommand(cfg, settings),
+      worktreeManager,
+      registerTeammate: (cfg, res) => {
+        registerTeammateInTeamFile(cfg.team, {
+          agentId: res.agentId,
+          name: cfg.name,
+          backendType: res.backendType,
+          joinedAt: Date.now() / 1000,
+          agentType: null,
+          model: cfg.model ?? null,
+          prompt: cfg.prompt,
+          color: null,
+          planModeRequired: false,
+          sessionId: cfg.sessionId ?? null,
+          subscriptions: [],
+          isActive: true,
+          mode: null,
+          tmuxPaneId: "",
+          cwd: cfg.cwd,
+          worktreePath: res.worktree?.path ?? null,
+          permissions: cfg.permissions ?? [],
+          status: "active",
+        });
+        watchTeamForPermissions(cfg.team);
+        startSwarmPermissionResolver(permissionChecker, READ_ONLY_TOOLS);
+      },
+    }),
+  );
 }
 
 async function attachSandboxRuntime(
   bundle: RuntimeBundle,
   cwd: string,
   reporter?: SandboxRuntimeReporter,
+  sessionId?: string,
 ): Promise<void> {
   let sandboxRuntime;
   try {
     sandboxRuntime = await startSandboxRuntime({
       settings: bundle.settings,
       cwd,
-      sessionId: createSandboxSessionId(cwd),
+      sessionId: createSandboxSessionId(cwd, sessionId),
       reporter,
     });
   } catch (error) {
@@ -282,9 +292,12 @@ async function attachSandboxRuntime(
   registerExitCleanup(bundle);
 }
 
-function createSandboxSessionId(cwd: string): string {
+function createSandboxSessionId(cwd: string, sessionId?: string): string {
   const repoId = createHash("sha1").update(cwd).digest("hex").slice(0, 12);
-  return `${process.pid}-${repoId}-${Date.now().toString(36)}`;
+  const safeSessionId = sessionId?.replace(/[^A-Za-z0-9._-]/g, "_");
+  return safeSessionId
+    ? `${process.pid}-${repoId}-${safeSessionId}`
+    : `${process.pid}-${repoId}-${Date.now().toString(36)}`;
 }
 
 export function formatSandboxUnavailableError(reason: string, settings: Settings): string {
@@ -583,14 +596,9 @@ export const nodeRunGit: GitRunner = (args, cwd) =>
   });
 
 /**
- * 解析 *cwd* 所在 git 仓库的顶层目录（`git rev-parse --show-toplevel`）。
+ * 解析 *cwd* 所在 Git 仓库的顶层目录，不启动 Git 子进程。
  * 失败（非 git 仓库 / git 不可用）回退到 cwd 本身。
  */
 export async function resolveRepoRoot(cwd: string): Promise<string> {
-  const { code, stdout } = await nodeRunGit(["rev-parse", "--show-toplevel"], cwd);
-  if (code === 0) {
-    const top = stdout.trim();
-    if (top) return top;
-  }
-  return cwd;
+  return resolveGitRepository(cwd)?.root ?? cwd;
 }

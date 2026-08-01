@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 export function resolveBun(): string | null {
   const candidates = process.platform === "win32" ? ["bun.exe", "bun"] : ["bun"];
   for (const cmd of candidates) {
-    const r = spawnSync(cmd, ["--version"], { stdio: "ignore" });
+    const r = spawnSync(cmd, ["--version"], { stdio: "ignore", windowsHide: true });
     if (r.error == null && r.status === 0) return cmd;
   }
   return null;

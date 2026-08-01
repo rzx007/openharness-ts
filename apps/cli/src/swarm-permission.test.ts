@@ -28,7 +28,7 @@ beforeEach(() => {
 afterEach(() => {
   stopSwarmPermissionResolver();
   _resetSwarmPermissionStateForTests();
-  rmSync(join(homedir(), ".openharness", "teams", team), { recursive: true, force: true });
+  rmSync(join(homedir(), ".openharness-ts", "teams", team), { recursive: true, force: true });
   delete process.env.CLAUDE_CODE_TEAM_NAME;
   delete process.env.CLAUDE_CODE_AGENT_ID;
   delete process.env.CLAUDE_CODE_AGENT_NAME;

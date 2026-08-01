@@ -156,7 +156,7 @@ export function buildDryRunReport(input: {
 /**
  * `oh --dry-run`：预览解析后的运行时配置 + readiness，**不创建 API client、不调模型**。
  *
- * 在 mainAction 的 backendOnly/tui/print 早分支之前调用。
+ * 在 mainAction 的 tui/print 早分支之前调用。
  */
 export async function runDryRun(settings: Settings, options: DryRunOptions): Promise<void> {
   const chalk = (await import("chalk")).default;

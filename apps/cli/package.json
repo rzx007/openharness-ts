@@ -26,6 +26,7 @@
     "@openharness/prompts": "workspace:*",
     "@openharness/plugins": "workspace:*",
     "@openharness/services": "workspace:*",
+    "@openharness/server": "workspace:*",
     "@openharness/skills": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "@openharness/channels": "workspace:*",

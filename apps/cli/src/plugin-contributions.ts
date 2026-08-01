@@ -14,7 +14,7 @@ import type { ToolDefinition } from "@openharness/core";
  * 插件贡献 → 运行时注册（C.1 接线）。
  *
  * 插件的 skills 与 commands 都注册进 SkillRegistry：斜杠路由
- * （matchUserInvocableSkill）、命令列表（buildHostCommandList）、模型可见性
+ * （matchUserInvocableSkill）、命令目录（buildSlashCommandList）、模型可见性
  * （modelVisibleList）全部复用既有 skill 链路——`/my-plugin:lint` 即时可用，
  * 无需另建插件命令表。
  *
@@ -139,9 +139,12 @@ export async function registerPluginTools(
 }
 
 /** 插件 MCP server 合并进用户配置：**用户 settings 同名优先**，插件不覆盖。 */
-export function mergePluginMcpServers<T>(userServers: Record<string, T> | undefined): Record<string, T> {
+export function mergePluginMcpServers<T>(
+  userServers: Record<string, T> | undefined,
+  plugins: readonly LoadedPlugin[] = loadedPluginsCache,
+): Record<string, T> {
   const merged: Record<string, T> = {};
-  for (const plugin of loadedPluginsCache) {
+  for (const plugin of plugins) {
     if (!plugin.enabled) continue;
     for (const [name, config] of Object.entries(plugin.mcpServers)) {
       merged[name] = config as T;

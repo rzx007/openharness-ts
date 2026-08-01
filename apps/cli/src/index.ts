@@ -9,6 +9,7 @@ import { createProviderCommand } from "./commands/provider";
 import { createSetupCommand } from "./commands/setup";
 import { createSandboxCommand } from "./commands/sandbox";
 import { createWorkflowCommand } from "./commands/workflow";
+import { createDaemonCommand, createServeCommand } from "./commands/daemon";
 import { VERSION } from "./version";
 
 const program = new Command();
@@ -37,7 +38,6 @@ program
   .option("--effort <level>", "Effort level (low | medium | high)")
   .option("--verbose", "Verbose output")
   .option("-d, --debug", "Debug mode")
-  .option("--backend-only", "Run as BackendHost for TUI (spawned by TUI frontend; OHJSON on stdin/stdout)")
   .option("--tui", "Launch terminal UI (opentui frontend, requires Bun)")
   .option("--dangerously-skip-permissions", "Skip all permission checks")
   .option("--allowed-tools <tools>", "Comma-separated allowed tools")
@@ -60,6 +60,8 @@ program.addCommand(createProviderCommand());
 program.addCommand(createSetupCommand());
 program.addCommand(createSandboxCommand());
 program.addCommand(createWorkflowCommand());
+program.addCommand(createServeCommand());
+program.addCommand(createDaemonCommand());
 
 program
   .command("config")

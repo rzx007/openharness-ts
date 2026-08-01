@@ -2,10 +2,10 @@ import { Command } from "commander";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const JOBS_PATH = join(homedir(), ".openharness", "cron_jobs.json");
-const PID_PATH = join(homedir(), ".openharness", "cron.pid");
-const HISTORY_PATH = join(homedir(), ".openharness", "cron_history.jsonl");
-const LOG_DIR = join(homedir(), ".openharness", "cron_logs");
+const JOBS_PATH = join(homedir(), ".openharness-ts", "cron_jobs.json");
+const PID_PATH = join(homedir(), ".openharness-ts", "cron.pid");
+const HISTORY_PATH = join(homedir(), ".openharness-ts", "cron_history.jsonl");
+const LOG_DIR = join(homedir(), ".openharness-ts", "cron_logs");
 
 /** Returns the PID of the running daemon, or null if not running. */
 async function getDaemonPid(): Promise<number | null> {
@@ -101,6 +101,7 @@ export function createCronCommand(): Command {
       const child = spawn(process.execPath, [...process.execArgv, process.argv[1]!, "cron", "daemon"], {
         detached: true,
         stdio: "ignore",
+        windowsHide: true,
       });
       child.unref();
       // Give the daemon a moment to write its PID file
@@ -148,7 +149,7 @@ export function createCronCommand(): Command {
       scheduler.setLogDir(LOG_DIR);
 
       // Write PID file so "start" and "stop" can track us.
-      await mkdir(join(homedir(), ".openharness"), { recursive: true }).catch(() => {});
+      await mkdir(join(homedir(), ".openharness-ts"), { recursive: true }).catch(() => {});
       await writeFile(PID_PATH, String(process.pid), "utf-8").catch(() => {});
 
       await scheduler.loadJobs(JOBS_PATH);

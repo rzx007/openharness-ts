@@ -2,7 +2,22 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "../..",
+    "baseUrl": ".",
+    "paths": {
+      "@openharness/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@openharness/memory": [
+        "../../packages/memory/src/index.ts"
+      ],
+      "@openharness/server": [
+        "../../packages/server/src/index.ts"
+      ],
+      "@openharness/services": [
+        "../../packages/services/src/index.ts"
+      ]
+    }
   },
   "include": [
     "src"
