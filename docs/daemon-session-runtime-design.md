@@ -2,7 +2,7 @@
 
 > 状态：主线架构。Task 0-9 已落地 daemon/client、TUI attach 与 durable message-part 基础版。
 > 日期：2026-07-31。
-> 决策：默认 `ohs --tui` 已迁到 daemon attach 路径：`--tui -> frontend -> @openharness/client -> ohs serve`。TUI 的旧 frontend-owned backend/OHJSON 兼容路径已退场。目标架构是类似 opencode 的 daemon/server，具备持久化 session，以及可 attach 的客户端。
+> 决策：默认 `ohs`（与显式 `ohs --tui`）走 daemon attach：`CLI -> frontend -> @openharness/client -> ohs serve`。进程内 REPL 产品入口已移除；print/worker 仍为无 UI 路径。TUI 的旧 frontend-owned backend/OHJSON 兼容路径已退场。
 
 ## 1. 目标
 
@@ -141,11 +141,12 @@ apps/web / apps/desktop
 - Daemon session runtime 已按 session/location 创建 MCP manager，并随 runtime 生命周期关闭。
 - 更深层的 provider/tool/sandbox cancellation。
 - TUI 主路径已迁到 daemon client。
+- Slash command：catalog、template expand，以及 `/model` `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/help` `/status` `/version` 已落地；`/tasks run`、部分 REPL-only 命令仍待。
 - Web/Desktop/remote attach 的认证与部署策略。
 
 ## 5. 持久化存储
 
-目标权威存储使用 SQLite。当前基础版先用文件 adapter 固化数据与事件语义。print/REPL 的项目级 JSON snapshot 是独立功能，不是 daemon store 的旧版本、迁移源或恢复后门。
+目标权威存储使用 SQLite。当前基础版先用文件 adapter 固化数据与事件语义。print 的项目级 JSON snapshot 是独立功能，不是 daemon store 的旧版本、迁移源或恢复后门。
 
 ### 5.1 表结构
 
@@ -239,15 +240,54 @@ SQLite adapter 可为每个已提交事件使用一次事务。
 
 ```text
 GET    /health
+GET    /commands?cwd=
+GET    /settings
+PATCH  /settings
+GET    /providers
+GET    /memory?cwd=
+GET    /memory/:entryId?cwd=
+POST   /memory
+DELETE /memory/:entryId?cwd=
+GET    /auth
+POST   /auth/login
+POST   /auth/logout
+GET    /context?cwd=
+POST   /dream
+GET    /profile
+POST   /profile/init
+GET    /output-styles
+POST   /project/init
+GET    /plugins?cwd=
+POST   /plugins/:name/enable
+POST   /plugins/:name/disable
+POST   /plugins/reload
+GET    /agent-personas
+GET    /hooks?cwd=&sessionId=
+GET    /git/diff?cwd=&full=
+GET    /git/branch?cwd=&list=
+GET    /git/status?cwd=
+POST   /git/commit
+GET    /tasks?sessionId=&cwd=&status=
+POST   /tasks
+GET    /tasks/:taskId?sessionId=&cwd=
+POST   /tasks/:taskId/stop?sessionId=&cwd=
 GET    /sessions?cwd=&limit=&includeArchived=
 POST   /sessions
 GET    /sessions/:sessionId
+PATCH  /sessions/:sessionId
 GET    /sessions/:sessionId/state
+GET    /sessions/:sessionId/mcp
+GET    /sessions/:sessionId/usage
+POST   /sessions/:sessionId/export
+POST   /sessions/:sessionId/compact
+POST   /sessions/:sessionId/rewind
+POST   /sessions/:sessionId/remember
 DELETE /sessions/:sessionId
 
 GET    /sessions/:sessionId/messages?limit=&cursor=
 GET    /sessions/:sessionId/parts?limit=&cursor=&messageId=
 POST   /sessions/:sessionId/prompts
+POST   /sessions/:sessionId/commands
 POST   /sessions/:sessionId/interrupt
 
 GET    /events?cursor=&afterSeq=&sessionId=&limit=
@@ -257,15 +297,32 @@ GET    /permissions?sessionId=&status=&toolName=&limit=
 POST   /permissions/:requestId/reply
 ```
 
+Slash command 边界：
+
+- `GET /commands` 只返回 cwd 作用域的 **catalog 元数据**（builtin session 命令 + skill/template），不是通用执行器。
+- `POST /sessions/:id/commands` 只用于 **template/skill 展开 → 正常 admitPrompt**。
+- `/model` 等状态变更走资源 API（如 `PATCH /sessions/:id`），不走通用 `runCommand`。
+- 客户端本地 UI 命令（`/new`、`/sessions`、`/theme`、`/permissions` 等）不进 server registry。
+- 未知 `/...` 必须失败关闭，不得当普通 prompt 发给模型。
+- 跨端呈现/派发：`@openharness/client` `dispatchSessionCommand`（流程见 [slash-commands-flow.md](./slash-commands-flow.md)）。
+
+入口边界（刻意不进 daemon）：
+
+- `-p/--print` 与 `--task-worker` / `--swarm-worker` 仍是**进程内一次性 runtime**（swarm teammate、无头批处理）。它们不 attach daemon session store；权限走文件流或 ask-即拒，不经 PermissionBroker。
+- 交互产品入口只有 TUI/daemon。旧 REPL registry 已拆除。
+
+资源 API 风险说明：
+
+- `/commit`（`POST /git/commit`）会 `git add -A` 后提交；多客户端并发时可能互相踩工作树。无参 `/commit` 仅 `git status --short`。
+- `/reload-plugins` / plugin enable|disable 通过 **关闭 cwd 下 session runtime** 生效，下次 warm 再发现插件；不是进程内热替换 hooks/skills。
+- Daemon 启动时对磁盘上遗留的 `pending`/`running` run 调用 `interruptActiveRuns`，避免客户端永久 busy。sessions/messages/parts/events 经 `sessions.json` 跨重启保留。
+
 当前事件流使用 SSE。`GET /health` 只返回存活状态与可选 release version；session 数据结构没有并行协议版本。CLI 用 registry 的 release version 与启动时间识别 stale daemon。WebSocket 可后续加入，以支持更低延迟的双向控制。
 
 规划中但尚未实现的 API：
 
 ```text
-PATCH  /sessions/:sessionId
 POST   /sessions/:sessionId/resume
-GET    /tasks?sessionId=
-POST   /tasks/:taskId/stop
 ```
 
 ## 7. Client SDK 类型
@@ -435,7 +492,8 @@ ohs daemon start
 ohs daemon status
 ohs daemon stop
 ohs attach [url]
-ohs --tui        # 启动/attach daemon，然后启动 TUI 客户端
+ohs              # 默认：启动/attach daemon，然后启动 TUI 客户端
+ohs --tui        # 显式同上（进程内 REPL 入口已移除）
 ```
 
 注册文件：

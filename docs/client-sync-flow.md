@@ -25,16 +25,18 @@ SessionRuntime / QueryEngine
 - UI 不再 spawn per-session backend 作为主路径。
 - 单 session attach 先读取原子 HTTP snapshot，再从 snapshot cursor 消费 SSE live event。
 - 多个客户端 attach 同一个 daemon 时，状态由同一个 reducer 收敛。
+- 斜杠命令呈现/派发走 `dispatchSessionCommand`（见 [slash-commands-flow.md](./slash-commands-flow.md)），不绑 TUI React。
 
 ## 包结构
 
 ```text
 packages/client/src
-  client.ts      # OpenHarnessClient：typed HTTP API + SSE parser
-  reducer.ts     # applyEvent/applyEvents：事件归并为 client state
-  sync.ts        # hydrateState/syncEvents：snapshot/replay + live 合并
-  types.ts       # 面向客户端的 public types
-  index.ts       # public exports
+  client.ts            # OpenHarnessClient：typed HTTP API + SSE parser
+  reducer.ts           # applyEvent/applyEvents：事件归并为 client state
+  sync.ts              # hydrateState/syncEvents：snapshot/replay + live 合并
+  session-commands.ts  # dispatchSessionCommand：斜杠呈现/派发（无 React）
+  types.ts             # 面向客户端的 public types
+  index.ts             # public exports
 ```
 
 ## API Client
@@ -79,6 +81,14 @@ await client.replyPermission(pending[0].id, {
 | `streamEvents()` | `GET /events/stream` |
 | `listPermissions()` | `GET /permissions` |
 | `replyPermission(id, input)` | `POST /permissions/:requestId/reply` |
+| `createTask(input)` | `POST /tasks`（`/tasks run`） |
+| `initProject({ cwd })` | `POST /project/init` |
+| `listPlugins({ cwd })` / `enablePlugin` / `disablePlugin` | `/plugins` |
+| `reloadPlugins({ cwd })` | `POST /plugins/reload` |
+| `listHooks({ cwd, sessionId? })` | `GET /hooks` |
+| `listAgentPersonas()` | `GET /agent-personas` |
+| `getGitDiff` / `getGitBranch` / `getGitStatus` / `gitCommit` | `/git/*` |
+| `rewindSession(id, { count? })` | `POST /sessions/:id/rewind` |
 
 ## Event Reducer
 

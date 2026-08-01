@@ -34,6 +34,6 @@
 
 ## 测试
 
-`apps/cli/src/commands/slash-batch.test.ts`：mock SlashCommandContext 冒烟
+`apps/cli/src/commands/slash-batch.test.ts`：helpers + daemon profile/context 服务冒烟（旧 REPL registry 已拆除）
 四命令输出形状 + `/plugin enable` 持久化断言；discovery.test 钉住
 `OPENHARNESS_CONFIG_DIR` 重定向。

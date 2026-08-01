@@ -1,9 +1,9 @@
 # TUI 启动链路
 
-当前 `ohs --tui` 只有 daemon/client 主线，不再保留旧 TUI 后端/OHJSON 兼容路径。
+默认 `ohs`（无 prompt）与显式 `ohs --tui` 均走 daemon/client 主线；不再保留旧 TUI 后端/OHJSON，也不再提供进程内 REPL 交互入口。
 
 ```text
-ohs --tui [flags] ["initial prompt"]
+ohs | ohs --tui [flags] ["initial prompt"]
   -> apps/cli/src/index.ts
   -> mainAction()
   -> runTuiMode()
@@ -36,7 +36,7 @@ ohs --tui [flags] ["initial prompt"]
 
 ## CLI 启动器
 
-`apps/cli/src/index.ts` 只暴露 `--tui` 作为 TUI 入口。`mainAction()` 处理 `--cwd`、加载 settings 后进入 `runTuiMode()`。
+`mainAction()` 在无 prompt 时默认进入 `runTuiMode()`；`--tui` 为显式别名。带 prompt 且未加 `--tui` 时走 print。`--continue` / `--resume` 不能用于 TUI 入口（daemon 会话用 TUI 内 `/sessions` / `/resume`）。
 
 `runTuiMode()` 负责：
 

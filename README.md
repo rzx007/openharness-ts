@@ -5,18 +5,20 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 ## 特性
 
 > ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
+>
+> **易漂移数字以代码/单测为准**：内置工具数 → `packages/tools` `createDefaultToolRegistry`（`registry.test.ts` 锁 45）；Provider 数 → `packages/api` `PROVIDERS`（`registry.test.ts` 锁 21）；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。架构细节以 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 优先于本文。
 
-- ✅ **多模型支持** — 21 个 Provider 自动检测（Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅、reasoning effort
-- ✅ **内置工具（45）** — 文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait / Workflow / ImageToText / ImageGeneration / FeishuPush 等齐全；bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
+- ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
+- ✅ **内置工具（45）** — 以 `createDefaultToolRegistry()` 为准：文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait / Workflow / ImageToText / ImageGeneration / FeishuPush 等齐全；bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
 - ✅ **多 Agent 编排** — `agent` 工具真实派发 `--task-worker` 子进程 teammate：`SendMessage` 重启式多轮续聊、独立 git worktree 隔离、只读自动放行、写操作经 pending/resolved 文件流转 leader 裁决、`TaskWait` 阻塞取结果；内置 7 agent + 用户/插件自定义 agent（`~/.openharness-ts/agents/*.md`）。Coordinator 硬调度器已支持 `Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、TUI follow-up 执行和 `ohs workflow` 管理命令。TUI SwarmPanel 组件仍在，但 daemon 事件尚未接入（当前恒为空）
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
-- ✅ **会话持久化** — TUI/跨端主线使用 daemon `SessionStore` 保存 session、input、message、canonical message parts、run、权限请求和事件；单会话通过原子 snapshot + SSE 恢复。REPL/print 仍保留项目级快照用于 `--continue` / `--resume`
+- ✅ **会话持久化** — TUI/跨端主线使用 daemon `SessionStore` 保存 session、input、message、canonical message parts、run、权限请求和事件；单会话通过原子 snapshot + SSE 恢复。print 仍保留项目级快照用于 `--continue` / `--resume`（不用于默认 TUI）
 - ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents/tools_dir 六类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 支持动态 import 插件工具
 - ✅ **Channels 引擎桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 QueryEngine；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-bridge-design.md](docs/channels-bridge-design.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。SwarmPanel UI 保留但尚未接 daemon 事件
-- 🟢 **Daemon Session Runtime** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、原子 session snapshot、SSE 事件流、单 session 串行/多 session 并发 run coordinator、持久化 PermissionBroker 和共享 `@openharness/client` reducer。`ohs --tui` 默认启动/attach daemon，TUI 的 OHJSON/BackendHost 路径已删除。详见 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 和 [docs/client-sync-flow.md](docs/client-sync-flow.md)
+- 🟢 **Daemon Session Runtime** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、原子 session snapshot、SSE 事件流、单 session 串行/多 session 并发 run coordinator、持久化 PermissionBroker 和共享 `@openharness/client` reducer。默认 `ohs`（与 `ohs --tui`）启动/attach daemon；进程内 REPL 入口已移除。详见 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 和 [docs/client-sync-flow.md](docs/client-sync-flow.md)
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
 - 🟡 **可用但仍在收口** — `sandbox`（Bash 走 SRT/Docker，文件工具宿主执行 + path guard；Docker proxy 为 bridge+代理环境 MVP；Docker/SRT 可选 e2e 已补，CI 接入待补）
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
@@ -58,13 +60,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 # CLI 安装后提供两个等价命令：ohs 与 openharness
 
-# 单次执行
+# 单次执行（进程内 print）
 ohs "explain this codebase"
+ohs -p "explain this codebase"
 
-# 交互式 REPL
+# 交互式 TUI（默认；attach/启动 daemon，需安装 Bun）
 ohs
-
-# 启动 TUI（opentui + React 19 终端 UI，需安装 Bun）
 ohs --tui
 
 # TUI 带初始提示
@@ -134,11 +135,11 @@ Options:
   --mcp-config <path>          MCP 服务器配置文件
   --theme <theme>              终端主题
   --effort <level>             推理强度: low | medium | high
-  --tui                        启动 opentui TUI 界面（需安装 Bun）
+  --tui                        显式启动 TUI/daemon（无 prompt 时默认已是 TUI；需 Bun）
   --verbose                    详细输出
-  --continue                   继续上次会话
-  --resume <session>           恢复指定会话
-  -p, --print                  打印响应后退出（非交互）
+  --continue                   继续上次 **print** 项目级快照（不可用于交互 TUI）
+  --resume <session>           恢复指定 **print** 项目级快照（不可用于交互 TUI）
+  -p, --print                  打印响应后退出（非交互；有 prompt 时默认即 print）
   -n, --name <name>            命名会话
   --output-format <format>     输出格式: text | json | stream-json
   --append-system-prompt <p>   追加到默认 system prompt
@@ -230,11 +231,11 @@ Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-mo
 Workflow CLI 和 TUI `/workflow` 面板的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
 `ohs provider use <name>` 默认只切换供应商；要同时切模型请加 `-m/--model`，例如 `ohs provider use deepseek -m deepseek-chat`。
 
-交互式 REPL/TUI 内还有 `/help`、`/model`、`/provider`、`/memory`、`/tasks`、`/diff`、`/output-style` 等斜杠命令；完整清单见 [docs/slash-commands.md](docs/slash-commands.md)，运行时以 `/help` 为准。
+TUI 内斜杠命令走 daemon command catalog + client-local UI + template expand；共享呈现/派发在 `@openharness/client` `dispatchSessionCommand`（TUI 适配层 `sessionSlashCommands.ts`）。流程见 [docs/slash-commands-flow.md](docs/slash-commands-flow.md)，清单见 [docs/slash-commands.md](docs/slash-commands.md)；运行时以 TUI `/help` 与 `GET /commands` 为准。
 
 ### TUI、Web、Desktop 的共享会话
 
-`ohs --tui` 会连接已有 daemon；没有可用 daemon 时会启动一个。后续 Web、Desktop 或 remote attach 客户端都应通过 `@openharness/client` 连接同一个 daemon，而不是各自启动 agent runtime。
+默认 `ohs`（与 `ohs --tui`）会连接已有 daemon；没有可用/stale daemon 时会启动一个。后续 Web、Desktop 或 remote attach 客户端都应通过 `@openharness/client` 连接同一个 daemon，而不是各自启动 agent runtime。
 
 一次模型交互会被服务端保存为按顺序排列的 canonical message parts：
 
@@ -266,7 +267,7 @@ OpenHarness-ts/
 │   ├── core/                 # 核心引擎（QueryEngine、类型、配置）
 │   ├── api/                  # API Provider 抽象层
 │   ├── client/               # daemon HTTP/SSE typed client + event reducer（TUI/Web/Desktop 共用）
-│   ├── tools/                # 45 内置工具实现
+│   ├── tools/                # 内置工具（createDefaultToolRegistry，当前 45）
 │   ├── server/               # daemon HTTP server、run coordinator、permission broker
 │   ├── services/             # 服务层（Compact、Session、Cron、Task、LSP、OAuth）
 │   ├── coordinator/          # 多 Agent 编排器
@@ -278,7 +279,7 @@ OpenHarness-ts/
 │   ├── bridge/               # 多进程会话桥接
 │   ├── swarm/                # 多 Agent 团队管理
 │   ├── memory/               # 持久化记忆存储
-│   ├── commands/             # 斜杠命令注册
+│   ├── commands/             # CommandRegistry 库；TUI 不跑 CLI 旧 builtin 表
 │   ├── auth/                 # 认证流程（API Key、OAuth Device Code）
 │   ├── skills/               # Skill 加载与管理
 │   ├── plugins/              # 插件系统
@@ -309,7 +310,7 @@ OpenHarness-ts/
 │  ┌────────────────────┐  ┌──────────────────────────────────────┐  │
 │  │   CLI (ohs)        │  │   Clients (attach)                   │  │
 │  │   Commander.js     │  │   TUI / Web / Desktop / remote       │  │
-│  │   REPL / Print     │  │   OpenTUI + useServerSync            │  │
+│  │   TUI / Print      │  │   OpenTUI + useServerSync            │  │
 │  │   daemon lifecycle │  │   @openharness/client                │  │
 │  └────────┬───────────┘  └──────────────┬───────────────────────┘  │
 │           │               HTTP+SSE:     │ attach                   │
@@ -358,7 +359,7 @@ OpenHarness-ts/
 │                    API Provider Layer                               │
 │                                                                     │
 │  ┌────────────────────────────────────────────────────────────────┐ │
-│  │  Provider Registry (20+ providers)                            │ │
+│  │  Provider Registry (PROVIDERS, 21)                            │ │
 │  │                                                                │ │
 │  │  ┌──────────────┐  ┌──────────────────┐  ┌────────────────┐  │ │
 │  │  │ Anthropic    │  │ OpenAI Compat    │  │ Auto Detect    │  │ │
@@ -372,7 +373,7 @@ OpenHarness-ts/
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Tool Layer (45 tools)                            │
+│                    Tool Layer (createDefaultToolRegistry)           │
 │                                                                     │
 │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐ ┌─────────┐ │
 │  │ Bash    │ │ Read     │ │ Write    │ │ Edit      │ │ Glob    │ │
@@ -438,17 +439,17 @@ OpenHarness-ts/
 | ------------------------ | ----------------------------------------------------------- |
 | `AnthropicClient`        | Anthropic 原生 SDK 客户端，流式聚合 `input_json_delta`，429/5xx 指数退避重试 |
 | `OpenAICompatibleClient` | OpenAI 兼容客户端，支持 reasoning_content（o1/o3 系列），Kimi workaround |
-| `Provider Registry`      | 20+ Provider 自动检测：apiKey 前缀 → baseURL 关键字 → model 关键字，三级匹配  |
+| `Provider Registry`      | 21 个 Provider（`PROVIDERS`）自动检测：apiKey 前缀 → baseURL 关键字 → model 关键字，三级匹配  |
 | `detectProvider()`       | 从 `(model, apiKey, baseURL)` 三元组自动推断 Provider 和 BackendType |
 
 
-### 工具层（45 Tools）
+### 工具层（45 Tools，`createDefaultToolRegistry`）
 
 
 | 分类           | 工具                                                                                                            |
 | ------------ | ------------------------------------------------------------------------------------------------------------- |
 | **文件操作**     | `Bash`（命令执行）、`Read`（文件读取）、`Write`（文件写入）、`Edit`（精确字符串替换）、`Glob`（文件模式匹配）、`NotebookEdit`（Jupyter 编辑）             |
-| **搜索**       | `Grep`（ripgrep 优先 + JS fallback）、`LspTool`（LSP 集成）                                                            |
+| **搜索**       | `Grep`（ripgrep 优先 + JS fallback）、`Lsp`（LSP 集成）                                                            |
 | **Web**      | `WebFetch`（URL 抓取 + HTML→Text）、`WebSearch`（DuckDuckGo HTML 搜索）                                                |
 | **任务管理**     | `TaskCreate/Get/List/Output/Stop/Update/Wait`（7 个任务生命周期工具）                                                     |
 | **Agent/团队** | `Agent`（`--task-worker` 子进程派发）、`SendMessage`（重启式多轮通信）、`Workflow`（硬调度 DAG）、`TeamCreate/Delete`（团队管理）          |
@@ -464,7 +465,7 @@ OpenHarness-ts/
 | 模块               | 说明                                                                                                                                                                                                                               |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CompactService` | LLM 驱动的对话摘要：当 token 接近阈值时自动触发，结构化 `<analysis>/<summary>` 输出。详见 [docs/compact-service-design.md](docs/compact-service-design.md)                                                                                                  |
-| session snapshot functions | print/REPL 会话快照：按项目分目录（cwd 哈希）、latest/id 双写、load 侧 tool_use/result 配对修复、tool_metadata 白名单、transcript.md 导出；不参与 daemon/TUI 状态。详见 [docs/session-storage-design.md](docs/session-storage-design.md) |
+| session snapshot functions | print/worker 项目级快照：按项目分目录（cwd 哈希）、latest/id 双写、load 侧 tool_use/result 配对修复、tool_metadata 白名单、transcript.md 导出；不参与 daemon/TUI 状态。详见 [docs/session-storage-design.md](docs/session-storage-design.md) |
 | `SessionStore` | daemon 主线会话存储：session/input/message/canonical message part/event/run/permission request；支持单会话原子 snapshot + SSE cursor，当前为文件 adapter，SQLite adapter 待落地                                                                                                               |
 | `CronScheduler`  | 定时任务：cron 表达式解析 + `computeNextRunTime` + 执行历史记录                                                                                                                                                                                  |
 | `TaskManager`    | 任务管理：创建/查询/停止/输出，文件持久化                                                                                                                                                                                                           |
@@ -484,7 +485,7 @@ OpenHarness-ts/
 | `HookExecutor`          | Hook 系统：10 类事件（`session_start/end`、`pre/post_tool_use`、`pre/post_compact`、`user_prompt_submit`、`notification`、`stop`、`subagent_stop`），支持 command/http/prompt/agent 四种类型、priority、matcher、`$ARGUMENTS`                                                                                                                                                                                                                                                      |
 | `Swarm`                 | 多 Agent 团队：subprocess 后端把子代理派发为 `ohs --task-worker` 子进程（prompt 经 stdin），SendMessage 重启式多轮续聊；git worktree 隔离、只读工具自动放行；文件邮箱（原子写+文件锁）、team.json 持久化（随会话退出清理）、权限同步（worker 写操作经 pending/resolved 文件流转 leader checker 自动裁决）。详见 [docs/swarm-file-infra-design.md](docs/swarm-file-infra-design.md)、[docs/swarm-task-worker-design.md](docs/swarm-task-worker-design.md) |
 | `PluginLoader`          | 插件系统（Claude Code 布局兼容）：双源发现 + 项目插件信任门控；skills/commands/hooks/MCP/agents/tools_dir 六类贡献注册（`/plugin:cmd` 斜杠命令、`${CLAUDE_PLUGIN_ROOT}`、`.mcp.json`、动态工具 import）；卸载路径穿越防护。详见 [docs/plugins-contributions-design.md](docs/plugins-contributions-design.md)                                                                                                            |
-| `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；REPL 下 user-invocable skill 可作 `/<skill>` 斜杠命令；daemon 会加载 skills 供模型使用，TUI 斜杠路由仍需分层设计；model 可见性过滤                                                                                                                                   |
+| `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；daemon catalog 将 user-invocable skill 暴露为 template 斜杠（`POST /sessions/:id/commands` 展开后 admit）；model 可见性过滤                                                                                                                                   |
 | `BridgeManager`         | 会话桥接：多进程间共享会话状态                                                                                                                                                                                                                                                                                                                                                  |
 | `PermissionChecker`     | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                                                                                                                                                                                                                                                                                    |
 | `OpenHarnessHttpServer` | daemon HTTP/SSE 服务：Hono 路由、bearer token、sessions/state/messages/parts/prompts/events/permissions API、run coordinator 和 PermissionBroker                                                                                                                                                                                                                                      |
@@ -496,9 +497,9 @@ OpenHarness-ts/
 
 | 模块                  | 说明                                                                                                                                                |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/channels/workflow/config 子命令，20+ CLI flags                                                            |
-| `REPL`              | 交互式循环：`>` 提示符，41 个斜杠命令（完整清单见 [docs/slash-commands.md](docs/slash-commands.md)）；支持输出样式 `default/minimal/codex`（`minimal` 极简纯文本渲染）                  |
-| `TUI Frontend`      | opentui + React 19 终端 UI（Bun 运行时）。默认通过 `useServerSync` attach 到 daemon，并消费 `@openharness/client` reducer。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
+| `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/channels/workflow/sandbox/daemon/serve/config 子命令，20+ CLI flags                                                            |
+| `TUI Frontend`      | 默认交互面：opentui + React 19（Bun）。`ohs` / `ohs --tui` 经 `useServerSync` attach daemon，消费 `@openharness/client` reducer。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
+| `Print / worker`    | 无 UI 一次性或 stdin worker：进程内 `bootstrap()` + `QueryEngine`；项目级 session snapshot 仅用于 print `--continue/--resume` |
 | `ThemeManager`      | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题                                                                                     |
 | `VimModeHandler`    | Vim 模态编辑：normal / insert / visual / command 模式切换                                                                                                  |
 | `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析                                                                                                                                 |
@@ -521,11 +522,10 @@ OpenHarness-ts/
                            │
            ┌───────────────┼────────────────┐
            ▼               ▼                ▼
-        --tui           --print          REPL (默认)
-     (daemon 客户端)     (单次执行)       (交互式循环)
-           │               │                │
-           │               └────────┬───────┘
-           │                        ▼
+     ohs / --tui        --print / prompt   task-worker
+   (daemon 客户端,默认)   (单次执行)         (内部)
+           │               │
+           │               ▼
            │        ┌──────────────────────────────────────┐
            │        │  Runtime Bootstrap (bootstrap())     │
            │        │  在 CLI 进程内组装 RuntimeBundle      │
@@ -647,13 +647,13 @@ submitMessage(userInput)
 
 ### 会话恢复流程
 
-print / REPL（项目级快照，不参与 daemon/TUI 状态）：
+print / worker（项目级快照，不参与 daemon/TUI 状态）：
 
 ```
-ohs --continue         ohs --resume <id>
+ohs -p --continue "…"   ohs -p --resume <id> "…"
        │                      │
        ▼                      ▼
-  加载最新 session       加载指定 session
+  加载最新 snapshot       加载指定 snapshot
        │                      │
        └──────────┬───────────┘
                   ▼
@@ -663,7 +663,9 @@ ohs --continue         ohs --resume <id>
   └─ queryEngine.loadMessages(messages)
                   │
                   ▼
-  继续 print/REPL 对话（保留历史上下文）
+  继续 print 对话（保留历史上下文）
+
+# 交互 TUI 禁止 --continue/--resume；用 /sessions 或 /resume
 ```
 
 TUI / Web / Desktop（daemon 权威状态）：

@@ -1,0 +1,185 @@
+# Slash Commands Flow
+
+> 状态：daemon/TUI 主线。斜杠命令**不是**通用 `runCommand`；按三层分流。
+> 呈现/派发层在 `@openharness/client`（`dispatchSessionCommand`），TUI/Web/Desktop 共用。
+> 命令清单参考 [slash-commands.md](./slash-commands.md)；协议细节见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)、[client-sync-flow.md](./client-sync-flow.md)。
+
+## 目标
+
+用户输入 `/...` 时：
+
+1. 先命中 **client-local UI**（会话切换、主题、权限弹层等）。
+2. 再命中 **session/resource 命令**（catalog + HTTP 资源 API，呈现文案由共享模块生成）。
+3. 再命中 **template/skill**（展开为 prompt → 正常 admit/run）。
+4. 未知 `/...` **失败关闭**，不得当普通用户消息发给模型。
+
+长期约束：
+
+- Server **不**托管旧 REPL `slash-commands.ts` registry。
+- Server catalog（`GET /commands`）只提供元数据；状态变更走资源 API。
+- 呈现层（拼系统消息、调 `OpenHarnessClient`）放在 `@openharness/client`，不绑 TUI React。
+
+## 分层
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Host UI（TUI App / 未来 Web / Desktop）                         │
+│  · /new /resume /sessions /theme /permissions /workflow …       │
+│  · template invoke 的 busy/run 状态（setLocalBusy 等）            │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ slash line
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  @openharness/client  dispatchSessionCommand(host)               │
+│  · parseSlashLine / mergeCommandDetails / LOCAL_COMMAND_*        │
+│  · /model /config /memory /tasks /rewind /plugin … 呈现 + API    │
+│  · emit(text) 把系统消息交回宿主                                  │
+│  · outcome: handled | local_ui | unhandled                       │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ unhandled + catalog.kind===template
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  OpenHarnessClient.invokeCommand → POST /sessions/:id/commands   │
+│  → expand template → admitPrompt → run                           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Daemon (@openharness/server)                                    │
+│  · GET /commands          catalog（builtin session + skills）    │
+│  · PATCH /sessions/:id    /model 等                              │
+│  · GET/PATCH /settings    /config /effort /fast /turns …         │
+│  · 其它资源 API           memory / tasks / git / plugins …       │
+│  · SessionRuntime         compact / remember / mcp inspect …     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 涉及模块
+
+| 组件 | 路径 | 职责 |
+|------|------|------|
+| Builtin catalog | `packages/server/src/commands.ts` | `BUILTIN_SESSION_COMMANDS` + `mergeCommandCatalog` |
+| HTTP routes | `packages/server/src/http.ts` | `/commands`、资源 API、`POST .../commands` expand |
+| CLI catalog extras | `apps/cli/src/command-catalog.ts` | cwd 下 skill/plugin templates |
+| CLI injectables | `apps/cli/src/daemon-services.ts` | settings/memory/git/plugins… 实现 |
+| Shared dispatch | `packages/client/src/session-commands.ts` | 呈现层 + 资源 API 调用 |
+| TUI adapter | `apps/frontend/src/hooks/sessionSlashCommands.ts` | React ctx → `SessionCommandHost` |
+| TUI sync | `apps/frontend/src/hooks/useServerSync.ts` | `/new` `/resume`、template busy、admitPrompt |
+| TUI App | `apps/frontend/src/App.tsx` | 本地 UI 命令（theme/sessions/permissions…） |
+| Helpers（非执行器） | `apps/cli/src/commands/slash-helpers.ts` | prompt/profile 格式化，供 daemon-services |
+
+## 提交流程（TUI）
+
+```text
+用户 Enter
+  → App / useServerSync sendRequest({ type: "submit_line", line })
+  → parseSlashLine(line)
+
+  /new | /resume <id>
+      → 宿主会话生命周期（createAndSwitchSession / getSession）
+      → return
+
+  dispatchSessionSlashCommand  (frontend adapter)
+      → resolveSessionCwd(status, daemon)
+      → dispatchSessionCommand(slash, host)
+           ├─ handled     → emit 系统消息，结束
+           ├─ local_ui    → 交给 App 已处理的 UI 命令（或忽略）
+           └─ unhandled   → 继续
+
+  catalogEntry.kind === "template"
+      → client.invokeCommand(sessionId, { name, args })
+      → setSubmittedRun
+
+  仍是 slash 且未处理
+      → emit "Unknown command: /…"
+      → 不 admitPrompt
+
+  普通文本
+      → client.admitPrompt(sessionId, { content: line })
+```
+
+Web/Desktop 应复用同一条链：宿主实现 `SessionCommandHost.emit` / `patchStatus`，自行处理 `local_ui` 与 template busy。
+
+## SessionCommandHost（共享契约）
+
+```ts
+type SessionCommandHost = {
+  client: OpenHarnessClient;
+  sessionId?: string;
+  cwd: string;
+  model?: string;
+  permissionMode?: string;
+  statusSessionId?: string;
+  commandCatalog: CommandCatalogEntry[];
+  clientState: OpenHarnessClientState;
+  busy: boolean;
+  emit(text: string): void;
+  patchStatus?(patch: Record<string, unknown>): void;
+};
+
+type SessionCommandOutcome = "handled" | "unhandled" | "local_ui";
+```
+
+- `emit`：呈现层唯一出口（系统/通知文案）。
+- `patchStatus`：可选；`/plan` `/model` `/provider` 写本地 UI 状态。
+- `cwd`：由宿主解析（`resolveSessionCwd`），不要在共享层读 React refs。
+
+## 命令归属速查
+
+| 层 | 代表命令 | 执行位置 |
+|---|---|---|
+| Client-local UI | `/new` `/sessions` `/resume` `/theme` `/permissions` `/workflow(s)` | 宿主 App；catalog 可不列或仅 autocomplete |
+| Shared session（资源 API） | `/model` `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/rewind` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/init` `/plugin` `/reload-plugins` `/hooks` `/subagents` `/diff` `/branch` `/commit` `/help` `/status` `/version` `/skills` | `dispatchSessionCommand` |
+| Template | user-invocable skills、plugin commands | `POST /sessions/:id/commands` |
+| 禁止 | 通用 `runCommand`、未知 slash 当 prompt | — |
+
+`/plan`：App 无参 toggle 会改写成 `/plan on|off`；共享层只处理 on/off 并 `patchStatus`。
+
+## Catalog 与 template
+
+```text
+GET /commands?cwd=
+  → mergeCommandCatalog(BUILTIN_SESSION_COMMANDS + skill/plugin extras)
+  → 客户端 mergeCommandDetails(+ LOCAL_COMMAND_DETAILS) 做 /help 与 autocomplete
+
+POST /sessions/:id/commands  { name, args }
+  → commandCatalog.expand()
+  → admitPrompt(expanded.prompt)
+  → 与普通 prompt 同一 run 队列
+```
+
+Builtin session 名与 skill 重名时 **builtin 胜出**（例如 `/commit` 是 git 资源命令，不再当 template）。
+
+## 失败关闭
+
+| 情况 | 行为 |
+|---|---|
+| 未知 `/foo` | 系统消息 `Unknown command: /foo`；**不**调用 admitPrompt |
+| session 命令缺 `sessionId`（需会话的） | 静默 `handled`（与 TUI 现状一致） |
+| 资源 API 4xx/5xx | 由宿主 `sendRequest` 外层 error 路径处理（adapter 不吞） |
+
+## 与旧 REPL 的边界
+
+| 旧（已拆除） | 现 |
+|---|---|
+| `registerBuiltinCommandsOnRegistry` | 无；catalog + `dispatchSessionCommand` |
+| 进程内 `QueryEngine` 上改历史 | store `replaceTranscript` + `closeRuntime`（如 `/rewind` `/compact`） |
+| print/worker 斜杠 | **不支持**完整 slash 面；print 是一次性 prompt |
+
+print / `--task-worker` 仍是进程内 runtime，不走本 flow。见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)「入口边界」。
+
+## Web/Desktop 接入清单
+
+1. 用 `@openharness/client`：`OpenHarnessClient` + `hydrateState`/`syncEvents`。
+2. 拉取 `listCommands({ cwd })`，与 `LOCAL_COMMAND_DETAILS` 合并做 autocomplete。
+3. 提交行：本地 UI → `dispatchSessionCommand` → template `invokeCommand` → unknown 拦截 → `admitPrompt`。
+4. 实现 `emit`（transcript / toast）与可选 `patchStatus`。
+5. `/new` `/resume` 等会话生命周期由宿主自己接 HTTP（与 TUI `useServerSync` 对齐即可）。
+
+## 相关文档
+
+- [slash-commands.md](./slash-commands.md) — 命令清单（参考）
+- [client-sync-flow.md](./client-sync-flow.md) — snapshot + SSE
+- [daemon-session-runtime-design.md](./daemon-session-runtime-design.md) — HTTP API 与 slash 边界
+- [skills-flow.md](./skills-flow.md) — skill 加载（历史 REPL 路径已归档；template 展开见上文）
+- [tui-flow.md](./tui-flow.md) — TUI 启动与 attach

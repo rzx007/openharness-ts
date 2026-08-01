@@ -211,22 +211,33 @@
 
 ## Task 10：Slash Command 可用性恢复
 
-- [ ] 审计旧 `slash-commands.ts`，按职责分为：
+- [x] 审计旧 `slash-commands.ts`，按职责分为：
   - client-local UI 命令：`/new`、`/sessions`、`/resume`、`/theme`、`/permissions`、`/workflow`、`/exit` 等。
   - server/session API 命令：`/model`、`/provider`、`/auth`、`/config`、`/memory`、`/mcp`、`/tasks`、`/agents` 等。
   - runtime/prompt 模板命令：user-invocable skills、项目/插件 command template。
   - REPL-only 或需要重新设计的命令：直接依赖本地 renderer、stdin/stdout 或一次性 CLI 环境的命令。
-- [ ] 增加 server command catalog API，按 `cwd/location` 返回可跨客户端共享的命令元数据。
-- [ ] 在 `@openharness/client` 增加 command list/run API 类型。
-- [ ] TUI 将本地 UI 命令与 server command catalog 合并，用于 slash autocomplete 与 command palette。
-- [ ] 提交 slash 命令时先命中本地命令；再命中 server/session 命令；最后才作为普通 prompt 入队。
-- [ ] 对 skill/template 命令采用 opencode 风格：选择后展开/注入 prompt，而不是让 UI 命令 executor 直接拥有 runtime。
-- [ ] 增加回归测试覆盖 `/new`、`/sessions`、`/model`、`/permissions`、skill/template 命令，以及未知 slash 不误触发。
+- [x] 增加 server command catalog API，按 `cwd/location` 返回可跨客户端共享的命令元数据。
+- [x] 在 `@openharness/client` 增加 `listCommands` / `invokeCommand` / `updateSession`（**不是**通用 `runCommand`）。
+- [x] TUI 将本地 UI 命令与 server command catalog 合并，用于 slash autocomplete 与 command palette。
+- [x] 提交 slash 命令时先命中本地命令；再命中 server/session/template；未知 `/...` 失败关闭，不入队普通 prompt。
+- [x] 对 skill/template 命令采用 opencode 风格：`POST /sessions/:id/commands` 展开后走正常 admit/run。
+- [x] 首批恢复：`/model`（PATCH session）、`/skills`（catalog 列表）、skill template、`/permissions`/`/plan`/`/theme`（client-local）、未知 slash 拦截。
+- [x] 第二批：`/config`（GET/PATCH `/settings`）、`/provider`（GET `/providers` + PATCH settings）、`/mcp`（GET `/sessions/:id/mcp`）、`/tasks`（list/show/stop）、`/help` `/status` `/version`。
+- [x] 第三批：`/memory`（GET/POST/DELETE `/memory`）、`/auth`（GET `/auth` + login/logout）、`/context`（GET `/context`）、`/stats` `/agents`（客户端组合现有 API）。
+- [x] 第四批：`/compact`（runtime.compact + store.replaceTranscript + `session.transcript.replaced`）、`/remember`（runtime.remember）、`/dream`（POST `/dream`）、`/profile`（GET `/profile` + POST `/profile/init`）、`/doctor`（客户端组合）、`/effort` `/fast` `/turns`（PATCH `/settings`）。
+- [x] 第五批：`/usage` `/cost`（GET `/sessions/:id/usage`）、`/export`（POST `/sessions/:id/export`）、`/output-style`（GET `/output-styles` + PATCH `/settings`）。
+- [x] 第六批：`/tasks run`（POST `/tasks`）、`/init`（POST `/project/init`）、`/plugin`（GET `/plugins` + enable/disable）、`/hooks`（GET `/hooks`）、`/subagents`（GET `/agent-personas`）、`/diff` `/branch`（GET `/git/diff` `/git/branch`）。
+- [x] 第七批：`/rewind`（POST `/sessions/:id/rewind` + store.replaceTranscript + closeRuntime）、`/commit`（GET `/git/status` + POST `/git/commit`）、`/reload-plugins`（POST `/plugins/reload` + closeRuntimesForCwd）。
+- [x] 债务收口：拆空 legacy REPL registry（`slash-helpers.ts` + 兼容 re-export）；slash 呈现层进 `@openharness/client` `dispatchSessionCommand`（TUI 薄适配）；文档化 print/worker 刻意进程内、`/commit` 与 plugin reload 风险；流程见 `docs/slash-commands-flow.md`。
+- [ ] 后续：Task 11 Web/Desktop（认证/CORS/发现/SDK 示例）。print/worker **不**迁入 daemon（swarm/one-shot 边界）。
+- [x] 退场进程内 REPL 产品入口：默认 `ohs` → TUI/daemon；删除 `runRepl`；`--continue/--resume` 不再用于交互入口。
+- [x] 增加回归测试覆盖 `/new`、`/sessions`、`/model`、`/config`、`/provider`、`/mcp`、`/tasks`、`/memory`、`/auth`、`/compact`、`/dream`、`/profile`、skill/template 命令，以及未知 slash 不误触发。
 
 退出标准：
 
 - TUI 迁到 daemon 后，旧主线常用 slash 命令不会退化成普通模型输入。
 - Web/Desktop 可通过同一 command catalog 获取共享命令，而不依赖 TUI 专用协议。
+- **不**把旧 REPL `slash-commands.ts` registry 原样搬进 server。
 
 ---
 
@@ -249,6 +260,6 @@
 - [x] 同一 session 的 prompt 按策略串行或排队。
 - [x] 第二个客户端可以 attach 并 hydrate 当前状态。
 - [x] 权限请求在客户端断开后仍然存活。
-- [ ] Daemon 重启保留 sessions/messages/events。
+- [x] Daemon 重启保留 sessions/messages/events（`http.test` 跨进程 reload + `interruptActiveRuns`）。
 - [x] TUI 主路径不再派生 per-session backend。
 - [x] 当前主线不存在 BackendHost/OHJSON、版本化 store 目录或旧 store 读取分支。

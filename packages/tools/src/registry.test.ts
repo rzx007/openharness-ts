@@ -48,6 +48,8 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("McpAuth");
     expect(names).toContain("RemoteTrigger");
     expect(names).toContain("Lsp");
+    expect(names).toContain("ImageToText");
+    expect(names).toContain("ImageGeneration");
     expect(names).toContain("FeishuPush");
     expect(tools).toHaveLength(45);
   });

@@ -55,7 +55,7 @@
 - TS REPL 本就无 markdown 重渲染/spinner/panel,故 Python 的那几个 `minimal` 分支在此无对应物。
 
 ### d) `/output-style` 命令(新内置斜杠命令)
-- 注册到 builtin 命令(`registerBuiltinCommandsOnRegistry` / slash-commands.ts)。
+- 经 daemon catalog `/output-style` + PATCH `/settings`；纯函数解析见 `slash-helpers.buildOutputStyleResult`。
 - 语义对齐 Python `_output_style_handler`:
   - 无参 / `show` → "Output style: <current>"
   - `list` → 每行 `<name> [<source>]`,当前项加 active 标记(如 `* default [builtin]`)

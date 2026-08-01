@@ -1,14 +1,17 @@
 # 参考：斜杠命令与内置工具
 
-> 本文是统一清单（随特性合并更新）。运行时权威来源：REPL 内 `/help`
-> 列全部命令（CommandRegistry 自动生成）；工具以 `ToolRegistry.getAll()` 为准。
-> 各命令的设计取舍见对应 `docs/*-design.md`。
+> 交互主线是 daemon TUI：`GET /commands` catalog + client-local UI +
+> template expand。**流程权威文档**：[slash-commands-flow.md](./slash-commands-flow.md)。
+> 运行时以 TUI `/help` 与 `packages/server/src/commands.ts` catalog 为准；
+> 共享呈现层在 `@openharness/client` `dispatchSessionCommand`；TUI 适配层
+> `apps/frontend/src/hooks/sessionSlashCommands.ts`。`slash-helpers.ts` 仅
+> formatters。工具以 `ToolRegistry.getAll()` 为准。
 
-## 斜杠命令（41 个内置）
+## 斜杠命令（daemon / TUI 清单）
 
-注册处：`apps/cli/src/commands/slash-commands.ts`。除内置外，user-invocable
-skill 动态注册为 `/<skill>`（E.5），插件命令注册为 `/插件名:命令`（C.1）。
-内置命令优先于同名 skill。
+内置 session 命令见 `packages/server/src/commands.ts`；client-local UI 命令
+（`/new` `/sessions` `/theme` `/permissions` 等）只在 TUI。user-invocable
+skill 经 command catalog 以 template 形式出现。
 
 ### 会话
 
