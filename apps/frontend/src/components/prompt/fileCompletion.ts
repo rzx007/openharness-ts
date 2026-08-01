@@ -17,7 +17,7 @@ export async function listProjectFiles(cwd: string): Promise<string[]> {
   try {
     const proc = Bun.spawn(
       ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-      { cwd, stdout: "pipe", stderr: "pipe" },
+      { cwd, stdout: "pipe", stderr: "pipe", windowsHide: true },
     );
     const text = await new Response(proc.stdout).text();
     await proc.exited;

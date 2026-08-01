@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { useBackendSession } from "./hooks/useBackendSession";
+import { useServerSync } from "./hooks/useServerSync";
 import { useEscToCancel } from "./hooks/useEscToCancel";
 import { useModalWiring } from "./hooks/useModalWiring";
 import { ThemeProvider, useTheme } from "./theme/ThemeContext";
@@ -32,13 +32,12 @@ function AppInner({ config }: { config: FrontendConfig }) {
     renderer.setBackgroundColor(theme.colors.background);
   }, [renderer, theme.colors.background]);
 
-  const session = useBackendSession(
-    config,
-    (code) => {
-      process.exit(code ?? 0);
-    },
-    (message) => toast(message, "error"),
-  );
+  const onSessionExit = useCallback((code?: number | null) => {
+    process.exitCode = code ?? 0;
+    renderer.destroy();
+  }, [renderer]);
+  const onSessionError = useCallback((message: string) => toast(message, "error"), [toast]);
+  const session = useServerSync(config, onSessionError);
 
   // Local input history (up to 100 entries)
   const [history, setHistory] = useState<string[]>([]);
@@ -130,7 +129,6 @@ function AppInner({ config }: { config: FrontendConfig }) {
           type: "submit_line",
           line: isPlan ? "/plan off" : "/plan on",
         });
-        session.setBusy(true);
         return true;
       }
 
@@ -185,7 +183,6 @@ function AppInner({ config }: { config: FrontendConfig }) {
         return;
       }
       session.sendRequest({ type: "submit_line", line });
-      session.setBusy(true);
       appendHistory(line);
     },
     [appendHistory, handleCommand, session],
@@ -257,19 +254,14 @@ function AppInner({ config }: { config: FrontendConfig }) {
             id: "app.exit",
             title: "Exit",
             keybinding: "ctrl+c",
-            run: () => {
-              session.sendRequest({ type: "shutdown" });
-              renderer.destroy();
-              process.exit(0);
-            },
+            run: () => onSessionExit(0),
           },
         ],
         submitLine: (line: string) => {
           session.sendRequest({ type: "submit_line", line });
-          session.setBusy(true);
         },
       }),
-    [handleCommand, openCommandPalette, renderer, session],
+    [handleCommand, onSessionExit, openCommandPalette, session],
   );
   registryRef.current = registry;
 
@@ -284,9 +276,9 @@ function AppInner({ config }: { config: FrontendConfig }) {
         key.stopPropagation();
         return;
       }
-      session.sendRequest({ type: "shutdown" });
-      renderer.destroy();
-      process.exit(0);
+      key.preventDefault();
+      key.stopPropagation();
+      onSessionExit(0);
     }
     if (key.ctrl && key.name === "p") {
       // 已有弹层（含后端 permission/question/select）时不顶掉：

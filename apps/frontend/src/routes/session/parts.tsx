@@ -107,7 +107,7 @@ export function TranscriptPart({
       );
 
     case "assistant":
-      return <markdown content={item.text} syntaxStyle={syntax} />;
+      return <markdown content={item.text} syntaxStyle={syntax} streaming={item.streaming === true} />;
 
     case "tool": {
       const toolName = item.tool_name ?? "tool";

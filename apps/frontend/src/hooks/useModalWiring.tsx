@@ -3,9 +3,9 @@ import { DialogSelect } from "../ui/DialogSelect";
 import { PermissionDialog } from "../components/dialogs/PermissionDialog";
 import { QuestionDialog } from "../components/dialogs/QuestionDialog";
 import type { useDialog } from "../ui/DialogContext";
-import type { useBackendSession } from "./useBackendSession";
+import type { TuiSessionController } from "./sessionController";
 
-type Session = ReturnType<typeof useBackendSession>;
+type Session = TuiSessionController;
 type Dialog = ReturnType<typeof useDialog>;
 
 /**
@@ -111,7 +111,6 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
             type: "submit_line",
             line: `${req.submitPrefix}${value}`,
           });
-          session.setBusy(true);
           dialog.close();
           session.setSelectRequest(null);
         }}

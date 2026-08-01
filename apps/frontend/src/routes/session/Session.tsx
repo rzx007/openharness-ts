@@ -34,7 +34,7 @@ export function Session({ items, assistantBuffer }: SessionProps) {
         rowGap={1}
       >
         {items.map((item, i) => (
-          <TranscriptPart key={i} item={item} syntax={syntax} />
+          <TranscriptPart key={item.id ?? i} item={item} syntax={syntax} />
         ))}
         {assistantBuffer ? (
           <markdown content={assistantBuffer} syntaxStyle={syntax} streaming />

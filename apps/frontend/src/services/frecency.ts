@@ -14,7 +14,7 @@ let dirty = false;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 function configPath(): string {
-  const dir = process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness");
+  const dir = process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness-ts");
   mkdirSync(dir, { recursive: true });
   return join(dir, "frecency.json");
 }

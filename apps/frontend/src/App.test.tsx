@@ -113,6 +113,30 @@ test("AppView with user+assistant transcript renders Session view", async () => 
   renderer.destroy();
 });
 
+test("AppView renders assistant text when a canonical part appears after the user row", async () => {
+  let publishAssistant: () => void = () => {};
+  function Harness() {
+    const [transcript, setTranscript] = React.useState<TranscriptItem[]>([
+      { id: "user-1", role: "user", text: "dynamic user" },
+    ]);
+    publishAssistant = () => setTranscript((items) => [
+      ...items,
+      { id: "assistant-1:part-1", role: "assistant", text: "dynamic assistant", streaming: true },
+    ]);
+    return <AppView {...baseProps} transcript={transcript} busy />;
+  }
+
+  const { renderer, renderOnce, waitForFrame, captureCharFrame } = await testRender(
+    <ThemeProvider><Harness /></ThemeProvider>,
+    { width: 100, height: 40 },
+  );
+  await renderOnce();
+  await act(async () => publishAssistant());
+  await waitForFrame((frame) => frame.includes("dynamic assistant"), { maxPasses: 60 });
+  expect(captureCharFrame()).toContain("dynamic assistant");
+  renderer.destroy();
+});
+
 // ─── Test 4: dialogOpen=true → Prompt not rendered ──────────────────────────
 
 test("AppView with dialogOpen=true does not render Prompt", async () => {
