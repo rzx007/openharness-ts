@@ -152,8 +152,237 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     if (pathname === "/health") {
       return jsonResponse({ ok: true });
     }
+    if (pathname === "/commands") {
+      return jsonResponse({
+        commands: [
+          { name: "/model", kind: "session", source: "builtin", description: "Show or switch the session model" },
+          { name: "/skills", kind: "session", source: "builtin", description: "List skills" },
+          { name: "/config", kind: "session", source: "builtin", description: "Show or edit settings" },
+          { name: "/provider", kind: "session", source: "builtin", description: "Show or switch provider" },
+          { name: "/mcp", kind: "session", source: "builtin", description: "Show MCP status" },
+          { name: "/tasks", kind: "session", source: "builtin", description: "List tasks" },
+          { name: "/help", kind: "session", source: "builtin", description: "List commands" },
+          { name: "/status", kind: "session", source: "builtin", description: "Session status" },
+          { name: "/version", kind: "session", source: "builtin", description: "Version" },
+          { name: "/compact", kind: "session", source: "builtin", description: "Compact" },
+          { name: "/remember", kind: "session", source: "builtin", description: "Remember" },
+          { name: "/dream", kind: "session", source: "builtin", description: "Dream" },
+          { name: "/profile", kind: "session", source: "builtin", description: "Profile" },
+          { name: "/doctor", kind: "session", source: "builtin", description: "Doctor" },
+          { name: "/effort", kind: "session", source: "builtin", description: "Effort" },
+          { name: "/usage", kind: "session", source: "builtin", description: "Usage" },
+          { name: "/cost", kind: "session", source: "builtin", description: "Cost" },
+          { name: "/export", kind: "session", source: "builtin", description: "Export" },
+          { name: "/output-style", kind: "session", source: "builtin", description: "Output style" },
+          { name: "/init", kind: "session", source: "builtin", description: "Init project" },
+          { name: "/plugin", kind: "session", source: "builtin", description: "Plugins" },
+          { name: "/hooks", kind: "session", source: "builtin", description: "Hooks" },
+          { name: "/subagents", kind: "session", source: "builtin", description: "Subagents" },
+          { name: "/diff", kind: "session", source: "builtin", description: "Diff" },
+          { name: "/branch", kind: "session", source: "builtin", description: "Branch" },
+          { name: "/rewind", kind: "session", source: "builtin", description: "Rewind" },
+          { name: "/commit", kind: "session", source: "builtin", description: "Commit" },
+          { name: "/reload-plugins", kind: "session", source: "builtin", description: "Reload plugins" },
+          { name: "/pr", kind: "template", source: "skill", description: "Write a PR" },
+        ],
+      });
+    }
+    if (pathname === "/output-styles") {
+      return jsonResponse({
+        styles: [
+          { name: "default", content: "std", source: "builtin" },
+          { name: "minimal", content: "terse", source: "builtin" },
+        ],
+      });
+    }
+    if (pathname === "/sessions/s1/usage") {
+      return jsonResponse({
+        model: "m",
+        inputTokens: 11,
+        outputTokens: 22,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        messageCount: 2,
+        estimatedCost: "$0.0001",
+      });
+    }
+    if (pathname === "/sessions/s1/export" && init?.method === "POST") {
+      return jsonResponse({ format: "md", filepath: "/tmp/export.md", messageCount: 2 });
+    }
+    if (pathname === "/settings" && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      return jsonResponse({
+        settings: {
+          model: "m",
+          provider: typeof body.provider === "string" ? body.provider : "anthropic",
+          permission: { mode: "default" },
+          effort: body.effort ?? "medium",
+          fastMode: body.fastMode ?? false,
+          maxTurns: body.maxTurns ?? 50,
+        },
+      });
+    }
+    if (pathname === "/settings") {
+      return jsonResponse({
+        settings: {
+          model: "m",
+          provider: "openai",
+          permission: { mode: "default" },
+          effort: "medium",
+          fastMode: false,
+          maxTurns: 50,
+          apiFormat: "openai",
+        },
+      });
+    }
+    if (pathname === "/dream" && init?.method === "POST") {
+      return jsonResponse({ taskId: "dream_1" });
+    }
+    if (pathname === "/profile/init" && init?.method === "POST") {
+      return jsonResponse({ report: "PROFILE INIT" });
+    }
+    if (pathname === "/profile") {
+      return jsonResponse({ report: "PROFILE STATUS" });
+    }
+    if (pathname === "/sessions/s1/compact" && init?.method === "POST") {
+      return jsonResponse({ messageCount: 2, messages: [], parts: [] });
+    }
+    if (pathname === "/sessions/s1/remember" && init?.method === "POST") {
+      return jsonResponse({ skipped: false, writtenIds: ["mem2"], titles: ["pnpm tip"] });
+    }
+    if (pathname === "/providers") {
+      return jsonResponse({
+        providers: [
+          { name: "openai", displayName: "OpenAI", hasKey: true, active: true },
+          { name: "anthropic", displayName: "Anthropic", hasKey: false, active: false },
+        ],
+      });
+    }
+    if (pathname === "/tasks" && init?.method === "POST") {
+      return jsonResponse({
+        task: {
+          id: "task_run_1",
+          type: "shell",
+          status: "running",
+          description: "echo hi",
+          cwd: process.cwd(),
+          command: "echo hi",
+          createdAt: 1,
+        },
+      });
+    }
+    if (pathname === "/tasks") {
+      return jsonResponse({
+        tasks: [{ id: "task_1", type: "shell", status: "running", description: "demo", cwd: process.cwd(), createdAt: 1 }],
+      });
+    }
+    if (pathname === "/project/init" && init?.method === "POST") {
+      return jsonResponse({ report: "Project initialized successfully." });
+    }
+    if (pathname === "/plugins/demo/enable" && init?.method === "POST") {
+      return jsonResponse({ message: "Enabled plugin 'demo'." });
+    }
+    if (pathname === "/plugins") {
+      return jsonResponse({
+        plugins: [{
+          name: "demo",
+          version: "1.0.0",
+          enabled: true,
+          skillCount: 1,
+          commandCount: 0,
+          hookCount: 0,
+          agentCount: 0,
+        }],
+        warnings: [],
+      });
+    }
+    if (pathname === "/hooks") {
+      return jsonResponse({
+        hooks: [{
+          id: "h1",
+          event: "stop",
+          type: "command",
+          enabled: true,
+          origin: "settings",
+        }],
+      });
+    }
+    if (pathname === "/agent-personas") {
+      return jsonResponse({
+        agents: [{ name: "Explore", description: "search files", source: "builtin" }],
+      });
+    }
+    if (pathname === "/git/diff") {
+      return jsonResponse({ output: "a.txt | 1 +\n" });
+    }
+    if (pathname === "/git/branch") {
+      return jsonResponse({ output: "Current branch: main" });
+    }
+    if (pathname === "/sessions/s1/mcp") {
+      return jsonResponse({
+        servers: [{ name: "demo", status: "connected", toolCount: 1, resourceCount: 0, command: "demo" }],
+      });
+    }
+    if (pathname === "/memory" && init?.method === "POST") {
+      return jsonResponse({
+        entry: { id: "mem1", content: "prefer pnpm", createdAt: 1, updatedAt: 1 },
+      });
+    }
+    if (pathname === "/memory") {
+      return jsonResponse({
+        directory: "/tmp/memory",
+        entries: [{ id: "mem1", content: "prefer pnpm", createdAt: 1, updatedAt: 1 }],
+      });
+    }
+    if (pathname === "/auth") {
+      return jsonResponse({
+        auth: {
+          codex: { configured: false, state: "missing", source: "/tmp/auth.json" },
+          storedProviders: ["openai"],
+          envProviders: [],
+        },
+      });
+    }
+    if (pathname === "/context") {
+      return jsonResponse({ report: "CONTEXT PREVIEW" });
+    }
     if (pathname === "/sessions" && init?.method === "POST") return jsonResponse({ session: createdSession });
     if (pathname === "/sessions") return jsonResponse({ sessions: [session] });
+    if (pathname === "/sessions/s1" && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body ?? "{}")) as { model?: string };
+      return jsonResponse({ session: { ...session, model: body.model ?? session.model, updatedAt: 9 } });
+    }
+    if (pathname === "/sessions/s1/commands" && init?.method === "POST") {
+      return jsonResponse({
+        input: { id: "i-cmd", sessionId: "s1", seq: 2, delivery: "queue", content: "PR PROMPT", metadata: {}, createdAt: 11 },
+        run: { id: "r-cmd", sessionId: "s1", status: "running", metadata: {}, createdAt: 11, updatedAt: 11 },
+        command: { name: "/pr", kind: "template", source: "skill" },
+      });
+    }
+    if (pathname === "/sessions/s1/rewind" && init?.method === "POST") {
+      return jsonResponse({ turns: 1, removed: 2, messages: [], parts: [] });
+    }
+    if (pathname === "/plugins/reload" && init?.method === "POST") {
+      return jsonResponse({
+        plugins: [{
+          name: "demo",
+          version: "1.0.0",
+          enabled: true,
+          skillCount: 1,
+          commandCount: 0,
+          hookCount: 0,
+          agentCount: 0,
+        }],
+        warnings: [],
+        message: "Plugins rediscovered; session runtimes will reload on next use.",
+      });
+    }
+    if (pathname === "/git/status") {
+      return jsonResponse({ output: " M README.md\n" });
+    }
+    if (pathname === "/git/commit" && init?.method === "POST") {
+      return jsonResponse({ output: "[main abc123] fix auth" });
+    }
     if (pathname === "/sessions/s1/state") {
       return jsonResponse({
         cursor: 6,
@@ -276,10 +505,12 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "list_sessions" });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
-  expect(captured?.selectRequest?.options[0]).toMatchObject({
-    value: "__openharness_new_session__",
-    label: "New session",
-  });
+  const sessionOption = captured?.selectRequest?.options[0];
+  expect(sessionOption?.value).toBe("s1");
+  expect(sessionOption?.label === "TUI" || sessionOption?.label === "* TUI").toBe(true);
+  expect(sessionOption?.description?.endsWith("| idle")).toBe(true);
+  expect(captured?.selectRequest?.options.some((option) => String(option.label).includes("New session"))).toBe(false);
+  expect(sessionOption?.description?.includes("\\") || sessionOption?.description?.includes("/")).toBe(false);
 
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "/new Scratch" });
@@ -295,6 +526,98 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   });
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2" && call.init.method === "DELETE")).toBe(true);
   expect(captured?.status.session_id).toBe("s1");
+
+  expect(captured?.commands).toEqual(expect.arrayContaining(["/new", "/model", "/pr", "/skills"]));
+
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "/model gpt-test" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(calls.some((call) => call.url === "http://daemon.test/sessions/s1" && call.init.method === "PATCH")).toBe(true);
+  expect(captured?.status.model).toBe("gpt-test");
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Model set to gpt-test"))).toBe(true);
+
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "/pr fix auth" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(calls.some((call) => call.url === "http://daemon.test/sessions/s1/commands" && call.init.method === "POST")).toBe(true);
+
+  const promptCallsBeforeUnknown = calls.filter((call) => call.url.includes("/prompts")).length;
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "/definitely-not-a-command" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(calls.filter((call) => call.url.includes("/prompts")).length).toBe(promptCallsBeforeUnknown);
+  expect(captured?.transcript.some((item) =>
+    item.role === "system" && item.text.includes("Unknown command: /definitely-not-a-command"),
+  )).toBe(true);
+
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "/help" });
+    captured?.sendRequest({ type: "submit_line", line: "/config show" });
+    captured?.sendRequest({ type: "submit_line", line: "/provider" });
+    captured?.sendRequest({ type: "submit_line", line: "/mcp" });
+    captured?.sendRequest({ type: "submit_line", line: "/tasks" });
+    captured?.sendRequest({ type: "submit_line", line: "/memory" });
+    captured?.sendRequest({ type: "submit_line", line: "/auth" });
+    captured?.sendRequest({ type: "submit_line", line: "/context" });
+    captured?.sendRequest({ type: "submit_line", line: "/stats" });
+    captured?.sendRequest({ type: "submit_line", line: "/agents" });
+    captured?.sendRequest({ type: "submit_line", line: "/compact" });
+    captured?.sendRequest({ type: "submit_line", line: "/remember" });
+    captured?.sendRequest({ type: "submit_line", line: "/dream" });
+    captured?.sendRequest({ type: "submit_line", line: "/profile" });
+    captured?.sendRequest({ type: "submit_line", line: "/doctor" });
+    captured?.sendRequest({ type: "submit_line", line: "/effort high" });
+    captured?.sendRequest({ type: "submit_line", line: "/usage" });
+    captured?.sendRequest({ type: "submit_line", line: "/cost" });
+    captured?.sendRequest({ type: "submit_line", line: "/export" });
+    captured?.sendRequest({ type: "submit_line", line: "/output-style list" });
+    captured?.sendRequest({ type: "submit_line", line: "/tasks run echo hi" });
+    captured?.sendRequest({ type: "submit_line", line: "/init" });
+    captured?.sendRequest({ type: "submit_line", line: "/plugin" });
+    captured?.sendRequest({ type: "submit_line", line: "/hooks" });
+    captured?.sendRequest({ type: "submit_line", line: "/subagents" });
+    captured?.sendRequest({ type: "submit_line", line: "/diff" });
+    captured?.sendRequest({ type: "submit_line", line: "/branch" });
+    captured?.sendRequest({ type: "submit_line", line: "/rewind 1" });
+    captured?.sendRequest({ type: "submit_line", line: "/reload-plugins" });
+    captured?.sendRequest({ type: "submit_line", line: "/commit" });
+    captured?.sendRequest({ type: "submit_line", line: "/commit fix auth" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Available commands:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes('"provider": "openai"'))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenAI"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("MCP Servers"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("task_1"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("prefer pnpm"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Credential status:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("CONTEXT PREVIEW"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Session stats:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("No agent tasks."))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Conversation compacted"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("已写入"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Dream 已启动"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("PROFILE STATUS"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenHarness Environment Diagnostic"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Effort set to: high"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Token usage:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Cost estimate:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Exported Markdown to:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("* default"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Task started: task_run_1"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Project initialized successfully."))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("demo@1.0.0"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("h1: stop"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Explore"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("a.txt | 1 +"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Current branch: main"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Rewound 1 turn(s)"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Reloaded plugins:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("M README.md"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("[main abc123] fix auth"))).toBe(true);
 
   renderer.destroy();
 });

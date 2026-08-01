@@ -4,6 +4,7 @@ import {
   createInitialClientState,
   selectSessionMessagesWithParts,
   syncEvents,
+  type CommandCatalogEntry,
   type OpenHarnessClientState,
   type PermissionRequestRecord,
   type SessionBucket,
@@ -13,9 +14,12 @@ import {
 
 import type { FrontendConfig, TranscriptItem } from "../types";
 import type { TuiSessionController } from "./sessionController";
-
-const NEW_SESSION_VALUE = "__openharness_new_session__";
-const LOCAL_COMMANDS = ["/new", "/sessions", "/permissions", "/plan", "/theme"];
+import {
+  dispatchSessionSlashCommand,
+  hasActiveRun,
+  mergeCommandDetails,
+  parseSlashLine,
+} from "./sessionSlashCommands";
 
 function contentToText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -149,13 +153,6 @@ function firstPendingPermission(state: OpenHarnessClientState, sessionId?: strin
     .at(0);
 }
 
-function hasActiveRun(state: OpenHarnessClientState, sessionId?: string): boolean {
-  if (!sessionId) return false;
-  const bucket = state.buckets[sessionId];
-  if (!bucket) return false;
-  return Object.values(bucket.runs).some((run) => run.status === "pending" || run.status === "running");
-}
-
 export function useServerSync(
   config: FrontendConfig,
   onError?: (message: string) => void,
@@ -173,8 +170,11 @@ export function useServerSync(
   const [submittedRun, setSubmittedRun] = useState<{ sessionId: string; runId: string } | null>(null);
   const [ready, setReady] = useState(false);
   const [systemItems, setSystemItems] = useState<TranscriptItem[]>([]);
+  const [commandCatalog, setCommandCatalog] = useState<CommandCatalogEntry[]>([]);
   const clientRef = useRef<OpenHarnessClient | null>(null);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
+  const commandCatalogRef = useRef<CommandCatalogEntry[]>([]);
+  const statusRef = useRef(status);
   const sentInitialPromptRef = useRef(false);
   const shownPermissionIdRef = useRef<string | undefined>(undefined);
   const onErrorRef = useRef(onError);
@@ -184,6 +184,14 @@ export function useServerSync(
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
 
+  useEffect(() => {
+    commandCatalogRef.current = commandCatalog;
+  }, [commandCatalog]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
   const reportError = useCallback((message: string) => {
     setSystemItems((items) => [...items, { role: "system", text: `error: ${message}` }]);
     onErrorRef.current?.(message);
@@ -191,10 +199,14 @@ export function useServerSync(
     setSubmittedRun(null);
   }, []);
 
+  const pushSystem = useCallback((text: string) => {
+    setSystemItems((items) => [...items, { role: "system", text }]);
+  }, []);
+
   useEffect(() => {
     if (!daemon?.url) {
       setReady(true);
-      reportError("Daemon URL is required for TUI. Launch with `ohs --tui` so the CLI can start or attach the daemon.");
+      reportError("Daemon URL is required for TUI. Launch with `ohs` or `ohs --tui` so the CLI can start or attach the daemon.");
       return;
     }
     let cancelled = false;
@@ -206,9 +218,13 @@ export function useServerSync(
         await client.health();
         const cwd = daemon.cwd ?? process.cwd();
         const model = daemon.model ?? "default";
-        const sessions = await client.listSessions({ cwd, limit: 20 });
+        const [sessions, commands] = await Promise.all([
+          client.listSessions({ cwd, limit: 20 }),
+          client.listCommands({ cwd }).catch(() => [] as CommandCatalogEntry[]),
+        ]);
         const session = sessions[0] ?? await client.createSession({ cwd, model, title: "TUI" });
         if (cancelled) return;
+        setCommandCatalog(commands);
         setStatus((current) => ({ ...current, model: session.model, session_id: session.id, cwd: session.cwd }));
         setActiveSessionId(session.id);
         void client.getSession(session.id).catch(() => {});
@@ -310,6 +326,8 @@ export function useServerSync(
       const type = String(payload.type ?? "");
       if (type === "submit_line") {
         const line = String(payload.line ?? "");
+        const slash = parseSlashLine(line);
+
         const newSession = line.match(/^\/new(?:\s+(.+))?$/);
         if (newSession) {
           setLocalBusy(false);
@@ -320,11 +338,6 @@ export function useServerSync(
         const resume = line.match(/^\/resume\s+(.+)$/);
         if (resume?.[1]) {
           const target = resume[1].trim();
-          if (target === NEW_SESSION_VALUE) {
-            setLocalBusy(false);
-            await createAndSwitchSession();
-            return;
-          }
           const session = await client.getSession(target);
           setLocalBusy(false);
           setSubmittedRun(null);
@@ -338,6 +351,37 @@ export function useServerSync(
           setSelectRequest(null);
           return;
         }
+
+        const slashResult = await dispatchSessionSlashCommand(slash, {
+          client,
+          sessionId,
+          pushSystem,
+          statusRef,
+          commandCatalogRef,
+          clientState,
+          localBusy,
+          daemon,
+          setStatus,
+        });
+        if (slashResult === "handled" || slashResult === "local_ui_ignored") return;
+
+        if (slash) {
+          const catalogEntry = commandCatalogRef.current.find((entry) => entry.name === slash.name);
+          if (catalogEntry?.kind === "template") {
+            if (!sessionId) return;
+            setLocalBusy(true);
+            const response = await client.invokeCommand(sessionId, {
+              name: slash.name,
+              args: slash.args,
+            });
+            setLocalBusy(false);
+            setSubmittedRun(response.run ? { sessionId, runId: response.run.id } : null);
+            return;
+          }
+          pushSystem(`Unknown command: ${slash.name}`);
+          return;
+        }
+
         if (!sessionId) return;
         setLocalBusy(true);
         const response = await client.admitPrompt(sessionId, { content: line });
@@ -348,7 +392,7 @@ export function useServerSync(
 
       if (type === "delete_session") {
         const target = typeof payload.session_id === "string" ? payload.session_id : undefined;
-        if (!target || target === NEW_SESSION_VALUE) return;
+        if (!target) return;
         await client.archiveSession(target);
         setLocalBusy(false);
         setSubmittedRun(null);
@@ -403,27 +447,14 @@ export function useServerSync(
           includeArchived: false,
           limit: 20,
         });
-        const options = sessions.map((session) => ({
-          value: session.id,
-          label: `${session.id === activeSessionId ? "* " : ""}${session.title || session.id}`,
-          description: `${session.model} | ${session.status} | ${session.cwd}`,
-        }));
-        options.unshift({
-          value: NEW_SESSION_VALUE,
-          label: "New session",
-          description: daemon?.cwd ?? process.cwd(),
-        });
         setSelectRequest({
           title: "Sessions",
           submitPrefix: "/resume ",
-          options,
-          /*
-          options: options.map((session) => ({
+          options: sessions.map((session) => ({
             value: session.id,
-            label: session.title || session.id,
-            description: `${session.model} · ${session.status} · ${session.cwd}`,
+            label: `${session.id === activeSessionId ? "* " : ""}${session.title || session.id}`,
+            description: `${session.model} | ${session.status}`,
           })),
-          */
         });
         return;
       }
@@ -436,7 +467,7 @@ export function useServerSync(
     })().catch((error) => {
       reportError(error instanceof Error ? error.message : String(error));
     });
-  }, [activeSessionId, createAndSwitchSession, daemon?.cwd, reportError]);
+  }, [activeSessionId, clientState, createAndSwitchSession, daemon?.cwd, daemon?.model, localBusy, pushSystem, reportError]);
 
   const bucket = activeSessionId ? clientState.buckets[activeSessionId] : undefined;
   const transcript = useMemo(
@@ -449,6 +480,8 @@ export function useServerSync(
   const waitingForSubmittedRun = !!submittedRun && (
     !submittedRunRecord || submittedRunRecord.status === "pending" || submittedRunRecord.status === "running"
   );
+  const commandDetails = useMemo(() => mergeCommandDetails(commandCatalog), [commandCatalog]);
+  const commands = useMemo(() => commandDetails.map((entry) => entry.name), [commandDetails]);
 
   return useMemo(
     () => ({
@@ -456,8 +489,8 @@ export function useServerSync(
       assistantBuffer: "",
       status,
       tasks: [],
-      commands: LOCAL_COMMANDS,
-      commandDetails: LOCAL_COMMANDS.map((name) => ({ name })),
+      commands,
+      commandDetails,
       mcpServers: [],
       bridgeSessions: [],
       modal,
@@ -473,6 +506,6 @@ export function useServerSync(
       setBusy: setLocalBusy,
       sendRequest,
     }),
-    [localBusy, modal, ready, running, selectRequest, sendRequest, status, transcript, waitingForSubmittedRun],
+    [commandDetails, commands, localBusy, modal, ready, running, selectRequest, sendRequest, status, transcript, waitingForSubmittedRun],
   );
 }
