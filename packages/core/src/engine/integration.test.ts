@@ -36,13 +36,16 @@ function noopHooks(): any {
   return { execute: async () => ({ blocked: false }) };
 }
 
-function makeTool(name: string, fn?: (input: Record<string, unknown>) => string): ToolDefinition {
+function makeTool(
+  name: string,
+  fn?: (input: Record<string, unknown>, context: { cwd: string }) => string,
+): ToolDefinition {
   return {
     name,
     description: `${name} tool`,
     inputSchema: { type: "object", properties: {} },
-    execute: async (input) => ({
-      content: [{ type: "text" as const, text: fn ? fn(input) : `${name} executed` }],
+    execute: async (input, context) => ({
+      content: [{ type: "text" as const, text: fn ? fn(input, context) : `${name} executed` }],
     }),
   };
 }
@@ -112,6 +115,104 @@ describe("Integration: Full Agent Loop", () => {
     expect(history[1]!.type).toBe("assistant");
     expect(history[2]!.type).toBe("tool_result");
     expect(history[3]!.type).toBe("assistant");
+  });
+
+  it("uses the configured cwd for tool execution context", async () => {
+    const registry = new ToolRegistry();
+    const seenCwds: string[] = [];
+    registry.register(makeTool("Pwd", (_input, context) => {
+      seenCwds.push(context.cwd);
+      return context.cwd;
+    }));
+
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "Pwd", input: {} },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks(), {
+      cwd: "/session/project-a",
+    });
+    for await (const _event of engine.submitMessage("pwd")) {
+      // drain
+    }
+
+    expect(seenCwds).toEqual(["/session/project-a"]);
+  });
+
+  it("uses the configured session id for tool execution context", async () => {
+    const registry = new ToolRegistry();
+    const seenSessionIds: Array<string | undefined> = [];
+    registry.register(makeTool("SessionProbe", (_input, context) => {
+      seenSessionIds.push(context.sessionId);
+      return context.sessionId ?? "(none)";
+    }));
+
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "SessionProbe", input: {} },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks(), {
+      cwd: "/session/project-a",
+      sessionId: "session-a",
+    });
+    for await (const _event of engine.submitMessage("session")) {
+      // drain
+    }
+
+    expect(seenSessionIds).toEqual(["session-a"]);
+  });
+
+  it("passes the runtime event sink to tool execution context", async () => {
+    const registry = new ToolRegistry();
+    const emitted: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+    registry.register({
+      name: "Emit",
+      description: "Emit tool",
+      inputSchema: { type: "object", properties: {} },
+      execute: async (_input, context) => {
+        await context.runtimeEventSink?.({ type: "tool.custom", payload: { ok: true } });
+        return { content: [{ type: "text" as const, text: "emitted" }] };
+      },
+    });
+
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "Emit", input: {} },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
+    engine.setRuntimeEventSink((event) => emitted.push(event));
+    for await (const _event of engine.submitMessage("emit")) {
+      // drain
+    }
+
+    expect(emitted).toEqual([{ type: "tool.custom", payload: { ok: true } }]);
   });
 
   it("multi-tool parallel execution", async () => {

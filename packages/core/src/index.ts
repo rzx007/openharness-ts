@@ -88,15 +88,13 @@ export { CostTracker } from "./engine/cost-tracker";
 
 export { loadSettings, saveSettings, loadProjectSettings, saveProjectSettings } from "./config/settings";
 export { resolvePaths, getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath, getDataDir, getLogsDir, getSessionsDir, getTasksDir, getPluginsDir, getSkillsDir, getMemoryDir, getProjectMemoryDir, getFeedbackDir, getCronRegistryPath, getCronHistoryPath, getCronLogsDir, getCredentialsFilePath } from "./config/paths";
+export { resolveGitRepository, type GitRepositoryInfo } from "./config/git";
 
 export type { AppState } from "./state/app-state";
 export { AppStateStore } from "./state/state-store";
 
-export { ProtocolHost } from "./protocol/protocol-host";
-
 export { retryWithBackoff } from "./utils/retry";
 export { estimateTokens } from "./utils/token-counter";
-export { parseJsonLines } from "./utils/json";
 export {
   sanitizeMessageHistory,
   boundaryFallsInsideToolGroup,

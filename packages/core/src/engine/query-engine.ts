@@ -143,6 +143,9 @@ export class QueryEngine implements IQueryEngine {
   private memoryRetriever?: MemoryRetriever;
   private allowedTools: string[] | null = null;
   private mcpManager: unknown = undefined;
+  private runtimeEventSink: ToolContext["runtimeEventSink"] = undefined;
+  private cwd: string;
+  private sessionId: string | undefined;
 
   constructor(
     private apiClient: StreamingMessageClient,
@@ -166,6 +169,8 @@ export class QueryEngine implements IQueryEngine {
     this.permissionPrompt = options.permissionPrompt;
     this.skillRegistry = options.skillRegistry;
     this.memoryRetriever = options.memoryRetriever;
+    this.cwd = options.cwd ?? process.cwd();
+    this.sessionId = options.sessionId;
   }
 
   /**
@@ -185,8 +190,16 @@ export class QueryEngine implements IQueryEngine {
     this.allowedTools = tools;
   }
 
+  setSessionId(sessionId: string | undefined): void {
+    this.sessionId = sessionId;
+  }
+
   setMcpManager(mgr: unknown): void {
     this.mcpManager = mgr;
+  }
+
+  setRuntimeEventSink(sink: ToolContext["runtimeEventSink"]): void {
+    this.runtimeEventSink = sink;
   }
 
   /**
@@ -489,10 +502,12 @@ export class QueryEngine implements IQueryEngine {
       executable.map(async ({ idx, toolUse, tool }) => {
         try {
           const context: ToolContext = {
-            cwd: process.cwd(),
+            cwd: this.cwd,
+            sessionId: this.sessionId,
             settings: this.options.settings,
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
+            runtimeEventSink: this.runtimeEventSink,
           };
           const result = await this.executeToolWithTimeout(tool, toolUse.input, context, timeoutMs);
           return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };

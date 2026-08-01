@@ -24,7 +24,7 @@ let _cached: ResolvedPaths | undefined;
 
 export function resolvePaths(projectRoot?: string): ResolvedPaths {
   const configDir =
-    process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness");
+    process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness-ts");
   if (_cached && !projectRoot && _cached.configDir === configDir) return _cached;
 
   const dataDir = join(configDir, "data");

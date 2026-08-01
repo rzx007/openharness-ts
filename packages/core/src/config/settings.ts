@@ -252,7 +252,7 @@ function mergeSandboxConfig(
 /**
  * 从用户主目录下的配置文件中加载设置信息。
  * 
- * 该函数尝试读取位于 `~/.openharness/settings.json` 的配置文件。
+ * 该函数尝试读取位于 `~/.openharness-ts/settings.json` 的配置文件。
  * 如果文件存在且内容合法，则解析并返回部分设置对象；
  * 如果文件不存在、无法访问或解析失败，则返回 null。
  * 

@@ -27,8 +27,12 @@ export interface QueryEngine {
    * 过滤在 submitMessage 内 streamMessage 调用前生效，不影响 toolRegistry 注册表。
    */
   setAllowedTools(tools: string[] | null): void;
+  setSessionId(sessionId: string | undefined): void;
   /** 注入 MCP 客户端管理器，工具执行时通过 ToolContext.mcpManager 传递。 */
   setMcpManager(mgr: unknown): void;
+  setRuntimeEventSink(
+    sink: ((event: { type: string; payload?: Record<string, unknown> }) => void | Promise<void>) | undefined,
+  ): void;
 }
 
 export interface PermissionPrompt {
@@ -59,6 +63,10 @@ export interface MemoryRetriever {
 
 export interface QueryEngineOptions {
   maxTurns?: number;
+  /** Runtime working directory used for all tool execution in this engine. */
+  cwd?: string;
+  /** Runtime session id used to scope task/swarm ownership. */
+  sessionId?: string;
   systemPrompt?: string;
   model?: string;
   maxTokens?: number;
