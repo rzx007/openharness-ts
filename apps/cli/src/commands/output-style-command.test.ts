@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildOutputStyleResult } from "./slash-commands";
+import { buildOutputStyleResult } from "./slash-helpers.js";
 import type { OutputStyleDefinition } from "@openharness/output-styles";
 
 const STYLES: OutputStyleDefinition[] = [

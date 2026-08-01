@@ -14,6 +14,7 @@ import {
   isSessionMemoryEnabled,
   isMemoryAutoExtractEnabled,
   memoryAutoExtractMaxRecords,
+  resolveMainEntryMode,
 } from "./main";
 
 /** 构造一个最小 SkillDefinition（补齐新增必填字段的默认值）。 */
@@ -58,6 +59,24 @@ function makeRegistry(): CommandRegistry {
   });
   return reg;
 }
+
+describe("resolveMainEntryMode", () => {
+  it("defaults to tui when there is no prompt", () => {
+    expect(resolveMainEntryMode(undefined, {})).toBe("tui");
+    expect(resolveMainEntryMode(undefined, { tui: true })).toBe("tui");
+  });
+
+  it("routes prompts and --print to print mode", () => {
+    expect(resolveMainEntryMode("hello", {})).toBe("print");
+    expect(resolveMainEntryMode("hello", { print: true })).toBe("print");
+  });
+
+  it("keeps dry-run and task-worker ahead of tui/print", () => {
+    expect(resolveMainEntryMode(undefined, { dryRun: true })).toBe("dry-run");
+    expect(resolveMainEntryMode("x", { taskWorker: true })).toBe("task-worker");
+    expect(resolveMainEntryMode("x", { tui: true })).toBe("tui");
+  });
+});
 
 describe("buildSlashCommandList", () => {
   it("keeps the single leading slash from registered names (no //help)", () => {

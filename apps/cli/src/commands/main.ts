@@ -1,32 +1,21 @@
-import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import type { ContentBlock, RuntimeBundle, Settings } from "@openharness/core";
-import { loadSettings, saveSettings as saveSettingsCore, getProjectMemoryDir, getSkillsDir, getDataDir } from "@openharness/core";
+import { loadSettings, getProjectMemoryDir, getSkillsDir, getDataDir } from "@openharness/core";
 import { CommandRegistry } from "@openharness/commands";
-import { HookExecutor } from "@openharness/hooks";
-import { McpClientManager } from "@openharness/mcp";
 import { MemoryManager } from "@openharness/memory";
 import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
-import { ThemeManager } from "@openharness/themes";
-import { TaskManager } from "@openharness/services";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { resolveToolPath } from "@openharness/tools";
 import { CredentialStorage } from "@openharness/auth";
-import { bootstrap, registerSubprocessBackend } from "../runtime";
-import type { SandboxRuntimeEvent, SandboxRuntimeReporter } from "@openharness/sandbox";
-import { loadPluginContributions, registerPluginHooks, mergePluginMcpServers, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
+import { bootstrap } from "../runtime";
+import { loadPluginContributions, registerPluginHooks, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
 import { updateRulesFromSession } from "@openharness/personalization";
-import { updateSessionMemoryFile, getSessionMemoryPath, getSessionMemoryContent, sessionMemoryToCompactText } from "@openharness/services";
+import { updateSessionMemoryFile } from "@openharness/services";
 import { isSwarmWorker } from "@openharness/swarm";
-import {
-  isCoordinatorMode,
-  getCoordinatorTools,
-  matchSessionMode,
-} from "@openharness/coordinator";
+import { isCoordinatorMode } from "@openharness/coordinator";
 import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
 import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
-import { registerBuiltinCommandsOnRegistry, type SlashCommandContext } from "./slash-commands";
 import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
 import { probeDaemonRegistry, terminateDaemonProcess } from "../daemon-lifecycle";
@@ -221,17 +210,38 @@ export async function buildUserContentWithAttachments(
   return blocks.length > 0 ? blocks : line;
 }
 
+export type MainEntryMode = "dry-run" | "task-worker" | "tui" | "print";
+
+/** Pure entry routing for tests and mainAction. */
+export function resolveMainEntryMode(
+  prompt: string | undefined,
+  options: Pick<MainOptions, "dryRun" | "taskWorker" | "tui" | "print">,
+): MainEntryMode {
+  if (options.dryRun) return "dry-run";
+  if (options.taskWorker) return "task-worker";
+  if (options.tui) return "tui";
+  if (options.print && prompt) return "print";
+  if (prompt) return "print";
+  return "tui";
+}
+
+function rejectInteractiveContinueResume(options: MainOptions): void {
+  if (!options.continue && !options.resume) return;
+  console.error(
+    "`--continue` / `--resume` apply to print-mode project snapshots only.\n" +
+      "Interactive sessions use the daemon store — open TUI and run /sessions or /resume.\n" +
+      "Example: ohs -p --continue \"follow up\"",
+  );
+  process.exit(1);
+}
+
 /**
  * 应用程序的主入口点，根据提供的选项和提示决定执行模式。
- * 
- * 该函数首先处理设置覆盖，然后根据标志位依次尝试以下模式：
- * 1. TUI 交互模式 (tui) — 启动/attach daemon，再 spawn opentui 前端
- * 2. 打印/非交互模式 (print 或存在 prompt)
- * 3. REPL 交互模式 (默认)
- * 
- * @param prompt - 用户输入的初始提示词，如果未提供则进入交互模式
- * @param options - 命令行选项配置对象，包含模型、权限、路径等设置
- * @returns Promise<void>
+ *
+ * 模式优先级：
+ * 1. dry-run / task-worker
+ * 2. TUI（`--tui` 或默认无 prompt）— 启动/attach daemon，再 spawn opentui 前端
+ * 3. print（`-p` 或存在 prompt）— 进程内一次性 Agent 调用
  */
 export async function mainAction(
   prompt: string | undefined,
@@ -253,38 +263,26 @@ export async function mainAction(
     console.log("Settings:", JSON.stringify(settings, null, 2));
   }
 
-  // dry-run：预览解析后的运行时配置 + readiness，不创建 client、不调模型。
-  // 放在 tui/print 之前，让任何模式下加 --dry-run 都只预览不执行。
-  if (options.dryRun) {
+  const mode = resolveMainEntryMode(prompt, options);
+
+  if (mode === "dry-run") {
     const { runDryRun } = await import("../dry-run");
     await runDryRun(settings, options);
     return;
   }
 
-  // task-worker 模式 = 「stdin 读一行 → 跑一轮 → 退出」(teammate 多轮的承载,
-  // send_message 写 stdin 时 TaskManager 懒复活重启本进程)。无 TTY,先于其余模式。
-  if (options.taskWorker) {
+  if (mode === "task-worker") {
     await runTaskWorker(settings, options);
     return;
   }
 
-  if (options.tui) {
-    await runTuiMode(settings, options, prompt);
+  if (mode === "print") {
+    await runPrintMode(settings, prompt!, options);
     return;
   }
 
-  // print 模式 = 「一次性 Agent 调用 + stdout 流式输出 + 退出」
-  if (options.print && prompt) {
-    await runPrintMode(settings, prompt, options);
-    return;
-  }
-
-  if (prompt) {
-    await runPrintMode(settings, prompt, options);
-    return;
-  }
-
-  await runRepl(settings, options);
+  rejectInteractiveContinueResume(options);
+  await runTuiMode(settings, options, prompt);
 }
 
 /**
@@ -588,388 +586,9 @@ async function runPrintMode(
 }
 
 /**
- * 启动终端 REPL (Read-Eval-Print Loop) 交互模式。
- * 
- * 此模式提供完整的交互式体验，包括会话管理、记忆加载、MCP 连接、
- * 命令注册以及基于 readline 的用户输入处理。支持会话恢复和持久化。
- * 
- * @param settings - 当前加载的应用设置
- * @param options - 命令行选项，影响会话ID生成和行为配置
- * @returns Promise<void>
- */
-async function runRepl(
-  settings: Settings,
-  options: MainOptions,
-): Promise<void> {
-  const { join } = await import("node:path");
-
-  // ==================加载并注册技能（三源：bundled < user < project）==================
-  const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
-
-  const credentialStorage = new CredentialStorage();
-
-  const bundle = await bootstrap({
-    settings,
-    cliOverrides: buildCliOverrides(options),
-    skillRegistry,
-    credentialStorage,
-    sandboxReporter: createSandboxStartupReporter(process.stdout),
-  });
-  // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
-  registerPluginHooks(bundle.hookExecutor);
-  // C.1 插件 tools_dir：动态加载插件工具目录，注册进 toolRegistry。
-  await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
-  // C.4 coordinator 模式：限制工具集为 orchestration tools。
-  if (isCoordinatorMode()) {
-    bundle.queryEngine.setAllowedTools(getCoordinatorTools());
-  }
-
-  let currentModel = settings.model;
-  let sessionId: string | undefined;
-  let currentSettings = settings;
-
-  if (options.continue || options.resume) {
-    sessionId = await loadSessionAndResume(
-      bundle.queryEngine,
-      options.resume,
-      options.name,
-    );
-  } else {
-    sessionId = generateSessionId();
-    if (options.name) {
-      sessionId = `${sessionId}:${options.name}`;
-    }
-  }
-  bundle.queryEngine.setSessionId(sessionId);
-  await registerSubprocessBackend({
-    cwd: process.cwd(),
-    sessionId,
-    settings,
-    permissionChecker: bundle.permissionChecker,
-  });
-
-  const memoryDir = getProjectMemoryDir(process.cwd());
-
-  // ==================创建 MCP 客户端==================
-  const mcpManager = new McpClientManager();
-  // 插件 MCP 贡献合并：用户 settings 同名 server 优先，插件不覆盖（C.1-R3）。
-  const mcpServers = mergePluginMcpServers(currentSettings.mcpServers);
-  if (Object.keys(mcpServers).length > 0) {
-    await mcpManager.connectAll(mcpServers).catch(() => { });
-  }
-  // MCP 工具注册进 toolRegistry：已连接 server 的工具以 mcp__<server>__<tool>
-  // 形式注册，模型可直接调用；注入 mcpManager 使 McpToolCall 元工具可用。
-  for (const tool of mcpManager.getAsToolDefinitions()) {
-    bundle.toolRegistry.register(tool);
-  }
-  bundle.queryEngine.setMcpManager(mcpManager);
-
-  // ==================创建 MemoryManager 客户端==================
-  const memoryManager = new MemoryManager(1000, memoryDir);
-  const memoryFile = join(memoryDir, "memory.json");
-  await memoryManager.loadFromFile(memoryFile).catch(() => { });
-
-  // ==================接线 per-turn 相关记忆检索==================
-  // 每轮按本轮用户输入选相关记忆，作为瞬态 system-reminder 注入（不进持久历史，
-  // 不改写常驻 systemPrompt）。同时对命中的记忆 markMemoryUsed 记使用。
-  // 参考 Python prompts/context.py 的 select_relevant_memories + mark_memory_used。
-  bundle.queryEngine.setMemoryRetriever(async (userInput: string) => {
-    if (currentSettings.memory?.enabled === false) return null;
-    const maxEntries = currentSettings.memory?.maxFiles ?? 10;
-    // 注入与“标记已使用”取同一批条目：selectRelevantForPrompt 返回它实际
-    // 渲染进 text 的那批条目（及其 ids），保证 use_count 反馈与注入一致。
-    const { text, ids } = memoryManager.selectRelevantForPrompt(maxEntries, userInput);
-    if (!text) return null;
-    try {
-      if (ids.length > 0) {
-        await memoryManager.markMemoryUsed(ids);
-      }
-    } catch {
-      // markMemoryUsed 失败不应阻断本轮注入
-    }
-    return text;
-  });
-
-
-  // ==================创建主题管理器==================
-  const themeManager = new ThemeManager();
-
-  // ==================创建任务管理器==================
-  const taskManager = new TaskManager();
-
-  /**
-   * 异步刷新系统提示词。
-   *
-   * 该函数根据当前设置构建运行时系统提示词，并将其更新到查询引擎中。
-   */
-  const refreshSystemPrompt = async () => {
-    // 构建 system-prompt 期的项目记忆段（top-N，无 per-turn query）。
-    // 注意：per-turn 按本轮用户输入的相关性检索属于 QueryEngine 轮级管线，
-    // 此处只做构建期注入，详见 buildRuntimeSystemPrompt 的 TODO。
-    const memoryContent =
-      currentSettings.memory?.enabled !== false
-        ? memoryManager.buildMemoryPrompt(currentSettings.memory?.maxFiles ?? 10)
-        : undefined;
-
-    // 根据当前配置构建运行时系统提示词。skillsList 过滤掉 disableModelInvocation
-    // 的技能（model 可见性：模型只看到可被它发现/调用的技能）。
-    const prompt = await buildRuntimeSystemPrompt({
-      customPrompt: currentSettings.systemPrompt,
-      cwd: process.cwd(),
-      permissionMode: currentSettings.permission.mode,
-      fastMode: currentSettings.fastMode,
-      effort: currentSettings.effort,
-      passes: currentSettings.passes,
-      memoryContent,
-      skillsList: skillRegistry.modelVisibleList(),
-    });
-    // 将生成的提示词设置到查询引擎中
-    bundle.queryEngine.setSystemPrompt(prompt);
-  };
-
-  // ==================创建slash命令注册器==================
-  const commandRegistry = new CommandRegistry();
-
-  // 命令注册器上下文
-  const slashCtx: SlashCommandContext = {
-    getEngine: () => bundle.queryEngine as any,
-    getModel: () => currentModel,
-    setModel: (m: string) => { currentModel = m; bundle.queryEngine.setModel(m); },
-    getSettings: () => currentSettings,
-    updateSettings: async (patch: Partial<Settings>) => {
-      currentSettings = { ...currentSettings, ...patch };
-      await saveSettingsCore(currentSettings);
-    },
-    hookExecutor: bundle.hookExecutor as HookExecutor,
-    memoryManager,
-    memoryDir,
-    mcpManager,
-    skillRegistry,
-    themeManager,
-    taskManager,
-    sessionId,
-    exitRepl: () => { },
-    refreshSystemPrompt,
-    getBundle: () => bundle,
-    credentialStorage,
-    // renderer 在下方声明,闭包在命令调用时(已初始化)解析,不存在 TDZ 问题。
-    setRendererStyle: (name: string) => { renderer.setStyle(name); },
-  };
-
-  // 注册内置命令
-  registerBuiltinCommandsOnRegistry(commandRegistry, slashCtx);
-
-  // 启动时刷新一次 system prompt，把（model 可见的）技能段注入。
-  // bootstrap 期的 system prompt 不带 skillsList，这里补上。
-  await refreshSystemPrompt();
-
-  // B.2 compact attachments：compact 时注入 taskFocus + session_memory checkpoint。
-  bundle.queryEngine.setAttachmentsProvider(() => {
-    const running = taskManager.listTasks("running");
-    const taskFocus = running.length > 0
-      ? running.map((t) => t.description).join("; ")
-      : undefined;
-    const smPath = isSessionMemoryEnabled(currentSettings)
-      ? getSessionMemoryPath(process.cwd(), sessionId)
-      : undefined;
-    const sessionMemory = smPath
-      ? sessionMemoryToCompactText(getSessionMemoryContent(smPath)) || undefined
-      : undefined;
-    return { taskFocus, sessionMemory };
-  });
-
-  console.log("OpenHarness Interactive Mode");
-  console.log(`Model: ${currentModel}`);
-  console.log(`Session: ${sessionId}`);
-  console.log("Type /help for commands, or Ctrl+C to exit.\n");
-
-
-  // 创建逐行读取输入流  readline 接口， 用户在 终端输入
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: "> ",
-  });
-
-  // 用于保证 session 快照只保存一次，防止 exit/quit 命令路径与 rl.close 事件路径双写。
-  let sessionSaved = false;
-  const saveOnce = async () => {
-    if (sessionSaved) return;
-    sessionSaved = true;
-    await saveSessionSnapshot(sessionId, bundle.queryEngine, currentModel);
-  };
-
-  const renderer = new EventRenderer({
-    verbose: options.verbose,
-    outputStyle: settings.outputStyle,
-  });
-
-  const processLine = async (line: string): Promise<void> => {
-    const input = line.trim();
-    if (!input) return;
-
-    if (input === "exit" || input === "quit") {
-      await saveOnce();
-      rl.close();
-      return;
-    }
-
-    if (input.startsWith("/")) {
-      // 先尝试 user-invocable skill 的 /<skill>（内置命令优先，不被覆盖）。
-      // 命中 → 把 skill prompt 当作一次普通输入跑一轮，再 return。
-      const skillMatch = matchUserInvocableSkill(
-        input,
-        skillRegistry,
-        (name) => commandRegistry.get(name) !== undefined,
-      );
-      if (skillMatch) {
-        renderer.reset();
-        const skillPrompt = buildSkillPrompt(skillMatch.skill, skillMatch.args);
-        const overrideModel = skillMatch.skill.model;
-        let completed = false;
-        if (overrideModel) bundle.queryEngine.setModel(overrideModel);
-        try {
-          for await (const event of bundle.queryEngine.submitMessage(skillPrompt)) {
-            await renderer.render(event);
-          }
-          completed = true;
-        } catch (err) {
-          if (err instanceof Error) {
-            process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
-          }
-        } finally {
-          if (overrideModel) bundle.queryEngine.setModel(currentModel);
-        }
-        if (completed) {
-          await maintainMemoryAfterTurn({
-            bundle,
-            settings: currentSettings,
-            model: currentModel,
-            memoryManager,
-            memoryDir,
-            sessionId,
-          });
-        }
-        rl.prompt();
-        return;
-      }
-
-      const spaceIdx = input.indexOf(" ");
-      const cmdName = spaceIdx >= 0 ? input.slice(0, spaceIdx) : input;
-      const argsStr = spaceIdx >= 0 ? input.slice(spaceIdx + 1) : "";
-      const result = await commandRegistry.execute(cmdName, {
-        args: parseCommandArgs(argsStr),
-        raw: input,
-      });
-
-      if (result.output === "__EXIT__") {
-        await saveOnce();
-        rl.close();
-        return;
-      }
-
-      if (result.output) {
-        process.stdout.write(`${result.output}\n`);
-      }
-      if (result.error) {
-        process.stderr.write(`Error: ${result.error}\n`);
-      }
-      rl.prompt();
-      return;
-    }
-
-    renderer.reset();
-
-    let completed = false;
-    try {
-      for await (const event of bundle.queryEngine.submitMessage(input)) {
-        await renderer.render(event);
-      }
-      completed = true;
-    } catch (err) {
-      if (err instanceof Error) {
-        process.stderr.write(`${formatApiError(err, currentSettings)}\n`);
-      }
-    }
-
-    // End-of-turn memory maintenance: checkpoint, optional extraction, snapshot, auto-dream.
-    if (completed) {
-      await maintainMemoryAfterTurn({
-        bundle,
-        settings: currentSettings,
-        model: currentModel,
-        memoryManager,
-        memoryDir,
-        sessionId,
-      });
-    }
-
-    rl.prompt();
-  };
-
-  rl.on("line", (line) => {
-    processLine(line).catch((err) => {
-      process.stderr.write(`Fatal: ${err}\n`);
-    });
-  });
-
-  rl.on("close", () => {
-    (async () => {
-      // 个性化（C.5）：REPL 退出时 best-effort 抽取环境事实。
-      try {
-        updateRulesFromSession(bundle.queryEngine.getHistory());
-      } catch {
-        // best-effort
-      }
-      // Ctrl+C / EOF 退出前保存会话快照（saveOnce 保证只写一次，防止与 exit/quit 双写）。
-      await saveOnce();
-      process.exit(0);
-    })();
-  });
-
-  rl.prompt();
-}
-
-function createSandboxStartupReporter(stream: NodeJS.WritableStream): SandboxRuntimeReporter {
-  let started = false;
-  return (event: SandboxRuntimeEvent) => {
-    const line = formatSandboxStartupEvent(event, !started);
-    if (!line) return;
-    started = true;
-    stream.write(`${line}\n`);
-  };
-}
-
-function formatSandboxStartupEvent(event: SandboxRuntimeEvent, first: boolean): string | undefined {
-  switch (event.type) {
-    case "start":
-      return first
-        ? `Preparing ${event.backend === "docker" ? "Docker" : "SRT"} sandbox...`
-        : undefined;
-    case "check-availability":
-      return event.backend === "docker" ? "  Docker: checking" : "  SRT: checking";
-    case "check-image":
-      return `  Image: checking ${event.image}`;
-    case "build-image":
-      return `  Image: building ${event.image} from ${event.dockerfile}`;
-    case "start-container":
-      return `  Container: ${event.reused ? "reusing" : "starting"} ${event.containerName}`;
-    case "ready":
-      return event.containerName
-        ? `Sandbox ready: ${event.containerName}`
-        : "Sandbox ready.";
-    case "unavailable":
-      return `Sandbox unavailable: ${event.reason}`;
-    default:
-      return undefined;
-  }
-}
-
-/**
  * 启动 TUI (Terminal User Interface) 模式。
  *
- * 本进程（ohs --tui）仅作**启动器**：spawn opentui 前端（Bun 运行时）子进程，经
+ * 本进程仅作**启动器**（默认 `ohs` 与显式 `ohs --tui`）：spawn opentui 前端（Bun 运行时）子进程，经
  * `OPENHARNESS_FRONTEND_CONFIG` 传入 daemon attach 信息。
  * 前端通过 `useServerSync` 与 daemon 通信。
  * 本进程 stdio inherit 终端给 opentui，等前端退出后 process.exit。详见 docs/tui-flow.md。
@@ -1226,74 +845,10 @@ function buildCliOverrides(options: MainOptions) {
   };
 }
 
-/**
- * 解析命令参数字符串为键值对对象。
- * 
- * 支持 key=value 格式，以及位置参数（第一个参数视为 model，其余视为 _index）。
- * 
- * @param argsStr - 原始参数字符串
- * @returns Record<string, string> 解析后的参数映射
- */
-function parseCommandArgs(argsStr: string): Record<string, string> {
-  const args: Record<string, string> = {};
-  if (!argsStr) return args;
-  const parts = argsStr.split(/\s+/);
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!;
-    if (part.includes("=")) {
-      const [k, ...v] = part.split("=");
-      args[k!] = v.join("=");
-    } else if (i === 0) {
-      args["model"] = part;
-      args["_0"] = part;
-    } else {
-      args[`_${i}`] = part;
-    }
-  }
-  return args;
-}
-
-/**
- * 生成唯一的会话 ID。
- * 
- * 基于时间戳和随机数生成简短的唯一标识符。
- * 
- * @returns string 生成的会话 ID
- */
 function generateSessionId(): string {
   const timestamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 6);
   return `${timestamp}-${rand}`;
-}
-
-/**
- * 加载并恢复之前的会话状态。
- * 
- * 如果提供了 resumeId，则尝试加载该会话；否则查找最新的会话。
- * 如果找到有效的会话快照，则将消息加载到引擎中并设置模型。
- * 
- * @param engine - 查询引擎实例
- * @param resumeId - 可选的指定恢复会话 ID
- * @param _name - 可选的会话名称（当前未使用）
- * @returns Promise<string> 恢复后的会话 ID
- */
-async function loadSessionAndResume(
-  engine: any,
-  resumeId?: string,
-  _name?: string,
-): Promise<string> {
-  const { loadSessionSnapshot: loadLatest, loadSessionById } = await import("@openharness/services");
-  const payload = resumeId ? loadSessionById(process.cwd(), resumeId) : loadLatest(process.cwd());
-  if (payload) {
-    engine.loadMessages(payload.messages);
-    if (payload.model) engine.setModel(payload.model);
-    const modeMsg = matchSessionMode(payload.session_mode);
-    if (modeMsg) console.log(modeMsg);
-    console.log(`Resumed session: ${payload.session_id} (${payload.message_count} messages)`);
-    return payload.session_id;
-  }
-
-  return generateSessionId();
 }
 
 /**

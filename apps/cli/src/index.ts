@@ -17,13 +17,15 @@ program.enablePositionalOptions();
 
 program
   .name("ohs")
-  .description("OpenHarness-ts - Open Source AI Agent Framework")
+  .description(
+    "OpenHarness-ts - Open Source AI Agent Framework. Interactive default: TUI/daemon (requires Bun). One-shot: pass a prompt or use -p/--print.",
+  )
   .version(VERSION)
-  .argument("[prompt]", "Initial prompt to send")
+  .argument("[prompt]", "Initial prompt to send (print mode; omit for interactive TUI)")
   .option("-m, --model <model>", "Model to use")
-  .option("-p, --print", "Print response and exit (non-interactive)")
-  .option("-c, --continue", "Continue last session")
-  .option("-r, --resume <session>", "Resume a specific session")
+  .option("-p, --print", "Print response and exit (non-interactive; requires a prompt)")
+  .option("-c, --continue", "Continue last print-mode project snapshot (not daemon TUI)")
+  .option("-r, --resume <session>", "Resume a print-mode project snapshot by id (not daemon TUI)")
   .option("-n, --name <name>", "Name the session")
   .option("--provider <provider>", "API provider")
   .option("--permission-mode <mode>", "Permission mode (default | plan | full_auto)")
@@ -38,7 +40,7 @@ program
   .option("--effort <level>", "Effort level (low | medium | high)")
   .option("--verbose", "Verbose output")
   .option("-d, --debug", "Debug mode")
-  .option("--tui", "Launch terminal UI (opentui frontend, requires Bun)")
+  .option("--tui", "Explicitly launch TUI/daemon (default when no prompt; requires Bun)")
   .option("--dangerously-skip-permissions", "Skip all permission checks")
   .option("--allowed-tools <tools>", "Comma-separated allowed tools")
   .option("--disallowed-tools <tools>", "Comma-separated disallowed tools")

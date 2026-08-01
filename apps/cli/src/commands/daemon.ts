@@ -27,15 +27,49 @@ async function runServe(options: ServeOptions): Promise<void> {
   } = await import("@openharness/server");
   const { loadSettings } = await import("@openharness/core");
   const { createCliSessionRuntimeFactory } = await import("../session-runtime.js");
+  const { createCliCommandCatalog } = await import("../command-catalog.js");
+  const {
+    createCliAgentPersonaService,
+    createCliAuthService,
+    createCliContextService,
+    createCliDreamService,
+    createCliGitService,
+    createCliHooksService,
+    createCliMemoryService,
+    createCliOutputStyleService,
+    createCliPluginService,
+    createCliProfileService,
+    createCliProjectInitService,
+    createCliProviderService,
+    createCliSettingsService,
+  } = await import("../daemon-services.js");
 
   const token = options.token ?? createBearerToken();
   const settings = await loadSettings({});
+  const settingsRef = { current: settings };
   const { server, listen } = await startOpenHarnessServer({
     host: options.host,
     port: options.port,
     token,
     storePath: options.storePath,
-    runtimeFactory: createCliSessionRuntimeFactory({ settings }),
+    runtimeFactory: createCliSessionRuntimeFactory({
+      settings,
+      getSettings: () => settingsRef.current,
+    }),
+    commandCatalog: createCliCommandCatalog(() => settingsRef.current),
+    settingsService: createCliSettingsService(settingsRef),
+    providerService: createCliProviderService(settingsRef),
+    memoryService: createCliMemoryService(),
+    authService: createCliAuthService(),
+    contextService: createCliContextService(settingsRef),
+    dreamService: createCliDreamService(settingsRef),
+    profileService: createCliProfileService(),
+    outputStyleService: createCliOutputStyleService(),
+    projectInitService: createCliProjectInitService(),
+    pluginService: createCliPluginService(settingsRef),
+    agentPersonaService: createCliAgentPersonaService(),
+    hooksService: createCliHooksService(settingsRef),
+    gitService: createCliGitService(),
     version: VERSION,
   });
 
