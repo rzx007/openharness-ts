@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
-import { getTasksDir } from "@openharness/core";
+import { getProjectConfigDir, getTasksDir } from "@openharness/core";
 
 export type TaskType = "shell" | "agent" | "dream";
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "stopped";
@@ -13,6 +13,8 @@ export interface TaskInfo {
   status: TaskStatus;
   description: string;
   cwd: string;
+  /** Owning session. When present, task state is isolated from other sessions in the same cwd. */
+  sessionId?: string;
   command?: string;
   /** Direct-exec argv (bypasses shell). Mutually exclusive with `command`. */
   argv?: string[];
@@ -55,6 +57,7 @@ export interface CreateShellTaskOptions {
   argv?: string[];
   description: string;
   cwd: string;
+  sessionId?: string;
   type?: TaskType;
   env?: Record<string, string>;
 }
@@ -63,6 +66,7 @@ export interface CreateAgentTaskOptions {
   prompt: string;
   description: string;
   cwd: string;
+  sessionId?: string;
   type?: TaskType;
   model?: string;
   command?: string;
@@ -142,6 +146,7 @@ export class TaskManager {
       status: "running",
       description: opts.description,
       cwd: opts.cwd,
+      sessionId: opts.sessionId,
       command: opts.command,
       argv: opts.argv ? [...opts.argv] : undefined,
       env: opts.env ? { ...opts.env } : undefined,
@@ -204,6 +209,7 @@ export class TaskManager {
         status: "failed",
         description: opts.description,
         cwd: opts.cwd,
+        sessionId: opts.sessionId,
         prompt: opts.prompt,
         outputFile,
         createdAt: Date.now(),
@@ -221,6 +227,7 @@ export class TaskManager {
       argv: opts.argv,
       description: opts.description,
       cwd: opts.cwd,
+      sessionId: opts.sessionId,
       type: opts.type ?? "agent",
       env: opts.env,
     });
@@ -492,6 +499,7 @@ export class TaskManager {
         env,
         detached,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
     } else {
       child = spawn(task.command!, {
@@ -500,6 +508,7 @@ export class TaskManager {
         shell: true,
         detached,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
     }
 
@@ -684,10 +693,11 @@ function terminateProcess(child: ChildProcess, graceMs: number): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise<void>((resolve) => {
     let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (done) return;
       done = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       resolve();
     };
     child.once("exit", finish);
@@ -698,7 +708,9 @@ function terminateProcess(child: ChildProcess, graceMs: number): Promise<void> {
     }
     if (process.platform === "win32") {
       // Windows has no real SIGTERM for console apps; kill the whole tree.
-      killProcessTree(child);
+      void killProcessTreeAsync(child, graceMs).then(() => {
+        setTimeout(finish, 50);
+      });
     } else if (child.pid != null) {
       // Graceful SIGTERM to the whole process group (the child leads its own
       // group via `detached`), so shell-spawned grandchildren get a chance to
@@ -713,7 +725,7 @@ function terminateProcess(child: ChildProcess, graceMs: number): Promise<void> {
         }
       }
     }
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       try {
         killProcessTree(child);
       } catch {
@@ -726,6 +738,59 @@ function terminateProcess(child: ChildProcess, graceMs: number): Promise<void> {
   });
 }
 
+function killProcessTreeAsync(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.pid == null) return Promise.resolve();
+  if (process.platform !== "win32") {
+    killProcessTree(child);
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    try {
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.once("exit", finish);
+      killer.once("error", () => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+        finish();
+      });
+      timer = setTimeout(() => {
+        try {
+          killer.kill();
+        } catch {
+          /* ignore */
+        }
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+        finish();
+      }, Math.max(200, timeoutMs));
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* ignore */
+      }
+      finish();
+    }
+  });
+}
+
 /** Force-kill a process and its children, cross-platform. */
 function killProcessTree(child: ChildProcess): void {
   if (child.pid == null) return;
@@ -734,6 +799,7 @@ function killProcessTree(child: ChildProcess): void {
     try {
       spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
         stdio: "ignore",
+        windowsHide: true,
       });
     } catch {
       try {
@@ -759,14 +825,70 @@ function killProcessTree(child: ChildProcess): void {
   }
 }
 
-let _default: TaskManager | undefined;
+export interface TaskManagerScope {
+  cwd: string;
+  sessionId?: string;
+}
 
-export function getTaskManager(): TaskManager {
+let _default: TaskManager | undefined;
+const scopedManagers = new Map<string, TaskManager>();
+
+function normalizeTaskManagerCwd(cwd: string): string {
+  const root = resolve(cwd);
+  return process.platform === "win32" ? root.toLowerCase() : root;
+}
+
+function normalizeTaskManagerSessionId(sessionId: string | undefined): string | undefined {
+  const trimmed = sessionId?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function taskManagerKey(scope: TaskManagerScope): string {
+  const cwd = normalizeTaskManagerCwd(scope.cwd);
+  const sessionId = normalizeTaskManagerSessionId(scope.sessionId);
+  return sessionId ? `${cwd}::session=${sessionId}` : cwd;
+}
+
+function scopedTasksDir(scope: TaskManagerScope): string {
+  const sessionId = normalizeTaskManagerSessionId(scope.sessionId);
+  if (!sessionId) return join(getProjectConfigDir(scope.cwd), "tasks");
+  const safeSessionId = sessionId.replace(/[^A-Za-z0-9._-]/g, "_") || "default";
+  return join(getProjectConfigDir(scope.cwd), "tasks", "sessions", safeSessionId);
+}
+
+export function getTaskManager(scope?: string | TaskManagerScope): TaskManager {
+  if (scope) {
+    const normalizedScope = typeof scope === "string" ? { cwd: scope } : scope;
+    const key = taskManagerKey(normalizedScope);
+    let manager = scopedManagers.get(key);
+    if (!manager) {
+      manager = new TaskManager(scopedTasksDir(normalizedScope));
+      scopedManagers.set(key, manager);
+    }
+    return manager;
+  }
   if (!_default) _default = new TaskManager();
   return _default;
 }
 
-export function resetTaskManager(): void {
+export function resetTaskManager(scope?: string | TaskManagerScope): void {
+  if (scope) {
+    const normalizedScope = typeof scope === "string" ? { cwd: scope } : scope;
+    const key = taskManagerKey(normalizedScope);
+    const sessionId = normalizeTaskManagerSessionId(normalizedScope.sessionId);
+    const keys = sessionId
+      ? [key]
+      : [...scopedManagers.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}::session=`));
+    for (const candidate of keys) {
+      scopedManagers.get(candidate)?.close();
+      scopedManagers.delete(candidate);
+    }
+    return;
+  }
   if (_default) _default.close();
   _default = undefined;
+  for (const manager of scopedManagers.values()) {
+    manager.close();
+  }
+  scopedManagers.clear();
 }

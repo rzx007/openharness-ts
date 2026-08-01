@@ -1,8 +1,39 @@
 export { CompactService } from "./compact";
 export type { CompactOptions } from "./compact";
 
-export { SessionStorage } from "./session";
-export type { SessionData, SessionMessage } from "./session";
+export { SessionStore, type SessionStoreOptions } from "./session-runtime";
+export type {
+  AdmitPromptInput,
+  AppendEventInput,
+  AppendMessagePartDeltaInput,
+  CreateMessageInput,
+  CreatePermissionRequestInput,
+  CreateRunInput,
+  CreateSessionInput,
+  InputDelivery,
+  ListEventsOptions,
+  ListMessagePartsOptions,
+  ListMessagesOptions,
+  ListPermissionRequestsOptions,
+  ListSessionsOptions,
+  PermissionRequestRecord,
+  PermissionStatus,
+  ReplyPermissionInput,
+  RunStatus,
+  SessionMessagePartRecord,
+  SessionMessagePartStatus,
+  SessionMessagePartType,
+  SessionEventRecord,
+  SessionInputRecord,
+  SessionMessageRecord,
+  SessionMessageRole,
+  SessionRecord,
+  SessionRunRecord,
+  SessionStatus,
+  SessionStateSnapshot,
+  UpsertMessagePartInput,
+  UpdateRunInput,
+} from "./session-runtime";
 export {
   getProjectSessionDir,
   saveSessionSnapshot,

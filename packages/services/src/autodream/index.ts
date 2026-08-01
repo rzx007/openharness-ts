@@ -136,7 +136,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
   const priorMtime = tryAcquireConsolidationLock(memoryDir);
   if (priorMtime === null) return null;
 
-  const runner = options.taskRunner ?? (getTaskManager() as unknown as DreamTaskRunner);
+  const runner = options.taskRunner ?? (getTaskManager(cwd) as unknown as DreamTaskRunner);
   mkdirSync(memoryDir, { recursive: true });
   mkdirSync(sessionDir, { recursive: true });
   const before = memoryFilesMtimeSnapshot(memoryDir);

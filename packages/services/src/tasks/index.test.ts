@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TaskManager } from "./index.js";
+import { getTaskManager, resetTaskManager, TaskManager } from "./index.js";
 
 const NODE = process.execPath;
 
@@ -37,10 +37,58 @@ function makeManager(): TaskManager {
 }
 
 afterEach(async () => {
+  resetTaskManager();
   while (managers.length) {
     const mgr = managers.pop()!;
     await mgr.aclose().catch(() => {});
   }
+});
+
+describe("scoped TaskManager", () => {
+  it("returns isolated managers per cwd", () => {
+    const cwdA = join(tempTasksDir(), "repo-a");
+    const cwdB = join(tempTasksDir(), "repo-b");
+    const first = getTaskManager(cwdA);
+    const second = getTaskManager(cwdA);
+    const other = getTaskManager(cwdB);
+
+    expect(first).toBe(second);
+    expect(first).not.toBe(other);
+
+    resetTaskManager(cwdA);
+    expect(getTaskManager(cwdA)).not.toBe(first);
+    expect(getTaskManager(cwdB)).toBe(other);
+  });
+
+  it("isolates managers and task lists per session within the same cwd", async () => {
+    const cwd = join(tempTasksDir(), "repo");
+    const sessionA = getTaskManager({ cwd, sessionId: "s-a" });
+    const sameSessionA = getTaskManager({ cwd, sessionId: "s-a" });
+    const sessionB = getTaskManager({ cwd, sessionId: "s-b" });
+    const cwdOnly = getTaskManager(cwd);
+
+    expect(sessionA).toBe(sameSessionA);
+    expect(sessionA).not.toBe(sessionB);
+    expect(sessionA).not.toBe(cwdOnly);
+
+    const task = await sessionA.createShellTask({
+      argv: [NODE, "-e", "process.stdout.write('session-a')"],
+      description: "session scoped",
+      cwd,
+      sessionId: "s-a",
+    });
+    expect(task.sessionId).toBe("s-a");
+    expect(sessionA.listTasks()).toHaveLength(1);
+    expect(sessionB.listTasks()).toHaveLength(0);
+    expect(cwdOnly.listTasks()).toHaveLength(0);
+
+    resetTaskManager({ cwd, sessionId: "s-a" });
+    expect(getTaskManager({ cwd, sessionId: "s-a" })).not.toBe(sessionA);
+    expect(getTaskManager({ cwd, sessionId: "s-b" })).toBe(sessionB);
+
+    resetTaskManager(cwd);
+    expect(getTaskManager({ cwd, sessionId: "s-b" })).not.toBe(sessionB);
+  });
 });
 
 describe("TaskManager real execution", () => {

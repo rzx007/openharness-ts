@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { CompactService } from "./compact/index.js";
-import { SessionStorage } from "./session/index.js";
 import { CronScheduler } from "./cron/index.js";
 import { estimateTokens } from "./token-estimation/index.js";
 import { LspClient } from "./lsp/index.js";
@@ -56,41 +55,6 @@ describe("CompactService", () => {
     ];
     const result = svc.microCompact(msgs);
     expect(result.length).toBe(msgs.length);
-  });
-});
-
-describe("SessionStorage", () => {
-  it("creates and retrieves a session", () => {
-    const store = new SessionStorage();
-    const session = store.create("s1", { foo: "bar" });
-    expect(session.id).toBe("s1");
-    expect(store.get("s1")).toBe(session);
-  });
-
-  it("updates session metadata", () => {
-    const store = new SessionStorage();
-    store.create("s1");
-    const updated = store.update("s1", { metadata: { status: "active" } });
-    expect(updated!.metadata.status).toBe("active");
-  });
-
-  it("update returns undefined for missing session", () => {
-    const store = new SessionStorage();
-    expect(store.update("nope", {})).toBeUndefined();
-  });
-
-  it("deletes a session", () => {
-    const store = new SessionStorage();
-    store.create("s1");
-    expect(store.delete("s1")).toBe(true);
-    expect(store.get("s1")).toBeUndefined();
-  });
-
-  it("lists all sessions", () => {
-    const store = new SessionStorage();
-    store.create("s1");
-    store.create("s2");
-    expect(store.list()).toHaveLength(2);
   });
 });
 

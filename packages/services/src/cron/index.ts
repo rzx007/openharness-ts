@@ -120,6 +120,7 @@ export class CronScheduler {
             const result = await execAsync(job.command, {
               cwd: job.cwd,
               timeout: COMMAND_TIMEOUT_MS,
+              windowsHide: true,
             });
             output = (result.stdout + result.stderr).trim().slice(0, OUTPUT_MAX_CHARS) || undefined;
           } else {

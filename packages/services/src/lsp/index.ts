@@ -63,7 +63,7 @@ export class LspClient {
     try {
       const { stdout } = await execAsync(
         `rg --no-heading -n "${query.replace(/"/g, '\\"')}" --type-add 'source:*.{ts,js,py}' -t source -g "*.ts" -g "*.js" -g "*.py" --max-count 5`,
-        { cwd: root, maxBuffer: 1024 * 1024 }
+        { cwd: root, maxBuffer: 1024 * 1024, windowsHide: true }
       );
       return stdout
         .split("\n")
@@ -104,7 +104,7 @@ export class LspClient {
     try {
       const { stdout } = await execAsync(
         `rg --no-heading -n "${symbol.replace(/"/g, '\\"')}" -g "*.ts" -g "*.js" -g "*.py" --max-count 20`,
-        { cwd: root, maxBuffer: 1024 * 1024 }
+        { cwd: root, maxBuffer: 1024 * 1024, windowsHide: true }
       );
       return stdout
         .split("\n")
