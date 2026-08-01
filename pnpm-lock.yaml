@@ -9,6 +9,9 @@ catalogs:
     '@anthropic-ai/sdk':
       specifier: ^0.40.0
       version: 0.40.1
+    '@hono/node-server':
+      specifier: ^1.19.13
+      version: 1.19.13
     '@modelcontextprotocol/sdk':
       specifier: ^1.29.0
       version: 1.29.0
@@ -36,6 +39,9 @@ catalogs:
     diff:
       specifier: ^7.0.0
       version: 7.0.0
+    hono:
+      specifier: ^4.12.12
+      version: 4.12.12
     openai:
       specifier: ^4.91.0
       version: 4.104.0
@@ -125,15 +131,18 @@ importers:
       '@openharness/prompts':
         specifier: workspace:*
         version: link:../../packages/prompts
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
+      '@openharness/server':
+        specifier: workspace:*
+        version: link:../../packages/server
       '@openharness/services':
         specifier: workspace:*
         version: link:../../packages/services
       '@openharness/skills':
         specifier: workspace:*
         version: link:../../packages/skills
-      '@openharness/sandbox':
-        specifier: workspace:*
-        version: link:../../packages/sandbox
       '@openharness/swarm':
         specifier: workspace:*
         version: link:../../packages/swarm
@@ -165,6 +174,9 @@ importers:
 
   apps/frontend:
     dependencies:
+      '@openharness/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@openharness/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -300,6 +312,22 @@ importers:
       yaml:
         specifier: 'catalog:'
         version: 2.9.0
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.17
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
+
+  packages/client:
+    dependencies:
+      '@openharness/services':
+        specifier: workspace:*
+        version: link:../services
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -490,6 +518,31 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.17
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
+
+  packages/server:
+    dependencies:
+      '@hono/node-server':
+        specifier: 'catalog:'
+        version: 1.19.13(hono@4.12.12)
+      '@openharness/core':
+        specifier: workspace:*
+        version: link:../core
+      '@openharness/services':
+        specifier: workspace:*
+        version: link:../services
+      hono:
+        specifier: 'catalog:'
+        version: 4.12.12
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
