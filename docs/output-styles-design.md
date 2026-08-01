@@ -1,4 +1,6 @@
-# 设计:Output Styles(输出样式)
+# 归档：Output Styles（输出样式）
+
+> 历史设计记录。本文以旧 TUI host 的 state/OHJSON 接线为前提，不能作为 daemon TUI 的实现依据；当前客户端会话同步见 [client-sync-flow.md](./client-sync-flow.md)。
 
 > 状态:已批准,待实现。忠实复刻 Python v0.1.9 的 output style 机制。
 
@@ -35,8 +37,8 @@
 - `loadOutputStyles(): OutputStyleDefinition[]`:
   - 内置三个:`default`("Standard rich console output.")、`minimal`("Very terse plain-text output.")、
     `codex`("Codex-like compact transcript and tool output.")
-  - 用户:`~/.openharness/output_styles/*.md`,stem=name、文件内容=content、source="user",按名排序
-- `getOutputStylesDir(): string`:`~/.openharness/output_styles`(递归 mkdir)
+  - 用户:`~/.openharness-ts/output_styles/*.md`,stem=name、文件内容=content、source="user",按名排序
+- `getOutputStylesDir(): string`:`~/.openharness-ts/output_styles`(递归 mkdir)
 - 保留一个轻量 `OutputStyleLoader`?——不必,Python 用自由函数;TS 也用 `loadOutputStyles()` 自由函数。
   (若有消费方依赖旧 `OutputStyleLoader`/`format`,一并改;经检索仅骨架自身,无外部消费方。)
 
@@ -60,7 +62,7 @@
   - `set <NAME>` 或裸 `<NAME>` → 校验 ∈ loadOutputStyles().name;未知 → "Unknown output style: <NAME>";
     合法 → `settings.outputStyle = NAME` + saveSettings + 热更新 REPL renderer(`renderer.setStyle`)
   - 其它 → "Usage: /output-style [show|list|NAME]"
-- REPL 与 TUI(经 `runHostSlashCommand`)都可用。
+- 当时的 REPL 与旧 TUI host 都可用。
 - 抽可测纯函数:`buildOutputStyleResult(args, styles, current)` → `{ message, newStyle? }`,
   把"参数解析 → 结果消息 + 是否切换"与 IO(load/save/renderer)分离,便于单测。
 
@@ -83,12 +85,12 @@
 - `codex` 独立渲染(渲染同 default,留 TODO,与 v0.1.9 一致)。
 - TUI render 分支、TUI 图形化样式选择器 UI。
 - system-prompt 注入(Python 不做)。
-- 项目级 `.openharness/output_styles`(最小版只 user 级 `~/.openharness/output_styles`,对齐 Python)。
+- 项目级 `.openharness/output_styles`(最小版只 user 级 `~/.openharness-ts/output_styles`)。
 
 ## 与 Python 的已知差异(刻意)
 
 - **`list` 输出**加 `*`/空格 active 标记(Python 是纯 `name [source]`)——便于 REPL 直观看当前项。
-- **config 目录**:`getOutputStylesDir()` 硬编码 `~/.openharness/output_styles`,不读 `OPENHARNESS_CONFIG_DIR`
+- **config 目录**:`getOutputStylesDir()` 默认硬编码 `~/.openharness-ts/output_styles`,不读 `OPENHARNESS_CONFIG_DIR`
   ——与本仓 `settings.ts` 的 IO 一致(整个 TS app 都硬编码 homedir);若将来 settings 接入
   `OPENHARNESS_CONFIG_DIR`,这里一并改以保持 parity。
 - **TUI `/output-style set` 当前不持久化**:TUI host 的 `updateSettings` 是 no-op(对**所有**

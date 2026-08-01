@@ -1,7 +1,9 @@
-# Spec：TUI 前端迁移 ink → opentui（对齐 opencode 交互）
+# 归档 Spec：TUI 前端迁移 ink → opentui（对齐 opencode 交互）
+
+> 历史记录，禁止作为当前实现说明。本文描述的是 2026-06 的三进程 BackendHost/OHJSON 架构；该架构已退场。当前 TUI 启动与跨端协议见 [../../tui-flow.md](../../tui-flow.md) 和 [../../client-sync-flow.md](../../client-sync-flow.md)。
 
 日期：2026-06-12
-状态：已与用户确认设计，待实施计划
+状态：已归档
 
 ## 背景与目标
 

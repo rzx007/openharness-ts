@@ -30,13 +30,13 @@
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
 | coordinator | ✅ | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；✅agent 级字段运行时生效(tools/disallowedTools/maxTurns/effort/permissionMode) |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
-| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；✅MCP connectAll+工具注册(REPL+BackendHost) |
+| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；✅MCP connectAll+工具注册(REPL+daemon session-runtime+task-worker) |
 | bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
-| personalization | ✅ | 10 类事实抽取+local_rules 持久化+prompt 注入+三模式 session-end 触发(C.5) |
+| personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 已接 REPL/print/task-worker，daemon/TUI 未接(C.5) |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
 | autopilot | ⛔ | 不复刻 |
 
@@ -131,7 +131,7 @@
 ### B.2 Compact 高级链路 ✅ 已完成
 - ✅ context collapse（确定性折叠超长文本）、PTL（prompt-too-long）重试 + 头部截断、tool_use/result 配对保护、图片占位替换。
 - ✅ boundary marker、PRE/POST_COMPACT hooks、progress/checkpoint。
-- ✅ compact attachments（B.2 尾巴）：`extractRecentFiles()`（Read/Write/Edit tool_use 历史，最近 20）、`deriveWorkLog()`（工具调用计数摘要）、`buildCompactPrompt()`（拼入 `<context>` 段）；`setAttachmentsProvider()` 外部注入 taskFocus/plan；REPL + BackendHost 两处接线 TaskManager.listTasks("running") 提供 task_focus。
+- ✅ compact attachments（B.2 尾巴）：`extractRecentFiles()`（Read/Write/Edit tool_use 历史，最近 20）、`deriveWorkLog()`（工具调用计数摘要）、`buildCompactPrompt()`（拼入 `<context>` 段）；`setAttachmentsProvider()` 外部注入 taskFocus/plan；REPL 接线 `TaskManager.listTasks("running")` 提供 task_focus。daemon `SessionRuntime` 尚未接 attachments provider。
 - **文件**：`packages/core/src/engine/compact-service.ts`、`packages/core/src/types/runtime.ts`、`packages/core/src/engine/query-engine.ts`、`apps/cli/src/commands/main.ts`
 
 ### B.3 Tasks 真实执行
@@ -151,7 +151,7 @@
 - permission-mode 段、delegation/subagent 段。
 - **文件**：`packages/prompts/src/index.ts`
 
-> B.5 per-turn 相关记忆检索已于后续完成：`QueryEngine.memoryRetriever` 回调 + `composeTurnSystemPrompt()` 瞬态注入，REPL 和 BackendHost 两路均接线。B.5 全部完成。
+> B.5 per-turn 相关记忆检索已于后续完成：`QueryEngine.memoryRetriever` 回调 + `composeTurnSystemPrompt()` 瞬态注入，REPL 与 print 两路均接线。daemon `SessionRuntime` 尚未接 memoryRetriever。B.5 对 CLI 直连路径全部完成。
 
 ---
 
@@ -164,9 +164,9 @@
 - ✅ project 信任门控（allowProjectPlugins，默认禁）+ 卸载路径穿越防护。
 - ✅ plugin agents 已随 C.4 收口（`packages/plugins/src/agents.ts`）。
 - ✅ `tools_dir` 动态 import（`registerPluginTools`，二段注册在 bootstrap 后，
-  REPL/BackendHost/task-worker 三路均接线；default export ToolDefinition | ToolDefinition[]）。
-- ✅ BackendHost MCP 已修：补 `connectAll` + `getAsToolDefinitions()` 注册 + `setMcpManager()` 注入 ToolContext，REPL 和 BackendHost 均生效。
-- **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`apps/cli/src/plugin-contributions.ts`
+  REPL / daemon `session-runtime` / task-worker 三路均接线；default export ToolDefinition | ToolDefinition[]）。
+- ✅ MCP 接线：`connectAll` + `getAsToolDefinitions()` 注册 + `setMcpManager()` 注入 ToolContext；REPL、daemon `session-runtime` 与 task-worker 均生效。旧 BackendHost 路径已删除。
+- **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`apps/cli/src/plugin-contributions.ts`、`apps/cli/src/session-runtime.ts`
 
 ### C.2 Auth ProviderProfile 体系
 - 命名 ProviderProfile（list/use/add/edit/remove/switch；base_url/api_format/model/credential_slot 等字段）。
@@ -188,20 +188,24 @@
   `OPENHARNESS_COORDINATOR_SIMPLE` 简单模式分支、`matchSessionMode`、`getCoordinatorTools`、
   `getCoordinatorUserContext`（scratchpad/worker-tools 注入）。
 - ✅ CLI 接线：session 快照存 `session_mode`；`--continue/--resume` 恢复时调
-  `matchSessionMode` 自动同步 env；REPL/BackendHost 启动时若 coordinator 模式
+  `matchSessionMode` 自动同步 env；REPL 启动时若 coordinator 模式
   调 `queryEngine.setAllowedTools(getCoordinatorTools())`（Agent/SendMessage/TaskStop/Workflow）。
+  daemon `SessionRuntime` 尚未按 session_mode 限制 coordinator 工具集。
 - `QueryEngine.setAllowedTools(string[]|null)`：在 submitMessage 内 streamMessage
   调用前过滤 toolRegistry，null 解除限制。
 - ✅ agent 级字段运行时生效：`tools/disallowedTools/maxTurns/effort/permissionMode` 经 `TeammateSpawnConfig` → `buildTeammateCommand` → CLI argv 传给子进程，bootstrap 应用。留待：agent 级 `hooks/mcpServers` 的运行时生效（需 env var 传 JSON，较复杂）。
 - **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`、`packages/core/src/{types/runtime,engine/query-engine}.ts`、`packages/services/src/session/storage.ts`、`apps/cli/src/commands/main.ts`
 
-### C.5 Personalization（新模块）✅ 已完成
+### C.5 Personalization（新模块）✅ 核心完成 / daemon 未接
 - ✅ `packages/personalization`：10 类环境事实正则抽取（SSH/IP/数据路径/conda/
   Python/端点/env/git remote/Ray/cron），去重合并 + 置信度胜出。
 - ✅ `local_rules/` rules.md + facts.json 持久化（尊重 OPENHARNESS_CONFIG_DIR）。
-- ✅ 三模式结束路径 best-effort 抽取；rules.md 注入 system prompt（CLAUDE.md 后）。
+- ✅ session-end best-effort 抽取已接 REPL / print / task-worker；rules.md 注入
+  system prompt（CLAUDE.md 后，含 daemon bootstrap）。
+- 留待：daemon/TUI session archive 或进程退出时调用 `updateRulesFromSession`。
+  旧 BackendHost shutdown 路径已删除。详见 `docs/personalization-design.md`。
 - 顺带修了 Python git_remote 正则的失效模式（恒捕获 1 字符被过滤）。
-- **文件**：`packages/personalization/src/index.ts`、`packages/prompts/src/index.ts`
+- **文件**：`packages/personalization/src/index.ts`、`packages/prompts/src/index.ts`、`apps/cli/src/commands/main.ts`
 
 ---
 
@@ -241,7 +245,7 @@
 - **文件**：`packages/sandbox/src/index.ts`
 
 ### D.4 Bridge 多进程会话（按需）
-- ✅ `spawn(command, cwd)`：`child_process.spawn(shell:true)`，stdout+stderr 并行泵入 `~/.openharness/bridge/logs/<id>.log`。
+- ✅ `spawn(command, cwd)`：`child_process.spawn(shell:true)`，stdout+stderr 并行泵入 `~/.openharness-ts/bridge/logs/<id>.log`。
 - ✅ `stop(sessionId)`：SIGTERM → 3s 超时 → SIGKILL，对齐 Python `SessionHandle.kill()`。
 - ✅ `listSpawnedSessions()`：返回 `BridgeSessionRecord`（pid / status / outputPath），按启动时间倒序。
 - ✅ `readOutput(sessionId, maxBytes=12000)`：读末尾日志，对齐 Python `read_output()`。
@@ -275,7 +279,7 @@
   改文件前在 TUI 权限框显示 +/− 着色 diff，`[y]` 本次 / `[a]` 整个会话(按工具名) / `[n]` 拒绝。
   仅 TUI（REPL/print 无交互权限确认）。详见 `docs/permission-flow.md`。
 - ✅ **Output styles**（输出样式,忠实复刻 v0.1.9）——`default/minimal/codex` 三内置 +
-  用户 `~/.openharness/output_styles/*.md`;REPL `EventRenderer` 按 name 分支(`minimal` 极简纯文本);
+  用户 `~/.openharness-ts/output_styles/*.md`;REPL `EventRenderer` 按 name 分支(`minimal` 极简纯文本);
   `/output-style [show|list|NAME]` 命令(REPL 热切换+持久化);TUI render-branch 已随
   E.3 收口补齐。详见 `docs/output-styles-design.md`。
 - ✅ 语法高亮（cli-highlight，无 lang 不 auto-detect）、TUI output-style
@@ -292,13 +296,13 @@
 ### E.5 Skills 增强 ✅ 完成
 - ✅ frontmatter 补 user-invocable / disable-model-invocation / model / argument-hint。
 - ✅ 内置 bundled skills（commit/review/test/plan/debug，TS 内嵌）；user/project 多源（bundled<user<project）+ 同名覆盖。
-- ✅ user-invocable skill 作 `/<skill>` 斜杠命令（REPL + backend；内置命令优先）；model 可见性过滤（disable-model-invocation 不进 system prompt，三模式一致）。
+- ✅ user-invocable skill 作 `/<skill>` 斜杠命令（REPL；内置命令优先）；model 可见性过滤（disable-model-invocation 不进 system prompt）。daemon 会加载 skills 供模型/工具使用，但 TUI 侧 `/<skill>` 斜杠路由仍需按 client-local vs server API 分层设计。
 - ✅ project skills **git-root 向上逐级遍历**：`findProjectSkillDirs(cwd)` 从 cwd 走到 `.git` 根，每层各收 `.openharness/skills` + `.claude/skills`，root→cwd 顺序加载（cwd 层最高优先）。
 - ✅ **路径穿越防护**：`discoverMarkdownFiles` 用 `resolve + sep` 校验每个文件的绝对路径必须在 `dirPath` 内（防 symlink/`..` 逃逸）。
 - ✅ **每命令 model 覆盖**：`/<skill>` 调用时若 `skill.model` 非空，在 `submitMessage` 前
-  临时 `setModel(skill.model)`，finally 块恢复原 model（REPL + BackendHost 两路均接线）。
-- 留待：skill-creator/diagnose 重工作流 skill。
-- **文件**：`packages/skills/src/index.ts`、`apps/cli/src/commands/main.ts`
+  临时 `setModel(skill.model)`，finally 块恢复原 model（REPL 接线；旧 BackendHost 路径已删除）。
+- 留待：skill-creator/diagnose 重工作流 skill；TUI/daemon 的 user-invocable skill 斜杠命令。
+- **文件**：`packages/skills/src/index.ts`、`apps/cli/src/commands/main.ts`、`apps/cli/src/session-runtime.ts`
 
 ### E.6 Services 杂项
 - ✅ 记忆四件套（第一刀）：`autodream`（/dream 命令+锁/备份/回滚）、`memory_extract`
@@ -320,7 +324,7 @@
 - ✅ Ctrl+C 保存：REPL `rl.on("close")` 退出前 `await saveSessionSnapshot`。
 - ✅ `/export` 命令：`/export [filename] [--json]`，文件名 `.json` 后缀或 `--json` 标志
   输出结构化 JSON（session_id/model/exported_at/messages），否则输出 Markdown；
-  默认写入 `~/.openharness/data/exports/`。
+  默认写入 `~/.openharness-ts/data/exports/`。
 - 留待：compact 侧读回 checkpoint、tool_outputs 接 microcompact。
   详见 `docs/session-storage-design.md`。
 - lsp 用真实 AST 解析（当前为正则/rg 近似）。

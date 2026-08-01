@@ -62,7 +62,7 @@ REPL/TUI：
 默认情况下，OpenHarness 将自身配置存放在：
 
 ```text
-~/.openharness
+~/.openharness-ts
 ```
 
 可通过以下环境变量重定向：

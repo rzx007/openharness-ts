@@ -4,7 +4,7 @@
 
 ## 范围
 
-- **R1 用户 agent 加载器**：`~/.openharness/agents/*.md`（YAML frontmatter +
+- **R1 用户 agent 加载器**：`~/.openharness-ts/agents/*.md`（YAML frontmatter +
   正文为 system prompt）→ `AgentDefinition`；`getAllAgentDefinitions()` 三源
   合并，同名后者覆盖：**builtin < user < plugin**（对齐 Python merge order）。
 - **R2 plugin agents**：plugins 包加载 `<plugin>/agents/**/*.md` + manifest
@@ -72,7 +72,7 @@ R3 函数本身在 `@openharness/coordinator` 包里实现后，还需三处 CLI
 
 `QueryEngine` 新增 `setAllowedTools(tools: string[] | null): void`，在 `submitMessage` 时按白名单过滤 `toolRegistry.getAll()`。
 
-REPL / BackendHost 启动时（`registerPluginHooks` 之后）：
+REPL 或 daemon session runtime 初始化时（`registerPluginHooks` 之后）：
 
 ```typescript
 if (isCoordinatorMode()) {

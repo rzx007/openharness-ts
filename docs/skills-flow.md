@@ -1,4 +1,6 @@
-# Skills 加载与调用流程（E.5）
+# 归档：Skills 加载与调用流程（E.5）
+
+> 历史设计记录。本文描述 daemon 化之前的 REPL/BackendHost skills 接线；REPL 行为可作参考，但不能据此推导 TUI/Web/Desktop 的 session API。当前跨端状态同步见 [client-sync-flow.md](./client-sync-flow.md)。
 
 skill 是一段带 frontmatter 的 Markdown「方法论/提示词」。它有**两条调用路径**：
 **用户**输入 `/<skill>` 斜杠命令触发，或 **模型**通过 `Skill` 工具按需拉取。本文讲
@@ -12,7 +14,7 @@ skill 从哪加载、怎么进 system prompt、两条路径分别怎么跑。
 | `BUNDLED_SKILLS` | `packages/skills/src/bundled.ts` | 内置 5 个 skill（commit/review/test/plan/debug，TS 内嵌） |
 | 三源加载 | `apps/cli/src/commands/main.ts` `loadSkillsThreeSources` | bundled → user → project，同名覆盖 |
 | `/<skill>` 拦截 | `apps/cli/src/commands/main.ts` `matchUserInvocableSkill` / `buildSkillPrompt` | 用户斜杠路径：匹配 user-invocable skill → 注入内容跑一轮 |
-| 命令列表 | `apps/cli/src/commands/main.ts` `buildHostCommandList` | 把 user-invocable skill 显示为 `/<name>` |
+| 命令目录 | `apps/cli/src/commands/main.ts` `buildSlashCommandList` | 当时将 user-invocable skill 显示为 `/<name>` |
 | model 可见性 | `runtime.ts`（bootstrap）+ `main.ts`（refreshSystemPrompt） | `modelVisibleList()` → system prompt 的 skills 段 |
 | `Skill` 工具 | `packages/tools/src/meta/skill.ts` | 模型路径：按名取 skill 内容 |
 | system prompt | `packages/prompts/src/index.ts` `buildRuntimeSystemPrompt(skillsList)` | 把 model 可见 skill 列给模型 |
@@ -22,7 +24,7 @@ skill 从哪加载、怎么进 system prompt、两条路径分别怎么跑。
 ```
 ┌──────────────── 加载（三来源，bundled < user < project，同名覆盖） ────────────────────────────────────────┐
 │  registerBundled()      loadFromDirectory(getSkillsDir())   findProjectSkillDirs(cwd)                      │
-│  内置 5 个(TS 内嵌) <   ~/.openharness/skills(用户)      <  git-root→cwd 每层 .openharness/skills          │
+│  内置 5 个(TS 内嵌) <  ~/.openharness-ts/skills(用户)   <  git-root→cwd 每层 .openharness/skills          │
 │  source:"bundled"       source:"user"                        + .claude/skills（cwd 层最高优先）             │
 └───────────────────────────────────────────────────┬──────────────────────────────────────────────────────┘
                                         ▼
@@ -100,7 +102,7 @@ skill 从哪加载、怎么进 system prompt、两条路径分别怎么跑。
 ```
 
 **未命中**（不是 user-invocable skill、或撞了内置命令）→ 落回原斜杠命令路由
-（commandRegistry / runHostSlashCommand），不会吞命令。
+（command registry），不会吞命令。
 
 ## 模型路径：`Skill` 工具
 

@@ -1,221 +1,107 @@
-# TUI 运行流程
+# TUI 启动链路
 
-`ohs --tui` 如何启动 opentui + React 19 终端 UI，以及 **BackendHost**（`ohs --backend-only`）
-如何通过 **OHJSON 行协议** 与前端通信。权限弹框、SwarmPanel 等能力都建立在这条链上。
+当前 `ohs --tui` 只有 daemon/client 主线，不再保留旧 TUI 后端/OHJSON 兼容路径。
 
-## 三进程模型
-
-TUI **不是**单进程：启动器、前端、后端是三个独立进程。
-
-```
-用户: ohs --tui [flags] ["initial prompt"]
-         │
-         ▼
-┌──────────────────────────────────────────────────────────┐
-│ 进程 A · 启动器（ohs --tui，runTuiMode）                  │
-│  · 拼 backend_command = [node, ohs, --backend-only, …]   │
-│  · spawn 进程 B，env: OPENHARNESS_FRONTEND_CONFIG          │
-│  · stdio: inherit（终端交给 opentui）                       │
-│  · 等 B 退出 → process.exit(code)                         │
-└──────────────────────────┬───────────────────────────────┘
-                           │ spawn
-                           ▼
-┌──────────────────────────────────────────────────────────┐
-│ 进程 B · TUI 前端（apps/frontend/src/index.tsx · opentui + React 19，Bun 运行时）│
-│  · useBackendSession mount → spawn 进程 C                 │
-│  · C.stdout → 读 OHJSON 事件 → 更新 React 状态           │
-│  · C.stdin  ← 写 JSON 请求（submit_line / permission_…） │
-│  · stderr inherit；自身 stdio inherit 终端用于渲染 UI      │
-└──────────────────────────┬───────────────────────────────┘
-                           │ spawn(stdio: pipe,pipe,inherit)
-                           ▼
-┌──────────────────────────────────────────────────────────┐
-│ 进程 C · BackendHost（ohs --backend-only，runBackendHost） │
-│  · bootstrap() → QueryEngine + permissionPrompt(TUI弹框) │
-│  · stdout emit OHJSON 事件；stdin readline 收前端请求     │
-│  · 不直接画终端 UI                                       │
-└──────────────────────────────────────────────────────────┘
+```text
+ohs --tui [flags] ["initial prompt"]
+  -> apps/cli/src/index.ts
+  -> mainAction()
+  -> runTuiMode()
+  -> readDaemonRegistry()
+  -> probe registry PID + authenticated GET /health
+  -> 若 daemon 不可达，清理 stale registry
+  -> 若 daemon 早于当前 CLI 构建或版本不同，停止 stale daemon
+  -> 若没有 ready daemon，spawn:
+       node <cli-entry> serve --register --host 127.0.0.1 --port 0
+  -> 等待 registry 写入 url / pid / token / storePath / version / startedAt
+  -> spawn:
+       bun apps/frontend/dist/index.js
+     env:
+       OPENHARNESS_FRONTEND_CONFIG={
+         daemon:{url,token,cwd,model},
+         initial_prompt,
+         theme,
+         version
+       }
+  -> apps/frontend/src/index.tsx
+  -> App
+  -> useServerSync
+  -> @openharness/client
+  -> session snapshot + SSE live events
+  -> OpenHarnessHttpServer
+  -> SessionStore + SessionRunCoordinator + PermissionBroker
+  -> CliSessionRuntime
+  -> bootstrap() + QueryEngine + tools
 ```
 
-**和 REPL / `--print` 的区别**：BackendHost 把流式输出转成结构化事件给 opentui 渲染；
-REPL 用 readline + EventRenderer 直接写终端。
+## CLI 启动器
 
----
+`apps/cli/src/index.ts` 只暴露 `--tui` 作为 TUI 入口。`mainAction()` 处理 `--cwd`、加载 settings 后进入 `runTuiMode()`。
 
-## 涉及的模块
+`runTuiMode()` 负责：
 
+- 检查 Bun runtime。
+- 读取 daemon registry。
+- 同时校验 registry PID、带 bearer token 的 `/health`、release version 和 daemon 启动时间。
+- daemon 早于当前 CLI 构建或 release version 不一致时标记为 `stale` 并自动退场。
+- registry 不存在、不可达或 stale 时，启动 `ohs serve --register`。
+- 将 daemon `url/token/cwd/model` 写入 `OPENHARNESS_FRONTEND_CONFIG`。
+- 以 `stdio: inherit` 启动 opentui 前端。
 
-| 组件                                    | 文件                                                                    | 职责                                                                                         |
-| ------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| CLI 入口 / 模式分发                         | `apps/cli/src/index.ts` + `commands/main.ts`                          | `--tui` → `runTuiMode`；`--backend-only` → `runBackendHost`                                 |
-| `runTuiMode`                          | `apps/cli/src/commands/main.ts`                                       | 拼 `backend_command`，spawn 前端，传 `OPENHARNESS_FRONTEND_CONFIG`                               |
-| 前端入口                                  | `apps/frontend/src/index.tsx`                                         | 解析 env 配置，`render(<App />)`；由 Bun 运行（CLI 通过 `resolveBun` 检测 Bun 路径，找不到时友好报错）               |
-| `useBackendSession`                   | `apps/frontend/src/hooks/useBackendSession.ts`                        | spawn backend、解析 OHJSON、发请求、30fps assistant delta 缓冲                                       |
-| `App` + 组件                            | `apps/frontend/src/App.tsx` 等                                         | Session/Home 路由、Prompt、SwarmPanel、Sidebar …                                                |
-| `DialogContext` + `useModalWiring`    | `apps/frontend/src/ui/DialogContext.tsx` + `hooks/useModalWiring.tsx` | 弹层栈管理；把 modal_request / select_request 接到 PermissionDialog / QuestionDialog / DialogSelect |
-| `PermissionDialog` / `QuestionDialog` | `apps/frontend/src/components/dialogs/`                               | 权限确认弹层（y/a/n/Esc）；工具提问弹层（input + Esc）                                                      |
-| `runBackendHost`                      | `apps/cli/src/commands/main.ts`                                       | bootstrap、请求循环、emit 事件、TUI 权限 `askPermission`                                              |
-| OHJSON 协议                             | `packages/core/src/protocol/protocol-host.ts`（参考）                     | 行前缀 `OHJSON:` + JSON                                                                       |
-| 权限 TUI 链路                             | 见 [permission-flow.md](./permission-flow.md)                          | checkTool → ask → modal_request → permission_response                                      |
+## Daemon
 
+`ohs serve --register` 会创建 `OpenHarnessHttpServer`：
 
----
+- `GET /health`
+- `GET /sessions`
+- `POST /sessions`
+- `GET /sessions/:sessionId`
+- `GET /sessions/:sessionId/state`
+- `GET /sessions/:sessionId/messages`
+- `GET /sessions/:sessionId/parts`
+- `POST /sessions/:sessionId/prompts`
+- `POST /sessions/:sessionId/interrupt`
+- `GET /permissions`
+- `POST /permissions/:requestId/reply`
+- `GET /events`
+- `GET /events/stream`
 
-## 启动流程（Step 1–4）
+服务启动后写 registry，供 TUI、Web、Desktop 或 remote attach 客户端复用。唯一的默认 store 是 `~/.openharness-ts/data/session-runtime/sessions.json`；旧 `~/.openharness` 不读取、不迁移，也不存在并行的版本化 store。
 
-```
-ohs --tui -m gpt-4 --permission-mode default
-         │
-         ▼
-┌──────────────────────────────────────────────────────────┐
-│ Step 1 · mainAction                                      │
-│ loadSettings → dry-run? → backendOnly? → tui? → …        │
-│ --tui 分支 → runTuiMode（本进程不进入 runBackendHost）    │
-└──────────────────────────┬───────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────┐
-│ Step 2 · runTuiMode                                      │
-│ args = [cliPath, "--backend-only", …透传 flags…]        │
-│ frontendConfig = { backend_command, initial_prompt, theme }│
-│ TTY 时清屏 \x1b[2J\x1b[3J\x1b[H                         │
-│ spawn(bun, apps/frontend/dist/index.js)                   │
-│   bun 路径由 resolveBun() 检测，缺失时抛出友好错误        │
-│   env.OPENHARNESS_FRONTEND_CONFIG = JSON.stringify(…)    │
-└──────────────────────────┬───────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────┐
-│ Step 3 · 前端 index.tsx + useBackendSession              │
-│ 解析 OPENHARNESS_FRONTEND_CONFIG → backend_command       │
-│ spawn(backend_command[0], args…)                         │
-│   stdio: [pipe, pipe, inherit]                           │
-│ readline 监听 C.stdout 每行 OHJSON:…                     │
-└──────────────────────────┬───────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────┐
-│ Step 4 · runBackendHost（进程 C）                        │
-│ bootstrap({ permissionPrompt: askPermission })           │
-│ emit { type: "ready", state, commands, … }               │
-│ readline(stdin) 循环处理 FrontendRequest                 │
-│ 收到 ready 后前端 setReady(true)，显示 PromptInput       │
-│ 若有 initial_prompt → 自动 submit_line                   │
-└──────────────────────────────────────────────────────────┘
-```
+## 前端
 
-### CLI flags 透传
+`apps/frontend/src/index.tsx` 只解析 daemon 配置并渲染 `App`。`App` 只使用 `useServerSync()`。
 
-`runTuiMode` 会把下列选项写入 `backend_command`（BackendHost 子进程 argv）：
+`useServerSync()` 负责：
 
-`-m` / `--provider` / `--permission-mode` / `--max-turns` / `-s` / `--api-key` /
-`--base-url` / `--api-format` / `--theme` / `--cwd` / `--effort` /
-`--dangerously-skip-permissions` / `--allowed-tools` / `--disallowed-tools` / `--bare`
+- 创建 `OpenHarnessClient`。
+- `health()` 探活。
+- `listSessions({ cwd })`，没有 session 时 `createSession()`。
+- 对活跃 session 调用 `syncEvents()`，先读取原子 HTTP snapshot，再从 snapshot cursor 接 SSE live。
+- 把 reducer state 映射为 transcript/status/modal。
+- 用户输入通过 `admitPrompt()` 提交。
+- `/sessions` 列表切换 session。
+- `/new [title]` 创建并切换 session。
+- `/resume <id>` 切换到指定 session。
+- 权限弹框通过 `replyPermission()` 持久化回复。
+- Esc interrupt 通过 `interruptSession()`。
 
-`theme` 同时进 `frontendConfig` 供 opentui 主题，不进 backend argv。
+Ctrl+C 由 `App` 请求 `renderer.destroy()`；进程只在 OpenTUI `onDestroy` 回调触发后退出，确保 raw mode、光标和 alternate screen 已经恢复。
 
----
+## Runtime
 
-## OHJSON 协议
+prompt 进入 server 后：
 
-**传输**：一行一条消息；backend → frontend 带前缀，frontend → backend 纯 JSON。
+1. `SessionStore.admitPrompt()` 持久化输入。
+2. `SessionStore.createRun()` 创建 run。
+3. `SessionRunCoordinator.enqueue()` 保证同 session 串行、不同 session 并发。
+4. `CliSessionRuntime` 复用 `bootstrap()` / `QueryEngine` 执行。
+5. QueryEngine stream event 被翻译成 durable `session.message.created`、`session.message.part.updated`、`session.message.part.delta`。
+6. daemon 通过 SSE 推给所有 attach 客户端。
 
+## 约束
 
-| 方向                 | 格式               | 示例                                      |
-| ------------------ | ---------------- | --------------------------------------- |
-| Backend → Frontend | `OHJSON:{...}\n` | `OHJSON:{"type":"ready","state":{...}}` |
-| Frontend → Backend | `{...}\n`（无前缀）   | `{"type":"submit_line","line":"hello"}` |
-
-
-非 `OHJSON:` 开头的 backend stdout 行会被前端当作 `{ role: "log" }` 写入 transcript。
-
-### 前端 → 后端（FrontendRequest）
-
-
-| type                  | 用途                                                                                   |
-| --------------------- | ------------------------------------------------------------------------------------ |
-| `submit_line`         | 用户输入或 initial_prompt                                                                 |
-| `permission_response` | PermissionDialog 权限确认（含 `scope: once | session`；readline handler 直接 resolve，不经主循环队列） |
-| `question_response`   | QuestionDialog 工具提问回答（同上，readline handler 直接 resolve）                                |
-| `list_sessions`       | `/resume` 触发会话列表弹层                                                                   |
-| `delete_session`      | ctrl+d 删除选中的历史会话                                                                     |
-| `shutdown`            | Ctrl+C / 退出                                                                          |
-
-
-### 后端 → 前端（部分 BackendEvent）
-
-
-| type                                     | 用途                                                                               |
-| ---------------------------------------- | -------------------------------------------------------------------------------- |
-| `ready`                                  | 连接就绪，带 state / commands / tasks                                                  |
-| `assistant_delta` / `assistant_complete` | 流式助手输出（前端 30fps 合并 delta）                                                        |
-| `transcript_item`                        | 用户/系统/工具消息                                                                       |
-| `tool_started` / `tool_completed`        | 工具调用展示                                                                           |
-| `modal_request`                          | 权限 / 问题 / 选择器                                                                    |
-| `line_complete`                          | 本轮结束（清 busy）                                                                     |
-| `clear_transcript`                       | 清空 transcript（`/new` 触发；`/clear` 命令已移除）                                          |
-| `todo_update` / `plan_mode_change`       | TodoPanel / 计划模式                                                                 |
-| `swarm_status`                           | SwarmPanel teammate 列表（见 [swarm-subprocess-flow.md](./swarm-subprocess-flow.md)） |
-| `shutdown` / `error`                     | 结束或错误                                                                            |
-
-
-`emit` 使用 writeLock 串行写 stdout，避免并发事件乱序。
-
----
-
-## 一轮对话时序（简化）
-
-```
-用户 Enter
-    │
-    ▼
-前端 sendRequest({ type:"submit_line", line:"…" })  →  C.stdin
-    │
-    ▼
-BackendHost: processLineForHost → QueryEngine.submitMessage
-    │
-    ├─ emit assistant_delta (多次)  →  B 合并缓冲 → ConversationView
-    ├─ emit tool_started / tool_completed
-    ├─ 若 checkTool→ask: emit modal_request(permission)
-    │       → B PermissionDialog(y/a/n/Esc) → permission_response → C readline handler 直接 resolve → 继续执行工具
-    └─ emit assistant_complete / line_complete  →  B setBusy(false)
-```
-
-斜杠命令、`/<skill>` 用户技能在后端 **本地路由**（`runHostSlashCommand` /
-`matchUserInvocableSkill`），不发给模型；行为对齐 REPL。
-
----
-
-## 其他入口
-
-
-| 方式                                     | 说明                                         |
-| -------------------------------------- | ------------------------------------------ |
-| `ohs --backend-only`                   | 单独跑 BackendHost（调试协议 / 无 TUI 前端）           |
-| 前端 dev + `OPENHARNESS_BACKEND_COMMAND` | 不经过 `runTuiMode`，前端自行 spawn backend        |
-| `ohs --tui "prompt"`                   | `initial_prompt` 在 ready 后自动 `submit_line` |
-
-
----
-
-## 关键点
-
-- **三进程**：`--tui` 进程只是启动器；BackendHost 在 **前端 spawn 的子进程** 里。
-- **stdio 分工**：A/B inherit 终端画 UI；B↔C 用 pipe 传协议；C stderr inherit。
-- **权限**：BackendHost 注入 `askPermission` → `modal_request`；详见 [permission-flow.md](./permission-flow.md)。
-- **SwarmPanel**：仅 BackendHost 订阅 `getTaskManager()` 的 agent 任务并 emit `swarm_status`；REPL 无此事件。
-- **busy 锁**：BackendHost 单会话 busy，并发 `submit_line` 返回 error。
-
-## 使用示例
-
-```bash
-# 标准 TUI
-ohs --tui
-
-# 带初始 prompt + 模型
-ohs --tui -m anthropic/claude-sonnet-4 "explain this repo"
-
-# 仅调试 backend（需另开终端或用脚本往 stdin 写 JSON）
-ohs --backend-only --permission-mode default
-```
-
+- TUI 不拥有 agent runtime。
+- TUI 不直接读写 session store。
+- TUI 不 spawn per-session backend。
+- 可恢复状态以 daemon canonical session state（messages + parts + runs + permissions）为准。

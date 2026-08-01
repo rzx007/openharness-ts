@@ -1,14 +1,16 @@
 # 设计：Personalization 环境事实抽取（C.5）
 
-> 状态：已实现合并。记忆体系全景见 [memory-system.md](./memory-system.md)。
+> 状态：已实现合并（REPL / print / task-worker）。记忆体系全景见 [memory-system.md](./memory-system.md)。
 > 新建 `packages/personalization`，移植 Python
 > `personalization/{extractor,rules,session_hook}.py`（共 273 行）。
+>
+> TUI / daemon session 的 session-end 抽取尚未接线；prompt 注入仍对所有经 `packages/prompts` 构建的 runtime 生效（含 daemon），只要 `rules.md` 非空。
 
 ## 它做什么
 
 会话结束时用 10 个正则从对话文本里抽「环境事实」（SSH 主机、服务器 IP、数据
 路径、conda 环境、Python 版本、API 端点、环境变量、git 远端、Ray 集群、cron
-表达式），去重合并持久化到 `~/.openharness/local_rules/`：
+表达式），去重合并持久化到 `~/.openharness-ts/local_rules/`：
 
 ```
 local_rules/
@@ -34,21 +36,25 @@ local_rules/
 
 - **prompt 注入**：`packages/prompts` 的 system prompt 构建在 CLAUDE.md 段后
   追加 `# Local Environment Rules\n\n<rules.md 内容>`（非空才注入）。
-- **session-end 触发**：CLI 各模式结束路径 best-effort 调
-  `updateRulesFromSession`（try/catch 吞错，绝不阻塞退出）——REPL /exit、
-  print 模式完成后、backend host shutdown。
+- **session-end 触发**：CLI 结束路径 best-effort 调 `updateRulesFromSession`
+  （try/catch 吞错，绝不阻塞退出）——当前已接：
+  - REPL `/exit` / EOF / Ctrl+C 退出前
+  - print 模式完成后
+  - task-worker 每轮结束后
+- **未接线**：`ohs --tui` / daemon `SessionRuntime` 在 archive、interrupt 或进程退出时
+  尚未调用抽取；旧 BackendHost shutdown 路径已删除，不要再按该路径实现。
 
 ## 与 Python 差异
 
 | 点 | Python | TS | 原因 |
 |----|--------|----|------|
-| 触发点 | ui/runtime 关停一处 | REPL/print/backend 三模式各自结束路径 | TS 无统一关停层 |
+| 触发点 | ui/runtime 关停一处 | REPL / print / task-worker 各自结束路径；daemon/TUI 未接 | TS 无统一关停层；daemon 需另定 session lifecycle hook |
 | 日志 | logging.info | 无（静默） | TS 无 logger 基建 |
 | 消息形状 | ConversationMessage.content blocks | 宽松 `{role?, content: string \| unknown[]}` | 适配 TS 引擎消息（SystemMessage 无 role） |
 | git_remote 正则 | 懒惰 `\S+?` 后仅跟可选组 → 恒捕获 1 字符,被长度过滤丢弃(死代码) | 追加 `(?=\s\|$)` 锚,真正捕获 `owner/repo` | 修 Python 的失效模式 |
 | prompt 注入包装 | 外层再包一层 `# Local Environment Rules` 标题(与 rules.md 自带标题重复) | 直接注入 rules.md 原文 | 避免双标题 |
-| 信号路径 | 单一关停钩子,同样不覆盖信号杀进程 | SIGINT/SIGTERM 杀 backend 时丢当轮事实(swarm 信号钩子保持最小,不挂载) | 对齐 Python 留待 |
-| 配置目录 | 硬编码 ~/.openharness | 尊重 OPENHARNESS_CONFIG_DIR(仓库既有约定) | 测试隔离/Electron 预留 |
+| 信号路径 | 单一关停钩子,同样不覆盖信号杀进程 | SIGINT/SIGTERM 硬杀进程时可能丢当轮事实(swarm 信号钩子保持最小,不挂载) | 对齐 Python 留待 |
+| 配置目录 | 默认 ~/.openharness-ts | 尊重 OPENHARNESS_CONFIG_DIR(仓库既有约定) | 测试隔离/Electron 预留 |
 
 ## 测试
 

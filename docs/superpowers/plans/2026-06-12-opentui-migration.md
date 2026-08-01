@@ -1,4 +1,6 @@
-# TUI 迁移 ink → opentui 实施计划
+# 归档：TUI 迁移 ink → opentui 实施计划
+
+> 历史实施计划，禁止作为当前任务执行。计划中的 BackendHost/OHJSON 三进程模型已退场；当前架构见 [../../tui-flow.md](../../tui-flow.md) 和 [../../client-sync-flow.md](../../client-sync-flow.md)。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

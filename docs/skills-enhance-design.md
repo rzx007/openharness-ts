@@ -1,6 +1,6 @@
-# 设计：Skills 增强 + 内置 skills（E.5）
+# 归档：Skills 增强 + 内置 skills（E.5）
 
-> 状态：✅ 已完成（E.5）。`/<skill>` 斜杠路由、frontmatter 扩展、内置 bundled skills、model 可见性均已实现并通过类型检查。
+> 状态：历史设计记录。本文描述的是 daemon 化之前的 REPL/BackendHost 接线，不能作为 TUI/Web/Desktop 实施依据；旧 BackendHost 已退场。当前跨端会话链路见 [client-sync-flow.md](./client-sync-flow.md)，slash command 的 server/client 分层仍需单独设计。
 
 ## 目标
 

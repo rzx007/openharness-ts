@@ -133,7 +133,7 @@ skill 动态注册为 `/<skill>`（E.5），插件命令注册为 `/插件名:�
 | 工具 | 说明 |
 |---|---|
 | `Agent` | 派发子代理执行任务 |
-| `TeamCreate` / `TeamDelete` | 创建/解散 swarm 团队（`~/.openharness/teams/<team>/`，team.json 生命周期） |
+| `TeamCreate` / `TeamDelete` | 创建/解散 swarm 团队（`~/.openharness-ts/teams/<team>/`，team.json 生命周期） |
 | `SendMessage` | 给 teammate 发消息（文件邮箱 + TaskManager 懒重启，见 [swarm-task-worker-design.md](swarm-task-worker-design.md)） |
 
 ### 后台任务（task/）

@@ -18,7 +18,7 @@ Session Mode / Reasoning Settings
 Available Skills
 Delegation Guidance
 Project Instructions: CLAUDE.md / .claude/CLAUDE.md / .claude/rules/*.md
-Local Environment Rules: ~/.openharness/local_rules/rules.md
+Local Environment Rules: ~/.openharness-ts/local_rules/rules.md
 Project Memory
 ```
 
@@ -85,7 +85,7 @@ Project Instructions:
 
 ```text
 USER.md
-Local Environment Rules: ~/.openharness/local_rules/rules.md
+Local Environment Rules: ~/.openharness-ts/local_rules/rules.md
 Project Memory
 Per-turn Relevant Memory (transient system-reminder)
 ```
@@ -214,7 +214,7 @@ volatile
   User Profile
     USER.md
   Local Environment Rules
-    ~/.openharness/local_rules/rules.md
+    ~/.openharness-ts/local_rules/rules.md
   Project Memory
   Per-turn Relevant Memory
     transient system-reminder, not persisted in history

@@ -13,12 +13,12 @@
 - plugin agents（依赖 C.4 的 agent .md frontmatter 解析器）；
 - bundled plugins（Python 侧也是空目录）。
 
-**已补充完成（C.1 二刀）**：`tools_dir` 动态 import 工具——`registerPluginTools` 函数遍历 `<plugin>/<tools_dir>/*.js|ts`，动态 import 后验证 `name` 与 `execute` 字段，通过则注册进 `toolRegistry`；import 失败只打 stderr 警告，不影响其他工具与插件加载。REPL / BackendHost / task-worker 三路均已在 `registerPluginHooks` 之后调用。
+**已补充完成（C.1 二刀）**：`tools_dir` 动态 import 工具——`registerPluginTools` 函数遍历 `<plugin>/<tools_dir>/*.js|ts`，动态 import 后验证 `name` 与 `execute` 字段，通过则注册进 `toolRegistry`；import 失败只打 stderr 警告，不影响其他工具与插件加载。REPL、daemon session runtime 与 task-worker 都在 `registerPluginHooks` 之后调用。
 
 ## Claude Code 兼容
 
 插件目录布局完全对齐 Claude Code 的插件格式（Python 原版即按此移植），
-一个 Claude Code 插件文件夹放进 `~/.openharness/plugins/` 应可直接生效：
+一个 Claude Code 插件文件夹放进 `~/.openharness-ts/plugins/` 应可直接生效：
 
 | Claude Code 约定 | 支持方式 |
 |------------------|----------|
@@ -33,7 +33,7 @@
 ## 目录与发现（R1）
 
 ```
-~/.openharness/plugins/<name>/          # 用户插件（默认加载）
+~/.openharness-ts/plugins/<name>/       # 用户插件（默认加载）
 <cwd>/.openharness/plugins/<name>/      # 项目插件（默认不加载，须 allowProjectPlugins）
 ```
 

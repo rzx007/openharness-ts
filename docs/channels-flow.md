@@ -74,7 +74,7 @@ ohs channels serve     # 长驻桥接；Ctrl+C 优雅停，再按一次强制退
 ohs channels status    # 查看 feishu enabled / allowFrom
 ```
 
-配置示例（`~/.openharness/settings.json`）：
+配置示例（`~/.openharness-ts/settings.json`）：
 
 ```json
 {

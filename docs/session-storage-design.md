@@ -3,6 +3,8 @@
 > 状态：已批准。移植 Python `services/session_storage.py`（230 行），
 > 替换 TS 现状的「平铺 `<sessionsDir>/<id>.json`」。
 
+> 当前定位：本文描述的是 print/REPL 的项目级快照功能，用于 `--continue` / `--resume` 和 transcript 导出，不供 TUI/daemon 使用。daemon 的权威 `SessionStore` 位于 `packages/services/src/session-runtime`，包含 session/input/message/part/event/run/permission request；当前为文件 adapter，目标是 SQLite。两者是独立功能，不存在格式回退或互相迁移。新设计见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)。
+
 ## 现状缺口
 
 TS（apps/cli main.ts 自带逻辑 + services/session 旧 SessionStorage 类）：
@@ -36,12 +38,11 @@ TS（apps/cli main.ts 自带逻辑 + services/session 旧 SessionStorage 类）�
 - ✅ Ctrl+C 保存：REPL `rl.on("close")` 改为 async IIFE，退出前 `await saveSessionSnapshot`。
 - ✅ `/export` 命令：`/export [filename] [--json]`，`.json` 后缀或 `--json` 标志
   输出 JSON（session_id/model/exported_at/messages），否则 Markdown；默认写
-  `~/.openharness/data/exports/`。`exportSessionMarkdown` 仍用于 session 目录
+  `~/.openharness-ts/data/exports/`。`exportSessionMarkdown` 仍用于 session 目录
   transcript 落盘，`/export` 走独立渲染路径（不依赖 cwd/storage）。
 - 留待：systemPrompt 传空串、usage 为 TS camelCase（与 Python 快照不互换）；
   compact 侧读回 checkpoint。
-- 旧 `SessionStorage` 类与 main.ts 平铺逻辑：CLI 接线改走新函数；
-  **向后兼容**——resume 找不到项目分目录时回退读旧平铺文件。
+- 已删除未被主线使用的 `SessionStorage` 类与 `~/.openharness-ts/sessions/<id>.json` 平铺回退；CLI 只调用本页的项目级 snapshot functions。
 - `/dream` 的 `listSessionsTouchedSince` 当前扫 `getSessionsDir()` 平铺根，
   接线后改传项目分目录。
 

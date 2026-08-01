@@ -37,7 +37,7 @@ NPE。
 
 ### ~~M-3 ImageToText/ImageGeneration 每次调用读磁盘~~ ✅ 已修复（模块级 settings 缓存）
 **文件**：`packages/tools/src/media/image-to-text.ts:56`、`image-generation.ts:49`  
-**描述**：每次 `execute` 都调 `loadSettings()`（读 `~/.openharness/settings.json`）。
+**描述**：每次 `execute` 都调 `loadSettings()`（读 `~/.openharness-ts/settings.json`）。
 高频调用下造成大量磁盘 I/O；若 settings 在两次调用间被修改，工具行为会不一致。  
 **修复**：在工具注册时注入 `settings` 或 `apiClient`，而非运行时读盘。参考其他工具
 通过 `ToolContext` 获取配置的模式。

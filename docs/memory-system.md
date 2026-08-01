@@ -26,7 +26,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 │                  ↓                                                │
 │  ┌─────────────────────────────┐                                  │
 │  │  session_memory 写 checkpoint│ ← 每轮自动，原子写               │
-│  │  goal / next_step / 摘要    │   ~/.openharness/data/           │
+│  │  goal / next_step / 摘要    │   ~/.openharness-ts/data/        │
 │  │  （最多 12k 字符 / 80 行）  │   session-memory/<项目>/<id>.md  │
 │  └─────────────────────────────┘                                  │
 └──────────────────────────────────────────────────────────────────┘
@@ -98,7 +98,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 **文件位置**：
 
 ```
-~/.openharness/data/session-memory/
+~/.openharness-ts/data/session-memory/
   <项目名>-<sha1前12>/
     <sessionId>.md
 ```
@@ -140,7 +140,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 **写哪里**（全局，跨项目共享）：
 
 ```
-~/.openharness/local_rules/
+~/.openharness-ts/local_rules/
   facts.json     ← 结构化事实（按 type:value 去重）
   rules.md       ← 人类可读的摘要，下次启动注入 system prompt
 ```
@@ -201,7 +201,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 **原理**：
 
-1. 整目录备份（`~/.openharness/data/memory-backups/`）
+1. 整目录备份（`~/.openharness-ts/data/memory-backups/`）
 2. 抢整合锁（防止并发两次 dream）
 3. 拉起一个 `ohs --print <整合 prompt>` 后台子进程（type: "dream"）
 4. 模型读 memory 目录，输出整合指令：合并近重复、纠错矛盾、相对日期改绝对、过时条目标 `disabled: true`、重建 MEMORY.md 索引
@@ -222,9 +222,9 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 | 时机             | 产生什么                                    | 写哪里                                                           |
 | -------------- | --------------------------------------- | ------------------------------------------------------------- |
-| 本轮结束           | session_memory checkpoint（goal + 消息摘要）  | `~/.openharness/data/session-memory/<project>-<hash>/<id>.md` |
-| 会话结束           | personalization 抽出 `10.0.0.7`、`prod-ml` | `~/.openharness/local_rules/facts.json` + `rules.md`          |
-| 你敲 `/remember` | LLM 提取"移除 /clear 的决策"                   | `~/.openharness/data/memory/<project>-<hash>/xxx.md`          |
+| 本轮结束           | session_memory checkpoint（goal + 消息摘要）  | `~/.openharness-ts/data/session-memory/<project>-<hash>/<id>.md` |
+| 会话结束           | personalization 抽出 `10.0.0.7`、`prod-ml` | `~/.openharness-ts/local_rules/facts.json` + `rules.md`          |
+| 你敲 `/remember` | LLM 提取"移除 /clear 的决策"                   | `~/.openharness-ts/data/memory/<project>-<hash>/xxx.md`          |
 | 你敲 `/dream`    | 整理 memory 目录，合并重复                       | 原地修改 + 备份                                                     |
 
 
@@ -244,7 +244,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 | **方法**   | 正则（10 个模式）                        | LLM 语义理解                                       |
 | **抓什么**  | 机械事实：IP、路径、环境名、端点                 | 语义事实：决策、偏好、约束                                  |
 | **成本**   | 零（无 LLM 调用）                       | 有成本（一次 LLM 调用）                                 |
-| **存放位置** | `~/.openharness/local_rules/`（全局） | `~/.openharness/data/memory/<项目>-<hash>/`（项目级） |
+| **存放位置** | `~/.openharness-ts/local_rules/`（全局） | `~/.openharness-ts/data/memory/<项目>-<hash>/`（项目级） |
 
 
 ---
@@ -254,7 +254,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 |         | session_memory checkpoint                         | session 快照                                  |
 | ------- | ------------------------------------------------- | ------------------------------------------- |
-| **目录**  | `~/.openharness/data/session-memory/<项目>-<hash>/` | `~/.openharness/data/sessions/<项目>-<hash>/` |
+| **目录**  | `~/.openharness-ts/data/session-memory/<项目>-<hash>/` | `~/.openharness-ts/data/sessions/<项目>-<hash>/` |
 | **内容**  | goal + 消息摘要（12k 上限）                               | 完整消息历史 + 元数据                                |
 | **用途**  | 给 compact 提供连续性                                   | 给 `/resume` 恢复会话                            |
 | **由谁读** | compact 边界（attachmentsProvider 注入）                | `--continue` / `--resume`                   |

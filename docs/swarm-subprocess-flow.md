@@ -18,8 +18,8 @@
 | `buildTeammateCommand` | `apps/cli/src/teammate.ts` | 配置 → `ohs --task-worker …` 的 argv（prompt 经 stdin） |
 | 后端注册 | `apps/cli/src/runtime.ts`（bootstrap） | 注册 subprocess 后端 + 给 teammate 任务打 `type:"agent"` 标 |
 | `TaskManager` | `packages/services/src/tasks/index.ts` | 真正 spawn 子进程、捕获输出；`awaitTask`/`registerTaskListener`（D.2）|
-| swarm_status emit | `apps/cli/src/commands/main.ts` + `swarm-status.ts` | 订阅任务状态，emit `swarm_status`（D.2）|
-| SwarmPanel | `apps/frontend/src/components/SwarmPanel.tsx` | TUI 显示 teammate 列表 + 状态 |
+| TUI 任务状态 | 尚未接入 daemon session API | 当前没有跨端的 teammate 状态视图 |
+| SwarmPanel | `apps/frontend/src/components/SwarmPanel.tsx` | 组件保留；等待 server-owned task/session event 后接入 |
 
 ## 整体模型（两进程 + 一个单例）
 
@@ -133,26 +133,11 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 
 ---
 
-## TUI 侧路（仅 `--tui`，与主路径并行）
+## TUI 状态（当前未接线）
 
-> TUI 三进程启动与 OHJSON 协议见 [tui-flow.md](./tui-flow.md)。
+TUI 已改为 daemon/client attach，不存在 BackendHost、OHJSON 或 `swarm_status` 事件。leader 获取 teammate 结果的权威路径是 `TaskWait`，与 UI 是否显示状态无关。
 
-SwarmPanel **不参与** Leader 取结果，只是可视化；只有 TUI 的 BackendHost 会 emit：
-
-```
-TaskManager.registerTaskListener
-         │  仅 type === "agent" 的任务
-         ▼
-BackendHost（--backend-only）
-         │  OHJSON 事件 swarm_status
-         ▼
-SwarmPanel（React/Ink）
-
-created   → status: running
-completed → status: done / error（按 exitCode）
-```
-
-REPL / 普通 print 模式下没有 BackendHost，**不会** emit `swarm_status`。
+当前 `TaskManager` 的 agent task 状态还没有持久化为 server-owned session/task event，因此 `SwarmPanel` 没有可跨端恢复的数据源。后续应由 server 暴露 task/session 状态，再由 `@openharness/client` reducer 和 TUI 消费；不要重新引入前端专用 stdio 协议。
 
 ---
 
@@ -161,7 +146,7 @@ REPL / 普通 print 模式下没有 BackendHost，**不会** emit `swarm_status`
 | | D.1 | D.2（当前） |
 |---|-----|------------|
 | 取结果 | Sleep + TaskGet/TaskOutput 轮询 | **TaskWait** 一次阻塞 |
-| UI | 无 | TUI 下 **swarm_status** → SwarmPanel |
+| UI | 无 | TUI teammate 状态尚未接入 daemon API |
 | 任务标记 | — | subprocess 任务统一 `type:"agent"` |
 
 ---
@@ -170,8 +155,8 @@ REPL / 普通 print 模式下没有 BackendHost，**不会** emit `swarm_status`
 
 - **解耦**：`swarm` 不直接依赖 `services`；`SubprocessBackend` 经结构化 `TaskRunner`
   接口拿 `createAgentTask`/`writeToTask`，真实 `TaskManager` 在 `bootstrap()` 注入。
-- **同一个单例**：派发（SubprocessBackend）、取结果（TaskWait）、emit 状态（BackendHost）
-  都用 **全局 `getTaskManager()` 单例**，三者对得上。
+- **同一个单例**：派发（SubprocessBackend）与取结果（TaskWait）都用按 runtime scope 获取的
+  `TaskManager`；TUI 状态尚未接入 daemon，不存在 BackendHost emit 分支。
 - **task-worker 一轮一进程**：读一行 stdin 跑一轮，完成后释放 stdin pipe、关闭 runtime cleanup 并退出；SendMessage 触发懒复活重启（重启不保留上下文）。
 - **配置继承**：argv 带 `--model (config.model ?? settings.model)`、provider、
   `-s <人格>`、**`--swarm-worker`**；**不把 api-key 放 argv**，teammate 复用 `settings.json` + 继承 env。
@@ -240,7 +225,7 @@ worker（teammate 进程）                     leader 进程
 ```
 
 - spawn 时注入 env `CLAUDE_CODE_TEAM_NAME/AGENT_ID/AGENT_NAME`，成员写进
-  `~/.openharness/teams/<team>/team.json`；本会话隐式建的团队随 leader 退出清理
+  `~/.openharness-ts/teams/<team>/team.json`；本会话隐式建的团队随 leader 退出清理
   （exit/SIGINT/SIGTERM）。
 - leader 是 `default` 模式时写操作仍会被拒（checker `ask`→拒）；要让 worker 写盘，
   leader 开 `full_auto` 或配 allowedTools——与上文表格语义一致，但现在拒绝

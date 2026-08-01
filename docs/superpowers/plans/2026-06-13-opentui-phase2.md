@@ -1,4 +1,6 @@
-# OpenHarness TUI Phase 2 Implementation Plan
+# 归档：OpenHarness TUI Phase 2 Implementation Plan
+
+> 历史实施计划。功能状态请以当前源码、README 和 [../../tui-flow.md](../../tui-flow.md) 为准；不要从本文推导 BackendHost/OHJSON 或旧 session 数据流。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

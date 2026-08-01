@@ -17,7 +17,7 @@ Python v0.1.9 的 `mailbox.py` / `team_lifecycle.py` / `permission_sync.py` 是
 ## 目录布局（对齐 Python）
 
 ```
-~/.openharness/teams/<team>/
+~/.openharness-ts/teams/<team>/
 ├── team.json                        # 团队元数据（R2）
 ├── agents/<agentId>/inbox/          # 文件邮箱（R1）
 │   ├── <timestamp>_<msgId>.json     # 每条消息一个文件

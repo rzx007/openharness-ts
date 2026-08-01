@@ -10,7 +10,7 @@
 ## 关键取舍（已批准）
 
 1. **何时建 worktree**：**opt-in** —— `agent` 工具加 `isolate?: boolean`（默认 false）。
-2. **路径/分支**：worktree 放 `~/.openharness/worktrees/<repo-id>/<flatSlug>`；
+2. **路径/分支**：worktree 放 `~/.openharness-ts/worktrees/<repo-id>/<flatSlug>`；
    slug=`<team>-<name>-<shortId>`（校验防 `..`/绝对路径穿越）；分支 `worktree-<flatSlug>`。
 3. **拿结果/清理**：teammate 在 worktree 里改（建议它 commit），完成后**保留** worktree+分支，
    结果告知 leader「改动在分支 `worktree-<flatSlug>` / 路径 `<path>`」，leader 自行 merge/review；

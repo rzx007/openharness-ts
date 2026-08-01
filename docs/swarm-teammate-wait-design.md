@@ -1,6 +1,6 @@
-# 设计：Swarm teammate 完成等待 + TUI 状态显示
+# 归档：Swarm teammate 完成等待 + 旧 TUI 状态显示
 
-> 状态：已批准，待实现。建立在 D.1（subprocess 派发后端）之上。
+> 状态：部分已实现的历史方案。TaskWait 已进入当前主线；本文依赖的 BackendHost/OHJSON `swarm_status` 通道已退场，不能再作为 TUI 接线方案。当前 swarm 子进程流程见 [swarm-subprocess-flow.md](./swarm-subprocess-flow.md)。
 
 ## 目标
 
@@ -13,7 +13,7 @@
 
 - `TaskManager`（B.3）：completion listener + 子进程执行 + 输出落盘。
 - coordinator：`<task-notification>` XML 格式（formatTaskNotification）。
-- 前端 SwarmPanel + useBackendSession 的 `swarm_status` 消费——已完整就绪，后端从未 emit。
+- 前端曾有 SwarmPanel + `useBackendSession` 的 `swarm_status` 消费；该 OHJSON 消费路径已随 BackendHost 删除，不能再当作当前 TUI 接线。TaskWait 仍是 leader 取结果的权威路径。
 
 ## 组件
 
