@@ -90,6 +90,7 @@ export function applyEvent(
 
   switch (event.type) {
     case "session.created":
+    case "session.updated":
       next = upsertSession(next, readPayloadRecord<SessionRecord>(event, "session"));
       break;
     case "session.archived":
@@ -100,6 +101,9 @@ export function applyEvent(
       break;
     case "session.message.created":
       next = upsertMessage(next, readPayloadRecord<SessionMessageRecord>(event, "message"));
+      break;
+    case "session.transcript.replaced":
+      next = replaceTranscript(next, event);
       break;
     case "session.message.part.updated":
       next = upsertPart(next, readPayloadRecord<SessionMessagePartRecord>(event, "part"));
@@ -164,6 +168,44 @@ function upsertMessage(state: OpenHarnessClientState, message: SessionMessageRec
   const bucket = cloneBucket(state.buckets[message.sessionId]);
   bucket.messages = upsertSorted(bucket.messages, message, (row) => row.seq);
   return { ...state, buckets: { ...state.buckets, [message.sessionId]: bucket } };
+}
+
+function replaceTranscript(state: OpenHarnessClientState, event: SessionEventRecord): OpenHarnessClientState {
+  const sessionId = event.sessionId;
+  if (!sessionId) return state;
+  const messages = Array.isArray(event.payload.messages)
+    ? event.payload.messages.filter((row): row is SessionMessageRecord =>
+      !!row && typeof row === "object" && !Array.isArray(row) && typeof (row as SessionMessageRecord).id === "string")
+    : [];
+  const parts = Array.isArray(event.payload.parts)
+    ? event.payload.parts.filter((row): row is SessionMessagePartRecord =>
+      !!row && typeof row === "object" && !Array.isArray(row) && typeof (row as SessionMessagePartRecord).id === "string")
+    : [];
+  const bucket = cloneBucket(state.buckets[sessionId]);
+  const partsByMessageId: SessionBucket["partsByMessageId"] = {};
+  for (const part of parts) {
+    const rows = partsByMessageId[part.messageId] ?? [];
+    rows.push(part);
+    partsByMessageId[part.messageId] = rows;
+  }
+  for (const rows of Object.values(partsByMessageId)) rows.sort((a, b) => a.seq - b.seq);
+  bucket.messages = [...messages].sort((a, b) => a.seq - b.seq);
+  bucket.partsByMessageId = partsByMessageId;
+  if (bucket.session) {
+    bucket.session = {
+      ...bucket.session,
+      updatedAt: Math.max(bucket.session.updatedAt, event.createdAt),
+    };
+  }
+  const sessions = bucket.session
+    ? { ...state.sessions, [sessionId]: bucket.session }
+    : state.sessions;
+  return {
+    ...state,
+    sessions,
+    sessionOrder: sortSessionOrder(sessions),
+    buckets: { ...state.buckets, [sessionId]: bucket },
+  };
 }
 
 function upsertPart(state: OpenHarnessClientState, part: SessionMessagePartRecord | undefined): OpenHarnessClientState {

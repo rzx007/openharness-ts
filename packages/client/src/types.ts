@@ -113,6 +113,187 @@ export interface PromptResponse {
   queue_state?: "running" | "queued";
 }
 
+export type CommandKind = "session" | "template";
+export type CommandSource = "builtin" | "skill" | "plugin" | "project";
+
+/** `GET /commands` 返回的命令元数据。 */
+export interface CommandCatalogEntry {
+  name: string;
+  description?: string;
+  kind: CommandKind;
+  source?: CommandSource;
+  argumentHint?: string;
+}
+
+/** `GET /commands` 查询参数。 */
+export interface ListCommandsOptions {
+  cwd: string;
+}
+
+/** `PATCH /sessions/:id` 请求体。 */
+export interface UpdateClientSessionInput {
+  title?: string;
+  model?: string;
+  agent?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+/** `POST /sessions/:id/commands` 请求体。 */
+export interface InvokeClientCommandInput {
+  name?: string;
+  args?: string;
+  line?: string;
+}
+
+/** `POST /sessions/:id/commands` 响应。 */
+export interface InvokeCommandResponse extends PromptResponse {
+  command: CommandCatalogEntry;
+}
+
+export interface ProviderInfo {
+  name: string;
+  displayName: string;
+  hasKey: boolean;
+  active: boolean;
+  local?: boolean;
+}
+
+export interface McpServerStatus {
+  name: string;
+  status: string;
+  toolCount: number;
+  resourceCount: number;
+  command?: string;
+  error?: string;
+}
+
+export interface TaskSnapshot {
+  id: string;
+  type: string;
+  status: string;
+  description: string;
+  cwd: string;
+  sessionId?: string;
+  command?: string;
+  createdAt: number;
+  finishedAt?: number;
+  exitCode?: number;
+}
+
+export interface ListTasksOptions {
+  sessionId?: string;
+  cwd?: string;
+  status?: string;
+}
+
+export interface MemoryEntryRecord {
+  id: string;
+  content: string;
+  tags?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MemoryListResponse {
+  directory: string;
+  entries: MemoryEntryRecord[];
+}
+
+export interface AuthStatus {
+  codex: {
+    configured: boolean;
+    state: string;
+    source: string;
+    detail?: string;
+    profileLabel?: string;
+  };
+  storedProviders: string[];
+  envProviders: Array<{ name: string; envKey: string }>;
+}
+
+export interface CompactSessionResponse {
+  messageCount: number;
+  messages: SessionMessageRecord[];
+  parts: SessionMessagePartRecord[];
+}
+
+export interface RewindSessionResponse {
+  turns: number;
+  removed: number;
+  messages: SessionMessageRecord[];
+  parts: SessionMessagePartRecord[];
+}
+
+export interface ReloadPluginsResponse {
+  plugins: PluginInfo[];
+  warnings: string[];
+  message: string;
+}
+
+export interface RememberSessionResponse {
+  skipped: boolean;
+  reason?: string;
+  writtenIds: string[];
+  titles: string[];
+}
+
+export interface StartDreamResponse {
+  taskId: string;
+}
+
+export interface SessionUsageResponse {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  messageCount: number;
+  estimatedCost: string;
+}
+
+export interface SessionExportResponse {
+  format: "md" | "json";
+  filepath: string;
+  messageCount: number;
+}
+
+export interface OutputStyleInfo {
+  name: string;
+  content: string;
+  source: "builtin" | "user";
+}
+
+export interface PluginInfo {
+  name: string;
+  version: string;
+  enabled: boolean;
+  skillCount: number;
+  commandCount: number;
+  hookCount: number;
+  agentCount: number;
+}
+
+export interface AgentPersonaInfo {
+  name: string;
+  description: string;
+  source?: string;
+  model?: string;
+}
+
+export interface HookInfo {
+  id: string;
+  event: string;
+  type: string;
+  enabled: boolean;
+  origin: "settings" | "runtime";
+}
+
+export interface CreateTaskInput {
+  cwd?: string;
+  sessionId?: string;
+  command: string;
+}
+
 /** `POST /sessions/:id/interrupt` 响应。 */
 export interface InterruptSessionResponse {
   activeRunId?: string;

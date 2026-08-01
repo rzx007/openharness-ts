@@ -113,6 +113,75 @@ describe("session event reducer", () => {
     expect(state.lastSeq).toBe(5);
   });
 
+  it("applies session.updated to refresh model and other session fields", () => {
+    const created = session("s1", 1);
+    const updated = { ...created, model: "new-model", updatedAt: 2 };
+    const state = applyEvents(createInitialClientState(), [
+      event(1, "session.created", { session: created }),
+      event(2, "session.updated", { session: updated }),
+    ]);
+    expect(state.sessions.s1?.model).toBe("new-model");
+    expect(state.buckets.s1?.session?.model).toBe("new-model");
+  });
+
+  it("replaces a session transcript from session.transcript.replaced", () => {
+    const created = session("s1", 1);
+    const oldMessage: SessionMessageRecord = {
+      id: "m-old",
+      sessionId: "s1",
+      seq: 1,
+      role: "user",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const oldPart: SessionMessagePartRecord = {
+      id: "p-old",
+      sessionId: "s1",
+      messageId: "m-old",
+      seq: 1,
+      type: "text",
+      status: "completed",
+      text: "old",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const nextMessage: SessionMessageRecord = {
+      id: "m-new",
+      sessionId: "s1",
+      seq: 1,
+      role: "assistant",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    const nextPart: SessionMessagePartRecord = {
+      id: "p-new",
+      sessionId: "s1",
+      messageId: "m-new",
+      seq: 1,
+      type: "text",
+      status: "completed",
+      text: "compacted",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    const state = applyEvents(createInitialClientState(), [
+      event(1, "session.created", { session: created }),
+      event(2, "session.message.created", { message: oldMessage }),
+      event(3, "session.message.part.updated", { part: oldPart }),
+      event(4, "session.transcript.replaced", {
+        messages: [nextMessage],
+        parts: [nextPart],
+      }),
+    ]);
+    expect(state.buckets.s1?.messages.map((message) => message.id)).toEqual(["m-new"]);
+    expect(state.buckets.s1?.partsByMessageId["m-new"]?.[0]?.text).toBe("compacted");
+    expect(state.buckets.s1?.partsByMessageId["m-old"]).toBeUndefined();
+  });
+
   it("dedupes events by seq and converges when records arrive out of order", () => {
     const first: SessionMessageRecord = {
       id: "m1",
