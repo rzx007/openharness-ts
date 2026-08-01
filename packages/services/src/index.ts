@@ -33,6 +33,10 @@ export type {
   SessionStateSnapshot,
   UpsertMessagePartInput,
   UpdateRunInput,
+  UpdateSessionInput,
+  ReplaceTranscriptInput,
+  ReplaceTranscriptMessageInput,
+  ReplaceTranscriptPartInput,
 } from "./session-runtime";
 export {
   getProjectSessionDir,

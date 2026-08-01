@@ -26,7 +26,10 @@ import type {
   SessionStateSnapshot,
   UpsertMessagePartInput,
   UpdateRunInput,
+  UpdateSessionInput,
+  ReplaceTranscriptInput,
 } from "./types.js";
+import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
 
 interface SessionState {
   nextEventSeq: number;
@@ -159,15 +162,36 @@ export class SessionStore {
     return clone(session);
   }
 
+  updateSession(sessionId: string, input: UpdateSessionInput): SessionRecord {
+    const session = assertSession(this.state, sessionId);
+    const timestamp = now();
+    if (input.title !== undefined) session.title = input.title;
+    if (input.model !== undefined) session.model = input.model;
+    if (input.agent !== undefined) {
+      if (input.agent === null) delete session.agent;
+      else session.agent = input.agent;
+    }
+    if (input.metadata !== undefined) session.metadata = input.metadata;
+    session.updatedAt = timestamp;
+    this.appendEventInMemory({
+      type: "session.updated",
+      sessionId,
+      payload: { session: clone(session) },
+    });
+    this.save();
+    return clone(session);
+  }
+
   admitPrompt(input: AdmitPromptInput): SessionInputRecord {
     const session = assertSession(this.state, input.sessionId);
     const id = input.id ?? randomUUID();
     if (this.state.inputs[id]) throw new Error(`Session input already exists: ${id}`);
     const timestamp = now();
+    const seq = maxSeq(this.state.inputs, input.sessionId) + 1;
     const row: SessionInputRecord = {
       id,
       sessionId: input.sessionId,
-      seq: maxSeq(this.state.inputs, input.sessionId) + 1,
+      seq,
       delivery: input.delivery ?? "queue",
       content: input.content,
       metadata: input.metadata ?? {},
@@ -175,6 +199,10 @@ export class SessionStore {
     };
     this.state.inputs[id] = row;
     session.updatedAt = timestamp;
+    if (seq === 1 && isPlaceholderSessionTitle(session.title)) {
+      const title = formatSessionTitle(input.content);
+      if (title) session.title = title;
+    }
     this.appendEventInMemory({
       type: "session.input.admitted",
       sessionId: input.sessionId,
@@ -182,6 +210,20 @@ export class SessionStore {
     });
     this.save();
     return clone(row);
+  }
+
+  /** Prefer first prompt text for list labels; fall back to stored title. */
+  resolveSessionListTitle(sessionId: string): string {
+    const session = assertSession(this.state, sessionId);
+    const first = Object.values(this.state.inputs)
+      .filter((input) => input.sessionId === sessionId)
+      .sort((a, b) => a.seq - b.seq)[0];
+    const fromPrompt = first ? formatSessionTitle(first.content) : "";
+    if (fromPrompt) return fromPrompt;
+    const stored = session.title.trim();
+    if (stored && !isPlaceholderSessionTitle(stored)) return formatSessionTitle(stored);
+    if (stored) return stored;
+    return session.id.slice(0, 8);
   }
 
   getInput(inputId: string): SessionInputRecord | undefined {
@@ -231,6 +273,79 @@ export class SessionStore {
     if (options.afterSeq !== undefined) messages = messages.filter((message) => message.seq > options.afterSeq!);
     if (options.limit !== undefined) messages = messages.slice(0, options.limit);
     return clone(messages);
+  }
+
+  /**
+   * Replace a session transcript atomically (used by /compact).
+   * Emits a single `session.transcript.replaced` event with the new messages/parts.
+   */
+  replaceTranscript(input: ReplaceTranscriptInput): {
+    messages: SessionMessageRecord[];
+    parts: SessionMessagePartRecord[];
+  } {
+    const session = assertSession(this.state, input.sessionId);
+    const timestamp = now();
+
+    for (const [id, message] of Object.entries(this.state.messages)) {
+      if (message.sessionId === input.sessionId) delete this.state.messages[id];
+    }
+    for (const [id, part] of Object.entries(this.state.parts)) {
+      if (part.sessionId === input.sessionId) delete this.state.parts[id];
+    }
+
+    const messages: SessionMessageRecord[] = [];
+    const parts: SessionMessagePartRecord[] = [];
+    let messageSeq = 0;
+    let partSeq = 0;
+
+    for (const row of input.messages) {
+      messageSeq += 1;
+      const messageId = randomUUID();
+      const message: SessionMessageRecord = {
+        id: messageId,
+        sessionId: input.sessionId,
+        seq: messageSeq,
+        role: row.role,
+        metadata: row.metadata ?? {},
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.state.messages[messageId] = message;
+      messages.push(message);
+
+      for (const partInput of row.parts) {
+        partSeq += 1;
+        const partId = randomUUID();
+        const part: SessionMessagePartRecord = {
+          id: partId,
+          sessionId: input.sessionId,
+          messageId,
+          seq: partSeq,
+          type: partInput.type,
+          status: partInput.status ?? "completed",
+          ...(partInput.text !== undefined ? { text: partInput.text } : {}),
+          ...(partInput.toolUseId !== undefined ? { toolUseId: partInput.toolUseId } : {}),
+          ...(partInput.toolName !== undefined ? { toolName: partInput.toolName } : {}),
+          ...(partInput.input !== undefined ? { input: partInput.input } : {}),
+          ...(partInput.output !== undefined ? { output: partInput.output } : {}),
+          ...(partInput.isError !== undefined ? { isError: partInput.isError } : {}),
+          metadata: partInput.metadata ?? {},
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        this.state.parts[partId] = part;
+        parts.push(part);
+      }
+    }
+
+    session.updatedAt = timestamp;
+    this.appendEventInMemory({
+      type: "session.transcript.replaced",
+      sessionId: input.sessionId,
+      payload: { messages: clone(messages), parts: clone(parts) },
+    });
+    this.save();
+    return { messages: clone(messages), parts: clone(parts) };
   }
 
   upsertMessagePart(input: UpsertMessagePartInput): SessionMessagePartRecord {

@@ -117,6 +117,13 @@ export interface CreateSessionInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface UpdateSessionInput {
+  title?: string;
+  model?: string;
+  agent?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 export interface AdmitPromptInput {
   id?: string;
   sessionId: string;
@@ -132,6 +139,29 @@ export interface CreateMessageInput {
   runId?: string;
   inputId?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface ReplaceTranscriptPartInput {
+  type: SessionMessagePartType;
+  status?: SessionMessagePartStatus;
+  text?: string;
+  toolUseId?: string;
+  toolName?: string;
+  input?: Record<string, unknown>;
+  output?: unknown;
+  isError?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplaceTranscriptMessageInput {
+  role: SessionMessageRole;
+  parts: ReplaceTranscriptPartInput[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplaceTranscriptInput {
+  sessionId: string;
+  messages: ReplaceTranscriptMessageInput[];
 }
 
 export interface UpsertMessagePartInput {

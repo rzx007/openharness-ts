@@ -33,12 +33,63 @@ describe("SessionStore", () => {
     });
   });
 
+  it("updates session model and emits session.updated", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "old" });
+      const updated = store.updateSession("s1", { model: "new" });
+      expect(updated.model).toBe("new");
+      expect(store.listEvents().map((event) => event.type)).toContain("session.updated");
+      expect(store.getSession("s1")?.model).toBe("new");
+    });
+  });
+
+  it("replaces a session transcript atomically", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const old = store.createMessage({ id: "m1", sessionId: "s1", role: "user" });
+      store.upsertMessagePart({
+        id: "p1",
+        sessionId: "s1",
+        messageId: old.id,
+        type: "text",
+        status: "completed",
+        text: "old",
+      });
+
+      const replaced = store.replaceTranscript({
+        sessionId: "s1",
+        messages: [
+          {
+            role: "assistant",
+            parts: [{ type: "text", status: "completed", text: "compacted summary" }],
+          },
+          {
+            role: "user",
+            parts: [{ type: "text", status: "completed", text: "recent" }],
+          },
+        ],
+      });
+
+      expect(replaced.messages).toHaveLength(2);
+      expect(store.listMessages("s1").map((message) => message.id)).toEqual(
+        replaced.messages.map((message) => message.id),
+      );
+      expect(store.listMessageParts("s1").map((part) => part.text)).toEqual([
+        "compacted summary",
+        "recent",
+      ]);
+      expect(store.listEvents().map((event) => event.type)).toContain("session.transcript.replaced");
+    });
+  });
+
   it("admits prompts, creates messages, updates parts, and keeps per-session order", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
       store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
 
-      const prompt = store.admitPrompt({ id: "i1", sessionId: "s1", content: "hello" });
+      const prompt = store.admitPrompt({ id: "i1", sessionId: "s1", content: "hello from the first prompt sentence." });
+      expect(store.getSession("s1")?.title).toBe("hello from the first");
+      expect(store.resolveSessionListTitle("s1")).toBe("hello from the first");
       const first = store.createMessage({ id: "m1", sessionId: "s1", role: "user", inputId: prompt.id });
       const userPart = store.upsertMessagePart({
         id: "p1",

@@ -1,4 +1,5 @@
 export { SessionStore, type SessionStoreOptions } from "./store.js";
+export { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
 export type {
   AdmitPromptInput,
   AppendEventInput,
@@ -30,4 +31,8 @@ export type {
   SessionStateSnapshot,
   UpsertMessagePartInput,
   UpdateRunInput,
+  UpdateSessionInput,
+  ReplaceTranscriptInput,
+  ReplaceTranscriptMessageInput,
+  ReplaceTranscriptPartInput,
 } from "./types.js";
