@@ -41,6 +41,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function sessionRuntimeMetadata(input: {
+  permissionMode?: unknown;
+  maxTurns?: unknown;
+}): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  if (typeof input.permissionMode === "string" && input.permissionMode) {
+    metadata.permissionMode = input.permissionMode;
+  }
+  if (typeof input.maxTurns === "number" && Number.isFinite(input.maxTurns)) {
+    metadata.maxTurns = input.maxTurns;
+  }
+  return metadata;
+}
+
 function textFromParts(parts: SessionMessagePartRecord[]): string {
   return parts
     .filter((part) => part.type === "text" || part.type === "reasoning")
@@ -161,8 +175,9 @@ export function useServerSync(
   const [clientState, setClientState] = useState<OpenHarnessClientState>(() => createInitialClientState());
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>();
   const [status, setStatus] = useState<Record<string, unknown>>({
-    permission_mode: "default",
+    permission_mode: daemon?.permissionMode ?? "default",
     model: daemon?.model ?? "default",
+    ...(typeof daemon?.maxTurns === "number" ? { max_turns: daemon.maxTurns } : {}),
   });
   const [modal, setModal] = useState<Record<string, unknown> | null>(null);
   const [selectRequest, setSelectRequest] = useState<TuiSessionController["selectRequest"]>(null);
@@ -222,10 +237,31 @@ export function useServerSync(
           client.listSessions({ cwd, limit: 20 }),
           client.listCommands({ cwd }).catch(() => [] as CommandCatalogEntry[]),
         ]);
-        const session = sessions[0] ?? await client.createSession({ cwd, model, title: "TUI" });
+        const metadata = sessionRuntimeMetadata({
+          permissionMode: daemon?.permissionMode ?? "default",
+          maxTurns: daemon?.maxTurns,
+        });
+        const session = sessions[0] ?? await client.createSession({
+          cwd,
+          model,
+          title: "TUI",
+          metadata,
+        });
         if (cancelled) return;
         setCommandCatalog(commands);
-        setStatus((current) => ({ ...current, model: session.model, session_id: session.id, cwd: session.cwd }));
+        setStatus((current) => ({
+          ...current,
+          model: session.model,
+          session_id: session.id,
+          cwd: session.cwd,
+          permission_mode:
+            typeof session.metadata.permissionMode === "string"
+              ? session.metadata.permissionMode
+              : current.permission_mode,
+          ...(typeof session.metadata.maxTurns === "number"
+            ? { max_turns: session.metadata.maxTurns }
+            : {}),
+        }));
         setActiveSessionId(session.id);
         void client.getSession(session.id).catch(() => {});
         setReady(true);
@@ -304,18 +340,34 @@ export function useServerSync(
     if (!client) return;
     const cwd = daemon?.cwd ?? process.cwd();
     const model = daemon?.model ?? "default";
-    const session = await client.createSession({ cwd, model, title: title?.trim() || "TUI" });
+    const metadata = sessionRuntimeMetadata({
+      permissionMode: statusRef.current.permission_mode ?? daemon?.permissionMode ?? "default",
+      maxTurns: statusRef.current.max_turns ?? daemon?.maxTurns,
+    });
+    const session = await client.createSession({
+      cwd,
+      model,
+      title: title?.trim() || "TUI",
+      metadata,
+    });
     setActiveSessionId(session.id);
     setStatus((current) => ({
       ...current,
       model: session.model,
       session_id: session.id,
       cwd: session.cwd,
+      permission_mode:
+        typeof session.metadata.permissionMode === "string"
+          ? session.metadata.permissionMode
+          : current.permission_mode,
+      ...(typeof session.metadata.maxTurns === "number"
+        ? { max_turns: session.metadata.maxTurns }
+        : {}),
     }));
     setSelectRequest(null);
     setLocalBusy(false);
     setSubmittedRun(null);
-  }, [daemon?.cwd, daemon?.model]);
+  }, [daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode]);
 
   const sendRequest = useCallback((payload: Record<string, unknown>): void => {
     const client = clientRef.current;
@@ -460,7 +512,14 @@ export function useServerSync(
       }
 
       if (type === "set_permission_mode") {
-        setStatus((current) => ({ ...current, permission_mode: payload.permission_mode ?? "default" }));
+        const mode = String(payload.permission_mode ?? "default");
+        setStatus((current) => ({ ...current, permission_mode: mode }));
+        if (sessionId) {
+          const current = await client.getSession(sessionId);
+          await client.updateSession(sessionId, {
+            metadata: { ...current.metadata, permissionMode: mode },
+          });
+        }
         return;
       }
 

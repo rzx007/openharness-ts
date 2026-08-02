@@ -102,6 +102,24 @@ const SSE_HEADERS = {
   "content-type": "text/event-stream; charset=utf-8",
 };
 
+const RUNTIME_SESSION_METADATA_KEYS = [
+  "permissionMode",
+  "maxTurns",
+  "systemPrompt",
+  "allowedTools",
+  "disallowedTools",
+  "effort",
+] as const;
+
+function runtimeSessionMetadataChanged(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): boolean {
+  return RUNTIME_SESSION_METADATA_KEYS.some(
+    (key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]),
+  );
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -1026,12 +1044,20 @@ export class OpenHarnessHttpServer {
     const before = this.latestEventSeq();
     const body = await readJson(c);
     try {
+      const existing = this.store.getSession(sessionId);
+      if (!existing) return errorResponse(404, "Session not found");
+      const nextMetadata = isRecord(body.metadata)
+        ? { ...existing.metadata, ...body.metadata }
+        : undefined;
       const session = this.store.updateSession(sessionId, {
         title: typeof body.title === "string" ? body.title : undefined,
         model: typeof body.model === "string" ? body.model : undefined,
         agent: body.agent === null ? null : typeof body.agent === "string" ? body.agent : undefined,
-        metadata: isRecord(body.metadata) ? body.metadata : undefined,
+        metadata: nextMetadata,
       });
+      if (nextMetadata && runtimeSessionMetadataChanged(existing.metadata, session.metadata)) {
+        await this.closeRuntime(sessionId);
+      }
       this.broadcastSince(before);
       return jsonResponse({ session });
     } catch (error) {

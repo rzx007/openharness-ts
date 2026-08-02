@@ -346,6 +346,62 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
+  it("merges session metadata and closes runtime when permissionMode changes", async () => {
+    const created: string[] = [];
+    const closed: string[] = [];
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime(context) {
+        created.push(context.session.id);
+        return {
+          async runPrompt() {
+            return { messages: [] };
+          },
+          async close() {
+            closed.push(context.session.id);
+          },
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "s1",
+          cwd: process.cwd(),
+          model: "m",
+          metadata: { maxTurns: 9, permissionMode: "default" },
+        }),
+      });
+      for (let i = 0; i < 20 && created.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(created).toEqual(["s1"]);
+
+      const patched = await fetch(`${baseUrl}/sessions/s1`, {
+        method: "PATCH",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
+      });
+      expect(patched.status).toBe(200);
+      const body = await patched.json() as {
+        session: { metadata: Record<string, unknown> };
+      };
+      expect(body.session.metadata).toEqual({
+        maxTurns: 9,
+        permissionMode: "plan",
+      });
+      expect(closed).toContain("s1");
+
+      await fetch(`${baseUrl}/sessions/s1`, { headers: auth(token) });
+      for (let i = 0; i < 20 && created.length < 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(created.filter((id) => id === "s1")).toHaveLength(2);
+    }, { runtimeFactory });
+  });
+
   it("serves settings and providers through resource APIs", async () => {
     let current = { model: "m", provider: "openai", permission: { mode: "default" } };
     let restart = false;

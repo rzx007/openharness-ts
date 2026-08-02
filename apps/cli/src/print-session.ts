@@ -17,8 +17,42 @@ export interface PrintSessionOptions {
   verbose?: boolean;
   outputFormat?: string;
   dangerouslySkipPermissions?: boolean;
+  permissionMode?: string;
+  maxTurns?: number;
+  systemPrompt?: string;
+  allowedTools?: string;
+  disallowedTools?: string;
+  effort?: string;
   continue?: boolean;
   resume?: string;
+}
+
+/** Build daemon session.metadata from CLI overrides / settings. */
+export function buildPrintSessionMetadata(
+  settings: Settings,
+  options: PrintSessionOptions,
+): Record<string, unknown> {
+  const permissionMode = options.dangerouslySkipPermissions
+    ? "full_auto"
+    : options.permissionMode ?? settings.permission?.mode;
+  const maxTurns = options.maxTurns ?? settings.maxTurns;
+  const systemPrompt = options.systemPrompt ?? settings.systemPrompt;
+  const effort = options.effort ?? settings.effort;
+  const allowedTools = options.allowedTools
+    ? options.allowedTools.split(",").map((tool) => tool.trim()).filter(Boolean)
+    : undefined;
+  const disallowedTools = options.disallowedTools
+    ? options.disallowedTools.split(",").map((tool) => tool.trim()).filter(Boolean)
+    : undefined;
+
+  const metadata: Record<string, unknown> = {};
+  if (typeof permissionMode === "string" && permissionMode) metadata.permissionMode = permissionMode;
+  if (typeof maxTurns === "number") metadata.maxTurns = maxTurns;
+  if (typeof systemPrompt === "string" && systemPrompt) metadata.systemPrompt = systemPrompt;
+  if (allowedTools && allowedTools.length > 0) metadata.allowedTools = allowedTools;
+  if (disallowedTools && disallowedTools.length > 0) metadata.disallowedTools = disallowedTools;
+  if (typeof effort === "string" && effort) metadata.effort = effort;
+  return metadata;
 }
 
 /**
@@ -160,6 +194,7 @@ export async function runPrintSession(
     cwd,
     model,
     title: "print",
+    metadata: buildPrintSessionMetadata(settings, options),
   });
 
   const controller = new AbortController();

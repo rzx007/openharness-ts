@@ -108,6 +108,12 @@ export async function dispatchSessionCommand(
       return "handled";
     }
     patchStatus({ permission_mode: next });
+    if (sessionId) {
+      const current = await client.getSession(sessionId);
+      await client.updateSession(sessionId, {
+        metadata: { ...current.metadata, permissionMode: next },
+      });
+    }
     emit(`Permission mode: ${next}`);
     return "handled";
   }

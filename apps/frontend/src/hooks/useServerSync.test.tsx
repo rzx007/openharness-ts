@@ -346,11 +346,35 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     if (pathname === "/context") {
       return jsonResponse({ report: "CONTEXT PREVIEW" });
     }
-    if (pathname === "/sessions" && init?.method === "POST") return jsonResponse({ session: createdSession });
+    if (pathname === "/sessions" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body ?? "{}")) as { metadata?: Record<string, unknown> };
+      return jsonResponse({
+        session: {
+          ...createdSession,
+          metadata: body.metadata ?? createdSession.metadata,
+        },
+      });
+    }
     if (pathname === "/sessions") return jsonResponse({ sessions: [session] });
-    if (pathname === "/sessions/s1" && init?.method === "PATCH") {
-      const body = JSON.parse(String(init.body ?? "{}")) as { model?: string };
-      return jsonResponse({ session: { ...session, model: body.model ?? session.model, updatedAt: 9 } });
+    if ((pathname === "/sessions/s1" || pathname === "/sessions/s2") && init?.method === "GET") {
+      return jsonResponse({
+        session: pathname.endsWith("/s2") ? createdSession : session,
+      });
+    }
+    if ((pathname === "/sessions/s1" || pathname === "/sessions/s2") && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body ?? "{}")) as {
+        model?: string;
+        metadata?: Record<string, unknown>;
+      };
+      const base = pathname.endsWith("/s2") ? createdSession : session;
+      return jsonResponse({
+        session: {
+          ...base,
+          model: body.model ?? base.model,
+          metadata: body.metadata ? { ...base.metadata, ...body.metadata } : base.metadata,
+          updatedAt: 9,
+        },
+      });
     }
     if (pathname === "/sessions/s1/commands" && init?.method === "POST") {
       return jsonResponse({
@@ -452,7 +476,14 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   let captured: TuiSessionController | undefined;
   function Harness() {
     captured = useServerSync({
-      daemon: { url: "http://daemon.test", token: "tok", cwd: session.cwd, model: "m" },
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: session.cwd,
+        model: "m",
+        permissionMode: "plan",
+        maxTurns: 11,
+      },
     }, () => {});
     return <box />;
   }
@@ -516,9 +547,24 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "submit_line", line: "/new Scratch" });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
-  expect(calls.some((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST")).toBe(true);
+  const createCall = calls.find((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST");
+  expect(createCall).toBeTruthy();
+  expect(JSON.parse(String(createCall?.init.body ?? "{}"))).toMatchObject({
+    title: "Scratch",
+    metadata: { permissionMode: "plan", maxTurns: 11 },
+  });
   expect(captured?.status.session_id).toBe("s2");
   expect(captured?.busy).toBe(false);
+
+  await act(async () => {
+    captured?.sendRequest({ type: "set_permission_mode", permission_mode: "full_auto" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const permissionPatch = calls.find((call) =>
+    call.url === "http://daemon.test/sessions/s2" && call.init.method === "PATCH"
+      && String(call.init.body ?? "").includes("permissionMode"));
+  expect(permissionPatch).toBeTruthy();
+  expect(captured?.status.permission_mode).toBe("full_auto");
 
   await act(async () => {
     captured?.sendRequest({ type: "delete_session", session_id: "s2" });

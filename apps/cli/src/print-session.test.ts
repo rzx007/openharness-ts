@@ -170,4 +170,72 @@ describe("runPrintSession", () => {
     expect(exitSpy).not.toHaveBeenCalled();
     stdoutSpy.mockRestore();
   });
+
+  it("writes permissionMode and maxTurns into createSession metadata", async () => {
+    const createSession = vi.fn(async () => ({
+      id: "s1",
+      cwd: "/tmp",
+      title: "print",
+      model: "m",
+      status: "idle",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    const Client = OpenHarnessClient as unknown as ReturnType<typeof vi.fn>;
+    Client.mockImplementation(() => ({
+      createSession,
+      admitPrompt: vi.fn(async () => ({
+        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 },
+        run: { id: "r1", sessionId: "s1", status: "completed", metadata: {}, createdAt: 2, updatedAt: 2 },
+      })),
+      getSessionState: vi.fn(async () => ({
+        cursor: 0,
+        session: {
+          id: "s1",
+          cwd: "/tmp",
+          title: "print",
+          model: "m",
+          status: "idle",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        inputs: [],
+        messages: [],
+        parts: [],
+        runs: [],
+        permissions: [],
+      })),
+      replyPermission: vi.fn(),
+      streamEvents: async function* () {},
+    }));
+
+    await runPrintSession(
+      { model: "m", outputStyle: "default", permission: { mode: "default" }, maxTurns: 50 } as never,
+      "hi",
+      {
+        model: "m",
+        cwd: "/tmp",
+        permissionMode: "plan",
+        maxTurns: 7,
+        systemPrompt: "be brief",
+        allowedTools: "Read,Glob",
+        effort: "low",
+      },
+    );
+
+    expect(createSession).toHaveBeenCalledWith({
+      cwd: "/tmp",
+      model: "m",
+      title: "print",
+      metadata: {
+        permissionMode: "plan",
+        maxTurns: 7,
+        systemPrompt: "be brief",
+        allowedTools: ["Read", "Glob"],
+        effort: "low",
+      },
+    });
+  });
 });
