@@ -284,11 +284,20 @@ export function useServerSync(
     const controller = new AbortController();
 
     void (async () => {
+      let reconnectNotice = false;
       try {
         for await (const update of syncEvents(client, {
           sessionId: activeSessionId,
           signal: controller.signal,
         })) {
+          if (update.source === "reconnecting") {
+            if (!reconnectNotice) {
+              reconnectNotice = true;
+              setSystemItems((items) => [...items, { role: "system", text: "reconnecting…" }]);
+            }
+            continue;
+          }
+          if (reconnectNotice) reconnectNotice = false;
           setClientState(update.state);
         }
       } catch (error) {

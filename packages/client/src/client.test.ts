@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OpenHarnessClient, streamServerSentEvents } from "./client.js";
 import { syncEvents } from "./sync.js";
-import type { SessionEventRecord, SessionRecord } from "./types.js";
+import type { SessionEventRecord, SessionRecord, SessionStateSnapshot } from "./types.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -123,9 +123,12 @@ describe("OpenHarnessClient", () => {
   });
 
   it("merges replayed and live events while suppressing live duplicates", async () => {
+    const controller = new AbortController();
     const stream = async function* (): AsyncIterable<SessionEventRecord> {
       yield event(2, "session.created");
       yield event(3, "session.input.admitted");
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
     };
     const client = {
       listEvents: async () => [event(1, "session.created"), event(2, "session.message.created")],
@@ -133,7 +136,8 @@ describe("OpenHarnessClient", () => {
     } as unknown as OpenHarnessClient;
 
     const updates: Array<{ seq: number; source: string; lastSeq: number }> = [];
-    for await (const update of syncEvents(client)) {
+    for await (const update of syncEvents(client, { signal: controller.signal, reconnectDelayMs: () => 0 })) {
+      if (!update.event) continue;
       updates.push({ seq: update.event.seq, source: update.source, lastSeq: update.state.lastSeq });
     }
 
@@ -142,5 +146,174 @@ describe("OpenHarnessClient", () => {
       { seq: 2, source: "replay", lastSeq: 2 },
       { seq: 3, source: "live", lastSeq: 3 },
     ]);
+  });
+
+  it("reconnects a disconnected live stream from lastSeq cursor", async () => {
+    const controller = new AbortController();
+    const cursors: Array<number | undefined> = [];
+    let attempt = 0;
+    const client = {
+      listEvents: async () => [event(1, "session.created")],
+      streamEvents: (options: { cursor?: number }) => {
+        cursors.push(options.cursor);
+        attempt += 1;
+        if (attempt === 1) {
+          return (async function* () {
+            yield event(2, "session.message.created");
+            throw new Error("stream reset");
+          })();
+        }
+        return (async function* () {
+          yield event(3, "session.input.admitted");
+          controller.abort();
+          throw new DOMException("Aborted", "AbortError");
+        })();
+      },
+    } as unknown as OpenHarnessClient;
+
+    const liveSeqs: number[] = [];
+    for await (const update of syncEvents(client, {
+      signal: controller.signal,
+      reconnectDelayMs: () => 0,
+    })) {
+      if (update.source === "live" && update.event) liveSeqs.push(update.event.seq);
+    }
+
+    expect(cursors).toEqual([1, 2]);
+    expect(liveSeqs).toEqual([2, 3]);
+  });
+
+  it("does not reconnect after abort", async () => {
+    const controller = new AbortController();
+    let streamCalls = 0;
+    const client = {
+      listEvents: async () => [event(1, "session.created")],
+      streamEvents: () => {
+        streamCalls += 1;
+        return (async function* () {
+          yield event(2, "session.message.created");
+          controller.abort();
+          throw new DOMException("The operation was aborted.", "AbortError");
+        })();
+      },
+    } as unknown as OpenHarnessClient;
+
+    const liveSeqs: number[] = [];
+    for await (const update of syncEvents(client, {
+      signal: controller.signal,
+      reconnectDelayMs: () => 0,
+    })) {
+      if (update.source === "live" && update.event) liveSeqs.push(update.event.seq);
+    }
+
+    expect(streamCalls).toBe(1);
+    expect(liveSeqs).toEqual([2]);
+  });
+
+  it("re-snapshots session state when reconnect live has a seq gap", async () => {
+    const controller = new AbortController();
+    const session: SessionRecord = {
+      id: "s1",
+      cwd: "/repo",
+      title: "Main",
+      model: "m",
+      status: "idle",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const snapshot = (cursor: number): SessionStateSnapshot => ({
+      cursor,
+      session,
+      inputs: [],
+      messages: [],
+      parts: [],
+      runs: [],
+      permissions: [],
+    });
+    let streamAttempt = 0;
+    let snapshotCalls = 0;
+    const client = {
+      getSessionState: async () => {
+        snapshotCalls += 1;
+        return snapshot(snapshotCalls === 1 ? 1 : 4);
+      },
+      streamEvents: (options: { cursor?: number }) => {
+        streamAttempt += 1;
+        if (streamAttempt === 1) {
+          expect(options.cursor).toBe(1);
+          return (async function* () {
+            yield event(2, "session.message.created");
+            throw new Error("stream reset");
+          })();
+        }
+        expect(options.cursor).toBe(2);
+        return (async function* () {
+          yield event(5, "session.run.updated");
+          controller.abort();
+          throw new DOMException("Aborted", "AbortError");
+        })();
+      },
+    } as unknown as OpenHarnessClient;
+
+    const sources: string[] = [];
+    let lastSeq = 0;
+    for await (const update of syncEvents(client, {
+      sessionId: "s1",
+      signal: controller.signal,
+      reconnectDelayMs: () => 0,
+    })) {
+      sources.push(update.source);
+      lastSeq = update.state.lastSeq;
+    }
+
+    expect(snapshotCalls).toBe(2);
+    expect(sources).toContain("reconnecting");
+    expect(sources.filter((source) => source === "snapshot")).toHaveLength(2);
+    expect(lastSeq).toBe(5);
+  });
+
+  it("uses exponential reconnect delay until the stream recovers", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const delays: number[] = [];
+    let attempt = 0;
+    const client = {
+      listEvents: async () => [],
+      streamEvents: () => {
+        attempt += 1;
+        if (attempt < 3) {
+          return (async function* () {
+            throw new Error(`boom-${attempt}`);
+          })();
+        }
+        return (async function* () {
+          yield event(1, "session.created");
+          controller.abort();
+          throw new DOMException("Aborted", "AbortError");
+        })();
+      },
+    } as unknown as OpenHarnessClient;
+
+    const run = (async () => {
+      for await (const update of syncEvents(client, {
+        signal: controller.signal,
+        reconnectDelayMs: (n) => {
+          const ms = 100 * 2 ** n;
+          delays.push(ms);
+          return ms;
+        },
+      })) {
+        if (update.source === "live") break;
+      }
+    })();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(delays).toEqual([100]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(delays).toEqual([100, 200]);
+    await vi.advanceTimersByTimeAsync(200);
+    await run;
+    vi.useRealTimers();
   });
 });

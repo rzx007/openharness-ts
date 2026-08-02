@@ -334,6 +334,11 @@ export interface EventSyncOptions {
   sessionId?: string;
   cursor?: number;
   signal?: AbortSignal;
+  /**
+   * Delay before a live-stream reconnect attempt (attempt is 0-based).
+   * Defaults to exponential backoff capped at 30s. Tests may pass `() => 0`.
+   */
+  reconnectDelayMs?: (attempt: number) => number;
 }
 
 /** `syncEvents` 产出的单次状态更新。 */
@@ -341,7 +346,7 @@ export interface SyncEventUpdate {
   event?: SessionEventRecord;
   state: OpenHarnessClientState;
   /** Session attach starts from an atomic snapshot, then consumes SSE deltas. */
-  source: "snapshot" | "replay" | "live";
+  source: "snapshot" | "replay" | "live" | "reconnecting";
 }
 
 /** 去掉 sessionId 后的 admit prompt 输入（sessionId 由路径提供）。 */

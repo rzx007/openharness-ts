@@ -127,19 +127,20 @@ apps/web / apps/desktop
 
 - `packages/services/src/session-runtime`：唯一的文件 adapter 版 `SessionStore`，支持 session/input/message/part/event/run/permission request。
 - `packages/server`：Hono HTTP server，bearer token，SSE 事件流，daemon registry，`ohs serve` 与 `ohs daemon start/status/stop`。
-- `SessionRunCoordinator`：同 session 串行、不同 session 并发、queued run interrupt、wake merge 计数。
-- `SessionRuntime` 注入：daemon 可通过 CLI runtime factory 复用现有 `bootstrap` / `QueryEngine`。
+- `SessionRunCoordinator`：同 session 串行、不同 session 并发、queued run interrupt、wake merge 计数；`delivery: "steer"` 对 active run 走 `mergeWake`，无 active run 时退化为 queue。
+- `SessionRuntime` 注入：daemon 可通过 CLI runtime factory 复用现有 `bootstrap` / `QueryEngine`；interrupt/`AbortSignal` 贯穿 QueryEngine / provider / tools 主路径。
 - `PermissionBroker`：权限请求持久化、`permission.asked/replied`、`POST /permissions/:requestId/reply`、session 级 approval 复用。
-- `packages/client`：typed API client、SSE parser、按 session bucket 的 message-part reducer、session snapshot+live 合并。
+- `packages/client`：typed API client、SSE parser、按 session bucket 的 message-part reducer、session snapshot+live 合并；SSE 断流后按 `lastSeq` 指数退避重连，session 路径遇 seq 空洞会 re-snapshot。
+- CLI/TUI 将 `permissionMode` / `maxTurns` 等写入 session metadata，供 daemon runtime warm 读取。
+- sandbox active session 按 `sessionId + cwd` 隔离（无 sessionId 的兼容路径仍可为 cwd-only）。
 
 仍待完成：
 
 - SQLite adapter 与迁移。
-- `delivery: "steer"` 真正注入运行中的 run。
 - 继续审计 CLI/历史命令中的 `process.cwd()`；runtime/tool 主路径已接收显式 `cwd` 并传到 `ToolContext`。
 - Workflow 工具事件已通过 runtime event sink 写入 session event stream；前端可基于 `workflow.*` 事件做实时视图。
 - Daemon session runtime 已按 session/location 创建 MCP manager，并随 runtime 生命周期关闭。
-- 更深层的 provider/tool/sandbox cancellation。
+- 部分长时间工具/边缘取消路径仍可继续硬化。
 - TUI 主路径已迁到 daemon client。
 - Slash command：catalog、template expand，以及 `/model` `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/help` `/status` `/version` 已落地；`/tasks run`、部分 REPL-only 命令仍待。
 - Web/Desktop/remote attach 的认证与部署策略。
