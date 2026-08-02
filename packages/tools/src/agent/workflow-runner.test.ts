@@ -234,6 +234,7 @@ describe("createAgentWorkflowRunner", () => {
       stopped({ task: { id: "stop" }, attempt: 1, dependencyResults: {} }),
     ).resolves.toMatchObject({ status: "killed", result: "stopped" });
 
+    const stopTask = vi.fn(async () => undefined);
     const timedOut = createAgentWorkflowRunner({
       cwd: "/repo",
       spawnWorker: async () => ({
@@ -243,6 +244,7 @@ describe("createAgentWorkflowRunner", () => {
         backendType: "subprocess",
       }),
       awaitTask: async () => ({ status: "running", output: "still working", timedOut: true }),
+      stopTask,
       getAgentDefinition: () => undefined,
     });
 
@@ -253,6 +255,44 @@ describe("createAgentWorkflowRunner", () => {
       summary: "slow did not finish before timeout",
       metadata: expect.objectContaining({ timedOut: true }),
     });
+    expect(stopTask).toHaveBeenCalledWith("task_timeout");
+  });
+
+  it("requests stop when a resumed workflow task wait times out", async () => {
+    const stopTask = vi.fn(async () => undefined);
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker: async () => {
+        throw new Error("should not spawn");
+      },
+      awaitTask: async () => ({ status: "running", output: "still working", timedOut: true }),
+      stopTask,
+      getAgentDefinition: () => undefined,
+    });
+
+    await expect(
+      runner({
+        task: { id: "slow" },
+        attempt: 1,
+        dependencyResults: {},
+        resumeFrom: {
+          taskId: "slow",
+          attempt: 1,
+          dependencies: [],
+          startedAt: 1,
+          summary: "old task",
+          metadata: {
+            agentId: "worker@default",
+            taskManagerTaskId: "task_resume_timeout",
+            backendType: "subprocess",
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      metadata: expect.objectContaining({ timedOut: true }),
+    });
+    expect(stopTask).toHaveBeenCalledWith("task_resume_timeout");
   });
 
   it("waits for an existing TaskManager task when resuming a running workflow task", async () => {

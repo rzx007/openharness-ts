@@ -173,9 +173,11 @@ export const taskWaitTool: ToolDefinition = {
         try {
           const res = await mgr.awaitTask(taskId, { timeoutMs });
           if (res.timedOut) {
+            // Best-effort: stop the child so a wait timeout does not leave it orphaned.
+            await mgr.stopTask(taskId).catch(() => {});
             return (
               `${taskId} (${res.status}): did not finish within ${timeoutSeconds}s — ` +
-              `you can keep waiting with TaskWait or stop it with TaskStop.\n` +
+              `已请求停止 (stop requested).\n` +
               `Output so far:\n${res.output}`
             );
           }
