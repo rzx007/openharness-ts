@@ -17,6 +17,22 @@ function withStore(test: (store: SessionStore, path: string) => void): void {
 }
 
 describe("SessionStore", () => {
+  it("lists direct child sessions without mixing descendants or siblings", () => {
+    withStore((store) => {
+      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child-1", parentId: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child-2", parentId: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "grandchild", parentId: "child-1", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "other", cwd: process.cwd(), model: "m" });
+
+      expect(store.listChildSessions("parent").map((session) => session.id).sort()).toEqual([
+        "child-1",
+        "child-2",
+      ]);
+      expect(store.listChildSessions("child-1").map((session) => session.id)).toEqual(["grandchild"]);
+    });
+  });
+
   it("persists sessions and rehydrates from disk", () => {
     withStore((store, path) => {
       const session = store.createSession({

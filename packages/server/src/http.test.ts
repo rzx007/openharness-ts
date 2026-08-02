@@ -25,7 +25,7 @@ function deferred<T = void>(): {
 }
 
 async function withServer(
-  test: (ctx: { baseUrl: string; token: string; storePath: string }) => Promise<void>,
+  test: (ctx: { baseUrl: string; token: string; storePath: string; server: OpenHarnessHttpServer }) => Promise<void>,
   options: Pick<
     OpenHarnessServerOptions,
     | "runtimeFactory"
@@ -68,7 +68,7 @@ async function withServer(
   });
   const listen = await server.listen();
   try {
-    await test({ baseUrl: listen.url, token, storePath: join(dir, "sessions.json") });
+    await test({ baseUrl: listen.url, token, storePath: join(dir, "sessions.json"), server });
   } finally {
     await server.close();
     rmSync(dir, { recursive: true, force: true });
@@ -95,6 +95,60 @@ async function waitForEvent(
 }
 
 describe("OpenHarnessHttpServer", () => {
+  it("provides runtimes an in-process child session host", async () => {
+    type Host = {
+      createChildSession(input: {
+        parentId: string;
+        cwd: string;
+        model?: string;
+        title: string;
+        agent: string;
+      }): Promise<{ id: string }>;
+      admitPrompt(sessionId: string, content: string): Promise<{ runId?: string }>;
+      awaitRun(sessionId: string, runId: string): Promise<{ status: string; output: string }>;
+    };
+    let host: Host | undefined;
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime(context) {
+        host = (context as typeof context & { childSessionHost?: Host }).childSessionHost;
+        return {
+          async runPrompt(_input, hooks) {
+            await hooks.onStreamEvent({ type: "text_delta", delta: "child output" });
+            return { messages: [] };
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token, server }) => {
+      const response = await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "parent", cwd: process.cwd(), model: "m" }),
+      });
+      expect(response.status).toBe(201);
+      for (let i = 0; i < 20 && !host; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(host).toBeDefined();
+
+      const child = await host!.createChildSession({
+        parentId: "parent",
+        cwd: process.cwd(),
+        title: "Explore@default",
+        agent: "Explore",
+      });
+      expect(server.store.getSession(child.id)?.parentId).toBe("parent");
+      expect(server.store.getSession(child.id)?.model).toBe("m");
+
+      const admitted = await host!.admitPrompt(child.id, "inspect");
+      expect(admitted.runId).toBeTruthy();
+      await expect(host!.awaitRun(child.id, admitted.runId!)).resolves.toMatchObject({
+        status: "completed",
+        output: "child output",
+      });
+    }, { runtimeFactory });
+  });
+
   it("uses the canonical session runtime store", () => {
     expect(getDefaultSessionStorePath()).toMatch(/[\\/]session-runtime[\\/]sessions\.json$/);
   });

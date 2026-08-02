@@ -69,7 +69,7 @@ export const agentTool: ToolDefinition = {
         team,
         prompt: input.prompt as string,
         cwd: context.cwd,
-        parentSessionId: "main",
+        parentSessionId: context.sessionId ?? "main",
         sessionId: workerSessionId,
         model: (input.model as string) ?? agentDef?.model,
         systemPrompt: agentDef?.systemPrompt,
@@ -87,6 +87,7 @@ export const agentTool: ToolDefinition = {
         try { getTeamRegistry().addAgent(input.team as string, result.taskId); } catch {}
       }
       let text = `Spawned agent ${result.agentId} (task_id=${result.taskId}, backend=${result.backendType})`;
+      if (result.sessionId) text += `\nsession_id=${result.sessionId}`;
       if (result.worktree) {
         text += `\nIsolated: changes land on branch \`${result.worktree.branch}\`, worktree path \`${result.worktree.path}\` — review/merge it yourself.`;
         text += `\nWhen done reviewing, clean it up with \`git worktree remove ${result.worktree.path}\` (or \`git worktree remove --force ${result.worktree.path}\` to discard uncommitted changes).`;

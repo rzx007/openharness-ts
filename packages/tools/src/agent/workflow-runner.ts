@@ -82,7 +82,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       team,
       prompt,
       cwd: options.cwd,
-      parentSessionId: "main",
+      parentSessionId: options.sessionId ?? "main",
       sessionId: workerSessionId,
       model: task.model ?? agentDef?.model,
       systemPrompt: agentDef?.systemPrompt,

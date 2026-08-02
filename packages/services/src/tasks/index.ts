@@ -74,6 +74,21 @@ export interface CreateAgentTaskOptions {
   env?: Record<string, string>;
 }
 
+export interface RegisterSessionTaskOptions {
+  description: string;
+  cwd: string;
+  sessionId: string;
+  childSessionId: string;
+  prompt: string;
+  onInput(data: string): Promise<void>;
+  onStop(): Promise<void>;
+}
+
+export interface CompleteSessionTaskInput {
+  status: Extract<TaskStatus, "completed" | "failed" | "stopped">;
+  output: string;
+}
+
 const MAX_OUTPUT_BYTES = 12_000;
 const STOP_GRACE_MS = 3_000;
 const MAX_RESTARTS = 5;
@@ -102,6 +117,7 @@ export class TaskManager {
   private writeChains = new Map<string, Promise<void>>();
   private completionListeners = new Map<string, CompletionListener>();
   private taskListeners = new Map<string, TaskListener>();
+  private sessionTaskCallbacks = new Map<string, Pick<RegisterSessionTaskOptions, "onInput" | "onStop">>();
   private idCounter = 0;
   private readonly tasksDir: string;
 
@@ -237,6 +253,46 @@ export class TaskManager {
     return task;
   }
 
+  registerSessionTask(options: RegisterSessionTaskOptions): TaskInfo {
+    const id = `task_${++this.idCounter}`;
+    const outputFile = join(this.tasksDir, `${id}.log`);
+    this.ensureTasksDir();
+    writeFileSync(outputFile, "");
+    const task: TaskInfo = {
+      id,
+      type: "agent",
+      status: "running",
+      description: options.description,
+      cwd: options.cwd,
+      sessionId: options.sessionId,
+      prompt: options.prompt,
+      outputFile,
+      createdAt: Date.now(),
+      startedAt: Date.now(),
+      metadata: { child_session_id: options.childSessionId },
+    };
+    this.tasks.set(id, task);
+    this.sessionTaskCallbacks.set(id, {
+      onInput: options.onInput,
+      onStop: options.onStop,
+    });
+    this.notifyTaskEvent(task, "created");
+    return task;
+  }
+
+  async completeSessionTask(taskId: string, input: CompleteSessionTaskInput): Promise<TaskInfo> {
+    const task = this.tasks.get(taskId);
+    if (!task || !this.sessionTaskCallbacks.has(taskId)) {
+      throw new Error(`Session task not found: ${taskId}`);
+    }
+    if (task.outputFile) writeFileSync(task.outputFile, input.output);
+    task.status = input.status;
+    task.exitCode = input.status === "completed" ? 0 : 1;
+    task.finishedAt = Date.now();
+    await this.notifyCompletion(task);
+    return task;
+  }
+
   // ── queries ─────────────────────────────────────────────
 
   getTask(taskId: string): TaskInfo | undefined {
@@ -271,6 +327,33 @@ export class TaskManager {
   async writeToTask(taskId: string, data: string): Promise<void> {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
+    const sessionCallbacks = this.sessionTaskCallbacks.get(taskId);
+    if (sessionCallbacks) {
+      const previous = {
+        status: task.status,
+        startedAt: task.startedAt,
+        finishedAt: task.finishedAt,
+        exitCode: task.exitCode,
+      };
+      task.status = "running";
+      task.startedAt = Date.now();
+      delete task.finishedAt;
+      delete task.exitCode;
+      this.notifyTaskEvent(task, "updated");
+      try {
+        await sessionCallbacks.onInput(data);
+      } catch (error) {
+        if (task.status === "running") {
+          task.status = previous.status;
+          task.startedAt = previous.startedAt;
+          task.finishedAt = previous.finishedAt;
+          task.exitCode = previous.exitCode;
+          this.notifyTaskEvent(task, "updated");
+        }
+        throw error;
+      }
+      return;
+    }
     const payload = encodeWorkerPayload(data);
 
     // Serialize writes per task so frames never interleave.
@@ -312,6 +395,16 @@ export class TaskManager {
   async stopTask(taskId: string): Promise<TaskInfo> {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
+    const sessionCallbacks = this.sessionTaskCallbacks.get(taskId);
+    if (sessionCallbacks) {
+      if (isTerminal(task.status)) return task;
+      await sessionCallbacks.onStop();
+      task.status = "stopped";
+      task.exitCode = 1;
+      task.finishedAt = Date.now();
+      await this.notifyCompletion(task);
+      return task;
+    }
     const state = this.states.get(taskId);
     if (!state) {
       if (task.status === "completed" || task.status === "failed" || task.status === "stopped") {

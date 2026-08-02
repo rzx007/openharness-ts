@@ -18,7 +18,7 @@ import {
 import { getDefaultSessionStorePath } from "./paths.js";
 import { StorePermissionBroker } from "./permission-broker.js";
 import { RunInterruptedError, SessionRunCoordinator } from "./run-coordinator.js";
-import type { SessionRuntime, SessionRuntimeFactory } from "./runtime.js";
+import type { ChildSessionHost, SessionRuntime, SessionRuntimeFactory } from "./runtime.js";
 import { writeSessionExport, type SessionExportFormat } from "./export-session.js";
 import type {
   AgentPersonaService,
@@ -167,10 +167,12 @@ export class OpenHarnessHttpServer {
   private readonly gitService?: GitService;
   private readonly version?: string;
   private readonly permissionBroker: StorePermissionBroker;
+  private readonly childSessionHost: ChildSessionHost;
   private readonly runCoordinator = new SessionRunCoordinator();
   private readonly encoder = new TextEncoder();
   private readonly sseClients = new Set<SseClient>();
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
+  private readonly runPromises = new Map<string, Promise<void>>();
   private listener?: Listener;
   private listenResult?: ListenResult;
 
@@ -199,6 +201,23 @@ export class OpenHarnessHttpServer {
       store: this.store,
       onChange: (previousEventSeq) => this.broadcastSince(previousEventSeq),
     });
+    this.childSessionHost = {
+      createChildSession: async (input) => this.createChildSession(input),
+      admitPrompt: async (sessionId, content) => {
+        const admitted = this.admitPromptAndMaybeRun(sessionId, { content });
+        return { ...(admitted.run ? { runId: admitted.run.id } : {}) };
+      },
+      awaitRun: async (sessionId, runId) => this.awaitChildRun(sessionId, runId),
+      interrupt: async (sessionId) => {
+        this.interruptSession(sessionId);
+      },
+      archive: async (sessionId) => {
+        const before = this.latestEventSeq();
+        this.store.archiveSession(sessionId);
+        await this.closeRuntime(sessionId);
+        this.broadcastSince(before);
+      },
+    };
     this.mountRoutes();
   }
 
@@ -946,6 +965,54 @@ export class OpenHarnessHttpServer {
     return jsonResponse({ session }, 201);
   }
 
+  private async createChildSession(
+    input: Parameters<ChildSessionHost["createChildSession"]>[0],
+  ): ReturnType<ChildSessionHost["createChildSession"]> {
+    if (!this.store.getSession(input.parentId)) {
+      throw new Error(`Parent session not found: ${input.parentId}`);
+    }
+    const parent = this.store.getSession(input.parentId)!;
+    const before = this.latestEventSeq();
+    const session = this.store.createSession({
+      ...input,
+      model: input.model ?? parent.model,
+    });
+    this.broadcastSince(before);
+    await this.warmRuntime(session.id);
+    return session;
+  }
+
+  private async awaitChildRun(
+    sessionId: string,
+    runId: string,
+  ): ReturnType<ChildSessionHost["awaitRun"]> {
+    const initial = this.store.getRun(runId);
+    if (!initial || initial.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
+    if (initial.status === "pending" || initial.status === "running") {
+      await this.runPromises.get(runId);
+    }
+    const run = this.store.getRun(runId);
+    if (!run || run.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
+    if (run.status === "pending" || run.status === "running") {
+      throw new Error(`Session run is still active: ${runId}`);
+    }
+    const output = this.store.listMessages(sessionId)
+      .filter((message) => message.runId === runId && message.role === "assistant")
+      .flatMap((message) => this.store.listMessageParts(sessionId, { messageId: message.id }))
+      .map((part) => {
+        if (part.text) return part.text;
+        if (part.output == null) return "";
+        return typeof part.output === "string" ? part.output : JSON.stringify(part.output);
+      })
+      .filter(Boolean)
+      .join("\n");
+    return {
+      status: run.status,
+      output,
+      ...(run.error ? { error: run.error } : {}),
+    };
+  }
+
   private handleGetSession(c: Context): Response {
     const sessionId = c.req.param("sessionId");
     if (!sessionId) return errorResponse(400, "sessionId is required");
@@ -1117,9 +1184,12 @@ export class OpenHarnessHttpServer {
         work: (context) => this.executeRun(sessionId, admitted.id, run.id, context),
       });
       queueState = enqueued.state;
-      enqueued.promise.catch(() => {
+      const tracked = enqueued.promise.catch(() => {
         // The persisted run state is updated by executeRun or interrupt handling.
+      }).finally(() => {
+        if (this.runPromises.get(run.id) === tracked) this.runPromises.delete(run.id);
       });
+      this.runPromises.set(run.id, tracked);
     }
     return { input: admitted, ...(run ? { run, queue_state: queueState } : {}) };
   }
@@ -1127,6 +1197,10 @@ export class OpenHarnessHttpServer {
   private handleInterruptSession(c: Context): Response {
     const sessionId = c.req.param("sessionId");
     if (!sessionId) return errorResponse(400, "sessionId is required");
+    return jsonResponse(this.interruptSession(sessionId));
+  }
+
+  private interruptSession(sessionId: string): ReturnType<SessionRunCoordinator["interrupt"]> {
     const before = this.latestEventSeq();
     const result = this.runCoordinator.interrupt(sessionId);
     if (result.interrupted) {
@@ -1140,7 +1214,7 @@ export class OpenHarnessHttpServer {
       });
       this.broadcastSince(before);
     }
-    return jsonResponse(result);
+    return result;
   }
 
   private async executeRun(
@@ -1366,7 +1440,12 @@ export class OpenHarnessHttpServer {
     const existing = this.runtimes.get(session.id);
     if (existing) return await existing;
 
-    const promise = this.runtimeFactory.createRuntime({ session, history, parts }).catch((error) => {
+    const promise = this.runtimeFactory.createRuntime({
+      session,
+      history,
+      parts,
+      childSessionHost: this.childSessionHost,
+    }).catch((error) => {
       if (this.runtimes.get(session.id) === promise) this.runtimes.delete(session.id);
       throw error;
     });

@@ -147,6 +147,13 @@ export class SessionStore {
     return clone(sessions);
   }
 
+  listChildSessions(parentId: string): SessionRecord[] {
+    assertSession(this.state, parentId);
+    return clone(Object.values(this.state.sessions)
+      .filter((session) => session.parentId === parentId && session.status !== "archived")
+      .sort((a, b) => a.createdAt - b.createdAt));
+  }
+
   archiveSession(sessionId: string): SessionRecord {
     const session = assertSession(this.state, sessionId);
     const timestamp = now();

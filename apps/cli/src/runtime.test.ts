@@ -3,10 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel, formatSandboxUnavailableError, resolveProviderScopedBaseUrl } from "./runtime";
+import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel, formatSandboxUnavailableError, resolveProviderScopedBaseUrl, registerChildSessionBackend } from "./runtime";
 import { READ_ONLY_TOOLS } from "@openharness/permissions";
 import { CredentialStorage } from "@openharness/auth";
 import type { Settings } from "@openharness/core";
+import { getBackendRegistry } from "@openharness/swarm";
 
 const BASE_SETTINGS: Settings = {
   model: "claude-sonnet-4-20250514",
@@ -14,6 +15,44 @@ const BASE_SETTINGS: Settings = {
   maxTurns: 50,
   permission: { mode: "default" },
 };
+
+describe("registerChildSessionBackend", () => {
+  it("registers in_process without registering subprocess", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "ohs-child-backend-"));
+    const sessionId = `parent-${Date.now()}`;
+    try {
+      await registerChildSessionBackend({
+        cwd,
+        sessionId,
+        host: {
+          createChildSession: async () => ({ id: "child" } as never),
+          admitPrompt: async () => ({ runId: "run" }),
+          awaitRun: async () => ({ status: "completed", output: "" }),
+          interrupt: async () => {},
+          archive: async () => {},
+        },
+      });
+
+      const registry = getBackendRegistry({ cwd, sessionId });
+      const first = registry.getExecutor("in_process");
+      expect(registry.list()).toEqual(["in_process"]);
+      await registerChildSessionBackend({
+        cwd,
+        sessionId,
+        host: {
+          createChildSession: async () => ({ id: "new-child" } as never),
+          admitPrompt: async () => ({ runId: "new-run" }),
+          awaitRun: async () => ({ status: "completed", output: "" }),
+          interrupt: async () => {},
+          archive: async () => {},
+        },
+      });
+      expect(registry.getExecutor("in_process")).toBe(first);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("resolveAutoApproveTools", () => {
   const base = { permission: { mode: "default" } } as Settings;

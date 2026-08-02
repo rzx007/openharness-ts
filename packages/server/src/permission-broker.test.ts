@@ -74,6 +74,41 @@ describe("StorePermissionBroker", () => {
     });
   });
 
+  it("routes child asks to the parent session and reuses parent session approvals", async () => {
+    await withBroker(async ({ broker, store }) => {
+      store.createSession({ id: "child", parentId: "s1", cwd: process.cwd(), model: "m" });
+      const childInput = store.admitPrompt({ id: "child-input", sessionId: "child", content: "edit" });
+      store.createRun({ id: "child-run", sessionId: "child", inputId: childInput.id });
+
+      const parentAsk = broker.ask({ sessionId: "s1", runId: "r1", toolName: "Write" });
+      const parentRequest = store.listPermissionRequests({ sessionId: "s1", status: "pending" })[0]!;
+      broker.reply({ requestId: parentRequest.id, status: "approved", decision: "session" });
+      await expect(parentAsk).resolves.toBe(true);
+
+      const childAsk = broker.ask({
+        sessionId: "child",
+        runId: "child-run",
+        toolName: "Write",
+        input: { path: "child.txt" },
+      });
+      await expect(childAsk).resolves.toBe(true);
+
+      const childRequest = store.listPermissionRequests({ sessionId: "s1", toolName: "Write" }).at(-1);
+      expect(childRequest).toMatchObject({
+        sessionId: "s1",
+        status: "approved",
+        decision: "session",
+        payload: {
+          childSessionId: "child",
+          childRunId: "child-run",
+          reusedApprovalRequestId: parentRequest.id,
+        },
+      });
+      expect(childRequest?.runId).toBeUndefined();
+      expect(store.listPermissionRequests({ sessionId: "child" })).toHaveLength(0);
+    });
+  });
+
   it("expires a pending request when its run is interrupted", async () => {
     await withBroker(async ({ broker, store }) => {
       const controller = new AbortController();

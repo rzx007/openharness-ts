@@ -45,6 +45,7 @@ export type {
   SettingsService,
 } from "./settings-api.js";
 export type {
+  ChildSessionHost,
   RuntimeMessageRecord,
   RuntimePermissionAskInput,
   SessionCompactResult,

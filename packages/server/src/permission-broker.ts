@@ -51,15 +51,18 @@ export class StorePermissionBroker implements PermissionBroker {
   }
 
   async ask(input: PermissionAskInput): Promise<boolean> {
+    const permissionSessionId = this.resolvePermissionSessionId(input.sessionId);
     const reusable = this.findSessionApproval(input.sessionId, input.toolName);
     const previousEventSeq = this.latestEventSeq();
     const request = this.store.createPermissionRequest({
-      sessionId: input.sessionId,
-      runId: input.runId,
+      sessionId: permissionSessionId,
+      runId: permissionSessionId === input.sessionId ? input.runId : undefined,
       toolName: input.toolName,
       payload: {
         reason: input.reason,
         input: input.input ?? {},
+        ...(permissionSessionId !== input.sessionId ? { childSessionId: input.sessionId } : {}),
+        ...(permissionSessionId !== input.sessionId && input.runId ? { childRunId: input.runId } : {}),
         ...(reusable ? { reusedApprovalRequestId: reusable.id } : {}),
       },
     });
@@ -132,10 +135,30 @@ export class StorePermissionBroker implements PermissionBroker {
   }
 
   private findSessionApproval(sessionId: string, toolName: string): PermissionRequestRecord | undefined {
-    return this.store
-      .listPermissionRequests({ sessionId, toolName, status: "approved" })
-      .filter((request) => request.decision === "session")
-      .at(-1);
+    for (const candidateId of this.sessionLineage(sessionId)) {
+      const approval = this.store
+        .listPermissionRequests({ sessionId: candidateId, toolName, status: "approved" })
+        .filter((request) => request.decision === "session")
+        .at(-1);
+      if (approval) return approval;
+    }
+    return undefined;
+  }
+
+  private resolvePermissionSessionId(sessionId: string): string {
+    return this.sessionLineage(sessionId).at(-1) ?? sessionId;
+  }
+
+  private sessionLineage(sessionId: string): string[] {
+    const lineage: string[] = [];
+    const seen = new Set<string>();
+    let currentId: string | undefined = sessionId;
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      lineage.push(currentId);
+      currentId = this.store.getSession(currentId)?.parentId;
+    }
+    return lineage;
   }
 
   private expire(requestId: string, reason: string): void {

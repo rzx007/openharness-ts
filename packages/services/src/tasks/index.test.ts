@@ -91,6 +91,83 @@ describe("scoped TaskManager", () => {
   });
 });
 
+describe("TaskManager session task bridge", () => {
+  it("tracks child-session work through input, completion, output, and stop callbacks", async () => {
+    const manager = makeManager();
+    const inputs: string[] = [];
+    let stopped = false;
+    const task = manager.registerSessionTask({
+      description: "child agent",
+      cwd: process.cwd(),
+      sessionId: "parent",
+      childSessionId: "child",
+      prompt: "first",
+      onInput: async (text) => {
+        inputs.push(text);
+      },
+      onStop: async () => {
+        stopped = true;
+      },
+    });
+
+    expect(task).toMatchObject({
+      type: "agent",
+      status: "running",
+      sessionId: "parent",
+      metadata: { child_session_id: "child" },
+    });
+
+    await manager.writeToTask(task.id, "follow up");
+    expect(inputs).toEqual(["follow up"]);
+
+    const waiting = manager.awaitTask(task.id);
+    await manager.completeSessionTask(task.id, { status: "completed", output: "child result" });
+    await expect(waiting).resolves.toMatchObject({
+      status: "completed",
+      output: "child result",
+      exitCode: 0,
+    });
+
+    const stoppedTask = manager.registerSessionTask({
+      description: "stoppable child",
+      cwd: process.cwd(),
+      sessionId: "parent",
+      childSessionId: "child-2",
+      prompt: "work",
+      onInput: async () => {},
+      onStop: async () => {
+        stopped = true;
+      },
+    });
+    await manager.stopTask(stoppedTask.id);
+    expect(stopped).toBe(true);
+    expect(stoppedTask.status).toBe("stopped");
+  });
+
+  it("restores the previous terminal state when a follow-up cannot be admitted", async () => {
+    const manager = makeManager();
+    const task = manager.registerSessionTask({
+      description: "child agent",
+      cwd: process.cwd(),
+      sessionId: "parent",
+      childSessionId: "child",
+      prompt: "first",
+      onInput: async () => {
+        throw new Error("child archived");
+      },
+      onStop: async () => {},
+    });
+    await manager.completeSessionTask(task.id, { status: "completed", output: "first result" });
+
+    await expect(manager.writeToTask(task.id, "follow up")).rejects.toThrow("child archived");
+    expect(manager.getTask(task.id)).toMatchObject({
+      status: "completed",
+      exitCode: 0,
+    });
+    expect(manager.readTaskOutput(task.id)).toBe("first result");
+  });
+});
+
 describe("TaskManager real execution", () => {
   it("runs a shell task and captures output to the log file", async () => {
     const mgr = makeManager();

@@ -5,6 +5,7 @@ import type {
   SessionMessagePartRecord,
   SessionMessageRecord,
   SessionRecord,
+  SessionRunRecord,
 } from "@openharness/services";
 
 import type { SessionRuntimeInspect } from "./settings-api.js";
@@ -74,10 +75,34 @@ export interface SessionRuntime {
   getUsage?(): Promise<SessionUsageSnapshot> | SessionUsageSnapshot;
 }
 
+export interface ChildSessionHost {
+  createChildSession(input: {
+    id?: string;
+    parentId: string;
+    cwd: string;
+    model?: string;
+    title: string;
+    agent: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<SessionRecord>;
+  admitPrompt(sessionId: string, content: string): Promise<{ runId?: string }>;
+  awaitRun(
+    sessionId: string,
+    runId: string,
+  ): Promise<{
+    status: Extract<SessionRunRecord["status"], "completed" | "failed" | "interrupted">;
+    output: string;
+    error?: string;
+  }>;
+  interrupt(sessionId: string): Promise<void>;
+  archive(sessionId: string): Promise<void>;
+}
+
 export interface SessionRuntimeFactory {
   createRuntime(context: {
     session: SessionRecord;
     history: SessionMessageRecord[];
     parts: SessionMessagePartRecord[];
+    childSessionHost: ChildSessionHost;
   }): Promise<SessionRuntime>;
 }
