@@ -24,7 +24,7 @@ export const darkTheme: ThemeDefinition = {
     primary: "#3b82f6",
     secondary: "#94a3b8",
     accent: "#a78bfa",
-    background: "#0f172a",
+    background: "#000000",
     foreground: "#f1f5f9",
     muted: "#64748b",
     error: "#f87171",
