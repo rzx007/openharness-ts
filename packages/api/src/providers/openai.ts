@@ -9,6 +9,7 @@ import type {
 } from "@openharness/core";
 import type { ProviderConfig } from "./registry";
 import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
+import { abortableDelay } from "./retry";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY = 1000;
@@ -179,13 +180,16 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      params.abortSignal?.throwIfAborted();
       // Reset per-attempt accumulated state so a retry starts from a clean slate.
       collectedToolCalls.clear();
       finishReason = null;
       collectedReasoning = "";
       thinkBuf = "";
       try {
-        const stream = await this._client.chat.completions.create(createParams);
+        const stream = await this._client.chat.completions.create(createParams, {
+          signal: params.abortSignal,
+        });
 
         for await (const chunk of stream) {
           if (!chunk.choices || chunk.choices.length === 0) {
@@ -246,13 +250,14 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
       } catch (error) {
         lastError = this.classifyError(error);
         const status = (error as any)?.status ?? (error as any)?.statusCode;
+        params.abortSignal?.throwIfAborted();
         if (attempt < MAX_RETRIES && status && RETRYABLE_CODES.has(status)) {
           const retryAfter = this.getRetryAfter(error);
           const jitter = Math.random() * 1000;
           const delay = retryAfter > 0
             ? Math.min(retryAfter * 1000, MAX_DELAY)
             : Math.min(BASE_DELAY * 2 ** attempt + jitter, MAX_DELAY);
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await abortableDelay(delay, params.abortSignal);
           continue;
         }
         throw lastError;

@@ -8,6 +8,7 @@ import type {
 } from "@openharness/core";
 import type { ProviderConfig } from "./registry";
 import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
+import { abortableDelay } from "./retry";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY = 1000;
@@ -30,6 +31,7 @@ export class AnthropicClient implements StreamingMessageClient {
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      params.abortSignal?.throwIfAborted();
       try {
         const stream = this.client.messages.stream({
           model: params.model,
@@ -38,6 +40,8 @@ export class AnthropicClient implements StreamingMessageClient {
           tools: tools?.length ? tools : undefined,
           max_tokens: params.maxTokens ?? 8192,
           temperature: params.temperature,
+        }, {
+          signal: params.abortSignal,
         });
 
         const toolInputBuffers: Map<number, { id: string; name: string; partialJson: string }> =
@@ -104,13 +108,14 @@ export class AnthropicClient implements StreamingMessageClient {
       } catch (error) {
         lastError = this.classifyError(error);
         const status = (error as any)?.status ?? (error as any)?.statusCode;
+        params.abortSignal?.throwIfAborted();
         if (attempt < MAX_RETRIES && status && RETRYABLE_CODES.has(status)) {
           const retryAfter = this.getRetryAfter(error);
           const jitter = Math.random() * 1000;
           const delay = retryAfter > 0
             ? Math.min(retryAfter * 1000, MAX_DELAY)
             : Math.min(BASE_DELAY * 2 ** attempt + jitter, MAX_DELAY);
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await abortableDelay(delay, params.abortSignal);
           continue;
         }
         throw lastError;

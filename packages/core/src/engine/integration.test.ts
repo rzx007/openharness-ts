@@ -416,17 +416,16 @@ describe("Integration: Full Agent Loop", () => {
     expect(sawAbortSignal).toBe(true);
   });
 
-  it("times out hung tools through the unified execution wrapper", async () => {
+  it("keeps the timeout reason when timeout wins before external abort", async () => {
     const registry = new ToolRegistry();
-    let aborted = false;
+    const controller = new AbortController();
+    let toolSignal: AbortSignal | undefined;
     registry.register({
       name: "Hang",
       description: "never resolves",
       inputSchema: { type: "object", properties: {} },
       execute: async (_input, context) => {
-        context.abortSignal?.addEventListener("abort", () => {
-          aborted = true;
-        });
+        toolSignal = context.abortSignal;
         return await new Promise(() => {});
       },
     });
@@ -453,14 +452,104 @@ describe("Integration: Full Agent Loop", () => {
       { toolTimeoutMs: 20 },
     );
     const events: StreamEvent[] = [];
-    for await (const e of engine.submitMessage("hang")) {
+    for await (const e of engine.submitMessage("hang", { signal: controller.signal })) {
       events.push(e);
     }
 
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd.result.isError).toBe(true);
     expect(toolEnd.result.content[0].text).toContain("Tool execution timed out after 20 ms");
-    expect(aborted).toBe(true);
+    expect(toolSignal?.aborted).toBe(true);
+    const timeoutReason = toolSignal?.reason;
+    expect(String(timeoutReason)).toContain("Tool execution timed out after 20 ms");
+
+    controller.abort(new Error("external abort arrived second"));
+    expect(toolSignal?.reason).toBe(timeoutReason);
+  });
+
+  it("interrupts a hung provider with the submit signal", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("provider interrupted");
+    let receivedSignal: AbortSignal | undefined;
+    const client = {
+      streamMessage: async function* (params: { abortSignal?: AbortSignal }) {
+        receivedSignal = params.abortSignal;
+        params.abortSignal?.throwIfAborted();
+        await new Promise<never>((_, reject) => {
+          params.abortSignal?.addEventListener(
+            "abort",
+            () => reject(params.abortSignal?.reason),
+            { once: true },
+          );
+        });
+      },
+    };
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+
+    const run = (async () => {
+      for await (const _ of engine.submitMessage("hang", { signal: controller.signal })) {}
+    })();
+    controller.abort(interrupted);
+
+    await expect(Promise.race([
+      run,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("provider did not abort")), 50)),
+    ])).rejects.toBe(interrupted);
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  it("keeps the external reason when external abort wins before timeout", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("tool interrupted");
+    let toolSignal: AbortSignal | undefined;
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "Hang",
+      description: "never resolves",
+      inputSchema: { type: "object", properties: {} },
+      execute: async (_input, context) => {
+        toolSignal = context.abortSignal;
+        return await new Promise(() => {});
+      },
+    });
+    let callCount = 0;
+    const client = {
+      streamMessage: async function* (params: { abortSignal?: AbortSignal }) {
+        callCount++;
+        if (callCount === 1) {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: { type: "tool_use" as const, id: "tu1", name: "Hang", input: {} },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" };
+          return;
+        }
+        params.abortSignal?.throwIfAborted();
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    const engine = new QueryEngine(
+      client,
+      registry,
+      allowAll(),
+      noopHooks(),
+      { toolTimeoutMs: 10_000 },
+    );
+
+    const run = (async () => {
+      for await (const _ of engine.submitMessage("hang", { signal: controller.signal })) {}
+    })();
+    await vi.waitFor(() => expect(toolSignal).toBeDefined());
+    controller.abort(interrupted);
+
+    await expect(Promise.race([
+      run,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("tool did not abort")), 50)),
+    ])).rejects.toBe(interrupted);
+    expect(toolSignal?.aborted).toBe(true);
+    expect(toolSignal?.reason).toBe(interrupted);
+    await Promise.resolve();
+    expect(toolSignal?.reason).toBe(interrupted);
   });
 
   it("three-turn chained tool calls", async () => {
@@ -750,6 +839,63 @@ describe("Integration: AutoCompact in Agent Loop", () => {
       (m) => typeof m.content === "string" && m.content.includes("[Compact boundary marker]"),
     );
     expect(hasBoundary).toBe(true);
+  });
+
+  it("interrupts an in-flight auto-compaction summary with the run signal", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("compaction interrupted");
+    let compactSignal: AbortSignal | undefined;
+    let normalCalls = 0;
+    let markCompactStarted!: () => void;
+    const compactStarted = new Promise<void>((resolve) => {
+      markCompactStarted = resolve;
+    });
+    const client = {
+      streamMessage: async function* (params: any) {
+        if (params.system === "You are a conversation summarizer.") {
+          compactSignal = params.abortSignal;
+          markCompactStarted();
+          params.abortSignal?.throwIfAborted();
+          await new Promise<never>((_, reject) => {
+            params.abortSignal?.addEventListener(
+              "abort",
+              () => reject(params.abortSignal?.reason),
+              { once: true },
+            );
+          });
+          return;
+        }
+        normalCalls++;
+        params.abortSignal?.throwIfAborted();
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    const engine = new QueryEngine(
+      client,
+      new ToolRegistry(),
+      allowAll(),
+      noopHooks(),
+      { maxTokens: 100, compactKeepRecent: 2 },
+    );
+    engine.loadMessages([
+      { type: "user", content: "old question ".repeat(100) },
+      { type: "assistant", content: "old answer ".repeat(100) },
+      { type: "user", content: "newer question ".repeat(100) },
+      { type: "assistant", content: "newer answer ".repeat(100) },
+    ]);
+
+    const run = (async () => {
+      for await (const _ of engine.submitMessage("continue", { signal: controller.signal })) {}
+    })();
+    await compactStarted;
+    controller.abort(interrupted);
+
+    await expect(Promise.race([
+      run,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("compaction did not abort")), 50)),
+    ])).rejects.toBe(interrupted);
+    expect(compactSignal).toBe(controller.signal);
+    expect(normalCalls).toBe(0);
   });
 
   it("manual compact() call triggers micro then auto", async () => {

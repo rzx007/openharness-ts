@@ -112,13 +112,17 @@ function toCompactClient(
   model: string,
 ): CompactClient {
   return {
-    submitMessage(content: string): AsyncIterable<StreamEvent> {
+    submitMessage(
+      content: string,
+      options?: { signal?: AbortSignal },
+    ): AsyncIterable<StreamEvent> {
       return apiClient.streamMessage({
         model,
         messages: [{ type: "user", content }],
         system: COMPACT_SUMMARIZER_SYSTEM_PROMPT,
         maxTokens: MAX_COMPACT_OUTPUT_TOKENS,
         tools: undefined,
+        abortSignal: options?.signal,
       });
     },
   };
@@ -129,6 +133,10 @@ export class MaxTurnsExceeded extends Error {
     super(`Exceeded maximum agentic turns (${maxTurns})`);
     this.name = "MaxTurnsExceeded";
   }
+}
+
+export interface SubmitMessageOptions {
+  signal?: AbortSignal;
 }
 
 export class QueryEngine implements IQueryEngine {
@@ -228,7 +236,10 @@ export class QueryEngine implements IQueryEngine {
    * @param content - 用户发送的消息内容
    * @returns 一个异步迭代器，yield 出流式事件（StreamEvent），包括文本增量、工具使用开始/结束、用量信息等
    */
-  async *submitMessage(content: string | ContentBlock[]): AsyncIterable<StreamEvent> {
+  async *submitMessage(
+    content: string | ContentBlock[],
+    options: SubmitMessageOptions = {},
+  ): AsyncIterable<StreamEvent> {
     this.messages = sanitizeMessageHistory(this.messages);
 
     this.messages.push({ type: "user", content });
@@ -255,8 +266,13 @@ export class QueryEngine implements IQueryEngine {
     while (turnCount < this.maxTurns) {
       // 自动压缩消息历史以控制上下文长度
       try {
-        this.messages = await this.compactService.autoCompact(this.messages);
-      } catch {
+        this.messages = await this.compactService.autoCompact(
+          this.messages,
+          "auto",
+          options.signal,
+        );
+      } catch (error) {
+        if (options.signal?.aborted) throw options.signal.reason;
         // compact failure is non-fatal; continue with current messages
       }
       this.messages = sanitizeMessageHistory(this.messages);
@@ -270,6 +286,7 @@ export class QueryEngine implements IQueryEngine {
         messages: this.messages,
         system: turnSystemPrompt,
         tools: tools.length > 0 ? tools : undefined,
+        abortSignal: options.signal,
       });
 
       let assistantText = "";
@@ -311,7 +328,7 @@ export class QueryEngine implements IQueryEngine {
       if (toolUses.length === 0) return;
 
       // 执行所有请求的工具调用，并将结果作为工具结果消息加入历史记录
-      const results = await this.executeTools(toolUses);
+      const results = await this.executeTools(toolUses, options.signal);
       for (const result of results) {
         this.messages.push({
           type: "tool_result",
@@ -387,7 +404,10 @@ export class QueryEngine implements IQueryEngine {
    * @returns 一个 Promise，解析为工具执行结果数组。每个结果对应输入数组中的一个工具调用，
    *          包含工具ID、名称、执行内容（或错误信息）以及是否出错的标志。
    */
-  private async executeTools(toolUses: ToolUseBlock[]): Promise<ToolExecutionResult[]> {
+  private async executeTools(
+    toolUses: ToolUseBlock[],
+    signal?: AbortSignal,
+  ): Promise<ToolExecutionResult[]> {
     const results: ToolExecutionResult[] = new Array(toolUses.length);
     const readyForPermission: {
       idx: number;
@@ -509,9 +529,18 @@ export class QueryEngine implements IQueryEngine {
             mcpManager: this.mcpManager,
             runtimeEventSink: this.runtimeEventSink,
           };
-          const result = await this.executeToolWithTimeout(tool, toolUse.input, context, timeoutMs);
+          const result = await this.executeToolWithTimeout(
+            tool,
+            toolUse.input,
+            context,
+            timeoutMs,
+            signal,
+          );
           return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };
         } catch (error) {
+          if (signal?.aborted) {
+            throw signal.reason;
+          }
           return {
             idx,
             result: {
@@ -555,10 +584,17 @@ export class QueryEngine implements IQueryEngine {
     input: Record<string, unknown>,
     context: ToolContext,
     timeoutMs: number,
+    externalSignal?: AbortSignal,
   ): Promise<Awaited<ReturnType<NonNullable<ReturnType<IToolRegistry["get"]>>["execute"]>>> {
     const controller = new AbortController();
     const timeoutError = new ToolTimeoutError(timeoutMs);
     let abortListener: (() => void) | undefined;
+    const abortFromExternal = () => controller.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) {
+      abortFromExternal();
+    } else {
+      externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+    }
     const timeout = setTimeout(() => {
       controller.abort(timeoutError);
     }, timeoutMs);
@@ -566,7 +602,11 @@ export class QueryEngine implements IQueryEngine {
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       abortListener = () => reject(controller.signal.reason ?? timeoutError);
-      controller.signal.addEventListener("abort", abortListener, { once: true });
+      if (controller.signal.aborted) {
+        abortListener();
+      } else {
+        controller.signal.addEventListener("abort", abortListener, { once: true });
+      }
     });
 
     try {
@@ -579,6 +619,7 @@ export class QueryEngine implements IQueryEngine {
       if (abortListener) {
         controller.signal.removeEventListener("abort", abortListener);
       }
+      externalSignal?.removeEventListener("abort", abortFromExternal);
     }
   }
 }

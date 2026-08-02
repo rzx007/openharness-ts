@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { Message } from "@openharness/core";
 import {
   OpenAICompatibleClient,
@@ -196,6 +196,72 @@ describe("convertMessages image passing", () => {
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("OpenAICompatibleClient cancellation", () => {
+  it("passes abortSignal to the OpenAI request", async () => {
+    const controller = new AbortController();
+    const create = vi.fn(async () => ({
+      async *[Symbol.asyncIterator]() {},
+    }));
+    const client = new OpenAICompatibleClient({ apiKey: "test", baseURL: undefined } as any);
+    client.client = {
+      chat: { completions: { create } },
+    } as any;
+
+    for await (const _ of client.streamMessage({
+      model: "gpt-4o",
+      messages: [{ type: "user", content: "hello" }],
+      abortSignal: controller.signal,
+    })) {}
+
+    expect(create).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
+  it("aborts retry backoff without starting another request", async () => {
+    vi.useFakeTimers();
+    let run: Promise<void> | undefined;
+    try {
+      const retryable = Object.assign(new Error("rate limited"), {
+        status: 429,
+        headers: { get: () => "30" },
+      });
+      const create = vi.fn().mockRejectedValue(retryable);
+      const client = new OpenAICompatibleClient({ apiKey: "test", baseURL: undefined } as any);
+      client.client = {
+        chat: { completions: { create } },
+      } as any;
+      const controller = new AbortController();
+      const interrupted = new Error("retry interrupted");
+      let rejection: unknown;
+
+      run = (async () => {
+        for await (const _ of client.streamMessage({
+          model: "gpt-4o",
+          messages: [{ type: "user", content: "hello" }],
+          abortSignal: controller.signal,
+        })) {}
+      })();
+      void run.catch((error) => {
+        rejection = error;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(create).toHaveBeenCalledTimes(1);
+
+      controller.abort(interrupted);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(rejection).toBe(interrupted);
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally {
+      await vi.runAllTimersAsync();
+      await run?.catch(() => {});
+      vi.useRealTimers();
     }
   });
 });

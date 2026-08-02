@@ -243,7 +243,7 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
   };
 }
 
-class CliSessionRuntime implements SessionRuntime {
+export class CliSessionRuntime implements SessionRuntime {
   constructor(
     private readonly bundle: Awaited<ReturnType<typeof bootstrap>>,
     private readonly mcpManager: McpClientManager,
@@ -260,7 +260,10 @@ class CliSessionRuntime implements SessionRuntime {
     if (input.session.model) this.bundle.queryEngine.setModel(input.session.model);
     this.bundle.queryEngine.setRuntimeEventSink((event) => hooks.onEvent(event));
     try {
-      for await (const event of this.bundle.queryEngine.submitMessage(input.input.content)) {
+      for await (const event of this.bundle.queryEngine.submitMessage(
+        input.input.content,
+        { signal: input.signal },
+      )) {
         if (input.signal.aborted) throw new Error("Run interrupted");
         await hooks.onStreamEvent(event);
       }
