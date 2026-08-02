@@ -36,7 +36,7 @@ ohs | ohs --tui [flags] ["initial prompt"]
 
 ## CLI 启动器
 
-`mainAction()` 在无 prompt 时默认进入 `runTuiMode()`；`--tui` 为显式别名。带 prompt 且未加 `--tui` 时走 print。`--continue` / `--resume` 不能用于 TUI 入口（daemon 会话用 TUI 内 `/sessions` / `/resume`）。
+`mainAction()` 在无 prompt 时默认进入 `runTuiMode()`；`--tui` 为显式别名。带 prompt 且未加 `--tui` 时走 print（同样 ensure daemon + Session API，见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)「Print Session API」）。`--continue` / `--resume` 在 TUI 与 print 入口均暂不可用（daemon 会话用 TUI 内 `/sessions` / `/resume`）。
 
 `runTuiMode()` 负责：
 

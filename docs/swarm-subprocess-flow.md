@@ -1,12 +1,36 @@
 # Swarm 子进程派发运行流程（D.1 + D.2）
 
-`agent` 工具如何把一个子代理（teammate）作为独立 `ohs --task-worker` 子进程拉起、
-后台运行，leader 用 `TaskWait` 阻塞取回结果，并在 TUI 的 SwarmPanel 显示状态。
-这是 swarm 当前的最小可用多 Agent 闭环。
+> 状态：deprecated compatibility fallback 的实现说明。本文保留 D.1/D.2 subprocess 协议与历史细节，不代表推荐的产品主路径。
+>
+> 当前主路径：daemon/TUI/print 内的 `Agent` 在 daemon 中创建带 `parentId` 的 child session，由 `SessionRuntime` 执行，并使用统一的 `SessionStore`、session event 与 `PermissionBroker`。`ohs --task-worker`、subprocess backend、项目级 worker snapshot 和文件权限流只为旧调用方兜底保留。
+
+兼容路径中的 `agent` 工具会把一个子代理（teammate）作为独立 `ohs --task-worker`
+子进程拉起、后台运行，leader 用 `TaskWait` 阻塞取回结果。这是旧 swarm
+最小可用多 Agent 闭环，目前仅作为 compatibility fallback。
 
 - **D.1**：subprocess 派发后端（spawn → 后台子进程 → 轮询取结果）。
 - **D.2**：用 `TaskWait` 阻塞等待替代 Sleep 盲轮询；emit `swarm_status` 点亮 SwarmPanel。
 - **D.4**：teammate 带 `--swarm-worker`，只读工具自动放行（Explore/Plan 默认 permission 即可）。
+
+## 主路径目标与兼容边界
+
+```text
+daemon session 中的 Agent（当前主路径）
+  -> store.createSession({ parentId, cwd, ... })
+  -> admitPrompt(childSessionId)
+  -> 同一 daemon 的 SessionRuntime 执行 child
+  -> 消息/run/事件写入 SessionStore
+  -> 权限经 PermissionBroker 路由给已 attach 客户端
+
+无法进入上述路径的旧调用方（兼容 fallback）
+  -> SubprocessBackend
+  -> ohs --task-worker
+  -> 项目级 snapshot + 文件 mailbox / permission-sync
+```
+
+- daemon/TUI/用户 print 发起的 `Agent` 以 child session 为目标主路径。
+- `--task-worker` 不再承载新产品能力；现有 `SendMessage`、worktree、文件权限流只维持兼容。
+- child session 迁移完成前，下面章节描述的是仍可运行的兼容实现，不是已完成的新主路径。
 
 ## 涉及的模块
 
@@ -21,9 +45,9 @@
 | TUI 任务状态 | 尚未接入 daemon session API | 当前没有跨端的 teammate 状态视图 |
 | SwarmPanel | `apps/frontend/src/components/SwarmPanel.tsx` | 组件保留；等待 server-owned task/session event 后接入 |
 
-## 整体模型（两进程 + 一个单例）
+## 兼容模型（两进程 + 一个单例）
 
-Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **TaskManager 单例** 衔接：
+兼容 fallback 是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **TaskManager 单例** 衔接：
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -70,9 +94,9 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 
 ---
 
-## Swarm teammate 运行流程（主路径）
+## Swarm teammate 运行流程（兼容路径）
 
-这是 Leader LLM **必须走的两步工具调用**（D.2 之后不再 Sleep 盲轮询）：
+这是 subprocess fallback 中 Leader LLM 的两步工具调用（D.2 之后不再 Sleep 盲轮询）：
 
 ```
 用户："用 Explore 子 agent 看 packages/core"
@@ -89,7 +113,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 │ Step 2 · Agent 工具（packages/tools/src/agent）           │
 │                                                          │
 │  getAgentDefinition(subagentType)  → 人格 systemPrompt   │
-│  当前主路径：getBackendRegistry().getExecutor("subprocess")│
+│  兼容路径：getBackendRegistry().getExecutor("subprocess") │
 │  SubprocessBackend.spawn(config)                         │
 │    ├─ buildTeammateCommand → [node, ohs, --task-worker]  │
 │    └─ TaskManager.createAgentTask({argv,prompt,type:…}) │
@@ -127,7 +151,7 @@ Swarm 当前是 **Leader 进程** 派 **Teammate 子进程**，两者通过 **Ta
 **要点：**
 
 - Subagent **不是**框架自动识别用户话术；是 Leader LLM **主动调 `Agent` 工具**。
-- Teammate 走 `--task-worker`：读一行 stdin 跑一轮即退；**SendMessage 多轮可用**——写 stdin 时 TaskManager 懒复活重启进程（重启不保留上下文，与 Python 同）。
+- 兼容 Teammate 走 `--task-worker`：读一行 stdin 跑一轮即退；**SendMessage 多轮可用**——写 stdin 时 TaskManager 懒复活重启进程。
 - task-worker 的退出以 child process exit 为准；只写完 stdout 不等于 TaskManager terminal。结束时必须释放 stdin pipe 并关闭 runtime cleanup，否则 Windows 下可能出现日志已完成但 task 仍为 `running`。
 - Teammate argv 自动带 **`--swarm-worker`**（D.4）：只读工具集自动放行，**Explore/Plan 在父进程 `default` 下即可工作**；写/执行类工具经 D.5 权限文件流转 leader 裁决（leader 没放行则拒）。
 
@@ -177,9 +201,9 @@ TUI 已改为 daemon/client attach，不存在 BackendHost、OHJSON 或 `swarm_s
 - **swarm_status（D.2）**：teammate（`type:"agent"`）任务 created/completed 时 emit，
   点亮前端 SwarmPanel（状态枚举 running/idle/done/error）。
 
-## 使用前提
+## 兼容路径使用前提
 
-teammate 的 `--permission-mode` **缺省一律 `default`（不继承父进程）**，且 argv 一律带
+仅在调用方仍需 subprocess fallback 时，teammate 的 `--permission-mode` **缺省一律 `default`（不继承父进程）**，且 argv 一律带
 **`--swarm-worker`**（由 `buildTeammateCommand` 注入，用户无需手动传）。Agent 工具的
 `permissionMode` 入参可按 teammate 显式覆盖。
 

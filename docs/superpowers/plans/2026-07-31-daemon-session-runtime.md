@@ -229,7 +229,9 @@
 - [x] 第六批：`/tasks run`（POST `/tasks`）、`/init`（POST `/project/init`）、`/plugin`（GET `/plugins` + enable/disable）、`/hooks`（GET `/hooks`）、`/subagents`（GET `/agent-personas`）、`/diff` `/branch`（GET `/git/diff` `/git/branch`）。
 - [x] 第七批：`/rewind`（POST `/sessions/:id/rewind` + store.replaceTranscript + closeRuntime）、`/commit`（GET `/git/status` + POST `/git/commit`）、`/reload-plugins`（POST `/plugins/reload` + closeRuntimesForCwd）。
 - [x] 债务收口：拆空 legacy REPL registry（`slash-helpers.ts` + 兼容 re-export）；slash 呈现层进 `@openharness/client` `dispatchSessionCommand`（TUI 薄适配）；文档化 print/worker 刻意进程内、`/commit` 与 plugin reload 风险；流程见 `docs/slash-commands-flow.md`。
-- [ ] 后续：Task 11 Web/Desktop（认证/CORS/发现/SDK 示例）。print/worker **不**迁入 daemon（swarm/one-shot 边界）。
+- [x] 用户 print/headless 迁入 Session API（ensure daemon + client admitPrompt）；内部 `--task-worker` / swarm 暂缓（第二阶段 child session）。
+- [ ] 后续：Task 11 Web/Desktop（认证/CORS/发现/SDK 示例）。
+- [x] task/subagent → daemon 内 child session（取代 daemon 主路径的 `--task-worker` 子进程旁路；旧 CLI 仅兼容保留）。
 - [x] 退场进程内 REPL 产品入口：默认 `ohs` → TUI/daemon；删除 `runRepl`；`--continue/--resume` 不再用于交互入口。
 - [x] 增加回归测试覆盖 `/new`、`/sessions`、`/model`、`/config`、`/provider`、`/mcp`、`/tasks`、`/memory`、`/auth`、`/compact`、`/dream`、`/profile`、skill/template 命令，以及未知 slash 不误触发。
 

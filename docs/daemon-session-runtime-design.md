@@ -2,7 +2,7 @@
 
 > 状态：主线架构。Task 0-9 已落地 daemon/client、TUI attach 与 durable message-part 基础版。
 > 日期：2026-07-31。
-> 决策：默认 `ohs`（与显式 `ohs --tui`）走 daemon attach：`CLI -> frontend -> @openharness/client -> ohs serve`。进程内 REPL 产品入口已移除；print/worker 仍为无 UI 路径。TUI 的旧 frontend-owned backend/OHJSON 兼容路径已退场。
+> 决策：默认 `ohs`（与显式 `ohs --tui`）走 daemon attach：`CLI -> frontend -> @openharness/client -> ohs serve`。用户 headless print（`ohs "prompt"` / `-p`）同样走 Session API 客户端。daemon 内 `Agent` 通过 child session 执行；`--task-worker` / swarm subprocess 仅保留为 deprecated compatibility fallback，不再作为 daemon/TUI/print 主路径。进程内 REPL 已移除，TUI 的旧 BackendHost/OHJSON 路径已退场。
 
 ## 1. 目标
 
@@ -306,10 +306,13 @@ Slash command 边界：
 - 未知 `/...` 必须失败关闭，不得当普通 prompt 发给模型。
 - 跨端呈现/派发：`@openharness/client` `dispatchSessionCommand`（流程见 [slash-commands-flow.md](./slash-commands-flow.md)）。
 
-入口边界（刻意不进 daemon）：
+入口边界：
 
-- `-p/--print` 与 `--task-worker` / `--swarm-worker` 仍是**进程内一次性 runtime**（swarm teammate、无头批处理）。它们不 attach daemon session store；权限走文件流或 ask-即拒，不经 PermissionBroker。
+- **用户 headless print**（`ohs "prompt"` / `ohs -p`）：ensure daemon → `@openharness/client` → `createSession` + `admitPrompt` + SSE；无 TTY 时 permission 自动 deny（或 `--dangerously-skip-permissions` 时 approve）。详见下文「Print Session API」。
+- **daemon/TUI/print 内的 `Agent`**：本轮迁移目标为 daemon 内 child session + PermissionBroker；迁移完成前不得把目标状态描述为已全部落地。
+- **内部 `--task-worker` / `--swarm-worker`**：只保留 deprecated compatibility fallback；该路径仍是进程内一次性 runtime，不 attach daemon session store，权限走文件流，不再继续扩展为产品主路径。
 - 交互产品入口只有 TUI/daemon。旧 REPL registry 已拆除。
+- print 的旧项目级 `--continue` / `--resume` **尚未**迁到 daemon store；传这些 flag 会明确报错。
 
 资源 API 风险说明：
 
@@ -557,6 +560,45 @@ ohs --tui        # 显式同上（进程内 REPL 入口已移除）
 
 - 增加 Web/Desktop 客户端。
 - 强化远程认证与传输。
+
+## 14.1 Print Session API（用户 headless）
+
+```text
+ohs "prompt" | ohs -p "prompt"
+  -> ensureLocalDaemon()   # 与 TUI 共用 registry / spawn serve
+  -> OpenHarnessClient.createSession({ cwd, model })
+  -> syncEvents(sessionId) 先订阅
+  -> admitPrompt(content)
+  -> 渲染 session.message.part.* 到 stdout
+  -> pending permission: auto-deny（或 --dangerously-skip-permissions → approve）
+  -> 无 active/pending run 后退出
+```
+
+Follow-up：`CliSessionRuntime` end-of-turn memory / personalization 应在 daemon 侧统一执行，print 客户端不重复写项目级 snapshot。
+
+## 14.2 第二阶段：task / subagent → child session（已落地）
+
+对齐 opencode TaskTool：daemon/TUI/print 主路径中的 `Agent` 在 daemon 内创建并运行 child session，不再派生 `--task-worker` 子进程。
+
+```text
+Agent tool (in daemon CliSessionRuntime)
+  -> store.createSession({ parentId })
+  -> 同进程 admitPrompt / SessionRuntime on child
+  -> 权限从 parent 派生；事件进同一 SessionStore
+```
+
+| 现状 | 目标 |
+|------|------|
+| `SubprocessBackend` + `ohs --task-worker` | daemon 内 child session |
+| 文件 mailbox / permission-sync | session 事件 + PermissionBroker |
+| 项目级 worker snapshot | daemon `SessionStore` |
+
+迁移边界：
+
+- **新主路径**：从 daemon session 发起的 `Agent` 调用创建带 `parentId` 的 child session，由同一 daemon 的 `SessionRuntime` 执行；TUI、用户 print 和其它 Session API 客户端共享这条路径。
+- **状态与权限**：child 的消息、run、事件和权限请求进入同一 `SessionStore` / `PermissionBroker`，客户端可按 session 关系观察与裁决。
+- **兼容路径**：`--task-worker`、`SubprocessBackend`、文件 mailbox / permission-sync 和项目级 worker snapshot 暂不删除，但只作为 deprecated compatibility fallback，服务旧调用方或迁移期间无法进入 daemon child session 的入口。
+- **兼容约束**：不再为 `--task-worker` 增加新的产品能力；迁移完成后再单独评估删除窗口。现有兼容代码仍可运行，不代表它是 daemon/TUI/print 的推荐路径。
 
 ## 15. 风险
 
