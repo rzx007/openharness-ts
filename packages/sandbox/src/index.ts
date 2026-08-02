@@ -64,6 +64,7 @@ export {
   stopActiveSandboxSession,
   stopActiveSandboxSessionSync,
 } from "./session.js";
+export type { SandboxSessionLookup, SandboxSessionScope } from "./session.js";
 export {
   createShellProcess,
   resolveContainerShellArgv,
@@ -95,14 +96,15 @@ export class SandboxAdapter {
   async execute(command: string, _cwd?: string): Promise<SandboxResult> {
     const cwd = _cwd ?? this.config.workdir ?? process.cwd();
     const settings = this.toSettings();
+    const sessionId = `adapter-${process.pid}-${Date.now().toString(36)}`;
     const runtime = await startSandboxRuntimeInternal({
       settings,
       cwd,
-      sessionId: `adapter-${process.pid}-${Date.now().toString(36)}`,
+      sessionId,
     });
 
     try {
-      return await runAdapterCommand(command, cwd, settings);
+      return await runAdapterCommand(command, cwd, settings, sessionId);
     } finally {
       await runtime.stop();
     }
@@ -132,10 +134,16 @@ export class SandboxAdapter {
   }
 }
 
-function runAdapterCommand(command: string, cwd: string, settings: Settings): Promise<SandboxResult> {
+function runAdapterCommand(
+  command: string,
+  cwd: string,
+  settings: Settings,
+  sessionId: string,
+): Promise<SandboxResult> {
   return new Promise((resolve) => {
     createShellProcessInternal(command, {
       cwd,
+      sessionId,
       settings,
       stdio: ["ignore", "pipe", "pipe"],
     }).then((child) => {

@@ -52,6 +52,7 @@ maybeDescribe("docker sandbox e2e", () => {
   });
 
   it("starts a docker runtime and executes shell commands inside the mounted workspace", async () => {
+    const sessionId = `e2e-docker-${Date.now()}`;
     runtime = await startSandboxRuntime({
       settings: {
         ...baseSettings,
@@ -64,7 +65,7 @@ maybeDescribe("docker sandbox e2e", () => {
         },
       },
       cwd: process.cwd(),
-      sessionId: `e2e-docker-${Date.now()}`,
+      sessionId,
     });
 
     expect(runtime.status).toMatchObject({
@@ -77,6 +78,7 @@ maybeDescribe("docker sandbox e2e", () => {
 
     const child = await createShellProcess("pwd && test -f package.json && node -e \"console.log('node-ok')\"", {
       cwd: process.cwd(),
+      sessionId,
       settings: {
         ...baseSettings,
         sandbox: {
@@ -202,6 +204,7 @@ maybeDescribe("docker sandbox e2e", () => {
   }, 60_000);
 
   it("blocks outbound network when Docker network mode is none", async () => {
+    const sessionId = `e2e-docker-none-${Date.now()}`;
     runtime = await startSandboxRuntime({
       settings: {
         ...baseSettings,
@@ -214,13 +217,14 @@ maybeDescribe("docker sandbox e2e", () => {
         },
       },
       cwd: process.cwd(),
-      sessionId: `e2e-docker-none-${Date.now()}`,
+      sessionId,
     });
 
     const child = await createShellProcess(
       "node -e \"fetch('https://example.com').then(()=>process.exit(0)).catch(()=>process.exit(7))\"",
       {
         cwd: process.cwd(),
+        sessionId,
         settings: {
           ...baseSettings,
           sandbox: {
@@ -259,6 +263,7 @@ maybeDescribe("docker sandbox e2e", () => {
   it.skipIf(process.env.OPENHARNESS_E2E_DOCKER_NETWORK !== "1")(
     "allows outbound network when Docker bridge networking is enabled",
     async () => {
+      const sessionId = `e2e-docker-bridge-${Date.now()}`;
       runtime = await startSandboxRuntime({
         settings: {
           ...baseSettings,
@@ -271,13 +276,14 @@ maybeDescribe("docker sandbox e2e", () => {
           },
         },
         cwd: process.cwd(),
-        sessionId: `e2e-docker-bridge-${Date.now()}`,
+        sessionId,
       });
 
       const child = await createShellProcess(
         "node -e \"fetch('https://example.com').then(r=>{console.log(r.status); process.exit(r.status === 200 ? 0 : 1)}).catch(e=>{console.error(e); process.exit(1)})\"",
         {
           cwd: process.cwd(),
+          sessionId,
           settings: {
             ...baseSettings,
             sandbox: {

@@ -44,7 +44,7 @@ describe("SandboxAdapter", () => {
     const result = await adapter.execute("echo adapter-ok");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("adapter-ok");
-  });
+  }, 20_000);
 });
 
 describe("normalizeSandboxConfig", () => {
@@ -298,23 +298,20 @@ describe("sandbox active session registry", () => {
     setActiveSandboxSession(null);
   });
 
+  function makeSession(cwd: string) {
+    return {
+      backend: "docker" as const,
+      cwd: resolve(cwd),
+      active: true,
+      start: async () => {},
+      stop: async () => {},
+      stopSync: () => {},
+    };
+  }
+
   it("tracks active sessions by cwd", () => {
-    const first = {
-      backend: "docker" as const,
-      cwd: resolve("D:/repo-a"),
-      active: true,
-      start: async () => {},
-      stop: async () => {},
-      stopSync: () => {},
-    };
-    const second = {
-      backend: "docker" as const,
-      cwd: resolve("D:/repo-b"),
-      active: true,
-      start: async () => {},
-      stop: async () => {},
-      stopSync: () => {},
-    };
+    const first = makeSession("D:/repo-a");
+    const second = makeSession("D:/repo-b");
 
     setActiveSandboxSession(first);
     setActiveSandboxSession(second);
@@ -324,6 +321,29 @@ describe("sandbox active session registry", () => {
     expect(isSandboxSessionActive(first.cwd)).toBe(true);
     expect(isSandboxSessionActive(second.cwd)).toBe(true);
     expect(getActiveSandboxSession()).toBe(second);
+  });
+
+  it("isolates active sandboxes by sessionId within the same cwd", () => {
+    const cwd = resolve("D:/shared-repo");
+    const sessionA = makeSession(cwd);
+    const sessionB = makeSession(cwd);
+    const cwdOnly = makeSession(cwd);
+
+    setActiveSandboxSession(sessionA, { cwd, sessionId: "s-a" });
+    setActiveSandboxSession(sessionB, { cwd, sessionId: "s-b" });
+    setActiveSandboxSession(cwdOnly, cwd);
+
+    expect(getActiveSandboxSession({ cwd, sessionId: "s-a" })).toBe(sessionA);
+    expect(getActiveSandboxSession({ cwd, sessionId: "s-b" })).toBe(sessionB);
+    expect(getActiveSandboxSession(cwd)).toBe(cwdOnly);
+    expect(getActiveSandboxSession({ cwd, sessionId: "s-a" })).not.toBe(
+      getActiveSandboxSession({ cwd, sessionId: "s-b" }),
+    );
+
+    setActiveSandboxSession(null, { cwd, sessionId: "s-a" });
+    expect(getActiveSandboxSession({ cwd, sessionId: "s-a" })).toBeNull();
+    expect(getActiveSandboxSession({ cwd, sessionId: "s-b" })).toBe(sessionB);
+    expect(getActiveSandboxSession(cwd)).toBe(cwdOnly);
   });
 });
 

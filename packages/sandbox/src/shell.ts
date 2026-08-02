@@ -9,6 +9,7 @@ import { wrapCommandForSrt } from "./srt-adapter.js";
 
 export interface CreateShellProcessOptions {
   cwd: string;
+  sessionId?: string;
   settings?: Settings;
   env?: Record<string, string>;
   stdio?: StdioOptions;
@@ -37,7 +38,10 @@ export async function createShellProcess(
   if (sandbox.backend === "docker") {
     // Container image is Linux; never reuse host (e.g. Windows bash.exe) argv.
     const argv = resolveContainerShellArgv(command);
-    const session = getActiveSandboxSession(options.cwd);
+    const session = getActiveSandboxSession({
+      cwd: options.cwd,
+      sessionId: options.sessionId,
+    });
     if (session?.backend === "docker" && session.active && session.execCommand) {
       return session.execCommand(argv, {
         cwd: options.cwd,

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import type { ToolDefinition } from "@openharness/core";
+import type { Settings, ToolDefinition } from "@openharness/core";
 import { createShellProcess, SandboxUnavailableError } from "@openharness/sandbox";
 
 // Matches the Python implementation's output cap.
@@ -33,7 +33,10 @@ export const bashTool: ToolDefinition = {
     const timeout = (input.timeout as number) ?? 120_000;
     const cwd = (input.workdir as string) ?? context.cwd;
 
-    const result = await runShell(command, cwd, timeout);
+    const result = await runShell(command, cwd, timeout, {
+      sessionId: context.sessionId,
+      settings: context.settings,
+    });
 
     if (result.timedOut) {
       return {
@@ -63,11 +66,14 @@ interface ShellResult {
 function runShell(
   command: string,
   cwd: string,
-  timeout: number
+  timeout: number,
+  options: { sessionId?: string; settings?: Settings } = {},
 ): Promise<ShellResult> {
   return new Promise<ShellResult>((resolve) => {
     createShellProcess(command, {
       cwd,
+      sessionId: options.sessionId,
+      settings: options.settings,
       stdio: ["ignore", "pipe", "pipe"],
     }).then((child) => {
 

@@ -338,7 +338,9 @@ async function attachSandboxRuntime(
     sandboxRuntime = await startSandboxRuntime({
       settings: bundle.settings,
       cwd,
-      sessionId: createSandboxSessionId(cwd, sessionId),
+      // Pass daemon sessionId as-is so Bash/ToolContext lookups hit the same active map key.
+      // Omit for cwd-only callers (channels / task-worker / legacy CLI).
+      sessionId,
       reporter,
     });
   } catch (error) {
@@ -359,14 +361,6 @@ async function attachSandboxRuntime(
     () => sandboxRuntime.stopSync(),
   );
   registerExitCleanup(bundle);
-}
-
-function createSandboxSessionId(cwd: string, sessionId?: string): string {
-  const repoId = createHash("sha1").update(cwd).digest("hex").slice(0, 12);
-  const safeSessionId = sessionId?.replace(/[^A-Za-z0-9._-]/g, "_");
-  return safeSessionId
-    ? `${process.pid}-${repoId}-${safeSessionId}`
-    : `${process.pid}-${repoId}-${Date.now().toString(36)}`;
 }
 
 export function formatSandboxUnavailableError(reason: string, settings: Settings): string {

@@ -4,20 +4,44 @@ import type { SandboxSession } from "./types.js";
 const activeSessions = new Map<string, SandboxSession>();
 let lastActiveKey: string | null = null;
 
-function keyForCwd(cwd: string): string {
+export interface SandboxSessionScope {
+  cwd: string;
+  sessionId?: string;
+}
+
+export type SandboxSessionLookup = string | SandboxSessionScope;
+
+function normalizeCwd(cwd: string): string {
   const resolved = resolve(cwd);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-export function getActiveSandboxSession(cwd?: string): SandboxSession | null {
-  if (cwd) return activeSessions.get(keyForCwd(cwd)) ?? null;
+function normalizeSessionId(sessionId: string | undefined): string | undefined {
+  const trimmed = sessionId?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function keyForScope(scope: SandboxSessionLookup): string {
+  if (typeof scope === "string") {
+    return normalizeCwd(scope);
+  }
+  const cwd = normalizeCwd(scope.cwd);
+  const sessionId = normalizeSessionId(scope.sessionId);
+  return sessionId ? `${cwd}::session=${sessionId}` : cwd;
+}
+
+export function getActiveSandboxSession(scope?: SandboxSessionLookup): SandboxSession | null {
+  if (scope !== undefined) return activeSessions.get(keyForScope(scope)) ?? null;
   return lastActiveKey ? activeSessions.get(lastActiveKey) ?? null : null;
 }
 
-export function setActiveSandboxSession(session: SandboxSession | null, cwd?: string): void {
+export function setActiveSandboxSession(
+  session: SandboxSession | null,
+  scope?: SandboxSessionLookup,
+): void {
   if (session === null) {
-    if (cwd) {
-      const key = keyForCwd(cwd);
+    if (scope !== undefined) {
+      const key = keyForScope(scope);
       activeSessions.delete(key);
       if (lastActiveKey === key) lastActiveKey = activeSessions.keys().next().value ?? null;
       return;
@@ -27,31 +51,47 @@ export function setActiveSandboxSession(session: SandboxSession | null, cwd?: st
     return;
   }
 
-  const key = keyForCwd(cwd ?? session.cwd);
+  const key = keyForScope(scope ?? session.cwd);
   activeSessions.set(key, session);
   lastActiveKey = key;
 }
 
-export function isSandboxSessionActive(cwd?: string): boolean {
-  return getActiveSandboxSession(cwd)?.active === true;
+export function isSandboxSessionActive(scope?: SandboxSessionLookup): boolean {
+  return getActiveSandboxSession(scope)?.active === true;
 }
 
-export async function stopActiveSandboxSession(cwd?: string): Promise<void> {
-  const session = getActiveSandboxSession(cwd);
+export async function stopActiveSandboxSession(scope?: SandboxSessionLookup): Promise<void> {
+  const session = getActiveSandboxSession(scope);
   if (session === null) return;
   try {
     await session.stop();
   } finally {
-    setActiveSandboxSession(null, cwd ?? session.cwd);
+    clearActiveSandboxEntry(session, scope);
   }
 }
 
-export function stopActiveSandboxSessionSync(cwd?: string): void {
-  const session = getActiveSandboxSession(cwd);
+export function stopActiveSandboxSessionSync(scope?: SandboxSessionLookup): void {
+  const session = getActiveSandboxSession(scope);
   if (session === null) return;
   try {
     session.stopSync?.();
   } finally {
-    setActiveSandboxSession(null, cwd ?? session.cwd);
+    clearActiveSandboxEntry(session, scope);
+  }
+}
+
+function clearActiveSandboxEntry(
+  session: SandboxSession,
+  scope?: SandboxSessionLookup,
+): void {
+  if (scope !== undefined) {
+    setActiveSandboxSession(null, scope);
+    return;
+  }
+  for (const [key, value] of activeSessions) {
+    if (value !== session) continue;
+    activeSessions.delete(key);
+    if (lastActiveKey === key) lastActiveKey = activeSessions.keys().next().value ?? null;
+    return;
   }
 }
