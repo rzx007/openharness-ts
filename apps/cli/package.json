@@ -30,6 +30,7 @@
     "@openharness/skills": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "@openharness/channels": "workspace:*",
+    "@openharness/client": "workspace:*",
     "@openharness/swarm": "workspace:*",
     "@openharness/themes": "workspace:*",
     "@openharness/tools": "workspace:*",

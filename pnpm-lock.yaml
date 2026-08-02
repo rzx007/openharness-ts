@@ -98,6 +98,9 @@ importers:
       '@openharness/channels':
         specifier: workspace:*
         version: link:../../packages/channels
+      '@openharness/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@openharness/commands':
         specifier: workspace:*
         version: link:../../packages/commands
@@ -288,6 +291,22 @@ importers:
         specifier: 'catalog:'
         version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
+  packages/client:
+    dependencies:
+      '@openharness/services':
+        specifier: workspace:*
+        version: link:../services
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.17
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
+
   packages/commands:
     dependencies:
       '@openharness/core':
@@ -312,22 +331,6 @@ importers:
       yaml:
         specifier: 'catalog:'
         version: 2.9.0
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.19.17
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: 'catalog:'
-        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
-
-  packages/client:
-    dependencies:
-      '@openharness/services':
-        specifier: workspace:*
-        version: link:../services
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
