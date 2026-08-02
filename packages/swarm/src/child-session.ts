@@ -19,6 +19,7 @@ export interface ChildSessionHost {
     runId: string,
   ): Promise<{ status: "completed" | "failed" | "interrupted"; output: string; error?: string }>;
   interrupt(sessionId: string): Promise<void>;
+  closeRuntime(sessionId: string): Promise<void>;
   archive(sessionId: string): Promise<void>;
 }
 
@@ -111,16 +112,22 @@ export class ChildSessionBackend implements SwarmBackend {
           } catch (error) {
             if (this.taskGenerations.get(taskId) === generation) this.nextGeneration(taskId);
             const message = error instanceof Error ? error.message : String(error);
-            await this.options.taskBridge.completeSessionTask(taskId, {
-              status: "failed",
-              output: message,
-            });
+            try {
+              await this.options.taskBridge.completeSessionTask(taskId, {
+                status: "failed",
+                output: message,
+              });
+            } finally {
+              await this.options.host.closeRuntime(child.id).catch(() => {});
+            }
             throw error;
           }
         },
         onStop: async () => {
           this.nextGeneration(taskId);
           await this.options.host.interrupt(child.id);
+          await this.options.host.closeRuntime(child.id);
+          await this.options.host.archive(child.id);
         },
       });
       taskId = bridgeTask.id;
@@ -151,6 +158,7 @@ export class ChildSessionBackend implements SwarmBackend {
       if (taskId) this.nextGeneration(taskId);
       if (childSessionId) {
         await this.options.host.interrupt(childSessionId).catch(() => {});
+        await this.options.host.closeRuntime(childSessionId).catch(() => {});
         await this.options.host.archive(childSessionId).catch(() => {});
       }
       if (taskId) {
@@ -183,6 +191,7 @@ export class ChildSessionBackend implements SwarmBackend {
     if (!child) throw new Error(`No active child session for ${agentId}`);
     this.nextGeneration(child.taskId);
     await this.options.host.interrupt(child.sessionId);
+    await this.options.host.closeRuntime(child.sessionId);
     await this.options.host.archive(child.sessionId);
     await this.options.taskBridge.completeSessionTask(child.taskId, {
       status: "stopped",
@@ -204,20 +213,36 @@ export class ChildSessionBackend implements SwarmBackend {
 
   private monitorRun(taskId: string, sessionId: string, runId: string, generation: number): void {
     void this.options.host.awaitRun(sessionId, runId).then(
-      (result) => {
+      async (result) => {
         if (this.taskGenerations.get(taskId) !== generation) return;
-        return this.options.taskBridge.completeSessionTask(taskId, {
-          status: result.status === "completed" ? "completed" : result.status === "interrupted" ? "stopped" : "failed",
-          output: result.output || result.error || "",
-        });
+        try {
+          await this.options.taskBridge.completeSessionTask(taskId, {
+            status: result.status === "completed"
+              ? "completed"
+              : result.status === "interrupted"
+              ? "stopped"
+              : "failed",
+            output: result.output || result.error || "",
+          });
+        } finally {
+          if (this.taskGenerations.get(taskId) === generation) {
+            await this.options.host.closeRuntime(sessionId).catch(() => {});
+          }
+        }
       },
-      (error) => {
+      async (error) => {
         if (this.taskGenerations.get(taskId) !== generation) return;
-        return this.options.taskBridge.completeSessionTask(taskId, {
-          status: "failed",
-          output: error instanceof Error ? error.message : String(error),
-        });
+        try {
+          await this.options.taskBridge.completeSessionTask(taskId, {
+            status: "failed",
+            output: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          if (this.taskGenerations.get(taskId) === generation) {
+            await this.options.host.closeRuntime(sessionId).catch(() => {});
+          }
+        }
       },
-    );
+    ).catch(() => {});
   }
 }

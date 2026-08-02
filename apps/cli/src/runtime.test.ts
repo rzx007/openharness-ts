@@ -29,6 +29,7 @@ describe("registerChildSessionBackend", () => {
           admitPrompt: async () => ({ runId: "run" }),
           awaitRun: async () => ({ status: "completed", output: "" }),
           interrupt: async () => {},
+          closeRuntime: async () => {},
           archive: async () => {},
         },
       });
@@ -44,6 +45,7 @@ describe("registerChildSessionBackend", () => {
           admitPrompt: async () => ({ runId: "new-run" }),
           awaitRun: async () => ({ status: "completed", output: "" }),
           interrupt: async () => {},
+          closeRuntime: async () => {},
           archive: async () => {},
         },
       });

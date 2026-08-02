@@ -95,6 +95,7 @@ export interface ChildSessionHost {
     error?: string;
   }>;
   interrupt(sessionId: string): Promise<void>;
+  closeRuntime(sessionId: string): Promise<void>;
   archive(sessionId: string): Promise<void>;
 }
 

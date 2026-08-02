@@ -211,11 +211,9 @@ export class OpenHarnessHttpServer {
       interrupt: async (sessionId) => {
         this.interruptSession(sessionId);
       },
+      closeRuntime: async (sessionId) => this.closeRuntime(sessionId),
       archive: async (sessionId) => {
-        const before = this.latestEventSeq();
-        this.store.archiveSession(sessionId);
-        await this.closeRuntime(sessionId);
-        this.broadcastSince(before);
+        await this.archiveSessionTree(sessionId);
       },
     };
     this.mountRoutes();
@@ -1051,18 +1049,27 @@ export class OpenHarnessHttpServer {
     }
   }
 
-  private handleArchiveSession(c: Context): Response {
+  private async handleArchiveSession(c: Context): Promise<Response> {
     const sessionId = c.req.param("sessionId");
     if (!sessionId) return errorResponse(400, "sessionId is required");
-    const before = this.latestEventSeq();
     try {
-      const session = this.store.archiveSession(sessionId);
-      void this.closeRuntime(sessionId);
-      this.broadcastSince(before);
+      const session = await this.archiveSessionTree(sessionId);
       return jsonResponse({ session });
     } catch (error) {
       return errorResponse(404, error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private async archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
+    const children = this.store.listChildSessions(sessionId);
+    for (const child of children) await this.archiveSessionTree(child.id);
+
+    this.interruptSession(sessionId);
+    await this.closeRuntime(sessionId);
+    const before = this.latestEventSeq();
+    const session = this.store.archiveSession(sessionId);
+    this.broadcastSince(before);
+    return session;
   }
 
   private handleListMessages(c: Context): Response {

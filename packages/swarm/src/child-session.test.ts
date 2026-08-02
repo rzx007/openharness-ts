@@ -31,6 +31,7 @@ describe("ChildSessionBackend", () => {
       admitPrompt: vi.fn(async () => ({ runId: "run-1" })),
       awaitRun: vi.fn(async () => ({ status: "completed", output: "done" })),
       interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
       archive: vi.fn(async () => {}),
     };
     let callbacks:
@@ -68,7 +69,12 @@ describe("ChildSessionBackend", () => {
         status: "completed",
         output: "done",
       });
+      expect(host.closeRuntime).toHaveBeenCalledWith("child");
     });
+    expect((bridge.completeSessionTask as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan(
+      (host.closeRuntime as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+    );
+    expect(host.archive).not.toHaveBeenCalled();
 
     await backend.sendMessage("Explore@default", { text: "follow up", fromAgent: "coordinator" });
     expect(bridge.writeToSessionTask).toHaveBeenCalledWith("task-1", "follow up");
@@ -81,6 +87,7 @@ describe("ChildSessionBackend", () => {
       admitPrompt: vi.fn(async () => ({ runId: "run-1" })),
       awaitRun: vi.fn(async () => ({ status: "completed", output: "" })),
       interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
       archive: vi.fn(async () => {}),
     };
     const bridge: SessionTaskBridge = {
@@ -94,7 +101,14 @@ describe("ChildSessionBackend", () => {
     await backend.terminate("Explore@default");
 
     expect(host.interrupt).toHaveBeenCalledWith("child");
+    expect(host.closeRuntime).toHaveBeenCalledWith("child");
     expect(host.archive).toHaveBeenCalledWith("child");
+    expect((host.interrupt as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan(
+      (host.closeRuntime as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+    );
+    expect((host.closeRuntime as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan(
+      (host.archive as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+    );
     expect(bridge.completeSessionTask).toHaveBeenCalledWith("task-1", {
       status: "stopped",
       output: "Child session terminated",
@@ -113,6 +127,7 @@ describe("ChildSessionBackend", () => {
       }),
       awaitRun: vi.fn(() => new Promise(() => {})),
       interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
       archive: vi.fn(async () => {}),
     };
     let callbacks!: { onInput(data: string): Promise<void>; onStop(): Promise<void> };
@@ -135,6 +150,7 @@ describe("ChildSessionBackend", () => {
       status: "failed",
       output: "child archived",
     });
+    expect(host.closeRuntime).toHaveBeenCalledWith("child");
   });
 
   it("does not complete the task from an older run after a follow-up is queued", async () => {
@@ -150,6 +166,7 @@ describe("ChildSessionBackend", () => {
       }),
       awaitRun: vi.fn((_sessionId, runId) => runId === "run-1" ? first.promise : second.promise),
       interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
       archive: vi.fn(async () => {}),
     };
     let callbacks!: { onInput(data: string): Promise<void>; onStop(): Promise<void> };
@@ -169,6 +186,7 @@ describe("ChildSessionBackend", () => {
     first.resolve({ status: "completed", output: "old" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(completeSessionTask).not.toHaveBeenCalled();
+    expect(host.closeRuntime).not.toHaveBeenCalled();
 
     secondAdmission.resolve({ runId: "run-2" });
     await followUp;
@@ -178,7 +196,70 @@ describe("ChildSessionBackend", () => {
         status: "completed",
         output: "latest",
       });
+      expect(host.closeRuntime).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("closes the runtime after a failed run without archiving the child", async () => {
+    const host: ChildSessionHost = {
+      createChildSession: vi.fn(async () => ({ id: "child" })),
+      admitPrompt: vi.fn(async () => ({ runId: "run-1" })),
+      awaitRun: vi.fn(async () => {
+        throw new Error("provider failed");
+      }),
+      interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
+      archive: vi.fn(async () => {}),
+    };
+    const completeSessionTask = vi.fn(async () => {});
+    const bridge: SessionTaskBridge = {
+      registerSessionTask: vi.fn(() => ({ id: "task-1" })),
+      completeSessionTask,
+      writeToSessionTask: vi.fn(async () => {}),
+    };
+    const backend = new ChildSessionBackend({ host, taskBridge: bridge });
+
+    await backend.spawn(config());
+
+    await vi.waitFor(() => {
+      expect(completeSessionTask).toHaveBeenCalledWith("task-1", {
+        status: "failed",
+        output: "provider failed",
+      });
+      expect(host.closeRuntime).toHaveBeenCalledWith("child");
+    });
+    expect(host.archive).not.toHaveBeenCalled();
+  });
+
+  it("stops a bridged task by interrupting, closing, then archiving its child", async () => {
+    const host: ChildSessionHost = {
+      createChildSession: vi.fn(async () => ({ id: "child" })),
+      admitPrompt: vi.fn(async () => ({ runId: "run-1" })),
+      awaitRun: vi.fn(() => new Promise(() => {})),
+      interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
+      archive: vi.fn(async () => {}),
+    };
+    let callbacks!: { onInput(data: string): Promise<void>; onStop(): Promise<void> };
+    const bridge: SessionTaskBridge = {
+      registerSessionTask: vi.fn((input) => {
+        callbacks = input;
+        return { id: "task-1" };
+      }),
+      completeSessionTask: vi.fn(async () => {}),
+      writeToSessionTask: vi.fn(async () => {}),
+    };
+    const backend = new ChildSessionBackend({ host, taskBridge: bridge });
+    await backend.spawn(config());
+
+    await callbacks.onStop();
+
+    expect((host.interrupt as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan(
+      (host.closeRuntime as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+    );
+    expect((host.closeRuntime as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan(
+      (host.archive as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+    );
   });
 
   it("rolls back child, task, and isolated worktree when registration fails", async () => {
@@ -187,6 +268,7 @@ describe("ChildSessionBackend", () => {
       admitPrompt: vi.fn(async () => ({ runId: "run-1" })),
       awaitRun: vi.fn(async () => ({ status: "completed", output: "" })),
       interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
       archive: vi.fn(async () => {}),
     };
     const bridge: SessionTaskBridge = {
@@ -218,6 +300,7 @@ describe("ChildSessionBackend", () => {
       error: "register failed",
     });
     expect(host.interrupt).toHaveBeenCalledWith("child");
+    expect(host.closeRuntime).toHaveBeenCalledWith("child");
     expect(host.archive).toHaveBeenCalledWith("child");
     expect(bridge.completeSessionTask).toHaveBeenCalledWith("task-1", {
       status: "failed",
@@ -232,6 +315,7 @@ describe("ChildSessionBackend", () => {
       admitPrompt: vi.fn(async () => ({})),
       awaitRun: vi.fn(async () => ({ status: "completed", output: "" })),
       interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
       archive: vi.fn(async () => {}),
     };
     const bridge: SessionTaskBridge = {
@@ -267,6 +351,7 @@ describe("ChildSessionBackend", () => {
       admitPrompt: vi.fn(async () => ({})),
       awaitRun: vi.fn(async () => ({ status: "completed", output: "" })),
       interrupt: vi.fn(async () => {}),
+      closeRuntime: vi.fn(async () => {}),
       archive: vi.fn(async () => {}),
     };
     const bridge: SessionTaskBridge = {

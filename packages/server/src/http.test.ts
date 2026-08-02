@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { CommandCatalogProvider } from "./commands.js";
 import { OpenHarnessHttpServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
-import type { SessionRuntimeFactory } from "./runtime.js";
+import type { ChildSessionHost, SessionRuntimeFactory } from "./runtime.js";
 import type { OpenHarnessServerOptions } from "./http.js";
 
 function deferred<T = void>(): {
@@ -106,17 +106,23 @@ describe("OpenHarnessHttpServer", () => {
       }): Promise<{ id: string }>;
       admitPrompt(sessionId: string, content: string): Promise<{ runId?: string }>;
       awaitRun(sessionId: string, runId: string): Promise<{ status: string; output: string }>;
+      closeRuntime(sessionId: string): Promise<void>;
     };
     let host: Host | undefined;
+    const created: string[] = [];
+    const closed: string[] = [];
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime(context) {
         host = (context as typeof context & { childSessionHost?: Host }).childSessionHost;
+        created.push(context.session.id);
         return {
           async runPrompt(_input, hooks) {
             await hooks.onStreamEvent({ type: "text_delta", delta: "child output" });
             return { messages: [] };
           },
-          async close() {},
+          async close() {
+            closed.push(context.session.id);
+          },
         };
       },
     };
@@ -146,6 +152,15 @@ describe("OpenHarnessHttpServer", () => {
         status: "completed",
         output: "child output",
       });
+      await host!.closeRuntime(child.id);
+      expect(closed).toContain(child.id);
+
+      const followUp = await host!.admitPrompt(child.id, "follow up");
+      await expect(host!.awaitRun(child.id, followUp.runId!)).resolves.toMatchObject({
+        status: "completed",
+      });
+      expect(created.filter((id) => id === child.id)).toHaveLength(2);
+      expect(server.store.getSession(child.id)?.status).not.toBe("archived");
     }, { runtimeFactory });
   });
 
@@ -1052,6 +1067,83 @@ describe("OpenHarnessHttpServer", () => {
       };
       expect(events.events.map((event) => event.type)).toContain("session.archived");
     });
+  });
+
+  it("archives descendants after interrupting runs and closing runtimes", async () => {
+    let host: ChildSessionHost | undefined;
+    let serverRef: OpenHarnessHttpServer | undefined;
+    const lifecycle: string[] = [];
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime(context) {
+        host = context.childSessionHost;
+        return {
+          async runPrompt(input) {
+            await new Promise<void>((resolve) => {
+              input.signal.addEventListener("abort", () => {
+                lifecycle.push(`interrupt:${input.session.id}`);
+                resolve();
+              }, { once: true });
+            });
+            throw new Error("interrupted by archive");
+          },
+          async close() {
+            lifecycle.push(`close:${context.session.id}:${serverRef?.store.getSession(context.session.id)?.status}`);
+          },
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token, server }) => {
+      serverRef = server;
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "parent", cwd: process.cwd(), model: "m" }),
+      });
+      for (let i = 0; i < 20 && !host; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await host!.createChildSession({
+        id: "child",
+        parentId: "parent",
+        cwd: process.cwd(),
+        title: "child",
+        agent: "Explore",
+      });
+      await host!.createChildSession({
+        id: "grandchild",
+        parentId: "child",
+        cwd: process.cwd(),
+        title: "grandchild",
+        agent: "Explore",
+      });
+      await host!.admitPrompt("child", "run child");
+      await host!.admitPrompt("grandchild", "run grandchild");
+      for (let i = 0; i < 50; i++) {
+        const running = ["child", "grandchild"].every((id) =>
+          server.store.listRuns(id).some((run) => run.status === "running")
+        );
+        if (running) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      const archived = await fetch(`${baseUrl}/sessions/parent`, {
+        method: "DELETE",
+        headers: auth(token),
+      });
+
+      expect(archived.status).toBe(200);
+      expect(server.store.getSession("parent")?.status).toBe("archived");
+      expect(server.store.getSession("child")?.status).toBe("archived");
+      expect(server.store.getSession("grandchild")?.status).toBe("archived");
+      for (const id of ["child", "grandchild"]) {
+        const interruptIndex = lifecycle.indexOf(`interrupt:${id}`);
+        const closeIndex = lifecycle.findIndex((event) => event.startsWith(`close:${id}:`));
+        expect(interruptIndex).toBeGreaterThanOrEqual(0);
+        expect(interruptIndex).toBeLessThan(closeIndex);
+        expect(lifecycle[closeIndex]).not.toBe(`close:${id}:archived`);
+      }
+      expect(lifecycle.find((event) => event.startsWith("close:parent:"))).not.toBe("close:parent:archived");
+    }, { runtimeFactory });
   });
 
   it("streams replayed and live events over SSE", async () => {
