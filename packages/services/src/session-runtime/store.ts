@@ -245,6 +245,32 @@ export class SessionStore {
       .sort((a, b) => a.seq - b.seq));
   }
 
+  /**
+   * Inputs not yet bound to a run and not yet promoted into a transcript message.
+   * Used by steer delivery to pull follow-ups into an active run.
+   */
+  listUnboundInputs(sessionId: string): SessionInputRecord[] {
+    assertSession(this.state, sessionId);
+    const boundToRun = new Set(
+      Object.values(this.state.runs)
+        .filter((run) => run.sessionId === sessionId && run.inputId)
+        .map((run) => run.inputId!),
+    );
+    const promoted = new Set(
+      Object.values(this.state.messages)
+        .filter((message) => message.sessionId === sessionId && message.inputId)
+        .map((message) => message.inputId!),
+    );
+    return clone(
+      Object.values(this.state.inputs)
+        .filter((input) =>
+          input.sessionId === sessionId &&
+          !boundToRun.has(input.id) &&
+          !promoted.has(input.id))
+        .sort((a, b) => a.seq - b.seq),
+    );
+  }
+
   createMessage(input: CreateMessageInput): SessionMessageRecord {
     const session = assertSession(this.state, input.sessionId);
     const id = input.id ?? randomUUID();

@@ -137,6 +137,11 @@ export class MaxTurnsExceeded extends Error {
 
 export interface SubmitMessageOptions {
   signal?: AbortSignal;
+  /**
+   * Called at agentic turn boundaries. Returned strings are appended as user
+   * messages so the same submitMessage call continues instead of returning.
+   */
+  pullFollowUps?: () => string[] | Promise<string[]>;
 }
 
 export class QueryEngine implements IQueryEngine {
@@ -324,25 +329,42 @@ export class QueryEngine implements IQueryEngine {
         });
       }
 
-      // 如果没有工具调用，则结束当前交互流程
-      if (toolUses.length === 0) return;
-
-      // 执行所有请求的工具调用，并将结果作为工具结果消息加入历史记录
-      const results = await this.executeTools(toolUses, options.signal);
-      for (const result of results) {
-        this.messages.push({
-          type: "tool_result",
-          toolUseId: result.toolUseId,
-          content: applyToolOutputBudget(result.content),
-          isError: result.isError,
-        });
-        yield { type: "tool_use_end", toolUseId: result.toolUseId, result };
+      if (toolUses.length > 0) {
+        // 执行所有请求的工具调用，并将结果作为工具结果消息加入历史记录
+        const results = await this.executeTools(toolUses, options.signal);
+        for (const result of results) {
+          this.messages.push({
+            type: "tool_result",
+            toolUseId: result.toolUseId,
+            content: applyToolOutputBudget(result.content),
+            isError: result.isError,
+          });
+          yield { type: "tool_use_end", toolUseId: result.toolUseId, result };
+        }
+        turnCount++;
+        await this.consumeFollowUps(options);
+        continue;
       }
 
-      turnCount++;
+      // 无工具调用：若 turn 边界有 follow-up，则继续同一 submitMessage
+      if (await this.consumeFollowUps(options)) {
+        turnCount++;
+        continue;
+      }
+      return;
     }
 
     throw new MaxTurnsExceeded(this.maxTurns);
+  }
+
+  private async consumeFollowUps(options: SubmitMessageOptions): Promise<boolean> {
+    if (!options.pullFollowUps) return false;
+    const followUps = (await options.pullFollowUps()) ?? [];
+    if (followUps.length === 0) return false;
+    for (const content of followUps) {
+      this.messages.push({ type: "user", content });
+    }
+    return true;
   }
 
   getHistory(): Message[] {

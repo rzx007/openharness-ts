@@ -260,9 +260,17 @@ export class CliSessionRuntime implements SessionRuntime {
     if (input.session.model) this.bundle.queryEngine.setModel(input.session.model);
     this.bundle.queryEngine.setRuntimeEventSink((event) => hooks.onEvent(event));
     try {
+      let lastWake = 0;
       for await (const event of this.bundle.queryEngine.submitMessage(
         input.input.content,
-        { signal: input.signal },
+        {
+          signal: input.signal,
+          pullFollowUps: () => {
+            if (input.wakeCount() <= lastWake) return [];
+            lastWake = input.wakeCount();
+            return input.drainSteeredInputs().map((row) => row.content);
+          },
+        },
       )) {
         if (input.signal.aborted) throw new Error("Run interrupted");
         await hooks.onStreamEvent(event);

@@ -44,6 +44,8 @@ export interface SessionRuntimeRunInput {
   parts: SessionMessagePartRecord[];
   signal: AbortSignal;
   wakeCount(): number;
+  /** Pull admitted steer inputs not yet bound to a run; safe to call at turn boundaries. */
+  drainSteeredInputs(): SessionInputRecord[];
 }
 
 export interface RuntimePermissionAskInput {

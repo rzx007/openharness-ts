@@ -168,6 +168,19 @@ describe("SessionStore", () => {
     });
   });
 
+  it("lists unbound inputs until they are run-bound or promoted to a message", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const first = store.admitPrompt({ id: "i1", sessionId: "s1", content: "start", delivery: "queue" });
+      store.createRun({ id: "r1", sessionId: "s1", inputId: first.id });
+      const steered = store.admitPrompt({ id: "i2", sessionId: "s1", content: "nudge", delivery: "steer" });
+      expect(store.listUnboundInputs("s1").map((row) => row.id)).toEqual(["i2"]);
+
+      store.createMessage({ id: "m1", sessionId: "s1", role: "user", inputId: steered.id });
+      expect(store.listUnboundInputs("s1")).toEqual([]);
+    });
+  });
+
   it("tracks runs and permission replies as durable events", () => {
     withStore((store, path) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });

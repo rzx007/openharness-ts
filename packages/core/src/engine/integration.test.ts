@@ -1119,4 +1119,53 @@ describe("Integration: CostTracker", () => {
   });
 });
 
+describe("Integration: Steer follow-ups", () => {
+  it("injects pullFollowUps at turn boundaries and continues the same run", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("Ping", () => "pong"));
+
+    let pullCount = 0;
+    const { client, getCallCount } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "Ping", input: {} },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "first reply" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", delta: "after steer" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
+    for await (const _ of engine.submitMessage("start", {
+      pullFollowUps: () => {
+        pullCount++;
+        // After tools (1) and before returning from the first text turn (2):
+        // inject once when the model would otherwise stop.
+        if (pullCount === 2) return ["steered follow-up"];
+        return [];
+      },
+    })) {}
+
+    expect(getCallCount()).toBe(3);
+    const history = engine.getHistory();
+    expect(history.map((message) => message.type)).toEqual([
+      "user",
+      "assistant",
+      "tool_result",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(history[4]).toMatchObject({ type: "user", content: "steered follow-up" });
+  });
+});
+
 

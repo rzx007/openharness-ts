@@ -1172,13 +1172,28 @@ export class OpenHarnessHttpServer {
     queue_state?: "running" | "queued";
   } {
     const before = this.latestEventSeq();
+    const delivery = input.delivery ?? "queue";
     const admitted = this.store.admitPrompt({
       id: input.id,
       sessionId,
-      delivery: input.delivery ?? "queue",
+      delivery,
       content: input.content,
       metadata: input.metadata,
     });
+
+    if (delivery === "steer" && this.runtimeFactory) {
+      const activeRunId = this.runCoordinator.activeRunId(sessionId);
+      if (activeRunId) {
+        this.broadcastSince(before);
+        this.runCoordinator.mergeWake(sessionId);
+        const activeRun = this.store.getRun(activeRunId);
+        return {
+          input: admitted,
+          ...(activeRun ? { run: activeRun, queue_state: "running" as const } : {}),
+        };
+      }
+    }
+
     const run = this.runtimeFactory
       ? this.store.createRun({ sessionId, inputId: admitted.id })
       : undefined;
@@ -1244,9 +1259,44 @@ export class OpenHarnessHttpServer {
       const renderState = this.createRunRenderState(sessionId, inputId, runId, admitted.content);
       this.broadcastSince(before);
 
+      const drainSteeredInputs = () => {
+        const pending = this.store.listUnboundInputs(sessionId);
+        if (pending.length === 0) return pending;
+        const eventBefore = this.latestEventSeq();
+        this.completeActiveTextPart(renderState, "completed");
+        delete renderState.assistantMessageId;
+        renderState.assistantTurnCompleted = true;
+        for (const steered of pending) {
+          const userMessage = this.store.createMessage({
+            sessionId,
+            role: "user",
+            runId,
+            inputId: steered.id,
+          });
+          this.store.upsertMessagePart({
+            sessionId,
+            messageId: userMessage.id,
+            type: "text",
+            status: "completed",
+            text: steered.content,
+          });
+        }
+        this.broadcastSince(eventBefore);
+        return pending;
+      };
+
       const runtime = await this.getOrCreateRuntime(session, history, parts);
       await runtime.runPrompt(
-        { session, input: admitted, runId, history, parts, signal: context.signal, wakeCount: context.wakeCount },
+        {
+          session,
+          input: admitted,
+          runId,
+          history,
+          parts,
+          signal: context.signal,
+          wakeCount: context.wakeCount,
+          drainSteeredInputs,
+        },
         {
           onEvent: (event) => {
             const eventBefore = this.latestEventSeq();
