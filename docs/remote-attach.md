@@ -26,7 +26,15 @@ ohs --tui \
   --daemon-token "$OPENHARNESS_DAEMON_TOKEN"
 ```
 
-`--daemon-url` 不会启动或替换本机 daemon，只会把明确的连接描述传入正常的 TUI 客户端路径。
+无界面 print 入口使用同一份连接描述，不会因为带了 prompt 就改为启动本机 daemon：
+
+```bash
+ohs -p "summarize the current session" \
+  --daemon-url https://daemon.example \
+  --daemon-token "$OPENHARNESS_DAEMON_TOKEN"
+```
+
+`--daemon-url` 不会启动或替换本机 daemon，只会把明确的连接描述传入正常的 TUI 或 print 客户端路径。
 
 ## Web/Desktop SDK
 
