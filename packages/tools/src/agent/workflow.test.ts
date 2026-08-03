@@ -247,6 +247,44 @@ describe("workflowTool", () => {
     }
   });
 
+  it("cancels a detached workflow and its child task when the parent session aborts", async () => {
+    const cwd = makeTempDir();
+    const controller = new AbortController();
+    let releaseWorker: (() => void) | undefined;
+    try {
+      const runner: WorkflowRunner = vi.fn(({ reportProgress }) => {
+        reportProgress?.({ metadata: { taskManagerTaskId: "child-task" } });
+        return new Promise((resolve) => {
+          releaseWorker = () => resolve({ summary: "late worker completion" });
+        });
+      });
+      const stopTask = vi.fn(async () => releaseWorker?.());
+      const tool = createWorkflowTool({ createRunner: () => runner, stopTask });
+
+      await tool.execute(
+        { mode: "pipeline", runId: "parent-owned", tasks: [{ id: "research" }] },
+        {
+          cwd,
+          sessionId: "parent",
+          abortSignal: new AbortController().signal,
+          runAbortSignal: controller.signal,
+        },
+      );
+      const store = new WorkflowRunStore({ cwd });
+      await vi.waitFor(() => {
+        expect(store.load("parent-owned")?.runningTasks.research?.metadata?.taskManagerTaskId).toBe("child-task");
+      });
+
+      controller.abort(new Error("parent interrupted"));
+      await vi.waitFor(() => expect(store.load("parent-owned")?.status).toBe("failed"));
+      expect(stopTask).toHaveBeenCalledWith("child-task");
+      await vi.waitFor(() => expect(store.load("parent-owned")?.summary).toBe("Parent session interrupted"));
+    } finally {
+      releaseWorker?.();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("returns an error for invalid workflow input", async () => {
     const createRunner = vi.fn();
     const tool = createWorkflowTool({ createRunner });

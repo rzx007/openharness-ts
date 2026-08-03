@@ -13,8 +13,20 @@ interface ServeOptions {
   host?: string;
   port?: number;
   token?: string;
+  allowOrigin?: string[];
   storePath?: string;
   register?: boolean;
+}
+
+export function isLoopbackHost(host: string | undefined): boolean {
+  const normalized = (host ?? "127.0.0.1").trim().toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+export function assertSafeDaemonBinding(options: Pick<ServeOptions, "host" | "token">): void {
+  if (!isLoopbackHost(options.host) && !options.token) {
+    throw new Error("A non-loopback daemon requires an explicit --token");
+  }
 }
 
 async function runServe(options: ServeOptions): Promise<void> {
@@ -44,6 +56,7 @@ async function runServe(options: ServeOptions): Promise<void> {
     createCliSettingsService,
   } = await import("../daemon-services.js");
 
+  assertSafeDaemonBinding(options);
   const token = options.token ?? createBearerToken();
   const settings = await loadSettings({});
   const settingsRef = { current: settings };
@@ -51,6 +64,7 @@ async function runServe(options: ServeOptions): Promise<void> {
     host: options.host,
     port: options.port,
     token,
+    allowedOrigins: options.allowOrigin,
     storePath: options.storePath,
     runtimeFactory: createCliSessionRuntimeFactory({
       settings,
@@ -110,6 +124,7 @@ export function createServeCommand(): Command {
     .option("--host <host>", "Host to bind", "127.0.0.1")
     .option("--port <port>", "Port to bind", (value) => Number.parseInt(value, 10), 0)
     .option("--token <token>", "Bearer token; generated when omitted")
+    .option("--allow-origin <origin...>", "Allow browser requests from exact origin(s)")
     .option("--store-path <path>", "Session store path")
     .option("--register", "Write daemon registry for clients to attach")
     .action(async (options: ServeOptions) => {
@@ -126,8 +141,10 @@ export function createDaemonCommand(): Command {
     .option("--host <host>", "Host to bind", "127.0.0.1")
     .option("--port <port>", "Port to bind", (value) => Number.parseInt(value, 10), 0)
     .option("--token <token>", "Bearer token; generated when omitted")
+    .option("--allow-origin <origin...>", "Allow browser requests from exact origin(s)")
     .option("--store-path <path>", "Session store path")
     .action(async (options: ServeOptions) => {
+      assertSafeDaemonBinding(options);
       const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
       const entry = process.argv[1];
       if (!entry) {
@@ -147,6 +164,7 @@ export function createDaemonCommand(): Command {
       const args = [...process.execArgv, entry, "serve", "--register", "--host", options.host ?? "127.0.0.1"];
       if (options.port !== undefined) args.push("--port", String(options.port));
       if (options.token) args.push("--token", options.token);
+      for (const origin of options.allowOrigin ?? []) args.push("--allow-origin", origin);
       if (options.storePath) args.push("--store-path", options.storePath);
 
       const child = spawn(process.execPath, args, { detached: true, stdio: "ignore", windowsHide: true });

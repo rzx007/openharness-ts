@@ -26,11 +26,14 @@ export interface RunPersistentWorkflowOptions extends WorkflowRunStoreOptions {
   runId?: string;
   store?: WorkflowRunStore;
   onEvent?: (event: WorkflowRunEvent) => void;
+  /** Prevent a cancelled owner from writing a later running/completed snapshot. */
+  signal?: AbortSignal;
 }
 
 export interface ResumePersistentWorkflowOptions extends WorkflowRunStoreOptions {
   store?: WorkflowRunStore;
   onEvent?: (event: WorkflowRunEvent) => void;
+  signal?: AbortSignal;
 }
 
 export interface CancelPersistentWorkflowOptions extends WorkflowRunStoreOptions {
@@ -135,8 +138,11 @@ export async function runPersistentWorkflow(
   const store = options.store ?? new WorkflowRunStore({ cwd: options.cwd, dir: options.dir });
   return runWorkflow(spec, runner, {
     runId: options.runId,
-    onSnapshot: (snapshot) => store.save(snapshot),
+    onSnapshot: (snapshot) => {
+      if (!options.signal?.aborted) store.save(snapshot);
+    },
     onEvent: (event) => {
+      if (options.signal?.aborted) return;
       store.appendEvent(event);
       options.onEvent?.(event);
     },
@@ -164,8 +170,11 @@ export async function resumePersistentWorkflow(
     createdAt: snapshot.createdAt,
     initialResults: snapshot.results,
     initialRunningTasks: snapshot.runningTasks,
-    onSnapshot: (next) => store.save(next),
+    onSnapshot: (next) => {
+      if (!options.signal?.aborted) store.save(next);
+    },
     onEvent: (event) => {
+      if (options.signal?.aborted) return;
       store.appendEvent(event);
       options.onEvent?.(event);
     },

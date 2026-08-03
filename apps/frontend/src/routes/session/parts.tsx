@@ -89,7 +89,7 @@ function CollapsibleTranscriptBlock({
   );
 }
 
-export function TranscriptPart({
+function TranscriptPartView({
   item,
   syntax,
 }: {
@@ -211,3 +211,16 @@ export function TranscriptPart({
       return <text>{item.text}</text>;
   }
 }
+
+export const TranscriptPart = React.memo(TranscriptPartView, (previous, next) => {
+  const previousItem = previous.item;
+  const nextItem = next.item;
+  return previous.syntax === next.syntax
+    && previousItem.id === nextItem.id
+    && previousItem.role === nextItem.role
+    && previousItem.text === nextItem.text
+    && previousItem.streaming === nextItem.streaming
+    && previousItem.tool_name === nextItem.tool_name
+    && previousItem.tool_input === nextItem.tool_input
+    && previousItem.is_error === nextItem.is_error;
+});

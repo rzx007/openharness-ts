@@ -4,6 +4,7 @@ export {
   type ListenResult,
   type OpenHarnessServerHealth,
   type OpenHarnessServerOptions,
+  type OpenHarnessRuntimeSnapshot,
 } from "./http.js";
 export {
   BUILTIN_SESSION_COMMANDS,
@@ -45,6 +46,7 @@ export type {
   SettingsService,
 } from "./settings-api.js";
 export type {
+  ChildSessionHost,
   RuntimeMessageRecord,
   RuntimePermissionAskInput,
   SessionCompactResult,
@@ -54,9 +56,17 @@ export type {
   SessionRuntimeHooks,
   SessionRuntimeRunInput,
   SessionRuntimeRunResult,
+  SessionTaskBridge,
   SessionUsageSnapshot,
 } from "./runtime.js";
 export { estimateCostUsd } from "./usage.js";
+export {
+  TRACE_ID_HEADER,
+  writeStructuredLog,
+  type ObservabilityEvent,
+  type ObservabilityLevel,
+  type StructuredLogger,
+} from "./observability.js";
 export {
   writeSessionExport,
   type BuildSessionExportInput,

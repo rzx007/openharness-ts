@@ -1,4 +1,5 @@
 import type { PermissionRequestRecord, PermissionStatus, SessionStore } from "@openharness/services";
+import type { StructuredLogger } from "./observability.js";
 
 export type PermissionReplyStatus = Extract<PermissionStatus, "approved" | "denied" | "expired">;
 export type PermissionDecisionScope = "once" | "session";
@@ -6,6 +7,7 @@ export type PermissionDecisionScope = "once" | "session";
 export interface PermissionAskInput {
   sessionId: string;
   runId?: string;
+  traceId?: string;
   toolName: string;
   reason?: string;
   input?: Record<string, unknown>;
@@ -14,6 +16,7 @@ export interface PermissionAskInput {
 
 export interface PermissionReplyInput {
   requestId: string;
+  traceId?: string;
   status: PermissionReplyStatus;
   decision?: PermissionDecisionScope;
   clientId?: string;
@@ -36,6 +39,7 @@ export interface PermissionBroker {
 export interface StorePermissionBrokerOptions {
   store: SessionStore;
   onChange?: (previousEventSeq: number) => void;
+  logger?: StructuredLogger;
 }
 
 type Waiter = (request: PermissionRequestRecord) => void;
@@ -43,27 +47,42 @@ type Waiter = (request: PermissionRequestRecord) => void;
 export class StorePermissionBroker implements PermissionBroker {
   private readonly store: SessionStore;
   private readonly onChange?: (previousEventSeq: number) => void;
+  private readonly logger?: StructuredLogger;
   private readonly waiters = new Map<string, Set<Waiter>>();
 
   constructor(options: StorePermissionBrokerOptions) {
     this.store = options.store;
     this.onChange = options.onChange;
+    this.logger = options.logger;
   }
 
   async ask(input: PermissionAskInput): Promise<boolean> {
+    const permissionSessionId = this.resolvePermissionSessionId(input.sessionId);
     const reusable = this.findSessionApproval(input.sessionId, input.toolName);
     const previousEventSeq = this.latestEventSeq();
     const request = this.store.createPermissionRequest({
-      sessionId: input.sessionId,
-      runId: input.runId,
+      sessionId: permissionSessionId,
+      runId: permissionSessionId === input.sessionId ? input.runId : undefined,
       toolName: input.toolName,
       payload: {
         reason: input.reason,
         input: input.input ?? {},
+        ...(permissionSessionId !== input.sessionId ? { childSessionId: input.sessionId } : {}),
+        ...(permissionSessionId !== input.sessionId && input.runId ? { childRunId: input.runId } : {}),
+        ...(input.traceId ? { traceId: input.traceId } : {}),
         ...(reusable ? { reusedApprovalRequestId: reusable.id } : {}),
       },
     });
     this.notify(previousEventSeq);
+    this.logger?.({
+      level: "info",
+      event: "permission.requested",
+      traceId: input.traceId,
+      sessionId: permissionSessionId,
+      runId: input.runId,
+      requestId: request.id,
+      toolName: input.toolName,
+    });
 
     if (reusable) {
       const beforeReply = this.latestEventSeq();
@@ -73,6 +92,15 @@ export class StorePermissionBroker implements PermissionBroker {
         decision: "session",
       });
       this.notify(beforeReply);
+      this.logger?.({
+        level: "info",
+        event: "permission.auto_approved",
+        traceId: input.traceId,
+        sessionId: request.sessionId,
+        runId: request.runId,
+        requestId: request.id,
+        toolName: request.toolName,
+      });
       return replied.status === "approved";
     }
 
@@ -120,6 +148,15 @@ export class StorePermissionBroker implements PermissionBroker {
     });
     this.notify(previousEventSeq);
     this.resolveWaiters(replied);
+    this.logger?.({
+      level: "info",
+      event: "permission.replied",
+      traceId: this.traceIdFromRequest(replied) ?? input.traceId,
+      sessionId: replied.sessionId,
+      runId: replied.runId,
+      requestId: replied.id,
+      toolName: replied.toolName,
+    });
     return replied;
   }
 
@@ -132,10 +169,30 @@ export class StorePermissionBroker implements PermissionBroker {
   }
 
   private findSessionApproval(sessionId: string, toolName: string): PermissionRequestRecord | undefined {
-    return this.store
-      .listPermissionRequests({ sessionId, toolName, status: "approved" })
-      .filter((request) => request.decision === "session")
-      .at(-1);
+    for (const candidateId of this.sessionLineage(sessionId)) {
+      const approval = this.store
+        .listPermissionRequests({ sessionId: candidateId, toolName, status: "approved" })
+        .filter((request) => request.decision === "session")
+        .at(-1);
+      if (approval) return approval;
+    }
+    return undefined;
+  }
+
+  private resolvePermissionSessionId(sessionId: string): string {
+    return this.sessionLineage(sessionId).at(-1) ?? sessionId;
+  }
+
+  private sessionLineage(sessionId: string): string[] {
+    const lineage: string[] = [];
+    const seen = new Set<string>();
+    let currentId: string | undefined = sessionId;
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      lineage.push(currentId);
+      currentId = this.store.getSession(currentId)?.parentId;
+    }
+    return lineage;
   }
 
   private expire(requestId: string, reason: string): void {
@@ -149,6 +206,16 @@ export class StorePermissionBroker implements PermissionBroker {
     });
     this.notify(previousEventSeq);
     this.resolveWaiters(expired);
+    this.logger?.({
+      level: "warn",
+      event: "permission.expired",
+      traceId: this.traceIdFromRequest(expired),
+      sessionId: expired.sessionId,
+      runId: expired.runId,
+      requestId: expired.id,
+      toolName: expired.toolName,
+      error: reason,
+    });
   }
 
   private resolveWaiters(request: PermissionRequestRecord): void {
@@ -158,8 +225,13 @@ export class StorePermissionBroker implements PermissionBroker {
     for (const waiter of waiters) waiter(request);
   }
 
+  private traceIdFromRequest(request: PermissionRequestRecord): string | undefined {
+    const traceId = request.payload.traceId;
+    return typeof traceId === "string" ? traceId : undefined;
+  }
+
   private latestEventSeq(): number {
-    return this.store.listEvents({ limit: Number.MAX_SAFE_INTEGER }).at(-1)?.seq ?? 0;
+    return this.store.latestEventSeq();
   }
 
   private notify(previousEventSeq: number): void {

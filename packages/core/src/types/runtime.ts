@@ -8,7 +8,13 @@ import type { Settings } from "./settings";
 import type { CompactAttachmentsProvider } from "../engine/compact-service";
 
 export interface QueryEngine {
-  submitMessage(content: string | ContentBlock[]): AsyncIterable<StreamEvent>;
+  submitMessage(
+    content: string | ContentBlock[],
+    options?: {
+      signal?: AbortSignal;
+      pullFollowUps?: () => string[] | Promise<string[]>;
+    },
+  ): AsyncIterable<StreamEvent>;
   getHistory(): Message[];
   compact(): Promise<void>;
   clear(): void;

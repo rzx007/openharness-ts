@@ -192,7 +192,10 @@ export interface CompactServiceOptions {
 
 /** 摘要客户端最小接口：提交一段 prompt，消费流式事件。 */
 export interface CompactClient {
-  submitMessage(content: string): AsyncIterable<StreamEvent>;
+  submitMessage(
+    content: string,
+    options?: { signal?: AbortSignal },
+  ): AsyncIterable<StreamEvent>;
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +450,7 @@ export class CompactService {
   async autoCompact(
     messages: Message[],
     trigger: CompactTrigger = "auto",
+    signal?: AbortSignal,
   ): Promise<Message[]> {
     const estimated = this.estimateTokens(messages);
     const threshold =
@@ -491,10 +495,11 @@ export class CompactService {
     // 第三层：有 summarizer client 则做完整 LLM 摘要。
     if (this.client) {
       try {
-        const result = await this.llmCompact(working, trigger);
+        const result = await this.llmCompact(working, trigger, signal);
         this.consecutiveFailures = 0;
         return result;
       } catch (err) {
+        if (signal?.aborted) throw signal.reason;
         this.consecutiveFailures++;
         await this.emitProgress({
           phase: "compact_failed",
@@ -695,6 +700,7 @@ export class CompactService {
   private async llmCompact(
     messages: Message[],
     trigger: CompactTrigger,
+    signal?: AbortSignal,
   ): Promise<Message[]> {
     if (!this.client) throw new Error("No LLM client");
 
@@ -762,9 +768,10 @@ export class CompactService {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
-        summaryText = await this.collectSummary(summarizable, compactPrompt);
+        summaryText = await this.collectSummary(summarizable, compactPrompt, signal);
         break;
       } catch (err) {
+        if (signal?.aborted) throw signal.reason;
         if (isPromptTooLongError(err) && ptlRetries < MAX_PTL_RETRIES) {
           const truncated = this.truncateHeadForPtlRetry(summarizable);
           if (truncated) {
@@ -841,7 +848,11 @@ export class CompactService {
    * 把待摘要消息序列化成对话文本，拼进 prompt，流式收集摘要模型输出。
    * 每条消息 content 最多截取 4000 字符，避免单条巨文再次撑爆摘要请求。
    */
-  private async collectSummary(messages: Message[], customPrompt?: string): Promise<string> {
+  private async collectSummary(
+    messages: Message[],
+    customPrompt?: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     if (!this.client) throw new Error("No LLM client");
 
     const conversationText = messages
@@ -866,7 +877,7 @@ export class CompactService {
     const prompt = `${basePrompt}\n\n<conversation>\n${conversationText}\n</conversation>`;
 
     let summaryText = "";
-    for await (const event of this.client.submitMessage(prompt)) {
+    for await (const event of this.client.submitMessage(prompt, { signal })) {
       if (event.type === "text_delta") {
         summaryText += event.delta;
       } else if (event.type === "error") {

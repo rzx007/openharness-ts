@@ -92,6 +92,50 @@ describe("dispatchSessionCommand", () => {
     expect(emitted[0]).toBe("OpenHarness v1.2.3");
   });
 
+  it("presents read-only command output when a presentation surface is available", async () => {
+    const { host: h, emitted } = host();
+    const presented: Array<{ title: string; content: string }> = [];
+    Object.assign(h, {
+      sessionId: "s1",
+      model: "m",
+      statusSessionId: "s1",
+      permissionMode: "default",
+      present: (title: string, content: string) => {
+        presented.push({ title, content });
+      },
+    });
+
+    const outcome = await dispatchSessionCommand({ name: "/status", args: "" }, h);
+
+    expect(outcome).toBe("handled");
+    expect(emitted).toHaveLength(0);
+    expect(presented[0]?.title).toBe("Status");
+    expect(presented[0]?.content).toContain("Session status:");
+  });
+
+  it("routes cache-first read commands through the presentation cache host", async () => {
+    const getContextPreview = vi.fn(async () => "CONTEXT");
+    const client = fakeClient({ getContextPreview });
+    const { host: h, emitted } = host({ client });
+    const reads: Array<{ key: string; title: string; load: () => Promise<string> }> = [];
+    Object.assign(h, {
+      present: vi.fn(),
+      cacheFirstRead: (request: { key: string; title: string; load: () => Promise<string> }) => {
+        reads.push(request);
+      },
+    });
+
+    const outcome = await dispatchSessionCommand({ name: "/context", args: "" }, h);
+
+    expect(outcome).toBe("handled");
+    expect(emitted).toHaveLength(0);
+    expect(getContextPreview).not.toHaveBeenCalled();
+    expect(reads[0]?.key).toBe("context:/tmp/project");
+    expect(reads[0]?.title).toBe("Context");
+    await expect(reads[0]!.load()).resolves.toBe("CONTEXT");
+    expect(getContextPreview).toHaveBeenCalledWith({ cwd: "/tmp/project" });
+  });
+
   it("returns unhandled for unknown non-local commands", async () => {
     const { host: h, emitted } = host();
     const outcome = await dispatchSessionCommand({ name: "/not-a-real-cmd", args: "" }, h);
@@ -103,5 +147,47 @@ describe("dispatchSessionCommand", () => {
     const { host: h } = host();
     const outcome = await dispatchSessionCommand({ name: "/theme", args: "dark" }, h);
     expect(outcome).toBe("local_ui");
+  });
+
+  it("patches session metadata.permissionMode for /plan", async () => {
+    const updateSession = vi.fn(async (_id: string, input: { metadata?: Record<string, unknown> }) => ({
+      id: "s1",
+      cwd: "/tmp",
+      title: "TUI",
+      model: "m",
+      status: "idle",
+      metadata: input.metadata ?? {},
+      createdAt: 1,
+      updatedAt: 2,
+    }));
+    const getSession = vi.fn(async () => ({
+      id: "s1",
+      cwd: "/tmp",
+      title: "TUI",
+      model: "m",
+      status: "idle",
+      metadata: { maxTurns: 12, effort: "medium" },
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    const patches: Array<Record<string, unknown>> = [];
+    const client = fakeClient({ updateSession, getSession });
+    const { host: h, emitted } = host({ client });
+    Object.assign(h, {
+      sessionId: "s1",
+      patchStatus: (patch: Record<string, unknown>) => {
+        patches.push(patch);
+      },
+    });
+
+    const outcome = await dispatchSessionCommand({ name: "/plan", args: "on" }, h);
+
+    expect(outcome).toBe("handled");
+    expect(getSession).toHaveBeenCalledWith("s1");
+    expect(updateSession).toHaveBeenCalledWith("s1", {
+      metadata: { maxTurns: 12, effort: "medium", permissionMode: "plan" },
+    });
+    expect(patches).toEqual([{ permission_mode: "plan" }]);
+    expect(emitted[0]).toBe("Permission mode: plan");
   });
 });

@@ -1,10 +1,12 @@
-import { readFileSync } from "node:fs";
+import { cpSync, readFileSync, rmSync } from "node:fs";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
-const externals = [
+const externals = [...new Set([
   ...Object.keys(pkg.dependencies || {}),
   ...Object.keys(pkg.peerDependencies || {}),
-].filter((d) => !d.startsWith("@openharness/"));
+  // Native addon: it must resolve beside the installed package, never from dist.
+  "better-sqlite3",
+])].filter((d) => !d.startsWith("@openharness/"));
 
 const result = await Bun.build({
   entrypoints: ["src/index.ts"],
@@ -29,5 +31,10 @@ for (const output of result.outputs) {
     await Bun.write(output.path, content);
   }
 }
+
+// Store migrations are runtime assets: source execution and the bundled CLI both
+// resolve them next to the SessionStore module.
+rmSync("dist/migrations", { recursive: true, force: true });
+cpSync("../../packages/services/src/session-runtime/migrations", "dist/migrations", { recursive: true });
 
 console.log(`Build complete: ${result.outputs.length} files`);

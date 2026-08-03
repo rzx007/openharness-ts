@@ -6,8 +6,8 @@ catalog:
   '@anthropic-ai/sdk': ^0.40.0
   '@hono/node-server': ^1.19.13
   '@modelcontextprotocol/sdk': ^1.29.0
-  '@opentui/core': ^0.4.1
-  '@opentui/react': ^0.4.1
+  '@opentui/core': ^0.4.5
+  '@opentui/react': ^0.4.5
   '@types/diff': ^7.0.2
   '@types/node': ^22.13.14
   '@types/react': ^19.0.0

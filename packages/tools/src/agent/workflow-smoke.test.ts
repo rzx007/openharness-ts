@@ -4,11 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseWorkflowNotification, WorkflowRunStore } from "@openharness/coordinator";
 import { getTaskManager, resetTaskManager } from "@openharness/services";
-import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
+import { ChildSessionBackend, type TeammateSpawnConfig } from "@openharness/swarm";
 import { createAgentWorkflowRunner } from "./workflow-runner";
 import { createWorkflowTool } from "./workflow";
-
-const NODE = process.execPath;
 
 let tempDir: string | undefined;
 let savedConfigDir: string | undefined;
@@ -29,13 +27,36 @@ afterEach(() => {
 });
 
 describe("Workflow tool smoke", () => {
-  it("runs through Workflow -> scheduler -> agent runner -> TaskManager", async () => {
+  it("runs through Workflow -> child session backend -> TaskManager bridge", async () => {
     const spawned: TeammateSpawnConfig[] = [];
+    const manager = getTaskManager(tempDir!);
+    const backend = new ChildSessionBackend({
+      host: {
+        createChildSession: async (input) => ({ id: input.id ?? `child-${spawned.length}` }),
+        admitPrompt: async (sessionId) => ({ runId: `run-${sessionId}` }),
+        awaitRun: async (sessionId) => ({
+          status: "completed",
+          output: `worker:${sessionId.split("-")[1] ?? sessionId}`,
+        }),
+        interrupt: async () => {},
+        archive: async () => {},
+      },
+      taskBridge: {
+        registerSessionTask: (input) => manager.registerSessionTask(input),
+        completeSessionTask: (id, input) => manager.completeSessionTask(id, input),
+        writeToSessionTask: (id, data) => manager.writeToTask(id, data),
+      },
+    });
     const tool = createWorkflowTool({
       createRunner: (options) =>
         createAgentWorkflowRunner({
           ...options,
-          spawnWorker: async (config) => spawnNodeWorker(config, spawned),
+          spawnWorker: async (config) => {
+            spawned.push(config);
+            return await backend.spawn(config);
+          },
+          awaitTask: (taskId, waitOptions) => manager.awaitTask(taskId, waitOptions),
+          getDiffSummary: async () => ({ changedFiles: [], insertions: 0, deletions: 0 }),
           getAgentDefinition: () => undefined,
         }),
     });
@@ -77,33 +98,6 @@ describe("Workflow tool smoke", () => {
     expect(stored[0]?.orderedResults.map((task) => task.taskId)).toEqual(["research", "verify"]);
   });
 });
-
-async function spawnNodeWorker(
-  config: TeammateSpawnConfig,
-  spawned: TeammateSpawnConfig[],
-): Promise<SpawnResult> {
-  spawned.push(config);
-  const task = await getTaskManager(config.cwd).createShellTask({
-    argv: [
-      NODE,
-      "-e",
-      "const id=process.env.WORKFLOW_TASK_ID; const prompt=process.env.WORKFLOW_PROMPT ?? ''; process.stdout.write(`worker:${id}\\nprompt:${prompt.slice(0,120)}`);",
-    ],
-    description: `workflow smoke ${config.name}`,
-    cwd: config.cwd,
-    type: "agent",
-    env: {
-      WORKFLOW_TASK_ID: config.sessionId?.split("-")[1] ?? config.name,
-      WORKFLOW_PROMPT: config.prompt,
-    },
-  });
-  return {
-    success: true,
-    agentId: `${config.name}@${config.team}`,
-    taskId: task.id,
-    backendType: "smoke",
-  };
-}
 
 function textOf(result: Awaited<ReturnType<ReturnType<typeof createWorkflowTool>["execute"]>>): string {
   const block = result.content[0];

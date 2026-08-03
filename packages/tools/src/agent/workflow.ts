@@ -309,19 +309,38 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         const waitForCompletion = input.waitForCompletion === true || !persist || options.run !== undefined;
         if (action === "run" && persist && options.run === undefined && !waitForCompletion) {
           const store = new WorkflowRunStore({ cwd: context.cwd });
-          void runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
+          const workflowRunId = runId ?? createWorkflowRunId();
+          const ownerSignal = context.runAbortSignal ?? context.abortSignal;
+          const onEvent = (event: WorkflowRunEvent) => emitWorkflowRuntimeEvent(context, event);
+          const cancelForParentInterrupt = () => {
+            void cancelPersistentWorkflow(workflowRunId, {
+              store,
+              reason: "Parent session interrupted",
+              stopTask: options.stopTask ?? ((taskId) => stopTaskInCwd(context.cwd, context.sessionId, taskId)),
+              onEvent,
+            }).catch(() => {});
+          };
+          const workflow = runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
             cwd: context.cwd,
-            runId,
+            runId: workflowRunId,
             store,
-            onEvent: (event) => emitWorkflowRuntimeEvent(context, event),
-          })
+            onEvent,
+            signal: ownerSignal,
+          });
+          if (ownerSignal?.aborted) {
+            cancelForParentInterrupt();
+          } else {
+            ownerSignal?.addEventListener("abort", cancelForParentInterrupt, { once: true });
+          }
+          void workflow
             .catch((error) => {
               // The scheduler normally records task-level failures in snapshots. This
               // catch only prevents detached background runs from surfacing as
               // unhandled rejections if startup fails unexpectedly.
               console.error(`Detached workflow ${runId ?? "(unknown)"} failed: ${error instanceof Error ? error.message : String(error)}`);
-            });
-          const snapshot = runId ? store.load(runId) : store.latest();
+            })
+            .finally(() => ownerSignal?.removeEventListener("abort", cancelForParentInterrupt));
+          const snapshot = store.load(workflowRunId);
           if (!snapshot) {
             return { content: [{ type: "text", text: "Workflow submitted, but no running snapshot was written yet. Use Workflow status/latest or /workflow to refresh." }] };
           }

@@ -178,7 +178,7 @@ export interface CliSessionRuntimeFactoryOptions {
 export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactoryOptions): SessionRuntimeFactory {
   const getSettings = options.getSettings ?? (() => options.settings);
   return {
-    async createRuntime({ session, history, parts }) {
+    async createRuntime({ session, history, parts, childSessionHost, sessionTaskBridge }) {
       let permissionPrompt: ((toolName: string, reason?: string, input?: Record<string, unknown>) => Promise<boolean>) | undefined;
       const settings = getSettings();
       const skillRegistry = new SkillRegistry();
@@ -188,8 +188,25 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
         cwd: session.cwd,
         sessionId: session.id,
         cliOverrides: {
-          // Headless daemon is fail-closed until PermissionBroker is wired.
-          permissionMode: settings.permission.mode,
+          permissionMode:
+            typeof session.metadata.permissionMode === "string"
+              ? session.metadata.permissionMode
+              : settings.permission.mode,
+          systemPrompt:
+            typeof session.metadata.systemPrompt === "string"
+              ? session.metadata.systemPrompt
+              : undefined,
+          maxTurns:
+            typeof session.metadata.maxTurns === "number"
+              ? session.metadata.maxTurns
+              : undefined,
+          allowedTools: Array.isArray(session.metadata.allowedTools)
+            ? session.metadata.allowedTools.filter((tool): tool is string => typeof tool === "string").join(",")
+            : undefined,
+          disallowedTools: Array.isArray(session.metadata.disallowedTools)
+            ? session.metadata.disallowedTools.filter((tool): tool is string => typeof tool === "string").join(",")
+            : undefined,
+          effort: typeof session.metadata.effort === "string" ? session.metadata.effort : undefined,
         },
         permissionPrompt: async (toolName, reason, input) => {
           if (!permissionPrompt) return false;
@@ -197,6 +214,8 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
         },
         skillRegistry,
         credentialStorage: new CredentialStorage(),
+        childSessionHost,
+        sessionTaskBridge,
       });
       registerPluginHooks(bundle.hookExecutor, pluginContributions.plugins);
       await registerPluginTools(bundle.toolRegistry, pluginContributions.plugins);
@@ -225,7 +244,7 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
   };
 }
 
-class CliSessionRuntime implements SessionRuntime {
+export class CliSessionRuntime implements SessionRuntime {
   constructor(
     private readonly bundle: Awaited<ReturnType<typeof bootstrap>>,
     private readonly mcpManager: McpClientManager,
@@ -242,7 +261,18 @@ class CliSessionRuntime implements SessionRuntime {
     if (input.session.model) this.bundle.queryEngine.setModel(input.session.model);
     this.bundle.queryEngine.setRuntimeEventSink((event) => hooks.onEvent(event));
     try {
-      for await (const event of this.bundle.queryEngine.submitMessage(input.input.content)) {
+      let lastWake = 0;
+      for await (const event of this.bundle.queryEngine.submitMessage(
+        input.input.content,
+        {
+          signal: input.signal,
+          pullFollowUps: () => {
+            if (input.wakeCount() <= lastWake) return [];
+            lastWake = input.wakeCount();
+            return input.drainSteeredInputs().map((row) => row.content);
+          },
+        },
+      )) {
         if (input.signal.aborted) throw new Error("Run interrupted");
         await hooks.onStreamEvent(event);
       }

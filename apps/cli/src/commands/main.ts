@@ -18,7 +18,6 @@ import { EventRenderer } from "../renderer";
 import { formatApiError } from "../format-error";
 import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
-import { probeDaemonRegistry, terminateDaemonProcess } from "../daemon-lifecycle";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
@@ -51,6 +50,8 @@ interface MainOptions {
   verbose?: boolean;
   debug?: boolean;
   tui?: boolean;
+  daemonUrl?: string;
+  daemonToken?: string;
   dangerouslySkipPermissions?: boolean;
   allowedTools?: string;
   disallowedTools?: string;
@@ -228,9 +229,9 @@ export function resolveMainEntryMode(
 function rejectInteractiveContinueResume(options: MainOptions): void {
   if (!options.continue && !options.resume) return;
   console.error(
-    "`--continue` / `--resume` apply to print-mode project snapshots only.\n" +
-      "Interactive sessions use the daemon store — open TUI and run /sessions or /resume.\n" +
-      "Example: ohs -p --continue \"follow up\"",
+    "`--continue` / `--resume` are not available for interactive TUI.\n" +
+      "Use TUI `/sessions` or `/resume` for daemon sessions.\n" +
+      "Example: ohs",
   );
   process.exit(1);
 }
@@ -241,7 +242,7 @@ function rejectInteractiveContinueResume(options: MainOptions): void {
  * 模式优先级：
  * 1. dry-run / task-worker
  * 2. TUI（`--tui` 或默认无 prompt）— 启动/attach daemon，再 spawn opentui 前端
- * 3. print（`-p` 或存在 prompt）— 进程内一次性 Agent 调用
+ * 3. print（`-p` 或存在 prompt）— ensure daemon + Session API headless client
  */
 export async function mainAction(
   prompt: string | undefined,
@@ -286,16 +287,34 @@ export async function mainAction(
 }
 
 /**
- * 执行打印模式，处理单个提示并输出结果后退出。
- * 
- * 此模式适用于脚本化调用或非交互式环境。它会加载技能，初始化运行时环境，
- * 并将所有事件通过 EventRenderer 渲染到标准输出。
- * 
- * @param settings -当前加载的应用设置
- * @param prompt - 要处理的用户提示词
- * @param options - 命令行选项，用于控制渲染行为（如 verbose）
- * @returns Promise<void>
+ * 用户 headless print：ensure daemon + Session API（见 `print-session.ts`）。
  */
+async function runPrintMode(
+  settings: Settings,
+  prompt: string,
+  options: MainOptions,
+): Promise<void> {
+  const { runPrintSession } = await import("../print-session.js");
+  const path = await import("node:path");
+  await runPrintSession(settings, prompt, {
+    model: options.model ?? settings.model,
+    cwd: options.cwd ? path.resolve(options.cwd) : process.cwd(),
+    verbose: options.verbose,
+    outputFormat: options.outputFormat,
+    dangerouslySkipPermissions: options.dangerouslySkipPermissions,
+    permissionMode: options.permissionMode,
+    maxTurns: options.maxTurns ?? settings.maxTurns,
+    systemPrompt: options.systemPrompt,
+    allowedTools: options.allowedTools,
+    disallowedTools: options.disallowedTools,
+    effort: options.effort,
+    daemonUrl: options.daemonUrl,
+    daemonToken: options.daemonToken,
+    continue: options.continue,
+    resume: options.resume,
+  });
+}
+
 /**
  * stdin 驱动的无 TTY worker(对齐 Python ui/app.py run_task_worker):
  * 读一行(JSON {text,...} 或纯文本)→ submitMessage 流式 stdout → 退出。
@@ -483,108 +502,6 @@ export function decodeTaskWorkerLine(raw: string): string {
   return trimmed;
 }
 
-async function runPrintMode(
-  settings: Settings,
-  prompt: string,
-  options: MainOptions,
-): Promise<void> {
-  // ==================加载并注册技能（三源：bundled < user < project）==================
-  const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
-
-  // ==================创建凭证存储器==================
-  const credentialStorage = new CredentialStorage();
-
-  // ==================创建运行时环境==================
-  // swarm worker（teammate 子进程，带 --swarm-worker + swarm env）：permissionPrompt
-  // 接文件流——写 pending 请求并阻塞轮询 leader 裁决（D.5）。写操作从「无确认即拒」
-  // 变「转 leader 审批」；非 worker 的 print 模式保持无 prompt（ask 即拒）。
-  const swarmPermissionPrompt =
-    options.swarmWorker && isSwarmWorker() ? buildSwarmWorkerPermissionPrompt() : undefined;
-  const bundle = await bootstrap({
-    settings,
-    cliOverrides: buildCliOverrides(options),
-    skillRegistry,
-    credentialStorage,
-    permissionPrompt: swarmPermissionPrompt,
-    sessionId: options.sessionId,
-  });
-  // 插件 hooks 贡献：bootstrap 后才有 HookExecutor，经缓存二段注册（C.1-R3）。
-  registerPluginHooks(bundle.hookExecutor);
-
-  const memoryDir = getProjectMemoryDir(process.cwd());
-  const memoryManager = new MemoryManager(1000, memoryDir);
-  const memoryFile = join(memoryDir, "memory.json");
-  await memoryManager.loadFromFile(memoryFile).catch(() => { });
-
-  const memoryContent =
-    settings.memory?.enabled !== false
-      ? memoryManager.buildMemoryPrompt(settings.memory?.maxFiles ?? 10)
-      : undefined;
-  bundle.queryEngine.setSystemPrompt(
-    await buildRuntimeSystemPrompt({
-      customPrompt: settings.systemPrompt,
-      cwd: process.cwd(),
-      permissionMode: settings.permission.mode,
-      fastMode: settings.fastMode,
-      effort: settings.effort,
-      passes: settings.passes,
-      memoryContent,
-      skillsList: skillRegistry.modelVisibleList(),
-    }),
-  );
-
-  bundle.queryEngine.setMemoryRetriever(async (userInput: string) => {
-    if (settings.memory?.enabled === false) return null;
-    const maxEntries = settings.memory?.maxFiles ?? 10;
-    const { text, ids } = memoryManager.selectRelevantForPrompt(maxEntries, userInput);
-    if (!text) return null;
-    try {
-      if (ids.length > 0) {
-        await memoryManager.markMemoryUsed(ids);
-      }
-    } catch {
-      // best-effort
-    }
-    return text;
-  });
-
-  // ==================创建事件渲染器==================
-  const renderer = new EventRenderer({
-    verbose: options.verbose,
-    printMode: true,
-    outputStyle: settings.outputStyle,
-  });
-
-  // ==================提交消息并渲染事件==================
-  try {
-    for await (const event of bundle.queryEngine.submitMessage(prompt)) {
-      await renderer.render(event);
-    }
-  } catch (err) {
-    if (err instanceof Error) {
-      process.stderr.write(`${formatApiError(err, settings)}\n`);
-    }
-    process.exit(1);
-  }
-
-  // 个性化（C.5）：会话结束 best-effort 抽取环境事实，绝不阻塞退出。
-  try {
-    updateRulesFromSession(bundle.queryEngine.getHistory());
-  } catch {
-    // best-effort
-  }
-
-  await maintainMemoryAfterTurn({
-    bundle,
-    settings,
-    model: settings.model,
-    memoryManager,
-    memoryDir,
-    sessionId: generateSessionId(),
-  });
-}
-
 /**
  * 启动 TUI (Terminal User Interface) 模式。
  *
@@ -616,35 +533,18 @@ async function runTuiMode(
   const { spawn } = await import("node:child_process");
   const path = await import("node:path");
   const url = await import("node:url");
-  const cliPath = process.argv[1];
-  if (!cliPath) throw new Error("Cannot locate CLI entrypoint.");
-  const daemonProbeOptions = {
-    expectedVersion: VERSION,
-    minimumStartedAt: (await stat(cliPath)).mtimeMs,
-  };
-  const {
-    clearDaemonRegistry,
-    readDaemonRegistry,
-  } = await import("@openharness/server");
-
-  const waitForDaemonRegistry = async (): Promise<NonNullable<ReturnType<typeof readDaemonRegistry>>> => {
-    for (let i = 0; i < 40; i += 1) {
-      const registry = readDaemonRegistry();
-      if (registry && await probeDaemonRegistry(registry, daemonProbeOptions) === "ready") return registry;
-      await new Promise((resolve) => setTimeout(resolve, 100));
+  const { ensureLocalDaemon } = await import("../ensure-daemon.js");
+  let daemon: { url: string; token: string };
+  if (options.daemonUrl) {
+    const remoteUrl = options.daemonUrl.replace(/\/+$/, "");
+    const parsed = new URL(remoteUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("--daemon-url must use http or https");
     }
-    throw new Error("The OpenHarness daemon was not ready after starting ohs serve.");
-  };
-
-  let daemon = readDaemonRegistry();
-  const daemonStatus = daemon ? await probeDaemonRegistry(daemon, daemonProbeOptions) : "unreachable";
-  if (!daemon || daemonStatus !== "ready") {
-    if (daemon && daemonStatus === "stale") terminateDaemonProcess(daemon.pid);
-    clearDaemonRegistry();
-    const serveArgs = [cliPath, "serve", "--register", "--host", "127.0.0.1", "--port", "0"];
-    const daemonChild = spawn(process.execPath, serveArgs, { detached: true, stdio: "ignore", windowsHide: true });
-    daemonChild.unref();
-    daemon = await waitForDaemonRegistry();
+    if (!options.daemonToken) throw new Error("--daemon-token is required with --daemon-url");
+    daemon = { url: remoteUrl, token: options.daemonToken };
+  } else {
+    daemon = await ensureLocalDaemon();
   }
 
   const frontendConfig = JSON.stringify({
@@ -653,6 +553,8 @@ async function runTuiMode(
       token: daemon.token,
       cwd: options.cwd ? path.resolve(options.cwd) : process.cwd(),
       model: options.model ?? settings.model,
+      permissionMode: options.permissionMode ?? settings.permission.mode,
+      maxTurns: options.maxTurns ?? settings.maxTurns,
     },
     initial_prompt: prompt ?? null,
     theme: options.theme ?? "default",

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ToolDefinition } from "@openharness/core";
 import { loadSettings, type Settings } from "@openharness/core";
+import { createToolAbortScope } from "../abort.js";
 
 // Cache settings per process; avoids a disk read on every tool invocation.
 let _settingsCache: Settings | undefined;
@@ -46,7 +47,7 @@ export const imageGenerationTool: ToolDefinition = {
     },
     required: ["prompt"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const prompt = input.prompt as string;
     const size = (input.size as string | undefined) ?? "1024x1024";
     const quality = (input.quality as string | undefined) ?? "standard";
@@ -57,6 +58,7 @@ export const imageGenerationTool: ToolDefinition = {
     const apiKey = settings.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? "";
     const baseUrl = (settings.imageGenerationBaseUrl ?? settings.baseUrl ?? "https://api.openai.com").replace(/\/$/, "");
     const model = modelOverride ?? "dall-e-3";
+    const generationAbortScope = createToolAbortScope(context.abortSignal, 120_000);
 
     try {
       const res = await fetch(`${baseUrl}/v1/images/generations`, {
@@ -66,7 +68,7 @@ export const imageGenerationTool: ToolDefinition = {
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({ model, prompt, size, quality, n, response_format: "b64_json" }),
-        signal: AbortSignal.timeout(120_000),
+        signal: generationAbortScope.signal,
       });
 
       if (!res.ok) {
@@ -97,13 +99,18 @@ export const imageGenerationTool: ToolDefinition = {
           await writeFile(filePath, Buffer.from(item.b64_json, "base64"));
         } else if (item.url) {
           // fallback: download from URL
-          const imgRes = await fetch(item.url, { signal: AbortSignal.timeout(60_000) });
-          if (imgRes.ok) {
-            const buf = Buffer.from(await imgRes.arrayBuffer());
-            await writeFile(filePath, buf);
-          } else {
-            savedPaths.push(`(download failed: ${item.url})`);
-            continue;
+          const downloadAbortScope = createToolAbortScope(context.abortSignal, 60_000);
+          try {
+            const imgRes = await fetch(item.url, { signal: downloadAbortScope.signal });
+            if (imgRes.ok) {
+              const buf = Buffer.from(await imgRes.arrayBuffer());
+              await writeFile(filePath, buf);
+            } else {
+              savedPaths.push(`(download failed: ${item.url})`);
+              continue;
+            }
+          } finally {
+            downloadAbortScope.dispose();
           }
         } else {
           continue;
@@ -121,6 +128,8 @@ export const imageGenerationTool: ToolDefinition = {
         content: [{ type: "text", text: `image_generation failed: ${(err as Error).message}` }],
         isError: true,
       };
+    } finally {
+      generationAbortScope.dispose();
     }
   },
 };

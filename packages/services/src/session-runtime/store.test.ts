@@ -1,22 +1,41 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { SessionStore } from "./store.js";
 
 function withStore(test: (store: SessionStore, path: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
-  const path = join(dir, "store.json");
+  const path = join(dir, "store.db");
+  const store = new SessionStore({ path });
   try {
-    test(new SessionStore({ path }), path);
+    test(store, path);
   } finally {
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 describe("SessionStore", () => {
+  it("lists direct child sessions without mixing descendants or siblings", () => {
+    withStore((store) => {
+      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child-1", parentId: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child-2", parentId: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "grandchild", parentId: "child-1", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "other", cwd: process.cwd(), model: "m" });
+
+      expect(store.listChildSessions("parent").map((session) => session.id).sort()).toEqual([
+        "child-1",
+        "child-2",
+      ]);
+      expect(store.listChildSessions("child-1").map((session) => session.id)).toEqual(["grandchild"]);
+    });
+  });
+
   it("persists sessions and rehydrates from disk", () => {
     withStore((store, path) => {
       const session = store.createSession({
@@ -30,7 +49,43 @@ describe("SessionStore", () => {
       const reloaded = new SessionStore({ path });
       expect(reloaded.getSession("s1")).toEqual(session);
       expect(reloaded.listSessions().map((row) => row.id)).toEqual(["s1"]);
+      reloaded.close();
     });
+  });
+
+  it("does not read legacy JSON stores as a migration source", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
+    const path = join(dir, "legacy.json");
+    try {
+      writeFileSync(path, JSON.stringify({ sessions: { legacy: { id: "legacy" } } }), "utf-8");
+      expect(() => new SessionStore({ path })).toThrow(/database/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adopts a pre-Drizzle SQLite schema without replacing session data", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
+    const path = join(dir, "store.db");
+    try {
+      const database = new Database(path);
+      database.exec(`
+        CREATE TABLE session (
+          id TEXT PRIMARY KEY, parent_id TEXT, cwd TEXT NOT NULL, title TEXT NOT NULL,
+          model TEXT NOT NULL, agent TEXT, status TEXT NOT NULL, metadata_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER
+        );
+      `);
+      database.prepare("INSERT INTO session VALUES (?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)")
+        .run("s1", process.cwd(), "existing", "m", "idle", "{}", 1, 1);
+      database.close();
+
+      const store = new SessionStore({ path });
+      expect(store.getSession("s1")).toMatchObject({ id: "s1", title: "existing" });
+      store.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("updates session model and emits session.updated", () => {
@@ -83,7 +138,7 @@ describe("SessionStore", () => {
   });
 
   it("admits prompts, creates messages, updates parts, and keeps per-session order", () => {
-    withStore((store) => {
+    withStore((store, path) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
       store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
 
@@ -108,13 +163,14 @@ describe("SessionStore", () => {
         status: "running",
         text: "h",
       });
-      store.appendMessagePartDelta({
+      const deltaEvent = store.appendMessagePartDelta({
         sessionId: "s1",
         messageId: second.id,
         partId: assistantPart.id,
         field: "text",
         delta: "i",
       });
+      expect(store.latestEventSeq()).toBe(deltaEvent.seq);
       store.createMessage({ id: "m3", sessionId: "s2", role: "user" });
 
       expect(prompt.seq).toBe(1);
@@ -128,6 +184,22 @@ describe("SessionStore", () => {
         ["p2", "hi"],
       ]);
       expect(store.listMessageParts("s1", { messageId: second.id }).map((row) => row.id)).toEqual(["p2"]);
+      expect(store.listEvents().map((event) => event.type)).toContain("session.message.part.delta");
+      store.upsertMessagePart({
+        id: "p2",
+        sessionId: "s1",
+        messageId: second.id,
+        type: "text",
+        status: "completed",
+      });
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.listMessageParts("s1", { messageId: second.id }).map((row) => [row.id, row.text])).toEqual([
+        ["p2", "hi"],
+      ]);
+      expect(reloaded.listEvents().map((event) => event.type)).not.toContain("session.message.part.delta");
+      expect(reloaded.listEvents().map((event) => event.type)).toContain("session.message.part.updated");
+      reloaded.close();
     });
   });
 
@@ -149,6 +221,19 @@ describe("SessionStore", () => {
         "session.input.admitted",
         "daemon.heartbeat",
       ]);
+    });
+  });
+
+  it("lists unbound inputs until they are run-bound or promoted to a message", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const first = store.admitPrompt({ id: "i1", sessionId: "s1", content: "start", delivery: "queue" });
+      store.createRun({ id: "r1", sessionId: "s1", inputId: first.id });
+      const steered = store.admitPrompt({ id: "i2", sessionId: "s1", content: "nudge", delivery: "steer" });
+      expect(store.listUnboundInputs("s1").map((row) => row.id)).toEqual(["i2"]);
+
+      store.createMessage({ id: "m1", sessionId: "s1", role: "user", inputId: steered.id });
+      expect(store.listUnboundInputs("s1")).toEqual([]);
     });
   });
 
@@ -215,6 +300,7 @@ describe("SessionStore", () => {
       ]);
       expect(reloaded.listEvents().map((event) => event.type)).toContain("permission.replied");
       expect(reloaded.listEvents().map((event) => event.type)).toContain("session.message.part.updated");
+      reloaded.close();
     });
   });
 
@@ -235,6 +321,39 @@ describe("SessionStore", () => {
       expect(snapshot.messages.map((row) => row.id)).toEqual(["m1"]);
       expect(snapshot.parts.map((row) => row.text)).toEqual(["hello"]);
       expect(snapshot.runs).toMatchObject([{ id: "r1", status: "interrupted" }]);
+    });
+  });
+
+  it("persists task/child/run links and terminalizes active tasks after a restart", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child", parentId: "parent", cwd: process.cwd(), model: "m" });
+      const input = store.admitPrompt({ id: "child-input", sessionId: "child", content: "inspect" });
+      const run = store.createRun({ id: "child-run", sessionId: "child", inputId: input.id });
+      store.createSessionTask({
+        id: "task-child",
+        sessionId: "parent",
+        childSessionId: "child",
+        type: "agent",
+        description: "Explore@default",
+        cwd: process.cwd(),
+      });
+      store.updateSessionTask("task-child", { runId: run.id });
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getSessionState("parent").tasks).toMatchObject([{
+        id: "task-child",
+        childSessionId: "child",
+        runId: "child-run",
+        status: "running",
+      }]);
+      expect(reloaded.interruptActiveSessionTasks()).toBe(1);
+      expect(reloaded.getSessionTask("task-child")).toMatchObject({
+        status: "interrupted",
+        error: "Daemon restarted before the task completed",
+      });
+      expect(reloaded.listEvents({ sessionId: "parent" }).map((event) => event.type)).toContain("session.task.updated");
+      reloaded.close();
     });
   });
 

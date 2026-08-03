@@ -52,7 +52,10 @@ for await (const update of syncEvents(client, { sessionId: session.id })) {
 }
 ```
 
-当前主要消费者：`apps/frontend` 的 `useServerSync`。
+当前主要消费者：
+
+- `apps/frontend` 的 `useServerSync`（TUI）
+- `apps/cli` 的 `print-session.ts`（用户 headless print）
 
 ## API 一览
 

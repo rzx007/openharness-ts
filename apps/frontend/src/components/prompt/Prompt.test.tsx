@@ -169,6 +169,69 @@ test("slash prefix shows autocomplete; enter executes highlighted command", asyn
 // Test 4: busy=true → spinner + "working...", no submit on Enter
 // ---------------------------------------------------------------------------
 
+test("exact slash command submits the typed line instead of executing autocomplete", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+  const sessionsRun = mock(() => undefined);
+  const commands: Command[] = [
+    { id: "/sessions", title: "List sessions", run: sessionsRun },
+    { id: "/settings", title: "Settings", run: mock(() => undefined) },
+  ];
+
+  const { renderer, renderOnce, mockInput, waitForFrame } =
+    await testRender(
+      makePrompt({ onSubmit, slashCommands: commands }),
+      { width: 80, height: 24 },
+    );
+
+  await renderOnce();
+  await act(async () => {
+    await mockInput.typeText("/sessions");
+  });
+  await waitForFrame((f) => f.includes("/sessions"));
+
+  await act(async () => {
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(onSubmit).toHaveBeenCalledWith("/sessions");
+  expect(sessionsRun).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});
+
+test("slash command with args submits raw text instead of being swallowed by autocomplete", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+  const modelRun = mock(() => undefined);
+  const commands: Command[] = [
+    { id: "/model", title: "Set model", run: modelRun },
+  ];
+
+  const { renderer, renderOnce, mockInput, waitForFrame } =
+    await testRender(
+      makePrompt({ onSubmit, slashCommands: commands }),
+      { width: 80, height: 24 },
+    );
+
+  await renderOnce();
+  await act(async () => {
+    await mockInput.typeText("/model gpt-test");
+  });
+  await waitForFrame((f) => f.includes("/model gpt-test"));
+
+  await act(async () => {
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(onSubmit).toHaveBeenCalledWith("/model gpt-test");
+  expect(modelRun).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});
+
 test("busy state still allows slash autocomplete and command selection", async () => {
   const onSubmit = mock((_line: string) => undefined);
   const themeRun = mock(() => undefined);
@@ -198,6 +261,62 @@ test("busy state still allows slash autocomplete and command selection", async (
 
   expect(themeRun).toHaveBeenCalledTimes(1);
   expect(onSubmit).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});
+
+test("busy state submits exact slash commands even before autocomplete settles", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+  const sessionsRun = mock(() => undefined);
+  const commands: Command[] = [
+    { id: "/sessions", title: "List sessions", run: sessionsRun },
+  ];
+
+  const { renderer, renderOnce, mockInput, waitForFrame } =
+    await testRender(
+      makePrompt({ busy: true, onSubmit, slashCommands: commands }),
+      { width: 80, height: 24 },
+    );
+
+  await renderOnce();
+  await waitForFrame((f) => f.includes("working"));
+
+  await act(async () => {
+    await mockInput.typeText("/sessions");
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(onSubmit).toHaveBeenCalledWith("/sessions");
+  expect(sessionsRun).not.toHaveBeenCalled();
+
+  renderer.destroy();
+});
+
+test("busy state submits slash commands with args", async () => {
+  const onSubmit = mock((_line: string) => undefined);
+  const commands: Command[] = [
+    { id: "/model", title: "Set model", run: mock(() => undefined) },
+  ];
+
+  const { renderer, renderOnce, mockInput, waitForFrame } =
+    await testRender(
+      makePrompt({ busy: true, onSubmit, slashCommands: commands }),
+      { width: 80, height: 24 },
+    );
+
+  await renderOnce();
+  await waitForFrame((f) => f.includes("working"));
+
+  await act(async () => {
+    await mockInput.typeText("/model gpt-test");
+    mockInput.pressEnter();
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await renderOnce();
+
+  expect(onSubmit).toHaveBeenCalledWith("/model gpt-test");
 
   renderer.destroy();
 });

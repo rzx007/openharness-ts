@@ -12,7 +12,8 @@ import type { SandboxRuntimeReporter, SandboxRuntimeStatus } from "./types.js";
 export interface SandboxRuntimeOptions {
   settings: Settings;
   cwd: string;
-  sessionId: string;
+  /** Daemon sessions must pass this; omit for cwd-only callers (channels / task-worker). */
+  sessionId?: string;
   deps?: AvailabilityDeps;
   reporter?: SandboxRuntimeReporter;
 }
@@ -76,9 +77,12 @@ export async function startSandboxRuntime(
     return inertRuntime(statusFromAvailability("unavailable", availability));
   }
 
+  const dockerSessionId =
+    options.sessionId?.trim() ||
+    `sandbox-${process.pid}-${Date.now().toString(36)}`;
   const session = new DockerSandboxSession({
     settings: options.settings,
-    sessionId: options.sessionId,
+    sessionId: dockerSessionId,
     cwd: options.cwd,
     deps: options.deps,
     reporter: options.reporter,
@@ -99,7 +103,11 @@ export async function startSandboxRuntime(
       reason: error instanceof Error ? error.message : String(error),
     }));
   }
-  setActiveSandboxSession(session, options.cwd);
+  // Daemon path keys by sessionId+cwd; channels/task-worker omit sessionId → cwd-only.
+  const activeScope = options.sessionId?.trim()
+    ? { cwd: options.cwd, sessionId: options.sessionId.trim() }
+    : options.cwd;
+  setActiveSandboxSession(session, activeScope);
   options.reporter?.({ type: "ready", backend: "docker", containerName: session.containerName });
 
   const status = statusFromAvailability(
@@ -118,14 +126,14 @@ export async function startSandboxRuntime(
       try {
         await session.stop();
       } finally {
-        setActiveSandboxSession(null, options.cwd);
+        setActiveSandboxSession(null, activeScope);
       }
     },
     stopSync() {
       try {
         session.stopSync();
       } finally {
-        setActiveSandboxSession(null, options.cwd);
+        setActiveSandboxSession(null, activeScope);
       }
     },
   };

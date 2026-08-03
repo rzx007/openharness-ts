@@ -1,10 +1,13 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
+import { randomUUID } from "node:crypto";
 
+import { cancelPersistentWorkflow, WorkflowRunStore, type WorkflowRunEvent } from "@openharness/coordinator";
 import type { StreamEvent } from "@openharness/core";
 import {
   SessionStore,
   getTaskManager,
+  type TaskInfo,
   type PermissionStatus,
   type SessionEventRecord,
 } from "@openharness/services";
@@ -18,7 +21,8 @@ import {
 import { getDefaultSessionStorePath } from "./paths.js";
 import { StorePermissionBroker } from "./permission-broker.js";
 import { RunInterruptedError, SessionRunCoordinator } from "./run-coordinator.js";
-import type { SessionRuntime, SessionRuntimeFactory } from "./runtime.js";
+import type { ChildSessionHost, SessionRuntime, SessionRuntimeFactory } from "./runtime.js";
+import type { SessionTaskBridge } from "./runtime.js";
 import { writeSessionExport, type SessionExportFormat } from "./export-session.js";
 import type {
   AgentPersonaService,
@@ -37,11 +41,19 @@ import type {
 } from "./settings-api.js";
 import { rewindTranscript } from "./rewind.js";
 import { estimateCostUsd } from "./usage.js";
+import {
+  TRACE_ID_HEADER,
+  writeStructuredLog,
+  type ObservabilityEvent,
+  type StructuredLogger,
+} from "./observability.js";
 
 export interface OpenHarnessServerOptions {
   host?: string;
   port?: number;
   token?: string;
+  /** Exact browser origins permitted to call this daemon. Empty means native/same-origin clients only. */
+  allowedOrigins?: string[];
   store?: SessionStore;
   storePath?: string;
   runtimeFactory?: SessionRuntimeFactory;
@@ -60,11 +72,29 @@ export interface OpenHarnessServerOptions {
   hooksService?: HooksService;
   gitService?: GitService;
   version?: string;
+  logger?: StructuredLogger;
 }
 
 export interface OpenHarnessServerHealth {
   ok: true;
   version?: string;
+  startedAt: number;
+  uptimeMs: number;
+  sessionCount: number;
+  activeRunCount: number;
+  queuedRunCount: number;
+}
+
+export interface OpenHarnessRuntimeSnapshot {
+  startedAt: number;
+  uptimeMs: number;
+  sessions: { total: number; byStatus: Record<string, number> };
+  runs: { total: number; byStatus: Record<string, number> };
+  tasks: { total: number; byStatus: Record<string, number> };
+  permissions: { total: number; byStatus: Record<string, number> };
+  sseClientCount: number;
+  warmRuntimeCount: number;
+  coordinator: { activeRunCount: number; queuedRunCount: number };
 }
 
 export interface ListenResult {
@@ -75,9 +105,13 @@ export interface ListenResult {
 
 type JsonRecord = Record<string, unknown>;
 type Listener = ReturnType<typeof serve>;
+const DAEMON_RESTART_RUN_REASON = "Daemon restarted before the run completed";
+const DAEMON_RESTART_TASK_REASON = "Daemon restarted before the task completed";
+const DAEMON_RESTART_WORKFLOW_REASON = "Daemon restarted before the workflow completed";
 type SseClient = {
   sessionId?: string;
   controller: ReadableStreamDefaultController<Uint8Array>;
+  heartbeat?: ReturnType<typeof setInterval>;
 };
 type ActiveToolPart = {
   partId: string;
@@ -101,9 +135,72 @@ const SSE_HEADERS = {
   "connection": "keep-alive",
   "content-type": "text/event-stream; charset=utf-8",
 };
+const CORS_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
+const CORS_HEADERS = "authorization, content-type, last-event-id, x-openharness-trace-id";
+
+const RUNTIME_SESSION_METADATA_KEYS = [
+  "permissionMode",
+  "maxTurns",
+  "systemPrompt",
+  "allowedTools",
+  "disallowedTools",
+  "effort",
+] as const;
+
+function runtimeSessionMetadataChanged(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): boolean {
+  return RUNTIME_SESSION_METADATA_KEYS.some(
+    (key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]),
+  );
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeTraceId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value)
+    ? value
+    : undefined;
+}
+
+function withoutTraceId(metadata: Record<string, unknown>): Record<string, unknown> {
+  const { traceId: _traceId, ...rest } = metadata;
+  return rest;
+}
+
+function countByStatus(records: ReadonlyArray<{ status: string }>): Record<string, number> {
+  return records.reduce<Record<string, number>>((counts, record) => {
+    counts[record.status] = (counts[record.status] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function normalizeAllowedOrigins(origins: readonly string[]): Set<string> {
+  const normalized = new Set<string>();
+  for (const value of origins) {
+    if (value === "*") throw new Error("Wildcard CORS origins are not supported");
+    let origin: URL;
+    try {
+      origin = new URL(value);
+    } catch {
+      throw new Error(`Invalid allowed origin: ${value}`);
+    }
+    if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.origin !== value.replace(/\/$/, "")) {
+      throw new Error(`Allowed origin must be an http(s) origin without a path: ${value}`);
+    }
+    normalized.add(origin.origin);
+  }
+  return normalized;
+}
+
+function workflowRunIdFromSessionEvent(event: SessionEventRecord): string | undefined {
+  const workflowEvent = event.payload.event;
+  return isRecord(workflowEvent) && typeof workflowEvent.runId === "string"
+    ? workflowEvent.runId
+    : undefined;
 }
 
 function readLimit(value: string | undefined): number | undefined {
@@ -114,6 +211,25 @@ function readLimit(value: string | undefined): number | undefined {
 
 function readCursor(c: Context): number | undefined {
   return readLimit(c.req.query("cursor") ?? c.req.query("afterSeq"));
+}
+
+function readEventCursor(c: Context): number | undefined {
+  return readCursor(c) ?? readLimit(c.req.header("last-event-id"));
+}
+
+function jsonEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => jsonEqual(value, right[index]));
+  }
+  if (isRecord(left) && isRecord(right)) {
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length && leftKeys.every(
+      (key, index) => key === rightKeys[index] && jsonEqual(left[key], right[key]),
+    );
+  }
+  return false;
 }
 
 function readPermissionStatus(value: string | undefined): PermissionStatus | undefined {
@@ -137,6 +253,15 @@ function errorResponse(status: number, message: string): Response {
   return jsonResponse({ error: message }, status);
 }
 
+function sessionMutationErrorStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith("Session is archived:") ||
+    message.startsWith("Session is closing:") ||
+    message.startsWith("Prompt id is already used:")
+    ? 409
+    : 404;
+}
+
 async function readJson(c: Context): Promise<JsonRecord> {
   const text = await c.req.text();
   if (!text.trim()) return {};
@@ -150,6 +275,7 @@ export class OpenHarnessHttpServer {
   readonly app: Hono;
   readonly store: SessionStore;
   readonly token?: string;
+  private readonly allowedOrigins: ReadonlySet<string>;
   private readonly runtimeFactory?: SessionRuntimeFactory;
   private readonly commandCatalog?: CommandCatalogProvider;
   private readonly settingsService?: SettingsService;
@@ -166,19 +292,29 @@ export class OpenHarnessHttpServer {
   private readonly hooksService?: HooksService;
   private readonly gitService?: GitService;
   private readonly version?: string;
+  private readonly logger: StructuredLogger;
   private readonly permissionBroker: StorePermissionBroker;
+  private readonly childSessionHost: ChildSessionHost;
   private readonly runCoordinator = new SessionRunCoordinator();
   private readonly encoder = new TextEncoder();
   private readonly sseClients = new Set<SseClient>();
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
+  private readonly runPromises = new Map<string, Promise<void>>();
+  private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
+  private readonly requestTraceIds = new WeakMap<Request, string>();
+  private readonly startupRecovery: Promise<void>;
+  private readonly startedAt = Date.now();
   private listener?: Listener;
   private listenResult?: ListenResult;
 
   constructor(options: OpenHarnessServerOptions = {}) {
     this.app = new Hono();
     this.store = options.store ?? new SessionStore({ path: options.storePath ?? getDefaultSessionStorePath() });
-    this.store.interruptActiveRuns();
+    this.store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
+    this.store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
+    this.store.finalizeClosingSessions();
     this.token = options.token;
+    this.allowedOrigins = normalizeAllowedOrigins(options.allowedOrigins ?? []);
     this.runtimeFactory = options.runtimeFactory;
     this.commandCatalog = options.commandCatalog;
     this.settingsService = options.settingsService;
@@ -195,10 +331,28 @@ export class OpenHarnessHttpServer {
     this.hooksService = options.hooksService;
     this.gitService = options.gitService;
     this.version = options.version;
+    this.logger = options.logger ?? writeStructuredLog;
     this.permissionBroker = new StorePermissionBroker({
       store: this.store,
       onChange: (previousEventSeq) => this.broadcastSince(previousEventSeq),
+      logger: (event) => this.log(event),
     });
+    this.childSessionHost = {
+      createChildSession: async (input) => this.createChildSession(input),
+      admitPrompt: async (sessionId, content) => {
+        const admitted = this.admitPromptAndMaybeRun(sessionId, { content });
+        return { ...(admitted.run ? { runId: admitted.run.id } : {}) };
+      },
+      awaitRun: async (sessionId, runId) => this.awaitChildRun(sessionId, runId),
+      interrupt: async (sessionId) => {
+        this.interruptSession(sessionId);
+      },
+      closeRuntime: async (sessionId) => this.closeRuntime(sessionId),
+      archive: async (sessionId) => {
+        await this.archiveSessionTree(sessionId);
+      },
+    };
+    this.startupRecovery = this.recoverInterruptedWorkflows();
     this.mountRoutes();
   }
 
@@ -207,6 +361,7 @@ export class OpenHarnessHttpServer {
   }
 
   async listen(options: Pick<OpenHarnessServerOptions, "host" | "port"> = {}): Promise<ListenResult> {
+    await this.startupRecovery;
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 0;
     return await new Promise<ListenResult>((resolve, reject) => {
@@ -237,31 +392,71 @@ export class OpenHarnessHttpServer {
       } catch {
         // Client may already be gone.
       }
+      this.removeSseClient(client);
     }
-    this.sseClients.clear();
     await this.closeAllRuntimes();
-    if (!this.listener) return;
-    await new Promise<void>((resolve, reject) => {
-      this.listener!.close((error?: Error) => {
-        if (error) reject(error);
-        else resolve();
+    if (this.listener) {
+      await new Promise<void>((resolve, reject) => {
+        this.listener!.close((error?: Error) => {
+          if (error) reject(error);
+          else resolve();
+        });
       });
-    });
-    this.listener = undefined;
+      this.listener = undefined;
+    }
+    this.store.close();
   }
 
   private mountRoutes(): void {
     this.app.onError((error) => errorResponse(500, error instanceof Error ? error.message : String(error)));
 
     this.app.use("*", async (c, next) => {
+      const traceId = normalizeTraceId(c.req.header(TRACE_ID_HEADER)) ?? randomUUID();
+      const startedAt = Date.now();
+      this.requestTraceIds.set(c.req.raw, traceId);
+      try {
+        await next();
+      } finally {
+        c.res.headers.set(TRACE_ID_HEADER, traceId);
+        this.log({
+          level: "info",
+          event: "http.request.completed",
+          traceId,
+          method: c.req.method,
+          path: c.req.path,
+          status: c.res.status,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+    });
+
+    this.app.use("*", async (c, next) => {
+      const origin = c.req.header("origin");
+      if (!origin) {
+        await next();
+        return;
+      }
+      if (!this.allowedOrigins.has(origin)) return errorResponse(403, "Origin is not allowed");
+      const headers = {
+        "access-control-allow-origin": origin,
+        "access-control-allow-methods": CORS_METHODS,
+        "access-control-allow-headers": CORS_HEADERS,
+        "access-control-expose-headers": TRACE_ID_HEADER,
+        "access-control-max-age": "600",
+        vary: "Origin",
+      };
+      if (c.req.method === "OPTIONS") return new Response(null, { status: 204, headers });
+      await next();
+      for (const [name, value] of Object.entries(headers)) c.res.headers.set(name, value);
+    });
+
+    this.app.use("*", async (c, next) => {
       if (!this.authorized(c)) return errorResponse(401, "Unauthorized");
       await next();
     });
 
-    this.app.get("/health", () => jsonResponse({
-      ok: true,
-      ...(this.version ? { version: this.version } : {}),
-    } satisfies OpenHarnessServerHealth));
+    this.app.get("/health", () => this.handleHealth());
+    this.app.get("/debug/runtime", () => jsonResponse(this.runtimeSnapshot()));
     this.app.get("/commands", (c) => this.handleListCommands(c));
     this.app.get("/settings", (c) => this.handleGetSettings(c));
     this.app.patch("/settings", (c) => this.handlePatchSettings(c));
@@ -308,6 +503,7 @@ export class OpenHarnessHttpServer {
     this.app.get("/sessions/:sessionId/messages", (c) => this.handleListMessages(c));
     this.app.get("/sessions/:sessionId/parts", (c) => this.handleListMessageParts(c));
     this.app.post("/sessions/:sessionId/prompts", (c) => this.handleAdmitPrompt(c));
+    this.app.post("/sessions/:sessionId/runs/:runId/resume", (c) => this.handleResumeInterruptedRun(c));
     this.app.post("/sessions/:sessionId/commands", (c) => this.handleInvokeCommand(c));
     this.app.post("/sessions/:sessionId/interrupt", (c) => this.handleInterruptSession(c));
     this.app.get("/permissions", (c) => this.handleListPermissions(c));
@@ -319,6 +515,63 @@ export class OpenHarnessHttpServer {
   private authorized(c: Context): boolean {
     if (!this.token) return true;
     return c.req.header("authorization") === `Bearer ${this.token}`;
+  }
+
+  private traceIdForContext(c: Context): string {
+    return this.requestTraceIds.get(c.req.raw) ?? randomUUID();
+  }
+
+  private log(event: ObservabilityEvent): void {
+    this.logger(event);
+  }
+
+  private handleHealth(): Response {
+    const snapshot = this.runtimeSnapshot();
+    return jsonResponse({
+      ok: true,
+      ...(this.version ? { version: this.version } : {}),
+      startedAt: snapshot.startedAt,
+      uptimeMs: snapshot.uptimeMs,
+      sessionCount: snapshot.sessions.total,
+      activeRunCount: snapshot.coordinator.activeRunCount,
+      queuedRunCount: snapshot.coordinator.queuedRunCount,
+    } satisfies OpenHarnessServerHealth);
+  }
+
+  private runtimeSnapshot(): OpenHarnessRuntimeSnapshot {
+    const sessions = this.store.listSessions({ includeArchived: true });
+    const runs = sessions.flatMap((session) => this.store.listRuns(session.id));
+    const tasks = sessions.flatMap((session) => this.store.listSessionTasks(session.id));
+    const permissions = this.store.listPermissionRequests();
+    const activeRunCount = sessions.filter((session) => this.runCoordinator.activeRunId(session.id) !== undefined).length;
+    const queuedRunCount = sessions.reduce(
+      (count, session) => count + this.runCoordinator.queuedRunIds(session.id).length,
+      0,
+    );
+    const now = Date.now();
+    return {
+      startedAt: this.startedAt,
+      uptimeMs: now - this.startedAt,
+      sessions: { total: sessions.length, byStatus: countByStatus(sessions) },
+      runs: { total: runs.length, byStatus: countByStatus(runs) },
+      tasks: { total: tasks.length, byStatus: countByStatus(tasks) },
+      permissions: {
+        total: permissions.length,
+        byStatus: countByStatus(permissions),
+      },
+      sseClientCount: this.sseClients.size,
+      warmRuntimeCount: this.runtimes.size,
+      coordinator: { activeRunCount, queuedRunCount },
+    };
+  }
+
+  private traceIdForRun(runId: string): string {
+    const run = this.store.getRun(runId);
+    const traceId = normalizeTraceId(run?.metadata.traceId);
+    if (traceId) return traceId;
+    const generated = randomUUID();
+    if (run) this.store.updateRun(runId, { metadata: { traceId: generated } });
+    return generated;
   }
 
   private async handleListCommands(c: Context): Promise<Response> {
@@ -343,6 +596,9 @@ export class OpenHarnessHttpServer {
 
   private async handlePatchSettings(c: Context): Promise<Response> {
     if (!this.settingsService) return errorResponse(501, "Settings service is not configured");
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update daemon settings while session runs are active");
+    }
     const body = await readJson(c);
     try {
       const result = await this.settingsService.patch(body);
@@ -395,6 +651,9 @@ export class OpenHarnessHttpServer {
     if (typeof body.content !== "string" || !body.content.trim()) {
       return errorResponse(400, "content is required");
     }
+    if (this.hasActiveRunsForCwd(body.cwd)) {
+      return errorResponse(409, "Cannot update memory while session runs are active for this cwd");
+    }
     const tags = Array.isArray(body.tags)
       ? body.tags.filter((tag): tag is string => typeof tag === "string")
       : undefined;
@@ -413,6 +672,9 @@ export class OpenHarnessHttpServer {
     const entryId = c.req.param("entryId");
     if (!cwd) return errorResponse(400, "cwd is required");
     if (!entryId) return errorResponse(400, "entryId is required");
+    if (this.hasActiveRunsForCwd(cwd)) {
+      return errorResponse(409, "Cannot update memory while session runs are active for this cwd");
+    }
     try {
       const deleted = await this.memoryService.remove({ cwd, id: entryId });
       if (!deleted) return errorResponse(404, `Memory entry not found: ${entryId}`);
@@ -438,6 +700,9 @@ export class OpenHarnessHttpServer {
     if (typeof body.provider !== "string" || !body.provider.trim()) {
       return errorResponse(400, "provider is required");
     }
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update authentication while session runs are active");
+    }
     try {
       const result = await this.authService.login({
         provider: body.provider,
@@ -455,6 +720,9 @@ export class OpenHarnessHttpServer {
     const body = await readJson(c);
     if (typeof body.provider !== "string" || !body.provider.trim()) {
       return errorResponse(400, "provider is required");
+    }
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update authentication while session runs are active");
     }
     try {
       const result = await this.authService.logout({ provider: body.provider });
@@ -508,6 +776,9 @@ export class OpenHarnessHttpServer {
 
   private async handleProfileInit(c: Context): Promise<Response> {
     if (!this.profileService) return errorResponse(501, "Profile service is not configured");
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot initialize profile while session runs are active");
+    }
     try {
       const result = await this.profileService.init();
       await this.closeAllRuntimes();
@@ -561,6 +832,9 @@ export class OpenHarnessHttpServer {
     if (!this.pluginService) return errorResponse(501, "Plugin service is not configured");
     const name = c.req.param("name");
     if (!name) return errorResponse(400, "plugin name is required");
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update plugins while session runs are active");
+    }
     try {
       const result = await this.pluginService.setEnabled({ name, enabled });
       if (result.restartRuntimes) await this.closeAllRuntimes();
@@ -661,6 +935,9 @@ export class OpenHarnessHttpServer {
     const body = await readJson(c);
     const cwd = typeof body.cwd === "string" ? body.cwd : c.req.query("cwd") ?? undefined;
     if (!cwd) return errorResponse(400, "cwd is required");
+    if (this.hasActiveRunsForCwd(cwd)) {
+      return errorResponse(409, "Cannot reload plugins while session runs are active for this cwd");
+    }
     try {
       await this.closeRuntimesForCwd(cwd);
       const listed = await this.pluginService.list({ cwd });
@@ -738,7 +1015,7 @@ export class OpenHarnessHttpServer {
     const session = this.store.getSession(sessionId);
     if (!session) return errorResponse(404, "Session not found");
     if (!this.runtimeFactory) return errorResponse(501, "Runtime factory is not configured");
-    if (this.store.listRuns(sessionId).some((run) => run.status === "running" || run.status === "pending")) {
+    if (this.runCoordinator.hasWork(sessionId)) {
       return errorResponse(409, "Cannot compact while a run is active");
     }
     try {
@@ -767,7 +1044,7 @@ export class OpenHarnessHttpServer {
     if (!sessionId) return errorResponse(400, "sessionId is required");
     const session = this.store.getSession(sessionId);
     if (!session) return errorResponse(404, "Session not found");
-    if (this.store.listRuns(sessionId).some((run) => run.status === "running" || run.status === "pending")) {
+    if (this.runCoordinator.hasWork(sessionId)) {
       return errorResponse(409, "Cannot rewind while a run is active");
     }
     const body = await readJson(c);
@@ -807,6 +1084,9 @@ export class OpenHarnessHttpServer {
     const session = this.store.getSession(sessionId);
     if (!session) return errorResponse(404, "Session not found");
     if (!this.runtimeFactory) return errorResponse(501, "Runtime factory is not configured");
+    if (this.hasActiveRunsForCwd(session.cwd)) {
+      return errorResponse(409, "Cannot remember while session runs are active for this cwd");
+    }
     try {
       await this.warmRuntime(sessionId);
       const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
@@ -839,6 +1119,12 @@ export class OpenHarnessHttpServer {
   private handleListTasks(c: Context): Response {
     const scope = this.resolveTaskScope(c);
     if (scope instanceof Response) return scope;
+    if (scope.sessionId) {
+      this.projectManagerTasks(scope.sessionId, getTaskManager(scope));
+      const tasks = this.store.listSessionTasks(scope.sessionId);
+      const status = c.req.query("status");
+      return jsonResponse({ tasks: status ? tasks.filter((task) => task.status === status) : tasks });
+    }
     const tasks = getTaskManager(scope).listTasks(c.req.query("status") ?? undefined);
     return jsonResponse({ tasks });
   }
@@ -856,12 +1142,29 @@ export class OpenHarnessHttpServer {
     const command = typeof body.command === "string" ? body.command.trim() : "";
     if (!command) return errorResponse(400, "command is required");
     try {
-      const task = await getTaskManager({ cwd, ...(sessionId ? { sessionId } : {}) }).createShellTask({
+      const id = sessionId ? `task_${randomUUID()}` : undefined;
+      const manager = getTaskManager({ cwd, ...(sessionId ? { sessionId } : {}) });
+      const task = await manager.createShellTask({
+        ...(id ? { id } : {}),
         command,
         description: command,
         cwd,
         ...(sessionId ? { sessionId } : {}),
       });
+      if (sessionId) {
+        const before = this.latestEventSeq();
+        this.store.createSessionTask({
+          id: task.id,
+          sessionId,
+          type: task.type,
+          description: task.description,
+          cwd: task.cwd,
+          metadata: { origin: "http", taskManagerId: task.id },
+        });
+        this.trackTask(manager, task.id);
+        this.syncPersistentTask(task, manager);
+        this.broadcastSince(before);
+      }
       return jsonResponse({ task }, 201);
     } catch (error) {
       return errorResponse(400, error instanceof Error ? error.message : String(error));
@@ -874,6 +1177,15 @@ export class OpenHarnessHttpServer {
     const scope = this.resolveTaskScope(c);
     if (scope instanceof Response) return scope;
     const manager = getTaskManager(scope);
+    if (scope.sessionId) {
+      this.projectManagerTasks(scope.sessionId, manager);
+      const task = this.store.getSessionTask(taskId);
+      if (!task || task.sessionId !== scope.sessionId) return errorResponse(404, `Task not found: ${taskId}`);
+      const managerTaskId = typeof task.metadata.taskManagerId === "string" ? task.metadata.taskManagerId : task.id;
+      let output = task.output;
+      try { output = manager.readTaskOutput(managerTaskId); } catch { /* durable state remains available after restart */ }
+      return jsonResponse({ task, ...(output !== undefined ? { output } : {}) });
+    }
     const task = manager.getTask(taskId);
     if (!task) return errorResponse(404, `Task not found: ${taskId}`);
     let output: string | undefined;
@@ -891,7 +1203,16 @@ export class OpenHarnessHttpServer {
     const scope = this.resolveTaskScope(c);
     if (scope instanceof Response) return scope;
     try {
-      const task = await getTaskManager(scope).stopTask(taskId);
+      const manager = getTaskManager(scope);
+      if (scope.sessionId) this.projectManagerTasks(scope.sessionId, manager);
+      const persisted = scope.sessionId ? this.store.getSessionTask(taskId) : undefined;
+      const managerTaskId = persisted && typeof persisted.metadata.taskManagerId === "string"
+        ? persisted.metadata.taskManagerId
+        : taskId;
+      const task = await manager.stopTask(managerTaskId);
+      if (scope.sessionId && persisted) {
+        this.syncPersistentTask(task, manager, persisted.id);
+      }
       return jsonResponse({ task });
     } catch (error) {
       return errorResponse(404, error instanceof Error ? error.message : String(error));
@@ -915,11 +1236,15 @@ export class OpenHarnessHttpServer {
   }
 
   private handleListSessions(c: Context): Response {
-    const sessions = this.store.listSessions({
+    let sessions = this.store.listSessions({
       cwd: c.req.query("cwd") ?? undefined,
       includeArchived: c.req.query("includeArchived") === "true",
       limit: readLimit(c.req.query("limit")),
-    }).map((session) => ({
+    });
+    if (c.req.query("includeChildren") !== "true") {
+      sessions = sessions.filter((session) => !session.parentId);
+    }
+    sessions = sessions.map((session) => ({
       ...session,
       title: this.store.resolveSessionListTitle(session.id),
     }));
@@ -946,6 +1271,54 @@ export class OpenHarnessHttpServer {
     return jsonResponse({ session }, 201);
   }
 
+  private async createChildSession(
+    input: Parameters<ChildSessionHost["createChildSession"]>[0],
+  ): ReturnType<ChildSessionHost["createChildSession"]> {
+    if (!this.store.getSession(input.parentId)) {
+      throw new Error(`Parent session not found: ${input.parentId}`);
+    }
+    const parent = this.store.getSession(input.parentId)!;
+    const before = this.latestEventSeq();
+    const session = this.store.createSession({
+      ...input,
+      model: input.model ?? parent.model,
+    });
+    this.broadcastSince(before);
+    await this.warmRuntime(session.id);
+    return session;
+  }
+
+  private async awaitChildRun(
+    sessionId: string,
+    runId: string,
+  ): ReturnType<ChildSessionHost["awaitRun"]> {
+    const initial = this.store.getRun(runId);
+    if (!initial || initial.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
+    if (initial.status === "pending" || initial.status === "running") {
+      await this.runPromises.get(runId);
+    }
+    const run = this.store.getRun(runId);
+    if (!run || run.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
+    if (run.status === "pending" || run.status === "running") {
+      throw new Error(`Session run is still active: ${runId}`);
+    }
+    const output = this.store.listMessages(sessionId)
+      .filter((message) => message.runId === runId && message.role === "assistant")
+      .flatMap((message) => this.store.listMessageParts(sessionId, { messageId: message.id }))
+      .map((part) => {
+        if (part.text) return part.text;
+        if (part.output == null) return "";
+        return typeof part.output === "string" ? part.output : JSON.stringify(part.output);
+      })
+      .filter(Boolean)
+      .join("\n");
+    return {
+      status: run.status,
+      output,
+      ...(run.error ? { error: run.error } : {}),
+    };
+  }
+
   private handleGetSession(c: Context): Response {
     const sessionId = c.req.param("sessionId");
     if (!sessionId) return errorResponse(400, "sessionId is required");
@@ -961,16 +1334,28 @@ export class OpenHarnessHttpServer {
     const before = this.latestEventSeq();
     const body = await readJson(c);
     try {
+      const existing = this.store.getSession(sessionId);
+      if (!existing) return errorResponse(404, "Session not found");
+      const nextMetadata = isRecord(body.metadata)
+        ? { ...existing.metadata, ...body.metadata }
+        : undefined;
+      const runtimeMetadataChanged = nextMetadata && runtimeSessionMetadataChanged(existing.metadata, nextMetadata);
+      if (runtimeMetadataChanged && this.runCoordinator.hasWork(sessionId)) {
+        return errorResponse(409, "Cannot update runtime session settings while a run is active");
+      }
       const session = this.store.updateSession(sessionId, {
         title: typeof body.title === "string" ? body.title : undefined,
         model: typeof body.model === "string" ? body.model : undefined,
         agent: body.agent === null ? null : typeof body.agent === "string" ? body.agent : undefined,
-        metadata: isRecord(body.metadata) ? body.metadata : undefined,
+        metadata: nextMetadata,
       });
+      if (runtimeMetadataChanged) {
+        await this.closeRuntime(sessionId);
+      }
       this.broadcastSince(before);
       return jsonResponse({ session });
     } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -980,22 +1365,52 @@ export class OpenHarnessHttpServer {
     try {
       return jsonResponse(this.store.getSessionState(sessionId));
     } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
-  private handleArchiveSession(c: Context): Response {
+  private async handleArchiveSession(c: Context): Promise<Response> {
     const sessionId = c.req.param("sessionId");
     if (!sessionId) return errorResponse(400, "sessionId is required");
-    const before = this.latestEventSeq();
     try {
-      const session = this.store.archiveSession(sessionId);
-      void this.closeRuntime(sessionId);
-      this.broadcastSince(before);
+      const session = await this.archiveSessionTree(sessionId);
       return jsonResponse({ session });
     } catch (error) {
       return errorResponse(404, error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private async archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
+    const existing = this.archivePromises.get(sessionId);
+    if (existing) return await existing;
+    const archive = this.archiveSessionTreeWork(sessionId).finally(() => {
+      if (this.archivePromises.get(sessionId) === archive) this.archivePromises.delete(sessionId);
+    });
+    this.archivePromises.set(sessionId, archive);
+    return await archive;
+  }
+
+  private async archiveSessionTreeWork(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
+    const children = this.store.listChildSessions(sessionId);
+    for (const child of children) await this.archiveSessionTree(child.id);
+
+    const beforeClosing = this.latestEventSeq();
+    const current = this.store.getSession(sessionId);
+    if (!current) throw new Error(`Session not found: ${sessionId}`);
+    if (current.status === "archived") return current;
+    this.store.beginArchive(sessionId);
+    this.broadcastSince(beforeClosing);
+    const interrupted = this.interruptSession(sessionId);
+    const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
+      .filter((runId): runId is string => !!runId);
+    await Promise.all(interruptedRunIds
+      .map((runId) => this.runPromises.get(runId))
+      .filter((promise): promise is Promise<void> => promise !== undefined));
+    await this.closeRuntime(sessionId);
+    const before = this.latestEventSeq();
+    const session = this.store.archiveSession(sessionId);
+    this.broadcastSince(before);
+    return session;
   }
 
   private handleListMessages(c: Context): Response {
@@ -1039,10 +1454,86 @@ export class OpenHarnessHttpServer {
         delivery: body.delivery === "steer" ? "steer" : "queue",
         content: body.content,
         metadata: isRecord(body.metadata) ? body.metadata : undefined,
+        traceId: this.traceIdForContext(c),
       });
       return jsonResponse(admitted, 202);
     } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async handleResumeInterruptedRun(c: Context): Promise<Response> {
+    const sessionId = c.req.param("sessionId");
+    const runId = c.req.param("runId");
+    if (!sessionId || !runId) return errorResponse(400, "sessionId and runId are required");
+    const body = await readJson(c);
+    if (body.id !== undefined && typeof body.id !== "string") return errorResponse(400, "id must be a string");
+    if (body.metadata !== undefined && !isRecord(body.metadata)) return errorResponse(400, "metadata must be an object");
+
+    const sourceRun = this.store.getRun(runId);
+    if (!sourceRun || sourceRun.sessionId !== sessionId) return errorResponse(404, "Interrupted run not found");
+    if (sourceRun.status !== "interrupted") return errorResponse(409, "Only interrupted runs can be resumed");
+    if (!sourceRun.inputId) return errorResponse(409, "This interrupted run has no prompt to replay");
+    const sourceInput = this.store.getInput(sourceRun.inputId);
+    if (!sourceInput || sourceInput.sessionId !== sessionId) return errorResponse(409, "The original prompt is unavailable");
+
+    const existingRecovery = this.store.listInputs(sessionId).find((input) =>
+      isRecord(input.metadata.recovery) && input.metadata.recovery.sourceRunId === sourceRun.id,
+    );
+    if (existingRecovery && existingRecovery.id === body.id) {
+      const existingRun = this.store.findRunByInput(existingRecovery.id);
+      return jsonResponse({
+        input: existingRecovery,
+        ...(existingRun ? { run: existingRun } : {}),
+        ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
+        ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
+        source_run: sourceRun,
+      }, 202);
+    }
+    if (existingRecovery) {
+      return errorResponse(409, `Interrupted run already has a recovery: ${sourceRun.id}`);
+    }
+    if (!this.runtimeFactory) return errorResponse(409, "Session runtime is unavailable");
+    if (this.runCoordinator.hasWork(sessionId)) {
+      return errorResponse(409, "Wait for the active session run before resuming interrupted work");
+    }
+
+    try {
+      const resumed = this.admitPromptAndMaybeRun(sessionId, {
+        id: typeof body.id === "string" ? body.id : undefined,
+        content: sourceInput.content,
+        metadata: {
+          ...(isRecord(body.metadata) ? body.metadata : {}),
+          recovery: {
+            kind: "prompt_replay",
+            sourceRunId: sourceRun.id,
+            sourceInputId: sourceInput.id,
+          },
+        },
+        runMetadata: {
+          recovery: {
+            kind: "prompt_replay",
+            sourceRunId: sourceRun.id,
+            sourceInputId: sourceInput.id,
+          },
+        },
+        traceId: this.traceIdForContext(c),
+      });
+      const beforeRecoveryEvent = this.latestEventSeq();
+      this.store.appendEvent({
+        type: "session.run.recovery_requested",
+        sessionId,
+        payload: {
+          sourceRunId: sourceRun.id,
+          sourceInputId: sourceInput.id,
+          recoveryInputId: resumed.input.id,
+          recoveryRunId: resumed.run?.id,
+        },
+      });
+      this.broadcastSince(beforeRecoveryEvent);
+      return jsonResponse({ ...resumed, source_run: sourceRun }, 202);
+    } catch (error) {
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1077,10 +1568,11 @@ export class OpenHarnessHttpServer {
           commandKind: expanded.command.kind,
           commandArgs: args,
         },
+        traceId: this.traceIdForContext(c),
       });
       return jsonResponse({ ...admitted, command: expanded.command }, 202);
     } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1091,22 +1583,61 @@ export class OpenHarnessHttpServer {
       delivery?: "queue" | "steer";
       content: string;
       metadata?: Record<string, unknown>;
+      runMetadata?: Record<string, unknown>;
+      traceId?: string;
     },
   ): {
     input: ReturnType<SessionStore["admitPrompt"]>;
     run?: ReturnType<SessionStore["createRun"]>;
     queue_state?: "running" | "queued";
   } {
+    const delivery = input.delivery ?? "queue";
+    const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(input.metadata?.traceId) ?? randomUUID();
+    const metadata = { ...(input.metadata ?? {}), traceId };
+    const runMetadata = { ...(input.runMetadata ?? {}), traceId };
+    const existingInput = input.id ? this.store.getInput(input.id) : undefined;
+    if (existingInput) {
+      if (
+        existingInput.sessionId !== sessionId ||
+        existingInput.content !== input.content ||
+        existingInput.delivery !== delivery ||
+        !jsonEqual(withoutTraceId(existingInput.metadata), withoutTraceId(metadata))
+      ) {
+        throw new Error(`Prompt id is already used: ${input.id}`);
+      }
+      const existingRun = this.store.findRunByInput(existingInput.id);
+      return {
+        input: existingInput,
+        ...(existingRun ? { run: existingRun } : {}),
+        ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
+        ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
+      };
+    }
+
     const before = this.latestEventSeq();
     const admitted = this.store.admitPrompt({
       id: input.id,
       sessionId,
-      delivery: input.delivery ?? "queue",
+      delivery,
       content: input.content,
-      metadata: input.metadata,
+      metadata,
     });
+
+    if (delivery === "steer" && this.runtimeFactory) {
+      const activeRunId = this.runCoordinator.activeRunId(sessionId);
+      if (activeRunId) {
+        this.broadcastSince(before);
+        this.runCoordinator.mergeWake(sessionId);
+        const activeRun = this.store.getRun(activeRunId);
+        return {
+          input: admitted,
+          ...(activeRun ? { run: activeRun, queue_state: "running" as const } : {}),
+        };
+      }
+    }
+
     const run = this.runtimeFactory
-      ? this.store.createRun({ sessionId, inputId: admitted.id })
+      ? this.store.createRun({ sessionId, inputId: admitted.id, metadata: runMetadata })
       : undefined;
     this.broadcastSince(before);
     let queueState: "running" | "queued" | undefined;
@@ -1117,9 +1648,12 @@ export class OpenHarnessHttpServer {
         work: (context) => this.executeRun(sessionId, admitted.id, run.id, context),
       });
       queueState = enqueued.state;
-      enqueued.promise.catch(() => {
+      const tracked = enqueued.promise.catch(() => {
         // The persisted run state is updated by executeRun or interrupt handling.
+      }).finally(() => {
+        if (this.runPromises.get(run.id) === tracked) this.runPromises.delete(run.id);
       });
+      this.runPromises.set(run.id, tracked);
     }
     return { input: admitted, ...(run ? { run, queue_state: queueState } : {}) };
   }
@@ -1127,6 +1661,10 @@ export class OpenHarnessHttpServer {
   private handleInterruptSession(c: Context): Response {
     const sessionId = c.req.param("sessionId");
     if (!sessionId) return errorResponse(400, "sessionId is required");
+    return jsonResponse(this.interruptSession(sessionId));
+  }
+
+  private interruptSession(sessionId: string): ReturnType<SessionRunCoordinator["interrupt"]> {
     const before = this.latestEventSeq();
     const result = this.runCoordinator.interrupt(sessionId);
     if (result.interrupted) {
@@ -1140,7 +1678,15 @@ export class OpenHarnessHttpServer {
       });
       this.broadcastSince(before);
     }
-    return jsonResponse(result);
+    return result;
+  }
+
+  private hasAnyActiveRuns(): boolean {
+    return this.store.listSessions({ includeArchived: true }).some((session) => this.runCoordinator.hasWork(session.id));
+  }
+
+  private hasActiveRunsForCwd(cwd: string): boolean {
+    return this.store.listSessions({ cwd, includeArchived: true }).some((session) => this.runCoordinator.hasWork(session.id));
   }
 
   private async executeRun(
@@ -1158,14 +1704,51 @@ export class OpenHarnessHttpServer {
       const parts = this.store.listMessageParts(sessionId);
       const admitted = this.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
+      const traceId = this.traceIdForRun(runId);
 
       this.store.updateRun(runId, { status: "running" });
+      this.log({ level: "info", event: "session.run.started", traceId, sessionId, runId });
       const renderState = this.createRunRenderState(sessionId, inputId, runId, admitted.content);
       this.broadcastSince(before);
 
+      const drainSteeredInputs = () => {
+        const pending = this.store.listUnboundInputs(sessionId);
+        if (pending.length === 0) return pending;
+        const eventBefore = this.latestEventSeq();
+        this.completeActiveTextPart(renderState, "completed");
+        delete renderState.assistantMessageId;
+        renderState.assistantTurnCompleted = true;
+        for (const steered of pending) {
+          const userMessage = this.store.createMessage({
+            sessionId,
+            role: "user",
+            runId,
+            inputId: steered.id,
+          });
+          this.store.upsertMessagePart({
+            sessionId,
+            messageId: userMessage.id,
+            type: "text",
+            status: "completed",
+            text: steered.content,
+          });
+        }
+        this.broadcastSince(eventBefore);
+        return pending;
+      };
+
       const runtime = await this.getOrCreateRuntime(session, history, parts);
       await runtime.runPrompt(
-        { session, input: admitted, runId, history, parts, signal: context.signal, wakeCount: context.wakeCount },
+        {
+          session,
+          input: admitted,
+          runId,
+          history,
+          parts,
+          signal: context.signal,
+          wakeCount: context.wakeCount,
+          drainSteeredInputs,
+        },
         {
           onEvent: (event) => {
             const eventBefore = this.latestEventSeq();
@@ -1177,14 +1760,43 @@ export class OpenHarnessHttpServer {
             this.broadcastSince(eventBefore);
           },
           onStreamEvent: (event) => {
-            const eventBefore = this.latestEventSeq();
-            this.applyStreamEvent(renderState, event);
-            this.broadcastSince(eventBefore);
+            const canDirectBroadcast = event.type === "text_delta" && Boolean(renderState.activeTextPartId);
+            const eventBefore = canDirectBroadcast ? undefined : this.latestEventSeq();
+            const completedToolName = event.type === "tool_use_end"
+              ? renderState.toolParts.get(event.toolUseId)?.toolName
+              : undefined;
+            const liveEvent = this.applyStreamEvent(renderState, event);
+            if (event.type === "tool_use_start") {
+              this.log({
+                level: "info",
+                event: "session.tool.started",
+                traceId,
+                sessionId,
+                runId,
+                toolName: event.toolUse.name,
+              });
+            } else if (event.type === "tool_use_end") {
+              this.log({
+                level: event.result.isError ? "warn" : "info",
+                event: "session.tool.completed",
+                traceId,
+                sessionId,
+                runId,
+                toolName: completedToolName,
+                ...(event.result.isError ? { error: "tool returned an error" } : {}),
+              });
+            }
+            if (canDirectBroadcast && liveEvent) {
+              this.broadcastEvent(liveEvent);
+            } else if (eventBefore !== undefined) {
+              this.broadcastSince(eventBefore);
+            }
           },
           askPermission: (request) =>
             this.permissionBroker.ask({
               sessionId,
               runId,
+              traceId,
               toolName: request.toolName,
               reason: request.reason,
               input: request.input,
@@ -1196,17 +1808,27 @@ export class OpenHarnessHttpServer {
       before = this.latestEventSeq();
       this.completeActiveTextPart(renderState, "completed");
       this.store.updateRun(runId, { status: context.signal.aborted ? "interrupted" : "completed" });
+      this.log({
+        level: context.signal.aborted ? "warn" : "info",
+        event: context.signal.aborted ? "session.run.interrupted" : "session.run.completed",
+        traceId,
+        sessionId,
+        runId,
+      });
       this.broadcastSince(before);
     } catch (error) {
       await this.closeRuntime(sessionId);
       before = this.latestEventSeq();
       const message = error instanceof Error ? error.message : String(error);
+      const traceId = this.traceIdForRun(runId);
       if (error instanceof RunInterruptedError || context.signal.aborted) {
-        this.store.appendEvent({ type: "session.run.interrupted", sessionId, payload: { runId, error: message } });
+        this.store.appendEvent({ type: "session.run.interrupted", sessionId, payload: { runId, traceId, error: message } });
         this.store.updateRun(runId, { status: "interrupted", error: message });
+        this.log({ level: "warn", event: "session.run.interrupted", traceId, sessionId, runId, error: message });
       } else {
-        this.store.appendEvent({ type: "session.run.error", sessionId, payload: { runId, error: message } });
+        this.store.appendEvent({ type: "session.run.error", sessionId, payload: { runId, traceId, error: message } });
         this.store.updateRun(runId, { status: "failed", error: message });
+        this.log({ level: "error", event: "session.run.failed", traceId, sessionId, runId, error: message });
       }
       this.broadcastSince(before);
     }
@@ -1240,7 +1862,7 @@ export class OpenHarnessHttpServer {
     };
   }
 
-  private applyStreamEvent(state: ActiveRunRenderState, event: StreamEvent): void {
+  private applyStreamEvent(state: ActiveRunRenderState, event: StreamEvent): SessionEventRecord | undefined {
     switch (event.type) {
       case "text_delta": {
         const messageId = this.ensureAssistantMessage(state, true);
@@ -1254,14 +1876,13 @@ export class OpenHarnessHttpServer {
           });
           state.activeTextPartId = part.id;
         }
-        this.store.appendMessagePartDelta({
+        return this.store.appendMessagePartDelta({
           sessionId: state.sessionId,
           messageId,
           partId: state.activeTextPartId,
           field: "text",
           delta: event.delta,
         });
-        break;
       }
       case "tool_use_start": {
         this.completeActiveTextPart(state, "completed");
@@ -1366,12 +1987,132 @@ export class OpenHarnessHttpServer {
     const existing = this.runtimes.get(session.id);
     if (existing) return await existing;
 
-    const promise = this.runtimeFactory.createRuntime({ session, history, parts }).catch((error) => {
+    const promise = this.runtimeFactory.createRuntime({
+      session,
+      history,
+      parts,
+      childSessionHost: this.childSessionHost,
+      sessionTaskBridge: this.createSessionTaskBridge(session),
+    }).catch((error) => {
       if (this.runtimes.get(session.id) === promise) this.runtimes.delete(session.id);
       throw error;
     });
     this.runtimes.set(session.id, promise);
     return await promise;
+  }
+
+  private createSessionTaskBridge(session: { id: string; cwd: string }): SessionTaskBridge {
+    const manager = getTaskManager({ cwd: session.cwd, sessionId: session.id });
+    return {
+      registerSessionTask: (input) => {
+        const task = manager.registerSessionTask({ ...input, id: `task_${randomUUID()}` });
+        const before = this.latestEventSeq();
+        this.store.createSessionTask({
+          id: task.id,
+          sessionId: input.sessionId,
+          childSessionId: input.childSessionId,
+          type: task.type,
+          description: task.description,
+          cwd: task.cwd,
+          metadata: { origin: "child_session", agent: task.description, taskManagerId: task.id },
+        });
+        this.log({
+          level: "info",
+          event: "session.task.created",
+          sessionId: input.sessionId,
+          taskId: task.id,
+        });
+        this.broadcastSince(before);
+        return { id: task.id };
+      },
+      bindSessionTaskRun: async (taskId, runId) => {
+        const before = this.latestEventSeq();
+        const task = this.store.updateSessionTask(taskId, { status: "running", runId });
+        this.log({
+          level: "info",
+          event: "session.task.bound",
+          traceId: this.traceIdForRun(runId),
+          sessionId: task.sessionId,
+          runId,
+          taskId,
+        });
+        this.broadcastSince(before);
+      },
+      completeSessionTask: async (taskId, input) => {
+        const managerStatus = input.status === "interrupted" ? "stopped" : input.status;
+        const task = await manager.completeSessionTask(taskId, { ...input, status: managerStatus });
+        const before = this.latestEventSeq();
+        this.store.updateSessionTask(taskId, {
+          status: input.status,
+          output: input.output,
+          ...(input.status === "failed" ? { error: input.output } : {}),
+        });
+        const persisted = this.store.getSessionTask(taskId);
+        this.log({
+          level: input.status === "failed" ? "error" : "info",
+          event: "session.task.completed",
+          ...(persisted?.runId ? { traceId: this.traceIdForRun(persisted.runId), runId: persisted.runId } : {}),
+          sessionId: persisted?.sessionId ?? session.id,
+          taskId,
+          ...(input.status === "failed" ? { error: "task failed" } : {}),
+        });
+        this.broadcastSince(before);
+        return task;
+      },
+      writeToSessionTask: async (taskId, data) => {
+        await manager.writeToTask(taskId, data);
+        const before = this.latestEventSeq();
+        this.store.updateSessionTask(taskId, { status: "running" });
+        this.broadcastSince(before);
+      },
+    };
+  }
+
+  private projectManagerTasks(sessionId: string, manager: ReturnType<typeof getTaskManager>): void {
+    for (const task of manager.listTasks()) {
+      const persisted = this.store.findSessionTaskByManagerTaskId(sessionId, task.id);
+      if (!persisted) {
+        const sameId = this.store.getSessionTask(task.id);
+        this.store.createSessionTask({
+          id: sameId && sameId.sessionId !== sessionId ? `task_${randomUUID()}` : task.id,
+          sessionId,
+          childSessionId: typeof task.metadata.child_session_id === "string" ? task.metadata.child_session_id : undefined,
+          type: task.type,
+          description: task.description,
+          cwd: task.cwd,
+          metadata: { origin: "task_manager", taskManagerId: task.id },
+        });
+      }
+      const durableTask = this.store.findSessionTaskByManagerTaskId(sessionId, task.id) ?? this.store.getSessionTask(task.id);
+      if (durableTask?.sessionId === sessionId) this.syncPersistentTask(task, manager, durableTask.id);
+    }
+  }
+
+  private trackTask(manager: ReturnType<typeof getTaskManager>, taskId: string): void {
+    manager.registerTaskListener((task) => {
+      if (task.id !== taskId) return;
+      const persisted = this.store.getSessionTask(taskId);
+      if (!persisted) return;
+      this.syncPersistentTask(task, manager, persisted.id);
+    });
+  }
+
+  private syncPersistentTask(
+    task: TaskInfo,
+    manager: ReturnType<typeof getTaskManager>,
+    durableTaskId = task.id,
+  ): void {
+    const status = task.status === "pending" || task.status === "running" || task.status === "completed" ||
+      task.status === "failed" || task.status === "stopped" ? task.status : "failed";
+    let output: string | undefined;
+    try { output = manager.readTaskOutput(task.id); } catch { /* output is optional */ }
+    const before = this.latestEventSeq();
+    this.store.updateSessionTask(durableTaskId, {
+      status,
+      ...(output !== undefined ? { output } : {}),
+      ...(status === "failed" ? { error: output ?? "Task failed" } : {}),
+    });
+    this.broadcastSince(before);
   }
 
   private async warmRuntime(sessionId: string): Promise<void> {
@@ -1398,6 +2139,62 @@ export class OpenHarnessHttpServer {
   private async closeAllRuntimes(): Promise<void> {
     const sessionIds = [...this.runtimes.keys()];
     await Promise.all(sessionIds.map((sessionId) => this.closeRuntime(sessionId)));
+  }
+
+  /**
+   * Session runs and TaskManager ownership die with the daemon process. Workflow
+   * snapshots are project-local, so reconcile only run ids that this session log
+   * proves were started by this daemon; unrelated CLI/project workflows are left alone.
+   */
+  private async recoverInterruptedWorkflows(): Promise<void> {
+    const ownedRuns = new Map<string, { sessionId: string; cwd: string }>();
+    for (const event of this.store.listEvents()) {
+      if (event.type !== "workflow.workflow_started" || !event.sessionId) continue;
+      const runId = workflowRunIdFromSessionEvent(event);
+      if (!runId) continue;
+      const session = this.store.getSession(event.sessionId);
+      if (session) ownedRuns.set(runId, { sessionId: session.id, cwd: session.cwd });
+    }
+
+    for (const [runId, owner] of ownedRuns) {
+      const workflowStore = new WorkflowRunStore({ cwd: owner.cwd });
+      let snapshot;
+      try {
+        snapshot = workflowStore.load(runId);
+      } catch (error) {
+        this.appendWorkflowRecoveryFailure(owner.sessionId, runId, error);
+        continue;
+      }
+      if (!snapshot || snapshot.status !== "running") continue;
+
+      const before = this.latestEventSeq();
+      await cancelPersistentWorkflow(snapshot, {
+        store: workflowStore,
+        reason: DAEMON_RESTART_WORKFLOW_REASON,
+        onEvent: (event: WorkflowRunEvent) => this.appendWorkflowRecoveryEvent(owner.sessionId, event),
+      });
+      this.broadcastSince(before);
+    }
+  }
+
+  private appendWorkflowRecoveryEvent(sessionId: string, event: WorkflowRunEvent): void {
+    this.store.appendEvent({
+      type: `workflow.${event.type}`,
+      sessionId,
+      payload: { event, recoveredAfterDaemonRestart: true },
+    });
+  }
+
+  private appendWorkflowRecoveryFailure(sessionId: string, runId: string, error: unknown): void {
+    this.store.appendEvent({
+      type: "workflow.workflow_recovery_failed",
+      sessionId,
+      payload: {
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+        recoveredAfterDaemonRestart: true,
+      },
+    });
   }
 
   private handleListEvents(c: Context): Response {
@@ -1441,6 +2238,7 @@ export class OpenHarnessHttpServer {
     try {
       const request = this.permissionBroker.reply({
         requestId,
+        traceId: this.traceIdForContext(c),
         status,
         decision,
         clientId: typeof body.clientId === "string" ? body.clientId : undefined,
@@ -1461,12 +2259,15 @@ export class OpenHarnessHttpServer {
         client = { sessionId, controller };
         this.sseClients.add(client);
         controller.enqueue(this.encoder.encode(": connected\n\n"));
-        for (const event of this.store.listEvents({ afterSeq: readCursor(c), sessionId })) {
+        const heartbeat = setInterval(() => this.writeSseComment(client!, "keepalive"), 15_000);
+        heartbeat.unref?.();
+        client.heartbeat = heartbeat;
+        for (const event of this.store.listEvents({ afterSeq: readEventCursor(c), sessionId })) {
           this.writeSse(client, event);
         }
       },
       cancel: () => {
-        if (client) this.sseClients.delete(client);
+        if (client) this.removeSseClient(client);
       },
     });
 
@@ -1474,16 +2275,20 @@ export class OpenHarnessHttpServer {
   }
 
   private latestEventSeq(): number {
-    return this.store.listEvents({ limit: Number.MAX_SAFE_INTEGER }).at(-1)?.seq ?? 0;
+    return this.store.latestEventSeq();
   }
 
   private broadcastSince(seq: number): void {
     const events = this.store.listEvents({ afterSeq: seq });
     for (const event of events) {
-      for (const client of this.sseClients) {
-        if (client.sessionId && event.sessionId && event.sessionId !== client.sessionId) continue;
-        this.writeSse(client, event);
-      }
+      this.broadcastEvent(event);
+    }
+  }
+
+  private broadcastEvent(event: SessionEventRecord): void {
+    for (const client of this.sseClients) {
+      if (client.sessionId && event.sessionId && event.sessionId !== client.sessionId) continue;
+      this.writeSse(client, event);
     }
   }
 
@@ -1493,8 +2298,21 @@ export class OpenHarnessHttpServer {
         this.encoder.encode(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
       );
     } catch {
-      this.sseClients.delete(client);
+      this.removeSseClient(client);
     }
+  }
+
+  private writeSseComment(client: SseClient, comment: string): void {
+    try {
+      client.controller.enqueue(this.encoder.encode(`: ${comment}\n\n`));
+    } catch {
+      this.removeSseClient(client);
+    }
+  }
+
+  private removeSseClient(client: SseClient): void {
+    if (client.heartbeat) clearInterval(client.heartbeat);
+    this.sseClients.delete(client);
   }
 }
 

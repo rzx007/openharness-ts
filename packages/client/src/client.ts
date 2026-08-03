@@ -35,6 +35,8 @@ import type {
   PermissionRequestRecord,
   PluginInfo,
   PromptResponse,
+  ResumeInterruptedRunInput,
+  ResumeInterruptedRunResponse,
   ProviderInfo,
   OutputStyleInfo,
   RememberSessionResponse,
@@ -50,6 +52,40 @@ import type {
   TaskSnapshot,
   UpdateClientSessionInput,
 } from "./types.js";
+
+let promptRequestCounter = 0;
+
+/** Normalize a daemon base URL without accepting credentials or request fragments. */
+export function normalizeDaemonBaseUrl(value: string): string {
+  const raw = value.trim();
+  if (!raw) throw new Error("Daemon URL is required");
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("Daemon URL must be an absolute http or https URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Daemon URL must use http or https");
+  }
+  if (url.username || url.password) {
+    throw new Error("Daemon URL must not contain credentials; use a bearer token instead");
+  }
+  if (url.search || url.hash) {
+    throw new Error("Daemon URL must not contain query parameters or a fragment");
+  }
+
+  const pathname = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${pathname === "/" ? "" : pathname}`;
+}
+
+/** Generate a caller-stable id for one prompt admission attempt. */
+export function createPromptRequestId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  promptRequestCounter += 1;
+  return `prompt-${Date.now().toString(36)}-${promptRequestCounter.toString(36)}`;
+}
 
 /** HTTP API 非 2xx 时抛出；携带 status 与原始响应体。 */
 export class OpenHarnessApiError extends Error {
@@ -73,7 +109,7 @@ export class OpenHarnessClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: OpenHarnessClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = normalizeDaemonBaseUrl(options.baseUrl);
     this.token = options.token;
     this.fetchImpl = options.fetch ?? fetch;
   }
@@ -560,9 +596,29 @@ export class OpenHarnessClient {
   ): Promise<PromptResponse> {
     return await this.request<PromptResponse>(`/sessions/${encodeURIComponent(sessionId)}/prompts`, {
       method: "POST",
-      body: input,
+      body: { ...input, id: input.id ?? createPromptRequestId() },
       signal: options.signal,
     });
+  }
+
+  /**
+   * `POST /sessions/:id/runs/:runId/resume` — 显式重放一次中断 run 的原始 prompt。
+   * 不会继续旧 provider stream；服务端会创建一个带恢复溯源的新 input/run。
+   */
+  async resumeInterruptedRun(
+    sessionId: string,
+    runId: string,
+    input: ResumeInterruptedRunInput = {},
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ResumeInterruptedRunResponse> {
+    return await this.request<ResumeInterruptedRunResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/resume`,
+      {
+        method: "POST",
+        body: { ...input, id: input.id ?? createPromptRequestId() },
+        signal: options.signal,
+      },
+    );
   }
 
   /**

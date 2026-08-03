@@ -4,6 +4,8 @@ export type FrontendConfig = {
     token?: string | null;
     cwd?: string | null;
     model?: string | null;
+    permissionMode?: string | null;
+    maxTurns?: number | null;
   } | null;
   initial_prompt?: string | null;
   theme?: string | null;

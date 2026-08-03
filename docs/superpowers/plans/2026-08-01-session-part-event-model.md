@@ -42,7 +42,7 @@ Task 9 初次实现后把现场问题完全归因于 stale daemon 是错误结�
 - TUI 用服务端返回的 run id 跟踪提交，直到对应 run 进入 terminal 状态；running part 显式交给 OpenTUI streaming markdown，transcript item 使用稳定 id。
 - daemon 启动时将前一进程遗留的 pending/running run 标记为 interrupted，避免恢复后永久 busy。
 - repo root/branch 检测改为读取 `.git` marker/HEAD，不再在 runtime 初始化时 spawn Git。
-- 唯一默认存储为 `~/.openharness-ts/data/session-runtime/sessions.json`；旧 `~/.openharness` 不读取、不迁移。
+- 唯一默认存储为 `~/.openharness-ts/data/session-runtime/sessions.db`；旧 `~/.openharness` 与 JSON store 都不读取、不迁移。
 - `@openharness/client.health()` 只负责 transport 探活，stale daemon 判断归 CLI 生命周期所有。
 - 修正多轮工具执行边界：工具调用后的下一轮模型输出创建新的 assistant message，不再混入上一轮 message。
 
@@ -542,7 +542,7 @@ GET /sessions/:sessionId/parts?cursor=&limit=
 
 - 不实现 worker direct fetch。本地 TUI 后续可参考 opencode 改成 worker 内嵌 server，但要等 canonical state 稳定。
 - 不做 Web/Desktop UI。
-- 不做 SQLite adapter。
+- 已完成 SQLite adapter；本条为历史阶段的范围限定。
 - 不提供旧 store 读取或迁移分支。
 - 不保留 `runtime.*` 作为客户端协议。
 

@@ -57,6 +57,35 @@ describe("WorkflowRunStore", () => {
     expect(store.loadEvents("run-progress").map((event) => event.type)).toContain("workflow_finished");
   });
 
+  it("does not overwrite a terminal cancellation after its owner aborts", async () => {
+    const store = new WorkflowRunStore({ dir: tempDir() });
+    const controller = new AbortController();
+    let unblock: (() => void) | undefined;
+    const workflow = runPersistentWorkflow(
+      { mode: "parallel", tasks: [{ id: "research" }] },
+      async () => {
+        await new Promise<void>((resolve) => {
+          unblock = resolve;
+        });
+        return { summary: "late completion" };
+      },
+      { store, runId: "run-owner-abort", signal: controller.signal },
+    );
+
+    await vi.waitFor(() => expect(store.load("run-owner-abort")?.status).toBe("running"));
+    controller.abort(new Error("parent interrupted"));
+    await cancelPersistentWorkflow("run-owner-abort", { store, reason: "Parent session interrupted" });
+    unblock?.();
+    await workflow;
+
+    expect(store.load("run-owner-abort")).toMatchObject({
+      status: "failed",
+      summary: "Parent session interrupted",
+      runningTaskIds: [],
+    });
+    expect(store.loadEvents("run-owner-abort").map((event) => event.type)).not.toContain("workflow_finished");
+  });
+
   it("loads and lists completed workflow snapshots", async () => {
     const store = new WorkflowRunStore({ dir: tempDir() });
 

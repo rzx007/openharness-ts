@@ -75,8 +75,15 @@
   → App / useServerSync sendRequest({ type: "submit_line", line })
   → parseSlashLine(line)
 
-  /new | /resume <id>
+  /new | /sessions open <session-id>
       → 宿主会话生命周期（createAndSwitchSession / getSession）
+      → return
+
+  /resume [run-id]
+      → 从当前 reducer state 筛选 prompt-backed interrupted run
+      → 无参数时打开恢复选择器；有 run-id 时调用
+        POST /sessions/:id/runs/:runId/resume
+      → server 复制原始 prompt，创建带 recovery 溯源的新 input/run
       → return
 
   dispatchSessionSlashCommand  (frontend adapter)
@@ -128,7 +135,7 @@ type SessionCommandOutcome = "handled" | "unhandled" | "local_ui";
 
 | 层 | 代表命令 | 执行位置 |
 |---|---|---|
-| Client-local UI | `/new` `/sessions` `/resume` `/theme` `/permissions` `/workflow(s)` | 宿主 App；catalog 可不列或仅 autocomplete |
+| Client-local UI | `/new` `/sessions` `/resume` `/theme` `/permissions` `/workflow(s)` | 宿主 App；其中 `/resume` 调用专用恢复 API，catalog 可不列或仅 autocomplete |
 | Shared session（资源 API） | `/model` `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/rewind` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/init` `/plugin` `/reload-plugins` `/hooks` `/subagents` `/diff` `/branch` `/commit` `/help` `/status` `/version` `/skills` | `dispatchSessionCommand` |
 | Template | user-invocable skills、plugin commands | `POST /sessions/:id/commands` |
 | 禁止 | 通用 `runCommand`、未知 slash 当 prompt | — |
@@ -174,7 +181,7 @@ print / `--task-worker` 仍是进程内 runtime，不走本 flow。见 [daemon-s
 2. 拉取 `listCommands({ cwd })`，与 `LOCAL_COMMAND_DETAILS` 合并做 autocomplete。
 3. 提交行：本地 UI → `dispatchSessionCommand` → template `invokeCommand` → unknown 拦截 → `admitPrompt`。
 4. 实现 `emit`（transcript / toast）与可选 `patchStatus`。
-5. `/new` `/resume` 等会话生命周期由宿主自己接 HTTP（与 TUI `useServerSync` 对齐即可）。
+5. `/new` `/sessions` 等会话生命周期由宿主自己接 HTTP；`/resume` 必须调用专用恢复 API，不能把旧 prompt 当普通文本悄悄重新发送（与 TUI `useServerSync` 对齐即可）。
 
 ## 相关文档
 

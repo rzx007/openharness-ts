@@ -38,6 +38,20 @@ function AppInner({ config }: { config: FrontendConfig }) {
   }, [renderer]);
   const onSessionError = useCallback((message: string) => toast(message, "error"), [toast]);
   const session = useServerSync(config, onSessionError);
+  const activeSessionId = typeof session.status.session_id === "string"
+    ? session.status.session_id
+    : undefined;
+  const previousSessionIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const previousSessionId = previousSessionIdRef.current;
+    if (previousSessionId && previousSessionId !== activeSessionId) {
+      dialog.closeAll();
+      setWorkflowPanelOpen(false);
+      setDraft("");
+    }
+    previousSessionIdRef.current = activeSessionId;
+  }, [activeSessionId, dialog.closeAll]);
 
   // Local input history (up to 100 entries)
   const [history, setHistory] = useState<string[]>([]);
@@ -132,8 +146,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
         return true;
       }
 
-      // /sessions — list and restore sessions（/resume 作为别名保留）
-      if (line.trim() === "/sessions" || line.trim() === "/resume") {
+      // /sessions — 列出并切换会话；/resume 专用于显式重放中断 run。
+      if (line.trim() === "/sessions") {
         session.sendRequest({ type: "list_sessions" });
         return true;
       }
@@ -213,12 +227,13 @@ function AppInner({ config }: { config: FrontendConfig }) {
             run: openCommandPalette,
           },
           {
-            id: "app.theme",
+            // 必须用斜杠 id 覆盖后端 LOCAL 同名命令；否则补全回车走 submitLine → local_ui 被忽略，弹框不会开。
+            id: "/theme",
             title: "Change Theme",
             run: () => handleCommand("/theme"),
           },
           {
-            id: "app.permissions",
+            id: "/permissions",
             title: "Change Permission Mode",
             run: () => handleCommand("/permissions"),
           },

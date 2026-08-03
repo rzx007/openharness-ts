@@ -17,6 +17,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 } from "@openharness/services";
@@ -31,6 +32,7 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 };
@@ -48,12 +50,18 @@ export interface OpenHarnessClientOptions {
 export interface OpenHarnessServerHealth {
   ok: true;
   version?: string;
+  startedAt: number;
+  uptimeMs: number;
+  sessionCount: number;
+  activeRunCount: number;
+  queuedRunCount: number;
 }
 
 /** `GET /sessions` 查询参数。 */
 export interface ListSessionsOptions {
   cwd?: string;
   includeArchived?: boolean;
+  includeChildren?: boolean;
   limit?: number;
 }
 
@@ -65,6 +73,12 @@ export interface AdmitClientPromptInput {
   id?: string;
   content: string;
   delivery?: InputDelivery;
+  metadata?: Record<string, unknown>;
+}
+
+/** `POST /sessions/:id/runs/:runId/resume` 请求体。`id` 用于安全重试。 */
+export interface ResumeInterruptedRunInput {
+  id?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -111,6 +125,11 @@ export interface PromptResponse {
   input: SessionInputRecord;
   run?: SessionRunRecord;
   queue_state?: "running" | "queued";
+}
+
+/** `POST /sessions/:id/runs/:runId/resume` 响应。旧 run 保持 interrupted，新 run 独立执行。 */
+export interface ResumeInterruptedRunResponse extends PromptResponse {
+  source_run: SessionRunRecord;
 }
 
 export type CommandKind = "session" | "template";
@@ -311,6 +330,7 @@ export interface SessionBucket {
   messages: SessionMessageRecord[];
   partsByMessageId: Record<string, SessionMessagePartRecord[]>;
   runs: Record<string, SessionRunRecord>;
+  tasks: Record<string, SessionTaskRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }
 
@@ -334,6 +354,11 @@ export interface EventSyncOptions {
   sessionId?: string;
   cursor?: number;
   signal?: AbortSignal;
+  /**
+   * Delay before a live-stream reconnect attempt (attempt is 0-based).
+   * Defaults to exponential backoff capped at 30s. Tests may pass `() => 0`.
+   */
+  reconnectDelayMs?: (attempt: number) => number;
 }
 
 /** `syncEvents` 产出的单次状态更新。 */
@@ -341,7 +366,7 @@ export interface SyncEventUpdate {
   event?: SessionEventRecord;
   state: OpenHarnessClientState;
   /** Session attach starts from an atomic snapshot, then consumes SSE deltas. */
-  source: "snapshot" | "replay" | "live";
+  source: "snapshot" | "replay" | "live" | "reconnecting";
 }
 
 /** 去掉 sessionId 后的 admit prompt 输入（sessionId 由路径提供）。 */

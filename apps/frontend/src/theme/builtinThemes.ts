@@ -33,7 +33,7 @@ export const defaultTheme: ThemeConfig = {
     secondary: "#abb2bf",
     accent: "#61afef",
     foreground: "#abb2bf",
-    background: "#1e2127",
+    background: "#000000",
     backgroundPanel: "#262a33",
     backgroundPrompt: "#262626",
     muted: "#5c6370",

@@ -41,7 +41,7 @@
 
 - [x] 选定最终包位置：`packages/services/src/session-runtime`。
 - [ ] 增加 SQLite 依赖与数据库路径解析。
-- [ ] 将当前文件持久化 adapter 替换为 SQLite adapter。
+- [x] 将当前文件持久化 adapter 替换为 SQLite adapter。
 - [ ] 为以下表实现迁移：
   - `session`
   - `session_input`
@@ -229,7 +229,8 @@
 - [x] 第六批：`/tasks run`（POST `/tasks`）、`/init`（POST `/project/init`）、`/plugin`（GET `/plugins` + enable/disable）、`/hooks`（GET `/hooks`）、`/subagents`（GET `/agent-personas`）、`/diff` `/branch`（GET `/git/diff` `/git/branch`）。
 - [x] 第七批：`/rewind`（POST `/sessions/:id/rewind` + store.replaceTranscript + closeRuntime）、`/commit`（GET `/git/status` + POST `/git/commit`）、`/reload-plugins`（POST `/plugins/reload` + closeRuntimesForCwd）。
 - [x] 债务收口：拆空 legacy REPL registry（`slash-helpers.ts` + 兼容 re-export）；slash 呈现层进 `@openharness/client` `dispatchSessionCommand`（TUI 薄适配）；文档化 print/worker 刻意进程内、`/commit` 与 plugin reload 风险；流程见 `docs/slash-commands-flow.md`。
-- [ ] 后续：Task 11 Web/Desktop（认证/CORS/发现/SDK 示例）。print/worker **不**迁入 daemon（swarm/one-shot 边界）。
+- [x] 用户 print/headless 迁入 Session API（ensure daemon + client admitPrompt）；内部 `--task-worker` / swarm 暂缓（第二阶段 child session）。
+- [x] task/subagent → daemon 内 child session（取代 daemon 主路径的 `--task-worker` 子进程旁路；旧 CLI 仅兼容保留）。
 - [x] 退场进程内 REPL 产品入口：默认 `ohs` → TUI/daemon；删除 `runRepl`；`--continue/--resume` 不再用于交互入口。
 - [x] 增加回归测试覆盖 `/new`、`/sessions`、`/model`、`/config`、`/provider`、`/mcp`、`/tasks`、`/memory`、`/auth`、`/compact`、`/dream`、`/profile`、skill/template 命令，以及未知 slash 不误触发。
 
@@ -241,16 +242,64 @@
 
 ---
 
-## Task 11：Web/Desktop 就绪
+## Task 11：Daemon 重启恢复与 child session 收口
 
-- [ ] 文档化远程 attach 的认证模型。
-- [ ] 为本地 Web/Desktop 使用增加 CORS/origin 策略。
-- [ ] 增加 server 发现/attach 流程。
-- [ ] 增加 SDK 示例。
+- [x] daemon 启动时将遗留 `pending`/`running` session run 明确标记为 `interrupted`，并完成停在 `closing` 的归档。
+- [x] 以 `workflow.workflow_started` session event 作为 daemon 所有权凭据，只收口该 daemon/session 启动且仍为 `running` 的 project workflow snapshot。
+- [x] 将 daemon-owned running workflow 写为 terminal snapshot：已运行 task 为 `killed`、未开始 task 为 `skipped`，并追加可 replay 的 `workflow.workflow_cancelled` 审计事件。
+- [x] 保留 parent/child session、messages、parts 和 event timeline；不在启动时擅自重跑 provider、child TaskManager task 或 workflow。
+- [x] 增加 restart 回归：daemon-owned workflow 会终态化，同目录但无 session 所有权事件的 workflow 不受影响。
+
+退出标准：
+
+- daemon 重启后客户端不会看到永久 `busy` 的 session 或 workflow。
+- 用户可审计中断前的 child session 与 workflow timeline，再由新的显式操作决定是否重新执行。
+- 不把“内存 TaskManager 已丢失”的工作伪装成已恢复或继续运行。
+
+---
+
+## Task 12：Web/Desktop 就绪
+
+- [x] 文档化远程 attach 的认证模型：本地 registry 仅限本机；远程客户端必须显式提供 URL + bearer token。
+- [x] 增加 deny-by-default 的 CORS/origin 策略；仅精确 allowlist origin 可跨域，预检不需要 bearer token。
+- [x] 公网/非 loopback bind 强制要求显式 `--token`；TUI 用 `--daemon-url` + `--daemon-token` 进行远程 attach，不读取或改写本地 registry。
+- [x] 增加 `@openharness/client` 的 Web/Desktop SDK 示例与部署边界文档（[remote-attach.md](../../remote-attach.md)）。
 
 退出标准：
 
 - 非 TUI 客户端仅凭已文档化的 HTTP/SSE API 即可 attach。
+
+---
+
+## Task 13：可控恢复体验
+
+- [x] 将 daemon 重启遗留 run 保持为 `interrupted`，不自动重跑 provider、child task 或 workflow。
+- [x] 增加 prompt-backed run 的专用恢复 API：`POST /sessions/:sessionId/runs/:runId/resume`；恢复会创建有 source run/input 溯源的新 input/run，旧 run 不被改写。
+- [x] 用稳定请求 id 保证恢复请求可重试：相同 id 返回同一恢复结果，同一 source run 的其它恢复请求返回 `409`。
+- [x] 在 session 有活跃/排队 run、source 非中断、没有原始 prompt 时明确拒绝，避免把工作流或已丢失内存所有权的任务伪装成可续传。
+- [x] TUI `/resume` 显示当前会话可恢复 run 并发起显式重放；`/sessions` 负责切换会话。
+
+退出标准：
+
+- 重启后用户能看到中断原因和可执行的恢复操作，而不是只有一个不明所以的空闲会话。
+- 每一次恢复都有可 replay 的 input/run/event 审计链；网络重试不会创建第二次执行。
+- 恢复是“重新开始原始 prompt”，不是伪造 provider stream、workflow 或 child task 的内存续传。
+
+---
+
+## Task 14：Task / child 生命周期持久化
+
+- [x] 在 `SessionStore` 中增加 daemon-owned `SessionTaskRecord`，持久化 task、parent session、child session 和当前 child run 的关联。
+- [x] 增加 `session.task.created` / `session.task.updated` 事件，并把 task 放入 session attach snapshot；`@openharness/client` reducer 与其它 canonical 状态一并收敛。
+- [x] 将 server 的 `SessionTaskBridge` 注入 `CliSessionRuntime -> bootstrap -> ChildSessionBackend`；TaskManager 继续只承担本进程执行与 stdin/callback，不能再单独充当事实来源。
+- [x] session-scoped `/tasks` 读取 daemon 持久 task 投影；HTTP 创建的 session task 与 child task 使用全局唯一 id，避免不同 session 的 `task_1` 碰撞。
+- [x] daemon 重启时将遗留 `pending`/`running` task 收口为 `interrupted`，保留 child session/run 的历史与 Task 13 的显式 prompt 重放入口，不自动复活 callback、子进程或 child runtime。
+
+退出标准：
+
+- 任一客户端 attach 到 parent session 后，都能看到其 child task 的身份、状态和 child/run 链接。
+- daemon 重启不会丢失 task；未完成 task 有明确 `interrupted` 结论，而不是消失或永久 `running`。
+- TaskManager 进程内状态与 `SessionStore` 持久化投影职责分离。
 
 ---
 
@@ -261,5 +310,8 @@
 - [x] 第二个客户端可以 attach 并 hydrate 当前状态。
 - [x] 权限请求在客户端断开后仍然存活。
 - [x] Daemon 重启保留 sessions/messages/events（`http.test` 跨进程 reload + `interruptActiveRuns`）。
+- [x] Daemon 重启会终态化自己拥有的 running workflow，同时保留 child session 与审计时间线。
+- [x] 中断的 prompt run 只有在显式恢复后才会重放；相同恢复请求 id 不会重复派生 run。
+- [x] child task 的 task/session/run 链路可从 attach snapshot + SSE 重放；daemon 重启后遗留 task 会明确转为 `interrupted`。
 - [x] TUI 主路径不再派生 per-session backend。
 - [x] 当前主线不存在 BackendHost/OHJSON、版本化 store 目录或旧 store 读取分支。

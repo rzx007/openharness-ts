@@ -10,15 +10,15 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
 - ✅ **内置工具（45）** — 以 `createDefaultToolRegistry()` 为准：文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait / Workflow / ImageToText / ImageGeneration / FeishuPush 等齐全；bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
-- ✅ **多 Agent 编排** — `agent` 工具真实派发 `--task-worker` 子进程 teammate：`SendMessage` 重启式多轮续聊、独立 git worktree 隔离、只读自动放行、写操作经 pending/resolved 文件流转 leader 裁决、`TaskWait` 阻塞取结果；内置 7 agent + 用户/插件自定义 agent（`~/.openharness-ts/agents/*.md`）。Coordinator 硬调度器已支持 `Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、TUI follow-up 执行和 `ohs workflow` 管理命令。TUI SwarmPanel 组件仍在，但 daemon 事件尚未接入（当前恒为空）
+- ✅ **多 Agent 编排** — 内置 7 agent + 用户/插件自定义 agent（`~/.openharness-ts/agents/*.md`），以及 `TaskWait`、`Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、TUI follow-up 执行和 `ohs workflow` 管理命令。daemon/TUI/print 主路径使用 daemon 内 child session；task、child session 与 child run 的关联通过 daemon 事件持久化，跨客户端可重放。
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
-- ✅ **会话持久化** — TUI/跨端主线使用 daemon `SessionStore` 保存 session、input、message、canonical message parts、run、权限请求和事件；单会话通过原子 snapshot + SSE 恢复。print 仍保留项目级快照用于 `--continue` / `--resume`（不用于默认 TUI）
+- ✅ **会话持久化** — TUI / 用户 print / 跨端主线使用 daemon `SessionStore`；单会话通过原子 snapshot + SSE 恢复。daemon 内 `Agent` 使用同一 store 持久化 child session、task 与 child run 的关联；重启会保留审计记录，并将失去进程所有权的 run/task/workflow 明确标记为中断，不会伪造自动续跑。TUI 可用 `/resume` 明确重放某次中断 run 的原始 prompt。
 - ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents/tools_dir 六类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 支持动态 import 插件工具
 - ✅ **Channels 引擎桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 QueryEngine；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-bridge-design.md](docs/channels-bridge-design.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。SwarmPanel UI 保留但尚未接 daemon 事件
-- 🟢 **Daemon Session Runtime** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、原子 session snapshot、SSE 事件流、单 session 串行/多 session 并发 run coordinator、持久化 PermissionBroker 和共享 `@openharness/client` reducer。默认 `ohs`（与 `ohs --tui`）启动/attach daemon；进程内 REPL 入口已移除。详见 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 和 [docs/client-sync-flow.md](docs/client-sync-flow.md)
+- 🟢 **Daemon Session Runtime** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、原子 session snapshot、SSE 事件流、单 session 串行/多 session 并发 run coordinator、持久化 PermissionBroker 和共享 `@openharness/client` reducer。默认 `ohs`（与 `ohs --tui`）启动/attach daemon；重启将遗留 run 和 daemon-owned workflow 明确收口，保留 parent/child session 与 timeline；进程内 REPL 入口已移除。详见 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 和 [docs/client-sync-flow.md](docs/client-sync-flow.md)
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
 - 🟡 **可用但仍在收口** — `sandbox`（Bash 走 SRT/Docker，文件工具宿主执行 + path guard；Docker proxy 为 bridge+代理环境 MVP；Docker/SRT 可选 e2e 已补，CI 接入待补）
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
@@ -60,7 +60,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 # CLI 安装后提供两个等价命令：ohs 与 openharness
 
-# 单次执行（进程内 print）
+# 单次执行（headless：attach/启动 daemon，经 Session API）
 ohs "explain this codebase"
 ohs -p "explain this codebase"
 
@@ -137,9 +137,9 @@ Options:
   --effort <level>             推理强度: low | medium | high
   --tui                        显式启动 TUI/daemon（无 prompt 时默认已是 TUI；需 Bun）
   --verbose                    详细输出
-  --continue                   继续上次 **print** 项目级快照（不可用于交互 TUI）
-  --resume <session>           恢复指定 **print** 项目级快照（不可用于交互 TUI）
-  -p, --print                  打印响应后退出（非交互；有 prompt 时默认即 print）
+  --continue                   （暂不可用）旧项目级快照续聊；请用 TUI /sessions
+  --resume <session>           （暂不可用）旧项目级快照恢复；会话切换请用 TUI /sessions，中断 run 重放请用 TUI /resume
+  -p, --print                  经 daemon Session API 打印响应后退出（有 prompt 时默认即 print）
   -n, --name <name>            命名会话
   --output-format <format>     输出格式: text | json | stream-json
   --append-system-prompt <p>   追加到默认 system prompt
@@ -237,6 +237,8 @@ TUI 内斜杠命令走 daemon command catalog + client-local UI + template expan
 
 默认 `ohs`（与 `ohs --tui`）会连接已有 daemon；没有可用/stale daemon 时会启动一个。后续 Web、Desktop 或 remote attach 客户端都应通过 `@openharness/client` 连接同一个 daemon，而不是各自启动 agent runtime。
 
+远程 attach 使用显式 URL + bearer token，不读取本机 daemon registry；浏览器还必须命中 daemon 的精确 `--allow-origin` 白名单。部署与 SDK 示例见 [docs/remote-attach.md](docs/remote-attach.md)。
+
 一次模型交互会被服务端保存为按顺序排列的 canonical message parts：
 
 | Part | 含义 |
@@ -302,31 +304,31 @@ OpenHarness-ts/
 
 ### 架构图
 
-当前主线采用 daemon/session runtime。TUI 不再经过 BackendHost/OHJSON，也不为每个会话派生后端进程。完整启动链路见 [docs/tui-flow.md](docs/tui-flow.md)。
+当前主线采用 daemon/session runtime。TUI 不再经过 BackendHost/OHJSON，也不为每个会话派生后端进程。本机入口通过私有 registry 发现 daemon；远程入口只接受显式 URL 与 bearer token，二者最终连接同一个 Session API。完整启动链路见 [docs/tui-flow.md](docs/tui-flow.md)，远程部署见 [docs/remote-attach.md](docs/remote-attach.md)。
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          User Interface                            │
-│  ┌────────────────────┐  ┌──────────────────────────────────────┐  │
-│  │   CLI (ohs)        │  │   Clients (attach)                   │  │
-│  │   Commander.js     │  │   TUI / Web / Desktop / remote       │  │
-│  │   TUI / Print      │  │   OpenTUI + useServerSync            │  │
-│  │   daemon lifecycle │  │   @openharness/client                │  │
-│  └────────┬───────────┘  └──────────────┬───────────────────────┘  │
-│           │               HTTP+SSE:     │ attach                   │
-│           │               snapshot      ▼                          │
-│           │          ┌──────────────────────┐                      │
-│           │          │  ohs serve / daemon  │                      │
-│           │ starts/  │  Hono · SessionStore │                      │
-│           │ reuses──►│  RunCoordinator      │                      │
-│           │          │  PermissionBroker    │                      │
-│           │          └────────┬─────────────┘                      │
-│           │                   │ SessionRuntime                     │
-│           │   ┌───────────────▼──────────────┐                     │
-│           └──►│  Runtime Bootstrap           │                     │
-│               │  bootstrap() + QueryEngine   │                     │
-│               └────────┬─────────────────────┘                     │
-└────────────────────────┼───────────────────────────────────────────┘
+│                              客户端入口                             │
+│  ┌───────────────────────┐    ┌──────────────────────────────────┐ │
+│  │ 本机 CLI / TUI / print │    │ 远程 TUI / Web / Desktop         │ │
+│  │ `ohs` / `ohs --tui`   │    │ 显式 daemon URL + bearer token   │ │
+│  │ 私有本机 registry     │    │ 不读取、不复制本机 registry      │ │
+│  └───────────┬───────────┘    └───────────────┬──────────────────┘ │
+│              │ 启动或复用本机 daemon           │ HTTP action + SSE  │
+│              └───────────────┬────────────────┘                    │
+│                              ▼                                     │
+│                 ┌─────────────────────────────┐                    │
+│                 │ `ohs serve` / daemon        │                    │
+│                 │ Hono · SessionStore          │                    │
+│                 │ RunCoordinator               │                    │
+│                 │ PermissionBroker             │                    │
+│                 └──────────────┬──────────────┘                    │
+│                                │ SessionRuntime                    │
+│                 ┌──────────────▼──────────────┐                    │
+│                 │ runtime bootstrap            │                    │
+│                 │ `bootstrap()` + QueryEngine  │                    │
+│                 └──────────────┬──────────────┘                    │
+└────────────────────────────────┼────────────────────────────────────┘
                          │
 ┌────────────────────────┼───────────────────────────────────────────┐
 │                    Core Engine                                      │
@@ -452,7 +454,7 @@ OpenHarness-ts/
 | **搜索**       | `Grep`（ripgrep 优先 + JS fallback）、`Lsp`（LSP 集成）                                                            |
 | **Web**      | `WebFetch`（URL 抓取 + HTML→Text）、`WebSearch`（DuckDuckGo HTML 搜索）                                                |
 | **任务管理**     | `TaskCreate/Get/List/Output/Stop/Update/Wait`（7 个任务生命周期工具）                                                     |
-| **Agent/团队** | `Agent`（`--task-worker` 子进程派发）、`SendMessage`（重启式多轮通信）、`Workflow`（硬调度 DAG）、`TeamCreate/Delete`（团队管理）          |
+| **Agent/团队** | `Agent`（daemon child session）、`SendMessage`（child session 多轮）、`Workflow`（硬调度 DAG）、`TeamCreate/Delete`（团队管理）          |
 | **调度**       | `CronCreate/Delete/List/Toggle/RemoteTrigger`（5 个 Cron 工具）                                                    |
 | **MCP**      | `McpToolCall/ListMcpResources/ReadMcpResource/McpAuth`（4 个 MCP 工具）                                            |
 | **媒体/通道**    | `ImageToText`（视觉 fallback）、`ImageGeneration`（DALL-E 兼容）、`FeishuPush`                                          |
@@ -466,9 +468,9 @@ OpenHarness-ts/
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CompactService` | LLM 驱动的对话摘要：当 token 接近阈值时自动触发，结构化 `<analysis>/<summary>` 输出。详见 [docs/compact-service-design.md](docs/compact-service-design.md)                                                                                                  |
 | session snapshot functions | print/worker 项目级快照：按项目分目录（cwd 哈希）、latest/id 双写、load 侧 tool_use/result 配对修复、tool_metadata 白名单、transcript.md 导出；不参与 daemon/TUI 状态。详见 [docs/session-storage-design.md](docs/session-storage-design.md) |
-| `SessionStore` | daemon 主线会话存储：session/input/message/canonical message part/event/run/permission request；支持单会话原子 snapshot + SSE cursor，当前为文件 adapter，SQLite adapter 待落地                                                                                                               |
+| `SessionStore` | daemon 主线会话存储：session/input/message/canonical message part/event/run/task/permission request；支持单会话原子 snapshot + SSE cursor，使用 daemon 独占的 SQLite 数据库与迁移文件                                                                                                               |
 | `CronScheduler`  | 定时任务：cron 表达式解析 + `computeNextRunTime` + 执行历史记录                                                                                                                                                                                  |
-| `TaskManager`    | 任务管理：创建/查询/停止/输出，文件持久化                                                                                                                                                                                                           |
+| `TaskManager`    | 进程内执行器：创建/查询/停止/输出与 stdin/callback；跨端可恢复的生命周期由 `SessionStore` task 投影持久化                                                                                                                                           |
 | `MemoryManager`  | 四层记忆体系的持久层：frontmatter + 加权搜索 + MEMORY.md 索引；配套 `/remember`（LLM 提取持久记忆）、`/dream`（梦境整合）、会话 checkpoint 与环境事实抽取。详见 [docs/memory-system.md](docs/memory-system.md)                                                                   |
 | `LspClient`      | LSP 客户端：与 Language Server Protocol 通信                                                                                                                                                                                            |
 | `OAuthFlow`      | OAuth URL 生成骨架；token exchange / refresh 仍为 placeholder，生产 OAuth 链路待补                                                                                                                                                             |
@@ -483,7 +485,7 @@ OpenHarness-ts/
 | `McpClientManager`      | MCP 协议客户端：stdio + HTTP/SSE 传输连接外部 MCP Server，headers 鉴权，动态获取工具和资源；MCP OAuth 待补                                                                                                                                                                                                                                                                                   |
 | `ChannelAdapter`        | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                                                                                                                                                                                                                                                                                   |
 | `HookExecutor`          | Hook 系统：10 类事件（`session_start/end`、`pre/post_tool_use`、`pre/post_compact`、`user_prompt_submit`、`notification`、`stop`、`subagent_stop`），支持 command/http/prompt/agent 四种类型、priority、matcher、`$ARGUMENTS`                                                                                                                                                                                                                                                      |
-| `Swarm`                 | 多 Agent 团队：subprocess 后端把子代理派发为 `ohs --task-worker` 子进程（prompt 经 stdin），SendMessage 重启式多轮续聊；git worktree 隔离、只读工具自动放行；文件邮箱（原子写+文件锁）、team.json 持久化（随会话退出清理）、权限同步（worker 写操作经 pending/resolved 文件流转 leader checker 自动裁决）。详见 [docs/swarm-file-infra-design.md](docs/swarm-file-infra-design.md)、[docs/swarm-task-worker-design.md](docs/swarm-task-worker-design.md) |
+| `Swarm`                 | 多 Agent 团队：daemon/TUI/print 主路径在 daemon 内派生 child session；parent task、child session 与 child run 通过 session event 关联。详见 [docs/swarm-subprocess-flow.md](docs/swarm-subprocess-flow.md) |
 | `PluginLoader`          | 插件系统（Claude Code 布局兼容）：双源发现 + 项目插件信任门控；skills/commands/hooks/MCP/agents/tools_dir 六类贡献注册（`/plugin:cmd` 斜杠命令、`${CLAUDE_PLUGIN_ROOT}`、`.mcp.json`、动态工具 import）；卸载路径穿越防护。详见 [docs/plugins-contributions-design.md](docs/plugins-contributions-design.md)                                                                                                            |
 | `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；daemon catalog 将 user-invocable skill 暴露为 template 斜杠（`POST /sessions/:id/commands` 展开后 admit）；model 可见性过滤                                                                                                                                   |
 | `BridgeManager`         | 会话桥接：多进程间共享会话状态                                                                                                                                                                                                                                                                                                                                                  |
@@ -499,7 +501,8 @@ OpenHarness-ts/
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/cron/channels/workflow/sandbox/daemon/serve/config 子命令，20+ CLI flags                                                            |
 | `TUI Frontend`      | 默认交互面：opentui + React 19（Bun）。`ohs` / `ohs --tui` 经 `useServerSync` attach daemon，消费 `@openharness/client` reducer。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
-| `Print / worker`    | 无 UI 一次性或 stdin worker：进程内 `bootstrap()` + `QueryEngine`；项目级 session snapshot 仅用于 print `--continue/--resume` |
+| `Print`             | 用户 headless：ensure daemon → `@openharness/client` admitPrompt + SSE 渲染 stdout |
+| `Task worker`       | 历史内部实现，不属于 daemon/TUI/print 产品链路，也不作为兼容承诺；主路径的 `Agent` 为 daemon child session |
 | `ThemeManager`      | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题                                                                                     |
 | `VimModeHandler`    | Vim 模态编辑：normal / insert / visual / command 模式切换                                                                                                  |
 | `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析                                                                                                                                 |
@@ -520,47 +523,35 @@ OpenHarness-ts/
 │  解析 flags: --model, --api-key, --permission-mode, ...  │
 └──────────────────────────┬───────────────────────────────┘
                            │
-           ┌───────────────┼────────────────┐
-           ▼               ▼                ▼
-     ohs / --tui        --print / prompt   task-worker
-   (daemon 客户端,默认)   (单次执行)         (内部)
-           │               │
-           │               ▼
-           │        ┌──────────────────────────────────────┐
-           │        │  Runtime Bootstrap (bootstrap())     │
-           │        │  在 CLI 进程内组装 RuntimeBundle      │
-           │        │                                      │
-           │        │  1. resolveApiClient()               │
-           │        │  2. createDefaultToolRegistry()      │
-           │        │     注册 45 个内置工具 + 过滤黑白名单   │
-           │        │  3. createPermissionChecker()        │
-           │        │  4. new HookExecutor()               │
-           │        │  5. buildRuntimeSystemPrompt()       │
-           │        │  6. new QueryEngine(...)             │
-           │        │  7. RuntimeBuilder.assemble()        │
-           │        └──────────────────┬───────────────────┘
-           │                           │
-           │                           ▼
-           │                  submitMessage / 退出
-           │
-           ▼
+           ┌───────────────┼──────────────────────────┐
+           ▼               ▼                          ▼
+     ohs / --tui        --print / prompt      --task-worker（deprecated）
+   (daemon 客户端,默认)   (daemon 客户端,单次)     (compatibility fallback)
+           │               │                          │
+           └───────────────┤                          ▼
+                           │                 进程内 bootstrap() +
+                           │                 QueryEngine 后退出
+                           ▼
 ┌──────────────────────────────────────────────────────────┐
-│  runTuiMode()                                            │
+│  ensure / attach daemon                                  │
 │  ├─ 读取 daemon registry + GET /health                   │
 │  ├─ 无可用/stale daemon 时 spawn `ohs serve --register`  │
-│  └─ spawn Bun frontend（OPENHARNESS_FRONTEND_CONFIG）    │
+│  ├─ TUI: spawn Bun frontend                              │
+│  └─ print: @openharness/client + SSE stdout              │
 └──────────────────────────┬───────────────────────────────┘
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────┐
-│  TUI: useServerSync → @openharness/client                │
-│  HTTP snapshot/actions + SSE live events                 │
+│  @openharness/client                                     │
+│  TUI: snapshot/actions + SSE live events                 │
+│  print: admitPrompt + SSE stdout，run idle 后退出         │
 └──────────────────────────┬───────────────────────────────┘
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────┐
 │  ohs serve / daemon                                      │
 │  SessionStore · RunCoordinator · PermissionBroker        │
+│  Agent → child session（daemon 当前主路径）                │
 └──────────────────────────┬───────────────────────────────┘
                            │ SessionRuntime factory
                            ▼
@@ -624,7 +615,9 @@ submitMessage(userInput)
 │                 │  │ ├─ Read/Write: fs      │   │
 │                 │  │ ├─ WebSearch: HTTP     │   │
 │                 │  │ ├─ MCP: stdio/HTTP/SSE │   │
-│                 │  │ └─ Agent: task-worker  │   │
+│                 │  │ └─ Agent: child session│   │
+│                 │  │    （daemon 主路径；   │   │
+│                 │  │     worker 仅兼容）    │   │
 │                 │  └──────────┬─────────────┘   │
 │                 │             ▼                   │
 │                 │  ┌────────────────────────┐   │
@@ -647,25 +640,17 @@ submitMessage(userInput)
 
 ### 会话恢复流程
 
-print / worker（项目级快照，不参与 daemon/TUI 状态）：
+用户 print（daemon Session API；旧项目级 `--continue`/`--resume` 尚未迁移）：
 
 ```
-ohs -p --continue "…"   ohs -p --resume <id> "…"
-       │                      │
-       ▼                      ▼
-  加载最新 snapshot       加载指定 snapshot
-       │                      │
-       └──────────┬───────────┘
-                  ▼
-  loadSessionSnapshot(cwd) / loadSessionById(cwd, id)
-  ├─ 读取项目作用域的 latest.json / session-<id>.json
-  ├─ 反序列化为 Message[]
-  └─ queryEngine.loadMessages(messages)
-                  │
-                  ▼
-  继续 print 对话（保留历史上下文）
+ohs -p "…" / ohs "…"
+       │
+       ▼
+  ensureLocalDaemon → OpenHarnessClient
+  createSession → syncEvents → admitPrompt → 渲染 stdout → run idle 退出
+  （传 --continue/--resume 会明确报错）
 
-# 交互 TUI 禁止 --continue/--resume；用 /sessions 或 /resume
+# Agent child session 进入 daemon store；deprecated --task-worker fallback 仍用项目级快照
 ```
 
 TUI / Web / Desktop（daemon 权威状态）：

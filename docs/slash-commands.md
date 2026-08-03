@@ -19,7 +19,7 @@ skill 经 command catalog 以 template 形式出现。
 |---|---|
 | `/new` | 开新对话（清空历史并回到首页，对齐 opencode）；TUI 下 ctrl+d 可在 /sessions 弹层删除历史会话 |
 | `/compact` | 摘要压缩上下文 |
-| `/resume` | `latest \| <session-id>` 恢复历史会话（新存储优先，显式 id 回退 legacy） |
+| `/resume` | 列出当前会话可重放的中断 run；`/resume <run-id>` 显式重放该 run 的原始 prompt。旧 run 保持中断态，不能自动续传 provider/workflow |
 | `/rewind` | 撤销最近 N 轮（默认 1） |
 | `/session` | 当前会话信息 |
 | `/export` | 导出对话为 Markdown 文件 |

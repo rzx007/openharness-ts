@@ -54,6 +54,15 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     createdAt: 4,
     updatedAt: 4,
   };
+  const childSession: SessionRecord = {
+    ...session,
+    id: "child1",
+    parentId: "s1",
+    title: "Child worker",
+    status: "running",
+    createdAt: 3,
+    updatedAt: 6,
+  };
   const message: SessionMessageRecord = {
     id: "m1",
     sessionId: "s1",
@@ -145,7 +154,30 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     createdAt: 4,
     updatedAt: 4,
   };
+  const interruptedInput = {
+    id: "i-interrupted",
+    sessionId: "s1",
+    seq: 2,
+    delivery: "queue" as const,
+    content: "finish interrupted work",
+    metadata: {},
+    createdAt: 5,
+  };
+  const interruptedRun = {
+    id: "r-interrupted",
+    sessionId: "s1",
+    inputId: interruptedInput.id,
+    status: "interrupted" as const,
+    error: "Daemon restarted before the run completed",
+    metadata: {},
+    createdAt: 5,
+    updatedAt: 5,
+  };
   const calls: Array<{ url: string; init: RequestInit }> = [];
+  let holdNextSessionList = false;
+  let releaseHeldSessionList: ((response: Response) => void) | undefined;
+  let holdNextContext = false;
+  let releaseHeldContext: ((response: Response) => void) | undefined;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {} });
     const pathname = new URL(String(url)).pathname;
@@ -344,13 +376,51 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       });
     }
     if (pathname === "/context") {
+      if (holdNextContext) {
+        holdNextContext = false;
+        return await new Promise<Response>((resolve) => {
+          releaseHeldContext = resolve;
+        });
+      }
       return jsonResponse({ report: "CONTEXT PREVIEW" });
     }
-    if (pathname === "/sessions" && init?.method === "POST") return jsonResponse({ session: createdSession });
-    if (pathname === "/sessions") return jsonResponse({ sessions: [session] });
-    if (pathname === "/sessions/s1" && init?.method === "PATCH") {
-      const body = JSON.parse(String(init.body ?? "{}")) as { model?: string };
-      return jsonResponse({ session: { ...session, model: body.model ?? session.model, updatedAt: 9 } });
+    if (pathname === "/sessions" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body ?? "{}")) as { metadata?: Record<string, unknown> };
+      return jsonResponse({
+        session: {
+          ...createdSession,
+          metadata: body.metadata ?? createdSession.metadata,
+        },
+      });
+    }
+    if (pathname === "/sessions") {
+      if (holdNextSessionList) {
+        holdNextSessionList = false;
+        return await new Promise<Response>((resolve) => {
+          releaseHeldSessionList = resolve;
+        });
+      }
+      return jsonResponse({ sessions: [session, childSession] });
+    }
+    if ((pathname === "/sessions/s1" || pathname === "/sessions/s2") && init?.method === "GET") {
+      return jsonResponse({
+        session: pathname.endsWith("/s2") ? createdSession : session,
+      });
+    }
+    if ((pathname === "/sessions/s1" || pathname === "/sessions/s2") && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body ?? "{}")) as {
+        model?: string;
+        metadata?: Record<string, unknown>;
+      };
+      const base = pathname.endsWith("/s2") ? createdSession : session;
+      return jsonResponse({
+        session: {
+          ...base,
+          model: body.model ?? base.model,
+          metadata: body.metadata ? { ...base.metadata, ...body.metadata } : base.metadata,
+          updatedAt: 9,
+        },
+      });
     }
     if (pathname === "/sessions/s1/commands" && init?.method === "POST") {
       return jsonResponse({
@@ -387,10 +457,10 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       return jsonResponse({
         cursor: 6,
         session,
-        inputs: [],
+        inputs: [interruptedInput],
         messages: [message],
         parts: [textPart, toolPart],
-        runs: [run],
+        runs: [run, interruptedRun],
         permissions: [permission],
       });
     }
@@ -443,6 +513,17 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       event(10, "session.message.part.updated", { part: liveToolPart }),
     ]);
     if (pathname === "/sessions/s1/prompts") return jsonResponse({ input: { id: "i1" } });
+    if (pathname === "/sessions/s2/prompts") return jsonResponse({
+      input: { id: "i2" },
+      run: { id: "r2", sessionId: "s2", status: "running", metadata: {}, createdAt: 12, updatedAt: 12 },
+    });
+    if (pathname === "/sessions/s1/runs/r-interrupted/resume") {
+      return jsonResponse({
+        input: { ...interruptedInput, id: "i-recovery", metadata: { recovery: { sourceRunId: interruptedRun.id } } },
+        run: { ...interruptedRun, id: "r-recovery", inputId: "i-recovery", status: "pending" },
+        source_run: interruptedRun,
+      });
+    }
     if (pathname === "/permissions/p1/reply") {
       return jsonResponse({ request: { ...permission, status: "approved", decision: "once" } });
     }
@@ -452,7 +533,14 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   let captured: TuiSessionController | undefined;
   function Harness() {
     captured = useServerSync({
-      daemon: { url: "http://daemon.test", token: "tok", cwd: session.cwd, model: "m" },
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: session.cwd,
+        model: "m",
+        permissionMode: "plan",
+        maxTurns: 11,
+      },
     }, () => {});
     return <box />;
   }
@@ -487,8 +575,11 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     tool_name: "Bash",
     text: "live output",
   }));
-  expect(captured?.transcript.map((item) => item.text)).toContain("streaming now");
-  expect(captured?.assistantBuffer).toBe("");
+  expect(captured?.transcript.map((item) => item.text)).not.toContain("streaming now");
+  expect(captured?.transcript.map((item) => item.text)).toContain(
+    "Run interrupted: Daemon restarted before the run completed\nUse /resume r-interrupted to replay its original prompt.",
+  );
+  expect(captured?.assistantBuffer).toBe("streaming now");
   expect(captured?.modal).toMatchObject({ kind: "permission", request_id: "p1", tool_name: "Write" });
 
   await act(async () => {
@@ -502,23 +593,99 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(calls.every((call) => (call.init.headers as Record<string, string> | undefined)?.authorization === "Bearer tok")).toBe(true);
 
   await act(async () => {
-    captured?.sendRequest({ type: "list_sessions" });
+    captured?.sendRequest({ type: "submit_line", line: "/resume r-interrupted" });
     await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const recoveryCall = calls.find((call) => call.url === "http://daemon.test/sessions/s1/runs/r-interrupted/resume");
+  expect(recoveryCall?.init.method).toBe("POST");
+  expect(JSON.parse(String(recoveryCall?.init.body ?? "{}"))).toMatchObject({ id: expect.any(String) });
+
+  await act(async () => {
+    holdNextSessionList = true;
+    captured?.sendRequest({ type: "list_sessions" });
+    await Promise.resolve();
   });
   const sessionOption = captured?.selectRequest?.options[0];
   expect(sessionOption?.value).toBe("s1");
   expect(sessionOption?.label === "TUI" || sessionOption?.label === "* TUI").toBe(true);
   expect(sessionOption?.description?.endsWith("| idle")).toBe(true);
   expect(captured?.selectRequest?.options.some((option) => String(option.label).includes("New session"))).toBe(false);
+  expect(captured?.selectRequest?.options.some((option) => option.value === "child1")).toBe(false);
   expect(sessionOption?.description?.includes("\\") || sessionOption?.description?.includes("/")).toBe(false);
+  expect(releaseHeldSessionList).toBeTruthy();
+
+  await act(async () => {
+    releaseHeldSessionList?.(jsonResponse({ sessions: [session, childSession] }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.selectRequest?.options.some((option) => option.value === "child1")).toBe(false);
+
+  await act(async () => {
+    holdNextContext = true;
+    captured?.sendRequest({ type: "submit_line", line: "/context" });
+    await Promise.resolve();
+  });
+  expect(captured?.displayRequest?.title).toBe("Context");
+  expect(captured?.displayRequest?.content).toBe("Loading...");
+  expect(releaseHeldContext).toBeTruthy();
+
+  await act(async () => {
+    releaseHeldContext?.(jsonResponse({ report: "CONTEXT V1" }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.displayRequest?.content).toBe("CONTEXT V1");
+
+  await act(async () => {
+    holdNextContext = true;
+    captured?.sendRequest({ type: "submit_line", line: "/context" });
+    await Promise.resolve();
+  });
+  expect(captured?.displayRequest?.content).toBe("CONTEXT V1");
+  await act(async () => {
+    releaseHeldContext?.(jsonResponse({ report: "CONTEXT V2" }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.displayRequest?.content).toBe("CONTEXT V2");
 
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "/new Scratch" });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
-  expect(calls.some((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST")).toBe(true);
-  expect(captured?.status.session_id).toBe("s2");
+  let createCall = calls.find((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST");
+  expect(createCall).toBeUndefined();
+  expect(captured?.status.session_id).toBeUndefined();
   expect(captured?.busy).toBe(false);
+
+  await act(async () => {
+    captured?.sendRequest({ type: "list_sessions" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.selectRequest?.title).toBe("Sessions");
+  expect(captured?.selectRequest?.options[0]?.value).toBe("s1");
+
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "first scratch prompt" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  createCall = calls.find((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST");
+  expect(createCall).toBeTruthy();
+  expect(JSON.parse(String(createCall?.init.body ?? "{}"))).toMatchObject({
+    title: "Scratch",
+    metadata: { permissionMode: "plan", maxTurns: 11 },
+  });
+  expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2/prompts")).toBe(true);
+  expect(captured?.status.session_id).toBe("s2");
+  expect(captured?.busy).toBe(true);
+
+  await act(async () => {
+    captured?.sendRequest({ type: "set_permission_mode", permission_mode: "full_auto" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const permissionPatch = calls.find((call) =>
+    call.url === "http://daemon.test/sessions/s2" && call.init.method === "PATCH"
+      && String(call.init.body ?? "").includes("permissionMode"));
+  expect(permissionPatch).toBeTruthy();
+  expect(captured?.status.permission_mode).toBe("full_auto");
 
   await act(async () => {
     captured?.sendRequest({ type: "delete_session", session_id: "s2" });
@@ -587,37 +754,67 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "submit_line", line: "/commit fix auth" });
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Available commands:"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes('"provider": "openai"'))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenAI"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("MCP Servers"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("task_1"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("prefer pnpm"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Credential status:"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("CONTEXT PREVIEW"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Session stats:"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("No agent tasks."))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Available commands:"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes('"provider": "openai"'))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenAI"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("MCP Servers"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("task_1"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("prefer pnpm"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Credential status:"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("CONTEXT PREVIEW"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Session stats:"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("No agent tasks."))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Conversation compacted"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("已写入"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Dream 已启动"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("PROFILE STATUS"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenHarness Environment Diagnostic"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("PROFILE STATUS"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenHarness Environment Diagnostic"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Effort set to: high"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Token usage:"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Cost estimate:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Token usage:"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Cost estimate:"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Exported Markdown to:"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("* default"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("* default"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Task started: task_run_1"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Project initialized successfully."))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("demo@1.0.0"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("h1: stop"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Explore"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("a.txt | 1 +"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Current branch: main"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("demo@1.0.0"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("h1: stop"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Explore"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("a.txt | 1 +"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Current branch: main"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Rewound 1 turn(s)"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Reloaded plugins:"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("M README.md"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("M README.md"))).toBe(false);
+
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "/commit" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.displayRequest?.title).toBe("Commit");
+  expect(captured?.displayRequest?.content).toContain("M README.md");
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("[main abc123] fix auth"))).toBe(true);
+
+  const createCallsBeforeImmediateNew = calls.filter((call) =>
+    call.url === "http://daemon.test/sessions" && call.init.method === "POST"
+  ).length;
+  const oldPromptCallsBeforeImmediateNew = calls.filter((call) =>
+    call.url === "http://daemon.test/sessions/s1/prompts"
+  ).length;
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "/new Isolated" });
+    captured?.sendRequest({ type: "submit_line", line: "isolated prompt" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(calls.filter((call) =>
+    call.url === "http://daemon.test/sessions" && call.init.method === "POST"
+  )).toHaveLength(createCallsBeforeImmediateNew + 1);
+  expect(calls.filter((call) => call.url === "http://daemon.test/sessions/s1/prompts")).toHaveLength(
+    oldPromptCallsBeforeImmediateNew,
+  );
+  expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2/prompts")).toBe(true);
+  expect(captured?.status.session_id).toBe("s2");
+  expect(captured?.transcript.some((item) =>
+    item.text.includes("Unknown command: /definitely-not-a-command") || item.text.includes("Model set to gpt-test"),
+  )).toBe(false);
 
   renderer.destroy();
 });

@@ -12,13 +12,14 @@ function withBroker(
   test: (ctx: { broker: StorePermissionBroker; store: SessionStore; changes: number[] }) => Promise<void>,
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-permission-broker-"));
-  const store = new SessionStore({ path: join(dir, "store.json") });
+  const store = new SessionStore({ path: join(dir, "store.db") });
   const changes: number[] = [];
   const broker = new StorePermissionBroker({ store, onChange: (seq) => changes.push(seq) });
   store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
   const input = store.admitPrompt({ id: "i1", sessionId: "s1", content: "edit" });
   store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
   return test({ broker, store, changes }).finally(() => {
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   });
 }
@@ -71,6 +72,41 @@ describe("StorePermissionBroker", () => {
         decision: "session",
         payload: { reusedApprovalRequestId: firstRequest.id },
       });
+    });
+  });
+
+  it("routes child asks to the parent session and reuses parent session approvals", async () => {
+    await withBroker(async ({ broker, store }) => {
+      store.createSession({ id: "child", parentId: "s1", cwd: process.cwd(), model: "m" });
+      const childInput = store.admitPrompt({ id: "child-input", sessionId: "child", content: "edit" });
+      store.createRun({ id: "child-run", sessionId: "child", inputId: childInput.id });
+
+      const parentAsk = broker.ask({ sessionId: "s1", runId: "r1", toolName: "Write" });
+      const parentRequest = store.listPermissionRequests({ sessionId: "s1", status: "pending" })[0]!;
+      broker.reply({ requestId: parentRequest.id, status: "approved", decision: "session" });
+      await expect(parentAsk).resolves.toBe(true);
+
+      const childAsk = broker.ask({
+        sessionId: "child",
+        runId: "child-run",
+        toolName: "Write",
+        input: { path: "child.txt" },
+      });
+      await expect(childAsk).resolves.toBe(true);
+
+      const childRequest = store.listPermissionRequests({ sessionId: "s1", toolName: "Write" }).at(-1);
+      expect(childRequest).toMatchObject({
+        sessionId: "s1",
+        status: "approved",
+        decision: "session",
+        payload: {
+          childSessionId: "child",
+          childRunId: "child-run",
+          reusedApprovalRequestId: parentRequest.id,
+        },
+      });
+      expect(childRequest?.runId).toBeUndefined();
+      expect(store.listPermissionRequests({ sessionId: "child" })).toHaveLength(0);
     });
   });
 

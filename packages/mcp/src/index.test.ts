@@ -129,6 +129,20 @@ describe("McpClientManager", () => {
     expect(result.isError).toBe(false);
   });
 
+  it("forwards a tool abort signal to MCP requests", async () => {
+    await manager.connect("test", { command: "node" });
+    const controller = new AbortController();
+    const client = manager["clients"].get("test") as { callTool: ReturnType<typeof vi.fn> };
+
+    await manager.callTool("test", "read_file", { path: "/tmp" }, controller.signal);
+
+    expect(client.callTool).toHaveBeenLastCalledWith(
+      { name: "read_file", arguments: { path: "/tmp" } },
+      undefined,
+      { signal: controller.signal },
+    );
+  });
+
   it("readResource throws for unknown server", async () => {
     await expect(
       manager.readResource("nope", "file:///x")
@@ -140,6 +154,19 @@ describe("McpClientManager", () => {
 
     const content = await manager.readResource("test", "file:///config.json");
     expect(content).toBe("resource content");
+  });
+
+  it("forwards a tool abort signal when reading MCP resources", async () => {
+    await manager.connect("test", { command: "node" });
+    const controller = new AbortController();
+    const client = manager["clients"].get("test") as { readResource: ReturnType<typeof vi.fn> };
+
+    await manager.readResource("test", "file:///config.json", controller.signal);
+
+    expect(client.readResource).toHaveBeenLastCalledWith(
+      { uri: "file:///config.json" },
+      { signal: controller.signal },
+    );
   });
 
   it("handles connection failure gracefully", async () => {

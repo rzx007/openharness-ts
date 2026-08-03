@@ -24,6 +24,11 @@ export type TuiSessionController = {
     submitPrefix: string;
     options: SelectOptionPayload[];
   } | null;
+  displayRequest: {
+    key?: string;
+    title: string;
+    content: string;
+  } | null;
   busy: boolean;
   ready: boolean;
   todoMarkdown: string;
@@ -32,6 +37,7 @@ export type TuiSessionController = {
   workflowState: WorkflowTuiState | null;
   setModal(value: Record<string, unknown> | null): void;
   setSelectRequest(value: TuiSessionController["selectRequest"]): void;
+  setDisplayRequest(value: TuiSessionController["displayRequest"]): void;
   setBusy(value: boolean): void;
   sendRequest(payload: Record<string, unknown>): void;
 };

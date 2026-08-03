@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
+import { createToolAbortScope } from "../abort.js";
 
 interface SearchResult {
   title: string;
@@ -25,11 +26,12 @@ export const webSearchTool: ToolDefinition = {
     },
     required: ["query"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const query = input.query as string;
     const maxResults = ((input.maxResults as number) ?? 5);
     const endpoint =
       (input.searchUrl as string) || "https://html.duckduckgo.com/html/";
+    const abortScope = createToolAbortScope(context.abortSignal, 20_000);
 
     try {
       const response = await fetch(
@@ -37,7 +39,7 @@ export const webSearchTool: ToolDefinition = {
         {
           headers: { "User-Agent": "OpenHarness/0.1" },
           redirect: "follow",
-          signal: AbortSignal.timeout(20_000),
+          signal: abortScope.signal,
         }
       );
       if (!response.ok) {
@@ -72,6 +74,8 @@ export const webSearchTool: ToolDefinition = {
         content: [{ type: "text", text: `web_search failed: ${error}` }],
         isError: true,
       };
+    } finally {
+      abortScope.dispose();
     }
   },
 };

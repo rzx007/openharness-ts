@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
+import { createToolAbortScope } from "../abort.js";
 
 export const webFetchTool: ToolDefinition = {
   name: "WebFetch",
@@ -20,16 +21,17 @@ export const webFetchTool: ToolDefinition = {
     },
     required: ["url"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const url = input.url as string;
     const maxChars = ((input.maxChars as number) ?? 12000);
     const format = (input.format as string) ?? "text";
+    const abortScope = createToolAbortScope(context.abortSignal, 20_000);
 
     try {
       const response = await fetch(url, {
         headers: { "User-Agent": "OpenHarness/0.1" },
         redirect: "follow",
-        signal: AbortSignal.timeout(20_000),
+        signal: abortScope.signal,
       });
       if (!response.ok) {
         return {
@@ -77,6 +79,8 @@ export const webFetchTool: ToolDefinition = {
         content: [{ type: "text", text: `web_fetch failed: ${error}` }],
         isError: true,
       };
+    } finally {
+      abortScope.dispose();
     }
   },
 };

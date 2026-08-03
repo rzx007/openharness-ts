@@ -71,6 +71,23 @@ describe("agentTool isolate", () => {
     expect(calls.at(-1)?.isolate).toBe(false);
   });
 
+  it("uses the current daemon session as the child parent", async () => {
+    const { calls } = installFakeBackend(() => ({
+      success: true,
+      agentId: "Explore@default",
+      taskId: "task_parent",
+      sessionId: "child",
+      backendType: "in_process",
+    }));
+
+    await agentTool.execute(
+      { description: "d", prompt: "explore" },
+      { cwd: "/work", sessionId: "leader-session" },
+    );
+
+    expect(calls.at(-1)?.parentSessionId).toBe("leader-session");
+  });
+
   it("includes worktree branch and path in the returned text", async () => {
     installFakeBackend(() => ({
       success: true,

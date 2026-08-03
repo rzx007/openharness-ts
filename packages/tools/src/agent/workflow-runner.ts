@@ -23,6 +23,7 @@ export interface AgentWorkflowRunnerOptions {
   fromAgent?: string;
   spawnWorker?: (config: TeammateSpawnConfig) => Promise<SpawnResult>;
   awaitTask?: (taskId: string, options?: { timeoutMs?: number }) => Promise<AwaitTaskResult>;
+  stopTask?: (taskId: string) => Promise<unknown>;
   getChangedFiles?: (cwd: string) => Promise<string[]>;
   getDiffSummary?: (cwd: string) => Promise<WorkflowDiffSummary>;
   getAgentDefinition?: (name: string) => AgentDefinition | undefined;
@@ -47,6 +48,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
     const workerSessionId = createWorkerSessionId(task.id, attempt);
     const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, options.sessionId, config));
     const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions));
+    const stopTask = options.stopTask ?? ((taskId) => defaultStopTask(options.cwd, options.sessionId, taskId));
 
     const resumedTaskId = getStringMetadata(resumeFrom?.metadata, "taskManagerTaskId");
     if (resumedTaskId) {
@@ -56,6 +58,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
           metadata: resumeFrom?.metadata,
         });
         const waited = await awaitTask(resumedTaskId, { timeoutMs: options.timeoutMs });
+        await stopTimedOutTask(stopTask, resumedTaskId, waited);
         const spawn = {
           success: true,
           agentId: getStringMetadata(resumeFrom?.metadata, "agentId") ?? `${subagentType}@${team}`,
@@ -82,7 +85,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       team,
       prompt,
       cwd: options.cwd,
-      parentSessionId: "main",
+      parentSessionId: options.sessionId ?? "main",
       sessionId: workerSessionId,
       model: task.model ?? agentDef?.model,
       systemPrompt: agentDef?.systemPrompt,
@@ -115,9 +118,23 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       metadata: spawnMetadata(spawn),
     });
     const waited = await awaitTask(spawn.taskId, { timeoutMs: options.timeoutMs });
+    await stopTimedOutTask(stopTask, spawn.taskId, waited);
     const diff = await getDiffSummaryForWorker(options, spawn);
     return mapAwaitedTaskToWorkerResult(task, spawn, waited, diff);
   };
+}
+
+async function stopTimedOutTask(
+  stopTask: (taskId: string) => Promise<unknown>,
+  taskId: string,
+  waited: AwaitTaskResult,
+): Promise<void> {
+  if (!waited.timedOut) return;
+  try {
+    await stopTask(taskId);
+  } catch {
+    // Best-effort: a failed stop must not mask the timeout result.
+  }
 }
 
 function buildWorkerPrompt(
@@ -415,6 +432,15 @@ async function defaultAwaitTask(
 ): Promise<AwaitTaskResult> {
   const { getTaskManager } = await import("@openharness/services");
   return getTaskManager({ cwd, sessionId }).awaitTask(taskId, options);
+}
+
+async function defaultStopTask(
+  cwd: string,
+  sessionId: string | undefined,
+  taskId: string,
+): Promise<unknown> {
+  const { getTaskManager } = await import("@openharness/services");
+  return getTaskManager({ cwd, sessionId }).stopTask(taskId);
 }
 
 async function defaultGetAgentDefinition(name: string): Promise<AgentDefinition | undefined> {

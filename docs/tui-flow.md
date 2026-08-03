@@ -36,7 +36,7 @@ ohs | ohs --tui [flags] ["initial prompt"]
 
 ## CLI 启动器
 
-`mainAction()` 在无 prompt 时默认进入 `runTuiMode()`；`--tui` 为显式别名。带 prompt 且未加 `--tui` 时走 print。`--continue` / `--resume` 不能用于 TUI 入口（daemon 会话用 TUI 内 `/sessions` / `/resume`）。
+`mainAction()` 在无 prompt 时默认进入 `runTuiMode()`；`--tui` 为显式别名。带 prompt 且未加 `--tui` 时走 print（同样 ensure daemon + Session API，见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)「Print Session API」）。CLI 的 `--continue` / `--resume` 仍暂不可用；daemon 会话在 TUI 内用 `/sessions` 切换，用 `/resume` 明确重放中断 run。
 
 `runTuiMode()` 负责：
 
@@ -57,6 +57,7 @@ ohs | ohs --tui [flags] ["initial prompt"]
 - `POST /sessions`
 - `GET /sessions/:sessionId`
 - `GET /sessions/:sessionId/state`
+- `GET /tasks?sessionId=...`
 - `GET /sessions/:sessionId/messages`
 - `GET /sessions/:sessionId/parts`
 - `POST /sessions/:sessionId/prompts`
@@ -66,7 +67,13 @@ ohs | ohs --tui [flags] ["initial prompt"]
 - `GET /events`
 - `GET /events/stream`
 
-服务启动后写 registry，供 TUI、Web、Desktop 或 remote attach 客户端复用。唯一的默认 store 是 `~/.openharness-ts/data/session-runtime/sessions.json`；旧 `~/.openharness` 不读取、不迁移，也不存在并行的版本化 store。
+服务启动后仅为本机发现写入私有 registry，供本机 `ohs`、`ohs --tui` 与 print 入口复用。Web、Desktop 或另一台机器上的远程客户端绝不读取或复制该文件，而是使用显式 daemon URL 与 bearer token 连接。唯一的默认 store 是 `~/.openharness-ts/data/session-runtime/sessions.db`；它由 daemon 独占写入。旧 `~/.openharness` 与既有 JSON store 都不读取、不迁移，也不存在并行的版本化 store。
+
+## 远程 TUI 入口
+
+传入 `--daemon-url` 和 `--daemon-token` 时，`runTuiMode()` 跳过本机 registry、探活和 daemon 派生，直接将这组显式连接信息写入 `OPENHARNESS_FRONTEND_CONFIG`。前端仍通过同一个 `useServerSync()` 与 `@openharness/client` 进入 snapshot + SSE 链路，因此本机与远程 TUI 的会话行为一致。
+
+远程 daemon 绑定非 loopback 地址时必须显式设置 `--token`；浏览器客户端还必须命中精确的 `--allow-origin` 白名单。部署示例与安全边界见 [remote-attach.md](./remote-attach.md)。
 
 ## 前端
 
@@ -82,13 +89,15 @@ ohs | ohs --tui [flags] ["initial prompt"]
 - 用户输入通过 `admitPrompt()` 提交。
 - `/sessions` 列表切换 session。
 - `/new [title]` 创建并切换 session。
-- `/resume <id>` 切换到指定 session。
+- `/resume` 列出当前 session 可安全重放的中断 run；`/resume <runId>` 创建一个带恢复溯源的新 input/run，重放该 run 的原始 prompt。它不继续旧 provider stream，也不自动恢复 workflow/child task。
 - 权限弹框通过 `replyPermission()` 持久化回复。
 - Esc interrupt 通过 `interruptSession()`。
 
 Ctrl+C 由 `App` 请求 `renderer.destroy()`；进程只在 OpenTUI `onDestroy` 回调触发后退出，确保 raw mode、光标和 alternate screen 已经恢复。
 
 ## Runtime
+
+Windows 上 TUI 运行在 Bun 和 OpenTUI 原生 DLL 组合中。启动器会在加载 OpenTUI 之前拒绝低于 Bun `1.3.12` 的版本，避免原生运行时崩溃表现为无上下文的段错误。建议先执行 `bun upgrade` 再运行 `ohs`；该检查只影响 Windows TUI，不影响 daemon HTTP 服务。
 
 prompt 进入 server 后：
 
@@ -104,4 +113,4 @@ prompt 进入 server 后：
 - TUI 不拥有 agent runtime。
 - TUI 不直接读写 session store。
 - TUI 不 spawn per-session backend。
-- 可恢复状态以 daemon canonical session state（messages + parts + runs + permissions）为准。
+- 可恢复状态以 daemon canonical session state（messages + parts + runs + tasks + permissions）为准；TaskManager 的进程句柄和 callback 不属于可恢复状态。

@@ -3,6 +3,12 @@ export {
   type TaskRunner,
   type SubprocessBackendOptions,
 } from "./subprocess.js";
+export {
+  ChildSessionBackend,
+  type ChildSessionBackendOptions,
+  type ChildSessionHost,
+  type SessionTaskBridge,
+} from "./child-session.js";
 
 export {
   exclusiveFileLock,
@@ -123,6 +129,8 @@ export interface SpawnResult {
   success: boolean;
   agentId: string;
   taskId: string;
+  /** Daemon child session backing this teammate, when applicable. */
+  sessionId?: string;
   backendType: string;
   error?: string;
   /** 隔离成功时填充：teammate 改动所在的 worktree 路径与分支。 */

@@ -23,6 +23,7 @@ async function waitForStatus(taskId: string, status: string, timeoutMs = 8000): 
 
 afterEach(() => {
   resetTaskManager(CWD);
+  resetTaskManager({ cwd: CWD, sessionId: "session-timeout" });
 });
 
 describe("taskWaitTool", () => {
@@ -84,7 +85,7 @@ describe("taskWaitTool", () => {
     expect(text).toContain("boom");
   });
 
-  it("marks a task that does not finish in time as timed out", async () => {
+  it("marks a task that does not finish in time as timed out and requests stop", async () => {
     const mgr = getTaskManager(CWD);
     // Long-running task; we time out almost immediately.
     const task = await mgr.createShellTask(
@@ -97,9 +98,60 @@ describe("taskWaitTool", () => {
     const text = textOf(result);
     expect(text).toContain(task.id);
     expect(text).toMatch(/did not finish within 0\.2s/);
-    expect(text).toContain("TaskStop");
+    expect(text).toMatch(/已请求停止|requested stop/i);
+    expect(mgr.getTask(task.id)?.status).toBe("stopped");
+  });
 
-    await mgr.stopTask(task.id).catch(() => {});
+  it("stops a session-backed task when TaskWait times out", async () => {
+    const sessionId = "session-timeout";
+    const mgr = getTaskManager({ cwd: CWD, sessionId });
+    let stopped = false;
+    const task = mgr.registerSessionTask({
+      description: "session child",
+      cwd: CWD,
+      sessionId,
+      childSessionId: "child-timeout",
+      prompt: "work",
+      onInput: async () => {},
+      onStop: async () => {
+        stopped = true;
+      },
+    });
+
+    const result = await taskWaitTool.execute(
+      { taskIds: [task.id], timeoutSeconds: 0.15 },
+      { cwd: CWD, sessionId },
+    );
+    const text = textOf(result);
+    expect(text).toMatch(/已请求停止|requested stop/i);
+    expect(stopped).toBe(true);
+    expect(mgr.getTask(task.id)?.status).toBe("stopped");
+  });
+
+  it("stops every awaited task when the owning session is interrupted", async () => {
+    const controller = new AbortController();
+    const mgr = getTaskManager(CWD);
+    let stopped = false;
+    const task = mgr.registerSessionTask({
+      description: "interrupted child",
+      cwd: CWD,
+      childSessionId: "child-interrupted",
+      prompt: "work",
+      onInput: async () => {},
+      onStop: async () => {
+        stopped = true;
+      },
+    });
+
+    const waiting = taskWaitTool.execute(
+      { taskIds: [task.id], timeoutSeconds: 60 },
+      { cwd: CWD, abortSignal: controller.signal },
+    );
+    controller.abort(new Error("parent interrupted"));
+
+    await waiting;
+    expect(stopped).toBe(true);
+    expect(mgr.getTask(task.id)?.status).toBe("stopped");
   });
 
   it("isolates an unknown taskId without dragging down the others", async () => {
