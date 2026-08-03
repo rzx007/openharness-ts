@@ -1,5 +1,6 @@
 import {
   OpenHarnessClient,
+  createPromptRequestId,
   hasActiveRun,
   syncEvents,
   type OpenHarnessClientState,
@@ -218,7 +219,7 @@ export async function runPrintSession(
     })) {
       if (update.source === "snapshot" && !admitted) {
         admitted = true;
-        const response = await client.admitPrompt(session.id, { content: prompt });
+        const response = await client.admitPrompt(session.id, { id: createPromptRequestId(), content: prompt });
         runId = response.run?.id;
       }
 

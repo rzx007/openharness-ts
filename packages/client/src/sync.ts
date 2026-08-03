@@ -74,26 +74,17 @@ async function* liveWithReconnect(
         signal: options.signal,
       })) {
         attempt = 0;
-        if (event.seq > state.lastSeq + 1) {
-          if (options.sessionId) {
-            const snapshot = await client.getSessionState(options.sessionId, {
-              signal: options.signal,
-            });
-            state = applySessionSnapshot(state, snapshot);
-            cursor = state.lastSeq;
-            yield { state, source: "snapshot" };
-          } else {
-            const gap = await client.listEvents({
-              cursor: state.lastSeq,
-              signal: options.signal,
-            });
-            for (const missed of gap) {
-              const beforeGap = state;
-              state = applyEvent(state, missed);
-              if (state !== beforeGap) yield { event: missed, state, source: "replay" };
-            }
-            cursor = state.lastSeq;
+        if (event.seq > state.lastSeq + 1 && !options.sessionId) {
+          const gap = await client.listEvents({
+            cursor: state.lastSeq,
+            signal: options.signal,
+          });
+          for (const missed of gap) {
+            const beforeGap = state;
+            state = applyEvent(state, missed);
+            if (state !== beforeGap) yield { event: missed, state, source: "replay" };
           }
+          cursor = state.lastSeq;
         }
 
         const before = state;

@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from "@openharness/coordinator";
 import type { CommandCatalogProvider } from "./commands.js";
 import { OpenHarnessHttpServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
@@ -245,6 +246,100 @@ describe("OpenHarnessHttpServer", () => {
         };
         expect(events.events.map((event) => event.type)).toContain("session.transcript.replaced");
         expect(events.events.map((event) => event.type)).toContain("session.run.updated");
+      } finally {
+        await second.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("terminalizes daemon-owned running workflows after restart without touching unrelated project workflows", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-server-workflow-restart-"));
+    const storePath = join(dir, "sessions.json");
+    const projectCwd = join(dir, "project");
+    const workflowStore = new WorkflowRunStore({ cwd: projectCwd });
+    const spec = {
+      mode: "sequential" as const,
+      tasks: [{ id: "child", prompt: "finish the child task" }],
+    };
+    const plan = createWorkflowPlan(spec);
+    const now = Date.now();
+    const createRunningSnapshot = (runId: string) => createWorkflowRunSnapshot({
+      runId,
+      status: "running",
+      summary: "Workflow started",
+      spec,
+      plan,
+      results: new Map(),
+      running: new Set(["child"]),
+      runningTasks: new Map([["child", {
+        taskId: "child",
+        attempt: 1,
+        dependencies: [],
+        startedAt: now,
+        summary: "Child session is running",
+        metadata: { taskManagerTaskId: "task-lost-with-daemon" },
+      }]]),
+      createdAt: now,
+    });
+    const daemonRunId = "wf-daemon-owned";
+    const unrelatedRunId = "wf-cli-owned";
+    const corruptRunId = "wf-corrupt";
+    workflowStore.save(createRunningSnapshot(daemonRunId));
+    workflowStore.save(createRunningSnapshot(unrelatedRunId));
+
+    try {
+      const first = new OpenHarnessHttpServer({ storePath });
+      const parent = first.store.createSession({ id: "parent", cwd: projectCwd, model: "m", title: "parent" });
+      const child = first.store.createSession({ id: "child", parentId: parent.id, cwd: projectCwd, model: "m", title: "child" });
+      const staleChildRun = first.store.createRun({ id: "child-run", sessionId: child.id });
+      first.store.updateRun(staleChildRun.id, { status: "running" });
+      first.store.appendEvent({
+        type: "workflow.workflow_started",
+        sessionId: parent.id,
+        payload: {
+          event: {
+            version: 1,
+            runId: daemonRunId,
+            type: "workflow_started",
+            timestamp: now,
+            status: "running",
+          },
+        },
+      });
+      writeFileSync(workflowStore.pathFor(corruptRunId), "{ not valid JSON", "utf-8");
+      first.store.appendEvent({
+        type: "workflow.workflow_started",
+        sessionId: parent.id,
+        payload: {
+          event: {
+            version: 1,
+            runId: corruptRunId,
+            type: "workflow_started",
+            timestamp: now,
+            status: "running",
+          },
+        },
+      });
+
+      const second = new OpenHarnessHttpServer({ storePath });
+      await second.listen();
+      try {
+        const recovered = workflowStore.load(daemonRunId)!;
+        expect(recovered.status).toBe("failed");
+        expect(recovered.results.child).toMatchObject({
+          status: "killed",
+          summary: "Daemon restarted before the workflow completed",
+        });
+        expect(recovered.runningTaskIds).toEqual([]);
+        expect(workflowStore.load(unrelatedRunId)?.status).toBe("running");
+        expect(second.store.getRun(staleChildRun.id)).toMatchObject({ status: "interrupted" });
+        expect(second.store.listChildSessions(parent.id).map((session) => session.id)).toEqual([child.id]);
+        expect(second.store.listEvents({ sessionId: parent.id }).find((event) => event.type === "workflow.workflow_cancelled"))
+          .toMatchObject({ payload: { recoveredAfterDaemonRestart: true } });
+        expect(second.store.listEvents({ sessionId: parent.id }).find((event) => event.type === "workflow.workflow_recovery_failed"))
+          .toMatchObject({ payload: { runId: corruptRunId, recoveredAfterDaemonRestart: true } });
       } finally {
         await second.close();
       }
@@ -1202,6 +1297,295 @@ describe("OpenHarnessHttpServer", () => {
     }, { runtimeFactory });
   });
 
+  it("makes archive terminal before waiting for an interrupted run to settle", async () => {
+    const abortObserved = deferred();
+    const releaseRun = deferred();
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(input) {
+            await new Promise<void>((resolve) => {
+              input.signal.addEventListener("abort", () => {
+                abortObserved.resolve();
+                void releaseRun.promise.then(resolve);
+              }, { once: true });
+            });
+            throw new Error("interrupted by archive");
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token, server }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m" }),
+      });
+      await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "active" }),
+      });
+      await waitForEvent(baseUrl, token, (event) =>
+        event.type === "session.run.updated" &&
+        (event.payload?.run as { status?: string } | undefined)?.status === "running",
+      );
+
+      const archive = fetch(`${baseUrl}/sessions/s1`, { method: "DELETE", headers: auth(token) });
+      await abortObserved.promise;
+      expect(server.store.getSession("s1")?.status).toBe("closing");
+
+      const rejected = await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "must not run" }),
+      });
+      expect(rejected.status).toBe(409);
+
+      releaseRun.resolve();
+      expect((await archive).status).toBe(200);
+      expect(server.store.getSession("s1")?.status).toBe("archived");
+      expect(server.store.listInputs("s1").map((input) => input.content)).toEqual(["active"]);
+    }, { runtimeFactory });
+  });
+
+  it("returns the original admission for an idempotent prompt retry", async () => {
+    await withServer(async ({ baseUrl, token, server }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m" }),
+      });
+      const request = {
+        id: "prompt-request-1",
+        content: "do the thing",
+        metadata: { source: "tui", labels: ["retry"] },
+      };
+      const first = await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      const second = await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      const firstBody = await first.json() as { input: { id: string } };
+      const secondBody = await second.json() as { input: { id: string } };
+      expect(first.status).toBe(202);
+      expect(second.status).toBe(202);
+      expect(secondBody.input.id).toBe(firstBody.input.id);
+      expect(server.store.listInputs("s1")).toHaveLength(1);
+
+      const conflict = await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ ...request, content: "a different operation" }),
+      });
+      expect(conflict.status).toBe(409);
+      expect(server.store.listInputs("s1")).toHaveLength(1);
+    });
+  });
+
+  it("keeps a session running while only queued work is interrupted", async () => {
+    const abortObserved = deferred();
+    const releaseRun = deferred();
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(input) {
+            await new Promise<void>((resolve) => {
+              input.signal.addEventListener("abort", () => {
+                abortObserved.resolve();
+                void releaseRun.promise.then(resolve);
+              }, { once: true });
+            });
+            throw new Error("interrupted by test");
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token, server }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m" }),
+      });
+      for (const content of ["active", "queued"]) {
+        await fetch(`${baseUrl}/sessions/s1/prompts`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({ content }),
+        });
+      }
+      await waitForEvent(baseUrl, token, (event) =>
+        event.type === "session.run.updated" &&
+        (event.payload?.run as { status?: string } | undefined)?.status === "running",
+      );
+
+      await fetch(`${baseUrl}/sessions/s1/interrupt`, { method: "POST", headers: auth(token) });
+      await abortObserved.promise;
+      expect(server.store.getSession("s1")?.status).toBe("running");
+
+      releaseRun.resolve();
+      for (let i = 0; i < 50 && server.store.getSession("s1")?.status !== "idle"; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(server.store.getSession("s1")?.status).toBe("idle");
+    }, { runtimeFactory });
+  });
+
+  it("rejects runtime metadata changes while a run is active", async () => {
+    const started = deferred();
+    const closed: string[] = [];
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime(context) {
+        return {
+          async runPrompt() {
+            started.resolve();
+            await new Promise<void>(() => {});
+            return { messages: [] };
+          },
+          async close() {
+            closed.push(context.session.id);
+          },
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token, server }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m", metadata: { permissionMode: "default" } }),
+      });
+      await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "active" }),
+      });
+      await started.promise;
+
+      const patched = await fetch(`${baseUrl}/sessions/s1`, {
+        method: "PATCH",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
+      });
+      expect(patched.status).toBe(409);
+      expect(server.store.getSession("s1")?.metadata.permissionMode).toBe("default");
+      expect(closed).toEqual([]);
+    }, { runtimeFactory });
+  });
+
+  it("rejects runtime-restarting resource mutations before they write state", async () => {
+    const started = deferred();
+    const stopped = deferred();
+    const closed: string[] = [];
+    let memoryWrites = 0;
+    let authWrites = 0;
+    let pluginWrites = 0;
+    let profileWrites = 0;
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime(context) {
+        return {
+          async runPrompt(input) {
+            started.resolve();
+            await new Promise<void>((resolve) => {
+              input.signal.addEventListener("abort", resolve, { once: true });
+            });
+            stopped.resolve();
+            throw input.signal.reason;
+          },
+          async close() {
+            closed.push(context.session.id);
+          },
+          async remember() {
+            return { skipped: false, writtenIds: [], titles: [] };
+          },
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token }) => {
+      const cwd = process.cwd();
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "s1", cwd, model: "m" }),
+      });
+      await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "active" }),
+      });
+      await started.promise;
+
+      const requests = await Promise.all([
+        fetch(`${baseUrl}/memory`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({ cwd, content: "do not persist" }),
+        }),
+        fetch(`${baseUrl}/auth/login`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({ provider: "openai", apiKey: "sk-test" }),
+        }),
+        fetch(`${baseUrl}/profile/init`, { method: "POST", headers: auth(token) }),
+        fetch(`${baseUrl}/plugins/demo/enable`, { method: "POST", headers: auth(token) }),
+        fetch(`${baseUrl}/plugins/reload`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({ cwd }),
+        }),
+        fetch(`${baseUrl}/sessions/s1/remember`, { method: "POST", headers: auth(token) }),
+      ]);
+
+      expect(requests.map((response) => response.status)).toEqual([409, 409, 409, 409, 409, 409]);
+      expect({ memoryWrites, authWrites, pluginWrites, profileWrites, closed }).toEqual({
+        memoryWrites: 0,
+        authWrites: 0,
+        pluginWrites: 0,
+        profileWrites: 0,
+        closed: [],
+      });
+
+      await fetch(`${baseUrl}/sessions/s1/interrupt`, { method: "POST", headers: auth(token) });
+      await stopped.promise;
+    }, {
+      runtimeFactory,
+      memoryService: {
+        async list() { return { directory: "/tmp/memory", entries: [] }; },
+        async get() { return null; },
+        async add() {
+          memoryWrites++;
+          return { id: "m1", content: "unexpected", createdAt: 1, updatedAt: 1 };
+        },
+        async remove() { return false; },
+      },
+      authService: {
+        async status() {
+          return { codex: { configured: false, state: "none", source: "none" }, storedProviders: [], envProviders: [] };
+        },
+        async login() { authWrites++; return { message: "unexpected" }; },
+        async logout() { authWrites++; return { message: "unexpected" }; },
+      },
+      profileService: {
+        async status() { return { report: "unused" }; },
+        async init() { profileWrites++; return { report: "unexpected" }; },
+      },
+      pluginService: {
+        async list() { return { plugins: [], warnings: [] }; },
+        async setEnabled() { pluginWrites++; return { message: "unexpected", restartRuntimes: true }; },
+      },
+    });
+  });
+
   it("streams replayed and live events over SSE", async () => {
     await withServer(async ({ baseUrl, token }) => {
       await fetch(`${baseUrl}/sessions`, {
@@ -1235,6 +1619,44 @@ describe("OpenHarnessHttpServer", () => {
 
       expect(text).toContain("session.created");
       expect(text).toContain("session.input.admitted");
+    });
+  });
+
+  it("replays a filtered SSE stream from Last-Event-ID", async () => {
+    await withServer(async ({ baseUrl, token }) => {
+      for (const id of ["s1", "s2"]) {
+        await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({ id, cwd: process.cwd(), model: "m" }),
+        });
+      }
+      await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "replay me" }),
+      });
+
+      const abort = new AbortController();
+      const stream = await fetch(`${baseUrl}/events/stream?sessionId=s1`, {
+        headers: { ...auth(token), "last-event-id": "1" },
+        signal: abort.signal,
+      });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      for (let i = 0; i < 10 && !text.includes("session.input.admitted"); i++) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        text += decoder.decode(chunk.value, { stream: true });
+      }
+      await reader.cancel();
+      abort.abort();
+
+      expect(text).toContain("session.input.admitted");
+      expect(text).toContain("id: 3\nevent: session.input.admitted");
+      expect(text).not.toContain("id: 1\nevent:");
+      expect(text).not.toContain('"sessionId":"s2"');
     });
   });
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   OpenHarnessClient,
+  createPromptRequestId,
   createInitialClientState,
   selectSessionMessagesWithParts,
   syncEvents,
@@ -317,7 +318,7 @@ export function useServerSync(
     const client = clientRef.current;
     if (!client) return;
     setLocalBusy(true);
-    void client.admitPrompt(activeSessionId, { content: config.initial_prompt })
+    void client.admitPrompt(activeSessionId, { id: createPromptRequestId(), content: config.initial_prompt })
       .then((response) => {
         setLocalBusy(false);
         setSubmittedRun(response.run ? { sessionId: activeSessionId, runId: response.run.id } : null);
@@ -445,7 +446,7 @@ export function useServerSync(
 
         if (!sessionId) return;
         setLocalBusy(true);
-        const response = await client.admitPrompt(sessionId, { content: line });
+        const response = await client.admitPrompt(sessionId, { id: createPromptRequestId(), content: line });
         setLocalBusy(false);
         setSubmittedRun(response.run ? { sessionId, runId: response.run.id } : null);
         return;

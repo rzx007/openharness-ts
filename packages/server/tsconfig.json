@@ -5,6 +5,9 @@
     "rootDir": "../..",
     "baseUrl": ".",
     "paths": {
+      "@openharness/coordinator": [
+        "../coordinator/src/index.ts"
+      ],
       "@openharness/core": [
         "../core/src/index.ts"
       ],

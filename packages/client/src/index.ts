@@ -5,7 +5,7 @@
  * 客户端只做展示与控制，不拥有 agent runtime。
  */
 
-export { OpenHarnessApiError, OpenHarnessClient, streamServerSentEvents } from "./client.js";
+export { createPromptRequestId, OpenHarnessApiError, OpenHarnessClient, streamServerSentEvents } from "./client.js";
 export { applyEvent, applyEvents, applySessionSnapshot, createInitialClientState } from "./reducer.js";
 export { selectSessionMessagesWithParts } from "./selectors.js";
 export {

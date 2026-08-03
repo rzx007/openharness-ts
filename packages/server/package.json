@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@hono/node-server": "catalog:",
+    "@openharness/coordinator": "workspace:*",
     "@openharness/core": "workspace:*",
     "@openharness/services": "workspace:*",
     "hono": "catalog:"

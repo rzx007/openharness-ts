@@ -91,6 +91,15 @@ function assertSession(state: SessionState, sessionId: string): SessionRecord {
   return session;
 }
 
+function assertMutableSession(session: SessionRecord): void {
+  if (session.status === "archived") {
+    throw new Error(`Session is archived: ${session.id}`);
+  }
+  if (session.status === "closing") {
+    throw new Error(`Session is closing: ${session.id}`);
+  }
+}
+
 function assertMessage(state: SessionState, messageId: string): SessionMessageRecord {
   const message = state.messages[messageId];
   if (!message) throw new Error(`Session message not found: ${messageId}`);
@@ -156,6 +165,7 @@ export class SessionStore {
 
   archiveSession(sessionId: string): SessionRecord {
     const session = assertSession(this.state, sessionId);
+    if (session.status === "archived") return clone(session);
     const timestamp = now();
     session.status = "archived";
     session.updatedAt = timestamp;
@@ -169,8 +179,25 @@ export class SessionStore {
     return clone(session);
   }
 
+  /** Prevent further mutation while the server joins interrupted work. */
+  beginArchive(sessionId: string): SessionRecord {
+    const session = assertSession(this.state, sessionId);
+    if (session.status === "archived" || session.status === "closing") return clone(session);
+    const timestamp = now();
+    session.status = "closing";
+    session.updatedAt = timestamp;
+    this.appendEventInMemory({
+      type: "session.closing",
+      sessionId,
+      payload: { sessionId },
+    });
+    this.save();
+    return clone(session);
+  }
+
   updateSession(sessionId: string, input: UpdateSessionInput): SessionRecord {
     const session = assertSession(this.state, sessionId);
+    assertMutableSession(session);
     const timestamp = now();
     if (input.title !== undefined) session.title = input.title;
     if (input.model !== undefined) session.model = input.model;
@@ -191,6 +218,7 @@ export class SessionStore {
 
   admitPrompt(input: AdmitPromptInput): SessionInputRecord {
     const session = assertSession(this.state, input.sessionId);
+    assertMutableSession(session);
     const id = input.id ?? randomUUID();
     if (this.state.inputs[id]) throw new Error(`Session input already exists: ${id}`);
     const timestamp = now();
@@ -494,8 +522,12 @@ export class SessionStore {
 
   createRun(input: CreateRunInput): SessionRunRecord {
     const session = assertSession(this.state, input.sessionId);
+    assertMutableSession(session);
     if (input.inputId && !this.state.inputs[input.inputId]) {
       throw new Error(`Session input not found: ${input.inputId}`);
+    }
+    if (input.inputId && this.state.inputs[input.inputId]!.sessionId !== input.sessionId) {
+      throw new Error(`Session input does not belong to session: ${input.inputId}`);
     }
     const id = input.id ?? randomUUID();
     if (this.state.runs[id]) throw new Error(`Session run already exists: ${id}`);
@@ -510,6 +542,7 @@ export class SessionStore {
       updatedAt: timestamp,
     };
     this.state.runs[id] = run;
+    this.refreshSessionStatus(session);
     session.updatedAt = timestamp;
     this.appendEventInMemory({
       type: "session.run.created",
@@ -534,7 +567,7 @@ export class SessionStore {
     if (input.error !== undefined) run.error = input.error;
     if (input.metadata) run.metadata = { ...run.metadata, ...input.metadata };
     run.updatedAt = timestamp;
-    session.status = run.status === "running" ? "running" : "idle";
+    this.refreshSessionStatus(session);
     session.updatedAt = timestamp;
     this.appendEventInMemory({
       type: "session.run.updated",
@@ -547,6 +580,11 @@ export class SessionStore {
 
   getRun(runId: string): SessionRunRecord | undefined {
     const run = this.state.runs[runId];
+    return run ? clone(run) : undefined;
+  }
+
+  findRunByInput(inputId: string): SessionRunRecord | undefined {
+    const run = Object.values(this.state.runs).find((candidate) => candidate.inputId === inputId);
     return run ? clone(run) : undefined;
   }
 
@@ -567,6 +605,18 @@ export class SessionStore {
       .filter((run) => run.status === "pending" || run.status === "running");
     for (const run of active) this.updateRun(run.id, { status: "interrupted", error: reason });
     return active.length;
+  }
+
+  /** Complete an archive that was interrupted by a daemon process exit. */
+  finalizeClosingSessions(): number {
+    const closing = Object.values(this.state.sessions).filter((session) => session.status === "closing");
+    for (const session of closing) {
+      const hasActiveRun = Object.values(this.state.runs).some(
+        (run) => run.sessionId === session.id && (run.status === "pending" || run.status === "running"),
+      );
+      if (!hasActiveRun) this.archiveSession(session.id);
+    }
+    return closing.length;
   }
 
   createPermissionRequest(input: CreatePermissionRequestInput): PermissionRequestRecord {
@@ -662,6 +712,14 @@ export class SessionStore {
     };
     this.state.events.push(event);
     return event;
+  }
+
+  private refreshSessionStatus(session: SessionRecord): void {
+    if (session.status === "archived" || session.status === "closing") return;
+    const hasActiveRun = Object.values(this.state.runs).some(
+      (run) => run.sessionId === session.id && (run.status === "pending" || run.status === "running"),
+    );
+    session.status = hasActiveRun ? "running" : "idle";
   }
 
   private load(): SessionState {

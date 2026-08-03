@@ -101,6 +101,11 @@ export class SessionRunCoordinator {
     return [...(this.lanes.get(sessionId)?.queue ?? [])].map((task) => task.runId);
   }
 
+  hasWork(sessionId: string): boolean {
+    const lane = this.lanes.get(sessionId);
+    return !!lane?.active || (lane?.queue.length ?? 0) > 0;
+  }
+
   private getLane(sessionId: string): SessionLane {
     let lane = this.lanes.get(sessionId);
     if (!lane) {
@@ -155,4 +160,3 @@ export class SessionRunCoordinator {
     })();
   }
 }
-

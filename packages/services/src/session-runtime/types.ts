@@ -1,4 +1,9 @@
-export type SessionStatus = "idle" | "running" | "archived" | "error";
+/**
+ * `closing` is an internal lifecycle barrier: no new work may be admitted,
+ * while an already-running turn is being interrupted and joined before the
+ * session becomes permanently archived.
+ */
+export type SessionStatus = "idle" | "running" | "closing" | "archived" | "error";
 export type InputDelivery = "queue" | "steer";
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "interrupted";
 export type PermissionStatus = "pending" | "approved" | "denied" | "expired";

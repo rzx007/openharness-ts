@@ -230,7 +230,6 @@
 - [x] 第七批：`/rewind`（POST `/sessions/:id/rewind` + store.replaceTranscript + closeRuntime）、`/commit`（GET `/git/status` + POST `/git/commit`）、`/reload-plugins`（POST `/plugins/reload` + closeRuntimesForCwd）。
 - [x] 债务收口：拆空 legacy REPL registry（`slash-helpers.ts` + 兼容 re-export）；slash 呈现层进 `@openharness/client` `dispatchSessionCommand`（TUI 薄适配）；文档化 print/worker 刻意进程内、`/commit` 与 plugin reload 风险；流程见 `docs/slash-commands-flow.md`。
 - [x] 用户 print/headless 迁入 Session API（ensure daemon + client admitPrompt）；内部 `--task-worker` / swarm 暂缓（第二阶段 child session）。
-- [ ] 后续：Task 11 Web/Desktop（认证/CORS/发现/SDK 示例）。
 - [x] task/subagent → daemon 内 child session（取代 daemon 主路径的 `--task-worker` 子进程旁路；旧 CLI 仅兼容保留）。
 - [x] 退场进程内 REPL 产品入口：默认 `ohs` → TUI/daemon；删除 `runRepl`；`--continue/--resume` 不再用于交互入口。
 - [x] 增加回归测试覆盖 `/new`、`/sessions`、`/model`、`/config`、`/provider`、`/mcp`、`/tasks`、`/memory`、`/auth`、`/compact`、`/dream`、`/profile`、skill/template 命令，以及未知 slash 不误触发。
@@ -243,7 +242,23 @@
 
 ---
 
-## Task 11：Web/Desktop 就绪
+## Task 11：Daemon 重启恢复与 child session 收口
+
+- [x] daemon 启动时将遗留 `pending`/`running` session run 明确标记为 `interrupted`，并完成停在 `closing` 的归档。
+- [x] 以 `workflow.workflow_started` session event 作为 daemon 所有权凭据，只收口该 daemon/session 启动且仍为 `running` 的 project workflow snapshot。
+- [x] 将 daemon-owned running workflow 写为 terminal snapshot：已运行 task 为 `killed`、未开始 task 为 `skipped`，并追加可 replay 的 `workflow.workflow_cancelled` 审计事件。
+- [x] 保留 parent/child session、messages、parts 和 event timeline；不在启动时擅自重跑 provider、child TaskManager task 或 workflow。
+- [x] 增加 restart 回归：daemon-owned workflow 会终态化，同目录但无 session 所有权事件的 workflow 不受影响。
+
+退出标准：
+
+- daemon 重启后客户端不会看到永久 `busy` 的 session 或 workflow。
+- 用户可审计中断前的 child session 与 workflow timeline，再由新的显式操作决定是否重新执行。
+- 不把“内存 TaskManager 已丢失”的工作伪装成已恢复或继续运行。
+
+---
+
+## Task 12：Web/Desktop 就绪
 
 - [ ] 文档化远程 attach 的认证模型。
 - [ ] 为本地 Web/Desktop 使用增加 CORS/origin 策略。
@@ -263,5 +278,6 @@
 - [x] 第二个客户端可以 attach 并 hydrate 当前状态。
 - [x] 权限请求在客户端断开后仍然存活。
 - [x] Daemon 重启保留 sessions/messages/events（`http.test` 跨进程 reload + `interruptActiveRuns`）。
+- [x] Daemon 重启会终态化自己拥有的 running workflow，同时保留 child session 与审计时间线。
 - [x] TUI 主路径不再派生 per-session backend。
 - [x] 当前主线不存在 BackendHost/OHJSON、版本化 store 目录或旧 store 读取分支。

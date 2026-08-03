@@ -48,6 +48,34 @@ session B: idle -> running ----------------------> idle
 
 这与 opencode 的 `SessionRunCoordinator` 一致：相同 key 串行；不同 key 并行。
 
+### 3.1.1 Session lifecycle barrier
+
+Session status is `idle`, `running`, `closing`, or `archived`. `DELETE /sessions/:id`
+first moves the session to `closing`, rejects new prompts and runtime-setting mutations with
+`409`, interrupts and joins active/queued work, closes its runtime, and only then writes
+`archived`. A daemon restart first marks leftover runs interrupted and finalizes any persisted
+`closing` session, so a half-finished archive cannot become writable again.
+
+`running` is derived from all pending/running runs for the session. Interrupting a queued run
+therefore cannot make an unrelated active run appear idle. Runtime-affecting session metadata
+and daemon settings are rejected while a session run is active; callers retry after the run is
+terminal instead of closing a live runtime underneath it.
+
+### 3.1.2 Daemon restart recovery is explicit
+
+A daemon restart restores durable records, not the old process. It marks leftover session runs
+as `interrupted`, completes any persisted `closing` archive, and preserves parent/child sessions,
+messages, canonical parts, permissions, and event history for inspection.
+
+Workflow snapshots are project-local, so the server only reconciles a `running` workflow when a
+persisted `workflow.workflow_started` event proves that this daemon session owned its run id. The
+snapshot becomes terminal (`killed` for running tasks and `skipped` for unstarted tasks) and the
+session event stream receives `workflow.workflow_cancelled` with
+`recoveredAfterDaemonRestart: true`. A same-project workflow without that session ownership event
+is not touched. A corrupt owned snapshot records `workflow.workflow_recovery_failed` without
+preventing the daemon from serving the remaining sessions. Restart never silently resumes a provider stream, a TaskManager task, or a child
+session: those in-memory owners no longer exist. A later explicit user action may start new work.
+
 ### 3.2 Prompt 准入是持久化的
 
 提交 prompt 拆成两步：
@@ -128,7 +156,7 @@ apps/web / apps/desktop
 - `packages/services/src/session-runtime`：唯一的文件 adapter 版 `SessionStore`，支持 session/input/message/part/event/run/permission request。
 - `packages/server`：Hono HTTP server，bearer token，SSE 事件流，daemon registry，`ohs serve` 与 `ohs daemon start/status/stop`。
 - `SessionRunCoordinator`：同 session 串行、不同 session 并发、queued run interrupt、wake merge 计数；`delivery: "steer"` 对 active run 走 `mergeWake`，无 active run 时退化为 queue。
-- `SessionRuntime` 注入：daemon 可通过 CLI runtime factory 复用现有 `bootstrap` / `QueryEngine`；interrupt/`AbortSignal` 贯穿 QueryEngine / provider / tools 主路径。
+- `SessionRuntime` 注入：daemon 可通过 CLI runtime factory 复用现有 `bootstrap` / `QueryEngine`；interrupt/`AbortSignal` 贯穿 QueryEngine、provider，以及 Bash/Web/Image/Feishu 工具主路径；`TaskWait` 收到父 session abort 后会请求停止其等待的 child task。`ToolContext.abortSignal` 是单次工具调用和 timeout 的信号，`runAbortSignal` 是 session run 所有权信号，供 detached workflow 等跨工具调用工作使用。
 - `PermissionBroker`：权限请求持久化、`permission.asked/replied`、`POST /permissions/:requestId/reply`、session 级 approval 复用。
 - `packages/client`：typed API client、SSE parser、按 session bucket 的 message-part reducer、session snapshot+live 合并；SSE 断流后按 `lastSeq` 指数退避重连，session 路径遇 seq 空洞会 re-snapshot。
 - CLI/TUI 将 `permissionMode` / `maxTurns` 等写入 session metadata，供 daemon runtime warm 读取。
@@ -138,9 +166,9 @@ apps/web / apps/desktop
 
 - SQLite adapter 与迁移。
 - 继续审计 CLI/历史命令中的 `process.cwd()`；runtime/tool 主路径已接收显式 `cwd` 并传到 `ToolContext`。
-- Workflow 工具事件已通过 runtime event sink 写入 session event stream；前端可基于 `workflow.*` 事件做实时视图。
+- Workflow 工具事件已通过 runtime event sink 写入 session event stream；前端可基于 `workflow.*` 事件做实时视图。detached workflow 绑定 parent run：parent interrupt 会停止已登记的 child task、写入 cancelled terminal snapshot，并拒绝晚到 scheduler 回写。daemon 重启会依据 `workflow.workflow_started` 所记的 session 所有权收口仍在运行的 snapshot，不会自动重跑已丢失内存所有权的 child task。
 - Daemon session runtime 已按 session/location 创建 MCP manager，并随 runtime 生命周期关闭。
-- 部分长时间工具/边缘取消路径仍可继续硬化。
+- 自定义 plugin 工具必须协作式消费 `ToolContext.abortSignal`；宿主无法强制终止任意 in-process plugin。MCP tool/resource 请求已使用 SDK request signal 取消。
 - TUI 主路径已迁到 daemon client。
 - Slash command：catalog、template expand，以及 `/model` `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/help` `/status` `/version` 已落地；`/tasks run`、部分 REPL-only 命令仍待。
 - Web/Desktop/remote attach 的认证与部署策略。
@@ -318,8 +346,8 @@ Slash command 边界：
 资源 API 风险说明：
 
 - `/commit`（`POST /git/commit`）会 `git add -A` 后提交；多客户端并发时可能互相踩工作树。无参 `/commit` 仅 `git status --short`。
-- `/reload-plugins` / plugin enable|disable 通过 **关闭 cwd 下 session runtime** 生效，下次 warm 再发现插件；不是进程内热替换 hooks/skills。
-- Daemon 启动时对磁盘上遗留的 `pending`/`running` run 调用 `interruptActiveRuns`，避免客户端永久 busy。sessions/messages/parts/events 经 `sessions.json` 跨重启保留。
+- 会导致 runtime reload 的资源写操作在对应 session 有 active/queued run 时返回 `409`，且不会先写入后关闭 runtime。memory/reload-plugin 按 cwd 隔离；settings/auth/profile/plugin enable|disable 为 daemon 全局 barrier。空闲后 `/reload-plugins` / plugin enable|disable 通过关闭 runtime 生效，下次 warm 再发现插件；不是进程内热替换 hooks/skills。
+- Daemon 启动时对磁盘上遗留的 `pending`/`running` run 调用 `interruptActiveRuns`，避免客户端永久 busy；完成 `closing` 归档；再仅收口被 session event 证明归属本 daemon 的 running workflow snapshot。sessions/messages/parts/events 与 child session 经 `sessions.json` 跨重启保留；无所有权事件的项目 workflow 不会被 daemon 改写。
 
 当前事件流使用 SSE。`GET /health` 只返回存活状态与可选 release version；session 数据结构没有并行协议版本。CLI 用 registry 的 release version 与启动时间识别 stale daemon。WebSocket 可后续加入，以支持更低延迟的双向控制。
 

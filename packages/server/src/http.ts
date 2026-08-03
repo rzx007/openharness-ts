@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 
+import { cancelPersistentWorkflow, WorkflowRunStore, type WorkflowRunEvent } from "@openharness/coordinator";
 import type { StreamEvent } from "@openharness/core";
 import {
   SessionStore,
@@ -75,9 +76,12 @@ export interface ListenResult {
 
 type JsonRecord = Record<string, unknown>;
 type Listener = ReturnType<typeof serve>;
+const DAEMON_RESTART_RUN_REASON = "Daemon restarted before the run completed";
+const DAEMON_RESTART_WORKFLOW_REASON = "Daemon restarted before the workflow completed";
 type SseClient = {
   sessionId?: string;
   controller: ReadableStreamDefaultController<Uint8Array>;
+  heartbeat?: ReturnType<typeof setInterval>;
 };
 type ActiveToolPart = {
   partId: string;
@@ -124,6 +128,13 @@ function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function workflowRunIdFromSessionEvent(event: SessionEventRecord): string | undefined {
+  const workflowEvent = event.payload.event;
+  return isRecord(workflowEvent) && typeof workflowEvent.runId === "string"
+    ? workflowEvent.runId
+    : undefined;
+}
+
 function readLimit(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
@@ -132,6 +143,25 @@ function readLimit(value: string | undefined): number | undefined {
 
 function readCursor(c: Context): number | undefined {
   return readLimit(c.req.query("cursor") ?? c.req.query("afterSeq"));
+}
+
+function readEventCursor(c: Context): number | undefined {
+  return readCursor(c) ?? readLimit(c.req.header("last-event-id"));
+}
+
+function jsonEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => jsonEqual(value, right[index]));
+  }
+  if (isRecord(left) && isRecord(right)) {
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length && leftKeys.every(
+      (key, index) => key === rightKeys[index] && jsonEqual(left[key], right[key]),
+    );
+  }
+  return false;
 }
 
 function readPermissionStatus(value: string | undefined): PermissionStatus | undefined {
@@ -153,6 +183,15 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function errorResponse(status: number, message: string): Response {
   return jsonResponse({ error: message }, status);
+}
+
+function sessionMutationErrorStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith("Session is archived:") ||
+    message.startsWith("Session is closing:") ||
+    message.startsWith("Prompt id is already used:")
+    ? 409
+    : 404;
 }
 
 async function readJson(c: Context): Promise<JsonRecord> {
@@ -191,13 +230,16 @@ export class OpenHarnessHttpServer {
   private readonly sseClients = new Set<SseClient>();
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
   private readonly runPromises = new Map<string, Promise<void>>();
+  private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
+  private readonly startupRecovery: Promise<void>;
   private listener?: Listener;
   private listenResult?: ListenResult;
 
   constructor(options: OpenHarnessServerOptions = {}) {
     this.app = new Hono();
     this.store = options.store ?? new SessionStore({ path: options.storePath ?? getDefaultSessionStorePath() });
-    this.store.interruptActiveRuns();
+    this.store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
+    this.store.finalizeClosingSessions();
     this.token = options.token;
     this.runtimeFactory = options.runtimeFactory;
     this.commandCatalog = options.commandCatalog;
@@ -234,6 +276,7 @@ export class OpenHarnessHttpServer {
         await this.archiveSessionTree(sessionId);
       },
     };
+    this.startupRecovery = this.recoverInterruptedWorkflows();
     this.mountRoutes();
   }
 
@@ -242,6 +285,7 @@ export class OpenHarnessHttpServer {
   }
 
   async listen(options: Pick<OpenHarnessServerOptions, "host" | "port"> = {}): Promise<ListenResult> {
+    await this.startupRecovery;
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 0;
     return await new Promise<ListenResult>((resolve, reject) => {
@@ -272,8 +316,8 @@ export class OpenHarnessHttpServer {
       } catch {
         // Client may already be gone.
       }
+      this.removeSseClient(client);
     }
-    this.sseClients.clear();
     await this.closeAllRuntimes();
     if (!this.listener) return;
     await new Promise<void>((resolve, reject) => {
@@ -378,6 +422,9 @@ export class OpenHarnessHttpServer {
 
   private async handlePatchSettings(c: Context): Promise<Response> {
     if (!this.settingsService) return errorResponse(501, "Settings service is not configured");
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update daemon settings while session runs are active");
+    }
     const body = await readJson(c);
     try {
       const result = await this.settingsService.patch(body);
@@ -430,6 +477,9 @@ export class OpenHarnessHttpServer {
     if (typeof body.content !== "string" || !body.content.trim()) {
       return errorResponse(400, "content is required");
     }
+    if (this.hasActiveRunsForCwd(body.cwd)) {
+      return errorResponse(409, "Cannot update memory while session runs are active for this cwd");
+    }
     const tags = Array.isArray(body.tags)
       ? body.tags.filter((tag): tag is string => typeof tag === "string")
       : undefined;
@@ -448,6 +498,9 @@ export class OpenHarnessHttpServer {
     const entryId = c.req.param("entryId");
     if (!cwd) return errorResponse(400, "cwd is required");
     if (!entryId) return errorResponse(400, "entryId is required");
+    if (this.hasActiveRunsForCwd(cwd)) {
+      return errorResponse(409, "Cannot update memory while session runs are active for this cwd");
+    }
     try {
       const deleted = await this.memoryService.remove({ cwd, id: entryId });
       if (!deleted) return errorResponse(404, `Memory entry not found: ${entryId}`);
@@ -473,6 +526,9 @@ export class OpenHarnessHttpServer {
     if (typeof body.provider !== "string" || !body.provider.trim()) {
       return errorResponse(400, "provider is required");
     }
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update authentication while session runs are active");
+    }
     try {
       const result = await this.authService.login({
         provider: body.provider,
@@ -490,6 +546,9 @@ export class OpenHarnessHttpServer {
     const body = await readJson(c);
     if (typeof body.provider !== "string" || !body.provider.trim()) {
       return errorResponse(400, "provider is required");
+    }
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update authentication while session runs are active");
     }
     try {
       const result = await this.authService.logout({ provider: body.provider });
@@ -543,6 +602,9 @@ export class OpenHarnessHttpServer {
 
   private async handleProfileInit(c: Context): Promise<Response> {
     if (!this.profileService) return errorResponse(501, "Profile service is not configured");
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot initialize profile while session runs are active");
+    }
     try {
       const result = await this.profileService.init();
       await this.closeAllRuntimes();
@@ -596,6 +658,9 @@ export class OpenHarnessHttpServer {
     if (!this.pluginService) return errorResponse(501, "Plugin service is not configured");
     const name = c.req.param("name");
     if (!name) return errorResponse(400, "plugin name is required");
+    if (this.hasAnyActiveRuns()) {
+      return errorResponse(409, "Cannot update plugins while session runs are active");
+    }
     try {
       const result = await this.pluginService.setEnabled({ name, enabled });
       if (result.restartRuntimes) await this.closeAllRuntimes();
@@ -696,6 +761,9 @@ export class OpenHarnessHttpServer {
     const body = await readJson(c);
     const cwd = typeof body.cwd === "string" ? body.cwd : c.req.query("cwd") ?? undefined;
     if (!cwd) return errorResponse(400, "cwd is required");
+    if (this.hasActiveRunsForCwd(cwd)) {
+      return errorResponse(409, "Cannot reload plugins while session runs are active for this cwd");
+    }
     try {
       await this.closeRuntimesForCwd(cwd);
       const listed = await this.pluginService.list({ cwd });
@@ -773,7 +841,7 @@ export class OpenHarnessHttpServer {
     const session = this.store.getSession(sessionId);
     if (!session) return errorResponse(404, "Session not found");
     if (!this.runtimeFactory) return errorResponse(501, "Runtime factory is not configured");
-    if (this.store.listRuns(sessionId).some((run) => run.status === "running" || run.status === "pending")) {
+    if (this.runCoordinator.hasWork(sessionId)) {
       return errorResponse(409, "Cannot compact while a run is active");
     }
     try {
@@ -802,7 +870,7 @@ export class OpenHarnessHttpServer {
     if (!sessionId) return errorResponse(400, "sessionId is required");
     const session = this.store.getSession(sessionId);
     if (!session) return errorResponse(404, "Session not found");
-    if (this.store.listRuns(sessionId).some((run) => run.status === "running" || run.status === "pending")) {
+    if (this.runCoordinator.hasWork(sessionId)) {
       return errorResponse(409, "Cannot rewind while a run is active");
     }
     const body = await readJson(c);
@@ -842,6 +910,9 @@ export class OpenHarnessHttpServer {
     const session = this.store.getSession(sessionId);
     if (!session) return errorResponse(404, "Session not found");
     if (!this.runtimeFactory) return errorResponse(501, "Runtime factory is not configured");
+    if (this.hasActiveRunsForCwd(session.cwd)) {
+      return errorResponse(409, "Cannot remember while session runs are active for this cwd");
+    }
     try {
       await this.warmRuntime(sessionId);
       const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
@@ -1049,19 +1120,23 @@ export class OpenHarnessHttpServer {
       const nextMetadata = isRecord(body.metadata)
         ? { ...existing.metadata, ...body.metadata }
         : undefined;
+      const runtimeMetadataChanged = nextMetadata && runtimeSessionMetadataChanged(existing.metadata, nextMetadata);
+      if (runtimeMetadataChanged && this.runCoordinator.hasWork(sessionId)) {
+        return errorResponse(409, "Cannot update runtime session settings while a run is active");
+      }
       const session = this.store.updateSession(sessionId, {
         title: typeof body.title === "string" ? body.title : undefined,
         model: typeof body.model === "string" ? body.model : undefined,
         agent: body.agent === null ? null : typeof body.agent === "string" ? body.agent : undefined,
         metadata: nextMetadata,
       });
-      if (nextMetadata && runtimeSessionMetadataChanged(existing.metadata, session.metadata)) {
+      if (runtimeMetadataChanged) {
         await this.closeRuntime(sessionId);
       }
       this.broadcastSince(before);
       return jsonResponse({ session });
     } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1071,7 +1146,7 @@ export class OpenHarnessHttpServer {
     try {
       return jsonResponse(this.store.getSessionState(sessionId));
     } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1087,10 +1162,31 @@ export class OpenHarnessHttpServer {
   }
 
   private async archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
+    const existing = this.archivePromises.get(sessionId);
+    if (existing) return await existing;
+    const archive = this.archiveSessionTreeWork(sessionId).finally(() => {
+      if (this.archivePromises.get(sessionId) === archive) this.archivePromises.delete(sessionId);
+    });
+    this.archivePromises.set(sessionId, archive);
+    return await archive;
+  }
+
+  private async archiveSessionTreeWork(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
     const children = this.store.listChildSessions(sessionId);
     for (const child of children) await this.archiveSessionTree(child.id);
 
-    this.interruptSession(sessionId);
+    const beforeClosing = this.latestEventSeq();
+    const current = this.store.getSession(sessionId);
+    if (!current) throw new Error(`Session not found: ${sessionId}`);
+    if (current.status === "archived") return current;
+    this.store.beginArchive(sessionId);
+    this.broadcastSince(beforeClosing);
+    const interrupted = this.interruptSession(sessionId);
+    const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
+      .filter((runId): runId is string => !!runId);
+    await Promise.all(interruptedRunIds
+      .map((runId) => this.runPromises.get(runId))
+      .filter((promise): promise is Promise<void> => promise !== undefined));
     await this.closeRuntime(sessionId);
     const before = this.latestEventSeq();
     const session = this.store.archiveSession(sessionId);
@@ -1142,7 +1238,7 @@ export class OpenHarnessHttpServer {
       });
       return jsonResponse(admitted, 202);
     } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1180,7 +1276,7 @@ export class OpenHarnessHttpServer {
       });
       return jsonResponse({ ...admitted, command: expanded.command }, 202);
     } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
+      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1197,8 +1293,27 @@ export class OpenHarnessHttpServer {
     run?: ReturnType<SessionStore["createRun"]>;
     queue_state?: "running" | "queued";
   } {
-    const before = this.latestEventSeq();
     const delivery = input.delivery ?? "queue";
+    const existingInput = input.id ? this.store.getInput(input.id) : undefined;
+    if (existingInput) {
+      if (
+        existingInput.sessionId !== sessionId ||
+        existingInput.content !== input.content ||
+        existingInput.delivery !== delivery ||
+        !jsonEqual(existingInput.metadata, input.metadata ?? {})
+      ) {
+        throw new Error(`Prompt id is already used: ${input.id}`);
+      }
+      const existingRun = this.store.findRunByInput(existingInput.id);
+      return {
+        input: existingInput,
+        ...(existingRun ? { run: existingRun } : {}),
+        ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
+        ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
+      };
+    }
+
+    const before = this.latestEventSeq();
     const admitted = this.store.admitPrompt({
       id: input.id,
       sessionId,
@@ -1263,6 +1378,14 @@ export class OpenHarnessHttpServer {
       this.broadcastSince(before);
     }
     return result;
+  }
+
+  private hasAnyActiveRuns(): boolean {
+    return this.store.listSessions({ includeArchived: true }).some((session) => this.runCoordinator.hasWork(session.id));
+  }
+
+  private hasActiveRunsForCwd(cwd: string): boolean {
+    return this.store.listSessions({ cwd, includeArchived: true }).some((session) => this.runCoordinator.hasWork(session.id));
   }
 
   private async executeRun(
@@ -1562,6 +1685,62 @@ export class OpenHarnessHttpServer {
     await Promise.all(sessionIds.map((sessionId) => this.closeRuntime(sessionId)));
   }
 
+  /**
+   * Session runs and TaskManager ownership die with the daemon process. Workflow
+   * snapshots are project-local, so reconcile only run ids that this session log
+   * proves were started by this daemon; unrelated CLI/project workflows are left alone.
+   */
+  private async recoverInterruptedWorkflows(): Promise<void> {
+    const ownedRuns = new Map<string, { sessionId: string; cwd: string }>();
+    for (const event of this.store.listEvents()) {
+      if (event.type !== "workflow.workflow_started" || !event.sessionId) continue;
+      const runId = workflowRunIdFromSessionEvent(event);
+      if (!runId) continue;
+      const session = this.store.getSession(event.sessionId);
+      if (session) ownedRuns.set(runId, { sessionId: session.id, cwd: session.cwd });
+    }
+
+    for (const [runId, owner] of ownedRuns) {
+      const workflowStore = new WorkflowRunStore({ cwd: owner.cwd });
+      let snapshot;
+      try {
+        snapshot = workflowStore.load(runId);
+      } catch (error) {
+        this.appendWorkflowRecoveryFailure(owner.sessionId, runId, error);
+        continue;
+      }
+      if (!snapshot || snapshot.status !== "running") continue;
+
+      const before = this.latestEventSeq();
+      await cancelPersistentWorkflow(snapshot, {
+        store: workflowStore,
+        reason: DAEMON_RESTART_WORKFLOW_REASON,
+        onEvent: (event: WorkflowRunEvent) => this.appendWorkflowRecoveryEvent(owner.sessionId, event),
+      });
+      this.broadcastSince(before);
+    }
+  }
+
+  private appendWorkflowRecoveryEvent(sessionId: string, event: WorkflowRunEvent): void {
+    this.store.appendEvent({
+      type: `workflow.${event.type}`,
+      sessionId,
+      payload: { event, recoveredAfterDaemonRestart: true },
+    });
+  }
+
+  private appendWorkflowRecoveryFailure(sessionId: string, runId: string, error: unknown): void {
+    this.store.appendEvent({
+      type: "workflow.workflow_recovery_failed",
+      sessionId,
+      payload: {
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+        recoveredAfterDaemonRestart: true,
+      },
+    });
+  }
+
   private handleListEvents(c: Context): Response {
     const events = this.store.listEvents({
       afterSeq: readCursor(c),
@@ -1623,12 +1802,15 @@ export class OpenHarnessHttpServer {
         client = { sessionId, controller };
         this.sseClients.add(client);
         controller.enqueue(this.encoder.encode(": connected\n\n"));
-        for (const event of this.store.listEvents({ afterSeq: readCursor(c), sessionId })) {
+        const heartbeat = setInterval(() => this.writeSseComment(client!, "keepalive"), 15_000);
+        heartbeat.unref?.();
+        client.heartbeat = heartbeat;
+        for (const event of this.store.listEvents({ afterSeq: readEventCursor(c), sessionId })) {
           this.writeSse(client, event);
         }
       },
       cancel: () => {
-        if (client) this.sseClients.delete(client);
+        if (client) this.removeSseClient(client);
       },
     });
 
@@ -1655,8 +1837,21 @@ export class OpenHarnessHttpServer {
         this.encoder.encode(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
       );
     } catch {
-      this.sseClients.delete(client);
+      this.removeSseClient(client);
     }
+  }
+
+  private writeSseComment(client: SseClient, comment: string): void {
+    try {
+      client.controller.enqueue(this.encoder.encode(`: ${comment}\n\n`));
+    } catch {
+      this.removeSseClient(client);
+    }
+  }
+
+  private removeSseClient(client: SseClient): void {
+    if (client.heartbeat) clearInterval(client.heartbeat);
+    this.sseClients.delete(client);
   }
 }
 

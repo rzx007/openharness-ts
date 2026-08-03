@@ -51,6 +51,15 @@ import type {
   UpdateClientSessionInput,
 } from "./types.js";
 
+let promptRequestCounter = 0;
+
+/** Generate a caller-stable id for one prompt admission attempt. */
+export function createPromptRequestId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  promptRequestCounter += 1;
+  return `prompt-${Date.now().toString(36)}-${promptRequestCounter.toString(36)}`;
+}
+
 /** HTTP API 非 2xx 时抛出；携带 status 与原始响应体。 */
 export class OpenHarnessApiError extends Error {
   constructor(
@@ -560,7 +569,7 @@ export class OpenHarnessClient {
   ): Promise<PromptResponse> {
     return await this.request<PromptResponse>(`/sessions/${encodeURIComponent(sessionId)}/prompts`, {
       method: "POST",
-      body: input,
+      body: { ...input, id: input.id ?? createPromptRequestId() },
       signal: options.signal,
     });
   }

@@ -128,6 +128,19 @@ type OpenHarnessClientState = {
 
 Reducer 用 `event.seq` 去重。即使 SSE live 与 replay 重叠，重复事件也不会二次写入。message/input/part 会按自身 `seq` 排序，因此乱序事件最终可收敛。TUI transcript 只从 message + parts selector 派生，不扫描 `runtime.*`。
 
+## Cursor and retry semantics
+
+The daemon event sequence is global. A stream filtered by `sessionId` therefore naturally
+contains gaps created by events for other sessions; those gaps are not packet loss and must not
+trigger a session snapshot. On a disconnect, the client reconnects with the highest applied global
+cursor. The server replays matching events after that cursor, also accepting `Last-Event-ID` for
+standard SSE clients, and sends keepalive comments while idle.
+
+Prompt admission is idempotent when the caller reuses `input.id`. Use
+`createPromptRequestId()` before the first send and retain that id if the transport outcome is
+unknown; `OpenHarnessClient.admitPrompt` also generates one when omitted. Reusing an id with different content,
+delivery, or metadata returns `409` rather than creating a second run.
+
 ## Snapshot + Live
 
 推荐客户端启动流程：

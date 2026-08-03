@@ -210,7 +210,7 @@ describe("OpenHarnessClient", () => {
     expect(liveSeqs).toEqual([2]);
   });
 
-  it("re-snapshots session state when reconnect live has a seq gap", async () => {
+  it("accepts global seq gaps in a session-filtered stream without re-snapshotting", async () => {
     const controller = new AbortController();
     const session: SessionRecord = {
       id: "s1",
@@ -267,10 +267,28 @@ describe("OpenHarnessClient", () => {
       lastSeq = update.state.lastSeq;
     }
 
-    expect(snapshotCalls).toBe(2);
+    expect(snapshotCalls).toBe(1);
     expect(sources).toContain("reconnecting");
-    expect(sources.filter((source) => source === "snapshot")).toHaveLength(2);
+    expect(sources.filter((source) => source === "snapshot")).toHaveLength(1);
     expect(lastSeq).toBe(5);
+  });
+
+  it("adds a stable request id when admitting a prompt", async () => {
+    const calls: RequestInit[] = [];
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: async (_url, init) => {
+        calls.push(init ?? {});
+        return jsonResponse({
+          input: { id: "server-input", sessionId: "s1", seq: 1, delivery: "queue", content: "hello", metadata: {}, createdAt: 1 },
+        }, 202);
+      },
+    });
+
+    await client.admitPrompt("s1", { content: "hello" });
+    const body = JSON.parse(String(calls[0]!.body)) as { id?: string; content: string };
+    expect(body.content).toBe("hello");
+    expect(body.id).toEqual(expect.any(String));
   });
 
   it("uses exponential reconnect delay until the stream recovers", async () => {
