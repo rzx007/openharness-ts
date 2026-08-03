@@ -97,6 +97,8 @@ Ctrl+C 由 `App` 请求 `renderer.destroy()`；进程只在 OpenTUI `onDestroy` 
 
 ## Runtime
 
+Windows 上 TUI 运行在 Bun 和 OpenTUI 原生 DLL 组合中。启动器会在加载 OpenTUI 之前拒绝低于 Bun `1.3.12` 的版本，避免原生运行时崩溃表现为无上下文的段错误。建议先执行 `bun upgrade` 再运行 `ohs`；该检查只影响 Windows TUI，不影响 daemon HTTP 服务。
+
 prompt 进入 server 后：
 
 1. `SessionStore.admitPrompt()` 持久化输入。

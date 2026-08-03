@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { SessionStore } from "./store.js";
@@ -58,6 +59,30 @@ describe("SessionStore", () => {
     try {
       writeFileSync(path, JSON.stringify({ sessions: { legacy: { id: "legacy" } } }), "utf-8");
       expect(() => new SessionStore({ path })).toThrow(/database/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adopts a pre-Drizzle SQLite schema without replacing session data", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
+    const path = join(dir, "store.db");
+    try {
+      const database = new Database(path);
+      database.exec(`
+        CREATE TABLE session (
+          id TEXT PRIMARY KEY, parent_id TEXT, cwd TEXT NOT NULL, title TEXT NOT NULL,
+          model TEXT NOT NULL, agent TEXT, status TEXT NOT NULL, metadata_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER
+        );
+      `);
+      database.prepare("INSERT INTO session VALUES (?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)")
+        .run("s1", process.cwd(), "existing", "m", "idle", "{}", 1, 1);
+      database.close();
+
+      const store = new SessionStore({ path });
+      expect(store.getSession("s1")).toMatchObject({ id: "s1", title: "existing" });
+      store.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

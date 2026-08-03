@@ -170,6 +170,8 @@ apps/web / apps/desktop
 
 权威存储已切换为 SQLite。`@openharness/services` 中的 [schema.ts](../packages/services/src/session-runtime/schema.ts) 是类型化 schema，[0000_session_runtime.sql](../packages/services/src/session-runtime/migrations/0000_session_runtime.sql) 是首个已提交迁移；daemon 在开放 HTTP 前以 Drizzle migrator 执行所有未应用迁移，再通过 `better-sqlite3` 独占写入 `~/.openharness-ts/data/session-runtime/sessions.db`。print 的项目级 JSON snapshot 是独立功能，不是 daemon store 的旧版本、迁移源或恢复后门。
 
+`0000` 是幂等 bootstrap migration：它也能接管本项目开发期已经由同构 SQLite schema 创建、但尚未写入 Drizzle 迁移记录的数据库；不会读取 JSON，也不会改变既有会话行。
+
 ### 5.1 当前表结构
 
 - `session`：会话本体及归档状态。
