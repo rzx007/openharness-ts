@@ -10,6 +10,7 @@ import { OpenHarnessHttpServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
 import type { ChildSessionHost, SessionRuntimeFactory, SessionTaskBridge } from "./runtime.js";
 import type { OpenHarnessServerOptions } from "./http.js";
+import type { ObservabilityEvent } from "./observability.js";
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -45,6 +46,7 @@ async function withServer(
     | "agentPersonaService"
     | "hooksService"
     | "gitService"
+    | "logger"
   > = {},
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-server-"));
@@ -68,6 +70,7 @@ async function withServer(
     agentPersonaService: options.agentPersonaService,
     hooksService: options.hooksService,
     gitService: options.gitService,
+    logger: options.logger ?? (() => {}),
   });
   const listen = await server.listen();
   try {
@@ -199,6 +202,68 @@ describe("OpenHarnessHttpServer", () => {
         ok: true,
       });
     });
+  });
+
+  it("propagates a trace ID through HTTP, persisted prompt/run, and tool lifecycle logs", async () => {
+    const events: ObservabilityEvent[] = [];
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(_input, hooks) {
+            await hooks.onStreamEvent({
+              type: "tool_use_start",
+              toolUse: { type: "tool_use", id: "tool-1", name: "Read", input: { path: "README.md" } },
+            });
+            await hooks.onStreamEvent({
+              type: "tool_use_end",
+              toolUseId: "tool-1",
+              result: { content: [{ type: "text", text: "ok" }] },
+            });
+            return { messages: [] };
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token, server }) => {
+      const traceId = "trace-e2e-001";
+      const created = await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ cwd: process.cwd(), model: "m" }),
+      });
+      const session = (await created.json() as { session: { id: string } }).session;
+      const response = await fetch(`${baseUrl}/sessions/${session.id}/prompts`, {
+        method: "POST",
+        headers: {
+          ...auth(token),
+          "content-type": "application/json",
+          "x-openharness-trace-id": traceId,
+        },
+        body: JSON.stringify({ id: "prompt-trace-1", content: "inspect" }),
+      });
+      expect(response.status).toBe(202);
+      expect(response.headers.get("x-openharness-trace-id")).toBe(traceId);
+      const admitted = await response.json() as {
+        input: { metadata: Record<string, unknown> };
+        run: { id: string; metadata: Record<string, unknown> };
+      };
+      expect(admitted.input.metadata.traceId).toBe(traceId);
+      expect(admitted.run.metadata.traceId).toBe(traceId);
+
+      for (let i = 0; i < 20 && server.store.getRun(admitted.run.id)?.status !== "completed"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(server.store.getRun(admitted.run.id)?.status).toBe("completed");
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ event: "http.request.completed", traceId, path: `/sessions/${session.id}/prompts` }),
+        expect.objectContaining({ event: "session.run.started", traceId, sessionId: session.id, runId: admitted.run.id }),
+        expect.objectContaining({ event: "session.tool.started", traceId, toolName: "Read" }),
+        expect.objectContaining({ event: "session.tool.completed", traceId, toolName: "Read" }),
+        expect.objectContaining({ event: "session.run.completed", traceId, sessionId: session.id, runId: admitted.run.id }),
+      ]));
+    }, { runtimeFactory, logger: (event) => events.push(event) });
   });
 
   it("permits only configured browser origins and handles unauthenticated preflight", async () => {
@@ -1338,6 +1403,33 @@ describe("OpenHarnessHttpServer", () => {
         events: Array<{ type: string }>;
       };
       expect(events.events.map((event) => event.type)).toContain("session.archived");
+    });
+  });
+
+  it("hides child sessions from the default session list", async () => {
+    await withServer(async ({ baseUrl, token }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "parent", cwd: process.cwd(), model: "m", title: "Parent" }),
+      });
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "child", parentId: "parent", cwd: process.cwd(), model: "m", title: "Child" }),
+      });
+
+      const listed = await (await fetch(`${baseUrl}/sessions`, { headers: auth(token) })).json() as {
+        sessions: Array<{ id: string }>;
+      };
+      expect(listed.sessions.map((session) => session.id)).toEqual(["parent"]);
+
+      const withChildren = await (await fetch(`${baseUrl}/sessions?includeChildren=true`, {
+        headers: auth(token),
+      })).json() as {
+        sessions: Array<{ id: string }>;
+      };
+      expect(withChildren.sessions.map((session) => session.id).sort()).toEqual(["child", "parent"]);
     });
   });
 

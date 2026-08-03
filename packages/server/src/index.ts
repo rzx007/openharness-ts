@@ -60,6 +60,13 @@ export type {
 } from "./runtime.js";
 export { estimateCostUsd } from "./usage.js";
 export {
+  TRACE_ID_HEADER,
+  writeStructuredLog,
+  type ObservabilityEvent,
+  type ObservabilityLevel,
+  type StructuredLogger,
+} from "./observability.js";
+export {
   writeSessionExport,
   type BuildSessionExportInput,
   type SessionExportFormat,

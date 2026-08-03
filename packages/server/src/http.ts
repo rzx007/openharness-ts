@@ -41,6 +41,12 @@ import type {
 } from "./settings-api.js";
 import { rewindTranscript } from "./rewind.js";
 import { estimateCostUsd } from "./usage.js";
+import {
+  TRACE_ID_HEADER,
+  writeStructuredLog,
+  type ObservabilityEvent,
+  type StructuredLogger,
+} from "./observability.js";
 
 export interface OpenHarnessServerOptions {
   host?: string;
@@ -66,6 +72,7 @@ export interface OpenHarnessServerOptions {
   hooksService?: HooksService;
   gitService?: GitService;
   version?: string;
+  logger?: StructuredLogger;
 }
 
 export interface OpenHarnessServerHealth {
@@ -112,7 +119,7 @@ const SSE_HEADERS = {
   "content-type": "text/event-stream; charset=utf-8",
 };
 const CORS_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
-const CORS_HEADERS = "authorization, content-type, last-event-id";
+const CORS_HEADERS = "authorization, content-type, last-event-id, x-openharness-trace-id";
 
 const RUNTIME_SESSION_METADATA_KEYS = [
   "permissionMode",
@@ -134,6 +141,17 @@ function runtimeSessionMetadataChanged(
 
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeTraceId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value)
+    ? value
+    : undefined;
+}
+
+function withoutTraceId(metadata: Record<string, unknown>): Record<string, unknown> {
+  const { traceId: _traceId, ...rest } = metadata;
+  return rest;
 }
 
 function normalizeAllowedOrigins(origins: readonly string[]): Set<string> {
@@ -250,6 +268,7 @@ export class OpenHarnessHttpServer {
   private readonly hooksService?: HooksService;
   private readonly gitService?: GitService;
   private readonly version?: string;
+  private readonly logger: StructuredLogger;
   private readonly permissionBroker: StorePermissionBroker;
   private readonly childSessionHost: ChildSessionHost;
   private readonly runCoordinator = new SessionRunCoordinator();
@@ -258,6 +277,7 @@ export class OpenHarnessHttpServer {
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
   private readonly runPromises = new Map<string, Promise<void>>();
   private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
+  private readonly requestTraceIds = new WeakMap<Request, string>();
   private readonly startupRecovery: Promise<void>;
   private listener?: Listener;
   private listenResult?: ListenResult;
@@ -286,9 +306,11 @@ export class OpenHarnessHttpServer {
     this.hooksService = options.hooksService;
     this.gitService = options.gitService;
     this.version = options.version;
+    this.logger = options.logger ?? writeStructuredLog;
     this.permissionBroker = new StorePermissionBroker({
       store: this.store,
       onChange: (previousEventSeq) => this.broadcastSince(previousEventSeq),
+      logger: (event) => this.log(event),
     });
     this.childSessionHost = {
       createChildSession: async (input) => this.createChildSession(input),
@@ -364,6 +386,26 @@ export class OpenHarnessHttpServer {
     this.app.onError((error) => errorResponse(500, error instanceof Error ? error.message : String(error)));
 
     this.app.use("*", async (c, next) => {
+      const traceId = normalizeTraceId(c.req.header(TRACE_ID_HEADER)) ?? randomUUID();
+      const startedAt = Date.now();
+      this.requestTraceIds.set(c.req.raw, traceId);
+      try {
+        await next();
+      } finally {
+        c.res.headers.set(TRACE_ID_HEADER, traceId);
+        this.log({
+          level: "info",
+          event: "http.request.completed",
+          traceId,
+          method: c.req.method,
+          path: c.req.path,
+          status: c.res.status,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+    });
+
+    this.app.use("*", async (c, next) => {
       const origin = c.req.header("origin");
       if (!origin) {
         await next();
@@ -374,6 +416,7 @@ export class OpenHarnessHttpServer {
         "access-control-allow-origin": origin,
         "access-control-allow-methods": CORS_METHODS,
         "access-control-allow-headers": CORS_HEADERS,
+        "access-control-expose-headers": TRACE_ID_HEADER,
         "access-control-max-age": "600",
         vary: "Origin",
       };
@@ -449,6 +492,23 @@ export class OpenHarnessHttpServer {
   private authorized(c: Context): boolean {
     if (!this.token) return true;
     return c.req.header("authorization") === `Bearer ${this.token}`;
+  }
+
+  private traceIdForContext(c: Context): string {
+    return this.requestTraceIds.get(c.req.raw) ?? randomUUID();
+  }
+
+  private log(event: ObservabilityEvent): void {
+    this.logger(event);
+  }
+
+  private traceIdForRun(runId: string): string {
+    const run = this.store.getRun(runId);
+    const traceId = normalizeTraceId(run?.metadata.traceId);
+    if (traceId) return traceId;
+    const generated = randomUUID();
+    if (run) this.store.updateRun(runId, { metadata: { traceId: generated } });
+    return generated;
   }
 
   private async handleListCommands(c: Context): Promise<Response> {
@@ -1113,11 +1173,15 @@ export class OpenHarnessHttpServer {
   }
 
   private handleListSessions(c: Context): Response {
-    const sessions = this.store.listSessions({
+    let sessions = this.store.listSessions({
       cwd: c.req.query("cwd") ?? undefined,
       includeArchived: c.req.query("includeArchived") === "true",
       limit: readLimit(c.req.query("limit")),
-    }).map((session) => ({
+    });
+    if (c.req.query("includeChildren") !== "true") {
+      sessions = sessions.filter((session) => !session.parentId);
+    }
+    sessions = sessions.map((session) => ({
       ...session,
       title: this.store.resolveSessionListTitle(session.id),
     }));
@@ -1327,6 +1391,7 @@ export class OpenHarnessHttpServer {
         delivery: body.delivery === "steer" ? "steer" : "queue",
         content: body.content,
         metadata: isRecord(body.metadata) ? body.metadata : undefined,
+        traceId: this.traceIdForContext(c),
       });
       return jsonResponse(admitted, 202);
     } catch (error) {
@@ -1389,6 +1454,7 @@ export class OpenHarnessHttpServer {
             sourceInputId: sourceInput.id,
           },
         },
+        traceId: this.traceIdForContext(c),
       });
       const beforeRecoveryEvent = this.latestEventSeq();
       this.store.appendEvent({
@@ -1439,6 +1505,7 @@ export class OpenHarnessHttpServer {
           commandKind: expanded.command.kind,
           commandArgs: args,
         },
+        traceId: this.traceIdForContext(c),
       });
       return jsonResponse({ ...admitted, command: expanded.command }, 202);
     } catch (error) {
@@ -1454,6 +1521,7 @@ export class OpenHarnessHttpServer {
       content: string;
       metadata?: Record<string, unknown>;
       runMetadata?: Record<string, unknown>;
+      traceId?: string;
     },
   ): {
     input: ReturnType<SessionStore["admitPrompt"]>;
@@ -1461,13 +1529,16 @@ export class OpenHarnessHttpServer {
     queue_state?: "running" | "queued";
   } {
     const delivery = input.delivery ?? "queue";
+    const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(input.metadata?.traceId) ?? randomUUID();
+    const metadata = { ...(input.metadata ?? {}), traceId };
+    const runMetadata = { ...(input.runMetadata ?? {}), traceId };
     const existingInput = input.id ? this.store.getInput(input.id) : undefined;
     if (existingInput) {
       if (
         existingInput.sessionId !== sessionId ||
         existingInput.content !== input.content ||
         existingInput.delivery !== delivery ||
-        !jsonEqual(existingInput.metadata, input.metadata ?? {})
+        !jsonEqual(withoutTraceId(existingInput.metadata), withoutTraceId(metadata))
       ) {
         throw new Error(`Prompt id is already used: ${input.id}`);
       }
@@ -1486,7 +1557,7 @@ export class OpenHarnessHttpServer {
       sessionId,
       delivery,
       content: input.content,
-      metadata: input.metadata,
+      metadata,
     });
 
     if (delivery === "steer" && this.runtimeFactory) {
@@ -1503,7 +1574,7 @@ export class OpenHarnessHttpServer {
     }
 
     const run = this.runtimeFactory
-      ? this.store.createRun({ sessionId, inputId: admitted.id, metadata: input.runMetadata })
+      ? this.store.createRun({ sessionId, inputId: admitted.id, metadata: runMetadata })
       : undefined;
     this.broadcastSince(before);
     let queueState: "running" | "queued" | undefined;
@@ -1570,8 +1641,10 @@ export class OpenHarnessHttpServer {
       const parts = this.store.listMessageParts(sessionId);
       const admitted = this.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
+      const traceId = this.traceIdForRun(runId);
 
       this.store.updateRun(runId, { status: "running" });
+      this.log({ level: "info", event: "session.run.started", traceId, sessionId, runId });
       const renderState = this.createRunRenderState(sessionId, inputId, runId, admitted.content);
       this.broadcastSince(before);
 
@@ -1625,13 +1698,37 @@ export class OpenHarnessHttpServer {
           },
           onStreamEvent: (event) => {
             const eventBefore = this.latestEventSeq();
+            const completedToolName = event.type === "tool_use_end"
+              ? renderState.toolParts.get(event.toolUseId)?.toolName
+              : undefined;
             this.applyStreamEvent(renderState, event);
+            if (event.type === "tool_use_start") {
+              this.log({
+                level: "info",
+                event: "session.tool.started",
+                traceId,
+                sessionId,
+                runId,
+                toolName: event.toolUse.name,
+              });
+            } else if (event.type === "tool_use_end") {
+              this.log({
+                level: event.result.isError ? "warn" : "info",
+                event: "session.tool.completed",
+                traceId,
+                sessionId,
+                runId,
+                toolName: completedToolName,
+                ...(event.result.isError ? { error: "tool returned an error" } : {}),
+              });
+            }
             this.broadcastSince(eventBefore);
           },
           askPermission: (request) =>
             this.permissionBroker.ask({
               sessionId,
               runId,
+              traceId,
               toolName: request.toolName,
               reason: request.reason,
               input: request.input,
@@ -1643,17 +1740,27 @@ export class OpenHarnessHttpServer {
       before = this.latestEventSeq();
       this.completeActiveTextPart(renderState, "completed");
       this.store.updateRun(runId, { status: context.signal.aborted ? "interrupted" : "completed" });
+      this.log({
+        level: context.signal.aborted ? "warn" : "info",
+        event: context.signal.aborted ? "session.run.interrupted" : "session.run.completed",
+        traceId,
+        sessionId,
+        runId,
+      });
       this.broadcastSince(before);
     } catch (error) {
       await this.closeRuntime(sessionId);
       before = this.latestEventSeq();
       const message = error instanceof Error ? error.message : String(error);
+      const traceId = this.traceIdForRun(runId);
       if (error instanceof RunInterruptedError || context.signal.aborted) {
-        this.store.appendEvent({ type: "session.run.interrupted", sessionId, payload: { runId, error: message } });
+        this.store.appendEvent({ type: "session.run.interrupted", sessionId, payload: { runId, traceId, error: message } });
         this.store.updateRun(runId, { status: "interrupted", error: message });
+        this.log({ level: "warn", event: "session.run.interrupted", traceId, sessionId, runId, error: message });
       } else {
-        this.store.appendEvent({ type: "session.run.error", sessionId, payload: { runId, error: message } });
+        this.store.appendEvent({ type: "session.run.error", sessionId, payload: { runId, traceId, error: message } });
         this.store.updateRun(runId, { status: "failed", error: message });
+        this.log({ level: "error", event: "session.run.failed", traceId, sessionId, runId, error: message });
       }
       this.broadcastSince(before);
     }
@@ -1842,12 +1949,26 @@ export class OpenHarnessHttpServer {
           cwd: task.cwd,
           metadata: { origin: "child_session", agent: task.description, taskManagerId: task.id },
         });
+        this.log({
+          level: "info",
+          event: "session.task.created",
+          sessionId: input.sessionId,
+          taskId: task.id,
+        });
         this.broadcastSince(before);
         return { id: task.id };
       },
       bindSessionTaskRun: async (taskId, runId) => {
         const before = this.latestEventSeq();
-        this.store.updateSessionTask(taskId, { status: "running", runId });
+        const task = this.store.updateSessionTask(taskId, { status: "running", runId });
+        this.log({
+          level: "info",
+          event: "session.task.bound",
+          traceId: this.traceIdForRun(runId),
+          sessionId: task.sessionId,
+          runId,
+          taskId,
+        });
         this.broadcastSince(before);
       },
       completeSessionTask: async (taskId, input) => {
@@ -1858,6 +1979,15 @@ export class OpenHarnessHttpServer {
           status: input.status,
           output: input.output,
           ...(input.status === "failed" ? { error: input.output } : {}),
+        });
+        const persisted = this.store.getSessionTask(taskId);
+        this.log({
+          level: input.status === "failed" ? "error" : "info",
+          event: "session.task.completed",
+          ...(persisted?.runId ? { traceId: this.traceIdForRun(persisted.runId), runId: persisted.runId } : {}),
+          sessionId: persisted?.sessionId ?? session.id,
+          taskId,
+          ...(input.status === "failed" ? { error: "task failed" } : {}),
         });
         this.broadcastSince(before);
         return task;
@@ -2041,6 +2171,7 @@ export class OpenHarnessHttpServer {
     try {
       const request = this.permissionBroker.reply({
         requestId,
+        traceId: this.traceIdForContext(c),
         status,
         decision,
         clientId: typeof body.clientId === "string" ? body.clientId : undefined,
