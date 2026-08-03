@@ -12,13 +12,14 @@ function withBroker(
   test: (ctx: { broker: StorePermissionBroker; store: SessionStore; changes: number[] }) => Promise<void>,
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-permission-broker-"));
-  const store = new SessionStore({ path: join(dir, "store.json") });
+  const store = new SessionStore({ path: join(dir, "store.db") });
   const changes: number[] = [];
   const broker = new StorePermissionBroker({ store, onChange: (seq) => changes.push(seq) });
   store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
   const input = store.admitPrompt({ id: "i1", sessionId: "s1", content: "edit" });
   store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
   return test({ broker, store, changes }).finally(() => {
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   });
 }

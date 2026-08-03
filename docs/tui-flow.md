@@ -67,7 +67,7 @@ ohs | ohs --tui [flags] ["initial prompt"]
 - `GET /events`
 - `GET /events/stream`
 
-服务启动后仅为本机发现写入私有 registry，供本机 `ohs`、`ohs --tui` 与 print 入口复用。Web、Desktop 或另一台机器上的远程客户端绝不读取或复制该文件，而是使用显式 daemon URL 与 bearer token 连接。唯一的默认 store 是 `~/.openharness-ts/data/session-runtime/sessions.json`；旧 `~/.openharness` 不读取、不迁移，也不存在并行的版本化 store。
+服务启动后仅为本机发现写入私有 registry，供本机 `ohs`、`ohs --tui` 与 print 入口复用。Web、Desktop 或另一台机器上的远程客户端绝不读取或复制该文件，而是使用显式 daemon URL 与 bearer token 连接。唯一的默认 store 是 `~/.openharness-ts/data/session-runtime/sessions.db`；它由 daemon 独占写入。旧 `~/.openharness` 与既有 JSON store 都不读取、不迁移，也不存在并行的版本化 store。
 
 ## 远程 TUI 入口
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,10 +8,12 @@ import { SessionStore } from "./store.js";
 
 function withStore(test: (store: SessionStore, path: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
-  const path = join(dir, "store.json");
+  const path = join(dir, "store.db");
+  const store = new SessionStore({ path });
   try {
-    test(new SessionStore({ path }), path);
+    test(store, path);
   } finally {
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -46,7 +48,19 @@ describe("SessionStore", () => {
       const reloaded = new SessionStore({ path });
       expect(reloaded.getSession("s1")).toEqual(session);
       expect(reloaded.listSessions().map((row) => row.id)).toEqual(["s1"]);
+      reloaded.close();
     });
+  });
+
+  it("does not read legacy JSON stores as a migration source", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
+    const path = join(dir, "legacy.json");
+    try {
+      writeFileSync(path, JSON.stringify({ sessions: { legacy: { id: "legacy" } } }), "utf-8");
+      expect(() => new SessionStore({ path })).toThrow(/database/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("updates session model and emits session.updated", () => {
@@ -244,6 +258,7 @@ describe("SessionStore", () => {
       ]);
       expect(reloaded.listEvents().map((event) => event.type)).toContain("permission.replied");
       expect(reloaded.listEvents().map((event) => event.type)).toContain("session.message.part.updated");
+      reloaded.close();
     });
   });
 
@@ -296,6 +311,7 @@ describe("SessionStore", () => {
         error: "Daemon restarted before the task completed",
       });
       expect(reloaded.listEvents({ sessionId: "parent" }).map((event) => event.type)).toContain("session.task.updated");
+      reloaded.close();
     });
   });
 

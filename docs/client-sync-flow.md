@@ -190,7 +190,7 @@ OHJSON TUI 层与 per-session BackendHost 已从主线删除。
 
 ## 尚未完成
 
-- store 仍是文件 adapter，SQLite adapter 是下一阶段持久化重点。
+- store 已迁到 daemon 独占的 SQLite；客户端只通过 Session API 与 SSE cursor 同步，绝不直接读取数据库。
 - WebSocket 双向协议暂不做；当前 HTTP action + SSE event 已覆盖基础 attach 与恢复。
 
 已覆盖的运行语义：`delivery: "steer"` 在目标 session 有活跃 run 时由 `SessionRunCoordinator.mergeWake()` 合并为一次 follow-up 唤醒；没有活跃 run 时退化为普通队列输入。CLI 也会在启动本机 TUI 前按 release version 与构建时间淘汰 stale daemon；这属于本机进程生命周期，不进入 client API 或 session 数据结构。

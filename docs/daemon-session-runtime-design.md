@@ -146,7 +146,8 @@ apps/web / apps/desktop
 
 已完成：
 
-- `packages/services/src/session-runtime`：唯一的文件 adapter 版 `SessionStore`，支持 session/input/message/part/event/run/permission request。
+- `packages/services/src/session-runtime`：唯一的 SQLite `SessionStore`，支持 session/input/message/part/event/run/task/permission request。
+- SQLite 持久化与迁移：Drizzle 定义 schema，Drizzle Kit 管理迁移文件，daemon 通过 `better-sqlite3` 独占打开数据库。
 - `packages/server`：Hono HTTP server，bearer token，SSE 事件流，daemon registry，`ohs serve` 与 `ohs daemon start/status/stop`。
 - `SessionRunCoordinator`：同 session 串行、不同 session 并发、queued run interrupt、wake merge 计数；`delivery: "steer"` 对 active run 走 `mergeWake`，无 active run 时退化为 queue。
 - `SessionRuntime` 注入：daemon 可通过 CLI runtime factory 复用现有 `bootstrap` / `QueryEngine`；interrupt/`AbortSignal` 贯穿 QueryEngine、provider，以及 Bash/Web/Image/Feishu 工具主路径；`TaskWait` 收到父 session abort 后会请求停止其等待的 child task。`ToolContext.abortSignal` 是单次工具调用和 timeout 的信号，`runAbortSignal` 是 session run 所有权信号，供 detached workflow 等跨工具调用工作使用。
@@ -157,7 +158,6 @@ apps/web / apps/desktop
 
 仍待完成：
 
-- SQLite adapter 与迁移。
 - 继续审计 CLI/历史命令中的 `process.cwd()`；runtime/tool 主路径已接收显式 `cwd` 并传到 `ToolContext`。
 - Workflow 工具事件已通过 runtime event sink 写入 session event stream；前端可基于 `workflow.*` 事件做实时视图。detached workflow 绑定 parent run：parent interrupt 会停止已登记的 child task、写入 cancelled terminal snapshot，并拒绝晚到 scheduler 回写。daemon 重启会依据 `workflow.workflow_started` 所记的 session 所有权收口仍在运行的 snapshot，不会自动重跑已丢失内存所有权的 child task。
 - Daemon session runtime 已按 session/location 创建 MCP manager，并随 runtime 生命周期关闭。
@@ -168,83 +168,17 @@ apps/web / apps/desktop
 
 ## 5. 持久化存储
 
-目标权威存储使用 SQLite。当前基础版先用文件 adapter 固化数据与事件语义。print 的项目级 JSON snapshot 是独立功能，不是 daemon store 的旧版本、迁移源或恢复后门。
+权威存储已切换为 SQLite。`@openharness/services` 中的 [schema.ts](../packages/services/src/session-runtime/schema.ts) 是类型化 schema，[0000_session_runtime.sql](../packages/services/src/session-runtime/migrations/0000_session_runtime.sql) 是首个已提交迁移；daemon 在开放 HTTP 前以 Drizzle migrator 执行所有未应用迁移，再通过 `better-sqlite3` 独占写入 `~/.openharness-ts/data/session-runtime/sessions.db`。print 的项目级 JSON snapshot 是独立功能，不是 daemon store 的旧版本、迁移源或恢复后门。
 
-### 5.1 表结构
+### 5.1 当前表结构
 
-```sql
-CREATE TABLE session (
-  id TEXT PRIMARY KEY,
-  parent_id TEXT,
-  cwd TEXT NOT NULL,
-  title TEXT NOT NULL,
-  model TEXT NOT NULL,
-  agent TEXT,
-  status TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  archived_at INTEGER,
-  metadata_json TEXT NOT NULL DEFAULT '{}'
-);
+- `session`：会话本体及归档状态。
+- `session_input`、`session_message`、`session_message_part`：输入、消息 shell 与 canonical message parts。
+- `session_run`、`session_task`：回合与 parent/child task 生命周期。
+- `permission_request`：跨客户端可回复的权限请求。
+- `session_event`：全局单调 cursor 的 SSE 回放日志。
 
-CREATE TABLE session_input (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-  seq INTEGER NOT NULL,
-  delivery TEXT NOT NULL,
-  content_json TEXT NOT NULL,
-  promoted_message_id TEXT,
-  created_at INTEGER NOT NULL,
-  UNIQUE(session_id, seq)
-);
-
-CREATE TABLE session_message (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-  seq INTEGER NOT NULL,
-  role TEXT NOT NULL,
-  content_json TEXT NOT NULL,
-  tool_uses_json TEXT,
-  is_error INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE(session_id, seq)
-);
-
-CREATE TABLE session_event (
-  id TEXT PRIMARY KEY,
-  session_id TEXT,
-  seq INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  UNIQUE(seq)
-);
-
-CREATE TABLE session_run (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-  status TEXT NOT NULL,
-  started_at INTEGER NOT NULL,
-  finished_at INTEGER,
-  error_json TEXT,
-  metadata_json TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE TABLE permission_request (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-  run_id TEXT,
-  tool_name TEXT NOT NULL,
-  reason TEXT,
-  input_json TEXT NOT NULL,
-  preview_json TEXT,
-  status TEXT NOT NULL,
-  response_json TEXT,
-  created_at INTEGER NOT NULL,
-  resolved_at INTEGER
-);
-```
+结构化字段保存为 JSON 列，排序字段以 `(session_id, seq)` 约束；完整列和索引以迁移文件为准。旧 `~/.openharness` 和任何 JSON session store 一律不读取、不导入。
 
 ### 5.2 Cursor 语义
 
@@ -254,7 +188,7 @@ CREATE TABLE permission_request (
 - 按 `sessionId` 过滤回放
 - 面向仪表盘的全局客户端同步
 
-SQLite adapter 可为每个已提交事件使用一次事务。
+SQLite Store 为每次领域变更使用一次事务：规范化状态和对应 event 要么一起可见，要么都不写入。
 
 ## 6. HTTP API
 
@@ -341,7 +275,7 @@ Slash command 边界：
 
 - `/commit`（`POST /git/commit`）会 `git add -A` 后提交；多客户端并发时可能互相踩工作树。无参 `/commit` 仅 `git status --short`。
 - 会导致 runtime reload 的资源写操作在对应 session 有 active/queued run 时返回 `409`，且不会先写入后关闭 runtime。memory/reload-plugin 按 cwd 隔离；settings/auth/profile/plugin enable|disable 为 daemon 全局 barrier。空闲后 `/reload-plugins` / plugin enable|disable 通过关闭 runtime 生效，下次 warm 再发现插件；不是进程内热替换 hooks/skills。
-- Daemon 启动时对磁盘上遗留的 `pending`/`running` run 和 task 分别调用 `interruptActiveRuns` / `interruptActiveSessionTasks`，避免客户端永久 busy；完成 `closing` 归档；再仅收口被 session event 证明归属本 daemon 的 running workflow snapshot。sessions/messages/parts/events、task 投影与 child session 经 `sessions.json` 跨重启保留；无所有权事件的项目 workflow 不会被 daemon 改写。
+- Daemon 启动时对磁盘上遗留的 `pending`/`running` run 和 task 分别调用 `interruptActiveRuns` / `interruptActiveSessionTasks`，避免客户端永久 busy；完成 `closing` 归档；再仅收口被 session event 证明归属本 daemon 的 running workflow snapshot。sessions/messages/parts/events、task 投影与 child session 经 `sessions.db` 跨重启保留；旧 JSON store 不是迁移源；无所有权事件的项目 workflow 不会被 daemon 改写。
 
 当前事件流使用 SSE。`GET /health` 只返回存活状态与可选 release version；session 数据结构没有并行协议版本。CLI 用 registry 的 release version 与启动时间识别 stale daemon。WebSocket 可后续加入，以支持更低延迟的双向控制。
 
@@ -547,9 +481,9 @@ ohs --tui        # 显式同上（进程内 REPL 入口已移除）
 
 ### Phase 1：存储与事件日志
 
-- 增加基于 SQLite 的 session store。
-- 增加 session 事件表以及事件追加/回放辅助函数。
-- 增加从现有 JSON 快照的导入。
+- 已完成：增加基于 SQLite 的 session store。
+- 已完成：增加 session 事件表以及事件追加/回放辅助函数。
+- 不增加从现有 JSON 快照的导入；旧数据结构不属于当前主线。
 
 ### Phase 2：Server 骨架
 

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import type {
   AdmitPromptInput,
@@ -72,11 +77,12 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function atomicWrite(path: string, data: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, data, "utf-8");
-  renameSync(tmp, path);
+function encode(value: unknown): string {
+  return JSON.stringify(value ?? {});
+}
+
+function decode(value: string | null): Record<string, unknown> {
+  return value ? JSON.parse(value) as Record<string, unknown> : {};
 }
 
 function maxSeq<T extends { sessionId: string; seq: number }>(
@@ -113,11 +119,31 @@ function assertMessage(state: SessionState, messageId: string): SessionMessageRe
 
 export class SessionStore {
   readonly path: string;
+  private readonly database: Database.Database;
+  private closed = false;
   private state: SessionState;
 
   constructor(options: SessionStoreOptions) {
     this.path = resolve(options.path);
-    this.state = this.load();
+    mkdirSync(dirname(this.path), { recursive: true });
+    this.database = new Database(this.path);
+    try {
+      this.database.pragma("journal_mode = WAL");
+      this.database.pragma("foreign_keys = ON");
+      this.database.pragma("busy_timeout = 5000");
+      this.database.pragma("synchronous = NORMAL");
+      this.applyMigrations();
+      this.state = this.load();
+    } catch (error) {
+      this.database.close();
+      throw error;
+    }
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.database.close();
+    this.closed = true;
   }
 
   createSession(input: CreateSessionInput): SessionRecord {
@@ -829,23 +855,81 @@ export class SessionStore {
     session.status = hasActiveRun ? "running" : "idle";
   }
 
+  private applyMigrations(): void {
+    migrate(drizzle(this.database), {
+      migrationsFolder: fileURLToPath(new URL("./migrations", import.meta.url)),
+    });
+  }
+
   private load(): SessionState {
-    if (!existsSync(this.path)) return emptyState();
-    const parsed = JSON.parse(readFileSync(this.path, "utf-8")) as Partial<SessionState>;
-    return {
-      nextEventSeq: parsed.nextEventSeq ?? 1,
-      sessions: parsed.sessions ?? {},
-      inputs: parsed.inputs ?? {},
-      messages: parsed.messages ?? {},
-      parts: parsed.parts ?? {},
-      events: parsed.events ?? [],
-      runs: parsed.runs ?? {},
-      tasks: parsed.tasks ?? {},
-      permissions: parsed.permissions ?? {},
-    };
+    const state = emptyState();
+    for (const row of this.database.prepare("SELECT * FROM session").all() as Array<Record<string, unknown>>) {
+      const session: SessionRecord = {
+        id: row.id as string,
+        ...(row.parent_id ? { parentId: row.parent_id as string } : {}),
+        cwd: row.cwd as string,
+        title: row.title as string,
+        model: row.model as string,
+        ...(row.agent ? { agent: row.agent as string } : {}),
+        status: row.status as SessionRecord["status"],
+        metadata: decode(row.metadata_json as string),
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+        ...(row.archived_at ? { archivedAt: row.archived_at as number } : {}),
+      };
+      state.sessions[session.id] = session;
+    }
+    for (const row of this.database.prepare("SELECT * FROM session_input").all() as Array<Record<string, unknown>>) {
+      const input: SessionInputRecord = { id: row.id as string, sessionId: row.session_id as string, seq: row.seq as number, delivery: row.delivery as SessionInputRecord["delivery"], content: row.content as string, metadata: decode(row.metadata_json as string), createdAt: row.created_at as number };
+      state.inputs[input.id] = input;
+    }
+    for (const row of this.database.prepare("SELECT * FROM session_message").all() as Array<Record<string, unknown>>) {
+      const message: SessionMessageRecord = { id: row.id as string, sessionId: row.session_id as string, seq: row.seq as number, role: row.role as SessionMessageRecord["role"], ...(row.run_id ? { runId: row.run_id as string } : {}), ...(row.input_id ? { inputId: row.input_id as string } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+      state.messages[message.id] = message;
+    }
+    for (const row of this.database.prepare("SELECT * FROM session_message_part").all() as Array<Record<string, unknown>>) {
+      const part: SessionMessagePartRecord = { id: row.id as string, sessionId: row.session_id as string, messageId: row.message_id as string, seq: row.seq as number, type: row.type as SessionMessagePartRecord["type"], status: row.status as SessionMessagePartRecord["status"], ...(row.text !== null ? { text: row.text as string } : {}), ...(row.tool_use_id ? { toolUseId: row.tool_use_id as string } : {}), ...(row.tool_name ? { toolName: row.tool_name as string } : {}), ...(row.input_json ? { input: decode(row.input_json as string) } : {}), ...(row.output_json ? { output: JSON.parse(row.output_json as string) } : {}), ...(row.is_error !== null ? { isError: Boolean(row.is_error) } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+      state.parts[part.id] = part;
+    }
+    for (const row of this.database.prepare("SELECT * FROM session_run").all() as Array<Record<string, unknown>>) {
+      const run: SessionRunRecord = { id: row.id as string, sessionId: row.session_id as string, ...(row.input_id ? { inputId: row.input_id as string } : {}), status: row.status as SessionRunRecord["status"], ...(row.started_at ? { startedAt: row.started_at as number } : {}), ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}), ...(row.error ? { error: row.error as string } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+      state.runs[run.id] = run;
+    }
+    for (const row of this.database.prepare("SELECT * FROM session_task").all() as Array<Record<string, unknown>>) {
+      const task: SessionTaskRecord = { id: row.id as string, sessionId: row.session_id as string, ...(row.child_session_id ? { childSessionId: row.child_session_id as string } : {}), ...(row.run_id ? { runId: row.run_id as string } : {}), type: row.type as string, status: row.status as SessionTaskRecord["status"], description: row.description as string, cwd: row.cwd as string, ...(row.output ? { output: row.output as string } : {}), ...(row.error ? { error: row.error as string } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, ...(row.started_at ? { startedAt: row.started_at as number } : {}), ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}), updatedAt: row.updated_at as number };
+      state.tasks[task.id] = task;
+    }
+    for (const row of this.database.prepare("SELECT * FROM permission_request").all() as Array<Record<string, unknown>>) {
+      const request: PermissionRequestRecord = { id: row.id as string, sessionId: row.session_id as string, ...(row.run_id ? { runId: row.run_id as string } : {}), toolName: row.tool_name as string, payload: decode(row.payload_json as string), status: row.status as PermissionRequestRecord["status"], ...(row.decision ? { decision: row.decision as string } : {}), ...(row.decided_by_client_id ? { decidedByClientId: row.decided_by_client_id as string } : {}), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+      state.permissions[request.id] = request;
+    }
+    for (const row of this.database.prepare("SELECT * FROM session_event ORDER BY seq").all() as Array<Record<string, unknown>>) {
+      const event: SessionEventRecord = { id: row.id as string, seq: row.seq as number, type: row.type as string, ...(row.session_id ? { sessionId: row.session_id as string } : {}), payload: decode(row.payload_json as string), createdAt: row.created_at as number };
+      state.events.push(event);
+      state.nextEventSeq = Math.max(state.nextEventSeq, event.seq + 1);
+    }
+    return state;
   }
 
   private save(): void {
-    atomicWrite(this.path, JSON.stringify(this.state, null, 2) + "\n");
+    this.database.transaction(() => {
+      this.database.exec("DELETE FROM session_event; DELETE FROM permission_request; DELETE FROM session_task; DELETE FROM session_run; DELETE FROM session_message_part; DELETE FROM session_message; DELETE FROM session_input; DELETE FROM session;");
+      const insertSession = this.database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const value of Object.values(this.state.sessions)) insertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null);
+      const insertInput = this.database.prepare("INSERT INTO session_input VALUES (?, ?, ?, ?, ?, ?, ?)");
+      for (const value of Object.values(this.state.inputs)) insertInput.run(value.id, value.sessionId, value.seq, value.delivery, value.content, encode(value.metadata), value.createdAt);
+      const insertMessage = this.database.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const value of Object.values(this.state.messages)) insertMessage.run(value.id, value.sessionId, value.seq, value.role, value.runId ?? null, value.inputId ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+      const insertPart = this.database.prepare("INSERT INTO session_message_part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const value of Object.values(this.state.parts)) insertPart.run(value.id, value.sessionId, value.messageId, value.seq, value.type, value.status, value.text ?? null, value.toolUseId ?? null, value.toolName ?? null, value.input === undefined ? null : encode(value.input), value.output === undefined ? null : JSON.stringify(value.output), value.isError === undefined ? null : Number(value.isError), encode(value.metadata), value.createdAt, value.updatedAt);
+      const insertRun = this.database.prepare("INSERT INTO session_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const value of Object.values(this.state.runs)) insertRun.run(value.id, value.sessionId, value.inputId ?? null, value.status, value.startedAt ?? null, value.finishedAt ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+      const insertTask = this.database.prepare("INSERT INTO session_task VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const value of Object.values(this.state.tasks)) insertTask.run(value.id, value.sessionId, value.childSessionId ?? null, value.runId ?? null, value.type, value.status, value.description, value.cwd, value.output ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.startedAt ?? null, value.finishedAt ?? null, value.updatedAt);
+      const insertPermission = this.database.prepare("INSERT INTO permission_request VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const value of Object.values(this.state.permissions)) insertPermission.run(value.id, value.sessionId, value.runId ?? null, value.toolName, encode(value.payload), value.status, value.decision ?? null, value.decidedByClientId ?? null, value.createdAt, value.updatedAt);
+      const insertEvent = this.database.prepare("INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)");
+      for (const value of this.state.events) insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
+    })();
   }
 }

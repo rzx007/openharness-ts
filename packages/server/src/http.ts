@@ -348,14 +348,16 @@ export class OpenHarnessHttpServer {
       this.removeSseClient(client);
     }
     await this.closeAllRuntimes();
-    if (!this.listener) return;
-    await new Promise<void>((resolve, reject) => {
-      this.listener!.close((error?: Error) => {
-        if (error) reject(error);
-        else resolve();
+    if (this.listener) {
+      await new Promise<void>((resolve, reject) => {
+        this.listener!.close((error?: Error) => {
+          if (error) reject(error);
+          else resolve();
+        });
       });
-    });
-    this.listener = undefined;
+      this.listener = undefined;
+    }
+    this.store.close();
   }
 
   private mountRoutes(): void {

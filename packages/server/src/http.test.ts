@@ -52,7 +52,7 @@ async function withServer(
   const server = new OpenHarnessHttpServer({
     token,
     allowedOrigins: options.allowedOrigins,
-    storePath: join(dir, "sessions.json"),
+    storePath: join(dir, "sessions.db"),
     runtimeFactory: options.runtimeFactory,
     commandCatalog: options.commandCatalog,
     settingsService: options.settingsService,
@@ -71,7 +71,7 @@ async function withServer(
   });
   const listen = await server.listen();
   try {
-    await test({ baseUrl: listen.url, token, storePath: join(dir, "sessions.json"), server });
+    await test({ baseUrl: listen.url, token, storePath: join(dir, "sessions.db"), server });
   } finally {
     await server.close();
     rmSync(dir, { recursive: true, force: true });
@@ -187,7 +187,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("uses the canonical session runtime store", () => {
-    expect(getDefaultSessionStorePath()).toMatch(/[\\/]session-runtime[\\/]sessions\.json$/);
+    expect(getDefaultSessionStorePath()).toMatch(/[\\/]session-runtime[\\/]sessions\.db$/);
   });
 
   it("serves health and protects routes with bearer auth", async () => {
@@ -230,7 +230,7 @@ describe("OpenHarnessHttpServer", () => {
 
   it("reloads sessions/messages/events after a daemon restart and interrupts leftover runs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-restart-"));
-    const storePath = join(dir, "sessions.json");
+    const storePath = join(dir, "sessions.db");
     const token = "test-token";
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime() {
@@ -376,7 +376,7 @@ describe("OpenHarnessHttpServer", () => {
 
   it("terminalizes daemon-owned running workflows after restart without touching unrelated project workflows", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-workflow-restart-"));
-    const storePath = join(dir, "sessions.json");
+    const storePath = join(dir, "sessions.db");
     const projectCwd = join(dir, "project");
     const workflowStore = new WorkflowRunStore({ cwd: projectCwd });
     const spec = {
@@ -443,6 +443,7 @@ describe("OpenHarnessHttpServer", () => {
         },
       });
 
+      await first.close();
       const second = new OpenHarnessHttpServer({ storePath });
       await second.listen();
       try {

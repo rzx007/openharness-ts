@@ -41,7 +41,7 @@
 
 - [x] 选定最终包位置：`packages/services/src/session-runtime`。
 - [ ] 增加 SQLite 依赖与数据库路径解析。
-- [ ] 将当前文件持久化 adapter 替换为 SQLite adapter。
+- [x] 将当前文件持久化 adapter 替换为 SQLite adapter。
 - [ ] 为以下表实现迁移：
   - `session`
   - `session_input`

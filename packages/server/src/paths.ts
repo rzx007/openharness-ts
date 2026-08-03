@@ -14,7 +14,7 @@ export interface DaemonRegistry {
 }
 
 export function getDefaultSessionStorePath(): string {
-  return join(getDataDir(), "session-runtime", "sessions.json");
+  return join(getDataDir(), "session-runtime", "sessions.db");
 }
 
 export function getDaemonRegistryPath(): string {

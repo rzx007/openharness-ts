@@ -9,7 +9,7 @@ function registry(overrides: Partial<DaemonRegistry> = {}): DaemonRegistry {
     url: "http://daemon.test",
     pid: 42,
     token: "token",
-    storePath: "sessions.json",
+    storePath: "sessions.db",
     startedAt: 100,
     version: "0.1.0",
     ...overrides,
