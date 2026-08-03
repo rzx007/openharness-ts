@@ -9,10 +9,12 @@ import {
 
 /**
  * 用一个可记录调用的假后端注册进真实 BackendRegistry 单例。
- * Agent 工具会按 in_process → subprocess → first 的顺序取 executor，
- * 这里注册到 "subprocess"（in_process 不存在会落到这里）。
+ * Agent 工具现在只按 mode 选明确的 executor；默认注册到 in_process。
  */
-function installFakeBackend(spawnImpl: (config: TeammateSpawnConfig) => SpawnResult): {
+function installFakeBackend(
+  spawnImpl: (config: TeammateSpawnConfig) => SpawnResult,
+  backendName = "in_process",
+): {
   calls: TeammateSpawnConfig[];
 } {
   const calls: TeammateSpawnConfig[] = [];
@@ -24,7 +26,7 @@ function installFakeBackend(spawnImpl: (config: TeammateSpawnConfig) => SpawnRes
     async sendMessage() {},
     async terminate() {},
   };
-  getBackendRegistry().register("subprocess", backend);
+  getBackendRegistry().register(backendName, backend);
   return { calls };
 }
 
@@ -40,6 +42,48 @@ describe("agentTool isolate", () => {
     const props = (agentTool.inputSchema as { properties: Record<string, unknown> }).properties;
     expect(props.isolate).toBeDefined();
     expect((props.isolate as { type: string }).type).toBe("boolean");
+  });
+
+  it("defaults to in_process_teammate mode", () => {
+    const props = (agentTool.inputSchema as { properties: Record<string, { default?: string; enum?: string[] }> }).properties;
+    expect(props.mode?.default).toBe("in_process_teammate");
+    expect(props.mode?.enum).toEqual(["in_process_teammate", "remote_agent"]);
+  });
+
+  it("rejects local_agent mode instead of treating it as subprocess compatibility", async () => {
+    const { calls } = installFakeBackend(() => ({
+      success: true,
+      agentId: "Explore@default",
+      taskId: "task_local",
+      backendType: "in_process",
+    }));
+
+    const result = await agentTool.execute(
+      { description: "d", prompt: "explore", mode: "local_agent" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("Invalid mode");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("reports remote_agent as unsupported without spawning", async () => {
+    const { calls } = installFakeBackend(() => ({
+      success: true,
+      agentId: "Explore@default",
+      taskId: "task_remote",
+      backendType: "in_process",
+    }));
+
+    const result = await agentTool.execute(
+      { description: "d", prompt: "explore", mode: "remote_agent" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("not implemented");
+    expect(calls).toHaveLength(0);
   });
 
   it("passes isolate:true through to executor.spawn", async () => {

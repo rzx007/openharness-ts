@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runWorkflow, type WorkflowTaskRunResult } from "@openharness/coordinator";
 import type { AwaitTaskResult } from "@openharness/services";
-import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
+import { getBackendRegistry, type SpawnResult, type SwarmBackend, type TeammateSpawnConfig } from "@openharness/swarm";
 import { createAgentWorkflowRunner } from "./workflow-runner.js";
 
 function completedDependency(taskId: string, result: string): WorkflowTaskRunResult {
@@ -387,6 +387,84 @@ describe("createAgentWorkflowRunner", () => {
       result: "new output",
       metadata: { taskManagerTaskId: "task_new" },
     });
+  });
+
+  it("defaults to the in-process teammate backend", async () => {
+    const cwd = `/repo-mode-${Math.random().toString(36).slice(2)}`;
+    const inProcessCalls: TeammateSpawnConfig[] = [];
+    const subprocessCalls: TeammateSpawnConfig[] = [];
+    const inProcess: SwarmBackend = {
+      async spawn(config) {
+        inProcessCalls.push(config);
+        return {
+          success: true,
+          agentId: `${config.name}@${config.team}`,
+          taskId: "task_in_process",
+          backendType: "in_process",
+        };
+      },
+      async sendMessage() {},
+      async terminate() {},
+    };
+    const subprocess: SwarmBackend = {
+      async spawn(config) {
+        subprocessCalls.push(config);
+        return {
+          success: true,
+          agentId: `${config.name}@${config.team}`,
+          taskId: "task_subprocess",
+          backendType: "subprocess",
+        };
+      },
+      async sendMessage() {},
+      async terminate() {},
+    };
+    const registry = getBackendRegistry(cwd);
+    registry.register("in_process", inProcess);
+    registry.register("subprocess", subprocess);
+
+    const runner = createAgentWorkflowRunner({
+      cwd,
+      awaitTask: async () => ({ status: "completed", output: "ok", exitCode: 0 }),
+      getDiffSummary: async () => ({ changedFiles: [], insertions: 0, deletions: 0 }),
+      getAgentDefinition: () => undefined,
+    });
+
+    const result = await runner({ task: { id: "default-mode" }, attempt: 1, dependencyResults: {} });
+
+    expect(result.metadata?.backendType).toBe("in_process");
+    expect(inProcessCalls).toHaveLength(1);
+    expect(subprocessCalls).toHaveLength(0);
+  });
+
+  it("fails remote_agent mode before spawning a worker", async () => {
+    const calls: TeammateSpawnConfig[] = [];
+    const cwd = `/repo-remote-${Math.random().toString(36).slice(2)}`;
+    getBackendRegistry(cwd).register("in_process", {
+      async spawn(config) {
+        calls.push(config);
+        return {
+          success: true,
+          agentId: `${config.name}@${config.team}`,
+          taskId: "task_remote",
+          backendType: "in_process",
+        };
+      },
+      async sendMessage() {},
+      async terminate() {},
+    });
+    const runner = createAgentWorkflowRunner({
+      cwd,
+      mode: "remote_agent",
+      awaitTask: async () => ({ status: "completed", output: "unreachable" }),
+      getAgentDefinition: () => undefined,
+    });
+
+    const result = await runner({ task: { id: "remote" }, attempt: 1, dependencyResults: {} });
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("not implemented");
+    expect(calls).toHaveLength(0);
   });
 
   it("can be used by runWorkflow as a real runner adapter", async () => {

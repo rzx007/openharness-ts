@@ -17,7 +17,7 @@ export interface AgentWorkflowRunnerOptions {
   cwd: string;
   sessionId?: string;
   team?: string;
-  mode?: "local_agent" | "remote_agent" | "in_process_teammate";
+  mode?: "remote_agent" | "in_process_teammate";
   timeoutMs?: number;
   permissionMode?: "default" | "plan" | "full_auto";
   fromAgent?: string;
@@ -46,7 +46,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       : await defaultGetAgentDefinition(subagentType);
     const team = task.team ?? options.team ?? "default";
     const workerSessionId = createWorkerSessionId(task.id, attempt);
-    const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, options.sessionId, config));
+    const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, options.sessionId, config, options.mode));
     const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions));
     const stopTask = options.stopTask ?? ((taskId) => defaultStopTask(options.cwd, options.sessionId, taskId));
 
@@ -380,48 +380,42 @@ function normalizeDiffSummary(diff: WorkflowDiffSummary): WorkflowDiffSummary {
   };
 }
 
-async function defaultSpawnWorker(cwd: string, sessionId: string | undefined, config: TeammateSpawnConfig): Promise<SpawnResult> {
+async function defaultSpawnWorker(
+  cwd: string,
+  sessionId: string | undefined,
+  config: TeammateSpawnConfig,
+  mode: "remote_agent" | "in_process_teammate" = "in_process_teammate",
+): Promise<SpawnResult> {
   const { getBackendRegistry } = await import("@openharness/swarm");
-  const registries = sessionId
-    ? [getBackendRegistry({ cwd, sessionId })]
-    : [getBackendRegistry(cwd)];
-  try {
-    return await registries[0]!.getExecutor("in_process").spawn(config);
-  } catch {
-    try {
-      return await registries[0]!.getExecutor("subprocess").spawn(config);
-    } catch {
-      try {
-        return await registries[0]!.getExecutor().spawn(config);
-      } catch {
-        for (const registry of registries.slice(1)) {
-          try {
-            return await registry.getExecutor("in_process").spawn(config);
-          } catch {
-            try {
-              return await registry.getExecutor("subprocess").spawn(config);
-            } catch {
-              try {
-                return await registry.getExecutor().spawn(config);
-              } catch {
-                continue;
-              }
-            }
-          }
-        }
-        const globalRegistry = getBackendRegistry();
-        try {
-          return await globalRegistry.getExecutor("in_process").spawn(config);
-        } catch {
-          try {
-            return await globalRegistry.getExecutor("subprocess").spawn(config);
-          } catch {
-            return await globalRegistry.getExecutor().spawn(config);
-          }
-        }
-      }
-    }
+  const agentId = `${config.name}@${config.team}`;
+  if (mode === "remote_agent") {
+    return {
+      success: false,
+      agentId,
+      taskId: "",
+      backendType: "remote",
+      error: "remote_agent mode is not implemented yet.",
+    };
   }
+  const registries = sessionId
+    ? [getBackendRegistry({ cwd, sessionId }), getBackendRegistry()]
+    : [getBackendRegistry(cwd), getBackendRegistry()];
+  for (const registry of registries) {
+    let executor;
+    try {
+      executor = registry.getExecutor("in_process");
+    } catch {
+      continue;
+    }
+    return await executor.spawn(config);
+  }
+  return {
+    success: false,
+    agentId,
+    taskId: "",
+    backendType: "in_process",
+    error: "No swarm backend registered for mode in_process_teammate",
+  };
 }
 
 async function defaultAwaitTask(

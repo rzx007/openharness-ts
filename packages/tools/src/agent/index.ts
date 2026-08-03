@@ -1,10 +1,12 @@
 import type { ToolDefinition } from "@openharness/core";
 import type { SwarmBackend } from "@openharness/swarm";
 
+type AgentExecutionMode = "in_process_teammate" | "remote_agent";
+
 export const agentTool: ToolDefinition = {
   name: "Agent",
   description:
-    "Spawn a local background agent task. Returns a task_id. " +
+    "Spawn an in-process teammate task. Returns a task_id. " +
     "Use TaskWait with that task_id to block until the task finishes and retrieve its result — " +
     "do not poll with Sleep.",
   inputSchema: {
@@ -15,7 +17,12 @@ export const agentTool: ToolDefinition = {
       subagentType: { type: "string", description: "Agent type (e.g. general-purpose, Explore, worker)" },
       model: { type: "string", description: "Model override" },
       team: { type: "string", description: "Optional team to attach the agent to" },
-      mode: { type: "string", description: "Agent mode", default: "local_agent" },
+      mode: {
+        type: "string",
+        enum: ["in_process_teammate", "remote_agent"],
+        description: "Agent execution mode. in_process_teammate uses the daemon child-session backend; remote_agent is reserved and currently unsupported.",
+        default: "in_process_teammate",
+      },
       permissionMode: {
         type: "string",
         enum: ["default", "plan", "full_auto"],
@@ -36,9 +43,12 @@ export const agentTool: ToolDefinition = {
     const { getBackendRegistry } = await import("@openharness/swarm");
     const { getAgentDefinition } = await import("@openharness/coordinator");
     const { getTeamRegistry } = await import("@openharness/coordinator");
-    const mode = (input.mode as string) ?? "local_agent";
-    if (!["local_agent", "remote_agent", "in_process_teammate"].includes(mode)) {
-      return { content: [{ type: "text", text: "Invalid mode. Use local_agent, remote_agent, or in_process_teammate." }], isError: true };
+    const mode = parseAgentExecutionMode(input.mode);
+    if (!mode) {
+      return { content: [{ type: "text", text: "Invalid mode. Use in_process_teammate or remote_agent." }], isError: true };
+    }
+    if (mode === "remote_agent") {
+      return { content: [{ type: "text", text: "remote_agent mode is not implemented yet." }], isError: true };
     }
 
     const permissionMode = input.permissionMode as string | undefined;
@@ -55,9 +65,10 @@ export const agentTool: ToolDefinition = {
       context.sessionId
         ? [getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId }), getBackendRegistry()]
         : [getBackendRegistry(context.cwd), getBackendRegistry()],
+      mode,
     );
     if (!executor) {
-      return { content: [{ type: "text", text: "No swarm backend registered" }], isError: true };
+      return { content: [{ type: "text", text: `No swarm backend registered for mode ${mode}` }], isError: true };
     }
 
     try {
@@ -104,7 +115,7 @@ export const agentTool: ToolDefinition = {
 
 export const sendMessageTool: ToolDefinition = {
   name: "SendMessage",
-  description: "Send a follow-up message to a running local agent task.",
+  description: "Send a follow-up message to a running teammate task.",
   inputSchema: {
     type: "object",
     properties: {
@@ -124,6 +135,7 @@ export const sendMessageTool: ToolDefinition = {
         context.sessionId
           ? [getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId }), getBackendRegistry()]
           : [getBackendRegistry(context.cwd), getBackendRegistry()],
+        "in_process_teammate",
       );
       if (!executor) {
         return { content: [{ type: "text", text: "No swarm backend registered" }], isError: true };
@@ -145,15 +157,23 @@ type BackendRegistryLike = {
   getExecutor(name?: string): SwarmBackend;
 };
 
-function pickSwarmExecutor(registries: BackendRegistryLike[]): SwarmBackend | undefined {
+function pickSwarmExecutor(
+  registries: BackendRegistryLike[],
+  mode: AgentExecutionMode,
+): SwarmBackend | undefined {
+  const backendName = mode === "in_process_teammate" ? "in_process" : "remote";
   for (const registry of registries) {
-    for (const name of ["in_process", "subprocess", undefined] as const) {
-      try {
-        return registry.getExecutor(name);
-      } catch {
-        continue;
-      }
+    try {
+      return registry.getExecutor(backendName);
+    } catch {
+      continue;
     }
   }
+  return undefined;
+}
+
+function parseAgentExecutionMode(value: unknown): AgentExecutionMode | undefined {
+  if (value === undefined) return "in_process_teammate";
+  if (value === "in_process_teammate" || value === "remote_agent") return value;
   return undefined;
 }
