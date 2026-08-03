@@ -106,23 +106,25 @@ export function DialogProvider({
 
   return (
     <DialogContext.Provider value={api}>
-      {children}
-      {topEntry !== null && (
-        <box
-          position="absolute"
-          top={dialogTop}
-          left={dialogLeft}
-          width={dialogWidth}
-          zIndex={100}
-          border={true}
-          borderColor={theme.colors.accent}
-          backgroundColor={theme.colors.backgroundPanel}
-          padding={1}
-          flexDirection="column"
-        >
-          {topEntry.node}
-        </box>
-      )}
+      <box position="relative" width="100%" height="100%">
+        {children}
+        {topEntry !== null && (
+          <box
+            position="absolute"
+            top={dialogTop}
+            left={dialogLeft}
+            width={dialogWidth}
+            zIndex={100}
+            border={true}
+            borderColor={theme.colors.accent}
+            backgroundColor={theme.colors.backgroundPanel}
+            padding={1}
+            flexDirection="column"
+          >
+            {topEntry.node}
+          </box>
+        )}
+      </box>
     </DialogContext.Provider>
   );
 }

@@ -192,6 +192,8 @@ export function Prompt({
   // Handle textarea onSubmit (triggered by Return key)
   const handleTextareaSubmit = useCallback(() => {
     const text = textareaRef.current?.plainText ?? content;
+    const trimmed = text.trim();
+    const isSlashCommand = trimmed.startsWith("/");
     if (text !== content) {
       setContent(text);
       onDraftChange?.(text);
@@ -210,8 +212,18 @@ export function Prompt({
       return;
     }
 
-    // If autocomplete is open, handle through autocomplete (don't also submit text)
+    // Complete prefixes like "/th"; submit exact slash lines and slash lines with args.
     if (acOpen) {
+      const exactCommand = acRawCommands.some((cmd) => cmd.id === trimmed);
+      const slashWithArgs = /^\/\S+\s+[\s\S]+$/.test(trimmed);
+      if (exactCommand || slashWithArgs || acRawCommands.length === 0) {
+        if (!busy || isSlashCommand) {
+          onSubmit(trimmed);
+          clearTextarea();
+        }
+        setAcOpen(false);
+        return;
+      }
       const suggestion = acRawCommands[acNav.index];
       if (suggestion) {
         suggestion.run();
@@ -222,10 +234,8 @@ export function Prompt({
       return;
     }
 
-    if (busy) return;
-
-    const trimmed = text.trim();
     if (trimmed === "") return;
+    if (busy && !isSlashCommand) return;
 
     onSubmit(trimmed);
     clearTextarea();

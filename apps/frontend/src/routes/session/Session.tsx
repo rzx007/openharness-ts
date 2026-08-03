@@ -37,7 +37,7 @@ export function Session({ items, assistantBuffer }: SessionProps) {
           <TranscriptPart key={item.id ?? i} item={item} syntax={syntax} />
         ))}
         {assistantBuffer ? (
-          <markdown content={assistantBuffer} syntaxStyle={syntax} streaming />
+          <text wrapMode="word">{assistantBuffer}</text>
         ) : null}
       </box>
     </scrollbox>
