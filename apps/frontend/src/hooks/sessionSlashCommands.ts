@@ -2,6 +2,7 @@ import type {
   CommandCatalogEntry,
   OpenHarnessClient,
   OpenHarnessClientState,
+  PresentationReadRequest,
   SlashLine,
 } from "@openharness/client";
 import {
@@ -29,10 +30,12 @@ export type SessionSlashCtx = {
   client: OpenHarnessClient;
   sessionId: string | undefined;
   pushSystem: (text: string) => void;
+  presentSystem: (title: string, content: string) => void;
   statusRef: MutableRefObject<Record<string, unknown>>;
   commandCatalogRef: MutableRefObject<CommandCatalogEntry[]>;
   clientState: OpenHarnessClientState;
   localBusy: boolean;
+  cacheFirstRead?: (request: PresentationReadRequest) => void;
   daemon?: FrontendConfig["daemon"];
   setStatus: Dispatch<SetStateAction<Record<string, unknown>>>;
 };
@@ -45,10 +48,12 @@ export async function dispatchSessionSlashCommand(
     client,
     sessionId,
     pushSystem,
+    presentSystem,
     statusRef,
     commandCatalogRef,
     clientState,
     localBusy,
+    cacheFirstRead,
     daemon,
     setStatus,
   } = ctx;
@@ -73,6 +78,8 @@ export async function dispatchSessionSlashCommand(
     clientState,
     busy: localBusy,
     emit: pushSystem,
+    present: presentSystem,
+    cacheFirstRead,
     patchStatus: (patch) => setStatus((current) => ({ ...current, ...patch })),
   });
 

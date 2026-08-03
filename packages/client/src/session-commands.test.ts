@@ -92,6 +92,50 @@ describe("dispatchSessionCommand", () => {
     expect(emitted[0]).toBe("OpenHarness v1.2.3");
   });
 
+  it("presents read-only command output when a presentation surface is available", async () => {
+    const { host: h, emitted } = host();
+    const presented: Array<{ title: string; content: string }> = [];
+    Object.assign(h, {
+      sessionId: "s1",
+      model: "m",
+      statusSessionId: "s1",
+      permissionMode: "default",
+      present: (title: string, content: string) => {
+        presented.push({ title, content });
+      },
+    });
+
+    const outcome = await dispatchSessionCommand({ name: "/status", args: "" }, h);
+
+    expect(outcome).toBe("handled");
+    expect(emitted).toHaveLength(0);
+    expect(presented[0]?.title).toBe("Status");
+    expect(presented[0]?.content).toContain("Session status:");
+  });
+
+  it("routes cache-first read commands through the presentation cache host", async () => {
+    const getContextPreview = vi.fn(async () => "CONTEXT");
+    const client = fakeClient({ getContextPreview });
+    const { host: h, emitted } = host({ client });
+    const reads: Array<{ key: string; title: string; load: () => Promise<string> }> = [];
+    Object.assign(h, {
+      present: vi.fn(),
+      cacheFirstRead: (request: { key: string; title: string; load: () => Promise<string> }) => {
+        reads.push(request);
+      },
+    });
+
+    const outcome = await dispatchSessionCommand({ name: "/context", args: "" }, h);
+
+    expect(outcome).toBe("handled");
+    expect(emitted).toHaveLength(0);
+    expect(getContextPreview).not.toHaveBeenCalled();
+    expect(reads[0]?.key).toBe("context:/tmp/project");
+    expect(reads[0]?.title).toBe("Context");
+    await expect(reads[0]!.load()).resolves.toBe("CONTEXT");
+    expect(getContextPreview).toHaveBeenCalledWith({ cwd: "/tmp/project" });
+  });
+
   it("returns unhandled for unknown non-local commands", async () => {
     const { host: h, emitted } = host();
     const outcome = await dispatchSessionCommand({ name: "/not-a-real-cmd", args: "" }, h);

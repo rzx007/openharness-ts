@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { DialogSelect } from "../ui/DialogSelect";
+import { DialogText } from "../ui/DialogText";
 import { PermissionDialog } from "../components/dialogs/PermissionDialog";
 import { QuestionDialog } from "../components/dialogs/QuestionDialog";
 import type { useDialog } from "../ui/DialogContext";
@@ -92,12 +93,22 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
     }
   }, [session.modal]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const req = session.displayRequest;
+    if (!req) return;
+
+    dialog.replace(
+      <DialogText title={req.title} content={req.content} />,
+      () => session.setDisplayRequest(null),
+    );
+  }, [session.displayRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Dialog wiring for selectRequest ─────────────────────────────────────────
   useEffect(() => {
     const req = session.selectRequest;
     if (!req) return;
 
-    const isSessions = req.submitPrefix === "/resume ";
+    const isSessions = req.submitPrefix === "/sessions open ";
     dialog.replace(
       <DialogSelect
         title={req.title}

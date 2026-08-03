@@ -3,6 +3,12 @@ import type { CommandCatalogEntry, OpenHarnessClientState } from "./types.js";
 
 export type SlashLine = { name: string; args: string };
 
+export type PresentationReadRequest = {
+  key: string;
+  title: string;
+  load: () => Promise<string>;
+};
+
 export type SessionCommandHost = {
   client: OpenHarnessClient;
   sessionId?: string;
@@ -17,6 +23,10 @@ export type SessionCommandHost = {
   busy: boolean;
   /** Present a system/notice message to the user */
   emit(text: string): void;
+  /** Present read-only output in a transient UI surface when available. */
+  present?(title: string, content: string): void;
+  /** Present cached read-only output immediately and refresh it asynchronously. */
+  cacheFirstRead?(request: PresentationReadRequest): void;
   /** Optional status patch for /plan /model /provider */
   patchStatus?(patch: Record<string, unknown>): void;
 };
@@ -80,6 +90,74 @@ export function resolveSessionCwd(input: {
   return input.fallback ?? (typeof process !== "undefined" ? process.cwd() : ".");
 }
 
+function firstArg(args: string): string | undefined {
+  return args.trim().split(/\s+/).filter(Boolean)[0];
+}
+
+function shouldPresentSlashOutput(slash: SlashLine): boolean {
+  switch (slash.name) {
+    case "/help":
+    case "/version":
+    case "/status":
+    case "/mcp":
+    case "/context":
+    case "/stats":
+    case "/agents":
+    case "/doctor":
+    case "/usage":
+    case "/cost":
+    case "/hooks":
+    case "/subagents":
+    case "/diff":
+    case "/skills":
+      return true;
+    case "/config": {
+      const args = slash.args.trim();
+      return !args || args === "show";
+    }
+    case "/provider":
+      return !slash.args.trim();
+    case "/tasks": {
+      const sub = firstArg(slash.args);
+      return !sub || sub === "list" || sub === "show";
+    }
+    case "/memory": {
+      const sub = firstArg(slash.args);
+      return !sub || sub === "list" || sub === "show";
+    }
+    case "/auth": {
+      const sub = firstArg(slash.args);
+      return !sub || sub === "status";
+    }
+    case "/profile": {
+      const action = firstArg(slash.args) ?? "status";
+      return action === "status" || action === "show";
+    }
+    case "/effort":
+    case "/turns":
+      return !slash.args.trim();
+    case "/output-style": {
+      const sub = firstArg(slash.args);
+      return !sub || sub === "show" || sub === "list";
+    }
+    case "/plugin": {
+      const sub = firstArg(slash.args);
+      return !sub || sub === "list";
+    }
+    case "/branch":
+      return !slash.args.trim() || slash.args.trim().split(/\s+/).includes("list");
+    case "/commit":
+      return !slash.args.trim();
+    default:
+      return false;
+  }
+}
+
+function slashOutputTitle(slash: SlashLine): string {
+  const name = slash.name.startsWith("/") ? slash.name.slice(1) : slash.name;
+  return name ? name[0]!.toUpperCase() + name.slice(1) : "Output";
+}
+
 export async function dispatchSessionCommand(
   slash: SlashLine | null,
   host: SessionCommandHost,
@@ -95,7 +173,24 @@ export async function dispatchSessionCommand(
     clientState,
     busy,
   } = host;
-  const emit = (text: string) => host.emit(text);
+  const emit = (text: string) => {
+    if (slash && host.present && shouldPresentSlashOutput(slash)) {
+      host.present(slashOutputTitle(slash), text);
+      return;
+    }
+    host.emit(text);
+  };
+  const readPresentation = async (
+    key: string,
+    title: string,
+    load: () => Promise<string>,
+  ): Promise<void> => {
+    if (slash && host.cacheFirstRead && shouldPresentSlashOutput(slash)) {
+      host.cacheFirstRead({ key, title, load });
+      return;
+    }
+    emit(await load());
+  };
   const patchStatus = (patch: Record<string, unknown>) => host.patchStatus?.(patch);
 
   if (slash?.name === "/plan") {
@@ -163,8 +258,10 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/version") {
-    const health = await client.health();
-    emit(`OpenHarness${health.version ? ` v${health.version}` : ""}`);
+    await readPresentation("version", "Version", async () => {
+      const health = await client.health();
+      return `OpenHarness${health.version ? ` v${health.version}` : ""}`;
+    });
     return "handled";
   }
 
@@ -183,8 +280,10 @@ export async function dispatchSessionCommand(
   if (slash?.name === "/config") {
     const args = slash.args.trim();
     if (!args || args === "show") {
-      const settings = await client.getSettings();
-      emit(JSON.stringify(settings, null, 2));
+      await readPresentation(`config:${cwd}`, "Config", async () => {
+        const settings = await client.getSettings();
+        return JSON.stringify(settings, null, 2);
+      });
       return "handled";
     }
     const setMatch = args.match(/^set\s+(\S+)\s+([\s\S]+)$/);
@@ -199,14 +298,16 @@ export async function dispatchSessionCommand(
 
   if (slash?.name === "/provider") {
     if (!slash.args) {
-      const providers = await client.listProviders();
-      const lines = ["Available providers:", ""];
-      for (const provider of providers) {
-        const marker = provider.active ? " (active)" : "";
-        const keyStatus = provider.local ? "[local]" : provider.hasKey ? "[key]" : "[no key]";
-        lines.push(`  ${provider.name.padEnd(14)} ${provider.displayName.padEnd(14)} ${keyStatus}${marker}`);
-      }
-      emit(lines.join("\n"));
+      await readPresentation("providers", "Provider", async () => {
+        const providers = await client.listProviders();
+        const lines = ["Available providers:", ""];
+        for (const provider of providers) {
+          const marker = provider.active ? " (active)" : "";
+          const keyStatus = provider.local ? "[local]" : provider.hasKey ? "[key]" : "[no key]";
+          lines.push(`  ${provider.name.padEnd(14)} ${provider.displayName.padEnd(14)} ${keyStatus}${marker}`);
+        }
+        return lines.join("\n");
+      });
       return "handled";
     }
     const settings = await client.patchSettings(
@@ -223,13 +324,10 @@ export async function dispatchSessionCommand(
 
   if (slash?.name === "/mcp") {
     if (!sessionId) return "handled";
-    const servers = await client.getSessionMcp(sessionId);
-    if (servers.length === 0) {
-      emit("No MCP servers connected.");
-      return "handled";
-    }
-    emit(
-      [
+    await readPresentation(`mcp:${sessionId}`, "MCP", async () => {
+      const servers = await client.getSessionMcp(sessionId);
+      if (servers.length === 0) return "No MCP servers connected.";
+      return [
         `MCP Servers (${servers.length}):`,
         "",
         ...servers.flatMap((server) => [
@@ -239,8 +337,8 @@ export async function dispatchSessionCommand(
           ...(server.error ? [`    Error: ${server.error}`] : []),
           "",
         ]),
-      ].join("\n"),
-    );
+      ].join("\n");
+    });
     return "handled";
   }
 
@@ -249,34 +347,33 @@ export async function dispatchSessionCommand(
     const args = slash.args.trim();
     const [sub, id] = args.split(/\s+/).filter(Boolean);
     if (!sub || sub === "list") {
-      const tasks = await client.listTasks({ sessionId });
-      if (tasks.length === 0) {
-        emit("No tasks.");
-        return "handled";
-      }
-      emit(
-        [
+      await readPresentation(`tasks:${sessionId}`, "Tasks", async () => {
+        const tasks = await client.listTasks({ sessionId });
+        if (tasks.length === 0) return "No tasks.";
+        return [
           `Tasks (${tasks.length}):`,
           "",
           ...tasks.map((task) => `  ${task.id} [${task.status}] ${task.type}: ${task.description}`),
-        ].join("\n"),
-      );
+        ].join("\n");
+      });
       return "handled";
     }
     if (sub === "show" && id) {
-      const detail = await client.getTask(id, { sessionId });
-      emit([
-        `Task: ${detail.task.id}`,
-        `  Type:        ${detail.task.type}`,
-        `  Status:      ${detail.task.status}`,
-        `  Description: ${detail.task.description}`,
-        `  CWD:         ${detail.task.cwd}`,
-        `  Command:     ${detail.task.command ?? "(none)"}`,
-        `  Exit code:   ${detail.task.exitCode ?? "(n/a)"}`,
-        "",
-        "Output:",
-        detail.output ?? "(no output)",
-      ].join("\n"));
+      await readPresentation(`task:${sessionId}:${id}`, "Tasks", async () => {
+        const detail = await client.getTask(id, { sessionId });
+        return [
+          `Task: ${detail.task.id}`,
+          `  Type:        ${detail.task.type}`,
+          `  Status:      ${detail.task.status}`,
+          `  Description: ${detail.task.description}`,
+          `  CWD:         ${detail.task.cwd}`,
+          `  Command:     ${detail.task.command ?? "(none)"}`,
+          `  Exit code:   ${detail.task.exitCode ?? "(n/a)"}`,
+          "",
+          "Output:",
+          detail.output ?? "(no output)",
+        ].join("\n");
+      });
       return "handled";
     }
     if (sub === "stop" && id) {
@@ -302,13 +399,10 @@ export async function dispatchSessionCommand(
     const args = slash.args.trim();
     const [sub, ...rest] = args.split(/\s+/).filter(Boolean);
     if (!sub || sub === "list") {
-      const listed = await client.listMemory({ cwd });
-      if (listed.entries.length === 0) {
-        emit(`Memory directory: ${listed.directory}\nNo entries found.`);
-        return "handled";
-      }
-      emit(
-        [
+      await readPresentation(`memory:${cwd}:list`, "Memory", async () => {
+        const listed = await client.listMemory({ cwd });
+        if (listed.entries.length === 0) return `Memory directory: ${listed.directory}\nNo entries found.`;
+        return [
           `Memory entries (${listed.entries.length}):`,
           "",
           ...listed.entries.map((entry) => {
@@ -318,20 +412,23 @@ export async function dispatchSessionCommand(
               : entry.content;
             return `  ${entry.id}${tags}: ${preview}`;
           }),
-        ].join("\n"),
-      );
+        ].join("\n");
+      });
       return "handled";
     }
     if (sub === "show" && rest[0]) {
-      const entry = await client.getMemory(rest[0], { cwd });
-      emit([
-        `ID:       ${entry.id}`,
-        `Created:  ${new Date(entry.createdAt).toISOString()}`,
-        `Updated:  ${new Date(entry.updatedAt).toISOString()}`,
-        `Tags:     ${entry.tags?.join(", ") ?? "(none)"}`,
-        "",
-        entry.content,
-      ].join("\n"));
+      const memoryId = rest[0];
+      await readPresentation(`memory:${cwd}:show:${memoryId}`, "Memory", async () => {
+        const entry = await client.getMemory(memoryId, { cwd });
+        return [
+          `ID:       ${entry.id}`,
+          `Created:  ${new Date(entry.createdAt).toISOString()}`,
+          `Updated:  ${new Date(entry.updatedAt).toISOString()}`,
+          `Tags:     ${entry.tags?.join(", ") ?? "(none)"}`,
+          "",
+          entry.content,
+        ].join("\n");
+      });
       return "handled";
     }
     if (sub === "add") {
@@ -357,25 +454,27 @@ export async function dispatchSessionCommand(
     const args = slash.args.trim();
     const [sub, provider, apiKey] = args.split(/\s+/).filter(Boolean);
     if (!sub || sub === "status") {
-      const auth = await client.getAuthStatus();
-      const lines = ["Credential status:", "", "  Auth sources:"];
-      lines.push(
-        `    codex_subscription: ${auth.codex.configured ? "ready" : auth.codex.state} (${auth.codex.source})`,
-      );
-      if (auth.storedProviders.length > 0) {
-        lines.push("", "  Stored credentials:");
-        for (const name of auth.storedProviders) lines.push(`    ${name}: configured`);
-      }
-      if (auth.envProviders.length > 0) {
-        lines.push("  Environment variables:");
-        for (const env of auth.envProviders) lines.push(`    ${env.name}: ${env.envKey}`);
-      }
-      if (auth.storedProviders.length === 0 && auth.envProviders.length === 0) {
-        lines.push("", "  No credentials configured.");
-        lines.push("  Use /auth login <provider> <api-key> to store an API key.");
-        lines.push("  Use /auth login codex to use a Codex subscription.");
-      }
-      emit(lines.join("\n"));
+      await readPresentation("auth:status", "Auth", async () => {
+        const auth = await client.getAuthStatus();
+        const lines = ["Credential status:", "", "  Auth sources:"];
+        lines.push(
+          `    codex_subscription: ${auth.codex.configured ? "ready" : auth.codex.state} (${auth.codex.source})`,
+        );
+        if (auth.storedProviders.length > 0) {
+          lines.push("", "  Stored credentials:");
+          for (const name of auth.storedProviders) lines.push(`    ${name}: configured`);
+        }
+        if (auth.envProviders.length > 0) {
+          lines.push("  Environment variables:");
+          for (const env of auth.envProviders) lines.push(`    ${env.name}: ${env.envKey}`);
+        }
+        if (auth.storedProviders.length === 0 && auth.envProviders.length === 0) {
+          lines.push("", "  No credentials configured.");
+          lines.push("  Use /auth login <provider> <api-key> to store an API key.");
+          lines.push("  Use /auth login codex to use a Codex subscription.");
+        }
+        return lines.join("\n");
+      });
       return "handled";
     }
     if (sub === "login") {
@@ -401,8 +500,7 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/context") {
-    const report = await client.getContextPreview({ cwd });
-    emit(report);
+    await readPresentation(`context:${cwd}`, "Context", async () => await client.getContextPreview({ cwd }));
     return "handled";
   }
 
@@ -605,33 +703,38 @@ export async function dispatchSessionCommand(
 
   if (slash?.name === "/usage" || slash?.name === "/cost") {
     if (!sessionId) return "handled";
-    const usage = await client.getSessionUsage(sessionId);
     if (slash.name === "/cost") {
-      emit([
-        "Cost estimate:",
-        `  Model:         ${usage.model}`,
-        `  Input tokens:  ${usage.inputTokens.toLocaleString()}`,
-        `  Output tokens: ${usage.outputTokens.toLocaleString()}`,
-        `  Est. cost:     ${usage.estimatedCost}`,
-        ...(usage.cacheCreationTokens
-          ? [`  Cache write:   ${usage.cacheCreationTokens.toLocaleString()}`]
-          : []),
-        ...(usage.cacheReadTokens
-          ? [`  Cache read:    ${usage.cacheReadTokens.toLocaleString()}`]
-          : []),
-      ].join("\n"));
+      await readPresentation(`cost:${sessionId}`, "Cost", async () => {
+        const usage = await client.getSessionUsage(sessionId);
+        return [
+          "Cost estimate:",
+          `  Model:         ${usage.model}`,
+          `  Input tokens:  ${usage.inputTokens.toLocaleString()}`,
+          `  Output tokens: ${usage.outputTokens.toLocaleString()}`,
+          `  Est. cost:     ${usage.estimatedCost}`,
+          ...(usage.cacheCreationTokens
+            ? [`  Cache write:   ${usage.cacheCreationTokens.toLocaleString()}`]
+            : []),
+          ...(usage.cacheReadTokens
+            ? [`  Cache read:    ${usage.cacheReadTokens.toLocaleString()}`]
+            : []),
+        ].join("\n");
+      });
       return "handled";
     }
-    emit([
-      "Token usage:",
-      `  Input:         ${usage.inputTokens.toLocaleString()}`,
-      `  Output:        ${usage.outputTokens.toLocaleString()}`,
-      `  Total:         ${(usage.inputTokens + usage.outputTokens).toLocaleString()}`,
-      `  Cache write:   ${usage.cacheCreationTokens.toLocaleString()}`,
-      `  Cache read:    ${usage.cacheReadTokens.toLocaleString()}`,
-      `  Messages:      ${usage.messageCount}`,
-      `  Est. cost:     ${usage.estimatedCost}`,
-    ].join("\n"));
+    await readPresentation(`usage:${sessionId}`, "Usage", async () => {
+      const usage = await client.getSessionUsage(sessionId);
+      return [
+        "Token usage:",
+        `  Input:         ${usage.inputTokens.toLocaleString()}`,
+        `  Output:        ${usage.outputTokens.toLocaleString()}`,
+        `  Total:         ${(usage.inputTokens + usage.outputTokens).toLocaleString()}`,
+        `  Cache write:   ${usage.cacheCreationTokens.toLocaleString()}`,
+        `  Cache read:    ${usage.cacheReadTokens.toLocaleString()}`,
+        `  Messages:      ${usage.messageCount}`,
+        `  Est. cost:     ${usage.estimatedCost}`,
+      ].join("\n");
+    });
     return "handled";
   }
 
@@ -693,21 +796,18 @@ export async function dispatchSessionCommand(
     const args = slash.args.trim().split(/\s+/).filter(Boolean);
     const sub = args[0];
     if (!sub || sub === "list") {
-      const listed = await client.listPlugins({ cwd });
-      if (listed.plugins.length === 0) {
-        emit("No plugins discovered.");
-        return "handled";
-      }
-      emit(
-        [
+      await readPresentation(`plugins:${cwd}`, "Plugin", async () => {
+        const listed = await client.listPlugins({ cwd });
+        if (listed.plugins.length === 0) return "No plugins discovered.";
+        return [
           ...listed.plugins.map(
             (plugin) =>
               `- ${plugin.name}@${plugin.version} [${plugin.enabled ? "enabled" : "disabled"}] ` +
               `skills=${plugin.skillCount} commands=${plugin.commandCount} hooks=${plugin.hookCount} agents=${plugin.agentCount}`,
           ),
           ...listed.warnings.map((warning) => `! ${warning}`),
-        ].join("\n"),
-      );
+        ].join("\n");
+      });
       return "handled";
     }
     if ((sub === "enable" || sub === "disable") && args[1]) {
@@ -741,31 +841,30 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/hooks") {
-    const hooks = await client.listHooks({
-      cwd,
-      ...(sessionId ? { sessionId } : {}),
+    await readPresentation(`hooks:${cwd}:${sessionId ?? "global"}`, "Hooks", async () => {
+      const hooks = await client.listHooks({
+        cwd,
+        ...(sessionId ? { sessionId } : {}),
+      });
+      if (hooks.length === 0) return "No hooks configured.";
+      const settingsHooks = hooks.filter((hook) => hook.origin === "settings");
+      const runtimeHooks = hooks.filter((hook) => hook.origin === "runtime");
+      const lines = ["Hooks:", ""];
+      if (runtimeHooks.length > 0) {
+        lines.push("Runtime hooks:");
+        for (const hook of runtimeHooks) {
+          lines.push(`  ${hook.id}: ${hook.event} (${hook.type}) [${hook.enabled ? "enabled" : "disabled"}]`);
+        }
+        lines.push("");
+      }
+      if (settingsHooks.length > 0) {
+        lines.push("Settings hooks:");
+        for (const hook of settingsHooks) {
+          lines.push(`  ${hook.id}: ${hook.event} (${hook.type}) [${hook.enabled ? "enabled" : "disabled"}]`);
+        }
+      }
+      return lines.join("\n");
     });
-    if (hooks.length === 0) {
-      emit("No hooks configured.");
-      return "handled";
-    }
-    const settingsHooks = hooks.filter((hook) => hook.origin === "settings");
-    const runtimeHooks = hooks.filter((hook) => hook.origin === "runtime");
-    const lines = ["Hooks:", ""];
-    if (runtimeHooks.length > 0) {
-      lines.push("Runtime hooks:");
-      for (const hook of runtimeHooks) {
-        lines.push(`  ${hook.id}: ${hook.event} (${hook.type}) [${hook.enabled ? "enabled" : "disabled"}]`);
-      }
-      lines.push("");
-    }
-    if (settingsHooks.length > 0) {
-      lines.push("Settings hooks:");
-      for (const hook of settingsHooks) {
-        lines.push(`  ${hook.id}: ${hook.event} (${hook.type}) [${hook.enabled ? "enabled" : "disabled"}]`);
-      }
-    }
-    emit(lines.join("\n"));
     return "handled";
   }
 
@@ -788,20 +887,22 @@ export async function dispatchSessionCommand(
 
   if (slash?.name === "/diff") {
     const full = slash.args.trim().split(/\s+/).includes("full");
-    emit(await client.getGitDiff({ cwd, full }));
+    await readPresentation(`git:diff:${cwd}:${full ? "full" : "summary"}`, "Diff", async () =>
+      await client.getGitDiff({ cwd, full }));
     return "handled";
   }
 
   if (slash?.name === "/branch") {
     const list = slash.args.trim().split(/\s+/).includes("list");
-    emit(await client.getGitBranch({ cwd, list }));
+    await readPresentation(`git:branch:${cwd}:${list ? "list" : "current"}`, "Branch", async () =>
+      await client.getGitBranch({ cwd, list }));
     return "handled";
   }
 
   if (slash?.name === "/commit") {
     const message = slash.args.trim();
     if (!message) {
-      emit(await client.getGitStatus({ cwd }));
+      await readPresentation(`git:status:${cwd}`, "Commit", async () => await client.getGitStatus({ cwd }));
       return "handled";
     }
     emit(await client.gitCommit({ cwd, message }));

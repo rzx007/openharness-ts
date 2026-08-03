@@ -25,6 +25,7 @@ export {
 } from "./session-commands.js";
 export { hydrateState, syncEvents } from "./sync.js";
 export type {
+  PresentationReadRequest,
   SessionCommandHost,
   SessionCommandOutcome,
   SlashLine,

@@ -61,6 +61,7 @@ export interface OpenHarnessServerHealth {
 export interface ListSessionsOptions {
   cwd?: string;
   includeArchived?: boolean;
+  includeChildren?: boolean;
   limit?: number;
 }
 
