@@ -17,6 +17,7 @@ vi.mock("@openharness/client", async () => {
 });
 
 import { OpenHarnessClient } from "@openharness/client";
+import { ensureLocalDaemon } from "./ensure-daemon.js";
 import { rejectPrintContinueResume, runPrintSession } from "./print-session.js";
 
 describe("rejectPrintContinueResume", () => {
@@ -163,11 +164,13 @@ describe("runPrintSession", () => {
     await runPrintSession(
       { model: "m", outputStyle: "default" } as never,
       "hi",
-      { model: "m", cwd: "/tmp" },
+      { model: "m", cwd: "/tmp", daemonUrl: "https://daemon.example/", daemonToken: "remote-token" },
     );
 
     expect(writes.join("")).toContain("hello from daemon");
     expect(exitSpy).not.toHaveBeenCalled();
+    expect(ensureLocalDaemon).not.toHaveBeenCalled();
+    expect(Client).toHaveBeenCalledWith({ baseUrl: "https://daemon.example", token: "remote-token" });
     stdoutSpy.mockRestore();
   });
 
@@ -208,7 +211,18 @@ describe("runPrintSession", () => {
         permissions: [],
       })),
       replyPermission: vi.fn(),
-      streamEvents: async function* () {},
+      streamEvents: async function* () {
+        yield {
+          id: "e1",
+          seq: 1,
+          type: "session.run.updated",
+          sessionId: "s1",
+          createdAt: 3,
+          payload: {
+            run: { id: "r1", sessionId: "s1", status: "completed", metadata: {}, createdAt: 2, updatedAt: 3 },
+          },
+        };
+      },
     }));
 
     await runPrintSession(

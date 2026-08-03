@@ -308,6 +308,8 @@ async function runPrintMode(
     allowedTools: options.allowedTools,
     disallowedTools: options.disallowedTools,
     effort: options.effort,
+    daemonUrl: options.daemonUrl,
+    daemonToken: options.daemonToken,
     continue: options.continue,
     resume: options.resume,
   });

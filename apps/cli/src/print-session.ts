@@ -2,6 +2,7 @@ import {
   OpenHarnessClient,
   createPromptRequestId,
   hasActiveRun,
+  normalizeDaemonBaseUrl,
   syncEvents,
   type OpenHarnessClientState,
   type SessionEventRecord,
@@ -24,6 +25,8 @@ export interface PrintSessionOptions {
   allowedTools?: string;
   disallowedTools?: string;
   effort?: string;
+  daemonUrl?: string;
+  daemonToken?: string;
   continue?: boolean;
   resume?: string;
 }
@@ -183,7 +186,16 @@ export async function runPrintSession(
 ): Promise<void> {
   rejectPrintContinueResume(options);
 
-  const daemon = await ensureLocalDaemon();
+  let daemon: { url: string; token: string };
+  if (options.daemonUrl) {
+    if (!options.daemonToken) throw new Error("--daemon-token is required with --daemon-url");
+    daemon = {
+      url: normalizeDaemonBaseUrl(options.daemonUrl),
+      token: options.daemonToken,
+    };
+  } else {
+    daemon = await ensureLocalDaemon();
+  }
   const client = new OpenHarnessClient({
     baseUrl: daemon.url,
     token: daemon.token,
