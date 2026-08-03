@@ -522,6 +522,147 @@ describe("OpenHarnessHttpServer", () => {
     }, { runtimeFactory });
   });
 
+  it("keeps traced recovery, permission, SSE replay, and another session independent after restart", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-server-e2e-recovery-"));
+    const storePath = join(dir, "sessions.db");
+    const token = "test-token";
+    const recoveryTraceId = "trace-recovery-e2e-001";
+    const parallelTraceId = "trace-parallel-e2e-001";
+    const logs: ObservabilityEvent[] = [];
+    let first: OpenHarnessHttpServer | undefined;
+    let second: OpenHarnessHttpServer | undefined;
+
+    try {
+      first = new OpenHarnessHttpServer({ token, storePath, logger: (event) => logs.push(event) });
+      await first.listen();
+      const recoverySession = first.store.createSession({ id: "recover", cwd: process.cwd(), model: "m" });
+      first.store.createSession({ id: "parallel", cwd: process.cwd(), model: "m" });
+      const sourceInput = first.store.admitPrompt({
+        id: "source-input",
+        sessionId: recoverySession.id,
+        content: "recover after restart",
+        metadata: { traceId: recoveryTraceId },
+      });
+      const sourceRun = first.store.createRun({
+        id: "source-run",
+        sessionId: recoverySession.id,
+        inputId: sourceInput.id,
+        metadata: { traceId: recoveryTraceId },
+      });
+      first.store.updateRun(sourceRun.id, {
+        status: "interrupted",
+        error: "Daemon restarted before the run completed",
+      });
+      await first.close();
+      first = undefined;
+
+      const runtimeFactory: SessionRuntimeFactory = {
+        async createRuntime() {
+          return {
+            async runPrompt(input, hooks) {
+              if (input.session.id === "recover") {
+                const allowed = await hooks.askPermission({
+                  toolName: "Write",
+                  reason: "apply recovered change",
+                  input: { path: "README.md" },
+                });
+                await hooks.onStreamEvent({ type: "text_delta", delta: allowed ? "recovered" : "denied" });
+              } else {
+                await hooks.onStreamEvent({ type: "text_delta", delta: "parallel completed" });
+              }
+              return { messages: [] };
+            },
+            async close() {},
+          };
+        },
+      };
+      second = new OpenHarnessHttpServer({ token, storePath, runtimeFactory, logger: (event) => logs.push(event) });
+      const listen = await second.listen();
+
+      const streamAbort = new AbortController();
+      const replay = await fetch(`${listen.url}/events/stream?sessionId=recover`, {
+        headers: { ...auth(token), "last-event-id": "0" },
+        signal: streamAbort.signal,
+      });
+      const replayReader = replay.body!.getReader();
+      const decoder = new TextDecoder();
+      let replayText = "";
+      for (let i = 0; i < 10 && !replayText.includes("session.run.updated"); i += 1) {
+        const chunk = await replayReader.read();
+        if (chunk.done) break;
+        replayText += decoder.decode(chunk.value, { stream: true });
+      }
+      await replayReader.cancel();
+      streamAbort.abort();
+      expect(replayText).toContain("session.run.updated");
+      expect(replayText).toContain(recoveryTraceId);
+
+      const resumedResponse = await fetch(`${listen.url}/sessions/recover/runs/source-run/resume`, {
+        method: "POST",
+        headers: {
+          ...auth(token),
+          "content-type": "application/json",
+          "x-openharness-trace-id": recoveryTraceId,
+        },
+        body: JSON.stringify({ id: "recover-request" }),
+      });
+      expect(resumedResponse.status).toBe(202);
+      expect(resumedResponse.headers.get("x-openharness-trace-id")).toBe(recoveryTraceId);
+      const resumed = await resumedResponse.json() as { run: { id: string; metadata: Record<string, unknown> } };
+      expect(resumed.run.metadata.traceId).toBe(recoveryTraceId);
+
+      await waitForEvent(listen.url, token, (event) => event.type === "permission.asked");
+      const pending = await (await fetch(`${listen.url}/permissions?sessionId=recover&status=pending`, {
+        headers: auth(token),
+      })).json() as { requests: Array<{ id: string; payload: Record<string, unknown> }> };
+      expect(pending.requests).toHaveLength(1);
+      expect(pending.requests[0]?.payload.traceId).toBe(recoveryTraceId);
+
+      const parallelResponse = await fetch(`${listen.url}/sessions/parallel/prompts`, {
+        method: "POST",
+        headers: {
+          ...auth(token),
+          "content-type": "application/json",
+          "x-openharness-trace-id": parallelTraceId,
+        },
+        body: JSON.stringify({ id: "parallel-input", content: "continue independently" }),
+      });
+      expect(parallelResponse.status).toBe(202);
+      const parallel = await parallelResponse.json() as { run: { id: string } };
+      for (let i = 0; i < 20 && second.store.getRun(parallel.run.id)?.status !== "completed"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(second.store.getRun(parallel.run.id)?.status).toBe("completed");
+      expect(second.store.getRun(resumed.run.id)?.status).toBe("running");
+
+      const reply = await fetch(`${listen.url}/permissions/${pending.requests[0]!.id}/reply`, {
+        method: "POST",
+        headers: {
+          ...auth(token),
+          "content-type": "application/json",
+          "x-openharness-trace-id": recoveryTraceId,
+        },
+        body: JSON.stringify({ status: "approved", decision: "once", clientId: "reconnected-client" }),
+      });
+      expect(reply.status).toBe(200);
+      for (let i = 0; i < 20 && second.store.getRun(resumed.run.id)?.status !== "completed"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(second.store.getRun(resumed.run.id)?.status).toBe("completed");
+      expect(logs).toEqual(expect.arrayContaining([
+        expect.objectContaining({ event: "session.run.started", traceId: recoveryTraceId, runId: resumed.run.id }),
+        expect.objectContaining({ event: "permission.requested", traceId: recoveryTraceId }),
+        expect.objectContaining({ event: "permission.replied", traceId: recoveryTraceId }),
+        expect.objectContaining({ event: "session.run.completed", traceId: recoveryTraceId, runId: resumed.run.id }),
+        expect.objectContaining({ event: "session.run.completed", traceId: parallelTraceId, runId: parallel.run.id }),
+      ]));
+    } finally {
+      await second?.close();
+      await first?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("terminalizes daemon-owned running workflows after restart without touching unrelated project workflows", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-workflow-restart-"));
     const storePath = join(dir, "sessions.db");

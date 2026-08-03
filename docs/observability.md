@@ -43,4 +43,6 @@ TUI / print / Web 请求
 
 `GET /debug/runtime` 用于人工诊断，额外返回 session/run/task/permission 的状态计数、SSE attach 数、warm runtime 数和 coordinator 队列计数。它不返回 store 路径、session 内容、工具参数/结果或认证信息，因此可以作为未来 Desktop/Web 状态页的只读数据源。
 
-Task 16C 将使用同一 trace 断言 daemon 重启、SSE 重连、权限、恢复与并发 session 的端到端行为。
+## 端到端保障
+
+Task 16C 已覆盖一个跨 daemon 重启的真实恢复场景：旧 run 保持 `interrupted`，新 daemon 的 SSE 可从 cursor 回放旧事件；使用同一 `traceId` 的显式恢复会等待持久化 permission reply；另一个 session 即使使用不同 trace，也可以在前者等待授权时独立完成。该用例同时断言 run、permission 和结构化日志仍可按 trace 关联。
