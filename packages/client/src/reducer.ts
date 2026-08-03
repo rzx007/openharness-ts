@@ -81,12 +81,12 @@ export function applyEvent(
   event: SessionEventRecord,
 ): OpenHarnessClientState {
   if (state.eventsBySeq[event.seq]) return state;
+  // Hot token streams can produce thousands of delta events; cloning this index per delta is O(n^2).
+  state.eventsBySeq[event.seq] = event;
 
   let next: OpenHarnessClientState = {
     ...state,
-    sessions: { ...state.sessions },
-    buckets: { ...state.buckets },
-    eventsBySeq: { ...state.eventsBySeq, [event.seq]: event },
+    eventsBySeq: state.eventsBySeq,
     lastSeq: Math.max(state.lastSeq, event.seq),
   };
 
@@ -216,7 +216,7 @@ function replaceTranscript(state: OpenHarnessClientState, event: SessionEventRec
 
 function upsertPart(state: OpenHarnessClientState, part: SessionMessagePartRecord | undefined): OpenHarnessClientState {
   if (!part) return state;
-  const bucket = cloneBucket(state.buckets[part.sessionId]);
+  const bucket = cloneBucketForPartWrite(state.buckets[part.sessionId]);
   const existing = bucket.partsByMessageId[part.messageId] ?? [];
   bucket.partsByMessageId = {
     ...bucket.partsByMessageId,
@@ -233,7 +233,7 @@ function appendPartDelta(state: OpenHarnessClientState, event: SessionEventRecor
   const delta = typeof event.payload.delta === "string" ? event.payload.delta : undefined;
   if (!sessionId || !messageId || !partId || field !== "text" || delta === undefined) return state;
 
-  const bucket = cloneBucket(state.buckets[sessionId]);
+  const bucket = cloneBucketForPartWrite(state.buckets[sessionId]);
   const currentParts = bucket.partsByMessageId[messageId] ?? [];
   const index = currentParts.findIndex((part) => part.id === partId);
   const nextParts = [...currentParts];
@@ -259,9 +259,12 @@ function appendPartDelta(state: OpenHarnessClientState, event: SessionEventRecor
       updatedAt: event.createdAt,
     });
   }
+  const sortedParts = index >= 0
+    ? nextParts
+    : nextParts.sort((a, b) => a.seq - b.seq);
   bucket.partsByMessageId = {
     ...bucket.partsByMessageId,
-    [messageId]: nextParts.sort((a, b) => a.seq - b.seq),
+    [messageId]: sortedParts,
   };
   return { ...state, buckets: { ...state.buckets, [sessionId]: bucket } };
 }
@@ -301,6 +304,18 @@ function cloneBucket(bucket: SessionBucket | undefined): SessionBucket {
     runs: bucket?.runs ? { ...bucket.runs } : {},
     tasks: bucket?.tasks ? { ...bucket.tasks } : {},
     permissions: bucket?.permissions ? { ...bucket.permissions } : {},
+  };
+}
+
+function cloneBucketForPartWrite(bucket: SessionBucket | undefined): SessionBucket {
+  return {
+    session: bucket?.session,
+    inputs: bucket?.inputs ?? [],
+    messages: bucket?.messages ?? [],
+    partsByMessageId: bucket?.partsByMessageId ?? {},
+    runs: bucket?.runs ?? {},
+    tasks: bucket?.tasks ?? {},
+    permissions: bucket?.permissions ?? {},
   };
 }
 

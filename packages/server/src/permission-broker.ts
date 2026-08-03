@@ -231,7 +231,7 @@ export class StorePermissionBroker implements PermissionBroker {
   }
 
   private latestEventSeq(): number {
-    return this.store.listEvents({ limit: Number.MAX_SAFE_INTEGER }).at(-1)?.seq ?? 0;
+    return this.store.latestEventSeq();
   }
 
   private notify(previousEventSeq: number): void {

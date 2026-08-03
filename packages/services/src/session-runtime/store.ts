@@ -85,6 +85,10 @@ function decode(value: string | null): Record<string, unknown> {
   return value ? JSON.parse(value) as Record<string, unknown> : {};
 }
 
+function isDurableEvent(event: SessionEventRecord): boolean {
+  return event.type !== "session.message.part.delta";
+}
+
 function maxSeq<T extends { sessionId: string; seq: number }>(
   table: Record<string, T>,
   sessionId: string,
@@ -518,7 +522,6 @@ export class SessionStore {
         delta: input.delta,
       },
     });
-    this.save();
     return clone(event);
   }
 
@@ -549,6 +552,10 @@ export class SessionStore {
     events = events.sort((a, b) => a.seq - b.seq);
     if (options.limit !== undefined) events = events.slice(0, options.limit);
     return clone(events);
+  }
+
+  latestEventSeq(): number {
+    return this.state.events.at(-1)?.seq ?? 0;
   }
 
   createRun(input: CreateRunInput): SessionRunRecord {
@@ -929,7 +936,11 @@ export class SessionStore {
       const insertPermission = this.database.prepare("INSERT INTO permission_request VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       for (const value of Object.values(this.state.permissions)) insertPermission.run(value.id, value.sessionId, value.runId ?? null, value.toolName, encode(value.payload), value.status, value.decision ?? null, value.decidedByClientId ?? null, value.createdAt, value.updatedAt);
       const insertEvent = this.database.prepare("INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)");
-      for (const value of this.state.events) insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
+      for (const value of this.state.events) {
+        if (!isDurableEvent(value)) continue;
+        insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
+      }
     })();
   }
+
 }

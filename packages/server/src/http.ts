@@ -1760,11 +1760,12 @@ export class OpenHarnessHttpServer {
             this.broadcastSince(eventBefore);
           },
           onStreamEvent: (event) => {
-            const eventBefore = this.latestEventSeq();
+            const canDirectBroadcast = event.type === "text_delta" && Boolean(renderState.activeTextPartId);
+            const eventBefore = canDirectBroadcast ? undefined : this.latestEventSeq();
             const completedToolName = event.type === "tool_use_end"
               ? renderState.toolParts.get(event.toolUseId)?.toolName
               : undefined;
-            this.applyStreamEvent(renderState, event);
+            const liveEvent = this.applyStreamEvent(renderState, event);
             if (event.type === "tool_use_start") {
               this.log({
                 level: "info",
@@ -1785,7 +1786,11 @@ export class OpenHarnessHttpServer {
                 ...(event.result.isError ? { error: "tool returned an error" } : {}),
               });
             }
-            this.broadcastSince(eventBefore);
+            if (canDirectBroadcast && liveEvent) {
+              this.broadcastEvent(liveEvent);
+            } else if (eventBefore !== undefined) {
+              this.broadcastSince(eventBefore);
+            }
           },
           askPermission: (request) =>
             this.permissionBroker.ask({
@@ -1857,7 +1862,7 @@ export class OpenHarnessHttpServer {
     };
   }
 
-  private applyStreamEvent(state: ActiveRunRenderState, event: StreamEvent): void {
+  private applyStreamEvent(state: ActiveRunRenderState, event: StreamEvent): SessionEventRecord | undefined {
     switch (event.type) {
       case "text_delta": {
         const messageId = this.ensureAssistantMessage(state, true);
@@ -1871,14 +1876,13 @@ export class OpenHarnessHttpServer {
           });
           state.activeTextPartId = part.id;
         }
-        this.store.appendMessagePartDelta({
+        return this.store.appendMessagePartDelta({
           sessionId: state.sessionId,
           messageId,
           partId: state.activeTextPartId,
           field: "text",
           delta: event.delta,
         });
-        break;
       }
       case "tool_use_start": {
         this.completeActiveTextPart(state, "completed");
@@ -2271,16 +2275,20 @@ export class OpenHarnessHttpServer {
   }
 
   private latestEventSeq(): number {
-    return this.store.listEvents({ limit: Number.MAX_SAFE_INTEGER }).at(-1)?.seq ?? 0;
+    return this.store.latestEventSeq();
   }
 
   private broadcastSince(seq: number): void {
     const events = this.store.listEvents({ afterSeq: seq });
     for (const event of events) {
-      for (const client of this.sseClients) {
-        if (client.sessionId && event.sessionId && event.sessionId !== client.sessionId) continue;
-        this.writeSse(client, event);
-      }
+      this.broadcastEvent(event);
+    }
+  }
+
+  private broadcastEvent(event: SessionEventRecord): void {
+    for (const client of this.sseClients) {
+      if (client.sessionId && event.sessionId && event.sessionId !== client.sessionId) continue;
+      this.writeSse(client, event);
     }
   }
 

@@ -138,7 +138,7 @@ describe("SessionStore", () => {
   });
 
   it("admits prompts, creates messages, updates parts, and keeps per-session order", () => {
-    withStore((store) => {
+    withStore((store, path) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
       store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
 
@@ -163,13 +163,14 @@ describe("SessionStore", () => {
         status: "running",
         text: "h",
       });
-      store.appendMessagePartDelta({
+      const deltaEvent = store.appendMessagePartDelta({
         sessionId: "s1",
         messageId: second.id,
         partId: assistantPart.id,
         field: "text",
         delta: "i",
       });
+      expect(store.latestEventSeq()).toBe(deltaEvent.seq);
       store.createMessage({ id: "m3", sessionId: "s2", role: "user" });
 
       expect(prompt.seq).toBe(1);
@@ -183,6 +184,22 @@ describe("SessionStore", () => {
         ["p2", "hi"],
       ]);
       expect(store.listMessageParts("s1", { messageId: second.id }).map((row) => row.id)).toEqual(["p2"]);
+      expect(store.listEvents().map((event) => event.type)).toContain("session.message.part.delta");
+      store.upsertMessagePart({
+        id: "p2",
+        sessionId: "s1",
+        messageId: second.id,
+        type: "text",
+        status: "completed",
+      });
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.listMessageParts("s1", { messageId: second.id }).map((row) => [row.id, row.text])).toEqual([
+        ["p2", "hi"],
+      ]);
+      expect(reloaded.listEvents().map((event) => event.type)).not.toContain("session.message.part.delta");
+      expect(reloaded.listEvents().map((event) => event.type)).toContain("session.message.part.updated");
+      reloaded.close();
     });
   });
 
