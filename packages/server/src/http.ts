@@ -43,6 +43,8 @@ export interface OpenHarnessServerOptions {
   host?: string;
   port?: number;
   token?: string;
+  /** Exact browser origins permitted to call this daemon. Empty means native/same-origin clients only. */
+  allowedOrigins?: string[];
   store?: SessionStore;
   storePath?: string;
   runtimeFactory?: SessionRuntimeFactory;
@@ -105,6 +107,8 @@ const SSE_HEADERS = {
   "connection": "keep-alive",
   "content-type": "text/event-stream; charset=utf-8",
 };
+const CORS_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
+const CORS_HEADERS = "authorization, content-type, last-event-id";
 
 const RUNTIME_SESSION_METADATA_KEYS = [
   "permissionMode",
@@ -126,6 +130,24 @@ function runtimeSessionMetadataChanged(
 
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeAllowedOrigins(origins: readonly string[]): Set<string> {
+  const normalized = new Set<string>();
+  for (const value of origins) {
+    if (value === "*") throw new Error("Wildcard CORS origins are not supported");
+    let origin: URL;
+    try {
+      origin = new URL(value);
+    } catch {
+      throw new Error(`Invalid allowed origin: ${value}`);
+    }
+    if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.origin !== value.replace(/\/$/, "")) {
+      throw new Error(`Allowed origin must be an http(s) origin without a path: ${value}`);
+    }
+    normalized.add(origin.origin);
+  }
+  return normalized;
 }
 
 function workflowRunIdFromSessionEvent(event: SessionEventRecord): string | undefined {
@@ -207,6 +229,7 @@ export class OpenHarnessHttpServer {
   readonly app: Hono;
   readonly store: SessionStore;
   readonly token?: string;
+  private readonly allowedOrigins: ReadonlySet<string>;
   private readonly runtimeFactory?: SessionRuntimeFactory;
   private readonly commandCatalog?: CommandCatalogProvider;
   private readonly settingsService?: SettingsService;
@@ -241,6 +264,7 @@ export class OpenHarnessHttpServer {
     this.store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
     this.store.finalizeClosingSessions();
     this.token = options.token;
+    this.allowedOrigins = normalizeAllowedOrigins(options.allowedOrigins ?? []);
     this.runtimeFactory = options.runtimeFactory;
     this.commandCatalog = options.commandCatalog;
     this.settingsService = options.settingsService;
@@ -331,6 +355,25 @@ export class OpenHarnessHttpServer {
 
   private mountRoutes(): void {
     this.app.onError((error) => errorResponse(500, error instanceof Error ? error.message : String(error)));
+
+    this.app.use("*", async (c, next) => {
+      const origin = c.req.header("origin");
+      if (!origin) {
+        await next();
+        return;
+      }
+      if (!this.allowedOrigins.has(origin)) return errorResponse(403, "Origin is not allowed");
+      const headers = {
+        "access-control-allow-origin": origin,
+        "access-control-allow-methods": CORS_METHODS,
+        "access-control-allow-headers": CORS_HEADERS,
+        "access-control-max-age": "600",
+        vary: "Origin",
+      };
+      if (c.req.method === "OPTIONS") return new Response(null, { status: 204, headers });
+      await next();
+      for (const [name, value] of Object.entries(headers)) c.res.headers.set(name, value);
+    });
 
     this.app.use("*", async (c, next) => {
       if (!this.authorized(c)) return errorResponse(401, "Unauthorized");

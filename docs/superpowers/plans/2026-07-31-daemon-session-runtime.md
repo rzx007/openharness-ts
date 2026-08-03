@@ -260,10 +260,10 @@
 
 ## Task 12：Web/Desktop 就绪
 
-- [ ] 文档化远程 attach 的认证模型。
-- [ ] 为本地 Web/Desktop 使用增加 CORS/origin 策略。
-- [ ] 增加 server 发现/attach 流程。
-- [ ] 增加 SDK 示例。
+- [x] 文档化远程 attach 的认证模型：本地 registry 仅限本机；远程客户端必须显式提供 URL + bearer token。
+- [x] 增加 deny-by-default 的 CORS/origin 策略；仅精确 allowlist origin 可跨域，预检不需要 bearer token。
+- [x] 公网/非 loopback bind 强制要求显式 `--token`；TUI 用 `--daemon-url` + `--daemon-token` 进行远程 attach，不读取或改写本地 registry。
+- [x] 增加 `@openharness/client` 的 Web/Desktop SDK 示例与部署边界文档（[remote-attach.md](../../remote-attach.md)）。
 
 退出标准：
 

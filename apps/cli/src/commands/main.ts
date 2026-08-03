@@ -50,6 +50,8 @@ interface MainOptions {
   verbose?: boolean;
   debug?: boolean;
   tui?: boolean;
+  daemonUrl?: string;
+  daemonToken?: string;
   dangerouslySkipPermissions?: boolean;
   allowedTools?: string;
   disallowedTools?: string;
@@ -530,7 +532,18 @@ async function runTuiMode(
   const path = await import("node:path");
   const url = await import("node:url");
   const { ensureLocalDaemon } = await import("../ensure-daemon.js");
-  const daemon = await ensureLocalDaemon();
+  let daemon: { url: string; token: string };
+  if (options.daemonUrl) {
+    const remoteUrl = options.daemonUrl.replace(/\/+$/, "");
+    const parsed = new URL(remoteUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("--daemon-url must use http or https");
+    }
+    if (!options.daemonToken) throw new Error("--daemon-token is required with --daemon-url");
+    daemon = { url: remoteUrl, token: options.daemonToken };
+  } else {
+    daemon = await ensureLocalDaemon();
+  }
 
   const frontendConfig = JSON.stringify({
     daemon: {

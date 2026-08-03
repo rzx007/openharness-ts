@@ -237,6 +237,8 @@ TUI 内斜杠命令走 daemon command catalog + client-local UI + template expan
 
 默认 `ohs`（与 `ohs --tui`）会连接已有 daemon；没有可用/stale daemon 时会启动一个。后续 Web、Desktop 或 remote attach 客户端都应通过 `@openharness/client` 连接同一个 daemon，而不是各自启动 agent runtime。
 
+远程 attach 使用显式 URL + bearer token，不读取本机 daemon registry；浏览器还必须命中 daemon 的精确 `--allow-origin` 白名单。部署与 SDK 示例见 [docs/remote-attach.md](docs/remote-attach.md)。
+
 一次模型交互会被服务端保存为按顺序排列的 canonical message parts：
 
 | Part | 含义 |

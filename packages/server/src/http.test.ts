@@ -30,6 +30,7 @@ async function withServer(
   options: Pick<
     OpenHarnessServerOptions,
     | "runtimeFactory"
+    | "allowedOrigins"
     | "commandCatalog"
     | "settingsService"
     | "providerService"
@@ -50,6 +51,7 @@ async function withServer(
   const token = "test-token";
   const server = new OpenHarnessHttpServer({
     token,
+    allowedOrigins: options.allowedOrigins,
     storePath: join(dir, "sessions.json"),
     runtimeFactory: options.runtimeFactory,
     commandCatalog: options.commandCatalog,
@@ -178,6 +180,33 @@ describe("OpenHarnessHttpServer", () => {
         ok: true,
       });
     });
+  });
+
+  it("permits only configured browser origins and handles unauthenticated preflight", async () => {
+    await withServer(async ({ baseUrl, token }) => {
+      const preflight = await fetch(`${baseUrl}/sessions`, {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://desk.example",
+          "access-control-request-method": "GET",
+          "access-control-request-headers": "authorization",
+        },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get("access-control-allow-origin")).toBe("https://desk.example");
+      expect(preflight.headers.get("access-control-allow-headers")).toContain("authorization");
+
+      const allowed = await fetch(`${baseUrl}/health`, {
+        headers: { ...auth(token), origin: "https://desk.example" },
+      });
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers.get("access-control-allow-origin")).toBe("https://desk.example");
+
+      const denied = await fetch(`${baseUrl}/health`, {
+        headers: { ...auth(token), origin: "https://untrusted.example" },
+      });
+      expect(denied.status).toBe(403);
+    }, { allowedOrigins: ["https://desk.example"] });
   });
 
   it("reloads sessions/messages/events after a daemon restart and interrupts leftover runs", async () => {

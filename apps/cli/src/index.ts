@@ -41,6 +41,8 @@ program
   .option("--verbose", "Verbose output")
   .option("-d, --debug", "Debug mode")
   .option("--tui", "Explicitly launch TUI/daemon (default when no prompt; requires Bun)")
+  .option("--daemon-url <url>", "Attach TUI to an explicit daemon URL instead of starting a local daemon")
+  .option("--daemon-token <token>", "Bearer token for --daemon-url")
   .option("--dangerously-skip-permissions", "Skip all permission checks")
   .option("--allowed-tools <tools>", "Comma-separated allowed tools")
   .option("--disallowed-tools <tools>", "Comma-separated disallowed tools")
