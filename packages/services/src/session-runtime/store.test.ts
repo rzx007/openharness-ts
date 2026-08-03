@@ -267,6 +267,38 @@ describe("SessionStore", () => {
     });
   });
 
+  it("persists task/child/run links and terminalizes active tasks after a restart", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child", parentId: "parent", cwd: process.cwd(), model: "m" });
+      const input = store.admitPrompt({ id: "child-input", sessionId: "child", content: "inspect" });
+      const run = store.createRun({ id: "child-run", sessionId: "child", inputId: input.id });
+      store.createSessionTask({
+        id: "task-child",
+        sessionId: "parent",
+        childSessionId: "child",
+        type: "agent",
+        description: "Explore@default",
+        cwd: process.cwd(),
+      });
+      store.updateSessionTask("task-child", { runId: run.id });
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getSessionState("parent").tasks).toMatchObject([{
+        id: "task-child",
+        childSessionId: "child",
+        runId: "child-run",
+        status: "running",
+      }]);
+      expect(reloaded.interruptActiveSessionTasks()).toBe(1);
+      expect(reloaded.getSessionTask("task-child")).toMatchObject({
+        status: "interrupted",
+        error: "Daemon restarted before the task completed",
+      });
+      expect(reloaded.listEvents({ sessionId: "parent" }).map((event) => event.type)).toContain("session.task.updated");
+    });
+  });
+
   it("archives sessions without deleting their replay history", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });

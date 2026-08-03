@@ -8,7 +8,7 @@ import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from 
 import type { CommandCatalogProvider } from "./commands.js";
 import { OpenHarnessHttpServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
-import type { ChildSessionHost, SessionRuntimeFactory } from "./runtime.js";
+import type { ChildSessionHost, SessionRuntimeFactory, SessionTaskBridge } from "./runtime.js";
 import type { OpenHarnessServerOptions } from "./http.js";
 
 function deferred<T = void>(): {
@@ -112,11 +112,13 @@ describe("OpenHarnessHttpServer", () => {
       closeRuntime(sessionId: string): Promise<void>;
     };
     let host: Host | undefined;
+    let taskBridge: SessionTaskBridge | undefined;
     const created: string[] = [];
     const closed: string[] = [];
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime(context) {
         host = (context as typeof context & { childSessionHost?: Host }).childSessionHost;
+        taskBridge = context.sessionTaskBridge;
         created.push(context.session.id);
         return {
           async runPrompt(_input, hooks) {
@@ -151,9 +153,26 @@ describe("OpenHarnessHttpServer", () => {
 
       const admitted = await host!.admitPrompt(child.id, "inspect");
       expect(admitted.runId).toBeTruthy();
+      const task = taskBridge!.registerSessionTask({
+        description: "Explore@default",
+        cwd: process.cwd(),
+        sessionId: "parent",
+        childSessionId: child.id,
+        prompt: "inspect",
+        onInput: async () => {},
+        onStop: async () => {},
+      });
+      await taskBridge!.bindSessionTaskRun(task.id, admitted.runId!);
       await expect(host!.awaitRun(child.id, admitted.runId!)).resolves.toMatchObject({
         status: "completed",
         output: "child output",
+      });
+      await taskBridge!.completeSessionTask(task.id, { status: "completed", output: "child output" });
+      expect(server.store.getSessionTask(task.id)).toMatchObject({
+        sessionId: "parent",
+        childSessionId: child.id,
+        runId: admitted.runId,
+        status: "completed",
       });
       await host!.closeRuntime(child.id);
       expect(closed).toContain(child.id);
@@ -248,6 +267,9 @@ describe("OpenHarnessHttpServer", () => {
         });
         // Simulate a previous daemon crash leaving an active run on disk.
         first.store.createRun({ id: "r-stale", sessionId: "s1" });
+        first.store.createSessionTask({
+          id: "task-stale", sessionId: "s1", type: "agent", description: "stale child", cwd: process.cwd(),
+        });
       } finally {
         await first.close();
       }
@@ -265,22 +287,91 @@ describe("OpenHarnessHttpServer", () => {
           messages: Array<{ role: string }>;
           parts: Array<{ text?: string }>;
           runs: Array<{ id: string; status: string }>;
+          tasks: Array<{ id: string; status: string }>;
         };
         expect(state.messages).toHaveLength(1);
         expect(state.parts[0]?.text).toBe("survived restart");
         expect(state.runs.find((run) => run.id === "r-stale")?.status).toBe("interrupted");
+        expect(state.tasks.find((task) => task.id === "task-stale")?.status).toBe("interrupted");
 
         const events = await (await fetch(`${listen2.url}/events`, { headers: auth(token) })).json() as {
           events: Array<{ type: string }>;
         };
         expect(events.events.map((event) => event.type)).toContain("session.transcript.replaced");
         expect(events.events.map((event) => event.type)).toContain("session.run.updated");
+        expect(events.events.map((event) => event.type)).toContain("session.task.updated");
       } finally {
         await second.close();
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("replays an interrupted prompt only after an explicit, idempotent recovery request", async () => {
+    const prompts: string[] = [];
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(input) {
+            prompts.push(input.input.content);
+            return { messages: [] };
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token, server }) => {
+      const session = server.store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const input = server.store.admitPrompt({ id: "input-before-restart", sessionId: session.id, content: "finish the report" });
+      const interrupted = server.store.createRun({ id: "run-before-restart", sessionId: session.id, inputId: input.id });
+      server.store.updateRun(interrupted.id, {
+        status: "interrupted",
+        error: "Daemon restarted before the run completed",
+      });
+
+      const first = await fetch(`${baseUrl}/sessions/s1/runs/run-before-restart/resume`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "recovery-request-1" }),
+      });
+      expect(first.status).toBe(202);
+      const recovered = await first.json() as {
+        input: { id: string; content: string; metadata: Record<string, unknown> };
+        run?: { id: string; metadata: Record<string, unknown> };
+        source_run: { id: string; status: string };
+      };
+      expect(recovered).toMatchObject({
+        input: {
+          content: "finish the report",
+          metadata: { recovery: { kind: "prompt_replay", sourceRunId: "run-before-restart", sourceInputId: "input-before-restart" } },
+        },
+        run: { metadata: { recovery: { sourceRunId: "run-before-restart" } } },
+        source_run: { id: "run-before-restart", status: "interrupted" },
+      });
+      expect(recovered.run?.id).toBeTruthy();
+
+      await waitForEvent(baseUrl, token, (event) => event.type === "session.run.recovery_requested");
+      expect(prompts).toEqual(["finish the report"]);
+
+      const retry = await fetch(`${baseUrl}/sessions/s1/runs/run-before-restart/resume`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "recovery-request-1" }),
+      });
+      expect(retry.status).toBe(202);
+      expect((await retry.json() as { run?: { id: string } }).run?.id).toBe(recovered.run?.id);
+      expect(server.store.listEvents({ sessionId: "s1" }).filter((event) => event.type === "session.run.recovery_requested")).toHaveLength(1);
+
+      const duplicate = await fetch(`${baseUrl}/sessions/s1/runs/run-before-restart/resume`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "different-recovery-request" }),
+      });
+      expect(duplicate.status).toBe(409);
+      expect(server.store.getRun("run-before-restart")?.status).toBe("interrupted");
+    }, { runtimeFactory });
   });
 
   it("terminalizes daemon-owned running workflows after restart without touching unrelated project workflows", async () => {

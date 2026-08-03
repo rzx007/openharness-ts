@@ -105,6 +105,32 @@ describe("OpenHarnessClient", () => {
     ]);
   });
 
+  it("replays an interrupted run through the dedicated, idempotent endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({
+        input: { id: "recovery-i1", sessionId: "s1", seq: 2, delivery: "queue", content: "retry", metadata: {}, createdAt: 2 },
+        run: { id: "recovery-r1", sessionId: "s1", inputId: "recovery-i1", status: "pending", metadata: {}, createdAt: 2, updatedAt: 2 },
+        source_run: { id: "r1", sessionId: "s1", inputId: "i1", status: "interrupted", metadata: {}, createdAt: 1, updatedAt: 2 },
+      }, 202);
+    };
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      token: "tok",
+      fetch: fetchImpl as typeof fetch,
+    });
+
+    await expect(client.resumeInterruptedRun("s1", "r1", { id: "request-1" })).resolves.toMatchObject({
+      run: { id: "recovery-r1" },
+      source_run: { id: "r1", status: "interrupted" },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("http://127.0.0.1:3456/sessions/s1/runs/r1/resume");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ id: "request-1" });
+  });
+
   it("parses server-sent event frames and ignores comments", async () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

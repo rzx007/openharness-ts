@@ -9,6 +9,7 @@ import type {
   CreateMessageInput,
   CreatePermissionRequestInput,
   CreateRunInput,
+  CreateSessionTaskInput,
   CreateSessionInput,
   ListEventsOptions,
   ListMessagePartsOptions,
@@ -23,9 +24,11 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
   SessionStateSnapshot,
   UpsertMessagePartInput,
   UpdateRunInput,
+  UpdateSessionTaskInput,
   UpdateSessionInput,
   ReplaceTranscriptInput,
 } from "./types.js";
@@ -39,6 +42,7 @@ interface SessionState {
   parts: Record<string, SessionMessagePartRecord>;
   events: SessionEventRecord[];
   runs: Record<string, SessionRunRecord>;
+  tasks: Record<string, SessionTaskRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }
 
@@ -59,6 +63,7 @@ function emptyState(): SessionState {
     parts: {},
     events: [],
     runs: {},
+    tasks: {},
     permissions: {},
   };
 }
@@ -595,6 +600,105 @@ export class SessionStore {
       .sort((a, b) => a.createdAt - b.createdAt));
   }
 
+  createSessionTask(input: CreateSessionTaskInput): SessionTaskRecord {
+    const session = assertSession(this.state, input.sessionId);
+    const id = input.id ?? randomUUID();
+    if (this.state.tasks[id]) throw new Error(`Session task already exists: ${id}`);
+    if (input.childSessionId) {
+      const child = assertSession(this.state, input.childSessionId);
+      if (child.parentId !== input.sessionId) {
+        throw new Error(`Child session does not belong to task session: ${input.childSessionId}`);
+      }
+    }
+    if (input.runId) {
+      const run = this.state.runs[input.runId];
+      if (!run || run.sessionId !== input.childSessionId && run.sessionId !== input.sessionId) {
+        throw new Error(`Task run does not belong to task session: ${input.runId}`);
+      }
+    }
+    const timestamp = now();
+    const task: SessionTaskRecord = {
+      id,
+      sessionId: input.sessionId,
+      ...(input.childSessionId ? { childSessionId: input.childSessionId } : {}),
+      ...(input.runId ? { runId: input.runId } : {}),
+      type: input.type,
+      status: "running",
+      description: input.description,
+      cwd: resolve(input.cwd),
+      metadata: input.metadata ?? {},
+      createdAt: timestamp,
+      startedAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.state.tasks[id] = task;
+    session.updatedAt = timestamp;
+    this.appendEventInMemory({ type: "session.task.created", sessionId: task.sessionId, payload: { task } });
+    this.save();
+    return clone(task);
+  }
+
+  updateSessionTask(taskId: string, input: UpdateSessionTaskInput): SessionTaskRecord {
+    const task = this.state.tasks[taskId];
+    if (!task) throw new Error(`Session task not found: ${taskId}`);
+    const session = assertSession(this.state, task.sessionId);
+    if (input.runId !== undefined) {
+      const run = this.state.runs[input.runId];
+      if (!run || (run.sessionId !== task.sessionId && run.sessionId !== task.childSessionId)) {
+        throw new Error(`Task run does not belong to task: ${input.runId}`);
+      }
+      task.runId = input.runId;
+    }
+    const timestamp = now();
+    const previousStatus = task.status;
+    if (input.status) {
+      task.status = input.status;
+      if (input.status === "running" && !task.startedAt) task.startedAt = timestamp;
+      if (["completed", "failed", "stopped", "interrupted"].includes(input.status)) task.finishedAt = timestamp;
+    }
+    if (input.output !== undefined) task.output = input.output;
+    if (input.error !== undefined) task.error = input.error;
+    if (input.metadata) task.metadata = { ...task.metadata, ...input.metadata };
+    task.updatedAt = timestamp;
+    session.updatedAt = timestamp;
+    this.appendEventInMemory({
+      type: "session.task.updated",
+      sessionId: task.sessionId,
+      payload: { task, previousStatus },
+    });
+    this.save();
+    return clone(task);
+  }
+
+  getSessionTask(taskId: string): SessionTaskRecord | undefined {
+    const task = this.state.tasks[taskId];
+    return task ? clone(task) : undefined;
+  }
+
+  listSessionTasks(sessionId: string): SessionTaskRecord[] {
+    assertSession(this.state, sessionId);
+    return clone(Object.values(this.state.tasks)
+      .filter((task) => task.sessionId === sessionId)
+      .sort((a, b) => a.createdAt - b.createdAt));
+  }
+
+  findSessionTaskByManagerTaskId(sessionId: string, taskManagerId: string): SessionTaskRecord | undefined {
+    assertSession(this.state, sessionId);
+    const task = Object.values(this.state.tasks).find((candidate) =>
+      candidate.sessionId === sessionId && candidate.metadata.taskManagerId === taskManagerId);
+    return task ? clone(task) : undefined;
+  }
+
+  /** A daemon restart cannot retain TaskManager callbacks or process handles. */
+  interruptActiveSessionTasks(reason = "Daemon restarted before the task completed"): number {
+    const active = Object.values(this.state.tasks)
+      .filter((task) => task.status === "pending" || task.status === "running");
+    for (const task of active) {
+      this.updateSessionTask(task.id, { status: "interrupted", error: reason });
+    }
+    return active.length;
+  }
+
   /**
    * Mark work owned by a previous daemon process as terminal. A fresh daemon
    * cannot resume an in-memory QueryEngine run, so leaving these rows active
@@ -695,6 +799,9 @@ export class SessionStore {
       runs: Object.values(this.state.runs)
         .filter((run) => run.sessionId === sessionId)
         .sort((a, b) => a.createdAt - b.createdAt),
+      tasks: Object.values(this.state.tasks)
+        .filter((task) => task.sessionId === sessionId)
+        .sort((a, b) => a.createdAt - b.createdAt),
       permissions: Object.values(this.state.permissions)
         .filter((request) => request.sessionId === sessionId)
         .sort((a, b) => a.createdAt - b.createdAt),
@@ -733,6 +840,7 @@ export class SessionStore {
       parts: parsed.parts ?? {},
       events: parsed.events ?? [],
       runs: parsed.runs ?? {},
+      tasks: parsed.tasks ?? {},
       permissions: parsed.permissions ?? {},
     };
   }

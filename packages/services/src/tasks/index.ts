@@ -53,6 +53,7 @@ export interface AwaitTaskResult {
 }
 
 export interface CreateShellTaskOptions {
+  id?: string;
   command?: string;
   argv?: string[];
   description: string;
@@ -63,6 +64,7 @@ export interface CreateShellTaskOptions {
 }
 
 export interface CreateAgentTaskOptions {
+  id?: string;
   prompt: string;
   description: string;
   cwd: string;
@@ -75,6 +77,7 @@ export interface CreateAgentTaskOptions {
 }
 
 export interface RegisterSessionTaskOptions {
+  id?: string;
   description: string;
   cwd: string;
   sessionId: string;
@@ -154,7 +157,8 @@ export class TaskManager {
       throw new Error("createShellTask accepts only one of command or argv");
     }
 
-    const id = `task_${++this.idCounter}`;
+    const id = opts.id ?? `task_${++this.idCounter}`;
+    if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
     const outputFile = join(this.tasksDir, `${id}.log`);
     const task: TaskInfo = {
       id,
@@ -212,7 +216,8 @@ export class TaskManager {
     // No concrete command yet (swarm dispatch is Phase D). Don't spawn — but
     // don't go silently pending either: register an explicit failed record.
     if (opts.command == null && opts.argv == null) {
-      const id = `task_${++this.idCounter}`;
+      const id = opts.id ?? `task_${++this.idCounter}`;
+      if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
       const outputFile = join(this.tasksDir, `${id}.log`);
       this.ensureTasksDir();
       const message =
@@ -254,7 +259,8 @@ export class TaskManager {
   }
 
   registerSessionTask(options: RegisterSessionTaskOptions): TaskInfo {
-    const id = `task_${++this.idCounter}`;
+    const id = options.id ?? `task_${++this.idCounter}`;
+    if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
     const outputFile = join(this.tasksDir, `${id}.log`);
     this.ensureTasksDir();
     writeFileSync(outputFile, "");

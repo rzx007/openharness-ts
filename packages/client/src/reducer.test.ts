@@ -10,6 +10,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
 } from "./types.js";
 
 function session(id: string, updatedAt: number): SessionRecord {
@@ -111,6 +112,21 @@ describe("session event reducer", () => {
     expect(state.buckets.s1?.runs.r1).toEqual(run);
     expect(state.buckets.s1?.permissions.p1).toEqual(permission);
     expect(state.lastSeq).toBe(5);
+  });
+
+  it("hydrates and updates durable task projections", () => {
+    const task: SessionTaskRecord = {
+      id: "task-1", sessionId: "s1", childSessionId: "child-1", runId: "run-1",
+      type: "agent", status: "running", description: "Explore@default", cwd: process.cwd(),
+      metadata: {}, createdAt: 1, startedAt: 1, updatedAt: 1,
+    };
+    let state = applySessionSnapshot(createInitialClientState(), {
+      cursor: 1, session: session("s1", 1), inputs: [], messages: [], parts: [], runs: [], tasks: [task], permissions: [],
+    });
+    expect(state.buckets.s1?.tasks[task.id]).toEqual(task);
+    const interrupted = { ...task, status: "interrupted" as const, error: "daemon restarted", finishedAt: 2, updatedAt: 2 };
+    state = applyEvent(state, event(2, "session.task.updated", { task: interrupted }));
+    expect(state.buckets.s1?.tasks[task.id]).toEqual(interrupted);
   });
 
   it("applies session.updated to refresh model and other session fields", () => {

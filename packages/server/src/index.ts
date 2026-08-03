@@ -55,6 +55,7 @@ export type {
   SessionRuntimeHooks,
   SessionRuntimeRunInput,
   SessionRuntimeRunResult,
+  SessionTaskBridge,
   SessionUsageSnapshot,
 } from "./runtime.js";
 export { estimateCostUsd } from "./usage.js";

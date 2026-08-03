@@ -56,6 +56,30 @@ function sessionRuntimeMetadata(input: {
   return metadata;
 }
 
+type RecoverableRun = {
+  id: string;
+  error?: string;
+  prompt: string;
+};
+
+function recoverableInterruptedRuns(bucket?: SessionBucket): RecoverableRun[] {
+  if (!bucket) return [];
+  const recoveredSourceRunIds = new Set(
+    bucket.inputs.flatMap((input) =>
+      isRecord(input.metadata.recovery) && typeof input.metadata.recovery.sourceRunId === "string"
+        ? [input.metadata.recovery.sourceRunId]
+        : [],
+    ),
+  );
+  return Object.values(bucket.runs)
+    .filter((run) => run.status === "interrupted" && !!run.inputId && !recoveredSourceRunIds.has(run.id))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .flatMap((run) => {
+      const input = bucket.inputs.find((candidate) => candidate.id === run.inputId);
+      return input ? [{ id: run.id, error: run.error, prompt: input.content }] : [];
+    });
+}
+
 function textFromParts(parts: SessionMessagePartRecord[]): string {
   return parts
     .filter((part) => part.type === "text" || part.type === "reasoning")
@@ -397,9 +421,9 @@ export function useServerSync(
           await createAndSwitchSession(newSession[1]);
           return;
         }
-        const resume = line.match(/^\/resume\s+(.+)$/);
-        if (resume?.[1]) {
-          const target = resume[1].trim();
+        const switchSession = line.match(/^\/sessions\s+open\s+(.+)$/);
+        if (switchSession?.[1]) {
+          const target = switchSession[1].trim();
           const session = await client.getSession(target);
           setLocalBusy(false);
           setSubmittedRun(null);
@@ -410,6 +434,41 @@ export function useServerSync(
             session_id: session.id,
             cwd: session.cwd,
           }));
+          setSelectRequest(null);
+          return;
+        }
+
+        if (slash?.name === "/resume") {
+          if (!sessionId) {
+            pushSystem("No active session to resume.");
+            return;
+          }
+          const recoverable = recoverableInterruptedRuns(clientState.buckets[sessionId]);
+          if (!slash.args) {
+            if (recoverable.length === 0) {
+              pushSystem("No interrupted prompt runs are available to resume.");
+              return;
+            }
+            setSelectRequest({
+              title: "Resume interrupted run",
+              submitPrefix: "/resume ",
+              options: recoverable.map((run) => ({
+                value: run.id,
+                label: run.prompt.length > 72 ? `${run.prompt.slice(0, 72)}...` : run.prompt,
+                description: run.error ?? "Interrupted before completion",
+              })),
+            });
+            return;
+          }
+          const runId = slash.args.trim();
+          if (!recoverable.some((run) => run.id === runId)) {
+            pushSystem(`Run is not available for recovery: ${runId}`);
+            return;
+          }
+          setLocalBusy(true);
+          const response = await client.resumeInterruptedRun(sessionId, runId, { id: createPromptRequestId() });
+          setLocalBusy(false);
+          setSubmittedRun(response.run ? { sessionId, runId: response.run.id } : null);
           setSelectRequest(null);
           return;
         }
@@ -511,7 +570,7 @@ export function useServerSync(
         });
         setSelectRequest({
           title: "Sessions",
-          submitPrefix: "/resume ",
+          submitPrefix: "/sessions open ",
           options: sessions.map((session) => ({
             value: session.id,
             label: `${session.id === activeSessionId ? "* " : ""}${session.title || session.id}`,
@@ -539,9 +598,17 @@ export function useServerSync(
   }, [activeSessionId, clientState, createAndSwitchSession, daemon?.cwd, daemon?.model, localBusy, pushSystem, reportError]);
 
   const bucket = activeSessionId ? clientState.buckets[activeSessionId] : undefined;
+  const recoveryItems = useMemo(
+    () => recoverableInterruptedRuns(bucket).map((run) => ({
+      id: `recovery:${run.id}`,
+      role: "system" as const,
+      text: `Run interrupted${run.error ? `: ${run.error}` : ""}\nUse /resume ${run.id} to replay its original prompt.`,
+    })),
+    [bucket],
+  );
   const transcript = useMemo(
-    () => [...bucketToTranscript(bucket), ...systemItems],
-    [bucket, systemItems],
+    () => [...bucketToTranscript(bucket), ...recoveryItems, ...systemItems],
+    [bucket, recoveryItems, systemItems],
   );
   const submittedRunRecord = submittedRun
     ? clientState.buckets[submittedRun.sessionId]?.runs[submittedRun.runId]

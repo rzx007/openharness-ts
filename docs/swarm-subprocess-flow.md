@@ -1,8 +1,8 @@
-# Swarm 子进程派发运行流程（D.1 + D.2）
+# 历史归档：Swarm 子进程派发运行流程（D.1 + D.2）
 
-> 状态：deprecated compatibility fallback 的实现说明。本文保留 D.1/D.2 subprocess 协议与历史细节，不代表推荐的产品主路径。
+> 状态：历史实现说明。本文保留 D.1/D.2 subprocess 协议与历史细节，不属于当前产品链路，也不作为兼容承诺。
 >
-> 当前主路径：daemon/TUI/print 内的 `Agent` 在 daemon 中创建带 `parentId` 的 child session，由 `SessionRuntime` 执行，并使用统一的 `SessionStore`、session event 与 `PermissionBroker`。`ohs --task-worker`、subprocess backend、项目级 worker snapshot 和文件权限流只为旧调用方兜底保留。
+> 当前主路径：daemon/TUI/print 内的 `Agent` 在 daemon 中创建带 `parentId` 的 child session，由 `SessionRuntime` 执行，并使用统一的 `SessionStore`、session event 与 `PermissionBroker`。`ohs --task-worker`、subprocess backend、项目级 worker snapshot 和文件权限流仅是待清理的历史实现。
 
 兼容路径中的 `agent` 工具会把一个子代理（teammate）作为独立 `ohs --task-worker`
 子进程拉起、后台运行，leader 用 `TaskWait` 阻塞取回结果。这是旧 swarm
@@ -42,8 +42,8 @@ daemon session 中的 Agent（当前主路径）
 | `buildTeammateCommand` | `apps/cli/src/teammate.ts` | 配置 → `ohs --task-worker …` 的 argv（prompt 经 stdin） |
 | 后端注册 | `apps/cli/src/runtime.ts`（bootstrap） | 注册 subprocess 后端 + 给 teammate 任务打 `type:"agent"` 标 |
 | `TaskManager` | `packages/services/src/tasks/index.ts` | 真正 spawn 子进程、捕获输出；`awaitTask`/`registerTaskListener`（D.2）|
-| TUI 任务状态 | 尚未接入 daemon session API | 当前没有跨端的 teammate 状态视图 |
-| SwarmPanel | `apps/frontend/src/components/SwarmPanel.tsx` | 组件保留；等待 server-owned task/session event 后接入 |
+| TUI 任务状态 | `@openharness/client` 已同步 daemon task 投影 | `SwarmPanel` 尚未消费该状态，跨端呈现仍待补齐 |
+| SwarmPanel | `apps/frontend/src/components/SwarmPanel.tsx` | 组件保留；后续直接消费 client task bucket，不新增专用协议 |
 
 ## 兼容模型（两进程 + 一个单例）
 
@@ -161,7 +161,7 @@ daemon session 中的 Agent（当前主路径）
 
 TUI 已改为 daemon/client attach，不存在 BackendHost、OHJSON 或 `swarm_status` 事件。leader 获取 teammate 结果的权威路径是 `TaskWait`，与 UI 是否显示状态无关。
 
-当前 `TaskManager` 的 agent task 状态还没有持久化为 server-owned session/task event，因此 `SwarmPanel` 没有可跨端恢复的数据源。后续应由 server 暴露 task/session 状态，再由 `@openharness/client` reducer 和 TUI 消费；不要重新引入前端专用 stdio 协议。
+daemon child session 的 task 已持久化为 `SessionStore` 的 `SessionTaskRecord`，并通过 `session.task.created` / `session.task.updated` 进入 snapshot + SSE；记录包含 parent session、child session 与当前 child run 的关联。`TaskManager` 只保留进程句柄和回调。TUI 的 SwarmPanel 呈现仍待接入这份客户端状态，不能重新引入前端专用 stdio 协议。
 
 ---
 

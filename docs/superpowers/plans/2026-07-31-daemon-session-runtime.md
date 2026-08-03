@@ -271,6 +271,38 @@
 
 ---
 
+## Task 13：可控恢复体验
+
+- [x] 将 daemon 重启遗留 run 保持为 `interrupted`，不自动重跑 provider、child task 或 workflow。
+- [x] 增加 prompt-backed run 的专用恢复 API：`POST /sessions/:sessionId/runs/:runId/resume`；恢复会创建有 source run/input 溯源的新 input/run，旧 run 不被改写。
+- [x] 用稳定请求 id 保证恢复请求可重试：相同 id 返回同一恢复结果，同一 source run 的其它恢复请求返回 `409`。
+- [x] 在 session 有活跃/排队 run、source 非中断、没有原始 prompt 时明确拒绝，避免把工作流或已丢失内存所有权的任务伪装成可续传。
+- [x] TUI `/resume` 显示当前会话可恢复 run 并发起显式重放；`/sessions` 负责切换会话。
+
+退出标准：
+
+- 重启后用户能看到中断原因和可执行的恢复操作，而不是只有一个不明所以的空闲会话。
+- 每一次恢复都有可 replay 的 input/run/event 审计链；网络重试不会创建第二次执行。
+- 恢复是“重新开始原始 prompt”，不是伪造 provider stream、workflow 或 child task 的内存续传。
+
+---
+
+## Task 14：Task / child 生命周期持久化
+
+- [x] 在 `SessionStore` 中增加 daemon-owned `SessionTaskRecord`，持久化 task、parent session、child session 和当前 child run 的关联。
+- [x] 增加 `session.task.created` / `session.task.updated` 事件，并把 task 放入 session attach snapshot；`@openharness/client` reducer 与其它 canonical 状态一并收敛。
+- [x] 将 server 的 `SessionTaskBridge` 注入 `CliSessionRuntime -> bootstrap -> ChildSessionBackend`；TaskManager 继续只承担本进程执行与 stdin/callback，不能再单独充当事实来源。
+- [x] session-scoped `/tasks` 读取 daemon 持久 task 投影；HTTP 创建的 session task 与 child task 使用全局唯一 id，避免不同 session 的 `task_1` 碰撞。
+- [x] daemon 重启时将遗留 `pending`/`running` task 收口为 `interrupted`，保留 child session/run 的历史与 Task 13 的显式 prompt 重放入口，不自动复活 callback、子进程或 child runtime。
+
+退出标准：
+
+- 任一客户端 attach 到 parent session 后，都能看到其 child task 的身份、状态和 child/run 链接。
+- daemon 重启不会丢失 task；未完成 task 有明确 `interrupted` 结论，而不是消失或永久 `running`。
+- TaskManager 进程内状态与 `SessionStore` 持久化投影职责分离。
+
+---
+
 ## 验证清单
 
 - [x] 两个 session 在同一个 daemon 中并发运行。
@@ -279,5 +311,7 @@
 - [x] 权限请求在客户端断开后仍然存活。
 - [x] Daemon 重启保留 sessions/messages/events（`http.test` 跨进程 reload + `interruptActiveRuns`）。
 - [x] Daemon 重启会终态化自己拥有的 running workflow，同时保留 child session 与审计时间线。
+- [x] 中断的 prompt run 只有在显式恢复后才会重放；相同恢复请求 id 不会重复派生 run。
+- [x] child task 的 task/session/run 链路可从 attach snapshot + SSE 重放；daemon 重启后遗留 task 会明确转为 `interrupted`。
 - [x] TUI 主路径不再派生 per-session backend。
 - [x] 当前主线不存在 BackendHost/OHJSON、版本化 store 目录或旧 store 读取分支。

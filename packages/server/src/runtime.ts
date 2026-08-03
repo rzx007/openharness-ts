@@ -101,11 +101,34 @@ export interface ChildSessionHost {
   archive(sessionId: string): Promise<void>;
 }
 
+/**
+ * Runtime-facing bridge for child-agent tasks. The server supplies it so child
+ * execution can keep its local TaskManager while lifecycle facts remain durable.
+ */
+export interface SessionTaskBridge {
+  registerSessionTask(input: {
+    description: string;
+    cwd: string;
+    sessionId: string;
+    childSessionId: string;
+    prompt: string;
+    onInput(data: string): Promise<void>;
+    onStop(): Promise<void>;
+  }): { id: string };
+  bindSessionTaskRun(taskId: string, runId: string): Promise<void>;
+  completeSessionTask(
+    taskId: string,
+    input: { status: "completed" | "failed" | "stopped" | "interrupted"; output: string },
+  ): Promise<unknown>;
+  writeToSessionTask(taskId: string, data: string): Promise<void>;
+}
+
 export interface SessionRuntimeFactory {
   createRuntime(context: {
     session: SessionRecord;
     history: SessionMessageRecord[];
     parts: SessionMessagePartRecord[];
     childSessionHost: ChildSessionHost;
+    sessionTaskBridge: SessionTaskBridge;
   }): Promise<SessionRuntime>;
 }

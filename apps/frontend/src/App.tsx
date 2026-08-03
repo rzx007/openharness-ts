@@ -132,8 +132,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
         return true;
       }
 
-      // /sessions — list and restore sessions（/resume 作为别名保留）
-      if (line.trim() === "/sessions" || line.trim() === "/resume") {
+      // /sessions — 列出并切换会话；/resume 专用于显式重放中断 run。
+      if (line.trim() === "/sessions") {
         session.sendRequest({ type: "list_sessions" });
         return true;
       }

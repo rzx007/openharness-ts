@@ -30,7 +30,7 @@ export type SessionCommandOutcome =
 export const LOCAL_COMMAND_DETAILS: Array<{ name: string; description?: string }> = [
   { name: "/new", description: "Start a new session" },
   { name: "/sessions", description: "List and switch sessions" },
-  { name: "/resume", description: "Resume a session by id" },
+  { name: "/resume", description: "Replay an interrupted prompt run" },
   { name: "/permissions", description: "Change permission mode" },
   { name: "/plan", description: "Toggle plan mode" },
   { name: "/theme", description: "Change TUI theme" },

@@ -6,6 +6,7 @@
 export type SessionStatus = "idle" | "running" | "closing" | "archived" | "error";
 export type InputDelivery = "queue" | "steer";
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "interrupted";
+export type SessionTaskStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
 export type PermissionStatus = "pending" | "approved" | "denied" | "expired";
 export type SessionMessageRole = "system" | "user" | "assistant";
 export type SessionMessagePartType = "text" | "reasoning" | "tool" | "tool_result" | "error" | "log";
@@ -88,6 +89,25 @@ export interface SessionRunRecord {
   updatedAt: number;
 }
 
+/** Daemon-owned task projection. Execution handles stay in TaskManager and are never persisted. */
+export interface SessionTaskRecord {
+  id: string;
+  sessionId: string;
+  childSessionId?: string;
+  runId?: string;
+  type: string;
+  status: SessionTaskStatus;
+  description: string;
+  cwd: string;
+  output?: string;
+  error?: string;
+  metadata: Record<string, unknown>;
+  createdAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  updatedAt: number;
+}
+
 export interface PermissionRequestRecord {
   id: string;
   sessionId: string;
@@ -109,6 +129,7 @@ export interface SessionStateSnapshot {
   messages: SessionMessageRecord[];
   parts: SessionMessagePartRecord[];
   runs: SessionRunRecord[];
+  tasks?: SessionTaskRecord[];
   permissions: PermissionRequestRecord[];
 }
 
@@ -208,6 +229,25 @@ export interface CreateRunInput {
 
 export interface UpdateRunInput {
   status?: RunStatus;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateSessionTaskInput {
+  id?: string;
+  sessionId: string;
+  childSessionId?: string;
+  runId?: string;
+  type: string;
+  description: string;
+  cwd: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateSessionTaskInput {
+  status?: SessionTaskStatus;
+  runId?: string;
+  output?: string;
   error?: string;
   metadata?: Record<string, unknown>;
 }

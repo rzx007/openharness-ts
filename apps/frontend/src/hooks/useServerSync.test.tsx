@@ -145,6 +145,25 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     createdAt: 4,
     updatedAt: 4,
   };
+  const interruptedInput = {
+    id: "i-interrupted",
+    sessionId: "s1",
+    seq: 2,
+    delivery: "queue" as const,
+    content: "finish interrupted work",
+    metadata: {},
+    createdAt: 5,
+  };
+  const interruptedRun = {
+    id: "r-interrupted",
+    sessionId: "s1",
+    inputId: interruptedInput.id,
+    status: "interrupted" as const,
+    error: "Daemon restarted before the run completed",
+    metadata: {},
+    createdAt: 5,
+    updatedAt: 5,
+  };
   const calls: Array<{ url: string; init: RequestInit }> = [];
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {} });
@@ -411,10 +430,10 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       return jsonResponse({
         cursor: 6,
         session,
-        inputs: [],
+        inputs: [interruptedInput],
         messages: [message],
         parts: [textPart, toolPart],
-        runs: [run],
+        runs: [run, interruptedRun],
         permissions: [permission],
       });
     }
@@ -467,6 +486,13 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       event(10, "session.message.part.updated", { part: liveToolPart }),
     ]);
     if (pathname === "/sessions/s1/prompts") return jsonResponse({ input: { id: "i1" } });
+    if (pathname === "/sessions/s1/runs/r-interrupted/resume") {
+      return jsonResponse({
+        input: { ...interruptedInput, id: "i-recovery", metadata: { recovery: { sourceRunId: interruptedRun.id } } },
+        run: { ...interruptedRun, id: "r-recovery", inputId: "i-recovery", status: "pending" },
+        source_run: interruptedRun,
+      });
+    }
     if (pathname === "/permissions/p1/reply") {
       return jsonResponse({ request: { ...permission, status: "approved", decision: "once" } });
     }
@@ -519,6 +545,9 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     text: "live output",
   }));
   expect(captured?.transcript.map((item) => item.text)).toContain("streaming now");
+  expect(captured?.transcript.map((item) => item.text)).toContain(
+    "Run interrupted: Daemon restarted before the run completed\nUse /resume r-interrupted to replay its original prompt.",
+  );
   expect(captured?.assistantBuffer).toBe("");
   expect(captured?.modal).toMatchObject({ kind: "permission", request_id: "p1", tool_name: "Write" });
 
@@ -531,6 +560,14 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s1/prompts")).toBe(true);
   expect(calls.some((call) => call.url === "http://daemon.test/permissions/p1/reply")).toBe(true);
   expect(calls.every((call) => (call.init.headers as Record<string, string> | undefined)?.authorization === "Bearer tok")).toBe(true);
+
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "/resume r-interrupted" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const recoveryCall = calls.find((call) => call.url === "http://daemon.test/sessions/s1/runs/r-interrupted/resume");
+  expect(recoveryCall?.init.method).toBe("POST");
+  expect(JSON.parse(String(recoveryCall?.init.body ?? "{}"))).toMatchObject({ id: expect.any(String) });
 
   await act(async () => {
     captured?.sendRequest({ type: "list_sessions" });

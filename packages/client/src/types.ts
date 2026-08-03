@@ -17,6 +17,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 } from "@openharness/services";
@@ -31,6 +32,7 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 };
@@ -65,6 +67,12 @@ export interface AdmitClientPromptInput {
   id?: string;
   content: string;
   delivery?: InputDelivery;
+  metadata?: Record<string, unknown>;
+}
+
+/** `POST /sessions/:id/runs/:runId/resume` 请求体。`id` 用于安全重试。 */
+export interface ResumeInterruptedRunInput {
+  id?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -111,6 +119,11 @@ export interface PromptResponse {
   input: SessionInputRecord;
   run?: SessionRunRecord;
   queue_state?: "running" | "queued";
+}
+
+/** `POST /sessions/:id/runs/:runId/resume` 响应。旧 run 保持 interrupted，新 run 独立执行。 */
+export interface ResumeInterruptedRunResponse extends PromptResponse {
+  source_run: SessionRunRecord;
 }
 
 export type CommandKind = "session" | "template";
@@ -311,6 +324,7 @@ export interface SessionBucket {
   messages: SessionMessageRecord[];
   partsByMessageId: Record<string, SessionMessagePartRecord[]>;
   runs: Record<string, SessionRunRecord>;
+  tasks: Record<string, SessionTaskRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }
 

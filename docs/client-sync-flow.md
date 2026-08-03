@@ -128,20 +128,13 @@ type OpenHarnessClientState = {
 
 Reducer 用 `event.seq` 去重。即使 SSE live 与 replay 重叠，重复事件也不会二次写入。message/input/part 会按自身 `seq` 排序，因此乱序事件最终可收敛。TUI transcript 只从 message + parts selector 派生，不扫描 `runtime.*`。
 
-## Cursor and retry semantics
+## Cursor 与重连语义
 
-The daemon event sequence is global. A stream filtered by `sessionId` therefore naturally
-contains gaps created by events for other sessions; those gaps are not packet loss and must not
-trigger a session snapshot. On a disconnect, the client reconnects with the highest applied global
-cursor. The server replays matching events after that cursor, also accepting `Last-Event-ID` for
-standard SSE clients, and sends keepalive comments while idle.
+daemon 事件序列是全局递增的。因此按 `sessionId` 过滤的事件流天然会因其它 session 的事件而出现序号空洞；这不是丢包，不能因此触发 session snapshot。连接断开后，客户端携带已应用的最大全局 cursor 重连。服务端会回放该 cursor 之后匹配的事件，也接受标准 SSE 客户端的 `Last-Event-ID`，并在空闲时发送 keepalive 注释。
 
-Prompt admission is idempotent when the caller reuses `input.id`. Use
-`createPromptRequestId()` before the first send and retain that id if the transport outcome is
-unknown; `OpenHarnessClient.admitPrompt` also generates one when omitted. Reusing an id with different content,
-delivery, or metadata returns `409` rather than creating a second run.
+调用方复用 `input.id` 时，prompt 准入是幂等的。首次发送前应调用 `createPromptRequestId()`，若传输结果不明则保留同一 id 重试；省略时 `OpenHarnessClient.admitPrompt` 也会自动生成。若使用相同 id 但 content、delivery 或 metadata 不同，服务端返回 `409`，而不会创建第二个 run。
 
-## Snapshot + Live
+## Snapshot 与实时事件
 
 推荐客户端启动流程：
 
@@ -197,7 +190,7 @@ OHJSON TUI 层与 per-session BackendHost 已从主线删除。
 
 ## 尚未完成
 
-- `delivery: "steer"` 还没有真正注入活跃 run，只是 API/store/coordinator 的前置能力。
-- CLI 根据 release version 与构建时间识别 stale daemon，并在启动 TUI 前替换为当前构建；该判断不进入 client API 或 session 数据结构。
 - store 仍是文件 adapter，SQLite adapter 是下一阶段持久化重点。
 - WebSocket 双向协议暂不做；当前 HTTP action + SSE event 已覆盖基础 attach 与恢复。
+
+已覆盖的运行语义：`delivery: "steer"` 在目标 session 有活跃 run 时由 `SessionRunCoordinator.mergeWake()` 合并为一次 follow-up 唤醒；没有活跃 run 时退化为普通队列输入。CLI 也会在启动本机 TUI 前按 release version 与构建时间淘汰 stale daemon；这属于本机进程生命周期，不进入 client API 或 session 数据结构。

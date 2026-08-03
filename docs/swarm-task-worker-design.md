@@ -1,10 +1,10 @@
-# 兼容设计：Swarm 长驻 worker（重启式多轮 sendMessage）
+# 历史归档：Swarm worker（重启式多轮 sendMessage）
 
-> 状态：已落地的旧路径能力，现作为 deprecated compatibility fallback 保留。
+> 状态：历史实现归档，不属于当前 daemon/TUI/print 产品链路，也不作为兼容承诺。
 >
-> daemon/TUI/print 的 `Agent` 当前在 daemon 内创建 child session，并统一使用 `SessionStore`、session event 与 `PermissionBroker`。本文只记录 `--task-worker` / subprocess fallback 的重启式多轮协议，不代表主路径；后续不再为该 worker 路径增加产品能力。
+> daemon/TUI/print 的 `Agent` 当前在 daemon 内创建 child session，并统一使用 `SessionStore`、session event 与 `PermissionBroker`。本文只记录旧 `--task-worker` / subprocess 的重启式多轮协议，不能作为当前功能说明。
 
-本设计当时用于补齐 subprocess swarm 的 teammate 多轮对话。现阶段仅在旧调用方或 child session 无法接管的迁移场景中使用。
+本设计当时用于补齐 subprocess swarm 的 teammate 多轮对话；保留它仅为理解历史代码，不应在新功能中调用或扩展。
 
 ## 核心认知（读 Python 源后修正）
 

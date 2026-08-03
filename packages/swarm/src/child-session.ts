@@ -35,8 +35,10 @@ export interface SessionTaskBridge {
   }): { id: string };
   completeSessionTask(
     taskId: string,
-    input: { status: "completed" | "failed" | "stopped"; output: string },
+    input: { status: "completed" | "failed" | "stopped" | "interrupted"; output: string },
   ): Promise<unknown>;
+  /** Optional for legacy local task bridges; daemon bridges persist the linkage. */
+  bindSessionTaskRun?(taskId: string, runId: string): Promise<void>;
   writeToSessionTask(taskId: string, data: string): Promise<void>;
 }
 
@@ -108,7 +110,10 @@ export class ChildSessionBackend implements SwarmBackend {
           const generation = this.nextGeneration(taskId);
           try {
             const admitted = await this.options.host.admitPrompt(child.id, data);
-            if (admitted.runId) this.monitorRun(taskId, child.id, admitted.runId, generation);
+            if (admitted.runId) {
+              await this.options.taskBridge.bindSessionTaskRun?.(taskId, admitted.runId);
+              this.monitorRun(taskId, child.id, admitted.runId, generation);
+            }
           } catch (error) {
             if (this.taskGenerations.get(taskId) === generation) this.nextGeneration(taskId);
             const message = error instanceof Error ? error.message : String(error);
@@ -139,7 +144,10 @@ export class ChildSessionBackend implements SwarmBackend {
 
       const generation = this.nextGeneration(taskId);
       const admitted = await this.options.host.admitPrompt(child.id, effectiveConfig.prompt);
-      if (admitted.runId) this.monitorRun(taskId, child.id, admitted.runId, generation);
+      if (admitted.runId) {
+        await this.options.taskBridge.bindSessionTaskRun?.(taskId, admitted.runId);
+        this.monitorRun(taskId, child.id, admitted.runId, generation);
+      }
       else await this.options.taskBridge.completeSessionTask(taskId, { status: "completed", output: "" });
 
       const result: SpawnResult = {
@@ -220,7 +228,7 @@ export class ChildSessionBackend implements SwarmBackend {
             status: result.status === "completed"
               ? "completed"
               : result.status === "interrupted"
-              ? "stopped"
+              ? "interrupted"
               : "failed",
             output: result.output || result.error || "",
           });

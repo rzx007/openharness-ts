@@ -70,6 +70,7 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
   SessionStateSnapshot,
   SessionUsageResponse,
   StartDreamResponse,

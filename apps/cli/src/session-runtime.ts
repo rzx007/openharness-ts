@@ -178,7 +178,7 @@ export interface CliSessionRuntimeFactoryOptions {
 export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactoryOptions): SessionRuntimeFactory {
   const getSettings = options.getSettings ?? (() => options.settings);
   return {
-    async createRuntime({ session, history, parts, childSessionHost }) {
+    async createRuntime({ session, history, parts, childSessionHost, sessionTaskBridge }) {
       let permissionPrompt: ((toolName: string, reason?: string, input?: Record<string, unknown>) => Promise<boolean>) | undefined;
       const settings = getSettings();
       const skillRegistry = new SkillRegistry();
@@ -215,6 +215,7 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
         skillRegistry,
         credentialStorage: new CredentialStorage(),
         childSessionHost,
+        sessionTaskBridge,
       });
       registerPluginHooks(bundle.hookExecutor, pluginContributions.plugins);
       await registerPluginTools(bundle.toolRegistry, pluginContributions.plugins);

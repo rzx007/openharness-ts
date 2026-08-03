@@ -2,7 +2,7 @@
 
 > 状态：主线架构。Task 0-9 已落地 daemon/client、TUI attach 与 durable message-part 基础版。
 > 日期：2026-07-31。
-> 决策：默认 `ohs`（与显式 `ohs --tui`）走 daemon attach：`CLI -> frontend -> @openharness/client -> ohs serve`。用户 headless print（`ohs "prompt"` / `-p`）同样走 Session API 客户端。daemon 内 `Agent` 通过 child session 执行；`--task-worker` / swarm subprocess 仅保留为 deprecated compatibility fallback，不再作为 daemon/TUI/print 主路径。进程内 REPL 已移除，TUI 的旧 BackendHost/OHJSON 路径已退场。
+> 决策：默认 `ohs`（与显式 `ohs --tui`）走 daemon attach：`CLI -> frontend -> @openharness/client -> ohs serve`。用户 headless print（`ohs "prompt"` / `-p`）同样走 Session API 客户端。daemon 内 `Agent` 通过 child session 执行；`--task-worker` / swarm subprocess 是历史内部实现，不属于 daemon/TUI/print 产品链路，也不作为兼容承诺。进程内 REPL 已移除，TUI 的旧 BackendHost/OHJSON 路径已退场。
 
 ## 1. 目标
 
@@ -48,18 +48,12 @@ session B: idle -> running ----------------------> idle
 
 这与 opencode 的 `SessionRunCoordinator` 一致：相同 key 串行；不同 key 并行。
 
-### 3.1.1 Session lifecycle barrier
+### 3.1.1 Session 生命周期屏障
 
-Session status is `idle`, `running`, `closing`, or `archived`. `DELETE /sessions/:id`
-first moves the session to `closing`, rejects new prompts and runtime-setting mutations with
-`409`, interrupts and joins active/queued work, closes its runtime, and only then writes
-`archived`. A daemon restart first marks leftover runs interrupted and finalizes any persisted
-`closing` session, so a half-finished archive cannot become writable again.
+Session 状态只能是 `idle`、`running`、`closing` 或 `archived`。`DELETE /sessions/:id`
+会先把 session 移为 `closing`，以 `409` 拒绝新的 prompt 与影响 runtime 的设置变更；随后中断并等待活跃或排队工作结束、关闭 runtime，最后才写入 `archived`。daemon 重启时会先将遗留 run 标记为 interrupted，并完成所有已持久化的 `closing` session，因此未完成的归档不会重新变为可写。
 
-`running` is derived from all pending/running runs for the session. Interrupting a queued run
-therefore cannot make an unrelated active run appear idle. Runtime-affecting session metadata
-and daemon settings are rejected while a session run is active; callers retry after the run is
-terminal instead of closing a live runtime underneath it.
+`running` 由该 session 全部 pending/running run 推导得出。因此中断一个排队 run 不会让无关的活跃 run 显示为空闲。session run 活跃期间，影响 runtime 的 session metadata 和 daemon 设置一律拒绝写入；调用方应在 run 进入终态后重试，而不是在仍运行的 runtime 下方直接关闭或替换配置。
 
 ### 3.1.2 Daemon 重启恢复必须显式化
 
@@ -82,7 +76,7 @@ provider stream、TaskManager task 或 child session，因为这些进程内所�
 1. 将用户输入准入到持久化存储。
 2. 唤醒 session runner。
 
-如果 daemon 在准入之后、执行之前崩溃，该 prompt 仍然可见且可恢复。下次 resume 可按策略执行待处理输入，或将其标记为中断。
+如果 daemon 在准入之后、执行之前崩溃，该 prompt 仍然可见；daemon 重启会把未完成 run 标为 `interrupted`。它不会自动重跑，用户只能通过显式恢复操作创建新的 input/run 来重放原始 prompt。
 
 ### 3.3 事件是客户端真相源
 
@@ -170,7 +164,7 @@ apps/web / apps/desktop
 - 自定义 plugin 工具必须协作式消费 `ToolContext.abortSignal`；宿主无法强制终止任意 in-process plugin。MCP tool/resource 请求已使用 SDK request signal 取消。
 - TUI 主路径已迁到 daemon client。
 - Slash command：catalog、template expand，以及 `/model` `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/help` `/status` `/version` 已落地；`/tasks run`、部分 REPL-only 命令仍待。
-- Web/Desktop/remote attach 的认证与部署策略。
+- 远程连接的基础安全策略已落地：远程客户端使用显式 URL + bearer token，非 loopback daemon 强制显式 token，浏览器仅允许精确 `--allow-origin` 白名单。完整部署说明见 [remote-attach.md](./remote-attach.md)。仍待完成的是正式 Web/Desktop 应用、TLS/反向代理部署基线、用户身份与多租户授权等生产化能力。
 
 ## 5. 持久化存储
 
@@ -317,6 +311,7 @@ GET    /sessions/:sessionId/parts?limit=&cursor=&messageId=
 POST   /sessions/:sessionId/prompts
 POST   /sessions/:sessionId/commands
 POST   /sessions/:sessionId/interrupt
+POST   /sessions/:sessionId/runs/:runId/resume
 
 GET    /events?cursor=&afterSeq=&sessionId=&limit=
 GET    /events/stream?cursor=&afterSeq=&sessionId=
@@ -338,7 +333,7 @@ Slash command 边界：
 
 - **用户 headless print**（`ohs "prompt"` / `ohs -p`）：ensure daemon → `@openharness/client` → `createSession` + `admitPrompt` + SSE；无 TTY 时 permission 自动 deny（或 `--dangerously-skip-permissions` 时 approve）。详见下文「Print Session API」。
 - **daemon/TUI/print 内的 `Agent`**：本轮迁移目标为 daemon 内 child session + PermissionBroker；迁移完成前不得把目标状态描述为已全部落地。
-- **内部 `--task-worker` / `--swarm-worker`**：只保留 deprecated compatibility fallback；该路径仍是进程内一次性 runtime，不 attach daemon session store，权限走文件流，不再继续扩展为产品主路径。
+- **内部 `--task-worker` / `--swarm-worker`**：历史进程内一次性 runtime，不 attach daemon session store，权限走文件流；不属于当前产品链路，也不保证兼容行为。
 - 交互产品入口只有 TUI/daemon。旧 REPL registry 已拆除。
 - print 的旧项目级 `--continue` / `--resume` **尚未**迁到 daemon store；传这些 flag 会明确报错。
 
@@ -346,15 +341,16 @@ Slash command 边界：
 
 - `/commit`（`POST /git/commit`）会 `git add -A` 后提交；多客户端并发时可能互相踩工作树。无参 `/commit` 仅 `git status --short`。
 - 会导致 runtime reload 的资源写操作在对应 session 有 active/queued run 时返回 `409`，且不会先写入后关闭 runtime。memory/reload-plugin 按 cwd 隔离；settings/auth/profile/plugin enable|disable 为 daemon 全局 barrier。空闲后 `/reload-plugins` / plugin enable|disable 通过关闭 runtime 生效，下次 warm 再发现插件；不是进程内热替换 hooks/skills。
-- Daemon 启动时对磁盘上遗留的 `pending`/`running` run 调用 `interruptActiveRuns`，避免客户端永久 busy；完成 `closing` 归档；再仅收口被 session event 证明归属本 daemon 的 running workflow snapshot。sessions/messages/parts/events 与 child session 经 `sessions.json` 跨重启保留；无所有权事件的项目 workflow 不会被 daemon 改写。
+- Daemon 启动时对磁盘上遗留的 `pending`/`running` run 和 task 分别调用 `interruptActiveRuns` / `interruptActiveSessionTasks`，避免客户端永久 busy；完成 `closing` 归档；再仅收口被 session event 证明归属本 daemon 的 running workflow snapshot。sessions/messages/parts/events、task 投影与 child session 经 `sessions.json` 跨重启保留；无所有权事件的项目 workflow 不会被 daemon 改写。
 
 当前事件流使用 SSE。`GET /health` 只返回存活状态与可选 release version；session 数据结构没有并行协议版本。CLI 用 registry 的 release version 与启动时间识别 stale daemon。WebSocket 可后续加入，以支持更低延迟的双向控制。
 
-规划中但尚未实现的 API：
+恢复 API 语义：
 
-```text
-POST   /sessions/:sessionId/resume
-```
+- `POST /sessions/:sessionId/runs/:runId/resume` 只接受该 session 中状态为 `interrupted` 且关联原始 prompt 的 run。
+- 服务端保留 source run 的 `interrupted` 状态，复制其原始 prompt 并创建带 `recovery.sourceRunId` / `recovery.sourceInputId` 溯源的新 input/run；不会伪造 provider stream 续传。
+- 请求使用稳定 `id` 时可安全重试：同一 id 返回同一个恢复 input/run，不会重复执行；同一 source run 的其它恢复请求返回 `409`。
+- session 有活跃或排队 run、原始 prompt 已不可用，或 source run 不是 `interrupted` 时返回 `409`。workflow、失去内存所有权的 child task 等没有 prompt-backed run 的工作只保留审计，不提供伪恢复。
 
 ## 7. Client SDK 类型
 
@@ -511,7 +507,7 @@ TUI 路由切换的是 session，而不是切换 backend 进程。
 
 ### 12.2 Web/Desktop
 
-Web 与 Desktop 使用与 TUI 相同的 SDK/store。Desktop 可嵌入或自动启动 daemon；Web 可通过带 token 认证的 daemon URL attach。
+正式的 Web 与 Desktop 应用尚未落地；它们必须使用与 TUI 相同的 `@openharness/client`、snapshot + SSE reducer 和 Session API。当前已可通过显式 daemon URL + bearer token attach；Desktop 可嵌入或自动启动本机 daemon，Web 可连接带 token 认证且满足 CORS 白名单的 daemon。远程连接不能读取或复制本机 daemon registry。
 
 ## 13. Daemon 生命周期
 
@@ -540,7 +536,7 @@ ohs --tui        # 显式同上（进程内 REPL 入口已移除）
 }
 ```
 
-本地 daemon 使用随机 bearer token；后续需补齐跨平台的 registry 文件权限收紧。
+本地 daemon 使用随机 bearer token，registry 仅用于本机发现；远程客户端必须使用显式 URL + token。后续需补齐跨平台的 registry 文件权限收紧。
 
 ## 14. 迁移计划
 
@@ -584,10 +580,11 @@ ohs --tui        # 显式同上（进程内 REPL 入口已移除）
   - server 暴露按 location/cwd 作用域的 command catalog 与必要的 session command API。
   - user-invocable skill / template command 采用 opencode 风格展开为 prompt，而不是由客户端直接拥有 runtime。
 
-### Phase 6：Web/Desktop/远程 attach
+### Phase 6：Web/Desktop/远程连接
 
-- 增加 Web/Desktop 客户端。
-- 强化远程认证与传输。
+- 已完成远程连接基线：显式 URL + bearer token、非 loopback bind 强制 token、浏览器精确 CORS origin 白名单，以及 TUI 的 `--daemon-url` / `--daemon-token`。
+- 待实现正式的 Web/Desktop 客户端。
+- 待补齐 TLS/反向代理部署基线、用户身份与更细粒度授权，避免把共享 bearer token 当作最终多用户方案。
 
 ## 14.1 Print Session API（用户 headless）
 
@@ -625,13 +622,13 @@ Agent tool (in daemon CliSessionRuntime)
 
 - **新主路径**：从 daemon session 发起的 `Agent` 调用创建带 `parentId` 的 child session，由同一 daemon 的 `SessionRuntime` 执行；TUI、用户 print 和其它 Session API 客户端共享这条路径。
 - **状态与权限**：child 的消息、run、事件和权限请求进入同一 `SessionStore` / `PermissionBroker`，客户端可按 session 关系观察与裁决。
-- **兼容路径**：`--task-worker`、`SubprocessBackend`、文件 mailbox / permission-sync 和项目级 worker snapshot 暂不删除，但只作为 deprecated compatibility fallback，服务旧调用方或迁移期间无法进入 daemon child session 的入口。
-- **兼容约束**：不再为 `--task-worker` 增加新的产品能力；迁移完成后再单独评估删除窗口。现有兼容代码仍可运行，不代表它是 daemon/TUI/print 的推荐路径。
+- **任务投影**：parent session 的 task 通过 `SessionTaskRecord` 持久化，记录 task ID、child session ID 和当前 run ID；TaskManager 仅保留执行中的回调、stdin 与进程句柄。
+- **重启边界**：daemon 启动会将未终态 task 写为 `interrupted`。child 的消息/run 仍可审计，具备原始 prompt 的中断 run 可用 `/resume` 显式创建新 run；不会自动复活 callback、子进程或 child runtime。
 
 ## 15. 风险
 
 - `process.cwd()` 在 CLI/历史命令中仍使用广泛；runtime/tool 主路径已开始显式传递 `cwd`。
-- sandbox 已按 session/location 作用域；task manager 与 swarm backend registry 已按 `sessionId + location/cwd` 作用域，避免同 cwd 多 session 共享 task runner、task list、wait/stop/output 状态。
+- sandbox 已按 session/location 作用域；task manager 与 swarm backend registry 已按 `sessionId + location/cwd` 作用域，避免同 cwd 多 session 共享 task runner、task list、wait/stop/output 状态；对外可恢复的 task 生命周期以 `SessionStore` 的 task 投影为准。
 - MCP 首版采用 session/location 作用域；后续可为纯静态无认证服务器引入 daemon/project 共享池。
 - slash command 不能简单复用旧 REPL registry；需要先区分 client-local、server/session API、runtime/template、REPL-only，否则会把 `BackendHost` 形态重新引入 server。
 - 长时间运行的工具调用需要可靠的取消与所有权清理。

@@ -14,6 +14,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionTaskRecord,
   SessionStateSnapshot,
 } from "./types.js";
 
@@ -64,6 +65,7 @@ export function applySessionSnapshot(
         messages: [...snapshot.messages].sort((a, b) => a.seq - b.seq),
         partsByMessageId,
         runs: Object.fromEntries(snapshot.runs.map((run) => [run.id, run])),
+        tasks: Object.fromEntries((snapshot.tasks ?? []).map((task) => [task.id, task])),
         permissions: Object.fromEntries(snapshot.permissions.map((request) => [request.id, request])),
       },
     },
@@ -114,6 +116,10 @@ export function applyEvent(
     case "session.run.created":
     case "session.run.updated":
       next = upsertRun(next, readPayloadRecord<SessionRunRecord>(event, "run"));
+      break;
+    case "session.task.created":
+    case "session.task.updated":
+      next = upsertTask(next, readPayloadRecord<SessionTaskRecord>(event, "task"));
       break;
     case "permission.asked":
     case "permission.replied":
@@ -277,6 +283,13 @@ function upsertPermission(
   return { ...state, buckets: { ...state.buckets, [request.sessionId]: bucket } };
 }
 
+function upsertTask(state: OpenHarnessClientState, task: SessionTaskRecord | undefined): OpenHarnessClientState {
+  if (!task) return state;
+  const bucket = cloneBucket(state.buckets[task.sessionId]);
+  bucket.tasks = { ...bucket.tasks, [task.id]: task };
+  return { ...state, buckets: { ...state.buckets, [task.sessionId]: bucket } };
+}
+
 function cloneBucket(bucket: SessionBucket | undefined): SessionBucket {
   return {
     session: bucket?.session,
@@ -286,6 +299,7 @@ function cloneBucket(bucket: SessionBucket | undefined): SessionBucket {
       ? Object.fromEntries(Object.entries(bucket.partsByMessageId).map(([id, parts]) => [id, [...parts]]))
       : {},
     runs: bucket?.runs ? { ...bucket.runs } : {},
+    tasks: bucket?.tasks ? { ...bucket.tasks } : {},
     permissions: bucket?.permissions ? { ...bucket.permissions } : {},
   };
 }

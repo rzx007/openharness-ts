@@ -35,6 +35,8 @@ import type {
   PermissionRequestRecord,
   PluginInfo,
   PromptResponse,
+  ResumeInterruptedRunInput,
+  ResumeInterruptedRunResponse,
   ProviderInfo,
   OutputStyleInfo,
   RememberSessionResponse,
@@ -572,6 +574,26 @@ export class OpenHarnessClient {
       body: { ...input, id: input.id ?? createPromptRequestId() },
       signal: options.signal,
     });
+  }
+
+  /**
+   * `POST /sessions/:id/runs/:runId/resume` — 显式重放一次中断 run 的原始 prompt。
+   * 不会继续旧 provider stream；服务端会创建一个带恢复溯源的新 input/run。
+   */
+  async resumeInterruptedRun(
+    sessionId: string,
+    runId: string,
+    input: ResumeInterruptedRunInput = {},
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ResumeInterruptedRunResponse> {
+    return await this.request<ResumeInterruptedRunResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/resume`,
+      {
+        method: "POST",
+        body: { ...input, id: input.id ?? createPromptRequestId() },
+        signal: options.signal,
+      },
+    );
   }
 
   /**

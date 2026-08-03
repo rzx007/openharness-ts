@@ -23,7 +23,7 @@ import {
   type GitRunner,
 } from "@openharness/swarm";
 import { getTaskManager } from "@openharness/services";
-import type { ChildSessionHost } from "@openharness/server";
+import type { ChildSessionHost, SessionTaskBridge } from "@openharness/server";
 import { buildTeammateCommand } from "./teammate.js";
 import { startSwarmPermissionResolver, watchTeamForPermissions } from "./swarm-permission.js";
 
@@ -65,6 +65,7 @@ export interface BootstrapOptions {
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
   childSessionHost?: ChildSessionHost;
+  sessionTaskBridge?: SessionTaskBridge;
 }
 
 /**
@@ -191,6 +192,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
       cwd,
       sessionId: options.sessionId,
       host: options.childSessionHost,
+      taskBridge: options.sessionTaskBridge,
     });
   } else {
     await registerSubprocessBackend({
@@ -274,6 +276,7 @@ export async function registerChildSessionBackend(options: {
   cwd: string;
   sessionId: string;
   host: ChildSessionHost;
+  taskBridge?: SessionTaskBridge;
 }): Promise<void> {
   const { cwd, sessionId, host } = options;
   const runtimeScope = { cwd, sessionId };
@@ -288,9 +291,13 @@ export async function registerChildSessionBackend(options: {
   });
   const childOptions: ChildSessionBackendOptions = {
     host,
-    taskBridge: {
+    taskBridge: options.taskBridge ?? {
       registerSessionTask: (input) => taskManager.registerSessionTask(input),
-      completeSessionTask: (id, input) => taskManager.completeSessionTask(id, input),
+      completeSessionTask: (id, input) => taskManager.completeSessionTask(id, {
+        ...input,
+        status: input.status === "interrupted" ? "stopped" : input.status,
+      }),
+      bindSessionTaskRun: async () => {},
       writeToSessionTask: (id, data) => taskManager.writeToTask(id, data),
     },
     worktreeManager,
