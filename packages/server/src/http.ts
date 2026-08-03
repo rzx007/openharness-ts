@@ -47,6 +47,33 @@ import {
   type ObservabilityEvent,
   type StructuredLogger,
 } from "./observability.js";
+import {
+  CORS_HEADERS,
+  CORS_METHODS,
+  DAEMON_RESTART_RUN_REASON,
+  DAEMON_RESTART_TASK_REASON,
+  DAEMON_RESTART_WORKFLOW_REASON,
+  SSE_HEADERS,
+  countByStatus,
+  errorResponse,
+  isRecord,
+  jsonEqual,
+  jsonResponse,
+  normalizeAllowedOrigins,
+  normalizeTraceId,
+  readCursor,
+  readEventCursor,
+  readJson,
+  readLimit,
+  readPermissionStatus,
+  runtimeSessionMetadataChanged,
+  sessionMutationErrorStatus,
+  withoutTraceId,
+  workflowRunIdFromSessionEvent,
+  type ActiveRunRenderState,
+  type JsonRecord,
+  type SseClient,
+} from "./http-support.js";
 
 export interface OpenHarnessServerOptions {
   host?: string;
@@ -103,173 +130,7 @@ export interface ListenResult {
   url: string;
 }
 
-type JsonRecord = Record<string, unknown>;
 type Listener = ReturnType<typeof serve>;
-const DAEMON_RESTART_RUN_REASON = "Daemon restarted before the run completed";
-const DAEMON_RESTART_TASK_REASON = "Daemon restarted before the task completed";
-const DAEMON_RESTART_WORKFLOW_REASON = "Daemon restarted before the workflow completed";
-type SseClient = {
-  sessionId?: string;
-  controller: ReadableStreamDefaultController<Uint8Array>;
-  heartbeat?: ReturnType<typeof setInterval>;
-};
-type ActiveToolPart = {
-  partId: string;
-  messageId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-};
-type ActiveRunRenderState = {
-  sessionId: string;
-  runId: string;
-  inputId: string;
-  assistantMessageId?: string;
-  assistantTurnCompleted: boolean;
-  activeTextPartId?: string;
-  toolParts: Map<string, ActiveToolPart>;
-};
-
-const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
-const SSE_HEADERS = {
-  "cache-control": "no-cache",
-  "connection": "keep-alive",
-  "content-type": "text/event-stream; charset=utf-8",
-};
-const CORS_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
-const CORS_HEADERS = "authorization, content-type, last-event-id, x-openharness-trace-id";
-
-const RUNTIME_SESSION_METADATA_KEYS = [
-  "permissionMode",
-  "maxTurns",
-  "systemPrompt",
-  "allowedTools",
-  "disallowedTools",
-  "effort",
-] as const;
-
-function runtimeSessionMetadataChanged(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-): boolean {
-  return RUNTIME_SESSION_METADATA_KEYS.some(
-    (key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]),
-  );
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeTraceId(value: unknown): string | undefined {
-  return typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value)
-    ? value
-    : undefined;
-}
-
-function withoutTraceId(metadata: Record<string, unknown>): Record<string, unknown> {
-  const { traceId: _traceId, ...rest } = metadata;
-  return rest;
-}
-
-function countByStatus(records: ReadonlyArray<{ status: string }>): Record<string, number> {
-  return records.reduce<Record<string, number>>((counts, record) => {
-    counts[record.status] = (counts[record.status] ?? 0) + 1;
-    return counts;
-  }, {});
-}
-
-function normalizeAllowedOrigins(origins: readonly string[]): Set<string> {
-  const normalized = new Set<string>();
-  for (const value of origins) {
-    if (value === "*") throw new Error("Wildcard CORS origins are not supported");
-    let origin: URL;
-    try {
-      origin = new URL(value);
-    } catch {
-      throw new Error(`Invalid allowed origin: ${value}`);
-    }
-    if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.origin !== value.replace(/\/$/, "")) {
-      throw new Error(`Allowed origin must be an http(s) origin without a path: ${value}`);
-    }
-    normalized.add(origin.origin);
-  }
-  return normalized;
-}
-
-function workflowRunIdFromSessionEvent(event: SessionEventRecord): string | undefined {
-  const workflowEvent = event.payload.event;
-  return isRecord(workflowEvent) && typeof workflowEvent.runId === "string"
-    ? workflowEvent.runId
-    : undefined;
-}
-
-function readLimit(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function readCursor(c: Context): number | undefined {
-  return readLimit(c.req.query("cursor") ?? c.req.query("afterSeq"));
-}
-
-function readEventCursor(c: Context): number | undefined {
-  return readCursor(c) ?? readLimit(c.req.header("last-event-id"));
-}
-
-function jsonEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((value, index) => jsonEqual(value, right[index]));
-  }
-  if (isRecord(left) && isRecord(right)) {
-    const leftKeys = Object.keys(left).sort();
-    const rightKeys = Object.keys(right).sort();
-    return leftKeys.length === rightKeys.length && leftKeys.every(
-      (key, index) => key === rightKeys[index] && jsonEqual(left[key], right[key]),
-    );
-  }
-  return false;
-}
-
-function readPermissionStatus(value: string | undefined): PermissionStatus | undefined {
-  if (!value) return undefined;
-  if (value === "pending" || value === "approved" || value === "denied" || value === "expired") return value;
-  throw new Error("Invalid permission status");
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  const text = JSON.stringify(body);
-  return new Response(text, {
-    status,
-    headers: {
-      ...JSON_HEADERS,
-      "content-length": String(Buffer.byteLength(text)),
-    },
-  });
-}
-
-function errorResponse(status: number, message: string): Response {
-  return jsonResponse({ error: message }, status);
-}
-
-function sessionMutationErrorStatus(error: unknown): number {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.startsWith("Session is archived:") ||
-    message.startsWith("Session is closing:") ||
-    message.startsWith("Prompt id is already used:")
-    ? 409
-    : 404;
-}
-
-async function readJson(c: Context): Promise<JsonRecord> {
-  const text = await c.req.text();
-  if (!text.trim()) return {};
-  if (new TextEncoder().encode(text).byteLength > 1024 * 1024) throw new Error("Request body too large");
-  const parsed = JSON.parse(text) as unknown;
-  if (!isRecord(parsed)) throw new Error("Request body must be a JSON object");
-  return parsed;
-}
 
 export class OpenHarnessHttpServer {
   readonly app: Hono;

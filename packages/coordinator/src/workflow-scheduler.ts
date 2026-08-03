@@ -1,507 +1,116 @@
-export type WorkflowMode = "parallel" | "sequential" | "pipeline";
+import { WORKFLOW_BUDGET_POLICY_PRESETS, WORKFLOW_SPEC_TEMPLATES } from "./workflow-model.js";
+import {
+  cloneBudgetUsage,
+  collectWorkflowBudgetUsage,
+  workflowBudgetFromMetadata,
+  workflowBudgetPolicyExceeded,
+  workflowBudgetSoftLimit,
+} from "./workflow-budget.js";
+import {
+  createWorkflowPlan,
+  normalizeWriteScope,
+  runnableWriteScopes,
+  workflowTasksConflict,
+  writeScopesOverlap,
+} from "./workflow-validation.js";
+import type {
+  WorkflowMode,
+  WorkflowFailurePolicy,
+  WorkflowTaskTerminalStatus,
+  WorkflowTaskStatus,
+  WorkflowRetryPolicy,
+  WorkflowTask,
+  WorkflowSpec,
+  WorkflowPlan,
+  WorkflowWorkerResult,
+  WorkflowTaskBudgetUsage,
+  WorkflowBudgetPolicy,
+  WorkflowConservePolicy,
+  WorkflowBudgetPolicyPreset,
+  WorkflowDiffFileSummary,
+  WorkflowDiffSummary,
+  WorkflowTaskRunResult,
+  WorkflowRunnerContext,
+  WorkflowRunner,
+  WorkflowRunResult,
+  WorkflowRunSummary,
+  WorkflowRunSnapshotPlan,
+  WorkflowRunningTask,
+  WorkflowTaskProgress,
+  WorkflowBlockedTask,
+  WorkflowReconciliationIssue,
+  WorkflowReconciliationFileSummary,
+  WorkflowReconciliationTaskSummary,
+  WorkflowReconciliationSummary,
+  WorkflowReconciliationFollowUpAction,
+  WorkflowReconciliationPlan,
+  WorkflowReconciliationSpecOptions,
+  WorkflowBudgetUsage,
+  WorkflowRunSnapshotStatus,
+  WorkflowRunSnapshot,
+  WorkflowRunOptions,
+  WorkflowRunEventType,
+  WorkflowRunEvent,
+  WorkflowNotificationTask,
+  WorkflowNotification,
+  WorkflowTemplateName,
+  WorkflowSpecTemplate,
+  WorkflowValidationIssue,
+  WorkflowValidationReport,
+} from "./workflow-model.js";
 
-export type WorkflowFailurePolicy = "skip-dependents" | "fail-fast" | "continue";
-
-export type WorkflowTaskTerminalStatus = "completed" | "failed" | "killed" | "skipped";
-
-export type WorkflowTaskStatus = "pending" | "running" | WorkflowTaskTerminalStatus;
-
-export interface WorkflowRetryPolicy {
-  /** Total attempts, including the first attempt. Defaults to 1. */
-  maxAttempts?: number;
-  /** Statuses that should be retried. Defaults to ["failed"]. */
-  retryOn?: Array<"failed" | "killed">;
-}
-
-export interface WorkflowTask {
-  id: string;
-  description?: string;
-  prompt?: string;
-  subagentType?: string;
-  model?: string;
-  team?: string;
-  permissionMode?: "default" | "plan" | "full_auto";
-  dependsOn?: string[];
-  retry?: WorkflowRetryPolicy;
-  timeoutMs?: number;
-  readOnly?: boolean;
-  writeScope?: string[];
-  isolate?: boolean;
-  metadata?: Record<string, unknown>;
-}
-
-export interface WorkflowSpec {
-  mode: WorkflowMode;
-  tasks: WorkflowTask[];
-  maxConcurrency?: number;
-  defaultTaskTimeoutMs?: number;
-  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
-  budgetPolicy?: WorkflowBudgetPolicy;
-  failurePolicy?: WorkflowFailurePolicy;
-}
-
-export interface WorkflowPlan {
-  mode: WorkflowMode;
-  tasks: WorkflowTask[];
-  maxConcurrency: number;
-  defaultTaskTimeoutMs?: number;
-  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
-  budgetPolicy?: WorkflowBudgetPolicy;
-  executionOrder: string[];
-  dependencyMap: Record<string, string[]>;
-  dependentsMap: Record<string, string[]>;
-}
-
-export interface WorkflowWorkerResult {
-  status?: Exclude<WorkflowTaskTerminalStatus, "skipped">;
-  summary: string;
-  result?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface WorkflowTaskBudgetUsage {
-  tokensUsed?: number;
-  tokenBudget?: number;
-  timeUsedMs?: number;
-  timeBudgetMs?: number;
-}
-
-export interface WorkflowBudgetPolicy {
-  maxTokensUsed?: number;
-  maxTimeUsedMs?: number;
-  softMaxTokensUsed?: number;
-  softMaxTimeUsedMs?: number;
-  onSoftLimit?: "continue" | "serialize" | "conserve" | "serialize-and-conserve";
-  conserve?: WorkflowConservePolicy;
-}
-
-export interface WorkflowConservePolicy {
-  promptHint?: string;
-  permissionMode?: "default" | "plan";
-  maxTurns?: number;
-}
-
-export type WorkflowBudgetPolicyPreset = "cheap-review" | "safe-write" | "fast-parallel";
-
-export const WORKFLOW_BUDGET_POLICY_PRESETS: Record<WorkflowBudgetPolicyPreset, WorkflowBudgetPolicy> = {
-  "cheap-review": {
-    maxTokensUsed: 12_000,
-    softMaxTokensUsed: 8_000,
-    onSoftLimit: "serialize-and-conserve",
-    conserve: {
-      permissionMode: "plan",
-      maxTurns: 2,
-      promptHint: "Prefer inspection, focused summaries, and minimal follow-up work once the workflow is over its cheap-review budget.",
-    },
-  },
-  "safe-write": {
-    maxTokensUsed: 24_000,
-    softMaxTokensUsed: 16_000,
-    onSoftLimit: "serialize-and-conserve",
-    conserve: {
-      permissionMode: "plan",
-      maxTurns: 4,
-      promptHint: "Prefer small, reviewable write steps and stop to report uncertainty once the workflow is over its safe-write budget.",
-    },
-  },
-  "fast-parallel": {
-    maxTokensUsed: 45_000,
-    softMaxTokensUsed: 30_000,
-    onSoftLimit: "continue",
-  },
-};
-
-export interface WorkflowDiffFileSummary {
-  path: string;
-  status: "added" | "modified" | "deleted" | "renamed" | "untracked" | "other";
-  insertions?: number;
-  deletions?: number;
-}
-
-export interface WorkflowDiffSummary {
-  changedFiles: string[];
-  files: WorkflowDiffFileSummary[];
-  added: number;
-  modified: number;
-  deleted: number;
-  renamed: number;
-  untracked: number;
-  insertions: number;
-  deletions: number;
-}
-
-export interface WorkflowTaskRunResult {
-  taskId: string;
-  status: WorkflowTaskTerminalStatus;
-  summary: string;
-  result?: string;
-  metadata?: Record<string, unknown>;
-  budget?: WorkflowTaskBudgetUsage;
-  attempts: number;
-  dependencies: string[];
-  startedAt: number;
-  finishedAt: number;
-  skippedReason?: string;
-  timedOut?: boolean;
-  error?: string;
-}
-
-export interface WorkflowRunnerContext {
-  task: WorkflowTask;
-  attempt: number;
-  dependencyResults: Record<string, WorkflowTaskRunResult>;
-  pipelineInput?: WorkflowTaskRunResult;
-  resumeFrom?: WorkflowRunningTask;
-  budgetMode?: "normal" | "conserve";
-  budgetConserve?: WorkflowConservePolicy;
-  reportProgress?: (progress: WorkflowTaskProgress) => void;
-}
-
-export type WorkflowRunner = (
-  context: WorkflowRunnerContext,
-) => Promise<WorkflowWorkerResult> | WorkflowWorkerResult;
-
-export interface WorkflowRunResult {
-  runId?: string;
-  status: "completed" | "failed";
-  summary: string;
-  plan: WorkflowPlan;
-  results: Record<string, WorkflowTaskRunResult>;
-  orderedResults: WorkflowTaskRunResult[];
-  needsReconciliation?: boolean;
-  reconciliationIssues?: WorkflowReconciliationIssue[];
-  budget?: WorkflowBudgetUsage;
-}
-
-export interface WorkflowRunSummary {
-  runId: string;
-  status: WorkflowRunSnapshotStatus;
-  summary: string;
-  mode: WorkflowMode;
-  totalTasks: number;
-  completedTasks: number;
-  failedTasks: number;
-  pendingTasks: number;
-  runningTasks: number;
-  blockedTasks: number;
-  needsReconciliation: boolean;
-  budget: WorkflowBudgetUsage;
-  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface WorkflowRunSnapshotPlan {
-  mode: WorkflowMode;
-  tasks: WorkflowTask[];
-  maxConcurrency: number | "unbounded";
-  defaultTaskTimeoutMs?: number;
-  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
-  budgetPolicy?: WorkflowBudgetPolicy;
-  executionOrder: string[];
-  dependencyMap: Record<string, string[]>;
-  dependentsMap: Record<string, string[]>;
-}
-
-export interface WorkflowRunningTask {
-  taskId: string;
-  attempt: number;
-  dependencies: string[];
-  startedAt: number;
-  summary: string;
-  budget?: WorkflowTaskBudgetUsage;
-  metadata?: Record<string, unknown>;
-}
-
-export interface WorkflowTaskProgress {
-  summary?: string;
-  metadata?: Record<string, unknown>;
-  budget?: WorkflowTaskBudgetUsage;
-}
-
-export interface WorkflowBlockedTask {
-  taskId: string;
-  reason: string;
-  waitingForTaskIds: string[];
-  writeScope?: string[];
-  conflictingWriteScope?: string[];
-}
-
-export interface WorkflowReconciliationIssue {
-  issueId: string;
-  type: "write-scope-overlap" | "changed-file-overlap";
-  severity: "needs-reconciliation" | "actual-conflict";
-  taskIds: string[];
-  writeScope: string[];
-  changedFiles?: string[];
-  summary: string;
-}
-
-export interface WorkflowReconciliationFileSummary {
-  path: string;
-  issueIds: string[];
-  taskIds: string[];
-  statuses: Record<string, WorkflowDiffFileSummary["status"]>;
-  insertions: number;
-  deletions: number;
-}
-
-export interface WorkflowReconciliationTaskSummary {
-  taskId: string;
-  issueIds: string[];
-  changedFiles: string[];
-  insertions: number;
-  deletions: number;
-}
-
-export interface WorkflowReconciliationSummary {
-  totalIssues: number;
-  actualConflicts: number;
-  declaredScopeOverlaps: number;
-  files: WorkflowReconciliationFileSummary[];
-  tasks: WorkflowReconciliationTaskSummary[];
-}
-
-export interface WorkflowReconciliationFollowUpAction {
-  actionId: string;
-  issueIds: string[];
-  taskId: string;
-  description: string;
-  prompt: string;
-  writeScope: string[];
-  dependsOn: string[];
-}
-
-export interface WorkflowReconciliationPlan {
-  needed: boolean;
-  summary: string;
-  actions: WorkflowReconciliationFollowUpAction[];
-}
-
-export interface WorkflowReconciliationSpecOptions {
-  actionIds?: string[];
-  issueIds?: string[];
-  verifyTaskId?: string;
-  budgetPolicyPreset?: WorkflowBudgetPolicyPreset;
-}
-
-export interface WorkflowBudgetUsage extends WorkflowTaskBudgetUsage {
-  tasks: Record<string, WorkflowTaskBudgetUsage>;
-}
-
-export type WorkflowRunSnapshotStatus = "running" | "completed" | "failed";
-
-export interface WorkflowRunSnapshot {
-  version: 1;
-  runId: string;
-  status: WorkflowRunSnapshotStatus;
-  summary: string;
-  spec: WorkflowSpec;
-  plan: WorkflowRunSnapshotPlan;
-  results: Record<string, WorkflowTaskRunResult>;
-  orderedResults: WorkflowTaskRunResult[];
-  pendingTaskIds: string[];
-  blockedTaskIds: string[];
-  blockedTasks: Record<string, WorkflowBlockedTask>;
-  runningTaskIds: string[];
-  runningTasks: Record<string, WorkflowRunningTask>;
-  budget: WorkflowBudgetUsage;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface WorkflowRunOptions {
-  runId?: string;
-  onSnapshot?: (snapshot: WorkflowRunSnapshot) => void;
-  onEvent?: (event: WorkflowRunEvent) => void;
-  initialResults?: Record<string, WorkflowTaskRunResult>;
-  initialRunningTasks?: Record<string, WorkflowRunningTask>;
-  createdAt?: number;
-}
-
-export type WorkflowRunEventType =
-  | "workflow_started"
-  | "task_started"
-  | "task_progress"
-  | "task_blocked"
-  | "workflow_budget_conserving"
-  | "workflow_budget_exceeded"
-  | "task_finished"
-  | "workflow_cancelled"
-  | "workflow_finished";
-
-export interface WorkflowRunEvent {
-  version: 1;
-  runId: string;
-  type: WorkflowRunEventType;
-  timestamp: number;
-  summary?: string;
-  taskId?: string;
-  attempt?: number;
-  status?: WorkflowTaskStatus | WorkflowRunResult["status"];
-  runningTask?: WorkflowRunningTask;
-  blockedTask?: WorkflowBlockedTask;
-  result?: WorkflowTaskRunResult;
-}
-
-export interface WorkflowNotificationTask {
-  taskId: string;
-  status: WorkflowTaskTerminalStatus;
-  summary: string;
-  attempts: number;
-  dependencies: string[];
-  startedAt: number;
-  finishedAt: number;
-  result?: string;
-  metadata?: Record<string, unknown>;
-  budget?: WorkflowTaskBudgetUsage;
-  reconciliationIssueIds?: string[];
-  skippedReason?: string;
-  timedOut?: boolean;
-  error?: string;
-}
-
-export interface WorkflowNotification {
-  runId?: string;
-  status: WorkflowRunResult["status"];
-  summary: string;
-  mode: WorkflowMode;
-  totalTasks: number;
-  completedTasks: number;
-  failedTasks: number;
-  needsReconciliation: boolean;
-  reconciliationIssues: WorkflowReconciliationIssue[];
-  reconciliationSummary: WorkflowReconciliationSummary;
-  reconciliationPlan: WorkflowReconciliationPlan;
-  budget: WorkflowBudgetUsage;
-  tasks: WorkflowNotificationTask[];
-}
-
-export type WorkflowTemplateName = "research-implement-verify" | "parallel-review" | "safe-write";
-
-export interface WorkflowSpecTemplate {
-  name: WorkflowTemplateName;
-  version: number;
-  description: string;
-  spec: WorkflowSpec;
-}
-
-export const WORKFLOW_SPEC_TEMPLATES: Record<WorkflowTemplateName, WorkflowSpecTemplate> = {
-  "research-implement-verify": {
-    name: "research-implement-verify",
-    version: 1,
-    description: "Pipeline for one focused change: inspect context, implement the change, then verify behavior.",
-    spec: {
-      mode: "pipeline",
-      budgetPolicyPreset: "safe-write",
-      tasks: [
-        { id: "research", description: "Inspect the relevant code and identify the minimal change." },
-        { id: "implement", description: "Apply the focused code change.", writeScope: ["."], isolate: true },
-        { id: "verify", description: "Run targeted checks and summarize the result.", readOnly: true },
-      ],
-    },
-  },
-  "parallel-review": {
-    name: "parallel-review",
-    version: 1,
-    description: "Parallel read-only review for independent areas before a Coordinator summary.",
-    spec: {
-      mode: "parallel",
-      maxConcurrency: 3,
-      budgetPolicyPreset: "cheap-review",
-      tasks: [
-        { id: "review-code", description: "Review implementation risks.", readOnly: true },
-        { id: "review-tests", description: "Review test coverage and likely gaps.", readOnly: true },
-        { id: "review-docs", description: "Review documentation or user-facing contract impact.", readOnly: true },
-      ],
-    },
-  },
-  "safe-write": {
-    name: "safe-write",
-    version: 1,
-    description: "Serial write workflow for risky edits where each step should finish before the next begins.",
-    spec: {
-      mode: "sequential",
-      budgetPolicyPreset: "safe-write",
-      failurePolicy: "fail-fast",
-      tasks: [
-        { id: "plan", description: "Confirm exact files and risk before editing.", readOnly: true },
-        { id: "write", description: "Make the smallest safe edit.", writeScope: ["."], isolate: true },
-        { id: "check", description: "Run checks and report remaining risk.", readOnly: true },
-      ],
-    },
-  },
-};
-
-export interface WorkflowValidationIssue {
-  severity: "error" | "warning";
-  code: string;
-  message: string;
-  taskIds?: string[];
-}
-
-export interface WorkflowValidationReport {
-  valid: boolean;
-  issues: WorkflowValidationIssue[];
-  plan?: WorkflowPlan;
-}
-
-export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
-  const tasks = normalizeTasksForMode(spec.mode, spec.tasks);
-  validateWorkflowTimeouts(spec.defaultTaskTimeoutMs, tasks);
-  validateWorkflowBudgetPolicyPreset(spec.budgetPolicyPreset);
-  const budgetPolicy = resolveWorkflowBudgetPolicy(spec.budgetPolicyPreset, spec.budgetPolicy);
-  validateWorkflowBudgetPolicy(budgetPolicy);
-  validateWorkflowTasks(tasks);
-  const dependencyMap = buildDependencyMap(tasks);
-  const dependentsMap = buildDependentsMap(tasks);
-  const executionOrder = topologicalOrder(tasks, dependencyMap);
-
-  return {
-    mode: spec.mode,
-    tasks,
-    maxConcurrency: resolveMaxConcurrency(spec.mode, spec.maxConcurrency),
-    defaultTaskTimeoutMs: spec.defaultTaskTimeoutMs,
-    budgetPolicyPreset: spec.budgetPolicyPreset,
-    budgetPolicy,
-    executionOrder,
-    dependencyMap,
-    dependentsMap,
-  };
-}
-
-export function createWorkflowValidationReport(spec: WorkflowSpec): WorkflowValidationReport {
-  try {
-    const plan = createWorkflowPlan(spec);
-    const issues: WorkflowValidationIssue[] = [];
-    for (let i = 0; i < plan.tasks.length; i += 1) {
-      const left = plan.tasks[i]!;
-      for (const right of plan.tasks.slice(i + 1)) {
-        if (!workflowTasksConflict(left, right)) continue;
-        issues.push({
-          severity: "warning",
-          code: "write-scope-overlap",
-          message: `Tasks '${left.id}' and '${right.id}' have overlapping non-isolated write scopes and will be serialized.`,
-          taskIds: [left.id, right.id],
-        });
-      }
-    }
-    return {
-      valid: issues.every((issue) => issue.severity !== "error"),
-      issues,
-      plan,
-    };
-  } catch (error) {
-    return {
-      valid: false,
-      issues: [{
-        severity: "error",
-        code: "invalid-workflow-spec",
-        message: error instanceof Error ? error.message : String(error),
-      }],
-    };
-  }
-}
+export { WORKFLOW_BUDGET_POLICY_PRESETS, WORKFLOW_SPEC_TEMPLATES } from "./workflow-model.js";
+export {
+  createWorkflowPlan,
+  createWorkflowValidationReport,
+  validateWorkflowTasks,
+  workflowTasksConflict,
+} from "./workflow-validation.js";
+export type {
+  WorkflowMode,
+  WorkflowFailurePolicy,
+  WorkflowTaskTerminalStatus,
+  WorkflowTaskStatus,
+  WorkflowRetryPolicy,
+  WorkflowTask,
+  WorkflowSpec,
+  WorkflowPlan,
+  WorkflowWorkerResult,
+  WorkflowTaskBudgetUsage,
+  WorkflowBudgetPolicy,
+  WorkflowConservePolicy,
+  WorkflowBudgetPolicyPreset,
+  WorkflowDiffFileSummary,
+  WorkflowDiffSummary,
+  WorkflowTaskRunResult,
+  WorkflowRunnerContext,
+  WorkflowRunner,
+  WorkflowRunResult,
+  WorkflowRunSummary,
+  WorkflowRunSnapshotPlan,
+  WorkflowRunningTask,
+  WorkflowTaskProgress,
+  WorkflowBlockedTask,
+  WorkflowReconciliationIssue,
+  WorkflowReconciliationFileSummary,
+  WorkflowReconciliationTaskSummary,
+  WorkflowReconciliationSummary,
+  WorkflowReconciliationFollowUpAction,
+  WorkflowReconciliationPlan,
+  WorkflowReconciliationSpecOptions,
+  WorkflowBudgetUsage,
+  WorkflowRunSnapshotStatus,
+  WorkflowRunSnapshot,
+  WorkflowRunOptions,
+  WorkflowRunEventType,
+  WorkflowRunEvent,
+  WorkflowNotificationTask,
+  WorkflowNotification,
+  WorkflowTemplateName,
+  WorkflowSpecTemplate,
+  WorkflowValidationIssue,
+  WorkflowValidationReport,
+} from "./workflow-model.js";
 
 export function createWorkflowNotification(result: WorkflowRunResult): WorkflowNotification {
   const completedTasks = result.orderedResults.filter((task) => task.status === "completed").length;
@@ -582,37 +191,6 @@ export function parseWorkflowNotification(text: string): WorkflowNotification | 
   } catch {
     return undefined;
   }
-}
-
-export function validateWorkflowTasks(tasks: WorkflowTask[]): void {
-  const seen = new Set<string>();
-  for (const task of tasks) {
-    const id = task.id.trim();
-    if (!id) {
-      throw new Error("Workflow task id cannot be empty");
-    }
-    if (seen.has(id)) {
-      throw new Error(`Duplicate workflow task id '${id}'`);
-    }
-    seen.add(id);
-  }
-
-  for (const task of tasks) {
-    for (const dependency of task.dependsOn ?? []) {
-      if (!seen.has(dependency)) {
-        throw new Error(`Task '${task.id}' depends on missing task '${dependency}'`);
-      }
-    }
-  }
-
-  topologicalOrder(tasks, buildDependencyMap(tasks));
-}
-
-export function workflowTasksConflict(a: WorkflowTask, b: WorkflowTask): boolean {
-  const aScopes = runnableWriteScopes(a);
-  const bScopes = runnableWriteScopes(b);
-  if (aScopes.length === 0 || bScopes.length === 0) return false;
-  return aScopes.some((aScope) => bScopes.some((bScope) => writeScopesOverlap(aScope, bScope)));
 }
 
 export async function runWorkflow(
@@ -1085,159 +663,9 @@ class WorkflowTaskTimeoutError extends Error {
   }
 }
 
-function normalizeTasksForMode(mode: WorkflowMode, tasks: WorkflowTask[]): WorkflowTask[] {
-  return tasks.map((task, index) => {
-    const dependsOn = [...(task.dependsOn ?? [])];
-    if ((mode === "sequential" || mode === "pipeline") && index > 0) {
-      const previous = tasks[index - 1]?.id;
-      if (previous && !dependsOn.includes(previous)) {
-        dependsOn.push(previous);
-      }
-    }
-    return { ...task, id: task.id.trim(), dependsOn };
-  });
-}
-
-function resolveMaxConcurrency(mode: WorkflowMode, value: number | undefined): number {
-  if (mode === "sequential" || mode === "pipeline") return 1;
-  if (value === undefined) return Number.POSITIVE_INFINITY;
-  if (!Number.isFinite(value) || value < 1) {
-    throw new Error("maxConcurrency must be a positive number");
-  }
-  return Math.floor(value);
-}
-
-function validateWorkflowTimeouts(defaultTaskTimeoutMs: number | undefined, tasks: WorkflowTask[]): void {
-  validateTimeoutMs(defaultTaskTimeoutMs, "defaultTaskTimeoutMs");
-  for (const task of tasks) {
-    validateTimeoutMs(task.timeoutMs, `tasks.${task.id}.timeoutMs`);
-  }
-}
-
-function validateWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy | undefined): void {
-  if (!policy) return;
-  validateBudgetPolicyNumber(policy.maxTokensUsed, "budgetPolicy.maxTokensUsed");
-  validateBudgetPolicyNumber(policy.maxTimeUsedMs, "budgetPolicy.maxTimeUsedMs");
-  validateBudgetPolicyNumber(policy.softMaxTokensUsed, "budgetPolicy.softMaxTokensUsed");
-  validateBudgetPolicyNumber(policy.softMaxTimeUsedMs, "budgetPolicy.softMaxTimeUsedMs");
-  if (
-    policy.onSoftLimit !== undefined &&
-    policy.onSoftLimit !== "continue" &&
-    policy.onSoftLimit !== "serialize" &&
-    policy.onSoftLimit !== "conserve" &&
-    policy.onSoftLimit !== "serialize-and-conserve"
-  ) {
-    throw new Error("budgetPolicy.onSoftLimit must be one of: continue, serialize, conserve, serialize-and-conserve");
-  }
-  if (policy.conserve?.maxTurns !== undefined && (!Number.isInteger(policy.conserve.maxTurns) || policy.conserve.maxTurns < 1)) {
-    throw new Error("budgetPolicy.conserve.maxTurns must be a positive integer");
-  }
-  if (
-    policy.conserve?.permissionMode !== undefined &&
-    policy.conserve.permissionMode !== "default" &&
-    policy.conserve.permissionMode !== "plan"
-  ) {
-    throw new Error("budgetPolicy.conserve.permissionMode must be one of: default, plan");
-  }
-}
-
-function validateWorkflowBudgetPolicyPreset(preset: WorkflowBudgetPolicyPreset | undefined): void {
-  if (preset === undefined) return;
-  if (!(preset in WORKFLOW_BUDGET_POLICY_PRESETS)) {
-    throw new Error("budgetPolicyPreset must be one of: cheap-review, safe-write, fast-parallel");
-  }
-}
-
-function resolveWorkflowBudgetPolicy(
-  preset: WorkflowBudgetPolicyPreset | undefined,
-  policy: WorkflowBudgetPolicy | undefined,
-): WorkflowBudgetPolicy | undefined {
-  if (!preset) return policy;
-  return mergeWorkflowBudgetPolicy(WORKFLOW_BUDGET_POLICY_PRESETS[preset], policy);
-}
-
-function mergeWorkflowBudgetPolicy(
-  presetPolicy: WorkflowBudgetPolicy,
-  policy: WorkflowBudgetPolicy | undefined,
-): WorkflowBudgetPolicy {
-  if (!policy) {
-    return cloneWorkflowBudgetPolicy(presetPolicy);
-  }
-  return {
-    ...cloneWorkflowBudgetPolicy(presetPolicy),
-    ...policy,
-    conserve: presetPolicy.conserve || policy.conserve
-      ? {
-          ...presetPolicy.conserve,
-          ...policy.conserve,
-        }
-      : undefined,
-  };
-}
-
-function cloneWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy): WorkflowBudgetPolicy {
-  return {
-    ...policy,
-    conserve: policy.conserve ? { ...policy.conserve } : undefined,
-  };
-}
-
-function validateBudgetPolicyNumber(value: number | undefined, label: string): void {
-  if (value === undefined) return;
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`${label} must be a positive number`);
-  }
-}
-
-function validateTimeoutMs(value: number | undefined, label: string): void {
-  if (value === undefined) return;
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`${label} must be a positive number`);
-  }
-}
-
 function resolveTaskTimeoutMs(plan: WorkflowPlan, task: WorkflowTask): number | undefined {
   const timeoutMs = task.timeoutMs ?? plan.defaultTaskTimeoutMs;
   return timeoutMs === undefined ? undefined : Math.floor(timeoutMs);
-}
-
-function buildDependencyMap(tasks: WorkflowTask[]): Record<string, string[]> {
-  return Object.fromEntries(tasks.map((task) => [task.id, [...(task.dependsOn ?? [])]]));
-}
-
-function buildDependentsMap(tasks: WorkflowTask[]): Record<string, string[]> {
-  const dependents = Object.fromEntries(tasks.map((task) => [task.id, [] as string[]]));
-  for (const task of tasks) {
-    for (const dependency of task.dependsOn ?? []) {
-      dependents[dependency]?.push(task.id);
-    }
-  }
-  return dependents;
-}
-
-function topologicalOrder(tasks: WorkflowTask[], dependencyMap: Record<string, string[]>): string[] {
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const result: string[] = [];
-
-  const visit = (taskId: string, stack: string[]) => {
-    if (visited.has(taskId)) return;
-    if (visiting.has(taskId)) {
-      throw new Error(`Workflow dependency cycle detected: ${[...stack, taskId].join(" -> ")}`);
-    }
-    visiting.add(taskId);
-    for (const dependency of dependencyMap[taskId] ?? []) {
-      visit(dependency, [...stack, taskId]);
-    }
-    visiting.delete(taskId);
-    visited.add(taskId);
-    result.push(taskId);
-  };
-
-  for (const task of tasks) {
-    visit(task.id, []);
-  }
-  return result;
 }
 
 function normalizeRetry(policy: WorkflowRetryPolicy | undefined): Required<WorkflowRetryPolicy> {
@@ -1382,20 +810,6 @@ function createInitialReadyQueue(
 
 function hasFailedInitialResult(results: Map<string, WorkflowTaskRunResult>): boolean {
   return [...results.values()].some((result) => result.status !== "completed" && result.status !== "skipped");
-}
-
-function runnableWriteScopes(task: WorkflowTask): string[] {
-  if (task.readOnly === true || task.isolate === true) return [];
-  return (task.writeScope ?? []).map(normalizeWriteScope).filter((scope) => scope.length > 0);
-}
-
-function normalizeWriteScope(scope: string): string {
-  const normalized = scope.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
-  return normalized === "." ? "" : normalized.toLowerCase();
-}
-
-function writeScopesOverlap(a: string, b: string): boolean {
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
 function collectWorkflowReconciliationIssues(
@@ -1646,74 +1060,6 @@ function summaryWithReconciliation(summary: string, issues: WorkflowReconciliati
     : `${summary}; ${issues.length} reconciliation issue(s)`;
 }
 
-function workflowBudgetFromMetadata(metadata: Record<string, unknown> | undefined): WorkflowTaskBudgetUsage | undefined {
-  if (!metadata) return undefined;
-  const budget = isRecord(metadata.budget) ? metadata.budget : metadata;
-  return normalizeBudgetUsage({
-    tokensUsed: budget.tokensUsed,
-    tokenBudget: budget.tokenBudget,
-    timeUsedMs: budget.timeUsedMs,
-    timeBudgetMs: budget.timeBudgetMs,
-  });
-}
-
-function collectWorkflowBudgetUsage(
-  orderedResults: WorkflowTaskRunResult[],
-  runningTasks: WorkflowRunningTask[] = [],
-): WorkflowBudgetUsage {
-  const tasks: Record<string, WorkflowTaskBudgetUsage> = {};
-  for (const result of orderedResults) {
-    const budget = result.budget ?? workflowBudgetFromMetadata(result.metadata);
-    if (budget) tasks[result.taskId] = budget;
-  }
-  for (const task of runningTasks) {
-    const budget = task.budget ?? workflowBudgetFromMetadata(task.metadata);
-    if (budget) tasks[task.taskId] = budget;
-  }
-
-  return {
-    tasks,
-    tokensUsed: sumBudget(tasks, "tokensUsed"),
-    tokenBudget: sumBudget(tasks, "tokenBudget"),
-    timeUsedMs: sumBudget(tasks, "timeUsedMs"),
-    timeBudgetMs: sumBudget(tasks, "timeBudgetMs"),
-  };
-}
-
-function workflowBudgetPolicyExceeded(
-  policy: WorkflowBudgetPolicy | undefined,
-  budget: WorkflowBudgetUsage,
-): string | undefined {
-  if (!policy) return undefined;
-  if (policy.maxTokensUsed !== undefined && (budget.tokensUsed ?? 0) >= policy.maxTokensUsed) {
-    return `Skipped because workflow token budget exceeded (${budget.tokensUsed ?? 0}/${policy.maxTokensUsed})`;
-  }
-  if (policy.maxTimeUsedMs !== undefined && (budget.timeUsedMs ?? 0) >= policy.maxTimeUsedMs) {
-    return `Skipped because workflow time budget exceeded (${budget.timeUsedMs ?? 0}/${policy.maxTimeUsedMs}ms)`;
-  }
-  return undefined;
-}
-
-function workflowBudgetSoftLimit(
-  policy: WorkflowBudgetPolicy | undefined,
-  budget: WorkflowBudgetUsage,
-): { summary: string; serialize: boolean; conserve: boolean } | undefined {
-  if (!policy) return undefined;
-  const reason =
-    policy.softMaxTokensUsed !== undefined && (budget.tokensUsed ?? 0) >= policy.softMaxTokensUsed
-      ? `Workflow token soft budget reached (${budget.tokensUsed ?? 0}/${policy.softMaxTokensUsed})`
-      : policy.softMaxTimeUsedMs !== undefined && (budget.timeUsedMs ?? 0) >= policy.softMaxTimeUsedMs
-        ? `Workflow time soft budget reached (${budget.timeUsedMs ?? 0}/${policy.softMaxTimeUsedMs}ms)`
-        : undefined;
-  if (!reason) return undefined;
-  const action = policy.onSoftLimit ?? "serialize-and-conserve";
-  return {
-    summary: `${reason}; applying ${action}`,
-    serialize: action === "serialize" || action === "serialize-and-conserve",
-    conserve: action === "conserve" || action === "serialize-and-conserve",
-  };
-}
-
 function changedFilesFromResult(result: WorkflowTaskRunResult | undefined): string[] {
   const metadata = result?.metadata;
   if (!metadata) return [];
@@ -1764,29 +1110,6 @@ function normalizeDiffFileStatus(status: unknown): WorkflowDiffFileSummary["stat
 
 function sumMapValues(values: Map<string, number>): number {
   return [...values.values()].reduce((total, value) => total + value, 0);
-}
-
-function cloneBudgetUsage(budget: WorkflowTaskBudgetUsage | undefined): WorkflowTaskBudgetUsage | undefined {
-  return budget ? { ...budget } : undefined;
-}
-
-function normalizeBudgetUsage(input: Record<keyof WorkflowTaskBudgetUsage, unknown>): WorkflowTaskBudgetUsage | undefined {
-  const budget: WorkflowTaskBudgetUsage = {};
-  if (typeof input.tokensUsed === "number" && Number.isFinite(input.tokensUsed)) budget.tokensUsed = input.tokensUsed;
-  if (typeof input.tokenBudget === "number" && Number.isFinite(input.tokenBudget)) budget.tokenBudget = input.tokenBudget;
-  if (typeof input.timeUsedMs === "number" && Number.isFinite(input.timeUsedMs)) budget.timeUsedMs = input.timeUsedMs;
-  if (typeof input.timeBudgetMs === "number" && Number.isFinite(input.timeBudgetMs)) budget.timeBudgetMs = input.timeBudgetMs;
-  return Object.keys(budget).length > 0 ? budget : undefined;
-}
-
-function sumBudget(
-  tasks: Record<string, WorkflowTaskBudgetUsage>,
-  field: keyof WorkflowTaskBudgetUsage,
-): number | undefined {
-  const values = Object.values(tasks)
-    .map((budget) => budget[field])
-    .filter((value): value is number => typeof value === "number");
-  return values.length === 0 ? undefined : values.reduce((total, value) => total + value, 0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
