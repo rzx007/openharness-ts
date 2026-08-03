@@ -198,10 +198,91 @@ describe("OpenHarnessHttpServer", () => {
       expect((await fetch(`${baseUrl}/health`)).status).toBe(401);
       const response = await fetch(`${baseUrl}/health`, { headers: auth(token) });
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
+      expect(await response.json()).toMatchObject({
         ok: true,
+        startedAt: expect.any(Number),
+        uptimeMs: expect.any(Number),
+        sessionCount: 0,
+        activeRunCount: 0,
+        queuedRunCount: 0,
+      });
+
+      expect((await fetch(`${baseUrl}/debug/runtime`)).status).toBe(401);
+      const runtime = await fetch(`${baseUrl}/debug/runtime`, { headers: auth(token) });
+      expect(runtime.status).toBe(200);
+      expect(await runtime.json()).toMatchObject({
+        startedAt: expect.any(Number),
+        uptimeMs: expect.any(Number),
+        sessions: { total: 0, byStatus: {} },
+        runs: { total: 0, byStatus: {} },
+        tasks: { total: 0, byStatus: {} },
+        permissions: { total: 0, byStatus: {} },
+        sseClientCount: 0,
+        warmRuntimeCount: 0,
+        coordinator: { activeRunCount: 0, queuedRunCount: 0 },
       });
     });
+  });
+
+  it("reports aggregate running and queued work without transcript content", async () => {
+    const releaseFirst = deferred();
+    const runtimeFactory: SessionRuntimeFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(input) {
+            if (input.input.content === "private first prompt") await releaseFirst.promise;
+            return { messages: [] };
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(async ({ baseUrl, token }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m" }),
+      });
+      await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "private first prompt" }),
+      });
+      await waitForEvent(baseUrl, token, (event) =>
+        event.type === "session.run.updated" &&
+        (event.payload?.run as { status?: string } | undefined)?.status === "running",
+      );
+      await fetch(`${baseUrl}/sessions/s1/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "private queued prompt" }),
+      });
+
+      const response = await fetch(`${baseUrl}/debug/runtime`, { headers: auth(token) });
+      expect(response.status).toBe(200);
+      const snapshot = await response.json() as {
+        sessions: { total: number; byStatus: Record<string, number> };
+        runs: { total: number; byStatus: Record<string, number> };
+        sseClientCount: number;
+        warmRuntimeCount: number;
+        coordinator: { activeRunCount: number; queuedRunCount: number };
+      };
+      expect(snapshot).toMatchObject({
+        sessions: { total: 1, byStatus: { running: 1 } },
+        runs: { total: 2, byStatus: { running: 1, pending: 1 } },
+        sseClientCount: 0,
+        warmRuntimeCount: 1,
+        coordinator: { activeRunCount: 1, queuedRunCount: 1 },
+      });
+      expect(JSON.stringify(snapshot)).not.toContain("private");
+
+      releaseFirst.resolve();
+      await waitForEvent(baseUrl, token, (event) =>
+        event.type === "session.run.updated" &&
+        (event.payload?.run as { status?: string } | undefined)?.status === "completed",
+      );
+    }, { runtimeFactory });
   });
 
   it("propagates a trace ID through HTTP, persisted prompt/run, and tool lifecycle logs", async () => {
@@ -279,12 +360,14 @@ describe("OpenHarnessHttpServer", () => {
       expect(preflight.status).toBe(204);
       expect(preflight.headers.get("access-control-allow-origin")).toBe("https://desk.example");
       expect(preflight.headers.get("access-control-allow-headers")).toContain("authorization");
+      expect(preflight.headers.get("access-control-allow-headers")).toContain("x-openharness-trace-id");
 
       const allowed = await fetch(`${baseUrl}/health`, {
         headers: { ...auth(token), origin: "https://desk.example" },
       });
       expect(allowed.status).toBe(200);
       expect(allowed.headers.get("access-control-allow-origin")).toBe("https://desk.example");
+      expect(allowed.headers.get("access-control-expose-headers")).toContain("x-openharness-trace-id");
 
       const denied = await fetch(`${baseUrl}/health`, {
         headers: { ...auth(token), origin: "https://untrusted.example" },

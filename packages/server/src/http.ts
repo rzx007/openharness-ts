@@ -78,6 +78,23 @@ export interface OpenHarnessServerOptions {
 export interface OpenHarnessServerHealth {
   ok: true;
   version?: string;
+  startedAt: number;
+  uptimeMs: number;
+  sessionCount: number;
+  activeRunCount: number;
+  queuedRunCount: number;
+}
+
+export interface OpenHarnessRuntimeSnapshot {
+  startedAt: number;
+  uptimeMs: number;
+  sessions: { total: number; byStatus: Record<string, number> };
+  runs: { total: number; byStatus: Record<string, number> };
+  tasks: { total: number; byStatus: Record<string, number> };
+  permissions: { total: number; byStatus: Record<string, number> };
+  sseClientCount: number;
+  warmRuntimeCount: number;
+  coordinator: { activeRunCount: number; queuedRunCount: number };
 }
 
 export interface ListenResult {
@@ -152,6 +169,13 @@ function normalizeTraceId(value: unknown): string | undefined {
 function withoutTraceId(metadata: Record<string, unknown>): Record<string, unknown> {
   const { traceId: _traceId, ...rest } = metadata;
   return rest;
+}
+
+function countByStatus(records: ReadonlyArray<{ status: string }>): Record<string, number> {
+  return records.reduce<Record<string, number>>((counts, record) => {
+    counts[record.status] = (counts[record.status] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 function normalizeAllowedOrigins(origins: readonly string[]): Set<string> {
@@ -279,6 +303,7 @@ export class OpenHarnessHttpServer {
   private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
   private readonly requestTraceIds = new WeakMap<Request, string>();
   private readonly startupRecovery: Promise<void>;
+  private readonly startedAt = Date.now();
   private listener?: Listener;
   private listenResult?: ListenResult;
 
@@ -430,10 +455,8 @@ export class OpenHarnessHttpServer {
       await next();
     });
 
-    this.app.get("/health", () => jsonResponse({
-      ok: true,
-      ...(this.version ? { version: this.version } : {}),
-    } satisfies OpenHarnessServerHealth));
+    this.app.get("/health", () => this.handleHealth());
+    this.app.get("/debug/runtime", () => jsonResponse(this.runtimeSnapshot()));
     this.app.get("/commands", (c) => this.handleListCommands(c));
     this.app.get("/settings", (c) => this.handleGetSettings(c));
     this.app.patch("/settings", (c) => this.handlePatchSettings(c));
@@ -500,6 +523,46 @@ export class OpenHarnessHttpServer {
 
   private log(event: ObservabilityEvent): void {
     this.logger(event);
+  }
+
+  private handleHealth(): Response {
+    const snapshot = this.runtimeSnapshot();
+    return jsonResponse({
+      ok: true,
+      ...(this.version ? { version: this.version } : {}),
+      startedAt: snapshot.startedAt,
+      uptimeMs: snapshot.uptimeMs,
+      sessionCount: snapshot.sessions.total,
+      activeRunCount: snapshot.coordinator.activeRunCount,
+      queuedRunCount: snapshot.coordinator.queuedRunCount,
+    } satisfies OpenHarnessServerHealth);
+  }
+
+  private runtimeSnapshot(): OpenHarnessRuntimeSnapshot {
+    const sessions = this.store.listSessions({ includeArchived: true });
+    const runs = sessions.flatMap((session) => this.store.listRuns(session.id));
+    const tasks = sessions.flatMap((session) => this.store.listSessionTasks(session.id));
+    const permissions = this.store.listPermissionRequests();
+    const activeRunCount = sessions.filter((session) => this.runCoordinator.activeRunId(session.id) !== undefined).length;
+    const queuedRunCount = sessions.reduce(
+      (count, session) => count + this.runCoordinator.queuedRunIds(session.id).length,
+      0,
+    );
+    const now = Date.now();
+    return {
+      startedAt: this.startedAt,
+      uptimeMs: now - this.startedAt,
+      sessions: { total: sessions.length, byStatus: countByStatus(sessions) },
+      runs: { total: runs.length, byStatus: countByStatus(runs) },
+      tasks: { total: tasks.length, byStatus: countByStatus(tasks) },
+      permissions: {
+        total: permissions.length,
+        byStatus: countByStatus(permissions),
+      },
+      sseClientCount: this.sseClients.size,
+      warmRuntimeCount: this.runtimes.size,
+      coordinator: { activeRunCount, queuedRunCount },
+    };
   }
 
   private traceIdForRun(runId: string): string {

@@ -37,4 +37,10 @@ TUI / print / Web 请求
 
 ## 后续阶段
 
-Task 16B 在此约定上增加 `/health` 运行快照和受保护的 metrics/debug 接口；Task 16C 使用同一 trace 断言 daemon 重启、SSE 重连、权限、恢复与并发 session 的端到端行为。
+## 运行快照
+
+`GET /health` 与 `GET /debug/runtime` 都需要 daemon bearer token。前者适合 CLI、远程 attach 和存活探测，返回版本、启动时间、运行时长、session 总数以及内存 coordinator 的 active/queued run 数量。
+
+`GET /debug/runtime` 用于人工诊断，额外返回 session/run/task/permission 的状态计数、SSE attach 数、warm runtime 数和 coordinator 队列计数。它不返回 store 路径、session 内容、工具参数/结果或认证信息，因此可以作为未来 Desktop/Web 状态页的只读数据源。
+
+Task 16C 将使用同一 trace 断言 daemon 重启、SSE 重连、权限、恢复与并发 session 的端到端行为。

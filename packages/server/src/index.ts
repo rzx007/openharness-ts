@@ -4,6 +4,7 @@ export {
   type ListenResult,
   type OpenHarnessServerHealth,
   type OpenHarnessServerOptions,
+  type OpenHarnessRuntimeSnapshot,
 } from "./http.js";
 export {
   BUILTIN_SESSION_COMMANDS,
