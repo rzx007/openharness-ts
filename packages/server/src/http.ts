@@ -8,12 +8,10 @@ import {
   SessionStore,
   getTaskManager,
   type TaskInfo,
-  type PermissionStatus,
   type SessionEventRecord,
 } from "@openharness/services";
 
 import {
-  mergeCommandCatalog,
   normalizeCommandName,
   parseSlashLine,
   type CommandCatalogProvider,
@@ -23,7 +21,6 @@ import { StorePermissionBroker } from "./permission-broker.js";
 import { RunInterruptedError, SessionRunCoordinator } from "./run-coordinator.js";
 import type { ChildSessionHost, SessionRuntime, SessionRuntimeFactory } from "./runtime.js";
 import type { SessionTaskBridge } from "./runtime.js";
-import { writeSessionExport, type SessionExportFormat } from "./export-session.js";
 import type {
   AgentPersonaService,
   AuthService,
@@ -39,8 +36,6 @@ import type {
   ProviderService,
   SettingsService,
 } from "./settings-api.js";
-import { rewindTranscript } from "./rewind.js";
-import { estimateCostUsd } from "./usage.js";
 import {
   TRACE_ID_HEADER,
   writeStructuredLog,
@@ -65,15 +60,23 @@ import {
   readEventCursor,
   readJson,
   readLimit,
-  readPermissionStatus,
   runtimeSessionMetadataChanged,
   sessionMutationErrorStatus,
   withoutTraceId,
   workflowRunIdFromSessionEvent,
   type ActiveRunRenderState,
   type JsonRecord,
+  type OpenHarnessRuntimeSnapshot,
   type SseClient,
 } from "./http-support.js";
+import { createSystemRoutes } from "./http-system-routes.js";
+import { createMemoryRoutes } from "./http-memory-routes.js";
+import { createAuthRoutes } from "./http-auth-routes.js";
+import { createServiceRoutes } from "./http-service-routes.js";
+import { createGitRoutes } from "./http-git-routes.js";
+import { createPermissionRoutes } from "./http-permission-routes.js";
+import { createSessionUtilityRoutes } from "./http-session-utility-routes.js";
+import { createTaskRoutes } from "./http-task-routes.js";
 
 export interface OpenHarnessServerOptions {
   host?: string;
@@ -102,27 +105,7 @@ export interface OpenHarnessServerOptions {
   logger?: StructuredLogger;
 }
 
-export interface OpenHarnessServerHealth {
-  ok: true;
-  version?: string;
-  startedAt: number;
-  uptimeMs: number;
-  sessionCount: number;
-  activeRunCount: number;
-  queuedRunCount: number;
-}
-
-export interface OpenHarnessRuntimeSnapshot {
-  startedAt: number;
-  uptimeMs: number;
-  sessions: { total: number; byStatus: Record<string, number> };
-  runs: { total: number; byStatus: Record<string, number> };
-  tasks: { total: number; byStatus: Record<string, number> };
-  permissions: { total: number; byStatus: Record<string, number> };
-  sseClientCount: number;
-  warmRuntimeCount: number;
-  coordinator: { activeRunCount: number; queuedRunCount: number };
-}
+export type { OpenHarnessRuntimeSnapshot, OpenHarnessServerHealth } from "./http-support.js";
 
 export interface ListenResult {
   host: string;
@@ -316,59 +299,90 @@ export class OpenHarnessHttpServer {
       await next();
     });
 
-    this.app.get("/health", () => this.handleHealth());
-    this.app.get("/debug/runtime", () => jsonResponse(this.runtimeSnapshot()));
-    this.app.get("/commands", (c) => this.handleListCommands(c));
-    this.app.get("/settings", (c) => this.handleGetSettings(c));
-    this.app.patch("/settings", (c) => this.handlePatchSettings(c));
-    this.app.get("/providers", (c) => this.handleListProviders(c));
-    this.app.get("/memory", (c) => this.handleListMemory(c));
-    this.app.get("/memory/:entryId", (c) => this.handleGetMemory(c));
-    this.app.post("/memory", (c) => this.handleAddMemory(c));
-    this.app.delete("/memory/:entryId", (c) => this.handleRemoveMemory(c));
-    this.app.get("/auth", (c) => this.handleAuthStatus(c));
-    this.app.post("/auth/login", (c) => this.handleAuthLogin(c));
-    this.app.post("/auth/logout", (c) => this.handleAuthLogout(c));
-    this.app.get("/context", (c) => this.handleContextPreview(c));
-    this.app.post("/dream", (c) => this.handleStartDream(c));
-    this.app.get("/profile", (c) => this.handleProfileStatus(c));
-    this.app.post("/profile/init", (c) => this.handleProfileInit(c));
-    this.app.get("/output-styles", (c) => this.handleListOutputStyles(c));
-    this.app.post("/project/init", (c) => this.handleProjectInit(c));
-    this.app.get("/plugins", (c) => this.handleListPlugins(c));
-    this.app.post("/plugins/:name/enable", (c) => this.handleEnablePlugin(c));
-    this.app.post("/plugins/:name/disable", (c) => this.handleDisablePlugin(c));
-    this.app.post("/plugins/reload", (c) => this.handleReloadPlugins(c));
-    this.app.get("/agent-personas", (c) => this.handleListAgentPersonas(c));
-    this.app.get("/hooks", (c) => this.handleListHooks(c));
-    this.app.get("/git/diff", (c) => this.handleGitDiff(c));
-    this.app.get("/git/branch", (c) => this.handleGitBranch(c));
-    this.app.get("/git/status", (c) => this.handleGitStatus(c));
-    this.app.post("/git/commit", (c) => this.handleGitCommit(c));
-    this.app.get("/tasks", (c) => this.handleListTasks(c));
-    this.app.post("/tasks", (c) => this.handleCreateTask(c));
-    this.app.get("/tasks/:taskId", (c) => this.handleGetTask(c));
-    this.app.post("/tasks/:taskId/stop", (c) => this.handleStopTask(c));
+    this.app.route("/", createSystemRoutes({
+      version: this.version,
+      commandCatalog: this.commandCatalog,
+      settingsService: this.settingsService,
+      providerService: this.providerService,
+      runtimeSnapshot: () => this.runtimeSnapshot(),
+      hasAnyActiveRuns: () => this.hasAnyActiveRuns(),
+      closeAllRuntimes: () => this.closeAllRuntimes(),
+    }));
+    this.app.route("/memory", createMemoryRoutes({
+      memoryService: this.memoryService,
+      hasActiveRunsForCwd: (cwd) => this.hasActiveRunsForCwd(cwd),
+      closeRuntimesForCwd: (cwd) => this.closeRuntimesForCwd(cwd),
+    }));
+    this.app.route("/auth", createAuthRoutes({
+      authService: this.authService,
+      hasAnyActiveRuns: () => this.hasAnyActiveRuns(),
+      closeAllRuntimes: () => this.closeAllRuntimes(),
+    }));
+    this.app.route("/", createServiceRoutes({
+      contextService: this.contextService,
+      dreamService: this.dreamService,
+      profileService: this.profileService,
+      outputStyleService: this.outputStyleService,
+      projectInitService: this.projectInitService,
+      pluginService: this.pluginService,
+      agentPersonaService: this.agentPersonaService,
+      hooksService: this.hooksService,
+      hasAnyActiveRuns: () => this.hasAnyActiveRuns(),
+      hasActiveRunsForCwd: (cwd) => this.hasActiveRunsForCwd(cwd),
+      closeAllRuntimes: () => this.closeAllRuntimes(),
+      closeRuntimesForCwd: (cwd) => this.closeRuntimesForCwd(cwd),
+      sessionExists: (sessionId) => this.store.getSession(sessionId) !== undefined,
+      inspectRuntimeHooks: this.runtimeFactory
+        ? async (sessionId) => {
+            await this.warmRuntime(sessionId);
+            const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
+            if (!runtime?.inspect) return [];
+            return (await runtime.inspect()).hooks ?? [];
+          }
+        : undefined,
+    }));
+    this.app.route("/git", createGitRoutes({ gitService: this.gitService }));
+    this.app.route("/tasks", createTaskRoutes({
+      getSession: (sessionId) => this.store.getSession(sessionId),
+      listSessionTasks: (sessionId) => this.store.listSessionTasks(sessionId),
+      getSessionTask: (taskId) => this.store.getSessionTask(taskId),
+      createSessionTask: (input) => this.store.createSessionTask(input),
+      latestEventSeq: () => this.latestEventSeq(),
+      broadcastSince: (seq) => this.broadcastSince(seq),
+      projectManagerTasks: (sessionId, manager) => this.projectManagerTasks(sessionId, manager),
+      trackTask: (manager, taskId) => this.trackTask(manager, taskId),
+      syncPersistentTask: (task, manager, persistedId) => this.syncPersistentTask(task, manager, persistedId),
+    }));
+    this.app.route("/permissions", createPermissionRoutes({
+      listRequests: (input) => this.permissionBroker.listRequests(input),
+      reply: (input) => this.permissionBroker.reply(input),
+      traceIdForRequest: (request) => this.traceIdForRequest(request),
+    }));
+    this.app.route("/sessions", createSessionUtilityRoutes({
+      store: this.store,
+      runtimeFactory: this.runtimeFactory,
+      hasRunWork: (sessionId) => this.runCoordinator.hasWork(sessionId),
+      hasActiveRunsForCwd: (cwd) => this.hasActiveRunsForCwd(cwd),
+      warmRuntime: (sessionId) => this.warmRuntime(sessionId),
+      runtimeForSession: async (sessionId) =>
+        this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined,
+      latestEventSeq: () => this.latestEventSeq(),
+      broadcastSince: (seq) => this.broadcastSince(seq),
+      closeRuntime: (sessionId) => this.closeRuntime(sessionId),
+      closeRuntimesForCwd: (cwd) => this.closeRuntimesForCwd(cwd),
+    }));
     this.app.get("/sessions", (c) => this.handleListSessions(c));
     this.app.post("/sessions", (c) => this.handleCreateSession(c));
     this.app.get("/sessions/:sessionId", (c) => this.handleGetSession(c));
     this.app.patch("/sessions/:sessionId", (c) => this.handleUpdateSession(c));
     this.app.get("/sessions/:sessionId/state", (c) => this.handleGetSessionState(c));
     this.app.delete("/sessions/:sessionId", (c) => this.handleArchiveSession(c));
-    this.app.get("/sessions/:sessionId/mcp", (c) => this.handleGetSessionMcp(c));
-    this.app.get("/sessions/:sessionId/usage", (c) => this.handleGetSessionUsage(c));
-    this.app.post("/sessions/:sessionId/export", (c) => this.handleExportSession(c));
-    this.app.post("/sessions/:sessionId/compact", (c) => this.handleCompactSession(c));
-    this.app.post("/sessions/:sessionId/rewind", (c) => this.handleRewindSession(c));
-    this.app.post("/sessions/:sessionId/remember", (c) => this.handleRememberSession(c));
     this.app.get("/sessions/:sessionId/messages", (c) => this.handleListMessages(c));
     this.app.get("/sessions/:sessionId/parts", (c) => this.handleListMessageParts(c));
     this.app.post("/sessions/:sessionId/prompts", (c) => this.handleAdmitPrompt(c));
     this.app.post("/sessions/:sessionId/runs/:runId/resume", (c) => this.handleResumeInterruptedRun(c));
     this.app.post("/sessions/:sessionId/commands", (c) => this.handleInvokeCommand(c));
     this.app.post("/sessions/:sessionId/interrupt", (c) => this.handleInterruptSession(c));
-    this.app.get("/permissions", (c) => this.handleListPermissions(c));
-    this.app.post("/permissions/:requestId/reply", (c) => this.handleReplyPermission(c));
     this.app.get("/events", (c) => this.handleListEvents(c));
     this.app.get("/events/stream", (c) => this.handleEventStream(c));
   }
@@ -379,24 +393,15 @@ export class OpenHarnessHttpServer {
   }
 
   private traceIdForContext(c: Context): string {
-    return this.requestTraceIds.get(c.req.raw) ?? randomUUID();
+    return this.traceIdForRequest(c.req.raw);
+  }
+
+  private traceIdForRequest(request: Request): string {
+    return this.requestTraceIds.get(request) ?? randomUUID();
   }
 
   private log(event: ObservabilityEvent): void {
     this.logger(event);
-  }
-
-  private handleHealth(): Response {
-    const snapshot = this.runtimeSnapshot();
-    return jsonResponse({
-      ok: true,
-      ...(this.version ? { version: this.version } : {}),
-      startedAt: snapshot.startedAt,
-      uptimeMs: snapshot.uptimeMs,
-      sessionCount: snapshot.sessions.total,
-      activeRunCount: snapshot.coordinator.activeRunCount,
-      queuedRunCount: snapshot.coordinator.queuedRunCount,
-    } satisfies OpenHarnessServerHealth);
   }
 
   private runtimeSnapshot(): OpenHarnessRuntimeSnapshot {
@@ -435,665 +440,9 @@ export class OpenHarnessHttpServer {
     return generated;
   }
 
-  private async handleListCommands(c: Context): Promise<Response> {
-    const cwd = c.req.query("cwd");
-    if (!cwd) return errorResponse(400, "cwd is required");
-    try {
-      const extras = this.commandCatalog ? await this.commandCatalog.list({ cwd }) : [];
-      return jsonResponse({ commands: mergeCommandCatalog(extras) });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGetSettings(c: Context): Promise<Response> {
-    if (!this.settingsService) return errorResponse(501, "Settings service is not configured");
-    try {
-      return jsonResponse({ settings: await this.settingsService.get() });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handlePatchSettings(c: Context): Promise<Response> {
-    if (!this.settingsService) return errorResponse(501, "Settings service is not configured");
-    if (this.hasAnyActiveRuns()) {
-      return errorResponse(409, "Cannot update daemon settings while session runs are active");
-    }
-    const body = await readJson(c);
-    try {
-      const result = await this.settingsService.patch(body);
-      if (result.restartRuntimes) await this.closeAllRuntimes();
-      return jsonResponse({ settings: result.settings });
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleListProviders(c: Context): Promise<Response> {
-    if (!this.providerService) return errorResponse(501, "Provider service is not configured");
-    try {
-      return jsonResponse({ providers: await this.providerService.list() });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleListMemory(c: Context): Promise<Response> {
-    if (!this.memoryService) return errorResponse(501, "Memory service is not configured");
-    const cwd = c.req.query("cwd");
-    if (!cwd) return errorResponse(400, "cwd is required");
-    try {
-      return jsonResponse(await this.memoryService.list({ cwd }));
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGetMemory(c: Context): Promise<Response> {
-    if (!this.memoryService) return errorResponse(501, "Memory service is not configured");
-    const cwd = c.req.query("cwd");
-    const entryId = c.req.param("entryId");
-    if (!cwd) return errorResponse(400, "cwd is required");
-    if (!entryId) return errorResponse(400, "entryId is required");
-    try {
-      const entry = await this.memoryService.get({ cwd, id: entryId });
-      if (!entry) return errorResponse(404, `Memory entry not found: ${entryId}`);
-      return jsonResponse({ entry });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleAddMemory(c: Context): Promise<Response> {
-    if (!this.memoryService) return errorResponse(501, "Memory service is not configured");
-    const body = await readJson(c);
-    if (typeof body.cwd !== "string") return errorResponse(400, "cwd is required");
-    if (typeof body.content !== "string" || !body.content.trim()) {
-      return errorResponse(400, "content is required");
-    }
-    if (this.hasActiveRunsForCwd(body.cwd)) {
-      return errorResponse(409, "Cannot update memory while session runs are active for this cwd");
-    }
-    const tags = Array.isArray(body.tags)
-      ? body.tags.filter((tag): tag is string => typeof tag === "string")
-      : undefined;
-    try {
-      const entry = await this.memoryService.add({ cwd: body.cwd, content: body.content, tags });
-      await this.closeRuntimesForCwd(body.cwd);
-      return jsonResponse({ entry }, 201);
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleRemoveMemory(c: Context): Promise<Response> {
-    if (!this.memoryService) return errorResponse(501, "Memory service is not configured");
-    const cwd = c.req.query("cwd");
-    const entryId = c.req.param("entryId");
-    if (!cwd) return errorResponse(400, "cwd is required");
-    if (!entryId) return errorResponse(400, "entryId is required");
-    if (this.hasActiveRunsForCwd(cwd)) {
-      return errorResponse(409, "Cannot update memory while session runs are active for this cwd");
-    }
-    try {
-      const deleted = await this.memoryService.remove({ cwd, id: entryId });
-      if (!deleted) return errorResponse(404, `Memory entry not found: ${entryId}`);
-      await this.closeRuntimesForCwd(cwd);
-      return jsonResponse({ deleted: true, id: entryId });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleAuthStatus(c: Context): Promise<Response> {
-    if (!this.authService) return errorResponse(501, "Auth service is not configured");
-    try {
-      return jsonResponse({ auth: await this.authService.status() });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleAuthLogin(c: Context): Promise<Response> {
-    if (!this.authService) return errorResponse(501, "Auth service is not configured");
-    const body = await readJson(c);
-    if (typeof body.provider !== "string" || !body.provider.trim()) {
-      return errorResponse(400, "provider is required");
-    }
-    if (this.hasAnyActiveRuns()) {
-      return errorResponse(409, "Cannot update authentication while session runs are active");
-    }
-    try {
-      const result = await this.authService.login({
-        provider: body.provider,
-        apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
-      });
-      await this.closeAllRuntimes();
-      return jsonResponse(result);
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleAuthLogout(c: Context): Promise<Response> {
-    if (!this.authService) return errorResponse(501, "Auth service is not configured");
-    const body = await readJson(c);
-    if (typeof body.provider !== "string" || !body.provider.trim()) {
-      return errorResponse(400, "provider is required");
-    }
-    if (this.hasAnyActiveRuns()) {
-      return errorResponse(409, "Cannot update authentication while session runs are active");
-    }
-    try {
-      const result = await this.authService.logout({ provider: body.provider });
-      await this.closeAllRuntimes();
-      return jsonResponse(result);
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleContextPreview(c: Context): Promise<Response> {
-    if (!this.contextService) return errorResponse(501, "Context service is not configured");
-    const cwd = c.req.query("cwd");
-    if (!cwd) return errorResponse(400, "cwd is required");
-    try {
-      return jsonResponse(await this.contextService.preview({ cwd }));
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleStartDream(c: Context): Promise<Response> {
-    if (!this.dreamService) return errorResponse(501, "Dream service is not configured");
-    const body = await readJson(c);
-    if (typeof body.cwd !== "string" || !body.cwd.trim()) {
-      return errorResponse(400, "cwd is required");
-    }
-    try {
-      const result = await this.dreamService.start({
-        cwd: body.cwd,
-        sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
-        preview: body.preview === true,
-      });
-      if (!result.started) {
-        return errorResponse(409, result.reason ?? "Dream was not started");
-      }
-      return jsonResponse({ taskId: result.taskId }, 201);
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleProfileStatus(c: Context): Promise<Response> {
-    if (!this.profileService) return errorResponse(501, "Profile service is not configured");
-    try {
-      return jsonResponse(await this.profileService.status());
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleProfileInit(c: Context): Promise<Response> {
-    if (!this.profileService) return errorResponse(501, "Profile service is not configured");
-    if (this.hasAnyActiveRuns()) {
-      return errorResponse(409, "Cannot initialize profile while session runs are active");
-    }
-    try {
-      const result = await this.profileService.init();
-      await this.closeAllRuntimes();
-      return jsonResponse(result);
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleListOutputStyles(c: Context): Promise<Response> {
-    if (!this.outputStyleService) return errorResponse(501, "Output style service is not configured");
-    try {
-      return jsonResponse({ styles: await this.outputStyleService.list() });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleProjectInit(c: Context): Promise<Response> {
-    if (!this.projectInitService) return errorResponse(501, "Project init service is not configured");
-    const body = await readJson(c);
-    const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
-    if (!cwd) return errorResponse(400, "cwd is required");
-    try {
-      return jsonResponse(await this.projectInitService.init({ cwd }));
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleListPlugins(c: Context): Promise<Response> {
-    if (!this.pluginService) return errorResponse(501, "Plugin service is not configured");
-    const cwd = c.req.query("cwd") ?? undefined;
-    if (!cwd) return errorResponse(400, "cwd is required");
-    try {
-      return jsonResponse(await this.pluginService.list({ cwd }));
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleEnablePlugin(c: Context): Promise<Response> {
-    return await this.handleSetPluginEnabled(c, true);
-  }
-
-  private async handleDisablePlugin(c: Context): Promise<Response> {
-    return await this.handleSetPluginEnabled(c, false);
-  }
-
-  private async handleSetPluginEnabled(c: Context, enabled: boolean): Promise<Response> {
-    if (!this.pluginService) return errorResponse(501, "Plugin service is not configured");
-    const name = c.req.param("name");
-    if (!name) return errorResponse(400, "plugin name is required");
-    if (this.hasAnyActiveRuns()) {
-      return errorResponse(409, "Cannot update plugins while session runs are active");
-    }
-    try {
-      const result = await this.pluginService.setEnabled({ name, enabled });
-      if (result.restartRuntimes) await this.closeAllRuntimes();
-      return jsonResponse({ message: result.message });
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleListAgentPersonas(c: Context): Promise<Response> {
-    if (!this.agentPersonaService) return errorResponse(501, "Agent persona service is not configured");
-    try {
-      return jsonResponse(await this.agentPersonaService.list());
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleListHooks(c: Context): Promise<Response> {
-    if (!this.hooksService) return errorResponse(501, "Hooks service is not configured");
-    const cwd = c.req.query("cwd") ?? undefined;
-    if (!cwd) return errorResponse(400, "cwd is required");
-    const sessionId = c.req.query("sessionId") ?? undefined;
-    try {
-      const listed = await this.hooksService.list({ cwd, ...(sessionId ? { sessionId } : {}) });
-      const hooks = [...listed.hooks];
-      if (sessionId && this.runtimeFactory) {
-        const session = this.store.getSession(sessionId);
-        if (!session) return errorResponse(404, "Session not found");
-        await this.warmRuntime(sessionId);
-        const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
-        if (runtime?.inspect) {
-          const inspect = await runtime.inspect();
-          for (const hook of inspect.hooks ?? []) {
-            if (!hooks.some((row) => row.id === hook.id && row.origin === hook.origin)) {
-              hooks.push(hook);
-            }
-          }
-        }
-      }
-      return jsonResponse({ hooks });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGitDiff(c: Context): Promise<Response> {
-    if (!this.gitService) return errorResponse(501, "Git service is not configured");
-    const cwd = c.req.query("cwd") ?? undefined;
-    if (!cwd) return errorResponse(400, "cwd is required");
-    const full = c.req.query("full") === "true" || c.req.query("full") === "1";
-    try {
-      return jsonResponse(await this.gitService.diff({ cwd, full }));
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGitBranch(c: Context): Promise<Response> {
-    if (!this.gitService) return errorResponse(501, "Git service is not configured");
-    const cwd = c.req.query("cwd") ?? undefined;
-    if (!cwd) return errorResponse(400, "cwd is required");
-    const list = c.req.query("list") === "true" || c.req.query("list") === "1";
-    try {
-      return jsonResponse(await this.gitService.branch({ cwd, list }));
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGitStatus(c: Context): Promise<Response> {
-    if (!this.gitService) return errorResponse(501, "Git service is not configured");
-    const cwd = c.req.query("cwd") ?? undefined;
-    if (!cwd) return errorResponse(400, "cwd is required");
-    try {
-      return jsonResponse(await this.gitService.status({ cwd }));
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGitCommit(c: Context): Promise<Response> {
-    if (!this.gitService) return errorResponse(501, "Git service is not configured");
-    const body = await readJson(c);
-    const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
-    const message = typeof body.message === "string" ? body.message.trim() : "";
-    if (!cwd) return errorResponse(400, "cwd is required");
-    if (!message) return errorResponse(400, "message is required");
-    try {
-      return jsonResponse(await this.gitService.commit({ cwd, message }));
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleReloadPlugins(c: Context): Promise<Response> {
-    if (!this.pluginService) return errorResponse(501, "Plugin service is not configured");
-    const body = await readJson(c);
-    const cwd = typeof body.cwd === "string" ? body.cwd : c.req.query("cwd") ?? undefined;
-    if (!cwd) return errorResponse(400, "cwd is required");
-    if (this.hasActiveRunsForCwd(cwd)) {
-      return errorResponse(409, "Cannot reload plugins while session runs are active for this cwd");
-    }
-    try {
-      await this.closeRuntimesForCwd(cwd);
-      const listed = await this.pluginService.list({ cwd });
-      return jsonResponse({
-        ...listed,
-        message: "Plugins rediscovered; session runtimes will reload on next use.",
-      });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGetSessionUsage(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-    const messageCount = this.store.listMessages(sessionId).length;
-    try {
-      await this.warmRuntime(sessionId);
-      const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
-      const usage = runtime?.getUsage
-        ? await runtime.getUsage()
-        : {
-          inputTokens: 0,
-          outputTokens: 0,
-          messageCount,
-        };
-      const estimatedCost = estimateCostUsd(
-        session.model,
-        usage.inputTokens,
-        usage.outputTokens,
-      );
-      return jsonResponse({
-        model: session.model,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cacheCreationTokens: usage.cacheCreationTokens ?? 0,
-        cacheReadTokens: usage.cacheReadTokens ?? 0,
-        messageCount: usage.messageCount ?? messageCount,
-        estimatedCost,
-      });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleExportSession(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-    const body = await readJson(c);
-    const forceJson = body.json === true || body.format === "json";
-    const filename = typeof body.filename === "string" ? body.filename : undefined;
-    const format: SessionExportFormat =
-      forceJson || (filename?.endsWith(".json") ?? false) ? "json" : "md";
-    try {
-      const result = await writeSessionExport({
-        session,
-        messages: this.store.listMessages(sessionId),
-        parts: this.store.listMessageParts(sessionId),
-        format,
-        filename,
-      });
-      return jsonResponse(result);
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleCompactSession(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-    if (!this.runtimeFactory) return errorResponse(501, "Runtime factory is not configured");
-    if (this.runCoordinator.hasWork(sessionId)) {
-      return errorResponse(409, "Cannot compact while a run is active");
-    }
-    try {
-      await this.warmRuntime(sessionId);
-      const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
-      if (!runtime?.compact) return errorResponse(501, "Session runtime does not support compact");
-      const before = this.latestEventSeq();
-      const compacted = await runtime.compact();
-      const replaced = this.store.replaceTranscript({
-        sessionId,
-        messages: compacted.transcript,
-      });
-      this.broadcastSince(before);
-      return jsonResponse({
-        messageCount: compacted.messageCount,
-        messages: replaced.messages,
-        parts: replaced.parts,
-      });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleRewindSession(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-    if (this.runCoordinator.hasWork(sessionId)) {
-      return errorResponse(409, "Cannot rewind while a run is active");
-    }
-    const body = await readJson(c);
-    const rawCount = body.count ?? 1;
-    const count = typeof rawCount === "number" ? rawCount : Number.parseInt(String(rawCount), 10);
-    if (!Number.isInteger(count) || count < 1) {
-      return errorResponse(400, "count must be a positive integer");
-    }
-    try {
-      const rewound = rewindTranscript(
-        this.store.listMessages(sessionId),
-        this.store.listMessageParts(sessionId),
-        count,
-      );
-      if (rewound.removed === 0) return errorResponse(400, "No messages to rewind");
-      const before = this.latestEventSeq();
-      const replaced = this.store.replaceTranscript({
-        sessionId,
-        messages: rewound.kept,
-      });
-      await this.closeRuntime(sessionId);
-      this.broadcastSince(before);
-      return jsonResponse({
-        turns: rewound.turns,
-        removed: rewound.removed,
-        messages: replaced.messages,
-        parts: replaced.parts,
-      });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleRememberSession(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-    if (!this.runtimeFactory) return errorResponse(501, "Runtime factory is not configured");
-    if (this.hasActiveRunsForCwd(session.cwd)) {
-      return errorResponse(409, "Cannot remember while session runs are active for this cwd");
-    }
-    try {
-      await this.warmRuntime(sessionId);
-      const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
-      if (!runtime?.remember) return errorResponse(501, "Session runtime does not support remember");
-      const result = await runtime.remember();
-      await this.closeRuntimesForCwd(session.cwd);
-      return jsonResponse(result);
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
-  }
-
   private async closeRuntimesForCwd(cwd: string): Promise<void> {
     const sessions = this.store.listSessions({ cwd, includeArchived: true });
     await Promise.all(sessions.map((session) => this.closeRuntime(session.id)));
-  }
-
-  private resolveTaskScope(c: Context): { cwd: string; sessionId?: string } | Response {
-    const sessionId = c.req.query("sessionId") ?? undefined;
-    let cwd = c.req.query("cwd") ?? undefined;
-    if (sessionId) {
-      const session = this.store.getSession(sessionId);
-      if (!session) return errorResponse(404, "Session not found");
-      cwd = cwd ?? session.cwd;
-    }
-    if (!cwd) return errorResponse(400, "cwd or sessionId is required");
-    return { cwd, ...(sessionId ? { sessionId } : {}) };
-  }
-
-  private handleListTasks(c: Context): Response {
-    const scope = this.resolveTaskScope(c);
-    if (scope instanceof Response) return scope;
-    if (scope.sessionId) {
-      this.projectManagerTasks(scope.sessionId, getTaskManager(scope));
-      const tasks = this.store.listSessionTasks(scope.sessionId);
-      const status = c.req.query("status");
-      return jsonResponse({ tasks: status ? tasks.filter((task) => task.status === status) : tasks });
-    }
-    const tasks = getTaskManager(scope).listTasks(c.req.query("status") ?? undefined);
-    return jsonResponse({ tasks });
-  }
-
-  private async handleCreateTask(c: Context): Promise<Response> {
-    const body = await readJson(c);
-    const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-    let cwd = typeof body.cwd === "string" ? body.cwd : undefined;
-    if (sessionId) {
-      const session = this.store.getSession(sessionId);
-      if (!session) return errorResponse(404, "Session not found");
-      cwd = cwd ?? session.cwd;
-    }
-    if (!cwd) return errorResponse(400, "cwd or sessionId is required");
-    const command = typeof body.command === "string" ? body.command.trim() : "";
-    if (!command) return errorResponse(400, "command is required");
-    try {
-      const id = sessionId ? `task_${randomUUID()}` : undefined;
-      const manager = getTaskManager({ cwd, ...(sessionId ? { sessionId } : {}) });
-      const task = await manager.createShellTask({
-        ...(id ? { id } : {}),
-        command,
-        description: command,
-        cwd,
-        ...(sessionId ? { sessionId } : {}),
-      });
-      if (sessionId) {
-        const before = this.latestEventSeq();
-        this.store.createSessionTask({
-          id: task.id,
-          sessionId,
-          type: task.type,
-          description: task.description,
-          cwd: task.cwd,
-          metadata: { origin: "http", taskManagerId: task.id },
-        });
-        this.trackTask(manager, task.id);
-        this.syncPersistentTask(task, manager);
-        this.broadcastSince(before);
-      }
-      return jsonResponse({ task }, 201);
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private handleGetTask(c: Context): Response {
-    const taskId = c.req.param("taskId");
-    if (!taskId) return errorResponse(400, "taskId is required");
-    const scope = this.resolveTaskScope(c);
-    if (scope instanceof Response) return scope;
-    const manager = getTaskManager(scope);
-    if (scope.sessionId) {
-      this.projectManagerTasks(scope.sessionId, manager);
-      const task = this.store.getSessionTask(taskId);
-      if (!task || task.sessionId !== scope.sessionId) return errorResponse(404, `Task not found: ${taskId}`);
-      const managerTaskId = typeof task.metadata.taskManagerId === "string" ? task.metadata.taskManagerId : task.id;
-      let output = task.output;
-      try { output = manager.readTaskOutput(managerTaskId); } catch { /* durable state remains available after restart */ }
-      return jsonResponse({ task, ...(output !== undefined ? { output } : {}) });
-    }
-    const task = manager.getTask(taskId);
-    if (!task) return errorResponse(404, `Task not found: ${taskId}`);
-    let output: string | undefined;
-    try {
-      output = manager.readTaskOutput(taskId);
-    } catch {
-      output = undefined;
-    }
-    return jsonResponse({ task, ...(output !== undefined ? { output } : {}) });
-  }
-
-  private async handleStopTask(c: Context): Promise<Response> {
-    const taskId = c.req.param("taskId");
-    if (!taskId) return errorResponse(400, "taskId is required");
-    const scope = this.resolveTaskScope(c);
-    if (scope instanceof Response) return scope;
-    try {
-      const manager = getTaskManager(scope);
-      if (scope.sessionId) this.projectManagerTasks(scope.sessionId, manager);
-      const persisted = scope.sessionId ? this.store.getSessionTask(taskId) : undefined;
-      const managerTaskId = persisted && typeof persisted.metadata.taskManagerId === "string"
-        ? persisted.metadata.taskManagerId
-        : taskId;
-      const task = await manager.stopTask(managerTaskId);
-      if (scope.sessionId && persisted) {
-        this.syncPersistentTask(task, manager, persisted.id);
-      }
-      return jsonResponse({ task });
-    } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleGetSessionMcp(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-    try {
-      await this.warmRuntime(sessionId);
-      const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
-      if (!runtime?.inspect) return jsonResponse({ servers: [] as unknown[] });
-      const inspect = await runtime.inspect();
-      return jsonResponse({ servers: inspect.mcpServers });
-    } catch (error) {
-      return errorResponse(500, error instanceof Error ? error.message : String(error));
-    }
   }
 
   private handleListSessions(c: Context): Response {
@@ -2067,51 +1416,7 @@ export class OpenHarnessHttpServer {
     return jsonResponse({ events });
   }
 
-  private handleListPermissions(c: Context): Response {
-    let status: PermissionStatus | undefined;
-    try {
-      status = readPermissionStatus(c.req.query("status"));
-    } catch (error) {
-      return errorResponse(400, error instanceof Error ? error.message : String(error));
-    }
-    const requests = this.permissionBroker.listRequests({
-      sessionId: c.req.query("sessionId") ?? undefined,
-      status,
-      toolName: c.req.query("toolName") ?? undefined,
-      limit: readLimit(c.req.query("limit")),
-    });
-    return jsonResponse({ requests });
-  }
-
-  private async handleReplyPermission(c: Context): Promise<Response> {
-    const requestId = c.req.param("requestId");
-    if (!requestId) return errorResponse(400, "requestId is required");
-    const body = await readJson(c);
-    const status = body.status;
-    if (status !== "approved" && status !== "denied" && status !== "expired") {
-      return errorResponse(400, "status must be approved, denied, or expired");
-    }
-    const decision = body.decision;
-    if (decision !== undefined && decision !== "once" && decision !== "session") {
-      return errorResponse(400, "decision must be once or session");
-    }
-
-    try {
-      const request = this.permissionBroker.reply({
-        requestId,
-        traceId: this.traceIdForContext(c),
-        status,
-        decision,
-        clientId: typeof body.clientId === "string" ? body.clientId : undefined,
-      });
-      return jsonResponse({ request });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return errorResponse(message.includes("not found") ? 404 : 409, message);
-    }
-  }
-
-  private handleEventStream(c: Context): Response {
+      private handleEventStream(c: Context): Response {
     const sessionId = c.req.query("sessionId") ?? undefined;
     let client: SseClient | undefined;
 

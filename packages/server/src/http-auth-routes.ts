@@ -1,0 +1,59 @@
+import { Hono } from "hono";
+
+import { errorResponse, jsonResponse, readJson } from "./http-support.js";
+import type { AuthService } from "./settings-api.js";
+
+export interface AuthRoutesContext {
+  authService?: AuthService;
+  hasAnyActiveRuns(): boolean;
+  closeAllRuntimes(): Promise<void>;
+}
+
+export function createAuthRoutes(context: AuthRoutesContext): Hono {
+  return new Hono()
+    .get("/", async () => {
+      if (!context.authService) return errorResponse(501, "Auth service is not configured");
+      try {
+        return jsonResponse({ auth: await context.authService.status() });
+      } catch (error) {
+        return errorResponse(500, error instanceof Error ? error.message : String(error));
+      }
+    })
+    .post("/login", async (c) => {
+      if (!context.authService) return errorResponse(501, "Auth service is not configured");
+      const body = await readJson(c);
+      if (typeof body.provider !== "string" || !body.provider.trim()) {
+        return errorResponse(400, "provider is required");
+      }
+      if (context.hasAnyActiveRuns()) {
+        return errorResponse(409, "Cannot update authentication while session runs are active");
+      }
+      try {
+        const result = await context.authService.login({
+          provider: body.provider,
+          apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+        });
+        await context.closeAllRuntimes();
+        return jsonResponse(result);
+      } catch (error) {
+        return errorResponse(400, error instanceof Error ? error.message : String(error));
+      }
+    })
+    .post("/logout", async (c) => {
+      if (!context.authService) return errorResponse(501, "Auth service is not configured");
+      const body = await readJson(c);
+      if (typeof body.provider !== "string" || !body.provider.trim()) {
+        return errorResponse(400, "provider is required");
+      }
+      if (context.hasAnyActiveRuns()) {
+        return errorResponse(409, "Cannot update authentication while session runs are active");
+      }
+      try {
+        const result = await context.authService.logout({ provider: body.provider });
+        await context.closeAllRuntimes();
+        return jsonResponse(result);
+      } catch (error) {
+        return errorResponse(400, error instanceof Error ? error.message : String(error));
+      }
+    });
+}

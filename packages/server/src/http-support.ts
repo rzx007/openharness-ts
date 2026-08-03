@@ -1,7 +1,30 @@
 import type { Context } from "hono";
-import type { PermissionStatus, SessionEventRecord } from "@openharness/services";
 
 export type JsonRecord = Record<string, unknown>;
+
+export type HttpPermissionStatus = "pending" | "approved" | "denied" | "expired";
+
+export interface OpenHarnessServerHealth {
+  ok: true;
+  version?: string;
+  startedAt: number;
+  uptimeMs: number;
+  sessionCount: number;
+  activeRunCount: number;
+  queuedRunCount: number;
+}
+
+export interface OpenHarnessRuntimeSnapshot {
+  startedAt: number;
+  uptimeMs: number;
+  sessions: { total: number; byStatus: Record<string, number> };
+  runs: { total: number; byStatus: Record<string, number> };
+  tasks: { total: number; byStatus: Record<string, number> };
+  permissions: { total: number; byStatus: Record<string, number> };
+  sseClientCount: number;
+  warmRuntimeCount: number;
+  coordinator: { activeRunCount: number; queuedRunCount: number };
+}
 
 export type SseClient = {
   sessionId?: string;
@@ -97,7 +120,7 @@ export function normalizeAllowedOrigins(origins: readonly string[]): Set<string>
   return normalized;
 }
 
-export function workflowRunIdFromSessionEvent(event: SessionEventRecord): string | undefined {
+export function workflowRunIdFromSessionEvent(event: { payload: Record<string, unknown> }): string | undefined {
   const workflowEvent = event.payload.event;
   return isRecord(workflowEvent) && typeof workflowEvent.runId === "string"
     ? workflowEvent.runId
@@ -133,7 +156,7 @@ export function jsonEqual(left: unknown, right: unknown): boolean {
   return false;
 }
 
-export function readPermissionStatus(value: string | undefined): PermissionStatus | undefined {
+export function readPermissionStatus(value: string | undefined): HttpPermissionStatus | undefined {
   if (!value) return undefined;
   if (value === "pending" || value === "approved" || value === "denied" || value === "expired") return value;
   throw new Error("Invalid permission status");
