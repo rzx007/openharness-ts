@@ -1,13 +1,13 @@
-# Remote Attach
+# 远程连接
 
-Task 12 defines two separate connection modes.
+Task 12 定义两种彼此隔离的连接模式。
 
-- **Local discovery:** `ohs` and `ohs --tui` use the private local daemon registry under `~/.openharness-ts/daemon/`. The registry contains a bearer token and must not be copied to another machine.
-- **Remote attach:** Web, Desktop, and another machine receive an explicit daemon URL plus bearer token through a secure channel. They never read the local registry.
+- **本机发现：** `ohs` 与 `ohs --tui` 使用 `~/.openharness-ts/daemon/` 下的私有 daemon registry。该文件含 bearer token，不能复制到其它机器。
+- **远程连接：** Web、Desktop 或另一台机器通过安全渠道获得明确的 daemon URL 与 bearer token；它们绝不读取本机 registry。
 
-## Start a browser-capable daemon
+## 启动可供浏览器连接的 daemon
 
-The default daemon binds to `127.0.0.1`. A non-loopback bind requires an explicit token. Browser origins are deny-by-default and must be listed exactly.
+默认 daemon 绑定 `127.0.0.1`。绑定到非 loopback 地址时必须显式提供 token。浏览器 origin 默认拒绝，必须逐条精确列出。
 
 ```bash
 ohs serve --host 0.0.0.0 --port 8787 \
@@ -16,9 +16,9 @@ ohs serve --host 0.0.0.0 --port 8787 \
   --allow-origin http://localhost:5173
 ```
 
-Put TLS and any network access policy in front of a non-loopback daemon. Do not put the token in a URL, query string, browser local storage shared by untrusted pages, or a copied local registry file.
+非 loopback daemon 前应部署 TLS 与网络访问策略。不要把 token 放进 URL、query string、不受信任页面可读取的浏览器本地存储，或复制出来的本机 registry 文件。
 
-## Attach a TUI
+## 连接 TUI
 
 ```bash
 ohs --tui \
@@ -26,11 +26,11 @@ ohs --tui \
   --daemon-token "$OPENHARNESS_DAEMON_TOKEN"
 ```
 
-`--daemon-url` never starts or replaces a local daemon. It passes the explicit connection descriptor to the normal TUI client path.
+`--daemon-url` 不会启动或替换本机 daemon，只会把明确的连接描述传入正常的 TUI 客户端路径。
 
 ## Web/Desktop SDK
 
-`@openharness/client` uses `fetch`, including for SSE, so the bearer token is sent in the `Authorization` header without placing it in the event-stream URL.
+`@openharness/client` 对普通 HTTP 与 SSE 都使用 `fetch`，因此 bearer token 通过 `Authorization` header 发送，不会出现在事件流 URL 中。
 
 ```ts
 import { OpenHarnessClient, syncEvents } from "@openharness/client";
@@ -45,4 +45,4 @@ const sessions = await client.listSessions();
 const state = await syncEvents(client);
 ```
 
-An allowed browser origin controls which pages may issue cross-origin requests. It is not an authentication substitute: every remote request still needs the bearer token.
+允许的浏览器 origin 只控制哪些页面能发起跨域请求，并不能替代认证：每个远程请求仍必须携带 bearer token。

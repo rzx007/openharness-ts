@@ -61,20 +61,19 @@ therefore cannot make an unrelated active run appear idle. Runtime-affecting ses
 and daemon settings are rejected while a session run is active; callers retry after the run is
 terminal instead of closing a live runtime underneath it.
 
-### 3.1.2 Daemon restart recovery is explicit
+### 3.1.2 Daemon 重启恢复必须显式化
 
-A daemon restart restores durable records, not the old process. It marks leftover session runs
-as `interrupted`, completes any persisted `closing` archive, and preserves parent/child sessions,
-messages, canonical parts, permissions, and event history for inspection.
+Daemon 重启恢复的是持久记录，不是旧进程本身。它会把遗留 session run 标记为
+`interrupted`，完成已持久化但停在 `closing` 的归档，并保留 parent/child session、消息、
+canonical parts、权限和事件历史供用户审计。
 
-Workflow snapshots are project-local, so the server only reconciles a `running` workflow when a
-persisted `workflow.workflow_started` event proves that this daemon session owned its run id. The
-snapshot becomes terminal (`killed` for running tasks and `skipped` for unstarted tasks) and the
-session event stream receives `workflow.workflow_cancelled` with
-`recoveredAfterDaemonRestart: true`. A same-project workflow without that session ownership event
-is not touched. A corrupt owned snapshot records `workflow.workflow_recovery_failed` without
-preventing the daemon from serving the remaining sessions. Restart never silently resumes a provider stream, a TaskManager task, or a child
-session: those in-memory owners no longer exist. A later explicit user action may start new work.
+workflow snapshot 位于项目目录，因此 server 只会收口仍为 `running` 且有持久化
+`workflow.workflow_started` 事件证明归属于当前 daemon session 的 run。该 snapshot 会进入终态：
+运行中的 task 标为 `killed`，未启动 task 标为 `skipped`；session 事件流追加带有
+`recoveredAfterDaemonRestart: true` 的 `workflow.workflow_cancelled`。同项目中没有该
+session 所有权事件的 workflow 不会被修改。归属的 snapshot 若损坏，只会记录
+`workflow.workflow_recovery_failed`，不会阻止 daemon 为其它 session 提供服务。重启不会悄悄恢复
+provider stream、TaskManager task 或 child session，因为这些进程内所有权已经消失；后续工作必须由用户显式重新发起。
 
 ### 3.2 Prompt 准入是持久化的
 
