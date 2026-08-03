@@ -50,6 +50,11 @@ export interface OpenHarnessClientOptions {
 export interface OpenHarnessServerHealth {
   ok: true;
   version?: string;
+  startedAt: number;
+  uptimeMs: number;
+  sessionCount: number;
+  activeRunCount: number;
+  queuedRunCount: number;
 }
 
 /** `GET /sessions` 查询参数。 */

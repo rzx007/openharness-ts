@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { OpenHarnessClient, streamServerSentEvents } from "./client.js";
+import { normalizeDaemonBaseUrl, OpenHarnessClient, streamServerSentEvents } from "./client.js";
 import { syncEvents } from "./sync.js";
 import type { SessionEventRecord, SessionRecord, SessionStateSnapshot } from "./types.js";
 
@@ -16,6 +16,14 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 }
 
 describe("OpenHarnessClient", () => {
+  it("normalizes safe daemon URLs and rejects URL-based credential leaks", () => {
+    expect(normalizeDaemonBaseUrl(" https://daemon.example/api/ ")).toBe("https://daemon.example/api");
+    expect(() => normalizeDaemonBaseUrl("ftp://daemon.example")).toThrow("http or https");
+    expect(() => normalizeDaemonBaseUrl("https://token@daemon.example")).toThrow("must not contain credentials");
+    expect(() => normalizeDaemonBaseUrl("https://daemon.example?token=secret")).toThrow("must not contain query");
+    expect(() => normalizeDaemonBaseUrl("not-a-url")).toThrow("absolute http or https");
+  });
+
   it("calls typed API endpoints with bearer auth and JSON bodies", async () => {
     const session: SessionRecord = {
       id: "s1",

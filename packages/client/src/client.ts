@@ -55,6 +55,31 @@ import type {
 
 let promptRequestCounter = 0;
 
+/** Normalize a daemon base URL without accepting credentials or request fragments. */
+export function normalizeDaemonBaseUrl(value: string): string {
+  const raw = value.trim();
+  if (!raw) throw new Error("Daemon URL is required");
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("Daemon URL must be an absolute http or https URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Daemon URL must use http or https");
+  }
+  if (url.username || url.password) {
+    throw new Error("Daemon URL must not contain credentials; use a bearer token instead");
+  }
+  if (url.search || url.hash) {
+    throw new Error("Daemon URL must not contain query parameters or a fragment");
+  }
+
+  const pathname = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${pathname === "/" ? "" : pathname}`;
+}
+
 /** Generate a caller-stable id for one prompt admission attempt. */
 export function createPromptRequestId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
@@ -84,7 +109,7 @@ export class OpenHarnessClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: OpenHarnessClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = normalizeDaemonBaseUrl(options.baseUrl);
     this.token = options.token;
     this.fetchImpl = options.fetch ?? fetch;
   }
