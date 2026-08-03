@@ -383,15 +383,17 @@ describe("Integration: Full Agent Loop", () => {
     expect(toolEnd.result.content[0].text).toContain("boom");
   });
 
-  it("injects abortSignal into tool context", async () => {
+  it("injects tool and run abort signals into tool context", async () => {
     const registry = new ToolRegistry();
     let sawAbortSignal = false;
+    let runAbortSignal: AbortSignal | undefined;
     registry.register({
       name: "ContextCheck",
       description: "checks context",
       inputSchema: { type: "object", properties: {} },
       execute: async (_input, context) => {
         sawAbortSignal = context.abortSignal instanceof AbortSignal;
+        runAbortSignal = context.runAbortSignal;
         return { content: [{ type: "text", text: "ok" }] };
       },
     });
@@ -411,9 +413,11 @@ describe("Integration: Full Agent Loop", () => {
     ]);
 
     const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
-    for await (const _ of engine.submitMessage("check context")) {}
+    const controller = new AbortController();
+    for await (const _ of engine.submitMessage("check context", { signal: controller.signal })) {}
 
     expect(sawAbortSignal).toBe(true);
+    expect(runAbortSignal).toBe(controller.signal);
   });
 
   it("keeps the timeout reason when timeout wins before external abort", async () => {

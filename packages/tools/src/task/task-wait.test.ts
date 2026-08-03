@@ -128,6 +128,32 @@ describe("taskWaitTool", () => {
     expect(mgr.getTask(task.id)?.status).toBe("stopped");
   });
 
+  it("stops every awaited task when the owning session is interrupted", async () => {
+    const controller = new AbortController();
+    const mgr = getTaskManager(CWD);
+    let stopped = false;
+    const task = mgr.registerSessionTask({
+      description: "interrupted child",
+      cwd: CWD,
+      childSessionId: "child-interrupted",
+      prompt: "work",
+      onInput: async () => {},
+      onStop: async () => {
+        stopped = true;
+      },
+    });
+
+    const waiting = taskWaitTool.execute(
+      { taskIds: [task.id], timeoutSeconds: 60 },
+      { cwd: CWD, abortSignal: controller.signal },
+    );
+    controller.abort(new Error("parent interrupted"));
+
+    await waiting;
+    expect(stopped).toBe(true);
+    expect(mgr.getTask(task.id)?.status).toBe("stopped");
+  });
+
   it("isolates an unknown taskId without dragging down the others", async () => {
     const mgr = getTaskManager(CWD);
     const good = await mgr.createShellTask(

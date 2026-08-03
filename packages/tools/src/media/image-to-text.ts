@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import type { ToolDefinition } from "@openharness/core";
 import { loadSettings, type Settings } from "@openharness/core";
 import { resolveToolPath } from "../file/path.js";
+import { createToolAbortScope } from "../abort.js";
 
 // Cache settings per process; avoids a disk read on every tool invocation.
 // Settings don't change during a process's lifetime (changes restart the process).
@@ -93,6 +94,7 @@ export const imageToTextTool: ToolDefinition = {
       }
     }
 
+    const abortScope = createToolAbortScope(context.abortSignal, 60_000);
     try {
       let responseText: string;
 
@@ -114,7 +116,7 @@ export const imageToTextTool: ToolDefinition = {
               },
             ],
           }),
-          signal: AbortSignal.timeout(60_000),
+          signal: abortScope.signal,
         });
         if (!res.ok) {
           const body = await res.text();
@@ -140,7 +142,7 @@ export const imageToTextTool: ToolDefinition = {
               },
             ],
           }),
-          signal: AbortSignal.timeout(60_000),
+          signal: abortScope.signal,
         });
         if (!res.ok) {
           const body = await res.text();
@@ -155,6 +157,8 @@ export const imageToTextTool: ToolDefinition = {
       return { content: [{ type: "text", text: responseText || "(no description returned)" }] };
     } catch (err) {
       return { content: [{ type: "text", text: `image_to_text failed: ${(err as Error).message}` }], isError: true };
+    } finally {
+      abortScope.dispose();
     }
   },
 };

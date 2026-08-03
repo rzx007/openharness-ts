@@ -546,6 +546,7 @@ export class QueryEngine implements IQueryEngine {
           const context: ToolContext = {
             cwd: this.cwd,
             sessionId: this.sessionId,
+            runAbortSignal: signal,
             settings: this.options.settings,
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,

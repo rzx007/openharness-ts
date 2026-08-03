@@ -4,6 +4,9 @@ import type { Settings } from "./settings";
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
+  /** Lifetime of the owning session run; use for detached work that outlives this tool call. */
+  runAbortSignal?: AbortSignal;
+  /** Lifetime of this tool invocation, including its execution timeout. */
   abortSignal?: AbortSignal;
   settings?: Settings;
   skillRegistry?: unknown;

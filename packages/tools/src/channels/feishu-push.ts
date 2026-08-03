@@ -1,5 +1,6 @@
 import { loadSettings, type Settings } from "@openharness/core";
 import type { ToolDefinition } from "@openharness/core";
+import { createToolAbortScope } from "../abort.js";
 
 let _settingsCache: Settings | undefined;
 async function getCachedSettings(): Promise<Settings> {
@@ -7,13 +8,14 @@ async function getCachedSettings(): Promise<Settings> {
   return _settingsCache;
 }
 
-async function getTenantToken(appId: string, appSecret: string): Promise<string> {
+async function getTenantToken(appId: string, appSecret: string, signal: AbortSignal): Promise<string> {
   const res = await fetch(
     "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+      signal,
     },
   );
   const data = (await res.json()) as { tenant_access_token?: string; msg?: string };
@@ -23,7 +25,7 @@ async function getTenantToken(appId: string, appSecret: string): Promise<string>
   return data.tenant_access_token;
 }
 
-async function sendToChat(token: string, chatId: string, text: string): Promise<void> {
+async function sendToChat(token: string, chatId: string, text: string, signal: AbortSignal): Promise<void> {
   const res = await fetch(
     "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
     {
@@ -34,6 +36,7 @@ async function sendToChat(token: string, chatId: string, text: string): Promise<
         msg_type: "text",
         content: JSON.stringify({ text }),
       }),
+      signal,
     },
   );
   const data = (await res.json()) as { code?: number; msg?: string };
@@ -63,7 +66,7 @@ export const feishuPushTool: ToolDefinition = {
     },
     required: ["target", "message"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const target = input.target as string;
     const message = input.message as string;
 
@@ -83,12 +86,15 @@ export const feishuPushTool: ToolDefinition = {
       };
     }
 
+    const abortScope = createToolAbortScope(context.abortSignal, 20_000);
     try {
-      const token = await getTenantToken(feishu.appId, feishu.appSecret);
-      await sendToChat(token, chatId, message);
+      const token = await getTenantToken(feishu.appId, feishu.appSecret, abortScope.signal);
+      await sendToChat(token, chatId, message, abortScope.signal);
       return { content: [{ type: "text" as const, text: `已发送到「${target}」` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    } finally {
+      abortScope.dispose();
     }
   },
 };

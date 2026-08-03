@@ -18,7 +18,12 @@ export const mcpToolCallTool: ToolDefinition = {
       return { content: [{ type: "text", text: "MCP manager not available in context" }], isError: true };
     }
     try {
-      const result = await mgr.callTool(input.serverName as string, input.toolName as string, (input.args as Record<string, unknown>) ?? {});
+      const result = await mgr.callTool(
+        input.serverName as string,
+        input.toolName as string,
+        (input.args as Record<string, unknown>) ?? {},
+        context.abortSignal,
+      );
       return { content: [{ type: "text", text: result.content }], isError: result.isError };
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };
@@ -60,7 +65,11 @@ export const readMcpResourceTool: ToolDefinition = {
     const mgr = (context as any).mcpManager;
     if (!mgr) return { content: [{ type: "text", text: "MCP manager not available" }], isError: true };
     try {
-      const content = await mgr.readResource(input.serverName as string, input.uri as string);
+      const content = await mgr.readResource(
+        input.serverName as string,
+        input.uri as string,
+        context.abortSignal,
+      );
       return { content: [{ type: "text", text: content }] };
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };

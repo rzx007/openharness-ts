@@ -164,12 +164,21 @@ export const taskWaitTool: ToolDefinition = {
 
     const timeoutSeconds = typeof input.timeoutSeconds === "number" ? input.timeoutSeconds : 300;
     const timeoutMs = timeoutSeconds * 1000;
+    const stopOnAbort = () => {
+      void Promise.all(taskIds.map((taskId) => mgr.stopTask(taskId).catch(() => {})));
+    };
+    if (context.abortSignal?.aborted) {
+      stopOnAbort();
+    } else {
+      context.abortSignal?.addEventListener("abort", stopOnAbort, { once: true });
+    }
 
     // Await every task independently so a single failed/unknown id never drags
     // down the rest. awaitTask throws synchronously on an unknown id, so wrap
     // each call in its own try/catch via an async closure.
-    const segments = await Promise.all(
-      taskIds.map(async (taskId) => {
+    try {
+      const segments = await Promise.all(
+        taskIds.map(async (taskId) => {
         try {
           const res = await mgr.awaitTask(taskId, { timeoutMs });
           if (res.timedOut) {
@@ -186,14 +195,17 @@ export const taskWaitTool: ToolDefinition = {
         } catch (err) {
           return `${taskId} (error): ${(err as Error).message}`;
         }
-      }),
-    );
+        }),
+      );
 
-    const anyError = segments.some((s) => s.includes("(error):"));
-    return {
-      content: [{ type: "text", text: segments.join("\n\n") }],
-      ...(anyError ? { isError: true } : {}),
-    };
+      const anyError = segments.some((s) => s.includes("(error):"));
+      return {
+        content: [{ type: "text", text: segments.join("\n\n") }],
+        ...(anyError ? { isError: true } : {}),
+      };
+    } finally {
+      context.abortSignal?.removeEventListener("abort", stopOnAbort);
+    }
   },
 };
 

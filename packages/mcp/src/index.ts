@@ -244,8 +244,8 @@ export class McpClientManager {
         name: `mcp__${t.serverName}__${t.name}`,
         description: `[${t.serverName}] ${t.description}`,
         inputSchema: t.inputSchema,
-        execute: async (input) => {
-          const result = await this.callTool(t.serverName, t.name, input);
+        execute: async (input, context) => {
+          const result = await this.callTool(t.serverName, t.name, input, context.abortSignal);
           return {
             content: [{ type: "text" as const, text: result.content }],
             isError: result.isError,
@@ -258,7 +258,8 @@ export class McpClientManager {
   async callTool(
     serverName: string,
     toolName: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<McpToolCallResult> {
     const client = this.clients.get(serverName);
     if (!client) {
@@ -266,7 +267,11 @@ export class McpClientManager {
     }
 
     try {
-      const result = await client.callTool({ name: toolName, arguments: args });
+      const result = await client.callTool(
+        { name: toolName, arguments: args },
+        undefined,
+        signal ? { signal } : undefined,
+      );
       const parts: string[] = [];
       for (const item of result.content as any[]) {
         if (item.type === "text") {
@@ -287,13 +292,13 @@ export class McpClientManager {
     }
   }
 
-  async readResource(serverName: string, uri: string): Promise<string> {
+  async readResource(serverName: string, uri: string, signal?: AbortSignal): Promise<string> {
     const client = this.clients.get(serverName);
     if (!client) {
       throw new Error(`MCP server not found: ${serverName}`);
     }
 
-    const result = await client.readResource({ uri });
+    const result = await client.readResource({ uri }, signal ? { signal } : undefined);
     const parts: string[] = [];
     for (const item of result.contents as any[]) {
       if (item.text !== undefined) {
