@@ -3,6 +3,8 @@
 > 状态：历史实现说明。本文保留 D.1/D.2 subprocess 协议与历史细节，不属于当前产品链路，也不作为兼容承诺。
 >
 > 当前主路径：daemon/TUI/print 内的 `Agent` 在 daemon 中创建带 `parentId` 的 child session，由 `SessionRuntime` 执行，并使用统一的 `SessionStore`、session event 与 `PermissionBroker`。`ohs --task-worker`、subprocess backend、项目级 worker snapshot 和文件权限流仅是待清理的历史实现。
+>
+> 当前主路径的流程说明见 [`agent-child-session-flow.md`](./agent-child-session-flow.md)。
 
 兼容路径中的 `agent` 工具会把一个子代理（teammate）作为独立 `ohs --task-worker`
 子进程拉起、后台运行，leader 用 `TaskWait` 阻塞取回结果。这是旧 swarm

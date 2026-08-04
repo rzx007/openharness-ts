@@ -541,6 +541,8 @@ Follow-up：`CliSessionRuntime` end-of-turn memory / personalization 应在 daem
 
 对齐 opencode TaskTool：daemon/TUI/print 主路径中的 `Agent` 在 daemon 内创建并运行 child session，不再派生 `--task-worker` 子进程。
 
+当前主流程的独立说明见 [`agent-child-session-flow.md`](./agent-child-session-flow.md)。
+
 ```text
 Agent tool (in daemon CliSessionRuntime)
   -> store.createSession({ parentId })
