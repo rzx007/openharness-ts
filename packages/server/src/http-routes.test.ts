@@ -4,6 +4,7 @@ import { createAuthRoutes } from "./http-auth-routes.js";
 import { createGitRoutes } from "./http-git-routes.js";
 import { createMemoryRoutes } from "./http-memory-routes.js";
 import { createPermissionRoutes } from "./http-permission-routes.js";
+import { createSessionRoutes } from "./http-session-routes.js";
 import { createServiceRoutes } from "./http-service-routes.js";
 import { createSystemRoutes } from "./http-system-routes.js";
 
@@ -174,6 +175,121 @@ describe("permission routes", () => {
       status: "approved",
       decision: "once",
       clientId: "desk",
+    });
+  });
+});
+
+describe("session routes", () => {
+  it("creates sessions and warms their runtime", async () => {
+    const warmRuntime = vi.fn(async () => {});
+    const broadcastSince = vi.fn();
+    const session = {
+      id: "s1",
+      cwd: "/repo",
+      title: "New session",
+      model: "gpt-test",
+      status: "idle",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const app = createSessionRoutes({
+      store: {
+        createSession: vi.fn(() => session),
+        getSession: vi.fn(),
+        getSessionState: vi.fn(),
+        listMessageParts: vi.fn(() => []),
+        listMessages: vi.fn(() => []),
+        listSessions: vi.fn(() => []),
+        resolveSessionListTitle: vi.fn(),
+        updateSession: vi.fn(),
+      },
+      latestEventSeq: () => 7,
+      broadcastSince,
+      warmRuntime,
+      hasRunWork: () => false,
+      closeRuntime: async () => {},
+      archiveSessionTree: async () => session,
+      traceIdForRequest: () => "trace-1",
+      admitPromptAndMaybeRun: vi.fn(),
+    });
+
+    const response = await app.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "s1", cwd: "/repo", model: "gpt-test" }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(warmRuntime).toHaveBeenCalledWith("s1");
+    expect(broadcastSince).toHaveBeenCalledWith(7);
+  });
+
+  it("expands slash commands into admitted prompts", async () => {
+    const admitPromptAndMaybeRun = vi.fn(() => ({
+      input: {
+        id: "i1",
+        sessionId: "s1",
+        seq: 1,
+        delivery: "queue",
+        content: "expanded prompt",
+        metadata: {},
+        createdAt: 1,
+      },
+    }));
+    const app = createSessionRoutes({
+      store: {
+        createSession: vi.fn(),
+        getSession: vi.fn(() => ({
+          id: "s1",
+          cwd: "/repo",
+          title: "Session",
+          model: "gpt-test",
+          status: "idle",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        })),
+        getSessionState: vi.fn(),
+        listMessageParts: vi.fn(() => []),
+        listMessages: vi.fn(() => []),
+        listSessions: vi.fn(() => []),
+        resolveSessionListTitle: vi.fn(),
+        updateSession: vi.fn(),
+      },
+      commandCatalog: {
+        expand: vi.fn(async () => ({
+          prompt: "expanded prompt",
+          command: { name: "/fix", kind: "template", source: "project" },
+        })),
+      },
+      latestEventSeq: () => 1,
+      broadcastSince: vi.fn(),
+      warmRuntime: async () => {},
+      hasRunWork: () => false,
+      closeRuntime: async () => {},
+      archiveSessionTree: async () => {
+        throw new Error("not used");
+      },
+      traceIdForRequest: () => "trace-1",
+      admitPromptAndMaybeRun,
+    });
+
+    const response = await app.request("/s1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ line: "/fix tests" }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(admitPromptAndMaybeRun).toHaveBeenCalledWith("s1", {
+      content: "expanded prompt",
+      metadata: {
+        command: "/fix",
+        commandKind: "template",
+        commandArgs: "tests",
+      },
+      traceId: "trace-1",
     });
   });
 });

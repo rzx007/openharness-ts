@@ -11,11 +11,7 @@ import {
   type SessionEventRecord,
 } from "@openharness/services";
 
-import {
-  normalizeCommandName,
-  parseSlashLine,
-  type CommandCatalogProvider,
-} from "./commands.js";
+import type { CommandCatalogProvider } from "./commands.js";
 import { getDefaultSessionStorePath } from "./paths.js";
 import { StorePermissionBroker } from "./permission-broker.js";
 import { RunInterruptedError, SessionRunCoordinator } from "./run-coordinator.js";
@@ -60,7 +56,6 @@ import {
   readEventCursor,
   readJson,
   readLimit,
-  runtimeSessionMetadataChanged,
   sessionMutationErrorStatus,
   withoutTraceId,
   workflowRunIdFromSessionEvent,
@@ -75,6 +70,7 @@ import { createAuthRoutes } from "./http-auth-routes.js";
 import { createServiceRoutes } from "./http-service-routes.js";
 import { createGitRoutes } from "./http-git-routes.js";
 import { createPermissionRoutes } from "./http-permission-routes.js";
+import { createSessionRoutes } from "./http-session-routes.js";
 import { createSessionUtilityRoutes } from "./http-session-utility-routes.js";
 import { createTaskRoutes } from "./http-task-routes.js";
 
@@ -371,17 +367,20 @@ export class OpenHarnessHttpServer {
       closeRuntime: (sessionId) => this.closeRuntime(sessionId),
       closeRuntimesForCwd: (cwd) => this.closeRuntimesForCwd(cwd),
     }));
-    this.app.get("/sessions", (c) => this.handleListSessions(c));
-    this.app.post("/sessions", (c) => this.handleCreateSession(c));
-    this.app.get("/sessions/:sessionId", (c) => this.handleGetSession(c));
-    this.app.patch("/sessions/:sessionId", (c) => this.handleUpdateSession(c));
-    this.app.get("/sessions/:sessionId/state", (c) => this.handleGetSessionState(c));
-    this.app.delete("/sessions/:sessionId", (c) => this.handleArchiveSession(c));
-    this.app.get("/sessions/:sessionId/messages", (c) => this.handleListMessages(c));
-    this.app.get("/sessions/:sessionId/parts", (c) => this.handleListMessageParts(c));
+    this.app.route("/sessions", createSessionRoutes({
+      store: this.store,
+      commandCatalog: this.commandCatalog,
+      latestEventSeq: () => this.latestEventSeq(),
+      broadcastSince: (seq) => this.broadcastSince(seq),
+      warmRuntime: (sessionId) => this.warmRuntime(sessionId),
+      hasRunWork: (sessionId) => this.runCoordinator.hasWork(sessionId),
+      closeRuntime: (sessionId) => this.closeRuntime(sessionId),
+      archiveSessionTree: (sessionId) => this.archiveSessionTree(sessionId),
+      traceIdForRequest: (request) => this.traceIdForRequest(request),
+      admitPromptAndMaybeRun: (sessionId, input) => this.admitPromptAndMaybeRun(sessionId, input),
+    }));
     this.app.post("/sessions/:sessionId/prompts", (c) => this.handleAdmitPrompt(c));
     this.app.post("/sessions/:sessionId/runs/:runId/resume", (c) => this.handleResumeInterruptedRun(c));
-    this.app.post("/sessions/:sessionId/commands", (c) => this.handleInvokeCommand(c));
     this.app.post("/sessions/:sessionId/interrupt", (c) => this.handleInterruptSession(c));
     this.app.get("/events", (c) => this.handleListEvents(c));
     this.app.get("/events/stream", (c) => this.handleEventStream(c));
@@ -445,42 +444,6 @@ export class OpenHarnessHttpServer {
     await Promise.all(sessions.map((session) => this.closeRuntime(session.id)));
   }
 
-  private handleListSessions(c: Context): Response {
-    let sessions = this.store.listSessions({
-      cwd: c.req.query("cwd") ?? undefined,
-      includeArchived: c.req.query("includeArchived") === "true",
-      limit: readLimit(c.req.query("limit")),
-    });
-    if (c.req.query("includeChildren") !== "true") {
-      sessions = sessions.filter((session) => !session.parentId);
-    }
-    sessions = sessions.map((session) => ({
-      ...session,
-      title: this.store.resolveSessionListTitle(session.id),
-    }));
-    return jsonResponse({ sessions });
-  }
-
-  private async handleCreateSession(c: Context): Promise<Response> {
-    const before = this.latestEventSeq();
-    const body = await readJson(c);
-    if (typeof body.cwd !== "string") return errorResponse(400, "cwd is required");
-    if (typeof body.model !== "string") return errorResponse(400, "model is required");
-
-    const session = this.store.createSession({
-      id: typeof body.id === "string" ? body.id : undefined,
-      parentId: typeof body.parentId === "string" ? body.parentId : undefined,
-      cwd: body.cwd,
-      title: typeof body.title === "string" ? body.title : undefined,
-      model: body.model,
-      agent: typeof body.agent === "string" ? body.agent : undefined,
-      metadata: isRecord(body.metadata) ? body.metadata : undefined,
-    });
-    void this.warmRuntime(session.id);
-    this.broadcastSince(before);
-    return jsonResponse({ session }, 201);
-  }
-
   private async createChildSession(
     input: Parameters<ChildSessionHost["createChildSession"]>[0],
   ): ReturnType<ChildSessionHost["createChildSession"]> {
@@ -529,67 +492,6 @@ export class OpenHarnessHttpServer {
     };
   }
 
-  private handleGetSession(c: Context): Response {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-    void this.warmRuntime(sessionId);
-    return jsonResponse({ session });
-  }
-
-  private async handleUpdateSession(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const before = this.latestEventSeq();
-    const body = await readJson(c);
-    try {
-      const existing = this.store.getSession(sessionId);
-      if (!existing) return errorResponse(404, "Session not found");
-      const nextMetadata = isRecord(body.metadata)
-        ? { ...existing.metadata, ...body.metadata }
-        : undefined;
-      const runtimeMetadataChanged = nextMetadata && runtimeSessionMetadataChanged(existing.metadata, nextMetadata);
-      if (runtimeMetadataChanged && this.runCoordinator.hasWork(sessionId)) {
-        return errorResponse(409, "Cannot update runtime session settings while a run is active");
-      }
-      const session = this.store.updateSession(sessionId, {
-        title: typeof body.title === "string" ? body.title : undefined,
-        model: typeof body.model === "string" ? body.model : undefined,
-        agent: body.agent === null ? null : typeof body.agent === "string" ? body.agent : undefined,
-        metadata: nextMetadata,
-      });
-      if (runtimeMetadataChanged) {
-        await this.closeRuntime(sessionId);
-      }
-      this.broadcastSince(before);
-      return jsonResponse({ session });
-    } catch (error) {
-      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private handleGetSessionState(c: Context): Response {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    try {
-      return jsonResponse(this.store.getSessionState(sessionId));
-    } catch (error) {
-      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleArchiveSession(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    try {
-      const session = await this.archiveSessionTree(sessionId);
-      return jsonResponse({ session });
-    } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
-    }
-  }
-
   private async archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
     const existing = this.archivePromises.get(sessionId);
     if (existing) return await existing;
@@ -621,35 +523,6 @@ export class OpenHarnessHttpServer {
     const session = this.store.archiveSession(sessionId);
     this.broadcastSince(before);
     return session;
-  }
-
-  private handleListMessages(c: Context): Response {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    try {
-      const messages = this.store.listMessages(sessionId, {
-        afterSeq: readCursor(c),
-        limit: readLimit(c.req.query("limit")),
-      });
-      return jsonResponse({ messages });
-    } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private handleListMessageParts(c: Context): Response {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    try {
-      const parts = this.store.listMessageParts(sessionId, {
-        afterSeq: readCursor(c),
-        messageId: c.req.query("messageId") ?? undefined,
-        limit: readLimit(c.req.query("limit")),
-      });
-      return jsonResponse({ parts });
-    } catch (error) {
-      return errorResponse(404, error instanceof Error ? error.message : String(error));
-    }
   }
 
   private async handleAdmitPrompt(c: Context): Promise<Response> {
@@ -742,45 +615,6 @@ export class OpenHarnessHttpServer {
       });
       this.broadcastSince(beforeRecoveryEvent);
       return jsonResponse({ ...resumed, source_run: sourceRun }, 202);
-    } catch (error) {
-      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleInvokeCommand(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const body = await readJson(c);
-    const session = this.store.getSession(sessionId);
-    if (!session) return errorResponse(404, "Session not found");
-
-    let name = typeof body.name === "string" ? normalizeCommandName(body.name) : "";
-    let args = typeof body.args === "string" ? body.args : "";
-    if (!name && typeof body.line === "string") {
-      const parsed = parseSlashLine(body.line);
-      if (!parsed) return errorResponse(400, "line must be a slash command");
-      name = parsed.name;
-      args = parsed.args;
-    }
-    if (!name) return errorResponse(400, "name or line is required");
-
-    if (!this.commandCatalog?.expand) {
-      return errorResponse(400, "Command expansion is not available");
-    }
-
-    try {
-      const expanded = await this.commandCatalog.expand({ cwd: session.cwd, name, args });
-      if (!expanded) return errorResponse(404, `Unknown command: ${name}`);
-      const admitted = this.admitPromptAndMaybeRun(sessionId, {
-        content: expanded.prompt,
-        metadata: {
-          command: expanded.command.name,
-          commandKind: expanded.command.kind,
-          commandArgs: args,
-        },
-        traceId: this.traceIdForContext(c),
-      });
-      return jsonResponse({ ...admitted, command: expanded.command }, 202);
     } catch (error) {
       return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
     }
