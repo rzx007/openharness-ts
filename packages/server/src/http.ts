@@ -47,16 +47,13 @@ import {
   SSE_HEADERS,
   countByStatus,
   errorResponse,
-  isRecord,
   jsonEqual,
   jsonResponse,
   normalizeAllowedOrigins,
   normalizeTraceId,
   readCursor,
   readEventCursor,
-  readJson,
   readLimit,
-  sessionMutationErrorStatus,
   withoutTraceId,
   workflowRunIdFromSessionEvent,
   type ActiveRunRenderState,
@@ -70,6 +67,7 @@ import { createAuthRoutes } from "./http-auth-routes.js";
 import { createServiceRoutes } from "./http-service-routes.js";
 import { createGitRoutes } from "./http-git-routes.js";
 import { createPermissionRoutes } from "./http-permission-routes.js";
+import { createRunExecutionRoutes } from "./http-run-execution-routes.js";
 import { createSessionRoutes } from "./http-session-routes.js";
 import { createSessionUtilityRoutes } from "./http-session-utility-routes.js";
 import { createTaskRoutes } from "./http-task-routes.js";
@@ -379,9 +377,16 @@ export class OpenHarnessHttpServer {
       traceIdForRequest: (request) => this.traceIdForRequest(request),
       admitPromptAndMaybeRun: (sessionId, input) => this.admitPromptAndMaybeRun(sessionId, input),
     }));
-    this.app.post("/sessions/:sessionId/prompts", (c) => this.handleAdmitPrompt(c));
-    this.app.post("/sessions/:sessionId/runs/:runId/resume", (c) => this.handleResumeInterruptedRun(c));
-    this.app.post("/sessions/:sessionId/interrupt", (c) => this.handleInterruptSession(c));
+    this.app.route("/sessions", createRunExecutionRoutes({
+      store: this.store,
+      hasRuntime: () => Boolean(this.runtimeFactory),
+      hasRunWork: (sessionId) => this.runCoordinator.hasWork(sessionId),
+      latestEventSeq: () => this.latestEventSeq(),
+      broadcastSince: (seq) => this.broadcastSince(seq),
+      traceIdForRequest: (request) => this.traceIdForRequest(request),
+      admitPromptAndMaybeRun: (sessionId, input) => this.admitPromptAndMaybeRun(sessionId, input),
+      interruptSession: (sessionId) => this.interruptSession(sessionId),
+    }));
     this.app.get("/events", (c) => this.handleListEvents(c));
     this.app.get("/events/stream", (c) => this.handleEventStream(c));
   }
@@ -389,10 +394,6 @@ export class OpenHarnessHttpServer {
   private authorized(c: Context): boolean {
     if (!this.token) return true;
     return c.req.header("authorization") === `Bearer ${this.token}`;
-  }
-
-  private traceIdForContext(c: Context): string {
-    return this.traceIdForRequest(c.req.raw);
   }
 
   private traceIdForRequest(request: Request): string {
@@ -525,101 +526,6 @@ export class OpenHarnessHttpServer {
     return session;
   }
 
-  private async handleAdmitPrompt(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    const body = await readJson(c);
-    if (typeof body.content !== "string") return errorResponse(400, "content is required");
-
-    try {
-      const admitted = this.admitPromptAndMaybeRun(sessionId, {
-        id: typeof body.id === "string" ? body.id : undefined,
-        delivery: body.delivery === "steer" ? "steer" : "queue",
-        content: body.content,
-        metadata: isRecord(body.metadata) ? body.metadata : undefined,
-        traceId: this.traceIdForContext(c),
-      });
-      return jsonResponse(admitted, 202);
-    } catch (error) {
-      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async handleResumeInterruptedRun(c: Context): Promise<Response> {
-    const sessionId = c.req.param("sessionId");
-    const runId = c.req.param("runId");
-    if (!sessionId || !runId) return errorResponse(400, "sessionId and runId are required");
-    const body = await readJson(c);
-    if (body.id !== undefined && typeof body.id !== "string") return errorResponse(400, "id must be a string");
-    if (body.metadata !== undefined && !isRecord(body.metadata)) return errorResponse(400, "metadata must be an object");
-
-    const sourceRun = this.store.getRun(runId);
-    if (!sourceRun || sourceRun.sessionId !== sessionId) return errorResponse(404, "Interrupted run not found");
-    if (sourceRun.status !== "interrupted") return errorResponse(409, "Only interrupted runs can be resumed");
-    if (!sourceRun.inputId) return errorResponse(409, "This interrupted run has no prompt to replay");
-    const sourceInput = this.store.getInput(sourceRun.inputId);
-    if (!sourceInput || sourceInput.sessionId !== sessionId) return errorResponse(409, "The original prompt is unavailable");
-
-    const existingRecovery = this.store.listInputs(sessionId).find((input) =>
-      isRecord(input.metadata.recovery) && input.metadata.recovery.sourceRunId === sourceRun.id,
-    );
-    if (existingRecovery && existingRecovery.id === body.id) {
-      const existingRun = this.store.findRunByInput(existingRecovery.id);
-      return jsonResponse({
-        input: existingRecovery,
-        ...(existingRun ? { run: existingRun } : {}),
-        ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
-        ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
-        source_run: sourceRun,
-      }, 202);
-    }
-    if (existingRecovery) {
-      return errorResponse(409, `Interrupted run already has a recovery: ${sourceRun.id}`);
-    }
-    if (!this.runtimeFactory) return errorResponse(409, "Session runtime is unavailable");
-    if (this.runCoordinator.hasWork(sessionId)) {
-      return errorResponse(409, "Wait for the active session run before resuming interrupted work");
-    }
-
-    try {
-      const resumed = this.admitPromptAndMaybeRun(sessionId, {
-        id: typeof body.id === "string" ? body.id : undefined,
-        content: sourceInput.content,
-        metadata: {
-          ...(isRecord(body.metadata) ? body.metadata : {}),
-          recovery: {
-            kind: "prompt_replay",
-            sourceRunId: sourceRun.id,
-            sourceInputId: sourceInput.id,
-          },
-        },
-        runMetadata: {
-          recovery: {
-            kind: "prompt_replay",
-            sourceRunId: sourceRun.id,
-            sourceInputId: sourceInput.id,
-          },
-        },
-        traceId: this.traceIdForContext(c),
-      });
-      const beforeRecoveryEvent = this.latestEventSeq();
-      this.store.appendEvent({
-        type: "session.run.recovery_requested",
-        sessionId,
-        payload: {
-          sourceRunId: sourceRun.id,
-          sourceInputId: sourceInput.id,
-          recoveryInputId: resumed.input.id,
-          recoveryRunId: resumed.run?.id,
-        },
-      });
-      this.broadcastSince(beforeRecoveryEvent);
-      return jsonResponse({ ...resumed, source_run: sourceRun }, 202);
-    } catch (error) {
-      return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
-    }
-  }
-
   private admitPromptAndMaybeRun(
     sessionId: string,
     input: {
@@ -700,12 +606,6 @@ export class OpenHarnessHttpServer {
       this.runPromises.set(run.id, tracked);
     }
     return { input: admitted, ...(run ? { run, queue_state: queueState } : {}) };
-  }
-
-  private handleInterruptSession(c: Context): Response {
-    const sessionId = c.req.param("sessionId");
-    if (!sessionId) return errorResponse(400, "sessionId is required");
-    return jsonResponse(this.interruptSession(sessionId));
   }
 
   private interruptSession(sessionId: string): ReturnType<SessionRunCoordinator["interrupt"]> {

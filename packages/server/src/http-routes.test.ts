@@ -4,6 +4,7 @@ import { createAuthRoutes } from "./http-auth-routes.js";
 import { createGitRoutes } from "./http-git-routes.js";
 import { createMemoryRoutes } from "./http-memory-routes.js";
 import { createPermissionRoutes } from "./http-permission-routes.js";
+import { createRunExecutionRoutes } from "./http-run-execution-routes.js";
 import { createSessionRoutes } from "./http-session-routes.js";
 import { createServiceRoutes } from "./http-service-routes.js";
 import { createSystemRoutes } from "./http-system-routes.js";
@@ -289,6 +290,53 @@ describe("session routes", () => {
         commandKind: "template",
         commandArgs: "tests",
       },
+      traceId: "trace-1",
+    });
+  });
+});
+
+describe("run execution routes", () => {
+  it("admits prompts with trace metadata", async () => {
+    const admitPromptAndMaybeRun = vi.fn(() => ({
+      input: {
+        id: "i1",
+        sessionId: "s1",
+        seq: 1,
+        delivery: "steer",
+        content: "hello",
+        metadata: {},
+        createdAt: 1,
+      },
+    }));
+    const app = createRunExecutionRoutes({
+      store: {
+        appendEvent: vi.fn(),
+        findRunByInput: vi.fn(),
+        getInput: vi.fn(),
+        getRun: vi.fn(),
+        listInputs: vi.fn(() => []),
+      },
+      hasRuntime: () => true,
+      hasRunWork: () => false,
+      latestEventSeq: () => 1,
+      broadcastSince: vi.fn(),
+      traceIdForRequest: () => "trace-1",
+      admitPromptAndMaybeRun,
+      interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
+    });
+
+    const response = await app.request("/s1/prompts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "i1", delivery: "steer", content: "hello", metadata: { source: "test" } }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(admitPromptAndMaybeRun).toHaveBeenCalledWith("s1", {
+      id: "i1",
+      delivery: "steer",
+      content: "hello",
+      metadata: { source: "test" },
       traceId: "trace-1",
     });
   });
