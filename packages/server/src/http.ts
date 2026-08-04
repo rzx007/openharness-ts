@@ -44,26 +44,21 @@ import {
   DAEMON_RESTART_RUN_REASON,
   DAEMON_RESTART_TASK_REASON,
   DAEMON_RESTART_WORKFLOW_REASON,
-  SSE_HEADERS,
   countByStatus,
   errorResponse,
   jsonEqual,
-  jsonResponse,
   normalizeAllowedOrigins,
   normalizeTraceId,
-  readCursor,
-  readEventCursor,
-  readLimit,
   withoutTraceId,
   workflowRunIdFromSessionEvent,
   type ActiveRunRenderState,
   type JsonRecord,
   type OpenHarnessRuntimeSnapshot,
-  type SseClient,
 } from "./http-support.js";
 import { createSystemRoutes } from "./http-system-routes.js";
 import { createMemoryRoutes } from "./http-memory-routes.js";
 import { createAuthRoutes } from "./http-auth-routes.js";
+import { HttpEventHub } from "./http-events-routes.js";
 import { createServiceRoutes } from "./http-service-routes.js";
 import { createGitRoutes } from "./http-git-routes.js";
 import { createPermissionRoutes } from "./http-permission-routes.js";
@@ -133,9 +128,8 @@ export class OpenHarnessHttpServer {
   private readonly logger: StructuredLogger;
   private readonly permissionBroker: StorePermissionBroker;
   private readonly childSessionHost: ChildSessionHost;
+  private readonly eventHub: HttpEventHub;
   private readonly runCoordinator = new SessionRunCoordinator();
-  private readonly encoder = new TextEncoder();
-  private readonly sseClients = new Set<SseClient>();
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
   private readonly runPromises = new Map<string, Promise<void>>();
   private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
@@ -175,6 +169,7 @@ export class OpenHarnessHttpServer {
       onChange: (previousEventSeq) => this.broadcastSince(previousEventSeq),
       logger: (event) => this.log(event),
     });
+    this.eventHub = new HttpEventHub(this.store);
     this.childSessionHost = {
       createChildSession: async (input) => this.createChildSession(input),
       admitPrompt: async (sessionId, content) => {
@@ -224,14 +219,7 @@ export class OpenHarnessHttpServer {
   }
 
   async close(): Promise<void> {
-    for (const client of this.sseClients) {
-      try {
-        client.controller.close();
-      } catch {
-        // Client may already be gone.
-      }
-      this.removeSseClient(client);
-    }
+    this.eventHub.closeClients();
     await this.closeAllRuntimes();
     if (this.listener) {
       await new Promise<void>((resolve, reject) => {
@@ -387,8 +375,7 @@ export class OpenHarnessHttpServer {
       admitPromptAndMaybeRun: (sessionId, input) => this.admitPromptAndMaybeRun(sessionId, input),
       interruptSession: (sessionId) => this.interruptSession(sessionId),
     }));
-    this.app.get("/events", (c) => this.handleListEvents(c));
-    this.app.get("/events/stream", (c) => this.handleEventStream(c));
+    this.app.route("/events", this.eventHub.createRoutes());
   }
 
   private authorized(c: Context): boolean {
@@ -425,7 +412,7 @@ export class OpenHarnessHttpServer {
         total: permissions.length,
         byStatus: countByStatus(permissions),
       },
-      sseClientCount: this.sseClients.size,
+      sseClientCount: this.eventHub.clientCount,
       warmRuntimeCount: this.runtimes.size,
       coordinator: { activeRunCount, queuedRunCount },
     };
@@ -1141,78 +1128,16 @@ export class OpenHarnessHttpServer {
     });
   }
 
-  private handleListEvents(c: Context): Response {
-    const events = this.store.listEvents({
-      afterSeq: readCursor(c),
-      sessionId: c.req.query("sessionId") ?? undefined,
-      limit: readLimit(c.req.query("limit")),
-    });
-    return jsonResponse({ events });
-  }
-
-      private handleEventStream(c: Context): Response {
-    const sessionId = c.req.query("sessionId") ?? undefined;
-    let client: SseClient | undefined;
-
-    const stream = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        client = { sessionId, controller };
-        this.sseClients.add(client);
-        controller.enqueue(this.encoder.encode(": connected\n\n"));
-        const heartbeat = setInterval(() => this.writeSseComment(client!, "keepalive"), 15_000);
-        heartbeat.unref?.();
-        client.heartbeat = heartbeat;
-        for (const event of this.store.listEvents({ afterSeq: readEventCursor(c), sessionId })) {
-          this.writeSse(client, event);
-        }
-      },
-      cancel: () => {
-        if (client) this.removeSseClient(client);
-      },
-    });
-
-    return new Response(stream, { status: 200, headers: SSE_HEADERS });
-  }
-
   private latestEventSeq(): number {
     return this.store.latestEventSeq();
   }
 
   private broadcastSince(seq: number): void {
-    const events = this.store.listEvents({ afterSeq: seq });
-    for (const event of events) {
-      this.broadcastEvent(event);
-    }
+    this.eventHub.broadcastSince(seq);
   }
 
   private broadcastEvent(event: SessionEventRecord): void {
-    for (const client of this.sseClients) {
-      if (client.sessionId && event.sessionId && event.sessionId !== client.sessionId) continue;
-      this.writeSse(client, event);
-    }
-  }
-
-  private writeSse(client: SseClient, event: SessionEventRecord): void {
-    try {
-      client.controller.enqueue(
-        this.encoder.encode(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
-      );
-    } catch {
-      this.removeSseClient(client);
-    }
-  }
-
-  private writeSseComment(client: SseClient, comment: string): void {
-    try {
-      client.controller.enqueue(this.encoder.encode(`: ${comment}\n\n`));
-    } catch {
-      this.removeSseClient(client);
-    }
-  }
-
-  private removeSseClient(client: SseClient): void {
-    if (client.heartbeat) clearInterval(client.heartbeat);
-    this.sseClients.delete(client);
+    this.eventHub.broadcastEvent(event);
   }
 }
 

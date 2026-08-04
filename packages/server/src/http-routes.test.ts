@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createAuthRoutes } from "./http-auth-routes.js";
 import { createGitRoutes } from "./http-git-routes.js";
+import { HttpEventHub } from "./http-events-routes.js";
 import { createMemoryRoutes } from "./http-memory-routes.js";
 import { createPermissionRoutes } from "./http-permission-routes.js";
 import { createRunExecutionRoutes } from "./http-run-execution-routes.js";
@@ -338,6 +339,35 @@ describe("run execution routes", () => {
       content: "hello",
       metadata: { source: "test" },
       traceId: "trace-1",
+    });
+  });
+});
+
+describe("event routes", () => {
+  it("lists events with cursor, session, and limit filters", async () => {
+    const listEvents = vi.fn(() => [{
+      id: "e1",
+      seq: 2,
+      type: "session.updated",
+      sessionId: "s1",
+      payload: {},
+      createdAt: 1,
+    }]);
+    const hub = new HttpEventHub({ listEvents });
+
+    const response = await hub.createRoutes().request("/?cursor=1&sessionId=s1&limit=5");
+
+    expect(response.status).toBe(200);
+    expect(listEvents).toHaveBeenCalledWith({ afterSeq: 1, sessionId: "s1", limit: 5 });
+    await expect(response.json()).resolves.toEqual({
+      events: [{
+        id: "e1",
+        seq: 2,
+        type: "session.updated",
+        sessionId: "s1",
+        payload: {},
+        createdAt: 1,
+      }],
     });
   });
 });
