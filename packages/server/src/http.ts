@@ -2,7 +2,6 @@ import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { randomUUID } from "node:crypto";
 
-import { cancelPersistentWorkflow, WorkflowRunStore, type WorkflowRunEvent } from "@openharness/coordinator";
 import type { StreamEvent } from "@openharness/core";
 import {
   SessionStore,
@@ -43,14 +42,12 @@ import {
   CORS_METHODS,
   DAEMON_RESTART_RUN_REASON,
   DAEMON_RESTART_TASK_REASON,
-  DAEMON_RESTART_WORKFLOW_REASON,
   countByStatus,
   errorResponse,
   jsonEqual,
   normalizeAllowedOrigins,
   normalizeTraceId,
   withoutTraceId,
-  workflowRunIdFromSessionEvent,
   type ActiveRunRenderState,
   type JsonRecord,
   type OpenHarnessRuntimeSnapshot,
@@ -66,6 +63,7 @@ import { createRunExecutionRoutes } from "./http-run-execution-routes.js";
 import { createSessionRoutes } from "./http-session-routes.js";
 import { createSessionUtilityRoutes } from "./http-session-utility-routes.js";
 import { createTaskRoutes } from "./http-task-routes.js";
+import { recoverInterruptedWorkflows } from "./http-workflow-recovery.js";
 
 export interface OpenHarnessServerOptions {
   host?: string;
@@ -185,7 +183,11 @@ export class OpenHarnessHttpServer {
         await this.archiveSessionTree(sessionId);
       },
     };
-    this.startupRecovery = this.recoverInterruptedWorkflows();
+    this.startupRecovery = recoverInterruptedWorkflows({
+      store: this.store,
+      latestEventSeq: () => this.latestEventSeq(),
+      broadcastSince: (seq) => this.broadcastSince(seq),
+    });
     this.mountRoutes();
   }
 
@@ -1070,62 +1072,6 @@ export class OpenHarnessHttpServer {
   private async closeAllRuntimes(): Promise<void> {
     const sessionIds = [...this.runtimes.keys()];
     await Promise.all(sessionIds.map((sessionId) => this.closeRuntime(sessionId)));
-  }
-
-  /**
-   * Session runs and TaskManager ownership die with the daemon process. Workflow
-   * snapshots are project-local, so reconcile only run ids that this session log
-   * proves were started by this daemon; unrelated CLI/project workflows are left alone.
-   */
-  private async recoverInterruptedWorkflows(): Promise<void> {
-    const ownedRuns = new Map<string, { sessionId: string; cwd: string }>();
-    for (const event of this.store.listEvents()) {
-      if (event.type !== "workflow.workflow_started" || !event.sessionId) continue;
-      const runId = workflowRunIdFromSessionEvent(event);
-      if (!runId) continue;
-      const session = this.store.getSession(event.sessionId);
-      if (session) ownedRuns.set(runId, { sessionId: session.id, cwd: session.cwd });
-    }
-
-    for (const [runId, owner] of ownedRuns) {
-      const workflowStore = new WorkflowRunStore({ cwd: owner.cwd });
-      let snapshot;
-      try {
-        snapshot = workflowStore.load(runId);
-      } catch (error) {
-        this.appendWorkflowRecoveryFailure(owner.sessionId, runId, error);
-        continue;
-      }
-      if (!snapshot || snapshot.status !== "running") continue;
-
-      const before = this.latestEventSeq();
-      await cancelPersistentWorkflow(snapshot, {
-        store: workflowStore,
-        reason: DAEMON_RESTART_WORKFLOW_REASON,
-        onEvent: (event: WorkflowRunEvent) => this.appendWorkflowRecoveryEvent(owner.sessionId, event),
-      });
-      this.broadcastSince(before);
-    }
-  }
-
-  private appendWorkflowRecoveryEvent(sessionId: string, event: WorkflowRunEvent): void {
-    this.store.appendEvent({
-      type: `workflow.${event.type}`,
-      sessionId,
-      payload: { event, recoveredAfterDaemonRestart: true },
-    });
-  }
-
-  private appendWorkflowRecoveryFailure(sessionId: string, runId: string, error: unknown): void {
-    this.store.appendEvent({
-      type: "workflow.workflow_recovery_failed",
-      sessionId,
-      payload: {
-        runId,
-        error: error instanceof Error ? error.message : String(error),
-        recoveredAfterDaemonRestart: true,
-      },
-    });
   }
 
   private latestEventSeq(): number {
