@@ -12,6 +12,8 @@ export interface TaskInfo {
   metadata: Record<string, unknown>;
 }
 
+type DurableTaskStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
+
 export interface TaskManager {
   completeSessionTask(
     taskId: string,
@@ -46,7 +48,7 @@ interface SessionTaskStore {
     runId?: string;
   } | undefined;
   updateSessionTask(taskId: string, input: {
-    status: string;
+    status: DurableTaskStatus;
     runId?: string;
     output?: string;
     error?: string;
@@ -166,8 +168,8 @@ export class SessionTaskBridgeManager {
   }
 
   syncPersistentTask(task: TaskInfo, manager: TaskManager, durableTaskId = task.id): void {
-    const status = task.status === "pending" || task.status === "running" || task.status === "completed" ||
-      task.status === "failed" || task.status === "stopped" ? task.status : "failed";
+    const status: DurableTaskStatus = task.status === "pending" || task.status === "running" ||
+      task.status === "completed" || task.status === "failed" || task.status === "stopped" ? task.status : "failed";
     let output: string | undefined;
     try { output = manager.readTaskOutput(task.id); } catch { /* output is optional */ }
     const before = this.context.latestEventSeq();

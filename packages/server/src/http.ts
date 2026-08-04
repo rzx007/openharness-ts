@@ -11,8 +11,7 @@ import {
 import type { CommandCatalogProvider } from "./commands.js";
 import { getDefaultSessionStorePath } from "./paths.js";
 import { StorePermissionBroker } from "./permission-broker.js";
-import { RunInterruptedError, SessionRunCoordinator } from "./run-coordinator.js";
-import type { ChildSessionHost, SessionRuntime, SessionRuntimeFactory } from "./runtime.js";
+import type { ChildSessionHost, SessionRuntimeFactory } from "./runtime.js";
 import type {
   AgentPersonaService,
   AuthService,
@@ -41,10 +40,8 @@ import {
   DAEMON_RESTART_TASK_REASON,
   countByStatus,
   errorResponse,
-  jsonEqual,
   normalizeAllowedOrigins,
   normalizeTraceId,
-  withoutTraceId,
   type JsonRecord,
   type OpenHarnessRuntimeSnapshot,
 } from "./http-support.js";
@@ -62,6 +59,7 @@ import { createSessionRoutes } from "./http-session-routes.js";
 import { createSessionUtilityRoutes } from "./http-session-utility-routes.js";
 import { createTaskRoutes } from "./http-task-routes.js";
 import { recoverInterruptedWorkflows } from "./http-workflow-recovery.js";
+import { SessionRunEngine } from "./session-run-engine.js";
 
 export interface OpenHarnessServerOptions {
   host?: string;
@@ -127,9 +125,7 @@ export class OpenHarnessHttpServer {
   private readonly eventHub: HttpEventHub;
   private readonly runRenderer: SessionRunRenderer;
   private readonly sessionTaskBridgeManager: SessionTaskBridgeManager;
-  private readonly runCoordinator = new SessionRunCoordinator();
-  private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
-  private readonly runPromises = new Map<string, Promise<void>>();
+  private readonly runEngine: SessionRunEngine;
   private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
   private readonly requestTraceIds = new WeakMap<Request, string>();
   private readonly startupRecovery: Promise<void>;
@@ -180,18 +176,31 @@ export class OpenHarnessHttpServer {
     this.childSessionHost = {
       createChildSession: async (input) => this.createChildSession(input),
       admitPrompt: async (sessionId, content) => {
-        const admitted = this.admitPromptAndMaybeRun(sessionId, { content });
+        const admitted = this.runEngine.admitPromptAndMaybeRun(sessionId, { content });
         return { ...(admitted.run ? { runId: admitted.run.id } : {}) };
       },
-      awaitRun: async (sessionId, runId) => this.awaitChildRun(sessionId, runId),
+      awaitRun: async (sessionId, runId) => this.runEngine.awaitRun(sessionId, runId),
       interrupt: async (sessionId) => {
-        this.interruptSession(sessionId);
+        this.runEngine.interruptSession(sessionId);
       },
-      closeRuntime: async (sessionId) => this.closeRuntime(sessionId),
+      closeRuntime: async (sessionId) => this.runEngine.closeRuntime(sessionId),
       archive: async (sessionId) => {
         await this.archiveSessionTree(sessionId);
       },
     };
+    this.runEngine = new SessionRunEngine({
+      store: this.store,
+      runtimeFactory: this.runtimeFactory,
+      childSessionHost: this.childSessionHost,
+      permissionBroker: this.permissionBroker,
+      runRenderer: this.runRenderer,
+      sessionTaskBridgeManager: this.sessionTaskBridgeManager,
+      latestEventSeq: () => this.latestEventSeq(),
+      broadcastSince: (seq) => this.broadcastSince(seq),
+      broadcastEvent: (event) => this.broadcastEvent(event),
+      traceIdForRun: (runId) => this.traceIdForRun(runId),
+      log: (event) => this.log(event),
+    });
     this.startupRecovery = recoverInterruptedWorkflows({
       store: this.store,
       latestEventSeq: () => this.latestEventSeq(),
@@ -231,7 +240,7 @@ export class OpenHarnessHttpServer {
 
   async close(): Promise<void> {
     this.eventHub.closeClients();
-    await this.closeAllRuntimes();
+    await this.runEngine.closeAllRuntimes();
     if (this.listener) {
       await new Promise<void>((resolve, reject) => {
         this.listener!.close((error?: Error) => {
@@ -298,18 +307,18 @@ export class OpenHarnessHttpServer {
       settingsService: this.settingsService,
       providerService: this.providerService,
       runtimeSnapshot: () => this.runtimeSnapshot(),
-      hasAnyActiveRuns: () => this.hasAnyActiveRuns(),
-      closeAllRuntimes: () => this.closeAllRuntimes(),
+      hasAnyActiveRuns: () => this.runEngine.hasAnyActiveRuns(),
+      closeAllRuntimes: () => this.runEngine.closeAllRuntimes(),
     }));
     this.app.route("/memory", createMemoryRoutes({
       memoryService: this.memoryService,
-      hasActiveRunsForCwd: (cwd) => this.hasActiveRunsForCwd(cwd),
-      closeRuntimesForCwd: (cwd) => this.closeRuntimesForCwd(cwd),
+      hasActiveRunsForCwd: (cwd) => this.runEngine.hasActiveRunsForCwd(cwd),
+      closeRuntimesForCwd: (cwd) => this.runEngine.closeRuntimesForCwd(cwd),
     }));
     this.app.route("/auth", createAuthRoutes({
       authService: this.authService,
-      hasAnyActiveRuns: () => this.hasAnyActiveRuns(),
-      closeAllRuntimes: () => this.closeAllRuntimes(),
+      hasAnyActiveRuns: () => this.runEngine.hasAnyActiveRuns(),
+      closeAllRuntimes: () => this.runEngine.closeAllRuntimes(),
     }));
     this.app.route("/", createServiceRoutes({
       contextService: this.contextService,
@@ -320,15 +329,15 @@ export class OpenHarnessHttpServer {
       pluginService: this.pluginService,
       agentPersonaService: this.agentPersonaService,
       hooksService: this.hooksService,
-      hasAnyActiveRuns: () => this.hasAnyActiveRuns(),
-      hasActiveRunsForCwd: (cwd) => this.hasActiveRunsForCwd(cwd),
-      closeAllRuntimes: () => this.closeAllRuntimes(),
-      closeRuntimesForCwd: (cwd) => this.closeRuntimesForCwd(cwd),
+      hasAnyActiveRuns: () => this.runEngine.hasAnyActiveRuns(),
+      hasActiveRunsForCwd: (cwd) => this.runEngine.hasActiveRunsForCwd(cwd),
+      closeAllRuntimes: () => this.runEngine.closeAllRuntimes(),
+      closeRuntimesForCwd: (cwd) => this.runEngine.closeRuntimesForCwd(cwd),
       sessionExists: (sessionId) => this.store.getSession(sessionId) !== undefined,
       inspectRuntimeHooks: this.runtimeFactory
         ? async (sessionId) => {
-            await this.warmRuntime(sessionId);
-            const runtime = this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined;
+            await this.runEngine.warmRuntime(sessionId);
+            const runtime = await this.runEngine.runtimeForSession(sessionId);
             if (!runtime?.inspect) return [];
             return (await runtime.inspect()).hooks ?? [];
           }
@@ -355,37 +364,36 @@ export class OpenHarnessHttpServer {
     this.app.route("/sessions", createSessionUtilityRoutes({
       store: this.store,
       runtimeFactory: this.runtimeFactory,
-      hasRunWork: (sessionId) => this.runCoordinator.hasWork(sessionId),
-      hasActiveRunsForCwd: (cwd) => this.hasActiveRunsForCwd(cwd),
-      warmRuntime: (sessionId) => this.warmRuntime(sessionId),
-      runtimeForSession: async (sessionId) =>
-        this.runtimes.get(sessionId) ? await this.runtimes.get(sessionId)! : undefined,
+      hasRunWork: (sessionId) => this.runEngine.hasWork(sessionId),
+      hasActiveRunsForCwd: (cwd) => this.runEngine.hasActiveRunsForCwd(cwd),
+      warmRuntime: (sessionId) => this.runEngine.warmRuntime(sessionId),
+      runtimeForSession: (sessionId) => this.runEngine.runtimeForSession(sessionId),
       latestEventSeq: () => this.latestEventSeq(),
       broadcastSince: (seq) => this.broadcastSince(seq),
-      closeRuntime: (sessionId) => this.closeRuntime(sessionId),
-      closeRuntimesForCwd: (cwd) => this.closeRuntimesForCwd(cwd),
+      closeRuntime: (sessionId) => this.runEngine.closeRuntime(sessionId),
+      closeRuntimesForCwd: (cwd) => this.runEngine.closeRuntimesForCwd(cwd),
     }));
     this.app.route("/sessions", createSessionRoutes({
       store: this.store,
       commandCatalog: this.commandCatalog,
       latestEventSeq: () => this.latestEventSeq(),
       broadcastSince: (seq) => this.broadcastSince(seq),
-      warmRuntime: (sessionId) => this.warmRuntime(sessionId),
-      hasRunWork: (sessionId) => this.runCoordinator.hasWork(sessionId),
-      closeRuntime: (sessionId) => this.closeRuntime(sessionId),
+      warmRuntime: (sessionId) => this.runEngine.warmRuntime(sessionId),
+      hasRunWork: (sessionId) => this.runEngine.hasWork(sessionId),
+      closeRuntime: (sessionId) => this.runEngine.closeRuntime(sessionId),
       archiveSessionTree: (sessionId) => this.archiveSessionTree(sessionId),
       traceIdForRequest: (request) => this.traceIdForRequest(request),
-      admitPromptAndMaybeRun: (sessionId, input) => this.admitPromptAndMaybeRun(sessionId, input),
+      admitPromptAndMaybeRun: (sessionId, input) => this.runEngine.admitPromptAndMaybeRun(sessionId, input),
     }));
     this.app.route("/sessions", createRunExecutionRoutes({
       store: this.store,
       hasRuntime: () => Boolean(this.runtimeFactory),
-      hasRunWork: (sessionId) => this.runCoordinator.hasWork(sessionId),
+      hasRunWork: (sessionId) => this.runEngine.hasWork(sessionId),
       latestEventSeq: () => this.latestEventSeq(),
       broadcastSince: (seq) => this.broadcastSince(seq),
       traceIdForRequest: (request) => this.traceIdForRequest(request),
-      admitPromptAndMaybeRun: (sessionId, input) => this.admitPromptAndMaybeRun(sessionId, input),
-      interruptSession: (sessionId) => this.interruptSession(sessionId),
+      admitPromptAndMaybeRun: (sessionId, input) => this.runEngine.admitPromptAndMaybeRun(sessionId, input),
+      interruptSession: (sessionId) => this.runEngine.interruptSession(sessionId),
     }));
     this.app.route("/events", this.eventHub.createRoutes());
   }
@@ -408,9 +416,9 @@ export class OpenHarnessHttpServer {
     const runs = sessions.flatMap((session) => this.store.listRuns(session.id));
     const tasks = sessions.flatMap((session) => this.store.listSessionTasks(session.id));
     const permissions = this.store.listPermissionRequests();
-    const activeRunCount = sessions.filter((session) => this.runCoordinator.activeRunId(session.id) !== undefined).length;
+    const activeRunCount = sessions.filter((session) => this.runEngine.activeRunId(session.id) !== undefined).length;
     const queuedRunCount = sessions.reduce(
-      (count, session) => count + this.runCoordinator.queuedRunIds(session.id).length,
+      (count, session) => count + this.runEngine.queuedRunIds(session.id).length,
       0,
     );
     const now = Date.now();
@@ -425,7 +433,7 @@ export class OpenHarnessHttpServer {
         byStatus: countByStatus(permissions),
       },
       sseClientCount: this.eventHub.clientCount,
-      warmRuntimeCount: this.runtimes.size,
+      warmRuntimeCount: this.runEngine.warmRuntimeCount,
       coordinator: { activeRunCount, queuedRunCount },
     };
   }
@@ -437,11 +445,6 @@ export class OpenHarnessHttpServer {
     const generated = randomUUID();
     if (run) this.store.updateRun(runId, { metadata: { traceId: generated } });
     return generated;
-  }
-
-  private async closeRuntimesForCwd(cwd: string): Promise<void> {
-    const sessions = this.store.listSessions({ cwd, includeArchived: true });
-    await Promise.all(sessions.map((session) => this.closeRuntime(session.id)));
   }
 
   private async createChildSession(
@@ -457,39 +460,8 @@ export class OpenHarnessHttpServer {
       model: input.model ?? parent.model,
     });
     this.broadcastSince(before);
-    await this.warmRuntime(session.id);
+    await this.runEngine.warmRuntime(session.id);
     return session;
-  }
-
-  private async awaitChildRun(
-    sessionId: string,
-    runId: string,
-  ): ReturnType<ChildSessionHost["awaitRun"]> {
-    const initial = this.store.getRun(runId);
-    if (!initial || initial.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
-    if (initial.status === "pending" || initial.status === "running") {
-      await this.runPromises.get(runId);
-    }
-    const run = this.store.getRun(runId);
-    if (!run || run.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
-    if (run.status === "pending" || run.status === "running") {
-      throw new Error(`Session run is still active: ${runId}`);
-    }
-    const output = this.store.listMessages(sessionId)
-      .filter((message) => message.runId === runId && message.role === "assistant")
-      .flatMap((message) => this.store.listMessageParts(sessionId, { messageId: message.id }))
-      .map((part) => {
-        if (part.text) return part.text;
-        if (part.output == null) return "";
-        return typeof part.output === "string" ? part.output : JSON.stringify(part.output);
-      })
-      .filter(Boolean)
-      .join("\n");
-    return {
-      status: run.status,
-      output,
-      ...(run.error ? { error: run.error } : {}),
-    };
   }
 
   private async archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
@@ -512,298 +484,15 @@ export class OpenHarnessHttpServer {
     if (current.status === "archived") return current;
     this.store.beginArchive(sessionId);
     this.broadcastSince(beforeClosing);
-    const interrupted = this.interruptSession(sessionId);
+    const interrupted = this.runEngine.interruptSession(sessionId);
     const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
       .filter((runId): runId is string => !!runId);
-    await Promise.all(interruptedRunIds
-      .map((runId) => this.runPromises.get(runId))
-      .filter((promise): promise is Promise<void> => promise !== undefined));
-    await this.closeRuntime(sessionId);
+    await this.runEngine.waitForRuns(interruptedRunIds);
+    await this.runEngine.closeRuntime(sessionId);
     const before = this.latestEventSeq();
     const session = this.store.archiveSession(sessionId);
     this.broadcastSince(before);
     return session;
-  }
-
-  private admitPromptAndMaybeRun(
-    sessionId: string,
-    input: {
-      id?: string;
-      delivery?: "queue" | "steer";
-      content: string;
-      metadata?: Record<string, unknown>;
-      runMetadata?: Record<string, unknown>;
-      traceId?: string;
-    },
-  ): {
-    input: ReturnType<SessionStore["admitPrompt"]>;
-    run?: ReturnType<SessionStore["createRun"]>;
-    queue_state?: "running" | "queued";
-  } {
-    const delivery = input.delivery ?? "queue";
-    const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(input.metadata?.traceId) ?? randomUUID();
-    const metadata = { ...(input.metadata ?? {}), traceId };
-    const runMetadata = { ...(input.runMetadata ?? {}), traceId };
-    const existingInput = input.id ? this.store.getInput(input.id) : undefined;
-    if (existingInput) {
-      if (
-        existingInput.sessionId !== sessionId ||
-        existingInput.content !== input.content ||
-        existingInput.delivery !== delivery ||
-        !jsonEqual(withoutTraceId(existingInput.metadata), withoutTraceId(metadata))
-      ) {
-        throw new Error(`Prompt id is already used: ${input.id}`);
-      }
-      const existingRun = this.store.findRunByInput(existingInput.id);
-      return {
-        input: existingInput,
-        ...(existingRun ? { run: existingRun } : {}),
-        ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
-        ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
-      };
-    }
-
-    const before = this.latestEventSeq();
-    const admitted = this.store.admitPrompt({
-      id: input.id,
-      sessionId,
-      delivery,
-      content: input.content,
-      metadata,
-    });
-
-    if (delivery === "steer" && this.runtimeFactory) {
-      const activeRunId = this.runCoordinator.activeRunId(sessionId);
-      if (activeRunId) {
-        this.broadcastSince(before);
-        this.runCoordinator.mergeWake(sessionId);
-        const activeRun = this.store.getRun(activeRunId);
-        return {
-          input: admitted,
-          ...(activeRun ? { run: activeRun, queue_state: "running" as const } : {}),
-        };
-      }
-    }
-
-    const run = this.runtimeFactory
-      ? this.store.createRun({ sessionId, inputId: admitted.id, metadata: runMetadata })
-      : undefined;
-    this.broadcastSince(before);
-    let queueState: "running" | "queued" | undefined;
-    if (run) {
-      const enqueued = this.runCoordinator.enqueue({
-        sessionId,
-        runId: run.id,
-        work: (context) => this.executeRun(sessionId, admitted.id, run.id, context),
-      });
-      queueState = enqueued.state;
-      const tracked = enqueued.promise.catch(() => {
-        // The persisted run state is updated by executeRun or interrupt handling.
-      }).finally(() => {
-        if (this.runPromises.get(run.id) === tracked) this.runPromises.delete(run.id);
-      });
-      this.runPromises.set(run.id, tracked);
-    }
-    return { input: admitted, ...(run ? { run, queue_state: queueState } : {}) };
-  }
-
-  private interruptSession(sessionId: string): ReturnType<SessionRunCoordinator["interrupt"]> {
-    const before = this.latestEventSeq();
-    const result = this.runCoordinator.interrupt(sessionId);
-    if (result.interrupted) {
-      for (const runId of result.queuedRunIds) {
-        this.store.updateRun(runId, { status: "interrupted", error: "Queued run interrupted" });
-      }
-      this.store.appendEvent({
-        type: "session.run.interrupt_requested",
-        sessionId,
-        payload: { runId: result.activeRunId, queuedRunIds: result.queuedRunIds },
-      });
-      this.broadcastSince(before);
-    }
-    return result;
-  }
-
-  private hasAnyActiveRuns(): boolean {
-    return this.store.listSessions({ includeArchived: true }).some((session) => this.runCoordinator.hasWork(session.id));
-  }
-
-  private hasActiveRunsForCwd(cwd: string): boolean {
-    return this.store.listSessions({ cwd, includeArchived: true }).some((session) => this.runCoordinator.hasWork(session.id));
-  }
-
-  private async executeRun(
-    sessionId: string,
-    inputId: string,
-    runId: string,
-    context: { signal: AbortSignal; wakeCount(): number },
-  ): Promise<void> {
-    if (!this.runtimeFactory) return;
-    let before = this.latestEventSeq();
-    try {
-      const session = this.store.getSession(sessionId);
-      if (!session) throw new Error(`Session not found: ${sessionId}`);
-      const history = this.store.listMessages(sessionId);
-      const parts = this.store.listMessageParts(sessionId);
-      const admitted = this.store.getInput(inputId);
-      if (!admitted) throw new Error(`Session input not found: ${inputId}`);
-      const traceId = this.traceIdForRun(runId);
-
-      this.store.updateRun(runId, { status: "running" });
-      this.log({ level: "info", event: "session.run.started", traceId, sessionId, runId });
-      const renderState = this.runRenderer.createState(sessionId, inputId, runId, admitted.content);
-      this.broadcastSince(before);
-
-      const drainSteeredInputs = () => {
-        const pending = this.store.listUnboundInputs(sessionId);
-        if (pending.length === 0) return pending;
-        const eventBefore = this.latestEventSeq();
-        this.runRenderer.drainSteeredInputs(renderState, pending);
-        this.broadcastSince(eventBefore);
-        return pending;
-      };
-
-      const runtime = await this.getOrCreateRuntime(session, history, parts);
-      await runtime.runPrompt(
-        {
-          session,
-          input: admitted,
-          runId,
-          history,
-          parts,
-          signal: context.signal,
-          wakeCount: context.wakeCount,
-          drainSteeredInputs,
-        },
-        {
-          onEvent: (event) => {
-            const eventBefore = this.latestEventSeq();
-            this.store.appendEvent({
-              type: event.type,
-              sessionId,
-              payload: event.payload,
-            });
-            this.broadcastSince(eventBefore);
-          },
-          onStreamEvent: (event) => {
-            const canDirectBroadcast = event.type === "text_delta" && this.runRenderer.hasActiveTextPart(renderState);
-            const eventBefore = canDirectBroadcast ? undefined : this.latestEventSeq();
-            const applied = this.runRenderer.applyStreamEvent(renderState, event);
-            if (event.type === "tool_use_start") {
-              this.log({
-                level: "info",
-                event: "session.tool.started",
-                traceId,
-                sessionId,
-                runId,
-                toolName: event.toolUse.name,
-              });
-            } else if (event.type === "tool_use_end") {
-              this.log({
-                level: event.result.isError ? "warn" : "info",
-                event: "session.tool.completed",
-                traceId,
-                sessionId,
-                runId,
-                toolName: applied.completedToolName,
-                ...(event.result.isError ? { error: "tool returned an error" } : {}),
-              });
-            }
-            if (canDirectBroadcast && applied.liveEvent) {
-              this.broadcastEvent(applied.liveEvent);
-            } else if (eventBefore !== undefined) {
-              this.broadcastSince(eventBefore);
-            }
-          },
-          askPermission: (request) =>
-            this.permissionBroker.ask({
-              sessionId,
-              runId,
-              traceId,
-              toolName: request.toolName,
-              reason: request.reason,
-              input: request.input,
-              signal: context.signal,
-            }),
-        },
-      );
-
-      before = this.latestEventSeq();
-      this.runRenderer.completeActiveTextPart(renderState, "completed");
-      this.store.updateRun(runId, { status: context.signal.aborted ? "interrupted" : "completed" });
-      this.log({
-        level: context.signal.aborted ? "warn" : "info",
-        event: context.signal.aborted ? "session.run.interrupted" : "session.run.completed",
-        traceId,
-        sessionId,
-        runId,
-      });
-      this.broadcastSince(before);
-    } catch (error) {
-      await this.closeRuntime(sessionId);
-      before = this.latestEventSeq();
-      const message = error instanceof Error ? error.message : String(error);
-      const traceId = this.traceIdForRun(runId);
-      if (error instanceof RunInterruptedError || context.signal.aborted) {
-        this.store.appendEvent({ type: "session.run.interrupted", sessionId, payload: { runId, traceId, error: message } });
-        this.store.updateRun(runId, { status: "interrupted", error: message });
-        this.log({ level: "warn", event: "session.run.interrupted", traceId, sessionId, runId, error: message });
-      } else {
-        this.store.appendEvent({ type: "session.run.error", sessionId, payload: { runId, traceId, error: message } });
-        this.store.updateRun(runId, { status: "failed", error: message });
-        this.log({ level: "error", event: "session.run.failed", traceId, sessionId, runId, error: message });
-      }
-      this.broadcastSince(before);
-    }
-  }
-
-  private async getOrCreateRuntime(
-    session: Parameters<SessionRuntimeFactory["createRuntime"]>[0]["session"],
-    history: Parameters<SessionRuntimeFactory["createRuntime"]>[0]["history"],
-    parts: Parameters<SessionRuntimeFactory["createRuntime"]>[0]["parts"],
-  ): Promise<SessionRuntime> {
-    if (!this.runtimeFactory) throw new Error("Runtime factory is not configured");
-    const existing = this.runtimes.get(session.id);
-    if (existing) return await existing;
-
-    const promise = this.runtimeFactory.createRuntime({
-      session,
-      history,
-      parts,
-      childSessionHost: this.childSessionHost,
-      sessionTaskBridge: this.sessionTaskBridgeManager.createBridge(session),
-    }).catch((error) => {
-      if (this.runtimes.get(session.id) === promise) this.runtimes.delete(session.id);
-      throw error;
-    });
-    this.runtimes.set(session.id, promise);
-    return await promise;
-  }
-
-  private async warmRuntime(sessionId: string): Promise<void> {
-    if (!this.runtimeFactory || this.runtimes.has(sessionId)) return;
-    const session = this.store.getSession(sessionId);
-    if (!session || session.status === "archived") return;
-    const history = this.store.listMessages(sessionId);
-    const parts = this.store.listMessageParts(sessionId);
-    await this.getOrCreateRuntime(session, history, parts).catch(() => {});
-  }
-
-  private async closeRuntime(sessionId: string): Promise<void> {
-    const runtimePromise = this.runtimes.get(sessionId);
-    if (!runtimePromise) return;
-    this.runtimes.delete(sessionId);
-    try {
-      const runtime = await runtimePromise;
-      await runtime.close();
-    } catch {
-      // Runtime may have failed while being created; nothing else to close.
-    }
-  }
-
-  private async closeAllRuntimes(): Promise<void> {
-    const sessionIds = [...this.runtimes.keys()];
-    await Promise.all(sessionIds.map((sessionId) => this.closeRuntime(sessionId)));
   }
 
   private latestEventSeq(): number {
