@@ -50,8 +50,16 @@ Agent runner → 通过 swarm / TaskManager 真正跑 worker
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| 调度核心 | `packages/coordinator/src/workflow-scheduler.ts` | `WorkflowSpec` / plan / `runWorkflow` / notification / budget / reconcile |
-| 持久化 | `packages/coordinator/src/workflow-store.ts` | `.openharness/workflows/<runId>.json` + `.events.ndjson`；resume |
+| 公共调度入口 | `packages/coordinator/src/workflow-scheduler.ts` | 兼容导出入口；外部仍从这里或 `@openharness/coordinator` 导入 |
+| 调度循环 | `packages/coordinator/src/workflow/runner.ts` | `runWorkflow`、ready queue、并发、失败策略、budget、blocked task |
+| task attempt | `packages/coordinator/src/workflow/task-runner.ts` | 单 task 执行、retry、timeout、progress budget |
+| plan / 校验 | `packages/coordinator/src/workflow/validation.ts` | `WorkflowSpec` 展开、DAG、mode、writeScope 校验 |
+| budget | `packages/coordinator/src/workflow/budget.ts` | preset、hard/soft limit、usage 汇总 |
+| snapshot | `packages/coordinator/src/workflow/snapshot.ts` | run id、snapshot、summary、snapshot/result 转换 |
+| notification | `packages/coordinator/src/workflow/notification.ts` | `<workflow-notification>` formatter/parser |
+| reconciliation | `packages/coordinator/src/workflow/reconciliation.ts` | changed-file / write-scope overlap 检测、summary、follow-up spec |
+| 公共持久化入口 | `packages/coordinator/src/workflow-store.ts` | 持久化兼容导出入口 |
+| 持久化实现 | `packages/coordinator/src/workflow/store.ts` | `.openharness/workflows/<runId>.json` + `.events.ndjson`；resume/cancel/list |
 | Coordinator 模式 | `packages/coordinator/src/coordinator-mode.ts` | `getCoordinatorTools()` 含 `Workflow`；prompt / user context |
 | System prompt | `packages/coordinator/src/index.ts` | `COORDINATOR_SYSTEM_PROMPT` 说明何时用 Workflow vs Agent |
 | Workflow 工具 | `packages/tools/src/agent/workflow.ts` | 解析 input、run/resume/status、返回 `<workflow-notification>` |
@@ -310,8 +318,8 @@ status 另用：
 
 | 范围 | 文件 |
 |------|------|
-| 纯调度（fake runner） | `packages/coordinator/src/workflow-scheduler.test.ts` |
-| store / resume | `packages/coordinator/src/workflow-store.test.ts` |
+| 纯调度（fake runner） | `packages/coordinator/src/workflow/scheduler.test.ts` |
+| store / resume | `packages/coordinator/src/workflow/store.test.ts` |
 | Workflow 工具解析与 status | `packages/tools/src/agent/workflow.test.ts` |
 | runner 单元 | `packages/tools/src/agent/workflow-runner.test.ts` |
 | 工具 → scheduler → TaskManager smoke | `packages/tools/src/agent/workflow-smoke.test.ts` |

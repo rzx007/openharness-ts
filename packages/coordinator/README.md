@@ -14,8 +14,17 @@
 
 | 模块 | 职责 |
 |------|------|
-| `workflow-scheduler.ts` | 纯内存调度：DAG、三种 mode、失败策略、retry、writeScope、budget、notification |
-| `workflow-store.ts` | `.openharness/workflows` 快照 + events；resume |
+| `workflow-scheduler.ts` | 兼容导出入口；真实实现位于 `workflow/` |
+| `workflow-store.ts` | 持久化兼容导出入口；真实实现位于 `workflow/store.ts` |
+| `workflow/model.ts` | `WorkflowSpec`、plan、snapshot、notification、reconciliation 等核心类型 |
+| `workflow/validation.ts` | DAG、三种 mode、依赖、writeScope 与 spec 校验 |
+| `workflow/budget.ts` | budget preset、hard/soft limit、usage 汇总 |
+| `workflow/runner.ts` | 纯内存调度循环：ready queue、并发、失败策略、budget、blocked task |
+| `workflow/task-runner.ts` | 单 task 执行、retry、timeout、progress budget |
+| `workflow/snapshot.ts` | run id、snapshot、summary、snapshot/result 转换 |
+| `workflow/notification.ts` | `<workflow-notification>` formatter/parser |
+| `workflow/reconciliation.ts` | changed-file / write-scope overlap 检测、summary、follow-up spec |
+| `workflow/store.ts` | `.openharness/workflows` 快照 + events；resume/cancel/list |
 | `coordinator-mode.ts` | `getCoordinatorTools` / prompt / user context |
 | `agent-loader.ts` / `agent-definitions.ts` | frontmatter 加载与 builtin 合并 |
 | `index.ts` | 导出 + `COORDINATOR_SYSTEM_PROMPT` |
