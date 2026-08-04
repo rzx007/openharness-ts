@@ -4,7 +4,7 @@ import type { SessionStore } from "@openharness/services";
 import {
   DAEMON_RESTART_WORKFLOW_REASON,
   workflowRunIdFromSessionEvent,
-} from "./http-support.js";
+} from "./support.js";
 
 export interface WorkflowRecoveryContext {
   store: Pick<SessionStore, "appendEvent" | "getSession" | "listEvents">;

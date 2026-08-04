@@ -44,22 +44,22 @@ import {
   normalizeTraceId,
   type JsonRecord,
   type OpenHarnessRuntimeSnapshot,
-} from "./http-support.js";
-import { createSystemRoutes } from "./http-system-routes.js";
-import { createMemoryRoutes } from "./http-memory-routes.js";
-import { createAuthRoutes } from "./http-auth-routes.js";
-import { HttpEventHub } from "./http-events-routes.js";
-import { createServiceRoutes } from "./http-service-routes.js";
-import { createGitRoutes } from "./http-git-routes.js";
-import { createPermissionRoutes } from "./http-permission-routes.js";
-import { createRunExecutionRoutes } from "./http-run-execution-routes.js";
-import { SessionRunRenderer } from "./http-run-renderer.js";
-import { SessionTaskBridgeManager } from "./http-session-task-bridge.js";
-import { createSessionRoutes } from "./http-session-routes.js";
-import { createSessionUtilityRoutes } from "./http-session-utility-routes.js";
-import { createTaskRoutes } from "./http-task-routes.js";
-import { recoverInterruptedWorkflows } from "./http-workflow-recovery.js";
-import { SessionRunEngine } from "./session-run-engine.js";
+} from "./http/support.js";
+import { createAuthRoutes } from "./http/routes/auth.js";
+import { HttpEventHub } from "./http/routes/events.js";
+import { createGitRoutes } from "./http/routes/git.js";
+import { createMemoryRoutes } from "./http/routes/memory.js";
+import { createPermissionRoutes } from "./http/routes/permission.js";
+import { createRunExecutionRoutes } from "./http/routes/run-execution.js";
+import { createServiceRoutes } from "./http/routes/service.js";
+import { createSessionRoutes } from "./http/routes/session.js";
+import { createSessionUtilityRoutes } from "./http/routes/session-utility.js";
+import { createSystemRoutes } from "./http/routes/system.js";
+import { createTaskRoutes } from "./http/routes/task.js";
+import { SessionRunRenderer } from "./http/run-renderer.js";
+import { SessionRunEngine } from "./http/session-run-engine.js";
+import { SessionTaskBridgeManager } from "./http/session-task-bridge.js";
+import { recoverInterruptedWorkflows } from "./http/workflow-recovery.js";
 
 export interface OpenHarnessServerOptions {
   host?: string;
@@ -88,7 +88,7 @@ export interface OpenHarnessServerOptions {
   logger?: StructuredLogger;
 }
 
-export type { OpenHarnessRuntimeSnapshot, OpenHarnessServerHealth } from "./http-support.js";
+export type { OpenHarnessRuntimeSnapshot, OpenHarnessServerHealth } from "./http/support.js";
 
 export interface ListenResult {
   host: string;

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
-import { errorResponse, jsonResponse, readJson } from "./http-support.js";
-import type { AuthService } from "./settings-api.js";
+import { errorResponse, jsonResponse, readJson } from "../support.js";
+import type { AuthService } from "../../settings-api.js";
 
 export interface AuthRoutesContext {
   authService?: AuthService;

@@ -7,7 +7,7 @@ import {
   readLimit,
   readPermissionStatus,
   type HttpPermissionStatus,
-} from "./http-support.js";
+} from "../support.js";
 
 export interface PermissionRoutesContext {
   listRequests(input: {

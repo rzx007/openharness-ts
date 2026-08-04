@@ -9,7 +9,7 @@ import {
   readEventCursor,
   readLimit,
   type SseClient,
-} from "./http-support.js";
+} from "../support.js";
 
 export class HttpEventHub {
   private readonly encoder = new TextEncoder();

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionRunRenderer } from "./http-run-renderer.js";
+import { SessionRunRenderer } from "./run-renderer.js";
 
 function createStore() {
   let messageSeq = 0;

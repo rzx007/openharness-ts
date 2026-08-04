@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import { errorResponse, jsonResponse, readJson } from "./http-support.js";
+import { errorResponse, jsonResponse, readJson } from "../support.js";
 import type {
   AgentPersonaService,
   ContextService,
@@ -11,7 +11,7 @@ import type {
   PluginService,
   ProfileService,
   ProjectInitService,
-} from "./settings-api.js";
+} from "../../settings-api.js";
 
 export interface ServiceRoutesContext {
   contextService?: ContextService;

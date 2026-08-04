@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { getTaskManager, type TaskInfo } from "@openharness/services";
 
-import { errorResponse, jsonResponse, readJson } from "./http-support.js";
+import { errorResponse, jsonResponse, readJson } from "../support.js";
 
 type TaskManager = ReturnType<typeof getTaskManager>;
 type TaskScope = { cwd: string; sessionId?: string };

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionTaskBridgeManager, type TaskManager } from "./http-session-task-bridge.js";
+import { SessionTaskBridgeManager, type TaskManager } from "./session-task-bridge.js";
 
 function createContext() {
   return {

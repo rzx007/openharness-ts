@@ -6,7 +6,7 @@ import {
   normalizeCommandName,
   parseSlashLine,
   type CommandCatalogProvider,
-} from "./commands.js";
+} from "../../commands.js";
 import {
   errorResponse,
   isRecord,
@@ -16,7 +16,7 @@ import {
   readLimit,
   runtimeSessionMetadataChanged,
   sessionMutationErrorStatus,
-} from "./http-support.js";
+} from "../support.js";
 
 type AdmitPromptResult = {
   input: ReturnType<SessionStore["admitPrompt"]>;

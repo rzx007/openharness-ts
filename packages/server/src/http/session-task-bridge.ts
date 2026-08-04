@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import type { ObservabilityEvent } from "./observability.js";
-import type { SessionTaskBridge } from "./runtime.js";
+import type { ObservabilityEvent } from "../observability.js";
+import type { SessionTaskBridge } from "../runtime.js";
 
 export interface TaskInfo {
   id: string;

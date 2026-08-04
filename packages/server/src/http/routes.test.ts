@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createAuthRoutes } from "./http-auth-routes.js";
-import { createGitRoutes } from "./http-git-routes.js";
-import { HttpEventHub } from "./http-events-routes.js";
-import { createMemoryRoutes } from "./http-memory-routes.js";
-import { createPermissionRoutes } from "./http-permission-routes.js";
-import { createRunExecutionRoutes } from "./http-run-execution-routes.js";
-import { createSessionRoutes } from "./http-session-routes.js";
-import { createServiceRoutes } from "./http-service-routes.js";
-import { createSystemRoutes } from "./http-system-routes.js";
+import { createAuthRoutes } from "./routes/auth.js";
+import { HttpEventHub } from "./routes/events.js";
+import { createGitRoutes } from "./routes/git.js";
+import { createMemoryRoutes } from "./routes/memory.js";
+import { createPermissionRoutes } from "./routes/permission.js";
+import { createRunExecutionRoutes } from "./routes/run-execution.js";
+import { createServiceRoutes } from "./routes/service.js";
+import { createSessionRoutes } from "./routes/session.js";
+import { createSystemRoutes } from "./routes/system.js";
 
 function runtimeSnapshot() {
   return {

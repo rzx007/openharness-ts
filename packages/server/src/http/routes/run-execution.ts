@@ -8,8 +8,8 @@ import {
   jsonResponse,
   readJson,
   sessionMutationErrorStatus,
-} from "./http-support.js";
-import type { SessionRunCoordinator } from "./run-coordinator.js";
+} from "../support.js";
+import type { SessionRunCoordinator } from "../../run-coordinator.js";
 
 type AdmitPromptInput = {
   id?: string;

@@ -6,13 +6,13 @@ import {
   jsonEqual,
   normalizeTraceId,
   withoutTraceId,
-} from "./http-support.js";
-import type { StorePermissionBroker } from "./permission-broker.js";
-import { RunInterruptedError, SessionRunCoordinator, type SessionRunWorkContext } from "./run-coordinator.js";
-import type { ChildSessionHost, SessionRuntime, SessionRuntimeFactory } from "./runtime.js";
-import type { ObservabilityEvent } from "./observability.js";
-import type { SessionRunRenderer } from "./http-run-renderer.js";
-import type { SessionTaskBridgeManager } from "./http-session-task-bridge.js";
+} from "./support.js";
+import type { StorePermissionBroker } from "../permission-broker.js";
+import { RunInterruptedError, SessionRunCoordinator, type SessionRunWorkContext } from "../run-coordinator.js";
+import type { ChildSessionHost, SessionRuntime, SessionRuntimeFactory } from "../runtime.js";
+import type { ObservabilityEvent } from "../observability.js";
+import type { SessionRunRenderer } from "./run-renderer.js";
+import type { SessionTaskBridgeManager } from "./session-task-bridge.js";
 
 export type AdmitPromptInput = {
   id?: string;
