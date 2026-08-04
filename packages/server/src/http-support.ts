@@ -32,23 +32,6 @@ export type SseClient = {
   heartbeat?: ReturnType<typeof setInterval>;
 };
 
-export type ActiveToolPart = {
-  partId: string;
-  messageId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-};
-
-export type ActiveRunRenderState = {
-  sessionId: string;
-  runId: string;
-  inputId: string;
-  assistantMessageId?: string;
-  assistantTurnCompleted: boolean;
-  activeTextPartId?: string;
-  toolParts: Map<string, ActiveToolPart>;
-};
-
 export const DAEMON_RESTART_RUN_REASON = "Daemon restarted before the run completed";
 export const DAEMON_RESTART_TASK_REASON = "Daemon restarted before the task completed";
 export const DAEMON_RESTART_WORKFLOW_REASON = "Daemon restarted before the workflow completed";

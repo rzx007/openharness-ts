@@ -2,7 +2,6 @@ import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { randomUUID } from "node:crypto";
 
-import type { StreamEvent } from "@openharness/core";
 import {
   SessionStore,
   getTaskManager,
@@ -48,7 +47,6 @@ import {
   normalizeAllowedOrigins,
   normalizeTraceId,
   withoutTraceId,
-  type ActiveRunRenderState,
   type JsonRecord,
   type OpenHarnessRuntimeSnapshot,
 } from "./http-support.js";
@@ -60,6 +58,7 @@ import { createServiceRoutes } from "./http-service-routes.js";
 import { createGitRoutes } from "./http-git-routes.js";
 import { createPermissionRoutes } from "./http-permission-routes.js";
 import { createRunExecutionRoutes } from "./http-run-execution-routes.js";
+import { SessionRunRenderer } from "./http-run-renderer.js";
 import { createSessionRoutes } from "./http-session-routes.js";
 import { createSessionUtilityRoutes } from "./http-session-utility-routes.js";
 import { createTaskRoutes } from "./http-task-routes.js";
@@ -127,6 +126,7 @@ export class OpenHarnessHttpServer {
   private readonly permissionBroker: StorePermissionBroker;
   private readonly childSessionHost: ChildSessionHost;
   private readonly eventHub: HttpEventHub;
+  private readonly runRenderer: SessionRunRenderer;
   private readonly runCoordinator = new SessionRunCoordinator();
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
   private readonly runPromises = new Map<string, Promise<void>>();
@@ -168,6 +168,7 @@ export class OpenHarnessHttpServer {
       logger: (event) => this.log(event),
     });
     this.eventHub = new HttpEventHub(this.store);
+    this.runRenderer = new SessionRunRenderer(this.store);
     this.childSessionHost = {
       createChildSession: async (input) => this.createChildSession(input),
       admitPrompt: async (sessionId, content) => {
@@ -641,31 +642,14 @@ export class OpenHarnessHttpServer {
 
       this.store.updateRun(runId, { status: "running" });
       this.log({ level: "info", event: "session.run.started", traceId, sessionId, runId });
-      const renderState = this.createRunRenderState(sessionId, inputId, runId, admitted.content);
+      const renderState = this.runRenderer.createState(sessionId, inputId, runId, admitted.content);
       this.broadcastSince(before);
 
       const drainSteeredInputs = () => {
         const pending = this.store.listUnboundInputs(sessionId);
         if (pending.length === 0) return pending;
         const eventBefore = this.latestEventSeq();
-        this.completeActiveTextPart(renderState, "completed");
-        delete renderState.assistantMessageId;
-        renderState.assistantTurnCompleted = true;
-        for (const steered of pending) {
-          const userMessage = this.store.createMessage({
-            sessionId,
-            role: "user",
-            runId,
-            inputId: steered.id,
-          });
-          this.store.upsertMessagePart({
-            sessionId,
-            messageId: userMessage.id,
-            type: "text",
-            status: "completed",
-            text: steered.content,
-          });
-        }
+        this.runRenderer.drainSteeredInputs(renderState, pending);
         this.broadcastSince(eventBefore);
         return pending;
       };
@@ -693,12 +677,9 @@ export class OpenHarnessHttpServer {
             this.broadcastSince(eventBefore);
           },
           onStreamEvent: (event) => {
-            const canDirectBroadcast = event.type === "text_delta" && Boolean(renderState.activeTextPartId);
+            const canDirectBroadcast = event.type === "text_delta" && this.runRenderer.hasActiveTextPart(renderState);
             const eventBefore = canDirectBroadcast ? undefined : this.latestEventSeq();
-            const completedToolName = event.type === "tool_use_end"
-              ? renderState.toolParts.get(event.toolUseId)?.toolName
-              : undefined;
-            const liveEvent = this.applyStreamEvent(renderState, event);
+            const applied = this.runRenderer.applyStreamEvent(renderState, event);
             if (event.type === "tool_use_start") {
               this.log({
                 level: "info",
@@ -715,12 +696,12 @@ export class OpenHarnessHttpServer {
                 traceId,
                 sessionId,
                 runId,
-                toolName: completedToolName,
+                toolName: applied.completedToolName,
                 ...(event.result.isError ? { error: "tool returned an error" } : {}),
               });
             }
-            if (canDirectBroadcast && liveEvent) {
-              this.broadcastEvent(liveEvent);
+            if (canDirectBroadcast && applied.liveEvent) {
+              this.broadcastEvent(applied.liveEvent);
             } else if (eventBefore !== undefined) {
               this.broadcastSince(eventBefore);
             }
@@ -739,7 +720,7 @@ export class OpenHarnessHttpServer {
       );
 
       before = this.latestEventSeq();
-      this.completeActiveTextPart(renderState, "completed");
+      this.runRenderer.completeActiveTextPart(renderState, "completed");
       this.store.updateRun(runId, { status: context.signal.aborted ? "interrupted" : "completed" });
       this.log({
         level: context.signal.aborted ? "warn" : "info",
@@ -765,150 +746,6 @@ export class OpenHarnessHttpServer {
       }
       this.broadcastSince(before);
     }
-  }
-
-  private createRunRenderState(
-    sessionId: string,
-    inputId: string,
-    runId: string,
-    content: string,
-  ): ActiveRunRenderState {
-    const userMessage = this.store.createMessage({
-      sessionId,
-      role: "user",
-      runId,
-      inputId,
-    });
-    this.store.upsertMessagePart({
-      sessionId,
-      messageId: userMessage.id,
-      type: "text",
-      status: "completed",
-      text: content,
-    });
-    return {
-      sessionId,
-      runId,
-      inputId,
-      assistantTurnCompleted: false,
-      toolParts: new Map(),
-    };
-  }
-
-  private applyStreamEvent(state: ActiveRunRenderState, event: StreamEvent): SessionEventRecord | undefined {
-    switch (event.type) {
-      case "text_delta": {
-        const messageId = this.ensureAssistantMessage(state, true);
-        if (!state.activeTextPartId) {
-          const part = this.store.upsertMessagePart({
-            sessionId: state.sessionId,
-            messageId,
-            type: "text",
-            status: "running",
-            text: "",
-          });
-          state.activeTextPartId = part.id;
-        }
-        return this.store.appendMessagePartDelta({
-          sessionId: state.sessionId,
-          messageId,
-          partId: state.activeTextPartId,
-          field: "text",
-          delta: event.delta,
-        });
-      }
-      case "tool_use_start": {
-        this.completeActiveTextPart(state, "completed");
-        const messageId = this.ensureAssistantMessage(state, true);
-        const part = this.store.upsertMessagePart({
-          id: event.toolUse.id,
-          sessionId: state.sessionId,
-          messageId,
-          type: "tool",
-          status: "running",
-          toolUseId: event.toolUse.id,
-          toolName: event.toolUse.name,
-          input: event.toolUse.input,
-        });
-        state.toolParts.set(event.toolUse.id, {
-          partId: part.id,
-          messageId,
-          toolName: event.toolUse.name,
-          input: event.toolUse.input,
-        });
-        break;
-      }
-      case "tool_use_end": {
-        const active = state.toolParts.get(event.toolUseId);
-        const messageId = active?.messageId ?? this.ensureAssistantMessage(state);
-        this.store.upsertMessagePart({
-          id: active?.partId ?? event.toolUseId,
-          sessionId: state.sessionId,
-          messageId,
-          type: "tool",
-          status: event.result.isError ? "failed" : "completed",
-          toolUseId: event.toolUseId,
-          ...(active?.toolName ? { toolName: active.toolName } : {}),
-          ...(active?.input ? { input: active.input } : {}),
-          output: event.result,
-          isError: event.result.isError === true,
-        });
-        state.toolParts.delete(event.toolUseId);
-        break;
-      }
-      case "usage": {
-        this.store.updateRun(state.runId, { metadata: { usage: event.usage } });
-        break;
-      }
-      case "complete": {
-        this.completeActiveTextPart(state, "completed");
-        state.assistantTurnCompleted = true;
-        this.store.updateRun(state.runId, { metadata: { stopReason: event.stopReason } });
-        break;
-      }
-      case "error": {
-        const messageId = this.ensureAssistantMessage(state, true);
-        this.completeActiveTextPart(state, "failed");
-        this.store.upsertMessagePart({
-          sessionId: state.sessionId,
-          messageId,
-          type: "error",
-          status: "failed",
-          text: event.error.message,
-        });
-        break;
-      }
-    }
-  }
-
-  private ensureAssistantMessage(state: ActiveRunRenderState, startTurn = false): string {
-    if (startTurn && state.assistantTurnCompleted) {
-      delete state.assistantMessageId;
-      state.assistantTurnCompleted = false;
-    }
-    if (state.assistantMessageId) return state.assistantMessageId;
-    const message = this.store.createMessage({
-      sessionId: state.sessionId,
-      role: "assistant",
-      runId: state.runId,
-    });
-    state.assistantMessageId = message.id;
-    return message.id;
-  }
-
-  private completeActiveTextPart(
-    state: ActiveRunRenderState,
-    status: "completed" | "failed" | "interrupted",
-  ): void {
-    if (!state.assistantMessageId || !state.activeTextPartId) return;
-    this.store.upsertMessagePart({
-      id: state.activeTextPartId,
-      sessionId: state.sessionId,
-      messageId: state.assistantMessageId,
-      type: "text",
-      status,
-    });
-    delete state.activeTextPartId;
   }
 
   private async getOrCreateRuntime(
