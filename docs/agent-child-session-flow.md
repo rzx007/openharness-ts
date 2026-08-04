@@ -12,6 +12,34 @@ Leader session 调用 Agent
   -> TaskWait / session events 返回完成状态
 ```
 
+## 流程图
+
+```mermaid
+flowchart TD
+  leader["Leader session"] --> agent["Agent tool<br/>packages/tools/src/agent/index.ts"]
+  agent --> backend["ChildSessionBackend<br/>packages/swarm/src/child-session.ts"]
+  backend --> worktree{"isolate=true<br/>and git repo?"}
+  worktree -->|yes| isolated["create isolated worktree"]
+  worktree -->|no| child
+  isolated --> child["create child session<br/>SessionStore parentId"]
+
+  child --> task["register SessionTaskRecord<br/>parent-visible task"]
+  child --> admit["admitPrompt(childSessionId)"]
+  admit --> engine["SessionRunEngine"]
+  engine --> runtime["SessionRuntime executes child run"]
+  runtime --> events["messages / parts / runs / events<br/>same SessionStore"]
+  runtime --> perms["PermissionBroker<br/>walk child -> parent"]
+
+  engine --> await["awaitRun(childSessionId, runId)"]
+  await --> complete["completeSessionTask(status/output)"]
+  complete --> task
+  task --> wait["TaskWait / session.task.* SSE"]
+  wait --> leader
+
+  stop["TaskStop / archive parent"] -.-> interrupt["interrupt + closeRuntime + archive child"]
+  interrupt -.-> task
+```
+
 ## 运行流程
 
 ```text
