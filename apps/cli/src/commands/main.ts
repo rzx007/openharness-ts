@@ -6,16 +6,10 @@ import { MemoryManager } from "@openharness/memory";
 import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { resolveToolPath } from "@openharness/tools";
-import { CredentialStorage } from "@openharness/auth";
 import { bootstrap } from "../runtime";
-import { loadPluginContributions, registerPluginHooks, registerPluginTools, getLoadedPlugins } from "../plugin-contributions";
-import { updateRulesFromSession } from "@openharness/personalization";
+import { loadPluginContributions } from "../plugin-contributions";
 import { updateSessionMemoryFile } from "@openharness/services";
-import { isSwarmWorker } from "@openharness/swarm";
 import { isCoordinatorMode } from "@openharness/coordinator";
-import { buildSwarmWorkerPermissionPrompt } from "../swarm-permission";
-import { EventRenderer } from "../renderer";
-import { formatApiError } from "../format-error";
 import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
 import { join } from "node:path";
@@ -58,8 +52,6 @@ interface MainOptions {
   outputFormat?: string;
   appendSystemPrompt?: string;
   bare?: boolean;
-  swarmWorker?: boolean;
-  taskWorker?: boolean;
   dryRun?: boolean;
   sessionId?: string;
 }
@@ -211,15 +203,14 @@ export async function buildUserContentWithAttachments(
   return blocks.length > 0 ? blocks : line;
 }
 
-export type MainEntryMode = "dry-run" | "task-worker" | "tui" | "print";
+export type MainEntryMode = "dry-run" | "tui" | "print";
 
 /** Pure entry routing for tests and mainAction. */
 export function resolveMainEntryMode(
   prompt: string | undefined,
-  options: Pick<MainOptions, "dryRun" | "taskWorker" | "tui" | "print">,
+  options: Pick<MainOptions, "dryRun" | "tui" | "print">,
 ): MainEntryMode {
   if (options.dryRun) return "dry-run";
-  if (options.taskWorker) return "task-worker";
   if (options.tui) return "tui";
   if (options.print && prompt) return "print";
   if (prompt) return "print";
@@ -240,7 +231,7 @@ function rejectInteractiveContinueResume(options: MainOptions): void {
  * 应用程序的主入口点，根据提供的选项和提示决定执行模式。
  *
  * 模式优先级：
- * 1. dry-run / task-worker
+ * 1. dry-run
  * 2. TUI（`--tui` 或默认无 prompt）— 启动/attach daemon，再 spawn opentui 前端
  * 3. print（`-p` 或存在 prompt）— ensure daemon + Session API headless client
  */
@@ -269,11 +260,6 @@ export async function mainAction(
   if (mode === "dry-run") {
     const { runDryRun } = await import("../dry-run");
     await runDryRun(settings, options);
-    return;
-  }
-
-  if (mode === "task-worker") {
-    await runTaskWorker(settings, options);
     return;
   }
 
@@ -313,193 +299,6 @@ async function runPrintMode(
     continue: options.continue,
     resume: options.resume,
   });
-}
-
-/**
- * stdin 驱动的无 TTY worker(对齐 Python ui/app.py run_task_worker):
- * 读一行(JSON {text,...} 或纯文本)→ submitMessage 流式 stdout → 退出。
- * 多轮 = TaskManager 懒复活重启 + 写下一行 stdin;重启不保留上下文。
- */
-async function runTaskWorker(
-  settings: Settings,
-  options: MainOptions,
-): Promise<void> {
-  const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
-  const credentialStorage = new CredentialStorage();
-  const swarmPermissionPrompt =
-    options.swarmWorker && isSwarmWorker() ? buildSwarmWorkerPermissionPrompt() : undefined;
-  const bundle = await bootstrap({
-    settings,
-    cliOverrides: buildCliOverrides(options),
-    skillRegistry,
-    credentialStorage,
-    permissionPrompt: swarmPermissionPrompt,
-    sessionId: options.sessionId,
-  });
-  try {
-    registerPluginHooks(bundle.hookExecutor);
-  await registerPluginTools(bundle.toolRegistry, getLoadedPlugins());
-  const renderer = new EventRenderer({ verbose: options.verbose, printMode: true, outputStyle: settings.outputStyle });
-
-  // D.1 Swarm context recovery：从预分配的会话 ID 恢复历史，跨重启保持上下文。
-  const workerSessionId = options.sessionId ?? generateSessionId();
-  if (options.sessionId) {
-    try {
-      const { loadSessionById } = await import("@openharness/services");
-      const payload = loadSessionById(process.cwd(), options.sessionId);
-      if (payload?.messages?.length) {
-        bundle.queryEngine.loadMessages(payload.messages as any);
-        if (payload.model) bundle.queryEngine.setModel(payload.model);
-      }
-    } catch {
-      // best-effort：快照不存在时静默忽略，从空历史开始
-    }
-  }
-
-  // 启动时检查自己的 mailbox：若 leader 已发送 shutdown，提前退出，不处理本轮 stdin。
-  // worker 每轮运行完即退出，mailbox 在下次懒复活重启时才被检查，这是正常路径。
-  if (isSwarmWorker()) {
-    const agentName = process.env["CLAUDE_CODE_AGENT_NAME"] ?? "";
-    const teamName = process.env["CLAUDE_CODE_TEAM_NAME"] ?? "default";
-    if (agentName) {
-      try {
-        const { TeammateMailbox } = await import("@openharness/swarm");
-        const mailbox = new TeammateMailbox(teamName, agentName);
-        const pending = await mailbox.readAll();
-        const shutdownMsg = pending.find((m) => m.type === "shutdown");
-        if (shutdownMsg) {
-          await mailbox.markRead(shutdownMsg.id);
-          return;
-        }
-      } catch {
-        // mailbox 读取失败时继续正常执行，不阻断 worker
-      }
-    }
-  }
-
-  const line = await readOneStdinLine();
-  const decoded = decodeTaskWorkerLine(line);
-  if (!decoded) return;
-
-  try {
-    for await (const event of bundle.queryEngine.submitMessage(decoded)) {
-      await renderer.render(event);
-    }
-  } catch (err) {
-    if (err instanceof Error) {
-      process.stderr.write(`${formatApiError(err, settings)}\n`);
-    }
-    process.exitCode = 1;
-    return;
-  }
-
-  try {
-    updateRulesFromSession(bundle.queryEngine.getHistory());
-  } catch {
-    // best-effort
-  }
-
-  // D.1：每轮结束后保存快照，供下次重启恢复上下文。
-  await saveSessionSnapshot(workerSessionId, bundle.queryEngine, settings.model);
-
-  // 轮次结束后读一次 mailbox：消费掉本轮期间积压的 shutdown/其他消息，
-  // 并向 leader 推送 idle 通知（leader 据此更新 swarm 状态面板）。
-  if (isSwarmWorker()) {
-    const agentName = process.env["CLAUDE_CODE_AGENT_NAME"] ?? "";
-    const teamName = process.env["CLAUDE_CODE_TEAM_NAME"] ?? "default";
-    if (agentName) {
-      try {
-        const { TeammateMailbox, createIdleNotification } = await import("@openharness/swarm");
-        const mailbox = new TeammateMailbox(teamName, agentName);
-        const pending = await mailbox.readAll();
-        for (const msg of pending) {
-          await mailbox.markRead(msg.id);
-        }
-        // 向 leader 发送 idle 通知
-        const leaderMailbox = new TeammateMailbox(teamName, "leader");
-        const idleMsg = createIdleNotification(agentName, "leader", "turn complete");
-        await leaderMailbox.write(idleMsg);
-      } catch {
-        // best-effort：通知失败不影响主流程
-      }
-    }
-  }
-  } finally {
-    closeTaskWorkerInputForExit();
-    await bundle.close().catch(() => {});
-  }
-}
-
-/**
- * 读 stdin 第一行(EOF 返回空串)。chunk 迭代而非 readline(后者在 Windows 管道
- * stdin 下偶现 close 先于 line)。关键:destroyOnReturn:false + pause——若早退时
- * destroy 掉 stdin,leader 在本轮进行中 SendMessage 会撞断管 → TaskManager 误判
- * 死进程而 terminate+重启,杀掉进行中的工作;pause 后句柄不再撑事件循环,
- * 跑完一轮仍可干净退出。
- */
-async function readOneStdinLine(): Promise<string> {
-  let buffer = "";
-  process.stdin.setEncoding("utf-8");
-  const iterator = (process.stdin as unknown as {
-    iterator(opts: { destroyOnReturn: boolean }): AsyncIterableIterator<string>;
-  }).iterator({ destroyOnReturn: false });
-  for await (const chunk of iterator) {
-    buffer += chunk;
-    const idx = buffer.indexOf(String.fromCharCode(10));
-    if (idx >= 0) {
-      process.stdin.pause();
-      return buffer.slice(0, idx);
-    }
-  }
-  return buffer;
-}
-
-export function closeTaskWorkerInputForExit(input: NodeJS.ReadStream = process.stdin): void {
-  // A task-worker consumes exactly one framed stdin message. Keeping the pipe
-  // paused after that frame can keep the child process alive on Windows, so
-  // release it once the turn has fully finished and future messages can use
-  // TaskManager's lazy restart path.
-  try {
-    input.pause();
-  } catch {
-    // best-effort shutdown
-  }
-  for (const eventName of ["data", "readable", "end"] as const) {
-    try {
-      input.removeAllListeners(eventName);
-    } catch {
-      // best-effort shutdown
-    }
-  }
-  try {
-    if (!(input as { destroyed?: boolean }).destroyed) {
-      input.destroy();
-    }
-  } catch {
-    // best-effort shutdown
-  }
-}
-
-/**
- * 解码 worker 收到的一行:JSON 对象取 text 字段(send_message 的结构化信封),
- * 非 JSON 按纯文本 prompt(对齐 Python _decode_task_worker_line)。
- */
-export function decodeTaskWorkerLine(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const text = (parsed as { text?: unknown }).text;
-      if (typeof text === "string") return text.trim();
-    }
-    // 对齐 Python:无 text 字段的 JSON(或数组/数字)按原始行当 prompt,
-    // 而非静默空转(空转还会白烧一次懒复活重启额度)。
-  } catch {
-    // 纯文本
-  }
-  return trimmed;
 }
 
 /**
@@ -743,14 +542,7 @@ function buildCliOverrides(options: MainOptions) {
     disallowedTools: options.disallowedTools,
     effort: options.effort,
     fastMode: options.bare ? true : undefined,
-    swarmWorker: options.swarmWorker,
   };
-}
-
-function generateSessionId(): string {
-  const timestamp = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `${timestamp}-${rand}`;
 }
 
 /**

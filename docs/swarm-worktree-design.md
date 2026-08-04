@@ -1,6 +1,7 @@
 # 设计：teammate worktree 隔离（D.3）
 
-> 状态：已批准，待实现。建立在 D.1（subprocess 派发）+ D.2（完成等待）之上。
+> 状态：历史设计已改道。原文建立在已退场的 subprocess 派发之上；
+> 当前 worktree 隔离由 `ChildSessionBackend` 在 child-session 主链路中处理。
 
 ## 目标
 

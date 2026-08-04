@@ -12,7 +12,7 @@ import type { SandboxRuntimeReporter, SandboxRuntimeStatus } from "./types.js";
 export interface SandboxRuntimeOptions {
   settings: Settings;
   cwd: string;
-  /** Daemon sessions must pass this; omit for cwd-only callers (channels / task-worker). */
+  /** Daemon sessions must pass this; omit for cwd-only callers such as channels. */
   sessionId?: string;
   deps?: AvailabilityDeps;
   reporter?: SandboxRuntimeReporter;
@@ -103,7 +103,7 @@ export async function startSandboxRuntime(
       reason: error instanceof Error ? error.message : String(error),
     }));
   }
-  // Daemon path keys by sessionId+cwd; channels/task-worker omit sessionId → cwd-only.
+    // Daemon path keys by sessionId+cwd; channels omit sessionId -> cwd-only.
   const activeScope = options.sessionId?.trim()
     ? { cwd: options.cwd, sessionId: options.sessionId.trim() }
     : options.cwd;

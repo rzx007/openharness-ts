@@ -1,6 +1,6 @@
 # 设计：Coordinator agent 加载与 prompt 还原（C.4）
 
-> 状态：✅ 已完成（C.4 + agent 级字段运行时生效）。R1–R3 全部实现并通过类型检查；CLI 接线已补齐；agent 级字段（tools/disallowedTools/maxTurns/effort/permissionMode）已在 spawn worker 时实际传给子进程。
+> 状态：✅ 已完成（C.4 + agent 级字段运行时生效）。R1–R3 全部实现并通过类型检查；daemon child-session 接线已补齐；agent 级字段（tools/disallowedTools/maxTurns/effort/permissionMode）会随 child session metadata 进入运行时。
 
 ## 范围
 
@@ -13,7 +13,7 @@
   `match_session_mode`、`get_coordinator_tools`、`get_coordinator_user_context`
   （scratchpad / worker-tools 注入）。
 
-**已实现（后续补充）**：`tools`/`disallowedTools`/`maxTurns`/`effort`/`permissionMode` 五个字段在 spawn worker 时经 `TeammateSpawnConfig` → `buildTeammateCommand` → CLI argv 实际传给子进程，bootstrap 应用（见下方"agent 级字段运行时生效"小节）。
+**已实现（后续补充）**：`tools`/`disallowedTools`/`maxTurns`/`effort`/`permissionMode` 五个字段在 spawn worker 时经 `TeammateSpawnConfig` → `ChildSessionBackend` 写入 child session metadata，由 daemon runtime 应用（见下方"agent 级字段运行时生效"小节）。
 
 **仍留待**：agent 级 `hooks`/`mcpServers` 的运行时生效（需 env var 传 JSON，再在 worker 侧解析注册，较复杂）；`memory`/`isolation` 的行为接线（字段已解析，接线待后续）。
 
@@ -85,7 +85,7 @@ if (isCoordinatorMode()) {
 
 ## agent 级字段运行时生效
 
-`AgentDefinition` 里的约束字段现在会随 spawn 实际传给 worker 子进程。完整链路：
+`AgentDefinition` 里的约束字段现在会随 spawn 实际传给 child session。完整链路：
 
 ```
 agent.md frontmatter
@@ -98,26 +98,30 @@ agent.md frontmatter
 ↓ packages/tools/src/agent/index.ts（Agent 工具）
   agentDef → TeammateSpawnConfig.{allowedTools, disallowedTools, maxTurns, effort, permissionMode}
 
-↓ apps/cli/src/teammate.ts（buildTeammateCommand）
-  argv: [..., "--allowed-tools", "Read,Write",
-               "--disallowed-tools", "Bash",
-               "--max-turns", "5",
-               "--effort", "high",
-               "--permission-mode", "plan"]
+↓ packages/swarm/src/child-session.ts（ChildSessionBackend）
+  host.createChildSession({
+    metadata: {
+      allowedTools: ["Read", "Write"],
+      disallowedTools: ["Bash"],
+      maxTurns: 5,
+      effort: "high",
+      permissionMode: "plan"
+    }
+  })
 
-↓ apps/cli/src/commands/main.ts（buildCliOverrides → bootstrap）
-  PermissionChecker 工具白/黑名单 + queryEngine maxTurns + effort 注入
+↓ packages/server/src/http.ts / apps/cli/src/runtime.ts
+  child session metadata 驱动 PermissionChecker 工具白/黑名单、queryEngine maxTurns 与 effort
 ```
 
 ### 各字段说明
 
-| 字段 | CLI 参数 | bootstrap 应用点 |
-|------|----------|-----------------|
-| `tools` | `--allowed-tools A,B` | `bootstrap` 构建 `toolRegistry` 时过滤，只保留白名单工具 |
-| `disallowedTools` | `--disallowed-tools X` | `bootstrap` 构建 `toolRegistry` 时排除黑名单工具 |
-| `maxTurns` | `--max-turns N` | `buildCliOverrides` → `settings.maxTurns` → `QueryEngine.setMaxTurns` |
-| `effort` | `--effort high` | `buildCliOverrides` → `settings.effort` → API 调用时 reasoning effort |
-| `permissionMode` | `--permission-mode plan` | `buildCliOverrides` → `PermissionChecker.mode`（Agent 工具传入值 > agentDef 值 > "default"） |
+| 字段 | child session metadata | 应用点 |
+|------|------------------------|--------|
+| `tools` | `allowedTools` | child runtime 构建 `toolRegistry` 时过滤，只保留白名单工具 |
+| `disallowedTools` | `disallowedTools` | child runtime 构建 `toolRegistry` 时排除黑名单工具 |
+| `maxTurns` | `maxTurns` | child runtime 的 `QueryEngine` turn 上限 |
+| `effort` | `effort` | child runtime API 调用时 reasoning effort |
+| `permissionMode` | `permissionMode` | child runtime 的 `PermissionChecker.mode`（Agent 工具传入值 > agentDef 值 > "default"） |
 
 ### permissionMode 优先级
 

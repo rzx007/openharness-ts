@@ -1,8 +1,8 @@
 # 设计：Swarm 文件基础设施 + 权限同步（D.5）
 
-> 状态：已批准。建立在 swarm D.1–D.4（subprocess 派发、TaskWait、worktree 隔离、
-> 只读自动放行）之上，收口 PLAN-REMAINING「Swarm 真实派发」的剩余三块：
-> 文件邮箱、team.json 持久化、权限同步。
+> 状态：历史归档。本文建立在已退场的 swarm subprocess D.1–D.4 之上；
+> 文件邮箱与 permission-sync 不属于当前 child-session 主链路。当前 Agent 流程见
+> [agent-child-session-flow.md](./agent-child-session-flow.md)。
 
 ## 背景与关键发现
 

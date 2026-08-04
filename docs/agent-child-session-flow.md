@@ -1,6 +1,6 @@
 # Agent child session 流程
 
-当前 daemon/TUI/print 主路径中的 `Agent` 使用进程内 child session。旧的 `ohs --task-worker` subprocess 路径只作为历史兼容资料保留，不应再作为产品链路的心智模型。
+当前 daemon/TUI/print 主路径中的 `Agent` 使用进程内 child session。旧的 `ohs --task-worker` subprocess 路径已从运行时代码退场，不再作为兼容 fallback。
 
 ## 一句话模型
 
@@ -16,8 +16,14 @@ Leader session 调用 Agent
 
 ```mermaid
 flowchart TD
+  bootstrap["bootstrap runtime<br/>apps/cli/src/runtime.ts"] --> register["registerChildSessionBackend()"]
+  register --> registry["BackendRegistry.register<br/>name=in_process"]
+  registry --> agent
+
   leader["Leader session"] --> agent["Agent tool<br/>packages/tools/src/agent/index.ts"]
-  agent --> backend["ChildSessionBackend<br/>packages/swarm/src/child-session.ts"]
+  agent --> pick["pickSwarmExecutor()<br/>getBackendRegistry(scope)"]
+  pick --> registry
+  pick --> backend["ChildSessionBackend<br/>packages/swarm/src/child-session.ts"]
   backend --> worktree{"isolate=true<br/>and git repo?"}
   worktree -->|yes| isolated["create isolated worktree"]
   worktree -->|no| child
@@ -40,12 +46,41 @@ flowchart TD
   interrupt -.-> task
 ```
 
+## 启动注册
+
+是的，`Agent` 工具执行前，运行时需要先把可用的 `SwarmBackend` 注册进对应 scope 的 `BackendRegistry`。
+
+daemon/TUI/print 的 child-session 主路径在 `apps/cli/src/runtime.ts` 的 `bootstrap()` 中完成注册：
+
+```text
+bootstrap({ cwd, sessionId, childSessionHost, sessionTaskBridge })
+  -> registerChildSessionBackend({ cwd, sessionId, host, taskBridge })
+  -> getBackendRegistry({ cwd, sessionId })
+  -> backendRegistry.register("in_process", new ChildSessionBackend(...))
+```
+
+这里的 scope 必须和 `Agent` 工具取 executor 时一致。`Agent.execute()` 会优先查：
+
+```text
+getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId })
+```
+
+因此 `registerChildSessionBackend()` 也按 `{ cwd, sessionId }` 注册 `in_process`，这样 leader session 里调用 `Agent` 时才能拿到同一个 `ChildSessionBackend`。
+
+如果 `bootstrap()` 没有拿到 `childSessionHost` 或 `sessionId`，当前代码不会注册 Agent swarm backend；后续调用 `Agent` 会明确报 `No swarm backend registered for mode in_process_teammate`，而不是退回旧 subprocess 路径。
+
 ## 运行流程
 
 ```text
+apps/cli/src/runtime.ts
+  bootstrap()
+    -> registerChildSessionBackend()
+    -> getBackendRegistry({ cwd, sessionId }).register("in_process", ChildSessionBackend)
+
 packages/tools/src/agent/index.ts
   Agent.execute()
     -> mode=in_process_teammate 时选择 "in_process" swarm backend
+    -> getBackendRegistry({ cwd, sessionId }).getExecutor("in_process")
     -> executor.spawn(TeammateSpawnConfig)
 
 packages/swarm/src/child-session.ts
@@ -134,9 +169,9 @@ Daemon restart 不会复活内存中的 callback、provider stream、child runti
 | child backend 测试 | `packages/swarm/src/child-session.test.ts` |
 | server child-session 测试 | `packages/server/src/http.test.ts` |
 
-## 历史兼容
+## 历史归档
 
-下面两份 subprocess 文档仍可用于理解旧兼容代码，但不是当前产品主流程：
+下面两份 subprocess 文档只记录已经退场的历史设计，不对应当前运行时代码：
 
 - `docs/swarm-subprocess-flow.md`
 - `docs/swarm-task-worker-design.md`

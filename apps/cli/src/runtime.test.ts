@@ -88,7 +88,7 @@ describe("resolveAutoApproveTools", () => {
     const tools = new Set(
       resolveAutoApproveTools(
         { permission: { mode: "default", autoApproveTools: ["TodoWrite", "Read"] } } as Settings,
-        { swarmWorker: true },
+        { autoApproveReadOnly: true },
       ),
     );
     expect(tools.has("TodoWrite")).toBe(true);

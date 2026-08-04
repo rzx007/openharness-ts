@@ -16,7 +16,6 @@ import type { SkillRegistry } from "@openharness/skills";
 import {
   ChildSessionBackend,
   getBackendRegistry,
-  SubprocessBackend,
   WorktreeManager,
   registerTeammateInTeamFile,
   type ChildSessionBackendOptions,
@@ -24,8 +23,6 @@ import {
 } from "@openharness/swarm";
 import { getTaskManager } from "@openharness/services";
 import type { ChildSessionHost, SessionTaskBridge } from "@openharness/server";
-import { buildTeammateCommand } from "./teammate.js";
-import { startSwarmPermissionResolver, watchTeamForPermissions } from "./swarm-permission.js";
 
 const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
@@ -52,7 +49,6 @@ export interface BootstrapOptions {
     disallowedTools?: string;
     effort?: string;
     fastMode?: boolean;
-    swarmWorker?: boolean;
     /** 只读工具自动放行(Read/Glob/Grep 等)。channels serve 等无头模式用:
      *  default 模式下 ask 无人确认会全拒,放行只读让"看"可用、"写/执行"仍拒。 */
     autoApproveReadOnly?: boolean;
@@ -70,18 +66,18 @@ export interface BootstrapOptions {
 
 /**
  * 合并自动放行工具：settings.permission.autoApproveTools（用户显式配置）
- * + swarm worker / autoApproveReadOnly 注入的 READ_ONLY_TOOLS。
+ * + autoApproveReadOnly 注入的 READ_ONLY_TOOLS。
  * 空合并返回 undefined（checker 走默认行为）。
  */
 export function resolveAutoApproveTools(
   settings: Settings,
-  overrides: { swarmWorker?: boolean; autoApproveReadOnly?: boolean; autoApproveTools?: string[] },
+  overrides: { autoApproveReadOnly?: boolean; autoApproveTools?: string[] },
 ): string[] | undefined {
   const merged = new Set([
     ...(settings.permission.autoApproveTools ?? []),
     ...(overrides.autoApproveTools ?? []),
   ]);
-  if (overrides.swarmWorker || overrides.autoApproveReadOnly) {
+  if (overrides.autoApproveReadOnly) {
     for (const tool of READ_ONLY_TOOLS) merged.add(tool);
   }
   return merged.size > 0 ? [...merged] : undefined;
@@ -153,9 +149,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt
   // 时才注入 model 可见的 skills 段，使 print/backend 三模式与 REPL 一致——REPL
   // 由 refreshSystemPrompt 注入，print/backend 走 bootstrap 由此处注入。
-  // task-worker 子进程的 systemPrompt 通过 env 传递（避免 Windows argv 长度限制）。
-  const envSystemPrompt = process.env["OPENHARNESS_TASK_SYSTEM_PROMPT"] || undefined;
-  const systemPrompt = overrides.systemPrompt ?? envSystemPrompt ?? await buildRuntimeSystemPrompt({
+  const systemPrompt = overrides.systemPrompt ?? await buildRuntimeSystemPrompt({
     customPrompt: settings.systemPrompt,
     cwd,
     permissionMode: mode,
@@ -184,22 +178,13 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     engineOptions,
   );
 
-  // 注册 swarm subprocess 后端（幂等）：让 Agent 工具能真正把子代理拉起为
-  // 子进程。teammate 命令由 buildTeammateCommand 构建（继承 model/provider/
-  // 权限模式，不暴露 api-key）。
+  // Daemon child-session 主链路：只有具备 child host 的 runtime 才注册 Agent backend。
   if (options.childSessionHost && options.sessionId) {
     await registerChildSessionBackend({
       cwd,
       sessionId: options.sessionId,
       host: options.childSessionHost,
       taskBridge: options.sessionTaskBridge,
-    });
-  } else {
-    await registerSubprocessBackend({
-      cwd,
-      sessionId: options.sessionId,
-      settings,
-      permissionChecker,
     });
   }
   const bundle = new RuntimeBuilder()
@@ -212,64 +197,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
 
   await attachSandboxRuntime(bundle, cwd, options.sandboxReporter, options.sessionId);
   return bundle;
-}
-export async function registerSubprocessBackend(options: {
-  cwd: string;
-  sessionId?: string;
-  settings: Settings;
-  permissionChecker: Parameters<typeof startSwarmPermissionResolver>[0];
-}): Promise<void> {
-  const { cwd, sessionId, settings, permissionChecker } = options;
-  const runtimeScope = { cwd, sessionId };
-  const backendRegistry = getBackendRegistry(runtimeScope);
-  if (backendRegistry.list().includes("subprocess")) return;
-
-  const taskManager = getTaskManager(runtimeScope);
-  const repoRoot = await resolveRepoRoot(cwd);
-  const worktreeManager = new WorktreeManager({
-    runGit: nodeRunGit,
-    repoRoot,
-    baseDir: computeWorktreeBaseDir(repoRoot, getConfigDir()),
-  });
-  backendRegistry.register(
-    "subprocess",
-    new SubprocessBackend({
-      taskRunner: {
-        createShellTask: (opts) => taskManager.createShellTask({ ...opts, sessionId, type: "agent" }),
-        createAgentTask: (opts) => taskManager.createAgentTask({ ...opts, sessionId, type: "agent" }),
-        writeToTask: (id, data) => taskManager.writeToTask(id, data),
-        stopTask: async (id) => {
-          await taskManager.stopTask(id);
-        },
-      },
-      buildCommand: (cfg) => buildTeammateCommand(cfg, settings),
-      worktreeManager,
-      registerTeammate: (cfg, res) => {
-        registerTeammateInTeamFile(cfg.team, {
-          agentId: res.agentId,
-          name: cfg.name,
-          backendType: res.backendType,
-          joinedAt: Date.now() / 1000,
-          agentType: null,
-          model: cfg.model ?? null,
-          prompt: cfg.prompt,
-          color: null,
-          planModeRequired: false,
-          sessionId: cfg.sessionId ?? null,
-          subscriptions: [],
-          isActive: true,
-          mode: null,
-          tmuxPaneId: "",
-          cwd: cfg.cwd,
-          worktreePath: res.worktree?.path ?? null,
-          permissions: cfg.permissions ?? [],
-          status: "active",
-        });
-        watchTeamForPermissions(cfg.team);
-        startSwarmPermissionResolver(permissionChecker, READ_ONLY_TOOLS);
-      },
-    }),
-  );
 }
 
 export async function registerChildSessionBackend(options: {
@@ -346,7 +273,7 @@ async function attachSandboxRuntime(
       settings: bundle.settings,
       cwd,
       // Pass daemon sessionId as-is so Bash/ToolContext lookups hit the same active map key.
-      // Omit for cwd-only callers (channels / task-worker / legacy CLI).
+      // Omit for cwd-only callers such as channels and legacy local CLI paths.
       sessionId,
       reporter,
     });

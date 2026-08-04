@@ -1,6 +1,6 @@
 # 设计：Personalization 环境事实抽取（C.5）
 
-> 状态：已实现合并（REPL / print / task-worker）。记忆体系全景见 [memory-system.md](./memory-system.md)。
+> 状态：已实现合并（print / daemon session runtime）。记忆体系全景见 [memory-system.md](./memory-system.md)。
 > 新建 `packages/personalization`，移植 Python
 > `personalization/{extractor,rules,session_hook}.py`（共 273 行）。
 >
@@ -40,7 +40,7 @@ local_rules/
   （try/catch 吞错，绝不阻塞退出）——当前已接：
   - REPL `/exit` / EOF / Ctrl+C 退出前
   - print 模式完成后
-  - task-worker 每轮结束后
+  - daemon child session 每轮结束后
 - **未接线**：`ohs --tui` / daemon `SessionRuntime` 在 archive、interrupt 或进程退出时
   尚未调用抽取；旧 BackendHost shutdown 路径已删除，不要再按该路径实现。
 
@@ -48,7 +48,7 @@ local_rules/
 
 | 点 | Python | TS | 原因 |
 |----|--------|----|------|
-| 触发点 | ui/runtime 关停一处 | REPL / print / task-worker 各自结束路径；daemon/TUI 未接 | TS 无统一关停层；daemon 需另定 session lifecycle hook |
+| 触发点 | ui/runtime 关停一处 | print / daemon session runtime 各自结束路径 | TS 无统一关停层；daemon 需另定 session lifecycle hook |
 | 日志 | logging.info | 无（静默） | TS 无 logger 基建 |
 | 消息形状 | ConversationMessage.content blocks | 宽松 `{role?, content: string \| unknown[]}` | 适配 TS 引擎消息（SystemMessage 无 role） |
 | git_remote 正则 | 懒惰 `\S+?` 后仅跟可选组 → 恒捕获 1 字符,被长度过滤丢弃(死代码) | 追加 `(?=\s\|$)` 锚,真正捕获 `owner/repo` | 修 Python 的失效模式 |

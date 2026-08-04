@@ -13,7 +13,7 @@
 - plugin agents（依赖 C.4 的 agent .md frontmatter 解析器）；
 - bundled plugins（Python 侧也是空目录）。
 
-**已补充完成（C.1 二刀）**：`tools_dir` 动态 import 工具——`registerPluginTools` 函数遍历 `<plugin>/<tools_dir>/*.js|ts`，动态 import 后验证 `name` 与 `execute` 字段，通过则注册进 `toolRegistry`；import 失败只打 stderr 警告，不影响其他工具与插件加载。REPL、daemon session runtime 与 task-worker 都在 `registerPluginHooks` 之后调用。
+**已补充完成（C.1 二刀）**：`tools_dir` 动态 import 工具——`registerPluginTools` 函数遍历 `<plugin>/<tools_dir>/*.js|ts`，动态 import 后验证 `name` 与 `execute` 字段，通过则注册进 `toolRegistry`；import 失败只打 stderr 警告，不影响其他工具与插件加载。daemon session runtime 在 `registerPluginHooks` 之后调用。
 
 ## Claude Code 兼容
 

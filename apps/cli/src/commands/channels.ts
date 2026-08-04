@@ -63,7 +63,7 @@ async function runChannelsServe(): Promise<void> {
     return;
   }
 
-  // 引擎组装复用 task-worker/backend 的 bootstrap 路径。
+  // 引擎组装复用无头 runtime 的 bootstrap 路径。
   const { SkillRegistry } = await import("@openharness/skills");
   const { CredentialStorage } = await import("@openharness/auth");
   const { bootstrap } = await import("../runtime");

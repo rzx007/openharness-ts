@@ -43,6 +43,8 @@ export const agentTool: ToolDefinition = {
     const { getBackendRegistry } = await import("@openharness/swarm");
     const { getAgentDefinition } = await import("@openharness/coordinator");
     const { getTeamRegistry } = await import("@openharness/coordinator");
+
+    // 解析并校验执行模式：当前仅支持 in-process teammate 后端。
     const mode = parseAgentExecutionMode(input.mode);
     if (!mode) {
       return { content: [{ type: "text", text: "Invalid mode. Use in_process_teammate or remote_agent." }], isError: true };
@@ -51,16 +53,19 @@ export const agentTool: ToolDefinition = {
       return { content: [{ type: "text", text: "remote_agent mode is not implemented yet." }], isError: true };
     }
 
+    // 权限模式必须落在允许的三种枚举值中，避免传入无效配置。
     const permissionMode = input.permissionMode as string | undefined;
     if (permissionMode !== undefined && !["default", "plan", "full_auto"].includes(permissionMode)) {
       return { content: [{ type: "text", text: "Invalid permissionMode. Use default, plan, or full_auto." }], isError: true };
     }
 
+    // 根据 subagentType 读取预定义的 agent 配置，便于复用模型、工具约束和权限策略。
     const subagentType = input.subagentType as string | undefined;
     const agentDef = subagentType ? getAgentDefinition(subagentType) : undefined;
     const agentName = subagentType ?? "agent";
     const team = (input.team as string) ?? "default";
 
+    // 优先使用当前 session 绑定的 registry；若没有则回退到全局 registry。
     const executor = pickSwarmExecutor(
       context.sessionId
         ? [getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId }), getBackendRegistry()]
@@ -72,8 +77,7 @@ export const agentTool: ToolDefinition = {
     }
 
     try {
-      // Pre-generate a stable session ID so the worker can persist and restore
-      // its context across lazy restarts (D.1 Swarm context recovery).
+      // 预先生成稳定的 worker sessionId，保证子任务在懒加载重启后仍能恢复上下文。
       const workerSessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const result = await executor.spawn({
         name: agentName,
@@ -94,6 +98,8 @@ export const agentTool: ToolDefinition = {
       if (!result.success) {
         return { content: [{ type: "text", text: result.error ?? "Failed to spawn agent" }], isError: true };
       }
+
+      // 如用户传入了 team，则把该 agent 注册到对应 team 中，方便后续查询与协作。
       if (input.team) {
         try { getTeamRegistry().addAgent(input.team as string, result.taskId); } catch {}
       }

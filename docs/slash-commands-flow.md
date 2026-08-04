@@ -173,7 +173,7 @@ Builtin session 名与 skill 重名时 **builtin 胜出**（例如 `/commit` 是
 | 进程内 `QueryEngine` 上改历史 | store `replaceTranscript` + `closeRuntime`（如 `/rewind` `/compact`） |
 | print/worker 斜杠 | **不支持**完整 slash 面；print 是一次性 prompt |
 
-print / `--task-worker` 仍是进程内 runtime，不走本 flow。见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)「入口边界」。
+print 走 daemon Session API，不走本 flow。旧 `--task-worker` 入口已退场。见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)「入口边界」。
 
 ## Web/Desktop 接入清单
 

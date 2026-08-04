@@ -71,9 +71,8 @@ describe("resolveMainEntryMode", () => {
     expect(resolveMainEntryMode("hello", { print: true })).toBe("print");
   });
 
-  it("keeps dry-run and task-worker ahead of tui/print", () => {
+  it("keeps dry-run ahead of tui/print", () => {
     expect(resolveMainEntryMode(undefined, { dryRun: true })).toBe("dry-run");
-    expect(resolveMainEntryMode("x", { taskWorker: true })).toBe("task-worker");
     expect(resolveMainEntryMode("x", { tui: true })).toBe("tui");
   });
 });

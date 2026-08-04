@@ -1,10 +1,8 @@
 # 设计：只读工具自动放行（permission_sync 最小版，D.4）
 
-> 状态：已批准，待实现。建立在 D.1–D.3 之上。
-> （历史文档：D.5 已落地写操作转 leader 审批，且 worker 不再继承 leader 的
-> permission-mode、缺省一律 `default`——现状见
-> [swarm-subprocess-flow.md](./swarm-subprocess-flow.md) 与
-> [swarm-file-infra-design.md](./swarm-file-infra-design.md)。）
+> 状态：历史归档。本文建立在已退场的 subprocess worker 路径上；
+> `--swarm-worker` 与 `buildTeammateCommand` 已从运行时代码删除。当前权限路径由
+> daemon child session + `PermissionBroker` 承载。
 
 ## 目标
 

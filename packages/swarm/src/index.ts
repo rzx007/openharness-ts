@@ -1,9 +1,4 @@
 export {
-  SubprocessBackend,
-  type TaskRunner,
-  type SubprocessBackendOptions,
-} from "./subprocess.js";
-export {
   ChildSessionBackend,
   type ChildSessionBackendOptions,
   type ChildSessionHost,
@@ -292,16 +287,22 @@ export interface BackendRegistryScope {
 }
 
 function normalizeRegistryScope(scope: string | BackendRegistryScope): string {
+  // 对象形态的 scope 会按工作目录 + 可选 sessionId 组成唯一键；
+  // 这样同一个 cwd 在不同会话下可以拿到独立的 registry 实例。
   if (typeof scope !== "string") {
     const normalizedCwd = normalizeRegistryScope(scope.cwd);
     const sessionId = scope.sessionId?.trim();
     return sessionId ? `${normalizedCwd}::session=${sessionId}` : normalizedCwd;
   }
+
+  // 字符串 scope 先统一成 POSIX 风格路径，再在 Windows 下做小写归一化，
+  // 避免同一路径因斜杠大小写差异而导致缓存键不一致。
   const normalized = scope.replace(/\\/g, "/").replace(/\/+$/, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 export function getBackendRegistry(scope?: string | BackendRegistryScope): BackendRegistry {
+  // 若传入 scope，则按 cwd/session 维度获取或创建独立 registry，避免不同会话共享同一后端注册表。
   if (scope) {
     const key = normalizeRegistryScope(scope);
     let scoped = scopedBackendRegistries.get(key);
@@ -311,6 +312,8 @@ export function getBackendRegistry(scope?: string | BackendRegistryScope): Backe
     }
     return scoped;
   }
+
+  // 未传 scope 时使用全局默认 registry，供无会话上下文的调用复用。
   if (!_defaultBackendRegistry) {
     _defaultBackendRegistry = new BackendRegistry();
   }

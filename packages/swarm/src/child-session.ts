@@ -51,7 +51,9 @@ export interface ChildSessionBackendOptions {
 
 export class ChildSessionBackend implements SwarmBackend {
   readonly backendType = "in_process";
+  // 维护 agentId -> child session 的映射，便于后续 sendMessage / terminate 直接定位子会话。
   private readonly children = new Map<string, { sessionId: string; taskId: string; worktreeSlug?: string }>();
+  // 记录每个会话任务的生成编号，用于丢弃已过期的异步 run 结果，避免旧事件覆盖新状态。
   private readonly taskGenerations = new Map<string, number>();
 
   constructor(private options: ChildSessionBackendOptions) {}
@@ -61,6 +63,7 @@ export class ChildSessionBackend implements SwarmBackend {
   }
 
   async spawn(config: TeammateSpawnConfig): Promise<SpawnResult> {
+    // agentId 是全局唯一标识，便于在 children Map 中做查找与归属管理。
     const agentId = `${config.name}@${config.team}`;
     let effectiveConfig = config;
     let worktree: SpawnResult["worktree"];
@@ -68,6 +71,7 @@ export class ChildSessionBackend implements SwarmBackend {
     let childSessionId: string | undefined;
     let taskId = "";
     try {
+      // 仅在开启 isolate 且当前仓库可用时，才创建独立 git worktree；这样并行写任务不会互相污染同一工作目录。
       if (config.isolate && this.options.worktreeManager && await this.options.worktreeManager.isGitRepo()) {
         const rawSlug = `${config.team}-${config.name}`
           .toLowerCase()
@@ -81,6 +85,7 @@ export class ChildSessionBackend implements SwarmBackend {
         effectiveConfig = { ...config, cwd: created.path };
       }
 
+      // 创建真正的子会话，并把 metadata 透传给 host，便于运行时识别团队、权限模式、工具约束等信息。
       const child = await this.options.host.createChildSession({
         id: effectiveConfig.sessionId,
         parentId: effectiveConfig.parentSessionId,
@@ -100,6 +105,7 @@ export class ChildSessionBackend implements SwarmBackend {
       });
       childSessionId = child.id;
 
+      // 注册会话任务桥：后续输入、停止信号都由 taskBridge 来驱动与落盘。
       const bridgeTask = this.options.taskBridge.registerSessionTask({
         description: agentId,
         cwd: effectiveConfig.cwd,
@@ -136,12 +142,14 @@ export class ChildSessionBackend implements SwarmBackend {
         },
       });
       taskId = bridgeTask.id;
+      // 记录活跃子会话的映射，方便后续消息发送与 terminate。
       this.children.set(agentId, {
         sessionId: child.id,
         taskId,
         ...(worktreeSlug ? { worktreeSlug } : {}),
       });
 
+      // 首次提交 prompt，并异步监听 run 完成状态，最后用 taskBridge 完成任务记录。
       const generation = this.nextGeneration(taskId);
       const admitted = await this.options.host.admitPrompt(child.id, effectiveConfig.prompt);
       if (admitted.runId) {

@@ -137,7 +137,7 @@ skill 经 command catalog 以 template 形式出现。
 |---|---|
 | `Agent` | 派发子代理执行任务 |
 | `TeamCreate` / `TeamDelete` | 创建/解散 swarm 团队（`~/.openharness-ts/teams/<team>/`，team.json 生命周期） |
-| `SendMessage` | 给 teammate 发消息（文件邮箱 + TaskManager 懒重启，见 [swarm-task-worker-design.md](swarm-task-worker-design.md)） |
+| `SendMessage` | 给 teammate 发消息（child session task 输入，见 [agent-child-session-flow.md](agent-child-session-flow.md)） |
 
 ### 后台任务（task/）
 

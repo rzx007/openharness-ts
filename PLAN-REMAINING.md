@@ -193,14 +193,14 @@
   daemon `SessionRuntime` 尚未按 session_mode 限制 coordinator 工具集。
 - `QueryEngine.setAllowedTools(string[]|null)`：在 submitMessage 内 streamMessage
   调用前过滤 toolRegistry，null 解除限制。
-- ✅ agent 级字段运行时生效：`tools/disallowedTools/maxTurns/effort/permissionMode` 经 `TeammateSpawnConfig` → `buildTeammateCommand` → CLI argv 传给子进程，bootstrap 应用。留待：agent 级 `hooks/mcpServers` 的运行时生效（需 env var 传 JSON，较复杂）。
+- ✅ agent 级字段运行时生效：`tools/disallowedTools/maxTurns/effort/permissionMode` 经 `TeammateSpawnConfig` → `ChildSessionBackend` 写入 child session metadata，由 daemon runtime 应用。留待：agent 级 `hooks/mcpServers` 的运行时生效。
 - **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`、`packages/core/src/{types/runtime,engine/query-engine}.ts`、`packages/services/src/session/storage.ts`、`apps/cli/src/commands/main.ts`
 
 ### C.5 Personalization（新模块）✅ 核心完成 / daemon 未接
 - ✅ `packages/personalization`：10 类环境事实正则抽取（SSH/IP/数据路径/conda/
   Python/端点/env/git remote/Ray/cron），去重合并 + 置信度胜出。
 - ✅ `local_rules/` rules.md + facts.json 持久化（尊重 OPENHARNESS_CONFIG_DIR）。
-- ✅ session-end best-effort 抽取已接 REPL / print / task-worker；rules.md 注入
+- ✅ session-end best-effort 抽取已接 print / daemon session runtime；rules.md 注入
   system prompt（CLAUDE.md 后，含 daemon bootstrap）。
 - 留待：daemon/TUI session archive 或进程退出时调用 `updateRulesFromSession`。
   旧 BackendHost shutdown 路径已删除。详见 `docs/personalization-design.md`。

@@ -2,7 +2,7 @@
 
 > 状态：主线架构。Task 0-9 已落地 daemon/client、TUI attach 与 durable message-part 基础版。
 > 日期：2026-07-31。
-> 决策：默认 `ohs`（与显式 `ohs --tui`）走 daemon attach：`CLI -> frontend -> @openharness/client -> ohs serve`。用户 headless print（`ohs "prompt"` / `-p`）同样走 Session API 客户端。daemon 内 `Agent` 通过 child session 执行；`--task-worker` / swarm subprocess 是历史内部实现，不属于 daemon/TUI/print 产品链路，也不作为兼容承诺。进程内 REPL 已移除，TUI 的旧 BackendHost/OHJSON 路径已退场。
+> 决策：默认 `ohs`（与显式 `ohs --tui`）走 daemon attach：`CLI -> frontend -> @openharness/client -> ohs serve`。用户 headless print（`ohs "prompt"` / `-p`）同样走 Session API 客户端。daemon 内 `Agent` 通过 child session 执行；`--task-worker` / swarm subprocess 已从运行时代码退场，不再作为兼容 fallback。进程内 REPL 已移除，TUI 的旧 BackendHost/OHJSON 路径已退场。
 
 ## 1. 目标
 
@@ -269,7 +269,7 @@ Slash command 边界：
 
 - **用户 headless print**（`ohs "prompt"` / `ohs -p`）：ensure daemon → `@openharness/client` → `createSession` + `admitPrompt` + SSE；无 TTY 时 permission 自动 deny（或 `--dangerously-skip-permissions` 时 approve）。详见下文「Print Session API」。
 - **daemon/TUI/print 内的 `Agent`**：本轮迁移目标为 daemon 内 child session + PermissionBroker；迁移完成前不得把目标状态描述为已全部落地。
-- **内部 `--task-worker` / `--swarm-worker`**：历史进程内一次性 runtime，不 attach daemon session store，权限走文件流；不属于当前产品链路，也不保证兼容行为。
+- **内部 `--task-worker` / `--swarm-worker`**：已退场。当前 CLI 不再暴露这些 flag，runtime 也不再注册 subprocess swarm backend。
 - 交互产品入口只有 TUI/daemon。旧 REPL registry 已拆除。
 - print 的旧项目级 `--continue` / `--resume` **尚未**迁到 daemon store；传这些 flag 会明确报错。
 
