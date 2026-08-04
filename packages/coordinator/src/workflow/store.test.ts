@@ -7,8 +7,8 @@ import {
   createWorkflowPlan,
   createWorkflowRunSnapshot,
   type WorkflowTaskRunResult,
-} from "./workflow-scheduler.js";
-import { cancelPersistentWorkflow, resumePersistentWorkflow, runPersistentWorkflow, WorkflowRunStore } from "./workflow-store.js";
+} from "../workflow-scheduler.js";
+import { cancelPersistentWorkflow, resumePersistentWorkflow, runPersistentWorkflow, WorkflowRunStore } from "../workflow-store.js";
 
 const tempDirs: string[] = [];
 

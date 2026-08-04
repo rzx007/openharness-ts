@@ -1,4 +1,4 @@
-import { WORKFLOW_BUDGET_POLICY_PRESETS } from "./workflow-model.js";
+import { WORKFLOW_BUDGET_POLICY_PRESETS } from "./model.js";
 import type {
   WorkflowBudgetPolicy,
   WorkflowBudgetPolicyPreset,
@@ -6,7 +6,7 @@ import type {
   WorkflowRunningTask,
   WorkflowTaskBudgetUsage,
   WorkflowTaskRunResult,
-} from "./workflow-model.js";
+} from "./model.js";
 
 export function validateWorkflowBudgetPolicy(policy: WorkflowBudgetPolicy | undefined): void {
   if (!policy) return;

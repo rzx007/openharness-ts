@@ -2,14 +2,14 @@ import {
   resolveWorkflowBudgetPolicy,
   validateWorkflowBudgetPolicy,
   validateWorkflowBudgetPolicyPreset,
-} from "./workflow-budget.js";
+} from "./budget.js";
 import type {
   WorkflowMode,
   WorkflowPlan,
   WorkflowSpec,
   WorkflowTask,
   WorkflowValidationReport,
-} from "./workflow-model.js";
+} from "./model.js";
 
 export function createWorkflowPlan(spec: WorkflowSpec): WorkflowPlan {
   const tasks = normalizeTasksForMode(spec.mode, spec.tasks);
