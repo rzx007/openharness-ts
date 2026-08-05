@@ -29,7 +29,7 @@ ohs | ohs --tui [flags] ["initial prompt"]
   -> @openharness/client
   -> session snapshot + SSE live events
   -> OpenHarnessHttpServer
-  -> SessionStore + SessionRunCoordinator + PermissionBroker
+  -> SessionStore + SessionRunEngine + PermissionBroker
   -> CliSessionRuntime
   -> bootstrap() + QueryEngine + tools
 ```
@@ -103,7 +103,7 @@ prompt 进入 server 后：
 
 1. `SessionStore.admitPrompt()` 持久化输入。
 2. `SessionStore.createRun()` 创建 run。
-3. `SessionRunCoordinator.enqueue()` 保证同 session 串行、不同 session 并发。
+3. `SessionRunEngine.admitPrompt()` 负责 prompt 准入、steer 和中断语义，内部通过 `SessionRunCoordinator.enqueue()` 保证同 session 串行、不同 session 并发。
 4. `CliSessionRuntime` 复用 `bootstrap()` / `QueryEngine` 执行。
 5. QueryEngine stream event 被翻译成 durable `session.message.created`、`session.message.part.updated`、`session.message.part.delta`。
 6. daemon 通过 SSE 推给所有 attach 客户端。

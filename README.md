@@ -18,7 +18,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents/tools_dir 六类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 支持动态 import 插件工具
 - ✅ **Channels 引擎桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 QueryEngine；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-bridge-design.md](docs/channels-bridge-design.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。SwarmPanel UI 保留但尚未接 daemon 事件
-- 🟢 **Daemon Session Runtime** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、原子 session snapshot、SSE 事件流、单 session 串行/多 session 并发 run coordinator、持久化 PermissionBroker 和共享 `@openharness/client` reducer。默认 `ohs`（与 `ohs --tui`）启动/attach daemon；重启将遗留 run 和 daemon-owned workflow 明确收口，保留 parent/child session 与 timeline；进程内 REPL 入口已移除。认知地图见 [docs/daemon-runtime-flow-map.md](docs/daemon-runtime-flow-map.md)；设计细节见 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 和 [docs/client-sync-flow.md](docs/client-sync-flow.md)
+- 🟢 **Daemon Session Runtime** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、原子 session snapshot、SSE 事件流、单 session 串行/多 session 并发 run engine、持久化 PermissionBroker 和共享 `@openharness/client` reducer。默认 `ohs`（与 `ohs --tui`）启动/attach daemon；重启将遗留 run 和 daemon-owned workflow 明确收口，保留 parent/child session 与 timeline；进程内 REPL 入口已移除。认知地图见 [docs/daemon-runtime-flow-map.md](docs/daemon-runtime-flow-map.md)；设计细节见 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 和 [docs/client-sync-flow.md](docs/client-sync-flow.md)
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
 - 🟡 **可用但仍在收口** — `sandbox`（Bash 走 SRT/Docker，文件工具宿主执行 + path guard；Docker proxy 为 bridge+代理环境 MVP；Docker/SRT 可选 e2e 已补，CI 接入待补）
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
@@ -270,7 +270,7 @@ OpenHarness-ts/
 │   ├── api/                  # API Provider 抽象层
 │   ├── client/               # daemon HTTP/SSE typed client + event reducer（TUI/Web/Desktop 共用）
 │   ├── tools/                # 内置工具（createDefaultToolRegistry，当前 45）
-│   ├── server/               # daemon HTTP server、run coordinator、permission broker
+│   ├── server/               # daemon HTTP server、run engine、permission broker
 │   ├── services/             # 服务层（Compact、Session、Cron、Task、LSP、OAuth）
 │   ├── coordinator/          # 多 Agent 编排器
 │   ├── mcp/                  # MCP 协议客户端
@@ -320,7 +320,7 @@ OpenHarness-ts/
 │                 ┌─────────────────────────────┐                    │
 │                 │ `ohs serve` / daemon        │                    │
 │                 │ Hono · SessionStore          │                    │
-│                 │ RunCoordinator               │                    │
+│                 │ SessionRunEngine             │                    │
 │                 │ PermissionBroker             │                    │
 │                 └──────────────┬──────────────┘                    │
 │                                │ SessionRuntime                    │
@@ -490,7 +490,7 @@ OpenHarness-ts/
 | `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；daemon catalog 将 user-invocable skill 暴露为 template 斜杠（`POST /sessions/:id/commands` 展开后 admit）；model 可见性过滤                                                                                                                                   |
 | `BridgeManager`         | 会话桥接：多进程间共享会话状态                                                                                                                                                                                                                                                                                                                                                  |
 | `PermissionChecker`     | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                                                                                                                                                                                                                                                                                    |
-| `OpenHarnessHttpServer` | daemon HTTP/SSE 服务：Hono 路由、bearer token、sessions/state/messages/parts/prompts/events/permissions API、run coordinator 和 PermissionBroker                                                                                                                                                                                                                                      |
+| `OpenHarnessHttpServer` | daemon HTTP/SSE 服务：Hono 路由、bearer token、sessions/state/messages/parts/prompts/events/permissions API、run engine 和 PermissionBroker                                                                                                                                                                                                                                             |
 | `OpenHarnessClient`     | 跨端客户端 SDK：typed API、SSE 解析、session snapshot+live 合并、按 session bucket 的 event reducer。详见 [docs/client-sync-flow.md](docs/client-sync-flow.md)                                                                                                                                                                                                                               |
 
 
@@ -550,7 +550,7 @@ OpenHarness-ts/
                            ▼
 ┌──────────────────────────────────────────────────────────┐
 │  ohs serve / daemon                                      │
-│  SessionStore · RunCoordinator · PermissionBroker        │
+│  SessionStore · SessionRunEngine · PermissionBroker      │
 │  Agent → child session（daemon 当前主路径）                │
 └──────────────────────────┬───────────────────────────────┘
                            │ SessionRuntime factory

@@ -149,7 +149,7 @@ apps/web / apps/desktop
 - `packages/services/src/session-runtime`：唯一的 SQLite `SessionStore`，支持 session/input/message/part/event/run/task/permission request。
 - SQLite 持久化与迁移：Drizzle 定义 schema，Drizzle Kit 管理迁移文件，daemon 通过 `better-sqlite3` 独占打开数据库。
 - `packages/server`：Hono HTTP server，bearer token，SSE 事件流，daemon registry，`ohs serve` 与 `ohs daemon start/status/stop`。
-- `SessionRunCoordinator`：同 session 串行、不同 session 并发、queued run interrupt、wake merge 计数；`delivery: "steer"` 对 active run 走 `mergeWake`，无 active run 时退化为 queue。
+- `SessionRunEngine` / `SessionRunCoordinator`：HTTP 层由 `SessionRunEngine` 负责 prompt 准入、run 创建、steer、中断与等待；底层 `SessionRunCoordinator` 只负责同 session lane 串行、不同 session 并发、queued run interrupt 和 wake merge 计数。`delivery: "steer"` 对 active run 走 `mergeWake`，无 active run 时退化为 queue。
 - `SessionRuntime` 注入：daemon 可通过 CLI runtime factory 复用现有 `bootstrap` / `QueryEngine`；interrupt/`AbortSignal` 贯穿 QueryEngine、provider，以及 Bash/Web/Image/Feishu 工具主路径；`TaskWait` 收到父 session abort 后会请求停止其等待的 child task。`ToolContext.abortSignal` 是单次工具调用和 timeout 的信号，`runAbortSignal` 是 session run 所有权信号，供 detached workflow 等跨工具调用工作使用。
 - `PermissionBroker`：权限请求持久化、`permission.asked/replied`、`POST /permissions/:requestId/reply`、session 级 approval 复用。
 - `packages/client`：typed API client、SSE parser、按 session bucket 的 message-part reducer、session snapshot+live 合并；SSE 断流后按 `lastSeq` 指数退避重连，session 路径遇 seq 空洞会 re-snapshot。
@@ -268,7 +268,7 @@ Slash command 边界：
 入口边界：
 
 - **用户 headless print**（`ohs "prompt"` / `ohs -p`）：ensure daemon → `@openharness/client` → `createSession` + `admitPrompt` + SSE；无 TTY 时 permission 自动 deny（或 `--dangerously-skip-permissions` 时 approve）。详见下文「Print Session API」。
-- **daemon/TUI/print 内的 `Agent`**：本轮迁移目标为 daemon 内 child session + PermissionBroker；迁移完成前不得把目标状态描述为已全部落地。
+- **daemon/TUI/print 内的 `Agent`**：当前主路径已落到 daemon 内 child session + PermissionBroker；parent/child/task/run 关系进入同一个 daemon store 与事件流。
 - **内部 `--task-worker` / `--swarm-worker`**：已退场。当前 CLI 不再暴露这些 flag，runtime 也不再注册 subprocess swarm backend。
 - 交互产品入口只有 TUI/daemon。旧 REPL registry 已拆除。
 - print 的旧项目级 `--continue` / `--resume` **尚未**迁到 daemon store；传这些 flag 会明确报错。
