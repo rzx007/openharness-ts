@@ -5,25 +5,23 @@ import {
   errorResponse,
   jsonResponse,
   readJson,
-  type OpenHarnessRuntimeSnapshot,
   type OpenHarnessServerHealth,
 } from "../support.js";
 import type { ProviderService, SettingsService } from "../../settings-api.js";
+import type { DaemonControlService } from "../daemon-control-service.js";
 
 export interface SystemRoutesContext {
   version?: string;
   commandCatalog?: CommandCatalogProvider;
   settingsService?: SettingsService;
   providerService?: ProviderService;
-  runtimeSnapshot(): OpenHarnessRuntimeSnapshot;
-  hasAnyActiveRuns(): boolean;
-  closeAllRuntimes(): Promise<void>;
+  control: Pick<DaemonControlService, "closeAllRuntimes" | "hasAnyActiveRuns" | "runtimeSnapshot">;
 }
 
 export function createSystemRoutes(context: SystemRoutesContext): Hono {
   return new Hono()
     .get("/health", () => {
-      const snapshot = context.runtimeSnapshot();
+      const snapshot = context.control.runtimeSnapshot();
       return jsonResponse({
         ok: true,
         ...(context.version ? { version: context.version } : {}),
@@ -34,7 +32,7 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
         queuedRunCount: snapshot.coordinator.queuedRunCount,
       } satisfies OpenHarnessServerHealth);
     })
-    .get("/debug/runtime", () => jsonResponse(context.runtimeSnapshot()))
+    .get("/debug/runtime", () => jsonResponse(context.control.runtimeSnapshot()))
     .get("/commands", async (c) => {
       const cwd = c.req.query("cwd");
       if (!cwd) return errorResponse(400, "cwd is required");
@@ -55,13 +53,13 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
     })
     .patch("/settings", async (c) => {
       if (!context.settingsService) return errorResponse(501, "Settings service is not configured");
-      if (context.hasAnyActiveRuns()) {
+      if (context.control.hasAnyActiveRuns()) {
         return errorResponse(409, "Cannot update daemon settings while session runs are active");
       }
       const body = await readJson(c);
       try {
         const result = await context.settingsService.patch(body);
-        if (result.restartRuntimes) await context.closeAllRuntimes();
+        if (result.restartRuntimes) await context.control.closeAllRuntimes();
         return jsonResponse({ settings: result.settings });
       } catch (error) {
         return errorResponse(400, error instanceof Error ? error.message : String(error));

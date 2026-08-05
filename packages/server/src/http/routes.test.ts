@@ -8,7 +8,9 @@ import { createPermissionRoutes } from "./routes/permission.js";
 import { createRunExecutionRoutes } from "./routes/run-execution.js";
 import { createServiceRoutes } from "./routes/service.js";
 import { createSessionRoutes } from "./routes/session.js";
+import { createSessionUtilityRoutes } from "./routes/session-utility.js";
 import { createSystemRoutes } from "./routes/system.js";
+import { createTaskRoutes } from "./routes/task.js";
 
 function runtimeSnapshot() {
   return {
@@ -24,13 +26,25 @@ function runtimeSnapshot() {
   };
 }
 
+function daemonControl(overrides: Record<string, unknown> = {}) {
+  return {
+    runtimeSnapshot,
+    hasAnyActiveRuns: () => false,
+    hasActiveRunsForCwd: () => false,
+    closeAllRuntimes: async () => {},
+    closeRuntimesForCwd: async () => {},
+    runtimeInspectionAvailable: true,
+    sessionExists: () => true,
+    inspectRuntimeHooks: async () => [],
+    ...overrides,
+  };
+}
+
 describe("system routes", () => {
   it("serves health from the runtime snapshot", async () => {
     const app = createSystemRoutes({
       version: "1.2.3",
-      runtimeSnapshot,
-      hasAnyActiveRuns: () => false,
-      closeAllRuntimes: async () => {},
+      control: daemonControl(),
     });
 
     const response = await app.request("/health");
@@ -47,12 +61,10 @@ describe("system routes", () => {
 
   it("lists built-in and provider commands", async () => {
     const app = createSystemRoutes({
-      runtimeSnapshot,
+      control: daemonControl(),
       commandCatalog: {
         list: () => [{ name: "/custom", kind: "template", source: "project" }],
       },
-      hasAnyActiveRuns: () => false,
-      closeAllRuntimes: async () => {},
     });
 
     const response = await app.request("/commands?cwd=/repo");
@@ -74,8 +86,7 @@ describe("memory routes", () => {
         get: async () => undefined,
         remove: async () => false,
       },
-      hasActiveRunsForCwd: () => false,
-      closeRuntimesForCwd,
+      control: daemonControl({ closeRuntimesForCwd }),
     });
 
     const response = await app.request("/", {
@@ -97,8 +108,7 @@ describe("auth routes", () => {
         login: async () => ({ ok: true }),
         logout: async () => ({ ok: true }),
       },
-      hasAnyActiveRuns: () => true,
-      closeAllRuntimes: async () => {},
+      control: daemonControl({ hasAnyActiveRuns: () => true }),
     });
 
     const response = await app.request("/login", {
@@ -121,10 +131,7 @@ describe("service routes", () => {
         list: async () => ({ plugins: [], warnings: [] }),
         setEnabled: async () => ({ message: "ok" }),
       },
-      hasAnyActiveRuns: () => false,
-      hasActiveRunsForCwd: () => true,
-      closeAllRuntimes: async () => {},
-      closeRuntimesForCwd: async () => {},
+      control: daemonControl({ hasActiveRunsForCwd: () => true }),
     });
 
     const response = await app.request("/plugins/reload", {
@@ -159,9 +166,8 @@ describe("permission routes", () => {
   it("passes trace id through permission replies", async () => {
     const reply = vi.fn(() => ({ id: "p1", status: "approved" }));
     const app = createPermissionRoutes({
-      listRequests: () => [],
-      reply,
-      traceIdForRequest: () => "trace-1",
+      permissions: { listRequests: () => [], reply },
+      traces: { get: () => "trace-1" },
     });
 
     const response = await app.request("/p1/reply", {
@@ -183,8 +189,6 @@ describe("permission routes", () => {
 
 describe("session routes", () => {
   it("creates sessions and warms their runtime", async () => {
-    const warmRuntime = vi.fn(async () => {});
-    const broadcastSince = vi.fn();
     const session = {
       id: "s1",
       cwd: "/repo",
@@ -195,25 +199,23 @@ describe("session routes", () => {
       createdAt: 1,
       updatedAt: 1,
     };
+    const createSession = vi.fn(() => session);
     const app = createSessionRoutes({
-      store: {
-        createSession: vi.fn(() => session),
+      queries: {
         getSession: vi.fn(),
         getSessionState: vi.fn(),
         listMessageParts: vi.fn(() => []),
         listMessages: vi.fn(() => []),
         listSessions: vi.fn(() => []),
-        resolveSessionListTitle: vi.fn(),
-        updateSession: vi.fn(),
       },
-      latestEventSeq: () => 7,
-      broadcastSince,
-      warmRuntime,
-      hasRunWork: () => false,
-      closeRuntime: async () => {},
-      archiveSessionTree: async () => session,
-      traceIdForRequest: () => "trace-1",
-      admitPromptAndMaybeRun: vi.fn(),
+      application: {
+        createSession,
+        getSession: vi.fn(),
+        updateSession: vi.fn(),
+        archiveSessionTree: vi.fn(async () => session),
+        admitPrompt: vi.fn(),
+      },
+      traces: { get: () => "trace-1" },
     });
 
     const response = await app.request("/", {
@@ -223,8 +225,7 @@ describe("session routes", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(warmRuntime).toHaveBeenCalledWith("s1");
-    expect(broadcastSince).toHaveBeenCalledWith(7);
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ id: "s1", cwd: "/repo" }));
   });
 
   it("expands slash commands into admitted prompts", async () => {
@@ -240,8 +241,7 @@ describe("session routes", () => {
       },
     }));
     const app = createSessionRoutes({
-      store: {
-        createSession: vi.fn(),
+      queries: {
         getSession: vi.fn(() => ({
           id: "s1",
           cwd: "/repo",
@@ -256,8 +256,13 @@ describe("session routes", () => {
         listMessageParts: vi.fn(() => []),
         listMessages: vi.fn(() => []),
         listSessions: vi.fn(() => []),
-        resolveSessionListTitle: vi.fn(),
+      },
+      application: {
+        createSession: vi.fn(),
+        getSession: vi.fn(),
         updateSession: vi.fn(),
+        archiveSessionTree: vi.fn(),
+        admitPrompt: admitPromptAndMaybeRun,
       },
       commandCatalog: {
         expand: vi.fn(async () => ({
@@ -265,16 +270,7 @@ describe("session routes", () => {
           command: { name: "/fix", kind: "template", source: "project" },
         })),
       },
-      latestEventSeq: () => 1,
-      broadcastSince: vi.fn(),
-      warmRuntime: async () => {},
-      hasRunWork: () => false,
-      closeRuntime: async () => {},
-      archiveSessionTree: async () => {
-        throw new Error("not used");
-      },
-      traceIdForRequest: () => "trace-1",
-      admitPromptAndMaybeRun,
+      traces: { get: () => "trace-1" },
     });
 
     const response = await app.request("/s1/commands", {
@@ -310,20 +306,12 @@ describe("run execution routes", () => {
       },
     }));
     const app = createRunExecutionRoutes({
-      store: {
-        appendEvent: vi.fn(),
-        findRunByInput: vi.fn(),
-        getInput: vi.fn(),
-        getRun: vi.fn(),
-        listInputs: vi.fn(() => []),
+      application: {
+        admitPrompt: admitPromptAndMaybeRun,
+        resumeRun: vi.fn(),
+        interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
       },
-      hasRuntime: () => true,
-      hasRunWork: () => false,
-      latestEventSeq: () => 1,
-      broadcastSince: vi.fn(),
-      traceIdForRequest: () => "trace-1",
-      admitPromptAndMaybeRun,
-      interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
+      traces: { get: () => "trace-1" },
     });
 
     const response = await app.request("/s1/prompts", {
@@ -339,6 +327,87 @@ describe("run execution routes", () => {
       content: "hello",
       metadata: { source: "test" },
       traceId: "trace-1",
+    });
+  });
+
+  it("forwards interrupted-run recovery to the session application", async () => {
+    const resumeRun = vi.fn(() => ({
+      input: { id: "recovery-input" },
+      run: { id: "recovery-run" },
+      source_run: { id: "source-run", status: "interrupted" },
+    }));
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt: vi.fn(),
+        resumeRun,
+        interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
+      },
+      traces: { get: () => "trace-1" },
+    });
+
+    const response = await app.request("/s1/runs/source-run/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "recovery-input", metadata: { requestedBy: "test" } }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(resumeRun).toHaveBeenCalledWith("s1", "source-run", {
+      id: "recovery-input",
+      metadata: { requestedBy: "test" },
+      traceId: "trace-1",
+    });
+  });
+});
+
+describe("session utility routes", () => {
+  it("forwards rewind parameters to session maintenance", async () => {
+    const rewind = vi.fn(async () => ({ turns: 2, removed: 4, messages: [], parts: [] }));
+    const app = createSessionUtilityRoutes({
+      maintenance: {
+        listMcpServers: vi.fn(),
+        getUsage: vi.fn(),
+        exportSession: vi.fn(),
+        compact: vi.fn(),
+        rewind,
+        remember: vi.fn(),
+      },
+    });
+
+    const response = await app.request("/s1/rewind", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ count: 2 }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(rewind).toHaveBeenCalledWith("s1", 2);
+  });
+});
+
+describe("task routes", () => {
+  it("forwards shell task creation to the task service", async () => {
+    const create = vi.fn(async () => ({ task: { id: "task-1", status: "running" } }));
+    const app = createTaskRoutes({
+      tasks: {
+        list: vi.fn(),
+        create,
+        get: vi.fn(),
+        stop: vi.fn(),
+      },
+    });
+
+    const response = await app.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: "s1", command: "pnpm test" }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(create).toHaveBeenCalledWith({
+      cwd: undefined,
+      sessionId: "s1",
+      command: "pnpm test",
     });
   });
 });

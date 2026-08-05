@@ -5,13 +5,13 @@ import type {
   AgentPersonaService,
   ContextService,
   DreamService,
-  HookInfo,
   HooksService,
   OutputStyleService,
   PluginService,
   ProfileService,
   ProjectInitService,
 } from "../../settings-api.js";
+import type { DaemonControlService } from "../daemon-control-service.js";
 
 export interface ServiceRoutesContext {
   contextService?: ContextService;
@@ -22,12 +22,16 @@ export interface ServiceRoutesContext {
   pluginService?: PluginService;
   agentPersonaService?: AgentPersonaService;
   hooksService?: HooksService;
-  hasAnyActiveRuns(): boolean;
-  hasActiveRunsForCwd(cwd: string): boolean;
-  closeAllRuntimes(): Promise<void>;
-  closeRuntimesForCwd(cwd: string): Promise<void>;
-  sessionExists?(sessionId: string): boolean;
-  inspectRuntimeHooks?(sessionId: string): Promise<HookInfo[]>;
+  control: Pick<
+    DaemonControlService,
+    | "closeAllRuntimes"
+    | "closeRuntimesForCwd"
+    | "hasActiveRunsForCwd"
+    | "hasAnyActiveRuns"
+    | "inspectRuntimeHooks"
+    | "runtimeInspectionAvailable"
+    | "sessionExists"
+  >;
 }
 
 export function createServiceRoutes(context: ServiceRoutesContext): Hono {
@@ -72,12 +76,12 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
     })
     .post("/profile/init", async () => {
       if (!context.profileService) return errorResponse(501, "Profile service is not configured");
-      if (context.hasAnyActiveRuns()) {
+      if (context.control.hasAnyActiveRuns()) {
         return errorResponse(409, "Cannot initialize profile while session runs are active");
       }
       try {
         const result = await context.profileService.init();
-        await context.closeAllRuntimes();
+        await context.control.closeAllRuntimes();
         return jsonResponse(result);
       } catch (error) {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
@@ -119,11 +123,11 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
       const body = await readJson(c);
       const cwd = typeof body.cwd === "string" ? body.cwd : c.req.query("cwd") ?? undefined;
       if (!cwd) return errorResponse(400, "cwd is required");
-      if (context.hasActiveRunsForCwd(cwd)) {
+      if (context.control.hasActiveRunsForCwd(cwd)) {
         return errorResponse(409, "Cannot reload plugins while session runs are active for this cwd");
       }
       try {
-        await context.closeRuntimesForCwd(cwd);
+        await context.control.closeRuntimesForCwd(cwd);
         const listed = await context.pluginService.list({ cwd });
         return jsonResponse({
           ...listed,
@@ -149,11 +153,11 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
       try {
         const listed = await context.hooksService.list({ cwd, ...(sessionId ? { sessionId } : {}) });
         const hooks = [...listed.hooks];
-        if (sessionId && context.inspectRuntimeHooks) {
-          if (context.sessionExists && !context.sessionExists(sessionId)) {
+        if (sessionId && context.control.runtimeInspectionAvailable) {
+          if (!context.control.sessionExists(sessionId)) {
             return errorResponse(404, "Session not found");
           }
-          for (const hook of await context.inspectRuntimeHooks(sessionId)) {
+          for (const hook of await context.control.inspectRuntimeHooks(sessionId)) {
             if (!hooks.some((row) => row.id === hook.id && row.origin === hook.origin)) {
               hooks.push(hook);
             }
@@ -173,12 +177,12 @@ async function setPluginEnabled(
 ): Promise<Response> {
   if (!context.pluginService) return errorResponse(501, "Plugin service is not configured");
   if (!name) return errorResponse(400, "plugin name is required");
-  if (context.hasAnyActiveRuns()) {
+  if (context.control.hasAnyActiveRuns()) {
     return errorResponse(409, "Cannot update plugins while session runs are active");
   }
   try {
     const result = await context.pluginService.setEnabled({ name, enabled });
-    if (result.restartRuntimes) await context.closeAllRuntimes();
+    if (result.restartRuntimes) await context.control.closeAllRuntimes();
     return jsonResponse({ message: result.message });
   } catch (error) {
     return errorResponse(400, error instanceof Error ? error.message : String(error));

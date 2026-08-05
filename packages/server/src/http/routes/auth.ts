@@ -2,11 +2,11 @@ import { Hono } from "hono";
 
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 import type { AuthService } from "../../settings-api.js";
+import type { DaemonControlService } from "../daemon-control-service.js";
 
 export interface AuthRoutesContext {
   authService?: AuthService;
-  hasAnyActiveRuns(): boolean;
-  closeAllRuntimes(): Promise<void>;
+  control: Pick<DaemonControlService, "closeAllRuntimes" | "hasAnyActiveRuns">;
 }
 
 export function createAuthRoutes(context: AuthRoutesContext): Hono {
@@ -25,7 +25,7 @@ export function createAuthRoutes(context: AuthRoutesContext): Hono {
       if (typeof body.provider !== "string" || !body.provider.trim()) {
         return errorResponse(400, "provider is required");
       }
-      if (context.hasAnyActiveRuns()) {
+      if (context.control.hasAnyActiveRuns()) {
         return errorResponse(409, "Cannot update authentication while session runs are active");
       }
       try {
@@ -33,7 +33,7 @@ export function createAuthRoutes(context: AuthRoutesContext): Hono {
           provider: body.provider,
           apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
         });
-        await context.closeAllRuntimes();
+        await context.control.closeAllRuntimes();
         return jsonResponse(result);
       } catch (error) {
         return errorResponse(400, error instanceof Error ? error.message : String(error));
@@ -45,12 +45,12 @@ export function createAuthRoutes(context: AuthRoutesContext): Hono {
       if (typeof body.provider !== "string" || !body.provider.trim()) {
         return errorResponse(400, "provider is required");
       }
-      if (context.hasAnyActiveRuns()) {
+      if (context.control.hasAnyActiveRuns()) {
         return errorResponse(409, "Cannot update authentication while session runs are active");
       }
       try {
         const result = await context.authService.logout({ provider: body.provider });
-        await context.closeAllRuntimes();
+        await context.control.closeAllRuntimes();
         return jsonResponse(result);
       } catch (error) {
         return errorResponse(400, error instanceof Error ? error.message : String(error));

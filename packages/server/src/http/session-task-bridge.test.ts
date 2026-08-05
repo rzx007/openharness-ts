@@ -11,8 +11,7 @@ function createContext() {
       updateSessionTask: vi.fn(),
     },
     getTaskManager: vi.fn(() => createTaskManager()),
-    latestEventSeq: vi.fn(() => 4),
-    broadcastSince: vi.fn(),
+    events: { checkpoint: vi.fn(() => 4), publishSince: vi.fn() },
     traceIdForRun: vi.fn((runId: string) => `trace-${runId}`),
     log: vi.fn(),
   };
@@ -64,7 +63,7 @@ describe("SessionTaskBridgeManager", () => {
       status: "running",
       output: "output",
     });
-    expect(context.broadcastSince).toHaveBeenCalledWith(4);
+    expect(context.events.publishSince).toHaveBeenCalledWith(4);
   });
 
   it("syncs failed task output into durable state", () => {
@@ -88,6 +87,6 @@ describe("SessionTaskBridgeManager", () => {
       output: "boom",
       error: "boom",
     });
-    expect(context.broadcastSince).toHaveBeenCalledWith(4);
+    expect(context.events.publishSince).toHaveBeenCalledWith(4);
   });
 });

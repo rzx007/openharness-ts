@@ -5,11 +5,11 @@ import {
   DAEMON_RESTART_WORKFLOW_REASON,
   workflowRunIdFromSessionEvent,
 } from "./support.js";
+import type { SessionEventPublisher } from "./session-event-publisher.js";
 
 export interface WorkflowRecoveryContext {
   store: Pick<SessionStore, "appendEvent" | "getSession" | "listEvents">;
-  latestEventSeq(): number;
-  broadcastSince(seq: number): void;
+  events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
 /**
@@ -38,13 +38,13 @@ export async function recoverInterruptedWorkflows(context: WorkflowRecoveryConte
     }
     if (!snapshot || snapshot.status !== "running") continue;
 
-    const before = context.latestEventSeq();
+    const before = context.events.checkpoint();
     await cancelPersistentWorkflow(snapshot, {
       store: workflowStore,
       reason: DAEMON_RESTART_WORKFLOW_REASON,
       onEvent: (event: WorkflowRunEvent) => appendWorkflowRecoveryEvent(context, owner.sessionId, event),
     });
-    context.broadcastSince(before);
+    context.events.publishSince(before);
   }
 }
 

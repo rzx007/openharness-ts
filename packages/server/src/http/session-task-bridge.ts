@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { ObservabilityEvent } from "../observability.js";
 import type { SessionTaskBridge } from "../runtime.js";
+import type { SessionEventPublisher } from "./session-event-publisher.js";
 
 export interface TaskInfo {
   id: string;
@@ -58,8 +59,7 @@ interface SessionTaskStore {
 export interface SessionTaskBridgeManagerContext {
   store: SessionTaskStore;
   getTaskManager: TaskManagerFactory;
-  latestEventSeq(): number;
-  broadcastSince(seq: number): void;
+  events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   traceIdForRun(runId: string): string;
   log(event: ObservabilityEvent): void;
 }
@@ -72,7 +72,7 @@ export class SessionTaskBridgeManager {
     return {
       registerSessionTask: (input) => {
         const task = manager.registerSessionTask({ ...input, id: `task_${randomUUID()}` });
-        const before = this.context.latestEventSeq();
+        const before = this.context.events.checkpoint();
         this.context.store.createSessionTask({
           id: task.id,
           sessionId: input.sessionId,
@@ -88,11 +88,11 @@ export class SessionTaskBridgeManager {
           sessionId: input.sessionId,
           taskId: task.id,
         });
-        this.context.broadcastSince(before);
+        this.context.events.publishSince(before);
         return { id: task.id };
       },
       bindSessionTaskRun: async (taskId, runId) => {
-        const before = this.context.latestEventSeq();
+        const before = this.context.events.checkpoint();
         const task = this.context.store.updateSessionTask(taskId, { status: "running", runId });
         this.context.log({
           level: "info",
@@ -102,12 +102,12 @@ export class SessionTaskBridgeManager {
           runId,
           taskId,
         });
-        this.context.broadcastSince(before);
+        this.context.events.publishSince(before);
       },
       completeSessionTask: async (taskId, input) => {
         const managerStatus = input.status === "interrupted" ? "stopped" : input.status;
         const task = await manager.completeSessionTask(taskId, { ...input, status: managerStatus });
-        const before = this.context.latestEventSeq();
+        const before = this.context.events.checkpoint();
         this.context.store.updateSessionTask(taskId, {
           status: input.status,
           output: input.output,
@@ -125,14 +125,14 @@ export class SessionTaskBridgeManager {
           taskId,
           ...(input.status === "failed" ? { error: "task failed" } : {}),
         });
-        this.context.broadcastSince(before);
+        this.context.events.publishSince(before);
         return task;
       },
       writeToSessionTask: async (taskId, data) => {
         await manager.writeToTask(taskId, data);
-        const before = this.context.latestEventSeq();
+        const before = this.context.events.checkpoint();
         this.context.store.updateSessionTask(taskId, { status: "running" });
-        this.context.broadcastSince(before);
+        this.context.events.publishSince(before);
       },
     };
   }
@@ -172,12 +172,12 @@ export class SessionTaskBridgeManager {
       task.status === "completed" || task.status === "failed" || task.status === "stopped" ? task.status : "failed";
     let output: string | undefined;
     try { output = manager.readTaskOutput(task.id); } catch { /* output is optional */ }
-    const before = this.context.latestEventSeq();
+    const before = this.context.events.checkpoint();
     this.context.store.updateSessionTask(durableTaskId, {
       status,
       ...(output !== undefined ? { output } : {}),
       ...(status === "failed" ? { error: output ?? "Task failed" } : {}),
     });
-    this.context.broadcastSince(before);
+    this.context.events.publishSince(before);
   }
 }

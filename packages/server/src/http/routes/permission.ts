@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 
+import type { StorePermissionBroker } from "../../permission-broker.js";
+import type { RequestTraceRegistry } from "../request-trace-registry.js";
+
 import {
   errorResponse,
   jsonResponse,
@@ -10,20 +13,8 @@ import {
 } from "../support.js";
 
 export interface PermissionRoutesContext {
-  listRequests(input: {
-    sessionId?: string;
-    status?: HttpPermissionStatus;
-    toolName?: string;
-    limit?: number;
-  }): unknown[];
-  reply(input: {
-    requestId: string;
-    traceId: string;
-    status: "approved" | "denied" | "expired";
-    decision?: "once" | "session";
-    clientId?: string;
-  }): unknown;
-  traceIdForRequest(request: Request): string;
+  permissions: Pick<StorePermissionBroker, "listRequests" | "reply">;
+  traces: Pick<RequestTraceRegistry, "get">;
 }
 
 export function createPermissionRoutes(context: PermissionRoutesContext): Hono {
@@ -35,7 +26,7 @@ export function createPermissionRoutes(context: PermissionRoutesContext): Hono {
       } catch (error) {
         return errorResponse(400, error instanceof Error ? error.message : String(error));
       }
-      const requests = context.listRequests({
+      const requests = context.permissions.listRequests({
         sessionId: c.req.query("sessionId") ?? undefined,
         status,
         toolName: c.req.query("toolName") ?? undefined,
@@ -57,9 +48,9 @@ export function createPermissionRoutes(context: PermissionRoutesContext): Hono {
       }
 
       try {
-        const request = context.reply({
+        const request = context.permissions.reply({
           requestId,
-          traceId: context.traceIdForRequest(c.req.raw),
+          traceId: context.traces.get(c.req.raw),
           status,
           decision,
           clientId: typeof body.clientId === "string" ? body.clientId : undefined,

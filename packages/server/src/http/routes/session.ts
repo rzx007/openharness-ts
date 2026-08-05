@@ -1,7 +1,5 @@
 import { Hono } from "hono";
 
-import type { SessionStore } from "@openharness/services";
-
 import {
   normalizeCommandName,
   parseSlashLine,
@@ -14,70 +12,44 @@ import {
   readCursor,
   readJson,
   readLimit,
-  runtimeSessionMetadataChanged,
   sessionMutationErrorStatus,
 } from "../support.js";
-
-type AdmitPromptResult = {
-  input: ReturnType<SessionStore["admitPrompt"]>;
-  run?: ReturnType<SessionStore["createRun"]>;
-  queue_state?: "running" | "queued";
-};
+import type { RequestTraceRegistry } from "../request-trace-registry.js";
+import type { SessionApplicationService } from "../session-application-service.js";
+import { SessionApplicationError } from "../session-application-service.js";
+import type { SessionQueryService } from "../session-query-service.js";
+import type { AdmitPromptResult } from "../session-run-engine.js";
 
 export interface SessionRoutesContext {
-  store: Pick<
-    SessionStore,
-    | "createSession"
-    | "getSession"
-    | "getSessionState"
-    | "listMessageParts"
-    | "listMessages"
-    | "listSessions"
-    | "resolveSessionListTitle"
-    | "updateSession"
+  queries: Pick<
+    SessionQueryService,
+    "getSession" | "getSessionState" | "listMessageParts" | "listMessages" | "listSessions"
+  >;
+  application: Pick<
+    SessionApplicationService,
+    "admitPrompt" | "archiveSessionTree" | "createSession" | "getSession" | "updateSession"
   >;
   commandCatalog?: CommandCatalogProvider;
-  latestEventSeq(): number;
-  broadcastSince(seq: number): void;
-  warmRuntime(sessionId: string): Promise<void>;
-  hasRunWork(sessionId: string): boolean;
-  closeRuntime(sessionId: string): Promise<void>;
-  archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>>;
-  traceIdForRequest(request: Request): string;
-  admitPromptAndMaybeRun(
-    sessionId: string,
-    input: {
-      content: string;
-      metadata?: Record<string, unknown>;
-      traceId?: string;
-    },
-  ): AdmitPromptResult;
+  traces: Pick<RequestTraceRegistry, "get">;
 }
 
 export function createSessionRoutes(context: SessionRoutesContext): Hono {
   return new Hono()
     .get("/", (c) => {
-      let sessions = context.store.listSessions({
+      const sessions = context.queries.listSessions({
         cwd: c.req.query("cwd") ?? undefined,
         includeArchived: c.req.query("includeArchived") === "true",
+        includeChildren: c.req.query("includeChildren") === "true",
         limit: readLimit(c.req.query("limit")),
       });
-      if (c.req.query("includeChildren") !== "true") {
-        sessions = sessions.filter((session) => !session.parentId);
-      }
-      sessions = sessions.map((session) => ({
-        ...session,
-        title: context.store.resolveSessionListTitle(session.id),
-      }));
       return jsonResponse({ sessions });
     })
     .post("/", async (c) => {
-      const before = context.latestEventSeq();
       const body = await readJson(c);
       if (typeof body.cwd !== "string") return errorResponse(400, "cwd is required");
       if (typeof body.model !== "string") return errorResponse(400, "model is required");
 
-      const session = context.store.createSession({
+      const session = context.application.createSession({
         id: typeof body.id === "string" ? body.id : undefined,
         parentId: typeof body.parentId === "string" ? body.parentId : undefined,
         cwd: body.cwd,
@@ -86,53 +58,37 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         agent: typeof body.agent === "string" ? body.agent : undefined,
         metadata: isRecord(body.metadata) ? body.metadata : undefined,
       });
-      void context.warmRuntime(session.id);
-      context.broadcastSince(before);
       return jsonResponse({ session }, 201);
     })
     .get("/:sessionId", (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
-      const session = context.store.getSession(sessionId);
+      const session = context.application.getSession(sessionId, { warm: true });
       if (!session) return errorResponse(404, "Session not found");
-      void context.warmRuntime(sessionId);
       return jsonResponse({ session });
     })
     .patch("/:sessionId", async (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
-      const before = context.latestEventSeq();
       const body = await readJson(c);
       try {
-        const existing = context.store.getSession(sessionId);
-        if (!existing) return errorResponse(404, "Session not found");
-        const nextMetadata = isRecord(body.metadata)
-          ? { ...existing.metadata, ...body.metadata }
-          : undefined;
-        const runtimeMetadataChanged = nextMetadata && runtimeSessionMetadataChanged(existing.metadata, nextMetadata);
-        if (runtimeMetadataChanged && context.hasRunWork(sessionId)) {
-          return errorResponse(409, "Cannot update runtime session settings while a run is active");
-        }
-        const session = context.store.updateSession(sessionId, {
+        const session = await context.application.updateSession(sessionId, {
           title: typeof body.title === "string" ? body.title : undefined,
           model: typeof body.model === "string" ? body.model : undefined,
           agent: body.agent === null ? null : typeof body.agent === "string" ? body.agent : undefined,
-          metadata: nextMetadata,
+          metadata: isRecord(body.metadata) ? body.metadata : undefined,
         });
-        if (runtimeMetadataChanged) {
-          await context.closeRuntime(sessionId);
-        }
-        context.broadcastSince(before);
         return jsonResponse({ session });
       } catch (error) {
-        return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
+        const status = error instanceof SessionApplicationError ? error.status : sessionMutationErrorStatus(error);
+        return errorResponse(status, error instanceof Error ? error.message : String(error));
       }
     })
     .get("/:sessionId/state", (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
       try {
-        return jsonResponse(context.store.getSessionState(sessionId));
+        return jsonResponse(context.queries.getSessionState(sessionId));
       } catch (error) {
         return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
       }
@@ -141,7 +97,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
       try {
-        const session = await context.archiveSessionTree(sessionId);
+        const session = await context.application.archiveSessionTree(sessionId);
         return jsonResponse({ session });
       } catch (error) {
         return errorResponse(404, error instanceof Error ? error.message : String(error));
@@ -151,7 +107,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
       try {
-        const messages = context.store.listMessages(sessionId, {
+        const messages = context.queries.listMessages(sessionId, {
           afterSeq: readCursor(c),
           limit: readLimit(c.req.query("limit")),
         });
@@ -164,7 +120,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
       try {
-        const parts = context.store.listMessageParts(sessionId, {
+        const parts = context.queries.listMessageParts(sessionId, {
           afterSeq: readCursor(c),
           messageId: c.req.query("messageId") ?? undefined,
           limit: readLimit(c.req.query("limit")),
@@ -178,7 +134,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
       const body = await readJson(c);
-      const session = context.store.getSession(sessionId);
+      const session = context.queries.getSession(sessionId);
       if (!session) return errorResponse(404, "Session not found");
 
       let name = typeof body.name === "string" ? normalizeCommandName(body.name) : "";
@@ -198,14 +154,14 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       try {
         const expanded = await context.commandCatalog.expand({ cwd: session.cwd, name, args });
         if (!expanded) return errorResponse(404, `Unknown command: ${name}`);
-        const admitted = context.admitPromptAndMaybeRun(sessionId, {
+        const admitted: AdmitPromptResult = context.application.admitPrompt(sessionId, {
           content: expanded.prompt,
           metadata: {
             command: expanded.command.name,
             commandKind: expanded.command.kind,
             commandArgs: args,
           },
-          traceId: context.traceIdForRequest(c.req.raw),
+          traceId: context.traces.get(c.req.raw),
         });
         return jsonResponse({ ...admitted, command: expanded.command }, 202);
       } catch (error) {

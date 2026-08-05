@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SessionRunRenderer } from "./run-renderer.js";
 import { SessionRunEngine } from "./session-run-engine.js";
+import { SessionRunExecutor } from "./session-run-executor.js";
+import { SessionRuntimePool } from "./session-runtime-pool.js";
 
 function createStore() {
   const inputs = new Map<string, any>();
@@ -89,7 +91,7 @@ function createStore() {
 function createEngine(store = createStore()) {
   const runRenderer = new SessionRunRenderer(store as any);
   const runPrompt = vi.fn(async () => {});
-  const engine = new SessionRunEngine({
+  const runtimePool = new SessionRuntimePool({
     store: store as any,
     runtimeFactory: {
       createRuntime: vi.fn(async () => ({
@@ -105,14 +107,22 @@ function createEngine(store = createStore()) {
       closeRuntime: vi.fn(),
       archive: vi.fn(),
     },
+    sessionTaskBridgeManager: { createBridge: vi.fn(() => ({})) } as any,
+  });
+  const runExecutor = new SessionRunExecutor({
+    store: store as any,
+    runtimePool,
     permissionBroker: { ask: vi.fn() },
     runRenderer,
-    sessionTaskBridgeManager: { createBridge: vi.fn(() => ({})) } as any,
-    latestEventSeq: vi.fn(() => 1),
-    broadcastSince: vi.fn(),
-    broadcastEvent: vi.fn(),
+    events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn(), publish: vi.fn() },
     traceIdForRun: vi.fn((runId) => store.getRun(runId)?.metadata.traceId ?? `trace-${runId}`),
     log: vi.fn(),
+  });
+  const engine = new SessionRunEngine({
+    store: store as any,
+    runtimePool,
+    runExecutor,
+    events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
   });
   return { engine, store, runPrompt };
 }
