@@ -6,7 +6,7 @@ import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, getConfigDir,
 import { AnthropicClient, CodexSubscriptionClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { CredentialStorage, loadCodexCredential } from "@openharness/auth";
-import { PermissionChecker, READ_ONLY_TOOLS } from "@openharness/permissions";
+import { PermissionChecker, LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
@@ -66,7 +66,9 @@ export interface BootstrapOptions {
 
 /**
  * 合并自动放行工具：settings.permission.autoApproveTools（用户显式配置）
- * + autoApproveReadOnly 注入的 READ_ONLY_TOOLS。
+ * + autoApproveReadOnly 注入的非本地 READ_ONLY_TOOLS。
+ * 本地只读工具(Read/Glob/Grep/Lsp)不在这里隐式注入，交给 PermissionChecker
+ * 的 cwd 守卫处理；settings/overrides 显式 autoApproveTools 仍按用户授权保留。
  * 空合并返回 undefined（checker 走默认行为）。
  */
 export function resolveAutoApproveTools(
@@ -78,7 +80,9 @@ export function resolveAutoApproveTools(
     ...(overrides.autoApproveTools ?? []),
   ]);
   if (overrides.autoApproveReadOnly) {
-    for (const tool of READ_ONLY_TOOLS) merged.add(tool);
+    for (const tool of READ_ONLY_TOOLS) {
+      if (!LOCAL_READ_ONLY_TOOLS.has(tool)) merged.add(tool);
+    }
   }
   return merged.size > 0 ? [...merged] : undefined;
 }
@@ -130,7 +134,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     : (overrides.permissionMode as "default" | "plan" | "full_auto") ?? settings.permission.mode;
 
   // 自动放行三来源合并:settings.permission.autoApproveTools(用户显式配置,
-  // 此前从未接线)+ swarm worker / 无头只读模式注入 READ_ONLY_TOOLS。
+  // 此前从未接线)+ swarm worker / 无头只读模式注入非本地 READ_ONLY_TOOLS。
   // denied 永远优先于 autoApprove(checker 内保证)。
   const autoApproveTools = resolveAutoApproveTools(settings, overrides);
 

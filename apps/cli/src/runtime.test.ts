@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { resolveApiKey, computeWorktreeBaseDir, resolveRepoRoot, nodeRunGit, resolveAutoApproveTools, resolveRuntimeModel, formatSandboxUnavailableError, resolveProviderScopedBaseUrl, registerChildSessionBackend } from "./runtime";
-import { READ_ONLY_TOOLS } from "@openharness/permissions";
+import { LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@openharness/permissions";
 import { CredentialStorage } from "@openharness/auth";
 import type { Settings } from "@openharness/core";
 import { getBackendRegistry } from "@openharness/swarm";
@@ -70,13 +70,17 @@ describe("resolveAutoApproveTools", () => {
     expect(resolveAutoApproveTools(withSettings, {})).toEqual(["TodoWrite"]);
   });
 
-  it("autoApproveReadOnly 注入只读工具集(channels serve 无头模式)", () => {
+  it("autoApproveReadOnly 只注入非本地只读工具(channels serve 无头模式)", () => {
     const tools = new Set(resolveAutoApproveTools(base, { autoApproveReadOnly: true }));
-    expect(tools.has("Read")).toBe(true);
-    expect(tools.has("Grep")).toBe(true);
+    expect(tools.has("Read")).toBe(false);
+    expect(tools.has("Glob")).toBe(false);
+    expect(tools.has("Grep")).toBe(false);
+    expect(tools.has("Lsp")).toBe(false);
+    expect(tools.has("TaskList")).toBe(true);
+    expect(tools.has("WebFetch")).toBe(true);
     expect(tools.has("Write")).toBe(false);
     expect(tools.has("Bash")).toBe(false);
-    expect(tools.size).toBe(READ_ONLY_TOOLS.size);
+    expect(tools.size).toBe(READ_ONLY_TOOLS.size - LOCAL_READ_ONLY_TOOLS.size);
   });
 
   it("overrides.autoApproveTools 显式列表合并(channels serve 收窄集)", () => {
@@ -84,7 +88,7 @@ describe("resolveAutoApproveTools", () => {
     expect(tools).toEqual(new Set(["Read", "Glob"]));
   });
 
-  it("settings 与 readOnly 合并去重", () => {
+  it("settings 显式本地只读授权与 readOnly 合并", () => {
     const tools = new Set(
       resolveAutoApproveTools(
         { permission: { mode: "default", autoApproveTools: ["TodoWrite", "Read"] } } as Settings,
@@ -92,7 +96,8 @@ describe("resolveAutoApproveTools", () => {
       ),
     );
     expect(tools.has("TodoWrite")).toBe(true);
-    expect(tools.size).toBe(READ_ONLY_TOOLS.size + 1); // Read 去重
+    expect(tools.has("Read")).toBe(true);
+    expect(tools.size).toBe(READ_ONLY_TOOLS.size - LOCAL_READ_ONLY_TOOLS.size + 2);
   });
 });
 
