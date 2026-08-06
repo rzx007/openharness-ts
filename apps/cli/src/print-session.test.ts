@@ -174,6 +174,213 @@ describe("runPrintSession", () => {
     stdoutSpy.mockRestore();
   });
 
+  it("renders completed snapshot output when a fast daemon run finishes before SSE delivers events", async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as never);
+
+    const session = {
+      id: "s1",
+      cwd: "/tmp",
+      title: "print",
+      model: "m",
+      status: "idle",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const run = {
+      id: "r1",
+      sessionId: "s1",
+      inputId: "i1",
+      status: "completed",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 4,
+    };
+    const userMessage = {
+      id: "m-user",
+      sessionId: "s1",
+      seq: 1,
+      role: "user",
+      runId: "r1",
+      inputId: "i1",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    const assistantMessage = {
+      id: "m-assistant",
+      sessionId: "s1",
+      seq: 2,
+      role: "assistant",
+      runId: "r1",
+      metadata: {},
+      createdAt: 3,
+      updatedAt: 4,
+    };
+    const completedSnapshot = {
+      cursor: 5,
+      session,
+      inputs: [{ id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 }],
+      messages: [userMessage, assistantMessage],
+      parts: [
+        {
+          id: "p-user",
+          sessionId: "s1",
+          messageId: "m-user",
+          seq: 1,
+          type: "text",
+          status: "completed",
+          text: "hi",
+          metadata: {},
+          createdAt: 2,
+          updatedAt: 2,
+        },
+        {
+          id: "p-assistant",
+          sessionId: "s1",
+          messageId: "m-assistant",
+          seq: 1,
+          type: "text",
+          status: "completed",
+          text: "fast snapshot output",
+          metadata: {},
+          createdAt: 3,
+          updatedAt: 4,
+        },
+      ],
+      runs: [run],
+      permissions: [],
+    };
+    const Client = OpenHarnessClient as unknown as ReturnType<typeof vi.fn>;
+    Client.mockImplementation(() => ({
+      createSession: vi.fn(async () => session),
+      admitPrompt: vi.fn(async () => ({
+        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 },
+        run: { ...run, status: "running", updatedAt: 2 },
+      })),
+      getSessionState: vi.fn()
+        .mockResolvedValueOnce({
+          cursor: 1,
+          session,
+          inputs: [],
+          messages: [],
+          parts: [],
+          runs: [],
+          permissions: [],
+        })
+        .mockResolvedValue(completedSnapshot),
+      replyPermission: vi.fn(),
+      streamEvents: async function* () {},
+    }));
+
+    await runPrintSession(
+      { model: "m", outputStyle: "default" } as never,
+      "hi",
+      { model: "m", cwd: "/tmp" },
+    );
+
+    expect(writes.join("")).toContain("fast snapshot output");
+    expect(writes.join("")).not.toContain("hi");
+    expect(exitSpy).not.toHaveBeenCalled();
+    stdoutSpy.mockRestore();
+  });
+
+  it("does not synthesize json output from snapshot fallback", async () => {
+    const writes: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as never);
+
+    const session = {
+      id: "s1",
+      cwd: "/tmp",
+      title: "print",
+      model: "m",
+      status: "idle",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const run = {
+      id: "r1",
+      sessionId: "s1",
+      inputId: "i1",
+      status: "completed",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 4,
+    };
+    const completedSnapshot = {
+      cursor: 5,
+      session,
+      inputs: [{ id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 }],
+      messages: [
+        {
+          id: "m-assistant",
+          sessionId: "s1",
+          seq: 1,
+          role: "assistant",
+          runId: "r1",
+          metadata: {},
+          createdAt: 3,
+          updatedAt: 4,
+        },
+      ],
+      parts: [
+        {
+          id: "p-assistant",
+          sessionId: "s1",
+          messageId: "m-assistant",
+          seq: 1,
+          type: "text",
+          status: "completed",
+          text: "snapshot-only json text",
+          metadata: {},
+          createdAt: 3,
+          updatedAt: 4,
+        },
+      ],
+      runs: [run],
+      permissions: [],
+    };
+    const Client = OpenHarnessClient as unknown as ReturnType<typeof vi.fn>;
+    Client.mockImplementation(() => ({
+      createSession: vi.fn(async () => session),
+      admitPrompt: vi.fn(async () => ({
+        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 },
+        run: { ...run, status: "running", updatedAt: 2 },
+      })),
+      getSessionState: vi.fn()
+        .mockResolvedValueOnce({
+          cursor: 1,
+          session,
+          inputs: [],
+          messages: [],
+          parts: [],
+          runs: [],
+          permissions: [],
+        })
+        .mockResolvedValue(completedSnapshot),
+      replyPermission: vi.fn(),
+      streamEvents: async function* () {},
+    }));
+
+    await runPrintSession(
+      { model: "m", outputStyle: "default" } as never,
+      "hi",
+      { model: "m", cwd: "/tmp", outputFormat: "json" },
+    );
+
+    expect(writes.join("")).toBe("");
+    expect(exitSpy).not.toHaveBeenCalled();
+    stdoutSpy.mockRestore();
+  });
+
   it("writes permissionMode and maxTurns into createSession metadata", async () => {
     const createSession = vi.fn(async () => ({
       id: "s1",

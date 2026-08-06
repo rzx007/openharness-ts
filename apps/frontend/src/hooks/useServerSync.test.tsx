@@ -1,4 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Readable } from "node:stream";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import React from "react";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
@@ -34,6 +40,152 @@ function sseResponse(events: SessionEventRecord[] = []): Response {
       controller.close();
     },
   }), { headers: { "content-type": "text/event-stream" } });
+}
+
+type DaemonFixture = {
+  url: string;
+  token: string;
+  stop: () => Promise<void>;
+};
+type DaemonChild = ChildProcessByStdio<null, Readable, Readable>;
+
+function waitForFixtureReady(child: DaemonChild): Promise<{ url: string; token: string }> {
+  let stdout = "";
+  let stderr = "";
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for daemon fixture.\n${stderr}`));
+    }, 10_000);
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.stdout.off("data", onStdout);
+      child.stderr.off("data", onStderr);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const onStdout = (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+      const newline = stdout.indexOf("\n");
+      if (newline === -1) return;
+      cleanup();
+      const line = stdout.slice(0, newline).trim();
+      try {
+        resolve(JSON.parse(line) as { url: string; token: string });
+      } catch (error) {
+        reject(new Error(`Daemon fixture printed invalid startup JSON: ${line}`, { cause: error }));
+      }
+    };
+    const onStderr = (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup();
+      reject(new Error(`Daemon fixture exited before startup: code=${code} signal=${signal}\n${stderr}`));
+    };
+    child.stdout.on("data", onStdout);
+    child.stderr.on("data", onStderr);
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+}
+
+function resolveTsxLoader(repoRoot: string): string {
+  const pnpmModulesDir = join(repoRoot, "node_modules", ".pnpm");
+  const tsxPackageDir = readdirSync(pnpmModulesDir)
+    .find((name) => name.startsWith("tsx@"));
+  if (!tsxPackageDir) {
+    throw new Error("Unable to find tsx loader under node_modules/.pnpm.");
+  }
+  return join(pnpmModulesDir, tsxPackageDir, "node_modules", "tsx", "dist", "loader.mjs");
+}
+
+async function startDaemonFixture(): Promise<DaemonFixture> {
+  const dir = mkdtempSync(join(tmpdir(), "ohs-tui-sync-"));
+  const token = "tui-sync-token";
+  const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
+  const serverModuleUrl = pathToFileURL(join(repoRoot, "packages/server/src/index.ts")).href;
+  const scriptPath = join(dir, "daemon-fixture.mjs");
+  writeFileSync(scriptPath, `
+const { OpenHarnessHttpServer } = await import(${JSON.stringify(serverModuleUrl)});
+
+const server = new OpenHarnessHttpServer({
+  token: ${JSON.stringify(token)},
+  storePath: ${JSON.stringify(join(dir, "sessions.db"))},
+  logger: () => {},
+  runtimeFactory: {
+    async createRuntime() {
+      return {
+        async runPrompt(input, hooks) {
+          if (input.input.content !== "please edit") {
+            throw new Error(\`Unexpected prompt: \${input.input.content}\`);
+          }
+          const allowed = await hooks.askPermission({
+            toolName: "Write",
+            reason: "exercise TUI permission flow",
+            input: { path: "README.md" },
+          });
+          await hooks.onStreamEvent({
+            type: "text_delta",
+            delta: allowed ? "edit approved" : "edit denied",
+          });
+          return { messages: [] };
+        },
+        async close() {},
+      };
+    },
+  },
+});
+
+let closing = false;
+async function shutdown() {
+  if (closing) return;
+  closing = true;
+  await server.close();
+}
+
+process.on("SIGTERM", () => {
+  shutdown().finally(() => process.exit(0));
+});
+process.on("SIGINT", () => {
+  shutdown().finally(() => process.exit(0));
+});
+
+const listen = await server.listen();
+console.log(JSON.stringify({ url: listen.url, token: ${JSON.stringify(token)} }));
+`);
+
+  const tsxLoaderUrl = pathToFileURL(resolveTsxLoader(repoRoot)).href;
+  const child = spawn("node", ["--import", tsxLoaderUrl, scriptPath], {
+    cwd: repoRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const ready = await waitForFixtureReady(child);
+  return {
+    ...ready,
+    async stop() {
+      try {
+        if (child.exitCode == null && !child.killed) {
+          const waitForExit = (ms: number): Promise<boolean> =>
+            Promise.race([
+              new Promise<boolean>((resolve) => child.once("exit", () => resolve(true))),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+            ]);
+          child.kill("SIGTERM");
+          if (!(await waitForExit(2_000)) && child.exitCode == null) {
+            child.kill("SIGKILL");
+            await waitForExit(1_000);
+          }
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  };
 }
 
 test("useServerSync hydrates daemon state and sends prompt/permission replies", async () => {
@@ -818,3 +970,82 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
 
   renderer.destroy();
 });
+
+test("useServerSync drives a real daemon session through prompt, permission, and SSE", async () => {
+  const fixture = await startDaemonFixture();
+  try {
+    let captured: TuiSessionController | undefined;
+    const hasApprovedOutput = () =>
+      captured?.assistantBuffer === "edit approved" ||
+      captured?.transcript.some((item) => item.role === "assistant" && item.text === "edit approved") === true;
+
+    function Harness() {
+      captured = useServerSync({
+        daemon: {
+          url: fixture.url,
+          token: fixture.token,
+          cwd: process.cwd(),
+          model: "m",
+          permissionMode: "default",
+          maxTurns: 9,
+        },
+      }, () => {});
+      return <box />;
+    }
+
+    const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+    try {
+      for (let i = 0; i < 30 && !captured?.ready; i += 1) {
+        await act(async () => {
+          await renderOnce();
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+      }
+      expect(captured?.ready).toBe(true);
+      expect(captured?.status.session_id).toBeUndefined();
+
+      await act(async () => {
+        captured?.sendRequest({ type: "submit_line", line: "please edit" });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      for (let i = 0; i < 60 && captured?.modal?.kind !== "permission"; i += 1) {
+        await act(async () => {
+          await renderOnce();
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+      }
+      expect(captured?.modal).toMatchObject({
+        kind: "permission",
+        tool_name: "Write",
+      });
+      const requestId = String(captured?.modal?.request_id);
+      expect(requestId).toBeTruthy();
+
+      await act(async () => {
+        captured?.sendRequest({
+          type: "permission_response",
+          request_id: requestId,
+          allowed: true,
+          scope: "once",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      for (let i = 0; i < 60 && !hasApprovedOutput(); i += 1) {
+        await act(async () => {
+          await renderOnce();
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+      }
+
+      expect(hasApprovedOutput()).toBe(true);
+      expect(captured?.modal).toBeNull();
+      expect(captured?.busy).toBe(false);
+    } finally {
+      renderer.destroy();
+    }
+  } finally {
+    await fixture.stop();
+  }
+}, 15_000);

@@ -1,5 +1,6 @@
 import {
   OpenHarnessClient,
+  applySessionSnapshot,
   createPromptRequestId,
   hasActiveRun,
   normalizeDaemonBaseUrl,
@@ -7,6 +8,7 @@ import {
   type OpenHarnessClientState,
   type SessionEventRecord,
   type SessionMessagePartRecord,
+  type SessionStateSnapshot,
 } from "@openharness/client";
 import type { Settings } from "@openharness/core";
 
@@ -176,6 +178,45 @@ function renderSessionEvent(
   }
 }
 
+function renderSessionSnapshot(
+  state: OpenHarnessClientState,
+  sessionId: string,
+  renderer: EventRenderer,
+  outputFormat: string | undefined,
+  partTextSeen: Map<string, string>,
+): void {
+  if (outputFormat === "json" || outputFormat === "stream-json") return;
+  const bucket = state.buckets[sessionId];
+  if (!bucket) return;
+  for (const message of bucket.messages) {
+    if (message.role !== "assistant") continue;
+    const parts = bucket.partsByMessageId[message.id] ?? [];
+    for (const part of parts) {
+      if (part.type !== "text") continue;
+      renderSessionEvent(
+        {
+          id: `snapshot:${part.id}`,
+          seq: 0,
+          type: "session.message.part.updated",
+          sessionId,
+          payload: { part },
+          createdAt: part.updatedAt,
+        },
+        renderer,
+        outputFormat,
+        partTextSeen,
+      );
+    }
+  }
+}
+
+function mergeSessionSnapshot(
+  state: OpenHarnessClientState,
+  snapshot: SessionStateSnapshot,
+): OpenHarnessClientState {
+  return applySessionSnapshot(state, snapshot);
+}
+
 /**
  * Headless print via daemon Session API (opencode-run style).
  */
@@ -229,15 +270,19 @@ export async function runPrintSession(
       sessionId: session.id,
       signal: controller.signal,
     })) {
+      let observedState = update.state;
+
       if (update.source === "snapshot" && !admitted) {
         admitted = true;
         const response = await client.admitPrompt(session.id, { id: createPromptRequestId(), content: prompt });
         runId = response.run?.id;
+        observedState = mergeSessionSnapshot(update.state, await client.getSessionState(session.id));
+        renderSessionSnapshot(observedState, session.id, renderer, options.outputFormat, partTextSeen);
       }
 
       await autoReplyPermissions(
         client,
-        update.state,
+        observedState,
         session.id,
         approvePermissions,
         permissionSeen,
@@ -245,11 +290,14 @@ export async function runPrintSession(
 
       if (update.source === "live") {
         renderSessionEvent(update.event, renderer, options.outputFormat, partTextSeen);
+        renderSessionSnapshot(observedState, session.id, renderer, options.outputFormat, partTextSeen);
       }
 
       if (!admitted) continue;
-      const terminal = runTerminalStatus(update.state, session.id, runId);
+      const terminal = runTerminalStatus(observedState, session.id, runId);
       if (terminal === "active" || terminal === "unknown") continue;
+      observedState = mergeSessionSnapshot(observedState, await client.getSessionState(session.id));
+      renderSessionSnapshot(observedState, session.id, renderer, options.outputFormat, partTextSeen);
       if (terminal === "failed") exitCode = 1;
       controller.abort();
       break;
