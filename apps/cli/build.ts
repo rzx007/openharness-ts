@@ -1,4 +1,5 @@
 import { cpSync, readFileSync, rmSync } from "node:fs";
+import { resolve } from "node:path";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
 const externals = [...new Set([
@@ -15,6 +16,14 @@ const result = await Bun.build({
   format: "esm",
   sourcemap: "external",
   external: externals,
+  plugins: [{
+    name: "node-punycode-shim",
+    setup(build) {
+      build.onResolve({ filter: /^punycode$/ }, () => ({
+        path: resolve("src/shims/punycode.cjs"),
+      }));
+    },
+  }],
 });
 
 if (!result.success) {

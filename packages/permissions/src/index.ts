@@ -6,6 +6,7 @@ import type {
   PermissionSettings,
   PathRuleConfig,
 } from "@openharness/core";
+import { isAbsolute, relative, resolve } from "node:path";
 
 export type {
   PermissionMode,
@@ -35,6 +36,13 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "Lsp",
 ]);
 
+export const LOCAL_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "Lsp",
+]);
+
 export interface PermissionCheckOptions {
   mode: PermissionMode;
   rules?: PermissionRule[];
@@ -43,6 +51,7 @@ export interface PermissionCheckOptions {
   pathRules?: PathRuleConfig[];
   deniedCommands?: string[];
   autoApproveTools?: string[];
+  cwd?: string;
 }
 
 export class PermissionChecker implements IPermissionChecker {
@@ -53,6 +62,7 @@ export class PermissionChecker implements IPermissionChecker {
   private pathRules: PathRuleConfig[];
   private deniedCommands: string[];
   private autoApproveTools: Set<string>;
+  private cwd: string | undefined;
 
   constructor(options: PermissionCheckOptions | PermissionSettings) {
     if ("mode" in options && "allowedTools" in options) {
@@ -74,6 +84,8 @@ export class PermissionChecker implements IPermissionChecker {
       this.deniedCommands = o.deniedCommands ?? [];
       this.autoApproveTools = new Set(o.autoApproveTools ?? []);
     }
+    const cwd = (options as PermissionCheckOptions).cwd;
+    this.cwd = typeof cwd === "string" && cwd ? resolve(cwd) : undefined;
   }
 
   async checkTool(
@@ -103,8 +115,9 @@ export class PermissionChecker implements IPermissionChecker {
     // pathRules 首条命中即定结果；deny 立即否决，allow 暂存（仍需先过
     // allowedTools 白名单收窄，语义与原实现一致）。
     let pathAllowReason: string | null = null;
+    const pathInput = readToolPathInput(input);
     if (this.pathRules.length > 0) {
-      const path = typeof input.path === "string" ? input.path : typeof input.filePath === "string" ? input.filePath : "";
+      const path = pathInput ?? "";
       if (path) {
         for (const rule of this.pathRules) {
           if (matchPattern(rule.pattern, path)) {
@@ -152,6 +165,10 @@ export class PermissionChecker implements IPermissionChecker {
       };
     }
 
+    if (isLocalReadOnlyToolAllowed(toolName, input, this.cwd)) {
+      return { action: "allow", reason: `Local read-only tool '${toolName}' is within cwd` };
+    }
+
     if (this.mode === "plan") {
       return { action: "ask", reason: "Plan mode requires confirmation" };
     }
@@ -178,6 +195,29 @@ export class PermissionChecker implements IPermissionChecker {
   getMode(): PermissionMode {
     return this.mode;
   }
+}
+
+function readToolPathInput(input: Record<string, unknown>): string | undefined {
+  if (typeof input.path === "string") return input.path;
+  if (typeof input.filePath === "string") return input.filePath;
+  if (typeof input.file_path === "string") return input.file_path;
+  return undefined;
+}
+
+function isLocalReadOnlyToolAllowed(
+  toolName: string,
+  input: Record<string, unknown>,
+  cwd: string | undefined,
+): boolean {
+  if (!cwd || !LOCAL_READ_ONLY_TOOLS.has(toolName)) return false;
+  const path = readToolPathInput(input);
+  if (!path) return toolName === "Glob" || toolName === "Grep" || toolName === "Lsp";
+  return isWithinCwd(resolve(cwd, path), cwd);
+}
+
+function isWithinCwd(target: string, cwd: string): boolean {
+  const rel = relative(cwd, target);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function matchPattern(pattern: string, value: string): boolean {

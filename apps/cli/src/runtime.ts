@@ -136,6 +136,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
 
   const permissionChecker = new PermissionChecker({
     mode,
+    cwd,
     allowedTools: [...effectiveAllowed],
     deniedTools: [...effectiveDenied],
     pathRules: settings.permission.pathRules,
