@@ -6,7 +6,7 @@ import type {
   IHookExecutor,
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
-  PermissionPrompt,
+  QueryRuntimeHost,
   MemoryRetriever,
   ToolContext,
   ToolExecutionResult,
@@ -142,6 +142,7 @@ export interface SubmitMessageOptions {
    * messages so the same submitMessage call continues instead of returning.
    */
   pullFollowUps?: () => string[] | Promise<string[]>;
+  runtimeHost?: QueryRuntimeHost;
 }
 
 export class QueryEngine implements IQueryEngine {
@@ -151,12 +152,10 @@ export class QueryEngine implements IQueryEngine {
   private systemPrompt: string | undefined;
   private model: string;
   private maxTurns: number;
-  private permissionPrompt?: PermissionPrompt;
   private skillRegistry?: unknown;
   private memoryRetriever?: MemoryRetriever;
   private allowedTools: string[] | null = null;
   private mcpManager: unknown = undefined;
-  private runtimeEventSink: ToolContext["runtimeEventSink"] = undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -179,7 +178,6 @@ export class QueryEngine implements IQueryEngine {
     this.costTracker = new CostTracker();
     this.systemPrompt = options.systemPrompt;
     this.maxTurns = options.maxTurns ?? 50;
-    this.permissionPrompt = options.permissionPrompt;
     this.skillRegistry = options.skillRegistry;
     this.memoryRetriever = options.memoryRetriever;
     this.cwd = options.cwd ?? process.cwd();
@@ -209,10 +207,6 @@ export class QueryEngine implements IQueryEngine {
 
   setMcpManager(mgr: unknown): void {
     this.mcpManager = mgr;
-  }
-
-  setRuntimeEventSink(sink: ToolContext["runtimeEventSink"]): void {
-    this.runtimeEventSink = sink;
   }
 
   /**
@@ -331,7 +325,7 @@ export class QueryEngine implements IQueryEngine {
 
       if (toolUses.length > 0) {
         // 执行所有请求的工具调用，并将结果作为工具结果消息加入历史记录
-        const results = await this.executeTools(toolUses, options.signal);
+        const results = await this.executeTools(toolUses, options.signal, options.runtimeHost);
         for (const result of results) {
           this.messages.push({
             type: "tool_result",
@@ -429,6 +423,7 @@ export class QueryEngine implements IQueryEngine {
   private async executeTools(
     toolUses: ToolUseBlock[],
     signal?: AbortSignal,
+    runtimeHost?: QueryRuntimeHost,
   ): Promise<ToolExecutionResult[]> {
     const results: ToolExecutionResult[] = new Array(toolUses.length);
     const readyForPermission: {
@@ -500,8 +495,13 @@ export class QueryEngine implements IQueryEngine {
       // 处理需要用户确认权限的情况
       if (decision.action === "ask") {
         let allowed = false;
-        if (this.permissionPrompt) {
-          allowed = await this.permissionPrompt(toolUse.name, decision.reason, toolUse.input);
+        if (runtimeHost) {
+          const approval = await runtimeHost.requestPermission({
+            toolName: toolUse.name,
+            reason: decision.reason,
+            input: toolUse.input,
+          });
+          allowed = approval.status === "approved";
         }
         if (!allowed) {
           results[idx] = {
@@ -550,7 +550,7 @@ export class QueryEngine implements IQueryEngine {
             settings: this.options.settings,
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
-            runtimeEventSink: this.runtimeEventSink,
+            runtimeHost,
           };
           const result = await this.executeToolWithTimeout(
             tool,

@@ -188,7 +188,7 @@ describe("Integration: Full Agent Loop", () => {
       description: "Emit tool",
       inputSchema: { type: "object", properties: {} },
       execute: async (_input, context) => {
-        await context.runtimeEventSink?.({ type: "tool.custom", payload: { ok: true } });
+        await context.runtimeHost?.emitEvent({ type: "tool.custom", payload: { ok: true } });
         return { content: [{ type: "text" as const, text: "emitted" }] };
       },
     });
@@ -207,8 +207,12 @@ describe("Integration: Full Agent Loop", () => {
     ]);
 
     const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
-    engine.setRuntimeEventSink((event) => emitted.push(event));
-    for await (const _event of engine.submitMessage("emit")) {
+    for await (const _event of engine.submitMessage("emit", {
+      runtimeHost: {
+        emitEvent: (event) => emitted.push(event),
+        requestPermission: async () => ({ status: "denied" }),
+      },
+    })) {
       // drain
     }
 
@@ -1026,11 +1030,14 @@ describe("Integration: Permission Prompt (ask mode)", () => {
     ]);
 
     const askMode = { checkTool: async () => ({ action: "ask" as const, reason: "confirm?" }) };
-    const prompt = async () => true;
-
-    const engine = new QueryEngine(client, registry, askMode, noopHooks(), { permissionPrompt: prompt });
+    const engine = new QueryEngine(client, registry, askMode, noopHooks());
     const events: StreamEvent[] = [];
-    for await (const e of engine.submitMessage("ls")) { events.push(e); }
+    for await (const e of engine.submitMessage("ls", {
+      runtimeHost: {
+        emitEvent: async () => {},
+        requestPermission: async () => ({ status: "approved" }),
+      },
+    })) { events.push(e); }
 
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd).toBeDefined();
@@ -1053,11 +1060,14 @@ describe("Integration: Permission Prompt (ask mode)", () => {
     ]);
 
     const askMode = { checkTool: async () => ({ action: "ask" as const, reason: "confirm?" }) };
-    const prompt = async () => false;
-
-    const engine = new QueryEngine(client, registry, askMode, noopHooks(), { permissionPrompt: prompt });
+    const engine = new QueryEngine(client, registry, askMode, noopHooks());
     const events: StreamEvent[] = [];
-    for await (const e of engine.submitMessage("run")) { events.push(e); }
+    for await (const e of engine.submitMessage("run", {
+      runtimeHost: {
+        emitEvent: async () => {},
+        requestPermission: async () => ({ status: "denied" }),
+      },
+    })) { events.push(e); }
 
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd.result.isError).toBe(true);

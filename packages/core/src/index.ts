@@ -24,6 +24,7 @@ export type {
 export type {
   ToolDefinition,
   ToolContext,
+  ToolRuntimeHost,
   ToolResult,
   ToolExecutionResult,
   ToolRegistry as IToolRegistry,
@@ -74,8 +75,11 @@ export type {
 export type {
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
-  PermissionPrompt,
   MemoryRetriever,
+  QueryRuntimeHost,
+  QueryRuntimeHostEvent,
+  QueryRuntimePermissionDecision,
+  QueryRuntimePermissionRequest,
 } from "./types/runtime";
 
 export { RuntimeBundle } from "./types/runtime";
