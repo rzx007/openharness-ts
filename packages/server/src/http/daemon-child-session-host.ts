@@ -11,7 +11,11 @@ type ChildSessionApplication = Pick<
   | "interruptSession"
 >;
 
-/** Runtime-facing adapter over daemon-owned child-session use cases. */
+/**
+ * Runtime/Agent 侧看到的 ChildSessionHost 适配器。
+ * 把 createChildSession / admitPrompt / awaitRun / interrupt / archive 等调用
+ * 转发到 SessionApplicationService，避免 QueryEngine 直接依赖 HTTP 用例层。
+ */
 export class DaemonChildSessionHost implements ChildSessionHost {
   constructor(private readonly application: () => ChildSessionApplication) {}
 

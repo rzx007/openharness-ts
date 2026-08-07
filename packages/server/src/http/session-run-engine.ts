@@ -35,6 +35,11 @@ export interface SessionRunEngineContext {
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
+/**
+ * Prompt 准入与 session lane 调度（不执行模型）。
+ * 负责 admit/steer/queue、创建 run、enqueue 到 SessionRunCoordinator，
+ * 以及 awaitRun / interrupt；真正跑模型交给 SessionRunExecutor。
+ */
 export class SessionRunEngine {
   private readonly runCoordinator = new SessionRunCoordinator();
   private readonly runPromises = new Map<string, Promise<void>>();

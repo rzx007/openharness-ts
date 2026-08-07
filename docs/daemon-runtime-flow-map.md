@@ -1,6 +1,8 @@
 # Daemon Runtime Flow Map
 
 > 目标：降低 daemon / runtimeFactory / SessionRuntime / ChildSessionHost / child session / client sync 的认知负担。本文不是替代设计文档，而是一张运行时认知地图：先看总链路，再看每个模块自己的闭环。
+>
+> 想按问题查真实代码入口，读 [`daemon-runtime-code-guide.md`](./daemon-runtime-code-guide.md)。
 
 ## 一句话模型
 

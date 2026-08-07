@@ -16,7 +16,10 @@ export interface DaemonControlServiceContext {
   sseClientCount(): number;
 }
 
-/** Shared daemon status, runtime invalidation, and inspection control plane. */
+/**
+ * Daemon 控制面：runtime 快照、按 cwd/全局关闭 runtime、是否有活跃 run、
+ * hooks 等检查能力；供 /health、settings/plugin 等路由在写配置前做 barrier。
+ */
 export class DaemonControlService {
   constructor(private readonly context: DaemonControlServiceContext) {}
 

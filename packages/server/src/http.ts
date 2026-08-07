@@ -127,18 +127,28 @@ export class OpenHarnessHttpServer {
   private readonly gitService?: GitService;
   private readonly version?: string;
   private readonly logger: StructuredLogger;
+  /** 权限 ask/reply 中介（store 持久化 + 等待客户端裁决）。 */
   private readonly permissionBroker: StorePermissionBroker;
+  /** Agent/runtime 创建 child session 的宿主适配器 → SessionApplicationService。 */
   private readonly childSessionHost: ChildSessionHost;
   private readonly eventHub: HttpEventHub;
   private readonly sessionEvents: SessionEventPublisher;
+  /** StreamEvent → durable message/part 渲染。 */
   private readonly runRenderer: SessionRunRenderer;
+  /** 进程内 TaskManager ↔ store SessionTask 投影桥。 */
   private readonly sessionTaskBridgeManager: SessionTaskBridgeManager;
   private readonly sessionTaskService: SessionTaskService;
+  /** 每 session 一份 runtime 的创建/缓存/关闭。 */
   private readonly runtimePool: SessionRuntimePool;
+  /** Prompt 准入 + session lane 调度（queue/steer/interrupt）。 */
   private readonly runEngine: SessionRunEngine;
+  /** Session 写路径用例：create/admit/archive/child/resume 等。 */
   private readonly sessionApplication: SessionApplicationService;
+  /** Session 维护：compact/rewind/export/remember/MCP·usage 检查。 */
   private readonly sessionMaintenance: SessionMaintenanceService;
+  /** Session 只读查询：列表/详情/messages。 */
   private readonly sessionQueries: SessionQueryService;
+  /** Daemon 控制面：快照、关 runtime、活跃 run barrier。 */
   private readonly daemonControl: DaemonControlService;
   private readonly requestTraces = new RequestTraceRegistry();
   private readonly startupRecovery: Promise<void>;
@@ -199,6 +209,7 @@ export class OpenHarnessHttpServer {
       childSessionHost: this.childSessionHost,
       sessionTaskBridgeManager: this.sessionTaskBridgeManager,
     });
+    // 单次 run 执行：runtime.runPrompt + 流式落库 + 权限注入
     const runExecutor = new SessionRunExecutor({
       store: this.store,
       runtimePool: this.runtimePool,

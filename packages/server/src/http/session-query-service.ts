@@ -7,7 +7,10 @@ export interface ListSessionsQuery {
   limit?: number;
 }
 
-/** Read-only session facade used by HTTP routes. */
+/**
+ * Session 只读查询门面：列表（可隐藏 child）、详情、messages/parts、session state。
+ * 不触发 runtime warm，也不改 store。
+ */
 export class SessionQueryService {
   constructor(private readonly store: Pick<
     SessionStore,

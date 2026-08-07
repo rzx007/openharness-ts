@@ -25,7 +25,10 @@ export interface SessionMaintenanceServiceContext {
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
-/** Session-scoped inspection, transcript maintenance, and memory extraction use cases. */
+/**
+ * Session 维护用例：MCP/usage 检查、compact、rewind、export、remember 等。
+ * 通常要求无 active/queued run；会 warm runtime 并在变更 transcript 后必要时关闭 runtime。
+ */
 export class SessionMaintenanceService {
   constructor(private readonly context: SessionMaintenanceServiceContext) {}
 

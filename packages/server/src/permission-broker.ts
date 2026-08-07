@@ -44,6 +44,10 @@ export interface StorePermissionBrokerOptions {
 
 type Waiter = (request: PermissionRequestRecord) => void;
 
+/**
+ * 基于 SessionStore 的权限中介：ask 持久化请求并等待 reply，
+ * 支持 session 级审批复用与 parent/child session 权限上溯；变更时触发事件广播。
+ */
 export class StorePermissionBroker implements PermissionBroker {
   private readonly store: SessionStore;
   private readonly onChange?: (previousEventSeq: number) => void;

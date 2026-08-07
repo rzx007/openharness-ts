@@ -64,6 +64,10 @@ export interface SessionTaskBridgeManagerContext {
   log(event: ObservabilityEvent): void;
 }
 
+/**
+ * 为每个 session 生成 SessionTaskBridge：把进程内 TaskManager 与 store 的
+ * SessionTask 投影对齐（register/complete/bindRun/write），供 child session / Agent 使用。
+ */
 export class SessionTaskBridgeManager {
   constructor(private readonly context: SessionTaskBridgeManagerContext) {}
 

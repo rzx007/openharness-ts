@@ -23,7 +23,11 @@ export interface ExecuteSessionRunInput {
   runId: string;
 }
 
-/** Executes one admitted run and persists its complete stream lifecycle. */
+/**
+ * 单次 admitted run 的执行器。
+ * 从 RuntimePool 取 runtime，调 runPrompt，经 SessionRunRenderer 把流式事件
+ * 落成 message/part，注入 askPermission，并更新 run 终态（completed/interrupted/failed）。
+ */
 export class SessionRunExecutor {
   constructor(private readonly context: SessionRunExecutorContext) {}
 

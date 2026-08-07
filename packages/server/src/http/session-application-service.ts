@@ -40,7 +40,10 @@ export type ResumeSessionRunResult = AdmitPromptResult & {
   source_run: NonNullable<ReturnType<SessionStore["getRun"]>>;
 };
 
-/** Daemon-internal use-case facade shared by HTTP routes and child sessions. */
+/**
+ * Session 应用用例门面（HTTP 与 child session 共用）：
+ * 创建/更新/归档 session、admitPrompt、resume、interrupt、awaitRun、createChildSession 等写路径编排。
+ */
 export class SessionApplicationService {
   private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
 

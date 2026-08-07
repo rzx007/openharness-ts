@@ -28,6 +28,10 @@ export type AppliedStreamEvent = {
   completedToolName?: string;
 };
 
+/**
+ * 把 QueryEngine/runtime 的 StreamEvent 渲染进 durable store：
+ * 创建/更新 assistant message 与 text/tool parts，维护单次 run 的渲染状态。
+ */
 export class SessionRunRenderer {
   constructor(
     private readonly store: Pick<

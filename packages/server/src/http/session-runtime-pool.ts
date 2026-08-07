@@ -10,7 +10,10 @@ export interface SessionRuntimePoolContext {
   sessionTaskBridgeManager: Pick<SessionTaskBridgeManager, "createBridge">;
 }
 
-/** Owns daemon-local SessionRuntime creation, caching, and disposal. */
+/**
+ * 每 session 一份 SessionRuntime 的池：创建（warm/acquire）、缓存与关闭。
+ * 通过 runtimeFactory + ChildSessionHost + TaskBridge 组装；不负责 lane 排队或 prompt 准入。
+ */
 export class SessionRuntimePool {
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
 
