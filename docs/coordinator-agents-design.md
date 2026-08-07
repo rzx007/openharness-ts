@@ -1,132 +1,137 @@
-# 设计：Coordinator agent 加载与 prompt 还原（C.4）
+# Coordinator Agents Design
 
-> 状态：✅ 已完成（C.4 + agent 级字段运行时生效）。R1–R3 全部实现并通过类型检查；daemon child-session 接线已补齐；agent 级字段（tools/disallowedTools/maxTurns/effort/permissionMode）会随 child session metadata 进入运行时。
+> 状态：当前事实版。agent 定义加载已落地；agent 级字段会通过 runtime-host child invocation 写入 child session metadata。
 
 ## 范围
 
-- **R1 用户 agent 加载器**：`~/.openharness-ts/agents/*.md`（YAML frontmatter +
-  正文为 system prompt）→ `AgentDefinition`；`getAllAgentDefinitions()` 三源
-  合并，同名后者覆盖：**builtin < user < plugin**（对齐 Python merge order）。
-- **R2 plugin agents**：plugins 包加载 `<plugin>/agents/**/*.md` + manifest
-  `agents` 路径；agent 名带插件前缀 `plugin:ns:name`；接进合并链与 Agent 工具。
-- **R3 coordinator mode 还原**：`get_coordinator_system_prompt` 完整移植、
-  `match_session_mode`、`get_coordinator_tools`、`get_coordinator_user_context`
-  （scratchpad / worker-tools 注入）。
+本设计覆盖：
 
-**已实现（后续补充）**：`tools`/`disallowedTools`/`maxTurns`/`effort`/`permissionMode` 五个字段在 spawn worker 时经 `TeammateSpawnConfig` → `ChildSessionBackend` 写入 child session metadata，由 daemon runtime 应用（见下方"agent 级字段运行时生效"小节）。
+| 范围 | 状态 |
+|---|---|
+| 用户 agent 加载 | 已实现：`~/.openharness-ts/agents/*.md` |
+| plugin agent 加载 | 已实现：plugin `agents` 路径 |
+| builtin/user/plugin 合并 | 已实现：同名后者覆盖，优先级 builtin < user < plugin |
+| coordinator prompt 恢复 | 已实现 |
+| agent 字段运行时生效 | 已实现：经 Agent/Workflow -> runtimeHost -> child session metadata |
+| agent hooks/mcpServers 运行时生效 | 后续 |
 
-**仍留待**：agent 级 `hooks`/`mcpServers` 的运行时生效（需 env var 传 JSON，再在 worker 侧解析注册，较复杂）；`memory`/`isolation` 的行为接线（字段已解析，接线待后续）。
+## AgentDefinition 字段
 
-## 关键决策
+agent markdown frontmatter 支持的核心字段：
 
-- **引入 `yaml` 依赖**（npm `yaml`，进 catalog）：frontmatter 的 hooks/
-  mcpServers 是嵌套结构，行级解析不够；Python 也用 PyYAML。YAML 解析失败回退
-  行级 `key: value`（对齐 Python 的 fallback）。
-- **frontmatter 字段全集**（驼峰/下划线双形态容错，对齐 Python docstring）：
-  name/description（必填，缺省文件名/`Agent: <name>`）、tools/disallowedTools、
-  model（"inherit" 归一）、effort（low/medium/high 或正整数）、permissionMode、
-  maxTurns、skills、mcpServers、hooks、color（白名单）、background、
-  initialPrompt、memory、isolation、omitClaudeMd、criticalSystemReminder、
-  requiredMcpServers、permissions、subagent_type（缺省 name）。
-  非法枚举值静默置 null（Python 是 logger.debug，TS 无 logger 基建）。
-- **坏文件容错**：单个 .md 解析抛错 → 跳过该文件不拖垮整体（对齐 Python）。
-- **AgentDefinition 接口扩展**：在现有 TS 接口上补缺失字段（全部可选），
-  内置定义不动。
-
-## 与 Python 差异
-
-| 点 | Python | TS | 原因 |
-|----|--------|----|------|
-| 非法枚举值 | logger.debug | 静默忽略 | TS 无 logger 基建 |
-| plugin agents 命名 | `plugin:ns:name`（loader.py） | 同 | 对齐 |
-| getAllAgentDefinitions 的 plugin 段 | 函数内 lazy import load_plugins（每次全量重扫盘） | 注入式：`getAllAgentDefinitions(pluginAgents?)`，由 CLI 接线处传入已加载的插件 agents | 避免循环依赖与重复扫盘；TS 的插件在启动时已加载（C.1 缓存） |
-| permission_mode 枚举 | acceptEdits/bypassPermissions/plan/dontAsk/default（Claude Code 名） | 同字面量保留 | schema 兼容；TS 运行时映射留 swarm 接线 |
-| 插件 agent 的 hooks/mcpServers/omitClaudeMd | _load_single_agent_file 硬编码置空 | 同样置空（build 后剥除） | 信任面：插件不得自挂 hook/MCP/抑制 CLAUDE.md |
-| coordinator system prompt | f-string 模板（工具名/能力句插值） | 静态富版本 + 简单模式字符串替换（防回归断言钉住） | TS prompt 已是全量；simple 分支按需换 §3 |
-| 非字符串 frontmatter name | str() 强转 | 回退文件名 | 边缘差异，记录备查 |
-
-## 测试
-
-- R1：frontmatter 全字段解析（含嵌套 hooks/mcpServers）、YAML 失败回退行级、
-  非法枚举置 null、缺 name 用文件名、坏文件跳过、merge 顺序覆盖。
-- R2：plugin agents 目录递归 + 命名空间、manifest agents 路径形态、
-  enabled 过滤、合并链 plugin 覆盖 user。
-- R3：coordinator prompt 关键段落断言、match_session_mode 各分支、
-  coordinator tools 列表、user context 含 scratchpad/worker-tools。
-
-每轮 `pnpm check-types` + `pnpm test` 全绿。
-
-## CLI 接线（C.4 补充）
-
-R3 函数本身在 `@openharness/coordinator` 包里实现后，还需三处 CLI 接线：
-
-### 1. session_mode 存储
-
-`SessionSnapshotPayload` 新增 `session_mode?: string` 字段；`saveSessionSnapshot` 的 `options.sessionMode` 在 coordinator 模式下传 `"coordinator"`，会话文件写入后可被恢复端识别。
-
-### 2. matchSessionMode 在会话恢复时调用
-
-`loadSessionAndResume`（`main.ts`）恢复快照后调用 `matchSessionMode(payload.session_mode)`：若快照中有 `session_mode: "coordinator"` 则设置 `OPENHARNESS_COORDINATOR_MODE` 环境变量并向用户打印提示；若模式不匹配当前环境则警告。
-
-### 3. setAllowedTools 在 coordinator 模式启动时调用
-
-`QueryEngine` 新增 `setAllowedTools(tools: string[] | null): void`，在 `submitMessage` 时按白名单过滤 `toolRegistry.getAll()`。
-
-REPL 或 daemon session runtime 初始化时（`registerPluginHooks` 之后）：
-
-```typescript
-if (isCoordinatorMode()) {
-  bundle.queryEngine.setAllowedTools(getCoordinatorTools());
-  // getCoordinatorTools() = ["Agent", "SendMessage", "TaskStop", "Workflow"]
-}
+```yaml
+name: worker
+description: Implements scoped changes
+model: gpt-5
+tools:
+  - Read
+  - Write
+disallowedTools:
+  - Bash
+maxTurns: 5
+effort: high
+permissionMode: plan
+skills:
+  - some-skill
 ```
 
-这样 coordinator 只能调用 swarm / 硬调度相关工具，无法直接操作文件/运行 shell——对齐 Python coordinator 的工具隔离。`Workflow` 为后续硬调度器入口，调用链见 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md)。
+正文作为 `systemPrompt`。
 
-## agent 级字段运行时生效
+## 加载与合并
 
-`AgentDefinition` 里的约束字段现在会随 spawn 实际传给 child session。完整链路：
-
-```
-agent.md frontmatter
-  tools: [Read, Write]
-  disallowedTools: [Bash]
-  maxTurns: 5
-  effort: high
-  permissionMode: plan
-
-↓ packages/tools/src/agent/index.ts（Agent 工具）
-  agentDef → TeammateSpawnConfig.{allowedTools, disallowedTools, maxTurns, effort, permissionMode}
-
-↓ packages/swarm/src/child-session.ts（ChildSessionBackend）
-  host.createChildSession({
-    metadata: {
-      allowedTools: ["Read", "Write"],
-      disallowedTools: ["Bash"],
-      maxTurns: 5,
-      effort: "high",
-      permissionMode: "plan"
-    }
-  })
-
-↓ packages/server/src/http.ts / apps/cli/src/runtime.ts
-  child session metadata 驱动 PermissionChecker 工具白/黑名单、queryEngine maxTurns 与 effort
+```text
+builtin agents
+  -> user agents
+  -> plugin agents
+  -> AgentDefinition registry
 ```
 
-### 各字段说明
+关键文件：
 
-| 字段 | child session metadata | 应用点 |
-|------|------------------------|--------|
-| `tools` | `allowedTools` | child runtime 构建 `toolRegistry` 时过滤，只保留白名单工具 |
-| `disallowedTools` | `disallowedTools` | child runtime 构建 `toolRegistry` 时排除黑名单工具 |
-| `maxTurns` | `maxTurns` | child runtime 的 `QueryEngine` turn 上限 |
-| `effort` | `effort` | child runtime API 调用时 reasoning effort |
-| `permissionMode` | `permissionMode` | child runtime 的 `PermissionChecker.mode`（Agent 工具传入值 > agentDef 值 > "default"） |
+| 文件 | 责任 |
+|---|---|
+| `packages/coordinator/src/agents.ts` | agent definition 解析、合并、查询 |
+| `packages/tools/src/agent/index.ts` | Agent tool 读取 agent definition |
+| `packages/tools/src/agent/workflow-runner.ts` | Workflow task 读取 agent definition |
 
-### permissionMode 优先级
+## 运行时生效链路
 
-Agent 工具调用时 `input.permissionMode`（运行时显式指定）> `agentDef.permissionMode`（agent.md 定义）> 默认 `"default"`，允许调用方按需覆盖。
+```mermaid
+flowchart TD
+  md["agent.md frontmatter"] --> def["AgentDefinition"]
+  def --> agentTool["Agent tool / Workflow runner"]
+  agentTool --> host["runtimeHost.spawnChildAgent()"]
+  host --> daemon["DaemonChildAgentHost"]
+  daemon --> child["create child session metadata"]
+  child --> runtime["child CliSessionRuntime"]
+  runtime --> qe["child QueryEngine"]
+```
 
-### 仍留待（hooks/mcpServers）
+当前主路径：
 
-`hooks` 和 `mcpServers` 是嵌套对象，无法直接序列化成 CLI 参数，需要通过环境变量传 JSON 并在 worker 侧解析注册，留待后续实现。
+```text
+packages/tools/src/agent/index.ts
+  agentDef
+    -> spawnChildAgent({
+         model,
+         systemPrompt,
+         allowedTools,
+         disallowedTools,
+         maxTurns,
+         effort,
+         permissionMode
+       })
+
+packages/server/src/http/daemon-child-agent-host.ts
+  spawnChildAgent()
+    -> childSessionHost.createChildSession({
+         metadata: {
+           systemPrompt,
+           allowedTools,
+           disallowedTools,
+           maxTurns,
+           effort,
+           permissionMode
+         }
+       })
+```
+
+## 字段映射
+
+| AgentDefinition 字段 | child session metadata | 应用点 |
+|---|---|---|
+| `model` | session model | child runtime provider model |
+| markdown body | `systemPrompt` | child runtime system prompt |
+| `tools` | `allowedTools` | child runtime tool allow list |
+| `disallowedTools` | `disallowedTools` | child runtime tool deny list |
+| `maxTurns` | `maxTurns` | child QueryEngine turn limit |
+| `effort` | `effort` | provider reasoning effort |
+| `permissionMode` | `permissionMode` | child permission policy |
+
+`permissionMode` 优先级：
+
+```text
+Agent tool input.permissionMode
+  -> AgentDefinition.permissionMode
+  -> default
+```
+
+## Coordinator 工具隔离
+
+coordinator 模式只暴露调度相关工具：
+
+```text
+Agent
+SendMessage
+TaskStop
+Workflow
+```
+
+这样 coordinator 负责拆分/调度，不直接操作文件或 shell；真正执行由 child agent 完成。
+
+## 仍留待后续
+
+- `hooks` 运行时注入。
+- `mcpServers` 运行时注入。
+- `memory` / `isolation` 更细语义。
+- agent 字段与 host/framework 分层的更稳定 schema。

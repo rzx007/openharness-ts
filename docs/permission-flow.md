@@ -7,11 +7,11 @@ QueryEngine
   -> PermissionChecker.checkTool()
   -> decision === "ask"
   -> CliSessionRuntime permissionPrompt
-  -> SessionRuntimeHooks.askPermission()
+  -> RuntimeHostPort.requestPermission()
   -> PermissionBroker
   -> SessionStore.createPermissionRequest(status:"pending")
   -> append event: permission.asked
-  -> wait for reply
+  -> PermissionController.wait(requestId, signal)
 
 TUI / Web / Desktop
   -> @openharness/client syncEvents()
@@ -22,7 +22,7 @@ TUI / Web / Desktop
 PermissionBroker
   -> SessionStore.replyPermission()
   -> append event: permission.replied
-  -> resolve waiting run
+  -> PermissionController.resolve(requestId, decision)
   -> QueryEngine continues or denies tool call
 ```
 
@@ -33,9 +33,19 @@ PermissionBroker
 | 层 | 组件 | 产物 |
 |---|---|---|
 | 规则层 | `PermissionChecker.checkTool(name, input)` | `{ action: "allow" | "deny" | "ask", reason }` |
-| 确认层 | `PermissionBroker` + attach 客户端 | persisted request + persisted reply |
+| 确认层 | `StorePermissionBroker` + attach 客户端 | persisted request + persisted reply |
+| live 层 | `PermissionController` | in-process waiter + abort expiration |
 
 `checkTool` 只给出规则决策；需要用户确认时，由 daemon 持久化 request，并通过 event stream 通知所有 attach 客户端。
+
+关键边界：
+
+```text
+PermissionController owns the live continuation.
+SessionStore owns the durable projection.
+```
+
+因此 daemon 重启后不能假装恢复旧的 async stack；持久化 request 可以被 replay、展示、回复或收口，但原进程里的 live waiter 已不存在。
 
 ## HTTP API
 
