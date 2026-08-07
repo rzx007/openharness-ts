@@ -48,17 +48,26 @@ export type {
 export type {
   ChildSessionHost,
   RuntimeMessageRecord,
-  RuntimePermissionAskInput,
   SessionCompactResult,
   SessionRememberResult,
   SessionRuntime,
   SessionRuntimeFactory,
-  SessionRuntimeHooks,
   SessionRuntimeRunInput,
   SessionRuntimeRunResult,
   SessionTaskBridge,
   SessionUsageSnapshot,
 } from "./runtime.js";
+export type {
+  ChildAgentInput,
+  ChildAgentInvocation,
+  ChildAgentResult,
+  ChildAgentSpawnInput,
+  PermissionDecision,
+  PermissionRequestInput,
+  RuntimeHostEvent,
+  RuntimeHostPort,
+  RuntimeHostScope,
+} from "./runtime-host.js";
 export { estimateCostUsd } from "./usage.js";
 export {
   TRACE_ID_HEADER,
@@ -73,6 +82,10 @@ export {
   type SessionExportFormat,
   type SessionExportResult,
 } from "./export-session.js";
+export {
+  PermissionController,
+  type PermissionControllerWaitInput,
+} from "./permission-controller.js";
 export {
   StorePermissionBroker,
   type ListPermissionRequestsInput,

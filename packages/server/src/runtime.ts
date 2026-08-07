@@ -1,4 +1,3 @@
-import type { StreamEvent } from "@openharness/core";
 import type {
   ReplaceTranscriptMessageInput,
   SessionInputRecord,
@@ -9,6 +8,7 @@ import type {
 } from "@openharness/services";
 
 import type { SessionRuntimeInspect } from "./settings-api.js";
+import type { RuntimeHostPort } from "./runtime-host.js";
 
 export interface SessionCompactResult {
   messageCount: number;
@@ -48,24 +48,12 @@ export interface SessionRuntimeRunInput {
   drainSteeredInputs(): SessionInputRecord[];
 }
 
-export interface RuntimePermissionAskInput {
-  toolName: string;
-  reason?: string;
-  input?: Record<string, unknown>;
-}
-
-export interface SessionRuntimeHooks {
-  onEvent(event: { type: string; payload?: Record<string, unknown> }): void | Promise<void>;
-  onStreamEvent(event: StreamEvent): void | Promise<void>;
-  askPermission(input: RuntimePermissionAskInput): Promise<boolean>;
-}
-
 export interface SessionRuntimeRunResult {
   messages: RuntimeMessageRecord[];
 }
 
 export interface SessionRuntime {
-  runPrompt(input: SessionRuntimeRunInput, hooks: SessionRuntimeHooks): Promise<SessionRuntimeRunResult>;
+  runPrompt(input: SessionRuntimeRunInput, host: RuntimeHostPort): Promise<SessionRuntimeRunResult>;
   close(): Promise<void>;
   /** Optional inspection surface for session-scoped resources (MCP, etc.). */
   inspect?(): Promise<SessionRuntimeInspect> | SessionRuntimeInspect;
@@ -128,7 +116,5 @@ export interface SessionRuntimeFactory {
     session: SessionRecord;
     history: SessionMessageRecord[];
     parts: SessionMessagePartRecord[];
-    childSessionHost: ChildSessionHost;
-    sessionTaskBridge: SessionTaskBridge;
   }): Promise<SessionRuntime>;
 }

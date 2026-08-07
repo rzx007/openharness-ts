@@ -1,18 +1,15 @@
 import type { SessionStore } from "@openharness/services";
 
-import type { ChildSessionHost, SessionRuntime, SessionRuntimeFactory } from "../runtime.js";
-import type { SessionTaskBridgeManager } from "./session-task-bridge.js";
+import type { SessionRuntime, SessionRuntimeFactory } from "../runtime.js";
 
 export interface SessionRuntimePoolContext {
   store: Pick<SessionStore, "getSession" | "listMessageParts" | "listMessages" | "listSessions">;
   runtimeFactory?: SessionRuntimeFactory;
-  childSessionHost: ChildSessionHost;
-  sessionTaskBridgeManager: Pick<SessionTaskBridgeManager, "createBridge">;
 }
 
 /**
- * 每 session 一份 SessionRuntime 的池：创建（warm/acquire）、缓存与关闭。
- * 通过 runtimeFactory + ChildSessionHost + TaskBridge 组装；不负责 lane 排队或 prompt 准入。
+ * One cached SessionRuntime per session. The pool owns creation, reuse, and
+ * closing; run-scoped host capabilities are injected by SessionRunExecutor.
  */
 export class SessionRuntimePool {
   private readonly runtimes = new Map<string, Promise<SessionRuntime>>();
@@ -51,13 +48,7 @@ export class SessionRuntimePool {
     const existing = this.runtimes.get(session.id);
     if (existing) return await existing;
 
-    const promise = runtimeFactory.createRuntime({
-      session,
-      history,
-      parts,
-      childSessionHost: this.context.childSessionHost,
-      sessionTaskBridge: this.context.sessionTaskBridgeManager.createBridge(session),
-    }).catch((error) => {
+    const promise = runtimeFactory.createRuntime({ session, history, parts }).catch((error) => {
       if (this.runtimes.get(session.id) === promise) this.runtimes.delete(session.id);
       throw error;
     });

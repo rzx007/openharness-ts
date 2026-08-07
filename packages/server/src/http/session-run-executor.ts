@@ -3,20 +3,25 @@ import type { SessionStore } from "@openharness/services";
 import type { ObservabilityEvent } from "../observability.js";
 import type { StorePermissionBroker } from "../permission-broker.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../run-coordinator.js";
+import type { ChildSessionHost } from "../runtime.js";
+import { DaemonChildAgentHost } from "./daemon-child-agent-host.js";
+import { DaemonRuntimeHostPort } from "./daemon-runtime-host.js";
 import type { SessionRunRenderer } from "./run-renderer.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";
+import type { SessionTaskBridgeManager } from "./session-task-bridge.js";
 
 export interface SessionRunExecutorContext {
   store: SessionStore;
   runtimePool: SessionRuntimePool;
+  childSessionHost: ChildSessionHost;
+  sessionTaskBridgeManager: Pick<SessionTaskBridgeManager, "createBridge">;
   permissionBroker: Pick<StorePermissionBroker, "ask">;
   runRenderer: SessionRunRenderer;
   events: Pick<SessionEventPublisher, "checkpoint" | "publish" | "publishSince">;
   traceIdForRun(runId: string): string;
   log(event: ObservabilityEvent): void;
 }
-
 export interface ExecuteSessionRunInput {
   sessionId: string;
   inputId: string;
@@ -24,9 +29,8 @@ export interface ExecuteSessionRunInput {
 }
 
 /**
- * 单次 admitted run 的执行器。
- * 从 RuntimePool 取 runtime，调 runPrompt，经 SessionRunRenderer 把流式事件
- * 落成 message/part，注入 askPermission，并更新 run 终态（completed/interrupted/failed）。
+ * Single admitted-run executor. It builds a run-scoped host, renders stream
+ * events into message/part records, and updates the run terminal state.
  */
 export class SessionRunExecutor {
   constructor(private readonly context: SessionRunExecutorContext) {}
@@ -59,6 +63,75 @@ export class SessionRunExecutor {
       };
 
       const runtime = await this.context.runtimePool.acquire(session, history, parts);
+      const scope = {
+        sessionId,
+        inputId,
+        runId,
+        cwd: session.cwd,
+        traceId,
+        signal: workContext.signal,
+      };
+      const childAgentHost = new DaemonChildAgentHost({
+        scope,
+        childSessionHost: this.context.childSessionHost,
+        sessionTaskBridge: this.context.sessionTaskBridgeManager.createBridge(session),
+      });
+      const host = new DaemonRuntimeHostPort({
+        scope,
+        childAgentHost,
+        emitEvent: (event) => {
+          const eventBefore = this.context.events.checkpoint();
+          this.context.store.appendEvent({
+            type: event.type,
+            sessionId,
+            payload: event.payload,
+          });
+          this.context.events.publishSince(eventBefore);
+        },
+        emitStreamEvent: (event) => {
+          const canDirectBroadcast =
+            event.type === "text_delta" && this.context.runRenderer.hasActiveTextPart(renderState);
+          const eventBefore = canDirectBroadcast ? undefined : this.context.events.checkpoint();
+          const applied = this.context.runRenderer.applyStreamEvent(renderState, event);
+          if (event.type === "tool_use_start") {
+            this.context.log({
+              level: "info",
+              event: "session.tool.started",
+              traceId,
+              sessionId,
+              runId,
+              toolName: event.toolUse.name,
+            });
+          } else if (event.type === "tool_use_end") {
+            this.context.log({
+              level: event.result.isError ? "warn" : "info",
+              event: "session.tool.completed",
+              traceId,
+              sessionId,
+              runId,
+              toolName: applied.completedToolName,
+              ...(event.result.isError ? { error: "tool returned an error" } : {}),
+            });
+          }
+          if (canDirectBroadcast && applied.liveEvent) {
+            this.context.events.publish(applied.liveEvent);
+          } else if (eventBefore !== undefined) {
+            this.context.events.publishSince(eventBefore);
+          }
+        },
+        requestPermission: async (request) => {
+          const approved = await this.context.permissionBroker.ask({
+            sessionId,
+            runId,
+            traceId,
+            toolName: request.toolName,
+            reason: request.reason,
+            input: request.input,
+            signal: workContext.signal,
+          });
+          return approved ? { status: "approved" } : { status: "denied" };
+        },
+      });
       await runtime.runPrompt(
         {
           session,
@@ -70,58 +143,7 @@ export class SessionRunExecutor {
           wakeCount: workContext.wakeCount,
           drainSteeredInputs,
         },
-        {
-          onEvent: (event) => {
-            const eventBefore = this.context.events.checkpoint();
-            this.context.store.appendEvent({
-              type: event.type,
-              sessionId,
-              payload: event.payload,
-            });
-            this.context.events.publishSince(eventBefore);
-          },
-          onStreamEvent: (event) => {
-            const canDirectBroadcast =
-              event.type === "text_delta" && this.context.runRenderer.hasActiveTextPart(renderState);
-            const eventBefore = canDirectBroadcast ? undefined : this.context.events.checkpoint();
-            const applied = this.context.runRenderer.applyStreamEvent(renderState, event);
-            if (event.type === "tool_use_start") {
-              this.context.log({
-                level: "info",
-                event: "session.tool.started",
-                traceId,
-                sessionId,
-                runId,
-                toolName: event.toolUse.name,
-              });
-            } else if (event.type === "tool_use_end") {
-              this.context.log({
-                level: event.result.isError ? "warn" : "info",
-                event: "session.tool.completed",
-                traceId,
-                sessionId,
-                runId,
-                toolName: applied.completedToolName,
-                ...(event.result.isError ? { error: "tool returned an error" } : {}),
-              });
-            }
-            if (canDirectBroadcast && applied.liveEvent) {
-              this.context.events.publish(applied.liveEvent);
-            } else if (eventBefore !== undefined) {
-              this.context.events.publishSince(eventBefore);
-            }
-          },
-          askPermission: (request) =>
-            this.context.permissionBroker.ask({
-              sessionId,
-              runId,
-              traceId,
-              toolName: request.toolName,
-              reason: request.reason,
-              input: request.input,
-              signal: workContext.signal,
-            }),
-        },
+        host,
       );
 
       before = this.context.events.checkpoint();

@@ -8,7 +8,7 @@ import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from 
 import type { CommandCatalogProvider } from "./commands.js";
 import { OpenHarnessHttpServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
-import type { ChildSessionHost, SessionRuntimeFactory, SessionTaskBridge } from "./runtime.js";
+import type { SessionRuntimeFactory } from "./runtime.js";
 import type { OpenHarnessServerOptions } from "./http.js";
 import type { ObservabilityEvent } from "./observability.js";
 
@@ -101,31 +101,29 @@ async function waitForEvent(
 }
 
 describe("OpenHarnessHttpServer", () => {
-  it("provides runtimes an in-process child session host", async () => {
-    type Host = {
-      createChildSession(input: {
-        parentId: string;
-        cwd: string;
-        model?: string;
-        title: string;
-        agent: string;
-      }): Promise<{ id: string }>;
-      admitPrompt(sessionId: string, content: string): Promise<{ runId?: string }>;
-      awaitRun(sessionId: string, runId: string): Promise<{ status: string; output: string }>;
-      closeRuntime(sessionId: string): Promise<void>;
-    };
-    let host: Host | undefined;
-    let taskBridge: SessionTaskBridge | undefined;
+  it("provides runs a runtime host that can spawn child sessions", async () => {
     const created: string[] = [];
     const closed: string[] = [];
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime(context) {
-        host = (context as typeof context & { childSessionHost?: Host }).childSessionHost;
-        taskBridge = context.sessionTaskBridge;
         created.push(context.session.id);
         return {
-          async runPrompt(_input, hooks) {
-            await hooks.onStreamEvent({ type: "text_delta", delta: "child output" });
+          async runPrompt(_input, runtimeHost) {
+            if (context.session.parentId) {
+              await runtimeHost.emitStreamEvent({ type: "text_delta", delta: "child output" });
+              return { messages: [] };
+            }
+            const invocation = await runtimeHost.spawnChildAgent({
+              description: "Explore@default",
+              prompt: "inspect",
+              agent: "Explore",
+              cwd: context.session.cwd,
+            });
+            const result = await invocation.result;
+            await runtimeHost.emitStreamEvent({
+              type: "text_delta",
+              delta: result.output,
+            });
             return { messages: [] };
           },
           async close() {
@@ -142,50 +140,42 @@ describe("OpenHarnessHttpServer", () => {
         body: JSON.stringify({ id: "parent", cwd: process.cwd(), model: "m" }),
       });
       expect(response.status).toBe(201);
-      for (let i = 0; i < 20 && !host; i++) await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(host).toBeDefined();
-
-      const child = await host!.createChildSession({
-        parentId: "parent",
-        cwd: process.cwd(),
-        title: "Explore@default",
-        agent: "Explore",
+      const prompt = await fetch(`${baseUrl}/sessions/parent/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "start child" }),
       });
-      expect(server.store.getSession(child.id)?.parentId).toBe("parent");
-      expect(server.store.getSession(child.id)?.model).toBe("m");
-
-      const admitted = await host!.admitPrompt(child.id, "inspect");
-      expect(admitted.runId).toBeTruthy();
-      const task = taskBridge!.registerSessionTask({
-        description: "Explore@default",
-        cwd: process.cwd(),
-        sessionId: "parent",
-        childSessionId: child.id,
-        prompt: "inspect",
-        onInput: async () => {},
-        onStop: async () => {},
-      });
-      await taskBridge!.bindSessionTaskRun(task.id, admitted.runId!);
-      await expect(host!.awaitRun(child.id, admitted.runId!)).resolves.toMatchObject({
-        status: "completed",
-        output: "child output",
-      });
-      await taskBridge!.completeSessionTask(task.id, { status: "completed", output: "child output" });
-      expect(server.store.getSessionTask(task.id)).toMatchObject({
-        sessionId: "parent",
-        childSessionId: child.id,
-        runId: admitted.runId,
+      expect(prompt.status).toBe(202);
+      await waitForEvent(baseUrl, token, (event) =>
+        event.type === "session.run.updated" &&
+        (event.payload?.run as { sessionId?: string; status?: string } | undefined)?.sessionId === "parent" &&
+        (event.payload?.run as { status?: string } | undefined)?.status === "completed",
+      );
+      const child = server.store.listSessions({ includeArchived: true })
+        .find((session) => session.parentId === "parent");
+      expect(child).toMatchObject({ model: "m", parentId: "parent" });
+      const task = server.store.listSessionTasks("parent")[0];
+      expect(task).toMatchObject({
+        childSessionId: child!.id,
+        runId: expect.any(String),
         status: "completed",
       });
-      await host!.closeRuntime(child.id);
-      expect(closed).toContain(child.id);
+      await server.closeRuntime(child!.id);
+      expect(closed).toContain(child!.id);
 
-      const followUp = await host!.admitPrompt(child.id, "follow up");
-      await expect(host!.awaitRun(child.id, followUp.runId!)).resolves.toMatchObject({
-        status: "completed",
+      const followUp = await fetch(`${baseUrl}/sessions/${child!.id}/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "follow up" }),
       });
-      expect(created.filter((id) => id === child.id)).toHaveLength(2);
-      expect(server.store.getSession(child.id)?.status).not.toBe("archived");
+      expect(followUp.status).toBe(202);
+      await waitForEvent(baseUrl, token, (event) =>
+        event.type === "session.run.updated" &&
+        (event.payload?.run as { sessionId?: string; status?: string } | undefined)?.sessionId === child!.id &&
+        (event.payload?.run as { status?: string } | undefined)?.status === "completed",
+      );
+      expect(created.filter((id) => id === child!.id)).toHaveLength(2);
+      expect(server.store.getSession(child!.id)?.status).not.toBe("archived");
     }, { runtimeFactory });
   });
 
@@ -290,12 +280,12 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime() {
         return {
-          async runPrompt(_input, hooks) {
-            await hooks.onStreamEvent({
+          async runPrompt(_input, host) {
+            await host.emitStreamEvent({
               type: "tool_use_start",
               toolUse: { type: "tool_use", id: "tool-1", name: "Read", input: { path: "README.md" } },
             });
-            await hooks.onStreamEvent({
+            await host.emitStreamEvent({
               type: "tool_use_end",
               toolUseId: "tool-1",
               result: { content: [{ type: "text", text: "ok" }] },
@@ -559,16 +549,19 @@ describe("OpenHarnessHttpServer", () => {
       const runtimeFactory: SessionRuntimeFactory = {
         async createRuntime() {
           return {
-            async runPrompt(input, hooks) {
+            async runPrompt(input, host) {
               if (input.session.id === "recover") {
-                const allowed = await hooks.askPermission({
+                const decision = await host.requestPermission({
                   toolName: "Write",
                   reason: "apply recovered change",
                   input: { path: "README.md" },
                 });
-                await hooks.onStreamEvent({ type: "text_delta", delta: allowed ? "recovered" : "denied" });
+                await host.emitStreamEvent({
+                  type: "text_delta",
+                  delta: decision.status === "approved" ? "recovered" : "denied",
+                });
               } else {
-                await hooks.onStreamEvent({ type: "text_delta", delta: "parallel completed" });
+                await host.emitStreamEvent({ type: "text_delta", delta: "parallel completed" });
               }
               return { messages: [] };
             },
@@ -1658,12 +1651,10 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("archives descendants after interrupting runs and closing runtimes", async () => {
-    let host: ChildSessionHost | undefined;
     let serverRef: OpenHarnessHttpServer | undefined;
     const lifecycle: string[] = [];
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime(context) {
-        host = context.childSessionHost;
         return {
           async runPrompt(input) {
             await new Promise<void>((resolve) => {
@@ -1688,24 +1679,41 @@ describe("OpenHarnessHttpServer", () => {
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({ id: "parent", cwd: process.cwd(), model: "m" }),
       });
-      for (let i = 0; i < 20 && !host; i++) await new Promise((resolve) => setTimeout(resolve, 10));
 
-      await host!.createChildSession({
-        id: "child",
-        parentId: "parent",
-        cwd: process.cwd(),
-        title: "child",
-        agent: "Explore",
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "child",
+          parentId: "parent",
+          cwd: process.cwd(),
+          model: "m",
+          title: "child",
+          agent: "Explore",
+        }),
       });
-      await host!.createChildSession({
-        id: "grandchild",
-        parentId: "child",
-        cwd: process.cwd(),
-        title: "grandchild",
-        agent: "Explore",
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "grandchild",
+          parentId: "child",
+          cwd: process.cwd(),
+          model: "m",
+          title: "grandchild",
+          agent: "Explore",
+        }),
       });
-      await host!.admitPrompt("child", "run child");
-      await host!.admitPrompt("grandchild", "run grandchild");
+      await fetch(`${baseUrl}/sessions/child/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "run child" }),
+      });
+      await fetch(`${baseUrl}/sessions/grandchild/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ content: "run grandchild" }),
+      });
       for (let i = 0; i < 50; i++) {
         const running = ["child", "grandchild"].every((id) =>
           server.store.listRuns(id).some((run) => run.status === "running")
@@ -2102,12 +2110,12 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime({ session }) {
         return {
-          async runPrompt(input, hooks) {
+          async runPrompt(input, host) {
             expect(input.session.id).toBe(session.id);
             expect(input.input.content).toBe("hello runtime");
             expect(input.history).toEqual([]);
             expect(input.parts).toEqual([]);
-            await hooks.onStreamEvent({ type: "text_delta", delta: "hello" });
+            await host.emitStreamEvent({ type: "text_delta", delta: "hello" });
             return {
               messages: [],
             };
@@ -2165,20 +2173,20 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime() {
         return {
-          async runPrompt(_input, hooks) {
-            await hooks.onStreamEvent({ type: "text_delta", delta: "checking" });
-            await hooks.onStreamEvent({
+          async runPrompt(_input, host) {
+            await host.emitStreamEvent({ type: "text_delta", delta: "checking" });
+            await host.emitStreamEvent({
               type: "tool_use_start",
               toolUse: { type: "tool_use", id: "tool-1", name: "Read", input: { path: "README.md" } },
             });
-            await hooks.onStreamEvent({ type: "complete", stopReason: "tool_use" });
-            await hooks.onStreamEvent({
+            await host.emitStreamEvent({ type: "complete", stopReason: "tool_use" });
+            await host.emitStreamEvent({
               type: "tool_use_end",
               toolUseId: "tool-1",
               result: { content: [{ type: "text", text: "file contents" }] },
             });
-            await hooks.onStreamEvent({ type: "text_delta", delta: "finished" });
-            await hooks.onStreamEvent({ type: "complete", stopReason: "end_turn" });
+            await host.emitStreamEvent({ type: "text_delta", delta: "finished" });
+            await host.emitStreamEvent({ type: "complete", stopReason: "end_turn" });
             return { messages: [] };
           },
           async close() {},
@@ -2288,15 +2296,15 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime() {
         return {
-          async runPrompt(input, hooks) {
-            const allowed = await hooks.askPermission({
+          async runPrompt(input, host) {
+            const decision = await host.requestPermission({
               toolName: "Write",
               reason: "needs edit",
               input: { path: "README.md" },
             });
-            await hooks.onStreamEvent({
+            await host.emitStreamEvent({
               type: "text_delta",
-              delta: allowed ? "permission granted" : "permission denied",
+              delta: decision.status === "approved" ? "permission granted" : "permission denied",
             });
             return { messages: [] };
           },

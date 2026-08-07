@@ -25,15 +25,6 @@ function createContext(createRuntime = vi.fn(async () => ({
       listSessions: vi.fn(() => [session]),
     },
     runtimeFactory: { createRuntime },
-    childSessionHost: {
-      createChildSession: vi.fn(),
-      admitPrompt: vi.fn(),
-      awaitRun: vi.fn(),
-      interrupt: vi.fn(),
-      closeRuntime: vi.fn(),
-      archive: vi.fn(),
-    },
-    sessionTaskBridgeManager: { createBridge: vi.fn(() => ({} as any)) },
   };
 }
 
@@ -51,7 +42,6 @@ describe("SessionRuntimePool", () => {
 
     expect(first).toBe(second);
     expect(createRuntime).toHaveBeenCalledOnce();
-    expect(context.sessionTaskBridgeManager.createBridge).toHaveBeenCalledOnce();
     expect(pool.size).toBe(1);
 
     await pool.close(session.id);

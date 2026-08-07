@@ -1,5 +1,7 @@
 import type { PermissionRequestRecord, PermissionStatus, SessionStore } from "@openharness/services";
 import type { StructuredLogger } from "./observability.js";
+import { PermissionController } from "./permission-controller.js";
+import type { PermissionDecision } from "./runtime-host.js";
 
 export type PermissionReplyStatus = Extract<PermissionStatus, "approved" | "denied" | "expired">;
 export type PermissionDecisionScope = "once" | "session";
@@ -42,8 +44,6 @@ export interface StorePermissionBrokerOptions {
   logger?: StructuredLogger;
 }
 
-type Waiter = (request: PermissionRequestRecord) => void;
-
 /**
  * 基于 SessionStore 的权限中介：ask 持久化请求并等待 reply，
  * 支持 session 级审批复用与 parent/child session 权限上溯；变更时触发事件广播。
@@ -52,7 +52,7 @@ export class StorePermissionBroker implements PermissionBroker {
   private readonly store: SessionStore;
   private readonly onChange?: (previousEventSeq: number) => void;
   private readonly logger?: StructuredLogger;
-  private readonly waiters = new Map<string, Set<Waiter>>();
+  private readonly controller = new PermissionController();
 
   constructor(options: StorePermissionBrokerOptions) {
     this.store = options.store;
@@ -108,34 +108,12 @@ export class StorePermissionBroker implements PermissionBroker {
       return replied.status === "approved";
     }
 
-    if (input.signal?.aborted) {
-      this.expire(request.id, "Run interrupted before permission reply");
-      return false;
-    }
-
-    return await new Promise<boolean>((resolve) => {
-      const waiter: Waiter = (replied) => {
-        cleanup();
-        resolve(replied.status === "approved");
-      };
-      const abort = () => {
-        cleanup();
-        this.expire(request.id, "Run interrupted while waiting for permission");
-        resolve(false);
-      };
-      const cleanup = () => {
-        const waiters = this.waiters.get(request.id);
-        waiters?.delete(waiter);
-        if (waiters?.size === 0) this.waiters.delete(request.id);
-        input.signal?.removeEventListener("abort", abort);
-      };
-
-      const waiters = this.waiters.get(request.id) ?? new Set<Waiter>();
-      waiters.add(waiter);
-      this.waiters.set(request.id, waiters);
-      input.signal?.addEventListener("abort", abort, { once: true });
-      if (input.signal?.aborted) abort();
+    const decision = await this.controller.wait({
+      requestId: request.id,
+      signal: input.signal,
+      expire: (reason) => this.expire(request.id, reason),
     });
+    return decision.status === "approved";
   }
 
   reply(input: PermissionReplyInput): PermissionRequestRecord {
@@ -151,7 +129,7 @@ export class StorePermissionBroker implements PermissionBroker {
       clientId: input.clientId,
     });
     this.notify(previousEventSeq);
-    this.resolveWaiters(replied);
+    this.controller.resolve(replied.id, this.decisionFromRequest(replied));
     this.logger?.({
       level: "info",
       event: "permission.replied",
@@ -209,7 +187,7 @@ export class StorePermissionBroker implements PermissionBroker {
       decision: reason,
     });
     this.notify(previousEventSeq);
-    this.resolveWaiters(expired);
+    this.controller.resolve(expired.id, this.decisionFromRequest(expired, reason));
     this.logger?.({
       level: "warn",
       event: "permission.expired",
@@ -222,11 +200,17 @@ export class StorePermissionBroker implements PermissionBroker {
     });
   }
 
-  private resolveWaiters(request: PermissionRequestRecord): void {
-    const waiters = this.waiters.get(request.id);
-    if (!waiters) return;
-    this.waiters.delete(request.id);
-    for (const waiter of waiters) waiter(request);
+  private decisionFromRequest(request: PermissionRequestRecord, reason?: string): PermissionDecision {
+    if (request.status === "approved" || request.status === "denied") {
+      return {
+        status: request.status,
+        ...(request.decision === "once" || request.decision === "session" ? { decision: request.decision } : {}),
+      };
+    }
+    return {
+      status: "expired",
+      reason: reason ?? (typeof request.decision === "string" ? request.decision : undefined),
+    };
   }
 
   private traceIdFromRequest(request: PermissionRequestRecord): string | undefined {

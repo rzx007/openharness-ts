@@ -206,13 +206,13 @@ export class OpenHarnessHttpServer {
     this.runtimePool = new SessionRuntimePool({
       store: this.store,
       runtimeFactory: this.runtimeFactory,
-      childSessionHost: this.childSessionHost,
-      sessionTaskBridgeManager: this.sessionTaskBridgeManager,
     });
     // 单次 run 执行：runtime.runPrompt + 流式落库 + 权限注入
     const runExecutor = new SessionRunExecutor({
       store: this.store,
       runtimePool: this.runtimePool,
+      childSessionHost: this.childSessionHost,
+      sessionTaskBridgeManager: this.sessionTaskBridgeManager,
       permissionBroker: this.permissionBroker,
       runRenderer: this.runRenderer,
       events: this.sessionEvents,
