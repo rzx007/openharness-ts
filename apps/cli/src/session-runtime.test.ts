@@ -5,7 +5,7 @@ describe("CliSessionRuntime cancellation", () => {
   it("passes the run signal to QueryEngine.submitMessage", async () => {
     const Runtime = (sessionRuntimeModule as unknown as {
       CliSessionRuntime?: new (...args: any[]) => {
-        runPrompt(input: any, hooks: any): Promise<unknown>;
+        runPrompt(input: any, host: any): Promise<unknown>;
       };
     }).CliSessionRuntime;
     expect(Runtime).toBeTypeOf("function");
@@ -15,14 +15,12 @@ describe("CliSessionRuntime cancellation", () => {
     const queryEngine = {
       submitMessage,
       setModel: vi.fn(),
-      setRuntimeEventSink: vi.fn(),
     };
     const runtime = new Runtime(
       { queryEngine },
       { getConnections: () => [] },
       process.cwd(),
       () => ({}),
-      vi.fn(),
     );
     const controller = new AbortController();
 
@@ -35,22 +33,29 @@ describe("CliSessionRuntime cancellation", () => {
         drainSteeredInputs: () => [],
       },
       {
-        askPermission: vi.fn(),
-        onEvent: vi.fn(),
-        onStreamEvent: vi.fn(),
+        requestPermission: vi.fn(),
+        emitEvent: vi.fn(),
+        emitStreamEvent: vi.fn(),
       },
     );
 
     expect(submitMessage).toHaveBeenCalledWith(
       "hello",
-      expect.objectContaining({ signal: controller.signal, pullFollowUps: expect.any(Function) }),
+      expect.objectContaining({
+        signal: controller.signal,
+        pullFollowUps: expect.any(Function),
+        runtimeHost: expect.objectContaining({
+          requestPermission: expect.any(Function),
+          emitEvent: expect.any(Function),
+        }),
+      }),
     );
   });
 
   it("drains steered inputs when wakeCount increases at turn boundaries", async () => {
     const Runtime = (sessionRuntimeModule as unknown as {
       CliSessionRuntime?: new (...args: any[]) => {
-        runPrompt(input: any, hooks: any): Promise<unknown>;
+        runPrompt(input: any, host: any): Promise<unknown>;
       };
     }).CliSessionRuntime;
     expect(Runtime).toBeTypeOf("function");
@@ -63,14 +68,12 @@ describe("CliSessionRuntime cancellation", () => {
     const queryEngine = {
       submitMessage,
       setModel: vi.fn(),
-      setRuntimeEventSink: vi.fn(),
     };
     const runtime = new Runtime(
       { queryEngine },
       { getConnections: () => [] },
       process.cwd(),
       () => ({}),
-      vi.fn(),
     );
 
     let wake = 0;
@@ -84,9 +87,9 @@ describe("CliSessionRuntime cancellation", () => {
         drainSteeredInputs,
       },
       {
-        askPermission: vi.fn(),
-        onEvent: vi.fn(),
-        onStreamEvent: vi.fn(),
+        requestPermission: vi.fn(),
+        emitEvent: vi.fn(),
+        emitStreamEvent: vi.fn(),
       },
     );
 

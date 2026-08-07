@@ -59,10 +59,10 @@ describe("runPrintSession daemon integration", () => {
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime() {
         return {
-          async runPrompt(input, hooks) {
+          async runPrompt(input, host) {
             expect(input.input.content).toBe("hello daemon");
             await new Promise((resolve) => setTimeout(resolve, 20));
-            await hooks.onStreamEvent({ type: "text_delta", delta: "hello from real daemon" });
+            await host.emitStreamEvent({ type: "text_delta", delta: "hello from real daemon" });
             return { messages: [] };
           },
           async close() {},
@@ -98,14 +98,15 @@ describe("runPrintSession daemon integration", () => {
     const runtimeFactory: SessionRuntimeFactory = {
       async createRuntime() {
         return {
-          async runPrompt(_input, hooks) {
-            const allowed = await hooks.askPermission({
+          async runPrompt(_input, host) {
+            const decision = await host.requestPermission({
               toolName: "Write",
               reason: "edit requested by integration test",
               input: { path: "README.md" },
             });
+            const allowed = decision.status === "approved";
             decisions.push(allowed);
-            await hooks.onStreamEvent({
+            await host.emitStreamEvent({
               type: "text_delta",
               delta: allowed ? "permission approved" : "permission denied",
             });

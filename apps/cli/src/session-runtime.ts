@@ -5,9 +5,9 @@ import { getProjectMemoryDir, type Settings } from "@openharness/core";
 import type {
   SessionCompactResult,
   SessionRememberResult,
+  RuntimeHostPort,
   SessionRuntime,
   SessionRuntimeFactory,
-  SessionRuntimeHooks,
   SessionRuntimeRunInput,
   SessionRuntimeRunResult,
   SessionUsageSnapshot,
@@ -178,8 +178,7 @@ export interface CliSessionRuntimeFactoryOptions {
 export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactoryOptions): SessionRuntimeFactory {
   const getSettings = options.getSettings ?? (() => options.settings);
   return {
-    async createRuntime({ session, history, parts, childSessionHost, sessionTaskBridge }) {
-      let permissionPrompt: ((toolName: string, reason?: string, input?: Record<string, unknown>) => Promise<boolean>) | undefined;
+    async createRuntime({ session, history, parts }) {
       const settings = getSettings();
       const skillRegistry = new SkillRegistry();
       const pluginContributions = await loadSkillsThreeSources(skillRegistry, session.cwd, settings);
@@ -208,14 +207,8 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
             : undefined,
           effort: typeof session.metadata.effort === "string" ? session.metadata.effort : undefined,
         },
-        permissionPrompt: async (toolName, reason, input) => {
-          if (!permissionPrompt) return false;
-          return await permissionPrompt(toolName, reason, input);
-        },
         skillRegistry,
         credentialStorage: new CredentialStorage(),
-        childSessionHost,
-        sessionTaskBridge,
       });
       registerPluginHooks(bundle.hookExecutor, pluginContributions.plugins);
       await registerPluginTools(bundle.toolRegistry, pluginContributions.plugins);
@@ -236,9 +229,6 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
         mcpManager,
         session.cwd,
         getSettings,
-        (prompt) => {
-          permissionPrompt = prompt;
-        },
       );
     },
   };
@@ -250,38 +240,28 @@ export class CliSessionRuntime implements SessionRuntime {
     private readonly mcpManager: McpClientManager,
     private readonly cwd: string,
     private readonly getSettings: () => Settings,
-    private readonly setPermissionPrompt: (
-      prompt: ((toolName: string, reason?: string, input?: Record<string, unknown>) => Promise<boolean>) | undefined,
-    ) => void,
   ) {}
 
-  async runPrompt(input: SessionRuntimeRunInput, hooks: SessionRuntimeHooks): Promise<SessionRuntimeRunResult> {
-    this.setPermissionPrompt((toolName, reason, toolInput) =>
-      hooks.askPermission({ toolName, reason, input: toolInput }));
+  async runPrompt(input: SessionRuntimeRunInput, host: RuntimeHostPort): Promise<SessionRuntimeRunResult> {
     if (input.session.model) this.bundle.queryEngine.setModel(input.session.model);
-    this.bundle.queryEngine.setRuntimeEventSink((event) => hooks.onEvent(event));
-    try {
-      let lastWake = 0;
-      for await (const event of this.bundle.queryEngine.submitMessage(
-        input.input.content,
-        {
-          signal: input.signal,
-          pullFollowUps: () => {
-            if (input.wakeCount() <= lastWake) return [];
-            lastWake = input.wakeCount();
-            return input.drainSteeredInputs().map((row) => row.content);
-          },
+    let lastWake = 0;
+    for await (const event of this.bundle.queryEngine.submitMessage(
+      input.input.content,
+      {
+        signal: input.signal,
+        pullFollowUps: () => {
+          if (input.wakeCount() <= lastWake) return [];
+          lastWake = input.wakeCount();
+          return input.drainSteeredInputs().map((row) => row.content);
         },
-      )) {
-        if (input.signal.aborted) throw new Error("Run interrupted");
-        await hooks.onStreamEvent(event);
-      }
+        runtimeHost: host,
+      },
+    )) {
       if (input.signal.aborted) throw new Error("Run interrupted");
-      return { messages: [] };
-    } finally {
-      this.bundle.queryEngine.setRuntimeEventSink(undefined);
-      this.setPermissionPrompt(undefined);
+      await host.emitStreamEvent(event);
     }
+    if (input.signal.aborted) throw new Error("Run interrupted");
+    return { messages: [] };
   }
 
   inspect() {

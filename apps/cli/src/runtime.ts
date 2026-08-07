@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Settings, StreamingMessageClient } from "@openharness/core";
-import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, getConfigDir, resolveGitRepository } from "@openharness/core";
+import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, resolveGitRepository } from "@openharness/core";
 import { AnthropicClient, CodexSubscriptionClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { CredentialStorage, loadCodexCredential } from "@openharness/auth";
@@ -13,25 +13,10 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { SandboxUnavailableError, startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
-import {
-  ChildSessionBackend,
-  getBackendRegistry,
-  WorktreeManager,
-  registerTeammateInTeamFile,
-  type ChildSessionBackendOptions,
-  type GitRunner,
-} from "@openharness/swarm";
-import { getTaskManager } from "@openharness/services";
-import type { ChildSessionHost, SessionTaskBridge } from "@openharness/server";
+import type { GitRunner } from "@openharness/swarm";
 
 const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
-
-export type PermissionPromptFn = (
-  toolName: string,
-  reason?: string,
-  input?: Record<string, unknown>,
-) => Promise<boolean>;
 
 export interface BootstrapOptions {
   settings: Settings;
@@ -55,13 +40,10 @@ export interface BootstrapOptions {
     /** 显式追加自动放行的工具名(与其他来源合并;denied 类检查仍优先)。 */
     autoApproveTools?: string[];
   };
-  permissionPrompt?: PermissionPromptFn;
   skillRegistry?: SkillRegistry;
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
-  childSessionHost?: ChildSessionHost;
-  sessionTaskBridge?: SessionTaskBridge;
 }
 
 /**
@@ -171,7 +153,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     cwd,
     sessionId: options.sessionId,
     settings,
-    permissionPrompt: options.permissionPrompt,
     skillRegistry: options.skillRegistry,
   };
 
@@ -184,14 +165,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
   );
 
   // Daemon child-session 主链路：只有具备 child host 的 runtime 才注册 Agent backend。
-  if (options.childSessionHost && options.sessionId) {
-    await registerChildSessionBackend({
-      cwd,
-      sessionId: options.sessionId,
-      host: options.childSessionHost,
-      taskBridge: options.sessionTaskBridge,
-    });
-  }
   const bundle = new RuntimeBuilder()
     .setApiClient(apiClient)
     .setToolRegistry(toolRegistry)
@@ -202,68 +175,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
 
   await attachSandboxRuntime(bundle, cwd, options.sandboxReporter, options.sessionId);
   return bundle;
-}
-
-export async function registerChildSessionBackend(options: {
-  cwd: string;
-  sessionId: string;
-  host: ChildSessionHost;
-  taskBridge?: SessionTaskBridge;
-}): Promise<void> {
-  const { cwd, sessionId, host } = options;
-  const runtimeScope = { cwd, sessionId };
-  const backendRegistry = getBackendRegistry(runtimeScope);
-
-  const taskManager = getTaskManager(runtimeScope);
-  const repoRoot = await resolveRepoRoot(cwd);
-  const worktreeManager = new WorktreeManager({
-    runGit: nodeRunGit,
-    repoRoot,
-    baseDir: computeWorktreeBaseDir(repoRoot, getConfigDir()),
-  });
-  const childOptions: ChildSessionBackendOptions = {
-    host,
-    taskBridge: options.taskBridge ?? {
-      registerSessionTask: (input) => taskManager.registerSessionTask(input),
-      completeSessionTask: (id, input) => taskManager.completeSessionTask(id, {
-        ...input,
-        status: input.status === "interrupted" ? "stopped" : input.status,
-      }),
-      bindSessionTaskRun: async () => {},
-      writeToSessionTask: (id, data) => taskManager.writeToTask(id, data),
-    },
-    worktreeManager,
-    registerTeammate: (cfg, res) => {
-        registerTeammateInTeamFile(cfg.team, {
-          agentId: res.agentId,
-          name: cfg.name,
-          backendType: res.backendType,
-          joinedAt: Date.now() / 1000,
-          agentType: null,
-          model: cfg.model ?? null,
-          prompt: cfg.prompt,
-          color: null,
-          planModeRequired: false,
-          sessionId: res.sessionId ?? null,
-          subscriptions: [],
-          isActive: true,
-          mode: null,
-          tmuxPaneId: "",
-          cwd: cfg.cwd,
-          worktreePath: res.worktree?.path ?? null,
-          permissions: cfg.permissions ?? [],
-          status: "active",
-        });
-      },
-  };
-  if (backendRegistry.list().includes("in_process")) {
-    const existing = backendRegistry.getExecutor("in_process");
-    if (existing instanceof ChildSessionBackend) {
-      existing.reconfigure(childOptions);
-      return;
-    }
-  }
-  backendRegistry.register("in_process", new ChildSessionBackend(childOptions));
 }
 
 async function attachSandboxRuntime(
