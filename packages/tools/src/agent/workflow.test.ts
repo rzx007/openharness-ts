@@ -192,7 +192,7 @@ describe("workflowTool", () => {
           runId: "sink-run",
           tasks: [{ id: "research", prompt: "research" }],
         },
-        { cwd, runtimeEventSink: (event) => emitted.push(event) },
+        { cwd, runtimeHost: { emitEvent: (event) => emitted.push(event) } },
       );
 
       expect(result.isError).toBeUndefined();

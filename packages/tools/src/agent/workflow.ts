@@ -303,6 +303,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           team: asOptionalString(input.team),
           timeoutMs: runnerTimeoutMs,
           permissionMode: parsePermissionMode(input.permissionMode),
+          runtimeHost: context.runtimeHost,
         });
         const persist = input.persist !== false;
         const runId = asOptionalString(input.runId) ?? (action === "run" && persist && options.run === undefined ? createWorkflowRunId() : undefined);
@@ -491,11 +492,11 @@ async function workflowResume(
 }
 
 function emitWorkflowRuntimeEvent(
-  context: { runtimeEventSink?: (event: { type: string; payload?: Record<string, unknown> }) => void | Promise<void> },
+  context: { runtimeHost?: { emitEvent(event: { type: string; payload?: Record<string, unknown> }): void | Promise<void> } },
   event: WorkflowRunEvent,
 ): void {
   try {
-    const emitted = context.runtimeEventSink?.({
+    const emitted = context.runtimeHost?.emitEvent({
       type: `workflow.${event.type}`,
       payload: { event },
     });

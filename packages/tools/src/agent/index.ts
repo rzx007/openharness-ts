@@ -1,13 +1,15 @@
 import type { ToolDefinition } from "@openharness/core";
-import type { SwarmBackend } from "@openharness/swarm";
 
 type AgentExecutionMode = "in_process_teammate" | "remote_agent";
+
+const childInvocationByTaskId = new Map<string, string>();
+const childInvocationByAgentId = new Map<string, string>();
 
 export const agentTool: ToolDefinition = {
   name: "Agent",
   description:
     "Spawn an in-process teammate task. Returns a task_id. " +
-    "Use TaskWait with that task_id to block until the task finishes and retrieve its result — " +
+    "Use TaskWait with that task_id to block until the task finishes and retrieve its result - " +
     "do not poll with Sleep.",
   inputSchema: {
     type: "object",
@@ -20,7 +22,9 @@ export const agentTool: ToolDefinition = {
       mode: {
         type: "string",
         enum: ["in_process_teammate", "remote_agent"],
-        description: "Agent execution mode. in_process_teammate uses the daemon child-session backend; remote_agent is reserved and currently unsupported.",
+        description:
+          "Agent execution mode. in_process_teammate uses the runtime host child-agent port; " +
+          "remote_agent is reserved and currently unsupported.",
         default: "in_process_teammate",
       },
       permissionMode: {
@@ -28,7 +32,7 @@ export const agentTool: ToolDefinition = {
         enum: ["default", "plan", "full_auto"],
         description:
           "Permission mode for the spawned agent. Defaults to 'default': write operations are " +
-          "escalated to the leader for approval via the swarm permission file flow.",
+          "escalated to the leader for approval via the runtime host.",
       },
       isolate: {
         type: "boolean",
@@ -40,11 +44,8 @@ export const agentTool: ToolDefinition = {
     required: ["description", "prompt"],
   },
   async execute(input, context) {
-    const { getBackendRegistry } = await import("@openharness/swarm");
-    const { getAgentDefinition } = await import("@openharness/coordinator");
-    const { getTeamRegistry } = await import("@openharness/coordinator");
+    const { getAgentDefinition, getTeamRegistry } = await import("@openharness/coordinator");
 
-    // 解析并校验执行模式：当前仅支持 in-process teammate 后端。
     const mode = parseAgentExecutionMode(input.mode);
     if (!mode) {
       return { content: [{ type: "text", text: "Invalid mode. Use in_process_teammate or remote_agent." }], isError: true };
@@ -53,38 +54,29 @@ export const agentTool: ToolDefinition = {
       return { content: [{ type: "text", text: "remote_agent mode is not implemented yet." }], isError: true };
     }
 
-    // 权限模式必须落在允许的三种枚举值中，避免传入无效配置。
     const permissionMode = input.permissionMode as string | undefined;
     if (permissionMode !== undefined && !["default", "plan", "full_auto"].includes(permissionMode)) {
       return { content: [{ type: "text", text: "Invalid permissionMode. Use default, plan, or full_auto." }], isError: true };
     }
 
-    // 根据 subagentType 读取预定义的 agent 配置，便于复用模型、工具约束和权限策略。
+    if (!context.runtimeHost) {
+      return { content: [{ type: "text", text: "No runtime host registered for Agent tool" }], isError: true };
+    }
+
     const subagentType = input.subagentType as string | undefined;
     const agentDef = subagentType ? getAgentDefinition(subagentType) : undefined;
     const agentName = subagentType ?? "agent";
     const team = (input.team as string) ?? "default";
-
-    // 优先使用当前 session 绑定的 registry；若没有则回退到全局 registry。
-    const executor = pickSwarmExecutor(
-      context.sessionId
-        ? [getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId }), getBackendRegistry()]
-        : [getBackendRegistry(context.cwd), getBackendRegistry()],
-      mode,
-    );
-    if (!executor) {
-      return { content: [{ type: "text", text: `No swarm backend registered for mode ${mode}` }], isError: true };
-    }
+    const agentId = `${agentName}@${team}`;
 
     try {
-      // 预先生成稳定的 worker sessionId，保证子任务在懒加载重启后仍能恢复上下文。
       const workerSessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const result = await executor.spawn({
-        name: agentName,
-        team,
+      const invocation = await context.runtimeHost.spawnChildAgent({
+        description: input.description as string,
         prompt: input.prompt as string,
+        agent: agentName,
+        team,
         cwd: context.cwd,
-        parentSessionId: context.sessionId ?? "main",
         sessionId: workerSessionId,
         model: (input.model as string) ?? agentDef?.model,
         systemPrompt: agentDef?.systemPrompt,
@@ -95,22 +87,30 @@ export const agentTool: ToolDefinition = {
         maxTurns: agentDef?.maxTurns,
         effort: agentDef?.effort != null ? String(agentDef.effort) : undefined,
       });
-      if (!result.success) {
-        return { content: [{ type: "text", text: result.error ?? "Failed to spawn agent" }], isError: true };
+
+      const taskId = invocation.taskId ?? invocation.id;
+      childInvocationByTaskId.set(taskId, invocation.id);
+      childInvocationByAgentId.set(agentId, invocation.id);
+      if (invocation.taskId && invocation.taskId !== invocation.id) {
+        childInvocationByTaskId.set(invocation.id, invocation.id);
       }
 
-      // 如用户传入了 team，则把该 agent 注册到对应 team 中，方便后续查询与协作。
       if (input.team) {
-        try { getTeamRegistry().addAgent(input.team as string, result.taskId); } catch {}
+        try {
+          getTeamRegistry().addAgent(input.team as string, taskId);
+        } catch {
+          // Team registration is best-effort; spawning already succeeded.
+        }
       }
-      let text = `Spawned agent ${result.agentId} (task_id=${result.taskId}, backend=${result.backendType})`;
-      if (result.sessionId) text += `\nsession_id=${result.sessionId}`;
-      if (result.worktree) {
-        text += `\nIsolated: changes land on branch \`${result.worktree.branch}\`, worktree path \`${result.worktree.path}\` — review/merge it yourself.`;
-        text += `\nWhen done reviewing, clean it up with \`git worktree remove ${result.worktree.path}\` (or \`git worktree remove --force ${result.worktree.path}\` to discard uncommitted changes).`;
+
+      let text = `Spawned agent ${agentId} (task_id=${taskId}, backend=runtime_host)`;
+      if (invocation.sessionId) text += `\nsession_id=${invocation.sessionId}`;
+      if (invocation.worktree) {
+        text += `\nIsolated: changes land on branch \`${invocation.worktree.branch}\`, worktree path \`${invocation.worktree.path}\` - review/merge it yourself.`;
+        text += `\nWhen done reviewing, clean it up with \`git worktree remove ${invocation.worktree.path}\` (or \`git worktree remove --force ${invocation.worktree.path}\` to discard uncommitted changes).`;
       }
-      if (result.notice) {
-        text += `\nNotice: ${result.notice}`;
+      if (invocation.notice) {
+        text += `\nNotice: ${invocation.notice}`;
       }
       return { content: [{ type: "text", text }] };
     } catch (err) {
@@ -131,26 +131,25 @@ export const sendMessageTool: ToolDefinition = {
     required: ["taskId", "message"],
   },
   async execute(input, context) {
-    const { getTaskManager } = await import("@openharness/services");
-    const { getBackendRegistry } = await import("@openharness/swarm");
     const taskId = input.taskId as string;
     const message = input.message as string;
 
     if (taskId.includes("@")) {
-      const executor = pickSwarmExecutor(
-        context.sessionId
-          ? [getBackendRegistry({ cwd: context.cwd, sessionId: context.sessionId }), getBackendRegistry()]
-          : [getBackendRegistry(context.cwd), getBackendRegistry()],
-        "in_process_teammate",
-      );
-      if (!executor) {
-        return { content: [{ type: "text", text: "No swarm backend registered" }], isError: true };
+      const invocationId = childInvocationByAgentId.get(taskId);
+      if (!context.runtimeHost || !invocationId) {
+        return { content: [{ type: "text", text: `No active child invocation for agent ${taskId}` }], isError: true };
       }
-      await executor.sendMessage(taskId, { text: message, fromAgent: "coordinator" });
+      await context.runtimeHost.sendChildInput(invocationId, { content: message });
       return { content: [{ type: "text", text: `Sent message to agent ${taskId}` }] };
     }
 
     try {
+      const invocationId = childInvocationByTaskId.get(taskId);
+      if (context.runtimeHost && invocationId) {
+        await context.runtimeHost.sendChildInput(invocationId, { content: message });
+        return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
+      }
+      const { getTaskManager } = await import("@openharness/services");
       await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).writeToTask(taskId, message);
       return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
     } catch (err) {
@@ -158,25 +157,6 @@ export const sendMessageTool: ToolDefinition = {
     }
   },
 };
-
-type BackendRegistryLike = {
-  getExecutor(name?: string): SwarmBackend;
-};
-
-function pickSwarmExecutor(
-  registries: BackendRegistryLike[],
-  mode: AgentExecutionMode,
-): SwarmBackend | undefined {
-  const backendName = mode === "in_process_teammate" ? "in_process" : "remote";
-  for (const registry of registries) {
-    try {
-      return registry.getExecutor(backendName);
-    } catch {
-      continue;
-    }
-  }
-  return undefined;
-}
 
 function parseAgentExecutionMode(value: unknown): AgentExecutionMode | undefined {
   if (value === undefined) return "in_process_teammate";

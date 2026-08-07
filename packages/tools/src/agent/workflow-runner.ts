@@ -8,6 +8,7 @@ import type {
 } from "@openharness/coordinator";
 import { execFile } from "node:child_process";
 import type { AwaitTaskResult } from "@openharness/services";
+import type { ToolRuntimeHost } from "@openharness/core";
 import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
 import { promisify } from "node:util";
 
@@ -21,6 +22,7 @@ export interface AgentWorkflowRunnerOptions {
   timeoutMs?: number;
   permissionMode?: "default" | "plan" | "full_auto";
   fromAgent?: string;
+  runtimeHost?: ToolRuntimeHost;
   spawnWorker?: (config: TeammateSpawnConfig) => Promise<SpawnResult>;
   awaitTask?: (taskId: string, options?: { timeoutMs?: number }) => Promise<AwaitTaskResult>;
   stopTask?: (taskId: string) => Promise<unknown>;
@@ -46,7 +48,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       : await defaultGetAgentDefinition(subagentType);
     const team = task.team ?? options.team ?? "default";
     const workerSessionId = createWorkerSessionId(task.id, attempt);
-    const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, options.sessionId, config, options.mode));
+    const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, config, options.mode, options.runtimeHost));
     const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions));
     const stopTask = options.stopTask ?? ((taskId) => defaultStopTask(options.cwd, options.sessionId, taskId));
 
@@ -382,11 +384,10 @@ function normalizeDiffSummary(diff: WorkflowDiffSummary): WorkflowDiffSummary {
 
 async function defaultSpawnWorker(
   cwd: string,
-  sessionId: string | undefined,
   config: TeammateSpawnConfig,
   mode: "remote_agent" | "in_process_teammate" = "in_process_teammate",
+  runtimeHost?: ToolRuntimeHost,
 ): Promise<SpawnResult> {
-  const { getBackendRegistry } = await import("@openharness/swarm");
   const agentId = `${config.name}@${config.team}`;
   if (mode === "remote_agent") {
     return {
@@ -397,24 +398,39 @@ async function defaultSpawnWorker(
       error: "remote_agent mode is not implemented yet.",
     };
   }
-  const registries = sessionId
-    ? [getBackendRegistry({ cwd, sessionId }), getBackendRegistry()]
-    : [getBackendRegistry(cwd), getBackendRegistry()];
-  for (const registry of registries) {
-    let executor;
-    try {
-      executor = registry.getExecutor("in_process");
-    } catch {
-      continue;
-    }
-    return await executor.spawn(config);
+  if (!runtimeHost) {
+    return {
+      success: false,
+      agentId,
+      taskId: "",
+      backendType: "runtime_host",
+      error: "No runtime host registered for workflow worker",
+    };
   }
+  const invocation = await runtimeHost.spawnChildAgent({
+    description: agentId,
+    prompt: config.prompt,
+    agent: config.name,
+    team: config.team,
+    cwd,
+    sessionId: config.sessionId,
+    model: config.model,
+    systemPrompt: config.systemPrompt,
+    permissionMode: config.permissionMode,
+    isolate: config.isolate,
+    allowedTools: config.allowedTools,
+    disallowedTools: config.disallowedTools,
+    maxTurns: config.maxTurns,
+    effort: config.effort,
+  });
   return {
-    success: false,
+    success: true,
     agentId,
-    taskId: "",
-    backendType: "in_process",
-    error: "No swarm backend registered for mode in_process_teammate",
+    taskId: invocation.taskId ?? invocation.id,
+    sessionId: invocation.sessionId,
+    backendType: "runtime_host",
+    worktree: invocation.worktree,
+    notice: invocation.notice,
   };
 }
 

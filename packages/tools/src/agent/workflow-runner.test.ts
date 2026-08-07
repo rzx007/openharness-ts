@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runWorkflow, type WorkflowTaskRunResult } from "@openharness/coordinator";
 import type { AwaitTaskResult } from "@openharness/services";
-import { getBackendRegistry, type SpawnResult, type SwarmBackend, type TeammateSpawnConfig } from "@openharness/swarm";
+import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
 import { createAgentWorkflowRunner } from "./workflow-runner.js";
 
 function completedDependency(taskId: string, result: string): WorkflowTaskRunResult {
@@ -389,42 +389,23 @@ describe("createAgentWorkflowRunner", () => {
     });
   });
 
-  it("defaults to the in-process teammate backend", async () => {
-    const cwd = `/repo-mode-${Math.random().toString(36).slice(2)}`;
-    const inProcessCalls: TeammateSpawnConfig[] = [];
-    const subprocessCalls: TeammateSpawnConfig[] = [];
-    const inProcess: SwarmBackend = {
-      async spawn(config) {
-        inProcessCalls.push(config);
-        return {
-          success: true,
-          agentId: `${config.name}@${config.team}`,
-          taskId: "task_in_process",
-          backendType: "in_process",
-        };
-      },
-      async sendMessage() {},
-      async terminate() {},
+  it("defaults to the runtime host child-agent port", async () => {
+    const runtimeHost = {
+      emitEvent: vi.fn(),
+      requestPermission: vi.fn(async () => ({ status: "approved" as const })),
+      spawnChildAgent: vi.fn(async () => ({
+        id: "invocation-1",
+        taskId: "task_runtime_host",
+        sessionId: "child-1",
+        result: Promise.resolve({ status: "completed" as const, output: "ok" }),
+      })),
+      sendChildInput: vi.fn(async () => {}),
+      interruptChildAgent: vi.fn(async () => {}),
+      awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "ok" })),
     };
-    const subprocess: SwarmBackend = {
-      async spawn(config) {
-        subprocessCalls.push(config);
-        return {
-          success: true,
-          agentId: `${config.name}@${config.team}`,
-          taskId: "task_subprocess",
-          backendType: "subprocess",
-        };
-      },
-      async sendMessage() {},
-      async terminate() {},
-    };
-    const registry = getBackendRegistry(cwd);
-    registry.register("in_process", inProcess);
-    registry.register("subprocess", subprocess);
-
     const runner = createAgentWorkflowRunner({
-      cwd,
+      cwd: "/repo",
+      runtimeHost,
       awaitTask: async () => ({ status: "completed", output: "ok", exitCode: 0 }),
       getDiffSummary: async () => ({ changedFiles: [], insertions: 0, deletions: 0 }),
       getAgentDefinition: () => undefined,
@@ -432,30 +413,30 @@ describe("createAgentWorkflowRunner", () => {
 
     const result = await runner({ task: { id: "default-mode" }, attempt: 1, dependencyResults: {} });
 
-    expect(result.metadata?.backendType).toBe("in_process");
-    expect(inProcessCalls).toHaveLength(1);
-    expect(subprocessCalls).toHaveLength(0);
+    expect(result.metadata?.backendType).toBe("runtime_host");
+    expect(result.metadata?.taskManagerTaskId).toBe("task_runtime_host");
+    expect(runtimeHost.spawnChildAgent).toHaveBeenCalledWith(expect.objectContaining({
+      agent: "worker",
+      cwd: "/repo",
+    }));
   });
 
   it("fails remote_agent mode before spawning a worker", async () => {
-    const calls: TeammateSpawnConfig[] = [];
-    const cwd = `/repo-remote-${Math.random().toString(36).slice(2)}`;
-    getBackendRegistry(cwd).register("in_process", {
-      async spawn(config) {
-        calls.push(config);
-        return {
-          success: true,
-          agentId: `${config.name}@${config.team}`,
-          taskId: "task_remote",
-          backendType: "in_process",
-        };
-      },
-      async sendMessage() {},
-      async terminate() {},
-    });
+    const runtimeHost = {
+      emitEvent: vi.fn(),
+      requestPermission: vi.fn(async () => ({ status: "approved" as const })),
+      spawnChildAgent: vi.fn(async () => ({
+        id: "unreachable",
+        result: Promise.resolve({ status: "completed" as const, output: "unreachable" }),
+      })),
+      sendChildInput: vi.fn(async () => {}),
+      interruptChildAgent: vi.fn(async () => {}),
+      awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "unreachable" })),
+    };
     const runner = createAgentWorkflowRunner({
-      cwd,
+      cwd: "/repo",
       mode: "remote_agent",
+      runtimeHost,
       awaitTask: async () => ({ status: "completed", output: "unreachable" }),
       getAgentDefinition: () => undefined,
     });
@@ -464,7 +445,7 @@ describe("createAgentWorkflowRunner", () => {
 
     expect(result.status).toBe("failed");
     expect(result.summary).toContain("not implemented");
-    expect(calls).toHaveLength(0);
+    expect(runtimeHost.spawnChildAgent).not.toHaveBeenCalled();
   });
 
   it("can be used by runWorkflow as a real runner adapter", async () => {

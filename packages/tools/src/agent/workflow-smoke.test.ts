@@ -3,8 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseWorkflowNotification, WorkflowRunStore } from "@openharness/coordinator";
-import { getTaskManager, resetTaskManager } from "@openharness/services";
-import { ChildSessionBackend, type TeammateSpawnConfig } from "@openharness/swarm";
+import type { ToolRuntimeHost } from "@openharness/core";
 import { createAgentWorkflowRunner } from "./workflow-runner";
 import { createWorkflowTool } from "./workflow";
 
@@ -15,11 +14,9 @@ beforeEach(() => {
   savedConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
   tempDir = mkdtempSync(join(tmpdir(), "oh-workflow-smoke-"));
   process.env.OPENHARNESS_CONFIG_DIR = join(tempDir, "config");
-  resetTaskManager();
 });
 
 afterEach(() => {
-  resetTaskManager();
   if (savedConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
   else process.env.OPENHARNESS_CONFIG_DIR = savedConfigDir;
   if (tempDir) rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
@@ -27,35 +24,37 @@ afterEach(() => {
 });
 
 describe("Workflow tool smoke", () => {
-  it("runs through Workflow -> child session backend -> TaskManager bridge", async () => {
-    const spawned: TeammateSpawnConfig[] = [];
-    const manager = getTaskManager(tempDir!);
-    const backend = new ChildSessionBackend({
-      host: {
-        createChildSession: async (input) => ({ id: input.id ?? `child-${spawned.length}` }),
-        admitPrompt: async (sessionId) => ({ runId: `run-${sessionId}` }),
-        awaitRun: async (sessionId) => ({
-          status: "completed",
-          output: `worker:${sessionId.split("-")[1] ?? sessionId}`,
-        }),
-        interrupt: async () => {},
-        archive: async () => {},
+  it("runs through Workflow -> runtime host child-agent port -> task wait adapter", async () => {
+    const spawned: Array<Parameters<ToolRuntimeHost["spawnChildAgent"]>[0]> = [];
+    const outputs = new Map<string, string>();
+    const runtimeHost: ToolRuntimeHost = {
+      emitEvent: () => {},
+      requestPermission: async () => ({ status: "approved" }),
+      spawnChildAgent: async (input) => {
+        spawned.push(input);
+        const taskName = input.sessionId?.match(/^wf-(.+)-\d+-/)?.[1] ?? input.agent;
+        const taskId = `task_${taskName}`;
+        outputs.set(taskId, `worker:${taskName}`);
+        return {
+          id: `invocation_${taskName}`,
+          taskId,
+          sessionId: input.sessionId,
+          result: Promise.resolve({ status: "completed", output: outputs.get(taskId) ?? "" }),
+        };
       },
-      taskBridge: {
-        registerSessionTask: (input) => manager.registerSessionTask(input),
-        completeSessionTask: (id, input) => manager.completeSessionTask(id, input),
-        writeToSessionTask: (id, data) => manager.writeToTask(id, data),
-      },
-    });
+      sendChildInput: async () => {},
+      interruptChildAgent: async () => {},
+      awaitChildAgent: async (id) => ({ status: "completed", output: `worker:${id}` }),
+    };
     const tool = createWorkflowTool({
       createRunner: (options) =>
         createAgentWorkflowRunner({
           ...options,
-          spawnWorker: async (config) => {
-            spawned.push(config);
-            return await backend.spawn(config);
-          },
-          awaitTask: (taskId, waitOptions) => manager.awaitTask(taskId, waitOptions),
+          awaitTask: async (taskId) => ({
+            status: "completed",
+            output: outputs.get(taskId) ?? "",
+            exitCode: 0,
+          }),
           getDiffSummary: async () => ({ changedFiles: [], insertions: 0, deletions: 0 }),
           getAgentDefinition: () => undefined,
         }),
@@ -71,7 +70,7 @@ describe("Workflow tool smoke", () => {
           { id: "verify", prompt: "verify using prior output" },
         ],
       },
-      { cwd: tempDir! },
+      { cwd: tempDir!, runtimeHost },
     );
 
     const text = textOf(result);
