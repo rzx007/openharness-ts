@@ -2,7 +2,7 @@
 
 > 日期：2026-08-07
 >
-> 当前状态：方向可行，且 Phase 0-9 已落地到当前代码。`RuntimeHostPort` 已成为 `SessionRuntime.runPrompt(input, host)` 的主边界；permission、runtime event、child-agent invocation 都通过这个 run-scoped host 进入 daemon。
+> 当前状态：方向可行，且 Phase 0-12 已落地到当前代码。`RuntimeHostPort` 已成为 `SessionRuntime.runPrompt(input, host)` 的主边界；permission、runtime event、child-agent invocation 都通过这个 run-scoped host 进入 daemon。
 
 ## 1. 结论
 
@@ -117,6 +117,7 @@ DaemonChildAgentHost
 6. worktree slug/path/git 操作已从 `DaemonChildAgentHost` 抽到 server-local `child-agent-worktree.ts`。
 7. `ChildSessionHost` / `SessionTaskBridge` 类型已从 runtime contract 移到 server-local `child-agent-ports.ts`。
 8. `DaemonChildSessionHost` 独立 adapter 已删除；factory 直接把 `SessionApplicationService` 绑定为 `ChildSessionHost` port。
+9. `SessionApplicationService` / `SessionRunEngine` 不再反向依赖 `ChildSessionHost`，application/run engine 用例类型由各自模块声明，child port 保持 server-local。
 
 ## 7. 后续建议
 

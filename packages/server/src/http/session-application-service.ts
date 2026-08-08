@@ -1,7 +1,11 @@
-import type { SessionStore } from "@openharness/services";
+import type { CreateSessionInput, SessionRecord, SessionStore } from "@openharness/services";
 
-import type { ChildSessionHost } from "./child-agent-ports.js";
-import type { SessionRunEngine, AdmitPromptInput, AdmitPromptResult } from "./session-run-engine.js";
+import type {
+  AdmitPromptInput,
+  AdmitPromptResult,
+  AwaitSessionRunResult,
+  SessionRunEngine,
+} from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";
 import { isRecord, runtimeSessionMetadataChanged } from "./support.js";
@@ -38,6 +42,13 @@ export interface ResumeSessionRunCommand {
 
 export type ResumeSessionRunResult = AdmitPromptResult & {
   source_run: NonNullable<ReturnType<SessionStore["getRun"]>>;
+};
+
+export type CreateChildSessionCommand = Omit<CreateSessionInput, "parentId" | "title" | "agent" | "model"> & {
+  parentId: string;
+  title: string;
+  agent: string;
+  model?: string;
 };
 
 /**
@@ -171,7 +182,7 @@ export class SessionApplicationService {
     return this.context.runEngine.interruptSession(sessionId);
   }
 
-  async awaitRun(sessionId: string, runId: string): ReturnType<ChildSessionHost["awaitRun"]> {
+  async awaitRun(sessionId: string, runId: string): Promise<AwaitSessionRunResult> {
     return await this.context.runEngine.awaitRun(sessionId, runId);
   }
 
@@ -179,9 +190,7 @@ export class SessionApplicationService {
     await this.context.runtimePool.close(sessionId);
   }
 
-  async createChildSession(
-    input: Parameters<ChildSessionHost["createChildSession"]>[0],
-  ): ReturnType<ChildSessionHost["createChildSession"]> {
+  async createChildSession(input: CreateChildSessionCommand): Promise<SessionRecord> {
     const parent = this.context.store.getSession(input.parentId);
     if (!parent) throw new Error(`Parent session not found: ${input.parentId}`);
     const before = this.context.events.checkpoint();

@@ -1,8 +1,8 @@
-# Runtime Host Port 设计与 Phase 7 落地状态
+# Runtime Host Port 设计与 Phase 12 落地状态
 
 > 日期：2026-08-07
 >
-> 状态：Phase 0-7 已落地。本文是当前代码的任务文档，不是未来提案。
+> 状态：Phase 0-12 已落地。本文是当前代码的任务文档，不是未来提案。
 >
 > 目标：把 daemon 和 QueryEngine 之间零散的 callback、bridge、handle 收束到一个 run-scoped `RuntimeHostPort` 边界，降低状态归属分裂和句柄双向穿梭。
 
@@ -237,6 +237,7 @@ flowchart TD
 - Phase 9：`TaskWait` 语义已明确为等待 user-visible task projection；live child invocation handle 仅由 runtime host/daemon adapter 内部持有。
 - Phase 10：`ChildSessionHost` / `SessionTaskBridge` 类型已从 `runtime.ts` 移入 `packages/server/src/http/child-agent-ports.ts`，`runtime.ts` 只保留 `SessionRuntime` contract。
 - Phase 11：删除 `DaemonChildSessionHost` 独立 adapter；`DaemonChildAgentHostFactory` 直接从 `SessionApplicationService` 生成 server-local `ChildSessionHost` port。
+- Phase 12：`SessionApplicationService` / `SessionRunEngine` 不再反向引用 `ChildSessionHost`；application/run engine 自己声明用例类型，server-local child port 只服务 factory 与 daemon child adapter。
 - `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server-local adapter。
 
 ## 8. 后续非兼容改造建议

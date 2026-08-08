@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { SessionStore } from "@openharness/services";
+import type { SessionRunRecord, SessionStore } from "@openharness/services";
 
 import {
   jsonEqual,
@@ -8,7 +8,6 @@ import {
   withoutTraceId,
 } from "./support.js";
 import { SessionRunCoordinator } from "../run-coordinator.js";
-import type { ChildSessionHost } from "./child-agent-ports.js";
 import type { SessionRunExecutor } from "./session-run-executor.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";
@@ -26,6 +25,12 @@ export type AdmitPromptResult = {
   input: ReturnType<SessionStore["admitPrompt"]>;
   run?: ReturnType<SessionStore["createRun"]>;
   queue_state?: "running" | "queued";
+};
+
+export type AwaitSessionRunResult = {
+  status: Extract<SessionRunRecord["status"], "completed" | "failed" | "interrupted">;
+  output: string;
+  error?: string;
 };
 
 export interface SessionRunEngineContext {
@@ -70,7 +75,7 @@ export class SessionRunEngine {
       .some((session) => this.hasWork(session.id));
   }
 
-  async awaitRun(sessionId: string, runId: string): ReturnType<ChildSessionHost["awaitRun"]> {
+  async awaitRun(sessionId: string, runId: string): Promise<AwaitSessionRunResult> {
     const initial = this.context.store.getRun(runId);
     if (!initial || initial.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
     if (initial.status === "pending" || initial.status === "running") {
