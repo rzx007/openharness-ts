@@ -19,7 +19,7 @@ daemon = HTTP/SSE transport
        + runtime host adapters
 ```
 
-这也是它比旧世界绕的根因：旧世界可以在同一进程里直接操作 `QueryEngine`、工具、任务和权限；daemon 世界里，大部分用户动作先进入 HTTP route，再进入应用服务，然后通过 run-scoped `RuntimeHostPort` 回到 runtime / QueryEngine。
+这也是它比旧世界绕的根因：旧世界可以在同一进程里直接操作 `QueryEngine`、工具、任务和权限；daemon 世界里，大部分用户动作先进入 HTTP route，再进入应用服务，然后通过 run-scoped `AgentRunHost` 回到 runtime / QueryEngine。
 
 当前最关键的边界是：
 
@@ -28,10 +28,10 @@ client owns interaction
 daemon owns durable application state
 runtime owns execution
 QueryEngine owns agent loop
-RuntimeHostPort is the run-scoped capability port between runtime and daemon
+AgentRunHost is the run-scoped capability port between runtime and daemon
 ```
 
-不要把 `RuntimeHostPort` 理解成又一个业务大对象。它是 daemon 给单次 run 暴露的宿主能力边界：权限、runtime event、stream event、child agent lifecycle 都经由它回到 daemon。
+不要把 `AgentRunHost` 理解成又一个业务大对象。它是 daemon 给单次 run 暴露的宿主能力边界：权限、runtime event、stream event、child agent lifecycle 都经由它回到 daemon。
 
 ---
 
@@ -293,7 +293,7 @@ packages/server/src/http/routes/events.ts
 ```mermaid
 sequenceDiagram
   participant Tool as "Tool / QueryEngine"
-  participant Host as "RuntimeHostPort"
+  participant Host as "AgentRunHost"
   participant Exec as "SessionRunExecutor"
   participant Broker as "StorePermissionBroker"
   participant Controller as "PermissionController"
@@ -352,7 +352,7 @@ packages/client/src/client.ts
 
 闭环规则：
 
-- QueryEngine/tool 只看到 `RuntimeHostPort.requestPermission()`。
+- QueryEngine/tool 只看到 `AgentRunHost.requestPermission()`。
 - `PermissionController` 的 live handle 不能跨 daemon restart。
 - daemon restart 后未完成 live stack 不恢复；durable projection 会保留/终态化。
 - `decision: "session"` 会让同 session lineage 内相同工具后续自动批准。
@@ -709,7 +709,7 @@ SessionApplicationService / SessionRunEngine
 
 | 旧形态 | 当前形态 |
 |---|---|
-| `SessionRuntimeHooks` | `RuntimeHostPort` |
+| `SessionRuntimeHooks` | `AgentRunHost` |
 | `QueryEngine.permissionPrompt` | `SubmitMessageOptions.runtimeHost.requestPermission()` |
 | `QueryEngine.runtimeEventSink` | `ToolContext.runtimeHost.emitEvent()` |
 | `registerChildSessionBackend()` | `ToolRuntimeHost.spawnChildAgent()` |

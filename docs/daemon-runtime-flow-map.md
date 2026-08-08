@@ -9,7 +9,7 @@
 ```text
 Client 只负责 attach、提交输入、展示 snapshot/SSE。
 Daemon 持有 SessionStore、Application/Query/Maintenance/Control services、run lane、runtime pool、permission projection、child session projection。
-SessionRunExecutor 执行单次 run，并创建 run-scoped RuntimeHostPort。
+SessionRunExecutor 执行单次 run，并创建 run-scoped AgentRunHost。
 SessionRuntime/CliSessionRuntime 包住 QueryEngine。
 QueryEngine 和 tools 通过 runtimeHost 请求 permission、发 runtime event、创建 child agent。
 ```
@@ -180,7 +180,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  tool["QueryEngine tool call"] --> host["RuntimeHostPort.requestPermission()"]
+  tool["QueryEngine tool call"] --> host["AgentRunHost.requestPermission()"]
   host --> broker["StorePermissionBroker.ask()"]
   broker --> controller["PermissionController.create()"]
   broker --> store["store.createPermissionRequest()"]
@@ -269,7 +269,7 @@ DaemonChildAgentHost.interruptChildAgent()
 | prompt 为什么排队/steer | `SessionRunEngine` + `SessionRunCoordinator` |
 | runtime 什么时候创建/关闭 | `SessionRuntimePool` |
 | 一次 run 怎么落 message parts | `SessionRunExecutor` + `SessionRunRenderer` |
-| 工具权限怎么授权 | `QueryEngine` -> `RuntimeHostPort.requestPermission()` -> `StorePermissionBroker` |
+| 工具权限怎么授权 | `QueryEngine` -> `AgentRunHost.requestPermission()` -> `StorePermissionBroker` |
 | Agent 怎么建 child session | `Agent tool` -> `ToolRuntimeHost.spawnChildAgent()` -> `DaemonChildAgentHost` |
 | child task 怎么显示在 parent | `SessionTaskBridge` + `SessionTaskService` |
 | TaskWait 为什么能等 Agent 返回的 task_id | `TaskWait` -> scoped `TaskManager.awaitTask(task_id)`；daemon child session 由 `SessionTaskBridge` 注册同 id task projection |

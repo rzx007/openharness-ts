@@ -27,7 +27,7 @@ TUI/Web/CLI are interaction surfaces
 daemon should host agents, not define what an agent is.
 ```
 
-当前 Phase 0-13 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，但这只是边界，不是完整的 framework API。下一步应该补出一个 OpenHarness 内部 `Agent Framework Layer`：
+当前 Phase 0-15 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，并让 `CliSessionRuntime` 复用这层 facade：
 
 ```text
 Agent Framework Layer
@@ -454,14 +454,13 @@ packages/core or packages/agent-runtime
 
 历史 `RuntimeHostPort` 已被 `AgentRunHost` 取代，server 不再保留旧类型出口。
 
-状态：已开始落地。`packages/core/src/types/runtime.ts` 已提供 `AgentRunHost`、`AgentRunScope`、`AgentRuntimeEvent`、`AgentPermissionRequest/Decision`、`AgentChildAgentHost` 等 daemon-neutral host 类型；server 的 `DaemonRuntimeHostPort` 已实现 `AgentRunHost`。
+状态：已落地。`packages/core/src/types/runtime.ts` 已提供 `AgentRunHost`、`AgentRunScope`、`AgentRuntimeEvent`、`AgentPermissionRequest/Decision`、`AgentChildAgentHost` 等 daemon-neutral host 类型；server 的 `DaemonRuntimeHostPort` 已实现 `AgentRunHost`。
 
 ### Phase B：实现 standalone runner
 
 新增最小 facade：
 
 ```text
-createAgentRuntime()
 createAgentSession()
 submitMessage()
 stream()
@@ -476,7 +475,9 @@ stream()
 - stream event callback。
 - child agent unsupported。
 
-### Phase C：让 `CliSessionRuntime` 复用 facade
+状态：已落地到 `packages/core/src/agent-session.ts`。`createAgentSession({ queryEngine, cwd, ...callbacks })` 包装已构造的 `QueryEngine`，提供 `submitMessage()` async iterable、`runMessage()` 聚合结果、`getHistory()`、`clear()` 和 `createHost()`。它不依赖 daemon store/HTTP/SSE；默认权限为 deny；child agent 显式 unsupported。
+
+### Phase C / Phase 15：让 `CliSessionRuntime` 复用 facade
 
 现在 `CliSessionRuntime` 直接装配 `QueryEngine.submitMessage()`。改成：
 
@@ -486,7 +487,7 @@ CliSessionRuntime
   -> QueryEngine internally
 ```
 
-daemon 仍通过 `SessionRunExecutor` 提供 `DaemonRuntimeHostPort`。
+状态：已落地到 `apps/cli/src/session-runtime.ts`。daemon 仍通过 `SessionRunExecutor` 提供 `DaemonRuntimeHostPort`，但 CLI runtime 不再自己手写 `QueryEngine.submitMessage()` 的循环，而是调用 `AgentSession.submitMessage(..., { host })`。
 
 ### Phase D：收口 child agent API
 
@@ -525,7 +526,7 @@ daemon projection sink renders store messages/parts
 
 ---
 
-## 12. 推荐下一步
+## 12. 当前落地状态与下一步
 
 Phase 13 已落地为很小的命名边界代码改造：
 
@@ -540,28 +541,47 @@ Phase 13: introduce AgentRunHost naming boundary
 3. 让 server `DaemonRuntimeHostPort` / `DaemonChildAgentHost` / `DaemonChildAgentHostFactory` 使用 `Agent*` host 类型。
 4. 删除 `packages/server/src/runtime-host.ts` 旧命名出口，避免继续保留兼容层。
 
-下一步建议：
+Phase 14 也已落地为最小 standalone facade：
 
 ```text
 Phase 14: standalone in-memory AgentSession facade
 ```
 
-目标：
+已完成动作：
 
 1. 提供一个不依赖 daemon store/HTTP 的单进程 agent session。
 2. 复用 `QueryEngine.submitMessage()` 和 `AgentRunHost`。
 3. 默认 host 支持 stream/event callbacks、permission callback、child agent unsupported。
 4. 不改变 daemon 当前运行行为。
-5. 后续让 `CliSessionRuntime` 复用该 facade。
+5. 补充 `packages/core/src/agent-session.test.ts` 覆盖 stream 转发、permission callback、默认 deny 与 child unsupported。
 
 这才对应你说的“这种形态”：
 
 ```ts
-const agent = createAgent(...);
-await agent.submitMessage(...);
+const session = createAgentSession({ queryEngine, cwd });
+await session.runMessage(...);
 ```
 
-但我们不需要急着定函数名。先把边界立住。
+Phase 15 已落地：
+
+```text
+Phase 15: make CliSessionRuntime reuse AgentSession
+```
+
+已完成动作：
+
+1. `createCliSessionRuntimeFactory()` 为每个 daemon session 创建 `AgentSession`。
+2. `CliSessionRuntime.runPrompt()` 复用 `AgentSession.submitMessage()`。
+3. stream event 转发回到 `AgentSession` facade 内部，减少应用层重复循环。
+4. `@openharness/server/runtime` 与 `@openharness/services/session-runtime/types` 提供轻量类型 subpath，CLI runtime contract 不再通过大 barrel 触碰 HTTP/store 模块。
+
+下一步建议：
+
+```text
+Phase 16: split child-agent capability contract from generic run host
+```
+
+目标是让普通 agent runner 可以只声明 permission/event/stream 能力；daemon host 再额外提供 child-agent lifecycle。
 
 ---
 

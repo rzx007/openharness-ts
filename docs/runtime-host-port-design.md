@@ -1,8 +1,8 @@
-# Runtime Host Port 设计与 Phase 13 落地状态
+# Runtime Host Port 设计与 Phase 15 落地状态
 
 > 日期：2026-08-07
 >
-> 状态：Phase 0-13 已落地。本文是当前代码的任务文档，不是未来提案。
+> 状态：Phase 0-15 已落地。本文是当前代码的任务文档，不是未来提案。
 >
 > 目标：把 daemon 和 QueryEngine 之间零散的 callback、bridge、handle 收束到一个 run-scoped `AgentRunHost` 边界，降低状态归属分裂和句柄双向穿梭。
 
@@ -239,8 +239,10 @@ flowchart TD
 - Phase 11：删除 `DaemonChildSessionHost` 独立 adapter；`DaemonChildAgentHostFactory` 直接从 `SessionApplicationService` 生成 server-local `ChildSessionHost` port。
 - Phase 12：`SessionApplicationService` / `SessionRunEngine` 不再反向引用 `ChildSessionHost`；application/run engine 自己声明用例类型，server-local child port 只服务 factory 与 daemon child adapter。
 - Phase 13：`packages/core/src/types/runtime.ts` 新增 daemon-neutral `AgentRunHost` / `AgentRunScope` / `AgentChildAgentHost` 类型；`SessionRuntime.runPrompt()` 接收 `AgentRunHost`，server 的 `DaemonRuntimeHostPort` 实现该 framework contract，并删除旧 `packages/server/src/runtime-host.ts` 类型出口。
+- Phase 14：`packages/core/src/agent-session.ts` 新增 standalone in-memory `AgentSession` facade；`createAgentSession()` 包装已构造的 `QueryEngine`，提供 `submitMessage()` / `runMessage()`，复用 `AgentRunHost`，默认 permission deny，child agent 显式 unsupported。
+- Phase 15：`apps/cli/src/session-runtime.ts` 的 `CliSessionRuntime.runPrompt()` 已复用 `AgentSession.submitMessage()`；daemon-hosted runtime 与 standalone runner 共享同一个 submit facade。`@openharness/server/runtime` 与 `@openharness/services/session-runtime/types` 提供轻量 contract 入口，避免 CLI runtime 通过大 barrel 触碰 HTTP/store 模块。
 - `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server-local adapter。
 
 ## 8. 后续非兼容改造建议
 
-1. 继续推进 Phase 14：提供 standalone in-memory `AgentSession` facade，让 daemon 与单进程 runner 共用同一个 framework API。
+1. 继续推进 Phase 16：把 child-agent capability 从 generic run host 中拆成可选能力，让普通 standalone runner 不必实现 child lifecycle 方法。

@@ -138,7 +138,7 @@ remove clean isolated worktree
 
 ## 权限
 
-Child session 共享 daemon permission infrastructure。工具授权仍从 child QueryEngine 调 `RuntimeHostPort.requestPermission()` 进入 daemon host，再由 `StorePermissionBroker` 投影到 store/SSE。
+Child session 共享 daemon permission infrastructure。工具授权仍从 child QueryEngine 调 `AgentRunHost.requestPermission()` 进入 daemon host，再由 `StorePermissionBroker` 投影到 store/SSE。
 
 Agent 级字段会写入 child session metadata：
 

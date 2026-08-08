@@ -91,7 +91,7 @@ sequenceDiagram
 | CLI runtime adapter | `apps/cli/src/session-runtime.ts`, `apps/cli/src/runtime.ts` |
 | QueryEngine | `packages/core/src/engine/query-engine.ts` |
 
-## 3. RuntimeHostPort 注入点
+## 3. AgentRunHost 注入点
 
 `SessionRunExecutor` 是 host 的唯一创建点：
 

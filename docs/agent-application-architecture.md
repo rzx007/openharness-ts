@@ -640,7 +640,7 @@ sequenceDiagram
   participant U as 用户
   participant L as Leader Agent
   participant A as Agent Tool
-  participant H as RuntimeHostPort
+  participant H as AgentRunHost
   participant D as DaemonChildAgentHost
   participant S as SessionStore
   participant T as Task Projection
@@ -887,7 +887,7 @@ async function bootstrap(config): Promise<AgentRuntime> {
 }
 ```
 
-daemon mode 下，child-agent 能力不在 bootstrap 时注入为 `swarm` 对象，而是在每次 run 由 `SessionRunExecutor` 创建 `RuntimeHostPort`，再经 `ToolContext.runtimeHost.spawnChildAgent()` 暴露给 Agent/Workflow 工具。
+daemon mode 下，child-agent 能力不在 bootstrap 时注入为 `swarm` 对象，而是在每次 run 由 `SessionRunExecutor` 创建 `AgentRunHost`，再经 `ToolContext.runtimeHost.spawnChildAgent()` 暴露给 Agent/Workflow 工具。
 
 ---
 

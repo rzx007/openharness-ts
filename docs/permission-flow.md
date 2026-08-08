@@ -7,7 +7,7 @@ QueryEngine
   -> PermissionChecker.checkTool()
   -> decision === "ask"
   -> CliSessionRuntime permissionPrompt
-  -> RuntimeHostPort.requestPermission()
+  -> AgentRunHost.requestPermission()
   -> PermissionBroker
   -> SessionStore.createPermissionRequest(status:"pending")
   -> append event: permission.asked
