@@ -183,6 +183,7 @@ Agent tool
 | Tool context host 类型 | `packages/core/src/types/tools.ts`, `packages/core/src/types/runtime.ts` |
 | child-agent host factory | `packages/server/src/http/child-agent-host-factory.ts` |
 | daemon child adapter | `packages/server/src/http/daemon-child-agent-host.ts` |
+| isolated worktree helper | `packages/server/src/http/child-agent-worktree.ts` |
 | child session host | `packages/server/src/http/daemon-child-session-host.ts` |
 | task projection bridge | `packages/server/src/http/session-task-bridge.ts` |
 | child session create/admit/await | `packages/server/src/http/session-application-service.ts` |
@@ -210,7 +211,8 @@ cleanup：
 
 | 问题 | 文件 |
 |---|---|
-| worktree 创建/清理 | `packages/server/src/http/daemon-child-agent-host.ts` |
+| worktree slug、路径、git worktree 操作 | `packages/server/src/http/child-agent-worktree.ts` |
+| child invocation cleanup | `packages/server/src/http/daemon-child-agent-host.ts` |
 | isolate 参数来源 | `packages/tools/src/agent/index.ts`, `packages/tools/src/agent/workflow-runner.ts` |
 
 ## 7. SSE / snapshot

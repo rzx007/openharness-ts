@@ -228,15 +228,15 @@ flowchart TD
 - `packages/server/src/http/daemon-child-agent-host.ts` 支持 `sessionId`、`systemPrompt`、`worktree`、`notice` 和 worktree cleanup。
 - 相关测试已覆盖 Agent、Workflow、DaemonChildAgentHost、DaemonRuntimeHostPort、runtime pool、run executor/engine。
 
-## 7. Phase 6/7 收口状态
+## 7. Phase 6-8 收口状态
 
 - Phase 6：删除 `@openharness/swarm` 旧 `ChildSessionBackend` / backend registry surface，相关文档转为历史归档。
 - Phase 7：`SessionRunExecutor` 不再直接持有 `ChildSessionHost` 和 `SessionTaskBridgeManager`；二者由 `DaemonChildAgentHostFactory` 在 server-local 层组装成 run-scoped child-agent host。
+- Phase 8：`DaemonChildAgentHost` 内部 worktree helper 已抽成 `packages/server/src/http/child-agent-worktree.ts`，并补独立测试。
 - `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server 内部 adapter。
 
 ## 8. 后续非兼容改造建议
 
-1. 把 `DaemonChildAgentHost` 内部 worktree helper 抽成 server-local 文件，并补独立测试。
-2. 统一 `TaskWait` 对 runtime-host child invocation 的语义说明：用户看到的是 task projection，真实执行句柄是 invocation。
-3. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
-4. `DaemonChildSessionHost` 可以继续内收为 factory 私有依赖，减少被误读为 framework API 的机会。
+1. 统一 `TaskWait` 对 runtime-host child invocation 的语义说明：用户看到的是 task projection，真实执行句柄是 invocation。
+2. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
+3. `DaemonChildSessionHost` 可以继续内收为 factory 私有依赖，减少被误读为 framework API 的机会。
