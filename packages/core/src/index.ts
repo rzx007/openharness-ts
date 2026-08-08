@@ -93,6 +93,14 @@ export type {
 } from "./types/runtime";
 
 export { RuntimeBundle } from "./types/runtime";
+export {
+  AgentSession,
+  createAgentSession,
+  type AgentSessionHostCallbacks,
+  type AgentSessionOptions,
+  type AgentSessionRunResult,
+  type AgentSessionSubmitOptions,
+} from "./agent-session";
 
 export { QueryEngine, MaxTurnsExceeded } from "./engine/query-engine";
 export { ToolRegistry } from "./engine/tool-registry";
