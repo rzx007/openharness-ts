@@ -1,5 +1,5 @@
 import type { RuntimeChildAgentHost, RuntimeHostScope } from "../runtime-host.js";
-import type { ChildSessionHost } from "../runtime.js";
+import type { ChildSessionHost } from "./child-agent-ports.js";
 import { DaemonChildAgentHost } from "./daemon-child-agent-host.js";
 import type { SessionTaskBridgeManager } from "./session-task-bridge.js";
 

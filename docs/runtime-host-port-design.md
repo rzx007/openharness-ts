@@ -234,9 +234,10 @@ flowchart TD
 - Phase 7：`SessionRunExecutor` 不再直接持有 `ChildSessionHost` 和 `SessionTaskBridgeManager`；二者由 `DaemonChildAgentHostFactory` 在 server-local 层组装成 run-scoped child-agent host。
 - Phase 8：`DaemonChildAgentHost` 内部 worktree helper 已抽成 `packages/server/src/http/child-agent-worktree.ts`，并补独立测试。
 - Phase 9：`TaskWait` 语义已明确为等待 user-visible task projection；live child invocation handle 仅由 runtime host/daemon adapter 内部持有。
-- `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server 内部 adapter。
+- Phase 10：`ChildSessionHost` / `SessionTaskBridge` 类型已从 `runtime.ts` 移入 `packages/server/src/http/child-agent-ports.ts`，`runtime.ts` 只保留 `SessionRuntime` contract。
+- `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server-local adapter。
 
 ## 8. 后续非兼容改造建议
 
 1. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
-2. `DaemonChildSessionHost` 可以继续内收为 factory 私有依赖，减少被误读为 framework API 的机会。
+2. 继续评估是否要把 `DaemonChildSessionHost` 合并进 factory/use case 层，进一步减少 adapter 数量。

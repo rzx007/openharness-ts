@@ -8,7 +8,7 @@ import {
   withoutTraceId,
 } from "./support.js";
 import { SessionRunCoordinator } from "../run-coordinator.js";
-import type { ChildSessionHost } from "../runtime.js";
+import type { ChildSessionHost } from "./child-agent-ports.js";
 import type { SessionRunExecutor } from "./session-run-executor.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";

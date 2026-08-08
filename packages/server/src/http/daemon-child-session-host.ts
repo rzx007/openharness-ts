@@ -1,4 +1,4 @@
-import type { ChildSessionHost } from "../runtime.js";
+import type { ChildSessionHost } from "./child-agent-ports.js";
 import type { SessionApplicationService } from "./session-application-service.js";
 
 type ChildSessionApplication = Pick<
@@ -12,7 +12,7 @@ type ChildSessionApplication = Pick<
 >;
 
 /**
- * Runtime/Agent 侧看到的 ChildSessionHost 适配器。
+ * Daemon child-agent adapter for child session application use cases.
  * 把 createChildSession / admitPrompt / awaitRun / interrupt / archive 等调用
  * 转发到 SessionApplicationService，避免 QueryEngine 直接依赖 HTTP 用例层。
  */

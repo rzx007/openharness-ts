@@ -1,6 +1,6 @@
 import type { SessionStore } from "@openharness/services";
 
-import type { ChildSessionHost } from "../runtime.js";
+import type { ChildSessionHost } from "./child-agent-ports.js";
 import type { SessionRunEngine, AdmitPromptInput, AdmitPromptResult } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";

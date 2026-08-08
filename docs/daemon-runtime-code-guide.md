@@ -181,6 +181,7 @@ Agent tool
 | SendMessage follow-up | `packages/tools/src/agent/index.ts` |
 | Workflow worker spawn | `packages/tools/src/agent/workflow-runner.ts` |
 | Tool context host 类型 | `packages/core/src/types/tools.ts`, `packages/core/src/types/runtime.ts` |
+| child-agent server-local ports | `packages/server/src/http/child-agent-ports.ts` |
 | child-agent host factory | `packages/server/src/http/child-agent-host-factory.ts` |
 | daemon child adapter | `packages/server/src/http/daemon-child-agent-host.ts` |
 | isolated worktree helper | `packages/server/src/http/child-agent-worktree.ts` |

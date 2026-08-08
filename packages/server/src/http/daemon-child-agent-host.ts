@@ -8,7 +8,7 @@ import type {
   RuntimeChildAgentHost,
   RuntimeHostScope,
 } from "../runtime-host.js";
-import type { ChildSessionHost, SessionTaskBridge } from "../runtime.js";
+import type { ChildSessionHost, SessionTaskBridge } from "./child-agent-ports.js";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
