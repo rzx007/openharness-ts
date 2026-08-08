@@ -103,9 +103,11 @@ packages/server/src/http/daemon-child-agent-host.ts
 | parent 可见 task | durable `SessionTaskRecord` |
 | live child invocation handle | `DaemonChildAgentHost` 当前 run 内存 |
 | permission request | `StorePermissionBroker` + `PermissionController` |
-| isolated worktree | `DaemonChildAgentHost` |
+| isolated worktree | `child-agent-worktree.ts` + `DaemonChildAgentHost` cleanup |
 
 durable task 是 projection，不是 child session 本体。即使 parent task completed/stopped/interrupted，child session 的 messages/runs/events 仍保留用于审计。
+
+`TaskWait` 消费的是 `task_id` 对应的 parent-visible task projection，不直接拿 live child invocation handle。live invocation id 只在当前 run 的 `DaemonChildAgentHost` map 中用于 `SendMessage` / interrupt / await；daemon restart 后这个 map 不恢复。
 
 ## Follow-up / Stop
 
@@ -162,6 +164,7 @@ daemon restart 不会恢复 live child invocation handle、provider stream 或 p
 | Workflow child worker | `packages/tools/src/agent/workflow-runner.ts` |
 | run-scoped host 创建 | `packages/server/src/http/session-run-executor.ts` |
 | daemon child invocation adapter | `packages/server/src/http/daemon-child-agent-host.ts` |
+| isolated worktree helper | `packages/server/src/http/child-agent-worktree.ts` |
 | child session host | `packages/server/src/http/daemon-child-session-host.ts` |
 | session/run use cases | `packages/server/src/http/session-application-service.ts` |
 | durable task projection | `packages/server/src/http/session-task-bridge.ts` |

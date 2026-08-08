@@ -122,9 +122,10 @@ export const taskWaitTool: ToolDefinition = {
   name: "TaskWait",
   description:
     "Block until one or more background tasks finish and return their results. " +
-    "Use this to wait for sub-tasks spawned by the Agent tool (it returns a task_id): " +
-    "after spawning, call TaskWait with those task_id(s) instead of polling with Sleep. " +
-    "Accepts taskIds (string[] — also tolerates a single string) and an optional " +
+    "Use this to wait for task_id values returned by Agent or TaskCreate. For Agent-created " +
+    "child sessions, TaskWait waits on the user-visible task projection; the live child " +
+    "invocation handle stays behind RuntimeHostPort. " +
+    "Accepts taskIds (string[], also tolerates a single string) and an optional " +
     "timeoutSeconds (default 300). Each task is awaited independently, so one failed, " +
     "timed-out, or unknown task_id does not affect the others; the result is a readable " +
     "per-task summary with each task's final status and output.",
@@ -173,7 +174,11 @@ export const taskWaitTool: ToolDefinition = {
       context.abortSignal?.addEventListener("abort", stopOnAbort, { once: true });
     }
 
-    // Await every task independently so a single failed/unknown id never drags
+    // Await every user-visible task projection independently. For Agent-created
+    // child sessions, RuntimeHostPort keeps the live invocation handle private;
+    // TaskWait only needs the task_id returned to the model.
+    //
+    // A single failed/unknown id never drags
     // down the rest. awaitTask throws synchronously on an unknown id, so wrap
     // each call in its own try/catch via an async closure.
     try {
@@ -185,8 +190,7 @@ export const taskWaitTool: ToolDefinition = {
             // Best-effort: stop the child so a wait timeout does not leave it orphaned.
             await mgr.stopTask(taskId).catch(() => {});
             return (
-              `${taskId} (${res.status}): did not finish within ${timeoutSeconds}s — ` +
-              `已请求停止 (stop requested).\n` +
+              `${taskId} (${res.status}): did not finish within ${timeoutSeconds}s - stop requested.\n` +
               `Output so far:\n${res.output}`
             );
           }

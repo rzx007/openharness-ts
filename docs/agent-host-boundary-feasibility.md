@@ -2,7 +2,7 @@
 
 > 日期：2026-08-07
 >
-> 当前状态：方向可行，且 Phase 0-5B 已落地到当前代码。`RuntimeHostPort` 已成为 `SessionRuntime.runPrompt(input, host)` 的主边界；permission、runtime event、child-agent invocation 都通过这个 run-scoped host 进入 daemon。
+> 当前状态：方向可行，且 Phase 0-9 已落地到当前代码。`RuntimeHostPort` 已成为 `SessionRuntime.runPrompt(input, host)` 的主边界；permission、runtime event、child-agent invocation 都通过这个 run-scoped host 进入 daemon。
 
 ## 1. 结论
 

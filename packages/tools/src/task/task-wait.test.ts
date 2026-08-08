@@ -98,7 +98,7 @@ describe("taskWaitTool", () => {
     const text = textOf(result);
     expect(text).toContain(task.id);
     expect(text).toMatch(/did not finish within 0\.2s/);
-    expect(text).toMatch(/已请求停止|requested stop/i);
+    expect(text).toMatch(/stop requested/i);
     expect(mgr.getTask(task.id)?.status).toBe("stopped");
   });
 
@@ -123,7 +123,7 @@ describe("taskWaitTool", () => {
       { cwd: CWD, sessionId },
     );
     const text = textOf(result);
-    expect(text).toMatch(/已请求停止|requested stop/i);
+    expect(text).toMatch(/stop requested/i);
     expect(stopped).toBe(true);
     expect(mgr.getTask(task.id)?.status).toBe("stopped");
   });

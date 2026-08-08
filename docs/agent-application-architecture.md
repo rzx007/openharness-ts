@@ -622,14 +622,16 @@ interface MemoryRecord {
 - 协调成本大于执行成本。
 - 多个 Worker 会同时修改同一文件。
 
-### 为什么使用 subprocess
+### 为什么使用 daemon-owned child session
 
-每个子 Agent 使用独立进程，有几个实际好处：
+当前主线不再通过旧 `SwarmBackend` / subprocess registry 派发 Agent。`Agent` 工具只调用 `ToolRuntimeHost.spawnChildAgent()`；daemon 侧用 `DaemonChildAgentHost` 创建 child session、child run 和 parent-visible task projection。
 
-- 上下文、环境变量和崩溃边界独立。
-- 可以单独取消、超时和统计资源。
-- 可以使用独立工作目录或 git worktree。
-- 将来容易替换成容器或远程 Worker。
+这样做的实际收益：
+
+- 子 Agent 复用同一套 `SessionRunEngine` / `SessionStore` / permission broker。
+- parent 看到的是稳定 `task_id` projection，便于 `TaskWait`、SSE 和 `/tasks` 查询。
+- live invocation handle 只留在当前 run 内存中，避免暴露 daemon 私有 session/run 句柄。
+- `isolate: true` 时仍可使用独立 git worktree。
 
 典型流程：
 
@@ -638,34 +640,41 @@ sequenceDiagram
   participant U as 用户
   participant L as Leader Agent
   participant A as Agent Tool
-  participant T as Task Manager
-  participant W as Worker Subprocess
+  participant H as RuntimeHostPort
+  participant D as DaemonChildAgentHost
+  participant S as SessionStore
+  participant T as Task Projection
 
   U->>L: 提交复杂任务
   L->>A: spawn Explore 子任务
-  A->>T: createTask(config, prompt)
-  T->>W: 启动独立 Agent Runtime
-  A-->>L: 返回 taskId
+  A->>H: spawnChildAgent(input)
+  H->>D: create child invocation
+  D->>S: create child session + run
+  D->>T: register parent-visible task
+  A-->>L: 返回 task_id
   L->>A: spawn Verify 子任务
-  A->>T: createTask(config, prompt)
-  T->>W: 启动另一个 Worker
-  L->>T: TaskWait(taskIds)
-  W-->>T: 输出结果并进入终态
+  A->>H: spawnChildAgent(input)
+  H->>D: create child invocation
+  D->>S: create child session + run
+  D->>T: register parent-visible task
+  L->>T: TaskWait(task_ids)
+  S-->>T: child run terminal output projected
   T-->>L: 汇总各任务结果
   L-->>U: 综合判断并回答
 ```
 
-一个 Swarm Backend 可以抽象为：
+当前 runtime child-agent port 可以抽象为：
 
 ```ts
-interface SwarmBackend {
-  spawn(config: AgentTaskConfig): Promise<{ taskId: string }>;
-  sendMessage(taskId: string, message: string): Promise<void>;
-  wait(taskIds: string[], timeoutMs?: number): Promise<TaskResult[]>;
-  cancel(taskId: string): Promise<void>;
-  inspect(taskId: string): Promise<TaskStatus>;
+interface RuntimeChildAgentHost {
+  spawnChildAgent(input: ChildAgentSpawnInput): Promise<ChildAgentInvocation>;
+  sendChildInput(invocationId: string, input: ChildAgentInput): Promise<void>;
+  interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
+  awaitChildAgent(invocationId: string): Promise<ChildAgentResult>;
 }
 ```
+
+`ChildAgentInvocation.taskId` 是模型和用户看到的 `task_id`；`ChildAgentInvocation.id` 是 runtime host 内部 live handle。`TaskWait` 等的是 task projection，不直接访问 invocation id。
 
 任务状态最好使用明确状态机：
 
@@ -845,10 +854,10 @@ flowchart BT
   Core["core: 协议与运行时接口"]
   Infra["api / storage / permissions / sandbox"] --> Core
   Cap["tools / skills / mcp / memory"] --> Core
-  Swarm["swarm / coordinator"] --> Core
+  Coord["coordinator"] --> Core
   Apps["cli / tui / server / channels"] --> Infra
   Apps --> Cap
-  Apps --> Swarm
+  Apps --> Coord
 ```
 
 这里的关键是 **bootstrap 位于应用层**。应用层负责创建 Provider、Registry、Storage、PermissionChecker、Hooks 等实例，再注入 Runtime。底层 package 不要反过来 import CLI。
@@ -860,12 +869,11 @@ async function bootstrap(config): Promise<AgentRuntime> {
   const permissions = createPermissionChecker(config.permission);
   const sessions = createSessionStore(config.dataDir);
   const memory = createMemoryService(config.memory);
-  const swarm = createSwarmBackend(config.swarm);
 
   registerBuiltinTools(tools);
   registerMcpTools(tools, await connectMcpServers(config.mcp));
   registerPluginContributions(tools, await loadPlugins(config.plugins));
-  registerSwarmTools(tools, swarm);
+  registerAgentTools(tools);
 
   return new AgentRuntime({
     provider,
@@ -873,12 +881,13 @@ async function bootstrap(config): Promise<AgentRuntime> {
     permissions,
     sessions,
     memory,
-    swarm,
     hooks: createHooks(config),
     compactor: createCompactor(config),
   });
 }
 ```
+
+daemon mode 下，child-agent 能力不在 bootstrap 时注入为 `swarm` 对象，而是在每次 run 由 `SessionRunExecutor` 创建 `RuntimeHostPort`，再经 `ToolContext.runtimeHost.spawnChildAgent()` 暴露给 Agent/Workflow 工具。
 
 ---
 

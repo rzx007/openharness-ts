@@ -229,8 +229,9 @@ flowchart TD
 | Agent 为什么能创建 child session | `packages/tools/src/agent/index.ts` 调 `context.runtimeHost.spawnChildAgent()` |
 | child session 由谁创建 | `packages/server/src/http/daemon-child-agent-host.ts` -> `DaemonChildSessionHost` -> `SessionApplicationService` |
 | parent task projection 在哪 | `packages/server/src/http/session-task-bridge.ts` |
-| isolated worktree 在哪 | `packages/server/src/http/daemon-child-agent-host.ts` |
-| SendMessage 怎么送 follow-up | `packages/tools/src/agent/index.ts` -> `runtimeHost.sendChildInput()` |
+| isolated worktree 在哪 | `packages/server/src/http/child-agent-worktree.ts`，cleanup 在 `DaemonChildAgentHost` |
+| TaskWait 等的是什么 | `task_id` 对应的 parent-visible task projection，不是 live invocation handle |
+| SendMessage 怎么送 follow-up | `packages/tools/src/agent/index.ts` -> task/agent id 查 live invocation -> `runtimeHost.sendChildInput()` |
 | Workflow worker 怎么 spawn | `packages/tools/src/agent/workflow-runner.ts` |
 
 ## 闭环 6：archive / interrupt
@@ -269,4 +270,5 @@ DaemonChildAgentHost.interruptChildAgent()
 | 工具权限怎么授权 | `QueryEngine` -> `RuntimeHostPort.requestPermission()` -> `StorePermissionBroker` |
 | Agent 怎么建 child session | `Agent tool` -> `ToolRuntimeHost.spawnChildAgent()` -> `DaemonChildAgentHost` |
 | child task 怎么显示在 parent | `SessionTaskBridge` + `SessionTaskService` |
+| TaskWait 为什么能等 Agent 返回的 task_id | `TaskWait` -> scoped `TaskManager.awaitTask(task_id)`；daemon child session 由 `SessionTaskBridge` 注册同 id task projection |
 | SSE 为什么没收到 | `SessionEventPublisher` + `HttpEventHub` |

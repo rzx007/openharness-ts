@@ -145,7 +145,7 @@ skill 经 command catalog 以 template 形式出现。
 |---|---|
 | `TaskCreate` / `TaskGet` / `TaskList` / `TaskUpdate` | 任务 CRUD |
 | `TaskOutput` / `TaskStop` | 读输出 / 停止 |
-| `TaskWait` | 等待任务完成（swarm teammate 协作的等待原语） |
+| `TaskWait` | 等待 Agent/TaskCreate 返回的 `task_id` 完成；等待对象是 task projection，不是 live child invocation handle |
 
 ### 计划与工作区（mode/）
 

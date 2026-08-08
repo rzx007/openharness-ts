@@ -8,9 +8,9 @@ const childInvocationByAgentId = new Map<string, string>();
 export const agentTool: ToolDefinition = {
   name: "Agent",
   description:
-    "Spawn an in-process teammate task. Returns a task_id. " +
-    "Use TaskWait with that task_id to block until the task finishes and retrieve its result - " +
-    "do not poll with Sleep.",
+    "Spawn an in-process teammate task. Returns a user-visible task_id backed by a durable task projection. " +
+    "Use TaskWait with that task_id to block until the task finishes and retrieve its result; " +
+    "use SendMessage for follow-up input while the live child invocation is still active.",
   inputSchema: {
     type: "object",
     properties: {
@@ -121,7 +121,9 @@ export const agentTool: ToolDefinition = {
 
 export const sendMessageTool: ToolDefinition = {
   name: "SendMessage",
-  description: "Send a follow-up message to a running teammate task.",
+  description:
+    "Send a follow-up message to a running teammate task. For Agent-created child sessions, " +
+    "the task_id is resolved to the run-local child invocation handle before falling back to ordinary TaskManager input.",
   inputSchema: {
     type: "object",
     properties: {
