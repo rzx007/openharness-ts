@@ -15,6 +15,7 @@ describe("CliSessionRuntime cancellation", () => {
     const queryEngine = {
       submitMessage,
       setModel: vi.fn(),
+      setSessionId: vi.fn(),
     };
     const runtime = new Runtime(
       { queryEngine },
@@ -68,6 +69,7 @@ describe("CliSessionRuntime cancellation", () => {
     const queryEngine = {
       submitMessage,
       setModel: vi.fn(),
+      setSessionId: vi.fn(),
     };
     const runtime = new Runtime(
       { queryEngine },

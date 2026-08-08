@@ -8,6 +8,14 @@
     ".": {
       "import": "./src/index.ts",
       "types": "./src/index.ts"
+    },
+    "./memory-extract": {
+      "import": "./src/memory-extract.ts",
+      "types": "./src/memory-extract.ts"
+    },
+    "./session-runtime/types": {
+      "import": "./src/session-runtime/types.ts",
+      "types": "./src/session-runtime/types.ts"
     }
   },
   "scripts": {

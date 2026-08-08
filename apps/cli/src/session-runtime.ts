@@ -1,32 +1,28 @@
 import { join } from "node:path";
 
-import type { ContentBlock, Message, TextBlock, ToolUseBlock } from "@openharness/core";
-import { getProjectMemoryDir, type Settings } from "@openharness/core";
+import type { AgentRunHost, AgentSession, ContentBlock, Message, TextBlock, ToolUseBlock } from "@openharness/core";
+import { createAgentSession, getProjectMemoryDir, type Settings } from "@openharness/core";
 import type {
   SessionCompactResult,
   SessionRememberResult,
-  RuntimeHostPort,
   SessionRuntime,
   SessionRuntimeFactory,
   SessionRuntimeRunInput,
   SessionRuntimeRunResult,
   SessionUsageSnapshot,
-} from "@openharness/server";
+} from "@openharness/server/runtime";
 import type {
   ReplaceTranscriptMessageInput,
   ReplaceTranscriptPartInput,
   SessionMessagePartRecord,
   SessionMessageRecord,
-} from "@openharness/services";
-import { extractMemoriesFromTurn } from "@openharness/services";
+} from "@openharness/services/session-runtime/types";
 import { CredentialStorage } from "@openharness/auth";
 import { MemoryManager } from "@openharness/memory";
 import { McpClientManager } from "@openharness/mcp";
 import { SkillRegistry } from "@openharness/skills";
 
-import { bootstrap } from "./runtime.js";
-import { loadSkillsThreeSources } from "./commands/main.js";
-import { mergePluginMcpServers, registerPluginHooks, registerPluginTools } from "./plugin-contributions.js";
+type CliRuntimeBundle = Awaited<ReturnType<typeof import("./runtime.js").bootstrap>>;
 
 function textFromParts(parts: SessionMessagePartRecord[]): string {
   return parts
@@ -179,6 +175,13 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
   const getSettings = options.getSettings ?? (() => options.settings);
   return {
     async createRuntime({ session, history, parts }) {
+      const { bootstrap } = await import("./runtime.js");
+      const { loadSkillsThreeSources } = await import("./commands/main.js");
+      const {
+        mergePluginMcpServers,
+        registerPluginHooks,
+        registerPluginTools,
+      } = await import("./plugin-contributions.js");
       const settings = getSettings();
       const skillRegistry = new SkillRegistry();
       const pluginContributions = await loadSkillsThreeSources(skillRegistry, session.cwd, settings);
@@ -229,6 +232,11 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
         mcpManager,
         session.cwd,
         getSettings,
+        createAgentSession({
+          queryEngine: bundle.queryEngine,
+          cwd: session.cwd,
+          sessionId: session.id,
+        }),
       );
     },
   };
@@ -236,29 +244,29 @@ export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactory
 
 export class CliSessionRuntime implements SessionRuntime {
   constructor(
-    private readonly bundle: Awaited<ReturnType<typeof bootstrap>>,
+    private readonly bundle: CliRuntimeBundle,
     private readonly mcpManager: McpClientManager,
     private readonly cwd: string,
     private readonly getSettings: () => Settings,
+    private readonly agentSession: AgentSession = createAgentSession({
+      queryEngine: bundle.queryEngine,
+      cwd,
+    }),
   ) {}
 
-  async runPrompt(input: SessionRuntimeRunInput, host: RuntimeHostPort): Promise<SessionRuntimeRunResult> {
+  async runPrompt(input: SessionRuntimeRunInput, host: AgentRunHost): Promise<SessionRuntimeRunResult> {
     if (input.session.model) this.bundle.queryEngine.setModel(input.session.model);
     let lastWake = 0;
-    for await (const event of this.bundle.queryEngine.submitMessage(
-      input.input.content,
-      {
-        signal: input.signal,
-        pullFollowUps: () => {
-          if (input.wakeCount() <= lastWake) return [];
-          lastWake = input.wakeCount();
-          return input.drainSteeredInputs().map((row) => row.content);
-        },
-        runtimeHost: host,
+    for await (const _event of this.agentSession.submitMessage(input.input.content, {
+      signal: input.signal,
+      pullFollowUps: () => {
+        if (input.wakeCount() <= lastWake) return [];
+        lastWake = input.wakeCount();
+        return input.drainSteeredInputs().map((row) => row.content);
       },
-    )) {
+      host,
+    })) {
       if (input.signal.aborted) throw new Error("Run interrupted");
-      await host.emitStreamEvent(event);
     }
     if (input.signal.aborted) throw new Error("Run interrupted");
     return { messages: [] };
@@ -307,6 +315,7 @@ export class CliSessionRuntime implements SessionRuntime {
   }
 
   async remember(): Promise<SessionRememberResult> {
+    const { extractMemoriesFromTurn } = await import("@openharness/services/memory-extract");
     const memoryDir = getProjectMemoryDir(this.cwd);
     const manager = new MemoryManager(1000, memoryDir);
     await manager.loadFromFile(join(memoryDir, "memory.json")).catch(() => {});

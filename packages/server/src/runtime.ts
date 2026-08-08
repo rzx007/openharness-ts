@@ -4,7 +4,7 @@ import type {
   SessionMessagePartRecord,
   SessionMessageRecord,
   SessionRecord,
-} from "@openharness/services";
+} from "@openharness/services/session-runtime/types";
 import type { AgentRunHost } from "@openharness/core";
 
 import type { SessionRuntimeInspect } from "./settings-api.js";

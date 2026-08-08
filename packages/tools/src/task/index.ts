@@ -124,7 +124,7 @@ export const taskWaitTool: ToolDefinition = {
     "Block until one or more background tasks finish and return their results. " +
     "Use this to wait for task_id values returned by Agent or TaskCreate. For Agent-created " +
     "child sessions, TaskWait waits on the user-visible task projection; the live child " +
-    "invocation handle stays behind RuntimeHostPort. " +
+    "invocation handle stays behind AgentRunHost. " +
     "Accepts taskIds (string[], also tolerates a single string) and an optional " +
     "timeoutSeconds (default 300). Each task is awaited independently, so one failed, " +
     "timed-out, or unknown task_id does not affect the others; the result is a readable " +
@@ -175,7 +175,7 @@ export const taskWaitTool: ToolDefinition = {
     }
 
     // Await every user-visible task projection independently. For Agent-created
-    // child sessions, RuntimeHostPort keeps the live invocation handle private;
+    // child sessions, AgentRunHost keeps the live invocation handle private;
     // TaskWait only needs the task_id returned to the model.
     //
     // A single failed/unknown id never drags
