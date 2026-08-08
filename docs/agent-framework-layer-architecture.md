@@ -27,7 +27,7 @@ TUI/Web/CLI are interaction surfaces
 daemon should host agents, not define what an agent is.
 ```
 
-当前 Phase 0-12 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 `RuntimeHostPort`，但这只是边界，不是完整的 framework API。下一步应该补出一个 OpenHarness 内部 `Agent Framework Layer`：
+当前 Phase 0-13 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，但这只是边界，不是完整的 framework API。下一步应该补出一个 OpenHarness 内部 `Agent Framework Layer`：
 
 ```text
 Agent Framework Layer
@@ -213,7 +213,7 @@ const result = await agent.submitMessage("...");
 
 ## 5. Host Capability 设计
 
-`RuntimeHostPort` 是当前雏形。framework 层可以把它升级成更清晰的 host contract。
+`AgentRunHost` 是当前雏形。framework 层可以继续把它升级成更完整的 agent host contract。
 
 ```ts
 interface AgentRunHost {
@@ -224,7 +224,7 @@ interface AgentRunHost {
 
   requestPermission(request: ToolPermissionRequest): Promise<ToolPermissionDecision>;
 
-  spawnChildAgent?(input: ChildAgentSpawnInput): Promise<ChildAgentInvocation>;
+  spawnChildAgent?(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation>;
   sendChildInput?(invocationId: string, input: ChildAgentInput): Promise<void>;
   interruptChildAgent?(invocationId: string, reason?: string): Promise<void>;
   awaitChildAgent?(invocationId: string): Promise<ChildAgentResult>;
@@ -244,7 +244,7 @@ interface AgentRunHost {
 
 | 当前类型 | 未来位置 |
 |---|---|
-| `RuntimeHostPort` | framework host contract |
+| `AgentRunHost` | framework host contract |
 | `DaemonRuntimeHostPort` | server/daemon host adapter |
 | `DaemonChildAgentHost` | server/daemon child-agent adapter |
 | `ChildSessionHost` | server-local adapter port，不进入 framework |
@@ -258,7 +258,7 @@ interface AgentRunHost {
 
 ```text
 QueryEngine/tool
-  -> RuntimeHostPort.requestPermission()
+  -> AgentRunHost.requestPermission()
   -> DaemonRuntimeHostPort
   -> StorePermissionBroker
   -> PermissionController live waiter
@@ -334,16 +334,16 @@ framework 视角可以更简单：
 
 ```ts
 interface ChildAgentRuntime {
-  spawn(input: ChildAgentSpawnInput): Promise<ChildAgentInvocation>;
+  spawn(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation>;
 }
 
-interface ChildAgentInvocation {
+interface AgentChildAgentInvocation {
   id: string;
   taskId?: string;
   sessionId?: string;
   runId?: string;
   worktree?: { path: string; branch: string };
-  result: Promise<ChildAgentResult>;
+  result: Promise<AgentChildAgentResult>;
 }
 ```
 
@@ -452,7 +452,9 @@ packages/core or packages/agent-runtime
   ChildAgentRuntime
 ```
 
-当前 `RuntimeHostPort` 可以作为原型，但要去 daemon 命名。
+历史 `RuntimeHostPort` 已被 `AgentRunHost` 取代，server 不再保留旧类型出口。
+
+状态：已开始落地。`packages/core/src/types/runtime.ts` 已提供 `AgentRunHost`、`AgentRunScope`、`AgentRuntimeEvent`、`AgentPermissionRequest/Decision`、`AgentChildAgentHost` 等 daemon-neutral host 类型；server 的 `DaemonRuntimeHostPort` 已实现 `AgentRunHost`。
 
 ### Phase B：实现 standalone runner
 
@@ -525,24 +527,32 @@ daemon projection sink renders store messages/parts
 
 ## 12. 推荐下一步
 
-下一步建议不是继续拆 daemon 文件，而是做一个很小的代码 Phase：
+Phase 13 已落地为很小的命名边界代码改造：
 
 ```text
 Phase 13: introduce AgentRunHost naming boundary
 ```
 
-低风险动作：
+已完成动作：
 
 1. 在 framework/core 侧定义 daemon-neutral host type。
-2. 让 server `RuntimeHostPort` 逐步 alias 或迁移到这个类型。
-3. 不改变运行行为。
-4. 更新 `SessionRuntime.runPrompt(input, host)` 的命名与文档，让它看起来是 framework host，而不是 daemon host。
+2. 让 `SessionRuntime.runPrompt(input, host)` 接收 `AgentRunHost`。
+3. 让 server `DaemonRuntimeHostPort` / `DaemonChildAgentHost` / `DaemonChildAgentHostFactory` 使用 `Agent*` host 类型。
+4. 删除 `packages/server/src/runtime-host.ts` 旧命名出口，避免继续保留兼容层。
 
-完成后，再做：
+下一步建议：
 
 ```text
 Phase 14: standalone in-memory AgentSession facade
 ```
+
+目标：
+
+1. 提供一个不依赖 daemon store/HTTP 的单进程 agent session。
+2. 复用 `QueryEngine.submitMessage()` 和 `AgentRunHost`。
+3. 默认 host 支持 stream/event callbacks、permission callback、child agent unsupported。
+4. 不改变 daemon 当前运行行为。
+5. 后续让 `CliSessionRuntime` 复用该 facade。
 
 这才对应你说的“这种形态”：
 

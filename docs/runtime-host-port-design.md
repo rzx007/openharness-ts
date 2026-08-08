@@ -1,14 +1,14 @@
-# Runtime Host Port 设计与 Phase 12 落地状态
+# Runtime Host Port 设计与 Phase 13 落地状态
 
 > 日期：2026-08-07
 >
-> 状态：Phase 0-12 已落地。本文是当前代码的任务文档，不是未来提案。
+> 状态：Phase 0-13 已落地。本文是当前代码的任务文档，不是未来提案。
 >
-> 目标：把 daemon 和 QueryEngine 之间零散的 callback、bridge、handle 收束到一个 run-scoped `RuntimeHostPort` 边界，降低状态归属分裂和句柄双向穿梭。
+> 目标：把 daemon 和 QueryEngine 之间零散的 callback、bridge、handle 收束到一个 run-scoped `AgentRunHost` 边界，降低状态归属分裂和句柄双向穿梭。
 
 ## 0. 核心判断
 
-`RuntimeHostPort` 不是新的业务大对象。它是一条边界：
+`AgentRunHost` 不是新的业务大对象。它是一条边界：
 
 ```text
 runtime/framework asks for host capabilities
@@ -32,7 +32,7 @@ SessionRunExecutor
 ```text
 daemon owns durable product state
 runtime owns execution
-RuntimeHostPort is the narrow host-capability port
+AgentRunHost is the narrow host-capability port
 ```
 
 ## 1. 当前接口
@@ -41,7 +41,7 @@ RuntimeHostPort is the narrow host-capability port
 
 | 类型 | 文件 | 说明 |
 |---|---|---|
-| `RuntimeHostPort` | `packages/server/src/runtime-host.ts` | daemon run-scoped host port |
+| `AgentRunHost` | `packages/core/src/types/runtime.ts` | framework-level run-scoped host contract |
 | `QueryRuntimeHost` | `packages/core/src/types/runtime.ts` | core/tool 可见的 host contract |
 | `ToolRuntimeHost` | `packages/core/src/types/tools.ts` | tool context 中的 host contract |
 | `SessionRuntime` | `packages/server/src/runtime.ts` | runtime 必须接收 `runPrompt(input, host)` |
@@ -49,23 +49,23 @@ RuntimeHostPort is the narrow host-capability port
 当前形状：
 
 ```ts
-export interface RuntimeHostPort extends RuntimeChildAgentHost {
-  readonly scope: RuntimeHostScope;
+export interface AgentRunHost extends AgentChildAgentHost {
+  readonly scope: AgentRunScope;
 
-  emitEvent(event: RuntimeHostEvent): void | Promise<void>;
+  emitEvent(event: AgentRuntimeEvent): void | Promise<void>;
   emitStreamEvent(event: StreamEvent): void | Promise<void>;
-  requestPermission(input: PermissionRequestInput): Promise<PermissionDecision>;
+  requestPermission(input: AgentPermissionRequest): Promise<AgentPermissionDecision>;
 }
 
-export interface RuntimeChildAgentHost {
-  spawnChildAgent(input: ChildAgentSpawnInput): Promise<ChildAgentInvocation>;
-  sendChildInput(invocationId: string, input: ChildAgentInput): Promise<void>;
+export interface AgentChildAgentHost {
+  spawnChildAgent(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation>;
+  sendChildInput(invocationId: string, input: AgentChildAgentInput): Promise<void>;
   interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
-  awaitChildAgent(invocationId: string): Promise<ChildAgentResult>;
+  awaitChildAgent(invocationId: string): Promise<AgentChildAgentResult>;
 }
 
 export interface SessionRuntime {
-  runPrompt(input: SessionRuntimeRunInput, host: RuntimeHostPort): Promise<SessionRuntimeRunResult>;
+  runPrompt(input: SessionRuntimeRunInput, host: AgentRunHost): Promise<SessionRuntimeRunResult>;
 }
 ```
 
@@ -85,9 +85,9 @@ createRuntime(context: {
 
 | 旧入口 | 当前入口 | 状态 |
 |---|---|---|
-| `SessionRuntimeHooks.onEvent` | `RuntimeHostPort.emitEvent()` | 已直接切换，无 alias |
-| `SessionRuntimeHooks.onStreamEvent` | `RuntimeHostPort.emitStreamEvent()` | 已直接切换，无 alias |
-| `SessionRuntimeHooks.askPermission` | `RuntimeHostPort.requestPermission()` | 已直接切换，无 alias |
+| `SessionRuntimeHooks.onEvent` | `AgentRunHost.emitEvent()` | 已直接切换，无 alias |
+| `SessionRuntimeHooks.onStreamEvent` | `AgentRunHost.emitStreamEvent()` | 已直接切换，无 alias |
+| `SessionRuntimeHooks.askPermission` | `AgentRunHost.requestPermission()` | 已直接切换，无 alias |
 | `QueryEngine.permissionPrompt` | `SubmitMessageOptions.runtimeHost.requestPermission()` | 已删除 |
 | `QueryEngine.runtimeEventSink` | `ToolContext.runtimeHost.emitEvent()` | 已删除 |
 | `registerChildSessionBackend()` | `ToolRuntimeHost.spawnChildAgent()` | Phase 5B 已切换 |
@@ -99,7 +99,7 @@ createRuntime(context: {
 ```mermaid
 sequenceDiagram
   participant QE as QueryEngine
-  participant Host as RuntimeHostPort
+  participant Host as AgentRunHost
   participant DHost as DaemonRuntimeHostPort
   participant Broker as StorePermissionBroker
   participant Controller as PermissionController
@@ -131,7 +131,7 @@ sequenceDiagram
 |---|---|
 | `packages/server/src/permission-controller.ts` | live request handle、resolve、abort expire |
 | `packages/server/src/permission-broker.ts` | durable projection、session approval cache、HTTP reply bridge |
-| `packages/server/src/http/daemon-runtime-host.ts` | `RuntimeHostPort.requestPermission()` daemon adapter |
+| `packages/server/src/http/daemon-runtime-host.ts` | `AgentRunHost.requestPermission()` daemon adapter |
 | `packages/core/src/engine/query-engine.ts` | tool permission 调用 host |
 
 ## 4. Child Agent 闭环
@@ -238,8 +238,9 @@ flowchart TD
 - Phase 10：`ChildSessionHost` / `SessionTaskBridge` 类型已从 `runtime.ts` 移入 `packages/server/src/http/child-agent-ports.ts`，`runtime.ts` 只保留 `SessionRuntime` contract。
 - Phase 11：删除 `DaemonChildSessionHost` 独立 adapter；`DaemonChildAgentHostFactory` 直接从 `SessionApplicationService` 生成 server-local `ChildSessionHost` port。
 - Phase 12：`SessionApplicationService` / `SessionRunEngine` 不再反向引用 `ChildSessionHost`；application/run engine 自己声明用例类型，server-local child port 只服务 factory 与 daemon child adapter。
+- Phase 13：`packages/core/src/types/runtime.ts` 新增 daemon-neutral `AgentRunHost` / `AgentRunScope` / `AgentChildAgentHost` 类型；`SessionRuntime.runPrompt()` 接收 `AgentRunHost`，server 的 `DaemonRuntimeHostPort` 实现该 framework contract，并删除旧 `packages/server/src/runtime-host.ts` 类型出口。
 - `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server-local adapter。
 
 ## 8. 后续非兼容改造建议
 
-1. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
+1. 继续推进 Phase 14：提供 standalone in-memory `AgentSession` facade，让 daemon 与单进程 runner 共用同一个 framework API。

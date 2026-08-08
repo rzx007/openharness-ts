@@ -1,7 +1,7 @@
 import type { PermissionRequestRecord, PermissionStatus, SessionStore } from "@openharness/services";
+import type { AgentPermissionDecision } from "@openharness/core";
 import type { StructuredLogger } from "./observability.js";
 import { PermissionController } from "./permission-controller.js";
-import type { PermissionDecision } from "./runtime-host.js";
 
 export type PermissionReplyStatus = Extract<PermissionStatus, "approved" | "denied" | "expired">;
 export type PermissionDecisionScope = "once" | "session";
@@ -200,7 +200,7 @@ export class StorePermissionBroker implements PermissionBroker {
     });
   }
 
-  private decisionFromRequest(request: PermissionRequestRecord, reason?: string): PermissionDecision {
+  private decisionFromRequest(request: PermissionRequestRecord, reason?: string): AgentPermissionDecision {
     if (request.status === "approved" || request.status === "denied") {
       return {
         status: request.status,

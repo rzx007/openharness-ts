@@ -20,6 +20,7 @@ export interface QueryRuntimePermissionRequest {
 
 export interface QueryRuntimePermissionDecision {
   status: "approved" | "denied" | "expired";
+  decision?: "once" | "session";
   reason?: string;
 }
 
@@ -72,6 +73,38 @@ export interface QueryRuntimeChildAgentHost {
 export interface QueryRuntimeHost extends QueryRuntimeChildAgentHost {
   emitEvent(event: QueryRuntimeHostEvent): void | Promise<void>;
   requestPermission(input: QueryRuntimePermissionRequest): Promise<QueryRuntimePermissionDecision>;
+}
+
+export interface AgentRunScope {
+  sessionId: string;
+  runId: string;
+  inputId: string;
+  cwd: string;
+  traceId: string;
+  signal: AbortSignal;
+}
+
+export type AgentRuntimeEvent = QueryRuntimeHostEvent;
+export type AgentPermissionRequest = QueryRuntimePermissionRequest;
+export type AgentPermissionDecision = QueryRuntimePermissionDecision;
+export type AgentChildAgentSpawnInput = QueryRuntimeChildAgentSpawnInput;
+export type AgentChildAgentInput = QueryRuntimeChildAgentInput;
+export type AgentChildAgentResult = QueryRuntimeChildAgentResult;
+export type AgentChildAgentInvocation = QueryRuntimeChildAgentInvocation;
+export type AgentChildAgentHost = QueryRuntimeChildAgentHost;
+
+/**
+ * Run-scoped boundary for capabilities owned by the host environment.
+ *
+ * Framework code defines this contract; applications such as the daemon decide
+ * how to project these capabilities into durable state, HTTP, SSE, or local UI.
+ */
+export interface AgentRunHost extends AgentChildAgentHost {
+  readonly scope: AgentRunScope;
+
+  emitEvent(event: AgentRuntimeEvent): void | Promise<void>;
+  emitStreamEvent(event: StreamEvent): void | Promise<void>;
+  requestPermission(input: AgentPermissionRequest): Promise<AgentPermissionDecision>;
 }
 
 export interface QueryEngine {

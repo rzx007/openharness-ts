@@ -1,4 +1,4 @@
-import type { RuntimeChildAgentHost, RuntimeHostScope } from "../runtime-host.js";
+import type { AgentChildAgentHost, AgentRunScope } from "@openharness/core";
 import type { ChildSessionHost } from "./child-agent-ports.js";
 import { DaemonChildAgentHost } from "./daemon-child-agent-host.js";
 import type { SessionApplicationService } from "./session-application-service.js";
@@ -16,9 +16,9 @@ type ChildSessionApplication = Pick<
 
 export interface ChildAgentHostFactory {
   create(input: {
-    scope: RuntimeHostScope;
+    scope: AgentRunScope;
     session: { id: string; cwd: string };
-  }): RuntimeChildAgentHost;
+  }): AgentChildAgentHost;
 }
 
 export interface DaemonChildAgentHostFactoryContext {
@@ -30,9 +30,9 @@ export class DaemonChildAgentHostFactory implements ChildAgentHostFactory {
   constructor(private readonly context: DaemonChildAgentHostFactoryContext) {}
 
   create(input: {
-    scope: RuntimeHostScope;
+    scope: AgentRunScope;
     session: { id: string; cwd: string };
-  }): RuntimeChildAgentHost {
+  }): AgentChildAgentHost {
     return new DaemonChildAgentHost({
       scope: input.scope,
       childSessionHost: this.createChildSessionHost(),

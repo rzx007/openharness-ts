@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import type {
-  ChildAgentInput,
-  ChildAgentInvocation,
-  ChildAgentResult,
-  ChildAgentSpawnInput,
-  RuntimeChildAgentHost,
-  RuntimeHostScope,
-} from "../runtime-host.js";
+  AgentChildAgentHost,
+  AgentChildAgentInput,
+  AgentChildAgentInvocation,
+  AgentChildAgentResult,
+  AgentChildAgentSpawnInput,
+  AgentRunScope,
+} from "@openharness/core";
 import type { ChildSessionHost, SessionTaskBridge } from "./child-agent-ports.js";
 import {
   buildChildAgentWorktreeSlug,
@@ -20,28 +20,28 @@ interface ChildInvocationRecord {
   sessionId: string;
   runId?: string;
   generation: number;
-  result: Promise<ChildAgentResult>;
+  result: Promise<AgentChildAgentResult>;
   worktreeSlug?: string;
   worktreeManager?: ChildAgentWorktreeManager;
 }
 
 export interface DaemonChildAgentHostContext {
-  scope: RuntimeHostScope;
+  scope: AgentRunScope;
   childSessionHost: ChildSessionHost;
   sessionTaskBridge: SessionTaskBridge;
   createWorktreeManager?: (cwd: string) => Promise<ChildAgentWorktreeManager>;
 }
 
-export class DaemonChildAgentHost implements RuntimeChildAgentHost {
+export class DaemonChildAgentHost implements AgentChildAgentHost {
   private readonly invocations = new Map<string, ChildInvocationRecord>();
 
   constructor(private readonly context: DaemonChildAgentHostContext) {}
 
-  async spawnChildAgent(input: ChildAgentSpawnInput): Promise<ChildAgentInvocation> {
+  async spawnChildAgent(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation> {
     const invocationId = `child_${randomUUID()}`;
     const team = input.team ?? "default";
     let effectiveCwd = input.cwd;
-    let worktree: ChildAgentInvocation["worktree"];
+    let worktree: AgentChildAgentInvocation["worktree"];
     let worktreeSlug: string | undefined;
     let worktreeManager: ChildAgentWorktreeManager | undefined;
     let childSessionId: string | undefined;
@@ -136,7 +136,7 @@ export class DaemonChildAgentHost implements RuntimeChildAgentHost {
     }
   }
 
-  async sendChildInput(invocationId: string, input: ChildAgentInput): Promise<void> {
+  async sendChildInput(invocationId: string, input: AgentChildAgentInput): Promise<void> {
     const record = this.getInvocation(invocationId);
     await this.context.sessionTaskBridge.writeToSessionTask(record.taskId, input.content);
   }
@@ -158,7 +158,7 @@ export class DaemonChildAgentHost implements RuntimeChildAgentHost {
     this.invocations.delete(invocationId);
   }
 
-  async awaitChildAgent(invocationId: string): Promise<ChildAgentResult> {
+  async awaitChildAgent(invocationId: string): Promise<AgentChildAgentResult> {
     return await this.getInvocation(invocationId).result;
   }
 
@@ -173,10 +173,10 @@ export class DaemonChildAgentHost implements RuntimeChildAgentHost {
     }
   }
 
-  private monitorRun(record: ChildInvocationRecord, runId: string | undefined): Promise<ChildAgentResult> {
+  private monitorRun(record: ChildInvocationRecord, runId: string | undefined): Promise<AgentChildAgentResult> {
     const generation = ++record.generation;
     if (!runId) {
-      const result: ChildAgentResult = { status: "completed", output: "" };
+      const result: AgentChildAgentResult = { status: "completed", output: "" };
       void this.context.sessionTaskBridge.completeSessionTask(record.taskId, result);
       return Promise.resolve(result);
     }
@@ -184,7 +184,7 @@ export class DaemonChildAgentHost implements RuntimeChildAgentHost {
     return this.context.childSessionHost.awaitRun(record.sessionId, runId).then(
       async (result) => {
         if (record.generation !== generation) return result;
-        const normalized: ChildAgentResult = {
+        const normalized: AgentChildAgentResult = {
           status: result.status,
           output: result.output,
           ...(result.error ? { error: result.error } : {}),
@@ -196,7 +196,7 @@ export class DaemonChildAgentHost implements RuntimeChildAgentHost {
       async (error) => {
         if (record.generation !== generation) return { status: "failed", output: "", error: "" };
         const message = error instanceof Error ? error.message : String(error);
-        const result: ChildAgentResult = { status: "failed", output: message, error: message };
+        const result: AgentChildAgentResult = { status: "failed", output: message, error: message };
         await this.context.sessionTaskBridge.completeSessionTask(record.taskId, result).catch(() => {});
         await this.context.childSessionHost.closeRuntime(record.sessionId).catch(() => {});
         return result;

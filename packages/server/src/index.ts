@@ -56,16 +56,17 @@ export type {
   SessionUsageSnapshot,
 } from "./runtime.js";
 export type {
-  ChildAgentInput,
-  ChildAgentInvocation,
-  ChildAgentResult,
-  ChildAgentSpawnInput,
-  PermissionDecision,
-  PermissionRequestInput,
-  RuntimeHostEvent,
-  RuntimeHostPort,
-  RuntimeHostScope,
-} from "./runtime-host.js";
+  AgentChildAgentHost,
+  AgentChildAgentInput,
+  AgentChildAgentInvocation,
+  AgentChildAgentResult,
+  AgentChildAgentSpawnInput,
+  AgentPermissionDecision,
+  AgentPermissionRequest,
+  AgentRunHost,
+  AgentRunScope,
+  AgentRuntimeEvent,
+} from "@openharness/core";
 export { estimateCostUsd } from "./usage.js";
 export {
   TRACE_ID_HEADER,

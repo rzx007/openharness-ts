@@ -2,7 +2,7 @@
 
 > 日期：2026-08-07
 >
-> 当前状态：方向可行，且 Phase 0-12 已落地到当前代码。`RuntimeHostPort` 已成为 `SessionRuntime.runPrompt(input, host)` 的主边界；permission、runtime event、child-agent invocation 都通过这个 run-scoped host 进入 daemon。
+> 当前状态：方向可行，且 Phase 0-13 已落地到当前代码。`AgentRunHost` 已成为 `SessionRuntime.runPrompt(input, host)` 的 framework-level 主边界；permission、runtime event、child-agent invocation 都通过这个 run-scoped host 进入 daemon。
 
 ## 1. 结论
 
@@ -36,9 +36,9 @@ SessionRunExecutor
 
 | 旧入口 | 当前入口 |
 |---|---|
-| `permissionPrompt` | `RuntimeHostPort.requestPermission()` |
-| `runtimeEventSink` | `RuntimeHostPort.emitEvent()` |
-| `SessionRuntimeHooks` | `RuntimeHostPort` |
+| `permissionPrompt` | `AgentRunHost.requestPermission()` |
+| `runtimeEventSink` | `AgentRunHost.emitEvent()` |
+| `SessionRuntimeHooks` | `AgentRunHost` |
 | runtimeFactory `childSessionHost/sessionTaskBridge` | run-scoped `DaemonChildAgentHostFactory` + `DaemonChildAgentHost` |
 | Agent tool `ChildSessionBackend` | `ToolRuntimeHost.spawnChildAgent()` |
 | CLI `registerChildSessionBackend()` | 已删除 |
@@ -118,8 +118,9 @@ DaemonChildAgentHost
 7. `ChildSessionHost` / `SessionTaskBridge` 类型已从 runtime contract 移到 server-local `child-agent-ports.ts`。
 8. `DaemonChildSessionHost` 独立 adapter 已删除；factory 直接把 `SessionApplicationService` 绑定为 `ChildSessionHost` port。
 9. `SessionApplicationService` / `SessionRunEngine` 不再反向依赖 `ChildSessionHost`，application/run engine 用例类型由各自模块声明，child port 保持 server-local。
+10. `AgentRunHost` / `AgentRunScope` / `AgentChildAgentHost` 已在 `@openharness/core` 定义；server 的 `DaemonRuntimeHostPort` 实现该 framework contract，`SessionRuntime.runPrompt()` 接收 `AgentRunHost`。
 
 ## 7. 后续建议
 
-1. 把 core 的 `QueryRuntimeHost` 进一步稳定成 framework API。
+1. 推进 standalone in-memory `AgentSession` facade，让 daemon-hosted runner 与单进程 runner 共用 framework API。
 2. 明确 child invocation 的 restart 语义：live-only、recover-by-session，还是未来 serialized run state。

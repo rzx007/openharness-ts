@@ -1,37 +1,36 @@
-import type { StreamEvent } from "@openharness/core";
-
 import type {
-  ChildAgentInput,
-  ChildAgentInvocation,
-  ChildAgentResult,
-  ChildAgentSpawnInput,
-  PermissionDecision,
-  PermissionRequestInput,
-  RuntimeChildAgentHost,
-  RuntimeHostEvent,
-  RuntimeHostPort,
-  RuntimeHostScope,
-} from "../runtime-host.js";
+  AgentChildAgentHost,
+  AgentChildAgentInput,
+  AgentChildAgentInvocation,
+  AgentChildAgentResult,
+  AgentChildAgentSpawnInput,
+  AgentPermissionDecision,
+  AgentPermissionRequest,
+  AgentRunHost,
+  AgentRunScope,
+  AgentRuntimeEvent,
+  StreamEvent,
+} from "@openharness/core";
 
 export interface DaemonRuntimeHostPortContext {
-  scope: RuntimeHostScope;
-  emitEvent(event: RuntimeHostEvent): void | Promise<void>;
+  scope: AgentRunScope;
+  emitEvent(event: AgentRuntimeEvent): void | Promise<void>;
   emitStreamEvent(event: StreamEvent): void | Promise<void>;
-  requestPermission(input: PermissionRequestInput): Promise<PermissionDecision>;
-  childAgentHost: RuntimeChildAgentHost;
+  requestPermission(input: AgentPermissionRequest): Promise<AgentPermissionDecision>;
+  childAgentHost: AgentChildAgentHost;
 }
 
 /**
  * Runtime host implementation for daemon-owned runs.
  */
-export class DaemonRuntimeHostPort implements RuntimeHostPort {
-  readonly scope: RuntimeHostScope;
+export class DaemonRuntimeHostPort implements AgentRunHost {
+  readonly scope: AgentRunScope;
 
   constructor(private readonly context: DaemonRuntimeHostPortContext) {
     this.scope = context.scope;
   }
 
-  emitEvent(event: RuntimeHostEvent): void | Promise<void> {
+  emitEvent(event: AgentRuntimeEvent): void | Promise<void> {
     return this.context.emitEvent(event);
   }
 
@@ -39,15 +38,15 @@ export class DaemonRuntimeHostPort implements RuntimeHostPort {
     return this.context.emitStreamEvent(event);
   }
 
-  async requestPermission(input: PermissionRequestInput): Promise<PermissionDecision> {
+  async requestPermission(input: AgentPermissionRequest): Promise<AgentPermissionDecision> {
     return await this.context.requestPermission(input);
   }
 
-  async spawnChildAgent(input: ChildAgentSpawnInput): Promise<ChildAgentInvocation> {
+  async spawnChildAgent(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation> {
     return await this.context.childAgentHost.spawnChildAgent(input);
   }
 
-  async sendChildInput(invocationId: string, input: ChildAgentInput): Promise<void> {
+  async sendChildInput(invocationId: string, input: AgentChildAgentInput): Promise<void> {
     await this.context.childAgentHost.sendChildInput(invocationId, input);
   }
 
@@ -55,7 +54,7 @@ export class DaemonRuntimeHostPort implements RuntimeHostPort {
     await this.context.childAgentHost.interruptChildAgent(invocationId, reason);
   }
 
-  async awaitChildAgent(invocationId: string): Promise<ChildAgentResult> {
+  async awaitChildAgent(invocationId: string): Promise<AgentChildAgentResult> {
     return await this.context.childAgentHost.awaitChildAgent(invocationId);
   }
 }

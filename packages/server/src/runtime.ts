@@ -5,9 +5,9 @@ import type {
   SessionMessageRecord,
   SessionRecord,
 } from "@openharness/services";
+import type { AgentRunHost } from "@openharness/core";
 
 import type { SessionRuntimeInspect } from "./settings-api.js";
-import type { RuntimeHostPort } from "./runtime-host.js";
 
 export interface SessionCompactResult {
   messageCount: number;
@@ -52,7 +52,7 @@ export interface SessionRuntimeRunResult {
 }
 
 export interface SessionRuntime {
-  runPrompt(input: SessionRuntimeRunInput, host: RuntimeHostPort): Promise<SessionRuntimeRunResult>;
+  runPrompt(input: SessionRuntimeRunInput, host: AgentRunHost): Promise<SessionRuntimeRunResult>;
   close(): Promise<void>;
   /** Optional inspection surface for session-scoped resources (MCP, etc.). */
   inspect?(): Promise<SessionRuntimeInspect> | SessionRuntimeInspect;

@@ -1,4 +1,4 @@
-import type { PermissionDecision } from "./runtime-host.js";
+import type { AgentPermissionDecision } from "@openharness/core";
 
 export interface PermissionControllerWaitInput {
   requestId: string;
@@ -6,19 +6,19 @@ export interface PermissionControllerWaitInput {
   expire(reason: string): void;
 }
 
-type PermissionWaiter = (decision: PermissionDecision) => void;
+type PermissionWaiter = (decision: AgentPermissionDecision) => void;
 
 export class PermissionController {
   private readonly waiters = new Map<string, Set<PermissionWaiter>>();
 
-  wait(input: PermissionControllerWaitInput): Promise<PermissionDecision> {
+  wait(input: PermissionControllerWaitInput): Promise<AgentPermissionDecision> {
     if (input.signal?.aborted) {
       const reason = "Run interrupted before permission reply";
       input.expire(reason);
       return Promise.resolve({ status: "expired", reason });
     }
 
-    return new Promise<PermissionDecision>((resolve) => {
+    return new Promise<AgentPermissionDecision>((resolve) => {
       const waiter: PermissionWaiter = (decision) => {
         cleanup();
         resolve(decision);
@@ -44,7 +44,7 @@ export class PermissionController {
     });
   }
 
-  resolve(requestId: string, decision: PermissionDecision): boolean {
+  resolve(requestId: string, decision: AgentPermissionDecision): boolean {
     const waiters = this.waiters.get(requestId);
     if (!waiters) return false;
     this.waiters.delete(requestId);
