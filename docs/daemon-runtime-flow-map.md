@@ -44,13 +44,15 @@ flowchart TD
   factory --> runtime["CliSessionRuntime"]
   runtime --> qe["QueryEngine"]
 
-  executor --> childAgentHost["DaemonChildAgentHost<br/>run-scoped"]
+  executor --> childFactory["DaemonChildAgentHostFactory"]
+  childFactory --> childAgentHost["DaemonChildAgentHost<br/>run-scoped"]
   executor --> runtimeHost["DaemonRuntimeHostPort<br/>run-scoped"]
   qe -->|"ToolContext.runtimeHost"| runtimeHost
   runtimeHost --> childAgentHost
 
-  childAgentHost --> childSessionHost["DaemonChildSessionHost"]
-  childSessionHost --> appSvc
+  childFactory --> childSessionPort["ChildSessionHost port<br/>server-local"]
+  childAgentHost --> childSessionPort
+  childSessionPort --> appSvc
   childAgentHost --> taskBridge["SessionTaskBridge"]
   taskBridge --> store
 
@@ -210,7 +212,7 @@ flowchart TD
   childAgentHost --> worktree{"isolate?"}
   worktree -->|"yes, git repo"| git["create git worktree"]
   worktree -->|"no"| sameCwd["use parent cwd"]
-  git --> createChild["DaemonChildSessionHost.createChildSession()"]
+  git --> createChild["ChildSessionHost port createChildSession()"]
   sameCwd --> createChild
   createChild --> app["SessionApplicationService.createChildSession()"]
   app --> store["SessionStore child session"]
@@ -227,7 +229,7 @@ flowchart TD
 | 问题 | 文件 |
 |---|---|
 | Agent 为什么能创建 child session | `packages/tools/src/agent/index.ts` 调 `context.runtimeHost.spawnChildAgent()` |
-| child session 由谁创建 | `packages/server/src/http/daemon-child-agent-host.ts` -> `DaemonChildSessionHost` -> `SessionApplicationService` |
+| child session 由谁创建 | `DaemonChildAgentHostFactory` 生成 `ChildSessionHost` port -> `SessionApplicationService` |
 | parent task projection 在哪 | `packages/server/src/http/session-task-bridge.ts` |
 | isolated worktree 在哪 | `packages/server/src/http/child-agent-worktree.ts`，cleanup 在 `DaemonChildAgentHost` |
 | TaskWait 等的是什么 | `task_id` 对应的 parent-visible task projection，不是 live invocation handle |

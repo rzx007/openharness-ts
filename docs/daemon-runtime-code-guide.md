@@ -157,7 +157,7 @@ Agent tool
   -> DaemonRuntimeHostPort.spawnChildAgent()
   -> DaemonChildAgentHostFactory.create()
   -> DaemonChildAgentHost.spawnChildAgent()
-  -> DaemonChildSessionHost.createChildSession()
+  -> ChildSessionHost port createChildSession()
   -> SessionApplicationService.createChildSession()
   -> SessionTaskBridge.registerSessionTask()
   -> childSessionHost.admitPrompt()
@@ -185,7 +185,6 @@ Agent tool
 | child-agent host factory | `packages/server/src/http/child-agent-host-factory.ts` |
 | daemon child adapter | `packages/server/src/http/daemon-child-agent-host.ts` |
 | isolated worktree helper | `packages/server/src/http/child-agent-worktree.ts` |
-| child session host | `packages/server/src/http/daemon-child-session-host.ts` |
 | task projection bridge | `packages/server/src/http/session-task-bridge.ts` |
 | child session create/admit/await | `packages/server/src/http/session-application-service.ts` |
 

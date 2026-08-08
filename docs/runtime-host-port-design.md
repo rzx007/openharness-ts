@@ -143,7 +143,7 @@ sequenceDiagram
   participant Host as ToolRuntimeHost
   participant RuntimeHost as DaemonRuntimeHostPort
   participant ChildHost as DaemonChildAgentHost
-  participant SessionHost as DaemonChildSessionHost
+  participant SessionPort as ChildSessionHost port
   participant App as SessionApplicationService
   participant Bridge as SessionTaskBridge
   participant Store as SessionStore
@@ -152,15 +152,15 @@ sequenceDiagram
   Agent->>Host: spawnChildAgent(input)
   Host->>RuntimeHost: delegate
   RuntimeHost->>ChildHost: spawnChildAgent(input)
-  ChildHost->>SessionHost: createChildSession()
-  SessionHost->>App: createChildSession()
+  ChildHost->>SessionPort: createChildSession()
+  SessionPort->>App: createChildSession()
   App->>Store: create child session + warm runtime
   ChildHost->>Bridge: registerSessionTask()
   Bridge->>Store: persist parent-visible task
-  ChildHost->>SessionHost: admitPrompt(child, prompt)
-  SessionHost->>App: admitPrompt()
+  ChildHost->>SessionPort: admitPrompt(child, prompt)
+  SessionPort->>App: admitPrompt()
   App->>Store: create child input/run
-  ChildHost->>SessionHost: awaitRun(child, runId)
+  ChildHost->>SessionPort: awaitRun(child, runId)
   ChildHost->>Bridge: completeSessionTask()
   Agent-->>QE: task_id/session_id/worktree
 ```
@@ -204,9 +204,10 @@ flowchart TD
   QueryEngine -->|"Agent / Workflow tools"| ToolHost["ToolContext.runtimeHost"]
   ToolHost --> Host
   Host --> ChildAgentHost
-  ChildAgentHost --> ChildSessionHost["DaemonChildSessionHost"]
+  ChildFactory --> ChildSessionPort["ChildSessionHost port<br/>server-local"]
+  ChildAgentHost --> ChildSessionPort
   ChildAgentHost --> TaskBridge["SessionTaskBridge"]
-  ChildSessionHost --> App
+  ChildSessionPort --> App
   TaskBridge --> Store["SessionStore"]
   Host --> PermissionBroker["StorePermissionBroker"]
   PermissionBroker --> Store
@@ -235,9 +236,9 @@ flowchart TD
 - Phase 8：`DaemonChildAgentHost` 内部 worktree helper 已抽成 `packages/server/src/http/child-agent-worktree.ts`，并补独立测试。
 - Phase 9：`TaskWait` 语义已明确为等待 user-visible task projection；live child invocation handle 仅由 runtime host/daemon adapter 内部持有。
 - Phase 10：`ChildSessionHost` / `SessionTaskBridge` 类型已从 `runtime.ts` 移入 `packages/server/src/http/child-agent-ports.ts`，`runtime.ts` 只保留 `SessionRuntime` contract。
+- Phase 11：删除 `DaemonChildSessionHost` 独立 adapter；`DaemonChildAgentHostFactory` 直接从 `SessionApplicationService` 生成 server-local `ChildSessionHost` port。
 - `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server-local adapter。
 
 ## 8. 后续非兼容改造建议
 
 1. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
-2. 继续评估是否要把 `DaemonChildSessionHost` 合并进 factory/use case 层，进一步减少 adapter 数量。

@@ -25,7 +25,7 @@ flowchart TD
   childAgentHost --> isolate{"isolate=true?"}
   isolate -->|"yes + git repo"| worktree["create isolated git worktree"]
   isolate -->|"no / not git"| cwd["use parent cwd"]
-  worktree --> createChild["DaemonChildSessionHost.createChildSession()"]
+  worktree --> createChild["ChildSessionHost port<br/>createChildSession()"]
   cwd --> createChild
 
   createChild --> app["SessionApplicationService.createChildSession()"]
@@ -34,7 +34,7 @@ flowchart TD
   childAgentHost --> task["SessionTaskBridge.registerSessionTask()"]
   task --> storeTask["SessionStore SessionTaskRecord<br/>parent-visible task"]
 
-  childAgentHost --> admit["DaemonChildSessionHost.admitPrompt()"]
+  childAgentHost --> admit["ChildSessionHost port<br/>admitPrompt()"]
   admit --> appAdmit["SessionApplicationService.admitPrompt()"]
   appAdmit --> engine["SessionRunEngine"]
   engine --> childRun["child run executes through normal lane"]
@@ -165,7 +165,7 @@ daemon restart 不会恢复 live child invocation handle、provider stream 或 p
 | run-scoped host 创建 | `packages/server/src/http/session-run-executor.ts` |
 | daemon child invocation adapter | `packages/server/src/http/daemon-child-agent-host.ts` |
 | isolated worktree helper | `packages/server/src/http/child-agent-worktree.ts` |
-| child session host | `packages/server/src/http/daemon-child-session-host.ts` |
+| child session server-local port | `packages/server/src/http/child-agent-ports.ts`，由 `child-agent-host-factory.ts` 绑定到 application use case |
 | session/run use cases | `packages/server/src/http/session-application-service.ts` |
 | durable task projection | `packages/server/src/http/session-task-bridge.ts` |
 | runtime host types | `packages/server/src/runtime-host.ts`, `packages/core/src/types/runtime.ts` |

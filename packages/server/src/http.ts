@@ -54,7 +54,6 @@ import { createSessionUtilityRoutes } from "./http/routes/session-utility.js";
 import { createSystemRoutes } from "./http/routes/system.js";
 import { createTaskRoutes } from "./http/routes/task.js";
 import { DaemonChildAgentHostFactory } from "./http/child-agent-host-factory.js";
-import { DaemonChildSessionHost } from "./http/daemon-child-session-host.js";
 import { DaemonControlService } from "./http/daemon-control-service.js";
 import { RequestTraceRegistry } from "./http/request-trace-registry.js";
 import { SessionRunRenderer } from "./http/run-renderer.js";
@@ -202,7 +201,7 @@ export class OpenHarnessHttpServer {
       events: this.sessionEvents,
     });
     const childAgentHostFactory = new DaemonChildAgentHostFactory({
-      childSessionHost: new DaemonChildSessionHost(() => this.sessionApplication),
+      childSessionApplication: () => this.sessionApplication,
       sessionTaskBridgeManager: this.sessionTaskBridgeManager,
     });
     this.runtimePool = new SessionRuntimePool({

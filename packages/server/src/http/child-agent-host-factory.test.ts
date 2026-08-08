@@ -4,7 +4,7 @@ import { DaemonChildAgentHostFactory } from "./child-agent-host-factory.js";
 
 describe("DaemonChildAgentHostFactory", () => {
   it("creates a run-scoped child agent host with the session task bridge", async () => {
-    const childSessionHost = {
+    const childSessionApplication = {
       createChildSession: vi.fn(async (input: any) => ({
         id: "child-1",
         parentId: input.parentId,
@@ -17,11 +17,11 @@ describe("DaemonChildAgentHostFactory", () => {
         createdAt: 1,
         updatedAt: 1,
       })),
-      admitPrompt: vi.fn(async () => ({ runId: "run-child" })),
+      admitPrompt: vi.fn(() => ({ run: { id: "run-child" } })),
       awaitRun: vi.fn(async () => ({ status: "completed" as const, output: "done" })),
-      interrupt: vi.fn(async () => {}),
+      interruptSession: vi.fn(),
       closeRuntime: vi.fn(async () => {}),
-      archive: vi.fn(async () => {}),
+      archiveSessionTree: vi.fn(async () => {}),
     };
     const sessionTaskBridge = {
       registerSessionTask: vi.fn(() => ({ id: "task-1" })),
@@ -33,7 +33,7 @@ describe("DaemonChildAgentHostFactory", () => {
       createBridge: vi.fn(() => sessionTaskBridge),
     };
     const factory = new DaemonChildAgentHostFactory({
-      childSessionHost,
+      childSessionApplication: () => childSessionApplication,
       sessionTaskBridgeManager,
     });
 
@@ -57,7 +57,7 @@ describe("DaemonChildAgentHostFactory", () => {
     });
 
     expect(sessionTaskBridgeManager.createBridge).toHaveBeenCalledWith({ id: "parent-1", cwd: "/repo" });
-    expect(childSessionHost.createChildSession).toHaveBeenCalledWith(expect.objectContaining({
+    expect(childSessionApplication.createChildSession).toHaveBeenCalledWith(expect.objectContaining({
       parentId: "parent-1",
       cwd: "/repo",
       agent: "worker",

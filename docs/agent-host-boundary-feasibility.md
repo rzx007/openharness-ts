@@ -116,9 +116,9 @@ DaemonChildAgentHost
 5. `SessionRunExecutor` 已改为依赖 `DaemonChildAgentHostFactory`，不再直接拿 `ChildSessionHost` + `SessionTaskBridgeManager` 两套句柄。
 6. worktree slug/path/git 操作已从 `DaemonChildAgentHost` 抽到 server-local `child-agent-worktree.ts`。
 7. `ChildSessionHost` / `SessionTaskBridge` 类型已从 runtime contract 移到 server-local `child-agent-ports.ts`。
+8. `DaemonChildSessionHost` 独立 adapter 已删除；factory 直接把 `SessionApplicationService` 绑定为 `ChildSessionHost` port。
 
 ## 7. 后续建议
 
 1. 把 core 的 `QueryRuntimeHost` 进一步稳定成 framework API。
 2. 明确 child invocation 的 restart 语义：live-only、recover-by-session，还是未来 serialized run state。
-3. 继续评估是否合并 `DaemonChildSessionHost` 与 factory/use case 层，减少 adapter 数量。
