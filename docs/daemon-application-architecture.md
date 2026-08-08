@@ -2,7 +2,7 @@
 
 > 当前状态：对应当前代码。本文是 daemon 应用层的权威索引文档，用来从“我要查某条运行流程”快速定位到真实代码。
 >
-> 关联文档：[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)、[`daemon-runtime-code-guide.md`](./daemon-runtime-code-guide.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)、[`agent-child-session-flow.md`](./agent-child-session-flow.md)。
+> 关联文档：[`agent-framework-layer-architecture.md`](./agent-framework-layer-architecture.md)、[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)、[`daemon-runtime-code-guide.md`](./daemon-runtime-code-guide.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)、[`agent-child-session-flow.md`](./agent-child-session-flow.md)。
 
 ## 0. 先建立一个最重要的认识
 
