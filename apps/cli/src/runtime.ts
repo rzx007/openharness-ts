@@ -13,10 +13,13 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { SandboxUnavailableError, startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
-import type { GitRunner } from "@openharness/swarm";
 
 const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
+
+interface GitRunner {
+  (args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }>;
+}
 
 export interface BootstrapOptions {
   settings: Settings;

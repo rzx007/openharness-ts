@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { runWorkflow, type WorkflowTaskRunResult } from "@openharness/coordinator";
 import type { AwaitTaskResult } from "@openharness/services";
-import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
-import { createAgentWorkflowRunner } from "./workflow-runner.js";
+import {
+  createAgentWorkflowRunner,
+  type WorkflowWorkerSpawnConfig,
+  type WorkflowWorkerSpawnResult,
+} from "./workflow-runner.js";
 
 function completedDependency(taskId: string, result: string): WorkflowTaskRunResult {
   return {
@@ -18,8 +21,8 @@ function completedDependency(taskId: string, result: string): WorkflowTaskRunRes
 }
 
 describe("createAgentWorkflowRunner", () => {
-  it("spawns a swarm worker and waits for its TaskManager task", async () => {
-    const spawnWorker = vi.fn(async (_config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+  it("spawns a child worker and waits for its TaskManager task", async () => {
+    const spawnWorker = vi.fn(async (_config: WorkflowWorkerSpawnConfig): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,
       agentId: "worker@alpha",
       taskId: "task_1",
@@ -89,7 +92,7 @@ describe("createAgentWorkflowRunner", () => {
   });
 
   it("injects dependency results and pipeline input into the worker prompt", async () => {
-    const spawnWorker = vi.fn(async (_config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+    const spawnWorker = vi.fn(async (_config: WorkflowWorkerSpawnConfig): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,
       agentId: "worker@default",
       taskId: "task_2",
@@ -126,7 +129,7 @@ describe("createAgentWorkflowRunner", () => {
   });
 
   it("applies configurable worker behavior in budget conservation mode", async () => {
-    const spawnWorker = vi.fn(async (_config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+    const spawnWorker = vi.fn(async (_config: WorkflowWorkerSpawnConfig): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,
       agentId: "worker@default",
       taskId: "task_conserve",
@@ -296,7 +299,7 @@ describe("createAgentWorkflowRunner", () => {
   });
 
   it("waits for an existing TaskManager task when resuming a running workflow task", async () => {
-    const spawnWorker = vi.fn(async (): Promise<SpawnResult> => {
+    const spawnWorker = vi.fn(async (): Promise<WorkflowWorkerSpawnResult> => {
       throw new Error("should not spawn");
     });
     const awaitTask = vi.fn(async (_taskId: string): Promise<AwaitTaskResult> => ({
@@ -348,7 +351,7 @@ describe("createAgentWorkflowRunner", () => {
   });
 
   it("spawns a replacement worker when the resumed TaskManager task is unavailable", async () => {
-    const spawnWorker = vi.fn(async (): Promise<SpawnResult> => ({
+    const spawnWorker = vi.fn(async (): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,
       agentId: "worker@default",
       taskId: "task_new",
@@ -449,7 +452,7 @@ describe("createAgentWorkflowRunner", () => {
   });
 
   it("can be used by runWorkflow as a real runner adapter", async () => {
-    const spawnWorker = vi.fn(async (config: TeammateSpawnConfig): Promise<SpawnResult> => ({
+    const spawnWorker = vi.fn(async (config: WorkflowWorkerSpawnConfig): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,
       agentId: `${config.name}@${config.team}`,
       taskId: `task_${config.prompt.includes("implement") ? "implement" : "research"}`,

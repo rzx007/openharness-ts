@@ -9,10 +9,37 @@ import type {
 import { execFile } from "node:child_process";
 import type { AwaitTaskResult } from "@openharness/services";
 import type { ToolRuntimeHost } from "@openharness/core";
-import type { SpawnResult, TeammateSpawnConfig } from "@openharness/swarm";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+export interface WorkflowWorkerSpawnConfig {
+  name: string;
+  team: string;
+  prompt: string;
+  cwd: string;
+  parentSessionId: string;
+  sessionId?: string;
+  model?: string;
+  systemPrompt?: string;
+  permissionMode?: "default" | "plan" | "full_auto";
+  isolate?: boolean;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  maxTurns?: number;
+  effort?: string;
+}
+
+export interface WorkflowWorkerSpawnResult {
+  success: boolean;
+  agentId: string;
+  taskId: string;
+  sessionId?: string;
+  backendType: string;
+  error?: string;
+  worktree?: { path: string; branch: string };
+  notice?: string;
+}
 
 export interface AgentWorkflowRunnerOptions {
   cwd: string;
@@ -23,7 +50,7 @@ export interface AgentWorkflowRunnerOptions {
   permissionMode?: "default" | "plan" | "full_auto";
   fromAgent?: string;
   runtimeHost?: ToolRuntimeHost;
-  spawnWorker?: (config: TeammateSpawnConfig) => Promise<SpawnResult>;
+  spawnWorker?: (config: WorkflowWorkerSpawnConfig) => Promise<WorkflowWorkerSpawnResult>;
   awaitTask?: (taskId: string, options?: { timeoutMs?: number }) => Promise<AwaitTaskResult>;
   stopTask?: (taskId: string) => Promise<unknown>;
   getChangedFiles?: (cwd: string) => Promise<string[]>;
@@ -32,12 +59,12 @@ export interface AgentWorkflowRunnerOptions {
 }
 
 /**
- * Build a WorkflowRunner that executes each workflow task as a real swarm
- * worker and waits for the corresponding TaskManager task to finish.
+ * Build a WorkflowRunner that executes each workflow task as a child worker
+ * and waits for the corresponding TaskManager task projection to finish.
  *
  * This lives in @openharness/tools, not @openharness/coordinator, so the
  * coordinator package can stay a pure scheduler with no dependency on services
- * or swarm.
+ * or runtime host wiring.
  */
 export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): WorkflowRunner {
   return async ({ task, attempt, dependencyResults, pipelineInput, resumeFrom, budgetMode, budgetConserve, reportProgress }) => {
@@ -68,7 +95,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
           backendType: getStringMetadata(resumeFrom?.metadata, "backendType") ?? "resumed",
           worktree: getWorktreeMetadata(resumeFrom?.metadata),
           notice: getStringMetadata(resumeFrom?.metadata, "notice"),
-        } satisfies SpawnResult;
+        } satisfies WorkflowWorkerSpawnResult;
         const diff = await getDiffSummaryForWorker(options, spawn);
         return mapAwaitedTaskToWorkerResult(task, spawn, waited, diff);
       } catch (error) {
@@ -186,7 +213,7 @@ function indentBlock(text: string): string {
 
 function mapAwaitedTaskToWorkerResult(
   task: WorkflowTask,
-  spawn: SpawnResult,
+  spawn: WorkflowWorkerSpawnResult,
   waited: AwaitTaskResult,
   diff: WorkflowDiffSummary | undefined,
 ): WorkflowWorkerResult {
@@ -218,7 +245,7 @@ function mapAwaitedTaskToWorkerResult(
   };
 }
 
-function spawnMetadata(spawn: SpawnResult): Record<string, unknown> {
+function spawnMetadata(spawn: WorkflowWorkerSpawnResult): Record<string, unknown> {
   return {
     agentId: spawn.agentId,
     taskManagerTaskId: spawn.taskId,
@@ -233,7 +260,7 @@ function getStringMetadata(metadata: Record<string, unknown> | undefined, key: s
   return typeof value === "string" ? value : undefined;
 }
 
-function getWorktreeMetadata(metadata: Record<string, unknown> | undefined): SpawnResult["worktree"] | undefined {
+function getWorktreeMetadata(metadata: Record<string, unknown> | undefined): WorkflowWorkerSpawnResult["worktree"] | undefined {
   const value = metadata?.worktree;
   if (!value || typeof value !== "object") return undefined;
   const worktree = value as { path?: unknown; branch?: unknown };
@@ -244,7 +271,7 @@ function getWorktreeMetadata(metadata: Record<string, unknown> | undefined): Spa
 
 async function getDiffSummaryForWorker(
   options: AgentWorkflowRunnerOptions,
-  spawn: SpawnResult,
+  spawn: WorkflowWorkerSpawnResult,
 ): Promise<WorkflowDiffSummary | undefined> {
   const cwd = spawn.worktree?.path ?? options.cwd;
   try {
@@ -384,10 +411,10 @@ function normalizeDiffSummary(diff: WorkflowDiffSummary): WorkflowDiffSummary {
 
 async function defaultSpawnWorker(
   cwd: string,
-  config: TeammateSpawnConfig,
+  config: WorkflowWorkerSpawnConfig,
   mode: "remote_agent" | "in_process_teammate" = "in_process_teammate",
   runtimeHost?: ToolRuntimeHost,
-): Promise<SpawnResult> {
+): Promise<WorkflowWorkerSpawnResult> {
   const agentId = `${config.name}@${config.team}`;
   if (mode === "remote_agent") {
     return {

@@ -228,7 +228,7 @@ flowchart TD
 
 ## 7. 后续非兼容改造建议
 
-1. 删除或收窄 `@openharness/swarm` 中已不再被 Agent tool 使用的 `ChildSessionBackend`，避免新读者误以为它仍是主路径。
-2. 把 `DaemonChildAgentHost` 内部 worktree helper 抽成 server-local 文件，并补独立测试。
-3. 统一 `TaskWait` 对 runtime-host child invocation 的语义说明：用户看到的是 task projection，真实执行句柄是 invocation。
-4. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
+1. 把 `DaemonChildAgentHost` 内部 worktree helper 抽成 server-local 文件，并补独立测试。
+2. 统一 `TaskWait` 对 runtime-host child invocation 的语义说明：用户看到的是 task projection，真实执行句柄是 invocation。
+3. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
+4. `@openharness/swarm` 现在只保留为历史/独立 swarm 包；`apps/cli` 和 `@openharness/tools` 已不再依赖它。
