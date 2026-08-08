@@ -2,7 +2,7 @@
 
 > 目的：对照真实代码快速找到运行流程和归属边界。本文优先服务“我现在要查某个行为”的阅读场景。
 >
-> 总图见 [`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)。host 边界设计和 Phase 5B 状态见 [`runtime-host-port-design.md`](./runtime-host-port-design.md)。
+> 应用层入口索引见 [`daemon-application-architecture.md`](./daemon-application-architecture.md)。总图见 [`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)。host 边界设计与当前落地状态见 [`runtime-host-port-design.md`](./runtime-host-port-design.md)。
 
 ## 0. 先记住当前分层
 

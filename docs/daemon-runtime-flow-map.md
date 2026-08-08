@@ -2,7 +2,7 @@
 
 > 目的：用运行时地图降低 daemon / runtimeFactory / SessionRuntime / QueryEngine / child-agent 的认知负担。
 >
-> 本文描述当前代码。需要按问题定位文件时，配合 [`daemon-runtime-code-guide.md`](./daemon-runtime-code-guide.md) 阅读。
+> 本文描述当前代码。需要从客户端请求反查应用层流程时，先看 [`daemon-application-architecture.md`](./daemon-application-architecture.md)；需要按问题定位文件时，配合 [`daemon-runtime-code-guide.md`](./daemon-runtime-code-guide.md) 阅读。
 
 ## 一句话模型
 
