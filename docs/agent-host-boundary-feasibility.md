@@ -39,7 +39,7 @@ SessionRunExecutor
 | `permissionPrompt` | `RuntimeHostPort.requestPermission()` |
 | `runtimeEventSink` | `RuntimeHostPort.emitEvent()` |
 | `SessionRuntimeHooks` | `RuntimeHostPort` |
-| runtimeFactory `childSessionHost/sessionTaskBridge` | run-scoped `DaemonChildAgentHost` |
+| runtimeFactory `childSessionHost/sessionTaskBridge` | run-scoped `DaemonChildAgentHostFactory` + `DaemonChildAgentHost` |
 | Agent tool `ChildSessionBackend` | `ToolRuntimeHost.spawnChildAgent()` |
 | CLI `registerChildSessionBackend()` | 已删除 |
 
@@ -113,10 +113,11 @@ DaemonChildAgentHost
 2. `DaemonChildAgentHost` 里的 invocation map 是 run 内存态；durable truth 是 child session/run/task。
 3. `TaskWait` 面向用户的是 task projection，不是 child invocation 本体。
 4. `ChildSessionBackend` 已从当前 public surface 删除；旧 subprocess/swarm backend 只保留在历史文档中。
+5. `SessionRunExecutor` 已改为依赖 `DaemonChildAgentHostFactory`，不再直接拿 `ChildSessionHost` + `SessionTaskBridgeManager` 两套句柄。
 
 ## 7. 后续建议
 
 1. 把 core 的 `QueryRuntimeHost` 进一步稳定成 framework API。
 2. 抽出 server-local worktree helper，补独立测试。
 3. 明确 child invocation 的 restart 语义：live-only、recover-by-session，还是未来 serialized run state。
-4. 删除或重命名过时的 swarm backend 文档和类型，减少误导。
+4. 继续内收 `DaemonChildSessionHost`，避免被误读为 framework/public API。

@@ -97,7 +97,7 @@ sequenceDiagram
 
 ```text
 SessionRunExecutor.execute()
-  -> new DaemonChildAgentHost({ scope, childSessionHost, sessionTaskBridge })
+  -> childAgentHostFactory.create({ scope, session })
   -> new DaemonRuntimeHostPort({ scope, childAgentHost, emitEvent, emitStreamEvent, requestPermission })
   -> runtime.runPrompt(input, host)
 ```
@@ -155,6 +155,7 @@ QueryEngine tool call
 Agent tool
   -> context.runtimeHost.spawnChildAgent()
   -> DaemonRuntimeHostPort.spawnChildAgent()
+  -> DaemonChildAgentHostFactory.create()
   -> DaemonChildAgentHost.spawnChildAgent()
   -> DaemonChildSessionHost.createChildSession()
   -> SessionApplicationService.createChildSession()
@@ -170,7 +171,7 @@ Agent tool
 - Agent tool 不再使用 `ChildSessionBackend`。
 - CLI bootstrap 不再注册 `registerChildSessionBackend()`。
 - Workflow 默认 worker spawn 也走 `runtimeHost.spawnChildAgent()`。
-- `ChildSessionHost` 和 `SessionTaskBridge` 仍存在，但被收进 `DaemonChildAgentHost` 内部，不再穿过 runtimeFactory/QueryEngine。
+- `ChildSessionHost` 和 `SessionTaskBridge` 仍存在，但由 `DaemonChildAgentHostFactory` 组装后收进 `DaemonChildAgentHost`，不再穿过 runtimeFactory、QueryEngine 或 `SessionRunExecutor`。
 
 关键文件：
 
@@ -180,6 +181,7 @@ Agent tool
 | SendMessage follow-up | `packages/tools/src/agent/index.ts` |
 | Workflow worker spawn | `packages/tools/src/agent/workflow-runner.ts` |
 | Tool context host 类型 | `packages/core/src/types/tools.ts`, `packages/core/src/types/runtime.ts` |
+| child-agent host factory | `packages/server/src/http/child-agent-host-factory.ts` |
 | daemon child adapter | `packages/server/src/http/daemon-child-agent-host.ts` |
 | child session host | `packages/server/src/http/daemon-child-session-host.ts` |
 | task projection bridge | `packages/server/src/http/session-task-bridge.ts` |

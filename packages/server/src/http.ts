@@ -10,7 +10,7 @@ import {
 import type { CommandCatalogProvider } from "./commands.js";
 import { getDefaultSessionStorePath } from "./paths.js";
 import { StorePermissionBroker } from "./permission-broker.js";
-import type { ChildSessionHost, SessionRuntimeFactory } from "./runtime.js";
+import type { SessionRuntimeFactory } from "./runtime.js";
 import type {
   AgentPersonaService,
   AuthService,
@@ -53,6 +53,7 @@ import { createSessionRoutes } from "./http/routes/session.js";
 import { createSessionUtilityRoutes } from "./http/routes/session-utility.js";
 import { createSystemRoutes } from "./http/routes/system.js";
 import { createTaskRoutes } from "./http/routes/task.js";
+import { DaemonChildAgentHostFactory } from "./http/child-agent-host-factory.js";
 import { DaemonChildSessionHost } from "./http/daemon-child-session-host.js";
 import { DaemonControlService } from "./http/daemon-control-service.js";
 import { RequestTraceRegistry } from "./http/request-trace-registry.js";
@@ -129,8 +130,6 @@ export class OpenHarnessHttpServer {
   private readonly logger: StructuredLogger;
   /** 权限 ask/reply 中介（store 持久化 + 等待客户端裁决）。 */
   private readonly permissionBroker: StorePermissionBroker;
-  /** Agent/runtime 创建 child session 的宿主适配器 → SessionApplicationService。 */
-  private readonly childSessionHost: ChildSessionHost;
   private readonly eventHub: HttpEventHub;
   private readonly sessionEvents: SessionEventPublisher;
   /** StreamEvent → durable message/part 渲染。 */
@@ -202,7 +201,10 @@ export class OpenHarnessHttpServer {
       getTaskManager: (scope) => getTaskManager(scope),
       events: this.sessionEvents,
     });
-    this.childSessionHost = new DaemonChildSessionHost(() => this.sessionApplication);
+    const childAgentHostFactory = new DaemonChildAgentHostFactory({
+      childSessionHost: new DaemonChildSessionHost(() => this.sessionApplication),
+      sessionTaskBridgeManager: this.sessionTaskBridgeManager,
+    });
     this.runtimePool = new SessionRuntimePool({
       store: this.store,
       runtimeFactory: this.runtimeFactory,
@@ -211,8 +213,7 @@ export class OpenHarnessHttpServer {
     const runExecutor = new SessionRunExecutor({
       store: this.store,
       runtimePool: this.runtimePool,
-      childSessionHost: this.childSessionHost,
-      sessionTaskBridgeManager: this.sessionTaskBridgeManager,
+      childAgentHostFactory,
       permissionBroker: this.permissionBroker,
       runRenderer: this.runRenderer,
       events: this.sessionEvents,

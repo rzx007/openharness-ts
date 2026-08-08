@@ -37,15 +37,7 @@ describe("SessionRunExecutor", () => {
     const executor = new SessionRunExecutor({
       store: store as any,
       runtimePool: runtimePool as any,
-      childSessionHost: {
-        createChildSession: vi.fn(),
-        admitPrompt: vi.fn(),
-        awaitRun: vi.fn(),
-        interrupt: vi.fn(),
-        closeRuntime: vi.fn(),
-        archive: vi.fn(),
-      },
-      sessionTaskBridgeManager: { createBridge: vi.fn(() => ({})) } as any,
+      childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
       permissionBroker: { ask: vi.fn() },
       runRenderer: {
         createState: vi.fn(() => ({})),

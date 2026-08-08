@@ -78,7 +78,7 @@ packages/tools/src/agent/index.ts
 
 packages/server/src/http/session-run-executor.ts
   execute()
-    -> new DaemonChildAgentHost({ scope, childSessionHost, sessionTaskBridge })
+    -> childAgentHostFactory.create({ scope, session })
     -> new DaemonRuntimeHostPort({ scope, childAgentHost, ... })
     -> runtime.runPrompt(input, host)
 

@@ -1,8 +1,8 @@
-# Runtime Host Port 设计与 Phase 5B 落地状态
+# Runtime Host Port 设计与 Phase 7 落地状态
 
 > 日期：2026-08-07
 >
-> 状态：Phase 0-5B 已落地。本文是当前代码的任务文档，不是未来提案。
+> 状态：Phase 0-7 已落地。本文是当前代码的任务文档，不是未来提案。
 >
 > 目标：把 daemon 和 QueryEngine 之间零散的 callback、bridge、handle 收束到一个 run-scoped `RuntimeHostPort` 边界，降低状态归属分裂和句柄双向穿梭。
 
@@ -19,7 +19,7 @@ host decides transport, projection, and durable state
 
 ```text
 SessionRunExecutor
-  -> creates DaemonChildAgentHost
+  -> creates childAgentHost via DaemonChildAgentHostFactory
   -> creates DaemonRuntimeHostPort
   -> runtime.runPrompt(input, host)
   -> CliSessionRuntime
@@ -180,8 +180,9 @@ sequenceDiagram
 | `packages/tools/src/agent/index.ts` | Agent/SendMessage 通过 `context.runtimeHost` 访问 child port |
 | `packages/tools/src/agent/workflow-runner.ts` | Workflow 默认 worker spawn 走 runtime host child port |
 | `packages/tools/src/agent/workflow.ts` | 把 `context.runtimeHost` 传入 workflow runner |
+| `packages/server/src/http/child-agent-host-factory.ts` | run-scoped child-agent host factory，收口 child session host + task bridge 组装 |
 | `packages/server/src/http/daemon-child-agent-host.ts` | daemon child invocation adapter |
-| `packages/server/src/http/session-run-executor.ts` | 每次 run 创建 `DaemonChildAgentHost` 和 `DaemonRuntimeHostPort` |
+| `packages/server/src/http/session-run-executor.ts` | 每次 run 创建 `DaemonRuntimeHostPort`，并通过 factory 获取 child-agent host |
 | `packages/server/src/http/session-task-bridge.ts` | parent-visible durable task projection |
 
 ## 5. 当前运行图
@@ -194,9 +195,10 @@ flowchart TD
   Executor --> Pool["SessionRuntimePool"]
   Pool --> Factory["SessionRuntimeFactory"]
   Factory --> Runtime["CliSessionRuntime"]
-  Executor --> ChildAgentHost["DaemonChildAgentHost<br/>run-scoped"]
   Executor --> Host["DaemonRuntimeHostPort<br/>run-scoped"]
   Runtime -->|"runPrompt(input, host)"| QueryEngine["QueryEngine"]
+  Executor --> ChildFactory["DaemonChildAgentHostFactory"]
+  ChildFactory --> ChildAgentHost["DaemonChildAgentHost<br/>run-scoped"]
   QueryEngine -->|"permission"| Host
   QueryEngine -->|"runtime event"| Host
   QueryEngine -->|"Agent / Workflow tools"| ToolHost["ToolContext.runtimeHost"]
@@ -226,9 +228,15 @@ flowchart TD
 - `packages/server/src/http/daemon-child-agent-host.ts` 支持 `sessionId`、`systemPrompt`、`worktree`、`notice` 和 worktree cleanup。
 - 相关测试已覆盖 Agent、Workflow、DaemonChildAgentHost、DaemonRuntimeHostPort、runtime pool、run executor/engine。
 
-## 7. 后续非兼容改造建议
+## 7. Phase 6/7 收口状态
+
+- Phase 6：删除 `@openharness/swarm` 旧 `ChildSessionBackend` / backend registry surface，相关文档转为历史归档。
+- Phase 7：`SessionRunExecutor` 不再直接持有 `ChildSessionHost` 和 `SessionTaskBridgeManager`；二者由 `DaemonChildAgentHostFactory` 在 server-local 层组装成 run-scoped child-agent host。
+- `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server 内部 adapter。
+
+## 8. 后续非兼容改造建议
 
 1. 把 `DaemonChildAgentHost` 内部 worktree helper 抽成 server-local 文件，并补独立测试。
 2. 统一 `TaskWait` 对 runtime-host child invocation 的语义说明：用户看到的是 task projection，真实执行句柄是 invocation。
 3. 继续评估 framework 层是否应该提供更通用的 `ChildAgentInvocationHandle`，daemon 只实现 host adapter。
-4. `@openharness/swarm` 现在只保留为历史/独立 swarm 包；`apps/cli` 和 `@openharness/tools` 已不再依赖它。
+4. `DaemonChildSessionHost` 可以继续内收为 factory 私有依赖，减少被误读为 framework API 的机会。

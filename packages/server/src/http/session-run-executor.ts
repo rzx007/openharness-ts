@@ -3,19 +3,16 @@ import type { SessionStore } from "@openharness/services";
 import type { ObservabilityEvent } from "../observability.js";
 import type { StorePermissionBroker } from "../permission-broker.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../run-coordinator.js";
-import type { ChildSessionHost } from "../runtime.js";
-import { DaemonChildAgentHost } from "./daemon-child-agent-host.js";
+import type { ChildAgentHostFactory } from "./child-agent-host-factory.js";
 import { DaemonRuntimeHostPort } from "./daemon-runtime-host.js";
 import type { SessionRunRenderer } from "./run-renderer.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";
-import type { SessionTaskBridgeManager } from "./session-task-bridge.js";
 
 export interface SessionRunExecutorContext {
   store: SessionStore;
   runtimePool: SessionRuntimePool;
-  childSessionHost: ChildSessionHost;
-  sessionTaskBridgeManager: Pick<SessionTaskBridgeManager, "createBridge">;
+  childAgentHostFactory: ChildAgentHostFactory;
   permissionBroker: Pick<StorePermissionBroker, "ask">;
   runRenderer: SessionRunRenderer;
   events: Pick<SessionEventPublisher, "checkpoint" | "publish" | "publishSince">;
@@ -71,11 +68,7 @@ export class SessionRunExecutor {
         traceId,
         signal: workContext.signal,
       };
-      const childAgentHost = new DaemonChildAgentHost({
-        scope,
-        childSessionHost: this.context.childSessionHost,
-        sessionTaskBridge: this.context.sessionTaskBridgeManager.createBridge(session),
-      });
+      const childAgentHost = this.context.childAgentHostFactory.create({ scope, session });
       const host = new DaemonRuntimeHostPort({
         scope,
         childAgentHost,

@@ -103,15 +103,7 @@ function createEngine(store = createStore()) {
   const runExecutor = new SessionRunExecutor({
     store: store as any,
     runtimePool,
-    childSessionHost: {
-      createChildSession: vi.fn(),
-      admitPrompt: vi.fn(),
-      awaitRun: vi.fn(),
-      interrupt: vi.fn(),
-      closeRuntime: vi.fn(),
-      archive: vi.fn(),
-    },
-    sessionTaskBridgeManager: { createBridge: vi.fn(() => ({})) } as any,
+    childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
     permissionBroker: { ask: vi.fn() },
     runRenderer,
     events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn(), publish: vi.fn() },
