@@ -909,7 +909,7 @@ async function bootstrap(config): Promise<AgentRuntime> {
 - [Provider、认证与模型](./auth-provider-model.md)
 - [上下文压缩](./compact-service-design.md)
 - [记忆系统](./memory-system.md)
-- [Swarm 子进程](./swarm-subprocess-flow.md)
+- [Swarm 子进程历史归档](./swarm-subprocess-flow.md)
 - [Swarm worktree 隔离](./swarm-worktree-design.md)
 - [权限流](./permission-flow.md)
 - [Skill 流程](./skills-flow.md)

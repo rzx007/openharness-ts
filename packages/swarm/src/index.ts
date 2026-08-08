@@ -1,11 +1,4 @@
 export {
-  ChildSessionBackend,
-  type ChildSessionBackendOptions,
-  type ChildSessionHost,
-  type SessionTaskBridge,
-} from "./child-session.js";
-
-export {
   exclusiveFileLock,
   SwarmLockError,
   type ExclusiveFileLockOptions,
@@ -85,60 +78,6 @@ export {
   type WorktreeCreateResult,
   type WorktreeListEntry,
 } from "./worktree.js";
-
-export interface TeammateSpawnConfig {
-  name: string;
-  team: string;
-  prompt: string;
-  cwd: string;
-  parentSessionId: string;
-  /** 预分配给 worker 的会话 ID，用于跨重启保持上下文（D.1）。 */
-  sessionId?: string;
-  model?: string;
-  systemPrompt?: string;
-  permissions?: string[];
-  /**
-   * teammate 子进程的权限模式（与 core 的 PermissionMode 同形；swarm 不依赖
-   * core，这里本地声明）。缺省 "default"：worker 写操作经文件流由 leader 集中
-   * 裁决——即使 leader 自己跑 full_auto，也保留集中审计点，而不是 worker 自行放行。
-   */
-  permissionMode?: "default" | "plan" | "full_auto";
-  /** 隔离到独立 git worktree（并行写任务）。缺省 false → 走共享 cwd。 */
-  isolate?: boolean;
-  /** agent 定义里的工具白名单（tools 字段）；传给 --allowed-tools。 */
-  allowedTools?: string[];
-  /** agent 定义里的工具黑名单（disallowedTools 字段）；传给 --disallowed-tools。 */
-  disallowedTools?: string[];
-  /** agent 定义里的最大轮次（maxTurns 字段）；传给 --max-turns。 */
-  maxTurns?: number;
-  /** agent 定义里的推理强度（effort 字段）；传给 --effort。 */
-  effort?: string;
-}
-
-export interface TeammateMessage {
-  text: string;
-  fromAgent: string;
-}
-
-export interface SpawnResult {
-  success: boolean;
-  agentId: string;
-  taskId: string;
-  /** Daemon child session backing this teammate, when applicable. */
-  sessionId?: string;
-  backendType: string;
-  error?: string;
-  /** 隔离成功时填充：teammate 改动所在的 worktree 路径与分支。 */
-  worktree?: { path: string; branch: string };
-  /** 可选提示（如 isolate 退化为 no-op 的警告）。 */
-  notice?: string;
-}
-
-export interface SwarmBackend {
-  spawn(config: TeammateSpawnConfig): Promise<SpawnResult>;
-  sendMessage(agentId: string, message: TeammateMessage): Promise<void>;
-  terminate(agentId: string): Promise<void>;
-}
 
 export interface TeamMember {
   id: string;
@@ -235,11 +174,7 @@ export class Mailbox {
     this.queues.delete(agentId);
   }
 
-  broadcast(
-    from: string,
-    recipientIds: string[],
-    content: string
-  ): SwarmMessage[] {
+  broadcast(from: string, recipientIds: string[], content: string): SwarmMessage[] {
     const timestamp = Date.now();
     return recipientIds.map((to, i) => {
       const msg: SwarmMessage = {
@@ -253,69 +188,4 @@ export class Mailbox {
       return msg;
     });
   }
-}
-
-export class BackendRegistry {
-  private backends = new Map<string, SwarmBackend>();
-
-  register(name: string, backend: SwarmBackend): void {
-    this.backends.set(name, backend);
-  }
-
-  getExecutor(name?: string): SwarmBackend {
-    if (name) {
-      const backend = this.backends.get(name);
-      if (!backend) throw new Error(`Backend not found: ${name}`);
-      return backend;
-    }
-    const first = this.backends.values().next().value;
-    if (!first) throw new Error("No backends registered");
-    return first;
-  }
-
-  list(): string[] {
-    return [...this.backends.keys()];
-  }
-}
-
-let _defaultBackendRegistry: BackendRegistry | undefined;
-const scopedBackendRegistries = new Map<string, BackendRegistry>();
-
-export interface BackendRegistryScope {
-  cwd: string;
-  sessionId?: string;
-}
-
-function normalizeRegistryScope(scope: string | BackendRegistryScope): string {
-  // 对象形态的 scope 会按工作目录 + 可选 sessionId 组成唯一键；
-  // 这样同一个 cwd 在不同会话下可以拿到独立的 registry 实例。
-  if (typeof scope !== "string") {
-    const normalizedCwd = normalizeRegistryScope(scope.cwd);
-    const sessionId = scope.sessionId?.trim();
-    return sessionId ? `${normalizedCwd}::session=${sessionId}` : normalizedCwd;
-  }
-
-  // 字符串 scope 先统一成 POSIX 风格路径，再在 Windows 下做小写归一化，
-  // 避免同一路径因斜杠大小写差异而导致缓存键不一致。
-  const normalized = scope.replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
-}
-
-export function getBackendRegistry(scope?: string | BackendRegistryScope): BackendRegistry {
-  // 若传入 scope，则按 cwd/session 维度获取或创建独立 registry，避免不同会话共享同一后端注册表。
-  if (scope) {
-    const key = normalizeRegistryScope(scope);
-    let scoped = scopedBackendRegistries.get(key);
-    if (!scoped) {
-      scoped = new BackendRegistry();
-      scopedBackendRegistries.set(key, scoped);
-    }
-    return scoped;
-  }
-
-  // 未传 scope 时使用全局默认 registry，供无会话上下文的调用复用。
-  if (!_defaultBackendRegistry) {
-    _defaultBackendRegistry = new BackendRegistry();
-  }
-  return _defaultBackendRegistry;
 }

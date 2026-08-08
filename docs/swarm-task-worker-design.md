@@ -1,70 +1,27 @@
-# 历史归档：Swarm worker（重启式多轮 sendMessage）
+# Swarm Task Worker Design Archive
 
-> 状态：历史归档。本文记录的 `ohs --task-worker` / subprocess 多轮协议已经从运行时代码删除，不属于当前 daemon/TUI/print 产品链路，也不作为兼容承诺。
+> Status: historical archive.
 >
-> daemon/TUI/print 的 `Agent` 当前在 daemon 内创建 child session，并统一使用 `SessionStore`、session event 与 `PermissionBroker`。本文只记录旧 `--task-worker` / subprocess 的重启式多轮协议，不能作为当前功能说明或代码入口说明。
->
-> 当前主路径的流程说明见 [`agent-child-session-flow.md`](./agent-child-session-flow.md)。
+> The `ohs --task-worker` / subprocess worker protocol described here has been removed from the current runtime path. It is not a compatibility contract.
 
-本设计当时用于补齐 subprocess swarm 的 teammate 多轮对话；保留它仅为理解历史决策，不应在新功能中调用或扩展。
+## Current Replacement
 
-## 核心认知（读 Python 源后修正）
+Current child-agent execution is:
 
-Python 的"长驻 worker"**不是常驻进程**，而是**重启式多轮**：
+```text
+Agent tool / Workflow
+  -> ToolRuntimeHost.spawnChildAgent()
+  -> DaemonRuntimeHostPort
+  -> DaemonChildAgentHost
+  -> child session + parent task projection
+```
 
-- `--task-worker` 模式的 worker 每次只读**一行** stdin → 跑一轮 → 退出
-  （`ui/app.py run_task_worker`，显式注释 one-shot）；
-- `send_message` = 往任务 stdin 写一行 JSON；任务已结束时由
-  BackgroundTaskManager **懒复活重启**进程再写入；
-- **重启通过 session 快照恢复上下文（D.1 已实现）**——Agent 工具预分配 `workerSessionId`，经 `TeammateSpawnConfig.sessionId` → `--session-id` CLI flag 传入；task-worker 启动时用 `loadSessionById` 恢复消息历史，退出前 `saveSessionSnapshot` 持久化；TS TaskManager 仍保留"prior interactive context was not preserved"提示文案（懒复活首次无快照时显示）。
-- **退出边界也是协议的一部分**：一轮 `submitMessage` 完成后，task-worker 会保存 session snapshot、消费 shutdown/idle mailbox、释放 stdin pipe，并关闭 runtime cleanup；TaskManager 依赖 child process 的 exit 事件把 task 从 `running` 推到 `completed/failed`。
+Read the current flow here:
 
-TS 底子已齐：`TaskManager.writeToTask` 懒复活（B.3）、`createAgentTask`
-（prompt 经 stdin）、`type:"agent"` 任务标记、TaskWait。
+- [`agent-child-session-flow.md`](./agent-child-session-flow.md)
+- [`daemon-runtime-code-guide.md`](./daemon-runtime-code-guide.md)
+- [`runtime-host-port-design.md`](./runtime-host-port-design.md)
 
-## 三轮
+## Historical Note
 
-### R1 — `--task-worker` CLI 模式
-
-- `index.ts` 加 flag（内部用）；`main.ts` 加 `runTaskWorker(settings, options)`：
-  - bootstrap 同 print（含 D.5 的 swarm worker permissionPrompt 文件流）；
-  - `decodeTaskWorkerLine(raw)`：JSON 解析取 `text` 字段，非 JSON 按纯文本
-    （对齐 Python `_decode_task_worker_line`）；
-  - stdin readline 读一行 → `submitMessage` 流式 stdout → saveSessionSnapshot / idle notify → 释放 stdin pipe + close runtime cleanup → 退出；
-  - 个性化/checkpoint 钩子照 print 模式挂。
-
-### R2 — backend 改造
-
-- `buildTeammateCommand`：argv 改 `--task-worker`（**prompt 不再进 argv**，
-  经 stdin 喂——顺带消掉 prompt 过长撑爆 argv 的隐患）；
-- `TaskRunner` 接口扩 `createAgentTask`（options 形态：argv+prompt+env+type）
-  与 `writeToTask`；runtime 适配器透传 TaskManager 真实现；
-- `SubprocessBackend.spawn` 改走 `createAgentTask`；
-- `sendMessage(agentId, message)`：写 JSON 行
-  `{text, from, timestamp, color?, summary?}`（替换现在的 throw）。
-
-### R3 — E2E + 文档
-
-- 真模型 E2E：spawn → TaskWait → SendMessage 续聊 → TaskWait 取第二轮结果
-  （验证懒复活链路）；
-- `swarm-subprocess-flow.md`：one-shot 注释更新为重启式多轮 + 上下文不保留
-  说明；PLAN/README 同步。
-
-## 与 Python 差异
-
-| 点 | Python | TS | 原因 |
-|----|--------|----|------|
-| api-key | argv `--api-key` | 不进 argv（settings/env） | TS teammate 既有约定 |
-| 上下文连续性 | 重启不保留（注释明示） | ✅ 经 session 快照恢复（D.1）：预分配 sessionId → loadSessionById 恢复 → saveSessionSnapshot 持久化 | D.1 已实现 |
-| `system_prompt_mode`/`plan_mode_required` flags | 有 | 暂不传（TS spawn 配置无对应） | 字段缺口，留待 |
-| 空行/纯空白 stdin | continue 继续等下一行 | 直接退出（懒复活会重投下一条） | 退出比无限等更稳健 |
-| 无 text 的 JSON 对象 | 原始行当 prompt | 同（审查修复后对齐） | 防静默空转烧重启额度 |
-
-## 测试
-
-- decodeTaskWorkerLine：JSON 行取 text、坏 JSON 当纯文本、空行跳过；
-- buildTeammateCommand：argv 含 --task-worker、不含 prompt；
-- closeTaskWorkerInputForExit：一轮完成后 pause/remove listeners/destroy stdin，避免 Windows 管道保持进程存活；
-- SubprocessBackend：spawn 走 createAgentTask（prompt 透传）、sendMessage
-  写 JSON 行（fake runner 断言）、shutdown 清映射；
-- E2E（手动）：两轮往返。
+The old worker design used restart-style subprocess turns and session snapshots to simulate multi-turn teammates. That approach was superseded by daemon-owned child sessions, where the child run goes through the same `SessionRunEngine`, `SessionStore`, permission broker, and SSE event stream as any other daemon session.

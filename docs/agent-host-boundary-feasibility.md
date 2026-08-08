@@ -112,7 +112,7 @@ DaemonChildAgentHost
 1. `PermissionController` live handle 不能跨 daemon restart。重启后只能依赖 store projection 终态化。
 2. `DaemonChildAgentHost` 里的 invocation map 是 run 内存态；durable truth 是 child session/run/task。
 3. `TaskWait` 面向用户的是 task projection，不是 child invocation 本体。
-4. `ChildSessionBackend` 仍可能作为历史/测试/独立 swarm 概念存在，但不再是 Agent tool 主路径。
+4. `ChildSessionBackend` 已从当前 public surface 删除；旧 subprocess/swarm backend 只保留在历史文档中。
 
 ## 7. 后续建议
 
