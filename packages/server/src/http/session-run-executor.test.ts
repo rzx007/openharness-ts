@@ -39,12 +39,12 @@ describe("SessionRunExecutor", () => {
       runtimePool: runtimePool as any,
       childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
       permissionBroker: { ask: vi.fn() },
-      runRenderer: {
-        createState: vi.fn(() => ({})),
-        drainSteeredInputs: vi.fn(),
-        hasActiveTextPart: vi.fn(),
-        applyStreamEvent: vi.fn(),
-        completeActiveTextPart: vi.fn(),
+      transcriptProjection: {
+        beginRun: vi.fn(() => ({})),
+        projectSteeredInputs: vi.fn(),
+        hasOpenTextPart: vi.fn(),
+        projectStreamEvent: vi.fn(),
+        completeOpenTextPart: vi.fn(),
       } as any,
       events: { checkpoint: () => 7, publishSince: broadcastSince, publish: vi.fn() },
       traceIdForRun: () => "trace-1",

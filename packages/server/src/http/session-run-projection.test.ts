@@ -23,12 +23,12 @@ describe("DaemonRunProjection", () => {
     const permissionBroker = {
       ask: vi.fn(async () => true),
     };
-    const runRenderer = {
-      createState: vi.fn(() => ({ active: true })),
-      drainSteeredInputs: vi.fn(),
-      hasActiveTextPart: vi.fn(() => false),
-      applyStreamEvent: vi.fn(() => ({})),
-      completeActiveTextPart: vi.fn(),
+    const transcriptProjection = {
+      beginRun: vi.fn(() => ({ active: true })),
+      projectSteeredInputs: vi.fn(),
+      hasOpenTextPart: vi.fn(() => false),
+      projectStreamEvent: vi.fn(() => ({})),
+      completeOpenTextPart: vi.fn(),
     };
     const events = {
       checkpoint: vi.fn(() => 7),
@@ -39,7 +39,7 @@ describe("DaemonRunProjection", () => {
     const projection = new DaemonRunProjection({
       store: store as any,
       permissionBroker,
-      runRenderer: runRenderer as any,
+      transcriptProjection: transcriptProjection as any,
       events,
       sessionId: "s1",
       inputId: "input1",
@@ -79,7 +79,7 @@ describe("DaemonRunProjection", () => {
       input: { file: "a.txt" },
       signal: expect.any(AbortSignal),
     });
-    expect(runRenderer.applyStreamEvent).toHaveBeenCalledWith(expect.anything(), {
+    expect(transcriptProjection.projectStreamEvent).toHaveBeenCalledWith(expect.anything(), {
       type: "tool_use_start",
       toolUse: { id: "tool-1", name: "Write", input: { file: "a.txt" } },
     });

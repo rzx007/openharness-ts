@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionRunRenderer } from "./run-renderer.js";
+import { SessionTranscriptProjection } from "./transcript-projection.js";
 
 function createStore() {
   let messageSeq = 0;
@@ -34,13 +34,13 @@ function createStore() {
   };
 }
 
-describe("SessionRunRenderer", () => {
+describe("SessionTranscriptProjection", () => {
   it("projects text deltas into live message-part events", () => {
     const store = createStore();
-    const renderer = new SessionRunRenderer(store);
-    const state = renderer.createState("s1", "i1", "r1", "hello");
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", "hello");
 
-    const applied = renderer.applyStreamEvent(state, { type: "text_delta", delta: "world" });
+    const applied = projection.projectStreamEvent(state, { type: "text_delta", delta: "world" });
 
     expect(store.createMessage).toHaveBeenCalledWith({
       sessionId: "s1",
@@ -63,14 +63,14 @@ describe("SessionRunRenderer", () => {
 
   it("keeps tool names available when completing tool parts", () => {
     const store = createStore();
-    const renderer = new SessionRunRenderer(store);
-    const state = renderer.createState("s1", "i1", "r1", "hello");
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", "hello");
 
-    renderer.applyStreamEvent(state, {
+    projection.projectStreamEvent(state, {
       type: "tool_use_start",
       toolUse: { id: "tool-1", name: "shell", input: { cmd: "pwd" } },
     });
-    const applied = renderer.applyStreamEvent(state, {
+    const applied = projection.projectStreamEvent(state, {
       type: "tool_use_end",
       toolUseId: "tool-1",
       result: { output: "ok", isError: false },

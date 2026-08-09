@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionRunRenderer } from "./run-renderer.js";
 import { SessionRunEngine } from "./session-run-engine.js";
 import { SessionRunExecutor } from "./session-run-executor.js";
 import { SessionRuntimePool } from "./session-runtime-pool.js";
+import { SessionTranscriptProjection } from "./transcript-projection.js";
 
 function createStore() {
   const inputs = new Map<string, any>();
@@ -89,7 +89,7 @@ function createStore() {
 }
 
 function createEngine(store = createStore()) {
-  const runRenderer = new SessionRunRenderer(store as any);
+  const transcriptProjection = new SessionTranscriptProjection(store as any);
   const runPrompt = vi.fn(async () => {});
   const runtimePool = new SessionRuntimePool({
     store: store as any,
@@ -105,7 +105,7 @@ function createEngine(store = createStore()) {
     runtimePool,
     childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
     permissionBroker: { ask: vi.fn() },
-    runRenderer,
+    transcriptProjection,
     events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn(), publish: vi.fn() },
     traceIdForRun: vi.fn((runId) => store.getRun(runId)?.metadata.traceId ?? `trace-${runId}`),
     log: vi.fn(),

@@ -56,7 +56,6 @@ import { createTaskRoutes } from "./http/routes/task.js";
 import { DaemonChildAgentHostFactory } from "./http/child-agent-host-factory.js";
 import { DaemonControlService } from "./http/daemon-control-service.js";
 import { RequestTraceRegistry } from "./http/request-trace-registry.js";
-import { SessionRunRenderer } from "./http/run-renderer.js";
 import { SessionApplicationService } from "./http/session-application-service.js";
 import { SessionEventPublisher } from "./http/session-event-publisher.js";
 import { SessionMaintenanceService } from "./http/session-maintenance-service.js";
@@ -66,6 +65,7 @@ import { SessionRunExecutor } from "./http/session-run-executor.js";
 import { SessionRuntimePool } from "./http/session-runtime-pool.js";
 import { SessionTaskBridgeManager } from "./http/session-task-bridge.js";
 import { SessionTaskService } from "./http/session-task-service.js";
+import { SessionTranscriptProjection } from "./http/transcript-projection.js";
 import { recoverInterruptedWorkflows } from "./http/workflow-recovery.js";
 
 export interface OpenHarnessServerOptions {
@@ -131,8 +131,8 @@ export class OpenHarnessHttpServer {
   private readonly permissionBroker: StorePermissionBroker;
   private readonly eventHub: HttpEventHub;
   private readonly sessionEvents: SessionEventPublisher;
-  /** StreamEvent → durable message/part 渲染。 */
-  private readonly runRenderer: SessionRunRenderer;
+  /** StreamEvent -> durable transcript projection. */
+  private readonly transcriptProjection: SessionTranscriptProjection;
   /** 进程内 TaskManager ↔ store SessionTask 投影桥。 */
   private readonly sessionTaskBridgeManager: SessionTaskBridgeManager;
   private readonly sessionTaskService: SessionTaskService;
@@ -186,7 +186,7 @@ export class OpenHarnessHttpServer {
       onChange: (previousEventSeq) => this.sessionEvents.publishSince(previousEventSeq),
       logger: (event) => this.log(event),
     });
-    this.runRenderer = new SessionRunRenderer(this.store);
+    this.transcriptProjection = new SessionTranscriptProjection(this.store);
     this.sessionTaskBridgeManager = new SessionTaskBridgeManager({
       store: this.store,
       getTaskManager: (scope) => getTaskManager(scope),
@@ -214,7 +214,7 @@ export class OpenHarnessHttpServer {
       runtimePool: this.runtimePool,
       childAgentHostFactory,
       permissionBroker: this.permissionBroker,
-      runRenderer: this.runRenderer,
+      transcriptProjection: this.transcriptProjection,
       events: this.sessionEvents,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: (event) => this.log(event),

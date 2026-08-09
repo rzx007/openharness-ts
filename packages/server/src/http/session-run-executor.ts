@@ -5,16 +5,16 @@ import type { StorePermissionBroker } from "../permission-broker.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../run-coordinator.js";
 import type { ChildAgentHostFactory } from "./child-agent-host-factory.js";
 import { DaemonRunProjection } from "./session-run-projection.js";
-import type { SessionRunRenderer } from "./run-renderer.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";
+import type { SessionTranscriptProjection } from "./transcript-projection.js";
 
 export interface SessionRunExecutorContext {
   store: SessionStore;
   runtimePool: SessionRuntimePool;
   childAgentHostFactory: ChildAgentHostFactory;
   permissionBroker: Pick<StorePermissionBroker, "ask">;
-  runRenderer: SessionRunRenderer;
+  transcriptProjection: SessionTranscriptProjection;
   events: Pick<SessionEventPublisher, "checkpoint" | "publish" | "publishSince">;
   traceIdForRun(runId: string): string;
   log(event: ObservabilityEvent): void;
@@ -47,7 +47,7 @@ export class SessionRunExecutor {
       projection = new DaemonRunProjection({
         store: this.context.store,
         permissionBroker: this.context.permissionBroker,
-        runRenderer: this.context.runRenderer,
+        transcriptProjection: this.context.transcriptProjection,
         events: this.context.events,
         sessionId,
         inputId,

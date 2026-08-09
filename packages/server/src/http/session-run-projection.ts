@@ -11,13 +11,13 @@ import type { SessionInputRecord, SessionStore } from "@openharness/services";
 import type { ObservabilityEvent } from "../observability.js";
 import type { StorePermissionBroker } from "../permission-broker.js";
 import { DaemonRuntimeHostPort } from "./daemon-runtime-host.js";
-import type { ActiveRunRenderState, SessionRunRenderer } from "./run-renderer.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
+import type { ActiveTranscriptProjectionState, SessionTranscriptProjection } from "./transcript-projection.js";
 
 export interface DaemonRunProjectionContext {
   store: Pick<SessionStore, "appendEvent" | "listUnboundInputs" | "updateRun">;
   permissionBroker: Pick<StorePermissionBroker, "ask">;
-  runRenderer: SessionRunRenderer;
+  transcriptProjection: SessionTranscriptProjection;
   events: Pick<SessionEventPublisher, "checkpoint" | "publish" | "publishSince">;
   sessionId: string;
   inputId: string;
@@ -35,7 +35,7 @@ export interface DaemonRunProjectionContext {
  * event publication, and observability records.
  */
 export class DaemonRunProjection {
-  private renderState?: ActiveRunRenderState;
+  private transcriptState?: ActiveTranscriptProjectionState;
 
   constructor(private readonly context: DaemonRunProjectionContext) {}
 
@@ -49,7 +49,7 @@ export class DaemonRunProjection {
       sessionId: this.context.sessionId,
       runId: this.context.runId,
     });
-    this.renderState = this.context.runRenderer.createState(
+    this.transcriptState = this.context.transcriptProjection.beginRun(
       this.context.sessionId,
       this.context.inputId,
       this.context.runId,
@@ -62,7 +62,7 @@ export class DaemonRunProjection {
     const pending = this.context.store.listUnboundInputs(this.context.sessionId);
     if (pending.length === 0) return pending;
     const before = this.context.events.checkpoint();
-    this.context.runRenderer.drainSteeredInputs(this.requireRenderState(), pending);
+    this.context.transcriptProjection.projectSteeredInputs(this.requireTranscriptState(), pending);
     this.context.events.publishSince(before);
     return pending;
   }
@@ -79,7 +79,7 @@ export class DaemonRunProjection {
 
   complete(interrupted: boolean): void {
     const before = this.context.events.checkpoint();
-    this.context.runRenderer.completeActiveTextPart(this.requireRenderState(), "completed");
+    this.context.transcriptProjection.completeOpenTextPart(this.requireTranscriptState(), "completed");
     this.context.store.updateRun(this.context.runId, { status: interrupted ? "interrupted" : "completed" });
     this.context.log({
       level: interrupted ? "warn" : "info",
@@ -126,11 +126,11 @@ export class DaemonRunProjection {
   }
 
   private emitStreamEvent(event: StreamEvent): void {
-    const renderState = this.requireRenderState();
+    const transcriptState = this.requireTranscriptState();
     const canDirectBroadcast =
-      event.type === "text_delta" && this.context.runRenderer.hasActiveTextPart(renderState);
+      event.type === "text_delta" && this.context.transcriptProjection.hasOpenTextPart(transcriptState);
     const before = canDirectBroadcast ? undefined : this.context.events.checkpoint();
-    const applied = this.context.runRenderer.applyStreamEvent(renderState, event);
+    const applied = this.context.transcriptProjection.projectStreamEvent(transcriptState, event);
     if (event.type === "tool_use_start") {
       this.context.log({
         level: "info",
@@ -171,8 +171,8 @@ export class DaemonRunProjection {
     return approved ? { status: "approved" } : { status: "denied" };
   }
 
-  private requireRenderState(): ActiveRunRenderState {
-    if (!this.renderState) throw new Error("Run projection has not started");
-    return this.renderState;
+  private requireTranscriptState(): ActiveTranscriptProjectionState {
+    if (!this.transcriptState) throw new Error("Run projection has not started");
+    return this.transcriptState;
   }
 }

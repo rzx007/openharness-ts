@@ -13,7 +13,7 @@ type ActiveToolPart = {
   input: Record<string, unknown>;
 };
 
-export type ActiveRunRenderState = {
+export type ActiveTranscriptProjectionState = {
   sessionId: string;
   runId: string;
   inputId: string;
@@ -23,16 +23,18 @@ export type ActiveRunRenderState = {
   toolParts: Map<string, ActiveToolPart>;
 };
 
-export type AppliedStreamEvent = {
+export type AppliedTranscriptStreamEvent = {
   liveEvent?: SessionEventRecord;
   completedToolName?: string;
 };
 
 /**
- * 把 QueryEngine/runtime 的 StreamEvent 渲染进 durable store：
- * 创建/更新 assistant message 与 text/tool parts，维护单次 run 的渲染状态。
+ * Transcript projection sink for one run.
+ *
+ * It is the only place that knows how runtime StreamEvents become durable
+ * messages, text parts, tool parts, and part-delta events.
  */
-export class SessionRunRenderer {
+export class SessionTranscriptProjection {
   constructor(
     private readonly store: Pick<
       SessionStore,
@@ -40,12 +42,12 @@ export class SessionRunRenderer {
     >,
   ) {}
 
-  createState(
+  beginRun(
     sessionId: string,
     inputId: string,
     runId: string,
     content: string,
-  ): ActiveRunRenderState {
+  ): ActiveTranscriptProjectionState {
     const userMessage = this.store.createMessage({
       sessionId,
       role: "user",
@@ -68,8 +70,8 @@ export class SessionRunRenderer {
     };
   }
 
-  drainSteeredInputs(state: ActiveRunRenderState, pending: SessionInputRecord[]): void {
-    this.completeActiveTextPart(state, "completed");
+  projectSteeredInputs(state: ActiveTranscriptProjectionState, pending: SessionInputRecord[]): void {
+    this.completeOpenTextPart(state, "completed");
     delete state.assistantMessageId;
     state.assistantTurnCompleted = true;
     for (const steered of pending) {
@@ -89,11 +91,14 @@ export class SessionRunRenderer {
     }
   }
 
-  hasActiveTextPart(state: ActiveRunRenderState): boolean {
+  hasOpenTextPart(state: ActiveTranscriptProjectionState): boolean {
     return Boolean(state.activeTextPartId);
   }
 
-  applyStreamEvent(state: ActiveRunRenderState, event: StreamEvent): AppliedStreamEvent {
+  projectStreamEvent(
+    state: ActiveTranscriptProjectionState,
+    event: StreamEvent,
+  ): AppliedTranscriptStreamEvent {
     switch (event.type) {
       case "text_delta": {
         const messageId = this.ensureAssistantMessage(state, true);
@@ -118,7 +123,7 @@ export class SessionRunRenderer {
         };
       }
       case "tool_use_start": {
-        this.completeActiveTextPart(state, "completed");
+        this.completeOpenTextPart(state, "completed");
         const messageId = this.ensureAssistantMessage(state, true);
         const part = this.store.upsertMessagePart({
           id: event.toolUse.id,
@@ -161,14 +166,14 @@ export class SessionRunRenderer {
         return {};
       }
       case "complete": {
-        this.completeActiveTextPart(state, "completed");
+        this.completeOpenTextPart(state, "completed");
         state.assistantTurnCompleted = true;
         this.store.updateRun(state.runId, { metadata: { stopReason: event.stopReason } });
         return {};
       }
       case "error": {
         const messageId = this.ensureAssistantMessage(state, true);
-        this.completeActiveTextPart(state, "failed");
+        this.completeOpenTextPart(state, "failed");
         this.store.upsertMessagePart({
           sessionId: state.sessionId,
           messageId,
@@ -181,8 +186,8 @@ export class SessionRunRenderer {
     }
   }
 
-  completeActiveTextPart(
-    state: ActiveRunRenderState,
+  completeOpenTextPart(
+    state: ActiveTranscriptProjectionState,
     status: Extract<SessionMessagePartStatus, "completed" | "failed" | "interrupted">,
   ): void {
     if (!state.assistantMessageId || !state.activeTextPartId) return;
@@ -196,7 +201,7 @@ export class SessionRunRenderer {
     delete state.activeTextPartId;
   }
 
-  private ensureAssistantMessage(state: ActiveRunRenderState, startTurn = false): string {
+  private ensureAssistantMessage(state: ActiveTranscriptProjectionState, startTurn = false): string {
     if (startTurn && state.assistantTurnCompleted) {
       delete state.assistantMessageId;
       state.assistantTurnCompleted = false;
