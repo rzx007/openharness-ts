@@ -76,7 +76,7 @@ sequenceDiagram
   Exec->>RT: runPrompt(input, host)
   RT->>QE: submitMessage(..., runtimeHost)
   QE-->>Exec: host.emitStreamEvent()
-  Exec->>Store: render + terminal update
+  Exec->>Store: transcript projection + terminal update
 ```
 
 关键文件：
@@ -97,7 +97,7 @@ sequenceDiagram
 
 ```text
 SessionRunExecutor.execute()
-  -> new DaemonRunProjection({ store, renderer, permissionBroker, events, run scope })
+  -> new DaemonRunProjection({ store, transcriptProjection, permissionBroker, events, run scope })
   -> childAgentHostFactory.create({ scope, session })
   -> projection.createHost(scope, childAgentHost)
   -> new DaemonRuntimeHostPort({ scope, childAgentHost, projection callbacks })

@@ -1,8 +1,8 @@
-# Runtime Host Port 设计与 Phase 17 落地状态
+# Runtime Host Port 设计与 Phase 18 落地状态
 
 > 日期：2026-08-07
 >
-> 状态：Phase 0-17 已落地。本文是当前代码的任务文档，不是未来提案。
+> 状态：Phase 0-18 已落地。本文是当前代码的任务文档，不是未来提案。
 >
 > 目标：把 daemon 和 QueryEngine 之间零散的 callback、bridge、handle 收束到一个 run-scoped `AgentRunHost` 边界，降低状态归属分裂和句柄双向穿梭。
 
@@ -197,7 +197,7 @@ flowchart TD
   Executor --> Pool["SessionRuntimePool"]
   Pool --> Factory["SessionRuntimeFactory"]
   Factory --> Runtime["CliSessionRuntime"]
-  Executor --> Projection["DaemonRunProjection<br/>store/SSE/render/permission adapter"]
+  Executor --> Projection["DaemonRunProjection<br/>store/SSE/transcript/permission adapter"]
   Projection --> Host
   Runtime -->|"runPrompt(input, host)"| QueryEngine["QueryEngine"]
   Executor --> ChildFactory["DaemonChildAgentHostFactory"]
@@ -214,8 +214,8 @@ flowchart TD
   TaskBridge --> Store["SessionStore"]
   Projection --> PermissionBroker["StorePermissionBroker"]
   PermissionBroker --> Store
-  Projection --> Renderer["SessionRunRenderer"]
-  Renderer --> Store
+  Projection --> Transcript["SessionTranscriptProjection"]
+  Transcript --> Store
 ```
 
 ## 6. Phase 5B 完成清单
@@ -245,9 +245,14 @@ flowchart TD
 - Phase 14：`packages/core/src/agent-session.ts` 新增 standalone in-memory `AgentSession` facade；`createAgentSession()` 包装已构造的 `QueryEngine`，提供 `submitMessage()` / `runMessage()`，复用 `AgentRunHost`，默认 permission deny，child agent 显式 unsupported。
 - Phase 15：`apps/cli/src/session-runtime.ts` 的 `CliSessionRuntime.runPrompt()` 已复用 `AgentSession.submitMessage()`；daemon-hosted runtime 与 standalone runner 共享同一个 submit facade。`@openharness/server/runtime` 与 `@openharness/services/session-runtime/types` 提供轻量 contract 入口，避免 CLI runtime 通过大 barrel 触碰 HTTP/store 模块。
 - Phase 16：`AgentRunHost` / `QueryRuntimeHost` 不再继承 child-agent host；child lifecycle 通过可选 `childAgentHost?: AgentChildAgentHost` 暴露。`AgentSession` 默认不提供 child 能力，daemon 的 `DaemonRuntimeHostPort` 通过 `.childAgentHost` 提供完整 child session/task/run projection。
-- Phase 17：`packages/server/src/http/session-run-projection.ts` 新增 `DaemonRunProjection`，把 run-scoped host callbacks 的 durable projection 收进 adapter：runtime event -> store/SSE、stream event -> `SessionRunRenderer`、permission ask -> `StorePermissionBroker`、run terminal state -> store/log/SSE。`SessionRunExecutor` 只保留单次 run orchestration。
+- Phase 17：`packages/server/src/http/session-run-projection.ts` 新增 `DaemonRunProjection`，把 run-scoped host callbacks 的 durable projection 收进 adapter：runtime event -> store/SSE、stream event -> transcript projection、permission ask -> `StorePermissionBroker`、run terminal state -> store/log/SSE。`SessionRunExecutor` 只保留单次 run orchestration。
+- Phase 18：`packages/server/src/http/transcript-projection.ts` 新增 `SessionTranscriptProjection`，把 message/part 渲染规则收窄成 transcript projection sink；旧 `run-renderer.ts` / `SessionRunRenderer` 删除，不保留兼容 alias。
 - `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server-local adapter。
 
-## 8. 后续非兼容改造建议
+## 8. 当前收口结论
 
-1. 继续推进 Phase 18：把 `SessionRunRenderer` 进一步收窄成 transcript projection sink，让 message/part 渲染规则和 run orchestration 完全解耦。
+runtime host port 主线已经完成到三个稳定边界：
+
+1. `AgentRunHost`：framework/runtime 请求宿主能力。
+2. `DaemonRunProjection`：daemon 把 host callbacks 投影到 durable run state、permission、SSE、log。
+3. `SessionTranscriptProjection`：daemon 把 stream events 投影到 durable transcript messages/parts。

@@ -52,7 +52,7 @@ flowchart TB
   App --> RunEngine["SessionRunEngine<br/>admit + lane"]
   RunEngine --> Coordinator["SessionRunCoordinator<br/>one active run per session"]
   Coordinator --> Executor["SessionRunExecutor<br/>execute one run"]
-  Executor --> Projection["DaemonRunProjection<br/>store/SSE/render/permission adapter"]
+  Executor --> Projection["DaemonRunProjection<br/>store/SSE/transcript/permission adapter"]
 
   Executor --> Pool["SessionRuntimePool"]
   Pool --> Factory["SessionRuntimeFactory"]
@@ -64,7 +64,7 @@ flowchart TB
   QE -->|"permission ask"| Host
   QE -->|"Agent/SendMessage"| Host
 
-  Projection --> Renderer["SessionRunRenderer"]
+  Projection --> Transcript["SessionTranscriptProjection"]
   Projection --> Broker["StorePermissionBroker"]
   Host --> ChildHost["DaemonChildAgentHost"]
 
@@ -76,7 +76,7 @@ flowchart TB
   Query --> Store
   Maint --> Store
   App --> Store
-  Renderer --> Store
+  Transcript --> Store
   Broker --> Store
   Store --> Events["SessionEventPublisher / HttpEventHub"]
   Events --> Client
@@ -160,7 +160,7 @@ packages/server/src/http.ts
 | `SessionTaskBridgeManager` | `packages/server/src/http/session-task-bridge.ts` | 进程内 `TaskManager` 与 store 中 `SessionTask` 的投影桥 |
 | `SessionRunEngine` | `packages/server/src/http/session-run-engine.ts` | prompt admission、session lane、run promise、interrupt/await |
 | `SessionRunExecutor` | `packages/server/src/http/session-run-executor.ts` | 单次 run 执行、创建 projection/host、调用 runtime、处理 runtime close |
-| `DaemonRunProjection` | `packages/server/src/http/session-run-projection.ts` | run-scoped daemon projection：stream/render、runtime event、permission ask、run 终态 |
+| `DaemonRunProjection` | `packages/server/src/http/session-run-projection.ts` | run-scoped daemon projection：stream 分发、runtime event、permission ask、run 终态 |
 | `SessionRuntimePool` | `packages/server/src/http/session-runtime-pool.ts` | 每个 session 的 runtime warm/acquire/close/cache |
 
 ---
@@ -193,7 +193,7 @@ sequenceDiagram
   Engine->>Coord: "enqueue(sessionId, runId)"
   Coord->>Exec: "execute(..., workContext)"
   Exec->>Projection: "start(admitted.content)"
-  Projection->>Store: "updateRun(running) + render user message"
+  Projection->>Store: "updateRun(running) + project user message"
   Exec->>Pool: "acquire(session, history, parts)"
   Exec->>Projection: "createHost(scope, childAgentHost)"
   Projection->>Host: "new DaemonRuntimeHostPort(scope, callbacks)"
@@ -373,8 +373,8 @@ packages/client/src/client.ts
 flowchart TD
   QE["QueryEngine emits StreamEvent"] --> Host["DaemonRuntimeHostPort.emitStreamEvent()"]
   Host --> Projection["DaemonRunProjection.emitStreamEvent()"]
-  Projection --> Renderer["SessionRunRenderer.applyStreamEvent()"]
-  Renderer --> Store["SessionStore messages/parts"]
+  Projection --> Transcript["SessionTranscriptProjection.projectStreamEvent()"]
+  Transcript --> Store["SessionStore messages/parts"]
   Store --> Publisher["SessionEventPublisher.publishSince()"]
   Publisher --> Hub["HttpEventHub"]
   Hub --> Client["Client streamEvents()"]
@@ -389,10 +389,10 @@ packages/server/src/http/session-run-executor.ts
 packages/server/src/http/session-run-projection.ts
   emitStreamEvent / emitEvent / requestPermission projection adapter
 
-packages/server/src/http/run-renderer.ts
-  SessionRunRenderer.createState()
-  SessionRunRenderer.applyStreamEvent()
-  SessionRunRenderer.completeActiveTextPart()
+packages/server/src/http/transcript-projection.ts
+  SessionTranscriptProjection.beginRun()
+  SessionTranscriptProjection.projectStreamEvent()
+  SessionTranscriptProjection.completeOpenTextPart()
 
 packages/server/src/http/session-event-publisher.ts
   checkpoint()
@@ -405,7 +405,7 @@ packages/server/src/http/routes/events.ts
 闭环规则：
 
 - QueryEngine 发的是 runtime stream event，不直接写 store。
-- `SessionRunRenderer` 负责把 stream event 转成 durable message/part。
+- `SessionTranscriptProjection` 负责把 stream event 转成 durable message/part。
 - `text_delta` 在有 active text part 时可以直接广播 live event；其他事件先落库再 publish。
 - UI 读到的是 durable projection + live delta，不是 runtime 内部 transcript。
 
@@ -655,7 +655,7 @@ packages/server/src/http/routes/memory.ts
 | runtime instance | `SessionRuntimePool` | 否 | `packages/server/src/http/session-runtime-pool.ts` |
 | one-session run lane | `SessionRunCoordinator` | 否 | `packages/server/src/run-coordinator.ts` |
 | run promise / awaitRun | `SessionRunEngine` | 否，终态写 run record | `session-run-engine.ts` |
-| stream render state | `DaemonRunProjection` + `SessionRunRenderer` | 部分，最终写 messages/parts | `session-run-projection.ts`、`run-renderer.ts` |
+| stream transcript state | `DaemonRunProjection` + `SessionTranscriptProjection` | 部分，最终写 messages/parts | `session-run-projection.ts`、`transcript-projection.ts` |
 | permission live waiter | `PermissionController` | 否 | `permission-controller.ts` |
 | permission request/decision | `SessionStore` via `StorePermissionBroker` | 是 | `permission-broker.ts` |
 | child invocation map | `DaemonChildAgentHost` | 否 | `daemon-child-agent-host.ts` |
@@ -679,7 +679,7 @@ packages/server/src/http/routes/memory.ts
 |---|---|
 | 用户输入如何创建 run | `routes/run-execution.ts` -> `SessionApplicationService.admitPrompt()` -> `SessionRunEngine.admitPromptAndMaybeRun()` |
 | 为什么同 session 一次只跑一个 run | `SessionRunCoordinator.enqueue()` |
-| prompt 为什么会变成 message/part | `DaemonRunProjection` + `SessionRunRenderer` |
+| prompt 为什么会变成 message/part | `DaemonRunProjection` + `SessionTranscriptProjection` |
 | 工具授权如何弹给 UI | `DaemonRuntimeHostPort.requestPermission()` -> `StorePermissionBroker.ask()` |
 | UI 批准权限后谁唤醒工具 | `routes/permission.ts` -> `StorePermissionBroker.reply()` -> `PermissionController.resolve()` |
 | child agent 为什么会创建子 session | `DaemonChildAgentHost.spawnChildAgent()` -> `ChildSessionHost.createChildSession()` |
@@ -704,7 +704,7 @@ SessionRunExecutor
   owns one-run orchestration
 
 DaemonRunProjection
-  owns host callback projection into store/SSE/render/permission
+  owns host callback projection into store/SSE/transcript/permission
 
 DaemonRuntimeHostPort
   exposes run host capabilities to QueryEngine/tools and delegates projection callbacks

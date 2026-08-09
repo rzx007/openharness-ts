@@ -46,7 +46,7 @@ flowchart TD
 
   executor --> childFactory["DaemonChildAgentHostFactory"]
   childFactory --> childAgentHost["DaemonChildAgentHost<br/>run-scoped"]
-  executor --> projection["DaemonRunProjection<br/>store/SSE/render/permission"]
+  executor --> projection["DaemonRunProjection<br/>store/SSE/transcript/permission"]
   executor --> runtimeHost["DaemonRuntimeHostPort<br/>run-scoped"]
   projection --> runtimeHost
   qe -->|"ToolContext.runtimeHost"| runtimeHost
@@ -63,8 +63,8 @@ flowchart TD
   permissionBroker --> store
   permRoutes --> permissionBroker
 
-  projection --> renderer["SessionRunRenderer"]
-  renderer --> store
+  projection --> transcript["SessionTranscriptProjection"]
+  transcript --> store
   store --> publisher["SessionEventPublisher"]
   publisher --> hub["HttpEventHub / SSE"]
   hub --> client
@@ -163,7 +163,7 @@ sequenceDiagram
   X->>RT: runPrompt(input, host)
   RT->>QE: submitMessage(..., runtimeHost)
   QE-->>X: host.emitStreamEvent()
-  X->>S: render messages/parts/events
+  X->>S: project transcript/events
   S-->>SSE: publish since checkpoint
   X->>S: mark terminal state
   S-->>SSE: publish terminal event
@@ -176,7 +176,7 @@ sequenceDiagram
 | input/run/message/part/event | `SessionStore` |
 | 同 session 串行 | `SessionRunCoordinator` |
 | runtime 生命周期 | `SessionRuntimePool` |
-| 单次 run projection | `DaemonRunProjection` + `SessionRunRenderer` |
+| 单次 run projection | `DaemonRunProjection` + `SessionTranscriptProjection` |
 
 ## 闭环 4：permission
 
@@ -270,7 +270,7 @@ DaemonChildAgentHost.interruptChildAgent()
 | session list/state 为什么这样 | `SessionQueryService` + `SessionStore` |
 | prompt 为什么排队/steer | `SessionRunEngine` + `SessionRunCoordinator` |
 | runtime 什么时候创建/关闭 | `SessionRuntimePool` |
-| 一次 run 怎么落 message parts | `DaemonRunProjection` + `SessionRunRenderer` |
+| 一次 run 怎么落 message parts | `DaemonRunProjection` + `SessionTranscriptProjection` |
 | 工具权限怎么授权 | `QueryEngine` -> `AgentRunHost.requestPermission()` -> `StorePermissionBroker` |
 | Agent 怎么建 child session | `Agent tool` -> `ToolRuntimeHost.spawnChildAgent()` -> `DaemonChildAgentHost` |
 | child task 怎么显示在 parent | `SessionTaskBridge` + `SessionTaskService` |

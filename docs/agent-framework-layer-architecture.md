@@ -2,7 +2,7 @@
 
 > 当前状态：设计文档。目标不是把 OpenHarness 做成通用 agent framework，而是把现有 daemon / QueryEngine / tools / child-agent 的职责重新摆正，形成一个低心智负担、可嵌入、可由 daemon 托管的内部 Agent Framework 层。
 >
-> 关联文档：[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)、[`agent-host-boundary-feasibility.md`](./agent-host-boundary-feasibility.md)。
+> 关联文档：[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)、[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)。
 
 ## 0. 结论
 
@@ -27,7 +27,7 @@ TUI/Web/CLI are interaction surfaces
 daemon should host agents, not define what an agent is.
 ```
 
-当前 Phase 0-17 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，让 `CliSessionRuntime` 复用这层 facade，把 child-agent lifecycle 从 generic run host 中拆成可选能力，并把 daemon durable projection 收进 run-scoped adapter：
+当前 Phase 0-18 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，让 `CliSessionRuntime` 复用这层 facade，把 child-agent lifecycle 从 generic run host 中拆成可选能力，并把 daemon durable projection / transcript projection 分别收进明确 adapter：
 
 ```text
 Agent Framework Layer
@@ -500,11 +500,12 @@ daemon 的 `DaemonChildAgentHost` 继续作为实现。
 
 ### Phase E：投影 adapter 化
 
-把 `SessionRunRenderer` / durable projection 明确成 daemon adapter：
+把 durable run projection 和 transcript projection 明确成 daemon adapters：
 
 ```text
 framework emits stream/run events
-daemon projection sink renders store messages/parts
+DaemonRunProjection owns run/store/SSE/permission projection
+SessionTranscriptProjection owns message/part projection
 ```
 
 这一步完成后，daemon 复杂度会更像“托管实现”，而不是 agent runtime 主体。
@@ -578,11 +579,7 @@ Phase 15: make CliSessionRuntime reuse AgentSession
 3. stream event 转发回到 `AgentSession` facade 内部，减少应用层重复循环。
 4. `@openharness/server/runtime` 与 `@openharness/services/session-runtime/types` 提供轻量类型 subpath，CLI runtime contract 不再通过大 barrel 触碰 HTTP/store 模块。
 
-下一步建议：
-
-```text
-Phase 16: split child-agent capability contract from generic run host
-```
+Phase 16 已落地：
 
 已完成动作：
 
@@ -592,11 +589,7 @@ Phase 16: split child-agent capability contract from generic run host
 4. `DaemonRuntimeHostPort` 仍提供 daemon child 能力，但作为 `.childAgentHost` 属性。
 5. Agent / Workflow 工具通过 `ToolContext.runtimeHost.childAgentHost` 调用 child lifecycle。
 
-下一步建议：
-
-```text
-Phase 17: projection sink adapter boundary
-```
+Phase 17 已落地：
 
 已完成动作：
 
@@ -605,13 +598,18 @@ Phase 17: projection sink adapter boundary
 3. `SessionRunExecutor` 不再内联 `emitEvent` / `emitStreamEvent` / `requestPermission` callback 细节，只创建 projection、child host、runtime host，并调用 runtime。
 4. 补充 `session-run-projection.test.ts` 覆盖 host callback -> store/publisher/broker/log 的闭环。
 
-下一步建议：
+Phase 18 已落地：
 
 ```text
 Phase 18: transcript projection sink boundary
 ```
 
-目标是继续把 `SessionRunRenderer` 的 message/part 渲染规则整理成更独立的 transcript projection sink。
+已完成动作：
+
+1. `packages/server/src/http/transcript-projection.ts` 新增 `SessionTranscriptProjection`。
+2. message/part 渲染规则从 run projection 语义中独立出来，成为 transcript projection sink。
+3. `DaemonRunProjection` 只持有 run-scoped daemon projection：runtime event、stream event 分发、permission ask、run 终态、SSE/log。
+4. 删除旧 `run-renderer.ts` / `SessionRunRenderer` 命名，不保留兼容 alias。
 
 ---
 
