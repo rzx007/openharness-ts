@@ -9,7 +9,7 @@
 ```text
 Client 只负责 attach、提交输入、展示 snapshot/SSE。
 Daemon 持有 SessionStore、Application/Query/Maintenance/Control services、run lane、runtime pool、permission projection、child session projection。
-SessionRunExecutor 执行单次 run，并创建 run-scoped AgentRunHost。
+SessionRunExecutor 执行单次 run，并创建 run-scoped projection + AgentRunHost。
 SessionRuntime/CliSessionRuntime 包住 QueryEngine。
 QueryEngine 和 tools 通过 runtimeHost 请求 permission、发 runtime event、创建 child agent。
 ```
@@ -46,7 +46,9 @@ flowchart TD
 
   executor --> childFactory["DaemonChildAgentHostFactory"]
   childFactory --> childAgentHost["DaemonChildAgentHost<br/>run-scoped"]
+  executor --> projection["DaemonRunProjection<br/>store/SSE/render/permission"]
   executor --> runtimeHost["DaemonRuntimeHostPort<br/>run-scoped"]
+  projection --> runtimeHost
   qe -->|"ToolContext.runtimeHost"| runtimeHost
   runtimeHost --> childAgentHost
 
@@ -56,12 +58,12 @@ flowchart TD
   childAgentHost --> taskBridge["SessionTaskBridge"]
   taskBridge --> store
 
-  runtimeHost --> permissionBroker["StorePermissionBroker"]
+  projection --> permissionBroker["StorePermissionBroker"]
   permissionBroker --> permissionController["PermissionController"]
   permissionBroker --> store
   permRoutes --> permissionBroker
 
-  runtimeHost --> renderer["SessionRunRenderer"]
+  projection --> renderer["SessionRunRenderer"]
   renderer --> store
   store --> publisher["SessionEventPublisher"]
   publisher --> hub["HttpEventHub / SSE"]
@@ -78,7 +80,7 @@ flowchart TD
 | `SessionMaintenanceService` | MCP/usage/export/compact/rewind/remember | 不负责 prompt admission |
 | `DaemonControlService` | health/debug/busy guard/runtime invalidation | 不改 transcript 内容 |
 | `SessionRunEngine` | prompt admission、idempotency、steer、lane orchestration | 不持有 runtime |
-| `SessionRunExecutor` | 执行一个 admitted run，创建 run-scoped host | 不决定队列顺序 |
+| `SessionRunExecutor` | 执行一个 admitted run，创建 run-scoped projection/host | 不决定队列顺序 |
 | `SessionRuntimePool` | runtime 创建去重、缓存、warm、close | 不知道 child host/task bridge |
 | `SessionRuntimeFactory` | session/history/parts -> `SessionRuntime` | 不再接收 child bridge |
 | `CliSessionRuntime` | daemon 下的 runtime adapter，调用 QueryEngine | 不持久化 run state |
@@ -174,7 +176,7 @@ sequenceDiagram
 | input/run/message/part/event | `SessionStore` |
 | 同 session 串行 | `SessionRunCoordinator` |
 | runtime 生命周期 | `SessionRuntimePool` |
-| 单次 run rendering | `SessionRunExecutor` + `SessionRunRenderer` |
+| 单次 run projection | `DaemonRunProjection` + `SessionRunRenderer` |
 
 ## 闭环 4：permission
 
@@ -268,7 +270,7 @@ DaemonChildAgentHost.interruptChildAgent()
 | session list/state 为什么这样 | `SessionQueryService` + `SessionStore` |
 | prompt 为什么排队/steer | `SessionRunEngine` + `SessionRunCoordinator` |
 | runtime 什么时候创建/关闭 | `SessionRuntimePool` |
-| 一次 run 怎么落 message parts | `SessionRunExecutor` + `SessionRunRenderer` |
+| 一次 run 怎么落 message parts | `DaemonRunProjection` + `SessionRunRenderer` |
 | 工具权限怎么授权 | `QueryEngine` -> `AgentRunHost.requestPermission()` -> `StorePermissionBroker` |
 | Agent 怎么建 child session | `Agent tool` -> `ToolRuntimeHost.spawnChildAgent()` -> `DaemonChildAgentHost` |
 | child task 怎么显示在 parent | `SessionTaskBridge` + `SessionTaskService` |

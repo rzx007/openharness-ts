@@ -93,12 +93,14 @@ sequenceDiagram
 
 ## 3. AgentRunHost 注入点
 
-`SessionRunExecutor` 是 host 的唯一创建点：
+`SessionRunExecutor` 是单次 run 的 orchestration 点；host callback 的 daemon 投影由 `DaemonRunProjection` 负责：
 
 ```text
 SessionRunExecutor.execute()
+  -> new DaemonRunProjection({ store, renderer, permissionBroker, events, run scope })
   -> childAgentHostFactory.create({ scope, session })
-  -> new DaemonRuntimeHostPort({ scope, childAgentHost, emitEvent, emitStreamEvent, requestPermission })
+  -> projection.createHost(scope, childAgentHost)
+  -> new DaemonRuntimeHostPort({ scope, childAgentHost, projection callbacks })
   -> runtime.runPrompt(input, host)
 ```
 
@@ -135,6 +137,7 @@ QueryEngine tool call
 | tool 何时需要授权 | `packages/core/src/engine/query-engine.ts` |
 | tool context 如何携带 host | `packages/core/src/types/tools.ts` |
 | host permission adapter | `packages/server/src/http/daemon-runtime-host.ts` |
+| daemon projection adapter | `packages/server/src/http/session-run-projection.ts` |
 | live handle | `packages/server/src/permission-controller.ts` |
 | durable projection / reply | `packages/server/src/permission-broker.ts` |
 | HTTP routes | `packages/server/src/http/routes/permission.ts` |
@@ -154,7 +157,7 @@ QueryEngine tool call
 ```text
 Agent tool
   -> context.runtimeHost.childAgentHost.spawnChildAgent()
-  -> DaemonRuntimeHostPort.spawnChildAgent()
+  -> DaemonRuntimeHostPort.childAgentHost
   -> DaemonChildAgentHostFactory.create()
   -> DaemonChildAgentHost.spawnChildAgent()
   -> ChildSessionHost port createChildSession()

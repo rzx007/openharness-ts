@@ -52,19 +52,20 @@ flowchart TB
   App --> RunEngine["SessionRunEngine<br/>admit + lane"]
   RunEngine --> Coordinator["SessionRunCoordinator<br/>one active run per session"]
   Coordinator --> Executor["SessionRunExecutor<br/>execute one run"]
+  Executor --> Projection["DaemonRunProjection<br/>store/SSE/render/permission adapter"]
 
   Executor --> Pool["SessionRuntimePool"]
   Pool --> Factory["SessionRuntimeFactory"]
   Factory --> Runtime["SessionRuntime<br/>CliSessionRuntime"]
-  Executor --> Host["DaemonRuntimeHostPort<br/>run-scoped"]
+  Projection --> Host["DaemonRuntimeHostPort<br/>run-scoped"]
   Runtime -->|"runPrompt(input, host)"| QE["QueryEngine"]
 
   QE -->|"stream events"| Host
   QE -->|"permission ask"| Host
   QE -->|"Agent/SendMessage"| Host
 
-  Host --> Renderer["SessionRunRenderer"]
-  Host --> Broker["StorePermissionBroker"]
+  Projection --> Renderer["SessionRunRenderer"]
+  Projection --> Broker["StorePermissionBroker"]
   Host --> ChildHost["DaemonChildAgentHost"]
 
   ChildHost --> ChildPort["ChildSessionHost port<br/>factory-local"]
@@ -158,7 +159,8 @@ packages/server/src/http.ts
 | `SessionTaskService` | `packages/server/src/http/session-task-service.ts` | `/tasks` HTTP API 与 durable task projection 查询/停止 |
 | `SessionTaskBridgeManager` | `packages/server/src/http/session-task-bridge.ts` | 进程内 `TaskManager` 与 store 中 `SessionTask` 的投影桥 |
 | `SessionRunEngine` | `packages/server/src/http/session-run-engine.ts` | prompt admission、session lane、run promise、interrupt/await |
-| `SessionRunExecutor` | `packages/server/src/http/session-run-executor.ts` | 单次 run 执行、创建 runtime host、落库 stream event、更新 run 终态 |
+| `SessionRunExecutor` | `packages/server/src/http/session-run-executor.ts` | 单次 run 执行、创建 projection/host、调用 runtime、处理 runtime close |
+| `DaemonRunProjection` | `packages/server/src/http/session-run-projection.ts` | run-scoped daemon projection：stream/render、runtime event、permission ask、run 终态 |
 | `SessionRuntimePool` | `packages/server/src/http/session-runtime-pool.ts` | 每个 session 的 runtime warm/acquire/close/cache |
 
 ---
@@ -175,6 +177,7 @@ sequenceDiagram
   participant Engine as "SessionRunEngine"
   participant Coord as "SessionRunCoordinator"
   participant Exec as "SessionRunExecutor"
+  participant Projection as "DaemonRunProjection"
   participant Pool as "SessionRuntimePool"
   participant Runtime as "SessionRuntime"
   participant Host as "DaemonRuntimeHostPort"
@@ -189,13 +192,16 @@ sequenceDiagram
   Engine->>Store: "createRun()"
   Engine->>Coord: "enqueue(sessionId, runId)"
   Coord->>Exec: "execute(..., workContext)"
-  Exec->>Store: "updateRun(running)"
+  Exec->>Projection: "start(admitted.content)"
+  Projection->>Store: "updateRun(running) + render user message"
   Exec->>Pool: "acquire(session, history, parts)"
-  Exec->>Host: "new DaemonRuntimeHostPort(scope, adapters)"
+  Exec->>Projection: "createHost(scope, childAgentHost)"
+  Projection->>Host: "new DaemonRuntimeHostPort(scope, callbacks)"
   Exec->>Runtime: "runPrompt(input, host)"
   Runtime->>QE: "submitMessage(... runtimeHost=host)"
   QE-->>Host: "stream/permission/child calls"
-  Host->>Store: "events/messages/parts/tasks/permissions"
+  Host->>Projection: "events/stream/permission callbacks"
+  Projection->>Store: "events/messages/parts/permissions/run state"
   Store-->>SSE: "publishSince()"
   SSE-->>C: "events/stream"
 ```
@@ -366,8 +372,8 @@ packages/client/src/client.ts
 ```mermaid
 flowchart TD
   QE["QueryEngine emits StreamEvent"] --> Host["DaemonRuntimeHostPort.emitStreamEvent()"]
-  Host --> Exec["SessionRunExecutor emitStreamEvent adapter"]
-  Exec --> Renderer["SessionRunRenderer.applyStreamEvent()"]
+  Host --> Projection["DaemonRunProjection.emitStreamEvent()"]
+  Projection --> Renderer["SessionRunRenderer.applyStreamEvent()"]
   Renderer --> Store["SessionStore messages/parts"]
   Store --> Publisher["SessionEventPublisher.publishSince()"]
   Publisher --> Hub["HttpEventHub"]
@@ -378,7 +384,10 @@ flowchart TD
 
 ```text
 packages/server/src/http/session-run-executor.ts
-  emitStreamEvent adapter
+  creates DaemonRunProjection and runtime host
+
+packages/server/src/http/session-run-projection.ts
+  emitStreamEvent / emitEvent / requestPermission projection adapter
 
 packages/server/src/http/run-renderer.ts
   SessionRunRenderer.createState()
@@ -646,7 +655,7 @@ packages/server/src/http/routes/memory.ts
 | runtime instance | `SessionRuntimePool` | 否 | `packages/server/src/http/session-runtime-pool.ts` |
 | one-session run lane | `SessionRunCoordinator` | 否 | `packages/server/src/run-coordinator.ts` |
 | run promise / awaitRun | `SessionRunEngine` | 否，终态写 run record | `session-run-engine.ts` |
-| stream render state | `SessionRunRenderer` | 部分，最终写 messages/parts | `run-renderer.ts` |
+| stream render state | `DaemonRunProjection` + `SessionRunRenderer` | 部分，最终写 messages/parts | `session-run-projection.ts`、`run-renderer.ts` |
 | permission live waiter | `PermissionController` | 否 | `permission-controller.ts` |
 | permission request/decision | `SessionStore` via `StorePermissionBroker` | 是 | `permission-broker.ts` |
 | child invocation map | `DaemonChildAgentHost` | 否 | `daemon-child-agent-host.ts` |
@@ -670,7 +679,7 @@ packages/server/src/http/routes/memory.ts
 |---|---|
 | 用户输入如何创建 run | `routes/run-execution.ts` -> `SessionApplicationService.admitPrompt()` -> `SessionRunEngine.admitPromptAndMaybeRun()` |
 | 为什么同 session 一次只跑一个 run | `SessionRunCoordinator.enqueue()` |
-| prompt 为什么会变成 message/part | `SessionRunExecutor.execute()` + `SessionRunRenderer` |
+| prompt 为什么会变成 message/part | `DaemonRunProjection` + `SessionRunRenderer` |
 | 工具授权如何弹给 UI | `DaemonRuntimeHostPort.requestPermission()` -> `StorePermissionBroker.ask()` |
 | UI 批准权限后谁唤醒工具 | `routes/permission.ts` -> `StorePermissionBroker.reply()` -> `PermissionController.resolve()` |
 | child agent 为什么会创建子 session | `DaemonChildAgentHost.spawnChildAgent()` -> `ChildSessionHost.createChildSession()` |
@@ -692,10 +701,13 @@ SessionRuntimeFactory
   only creates SessionRuntime from durable session/history/parts
 
 SessionRunExecutor
-  owns one-run host assembly
+  owns one-run orchestration
+
+DaemonRunProjection
+  owns host callback projection into store/SSE/render/permission
 
 DaemonRuntimeHostPort
-  exposes permission/event/child-agent capabilities to QueryEngine/tools
+  exposes run host capabilities to QueryEngine/tools and delegates projection callbacks
 
 DaemonChildAgentHostFactory
   creates run-scoped child-agent host
@@ -713,7 +725,7 @@ SessionApplicationService / SessionRunEngine
 | `QueryEngine.permissionPrompt` | `SubmitMessageOptions.runtimeHost.requestPermission()` |
 | `QueryEngine.runtimeEventSink` | `ToolContext.runtimeHost.emitEvent()` |
 | `registerChildSessionBackend()` | `ToolRuntimeHost.spawnChildAgent()` |
-| runtimeFactory 注入 child bridge | `SessionRunExecutor` run-scoped host assembly |
+| runtimeFactory 注入 child bridge | `SessionRunExecutor` run-scoped projection/host assembly |
 | `DaemonChildSessionHost` standalone adapter | factory-local `ChildSessionHost` port |
 
 剩余复杂度主要来自真实需求本身：

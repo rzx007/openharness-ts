@@ -27,7 +27,7 @@ TUI/Web/CLI are interaction surfaces
 daemon should host agents, not define what an agent is.
 ```
 
-当前 Phase 0-16 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，让 `CliSessionRuntime` 复用这层 facade，并把 child-agent lifecycle 从 generic run host 中拆成可选能力：
+当前 Phase 0-17 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，让 `CliSessionRuntime` 复用这层 facade，把 child-agent lifecycle 从 generic run host 中拆成可选能力，并把 daemon durable projection 收进 run-scoped adapter：
 
 ```text
 Agent Framework Layer
@@ -598,7 +598,20 @@ Phase 16: split child-agent capability contract from generic run host
 Phase 17: projection sink adapter boundary
 ```
 
-目标是把 stream/run/permission/child projection 进一步显式收口成 daemon adapter，继续减少 application service 与 runtime 之间的交叉认知负担。
+已完成动作：
+
+1. 新增 `packages/server/src/http/session-run-projection.ts`。
+2. `DaemonRunProjection` 负责 runtime event、stream event、permission ask、run start/complete/fail 的 daemon projection。
+3. `SessionRunExecutor` 不再内联 `emitEvent` / `emitStreamEvent` / `requestPermission` callback 细节，只创建 projection、child host、runtime host，并调用 runtime。
+4. 补充 `session-run-projection.test.ts` 覆盖 host callback -> store/publisher/broker/log 的闭环。
+
+下一步建议：
+
+```text
+Phase 18: transcript projection sink boundary
+```
+
+目标是继续把 `SessionRunRenderer` 的 message/part 渲染规则整理成更独立的 transcript projection sink。
 
 ---
 
