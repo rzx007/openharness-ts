@@ -113,7 +113,7 @@ describe("OpenHarnessHttpServer", () => {
               await runtimeHost.emitStreamEvent({ type: "text_delta", delta: "child output" });
               return { messages: [] };
             }
-            const invocation = await runtimeHost.spawnChildAgent({
+            const invocation = await runtimeHost.childAgentHost!.spawnChildAgent({
               description: "Explore@default",
               prompt: "inspect",
               agent: "Explore",

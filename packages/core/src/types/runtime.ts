@@ -70,7 +70,8 @@ export interface QueryRuntimeChildAgentHost {
   awaitChildAgent(invocationId: string): Promise<QueryRuntimeChildAgentResult>;
 }
 
-export interface QueryRuntimeHost extends QueryRuntimeChildAgentHost {
+export interface QueryRuntimeHost {
+  childAgentHost?: QueryRuntimeChildAgentHost;
   emitEvent(event: QueryRuntimeHostEvent): void | Promise<void>;
   requestPermission(input: QueryRuntimePermissionRequest): Promise<QueryRuntimePermissionDecision>;
 }
@@ -99,8 +100,9 @@ export type AgentChildAgentHost = QueryRuntimeChildAgentHost;
  * Framework code defines this contract; applications such as the daemon decide
  * how to project these capabilities into durable state, HTTP, SSE, or local UI.
  */
-export interface AgentRunHost extends AgentChildAgentHost {
+export interface AgentRunHost {
   readonly scope: AgentRunScope;
+  readonly childAgentHost?: AgentChildAgentHost;
 
   emitEvent(event: AgentRuntimeEvent): void | Promise<void>;
   emitStreamEvent(event: StreamEvent): void | Promise<void>;

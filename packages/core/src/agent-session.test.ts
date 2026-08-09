@@ -73,7 +73,7 @@ describe("AgentSession", () => {
     expect(requestPermission).toHaveBeenCalledWith({ toolName: "Write", input: { file: "a.txt" } });
   });
 
-  it("denies permissions and rejects child agents when no host callbacks are configured", async () => {
+  it("denies permissions without requiring child-agent capabilities", async () => {
     const engine = createQueryEngine(async function* (_content, options) {
       const decision = await options?.runtimeHost?.requestPermission({ toolName: "Bash" });
       yield { type: "text_delta", delta: decision?.status ?? "missing" };
@@ -83,11 +83,6 @@ describe("AgentSession", () => {
     const result = await session.runMessage("run");
 
     expect(result.output).toBe("denied");
-    await expect(session.createHost().spawnChildAgent({
-      description: "d",
-      prompt: "p",
-      agent: "worker",
-      cwd: "/repo",
-    })).rejects.toThrow("Child agents are not supported");
+    expect(session.createHost().childAgentHost).toBeUndefined();
   });
 });

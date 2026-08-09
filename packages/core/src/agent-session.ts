@@ -108,18 +108,6 @@ export class AgentSession {
           reason: "No permission handler configured",
         });
       },
-      spawnChildAgent: async () => {
-        throw new Error("Child agents are not supported by this AgentSession host");
-      },
-      sendChildInput: async () => {
-        throw new Error("Child agents are not supported by this AgentSession host");
-      },
-      interruptChildAgent: async () => {
-        throw new Error("Child agents are not supported by this AgentSession host");
-      },
-      awaitChildAgent: async () => {
-        throw new Error("Child agents are not supported by this AgentSession host");
-      },
     };
   }
 

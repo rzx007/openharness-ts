@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseWorkflowNotification, WorkflowRunStore } from "@openharness/coordinator";
-import type { ToolRuntimeHost } from "@openharness/core";
+import type { AgentChildAgentHost, ToolRuntimeHost } from "@openharness/core";
 import { createAgentWorkflowRunner } from "./workflow-runner";
 import { createWorkflowTool } from "./workflow";
 
@@ -25,26 +25,28 @@ afterEach(() => {
 
 describe("Workflow tool smoke", () => {
   it("runs through Workflow -> runtime host child-agent port -> task wait adapter", async () => {
-    const spawned: Array<Parameters<ToolRuntimeHost["spawnChildAgent"]>[0]> = [];
+    const spawned: Array<Parameters<AgentChildAgentHost["spawnChildAgent"]>[0]> = [];
     const outputs = new Map<string, string>();
     const runtimeHost: ToolRuntimeHost = {
       emitEvent: () => {},
       requestPermission: async () => ({ status: "approved" }),
-      spawnChildAgent: async (input) => {
-        spawned.push(input);
-        const taskName = input.sessionId?.match(/^wf-(.+)-\d+-/)?.[1] ?? input.agent;
-        const taskId = `task_${taskName}`;
-        outputs.set(taskId, `worker:${taskName}`);
-        return {
-          id: `invocation_${taskName}`,
-          taskId,
-          sessionId: input.sessionId,
-          result: Promise.resolve({ status: "completed", output: outputs.get(taskId) ?? "" }),
-        };
+      childAgentHost: {
+        spawnChildAgent: async (input) => {
+          spawned.push(input);
+          const taskName = input.sessionId?.match(/^wf-(.+)-\d+-/)?.[1] ?? input.agent;
+          const taskId = `task_${taskName}`;
+          outputs.set(taskId, `worker:${taskName}`);
+          return {
+            id: `invocation_${taskName}`,
+            taskId,
+            sessionId: input.sessionId,
+            result: Promise.resolve({ status: "completed", output: outputs.get(taskId) ?? "" }),
+          };
+        },
+        sendChildInput: async () => {},
+        interruptChildAgent: async () => {},
+        awaitChildAgent: async (id) => ({ status: "completed", output: `worker:${id}` }),
       },
-      sendChildInput: async () => {},
-      interruptChildAgent: async () => {},
-      awaitChildAgent: async (id) => ({ status: "completed", output: `worker:${id}` }),
     };
     const tool = createWorkflowTool({
       createRunner: (options) =>

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { agentTool, sendMessageTool } from "./index.js";
-import type { ToolRuntimeHost } from "@openharness/core";
+import type { AgentChildAgentHost } from "@openharness/core";
 
-type SpawnInput = Parameters<ToolRuntimeHost["spawnChildAgent"]>[0];
-type SpawnResult = Awaited<ReturnType<ToolRuntimeHost["spawnChildAgent"]>>;
+type SpawnInput = Parameters<AgentChildAgentHost["spawnChildAgent"]>[0];
+type SpawnResult = Awaited<ReturnType<AgentChildAgentHost["spawnChildAgent"]>>;
 
 function createRuntimeHost(
   spawnImpl: (input: SpawnInput) => Promise<SpawnResult> =
@@ -15,9 +15,7 @@ function createRuntimeHost(
     }),
 ) {
   const calls: SpawnInput[] = [];
-  const host = {
-    emitEvent: vi.fn(),
-    requestPermission: vi.fn(async () => ({ status: "approved" as const })),
+  const childAgentHost = {
     spawnChildAgent: vi.fn(async (input: SpawnInput) => {
       calls.push(input);
       return await spawnImpl(input);
@@ -25,6 +23,11 @@ function createRuntimeHost(
     sendChildInput: vi.fn(async () => {}),
     interruptChildAgent: vi.fn(async () => {}),
     awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "done" })),
+  };
+  const host = {
+    emitEvent: vi.fn(),
+    requestPermission: vi.fn(async () => ({ status: "approved" as const })),
+    childAgentHost,
   };
   return { host, calls };
 }
@@ -52,7 +55,7 @@ describe("agentTool runtime host", () => {
 
     expect(result.isError).toBe(true);
     expect((result.content[0] as { text: string }).text).toContain("Invalid mode");
-    expect(host.spawnChildAgent).not.toHaveBeenCalled();
+    expect(host.childAgentHost.spawnChildAgent).not.toHaveBeenCalled();
   });
 
   it("reports remote_agent as unsupported without spawning", async () => {
@@ -65,7 +68,7 @@ describe("agentTool runtime host", () => {
 
     expect(result.isError).toBe(true);
     expect((result.content[0] as { text: string }).text).toContain("not implemented");
-    expect(host.spawnChildAgent).not.toHaveBeenCalled();
+    expect(host.childAgentHost.spawnChildAgent).not.toHaveBeenCalled();
   });
 
   it("requires a runtime host", async () => {
@@ -75,10 +78,10 @@ describe("agentTool runtime host", () => {
     );
 
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain("No runtime host");
+    expect((result.content[0] as { text: string }).text).toContain("No child-agent host");
   });
 
-  it("passes isolate:true through to runtimeHost.spawnChildAgent", async () => {
+  it("passes isolate:true through to runtimeHost.childAgentHost.spawnChildAgent", async () => {
     const { host, calls } = createRuntimeHost();
 
     await agentTool.execute(
@@ -127,7 +130,7 @@ describe("agentTool runtime host", () => {
     expect(text).toContain("/wt/alpha-build-xyz");
   });
 
-  it("passes permissionMode through to runtimeHost.spawnChildAgent", async () => {
+  it("passes permissionMode through to runtimeHost.childAgentHost.spawnChildAgent", async () => {
     const { host, calls } = createRuntimeHost();
 
     await agentTool.execute(
@@ -155,7 +158,7 @@ describe("agentTool runtime host", () => {
     );
 
     expect(result.isError).toBe(true);
-    expect(host.spawnChildAgent).not.toHaveBeenCalled();
+    expect(host.childAgentHost.spawnChildAgent).not.toHaveBeenCalled();
   });
 
   it("includes notice in the returned text when present", async () => {
@@ -191,6 +194,6 @@ describe("agentTool runtime host", () => {
     );
 
     expect(result.isError).toBeUndefined();
-    expect(host.sendChildInput).toHaveBeenCalledWith("invocation-follow-up", { content: "continue" });
+    expect(host.childAgentHost.sendChildInput).toHaveBeenCalledWith("invocation-follow-up", { content: "continue" });
   });
 });

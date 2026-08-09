@@ -59,8 +59,9 @@ export const agentTool: ToolDefinition = {
       return { content: [{ type: "text", text: "Invalid permissionMode. Use default, plan, or full_auto." }], isError: true };
     }
 
-    if (!context.runtimeHost) {
-      return { content: [{ type: "text", text: "No runtime host registered for Agent tool" }], isError: true };
+    const childAgentHost = context.runtimeHost?.childAgentHost;
+    if (!childAgentHost) {
+      return { content: [{ type: "text", text: "No child-agent host registered for Agent tool" }], isError: true };
     }
 
     const subagentType = input.subagentType as string | undefined;
@@ -71,7 +72,7 @@ export const agentTool: ToolDefinition = {
 
     try {
       const workerSessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const invocation = await context.runtimeHost.spawnChildAgent({
+      const invocation = await childAgentHost.spawnChildAgent({
         description: input.description as string,
         prompt: input.prompt as string,
         agent: agentName,
@@ -138,17 +139,19 @@ export const sendMessageTool: ToolDefinition = {
 
     if (taskId.includes("@")) {
       const invocationId = childInvocationByAgentId.get(taskId);
-      if (!context.runtimeHost || !invocationId) {
+      const childAgentHost = context.runtimeHost?.childAgentHost;
+      if (!childAgentHost || !invocationId) {
         return { content: [{ type: "text", text: `No active child invocation for agent ${taskId}` }], isError: true };
       }
-      await context.runtimeHost.sendChildInput(invocationId, { content: message });
+      await childAgentHost.sendChildInput(invocationId, { content: message });
       return { content: [{ type: "text", text: `Sent message to agent ${taskId}` }] };
     }
 
     try {
       const invocationId = childInvocationByTaskId.get(taskId);
-      if (context.runtimeHost && invocationId) {
-        await context.runtimeHost.sendChildInput(invocationId, { content: message });
+      const childAgentHost = context.runtimeHost?.childAgentHost;
+      if (childAgentHost && invocationId) {
+        await childAgentHost.sendChildInput(invocationId, { content: message });
         return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
       }
       const { getTaskManager } = await import("@openharness/services");

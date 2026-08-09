@@ -1,9 +1,5 @@
 import type {
   AgentChildAgentHost,
-  AgentChildAgentInput,
-  AgentChildAgentInvocation,
-  AgentChildAgentResult,
-  AgentChildAgentSpawnInput,
   AgentPermissionDecision,
   AgentPermissionRequest,
   AgentRunHost,
@@ -25,9 +21,11 @@ export interface DaemonRuntimeHostPortContext {
  */
 export class DaemonRuntimeHostPort implements AgentRunHost {
   readonly scope: AgentRunScope;
+  readonly childAgentHost: AgentChildAgentHost;
 
   constructor(private readonly context: DaemonRuntimeHostPortContext) {
     this.scope = context.scope;
+    this.childAgentHost = context.childAgentHost;
   }
 
   emitEvent(event: AgentRuntimeEvent): void | Promise<void> {
@@ -40,21 +38,5 @@ export class DaemonRuntimeHostPort implements AgentRunHost {
 
   async requestPermission(input: AgentPermissionRequest): Promise<AgentPermissionDecision> {
     return await this.context.requestPermission(input);
-  }
-
-  async spawnChildAgent(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation> {
-    return await this.context.childAgentHost.spawnChildAgent(input);
-  }
-
-  async sendChildInput(invocationId: string, input: AgentChildAgentInput): Promise<void> {
-    await this.context.childAgentHost.sendChildInput(invocationId, input);
-  }
-
-  async interruptChildAgent(invocationId: string, reason?: string): Promise<void> {
-    await this.context.childAgentHost.interruptChildAgent(invocationId, reason);
-  }
-
-  async awaitChildAgent(invocationId: string): Promise<AgentChildAgentResult> {
-    return await this.context.childAgentHost.awaitChildAgent(invocationId);
   }
 }

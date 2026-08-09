@@ -396,15 +396,17 @@ describe("createAgentWorkflowRunner", () => {
     const runtimeHost = {
       emitEvent: vi.fn(),
       requestPermission: vi.fn(async () => ({ status: "approved" as const })),
-      spawnChildAgent: vi.fn(async () => ({
-        id: "invocation-1",
-        taskId: "task_runtime_host",
-        sessionId: "child-1",
-        result: Promise.resolve({ status: "completed" as const, output: "ok" }),
-      })),
-      sendChildInput: vi.fn(async () => {}),
-      interruptChildAgent: vi.fn(async () => {}),
-      awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "ok" })),
+      childAgentHost: {
+        spawnChildAgent: vi.fn(async () => ({
+          id: "invocation-1",
+          taskId: "task_runtime_host",
+          sessionId: "child-1",
+          result: Promise.resolve({ status: "completed" as const, output: "ok" }),
+        })),
+        sendChildInput: vi.fn(async () => {}),
+        interruptChildAgent: vi.fn(async () => {}),
+        awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "ok" })),
+      },
     };
     const runner = createAgentWorkflowRunner({
       cwd: "/repo",
@@ -418,7 +420,7 @@ describe("createAgentWorkflowRunner", () => {
 
     expect(result.metadata?.backendType).toBe("runtime_host");
     expect(result.metadata?.taskManagerTaskId).toBe("task_runtime_host");
-    expect(runtimeHost.spawnChildAgent).toHaveBeenCalledWith(expect.objectContaining({
+    expect(runtimeHost.childAgentHost.spawnChildAgent).toHaveBeenCalledWith(expect.objectContaining({
       agent: "worker",
       cwd: "/repo",
     }));
@@ -428,13 +430,15 @@ describe("createAgentWorkflowRunner", () => {
     const runtimeHost = {
       emitEvent: vi.fn(),
       requestPermission: vi.fn(async () => ({ status: "approved" as const })),
-      spawnChildAgent: vi.fn(async () => ({
-        id: "unreachable",
-        result: Promise.resolve({ status: "completed" as const, output: "unreachable" }),
-      })),
-      sendChildInput: vi.fn(async () => {}),
-      interruptChildAgent: vi.fn(async () => {}),
-      awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "unreachable" })),
+      childAgentHost: {
+        spawnChildAgent: vi.fn(async () => ({
+          id: "unreachable",
+          result: Promise.resolve({ status: "completed" as const, output: "unreachable" }),
+        })),
+        sendChildInput: vi.fn(async () => {}),
+        interruptChildAgent: vi.fn(async () => {}),
+        awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "unreachable" })),
+      },
     };
     const runner = createAgentWorkflowRunner({
       cwd: "/repo",
@@ -448,7 +452,7 @@ describe("createAgentWorkflowRunner", () => {
 
     expect(result.status).toBe("failed");
     expect(result.summary).toContain("not implemented");
-    expect(runtimeHost.spawnChildAgent).not.toHaveBeenCalled();
+    expect(runtimeHost.childAgentHost.spawnChildAgent).not.toHaveBeenCalled();
   });
 
   it("can be used by runWorkflow as a real runner adapter", async () => {

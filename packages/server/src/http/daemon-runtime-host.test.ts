@@ -50,7 +50,7 @@ describe("DaemonRuntimeHostPort", () => {
     expect(decision.status).toBe("approved");
   });
 
-  it("delegates child-agent lifecycle calls", async () => {
+  it("exposes child-agent lifecycle capability", async () => {
     const invocation = {
       id: "child-invocation",
       taskId: "task-1",
@@ -71,11 +71,11 @@ describe("DaemonRuntimeHostPort", () => {
       childAgentHost,
     });
 
-    await expect(host.spawnChildAgent({ description: "d", prompt: "p", agent: "a", cwd: "/repo" }))
+    await expect(host.childAgentHost.spawnChildAgent({ description: "d", prompt: "p", agent: "a", cwd: "/repo" }))
       .resolves.toBe(invocation);
-    await host.sendChildInput("child-invocation", { content: "follow up" });
-    await host.interruptChildAgent("child-invocation", "stop");
-    await expect(host.awaitChildAgent("child-invocation")).resolves.toEqual({ status: "completed", output: "done" });
+    await host.childAgentHost.sendChildInput("child-invocation", { content: "follow up" });
+    await host.childAgentHost.interruptChildAgent("child-invocation", "stop");
+    await expect(host.childAgentHost.awaitChildAgent("child-invocation")).resolves.toEqual({ status: "completed", output: "done" });
 
     expect(childAgentHost.spawnChildAgent).toHaveBeenCalledWith({ description: "d", prompt: "p", agent: "a", cwd: "/repo" });
     expect(childAgentHost.sendChildInput).toHaveBeenCalledWith("child-invocation", { content: "follow up" });

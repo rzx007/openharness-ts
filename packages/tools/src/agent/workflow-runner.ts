@@ -434,7 +434,16 @@ async function defaultSpawnWorker(
       error: "No runtime host registered for workflow worker",
     };
   }
-  const invocation = await runtimeHost.spawnChildAgent({
+  if (!runtimeHost.childAgentHost) {
+    return {
+      success: false,
+      agentId,
+      taskId: "",
+      backendType: "runtime_host",
+      error: "No child-agent host registered for workflow worker",
+    };
+  }
+  const invocation = await runtimeHost.childAgentHost.spawnChildAgent({
     description: agentId,
     prompt: config.prompt,
     agent: config.name,
