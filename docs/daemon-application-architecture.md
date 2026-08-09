@@ -31,7 +31,7 @@ QueryEngine owns agent loop
 AgentRunHost is the run-scoped capability port between runtime and daemon
 ```
 
-不要把 `AgentRunHost` 理解成又一个业务大对象。它是 daemon 给单次 run 暴露的宿主能力边界：权限、runtime event、stream event、child agent lifecycle 都经由它回到 daemon。
+不要把 `AgentRunHost` 理解成又一个业务大对象。它是 daemon 给单次 run 暴露的宿主能力边界：权限、runtime event、stream event 经由它回到 daemon；child agent lifecycle 作为可选 `childAgentHost` 能力挂在这条边界上。
 
 ---
 
@@ -489,7 +489,7 @@ packages/server/src/http/session-application-service.ts
 - Agent tool 不知道 daemon 的 `ChildSessionHost` / `SessionTaskBridge`。
 - `ChildSessionHost` 是 factory-local port，由 `DaemonChildAgentHostFactory` 从 `SessionApplicationService` 生成。
 - `TaskWait` 等的是用户可见 task projection，不是 live child invocation handle。
-- `SendMessage` 优先通过 Agent tool 保存的 invocation id 回到 `runtimeHost.sendChildInput()`；找不到时才 fallback 到普通 `TaskManager.writeToTask()`。
+- `SendMessage` 优先通过 Agent tool 保存的 invocation id 回到 `runtimeHost.childAgentHost.sendChildInput()`；找不到时才 fallback 到普通 `TaskManager.writeToTask()`。
 - child run 完成后，`DaemonChildAgentHost` 会 complete task 并 close child runtime。
 
 ---
@@ -676,7 +676,7 @@ packages/server/src/http/routes/memory.ts
 | child agent 为什么会创建子 session | `DaemonChildAgentHost.spawnChildAgent()` -> `ChildSessionHost.createChildSession()` |
 | child agent 为什么也有 task_id | `SessionTaskBridgeManager.registerSessionTask()` |
 | `TaskWait` 等的是 child run 还是 task | `packages/tools/src/task/index.ts`，等 user-visible task projection |
-| `SendMessage` 怎么找到 child | `packages/tools/src/agent/index.ts` 的 invocation map，然后 `runtimeHost.sendChildInput()` |
+| `SendMessage` 怎么找到 child | `packages/tools/src/agent/index.ts` 的 invocation map，然后 `runtimeHost.childAgentHost.sendChildInput()` |
 | compact 为什么有时 409 | `SessionMaintenanceService.compact()` 检查 `runEngine.hasWork(sessionId)` |
 | 改 settings/plugin 为什么有时 409 | `DaemonControlService.hasAnyActiveRuns()` / `hasActiveRunsForCwd()` |
 | UI 刷新后从哪里恢复状态 | `GET /sessions/:id/state` + `/events/stream?cursor=` |

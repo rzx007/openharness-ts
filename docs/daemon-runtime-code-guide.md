@@ -153,7 +153,7 @@ QueryEngine tool call
 
 ```text
 Agent tool
-  -> context.runtimeHost.spawnChildAgent()
+  -> context.runtimeHost.childAgentHost.spawnChildAgent()
   -> DaemonRuntimeHostPort.spawnChildAgent()
   -> DaemonChildAgentHostFactory.create()
   -> DaemonChildAgentHost.spawnChildAgent()
@@ -170,7 +170,7 @@ Agent tool
 
 - Agent tool 不再使用 `ChildSessionBackend`。
 - CLI bootstrap 不再注册 `registerChildSessionBackend()`。
-- Workflow 默认 worker spawn 也走 `runtimeHost.spawnChildAgent()`。
+- Workflow 默认 worker spawn 也走 `runtimeHost.childAgentHost.spawnChildAgent()`。
 - `ChildSessionHost` 和 `SessionTaskBridge` 仍存在，但由 `DaemonChildAgentHostFactory` 组装后收进 `DaemonChildAgentHost`，不再穿过 runtimeFactory、QueryEngine 或 `SessionRunExecutor`。
 
 关键文件：

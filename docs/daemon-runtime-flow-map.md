@@ -206,7 +206,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   qe["QueryEngine"] --> agent["Agent tool<br/>packages/tools"]
-  agent --> host["ToolContext.runtimeHost.spawnChildAgent()"]
+  agent --> host["ToolContext.runtimeHost.childAgentHost.spawnChildAgent()"]
   host --> runtimeHost["DaemonRuntimeHostPort"]
   runtimeHost --> childAgentHost["DaemonChildAgentHost"]
   childAgentHost --> worktree{"isolate?"}
@@ -228,12 +228,12 @@ flowchart TD
 
 | 问题 | 文件 |
 |---|---|
-| Agent 为什么能创建 child session | `packages/tools/src/agent/index.ts` 调 `context.runtimeHost.spawnChildAgent()` |
+| Agent 为什么能创建 child session | `packages/tools/src/agent/index.ts` 调 `context.runtimeHost.childAgentHost.spawnChildAgent()` |
 | child session 由谁创建 | `DaemonChildAgentHostFactory` 生成 `ChildSessionHost` port -> `SessionApplicationService` |
 | parent task projection 在哪 | `packages/server/src/http/session-task-bridge.ts` |
 | isolated worktree 在哪 | `packages/server/src/http/child-agent-worktree.ts`，cleanup 在 `DaemonChildAgentHost` |
 | TaskWait 等的是什么 | `task_id` 对应的 parent-visible task projection，不是 live invocation handle |
-| SendMessage 怎么送 follow-up | `packages/tools/src/agent/index.ts` -> task/agent id 查 live invocation -> `runtimeHost.sendChildInput()` |
+| SendMessage 怎么送 follow-up | `packages/tools/src/agent/index.ts` -> task/agent id 查 live invocation -> `runtimeHost.childAgentHost.sendChildInput()` |
 | Workflow worker 怎么 spawn | `packages/tools/src/agent/workflow-runner.ts` |
 
 ## 闭环 6：archive / interrupt

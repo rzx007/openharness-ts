@@ -1,8 +1,8 @@
-# Runtime Host Port 设计与 Phase 15 落地状态
+# Runtime Host Port 设计与 Phase 16 落地状态
 
 > 日期：2026-08-07
 >
-> 状态：Phase 0-15 已落地。本文是当前代码的任务文档，不是未来提案。
+> 状态：Phase 0-16 已落地。本文是当前代码的任务文档，不是未来提案。
 >
 > 目标：把 daemon 和 QueryEngine 之间零散的 callback、bridge、handle 收束到一个 run-scoped `AgentRunHost` 边界，降低状态归属分裂和句柄双向穿梭。
 
@@ -49,8 +49,9 @@ AgentRunHost is the narrow host-capability port
 当前形状：
 
 ```ts
-export interface AgentRunHost extends AgentChildAgentHost {
+export interface AgentRunHost {
   readonly scope: AgentRunScope;
+  readonly childAgentHost?: AgentChildAgentHost;
 
   emitEvent(event: AgentRuntimeEvent): void | Promise<void>;
   emitStreamEvent(event: StreamEvent): void | Promise<void>;
@@ -171,7 +172,7 @@ sequenceDiagram
 - `DaemonChildAgentHost` 是唯一组合 child session、child run、parent task projection、interrupt/await 的 adapter。
 - `SessionRuntimePool` 不再持有 child-agent bridge；它只缓存 runtime。
 - `isolate: true` 的 worktree 创建在 `DaemonChildAgentHost` 内部处理，属于 daemon child lifecycle。
-- `SendMessage` 对由 Agent tool 创建的 task，会通过 invocation id 回到 `runtimeHost.sendChildInput()`。
+- `SendMessage` 对由 Agent tool 创建的 task，会通过 invocation id 回到 `runtimeHost.childAgentHost.sendChildInput()`。
 
 关键文件：
 
@@ -241,8 +242,9 @@ flowchart TD
 - Phase 13：`packages/core/src/types/runtime.ts` 新增 daemon-neutral `AgentRunHost` / `AgentRunScope` / `AgentChildAgentHost` 类型；`SessionRuntime.runPrompt()` 接收 `AgentRunHost`，server 的 `DaemonRuntimeHostPort` 实现该 framework contract，并删除旧 `packages/server/src/runtime-host.ts` 类型出口。
 - Phase 14：`packages/core/src/agent-session.ts` 新增 standalone in-memory `AgentSession` facade；`createAgentSession()` 包装已构造的 `QueryEngine`，提供 `submitMessage()` / `runMessage()`，复用 `AgentRunHost`，默认 permission deny，child agent 显式 unsupported。
 - Phase 15：`apps/cli/src/session-runtime.ts` 的 `CliSessionRuntime.runPrompt()` 已复用 `AgentSession.submitMessage()`；daemon-hosted runtime 与 standalone runner 共享同一个 submit facade。`@openharness/server/runtime` 与 `@openharness/services/session-runtime/types` 提供轻量 contract 入口，避免 CLI runtime 通过大 barrel 触碰 HTTP/store 模块。
+- Phase 16：`AgentRunHost` / `QueryRuntimeHost` 不再继承 child-agent host；child lifecycle 通过可选 `childAgentHost?: AgentChildAgentHost` 暴露。`AgentSession` 默认不提供 child 能力，daemon 的 `DaemonRuntimeHostPort` 通过 `.childAgentHost` 提供完整 child session/task/run projection。
 - `@openharness/server` public barrel 不再导出 `ChildSessionHost` / `SessionTaskBridge`；这些类型只服务 server-local adapter。
 
 ## 8. 后续非兼容改造建议
 
-1. 继续推进 Phase 16：把 child-agent capability 从 generic run host 中拆成可选能力，让普通 standalone runner 不必实现 child lifecycle 方法。
+1. 继续推进 Phase 17：把 stream/run/permission/child projection 显式收口成 daemon projection sink adapter。

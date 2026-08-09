@@ -208,7 +208,7 @@ createAgentWorkflowRunner()(context)
   │    成功 → 映射结果 + git diff
   │    失败 → 记 resumeError，改走 spawn
   │
-  └─ runtimeHost.spawnChildAgent(WorkflowWorkerSpawnConfig)
+  └─ runtimeHost.childAgentHost.spawnChildAgent(WorkflowWorkerSpawnConfig)
        isolate / permissionMode / tools / maxTurns（conserve 可覆盖）
        → awaitTask(spawn.taskId, { timeoutMs })
        → getDiffSummary（worktree/cwd git）

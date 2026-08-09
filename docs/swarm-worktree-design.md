@@ -17,7 +17,7 @@
 
 ```text
 Agent tool / Workflow worker
-  -> runtimeHost.spawnChildAgent({ isolate: true, ... })
+  -> runtimeHost.childAgentHost.spawnChildAgent({ isolate: true, ... })
   -> DaemonChildAgentHost
   -> resolve git repo root
   -> compute <configDir>/worktrees/<repoId>/<slug>

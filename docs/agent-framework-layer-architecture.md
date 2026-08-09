@@ -27,7 +27,7 @@ TUI/Web/CLI are interaction surfaces
 daemon should host agents, not define what an agent is.
 ```
 
-当前 Phase 0-15 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，并让 `CliSessionRuntime` 复用这层 facade：
+当前 Phase 0-16 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，让 `CliSessionRuntime` 复用这层 facade，并把 child-agent lifecycle 从 generic run host 中拆成可选能力：
 
 ```text
 Agent Framework Layer
@@ -218,16 +218,19 @@ const result = await agent.submitMessage("...");
 ```ts
 interface AgentRunHost {
   readonly scope: AgentRunScope;
+  readonly childAgentHost?: AgentChildAgentHost;
 
   emit(event: AgentRuntimeEvent): void | Promise<void>;
   emitStream(event: StreamEvent): void | Promise<void>;
 
   requestPermission(request: ToolPermissionRequest): Promise<ToolPermissionDecision>;
+}
 
-  spawnChildAgent?(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation>;
-  sendChildInput?(invocationId: string, input: ChildAgentInput): Promise<void>;
-  interruptChildAgent?(invocationId: string, reason?: string): Promise<void>;
-  awaitChildAgent?(invocationId: string): Promise<ChildAgentResult>;
+interface AgentChildAgentHost {
+  spawnChildAgent(input: AgentChildAgentSpawnInput): Promise<AgentChildAgentInvocation>;
+  sendChildInput(invocationId: string, input: ChildAgentInput): Promise<void>;
+  interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
+  awaitChildAgent(invocationId: string): Promise<ChildAgentResult>;
 }
 ```
 
@@ -237,7 +240,7 @@ interface AgentRunHost {
 |---|---|
 | framework 定义能力 | permission、events、child-agent 是 agent run 能力，不是 daemon 私有概念 |
 | host 决定投影 | daemon host 会落库/SSE；local host 可以 console/in-memory/test double |
-| child-agent 可选 | standalone runner 可以显式 unsupported；daemon runner 提供完整 child session/task/run projection |
+| child-agent 可选 | standalone runner 可以不提供 `childAgentHost`；daemon runner 提供完整 child session/task/run projection |
 | 不泄露 daemon 类型 | framework contract 不应引用 `SessionStore`、HTTP route、`SessionApplicationService` |
 
 当前映射：
@@ -321,7 +324,7 @@ handler
 
 ```text
 Agent tool
-  -> runtimeHost.spawnChildAgent()
+  -> runtimeHost.childAgentHost.spawnChildAgent()
   -> DaemonChildAgentHost
   -> create child session
   -> register parent-visible task
@@ -581,7 +584,21 @@ Phase 15: make CliSessionRuntime reuse AgentSession
 Phase 16: split child-agent capability contract from generic run host
 ```
 
-目标是让普通 agent runner 可以只声明 permission/event/stream 能力；daemon host 再额外提供 child-agent lifecycle。
+已完成动作：
+
+1. `AgentRunHost` / `QueryRuntimeHost` 不再继承 child-agent host。
+2. child lifecycle 通过可选 `childAgentHost?: AgentChildAgentHost` 暴露。
+3. `AgentSession.createHost()` 不再实现 unsupported child 方法；standalone host 默认就是无 child 能力。
+4. `DaemonRuntimeHostPort` 仍提供 daemon child 能力，但作为 `.childAgentHost` 属性。
+5. Agent / Workflow 工具通过 `ToolContext.runtimeHost.childAgentHost` 调用 child lifecycle。
+
+下一步建议：
+
+```text
+Phase 17: projection sink adapter boundary
+```
+
+目标是把 stream/run/permission/child projection 进一步显式收口成 daemon adapter，继续减少 application service 与 runtime 之间的交叉认知负担。
 
 ---
 

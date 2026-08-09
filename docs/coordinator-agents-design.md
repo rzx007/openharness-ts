@@ -60,7 +60,7 @@ builtin agents
 flowchart TD
   md["agent.md frontmatter"] --> def["AgentDefinition"]
   def --> agentTool["Agent tool / Workflow runner"]
-  agentTool --> host["runtimeHost.spawnChildAgent()"]
+  agentTool --> host["runtimeHost.childAgentHost.spawnChildAgent()"]
   host --> daemon["DaemonChildAgentHost"]
   daemon --> child["create child session metadata"]
   child --> runtime["child CliSessionRuntime"]

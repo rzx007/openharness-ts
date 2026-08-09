@@ -6,7 +6,7 @@
 
 ```text
 Leader QueryEngine 调用 Agent tool
-  -> Agent tool 调 context.runtimeHost.spawnChildAgent()
+  -> Agent tool 调 context.runtimeHost.childAgentHost.spawnChildAgent()
   -> DaemonRuntimeHostPort 委托 DaemonChildAgentHost
   -> DaemonChildAgentHost 创建 child session + parent task projection
   -> child prompt 进入普通 SessionRunEngine lane
@@ -18,7 +18,7 @@ Leader QueryEngine 调用 Agent tool
 ```mermaid
 flowchart TD
   leader["Leader session QueryEngine"] --> agent["Agent tool<br/>packages/tools/src/agent/index.ts"]
-  agent --> host["ToolContext.runtimeHost.spawnChildAgent()"]
+  agent --> host["ToolContext.runtimeHost.childAgentHost.spawnChildAgent()"]
   host --> runtimeHost["DaemonRuntimeHostPort"]
   runtimeHost --> childAgentHost["DaemonChildAgentHost"]
 
@@ -42,7 +42,7 @@ flowchart TD
   await --> complete["SessionTaskBridge.completeSessionTask()"]
   complete --> storeTask
 
-  send["SendMessage"] --> sendHost["runtimeHost.sendChildInput()"]
+  send["SendMessage"] --> sendHost["runtimeHost.childAgentHost.sendChildInput()"]
   sendHost --> childAgentHost
   childAgentHost --> admitFollowup["admit follow-up prompt to child"]
 
@@ -58,7 +58,7 @@ packages/tools/src/agent/index.ts
   Agent.execute()
     -> validate mode/permissionMode
     -> require context.runtimeHost
-    -> context.runtimeHost.spawnChildAgent({
+    -> context.runtimeHost.childAgentHost.spawnChildAgent({
          description,
          prompt,
          agent,
@@ -113,8 +113,8 @@ durable task 是 projection，不是 child session 本体。即使 parent task c
 
 `SendMessage` 当前规则：
 
-- 如果目标是 `agent@team`，用 Agent tool 保存的 invocation id 调 `runtimeHost.sendChildInput()`。
-- 如果目标是 Agent 返回的 `task_id`，同样先查 invocation id；能命中则调 `runtimeHost.sendChildInput()`。
+- 如果目标是 `agent@team`，用 Agent tool 保存的 invocation id 调 `runtimeHost.childAgentHost.sendChildInput()`。
+- 如果目标是 Agent 返回的 `task_id`，同样先查 invocation id；能命中则调 `runtimeHost.childAgentHost.sendChildInput()`。
 - 未命中的普通 task id 才回退到 `TaskManager.writeToTask()`。
 
 child follow-up 会：
