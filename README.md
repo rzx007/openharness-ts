@@ -6,7 +6,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 > ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
 >
-> **易漂移数字以代码/单测为准**：内置工具数 → `packages/tools` `createDefaultToolRegistry`（`registry.test.ts` 锁 45）；Provider 数 → `packages/api` `PROVIDERS`（`registry.test.ts` 锁 21）；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。架构细节以 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md) 优先于本文。
+> **易漂移数字以代码/单测为准**：内置工具数 → `packages/tools` `createDefaultToolRegistry`（`registry.test.ts` 锁 45）；Provider 数 → `packages/api` `PROVIDERS`（`registry.test.ts` 锁 21）；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。当前架构以 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md) 和 [docs/agent-framework-capability-boundary.md](docs/agent-framework-capability-boundary.md) 为准。
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
 - ✅ **内置工具（45）** — 以 `createDefaultToolRegistry()` 为准：文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait / Workflow / ImageToText / ImageGeneration / FeishuPush 等齐全；bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
@@ -18,7 +18,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents/tools_dir 六类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 支持动态 import 插件工具
 - ✅ **Channels 引擎桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 QueryEngine；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-bridge-design.md](docs/channels-bridge-design.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。SwarmPanel UI 保留但尚未接 daemon 事件
-- 🟢 **Daemon Session Runtime** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、原子 session snapshot、SSE 事件流、单 session 串行/多 session 并发 run engine、`RuntimeHostPort` 边界、持久化 PermissionBroker + live PermissionController 和共享 `@openharness/client` reducer。默认 `ohs`（与 `ohs --tui`）启动/attach daemon；重启将遗留 run 和 daemon-owned workflow 明确收口，保留 parent/child session 与 timeline；进程内 REPL 入口已移除。代码权威导览见 [docs/daemon-runtime-code-guide.md](docs/daemon-runtime-code-guide.md)；认知地图见 [docs/daemon-runtime-flow-map.md](docs/daemon-runtime-flow-map.md)；设计细节见 [docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md)、[docs/runtime-host-port-design.md](docs/runtime-host-port-design.md) 和 [docs/client-sync-flow.md](docs/client-sync-flow.md)
+- 🟢 **Daemon Application** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、durable session/transcript、SSE、单 session 串行 run lane、持久化 PermissionBroker、child durable projection 和共享 `@openharness/client` reducer。daemon 的 `AgentPool` 按 session 缓存真实 `OpenHarnessAgent`；framework 负责执行和 live handles。权威导览见 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)，framework 见 [docs/agent-runtime-framework-architecture.md](docs/agent-runtime-framework-architecture.md)，客户端同步见 [docs/client-sync-flow.md](docs/client-sync-flow.md)。
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
 - 🟡 **可用但仍在收口** — `sandbox`（Bash 走 SRT/Docker，文件工具宿主执行 + path guard；Docker proxy 为 bridge+代理环境 MVP；Docker/SRT 可选 e2e 已补，CI 接入待补）
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
@@ -323,10 +323,10 @@ OpenHarness-ts/
 │                 │ SessionRunEngine             │                    │
 │                 │ PermissionBroker/Controller  │                    │
 │                 └──────────────┬──────────────┘                    │
-│                                │ SessionRuntime                    │
+│                                │ AgentPool.acquire(sessionId)      │
 │                 ┌──────────────▼──────────────┐                    │
-│                 │ `AgentSessionRuntime`         │                    │
-│                 │ `OpenHarnessAgent`            │                    │
+│                 │ `AgentPool`                    │                    │
+│                 │ `OpenHarnessAgent`             │                    │
 │                 │ `AgentSession` → QueryEngine  │                    │
 │                 └──────────────┬──────────────┘                    │
 └────────────────────────────────┼────────────────────────────────────┘
@@ -486,7 +486,7 @@ OpenHarness-ts/
 | `McpClientManager`      | MCP 协议客户端：stdio + HTTP/SSE 传输连接外部 MCP Server，headers 鉴权，动态获取工具和资源；MCP OAuth 待补                                                                                                                                                                                                                                                                                   |
 | `ChannelAdapter`        | 通信通道：`StdioAdapter`（标准输入输出）、`HttpAdapter`（HTTP Webhook）、`FeishuAdapter`（飞书机器人）                                                                                                                                                                                                                                                                                   |
 | `HookExecutor`          | Hook 系统：10 类事件（`session_start/end`、`pre/post_tool_use`、`pre/post_compact`、`user_prompt_submit`、`notification`、`stop`、`subagent_stop`），支持 command/http/prompt/agent 四种类型、priority、matcher、`$ARGUMENTS`                                                                                                                                                                                                                                                      |
-| `Swarm`                 | 多 Agent 团队：daemon/TUI/print 主路径在 daemon 内派生 child session；parent task、child session 与 child run 通过 session event 关联。详见 [docs/swarm-subprocess-flow.md](docs/swarm-subprocess-flow.md) |
+| `Swarm`                 | 多 Agent 团队：framework 创建并执行 child agent，daemon 投影 parent task、child session 与 child run。详见 [docs/agent-child-session-flow.md](docs/agent-child-session-flow.md) |
 | `PluginLoader`          | 插件系统（Claude Code 布局兼容）：双源发现 + 项目插件信任门控；skills/commands/hooks/MCP/agents/tools_dir 六类贡献注册（`/plugin:cmd` 斜杠命令、`${CLAUDE_PLUGIN_ROOT}`、`.mcp.json`、动态工具 import）；卸载路径穿越防护。详见 [docs/plugins-contributions-design.md](docs/plugins-contributions-design.md)                                                                                                            |
 | `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；daemon catalog 将 user-invocable skill 暴露为 template 斜杠（`POST /sessions/:id/commands` 展开后 admit）；model 可见性过滤                                                                                                                                   |
 | `BridgeManager`         | 会话桥接：多进程间共享会话状态                                                                                                                                                                                                                                                                                                                                                  |
@@ -554,11 +554,11 @@ OpenHarness-ts/
 │  PermissionBroker · PermissionController                 │
 │  Agent → child session（daemon 当前主路径）                │
 └──────────────────────────┬───────────────────────────────┘
-                           │ SessionRuntime factory
+                           │ AgentPool.acquire(sessionId)
                            ▼
 ┌──────────────────────────────────────────────────────────┐
 │  @openharness/agent-runtime                              │
-│  AgentSessionRuntime → OpenHarnessAgent → AgentSession  │
+│  OpenHarnessAgent → AgentSession → QueryEngine          │
 │  → QueryEngine / tools / hooks / MCP                    │
 └──────────────────────────────────────────────────────────┘
 ```

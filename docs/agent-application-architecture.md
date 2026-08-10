@@ -1,5 +1,7 @@
 # 一个完整 Agent 应用需要什么
 
+> 本文是概念性架构笔记，不是当前代码索引。当前实现请以 [Agent Framework 边界](./agent-framework-capability-boundary.md) 和 [Daemon Application Architecture](./daemon-application-architecture.md) 为准。
+
 > 一份关于 Agent 功能、运行机制与工程架构的系统性笔记。
 
 ## 0. 先建立一个最重要的认识
@@ -622,9 +624,9 @@ interface MemoryRecord {
 - 协调成本大于执行成本。
 - 多个 Worker 会同时修改同一文件。
 
-### 为什么使用 daemon-owned child session
+### 为什么投影 durable child session
 
-当前主线不再通过旧 `SwarmBackend` / subprocess registry 派发 Agent。`Agent` 工具只调用 `ToolRuntimeHost.spawnChildAgent()`；daemon 侧用 `DaemonChildAgentHost` 创建 child session、child run 和 parent-visible task projection。
+当前主线不再通过旧 `SwarmBackend` / subprocess registry 派发 Agent。framework 的 `AgentChildManager` 创建并执行 child agent；daemon 的 `DaemonChildAgentProjection` 只创建 child session、child run 和 parent-visible task projection。
 
 这样做的实际收益：
 
@@ -640,22 +642,24 @@ sequenceDiagram
   participant U as 用户
   participant L as Leader Agent
   participant A as Agent Tool
-  participant H as AgentRunHost
-  participant D as DaemonChildAgentHost
+  participant M as AgentChildManager
+  participant D as DaemonChildAgentProjection
   participant S as SessionStore
   participant T as Task Projection
 
   U->>L: 提交复杂任务
   L->>A: spawn Explore 子任务
-  A->>H: spawnChildAgent(input)
-  H->>D: create child invocation
-  D->>S: create child session + run
+  A->>M: spawnChildAgent(input)
+  M->>D: create durable child projection
+  D->>S: create child session + task
+  M->>M: create and run child OpenHarnessAgent
   D->>T: register parent-visible task
   A-->>L: 返回 task_id
   L->>A: spawn Verify 子任务
-  A->>H: spawnChildAgent(input)
-  H->>D: create child invocation
-  D->>S: create child session + run
+  A->>M: spawnChildAgent(input)
+  M->>D: create durable child projection
+  D->>S: create child session + task
+  M->>M: create and run child OpenHarnessAgent
   D->>T: register parent-visible task
   L->>T: TaskWait(task_ids)
   S-->>T: child run terminal output projected
@@ -918,8 +922,7 @@ daemon mode 下，child-agent 能力不在 bootstrap 时注入为 `swarm` 对象
 - [Provider、认证与模型](./auth-provider-model.md)
 - [上下文压缩](./compact-service-design.md)
 - [记忆系统](./memory-system.md)
-- [Swarm 子进程历史归档](./swarm-subprocess-flow.md)
-- [Swarm worktree 隔离](./swarm-worktree-design.md)
+- [当前 child agent / durable session 流程](./agent-child-session-flow.md)
 - [权限流](./permission-flow.md)
 - [Skill 流程](./skills-flow.md)
 - [Plugin 贡献](./plugins-contributions-design.md)

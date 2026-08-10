@@ -1,171 +1,61 @@
 # Agent Child Session Flow
 
-> 状态：当前主线文档。旧的 `ChildSessionBackend` / `registerChildSessionBackend()` bootstrap 路径已经退出 Agent tool 主路径。
+> 当前实现。核心边界：framework owns child execution/live handles；daemon owns durable child projection。
 
-## 一句话模型
-
-```text
-Leader QueryEngine 调用 Agent tool
-  -> Agent tool 调 context.runtimeHost.childAgentHost.spawnChildAgent()
-  -> DaemonRuntimeHostPort 委托 DaemonChildAgentHost
-  -> DaemonChildAgentHost 创建 child session + parent task projection
-  -> child prompt 进入普通 SessionRunEngine lane
-  -> parent 通过 task projection / TaskWait / SSE 看到结果
-```
-
-## 当前流程图
+## 总图
 
 ```mermaid
-flowchart TD
-  leader["Leader session QueryEngine"] --> agent["Agent tool<br/>packages/tools/src/agent/index.ts"]
-  agent --> host["ToolContext.runtimeHost.childAgentHost.spawnChildAgent()"]
-  host --> runtimeHost["DaemonRuntimeHostPort"]
-  runtimeHost --> childAgentHost["DaemonChildAgentHost"]
-
-  childAgentHost --> isolate{"isolate=true?"}
-  isolate -->|"yes + git repo"| worktree["create isolated git worktree"]
-  isolate -->|"no / not git"| cwd["use parent cwd"]
-  worktree --> createChild["ChildSessionHost port<br/>createChildSession()"]
-  cwd --> createChild
-
-  createChild --> app["SessionApplicationService.createChildSession()"]
-  app --> storeChild["SessionStore child session<br/>parentId = leader session"]
-
-  childAgentHost --> task["SessionTaskBridge.registerSessionTask()"]
-  task --> storeTask["SessionStore SessionTaskRecord<br/>parent-visible task"]
-
-  childAgentHost --> admit["ChildSessionHost port<br/>admitPrompt()"]
-  admit --> appAdmit["SessionApplicationService.admitPrompt()"]
-  appAdmit --> engine["SessionRunEngine"]
-  engine --> childRun["child run executes through normal lane"]
-  childRun --> await["DaemonChildAgentHost.awaitRun()"]
-  await --> complete["SessionTaskBridge.completeSessionTask()"]
-  complete --> storeTask
-
-  send["SendMessage"] --> sendHost["runtimeHost.childAgentHost.sendChildInput()"]
-  sendHost --> childAgentHost
-  childAgentHost --> admitFollowup["admit follow-up prompt to child"]
-
-  stop["TaskStop / child interrupt"] --> interrupt["runtimeHost.interruptChildAgent()"]
-  interrupt --> childAgentHost
-  childAgentHost --> archive["interrupt + closeRuntime + archive child"]
+flowchart LR
+  Tool["Agent tools"] --> Manager["AgentChildManager"]
+  Manager --> Child["child OpenHarnessAgent"]
+  Manager -. projection .-> Daemon["DaemonChildAgentProjection"]
+  Daemon --> Session["durable child session/run"]
+  Daemon --> Task["parent-visible task"]
+  Daemon --> Worktree["optional worktree"]
 ```
 
-## 运行步骤
+## Spawn
+
+1. Agent tool 调用 framework 生成的 `AgentChildAgentHost.spawnChildAgent()`。
+2. `AgentChildManager` 生成 invocation ID。
+3. daemon projection 创建 child session、task 和可选 worktree，返回 sessionId/cwd/taskId。
+4. framework 递归调用 `createOpenHarnessAgent()` 创建 child 实例。
+5. framework 启动 child run；daemon projection 创建 durable input/run 和 child-scoped host。
+6. child 完成后 framework 返回 result，daemon 完成 run/task projection。
+
+## Follow-up / stop / await
 
 ```text
-packages/tools/src/agent/index.ts
-  Agent.execute()
-    -> validate mode/permissionMode
-    -> require context.runtimeHost
-    -> context.runtimeHost.childAgentHost.spawnChildAgent({
-         description,
-         prompt,
-         agent,
-         team,
-         cwd,
-         sessionId,
-         model,
-         systemPrompt,
-         permissionMode,
-         isolate,
-         allowedTools,
-         disallowedTools,
-         maxTurns,
-         effort
-       })
-    -> return task_id/session_id/worktree to model
-
-packages/server/src/http/session-run-executor.ts
-  execute()
-    -> childAgentHostFactory.create({ scope, session })
-    -> new DaemonRuntimeHostPort({ scope, childAgentHost, ... })
-    -> runtime.runPrompt(input, host)
-
-packages/server/src/http/daemon-child-agent-host.ts
-  spawnChildAgent()
-    -> optionally create worktree
-    -> childSessionHost.createChildSession()
-    -> sessionTaskBridge.registerSessionTask()
-    -> childSessionHost.admitPrompt()
-    -> sessionTaskBridge.bindSessionTaskRun()
-    -> monitor childSessionHost.awaitRun()
-    -> sessionTaskBridge.completeSessionTask()
+SendMessage -> AgentChildManager.send()
+Task input  -> SessionTaskBridge callback -> framework controls.send()
+Task stop   -> SessionTaskBridge callback -> framework controls.interrupt()
+HTTP child interrupt -> LiveChildAgentRegistry -> framework controls.interrupt()
+TaskWait    -> AgentChildManager.awaitResult()
 ```
 
-## 状态归属
+active run 的 follow-up 进入 QueryEngine `pullFollowUps`；已完成 child 的新输入会开始下一轮 run，并继续复用同一 child agent history。
 
-| 状态 | 归属 |
+parent run 的 AbortSignal 会终止该 run 创建的 child。parent agent `close()` 会关闭所有剩余 child 和资源。
+
+## 所有权
+
+| 状态 | 所有者 |
 |---|---|
-| parent session | `SessionStore` |
-| child session | `SessionStore`，带 `parentId` |
-| child messages / parts / runs | `SessionStore` |
-| parent 可见 task | durable `SessionTaskRecord` |
-| live child invocation handle | `DaemonChildAgentHost` 当前 run 内存 |
-| permission request | `StorePermissionBroker` + `PermissionController` |
-| isolated worktree | `child-agent-worktree.ts` + `DaemonChildAgentHost` cleanup |
+| child agent 与 invocation map | `AgentChildManager` |
+| abort controller / result promise | `AgentChildManager` |
+| child session/input/run/task records | daemon `SessionStore` |
+| sessionId -> controls 路由 | `LiveChildAgentRegistry`，只持引用 |
+| worktree create/cleanup | daemon projection |
 
-durable task 是 projection，不是 child session 本体。即使 parent task completed/stopped/interrupted，child session 的 messages/runs/events 仍保留用于审计。
-
-`TaskWait` 消费的是 `task_id` 对应的 parent-visible task projection，不直接拿 live child invocation handle。live invocation id 只在当前 run 的 `DaemonChildAgentHost` map 中用于 `SendMessage` / interrupt / await；daemon restart 后这个 map 不恢复。
-
-## Follow-up / Stop
-
-`SendMessage` 当前规则：
-
-- 如果目标是 `agent@team`，用 Agent tool 保存的 invocation id 调 `runtimeHost.childAgentHost.sendChildInput()`。
-- 如果目标是 Agent 返回的 `task_id`，同样先查 invocation id；能命中则调 `runtimeHost.childAgentHost.sendChildInput()`。
-- 未命中的普通 task id 才回退到 `TaskManager.writeToTask()`。
-
-child follow-up 会：
+## 代码位置
 
 ```text
-write parent task input
-  -> admit new prompt to child session
-  -> bind new run id
-  -> monitor new child run
+packages/agent-runtime/src/child-agent.ts
+packages/server/src/http/daemon-child-agent-projection.ts
+packages/server/src/http/child-agent-projection-factory.ts
+packages/server/src/http/live-child-agent-registry.ts
+packages/server/src/http/session-task-bridge.ts
+packages/server/src/http/child-agent-worktree.ts
 ```
 
-停止 child invocation 会：
-
-```text
-interrupt child session
-close child runtime
-archive child session
-complete parent task as stopped
-remove clean isolated worktree
-```
-
-## 权限
-
-Child session 共享 daemon permission infrastructure。工具授权仍从 child QueryEngine 调 `AgentRunHost.requestPermission()` 进入 daemon host，再由 `StorePermissionBroker` 投影到 store/SSE。
-
-Agent 级字段会写入 child session metadata：
-
-| 字段 | metadata |
-|---|---|
-| `tools` | `allowedTools` |
-| `disallowedTools` | `disallowedTools` |
-| `maxTurns` | `maxTurns` |
-| `effort` | `effort` |
-| `permissionMode` | `permissionMode` |
-| agent prompt | `systemPrompt` |
-| `isolate` | `isolate` + optional `worktree` |
-
-## 重启边界
-
-daemon restart 不会恢复 live child invocation handle、provider stream 或 permission promise。持久的 sessions/messages/runs/events/tasks 会留在 `SessionStore`；未终态 run/task 会在启动恢复时标记 interrupted。
-
-## 代码入口
-
-| 区域 | 文件 |
-|---|---|
-| Agent / SendMessage | `packages/tools/src/agent/index.ts` |
-| Workflow child worker | `packages/tools/src/agent/workflow-runner.ts` |
-| run-scoped host 创建 | `packages/server/src/http/session-run-executor.ts` |
-| daemon child invocation adapter | `packages/server/src/http/daemon-child-agent-host.ts` |
-| isolated worktree helper | `packages/server/src/http/child-agent-worktree.ts` |
-| child session server-local port | `packages/server/src/http/child-agent-ports.ts`，由 `child-agent-host-factory.ts` 绑定到 application use case |
-| session/run use cases | `packages/server/src/http/session-application-service.ts` |
-| durable task projection | `packages/server/src/http/session-task-bridge.ts` |
-| runtime host types | `packages/server/src/runtime-host.ts`, `packages/core/src/types/runtime.ts` |
+不存在 `DaemonChildAgentHost`、`ChildSessionHost` 或 child runtime factory。

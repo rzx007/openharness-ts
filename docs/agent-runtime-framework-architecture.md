@@ -1,305 +1,162 @@
 # Agent Runtime Framework Architecture
 
-> 当前状态：Phase 19 已落地。本文描述当前代码事实，是 Agent Runtime 组装、programmatic API 与 daemon 托管边界的权威入口。
->
-> 关联文档：[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)。
+> 状态：当前代码事实。边界约束见 [agent-framework-capability-boundary.md](./agent-framework-capability-boundary.md)。daemon 运行流程见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
 
-## 0. 核心模型
-
-OpenHarness 当前分为三层：
+## 核心对象
 
 ```text
-agent-runtime framework
-  -> daemon hosting layer (server/client)
-  -> application surfaces (TUI / Web / Desktop / CLI / scripts)
+QueryEngine      = model/tool agent loop
+AgentSession     = 单 agent session facade 与 run host 注入点
+OpenHarnessAgent = 带默认组装、维护 API 和 child lifecycle 的公开框架对象
+AgentChildManager = framework-owned child instances 与 live handles
 ```
 
-这里的箭头表达能力叠加，不代表 agent-runtime 依赖 daemon。真实 package 依赖方向见第 4 节。
+`createOpenHarnessAgent()` 返回一个长期存活的 `OpenHarnessAgent`。一次 `submitMessage()` 是一个对话回合；同一实例上的后续调用复用 history、usage、MCP、sandbox 和扩展资源。
+
+## 创建流程
+
+入口：[agent.ts](../packages/agent-runtime/src/agent.ts)
+
+```mermaid
+flowchart TD
+  Create["createOpenHarnessAgent(options)"]
+  Settings["load/effective Settings"]
+  Discover["discoverOpenHarnessExtensions"]
+  Runtime["createOpenHarnessRuntime"]
+  MCP["McpClientManager.connectAll"]
+  Memory["createAgentMemoryRuntime"]
+  Session["createAgentSession"]
+  Children["new AgentChildManager"]
+  Agent["DefaultOpenHarnessAgent"]
+
+  Create --> Settings --> Discover --> Runtime
+  Runtime --> MCP
+  Runtime --> Memory
+  Runtime --> Session
+  Session --> Children --> Agent
+```
+
+主要文件：
+
+| 文件 | 职责 |
+|---|---|
+| `packages/agent-runtime/src/agent.ts` | public facade 与资源生命周期 |
+| `packages/agent-runtime/src/default-runtime.ts` | provider、tools、hooks、prompt、permission、sandbox、QueryEngine 组装 |
+| `packages/agent-runtime/src/extensions.ts` | skills/plugins/MCP/agent definitions 发现 |
+| `packages/agent-runtime/src/memory-runtime.ts` | retrieval 与 remember |
+| `packages/agent-runtime/src/child-agent.ts` | child live lifecycle |
+| `packages/core/src/agent-session.ts` | run scope、host callbacks、QueryEngine 调用 |
+| `packages/core/src/engine/query-engine.ts` | model/tool loop |
+
+## 一轮 submitMessage
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Agent as OpenHarnessAgent
+  participant Children as AgentChildManager
+  participant Session as AgentSession
+  participant QE as QueryEngine
+  participant Host as AgentRunHost
+
+  Caller->>Agent: submitMessage(content, options)
+  Agent->>Agent: choose supplied host or create standalone host
+  Agent->>Children: createHost(baseHost, childProjection?)
+  Agent->>Session: submitMessage(content, host)
+  Session->>QE: submitMessage(content, runtimeHost)
+  loop model/tool turns
+    QE->>Host: requestPermission / emitEvent
+    QE-->>Session: StreamEvent
+    Session->>Host: emitStreamEvent
+    Session-->>Caller: StreamEvent
+  end
+```
+
+`runMessage()` 只是在 `submitMessage()` 上聚合 text delta、events 和最终 history，不存在另一套执行链。
+
+## Tool 与权限
+
+QueryEngine 执行工具时使用 runtime host：
 
 ```text
-QueryEngine       = 对话与工具循环
-AgentSession      = 单 session facade 与 run host 注入点
-OpenHarnessAgent  = 带默认组装的 programmatic Agent Runtime
-AgentSessionRuntime = daemon SessionRuntime adapter
-daemon            = HTTP、多客户端、持久化与并发托管形态
+QueryEngine tool loop
+  -> permission checker
+  -> AgentRunHost.requestPermission(request)
+  -> approved: tool.execute()
+  -> denied/expired/abort: stop tool execution
+  -> tool result returns to QueryEngine
 ```
 
-daemon 不再是 agent 的出生地。它获取一个 `SessionRuntimeFactory`，按 session 托管已经定义良好的 Agent Runtime。
+standalone 默认没有 permission callback 时拒绝；daemon 提供 `DaemonRuntimeHostPort`，把 request 转给 `StorePermissionBroker`。
 
-## 1. 两种运行形态
+## Child agent
 
-### 1.1 单进程 programmatic
+Agent tool 看到的是 `AgentChildAgentHost`，它由 `AgentChildManager.createHost()` 生成，不由 daemon 生成。
 
-入口：`packages/agent-runtime/src/agent.ts`
+```mermaid
+flowchart LR
+  Tool["Agent / SendMessage / TaskWait tools"]
+  Host["AgentChildAgentHost"]
+  Manager["AgentChildManager"]
+  Child["child OpenHarnessAgent"]
+  Projection["optional AgentChildProjection"]
+
+  Tool --> Host --> Manager --> Child
+  Manager -. observe .-> Projection
+```
+
+有 daemon 时，projection 负责 durable child session/task/run 与 child-scoped `AgentRunHost`；没有 daemon 时，manager 创建内存 session/run scope，child 仍可执行。
+
+## 维护 API
+
+| API | framework 行为 |
+|---|---|
+| `compact()` | 压缩并替换 live history |
+| `remember()` | 从 live history 提取并写 memory store |
+| `getUsage()` | 返回累计 token usage |
+| `inspect()` | 返回 model/tools/hooks/MCP/sandbox 快照 |
+| `loadHistory()` | 导入 domain messages |
+| `clear()` | 清空 history 与 QueryEngine 状态 |
+| `close()` | 关闭 children、MCP、sandbox 和 runtime resources |
+
+daemon maintenance service 调这些公开 API，然后只持久化 daemon 自己的结果。
+
+## 两种使用形态
+
+### Programmatic
 
 ```ts
-import { createOpenHarnessAgent } from "@openharness/agent-runtime";
-
 const agent = await createOpenHarnessAgent({
   cwd,
-  settings,
-  requestPermission: async (request) => {
-    return ui.askPermission(request);
-  },
+  requestPermission: askUser,
 });
 
-const result = await agent.runMessage("hi");
-await agent.close();
-```
-
-流式调用：
-
-```ts
 for await (const event of agent.submitMessage("hi")) {
   render(event);
 }
+
+await agent.close();
 ```
 
-调用链：
-
-```text
-createOpenHarnessAgent()
-  -> createOpenHarnessRuntime()
-     -> API client
-     -> default tools
-     -> PermissionChecker
-     -> HookExecutor
-     -> system prompt
-     -> QueryEngine
-     -> sandbox runtime
-  -> configureRuntime extension
-  -> McpClientManager
-  -> AgentSession
-
-agent.submitMessage()
-  -> AgentSession.submitMessage()
-  -> QueryEngine.submitMessage()
-  -> provider stream / tools / permission / follow-up
-```
-
-`OpenHarnessAgent` 直接提供：
-
-| API | 作用 |
-|---|---|
-| `submitMessage()` | 流式运行一轮或多轮 tool loop |
-| `runMessage()` | 收集文本、事件和最终 history |
-| `loadHistory()` / `getHistory()` | 恢复与读取会话历史 |
-| `compact()` | 压缩 QueryEngine history |
-| `getUsage()` | 获取当前 runtime 累计 token usage |
-| `getMcpConnections()` | 检查 session 级 MCP 连接 |
-| `close()` | 释放 MCP、sandbox 等 runtime 资源 |
-
-### 1.2 daemon 托管
-
-入口：`packages/agent-runtime/src/daemon.ts`
-
-```ts
-const runtimeFactory = createOpenHarnessAgentRuntimeFactory({
-  settings,
-  getSettings,
-  prepareSession: async ({ session, settings }) => ({
-    skillRegistry: await loadApplicationSkills(session.cwd, settings),
-    configureRuntime: registerApplicationExtensions,
-  }),
-});
-
-const server = new OpenHarnessHttpServer({ runtimeFactory });
-```
-
-实际 CLI 组装入口：`apps/cli/src/commands/daemon.ts`。
-
-```text
-CLI daemon command
-  -> createOpenHarnessAgentRuntimeFactory()
-  -> prepareSession() loads CLI skills/plugins
-  -> OpenHarnessHttpServer({ runtimeFactory })
-
-daemon receives prompt
-  -> SessionRunEngine
-  -> SessionRuntimePool.acquire()
-  -> factory.createRuntime()
-  -> createOpenHarnessAgent()
-  -> AgentSessionRuntime.runPrompt(input, host)
-  -> OpenHarnessAgent.submitMessage(..., { host })
-```
-
-`prepareSession` 是应用扩展边界。CLI 可以贡献 skills、plugin tools、plugin hooks 和 plugin MCP 配置，但不再构造 `QueryEngine`。
-
-## 2. Package 边界
-
-### `@openharness/agent-runtime`
-
-文件：
-
-```text
-packages/agent-runtime/src/default-runtime.ts
-packages/agent-runtime/src/agent.ts
-packages/agent-runtime/src/host-runtime.ts
-packages/agent-runtime/src/daemon.ts
-```
-
-职责：
-
-| 模块 | 归属 |
-|---|---|
-| `default-runtime.ts` | provider、tools、permission、hooks、prompt、QueryEngine、sandbox 的默认组装 |
-| `agent.ts` | `OpenHarnessAgent` programmatic facade、MCP 与资源生命周期 |
-| `host-runtime.ts` | daemon 可消费的 `SessionRuntime` / `SessionRuntimeFactory` contract |
-| `daemon.ts` | transcript codec、`AgentSessionRuntime`、默认 hosted factory、compact/usage/remember/inspect |
-
-明确不属于该 package：
-
-| 能力 | 所有者 |
-|---|---|
-| HTTP routes / Hono / SSE | `@openharness/server` |
-| `SessionStore` durable state | `@openharness/services` + server application services |
-| run lane / runtime pool | `@openharness/server` |
-| durable permission/transcript projection | `@openharness/server` |
-| CLI flags、daemon registry、进程启动 | `apps/cli` |
-| TUI/Web/Desktop rendering | 对应 surface |
-
-### `@openharness/server`
-
-server 只通过 `@openharness/agent-runtime/host` 认识 runtime contract。它不知道 provider、MCP、skills 或 `QueryEngine` 的创建方式。
-
-### `apps/cli`
-
-CLI 当前只承担：
-
-- settings 与命令参数入口。
-- daemon 生命周期和 registry。
-- skills/plugins 的应用扩展发现。
-- 把 runtime factory、application services 注入 server。
-- channels 等独立应用形态的启动。
-
-旧文件已退出：
-
-```text
-apps/cli/src/runtime.ts
-apps/cli/src/session-runtime.ts
-```
-
-## 3. Host 与状态归属
-
-一轮 daemon run 的双向交互仍通过 `AgentRunHost`，但 host 的创建和 durable projection 属于 daemon：
+### Daemon-hosted
 
 ```text
 SessionRunExecutor
-  -> DaemonRunProjection
-  -> AgentRunHost
-     -> requestPermission()
-     -> emitEvent()
-     -> emitStreamEvent()
-     -> optional childAgentHost
-  -> AgentSessionRuntime.runPrompt(..., host)
-  -> OpenHarnessAgent.submitMessage(..., { host })
+  -> AgentPool.acquire(sessionId)
+  -> agent.submitMessage(content, { host, childProjection, pullFollowUps })
+  -> daemon projections persist events and transcript
 ```
 
-状态归属：
-
-| 状态 | 所有者 |
-|---|---|
-| core message history | warm `OpenHarnessAgent` / `QueryEngine` |
-| session/run/input/message/part | daemon `SessionStore` |
-| permission pending/decision | daemon projection + store |
-| runtime instance | daemon `SessionRuntimePool` |
-| MCP connections | one `OpenHarnessAgent` instance |
-| child session/task durable state | daemon child host + store |
-
-framework 暴露事件与决策接口，daemon 负责把它们变成可 attach/replay 的持久状态；句柄不会写入 store。
-
-## 4. 真实依赖方向
-
-```mermaid
-flowchart TB
-  Core["@openharness/core<br/>QueryEngine / AgentSession / AgentRunHost"]
-  Runtime["@openharness/agent-runtime<br/>default composition / OpenHarnessAgent"]
-  Host["@openharness/agent-runtime/host<br/>SessionRuntime contract"]
-  DaemonAdapter["@openharness/agent-runtime/daemon<br/>hosted adapter"]
-  Server["@openharness/server<br/>HTTP / store orchestration / pool / projections"]
-  Client["@openharness/client<br/>daemon client SDK"]
-  CLI["apps/cli<br/>application composition"]
-  Surfaces["TUI / Web / Desktop"]
-
-  Runtime --> Core
-  Host --> Core
-  DaemonAdapter --> Runtime
-  DaemonAdapter --> Host
-  Server --> Host
-  CLI --> Runtime
-  CLI --> DaemonAdapter
-  CLI --> Server
-  CLI --> Client
-  Surfaces --> Client
-```
-
-server 依赖 contract，不依赖 `OpenHarnessAgent` 的具体 factory；因此测试或其他应用仍可注入别的 `SessionRuntimeFactory`。
-
-## 5. Permission 与 child agent 定位
-
-programmatic 模式下，permission 可以在创建 agent 时提供回调：
-
-```ts
-createOpenHarnessAgent({
-  settings,
-  requestPermission: async (request) => approveOrDeny(request),
-  childAgentHost,
-});
-```
-
-也可以在单次 `submitMessage()` 时传入完整 `host`。没有 permission handler 时默认拒绝，不会隐式放行。
-
-child agent 是 run host 的可选 capability。programmatic agent 可以在创建时注入 session 级 `childAgentHost`，也可以在单次调用时覆盖完整 host；不提供时仍可正常运行。daemon 在需要 child session/task projection 时按 run 注入。
-
-## 6. Phase 19 完成状态
-
-| Phase | 状态 | 代码结果 |
-|---|---|---|
-| 19A package boundary | 完成 | 新增 `packages/agent-runtime` |
-| 19B hosted runtime | 完成 | `AgentSessionRuntime`、transcript codec 迁出 CLI |
-| 19C default factory | 完成 | `createOpenHarnessAgentRuntimeFactory()` 与 `prepareSession` 扩展点 |
-| 19D standalone API | 完成 | `createOpenHarnessAgent()`、`submitMessage()`、`runMessage()` |
-| 19E docs/examples | 完成 | 本文与 daemon/TUI 运行文档指向真实路径 |
-
-## 7. 查代码路径
-
-查“agent 怎么创建”：
+daemon 缓存真实 agent，不存在 runtime adapter：
 
 ```text
-packages/agent-runtime/src/default-runtime.ts
-packages/agent-runtime/src/agent.ts
+Map<sessionId, Promise<OpenHarnessAgent>>
 ```
 
-查“一轮对话怎么跑”：
+## Public API 原则
 
-```text
-packages/core/src/agent-session.ts
-packages/core/src/engine/query-engine.ts
-```
-
-查“daemon 怎么把 prompt 交给 agent”：
-
-```text
-apps/cli/src/commands/daemon.ts
-packages/agent-runtime/src/daemon.ts
-packages/server/src/http/session-run-engine.ts
-packages/server/src/http/session-run-executor.ts
-```
-
-查“事件、permission、transcript 如何持久化”：
-
-```text
-packages/server/src/http/session-run-projection.ts
-packages/server/src/http/transcript-projection.ts
-```
-
-最终心智模型：
-
-```text
-QueryEngine is the loop.
-AgentSession is the session facade.
-OpenHarnessAgent is the opinionated framework API.
-AgentSessionRuntime is the daemon adapter.
-Daemon is a hosting mode.
-TUI/Web/Desktop/CLI are application surfaces.
-```
+- 公开 domain operation，不公开内部 bundle。
+- construction-time 扩展使用 `OpenHarnessAgentExtension`。
+- host callback 只表达 framework domain request/event。
+- durable record 类型不能进入 agent-runtime。
+- 新增 daemon hosting 需求时优先增加 projection，而不是恢复 `SessionRuntime`。

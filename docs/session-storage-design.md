@@ -3,7 +3,7 @@
 > 状态：已批准。移植 Python `services/session_storage.py`（230 行），
 > 替换 TS 现状的「平铺 `<sessionsDir>/<id>.json`」。
 
-> 当前定位：本文描述的是 print/REPL 的项目级快照功能，用于 `--continue` / `--resume` 和 transcript 导出，不供 TUI/daemon 使用。daemon 的权威 `SessionStore` 位于 `packages/services/src/session-runtime`，包含 session/input/message/part/event/run/task/permission request，使用 daemon 独占的 SQLite。两者是独立功能，不存在格式回退或互相迁移。新设计见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)。
+> 当前定位：本文描述历史项目级快照。daemon 的权威 `SessionStore` 位于 `packages/services/src/session-runtime`，包含 session/input/message/part/event/run/task/permission request，使用 daemon 独占的 SQLite。当前流程见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
 
 ## 现状缺口
 

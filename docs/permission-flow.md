@@ -1,83 +1,53 @@
-# 权限（Permission）流程
+# Permission Flow
 
-当前权限确认只有 daemon/client 主线。TUI 不通过 BackendHost/OHJSON 弹权限框，也不持有本地 permission Promise。
+> 当前实现的快速索引。完整 daemon 上下文见 [daemon-application-architecture.md](./daemon-application-architecture.md#工具运行与授权)。
 
-```text
-QueryEngine
-  -> PermissionChecker.checkTool()
-  -> decision === "ask"
-  -> QueryEngine calls AgentRunHost.requestPermission()
-     (host 由 AgentSessionRuntime -> OpenHarnessAgent.submitMessage() 注入)
-  -> PermissionBroker
-  -> SessionStore.createPermissionRequest(status:"pending")
-  -> append event: permission.asked
-  -> PermissionController.wait(requestId, signal)
-
-TUI / Web / Desktop
-  -> @openharness/client syncEvents()
-  -> receive permission.asked by replay or SSE
-  -> render permission modal
-  -> POST /permissions/:requestId/reply
-
-PermissionBroker
-  -> SessionStore.replyPermission()
-  -> append event: permission.replied
-  -> PermissionController.resolve(requestId, decision)
-  -> QueryEngine continues or denies tool call
-```
-
-## 决策层
-
-权限仍分两层：
-
-| 层 | 组件 | 产物 |
-|---|---|---|
-| 规则层 | `PermissionChecker.checkTool(name, input)` | `{ action: "allow" | "deny" | "ask", reason }` |
-| 确认层 | `StorePermissionBroker` + attach 客户端 | persisted request + persisted reply |
-| live 层 | `PermissionController` | in-process waiter + abort expiration |
-
-`checkTool` 只给出规则决策；需要用户确认时，由 daemon 持久化 request，并通过 event stream 通知所有 attach 客户端。
-
-关键边界：
+## Standalone
 
 ```text
-PermissionController owns the live continuation.
-SessionStore owns the durable projection.
+QueryEngine tool call
+  -> permission checker
+  -> AgentRunHost.requestPermission()
+  -> createOpenHarnessAgent({ requestPermission }) callback
+  -> approved / denied / expired
+  -> execute or reject tool
 ```
 
-因此 daemon 重启后不能假装恢复旧的 async stack；持久化 request 可以被 replay、展示、回复或收口，但原进程里的 live waiter 已不存在。
+未提供 callback 时默认拒绝，不隐式放行。
 
-## HTTP API
+## Daemon
 
-客户端读取与回复权限：
+```mermaid
+sequenceDiagram
+  participant QE as QueryEngine
+  participant H as DaemonRuntimeHostPort
+  participant B as StorePermissionBroker
+  participant S as SessionStore
+  participant U as UI
 
-```text
-GET  /permissions?sessionId=<id>&status=pending
-POST /permissions/:requestId/reply
+  QE->>H: requestPermission(request)
+  H->>B: ask(scope + request + AbortSignal)
+  B->>S: pending permission record
+  S-->>U: SSE event
+  U->>B: HTTP reply
+  B->>S: durable decision
+  B-->>H: resolve waiting promise
+  H-->>QE: decision
 ```
 
-reply body：
+## 代码位置
 
-```json
-{
-  "status": "approved",
-  "decision": "once",
-  "clientId": "tui"
-}
-```
+| 行为 | 文件 |
+|---|---|
+| tool loop 与 permission check | `packages/core/src/engine/query-engine.ts` |
+| framework host contract | `packages/core/src/types/runtime.ts` |
+| daemon run host | `packages/server/src/http/daemon-runtime-host.ts` |
+| durable broker | `packages/server/src/permission-broker.ts` |
+| live resolver | `packages/server/src/permission-controller.ts` |
+| list/reply routes | `packages/server/src/http/routes/permission.ts` |
 
-`status` 可为 `"approved"` 或 `"denied"`。
-`decision` 可为 `"once"` 或 `"session"`；`"session"` 会让同一 session 内同工具后续 ask 复用批准。
+## Cancellation
 
-## 客户端职责
+run 的 `AbortSignal` 传给 broker/controller。interrupt 或 archive 时，pending request 变为 expired，等待 promise 被 resolve，工具不会继续执行。
 
-TUI 的 `useServerSync()` 从 reducer state 中找当前 session 的 pending permission：
-
-- `permission.asked` 出现时展示 modal。
-- 用户批准/拒绝后调用 `client.replyPermission()`。
-- 客户端断开不影响 request 存活。
-- 另一个客户端稍后 attach 后仍可 replay 到 pending request 并回复。
-
-## 后续
-
-Edit/Write diff preview 应进入 persisted permission request payload，而不是走 TUI 专属协议。
+child request 会沿 session parent lineage 上浮到顶层 session；payload 保留 `childSessionId` 和 `childRunId`，因此 UI 只需监听父 session 也能处理授权。

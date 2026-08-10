@@ -77,7 +77,7 @@ for await (const update of syncEvents(client, { sessionId: session.id })) {
 ## 相关文档
 
 - [docs/client-sync-flow.md](../../docs/client-sync-flow.md)
-- [docs/daemon-session-runtime-design.md](../../docs/daemon-session-runtime-design.md)
+- [docs/daemon-application-architecture.md](../../docs/daemon-application-architecture.md)
 
 ## 测试
 

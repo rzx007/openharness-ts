@@ -1,23 +1,16 @@
 # Coordinator Agents Design
 
-> 状态：当前事实版。agent 定义加载已落地；agent 级字段会通过 runtime-host child invocation 写入 child session metadata。
+> 当前实现。child 执行边界见 [agent-child-session-flow.md](./agent-child-session-flow.md)。
 
-## 范围
+## Agent definitions
 
-本设计覆盖：
+定义来源按以下顺序合并，同名后者覆盖前者：
 
-| 范围 | 状态 |
-|---|---|
-| 用户 agent 加载 | 已实现：`~/.openharness-ts/agents/*.md` |
-| plugin agent 加载 | 已实现：plugin `agents` 路径 |
-| builtin/user/plugin 合并 | 已实现：同名后者覆盖，优先级 builtin < user < plugin |
-| coordinator prompt 恢复 | 已实现 |
-| agent 字段运行时生效 | 已实现：经 Agent/Workflow -> runtimeHost -> child session metadata |
-| agent hooks/mcpServers 运行时生效 | 后续 |
+```text
+builtin -> user -> plugin
+```
 
-## AgentDefinition 字段
-
-agent markdown frontmatter 支持的核心字段：
+agent markdown frontmatter 支持：
 
 ```yaml
 name: worker
@@ -31,108 +24,47 @@ disallowedTools:
 maxTurns: 5
 effort: high
 permissionMode: plan
-skills:
-  - some-skill
 ```
 
-正文作为 `systemPrompt`。
+正文作为 child `systemPrompt`。
 
-## 加载与合并
-
-```text
-builtin agents
-  -> user agents
-  -> plugin agents
-  -> AgentDefinition registry
-```
-
-关键文件：
-
-| 文件 | 责任 |
-|---|---|
-| `packages/coordinator/src/agents.ts` | agent definition 解析、合并、查询 |
-| `packages/tools/src/agent/index.ts` | Agent tool 读取 agent definition |
-| `packages/tools/src/agent/workflow-runner.ts` | Workflow task 读取 agent definition |
-
-## 运行时生效链路
+## Runtime flow
 
 ```mermaid
 flowchart TD
-  md["agent.md frontmatter"] --> def["AgentDefinition"]
-  def --> agentTool["Agent tool / Workflow runner"]
-  agentTool --> host["runtimeHost.childAgentHost.spawnChildAgent()"]
-  host --> daemon["DaemonChildAgentHost"]
-  daemon --> child["create child session metadata"]
-  child --> runtime["child AgentSessionRuntime"]
-  runtime --> agent["child OpenHarnessAgent / AgentSession"]
-  agent --> qe["child QueryEngine"]
+  Definition["AgentDefinition"]
+  Tool["Agent tool / Workflow runner"]
+  Host["framework AgentChildAgentHost"]
+  Manager["AgentChildManager"]
+  Projection["optional daemon projection"]
+  Child["child OpenHarnessAgent"]
+
+  Definition --> Tool --> Host --> Manager --> Child
+  Manager -. durable observation .-> Projection
 ```
 
-当前主路径：
+字段通过 spawn input 进入 framework：
+
+| definition | child runtime override |
+|---|---|
+| `model` | model |
+| markdown body | system prompt |
+| `tools` | allowed tools |
+| `disallowedTools` | disallowed tools |
+| `maxTurns` | QueryEngine max turns |
+| `effort` | provider reasoning effort |
+| `permissionMode` | child permission policy |
+
+daemon hosting 时，同一份字段同时写入 child session metadata，供 durable 查询和日后独立恢复；daemon 不负责创建 child QueryEngine。
+
+## Code
 
 ```text
+packages/coordinator/src/agents.ts
 packages/tools/src/agent/index.ts
-  agentDef
-    -> spawnChildAgent({
-         model,
-         systemPrompt,
-         allowedTools,
-         disallowedTools,
-         maxTurns,
-         effort,
-         permissionMode
-       })
-
-packages/server/src/http/daemon-child-agent-host.ts
-  spawnChildAgent()
-    -> childSessionHost.createChildSession({
-         metadata: {
-           systemPrompt,
-           allowedTools,
-           disallowedTools,
-           maxTurns,
-           effort,
-           permissionMode
-         }
-       })
+packages/tools/src/agent/workflow-runner.ts
+packages/agent-runtime/src/child-agent.ts
+packages/server/src/http/daemon-child-agent-projection.ts
 ```
 
-## 字段映射
-
-| AgentDefinition 字段 | child session metadata | 应用点 |
-|---|---|---|
-| `model` | session model | child runtime provider model |
-| markdown body | `systemPrompt` | child runtime system prompt |
-| `tools` | `allowedTools` | child runtime tool allow list |
-| `disallowedTools` | `disallowedTools` | child runtime tool deny list |
-| `maxTurns` | `maxTurns` | child QueryEngine turn limit |
-| `effort` | `effort` | provider reasoning effort |
-| `permissionMode` | `permissionMode` | child permission policy |
-
-`permissionMode` 优先级：
-
-```text
-Agent tool input.permissionMode
-  -> AgentDefinition.permissionMode
-  -> default
-```
-
-## Coordinator 工具隔离
-
-coordinator 模式只暴露调度相关工具：
-
-```text
-Agent
-SendMessage
-TaskStop
-Workflow
-```
-
-这样 coordinator 负责拆分/调度，不直接操作文件或 shell；真正执行由 child agent 完成。
-
-## 仍留待后续
-
-- `hooks` 运行时注入。
-- `mcpServers` 运行时注入。
-- `memory` / `isolation` 更细语义。
-- agent 字段与 host/framework 分层的更稳定 schema。
+Coordinator 模式只暴露调度工具；实际文件和 shell 操作由 child agent 执行。

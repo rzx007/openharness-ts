@@ -2,7 +2,7 @@
 
 > 状态：daemon/TUI 主线。斜杠命令**不是**通用 `runCommand`；按三层分流。
 > 呈现/派发层在 `@openharness/client`（`dispatchSessionCommand`），TUI/Web/Desktop 共用。
-> 命令清单参考 [slash-commands.md](./slash-commands.md)；协议细节见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)、[client-sync-flow.md](./client-sync-flow.md)。
+> 命令清单参考 [slash-commands.md](./slash-commands.md)；daemon 协议见 [daemon-application-architecture.md](./daemon-application-architecture.md)、[client-sync-flow.md](./client-sync-flow.md)。
 
 ## 目标
 
@@ -173,7 +173,7 @@ Builtin session 名与 skill 重名时 **builtin 胜出**（例如 `/commit` 是
 | 进程内 `QueryEngine` 上改历史 | store `replaceTranscript` + `closeRuntime`（如 `/rewind` `/compact`） |
 | print/worker 斜杠 | **不支持**完整 slash 面；print 是一次性 prompt |
 
-print 走 daemon Session API，不走本 flow。旧 `--task-worker` 入口已退场。见 [daemon-session-runtime-design.md](./daemon-session-runtime-design.md)「入口边界」。
+print 走 daemon Session API，不走本 flow。旧 `--task-worker` 入口已退场。见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
 
 ## Web/Desktop 接入清单
 
@@ -187,6 +187,6 @@ print 走 daemon Session API，不走本 flow。旧 `--task-worker` 入口已退
 
 - [slash-commands.md](./slash-commands.md) — 命令清单（参考）
 - [client-sync-flow.md](./client-sync-flow.md) — snapshot + SSE
-- [daemon-session-runtime-design.md](./daemon-session-runtime-design.md) — HTTP API 与 slash 边界
+- [daemon-application-architecture.md](./daemon-application-architecture.md) — HTTP API 与 slash 边界
 - [skills-flow.md](./skills-flow.md) — skill 加载（历史 REPL 路径已归档；template 展开见上文）
 - [tui-flow.md](./tui-flow.md) — TUI 启动与 attach
