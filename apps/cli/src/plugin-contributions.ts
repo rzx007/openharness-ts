@@ -66,7 +66,7 @@ export async function loadPluginContributions(
 }
 
 // ---------------------------------------------------------------------------
-// hooks / MCP（bootstrap 之后才有 HookExecutor / connectAll，故经缓存二段接线）
+// hooks / MCP（默认 runtime 创建后才有 HookExecutor / connectAll，故经缓存二段接线）
 // ---------------------------------------------------------------------------
 
 let loadedPluginsCache: LoadedPlugin[] = [];

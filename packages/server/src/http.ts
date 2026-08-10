@@ -10,7 +10,7 @@ import {
 import type { CommandCatalogProvider } from "./commands.js";
 import { getDefaultSessionStorePath } from "./paths.js";
 import { StorePermissionBroker } from "./permission-broker.js";
-import type { SessionRuntimeFactory } from "./runtime.js";
+import type { SessionRuntimeFactory } from "@openharness/agent-runtime/host";
 import type {
   AgentPersonaService,
   AuthService,

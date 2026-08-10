@@ -1,6 +1,6 @@
 import type { SessionStore } from "@openharness/services";
 
-import type { SessionRuntime, SessionRuntimeFactory } from "../runtime.js";
+import type { SessionRuntime, SessionRuntimeFactory } from "@openharness/agent-runtime/host";
 
 export interface SessionRuntimePoolContext {
   store: Pick<SessionStore, "getSession" | "listMessageParts" | "listMessages" | "listSessions">;

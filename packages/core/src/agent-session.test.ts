@@ -85,4 +85,20 @@ describe("AgentSession", () => {
     expect(result.output).toBe("denied");
     expect(session.createHost().childAgentHost).toBeUndefined();
   });
+
+  it("exposes an optional child-agent host configured for the session", () => {
+    const childAgentHost = {
+      spawnChildAgent: vi.fn(),
+      sendChildInput: vi.fn(),
+      interruptChildAgent: vi.fn(),
+      awaitChildAgent: vi.fn(),
+    };
+    const session = createAgentSession({
+      queryEngine: createQueryEngine(async function* () {}),
+      cwd: "/repo",
+      childAgentHost,
+    });
+
+    expect(session.createHost().childAgentHost).toBe(childAgentHost);
+  });
 });

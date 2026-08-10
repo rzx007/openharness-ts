@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import {
   OpenHarnessHttpServer,
-  type SessionRuntimeFactory,
 } from "@openharness/server";
+import type { SessionRuntimeFactory } from "@openharness/agent-runtime/host";
 
 import { runPrintSession } from "./print-session.js";
 

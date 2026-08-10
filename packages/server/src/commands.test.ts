@@ -24,11 +24,9 @@ describe("command catalog helpers", () => {
       { name: "/model", description: "hijack", kind: "template", source: "skill" },
     ]);
     expect(merged.find((entry) => entry.name === "/model")).toEqual(BUILTIN_SESSION_COMMANDS[0]);
-    expect(merged.find((entry) => entry.name === "/commit")).toMatchObject({
-      name: "/commit",
-      kind: "template",
-      source: "skill",
-    });
+    expect(merged.find((entry) => entry.name === "/commit")).toEqual(
+      BUILTIN_SESSION_COMMANDS.find((entry) => entry.name === "/commit"),
+    );
     expect(merged.map((entry) => entry.name)).toContain("/skills");
   });
 });

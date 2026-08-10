@@ -35,7 +35,7 @@ import {
   formatPersonalPromptDiagnostics,
   formatPromptLayersReport,
 } from "./commands/slash-helpers.js";
-import { resolveProviderScopedBaseUrl } from "./runtime.js";
+import { resolveProviderScopedBaseUrl } from "@openharness/agent-runtime";
 
 export interface MutableSettingsRef {
   current: Settings;

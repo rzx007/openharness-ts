@@ -8,7 +8,7 @@ import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from 
 import type { CommandCatalogProvider } from "./commands.js";
 import { OpenHarnessHttpServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
-import type { SessionRuntimeFactory } from "./runtime.js";
+import type { SessionRuntimeFactory } from "@openharness/agent-runtime/host";
 import type { OpenHarnessServerOptions } from "./http.js";
 import type { ObservabilityEvent } from "./observability.js";
 
@@ -160,7 +160,12 @@ describe("OpenHarnessHttpServer", () => {
         runId: expect.any(String),
         status: "completed",
       });
-      await server.closeRuntime(child!.id);
+      const closeRuntime = await fetch(`${baseUrl}/sessions/${child!.id}`, {
+        method: "PATCH",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
+      });
+      expect(closeRuntime.status).toBe(200);
       expect(closed).toContain(child!.id);
 
       const followUp = await fetch(`${baseUrl}/sessions/${child!.id}/prompts`, {

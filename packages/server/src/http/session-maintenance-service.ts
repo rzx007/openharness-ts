@@ -2,7 +2,7 @@ import type { SessionStore } from "@openharness/services";
 
 import { writeSessionExport, type SessionExportFormat } from "../export-session.js";
 import { rewindTranscript } from "../rewind.js";
-import type { SessionRememberResult } from "../runtime.js";
+import type { SessionRememberResult } from "@openharness/agent-runtime/host";
 import type { SessionRunEngine } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionRuntimePool } from "./session-runtime-pool.js";

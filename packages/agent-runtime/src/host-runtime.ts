@@ -7,7 +7,23 @@ import type {
 } from "@openharness/services/session-runtime/types";
 import type { AgentRunHost } from "@openharness/core";
 
-import type { SessionRuntimeInspect } from "./settings-api.js";
+export interface SessionRuntimeInspect {
+  mcpServers: Array<{
+    name: string;
+    status: string;
+    toolCount: number;
+    resourceCount: number;
+    command?: string;
+    error?: string;
+  }>;
+  hooks?: Array<{
+    id: string;
+    event: string;
+    type: string;
+    enabled: boolean;
+    origin: "settings" | "runtime";
+  }>;
+}
 
 export interface SessionCompactResult {
   messageCount: number;

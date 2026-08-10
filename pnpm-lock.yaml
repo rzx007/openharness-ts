@@ -89,6 +89,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@openharness/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@openharness/api':
         specifier: workspace:*
         version: link:../../packages/api
@@ -214,6 +217,55 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+
+  packages/agent-runtime:
+    dependencies:
+      '@openharness/api':
+        specifier: workspace:*
+        version: link:../api
+      '@openharness/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@openharness/core':
+        specifier: workspace:*
+        version: link:../core
+      '@openharness/hooks':
+        specifier: workspace:*
+        version: link:../hooks
+      '@openharness/mcp':
+        specifier: workspace:*
+        version: link:../mcp
+      '@openharness/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@openharness/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+      '@openharness/prompts':
+        specifier: workspace:*
+        version: link:../prompts
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      '@openharness/services':
+        specifier: workspace:*
+        version: link:../services
+      '@openharness/skills':
+        specifier: workspace:*
+        version: link:../skills
+      '@openharness/tools':
+        specifier: workspace:*
+        version: link:../tools
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.17
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/api:
     dependencies:
@@ -537,6 +589,9 @@ importers:
       '@hono/node-server':
         specifier: 'catalog:'
         version: 1.19.13(hono@4.12.12)
+      '@openharness/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
       '@openharness/coordinator':
         specifier: workspace:*
         version: link:../coordinator

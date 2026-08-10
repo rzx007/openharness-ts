@@ -1,7 +1,7 @@
 import type { Settings } from "@openharness/core";
 import { CredentialStorage, describeCodexAuthState } from "@openharness/auth";
 import { findByName, detectProvider } from "@openharness/api";
-import { resolveApiKey } from "./runtime";
+import { resolveApiKey } from "@openharness/agent-runtime";
 
 export interface ApiKeyCheck {
   ok: boolean;

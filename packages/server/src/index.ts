@@ -46,16 +46,6 @@ export type {
   SettingsService,
 } from "./settings-api.js";
 export type {
-  RuntimeMessageRecord,
-  SessionCompactResult,
-  SessionRememberResult,
-  SessionRuntime,
-  SessionRuntimeFactory,
-  SessionRuntimeRunInput,
-  SessionRuntimeRunResult,
-  SessionUsageSnapshot,
-} from "./runtime.js";
-export type {
   AgentChildAgentHost,
   AgentChildAgentInput,
   AgentChildAgentInvocation,

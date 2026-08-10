@@ -1,7 +1,16 @@
 import { join } from "node:path";
 
-import type { AgentRunHost, AgentSession, ContentBlock, Message, TextBlock, ToolUseBlock } from "@openharness/core";
-import { createAgentSession, getProjectMemoryDir, type Settings } from "@openharness/core";
+import type {
+  AgentRunHost,
+  ContentBlock,
+  Message,
+  RuntimeBundle,
+  Settings,
+  TextBlock,
+  ToolUseBlock,
+} from "@openharness/core";
+import { getProjectMemoryDir } from "@openharness/core";
+import { MemoryManager } from "@openharness/memory";
 import type {
   SessionCompactResult,
   SessionRememberResult,
@@ -10,19 +19,39 @@ import type {
   SessionRuntimeRunInput,
   SessionRuntimeRunResult,
   SessionUsageSnapshot,
-} from "@openharness/server/runtime";
+} from "./host-runtime.js";
 import type {
   ReplaceTranscriptMessageInput,
   ReplaceTranscriptPartInput,
   SessionMessagePartRecord,
   SessionMessageRecord,
+  SessionRecord,
 } from "@openharness/services/session-runtime/types";
-import { CredentialStorage } from "@openharness/auth";
-import { MemoryManager } from "@openharness/memory";
-import { McpClientManager } from "@openharness/mcp";
-import { SkillRegistry } from "@openharness/skills";
 
-type CliRuntimeBundle = Awaited<ReturnType<typeof import("./runtime.js").bootstrap>>;
+import {
+  createOpenHarnessAgent,
+  type OpenHarnessAgent,
+  type OpenHarnessAgentOptions,
+} from "./agent.js";
+import type { OpenHarnessRuntimeOverrides } from "./default-runtime.js";
+
+type UserMessageContent = Extract<Message, { type: "user" }>["content"];
+
+export interface AgentRuntimeSessionSetup {
+  skillRegistry?: OpenHarnessAgentOptions["skillRegistry"];
+  credentialStorage?: OpenHarnessAgentOptions["credentialStorage"];
+  mcpServers?: OpenHarnessAgentOptions["mcpServers"];
+  configureRuntime?(bundle: RuntimeBundle): Promise<void> | void;
+}
+
+export interface OpenHarnessAgentRuntimeFactoryOptions {
+  settings: Settings;
+  getSettings?: () => Settings;
+  prepareSession?(context: {
+    session: SessionRecord;
+    settings: Settings;
+  }): Promise<AgentRuntimeSessionSetup> | AgentRuntimeSessionSetup;
+}
 
 function textFromParts(parts: SessionMessagePartRecord[]): string {
   return parts
@@ -40,7 +69,10 @@ function contentBlocksFromOutput(output: unknown): ContentBlock[] {
   return [{ type: "text", text: output == null ? "" : String(output) }];
 }
 
-function toCoreMessages(messages: SessionMessageRecord[], parts: SessionMessagePartRecord[]): Message[] {
+export function transcriptToCoreMessages(
+  messages: SessionMessageRecord[],
+  parts: SessionMessagePartRecord[],
+): Message[] {
   const byMessage = new Map<string, SessionMessagePartRecord[]>();
   for (const part of parts) {
     const rows = byMessage.get(part.messageId) ?? [];
@@ -76,7 +108,9 @@ function toCoreMessages(messages: SessionMessageRecord[], parts: SessionMessageP
         ...(toolUses.length > 0 ? { toolUses } : {}),
       });
     }
-    for (const part of messageParts.filter((candidate) => candidate.type === "tool" && candidate.toolUseId && candidate.output !== undefined)) {
+    for (const part of messageParts.filter(
+      (candidate) => candidate.type === "tool" && candidate.toolUseId && candidate.output !== undefined,
+    )) {
       out.push({
         type: "tool_result",
         toolUseId: part.toolUseId!,
@@ -96,32 +130,30 @@ function userContentToText(content: UserMessageContent): string {
     .join("");
 }
 
-type UserMessageContent = Extract<Message, { type: "user" }>["content"];
-
-function coreMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessageInput[] {
+export function coreMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessageInput[] {
   const out: ReplaceTranscriptMessageInput[] = [];
-  for (const msg of messages) {
-    if (msg.type === "user") {
+  for (const message of messages) {
+    if (message.type === "user") {
       out.push({
         role: "user",
-        parts: [{ type: "text", status: "completed", text: userContentToText(msg.content) }],
+        parts: [{ type: "text", status: "completed", text: userContentToText(message.content) }],
       });
       continue;
     }
-    if (msg.type === "system") {
+    if (message.type === "system") {
       out.push({
         role: "system",
-        parts: [{ type: "text", status: "completed", text: msg.content }],
+        parts: [{ type: "text", status: "completed", text: message.content }],
       });
       continue;
     }
-    if (msg.type === "assistant") {
-      const parts: ReplaceTranscriptPartInput[] = [];
-      if (msg.content) {
-        parts.push({ type: "text", status: "completed", text: msg.content });
+    if (message.type === "assistant") {
+      const transcriptParts: ReplaceTranscriptPartInput[] = [];
+      if (message.content) {
+        transcriptParts.push({ type: "text", status: "completed", text: message.content });
       }
-      for (const toolUse of msg.toolUses ?? []) {
-        parts.push({
+      for (const toolUse of message.toolUses ?? []) {
+        transcriptParts.push({
           type: "tool",
           status: "completed",
           toolUseId: toolUse.id,
@@ -129,10 +161,10 @@ function coreMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessage
           input: toolUse.input,
         });
       }
-      if (parts.length === 0) {
-        parts.push({ type: "text", status: "completed", text: "" });
+      if (transcriptParts.length === 0) {
+        transcriptParts.push({ type: "text", status: "completed", text: "" });
       }
-      out.push({ role: "assistant", parts });
+      out.push({ role: "assistant", parts: transcriptParts });
       continue;
     }
 
@@ -141,11 +173,11 @@ function coreMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessage
       const row = out[index]!;
       if (row.role !== "assistant") continue;
       const part = row.parts.find(
-        (candidate) => candidate.type === "tool" && candidate.toolUseId === msg.toolUseId,
+        (candidate) => candidate.type === "tool" && candidate.toolUseId === message.toolUseId,
       );
       if (!part) continue;
-      part.output = { content: msg.content };
-      part.isError = msg.isError === true;
+      part.output = { content: message.content };
+      part.isError = message.isError === true;
       attached = true;
       break;
     }
@@ -155,10 +187,10 @@ function coreMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessage
         parts: [{
           type: "tool",
           status: "completed",
-          toolUseId: msg.toolUseId,
+          toolUseId: message.toolUseId,
           toolName: "unknown",
-          output: { content: msg.content },
-          isError: msg.isError === true,
+          output: { content: message.content },
+          isError: message.isError === true,
         }],
       });
     }
@@ -166,98 +198,71 @@ function coreMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessage
   return out;
 }
 
-export interface CliSessionRuntimeFactoryOptions {
-  settings: Settings;
-  getSettings?: () => Settings;
+function runtimeOverridesFromSession(session: SessionRecord): OpenHarnessRuntimeOverrides {
+  const permissionMode = session.metadata.permissionMode;
+  const effort = session.metadata.effort;
+  return {
+    permissionMode: permissionMode === "default" || permissionMode === "plan" || permissionMode === "full_auto"
+      ? permissionMode
+      : undefined,
+    systemPrompt:
+      typeof session.metadata.systemPrompt === "string"
+        ? session.metadata.systemPrompt
+        : undefined,
+    maxTurns:
+      typeof session.metadata.maxTurns === "number"
+        ? session.metadata.maxTurns
+        : undefined,
+    allowedTools: Array.isArray(session.metadata.allowedTools)
+      ? session.metadata.allowedTools.filter((tool): tool is string => typeof tool === "string")
+      : undefined,
+    disallowedTools: Array.isArray(session.metadata.disallowedTools)
+      ? session.metadata.disallowedTools.filter((tool): tool is string => typeof tool === "string")
+      : undefined,
+    effort: effort === "low" || effort === "medium" || effort === "high" ? effort : undefined,
+  };
 }
 
-export function createCliSessionRuntimeFactory(options: CliSessionRuntimeFactoryOptions): SessionRuntimeFactory {
+export function createOpenHarnessAgentRuntimeFactory(
+  options: OpenHarnessAgentRuntimeFactoryOptions,
+): SessionRuntimeFactory {
   const getSettings = options.getSettings ?? (() => options.settings);
   return {
     async createRuntime({ session, history, parts }) {
-      const { bootstrap } = await import("./runtime.js");
-      const { loadSkillsThreeSources } = await import("./commands/main.js");
-      const {
-        mergePluginMcpServers,
-        registerPluginHooks,
-        registerPluginTools,
-      } = await import("./plugin-contributions.js");
       const settings = getSettings();
-      const skillRegistry = new SkillRegistry();
-      const pluginContributions = await loadSkillsThreeSources(skillRegistry, session.cwd, settings);
-      const bundle = await bootstrap({
+      const setup = await options.prepareSession?.({ session, settings }) ?? {};
+      const agent = await createOpenHarnessAgent({
         settings,
         cwd: session.cwd,
         sessionId: session.id,
-        cliOverrides: {
-          permissionMode:
-            typeof session.metadata.permissionMode === "string"
-              ? session.metadata.permissionMode
-              : settings.permission.mode,
-          systemPrompt:
-            typeof session.metadata.systemPrompt === "string"
-              ? session.metadata.systemPrompt
-              : undefined,
-          maxTurns:
-            typeof session.metadata.maxTurns === "number"
-              ? session.metadata.maxTurns
-              : undefined,
-          allowedTools: Array.isArray(session.metadata.allowedTools)
-            ? session.metadata.allowedTools.filter((tool): tool is string => typeof tool === "string").join(",")
-            : undefined,
-          disallowedTools: Array.isArray(session.metadata.disallowedTools)
-            ? session.metadata.disallowedTools.filter((tool): tool is string => typeof tool === "string").join(",")
-            : undefined,
-          effort: typeof session.metadata.effort === "string" ? session.metadata.effort : undefined,
-        },
-        skillRegistry,
-        credentialStorage: new CredentialStorage(),
+        overrides: runtimeOverridesFromSession(session),
+        skillRegistry: setup.skillRegistry,
+        credentialStorage: setup.credentialStorage,
+        mcpServers: setup.mcpServers,
+        configureRuntime: setup.configureRuntime,
       });
-      registerPluginHooks(bundle.hookExecutor, pluginContributions.plugins);
-      await registerPluginTools(bundle.toolRegistry, pluginContributions.plugins);
-      const mcpManager = new McpClientManager();
-      const mcpServers = mergePluginMcpServers(settings.mcpServers, pluginContributions.plugins);
-      if (Object.keys(mcpServers).length > 0) {
-        await mcpManager.connectAll(mcpServers).catch(() => {});
+      try {
+        agent.loadHistory(transcriptToCoreMessages(history, parts));
+        return new AgentSessionRuntime(agent, session.cwd, getSettings);
+      } catch (error) {
+        await agent.close();
+        throw error;
       }
-      for (const tool of mcpManager.getAsToolDefinitions()) {
-        bundle.toolRegistry.register(tool);
-      }
-      bundle.queryEngine.setMcpManager(mcpManager);
-      bundle.addCleanup(() => mcpManager.disconnectAll());
-      const coreHistory = toCoreMessages(history, parts);
-      bundle.queryEngine.loadMessages(coreHistory);
-      return new CliSessionRuntime(
-        bundle,
-        mcpManager,
-        session.cwd,
-        getSettings,
-        createAgentSession({
-          queryEngine: bundle.queryEngine,
-          cwd: session.cwd,
-          sessionId: session.id,
-        }),
-      );
     },
   };
 }
 
-export class CliSessionRuntime implements SessionRuntime {
+export class AgentSessionRuntime implements SessionRuntime {
   constructor(
-    private readonly bundle: CliRuntimeBundle,
-    private readonly mcpManager: McpClientManager,
+    private readonly agent: OpenHarnessAgent,
     private readonly cwd: string,
     private readonly getSettings: () => Settings,
-    private readonly agentSession: AgentSession = createAgentSession({
-      queryEngine: bundle.queryEngine,
-      cwd,
-    }),
   ) {}
 
   async runPrompt(input: SessionRuntimeRunInput, host: AgentRunHost): Promise<SessionRuntimeRunResult> {
-    if (input.session.model) this.bundle.queryEngine.setModel(input.session.model);
+    if (input.session.model) this.agent.runtime.queryEngine.setModel(input.session.model);
     let lastWake = 0;
-    for await (const _event of this.agentSession.submitMessage(input.input.content, {
+    for await (const _event of this.agent.submitMessage(input.input.content, {
       signal: input.signal,
       pullFollowUps: () => {
         if (input.wakeCount() <= lastWake) return [];
@@ -274,15 +279,17 @@ export class CliSessionRuntime implements SessionRuntime {
 
   inspect() {
     return {
-      mcpServers: this.mcpManager.getConnections().map((conn) => ({
-        name: conn.name,
-        status: conn.status,
-        toolCount: conn.tools.length,
-        resourceCount: conn.resources.length,
-        command: `${conn.config.command} ${(conn.config.args ?? []).join(" ")}`.trim(),
-        ...(conn.error ? { error: conn.error.message } : {}),
+      mcpServers: this.agent.getMcpConnections().map((connection) => ({
+        name: connection.name,
+        status: connection.status,
+        toolCount: connection.tools.length,
+        resourceCount: connection.resources.length,
+        command: connection.config.command
+          ? `${connection.config.command} ${(connection.config.args ?? []).join(" ")}`.trim()
+          : connection.config.url,
+        ...(connection.error ? { error: connection.error.message } : {}),
       })),
-      hooks: (this.bundle.hookExecutor.getAll?.() ?? []).map((hook) => ({
+      hooks: (this.agent.runtime.hookExecutor.getAll?.() ?? []).map((hook) => ({
         id: hook.id,
         event: hook.event,
         type: hook.type,
@@ -293,8 +300,7 @@ export class CliSessionRuntime implements SessionRuntime {
   }
 
   async compact(): Promise<SessionCompactResult> {
-    await this.bundle.queryEngine.compact();
-    const history = this.bundle.queryEngine.getHistory();
+    const history = await this.agent.compact();
     return {
       messageCount: history.length,
       transcript: coreMessagesToTranscript(history),
@@ -302,7 +308,7 @@ export class CliSessionRuntime implements SessionRuntime {
   }
 
   getUsage(): SessionUsageSnapshot {
-    const usage = this.bundle.queryEngine.getTotalUsage();
+    const usage = this.agent.getUsage();
     return {
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -310,7 +316,7 @@ export class CliSessionRuntime implements SessionRuntime {
         ? { cacheCreationTokens: usage.cacheCreationTokens }
         : {}),
       ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-      messageCount: this.bundle.queryEngine.getHistory().length,
+      messageCount: this.agent.getHistory().length,
     };
   }
 
@@ -324,9 +330,9 @@ export class CliSessionRuntime implements SessionRuntime {
       .map((entry) => `- ${String(entry.metadata?.name ?? entry.id)}: ${String(entry.metadata?.description ?? "").slice(0, 80)}`)
       .join("\n");
     const result = await extractMemoriesFromTurn({
-      apiClient: this.bundle.apiClient,
+      apiClient: this.agent.runtime.apiClient,
       model: this.getSettings().model,
-      messages: this.bundle.queryEngine.getHistory(),
+      messages: this.agent.getHistory(),
       manager,
       existingManifest: manifest,
       memoryDir,
@@ -341,6 +347,6 @@ export class CliSessionRuntime implements SessionRuntime {
   }
 
   async close(): Promise<void> {
-    await this.bundle.close();
+    await this.agent.close();
   }
 }

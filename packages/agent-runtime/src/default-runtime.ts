@@ -1,8 +1,5 @@
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { join } from "node:path";
-import type { Settings, StreamingMessageClient } from "@openharness/core";
-import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle, resolveGitRepository } from "@openharness/core";
+import type { PermissionMode, Settings, StreamingMessageClient } from "@openharness/core";
+import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
 import { AnthropicClient, CodexSubscriptionClient, OpenAICompatibleClient, detectProvider, detectProviderFromEnv, findByName } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { CredentialStorage, loadCodexCredential } from "@openharness/auth";
@@ -10,39 +7,33 @@ import { PermissionChecker, LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@open
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
-import { SandboxUnavailableError, startSandboxRuntime } from "@openharness/sandbox";
+import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 
 const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
 
-interface GitRunner {
-  (args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }>;
+export interface OpenHarnessRuntimeOverrides {
+  apiKey?: string;
+  baseUrl?: string;
+  provider?: string;
+  model?: string;
+  systemPrompt?: string;
+  permissionMode?: PermissionMode;
+  maxTurns?: number;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  effort?: Settings["effort"];
+  fastMode?: boolean;
+  autoApproveReadOnly?: boolean;
+  autoApproveTools?: string[];
 }
 
-export interface BootstrapOptions {
+export interface OpenHarnessRuntimeOptions {
   settings: Settings;
   cwd?: string;
-  cliOverrides?: {
-    apiKey?: string;
-    baseUrl?: string;
-    provider?: string;
-    model?: string;
-    systemPrompt?: string;
-    permissionMode?: string;
-    maxTurns?: number;
-    dangerouslySkipPermissions?: boolean;
-    allowedTools?: string;
-    disallowedTools?: string;
-    effort?: string;
-    fastMode?: boolean;
-    /** 只读工具自动放行(Read/Glob/Grep 等)。channels serve 等无头模式用:
-     *  default 模式下 ask 无人确认会全拒,放行只读让"看"可用、"写/执行"仍拒。 */
-    autoApproveReadOnly?: boolean;
-    /** 显式追加自动放行的工具名(与其他来源合并;denied 类检查仍优先)。 */
-    autoApproveTools?: string[];
-  };
+  overrides?: OpenHarnessRuntimeOverrides;
   skillRegistry?: SkillRegistry;
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
@@ -79,10 +70,10 @@ export function resolveRuntimeModel(
   return overrides.model ?? settings.model;
 }
 
-export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundle> {
+export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOptions): Promise<RuntimeBundle> {
   const { settings } = options;
   const cwd = options.cwd ?? process.cwd();
-  const overrides = options.cliOverrides ?? {};
+  const overrides = options.overrides ?? {};
   const storage = options.credentialStorage ?? new CredentialStorage();
 
   const apiClient = await resolveApiClient(settings, overrides, storage);
@@ -91,11 +82,11 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
 
   const effectiveAllowed = new Set([
     ...(settings.permission.allowedTools ?? []),
-    ...(overrides.allowedTools ? overrides.allowedTools.split(",") : []),
+    ...(overrides.allowedTools ?? []),
   ]);
   const effectiveDenied = new Set([
     ...(settings.permission.deniedTools ?? []),
-    ...(overrides.disallowedTools ? overrides.disallowedTools.split(",") : []),
+    ...(overrides.disallowedTools ?? []),
   ]);
 
   if (effectiveAllowed.size > 0) {
@@ -114,9 +105,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     toolRegistry = filtered;
   }
 
-  const mode = overrides.dangerouslySkipPermissions
-    ? "full_auto"
-    : (overrides.permissionMode as "default" | "plan" | "full_auto") ?? settings.permission.mode;
+  const mode = overrides.permissionMode ?? settings.permission.mode;
 
   // 自动放行三来源合并:settings.permission.autoApproveTools(用户显式配置,
   // 此前从未接线)+ swarm worker / 无头只读模式注入非本地 READ_ONLY_TOOLS。
@@ -138,7 +127,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
 
   // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt
   // 时才注入 model 可见的 skills 段，使 print/backend 三模式与 REPL 一致——REPL
-  // 由 refreshSystemPrompt 注入，print/backend 走 bootstrap 由此处注入。
+  // 由 refreshSystemPrompt 注入，print/backend 走默认 composition root 由此处注入。
   const systemPrompt = overrides.systemPrompt ?? await buildRuntimeSystemPrompt({
     customPrompt: settings.systemPrompt,
     cwd,
@@ -167,7 +156,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<RuntimeBundl
     engineOptions,
   );
 
-  // Daemon child-session 主链路：只有具备 child host 的 runtime 才注册 Agent backend。
   const bundle = new RuntimeBuilder()
     .setApiClient(apiClient)
     .setToolRegistry(toolRegistry)
@@ -186,23 +174,12 @@ async function attachSandboxRuntime(
   reporter?: SandboxRuntimeReporter,
   sessionId?: string,
 ): Promise<void> {
-  let sandboxRuntime;
-  try {
-    sandboxRuntime = await startSandboxRuntime({
-      settings: bundle.settings,
-      cwd,
-      // Pass daemon sessionId as-is so Bash/ToolContext lookups hit the same active map key.
-      // Omit for cwd-only callers such as channels and legacy local CLI paths.
-      sessionId,
-      reporter,
-    });
-  } catch (error) {
-    if (error instanceof SandboxUnavailableError) {
-      console.error(formatSandboxUnavailableError(error.message, bundle.settings));
-      process.exit(1);
-    }
-    throw error;
-  }
+  const sandboxRuntime = await startSandboxRuntime({
+    settings: bundle.settings,
+    cwd,
+    sessionId,
+    reporter,
+  });
   bundle.sandboxStatus = sandboxRuntime.status;
 
   if (sandboxRuntime.status.backend !== "docker" || !sandboxRuntime.status.active) {
@@ -245,6 +222,9 @@ export function formatSandboxUnavailableError(reason: string, settings: Settings
 
 function registerExitCleanup(bundle: RuntimeBundle): void {
   bundlesWithExitCleanup.add(bundle);
+  bundle.addCleanup(() => {
+    bundlesWithExitCleanup.delete(bundle);
+  });
   if (exitCleanupInstalled) return;
   exitCleanupInstalled = true;
   process.on("exit", () => {
@@ -268,7 +248,7 @@ function registerExitCleanup(bundle: RuntimeBundle): void {
  */
 export async function resolveApiClient(
   settings: Settings,
-  overrides?: BootstrapOptions["cliOverrides"],
+  overrides?: OpenHarnessRuntimeOverrides,
   storage?: CredentialStorage,
 ): Promise<StreamingMessageClient> {
   const resolvedStorage = storage ?? new CredentialStorage();
@@ -406,7 +386,7 @@ export async function switchApiClientForBundle(
  */
 export async function resolveApiKey(
   settings: Settings,
-  overrides?: BootstrapOptions["cliOverrides"],
+  overrides?: OpenHarnessRuntimeOverrides,
   storage?: CredentialStorage,
 ): Promise<string> {
   // 优先使用显式指定的 apiKey（来自覆盖配置或设置）
@@ -462,59 +442,4 @@ function resolveBackendFromFormat(format: string): BackendType {
     case "openai": return "openai_compat";
     default: return "anthropic";
   }
-}
-
-// ---------------------------------------------------------------------------
-// Worktree wiring helpers (D.3)
-// ---------------------------------------------------------------------------
-
-/**
- * 计算某个 repo 的 worktree 存放根：`<configDir>/worktrees/<repoId>`。
- *
- * repoId 用 repoRoot 路径的 sha1 前 12 位，避免不同仓库的 worktree 互相串扰，
- * 且不暴露绝对路径。归一化路径分隔符 + Windows 下小写，让同一仓库始终落到同一目录。
- */
-export function computeWorktreeBaseDir(repoRoot: string, configDir: string): string {
-  const normalized = repoRoot.replace(/\\/g, "/").replace(/\/+$/, "");
-  const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
-  const repoId = createHash("sha1").update(key).digest("hex").slice(0, 12);
-  return join(configDir, "worktrees", repoId);
-}
-
-/**
- * 注入给 WorktreeManager 的 git 运行器：用 node child_process spawn 'git'。
- *
- * 用参数数组（非 shell 拼接）避免注入/转义问题，跨平台安全；捕获 {code, stdout, stderr}。
- */
-export const nodeRunGit: GitRunner = (args, cwd) =>
-  new Promise((resolve) => {
-    // GIT_TERMINAL_PROMPT=0：禁止 git 弹凭据提示而挂起子进程（与测试 realRunGit 一致，
-    // 也对齐 Python _run_git）。数组传参（非 shell 拼接）避免注入/转义问题。
-    const child = spawn("git", args, {
-      cwd,
-      windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (d) => {
-      stdout += d.toString();
-    });
-    child.stderr?.on("data", (d) => {
-      stderr += d.toString();
-    });
-    child.on("error", (err) => {
-      resolve({ code: 127, stdout, stderr: stderr || (err as Error).message });
-    });
-    child.on("close", (code) => {
-      resolve({ code: code ?? 1, stdout, stderr });
-    });
-  });
-
-/**
- * 解析 *cwd* 所在 Git 仓库的顶层目录，不启动 Git 子进程。
- * 失败（非 git 仓库 / git 不可用）回退到 cwd 本身。
- */
-export async function resolveRepoRoot(cwd: string): Promise<string> {
-  return resolveGitRepository(cwd)?.root ?? cwd;
 }

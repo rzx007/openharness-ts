@@ -63,10 +63,10 @@ async function runChannelsServe(): Promise<void> {
     return;
   }
 
-  // 引擎组装复用无头 runtime 的 bootstrap 路径。
+  // 引擎组装复用 agent-runtime 的默认 composition root。
   const { SkillRegistry } = await import("@openharness/skills");
   const { CredentialStorage } = await import("@openharness/auth");
-  const { bootstrap } = await import("../runtime");
+  const { createOpenHarnessRuntime } = await import("@openharness/agent-runtime");
   const { loadSkillsThreeSources } = await import("./main");
   const skillRegistry = new SkillRegistry();
   await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
@@ -78,10 +78,10 @@ async function runChannelsServe(): Promise<void> {
   // const channelSafeTools = [...READ_ONLY_TOOLS].filter(
   //   (t) => t !== "WebFetch" && t !== "WebSearch",
   // );
-  const channelSafeTools = [...READ_ONLY_TOOLS]
-  const bundle = await bootstrap({
+  const channelSafeTools = [...READ_ONLY_TOOLS];
+  const bundle = await createOpenHarnessRuntime({
     settings,
-    cliOverrides: { autoApproveTools: channelSafeTools },
+    overrides: { autoApproveTools: channelSafeTools },
     skillRegistry,
     credentialStorage: new CredentialStorage(),
   });

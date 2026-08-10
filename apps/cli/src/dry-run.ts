@@ -47,7 +47,7 @@ export function inferMcpTransport(cfg: McpServerConfig): string {
 /**
  * 按黑白名单过滤工具名，返回最终生效的工具数（纯函数）。
  *
- * 语义对齐 runtime.ts bootstrap：白名单非空时只保留白名单内的工具，
+ * 语义对齐 agent-runtime composition：白名单非空时只保留白名单内的工具，
  * 然后再剔除黑名单内的工具。settings 与 CLI override 的名单合并由调用方完成。
  */
 export function countEffectiveTools(

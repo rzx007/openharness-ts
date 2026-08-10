@@ -6,7 +6,6 @@ import { MemoryManager } from "@openharness/memory";
 import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { resolveToolPath } from "@openharness/tools";
-import { bootstrap } from "../runtime";
 import { loadPluginContributions } from "../plugin-contributions";
 import { updateSessionMemoryFile } from "@openharness/services";
 import { isCoordinatorMode } from "@openharness/coordinator";
