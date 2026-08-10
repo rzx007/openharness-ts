@@ -2,7 +2,7 @@
 
 > 当前状态：设计文档。目标不是把 OpenHarness 做成通用 agent framework，而是把现有 daemon / QueryEngine / tools / child-agent 的职责重新摆正，形成一个低心智负担、可嵌入、可由 daemon 托管的内部 Agent Framework 层。
 >
-> 关联文档：[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)、[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)。
+> 关联文档：[`agent-runtime-framework-architecture.md`](./agent-runtime-framework-architecture.md)、[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)、[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)。
 
 ## 0. 结论
 
