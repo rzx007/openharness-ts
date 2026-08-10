@@ -2,6 +2,8 @@ import type {
   AgentSessionHostCallbacks,
   AgentSessionRunResult,
   AgentSessionSubmitOptions,
+  AgentChildAgentHost,
+  AgentRunHost,
   ContentBlock,
   HookDefinition,
   Message,
@@ -94,10 +96,10 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
 
   submitMessage(content: string | ContentBlock[], options: OpenHarnessAgentSubmitOptions = {}) {
     const baseHost = options.host ?? this.session.createHost(options.signal);
-    const host = {
-      ...baseHost,
-      childAgentHost: this.children.createHost(baseHost, options.childProjection),
-    };
+    const host = composeAgentRunHost(
+      baseHost,
+      this.children.createHost(baseHost, options.childProjection),
+    );
     return this.session.submitMessage(content, { ...options, host });
   }
 
@@ -168,6 +170,19 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     await this.children.closeAll();
     await this.runtime.close();
   }
+}
+
+export function composeAgentRunHost(
+  baseHost: AgentRunHost,
+  childAgentHost: AgentChildAgentHost,
+): AgentRunHost {
+  return {
+    scope: baseHost.scope,
+    childAgentHost,
+    emitEvent: (event) => baseHost.emitEvent(event),
+    emitStreamEvent: (event) => baseHost.emitStreamEvent(event),
+    requestPermission: (request) => baseHost.requestPermission(request),
+  };
 }
 
 export async function createOpenHarnessAgent(
