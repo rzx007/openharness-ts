@@ -6,11 +6,11 @@ import {
   SessionStore,
   getTaskManager,
 } from "@openharness/services";
+import type { Settings } from "@openharness/core";
 
 import type { CommandCatalogProvider } from "./commands.js";
 import { getDefaultSessionStorePath } from "./paths.js";
 import { StorePermissionBroker } from "./permission-broker.js";
-import type { SessionRuntimeFactory } from "@openharness/agent-runtime/host";
 import type {
   AgentPersonaService,
   AuthService,
@@ -62,7 +62,7 @@ import { SessionMaintenanceService } from "./http/session-maintenance-service.js
 import { SessionQueryService } from "./http/session-query-service.js";
 import { SessionRunEngine } from "./http/session-run-engine.js";
 import { SessionRunExecutor } from "./http/session-run-executor.js";
-import { SessionRuntimePool } from "./http/session-runtime-pool.js";
+import { AgentPool, type CreateDaemonAgent } from "./http/agent-pool.js";
 import { SessionTaskBridgeManager } from "./http/session-task-bridge.js";
 import { SessionTaskService } from "./http/session-task-service.js";
 import { SessionTranscriptProjection } from "./http/transcript-projection.js";
@@ -76,7 +76,10 @@ export interface OpenHarnessServerOptions {
   allowedOrigins?: string[];
   store?: SessionStore;
   storePath?: string;
-  runtimeFactory?: SessionRuntimeFactory;
+  settings?: Settings;
+  getSettings?: () => Settings;
+  /** Test/embedding seam. Production daemon creation uses createOpenHarnessAgent directly. */
+  createAgent?: CreateDaemonAgent;
   commandCatalog?: CommandCatalogProvider;
   settingsService?: SettingsService;
   providerService?: ProviderService;
@@ -110,7 +113,6 @@ export class OpenHarnessHttpServer {
   readonly store: SessionStore;
   readonly token?: string;
   private readonly allowedOrigins: ReadonlySet<string>;
-  private readonly runtimeFactory?: SessionRuntimeFactory;
   private readonly commandCatalog?: CommandCatalogProvider;
   private readonly settingsService?: SettingsService;
   private readonly providerService?: ProviderService;
@@ -136,8 +138,8 @@ export class OpenHarnessHttpServer {
   /** 进程内 TaskManager ↔ store SessionTask 投影桥。 */
   private readonly sessionTaskBridgeManager: SessionTaskBridgeManager;
   private readonly sessionTaskService: SessionTaskService;
-  /** 每 session 一份 runtime 的创建/缓存/关闭。 */
-  private readonly runtimePool: SessionRuntimePool;
+  /** 每个 durable session 一份 warm OpenHarnessAgent。 */
+  private readonly agentPool: AgentPool;
   /** Prompt 准入 + session lane 调度（queue/steer/interrupt）。 */
   private readonly runEngine: SessionRunEngine;
   /** Session 写路径用例：create/admit/archive/child/resume 等。 */
@@ -162,7 +164,6 @@ export class OpenHarnessHttpServer {
     this.store.finalizeClosingSessions();
     this.token = options.token;
     this.allowedOrigins = normalizeAllowedOrigins(options.allowedOrigins ?? []);
-    this.runtimeFactory = options.runtimeFactory;
     this.commandCatalog = options.commandCatalog;
     this.settingsService = options.settingsService;
     this.providerService = options.providerService;
@@ -204,14 +205,16 @@ export class OpenHarnessHttpServer {
       childSessionApplication: () => this.sessionApplication,
       sessionTaskBridgeManager: this.sessionTaskBridgeManager,
     });
-    this.runtimePool = new SessionRuntimePool({
+    this.agentPool = new AgentPool({
       store: this.store,
-      runtimeFactory: this.runtimeFactory,
+      settings: options.settings,
+      getSettings: options.getSettings,
+      createAgent: options.createAgent,
     });
-    // 单次 run 执行：runtime.runPrompt + 流式落库 + 权限注入
+    // 单次 run 执行：agent.submitMessage + 流式落库 + 权限注入
     const runExecutor = new SessionRunExecutor({
       store: this.store,
-      runtimePool: this.runtimePool,
+      agentPool: this.agentPool,
       childAgentHostFactory,
       permissionBroker: this.permissionBroker,
       transcriptProjection: this.transcriptProjection,
@@ -221,27 +224,27 @@ export class OpenHarnessHttpServer {
     });
     this.runEngine = new SessionRunEngine({
       store: this.store,
-      runtimePool: this.runtimePool,
+      agentPool: this.agentPool,
       runExecutor,
       events: this.sessionEvents,
     });
     this.daemonControl = new DaemonControlService({
       store: this.store,
       runEngine: this.runEngine,
-      runtimePool: this.runtimePool,
+      agentPool: this.agentPool,
       startedAt: this.startedAt,
       sseClientCount: () => this.eventHub.clientCount,
     });
     this.sessionMaintenance = new SessionMaintenanceService({
       store: this.store,
       runEngine: this.runEngine,
-      runtimePool: this.runtimePool,
+      agentPool: this.agentPool,
       events: this.sessionEvents,
     });
     this.sessionApplication = new SessionApplicationService({
       store: this.store,
       runEngine: this.runEngine,
-      runtimePool: this.runtimePool,
+      agentPool: this.agentPool,
       events: this.sessionEvents,
     });
     this.sessionQueries = new SessionQueryService(this.store);

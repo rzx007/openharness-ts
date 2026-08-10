@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionRuntimePool } from "./session-runtime-pool.js";
+import { AgentPool } from "./agent-pool.js";
 
 const session = {
   id: "s1",
@@ -13,10 +13,14 @@ const session = {
   updatedAt: 1,
 } as const;
 
-function createContext(createRuntime = vi.fn(async () => ({
-  runPrompt: vi.fn(),
-  close: vi.fn(async () => {}),
-}))) {
+function createAgent(close = vi.fn(async () => {})) {
+  return {
+    loadHistory: vi.fn(),
+    close,
+  } as any;
+}
+
+function createContext(factory = vi.fn(async () => createAgent())) {
   return {
     store: {
       getSession: vi.fn(() => session),
@@ -24,16 +28,15 @@ function createContext(createRuntime = vi.fn(async () => ({
       listMessageParts: vi.fn(() => []),
       listSessions: vi.fn(() => [session]),
     },
-    runtimeFactory: { createRuntime },
+    createAgent: factory,
   };
 }
 
-describe("SessionRuntimePool", () => {
-  it("deduplicates concurrent runtime creation and closes the cached runtime", async () => {
+describe("AgentPool", () => {
+  it("deduplicates concurrent agent creation and closes the cached agent", async () => {
     const close = vi.fn(async () => {});
-    const createRuntime = vi.fn(async () => ({ runPrompt: vi.fn(), close }));
-    const context = createContext(createRuntime);
-    const pool = new SessionRuntimePool(context as any);
+    const factory = vi.fn(async () => createAgent(close));
+    const pool = new AgentPool(createContext(factory) as any);
 
     const [first, second] = await Promise.all([
       pool.acquire(session as any, [], []),
@@ -41,7 +44,7 @@ describe("SessionRuntimePool", () => {
     ]);
 
     expect(first).toBe(second);
-    expect(createRuntime).toHaveBeenCalledOnce();
+    expect(factory).toHaveBeenCalledOnce();
     expect(pool.size).toBe(1);
 
     await pool.close(session.id);
@@ -50,17 +53,17 @@ describe("SessionRuntimePool", () => {
     expect(pool.size).toBe(0);
   });
 
-  it("evicts a runtime when creation fails", async () => {
-    const createRuntime = vi.fn()
+  it("evicts an agent when creation fails", async () => {
+    const factory = vi.fn()
       .mockRejectedValueOnce(new Error("startup failed"))
-      .mockResolvedValueOnce({ runPrompt: vi.fn(), close: vi.fn() });
-    const pool = new SessionRuntimePool(createContext(createRuntime) as any);
+      .mockResolvedValueOnce(createAgent());
+    const pool = new AgentPool(createContext(factory) as any);
 
     await pool.warm(session.id);
     expect(pool.size).toBe(0);
 
     await pool.acquire(session as any, [], []);
-    expect(createRuntime).toHaveBeenCalledTimes(2);
+    expect(factory).toHaveBeenCalledTimes(2);
     expect(pool.size).toBe(1);
   });
 });

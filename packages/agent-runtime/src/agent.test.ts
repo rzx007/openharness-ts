@@ -32,8 +32,9 @@ describe("createOpenHarnessAgent", () => {
 
     expect(agent.id).toMatch(/^agent_session_/);
     expect(agent.getHistory()).toEqual([]);
-    expect(agent.runtime.queryEngine).toBeDefined();
-    expect(agent.runtime.toolRegistry.getAll().length).toBeGreaterThan(0);
+    expect(agent.inspect().tools.length).toBeGreaterThan(0);
+    expect(agent.inspect().model).toBe("claude-test");
+    expect(agent.getUsage()).toEqual(expect.objectContaining({ inputTokens: 0, outputTokens: 0 }));
     await agent.close();
   });
 });

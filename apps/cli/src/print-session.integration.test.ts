@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import {
   OpenHarnessHttpServer,
+  type CreateDaemonAgent,
 } from "@openharness/server";
-import type { SessionRuntimeFactory } from "@openharness/agent-runtime/host";
+import type { AgentRunHost } from "@openharness/core";
 
 import { runPrintSession } from "./print-session.js";
 
@@ -23,7 +24,7 @@ function captureWrite(stream: NodeJS.WriteStream): {
 }
 
 async function withPrintServer(
-  runtimeFactory: SessionRuntimeFactory,
+  createAgent: CreateDaemonAgent,
   run: (input: { server: OpenHarnessHttpServer; url: string; token: string }) => Promise<void>,
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-print-integration-"));
@@ -31,7 +32,7 @@ async function withPrintServer(
   const server = new OpenHarnessHttpServer({
     token,
     storePath: join(dir, "sessions.db"),
-    runtimeFactory,
+    createAgent,
     logger: () => {},
   });
 
@@ -42,6 +43,27 @@ async function withPrintServer(
     await server.close();
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function testAgent(
+  run: (content: string, host: AgentRunHost) => Promise<void>,
+): CreateDaemonAgent {
+  return async ({ session }) => ({
+    id: session.id,
+    async *submitMessage(content, options = {}) {
+      await run(typeof content === "string" ? content : "", options.host!);
+    },
+    async runMessage() { return { output: "", events: [], history: [] }; },
+    getHistory: () => [],
+    loadHistory: () => {},
+    clear: () => {},
+    setModel: () => {},
+    async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
+    async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
+    getUsage: () => ({ inputTokens: 0, outputTokens: 0 }),
+    inspect: () => ({ model: session.model, tools: [], hooks: [], mcpServers: [] }),
+    async close() {},
+  });
 }
 
 describe("runPrintSession daemon integration", () => {
@@ -56,21 +78,13 @@ describe("runPrintSession daemon integration", () => {
     exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const stdout = captureWrite(process.stdout);
 
-    const runtimeFactory: SessionRuntimeFactory = {
-      async createRuntime() {
-        return {
-          async runPrompt(input, host) {
-            expect(input.input.content).toBe("hello daemon");
-            await new Promise((resolve) => setTimeout(resolve, 20));
-            await host.emitStreamEvent({ type: "text_delta", delta: "hello from real daemon" });
-            return { messages: [] };
-          },
-          async close() {},
-        };
-      },
-    };
+    const createAgent = testAgent(async (content, host) => {
+      expect(content).toBe("hello daemon");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await host.emitStreamEvent({ type: "text_delta", delta: "hello from real daemon" });
+    });
 
-    await withPrintServer(runtimeFactory, async ({ server, url, token }) => {
+    await withPrintServer(createAgent, async ({ server, url, token }) => {
       await runPrintSession(
         { model: "m", outputStyle: "default" } as never,
         "hello daemon",
@@ -95,29 +109,21 @@ describe("runPrintSession daemon integration", () => {
     const stderr = captureWrite(process.stderr);
     const decisions: boolean[] = [];
 
-    const runtimeFactory: SessionRuntimeFactory = {
-      async createRuntime() {
-        return {
-          async runPrompt(_input, host) {
-            const decision = await host.requestPermission({
-              toolName: "Write",
-              reason: "edit requested by integration test",
-              input: { path: "README.md" },
-            });
-            const allowed = decision.status === "approved";
-            decisions.push(allowed);
-            await host.emitStreamEvent({
-              type: "text_delta",
-              delta: allowed ? "permission approved" : "permission denied",
-            });
-            return { messages: [] };
-          },
-          async close() {},
-        };
-      },
-    };
+    const createAgent = testAgent(async (_content, host) => {
+      const decision = await host.requestPermission({
+        toolName: "Write",
+        reason: "edit requested by integration test",
+        input: { path: "README.md" },
+      });
+      const allowed = decision.status === "approved";
+      decisions.push(allowed);
+      await host.emitStreamEvent({
+        type: "text_delta",
+        delta: allowed ? "permission approved" : "permission denied",
+      });
+    });
 
-    await withPrintServer(runtimeFactory, async ({ server, url, token }) => {
+    await withPrintServer(createAgent, async ({ server, url, token }) => {
       await runPrintSession(
         { model: "m", outputStyle: "default" } as never,
         "try edit",

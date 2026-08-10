@@ -2,7 +2,7 @@ import type { SessionStore } from "@openharness/services";
 
 import type { HookInfo } from "../settings-api.js";
 import type { SessionRunEngine } from "./session-run-engine.js";
-import type { SessionRuntimePool } from "./session-runtime-pool.js";
+import type { AgentPool } from "./agent-pool.js";
 import { countByStatus, type OpenHarnessRuntimeSnapshot } from "./support.js";
 
 export interface DaemonControlServiceContext {
@@ -11,7 +11,7 @@ export interface DaemonControlServiceContext {
     SessionRunEngine,
     "activeRunId" | "hasActiveRunsForCwd" | "hasAnyActiveRuns" | "queuedRunIds"
   >;
-  runtimePool: SessionRuntimePool;
+  agentPool: AgentPool;
   startedAt: number;
   sseClientCount(): number;
 }
@@ -24,7 +24,7 @@ export class DaemonControlService {
   constructor(private readonly context: DaemonControlServiceContext) {}
 
   get runtimeInspectionAvailable(): boolean {
-    return this.context.runtimePool.configured;
+    return this.context.agentPool.configured;
   }
 
   runtimeSnapshot(): OpenHarnessRuntimeSnapshot {
@@ -48,7 +48,7 @@ export class DaemonControlService {
       tasks: { total: tasks.length, byStatus: countByStatus(tasks) },
       permissions: { total: permissions.length, byStatus: countByStatus(permissions) },
       sseClientCount: this.context.sseClientCount(),
-      warmRuntimeCount: this.context.runtimePool.size,
+      warmAgentCount: this.context.agentPool.size,
       coordinator: { activeRunCount, queuedRunCount },
     };
   }
@@ -62,11 +62,11 @@ export class DaemonControlService {
   }
 
   async closeAllRuntimes(): Promise<void> {
-    await this.context.runtimePool.closeAll();
+    await this.context.agentPool.closeAll();
   }
 
   async closeRuntimesForCwd(cwd: string): Promise<void> {
-    await this.context.runtimePool.closeForCwd(cwd);
+    await this.context.agentPool.closeForCwd(cwd);
   }
 
   sessionExists(sessionId: string): boolean {
@@ -74,9 +74,8 @@ export class DaemonControlService {
   }
 
   async inspectRuntimeHooks(sessionId: string): Promise<HookInfo[]> {
-    await this.context.runtimePool.warm(sessionId);
-    const runtime = await this.context.runtimePool.get(sessionId);
-    if (!runtime?.inspect) return [];
-    return (await runtime.inspect()).hooks ?? [];
+    await this.context.agentPool.warm(sessionId);
+    const agent = await this.context.agentPool.get(sessionId);
+    return agent?.inspect().hooks.map((hook) => ({ ...hook, origin: "runtime" as const })) ?? [];
   }
 }

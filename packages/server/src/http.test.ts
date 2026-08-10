@@ -5,12 +5,84 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from "@openharness/coordinator";
+import type { AgentRunHost, Message } from "@openharness/core";
+import type { AgentCompactResult, AgentInspection, AgentRememberResult, OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { CommandCatalogProvider } from "./commands.js";
 import { OpenHarnessHttpServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
-import type { SessionRuntimeFactory } from "@openharness/agent-runtime/host";
+import type { CreateDaemonAgent, CreateDaemonAgentContext } from "./http/agent-pool.js";
 import type { OpenHarnessServerOptions } from "./http.js";
 import type { ObservabilityEvent } from "./observability.js";
+
+interface TestAgentProgram {
+  runPrompt(input: any, host: AgentRunHost): Promise<unknown>;
+  close(): Promise<void>;
+  inspect?(): AgentInspection;
+  compact?(): Promise<{ messageCount: number; transcript: Array<{ role: string; parts: Array<Record<string, any>> }> }>;
+  remember?(): Promise<AgentRememberResult>;
+  getUsage?(): ReturnType<OpenHarnessAgent["getUsage"]> & { messageCount?: number };
+}
+
+interface TestAgentProgramFactory {
+  createRuntime(context: CreateDaemonAgentContext): Promise<TestAgentProgram>;
+}
+
+function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAgent {
+  return async (context) => {
+    const program = await factory.createRuntime(context);
+    let history: Message[] = [];
+    return {
+      id: context.session.id,
+      async *submitMessage(content, options = {}) {
+        const pending: Array<{ content: string }> = [];
+        let wakeCount = 0;
+        const refresh = () => {
+          const followUps = options.pullFollowUps?.();
+          if (Array.isArray(followUps) && followUps.length > 0) {
+            pending.push(...followUps.map((row) => ({ content: row })));
+            wakeCount += 1;
+          }
+        };
+        await program.runPrompt({
+          session: context.session,
+          input: { content },
+          history: context.history,
+          parts: context.parts,
+          signal: options.signal ?? new AbortController().signal,
+          wakeCount: () => {
+            refresh();
+            return wakeCount;
+          },
+          drainSteeredInputs: () => pending.splice(0),
+        }, options.host!);
+      },
+      runMessage: async () => ({ output: "", events: [], history }),
+      getHistory: () => [...history],
+      loadHistory: (messages) => { history = [...messages]; },
+      clear: () => { history = []; },
+      setModel: () => {},
+      compact: async (): Promise<AgentCompactResult> => {
+        const beforeMessageCount = history.length;
+        const result = await program.compact?.();
+        if (result) history = testTranscriptToMessages(result.transcript);
+        return { history: [...history], beforeMessageCount, afterMessageCount: result?.messageCount ?? history.length };
+      },
+      remember: async () => await program.remember?.() ?? ({ skipped: true, writtenIds: [], titles: [] }),
+      getUsage: () => program.getUsage?.() ?? ({ inputTokens: 0, outputTokens: 0 }),
+      inspect: () => program.inspect?.() ?? ({ model: context.session.model, tools: [], hooks: [], mcpServers: [] }),
+      close: () => program.close(),
+    };
+  };
+}
+
+function testTranscriptToMessages(transcript: Array<{ role: string; parts: Array<Record<string, any>> }>): Message[] {
+  return transcript.flatMap((row): Message[] => {
+    const text = row.parts.filter((part) => part.type === "text").map((part) => String(part.text ?? "")).join("");
+    if (row.role === "user") return [{ type: "user", content: text }];
+    if (row.role === "system") return [{ type: "system", content: text }];
+    return [{ type: "assistant", content: text }];
+  });
+}
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -28,9 +100,9 @@ function deferred<T = void>(): {
 
 async function withServer(
   test: (ctx: { baseUrl: string; token: string; storePath: string; server: OpenHarnessHttpServer }) => Promise<void>,
-  options: Pick<
+  options: Omit<Pick<
     OpenHarnessServerOptions,
-    | "runtimeFactory"
+    | "createAgent"
     | "allowedOrigins"
     | "commandCatalog"
     | "settingsService"
@@ -47,7 +119,7 @@ async function withServer(
     | "hooksService"
     | "gitService"
     | "logger"
-  > = {},
+  >, "createAgent"> & { runtimeFactory?: TestAgentProgramFactory; createAgent?: CreateDaemonAgent } = {},
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-server-"));
   const token = "test-token";
@@ -55,7 +127,7 @@ async function withServer(
     token,
     allowedOrigins: options.allowedOrigins,
     storePath: join(dir, "sessions.db"),
-    runtimeFactory: options.runtimeFactory,
+    createAgent: options.createAgent ?? (options.runtimeFactory ? adaptTestAgentFactory(options.runtimeFactory) : undefined),
     commandCatalog: options.commandCatalog,
     settingsService: options.settingsService,
     providerService: options.providerService,
@@ -104,7 +176,7 @@ describe("OpenHarnessHttpServer", () => {
   it("provides runs a runtime host that can spawn child sessions", async () => {
     const created: string[] = [];
     const closed: string[] = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime(context) {
         created.push(context.session.id);
         return {
@@ -213,7 +285,7 @@ describe("OpenHarnessHttpServer", () => {
         tasks: { total: 0, byStatus: {} },
         permissions: { total: 0, byStatus: {} },
         sseClientCount: 0,
-        warmRuntimeCount: 0,
+        warmAgentCount: 0,
         coordinator: { activeRunCount: 0, queuedRunCount: 0 },
       });
     });
@@ -221,7 +293,7 @@ describe("OpenHarnessHttpServer", () => {
 
   it("reports aggregate running and queued work without transcript content", async () => {
     const releaseFirst = deferred();
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {
@@ -260,14 +332,14 @@ describe("OpenHarnessHttpServer", () => {
         sessions: { total: number; byStatus: Record<string, number> };
         runs: { total: number; byStatus: Record<string, number> };
         sseClientCount: number;
-        warmRuntimeCount: number;
+        warmAgentCount: number;
         coordinator: { activeRunCount: number; queuedRunCount: number };
       };
       expect(snapshot).toMatchObject({
         sessions: { total: 1, byStatus: { running: 1 } },
         runs: { total: 2, byStatus: { running: 1, pending: 1 } },
         sseClientCount: 0,
-        warmRuntimeCount: 1,
+        warmAgentCount: 1,
         coordinator: { activeRunCount: 1, queuedRunCount: 1 },
       });
       expect(JSON.stringify(snapshot)).not.toContain("private");
@@ -282,7 +354,7 @@ describe("OpenHarnessHttpServer", () => {
 
   it("propagates a trace ID through HTTP, persisted prompt/run, and tool lifecycle logs", async () => {
     const events: ObservabilityEvent[] = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(_input, host) {
@@ -375,7 +447,7 @@ describe("OpenHarnessHttpServer", () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-restart-"));
     const storePath = join(dir, "sessions.db");
     const token = "test-token";
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt() {
@@ -395,7 +467,7 @@ describe("OpenHarnessHttpServer", () => {
       },
     };
     try {
-      const first = new OpenHarnessHttpServer({ token, storePath, runtimeFactory });
+      const first = new OpenHarnessHttpServer({ token, storePath, createAgent: adaptTestAgentFactory(runtimeFactory) });
       const listen1 = await first.listen();
       try {
         await fetch(`${listen1.url}/sessions`, {
@@ -453,7 +525,7 @@ describe("OpenHarnessHttpServer", () => {
 
   it("replays an interrupted prompt only after an explicit, idempotent recovery request", async () => {
     const prompts: string[] = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {
@@ -551,7 +623,7 @@ describe("OpenHarnessHttpServer", () => {
       await first.close();
       first = undefined;
 
-      const runtimeFactory: SessionRuntimeFactory = {
+      const runtimeFactory: TestAgentProgramFactory = {
         async createRuntime() {
           return {
             async runPrompt(input, host) {
@@ -574,7 +646,7 @@ describe("OpenHarnessHttpServer", () => {
           };
         },
       };
-      second = new OpenHarnessHttpServer({ token, storePath, runtimeFactory, logger: (event) => logs.push(event) });
+      second = new OpenHarnessHttpServer({ token, storePath, createAgent: adaptTestAgentFactory(runtimeFactory), logger: (event) => logs.push(event) });
       const listen = await second.listen();
 
       const streamAbort = new AbortController();
@@ -852,7 +924,7 @@ describe("OpenHarnessHttpServer", () => {
   it("merges session metadata and closes runtime when permissionMode changes", async () => {
     const created: string[] = [];
     const closed: string[] = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime(context) {
         created.push(context.session.id);
         return {
@@ -981,7 +1053,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("returns MCP inspect status for a warmed session runtime", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt() {
@@ -1134,7 +1206,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("compacts a session transcript through the runtime and store", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt() {
@@ -1181,7 +1253,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("returns session usage and exports transcript files", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt() {
@@ -1452,7 +1524,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("rewinds a session transcript via store replace", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt() {
@@ -1658,7 +1730,7 @@ describe("OpenHarnessHttpServer", () => {
   it("archives descendants after interrupting runs and closing runtimes", async () => {
     let serverRef: OpenHarnessHttpServer | undefined;
     const lifecycle: string[] = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime(context) {
         return {
           async runPrompt(input) {
@@ -1750,7 +1822,7 @@ describe("OpenHarnessHttpServer", () => {
   it("makes archive terminal before waiting for an interrupted run to settle", async () => {
     const abortObserved = deferred();
     const releaseRun = deferred();
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {
@@ -1843,7 +1915,7 @@ describe("OpenHarnessHttpServer", () => {
   it("keeps a session running while only queued work is interrupted", async () => {
     const abortObserved = deferred();
     const releaseRun = deferred();
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {
@@ -1893,7 +1965,7 @@ describe("OpenHarnessHttpServer", () => {
   it("rejects runtime metadata changes while a run is active", async () => {
     const started = deferred();
     const closed: string[] = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime(context) {
         return {
           async runPrompt() {
@@ -1940,7 +2012,7 @@ describe("OpenHarnessHttpServer", () => {
     let authWrites = 0;
     let pluginWrites = 0;
     let profileWrites = 0;
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime(context) {
         return {
           async runPrompt(input) {
@@ -2110,9 +2182,9 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
-  it("runs admitted prompts through an injected session runtime", async () => {
+  it("runs admitted prompts through an injected framework agent", async () => {
     const closed: string[] = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime({ session }) {
         return {
           async runPrompt(input, host) {
@@ -2175,7 +2247,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("persists each model turn as a separate assistant message", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(_input, host) {
@@ -2237,7 +2309,7 @@ describe("OpenHarnessHttpServer", () => {
     const releaseFirst = deferred();
     const started: string[] = [];
     let created = 0;
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         created += 1;
         return {
@@ -2298,7 +2370,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("keeps permission requests alive after an event client disconnects and accepts a later reply", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input, host) {
@@ -2380,7 +2452,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("interrupts active and queued session runs", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {
@@ -2437,7 +2509,7 @@ describe("OpenHarnessHttpServer", () => {
     const release = deferred();
     let observedWakeCount = 0;
     let drained: Array<{ content: string; delivery: string }> = [];
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {
@@ -2509,9 +2581,7 @@ describe("OpenHarnessHttpServer", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(observedWakeCount).toBeGreaterThan(0);
-      expect(drained.map((input) => [input.content, input.delivery])).toEqual([
-        ["course correct", "steer"],
-      ]);
+      expect(drained.map((input) => input.content)).toEqual(["course correct"]);
 
       release.resolve();
       await waitForEvent(baseUrl, token, (event) =>
@@ -2522,7 +2592,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("falls back to creating a run when steer arrives while idle", async () => {
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt() {},
@@ -2567,7 +2637,7 @@ describe("OpenHarnessHttpServer", () => {
 
   it("keeps queue delivery enqueue semantics while a run is active", async () => {
     const release = deferred();
-    const runtimeFactory: SessionRuntimeFactory = {
+    const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {

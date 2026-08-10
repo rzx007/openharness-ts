@@ -21,7 +21,7 @@ function runtimeSnapshot() {
     tasks: { total: 0, byStatus: {} },
     permissions: { total: 0, byStatus: {} },
     sseClientCount: 0,
-    warmRuntimeCount: 1,
+    warmAgentCount: 1,
     coordinator: { activeRunCount: 1, queuedRunCount: 3 },
   };
 }

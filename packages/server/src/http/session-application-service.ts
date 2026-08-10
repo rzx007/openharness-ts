@@ -7,7 +7,7 @@ import type {
   SessionRunEngine,
 } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
-import type { SessionRuntimePool } from "./session-runtime-pool.js";
+import type { AgentPool } from "./agent-pool.js";
 import { isRecord, runtimeSessionMetadataChanged } from "./support.js";
 
 export class SessionApplicationError extends Error {
@@ -23,7 +23,7 @@ export class SessionApplicationError extends Error {
 export interface SessionApplicationServiceContext {
   store: SessionStore;
   runEngine: SessionRunEngine;
-  runtimePool: SessionRuntimePool;
+  agentPool: AgentPool;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
@@ -61,20 +61,20 @@ export class SessionApplicationService {
   constructor(private readonly context: SessionApplicationServiceContext) {}
 
   get hasRuntime(): boolean {
-    return this.context.runtimePool.configured;
+    return this.context.agentPool.configured;
   }
 
   createSession(input: Parameters<SessionStore["createSession"]>[0]): ReturnType<SessionStore["createSession"]> {
     const before = this.context.events.checkpoint();
     const session = this.context.store.createSession(input);
-    void this.context.runtimePool.warm(session.id);
+    void this.context.agentPool.warm(session.id);
     this.context.events.publishSince(before);
     return session;
   }
 
   getSession(sessionId: string, options: { warm?: boolean } = {}): ReturnType<SessionStore["getSession"]> {
     const session = this.context.store.getSession(sessionId);
-    if (session && options.warm) void this.context.runtimePool.warm(sessionId);
+    if (session && options.warm) void this.context.agentPool.warm(sessionId);
     return session;
   }
 
@@ -99,7 +99,7 @@ export class SessionApplicationService {
       agent: input.agent,
       metadata,
     });
-    if (runtimeMetadataChanged) await this.context.runtimePool.close(sessionId);
+    if (runtimeMetadataChanged) await this.context.agentPool.close(sessionId);
     this.context.events.publishSince(before);
     return session;
   }
@@ -187,7 +187,7 @@ export class SessionApplicationService {
   }
 
   async closeRuntime(sessionId: string): Promise<void> {
-    await this.context.runtimePool.close(sessionId);
+    await this.context.agentPool.close(sessionId);
   }
 
   async createChildSession(input: CreateChildSessionCommand): Promise<SessionRecord> {
@@ -199,7 +199,7 @@ export class SessionApplicationService {
       model: input.model ?? parent.model,
     });
     this.context.events.publishSince(before);
-    await this.context.runtimePool.warm(session.id);
+    await this.context.agentPool.warm(session.id);
     return session;
   }
 
@@ -227,7 +227,7 @@ export class SessionApplicationService {
     const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
       .filter((runId): runId is string => !!runId);
     await this.context.runEngine.waitForRuns(interruptedRunIds);
-    await this.context.runtimePool.close(sessionId);
+    await this.context.agentPool.close(sessionId);
     const before = this.context.events.checkpoint();
     const session = this.context.store.archiveSession(sessionId);
     this.context.events.publishSince(before);

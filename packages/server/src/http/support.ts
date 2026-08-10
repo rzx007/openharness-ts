@@ -22,7 +22,7 @@ export interface OpenHarnessRuntimeSnapshot {
   tasks: { total: number; byStatus: Record<string, number> };
   permissions: { total: number; byStatus: Record<string, number> };
   sseClientCount: number;
-  warmRuntimeCount: number;
+  warmAgentCount: number;
   coordinator: { activeRunCount: number; queuedRunCount: number };
 }
 

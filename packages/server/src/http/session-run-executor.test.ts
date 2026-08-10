@@ -26,17 +26,17 @@ describe("SessionRunExecutor", () => {
       appendEvent: vi.fn(),
       listUnboundInputs: vi.fn(() => []),
     };
-    const runtimePool = {
+    const agentPool = {
       configured: true,
       acquire: vi.fn(async () => {
-        throw new Error("runtime failed");
+        throw new Error("agent failed");
       }),
       close: vi.fn(async () => {}),
     };
     const broadcastSince = vi.fn();
     const executor = new SessionRunExecutor({
       store: store as any,
-      runtimePool: runtimePool as any,
+      agentPool: agentPool as any,
       childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
       permissionBroker: { ask: vi.fn() },
       transcriptProjection: {
@@ -56,15 +56,15 @@ describe("SessionRunExecutor", () => {
       { signal: new AbortController().signal, wakeCount: () => 0 },
     );
 
-    expect(runtimePool.close).toHaveBeenCalledWith("s1");
+    expect(agentPool.close).toHaveBeenCalledWith("s1");
     expect(store.appendEvent).toHaveBeenCalledWith({
       type: "session.run.error",
       sessionId: "s1",
-      payload: { runId: "run-1", traceId: "trace-1", error: "runtime failed" },
+      payload: { runId: "run-1", traceId: "trace-1", error: "agent failed" },
     });
     expect(store.updateRun).toHaveBeenLastCalledWith("run-1", {
       status: "failed",
-      error: "runtime failed",
+      error: "agent failed",
     });
     expect(broadcastSince).toHaveBeenLastCalledWith(7);
   });

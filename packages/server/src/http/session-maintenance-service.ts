@@ -1,11 +1,12 @@
 import type { SessionStore } from "@openharness/services";
+import type { AgentRememberResult } from "@openharness/agent-runtime";
 
 import { writeSessionExport, type SessionExportFormat } from "../export-session.js";
 import { rewindTranscript } from "../rewind.js";
-import type { SessionRememberResult } from "@openharness/agent-runtime/host";
 import type { SessionRunEngine } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
-import type { SessionRuntimePool } from "./session-runtime-pool.js";
+import type { AgentPool } from "./agent-pool.js";
+import { agentMessagesToTranscript } from "./agent-transcript.js";
 import { estimateCostUsd } from "../usage.js";
 
 export class SessionMaintenanceError extends Error {
@@ -21,7 +22,7 @@ export class SessionMaintenanceError extends Error {
 export interface SessionMaintenanceServiceContext {
   store: SessionStore;
   runEngine: Pick<SessionRunEngine, "hasActiveRunsForCwd" | "hasWork">;
-  runtimePool: SessionRuntimePool;
+  agentPool: AgentPool;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
@@ -34,10 +35,9 @@ export class SessionMaintenanceService {
 
   async listMcpServers(sessionId: string): Promise<unknown[]> {
     this.requireSession(sessionId);
-    await this.context.runtimePool.warm(sessionId);
-    const runtime = await this.context.runtimePool.get(sessionId);
-    if (!runtime?.inspect) return [];
-    return (await runtime.inspect()).mcpServers;
+    await this.context.agentPool.warm(sessionId);
+    const agent = await this.context.agentPool.get(sessionId);
+    return agent?.inspect().mcpServers ?? [];
   }
 
   async getUsage(sessionId: string): Promise<{
@@ -51,18 +51,16 @@ export class SessionMaintenanceService {
   }> {
     const session = this.requireSession(sessionId);
     const messageCount = this.context.store.listMessages(sessionId).length;
-    await this.context.runtimePool.warm(sessionId);
-    const runtime = await this.context.runtimePool.get(sessionId);
-    const usage = runtime?.getUsage
-      ? await runtime.getUsage()
-      : { inputTokens: 0, outputTokens: 0, messageCount };
+    await this.context.agentPool.warm(sessionId);
+    const agent = await this.context.agentPool.get(sessionId);
+    const usage = agent?.getUsage() ?? { inputTokens: 0, outputTokens: 0 };
     return {
       model: session.model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       cacheCreationTokens: usage.cacheCreationTokens ?? 0,
       cacheReadTokens: usage.cacheReadTokens ?? 0,
-      messageCount: usage.messageCount ?? messageCount,
+      messageCount: agent?.getHistory().length ?? messageCount,
       estimatedCost: estimateCostUsd(session.model, usage.inputTokens, usage.outputTokens),
     };
   }
@@ -91,20 +89,18 @@ export class SessionMaintenanceService {
     if (this.context.runEngine.hasWork(sessionId)) {
       throw new SessionMaintenanceError(409, "Cannot compact while a run is active");
     }
-    await this.context.runtimePool.warm(sessionId);
-    const runtime = await this.context.runtimePool.get(sessionId);
-    if (!runtime?.compact) {
-      throw new SessionMaintenanceError(501, "Session runtime does not support compact");
-    }
+    await this.context.agentPool.warm(sessionId);
+    const agent = await this.context.agentPool.get(sessionId);
+    if (!agent) throw new SessionMaintenanceError(501, "Agent runtime is not configured");
     const before = this.context.events.checkpoint();
-    const compacted = await runtime.compact();
+    const compacted = await agent.compact();
     const replaced = this.context.store.replaceTranscript({
       sessionId,
-      messages: compacted.transcript,
+      messages: agentMessagesToTranscript(compacted.history),
     });
     this.context.events.publishSince(before);
     return {
-      messageCount: compacted.messageCount,
+      messageCount: compacted.afterMessageCount,
       messages: replaced.messages,
       parts: replaced.parts,
     };
@@ -133,7 +129,7 @@ export class SessionMaintenanceService {
       sessionId,
       messages: rewound.kept,
     });
-    await this.context.runtimePool.close(sessionId);
+    await this.context.agentPool.close(sessionId);
     this.context.events.publishSince(before);
     return {
       turns: rewound.turns,
@@ -143,19 +139,17 @@ export class SessionMaintenanceService {
     };
   }
 
-  async remember(sessionId: string): Promise<SessionRememberResult> {
+  async remember(sessionId: string): Promise<AgentRememberResult> {
     const session = this.requireSession(sessionId);
     this.requireRuntime();
     if (this.context.runEngine.hasActiveRunsForCwd(session.cwd)) {
       throw new SessionMaintenanceError(409, "Cannot remember while session runs are active for this cwd");
     }
-    await this.context.runtimePool.warm(sessionId);
-    const runtime = await this.context.runtimePool.get(sessionId);
-    if (!runtime?.remember) {
-      throw new SessionMaintenanceError(501, "Session runtime does not support remember");
-    }
-    const result = await runtime.remember();
-    await this.context.runtimePool.closeForCwd(session.cwd);
+    await this.context.agentPool.warm(sessionId);
+    const agent = await this.context.agentPool.get(sessionId);
+    if (!agent) throw new SessionMaintenanceError(501, "Agent runtime is not configured");
+    const result = await agent.remember();
+    await this.context.agentPool.closeForCwd(session.cwd);
     return result;
   }
 
@@ -166,8 +160,8 @@ export class SessionMaintenanceService {
   }
 
   private requireRuntime(): void {
-    if (!this.context.runtimePool.configured) {
-      throw new SessionMaintenanceError(501, "Runtime factory is not configured");
+    if (!this.context.agentPool.configured) {
+      throw new SessionMaintenanceError(501, "Agent runtime is not configured");
     }
   }
 }

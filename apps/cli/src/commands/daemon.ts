@@ -38,14 +38,6 @@ async function runServe(options: ServeOptions): Promise<void> {
     writeDaemonRegistry,
   } = await import("@openharness/server");
   const { loadSettings } = await import("@openharness/core");
-  const { createOpenHarnessAgentRuntimeFactory } = await import("@openharness/agent-runtime/daemon");
-  const { SkillRegistry } = await import("@openharness/skills");
-  const { loadSkillsThreeSources } = await import("./main.js");
-  const {
-    mergePluginMcpServers,
-    registerPluginHooks,
-    registerPluginTools,
-  } = await import("../plugin-contributions.js");
   const { createCliCommandCatalog } = await import("../command-catalog.js");
   const {
     createCliAgentPersonaService,
@@ -73,29 +65,8 @@ async function runServe(options: ServeOptions): Promise<void> {
     token,
     allowedOrigins: options.allowOrigin,
     storePath: options.storePath,
-    runtimeFactory: createOpenHarnessAgentRuntimeFactory({
-      settings,
-      getSettings: () => settingsRef.current,
-      prepareSession: async ({ session, settings: runtimeSettings }) => {
-        const skillRegistry = new SkillRegistry();
-        const contributions = await loadSkillsThreeSources(
-          skillRegistry,
-          session.cwd,
-          runtimeSettings,
-        );
-        return {
-          skillRegistry,
-          mcpServers: mergePluginMcpServers(
-            runtimeSettings.mcpServers,
-            contributions.plugins,
-          ),
-          configureRuntime: async (bundle) => {
-            registerPluginHooks(bundle.hookExecutor, contributions.plugins);
-            await registerPluginTools(bundle.toolRegistry, contributions.plugins);
-          },
-        };
-      },
-    }),
+    settings,
+    getSettings: () => settingsRef.current,
     commandCatalog: createCliCommandCatalog(() => settingsRef.current),
     settingsService: createCliSettingsService(settingsRef),
     providerService: createCliProviderService(settingsRef),

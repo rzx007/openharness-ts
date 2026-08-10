@@ -44,7 +44,7 @@ function createService(options: {
     hasAnyActiveRuns: vi.fn(() => false),
     hasActiveRunsForCwd: vi.fn(() => false),
   };
-  const runtimePool = {
+  const agentPool = {
     configured: true,
     warm: vi.fn(async () => {}),
     get: vi.fn(),
@@ -56,25 +56,25 @@ function createService(options: {
   const service = new SessionApplicationService({
     store: store as any,
     runEngine: runEngine as any,
-    runtimePool: runtimePool as any,
+    agentPool: agentPool as any,
     events: { checkpoint: () => 7, publishSince: broadcastSince },
   });
-  return { service, store, runEngine, runtimePool, broadcastSince };
+  return { service, store, runEngine, agentPool, broadcastSince };
 }
 
 describe("SessionApplicationService", () => {
   it("creates a session, starts warming it, and publishes the store event", () => {
-    const { service, runtimePool, broadcastSince } = createService();
+    const { service, agentPool, broadcastSince } = createService();
 
     const created = service.createSession({ cwd: "/repo", model: "gpt-test" });
 
     expect(created).toMatchObject({ cwd: "/repo", model: "gpt-test" });
-    expect(runtimePool.warm).toHaveBeenCalledWith("s1");
+    expect(agentPool.warm).toHaveBeenCalledWith("s1");
     expect(broadcastSince).toHaveBeenCalledWith(7);
   });
 
   it("rejects runtime-setting changes while the session has run work", async () => {
-    const { service, store, runtimePool } = createService({ hasWork: true });
+    const { service, store, agentPool } = createService({ hasWork: true });
 
     await expect(service.updateSession("s1", {
       metadata: { permissionMode: "strict" },
@@ -82,18 +82,18 @@ describe("SessionApplicationService", () => {
       status: 409,
     }));
     expect(store.updateSession).not.toHaveBeenCalled();
-    expect(runtimePool.close).not.toHaveBeenCalled();
+    expect(agentPool.close).not.toHaveBeenCalled();
   });
 
   it("closes the runtime after changing runtime metadata", async () => {
-    const { service, store, runtimePool, broadcastSince } = createService();
+    const { service, store, agentPool, broadcastSince } = createService();
 
     await service.updateSession("s1", { metadata: { permissionMode: "strict" } });
 
     expect(store.updateSession).toHaveBeenCalledWith("s1", expect.objectContaining({
       metadata: { permissionMode: "strict" },
     }));
-    expect(runtimePool.close).toHaveBeenCalledWith("s1");
+    expect(agentPool.close).toHaveBeenCalledWith("s1");
     expect(broadcastSince).toHaveBeenCalledWith(7);
   });
 

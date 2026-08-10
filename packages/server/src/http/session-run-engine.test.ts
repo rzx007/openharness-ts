@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SessionRunEngine } from "./session-run-engine.js";
 import { SessionRunExecutor } from "./session-run-executor.js";
-import { SessionRuntimePool } from "./session-runtime-pool.js";
+import { AgentPool } from "./agent-pool.js";
 import { SessionTranscriptProjection } from "./transcript-projection.js";
 
 function createStore() {
@@ -90,19 +90,19 @@ function createStore() {
 
 function createEngine(store = createStore()) {
   const transcriptProjection = new SessionTranscriptProjection(store as any);
-  const runPrompt = vi.fn(async () => {});
-  const runtimePool = new SessionRuntimePool({
+  const submitMessage = vi.fn(async function* () {});
+  const agentPool = new AgentPool({
     store: store as any,
-    runtimeFactory: {
-      createRuntime: vi.fn(async () => ({
-        runPrompt,
+    createAgent: vi.fn(async () => ({
+        submitMessage,
+        setModel: vi.fn(),
+        loadHistory: vi.fn(),
         close: vi.fn(async () => {}),
-      })),
-    },
+      } as any)),
   });
   const runExecutor = new SessionRunExecutor({
     store: store as any,
-    runtimePool,
+    agentPool,
     childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
     permissionBroker: { ask: vi.fn() },
     transcriptProjection,
@@ -112,11 +112,11 @@ function createEngine(store = createStore()) {
   });
   const engine = new SessionRunEngine({
     store: store as any,
-    runtimePool,
+    agentPool,
     runExecutor,
     events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
   });
-  return { engine, store, runPrompt };
+  return { engine, store, submitMessage };
 }
 
 async function flushRun(): Promise<void> {
@@ -125,7 +125,7 @@ async function flushRun(): Promise<void> {
 
 describe("SessionRunEngine", () => {
   it("admits prompts and drives runtime runs to completion", async () => {
-    const { engine, store, runPrompt } = createEngine();
+    const { engine, store, submitMessage } = createEngine();
 
     const admitted = engine.admitPromptAndMaybeRun("s1", { content: "hello", traceId: "trace-1" });
     await flushRun();
@@ -133,7 +133,7 @@ describe("SessionRunEngine", () => {
     expect(admitted.input).toMatchObject({ sessionId: "s1", content: "hello" });
     expect(admitted.run).toMatchObject({ sessionId: "s1", inputId: admitted.input.id });
     expect(admitted.queue_state).toBe("running");
-    expect(runPrompt).toHaveBeenCalledOnce();
+    expect(submitMessage).toHaveBeenCalledOnce();
     expect(store.updateRun).toHaveBeenCalledWith(admitted.run!.id, { status: "running" });
     expect(store.updateRun).toHaveBeenCalledWith(admitted.run!.id, { status: "completed" });
   });

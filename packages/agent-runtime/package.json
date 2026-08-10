@@ -8,14 +8,6 @@
     ".": {
       "import": "./src/index.ts",
       "types": "./src/index.ts"
-    },
-    "./daemon": {
-      "import": "./src/daemon.ts",
-      "types": "./src/daemon.ts"
-    },
-    "./host": {
-      "import": "./src/host-runtime.ts",
-      "types": "./src/host-runtime.ts"
     }
   },
   "scripts": {
@@ -27,14 +19,15 @@
   "dependencies": {
     "@openharness/api": "workspace:*",
     "@openharness/auth": "workspace:*",
+    "@openharness/coordinator": "workspace:*",
     "@openharness/core": "workspace:*",
     "@openharness/hooks": "workspace:*",
     "@openharness/mcp": "workspace:*",
     "@openharness/memory": "workspace:*",
     "@openharness/permissions": "workspace:*",
+    "@openharness/plugins": "workspace:*",
     "@openharness/prompts": "workspace:*",
     "@openharness/sandbox": "workspace:*",
-    "@openharness/services": "workspace:*",
     "@openharness/skills": "workspace:*",
     "@openharness/tools": "workspace:*"
   },

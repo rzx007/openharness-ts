@@ -6,12 +6,12 @@ import { RunInterruptedError, type SessionRunWorkContext } from "../run-coordina
 import type { ChildAgentHostFactory } from "./child-agent-host-factory.js";
 import { DaemonRunProjection } from "./session-run-projection.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
-import type { SessionRuntimePool } from "./session-runtime-pool.js";
+import type { AgentPool } from "./agent-pool.js";
 import type { SessionTranscriptProjection } from "./transcript-projection.js";
 
 export interface SessionRunExecutorContext {
   store: SessionStore;
-  runtimePool: SessionRuntimePool;
+  agentPool: AgentPool;
   childAgentHostFactory: ChildAgentHostFactory;
   permissionBroker: Pick<StorePermissionBroker, "ask">;
   transcriptProjection: SessionTranscriptProjection;
@@ -33,7 +33,7 @@ export class SessionRunExecutor {
   constructor(private readonly context: SessionRunExecutorContext) {}
 
   async execute(input: ExecuteSessionRunInput, workContext: SessionRunWorkContext): Promise<void> {
-    if (!this.context.runtimePool.configured) return;
+    if (!this.context.agentPool.configured) return;
     const { sessionId, inputId, runId } = input;
     let projection: DaemonRunProjection | undefined;
     try {
@@ -58,7 +58,7 @@ export class SessionRunExecutor {
       });
       projection.start(admitted.content);
 
-      const runtime = await this.context.runtimePool.acquire(session, history, parts);
+      const agent = await this.context.agentPool.acquire(session, history, parts);
       const scope = {
         sessionId,
         inputId,
@@ -69,23 +69,24 @@ export class SessionRunExecutor {
       };
       const childAgentHost = this.context.childAgentHostFactory.create({ scope, session });
       const host = projection.createHost(scope, childAgentHost);
-      await runtime.runPrompt(
-        {
-          session,
-          input: admitted,
-          runId,
-          history,
-          parts,
-          signal: workContext.signal,
-          wakeCount: workContext.wakeCount,
-          drainSteeredInputs: () => projection!.drainSteeredInputs(),
-        },
+      agent.setModel(session.model);
+      let lastWake = 0;
+      for await (const _event of agent.submitMessage(admitted.content, {
+        signal: workContext.signal,
         host,
-      );
+        pullFollowUps: () => {
+          if (workContext.wakeCount() <= lastWake) return [];
+          lastWake = workContext.wakeCount();
+          return projection!.drainSteeredInputs().map((row) => row.content);
+        },
+      })) {
+        if (workContext.signal.aborted) throw new Error("Run interrupted");
+      }
+      if (workContext.signal.aborted) throw new Error("Run interrupted");
 
       projection.complete(workContext.signal.aborted);
     } catch (error) {
-      await this.context.runtimePool.close(sessionId);
+      await this.context.agentPool.close(sessionId);
       const message = error instanceof Error ? error.message : String(error);
       const traceId = this.context.traceIdForRun(runId);
       const interrupted = error instanceof RunInterruptedError || workContext.signal.aborted;

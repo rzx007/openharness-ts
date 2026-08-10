@@ -10,7 +10,7 @@ import {
 import { SessionRunCoordinator } from "../run-coordinator.js";
 import type { SessionRunExecutor } from "./session-run-executor.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
-import type { SessionRuntimePool } from "./session-runtime-pool.js";
+import type { AgentPool } from "./agent-pool.js";
 
 export type AdmitPromptInput = {
   id?: string;
@@ -35,7 +35,7 @@ export type AwaitSessionRunResult = {
 
 export interface SessionRunEngineContext {
   store: SessionStore;
-  runtimePool: SessionRuntimePool;
+  agentPool: AgentPool;
   runExecutor: Pick<SessionRunExecutor, "execute">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
@@ -142,7 +142,7 @@ export class SessionRunEngine {
       metadata,
     });
 
-    if (delivery === "steer" && this.context.runtimePool.configured) {
+    if (delivery === "steer" && this.context.agentPool.configured) {
       const activeRunId = this.runCoordinator.activeRunId(sessionId);
       if (activeRunId) {
         this.context.events.publishSince(before);
@@ -155,7 +155,7 @@ export class SessionRunEngine {
       }
     }
 
-    const run = this.context.runtimePool.configured
+    const run = this.context.agentPool.configured
       ? this.context.store.createRun({ sessionId, inputId: admitted.id, metadata: runMetadata })
       : undefined;
     this.context.events.publishSince(before);

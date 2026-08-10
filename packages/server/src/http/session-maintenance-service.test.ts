@@ -13,7 +13,7 @@ const session = {
   updatedAt: 1,
 };
 
-function createMaintenance(runtime: Record<string, any>) {
+function createMaintenance(agent: Record<string, any>) {
   const replaced = { messages: [{ id: "persisted-message" }], parts: [{ id: "persisted-part" }] };
   const store = {
     getSession: vi.fn(() => session),
@@ -25,10 +25,10 @@ function createMaintenance(runtime: Record<string, any>) {
     hasWork: vi.fn(() => false),
     hasActiveRunsForCwd: vi.fn(() => false),
   };
-  const runtimePool = {
+  const agentPool = {
     configured: true,
     warm: vi.fn(async () => {}),
-    get: vi.fn(async () => runtime),
+    get: vi.fn(async () => agent),
     close: vi.fn(async () => {}),
     closeForCwd: vi.fn(async () => {}),
   };
@@ -36,15 +36,15 @@ function createMaintenance(runtime: Record<string, any>) {
   const maintenance = new SessionMaintenanceService({
     store: store as any,
     runEngine: runEngine as any,
-    runtimePool: runtimePool as any,
+    agentPool: agentPool as any,
     events: { checkpoint: () => 7, publishSince: broadcastSince },
   });
-  return { maintenance, store, runEngine, runtimePool, broadcastSince, replaced };
+  return { maintenance, store, runEngine, agentPool, broadcastSince, replaced };
 }
 
 describe("SessionMaintenanceService", () => {
   it("persists the compacted transcript and broadcasts the replacement", async () => {
-    const compact = vi.fn(async () => ({ messageCount: 2, transcript: [] }));
+    const compact = vi.fn(async () => ({ history: [], beforeMessageCount: 3, afterMessageCount: 2 }));
     const { maintenance, store, broadcastSince, replaced } = createMaintenance({ compact });
 
     const result = await maintenance.compact("s1");
@@ -56,7 +56,7 @@ describe("SessionMaintenanceService", () => {
   });
 
   it("replaces a rewound transcript and closes its stale runtime", async () => {
-    const { maintenance, store, runtimePool, broadcastSince } = createMaintenance({});
+    const { maintenance, store, agentPool, broadcastSince } = createMaintenance({});
     store.listMessages.mockReturnValue([{
       id: "message-1",
       seq: 1,
@@ -79,16 +79,16 @@ describe("SessionMaintenanceService", () => {
 
     expect(result).toMatchObject({ turns: 1, removed: 1 });
     expect(store.replaceTranscript).toHaveBeenCalledWith({ sessionId: "s1", messages: [] });
-    expect(runtimePool.close).toHaveBeenCalledWith("s1");
+    expect(agentPool.close).toHaveBeenCalledWith("s1");
     expect(broadcastSince).toHaveBeenCalledWith(7);
   });
 
   it("extracts memories and closes every runtime for the cwd", async () => {
     const remembered = { skipped: false, writtenIds: ["memory-1"], titles: ["Fact"] };
     const remember = vi.fn(async () => remembered);
-    const { maintenance, runtimePool } = createMaintenance({ remember });
+    const { maintenance, agentPool } = createMaintenance({ remember });
 
     await expect(maintenance.remember("s1")).resolves.toBe(remembered);
-    expect(runtimePool.closeForCwd).toHaveBeenCalledWith("/repo");
+    expect(agentPool.closeForCwd).toHaveBeenCalledWith("/repo");
   });
 });

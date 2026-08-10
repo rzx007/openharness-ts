@@ -20,23 +20,23 @@ function createControl() {
     hasAnyActiveRuns: vi.fn(() => true),
     hasActiveRunsForCwd: vi.fn(() => false),
   };
-  const runtime = { inspect: vi.fn(async () => ({ hooks: [{ id: "hook-1", origin: "runtime" }] })) };
-  const runtimePool = {
+  const agent = { inspect: vi.fn(() => ({ hooks: [{ id: "hook-1", event: "pre_tool_use", type: "command", enabled: true }] })) };
+  const agentPool = {
     configured: true,
     size: 1,
     warm: vi.fn(async () => {}),
-    get: vi.fn(async () => runtime),
+    get: vi.fn(async () => agent),
     closeAll: vi.fn(async () => {}),
     closeForCwd: vi.fn(async () => {}),
   };
   const control = new DaemonControlService({
     store: store as any,
     runEngine: runEngine as any,
-    runtimePool: runtimePool as any,
+    agentPool: agentPool as any,
     startedAt: Date.now() - 100,
     sseClientCount: () => 2,
   });
-  return { control, store, runEngine, runtimePool };
+  return { control, store, runEngine, agentPool };
 }
 
 describe("DaemonControlService", () => {
@@ -50,17 +50,17 @@ describe("DaemonControlService", () => {
       runs: { total: 1, byStatus: { running: 1 } },
       permissions: { total: 1, byStatus: { pending: 1 } },
       sseClientCount: 2,
-      warmRuntimeCount: 1,
+      warmAgentCount: 1,
       coordinator: { activeRunCount: 1, queuedRunCount: 1 },
     });
   });
 
   it("inspects hooks through the shared runtime pool", async () => {
-    const { control, runtimePool } = createControl();
+    const { control, agentPool } = createControl();
 
     await expect(control.inspectRuntimeHooks("s1")).resolves.toEqual([
-      { id: "hook-1", origin: "runtime" },
+      { id: "hook-1", event: "pre_tool_use", type: "command", enabled: true, origin: "runtime" },
     ]);
-    expect(runtimePool.warm).toHaveBeenCalledWith("s1");
+    expect(agentPool.warm).toHaveBeenCalledWith("s1");
   });
 });

@@ -6,6 +6,7 @@ export {
   type OpenHarnessServerOptions,
   type OpenHarnessRuntimeSnapshot,
 } from "./http.js";
+export type { CreateDaemonAgent, CreateDaemonAgentContext } from "./http/agent-pool.js";
 export {
   BUILTIN_SESSION_COMMANDS,
   mergeCommandCatalog,
