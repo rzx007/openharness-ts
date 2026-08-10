@@ -535,8 +535,13 @@ export function useServerSync(
   useEffect(() => {
     if (!submittedRun) return;
     const run = clientState.buckets[submittedRun.sessionId]?.runs[submittedRun.runId];
-    if (run && run.status !== "pending" && run.status !== "running") setSubmittedRun(null);
-  }, [clientState, submittedRun]);
+    if (!run || run.status === "pending" || run.status === "running") return;
+    if (run.status === "failed") {
+      reportError(run.error ?? "Agent run failed");
+      return;
+    }
+    setSubmittedRun(null);
+  }, [clientState, reportError, submittedRun]);
 
   const createAndSwitchSession = useCallback(async (title?: string): Promise<SessionRecord | undefined> => {
     const client = clientRef.current;

@@ -117,27 +117,27 @@ const server = new OpenHarnessHttpServer({
   token: ${JSON.stringify(token)},
   storePath: ${JSON.stringify(join(dir, "sessions.db"))},
   logger: () => {},
-  runtimeFactory: {
-    async createRuntime() {
-      return {
-        async runPrompt(input, hooks) {
-          if (input.input.content !== "please edit") {
-            throw new Error(\`Unexpected prompt: \${input.input.content}\`);
+  async createAgent({ session }) {
+    return {
+      id: session.id,
+      async *submitMessage(content, options) {
+          if (content !== "please edit") {
+            throw new Error(\`Unexpected prompt: \${content}\`);
           }
-          const allowed = await hooks.askPermission({
+          const decision = await options.host.requestPermission({
             toolName: "Write",
             reason: "exercise TUI permission flow",
             input: { path: "README.md" },
           });
-          await hooks.onStreamEvent({
+          await options.host.emitStreamEvent({
             type: "text_delta",
-            delta: allowed ? "edit approved" : "edit denied",
+            delta: decision.status === "approved" ? "edit approved" : "edit denied",
           });
-          return { messages: [] };
-        },
-        async close() {},
-      };
-    },
+      },
+      loadHistory() {},
+      setModel() {},
+      async close() {},
+    };
   },
 });
 
@@ -332,7 +332,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   let releaseHeldContext: ((response: Response) => void) | undefined;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {} });
-    const pathname = new URL(String(url)).pathname;
+    const requestUrl = new URL(String(url));
+    const pathname = requestUrl.pathname;
     if (pathname === "/health") {
       return jsonResponse({ ok: true });
     }
@@ -652,6 +653,19 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
         ],
       });
     }
+    if (pathname === "/events/stream" && requestUrl.searchParams.get("sessionId") === "s2") {
+      return sseResponse([event(11, "session.run.updated", {
+        run: {
+          id: "r2",
+          sessionId: "s2",
+          status: "failed",
+          error: "provider unavailable",
+          metadata: {},
+          createdAt: 12,
+          updatedAt: 13,
+        },
+      }, "s2")]);
+    }
     if (pathname === "/events/stream") return sseResponse([
       event(7, "session.message.created", { message: liveMessage }),
       event(8, "session.message.part.updated", { part: liveTextPart }),
@@ -683,6 +697,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   }) as typeof fetch;
 
   let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
   function Harness() {
     captured = useServerSync({
       daemon: {
@@ -693,7 +708,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
         permissionMode: "plan",
         maxTurns: 11,
       },
-    }, () => {});
+    }, (message) => errors.push(message));
     return <box />;
   }
 
@@ -827,7 +842,9 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   });
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2/prompts")).toBe(true);
   expect(captured?.status.session_id).toBe("s2");
-  expect(captured?.busy).toBe(true);
+  expect(captured?.busy).toBe(false);
+  expect(errors).toContain("provider unavailable");
+  expect(captured?.transcript).toContainEqual({ role: "system", text: "error: provider unavailable" });
 
   await act(async () => {
     captured?.sendRequest({ type: "set_permission_mode", permission_mode: "full_auto" });
