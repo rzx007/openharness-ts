@@ -41,6 +41,10 @@ export interface AgentChildRunProjection {
   state?: unknown;
 }
 
+export interface AgentChildInputProjection {
+  inputId?: string;
+}
+
 export interface AgentChildProjection {
   createChild(input: {
     invocationId: string;
@@ -53,6 +57,11 @@ export interface AgentChildProjection {
     input: AgentChildAgentInput,
     signal: AbortSignal,
   ): Promise<AgentChildRunProjection>;
+  steerRun?(
+    child: AgentChildProjectionHandle,
+    run: AgentChildRunProjection,
+    input: AgentChildAgentInput,
+  ): Promise<AgentChildInputProjection | void>;
   finishRun(
     child: AgentChildProjectionHandle,
     run: AgentChildRunProjection,
@@ -73,9 +82,10 @@ interface ChildInvocationRecord {
   parentHost: AgentRunHost;
   abortController?: AbortController;
   acceptingFollowUps: boolean;
-  followUps: string[];
+  followUps: PendingChildFollowUp[];
   result: Promise<AgentChildAgentResult>;
   currentReceipt?: Promise<AgentChildInputReceipt>;
+  currentRunProjection?: AgentChildRunProjection;
   startChain: Promise<void>;
   lastResult?: AgentChildAgentResult;
   parentAbortHandler?: () => void;
@@ -83,6 +93,11 @@ interface ChildInvocationRecord {
   requests: Map<string, { input: AgentChildAgentInput; receipt: Promise<AgentChildInputReceipt> }>;
   closePromise?: Promise<void>;
   closed: boolean;
+}
+
+interface PendingChildFollowUp {
+  content: string;
+  projected: Promise<AgentChildInputProjection | void>;
 }
 
 export interface AgentChildManagerOptions {
@@ -242,8 +257,23 @@ export class AgentChildManager {
     input: AgentChildAgentInput,
   ): Promise<AgentChildInputReceipt> {
     if (input.delivery !== "queue" && record.acceptingFollowUps && record.currentReceipt) {
-      record.followUps.push(input.content);
-      return await record.currentReceipt;
+      const currentReceipt = record.currentReceipt;
+      const projected = record.currentRunProjection && record.projection?.steerRun
+        ? record.projection.steerRun(record.child, record.currentRunProjection, {
+            ...input,
+            delivery: input.delivery ?? "steer",
+          })
+        : Promise.resolve(undefined);
+      record.followUps.push({
+        content: input.content,
+        projected,
+      });
+      const [current, steered] = await Promise.all([currentReceipt, projected]);
+      const inputId = steered && typeof steered === "object" ? steered.inputId : undefined;
+      return {
+        ...current,
+        inputId: inputId ?? current.inputId,
+      };
     }
     return await this.queueRun(record, input);
   }
@@ -321,6 +351,7 @@ export class AgentChildManager {
         : {
             host: createStandaloneChildHost(record.parentHost, record.child, controller.signal),
           };
+      record.currentRunProjection = runProjection;
       started({
         sessionId: record.child.sessionId,
         inputId: runProjection.inputId ?? runProjection.host.scope.inputId,
@@ -331,7 +362,7 @@ export class AgentChildManager {
         signal: controller.signal,
         host: runProjection.host,
         childProjection: record.projection,
-        pullFollowUps: () => record.followUps.splice(0),
+        pullFollowUps: () => drainFollowUps(record),
       };
       let content: string | undefined = input.content;
       while (content !== undefined) {
@@ -340,7 +371,7 @@ export class AgentChildManager {
           if (event.type === "text_delta") output += event.delta;
         }
         record.acceptingFollowUps = false;
-        content = record.followUps.shift();
+        content = await shiftFollowUp(record);
       }
       result = { status: "completed", output };
     } catch (error) {
@@ -364,6 +395,7 @@ export class AgentChildManager {
     }
     if (record.abortController === controller) record.abortController = undefined;
     record.currentReceipt = undefined;
+    if (record.currentRunProjection === runProjection) record.currentRunProjection = undefined;
     record.lastResult = result;
     this.scheduleSuspend(record);
     return result;
@@ -471,6 +503,20 @@ function sameChildInput(left: AgentChildAgentInput, right: AgentChildAgentInput)
   return left.content === right.content &&
     (left.delivery ?? "steer") === (right.delivery ?? "steer") &&
     JSON.stringify(left.metadata ?? {}) === JSON.stringify(right.metadata ?? {});
+}
+
+async function drainFollowUps(record: ChildInvocationRecord): Promise<string[]> {
+  const pending = record.followUps.splice(0);
+  if (pending.length === 0) return [];
+  await Promise.all(pending.map((input) => input.projected));
+  return pending.map((input) => input.content);
+}
+
+async function shiftFollowUp(record: ChildInvocationRecord): Promise<string | undefined> {
+  const pending = record.followUps.shift();
+  if (!pending) return undefined;
+  await pending.projected;
+  return pending.content;
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void } {

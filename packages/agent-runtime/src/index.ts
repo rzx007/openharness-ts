@@ -26,6 +26,7 @@ export type {
 export { discoverOpenHarnessExtensions } from "./extensions.js";
 export type {
   AgentChildControls,
+  AgentChildInputProjection,
   AgentChildInputReceipt,
   AgentChildProjection,
   AgentChildProjectionHandle,

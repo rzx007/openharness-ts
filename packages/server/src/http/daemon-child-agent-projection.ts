@@ -8,6 +8,7 @@ import type {
 import type {
   AgentChildProjection,
   AgentChildProjectionHandle,
+  AgentChildInputProjection,
   AgentChildRunProjection,
 } from "@openharness/agent-runtime";
 import type { SessionStore } from "@openharness/services";
@@ -234,6 +235,26 @@ export class DaemonChildAgentProjection implements AgentChildProjection {
     else projection.fail(new Error(result.error ?? result.output), false);
     const state = child.state as DaemonChildState;
     await state.taskBridge.completeSessionTask(state.taskId, result);
+  }
+
+  async steerRun(
+    child: AgentChildProjectionHandle,
+    run: AgentChildRunProjection,
+    input: AgentChildAgentInput,
+  ): Promise<AgentChildInputProjection> {
+    const state = child.state as DaemonChildState;
+    const projection = (run.state as DaemonChildRunState).projection;
+    const traceId = input.traceId ?? randomUUID();
+    const before = this.context.events.checkpoint();
+    const admitted = this.context.store.admitPrompt({
+      id: input.id,
+      sessionId: child.sessionId,
+      delivery: "steer",
+      content: input.content,
+      metadata: { ...input.metadata, traceId, parentRunId: state.parentScope.runId },
+    });
+    projection.projectSteeredInputs([admitted], before);
+    return { inputId: admitted.id };
   }
 
   async failRunStart(child: AgentChildProjectionHandle, result: AgentChildAgentResult): Promise<void> {

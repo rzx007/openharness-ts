@@ -11,7 +11,7 @@ describe("DaemonChildAgentProjection", () => {
       writeToSessionTask: vi.fn(async () => {}),
     };
     const store = {
-      admitPrompt: vi.fn(() => ({ id: "input-1" })),
+      admitPrompt: vi.fn((input) => ({ id: input.id ?? "input-1", ...input })),
       createRun: vi.fn(() => ({ id: "run-1" })),
       updateRun: vi.fn(),
       appendEvent: vi.fn(),
@@ -51,11 +51,28 @@ describe("DaemonChildAgentProjection", () => {
       controls: { send: vi.fn(), interrupt: vi.fn() },
     });
     const run = await projection.startRun(child, { content: "inspect" }, new AbortController().signal);
+    const steered = await projection.steerRun(child, run, {
+      id: "steer-1",
+      content: "nudge",
+      metadata: { source: "test" },
+    });
     await projection.finishRun(child, run, { status: "completed", output: "done" });
 
     expect(child).toMatchObject({ sessionId: "child-session", taskId: "task-1" });
     expect(store.admitPrompt).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "child-session" }));
     expect(store.createRun).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "child-session" }));
+    expect(steered).toEqual({ inputId: "steer-1" });
+    expect(store.admitPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      id: "steer-1",
+      sessionId: "child-session",
+      delivery: "steer",
+      content: "nudge",
+      metadata: expect.objectContaining({ source: "test", parentRunId: "parent-run" }),
+    }));
+    expect(transcriptProjection.projectSteeredInputs).toHaveBeenCalledWith(
+      expect.anything(),
+      [expect.objectContaining({ id: "steer-1", content: "nudge" })],
+    );
     expect(taskBridge.bindSessionTaskRun).toHaveBeenCalledWith("task-1", "run-1");
     expect(taskBridge.completeSessionTask).toHaveBeenCalledWith("task-1", {
       status: "completed",

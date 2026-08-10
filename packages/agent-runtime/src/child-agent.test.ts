@@ -239,6 +239,46 @@ describe("AgentChildManager", () => {
     await invocation.result;
   });
 
+  it("projects in-flight follow-up input before the child consumes it", async () => {
+    const continueRun = deferred<void>();
+    const submitMessage = vi.fn(async function* (_content: string, options) {
+      yield { type: "text_delta" as const, delta: "start:" };
+      await continueRun.promise;
+      const followUps = await options.pullFollowUps();
+      yield { type: "text_delta" as const, delta: followUps.join(",") };
+    });
+    const steerRun = vi.fn(async () => ({ inputId: "steered-input" }));
+    const projection = createProjection({ steerRun });
+    const manager = new AgentChildManager({
+      settings: {} as any,
+      createAgent: vi.fn(async () => ({
+        submitMessage,
+        close: vi.fn(async () => {}),
+      } as any)),
+    });
+    const host = manager.createHost(parentHost(), projection);
+    const invocation = await host.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+
+    const receipt = await host.sendChildInput("task-1", {
+      id: "follow-up-1",
+      content: "nudge",
+    });
+    continueRun.resolve();
+
+    expect(receipt.inputId).toBe("steered-input");
+    expect(steerRun).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "child-session" }),
+      expect.objectContaining({ runId: "run-1" }),
+      expect.objectContaining({ id: "follow-up-1", content: "nudge", delivery: "steer" }),
+    );
+    await expect(invocation.result).resolves.toMatchObject({ output: "start:nudge" });
+  });
+
   it("makes concurrent interrupt callers wait for projection settlement", async () => {
     const finishing = deferred<void>();
     const finishRun = vi.fn(async () => {

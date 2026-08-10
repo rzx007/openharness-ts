@@ -60,10 +60,15 @@ export class DaemonRunProjection {
   drainSteeredInputs(): SessionInputRecord[] {
     const pending = this.context.store.listUnboundInputs(this.context.sessionId);
     if (pending.length === 0) return pending;
-    const before = this.context.events.checkpoint();
+    this.projectSteeredInputs(pending);
+    return pending;
+  }
+
+  projectSteeredInputs(pending: SessionInputRecord[], checkpoint?: number): void {
+    if (pending.length === 0) return;
+    const before = checkpoint ?? this.context.events.checkpoint();
     this.context.transcriptProjection.projectSteeredInputs(this.requireTranscriptState(), pending);
     this.context.events.publishSince(before);
-    return pending;
   }
 
   createHost(scope: AgentRunScope): DaemonRuntimeHostPort {
