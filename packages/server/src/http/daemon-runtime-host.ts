@@ -1,5 +1,4 @@
 import type {
-  AgentChildAgentHost,
   AgentPermissionDecision,
   AgentPermissionRequest,
   AgentRunHost,
@@ -13,7 +12,6 @@ export interface DaemonRuntimeHostPortContext {
   emitEvent(event: AgentRuntimeEvent): void | Promise<void>;
   emitStreamEvent(event: StreamEvent): void | Promise<void>;
   requestPermission(input: AgentPermissionRequest): Promise<AgentPermissionDecision>;
-  childAgentHost: AgentChildAgentHost;
 }
 
 /**
@@ -21,11 +19,9 @@ export interface DaemonRuntimeHostPortContext {
  */
 export class DaemonRuntimeHostPort implements AgentRunHost {
   readonly scope: AgentRunScope;
-  readonly childAgentHost: AgentChildAgentHost;
 
   constructor(private readonly context: DaemonRuntimeHostPortContext) {
     this.scope = context.scope;
-    this.childAgentHost = context.childAgentHost;
   }
 
   emitEvent(event: AgentRuntimeEvent): void | Promise<void> {

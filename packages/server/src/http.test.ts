@@ -173,36 +173,52 @@ async function waitForEvent(
 }
 
 describe("OpenHarnessHttpServer", () => {
-  it("provides runs a runtime host that can spawn child sessions", async () => {
+  it("projects framework-owned child execution into durable child sessions", async () => {
     const created: string[] = [];
     const closed: string[] = [];
-    const runtimeFactory: TestAgentProgramFactory = {
-      async createRuntime(context) {
-        created.push(context.session.id);
-        return {
-          async runPrompt(_input, runtimeHost) {
-            if (context.session.parentId) {
-              await runtimeHost.emitStreamEvent({ type: "text_delta", delta: "child output" });
-              return { messages: [] };
-            }
-            const invocation = await runtimeHost.childAgentHost!.spawnChildAgent({
+    const createAgent: CreateDaemonAgent = async (context) => {
+      created.push(context.session.id);
+      return {
+        id: context.session.id,
+        async *submitMessage(_content, options = {}) {
+          if (context.session.parentId) {
+            await options.host!.emitStreamEvent({ type: "text_delta", delta: "child output" });
+            return;
+          }
+          const child = await options.childProjection!.createChild({
+            invocationId: "child-invocation",
+            parentScope: options.host!.scope,
+            spawn: {
               description: "Explore@default",
               prompt: "inspect",
               agent: "Explore",
               cwd: context.session.cwd,
-            });
-            const result = await invocation.result;
-            await runtimeHost.emitStreamEvent({
-              type: "text_delta",
-              delta: result.output,
-            });
-            return { messages: [] };
-          },
-          async close() {
-            closed.push(context.session.id);
-          },
-        };
-      },
+            },
+            controls: { send: async () => {}, interrupt: async () => {} },
+          });
+          const run = await options.childProjection!.startRun(
+            child,
+            "inspect",
+            new AbortController().signal,
+          );
+          await run.host.emitStreamEvent({ type: "text_delta", delta: "child output" });
+          await options.childProjection!.finishRun(child, run, {
+            status: "completed",
+            output: "child output",
+          });
+          await options.host!.emitStreamEvent({ type: "text_delta", delta: "child output" });
+        },
+        async runMessage() { return { output: "", events: [], history: [] }; },
+        getHistory: () => [],
+        loadHistory: () => {},
+        clear: () => {},
+        setModel: () => {},
+        async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
+        async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
+        getUsage: () => ({ inputTokens: 0, outputTokens: 0 }),
+        inspect: () => ({ model: context.session.model, tools: [], hooks: [], mcpServers: [] }),
+        async close() { closed.push(context.session.id); },
+      };
     };
 
     await withServer(async ({ baseUrl, token, server }) => {
@@ -238,7 +254,7 @@ describe("OpenHarnessHttpServer", () => {
         body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
       });
       expect(closeRuntime.status).toBe(200);
-      expect(closed).toContain(child!.id);
+      expect(closed).not.toContain(child!.id);
 
       const followUp = await fetch(`${baseUrl}/sessions/${child!.id}/prompts`, {
         method: "POST",
@@ -251,9 +267,9 @@ describe("OpenHarnessHttpServer", () => {
         (event.payload?.run as { sessionId?: string; status?: string } | undefined)?.sessionId === child!.id &&
         (event.payload?.run as { status?: string } | undefined)?.status === "completed",
       );
-      expect(created.filter((id) => id === child!.id)).toHaveLength(2);
+      expect(created.filter((id) => id === child!.id)).toHaveLength(1);
       expect(server.store.getSession(child!.id)?.status).not.toBe("archived");
-    }, { runtimeFactory });
+    }, { createAgent });
   });
 
   it("uses the canonical session runtime store", () => {

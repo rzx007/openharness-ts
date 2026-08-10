@@ -1,5 +1,4 @@
 import type {
-  AgentChildAgentHost,
   AgentPermissionDecision,
   AgentPermissionRequest,
   AgentRunScope,
@@ -67,10 +66,9 @@ export class DaemonRunProjection {
     return pending;
   }
 
-  createHost(scope: AgentRunScope, childAgentHost: AgentChildAgentHost): DaemonRuntimeHostPort {
+  createHost(scope: AgentRunScope): DaemonRuntimeHostPort {
     return new DaemonRuntimeHostPort({
       scope,
-      childAgentHost,
       emitEvent: (event) => this.emitEvent(event),
       emitStreamEvent: (event) => this.emitStreamEvent(event),
       requestPermission: (request) => this.requestPermission(request),

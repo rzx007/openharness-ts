@@ -3,7 +3,7 @@ import type { SessionStore } from "@openharness/services";
 import type { ObservabilityEvent } from "../observability.js";
 import type { StorePermissionBroker } from "../permission-broker.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../run-coordinator.js";
-import type { ChildAgentHostFactory } from "./child-agent-host-factory.js";
+import type { ChildAgentProjectionFactory } from "./child-agent-projection-factory.js";
 import { DaemonRunProjection } from "./session-run-projection.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
@@ -12,7 +12,7 @@ import type { SessionTranscriptProjection } from "./transcript-projection.js";
 export interface SessionRunExecutorContext {
   store: SessionStore;
   agentPool: AgentPool;
-  childAgentHostFactory: ChildAgentHostFactory;
+  childAgentProjectionFactory: ChildAgentProjectionFactory;
   permissionBroker: Pick<StorePermissionBroker, "ask">;
   transcriptProjection: SessionTranscriptProjection;
   events: Pick<SessionEventPublisher, "checkpoint" | "publish" | "publishSince">;
@@ -67,13 +67,14 @@ export class SessionRunExecutor {
         traceId,
         signal: workContext.signal,
       };
-      const childAgentHost = this.context.childAgentHostFactory.create({ scope, session });
-      const host = projection.createHost(scope, childAgentHost);
+      const childProjection = this.context.childAgentProjectionFactory.create({ scope, session });
+      const host = projection.createHost(scope);
       agent.setModel(session.model);
       let lastWake = 0;
       for await (const _event of agent.submitMessage(admitted.content, {
         signal: workContext.signal,
         host,
+        childProjection,
         pullFollowUps: () => {
           if (workContext.wakeCount() <= lastWake) return [];
           lastWake = workContext.wakeCount();

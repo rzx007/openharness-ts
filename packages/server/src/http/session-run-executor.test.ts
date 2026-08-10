@@ -37,7 +37,7 @@ describe("SessionRunExecutor", () => {
     const executor = new SessionRunExecutor({
       store: store as any,
       agentPool: agentPool as any,
-      childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
+      childAgentProjectionFactory: { create: vi.fn(() => ({}) as any) },
       permissionBroker: { ask: vi.fn() },
       transcriptProjection: {
         beginRun: vi.fn(() => ({})),

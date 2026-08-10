@@ -103,7 +103,7 @@ function createEngine(store = createStore()) {
   const runExecutor = new SessionRunExecutor({
     store: store as any,
     agentPool,
-    childAgentHostFactory: { create: vi.fn(() => ({}) as any) },
+    childAgentProjectionFactory: { create: vi.fn(() => ({}) as any) },
     permissionBroker: { ask: vi.fn() },
     transcriptProjection,
     events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn(), publish: vi.fn() },

@@ -1,8 +1,25 @@
 import { randomUUID } from "node:crypto";
 
 import type { ObservabilityEvent } from "../observability.js";
-import type { SessionTaskBridge } from "./child-agent-ports.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
+
+export interface SessionTaskBridge {
+  registerSessionTask(input: {
+    description: string;
+    cwd: string;
+    sessionId: string;
+    childSessionId: string;
+    prompt: string;
+    onInput(data: string): Promise<void>;
+    onStop(): Promise<void>;
+  }): { id: string };
+  bindSessionTaskRun(taskId: string, runId: string): Promise<void>;
+  completeSessionTask(
+    taskId: string,
+    input: { status: "completed" | "failed" | "stopped" | "interrupted"; output: string },
+  ): Promise<unknown>;
+  writeToSessionTask(taskId: string, data: string): Promise<void>;
+}
 
 export interface TaskInfo {
   id: string;

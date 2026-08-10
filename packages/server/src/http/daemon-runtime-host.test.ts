@@ -18,18 +18,11 @@ describe("DaemonRuntimeHostPort", () => {
     const emitEvent = vi.fn();
     const emitStreamEvent = vi.fn();
     const requestPermission = vi.fn(async () => ({ status: "approved" as const }));
-    const childAgentHost = {
-      spawnChildAgent: vi.fn(),
-      sendChildInput: vi.fn(),
-      interruptChildAgent: vi.fn(),
-      awaitChildAgent: vi.fn(),
-    };
     const host = new DaemonRuntimeHostPort({
       scope: scope(),
       emitEvent,
       emitStreamEvent,
       requestPermission,
-      childAgentHost,
     });
 
     await host.emitEvent({ type: "runtime.event", payload: { ok: true } });
@@ -50,36 +43,4 @@ describe("DaemonRuntimeHostPort", () => {
     expect(decision.status).toBe("approved");
   });
 
-  it("exposes child-agent lifecycle capability", async () => {
-    const invocation = {
-      id: "child-invocation",
-      taskId: "task-1",
-      sessionId: "child-1",
-      result: Promise.resolve({ status: "completed" as const, output: "done" }),
-    };
-    const childAgentHost = {
-      spawnChildAgent: vi.fn(async () => invocation),
-      sendChildInput: vi.fn(async () => {}),
-      interruptChildAgent: vi.fn(async () => {}),
-      awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "done" })),
-    };
-    const host = new DaemonRuntimeHostPort({
-      scope: scope(),
-      emitEvent: vi.fn(),
-      emitStreamEvent: vi.fn(),
-      requestPermission: vi.fn(async () => ({ status: "approved" as const })),
-      childAgentHost,
-    });
-
-    await expect(host.childAgentHost.spawnChildAgent({ description: "d", prompt: "p", agent: "a", cwd: "/repo" }))
-      .resolves.toBe(invocation);
-    await host.childAgentHost.sendChildInput("child-invocation", { content: "follow up" });
-    await host.childAgentHost.interruptChildAgent("child-invocation", "stop");
-    await expect(host.childAgentHost.awaitChildAgent("child-invocation")).resolves.toEqual({ status: "completed", output: "done" });
-
-    expect(childAgentHost.spawnChildAgent).toHaveBeenCalledWith({ description: "d", prompt: "p", agent: "a", cwd: "/repo" });
-    expect(childAgentHost.sendChildInput).toHaveBeenCalledWith("child-invocation", { content: "follow up" });
-    expect(childAgentHost.interruptChildAgent).toHaveBeenCalledWith("child-invocation", "stop");
-    expect(childAgentHost.awaitChildAgent).toHaveBeenCalledWith("child-invocation");
-  });
 });

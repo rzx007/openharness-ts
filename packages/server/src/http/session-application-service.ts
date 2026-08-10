@@ -8,6 +8,7 @@ import type {
 } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
+import type { LiveChildAgentRegistry } from "./live-child-agent-registry.js";
 import { isRecord, runtimeSessionMetadataChanged } from "./support.js";
 
 export class SessionApplicationError extends Error {
@@ -24,6 +25,7 @@ export interface SessionApplicationServiceContext {
   store: SessionStore;
   runEngine: SessionRunEngine;
   agentPool: AgentPool;
+  liveChildren: Pick<LiveChildAgentRegistry, "interrupt">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
@@ -178,8 +180,12 @@ export class SessionApplicationService {
     return { ...resumed, source_run: sourceRun };
   }
 
-  interruptSession(sessionId: string): ReturnType<SessionRunEngine["interruptSession"]> {
-    return this.context.runEngine.interruptSession(sessionId);
+  async interruptSession(sessionId: string): Promise<ReturnType<SessionRunEngine["interruptSession"]>> {
+    const lane = this.context.runEngine.interruptSession(sessionId);
+    const childInterrupted = await this.context.liveChildren.interrupt(sessionId, "Session interrupted");
+    return childInterrupted && !lane.interrupted
+      ? { ...lane, interrupted: true }
+      : lane;
   }
 
   async awaitRun(sessionId: string, runId: string): Promise<AwaitSessionRunResult> {
@@ -199,7 +205,6 @@ export class SessionApplicationService {
       model: input.model ?? parent.model,
     });
     this.context.events.publishSince(before);
-    await this.context.agentPool.warm(session.id);
     return session;
   }
 
@@ -224,6 +229,7 @@ export class SessionApplicationService {
     this.context.store.beginArchive(sessionId);
     this.context.events.publishSince(beforeClosing);
     const interrupted = this.context.runEngine.interruptSession(sessionId);
+    await this.context.liveChildren.interrupt(sessionId, "Session archived");
     const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
       .filter((runId): runId is string => !!runId);
     await this.context.runEngine.waitForRuns(interruptedRunIds);

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import type {
-  AgentChildAgentHost,
   AgentPermissionDecision,
   AgentPermissionRequest,
   AgentRunHost,
@@ -28,7 +27,6 @@ export interface AgentSessionRunResult {
 }
 
 export interface AgentSessionHostCallbacks {
-  childAgentHost?: AgentChildAgentHost;
   emitEvent?(event: AgentRuntimeEvent): void | Promise<void>;
   emitStreamEvent?(event: StreamEvent): void | Promise<void>;
   requestPermission?(request: AgentPermissionRequest): Promise<AgentPermissionDecision>;
@@ -98,7 +96,6 @@ export class AgentSession {
     const scope = this.createScope(signal);
     return {
       scope,
-      ...(this.options.childAgentHost ? { childAgentHost: this.options.childAgentHost } : {}),
       emitEvent: async (event) => {
         await this.options.emitEvent?.(event);
       },

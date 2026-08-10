@@ -57,6 +57,7 @@ function createService(options: {
     store: store as any,
     runEngine: runEngine as any,
     agentPool: agentPool as any,
+    liveChildren: { interrupt: vi.fn(async () => false) },
     events: { checkpoint: () => 7, publishSince: broadcastSince },
   });
   return { service, store, runEngine, agentPool, broadcastSince };

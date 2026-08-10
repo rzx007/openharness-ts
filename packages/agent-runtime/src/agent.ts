@@ -25,6 +25,7 @@ import {
   type AgentMemoryRuntime,
   type AgentRememberResult,
 } from "./memory-runtime.js";
+import { AgentChildManager, type AgentChildProjection } from "./child-agent.js";
 
 export interface OpenHarnessAgentOptions
   extends AgentSessionHostCallbacks {
@@ -34,6 +35,10 @@ export interface OpenHarnessAgentOptions
   overrides?: OpenHarnessRuntimeOverrides;
   mcpServers?: Settings["mcpServers"];
   extensions?: OpenHarnessAgentExtension[];
+}
+
+export interface OpenHarnessAgentSubmitOptions extends AgentSessionSubmitOptions {
+  childProjection?: AgentChildProjection;
 }
 
 export interface AgentCompactResult {
@@ -59,8 +64,8 @@ export interface AgentInspection {
 
 export interface OpenHarnessAgent {
   readonly id: string;
-  submitMessage(content: string | ContentBlock[], options?: AgentSessionSubmitOptions): AsyncIterable<import("@openharness/core").StreamEvent>;
-  runMessage(content: string | ContentBlock[], options?: AgentSessionSubmitOptions): Promise<AgentSessionRunResult>;
+  submitMessage(content: string | ContentBlock[], options?: OpenHarnessAgentSubmitOptions): AsyncIterable<import("@openharness/core").StreamEvent>;
+  runMessage(content: string | ContentBlock[], options?: OpenHarnessAgentSubmitOptions): Promise<AgentSessionRunResult>;
   getHistory(): Message[];
   loadHistory(messages: Message[]): void;
   clear(): void;
@@ -78,6 +83,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     private readonly session: AgentSession,
     private readonly mcpManager: McpClientManager,
     private readonly memory: AgentMemoryRuntime | undefined,
+    private readonly children: AgentChildManager,
     private model: string,
   ) {}
 
@@ -85,15 +91,26 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     return this.session.id;
   }
 
-  submitMessage(content: string | ContentBlock[], options: AgentSessionSubmitOptions = {}) {
-    return this.session.submitMessage(content, options);
+  submitMessage(content: string | ContentBlock[], options: OpenHarnessAgentSubmitOptions = {}) {
+    const baseHost = options.host ?? this.session.createHost(options.signal);
+    const host = {
+      ...baseHost,
+      childAgentHost: this.children.createHost(baseHost, options.childProjection),
+    };
+    return this.session.submitMessage(content, { ...options, host });
   }
 
-  runMessage(
+  async runMessage(
     content: string | ContentBlock[],
-    options: AgentSessionSubmitOptions = {},
+    options: OpenHarnessAgentSubmitOptions = {},
   ): Promise<AgentSessionRunResult> {
-    return this.session.runMessage(content, options);
+    const events: import("@openharness/core").StreamEvent[] = [];
+    let output = "";
+    for await (const event of this.submitMessage(content, options)) {
+      events.push(event);
+      if (event.type === "text_delta") output += event.delta;
+    }
+    return { output, events, history: this.getHistory() };
   }
 
   getHistory(): Message[] {
@@ -147,6 +164,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   }
 
   async close(): Promise<void> {
+    await this.children.closeAll();
     await this.runtime.close();
   }
 }
@@ -199,16 +217,20 @@ export async function createOpenHarnessAgent(
       queryEngine: runtime.queryEngine,
       cwd,
       sessionId: options.sessionId,
-      childAgentHost: options.childAgentHost,
       emitEvent: options.emitEvent,
       emitStreamEvent: options.emitStreamEvent,
       requestPermission: options.requestPermission,
+    });
+    const children = new AgentChildManager({
+      settings,
+      createAgent: (childOptions) => createOpenHarnessAgent(childOptions),
     });
     return new DefaultOpenHarnessAgent(
       runtime,
       session,
       mcpManager,
       memory,
+      children,
       options.overrides?.model ?? settings.model,
     );
   } catch (error) {

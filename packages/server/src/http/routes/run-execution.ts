@@ -59,9 +59,9 @@ export function createRunExecutionRoutes(context: RunExecutionRoutesContext): Ho
         return errorResponse(status, error instanceof Error ? error.message : String(error));
       }
     })
-    .post("/:sessionId/interrupt", (c) => {
+    .post("/:sessionId/interrupt", async (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
-      return jsonResponse(context.application.interruptSession(sessionId));
+      return jsonResponse(await context.application.interruptSession(sessionId));
     });
 }
