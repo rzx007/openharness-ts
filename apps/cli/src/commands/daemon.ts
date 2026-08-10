@@ -34,53 +34,18 @@ async function runServe(options: ServeOptions): Promise<void> {
     clearDaemonRegistry,
     createBearerToken,
     readDaemonRegistry,
-    startOpenHarnessServer,
+    startOpenHarnessDaemon,
     writeDaemonRegistry,
   } = await import("@openharness/server");
-  const { loadSettings } = await import("@openharness/core");
-  const { createCliCommandCatalog } = await import("../command-catalog.js");
-  const {
-    createCliAgentPersonaService,
-    createCliAuthService,
-    createCliContextService,
-    createCliDreamService,
-    createCliGitService,
-    createCliHooksService,
-    createCliMemoryService,
-    createCliOutputStyleService,
-    createCliPluginService,
-    createCliProfileService,
-    createCliProjectInitService,
-    createCliProviderService,
-    createCliSettingsService,
-  } = await import("../daemon-services.js");
 
   assertSafeDaemonBinding(options);
   const token = options.token ?? createBearerToken();
-  const settings = await loadSettings({});
-  const settingsRef = { current: settings };
-  const { server, listen } = await startOpenHarnessServer({
+  const { server, listen } = await startOpenHarnessDaemon({
     host: options.host,
     port: options.port,
     token,
     allowedOrigins: options.allowOrigin,
     storePath: options.storePath,
-    settings,
-    getSettings: () => settingsRef.current,
-    commandCatalog: createCliCommandCatalog(() => settingsRef.current),
-    settingsService: createCliSettingsService(settingsRef),
-    providerService: createCliProviderService(settingsRef),
-    memoryService: createCliMemoryService(),
-    authService: createCliAuthService(),
-    contextService: createCliContextService(settingsRef),
-    dreamService: createCliDreamService(settingsRef),
-    profileService: createCliProfileService(),
-    outputStyleService: createCliOutputStyleService(),
-    projectInitService: createCliProjectInitService(),
-    pluginService: createCliPluginService(settingsRef),
-    agentPersonaService: createCliAgentPersonaService(),
-    hooksService: createCliHooksService(settingsRef),
-    gitService: createCliGitService(),
     version: VERSION,
   });
 

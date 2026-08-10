@@ -2,13 +2,27 @@ import { join } from "node:path";
 
 import { PROVIDERS, findByName } from "@openharness/api";
 import { CredentialStorage, describeCodexAuthState } from "@openharness/auth";
-import { getProjectMemoryDir, saveSettings, type Settings } from "@openharness/core";
+import {
+  getProjectMemoryDir,
+  saveSettings,
+  type Settings,
+} from "@openharness/core";
 import { MemoryManager, type MemoryEntry } from "@openharness/memory";
 import {
   buildPromptLayers,
   initializePersonalPromptFiles,
   inspectPersonalPromptFiles,
+  renderPromptLayers,
+  type PersonalPromptFileDiagnostic,
+  type PromptLayers,
 } from "@openharness/prompts";
+import { getProjectSessionDir, startDreamNow } from "@openharness/services";
+import { loadOutputStyles } from "@openharness/output-styles";
+import {
+  discoverOpenHarnessExtensions,
+  resolveProviderScopedBaseUrl,
+} from "@openharness/agent-runtime";
+
 import type {
   AgentPersonaService,
   AuthService,
@@ -24,20 +38,9 @@ import type {
   ProjectInitService,
   ProviderService,
   SettingsService,
-} from "@openharness/server";
-import { getProjectSessionDir, startDreamNow } from "@openharness/services";
-import { SkillRegistry } from "@openharness/skills";
-import { loadOutputStyles } from "@openharness/output-styles";
+} from "./settings-api.js";
 
-import { buildSettingsPatch, coerceConfigValue } from "./config-coerce.js";
-import { loadSkillsThreeSources } from "./commands/main.js";
-import {
-  formatPersonalPromptDiagnostics,
-  formatPromptLayersReport,
-} from "./commands/slash-helpers.js";
-import { resolveProviderScopedBaseUrl } from "@openharness/agent-runtime";
-
-export interface MutableSettingsRef {
+export interface DaemonSettingsRef {
   current: Settings;
 }
 
@@ -70,6 +73,106 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function coerceConfigValue(key: string, value: string): unknown {
+  if (["model", "apiFormat", "baseUrl", "systemPrompt", "theme", "outputStyle", "effort", "provider"].includes(key)) {
+    return value;
+  }
+  if (["maxTurns", "maxTokens", "passes"].includes(key)) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  if ([
+    "verbose",
+    "vimMode",
+    "voiceMode",
+    "fastMode",
+    "memory.enabled",
+    "memory.sessionMemoryEnabled",
+    "memory.autoExtractEnabled",
+    "memory.autoDreamEnabled",
+  ].includes(key)) {
+    if (value === "true" || value === "on") return true;
+    if (value === "false" || value === "off") return false;
+    return undefined;
+  }
+  if ([
+    "memory.maxFiles",
+    "memory.maxEntrypointLines",
+    "memory.autoExtractMaxRecords",
+    "memory.autoDreamMinHours",
+    "memory.autoDreamMinSessions",
+  ].includes(key)) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  if (key === "permission.mode") {
+    return ["default", "plan", "full_auto"].includes(value) ? value : undefined;
+  }
+  return value;
+}
+
+function buildSettingsPatch(
+  settings: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): Record<string, unknown> {
+  const [head, child] = key.split(".");
+  if (!head || !child) return { [key]: value };
+  const current = isRecord(settings[head]) ? settings[head] : {};
+  return { [head]: { ...current, [child]: value } };
+}
+
+function formatPersonalPromptDiagnostics(diagnostics: PersonalPromptFileDiagnostic[]): string {
+  const lines = ["Personal prompt files:"];
+  for (const item of diagnostics) {
+    const flags = [
+      item.truncated ? "truncated" : "",
+      item.issues.length > 0 ? `${item.issues.length} issue(s)` : "",
+    ].filter(Boolean);
+    lines.push(`- ${item.file}: ${item.status}${flags.length ? ` (${flags.join(", ")})` : ""}`);
+    lines.push(`  path: ${item.path}`);
+    if (item.message) lines.push(`  note: ${item.message}`);
+    for (const issue of item.issues) {
+      lines.push(`  ${issue.severity}: ${issue.code} - ${issue.message}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatPromptLayersReport(
+  layers: PromptLayers,
+  previewChars: number,
+  diagnostics: PersonalPromptFileDiagnostic[],
+): string {
+  const prompt = renderPromptLayers(layers);
+  const preview = prompt.length > previewChars
+    ? `${prompt.slice(0, previewChars)}\n... (truncated)`
+    : prompt;
+  const section = (name: keyof PromptLayers) => {
+    const values = layers[name].filter((value) => value.trim());
+    return `[${name}]\n${values.length > 0 ? values.join("\n\n") : "(empty)"}`;
+  };
+  const divider = "-".repeat(60);
+  return [
+    "Current system prompt layers:",
+    `- stable: ${layers.stable.length} section(s)`,
+    `- context: ${layers.context.length} section(s)`,
+    `- volatile: ${layers.volatile.length} section(s)`,
+    divider,
+    section("stable"),
+    divider,
+    section("context"),
+    divider,
+    section("volatile"),
+    divider,
+    "Flat preview:",
+    preview,
+    ...(diagnostics.length > 0 ? [divider, formatPersonalPromptDiagnostics(diagnostics)] : []),
+    divider,
+    `Total length: ${prompt.length} characters`,
+  ].join("\n");
+}
+
 const RUNTIME_RESTART_KEYS = new Set([
   "provider",
   "baseUrl",
@@ -83,7 +186,7 @@ const RUNTIME_RESTART_KEYS = new Set([
   "fastMode",
 ]);
 
-export function createCliSettingsService(ref: MutableSettingsRef): SettingsService {
+export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsService {
   return {
     get() {
       return sanitizeSettings(ref.current);
@@ -117,7 +220,7 @@ export function createCliSettingsService(ref: MutableSettingsRef): SettingsServi
   };
 }
 
-export function createCliProviderService(ref: MutableSettingsRef): ProviderService {
+export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderService {
   const storage = new CredentialStorage();
   return {
     async list() {
@@ -139,22 +242,6 @@ export function createCliProviderService(ref: MutableSettingsRef): ProviderServi
   };
 }
 
-export function describeProviderSwitch(providerName: string): {
-  patch: Record<string, unknown>;
-  label: string;
-} {
-  if (providerName === "auto") {
-    return { patch: { provider: "auto" }, label: "auto-detect" };
-  }
-  const spec = findByName(providerName);
-  const patch: Record<string, unknown> = { provider: providerName };
-  if (providerName === "codex") patch.model = "gpt-5.4";
-  return {
-    patch,
-    label: `${spec?.displayName ?? providerName}${patch.model ? ` (model: ${patch.model})` : ""}`,
-  };
-}
-
 function toMemoryRecord(entry: MemoryEntry): MemoryEntryRecord {
   return {
     id: entry.id,
@@ -172,7 +259,7 @@ async function openMemoryManager(cwd: string): Promise<{ manager: MemoryManager;
   return { manager, directory };
 }
 
-export function createCliMemoryService(): MemoryService {
+export function createDefaultMemoryService(): MemoryService {
   return {
     async list({ cwd }) {
       const { manager, directory } = await openMemoryManager(cwd);
@@ -209,7 +296,7 @@ function normalizeAuthProvider(target?: string): string | undefined {
   return normalized;
 }
 
-export function createCliAuthService(): AuthService {
+export function createDefaultAuthService(): AuthService {
   const storage = new CredentialStorage();
   return {
     async status() {
@@ -261,7 +348,7 @@ export function createCliAuthService(): AuthService {
   };
 }
 
-export function createCliContextService(ref: MutableSettingsRef): ContextService {
+export function createDefaultContextService(ref: DaemonSettingsRef): ContextService {
   return {
     async preview({ cwd }) {
       const settings = ref.current;
@@ -270,8 +357,7 @@ export function createCliContextService(ref: MutableSettingsRef): ContextService
         settings.memory?.enabled !== false
           ? manager.buildMemoryPrompt(settings.memory?.maxFiles ?? 10)
           : undefined;
-      const skillRegistry = new SkillRegistry();
-      await loadSkillsThreeSources(skillRegistry, cwd, settings);
+      const { skillRegistry } = await discoverOpenHarnessExtensions(cwd, settings);
       const layers = await buildPromptLayers({
         customPrompt: settings.systemPrompt,
         cwd,
@@ -288,7 +374,7 @@ export function createCliContextService(ref: MutableSettingsRef): ContextService
   };
 }
 
-export function createCliDreamService(ref: MutableSettingsRef): DreamService {
+export function createDefaultDreamService(ref: DaemonSettingsRef): DreamService {
   return {
     async start({ cwd, sessionId, preview }) {
       const { manager, directory } = await openMemoryManager(cwd);
@@ -324,7 +410,7 @@ export function createCliDreamService(ref: MutableSettingsRef): DreamService {
   };
 }
 
-export function createCliProfileService(): ProfileService {
+export function createDefaultProfileService(): ProfileService {
   return {
     async status() {
       const diagnostics = await inspectPersonalPromptFiles();
@@ -347,7 +433,7 @@ export function createCliProfileService(): ProfileService {
   };
 }
 
-export function createCliOutputStyleService(): OutputStyleService {
+export function createDefaultOutputStyleService(): OutputStyleService {
   return {
     list() {
       return loadOutputStyles().map((style) => ({
@@ -359,7 +445,7 @@ export function createCliOutputStyleService(): OutputStyleService {
   };
 }
 
-export function createCliProjectInitService(): ProjectInitService {
+export function createDefaultProjectInitService(): ProjectInitService {
   return {
     async init({ cwd }) {
       const { writeFile, mkdir, access } = await import("node:fs/promises");
@@ -406,7 +492,7 @@ export function createCliProjectInitService(): ProjectInitService {
   };
 }
 
-export function createCliPluginService(ref: MutableSettingsRef): PluginService {
+export function createDefaultPluginService(ref: DaemonSettingsRef): PluginService {
   return {
     async list({ cwd }) {
       const { loadPlugins } = await import("@openharness/plugins");
@@ -439,7 +525,7 @@ export function createCliPluginService(ref: MutableSettingsRef): PluginService {
   };
 }
 
-export function createCliAgentPersonaService(): AgentPersonaService {
+export function createDefaultAgentPersonaService(): AgentPersonaService {
   return {
     async list() {
       const { getAllAgentDefinitions } = await import("@openharness/coordinator");
@@ -456,7 +542,7 @@ export function createCliAgentPersonaService(): AgentPersonaService {
   };
 }
 
-export function createCliHooksService(ref: MutableSettingsRef): HooksService {
+export function createDefaultHooksService(ref: DaemonSettingsRef): HooksService {
   return {
     list({ cwd: _cwd }) {
       const settingsHooks = ref.current.hooks ?? [];
@@ -473,7 +559,7 @@ export function createCliHooksService(ref: MutableSettingsRef): HooksService {
   };
 }
 
-export function createCliGitService(): GitService {
+export function createDefaultGitService(): GitService {
   return {
     async diff({ cwd, full }) {
       const { execFile } = await import("node:child_process");

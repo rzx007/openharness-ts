@@ -23,6 +23,7 @@ export type {
   OpenHarnessAgentExtension,
   OpenHarnessExtensionContext,
 } from "./extensions.js";
+export { discoverOpenHarnessExtensions } from "./extensions.js";
 export type {
   AgentChildControls,
   AgentChildProjection,

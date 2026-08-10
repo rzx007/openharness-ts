@@ -595,15 +595,36 @@ importers:
       '@openharness/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
+      '@openharness/api':
+        specifier: workspace:*
+        version: link:../api
+      '@openharness/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@openharness/coordinator':
         specifier: workspace:*
         version: link:../coordinator
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@openharness/output-styles':
+        specifier: workspace:*
+        version: link:../output-styles
+      '@openharness/plugins':
+        specifier: workspace:*
+        version: link:../plugins
+      '@openharness/prompts':
+        specifier: workspace:*
+        version: link:../prompts
       '@openharness/services':
         specifier: workspace:*
         version: link:../services
+      '@openharness/skills':
+        specifier: workspace:*
+        version: link:../skills
       hono:
         specifier: 'catalog:'
         version: 4.12.12

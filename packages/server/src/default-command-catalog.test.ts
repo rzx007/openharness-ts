@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Settings } from "@openharness/core";
 
-import { createCliCommandCatalog } from "./command-catalog.js";
+import { createDefaultCommandCatalog } from "./default-command-catalog.js";
 
 function minimalSettings(): Settings {
   return {
@@ -17,11 +17,11 @@ function minimalSettings(): Settings {
   };
 }
 
-describe("createCliCommandCatalog", () => {
+describe("createDefaultCommandCatalog", () => {
   it("lists bundled user-invocable skills as template commands and expands them", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-catalog-"));
     try {
-      const catalog = createCliCommandCatalog(minimalSettings());
+      const catalog = createDefaultCommandCatalog(minimalSettings());
       const commands = await catalog.list({ cwd: dir });
       expect(commands.map((command) => command.name)).toEqual(
         expect.arrayContaining(["/commit", "/review", "/plan"]),
@@ -46,7 +46,7 @@ describe("createCliCommandCatalog", () => {
         join(skillDir, "ship.md"),
         "---\nname: ship\ndescription: Ship it\nuser-invocable: true\n---\nShip the change.\n",
       );
-      const catalog = createCliCommandCatalog(minimalSettings());
+      const catalog = createDefaultCommandCatalog(minimalSettings());
       const commands = await catalog.list({ cwd: dir });
       expect(commands.find((command) => command.name === "/ship")).toMatchObject({
         kind: "template",

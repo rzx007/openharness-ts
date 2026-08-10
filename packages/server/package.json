@@ -19,9 +19,16 @@
   "dependencies": {
     "@hono/node-server": "catalog:",
     "@openharness/agent-runtime": "workspace:*",
+    "@openharness/api": "workspace:*",
+    "@openharness/auth": "workspace:*",
     "@openharness/coordinator": "workspace:*",
     "@openharness/core": "workspace:*",
+    "@openharness/memory": "workspace:*",
+    "@openharness/output-styles": "workspace:*",
+    "@openharness/plugins": "workspace:*",
+    "@openharness/prompts": "workspace:*",
     "@openharness/services": "workspace:*",
+    "@openharness/skills": "workspace:*",
     "hono": "catalog:"
   },
   "devDependencies": {

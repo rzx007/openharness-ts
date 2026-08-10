@@ -6,6 +6,10 @@ export {
   type OpenHarnessServerOptions,
   type OpenHarnessRuntimeSnapshot,
 } from "./http.js";
+export {
+  startOpenHarnessDaemon,
+  type OpenHarnessDaemonOptions,
+} from "./default-daemon.js";
 export type { CreateDaemonAgent, CreateDaemonAgentContext } from "./http/agent-pool.js";
 export {
   BUILTIN_SESSION_COMMANDS,

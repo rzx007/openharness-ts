@@ -5,11 +5,10 @@ import type {
   ExpandCommandInput,
   ExpandCommandResult,
   ListCommandsInput,
-} from "@openharness/server";
-import { normalizeCommandName } from "@openharness/server";
-import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
-
-import { buildSkillPrompt, loadSkillsThreeSources, matchUserInvocableSkill } from "./commands/main.js";
+} from "./commands.js";
+import { normalizeCommandName } from "./commands.js";
+import { discoverOpenHarnessExtensions } from "@openharness/agent-runtime";
+import type { SkillDefinition } from "@openharness/skills";
 
 function skillToCatalogEntry(skill: SkillDefinition): CommandCatalogEntry {
   const name = normalizeCommandName(skill.commandName ?? skill.name);
@@ -22,17 +21,15 @@ function skillToCatalogEntry(skill: SkillDefinition): CommandCatalogEntry {
   };
 }
 
-async function loadSkillRegistry(cwd: string, settings: Settings): Promise<SkillRegistry> {
-  const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, cwd, settings);
-  return skillRegistry;
+async function loadSkillRegistry(cwd: string, settings: Settings) {
+  return (await discoverOpenHarnessExtensions(cwd, settings)).skillRegistry;
 }
 
 /**
  * cwd-scoped command catalog for the daemon.
  * Exposes user-invocable skills as template commands; does not host the old REPL registry.
  */
-export function createCliCommandCatalog(
+export function createDefaultCommandCatalog(
   settings: Settings | (() => Settings),
 ): CommandCatalogProvider {
   const getSettings = typeof settings === "function" ? settings : () => settings;
@@ -48,11 +45,15 @@ export function createCliCommandCatalog(
     async expand(input: ExpandCommandInput): Promise<ExpandCommandResult | null> {
       const skillRegistry = await loadSkillRegistry(input.cwd, getSettings());
       const line = `${normalizeCommandName(input.name)}${input.args ? ` ${input.args}` : ""}`;
-      const match = matchUserInvocableSkill(line, skillRegistry, () => false);
-      if (!match) return null;
+      const trimmed = line.trim();
+      const separator = trimmed.indexOf(" ");
+      const name = (separator < 0 ? trimmed : trimmed.slice(0, separator)).replace(/^\//, "");
+      const args = separator < 0 ? "" : trimmed.slice(separator + 1).trim();
+      const skill = skillRegistry.resolve(name);
+      if (!skill?.userInvocable) return null;
       return {
-        prompt: buildSkillPrompt(match.skill, match.args),
-        command: skillToCatalogEntry(match.skill),
+        prompt: args ? `${skill.content.trimEnd()}\n\n## Arguments\n${args}\n` : skill.content,
+        command: skillToCatalogEntry(skill),
       };
     },
   };
