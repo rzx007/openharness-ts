@@ -44,7 +44,7 @@ volatile
 | print 模式 | `apps/cli/src/commands/main.ts` | 每次运行前调用 `buildRuntimeSystemPrompt()`，传入 settings、memory、skills | ✅ canonical |
 | backend / TUI host 初始化 | `apps/cli/src/commands/main.ts` | `refreshSystemPrompt()` 调用 `buildRuntimeSystemPrompt()`，传入 settings、memory、skills | ✅ canonical |
 | backend permission mode 切换 | `apps/cli/src/commands/main.ts` | 更新 settings 后调用 `refreshSystemPrompt()` | ✅ canonical |
-| bootstrap 默认 runtime | `apps/cli/src/runtime.ts` | 未提供 explicit override 时调用 `buildRuntimeSystemPrompt()`，传入 settings、skills | ✅ canonical |
+| 默认 runtime composition | `packages/agent-runtime/src/default-runtime.ts` | 未提供 explicit override 时调用 `buildRuntimeSystemPrompt()`，传入 settings、skills | ✅ canonical |
 | `/context` 调试 | `apps/cli/src/commands/slash-commands.ts` | 调用 `buildPromptLayers()` 并按层渲染预览 | ✅ diagnostic |
 | `/profile` 管理 | `apps/cli/src/commands/slash-commands.ts` | 使用 `inspectPersonalPromptFiles()` / `initializePersonalPromptFiles()` | ✅ diagnostic + init |
 

@@ -63,8 +63,9 @@ flowchart TD
   agentTool --> host["runtimeHost.childAgentHost.spawnChildAgent()"]
   host --> daemon["DaemonChildAgentHost"]
   daemon --> child["create child session metadata"]
-  child --> runtime["child CliSessionRuntime"]
-  runtime --> qe["child QueryEngine"]
+  child --> runtime["child AgentSessionRuntime"]
+  runtime --> agent["child OpenHarnessAgent / AgentSession"]
+  agent --> qe["child QueryEngine"]
 ```
 
 当前主路径：

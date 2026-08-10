@@ -56,9 +56,10 @@ flowchart TB
 
   Executor --> Pool["SessionRuntimePool"]
   Pool --> Factory["SessionRuntimeFactory"]
-  Factory --> Runtime["SessionRuntime<br/>CliSessionRuntime"]
+  Factory --> Runtime["AgentSessionRuntime<br/>daemon adapter"]
   Projection --> Host["DaemonRuntimeHostPort<br/>run-scoped"]
-  Runtime -->|"runPrompt(input, host)"| QE["QueryEngine"]
+  Runtime -->|"runPrompt(input, host)"| Agent["OpenHarnessAgent<br/>AgentSession"]
+  Agent --> QE["QueryEngine"]
 
   QE -->|"stream events"| Host
   QE -->|"permission ask"| Host
@@ -230,7 +231,7 @@ packages/server/src/http/session-run-executor.ts
 packages/server/src/http/session-runtime-pool.ts
   SessionRuntimePool.acquire()
 
-packages/server/src/runtime.ts
+packages/agent-runtime/src/host-runtime.ts
   SessionRuntime.runPrompt(input, host)
 ```
 

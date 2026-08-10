@@ -22,7 +22,7 @@ SessionRunExecutor
   -> creates childAgentHost via DaemonChildAgentHostFactory
   -> creates DaemonRuntimeHostPort
   -> runtime.runPrompt(input, host)
-  -> CliSessionRuntime
+  -> AgentSessionRuntime
   -> QueryEngine.submitMessage(..., { runtimeHost: host })
   -> tools use ToolContext.runtimeHost
 ```
@@ -44,7 +44,7 @@ AgentRunHost is the narrow host-capability port
 | `AgentRunHost` | `packages/core/src/types/runtime.ts` | framework-level run-scoped host contract |
 | `QueryRuntimeHost` | `packages/core/src/types/runtime.ts` | core/tool 可见的 host contract |
 | `ToolRuntimeHost` | `packages/core/src/types/tools.ts` | tool context 中的 host contract |
-| `SessionRuntime` | `packages/server/src/runtime.ts` | runtime 必须接收 `runPrompt(input, host)` |
+| `SessionRuntime` | `packages/agent-runtime/src/host-runtime.ts` | runtime 必须接收 `runPrompt(input, host)` |
 
 当前形状：
 
@@ -196,7 +196,7 @@ flowchart TD
   Engine --> Executor["SessionRunExecutor<br/>one run"]
   Executor --> Pool["SessionRuntimePool"]
   Pool --> Factory["SessionRuntimeFactory"]
-  Factory --> Runtime["CliSessionRuntime"]
+  Factory --> Runtime["AgentSessionRuntime"]
   Executor --> Projection["DaemonRunProjection<br/>store/SSE/transcript/permission adapter"]
   Projection --> Host
   Runtime -->|"runPrompt(input, host)"| QueryEngine["QueryEngine"]
@@ -225,10 +225,10 @@ flowchart TD
 - `packages/tools/src/agent/index.ts` 的 Agent/SendMessage 改为 runtime-host port。
 - `packages/tools/src/agent/workflow-runner.ts` 的默认 worker spawn 改为 runtime-host port。
 - `packages/tools/src/agent/workflow.ts` 把 `context.runtimeHost` 传入 runner。
-- `apps/cli/src/runtime.ts` 删除 `registerChildSessionBackend()` bootstrap 注册路径。
-- `apps/cli/src/session-runtime.ts` 不再向 bootstrap 传 child host/task bridge。
+- `packages/agent-runtime/src/default-runtime.ts` 删除 `registerChildSessionBackend()` 注册路径。
+- `packages/agent-runtime/src/daemon.ts` 不再向 runtime composition 传 child host/task bridge。
 - `packages/server/src/http/session-runtime-pool.ts` 删除 child host/task bridge context。
-- `packages/server/src/runtime.ts` 的 runtime factory context 删除 child host/task bridge。
+- `packages/agent-runtime/src/host-runtime.ts` 的 runtime factory context 删除 child host/task bridge。
 - `packages/server/src/http/daemon-child-agent-host.ts` 支持 `sessionId`、`systemPrompt`、`worktree`、`notice` 和 worktree cleanup。
 - 相关测试已覆盖 Agent、Workflow、DaemonChildAgentHost、DaemonRuntimeHostPort、runtime pool、run executor/engine。
 
@@ -243,7 +243,7 @@ flowchart TD
 - Phase 12：`SessionApplicationService` / `SessionRunEngine` 不再反向引用 `ChildSessionHost`；application/run engine 自己声明用例类型，server-local child port 只服务 factory 与 daemon child adapter。
 - Phase 13：`packages/core/src/types/runtime.ts` 新增 daemon-neutral `AgentRunHost` / `AgentRunScope` / `AgentChildAgentHost` 类型；`SessionRuntime.runPrompt()` 接收 `AgentRunHost`，server 的 `DaemonRuntimeHostPort` 实现该 framework contract，并删除旧 `packages/server/src/runtime-host.ts` 类型出口。
 - Phase 14：`packages/core/src/agent-session.ts` 新增 standalone in-memory `AgentSession` facade；`createAgentSession()` 包装已构造的 `QueryEngine`，提供 `submitMessage()` / `runMessage()`，复用 `AgentRunHost`，默认 permission deny，child agent 显式 unsupported。
-- Phase 15：`apps/cli/src/session-runtime.ts` 的 `CliSessionRuntime.runPrompt()` 已复用 `AgentSession.submitMessage()`；daemon-hosted runtime 与 standalone runner 共享同一个 submit facade。`@openharness/server/runtime` 与 `@openharness/services/session-runtime/types` 提供轻量 contract 入口，避免 CLI runtime 通过大 barrel 触碰 HTTP/store 模块。
+- Phase 15：`packages/agent-runtime/src/daemon.ts` 的 `AgentSessionRuntime.runPrompt()` 已复用 `AgentSession.submitMessage()`；daemon-hosted runtime 与 standalone runner 共享同一个 submit facade。`@openharness/agent-runtime/host` 与 `@openharness/services/session-runtime/types` 提供轻量 contract 入口，避免 CLI runtime 通过大 barrel 触碰 HTTP/store 模块。
 - Phase 16：`AgentRunHost` / `QueryRuntimeHost` 不再继承 child-agent host；child lifecycle 通过可选 `childAgentHost?: AgentChildAgentHost` 暴露。`AgentSession` 默认不提供 child 能力，daemon 的 `DaemonRuntimeHostPort` 通过 `.childAgentHost` 提供完整 child session/task/run projection。
 - Phase 17：`packages/server/src/http/session-run-projection.ts` 新增 `DaemonRunProjection`，把 run-scoped host callbacks 的 durable projection 收进 adapter：runtime event -> store/SSE、stream event -> transcript projection、permission ask -> `StorePermissionBroker`、run terminal state -> store/log/SSE。`SessionRunExecutor` 只保留单次 run orchestration。
 - Phase 18：`packages/server/src/http/transcript-projection.ts` 新增 `SessionTranscriptProjection`，把 message/part 渲染规则收窄成 transcript projection sink；旧 `run-renderer.ts` / `SessionRunRenderer` 删除，不保留兼容 alias。

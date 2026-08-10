@@ -10,7 +10,7 @@
 Client 只负责 attach、提交输入、展示 snapshot/SSE。
 Daemon 持有 SessionStore、Application/Query/Maintenance/Control services、run lane、runtime pool、permission projection、child session projection。
 SessionRunExecutor 执行单次 run，并创建 run-scoped projection + AgentRunHost。
-SessionRuntime/CliSessionRuntime 包住 QueryEngine。
+AgentSessionRuntime 把 daemon contract 适配到 OpenHarnessAgent；OpenHarnessAgent 包住 AgentSession / QueryEngine。
 QueryEngine 和 tools 通过 runtimeHost 请求 permission、发 runtime event、创建 child agent。
 ```
 
@@ -41,8 +41,9 @@ flowchart TD
   engine --> executor["SessionRunExecutor<br/>one run"]
   executor --> pool["SessionRuntimePool"]
   pool --> factory["SessionRuntimeFactory"]
-  factory --> runtime["CliSessionRuntime"]
-  runtime --> qe["QueryEngine"]
+  factory --> runtime["AgentSessionRuntime"]
+  runtime --> agent["OpenHarnessAgent<br/>AgentSession"]
+  agent --> qe["QueryEngine"]
 
   executor --> childFactory["DaemonChildAgentHostFactory"]
   childFactory --> childAgentHost["DaemonChildAgentHost<br/>run-scoped"]
@@ -83,7 +84,8 @@ flowchart TD
 | `SessionRunExecutor` | 执行一个 admitted run，创建 run-scoped projection/host | 不决定队列顺序 |
 | `SessionRuntimePool` | runtime 创建去重、缓存、warm、close | 不知道 child host/task bridge |
 | `SessionRuntimeFactory` | session/history/parts -> `SessionRuntime` | 不再接收 child bridge |
-| `CliSessionRuntime` | daemon 下的 runtime adapter，调用 QueryEngine | 不持久化 run state |
+| `AgentSessionRuntime` | daemon contract adapter，调用 OpenHarnessAgent | 不构造 HTTP/store，不持久化 run state |
+| `OpenHarnessAgent` | 默认 runtime composition 的 programmatic facade | 不知道 daemon store |
 | `QueryEngine` | provider/tool/hook/MCP loop | 不知道 daemon store |
 | `DaemonRuntimeHostPort` | run-scoped host capability port | 不拥有 durable truth |
 | `DaemonChildAgentHost` | child invocation adapter：session/run/task/worktree | 不是 Agent tool 本身 |

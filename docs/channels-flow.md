@@ -58,7 +58,7 @@ ohs channels serve
        │    └─ feishu.enabled + appId/appSecret
        │         → new FeishuAdapter(...)
        │         → allowFrom["feishu"] = Object.values(feishu.allowFrom)
-       ├─ bootstrap({ autoApproveTools: READ_ONLY_TOOLS, ... })
+       ├─ createOpenHarnessRuntime({ autoApproveTools: READ_ONLY_TOOLS, ... })
        │    └─ QueryEngine / ToolRegistry / skills …
        ├─ new MessageBus()
        ├─ new ChannelManager(adapters, bus, { allowFrom, sendProgress, sendToolHints })
@@ -176,8 +176,8 @@ ChannelManager.dispatchOutbound
 `channels serve` 无人确认权限弹窗。启动时把 `READ_ONLY_TOOLS` 注入 `autoApproveTools`，让“看”可用、“写/Bash”仍走拒绝。
 
 ```text
-bootstrap({
-  cliOverrides: { autoApproveTools: [...READ_ONLY_TOOLS] }
+createOpenHarnessRuntime({
+  overrides: { autoApproveTools: [...READ_ONLY_TOOLS] }
 })
 ```
 

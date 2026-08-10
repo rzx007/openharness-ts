@@ -535,7 +535,7 @@ ohs "prompt" | ohs -p "prompt"
   -> 无 active/pending run 后退出
 ```
 
-Follow-up：`CliSessionRuntime` end-of-turn memory / personalization 应在 daemon 侧统一执行，print 客户端不重复写项目级 snapshot。
+Follow-up：`AgentSessionRuntime` end-of-turn memory / personalization 应在 daemon 侧统一执行，print 客户端不重复写项目级 snapshot。
 
 ## 14.2 第二阶段：task / subagent → child session（已落地）
 
@@ -544,7 +544,7 @@ Follow-up：`CliSessionRuntime` end-of-turn memory / personalization 应在 daem
 当前主流程的独立说明见 [`agent-child-session-flow.md`](./agent-child-session-flow.md)。
 
 ```text
-Agent tool (in daemon CliSessionRuntime)
+Agent tool (in daemon AgentSessionRuntime)
   -> store.createSession({ parentId })
   -> 同进程 admitPrompt / SessionRuntime on child
   -> 权限从 parent 派生；事件进同一 SessionStore

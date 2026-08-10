@@ -1,6 +1,6 @@
 # Agent Framework Layer Architecture
 
-> 当前状态：设计文档。目标不是把 OpenHarness 做成通用 agent framework，而是把现有 daemon / QueryEngine / tools / child-agent 的职责重新摆正，形成一个低心智负担、可嵌入、可由 daemon 托管的内部 Agent Framework 层。
+> 当前状态：Phase 0-19 已落地的设计与演进记录。当前 programmatic API 和 package 边界以 `agent-runtime-framework-architecture.md` 为准。
 >
 > 关联文档：[`agent-runtime-framework-architecture.md`](./agent-runtime-framework-architecture.md)、[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)、[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)。
 
@@ -27,7 +27,7 @@ TUI/Web/CLI are interaction surfaces
 daemon should host agents, not define what an agent is.
 ```
 
-当前 Phase 0-18 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出最小 standalone `AgentSession` facade，让 `CliSessionRuntime` 复用这层 facade，把 child-agent lifecycle 从 generic run host 中拆成可选能力，并把 daemon durable projection / transcript projection 分别收进明确 adapter：
+当前 Phase 0-19 已经把 daemon 和 QueryEngine 之间的回调、bridge、handle 收束到 framework-level `AgentRunHost`，补出 `AgentSession` 与 `OpenHarnessAgent` programmatic facade，让 `AgentSessionRuntime` 复用同一个 agent API，把 child-agent lifecycle 从 generic run host 中拆成可选能力，并把 daemon durable projection / transcript projection 分别收进明确 adapter：
 
 ```text
 Agent Framework Layer
@@ -69,19 +69,19 @@ OpenHarness 现在的 daemon 已经承担了 application hosting，但 framework
 
 ---
 
-## 2. 当前问题
+## 2. Phase 19 前的问题
 
-当前代码已经比最初清楚很多：
+Phase 18 时代码已经比最初清楚很多：
 
 ```text
 SessionRunExecutor
   -> creates DaemonRuntimeHostPort
   -> runtime.runPrompt(input, host)
-  -> CliSessionRuntime
+  -> AgentSessionRuntime
   -> QueryEngine.submitMessage(... runtimeHost)
 ```
 
-但从“用 OpenHarness 构建一个 agent”这个角度看，API 仍然偏底层：
+但从“用 OpenHarness 构建一个 agent”这个角度看，当时 API 仍然偏底层：
 
 ```text
 caller must understand:
@@ -480,17 +480,17 @@ stream()
 
 状态：已落地到 `packages/core/src/agent-session.ts`。`createAgentSession({ queryEngine, cwd, ...callbacks })` 包装已构造的 `QueryEngine`，提供 `submitMessage()` async iterable、`runMessage()` 聚合结果、`getHistory()`、`clear()` 和 `createHost()`。它不依赖 daemon store/HTTP/SSE；默认权限为 deny；child agent 显式 unsupported。
 
-### Phase C / Phase 15：让 `CliSessionRuntime` 复用 facade
+### Phase C / Phase 15：让 `AgentSessionRuntime` 复用 facade
 
-现在 `CliSessionRuntime` 直接装配 `QueryEngine.submitMessage()`。改成：
+Phase 15 前 `AgentSessionRuntime` 直接装配 `QueryEngine.submitMessage()`。改成：
 
 ```text
-CliSessionRuntime
+AgentSessionRuntime
   -> AgentSession facade
   -> QueryEngine internally
 ```
 
-状态：已落地到 `apps/cli/src/session-runtime.ts`。daemon 仍通过 `SessionRunExecutor` 提供 `DaemonRuntimeHostPort`，但 CLI runtime 不再自己手写 `QueryEngine.submitMessage()` 的循环，而是调用 `AgentSession.submitMessage(..., { host })`。
+状态：已落地到 `packages/agent-runtime/src/daemon.ts`。daemon 仍通过 `SessionRunExecutor` 提供 `DaemonRuntimeHostPort`，但 CLI runtime 不再自己手写 `QueryEngine.submitMessage()` 的循环，而是调用 `AgentSession.submitMessage(..., { host })`。
 
 ### Phase D：收口 child agent API
 
@@ -569,15 +569,23 @@ await session.runMessage(...);
 Phase 15 已落地：
 
 ```text
-Phase 15: make CliSessionRuntime reuse AgentSession
+Phase 15: make AgentSessionRuntime reuse AgentSession
 ```
 
 已完成动作：
 
-1. `createCliSessionRuntimeFactory()` 为每个 daemon session 创建 `AgentSession`。
-2. `CliSessionRuntime.runPrompt()` 复用 `AgentSession.submitMessage()`。
+1. `createOpenHarnessAgentRuntimeFactory()` 为每个 daemon session 创建 `OpenHarnessAgent`。
+2. `AgentSessionRuntime.runPrompt()` 复用 `OpenHarnessAgent.submitMessage()`，其内部进入 `AgentSession`。
 3. stream event 转发回到 `AgentSession` facade 内部，减少应用层重复循环。
-4. `@openharness/server/runtime` 与 `@openharness/services/session-runtime/types` 提供轻量类型 subpath，CLI runtime contract 不再通过大 barrel 触碰 HTTP/store 模块。
+4. `@openharness/agent-runtime/host` 与 `@openharness/services/session-runtime/types` 提供轻量类型 subpath，CLI runtime contract 不再通过大 barrel 触碰 HTTP/store 模块。
+
+Phase 19 已落地：
+
+1. 默认 provider/tools/permission/hooks/prompt/sandbox composition 从 CLI 迁入 `packages/agent-runtime`。
+2. 新增 `createOpenHarnessAgent()`，支持直接 `submitMessage()` / `runMessage()`。
+3. hosted runtime、transcript codec、compact/usage/remember/MCP 生命周期迁入 `agent-runtime/daemon`。
+4. `SessionRuntime` contract 迁入 `agent-runtime/host`，server 只依赖 host contract。
+5. CLI 删除旧 `runtime.ts` / `session-runtime.ts`，只通过 `prepareSession` 贡献 skills/plugins。
 
 Phase 16 已落地：
 

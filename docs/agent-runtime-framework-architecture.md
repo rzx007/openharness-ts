@@ -1,12 +1,12 @@
 # Agent Runtime Framework Architecture
 
-> 当前状态：框架化方向文档。本文描述下一阶段目标边界，不代表所有代码已经完成迁移。
+> 当前状态：Phase 19 已落地。本文描述当前代码事实，是 Agent Runtime 组装、programmatic API 与 daemon 托管边界的权威入口。
 >
-> 关联文档：[`agent-framework-layer-architecture.md`](./agent-framework-layer-architecture.md)、[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)。
+> 关联文档：[`daemon-application-architecture.md`](./daemon-application-architecture.md)、[`daemon-runtime-flow-map.md`](./daemon-runtime-flow-map.md)、[`runtime-host-port-design.md`](./runtime-host-port-design.md)。
 
-## 0. 核心判断
+## 0. 核心模型
 
-OpenHarness 应该形成三层：
+OpenHarness 当前分为三层：
 
 ```text
 agent-runtime framework
@@ -14,275 +14,283 @@ agent-runtime framework
   -> application surfaces (TUI / Web / Desktop / CLI / scripts)
 ```
 
-daemon 是一种托管形态，不应该是 agent 的出生地。TUI、Web、Desktop、CLI 也只是入口形态，不应该知道 `QueryEngine` 怎样被完整组装。
-
-目标不是做通用 agent framework，而是做一个 **OpenHarness 内部固执己见的 Agent Runtime**：
+这里的箭头表达能力叠加，不代表 agent-runtime 依赖 daemon。真实 package 依赖方向见第 4 节。
 
 ```text
-默认使用 QueryEngine
-默认使用 AgentSession
-默认装配工具、权限、hooks、MCP、memory、compact、usage
-默认可以被 daemon 托管
-默认也可以 programmatic 单进程运行
+QueryEngine       = 对话与工具循环
+AgentSession      = 单 session facade 与 run host 注入点
+OpenHarnessAgent  = 带默认组装的 programmatic Agent Runtime
+AgentSessionRuntime = daemon SessionRuntime adapter
+daemon            = HTTP、多客户端、持久化与并发托管形态
 ```
 
-## 1. 当前代码事实
+daemon 不再是 agent 的出生地。它获取一个 `SessionRuntimeFactory`，按 session 托管已经定义良好的 Agent Runtime。
 
-现在已经成立的是：
+## 1. 两种运行形态
 
-```text
-QueryEngine.submitMessage()
-  -> 可以直接运行一个对话回合
-  -> 支持 stream、tool call、permission、follow-up、abort signal
+### 1.1 单进程 programmatic
 
-AgentSession.submitMessage()
-  -> 包装 QueryEngine.submitMessage()
-  -> 注入 AgentRunHost
-  -> 统一 stream event callback
-
-SessionRuntimeFactory
-  -> 让 daemon 只依赖 runtime contract
-```
-
-但默认 runtime composition 仍在 CLI：
-
-```text
-apps/cli/src/runtime.ts
-  -> bootstrap()
-  -> new QueryEngine(...)
-  -> new RuntimeBuilder().setXxx().build()
-
-apps/cli/src/session-runtime.ts
-  -> createCliSessionRuntimeFactory()
-  -> load skills/plugins/MCP
-  -> createAgentSession()
-  -> return CliSessionRuntime
-```
-
-这意味着 `/apps/cli` 还不是纯入口层，它仍然承担了默认 Agent Runtime 的 composition root。
-
-## 2. 目标形态
-
-纯 programmatic 运行：
+入口：`packages/agent-runtime/src/agent.ts`
 
 ```ts
+import { createOpenHarnessAgent } from "@openharness/agent-runtime";
+
 const agent = await createOpenHarnessAgent({
   cwd,
   settings,
+  requestPermission: async (request) => {
+    return ui.askPermission(request);
+  },
 });
 
 const result = await agent.runMessage("hi");
+await agent.close();
 ```
 
-daemon 托管运行：
+流式调用：
+
+```ts
+for await (const event of agent.submitMessage("hi")) {
+  render(event);
+}
+```
+
+调用链：
+
+```text
+createOpenHarnessAgent()
+  -> createOpenHarnessRuntime()
+     -> API client
+     -> default tools
+     -> PermissionChecker
+     -> HookExecutor
+     -> system prompt
+     -> QueryEngine
+     -> sandbox runtime
+  -> configureRuntime extension
+  -> McpClientManager
+  -> AgentSession
+
+agent.submitMessage()
+  -> AgentSession.submitMessage()
+  -> QueryEngine.submitMessage()
+  -> provider stream / tools / permission / follow-up
+```
+
+`OpenHarnessAgent` 直接提供：
+
+| API | 作用 |
+|---|---|
+| `submitMessage()` | 流式运行一轮或多轮 tool loop |
+| `runMessage()` | 收集文本、事件和最终 history |
+| `loadHistory()` / `getHistory()` | 恢复与读取会话历史 |
+| `compact()` | 压缩 QueryEngine history |
+| `getUsage()` | 获取当前 runtime 累计 token usage |
+| `getMcpConnections()` | 检查 session 级 MCP 连接 |
+| `close()` | 释放 MCP、sandbox 等 runtime 资源 |
+
+### 1.2 daemon 托管
+
+入口：`packages/agent-runtime/src/daemon.ts`
 
 ```ts
 const runtimeFactory = createOpenHarnessAgentRuntimeFactory({
   settings,
   getSettings,
+  prepareSession: async ({ session, settings }) => ({
+    skillRegistry: await loadApplicationSkills(session.cwd, settings),
+    configureRuntime: registerApplicationExtensions,
+  }),
 });
 
-const server = new OpenHarnessHttpServer({
-  runtimeFactory,
-});
+const server = new OpenHarnessHttpServer({ runtimeFactory });
 ```
 
-TUI/Web/Desktop 接入 daemon：
+实际 CLI 组装入口：`apps/cli/src/commands/daemon.ts`。
 
 ```text
-surface
-  -> @openharness/client
-  -> daemon HTTP/SSE
-  -> SessionRuntimeFactory
-  -> OpenHarness Agent Runtime
-```
+CLI daemon command
+  -> createOpenHarnessAgentRuntimeFactory()
+  -> prepareSession() loads CLI skills/plugins
+  -> OpenHarnessHttpServer({ runtimeFactory })
 
-旧世界式 CLI 也可以不启 daemon：
-
-```text
-CLI command
+daemon receives prompt
+  -> SessionRunEngine
+  -> SessionRuntimePool.acquire()
+  -> factory.createRuntime()
   -> createOpenHarnessAgent()
-  -> agent.runMessage()
-  -> render stream directly to stdout
+  -> AgentSessionRuntime.runPrompt(input, host)
+  -> OpenHarnessAgent.submitMessage(..., { host })
 ```
 
-## 3. Package 边界
+`prepareSession` 是应用扩展边界。CLI 可以贡献 skills、plugin tools、plugin hooks 和 plugin MCP 配置，但不再构造 `QueryEngine`。
 
-建议新增中层 package：
+## 2. Package 边界
+
+### `@openharness/agent-runtime`
+
+文件：
 
 ```text
-packages/agent-runtime
+packages/agent-runtime/src/default-runtime.ts
+packages/agent-runtime/src/agent.ts
+packages/agent-runtime/src/host-runtime.ts
+packages/agent-runtime/src/daemon.ts
 ```
 
 职责：
 
-| 职责 | 说明 |
+| 模块 | 归属 |
 |---|---|
-| default agent construction | 创建 API client、tool registry、permission checker、hook executor、QueryEngine |
-| AgentSessionRuntime | 把 `AgentSession` 适配成 daemon 的 `SessionRuntime` |
-| SessionRuntimeFactory | 提供 daemon 可注入的默认 runtime factory |
-| transcript codec | `SessionMessageRecord/Part` 和 core `Message` 互转 |
-| runtime capabilities | compact、usage、remember、inspect、close |
-| extension wiring | skills、plugins、MCP、hooks、sandbox 的默认接入协议 |
+| `default-runtime.ts` | provider、tools、permission、hooks、prompt、QueryEngine、sandbox 的默认组装 |
+| `agent.ts` | `OpenHarnessAgent` programmatic facade、MCP 与资源生命周期 |
+| `host-runtime.ts` | daemon 可消费的 `SessionRuntime` / `SessionRuntimeFactory` contract |
+| `daemon.ts` | transcript codec、`AgentSessionRuntime`、默认 hosted factory、compact/usage/remember/inspect |
 
-不应该放进 `agent-runtime` 的内容：
+明确不属于该 package：
 
-| 不放入 | 原因 |
+| 能力 | 所有者 |
 |---|---|
-| HTTP routes / Hono / SSE | daemon hosting concern |
-| `SessionStore` durable projection | daemon application concern |
-| run lane / runtime pool | daemon hosting concern |
-| CLI flags / TUI process spawn | surface concern |
-| daemon registry / attach | surface + daemon lifecycle concern |
+| HTTP routes / Hono / SSE | `@openharness/server` |
+| `SessionStore` durable state | `@openharness/services` + server application services |
+| run lane / runtime pool | `@openharness/server` |
+| durable permission/transcript projection | `@openharness/server` |
+| CLI flags、daemon registry、进程启动 | `apps/cli` |
+| TUI/Web/Desktop rendering | 对应 surface |
 
-## 4. 依赖方向
+### `@openharness/server`
 
-理想依赖方向：
+server 只通过 `@openharness/agent-runtime/host` 认识 runtime contract。它不知道 provider、MCP、skills 或 `QueryEngine` 的创建方式。
+
+### `apps/cli`
+
+CLI 当前只承担：
+
+- settings 与命令参数入口。
+- daemon 生命周期和 registry。
+- skills/plugins 的应用扩展发现。
+- 把 runtime factory、application services 注入 server。
+- channels 等独立应用形态的启动。
+
+旧文件已退出：
+
+```text
+apps/cli/src/runtime.ts
+apps/cli/src/session-runtime.ts
+```
+
+## 3. Host 与状态归属
+
+一轮 daemon run 的双向交互仍通过 `AgentRunHost`，但 host 的创建和 durable projection 属于 daemon：
+
+```text
+SessionRunExecutor
+  -> DaemonRunProjection
+  -> AgentRunHost
+     -> requestPermission()
+     -> emitEvent()
+     -> emitStreamEvent()
+     -> optional childAgentHost
+  -> AgentSessionRuntime.runPrompt(..., host)
+  -> OpenHarnessAgent.submitMessage(..., { host })
+```
+
+状态归属：
+
+| 状态 | 所有者 |
+|---|---|
+| core message history | warm `OpenHarnessAgent` / `QueryEngine` |
+| session/run/input/message/part | daemon `SessionStore` |
+| permission pending/decision | daemon projection + store |
+| runtime instance | daemon `SessionRuntimePool` |
+| MCP connections | one `OpenHarnessAgent` instance |
+| child session/task durable state | daemon child host + store |
+
+framework 暴露事件与决策接口，daemon 负责把它们变成可 attach/replay 的持久状态；句柄不会写入 store。
+
+## 4. 真实依赖方向
 
 ```mermaid
 flowchart TB
-  Core["@openharness/core<br/>QueryEngine / AgentSession / contracts"]
-  AgentRuntime["@openharness/agent-runtime<br/>opinionated runtime composition"]
-  Server["@openharness/server<br/>daemon hosting"]
-  Client["@openharness/client<br/>daemon SDK"]
-  Surfaces["apps/cli / Web / Desktop / TUI"]
+  Core["@openharness/core<br/>QueryEngine / AgentSession / AgentRunHost"]
+  Runtime["@openharness/agent-runtime<br/>default composition / OpenHarnessAgent"]
+  Host["@openharness/agent-runtime/host<br/>SessionRuntime contract"]
+  DaemonAdapter["@openharness/agent-runtime/daemon<br/>hosted adapter"]
+  Server["@openharness/server<br/>HTTP / store orchestration / pool / projections"]
+  Client["@openharness/client<br/>daemon client SDK"]
+  CLI["apps/cli<br/>application composition"]
+  Surfaces["TUI / Web / Desktop"]
 
-  AgentRuntime --> Core
-  Server --> Core
-  Server -. "runtime contract only" .-> AgentRuntime
-  Client --> ServerTypes["@openharness/services types"]
-  Surfaces --> AgentRuntime
-  Surfaces --> Server
+  Runtime --> Core
+  Host --> Core
+  DaemonAdapter --> Runtime
+  DaemonAdapter --> Host
+  Server --> Host
+  CLI --> Runtime
+  CLI --> DaemonAdapter
+  CLI --> Server
+  CLI --> Client
   Surfaces --> Client
 ```
 
-`server` 最好继续只依赖 `SessionRuntimeFactory` contract。默认 OpenHarness agent runtime 由应用入口注入：
+server 依赖 contract，不依赖 `OpenHarnessAgent` 的具体 factory；因此测试或其他应用仍可注入别的 `SessionRuntimeFactory`。
 
-```text
-apps/cli
-  -> createOpenHarnessAgentRuntimeFactory()
-  -> OpenHarnessHttpServer({ runtimeFactory })
-```
+## 5. Permission 与 child agent 定位
 
-这样 daemon 仍然可以托管别的 runtime，不被默认 agent 实现绑死。
-
-## 5. 三层职责
-
-### Agent Runtime Framework
-
-负责“agent 怎么被组装和运行”：
-
-- `QueryEngine` 创建和默认参数。
-- `AgentSession` 生命周期。
-- tools / MCP / hooks / permission checker 装配。
-- history/parts 转 core messages。
-- direct `submitMessage()` / `runMessage()`。
-- daemon `SessionRuntime` adapter。
-- compact / usage / remember 等 agent 能力。
-
-### Daemon Hosting Layer
-
-负责“多客户端如何托管 agent”：
-
-- HTTP routes。
-- `SessionStore`。
-- prompt admission。
-- run lane。
-- runtime pool。
-- permission durable projection。
-- transcript durable projection。
-- task/child session projection。
-- SSE attach/replay。
-
-### Application Surfaces
-
-负责“用户如何进入系统”：
-
-- CLI flags。
-- TUI/Web/Desktop UI。
-- daemon 启动/attach。
-- print mode stdout rendering。
-- app-specific settings loading。
-
-## 6. 为什么不直接用 QueryEngine
-
-`QueryEngine.submitMessage()` 是真实的一轮对话执行入口，但它偏底层：
+programmatic 模式下，permission 可以在创建 agent 时提供回调：
 
 ```ts
-for await (const event of queryEngine.submitMessage("hi", { runtimeHost })) {
-  // consume events
-}
+createOpenHarnessAgent({
+  settings,
+  requestPermission: async (request) => approveOrDeny(request),
+  childAgentHost,
+});
 ```
 
-调用者必须自己保证：
+也可以在单次 `submitMessage()` 时传入完整 `host`。没有 permission handler 时默认拒绝，不会隐式放行。
 
-- `QueryEngine` 已经有 API client。
-- 工具、权限、hooks、MCP 已注册。
-- session id / cwd / model / system prompt 正确。
-- history 已加载。
-- runtimeHost 能处理 permission/event/child-agent。
-- 输出事件有人持久化或渲染。
+child agent 是 run host 的可选 capability。programmatic agent 可以在创建时注入 session 级 `childAgentHost`，也可以在单次调用时覆盖完整 host；不提供时仍可正常运行。daemon 在需要 child session/task projection 时按 run 注入。
 
-所以 framework API 应该落在 `AgentRuntime` / `AgentSession`，而不是让应用直接操作 `QueryEngine`。
+## 6. Phase 19 完成状态
 
-## 7. Phase 19 迁移建议
+| Phase | 状态 | 代码结果 |
+|---|---|---|
+| 19A package boundary | 完成 | 新增 `packages/agent-runtime` |
+| 19B hosted runtime | 完成 | `AgentSessionRuntime`、transcript codec 迁出 CLI |
+| 19C default factory | 完成 | `createOpenHarnessAgentRuntimeFactory()` 与 `prepareSession` 扩展点 |
+| 19D standalone API | 完成 | `createOpenHarnessAgent()`、`submitMessage()`、`runMessage()` |
+| 19E docs/examples | 完成 | 本文与 daemon/TUI 运行文档指向真实路径 |
 
-第一步不要改 daemon 行为，只移动 composition 边界。
+## 7. 查代码路径
+
+查“agent 怎么创建”：
 
 ```text
-Phase 19A: create package boundary
-  -> packages/agent-runtime
-  -> export transcript codec
-  -> export AgentSessionRuntime shell
-
-Phase 19B: move CLI session runtime internals
-  -> move toCoreMessages/coreMessagesToTranscript
-  -> move CliSessionRuntime class and rename to AgentSessionRuntime
-  -> keep CLI wrapper as thin compatibility-free caller
-
-Phase 19C: move default runtime factory
-  -> createOpenHarnessAgentRuntimeFactory()
-  -> CLI passes settings/getSettings/credentialStorage/plugin loader adapters
-
-Phase 19D: expose standalone agent API
-  -> createOpenHarnessAgent()
-  -> agent.submitMessage()
-  -> agent.runMessage()
-
-Phase 19E: update docs and examples
-  -> pure CLI direct mode
-  -> daemon hosted mode
+packages/agent-runtime/src/default-runtime.ts
+packages/agent-runtime/src/agent.ts
 ```
 
-每一步都应该保持一个原则：
+查“一轮对话怎么跑”：
 
 ```text
-daemon behavior unchanged, ownership changed.
-```
-
-## 8. 完成后的读代码路径
-
-查 agent 如何运行一轮：
-
-```text
-packages/agent-runtime
 packages/core/src/agent-session.ts
 packages/core/src/engine/query-engine.ts
 ```
 
-查 daemon 如何托管：
+查“daemon 怎么把 prompt 交给 agent”：
 
 ```text
+apps/cli/src/commands/daemon.ts
+packages/agent-runtime/src/daemon.ts
+packages/server/src/http/session-run-engine.ts
 packages/server/src/http/session-run-executor.ts
-packages/server/src/http/session-run-projection.ts
-packages/server/src/http/transcript-projection.ts
 ```
 
-查 TUI/Web/Desktop 如何接入：
+查“事件、permission、transcript 如何持久化”：
 
 ```text
-@openharness/client
-apps/*
+packages/server/src/http/session-run-projection.ts
+packages/server/src/http/transcript-projection.ts
 ```
 
 最终心智模型：
@@ -290,7 +298,8 @@ apps/*
 ```text
 QueryEngine is the loop.
 AgentSession is the session facade.
-AgentRuntime is the opinionated OpenHarness framework.
+OpenHarnessAgent is the opinionated framework API.
+AgentSessionRuntime is the daemon adapter.
 Daemon is a hosting mode.
-TUI/Web/Desktop/CLI are surfaces.
+TUI/Web/Desktop/CLI are application surfaces.
 ```

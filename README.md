@@ -325,8 +325,9 @@ OpenHarness-ts/
 │                 └──────────────┬──────────────┘                    │
 │                                │ SessionRuntime                    │
 │                 ┌──────────────▼──────────────┐                    │
-│                 │ runtime bootstrap            │                    │
-│                 │ `bootstrap()` + QueryEngine  │                    │
+│                 │ `AgentSessionRuntime`         │                    │
+│                 │ `OpenHarnessAgent`            │                    │
+│                 │ `AgentSession` → QueryEngine  │                    │
 │                 └──────────────┬──────────────┘                    │
 └────────────────────────────────┼────────────────────────────────────┘
                          │
@@ -529,8 +530,7 @@ OpenHarness-ts/
    (daemon 客户端,默认)   (daemon 客户端,单次)     (compatibility fallback)
            │               │                          │
            └───────────────┤                          ▼
-                           │                 进程内 bootstrap() +
-                           │                 QueryEngine 后退出
+                           │                 历史 task worker
                            ▼
 ┌──────────────────────────────────────────────────────────┐
 │  ensure / attach daemon                                  │
@@ -557,8 +557,9 @@ OpenHarness-ts/
                            │ SessionRuntime factory
                            ▼
 ┌──────────────────────────────────────────────────────────┐
-│  Runtime Bootstrap (bootstrap())                         │
-│  在 daemon 侧按 session 组装 QueryEngine / tools / hooks │
+│  @openharness/agent-runtime                              │
+│  AgentSessionRuntime → OpenHarnessAgent → AgentSession  │
+│  → QueryEngine / tools / hooks / MCP                    │
 └──────────────────────────────────────────────────────────┘
 ```
 

@@ -6,8 +6,8 @@
 QueryEngine
   -> PermissionChecker.checkTool()
   -> decision === "ask"
-  -> CliSessionRuntime permissionPrompt
-  -> AgentRunHost.requestPermission()
+  -> QueryEngine calls AgentRunHost.requestPermission()
+     (host 由 AgentSessionRuntime -> OpenHarnessAgent.submitMessage() 注入)
   -> PermissionBroker
   -> SessionStore.createPermissionRequest(status:"pending")
   -> append event: permission.asked

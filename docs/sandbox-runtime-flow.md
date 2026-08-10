@@ -45,7 +45,7 @@ Sandbox 有两条后端：
 | Session | `packages/sandbox/src/session.ts` | 进程内唯一 active sandbox session |
 | Shell helper | `packages/sandbox/src/shell.ts` | `createShellProcess`；宿主 `resolveShellArgv`（探测缓存）；容器 `resolveContainerShellArgv` |
 | 路径校验 | `packages/sandbox/src/path-validator.ts` | 文件工具路径是否在 sandbox root / allow 列表 |
-| CLI 挂载 | `apps/cli/src/runtime.ts` | `attachSandboxRuntime`：bootstrap 后启动，docker 时注册 cleanup |
+| Runtime 挂载 | `packages/agent-runtime/src/default-runtime.ts` | `attachSandboxRuntime`：默认 runtime 组装后启动，docker 时注册 cleanup |
 | Bash | `packages/tools/src/shell/bash.ts` | timeout / 输出截断；spawn 走 `createShellProcess` |
 | 文件守卫 | `packages/tools/src/file/sandbox-guard.ts` | Read/Write/Edit/Glob/Grep 调 `validateSandboxPath` |
 | Settings | `packages/core/src/config/settings.ts` | env 覆盖 `OPENHARNESS_SANDBOX_*` |
@@ -58,7 +58,7 @@ apps/cli/src/commands/main.ts
     └─ loadSettings(overrides, { includeProject: true })
          └─ mergeSandboxConfig / buildSandboxEnvOverrides
 
-    └─ bootstrap(settings)                         # apps/cli/src/runtime.ts
+    └─ createOpenHarnessRuntime(settings)          # packages/agent-runtime/src/default-runtime.ts
          └─ 组装 QueryEngine / ToolRegistry / …
          └─ RuntimeBuilder.build(settings)
          └─ attachSandboxRuntime(bundle, cwd)

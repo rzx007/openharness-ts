@@ -13,7 +13,8 @@ routes
   -> SessionRunExecutor for one admitted run
   -> SessionRuntimePool
   -> SessionRuntimeFactory
-  -> CliSessionRuntime
+  -> AgentSessionRuntime
+  -> OpenHarnessAgent / AgentSession
   -> QueryEngine
   -> ToolContext.runtimeHost for permission/event/child-agent capabilities
 ```
@@ -87,8 +88,8 @@ sequenceDiagram
 | lane 串行 | `packages/server/src/run-coordinator.ts` |
 | 单次 run 执行 | `packages/server/src/http/session-run-executor.ts` |
 | runtime 缓存 | `packages/server/src/http/session-runtime-pool.ts` |
-| runtime contract | `packages/server/src/runtime.ts` |
-| CLI runtime adapter | `apps/cli/src/session-runtime.ts`, `apps/cli/src/runtime.ts` |
+| runtime contract | `packages/agent-runtime/src/host-runtime.ts` |
+| Agent runtime adapter | `packages/agent-runtime/src/daemon.ts`, `packages/agent-runtime/src/default-runtime.ts` |
 | QueryEngine | `packages/core/src/engine/query-engine.ts` |
 
 ## 3. AgentRunHost 注入点
@@ -172,7 +173,7 @@ Agent tool
 重要结论：
 
 - Agent tool 不再使用 `ChildSessionBackend`。
-- CLI bootstrap 不再注册 `registerChildSessionBackend()`。
+- 默认 runtime composition 不再注册 `registerChildSessionBackend()`。
 - Workflow 默认 worker spawn 也走 `runtimeHost.childAgentHost.spawnChildAgent()`。
 - `ChildSessionHost` 和 `SessionTaskBridge` 仍存在，但由 `DaemonChildAgentHostFactory` 组装后收进 `DaemonChildAgentHost`，不再穿过 runtimeFactory、QueryEngine 或 `SessionRunExecutor`。
 
