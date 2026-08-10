@@ -1,8 +1,12 @@
-import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 
 import { VERSION } from "./version.js";
 import { probeDaemonRegistry, terminateDaemonProcess } from "./daemon-lifecycle.js";
+import {
+  daemonStartupError,
+  spawnDaemonProcess,
+  type SpawnedDaemonProcess,
+} from "./daemon-process.js";
 
 export interface LocalDaemonHandle {
   url: string;
@@ -39,15 +43,18 @@ export async function ensureLocalDaemon(
     readDaemonRegistry,
   } = await import("@openharness/server");
 
-  const waitForDaemonRegistry = async (): Promise<NonNullable<ReturnType<typeof readDaemonRegistry>>> => {
+  const waitForDaemonRegistry = async (
+    spawned: SpawnedDaemonProcess,
+  ): Promise<NonNullable<ReturnType<typeof readDaemonRegistry>>> => {
     for (let i = 0; i < 40; i += 1) {
       const registry = readDaemonRegistry();
       if (registry && await probeDaemonRegistry(registry, daemonProbeOptions) === "ready") {
         return registry;
       }
+      if (spawned.failure()) throw daemonStartupError(spawned);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    throw new Error("The OpenHarness daemon was not ready after starting ohs serve.");
+    throw daemonStartupError(spawned);
   };
 
   let daemon = readDaemonRegistry();
@@ -56,13 +63,8 @@ export async function ensureLocalDaemon(
     if (daemon && daemonStatus === "stale") terminateDaemonProcess(daemon.pid);
     clearDaemonRegistry();
     const serveArgs = [cliPath, "serve", "--register", "--host", "127.0.0.1", "--port", "0"];
-    const daemonChild = spawn(process.execPath, serveArgs, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    daemonChild.unref();
-    daemon = await waitForDaemonRegistry();
+    const spawned = spawnDaemonProcess(serveArgs[0]!, serveArgs.slice(1));
+    daemon = await waitForDaemonRegistry(spawned);
   }
 
   return {

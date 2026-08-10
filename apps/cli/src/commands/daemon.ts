@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
 import { Command } from "commander";
 
@@ -7,6 +6,7 @@ import {
   probeDaemonRegistry,
   terminateDaemonProcess,
 } from "../daemon-lifecycle.js";
+import { daemonStartupError, spawnDaemonProcess } from "../daemon-process.js";
 import { VERSION } from "../version.js";
 
 interface ServeOptions {
@@ -123,22 +123,24 @@ export function createDaemonCommand(): Command {
       if (existing && existingStatus === "stale") terminateDaemonProcess(existing.pid);
       clearDaemonRegistry();
 
-      const args = [...process.execArgv, entry, "serve", "--register", "--host", options.host ?? "127.0.0.1"];
+      const args = ["serve", "--register", "--host", options.host ?? "127.0.0.1"];
       if (options.port !== undefined) args.push("--port", String(options.port));
       if (options.token) args.push("--token", options.token);
       for (const origin of options.allowOrigin ?? []) args.push("--allow-origin", origin);
       if (options.storePath) args.push("--store-path", options.storePath);
 
-      const child = spawn(process.execPath, args, { detached: true, stdio: "ignore", windowsHide: true });
-      child.unref();
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      const registry = readDaemonRegistry();
-      if (registry && await probeDaemonRegistry(registry, probeOptions) === "ready") {
-        console.log(`Daemon started at ${registry.url} (PID: ${registry.pid})`);
-      } else {
-        console.log(`Daemon spawned (PID: ${child.pid ?? "unknown"}); registry not ready yet.`);
+      const spawned = spawnDaemonProcess(entry, args);
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const registry = readDaemonRegistry();
+        if (registry && await probeDaemonRegistry(registry, probeOptions) === "ready") {
+          console.log(`Daemon started at ${registry.url} (PID: ${registry.pid})`);
+          return;
+        }
+        if (spawned.failure()) throw daemonStartupError(spawned);
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
+      console.log(`Daemon spawned (PID: ${spawned.child.pid ?? "unknown"}); registry not ready yet.`);
+      console.log(`Log: ${spawned.logPath}`);
     });
 
   cmd

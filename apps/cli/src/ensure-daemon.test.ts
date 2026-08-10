@@ -1,16 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonRegistry } from "@openharness/server";
 
-const spawnMock = vi.hoisted(() => vi.fn());
 const statMock = vi.hoisted(() => vi.fn());
 const readDaemonRegistryMock = vi.hoisted(() => vi.fn());
 const clearDaemonRegistryMock = vi.hoisted(() => vi.fn());
 const probeDaemonRegistryMock = vi.hoisted(() => vi.fn());
 const terminateDaemonProcessMock = vi.hoisted(() => vi.fn());
-
-vi.mock("node:child_process", () => ({
-  spawn: spawnMock,
-}));
+const spawnDaemonProcessMock = vi.hoisted(() => vi.fn());
+const daemonStartupErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:fs/promises", () => ({
   stat: statMock,
@@ -24,6 +21,11 @@ vi.mock("@openharness/server", () => ({
 vi.mock("./daemon-lifecycle.js", () => ({
   probeDaemonRegistry: probeDaemonRegistryMock,
   terminateDaemonProcess: terminateDaemonProcessMock,
+}));
+
+vi.mock("./daemon-process.js", () => ({
+  spawnDaemonProcess: spawnDaemonProcessMock,
+  daemonStartupError: daemonStartupErrorMock,
 }));
 
 import { ensureLocalDaemon } from "./ensure-daemon.js";
@@ -40,11 +42,20 @@ function registry(overrides: Partial<DaemonRegistry> = {}): DaemonRegistry {
   };
 }
 
+function spawned(failure?: string) {
+  return {
+    child: { pid: 456 },
+    logPath: "D:/logs/daemon.log",
+    failure: vi.fn(() => failure),
+  };
+}
+
 describe("ensureLocalDaemon", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     statMock.mockResolvedValue({ mtimeMs: 100 });
-    spawnMock.mockReturnValue({ unref: vi.fn() });
+    spawnDaemonProcessMock.mockReturnValue(spawned());
+    daemonStartupErrorMock.mockReturnValue(new Error("daemon startup failed"));
     terminateDaemonProcessMock.mockReturnValue(true);
   });
 
@@ -70,7 +81,7 @@ describe("ensureLocalDaemon", () => {
       minimumStartedAt: 100,
     });
     expect(clearDaemonRegistryMock).not.toHaveBeenCalled();
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(spawnDaemonProcessMock).not.toHaveBeenCalled();
     expect(terminateDaemonProcessMock).not.toHaveBeenCalled();
   });
 
@@ -84,20 +95,14 @@ describe("ensureLocalDaemon", () => {
     const handle = await ensureLocalDaemon({ cliPath: "cli-entry.js", expectedVersion: "0.1.0" });
 
     expect(clearDaemonRegistryMock).toHaveBeenCalledOnce();
-    expect(spawnMock).toHaveBeenCalledWith(process.execPath, [
-      "cli-entry.js",
+    expect(spawnDaemonProcessMock).toHaveBeenCalledWith("cli-entry.js", [
       "serve",
       "--register",
       "--host",
       "127.0.0.1",
       "--port",
       "0",
-    ], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    expect(spawnMock.mock.results[0]!.value.unref).toHaveBeenCalledOnce();
+    ]);
     expect(handle).toMatchObject({ url: ready.url, token: ready.token, pid: ready.pid });
     expect(terminateDaemonProcessMock).not.toHaveBeenCalled();
   });
@@ -116,7 +121,7 @@ describe("ensureLocalDaemon", () => {
 
     expect(terminateDaemonProcessMock).toHaveBeenCalledWith(stale.pid);
     expect(clearDaemonRegistryMock).toHaveBeenCalledOnce();
-    expect(spawnMock).toHaveBeenCalledOnce();
+    expect(spawnDaemonProcessMock).toHaveBeenCalledOnce();
     expect(handle.pid).toBe(ready.pid);
   });
 
@@ -134,7 +139,20 @@ describe("ensureLocalDaemon", () => {
 
     expect(terminateDaemonProcessMock).not.toHaveBeenCalled();
     expect(clearDaemonRegistryMock).toHaveBeenCalledOnce();
-    expect(spawnMock).toHaveBeenCalledOnce();
+    expect(spawnDaemonProcessMock).toHaveBeenCalledOnce();
     expect(handle.pid).toBe(ready.pid);
+  });
+
+  it("reports a child process failure instead of waiting for the registry timeout", async () => {
+    const failed = spawned("exited with code 1");
+    readDaemonRegistryMock.mockReturnValue(null);
+    spawnDaemonProcessMock.mockReturnValue(failed);
+
+    await expect(ensureLocalDaemon({
+      cliPath: "cli-entry.js",
+      expectedVersion: "0.1.0",
+    })).rejects.toThrow("daemon startup failed");
+
+    expect(daemonStartupErrorMock).toHaveBeenCalledWith(failed);
   });
 });
