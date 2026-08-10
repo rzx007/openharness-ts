@@ -9,7 +9,12 @@ import type {
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
 import type { LiveChildAgentRegistry } from "./live-child-agent-registry.js";
-import { isRecord, runtimeSessionMetadataChanged } from "./support.js";
+import {
+  isRecord,
+  jsonEqual,
+  runtimeSessionMetadataChanged,
+  withoutTraceId,
+} from "./support.js";
 
 export class SessionApplicationError extends Error {
   constructor(
@@ -25,7 +30,7 @@ export interface SessionApplicationServiceContext {
   store: SessionStore;
   runEngine: SessionRunEngine;
   agentPool: AgentPool;
-  liveChildren: Pick<LiveChildAgentRegistry, "interrupt">;
+  liveChildren: Pick<LiveChildAgentRegistry, "has" | "send" | "interrupt">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
@@ -76,7 +81,9 @@ export class SessionApplicationService {
 
   getSession(sessionId: string, options: { warm?: boolean } = {}): ReturnType<SessionStore["getSession"]> {
     const session = this.context.store.getSession(sessionId);
-    if (session && options.warm) void this.context.agentPool.warm(sessionId);
+    if (session && options.warm && !this.context.liveChildren.has(sessionId)) {
+      void this.context.agentPool.warm(sessionId);
+    }
     return session;
   }
 
@@ -90,6 +97,9 @@ export class SessionApplicationService {
       ? { ...existing.metadata, ...input.metadata }
       : undefined;
     const runtimeMetadataChanged = metadata && runtimeSessionMetadataChanged(existing.metadata, metadata);
+    if (runtimeMetadataChanged && this.context.liveChildren.has(sessionId)) {
+      throw new SessionApplicationError(409, "Cannot update runtime settings while a child agent is live");
+    }
     if (runtimeMetadataChanged && this.context.runEngine.hasWork(sessionId)) {
       throw new SessionApplicationError(409, "Cannot update runtime session settings while a run is active");
     }
@@ -106,7 +116,54 @@ export class SessionApplicationService {
     return session;
   }
 
-  admitPrompt(sessionId: string, input: AdmitPromptInput): AdmitPromptResult {
+  async admitPrompt(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
+    const delivery = input.delivery ?? "queue";
+    const metadata = { ...(input.metadata ?? {}), ...(input.traceId ? { traceId: input.traceId } : {}) };
+    if (this.context.liveChildren.has(sessionId) && input.id) {
+      const existing = this.context.store.getInput(input.id);
+      if (existing) {
+        if (
+          existing.sessionId !== sessionId ||
+          existing.content !== input.content ||
+          existing.delivery !== delivery ||
+          !jsonEqual(withoutTraceId(existing.metadata), withoutTraceId(metadata))
+        ) {
+          throw new SessionApplicationError(409, `Prompt id is already used: ${input.id}`);
+        }
+        return promptResult(this.context.store, existing);
+      }
+    }
+    const live = await this.context.liveChildren.send(sessionId, {
+      id: input.id,
+      content: input.content,
+      delivery,
+      traceId: input.traceId,
+      metadata: input.metadata,
+    });
+    if (live) {
+      let admitted = live.inputId ? this.context.store.getInput(live.inputId) : undefined;
+      if (!admitted || admitted.content !== input.content || (input.id && admitted.id !== input.id)) {
+        const before = this.context.events.checkpoint();
+        admitted = this.context.store.admitPrompt({
+          id: input.id,
+          sessionId,
+          delivery,
+          content: input.content,
+          metadata,
+        });
+        this.context.events.publishSince(before);
+      }
+      const run = live.runId ? this.context.store.getRun(live.runId) : undefined;
+      if (!admitted || admitted.sessionId !== sessionId) {
+        throw new SessionApplicationError(409, "Live child did not create a durable input projection");
+      }
+      return {
+        input: admitted,
+        ...(run ? { run } : {}),
+        ...(run?.status === "running" ? { queue_state: "running" as const } : {}),
+        ...(run?.status === "pending" ? { queue_state: "queued" as const } : {}),
+      };
+    }
     return this.context.runEngine.admitPromptAndMaybeRun(sessionId, input);
   }
 
@@ -182,7 +239,10 @@ export class SessionApplicationService {
 
   async interruptSession(sessionId: string): Promise<ReturnType<SessionRunEngine["interruptSession"]>> {
     const lane = this.context.runEngine.interruptSession(sessionId);
-    const childInterrupted = await this.context.liveChildren.interrupt(sessionId, "Session interrupted");
+    const targets = [sessionId, ...this.descendantSessionIds(sessionId)];
+    const childInterrupted = (await Promise.all(
+      targets.map((target) => this.context.liveChildren.interrupt(target, "Session interrupted")),
+    )).some(Boolean);
     return childInterrupted && !lane.interrupted
       ? { ...lane, interrupted: true }
       : lane;
@@ -193,6 +253,7 @@ export class SessionApplicationService {
   }
 
   async closeRuntime(sessionId: string): Promise<void> {
+    if (await this.context.liveChildren.interrupt(sessionId, "Session runtime closed")) return;
     await this.context.agentPool.close(sessionId);
   }
 
@@ -239,4 +300,25 @@ export class SessionApplicationService {
     this.context.events.publishSince(before);
     return session;
   }
+
+  private descendantSessionIds(sessionId: string): string[] {
+    const result: string[] = [];
+    for (const child of this.context.store.listChildSessions(sessionId)) {
+      result.push(child.id, ...this.descendantSessionIds(child.id));
+    }
+    return result;
+  }
+}
+
+function promptResult(
+  store: SessionStore,
+  input: NonNullable<ReturnType<SessionStore["getInput"]>>,
+): AdmitPromptResult {
+  const run = store.findRunByInput(input.id);
+  return {
+    input,
+    ...(run ? { run } : {}),
+    ...(run?.status === "running" ? { queue_state: "running" as const } : {}),
+    ...(run?.status === "pending" ? { queue_state: "queued" as const } : {}),
+  };
 }

@@ -144,20 +144,29 @@ function formatPromptLayersReport(
   previewChars: number,
   diagnostics: PersonalPromptFileDiagnostic[],
 ): string {
+  const sectionPreviewChars = 350;
   const prompt = renderPromptLayers(layers);
   const preview = prompt.length > previewChars
     ? `${prompt.slice(0, previewChars)}\n... (truncated)`
     : prompt;
   const section = (name: keyof PromptLayers) => {
     const values = layers[name].filter((value) => value.trim());
-    return `[${name}]\n${values.length > 0 ? values.join("\n\n") : "(empty)"}`;
+    if (values.length === 0) return `[${name}]\n(empty)`;
+    const previews = values.map((value, index) => {
+      const trimmed = value.trim();
+      const text = trimmed.length > sectionPreviewChars
+        ? `${trimmed.slice(0, sectionPreviewChars)}\n... (truncated)`
+        : trimmed;
+      return `section ${index + 1}:\n${text}`;
+    });
+    return `[${name}]\n${previews.join("\n\n")}`;
   };
   const divider = "-".repeat(60);
   return [
     "Current system prompt layers:",
-    `- stable: ${layers.stable.length} section(s)`,
-    `- context: ${layers.context.length} section(s)`,
-    `- volatile: ${layers.volatile.length} section(s)`,
+    `- stable: ${layers.stable.length} section(s), ${layerCharCount(layers.stable)} characters`,
+    `- context: ${layers.context.length} section(s), ${layerCharCount(layers.context)} characters`,
+    `- volatile: ${layers.volatile.length} section(s), ${layerCharCount(layers.volatile)} characters`,
     divider,
     section("stable"),
     divider,
@@ -171,6 +180,10 @@ function formatPromptLayersReport(
     divider,
     `Total length: ${prompt.length} characters`,
   ].join("\n");
+}
+
+function layerCharCount(parts: string[]): number {
+  return parts.filter((part) => part.trim()).join("\n\n").length;
 }
 
 const RUNTIME_RESTART_KEYS = new Set([

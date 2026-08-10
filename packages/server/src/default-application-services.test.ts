@@ -49,5 +49,7 @@ describe("default daemon application services", () => {
 
     expect(preview.report).toContain("SOUL.md: blocked");
     expect(preview.report).toContain("ignore_higher_priority_instructions");
+    expect(preview.report).toContain("section 1:");
+    expect(preview.report).toContain("... (truncated)");
   });
 });

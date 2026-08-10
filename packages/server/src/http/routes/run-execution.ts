@@ -27,7 +27,7 @@ export function createRunExecutionRoutes(context: RunExecutionRoutesContext): Ho
       if (typeof body.content !== "string") return errorResponse(400, "content is required");
 
       try {
-        const admitted = context.application.admitPrompt(sessionId, {
+        const admitted = await context.application.admitPrompt(sessionId, {
           id: typeof body.id === "string" ? body.id : undefined,
           delivery: body.delivery === "steer" ? "steer" : "queue",
           content: body.content,

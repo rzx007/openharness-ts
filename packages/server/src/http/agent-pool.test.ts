@@ -33,6 +33,18 @@ function createContext(factory = vi.fn(async () => createAgent())) {
 }
 
 describe("AgentPool", () => {
+  it("does not create a second agent for a framework-owned live child session", async () => {
+    const context = createContext();
+    const pool = new AgentPool({
+      ...context,
+      isSessionExternallyOwned: (sessionId) => sessionId === "s1",
+    } as any);
+
+    await pool.warm("s1");
+    expect(context.createAgent).not.toHaveBeenCalled();
+    await expect(pool.acquire(session as any, [], [])).rejects.toThrow("owned by a live child agent");
+  });
+
   it("deduplicates concurrent agent creation and closes the cached agent", async () => {
     const close = vi.fn(async () => {});
     const factory = vi.fn(async () => createAgent(close));

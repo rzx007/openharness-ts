@@ -37,6 +37,7 @@ function createMaintenance(agent: Record<string, any>) {
     store: store as any,
     runEngine: runEngine as any,
     agentPool: agentPool as any,
+    liveChildren: { has: vi.fn(() => false) },
     events: { checkpoint: () => 7, publishSince: broadcastSince },
   });
   return { maintenance, store, runEngine, agentPool, broadcastSince, replaced };

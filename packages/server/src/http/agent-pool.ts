@@ -24,9 +24,10 @@ export interface AgentPoolContext {
   settings?: Settings;
   getSettings?: () => Settings;
   createAgent?: CreateDaemonAgent;
+  isSessionExternallyOwned?(sessionId: string): boolean;
 }
 
-/** One warm framework agent per durable daemon session. */
+/** One warm framework agent per pool-owned durable session; live children stay framework-owned. */
 export class AgentPool {
   private readonly agents = new Map<string, Promise<OpenHarnessAgent>>();
 
@@ -41,7 +42,7 @@ export class AgentPool {
   }
 
   async warm(sessionId: string): Promise<void> {
-    if (!this.configured || this.agents.has(sessionId)) return;
+    if (!this.configured || this.agents.has(sessionId) || this.context.isSessionExternallyOwned?.(sessionId)) return;
     const session = this.context.store.getSession(sessionId);
     if (!session || session.status === "archived") return;
     await this.acquire(
@@ -62,6 +63,9 @@ export class AgentPool {
     parts: SessionMessagePartRecord[],
   ): Promise<OpenHarnessAgent> {
     if (!this.configured) throw new Error("Agent runtime is not configured");
+    if (this.context.isSessionExternallyOwned?.(session.id)) {
+      throw new Error(`Session runtime is owned by a live child agent: ${session.id}`);
+    }
     const existing = this.agents.get(session.id);
     if (existing) return await existing;
 

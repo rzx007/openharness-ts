@@ -185,7 +185,27 @@ describe("OpenHarnessHttpServer", () => {
             await options.host!.emitStreamEvent({ type: "text_delta", delta: "child output" });
             return;
           }
-          const child = await options.childProjection!.createChild({
+          let child: Awaited<ReturnType<NonNullable<typeof options.childProjection>["createChild"]>>;
+          const controls = {
+            send: async (input: { content: string }) => {
+              const controller = new AbortController();
+              const run = await options.childProjection!.startRun(child, input, controller.signal);
+              const result = (async () => {
+                await run.host.emitStreamEvent({ type: "text_delta", delta: "child output" });
+                const completed = { status: "completed" as const, output: "child output" };
+                await options.childProjection!.finishRun(child, run, completed);
+                return completed;
+              })();
+              return {
+                sessionId: child.sessionId,
+                inputId: run.inputId,
+                runId: run.runId,
+                result,
+              };
+            },
+            interrupt: async () => {},
+          };
+          child = await options.childProjection!.createChild({
             invocationId: "child-invocation",
             parentScope: options.host!.scope,
             spawn: {
@@ -194,18 +214,10 @@ describe("OpenHarnessHttpServer", () => {
               agent: "Explore",
               cwd: context.session.cwd,
             },
-            controls: { send: async () => {}, interrupt: async () => {} },
+            controls,
           });
-          const run = await options.childProjection!.startRun(
-            child,
-            "inspect",
-            new AbortController().signal,
-          );
-          await run.host.emitStreamEvent({ type: "text_delta", delta: "child output" });
-          await options.childProjection!.finishRun(child, run, {
-            status: "completed",
-            output: "child output",
-          });
+          const initial = await controls.send({ content: "inspect" });
+          await initial.result;
           await options.host!.emitStreamEvent({ type: "text_delta", delta: "child output" });
         },
         async runMessage() { return { output: "", events: [], history: [] }; },
@@ -253,7 +265,7 @@ describe("OpenHarnessHttpServer", () => {
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
       });
-      expect(closeRuntime.status).toBe(200);
+      expect(closeRuntime.status).toBe(409);
       expect(closed).not.toContain(child!.id);
 
       const followUp = await fetch(`${baseUrl}/sessions/${child!.id}/prompts`, {
@@ -267,7 +279,7 @@ describe("OpenHarnessHttpServer", () => {
         (event.payload?.run as { sessionId?: string; status?: string } | undefined)?.sessionId === child!.id &&
         (event.payload?.run as { status?: string } | undefined)?.status === "completed",
       );
-      expect(created.filter((id) => id === child!.id)).toHaveLength(1);
+      expect(created.filter((id) => id === child!.id)).toHaveLength(0);
       expect(server.store.getSession(child!.id)?.status).not.toBe("archived");
     }, { createAgent });
   });

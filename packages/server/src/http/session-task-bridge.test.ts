@@ -19,6 +19,7 @@ function createContext() {
 
 function createTaskManager(overrides: Partial<TaskManager> = {}): TaskManager {
   return {
+    beginSessionTask: vi.fn(),
     completeSessionTask: vi.fn(),
     listTasks: vi.fn(() => []),
     readTaskOutput: vi.fn(() => "output"),
@@ -30,6 +31,22 @@ function createTaskManager(overrides: Partial<TaskManager> = {}): TaskManager {
 }
 
 describe("SessionTaskBridgeManager", () => {
+  it("moves both live and durable task state back to running when a child starts another run", async () => {
+    const context = createContext();
+    const manager = createTaskManager();
+    context.getTaskManager.mockReturnValue(manager);
+    context.store.updateSessionTask.mockReturnValue({ sessionId: "s1" });
+    const bridge = new SessionTaskBridgeManager(context).createBridge({ id: "s1", cwd: "/repo" });
+
+    await bridge.bindSessionTaskRun("task-1", "run-2");
+
+    expect(manager.beginSessionTask).toHaveBeenCalledWith("task-1");
+    expect(context.store.updateSessionTask).toHaveBeenCalledWith("task-1", {
+      status: "running",
+      runId: "run-2",
+    });
+  });
+
   it("projects task manager tasks into durable session tasks", () => {
     const context = createContext();
     const manager = createTaskManager({

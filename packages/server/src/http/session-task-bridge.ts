@@ -33,6 +33,7 @@ export interface TaskInfo {
 type DurableTaskStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
 
 export interface TaskManager {
+  beginSessionTask(taskId: string): TaskInfo;
   completeSessionTask(
     taskId: string,
     input: { status: "completed" | "failed" | "stopped"; output: string },
@@ -114,6 +115,7 @@ export class SessionTaskBridgeManager {
       },
       bindSessionTaskRun: async (taskId, runId) => {
         const before = this.context.events.checkpoint();
+        manager.beginSessionTask(taskId);
         const task = this.context.store.updateSessionTask(taskId, { status: "running", runId });
         this.context.log({
           level: "info",

@@ -32,11 +32,10 @@ export class DaemonChildAgentProjectionFactory implements ChildAgentProjectionFa
 
   create(input: { scope: AgentRunScope; session: { id: string; cwd: string } }): AgentChildProjection {
     return new DaemonChildAgentProjection({
-      parentScope: input.scope,
       store: this.context.store,
       createChildSession: (child) => this.context.childSessionApplication().createChildSession(child),
       liveChildren: this.context.liveChildren,
-      taskBridge: this.context.sessionTaskBridgeManager.createBridge(input.session),
+      createTaskBridge: (session) => this.context.sessionTaskBridgeManager.createBridge(session),
       permissionBroker: this.context.permissionBroker,
       transcriptProjection: this.context.transcriptProjection,
       events: this.context.events,

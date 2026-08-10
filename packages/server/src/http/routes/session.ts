@@ -154,7 +154,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       try {
         const expanded = await context.commandCatalog.expand({ cwd: session.cwd, name, args });
         if (!expanded) return errorResponse(404, `Unknown command: ${name}`);
-        const admitted: AdmitPromptResult = context.application.admitPrompt(sessionId, {
+        const admitted: AdmitPromptResult = await context.application.admitPrompt(sessionId, {
           content: expanded.prompt,
           metadata: {
             command: expanded.command.name,

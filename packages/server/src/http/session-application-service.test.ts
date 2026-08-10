@@ -18,6 +18,7 @@ function createService(options: {
   run?: Record<string, any>;
   input?: Record<string, any>;
   inputs?: Array<Record<string, any>>;
+  live?: boolean;
 } = {}) {
   const store = {
     createSession: vi.fn((input) => ({ ...session, ...input })),
@@ -30,6 +31,7 @@ function createService(options: {
     getInput: vi.fn(() => options.input),
     listInputs: vi.fn(() => options.inputs ?? []),
     findRunByInput: vi.fn(),
+    admitPrompt: vi.fn((input) => ({ id: input.id ?? "live-input", ...input })),
     appendEvent: vi.fn(),
   };
   const runEngine = {
@@ -53,17 +55,56 @@ function createService(options: {
     closeAll: vi.fn(async () => {}),
   };
   const broadcastSince = vi.fn();
+  const liveChildren = {
+    has: vi.fn(() => options.live ?? false),
+    send: vi.fn(async () => options.live ? {
+      sessionId: "s1",
+      inputId: options.input?.id,
+      runId: options.run?.id,
+      result: Promise.resolve({ status: "completed" as const, output: "done" }),
+    } : undefined),
+    interrupt: vi.fn(async () => false),
+  };
   const service = new SessionApplicationService({
     store: store as any,
     runEngine: runEngine as any,
     agentPool: agentPool as any,
-    liveChildren: { interrupt: vi.fn(async () => false) },
+    liveChildren,
     events: { checkpoint: () => 7, publishSince: broadcastSince },
   });
-  return { service, store, runEngine, agentPool, broadcastSince };
+  return { service, store, runEngine, agentPool, liveChildren, broadcastSince };
 }
 
 describe("SessionApplicationService", () => {
+  it("routes live child prompts back to framework controls without warming a second agent", async () => {
+    const input = {
+      id: "live-input",
+      sessionId: "s1",
+      delivery: "queue",
+      content: "follow up",
+      metadata: {},
+    };
+    const run = { id: "live-run", sessionId: "s1", inputId: "live-input", status: "running" };
+    const { service, store, runEngine, agentPool, liveChildren } = createService({ live: true, input, run });
+    store.getInput.mockReturnValueOnce(undefined).mockReturnValue(input);
+
+    service.getSession("s1", { warm: true });
+    const admitted = await service.admitPrompt("s1", {
+      id: "live-input",
+      delivery: "queue",
+      content: "follow up",
+    });
+
+    expect(agentPool.warm).not.toHaveBeenCalled();
+    expect(liveChildren.send).toHaveBeenCalledWith("s1", expect.objectContaining({
+      id: "live-input",
+      delivery: "queue",
+      content: "follow up",
+    }));
+    expect(runEngine.admitPromptAndMaybeRun).not.toHaveBeenCalled();
+    expect(admitted).toMatchObject({ input, run, queue_state: "running" });
+  });
+
   it("creates a session, starts warming it, and publishes the store event", () => {
     const { service, agentPool, broadcastSince } = createService();
 

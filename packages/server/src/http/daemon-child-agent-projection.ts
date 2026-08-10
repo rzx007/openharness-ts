@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AgentChildAgentInput,
   AgentChildAgentResult,
   AgentRunScope,
 } from "@openharness/core";
@@ -26,6 +27,8 @@ import type { SessionTranscriptProjection } from "./transcript-projection.js";
 
 interface DaemonChildState {
   taskId: string;
+  taskBridge: SessionTaskBridge;
+  parentScope: AgentRunScope;
   worktreeSlug?: string;
   worktreeManager?: ChildAgentWorktreeManager;
 }
@@ -35,7 +38,6 @@ interface DaemonChildRunState {
 }
 
 export interface DaemonChildAgentProjectionContext {
-  parentScope: AgentRunScope;
   store: SessionStore;
   createChildSession(input: {
     id?: string;
@@ -47,7 +49,7 @@ export interface DaemonChildAgentProjectionContext {
     metadata?: Record<string, unknown>;
   }): Promise<{ id: string }>;
   liveChildren: Pick<LiveChildAgentRegistry, "register" | "unregister">;
-  taskBridge: SessionTaskBridge;
+  createTaskBridge(session: { id: string; cwd: string }): SessionTaskBridge;
   permissionBroker: Pick<StorePermissionBroker, "ask">;
   transcriptProjection: SessionTranscriptProjection;
   events: Pick<SessionEventPublisher, "checkpoint" | "publish" | "publishSince">;
@@ -78,72 +80,120 @@ export class DaemonChildAgentProjection implements AgentChildProjection {
       }
     }
 
-    const child = await this.context.createChildSession({
-      ...(input.spawn.sessionId ? { id: input.spawn.sessionId } : {}),
-      parentId: input.parentScope.sessionId,
-      cwd,
-      ...(input.spawn.model ? { model: input.spawn.model } : {}),
-      title: `${input.spawn.agent}@${team}`,
-      agent: input.spawn.agent,
-      metadata: {
-        ...input.spawn.metadata,
-        team,
-        systemPrompt: input.spawn.systemPrompt,
-        permissionMode: input.spawn.permissionMode,
-        allowedTools: input.spawn.allowedTools,
-        disallowedTools: input.spawn.disallowedTools,
-        maxTurns: input.spawn.maxTurns,
-        effort: input.spawn.effort,
-        isolate: input.spawn.isolate,
-        ...(worktree ? { worktree } : {}),
-      },
-    });
-    const task = this.context.taskBridge.registerSessionTask({
-      description: input.spawn.description,
-      cwd,
-      sessionId: input.parentScope.sessionId,
-      childSessionId: child.id,
-      prompt: input.spawn.prompt,
-      onInput: (content) => input.controls.send({ content }),
-      onStop: () => input.controls.interrupt("Child agent stopped"),
-    });
-    this.context.liveChildren.register(child.id, input.invocationId, input.controls);
-    return {
-      invocationId: input.invocationId,
-      sessionId: child.id,
-      cwd,
-      taskId: task.id,
-      ...(worktree ? { worktree } : {}),
-      state: {
+    let childId: string | undefined;
+    let taskId: string | undefined;
+    let taskBridge: SessionTaskBridge | undefined;
+    let registered = false;
+    try {
+      const child = await this.context.createChildSession({
+        ...(input.spawn.sessionId ? { id: input.spawn.sessionId } : {}),
+        parentId: input.parentScope.sessionId,
+        cwd,
+        ...(input.spawn.model ? { model: input.spawn.model } : {}),
+        title: `${input.spawn.agent}@${team}`,
+        agent: input.spawn.agent,
+        metadata: {
+          ...input.spawn.metadata,
+          team,
+          systemPrompt: input.spawn.systemPrompt,
+          permissionMode: input.spawn.permissionMode,
+          allowedTools: input.spawn.allowedTools,
+          disallowedTools: input.spawn.disallowedTools,
+          maxTurns: input.spawn.maxTurns,
+          effort: input.spawn.effort,
+          isolate: input.spawn.isolate,
+          ...(worktree ? { worktree } : {}),
+        },
+      });
+      childId = child.id;
+      taskBridge = this.context.createTaskBridge({
+        id: input.parentScope.sessionId,
+        cwd: input.parentScope.cwd,
+      });
+      const task = taskBridge.registerSessionTask({
+        description: input.spawn.description,
+        cwd,
+        sessionId: input.parentScope.sessionId,
+        childSessionId: child.id,
+        prompt: input.spawn.prompt,
+        onInput: async (content) => {
+          await input.controls.send({ content });
+        },
+        onStop: () => input.controls.interrupt("Child agent stopped"),
+      });
+      taskId = task.id;
+      this.context.liveChildren.register(child.id, input.invocationId, input.controls);
+      registered = true;
+      return {
+        invocationId: input.invocationId,
+        sessionId: child.id,
+        cwd,
         taskId: task.id,
-        ...(worktreeSlug ? { worktreeSlug } : {}),
-        ...(worktreeManager ? { worktreeManager } : {}),
-      } satisfies DaemonChildState,
-    };
+        ...(worktree ? { worktree } : {}),
+        state: {
+          taskId: task.id,
+          taskBridge,
+          parentScope: input.parentScope,
+          ...(worktreeSlug ? { worktreeSlug } : {}),
+          ...(worktreeManager ? { worktreeManager } : {}),
+        } satisfies DaemonChildState,
+      };
+    } catch (error) {
+      if (registered && childId) {
+        this.context.liveChildren.unregister(childId, input.invocationId);
+      }
+      if (taskId && taskBridge) {
+        const message = error instanceof Error ? error.message : String(error);
+        await taskBridge.completeSessionTask(taskId, {
+          status: "failed",
+          output: message,
+        }).catch(() => {});
+      }
+      if (childId) {
+        const before = this.context.events.checkpoint();
+        this.context.store.archiveSession(childId);
+        this.context.events.publishSince(before);
+      }
+      if (worktreeSlug && worktreeManager) {
+        await worktreeManager.remove(worktreeSlug).catch(() => {});
+      }
+      throw error;
+    }
   }
 
   async startRun(
     child: AgentChildProjectionHandle,
-    content: string,
+    input: AgentChildAgentInput,
     signal: AbortSignal,
   ): Promise<AgentChildRunProjection> {
-    const traceId = randomUUID();
+    const state = child.state as DaemonChildState;
+    const traceId = input.traceId ?? randomUUID();
     const before = this.context.events.checkpoint();
     const admitted = this.context.store.admitPrompt({
+      id: input.id,
       sessionId: child.sessionId,
-      delivery: "queue",
-      content,
-      metadata: { traceId, parentRunId: this.context.parentScope.runId },
+      delivery: input.delivery ?? "queue",
+      content: input.content,
+      metadata: { ...input.metadata, traceId, parentRunId: state.parentScope.runId },
     });
     const run = this.context.store.createRun({
       sessionId: child.sessionId,
       inputId: admitted.id,
-      metadata: { traceId, parentRunId: this.context.parentScope.runId },
+      metadata: { traceId, parentRunId: state.parentScope.runId },
     });
     this.context.events.publishSince(before);
 
-    const state = child.state as DaemonChildState;
-    await this.context.taskBridge.bindSessionTaskRun(state.taskId, run.id);
+    try {
+      await state.taskBridge.bindSessionTaskRun(state.taskId, run.id);
+    } catch (error) {
+      const failedAt = this.context.events.checkpoint();
+      this.context.store.updateRun(run.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.context.events.publishSince(failedAt);
+      throw error;
+    }
     const projection = new DaemonRunProjection({
       store: this.context.store,
       permissionBroker: this.context.permissionBroker,
@@ -156,7 +206,7 @@ export class DaemonChildAgentProjection implements AgentChildProjection {
       signal,
       log: this.context.log,
     });
-    projection.start(content);
+    projection.start(input.content);
     const scope: AgentRunScope = {
       sessionId: child.sessionId,
       inputId: admitted.id,
@@ -166,6 +216,7 @@ export class DaemonChildAgentProjection implements AgentChildProjection {
       signal,
     };
     return {
+      inputId: admitted.id,
       runId: run.id,
       host: projection.createHost(scope),
       state: { projection } satisfies DaemonChildRunState,
@@ -182,13 +233,21 @@ export class DaemonChildAgentProjection implements AgentChildProjection {
     else if (result.status === "interrupted" || result.status === "stopped") projection.complete(true);
     else projection.fail(new Error(result.error ?? result.output), false);
     const state = child.state as DaemonChildState;
-    await this.context.taskBridge.completeSessionTask(state.taskId, result);
+    await state.taskBridge.completeSessionTask(state.taskId, result);
+  }
+
+  async failRunStart(child: AgentChildProjectionHandle, result: AgentChildAgentResult): Promise<void> {
+    const state = child.state as DaemonChildState;
+    await state.taskBridge.completeSessionTask(state.taskId, result);
   }
 
   async closeChild(child: AgentChildProjectionHandle, result: AgentChildAgentResult): Promise<void> {
     const state = child.state as DaemonChildState;
     this.context.liveChildren.unregister(child.sessionId, child.invocationId);
-    await this.context.taskBridge.completeSessionTask(state.taskId, result).catch(() => {});
+    const task = this.context.store.getSessionTask(state.taskId);
+    if (task && (task.status === "pending" || task.status === "running")) {
+      await state.taskBridge.completeSessionTask(state.taskId, result).catch(() => {});
+    }
     if (state.worktreeSlug && state.worktreeManager) {
       const hasChanges = await state.worktreeManager.hasChanges(state.worktreeSlug).catch(() => true);
       if (!hasChanges) await state.worktreeManager.remove(state.worktreeSlug).catch(() => {});

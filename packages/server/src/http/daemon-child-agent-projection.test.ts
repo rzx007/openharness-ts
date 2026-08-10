@@ -24,19 +24,12 @@ describe("DaemonChildAgentProjection", () => {
       projectStreamEvent: vi.fn(() => ({})),
       projectSteeredInputs: vi.fn(),
     };
+    const createTaskBridge = vi.fn(() => taskBridge);
     const projection = new DaemonChildAgentProjection({
-      parentScope: {
-        sessionId: "parent",
-        inputId: "parent-input",
-        runId: "parent-run",
-        cwd: "/repo",
-        traceId: "parent-trace",
-        signal: new AbortController().signal,
-      },
       store: store as any,
       createChildSession: vi.fn(async () => ({ id: "child-session" })),
       liveChildren: { register: vi.fn(), unregister: vi.fn() },
-      taskBridge,
+      createTaskBridge,
       permissionBroker: { ask: vi.fn(async () => true) },
       transcriptProjection: transcriptProjection as any,
       events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
@@ -57,7 +50,7 @@ describe("DaemonChildAgentProjection", () => {
       spawn: { description: "Explore", prompt: "inspect", agent: "Explore", cwd: "/repo" },
       controls: { send: vi.fn(), interrupt: vi.fn() },
     });
-    const run = await projection.startRun(child, "inspect", new AbortController().signal);
+    const run = await projection.startRun(child, { content: "inspect" }, new AbortController().signal);
     await projection.finishRun(child, run, { status: "completed", output: "done" });
 
     expect(child).toMatchObject({ sessionId: "child-session", taskId: "task-1" });
@@ -68,5 +61,25 @@ describe("DaemonChildAgentProjection", () => {
       status: "completed",
       output: "done",
     });
+
+    const grandchild = await projection.createChild({
+      invocationId: "grandchild-1",
+      parentScope: {
+        sessionId: "child-session",
+        inputId: "child-input",
+        runId: "child-run",
+        cwd: "/child-repo",
+        traceId: "child-trace",
+        signal: new AbortController().signal,
+      },
+      spawn: { description: "Verify", prompt: "verify", agent: "Verify", cwd: "/child-repo" },
+      controls: { send: vi.fn(), interrupt: vi.fn() },
+    });
+    await projection.startRun(grandchild, { content: "verify" }, new AbortController().signal);
+
+    expect(createTaskBridge).toHaveBeenLastCalledWith({ id: "child-session", cwd: "/child-repo" });
+    expect(store.admitPrompt).toHaveBeenLastCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ parentRunId: "child-run" }),
+    }));
   });
 });

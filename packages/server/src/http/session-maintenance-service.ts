@@ -6,6 +6,7 @@ import { rewindTranscript } from "../rewind.js";
 import type { SessionRunEngine } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
+import type { LiveChildAgentRegistry } from "./live-child-agent-registry.js";
 import { agentMessagesToTranscript } from "./agent-transcript.js";
 import { estimateCostUsd } from "../usage.js";
 
@@ -23,6 +24,7 @@ export interface SessionMaintenanceServiceContext {
   store: SessionStore;
   runEngine: Pick<SessionRunEngine, "hasActiveRunsForCwd" | "hasWork">;
   agentPool: AgentPool;
+  liveChildren: Pick<LiveChildAgentRegistry, "has">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
@@ -35,6 +37,7 @@ export class SessionMaintenanceService {
 
   async listMcpServers(sessionId: string): Promise<unknown[]> {
     this.requireSession(sessionId);
+    this.rejectLiveChild(sessionId);
     await this.context.agentPool.warm(sessionId);
     const agent = await this.context.agentPool.get(sessionId);
     return agent?.inspect().mcpServers ?? [];
@@ -50,6 +53,7 @@ export class SessionMaintenanceService {
     estimatedCost: string;
   }> {
     const session = this.requireSession(sessionId);
+    this.rejectLiveChild(sessionId);
     const messageCount = this.context.store.listMessages(sessionId).length;
     await this.context.agentPool.warm(sessionId);
     const agent = await this.context.agentPool.get(sessionId);
@@ -85,6 +89,7 @@ export class SessionMaintenanceService {
     parts: ReturnType<SessionStore["replaceTranscript"]>["parts"];
   }> {
     this.requireSession(sessionId);
+    this.rejectLiveChild(sessionId);
     this.requireRuntime();
     if (this.context.runEngine.hasWork(sessionId)) {
       throw new SessionMaintenanceError(409, "Cannot compact while a run is active");
@@ -113,6 +118,7 @@ export class SessionMaintenanceService {
     parts: ReturnType<SessionStore["replaceTranscript"]>["parts"];
   }> {
     this.requireSession(sessionId);
+    this.rejectLiveChild(sessionId);
     if (this.context.runEngine.hasWork(sessionId)) {
       throw new SessionMaintenanceError(409, "Cannot rewind while a run is active");
     }
@@ -141,6 +147,7 @@ export class SessionMaintenanceService {
 
   async remember(sessionId: string): Promise<AgentRememberResult> {
     const session = this.requireSession(sessionId);
+    this.rejectLiveChild(sessionId);
     this.requireRuntime();
     if (this.context.runEngine.hasActiveRunsForCwd(session.cwd)) {
       throw new SessionMaintenanceError(409, "Cannot remember while session runs are active for this cwd");
@@ -162,6 +169,12 @@ export class SessionMaintenanceService {
   private requireRuntime(): void {
     if (!this.context.agentPool.configured) {
       throw new SessionMaintenanceError(501, "Agent runtime is not configured");
+    }
+  }
+
+  private rejectLiveChild(sessionId: string): void {
+    if (this.context.liveChildren.has(sessionId)) {
+      throw new SessionMaintenanceError(409, "Cannot mutate or inspect a child runtime while it is live in its parent agent");
     }
   }
 }

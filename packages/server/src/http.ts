@@ -220,6 +220,7 @@ export class OpenHarnessHttpServer {
       settings: options.settings,
       getSettings: options.getSettings,
       createAgent: options.createAgent,
+      isSessionExternallyOwned: (sessionId) => this.liveChildren.has(sessionId),
     });
     // 单次 run 执行：agent.submitMessage + 流式落库 + 权限注入
     const runExecutor = new SessionRunExecutor({
@@ -249,6 +250,7 @@ export class OpenHarnessHttpServer {
       store: this.store,
       runEngine: this.runEngine,
       agentPool: this.agentPool,
+      liveChildren: this.liveChildren,
       events: this.sessionEvents,
     });
     this.sessionApplication = new SessionApplicationService({
