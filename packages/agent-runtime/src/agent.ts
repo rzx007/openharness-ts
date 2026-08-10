@@ -35,6 +35,7 @@ export interface OpenHarnessAgentOptions
   overrides?: OpenHarnessRuntimeOverrides;
   mcpServers?: Settings["mcpServers"];
   extensions?: OpenHarnessAgentExtension[];
+  childIdleTtlMs?: number;
 }
 
 export interface OpenHarnessAgentSubmitOptions extends AgentSessionSubmitOptions {
@@ -223,6 +224,7 @@ export async function createOpenHarnessAgent(
     });
     const children = new AgentChildManager({
       settings,
+      idleTtlMs: options.childIdleTtlMs,
       createAgent: (childOptions) => createOpenHarnessAgent(childOptions),
     });
     return new DefaultOpenHarnessAgent(

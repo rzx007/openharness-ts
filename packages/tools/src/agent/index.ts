@@ -2,9 +2,6 @@ import type { ToolDefinition } from "@openharness/core";
 
 type AgentExecutionMode = "in_process_teammate" | "remote_agent";
 
-const childInvocationByTaskId = new Map<string, string>();
-const childInvocationByAgentId = new Map<string, string>();
-
 export const agentTool: ToolDefinition = {
   name: "Agent",
   description:
@@ -90,11 +87,6 @@ export const agentTool: ToolDefinition = {
       });
 
       const taskId = invocation.taskId ?? invocation.id;
-      childInvocationByTaskId.set(taskId, invocation.id);
-      childInvocationByAgentId.set(agentId, invocation.id);
-      if (invocation.taskId && invocation.taskId !== invocation.id) {
-        childInvocationByTaskId.set(invocation.id, invocation.id);
-      }
 
       if (input.team) {
         try {
@@ -138,21 +130,27 @@ export const sendMessageTool: ToolDefinition = {
     const message = input.message as string;
 
     if (taskId.includes("@")) {
-      const invocationId = childInvocationByAgentId.get(taskId);
       const childAgentHost = context.runtimeHost?.childAgentHost;
-      if (!childAgentHost || !invocationId) {
+      if (!childAgentHost) {
         return { content: [{ type: "text", text: `No active child invocation for agent ${taskId}` }], isError: true };
       }
-      await childAgentHost.sendChildInput(invocationId, { content: message });
-      return { content: [{ type: "text", text: `Sent message to agent ${taskId}` }] };
+      try {
+        await childAgentHost.sendChildInput(taskId, { content: message });
+        return { content: [{ type: "text", text: `Sent message to agent ${taskId}` }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: (err as Error).message }], isError: true };
+      }
     }
 
     try {
-      const invocationId = childInvocationByTaskId.get(taskId);
       const childAgentHost = context.runtimeHost?.childAgentHost;
-      if (childAgentHost && invocationId) {
-        await childAgentHost.sendChildInput(invocationId, { content: message });
-        return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
+      if (childAgentHost) {
+        try {
+          await childAgentHost.sendChildInput(taskId, { content: message });
+          return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.startsWith("Child agent invocation not found:")) throw error;
+        }
       }
       const { getTaskManager } = await import("@openharness/services");
       await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).writeToTask(taskId, message);

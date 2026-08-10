@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,6 +165,34 @@ describe("TaskManager session task bridge", () => {
       exitCode: 0,
     });
     expect(manager.readTaskOutput(task.id)).toBe("first result");
+  });
+
+  it("reopens a completed session task for direct framework follow-up", async () => {
+    const manager = makeManager();
+    const onStop = vi.fn(async () => {});
+    const task = manager.registerSessionTask({
+      description: "child agent",
+      cwd: process.cwd(),
+      sessionId: "parent",
+      childSessionId: "child",
+      prompt: "first",
+      onInput: async () => {},
+      onStop,
+    });
+    await manager.completeSessionTask(task.id, { status: "completed", output: "first result" });
+
+    manager.beginSessionTask(task.id);
+    const waiting = manager.awaitTask(task.id);
+    let resolved = false;
+    void waiting.then(() => {
+      resolved = true;
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    await manager.stopTask(task.id);
+    await expect(waiting).resolves.toMatchObject({ status: "stopped" });
+    expect(onStop).toHaveBeenCalledOnce();
   });
 });
 

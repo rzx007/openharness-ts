@@ -44,6 +44,9 @@ export interface QueryRuntimeChildAgentSpawnInput {
 
 export interface QueryRuntimeChildAgentInput {
   content: string;
+  id?: string;
+  delivery?: "queue" | "steer";
+  traceId?: string;
   metadata?: Record<string, unknown>;
 }
 

@@ -194,6 +194,6 @@ describe("agentTool runtime host", () => {
     );
 
     expect(result.isError).toBeUndefined();
-    expect(host.childAgentHost.sendChildInput).toHaveBeenCalledWith("invocation-follow-up", { content: "continue" });
+    expect(host.childAgentHost.sendChildInput).toHaveBeenCalledWith("task_follow_up", { content: "continue" });
   });
 });

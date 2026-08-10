@@ -135,7 +135,235 @@ describe("AgentChildManager", () => {
     expect(close).toHaveBeenCalledOnce();
     expect(closeChild).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "child-session" }),
-      expect.objectContaining({ status: "stopped" }),
+      expect.objectContaining({ status: "interrupted" }),
     );
   });
+
+  it("starts a new serialized run for a completed child by task or agent alias", async () => {
+    const submitMessage = vi.fn(async function* (content: string) {
+      yield { type: "text_delta" as const, delta: `output:${content}` };
+    });
+    let runCount = 0;
+    const projection = createProjection({
+      startRun: vi.fn(async (_child, _input, signal) => {
+        runCount += 1;
+        return childRun(`run-${runCount}`, signal);
+      }),
+    });
+    const manager = new AgentChildManager({
+      settings: {} as any,
+      createAgent: vi.fn(async () => ({ submitMessage, close: vi.fn(async () => {}) } as any)),
+    });
+    const host = manager.createHost(parentHost(), projection);
+    const invocation = await host.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+
+    await expect(invocation.result).resolves.toMatchObject({ output: "output:first" });
+    await host.sendChildInput("task-1", { content: "second" });
+    await expect(host.awaitChildAgent("task-1")).resolves.toMatchObject({ output: "output:second" });
+    await host.sendChildInput("Explore@default", { content: "third" });
+    await expect(host.awaitChildAgent("Explore@default")).resolves.toMatchObject({ output: "output:third" });
+    await Promise.all([
+      host.sendChildInput("task-1", { id: "request-4", delivery: "queue", content: "fourth" }),
+      host.sendChildInput("task-1", { id: "request-4", delivery: "queue", content: "fourth" }),
+    ]);
+    await expect(host.awaitChildAgent("task-1")).resolves.toMatchObject({ output: "output:fourth" });
+    expect(projection.startRun).toHaveBeenCalledTimes(4);
+  });
+
+  it("turns projection start failures into a retryable failed result", async () => {
+    const failRunStart = vi.fn(async () => {});
+    const startRun = vi.fn()
+      .mockRejectedValueOnce(new Error("store unavailable"))
+      .mockImplementationOnce(async (_child, _input, signal) => childRun("run-2", signal));
+    const projection = createProjection({ startRun, failRunStart });
+    const manager = new AgentChildManager({
+      settings: {} as any,
+      createAgent: vi.fn(async () => ({
+        submitMessage: vi.fn(async function* () {
+          yield { type: "text_delta" as const, delta: "recovered" };
+        }),
+        close: vi.fn(async () => {}),
+      } as any)),
+    });
+    const host = manager.createHost(parentHost(), projection);
+    const invocation = await host.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+
+    await expect(invocation.result).resolves.toMatchObject({ status: "failed", error: "store unavailable" });
+    expect(failRunStart).toHaveBeenCalledOnce();
+    await host.sendChildInput("task-1", { content: "retry" });
+    await expect(host.awaitChildAgent("task-1")).resolves.toMatchObject({ status: "completed", output: "recovered" });
+  });
+
+  it("does not start a follow-up while the previous projection is finishing", async () => {
+    const finishing = deferred<void>();
+    const finishRun = vi.fn(async () => {
+      if (finishRun.mock.calls.length === 1) await finishing.promise;
+    });
+    const startRun = vi.fn(async (_child, _input, signal) => childRun(`run-${startRun.mock.calls.length}`, signal));
+    const projection = createProjection({ startRun, finishRun });
+    const manager = new AgentChildManager({
+      settings: {} as any,
+      createAgent: vi.fn(async () => ({
+        submitMessage: vi.fn(async function* () {
+          yield { type: "text_delta" as const, delta: "done" };
+        }),
+        close: vi.fn(async () => {}),
+      } as any)),
+    });
+    const host = manager.createHost(parentHost(), projection);
+    const invocation = await host.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await vi.waitFor(() => expect(finishRun).toHaveBeenCalledOnce());
+
+    const followUp = host.sendChildInput("task-1", { content: "second" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(startRun).toHaveBeenCalledOnce();
+    finishing.resolve();
+    await followUp;
+    expect(startRun).toHaveBeenCalledTimes(2);
+    await host.awaitChildAgent("task-1");
+    await invocation.result;
+  });
+
+  it("makes concurrent interrupt callers wait for projection settlement", async () => {
+    const finishing = deferred<void>();
+    const finishRun = vi.fn(async () => {
+      await finishing.promise;
+    });
+    const closeChild = vi.fn(async () => {});
+    const projection = createProjection({ finishRun, closeChild });
+    const manager = new AgentChildManager({
+      settings: {} as any,
+      createAgent: vi.fn(async () => ({
+        submitMessage: vi.fn(async function* (_content, options) {
+          await new Promise<void>((resolve) => options.signal.addEventListener("abort", () => resolve(), { once: true }));
+          throw new Error("aborted");
+        }),
+        close: vi.fn(async () => {}),
+      } as any)),
+    });
+    const parent = new AbortController();
+    const host = manager.createHost(parentHost(parent.signal), projection);
+    const invocation = await host.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    parent.abort();
+    const interrupted = host.interruptChildAgent(invocation.id, "stop");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(closeChild).not.toHaveBeenCalled();
+
+    finishing.resolve();
+    await interrupted;
+    expect(closeChild).toHaveBeenCalledOnce();
+    expect(finishRun.mock.invocationCallOrder[0]).toBeLessThan(closeChild.mock.invocationCallOrder[0]!);
+  });
+
+  it("suspends idle child resources and revives the same session with restored history", async () => {
+    const close = vi.fn(async () => {});
+    const loadHistory = vi.fn();
+    const createAgent = vi.fn(async () => ({
+      submitMessage: vi.fn(async function* (content: string) {
+        yield { type: "text_delta" as const, delta: content };
+      }),
+      getHistory: vi.fn(() => [{ role: "assistant", content: [{ type: "text", text: "first" }] }]),
+      loadHistory,
+      close,
+    } as any));
+    const manager = new AgentChildManager({ settings: {} as any, idleTtlMs: 1, createAgent });
+    const host = manager.createHost(parentHost(), createProjection());
+    const invocation = await host.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await invocation.result;
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+
+    await host.sendChildInput("task-1", { content: "second" });
+    await host.awaitChildAgent("task-1");
+
+    expect(createAgent).toHaveBeenCalledTimes(2);
+    expect(createAgent.mock.calls[1]?.[0]).toMatchObject({ sessionId: "child-session" });
+    expect(loadHistory).toHaveBeenCalledWith([
+      { role: "assistant", content: [{ type: "text", text: "first" }] },
+    ]);
+    await manager.closeAll();
+  });
 });
+
+function parentHost(signal = new AbortController().signal) {
+  return {
+    scope: {
+      sessionId: "parent",
+      inputId: "parent-input",
+      runId: "parent-run",
+      cwd: "/repo",
+      traceId: "parent-trace",
+      signal,
+    },
+    emitEvent: vi.fn(),
+    emitStreamEvent: vi.fn(),
+    requestPermission: vi.fn(),
+  };
+}
+
+function childRun(runId: string, signal: AbortSignal) {
+  return {
+    inputId: `input-${runId}`,
+    runId,
+    host: {
+      scope: {
+        sessionId: "child-session",
+        inputId: `input-${runId}`,
+        runId,
+        cwd: "/repo",
+        traceId: `trace-${runId}`,
+        signal,
+      },
+      emitEvent: vi.fn(),
+      emitStreamEvent: vi.fn(),
+      requestPermission: vi.fn(),
+    },
+  };
+}
+
+function createProjection(overrides: Partial<AgentChildProjection> = {}): AgentChildProjection {
+  return {
+    createChild: vi.fn(async ({ invocationId }) => ({
+      invocationId,
+      sessionId: "child-session",
+      cwd: "/repo",
+      taskId: "task-1",
+    })),
+    startRun: vi.fn(async (_child, _input, signal) => childRun("run-1", signal)),
+    finishRun: vi.fn(async () => {}),
+    closeChild: vi.fn(async () => {}),
+    ...overrides,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value?: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = (value) => done(value as T);
+  });
+  return { promise, resolve };
+}

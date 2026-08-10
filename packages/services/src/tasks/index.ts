@@ -299,6 +299,19 @@ export class TaskManager {
     return task;
   }
 
+  beginSessionTask(taskId: string): TaskInfo {
+    const task = this.tasks.get(taskId);
+    if (!task || !this.sessionTaskCallbacks.has(taskId)) {
+      throw new Error(`Session task not found: ${taskId}`);
+    }
+    task.status = "running";
+    task.startedAt = Date.now();
+    delete task.finishedAt;
+    delete task.exitCode;
+    this.notifyTaskEvent(task, "updated");
+    return task;
+  }
+
   // ── queries ─────────────────────────────────────────────
 
   getTask(taskId: string): TaskInfo | undefined {
@@ -341,11 +354,7 @@ export class TaskManager {
         finishedAt: task.finishedAt,
         exitCode: task.exitCode,
       };
-      task.status = "running";
-      task.startedAt = Date.now();
-      delete task.finishedAt;
-      delete task.exitCode;
-      this.notifyTaskEvent(task, "updated");
+      this.beginSessionTask(taskId);
       try {
         await sessionCallbacks.onInput(data);
       } catch (error) {
