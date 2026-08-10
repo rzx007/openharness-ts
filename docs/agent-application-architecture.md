@@ -630,7 +630,7 @@ interface MemoryRecord {
 
 这样做的实际收益：
 
-- 子 Agent 复用同一套 `SessionRunEngine` / `SessionStore` / permission broker。
+- 子 Agent 复用同一套 `SessionStore` / permission broker / transcript projection，但执行不进入 daemon `SessionRunEngine`；framework `AgentChildManager` 直接执行，`DaemonChildAgentProjection` 创建 durable input/run/task。
 - parent 看到的是稳定 `task_id` projection，便于 `TaskWait`、SSE 和 `/tasks` 查询。
 - live invocation handle 只留在当前 run 内存中，避免暴露 daemon 私有 session/run 句柄。
 - `isolate: true` 时仍可使用独立 git worktree。

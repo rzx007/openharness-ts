@@ -107,6 +107,8 @@ flowchart LR
 
 有 daemon 时，projection 负责 durable child session/task/run 与 child-scoped `AgentRunHost`；没有 daemon 时，manager 创建内存 session/run scope，child 仍可执行。
 
+同一 child 的 run 严格串行；`finishRun()` 完成前 invocation 不进入 idle。interrupt 等待当前 run settlement。completed child 默认在 5 分钟 idle TTL 后 suspend MCP/sandbox/runtime，同时保留 history 与 live handle；后续输入使用同一 session ID 恢复。
+
 ## 维护 API
 
 | API | framework 行为 |

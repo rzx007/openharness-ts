@@ -132,7 +132,7 @@ packages/server/src/http/session-run-engine.ts
 packages/server/src/http/session-run-executor.ts
 ```
 
-## AgentPool：每 session 一个实例
+## AgentPool：每个 pool-owned session 一个实例
 
 `AgentPool` 的真实缓存是：
 
@@ -150,7 +150,7 @@ key 是 durable `sessionId`。Promise 用于合并并发 warm/acquire；创建�
 - remember 后按 cwd 关闭
 - daemon shutdown 或 settings/plugin reload barrier
 
-child agent 不预先放入 `AgentPool`。它由 parent agent 的 `AgentChildManager` 持有；只有 child session 日后作为独立 HTTP session 被恢复时，才会进入 pool。
+child agent 不放入 `AgentPool`。它由 parent agent 的 `AgentChildManager` 持有，`LiveChildAgentRegistry` 负责 `sessionId -> controls` 的执行所有权仲裁：GET 不 warm 第二个 agent，HTTP prompt 直接回到 framework。child 关闭或 daemon 重启、live owner 消失后，该 durable session 才能进入 pool 并从 transcript 恢复。
 
 ## 工具运行与授权
 
@@ -218,6 +218,8 @@ sequenceDiagram
 | child session -> controls 路由 | daemon `LiveChildAgentRegistry`，仅引用 |
 | isolated worktree | daemon `child-agent-worktree.ts` |
 
+recursive child 复用同一个 projection 对象，但 projection 不捕获根 session 的 TaskBridge。每次 `createChild(parentScope, ...)` 都按直接父 session 创建 bridge，并把直接父 run scope 存入 child handle state，因此 grandchild 的 task scope 与 `parentRunId` 不会串回根 session。
+
 关键文件：
 
 ```text
@@ -238,6 +240,8 @@ HTTP route
   -> agent.compact/remember/getUsage/inspect
   -> persist only daemon projection or return DTO
 ```
+
+live child 不进入 `AgentPool`，daemon 不会为它创建第二个实例来执行 compact/remember/usage/MCP inspect。此时 maintenance API 返回 `409`；child 关闭或 daemon 重启并由 pool 恢复后，这些 API 才重新可用。
 
 特殊点：
 

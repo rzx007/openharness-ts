@@ -73,6 +73,8 @@ flowchart LR
 - MCP、sandbox 等资源
 - child invocation map 与 child agent 实例
 
+completed child 的重资源不是永久驻留：默认 idle TTL 后由 framework suspend，history 与 invocation handle 保留，follow-up 可透明恢复。
+
 稳定 API：
 
 ```text
@@ -115,7 +117,7 @@ durable permission record 属于 daemon；暂停工具并等待 decision 的语�
 - HTTP、Bearer auth、CORS、SSE、request trace
 - `SessionStore` 及 session/input/run/message/part/event
 - prompt queue/steer admission 与每 session run lane
-- 每 durable session 一个 warm `OpenHarnessAgent` 的 `AgentPool`
+- 非 live-child durable session 的 warm `OpenHarnessAgent` `AgentPool`；live child 由 registry 仲裁，禁止重复实例
 - transcript、permission、child session/task/run 的 durable projection
 - daemon restart recovery、archive、rewind、export
 - settings/provider/auth/memory/plugin/git 等资源 API

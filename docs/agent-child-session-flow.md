@@ -29,9 +29,17 @@ flowchart LR
 SendMessage -> AgentChildManager.send()
 Task input  -> SessionTaskBridge callback -> framework controls.send()
 Task stop   -> SessionTaskBridge callback -> framework controls.interrupt()
+HTTP child prompt -> SessionApplicationService -> LiveChildAgentRegistry -> framework controls.send()
 HTTP child interrupt -> LiveChildAgentRegistry -> framework controls.interrupt()
-TaskWait    -> AgentChildManager.awaitResult()
+TaskWait    -> parent-scoped TaskManager projection
+awaitChildAgent -> AgentChildManager.awaitResult()
 ```
+
+`LiveChildAgentRegistry` 是执行所有权仲裁点。只要 child 仍由 framework 持有，HTTP GET 不会 warm `AgentPool`，HTTP prompt 也不会创建第二个 agent；child 被关闭或 daemon 重启后，durable session 才能由 `AgentPool` 从 transcript 恢复。
+
+completed child 的新 run 会同时把 durable task 和 parent-scoped TaskManager task 重新置为 `running`，因此 `TaskWait` 不会返回上一轮结果，`TaskStop` 也仍能到达 live controls。
+
+child run 在 `startRun -> submitMessage -> finishRun` 全部完成前始终占用 invocation。interrupt 会等待这一完整 settlement，再 unregister、清理 worktree 和返回。空闲 child 默认在 5 分钟后 suspend 重资源；invocation 与 history 保留，follow-up 使用原 `sessionId` 重建 agent。
 
 active run 的 follow-up 进入 QueryEngine `pullFollowUps`；已完成 child 的新输入会开始下一轮 run，并继续复用同一 child agent history。
 
