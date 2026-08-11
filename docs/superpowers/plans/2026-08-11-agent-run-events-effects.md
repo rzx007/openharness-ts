@@ -118,6 +118,20 @@ daemon consumes events and projects durable state
 
 退出标准：相关 package typecheck 和 focused tests 通过；生产代码不存在旧 host/projection compatibility path。
 
+## Task 6：二次复盘一致性修复
+
+- [x] steer receipt 延迟到可用 turn boundary 的 `input.accepted` 成功交付与实际消费；provider/tool/terminal/max-turn 先结束时统一 typed reject。
+- [x] 批量 steer projection 失败不报告部分成功。
+- [x] coordinator delivery 返回输入最终归属 run；late steer replacement run ID 透传到 HTTP，replacement 失败不会悬挂 promise。
+- [x] child run 严格校验 framework `started` receipt，不再用 manager 预分配 ID 覆盖真实 receipt。
+- [x] live child HTTP 删除 durable input/run 补造 fallback；receipt 与 durable projection 不一致时明确失败。
+- [x] `input.accepted` 携带 child input metadata，删除 fallback 后仍由唯一 projector 完整落盘。
+- [x] child event projection 失败补偿 durable run/transcript/task terminal 状态；`child.closed` 不再吞 durable completion failure。
+- [x] task bridge durable-first 注册；live TaskManager 注册失败回写 failed，live completion 失败不阻断 durable terminal。
+- [x] 更新 framework/daemon/event 权威文档并补充 steer、child identity、projection、task bridge 回归测试。
+
+退出标准：core、agent-runtime、server typecheck 通过；上述 focused tests 通过；所有 steer delivery promise 都有 resolve/reject 终点。
+
 ## 提交策略
 
 建议按三个可审查提交落地，而不是按文件碎片提交：

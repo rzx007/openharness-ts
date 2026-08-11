@@ -198,13 +198,18 @@ sequenceDiagram
   else handle 已注册
     Lane->>Run: steer(input)
   end
+  Run->>Run: reserve pending steer
+  QE->>Run: takeSteeredInputs at usable boundary
   Run->>Projector: input.accepted delivery=steer
-  Run->>QE: queue for next turn boundary
+  Run-->>QE: consumed input
+  Run-->>Lane: receipt(runId)
+  Lane-->>Engine: final owning runId
+  Engine-->>UI: input + original/replacement run
 ```
 
-正常 steer 不创建第二个 run。没有 active lane 时，`delivery=steer` 按普通 prompt 创建新 run。已 admit 但 handle 尚未注册的 steer 保存在 lane，注册后按序 flush。
+正常 steer 不创建第二个 run。没有 active lane 时，`delivery=steer` 按普通 prompt 创建新 run。已 admit 但 handle 尚未注册的 steer 保存在 lane，注册后按序 flush。HTTP application 会等待 delivery receipt，因此响应中的 `run` 一定是该输入最终归属的原 active run 或 replacement run，而不是过早返回旧 run。
 
-最终 turn boundary 由 framework 原子关闭 steering。若 lane 已接收输入、但 `run.steer()` 明确抛出 `AgentRunNotAcceptingInputError`，coordinator 不丢弃 durable input，而是在同一 lane 创建带 `recoveredFromSteer` metadata 的 replacement run。其他 steer 错误仍失败当前执行，不被误判为正常收尾。
+最终 turn boundary 与 max-turn boundary 由 framework 关闭 steering；未到可继续的模型回合前，`input.accepted` 和 receipt 都不会产生。若 lane 已接收输入、但 `run.steer()` 明确抛出 `AgentRunNotAcceptingInputError`，coordinator 不丢弃 durable input，而是在同一 lane 创建带 `recoveredFromSteer` metadata 的 replacement run，并用新 run ID 结算 HTTP delivery。其他 steer 错误以及 replacement 创建错误都会明确拒绝请求并终止当前 lane 控制链，不会留下悬挂 promise。
 
 ## Interrupt
 
@@ -260,6 +265,8 @@ Agent tool -> framework AgentChildManager
 HTTP child prompt、Task input 和 TaskStop 最终都通过 `rootAgent.children` 调 live handle。daemon 只保存路由索引，不复制 controls。完整流程见 [Agent Child Session Flow](./agent-child-session-flow.md)。
 
 `rootAgent.children` 是 framework root tree 共享的 descendant directory，不只包含 direct child。`child.created` durable 建模若在 task/live-route 阶段失败，projector 会失败 task、注销已注册 route，并 archive 本次新建的 child session；framework 随后回滚 handle 与 environment lease。
+
+child 普通 input/run/output/tool 投影失败时，projector 会把已存在的 durable run、未完成 transcript part 与 parent task 收束为 failed，再把 required event failure 传播回 framework。live child HTTP 路径只接受 framework `started/steer` receipt 对应的 durable input/run；缺失或身份不一致返回 500，不再由 application 临时补造 input/run。`SessionTaskBridge` 先创建 durable task 再登记 live TaskManager；live 登记失败会标记 durable task failed，live completion 失败也不阻止 durable terminal 状态落盘。
 
 ## Maintenance
 

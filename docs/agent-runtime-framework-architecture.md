@@ -116,7 +116,9 @@ steer(input)
 interrupt(reason?)
 ```
 
-steer 在同步检查后先预占 framework pending 队列，再发 `input.accepted(delivery=steer)`；事件成功后调用方收到 receipt，QueryEngine 在 turn boundary 消费。最终无工具回合会原子地“取空并关闭 steering”，因此不会出现 durable accepted 但永远未消费的输入。
+steer 在同步检查后先预占 framework pending 队列，但此时 receipt **不会**成功。QueryEngine 到达仍有下一模型回合的 turn boundary 后，framework 才投递 `input.accepted(delivery=steer)`、把输入交给 QueryEngine，并结算 receipt；因此 receipt 表示“已被本轮执行消费”，不是“已进入内存队列”。若 provider/tool/event projection 先失败、run 被中断，或已没有剩余 turn，所有未消费 receipt 都以 `AgentRunNotAcceptingInputError` 拒绝。批量 steer 也只有整批 `input.accepted` 投递成功后才统一结算，不报告部分成功。
+
+最终无工具回合和 max-turn boundary 会先关闭 steering，不再取走无法触发下一模型回合的输入。framework 只负责拒绝未消费 handle 请求；是否把 durable 输入转成 replacement run，是 daemon 的应用策略。
 
 ## Tool 与权限
 
@@ -144,6 +146,8 @@ QueryEngine
 6. active follow-up 调用当前 run 的 `steer()`；queue follow-up 串行启动下一轮。
 7. idle TTL 到期后保存 history、关闭重资源并发布 suspended；后续输入恢复同一 child。
 8. close/parent abort 终止 run、释放环境并发布 `child.closed`。
+
+child run 返回的 `started` receipt 必须逐项匹配 manager 预分配的 `sessionId/inputId/runId`；不一致时 framework 中断该 run、关闭 child，并拒绝调用方，不能用本地 ID 覆盖 framework receipt。
 
 每个 `AgentChildManager` 只 close 自己直接拥有的 child；root 与所有递归 child 共享一个 `AgentChildRegistry`。因此 `rootAgent.children.get(id|getBySessionId)` 可以定位任意深度 descendant，而生命周期释放仍由创建它的 manager 负责。daemon 不向 framework 回传 taskId、host、controls 或 opaque projection state。
 

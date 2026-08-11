@@ -162,6 +162,8 @@ run handle 的唯一所有者是 framework。daemon lane 可以保存引用并�
 
 `started` 是 required `run.started` event 的交付屏障；它不是“已排队”，而是 application 已成功消费 start fact。child prompt/spawn 只有在该 promise settle 后才返回 run receipt。
 
+`steer()` receipt 采用同样的事实屏障，但发生在 QueryEngine 的可用 turn boundary：同步调用只预占 pending slot；`input.accepted` 成功交付且输入即将进入下一模型回合后 receipt 才 resolve。run 在此之前失败、终止或耗尽 turn 时，receipt 以 typed `AgentRunNotAcceptingInputError` reject。application 可以据此实施 durable replacement policy，framework 自身不创建 durable run。
+
 `AgentSubmitOptions` 允许 daemon 提供已经准入的身份：
 
 ```ts
@@ -172,10 +174,11 @@ interface AgentSubmitOptions {
     traceId: string;
   };
   signal?: AbortSignal;
+  metadata?: Record<string, unknown>;
 }
 ```
 
-standalone 模式省略 `ids` 时由 framework 生成；daemon root run 使用 store 已生成的 ID。这样 framework event 与 durable record 使用同一身份，不再翻译句柄。
+standalone 模式省略 `ids` 时由 framework 生成；daemon root run 使用 store 已生成的 ID。这样 framework event 与 durable record 使用同一身份，不再翻译句柄。`metadata` 随 `input.accepted` 事实传播，主要用于 framework-owned child 新输入；daemon root input 已在 submit 前 durable admit。
 
 ### 5.3 AgentChildHandle
 
@@ -409,9 +412,9 @@ HTTP interrupt
 
 lane 仍负责多客户端准入和 per-session 串行，但不再让 framework 反向查询 daemon store。
 
-steer 可能在 executor 注册 handle 前已经被 HTTP durable admit。lane 保留这段短暂窗口中的 pending steer，并在 `registerHandle()` 时按准入顺序主动 flush。`run.steer()` 接受 daemon 已生成的 input ID/trace ID，framework 随后发出 `input.accepted`，projector 据此把该 input 绑定到 active run 并投影 transcript。
+steer 可能在 executor 注册 handle 前已经被 HTTP durable admit。lane 保留这段短暂窗口中的 pending steer，并在 `registerHandle()` 时按准入顺序主动 flush。`run.steer()` 接受 daemon 已生成的 input ID/trace ID；framework 在 QueryEngine 真正消费它的 turn boundary 发出 `input.accepted`，projector 据此把该 input 绑定到 active run 并投影 transcript，随后 receipt 才返回。
 
-最终无工具 turn 使用 `takeSteeredInputs({ closeIfEmpty: true })` 原子完成“取输入或关闭 steering”。若 daemon lane 先接收、framework 后确认 run 已关闭，typed `AgentRunNotAcceptingInputError` 触发 durable replacement run；输入不会停留在 store 中却没有执行归属。
+最终无工具 turn 与 max-turn boundary 会在没有下一模型回合时关闭 steering，不取走 pending input。若 daemon lane 先接收、framework 后确认 run 已关闭，typed `AgentRunNotAcceptingInputError` 触发 durable replacement run；lane delivery 返回 replacement run ID，HTTP 不会把输入错误归到旧 run。provider/tool/projection failure 也会拒绝所有尚未消费的 receipt，不会留下“已成功但模型未收到”的输入。
 
 ## 10. Child agent 目标链路
 
