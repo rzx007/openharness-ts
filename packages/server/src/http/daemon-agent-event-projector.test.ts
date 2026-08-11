@@ -54,6 +54,7 @@ describe("DaemonAgentEventProjector", () => {
       hasOpenTextPart: vi.fn(() => false),
       projectStreamEvent: vi.fn(() => ({})),
       completeOpenTextPart: vi.fn(),
+      finalizeRunParts: vi.fn(),
     };
     const liveChildren = { register: vi.fn(), unregister: vi.fn() };
     const rootAgent = { children: { get: vi.fn() } } as any;
@@ -76,6 +77,7 @@ describe("DaemonAgentEventProjector", () => {
     await projector.apply(event("input.accepted", {
       content: "inspect",
       delivery: "queue",
+      metadata: { requestedBy: "test" },
     }, { sessionId: "child-session", inputId: "input-1", runId: "run-1", childId: "child-1" }));
     bridge.bindSessionTaskRun.mockRejectedValueOnce(new Error("bind failed"));
     const started = event("run.started", {}, {
@@ -85,6 +87,12 @@ describe("DaemonAgentEventProjector", () => {
       childId: "child-1",
     });
     await expect(projector.apply(started)).rejects.toThrow("bind failed");
+    expect(transcript.finalizeRunParts).toHaveBeenCalledWith("child-session", "run-1", "failed");
+    expect(store.updateRun).toHaveBeenCalledWith("run-1", { status: "failed", error: "bind failed" });
+    expect(bridge.completeSessionTask).toHaveBeenCalledWith("child-1", {
+      status: "failed",
+      output: "bind failed",
+    });
     await projector.apply(started);
     await projector.apply(event("output.text.delta", { delta: "done" }, {
       sessionId: "child-session",
@@ -100,6 +108,10 @@ describe("DaemonAgentEventProjector", () => {
     }));
 
     expect(store.createSession).toHaveBeenCalledWith(expect.objectContaining({ id: "child-session", parentId: "parent" }));
+    expect(store.admitPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      id: "input-1",
+      metadata: expect.objectContaining({ requestedBy: "test" }),
+    }));
     expect(bridge.registerSessionTask).toHaveBeenCalledWith(expect.objectContaining({ id: "child-1" }));
     expect(liveChildren.register).toHaveBeenCalledWith("child-session", "child-1", rootAgent);
     expect(transcript.projectStreamEvent).toHaveBeenCalledWith(expect.anything(), { type: "text_delta", delta: "done" });

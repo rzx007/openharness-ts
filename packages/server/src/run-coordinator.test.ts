@@ -113,9 +113,13 @@ describe("SessionRunCoordinator", () => {
     expect(coordinator.steer("missing", { content: "ignored" })).toEqual({ merged: false });
     registered.resolve();
     expect(first).toMatchObject({ merged: true, activeRunId: "r1" });
-    expect(coordinator.steer("s1", { content: "second" })).toMatchObject({ merged: true, activeRunId: "r1" });
+    const second = coordinator.steer("s1", { content: "second" });
+    expect(second).toMatchObject({ merged: true, activeRunId: "r1" });
     release.resolve();
     await run.promise;
+    if (!first.merged || !second.merged) throw new Error("Expected steer delivery handles");
+    await expect(first.delivery).resolves.toEqual({ runId: "r1" });
+    await expect(second.delivery).resolves.toEqual({ runId: "r1" });
     expect(steered).toEqual(["first", "second"]);
   });
 
@@ -136,18 +140,72 @@ describe("SessionRunCoordinator", () => {
     const run = coordinator.enqueue({
       sessionId: "s1",
       runId: "r1",
-      onSteerRejected: async (input) => { rejected.push(input.content); },
+      onSteerRejected: async (input) => {
+        rejected.push(input.content);
+        return "r2";
+      },
       work: async (context) => {
         await context.registerHandle(handle);
         await release.promise;
       },
     });
 
-    expect(coordinator.steer("s1", { content: "late" })).toMatchObject({ merged: true, activeRunId: "r1" });
+    const steered = coordinator.steer("s1", { content: "late" });
+    expect(steered).toMatchObject({ merged: true, activeRunId: "r1" });
     release.resolve();
     await run.promise;
 
+    if (!steered.merged) throw new Error("Expected steer delivery handle");
+    await expect(steered.delivery).resolves.toEqual({ runId: "r2" });
     expect(rejected).toEqual(["late"]);
+  });
+
+  it("rejects steer delivery when replacement run creation fails", async () => {
+    const coordinator = new SessionRunCoordinator();
+    const handle: AgentRunHandle = {
+      id: "r1",
+      inputId: "i1",
+      sessionId: "s1",
+      traceId: "t1",
+      started: Promise.resolve({ sessionId: "s1", inputId: "i1", runId: "r1" }),
+      result: Promise.resolve({ status: "completed", output: "", history: [], usage: { inputTokens: 0, outputTokens: 0 } }),
+      steer: async () => { throw new AgentRunNotAcceptingInputError("r1"); },
+      interrupt: async () => {},
+    };
+    const release = deferred();
+    const run = coordinator.enqueue({
+      sessionId: "s1",
+      runId: "r1",
+      onSteerRejected: async () => { throw new Error("replacement failed"); },
+      work: async (context) => {
+        await context.registerHandle(handle);
+        await release.promise;
+      },
+    });
+
+    const steered = coordinator.steer("s1", { content: "late" });
+    if (!steered.merged) throw new Error("Expected steer delivery handle");
+    await expect(steered.delivery).rejects.toThrow("replacement failed");
+    release.resolve();
+    await expect(run.promise).rejects.toThrow("replacement failed");
+  });
+
+  it("recovers steer queued before a handle when work settles without registering one", async () => {
+    const coordinator = new SessionRunCoordinator();
+    const release = deferred();
+    const run = coordinator.enqueue({
+      sessionId: "s1",
+      runId: "r1",
+      onSteerRejected: async () => "r2",
+      work: async () => { await release.promise; },
+    });
+    const steered = coordinator.steer("s1", { content: "early" });
+    if (!steered.merged) throw new Error("Expected steer delivery handle");
+
+    release.resolve();
+
+    await expect(steered.delivery).resolves.toEqual({ runId: "r2" });
+    await expect(run.promise).resolves.toBeUndefined();
   });
 
   it("interrupts the active run and rejects queued runs", async () => {

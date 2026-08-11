@@ -16,7 +16,7 @@ export interface EnqueueRunOptions {
   sessionId: string;
   runId: string;
   work: (context: SessionRunWorkContext) => Promise<void>;
-  onSteerRejected?(input: AgentSteerInput, error: AgentRunNotAcceptingInputError): void | Promise<void>;
+  onSteerRejected?(input: AgentSteerInput, error: AgentRunNotAcceptingInputError): string | Promise<string>;
 }
 
 export interface EnqueueRunResult {
@@ -26,10 +26,20 @@ export interface EnqueueRunResult {
   promise: Promise<void>;
 }
 
+export type SteerSessionResult =
+  | { merged: false }
+  | { merged: true; activeRunId: string; delivery: Promise<{ runId: string }> };
+
 export interface InterruptSessionResult {
   activeRunId?: string;
   queuedRunIds: string[];
   interrupted: boolean;
+}
+
+interface PendingSteerRequest {
+  input: AgentSteerInput;
+  resolve(value: { runId: string }): void;
+  reject(error: unknown): void;
 }
 
 interface RunTask {
@@ -41,7 +51,8 @@ interface RunTask {
   reject: (error: unknown) => void;
   promise: Promise<void>;
   handle?: AgentRunHandle;
-  pendingSteers: AgentSteerInput[];
+  pendingSteers: PendingSteerRequest[];
+  steerRequests: Set<PendingSteerRequest>;
   controlChain: Promise<void>;
   acceptingSteers: boolean;
   onSteerRejected?: EnqueueRunOptions["onSteerRejected"];
@@ -59,11 +70,8 @@ export class SessionRunCoordinator {
     const lane = this.getLane(options.sessionId);
     const task = this.createTask(options);
     const state = lane.active ? "queued" : "running";
-    if (lane.active) {
-      lane.queue.push(task);
-    } else {
-      this.startTask(lane, task);
-    }
+    if (lane.active) lane.queue.push(task);
+    else this.startTask(lane, task);
     return {
       runId: task.runId,
       sessionId: task.sessionId,
@@ -72,12 +80,21 @@ export class SessionRunCoordinator {
     };
   }
 
-  steer(sessionId: string, input: AgentSteerInput): { merged: boolean; activeRunId?: string } {
+  steer(sessionId: string, input: AgentSteerInput): SteerSessionResult {
     const lane = this.lanes.get(sessionId);
     if (!lane?.active || !lane.active.acceptingSteers) return { merged: false };
-    lane.active.pendingSteers.push(input);
+    let resolve!: PendingSteerRequest["resolve"];
+    let reject!: PendingSteerRequest["reject"];
+    const delivery = new Promise<{ runId: string }>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    void delivery.catch(() => {});
+    const request = { input, resolve, reject };
+    lane.active.pendingSteers.push(request);
+    lane.active.steerRequests.add(request);
     this.flushSteers(lane.active);
-    return { merged: true, activeRunId: lane.active.runId };
+    return { merged: true, activeRunId: lane.active.runId, delivery };
   }
 
   interrupt(sessionId: string): InterruptSessionResult {
@@ -86,8 +103,10 @@ export class SessionRunCoordinator {
 
     const queuedRunIds = lane.queue.map((task) => task.runId);
     for (const task of lane.queue.splice(0)) {
+      const error = new RunInterruptedError("Queued run interrupted");
       task.controller.abort();
-      task.reject(new RunInterruptedError("Queued run interrupted"));
+      this.rejectSteers(task, error);
+      task.reject(error);
     }
 
     const activeRunId = lane.active?.runId;
@@ -141,6 +160,7 @@ export class SessionRunCoordinator {
       reject,
       promise,
       pendingSteers: [],
+      steerRequests: new Set(),
       controlChain: Promise.resolve(),
       acceptingSteers: true,
       onSteerRejected: options.onSteerRejected,
@@ -166,18 +186,17 @@ export class SessionRunCoordinator {
         });
         task.acceptingSteers = false;
         await task.controlChain;
+        await this.recoverUndeliveredSteers(task);
         task.resolve();
       } catch (error) {
         task.acceptingSteers = false;
+        this.rejectSteers(task, error);
         task.reject(error);
       } finally {
         if (lane.active === task) lane.active = undefined;
         const next = lane.queue.shift();
-        if (next) {
-          this.startTask(lane, next);
-        } else if (!lane.active) {
-          this.lanes.delete(task.sessionId);
-        }
+        if (next) this.startTask(lane, next);
+        else if (!lane.active) this.lanes.delete(task.sessionId);
       }
     })();
   }
@@ -186,12 +205,28 @@ export class SessionRunCoordinator {
     if (!task.handle || task.pendingSteers.length === 0) return;
     const pending = task.pendingSteers.splice(0);
     task.controlChain = task.controlChain.then(async () => {
-      for (const input of pending) {
+      for (const request of pending) {
         try {
-          await task.handle!.steer(input);
+          const receipt = await task.handle!.steer(request.input);
+          request.resolve({ runId: receipt.runId });
         } catch (error) {
-          if (!(error instanceof AgentRunNotAcceptingInputError) || !task.onSteerRejected) throw error;
-          await task.onSteerRejected(input, error);
+          if (
+            task.controller.signal.aborted ||
+            !(error instanceof AgentRunNotAcceptingInputError) ||
+            !task.onSteerRejected
+          ) {
+            request.reject(error);
+            throw error;
+          }
+          try {
+            const runId = await task.onSteerRejected(request.input, error);
+            request.resolve({ runId });
+          } catch (replacementError) {
+            request.reject(replacementError);
+            throw replacementError;
+          }
+        } finally {
+          task.steerRequests.delete(request);
         }
       }
     }).catch((error) => {
@@ -200,5 +235,32 @@ export class SessionRunCoordinator {
       throw error;
     });
     void task.controlChain.catch(() => {});
+  }
+
+  private rejectSteers(task: RunTask, error: unknown): void {
+    for (const request of task.steerRequests) request.reject(error);
+    task.steerRequests.clear();
+    task.pendingSteers.splice(0);
+  }
+
+  private async recoverUndeliveredSteers(task: RunTask): Promise<void> {
+    const pending = task.pendingSteers.splice(0);
+    if (pending.length === 0) return;
+    const error = new AgentRunNotAcceptingInputError(task.runId);
+    for (const request of pending) {
+      try {
+        if (!task.onSteerRejected) {
+          request.reject(error);
+          continue;
+        }
+        const runId = await task.onSteerRejected(request.input, error);
+        request.resolve({ runId });
+      } catch (replacementError) {
+        request.reject(replacementError);
+        throw replacementError;
+      } finally {
+        task.steerRequests.delete(request);
+      }
+    }
   }
 }

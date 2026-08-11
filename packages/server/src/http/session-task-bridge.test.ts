@@ -31,6 +31,56 @@ function createTaskManager(overrides: Partial<TaskManager> = {}): TaskManager {
 }
 
 describe("SessionTaskBridgeManager", () => {
+  it("does not register a live task when durable task creation fails", () => {
+    const context = createContext();
+    const manager = createTaskManager();
+    context.getTaskManager.mockReturnValue(manager);
+    context.store.createSessionTask.mockImplementation(() => { throw new Error("store unavailable"); });
+    const bridge = new SessionTaskBridgeManager(context).createBridge({ id: "s1", cwd: "/repo" });
+
+    expect(() => bridge.registerSessionTask(childTaskInput())).toThrow("store unavailable");
+    expect(manager.registerSessionTask).not.toHaveBeenCalled();
+  });
+
+  it("marks the durable task failed when live task registration fails", () => {
+    const context = createContext();
+    const manager = createTaskManager({
+      registerSessionTask: vi.fn(() => { throw new Error("manager unavailable"); }),
+    });
+    context.getTaskManager.mockReturnValue(manager);
+    const bridge = new SessionTaskBridgeManager(context).createBridge({ id: "s1", cwd: "/repo" });
+
+    expect(() => bridge.registerSessionTask(childTaskInput())).toThrow("manager unavailable");
+    expect(context.store.updateSessionTask).toHaveBeenCalledWith("task-1", {
+      status: "failed",
+      output: "manager unavailable",
+      error: "manager unavailable",
+    });
+    expect(context.events.publishSince).toHaveBeenCalledWith(4);
+  });
+
+  it("persists terminal state even when live task completion fails", async () => {
+    const context = createContext();
+    const manager = createTaskManager({
+      completeSessionTask: vi.fn(async () => { throw new Error("manager unavailable"); }),
+    });
+    context.getTaskManager.mockReturnValue(manager);
+    context.store.updateSessionTask.mockReturnValue({ sessionId: "s1" });
+    context.store.getSessionTask.mockReturnValue({ id: "task-1", sessionId: "s1", runId: "run-1" });
+    const bridge = new SessionTaskBridgeManager(context).createBridge({ id: "s1", cwd: "/repo" });
+
+    await expect(bridge.completeSessionTask("task-1", { status: "completed", output: "done" })).resolves.toBeUndefined();
+    expect(context.store.updateSessionTask).toHaveBeenCalledWith("task-1", {
+      status: "completed",
+      output: "done",
+    });
+    expect(context.log).toHaveBeenCalledWith(expect.objectContaining({
+      level: "warn",
+      event: "session.task.manager_completion_failed",
+      error: "manager unavailable",
+    }));
+  });
+
   it("moves both live and durable task state back to running when a child starts another run", async () => {
     const context = createContext();
     const manager = createTaskManager();
@@ -107,3 +157,16 @@ describe("SessionTaskBridgeManager", () => {
     expect(context.events.publishSince).toHaveBeenCalledWith(4);
   });
 });
+
+function childTaskInput() {
+  return {
+    id: "task-1",
+    description: "Explore",
+    cwd: "/repo",
+    sessionId: "s1",
+    childSessionId: "child-1",
+    prompt: "inspect",
+    onInput: async () => {},
+    onStop: async () => {},
+  };
+}

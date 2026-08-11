@@ -94,17 +94,29 @@ export class SessionTaskBridgeManager {
     const manager = this.context.getTaskManager({ cwd: session.cwd, sessionId: session.id });
     return {
       registerSessionTask: (input) => {
-        const task = manager.registerSessionTask(input);
         const before = this.context.events.checkpoint();
         this.context.store.createSessionTask({
-          id: task.id,
+          id: input.id,
           sessionId: input.sessionId,
           childSessionId: input.childSessionId,
-          type: task.type,
-          description: task.description,
-          cwd: task.cwd,
-          metadata: { origin: "child_session", agent: task.description, taskManagerId: task.id },
+          type: "agent",
+          description: input.description,
+          cwd: input.cwd,
+          metadata: { origin: "child_session", agent: input.description, taskManagerId: input.id },
         });
+        let task: TaskInfo;
+        try {
+          task = manager.registerSessionTask(input);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.context.store.updateSessionTask(input.id, {
+            status: "failed",
+            output: message,
+            error: message,
+          });
+          this.context.events.publishSince(before);
+          throw error;
+        }
         this.context.log({
           level: "info",
           event: "session.task.created",
@@ -130,7 +142,13 @@ export class SessionTaskBridgeManager {
       },
       completeSessionTask: async (taskId, input) => {
         const managerStatus = input.status === "interrupted" ? "stopped" : input.status;
-        const task = await manager.completeSessionTask(taskId, { ...input, status: managerStatus });
+        let task: unknown;
+        let managerError: unknown;
+        try {
+          task = await manager.completeSessionTask(taskId, { ...input, status: managerStatus });
+        } catch (error) {
+          managerError = error;
+        }
         const before = this.context.events.checkpoint();
         this.context.store.updateSessionTask(taskId, {
           status: input.status,
@@ -150,6 +168,15 @@ export class SessionTaskBridgeManager {
           ...(input.status === "failed" ? { error: "task failed" } : {}),
         });
         this.context.events.publishSince(before);
+        if (managerError) {
+          this.context.log({
+            level: "warn",
+            event: "session.task.manager_completion_failed",
+            sessionId: persisted?.sessionId ?? session.id,
+            taskId,
+            error: managerError instanceof Error ? managerError.message : String(managerError),
+          });
+        }
         return task;
       },
       writeToSessionTask: async (taskId, data) => {

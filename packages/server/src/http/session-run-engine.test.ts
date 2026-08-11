@@ -22,9 +22,9 @@ describe("SessionRunEngine", () => {
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
     });
 
-    const root = engine.admitPromptAndMaybeRun("s1", { content: "hello", traceId: "trace-1" });
+    const root = await engine.admitPromptAndMaybeRun("s1", { content: "hello", traceId: "trace-1" });
     await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
-    const steered = engine.admitPromptAndMaybeRun("s1", {
+    const steered = await engine.admitPromptAndMaybeRun("s1", {
       id: "steer-1",
       content: "nudge",
       delivery: "steer",
@@ -39,7 +39,7 @@ describe("SessionRunEngine", () => {
     await engine.waitForRuns([root.run!.id]);
   });
 
-  it("returns an existing prompt/run for an identical request id", () => {
+  it("returns an existing prompt/run for an identical request id", async () => {
     const store = createStore();
     const engine = new SessionRunEngine({
       store: store as any,
@@ -47,8 +47,8 @@ describe("SessionRunEngine", () => {
       runExecutor: {} as any,
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
     });
-    const first = engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
-    const second = engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
+    const first = await engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
+    const second = await engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
     expect(second.input).toBe(first.input);
   });
 
@@ -76,14 +76,23 @@ describe("SessionRunEngine", () => {
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
     });
 
-    engine.admitPromptAndMaybeRun("s1", { content: "first" });
+    await engine.admitPromptAndMaybeRun("s1", { content: "first" });
     await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
-    engine.admitPromptAndMaybeRun("s1", { id: "late-input", content: "late", delivery: "steer" });
+    const steered = engine.admitPromptAndMaybeRun("s1", {
+      id: "late-input",
+      content: "late",
+      delivery: "steer",
+    });
     await vi.waitFor(() => expect(store.createRun).toHaveBeenCalledTimes(2));
     const replacement = store.createRun.mock.results[1]?.value;
     expect(replacement).toMatchObject({
       inputId: "late-input",
       metadata: expect.objectContaining({ recoveredFromSteer: true }),
+    });
+    await expect(steered).resolves.toMatchObject({
+      input: { id: "late-input" },
+      run: { id: replacement.id },
+      queue_state: "queued",
     });
 
     pending.resolve();

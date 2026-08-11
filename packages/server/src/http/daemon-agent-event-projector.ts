@@ -36,8 +36,24 @@ export class DaemonAgentEventProjector {
 
   async apply(event: AgentEvent): Promise<void> {
     if (event.sequence <= this.lastAppliedSequence) return;
-    await this.project(event);
-    this.lastAppliedSequence = event.sequence;
+    try {
+      await this.project(event);
+      this.lastAppliedSequence = event.sequence;
+    } catch (error) {
+      if (event.context.childId && event.type !== "child.created" && event.type !== "child.closed") {
+        await this.compensateChildProjectionFailure(event, error).catch((compensationError) => {
+          this.context.log({
+            level: "error",
+            event: "session.child_projection.compensation_failed",
+            traceId: event.context.traceId,
+            sessionId: event.context.sessionId,
+            runId: event.context.runId,
+            error: compensationError instanceof Error ? compensationError.message : String(compensationError),
+          });
+        });
+      }
+      throw error;
+    }
   }
 
   private async project(event: AgentEvent): Promise<void> {
@@ -136,7 +152,8 @@ export class DaemonAgentEventProjector {
       bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
       taskId = this.context.store.getSessionTask(childId)?.id;
       if (!taskId) {
-        taskId = bridge.registerSessionTask({
+        taskId = childId;
+        const registered = bridge.registerSessionTask({
           id: childId,
           description: spawn.description,
           cwd,
@@ -151,7 +168,8 @@ export class DaemonAgentEventProjector {
           onStop: async () => {
             await this.context.rootAgent.children.get(childId)?.interrupt("Child agent stopped");
           },
-        }).id;
+        });
+        if (registered.id !== taskId) throw new Error(`Child task identity conflict: ${registered.id}/${taskId}`);
       }
       this.context.liveChildren.register(sessionId, childId, this.context.rootAgent);
       liveRegistered = true;
@@ -182,7 +200,7 @@ export class DaemonAgentEventProjector {
     if (state) {
       const task = this.context.store.getSessionTask(state.taskId);
       if (task && (task.status === "pending" || task.status === "running")) {
-        await state.bridge.completeSessionTask(state.taskId, event.data.result).catch(() => {});
+        await state.bridge.completeSessionTask(state.taskId, event.data.result);
       }
       this.children.delete(state.childId);
     }
@@ -206,8 +224,8 @@ export class DaemonAgentEventProjector {
         delivery: event.data.delivery,
         content,
         metadata: {
+          ...event.data.metadata,
           ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
-          ...(event.context.parentRunId ? { parentRunId: event.context.parentRunId } : {}),
         },
       });
       this.context.events.publishSince(before);
@@ -364,6 +382,33 @@ export class DaemonAgentEventProjector {
       payload: { frameworkEventId: event.id, ...payload },
     });
     this.context.events.publishSince(before);
+  }
+
+  private async compensateChildProjectionFailure(event: AgentEvent, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    const runId = event.context.runId;
+    if (runId) {
+      const run = this.context.store.getRun(runId);
+      if (run && (run.status === "pending" || run.status === "running")) {
+        const before = this.context.events.checkpoint();
+        this.context.transcriptProjection.finalizeRunParts(event.context.sessionId, runId, "failed");
+        this.context.store.appendEvent({
+          type: "session.run.error",
+          sessionId: event.context.sessionId,
+          payload: { runId, traceId: event.context.traceId, error: message, projectionFailure: true },
+        });
+        this.context.store.updateRun(runId, { status: "failed", error: message });
+        this.context.events.publishSince(before);
+      }
+      this.transcripts.delete(runId);
+    }
+
+    const child = this.children.get(event.context.childId!);
+    if (!child) return;
+    const task = this.context.store.getSessionTask(child.taskId);
+    if (task && (task.status === "pending" || task.status === "running")) {
+      await child.bridge.completeSessionTask(child.taskId, { status: "failed", output: message });
+    }
   }
 }
 

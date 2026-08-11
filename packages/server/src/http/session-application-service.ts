@@ -18,7 +18,7 @@ import {
 
 export class SessionApplicationError extends Error {
   constructor(
-    readonly status: 404 | 409,
+    readonly status: 404 | 409 | 500,
     message: string,
   ) {
     super(message);
@@ -141,37 +141,37 @@ export class SessionApplicationService {
       metadata: input.metadata,
     });
     if (live) {
-      let admitted = live.inputId ? this.context.store.getInput(live.inputId) : undefined;
-      if (!admitted || admitted.content !== input.content || (input.id && admitted.id !== input.id)) {
-        const before = this.context.events.checkpoint();
-        admitted = this.context.store.admitPrompt({
-          id: input.id,
-          sessionId,
-          delivery,
-          content: input.content,
-          metadata,
-        });
-        this.context.events.publishSince(before);
+      const admitted = this.context.store.getInput(live.inputId);
+      const run = this.context.store.getRun(live.runId);
+      if (
+        live.sessionId !== sessionId ||
+        !admitted ||
+        admitted.sessionId !== sessionId ||
+        admitted.content !== input.content ||
+        admitted.delivery !== delivery ||
+        (input.id !== undefined && admitted.id !== input.id) ||
+        !jsonEqual(withoutTraceId(admitted.metadata), withoutTraceId(metadata))
+      ) {
+        throw new SessionApplicationError(500, "Live child input projection did not match its framework receipt");
       }
-      const run = live.runId ? this.context.store.getRun(live.runId) : undefined;
-      if (!admitted || admitted.sessionId !== sessionId) {
-        throw new SessionApplicationError(409, "Live child did not create a durable input projection");
+      if (!run || run.sessionId !== sessionId || run.inputId !== admitted.id) {
+        throw new SessionApplicationError(500, "Live child run projection did not match its framework receipt");
       }
       return {
         input: admitted,
-        ...(run ? { run } : {}),
-        ...(run?.status === "running" ? { queue_state: "running" as const } : {}),
-        ...(run?.status === "pending" ? { queue_state: "queued" as const } : {}),
+        run,
+        ...(run.status === "running" ? { queue_state: "running" as const } : {}),
+        ...(run.status === "pending" ? { queue_state: "queued" as const } : {}),
       };
     }
-    return this.context.runEngine.admitPromptAndMaybeRun(sessionId, input);
+    return await this.context.runEngine.admitPromptAndMaybeRun(sessionId, input);
   }
 
-  resumeRun(
+  async resumeRun(
     sessionId: string,
     runId: string,
     input: ResumeSessionRunCommand,
-  ): ResumeSessionRunResult {
+  ): Promise<ResumeSessionRunResult> {
     const sourceRun = this.context.store.getRun(runId);
     if (!sourceRun || sourceRun.sessionId !== sessionId) {
       throw new SessionApplicationError(404, "Interrupted run not found");
@@ -215,7 +215,7 @@ export class SessionApplicationService {
       sourceRunId: sourceRun.id,
       sourceInputId: sourceInput.id,
     };
-    const resumed = this.context.runEngine.admitPromptAndMaybeRun(sessionId, {
+    const resumed = await this.context.runEngine.admitPromptAndMaybeRun(sessionId, {
       id: input.id,
       content: sourceInput.content,
       metadata: { ...(input.metadata ?? {}), recovery },

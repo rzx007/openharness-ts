@@ -48,7 +48,7 @@ export function createRunExecutionRoutes(context: RunExecutionRoutesContext): Ho
       if (body.metadata !== undefined && !isRecord(body.metadata)) return errorResponse(400, "metadata must be an object");
 
       try {
-        const resumed = context.application.resumeRun(sessionId, runId, {
+        const resumed = await context.application.resumeRun(sessionId, runId, {
           id: typeof body.id === "string" ? body.id : undefined,
           metadata: isRecord(body.metadata) ? body.metadata : undefined,
           traceId: context.traces.get(c.req.raw),

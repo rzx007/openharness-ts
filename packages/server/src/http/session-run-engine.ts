@@ -109,7 +109,7 @@ export class SessionRunEngine {
       .filter((promise): promise is Promise<void> => promise !== undefined));
   }
 
-  admitPromptAndMaybeRun(sessionId: string, input: AdmitPromptInput): AdmitPromptResult {
+  async admitPromptAndMaybeRun(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
     const delivery = input.delivery ?? "queue";
     const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(input.metadata?.traceId) ?? randomUUID();
     const metadata = { ...(input.metadata ?? {}), traceId };
@@ -152,10 +152,16 @@ export class SessionRunEngine {
       });
       if (steered.merged && steered.activeRunId) {
         this.context.events.publishSince(before);
-        const activeRun = this.context.store.getRun(steered.activeRunId);
+        const delivered = await steered.delivery;
+        const activeRun = this.context.store.getRun(delivered.runId);
+        if (!activeRun || activeRun.sessionId !== sessionId) {
+          throw new Error(`Steered input run was not found: ${delivered.runId}`);
+        }
         return {
           input: admitted,
-          ...(activeRun ? { run: activeRun, queue_state: "running" as const } : {}),
+          run: activeRun,
+          ...(activeRun.status === "running" ? { queue_state: "running" as const } : {}),
+          ...(activeRun.status === "pending" ? { queue_state: "queued" as const } : {}),
         };
       }
     }
@@ -208,13 +214,14 @@ export class SessionRunEngine {
     return enqueued.state;
   }
 
-  private enqueueRejectedSteer(sessionId: string, input: { id?: string; traceId?: string }): void {
+  private enqueueRejectedSteer(sessionId: string, input: { id?: string; traceId?: string }): string {
     if (!input.id) throw new Error("Rejected steer is missing its durable input id");
     const admitted = this.context.store.getInput(input.id);
     if (!admitted || admitted.sessionId !== sessionId) {
       throw new Error(`Rejected steer input was not found: ${input.id}`);
     }
-    if (this.context.store.findRunByInput(admitted.id)) return;
+    const existing = this.context.store.findRunByInput(admitted.id);
+    if (existing) return existing.id;
     const before = this.context.events.checkpoint();
     const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(admitted.metadata.traceId) ?? randomUUID();
     const run = this.context.store.createRun({
@@ -224,5 +231,6 @@ export class SessionRunEngine {
     });
     this.context.events.publishSince(before);
     this.enqueueRun(run, admitted.id);
+    return run.id;
   }
 }

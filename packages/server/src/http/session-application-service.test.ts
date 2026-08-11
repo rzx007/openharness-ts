@@ -82,7 +82,7 @@ describe("SessionApplicationService", () => {
       sessionId: "s1",
       delivery: "queue",
       content: "follow up",
-      metadata: {},
+      metadata: { requestedBy: "test" },
     };
     const run = { id: "live-run", sessionId: "s1", inputId: "live-input", status: "running" };
     const { service, store, runEngine, agentPool, liveChildren } = createService({ live: true, input, run });
@@ -93,6 +93,7 @@ describe("SessionApplicationService", () => {
       id: "live-input",
       delivery: "queue",
       content: "follow up",
+      metadata: { requestedBy: "test" },
     });
 
     expect(agentPool.warm).not.toHaveBeenCalled();
@@ -100,9 +101,45 @@ describe("SessionApplicationService", () => {
       id: "live-input",
       delivery: "queue",
       content: "follow up",
+      metadata: { requestedBy: "test" },
     }));
     expect(runEngine.admitPromptAndMaybeRun).not.toHaveBeenCalled();
     expect(admitted).toMatchObject({ input, run, queue_state: "running" });
+  });
+
+  it("fails a live child prompt when its framework receipt was not durably projected", async () => {
+    const { service, store, runEngine, liveChildren } = createService({ live: true });
+    liveChildren.send.mockResolvedValue({
+      sessionId: "s1",
+      inputId: "missing-input",
+      runId: "missing-run",
+      result: Promise.resolve({ status: "completed" as const, output: "done" }),
+    });
+
+    await expect(service.admitPrompt("s1", { content: "follow up" })).rejects.toEqual(
+      expect.objectContaining<Partial<SessionApplicationError>>({ status: 500 }),
+    );
+    expect(store.admitPrompt).not.toHaveBeenCalled();
+    expect(runEngine.admitPromptAndMaybeRun).not.toHaveBeenCalled();
+  });
+
+  it("rejects a live child receipt whose run belongs to another input", async () => {
+    const input = {
+      id: "live-input",
+      sessionId: "s1",
+      delivery: "queue",
+      content: "follow up",
+      metadata: {},
+    };
+    const run = { id: "live-run", sessionId: "s1", inputId: "other-input", status: "running" };
+    const { service, store } = createService({ live: true, input, run });
+    store.getInput.mockReturnValueOnce(undefined).mockReturnValue(input);
+
+    await expect(service.admitPrompt("s1", {
+      id: "live-input",
+      content: "follow up",
+      delivery: "queue",
+    })).rejects.toEqual(expect.objectContaining<Partial<SessionApplicationError>>({ status: 500 }));
   });
 
   it("creates a session, starts warming it, and publishes the store event", () => {
@@ -139,7 +176,7 @@ describe("SessionApplicationService", () => {
     expect(broadcastSince).toHaveBeenCalledWith(7);
   });
 
-  it("resumes an interrupted run and records its recovery link", () => {
+  it("resumes an interrupted run and records its recovery link", async () => {
     const sourceRun = {
       id: "source-run",
       sessionId: "s1",
@@ -157,7 +194,7 @@ describe("SessionApplicationService", () => {
       input: sourceInput,
     });
 
-    const resumed = service.resumeRun("s1", "source-run", {
+    const resumed = await service.resumeRun("s1", "source-run", {
       id: "recovery-input",
       metadata: { requestedBy: "test" },
       traceId: "trace-1",
