@@ -92,6 +92,19 @@ export interface AgentCompactResult {
   afterMessageCount: number;
 }
 
+export type OpenHarnessAgentState = "idle" | "running" | "maintaining" | "closing" | "closed";
+
+export class AgentOperationConflictError extends Error {
+  constructor(
+    readonly agentId: string,
+    readonly state: OpenHarnessAgentState,
+    readonly operation: string,
+  ) {
+    super(`Agent cannot ${operation} while ${state}: ${agentId}`);
+    this.name = "AgentOperationConflictError";
+  }
+}
+
 export interface AgentInspection {
   model: string;
   tools: Array<{ name: string }>;
@@ -109,6 +122,7 @@ export interface AgentInspection {
 
 export interface OpenHarnessAgent {
   readonly id: string;
+  readonly state: OpenHarnessAgentState;
   readonly events: AgentEventSource;
   readonly children: AgentChildDirectory;
   submitMessage(content: string | ContentBlock[], options?: OpenHarnessAgentSubmitOptions): AgentRunHandle;
@@ -126,7 +140,9 @@ export interface OpenHarnessAgent {
 
 class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   private activeRun?: FrameworkAgentRun;
-  private closed = false;
+  private maintenance?: { kind: "compact" | "remember"; settled: Promise<void> };
+  private lifecycleState: OpenHarnessAgentState = "idle";
+  private closePromise?: Promise<void>;
 
   constructor(
     private readonly runtime: RuntimeBundle,
@@ -145,6 +161,10 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     return this.session.id;
   }
 
+  get state(): OpenHarnessAgentState {
+    return this.lifecycleState;
+  }
+
   get events(): AgentEventSource {
     return this.eventBus;
   }
@@ -153,8 +173,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     content: string | ContentBlock[],
     options: OpenHarnessAgentSubmitOptions = {},
   ): AgentRunHandle {
-    if (this.closed) throw new Error(`Agent is closed: ${this.id}`);
-    if (this.activeRun?.active) throw new Error(`Agent already has an active run: ${this.id}`);
+    this.assertIdle("submit a message");
     const ids = options.ids ?? {
       inputId: `input_${randomUUID()}`,
       runId: `run_${randomUUID()}`,
@@ -174,10 +193,13 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       delivery: options.delivery ?? "queue",
       metadata: options.metadata,
       onSettled: () => {
-        if (this.activeRun === run) this.activeRun = undefined;
+        if (this.activeRun !== run) return;
+        this.activeRun = undefined;
+        if (this.lifecycleState === "running") this.lifecycleState = "idle";
       },
     });
     this.activeRun = run;
+    this.lifecycleState = "running";
     return run;
   }
 
@@ -193,30 +215,37 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   }
 
   loadHistory(messages: Message[]): void {
+    this.assertIdle("load history");
     this.runtime.queryEngine.loadMessages(messages);
   }
 
   clear(): void {
+    this.assertIdle("clear history");
     this.session.clear();
   }
 
   setModel(model: string): void {
+    this.assertIdle("set the model");
     this.model = model;
     this.runtime.queryEngine.setModel(model);
   }
 
-  async compact(): Promise<AgentCompactResult> {
-    const beforeMessageCount = this.getHistory().length;
-    await this.runtime.queryEngine.compact();
-    const history = this.getHistory();
-    return { history, beforeMessageCount, afterMessageCount: history.length };
+  compact(): Promise<AgentCompactResult> {
+    return this.runMaintenance("compact", async () => {
+      const beforeMessageCount = this.getHistory().length;
+      await this.runtime.queryEngine.compact();
+      const history = this.getHistory();
+      return { history, beforeMessageCount, afterMessageCount: history.length };
+    });
   }
 
-  async remember(): Promise<AgentRememberResult> {
-    if (!this.memory) {
-      return { skipped: true, reason: "memory is disabled", writtenIds: [], titles: [] };
-    }
-    return await this.memory.remember(this.getHistory(), this.runtime.apiClient, this.model);
+  remember(): Promise<AgentRememberResult> {
+    return this.runMaintenance("remember", async () => {
+      if (!this.memory) {
+        return { skipped: true, reason: "memory is disabled", writtenIds: [], titles: [] };
+      }
+      return await this.memory.remember(this.getHistory(), this.runtime.apiClient, this.model);
+    });
   }
 
   getUsage(): UsageSnapshot {
@@ -238,13 +267,47 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     };
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    await this.activeRun?.interrupt("Agent closed");
-    await this.childManager.closeAll();
-    await this.eventBus.drain();
-    await this.runtime.close();
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    if (this.lifecycleState === "closed") return Promise.resolve();
+    this.lifecycleState = "closing";
+    const closing = (async () => {
+      try {
+        await this.activeRun?.interrupt("Agent closed");
+        await this.maintenance?.settled;
+        await this.childManager.closeAll();
+        await this.eventBus.drain();
+        await this.runtime.close();
+      } finally {
+        this.lifecycleState = "closed";
+      }
+    })();
+    this.closePromise = closing;
+    return closing;
+  }
+
+  private assertIdle(operation: string): void {
+    if (this.lifecycleState !== "idle") {
+      throw new AgentOperationConflictError(this.id, this.lifecycleState, operation);
+    }
+  }
+
+  private runMaintenance<T>(kind: "compact" | "remember", work: () => Promise<T>): Promise<T> {
+    this.assertIdle(kind);
+    this.lifecycleState = "maintaining";
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => { settle = resolve; });
+    const operation = { kind, settled };
+    this.maintenance = operation;
+    return (async () => {
+      try {
+        return await work();
+      } finally {
+        if (this.maintenance === operation) this.maintenance = undefined;
+        if (this.lifecycleState === "maintaining") this.lifecycleState = "idle";
+        settle();
+      }
+    })();
   }
 }
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AgentRunNotAcceptingInputError, type Settings } from "@openharness/core";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createOpenHarnessAgent } from "./agent.js";
+import { AgentOperationConflictError, createOpenHarnessAgent } from "./agent.js";
 
 const tempDirs: string[] = [];
 
@@ -99,5 +99,43 @@ describe("createOpenHarnessAgent", () => {
     await expect(run.result).rejects.toThrow("second projection failed");
     await expect(second).rejects.toBeInstanceOf(AgentRunNotAcceptingInputError);
     await agent.close();
+  });
+
+  it("serializes runs, maintenance, context mutation, and close through one lifecycle", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
+    tempDirs.push(cwd);
+    const settings: Settings = {
+      apiKey: "test-key",
+      apiFormat: "anthropic",
+      model: "claude-test",
+      maxTurns: 3,
+      permission: { mode: "default" },
+      sandbox: { enabled: false },
+    };
+    const agent = await createOpenHarnessAgent({ cwd, settings });
+    let finishCompact!: () => void;
+    (agent as any).runtime.queryEngine.compact = () => new Promise<void>((resolve) => {
+      finishCompact = resolve;
+    });
+
+    const compact = agent.compact();
+    expect(agent.state).toBe("maintaining");
+    expect(() => agent.submitMessage("late run")).toThrow(AgentOperationConflictError);
+    expect(() => agent.loadHistory([])).toThrow(AgentOperationConflictError);
+    expect(() => agent.clear()).toThrow(AgentOperationConflictError);
+    expect(() => agent.setModel("other-model")).toThrow(AgentOperationConflictError);
+
+    const closing = agent.close();
+    expect(agent.state).toBe("closing");
+    let closed = false;
+    void closing.then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+
+    finishCompact();
+    await compact;
+    await closing;
+    expect(agent.state).toBe("closed");
+    expect(() => agent.submitMessage("after close")).toThrow(AgentOperationConflictError);
   });
 });

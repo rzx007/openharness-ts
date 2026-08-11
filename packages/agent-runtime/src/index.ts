@@ -11,11 +11,13 @@ export {
   type OpenHarnessRuntimeOverrides,
 } from "./default-runtime.js";
 export {
+  AgentOperationConflictError,
   createOpenHarnessAgent,
   type AgentCompactResult,
   type AgentInspection,
   type OpenHarnessAgent,
   type OpenHarnessAgentOptions,
+  type OpenHarnessAgentState,
   type OpenHarnessAgentSubmitOptions,
 } from "./agent.js";
 export type { AgentRememberResult } from "./memory-runtime.js";
