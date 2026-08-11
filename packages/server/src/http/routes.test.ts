@@ -11,6 +11,7 @@ import { createSessionRoutes } from "./routes/session.js";
 import { createSessionUtilityRoutes } from "./routes/session-utility.js";
 import { createSystemRoutes } from "./routes/system.js";
 import { createTaskRoutes } from "./routes/task.js";
+import { SessionApplicationError } from "./session-application-service.js";
 
 function runtimeSnapshot() {
   return {
@@ -290,6 +291,51 @@ describe("session routes", () => {
       traceId: "trace-1",
     });
   });
+
+  it("preserves application error status for slash command prompts", async () => {
+    const app = createSessionRoutes({
+      queries: {
+        getSession: vi.fn(() => ({
+          id: "s1",
+          cwd: "/repo",
+          title: "Session",
+          model: "gpt-test",
+          status: "idle",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        })),
+        getSessionState: vi.fn(),
+        listMessageParts: vi.fn(() => []),
+        listMessages: vi.fn(() => []),
+        listSessions: vi.fn(() => []),
+      },
+      application: {
+        createSession: vi.fn(),
+        getSession: vi.fn(),
+        updateSession: vi.fn(),
+        archiveSessionTree: vi.fn(),
+        admitPrompt: vi.fn(async () => {
+          throw new SessionApplicationError(500, "Child projection mismatch");
+        }),
+      },
+      commandCatalog: {
+        expand: vi.fn(async () => ({
+          prompt: "expanded prompt",
+          command: { name: "/fix", kind: "template", source: "project" },
+        })),
+      },
+      traces: { get: () => "trace-1" },
+    });
+
+    const response = await app.request("/s1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ line: "/fix tests" }),
+    });
+
+    expect(response.status).toBe(500);
+  });
 });
 
 describe("run execution routes", () => {
@@ -328,6 +374,25 @@ describe("run execution routes", () => {
       metadata: { source: "test" },
       traceId: "trace-1",
     });
+  });
+
+  it("preserves session application error status for prompt failures", async () => {
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt: vi.fn(async () => { throw new SessionApplicationError(500, "projection mismatch"); }),
+        resumeRun: vi.fn(),
+        interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
+      },
+      traces: { get: () => "trace-1" },
+    });
+
+    const response = await app.request("/s1/prompts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "hello" }),
+    });
+
+    expect(response.status).toBe(500);
   });
 
   it("forwards interrupted-run recovery to the session application", async () => {

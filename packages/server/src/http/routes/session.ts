@@ -165,7 +165,8 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         });
         return jsonResponse({ ...admitted, command: expanded.command }, 202);
       } catch (error) {
-        return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
+        const status = error instanceof SessionApplicationError ? error.status : sessionMutationErrorStatus(error);
+        return errorResponse(status, error instanceof Error ? error.message : String(error));
       }
     });
 }

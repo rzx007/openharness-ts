@@ -36,7 +36,8 @@ export function createRunExecutionRoutes(context: RunExecutionRoutesContext): Ho
         });
         return jsonResponse(admitted, 202);
       } catch (error) {
-        return errorResponse(sessionMutationErrorStatus(error), error instanceof Error ? error.message : String(error));
+        const status = error instanceof SessionApplicationError ? error.status : sessionMutationErrorStatus(error);
+        return errorResponse(status, error instanceof Error ? error.message : String(error));
       }
     })
     .post("/:sessionId/runs/:runId/resume", async (c) => {
