@@ -462,6 +462,7 @@ sequenceDiagram
 - `child.created` listener 是有序且 awaited 的，所以 durable child 建模失败时 framework 不会继续启动 child。
 - framework 先把 handle 放入 `agent.children`，再发 `child.created`；listener 失败时回滚 directory 和 environment lease。
 - event 不返回 `taskId`。agent tool 使用 `childId`；daemon task 保存 `childId` 用于路由。
+- child close 先进入 `closing`，新 input 不得与资源释放并发；command 不接受 `agent@team` alias。
 - child run 使用与 root run 相同的 run/output/tool event，不再创建 child-scoped `AgentRunHost`。
 - descendant event 自动汇入 root agent event source，且所有 manager 共享一个 tree-wide child registry；grandchild 不需要复用一个带 opaque state 的 daemon projection 对象，root directory 也能直接路由它。
 - live HTTP/task input 通过 `agent.children.getBySessionId()` 找到 handle；不再把 `AgentChildControls` 注册进 daemon。
@@ -543,6 +544,8 @@ projection 是 daemon 对事实的单向消费，不再是 framework 执行协�
 9. event payload 必须可序列化并限制 tool output/delta 大小；大内容继续由 transcript/store 分块处理。
 10. listener 不能反向调用同一 agent 的阻塞方法造成重入；daemon 路由在 event apply 完成后再执行 live command。
 11. required listener 失败后 dispatcher 立即熔断该 run；不得再通过同一个失败 listener 递归发送 `run.failed`。executor 使用 durable fallback 收口未终态 run。
+12. daemon 的一次 event 归约必须在同一个 `SessionStore.transaction()` 内提交；SQLite 写失败时内存 read model 与 transcript reducer state 一并回滚。
+13. child/pool close 必须线性化：`closing` 阶段拒绝新 input/acquire，旧 generation 完整释放前不能创建 replacement。
 
 ## 14. 被否决的替代方案
 

@@ -108,7 +108,7 @@ daemon consumes events and projects durable state
 - [x] steer 先同步预占 pending slot；最终 turn 原子 drain/close，late reject 由 daemon 创建 durable replacement run。
 - [x] `AgentRunHandle.started` 建立 required `run.started` delivery barrier；child receipt 不早于 durable run start。
 - [x] root tree 共享 `AgentChildRegistry`，支持从 root 路由任意深度 descendant，同时保留 manager-local lifecycle ownership。
-- [x] `AgentPool` 把 agent promise 与 subscription 收入同一代际 entry，旧 close 不影响 replacement。
+- [x] `AgentPool` 把 agent promise 与 subscription 收入同一代际 entry；closing 完成后的清理不误伤后续 replacement。
 - [x] `child.created` partial failure 补偿 task/live route/new child session。
 - [x] projector 用成功 event sequence 水位替代无界 event/input sets。
 - [x] listener/infrastructure failure 收束遗留 running transcript parts。
@@ -154,10 +154,24 @@ daemon consumes events and projects durable state
 - [x] daemon restart 收束 running transcript parts，并把旧进程 pending permission 置为 expired。
 - [x] input create-or-validate 比较完整业务 metadata；root executor 原样传递 admitted metadata。
 - [x] durable run terminal 不可 reopen；child task 仍可显式绑定新 run 后 reopen。
-- [x] `child.closed` durable completion 失败时仍清理 projector live state。
+- [x] `child.closed` durable completion 失败时清理 live route，并保留 pending projection state 供后续重试。
 - [x] 删除 `listUnboundInputs`、`createChildSession`、`writeToSessionTask` 旧接口并更新权威文档。
 
 退出标准：agent-runtime/server/services focused tests、全量 package tests/typecheck 与 `git diff --check` 通过；重启集成测试覆盖 run part/task/permission 三类 stale state。
+
+## Task 9：事务边界与 closing 线性化
+
+- [x] `SessionStore.transaction()` 将 SQLite commit 与内存 read model 绑定；任一嵌套写失败时整体恢复事务前快照。
+- [x] projector 的 input/run/stream/terminal/compensation 多步归约使用 store transaction，并在失败时恢复 transcript reducer state。
+- [x] text delta 使用增量 SQL 持久化 part 文本；daemon 在 part complete 前退出不会丢失已输出内容。
+- [x] child lifecycle 增加不可逆 `closing`；close 开始后拒绝 steer/queue，run/creation 续体不能回写 active state。
+- [x] 删除 `agent@team` command alias；child command 只接受 canonical child/task ID，session 查询走 tree-wide directory。
+- [x] `AgentPool` closing entry 阻止 replacement generation，并在等待后重新读取 durable session/history；closing/archived session 不可 warm/acquire。
+- [x] archive 在 descendant snapshot 前先把 parent 置为 closing；projector 拒绝 closing/archived parent 的 `child.created`。
+- [x] `child.closed` durable completion 失败时保留 pending projection state，下一有序事件或同 event retry 先完成 terminal projection。
+- [x] 增加 store fault injection、running delta reload、child close/input、pool close/acquire、archive admission 与 child close retry 回归测试。
+
+退出标准：agent-runtime、services、server、core 全量测试与相关 package typecheck 通过；durable store 失败不产生进程内幽灵状态；同一 session/child 在 closing 窗口没有第二个执行 owner。
 
 ## 提交策略
 

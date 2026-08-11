@@ -146,11 +146,13 @@ QueryEngine
 6. 启动 child run；child run 使用普通 input/run/output/tool events。
 7. active follow-up 调用当前 run 的 `steer()`；queue follow-up 串行启动下一轮。
 8. idle TTL 到期后保存 history、关闭重资源并发布 suspended；后续输入恢复同一 child。
-9. close/parent abort 终止 run、等待任何 in-flight agent creation、释放环境并发布一次 `child.closed`。
+9. close/parent abort 先进入 `closing` 并拒绝所有新 input，再终止 run、等待任何 in-flight agent creation、释放环境并发布一次 `child.closed`。
 
 child run 返回的 `started` receipt 必须逐项匹配 manager 预分配的 `sessionId/inputId/runId`；不一致时 framework 中断该 run、关闭 child，并拒绝调用方，不能用本地 ID 覆盖 framework receipt。
 
 caller 提供 child input ID 时，manager 在 live 实例内缓存最近 256 个已结算请求，加上全部未结算请求：相同 ID、相同 payload 返回同一结果，相同 ID、不同 payload 拒绝。这个窗口只保护 framework live handle；daemon 的长期 HTTP 幂等由 durable input/run 关系负责，因此 framework 不持有无界历史。
+
+child command 只接受 canonical `childId`。`sessionId` 通过 tree-wide directory 的 `getBySessionId()` 查询；`agent@team` 不作为 command alias，因此同类型 worker 并行时不存在静默覆盖或关闭后 alias 丢失。
 
 每个 `AgentChildManager` 只 close 自己直接拥有的 child；root 与所有递归 child 共享一个 `AgentChildRegistry`。因此 `rootAgent.children.get(id|getBySessionId)` 可以定位任意深度 descendant，而生命周期释放仍由创建它的 manager 负责。daemon 不向 framework 回传 taskId、host、controls 或 opaque projection state。
 

@@ -166,7 +166,7 @@ agent.events.subscribe((event) => projector.apply(event));
 |---|---|
 | `input.accepted` | create/validate durable input；steer 时追加 user transcript |
 | `run.started` | create/validate run、置 running、begin transcript |
-| `output.text.delta` | append text part delta + live SSE |
+| `output.text.delta` | 增量持久化 text part + live SSE；delta event 本身不进入 replay log |
 | `output.turn.completed` | 完成当前 text part，保留 provider model-turn 边界 |
 | `tool.started/completed` | create/update tool part + observability |
 | `usage.updated` | project usage event |
@@ -174,10 +174,10 @@ agent.events.subscribe((event) => projector.apply(event));
 | `permission.requested/resolved` | 写 framework observation event |
 | `child.created` | child session + task + live directory |
 | `child.suspended/resumed` | durable lifecycle observation |
-| `child.closed` | finish task、unregister live route |
+| `child.closed` | finish task、unregister live route；durable 失败时保留 pending projection 供有序重试 |
 | run terminal | complete text、finalize durable run/task |
 
-projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。input/run/child identity 使用 create-or-validate：input 会比较去除 traceId 后的完整 metadata，既有 child session 必须匹配 parent/cwd/childId，terminal run 不允许被 `run.started` 重开。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
+projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。input/run/stream/terminal 的多步 durable 归约使用 `SessionStore.transaction()`，SQLite 与内存 read model 同时提交或同时回滚，transcript projection state 也在失败时恢复。input/run/child identity 使用 create-or-validate：input 会比较去除 traceId 后的完整 metadata，既有 child session 必须匹配 parent/cwd/childId，terminal run 不允许被 `run.started` 重开。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
 
 ## Steer
 
@@ -268,7 +268,7 @@ Agent tool -> framework AgentChildManager
 
 HTTP child prompt、SendMessage 的 session-task callback 和 TaskStop 最终都通过 `rootAgent.children` 调 live handle。daemon 只保存路由索引，不复制 controls。完整流程见 [Agent Child Session Flow](./agent-child-session-flow.md)。
 
-`rootAgent.children` 是 framework root tree 共享的 descendant directory，不只包含 direct child。`child.created` durable 建模若在 task/live-route 阶段失败，projector 会失败 task、注销已注册 route，并 archive 本次新建的 child session；framework 随后回滚 handle 与 environment lease。
+`rootAgent.children` 是 framework root tree 共享的 descendant directory，不只包含 direct child。`child.created` durable 建模若在 task/live-route 阶段失败，projector 会失败 task、注销已注册 route，并 archive 本次新建的 child session；framework 随后回滚 handle 与 environment lease。parent 一旦进入 `closing/archived`，projector 拒绝新的 `child.created`。
 
 child 普通 input/run/output/tool 投影失败时，projector 会把已存在的 durable run、未完成 transcript part 与 parent task 收束为 failed，再把 required event failure 传播回 framework。live child HTTP 路径只接受 framework `started/steer` receipt 对应的 durable input/run；缺失或身份不一致返回 500，不再由 application 临时补造 input/run。`SessionTaskBridge` 先创建 durable task 再登记 live TaskManager；live 登记失败会标记 durable task failed，live completion 失败也不阻止 durable terminal 状态落盘。
 
@@ -283,7 +283,7 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 | usage | Maintenance -> `agent.getUsage()` |
 | inspect/MCP | Maintenance/Control -> `agent.inspect()` |
 | rewind | close agent -> mutate durable transcript -> later rehydrate |
-| archive | begin archive -> interrupt/wait -> close pool/live child -> durable archive |
+| archive | parent 先进入 closing -> 固定 descendant snapshot -> interrupt/wait -> close pool/live child -> durable archive |
 
 这些 API 是 framework 能力的 daemon 应用化；daemon 负责 durable 更新和并发保护。
 
@@ -308,7 +308,9 @@ shutdown 等待 active runs barrier，关闭 agents/children、event delivery、
 - root durable input/run 在 submit 前创建。
 - 每个 durable input 最终可通过 primary run input 或 transcript message 解析到 owning run；失败/中断的 steer 也必须 terminalize。
 - durable run 一旦 completed/failed/interrupted 就不可重新进入 running；child task 可绑定新的 run 并显式 reopen。
-- 每个 pool-owned session 最多一个 warm root agent，每个 agent 最多一个 active root run。
+- 每个 pool-owned session 最多一个 root agent generation；closing entry 在旧实例完整释放前阻止 replacement，每个 agent 最多一个 active root run。
+- `SessionStore.transaction()` 同时保护 SQLite 与内存 read model；存储失败后不得暴露未提交实体。
+- text delta 直接增量更新 durable part，因此 daemon 在 part complete 前退出也能恢复已输出文本。
 - required event projection 先于 `run.result` settlement。
 - `run.started` projection 先于 `run.started` receipt settlement。
 - framework 只通过 event/effect/handle 与 daemon 接触。
