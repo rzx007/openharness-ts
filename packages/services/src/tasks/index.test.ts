@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { mkdtempSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getTaskManager, resetTaskManager, TaskManager } from "./index.js";
@@ -182,6 +182,7 @@ describe("TaskManager session task bridge", () => {
     await manager.completeSessionTask(task.id, { status: "completed", output: "first result" });
 
     manager.beginSessionTask(task.id);
+    expect(manager.readTaskOutput(task.id)).toBe("(no output)");
     const waiting = manager.awaitTask(task.id);
     let resolved = false;
     void waiting.then(() => {
@@ -193,6 +194,26 @@ describe("TaskManager session task bridge", () => {
     await manager.stopTask(task.id);
     await expect(waiting).resolves.toMatchObject({ status: "stopped" });
     expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps active task output when an input steers the current run", async () => {
+    const manager = makeManager();
+    const task = manager.registerSessionTask({
+      description: "child agent",
+      cwd: process.cwd(),
+      sessionId: "parent",
+      childSessionId: "child",
+      prompt: "first",
+      onInput: async () => {},
+      onStop: async () => {},
+    });
+    writeFileSync(task.outputFile!, "partial output");
+    const startedAt = task.startedAt;
+
+    await manager.writeToTask(task.id, "steer");
+
+    expect(manager.readTaskOutput(task.id)).toBe("partial output");
+    expect(task.startedAt).toBe(startedAt);
   });
 });
 

@@ -304,10 +304,14 @@ export class TaskManager {
     if (!task || !this.sessionTaskCallbacks.has(taskId)) {
       throw new Error(`Session task not found: ${taskId}`);
     }
+    const reopening = task.status !== "running";
     task.status = "running";
-    task.startedAt = Date.now();
-    delete task.finishedAt;
-    delete task.exitCode;
+    if (reopening) {
+      task.startedAt = Date.now();
+      if (task.outputFile) writeFileSync(task.outputFile, "");
+      delete task.finishedAt;
+      delete task.exitCode;
+    }
     this.notifyTaskEvent(task, "updated");
     return task;
   }
@@ -353,6 +357,9 @@ export class TaskManager {
         startedAt: task.startedAt,
         finishedAt: task.finishedAt,
         exitCode: task.exitCode,
+        output: task.outputFile && existsSync(task.outputFile)
+          ? readFileSync(task.outputFile, "utf-8")
+          : undefined,
       };
       this.beginSessionTask(taskId);
       try {
@@ -363,6 +370,9 @@ export class TaskManager {
           task.startedAt = previous.startedAt;
           task.finishedAt = previous.finishedAt;
           task.exitCode = previous.exitCode;
+          if (task.outputFile && previous.output !== undefined) {
+            writeFileSync(task.outputFile, previous.output);
+          }
           this.notifyTaskEvent(task, "updated");
         }
         throw error;

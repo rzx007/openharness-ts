@@ -44,11 +44,13 @@ interface ChildRecord {
   lastResult?: AgentChildResult;
   parentAbortHandler?: () => void;
   aliases: Set<string>;
-  requests: Map<string, { input: AgentChildInput; receipt: Promise<AgentInputReceipt> }>;
+  requests: Map<string, { input: AgentChildInput; receipt: Promise<AgentInputReceipt>; settled: boolean }>;
   state: AgentChildHandle["state"];
   closePromise?: Promise<void>;
   handle: ChildHandle;
 }
+
+const MAX_CHILD_REQUEST_HISTORY = 256;
 
 export interface AgentChildManagerOptions {
   settings: Settings;
@@ -231,7 +233,18 @@ export class AgentChildManager implements AgentChildDirectory {
         return await existing.receipt;
       }
       const receipt = this.sendToRecord(record, input);
-      record.requests.set(input.id, { input, receipt });
+      const request = { input, receipt, settled: false };
+      record.requests.set(input.id, request);
+      void receipt.then(
+        () => {
+          request.settled = true;
+          this.trimRequestHistory(record);
+        },
+        () => {
+          request.settled = true;
+          this.trimRequestHistory(record);
+        },
+      );
       return await receipt;
     }
     return await this.sendToRecord(record, input);
@@ -326,6 +339,15 @@ export class AgentChildManager implements AgentChildDirectory {
 
   private async awaitResult(childId: string): Promise<AgentChildResult> {
     return await this.require(childId).result;
+  }
+
+  private trimRequestHistory(record: ChildRecord): void {
+    if (record.requests.size <= MAX_CHILD_REQUEST_HISTORY) return;
+    for (const [id, request] of record.requests) {
+      if (!request.settled) continue;
+      record.requests.delete(id);
+      if (record.requests.size <= MAX_CHILD_REQUEST_HISTORY) return;
+    }
   }
 
   private async ensureAgent(record: ChildRecord): Promise<OpenHarnessAgent> {

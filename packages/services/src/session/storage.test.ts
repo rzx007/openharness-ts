@@ -190,8 +190,16 @@ describe("sanitizeStoredMessages (load-side pairing repair)", () => {
       sessionId: "good",
       messages: [
         { type: "user", content: "hi" },
-        { type: "assistant", content: [{ type: "tool_use", name: "Bash", input: {} }] },
-        { type: "tool_result", content: [{ type: "tool_result", content: "out" }] },
+        {
+          type: "assistant",
+          content: "",
+          toolUses: [{ type: "tool_use", id: "call_good", name: "Bash", input: {} }],
+        },
+        {
+          type: "tool_result",
+          toolUseId: "call_good",
+          content: [{ type: "text", text: "out" }],
+        },
         { type: "assistant", content: "done" },
       ],
     });

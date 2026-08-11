@@ -65,6 +65,7 @@ interface SessionTaskStore {
   getSessionTask(taskId: string): {
     id: string;
     sessionId: string;
+    status: DurableTaskStatus;
     runId?: string;
   } | undefined;
   updateSessionTask(taskId: string, input: {
@@ -221,6 +222,12 @@ export class SessionTaskBridgeManager {
   syncPersistentTask(task: TaskInfo, manager: TaskManager, durableTaskId = task.id): void {
     const status: DurableTaskStatus = task.status === "pending" || task.status === "running" ||
       task.status === "completed" || task.status === "failed" || task.status === "stopped" ? task.status : "failed";
+    const persisted = this.context.store.getSessionTask(durableTaskId);
+    if (
+      persisted &&
+      isTerminalTaskStatus(persisted.status) &&
+      (status === "pending" || status === "running")
+    ) return;
     let output: string | undefined;
     try { output = manager.readTaskOutput(task.id); } catch { /* output is optional */ }
     const before = this.context.events.checkpoint();
@@ -231,4 +238,8 @@ export class SessionTaskBridgeManager {
     });
     this.context.events.publishSince(before);
   }
+}
+
+function isTerminalTaskStatus(status: DurableTaskStatus): boolean {
+  return status === "completed" || status === "failed" || status === "stopped" || status === "interrupted";
 }

@@ -243,6 +243,32 @@ describe("AgentChildManager", () => {
     await expect(manager.closeAll()).rejects.toThrow("projection unavailable");
     expect(manager.list()).toEqual([]);
   });
+
+  it("bounds settled child input idempotency history", async () => {
+    const manager = createManager(
+      new AgentEventBus(),
+      async () => fakeAgent(vi.fn(() => completedRun("done"))),
+    );
+    const controller = manager.createController(parentScope());
+    const invocation = await controller.spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+
+    for (let index = 0; index < 270; index++) {
+      await controller.sendChildInput(invocation.id, {
+        id: `request-${index}`,
+        content: `follow up ${index}`,
+        delivery: "queue",
+      });
+    }
+
+    const record = (manager as any).records.get(invocation.id);
+    expect(record.requests.size).toBe(256);
+    await manager.closeAll();
+  });
 });
 
 function createManager(

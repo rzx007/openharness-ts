@@ -156,6 +156,28 @@ describe("SessionTaskBridgeManager", () => {
     });
     expect(context.events.publishSince).toHaveBeenCalledWith(4);
   });
+
+  it("does not regress a durable terminal task from a stale live running snapshot", () => {
+    const context = createContext();
+    context.store.getSessionTask.mockReturnValue({
+      id: "task-1",
+      sessionId: "s1",
+      status: "completed",
+    });
+    const manager = createTaskManager();
+    const bridge = new SessionTaskBridgeManager(context);
+
+    bridge.syncPersistentTask({
+      id: "task-1",
+      type: "agent",
+      status: "running",
+      description: "Explore",
+      cwd: "/repo",
+      metadata: {},
+    }, manager);
+
+    expect(context.store.updateSessionTask).not.toHaveBeenCalled();
+  });
 });
 
 function childTaskInput() {
