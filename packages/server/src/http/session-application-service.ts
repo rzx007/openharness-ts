@@ -1,4 +1,4 @@
-import type { CreateSessionInput, SessionRecord, SessionStore } from "@openharness/services";
+import type { SessionStore } from "@openharness/services";
 
 import type {
   AdmitPromptInput,
@@ -51,17 +51,7 @@ export type ResumeSessionRunResult = AdmitPromptResult & {
   source_run: NonNullable<ReturnType<SessionStore["getRun"]>>;
 };
 
-export type CreateChildSessionCommand = Omit<CreateSessionInput, "parentId" | "title" | "agent" | "model"> & {
-  parentId: string;
-  title: string;
-  agent: string;
-  model?: string;
-};
-
-/**
- * Session 应用用例门面（HTTP 与 child session 共用）：
- * 创建/更新/归档 session、admitPrompt、resume、interrupt、awaitRun、createChildSession 等写路径编排。
- */
+/** Session 写用例门面；child session 只由 framework 事件投影创建。 */
 export class SessionApplicationService {
   private readonly archivePromises = new Map<string, Promise<ReturnType<SessionStore["archiveSession"]>>>();
 
@@ -143,6 +133,7 @@ export class SessionApplicationService {
     if (live) {
       const admitted = this.context.store.getInput(live.inputId);
       const run = this.context.store.getRun(live.runId);
+      const owningRun = this.context.store.findRunByInput(live.inputId);
       if (
         live.sessionId !== sessionId ||
         !admitted ||
@@ -154,7 +145,13 @@ export class SessionApplicationService {
       ) {
         throw new SessionApplicationError(500, "Live child input projection did not match its framework receipt");
       }
-      if (!run || run.sessionId !== sessionId || run.inputId !== admitted.id) {
+      if (
+        !run ||
+        run.sessionId !== sessionId ||
+        !owningRun ||
+        owningRun.id !== run.id ||
+        owningRun.sessionId !== sessionId
+      ) {
         throw new SessionApplicationError(500, "Live child run projection did not match its framework receipt");
       }
       return {
@@ -255,18 +252,6 @@ export class SessionApplicationService {
   async closeRuntime(sessionId: string): Promise<void> {
     if (await this.context.liveChildren.interrupt(sessionId, "Session runtime closed")) return;
     await this.context.agentPool.close(sessionId);
-  }
-
-  async createChildSession(input: CreateChildSessionCommand): Promise<SessionRecord> {
-    const parent = this.context.store.getSession(input.parentId);
-    if (!parent) throw new Error(`Parent session not found: ${input.parentId}`);
-    const before = this.context.events.checkpoint();
-    const session = this.context.store.createSession({
-      ...input,
-      model: input.model ?? parent.model,
-    });
-    this.context.events.publishSince(before);
-    return session;
   }
 
   async archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {

@@ -34,6 +34,7 @@ export type SseClient = {
 
 export const DAEMON_RESTART_RUN_REASON = "Daemon restarted before the run completed";
 export const DAEMON_RESTART_TASK_REASON = "Daemon restarted before the task completed";
+export const DAEMON_RESTART_PERMISSION_REASON = "Daemon restarted before the permission was resolved";
 export const DAEMON_RESTART_WORKFLOW_REASON = "Daemon restarted before the workflow completed";
 
 export const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };

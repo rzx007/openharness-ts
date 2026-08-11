@@ -42,6 +42,7 @@ export class SessionRunExecutor {
       const run = agent.submitMessage(admitted.content, {
         signal: workContext.signal,
         delivery: admitted.delivery,
+        metadata: admitted.metadata,
         ids: {
           inputId,
           runId,

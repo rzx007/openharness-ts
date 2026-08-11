@@ -35,6 +35,7 @@ import {
 import {
   CORS_HEADERS,
   CORS_METHODS,
+  DAEMON_RESTART_PERMISSION_REASON,
   DAEMON_RESTART_RUN_REASON,
   DAEMON_RESTART_TASK_REASON,
   errorResponse,
@@ -164,6 +165,7 @@ export class OpenHarnessHttpServer {
     this.store = options.store ?? new SessionStore({ path: options.storePath ?? getDefaultSessionStorePath() });
     this.store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
     this.store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
+    this.store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
     this.store.finalizeClosingSessions();
     this.token = options.token;
     this.allowedOrigins = normalizeAllowedOrigins(options.allowedOrigins ?? []);

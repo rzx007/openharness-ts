@@ -31,6 +31,7 @@ describe("SessionRunExecutor", () => {
     expect(submitMessage).toHaveBeenCalledWith("hello", {
       signal: expect.any(AbortSignal),
       delivery: "queue",
+      metadata: { requestedBy: "test", traceId: "trace-1" },
       ids: { inputId: "input-1", runId: "run-1", traceId: "trace-1" },
     });
     expect(registerHandle).toHaveBeenCalledWith(handle);
@@ -70,7 +71,13 @@ function createStore() {
   const run = { id: "run-1", sessionId: "s1", inputId: "input-1", status: "pending" };
   return {
     getSession: vi.fn(() => ({ id: "s1", cwd: "/repo", model: "gpt-test", metadata: {} })),
-    getInput: vi.fn(() => ({ id: "input-1", sessionId: "s1", content: "hello", delivery: "queue" })),
+    getInput: vi.fn(() => ({
+      id: "input-1",
+      sessionId: "s1",
+      content: "hello",
+      delivery: "queue",
+      metadata: { requestedBy: "test", traceId: "trace-1" },
+    })),
     getRun: vi.fn(() => run),
     listMessages: vi.fn(() => []),
     listMessageParts: vi.fn(() => []),

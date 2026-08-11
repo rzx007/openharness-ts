@@ -19,7 +19,6 @@ export interface SessionTaskBridge {
     taskId: string,
     input: { status: "completed" | "failed" | "stopped" | "interrupted"; output: string },
   ): Promise<unknown>;
-  writeToSessionTask(taskId: string, data: string): Promise<void>;
 }
 
 export interface TaskInfo {
@@ -86,7 +85,7 @@ export interface SessionTaskBridgeManagerContext {
 
 /**
  * 为每个 session 生成 SessionTaskBridge：把进程内 TaskManager 与 store 的
- * SessionTask 投影对齐（register/complete/bindRun/write），供 child session / Agent 使用。
+ * SessionTask 投影对齐（register/complete/bindRun），供 child session / Agent 使用。
  */
 export class SessionTaskBridgeManager {
   constructor(private readonly context: SessionTaskBridgeManagerContext) {}
@@ -179,12 +178,6 @@ export class SessionTaskBridgeManager {
           });
         }
         return task;
-      },
-      writeToSessionTask: async (taskId, data) => {
-        await manager.writeToTask(taskId, data);
-        const before = this.context.events.checkpoint();
-        this.context.store.updateSessionTask(taskId, { status: "running" });
-        this.context.events.publishSince(before);
       },
     };
   }

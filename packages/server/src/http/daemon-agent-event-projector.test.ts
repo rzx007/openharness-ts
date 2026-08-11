@@ -93,17 +93,26 @@ describe("DaemonAgentEventProjector", () => {
       status: "failed",
       output: "bind failed",
     });
-    await projector.apply(started);
+    await projector.apply(event("input.accepted", {
+      content: "continue",
+      delivery: "queue",
+    }, { sessionId: "child-session", inputId: "input-2", runId: "run-2", childId: "child-1" }));
+    await projector.apply(event("run.started", {}, {
+      sessionId: "child-session",
+      inputId: "input-2",
+      runId: "run-2",
+      childId: "child-1",
+    }));
     await projector.apply(event("output.text.delta", { delta: "done" }, {
       sessionId: "child-session",
-      inputId: "input-1",
-      runId: "run-1",
+      inputId: "input-2",
+      runId: "run-2",
       childId: "child-1",
     }));
     await projector.apply(event("run.completed", { output: "done" }, {
       sessionId: "child-session",
-      inputId: "input-1",
-      runId: "run-1",
+      inputId: "input-2",
+      runId: "run-2",
       childId: "child-1",
     }));
 
@@ -116,7 +125,7 @@ describe("DaemonAgentEventProjector", () => {
     expect(liveChildren.register).toHaveBeenCalledWith("child-session", "child-1", rootAgent);
     expect(transcript.projectStreamEvent).toHaveBeenCalledWith(expect.anything(), { type: "text_delta", delta: "done" });
     expect(bridge.bindSessionTaskRun).toHaveBeenCalledTimes(2);
-    expect(store.updateRun).toHaveBeenLastCalledWith("run-1", { status: "completed" });
+    expect(store.updateRun).toHaveBeenLastCalledWith("run-2", { status: "completed" });
     expect(bridge.completeSessionTask).toHaveBeenCalledWith("child-1", { status: "completed", output: "done" });
   });
 
@@ -177,6 +186,113 @@ describe("DaemonAgentEventProjector", () => {
     });
     expect(archiveSession).toHaveBeenCalledWith("child-session-bad");
     expect(sessions.get("child-session-bad")?.status).toBe("archived");
+  });
+
+  it("rejects replayed input ids whose durable metadata differs", async () => {
+    const store = {
+      getInput: vi.fn(() => ({
+        id: "input-1",
+        sessionId: "s1",
+        content: "hello",
+        delivery: "queue",
+        metadata: { source: "first", traceId: "old-trace" },
+      })),
+    };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: store as any,
+      transcriptProjection: {} as any,
+      taskBridgeManager: {} as any,
+      liveChildren: {} as any,
+      events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    await expect(projector.apply(event("input.accepted", {
+      content: "hello",
+      delivery: "queue",
+      metadata: { source: "second" },
+    }, { sessionId: "s1", inputId: "input-1", runId: "run-1" })))
+      .rejects.toThrow("Agent input identity conflict");
+  });
+
+  it("rejects reuse of a durable child session by a different child identity", async () => {
+    const store = {
+      getSession: vi.fn((id) => id === "parent"
+        ? { id: "parent", cwd: "/repo", model: "gpt", metadata: {} }
+        : { id: "child-session", parentId: "parent", cwd: "/repo", metadata: { childId: "old-child" } }),
+    };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: store as any,
+      transcriptProjection: {} as any,
+      taskBridgeManager: {} as any,
+      liveChildren: {} as any,
+      events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    await expect(projector.apply(event("child.created", {
+      childId: "new-child",
+      sessionId: "child-session",
+      spawn: { description: "Explore", prompt: "inspect", agent: "Explore", cwd: "/repo" },
+      cwd: "/repo",
+    }, { sessionId: "parent", childId: "new-child" })))
+      .rejects.toThrow("Child session identity conflict");
+  });
+
+  it("forgets child projection state even when durable close completion fails", async () => {
+    const completeSessionTask = vi.fn(async () => { throw new Error("store unavailable"); });
+    const liveChildren = { unregister: vi.fn() };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: { getSessionTask: vi.fn(() => ({ id: "child-1", status: "running" })) } as any,
+      transcriptProjection: {} as any,
+      taskBridgeManager: {} as any,
+      liveChildren: liveChildren as any,
+      events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+    (projector as any).children.set("child-1", {
+      childId: "child-1",
+      sessionId: "child-session",
+      parentSessionId: "parent",
+      taskId: "child-1",
+      bridge: { completeSessionTask },
+    });
+
+    await expect(projector.apply(event("child.closed", {
+      childId: "child-1",
+      sessionId: "child-session",
+      result: { status: "completed", output: "done" },
+    }, { sessionId: "parent", childId: "child-1" }))).rejects.toThrow("store unavailable");
+
+    expect(liveChildren.unregister).toHaveBeenCalledWith("child-session", "child-1");
+    expect((projector as any).children.size).toBe(0);
+  });
+
+  it("does not reopen a terminal durable run", async () => {
+    const updateRun = vi.fn();
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: {
+        getInput: vi.fn(() => ({ id: "input-1", sessionId: "s1", content: "hello" })),
+        getRun: vi.fn(() => ({ id: "run-1", sessionId: "s1", inputId: "input-1", status: "failed" })),
+        updateRun,
+      } as any,
+      transcriptProjection: {} as any,
+      taskBridgeManager: {} as any,
+      liveChildren: {} as any,
+      events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    await expect(projector.apply(event("run.started", {}, {
+      sessionId: "s1",
+      inputId: "input-1",
+      runId: "run-1",
+    }))).rejects.toThrow("Agent run is already terminal");
+    expect(updateRun).not.toHaveBeenCalled();
   });
 });
 

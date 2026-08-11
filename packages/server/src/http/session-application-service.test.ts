@@ -19,6 +19,7 @@ function createService(options: {
   input?: Record<string, any>;
   inputs?: Array<Record<string, any>>;
   live?: boolean;
+  owningRun?: Record<string, any>;
 } = {}) {
   const store = {
     createSession: vi.fn((input) => ({ ...session, ...input })),
@@ -30,7 +31,7 @@ function createService(options: {
     getRun: vi.fn(() => options.run),
     getInput: vi.fn(() => options.input),
     listInputs: vi.fn(() => options.inputs ?? []),
-    findRunByInput: vi.fn(),
+    findRunByInput: vi.fn(() => options.owningRun),
     admitPrompt: vi.fn((input) => ({ id: input.id ?? "live-input", ...input })),
     appendEvent: vi.fn(),
   };
@@ -85,7 +86,12 @@ describe("SessionApplicationService", () => {
       metadata: { requestedBy: "test" },
     };
     const run = { id: "live-run", sessionId: "s1", inputId: "live-input", status: "running" };
-    const { service, store, runEngine, agentPool, liveChildren } = createService({ live: true, input, run });
+    const { service, store, runEngine, agentPool, liveChildren } = createService({
+      live: true,
+      input,
+      run,
+      owningRun: run,
+    });
     store.getInput.mockReturnValueOnce(undefined).mockReturnValue(input);
 
     service.getSession("s1", { warm: true });
@@ -123,22 +129,43 @@ describe("SessionApplicationService", () => {
     expect(runEngine.admitPromptAndMaybeRun).not.toHaveBeenCalled();
   });
 
-  it("rejects a live child receipt whose run belongs to another input", async () => {
+  it("accepts an active child steer owned by a transcript message in the current run", async () => {
     const input = {
       id: "live-input",
       sessionId: "s1",
-      delivery: "queue",
+      delivery: "steer",
       content: "follow up",
       metadata: {},
     };
-    const run = { id: "live-run", sessionId: "s1", inputId: "other-input", status: "running" };
-    const { service, store } = createService({ live: true, input, run });
+    const run = { id: "live-run", sessionId: "s1", inputId: "primary-input", status: "running" };
+    const { service, store } = createService({ live: true, input, run, owningRun: run });
     store.getInput.mockReturnValueOnce(undefined).mockReturnValue(input);
 
     await expect(service.admitPrompt("s1", {
       id: "live-input",
       content: "follow up",
-      delivery: "queue",
+      delivery: "steer",
+    })).resolves.toMatchObject({ input, run, queue_state: "running" });
+    expect(store.findRunByInput).toHaveBeenCalledWith("live-input");
+  });
+
+  it("rejects a live child receipt whose projected input belongs to another run", async () => {
+    const input = {
+      id: "live-input",
+      sessionId: "s1",
+      delivery: "steer",
+      content: "follow up",
+      metadata: {},
+    };
+    const run = { id: "live-run", sessionId: "s1", inputId: "primary-input", status: "running" };
+    const owningRun = { ...run, id: "other-run" };
+    const { service, store } = createService({ live: true, input, run, owningRun });
+    store.getInput.mockReturnValueOnce(undefined).mockReturnValue(input);
+
+    await expect(service.admitPrompt("s1", {
+      id: "live-input",
+      content: "follow up",
+      delivery: "steer",
     })).rejects.toEqual(expect.objectContaining<Partial<SessionApplicationError>>({ status: 500 }));
   });
 

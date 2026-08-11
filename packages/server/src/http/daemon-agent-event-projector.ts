@@ -7,6 +7,7 @@ import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionTaskBridge, SessionTaskBridgeManager } from "./session-task-bridge.js";
 import type { ActiveTranscriptProjectionState, SessionTranscriptProjection } from "./transcript-projection.js";
+import { jsonEqual, withoutTraceId } from "./support.js";
 
 interface ChildProjectionState {
   childId: string;
@@ -113,7 +114,10 @@ export class DaemonAgentEventProjector {
     const parent = this.context.store.getSession(event.context.sessionId);
     if (!parent) throw new Error(`Parent session not found for child ${childId}: ${event.context.sessionId}`);
     const existing = this.context.store.getSession(sessionId);
-    if (existing && (existing.parentId !== parent.id || existing.cwd !== cwd)) {
+    if (
+      existing &&
+      (existing.parentId !== parent.id || existing.cwd !== cwd || existing.metadata.childId !== childId)
+    ) {
       throw new Error(`Child session identity conflict: ${sessionId}`);
     }
 
@@ -196,19 +200,22 @@ export class DaemonAgentEventProjector {
 
   private async projectChildClosed(event: Extract<AgentEvent, { type: "child.closed" }>): Promise<void> {
     const state = this.children.get(event.data.childId);
-    this.context.liveChildren.unregister(event.data.sessionId, event.data.childId);
-    if (state) {
-      const task = this.context.store.getSessionTask(state.taskId);
-      if (task && (task.status === "pending" || task.status === "running")) {
-        await state.bridge.completeSessionTask(state.taskId, event.data.result);
+    try {
+      this.context.liveChildren.unregister(event.data.sessionId, event.data.childId);
+      if (state) {
+        const task = this.context.store.getSessionTask(state.taskId);
+        if (task && (task.status === "pending" || task.status === "running")) {
+          await state.bridge.completeSessionTask(state.taskId, event.data.result);
+        }
       }
-      this.children.delete(state.childId);
+      this.appendRuntimeEvent(event, {
+        childId: event.data.childId,
+        childSessionId: event.data.sessionId,
+        result: event.data.result,
+      });
+    } finally {
+      if (state) this.children.delete(state.childId);
     }
-    this.appendRuntimeEvent(event, {
-      childId: event.data.childId,
-      childSessionId: event.data.sessionId,
-      result: event.data.result,
-    });
   }
 
   private projectInput(event: Extract<AgentEvent, { type: "input.accepted" }>): void {
@@ -216,6 +223,10 @@ export class DaemonAgentEventProjector {
     const inputId = required(event.context.inputId, "inputId", event.type);
     let input = this.context.store.getInput(inputId);
     const content = contentToText(event.data.content);
+    const metadata = {
+      ...event.data.metadata,
+      ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
+    };
     if (!input) {
       const before = this.context.events.checkpoint();
       input = this.context.store.admitPrompt({
@@ -223,13 +234,15 @@ export class DaemonAgentEventProjector {
         sessionId,
         delivery: event.data.delivery,
         content,
-        metadata: {
-          ...event.data.metadata,
-          ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
-        },
+        metadata,
       });
       this.context.events.publishSince(before);
-    } else if (input.sessionId !== sessionId || input.content !== content || input.delivery !== event.data.delivery) {
+    } else if (
+      input.sessionId !== sessionId ||
+      input.content !== content ||
+      input.delivery !== event.data.delivery ||
+      !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))
+    ) {
       throw new Error(`Agent input identity conflict: ${inputId}`);
     }
 
@@ -267,6 +280,8 @@ export class DaemonAgentEventProjector {
       });
     } else if (existing.sessionId !== sessionId || existing.inputId !== inputId) {
       throw new Error(`Agent run identity conflict: ${runId}`);
+    } else if (existing.status === "completed" || existing.status === "failed" || existing.status === "interrupted") {
+      throw new Error(`Agent run is already terminal: ${runId}`);
     }
     this.context.store.updateRun(runId, { status: "running" });
     this.transcripts.set(runId, this.context.transcriptProjection.beginRun(sessionId, inputId, runId, input.content));

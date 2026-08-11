@@ -89,7 +89,14 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
         let handle!: AgentRunHandle;
         const result = Promise.resolve().then(async (): Promise<AgentRunResult> => {
           try {
-            await emit({ type: "input.accepted", data: { content, delivery: options.delivery ?? "queue" } }, eventContext);
+            await emit({
+              type: "input.accepted",
+              data: {
+                content,
+                delivery: options.delivery ?? "queue",
+                ...(options.metadata ? { metadata: options.metadata } : {}),
+              },
+            }, eventContext);
             await emit({ type: "run.started", data: {} }, eventContext);
             const runContext: TestAgentRunContext = {
               emit: async (event, override = {}) => {
@@ -146,7 +153,14 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
           result,
           steer: async (input) => {
             const accepted = { ...input, id: input.id ?? `steer-${sequence + 1}`, traceId: input.traceId ?? ids.traceId };
-            await emit({ type: "input.accepted", data: { content: accepted.content, delivery: "steer" } }, {
+            await emit({
+              type: "input.accepted",
+              data: {
+                content: accepted.content,
+                delivery: "steer",
+                ...(accepted.metadata ? { metadata: accepted.metadata } : {}),
+              },
+            }, {
               ...eventContext,
               inputId: accepted.id,
               traceId: accepted.traceId,
@@ -612,6 +626,27 @@ describe("OpenHarnessHttpServer", () => {
         });
         // Simulate a previous daemon crash leaving an active run on disk.
         first.store.createRun({ id: "r-stale", sessionId: "s1" });
+        first.store.updateRun("r-stale", { status: "running" });
+        const staleMessage = first.store.createMessage({
+          id: "m-stale",
+          sessionId: "s1",
+          role: "assistant",
+          runId: "r-stale",
+        });
+        first.store.upsertMessagePart({
+          id: "part-stale",
+          sessionId: "s1",
+          messageId: staleMessage.id,
+          type: "text",
+          status: "running",
+          text: "unfinished",
+        });
+        first.store.createPermissionRequest({
+          id: "permission-stale",
+          sessionId: "s1",
+          runId: "r-stale",
+          toolName: "Write",
+        });
         first.store.createSessionTask({
           id: "task-stale", sessionId: "s1", type: "agent", description: "stale child", cwd: process.cwd(),
         });
@@ -630,14 +665,20 @@ describe("OpenHarnessHttpServer", () => {
 
         const state = await (await fetch(`${listen2.url}/sessions/s1/state`, { headers: auth(token) })).json() as {
           messages: Array<{ role: string }>;
-          parts: Array<{ text?: string }>;
+          parts: Array<{ id: string; text?: string; status: string }>;
           runs: Array<{ id: string; status: string }>;
           tasks: Array<{ id: string; status: string }>;
+          permissions: Array<{ id: string; status: string; decision?: string }>;
         };
-        expect(state.messages).toHaveLength(1);
+        expect(state.messages).toHaveLength(2);
         expect(state.parts[0]?.text).toBe("survived restart");
+        expect(state.parts.find((part) => part.id === "part-stale")?.status).toBe("interrupted");
         expect(state.runs.find((run) => run.id === "r-stale")?.status).toBe("interrupted");
         expect(state.tasks.find((task) => task.id === "task-stale")?.status).toBe("interrupted");
+        expect(state.permissions.find((request) => request.id === "permission-stale")).toMatchObject({
+          status: "expired",
+          decision: "Daemon restarted before the permission was resolved",
+        });
 
         const events = await (await fetch(`${listen2.url}/events`, { headers: auth(token) })).json() as {
           events: Array<{ type: string }>;
@@ -645,6 +686,7 @@ describe("OpenHarnessHttpServer", () => {
         expect(events.events.map((event) => event.type)).toContain("session.transcript.replaced");
         expect(events.events.map((event) => event.type)).toContain("session.run.updated");
         expect(events.events.map((event) => event.type)).toContain("session.task.updated");
+        expect(events.events.map((event) => event.type)).toContain("permission.replied");
       } finally {
         await second.close();
       }
