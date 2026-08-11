@@ -108,7 +108,7 @@ Format:
 - The \`<summary>\` describes the outcome: "completed", "failed: {error}", or "was stopped"
 - The \`<task-id>\` value is the agent ID — use send_message with that ID as \`to\` to continue that worker
 
-When you spawn a worker, the agent tool returns a \`task_id\`. To wait for that worker's result, call the \`TaskWait\` tool with its \`task_id\` — it blocks until the worker finishes and returns the result directly. Never poll with Sleep plus repeated \`TaskOutput\` calls; that wastes turns and tokens. \`TaskWait\` is always the way to block on a worker you launched.
+When you spawn a worker, the agent tool returns a \`task_id\`. To wait for that worker's result, call the \`TaskWait\` tool with its \`task_id\` — it blocks until the worker finishes and returns the result directly. For long-running workers where the user would benefit from progress, pass \`heartbeatSeconds\`; if the worker is still running, \`TaskWait\` returns a running summary and partial output without stopping the worker, and you can call \`TaskWait\` again with the same \`task_id\` to continue waiting. Never poll with Sleep plus repeated \`TaskOutput\` calls; that wastes turns and tokens. \`TaskWait\` is always the way to block on or check progress for a worker you launched.
 
 ### Workflow Results
 

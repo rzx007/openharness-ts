@@ -24,6 +24,7 @@ async function waitForStatus(taskId: string, status: string, timeoutMs = 8000): 
 afterEach(() => {
   resetTaskManager(CWD);
   resetTaskManager({ cwd: CWD, sessionId: "session-timeout" });
+  resetTaskManager({ cwd: CWD, sessionId: "session-heartbeat" });
 });
 
 describe("taskWaitTool", () => {
@@ -126,6 +127,53 @@ describe("taskWaitTool", () => {
     expect(text).toMatch(/stop requested/i);
     expect(stopped).toBe(true);
     expect(mgr.getTask(task.id)?.status).toBe("stopped");
+  });
+
+  it("returns a heartbeat progress summary without stopping an unfinished task", async () => {
+    const mgr = getTaskManager(CWD);
+    const task = await mgr.createShellTask(
+      `${NODE} -e "process.stdout.write('working'); setTimeout(() => {}, 60000)"`,
+      "slow heartbeat task",
+      CWD,
+    );
+
+    const result = await taskWaitTool.execute(
+      { taskIds: [task.id], timeoutSeconds: 60, heartbeatSeconds: 0.15 },
+      { cwd: CWD },
+    );
+    const text = textOf(result);
+    expect(text).toContain(task.id);
+    expect(text).toContain("still running after 0.15s");
+    expect(text).toContain("call TaskWait again");
+    expect(text).toContain("working");
+    expect(mgr.getTask(task.id)?.status).toBe("running");
+    expect(result.isError).toBeFalsy();
+  });
+
+  it("does not stop a session-backed task when heartbeat returns progress", async () => {
+    const sessionId = "session-heartbeat";
+    const mgr = getTaskManager({ cwd: CWD, sessionId });
+    let stopped = false;
+    const task = mgr.registerSessionTask({
+      description: "session child heartbeat",
+      cwd: CWD,
+      sessionId,
+      childSessionId: "child-heartbeat",
+      prompt: "work",
+      onInput: async () => {},
+      onStop: async () => {
+        stopped = true;
+      },
+    });
+
+    const result = await taskWaitTool.execute(
+      { taskIds: [task.id], timeoutSeconds: 60, heartbeatSeconds: 0.15 },
+      { cwd: CWD, sessionId },
+    );
+    const text = textOf(result);
+    expect(text).toContain("still running after 0.15s");
+    expect(stopped).toBe(false);
+    expect(mgr.getTask(task.id)?.status).toBe("running");
   });
 
   it("stops every awaited task when the owning session is interrupted", async () => {

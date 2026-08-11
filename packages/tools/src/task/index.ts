@@ -126,7 +126,9 @@ export const taskWaitTool: ToolDefinition = {
     "child sessions, TaskWait waits on the user-visible task projection; the live child " +
     "invocation handle stays behind AgentRunHost.childAgentHost. " +
     "Accepts taskIds (string[], also tolerates a single string) and an optional " +
-    "timeoutSeconds (default 300). Each task is awaited independently, so one failed, " +
+    "timeoutSeconds (default 300). When heartbeatSeconds is provided, TaskWait " +
+    "returns a running progress summary after that interval without stopping the task; " +
+    "call TaskWait again to keep waiting. Each task is awaited independently, so one failed, " +
     "timed-out, or unknown task_id does not affect the others; the result is a readable " +
     "per-task summary with each task's final status and output.",
   inputSchema: {
@@ -141,6 +143,11 @@ export const taskWaitTool: ToolDefinition = {
         type: "number",
         description: "Per-task wait timeout in seconds before giving up",
         default: 300,
+      },
+      heartbeatSeconds: {
+        type: "number",
+        description:
+          "Optional progress heartbeat. If a task is still running after this many seconds, return a partial running summary without stopping it.",
       },
     },
     required: ["taskIds"],
@@ -164,7 +171,12 @@ export const taskWaitTool: ToolDefinition = {
     }
 
     const timeoutSeconds = typeof input.timeoutSeconds === "number" ? input.timeoutSeconds : 300;
+    const heartbeatSeconds = typeof input.heartbeatSeconds === "number" ? input.heartbeatSeconds : undefined;
+    if (heartbeatSeconds !== undefined && (!Number.isFinite(heartbeatSeconds) || heartbeatSeconds <= 0)) {
+      return { content: [{ type: "text", text: "heartbeatSeconds must be a positive number" }], isError: true };
+    }
     const timeoutMs = timeoutSeconds * 1000;
+    const heartbeatMs = heartbeatSeconds !== undefined ? heartbeatSeconds * 1000 : undefined;
     const stopOnAbort = () => {
       void Promise.all(taskIds.map((taskId) => mgr.stopTask(taskId).catch(() => {})));
     };
@@ -184,21 +196,25 @@ export const taskWaitTool: ToolDefinition = {
     try {
       const segments = await Promise.all(
         taskIds.map(async (taskId) => {
-        try {
-          const res = await mgr.awaitTask(taskId, { timeoutMs });
-          if (res.timedOut) {
-            // Best-effort: stop the child so a wait timeout does not leave it orphaned.
-            await mgr.stopTask(taskId).catch(() => {});
-            return (
-              `${taskId} (${res.status}): did not finish within ${timeoutSeconds}s - stop requested.\n` +
-              `Output so far:\n${res.output}`
-            );
+          try {
+            const waitMs = heartbeatMs !== undefined ? Math.min(timeoutMs, heartbeatMs) : timeoutMs;
+            const res = await mgr.awaitTask(taskId, { timeoutMs: waitMs });
+            if (res.timedOut) {
+              if (heartbeatMs !== undefined && heartbeatMs < timeoutMs) {
+                return formatHeartbeat(taskId, res.status, heartbeatSeconds!, res.output);
+              }
+              // Best-effort: stop the child so a hard wait timeout does not leave it orphaned.
+              await mgr.stopTask(taskId).catch(() => {});
+              return (
+                `${taskId} (${res.status}): did not finish within ${timeoutSeconds}s - stop requested.\n` +
+                `Output so far:\n${res.output}`
+              );
+            }
+            const exit = res.exitCode != null ? ` exit=${res.exitCode}` : "";
+            return `${taskId} (${res.status}${exit}):\n${res.output}`;
+          } catch (err) {
+            return `${taskId} (error): ${(err as Error).message}`;
           }
-          const exit = res.exitCode != null ? ` exit=${res.exitCode}` : "";
-          return `${taskId} (${res.status}${exit}):\n${res.output}`;
-        } catch (err) {
-          return `${taskId} (error): ${(err as Error).message}`;
-        }
         }),
       );
 
@@ -212,6 +228,19 @@ export const taskWaitTool: ToolDefinition = {
     }
   },
 };
+
+function formatHeartbeat(
+  taskId: string,
+  status: string,
+  heartbeatSeconds: number,
+  output: string,
+): string {
+  return (
+    `${taskId} (${status}): still running after ${heartbeatSeconds}s; ` +
+    "call TaskWait again with the same task_id to continue waiting.\n" +
+    `Output so far:\n${output}`
+  );
+}
 
 export const taskUpdateTool: ToolDefinition = {
   name: "TaskUpdate",
