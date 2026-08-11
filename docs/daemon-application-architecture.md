@@ -211,6 +211,10 @@ sequenceDiagram
 
 最终 turn boundary 与 max-turn boundary 由 framework 关闭 steering；未到可继续的模型回合前，`input.accepted` 和 receipt 都不会产生。若 lane 已接收输入、但 `run.steer()` 明确抛出 `AgentRunNotAcceptingInputError`，coordinator 不丢弃 durable input，而是在同一 lane 创建带 `recoveredFromSteer` metadata 的 replacement run，并用新 run ID 结算 HTTP delivery。其他 steer 错误以及 replacement 创建错误都会明确拒绝请求并终止当前 lane 控制链，不会留下悬挂 promise。
 
+steer 的 durable 归属既可以由新 run 的 `run.inputId` 表达，也可以由原 active run transcript 中的 user message（`message.inputId + message.runId`）表达。相同 input ID 重试时，application 会沿这两种关系找到最终 owning run，不会再次 delivery。相同 ID 在首次 delivery 仍 pending 时，共享同一个进程内 admission promise；payload、session 或 delivery 不一致则按 idempotency conflict 拒绝。
+
+interrupt 或 delivery failure 会拒绝所有尚未结算的 steer。若输入还没有任何 owning run，engine 会为它建立 terminal `interrupted`/`failed` run，保证 durable input 不会永久悬空；如果 projector 已把它绑定到原 run，则由该 run 的 terminal projection 收束。
+
 ## Interrupt
 
 ```text
@@ -268,6 +272,8 @@ HTTP child prompt、Task input 和 TaskStop 最终都通过 `rootAgent.children`
 
 child 普通 input/run/output/tool 投影失败时，projector 会把已存在的 durable run、未完成 transcript part 与 parent task 收束为 failed，再把 required event failure 传播回 framework。live child HTTP 路径只接受 framework `started/steer` receipt 对应的 durable input/run；缺失或身份不一致返回 500，不再由 application 临时补造 input/run。`SessionTaskBridge` 先创建 durable task 再登记 live TaskManager；live 登记失败会标记 durable task failed，live completion 失败也不阻止 durable terminal 状态落盘。
 
+durable child task 的 terminal 状态不会被延迟到达的 live `pending/running` snapshot 回退。只有显式的新一轮 child run 才会把 task 重新置为 `running`；重开时同时清除上一轮的 `finishedAt/output/error` 与 live output file，避免两轮结果混合。
+
 ## Maintenance
 
 | 用例 | 主要路径 |
@@ -293,6 +299,7 @@ shutdown 等待 active runs barrier，关闭 agents/children、event delivery、
 ## 不变量
 
 - root durable input/run 在 submit 前创建。
+- 每个 durable input 最终可通过 primary run input 或 transcript message 解析到 owning run；失败/中断的 steer 也必须 terminalize。
 - 每个 pool-owned session 最多一个 warm root agent，每个 agent 最多一个 active root run。
 - required event projection 先于 `run.result` settlement。
 - `run.started` projection 先于 `run.started` receipt settlement。

@@ -132,6 +132,19 @@ daemon consumes events and projects durable state
 
 退出标准：core、agent-runtime、server typecheck 通过；上述 focused tests 通过；所有 steer delivery promise 都有 resolve/reject 终点。
 
+## Task 7：第三次复盘一致性修复
+
+- [x] steer 幂等查询同时识别 primary run input 与 transcript message ownership；成功 retry 不重复 delivery。
+- [x] 同一 pending input ID 共享 admission promise；冲突 payload 明确拒绝，不保留无界 pending admission。
+- [x] interrupt/delivery failure terminalize 尚未绑定 run 的 durable steer input。
+- [x] late steer rejection 即使已部分投影到原 run，也创建 replacement run，不误复用原 run。
+- [x] durable child task 拒绝 stale active snapshot 覆盖 terminal 状态；显式 reopen 清除旧 terminal 字段和 output file。
+- [x] live child request 幂等历史限制为最近 256 个 settled request，长期 HTTP 幂等留给 daemon durable store。
+- [x] prompt route 保留 `SessionApplicationError.status`，不把 framework/durable 一致性错误降级成 404。
+- [x] 补充 store、run engine、coordinator、task bridge、route 与 child manager 回归测试，并更新权威文档。
+
+退出标准：services、core、agent-runtime、server typecheck 与全量测试通过；`git diff --check` 无错误；每个 admitted steer input 都有 owning run 或 terminal failure run。
+
 ## 提交策略
 
 建议按三个可审查提交落地，而不是按文件碎片提交：

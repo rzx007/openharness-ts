@@ -54,7 +54,7 @@ Task input
 - child 有 active run 且 delivery 不是 queue：调用 `run.steer()`，输入在 turn boundary 注入同一 run。
 - active run 正在收尾、不再接受 steer：等待其 settle 后串行启动下一轮。
 - delivery=queue 或 child idle：沿 `startChain` 启动下一轮 run，复用 history。
-- caller 提供 input ID 时，manager 对相同请求幂等；相同 ID 不同 payload 失败关闭。
+- caller 提供 input ID 时，manager 对未结算请求和最近 256 个已结算请求幂等；相同 ID 不同 payload 失败关闭。daemon 的长期 HTTP 幂等由 durable input/run 关系承担。
 - child/grandchild 共用 tree-wide directory，所以 daemon 从 root agent 可以直接路由任意深度 descendant。
 - live child HTTP 只返回 receipt 已对应到 durable input/run 的结果；投影缺失或身份不一致会明确失败，不补造第二份 durable 事实。
 
@@ -69,6 +69,8 @@ parent agent close        -> manager.closeAll()
 close 会 abort active run、等待 settlement、关闭 child 资源、释放 environment lease、发布并等待 `child.closed`，最后从 directory 删除 handle。daemon 收到 terminal/closed event 后完成 durable run/task 并移除 live route。
 
 若 child 普通执行事件投影失败，daemon projector 会先把已建立的 durable run、transcript part 和 parent task 收束为 failed，再把 required event failure 传播给 framework。TaskManager 的 live completion 失败不会阻止 durable task terminal 落盘；durable completion 自身失败则由 `child.closed` 向上传播，不能静默吞掉。
+
+durable task 已 terminal 后，延迟到达的 live `pending/running` snapshot 不得让它回退。显式 follow-up 启动新 run 时才重新置为 `running`，并清除上一轮的 `finishedAt/output/error` 与 live output file。
 
 ## Suspend / resume
 
