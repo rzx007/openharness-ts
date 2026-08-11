@@ -474,7 +474,7 @@ root run 的 session/input/run 已由 daemon 准入；child 内部创建的 ID �
 1. record 不存在则创建。
 2. record 已存在且 identity/content 相同则视为幂等 replay。
 3. ID 相同但 payload 不同则失败关闭，不静默覆盖。
-4. projector 只在事件成功应用后推进 root event sequence 水位，失败可重试且内存占用恒定。
+4. projector 只在事件成功应用或 terminal compensation 收敛后推进 root event sequence 水位；补偿也失败时保留唯一 pending settlement，下一事件必须先重试，内存占用恒定。
 
 ## 11. Daemon 中保留的 projection
 
@@ -544,7 +544,7 @@ projection 是 daemon 对事实的单向消费，不再是 framework 执行协�
 9. event payload 必须可序列化并限制 tool output/delta 大小；大内容继续由 transcript/store 分块处理。
 10. listener 不能反向调用同一 agent 的阻塞方法造成重入；daemon 路由在 event apply 完成后再执行 live command。
 11. required listener 失败后 dispatcher 立即熔断该 run；不得再通过同一个失败 listener 递归发送 `run.failed`。executor 使用 durable fallback 收口未终态 run。
-12. daemon 的一次 event 归约必须在同一个 `SessionStore.transaction()` 内提交；SQLite 写失败时内存 read model 与 transcript reducer state 一并回滚。
+12. daemon 的结构性 event 归约必须在同一个 `SessionStore.transaction()` 内提交；SQLite 写失败时内存 read model 与 transcript reducer state 一并回滚。已存在 text part 的后续 delta 是唯一 hot-path 例外：立即 live publish、按 dirty checkpoint 批量持久化，并在 terminal/close 强制 flush。
 13. child/pool close 必须线性化：`closing` 阶段拒绝新 input/acquire，旧 generation 完整释放前不能创建 replacement。
 
 ## 14. 被否决的替代方案
@@ -595,7 +595,7 @@ core host type
 - framework public API 中不存在 `AgentRunHost`、`AgentChildProjection`。
 - server 中不存在 `DaemonRuntimeHostPort`、`DaemonRunProjection.createHost()`、`DaemonChildAgentProjection`。
 - daemon 只通过一个 required event subscription 和 `AgentEffects` 接入 framework。
-- root/child 的 stream、tool、permission、terminal 状态均可 durable replay 到第二个客户端。
+- root/child 的完整 transcript、tool、permission、terminal 状态均可 durable replay 到第二个客户端；逐 chunk text delta 只做 live publish，replay 使用 checkpoint 后的完整 part 文本。
 - child 工具不接收 daemon taskId；framework 与 daemon 之间不传 controls、resolve 或 opaque projection state。
 - steer 不再依赖 `wakeCount`、`drainSteeredInputs()` 或 `pullFollowUps()`。
 - permission interrupt、recursive child、idle suspend/resume、daemon restart recovery 保持现有行为。

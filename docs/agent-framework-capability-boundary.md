@@ -35,6 +35,7 @@ framework 负责：
 
 - provider、model、QueryEngine、tools、hooks、skills、plugins、MCP、sandbox 的默认组装
 - history、usage、当前 run 与资源生命周期
+- 单实例 `idle/running/maintaining/closing/closed` operation state machine
 - permission wait 的执行语义
 - child identity、实例、递归执行、tree-wide descendant directory、follow-up、interrupt、suspend/resume、worktree lease
 - 有序 `AgentEvent`、`AgentEffects` 和 run/child handles
@@ -58,6 +59,7 @@ daemon 负责：
 - 把 `AgentEvent` 单向归约为 durable transcript/run/task/session/event 和 SSE
 - 把 HTTP/task commands 路由到 framework-owned run/child handles
 - restart recovery、maintenance 与 product APIs
+- session/cwd/global admission barrier 与 daemon stop-and-drain
 
 daemon 可以保存 `rootAgent + childId` 的路由索引，但不复制 child controls，也不拥有 child instance。
 
@@ -74,6 +76,8 @@ daemon 可以保存 `rootAgent + childId` 的路由索引，但不复制 child c
 | durable child session/task/run | daemon |
 | per-session request lane | daemon |
 | warm root agent cache | daemon `AgentPool` |
+| 单 agent operation 互斥 | framework `OpenHarnessAgent.state` |
+| session/cwd/global 请求互斥 | daemon `DaemonOperationGate` |
 | UI selection/render/prompt controls | surface |
 
 ## 边界协议

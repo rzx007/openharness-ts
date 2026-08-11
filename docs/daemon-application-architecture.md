@@ -150,9 +150,23 @@ sessionId -> { promise: Promise<OpenHarnessAgent>, subscription }
 5. 后续 root run 复用实例。
 6. archive、runtime config change、failure 或 shutdown 时 close 并 unsubscribe。
 
-close 只清理自己捕获的 entry/subscription。旧 agent 正在异步关闭时，同一 session 可以创建新 entry；旧代际的 finally 不会误删或 unsubscribe 新代际。
+close 只清理自己捕获的 entry/subscription。entry 一旦进入 `closing`，同一 session 的 acquire 会等待旧实例完整释放，再重新读取 durable session/history 创建 replacement；旧代际的 finally 不会误删或 unsubscribe 新代际。
 
 live child 由 root agent 的 `AgentChildManager` 持有，不进入 AgentPool。`LiveChildAgentDirectory` 让 pool 拒绝为该 durable child session 创建第二个 agent。
+
+## Daemon operation gate
+
+`DaemonOperationGate` 是 daemon 应用层的统一准入边界，scope 为 `sessionId + cwd`。普通 runtime 使用持有 shared lease；配置、维护与 archive 持有 exclusive barrier：
+
+| barrier | 阻止的准入 | 典型调用 |
+|---|---|---|
+| session | 同一 session | runtime PATCH、compact、rewind、archive |
+| cwd | 同一 cwd 的所有 session | remember、memory/plugin reload |
+| global | 所有 session | settings/auth/profile/plugin mutation、shutdown |
+
+线性化顺序固定为：先安装 barrier，原子检查 lane 与 `AgentPool` live state，再执行 mutation/close，最后释放 barrier。prompt、resume、required runtime inspect 和 best-effort warm 都必须经过 shared admission；warm 拿不到 lease 时只跳过预热，Maintenance/Control 的必需 runtime 创建失败则直接向调用方传播。
+
+framework 实例内部还有更小一层状态机：`idle -> running | maintaining -> idle`，close 从任意非 closed 状态进入 `closing -> closed`。因此 daemon barrier 解决跨请求/跨实例策略，agent state 解决单实例历史、模型、run 与 maintenance 的互斥，两层不互相替代。
 
 ## Event projection
 
@@ -166,7 +180,7 @@ agent.events.subscribe((event) => projector.apply(event));
 |---|---|
 | `input.accepted` | create/validate durable input；steer 时追加 user transcript |
 | `run.started` | create/validate run、置 running、begin transcript |
-| `output.text.delta` | 增量持久化 text part + live SSE；delta event 本身不进入 replay log |
+| `output.text.delta` | 立即更新内存 text part 并发 live SSE；dirty part 按 checkpoint 批量持久化，delta event 本身不进入 replay log |
 | `output.turn.completed` | 完成当前 text part，保留 provider model-turn 边界 |
 | `tool.started/completed` | create/update tool part + observability |
 | `usage.updated` | project usage event |
@@ -177,7 +191,17 @@ agent.events.subscribe((event) => projector.apply(event));
 | `child.closed` | finish task、unregister live route；durable 失败时保留 pending projection 供有序重试 |
 | run terminal | complete text、finalize durable run/task |
 
-projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。input/run/stream/terminal 的多步 durable 归约使用 `SessionStore.transaction()`，SQLite 与内存 read model 同时提交或同时回滚，transcript projection state 也在失败时恢复。input/run/child identity 使用 create-or-validate：input 会比较去除 traceId 后的完整 metadata，既有 child session 必须匹配 parent/cwd/childId，terminal run 不允许被 `run.started` 重开。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
+projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。所有 child required event 共用一个 pending settlement 状态机：`child.closed` 重试原 projection，其他 child event 执行 durable terminal compensation；settlement 再失败时，下一有序事件必须先完成 pending settlement，水位不能越过 poison event。root projection failure 传播给 framework，并由 `SessionRunExecutor` 对仍非 terminal 的 durable run 做 infrastructure fallback。
+
+input/run/stream/terminal 的多步 durable 归约使用 `SessionStore.transaction()`，SQLite 与内存 read model 同时提交或同时回滚，transcript projection state 也在失败时恢复。input/run/child identity 使用 create-or-validate：input 会比较去除 traceId 后的完整 metadata，既有 child session 必须匹配 parent/cwd/childId，terminal run 不允许被 `run.started` 重开。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
+
+### Text delta durability
+
+delta 有两条彼此独立的输出：`liveEvent` 立即发给当前 SSE 客户端；durable text 按 part 累积 dirty checkpoint。默认每 `150ms` 或 `8KB` flush，同批 dirty part 在一个 SQLite transaction 中更新 part/message/session。part complete、tool boundary、run terminal 和 `SessionStore.close()` 会通过普通 unit-of-work 或显式 close 强制落盘。
+
+异常进程退出最多丢失最后一个 checkpoint 窗口；正常 terminal/shutdown/close 不丢失。transient delta 不进入 `SessionStore.events`，client reducer 也不把它保留在 durable `eventsBySeq` 索引。durable event 与 live delta 共用全局 SSE 序号，store 每次预留 1024 个序号并持久化高水位；重启可以留下空洞，但绝不复用客户端已经见过的 cursor。
+
+`SessionStore` 的普通写使用 row-level mutation/unit-of-work：只 upsert dirty row、只 append 新 durable event，`replaceTranscript` 只删除目标 session 的旧 message/part。成本不再随全库历史线性增长。
 
 ## Steer
 
@@ -285,7 +309,7 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 | rewind | close agent -> mutate durable transcript -> later rehydrate |
 | archive | parent 先进入 closing -> 固定 descendant snapshot -> interrupt/wait -> close pool/live child -> durable archive |
 
-这些 API 是 framework 能力的 daemon 应用化；daemon 负责 durable 更新和并发保护。
+这些 API 是 framework 能力的 daemon 应用化；daemon 负责 durable 更新和并发保护。compact/rewind 使用 session barrier，remember 使用 cwd barrier；barrier 覆盖 agent operation、durable mutation 与必要的 runtime close，不使用“先检查 active run、稍后再执行”的 check-then-act。
 
 ## 启动与关闭
 
@@ -301,7 +325,7 @@ constructor 在开放 HTTP 前执行 durable recovery：
 3. pending permission -> `expired`，因为旧进程的 resolver 已不存在。
 4. 对已无 active run 的 `closing` session 完成 archive。
 
-shutdown 等待 active runs barrier，关闭 agents/children、event delivery、HTTP hub 和 store。
+shutdown 先把 `DaemonOperationGate` 置为 closing 并等待现有 shared/barrier lease；随后 `SessionRunEngine.stopAndDrain()` 停止新 admission、同时中断 active/queued lanes 并等待 run promise 收敛；最后关闭 agents/children、HTTP listener/SSE 和 store。queued run 不会在已有 agent 关闭后被重新启动。
 
 ## 不变量
 
@@ -310,7 +334,8 @@ shutdown 等待 active runs barrier，关闭 agents/children、event delivery、
 - durable run 一旦 completed/failed/interrupted 就不可重新进入 running；child task 可绑定新的 run 并显式 reopen。
 - 每个 pool-owned session 最多一个 root agent generation；closing entry 在旧实例完整释放前阻止 replacement，每个 agent 最多一个 active root run。
 - `SessionStore.transaction()` 同时保护 SQLite 与内存 read model；存储失败后不得暴露未提交实体。
-- text delta 直接增量更新 durable part，因此 daemon 在 part complete 前退出也能恢复已输出文本。
+- text delta 立即 live publish，并按 `150ms/8KB` checkpoint durable part；异常退出只允许丢失一个有界尾窗，正常 terminal/close 必须完整。
+- SSE 序号跨 daemon restart 单调不复用；transient delta 不进入 durable replay log 或 client durable event index。
 - required event projection 先于 `run.result` settlement。
 - `run.started` projection 先于 `run.started` receipt settlement。
 - framework 只通过 event/effect/handle 与 daemon 接触。

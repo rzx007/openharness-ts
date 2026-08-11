@@ -156,6 +156,25 @@ child command 只接受 canonical `childId`。`sessionId` 通过 tree-wide direc
 
 每个 `AgentChildManager` 只 close 自己直接拥有的 child；root 与所有递归 child 共享一个 `AgentChildRegistry`。因此 `rootAgent.children.get(id|getBySessionId)` 可以定位任意深度 descendant，而生命周期释放仍由创建它的 manager 负责。daemon 不向 framework 回传 taskId、host、controls 或 opaque projection state。
 
+## Agent operation state machine
+
+`OpenHarnessAgent.state` 是公开只读状态：
+
+```text
+idle --submitMessage--> running --run.result settled--> idle
+idle --compact/remember--> maintaining --settled--> idle
+idle/running/maintaining --close--> closing --> closed
+```
+
+互斥规则由同一个状态机执行，而不是由每个 API 各自检查：
+
+- `submitMessage` 同步预占 `running`，所以两个同 tick 的 submit 也不可能同时启动。
+- `loadHistory`、`clear`、`setModel`、`compact`、`remember` 只允许从 `idle` 进入；冲突抛出 `AgentOperationConflictError`。
+- compact/remember 在整个异步 operation 期间保持 `maintaining`，不能与 run 或历史/模型修改穿插。
+- `close()` 幂等，进入 `closing` 后拒绝新 operation；active run 先 interrupt，maintenance 先 settle，然后 close children、drain event bus、释放 runtime。
+
+这层状态机是 framework 独立运行时的完整约束，不依赖 daemon。daemon 的 scope admission gate 只在多客户端应用形态上增加 session/cwd/global 策略。
+
 ## 维护 API
 
 | API | 行为 |
@@ -172,6 +191,7 @@ child command 只接受 canonical `childId`。`sessionId` 通过 tree-wide direc
 
 - agent-runtime 不 import server/daemon。
 - framework 拥有执行状态和 live handles。
+- 单个 agent 的 run、maintenance、history/model mutation 与 close 服从同一 operation state machine。
 - application 只通过 events、effects 与 handles 接入。
 - child 递归继承同一 effects 和 event source。
 - child 递归共享同一个 tree-wide handle directory，但不共享 manager ownership。
