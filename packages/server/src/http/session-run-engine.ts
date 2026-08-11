@@ -7,7 +7,7 @@ import {
   normalizeTraceId,
   withoutTraceId,
 } from "./support.js";
-import { SessionRunCoordinator } from "../run-coordinator.js";
+import { RunInterruptedError, SessionRunCoordinator } from "../run-coordinator.js";
 import type { SessionRunExecutor } from "./session-run-executor.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
@@ -48,6 +48,13 @@ export interface SessionRunEngineContext {
 export class SessionRunEngine {
   private readonly runCoordinator = new SessionRunCoordinator();
   private readonly runPromises = new Map<string, Promise<void>>();
+  private readonly pendingAdmissions = new Map<string, {
+    sessionId: string;
+    delivery: "queue" | "steer";
+    content: string;
+    metadata: Record<string, unknown>;
+    promise: Promise<AdmitPromptResult>;
+  }>();
 
   constructor(private readonly context: SessionRunEngineContext) {}
 
@@ -109,7 +116,32 @@ export class SessionRunEngine {
       .filter((promise): promise is Promise<void> => promise !== undefined));
   }
 
-  async admitPromptAndMaybeRun(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
+  admitPromptAndMaybeRun(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
+    if (!input.id) return this.admitPrompt(sessionId, input);
+    const delivery = input.delivery ?? "queue";
+    const metadata = withoutTraceId(input.metadata ?? {});
+    const pending = this.pendingAdmissions.get(input.id);
+    if (pending) {
+      if (
+        pending.sessionId !== sessionId ||
+        pending.delivery !== delivery ||
+        pending.content !== input.content ||
+        !jsonEqual(pending.metadata, metadata)
+      ) {
+        throw new Error(`Prompt id is already used: ${input.id}`);
+      }
+      return pending.promise;
+    }
+    const promise = this.admitPrompt(sessionId, input).finally(() => {
+      if (this.pendingAdmissions.get(input.id!)?.promise === promise) {
+        this.pendingAdmissions.delete(input.id!);
+      }
+    });
+    this.pendingAdmissions.set(input.id, { sessionId, delivery, content: input.content, metadata, promise });
+    return promise;
+  }
+
+  private async admitPrompt(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
     const delivery = input.delivery ?? "queue";
     const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(input.metadata?.traceId) ?? randomUUID();
     const metadata = { ...(input.metadata ?? {}), traceId };
@@ -152,7 +184,13 @@ export class SessionRunEngine {
       });
       if (steered.merged && steered.activeRunId) {
         this.context.events.publishSince(before);
-        const delivered = await steered.delivery;
+        let delivered: Awaited<typeof steered.delivery>;
+        try {
+          delivered = await steered.delivery;
+        } catch (error) {
+          this.terminalizeUndeliveredSteer(sessionId, admitted.id, traceId, error);
+          throw error;
+        }
         const activeRun = this.context.store.getRun(delivered.runId);
         if (!activeRun || activeRun.sessionId !== sessionId) {
           throw new Error(`Steered input run was not found: ${delivered.runId}`);
@@ -221,7 +259,7 @@ export class SessionRunEngine {
       throw new Error(`Rejected steer input was not found: ${input.id}`);
     }
     const existing = this.context.store.findRunByInput(admitted.id);
-    if (existing) return existing.id;
+    if (existing?.inputId === admitted.id) return existing.id;
     const before = this.context.events.checkpoint();
     const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(admitted.metadata.traceId) ?? randomUUID();
     const run = this.context.store.createRun({
@@ -232,5 +270,32 @@ export class SessionRunEngine {
     this.context.events.publishSince(before);
     this.enqueueRun(run, admitted.id);
     return run.id;
+  }
+
+  private terminalizeUndeliveredSteer(
+    sessionId: string,
+    inputId: string,
+    traceId: string,
+    error: unknown,
+  ): void {
+    if (this.context.store.findRunByInput(inputId)) return;
+    const message = error instanceof Error ? error.message : String(error);
+    const interrupted = error instanceof RunInterruptedError;
+    const before = this.context.events.checkpoint();
+    const run = this.context.store.createRun({
+      sessionId,
+      inputId,
+      metadata: { traceId, steerDeliveryFailed: true },
+    });
+    this.context.store.appendEvent({
+      type: interrupted ? "session.run.interrupted" : "session.run.error",
+      sessionId,
+      payload: { runId: run.id, traceId, error: message, steerDeliveryFailure: true },
+    });
+    this.context.store.updateRun(run.id, {
+      status: interrupted ? "interrupted" : "failed",
+      error: message,
+    });
+    this.context.events.publishSince(before);
   }
 }

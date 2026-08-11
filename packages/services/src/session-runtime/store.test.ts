@@ -232,8 +232,39 @@ describe("SessionStore", () => {
       const steered = store.admitPrompt({ id: "i2", sessionId: "s1", content: "nudge", delivery: "steer" });
       expect(store.listUnboundInputs("s1").map((row) => row.id)).toEqual(["i2"]);
 
-      store.createMessage({ id: "m1", sessionId: "s1", role: "user", inputId: steered.id });
+      store.createMessage({ id: "m1", sessionId: "s1", role: "user", runId: "r1", inputId: steered.id });
       expect(store.listUnboundInputs("s1")).toEqual([]);
+      expect(store.findRunByInput(steered.id)?.id).toBe("r1");
+    });
+  });
+
+  it("clears terminal run and task fields when reusable state returns to running", () => {
+    withStore((store) => {
+      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child", parentId: "parent", cwd: process.cwd(), model: "m" });
+      const input = store.admitPrompt({ id: "i1", sessionId: "child", content: "first" });
+      const run = store.createRun({ id: "r1", sessionId: "child", inputId: input.id });
+      store.updateRun(run.id, { status: "failed", error: "first failed" });
+      store.updateRun(run.id, { status: "running" });
+      expect(store.getRun(run.id)).toMatchObject({ status: "running" });
+      expect(store.getRun(run.id)).not.toHaveProperty("finishedAt");
+      expect(store.getRun(run.id)).not.toHaveProperty("error");
+
+      store.createSessionTask({
+        id: "task-1",
+        sessionId: "parent",
+        childSessionId: "child",
+        runId: run.id,
+        type: "agent",
+        description: "Explore",
+        cwd: process.cwd(),
+      });
+      store.updateSessionTask("task-1", { status: "failed", output: "old", error: "old error" });
+      store.updateSessionTask("task-1", { status: "running" });
+      expect(store.getSessionTask("task-1")).toMatchObject({ status: "running" });
+      expect(store.getSessionTask("task-1")).not.toHaveProperty("finishedAt");
+      expect(store.getSessionTask("task-1")).not.toHaveProperty("output");
+      expect(store.getSessionTask("task-1")).not.toHaveProperty("error");
     });
   });
 

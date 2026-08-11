@@ -599,7 +599,11 @@ export class SessionStore {
     const previous = run.status;
     if (input.status) {
       run.status = input.status;
-      if (input.status === "running" && !run.startedAt) run.startedAt = timestamp;
+      if (input.status === "running" && previous !== "running") {
+        run.startedAt = timestamp;
+        delete run.finishedAt;
+        delete run.error;
+      }
       if (["completed", "failed", "interrupted"].includes(input.status)) run.finishedAt = timestamp;
     }
     if (input.error !== undefined) run.error = input.error;
@@ -622,7 +626,12 @@ export class SessionStore {
   }
 
   findRunByInput(inputId: string): SessionRunRecord | undefined {
-    const run = Object.values(this.state.runs).find((candidate) => candidate.inputId === inputId);
+    const direct = Object.values(this.state.runs).find((candidate) => candidate.inputId === inputId);
+    if (direct) return clone(direct);
+    const promoted = Object.values(this.state.messages).find((message) =>
+      message.inputId === inputId && message.runId,
+    );
+    const run = promoted?.runId ? this.state.runs[promoted.runId] : undefined;
     return run ? clone(run) : undefined;
   }
 
@@ -686,7 +695,12 @@ export class SessionStore {
     const previousStatus = task.status;
     if (input.status) {
       task.status = input.status;
-      if (input.status === "running" && !task.startedAt) task.startedAt = timestamp;
+      if (input.status === "running" && previousStatus !== "running") {
+        task.startedAt = timestamp;
+        delete task.finishedAt;
+        delete task.output;
+        delete task.error;
+      }
       if (["completed", "failed", "stopped", "interrupted"].includes(input.status)) task.finishedAt = timestamp;
     }
     if (input.output !== undefined) task.output = input.output;

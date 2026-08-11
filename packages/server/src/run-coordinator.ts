@@ -111,6 +111,7 @@ export class SessionRunCoordinator {
 
     const activeRunId = lane.active?.runId;
     if (lane.active) {
+      this.rejectSteers(lane.active, new RunInterruptedError("Steered input interrupted"));
       lane.active.controller.abort();
       void lane.active.handle?.interrupt("Run interrupted");
     }
@@ -210,8 +211,12 @@ export class SessionRunCoordinator {
           const receipt = await task.handle!.steer(request.input);
           request.resolve({ runId: receipt.runId });
         } catch (error) {
+          if (task.controller.signal.aborted) {
+            const interrupted = new RunInterruptedError("Steered input interrupted");
+            request.reject(interrupted);
+            throw interrupted;
+          }
           if (
-            task.controller.signal.aborted ||
             !(error instanceof AgentRunNotAcceptingInputError) ||
             !task.onSteerRejected
           ) {
@@ -246,6 +251,14 @@ export class SessionRunCoordinator {
   private async recoverUndeliveredSteers(task: RunTask): Promise<void> {
     const pending = task.pendingSteers.splice(0);
     if (pending.length === 0) return;
+    if (task.controller.signal.aborted) {
+      const error = new RunInterruptedError("Steered input interrupted");
+      for (const request of pending) {
+        request.reject(error);
+        task.steerRequests.delete(request);
+      }
+      return;
+    }
     const error = new AgentRunNotAcceptingInputError(task.runId);
     for (const request of pending) {
       try {
