@@ -173,6 +173,33 @@ daemon consumes events and projects durable state
 
 退出标准：agent-runtime、services、server、core 全量测试与相关 package typecheck 通过；durable store 失败不产生进程内幽灵状态；同一 session/child 在 closing 窗口没有第二个执行 owner。
 
+## Follow-up：text delta checkpoint 性能
+
+> 状态：待处理。当前实现为每个 `output.text.delta` 同步执行一次 SQLite 事务，并分别更新 part、message、session；该策略优先保证崩溃时不丢失已投影文本，但高频 provider chunk 会阻塞事件消费并放大磁盘写入。
+
+- [ ] delta 先更新内存 read model 并立即发布 SSE，以 part 为单位累计 dirty checkpoint。
+- [ ] delta hot path 不再触发整份 `SessionState` 的 `structuredClone` 或全量 `save()`；事务回滚只覆盖本次 dirty part/checkpoint 状态。
+- [ ] 默认按 100-250ms 或 4-16KB 阈值批量 flush；同批 dirty part 使用单个 SQLite 事务。
+- [ ] part complete、tool boundary、run terminal、agent eviction 与 daemon shutdown 强制 flush。
+- [ ] transient delta event 使用有界缓存或只做 live publish，避免 daemon 生命周期内无上限占用内存。
+- [ ] 明确 durability contract：异常进程退出最多丢失一个 checkpoint 窗口；正常 terminal/close 不丢失。
+- [ ] 增加高频 delta 合并、定时 flush、阈值 flush、terminal/close flush 与写入失败重试测试，并做写事务次数/吞吐基准对比。
+
+退出标准：delta 写事务数量不再随 chunk 数量线性增长；SSE 实时性不依赖 durable flush；正常生命周期边界可恢复完整文本；文档明确异常退出的有界尾部丢失语义。
+
+## Follow-up：归零复盘待办
+
+> 状态：待处理。以下问题按机制收敛，不接受在单条 route、单个 event type 或单个 catch 中继续叠加局部补丁。
+
+- [ ] framework 为 `submitMessage`、`compact`、`loadHistory`、`clear`、`setModel`、`close` 建立统一 operation gate；历史/配置变更不得与 active run 并发。
+- [ ] daemon 建立 application admission gate；shutdown、全局配置重载和 session maintenance 先关闭对应准入，再检查/中断/drain run lane，最后关闭 agent/store。
+- [ ] `SessionRunEngine` 提供全局或按 scope 的 stop-and-drain 生命周期；server shutdown 不得在关闭已有 agent 后启动 queued run。
+- [ ] projector 对任意 required event 的“投影失败 + 补偿失败”采用统一 poison/retry/terminalize 策略；不能只为 `child.closed` 保存 pending state，也不能让 sequence watermark 越过未收敛事件。
+- [ ] `AgentPool.warm()` 保持 best-effort 语义，但 Maintenance/Control 的必需 runtime 操作直接传播 agent 创建失败，不能静默降级为 `[]`、零 usage 或 501。
+- [ ] `SessionStore.save()` 从全表 DELETE/INSERT 快照写迁移为行级 mutation/unit-of-work；durable event 使用 append，普通状态更新成本不随全库历史线性增长。
+
+退出标准：framework 单实例操作具有明确互斥状态机；daemon close/config/maintenance 与 prompt admission 线性化；required event 失败必有可观察终态；store 写放大有基准和上界。
+
 ## 提交策略
 
 建议按三个可审查提交落地，而不是按文件碎片提交：
