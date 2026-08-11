@@ -79,7 +79,7 @@ describe("AgentPool", () => {
     expect(pool.size).toBe(1);
   });
 
-  it("keeps a replacement subscription when an older generation finishes closing", async () => {
+  it("waits for the old generation to close before creating a replacement", async () => {
     const oldClose = deferred();
     const oldAgent = createAgent(vi.fn(async () => { await oldClose.promise; }));
     const newAgent = createAgent();
@@ -96,14 +96,39 @@ describe("AgentPool", () => {
     await pool.acquire(session as any, [], []);
     const closing = pool.close(session.id);
     await vi.waitFor(() => expect(oldAgent.close).toHaveBeenCalledOnce());
-    await pool.acquire(session as any, [], []);
+    const replacement = pool.acquire(session as any, [], []);
+    await Promise.resolve();
+    expect(factory).toHaveBeenCalledOnce();
+    expect(await pool.get(session.id)).toBeUndefined();
     oldClose.resolve();
     await closing;
+    expect(await replacement).toBe(newAgent);
 
     expect(oldUnsubscribe).toHaveBeenCalledOnce();
     expect(newUnsubscribe).not.toHaveBeenCalled();
     expect(await pool.get(session.id)).toBe(newAgent);
     await pool.closeAll();
+  });
+
+  it("does not recreate a session that becomes archived while its agent closes", async () => {
+    const oldClose = deferred();
+    const oldAgent = createAgent(vi.fn(async () => { await oldClose.promise; }));
+    const factory = vi.fn().mockResolvedValueOnce(oldAgent);
+    let status: "idle" | "archived" = "idle";
+    const context = createContext(factory);
+    context.store.getSession.mockImplementation(() => ({ ...session, status }));
+    const pool = new AgentPool(context as any);
+
+    await pool.acquire(session as any, [], []);
+    const closing = pool.close(session.id);
+    const replacement = pool.acquire(session as any, [], []);
+    status = "archived";
+    oldClose.resolve();
+
+    await closing;
+    await expect(replacement).rejects.toThrow("Session runtime is not available");
+    expect(factory).toHaveBeenCalledOnce();
+    expect(pool.size).toBe(0);
   });
 });
 

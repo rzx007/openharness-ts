@@ -185,6 +185,11 @@ describe("SessionStore", () => {
       ]);
       expect(store.listMessageParts("s1", { messageId: second.id }).map((row) => row.id)).toEqual(["p2"]);
       expect(store.listEvents().map((event) => event.type)).toContain("session.message.part.delta");
+      const runningReloaded = new SessionStore({ path });
+      expect(runningReloaded.listMessageParts("s1", { messageId: second.id })).toMatchObject([
+        { id: "p2", text: "hi", status: "running" },
+      ]);
+      runningReloaded.close();
       store.upsertMessagePart({
         id: "p2",
         sessionId: "s1",
@@ -252,6 +257,32 @@ describe("SessionStore", () => {
       expect(store.getSessionTask("task-1")).not.toHaveProperty("finishedAt");
       expect(store.getSessionTask("task-1")).not.toHaveProperty("output");
       expect(store.getSessionTask("task-1")).not.toHaveProperty("error");
+    });
+  });
+
+  it("rolls back both SQLite and the in-memory read model when a grouped write fails", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "existing", cwd: process.cwd(), model: "m" });
+
+      expect(() => store.transaction(() => {
+        store.createSession({ id: "transient", cwd: process.cwd(), model: "m" });
+        (store as any).database.exec(`
+          CREATE TRIGGER fail_session_insert
+          BEFORE INSERT ON session
+          BEGIN
+            SELECT RAISE(ABORT, 'forced store failure');
+          END;
+        `);
+        store.createSession({ id: "never-committed", cwd: process.cwd(), model: "m" });
+      })).toThrow("forced store failure");
+
+      expect(store.getSession("existing")).toBeDefined();
+      expect(store.getSession("transient")).toBeUndefined();
+      expect(store.getSession("never-committed")).toBeUndefined();
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.listSessions().map((session) => session.id)).toEqual(["existing"]);
+      reloaded.close();
     });
   });
 

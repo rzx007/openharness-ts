@@ -280,7 +280,7 @@ describe("AgentChildManager", () => {
     resumed.resolve(resumedAgent);
 
     await expect(closing).resolves.toBeUndefined();
-    await expect(followUp).rejects.toThrow("Child agent is closed");
+    await expect(followUp).rejects.toThrow("Child agent is closing or closed");
     expect(resumedAgent.submitMessage).not.toHaveBeenCalled();
     expect(resumedAgent.close).toHaveBeenCalled();
     expect(events.at(-1)).toBe("child.closed");
@@ -308,7 +308,7 @@ describe("AgentChildManager", () => {
     created.resolve(childAgent);
 
     await expect(closing).resolves.toBeUndefined();
-    await expect(spawn).rejects.toThrow("Child agent is closed");
+    await expect(spawn).rejects.toThrow("Child agent is closing or closed");
     expect(childAgent.submitMessage).not.toHaveBeenCalled();
     expect(childAgent.close).toHaveBeenCalledOnce();
     expect(events.filter((type) => type === "child.closed")).toHaveLength(1);
@@ -343,6 +343,30 @@ describe("AgentChildManager", () => {
     expect(replay).toEqual(first);
     expect(submitMessage).toHaveBeenCalledTimes(2);
     await manager.closeAll();
+  });
+
+  it("rejects new input as soon as child close begins", async () => {
+    const pending = deferred<AgentRunResult>();
+    const interrupt = vi.fn(async () => pending.reject(new Error("interrupted")));
+    const submitMessage = vi.fn(() => runHandle(pending.promise, vi.fn(), interrupt));
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage));
+    const controller = manager.createController(parentScope());
+    const invocation = await controller.spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+
+    const closing = manager.close(invocation.id);
+
+    expect(manager.get(invocation.id)?.state).toBe("closing");
+    await expect(controller.sendChildInput(invocation.id, {
+      content: "must not start",
+      delivery: "queue",
+    })).rejects.toThrow("Child agent is closing or closed");
+    await closing;
+    expect(submitMessage).toHaveBeenCalledOnce();
   });
 
   it("surfaces required child.closed delivery failures and still removes the handle", async () => {

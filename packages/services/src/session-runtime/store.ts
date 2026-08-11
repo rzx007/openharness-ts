@@ -129,6 +129,7 @@ export class SessionStore {
   readonly path: string;
   private readonly database: Database.Database;
   private closed = false;
+  private transactionDepth = 0;
   private state: SessionState;
 
   constructor(options: SessionStoreOptions) {
@@ -152,6 +153,23 @@ export class SessionStore {
     if (this.closed) return;
     this.database.close();
     this.closed = true;
+  }
+
+  /**
+   * Groups synchronous store mutations into one durable commit. Both SQLite
+   * rows and the in-memory read model return to their previous state on error.
+   */
+  transaction<T>(work: () => T): T {
+    const previous = structuredClone(this.state);
+    this.transactionDepth += 1;
+    try {
+      return this.database.transaction(work)();
+    } catch (error) {
+      this.state = previous;
+      throw error;
+    } finally {
+      this.transactionDepth -= 1;
+    }
   }
 
   createSession(input: CreateSessionInput): SessionRecord {
@@ -500,6 +518,19 @@ export class SessionStore {
         delta: input.delta,
       },
     });
+    try {
+      this.database.transaction(() => {
+        this.database.prepare("UPDATE session_message_part SET text = ?, updated_at = ? WHERE id = ?")
+          .run(part.text ?? "", part.updatedAt, part.id);
+        this.database.prepare("UPDATE session_message SET updated_at = ? WHERE id = ?")
+          .run(message.updatedAt, message.id);
+        this.database.prepare("UPDATE session SET updated_at = ? WHERE id = ?")
+          .run(session.updatedAt, session.id);
+      })();
+    } catch (error) {
+      if (this.transactionDepth === 0) this.state = this.load();
+      throw error;
+    }
     return clone(event);
   }
 
@@ -940,28 +971,33 @@ export class SessionStore {
   }
 
   private save(): void {
-    this.database.transaction(() => {
-      this.database.exec("DELETE FROM session_event; DELETE FROM permission_request; DELETE FROM session_task; DELETE FROM session_run; DELETE FROM session_message_part; DELETE FROM session_message; DELETE FROM session_input; DELETE FROM session;");
-      const insertSession = this.database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const value of Object.values(this.state.sessions)) insertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null);
-      const insertInput = this.database.prepare("INSERT INTO session_input VALUES (?, ?, ?, ?, ?, ?, ?)");
-      for (const value of Object.values(this.state.inputs)) insertInput.run(value.id, value.sessionId, value.seq, value.delivery, value.content, encode(value.metadata), value.createdAt);
-      const insertMessage = this.database.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const value of Object.values(this.state.messages)) insertMessage.run(value.id, value.sessionId, value.seq, value.role, value.runId ?? null, value.inputId ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
-      const insertPart = this.database.prepare("INSERT INTO session_message_part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const value of Object.values(this.state.parts)) insertPart.run(value.id, value.sessionId, value.messageId, value.seq, value.type, value.status, value.text ?? null, value.toolUseId ?? null, value.toolName ?? null, value.input === undefined ? null : encode(value.input), value.output === undefined ? null : JSON.stringify(value.output), value.isError === undefined ? null : Number(value.isError), encode(value.metadata), value.createdAt, value.updatedAt);
-      const insertRun = this.database.prepare("INSERT INTO session_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const value of Object.values(this.state.runs)) insertRun.run(value.id, value.sessionId, value.inputId ?? null, value.status, value.startedAt ?? null, value.finishedAt ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
-      const insertTask = this.database.prepare("INSERT INTO session_task VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const value of Object.values(this.state.tasks)) insertTask.run(value.id, value.sessionId, value.childSessionId ?? null, value.runId ?? null, value.type, value.status, value.description, value.cwd, value.output ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.startedAt ?? null, value.finishedAt ?? null, value.updatedAt);
-      const insertPermission = this.database.prepare("INSERT INTO permission_request VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const value of Object.values(this.state.permissions)) insertPermission.run(value.id, value.sessionId, value.runId ?? null, value.toolName, encode(value.payload), value.status, value.decision ?? null, value.decidedByClientId ?? null, value.createdAt, value.updatedAt);
-      const insertEvent = this.database.prepare("INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)");
-      for (const value of this.state.events) {
-        if (!isDurableEvent(value)) continue;
-        insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
-      }
-    })();
+    try {
+      this.database.transaction(() => {
+        this.database.exec("DELETE FROM session_event; DELETE FROM permission_request; DELETE FROM session_task; DELETE FROM session_run; DELETE FROM session_message_part; DELETE FROM session_message; DELETE FROM session_input; DELETE FROM session;");
+        const insertSession = this.database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const value of Object.values(this.state.sessions)) insertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null);
+        const insertInput = this.database.prepare("INSERT INTO session_input VALUES (?, ?, ?, ?, ?, ?, ?)");
+        for (const value of Object.values(this.state.inputs)) insertInput.run(value.id, value.sessionId, value.seq, value.delivery, value.content, encode(value.metadata), value.createdAt);
+        const insertMessage = this.database.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const value of Object.values(this.state.messages)) insertMessage.run(value.id, value.sessionId, value.seq, value.role, value.runId ?? null, value.inputId ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+        const insertPart = this.database.prepare("INSERT INTO session_message_part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const value of Object.values(this.state.parts)) insertPart.run(value.id, value.sessionId, value.messageId, value.seq, value.type, value.status, value.text ?? null, value.toolUseId ?? null, value.toolName ?? null, value.input === undefined ? null : encode(value.input), value.output === undefined ? null : JSON.stringify(value.output), value.isError === undefined ? null : Number(value.isError), encode(value.metadata), value.createdAt, value.updatedAt);
+        const insertRun = this.database.prepare("INSERT INTO session_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const value of Object.values(this.state.runs)) insertRun.run(value.id, value.sessionId, value.inputId ?? null, value.status, value.startedAt ?? null, value.finishedAt ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+        const insertTask = this.database.prepare("INSERT INTO session_task VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const value of Object.values(this.state.tasks)) insertTask.run(value.id, value.sessionId, value.childSessionId ?? null, value.runId ?? null, value.type, value.status, value.description, value.cwd, value.output ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.startedAt ?? null, value.finishedAt ?? null, value.updatedAt);
+        const insertPermission = this.database.prepare("INSERT INTO permission_request VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const value of Object.values(this.state.permissions)) insertPermission.run(value.id, value.sessionId, value.runId ?? null, value.toolName, encode(value.payload), value.status, value.decision ?? null, value.decidedByClientId ?? null, value.createdAt, value.updatedAt);
+        const insertEvent = this.database.prepare("INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)");
+        for (const value of this.state.events) {
+          if (!isDurableEvent(value)) continue;
+          insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
+        }
+      })();
+    } catch (error) {
+      if (this.transactionDepth === 0) this.state = this.load();
+      throw error;
+    }
   }
 
 }

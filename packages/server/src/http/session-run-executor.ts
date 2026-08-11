@@ -59,17 +59,19 @@ export class SessionRunExecutor {
       const traceId = this.context.traceIdForRun(runId);
       const interrupted = error instanceof RunInterruptedError || workContext.signal.aborted;
       const before = this.context.events.checkpoint();
-      this.context.transcriptProjection.finalizeRunParts(
-        sessionId,
-        runId,
-        interrupted ? "interrupted" : "failed",
-      );
-      this.context.store.appendEvent({
-        type: interrupted ? "session.run.interrupted" : "session.run.error",
-        sessionId,
-        payload: { runId, traceId, error: message },
+      this.context.store.transaction(() => {
+        this.context.transcriptProjection.finalizeRunParts(
+          sessionId,
+          runId,
+          interrupted ? "interrupted" : "failed",
+        );
+        this.context.store.appendEvent({
+          type: interrupted ? "session.run.interrupted" : "session.run.error",
+          sessionId,
+          payload: { runId, traceId, error: message },
+        });
+        this.context.store.updateRun(runId, { status: interrupted ? "interrupted" : "failed", error: message });
       });
-      this.context.store.updateRun(runId, { status: interrupted ? "interrupted" : "failed", error: message });
       this.context.log({
         level: interrupted ? "warn" : "error",
         event: interrupted ? "session.run.interrupted" : "session.run.failed",

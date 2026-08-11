@@ -15,6 +15,7 @@ interface ChildProjectionState {
   parentSessionId: string;
   taskId: string;
   bridge: SessionTaskBridge;
+  pendingClose?: Extract<AgentEvent, { type: "child.closed" }>;
 }
 
 export interface DaemonAgentEventProjectorContext {
@@ -36,6 +37,7 @@ export class DaemonAgentEventProjector {
   constructor(private readonly context: DaemonAgentEventProjectorContext) {}
 
   async apply(event: AgentEvent): Promise<void> {
+    await this.reconcilePendingChildClosures();
     if (event.sequence <= this.lastAppliedSequence) return;
     try {
       await this.project(event);
@@ -113,6 +115,9 @@ export class DaemonAgentEventProjector {
     const { childId, sessionId, spawn, cwd, worktree } = event.data;
     const parent = this.context.store.getSession(event.context.sessionId);
     if (!parent) throw new Error(`Parent session not found for child ${childId}: ${event.context.sessionId}`);
+    if (parent.status === "closing" || parent.status === "archived") {
+      throw new Error(`Parent session is not accepting child agents: ${parent.id}`);
+    }
     const existing = this.context.store.getSession(sessionId);
     if (
       existing &&
@@ -200,59 +205,51 @@ export class DaemonAgentEventProjector {
 
   private async projectChildClosed(event: Extract<AgentEvent, { type: "child.closed" }>): Promise<void> {
     const state = this.children.get(event.data.childId);
-    try {
-      this.context.liveChildren.unregister(event.data.sessionId, event.data.childId);
-      if (state) {
-        const task = this.context.store.getSessionTask(state.taskId);
-        if (task && (task.status === "pending" || task.status === "running")) {
-          await state.bridge.completeSessionTask(state.taskId, event.data.result);
-        }
-      }
-      this.appendRuntimeEvent(event, {
-        childId: event.data.childId,
-        childSessionId: event.data.sessionId,
-        result: event.data.result,
-      });
-    } finally {
-      if (state) this.children.delete(state.childId);
-    }
+    if (state) state.pendingClose = event;
+    await this.completeChildCloseProjection(event, state);
   }
 
   private projectInput(event: Extract<AgentEvent, { type: "input.accepted" }>): void {
     const sessionId = event.context.sessionId;
     const inputId = required(event.context.inputId, "inputId", event.type);
-    let input = this.context.store.getInput(inputId);
     const content = contentToText(event.data.content);
     const metadata = {
       ...event.data.metadata,
       ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
     };
-    if (!input) {
-      const before = this.context.events.checkpoint();
-      input = this.context.store.admitPrompt({
-        id: inputId,
-        sessionId,
-        delivery: event.data.delivery,
-        content,
-        metadata,
-      });
-      this.context.events.publishSince(before);
-    } else if (
-      input.sessionId !== sessionId ||
-      input.content !== content ||
-      input.delivery !== event.data.delivery ||
-      !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))
-    ) {
-      throw new Error(`Agent input identity conflict: ${inputId}`);
-    }
-
     const runId = event.context.runId;
     const transcript = runId ? this.transcripts.get(runId) : undefined;
-    if (transcript && event.data.delivery === "steer") {
-      const before = this.context.events.checkpoint();
-      this.context.transcriptProjection.projectSteeredInputs(transcript, [input]);
-      this.context.events.publishSince(before);
+    const transcriptSnapshot = transcript ? snapshotTranscript(transcript) : undefined;
+    const before = this.context.events.checkpoint();
+    try {
+      this.context.store.transaction(() => {
+        let input = this.context.store.getInput(inputId);
+        if (!input) {
+          input = this.context.store.admitPrompt({
+            id: inputId,
+            sessionId,
+            delivery: event.data.delivery,
+            content,
+            metadata,
+          });
+        } else if (
+          input.sessionId !== sessionId ||
+          input.content !== content ||
+          input.delivery !== event.data.delivery ||
+          !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))
+        ) {
+          throw new Error(`Agent input identity conflict: ${inputId}`);
+        }
+
+        if (transcript && event.data.delivery === "steer") {
+          this.context.transcriptProjection.projectSteeredInputs(transcript, [input]);
+        }
+      });
+    } catch (error) {
+      if (transcript && transcriptSnapshot) restoreTranscript(transcript, transcriptSnapshot);
+      throw error;
     }
+    this.context.events.publishSince(before);
   }
 
   private async startRun(event: Extract<AgentEvent, { type: "run.started" }>): Promise<void> {
@@ -267,24 +264,27 @@ export class DaemonAgentEventProjector {
     }
 
     const before = this.context.events.checkpoint();
-    const existing = this.context.store.getRun(runId);
-    if (!existing) {
-      this.context.store.createRun({
-        id: runId,
-        sessionId,
-        inputId,
-        metadata: {
-          ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
-          ...(event.context.parentRunId ? { parentRunId: event.context.parentRunId } : {}),
-        },
-      });
-    } else if (existing.sessionId !== sessionId || existing.inputId !== inputId) {
-      throw new Error(`Agent run identity conflict: ${runId}`);
-    } else if (existing.status === "completed" || existing.status === "failed" || existing.status === "interrupted") {
-      throw new Error(`Agent run is already terminal: ${runId}`);
-    }
-    this.context.store.updateRun(runId, { status: "running" });
-    this.transcripts.set(runId, this.context.transcriptProjection.beginRun(sessionId, inputId, runId, input.content));
+    const transcript = this.context.store.transaction(() => {
+      const existing = this.context.store.getRun(runId);
+      if (!existing) {
+        this.context.store.createRun({
+          id: runId,
+          sessionId,
+          inputId,
+          metadata: {
+            ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
+            ...(event.context.parentRunId ? { parentRunId: event.context.parentRunId } : {}),
+          },
+        });
+      } else if (existing.sessionId !== sessionId || existing.inputId !== inputId) {
+        throw new Error(`Agent run identity conflict: ${runId}`);
+      } else if (existing.status === "completed" || existing.status === "failed" || existing.status === "interrupted") {
+        throw new Error(`Agent run is already terminal: ${runId}`);
+      }
+      this.context.store.updateRun(runId, { status: "running" });
+      return this.context.transcriptProjection.beginRun(sessionId, inputId, runId, input.content);
+    });
+    this.transcripts.set(runId, transcript);
     this.context.log({
       level: "info",
       event: "session.run.started",
@@ -307,9 +307,17 @@ export class DaemonAgentEventProjector {
     const runId = required(event.context.runId, "runId", event.type);
     const state = this.transcripts.get(runId);
     if (!state) throw new Error(`Transcript projection not started for run: ${runId}`);
+    const stateSnapshot = snapshotTranscript(state);
     const direct = stream.type === "text_delta" && this.context.transcriptProjection.hasOpenTextPart(state);
     const before = direct ? undefined : this.context.events.checkpoint();
-    const applied = this.context.transcriptProjection.projectStreamEvent(state, stream);
+    let applied: ReturnType<SessionTranscriptProjection["projectStreamEvent"]>;
+    try {
+      applied = this.context.store.transaction(() =>
+        this.context.transcriptProjection.projectStreamEvent(state, stream));
+    } catch (error) {
+      restoreTranscript(state, stateSnapshot);
+      throw error;
+    }
     if (stream.type === "tool_use_start") {
       this.context.log({
         level: "info",
@@ -339,30 +347,38 @@ export class DaemonAgentEventProjector {
   ): Promise<void> {
     const runId = required(event.context.runId, "runId", event.type);
     const state = this.transcripts.get(runId);
+    const stateSnapshot = state ? snapshotTranscript(state) : undefined;
     const before = this.context.events.checkpoint();
     const interrupted = event.type === "run.interrupted";
     const failed = event.type === "run.failed";
-    if (state) {
-      this.context.transcriptProjection.completeOpenTextPart(
-        state,
-        interrupted ? "interrupted" : failed ? "failed" : "completed",
-      );
-    }
     const error = event.type === "run.completed" ? undefined : event.data.error.message;
-    if (error) {
-      this.context.store.appendEvent({
-        type: interrupted ? "session.run.interrupted" : "session.run.error",
-        sessionId: event.context.sessionId,
-        payload: { runId, traceId: event.context.traceId, error },
+    try {
+      this.context.store.transaction(() => {
+        if (state) {
+          this.context.transcriptProjection.completeOpenTextPart(
+            state,
+            interrupted ? "interrupted" : failed ? "failed" : "completed",
+          );
+        }
+        if (error) {
+          this.context.store.appendEvent({
+            type: interrupted ? "session.run.interrupted" : "session.run.error",
+            sessionId: event.context.sessionId,
+            payload: { runId, traceId: event.context.traceId, error },
+          });
+        }
+        this.context.store.updateRun(runId, {
+          status: interrupted ? "interrupted" : failed ? "failed" : "completed",
+          ...(error ? { error } : {}),
+          ...(event.type === "run.completed" && event.data.stopReason
+            ? { metadata: { stopReason: event.data.stopReason } }
+            : {}),
+        });
       });
+    } catch (projectionError) {
+      if (state && stateSnapshot) restoreTranscript(state, stateSnapshot);
+      throw projectionError;
     }
-    this.context.store.updateRun(runId, {
-      status: interrupted ? "interrupted" : failed ? "failed" : "completed",
-      ...(error ? { error } : {}),
-      ...(event.type === "run.completed" && event.data.stopReason
-        ? { metadata: { stopReason: event.data.stopReason } }
-        : {}),
-    });
     this.context.log({
       level: failed ? "error" : interrupted ? "warn" : "info",
       event: failed ? "session.run.failed" : interrupted ? "session.run.interrupted" : "session.run.completed",
@@ -406,13 +422,15 @@ export class DaemonAgentEventProjector {
       const run = this.context.store.getRun(runId);
       if (run && (run.status === "pending" || run.status === "running")) {
         const before = this.context.events.checkpoint();
-        this.context.transcriptProjection.finalizeRunParts(event.context.sessionId, runId, "failed");
-        this.context.store.appendEvent({
-          type: "session.run.error",
-          sessionId: event.context.sessionId,
-          payload: { runId, traceId: event.context.traceId, error: message, projectionFailure: true },
+        this.context.store.transaction(() => {
+          this.context.transcriptProjection.finalizeRunParts(event.context.sessionId, runId, "failed");
+          this.context.store.appendEvent({
+            type: "session.run.error",
+            sessionId: event.context.sessionId,
+            payload: { runId, traceId: event.context.traceId, error: message, projectionFailure: true },
+          });
+          this.context.store.updateRun(runId, { status: "failed", error: message });
         });
-        this.context.store.updateRun(runId, { status: "failed", error: message });
         this.context.events.publishSince(before);
       }
       this.transcripts.delete(runId);
@@ -425,6 +443,48 @@ export class DaemonAgentEventProjector {
       await child.bridge.completeSessionTask(child.taskId, { status: "failed", output: message });
     }
   }
+
+  private async reconcilePendingChildClosures(): Promise<void> {
+    for (const child of this.children.values()) {
+      if (!child.pendingClose) continue;
+      const event = child.pendingClose;
+      await this.completeChildCloseProjection(event, child);
+      this.lastAppliedSequence = Math.max(this.lastAppliedSequence, event.sequence);
+    }
+  }
+
+  private async completeChildCloseProjection(
+    event: Extract<AgentEvent, { type: "child.closed" }>,
+    state: ChildProjectionState | undefined,
+  ): Promise<void> {
+    this.context.liveChildren.unregister(event.data.sessionId, event.data.childId);
+    if (state) {
+      const task = this.context.store.getSessionTask(state.taskId);
+      if (task && (task.status === "pending" || task.status === "running")) {
+        await state.bridge.completeSessionTask(state.taskId, event.data.result);
+      }
+    }
+    this.appendRuntimeEvent(event, {
+      childId: event.data.childId,
+      childSessionId: event.data.sessionId,
+      result: event.data.result,
+    });
+    if (state) this.children.delete(state.childId);
+  }
+}
+
+function snapshotTranscript(state: ActiveTranscriptProjectionState): ActiveTranscriptProjectionState {
+  return { ...state, toolParts: new Map(state.toolParts) };
+}
+
+function restoreTranscript(
+  state: ActiveTranscriptProjectionState,
+  snapshot: ActiveTranscriptProjectionState,
+): void {
+  for (const key of Object.keys(state) as Array<keyof ActiveTranscriptProjectionState>) {
+    delete (state as Partial<ActiveTranscriptProjectionState>)[key];
+  }
+  Object.assign(state, snapshot, { toolParts: new Map(snapshot.toolParts) });
 }
 
 function required(value: string | undefined, name: string, eventType: string): string {

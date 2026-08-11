@@ -157,6 +157,16 @@ export class SessionRunEngine {
         throw new Error(`Prompt id is already used: ${input.id}`);
       }
       const existingRun = this.context.store.findRunByInput(existingInput.id);
+      if (!existingRun && this.context.agentPool.configured) {
+        const before = this.context.events.checkpoint();
+        const recovered = this.context.store.createRun({
+          sessionId,
+          inputId: existingInput.id,
+          metadata: { ...runMetadata, recoveredAdmission: true },
+        });
+        this.context.events.publishSince(before);
+        return { input: existingInput, run: recovered, queue_state: this.enqueueRun(recovered, existingInput.id) };
+      }
       return {
         input: existingInput,
         ...(existingRun ? { run: existingRun } : {}),
@@ -219,13 +229,15 @@ export class SessionRunEngine {
     const before = this.context.events.checkpoint();
     const result = this.runCoordinator.interrupt(sessionId);
     if (result.interrupted) {
-      for (const runId of result.queuedRunIds) {
-        this.context.store.updateRun(runId, { status: "interrupted", error: "Queued run interrupted" });
-      }
-      this.context.store.appendEvent({
-        type: "session.run.interrupt_requested",
-        sessionId,
-        payload: { runId: result.activeRunId, queuedRunIds: result.queuedRunIds },
+      this.context.store.transaction(() => {
+        for (const runId of result.queuedRunIds) {
+          this.context.store.updateRun(runId, { status: "interrupted", error: "Queued run interrupted" });
+        }
+        this.context.store.appendEvent({
+          type: "session.run.interrupt_requested",
+          sessionId,
+          payload: { runId: result.activeRunId, queuedRunIds: result.queuedRunIds },
+        });
       });
       this.context.events.publishSince(before);
     }
@@ -282,19 +294,21 @@ export class SessionRunEngine {
     const message = error instanceof Error ? error.message : String(error);
     const interrupted = error instanceof RunInterruptedError;
     const before = this.context.events.checkpoint();
-    const run = this.context.store.createRun({
-      sessionId,
-      inputId,
-      metadata: { traceId, steerDeliveryFailed: true },
-    });
-    this.context.store.appendEvent({
-      type: interrupted ? "session.run.interrupted" : "session.run.error",
-      sessionId,
-      payload: { runId: run.id, traceId, error: message, steerDeliveryFailure: true },
-    });
-    this.context.store.updateRun(run.id, {
-      status: interrupted ? "interrupted" : "failed",
-      error: message,
+    this.context.store.transaction(() => {
+      const created = this.context.store.createRun({
+        sessionId,
+        inputId,
+        metadata: { traceId, steerDeliveryFailed: true },
+      });
+      this.context.store.appendEvent({
+        type: interrupted ? "session.run.interrupted" : "session.run.error",
+        sessionId,
+        payload: { runId: created.id, traceId, error: message, steerDeliveryFailure: true },
+      });
+      this.context.store.updateRun(created.id, {
+        status: interrupted ? "interrupted" : "failed",
+        error: message,
+      });
     });
     this.context.events.publishSince(before);
   }

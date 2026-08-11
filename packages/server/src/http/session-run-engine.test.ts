@@ -210,6 +210,7 @@ function createStore() {
   let inputCount = 0;
   let runCount = 0;
   return {
+    transaction: <T>(work: () => T) => work(),
     admitPrompt: vi.fn((input) => {
       const row = {
         ...input,

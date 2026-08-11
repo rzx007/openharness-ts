@@ -265,9 +265,6 @@ export class SessionApplicationService {
   }
 
   private async archiveSessionTreeWork(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
-    const children = this.context.store.listChildSessions(sessionId);
-    for (const child of children) await this.archiveSessionTree(child.id);
-
     const beforeClosing = this.context.events.checkpoint();
     const current = this.context.store.getSession(sessionId);
     if (!current) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
@@ -275,7 +272,13 @@ export class SessionApplicationService {
     this.context.store.beginArchive(sessionId);
     this.context.events.publishSince(beforeClosing);
     const interrupted = this.context.runEngine.interruptSession(sessionId);
-    await this.context.liveChildren.interrupt(sessionId, "Session archived");
+    const liveInterrupt = this.context.liveChildren.interrupt(sessionId, "Session archived");
+
+    // Closing the parent first makes the descendant snapshot stable: the
+    // event projector rejects child.created for closing sessions.
+    const children = this.context.store.listChildSessions(sessionId);
+    await liveInterrupt;
+    for (const child of children) await this.archiveSessionTree(child.id);
     const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
       .filter((runId): runId is string => !!runId);
     await this.context.runEngine.waitForRuns(interruptedRunIds);

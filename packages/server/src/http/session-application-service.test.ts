@@ -260,4 +260,22 @@ describe("SessionApplicationService", () => {
     });
     expect(broadcastSince).toHaveBeenCalledWith(7);
   });
+
+  it("closes child admission before taking the archive descendant snapshot", async () => {
+    const { service, store } = createService();
+    let closing = false;
+    store.beginArchive.mockImplementation(() => {
+      closing = true;
+      return { ...session, status: "closing" };
+    });
+    store.listChildSessions.mockImplementation(() => {
+      expect(closing).toBe(true);
+      return [];
+    });
+
+    await service.archiveSessionTree("s1");
+
+    expect(store.beginArchive.mock.invocationCallOrder[0])
+      .toBeLessThan(store.listChildSessions.mock.invocationCallOrder[0]!);
+  });
 });

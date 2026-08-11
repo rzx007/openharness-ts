@@ -45,7 +45,6 @@ interface ChildRecord {
   startChain: Promise<void>;
   lastResult?: AgentChildResult;
   parentAbortHandler?: () => void;
-  aliases: Set<string>;
   requests: Map<string, { input: AgentChildInput; receipt: Promise<AgentInputReceipt>; settled: boolean }>;
   state: AgentChildHandle["state"];
   closePromise?: Promise<void>;
@@ -103,7 +102,6 @@ export class AgentChildRegistry implements AgentChildDirectory {
 
 export class AgentChildManager implements AgentChildDirectory {
   private readonly records = new Map<string, ChildRecord>();
-  private readonly aliases = new Map<string, string>();
   private readonly environment: AgentChildEnvironmentProvider;
   private readonly directory: AgentChildRegistry;
 
@@ -130,7 +128,10 @@ export class AgentChildManager implements AgentChildDirectory {
   }
 
   getBySessionId(sessionId: string): AgentChildHandle | undefined {
-    return this.find(sessionId)?.handle;
+    for (const record of this.records.values()) {
+      if (record.sessionId === sessionId) return record.handle;
+    }
+    return undefined;
   }
 
   list(): AgentChildHandle[] {
@@ -179,7 +180,6 @@ export class AgentChildManager implements AgentChildDirectory {
       }),
       result: Promise.resolve({ status: "completed", output: "" }),
       startChain: Promise.resolve(),
-      aliases: new Set<string>(),
       requests: new Map(),
       state: "starting",
       handle,
@@ -189,9 +189,6 @@ export class AgentChildManager implements AgentChildDirectory {
     try {
       this.directory.register(handle);
       this.records.set(childId, record);
-      this.registerAlias(record, childId);
-      this.registerAlias(record, sessionId);
-      this.registerAlias(record, `${input.agent}@${input.team ?? "default"}`);
       await this.emitChild(record, {
         type: "child.created",
         data: {
@@ -230,7 +227,7 @@ export class AgentChildManager implements AgentChildDirectory {
 
   async send(childId: string, input: AgentChildInput): Promise<AgentInputReceipt> {
     const record = this.require(childId);
-    if (record.state === "closed") throw new Error(`Child agent is closed: ${childId}`);
+    if (isChildUnavailable(record)) throw new Error(`Child agent is closing or closed: ${childId}`);
     if (input.id) {
       const existing = record.requests.get(input.id);
       if (existing) {
@@ -263,6 +260,7 @@ export class AgentChildManager implements AgentChildDirectory {
     const record = this.find(childId);
     if (!record) return;
     if (record.closePromise) return await record.closePromise;
+    record.state = "closing";
     const closing = (async () => {
       record.abortController?.abort(reason ?? "Child agent closed");
       await record.currentRun?.interrupt(reason ?? "Child agent closed");
@@ -289,7 +287,7 @@ export class AgentChildManager implements AgentChildDirectory {
     let receipt: AgentInputReceipt | undefined;
     const scheduled = record.startChain.then(async () => {
       await record.result.catch(() => {});
-      if (record.state === "closed") throw new Error(`Child agent is closed: ${record.id}`);
+      if (isChildUnavailable(record)) throw new Error(`Child agent is closing or closed: ${record.id}`);
       receipt = await this.beginRun(record, input);
     });
     record.startChain = scheduled.then(() => {}, () => {});
@@ -299,7 +297,7 @@ export class AgentChildManager implements AgentChildDirectory {
 
   private async beginRun(record: ChildRecord, input: AgentChildInput): Promise<AgentInputReceipt> {
     const agent = await this.ensureAgent(record);
-    if (isChildClosed(record)) throw new Error(`Child agent is closed: ${record.id}`);
+    if (isChildUnavailable(record)) throw new Error(`Child agent is closing or closed: ${record.id}`);
     const controller = new AbortController();
     record.abortController = controller;
     record.state = "running";
@@ -324,7 +322,7 @@ export class AgentChildManager implements AgentChildDirectory {
     record.result = result.finally(() => {
       if (record.abortController === controller) record.abortController = undefined;
       if (record.currentRun === run) record.currentRun = undefined;
-      if (record.state !== "closed") record.state = "idle";
+      if (!isChildUnavailable(record)) record.state = "idle";
     }).then((settled) => {
       record.lastResult = settled;
       this.scheduleSuspend(record);
@@ -359,14 +357,14 @@ export class AgentChildManager implements AgentChildDirectory {
   private async ensureAgent(record: ChildRecord, announceResume = true): Promise<OpenHarnessAgent> {
     this.clearIdleTimer(record);
     await record.suspending;
-    if (record.state === "closed") throw new Error(`Child agent is closed: ${record.id}`);
+    if (isChildUnavailable(record)) throw new Error(`Child agent is closing or closed: ${record.id}`);
     if (record.agent) return record.agent;
     const creating = record.creating ?? record.createAgent();
     record.creating = creating;
     void creating.catch(() => {});
     try {
       const agent = await creating;
-      if (isChildClosed(record)) throw new Error(`Child agent is closed: ${record.id}`);
+      if (isChildUnavailable(record)) throw new Error(`Child agent is closing or closed: ${record.id}`);
       if (record.suspendedHistory) agent.loadHistory(record.suspendedHistory);
       record.agent = agent;
       record.state = "idle";
@@ -376,7 +374,7 @@ export class AgentChildManager implements AgentChildDirectory {
           data: { childId: record.id, sessionId: record.sessionId },
         });
       }
-      if (isChildClosed(record)) throw new Error(`Child agent is closed: ${record.id}`);
+      if (isChildUnavailable(record)) throw new Error(`Child agent is closing or closed: ${record.id}`);
       return agent;
     } catch (error) {
       const agent = await creating.catch(() => undefined);
@@ -392,7 +390,7 @@ export class AgentChildManager implements AgentChildDirectory {
 
   private scheduleSuspend(record: ChildRecord): void {
     const idleTtlMs = this.options.idleTtlMs ?? 5 * 60_000;
-    if (idleTtlMs <= 0 || record.state === "closed") return;
+    if (idleTtlMs <= 0 || isChildUnavailable(record)) return;
     this.clearIdleTimer(record);
     record.idleTimer = setTimeout(() => {
       record.idleTimer = undefined;
@@ -402,7 +400,7 @@ export class AgentChildManager implements AgentChildDirectory {
         record.suspendedHistory = agent.getHistory();
         await agent.close().catch(() => {});
         if (record.agent === agent) record.agent = undefined;
-        if (record.state === "closed") return;
+        if (isChildUnavailable(record)) return;
         record.state = "suspended";
         await this.emitChild(record, {
           type: "child.suspended",
@@ -459,8 +457,7 @@ export class AgentChildManager implements AgentChildDirectory {
   }
 
   private find(value: string): ChildRecord | undefined {
-    const id = this.aliases.get(value) ?? value;
-    return this.records.get(id);
+    return this.records.get(value);
   }
 
   private require(value: string): ChildRecord {
@@ -469,17 +466,9 @@ export class AgentChildManager implements AgentChildDirectory {
     return record;
   }
 
-  private registerAlias(record: ChildRecord, alias: string): void {
-    record.aliases.add(alias);
-    this.aliases.set(alias, record.id);
-  }
-
   private deleteRecord(record: ChildRecord): void {
     this.directory.unregister(record.handle);
     this.records.delete(record.id);
-    for (const alias of record.aliases) {
-      if (this.aliases.get(alias) === record.id) this.aliases.delete(alias);
-    }
   }
 
   private clearIdleTimer(record: ChildRecord): void {
@@ -516,8 +505,8 @@ function sameChildInput(left: AgentChildInput, right: AgentChildInput): boolean 
     isDeepStrictEqual(left.metadata ?? {}, right.metadata ?? {});
 }
 
-function isChildClosed(record: ChildRecord): boolean {
-  return record.state === "closed";
+function isChildUnavailable(record: ChildRecord): boolean {
+  return record.state === "closing" || record.state === "closed";
 }
 
 function failedResult(error: unknown): AgentChildResult {

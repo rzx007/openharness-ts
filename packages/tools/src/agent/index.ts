@@ -120,7 +120,7 @@ export const sendMessageTool: ToolDefinition = {
   inputSchema: {
     type: "object",
     properties: {
-      taskId: { type: "string", description: "Target task id or agent_id (name@team)" },
+      taskId: { type: "string", description: "Target task id returned by Agent" },
       message: { type: "string", description: "Message to send" },
     },
     required: ["taskId", "message"],

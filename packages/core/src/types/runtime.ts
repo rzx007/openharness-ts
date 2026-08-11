@@ -203,7 +203,7 @@ export interface AgentRunHandle {
 export interface AgentChildHandle {
   readonly id: string;
   readonly sessionId: string;
-  readonly state: "starting" | "running" | "idle" | "suspended" | "closed";
+  readonly state: "starting" | "running" | "idle" | "suspended" | "closing" | "closed";
   readonly result: Promise<AgentChildResult>;
   send(input: AgentChildInput): Promise<AgentInputReceipt>;
   interrupt(reason?: string): Promise<void>;

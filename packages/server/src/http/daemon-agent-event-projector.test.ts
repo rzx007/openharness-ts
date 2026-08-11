@@ -10,6 +10,7 @@ describe("DaemonAgentEventProjector", () => {
     const runs = new Map<string, any>();
     const tasks = new Map<string, any>();
     const store = {
+      transaction: <T>(work: () => T) => work(),
       getSession: vi.fn((id) => sessions.get(id)),
       createSession: vi.fn((input) => {
         const row = { ...input, status: "idle" };
@@ -190,6 +191,7 @@ describe("DaemonAgentEventProjector", () => {
 
   it("rejects replayed input ids whose durable metadata differs", async () => {
     const store = {
+      transaction: <T>(work: () => T) => work(),
       getInput: vi.fn(() => ({
         id: "input-1",
         sessionId: "s1",
@@ -241,12 +243,46 @@ describe("DaemonAgentEventProjector", () => {
       .rejects.toThrow("Child session identity conflict");
   });
 
-  it("forgets child projection state even when durable close completion fails", async () => {
-    const completeSessionTask = vi.fn(async () => { throw new Error("store unavailable"); });
-    const liveChildren = { unregister: vi.fn() };
+  it("rejects child creation after the parent session starts closing", async () => {
     const projector = new DaemonAgentEventProjector({
       rootAgent: { children: { get: vi.fn() } } as any,
-      store: { getSessionTask: vi.fn(() => ({ id: "child-1", status: "running" })) } as any,
+      store: {
+        getSession: vi.fn(() => ({
+          id: "parent",
+          cwd: "/repo",
+          model: "gpt",
+          status: "closing",
+          metadata: {},
+        })),
+      } as any,
+      transcriptProjection: {} as any,
+      taskBridgeManager: {} as any,
+      liveChildren: {} as any,
+      events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    await expect(projector.apply(event("child.created", {
+      childId: "late-child",
+      sessionId: "late-child-session",
+      spawn: { description: "Explore", prompt: "inspect", agent: "Explore", cwd: "/repo" },
+      cwd: "/repo",
+    }, { sessionId: "parent", childId: "late-child" })))
+      .rejects.toThrow("Parent session is not accepting child agents");
+  });
+
+  it("retains and retries child close projection state after durable completion fails", async () => {
+    const completeSessionTask = vi.fn()
+      .mockRejectedValueOnce(new Error("store unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const liveChildren = { unregister: vi.fn() };
+    const store = {
+      getSessionTask: vi.fn(() => ({ id: "child-1", status: "running" })),
+      appendEvent: vi.fn(),
+    };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: store as any,
       transcriptProjection: {} as any,
       taskBridgeManager: {} as any,
       liveChildren: liveChildren as any,
@@ -261,13 +297,20 @@ describe("DaemonAgentEventProjector", () => {
       bridge: { completeSessionTask },
     });
 
-    await expect(projector.apply(event("child.closed", {
+    const closed = event("child.closed", {
       childId: "child-1",
       sessionId: "child-session",
       result: { status: "completed", output: "done" },
-    }, { sessionId: "parent", childId: "child-1" }))).rejects.toThrow("store unavailable");
+    }, { sessionId: "parent", childId: "child-1" });
+    await expect(projector.apply(closed)).rejects.toThrow("store unavailable");
 
     expect(liveChildren.unregister).toHaveBeenCalledWith("child-session", "child-1");
+    expect((projector as any).children.size).toBe(1);
+
+    await projector.apply(closed);
+
+    expect(completeSessionTask).toHaveBeenCalledTimes(2);
+    expect(store.appendEvent).toHaveBeenCalledOnce();
     expect((projector as any).children.size).toBe(0);
   });
 
@@ -276,6 +319,7 @@ describe("DaemonAgentEventProjector", () => {
     const projector = new DaemonAgentEventProjector({
       rootAgent: { children: { get: vi.fn() } } as any,
       store: {
+        transaction: <T>(work: () => T) => work(),
         getInput: vi.fn(() => ({ id: "input-1", sessionId: "s1", content: "hello" })),
         getRun: vi.fn(() => ({ id: "run-1", sessionId: "s1", inputId: "input-1", status: "failed" })),
         updateRun,
