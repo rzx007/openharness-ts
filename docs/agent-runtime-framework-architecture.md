@@ -27,7 +27,8 @@ await agent.close();
 | `OpenHarnessAgent` | `packages/agent-runtime/src/agent.ts` | public facade、资源与 active run 所有权 |
 | `FrameworkAgentRun` | `packages/agent-runtime/src/agent.ts` | 一轮执行、事件归一化、steer、interrupt、terminal barrier |
 | `AgentEventBus` | `packages/agent-runtime/src/event-source.ts` | agent 级有序、awaited required event delivery |
-| `AgentChildManager` | `packages/agent-runtime/src/child-agent.ts` | child identity、实例、run、handle、suspend/resume |
+| `AgentChildManager` | `packages/agent-runtime/src/child-agent.ts` | 当前 agent 的 direct child 生命周期与资源所有权 |
+| `AgentChildRegistry` | `packages/agent-runtime/src/child-agent.ts` | 一个 root tree 共享的全部 descendant handle 索引 |
 | child environment | `packages/agent-runtime/src/child-environment.ts` | worktree acquire/release |
 | `AgentSession` | `packages/core/src/agent-session.ts` | QueryEngine 的薄 session facade |
 | `QueryEngine` | `packages/core/src/engine/query-engine.ts` | model/tool loop 与 history |
@@ -69,6 +70,8 @@ sequenceDiagram
   Agent-->>Caller: AgentRunHandle
   Run->>Bus: input.accepted
   Run->>Bus: run.started
+  Bus-->>Run: required listener settled
+  Run-->>Caller: started receipt resolves
   Run->>Session: submitMessage(content, execution)
   Session->>QE: submitMessage(content, execution)
   loop provider/tool turns
@@ -86,6 +89,7 @@ sequenceDiagram
 - 同一 agent 同时只允许一个 active root run。
 - provider `StreamEvent` 只在 framework 内部存在；外部只观察 `AgentEvent`。
 - terminal event 被 required listener 消费后，`run.result` 才 settle。
+- `run.started` 被 required listener 消费后，`run.started` receipt 才 settle；child/HTTP 调用方不会拿到尚未 durable start 的 run。
 - listener 失败会使 run 失败；不会再通过同一个失败 listener 递归发送 terminal event。
 - `runMessage()` 只是 `await submitMessage(...).result` 的 convenience API。
 
@@ -106,12 +110,13 @@ sequenceDiagram
 `AgentRunHandle` 提供：
 
 ```text
+started
 result
 steer(input)
 interrupt(reason?)
 ```
 
-steer 被 framework 接受后先发 `input.accepted(delivery=steer)`，再在 QueryEngine turn boundary 注入同一 run。
+steer 在同步检查后先预占 framework pending 队列，再发 `input.accepted(delivery=steer)`；事件成功后调用方收到 receipt，QueryEngine 在 turn boundary 消费。最终无工具回合会原子地“取空并关闭 steering”，因此不会出现 durable accepted 但永远未消费的输入。
 
 ## Tool 与权限
 
@@ -133,14 +138,14 @@ QueryEngine
 
 1. 生成 canonical `childId` 与 `sessionId`。
 2. 通过 `AgentChildEnvironmentProvider` 获取 cwd/worktree lease。
-3. 发布 `child.created`。
+3. 把 handle 注册到 root tree 共享的 `AgentChildRegistry`，再发布 `child.created`。
 4. 递归创建共享 event bus/effects 的 `OpenHarnessAgent`。
 5. 启动 child run；child run 使用普通 input/run/output/tool events。
 6. active follow-up 调用当前 run 的 `steer()`；queue follow-up 串行启动下一轮。
 7. idle TTL 到期后保存 history、关闭重资源并发布 suspended；后续输入恢复同一 child。
 8. close/parent abort 终止 run、释放环境并发布 `child.closed`。
 
-外部通过 `agent.children.get(id|getBySessionId)` 访问 live handle。daemon 不向 framework 回传 taskId、host、controls 或 opaque projection state。
+每个 `AgentChildManager` 只 close 自己直接拥有的 child；root 与所有递归 child 共享一个 `AgentChildRegistry`。因此 `rootAgent.children.get(id|getBySessionId)` 可以定位任意深度 descendant，而生命周期释放仍由创建它的 manager 负责。daemon 不向 framework 回传 taskId、host、controls 或 opaque projection state。
 
 ## 维护 API
 
@@ -160,5 +165,6 @@ QueryEngine
 - framework 拥有执行状态和 live handles。
 - application 只通过 events、effects 与 handles 接入。
 - child 递归继承同一 effects 和 event source。
+- child 递归共享同一个 tree-wide handle directory，但不共享 manager ownership。
 - `AgentSession` 不再生成 ID、保存 callbacks 或组装 host。
 - 不存在 daemon adapter、run host 或 child projection public API。

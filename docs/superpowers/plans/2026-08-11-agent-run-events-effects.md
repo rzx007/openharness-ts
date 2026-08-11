@@ -102,6 +102,22 @@ daemon consumes events and projects durable state
 - framework、server、client、frontend 的 run/permission/child integration tests 通过。
 - daemon 启动、TUI prompt、permission approve/deny、child follow-up 完成人工 smoke test。
 
+## Task 5：复盘 hardening
+
+- [x] framework 用 typed `AgentRunNotAcceptingInputError` 表达 terminal boundary，不再匹配错误字符串。
+- [x] steer 先同步预占 pending slot；最终 turn 原子 drain/close，late reject 由 daemon 创建 durable replacement run。
+- [x] `AgentRunHandle.started` 建立 required `run.started` delivery barrier；child receipt 不早于 durable run start。
+- [x] root tree 共享 `AgentChildRegistry`，支持从 root 路由任意深度 descendant，同时保留 manager-local lifecycle ownership。
+- [x] `AgentPool` 把 agent promise 与 subscription 收入同一代际 entry，旧 close 不影响 replacement。
+- [x] `child.created` partial failure 补偿 task/live route/new child session。
+- [x] projector 用成功 event sequence 水位替代无界 event/input sets。
+- [x] listener/infrastructure failure 收束遗留 running transcript parts。
+- [x] permission effect 原样保留 `approved | denied | expired`。
+- [x] 增加 terminal steer、descendant directory、pool race、projection rollback、transcript fallback、permission expiration 回归测试。
+- [x] 更新 TUI、framework、daemon、child、permission 权威文档。
+
+退出标准：相关 package typecheck 和 focused tests 通过；生产代码不存在旧 host/projection compatibility path。
+
 ## 提交策略
 
 建议按三个可审查提交落地，而不是按文件碎片提交：

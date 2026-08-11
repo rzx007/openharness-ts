@@ -1,6 +1,6 @@
 # TUI Flow
 
-> 当前 OpenTUI/daemon 主线。完整 server 细节见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
+> 当前 OpenTUI/daemon 主线。完整 server 细节见 [Daemon Application Architecture](./daemon-application-architecture.md)。
 
 ## 启动
 
@@ -14,7 +14,7 @@ ohs
   -> frontend useServerSync attaches through OpenHarnessClient
 ```
 
-CLI 进程是 launcher，不组装 QueryEngine，也不逐项注入 daemon services。daemon 前台入口调用 server 的 `startOpenHarnessDaemon()`。
+CLI 进程只是 launcher，不组装 QueryEngine，也不注入 daemon services。daemon 前台入口调用 server 的 `startOpenHarnessDaemon()`。
 
 ## 输入 `hi`
 
@@ -23,28 +23,42 @@ sequenceDiagram
   participant Input as OpenTUI input
   participant Sync as useServerSync
   participant Client as OpenHarnessClient
-  participant Daemon
+  participant App as SessionApplicationService
+  participant Engine as SessionRunEngine
+  participant Lane as SessionRunCoordinator
+  participant Exec as SessionRunExecutor
   participant Agent as OpenHarnessAgent
+  participant QE as QueryEngine
+  participant Projection as DaemonAgentEventProjector
+  participant Store as SessionStore/SSE
 
   Input->>Sync: submit "hi"
   Sync->>Client: admitPrompt(sessionId, content)
-  Client->>Daemon: POST /sessions/:id/prompts
-  Daemon-->>Client: 202 input/run/queue state
-  Daemon->>Agent: submitMessage("hi", daemon host)
-  Agent-->>Daemon: StreamEvent
-  Daemon-->>Sync: SSE durable/live events
+  Client->>App: POST /sessions/:id/prompts
+  App->>Engine: durable admit input/run
+  Engine->>Lane: enqueue per-session run
+  App-->>Client: 202 input/run/queue state
+  Lane->>Exec: execute admitted run
+  Exec->>Agent: submitMessage("hi", durable IDs)
+  Agent-->>Exec: AgentRunHandle
+  Exec->>Lane: registerHandle(handle)
+  Agent->>Projection: ordered AgentEvent
+  Agent->>QE: model/tool loop
+  QE-->>Agent: internal StreamEvent
+  Agent->>Projection: output/tool/usage/terminal AgentEvent
+  Projection->>Store: durable projection
+  Store-->>Sync: SSE state events
   Sync-->>Input: render transcript, tools, status
 ```
 
-前端不直接读取 agent，也不轮询 QueryEngine。它以 durable session state 为基线，通过 SSE 增量更新。
+`StreamEvent` 只存在于 framework 内部。daemon 订阅的是 `OpenHarnessAgent.events`，TUI 接收的是 `SessionStore` 产生的 durable SSE，而不是 framework event 直通。
 
 ## Permission
 
-1. daemon 通过 SSE 发布 pending permission。
-2. `useServerSync` 把它映射为前端 permission prompt。
-3. 用户批准或拒绝后，client 调用 permission reply API。
-4. daemon resolve framework 正在等待的 permission promise。
-5. 工具继续或停止，结果再经 SSE 回到 TUI。
+1. QueryEngine 触发 framework `AgentEffects.requestPermission`。
+2. daemon `StorePermissionBroker` 创建 pending request，SSE 推给 TUI。
+3. 用户批准、拒绝或 run 被中断后，broker 返回 `approved`、`denied` 或 `expired`。
+4. framework 继续工具执行或生成拒绝结果，并通过普通 AgentEvent/durable SSE 更新界面。
 
 ## 代码入口
 
@@ -55,4 +69,6 @@ sequenceDiagram
 | OpenTUI 根组件 | `apps/frontend/src/App.tsx` |
 | daemon hydrate、prompt、permission、SSE | `apps/frontend/src/hooks/useServerSync.ts` |
 | client HTTP API | `packages/client/src/client.ts` |
+| prompt/run 应用链 | `packages/server/src/http/session-application-service.ts` |
+| durable event reducer | `packages/server/src/http/daemon-agent-event-projector.ts` |
 | server 权威流程 | `docs/daemon-application-architecture.md` |

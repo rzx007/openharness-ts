@@ -71,7 +71,7 @@ sequenceDiagram
 ## Cancellation 与 lineage
 
 - run `AbortSignal` 传给 broker/controller。
-- interrupt/archive 时 pending request 变为 expired，等待中的 effect 返回，不继续执行工具。
+- interrupt/archive 时 pending request 变为 `expired`，broker 保留该 decision，不再降格成 `denied`；等待中的 effect 返回且不继续执行工具。
 - child scope 使用 child session/run；broker 沿 parent lineage 把 prompt 暴露给顶层 session。
 - durable payload 保留 child session/run identity，UI 无需持有 framework handle。
 
@@ -80,4 +80,5 @@ sequenceDiagram
 - event payload 中没有 resolve/reject/function。
 - daemon 不向 QueryEngine 注入 host。
 - effect 未配置或失效时绝不默认批准。
+- daemon effect 必须原样传递 `approved | denied | expired`，不得用 boolean 压平状态。
 - `permission.resolved` 在 effect settle 后发布，供日志与 projection 使用。

@@ -135,10 +135,10 @@ packages/server/src/http/daemon-agent-event-projector.ts
 
 ## AgentPool 与实例归属
 
-`AgentPool` 缓存：
+`AgentPool` 缓存一个带代际所有权的 entry：
 
 ```text
-sessionId -> Promise<OpenHarnessAgent>
+sessionId -> { promise: Promise<OpenHarnessAgent>, subscription }
 ```
 
 流程：
@@ -149,6 +149,8 @@ sessionId -> Promise<OpenHarnessAgent>
 4. 在任何 submit 前订阅 `agent.events`。
 5. 后续 root run 复用实例。
 6. archive、runtime config change、failure 或 shutdown 时 close 并 unsubscribe。
+
+close 只清理自己捕获的 entry/subscription。旧 agent 正在异步关闭时，同一 session 可以创建新 entry；旧代际的 finally 不会误删或 unsubscribe 新代际。
 
 live child 由 root agent 的 `AgentChildManager` 持有，不进入 AgentPool。`LiveChildAgentDirectory` 让 pool 拒绝为该 durable child session 创建第二个 agent。
 
@@ -175,7 +177,7 @@ agent.events.subscribe((event) => projector.apply(event));
 | `child.closed` | finish task、unregister live route |
 | run terminal | complete text、finalize durable run/task |
 
-projector 对 event ID 做进程内去重；input/run/child identity 使用 create-or-validate，重复 ID 不同 payload 会失败。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
+projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。input/run/child identity 使用 create-or-validate，重复 ID 不同 payload 会失败。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
 
 ## Steer
 
@@ -200,7 +202,9 @@ sequenceDiagram
   Run->>QE: queue for next turn boundary
 ```
 
-steer 不创建第二个 run。没有 active lane 时，`delivery=steer` 按普通 prompt 创建新 run。已 admit 但 handle 尚未注册的 steer 保存在 lane，注册后按序 flush。
+正常 steer 不创建第二个 run。没有 active lane 时，`delivery=steer` 按普通 prompt 创建新 run。已 admit 但 handle 尚未注册的 steer 保存在 lane，注册后按序 flush。
+
+最终 turn boundary 由 framework 原子关闭 steering。若 lane 已接收输入、但 `run.steer()` 明确抛出 `AgentRunNotAcceptingInputError`，coordinator 不丢弃 durable input，而是在同一 lane 创建带 `recoveredFromSteer` metadata 的 replacement run。其他 steer 错误仍失败当前执行，不被误判为正常收尾。
 
 ## Interrupt
 
@@ -215,7 +219,7 @@ HTTP interrupt
   -> LiveChildAgentDirectory.interrupt descendants
 ```
 
-framework 发 `run.interrupted` 后 projector 完成 durable terminal 状态。若 event delivery 或 agent 创建在 terminal event 前失败，`SessionRunExecutor` 只对仍非 terminal 的 run 执行 infrastructure fallback。
+framework 发 `run.interrupted` 后 projector 完成 durable terminal 状态。若 event delivery 或 agent 创建在 terminal event 前失败，`SessionRunExecutor` 只对仍非 terminal 的 run 执行 infrastructure fallback，并把该 run 遗留的 `running` transcript parts 收束为 `failed` 或 `interrupted`。
 
 ## 工具运行与授权
 
@@ -255,6 +259,8 @@ Agent tool -> framework AgentChildManager
 
 HTTP child prompt、Task input 和 TaskStop 最终都通过 `rootAgent.children` 调 live handle。daemon 只保存路由索引，不复制 controls。完整流程见 [Agent Child Session Flow](./agent-child-session-flow.md)。
 
+`rootAgent.children` 是 framework root tree 共享的 descendant directory，不只包含 direct child。`child.created` durable 建模若在 task/live-route 阶段失败，projector 会失败 task、注销已注册 route，并 archive 本次新建的 child session；framework 随后回滚 handle 与 environment lease。
+
 ## Maintenance
 
 | 用例 | 主要路径 |
@@ -282,6 +288,7 @@ shutdown 等待 active runs barrier，关闭 agents/children、event delivery、
 - root durable input/run 在 submit 前创建。
 - 每个 pool-owned session 最多一个 warm root agent，每个 agent 最多一个 active root run。
 - required event projection 先于 `run.result` settlement。
+- `run.started` projection 先于 `run.started` receipt settlement。
 - framework 只通过 event/effect/handle 与 daemon 接触。
 - daemon 不持有 QueryEngine，也不生成 framework child controls。
 - SSE 来自 durable store/event publisher，不直接把 framework event 透传给 UI。

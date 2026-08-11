@@ -8,6 +8,7 @@
 flowchart LR
   Tool["Agent / SendMessage / Workflow"]
   Manager["AgentChildManager"]
+  Registry["tree-wide AgentChildRegistry"]
   Child["child OpenHarnessAgent"]
   Events["shared AgentEventBus"]
   Projector["DaemonAgentEventProjector"]
@@ -15,9 +16,10 @@ flowchart LR
   Directory["LiveChildAgentDirectory"]
 
   Tool --> Manager --> Child --> Events --> Projector --> Store
+  Manager --> Registry
   Manager --> Events
   Projector --> Directory
-  Directory -. rootAgent.children .-> Manager
+  Directory -. rootAgent.children .-> Registry
 ```
 
 ## Spawn 闭环
@@ -25,10 +27,10 @@ flowchart LR
 1. Agent/Workflow tool 调用 `context.agent.children.spawnChildAgent()`。
 2. `AgentChildManager` 生成 canonical `childId` 与 `sessionId`。
 3. `AgentChildEnvironmentProvider` 获取 shared cwd 或 git worktree lease。
-4. manager 把 handle 放入 `agent.children`，发布并等待 `child.created`。
+4. manager 把 handle 放入 root tree 共享的 `AgentChildRegistry`，发布并等待 `child.created`。
 5. daemon projector 创建 durable child session、parent-visible task，并登记 `rootAgent + childId` 路由。
 6. framework 递归创建共享 effects/event bus 的 child `OpenHarnessAgent`。
-7. child 启动普通 run，发布 input/run/output/tool/terminal events。
+7. child 启动普通 run，发布 input/run/output/tool/terminal events；`run.started` 投影成功后 spawn receipt 才返回。
 8. daemon 使用同一个 event reducer 创建 child input/run/transcript并绑定/完成 task。
 
 daemon 不向 framework 返回 sessionId、taskId、run host、controls 或 opaque state。task 使用 `childId` 作为可见 ID，因此 Agent 返回的 `task_id` 可直接用于 TaskWait/SendMessage。
@@ -53,6 +55,7 @@ Task input
 - active run 正在收尾、不再接受 steer：等待其 settle 后串行启动下一轮。
 - delivery=queue 或 child idle：沿 `startChain` 启动下一轮 run，复用 history。
 - caller 提供 input ID 时，manager 对相同请求幂等；相同 ID 不同 payload 失败关闭。
+- child/grandchild 共用 tree-wide directory，所以 daemon 从 root agent 可以直接路由任意深度 descendant。
 
 ## Stop / interrupt / close
 
@@ -80,6 +83,7 @@ child run 完成后进入 idle。默认 5 分钟无输入：
 | 状态 | 所有者 |
 |---|---|
 | child ID、instance、run、abort、result、history | `AgentChildManager` |
+| root tree 的 descendant handle 索引 | framework `AgentChildRegistry` |
 | worktree acquire/release | framework child environment provider |
 | child session/input/run/task/transcript | daemon `SessionStore` + projector |
 | childSessionId -> rootAgent/childId 路由 | daemon `LiveChildAgentDirectory` |

@@ -36,7 +36,7 @@ framework 负责：
 - provider、model、QueryEngine、tools、hooks、skills、plugins、MCP、sandbox 的默认组装
 - history、usage、当前 run 与资源生命周期
 - permission wait 的执行语义
-- child identity、实例、递归执行、follow-up、interrupt、suspend/resume、worktree lease
+- child identity、实例、递归执行、tree-wide descendant directory、follow-up、interrupt、suspend/resume、worktree lease
 - 有序 `AgentEvent`、`AgentEffects` 和 run/child handles
 - compact、remember、inspect 等 agent 能力
 
@@ -67,6 +67,7 @@ daemon 可以保存 `rootAgent + childId` 的路由索引，但不复制 child c
 |---|---|
 | agent history / usage / model loop | framework |
 | active run、steer queue、abort | framework |
+| run started/terminal delivery barrier | framework |
 | child instance / handle / worktree lease | framework |
 | durable session/input/run/transcript | daemon |
 | durable permission request/reply | daemon |

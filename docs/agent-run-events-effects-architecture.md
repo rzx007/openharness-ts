@@ -150,6 +150,7 @@ interface AgentRunHandle {
   readonly inputId: string;
   readonly sessionId: string;
   readonly traceId: string;
+  readonly started: Promise<AgentInputReceipt>;
   readonly result: Promise<AgentRunResult>;
 
   steer(input: AgentSteerInput): Promise<AgentInputReceipt>;
@@ -158,6 +159,8 @@ interface AgentRunHandle {
 ```
 
 run handle 的唯一所有者是 framework。daemon lane 可以保存引用并调用它，但不能复制它的状态机。
+
+`started` 是 required `run.started` event 的交付屏障；它不是“已排队”，而是 application 已成功消费 start fact。child prompt/spawn 只有在该 promise settle 后才返回 run receipt。
 
 `AgentSubmitOptions` 允许 daemon 提供已经准入的身份：
 
@@ -223,7 +226,7 @@ interface AgentEventEnvelope<TType extends string, TData> {
 }
 ```
 
-- `id` 用于 daemon 幂等投影。
+- `id` 是事件身份；daemon projector 使用单调 `sequence` 成功水位做进程内幂等，避免维护无界 event ID 集合。
 - `sequence` 在一个 root agent event source 内单调递增；descendant child event 汇入同一 source。
 - daemon 自己的 durable event sequence 仍由 `SessionStore` 生成，不能复用 framework sequence。
 - error 必须转成 `{ name, message, code?, stack? }` DTO。
@@ -331,7 +334,8 @@ interface AgentExecutionContext {
   effects: AgentEffects;
   children: AgentChildController;
   emit(event: AgentEventInput): Promise<void>;
-  takeSteeredInputs(): AgentChildInput[];
+  takeSteeredInputs(options?: { closeIfEmpty?: boolean }): Promise<AgentChildInput[]>;
+  closeSteering(): void;
 }
 ```
 
@@ -407,6 +411,8 @@ lane 仍负责多客户端准入和 per-session 串行，但不再让 framework 
 
 steer 可能在 executor 注册 handle 前已经被 HTTP durable admit。lane 保留这段短暂窗口中的 pending steer，并在 `registerHandle()` 时按准入顺序主动 flush。`run.steer()` 接受 daemon 已生成的 input ID/trace ID，framework 随后发出 `input.accepted`，projector 据此把该 input 绑定到 active run 并投影 transcript。
 
+最终无工具 turn 使用 `takeSteeredInputs({ closeIfEmpty: true })` 原子完成“取输入或关闭 steering”。若 daemon lane 先接收、framework 后确认 run 已关闭，typed `AgentRunNotAcceptingInputError` 触发 durable replacement run；输入不会停留在 store 中却没有执行归属。
+
 ## 10. Child agent 目标链路
 
 ### 10.1 所有权调整
@@ -454,7 +460,7 @@ sequenceDiagram
 - framework 先把 handle 放入 `agent.children`，再发 `child.created`；listener 失败时回滚 directory 和 environment lease。
 - event 不返回 `taskId`。agent tool 使用 `childId`；daemon task 保存 `childId` 用于路由。
 - child run 使用与 root run 相同的 run/output/tool event，不再创建 child-scoped `AgentRunHost`。
-- descendant event 自动汇入 root agent event source，grandchild 不需要复用一个带 opaque state 的 daemon projection 对象。
+- descendant event 自动汇入 root agent event source，且所有 manager 共享一个 tree-wide child registry；grandchild 不需要复用一个带 opaque state 的 daemon projection 对象，root directory 也能直接路由它。
 - live HTTP/task input 通过 `agent.children.getBySessionId()` 找到 handle；不再把 `AgentChildControls` 注册进 daemon。
 
 ### 10.3 Durable 幂等
@@ -464,7 +470,7 @@ root run 的 session/input/run 已由 daemon 准入；child 内部创建的 ID �
 1. record 不存在则创建。
 2. record 已存在且 identity/content 相同则视为幂等 replay。
 3. ID 相同但 payload 不同则失败关闭，不静默覆盖。
-4. `(frameworkEventId, sessionId)` 建立投影去重约束。
+4. projector 只在事件成功应用后推进 root event sequence 水位，失败可重试且内存占用恒定。
 
 ## 11. Daemon 中保留的 projection
 
