@@ -224,37 +224,24 @@ describe("SessionStore", () => {
     });
   });
 
-  it("lists unbound inputs until they are run-bound or promoted to a message", () => {
-    withStore((store) => {
-      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const first = store.admitPrompt({ id: "i1", sessionId: "s1", content: "start", delivery: "queue" });
-      store.createRun({ id: "r1", sessionId: "s1", inputId: first.id });
-      const steered = store.admitPrompt({ id: "i2", sessionId: "s1", content: "nudge", delivery: "steer" });
-      expect(store.listUnboundInputs("s1").map((row) => row.id)).toEqual(["i2"]);
-
-      store.createMessage({ id: "m1", sessionId: "s1", role: "user", runId: "r1", inputId: steered.id });
-      expect(store.listUnboundInputs("s1")).toEqual([]);
-      expect(store.findRunByInput(steered.id)?.id).toBe("r1");
-    });
-  });
-
-  it("clears terminal run and task fields when reusable state returns to running", () => {
+  it("keeps runs terminal while allowing a child task to bind a later run", () => {
     withStore((store) => {
       store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
       store.createSession({ id: "child", parentId: "parent", cwd: process.cwd(), model: "m" });
       const input = store.admitPrompt({ id: "i1", sessionId: "child", content: "first" });
       const run = store.createRun({ id: "r1", sessionId: "child", inputId: input.id });
       store.updateRun(run.id, { status: "failed", error: "first failed" });
-      store.updateRun(run.id, { status: "running" });
-      expect(store.getRun(run.id)).toMatchObject({ status: "running" });
-      expect(store.getRun(run.id)).not.toHaveProperty("finishedAt");
-      expect(store.getRun(run.id)).not.toHaveProperty("error");
+      expect(() => store.updateRun(run.id, { status: "running" })).toThrow("Session run is already terminal");
+      expect(store.getRun(run.id)).toMatchObject({ status: "failed", error: "first failed" });
+
+      const nextInput = store.admitPrompt({ id: "i2", sessionId: "child", content: "second" });
+      const nextRun = store.createRun({ id: "r2", sessionId: "child", inputId: nextInput.id });
 
       store.createSessionTask({
         id: "task-1",
         sessionId: "parent",
         childSessionId: "child",
-        runId: run.id,
+        runId: nextRun.id,
         type: "agent",
         description: "Explore",
         cwd: process.cwd(),
@@ -309,6 +296,8 @@ describe("SessionStore", () => {
         decision: "once",
         clientId: "tui-1",
       });
+      expect(() => store.replyPermission({ requestId: permission.id, status: "denied" }))
+        .toThrow("Permission request already resolved");
       store.updateRun(run.id, { status: "completed" });
 
       const reloaded = new SessionStore({ path });
@@ -344,14 +333,50 @@ describe("SessionStore", () => {
       store.upsertMessagePart({
         id: "part1", sessionId: "s1", messageId: message.id, type: "text", status: "completed", text: "hello",
       });
+      const assistant = store.createMessage({ id: "m2", sessionId: "s1", role: "assistant", runId: "r1" });
+      store.upsertMessagePart({
+        id: "part-running-text",
+        sessionId: "s1",
+        messageId: assistant.id,
+        type: "text",
+        status: "running",
+        text: "partial",
+      });
+      store.upsertMessagePart({
+        id: "part-running-tool",
+        sessionId: "s1",
+        messageId: assistant.id,
+        type: "tool",
+        status: "running",
+        toolUseId: "tool-1",
+        toolName: "Read",
+      });
 
       expect(store.interruptActiveRuns()).toBe(1);
       const snapshot = store.getSessionState("s1");
       expect(snapshot.cursor).toBe(store.listEvents().at(-1)?.seq);
       expect(snapshot.inputs.map((row) => row.id)).toEqual(["i1"]);
-      expect(snapshot.messages.map((row) => row.id)).toEqual(["m1"]);
-      expect(snapshot.parts.map((row) => row.text)).toEqual(["hello"]);
+      expect(snapshot.messages.map((row) => row.id)).toEqual(["m1", "m2"]);
+      expect(snapshot.parts.find((row) => row.id === "part1")?.text).toBe("hello");
       expect(snapshot.runs).toMatchObject([{ id: "r1", status: "interrupted" }]);
+      expect(snapshot.parts.filter((part) => part.messageId === "m2").map((part) => part.status))
+        .toEqual(["interrupted", "interrupted"]);
+    });
+  });
+
+  it("expires permission requests whose live resolver belonged to a previous daemon", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      store.createPermissionRequest({ id: "pending", sessionId: "s1", toolName: "Write" });
+      const resolved = store.createPermissionRequest({ id: "resolved", sessionId: "s1", toolName: "Read" });
+      store.replyPermission({ requestId: resolved.id, status: "approved", decision: "once" });
+
+      expect(store.expirePendingPermissionRequests()).toBe(1);
+      expect(store.getPermissionRequest("pending")).toMatchObject({
+        status: "expired",
+        decision: "Daemon restarted before the permission was resolved",
+      });
+      expect(store.getPermissionRequest("resolved")?.status).toBe("approved");
     });
   });
 

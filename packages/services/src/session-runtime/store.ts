@@ -89,6 +89,10 @@ function isDurableEvent(event: SessionEventRecord): boolean {
   return event.type !== "session.message.part.delta";
 }
 
+function isTerminalRunStatus(status: SessionRunRecord["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "interrupted";
+}
+
 function maxSeq<T extends { sessionId: string; seq: number }>(
   table: Record<string, T>,
   sessionId: string,
@@ -306,32 +310,6 @@ export class SessionStore {
     return clone(Object.values(this.state.inputs)
       .filter((input) => input.sessionId === sessionId)
       .sort((a, b) => a.seq - b.seq));
-  }
-
-  /**
-   * Inputs not yet bound to a run and not yet promoted into a transcript message.
-   * Used by steer delivery to pull follow-ups into an active run.
-   */
-  listUnboundInputs(sessionId: string): SessionInputRecord[] {
-    assertSession(this.state, sessionId);
-    const boundToRun = new Set(
-      Object.values(this.state.runs)
-        .filter((run) => run.sessionId === sessionId && run.inputId)
-        .map((run) => run.inputId!),
-    );
-    const promoted = new Set(
-      Object.values(this.state.messages)
-        .filter((message) => message.sessionId === sessionId && message.inputId)
-        .map((message) => message.inputId!),
-    );
-    return clone(
-      Object.values(this.state.inputs)
-        .filter((input) =>
-          input.sessionId === sessionId &&
-          !boundToRun.has(input.id) &&
-          !promoted.has(input.id))
-        .sort((a, b) => a.seq - b.seq),
-    );
   }
 
   createMessage(input: CreateMessageInput): SessionMessageRecord {
@@ -598,6 +576,9 @@ export class SessionStore {
     const timestamp = now();
     const previous = run.status;
     if (input.status) {
+      if (isTerminalRunStatus(previous) && input.status !== previous) {
+        throw new Error(`Session run is already terminal: ${runId}`);
+      }
       run.status = input.status;
       if (input.status === "running" && previous !== "running") {
         run.startedAt = timestamp;
@@ -754,8 +735,33 @@ export class SessionStore {
   interruptActiveRuns(reason = "Daemon restarted before the run completed"): number {
     const active = Object.values(this.state.runs)
       .filter((run) => run.status === "pending" || run.status === "running");
-    for (const run of active) this.updateRun(run.id, { status: "interrupted", error: reason });
+    for (const run of active) {
+      const messageIds = new Set(Object.values(this.state.messages)
+        .filter((message) => message.runId === run.id)
+        .map((message) => message.id));
+      for (const part of Object.values(this.state.parts)) {
+        if (!messageIds.has(part.messageId) || part.status !== "running") continue;
+        this.upsertMessagePart({
+          id: part.id,
+          sessionId: part.sessionId,
+          messageId: part.messageId,
+          type: part.type,
+          status: "interrupted",
+        });
+      }
+      this.updateRun(run.id, { status: "interrupted", error: reason });
+    }
     return active.length;
+  }
+
+  /** A previous process cannot retain the resolver behind a pending permission prompt. */
+  expirePendingPermissionRequests(reason = "Daemon restarted before the permission was resolved"): number {
+    const pending = Object.values(this.state.permissions)
+      .filter((request) => request.status === "pending");
+    for (const request of pending) {
+      this.replyPermission({ requestId: request.id, status: "expired", decision: reason });
+    }
+    return pending.length;
   }
 
   /** Complete an archive that was interrupted by a daemon process exit. */
@@ -799,6 +805,7 @@ export class SessionStore {
   replyPermission(input: ReplyPermissionInput): PermissionRequestRecord {
     const request = this.state.permissions[input.requestId];
     if (!request) throw new Error(`Permission request not found: ${input.requestId}`);
+    if (request.status !== "pending") throw new Error(`Permission request already resolved: ${input.requestId}`);
     const timestamp = now();
     request.status = input.status;
     if (input.decision !== undefined) request.decision = input.decision;
