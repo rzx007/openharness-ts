@@ -1,54 +1,58 @@
 # Agent Runtime Framework Architecture
 
-> 状态：当前实现。已接受但尚未落地的下一阶段设计见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)；迁移完成前，本文中的 `AgentRunHost` / projection 链路仍是代码事实。
+> 状态：当前实现与权威代码索引。边界约束见 [Agent Framework Capability Boundary](./agent-framework-capability-boundary.md)，daemon 托管流程见 [Daemon Application Architecture](./daemon-application-architecture.md)。
 
-> 状态：当前代码事实。边界约束见 [agent-framework-capability-boundary.md](./agent-framework-capability-boundary.md)。daemon 运行流程见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
+## 一句话模型
+
+```text
+OpenHarnessAgent = QueryEngine + history + resources + active run + child directory
+AgentEvent       = framework 已经发生的执行事实
+AgentEffects     = framework 必须等待外部返回值的决策
+Run/ChildHandle  = 调用方控制 live execution 的能力
+```
+
+framework 不依赖 HTTP、daemon、SQLite session schema 或 UI。最小使用形态是：
+
+```ts
+const agent = await createOpenHarnessAgent({ cwd: process.cwd() });
+const run = agent.submitMessage("hi");
+const result = await run.result;
+await agent.close();
+```
 
 ## 核心对象
 
-```text
-QueryEngine      = model/tool agent loop
-AgentSession     = 单 agent session facade 与 run host 注入点
-OpenHarnessAgent = 带默认组装、维护 API 和 child lifecycle 的公开框架对象
-AgentChildManager = framework-owned child instances 与 live handles
-```
-
-`createOpenHarnessAgent()` 返回一个长期存活的 `OpenHarnessAgent`。一次 `submitMessage()` 是一个对话回合；同一实例上的后续调用复用 history、usage、MCP、sandbox 和扩展资源。
+| 对象 | 文件 | 职责 |
+|---|---|---|
+| `OpenHarnessAgent` | `packages/agent-runtime/src/agent.ts` | public facade、资源与 active run 所有权 |
+| `FrameworkAgentRun` | `packages/agent-runtime/src/agent.ts` | 一轮执行、事件归一化、steer、interrupt、terminal barrier |
+| `AgentEventBus` | `packages/agent-runtime/src/event-source.ts` | agent 级有序、awaited required event delivery |
+| `AgentChildManager` | `packages/agent-runtime/src/child-agent.ts` | child identity、实例、run、handle、suspend/resume |
+| child environment | `packages/agent-runtime/src/child-environment.ts` | worktree acquire/release |
+| `AgentSession` | `packages/core/src/agent-session.ts` | QueryEngine 的薄 session facade |
+| `QueryEngine` | `packages/core/src/engine/query-engine.ts` | model/tool loop 与 history |
+| execution contracts | `packages/core/src/types/runtime.ts` | events、effects、handles、internal execution context |
 
 ## 创建流程
-
-入口：[agent.ts](../packages/agent-runtime/src/agent.ts)
 
 ```mermaid
 flowchart TD
   Create["createOpenHarnessAgent(options)"]
-  Settings["load/effective Settings"]
-  Discover["discoverOpenHarnessExtensions"]
   Runtime["createOpenHarnessRuntime"]
-  MCP["McpClientManager.connectAll"]
-  Memory["createAgentMemoryRuntime"]
-  Session["createAgentSession"]
-  Children["new AgentChildManager"]
-  Agent["DefaultOpenHarnessAgent"]
+  MCP["MCP / extensions / memory"]
+  Session["createAgentSession(QueryEngine)"]
+  Bus["AgentEventBus + AgentEffects"]
+  Children["AgentChildManager"]
+  Agent["OpenHarnessAgent"]
 
-  Create --> Settings --> Discover --> Runtime
-  Runtime --> MCP
-  Runtime --> Memory
-  Runtime --> Session
+  Create --> Runtime --> MCP --> Session
+  Create --> Bus
   Session --> Children --> Agent
+  Bus --> Children
+  Bus --> Agent
 ```
 
-主要文件：
-
-| 文件 | 职责 |
-|---|---|
-| `packages/agent-runtime/src/agent.ts` | public facade 与资源生命周期 |
-| `packages/agent-runtime/src/default-runtime.ts` | provider、tools、hooks、prompt、permission、sandbox、QueryEngine 组装 |
-| `packages/agent-runtime/src/extensions.ts` | skills/plugins/MCP/agent definitions 发现 |
-| `packages/agent-runtime/src/memory-runtime.ts` | retrieval 与 remember |
-| `packages/agent-runtime/src/child-agent.ts` | child live lifecycle |
-| `packages/core/src/agent-session.ts` | run scope、host callbacks、QueryEngine 调用 |
-| `packages/core/src/engine/query-engine.ts` | model/tool loop |
+`createOpenHarnessRuntime()` 组装 provider、QueryEngine、tools、hooks、permission policy、prompt、skills、plugins 与 sandbox。`createOpenHarnessAgent()` 再补上 event/effect 边界、session facade、memory 和 child lifecycle。
 
 ## 一轮 submitMessage
 
@@ -56,111 +60,105 @@ flowchart TD
 sequenceDiagram
   participant Caller
   participant Agent as OpenHarnessAgent
-  participant Children as AgentChildManager
+  participant Run as AgentRunHandle
   participant Session as AgentSession
   participant QE as QueryEngine
-  participant Host as AgentRunHost
+  participant Bus as AgentEventBus
 
-  Caller->>Agent: submitMessage(content, options)
-  Agent->>Agent: choose supplied host or create standalone host
-  Agent->>Children: createHost(baseHost, childProjection?)
-  Agent->>Session: submitMessage(content, host)
-  Session->>QE: submitMessage(content, runtimeHost)
-  loop model/tool turns
-    QE->>Host: requestPermission / emitEvent
-    QE-->>Session: StreamEvent
-    Session->>Host: emitStreamEvent
-    Session-->>Caller: StreamEvent
+  Caller->>Agent: submitMessage(content, ids?)
+  Agent-->>Caller: AgentRunHandle
+  Run->>Bus: input.accepted
+  Run->>Bus: run.started
+  Run->>Session: submitMessage(content, execution)
+  Session->>QE: submitMessage(content, execution)
+  loop provider/tool turns
+    QE-->>Run: StreamEvent
+    Run->>Bus: output/tool/usage event
   end
+  Run->>Bus: run.completed / failed / interrupted
+  Bus-->>Run: required listener settled
+  Run-->>Caller: result settled
 ```
 
-`runMessage()` 只是在 `submitMessage()` 上聚合 text delta、events 和最终 history，不存在另一套执行链。
+关键语义：
+
+- `submitMessage()` 同步返回 live handle，执行在 microtask 中启动。
+- 同一 agent 同时只允许一个 active root run。
+- provider `StreamEvent` 只在 framework 内部存在；外部只观察 `AgentEvent`。
+- terminal event 被 required listener 消费后，`run.result` 才 settle。
+- listener 失败会使 run 失败；不会再通过同一个失败 listener 递归发送 terminal event。
+- `runMessage()` 只是 `await submitMessage(...).result` 的 convenience API。
+
+## Event / Effect / Handle
+
+选择规则：
+
+| 需要 | 使用 |
+|---|---|
+| 通知“已经发生”，无需返回值 | `AgentEvent` |
+| 执行必须等待外部决策 | `AgentEffects` |
+| 外部主动控制仍存活的执行 | `AgentRunHandle` / `AgentChildHandle` |
+
+当前 event 包含 input、run terminal、text delta、model turn boundary、tool、usage、domain、permission observation 和 child lifecycle。事件 payload 可序列化，不携带 Promise、resolver、AbortSignal 或 controls。
+
+当前唯一 effect 是 `requestPermission(request, scope)`。未配置时 framework 默认拒绝。
+
+`AgentRunHandle` 提供：
+
+```text
+result
+steer(input)
+interrupt(reason?)
+```
+
+steer 被 framework 接受后先发 `input.accepted(delivery=steer)`，再在 QueryEngine turn boundary 注入同一 run。
 
 ## Tool 与权限
 
-QueryEngine 执行工具时使用 runtime host：
-
 ```text
-QueryEngine tool loop
+QueryEngine
   -> permission checker
-  -> AgentRunHost.requestPermission(request)
-  -> approved: tool.execute()
-  -> denied/expired/abort: stop tool execution
-  -> tool result returns to QueryEngine
+  -> execution.emit(permission.requested)
+  -> execution.effects.requestPermission(request, scope)
+  -> execution.emit(permission.resolved)
+  -> approved: execute tool
+  -> denied/expired: return denied tool result
 ```
 
-standalone 默认没有 permission callback 时拒绝；daemon 提供 `DaemonRuntimeHostPort`，把 request 转给 `StorePermissionBroker`。
+工具通过 `ToolContext.agent` 获得 framework-internal execution context。Agent、SendMessage、Workflow 使用 `context.agent.children`；domain telemetry 使用 `context.agent.emit(domain.event)`。
 
 ## Child agent
 
-Agent tool 看到的是 `AgentChildAgentHost`，它由 `AgentChildManager.createHost()` 生成，不由 daemon 生成。
+`AgentChildManager` 完整拥有 child live lifecycle：
 
-```mermaid
-flowchart LR
-  Tool["Agent / SendMessage / TaskWait tools"]
-  Host["AgentChildAgentHost"]
-  Manager["AgentChildManager"]
-  Child["child OpenHarnessAgent"]
-  Projection["optional AgentChildProjection"]
+1. 生成 canonical `childId` 与 `sessionId`。
+2. 通过 `AgentChildEnvironmentProvider` 获取 cwd/worktree lease。
+3. 发布 `child.created`。
+4. 递归创建共享 event bus/effects 的 `OpenHarnessAgent`。
+5. 启动 child run；child run 使用普通 input/run/output/tool events。
+6. active follow-up 调用当前 run 的 `steer()`；queue follow-up 串行启动下一轮。
+7. idle TTL 到期后保存 history、关闭重资源并发布 suspended；后续输入恢复同一 child。
+8. close/parent abort 终止 run、释放环境并发布 `child.closed`。
 
-  Tool --> Host --> Manager --> Child
-  Manager -. observe .-> Projection
-```
-
-有 daemon 时，projection 负责 durable child session/task/run 与 child-scoped `AgentRunHost`；没有 daemon 时，manager 创建内存 session/run scope，child 仍可执行。
-
-同一 child 的 run 严格串行；`finishRun()` 完成前 invocation 不进入 idle。interrupt 等待当前 run settlement。completed child 默认在 5 分钟 idle TTL 后 suspend MCP/sandbox/runtime，同时保留 history 与 live handle；后续输入使用同一 session ID 恢复。
+外部通过 `agent.children.get(id|getBySessionId)` 访问 live handle。daemon 不向 framework 回传 taskId、host、controls 或 opaque projection state。
 
 ## 维护 API
 
-| API | framework 行为 |
+| API | 行为 |
 |---|---|
-| `compact()` | 压缩并替换 live history |
-| `remember()` | 从 live history 提取并写 memory store |
-| `getUsage()` | 返回累计 token usage |
-| `inspect()` | 返回 model/tools/hooks/MCP/sandbox 快照 |
-| `loadHistory()` | 导入 domain messages |
-| `clear()` | 清空 history 与 QueryEngine 状态 |
-| `close()` | 关闭 children、MCP、sandbox 和 runtime resources |
+| `getHistory/loadHistory/clear` | 管理 live conversation history |
+| `setModel` | 更新当前 model 与 QueryEngine |
+| `compact` | 压缩 live history |
+| `remember` | 从 history 提取 memory |
+| `getUsage` | 累计 token usage |
+| `inspect` | model/tools/hooks/MCP/sandbox 快照 |
+| `close` | interrupt run、close children、drain events、释放 runtime |
 
-daemon maintenance service 调这些公开 API，然后只持久化 daemon 自己的结果。
+## 不变量
 
-## 两种使用形态
-
-### Programmatic
-
-```ts
-const agent = await createOpenHarnessAgent({
-  cwd,
-  requestPermission: askUser,
-});
-
-for await (const event of agent.submitMessage("hi")) {
-  render(event);
-}
-
-await agent.close();
-```
-
-### Daemon-hosted
-
-```text
-SessionRunExecutor
-  -> AgentPool.acquire(sessionId)
-  -> agent.submitMessage(content, { host, childProjection, pullFollowUps })
-  -> daemon projections persist events and transcript
-```
-
-daemon 缓存真实 agent，不存在 runtime adapter：
-
-```text
-Map<sessionId, Promise<OpenHarnessAgent>>
-```
-
-## Public API 原则
-
-- 公开 domain operation，不公开内部 bundle。
-- construction-time 扩展使用 `OpenHarnessAgentExtension`。
-- host callback 只表达 framework domain request/event。
-- durable record 类型不能进入 agent-runtime。
-- 新增 daemon hosting 需求时优先增加 projection，而不是恢复 `SessionRuntime`。
+- agent-runtime 不 import server/daemon。
+- framework 拥有执行状态和 live handles。
+- application 只通过 events、effects 与 handles 接入。
+- child 递归继承同一 effects 和 event source。
+- `AgentSession` 不再生成 ID、保存 callbacks 或组装 host。
+- 不存在 daemon adapter、run host 或 child projection public API。

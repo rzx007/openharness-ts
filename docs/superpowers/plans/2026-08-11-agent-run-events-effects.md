@@ -1,6 +1,6 @@
 # Agent Run Events / Effects 实施计划
 
-> 状态：待实施。目标架构见 [Agent Run Events / Effects Architecture](../../agent-run-events-effects-architecture.md)。
+> 状态：已完成。当前架构见 [Agent Run Events / Effects Architecture](../../agent-run-events-effects-architecture.md)。
 >
 > 迁移原则：**不做兼容**。不提交双 public API、deprecated alias、daemon adapter 或旧 projection fallback；每个提交都必须通过相关 typecheck/tests。
 
@@ -22,7 +22,7 @@ framework owns AgentRunHandle / AgentChildHandle
 daemon consumes events and projects durable state
 ```
 
-## 当前基线
+## 改造前基线
 
 - root：`SessionRunExecutor -> DaemonRunProjection.createHost -> OpenHarnessAgent.submitMessage`。
 - permission：`QueryEngine -> AgentRunHost.requestPermission -> StorePermissionBroker`。
@@ -33,14 +33,14 @@ daemon consumes events and projects durable state
 
 ## Task 1：一次性切换 framework execution API
 
-- [ ] 在 core/agent-runtime 定义 serializable `AgentEvent` union、event envelope、`AgentEventSource`、`AgentEffects`、`AgentRunHandle`、`AgentChildHandle`。
-- [ ] `OpenHarnessAgent.submitMessage()` 改为返回 active `AgentRunHandle`；`runMessage()` 作为 await-result convenience API。
-- [ ] event source 支持一个 agent-level ordered/awaited required subscriber；terminal event 被消费后才 settle `run.result`。
-- [ ] agent-level effects 在 child agent 中继承；无 permission effect 时默认 denied。
-- [ ] 将 provider `StreamEvent` 在 framework 内归一化为 output/tool/usage/run events；error 改为 serializable DTO。
-- [ ] 将 QueryEngine/tool/workflow 的 `QueryRuntimeHost` 改为 framework internal execution context。
-- [ ] 删除 `AgentRunHost`、`QueryRuntimeHost` application contract、`AgentSessionHostCallbacks` 和 `composeAgentRunHost()`。
-- [ ] 更新 framework tests：direct run、event ordering、listener failure、permission effect、interrupt、steer、terminal barrier。
+- [x] 在 core/agent-runtime 定义 serializable `AgentEvent` union、event envelope、`AgentEventSource`、`AgentEffects`、`AgentRunHandle`、`AgentChildHandle`。
+- [x] `OpenHarnessAgent.submitMessage()` 改为返回 active `AgentRunHandle`；`runMessage()` 作为 await-result convenience API。
+- [x] event source 支持一个 agent-level ordered/awaited required subscriber；terminal event 被消费后才 settle `run.result`。
+- [x] agent-level effects 在 child agent 中继承；无 permission effect 时默认 denied。
+- [x] 将 provider `StreamEvent` 在 framework 内归一化为 output/tool/usage/run events；error 改为 serializable DTO。
+- [x] 将 QueryEngine/tool/workflow 的 `QueryRuntimeHost` 改为 framework internal execution context。
+- [x] 删除 `AgentRunHost`、`QueryRuntimeHost` application contract、`AgentSessionHostCallbacks` 和 `composeAgentRunHost()`。
+- [x] 更新 framework tests：direct run、event ordering、listener failure、permission effect、interrupt、steer、terminal barrier。
 
 退出标准：
 
@@ -50,15 +50,15 @@ daemon consumes events and projects durable state
 
 ## Task 2：一次性切换 daemon root run 与 permission
 
-- [ ] 新增单入口 `DaemonAgentEventProjector.apply(event)`，复用 `SessionTranscriptProjection`、store、event publisher 和 observability。
-- [ ] `AgentPool` 创建 agent 时注入 daemon `AgentEffects`，并在 hydrate/submit 前建立 required event subscription。
-- [ ] `SessionRunExecutor` 只 acquire agent、submit admitted IDs、注册 active run handle、await result 和处理基础设施兜底。
-- [ ] permission effect 直接调用 `StorePermissionBroker.ask(context + request + signal)`；保留现有 durable request、lineage、HTTP reply 和 expiration 语义。
-- [ ] `SessionRunCoordinator` 保存 active run handle 引用；steer 直接调用 `run.steer()`，interrupt 调用 `run.interrupt()`。
-- [ ] handle 注册前已 durable admit 的 steer 在 lane 中按顺序暂存，`registerActiveHandle()` 后主动 flush；用 `input.accepted` event 绑定 input/run。
-- [ ] 删除 `DaemonRuntimeHostPort`、`DaemonRunProjection`、对应 factory/context/test。
-- [ ] 删除 `wakeCount`、`drainSteeredInputs()`、`pullFollowUps()` 的 root run 回拉链路。
-- [ ] 更新 server tests：admit/run、delta transcript、tool part、failed run、permission、steer、interrupt、pool eviction/restart。
+- [x] 新增单入口 `DaemonAgentEventProjector.apply(event)`，复用 `SessionTranscriptProjection`、store、event publisher 和 observability。
+- [x] `AgentPool` 创建 agent 时注入 daemon `AgentEffects`，并在 hydrate/submit 前建立 required event subscription。
+- [x] `SessionRunExecutor` 只 acquire agent、submit admitted IDs、注册 active run handle、await result 和处理基础设施兜底。
+- [x] permission effect 直接调用 `StorePermissionBroker.ask(context + request + signal)`；保留现有 durable request、lineage、HTTP reply 和 expiration 语义。
+- [x] `SessionRunCoordinator` 保存 active run handle 引用；steer 直接调用 `run.steer()`，interrupt 调用 `run.interrupt()`。
+- [x] handle 注册前已 durable admit 的 steer 在 lane 中按顺序暂存，`registerActiveHandle()` 后主动 flush；用 `input.accepted` event 绑定 input/run。
+- [x] 删除 `DaemonRuntimeHostPort`、`DaemonRunProjection`、对应 factory/context/test。
+- [x] 删除 `wakeCount`、`drainSteeredInputs()`、`pullFollowUps()` 的 root run 回拉链路。
+- [x] 更新 server tests：admit/run、delta transcript、tool part、failed run、permission、steer、interrupt、pool eviction/restart。
 
 退出标准：
 
@@ -68,15 +68,15 @@ daemon consumes events and projects durable state
 
 ## Task 3：一次性切换 child lifecycle
 
-- [ ] `AgentChildManager` 直接生成 canonical `childId/sessionId/inputId/runId`，暴露 `agent.children` directory。
-- [ ] child tool 返回/接收 `childId`；删除 daemon `taskId` 作为 framework alias 的行为。
-- [ ] child create/run/suspend/resume/close 使用统一 `AgentEvent`，descendant event 汇入 root agent event source。
-- [ ] 把 worktree acquire/release 移入 agent-runtime 的 `ChildEnvironmentProvider`；daemon 只投影 worktree metadata。
-- [ ] `DaemonAgentEventProjector` 根据 child events 创建/更新 durable child session/input/run/task/transcript。
-- [ ] durable task 保存 `childId`；task input/stop 和 child HTTP route 通过 `agent.children.getBySessionId()` 路由。
-- [ ] 删除 `AgentChildProjection`、所有 projection handle/state、`DaemonChildAgentProjection`、`ChildAgentProjectionFactory`。
-- [ ] 删除 controls 注册式 `LiveChildAgentRegistry`；如仍需索引，只保存 root agent/session 与 childId，不复制 controls。
-- [ ] 更新 child tests：recursive child、follow-up、active steer、stop、parent abort、idle suspend/resume、worktree cleanup、restart 后 durable recovery。
+- [x] `AgentChildManager` 直接生成 canonical `childId/sessionId/inputId/runId`，暴露 `agent.children` directory。
+- [x] child tool 返回/接收 `childId`；删除 daemon `taskId` 作为 framework alias 的行为。
+- [x] child create/run/suspend/resume/close 使用统一 `AgentEvent`，descendant event 汇入 root agent event source。
+- [x] 把 worktree acquire/release 移入 agent-runtime 的 `ChildEnvironmentProvider`；daemon 只投影 worktree metadata。
+- [x] `DaemonAgentEventProjector` 根据 child events 创建/更新 durable child session/input/run/task/transcript。
+- [x] durable task 保存 `childId`；task input/stop 和 child HTTP route 通过 `agent.children` directory 路由。
+- [x] 删除 `AgentChildProjection`、所有 projection handle/state、`DaemonChildAgentProjection`、`ChildAgentProjectionFactory`。
+- [x] 删除 controls 注册式 `LiveChildAgentRegistry`；如仍需索引，只保存 root agent/session 与 childId，不复制 controls。
+- [x] 更新 child tests：follow-up、active steer、parent abort、idle suspend/resume、required event failure、worktree cleanup，并由 server integration 覆盖 durable child follow-up。
 
 退出标准：
 
@@ -86,14 +86,14 @@ daemon consumes events and projects durable state
 
 ## Task 4：数据一致性与清理
 
-- [ ] store 支持按 framework event ID 幂等投影；相同 ID 不同 payload 失败关闭。
-- [ ] 验证 root daemon-assigned ID 与 child framework-assigned ID 共用同一 durable namespace。
-- [ ] 给 output delta 做顺序、批量和大小边界测试。
-- [ ] 验证 required listener 失败时 live run 被 interrupt，durable run 最终为 failed/interrupted。
-- [ ] 验证 listener failure 不会通过同一个失败 listener 递归发送 terminal event。
-- [ ] 删除旧测试 fixture、导出、文件和文档中的 `AgentRunHost` / `DaemonRunProjection` / `AgentChildProjection` 当前链路描述。
-- [ ] 将本文标记完成，并把目标架构文档状态改为“当前实现”。
-- [ ] 更新 `daemon-application-architecture.md`、`agent-runtime-framework-architecture.md`、`agent-framework-capability-boundary.md`、`permission-flow.md`、`agent-child-session-flow.md`。
+- [x] projector 按 framework event ID 做当前进程幂等投影；实体 ID 重放执行 create-or-validate，相同 ID 不同 payload 失败关闭。
+- [x] 验证 root daemon-assigned ID 与 child framework-assigned ID 共用同一 durable namespace。
+- [x] output delta 通过 ordered/awaited event bus 串行投影，复用 transcript delta 边界测试。
+- [x] 验证 required listener 失败时 live run 失败，executor 对未终态 durable run 执行 failed/interrupted fallback。
+- [x] 验证 listener failure 不会通过同一个失败 listener 递归发送 terminal event。
+- [x] 删除旧测试 fixture、导出、文件和文档中的 `AgentRunHost` / `DaemonRunProjection` / `AgentChildProjection` 当前链路描述。
+- [x] 将本文标记完成，并把目标架构文档状态改为“当前实现”。
+- [x] 更新 `daemon-application-architecture.md`、`agent-runtime-framework-architecture.md`、`agent-framework-capability-boundary.md`、`permission-flow.md`、`agent-child-session-flow.md`。
 
 退出标准：
 

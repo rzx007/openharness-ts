@@ -1,71 +1,99 @@
 # Agent Child Session Flow
 
-> 当前实现。核心边界：framework owns child execution/live handles；daemon owns durable child projection。
->
-> 目标设计：删除 `AgentChildProjection`，改为 framework child handles + lifecycle events + daemon 单向 durable reducer。见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md#10-child-agent-目标链路)。
+> 状态：当前实现。framework owns child execution/live handles；daemon owns durable child session/task/run projection。
 
 ## 总图
 
 ```mermaid
 flowchart LR
-  Tool["Agent tools"] --> Manager["AgentChildManager"]
-  Manager --> Child["child OpenHarnessAgent"]
-  Manager -. projection .-> Daemon["DaemonChildAgentProjection"]
-  Daemon --> Session["durable child session/run"]
-  Daemon --> Task["parent-visible task"]
-  Daemon --> Worktree["optional worktree"]
+  Tool["Agent / SendMessage / Workflow"]
+  Manager["AgentChildManager"]
+  Child["child OpenHarnessAgent"]
+  Events["shared AgentEventBus"]
+  Projector["DaemonAgentEventProjector"]
+  Store["child session/run/task/transcript"]
+  Directory["LiveChildAgentDirectory"]
+
+  Tool --> Manager --> Child --> Events --> Projector --> Store
+  Manager --> Events
+  Projector --> Directory
+  Directory -. rootAgent.children .-> Manager
 ```
 
-## Spawn
+## Spawn 闭环
 
-1. Agent tool 调用 framework 生成的 `AgentChildAgentHost.spawnChildAgent()`。
-2. `AgentChildManager` 生成 invocation ID。
-3. daemon projection 创建 child session、task 和可选 worktree，返回 sessionId/cwd/taskId。
-4. framework 递归调用 `createOpenHarnessAgent()` 创建 child 实例。
-5. framework 启动 child run；daemon projection 创建 durable input/run 和 child-scoped host。
-6. child 完成后 framework 返回 result，daemon 完成 run/task projection。
+1. Agent/Workflow tool 调用 `context.agent.children.spawnChildAgent()`。
+2. `AgentChildManager` 生成 canonical `childId` 与 `sessionId`。
+3. `AgentChildEnvironmentProvider` 获取 shared cwd 或 git worktree lease。
+4. manager 把 handle 放入 `agent.children`，发布并等待 `child.created`。
+5. daemon projector 创建 durable child session、parent-visible task，并登记 `rootAgent + childId` 路由。
+6. framework 递归创建共享 effects/event bus 的 child `OpenHarnessAgent`。
+7. child 启动普通 run，发布 input/run/output/tool/terminal events。
+8. daemon 使用同一个 event reducer 创建 child input/run/transcript并绑定/完成 task。
 
-## Follow-up / stop / await
+daemon 不向 framework 返回 sessionId、taskId、run host、controls 或 opaque state。task 使用 `childId` 作为可见 ID，因此 Agent 返回的 `task_id` 可直接用于 TaskWait/SendMessage。
+
+## Follow-up
 
 ```text
-SendMessage -> AgentChildManager.send()
-Task input  -> SessionTaskBridge callback -> framework controls.send()
-Task stop   -> SessionTaskBridge callback -> framework controls.interrupt()
-HTTP child prompt -> SessionApplicationService -> LiveChildAgentRegistry -> framework controls.send()
-HTTP child interrupt -> LiveChildAgentRegistry -> framework controls.interrupt()
-TaskWait    -> parent-scoped TaskManager projection
-awaitChildAgent -> AgentChildManager.awaitResult()
+Agent SendMessage
+  -> context.agent.children.sendChildInput(childId, input)
+
+HTTP child prompt
+  -> SessionApplicationService
+  -> LiveChildAgentDirectory.send(childSessionId)
+  -> rootAgent.children.get(childId).send(input)
+
+Task input
+  -> SessionTaskBridge callback
+  -> rootAgent.children.get(childId).send(input)
 ```
 
-`LiveChildAgentRegistry` 是执行所有权仲裁点。只要 child 仍由 framework 持有，HTTP GET 不会 warm `AgentPool`，HTTP prompt 也不会创建第二个 agent；child 被关闭或 daemon 重启后，durable session 才能由 `AgentPool` 从 transcript 恢复。
+- child 有 active run 且 delivery 不是 queue：调用 `run.steer()`，输入在 turn boundary 注入同一 run。
+- active run 正在收尾、不再接受 steer：等待其 settle 后串行启动下一轮。
+- delivery=queue 或 child idle：沿 `startChain` 启动下一轮 run，复用 history。
+- caller 提供 input ID 时，manager 对相同请求幂等；相同 ID 不同 payload 失败关闭。
 
-completed child 的新 run 会同时把 durable task 和 parent-scoped TaskManager task 重新置为 `running`，因此 `TaskWait` 不会返回上一轮结果，`TaskStop` 也仍能到达 live controls。
+## Stop / interrupt / close
 
-child run 在 `startRun -> submitMessage -> finishRun` 全部完成前始终占用 invocation。interrupt 会等待这一完整 settlement，再 unregister、清理 worktree 和返回。空闲 child 默认在 5 分钟后 suspend 重资源；invocation 与 history 保留，follow-up 使用原 `sessionId` 重建 agent。
+```text
+TaskStop / HTTP interrupt -> child handle.interrupt()
+parent run abort          -> manager interrupt(childId)
+parent agent close        -> manager.closeAll()
+```
 
-active run 的 follow-up 进入 QueryEngine `pullFollowUps`；已完成 child 的新输入会开始下一轮 run，并继续复用同一 child agent history。
+close 会 abort active run、等待 settlement、关闭 child 资源、释放 environment lease、发布并等待 `child.closed`，最后从 directory 删除 handle。daemon 收到 terminal/closed event 后完成 durable run/task 并移除 live route。
 
-parent run 的 AbortSignal 会终止该 run 创建的 child。parent agent `close()` 会关闭所有剩余 child 和资源。
+## Suspend / resume
+
+child run 完成后进入 idle。默认 5 分钟无输入：
+
+1. snapshot history。
+2. close child MCP/sandbox/runtime。
+3. 保留 invocation/handle/session identity。
+4. 发布 `child.suspended`。
+
+后续输入创建新 child agent、load history、发布 `child.resumed`，再执行新 run。
 
 ## 所有权
 
 | 状态 | 所有者 |
 |---|---|
-| child agent 与 invocation map | `AgentChildManager` |
-| abort controller / result promise | `AgentChildManager` |
-| child session/input/run/task records | daemon `SessionStore` |
-| sessionId -> controls 路由 | `LiveChildAgentRegistry`，只持引用 |
-| worktree create/cleanup | daemon projection |
+| child ID、instance、run、abort、result、history | `AgentChildManager` |
+| worktree acquire/release | framework child environment provider |
+| child session/input/run/task/transcript | daemon `SessionStore` + projector |
+| childSessionId -> rootAgent/childId 路由 | daemon `LiveChildAgentDirectory` |
+| task callbacks | daemon `SessionTaskBridge` |
 
 ## 代码位置
 
 ```text
 packages/agent-runtime/src/child-agent.ts
-packages/server/src/http/daemon-child-agent-projection.ts
-packages/server/src/http/child-agent-projection-factory.ts
-packages/server/src/http/live-child-agent-registry.ts
+packages/agent-runtime/src/child-environment.ts
+packages/tools/src/agent/index.ts
+packages/tools/src/agent/workflow-runner.ts
+packages/server/src/http/daemon-agent-event-projector.ts
+packages/server/src/http/live-child-agent-directory.ts
 packages/server/src/http/session-task-bridge.ts
-packages/server/src/http/child-agent-worktree.ts
+packages/server/src/http/session-application-service.ts
 ```
-
-不存在 `DaemonChildAgentHost`、`ChildSessionHost` 或 child runtime factory。

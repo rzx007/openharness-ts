@@ -1,170 +1,108 @@
 # Agent Framework Capability Boundary
 
-> 状态：当前实现。下一阶段将用 events/effects/live handles 取代 public run host 和 child projection，见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)。
-
-> 状态：当前架构约束。代码与本文冲突时，应先确认是否需要修改边界，而不是新增兼容 adapter。
+> 状态：当前架构约束。代码与本文冲突时，应先修改所有权设计，不新增 compatibility adapter。
 
 ## 一句话边界
 
 ```text
-framework 管执行和 live handle
-daemon 管 durable session / child session / task / run projection
+framework 管执行、live state 与 live handles
+daemon 管 durable session/task/run/transcript projection 与多客户端策略
 surface 管交互和展示
 ```
 
-`@openharness/agent-runtime` 是可以独立运行的、带 OpenHarness 默认配置的 agent framework。daemon 是它的一种托管应用，不是 agent 的组成部分。
-
-```ts
-import { createOpenHarnessAgent } from "@openharness/agent-runtime";
-
-const agent = await createOpenHarnessAgent({ cwd: process.cwd() });
-const result = await agent.runMessage("hi");
-await agent.close();
-```
-
-这条路径不依赖 `@openharness/server`、HTTP 或 daemon store。
-
-## 三层模型
-
 ```mermaid
 flowchart LR
-  Framework["agent framework<br/>execution + live state"]
+  Framework["agent framework<br/>execution + events/effects/handles"]
   Daemon["daemon application<br/>HTTP + durable projection + coordination"]
   Surface["TUI / Web / Desktop / CLI"]
 
   Daemon --> Framework
   Surface --> Daemon
-  Surface -. "programmatic mode" .-> Framework
+  Surface -. programmatic mode .-> Framework
 ```
 
-真实 package 依赖方向是：
+真实依赖方向：
 
 ```text
-@openharness/core
-  <- @openharness/agent-runtime
-  <- @openharness/server
-  <- @openharness/client / apps
+@openharness/core <- @openharness/agent-runtime <- @openharness/server <- clients/apps
 ```
 
-禁止反向依赖：`agent-runtime` 不得引用 server、HTTP、SQLite session schema 或 daemon application service。
+`agent-runtime` 禁止依赖 server、HTTP、SSE、daemon store 或 durable session schema。
 
-## Framework 负责什么
+## Framework 边界
 
-### 默认组装
+framework 负责：
 
-`createOpenHarnessAgent()` 在 `packages/agent-runtime/src/agent.ts` 闭环：
+- provider、model、QueryEngine、tools、hooks、skills、plugins、MCP、sandbox 的默认组装
+- history、usage、当前 run 与资源生命周期
+- permission wait 的执行语义
+- child identity、实例、递归执行、follow-up、interrupt、suspend/resume、worktree lease
+- 有序 `AgentEvent`、`AgentEffects` 和 run/child handles
+- compact、remember、inspect 等 agent 能力
 
-- provider、credential、model 与 API client
-- QueryEngine 和默认 tools
-- permission checker、hooks、prompt、sandbox
-- bundled/user/project skills
-- plugin skills/tools/hooks/MCP/agent definitions
-- MCP 连接及释放
-- memory retrieval 与 `remember()`
-- child agent 的实例、运行、follow-up、interrupt、await 和 close
+framework 不负责：
 
-调用方不需要自己组装 QueryEngine，也不需要接触 `RuntimeBundle`。
-
-### 执行和 live state
-
-一个 `OpenHarnessAgent` 拥有：
-
-- message history 与累计 usage
-- 当前 model 和执行配置
-- tool/hook/skill registry
-- MCP、sandbox 等资源
-- child invocation map 与 child agent 实例
-
-completed child 的重资源不是永久驻留：默认 idle TTL 后由 framework suspend，history 与 invocation handle 保留，follow-up 可透明恢复。
-
-稳定 API：
-
-```text
-submitMessage() / runMessage()
-getHistory() / loadHistory() / clear()
-setModel()
-compact() / remember() / getUsage() / inspect()
-close()
-```
-
-`OpenHarnessAgent` 不公开内部 `runtime`，daemon 不能通过 `queryEngine`、`apiClient` 或 registry 穿透 facade。
-
-### Permission 语义
-
-framework 在工具执行前发起 `AgentPermissionRequest`，等待 `AgentPermissionDecision`，并在 denied、expired 或 abort 时终止对应工具执行。
-
-Host 决定交互方式：
-
-- standalone：终端回调、桌面对话框或固定策略
-- daemon：持久化请求、SSE 通知、HTTP reply 后 resolve
-
-durable permission record 属于 daemon；暂停工具并等待 decision 的语义属于 framework。
-
-### Child agent 语义
-
-`AgentChildManager` 位于 `packages/agent-runtime/src/child-agent.ts`，负责：
-
-- 递归创建 `OpenHarnessAgent`
-- 保存 invocation -> child agent/live controls
-- 执行 prompt 和 follow-up
-- parent run abort 时终止 child
-- `SendMessage`、interrupt、await 与资源释放
-
-`AgentChildProjection` 是可选观察接口。没有 projection 时 child 仍可在单进程模式运行。
-
-## Daemon 负责什么
-
-`@openharness/server` 是产品应用层，负责：
-
-- HTTP、Bearer auth、CORS、SSE、request trace
-- `SessionStore` 及 session/input/run/message/part/event
-- prompt queue/steer admission 与每 session run lane
-- 非 live-child durable session 的 warm `OpenHarnessAgent` `AgentPool`；live child 由 registry 仲裁，禁止重复实例
-- transcript、permission、child session/task/run 的 durable projection
+- durable session/input/run/message/task schema
+- HTTP route、Bearer auth、SSE 或多客户端 permission prompt
 - daemon restart recovery、archive、rewind、export
-- settings/provider/auth/memory/plugin/git 等资源 API
-- daemon 进程组合与默认服务
+- 每 session 的多请求 queue policy
 
-daemon 可以保存 framework live controls 的路由引用，但不能接管其所有权。`LiveChildAgentRegistry` 只完成 `childSessionId -> AgentChildControls` 路由。
+## Daemon 边界
 
-## 状态归属表
+daemon 负责：
 
-| 状态 | 唯一所有者 | 说明 |
-|---|---|---|
-| agent history / usage | `OpenHarnessAgent` | live state |
-| tool loop / permission wait | framework | execution semantics |
-| child instance / invocation handle | `AgentChildManager` | live handle |
-| durable session/input/run | daemon `SessionStore` | restart 后可恢复查询 |
-| durable transcript | daemon projection | framework history 的产品投影 |
-| durable permission request/reply | daemon broker/store | 多客户端交互 |
-| durable child session/task/run | daemon child projection | 对 live child 的产品投影 |
-| per-session concurrency lane | daemon run engine | 多客户端准入策略 |
-| warm agent cache | daemon `AgentPool` | `sessionId -> Promise<OpenHarnessAgent>` |
+- root prompt durable admission 与 per-session run lane
+- 每个 pool-owned session 的 warm agent cache
+- 实现 `AgentEffects.requestPermission`
+- 每个 root agent 一次 required event subscription
+- 把 `AgentEvent` 单向归约为 durable transcript/run/task/session/event 和 SSE
+- 把 HTTP/task commands 路由到 framework-owned run/child handles
+- restart recovery、maintenance 与 product APIs
 
-## 明确不存在的层
+daemon 可以保存 `rootAgent + childId` 的路由索引，但不复制 child controls，也不拥有 child instance。
 
-当前代码不再存在以下抽象：
+## 状态归属
+
+| 状态 | 唯一所有者 |
+|---|---|
+| agent history / usage / model loop | framework |
+| active run、steer queue、abort | framework |
+| child instance / handle / worktree lease | framework |
+| durable session/input/run/transcript | daemon |
+| durable permission request/reply | daemon |
+| durable child session/task/run | daemon |
+| per-session request lane | daemon |
+| warm root agent cache | daemon `AgentPool` |
+| UI selection/render/prompt controls | surface |
+
+## 边界协议
 
 ```text
-SessionRuntime
-SessionRuntimeFactory
-AgentSessionRuntime
-SessionRuntimePool
-DaemonChildAgentHost
-DaemonChildAgentHostFactory
-@openharness/agent-runtime/host
-@openharness/agent-runtime/daemon
+framework -> daemon : ordered AgentEvent facts
+framework -> daemon : AgentEffects call when a result is required
+daemon -> framework : run.steer / run.interrupt / child.send / child.interrupt
 ```
 
-不要以兼容为理由恢复这些名称。daemon 直接依赖 framework API。
+事件绝不携带 live capability。effect 绝不兼任 telemetry。handle 绝不写入 durable store。
 
-## 扩展判断规则
+## 扩展判断
 
-新增能力时依次判断：
+1. programmatic agent 是否也需要？需要则优先进入 framework。
+2. 是否必须等待外部返回值？是则定义窄 effect。
+3. 是否只是已发生事实？是则扩展 `AgentEvent` union。
+4. 是否控制 live execution？是则扩展 handle。
+5. 是否操作 HTTP、SSE、durable schema 或多客户端策略？是则进入 daemon。
+6. 是否只影响 TUI/Web 的交互与渲染？是则留在 surface。
 
-1. 单进程 programmatic agent 是否也需要它？需要则优先进入 framework。
-2. 它是否操作 HTTP、SSE、durable schema 或多客户端协调？是则进入 daemon。
-3. 它是否只是把 framework event/handle 映射到产品状态？是则定义窄 projection，不定义 runtime adapter。
-4. 它是否属于 TUI/Web 的按键、弹窗或渲染？是则留在 surface。
+## 已退场抽象
 
-最终标准不是“代码放在哪更方便”，而是执行状态和 durable 产品状态是否各自只有一个所有者。
+以下名称不应恢复：
+
+```text
+SessionRuntime / AgentSessionRuntime / RuntimeFactory
+AgentRunHost / QueryRuntimeHost / ToolRuntimeHost
+DaemonRuntimeHostPort / DaemonRunProjection
+AgentChildProjection / DaemonChildAgentProjection
+ChildAgentProjectionFactory / LiveChildAgentRegistry controls copy
+pullFollowUps / wakeCount / mergeWake
+```

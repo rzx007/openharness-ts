@@ -1,6 +1,6 @@
 # 一个完整 Agent 应用需要什么
 
-> 本文是概念性架构笔记，不是当前代码索引。当前实现请以 [Agent Framework 边界](./agent-framework-capability-boundary.md) 和 [Daemon Application Architecture](./daemon-application-architecture.md) 为准；已接受的下一阶段边界见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)。
+> 本文是概念性架构笔记，不是当前代码索引。当前实现请以 [Agent Framework 边界](./agent-framework-capability-boundary.md) 和 [Daemon Application Architecture](./daemon-application-architecture.md) 为准；events/effects/handles 的决策记录见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)。
 
 > 一份关于 Agent 功能、运行机制与工程架构的系统性笔记。
 
@@ -626,11 +626,11 @@ interface MemoryRecord {
 
 ### 为什么投影 durable child session
 
-当前主线不再通过旧 `SwarmBackend` / subprocess registry 派发 Agent。framework 的 `AgentChildManager` 创建并执行 child agent；daemon 的 `DaemonChildAgentProjection` 只创建 child session、child run 和 parent-visible task projection。
+当前主线不再通过旧 `SwarmBackend` / subprocess registry 派发 Agent。framework 的 `AgentChildManager` 创建并执行 child agent；daemon 的 `DaemonAgentEventProjector` 消费 child/run events，创建 child session、child run 和 parent-visible task projection。
 
 这样做的实际收益：
 
-- 子 Agent 复用同一套 `SessionStore` / permission broker / transcript projection，但执行不进入 daemon `SessionRunEngine`；framework `AgentChildManager` 直接执行，`DaemonChildAgentProjection` 创建 durable input/run/task。
+- 子 Agent 复用同一套 `SessionStore` / permission broker / transcript projection，但执行不进入 daemon `SessionRunEngine`；framework `AgentChildManager` 直接执行，统一 event projector 创建 durable input/run/task。
 - parent 看到的是稳定 `task_id` projection，便于 `TaskWait`、SSE 和 `/tasks` 查询。
 - live invocation handle 只留在当前 run 内存中，避免暴露 daemon 私有 session/run 句柄。
 - `isolate: true` 时仍可使用独立 git worktree。
@@ -643,21 +643,24 @@ sequenceDiagram
   participant L as Leader Agent
   participant A as Agent Tool
   participant M as AgentChildManager
-  participant D as DaemonChildAgentProjection
+  participant E as AgentEventBus
+  participant D as DaemonAgentEventProjector
   participant S as SessionStore
   participant T as Task Projection
 
   U->>L: 提交复杂任务
   L->>A: spawn Explore 子任务
   A->>M: spawnChildAgent(input)
-  M->>D: create durable child projection
+  M->>E: child.created
+  E->>D: apply(event)
   D->>S: create child session + task
   M->>M: create and run child OpenHarnessAgent
   D->>T: register parent-visible task
   A-->>L: 返回 task_id
   L->>A: spawn Verify 子任务
   A->>M: spawnChildAgent(input)
-  M->>D: create durable child projection
+  M->>E: child.created
+  E->>D: apply(event)
   D->>S: create child session + task
   M->>M: create and run child OpenHarnessAgent
   D->>T: register parent-visible task
@@ -667,10 +670,10 @@ sequenceDiagram
   L-->>U: 综合判断并回答
 ```
 
-当前 runtime child-agent port 可以抽象为：
+当前 framework child controller 是：
 
 ```ts
-interface RuntimeChildAgentHost {
+interface AgentChildController {
   spawnChildAgent(input: ChildAgentSpawnInput): Promise<ChildAgentInvocation>;
   sendChildInput(invocationId: string, input: ChildAgentInput): Promise<void>;
   interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
@@ -678,7 +681,7 @@ interface RuntimeChildAgentHost {
 }
 ```
 
-`ChildAgentInvocation.taskId` 是模型和用户看到的 `task_id`；`ChildAgentInvocation.id` 是 runtime host 内部 live handle。`TaskWait` 等的是 task projection，不直接访问 invocation id。
+`AgentChildInvocation.id` 是 canonical `childId`，同时作为模型看到的 `task_id` 和 daemon task projection ID。live handle 留在 `agent.children`，不会被序列化进 durable store。
 
 任务状态最好使用明确状态机：
 
@@ -891,7 +894,7 @@ async function bootstrap(config): Promise<AgentRuntime> {
 }
 ```
 
-daemon mode 下，child-agent 能力不在 bootstrap 时注入为 `swarm` 对象，而是在每次 run 由 `SessionRunExecutor` 创建 `AgentRunHost`，再经 `ToolContext.runtimeHost.childAgentHost.spawnChildAgent()` 暴露给 Agent/Workflow 工具。
+daemon mode 下，child-agent 能力不在 bootstrap 时注入为 `swarm` 对象。framework 在每次 run 建立 internal `AgentExecutionContext`，再经 `ToolContext.agent.children` 暴露给 Agent/Workflow 工具；daemon 只消费 lifecycle events。
 
 ---
 

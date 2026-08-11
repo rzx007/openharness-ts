@@ -2,7 +2,7 @@
 
 Reusable filesystem-based swarm infrastructure.
 
-This package no longer provides the runtime child-agent backend. Current Agent and Workflow execution goes through the framework-owned `AgentChildManager`; daemon hosting adds durable child session/task/run projection through `AgentChildProjection`.
+This package no longer provides the runtime child-agent backend. Current Agent and Workflow execution goes through the framework-owned `AgentChildManager`; daemon hosting consumes framework events through `DaemonAgentEventProjector` and keeps live routing handles in `LiveChildAgentDirectory`.
 
 ## Public Surface
 

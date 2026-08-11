@@ -1,12 +1,12 @@
 # Agent Run Events / Effects Architecture
 
-> 状态：**已接受的目标架构，尚未落地**。本文定义下一阶段 framework 与 daemon 的边界和迁移终态；当前代码事实仍以 [Agent Runtime Framework Architecture](./agent-runtime-framework-architecture.md) 和 [Daemon Application Architecture](./daemon-application-architecture.md) 为准。
+> 状态：**已实现的架构决策记录**。当前运行索引见 [Agent Runtime Framework Architecture](./agent-runtime-framework-architecture.md) 和 [Daemon Application Architecture](./daemon-application-architecture.md)。本文保留改造前问题、决策理由与验收约束。
 >
 > 决策摘要：删除 daemon 注入的 run host 和 child projection。framework 通过 `OpenHarnessAgent`、`AgentRunHandle`、`AgentChildHandle`、统一 `AgentEvent` 与少量 `AgentEffects` 暴露能力；daemon 只消费事件、实现 effects，并维护 durable projection。
 
 ## 1. 为什么要改
 
-当前边界在所有权上已经比旧 runtime factory 世界清晰：framework 管执行和 live handle，daemon 管 durable session/task/run projection。但一轮执行仍然按下面的方式接线：
+改造前的边界已经比旧 runtime factory 世界清晰，但一轮执行仍按下面的方式接线：
 
 ```text
 SessionRunExecutor
@@ -328,21 +328,21 @@ sequenceDiagram
 ```ts
 interface AgentExecutionContext {
   scope: AgentRunScope;
-  signal: AbortSignal;
-  events: AgentEventDispatcher;
   effects: AgentEffects;
-  children: AgentChildManager;
+  children: AgentChildController;
+  emit(event: AgentEventInput): Promise<void>;
+  takeSteeredInputs(): AgentChildInput[];
 }
 ```
 
 QueryEngine、tool context 和 workflow runner 可以依赖这个内部 context，但 application 不能构造它。对应替换：
 
-| 当前调用 | 目标调用 |
+| 改造前调用 | 当前调用 |
 |---|---|
-| `runtimeHost.emitEvent()` | `execution.events.emit()` |
+| `runtimeHost.emitEvent()` | `execution.emit()` |
 | `host.emitStreamEvent()` | framework 归一化 provider stream 后 emit |
 | `runtimeHost.requestPermission()` | `execution.effects.requestPermission()` |
-| `runtimeHost.childAgentHost.spawnChildAgent()` | `execution.children.spawn()` |
+| `runtimeHost.childAgentHost.spawnChildAgent()` | `execution.children.spawnChildAgent()` |
 
 这样 child/permission 是 framework 本身的执行能力，daemon 不再“注入出一个 Agent”。
 
@@ -390,13 +390,13 @@ sequenceDiagram
 
 ### 9.3 Steer 与 interrupt
 
-当前 `mergeWake -> wakeCount -> drainSteeredInputs -> pullFollowUps` 改为显式 handle：
+改造前的 `mergeWake -> wakeCount -> drainSteeredInputs -> pullFollowUps` 已改为显式 handle：
 
 ```text
 HTTP steer
   -> daemon durable admit input
   -> SessionRunCoordinator.activeHandle(sessionId)
-  -> run.steer({ content, inputId, traceId })
+  -> run.steer({ content, id, traceId })
 
 HTTP interrupt
   -> SessionRunCoordinator.activeHandle(sessionId)
@@ -405,7 +405,7 @@ HTTP interrupt
 
 lane 仍负责多客户端准入和 per-session 串行，但不再让 framework 反向查询 daemon store。
 
-steer 可能在 executor 注册 handle 前已经被 HTTP durable admit。lane 必须保留这段短暂窗口中的 pending steer，并在 `registerActiveHandle()` 时按准入顺序主动 flush；不能丢弃，也不能恢复成 `pullFollowUps()`。`run.steer()` 接受 daemon 已生成的 inputId/traceId，framework 随后发出 `input.accepted`，projector 据此把该 input 绑定到 active run 并投影 transcript。
+steer 可能在 executor 注册 handle 前已经被 HTTP durable admit。lane 保留这段短暂窗口中的 pending steer，并在 `registerHandle()` 时按准入顺序主动 flush。`run.steer()` 接受 daemon 已生成的 input ID/trace ID，framework 随后发出 `input.accepted`，projector 据此把该 input 绑定到 active run 并投影 transcript。
 
 ## 10. Child agent 目标链路
 

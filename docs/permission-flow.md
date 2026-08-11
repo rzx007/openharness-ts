@@ -1,55 +1,83 @@
 # Permission Flow
 
-> 当前实现的快速索引。完整 daemon 上下文见 [daemon-application-architecture.md](./daemon-application-architecture.md#工具运行与授权)。
->
-> 目标设计：permission 将成为 framework 显式等待的 `AgentEffects.requestPermission()`；不会把 `resolve` 句柄放进事件。见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md#7-agenteffects)。
+> 状态：当前实现快速索引。daemon 全链路见 [Daemon Application Architecture](./daemon-application-architecture.md#工具运行与授权)。
+
+## 核心语义
+
+permission 是 effect，不是带 resolver 的 event：
+
+```text
+request/decision : AgentEffects.requestPermission()
+observability    : permission.requested / permission.resolved AgentEvent
+durable UI flow  : daemon StorePermissionBroker
+```
+
+framework 等待 decision；event 只描述事实，保持可序列化。
 
 ## Standalone
 
-```text
-QueryEngine tool call
-  -> permission checker
-  -> AgentRunHost.requestPermission()
-  -> createOpenHarnessAgent({ requestPermission }) callback
-  -> approved / denied / expired
-  -> execute or reject tool
+```ts
+const agent = await createOpenHarnessAgent({
+  effects: {
+    requestPermission: async (request, scope) => {
+      return terminalPrompt(request, scope.signal)
+        ? { status: "approved" }
+        : { status: "denied" };
+    },
+  },
+});
 ```
 
-未提供 callback 时默认拒绝，不隐式放行。
+未提供 effect 时默认拒绝，不隐式放行。
 
 ## Daemon
 
 ```mermaid
 sequenceDiagram
   participant QE as QueryEngine
-  participant H as DaemonRuntimeHostPort
-  participant B as StorePermissionBroker
-  participant S as SessionStore
-  participant U as UI
+  participant Run as FrameworkAgentRun
+  participant FX as AgentEffects
+  participant Broker as StorePermissionBroker
+  participant Store as SessionStore
+  participant UI
 
-  QE->>H: requestPermission(request)
-  H->>B: ask(scope + request + AbortSignal)
-  B->>S: pending permission record
-  S-->>U: SSE event
-  U->>B: HTTP reply
-  B->>S: durable decision
-  B-->>H: resolve waiting promise
-  H-->>QE: decision
+  QE->>Run: permission required
+  Run->>Run: emit permission.requested
+  Run->>FX: requestPermission(request, scope)
+  FX->>Broker: ask(session/run/trace/request/signal)
+  Broker->>Store: create pending record
+  Store-->>UI: SSE permission.created
+  UI->>Broker: HTTP reply
+  Broker->>Store: persist decision
+  Broker-->>FX: approved / denied / expired
+  FX-->>Run: decision
+  Run->>Run: emit permission.resolved
+  Run-->>QE: decision
 ```
 
 ## 代码位置
 
 | 行为 | 文件 |
 |---|---|
-| tool loop 与 permission check | `packages/core/src/engine/query-engine.ts` |
-| framework host contract | `packages/core/src/types/runtime.ts` |
-| daemon run host | `packages/server/src/http/daemon-runtime-host.ts` |
+| permission checker 与 tool gate | `packages/core/src/engine/query-engine.ts` |
+| request/decision/event contracts | `packages/core/src/types/runtime.ts` |
+| framework event/effect 调用 | `packages/agent-runtime/src/agent.ts` |
+| daemon effect 注入 | `packages/server/src/http.ts` |
 | durable broker | `packages/server/src/permission-broker.ts` |
-| live resolver | `packages/server/src/permission-controller.ts` |
+| live resolver/expiration | `packages/server/src/permission-controller.ts` |
 | list/reply routes | `packages/server/src/http/routes/permission.ts` |
+| event durable observation | `packages/server/src/http/daemon-agent-event-projector.ts` |
 
-## Cancellation
+## Cancellation 与 lineage
 
-run 的 `AbortSignal` 传给 broker/controller。interrupt 或 archive 时，pending request 变为 expired，等待 promise 被 resolve，工具不会继续执行。
+- run `AbortSignal` 传给 broker/controller。
+- interrupt/archive 时 pending request 变为 expired，等待中的 effect 返回，不继续执行工具。
+- child scope 使用 child session/run；broker 沿 parent lineage 把 prompt 暴露给顶层 session。
+- durable payload 保留 child session/run identity，UI 无需持有 framework handle。
 
-child request 会沿 session parent lineage 上浮到顶层 session；payload 保留 `childSessionId` 和 `childRunId`，因此 UI 只需监听父 session 也能处理授权。
+## 不变量
+
+- event payload 中没有 resolve/reject/function。
+- daemon 不向 QueryEngine 注入 host。
+- effect 未配置或失效时绝不默认批准。
+- `permission.resolved` 在 effect settle 后发布，供日志与 projection 使用。
