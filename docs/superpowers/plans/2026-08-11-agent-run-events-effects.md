@@ -121,7 +121,7 @@ daemon consumes events and projects durable state
 ## Task 6：二次复盘一致性修复
 
 - [x] steer receipt 延迟到可用 turn boundary 的 `input.accepted` 成功交付与实际消费；provider/tool/terminal/max-turn 先结束时统一 typed reject。
-- [x] 批量 steer projection 失败不报告部分成功。
+- [x] steer receipt 不在 projection 前报告成功；后续归零复盘进一步改为每 boundary 单条消费。
 - [x] coordinator delivery 返回输入最终归属 run；late steer replacement run ID 透传到 HTTP，replacement 失败不会悬挂 promise。
 - [x] child run 严格校验 framework `started` receipt，不再用 manager 预分配 ID 覆盖真实 receipt。
 - [x] live child HTTP 删除 durable input/run 补造 fallback；receipt 与 durable projection 不一致时明确失败。
@@ -144,6 +144,20 @@ daemon consumes events and projects durable state
 - [x] 补充 store、run engine、coordinator、task bridge、route 与 child manager 回归测试，并更新权威文档。
 
 退出标准：services、core、agent-runtime、server typecheck 与全量测试通过；`git diff --check` 无错误；每个 admitted steer input 都有 owning run 或 terminal failure run。
+
+## Task 8：归零复盘与状态机收口
+
+- [x] steer 改为每个可用 turn boundary FIFO 消费一个；receipt 与单个 `input.accepted` 一一对应。
+- [x] live child receipt 通过 primary input 或 transcript message 验证 owning run，active steer 不再误报 500。
+- [x] child 首次创建/恢复实例纳入可等待 creation barrier；close 与 spawn cleanup 去重，不产生 orphan run 或重复 `child.closed`。
+- [x] tree-wide child sessionId 在 environment acquire 前预检；durable child session 同时校验 childId。
+- [x] daemon restart 收束 running transcript parts，并把旧进程 pending permission 置为 expired。
+- [x] input create-or-validate 比较完整业务 metadata；root executor 原样传递 admitted metadata。
+- [x] durable run terminal 不可 reopen；child task 仍可显式绑定新 run 后 reopen。
+- [x] `child.closed` durable completion 失败时仍清理 projector live state。
+- [x] 删除 `listUnboundInputs`、`createChildSession`、`writeToSessionTask` 旧接口并更新权威文档。
+
+退出标准：agent-runtime/server/services focused tests、全量 package tests/typecheck 与 `git diff --check` 通过；重启集成测试覆盖 run part/task/permission 三类 stale state。
 
 ## 提交策略
 

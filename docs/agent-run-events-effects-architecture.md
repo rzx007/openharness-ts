@@ -412,7 +412,7 @@ HTTP interrupt
 
 lane 仍负责多客户端准入和 per-session 串行，但不再让 framework 反向查询 daemon store。
 
-steer 可能在 executor 注册 handle 前已经被 HTTP durable admit。lane 保留这段短暂窗口中的 pending steer，并在 `registerHandle()` 时按准入顺序主动 flush。`run.steer()` 接受 daemon 已生成的 input ID/trace ID；framework 在 QueryEngine 真正消费它的 turn boundary 发出 `input.accepted`，projector 据此把该 input 绑定到 active run 并投影 transcript，随后 receipt 才返回。
+steer 可能在 executor 注册 handle 前已经被 HTTP durable admit。lane 保留这段短暂窗口中的 pending steer，并在 `registerHandle()` 时按准入顺序主动 flush。`run.steer()` 接受 daemon 已生成的 input ID/trace ID；framework 在 QueryEngine 真正消费它的 turn boundary 发出 `input.accepted`，projector 据此把该 input 绑定到 active run 并投影 transcript，随后 receipt 才返回。每个 boundary 只消费一个 pending steer；并发输入 FIFO 推进，已消费 receipt 不会因后续输入投影失败而回滚。
 
 最终无工具 turn 与 max-turn boundary 会在没有下一模型回合时关闭 steering，不取走 pending input。若 daemon lane 先接收、framework 后确认 run 已关闭，typed `AgentRunNotAcceptingInputError` 触发 durable replacement run；lane delivery 返回 replacement run ID，HTTP 不会把输入错误归到旧 run。provider/tool/projection failure 也会拒绝所有尚未消费的 receipt，不会留下“已成功但模型未收到”的输入。
 
@@ -539,7 +539,7 @@ projection 是 daemon 对事实的单向消费，不再是 framework 执行协�
 5. permission effect failure 默认等价于 denied/expired；基础设施错误可使 run failed，但绝不默认批准。
 6. parent interrupt 由 framework 传播到其创建的 child；daemon 不遍历 child controls。
 7. agent close 必须等待 run/child 清理和 event listener drain。
-8. daemon restart 后 live handles 不恢复；durable active run/task 仍按现有策略标记 interrupted。
+8. daemon restart 后 live handles 不恢复；durable active run/task 和开放 transcript part 标记 interrupted，pending permission 标记 expired。
 9. event payload 必须可序列化并限制 tool output/delta 大小；大内容继续由 transcript/store 分块处理。
 10. listener 不能反向调用同一 agent 的阻塞方法造成重入；daemon 路由在 event apply 完成后再执行 live command。
 11. required listener 失败后 dispatcher 立即熔断该 run；不得再通过同一个失败 listener 递归发送 `run.failed`。executor 使用 durable fallback 收口未终态 run。

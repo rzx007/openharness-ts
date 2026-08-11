@@ -74,7 +74,7 @@ routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装。
 | prompt/steer/interrupt/resume | `http/routes/run-execution.ts` | Application |
 | compact/rewind/export/remember/MCP/usage | `http/routes/session-utility.ts` | Maintenance |
 | permission list/reply | `http/routes/permission.ts` | `StorePermissionBroker` |
-| task list/input/stop | `http/routes/task.ts` | `SessionTaskService` |
+| task create/get/list/stop | `http/routes/task.ts` | `SessionTaskService` |
 | health/settings/provider | `http/routes/system.ts` | Control/default services |
 | replay/live SSE | `http/routes/events.ts` | `HttpEventHub` |
 
@@ -177,7 +177,7 @@ agent.events.subscribe((event) => projector.apply(event));
 | `child.closed` | finish task、unregister live route |
 | run terminal | complete text、finalize durable run/task |
 
-projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。input/run/child identity 使用 create-or-validate，重复 ID 不同 payload 会失败。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
+projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。input/run/child identity 使用 create-or-validate：input 会比较去除 traceId 后的完整 metadata，既有 child session 必须匹配 parent/cwd/childId，terminal run 不允许被 `run.started` 重开。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
 
 ## Steer
 
@@ -199,7 +199,7 @@ sequenceDiagram
     Lane->>Run: steer(input)
   end
   Run->>Run: reserve pending steer
-  QE->>Run: takeSteeredInputs at usable boundary
+  QE->>Run: take one steered input at usable boundary
   Run->>Projector: input.accepted delivery=steer
   Run-->>QE: consumed input
   Run-->>Lane: receipt(runId)
@@ -207,11 +207,11 @@ sequenceDiagram
   Engine-->>UI: input + original/replacement run
 ```
 
-正常 steer 不创建第二个 run。没有 active lane 时，`delivery=steer` 按普通 prompt 创建新 run。已 admit 但 handle 尚未注册的 steer 保存在 lane，注册后按序 flush。HTTP application 会等待 delivery receipt，因此响应中的 `run` 一定是该输入最终归属的原 active run 或 replacement run，而不是过早返回旧 run。
+正常 steer 不创建第二个 run。没有 active lane 时，`delivery=steer` 按普通 prompt 创建新 run。已 admit 但 handle 尚未注册的 steer 保存在 lane，注册后按序 flush。framework 每个可继续的 turn boundary 只消费一个 steer，因此并发输入按 FIFO 分布到后续模型回合，receipt 独立结算。HTTP application 会等待 delivery receipt，因此响应中的 `run` 一定是该输入最终归属的原 active run 或 replacement run，而不是过早返回旧 run。
 
 最终 turn boundary 与 max-turn boundary 由 framework 关闭 steering；未到可继续的模型回合前，`input.accepted` 和 receipt 都不会产生。若 lane 已接收输入、但 `run.steer()` 明确抛出 `AgentRunNotAcceptingInputError`，coordinator 不丢弃 durable input，而是在同一 lane 创建带 `recoveredFromSteer` metadata 的 replacement run，并用新 run ID 结算 HTTP delivery。其他 steer 错误以及 replacement 创建错误都会明确拒绝请求并终止当前 lane 控制链，不会留下悬挂 promise。
 
-steer 的 durable 归属既可以由新 run 的 `run.inputId` 表达，也可以由原 active run transcript 中的 user message（`message.inputId + message.runId`）表达。相同 input ID 重试时，application 会沿这两种关系找到最终 owning run，不会再次 delivery。相同 ID 在首次 delivery 仍 pending 时，共享同一个进程内 admission promise；payload、session 或 delivery 不一致则按 idempotency conflict 拒绝。
+steer 的 durable 归属既可以由新 run 的 `run.inputId` 表达，也可以由原 active run transcript 中的 user message（`message.inputId + message.runId`）表达。live child receipt 校验也使用这两种关系，不能要求 active steer 等于 run 的首个 input。相同 input ID 重试时，application 会找到最终 owning run，不会再次 delivery。相同 ID 在首次 delivery 仍 pending 时，共享同一个进程内 admission promise；payload、session 或 delivery 不一致则按 idempotency conflict 拒绝。
 
 interrupt 或 delivery failure 会拒绝所有尚未结算的 steer。若输入还没有任何 owning run，engine 会为它建立 terminal `interrupted`/`failed` run，保证 durable input 不会永久悬空；如果 projector 已把它绑定到原 run，则由该 run 的 terminal projection 收束。
 
@@ -266,7 +266,7 @@ Agent tool -> framework AgentChildManager
   -> ordinary input/run/output/tool terminal events
 ```
 
-HTTP child prompt、Task input 和 TaskStop 最终都通过 `rootAgent.children` 调 live handle。daemon 只保存路由索引，不复制 controls。完整流程见 [Agent Child Session Flow](./agent-child-session-flow.md)。
+HTTP child prompt、SendMessage 的 session-task callback 和 TaskStop 最终都通过 `rootAgent.children` 调 live handle。daemon 只保存路由索引，不复制 controls。完整流程见 [Agent Child Session Flow](./agent-child-session-flow.md)。
 
 `rootAgent.children` 是 framework root tree 共享的 descendant directory，不只包含 direct child。`child.created` durable 建模若在 task/live-route 阶段失败，projector 会失败 task、注销已注册 route，并 archive 本次新建的 child session；framework 随后回滚 handle 与 environment lease。
 
@@ -294,12 +294,20 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 - 默认组合：`default-daemon.ts`、`default-application-services.ts`、`default-command-catalog.ts`。
 - CLI `commands/daemon.ts` 只处理 host/port/token、registry 与进程信号。
 
+constructor 在开放 HTTP 前执行 durable recovery：
+
+1. pending/running run -> `interrupted`，并把该 run 的 `running` transcript parts 同步置为 `interrupted`。
+2. pending/running task -> `interrupted`。
+3. pending permission -> `expired`，因为旧进程的 resolver 已不存在。
+4. 对已无 active run 的 `closing` session 完成 archive。
+
 shutdown 等待 active runs barrier，关闭 agents/children、event delivery、HTTP hub 和 store。
 
 ## 不变量
 
 - root durable input/run 在 submit 前创建。
 - 每个 durable input 最终可通过 primary run input 或 transcript message 解析到 owning run；失败/中断的 steer 也必须 terminalize。
+- durable run 一旦 completed/failed/interrupted 就不可重新进入 running；child task 可绑定新的 run 并显式 reopen。
 - 每个 pool-owned session 最多一个 warm root agent，每个 agent 最多一个 active root run。
 - required event projection 先于 `run.result` settlement。
 - `run.started` projection 先于 `run.started` receipt settlement。

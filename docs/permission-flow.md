@@ -75,6 +75,10 @@ sequenceDiagram
 - child scope 使用 child session/run；broker 沿 parent lineage 把 prompt 暴露给顶层 session。
 - durable payload 保留 child session/run identity，UI 无需持有 framework handle。
 
+## Daemon 重启
+
+permission resolver 只存在于创建它的 daemon 进程。新 daemon 启动时，`SessionStore.expirePendingPermissionRequests()` 会把旧进程遗留的全部 `pending` request 改为 `expired`，写入明确的 restart reason 和 `permission.replied` durable event。已 approved/denied/expired 的记录不可再次改写。
+
 ## 不变量
 
 - event payload 中没有 resolve/reject/function。

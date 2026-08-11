@@ -26,12 +26,13 @@ flowchart LR
 
 1. Agent/Workflow tool 调用 `context.agent.children.spawnChildAgent()`。
 2. `AgentChildManager` 生成 canonical `childId` 与 `sessionId`。
-3. `AgentChildEnvironmentProvider` 获取 shared cwd 或 git worktree lease。
-4. manager 把 handle 放入 root tree 共享的 `AgentChildRegistry`，发布并等待 `child.created`。
-5. daemon projector 创建 durable child session、parent-visible task，并登记 `rootAgent + childId` 路由。
-6. framework 递归创建共享 effects/event bus 的 child `OpenHarnessAgent`。
-7. child 启动普通 run，发布 input/run/output/tool/terminal events；`run.started` 投影成功且 receipt 与 manager 预分配的 session/input/run ID 完全一致后，spawn receipt 才返回。
-8. daemon 使用同一个 event reducer 创建 child input/run/transcript 并绑定/完成 task；child input metadata 由 `input.accepted` 原样携带，application 不再补造记录。
+3. manager 在 tree-wide registry 预检 sessionId；已有 live child 时不获取环境资源。
+4. `AgentChildEnvironmentProvider` 获取 shared cwd 或 git worktree lease。
+5. manager 把 handle 放入 root tree 共享的 `AgentChildRegistry`，发布并等待 `child.created`。
+6. daemon projector 创建 durable child session、parent-visible task，并登记 `rootAgent + childId` 路由；既有 durable session 还必须匹配同一个 childId。
+7. framework 递归创建共享 effects/event bus 的 child `OpenHarnessAgent`。
+8. child 启动普通 run，发布 input/run/output/tool/terminal events；`run.started` 投影成功且 receipt 与 manager 预分配的 session/input/run ID 完全一致后，spawn receipt 才返回。
+9. daemon 使用同一个 event reducer 创建 child input/run/transcript 并绑定/完成 task；child input metadata 由 `input.accepted` 原样携带，application 不再补造记录。
 
 daemon 不向 framework 返回 sessionId、taskId、run host、controls 或 opaque state。task 使用 `childId` 作为可见 ID，因此 Agent 返回的 `task_id` 可直接用于 TaskWait/SendMessage。
 
@@ -46,8 +47,8 @@ HTTP child prompt
   -> LiveChildAgentDirectory.send(childSessionId)
   -> rootAgent.children.get(childId).send(input)
 
-Task input
-  -> SessionTaskBridge callback
+SendMessage 的普通 TaskManager fallback
+  -> registered session-task callback
   -> rootAgent.children.get(childId).send(input)
 ```
 
@@ -66,7 +67,7 @@ parent run abort          -> manager interrupt(childId)
 parent agent close        -> manager.closeAll()
 ```
 
-close 会 abort active run、等待 settlement、关闭 child 资源、释放 environment lease、发布并等待 `child.closed`，最后从 directory 删除 handle。daemon 收到 terminal/closed event 后完成 durable run/task 并移除 live route。
+close 会先把 record 置为 closed，abort active run、等待 settlement，也等待首次创建或 suspend-resume 正在创建的 agent；随后关闭资源、释放 environment lease、发布并等待唯一一次 `child.closed`，最后从 directory 删除 handle。异步创建续体发现 closed 后不得回写 `idle/running` 或提交孤立 run。daemon 收到 terminal/closed event 后完成 durable run/task 并移除 live route；即使 durable close completion 抛错，projector 也会丢弃该 live child 的进程内状态。
 
 若 child 普通执行事件投影失败，daemon projector 会先把已建立的 durable run、transcript part 和 parent task 收束为 failed，再把 required event failure 传播给 framework。TaskManager 的 live completion 失败不会阻止 durable task terminal 落盘；durable completion 自身失败则由 `child.closed` 向上传播，不能静默吞掉。
 
@@ -81,7 +82,7 @@ child run 完成后进入 idle。默认 5 分钟无输入：
 3. 保留 invocation/handle/session identity。
 4. 发布 `child.suspended`。
 
-后续输入创建新 child agent、load history、发布 `child.resumed`，再执行新 run。
+后续输入创建新 child agent、load history、发布 `child.resumed`，再执行新 run。恢复创建与 close 共享同一个 creation barrier；close 不会在新 agent 仍可能出现时提前返回。
 
 ## 所有权
 

@@ -116,7 +116,7 @@ steer(input)
 interrupt(reason?)
 ```
 
-steer 在同步检查后先预占 framework pending 队列，但此时 receipt **不会**成功。QueryEngine 到达仍有下一模型回合的 turn boundary 后，framework 才投递 `input.accepted(delivery=steer)`、把输入交给 QueryEngine，并结算 receipt；因此 receipt 表示“已被本轮执行消费”，不是“已进入内存队列”。若 provider/tool/event projection 先失败、run 被中断，或已没有剩余 turn，所有未消费 receipt 都以 `AgentRunNotAcceptingInputError` 拒绝。批量 steer 也只有整批 `input.accepted` 投递成功后才统一结算，不报告部分成功。
+steer 在同步检查后先预占 framework pending FIFO，但此时 receipt **不会**成功。QueryEngine 每到一个仍可继续模型执行的 turn boundary，只取一个 steer：framework 先投递 `input.accepted(delivery=steer)`，再把该输入交给 QueryEngine 并单独结算 receipt。并发 steer 因而按多个 boundary 顺序消费；后一个投影失败不会把已经交付的前一个伪装成失败。若 provider/tool/event projection 先失败、run 被中断，或已没有剩余 turn，所有尚未消费的 receipt 都以 `AgentRunNotAcceptingInputError` 拒绝。
 
 最终无工具回合和 max-turn boundary 会先关闭 steering，不再取走无法触发下一模型回合的输入。framework 只负责拒绝未消费 handle 请求；是否把 durable 输入转成 replacement run，是 daemon 的应用策略。
 
@@ -139,13 +139,14 @@ QueryEngine
 `AgentChildManager` 完整拥有 child live lifecycle：
 
 1. 生成 canonical `childId` 与 `sessionId`。
-2. 通过 `AgentChildEnvironmentProvider` 获取 cwd/worktree lease。
-3. 把 handle 注册到 root tree 共享的 `AgentChildRegistry`，再发布 `child.created`。
-4. 递归创建共享 event bus/effects 的 `OpenHarnessAgent`。
-5. 启动 child run；child run 使用普通 input/run/output/tool events。
-6. active follow-up 调用当前 run 的 `steer()`；queue follow-up 串行启动下一轮。
-7. idle TTL 到期后保存 history、关闭重资源并发布 suspended；后续输入恢复同一 child。
-8. close/parent abort 终止 run、释放环境并发布 `child.closed`。
+2. 在 tree-wide registry 中预检 sessionId；live 冲突在获取环境资源前失败。
+3. 通过 `AgentChildEnvironmentProvider` 获取 cwd/worktree lease。
+4. 把 handle 注册到 root tree 共享的 `AgentChildRegistry`，再发布 `child.created`。
+5. 递归创建共享 event bus/effects 的 `OpenHarnessAgent`。
+6. 启动 child run；child run 使用普通 input/run/output/tool events。
+7. active follow-up 调用当前 run 的 `steer()`；queue follow-up 串行启动下一轮。
+8. idle TTL 到期后保存 history、关闭重资源并发布 suspended；后续输入恢复同一 child。
+9. close/parent abort 终止 run、等待任何 in-flight agent creation、释放环境并发布一次 `child.closed`。
 
 child run 返回的 `started` receipt 必须逐项匹配 manager 预分配的 `sessionId/inputId/runId`；不一致时 framework 中断该 run、关闭 child，并拒绝调用方，不能用本地 ID 覆盖 framework receipt。
 
