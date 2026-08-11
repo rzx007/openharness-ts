@@ -143,17 +143,16 @@ export class SessionRunEngine {
     });
 
     if (delivery === "steer" && this.context.agentPool.configured) {
-      const activeRunId = this.runCoordinator.activeRunId(sessionId);
-      if (activeRunId) {
+      const steered = this.runCoordinator.steer(sessionId, {
+        id: admitted.id,
+        content: admitted.content,
+        delivery: "steer",
+        traceId,
+        metadata: admitted.metadata,
+      });
+      if (steered.merged && steered.activeRunId) {
         this.context.events.publishSince(before);
-        this.runCoordinator.steer(sessionId, {
-          id: admitted.id,
-          content: admitted.content,
-          delivery: "steer",
-          traceId,
-          metadata: admitted.metadata,
-        });
-        const activeRun = this.context.store.getRun(activeRunId);
+        const activeRun = this.context.store.getRun(steered.activeRunId);
         return {
           input: admitted,
           ...(activeRun ? { run: activeRun, queue_state: "running" as const } : {}),
@@ -167,22 +166,7 @@ export class SessionRunEngine {
     this.context.events.publishSince(before);
     let queueState: "running" | "queued" | undefined;
     if (run) {
-      const enqueued = this.runCoordinator.enqueue({
-        sessionId,
-        runId: run.id,
-        work: (workContext) => this.context.runExecutor.execute({
-          sessionId,
-          inputId: admitted.id,
-          runId: run.id,
-        }, workContext),
-      });
-      queueState = enqueued.state;
-      const tracked = enqueued.promise.catch(() => {
-        // The persisted run state is updated by SessionRunExecutor or interrupt handling.
-      }).finally(() => {
-        if (this.runPromises.get(run.id) === tracked) this.runPromises.delete(run.id);
-      });
-      this.runPromises.set(run.id, tracked);
+      queueState = this.enqueueRun(run, admitted.id);
     }
     return { input: admitted, ...(run ? { run, queue_state: queueState } : {}) };
   }
@@ -202,5 +186,43 @@ export class SessionRunEngine {
       this.context.events.publishSince(before);
     }
     return result;
+  }
+
+  private enqueueRun(run: SessionRunRecord, inputId: string): "running" | "queued" {
+    const enqueued = this.runCoordinator.enqueue({
+      sessionId: run.sessionId,
+      runId: run.id,
+      work: (workContext) => this.context.runExecutor.execute({
+        sessionId: run.sessionId,
+        inputId,
+        runId: run.id,
+      }, workContext),
+      onSteerRejected: (input) => this.enqueueRejectedSteer(run.sessionId, input),
+    });
+    const tracked = enqueued.promise.catch(() => {
+      // The persisted run state is updated by SessionRunExecutor or interrupt handling.
+    }).finally(() => {
+      if (this.runPromises.get(run.id) === tracked) this.runPromises.delete(run.id);
+    });
+    this.runPromises.set(run.id, tracked);
+    return enqueued.state;
+  }
+
+  private enqueueRejectedSteer(sessionId: string, input: { id?: string; traceId?: string }): void {
+    if (!input.id) throw new Error("Rejected steer is missing its durable input id");
+    const admitted = this.context.store.getInput(input.id);
+    if (!admitted || admitted.sessionId !== sessionId) {
+      throw new Error(`Rejected steer input was not found: ${input.id}`);
+    }
+    if (this.context.store.findRunByInput(admitted.id)) return;
+    const before = this.context.events.checkpoint();
+    const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(admitted.metadata.traceId) ?? randomUUID();
+    const run = this.context.store.createRun({
+      sessionId,
+      inputId: admitted.id,
+      metadata: { traceId, recoveredFromSteer: true },
+    });
+    this.context.events.publishSince(before);
+    this.enqueueRun(run, admitted.id);
   }
 }

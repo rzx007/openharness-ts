@@ -1,4 +1,4 @@
-import type { AgentRunHandle, AgentSteerInput } from "@openharness/core";
+import { AgentRunNotAcceptingInputError, type AgentRunHandle, type AgentSteerInput } from "@openharness/core";
 
 export class RunInterruptedError extends Error {
   constructor(message = "Run interrupted") {
@@ -16,6 +16,7 @@ export interface EnqueueRunOptions {
   sessionId: string;
   runId: string;
   work: (context: SessionRunWorkContext) => Promise<void>;
+  onSteerRejected?(input: AgentSteerInput, error: AgentRunNotAcceptingInputError): void | Promise<void>;
 }
 
 export interface EnqueueRunResult {
@@ -42,6 +43,8 @@ interface RunTask {
   handle?: AgentRunHandle;
   pendingSteers: AgentSteerInput[];
   controlChain: Promise<void>;
+  acceptingSteers: boolean;
+  onSteerRejected?: EnqueueRunOptions["onSteerRejected"];
 }
 
 interface SessionLane {
@@ -71,7 +74,7 @@ export class SessionRunCoordinator {
 
   steer(sessionId: string, input: AgentSteerInput): { merged: boolean; activeRunId?: string } {
     const lane = this.lanes.get(sessionId);
-    if (!lane?.active) return { merged: false };
+    if (!lane?.active || !lane.active.acceptingSteers) return { merged: false };
     lane.active.pendingSteers.push(input);
     this.flushSteers(lane.active);
     return { merged: true, activeRunId: lane.active.runId };
@@ -139,6 +142,8 @@ export class SessionRunCoordinator {
       promise,
       pendingSteers: [],
       controlChain: Promise.resolve(),
+      acceptingSteers: true,
+      onSteerRejected: options.onSteerRejected,
     };
   }
 
@@ -159,8 +164,11 @@ export class SessionRunCoordinator {
             await task.controlChain;
           },
         });
+        task.acceptingSteers = false;
+        await task.controlChain;
         task.resolve();
       } catch (error) {
+        task.acceptingSteers = false;
         task.reject(error);
       } finally {
         if (lane.active === task) lane.active = undefined;
@@ -178,7 +186,14 @@ export class SessionRunCoordinator {
     if (!task.handle || task.pendingSteers.length === 0) return;
     const pending = task.pendingSteers.splice(0);
     task.controlChain = task.controlChain.then(async () => {
-      for (const input of pending) await task.handle!.steer(input);
+      for (const input of pending) {
+        try {
+          await task.handle!.steer(input);
+        } catch (error) {
+          if (!(error instanceof AgentRunNotAcceptingInputError) || !task.onSteerRejected) throw error;
+          await task.onSteerRejected(input, error);
+        }
+      }
     }).catch((error) => {
       task.controller.abort(error);
       void task.handle?.interrupt(error instanceof Error ? error.message : String(error));

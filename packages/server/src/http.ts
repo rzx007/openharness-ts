@@ -212,7 +212,7 @@ export class OpenHarnessHttpServer {
       isSessionExternallyOwned: (sessionId) => this.liveChildren.has(sessionId),
       effects: {
         requestPermission: async (request, context) => {
-          const approved = await this.permissionBroker.ask({
+          return await this.permissionBroker.ask({
             sessionId: context.sessionId,
             runId: context.runId,
             traceId: context.traceId,
@@ -221,7 +221,6 @@ export class OpenHarnessHttpServer {
             input: request.input,
             signal: context.signal,
           });
-          return approved ? { status: "approved" } : { status: "denied" };
         },
       },
       bindAgent: (agent) => {
@@ -242,6 +241,7 @@ export class OpenHarnessHttpServer {
       store: this.store,
       agentPool: this.agentPool,
       events: this.sessionEvents,
+      transcriptProjection: this.transcriptProjection,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: (event) => this.log(event),
     });

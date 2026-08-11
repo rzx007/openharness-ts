@@ -32,7 +32,7 @@ export interface ListPermissionRequestsInput {
 }
 
 export interface PermissionBroker {
-  ask(input: PermissionAskInput): Promise<boolean>;
+  ask(input: PermissionAskInput): Promise<AgentPermissionDecision>;
   reply(input: PermissionReplyInput): PermissionRequestRecord;
   getRequest(requestId: string): PermissionRequestRecord | undefined;
   listRequests(input?: ListPermissionRequestsInput): PermissionRequestRecord[];
@@ -60,7 +60,7 @@ export class StorePermissionBroker implements PermissionBroker {
     this.logger = options.logger;
   }
 
-  async ask(input: PermissionAskInput): Promise<boolean> {
+  async ask(input: PermissionAskInput): Promise<AgentPermissionDecision> {
     const permissionSessionId = this.resolvePermissionSessionId(input.sessionId);
     const reusable = this.findSessionApproval(input.sessionId, input.toolName);
     const previousEventSeq = this.latestEventSeq();
@@ -105,7 +105,7 @@ export class StorePermissionBroker implements PermissionBroker {
         requestId: request.id,
         toolName: request.toolName,
       });
-      return replied.status === "approved";
+      return this.decisionFromRequest(replied);
     }
 
     const decision = await this.controller.wait({
@@ -113,7 +113,7 @@ export class StorePermissionBroker implements PermissionBroker {
       signal: input.signal,
       expire: (reason) => this.expire(request.id, reason),
     });
-    return decision.status === "approved";
+    return decision;
   }
 
   reply(input: PermissionReplyInput): PermissionRequestRecord {

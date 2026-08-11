@@ -22,4 +22,13 @@ describe("LiveChildAgentDirectory", () => {
     directory.unregister("child-session", "child-1");
     expect(directory.has("child-session")).toBe(false);
   });
+
+  it("removes stale entries while checking liveness", () => {
+    const rootAgent = { children: { get: vi.fn(() => undefined) } } as any;
+    const directory = new LiveChildAgentDirectory();
+    directory.register("child-session", "child-1", rootAgent);
+
+    expect(directory.has("child-session")).toBe(false);
+    expect(rootAgent.children.get).toHaveBeenCalledWith("child-1");
+  });
 });

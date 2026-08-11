@@ -17,6 +17,7 @@ describe("SessionRunExecutor", () => {
         close: vi.fn(async () => {}),
       } as any,
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+      transcriptProjection: { finalizeRunParts: vi.fn() },
       traceIdForRun: () => "trace-1",
       log: vi.fn(),
     });
@@ -39,6 +40,7 @@ describe("SessionRunExecutor", () => {
     const store = createStore();
     const publishSince = vi.fn();
     const close = vi.fn(async () => {});
+    const finalizeRunParts = vi.fn();
     const executor = new SessionRunExecutor({
       store: store as any,
       agentPool: {
@@ -47,6 +49,7 @@ describe("SessionRunExecutor", () => {
         close,
       } as any,
       events: { checkpoint: () => 7, publishSince },
+      transcriptProjection: { finalizeRunParts },
       traceIdForRun: () => "trace-1",
       log: vi.fn(),
     });
@@ -57,6 +60,7 @@ describe("SessionRunExecutor", () => {
     );
 
     expect(close).toHaveBeenCalledWith("s1");
+    expect(finalizeRunParts).toHaveBeenCalledWith("s1", "run-1", "failed");
     expect(store.updateRun).toHaveBeenCalledWith("run-1", { status: "failed", error: "agent failed" });
     expect(publishSince).toHaveBeenCalledWith(7);
   });
@@ -81,6 +85,7 @@ function completedHandle(): AgentRunHandle {
     inputId: "input-1",
     sessionId: "s1",
     traceId: "trace-1",
+    started: Promise.resolve({ sessionId: "s1", inputId: "input-1", runId: "run-1" }),
     result: Promise.resolve({
       status: "completed",
       output: "ok",

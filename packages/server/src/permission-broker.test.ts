@@ -52,7 +52,7 @@ describe("StorePermissionBroker", () => {
         clientId: "web-1",
       });
       expect(replied).toMatchObject({ status: "approved", decision: "once", decidedByClientId: "web-1" });
-      await expect(allowed).resolves.toBe(true);
+      await expect(allowed).resolves.toEqual({ status: "approved", decision: "once" });
       expect(store.listEvents().map((event) => event.type)).toContain("permission.replied");
     });
   });
@@ -62,9 +62,12 @@ describe("StorePermissionBroker", () => {
       const first = broker.ask({ sessionId: "s1", runId: "r1", toolName: "Bash", input: { command: "pnpm test" } });
       const firstRequest = store.listPermissionRequests({ status: "pending" })[0]!;
       broker.reply({ requestId: firstRequest.id, status: "approved", decision: "session" });
-      await expect(first).resolves.toBe(true);
+      await expect(first).resolves.toEqual({ status: "approved", decision: "session" });
 
-      await expect(broker.ask({ sessionId: "s1", runId: "r1", toolName: "Bash" })).resolves.toBe(true);
+      await expect(broker.ask({ sessionId: "s1", runId: "r1", toolName: "Bash" })).resolves.toEqual({
+        status: "approved",
+        decision: "session",
+      });
       const bashRequests = store.listPermissionRequests({ sessionId: "s1", toolName: "Bash" });
       expect(bashRequests).toHaveLength(2);
       expect(bashRequests[1]).toMatchObject({
@@ -84,7 +87,7 @@ describe("StorePermissionBroker", () => {
       const parentAsk = broker.ask({ sessionId: "s1", runId: "r1", toolName: "Write" });
       const parentRequest = store.listPermissionRequests({ sessionId: "s1", status: "pending" })[0]!;
       broker.reply({ requestId: parentRequest.id, status: "approved", decision: "session" });
-      await expect(parentAsk).resolves.toBe(true);
+      await expect(parentAsk).resolves.toEqual({ status: "approved", decision: "session" });
 
       const childAsk = broker.ask({
         sessionId: "child",
@@ -92,7 +95,7 @@ describe("StorePermissionBroker", () => {
         toolName: "Write",
         input: { path: "child.txt" },
       });
-      await expect(childAsk).resolves.toBe(true);
+      await expect(childAsk).resolves.toEqual({ status: "approved", decision: "session" });
 
       const childRequest = store.listPermissionRequests({ sessionId: "s1", toolName: "Write" }).at(-1);
       expect(childRequest).toMatchObject({
@@ -122,7 +125,7 @@ describe("StorePermissionBroker", () => {
       const request = store.listPermissionRequests({ status: "pending" })[0]!;
       controller.abort();
 
-      await expect(allowed).resolves.toBe(false);
+      await expect(allowed).resolves.toMatchObject({ status: "expired" });
       expect(store.getPermissionRequest(request.id)).toMatchObject({ status: "expired" });
     });
   });

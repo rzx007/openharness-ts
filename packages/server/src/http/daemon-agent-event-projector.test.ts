@@ -77,12 +77,15 @@ describe("DaemonAgentEventProjector", () => {
       content: "inspect",
       delivery: "queue",
     }, { sessionId: "child-session", inputId: "input-1", runId: "run-1", childId: "child-1" }));
-    await projector.apply(event("run.started", {}, {
+    bridge.bindSessionTaskRun.mockRejectedValueOnce(new Error("bind failed"));
+    const started = event("run.started", {}, {
       sessionId: "child-session",
       inputId: "input-1",
       runId: "run-1",
       childId: "child-1",
-    }));
+    });
+    await expect(projector.apply(started)).rejects.toThrow("bind failed");
+    await projector.apply(started);
     await projector.apply(event("output.text.delta", { delta: "done" }, {
       sessionId: "child-session",
       inputId: "input-1",
@@ -100,8 +103,68 @@ describe("DaemonAgentEventProjector", () => {
     expect(bridge.registerSessionTask).toHaveBeenCalledWith(expect.objectContaining({ id: "child-1" }));
     expect(liveChildren.register).toHaveBeenCalledWith("child-session", "child-1", rootAgent);
     expect(transcript.projectStreamEvent).toHaveBeenCalledWith(expect.anything(), { type: "text_delta", delta: "done" });
+    expect(bridge.bindSessionTaskRun).toHaveBeenCalledTimes(2);
     expect(store.updateRun).toHaveBeenLastCalledWith("run-1", { status: "completed" });
     expect(bridge.completeSessionTask).toHaveBeenCalledWith("child-1", { status: "completed", output: "done" });
+  });
+
+  it("compensates durable child state when live route registration fails", async () => {
+    const sessions = new Map<string, any>([["parent", { id: "parent", cwd: "/repo", model: "gpt" }]]);
+    const tasks = new Map<string, any>();
+    const archiveSession = vi.fn((id) => {
+      const session = sessions.get(id);
+      Object.assign(session, { status: "archived" });
+      return session;
+    });
+    const store = {
+      getSession: vi.fn((id) => sessions.get(id)),
+      createSession: vi.fn((input) => {
+        const row = { ...input, status: "idle" };
+        sessions.set(row.id, row);
+        return row;
+      }),
+      archiveSession,
+      getSessionTask: vi.fn((id) => tasks.get(id)),
+      appendEvent: vi.fn(),
+    };
+    const completeSessionTask = vi.fn(async (id, result) => {
+      Object.assign(tasks.get(id), { status: result.status, output: result.output });
+    });
+    const bridge = {
+      registerSessionTask: vi.fn((input) => {
+        const task = { id: input.id, status: "pending" };
+        tasks.set(task.id, task);
+        return task;
+      }),
+      completeSessionTask,
+    };
+    const liveChildren = {
+      register: vi.fn(() => { throw new Error("route conflict"); }),
+      unregister: vi.fn(),
+    };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: store as any,
+      transcriptProjection: {} as any,
+      taskBridgeManager: { createBridge: vi.fn(() => bridge) } as any,
+      liveChildren,
+      events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    await expect(projector.apply(event("child.created", {
+      childId: "child-bad",
+      sessionId: "child-session-bad",
+      spawn: { description: "Explore", prompt: "inspect", agent: "Explore", cwd: "/repo" },
+      cwd: "/repo",
+    }, { sessionId: "parent", childId: "child-bad" }))).rejects.toThrow("route conflict");
+
+    expect(completeSessionTask).toHaveBeenCalledWith("child-bad", {
+      status: "failed",
+      output: "route conflict",
+    });
+    expect(archiveSession).toHaveBeenCalledWith("child-session-bad");
+    expect(sessions.get("child-session-bad")?.status).toBe("archived");
   });
 });
 

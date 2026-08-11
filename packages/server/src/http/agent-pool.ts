@@ -29,10 +29,14 @@ export interface AgentPoolContext {
   bindAgent?(agent: OpenHarnessAgent, session: SessionRecord): AgentEventSubscription;
 }
 
+interface AgentPoolEntry {
+  promise: Promise<OpenHarnessAgent>;
+  subscription?: AgentEventSubscription;
+}
+
 /** One warm framework agent per pool-owned durable session; live children stay framework-owned. */
 export class AgentPool {
-  private readonly agents = new Map<string, Promise<OpenHarnessAgent>>();
-  private readonly subscriptions = new Map<string, AgentEventSubscription>();
+  private readonly agents = new Map<string, AgentPoolEntry>();
 
   constructor(private readonly context: AgentPoolContext) {}
 
@@ -56,8 +60,8 @@ export class AgentPool {
   }
 
   async get(sessionId: string): Promise<OpenHarnessAgent | undefined> {
-    const agent = this.agents.get(sessionId);
-    return agent ? await agent : undefined;
+    const entry = this.agents.get(sessionId);
+    return entry ? await entry.promise : undefined;
   }
 
   async acquire(
@@ -70,27 +74,29 @@ export class AgentPool {
       throw new Error(`Session runtime is owned by a live child agent: ${session.id}`);
     }
     const existing = this.agents.get(session.id);
-    if (existing) return await existing;
+    if (existing) return await existing.promise;
 
-    const promise = this.create(session, history, parts).catch((error) => {
-      if (this.agents.get(session.id) === promise) this.agents.delete(session.id);
+    const entry = {} as AgentPoolEntry;
+    const promise = this.create(session, history, parts, entry).catch((error) => {
+      if (this.agents.get(session.id) === entry) this.agents.delete(session.id);
       throw error;
     });
-    this.agents.set(session.id, promise);
+    entry.promise = promise;
+    this.agents.set(session.id, entry);
     return await promise;
   }
 
   async close(sessionId: string): Promise<void> {
-    const agentPromise = this.agents.get(sessionId);
-    if (!agentPromise) return;
-    this.agents.delete(sessionId);
+    const entry = this.agents.get(sessionId);
+    if (!entry) return;
+    if (this.agents.get(sessionId) === entry) this.agents.delete(sessionId);
     try {
-      await (await agentPromise).close();
+      await (await entry.promise).close();
     } catch {
       // Failed creation has no usable agent resource to close.
     } finally {
-      this.subscriptions.get(sessionId)?.unsubscribe();
-      this.subscriptions.delete(sessionId);
+      entry.subscription?.unsubscribe();
+      entry.subscription = undefined;
     }
   }
 
@@ -107,6 +113,7 @@ export class AgentPool {
     session: SessionRecord,
     history: SessionMessageRecord[],
     parts: SessionMessagePartRecord[],
+    entry: AgentPoolEntry,
   ): Promise<OpenHarnessAgent> {
     const settings = this.context.getSettings?.() ?? this.context.settings;
     const options: OpenHarnessAgentOptions = {
@@ -123,11 +130,11 @@ export class AgentPool {
     try {
       agent.loadHistory(transcriptToAgentMessages(history, parts));
       const subscription = this.context.bindAgent?.(agent, session);
-      if (subscription) this.subscriptions.set(session.id, subscription);
+      if (subscription) entry.subscription = subscription;
       return agent;
     } catch (error) {
-      this.subscriptions.get(session.id)?.unsubscribe();
-      this.subscriptions.delete(session.id);
+      entry.subscription?.unsubscribe();
+      entry.subscription = undefined;
       await agent.close();
       throw error;
     }

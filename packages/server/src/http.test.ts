@@ -142,6 +142,7 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
           inputId: ids.inputId,
           sessionId: context.session.id,
           traceId: ids.traceId,
+          started: Promise.resolve({ sessionId: context.session.id, inputId: ids.inputId, runId: ids.runId }),
           result,
           steer: async (input) => {
             const accepted = { ...input, id: input.id ?? `steer-${sequence + 1}`, traceId: input.traceId ?? ids.traceId };

@@ -22,6 +22,8 @@ function createStore() {
       updatedAt: 1,
       ...input,
     })),
+    listMessages: vi.fn(() => []),
+    listMessageParts: vi.fn(() => []),
     updateRun: vi.fn(),
     upsertMessagePart: vi.fn((input) => ({
       id: input.id ?? `p${++partSeq}`,
@@ -89,5 +91,59 @@ describe("SessionTranscriptProjection", () => {
       output: { output: "ok", isError: false },
       isError: false,
     });
+  });
+
+  it("closes only running parts owned by the failed run", () => {
+    const store = createStore();
+    store.listMessages.mockReturnValue([
+      { id: "m1", runId: "r1" },
+      { id: "m2", runId: "r2" },
+    ] as any);
+    store.listMessageParts.mockReturnValue([
+      { id: "p1", messageId: "m1", type: "text", status: "running" },
+      { id: "p2", messageId: "m1", type: "tool", status: "completed" },
+      { id: "p3", messageId: "m2", type: "text", status: "running" },
+    ] as any);
+    const projection = new SessionTranscriptProjection(store);
+
+    projection.finalizeRunParts("s1", "r1", "failed");
+
+    expect(store.upsertMessagePart).toHaveBeenCalledOnce();
+    expect(store.upsertMessagePart).toHaveBeenCalledWith({
+      id: "p1",
+      sessionId: "s1",
+      messageId: "m1",
+      type: "text",
+      status: "failed",
+    });
+  });
+
+  it("does not duplicate a steered user message when projection is retried", () => {
+    const store = createStore();
+    store.listMessages
+      .mockReturnValueOnce([])
+      .mockReturnValue([{ id: "m-steer", inputId: "steer-1" }] as any);
+    const projection = new SessionTranscriptProjection(store);
+    const state = {
+      sessionId: "s1",
+      runId: "r1",
+      inputId: "i1",
+      assistantTurnCompleted: false,
+      toolParts: new Map(),
+    };
+    const input = {
+      id: "steer-1",
+      sessionId: "s1",
+      seq: 2,
+      delivery: "steer" as const,
+      content: "continue",
+      metadata: {},
+      createdAt: 1,
+    };
+
+    projection.projectSteeredInputs(state, [input]);
+    projection.projectSteeredInputs(state, [input]);
+
+    expect(store.createMessage).toHaveBeenCalledOnce();
   });
 });

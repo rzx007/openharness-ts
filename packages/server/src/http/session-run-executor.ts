@@ -4,11 +4,13 @@ import type { ObservabilityEvent } from "../observability.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../run-coordinator.js";
 import type { AgentPool } from "./agent-pool.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
+import type { SessionTranscriptProjection } from "./transcript-projection.js";
 
 export interface SessionRunExecutorContext {
   store: SessionStore;
   agentPool: AgentPool;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
+  transcriptProjection: Pick<SessionTranscriptProjection, "finalizeRunParts">;
   traceIdForRun(runId: string): string;
   log(event: ObservabilityEvent): void;
 }
@@ -56,6 +58,11 @@ export class SessionRunExecutor {
       const traceId = this.context.traceIdForRun(runId);
       const interrupted = error instanceof RunInterruptedError || workContext.signal.aborted;
       const before = this.context.events.checkpoint();
+      this.context.transcriptProjection.finalizeRunParts(
+        sessionId,
+        runId,
+        interrupted ? "interrupted" : "failed",
+      );
       this.context.store.appendEvent({
         type: interrupted ? "session.run.interrupted" : "session.run.error",
         sessionId,

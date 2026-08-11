@@ -12,6 +12,7 @@ interface ChildProjectionState {
   childId: string;
   sessionId: string;
   parentSessionId: string;
+  taskId: string;
   bridge: SessionTaskBridge;
 }
 
@@ -29,67 +30,65 @@ export interface DaemonAgentEventProjectorContext {
 export class DaemonAgentEventProjector {
   private readonly transcripts = new Map<string, ActiveTranscriptProjectionState>();
   private readonly children = new Map<string, ChildProjectionState>();
-  private readonly projectedInputs = new Set<string>();
-  private readonly seen = new Set<string>();
+  private lastAppliedSequence = 0;
 
   constructor(private readonly context: DaemonAgentEventProjectorContext) {}
 
   async apply(event: AgentEvent): Promise<void> {
-    if (this.seen.has(event.id)) return;
-    this.seen.add(event.id);
-    try {
-      switch (event.type) {
-        case "child.created":
-          await this.projectChildCreated(event);
-          return;
-        case "child.closed":
-          await this.projectChildClosed(event);
-          return;
-        case "child.suspended":
-        case "child.resumed":
-          this.appendRuntimeEvent(event, { childId: event.data.childId, childSessionId: event.data.sessionId });
-          return;
-        case "input.accepted":
-          this.projectInput(event);
-          return;
-        case "run.started":
-          await this.startRun(event);
-          return;
-        case "output.text.delta":
-          this.projectStream(event, { type: "text_delta", delta: event.data.delta });
-          return;
-        case "output.turn.completed":
-          this.projectStream(event, { type: "complete", stopReason: event.data.stopReason });
-          return;
-        case "tool.started":
-          this.projectStream(event, { type: "tool_use_start", toolUse: event.data.toolUse });
-          return;
-        case "tool.completed":
-          this.projectStream(event, {
-            type: "tool_use_end",
-            toolUseId: event.data.toolUseId,
-            result: event.data.result,
-          });
-          return;
-        case "usage.updated":
-          this.projectStream(event, { type: "usage", usage: event.data.usage });
-          return;
-        case "domain.event":
-          this.appendRuntimeEvent(event, event.data.payload, event.data.name);
-          return;
-        case "permission.requested":
-        case "permission.resolved":
-          this.appendRuntimeEvent(event, { ...event.data });
-          return;
-        case "run.completed":
-        case "run.failed":
-        case "run.interrupted":
-          await this.finishRun(event);
-          return;
-      }
-    } catch (error) {
-      this.seen.delete(event.id);
-      throw error;
+    if (event.sequence <= this.lastAppliedSequence) return;
+    await this.project(event);
+    this.lastAppliedSequence = event.sequence;
+  }
+
+  private async project(event: AgentEvent): Promise<void> {
+    switch (event.type) {
+      case "child.created":
+        await this.projectChildCreated(event);
+        return;
+      case "child.closed":
+        await this.projectChildClosed(event);
+        return;
+      case "child.suspended":
+      case "child.resumed":
+        this.appendRuntimeEvent(event, { childId: event.data.childId, childSessionId: event.data.sessionId });
+        return;
+      case "input.accepted":
+        this.projectInput(event);
+        return;
+      case "run.started":
+        await this.startRun(event);
+        return;
+      case "output.text.delta":
+        this.projectStream(event, { type: "text_delta", delta: event.data.delta });
+        return;
+      case "output.turn.completed":
+        this.projectStream(event, { type: "complete", stopReason: event.data.stopReason });
+        return;
+      case "tool.started":
+        this.projectStream(event, { type: "tool_use_start", toolUse: event.data.toolUse });
+        return;
+      case "tool.completed":
+        this.projectStream(event, {
+          type: "tool_use_end",
+          toolUseId: event.data.toolUseId,
+          result: event.data.result,
+        });
+        return;
+      case "usage.updated":
+        this.projectStream(event, { type: "usage", usage: event.data.usage });
+        return;
+      case "domain.event":
+        this.appendRuntimeEvent(event, event.data.payload, event.data.name);
+        return;
+      case "permission.requested":
+      case "permission.resolved":
+        this.appendRuntimeEvent(event, { ...event.data });
+        return;
+      case "run.completed":
+      case "run.failed":
+      case "run.interrupted":
+        await this.finishRun(event);
+        return;
     }
   }
 
@@ -98,64 +97,92 @@ export class DaemonAgentEventProjector {
     const parent = this.context.store.getSession(event.context.sessionId);
     if (!parent) throw new Error(`Parent session not found for child ${childId}: ${event.context.sessionId}`);
     const existing = this.context.store.getSession(sessionId);
-    if (!existing) {
-      const before = this.context.events.checkpoint();
-      this.context.store.createSession({
-        id: sessionId,
-        parentId: parent.id,
-        cwd,
-        model: spawn.model ?? parent.model,
-        title: `${spawn.agent}@${spawn.team ?? "default"}`,
-        agent: spawn.agent,
-        metadata: {
-          ...spawn.metadata,
-          team: spawn.team ?? "default",
-          systemPrompt: spawn.systemPrompt,
-          permissionMode: spawn.permissionMode,
-          allowedTools: spawn.allowedTools,
-          disallowedTools: spawn.disallowedTools,
-          maxTurns: spawn.maxTurns,
-          effort: spawn.effort,
-          isolate: spawn.isolate,
-          childId,
-          ...(worktree ? { worktree } : {}),
-        },
-      });
-      this.context.events.publishSince(before);
-    } else if (existing.parentId !== parent.id || existing.cwd !== cwd) {
+    if (existing && (existing.parentId !== parent.id || existing.cwd !== cwd)) {
       throw new Error(`Child session identity conflict: ${sessionId}`);
     }
 
-    const bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
-    if (!this.context.store.getSessionTask(childId)) {
-      bridge.registerSessionTask({
-        id: childId,
-        description: spawn.description,
-        cwd,
-        sessionId: parent.id,
-        childSessionId: sessionId,
-        prompt: spawn.prompt,
-        onInput: async (content) => {
-          const child = this.context.rootAgent.children.get(childId);
-          if (!child) throw new Error(`Live child not found: ${childId}`);
-          await child.send({ content });
-        },
-        onStop: async () => {
-          await this.context.rootAgent.children.get(childId)?.interrupt("Child agent stopped");
-        },
-      });
+    let createdSession = false;
+    let bridge: SessionTaskBridge | undefined;
+    let taskId: string | undefined;
+    let liveRegistered = false;
+    try {
+      if (!existing) {
+        const before = this.context.events.checkpoint();
+        this.context.store.createSession({
+          id: sessionId,
+          parentId: parent.id,
+          cwd,
+          model: spawn.model ?? parent.model,
+          title: `${spawn.agent}@${spawn.team ?? "default"}`,
+          agent: spawn.agent,
+          metadata: {
+            ...spawn.metadata,
+            team: spawn.team ?? "default",
+            systemPrompt: spawn.systemPrompt,
+            permissionMode: spawn.permissionMode,
+            allowedTools: spawn.allowedTools,
+            disallowedTools: spawn.disallowedTools,
+            maxTurns: spawn.maxTurns,
+            effort: spawn.effort,
+            isolate: spawn.isolate,
+            childId,
+            ...(worktree ? { worktree } : {}),
+          },
+        });
+        createdSession = true;
+        this.context.events.publishSince(before);
+      }
+
+      bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
+      taskId = this.context.store.getSessionTask(childId)?.id;
+      if (!taskId) {
+        taskId = bridge.registerSessionTask({
+          id: childId,
+          description: spawn.description,
+          cwd,
+          sessionId: parent.id,
+          childSessionId: sessionId,
+          prompt: spawn.prompt,
+          onInput: async (content) => {
+            const child = this.context.rootAgent.children.get(childId);
+            if (!child) throw new Error(`Live child not found: ${childId}`);
+            await child.send({ content });
+          },
+          onStop: async () => {
+            await this.context.rootAgent.children.get(childId)?.interrupt("Child agent stopped");
+          },
+        }).id;
+      }
+      this.context.liveChildren.register(sessionId, childId, this.context.rootAgent);
+      liveRegistered = true;
+      this.children.set(childId, { childId, sessionId, parentSessionId: parent.id, taskId, bridge });
+    } catch (error) {
+      if (liveRegistered) this.context.liveChildren.unregister(sessionId, childId);
+      this.children.delete(childId);
+      const message = error instanceof Error ? error.message : String(error);
+      if (taskId && bridge) {
+        await bridge.completeSessionTask(taskId, { status: "failed", output: message }).catch(() => {});
+      }
+      if (createdSession) {
+        const before = this.context.events.checkpoint();
+        try {
+          this.context.store.archiveSession(sessionId);
+          this.context.events.publishSince(before);
+        } catch {
+          // Preserve the original projection failure.
+        }
+      }
+      throw error;
     }
-    this.children.set(childId, { childId, sessionId, parentSessionId: parent.id, bridge });
-    this.context.liveChildren.register(sessionId, childId, this.context.rootAgent);
   }
 
   private async projectChildClosed(event: Extract<AgentEvent, { type: "child.closed" }>): Promise<void> {
     const state = this.children.get(event.data.childId);
     this.context.liveChildren.unregister(event.data.sessionId, event.data.childId);
     if (state) {
-      const task = this.context.store.getSessionTask(state.childId);
+      const task = this.context.store.getSessionTask(state.taskId);
       if (task && (task.status === "pending" || task.status === "running")) {
-        await state.bridge.completeSessionTask(state.childId, event.data.result).catch(() => {});
+        await state.bridge.completeSessionTask(state.taskId, event.data.result).catch(() => {});
       }
       this.children.delete(state.childId);
     }
@@ -190,11 +217,10 @@ export class DaemonAgentEventProjector {
 
     const runId = event.context.runId;
     const transcript = runId ? this.transcripts.get(runId) : undefined;
-    if (transcript && event.data.delivery === "steer" && !this.projectedInputs.has(inputId)) {
+    if (transcript && event.data.delivery === "steer") {
       const before = this.context.events.checkpoint();
       this.context.transcriptProjection.projectSteeredInputs(transcript, [input]);
       this.context.events.publishSince(before);
-      this.projectedInputs.add(inputId);
     }
   }
 
@@ -204,7 +230,10 @@ export class DaemonAgentEventProjector {
     const inputId = required(event.context.inputId, "inputId", event.type);
     const input = this.context.store.getInput(inputId);
     if (!input) throw new Error(`Agent run input not found: ${inputId}`);
-    if (this.transcripts.has(runId)) return;
+    if (this.transcripts.has(runId)) {
+      await this.bindChildTaskRun(event, runId);
+      return;
+    }
 
     const before = this.context.events.checkpoint();
     const existing = this.context.store.getRun(runId);
@@ -232,10 +261,13 @@ export class DaemonAgentEventProjector {
     });
     this.context.events.publishSince(before);
 
-    if (event.context.childId) {
-      const child = this.children.get(event.context.childId);
-      if (child) await child.bridge.bindSessionTaskRun(child.childId, runId);
-    }
+    await this.bindChildTaskRun(event, runId);
+  }
+
+  private async bindChildTaskRun(event: AgentEvent, runId: string): Promise<void> {
+    if (!event.context.childId) return;
+    const child = this.children.get(event.context.childId);
+    if (child) await child.bridge.bindSessionTaskRun(child.taskId, runId);
   }
 
   private projectStream(event: AgentEvent, stream: StreamEvent): void {
@@ -319,7 +351,7 @@ export class DaemonAgentEventProjector {
               output: event.data.output ?? error ?? "",
               ...(error ? { error } : {}),
             };
-        await child.bridge.completeSessionTask(child.childId, result);
+        await child.bridge.completeSessionTask(child.taskId, result);
       }
     }
   }

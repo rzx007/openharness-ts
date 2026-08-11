@@ -78,4 +78,37 @@ describe("AgentPool", () => {
     expect(factory).toHaveBeenCalledTimes(2);
     expect(pool.size).toBe(1);
   });
+
+  it("keeps a replacement subscription when an older generation finishes closing", async () => {
+    const oldClose = deferred();
+    const oldAgent = createAgent(vi.fn(async () => { await oldClose.promise; }));
+    const newAgent = createAgent();
+    const factory = vi.fn()
+      .mockResolvedValueOnce(oldAgent)
+      .mockResolvedValueOnce(newAgent);
+    const oldUnsubscribe = vi.fn();
+    const newUnsubscribe = vi.fn();
+    const bindAgent = vi.fn()
+      .mockReturnValueOnce({ unsubscribe: oldUnsubscribe })
+      .mockReturnValueOnce({ unsubscribe: newUnsubscribe });
+    const pool = new AgentPool({ ...createContext(factory), bindAgent } as any);
+
+    await pool.acquire(session as any, [], []);
+    const closing = pool.close(session.id);
+    await vi.waitFor(() => expect(oldAgent.close).toHaveBeenCalledOnce());
+    await pool.acquire(session as any, [], []);
+    oldClose.resolve();
+    await closing;
+
+    expect(oldUnsubscribe).toHaveBeenCalledOnce();
+    expect(newUnsubscribe).not.toHaveBeenCalled();
+    expect(await pool.get(session.id)).toBe(newAgent);
+    await pool.closeAll();
+  });
 });
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}

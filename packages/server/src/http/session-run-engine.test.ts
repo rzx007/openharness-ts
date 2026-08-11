@@ -1,4 +1,4 @@
-import type { AgentRunHandle } from "@openharness/core";
+import { AgentRunNotAcceptingInputError, type AgentRunHandle } from "@openharness/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionRunEngine } from "./session-run-engine.js";
@@ -51,6 +51,44 @@ describe("SessionRunEngine", () => {
     const second = engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
     expect(second.input).toBe(first.input);
   });
+
+  it("queues a durable replacement run when a late steer is rejected", async () => {
+    const store = createStore();
+    const pending = deferred<void>();
+    const handle = runHandle(
+      pending.promise,
+      vi.fn(async () => { throw new AgentRunNotAcceptingInputError("r1"); }),
+    );
+    let execution = 0;
+    const runExecutor = {
+      execute: vi.fn(async (_input, context) => {
+        execution += 1;
+        if (execution === 1) {
+          await context.registerHandle(handle);
+          await pending.promise;
+        }
+      }),
+    };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    engine.admitPromptAndMaybeRun("s1", { content: "first" });
+    await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
+    engine.admitPromptAndMaybeRun("s1", { id: "late-input", content: "late", delivery: "steer" });
+    await vi.waitFor(() => expect(store.createRun).toHaveBeenCalledTimes(2));
+    const replacement = store.createRun.mock.results[1]?.value;
+    expect(replacement).toMatchObject({
+      inputId: "late-input",
+      metadata: expect.objectContaining({ recoveredFromSteer: true }),
+    });
+
+    pending.resolve();
+    await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledTimes(2));
+  });
 });
 
 function createStore() {
@@ -87,6 +125,7 @@ function runHandle(done: Promise<void>, steer: AgentRunHandle["steer"]): AgentRu
     inputId: "i1",
     sessionId: "s1",
     traceId: "trace-1",
+    started: Promise.resolve({ sessionId: "s1", inputId: "i1", runId: "r1" }),
     result: done.then(() => ({
       status: "completed" as const,
       output: "ok",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRunHandle } from "@openharness/core";
+import { AgentRunNotAcceptingInputError, type AgentRunHandle } from "@openharness/core";
 
 import { RunInterruptedError, SessionRunCoordinator } from "./run-coordinator.js";
 
@@ -90,6 +90,7 @@ describe("SessionRunCoordinator", () => {
       inputId: "i1",
       sessionId: "s1",
       traceId: "t1",
+      started: Promise.resolve({ sessionId: "s1", inputId: "i1", runId: "r1" }),
       result: Promise.resolve({ status: "completed", output: "", history: [], usage: { inputTokens: 0, outputTokens: 0 } }),
       steer: async (input) => {
         steered.push(input.content);
@@ -116,6 +117,37 @@ describe("SessionRunCoordinator", () => {
     release.resolve();
     await run.promise;
     expect(steered).toEqual(["first", "second"]);
+  });
+
+  it("recovers a steer rejected at the framework terminal boundary", async () => {
+    const coordinator = new SessionRunCoordinator();
+    const rejected: string[] = [];
+    const handle: AgentRunHandle = {
+      id: "r1",
+      inputId: "i1",
+      sessionId: "s1",
+      traceId: "t1",
+      started: Promise.resolve({ sessionId: "s1", inputId: "i1", runId: "r1" }),
+      result: Promise.resolve({ status: "completed", output: "", history: [], usage: { inputTokens: 0, outputTokens: 0 } }),
+      steer: async () => { throw new AgentRunNotAcceptingInputError("r1"); },
+      interrupt: async () => {},
+    };
+    const release = deferred();
+    const run = coordinator.enqueue({
+      sessionId: "s1",
+      runId: "r1",
+      onSteerRejected: async (input) => { rejected.push(input.content); },
+      work: async (context) => {
+        await context.registerHandle(handle);
+        await release.promise;
+      },
+    });
+
+    expect(coordinator.steer("s1", { content: "late" })).toMatchObject({ merged: true, activeRunId: "r1" });
+    release.resolve();
+    await run.promise;
+
+    expect(rejected).toEqual(["late"]);
   });
 
   it("interrupts the active run and rejects queued runs", async () => {

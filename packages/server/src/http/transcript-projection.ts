@@ -38,7 +38,7 @@ export class SessionTranscriptProjection {
   constructor(
     private readonly store: Pick<
       SessionStore,
-      "appendMessagePartDelta" | "createMessage" | "updateRun" | "upsertMessagePart"
+      "appendMessagePartDelta" | "createMessage" | "listMessageParts" | "listMessages" | "updateRun" | "upsertMessagePart"
     >,
   ) {}
 
@@ -75,6 +75,7 @@ export class SessionTranscriptProjection {
     delete state.assistantMessageId;
     state.assistantTurnCompleted = true;
     for (const steered of pending) {
+      if (this.store.listMessages(state.sessionId).some((message) => message.inputId === steered.id)) continue;
       const userMessage = this.store.createMessage({
         sessionId: state.sessionId,
         role: "user",
@@ -199,6 +200,30 @@ export class SessionTranscriptProjection {
       status,
     });
     delete state.activeTextPartId;
+  }
+
+  /** Closes parts left running when event delivery fails before terminal events are projected. */
+  finalizeRunParts(
+    sessionId: string,
+    runId: string,
+    status: Extract<SessionMessagePartStatus, "failed" | "interrupted">,
+  ): void {
+    const messageIds = new Set(
+      this.store
+        .listMessages(sessionId)
+        .filter((message) => message.runId === runId)
+        .map((message) => message.id),
+    );
+    for (const part of this.store.listMessageParts(sessionId)) {
+      if (!messageIds.has(part.messageId) || part.status !== "running") continue;
+      this.store.upsertMessagePart({
+        id: part.id,
+        sessionId,
+        messageId: part.messageId,
+        type: part.type,
+        status,
+      });
+    }
   }
 
   private ensureAssistantMessage(state: ActiveTranscriptProjectionState, startTurn = false): string {
