@@ -1156,6 +1156,22 @@ describe("Integration: CostTracker", () => {
 });
 
 describe("Integration: Steer follow-ups", () => {
+  it("closes steering without consuming a follow-up when no model turn remains", async () => {
+    const { client } = createMockStreamClient([[
+      { type: "text_delta", delta: "final reply" },
+      { type: "complete", stopReason: "end_turn" },
+    ]]);
+    const takeSteeredInputs = vi.fn(async () => [{ content: "too late" }]);
+    const execution = createExecutionContext({ takeSteeredInputs });
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks(), { maxTurns: 1 });
+
+    for await (const _ of engine.submitMessage("start", { execution })) {}
+
+    expect(takeSteeredInputs).not.toHaveBeenCalled();
+    expect(execution.closeSteering).toHaveBeenCalledOnce();
+    expect(engine.getHistory().some((message) => message.type === "user" && message.content === "too late")).toBe(false);
+  });
+
   it("injects steered inputs at turn boundaries and continues the same run", async () => {
     const registry = new ToolRegistry();
     registry.register(makeTool("Ping", () => "pong"));

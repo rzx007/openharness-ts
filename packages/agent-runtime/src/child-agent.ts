@@ -293,6 +293,7 @@ export class AgentChildManager implements AgentChildDirectory {
       ids,
       signal: controller.signal,
       delivery: input.delivery ?? "queue",
+      metadata: input.metadata,
     });
     record.currentRun = run;
     const result = run.result.then<AgentChildResult>((completed) => ({
@@ -311,8 +312,16 @@ export class AgentChildManager implements AgentChildDirectory {
       return settled;
     });
     void record.result.catch(() => {});
-    await run.started;
-    return { sessionId: record.sessionId, inputId: ids.inputId, runId: ids.runId };
+    const receipt = await run.started;
+    if (
+      receipt.sessionId !== record.sessionId ||
+      receipt.inputId !== ids.inputId ||
+      receipt.runId !== ids.runId
+    ) {
+      await run.interrupt("Child run started with unexpected identity");
+      throw new Error(`Child run identity conflict: ${receipt.sessionId}/${receipt.inputId}/${receipt.runId}`);
+    }
+    return receipt;
   }
 
   private async awaitResult(childId: string): Promise<AgentChildResult> {

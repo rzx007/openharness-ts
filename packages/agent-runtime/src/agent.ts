@@ -65,6 +65,7 @@ export interface OpenHarnessAgentOptions {
 export interface OpenHarnessAgentSubmitOptions {
   signal?: AbortSignal;
   delivery?: "queue" | "steer";
+  metadata?: Record<string, unknown>;
   ids?: {
     inputId: string;
     runId: string;
@@ -171,6 +172,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       ids,
       externalSignal: options.signal,
       delivery: options.delivery ?? "queue",
+      metadata: options.metadata,
       onSettled: () => {
         if (this.activeRun === run) this.activeRun = undefined;
       },
@@ -258,12 +260,13 @@ interface FrameworkAgentRunOptions {
   ids: { inputId: string; runId: string; traceId: string };
   externalSignal?: AbortSignal;
   delivery: "queue" | "steer";
+  metadata?: Record<string, unknown>;
   onSettled(): void;
 }
 
 interface PendingSteer {
   input: AgentSteerInput;
-  ready: Promise<void>;
+  receipt: ReturnType<typeof deferred<AgentInputReceipt>>;
 }
 
 class FrameworkAgentRun implements AgentRunHandle {
@@ -277,6 +280,7 @@ class FrameworkAgentRun implements AgentRunHandle {
 
   private readonly controller = new AbortController();
   private readonly steered: PendingSteer[] = [];
+  private readonly pendingSteers = new Set<PendingSteer>();
   private readonly start = deferred<AgentInputReceipt>();
   private acceptingInput = true;
   private externalAbort?: () => void;
@@ -312,23 +316,12 @@ class FrameworkAgentRun implements AgentRunHandle {
       traceId: input.traceId ?? randomUUID(),
       delivery: "steer" as const,
     };
-    const ready = deferred<void>();
-    void ready.promise.catch(() => {});
-    const pending = { input: accepted, ready: ready.promise };
+    const receipt = deferred<AgentInputReceipt>();
+    void receipt.promise.catch(() => {});
+    const pending = { input: accepted, receipt };
     this.steered.push(pending);
-    try {
-      await this.emit({
-        type: "input.accepted",
-        data: { content: accepted.content, delivery: "steer" },
-      }, { inputId: accepted.id, traceId: accepted.traceId });
-      ready.resolve(undefined);
-    } catch (error) {
-      ready.reject(error);
-      const index = this.steered.indexOf(pending);
-      if (index >= 0) this.steered.splice(index, 1);
-      throw error;
-    }
-    return { sessionId: this.sessionId, inputId: accepted.id, runId: this.id };
+    this.pendingSteers.add(pending);
+    return await receipt.promise;
   }
 
   async interrupt(reason?: string): Promise<void> {
@@ -360,7 +353,11 @@ class FrameworkAgentRun implements AgentRunHandle {
     try {
       await this.emit({
         type: "input.accepted",
-        data: { content: this.options.content, delivery: this.options.delivery },
+        data: {
+          content: this.options.content,
+          delivery: this.options.delivery,
+          ...(this.options.metadata ? { metadata: this.options.metadata } : {}),
+        },
       });
       await this.emit({ type: "run.started", data: {} });
       this.start.resolve({ sessionId: this.sessionId, inputId: this.inputId, runId: this.id });
@@ -375,6 +372,7 @@ class FrameworkAgentRun implements AgentRunHandle {
       }
       if (this.controller.signal.aborted) throw abortError(this.controller.signal);
       this.acceptingInput = false;
+      this.rejectPendingSteers();
       await this.emit({ type: "run.completed", data: { output, ...(stopReason ? { stopReason } : {}) } });
       return {
         status: "completed",
@@ -384,6 +382,7 @@ class FrameworkAgentRun implements AgentRunHandle {
       };
     } catch (error) {
       this.acceptingInput = false;
+      this.rejectPendingSteers();
       this.start.reject(error);
       if (!(error instanceof AgentEventDeliveryError)) {
         const interrupted = this.controller.signal.aborted;
@@ -399,10 +398,37 @@ class FrameworkAgentRun implements AgentRunHandle {
   private async takeSteeredInputs(options: { closeIfEmpty?: boolean } = {}): Promise<AgentSteerInput[]> {
     const pending = this.steered.splice(0);
     if (pending.length === 0 && options.closeIfEmpty) this.acceptingInput = false;
-    return await Promise.all(pending.map(async ({ input, ready }) => {
-      await ready;
-      return input;
-    }));
+    const inputs: AgentSteerInput[] = [];
+    try {
+      for (const { input } of pending) {
+        await this.emit({
+          type: "input.accepted",
+          data: {
+            content: input.content,
+            delivery: "steer",
+            ...(input.metadata ? { metadata: input.metadata } : {}),
+          },
+        }, { inputId: input.id, traceId: input.traceId });
+        inputs.push(input);
+      }
+    } catch (error) {
+      const rejected = new AgentRunNotAcceptingInputError(this.id);
+      for (const item of pending) item.receipt.reject(rejected);
+      throw error;
+    } finally {
+      for (const item of pending) this.pendingSteers.delete(item);
+    }
+    for (const { input, receipt } of pending) {
+      receipt.resolve({ sessionId: this.sessionId, inputId: input.id!, runId: this.id });
+    }
+    return inputs;
+  }
+
+  private rejectPendingSteers(): void {
+    const error = new AgentRunNotAcceptingInputError(this.id);
+    for (const pending of this.pendingSteers) pending.receipt.reject(error);
+    this.pendingSteers.clear();
+    this.steered.splice(0);
   }
 
   private async projectStreamEvent(event: StreamEvent): Promise<void> {

@@ -108,12 +108,16 @@ describe("AgentChildManager", () => {
   });
 
   it("does not expose a child receipt until run.started has been delivered", async () => {
-    const started = deferred<AgentInputReceipt>();
-    const submitMessage = vi.fn(() => runHandle(
+    const started = deferred<void>();
+    const submitMessage = vi.fn((_content, options) => runHandle(
       Promise.resolve(completedResult("done")),
       vi.fn(),
       vi.fn(async () => {}),
-      started.promise,
+      started.promise.then(() => ({
+        sessionId: "child-session",
+        inputId: options.ids.inputId,
+        runId: options.ids.runId,
+      })),
     ));
     const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage));
     let settled = false;
@@ -129,12 +133,33 @@ describe("AgentChildManager", () => {
 
     await Promise.resolve();
     expect(settled).toBe(false);
-    started.resolve({ sessionId: "child-session", inputId: "input-1", runId: "run-1" });
+    started.resolve();
     await expect(spawn).resolves.toMatchObject({
       inputId: expect.stringMatching(/^input_/),
       runId: expect.stringMatching(/^run_/),
     });
     await manager.closeAll();
+  });
+
+  it("rejects a child run whose started receipt changes framework identity", async () => {
+    const interrupt = vi.fn(async () => {});
+    const submitMessage = vi.fn(() => runHandle(
+      Promise.resolve(completedResult("done")),
+      vi.fn(),
+      interrupt,
+      Promise.resolve({ sessionId: "wrong-session", inputId: "wrong-input", runId: "wrong-run" }),
+    ));
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage), undefined, undefined, true);
+
+    await expect(manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+      sessionId: "child-session",
+    })).rejects.toThrow("Child run identity conflict");
+    expect(interrupt).toHaveBeenCalledWith("Child run started with unexpected identity");
+    expect(manager.list()).toEqual([]);
   });
 
   it("indexes descendants from multiple managers in one tree-wide directory", async () => {
@@ -186,10 +211,17 @@ describe("AgentChildManager", () => {
     await invocation.result;
     await waitUntil(() => events.includes("child.suspended"));
 
-    await controller.sendChildInput(invocation.id, { content: "continue", delivery: "queue" });
+    await controller.sendChildInput(invocation.id, {
+      content: "continue",
+      delivery: "queue",
+      metadata: { requestedBy: "test" },
+    });
 
     expect(createAgent).toHaveBeenCalledTimes(2);
     expect(secondAgent.loadHistory).toHaveBeenCalledWith([{ type: "assistant", content: "remembered" }]);
+    expect(secondAgent.submitMessage.mock.calls[0]?.[1]).toMatchObject({
+      metadata: { requestedBy: "test" },
+    });
     expect(events).toContain("child.resumed");
     await manager.closeAll();
   });
@@ -215,9 +247,10 @@ describe("AgentChildManager", () => {
 
 function createManager(
   bus: AgentEventBus,
-  createAgent: () => Promise<any>,
+  createAgent: (...args: any[]) => Promise<any>,
   idleTtlMs?: number,
   directory?: AgentChildRegistry,
+  preserveRunIdentity = false,
 ) {
   return new AgentChildManager({
     settings: {} as any,
@@ -225,7 +258,29 @@ function createManager(
     eventBus: bus,
     idleTtlMs,
     directory,
-    createAgent,
+    createAgent: async (options, identity) => {
+      const agent = await createAgent(options, identity);
+      if (preserveRunIdentity) return agent;
+      const submitMessage = agent.submitMessage;
+      return {
+        ...agent,
+        submitMessage: (content: unknown, submitOptions: any) => {
+          const run = submitMessage(content, submitOptions);
+          const ids = submitOptions.ids;
+          return {
+            ...run,
+            id: ids.runId,
+            inputId: ids.inputId,
+            sessionId: options.sessionId,
+            started: run.started.then(() => ({
+              sessionId: options.sessionId,
+              inputId: ids.inputId,
+              runId: ids.runId,
+            })),
+          };
+        },
+      };
+    },
     environment: {
       acquire: async (input) => ({ cwd: input.cwd, release: async () => {} }),
     },

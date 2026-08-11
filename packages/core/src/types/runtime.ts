@@ -128,7 +128,14 @@ export interface AgentSerializedError {
 }
 
 export type AgentEventInput =
-  | { type: "input.accepted"; data: { content: string | ContentBlock[]; delivery: "queue" | "steer" } }
+  | {
+      type: "input.accepted";
+      data: {
+        content: string | ContentBlock[];
+        delivery: "queue" | "steer";
+        metadata?: Record<string, unknown>;
+      };
+    }
   | { type: "run.started"; data: Record<string, never> }
   | { type: "run.completed"; data: { output: string; stopReason?: string } }
   | { type: "run.failed"; data: { error: AgentSerializedError; output?: string } }

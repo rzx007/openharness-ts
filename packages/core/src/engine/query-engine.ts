@@ -333,11 +333,19 @@ export class QueryEngine implements IQueryEngine {
           yield { type: "tool_use_end", toolUseId: result.toolUseId, result };
         }
         turnCount++;
+        if (turnCount >= this.maxTurns) {
+          options.execution?.closeSteering();
+          throw new MaxTurnsExceeded(this.maxTurns);
+        }
         await this.consumeFollowUps(options);
         continue;
       }
 
       // 无工具调用：若 turn 边界有 follow-up，则继续同一 submitMessage
+      if (turnCount + 1 >= this.maxTurns) {
+        options.execution?.closeSteering();
+        return;
+      }
       if (await this.consumeFollowUps(options, true)) {
         turnCount++;
         continue;
@@ -345,7 +353,6 @@ export class QueryEngine implements IQueryEngine {
       return;
     }
 
-    options.execution?.closeSteering();
     throw new MaxTurnsExceeded(this.maxTurns);
   }
 
