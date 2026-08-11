@@ -1,6 +1,6 @@
 import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "@openharness/agent-runtime";
 import { createOpenHarnessAgent } from "@openharness/agent-runtime";
-import type { Settings } from "@openharness/core";
+import type { AgentEffects, AgentEventSubscription, Settings } from "@openharness/core";
 import type { SessionStore } from "@openharness/services";
 import type {
   SessionMessagePartRecord,
@@ -25,11 +25,14 @@ export interface AgentPoolContext {
   getSettings?: () => Settings;
   createAgent?: CreateDaemonAgent;
   isSessionExternallyOwned?(sessionId: string): boolean;
+  effects?: AgentEffects;
+  bindAgent?(agent: OpenHarnessAgent, session: SessionRecord): AgentEventSubscription;
 }
 
 /** One warm framework agent per pool-owned durable session; live children stay framework-owned. */
 export class AgentPool {
   private readonly agents = new Map<string, Promise<OpenHarnessAgent>>();
+  private readonly subscriptions = new Map<string, AgentEventSubscription>();
 
   constructor(private readonly context: AgentPoolContext) {}
 
@@ -85,6 +88,9 @@ export class AgentPool {
       await (await agentPromise).close();
     } catch {
       // Failed creation has no usable agent resource to close.
+    } finally {
+      this.subscriptions.get(sessionId)?.unsubscribe();
+      this.subscriptions.delete(sessionId);
     }
   }
 
@@ -108,6 +114,7 @@ export class AgentPool {
       cwd: session.cwd,
       sessionId: session.id,
       overrides: runtimeOverridesFromSession(session),
+      ...(this.context.effects ? { effects: this.context.effects } : {}),
     };
     if (!this.context.createAgent && !settings) throw new Error("Agent settings are not configured");
     const agent = this.context.createAgent
@@ -115,8 +122,12 @@ export class AgentPool {
       : await createOpenHarnessAgent(options);
     try {
       agent.loadHistory(transcriptToAgentMessages(history, parts));
+      const subscription = this.context.bindAgent?.(agent, session);
+      if (subscription) this.subscriptions.set(session.id, subscription);
       return agent;
     } catch (error) {
+      this.subscriptions.get(session.id)?.unsubscribe();
+      this.subscriptions.delete(session.id);
       await agent.close();
       throw error;
     }

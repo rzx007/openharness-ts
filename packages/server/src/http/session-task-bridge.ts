@@ -5,6 +5,7 @@ import type { SessionEventPublisher } from "./session-event-publisher.js";
 
 export interface SessionTaskBridge {
   registerSessionTask(input: {
+    id: string;
     description: string;
     cwd: string;
     sessionId: string;
@@ -40,7 +41,7 @@ export interface TaskManager {
   ): Promise<unknown>;
   listTasks(status?: string): TaskInfo[];
   readTaskOutput(taskId: string): string;
-  registerSessionTask(input: Parameters<SessionTaskBridge["registerSessionTask"]>[0] & { id: string }): TaskInfo;
+  registerSessionTask(input: Parameters<SessionTaskBridge["registerSessionTask"]>[0]): TaskInfo;
   registerTaskListener(listener: (task: TaskInfo) => void): void;
   writeToTask(taskId: string, data: string): Promise<void>;
 }
@@ -93,7 +94,7 @@ export class SessionTaskBridgeManager {
     const manager = this.context.getTaskManager({ cwd: session.cwd, sessionId: session.id });
     return {
       registerSessionTask: (input) => {
-        const task = manager.registerSessionTask({ ...input, id: `task_${randomUUID()}` });
+        const task = manager.registerSessionTask(input);
         const before = this.context.events.checkpoint();
         this.context.store.createSessionTask({
           id: task.id,

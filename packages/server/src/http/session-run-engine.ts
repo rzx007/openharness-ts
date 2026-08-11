@@ -146,7 +146,13 @@ export class SessionRunEngine {
       const activeRunId = this.runCoordinator.activeRunId(sessionId);
       if (activeRunId) {
         this.context.events.publishSince(before);
-        this.runCoordinator.mergeWake(sessionId);
+        this.runCoordinator.steer(sessionId, {
+          id: admitted.id,
+          content: admitted.content,
+          delivery: "steer",
+          traceId,
+          metadata: admitted.metadata,
+        });
         const activeRun = this.context.store.getRun(activeRunId);
         return {
           input: admitted,

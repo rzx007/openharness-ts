@@ -6,7 +6,7 @@ import { rewindTranscript } from "../rewind.js";
 import type { SessionRunEngine } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
-import type { LiveChildAgentRegistry } from "./live-child-agent-registry.js";
+import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
 import { agentMessagesToTranscript } from "./agent-transcript.js";
 import { estimateCostUsd } from "../usage.js";
 
@@ -24,7 +24,7 @@ export interface SessionMaintenanceServiceContext {
   store: SessionStore;
   runEngine: Pick<SessionRunEngine, "hasActiveRunsForCwd" | "hasWork">;
   agentPool: AgentPool;
-  liveChildren: Pick<LiveChildAgentRegistry, "has">;
+  liveChildren: Pick<LiveChildAgentDirectory, "has">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 

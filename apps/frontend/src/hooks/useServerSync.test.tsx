@@ -56,7 +56,7 @@ function waitForFixtureReady(child: DaemonChild): Promise<{ url: string; token: 
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error(`Timed out waiting for daemon fixture.\n${stderr}`));
-    }, 10_000);
+    }, 30_000);
     const cleanup = () => {
       clearTimeout(timer);
       child.stdout.off("data", onStdout);
@@ -117,25 +117,69 @@ const server = new OpenHarnessHttpServer({
   token: ${JSON.stringify(token)},
   storePath: ${JSON.stringify(join(dir, "sessions.db"))},
   logger: () => {},
-  async createAgent({ session }) {
+  async createAgent({ session, options: agentOptions }) {
+    let listener;
+    let sequence = 0;
+    const publish = async (event, context) => {
+      await listener?.({
+        ...event,
+        id: \`fixture-event-\${++sequence}\`,
+        sequence,
+        occurredAt: new Date().toISOString(),
+        context,
+      });
+    };
     return {
       id: session.id,
-      async *submitMessage(content, options) {
-          if (content !== "please edit") {
-            throw new Error(\`Unexpected prompt: \${content}\`);
-          }
-          const decision = await options.host.requestPermission({
-            toolName: "Write",
-            reason: "exercise TUI permission flow",
-            input: { path: "README.md" },
-          });
-          await options.host.emitStreamEvent({
-            type: "text_delta",
-            delta: decision.status === "approved" ? "edit approved" : "edit denied",
-          });
+      events: {
+        subscribe(next) {
+          listener = next;
+          return { unsubscribe() { if (listener === next) listener = undefined; } };
+        },
       },
+      children: { get() {}, getBySessionId() {}, list() { return []; } },
+      submitMessage(content, options) {
+        if (content !== "please edit") {
+          throw new Error(\`Unexpected prompt: \${content}\`);
+        }
+        const ids = options.ids;
+        const context = { agentId: session.id, sessionId: session.id, inputId: ids.inputId, runId: ids.runId, traceId: ids.traceId };
+        const result = (async () => {
+          await publish({ type: "input.accepted", data: { content, delivery: options.delivery ?? "queue" } }, context);
+          await publish({ type: "run.started", data: {} }, context);
+          const request = { toolName: "Write", reason: "exercise TUI permission flow", input: { path: "README.md" } };
+          const requestId = \`permission-\${sequence + 1}\`;
+          await publish({ type: "permission.requested", data: { requestId, request } }, context);
+          const decision = await agentOptions.effects.requestPermission(request, {
+            ...context,
+            cwd: session.cwd,
+            signal: new AbortController().signal,
+          });
+          await publish({ type: "permission.resolved", data: { requestId, decision } }, context);
+          const output = decision.status === "approved" ? "edit approved" : "edit denied";
+          await publish({ type: "output.text.delta", data: { delta: output } }, context);
+          await publish({ type: "run.completed", data: { output } }, context);
+          return { status: "completed", output, history: [], usage: { inputTokens: 0, outputTokens: 0 } };
+        })();
+        return {
+          id: ids.runId,
+          inputId: ids.inputId,
+          sessionId: session.id,
+          traceId: ids.traceId,
+          result,
+          async steer() { throw new Error("steer is not used in this fixture"); },
+          async interrupt() { await result.catch(() => {}); },
+        };
+      },
+      async runMessage(content, options) { return await this.submitMessage(content, options).result; },
+      getHistory() { return []; },
       loadHistory() {},
+      clear() {},
       setModel() {},
+      async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
+      async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
+      getUsage() { return { inputTokens: 0, outputTokens: 0 }; },
+      inspect() { return { model: session.model, tools: [], hooks: [], mcpServers: [] }; },
       async close() {},
     };
   },

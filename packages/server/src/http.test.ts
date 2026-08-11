@@ -5,7 +5,20 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from "@openharness/coordinator";
-import type { AgentRunHost, Message } from "@openharness/core";
+import type {
+  AgentChildInput,
+  AgentChildDirectory,
+  AgentChildHandle,
+  AgentEvent,
+  AgentEventContext,
+  AgentEventInput,
+  AgentEventListener,
+  AgentPermissionRequest,
+  AgentPermissionDecision,
+  AgentRunHandle,
+  AgentRunResult,
+  Message,
+} from "@openharness/core";
 import type { AgentCompactResult, AgentInspection, AgentRememberResult, OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { CommandCatalogProvider } from "./commands.js";
 import { OpenHarnessHttpServer } from "./http.js";
@@ -15,12 +28,18 @@ import type { OpenHarnessServerOptions } from "./http.js";
 import type { ObservabilityEvent } from "./observability.js";
 
 interface TestAgentProgram {
-  runPrompt(input: any, host: AgentRunHost): Promise<unknown>;
+  runPrompt(input: any, run: TestAgentRunContext): Promise<unknown>;
   close(): Promise<void>;
+  children?: AgentChildDirectory;
   inspect?(): AgentInspection;
   compact?(): Promise<{ messageCount: number; transcript: Array<{ role: string; parts: Array<Record<string, any>> }> }>;
   remember?(): Promise<AgentRememberResult>;
   getUsage?(): ReturnType<OpenHarnessAgent["getUsage"]> & { messageCount?: number };
+}
+
+interface TestAgentRunContext {
+  emit(event: AgentEventInput, context?: Partial<AgentEventContext>): Promise<void>;
+  requestPermission(request: AgentPermissionRequest): Promise<AgentPermissionDecision>;
 }
 
 interface TestAgentProgramFactory {
@@ -31,32 +50,119 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
   return async (context) => {
     const program = await factory.createRuntime(context);
     let history: Message[] = [];
+    let listener: AgentEventListener | undefined;
+    let sequence = 0;
+    const emit = async (input: AgentEventInput, eventContext: AgentEventContext): Promise<void> => {
+      const event = {
+        ...input,
+        id: `test-event-${++sequence}`,
+        sequence,
+        occurredAt: new Date().toISOString(),
+        context: eventContext,
+      } as AgentEvent;
+      await listener?.(event);
+    };
     return {
       id: context.session.id,
-      async *submitMessage(content, options = {}) {
-        const pending: Array<{ content: string }> = [];
-        let wakeCount = 0;
-        const refresh = () => {
-          const followUps = options.pullFollowUps?.();
-          if (Array.isArray(followUps) && followUps.length > 0) {
-            pending.push(...followUps.map((row) => ({ content: row })));
-            wakeCount += 1;
-          }
-        };
-        await program.runPrompt({
-          session: context.session,
-          input: { content },
-          history: context.history,
-          parts: context.parts,
-          signal: options.signal ?? new AbortController().signal,
-          wakeCount: () => {
-            refresh();
-            return wakeCount;
-          },
-          drainSteeredInputs: () => pending.splice(0),
-        }, options.host!);
+      events: {
+        subscribe(next) {
+          listener = next;
+          return { unsubscribe: () => { if (listener === next) listener = undefined; } };
+        },
       },
-      runMessage: async () => ({ output: "", events: [], history }),
+      children: program.children ?? { get: () => undefined, getBySessionId: () => undefined, list: () => [] },
+      submitMessage(content, options = {}) {
+        const ids = options.ids ?? { inputId: "test-input", runId: "test-run", traceId: "test-trace" };
+        const controller = new AbortController();
+        const pending: AgentChildInput[] = [];
+        const steerWaiters: Array<(input: AgentChildInput) => void> = [];
+        const onAbort = () => controller.abort(options.signal?.reason);
+        options.signal?.addEventListener("abort", onAbort, { once: true });
+        const eventContext: AgentEventContext = {
+          agentId: context.session.id,
+          sessionId: context.session.id,
+          inputId: ids.inputId,
+          runId: ids.runId,
+          traceId: ids.traceId,
+        };
+        let output = "";
+        let handle!: AgentRunHandle;
+        const result = Promise.resolve().then(async (): Promise<AgentRunResult> => {
+          try {
+            await emit({ type: "input.accepted", data: { content, delivery: options.delivery ?? "queue" } }, eventContext);
+            await emit({ type: "run.started", data: {} }, eventContext);
+            const runContext: TestAgentRunContext = {
+              emit: async (event, override = {}) => {
+                if (event.type === "output.text.delta") output += event.data.delta;
+                await emit(event, { ...eventContext, ...override });
+              },
+              requestPermission: async (request) => {
+                const requestId = `permission-${sequence + 1}`;
+                await emit({ type: "permission.requested", data: { requestId, request } }, eventContext);
+                const requestPermission = context.options.effects?.requestPermission;
+                if (!requestPermission) throw new Error("Permission effect is not configured");
+                const decision = await requestPermission(request, {
+                  agentId: context.session.id,
+                  sessionId: context.session.id,
+                  inputId: ids.inputId,
+                  runId: ids.runId,
+                  traceId: ids.traceId,
+                  cwd: context.session.cwd,
+                  signal: controller.signal,
+                });
+                await emit({ type: "permission.resolved", data: { requestId, decision } }, eventContext);
+                return decision;
+              },
+            };
+            await program.runPrompt({
+              session: context.session,
+              input: { content },
+              history: context.history,
+              parts: context.parts,
+              signal: controller.signal,
+              waitForSteer: async () => pending.shift() ?? await new Promise<AgentChildInput>((resolve) => steerWaiters.push(resolve)),
+              drainSteeredInputs: () => pending.splice(0),
+            }, runContext);
+            if (controller.signal.aborted) throw new Error(String(controller.signal.reason ?? "Run interrupted"));
+            await emit({ type: "run.completed", data: { output } }, eventContext);
+            return { status: "completed", output, history, usage: { inputTokens: 0, outputTokens: 0 } };
+          } catch (error) {
+            const serialized = { name: "Error", message: error instanceof Error ? error.message : String(error) };
+            await emit({
+              type: controller.signal.aborted ? "run.interrupted" : "run.failed",
+              data: { error: serialized, ...(output ? { output } : {}) },
+            }, eventContext);
+            throw error;
+          } finally {
+            options.signal?.removeEventListener("abort", onAbort);
+          }
+        });
+        handle = {
+          id: ids.runId,
+          inputId: ids.inputId,
+          sessionId: context.session.id,
+          traceId: ids.traceId,
+          result,
+          steer: async (input) => {
+            const accepted = { ...input, id: input.id ?? `steer-${sequence + 1}`, traceId: input.traceId ?? ids.traceId };
+            await emit({ type: "input.accepted", data: { content: accepted.content, delivery: "steer" } }, {
+              ...eventContext,
+              inputId: accepted.id,
+              traceId: accepted.traceId,
+            });
+            const waiter = steerWaiters.shift();
+            if (waiter) waiter(accepted);
+            else pending.push(accepted);
+            return { sessionId: context.session.id, inputId: accepted.id, runId: ids.runId };
+          },
+          interrupt: async (reason) => {
+            controller.abort(reason ?? "Run interrupted");
+            await result.catch(() => {});
+          },
+        };
+        return handle;
+      },
+      async runMessage(content, options) { return await this.submitMessage(content, options).result; },
       getHistory: () => [...history],
       loadHistory: (messages) => { history = [...messages]; },
       clear: () => { history = []; },
@@ -174,63 +280,60 @@ async function waitForEvent(
 
 describe("OpenHarnessHttpServer", () => {
   it("projects framework-owned child execution into durable child sessions", async () => {
-    const created: string[] = [];
     const closed: string[] = [];
-    const createAgent: CreateDaemonAgent = async (context) => {
-      created.push(context.session.id);
-      return {
-        id: context.session.id,
-        async *submitMessage(_content, options = {}) {
-          if (context.session.parentId) {
-            await options.host!.emitStreamEvent({ type: "text_delta", delta: "child output" });
-            return;
-          }
-          let child: Awaited<ReturnType<NonNullable<typeof options.childProjection>["createChild"]>>;
-          const controls = {
-            send: async (input: { content: string }) => {
-              const controller = new AbortController();
-              const run = await options.childProjection!.startRun(child, input, controller.signal);
-              const result = (async () => {
-                await run.host.emitStreamEvent({ type: "text_delta", delta: "child output" });
-                const completed = { status: "completed" as const, output: "child output" };
-                await options.childProjection!.finishRun(child, run, completed);
-                return completed;
-              })();
-              return {
+    const runtimeFactory: TestAgentProgramFactory = {
+      async createRuntime({ session }) {
+        let runContext: TestAgentRunContext | undefined;
+        let runCount = 0;
+        const childContext = () => ({
+          agentId: "child-invocation",
+          sessionId: "child-session",
+          childId: "child-invocation",
+          parentSessionId: session.id,
+          parentRunId: "parent-run",
+        });
+        const send = async (input: AgentChildInput) => {
+          const suffix = ++runCount;
+          const inputId = input.id ?? `child-input-${suffix}`;
+          const runId = `child-run-${suffix}`;
+          await runContext!.emit({ type: "input.accepted", data: { content: input.content, delivery: input.delivery ?? "queue" } }, { ...childContext(), inputId, runId, traceId: `child-trace-${suffix}` });
+          await runContext!.emit({ type: "run.started", data: {} }, { ...childContext(), inputId, runId, traceId: `child-trace-${suffix}` });
+          await runContext!.emit({ type: "output.text.delta", data: { delta: "child output" } }, { ...childContext(), inputId, runId, traceId: `child-trace-${suffix}` });
+          await runContext!.emit({ type: "run.completed", data: { output: "child output" } }, { ...childContext(), inputId, runId, traceId: `child-trace-${suffix}` });
+          return { sessionId: "child-session", inputId, runId };
+        };
+        const child: AgentChildHandle = {
+          id: "child-invocation",
+          sessionId: "child-session",
+          state: "idle",
+          result: Promise.resolve({ status: "completed", output: "child output" }),
+          send,
+          interrupt: async () => {},
+          close: async () => {},
+        };
+        return {
+          children: {
+            get: (id) => id === child.id ? child : undefined,
+            getBySessionId: (id) => id === child.sessionId ? child : undefined,
+            list: () => [child],
+          },
+          async runPrompt(_input, run) {
+            runContext = run;
+            await run.emit({
+              type: "child.created",
+              data: {
+                childId: child.id,
                 sessionId: child.sessionId,
-                inputId: run.inputId,
-                runId: run.runId,
-                result,
-              };
-            },
-            interrupt: async () => {},
-          };
-          child = await options.childProjection!.createChild({
-            invocationId: "child-invocation",
-            parentScope: options.host!.scope,
-            spawn: {
-              description: "Explore@default",
-              prompt: "inspect",
-              agent: "Explore",
-              cwd: context.session.cwd,
-            },
-            controls,
-          });
-          const initial = await controls.send({ content: "inspect" });
-          await initial.result;
-          await options.host!.emitStreamEvent({ type: "text_delta", delta: "child output" });
-        },
-        async runMessage() { return { output: "", events: [], history: [] }; },
-        getHistory: () => [],
-        loadHistory: () => {},
-        clear: () => {},
-        setModel: () => {},
-        async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
-        async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
-        getUsage: () => ({ inputTokens: 0, outputTokens: 0 }),
-        inspect: () => ({ model: context.session.model, tools: [], hooks: [], mcpServers: [] }),
-        async close() { closed.push(context.session.id); },
-      };
+                spawn: { description: "Explore@default", prompt: "inspect", agent: "Explore", cwd: session.cwd },
+                cwd: session.cwd,
+              },
+            });
+            await child.send({ content: "inspect" });
+            await run.emit({ type: "output.text.delta", data: { delta: "child output" } });
+          },
+          async close() { closed.push(session.id); },
+        };
+      },
     };
 
     await withServer(async ({ baseUrl, token, server }) => {
@@ -279,9 +382,8 @@ describe("OpenHarnessHttpServer", () => {
         (event.payload?.run as { sessionId?: string; status?: string } | undefined)?.sessionId === child!.id &&
         (event.payload?.run as { status?: string } | undefined)?.status === "completed",
       );
-      expect(created.filter((id) => id === child!.id)).toHaveLength(0);
       expect(server.store.getSession(child!.id)?.status).not.toBe("archived");
-    }, { createAgent });
+    }, { runtimeFactory });
   });
 
   it("uses the canonical session runtime store", () => {
@@ -385,15 +487,14 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
-          async runPrompt(_input, host) {
-            await host.emitStreamEvent({
-              type: "tool_use_start",
-              toolUse: { type: "tool_use", id: "tool-1", name: "Read", input: { path: "README.md" } },
+          async runPrompt(_input, run) {
+            await run.emit({
+              type: "tool.started",
+              data: { toolUse: { type: "tool_use", id: "tool-1", name: "Read", input: { path: "README.md" } } },
             });
-            await host.emitStreamEvent({
-              type: "tool_use_end",
-              toolUseId: "tool-1",
-              result: { content: [{ type: "text", text: "ok" }] },
+            await run.emit({
+              type: "tool.completed",
+              data: { toolUseId: "tool-1", result: { content: [{ type: "text", text: "ok" }] } },
             });
             return { messages: [] };
           },
@@ -654,19 +755,16 @@ describe("OpenHarnessHttpServer", () => {
       const runtimeFactory: TestAgentProgramFactory = {
         async createRuntime() {
           return {
-            async runPrompt(input, host) {
+            async runPrompt(input, run) {
               if (input.session.id === "recover") {
-                const decision = await host.requestPermission({
+                const decision = await run.requestPermission({
                   toolName: "Write",
                   reason: "apply recovered change",
                   input: { path: "README.md" },
                 });
-                await host.emitStreamEvent({
-                  type: "text_delta",
-                  delta: decision.status === "approved" ? "recovered" : "denied",
-                });
+                await run.emit({ type: "output.text.delta", data: { delta: decision.status === "approved" ? "recovered" : "denied" } });
               } else {
-                await host.emitStreamEvent({ type: "text_delta", delta: "parallel completed" });
+                await run.emit({ type: "output.text.delta", data: { delta: "parallel completed" } });
               }
               return { messages: [] };
             },
@@ -2215,12 +2313,12 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime({ session }) {
         return {
-          async runPrompt(input, host) {
+          async runPrompt(input, run) {
             expect(input.session.id).toBe(session.id);
             expect(input.input.content).toBe("hello runtime");
             expect(input.history).toEqual([]);
             expect(input.parts).toEqual([]);
-            await host.emitStreamEvent({ type: "text_delta", delta: "hello" });
+            await run.emit({ type: "output.text.delta", data: { delta: "hello" } });
             return {
               messages: [],
             };
@@ -2278,20 +2376,19 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
-          async runPrompt(_input, host) {
-            await host.emitStreamEvent({ type: "text_delta", delta: "checking" });
-            await host.emitStreamEvent({
-              type: "tool_use_start",
-              toolUse: { type: "tool_use", id: "tool-1", name: "Read", input: { path: "README.md" } },
+          async runPrompt(_input, run) {
+            await run.emit({ type: "output.text.delta", data: { delta: "checking" } });
+            await run.emit({
+              type: "tool.started",
+              data: { toolUse: { type: "tool_use", id: "tool-1", name: "Read", input: { path: "README.md" } } },
             });
-            await host.emitStreamEvent({ type: "complete", stopReason: "tool_use" });
-            await host.emitStreamEvent({
-              type: "tool_use_end",
-              toolUseId: "tool-1",
-              result: { content: [{ type: "text", text: "file contents" }] },
+            await run.emit({ type: "output.turn.completed", data: { stopReason: "tool_use" } });
+            await run.emit({
+              type: "tool.completed",
+              data: { toolUseId: "tool-1", result: { content: [{ type: "text", text: "file contents" }] } },
             });
-            await host.emitStreamEvent({ type: "text_delta", delta: "finished" });
-            await host.emitStreamEvent({ type: "complete", stopReason: "end_turn" });
+            await run.emit({ type: "output.text.delta", data: { delta: "finished" } });
+            await run.emit({ type: "output.turn.completed", data: { stopReason: "end_turn" } });
             return { messages: [] };
           },
           async close() {},
@@ -2401,16 +2498,13 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
-          async runPrompt(input, host) {
-            const decision = await host.requestPermission({
+          async runPrompt(input, run) {
+            const decision = await run.requestPermission({
               toolName: "Write",
               reason: "needs edit",
               input: { path: "README.md" },
             });
-            await host.emitStreamEvent({
-              type: "text_delta",
-              delta: decision.status === "approved" ? "permission granted" : "permission denied",
-            });
+            await run.emit({ type: "output.text.delta", data: { delta: decision.status === "approved" ? "permission granted" : "permission denied" } });
             return { messages: [] };
           },
           async close() {},
@@ -2535,20 +2629,14 @@ describe("OpenHarnessHttpServer", () => {
 
   it("steers into an active run without creating a second run", async () => {
     const release = deferred();
-    let observedWakeCount = 0;
+    let observedSteerCount = 0;
     let drained: Array<{ content: string; delivery: string }> = [];
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
         return {
           async runPrompt(input) {
-            for (let i = 0; i < 100; i++) {
-              if (input.wakeCount() > 0) {
-                observedWakeCount = input.wakeCount();
-                drained = input.drainSteeredInputs();
-                break;
-              }
-              await new Promise((resolve) => setTimeout(resolve, 10));
-            }
+            drained = [await input.waitForSteer()];
+            observedSteerCount = drained.length;
             await release.promise;
           },
           async close() {},
@@ -2605,10 +2693,10 @@ describe("OpenHarnessHttpServer", () => {
         ["course correct", "steer"],
       ]);
 
-      for (let i = 0; i < 50 && observedWakeCount === 0; i++) {
+      for (let i = 0; i < 50 && observedSteerCount === 0; i++) {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      expect(observedWakeCount).toBeGreaterThan(0);
+      expect(observedSteerCount).toBeGreaterThan(0);
       expect(drained.map((input) => input.content)).toEqual(["course correct"]);
 
       release.resolve();

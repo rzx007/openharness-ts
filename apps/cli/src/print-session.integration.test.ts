@@ -7,7 +7,16 @@ import {
   OpenHarnessHttpServer,
   type CreateDaemonAgent,
 } from "@openharness/server";
-import type { AgentRunHost } from "@openharness/core";
+import type {
+  AgentEvent,
+  AgentEventContext,
+  AgentEventInput,
+  AgentEventListener,
+  AgentPermissionDecision,
+  AgentPermissionRequest,
+  AgentRunHandle,
+} from "@openharness/core";
+import type { OpenHarnessAgent } from "@openharness/agent-runtime";
 
 import { runPrintSession } from "./print-session.js";
 
@@ -46,24 +55,89 @@ async function withPrintServer(
 }
 
 function testAgent(
-  run: (content: string, host: AgentRunHost) => Promise<void>,
+  run: (content: string, context: {
+    emit(event: AgentEventInput): Promise<void>;
+    requestPermission(request: AgentPermissionRequest): Promise<AgentPermissionDecision>;
+  }) => Promise<void>,
 ): CreateDaemonAgent {
-  return async ({ session }) => ({
-    id: session.id,
-    async *submitMessage(content, options = {}) {
-      await run(typeof content === "string" ? content : "", options.host!);
-    },
-    async runMessage() { return { output: "", events: [], history: [] }; },
-    getHistory: () => [],
-    loadHistory: () => {},
-    clear: () => {},
-    setModel: () => {},
-    async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
-    async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
-    getUsage: () => ({ inputTokens: 0, outputTokens: 0 }),
-    inspect: () => ({ model: session.model, tools: [], hooks: [], mcpServers: [] }),
-    async close() {},
-  });
+  return async ({ session, options: agentOptions }) => {
+    let listener: AgentEventListener | undefined;
+    let sequence = 0;
+    const publish = async (input: AgentEventInput, context: AgentEventContext) => {
+      await listener?.({
+        ...input,
+        id: `print-test-${++sequence}`,
+        sequence,
+        occurredAt: new Date().toISOString(),
+        context,
+      } as AgentEvent);
+    };
+    const agent: OpenHarnessAgent = {
+      id: session.id,
+      events: {
+        subscribe(next) {
+          listener = next;
+          return { unsubscribe: () => { if (listener === next) listener = undefined; } };
+        },
+      },
+      children: { get: () => undefined, getBySessionId: () => undefined, list: () => [] },
+      submitMessage(content, options = {}) {
+        const ids = options.ids!;
+        const controller = new AbortController();
+        const context = { agentId: session.id, sessionId: session.id, inputId: ids.inputId, runId: ids.runId, traceId: ids.traceId };
+        let output = "";
+        const result = Promise.resolve().then(async () => {
+          await publish({ type: "input.accepted", data: { content, delivery: options.delivery ?? "queue" } }, context);
+          await publish({ type: "run.started", data: {} }, context);
+          await run(typeof content === "string" ? content : "", {
+            emit: async (event) => {
+              if (event.type === "output.text.delta") output += event.data.delta;
+              await publish(event, context);
+            },
+            requestPermission: async (request) => {
+              const requestId = `permission-${sequence + 1}`;
+              await publish({ type: "permission.requested", data: { requestId, request } }, context);
+              const requestPermission = agentOptions.effects?.requestPermission;
+              if (!requestPermission) throw new Error("Permission effect is not configured");
+              const decision = await requestPermission(request, {
+                agentId: session.id,
+                sessionId: session.id,
+                inputId: ids.inputId,
+                runId: ids.runId,
+                traceId: ids.traceId,
+                cwd: session.cwd,
+                signal: controller.signal,
+              });
+              await publish({ type: "permission.resolved", data: { requestId, decision } }, context);
+              return decision;
+            },
+          });
+          await publish({ type: "run.completed", data: { output } }, context);
+          return { status: "completed" as const, output, history: [], usage: { inputTokens: 0, outputTokens: 0 } };
+        });
+        return {
+          id: ids.runId,
+          inputId: ids.inputId,
+          sessionId: session.id,
+          traceId: ids.traceId,
+          result,
+          steer: async () => { throw new Error("steer is not used in print tests"); },
+          interrupt: async (reason) => { controller.abort(reason); await result.catch(() => {}); },
+        } satisfies AgentRunHandle;
+      },
+      async runMessage(content, options) { return await this.submitMessage(content, options).result; },
+      getHistory: () => [],
+      loadHistory: () => {},
+      clear: () => {},
+      setModel: () => {},
+      async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
+      async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
+      getUsage: () => ({ inputTokens: 0, outputTokens: 0 }),
+      inspect: () => ({ model: session.model, tools: [], hooks: [], mcpServers: [] }),
+      async close() {},
+    };
+    return agent;
+  };
 }
 
 describe("runPrintSession daemon integration", () => {
@@ -78,10 +152,10 @@ describe("runPrintSession daemon integration", () => {
     exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const stdout = captureWrite(process.stdout);
 
-    const createAgent = testAgent(async (content, host) => {
+    const createAgent = testAgent(async (content, run) => {
       expect(content).toBe("hello daemon");
       await new Promise((resolve) => setTimeout(resolve, 20));
-      await host.emitStreamEvent({ type: "text_delta", delta: "hello from real daemon" });
+      await run.emit({ type: "output.text.delta", data: { delta: "hello from real daemon" } });
     });
 
     await withPrintServer(createAgent, async ({ server, url, token }) => {
@@ -109,18 +183,15 @@ describe("runPrintSession daemon integration", () => {
     const stderr = captureWrite(process.stderr);
     const decisions: boolean[] = [];
 
-    const createAgent = testAgent(async (_content, host) => {
-      const decision = await host.requestPermission({
+    const createAgent = testAgent(async (_content, run) => {
+      const decision = await run.requestPermission({
         toolName: "Write",
         reason: "edit requested by integration test",
         input: { path: "README.md" },
       });
       const allowed = decision.status === "approved";
       decisions.push(allowed);
-      await host.emitStreamEvent({
-        type: "text_delta",
-        delta: allowed ? "permission approved" : "permission denied",
-      });
+      await run.emit({ type: "output.text.delta", data: { delta: allowed ? "permission approved" : "permission denied" } });
     });
 
     await withPrintServer(createAgent, async ({ server, url, token }) => {

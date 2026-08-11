@@ -8,7 +8,7 @@ import type {
 } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
-import type { LiveChildAgentRegistry } from "./live-child-agent-registry.js";
+import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
 import {
   isRecord,
   jsonEqual,
@@ -30,7 +30,7 @@ export interface SessionApplicationServiceContext {
   store: SessionStore;
   runEngine: SessionRunEngine;
   agentPool: AgentPool;
-  liveChildren: Pick<LiveChildAgentRegistry, "has" | "send" | "interrupt">;
+  liveChildren: Pick<LiveChildAgentDirectory, "has" | "send" | "interrupt">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 

@@ -51,16 +51,19 @@ export type {
   SettingsService,
 } from "./settings-api.js";
 export type {
-  AgentChildAgentHost,
-  AgentChildAgentInput,
-  AgentChildAgentInvocation,
-  AgentChildAgentResult,
-  AgentChildAgentSpawnInput,
+  AgentChildController,
+  AgentChildDirectory,
+  AgentChildHandle,
+  AgentChildInput,
+  AgentChildInvocation,
+  AgentChildResult,
+  AgentChildSpawnInput,
+  AgentEffects,
+  AgentEvent,
   AgentPermissionDecision,
   AgentPermissionRequest,
-  AgentRunHost,
+  AgentRunHandle,
   AgentRunScope,
-  AgentRuntimeEvent,
 } from "@openharness/core";
 export { estimateCostUsd } from "./usage.js";
 export {

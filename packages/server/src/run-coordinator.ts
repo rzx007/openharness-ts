@@ -1,3 +1,5 @@
+import type { AgentRunHandle, AgentSteerInput } from "@openharness/core";
+
 export class RunInterruptedError extends Error {
   constructor(message = "Run interrupted") {
     super(message);
@@ -7,7 +9,7 @@ export class RunInterruptedError extends Error {
 
 export interface SessionRunWorkContext {
   signal: AbortSignal;
-  wakeCount(): number;
+  registerHandle(handle: AgentRunHandle): Promise<void>;
 }
 
 export interface EnqueueRunOptions {
@@ -37,13 +39,14 @@ interface RunTask {
   resolve: () => void;
   reject: (error: unknown) => void;
   promise: Promise<void>;
-  wakeCount: number;
+  handle?: AgentRunHandle;
+  pendingSteers: AgentSteerInput[];
+  controlChain: Promise<void>;
 }
 
 interface SessionLane {
   active?: RunTask;
   queue: RunTask[];
-  wakeCount: number;
 }
 
 export class SessionRunCoordinator {
@@ -66,12 +69,12 @@ export class SessionRunCoordinator {
     };
   }
 
-  mergeWake(sessionId: string): { merged: boolean; wakeCount: number; activeRunId?: string } {
+  steer(sessionId: string, input: AgentSteerInput): { merged: boolean; activeRunId?: string } {
     const lane = this.lanes.get(sessionId);
-    if (!lane?.active) return { merged: false, wakeCount: 0 };
-    lane.wakeCount++;
-    lane.active.wakeCount++;
-    return { merged: true, wakeCount: lane.wakeCount, activeRunId: lane.active.runId };
+    if (!lane?.active) return { merged: false };
+    lane.active.pendingSteers.push(input);
+    this.flushSteers(lane.active);
+    return { merged: true, activeRunId: lane.active.runId };
   }
 
   interrupt(sessionId: string): InterruptSessionResult {
@@ -85,7 +88,10 @@ export class SessionRunCoordinator {
     }
 
     const activeRunId = lane.active?.runId;
-    if (lane.active) lane.active.controller.abort();
+    if (lane.active) {
+      lane.active.controller.abort();
+      void lane.active.handle?.interrupt("Run interrupted");
+    }
     return {
       ...(activeRunId ? { activeRunId } : {}),
       queuedRunIds,
@@ -109,7 +115,7 @@ export class SessionRunCoordinator {
   private getLane(sessionId: string): SessionLane {
     let lane = this.lanes.get(sessionId);
     if (!lane) {
-      lane = { queue: [], wakeCount: 0 };
+      lane = { queue: [] };
       this.lanes.set(sessionId, lane);
     }
     return lane;
@@ -131,7 +137,8 @@ export class SessionRunCoordinator {
       resolve,
       reject,
       promise,
-      wakeCount: 0,
+      pendingSteers: [],
+      controlChain: Promise.resolve(),
     };
   }
 
@@ -142,7 +149,15 @@ export class SessionRunCoordinator {
         if (task.controller.signal.aborted) throw new RunInterruptedError();
         await task.work({
           signal: task.controller.signal,
-          wakeCount: () => task.wakeCount,
+          registerHandle: async (handle) => {
+            if (task.controller.signal.aborted) {
+              await handle.interrupt("Run interrupted");
+              throw new RunInterruptedError();
+            }
+            task.handle = handle;
+            this.flushSteers(task);
+            await task.controlChain;
+          },
         });
         task.resolve();
       } catch (error) {
@@ -153,10 +168,22 @@ export class SessionRunCoordinator {
         if (next) {
           this.startTask(lane, next);
         } else if (!lane.active) {
-          lane.wakeCount = 0;
           this.lanes.delete(task.sessionId);
         }
       }
     })();
+  }
+
+  private flushSteers(task: RunTask): void {
+    if (!task.handle || task.pendingSteers.length === 0) return;
+    const pending = task.pendingSteers.splice(0);
+    task.controlChain = task.controlChain.then(async () => {
+      for (const input of pending) await task.handle!.steer(input);
+    }).catch((error) => {
+      task.controller.abort(error);
+      void task.handle?.interrupt(error instanceof Error ? error.message : String(error));
+      throw error;
+    });
+    void task.controlChain.catch(() => {});
   }
 }

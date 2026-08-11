@@ -53,7 +53,7 @@ import { createSessionRoutes } from "./http/routes/session.js";
 import { createSessionUtilityRoutes } from "./http/routes/session-utility.js";
 import { createSystemRoutes } from "./http/routes/system.js";
 import { createTaskRoutes } from "./http/routes/task.js";
-import { DaemonChildAgentProjectionFactory } from "./http/child-agent-projection-factory.js";
+import { DaemonAgentEventProjector } from "./http/daemon-agent-event-projector.js";
 import { DaemonControlService } from "./http/daemon-control-service.js";
 import { RequestTraceRegistry } from "./http/request-trace-registry.js";
 import { SessionApplicationService } from "./http/session-application-service.js";
@@ -65,7 +65,7 @@ import { SessionRunExecutor } from "./http/session-run-executor.js";
 import { AgentPool, type CreateDaemonAgent } from "./http/agent-pool.js";
 import { SessionTaskBridgeManager } from "./http/session-task-bridge.js";
 import { SessionTaskService } from "./http/session-task-service.js";
-import { LiveChildAgentRegistry } from "./http/live-child-agent-registry.js";
+import { LiveChildAgentDirectory } from "./http/live-child-agent-directory.js";
 import { SessionTranscriptProjection } from "./http/transcript-projection.js";
 import { recoverInterruptedWorkflows } from "./http/workflow-recovery.js";
 
@@ -134,13 +134,13 @@ export class OpenHarnessHttpServer {
   private readonly permissionBroker: StorePermissionBroker;
   private readonly eventHub: HttpEventHub;
   private readonly sessionEvents: SessionEventPublisher;
-  /** StreamEvent -> durable transcript projection. */
+  /** AgentEvent -> durable transcript projection helper. */
   private readonly transcriptProjection: SessionTranscriptProjection;
   /** 进程内 TaskManager ↔ store SessionTask 投影桥。 */
   private readonly sessionTaskBridgeManager: SessionTaskBridgeManager;
   private readonly sessionTaskService: SessionTaskService;
-  /** Durable child session id -> framework-owned live controls routing only. */
-  private readonly liveChildren = new LiveChildAgentRegistry();
+  /** Durable child session id -> framework child directory routing. */
+  private readonly liveChildren = new LiveChildAgentDirectory();
   /** 每个 durable session 一份 warm OpenHarnessAgent。 */
   private readonly agentPool: AgentPool;
   /** Prompt 准入 + session lane 调度（queue/steer/interrupt）。 */
@@ -204,31 +204,43 @@ export class OpenHarnessHttpServer {
       getTaskManager: (scope) => getTaskManager(scope),
       events: this.sessionEvents,
     });
-    const childAgentProjectionFactory = new DaemonChildAgentProjectionFactory({
-      store: this.store,
-      childSessionApplication: () => this.sessionApplication,
-      liveChildren: this.liveChildren,
-      sessionTaskBridgeManager: this.sessionTaskBridgeManager,
-      permissionBroker: this.permissionBroker,
-      transcriptProjection: this.transcriptProjection,
-      events: this.sessionEvents,
-      traceIdForRun: (runId) => this.traceIdForRun(runId),
-      log: (event) => this.log(event),
-    });
     this.agentPool = new AgentPool({
       store: this.store,
       settings: options.settings,
       getSettings: options.getSettings,
       createAgent: options.createAgent,
       isSessionExternallyOwned: (sessionId) => this.liveChildren.has(sessionId),
+      effects: {
+        requestPermission: async (request, context) => {
+          const approved = await this.permissionBroker.ask({
+            sessionId: context.sessionId,
+            runId: context.runId,
+            traceId: context.traceId,
+            toolName: request.toolName,
+            reason: request.reason,
+            input: request.input,
+            signal: context.signal,
+          });
+          return approved ? { status: "approved" } : { status: "denied" };
+        },
+      },
+      bindAgent: (agent) => {
+        const projector = new DaemonAgentEventProjector({
+          rootAgent: agent,
+          store: this.store,
+          transcriptProjection: this.transcriptProjection,
+          taskBridgeManager: this.sessionTaskBridgeManager,
+          liveChildren: this.liveChildren,
+          events: this.sessionEvents,
+          log: (event) => this.log(event),
+        });
+        return agent.events.subscribe((event) => projector.apply(event));
+      },
     });
-    // 单次 run 执行：agent.submitMessage + 流式落库 + 权限注入
+    // 单次 run 执行：agent.submitMessage -> AgentRunHandle；事件在 pool binding 中统一落库。
     const runExecutor = new SessionRunExecutor({
       store: this.store,
       agentPool: this.agentPool,
-      childAgentProjectionFactory,
-      permissionBroker: this.permissionBroker,
-      transcriptProjection: this.transcriptProjection,
       events: this.sessionEvents,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: (event) => this.log(event),

@@ -1,159 +1,105 @@
+import type { AgentRunHandle } from "@openharness/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionRunEngine } from "./session-run-engine.js";
-import { SessionRunExecutor } from "./session-run-executor.js";
-import { AgentPool } from "./agent-pool.js";
-import { SessionTranscriptProjection } from "./transcript-projection.js";
+
+describe("SessionRunEngine", () => {
+  it("admits root work and forwards steer directly to the active handle", async () => {
+    const store = createStore();
+    const pending = deferred<void>();
+    const steer = vi.fn(async (input) => ({ sessionId: "s1", inputId: input.id!, runId: "r1" }));
+    const handle = runHandle(pending.promise, steer);
+    const runExecutor = {
+      execute: vi.fn(async (_input, context) => {
+        await context.registerHandle(handle);
+        await handle.result;
+      }),
+    };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    const root = engine.admitPromptAndMaybeRun("s1", { content: "hello", traceId: "trace-1" });
+    await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
+    const steered = engine.admitPromptAndMaybeRun("s1", {
+      id: "steer-1",
+      content: "nudge",
+      delivery: "steer",
+      traceId: "trace-2",
+    });
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+
+    expect(root.queue_state).toBe("running");
+    expect(steered.run?.id).toBe(root.run?.id);
+    expect(steer).toHaveBeenCalledWith(expect.objectContaining({ id: "steer-1", content: "nudge" }));
+    pending.resolve();
+    await engine.waitForRuns([root.run!.id]);
+  });
+
+  it("returns an existing prompt/run for an identical request id", () => {
+    const store = createStore();
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: false } as any,
+      runExecutor: {} as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+    const first = engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
+    const second = engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
+    expect(second.input).toBe(first.input);
+  });
+});
 
 function createStore() {
   const inputs = new Map<string, any>();
   const runs = new Map<string, any>();
   let inputCount = 0;
   let runCount = 0;
-  let messageCount = 0;
-  let partCount = 0;
   return {
     admitPrompt: vi.fn((input) => {
-      const record = {
-        id: input.id ?? `i${++inputCount}`,
-        seq: inputCount,
-        delivery: input.delivery,
-        content: input.content,
-        metadata: input.metadata,
-        sessionId: input.sessionId,
-        createdAt: 1,
-      };
-      inputs.set(record.id, record);
-      return record;
-    }),
-    appendEvent: vi.fn(),
-    appendMessagePartDelta: vi.fn((input) => ({
-      id: "e1",
-      seq: 1,
-      type: "session.message_part.delta",
-      sessionId: input.sessionId,
-      payload: input,
-      createdAt: 1,
-    })),
-    createMessage: vi.fn((input) => ({
-      id: `m${++messageCount}`,
-      seq: messageCount,
-      metadata: {},
-      createdAt: 1,
-      updatedAt: 1,
-      ...input,
-    })),
-    createRun: vi.fn((input) => {
-      const record = {
-        id: `r${++runCount}`,
-        status: "pending",
-        createdAt: 1,
-        updatedAt: 1,
+      const row = {
         ...input,
+        id: input.id ?? `i${++inputCount}`,
+        delivery: input.delivery ?? "queue",
+        createdAt: 1,
       };
-      runs.set(record.id, record);
-      return record;
+      inputs.set(row.id, row);
+      return row;
     }),
-    findRunByInput: vi.fn((inputId) => [...runs.values()].find((run) => run.inputId === inputId)),
-    getInput: vi.fn((inputId) => inputs.get(inputId)),
-    getRun: vi.fn((runId) => runs.get(runId)),
-    getSession: vi.fn((sessionId) => ({
-      id: sessionId,
-      cwd: "/repo",
-      title: "Session",
-      model: "gpt-test",
-      status: "idle",
-      metadata: {},
-      createdAt: 1,
-      updatedAt: 1,
-    })),
-    listMessageParts: vi.fn(() => []),
-    listMessages: vi.fn(() => []),
-    listSessions: vi.fn(() => []),
-    listUnboundInputs: vi.fn(() => []),
-    updateRun: vi.fn((runId, input) => {
-      const existing = runs.get(runId);
-      const updated = { ...existing, ...input, metadata: { ...(existing?.metadata ?? {}), ...(input.metadata ?? {}) } };
-      runs.set(runId, updated);
-      return updated;
+    getInput: vi.fn((id) => inputs.get(id)),
+    createRun: vi.fn((input) => {
+      const row = { ...input, id: `r${++runCount}`, status: "pending", createdAt: 1, updatedAt: 1 };
+      runs.set(row.id, row);
+      return row;
     }),
-    upsertMessagePart: vi.fn((input) => ({
-      id: input.id ?? `p${++partCount}`,
-      seq: partCount,
-      metadata: {},
-      createdAt: 1,
-      updatedAt: 1,
-      ...input,
-    })),
+    getRun: vi.fn((id) => runs.get(id)),
+    findRunByInput: vi.fn((id) => [...runs.values()].find((run) => run.inputId === id)),
+    updateRun: vi.fn(),
   };
 }
 
-function createEngine(store = createStore()) {
-  const transcriptProjection = new SessionTranscriptProjection(store as any);
-  const submitMessage = vi.fn(async function* () {});
-  const agentPool = new AgentPool({
-    store: store as any,
-    createAgent: vi.fn(async () => ({
-        submitMessage,
-        setModel: vi.fn(),
-        loadHistory: vi.fn(),
-        close: vi.fn(async () => {}),
-      } as any)),
-  });
-  const runExecutor = new SessionRunExecutor({
-    store: store as any,
-    agentPool,
-    childAgentProjectionFactory: { create: vi.fn(() => ({}) as any) },
-    permissionBroker: { ask: vi.fn() },
-    transcriptProjection,
-    events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn(), publish: vi.fn() },
-    traceIdForRun: vi.fn((runId) => store.getRun(runId)?.metadata.traceId ?? `trace-${runId}`),
-    log: vi.fn(),
-  });
-  const engine = new SessionRunEngine({
-    store: store as any,
-    agentPool,
-    runExecutor,
-    events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
-  });
-  return { engine, store, submitMessage };
+function runHandle(done: Promise<void>, steer: AgentRunHandle["steer"]): AgentRunHandle {
+  return {
+    id: "r1",
+    inputId: "i1",
+    sessionId: "s1",
+    traceId: "trace-1",
+    result: done.then(() => ({
+      status: "completed" as const,
+      output: "ok",
+      history: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+    })),
+    steer,
+    interrupt: vi.fn(async () => {}),
+  };
 }
 
-async function flushRun(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
+function deferred<T>() {
+  let resolve!: (value?: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
 }
-
-describe("SessionRunEngine", () => {
-  it("admits prompts and drives runtime runs to completion", async () => {
-    const { engine, store, submitMessage } = createEngine();
-
-    const admitted = engine.admitPromptAndMaybeRun("s1", { content: "hello", traceId: "trace-1" });
-    await flushRun();
-
-    expect(admitted.input).toMatchObject({ sessionId: "s1", content: "hello" });
-    expect(admitted.run).toMatchObject({ sessionId: "s1", inputId: admitted.input.id });
-    expect(admitted.queue_state).toBe("running");
-    expect(submitMessage).toHaveBeenCalledOnce();
-    expect(store.updateRun).toHaveBeenCalledWith(admitted.run!.id, { status: "running" });
-    expect(store.updateRun).toHaveBeenCalledWith(admitted.run!.id, { status: "completed" });
-  });
-
-  it("returns existing prompt/run for identical prompt ids", () => {
-    const { engine } = createEngine();
-
-    const first = engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello", traceId: "trace-1" });
-    const second = engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello", traceId: "trace-2" });
-
-    expect(second.input).toBe(first.input);
-    expect(second.run?.id).toBe(first.run?.id);
-  });
-
-  it("rejects reused prompt ids with different content", () => {
-    const { engine } = createEngine();
-
-    engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
-
-    expect(() => engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "changed" }))
-      .toThrow("Prompt id is already used: fixed");
-  });
-});

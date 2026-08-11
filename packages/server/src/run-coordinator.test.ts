@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { AgentRunHandle } from "@openharness/core";
 
 import { RunInterruptedError, SessionRunCoordinator } from "./run-coordinator.js";
 
@@ -79,26 +80,42 @@ describe("SessionRunCoordinator", () => {
     await Promise.all([a.promise, b.promise]);
   });
 
-  it("merges wake signals into the active session run", async () => {
+  it("routes steer input into the active framework run handle", async () => {
     const coordinator = new SessionRunCoordinator();
+    const registered = deferred();
     const release = deferred();
-    let observedWakeCount = 0;
+    const steered: string[] = [];
+    const handle: AgentRunHandle = {
+      id: "r1",
+      inputId: "i1",
+      sessionId: "s1",
+      traceId: "t1",
+      result: Promise.resolve({ status: "completed", output: "", history: [], usage: { inputTokens: 0, outputTokens: 0 } }),
+      steer: async (input) => {
+        steered.push(input.content);
+        return { sessionId: "s1", inputId: input.id ?? "steer", runId: "r1" };
+      },
+      interrupt: async () => {},
+    };
 
     const run = coordinator.enqueue({
       sessionId: "s1",
       runId: "r1",
       work: async (context) => {
+        await registered.promise;
+        await context.registerHandle(handle);
         await release.promise;
-        observedWakeCount = context.wakeCount();
       },
     });
 
-    expect(coordinator.mergeWake("s1")).toMatchObject({ merged: true, wakeCount: 1, activeRunId: "r1" });
-    expect(coordinator.mergeWake("s1")).toMatchObject({ merged: true, wakeCount: 2, activeRunId: "r1" });
-    expect(coordinator.mergeWake("missing")).toEqual({ merged: false, wakeCount: 0 });
+    const first = coordinator.steer("s1", { content: "first" });
+    expect(coordinator.steer("missing", { content: "ignored" })).toEqual({ merged: false });
+    registered.resolve();
+    expect(first).toMatchObject({ merged: true, activeRunId: "r1" });
+    expect(coordinator.steer("s1", { content: "second" })).toMatchObject({ merged: true, activeRunId: "r1" });
     release.resolve();
     await run.promise;
-    expect(observedWakeCount).toBe(2);
+    expect(steered).toEqual(["first", "second"]);
   });
 
   it("interrupts the active run and rejects queued runs", async () => {
@@ -137,4 +154,3 @@ describe("SessionRunCoordinator", () => {
     await expect(queued.promise).rejects.toBeInstanceOf(RunInterruptedError);
   });
 });
-
