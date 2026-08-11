@@ -211,6 +211,7 @@ describe("SessionRunCoordinator", () => {
   it("interrupts the active run and rejects queued runs", async () => {
     const coordinator = new SessionRunCoordinator();
     const activeInterrupted = deferred();
+    let abortReason: unknown;
 
     const active = coordinator.enqueue({
       sessionId: "s1",
@@ -218,6 +219,7 @@ describe("SessionRunCoordinator", () => {
       work: async (context) => {
         await new Promise<void>((resolve) => {
           context.signal.addEventListener("abort", () => {
+            abortReason = context.signal.reason;
             activeInterrupted.resolve();
             resolve();
           }, { once: true });
@@ -233,14 +235,15 @@ describe("SessionRunCoordinator", () => {
       },
     });
 
-    const result = coordinator.interrupt("s1");
+    const result = coordinator.interrupt("s1", "Daemon shutting down");
     expect(result).toEqual({
       activeRunId: "active",
       queuedRunIds: ["queued"],
       interrupted: true,
     });
     await activeInterrupted.promise;
+    expect(abortReason).toBe("Daemon shutting down");
     await expect(active.promise).rejects.toBeInstanceOf(RunInterruptedError);
-    await expect(queued.promise).rejects.toBeInstanceOf(RunInterruptedError);
+    await expect(queued.promise).rejects.toThrow("Daemon shutting down");
   });
 });

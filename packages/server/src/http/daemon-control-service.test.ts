@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { DaemonControlService } from "./daemon-control-service.js";
+import { DaemonOperationGate } from "./daemon-operation-gate.js";
 
 function createControl() {
   const sessions = [
@@ -19,13 +20,15 @@ function createControl() {
     queuedRunIds: vi.fn((sessionId) => sessionId === "s1" ? ["run-2"] : []),
     hasAnyActiveRuns: vi.fn(() => true),
     hasActiveRunsForCwd: vi.fn(() => false),
+    stopAndDrain: vi.fn(async () => {}),
   };
   const agent = { inspect: vi.fn(() => ({ hooks: [{ id: "hook-1", event: "pre_tool_use", type: "command", enabled: true }] })) };
   const agentPool = {
     configured: true,
     size: 1,
-    warm: vi.fn(async () => {}),
-    get: vi.fn(async () => agent),
+    acquireSession: vi.fn(async () => agent),
+    hasActiveWork: vi.fn(() => false),
+    hasActiveWorkForCwd: vi.fn(() => false),
     closeAll: vi.fn(async () => {}),
     closeForCwd: vi.fn(async () => {}),
   };
@@ -33,6 +36,7 @@ function createControl() {
     store: store as any,
     runEngine: runEngine as any,
     agentPool: agentPool as any,
+    operationGate: new DaemonOperationGate(),
     startedAt: Date.now() - 100,
     sseClientCount: () => 2,
   });
@@ -61,6 +65,6 @@ describe("DaemonControlService", () => {
     await expect(control.inspectRuntimeHooks("s1")).resolves.toEqual([
       { id: "hook-1", event: "pre_tool_use", type: "command", enabled: true, origin: "runtime" },
     ]);
-    expect(agentPool.warm).toHaveBeenCalledWith("s1");
+    expect(agentPool.acquireSession).toHaveBeenCalledWith("s1");
   });
 });

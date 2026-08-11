@@ -15,7 +15,7 @@ export interface SystemRoutesContext {
   commandCatalog?: CommandCatalogProvider;
   settingsService?: SettingsService;
   providerService?: ProviderService;
-  control: Pick<DaemonControlService, "closeAllRuntimes" | "hasAnyActiveRuns" | "runtimeSnapshot">;
+  control: Pick<DaemonControlService, "acquireGlobalMutation" | "closeAllRuntimes" | "runtimeSnapshot">;
 }
 
 export function createSystemRoutes(context: SystemRoutesContext): Hono {
@@ -53,16 +53,19 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
     })
     .patch("/settings", async (c) => {
       if (!context.settingsService) return errorResponse(501, "Settings service is not configured");
-      if (context.control.hasAnyActiveRuns()) {
+      const body = await readJson(c);
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease) {
         return errorResponse(409, "Cannot update daemon settings while session runs are active");
       }
-      const body = await readJson(c);
       try {
         const result = await context.settingsService.patch(body);
         if (result.restartRuntimes) await context.control.closeAllRuntimes();
         return jsonResponse({ settings: result.settings });
       } catch (error) {
         return errorResponse(400, error instanceof Error ? error.message : String(error));
+      } finally {
+        lease.release();
       }
     })
     .get("/providers", async () => {

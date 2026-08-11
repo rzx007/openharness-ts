@@ -100,7 +100,8 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         const session = await context.application.archiveSessionTree(sessionId);
         return jsonResponse({ session });
       } catch (error) {
-        return errorResponse(404, error instanceof Error ? error.message : String(error));
+        const status = error instanceof SessionApplicationError ? error.status : 404;
+        return errorResponse(status, error instanceof Error ? error.message : String(error));
       }
     })
     .get("/:sessionId/messages", (c) => {

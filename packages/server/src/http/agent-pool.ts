@@ -31,6 +31,7 @@ export interface AgentPoolContext {
 
 interface AgentPoolEntry {
   promise: Promise<OpenHarnessAgent>;
+  agent?: OpenHarnessAgent;
   subscription?: AgentEventSubscription;
   state: "active" | "closing";
   closePromise?: Promise<void>;
@@ -50,6 +51,20 @@ export class AgentPool {
     return this.agents.size;
   }
 
+  hasActiveWork(): boolean {
+    return [...this.agents.values()].some((entry) => this.entryHasActiveWork(entry));
+  }
+
+  hasActiveWorkForSession(sessionId: string): boolean {
+    const entry = this.agents.get(sessionId);
+    return entry ? this.entryHasActiveWork(entry) : false;
+  }
+
+  hasActiveWorkForCwd(cwd: string): boolean {
+    return this.context.store.listSessions({ cwd, includeArchived: true })
+      .some((session) => this.hasActiveWorkForSession(session.id));
+  }
+
   async warm(sessionId: string): Promise<void> {
     if (!this.configured || this.agents.has(sessionId) || this.context.isSessionExternallyOwned?.(sessionId)) return;
     const session = this.context.store.getSession(sessionId);
@@ -64,6 +79,16 @@ export class AgentPool {
   async get(sessionId: string): Promise<OpenHarnessAgent | undefined> {
     const entry = this.agents.get(sessionId);
     return entry?.state === "active" ? await entry.promise : undefined;
+  }
+
+  async acquireSession(sessionId: string): Promise<OpenHarnessAgent> {
+    const session = this.context.store.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    return await this.acquire(
+      session,
+      this.context.store.listMessages(sessionId),
+      this.context.store.listMessageParts(sessionId),
+    );
   }
 
   async acquire(
@@ -117,6 +142,7 @@ export class AgentPool {
       } finally {
         entry.subscription?.unsubscribe();
         entry.subscription = undefined;
+        entry.agent = undefined;
         if (this.agents.get(sessionId) === entry) this.agents.delete(sessionId);
       }
     })();
@@ -155,6 +181,7 @@ export class AgentPool {
       agent.loadHistory(transcriptToAgentMessages(history, parts));
       const subscription = this.context.bindAgent?.(agent, session);
       if (subscription) entry.subscription = subscription;
+      entry.agent = agent;
       return agent;
     } catch (error) {
       entry.subscription?.unsubscribe();
@@ -162,6 +189,13 @@ export class AgentPool {
       await agent.close();
       throw error;
     }
+  }
+
+  private entryHasActiveWork(entry: AgentPoolEntry): boolean {
+    if (entry.state === "closing" || !entry.agent) return true;
+    if (entry.agent.state !== "idle") return true;
+    return entry.agent.children.list().some((child) =>
+      child.state === "starting" || child.state === "running" || child.state === "closing");
   }
 }
 

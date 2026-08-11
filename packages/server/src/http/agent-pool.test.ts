@@ -15,6 +15,8 @@ const session = {
 
 function createAgent(close = vi.fn(async () => {})) {
   return {
+    state: "idle",
+    children: { list: () => [] },
     loadHistory: vi.fn(),
     close,
   } as any;

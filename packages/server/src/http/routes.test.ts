@@ -30,8 +30,8 @@ function runtimeSnapshot() {
 function daemonControl(overrides: Record<string, unknown> = {}) {
   return {
     runtimeSnapshot,
-    hasAnyActiveRuns: () => false,
-    hasActiveRunsForCwd: () => false,
+    acquireGlobalMutation: () => ({ release() {} }),
+    acquireCwdMutation: () => ({ release() {} }),
     closeAllRuntimes: async () => {},
     closeRuntimesForCwd: async () => {},
     runtimeInspectionAvailable: true,
@@ -109,7 +109,7 @@ describe("auth routes", () => {
         login: async () => ({ ok: true }),
         logout: async () => ({ ok: true }),
       },
-      control: daemonControl({ hasAnyActiveRuns: () => true }),
+      control: daemonControl({ acquireGlobalMutation: () => undefined }),
     });
 
     const response = await app.request("/login", {
@@ -132,7 +132,7 @@ describe("service routes", () => {
         list: async () => ({ plugins: [], warnings: [] }),
         setEnabled: async () => ({ message: "ok" }),
       },
-      control: daemonControl({ hasActiveRunsForCwd: () => true }),
+      control: daemonControl({ acquireCwdMutation: () => undefined }),
     });
 
     const response = await app.request("/plugins/reload", {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionApplicationError, SessionApplicationService } from "./session-application-service.js";
+import { DaemonOperationGate } from "./daemon-operation-gate.js";
 
 const session = {
   id: "s1",
@@ -54,6 +55,7 @@ function createService(options: {
     close: vi.fn(async () => {}),
     closeForCwd: vi.fn(async () => {}),
     closeAll: vi.fn(async () => {}),
+    hasActiveWorkForSession: vi.fn(() => false),
   };
   const broadcastSince = vi.fn();
   const liveChildren = {
@@ -66,14 +68,16 @@ function createService(options: {
     } : undefined),
     interrupt: vi.fn(async () => false),
   };
+  const operationGate = new DaemonOperationGate();
   const service = new SessionApplicationService({
     store: store as any,
     runEngine: runEngine as any,
     agentPool: agentPool as any,
     liveChildren,
+    operationGate,
     events: { checkpoint: () => 7, publishSince: broadcastSince },
   });
-  return { service, store, runEngine, agentPool, liveChildren, broadcastSince };
+  return { service, store, runEngine, agentPool, liveChildren, operationGate, broadcastSince };
 }
 
 describe("SessionApplicationService", () => {
@@ -201,6 +205,42 @@ describe("SessionApplicationService", () => {
     }));
     expect(agentPool.close).toHaveBeenCalledWith("s1");
     expect(broadcastSince).toHaveBeenCalledWith(7);
+  });
+
+  it("closes the runtime after changing the model", async () => {
+    const { service, store, agentPool } = createService();
+
+    await service.updateSession("s1", { model: "next-model" });
+
+    expect(store.updateSession).toHaveBeenCalledWith("s1", expect.objectContaining({ model: "next-model" }));
+    expect(agentPool.close).toHaveBeenCalledWith("s1");
+  });
+
+  it("blocks prompt admission until a runtime configuration change has closed the old agent", async () => {
+    const { service, agentPool, runEngine } = createService();
+    let finishClose!: () => void;
+    const closing = new Promise<void>((resolve) => { finishClose = resolve; });
+    agentPool.close.mockReturnValue(closing);
+
+    const updating = service.updateSession("s1", { model: "next-model" });
+    await expect(service.admitPrompt("s1", { content: "too early" })).rejects.toEqual(
+      expect.objectContaining<Partial<SessionApplicationError>>({ status: 409 }),
+    );
+    expect(runEngine.admitPromptAndMaybeRun).not.toHaveBeenCalled();
+
+    finishClose();
+    await updating;
+    await expect(service.admitPrompt("s1", { content: "now" })).resolves.toBeDefined();
+  });
+
+  it("does not warm a session through an active global mutation barrier", () => {
+    const { service, agentPool, operationGate } = createService();
+    const lease = operationGate.tryEnterBarrier({ kind: "global" }, () => true)!;
+
+    service.getSession("s1", { warm: true });
+
+    expect(agentPool.warm).not.toHaveBeenCalled();
+    lease.release();
   });
 
   it("resumes an interrupted run and records its recovery link", async () => {

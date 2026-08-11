@@ -49,23 +49,32 @@ describe("DaemonAgentEventProjector", () => {
         Object.assign(tasks.get(id), { status: result.status, output: result.output });
       }),
     };
+    const liveDelta = {
+      id: "delta-1",
+      seq: 9,
+      type: "session.message.part.delta",
+      sessionId: "child-session",
+      payload: { delta: "done" },
+      createdAt: 1,
+    };
     const transcript = {
       beginRun: vi.fn(() => ({ active: true })),
       projectSteeredInputs: vi.fn(),
       hasOpenTextPart: vi.fn(() => false),
-      projectStreamEvent: vi.fn(() => ({})),
+      projectStreamEvent: vi.fn(() => ({ liveEvent: liveDelta })),
       completeOpenTextPart: vi.fn(),
       finalizeRunParts: vi.fn(),
     };
     const liveChildren = { register: vi.fn(), unregister: vi.fn() };
     const rootAgent = { children: { get: vi.fn() } } as any;
+    const events = { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() };
     const projector = new DaemonAgentEventProjector({
       rootAgent,
       store: store as any,
       transcriptProjection: transcript as any,
       taskBridgeManager: { createBridge: vi.fn(() => bridge) } as any,
       liveChildren,
-      events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
+      events,
       log: vi.fn(),
     });
 
@@ -125,6 +134,7 @@ describe("DaemonAgentEventProjector", () => {
     expect(bridge.registerSessionTask).toHaveBeenCalledWith(expect.objectContaining({ id: "child-1" }));
     expect(liveChildren.register).toHaveBeenCalledWith("child-session", "child-1", rootAgent);
     expect(transcript.projectStreamEvent).toHaveBeenCalledWith(expect.anything(), { type: "text_delta", delta: "done" });
+    expect(events.publish).toHaveBeenCalledWith(liveDelta);
     expect(bridge.bindSessionTaskRun).toHaveBeenCalledTimes(2);
     expect(store.updateRun).toHaveBeenLastCalledWith("run-2", { status: "completed" });
     expect(bridge.completeSessionTask).toHaveBeenCalledWith("child-1", { status: "completed", output: "done" });
@@ -274,6 +284,7 @@ describe("DaemonAgentEventProjector", () => {
   it("retains and retries child close projection state after durable completion fails", async () => {
     const completeSessionTask = vi.fn()
       .mockRejectedValueOnce(new Error("store unavailable"))
+      .mockRejectedValueOnce(new Error("store still unavailable"))
       .mockResolvedValueOnce(undefined);
     const liveChildren = { unregister: vi.fn() };
     const store = {
@@ -309,7 +320,7 @@ describe("DaemonAgentEventProjector", () => {
 
     await projector.apply(closed);
 
-    expect(completeSessionTask).toHaveBeenCalledTimes(2);
+    expect(completeSessionTask).toHaveBeenCalledTimes(3);
     expect(store.appendEvent).toHaveBeenCalledOnce();
     expect((projector as any).children.size).toBe(0);
   });

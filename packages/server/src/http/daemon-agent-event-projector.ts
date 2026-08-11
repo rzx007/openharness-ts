@@ -15,7 +15,12 @@ interface ChildProjectionState {
   parentSessionId: string;
   taskId: string;
   bridge: SessionTaskBridge;
-  pendingClose?: Extract<AgentEvent, { type: "child.closed" }>;
+}
+
+interface PendingEventSettlement {
+  event: AgentEvent;
+  action: "retry-projection" | "compensate-child";
+  cause: unknown;
 }
 
 export interface DaemonAgentEventProjectorContext {
@@ -33,28 +38,41 @@ export class DaemonAgentEventProjector {
   private readonly transcripts = new Map<string, ActiveTranscriptProjectionState>();
   private readonly children = new Map<string, ChildProjectionState>();
   private lastAppliedSequence = 0;
+  private pendingSettlement?: PendingEventSettlement;
 
   constructor(private readonly context: DaemonAgentEventProjectorContext) {}
 
   async apply(event: AgentEvent): Promise<void> {
-    await this.reconcilePendingChildClosures();
+    await this.reconcilePendingSettlement();
     if (event.sequence <= this.lastAppliedSequence) return;
     try {
       await this.project(event);
       this.lastAppliedSequence = event.sequence;
     } catch (error) {
-      if (event.context.childId && event.type !== "child.created" && event.type !== "child.closed") {
-        await this.compensateChildProjectionFailure(event, error).catch((compensationError) => {
+      let recovered = false;
+      if (event.context.childId) {
+        const settlement: PendingEventSettlement = {
+          event,
+          action: event.type === "child.closed" ? "retry-projection" : "compensate-child",
+          cause: error,
+        };
+        try {
+          await this.settle(settlement);
+          this.lastAppliedSequence = event.sequence;
+          recovered = settlement.action === "retry-projection";
+        } catch (settlementError) {
+          this.pendingSettlement = settlement;
           this.context.log({
             level: "error",
             event: "session.child_projection.compensation_failed",
             traceId: event.context.traceId,
             sessionId: event.context.sessionId,
             runId: event.context.runId,
-            error: compensationError instanceof Error ? compensationError.message : String(compensationError),
+            error: settlementError instanceof Error ? settlementError.message : String(settlementError),
           });
-        });
+        }
       }
+      if (recovered) return;
       throw error;
     }
   }
@@ -126,14 +144,9 @@ export class DaemonAgentEventProjector {
       throw new Error(`Child session identity conflict: ${sessionId}`);
     }
 
-    let createdSession = false;
-    let bridge: SessionTaskBridge | undefined;
-    let taskId: string | undefined;
-    let liveRegistered = false;
-    try {
-      if (!existing) {
-        const before = this.context.events.checkpoint();
-        this.context.store.createSession({
+    if (!existing) {
+      const before = this.context.events.checkpoint();
+      this.context.store.createSession({
           id: sessionId,
           parentId: parent.id,
           cwd,
@@ -153,16 +166,15 @@ export class DaemonAgentEventProjector {
             childId,
             ...(worktree ? { worktree } : {}),
           },
-        });
-        createdSession = true;
-        this.context.events.publishSince(before);
-      }
+      });
+      this.context.events.publishSince(before);
+    }
 
-      bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
-      taskId = this.context.store.getSessionTask(childId)?.id;
-      if (!taskId) {
-        taskId = childId;
-        const registered = bridge.registerSessionTask({
+    const bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
+    let taskId = this.context.store.getSessionTask(childId)?.id;
+    if (!taskId) {
+      taskId = childId;
+      const registered = bridge.registerSessionTask({
           id: childId,
           description: spawn.description,
           cwd,
@@ -177,35 +189,15 @@ export class DaemonAgentEventProjector {
           onStop: async () => {
             await this.context.rootAgent.children.get(childId)?.interrupt("Child agent stopped");
           },
-        });
-        if (registered.id !== taskId) throw new Error(`Child task identity conflict: ${registered.id}/${taskId}`);
-      }
-      this.context.liveChildren.register(sessionId, childId, this.context.rootAgent);
-      liveRegistered = true;
-      this.children.set(childId, { childId, sessionId, parentSessionId: parent.id, taskId, bridge });
-    } catch (error) {
-      if (liveRegistered) this.context.liveChildren.unregister(sessionId, childId);
-      this.children.delete(childId);
-      const message = error instanceof Error ? error.message : String(error);
-      if (taskId && bridge) {
-        await bridge.completeSessionTask(taskId, { status: "failed", output: message }).catch(() => {});
-      }
-      if (createdSession) {
-        const before = this.context.events.checkpoint();
-        try {
-          this.context.store.archiveSession(sessionId);
-          this.context.events.publishSince(before);
-        } catch {
-          // Preserve the original projection failure.
-        }
-      }
-      throw error;
+      });
+      if (registered.id !== taskId) throw new Error(`Child task identity conflict: ${registered.id}/${taskId}`);
     }
+    this.context.liveChildren.register(sessionId, childId, this.context.rootAgent);
+    this.children.set(childId, { childId, sessionId, parentSessionId: parent.id, taskId, bridge });
   }
 
   private async projectChildClosed(event: Extract<AgentEvent, { type: "child.closed" }>): Promise<void> {
     const state = this.children.get(event.data.childId);
-    if (state) state.pendingClose = event;
     await this.completeChildCloseProjection(event, state);
   }
 
@@ -312,8 +304,10 @@ export class DaemonAgentEventProjector {
     const before = direct ? undefined : this.context.events.checkpoint();
     let applied: ReturnType<SessionTranscriptProjection["projectStreamEvent"]>;
     try {
-      applied = this.context.store.transaction(() =>
-        this.context.transcriptProjection.projectStreamEvent(state, stream));
+      applied = direct
+        ? this.context.transcriptProjection.projectStreamEvent(state, stream)
+        : this.context.store.transaction(() =>
+            this.context.transcriptProjection.projectStreamEvent(state, stream));
     } catch (error) {
       restoreTranscript(state, stateSnapshot);
       throw error;
@@ -338,8 +332,8 @@ export class DaemonAgentEventProjector {
         ...(stream.result.isError ? { error: "tool returned an error" } : {}),
       });
     }
-    if (direct && applied.liveEvent) this.context.events.publish(applied.liveEvent);
-    else if (before !== undefined) this.context.events.publishSince(before);
+    if (before !== undefined) this.context.events.publishSince(before);
+    if (applied.liveEvent) this.context.events.publish(applied.liveEvent);
   }
 
   private async finishRun(
@@ -444,13 +438,46 @@ export class DaemonAgentEventProjector {
     }
   }
 
-  private async reconcilePendingChildClosures(): Promise<void> {
-    for (const child of this.children.values()) {
-      if (!child.pendingClose) continue;
-      const event = child.pendingClose;
-      await this.completeChildCloseProjection(event, child);
-      this.lastAppliedSequence = Math.max(this.lastAppliedSequence, event.sequence);
+  private async compensateChildCreationFailure(event: AgentEvent, error: unknown): Promise<void> {
+    const childId = event.context.childId!;
+    const childSessionId = event.type === "child.created" ? event.data.sessionId : event.context.sessionId;
+    const message = error instanceof Error ? error.message : String(error);
+    this.context.liveChildren.unregister(childSessionId, childId);
+    this.children.delete(childId);
+
+    const task = this.context.store.getSessionTask(childId);
+    const parent = this.context.store.getSession(event.context.sessionId);
+    if (task && parent && (task.status === "pending" || task.status === "running")) {
+      const bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
+      await bridge.completeSessionTask(task.id, { status: "failed", output: message });
     }
+
+    const child = this.context.store.getSession(childSessionId);
+    if (child && child.status !== "archived") {
+      const before = this.context.events.checkpoint();
+      this.context.store.archiveSession(childSessionId);
+      this.context.events.publishSince(before);
+    }
+  }
+
+  private async reconcilePendingSettlement(): Promise<void> {
+    const pending = this.pendingSettlement;
+    if (!pending) return;
+    await this.settle(pending);
+    this.lastAppliedSequence = Math.max(this.lastAppliedSequence, pending.event.sequence);
+    if (this.pendingSettlement === pending) this.pendingSettlement = undefined;
+  }
+
+  private async settle(pending: PendingEventSettlement): Promise<void> {
+    if (pending.action === "retry-projection") {
+      await this.project(pending.event);
+      return;
+    }
+    if (pending.event.type === "child.created") {
+      await this.compensateChildCreationFailure(pending.event, pending.cause);
+      return;
+    }
+    await this.compensateChildProjectionFailure(pending.event, pending.cause);
   }
 
   private async completeChildCloseProjection(

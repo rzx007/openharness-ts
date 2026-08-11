@@ -7,6 +7,11 @@ import type { SessionRunEngine } from "./session-run-engine.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
 import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
+import {
+  DaemonOperationUnavailableError,
+  type DaemonOperationGate,
+  type DaemonOperationLease,
+} from "./daemon-operation-gate.js";
 import { agentMessagesToTranscript } from "./agent-transcript.js";
 import { estimateCostUsd } from "../usage.js";
 
@@ -25,6 +30,7 @@ export interface SessionMaintenanceServiceContext {
   runEngine: Pick<SessionRunEngine, "hasActiveRunsForCwd" | "hasWork">;
   agentPool: AgentPool;
   liveChildren: Pick<LiveChildAgentDirectory, "has">;
+  operationGate: Pick<DaemonOperationGate, "enter" | "tryEnterBarrier">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
@@ -36,11 +42,15 @@ export class SessionMaintenanceService {
   constructor(private readonly context: SessionMaintenanceServiceContext) {}
 
   async listMcpServers(sessionId: string): Promise<unknown[]> {
-    this.requireSession(sessionId);
+    const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
-    await this.context.agentPool.warm(sessionId);
-    const agent = await this.context.agentPool.get(sessionId);
-    return agent?.inspect().mcpServers ?? [];
+    this.requireRuntime();
+    const lease = this.enterSessionOperation(session);
+    try {
+      return (await this.context.agentPool.acquireSession(sessionId)).inspect().mcpServers;
+    } finally {
+      lease.release();
+    }
   }
 
   async getUsage(sessionId: string): Promise<{
@@ -54,19 +64,23 @@ export class SessionMaintenanceService {
   }> {
     const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
-    const messageCount = this.context.store.listMessages(sessionId).length;
-    await this.context.agentPool.warm(sessionId);
-    const agent = await this.context.agentPool.get(sessionId);
-    const usage = agent?.getUsage() ?? { inputTokens: 0, outputTokens: 0 };
-    return {
-      model: session.model,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cacheCreationTokens: usage.cacheCreationTokens ?? 0,
-      cacheReadTokens: usage.cacheReadTokens ?? 0,
-      messageCount: agent?.getHistory().length ?? messageCount,
-      estimatedCost: estimateCostUsd(session.model, usage.inputTokens, usage.outputTokens),
-    };
+    this.requireRuntime();
+    const lease = this.enterSessionOperation(session);
+    try {
+      const agent = await this.context.agentPool.acquireSession(sessionId);
+      const usage = agent.getUsage();
+      return {
+        model: session.model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheCreationTokens: usage.cacheCreationTokens ?? 0,
+        cacheReadTokens: usage.cacheReadTokens ?? 0,
+        messageCount: agent.getHistory().length,
+        estimatedCost: estimateCostUsd(session.model, usage.inputTokens, usage.outputTokens),
+      };
+    } finally {
+      lease.release();
+    }
   }
 
   async exportSession(
@@ -88,27 +102,27 @@ export class SessionMaintenanceService {
     messages: ReturnType<SessionStore["replaceTranscript"]>["messages"];
     parts: ReturnType<SessionStore["replaceTranscript"]>["parts"];
   }> {
-    this.requireSession(sessionId);
+    const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
     this.requireRuntime();
-    if (this.context.runEngine.hasWork(sessionId)) {
-      throw new SessionMaintenanceError(409, "Cannot compact while a run is active");
+    const lease = this.acquireSessionBarrier(session.id, session.cwd, "Cannot compact while a run is active");
+    try {
+      const agent = await this.context.agentPool.acquireSession(sessionId);
+      const before = this.context.events.checkpoint();
+      const compacted = await agent.compact();
+      const replaced = this.context.store.replaceTranscript({
+        sessionId,
+        messages: agentMessagesToTranscript(compacted.history),
+      });
+      this.context.events.publishSince(before);
+      return {
+        messageCount: compacted.afterMessageCount,
+        messages: replaced.messages,
+        parts: replaced.parts,
+      };
+    } finally {
+      lease.release();
     }
-    await this.context.agentPool.warm(sessionId);
-    const agent = await this.context.agentPool.get(sessionId);
-    if (!agent) throw new SessionMaintenanceError(501, "Agent runtime is not configured");
-    const before = this.context.events.checkpoint();
-    const compacted = await agent.compact();
-    const replaced = this.context.store.replaceTranscript({
-      sessionId,
-      messages: agentMessagesToTranscript(compacted.history),
-    });
-    this.context.events.publishSince(before);
-    return {
-      messageCount: compacted.afterMessageCount,
-      messages: replaced.messages,
-      parts: replaced.parts,
-    };
   }
 
   async rewind(sessionId: string, count: number): Promise<{
@@ -117,47 +131,54 @@ export class SessionMaintenanceService {
     messages: ReturnType<SessionStore["replaceTranscript"]>["messages"];
     parts: ReturnType<SessionStore["replaceTranscript"]>["parts"];
   }> {
-    this.requireSession(sessionId);
+    const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
-    if (this.context.runEngine.hasWork(sessionId)) {
-      throw new SessionMaintenanceError(409, "Cannot rewind while a run is active");
+    const lease = this.acquireSessionBarrier(session.id, session.cwd, "Cannot rewind while a run is active");
+    try {
+      const rewound = rewindTranscript(
+        this.context.store.listMessages(sessionId),
+        this.context.store.listMessageParts(sessionId),
+        count,
+      );
+      if (rewound.removed === 0) {
+        throw new SessionMaintenanceError(400, "No messages to rewind");
+      }
+      const before = this.context.events.checkpoint();
+      const replaced = this.context.store.replaceTranscript({
+        sessionId,
+        messages: rewound.kept,
+      });
+      await this.context.agentPool.close(sessionId);
+      this.context.events.publishSince(before);
+      return {
+        turns: rewound.turns,
+        removed: rewound.removed,
+        messages: replaced.messages,
+        parts: replaced.parts,
+      };
+    } finally {
+      lease.release();
     }
-    const rewound = rewindTranscript(
-      this.context.store.listMessages(sessionId),
-      this.context.store.listMessageParts(sessionId),
-      count,
-    );
-    if (rewound.removed === 0) {
-      throw new SessionMaintenanceError(400, "No messages to rewind");
-    }
-    const before = this.context.events.checkpoint();
-    const replaced = this.context.store.replaceTranscript({
-      sessionId,
-      messages: rewound.kept,
-    });
-    await this.context.agentPool.close(sessionId);
-    this.context.events.publishSince(before);
-    return {
-      turns: rewound.turns,
-      removed: rewound.removed,
-      messages: replaced.messages,
-      parts: replaced.parts,
-    };
   }
 
   async remember(sessionId: string): Promise<AgentRememberResult> {
     const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
     this.requireRuntime();
-    if (this.context.runEngine.hasActiveRunsForCwd(session.cwd)) {
+    const lease = this.context.operationGate.tryEnterBarrier({ kind: "cwd", cwd: session.cwd }, () =>
+      !this.context.runEngine.hasActiveRunsForCwd(session.cwd) &&
+      !this.context.agentPool.hasActiveWorkForCwd(session.cwd));
+    if (!lease) {
       throw new SessionMaintenanceError(409, "Cannot remember while session runs are active for this cwd");
     }
-    await this.context.agentPool.warm(sessionId);
-    const agent = await this.context.agentPool.get(sessionId);
-    if (!agent) throw new SessionMaintenanceError(501, "Agent runtime is not configured");
-    const result = await agent.remember();
-    await this.context.agentPool.closeForCwd(session.cwd);
-    return result;
+    try {
+      const agent = await this.context.agentPool.acquireSession(sessionId);
+      const result = await agent.remember();
+      await this.context.agentPool.closeForCwd(session.cwd);
+      return result;
+    } finally {
+      lease.release();
+    }
   }
 
   private requireSession(sessionId: string): NonNullable<ReturnType<SessionStore["getSession"]>> {
@@ -175,6 +196,27 @@ export class SessionMaintenanceService {
   private rejectLiveChild(sessionId: string): void {
     if (this.context.liveChildren.has(sessionId)) {
       throw new SessionMaintenanceError(409, "Cannot mutate or inspect a child runtime while it is live in its parent agent");
+    }
+  }
+
+  private acquireSessionBarrier(sessionId: string, cwd: string, message: string): DaemonOperationLease {
+    const lease = this.context.operationGate.tryEnterBarrier({ kind: "session", sessionId, cwd }, () =>
+      !this.context.runEngine.hasWork(sessionId) &&
+      !this.context.agentPool.hasActiveWorkForSession(sessionId));
+    if (!lease) throw new SessionMaintenanceError(409, message);
+    return lease;
+  }
+
+  private enterSessionOperation(
+    session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
+  ): DaemonOperationLease {
+    try {
+      return this.context.operationGate.enter({ sessionId: session.id, cwd: session.cwd });
+    } catch (error) {
+      if (error instanceof DaemonOperationUnavailableError) {
+        throw new SessionMaintenanceError(409, error.message);
+      }
+      throw error;
     }
   }
 }

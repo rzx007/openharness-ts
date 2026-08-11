@@ -10,6 +10,11 @@ import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "./agent-pool.js";
 import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
 import {
+  DaemonOperationUnavailableError,
+  type DaemonOperationGate,
+  type DaemonOperationLease,
+} from "./daemon-operation-gate.js";
+import {
   isRecord,
   jsonEqual,
   runtimeSessionMetadataChanged,
@@ -31,6 +36,7 @@ export interface SessionApplicationServiceContext {
   runEngine: SessionRunEngine;
   agentPool: AgentPool;
   liveChildren: Pick<LiveChildAgentDirectory, "has" | "send" | "interrupt">;
+  operationGate: Pick<DaemonOperationGate, "enter" | "tryEnterBarrier">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
@@ -64,7 +70,7 @@ export class SessionApplicationService {
   createSession(input: Parameters<SessionStore["createSession"]>[0]): ReturnType<SessionStore["createSession"]> {
     const before = this.context.events.checkpoint();
     const session = this.context.store.createSession(input);
-    void this.context.agentPool.warm(session.id);
+    this.warmWhenAdmitted(session);
     this.context.events.publishSince(before);
     return session;
   }
@@ -72,7 +78,7 @@ export class SessionApplicationService {
   getSession(sessionId: string, options: { warm?: boolean } = {}): ReturnType<SessionStore["getSession"]> {
     const session = this.context.store.getSession(sessionId);
     if (session && options.warm && !this.context.liveChildren.has(sessionId)) {
-      void this.context.agentPool.warm(sessionId);
+      this.warmWhenAdmitted(session);
     }
     return session;
   }
@@ -87,26 +93,43 @@ export class SessionApplicationService {
       ? { ...existing.metadata, ...input.metadata }
       : undefined;
     const runtimeMetadataChanged = metadata && runtimeSessionMetadataChanged(existing.metadata, metadata);
-    if (runtimeMetadataChanged && this.context.liveChildren.has(sessionId)) {
-      throw new SessionApplicationError(409, "Cannot update runtime settings while a child agent is live");
-    }
-    if (runtimeMetadataChanged && this.context.runEngine.hasWork(sessionId)) {
-      throw new SessionApplicationError(409, "Cannot update runtime session settings while a run is active");
-    }
+    const runtimeConfigurationChanged = Boolean(
+      runtimeMetadataChanged ||
+      (input.model !== undefined && input.model !== existing.model) ||
+      (input.agent !== undefined && (input.agent ?? undefined) !== existing.agent),
+    );
+    const lease = runtimeConfigurationChanged
+      ? this.acquireSessionMutation(existing, "Cannot update runtime session settings while the session is active")
+      : undefined;
 
-    const before = this.context.events.checkpoint();
-    const session = this.context.store.updateSession(sessionId, {
-      title: input.title,
-      model: input.model,
-      agent: input.agent,
-      metadata,
-    });
-    if (runtimeMetadataChanged) await this.context.agentPool.close(sessionId);
-    this.context.events.publishSince(before);
-    return session;
+    try {
+      const before = this.context.events.checkpoint();
+      const session = this.context.store.updateSession(sessionId, {
+        title: input.title,
+        model: input.model,
+        agent: input.agent,
+        metadata,
+      });
+      if (runtimeConfigurationChanged) await this.context.agentPool.close(sessionId);
+      this.context.events.publishSince(before);
+      return session;
+    } finally {
+      lease?.release();
+    }
   }
 
   async admitPrompt(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
+    const session = this.context.store.getSession(sessionId);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    const lease = this.enterSessionOperation(session);
+    try {
+      return await this.admitPromptWork(sessionId, input);
+    } finally {
+      lease.release();
+    }
+  }
+
+  private async admitPromptWork(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
     const delivery = input.delivery ?? "queue";
     const metadata = { ...(input.metadata ?? {}), ...(input.traceId ? { traceId: input.traceId } : {}) };
     if (this.context.liveChildren.has(sessionId) && input.id) {
@@ -169,69 +192,76 @@ export class SessionApplicationService {
     runId: string,
     input: ResumeSessionRunCommand,
   ): Promise<ResumeSessionRunResult> {
-    const sourceRun = this.context.store.getRun(runId);
-    if (!sourceRun || sourceRun.sessionId !== sessionId) {
-      throw new SessionApplicationError(404, "Interrupted run not found");
-    }
-    if (sourceRun.status !== "interrupted") {
-      throw new SessionApplicationError(409, "Only interrupted runs can be resumed");
-    }
-    if (!sourceRun.inputId) {
-      throw new SessionApplicationError(409, "This interrupted run has no prompt to replay");
-    }
-    const sourceInput = this.context.store.getInput(sourceRun.inputId);
-    if (!sourceInput || sourceInput.sessionId !== sessionId) {
-      throw new SessionApplicationError(409, "The original prompt is unavailable");
-    }
+    const session = this.context.store.getSession(sessionId);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    const lease = this.enterSessionOperation(session);
+    try {
+      const sourceRun = this.context.store.getRun(runId);
+      if (!sourceRun || sourceRun.sessionId !== sessionId) {
+        throw new SessionApplicationError(404, "Interrupted run not found");
+      }
+      if (sourceRun.status !== "interrupted") {
+        throw new SessionApplicationError(409, "Only interrupted runs can be resumed");
+      }
+      if (!sourceRun.inputId) {
+        throw new SessionApplicationError(409, "This interrupted run has no prompt to replay");
+      }
+      const sourceInput = this.context.store.getInput(sourceRun.inputId);
+      if (!sourceInput || sourceInput.sessionId !== sessionId) {
+        throw new SessionApplicationError(409, "The original prompt is unavailable");
+      }
 
-    const existingRecovery = this.context.store.listInputs(sessionId).find((candidate) =>
-      isRecord(candidate.metadata.recovery) && candidate.metadata.recovery.sourceRunId === sourceRun.id,
-    );
-    if (existingRecovery && existingRecovery.id === input.id) {
-      const existingRun = this.context.store.findRunByInput(existingRecovery.id);
-      return {
-        input: existingRecovery,
-        ...(existingRun ? { run: existingRun } : {}),
-        ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
-        ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
-        source_run: sourceRun,
-      };
-    }
-    if (existingRecovery) {
-      throw new SessionApplicationError(409, `Interrupted run already has a recovery: ${sourceRun.id}`);
-    }
-    if (!this.hasRuntime) {
-      throw new SessionApplicationError(409, "Session runtime is unavailable");
-    }
-    if (this.context.runEngine.hasWork(sessionId)) {
-      throw new SessionApplicationError(409, "Wait for the active session run before resuming interrupted work");
-    }
+      const existingRecovery = this.context.store.listInputs(sessionId).find((candidate) =>
+        isRecord(candidate.metadata.recovery) && candidate.metadata.recovery.sourceRunId === sourceRun.id,
+      );
+      if (existingRecovery && existingRecovery.id === input.id) {
+        const existingRun = this.context.store.findRunByInput(existingRecovery.id);
+        return {
+          input: existingRecovery,
+          ...(existingRun ? { run: existingRun } : {}),
+          ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
+          ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
+          source_run: sourceRun,
+        };
+      }
+      if (existingRecovery) {
+        throw new SessionApplicationError(409, `Interrupted run already has a recovery: ${sourceRun.id}`);
+      }
+      if (!this.hasRuntime) {
+        throw new SessionApplicationError(409, "Session runtime is unavailable");
+      }
+      if (this.context.runEngine.hasWork(sessionId)) {
+        throw new SessionApplicationError(409, "Wait for the active session run before resuming interrupted work");
+      }
 
-    const recovery = {
-      kind: "prompt_replay",
-      sourceRunId: sourceRun.id,
-      sourceInputId: sourceInput.id,
-    };
-    const resumed = await this.context.runEngine.admitPromptAndMaybeRun(sessionId, {
-      id: input.id,
-      content: sourceInput.content,
-      metadata: { ...(input.metadata ?? {}), recovery },
-      runMetadata: { recovery },
-      traceId: input.traceId,
-    });
-    const before = this.context.events.checkpoint();
-    this.context.store.appendEvent({
-      type: "session.run.recovery_requested",
-      sessionId,
-      payload: {
+      const recovery = {
+        kind: "prompt_replay",
         sourceRunId: sourceRun.id,
         sourceInputId: sourceInput.id,
-        recoveryInputId: resumed.input.id,
-        recoveryRunId: resumed.run?.id,
-      },
-    });
-    this.context.events.publishSince(before);
-    return { ...resumed, source_run: sourceRun };
+      };
+      const resumed = await this.context.runEngine.admitPromptAndMaybeRun(sessionId, {
+        id: input.id,
+        content: sourceInput.content,
+        metadata: { ...(input.metadata ?? {}), recovery },
+        runMetadata: { recovery },
+        traceId: input.traceId,
+      });
+      const before = this.context.events.checkpoint();
+      this.context.store.appendEvent({
+        type: "session.run.recovery_requested",
+        sessionId,
+        payload: {
+          sourceRunId: sourceRun.id,
+          sourceInputId: sourceInput.id,
+          recoveryInputId: resumed.input.id,
+          recoveryRunId: resumed.run?.id,
+        },
+      });
+      this.context.events.publishSince(before);
+      return { ...resumed, source_run: sourceRun };
+    } finally {
+      lease.release();
+    }
   }
 
   async interruptSession(sessionId: string): Promise<ReturnType<SessionRunEngine["interruptSession"]>> {
@@ -269,24 +299,73 @@ export class SessionApplicationService {
     const current = this.context.store.getSession(sessionId);
     if (!current) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     if (current.status === "archived") return current;
-    this.context.store.beginArchive(sessionId);
-    this.context.events.publishSince(beforeClosing);
-    const interrupted = this.context.runEngine.interruptSession(sessionId);
-    const liveInterrupt = this.context.liveChildren.interrupt(sessionId, "Session archived");
+    const lease = this.context.operationGate.tryEnterBarrier(
+      { kind: "session", sessionId, cwd: current.cwd },
+      () => true,
+    );
+    if (!lease) throw new SessionApplicationError(409, "Session is busy with another operation");
+    try {
+      this.context.store.beginArchive(sessionId);
+      this.context.events.publishSince(beforeClosing);
+      const interrupted = this.context.runEngine.interruptSession(sessionId);
+      const liveInterrupt = this.context.liveChildren.interrupt(sessionId, "Session archived");
 
-    // Closing the parent first makes the descendant snapshot stable: the
-    // event projector rejects child.created for closing sessions.
-    const children = this.context.store.listChildSessions(sessionId);
-    await liveInterrupt;
-    for (const child of children) await this.archiveSessionTree(child.id);
-    const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
-      .filter((runId): runId is string => !!runId);
-    await this.context.runEngine.waitForRuns(interruptedRunIds);
-    await this.context.agentPool.close(sessionId);
-    const before = this.context.events.checkpoint();
-    const session = this.context.store.archiveSession(sessionId);
-    this.context.events.publishSince(before);
-    return session;
+      // Closing the parent first makes the descendant snapshot stable: the
+      // event projector rejects child.created for closing sessions.
+      const children = this.context.store.listChildSessions(sessionId);
+      await liveInterrupt;
+      for (const child of children) await this.archiveSessionTree(child.id);
+      const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds]
+        .filter((runId): runId is string => !!runId);
+      await this.context.runEngine.waitForRuns(interruptedRunIds);
+      await this.context.agentPool.close(sessionId);
+      const before = this.context.events.checkpoint();
+      const session = this.context.store.archiveSession(sessionId);
+      this.context.events.publishSince(before);
+      return session;
+    } finally {
+      lease.release();
+    }
+  }
+
+  private enterSessionOperation(
+    session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
+  ): DaemonOperationLease {
+    try {
+      return this.context.operationGate.enter({ sessionId: session.id, cwd: session.cwd });
+    } catch (error) {
+      if (error instanceof DaemonOperationUnavailableError) {
+        throw new SessionApplicationError(409, error.message);
+      }
+      throw error;
+    }
+  }
+
+  private acquireSessionMutation(
+    session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
+    message: string,
+  ): DaemonOperationLease {
+    const lease = this.context.operationGate.tryEnterBarrier(
+      { kind: "session", sessionId: session.id, cwd: session.cwd },
+      () => !this.context.liveChildren.has(session.id) &&
+        !this.context.runEngine.hasWork(session.id) &&
+        !this.context.agentPool.hasActiveWorkForSession(session.id),
+    );
+    if (!lease) throw new SessionApplicationError(409, message);
+    return lease;
+  }
+
+  private warmWhenAdmitted(
+    session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
+  ): void {
+    let lease: DaemonOperationLease;
+    try {
+      lease = this.context.operationGate.enter({ sessionId: session.id, cwd: session.cwd });
+    } catch (error) {
+      if (error instanceof DaemonOperationUnavailableError) return;
+      throw error;
+    }
+    void this.context.agentPool.warm(session.id).finally(() => lease.release());
   }
 
   private descendantSessionIds(sessionId: string): string[] {

@@ -48,6 +48,8 @@ export interface SessionRunEngineContext {
 export class SessionRunEngine {
   private readonly runCoordinator = new SessionRunCoordinator();
   private readonly runPromises = new Map<string, Promise<void>>();
+  private accepting = true;
+  private stopPromise?: Promise<void>;
   private readonly pendingAdmissions = new Map<string, {
     sessionId: string;
     delivery: "queue" | "steer";
@@ -80,6 +82,22 @@ export class SessionRunEngine {
     return this.context.store
       .listSessions({ cwd, includeArchived: true })
       .some((session) => this.hasWork(session.id));
+  }
+
+  async stopAndDrain(reason = "Daemon shutting down"): Promise<void> {
+    if (this.stopPromise) return await this.stopPromise;
+    this.accepting = false;
+    const stopping = (async () => {
+      const runIds: string[] = [];
+      for (const sessionId of this.runCoordinator.sessionIds()) {
+        const interrupted = this.interruptSession(sessionId, reason);
+        if (interrupted.activeRunId) runIds.push(interrupted.activeRunId);
+        runIds.push(...interrupted.queuedRunIds);
+      }
+      await this.waitForRuns(runIds);
+    })();
+    this.stopPromise = stopping;
+    await stopping;
   }
 
   async awaitRun(sessionId: string, runId: string): Promise<AwaitSessionRunResult> {
@@ -117,6 +135,7 @@ export class SessionRunEngine {
   }
 
   admitPromptAndMaybeRun(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
+    if (!this.accepting) return Promise.reject(new Error("Session run engine is stopping"));
     if (!input.id) return this.admitPrompt(sessionId, input);
     const delivery = input.delivery ?? "queue";
     const metadata = withoutTraceId(input.metadata ?? {});
@@ -225,18 +244,25 @@ export class SessionRunEngine {
     return { input: admitted, ...(run ? { run, queue_state: queueState } : {}) };
   }
 
-  interruptSession(sessionId: string): ReturnType<SessionRunCoordinator["interrupt"]> {
+  interruptSession(
+    sessionId: string,
+    reason?: string,
+  ): ReturnType<SessionRunCoordinator["interrupt"]> {
     const before = this.context.events.checkpoint();
-    const result = this.runCoordinator.interrupt(sessionId);
+    const result = this.runCoordinator.interrupt(sessionId, reason);
     if (result.interrupted) {
       this.context.store.transaction(() => {
         for (const runId of result.queuedRunIds) {
-          this.context.store.updateRun(runId, { status: "interrupted", error: "Queued run interrupted" });
+          this.context.store.updateRun(runId, { status: "interrupted", error: reason ?? "Queued run interrupted" });
         }
         this.context.store.appendEvent({
           type: "session.run.interrupt_requested",
           sessionId,
-          payload: { runId: result.activeRunId, queuedRunIds: result.queuedRunIds },
+          payload: {
+            runId: result.activeRunId,
+            queuedRunIds: result.queuedRunIds,
+            reason: reason ?? "Run interrupted",
+          },
         });
       });
       this.context.events.publishSince(before);

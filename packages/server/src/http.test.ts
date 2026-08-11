@@ -52,6 +52,9 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
     let history: Message[] = [];
     let listener: AgentEventListener | undefined;
     let sequence = 0;
+    let state: OpenHarnessAgent["state"] = "idle";
+    let activeHandle: AgentRunHandle | undefined;
+    let closePromise: Promise<void> | undefined;
     const emit = async (input: AgentEventInput, eventContext: AgentEventContext): Promise<void> => {
       const event = {
         ...input,
@@ -64,6 +67,7 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
     };
     return {
       id: context.session.id,
+      get state() { return state; },
       events: {
         subscribe(next) {
           listener = next;
@@ -72,6 +76,8 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
       },
       children: program.children ?? { get: () => undefined, getBySessionId: () => undefined, list: () => [] },
       submitMessage(content, options = {}) {
+        if (state !== "idle") throw new Error(`Agent is ${state}`);
+        state = "running";
         const ids = options.ids ?? { inputId: "test-input", runId: "test-run", traceId: "test-trace" };
         const controller = new AbortController();
         const pending: AgentChildInput[] = [];
@@ -142,6 +148,8 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
             throw error;
           } finally {
             options.signal?.removeEventListener("abort", onAbort);
+            if (activeHandle === handle) activeHandle = undefined;
+            if (state === "running") state = "idle";
           }
         });
         handle = {
@@ -175,6 +183,7 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
             await result.catch(() => {});
           },
         };
+        activeHandle = handle;
         return handle;
       },
       async runMessage(content, options) { return await this.submitMessage(content, options).result; },
@@ -183,15 +192,38 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
       clear: () => { history = []; },
       setModel: () => {},
       compact: async (): Promise<AgentCompactResult> => {
-        const beforeMessageCount = history.length;
-        const result = await program.compact?.();
-        if (result) history = testTranscriptToMessages(result.transcript);
-        return { history: [...history], beforeMessageCount, afterMessageCount: result?.messageCount ?? history.length };
+        if (state !== "idle") throw new Error(`Agent is ${state}`);
+        state = "maintaining";
+        try {
+          const beforeMessageCount = history.length;
+          const result = await program.compact?.();
+          if (result) history = testTranscriptToMessages(result.transcript);
+          return { history: [...history], beforeMessageCount, afterMessageCount: result?.messageCount ?? history.length };
+        } finally {
+          if (state === "maintaining") state = "idle";
+        }
       },
-      remember: async () => await program.remember?.() ?? ({ skipped: true, writtenIds: [], titles: [] }),
+      remember: async () => {
+        if (state !== "idle") throw new Error(`Agent is ${state}`);
+        state = "maintaining";
+        try {
+          return await program.remember?.() ?? ({ skipped: true, writtenIds: [], titles: [] });
+        } finally {
+          if (state === "maintaining") state = "idle";
+        }
+      },
       getUsage: () => program.getUsage?.() ?? ({ inputTokens: 0, outputTokens: 0 }),
       inspect: () => program.inspect?.() ?? ({ model: context.session.model, tools: [], hooks: [], mcpServers: [] }),
-      close: () => program.close(),
+      close: () => {
+        if (closePromise) return closePromise;
+        state = "closing";
+        closePromise = (async () => {
+          await activeHandle?.interrupt("Agent closed");
+          await program.close();
+          state = "closed";
+        })();
+        return closePromise;
+      },
     };
   };
 }
@@ -2137,9 +2169,13 @@ describe("OpenHarnessHttpServer", () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime(context) {
         return {
-          async runPrompt() {
+          async runPrompt(input) {
             started.resolve();
-            await new Promise<void>(() => {});
+            await new Promise<void>((_resolve, reject) => {
+              const interrupt = () => reject(new Error(String(input.signal.reason ?? "Run interrupted")));
+              if (input.signal.aborted) interrupt();
+              else input.signal.addEventListener("abort", interrupt, { once: true });
+            });
             return { messages: [] };
           },
           async close() {
@@ -2380,6 +2416,14 @@ describe("OpenHarnessHttpServer", () => {
         body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m" }),
       });
 
+      const liveAbort = new AbortController();
+      const liveStream = await fetch(`${baseUrl}/events/stream?sessionId=s1`, {
+        headers: auth(token),
+        signal: liveAbort.signal,
+      });
+      const liveReader = liveStream.body!.getReader();
+      const liveDecoder = new TextDecoder();
+
       const prompt = await fetch(`${baseUrl}/sessions/s1/prompts`, {
         method: "POST",
         headers: { ...auth(token), "content-type": "application/json" },
@@ -2396,7 +2440,18 @@ describe("OpenHarnessHttpServer", () => {
           event.type === "session.run.updated" &&
           (event.payload?.run as { status?: string } | undefined)?.status === "completed",
       );
-      expect(events.map((event) => event.type)).toContain("session.message.part.delta");
+      expect(events.map((event) => event.type)).not.toContain("session.message.part.delta");
+
+      let liveText = "";
+      for (let i = 0; i < 30 && !liveText.includes("session.message.part.delta"); i++) {
+        const chunk = await liveReader.read();
+        if (chunk.done) break;
+        liveText += liveDecoder.decode(chunk.value, { stream: true });
+      }
+      await liveReader.cancel();
+      liveAbort.abort();
+      expect(liveText).toContain("event: session.message.part.delta");
+      expect(liveText).toContain('"delta":"hello"');
 
       const messages = await (await fetch(`${baseUrl}/sessions/s1/messages`, { headers: auth(token) })).json() as {
         messages: Array<{ role: string; inputId?: string }>;

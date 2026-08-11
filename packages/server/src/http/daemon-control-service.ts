@@ -3,15 +3,17 @@ import type { SessionStore } from "@openharness/services";
 import type { HookInfo } from "../settings-api.js";
 import type { SessionRunEngine } from "./session-run-engine.js";
 import type { AgentPool } from "./agent-pool.js";
+import type { DaemonOperationGate, DaemonOperationLease } from "./daemon-operation-gate.js";
 import { countByStatus, type OpenHarnessRuntimeSnapshot } from "./support.js";
 
 export interface DaemonControlServiceContext {
   store: SessionStore;
   runEngine: Pick<
     SessionRunEngine,
-    "activeRunId" | "hasActiveRunsForCwd" | "hasAnyActiveRuns" | "queuedRunIds"
+    "activeRunId" | "hasActiveRunsForCwd" | "hasAnyActiveRuns" | "queuedRunIds" | "stopAndDrain"
   >;
   agentPool: AgentPool;
+  operationGate: DaemonOperationGate;
   startedAt: number;
   sseClientCount(): number;
 }
@@ -54,11 +56,19 @@ export class DaemonControlService {
   }
 
   hasAnyActiveRuns(): boolean {
-    return this.context.runEngine.hasAnyActiveRuns();
+    return this.context.runEngine.hasAnyActiveRuns() || this.context.agentPool.hasActiveWork();
   }
 
   hasActiveRunsForCwd(cwd: string): boolean {
-    return this.context.runEngine.hasActiveRunsForCwd(cwd);
+    return this.context.runEngine.hasActiveRunsForCwd(cwd) || this.context.agentPool.hasActiveWorkForCwd(cwd);
+  }
+
+  acquireGlobalMutation(): DaemonOperationLease | undefined {
+    return this.context.operationGate.tryEnterBarrier({ kind: "global" }, () => !this.hasAnyActiveRuns());
+  }
+
+  acquireCwdMutation(cwd: string): DaemonOperationLease | undefined {
+    return this.context.operationGate.tryEnterBarrier({ kind: "cwd", cwd }, () => !this.hasActiveRunsForCwd(cwd));
   }
 
   async closeAllRuntimes(): Promise<void> {
@@ -69,13 +79,26 @@ export class DaemonControlService {
     await this.context.agentPool.closeForCwd(cwd);
   }
 
+  async shutdown(): Promise<void> {
+    await this.context.operationGate.beginShutdown();
+    await this.context.runEngine.stopAndDrain();
+    await this.context.agentPool.closeAll();
+    this.context.operationGate.markClosed();
+  }
+
   sessionExists(sessionId: string): boolean {
     return this.context.store.getSession(sessionId) !== undefined;
   }
 
   async inspectRuntimeHooks(sessionId: string): Promise<HookInfo[]> {
-    await this.context.agentPool.warm(sessionId);
-    const agent = await this.context.agentPool.get(sessionId);
-    return agent?.inspect().hooks.map((hook) => ({ ...hook, origin: "runtime" as const })) ?? [];
+    const session = this.context.store.getSession(sessionId);
+    if (!session) return [];
+    const lease = this.context.operationGate.enter({ sessionId, cwd: session.cwd });
+    try {
+      const agent = await this.context.agentPool.acquireSession(sessionId);
+      return agent.inspect().hooks.map((hook) => ({ ...hook, origin: "runtime" as const }));
+    } finally {
+      lease.release();
+    }
   }
 }

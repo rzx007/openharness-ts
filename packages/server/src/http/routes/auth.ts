@@ -6,7 +6,7 @@ import type { DaemonControlService } from "../daemon-control-service.js";
 
 export interface AuthRoutesContext {
   authService?: AuthService;
-  control: Pick<DaemonControlService, "closeAllRuntimes" | "hasAnyActiveRuns">;
+  control: Pick<DaemonControlService, "acquireGlobalMutation" | "closeAllRuntimes">;
 }
 
 export function createAuthRoutes(context: AuthRoutesContext): Hono {
@@ -25,7 +25,8 @@ export function createAuthRoutes(context: AuthRoutesContext): Hono {
       if (typeof body.provider !== "string" || !body.provider.trim()) {
         return errorResponse(400, "provider is required");
       }
-      if (context.control.hasAnyActiveRuns()) {
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease) {
         return errorResponse(409, "Cannot update authentication while session runs are active");
       }
       try {
@@ -37,6 +38,8 @@ export function createAuthRoutes(context: AuthRoutesContext): Hono {
         return jsonResponse(result);
       } catch (error) {
         return errorResponse(400, error instanceof Error ? error.message : String(error));
+      } finally {
+        lease.release();
       }
     })
     .post("/logout", async (c) => {
@@ -45,7 +48,8 @@ export function createAuthRoutes(context: AuthRoutesContext): Hono {
       if (typeof body.provider !== "string" || !body.provider.trim()) {
         return errorResponse(400, "provider is required");
       }
-      if (context.control.hasAnyActiveRuns()) {
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease) {
         return errorResponse(409, "Cannot update authentication while session runs are active");
       }
       try {
@@ -54,6 +58,8 @@ export function createAuthRoutes(context: AuthRoutesContext): Hono {
         return jsonResponse(result);
       } catch (error) {
         return errorResponse(400, error instanceof Error ? error.message : String(error));
+      } finally {
+        lease.release();
       }
     });
 }

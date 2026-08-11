@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionMaintenanceService } from "./session-maintenance-service.js";
+import { DaemonOperationGate } from "./daemon-operation-gate.js";
 
 const session = {
   id: "s1",
@@ -27,20 +28,23 @@ function createMaintenance(agent: Record<string, any>) {
   };
   const agentPool = {
     configured: true,
-    warm: vi.fn(async () => {}),
-    get: vi.fn(async () => agent),
+    acquireSession: vi.fn(async () => agent),
+    hasActiveWorkForSession: vi.fn(() => false),
+    hasActiveWorkForCwd: vi.fn(() => false),
     close: vi.fn(async () => {}),
     closeForCwd: vi.fn(async () => {}),
   };
   const broadcastSince = vi.fn();
+  const operationGate = new DaemonOperationGate();
   const maintenance = new SessionMaintenanceService({
     store: store as any,
     runEngine: runEngine as any,
     agentPool: agentPool as any,
     liveChildren: { has: vi.fn(() => false) },
+    operationGate,
     events: { checkpoint: () => 7, publishSince: broadcastSince },
   });
-  return { maintenance, store, runEngine, agentPool, broadcastSince, replaced };
+  return { maintenance, store, runEngine, agentPool, operationGate, broadcastSince, replaced };
 }
 
 describe("SessionMaintenanceService", () => {
@@ -91,5 +95,28 @@ describe("SessionMaintenanceService", () => {
 
     await expect(maintenance.remember("s1")).resolves.toBe(remembered);
     expect(agentPool.closeForCwd).toHaveBeenCalledWith("/repo");
+  });
+
+  it("holds a session barrier for the complete asynchronous compact operation", async () => {
+    let finish!: () => void;
+    const compact = vi.fn(() => new Promise<any>((resolve) => {
+      finish = () => resolve({ history: [], beforeMessageCount: 1, afterMessageCount: 0 });
+    }));
+    const { maintenance, operationGate } = createMaintenance({ compact });
+
+    const running = maintenance.compact("s1");
+    await vi.waitFor(() => expect(compact).toHaveBeenCalledOnce());
+    expect(() => operationGate.enter({ sessionId: "s1", cwd: "/repo" })).toThrow(/blocked/);
+
+    finish();
+    await running;
+    expect(() => operationGate.enter({ sessionId: "s1", cwd: "/repo" })).not.toThrow();
+  });
+
+  it("propagates required runtime creation failures", async () => {
+    const { maintenance, agentPool } = createMaintenance({});
+    agentPool.acquireSession.mockRejectedValueOnce(new Error("provider startup failed"));
+
+    await expect(maintenance.listMcpServers("s1")).rejects.toThrow("provider startup failed");
   });
 });

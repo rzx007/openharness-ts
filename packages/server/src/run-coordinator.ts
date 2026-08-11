@@ -97,23 +97,25 @@ export class SessionRunCoordinator {
     return { merged: true, activeRunId: lane.active.runId, delivery };
   }
 
-  interrupt(sessionId: string): InterruptSessionResult {
+  interrupt(sessionId: string, reason?: string): InterruptSessionResult {
     const lane = this.lanes.get(sessionId);
     if (!lane) return { queuedRunIds: [], interrupted: false };
 
     const queuedRunIds = lane.queue.map((task) => task.runId);
     for (const task of lane.queue.splice(0)) {
-      const error = new RunInterruptedError("Queued run interrupted");
-      task.controller.abort();
+      const message = reason ?? "Queued run interrupted";
+      const error = new RunInterruptedError(message);
+      task.controller.abort(message);
       this.rejectSteers(task, error);
       task.reject(error);
     }
 
     const activeRunId = lane.active?.runId;
     if (lane.active) {
-      this.rejectSteers(lane.active, new RunInterruptedError("Steered input interrupted"));
-      lane.active.controller.abort();
-      void lane.active.handle?.interrupt("Run interrupted");
+      const message = reason ?? "Run interrupted";
+      this.rejectSteers(lane.active, new RunInterruptedError(reason ?? "Steered input interrupted"));
+      lane.active.controller.abort(message);
+      void lane.active.handle?.interrupt(message);
     }
     return {
       ...(activeRunId ? { activeRunId } : {}),
@@ -133,6 +135,10 @@ export class SessionRunCoordinator {
   hasWork(sessionId: string): boolean {
     const lane = this.lanes.get(sessionId);
     return !!lane?.active || (lane?.queue.length ?? 0) > 0;
+  }
+
+  sessionIds(): string[] {
+    return [...this.lanes.keys()];
   }
 
   private getLane(sessionId: string): SessionLane {
@@ -177,8 +183,9 @@ export class SessionRunCoordinator {
           signal: task.controller.signal,
           registerHandle: async (handle) => {
             if (task.controller.signal.aborted) {
-              await handle.interrupt("Run interrupted");
-              throw new RunInterruptedError();
+              const message = abortReason(task.controller.signal, "Run interrupted");
+              await handle.interrupt(message);
+              throw new RunInterruptedError(message);
             }
             task.handle = handle;
             this.flushSteers(task);
@@ -276,4 +283,10 @@ export class SessionRunCoordinator {
       }
     }
   }
+}
+
+function abortReason(signal: AbortSignal, fallback: string): string {
+  if (typeof signal.reason === "string" && signal.reason) return signal.reason;
+  if (signal.reason instanceof Error && signal.reason.message) return signal.reason.message;
+  return fallback;
 }

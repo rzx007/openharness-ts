@@ -201,6 +201,39 @@ describe("SessionRunEngine", () => {
     pending.resolve();
     await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledTimes(2));
   });
+
+  it("stops admission, interrupts the active lane, and never starts queued work during shutdown", async () => {
+    const store = createStore();
+    const activeDone = deferred<void>();
+    const handle = runHandle(
+      activeDone.promise,
+      vi.fn(),
+      vi.fn(async () => activeDone.resolve()),
+    );
+    const runExecutor = {
+      execute: vi.fn(async (_input, context) => {
+        await context.registerHandle(handle);
+        await handle.result;
+      }),
+    };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    await engine.admitPromptAndMaybeRun("s1", { content: "active" });
+    await engine.admitPromptAndMaybeRun("s1", { content: "queued" });
+    await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
+
+    await engine.stopAndDrain();
+
+    expect(runExecutor.execute).toHaveBeenCalledOnce();
+    expect(handle.interrupt).toHaveBeenCalledWith("Daemon shutting down");
+    await expect(engine.admitPromptAndMaybeRun("s1", { content: "too late" }))
+      .rejects.toThrow("stopping");
+  });
 });
 
 function createStore() {

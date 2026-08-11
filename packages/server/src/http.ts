@@ -56,6 +56,7 @@ import { createSystemRoutes } from "./http/routes/system.js";
 import { createTaskRoutes } from "./http/routes/task.js";
 import { DaemonAgentEventProjector } from "./http/daemon-agent-event-projector.js";
 import { DaemonControlService } from "./http/daemon-control-service.js";
+import { DaemonOperationGate } from "./http/daemon-operation-gate.js";
 import { RequestTraceRegistry } from "./http/request-trace-registry.js";
 import { SessionApplicationService } from "./http/session-application-service.js";
 import { SessionEventPublisher } from "./http/session-event-publisher.js";
@@ -142,6 +143,7 @@ export class OpenHarnessHttpServer {
   private readonly sessionTaskService: SessionTaskService;
   /** Durable child session id -> framework child directory routing. */
   private readonly liveChildren = new LiveChildAgentDirectory();
+  private readonly operationGate = new DaemonOperationGate();
   /** 每个 durable session 一份 warm OpenHarnessAgent。 */
   private readonly agentPool: AgentPool;
   /** Prompt 准入 + session lane 调度（queue/steer/interrupt）。 */
@@ -159,6 +161,7 @@ export class OpenHarnessHttpServer {
   private readonly startedAt = Date.now();
   private listener?: Listener;
   private listenResult?: ListenResult;
+  private closePromise?: Promise<void>;
 
   constructor(options: OpenHarnessServerOptions = {}) {
     this.app = new Hono();
@@ -257,6 +260,7 @@ export class OpenHarnessHttpServer {
       store: this.store,
       runEngine: this.runEngine,
       agentPool: this.agentPool,
+      operationGate: this.operationGate,
       startedAt: this.startedAt,
       sseClientCount: () => this.eventHub.clientCount,
     });
@@ -265,6 +269,7 @@ export class OpenHarnessHttpServer {
       runEngine: this.runEngine,
       agentPool: this.agentPool,
       liveChildren: this.liveChildren,
+      operationGate: this.operationGate,
       events: this.sessionEvents,
     });
     this.sessionApplication = new SessionApplicationService({
@@ -272,6 +277,7 @@ export class OpenHarnessHttpServer {
       runEngine: this.runEngine,
       agentPool: this.agentPool,
       liveChildren: this.liveChildren,
+      operationGate: this.operationGate,
       events: this.sessionEvents,
     });
     this.sessionQueries = new SessionQueryService(this.store);
@@ -311,18 +317,27 @@ export class OpenHarnessHttpServer {
     });
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    const closing = this.closeWork();
+    this.closePromise = closing;
+    return closing;
+  }
+
+  private async closeWork(): Promise<void> {
+    const shutdown = this.daemonControl.shutdown();
     this.eventHub.closeClients();
-    await this.daemonControl.closeAllRuntimes();
-    if (this.listener) {
-      await new Promise<void>((resolve, reject) => {
-        this.listener!.close((error?: Error) => {
-          if (error) reject(error);
-          else resolve();
-        });
-      });
-      this.listener = undefined;
-    }
+    const listener = this.listener;
+    this.listener = undefined;
+    const listenerClosed = listener
+      ? new Promise<void>((resolve, reject) => {
+          listener.close((error?: Error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        })
+      : Promise.resolve();
+    await Promise.all([shutdown, listenerClosed]);
     this.store.close();
   }
 

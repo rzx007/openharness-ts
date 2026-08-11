@@ -26,8 +26,8 @@ export interface ServiceRoutesContext {
     DaemonControlService,
     | "closeAllRuntimes"
     | "closeRuntimesForCwd"
-    | "hasActiveRunsForCwd"
-    | "hasAnyActiveRuns"
+    | "acquireCwdMutation"
+    | "acquireGlobalMutation"
     | "inspectRuntimeHooks"
     | "runtimeInspectionAvailable"
     | "sessionExists"
@@ -76,7 +76,8 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
     })
     .post("/profile/init", async () => {
       if (!context.profileService) return errorResponse(501, "Profile service is not configured");
-      if (context.control.hasAnyActiveRuns()) {
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease) {
         return errorResponse(409, "Cannot initialize profile while session runs are active");
       }
       try {
@@ -85,6 +86,8 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         return jsonResponse(result);
       } catch (error) {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
+      } finally {
+        lease.release();
       }
     })
     .get("/output-styles", async () => {
@@ -123,7 +126,8 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
       const body = await readJson(c);
       const cwd = typeof body.cwd === "string" ? body.cwd : c.req.query("cwd") ?? undefined;
       if (!cwd) return errorResponse(400, "cwd is required");
-      if (context.control.hasActiveRunsForCwd(cwd)) {
+      const lease = context.control.acquireCwdMutation(cwd);
+      if (!lease) {
         return errorResponse(409, "Cannot reload plugins while session runs are active for this cwd");
       }
       try {
@@ -135,6 +139,8 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         });
       } catch (error) {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
+      } finally {
+        lease.release();
       }
     })
     .get("/agent-personas", async () => {
@@ -177,7 +183,8 @@ async function setPluginEnabled(
 ): Promise<Response> {
   if (!context.pluginService) return errorResponse(501, "Plugin service is not configured");
   if (!name) return errorResponse(400, "plugin name is required");
-  if (context.control.hasAnyActiveRuns()) {
+  const lease = context.control.acquireGlobalMutation();
+  if (!lease) {
     return errorResponse(409, "Cannot update plugins while session runs are active");
   }
   try {
@@ -186,5 +193,7 @@ async function setPluginEnabled(
     return jsonResponse({ message: result.message });
   } catch (error) {
     return errorResponse(400, error instanceof Error ? error.message : String(error));
+  } finally {
+    lease.release();
   }
 }
