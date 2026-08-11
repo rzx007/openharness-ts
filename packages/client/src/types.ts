@@ -343,7 +343,7 @@ export interface OpenHarnessClientState {
   /** 按 `updatedAt` 降序的 session id 列表。 */
   sessionOrder: string[];
   buckets: Record<string, SessionBucket>;
-  /** 已应用事件，按 seq 去重。 */
+  /** Durable replay events indexed by seq; live text deltas are not retained. */
   eventsBySeq: Record<number, SessionEventRecord>;
   /** 当前已应用到的最大事件序号，用作 SSE cursor。 */
   lastSeq: number;

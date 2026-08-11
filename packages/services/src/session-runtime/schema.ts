@@ -127,3 +127,8 @@ export const sessionEvents = sqliteTable("session_event", {
 }, (table) => [
   index("session_event_session_seq_idx").on(table.sessionId, table.seq),
 ]);
+
+export const sessionEventSequence = sqliteTable("session_event_sequence", {
+  id: integer("id").primaryKey(),
+  reservedThrough: integer("reserved_through").notNull(),
+});

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,7 +54,26 @@ interface SessionState {
 
 export interface SessionStoreOptions {
   path: string;
+  deltaFlushIntervalMs?: number;
+  deltaFlushBytes?: number;
 }
+
+interface StoreMutations {
+  sessions: Set<string>;
+  inputs: Set<string>;
+  messages: Set<string>;
+  parts: Set<string>;
+  runs: Set<string>;
+  tasks: Set<string>;
+  permissions: Set<string>;
+  events: Set<string>;
+  deletedMessages: Set<string>;
+  deletedParts: Set<string>;
+}
+
+const DEFAULT_DELTA_FLUSH_INTERVAL_MS = 150;
+const DEFAULT_DELTA_FLUSH_BYTES = 8 * 1024;
+const EVENT_SEQUENCE_BLOCK_SIZE = 1024;
 
 function now(): number {
   return Date.now();
@@ -87,6 +107,36 @@ function decode(value: string | null): Record<string, unknown> {
 
 function isDurableEvent(event: SessionEventRecord): boolean {
   return event.type !== "session.message.part.delta";
+}
+
+function emptyMutations(): StoreMutations {
+  return {
+    sessions: new Set(),
+    inputs: new Set(),
+    messages: new Set(),
+    parts: new Set(),
+    runs: new Set(),
+    tasks: new Set(),
+    permissions: new Set(),
+    events: new Set(),
+    deletedMessages: new Set(),
+    deletedParts: new Set(),
+  };
+}
+
+function cloneMutations(value: StoreMutations): StoreMutations {
+  return {
+    sessions: new Set(value.sessions),
+    inputs: new Set(value.inputs),
+    messages: new Set(value.messages),
+    parts: new Set(value.parts),
+    runs: new Set(value.runs),
+    tasks: new Set(value.tasks),
+    permissions: new Set(value.permissions),
+    events: new Set(value.events),
+    deletedMessages: new Set(value.deletedMessages),
+    deletedParts: new Set(value.deletedParts),
+  };
 }
 
 function isTerminalRunStatus(status: SessionRunRecord["status"]): boolean {
@@ -130,10 +180,20 @@ export class SessionStore {
   private readonly database: Database.Database;
   private closed = false;
   private transactionDepth = 0;
+  private saveRequested = false;
+  private readonly deltaFlushIntervalMs: number;
+  private readonly deltaFlushBytes: number;
+  private readonly dirtyDeltaPartIds = new Set<string>();
+  private pendingDeltaBytes = 0;
+  private deltaFlushTimer?: ReturnType<typeof setTimeout>;
+  private reservedEventSeq = 0;
+  private mutations = emptyMutations();
   private state: SessionState;
 
   constructor(options: SessionStoreOptions) {
     this.path = resolve(options.path);
+    this.deltaFlushIntervalMs = Math.max(1, options.deltaFlushIntervalMs ?? DEFAULT_DELTA_FLUSH_INTERVAL_MS);
+    this.deltaFlushBytes = Math.max(1, options.deltaFlushBytes ?? DEFAULT_DELTA_FLUSH_BYTES);
     mkdirSync(dirname(this.path), { recursive: true });
     this.database = new Database(this.path);
     try {
@@ -151,8 +211,13 @@ export class SessionStore {
 
   close(): void {
     if (this.closed) return;
-    this.database.close();
-    this.closed = true;
+    try {
+      this.flushMessagePartDeltas();
+    } finally {
+      this.clearDeltaFlushTimer();
+      this.database.close();
+      this.closed = true;
+    }
   }
 
   /**
@@ -161,14 +226,46 @@ export class SessionStore {
    */
   transaction<T>(work: () => T): T {
     const previous = structuredClone(this.state);
+    const previousDirtyPartIds = new Set(this.dirtyDeltaPartIds);
+    const previousPendingDeltaBytes = this.pendingDeltaBytes;
+    const previousSaveRequested = this.saveRequested;
+    const previousReservedEventSeq = this.reservedEventSeq;
+    const previousMutations = cloneMutations(this.mutations);
     this.transactionDepth += 1;
+    if (this.transactionDepth === 1) this.saveRequested = false;
+    let persisted = false;
+    let completed = false;
     try {
-      return this.database.transaction(work)();
+      const result = this.database.transaction(() => {
+        const value = work();
+        if (this.transactionDepth === 1 && this.saveRequested) {
+          this.persistChanges();
+          persisted = true;
+        }
+        return value;
+      })();
+      if (persisted) {
+        this.clearDirtyDeltas();
+        this.mutations = emptyMutations();
+      }
+      completed = true;
+      return result;
     } catch (error) {
       this.state = previous;
+      this.restoreDirtyDeltas(previousDirtyPartIds, previousPendingDeltaBytes);
+      this.saveRequested = previousSaveRequested;
+      this.reservedEventSeq = previousReservedEventSeq;
+      this.mutations = previousMutations;
       throw error;
     } finally {
       this.transactionDepth -= 1;
+      if (this.transactionDepth === 0) {
+        this.saveRequested = previousSaveRequested;
+        if (this.dirtyDeltaPartIds.size > 0) {
+          if (completed && this.pendingDeltaBytes >= this.deltaFlushBytes) this.flushMessagePartDeltas();
+          else this.scheduleDeltaFlush();
+        }
+      }
     }
   }
 
@@ -189,6 +286,7 @@ export class SessionStore {
       updatedAt: timestamp,
     };
     this.state.sessions[id] = session;
+    this.mutations.sessions.add(id);
     this.appendEventInMemory({
       type: "session.created",
       sessionId: id,
@@ -227,6 +325,7 @@ export class SessionStore {
     session.status = "archived";
     session.updatedAt = timestamp;
     session.archivedAt = timestamp;
+    this.mutations.sessions.add(sessionId);
     this.appendEventInMemory({
       type: "session.archived",
       sessionId,
@@ -243,6 +342,7 @@ export class SessionStore {
     const timestamp = now();
     session.status = "closing";
     session.updatedAt = timestamp;
+    this.mutations.sessions.add(sessionId);
     this.appendEventInMemory({
       type: "session.closing",
       sessionId,
@@ -264,6 +364,7 @@ export class SessionStore {
     }
     if (input.metadata !== undefined) session.metadata = input.metadata;
     session.updatedAt = timestamp;
+    this.mutations.sessions.add(sessionId);
     this.appendEventInMemory({
       type: "session.updated",
       sessionId,
@@ -295,6 +396,8 @@ export class SessionStore {
       const title = formatSessionTitle(input.content);
       if (title) session.title = title;
     }
+    this.mutations.inputs.add(id);
+    this.mutations.sessions.add(input.sessionId);
     this.appendEventInMemory({
       type: "session.input.admitted",
       sessionId: input.sessionId,
@@ -348,6 +451,8 @@ export class SessionStore {
     };
     this.state.messages[id] = row;
     session.updatedAt = timestamp;
+    this.mutations.messages.add(id);
+    this.mutations.sessions.add(input.sessionId);
     this.appendEventInMemory({
       type: "session.message.created",
       sessionId: input.sessionId,
@@ -379,10 +484,19 @@ export class SessionStore {
     const timestamp = now();
 
     for (const [id, message] of Object.entries(this.state.messages)) {
-      if (message.sessionId === input.sessionId) delete this.state.messages[id];
+      if (message.sessionId === input.sessionId) {
+        delete this.state.messages[id];
+        this.mutations.messages.delete(id);
+        this.mutations.deletedMessages.add(id);
+      }
     }
     for (const [id, part] of Object.entries(this.state.parts)) {
-      if (part.sessionId === input.sessionId) delete this.state.parts[id];
+      if (part.sessionId === input.sessionId) {
+        delete this.state.parts[id];
+        this.mutations.parts.delete(id);
+        this.mutations.deletedParts.add(id);
+        this.dirtyDeltaPartIds.delete(id);
+      }
     }
 
     const messages: SessionMessageRecord[] = [];
@@ -403,6 +517,7 @@ export class SessionStore {
         updatedAt: timestamp,
       };
       this.state.messages[messageId] = message;
+      this.mutations.messages.add(messageId);
       messages.push(message);
 
       for (const partInput of row.parts) {
@@ -426,11 +541,13 @@ export class SessionStore {
           updatedAt: timestamp,
         };
         this.state.parts[partId] = part;
+        this.mutations.parts.add(partId);
         parts.push(part);
       }
     }
 
     session.updatedAt = timestamp;
+    this.mutations.sessions.add(input.sessionId);
     this.appendEventInMemory({
       type: "session.transcript.replaced",
       sessionId: input.sessionId,
@@ -484,6 +601,9 @@ export class SessionStore {
     this.state.parts[id] = row;
     message.updatedAt = timestamp;
     session.updatedAt = timestamp;
+    this.mutations.parts.add(id);
+    this.mutations.messages.add(message.id);
+    this.mutations.sessions.add(session.id);
     this.appendEventInMemory({
       type: "session.message.part.updated",
       sessionId: input.sessionId,
@@ -517,21 +637,27 @@ export class SessionStore {
         field: input.field,
         delta: input.delta,
       },
-    });
-    try {
-      this.database.transaction(() => {
-        this.database.prepare("UPDATE session_message_part SET text = ?, updated_at = ? WHERE id = ?")
-          .run(part.text ?? "", part.updatedAt, part.id);
-        this.database.prepare("UPDATE session_message SET updated_at = ? WHERE id = ?")
-          .run(message.updatedAt, message.id);
-        this.database.prepare("UPDATE session SET updated_at = ? WHERE id = ?")
-          .run(session.updatedAt, session.id);
-      })();
-    } catch (error) {
-      if (this.transactionDepth === 0) this.state = this.load();
-      throw error;
+    }, false);
+    this.dirtyDeltaPartIds.add(part.id);
+    this.pendingDeltaBytes += Buffer.byteLength(input.delta, "utf8");
+    if (this.transactionDepth === 0) {
+      if (this.pendingDeltaBytes >= this.deltaFlushBytes) this.flushMessagePartDeltas();
+      else this.scheduleDeltaFlush();
     }
     return clone(event);
+  }
+
+  flushMessagePartDeltas(): void {
+    if (this.dirtyDeltaPartIds.size === 0) return;
+    const partIds = [...this.dirtyDeltaPartIds];
+    const flush = () => this.persistDeltaPartRows(partIds);
+    if (this.transactionDepth > 0) flush();
+    else this.database.transaction(flush)();
+    for (const partId of partIds) this.dirtyDeltaPartIds.delete(partId);
+    if (this.dirtyDeltaPartIds.size === 0) {
+      this.pendingDeltaBytes = 0;
+      this.clearDeltaFlushTimer();
+    }
   }
 
   listMessageParts(sessionId: string, options: ListMessagePartsOptions = {}): SessionMessagePartRecord[] {
@@ -564,7 +690,7 @@ export class SessionStore {
   }
 
   latestEventSeq(): number {
-    return this.state.events.at(-1)?.seq ?? 0;
+    return this.state.nextEventSeq - 1;
   }
 
   createRun(input: CreateRunInput): SessionRunRecord {
@@ -591,6 +717,8 @@ export class SessionStore {
     this.state.runs[id] = run;
     this.refreshSessionStatus(session);
     session.updatedAt = timestamp;
+    this.mutations.runs.add(id);
+    this.mutations.sessions.add(session.id);
     this.appendEventInMemory({
       type: "session.run.created",
       sessionId: input.sessionId,
@@ -623,6 +751,8 @@ export class SessionStore {
     run.updatedAt = timestamp;
     this.refreshSessionStatus(session);
     session.updatedAt = timestamp;
+    this.mutations.runs.add(runId);
+    this.mutations.sessions.add(session.id);
     this.appendEventInMemory({
       type: "session.run.updated",
       sessionId: run.sessionId,
@@ -687,6 +817,8 @@ export class SessionStore {
     };
     this.state.tasks[id] = task;
     session.updatedAt = timestamp;
+    this.mutations.tasks.add(id);
+    this.mutations.sessions.add(session.id);
     this.appendEventInMemory({ type: "session.task.created", sessionId: task.sessionId, payload: { task } });
     this.save();
     return clone(task);
@@ -720,6 +852,8 @@ export class SessionStore {
     if (input.metadata) task.metadata = { ...task.metadata, ...input.metadata };
     task.updatedAt = timestamp;
     session.updatedAt = timestamp;
+    this.mutations.tasks.add(taskId);
+    this.mutations.sessions.add(session.id);
     this.appendEventInMemory({
       type: "session.task.updated",
       sessionId: task.sessionId,
@@ -824,6 +958,7 @@ export class SessionStore {
       updatedAt: timestamp,
     };
     this.state.permissions[id] = request;
+    this.mutations.permissions.add(id);
     this.appendEventInMemory({
       type: "permission.asked",
       sessionId: input.sessionId,
@@ -842,6 +977,7 @@ export class SessionStore {
     if (input.decision !== undefined) request.decision = input.decision;
     if (input.clientId !== undefined) request.decidedByClientId = input.clientId;
     request.updatedAt = timestamp;
+    this.mutations.permissions.add(request.id);
     this.appendEventInMemory({
       type: "permission.replied",
       sessionId: request.sessionId,
@@ -893,17 +1029,53 @@ export class SessionStore {
     });
   }
 
-  private appendEventInMemory(input: AppendEventInput): SessionEventRecord {
+  private appendEventInMemory(input: AppendEventInput, retain = true): SessionEventRecord {
     const event: SessionEventRecord = {
       id: input.id ?? randomUUID(),
-      seq: this.state.nextEventSeq++,
+      seq: this.allocateEventSequence(),
       type: input.type,
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       payload: input.payload ?? {},
       createdAt: now(),
     };
-    this.state.events.push(event);
+    if (retain) {
+      this.state.events.push(event);
+      this.mutations.events.add(event.id);
+    }
     return event;
+  }
+
+  private scheduleDeltaFlush(): void {
+    if (this.deltaFlushTimer || this.closed || this.dirtyDeltaPartIds.size === 0) return;
+    this.deltaFlushTimer = setTimeout(() => {
+      this.deltaFlushTimer = undefined;
+      try {
+        this.flushMessagePartDeltas();
+      } catch {
+        this.scheduleDeltaFlush();
+      }
+    }, this.deltaFlushIntervalMs);
+    this.deltaFlushTimer.unref?.();
+  }
+
+  private clearDeltaFlushTimer(): void {
+    if (!this.deltaFlushTimer) return;
+    clearTimeout(this.deltaFlushTimer);
+    this.deltaFlushTimer = undefined;
+  }
+
+  private clearDirtyDeltas(): void {
+    this.dirtyDeltaPartIds.clear();
+    this.pendingDeltaBytes = 0;
+    this.clearDeltaFlushTimer();
+  }
+
+  private restoreDirtyDeltas(partIds: Set<string>, pendingBytes: number): void {
+    this.dirtyDeltaPartIds.clear();
+    for (const partId of partIds) this.dirtyDeltaPartIds.add(partId);
+    this.pendingDeltaBytes = pendingBytes;
+    this.clearDeltaFlushTimer();
+    this.scheduleDeltaFlush();
   }
 
   private refreshSessionStatus(session: SessionRecord): void {
@@ -967,36 +1139,163 @@ export class SessionStore {
       state.events.push(event);
       state.nextEventSeq = Math.max(state.nextEventSeq, event.seq + 1);
     }
+    const sequence = this.database.prepare(
+      "SELECT reserved_through FROM session_event_sequence WHERE id = 1",
+    ).get() as { reserved_through?: number } | undefined;
+    this.reservedEventSeq = sequence?.reserved_through ?? 0;
+    state.nextEventSeq = Math.max(state.nextEventSeq, this.reservedEventSeq + 1);
     return state;
   }
 
+  private allocateEventSequence(): number {
+    if (this.state.nextEventSeq > this.reservedEventSeq) {
+      const reservedThrough = this.state.nextEventSeq + EVENT_SEQUENCE_BLOCK_SIZE - 1;
+      this.database.prepare(`
+        INSERT INTO session_event_sequence (id, reserved_through) VALUES (1, ?)
+        ON CONFLICT(id) DO UPDATE SET reserved_through = excluded.reserved_through
+      `).run(reservedThrough);
+      this.reservedEventSeq = reservedThrough;
+    }
+    return this.state.nextEventSeq++;
+  }
+
   private save(): void {
+    if (this.transactionDepth > 0) {
+      this.saveRequested = true;
+      return;
+    }
     try {
-      this.database.transaction(() => {
-        this.database.exec("DELETE FROM session_event; DELETE FROM permission_request; DELETE FROM session_task; DELETE FROM session_run; DELETE FROM session_message_part; DELETE FROM session_message; DELETE FROM session_input; DELETE FROM session;");
-        const insertSession = this.database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const value of Object.values(this.state.sessions)) insertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null);
-        const insertInput = this.database.prepare("INSERT INTO session_input VALUES (?, ?, ?, ?, ?, ?, ?)");
-        for (const value of Object.values(this.state.inputs)) insertInput.run(value.id, value.sessionId, value.seq, value.delivery, value.content, encode(value.metadata), value.createdAt);
-        const insertMessage = this.database.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const value of Object.values(this.state.messages)) insertMessage.run(value.id, value.sessionId, value.seq, value.role, value.runId ?? null, value.inputId ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
-        const insertPart = this.database.prepare("INSERT INTO session_message_part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const value of Object.values(this.state.parts)) insertPart.run(value.id, value.sessionId, value.messageId, value.seq, value.type, value.status, value.text ?? null, value.toolUseId ?? null, value.toolName ?? null, value.input === undefined ? null : encode(value.input), value.output === undefined ? null : JSON.stringify(value.output), value.isError === undefined ? null : Number(value.isError), encode(value.metadata), value.createdAt, value.updatedAt);
-        const insertRun = this.database.prepare("INSERT INTO session_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const value of Object.values(this.state.runs)) insertRun.run(value.id, value.sessionId, value.inputId ?? null, value.status, value.startedAt ?? null, value.finishedAt ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
-        const insertTask = this.database.prepare("INSERT INTO session_task VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const value of Object.values(this.state.tasks)) insertTask.run(value.id, value.sessionId, value.childSessionId ?? null, value.runId ?? null, value.type, value.status, value.description, value.cwd, value.output ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.startedAt ?? null, value.finishedAt ?? null, value.updatedAt);
-        const insertPermission = this.database.prepare("INSERT INTO permission_request VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const value of Object.values(this.state.permissions)) insertPermission.run(value.id, value.sessionId, value.runId ?? null, value.toolName, encode(value.payload), value.status, value.decision ?? null, value.decidedByClientId ?? null, value.createdAt, value.updatedAt);
-        const insertEvent = this.database.prepare("INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)");
-        for (const value of this.state.events) {
-          if (!isDurableEvent(value)) continue;
-          insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
-        }
-      })();
+      this.database.transaction(() => this.persistChanges())();
+      this.clearDirtyDeltas();
+      this.mutations = emptyMutations();
     } catch (error) {
-      if (this.transactionDepth === 0) this.state = this.load();
+      this.state = this.load();
+      this.clearDirtyDeltas();
+      this.mutations = emptyMutations();
       throw error;
+    }
+  }
+
+  private persistChanges(): void {
+    if (this.dirtyDeltaPartIds.size > 0) this.persistDeltaPartRows([...this.dirtyDeltaPartIds]);
+
+    const deletePart = this.database.prepare("DELETE FROM session_message_part WHERE id = ?");
+    for (const id of this.mutations.deletedParts) deletePart.run(id);
+    const deleteMessage = this.database.prepare("DELETE FROM session_message WHERE id = ?");
+    for (const id of this.mutations.deletedMessages) deleteMessage.run(id);
+
+    const upsertSession = this.database.prepare(`
+      INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id, cwd=excluded.cwd,
+        title=excluded.title, model=excluded.model, agent=excluded.agent, status=excluded.status,
+        metadata_json=excluded.metadata_json, created_at=excluded.created_at,
+        updated_at=excluded.updated_at, archived_at=excluded.archived_at
+    `);
+    for (const id of this.mutations.sessions) {
+      const value = this.state.sessions[id];
+      if (value) upsertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null);
+    }
+
+    const upsertInput = this.database.prepare(`
+      INSERT INTO session_input VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, seq=excluded.seq,
+        delivery=excluded.delivery, content=excluded.content, metadata_json=excluded.metadata_json,
+        created_at=excluded.created_at
+    `);
+    for (const id of this.mutations.inputs) {
+      const value = this.state.inputs[id];
+      if (value) upsertInput.run(value.id, value.sessionId, value.seq, value.delivery, value.content, encode(value.metadata), value.createdAt);
+    }
+
+    const upsertMessage = this.database.prepare(`
+      INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, seq=excluded.seq,
+        role=excluded.role, run_id=excluded.run_id, input_id=excluded.input_id,
+        metadata_json=excluded.metadata_json, created_at=excluded.created_at, updated_at=excluded.updated_at
+    `);
+    for (const id of this.mutations.messages) {
+      const value = this.state.messages[id];
+      if (value) upsertMessage.run(value.id, value.sessionId, value.seq, value.role, value.runId ?? null, value.inputId ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+    }
+
+    const upsertPart = this.database.prepare(`
+      INSERT INTO session_message_part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, message_id=excluded.message_id,
+        seq=excluded.seq, type=excluded.type, status=excluded.status, text=excluded.text,
+        tool_use_id=excluded.tool_use_id, tool_name=excluded.tool_name, input_json=excluded.input_json,
+        output_json=excluded.output_json, is_error=excluded.is_error, metadata_json=excluded.metadata_json,
+        created_at=excluded.created_at, updated_at=excluded.updated_at
+    `);
+    for (const id of this.mutations.parts) {
+      const value = this.state.parts[id];
+      if (value) upsertPart.run(value.id, value.sessionId, value.messageId, value.seq, value.type, value.status, value.text ?? null, value.toolUseId ?? null, value.toolName ?? null, value.input === undefined ? null : encode(value.input), value.output === undefined ? null : JSON.stringify(value.output), value.isError === undefined ? null : Number(value.isError), encode(value.metadata), value.createdAt, value.updatedAt);
+    }
+
+    const upsertRun = this.database.prepare(`
+      INSERT INTO session_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, input_id=excluded.input_id,
+        status=excluded.status, started_at=excluded.started_at, finished_at=excluded.finished_at,
+        error=excluded.error, metadata_json=excluded.metadata_json, created_at=excluded.created_at,
+        updated_at=excluded.updated_at
+    `);
+    for (const id of this.mutations.runs) {
+      const value = this.state.runs[id];
+      if (value) upsertRun.run(value.id, value.sessionId, value.inputId ?? null, value.status, value.startedAt ?? null, value.finishedAt ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+    }
+
+    const upsertTask = this.database.prepare(`
+      INSERT INTO session_task VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id,
+        child_session_id=excluded.child_session_id, run_id=excluded.run_id, type=excluded.type,
+        status=excluded.status, description=excluded.description, cwd=excluded.cwd,
+        output=excluded.output, error=excluded.error, metadata_json=excluded.metadata_json,
+        created_at=excluded.created_at, started_at=excluded.started_at,
+        finished_at=excluded.finished_at, updated_at=excluded.updated_at
+    `);
+    for (const id of this.mutations.tasks) {
+      const value = this.state.tasks[id];
+      if (value) upsertTask.run(value.id, value.sessionId, value.childSessionId ?? null, value.runId ?? null, value.type, value.status, value.description, value.cwd, value.output ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.startedAt ?? null, value.finishedAt ?? null, value.updatedAt);
+    }
+
+    const upsertPermission = this.database.prepare(`
+      INSERT INTO permission_request VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, run_id=excluded.run_id,
+        tool_name=excluded.tool_name, payload_json=excluded.payload_json, status=excluded.status,
+        decision=excluded.decision, decided_by_client_id=excluded.decided_by_client_id,
+        created_at=excluded.created_at, updated_at=excluded.updated_at
+    `);
+    for (const id of this.mutations.permissions) {
+      const value = this.state.permissions[id];
+      if (value) upsertPermission.run(value.id, value.sessionId, value.runId ?? null, value.toolName, encode(value.payload), value.status, value.decision ?? null, value.decidedByClientId ?? null, value.createdAt, value.updatedAt);
+    }
+
+    const insertEvent = this.database.prepare("INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)");
+    for (const value of this.state.events) {
+      if (!this.mutations.events.has(value.id) || !isDurableEvent(value)) continue;
+      insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
+    }
+  }
+
+  private persistDeltaPartRows(partIds: string[]): void {
+    const updatePart = this.database.prepare("UPDATE session_message_part SET text = ?, updated_at = ? WHERE id = ?");
+    const updateMessage = this.database.prepare("UPDATE session_message SET updated_at = ? WHERE id = ?");
+    const updateSession = this.database.prepare("UPDATE session SET updated_at = ? WHERE id = ?");
+    const messageIds = new Set<string>();
+    const sessionIds = new Set<string>();
+    for (const partId of partIds) {
+      const part = this.state.parts[partId];
+      if (!part) continue;
+      updatePart.run(part.text ?? "", part.updatedAt, part.id);
+      messageIds.add(part.messageId);
+      sessionIds.add(part.sessionId);
+    }
+    for (const messageId of messageIds) {
+      const message = this.state.messages[messageId];
+      if (message) updateMessage.run(message.updatedAt, message.id);
+    }
+    for (const sessionId of sessionIds) {
+      const session = this.state.sessions[sessionId];
+      if (session) updateSession.run(session.updatedAt, session.id);
     }
   }
 

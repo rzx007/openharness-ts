@@ -5,12 +5,15 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
-import { SessionStore } from "./store.js";
+import { SessionStore, type SessionStoreOptions } from "./store.js";
 
-function withStore(test: (store: SessionStore, path: string) => void): void {
+function withStore(
+  test: (store: SessionStore, path: string) => void,
+  options: Omit<SessionStoreOptions, "path"> = {},
+): void {
   const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
   const path = join(dir, "store.db");
-  const store = new SessionStore({ path });
+  const store = new SessionStore({ path, ...options });
   try {
     test(store, path);
   } finally {
@@ -171,8 +174,6 @@ describe("SessionStore", () => {
         delta: "i",
       });
       expect(store.latestEventSeq()).toBe(deltaEvent.seq);
-      store.createMessage({ id: "m3", sessionId: "s2", role: "user" });
-
       expect(prompt.seq).toBe(1);
       expect(first.seq).toBe(1);
       expect(second.seq).toBe(2);
@@ -184,12 +185,19 @@ describe("SessionStore", () => {
         ["p2", "hi"],
       ]);
       expect(store.listMessageParts("s1", { messageId: second.id }).map((row) => row.id)).toEqual(["p2"]);
-      expect(store.listEvents().map((event) => event.type)).toContain("session.message.part.delta");
+      expect(store.listEvents().map((event) => event.type)).not.toContain("session.message.part.delta");
       const runningReloaded = new SessionStore({ path });
       expect(runningReloaded.listMessageParts("s1", { messageId: second.id })).toMatchObject([
-        { id: "p2", text: "hi", status: "running" },
+        { id: "p2", text: "h", status: "running" },
       ]);
       runningReloaded.close();
+      store.flushMessagePartDeltas();
+      const checkpointReloaded = new SessionStore({ path });
+      expect(checkpointReloaded.listMessageParts("s1", { messageId: second.id })).toMatchObject([
+        { id: "p2", text: "hi", status: "running" },
+      ]);
+      checkpointReloaded.close();
+      store.createMessage({ id: "m3", sessionId: "s2", role: "user" });
       store.upsertMessagePart({
         id: "p2",
         sessionId: "s1",
@@ -257,7 +265,129 @@ describe("SessionStore", () => {
       expect(store.getSessionTask("task-1")).not.toHaveProperty("finishedAt");
       expect(store.getSessionTask("task-1")).not.toHaveProperty("output");
       expect(store.getSessionTask("task-1")).not.toHaveProperty("error");
+    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+  });
+
+  it("flushes pending text deltas when the store closes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-close-"));
+    const path = join(dir, "store.db");
+    const store = new SessionStore({ path, deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+    store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+    const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+    const part = store.upsertMessagePart({
+      id: "p1",
+      sessionId: "s1",
+      messageId: message.id,
+      type: "text",
+      status: "running",
+      text: "",
     });
+    store.appendMessagePartDelta({
+      sessionId: "s1",
+      messageId: message.id,
+      partId: part.id,
+      field: "text",
+      delta: "checkpointed",
+    });
+
+    store.close();
+    const reloaded = new SessionStore({ path });
+    expect(reloaded.listMessageParts("s1")).toMatchObject([{ id: "p1", text: "checkpointed" }]);
+    reloaded.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("checkpoints high-frequency deltas in one write transaction", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+      const part = store.upsertMessagePart({
+        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
+      });
+      const database = (store as any).database as Database.Database;
+      database.exec(`
+        CREATE TABLE delta_audit (count INTEGER NOT NULL);
+        INSERT INTO delta_audit VALUES (0);
+        CREATE TRIGGER count_delta_update AFTER UPDATE OF text ON session_message_part
+        WHEN NEW.id = 'p1'
+        BEGIN
+          UPDATE delta_audit SET count = count + 1;
+        END;
+      `);
+
+      for (let index = 0; index < 100; index++) {
+        store.appendMessagePartDelta({
+          sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "x",
+        });
+      }
+      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
+        .toEqual({ text: "" });
+
+      store.flushMessagePartDeltas();
+
+      expect(database.prepare("SELECT count FROM delta_audit").get()).toEqual({ count: 1 });
+      expect(database.prepare("SELECT length(text) AS length FROM session_message_part WHERE id = 'p1'").get())
+        .toEqual({ length: 100 });
+    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+  });
+
+  it("flushes grouped deltas on the timer and retries a failed checkpoint", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-timer-"));
+    const path = join(dir, "store.db");
+    const store = new SessionStore({ path, deltaFlushIntervalMs: 10, deltaFlushBytes: 1024 * 1024 });
+    try {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+      const part = store.upsertMessagePart({
+        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
+      });
+      const database = (store as any).database as Database.Database;
+      database.exec(`
+        CREATE TRIGGER fail_delta_update BEFORE UPDATE OF text ON session_message_part
+        WHEN NEW.id = 'p1'
+        BEGIN
+          SELECT RAISE(ABORT, 'forced delta failure');
+        END;
+      `);
+      store.transaction(() => {
+        store.appendMessagePartDelta({
+          sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "timer",
+        });
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
+        .toEqual({ text: "" });
+      database.exec("DROP TRIGGER fail_delta_update");
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
+        .toEqual({ text: "timer" });
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flushes immediately when the delta byte threshold is reached", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+      const part = store.upsertMessagePart({
+        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
+      });
+      const database = (store as any).database as Database.Database;
+      store.appendMessagePartDelta({
+        sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "he",
+      });
+      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
+        .toEqual({ text: "" });
+      store.appendMessagePartDelta({
+        sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "llo",
+      });
+      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
+        .toEqual({ text: "hello" });
+    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 5 });
   });
 
   it("rolls back both SQLite and the in-memory read model when a grouped write fails", () => {
@@ -282,6 +412,72 @@ describe("SessionStore", () => {
 
       const reloaded = new SessionStore({ path });
       expect(reloaded.listSessions().map((session) => session.id)).toEqual(["existing"]);
+      reloaded.close();
+    });
+  });
+
+  it("does not reuse a live delta sequence after restart", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-sequence-"));
+    const path = join(dir, "store.db");
+    try {
+      const store = new SessionStore({ path, deltaFlushIntervalMs: 60_000 });
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+      const part = store.upsertMessagePart({
+        id: "p1",
+        sessionId: "s1",
+        messageId: message.id,
+        type: "text",
+        status: "running",
+        text: "",
+      });
+      const delta = store.appendMessagePartDelta({
+        sessionId: "s1",
+        messageId: message.id,
+        partId: part.id,
+        field: "text",
+        delta: "live",
+      });
+      store.close();
+
+      const reloaded = new SessionStore({ path });
+      const durable = reloaded.appendEvent({ type: "daemon.after-restart", sessionId: "s1" });
+      expect(durable.seq).toBeGreaterThan(delta.seq);
+      expect(reloaded.listEvents({ afterSeq: delta.seq }).map((event) => event.id)).toContain(durable.id);
+      reloaded.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists only dirty rows and commits grouped mutations once", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
+      const database = (store as any).database as Database.Database;
+      database.exec(`
+        CREATE TABLE mutation_audit (count INTEGER NOT NULL);
+        INSERT INTO mutation_audit VALUES (0);
+        CREATE TRIGGER reject_session_delete BEFORE DELETE ON session
+        BEGIN
+          SELECT RAISE(ABORT, 'full snapshot rewrite detected');
+        END;
+        CREATE TRIGGER count_s1_update AFTER UPDATE ON session
+        WHEN NEW.id = 's1'
+        BEGIN
+          UPDATE mutation_audit SET count = count + 1;
+        END;
+      `);
+
+      store.transaction(() => {
+        store.updateSession("s1", { title: "first" });
+        store.updateSession("s1", { title: "final" });
+      });
+
+      expect(database.prepare("SELECT count FROM mutation_audit").get()).toEqual({ count: 1 });
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getSession("s1")?.title).toBe("final");
+      expect(reloaded.getSession("s2")).toBeDefined();
       reloaded.close();
     });
   });

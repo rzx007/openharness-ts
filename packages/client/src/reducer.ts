@@ -80,9 +80,9 @@ export function applyEvent(
   state: OpenHarnessClientState,
   event: SessionEventRecord,
 ): OpenHarnessClientState {
-  if (state.eventsBySeq[event.seq]) return state;
-  // Hot token streams can produce thousands of delta events; cloning this index per delta is O(n^2).
-  state.eventsBySeq[event.seq] = event;
+  const transient = event.type === "session.message.part.delta";
+  if (!transient && state.eventsBySeq[event.seq]) return state;
+  if (!transient) state.eventsBySeq[event.seq] = event;
 
   let next: OpenHarnessClientState = {
     ...state,

@@ -244,7 +244,7 @@ describe("session event reducer", () => {
     state = applyEvent(state, event(3, "session.message.created", { message: second }));
 
     expect(state.lastSeq).toBe(5);
-    expect(Object.keys(state.eventsBySeq).sort()).toEqual(["2", "3", "4", "5"]);
+    expect(Object.keys(state.eventsBySeq).sort()).toEqual(["2", "3", "4"]);
     expect(state.buckets.s1?.messages.map((message) => message.id)).toEqual(["m1", "m2"]);
     expect(state.buckets.s1?.partsByMessageId.m2?.[0]?.text).toBe("second");
   });
