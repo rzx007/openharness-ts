@@ -1,5 +1,7 @@
 # Agent Runtime Framework Architecture
 
+> 状态：当前实现。已接受但尚未落地的下一阶段设计见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)；迁移完成前，本文中的 `AgentRunHost` / projection 链路仍是代码事实。
+
 > 状态：当前代码事实。边界约束见 [agent-framework-capability-boundary.md](./agent-framework-capability-boundary.md)。daemon 运行流程见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
 
 ## 核心对象

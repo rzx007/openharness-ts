@@ -1,6 +1,8 @@
 # Agent Child Session Flow
 
 > 当前实现。核心边界：framework owns child execution/live handles；daemon owns durable child projection。
+>
+> 目标设计：删除 `AgentChildProjection`，改为 framework child handles + lifecycle events + daemon 单向 durable reducer。见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md#10-child-agent-目标链路)。
 
 ## 总图
 

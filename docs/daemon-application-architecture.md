@@ -1,6 +1,8 @@
 # Daemon Application Architecture
 
 > 状态：权威代码索引。要查 daemon 中某条运行流程，先打开本文，再按表中的文件定位。
+>
+> 目标重构：已接受的 events/effects/live handles 方案见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)。迁移完成前，本文描述的 `DaemonRunProjection`、`DaemonRuntimeHostPort` 和 child projection 仍是当前代码。
 
 ## 总体模型
 

@@ -1,6 +1,6 @@
 # 一个完整 Agent 应用需要什么
 
-> 本文是概念性架构笔记，不是当前代码索引。当前实现请以 [Agent Framework 边界](./agent-framework-capability-boundary.md) 和 [Daemon Application Architecture](./daemon-application-architecture.md) 为准。
+> 本文是概念性架构笔记，不是当前代码索引。当前实现请以 [Agent Framework 边界](./agent-framework-capability-boundary.md) 和 [Daemon Application Architecture](./daemon-application-architecture.md) 为准；已接受的下一阶段边界见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)。
 
 > 一份关于 Agent 功能、运行机制与工程架构的系统性笔记。
 

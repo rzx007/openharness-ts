@@ -1,6 +1,8 @@
 # Permission Flow
 
 > 当前实现的快速索引。完整 daemon 上下文见 [daemon-application-architecture.md](./daemon-application-architecture.md#工具运行与授权)。
+>
+> 目标设计：permission 将成为 framework 显式等待的 `AgentEffects.requestPermission()`；不会把 `resolve` 句柄放进事件。见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md#7-agenteffects)。
 
 ## Standalone
 

@@ -1,5 +1,7 @@
 # Agent Framework Capability Boundary
 
+> 状态：当前实现。下一阶段将用 events/effects/live handles 取代 public run host 和 child projection，见 [Agent Run Events / Effects Architecture](./agent-run-events-effects-architecture.md)。
+
 > 状态：当前架构约束。代码与本文冲突时，应先确认是否需要修改边界，而不是新增兼容 adapter。
 
 ## 一句话边界
