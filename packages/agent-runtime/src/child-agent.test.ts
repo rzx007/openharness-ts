@@ -190,6 +190,33 @@ describe("AgentChildManager", () => {
     expect(directory.list()).toEqual([]);
   });
 
+  it("rejects a tree-wide child session collision before creating another agent", async () => {
+    const directory = new AgentChildRegistry();
+    const firstFactory = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("first"))));
+    const secondFactory = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("second"))));
+    const first = createManager(new AgentEventBus(), firstFactory, undefined, directory);
+    const second = createManager(new AgentEventBus(), secondFactory, undefined, directory);
+
+    await first.createController(parentScope()).spawnChildAgent({
+      description: "First",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+      sessionId: "shared-child-session",
+    });
+
+    await expect(second.createController(parentScope()).spawnChildAgent({
+      description: "Second",
+      prompt: "inspect again",
+      agent: "Explore",
+      cwd: "/repo",
+      sessionId: "shared-child-session",
+    })).rejects.toThrow("Child agent session is already live");
+    expect(secondFactory).not.toHaveBeenCalled();
+    expect(directory.getBySessionId("shared-child-session")).toBeDefined();
+    await first.closeAll();
+  });
+
   it("suspends idle resources and restores history for the next run", async () => {
     const bus = new AgentEventBus();
     const events: string[] = [];
@@ -223,6 +250,98 @@ describe("AgentChildManager", () => {
       metadata: { requestedBy: "test" },
     });
     expect(events).toContain("child.resumed");
+    await manager.closeAll();
+  });
+
+  it("closes an agent created by an in-flight resume without starting an orphan run", async () => {
+    const bus = new AgentEventBus();
+    const events: string[] = [];
+    bus.subscribe((event) => { events.push(event.type); });
+    const firstAgent = fakeAgent(vi.fn(() => completedRun("first")));
+    const resumedAgent = fakeAgent(vi.fn(() => completedRun("orphan")));
+    const resumed = deferred<any>();
+    const createAgent = vi.fn()
+      .mockResolvedValueOnce(firstAgent)
+      .mockImplementationOnce(async () => await resumed.promise);
+    const manager = createManager(bus, createAgent, 5);
+    const controller = manager.createController(parentScope());
+    const invocation = await controller.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await invocation.result;
+    await waitUntil(() => events.includes("child.suspended"));
+
+    const followUp = controller.sendChildInput(invocation.id, { content: "continue", delivery: "queue" });
+    await waitUntil(() => createAgent.mock.calls.length === 2);
+    const closing = manager.close(invocation.id);
+    resumed.resolve(resumedAgent);
+
+    await expect(closing).resolves.toBeUndefined();
+    await expect(followUp).rejects.toThrow("Child agent is closed");
+    expect(resumedAgent.submitMessage).not.toHaveBeenCalled();
+    expect(resumedAgent.close).toHaveBeenCalled();
+    expect(events.at(-1)).toBe("child.closed");
+    expect(manager.list()).toEqual([]);
+  });
+
+  it("deduplicates cleanup when a child is closed during its initial agent creation", async () => {
+    const bus = new AgentEventBus();
+    const events: string[] = [];
+    bus.subscribe((event) => { events.push(event.type); });
+    const created = deferred<any>();
+    const childAgent = fakeAgent(vi.fn(() => completedRun("unexpected")));
+    const createAgent = vi.fn(async () => await created.promise);
+    const manager = createManager(bus, createAgent);
+    const spawn = manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await waitUntil(() => createAgent.mock.calls.length === 1);
+    const childId = manager.list()[0]!.id;
+
+    const closing = manager.close(childId);
+    created.resolve(childAgent);
+
+    await expect(closing).resolves.toBeUndefined();
+    await expect(spawn).rejects.toThrow("Child agent is closed");
+    expect(childAgent.submitMessage).not.toHaveBeenCalled();
+    expect(childAgent.close).toHaveBeenCalledOnce();
+    expect(events.filter((type) => type === "child.closed")).toHaveLength(1);
+    expect(manager.list()).toEqual([]);
+  });
+
+  it("treats reordered metadata keys as the same idempotent child input", async () => {
+    const submitMessage = vi.fn(() => completedRun("done"));
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage));
+    const controller = manager.createController(parentScope());
+    const invocation = await controller.spawnChildAgent({
+      description: "Explore",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await invocation.result;
+
+    const first = await controller.sendChildInput(invocation.id, {
+      id: "same-input",
+      content: "continue",
+      delivery: "queue",
+      metadata: { outer: { first: 1, second: 2 }, tail: true },
+    });
+    const replay = await controller.sendChildInput(invocation.id, {
+      id: "same-input",
+      content: "continue",
+      delivery: "queue",
+      metadata: { tail: true, outer: { second: 2, first: 1 } },
+    });
+
+    expect(replay).toEqual(first);
+    expect(submitMessage).toHaveBeenCalledTimes(2);
     await manager.closeAll();
   });
 

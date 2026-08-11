@@ -64,7 +64,7 @@ describe("createOpenHarnessAgent", () => {
     await agent.close();
   });
 
-  it("does not report partial success when a steer batch projection fails", async () => {
+  it("settles concurrent steers one boundary at a time", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);
     const settings: Settings = {
@@ -91,8 +91,12 @@ describe("createOpenHarnessAgent", () => {
     const first = run.steer({ id: "input-steer-1", content: "first" });
     const second = run.steer({ id: "input-steer-2", content: "second" });
 
+    await expect(first).resolves.toEqual({
+      sessionId: agent.id,
+      inputId: "input-steer-1",
+      runId: "run-root",
+    });
     await expect(run.result).rejects.toThrow("second projection failed");
-    await expect(first).rejects.toBeInstanceOf(AgentRunNotAcceptingInputError);
     await expect(second).rejects.toBeInstanceOf(AgentRunNotAcceptingInputError);
     await agent.close();
   });

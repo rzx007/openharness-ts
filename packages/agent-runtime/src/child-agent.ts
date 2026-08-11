@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import type {
   AgentChildController,
@@ -34,6 +35,7 @@ interface ChildRecord {
   lease: AgentChildEnvironmentLease;
   createAgent(): Promise<OpenHarnessAgent>;
   agent?: OpenHarnessAgent;
+  creating?: Promise<OpenHarnessAgent>;
   suspendedHistory?: ReturnType<OpenHarnessAgent["getHistory"]>;
   idleTimer?: ReturnType<typeof setTimeout>;
   suspending?: Promise<void>;
@@ -47,6 +49,7 @@ interface ChildRecord {
   requests: Map<string, { input: AgentChildInput; receipt: Promise<AgentInputReceipt>; settled: boolean }>;
   state: AgentChildHandle["state"];
   closePromise?: Promise<void>;
+  cleanupPromise?: Promise<void>;
   handle: ChildHandle;
 }
 
@@ -141,6 +144,9 @@ export class AgentChildManager implements AgentChildDirectory {
   private async spawn(parentScope: AgentRunScope, input: AgentChildSpawnInput): Promise<AgentChildInvocation> {
     const childId = `child_${randomUUID()}`;
     const sessionId = input.sessionId ?? `agent_session_${randomUUID()}`;
+    if (this.directory.getBySessionId(sessionId)) {
+      throw new Error(`Child agent session is already live: ${sessionId}`);
+    }
     const lease = await this.environment.acquire(input, childId);
     const record = {} as ChildRecord;
     const handle = new ChildHandle(this, () => record);
@@ -179,14 +185,13 @@ export class AgentChildManager implements AgentChildDirectory {
       handle,
     } satisfies Partial<ChildRecord>);
 
-    this.records.set(childId, record);
-    this.registerAlias(record, childId);
-    this.registerAlias(record, sessionId);
-    this.registerAlias(record, `${input.agent}@${input.team ?? "default"}`);
-
     let announced = false;
     try {
       this.directory.register(handle);
+      this.records.set(childId, record);
+      this.registerAlias(record, childId);
+      this.registerAlias(record, sessionId);
+      this.registerAlias(record, `${input.agent}@${input.team ?? "default"}`);
       await this.emitChild(record, {
         type: "child.created",
         data: {
@@ -198,7 +203,7 @@ export class AgentChildManager implements AgentChildDirectory {
         },
       });
       announced = true;
-      record.agent = await record.createAgent();
+      await this.ensureAgent(record, false);
       const parentAbortHandler = () => {
         void this.interrupt(childId, "Parent run interrupted").catch(() => {});
       };
@@ -294,6 +299,7 @@ export class AgentChildManager implements AgentChildDirectory {
 
   private async beginRun(record: ChildRecord, input: AgentChildInput): Promise<AgentInputReceipt> {
     const agent = await this.ensureAgent(record);
+    if (isChildClosed(record)) throw new Error(`Child agent is closed: ${record.id}`);
     const controller = new AbortController();
     record.abortController = controller;
     record.state = "running";
@@ -350,19 +356,38 @@ export class AgentChildManager implements AgentChildDirectory {
     }
   }
 
-  private async ensureAgent(record: ChildRecord): Promise<OpenHarnessAgent> {
+  private async ensureAgent(record: ChildRecord, announceResume = true): Promise<OpenHarnessAgent> {
     this.clearIdleTimer(record);
     await record.suspending;
+    if (record.state === "closed") throw new Error(`Child agent is closed: ${record.id}`);
     if (record.agent) return record.agent;
-    const agent = await record.createAgent();
-    if (record.suspendedHistory) agent.loadHistory(record.suspendedHistory);
-    record.agent = agent;
-    record.state = "idle";
-    await this.emitChild(record, {
-      type: "child.resumed",
-      data: { childId: record.id, sessionId: record.sessionId },
-    });
-    return agent;
+    const creating = record.creating ?? record.createAgent();
+    record.creating = creating;
+    void creating.catch(() => {});
+    try {
+      const agent = await creating;
+      if (isChildClosed(record)) throw new Error(`Child agent is closed: ${record.id}`);
+      if (record.suspendedHistory) agent.loadHistory(record.suspendedHistory);
+      record.agent = agent;
+      record.state = "idle";
+      if (announceResume) {
+        await this.emitChild(record, {
+          type: "child.resumed",
+          data: { childId: record.id, sessionId: record.sessionId },
+        });
+      }
+      if (isChildClosed(record)) throw new Error(`Child agent is closed: ${record.id}`);
+      return agent;
+    } catch (error) {
+      const agent = await creating.catch(() => undefined);
+      if (agent) {
+        if (record.agent === agent) record.agent = undefined;
+        if (!record.cleanupPromise) await agent.close().catch(() => {});
+      }
+      throw error;
+    } finally {
+      if (record.creating === creating) record.creating = undefined;
+    }
   }
 
   private scheduleSuspend(record: ChildRecord): void {
@@ -377,6 +402,7 @@ export class AgentChildManager implements AgentChildDirectory {
         record.suspendedHistory = agent.getHistory();
         await agent.close().catch(() => {});
         if (record.agent === agent) record.agent = undefined;
+        if (record.state === "closed") return;
         record.state = "suspended";
         await this.emitChild(record, {
           type: "child.suspended",
@@ -391,13 +417,22 @@ export class AgentChildManager implements AgentChildDirectory {
     record.idleTimer.unref?.();
   }
 
-  private async closeRecord(record: ChildRecord, result: AgentChildResult, emit: boolean): Promise<void> {
+  private closeRecord(record: ChildRecord, result: AgentChildResult, emit: boolean): Promise<void> {
+    if (record.cleanupPromise) return record.cleanupPromise;
+    const cleanup = this.closeRecordWork(record, result, emit);
+    record.cleanupPromise = cleanup;
+    return cleanup;
+  }
+
+  private async closeRecordWork(record: ChildRecord, result: AgentChildResult, emit: boolean): Promise<void> {
     if (record.state === "closed" && !this.records.has(record.id)) return;
     record.state = "closed";
     this.detachParentAbort(record);
     this.clearIdleTimer(record);
-    await record.suspending;
-    await record.agent?.close().catch(() => {});
+    await record.suspending?.catch(() => {});
+    const creating = record.creating;
+    const created = creating ? await creating.catch(() => undefined) : undefined;
+    await (record.agent ?? created)?.close().catch(() => {});
     record.agent = undefined;
     await record.lease.release(result).catch(() => {});
     try {
@@ -478,7 +513,11 @@ class ChildHandle implements AgentChildHandle {
 function sameChildInput(left: AgentChildInput, right: AgentChildInput): boolean {
   return left.content === right.content &&
     (left.delivery ?? "steer") === (right.delivery ?? "steer") &&
-    JSON.stringify(left.metadata ?? {}) === JSON.stringify(right.metadata ?? {});
+    isDeepStrictEqual(left.metadata ?? {}, right.metadata ?? {});
+}
+
+function isChildClosed(record: ChildRecord): boolean {
+  return record.state === "closed";
 }
 
 function failedResult(error: unknown): AgentChildResult {

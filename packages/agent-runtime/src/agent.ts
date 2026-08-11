@@ -396,7 +396,7 @@ class FrameworkAgentRun implements AgentRunHandle {
   }
 
   private async takeSteeredInputs(options: { closeIfEmpty?: boolean } = {}): Promise<AgentSteerInput[]> {
-    const pending = this.steered.splice(0);
+    const pending = this.steered.splice(0, 1);
     if (pending.length === 0 && options.closeIfEmpty) this.acceptingInput = false;
     const inputs: AgentSteerInput[] = [];
     try {
