@@ -120,6 +120,7 @@ function testAgent(
           inputId: ids.inputId,
           sessionId: session.id,
           traceId: ids.traceId,
+          started: Promise.resolve({ sessionId: session.id, inputId: ids.inputId, runId: ids.runId }),
           result,
           steer: async () => { throw new Error("steer is not used in print tests"); },
           interrupt: async (reason) => { controller.abort(reason); await result.catch(() => {}); },

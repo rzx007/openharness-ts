@@ -75,6 +75,13 @@ export interface AgentInputReceipt {
   runId: string;
 }
 
+export class AgentRunNotAcceptingInputError extends Error {
+  constructor(readonly runId: string) {
+    super(`Run is not accepting input: ${runId}`);
+    this.name = "AgentRunNotAcceptingInputError";
+  }
+}
+
 export interface AgentChildInvocation {
   id: string;
   sessionId: string;
@@ -162,7 +169,8 @@ export interface AgentExecutionContext {
   readonly effects: AgentEffects;
   readonly children: AgentChildController;
   emit(event: AgentEventInput): Promise<void>;
-  takeSteeredInputs(): AgentChildInput[];
+  takeSteeredInputs(options?: { closeIfEmpty?: boolean }): Promise<AgentChildInput[]>;
+  closeSteering(): void;
 }
 
 export interface AgentSteerInput extends AgentChildInput {}
@@ -179,6 +187,7 @@ export interface AgentRunHandle {
   readonly inputId: string;
   readonly sessionId: string;
   readonly traceId: string;
+  readonly started: Promise<AgentInputReceipt>;
   readonly result: Promise<AgentRunResult>;
   steer(input: AgentSteerInput): Promise<AgentInputReceipt>;
   interrupt(reason?: string): Promise<void>;

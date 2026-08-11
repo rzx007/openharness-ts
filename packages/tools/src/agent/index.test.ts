@@ -36,7 +36,8 @@ function createAgentContext(
     effects: { requestPermission: vi.fn(async () => ({ status: "approved" as const })) },
     children,
     emit: vi.fn(),
-    takeSteeredInputs: () => [],
+    takeSteeredInputs: async () => [],
+    closeSteering: vi.fn(),
   };
   return { agent, children, calls };
 }

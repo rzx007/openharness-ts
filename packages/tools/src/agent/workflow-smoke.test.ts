@@ -31,7 +31,8 @@ describe("Workflow tool smoke", () => {
       scope: { agentId: "leader", sessionId: "s1", inputId: "i1", runId: "r1", traceId: "t1", cwd: tempDir!, signal: new AbortController().signal },
       effects: { requestPermission: async () => ({ status: "approved" }) },
       emit: async () => {},
-      takeSteeredInputs: () => [],
+      takeSteeredInputs: async () => [],
+      closeSteering: () => {},
       children: {
         spawnChildAgent: async (input) => {
           spawned.push(input);

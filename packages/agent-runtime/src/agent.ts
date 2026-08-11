@@ -20,7 +20,13 @@ import type {
   StreamEvent,
   UsageSnapshot,
 } from "@openharness/core";
-import { createAgentSession, loadSettings, type AgentSession, type RuntimeBundle } from "@openharness/core";
+import {
+  AgentRunNotAcceptingInputError,
+  createAgentSession,
+  loadSettings,
+  type AgentSession,
+  type RuntimeBundle,
+} from "@openharness/core";
 import { McpClientManager, type McpConnection } from "@openharness/mcp";
 
 import {
@@ -38,6 +44,7 @@ import {
   type AgentRememberResult,
 } from "./memory-runtime.js";
 import {
+  AgentChildRegistry,
   AgentChildManager,
   type AgentChildEnvironmentProvider,
 } from "./child-agent.js";
@@ -74,6 +81,7 @@ interface AgentIdentity {
 interface InternalAgentOptions {
   eventBus: AgentEventBus;
   effects: AgentEffects;
+  childDirectory: AgentChildRegistry;
   identity?: AgentIdentity;
 }
 
@@ -127,7 +135,8 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     private readonly eventBus: AgentEventBus,
     private readonly effects: AgentEffects,
     private readonly identity: AgentIdentity | undefined,
-    readonly children: AgentChildManager,
+    private readonly childManager: AgentChildManager,
+    readonly children: AgentChildDirectory,
     private model: string,
   ) {}
 
@@ -156,7 +165,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       runtime: this.runtime,
       eventBus: this.eventBus,
       effects: this.effects,
-      children: this.children,
+      children: this.childManager,
       identity: this.identity,
       content,
       ids,
@@ -231,7 +240,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     if (this.closed) return;
     this.closed = true;
     await this.activeRun?.interrupt("Agent closed");
-    await this.children.closeAll();
+    await this.childManager.closeAll();
     await this.eventBus.drain();
     await this.runtime.close();
   }
@@ -252,16 +261,23 @@ interface FrameworkAgentRunOptions {
   onSettled(): void;
 }
 
+interface PendingSteer {
+  input: AgentSteerInput;
+  ready: Promise<void>;
+}
+
 class FrameworkAgentRun implements AgentRunHandle {
   readonly id: string;
   readonly inputId: string;
   readonly sessionId: string;
   readonly traceId: string;
+  readonly started: Promise<AgentInputReceipt>;
   readonly result: Promise<AgentRunResult>;
   active = true;
 
   private readonly controller = new AbortController();
-  private readonly steered: AgentSteerInput[] = [];
+  private readonly steered: PendingSteer[] = [];
+  private readonly start = deferred<AgentInputReceipt>();
   private acceptingInput = true;
   private externalAbort?: () => void;
 
@@ -270,6 +286,7 @@ class FrameworkAgentRun implements AgentRunHandle {
     this.inputId = options.ids.inputId;
     this.sessionId = options.session.id;
     this.traceId = options.ids.traceId;
+    this.started = this.start.promise;
     if (options.externalSignal) {
       this.externalAbort = () => this.controller.abort(options.externalSignal!.reason ?? "Run interrupted");
       if (options.externalSignal.aborted) this.externalAbort();
@@ -283,22 +300,34 @@ class FrameworkAgentRun implements AgentRunHandle {
       }
       options.onSettled();
     });
+    void this.started.catch(() => {});
     void this.result.catch(() => {});
   }
 
   async steer(input: AgentSteerInput): Promise<AgentInputReceipt> {
-    if (!this.active || !this.acceptingInput) throw new Error(`Run is not accepting input: ${this.id}`);
+    if (!this.active || !this.acceptingInput) throw new AgentRunNotAcceptingInputError(this.id);
     const accepted = {
       ...input,
       id: input.id ?? `input_${randomUUID()}`,
       traceId: input.traceId ?? randomUUID(),
       delivery: "steer" as const,
     };
-    await this.emit({
-      type: "input.accepted",
-      data: { content: accepted.content, delivery: "steer" },
-    }, { inputId: accepted.id, traceId: accepted.traceId });
-    this.steered.push(accepted);
+    const ready = deferred<void>();
+    void ready.promise.catch(() => {});
+    const pending = { input: accepted, ready: ready.promise };
+    this.steered.push(pending);
+    try {
+      await this.emit({
+        type: "input.accepted",
+        data: { content: accepted.content, delivery: "steer" },
+      }, { inputId: accepted.id, traceId: accepted.traceId });
+      ready.resolve(undefined);
+    } catch (error) {
+      ready.reject(error);
+      const index = this.steered.indexOf(pending);
+      if (index >= 0) this.steered.splice(index, 1);
+      throw error;
+    }
     return { sessionId: this.sessionId, inputId: accepted.id, runId: this.id };
   }
 
@@ -324,7 +353,8 @@ class FrameworkAgentRun implements AgentRunHandle {
       effects: this.options.effects,
       children: this.options.children.createController(scope),
       emit: (event) => this.emit(event),
-      takeSteeredInputs: () => this.steered.splice(0),
+      takeSteeredInputs: (options) => this.takeSteeredInputs(options),
+      closeSteering: () => { this.acceptingInput = false; },
     };
 
     try {
@@ -333,6 +363,7 @@ class FrameworkAgentRun implements AgentRunHandle {
         data: { content: this.options.content, delivery: this.options.delivery },
       });
       await this.emit({ type: "run.started", data: {} });
+      this.start.resolve({ sessionId: this.sessionId, inputId: this.inputId, runId: this.id });
       for await (const event of this.options.session.submitMessage(this.options.content, {
         signal: this.controller.signal,
         execution,
@@ -353,6 +384,7 @@ class FrameworkAgentRun implements AgentRunHandle {
       };
     } catch (error) {
       this.acceptingInput = false;
+      this.start.reject(error);
       if (!(error instanceof AgentEventDeliveryError)) {
         const interrupted = this.controller.signal.aborted;
         await this.emit({
@@ -362,6 +394,15 @@ class FrameworkAgentRun implements AgentRunHandle {
       }
       throw error;
     }
+  }
+
+  private async takeSteeredInputs(options: { closeIfEmpty?: boolean } = {}): Promise<AgentSteerInput[]> {
+    const pending = this.steered.splice(0);
+    if (pending.length === 0 && options.closeIfEmpty) this.acceptingInput = false;
+    return await Promise.all(pending.map(async ({ input, ready }) => {
+      await ready;
+      return input;
+    }));
   }
 
   private async projectStreamEvent(event: StreamEvent): Promise<void> {
@@ -409,7 +450,11 @@ export async function createOpenHarnessAgent(
       reason: "No permission effect configured",
     })),
   };
-  return await createOpenHarnessAgentInternal(options, { eventBus, effects });
+  return await createOpenHarnessAgentInternal(options, {
+    eventBus,
+    effects,
+    childDirectory: new AgentChildRegistry(),
+  });
 }
 
 async function createOpenHarnessAgentInternal(
@@ -459,10 +504,12 @@ async function createOpenHarnessAgentInternal(
       cwd,
       idleTtlMs: options.childIdleTtlMs,
       eventBus: internal.eventBus,
+      directory: internal.childDirectory,
       environment: options.childEnvironment,
       createAgent: (childOptions, identity) => createOpenHarnessAgentInternal(childOptions, {
         eventBus: internal.eventBus,
         effects: internal.effects,
+        childDirectory: internal.childDirectory,
         identity,
       }),
     });
@@ -475,12 +522,27 @@ async function createOpenHarnessAgentInternal(
       internal.effects,
       internal.identity,
       children,
+      internal.childDirectory,
       options.overrides?.model ?? settings.model,
     );
   } catch (error) {
     await runtime.close();
     throw error;
   }
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 function abortError(signal: AbortSignal): Error {

@@ -397,7 +397,8 @@ describe("createAgentWorkflowRunner", () => {
       scope: { agentId: "leader", sessionId: "s1", inputId: "i1", runId: "r1", traceId: "t1", cwd: "/repo", signal: new AbortController().signal },
       effects: { requestPermission: vi.fn(async () => ({ status: "approved" as const })) },
       emit: vi.fn(),
-      takeSteeredInputs: () => [],
+      takeSteeredInputs: async () => [],
+      closeSteering: vi.fn(),
       children: {
         spawnChildAgent: vi.fn(async () => ({
           id: "task_framework",
@@ -432,7 +433,8 @@ describe("createAgentWorkflowRunner", () => {
       scope: { agentId: "leader", sessionId: "s1", inputId: "i1", runId: "r1", traceId: "t1", cwd: "/repo", signal: new AbortController().signal },
       effects: { requestPermission: vi.fn(async () => ({ status: "approved" as const })) },
       emit: vi.fn(),
-      takeSteeredInputs: () => [],
+      takeSteeredInputs: async () => [],
+      closeSteering: vi.fn(),
       children: {
         spawnChildAgent: vi.fn(async () => ({
           id: "unreachable",

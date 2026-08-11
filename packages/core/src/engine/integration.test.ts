@@ -54,7 +54,8 @@ function createExecutionContext(options: {
       awaitChildAgent: async () => { throw new Error("not implemented in this test"); },
     },
     emit: options.emit ?? (async () => {}),
-    takeSteeredInputs: options.takeSteeredInputs ?? (() => []),
+    takeSteeredInputs: options.takeSteeredInputs ?? (async () => []),
+    closeSteering: vi.fn(),
   };
 }
 
@@ -1179,8 +1180,10 @@ describe("Integration: Steer follow-ups", () => {
     ]);
 
     const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
+    const closeModes: Array<boolean | undefined> = [];
     for await (const _ of engine.submitMessage("start", {
-      execution: createExecutionContext({ takeSteeredInputs: () => {
+      execution: createExecutionContext({ takeSteeredInputs: async (options) => {
+        closeModes.push(options?.closeIfEmpty);
         pullCount++;
         // After tools (1) and before returning from the first text turn (2):
         // inject once when the model would otherwise stop.
@@ -1190,6 +1193,7 @@ describe("Integration: Steer follow-ups", () => {
     })) {}
 
     expect(getCallCount()).toBe(3);
+    expect(closeModes).toContain(true);
     const history = engine.getHistory();
     expect(history.map((message) => message.type)).toEqual([
       "user",

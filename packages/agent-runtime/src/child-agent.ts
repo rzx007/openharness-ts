@@ -13,6 +13,7 @@ import type {
   AgentRunScope,
   Settings,
 } from "@openharness/core";
+import { AgentRunNotAcceptingInputError } from "@openharness/core";
 
 import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "./agent.js";
 import {
@@ -54,6 +55,7 @@ export interface AgentChildManagerOptions {
   cwd: string;
   idleTtlMs?: number;
   eventBus: AgentEventBus;
+  directory?: AgentChildRegistry;
   environment?: AgentChildEnvironmentProvider;
   createAgent(
     options: OpenHarnessAgentOptions,
@@ -61,13 +63,48 @@ export interface AgentChildManagerOptions {
   ): Promise<OpenHarnessAgent>;
 }
 
+/** Shared live-handle index for the complete descendant tree of one root agent. */
+export class AgentChildRegistry implements AgentChildDirectory {
+  private readonly byId = new Map<string, AgentChildHandle>();
+  private readonly bySessionId = new Map<string, AgentChildHandle>();
+
+  register(handle: AgentChildHandle): void {
+    const existingId = this.byId.get(handle.id);
+    const existingSession = this.bySessionId.get(handle.sessionId);
+    if ((existingId && existingId !== handle) || (existingSession && existingSession !== handle)) {
+      throw new Error(`Child agent identity is already live: ${handle.id}/${handle.sessionId}`);
+    }
+    this.byId.set(handle.id, handle);
+    this.bySessionId.set(handle.sessionId, handle);
+  }
+
+  unregister(handle: AgentChildHandle): void {
+    if (this.byId.get(handle.id) === handle) this.byId.delete(handle.id);
+    if (this.bySessionId.get(handle.sessionId) === handle) this.bySessionId.delete(handle.sessionId);
+  }
+
+  get(childId: string): AgentChildHandle | undefined {
+    return this.byId.get(childId);
+  }
+
+  getBySessionId(sessionId: string): AgentChildHandle | undefined {
+    return this.bySessionId.get(sessionId);
+  }
+
+  list(): AgentChildHandle[] {
+    return [...this.byId.values()];
+  }
+}
+
 export class AgentChildManager implements AgentChildDirectory {
   private readonly records = new Map<string, ChildRecord>();
   private readonly aliases = new Map<string, string>();
   private readonly environment: AgentChildEnvironmentProvider;
+  private readonly directory: AgentChildRegistry;
 
   constructor(private readonly options: AgentChildManagerOptions) {
     this.environment = options.environment ?? createDefaultChildEnvironmentProvider();
+    this.directory = options.directory ?? new AgentChildRegistry();
   }
 
   get cwd(): string {
@@ -147,6 +184,7 @@ export class AgentChildManager implements AgentChildDirectory {
 
     let announced = false;
     try {
+      this.directory.register(handle);
       await this.emitChild(record, {
         type: "child.created",
         data: {
@@ -226,7 +264,7 @@ export class AgentChildManager implements AgentChildDirectory {
       try {
         return await activeRun.steer(input);
       } catch (error) {
-        if (!(error instanceof Error) || !error.message.startsWith("Run is not accepting input:")) throw error;
+        if (!(error instanceof AgentRunNotAcceptingInputError)) throw error;
         await activeRun.result.catch(() => {});
       }
     }
@@ -273,6 +311,7 @@ export class AgentChildManager implements AgentChildDirectory {
       return settled;
     });
     void record.result.catch(() => {});
+    await run.started;
     return { sessionId: record.sessionId, inputId: ids.inputId, runId: ids.runId };
   }
 
@@ -370,6 +409,7 @@ export class AgentChildManager implements AgentChildDirectory {
   }
 
   private deleteRecord(record: ChildRecord): void {
+    this.directory.unregister(record.handle);
     this.records.delete(record.id);
     for (const alias of record.aliases) {
       if (this.aliases.get(alias) === record.id) this.aliases.delete(alias);

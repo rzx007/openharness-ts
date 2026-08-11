@@ -101,7 +101,7 @@ export type {
   AgentSteerInput,
 } from "./types/runtime";
 
-export { RuntimeBundle } from "./types/runtime";
+export { AgentRunNotAcceptingInputError, RuntimeBundle } from "./types/runtime";
 export {
   AgentSession,
   createAgentSession,

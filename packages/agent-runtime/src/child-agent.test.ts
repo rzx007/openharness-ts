@@ -1,7 +1,8 @@
-import type { AgentChildResult, AgentRunHandle, AgentRunResult, AgentRunScope } from "@openharness/core";
+import { AgentRunNotAcceptingInputError } from "@openharness/core";
+import type { AgentChildResult, AgentInputReceipt, AgentRunHandle, AgentRunResult, AgentRunScope } from "@openharness/core";
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentChildManager } from "./child-agent.js";
+import { AgentChildManager, AgentChildRegistry } from "./child-agent.js";
 import { AgentEventBus } from "./event-source.js";
 
 describe("AgentChildManager", () => {
@@ -79,7 +80,7 @@ describe("AgentChildManager", () => {
     const first = deferred<AgentRunResult>();
     const firstRun = runHandle(
       first.promise,
-      vi.fn(async () => { throw new Error("Run is not accepting input: run-1"); }),
+      vi.fn(async () => { throw new AgentRunNotAcceptingInputError("run-1"); }),
     );
     const submitMessage = vi.fn()
       .mockReturnValueOnce(firstRun)
@@ -104,6 +105,64 @@ describe("AgentChildManager", () => {
       ids: { runId: receipt.runId, inputId: receipt.inputId },
     });
     await manager.closeAll();
+  });
+
+  it("does not expose a child receipt until run.started has been delivered", async () => {
+    const started = deferred<AgentInputReceipt>();
+    const submitMessage = vi.fn(() => runHandle(
+      Promise.resolve(completedResult("done")),
+      vi.fn(),
+      vi.fn(async () => {}),
+      started.promise,
+    ));
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage));
+    let settled = false;
+    const spawn = manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    started.resolve({ sessionId: "child-session", inputId: "input-1", runId: "run-1" });
+    await expect(spawn).resolves.toMatchObject({
+      inputId: expect.stringMatching(/^input_/),
+      runId: expect.stringMatching(/^run_/),
+    });
+    await manager.closeAll();
+  });
+
+  it("indexes descendants from multiple managers in one tree-wide directory", async () => {
+    const directory = new AgentChildRegistry();
+    const first = createManager(new AgentEventBus(), async () => fakeAgent(vi.fn(() => completedRun("first"))), undefined, directory);
+    const second = createManager(new AgentEventBus(), async () => fakeAgent(vi.fn(() => completedRun("second"))), undefined, directory);
+
+    const parent = await first.createController(parentScope()).spawnChildAgent({
+      description: "Parent",
+      prompt: "first",
+      agent: "Explore",
+      cwd: "/repo",
+      sessionId: "child-parent",
+    });
+    const descendant = await second.createController({ ...parentScope(), sessionId: parent.sessionId }).spawnChildAgent({
+      description: "Descendant",
+      prompt: "second",
+      agent: "Explore",
+      cwd: "/repo",
+      sessionId: "child-descendant",
+    });
+
+    expect(directory.get(parent.id)?.sessionId).toBe("child-parent");
+    expect(directory.get(descendant.id)?.sessionId).toBe("child-descendant");
+    expect(directory.list()).toHaveLength(2);
+    await first.closeAll();
+    await second.closeAll();
+    expect(directory.list()).toEqual([]);
   });
 
   it("suspends idle resources and restores history for the next run", async () => {
@@ -154,12 +213,18 @@ describe("AgentChildManager", () => {
   });
 });
 
-function createManager(bus: AgentEventBus, createAgent: () => Promise<any>, idleTtlMs?: number) {
+function createManager(
+  bus: AgentEventBus,
+  createAgent: () => Promise<any>,
+  idleTtlMs?: number,
+  directory?: AgentChildRegistry,
+) {
   return new AgentChildManager({
     settings: {} as any,
     cwd: "/repo",
     eventBus: bus,
     idleTtlMs,
+    directory,
     createAgent,
     environment: {
       acquire: async (input) => ({ cwd: input.cwd, release: async () => {} }),
@@ -196,12 +261,18 @@ function runHandle(
   result: Promise<AgentRunResult>,
   steer: any,
   interrupt = vi.fn(async () => {}),
+  started: Promise<AgentInputReceipt> = Promise.resolve({
+    sessionId: "child-session",
+    inputId: "input-1",
+    runId: "run-1",
+  }),
 ): AgentRunHandle {
   return {
     id: "run-1",
     inputId: "input-1",
     sessionId: "child-session",
     traceId: "trace-1",
+    started,
     result,
     steer,
     interrupt,

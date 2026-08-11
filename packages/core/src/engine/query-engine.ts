@@ -338,18 +338,19 @@ export class QueryEngine implements IQueryEngine {
       }
 
       // 无工具调用：若 turn 边界有 follow-up，则继续同一 submitMessage
-      if (await this.consumeFollowUps(options)) {
+      if (await this.consumeFollowUps(options, true)) {
         turnCount++;
         continue;
       }
       return;
     }
 
+    options.execution?.closeSteering();
     throw new MaxTurnsExceeded(this.maxTurns);
   }
 
-  private async consumeFollowUps(options: SubmitMessageOptions): Promise<boolean> {
-    const followUps = options.execution?.takeSteeredInputs() ?? [];
+  private async consumeFollowUps(options: SubmitMessageOptions, closeIfEmpty = false): Promise<boolean> {
+    const followUps = await (options.execution?.takeSteeredInputs({ closeIfEmpty }) ?? []);
     if (followUps.length === 0) return false;
     for (const input of followUps) {
       this.messages.push({ type: "user", content: input.content });
