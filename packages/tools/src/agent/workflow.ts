@@ -303,7 +303,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           team: asOptionalString(input.team),
           timeoutMs: runnerTimeoutMs,
           permissionMode: parsePermissionMode(input.permissionMode),
-          runtimeHost: context.runtimeHost,
+          agent: context.agent,
         });
         const persist = input.persist !== false;
         const runId = asOptionalString(input.runId) ?? (action === "run" && persist && options.run === undefined ? createWorkflowRunId() : undefined);
@@ -492,13 +492,13 @@ async function workflowResume(
 }
 
 function emitWorkflowRuntimeEvent(
-  context: { runtimeHost?: { emitEvent(event: { type: string; payload?: Record<string, unknown> }): void | Promise<void> } },
+  context: { agent?: { emit(event: { type: "domain.event"; data: { name: string; payload?: Record<string, unknown> } }): Promise<void> } },
   event: WorkflowRunEvent,
 ): void {
   try {
-    const emitted = context.runtimeHost?.emitEvent({
-      type: `workflow.${event.type}`,
-      payload: { event },
+    const emitted = context.agent?.emit({
+      type: "domain.event",
+      data: { name: `workflow.${event.type}`, payload: { event } },
     });
     if (emitted && typeof (emitted as Promise<void>).then === "function") {
       (emitted as Promise<void>).catch(() => {});

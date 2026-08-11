@@ -392,14 +392,15 @@ describe("createAgentWorkflowRunner", () => {
     });
   });
 
-  it("defaults to the runtime host child-agent port", async () => {
-    const runtimeHost = {
-      emitEvent: vi.fn(),
-      requestPermission: vi.fn(async () => ({ status: "approved" as const })),
-      childAgentHost: {
+  it("defaults to the framework child-agent controller", async () => {
+    const agent = {
+      scope: { agentId: "leader", sessionId: "s1", inputId: "i1", runId: "r1", traceId: "t1", cwd: "/repo", signal: new AbortController().signal },
+      effects: { requestPermission: vi.fn(async () => ({ status: "approved" as const })) },
+      emit: vi.fn(),
+      takeSteeredInputs: () => [],
+      children: {
         spawnChildAgent: vi.fn(async () => ({
-          id: "invocation-1",
-          taskId: "task_runtime_host",
+          id: "task_framework",
           sessionId: "child-1",
           result: Promise.resolve({ status: "completed" as const, output: "ok" }),
         })),
@@ -410,7 +411,7 @@ describe("createAgentWorkflowRunner", () => {
     };
     const runner = createAgentWorkflowRunner({
       cwd: "/repo",
-      runtimeHost,
+      agent,
       awaitTask: async () => ({ status: "completed", output: "ok", exitCode: 0 }),
       getDiffSummary: async () => ({ changedFiles: [], insertions: 0, deletions: 0 }),
       getAgentDefinition: () => undefined,
@@ -418,19 +419,21 @@ describe("createAgentWorkflowRunner", () => {
 
     const result = await runner({ task: { id: "default-mode" }, attempt: 1, dependencyResults: {} });
 
-    expect(result.metadata?.backendType).toBe("runtime_host");
-    expect(result.metadata?.taskManagerTaskId).toBe("task_runtime_host");
-    expect(runtimeHost.childAgentHost.spawnChildAgent).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.metadata?.backendType).toBe("framework");
+    expect(result.metadata?.taskManagerTaskId).toBe("task_framework");
+    expect(agent.children.spawnChildAgent).toHaveBeenCalledWith(expect.objectContaining({
       agent: "worker",
       cwd: "/repo",
     }));
   });
 
   it("fails remote_agent mode before spawning a worker", async () => {
-    const runtimeHost = {
-      emitEvent: vi.fn(),
-      requestPermission: vi.fn(async () => ({ status: "approved" as const })),
-      childAgentHost: {
+    const agent = {
+      scope: { agentId: "leader", sessionId: "s1", inputId: "i1", runId: "r1", traceId: "t1", cwd: "/repo", signal: new AbortController().signal },
+      effects: { requestPermission: vi.fn(async () => ({ status: "approved" as const })) },
+      emit: vi.fn(),
+      takeSteeredInputs: () => [],
+      children: {
         spawnChildAgent: vi.fn(async () => ({
           id: "unreachable",
           result: Promise.resolve({ status: "completed" as const, output: "unreachable" }),
@@ -443,7 +446,7 @@ describe("createAgentWorkflowRunner", () => {
     const runner = createAgentWorkflowRunner({
       cwd: "/repo",
       mode: "remote_agent",
-      runtimeHost,
+      agent,
       awaitTask: async () => ({ status: "completed", output: "unreachable" }),
       getAgentDefinition: () => undefined,
     });
@@ -452,7 +455,7 @@ describe("createAgentWorkflowRunner", () => {
 
     expect(result.status).toBe("failed");
     expect(result.summary).toContain("not implemented");
-    expect(runtimeHost.childAgentHost.spawnChildAgent).not.toHaveBeenCalled();
+    expect(agent.children.spawnChildAgent).not.toHaveBeenCalled();
   });
 
   it("can be used by runWorkflow as a real runner adapter", async () => {

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseWorkflowNotification, WorkflowRunStore } from "@openharness/coordinator";
-import type { AgentChildAgentHost, ToolRuntimeHost } from "@openharness/core";
+import type { AgentChildController, AgentExecutionContext } from "@openharness/core";
 import { createAgentWorkflowRunner } from "./workflow-runner";
 import { createWorkflowTool } from "./workflow";
 
@@ -24,21 +24,22 @@ afterEach(() => {
 });
 
 describe("Workflow tool smoke", () => {
-  it("runs through Workflow -> runtime host child-agent port -> task wait adapter", async () => {
-    const spawned: Array<Parameters<AgentChildAgentHost["spawnChildAgent"]>[0]> = [];
+  it("runs through Workflow -> framework child controller -> task wait adapter", async () => {
+    const spawned: Array<Parameters<AgentChildController["spawnChildAgent"]>[0]> = [];
     const outputs = new Map<string, string>();
-    const runtimeHost: ToolRuntimeHost = {
-      emitEvent: () => {},
-      requestPermission: async () => ({ status: "approved" }),
-      childAgentHost: {
+    const agent: AgentExecutionContext = {
+      scope: { agentId: "leader", sessionId: "s1", inputId: "i1", runId: "r1", traceId: "t1", cwd: tempDir!, signal: new AbortController().signal },
+      effects: { requestPermission: async () => ({ status: "approved" }) },
+      emit: async () => {},
+      takeSteeredInputs: () => [],
+      children: {
         spawnChildAgent: async (input) => {
           spawned.push(input);
           const taskName = input.sessionId?.match(/^wf-(.+)-\d+-/)?.[1] ?? input.agent;
           const taskId = `task_${taskName}`;
           outputs.set(taskId, `worker:${taskName}`);
           return {
-            id: `invocation_${taskName}`,
-            taskId,
+            id: taskId,
             sessionId: input.sessionId,
             result: Promise.resolve({ status: "completed", output: outputs.get(taskId) ?? "" }),
           };
@@ -72,7 +73,7 @@ describe("Workflow tool smoke", () => {
           { id: "verify", prompt: "verify using prior output" },
         ],
       },
-      { cwd: tempDir!, runtimeHost },
+      { cwd: tempDir!, agent },
     );
 
     const text = textOf(result);

@@ -7,24 +7,37 @@ import type { StreamEvent } from "./events";
 import type { Settings } from "./settings";
 import type { CompactAttachmentsProvider } from "../engine/compact-service";
 
-export interface QueryRuntimeHostEvent {
-  type: string;
-  payload?: Record<string, unknown>;
-}
-
-export interface QueryRuntimePermissionRequest {
+export interface AgentPermissionRequest {
   toolName: string;
   reason?: string;
   input?: Record<string, unknown>;
 }
 
-export interface QueryRuntimePermissionDecision {
+export interface AgentPermissionDecision {
   status: "approved" | "denied" | "expired";
   decision?: "once" | "session";
   reason?: string;
 }
 
-export interface QueryRuntimeChildAgentSpawnInput {
+export interface AgentEffectContext {
+  agentId: string;
+  sessionId: string;
+  runId: string;
+  inputId: string;
+  cwd: string;
+  traceId: string;
+  childId?: string;
+  signal: AbortSignal;
+}
+
+export interface AgentEffects {
+  requestPermission(
+    input: AgentPermissionRequest,
+    context: AgentEffectContext,
+  ): Promise<AgentPermissionDecision>;
+}
+
+export interface AgentChildSpawnInput {
   description: string;
   prompt: string;
   agent: string;
@@ -42,7 +55,7 @@ export interface QueryRuntimeChildAgentSpawnInput {
   metadata?: Record<string, unknown>;
 }
 
-export interface QueryRuntimeChildAgentInput {
+export interface AgentChildInput {
   content: string;
   id?: string;
   delivery?: "queue" | "steer";
@@ -50,36 +63,37 @@ export interface QueryRuntimeChildAgentInput {
   metadata?: Record<string, unknown>;
 }
 
-export interface QueryRuntimeChildAgentResult {
+export interface AgentChildResult {
   status: "completed" | "failed" | "interrupted" | "stopped";
   output: string;
   error?: string;
 }
 
-export interface QueryRuntimeChildAgentInvocation {
+export interface AgentInputReceipt {
+  sessionId: string;
+  inputId: string;
+  runId: string;
+}
+
+export interface AgentChildInvocation {
   id: string;
-  taskId?: string;
-  sessionId?: string;
+  sessionId: string;
+  inputId?: string;
   runId?: string;
-  result: Promise<QueryRuntimeChildAgentResult>;
+  result: Promise<AgentChildResult>;
   worktree?: { path: string; branch: string };
   notice?: string;
 }
 
-export interface QueryRuntimeChildAgentHost {
-  spawnChildAgent(input: QueryRuntimeChildAgentSpawnInput): Promise<QueryRuntimeChildAgentInvocation>;
-  sendChildInput(invocationId: string, input: QueryRuntimeChildAgentInput): Promise<void>;
+export interface AgentChildController {
+  spawnChildAgent(input: AgentChildSpawnInput): Promise<AgentChildInvocation>;
+  sendChildInput(invocationId: string, input: AgentChildInput): Promise<AgentInputReceipt>;
   interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
-  awaitChildAgent(invocationId: string): Promise<QueryRuntimeChildAgentResult>;
-}
-
-export interface QueryRuntimeHost {
-  childAgentHost?: QueryRuntimeChildAgentHost;
-  emitEvent(event: QueryRuntimeHostEvent): void | Promise<void>;
-  requestPermission(input: QueryRuntimePermissionRequest): Promise<QueryRuntimePermissionDecision>;
+  awaitChildAgent(invocationId: string): Promise<AgentChildResult>;
 }
 
 export interface AgentRunScope {
+  agentId: string;
   sessionId: string;
   runId: string;
   inputId: string;
@@ -88,28 +102,102 @@ export interface AgentRunScope {
   signal: AbortSignal;
 }
 
-export type AgentRuntimeEvent = QueryRuntimeHostEvent;
-export type AgentPermissionRequest = QueryRuntimePermissionRequest;
-export type AgentPermissionDecision = QueryRuntimePermissionDecision;
-export type AgentChildAgentSpawnInput = QueryRuntimeChildAgentSpawnInput;
-export type AgentChildAgentInput = QueryRuntimeChildAgentInput;
-export type AgentChildAgentResult = QueryRuntimeChildAgentResult;
-export type AgentChildAgentInvocation = QueryRuntimeChildAgentInvocation;
-export type AgentChildAgentHost = QueryRuntimeChildAgentHost;
+export interface AgentEventContext {
+  agentId: string;
+  sessionId: string;
+  inputId?: string;
+  runId?: string;
+  traceId?: string;
+  childId?: string;
+  parentSessionId?: string;
+  parentRunId?: string;
+}
 
-/**
- * Run-scoped boundary for capabilities owned by the host environment.
- *
- * Framework code defines this contract; applications such as the daemon decide
- * how to project these capabilities into durable state, HTTP, SSE, or local UI.
- */
-export interface AgentRunHost {
+export interface AgentSerializedError {
+  name: string;
+  message: string;
+  code?: string;
+  stack?: string;
+}
+
+export type AgentEventInput =
+  | { type: "input.accepted"; data: { content: string | ContentBlock[]; delivery: "queue" | "steer" } }
+  | { type: "run.started"; data: Record<string, never> }
+  | { type: "run.completed"; data: { output: string; stopReason?: string } }
+  | { type: "run.failed"; data: { error: AgentSerializedError; output?: string } }
+  | { type: "run.interrupted"; data: { error: AgentSerializedError; output?: string } }
+  | { type: "output.text.delta"; data: { delta: string } }
+  | { type: "output.turn.completed"; data: { stopReason: string } }
+  | { type: "tool.started"; data: { toolUse: { type: "tool_use"; id: string; name: string; input: Record<string, unknown> } } }
+  | { type: "tool.completed"; data: { toolUseId: string; result: { content: ContentBlock[]; isError?: boolean } } }
+  | { type: "usage.updated"; data: { usage: import("./usage").UsageSnapshot } }
+  | { type: "domain.event"; data: { name: string; payload?: Record<string, unknown> } }
+  | { type: "permission.requested"; data: { requestId: string; request: AgentPermissionRequest } }
+  | { type: "permission.resolved"; data: { requestId: string; decision: AgentPermissionDecision } }
+  | { type: "child.created"; data: { childId: string; sessionId: string; spawn: AgentChildSpawnInput; cwd: string; worktree?: { path: string; branch: string } } }
+  | { type: "child.suspended"; data: { childId: string; sessionId: string } }
+  | { type: "child.resumed"; data: { childId: string; sessionId: string } }
+  | { type: "child.closed"; data: { childId: string; sessionId: string; result: AgentChildResult } };
+
+export type AgentEvent = AgentEventInput & {
+  id: string;
+  sequence: number;
+  occurredAt: string;
+  context: AgentEventContext;
+};
+
+export type AgentEventListener = (event: AgentEvent) => void | Promise<void>;
+
+export interface AgentEventSubscription {
+  unsubscribe(): void;
+}
+
+export interface AgentEventSource {
+  subscribe(listener: AgentEventListener): AgentEventSubscription;
+}
+
+/** Framework-internal execution capabilities shared with tool packages. */
+export interface AgentExecutionContext {
   readonly scope: AgentRunScope;
-  readonly childAgentHost?: AgentChildAgentHost;
+  readonly effects: AgentEffects;
+  readonly children: AgentChildController;
+  emit(event: AgentEventInput): Promise<void>;
+  takeSteeredInputs(): AgentChildInput[];
+}
 
-  emitEvent(event: AgentRuntimeEvent): void | Promise<void>;
-  emitStreamEvent(event: StreamEvent): void | Promise<void>;
-  requestPermission(input: AgentPermissionRequest): Promise<AgentPermissionDecision>;
+export interface AgentSteerInput extends AgentChildInput {}
+
+export interface AgentRunResult {
+  status: "completed";
+  output: string;
+  history: Message[];
+  usage: import("./usage").UsageSnapshot;
+}
+
+export interface AgentRunHandle {
+  readonly id: string;
+  readonly inputId: string;
+  readonly sessionId: string;
+  readonly traceId: string;
+  readonly result: Promise<AgentRunResult>;
+  steer(input: AgentSteerInput): Promise<AgentInputReceipt>;
+  interrupt(reason?: string): Promise<void>;
+}
+
+export interface AgentChildHandle {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly state: "starting" | "running" | "idle" | "suspended" | "closed";
+  readonly result: Promise<AgentChildResult>;
+  send(input: AgentChildInput): Promise<AgentInputReceipt>;
+  interrupt(reason?: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface AgentChildDirectory {
+  get(childId: string): AgentChildHandle | undefined;
+  getBySessionId(sessionId: string): AgentChildHandle | undefined;
+  list(): AgentChildHandle[];
 }
 
 export interface QueryEngine {
@@ -117,8 +205,7 @@ export interface QueryEngine {
     content: string | ContentBlock[],
     options?: {
       signal?: AbortSignal;
-      pullFollowUps?: () => string[] | Promise<string[]>;
-      runtimeHost?: QueryRuntimeHost;
+      execution?: AgentExecutionContext;
     },
   ): AsyncIterable<StreamEvent>;
   getHistory(): Message[];

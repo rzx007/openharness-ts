@@ -20,7 +20,7 @@ export const agentTool: ToolDefinition = {
         type: "string",
         enum: ["in_process_teammate", "remote_agent"],
         description:
-          "Agent execution mode. in_process_teammate uses the runtime host child-agent port; " +
+          "Agent execution mode. in_process_teammate uses the framework child manager; " +
           "remote_agent is reserved and currently unsupported.",
         default: "in_process_teammate",
       },
@@ -29,7 +29,7 @@ export const agentTool: ToolDefinition = {
         enum: ["default", "plan", "full_auto"],
         description:
           "Permission mode for the spawned agent. Defaults to 'default': write operations are " +
-          "escalated to the leader for approval via the runtime host.",
+          "escalated to the leader through the framework permission effect.",
       },
       isolate: {
         type: "boolean",
@@ -56,9 +56,9 @@ export const agentTool: ToolDefinition = {
       return { content: [{ type: "text", text: "Invalid permissionMode. Use default, plan, or full_auto." }], isError: true };
     }
 
-    const childAgentHost = context.runtimeHost?.childAgentHost;
-    if (!childAgentHost) {
-      return { content: [{ type: "text", text: "No child-agent host registered for Agent tool" }], isError: true };
+    const children = context.agent?.children;
+    if (!children) {
+      return { content: [{ type: "text", text: "No framework child manager registered for Agent tool" }], isError: true };
     }
 
     const subagentType = input.subagentType as string | undefined;
@@ -69,7 +69,7 @@ export const agentTool: ToolDefinition = {
 
     try {
       const workerSessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const invocation = await childAgentHost.spawnChildAgent({
+      const invocation = await children.spawnChildAgent({
         description: input.description as string,
         prompt: input.prompt as string,
         agent: agentName,
@@ -86,7 +86,7 @@ export const agentTool: ToolDefinition = {
         effort: agentDef?.effort != null ? String(agentDef.effort) : undefined,
       });
 
-      const taskId = invocation.taskId ?? invocation.id;
+      const taskId = invocation.id;
 
       if (input.team) {
         try {
@@ -96,8 +96,8 @@ export const agentTool: ToolDefinition = {
         }
       }
 
-      let text = `Spawned agent ${agentId} (task_id=${taskId}, backend=runtime_host)`;
-      if (invocation.sessionId) text += `\nsession_id=${invocation.sessionId}`;
+      let text = `Spawned agent ${agentId} (task_id=${taskId}, backend=framework)`;
+      text += `\nsession_id=${invocation.sessionId}`;
       if (invocation.worktree) {
         text += `\nIsolated: changes land on branch \`${invocation.worktree.branch}\`, worktree path \`${invocation.worktree.path}\` - review/merge it yourself.`;
         text += `\nWhen done reviewing, clean it up with \`git worktree remove ${invocation.worktree.path}\` (or \`git worktree remove --force ${invocation.worktree.path}\` to discard uncommitted changes).`;
@@ -130,12 +130,12 @@ export const sendMessageTool: ToolDefinition = {
     const message = input.message as string;
 
     if (taskId.includes("@")) {
-      const childAgentHost = context.runtimeHost?.childAgentHost;
-      if (!childAgentHost) {
+      const children = context.agent?.children;
+      if (!children) {
         return { content: [{ type: "text", text: `No active child invocation for agent ${taskId}` }], isError: true };
       }
       try {
-        await childAgentHost.sendChildInput(taskId, { content: message });
+        await children.sendChildInput(taskId, { content: message });
         return { content: [{ type: "text", text: `Sent message to agent ${taskId}` }] };
       } catch (err) {
         return { content: [{ type: "text", text: (err as Error).message }], isError: true };
@@ -143,13 +143,13 @@ export const sendMessageTool: ToolDefinition = {
     }
 
     try {
-      const childAgentHost = context.runtimeHost?.childAgentHost;
-      if (childAgentHost) {
+      const children = context.agent?.children;
+      if (children) {
         try {
-          await childAgentHost.sendChildInput(taskId, { content: message });
+          await children.sendChildInput(taskId, { content: message });
           return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
         } catch (error) {
-          if (!(error instanceof Error) || !error.message.startsWith("Child agent invocation not found:")) throw error;
+          if (!(error instanceof Error) || !error.message.startsWith("Child agent not found:")) throw error;
         }
       }
       const { getTaskManager } = await import("@openharness/services");

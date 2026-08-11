@@ -177,7 +177,7 @@ describe("workflowTool", () => {
 
   it("emits persistent workflow events to the runtime event sink", async () => {
     const cwd = makeTempDir();
-    const emitted: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+    const emitted: Array<{ type: string; data?: { name: string; payload?: Record<string, unknown> } }> = [];
     try {
       const runner: WorkflowRunner = vi.fn(async ({ task }) => ({
         summary: `${task.id} done`,
@@ -192,14 +192,14 @@ describe("workflowTool", () => {
           runId: "sink-run",
           tasks: [{ id: "research", prompt: "research" }],
         },
-        { cwd, runtimeHost: { emitEvent: (event) => emitted.push(event) } },
+        { cwd, agent: { emit: async (event) => { emitted.push(event as typeof emitted[number]); } } as never },
       );
 
       expect(result.isError).toBeUndefined();
-      expect(emitted.map((event) => event.type)).toContain("workflow.workflow_started");
-      expect(emitted.map((event) => event.type)).toContain("workflow.task_started");
-      expect(emitted.map((event) => event.type)).toContain("workflow.workflow_finished");
-      expect(emitted[0]?.payload?.event).toMatchObject({ runId: "sink-run" });
+      expect(emitted.map((event) => event.data?.name)).toContain("workflow.workflow_started");
+      expect(emitted.map((event) => event.data?.name)).toContain("workflow.task_started");
+      expect(emitted.map((event) => event.data?.name)).toContain("workflow.workflow_finished");
+      expect(emitted[0]?.data?.payload?.event).toMatchObject({ runId: "sink-run" });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

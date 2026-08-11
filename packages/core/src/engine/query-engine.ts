@@ -1,12 +1,14 @@
+import { randomUUID } from "node:crypto";
+
 import type { Message, StreamEvent, ToolUseBlock, UsageSnapshot, ContentBlock } from "../index";
 import type {
+  AgentExecutionContext,
   StreamingMessageClient,
   ToolRegistry as IToolRegistry,
   IPermissionChecker,
   IHookExecutor,
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
-  QueryRuntimeHost,
   MemoryRetriever,
   ToolContext,
   ToolExecutionResult,
@@ -137,12 +139,7 @@ export class MaxTurnsExceeded extends Error {
 
 export interface SubmitMessageOptions {
   signal?: AbortSignal;
-  /**
-   * Called at agentic turn boundaries. Returned strings are appended as user
-   * messages so the same submitMessage call continues instead of returning.
-   */
-  pullFollowUps?: () => string[] | Promise<string[]>;
-  runtimeHost?: QueryRuntimeHost;
+  execution?: AgentExecutionContext;
 }
 
 export class QueryEngine implements IQueryEngine {
@@ -325,7 +322,7 @@ export class QueryEngine implements IQueryEngine {
 
       if (toolUses.length > 0) {
         // 执行所有请求的工具调用，并将结果作为工具结果消息加入历史记录
-        const results = await this.executeTools(toolUses, options.signal, options.runtimeHost);
+        const results = await this.executeTools(toolUses, options.signal, options.execution);
         for (const result of results) {
           this.messages.push({
             type: "tool_result",
@@ -352,11 +349,10 @@ export class QueryEngine implements IQueryEngine {
   }
 
   private async consumeFollowUps(options: SubmitMessageOptions): Promise<boolean> {
-    if (!options.pullFollowUps) return false;
-    const followUps = (await options.pullFollowUps()) ?? [];
+    const followUps = options.execution?.takeSteeredInputs() ?? [];
     if (followUps.length === 0) return false;
-    for (const content of followUps) {
-      this.messages.push({ type: "user", content });
+    for (const input of followUps) {
+      this.messages.push({ type: "user", content: input.content });
     }
     return true;
   }
@@ -423,7 +419,7 @@ export class QueryEngine implements IQueryEngine {
   private async executeTools(
     toolUses: ToolUseBlock[],
     signal?: AbortSignal,
-    runtimeHost?: QueryRuntimeHost,
+    execution?: AgentExecutionContext,
   ): Promise<ToolExecutionResult[]> {
     const results: ToolExecutionResult[] = new Array(toolUses.length);
     const readyForPermission: {
@@ -495,11 +491,21 @@ export class QueryEngine implements IQueryEngine {
       // 处理需要用户确认权限的情况
       if (decision.action === "ask") {
         let allowed = false;
-        if (runtimeHost) {
-          const approval = await runtimeHost.requestPermission({
+        if (execution) {
+          const requestId = `permission_${randomUUID()}`;
+          const request = {
             toolName: toolUse.name,
             reason: decision.reason,
             input: toolUse.input,
+          };
+          await execution.emit({
+            type: "permission.requested",
+            data: { requestId, request },
+          });
+          const approval = await execution.effects.requestPermission(request, execution.scope);
+          await execution.emit({
+            type: "permission.resolved",
+            data: { requestId, decision: approval },
           });
           allowed = approval.status === "approved";
         }
@@ -550,7 +556,7 @@ export class QueryEngine implements IQueryEngine {
             settings: this.options.settings,
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
-            runtimeHost,
+            agent: execution,
           };
           const result = await this.executeToolWithTimeout(
             tool,

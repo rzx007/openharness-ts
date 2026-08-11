@@ -124,7 +124,7 @@ export const taskWaitTool: ToolDefinition = {
     "Block until one or more background tasks finish and return their results. " +
     "Use this to wait for task_id values returned by Agent or TaskCreate. For Agent-created " +
     "child sessions, TaskWait waits on the user-visible task projection; the live child " +
-    "invocation handle stays behind AgentRunHost.childAgentHost. " +
+    "invocation stays owned by the framework child directory. " +
     "Accepts taskIds (string[], also tolerates a single string) and an optional " +
     "timeoutSeconds (default 300). When heartbeatSeconds is provided, TaskWait " +
     "returns a running progress summary after that interval without stopping the task; " +
@@ -186,13 +186,12 @@ export const taskWaitTool: ToolDefinition = {
       context.abortSignal?.addEventListener("abort", stopOnAbort, { once: true });
     }
 
-    // Await every user-visible task projection independently. For Agent-created
-    // child sessions, AgentRunHost.childAgentHost keeps the live invocation handle private;
-    // TaskWait only needs the task_id returned to the model.
+    // 独立地等待每个用户可见的 task 投影结果。对于 Agent 创建的子会话，
+    // framework child directory 会保留实际的 live invocation；
+    // TaskWait 只需要模型返回的 task_id。
     //
-    // A single failed/unknown id never drags
-    // down the rest. awaitTask throws synchronously on an unknown id, so wrap
-    // each call in its own try/catch via an async closure.
+    // 单个失败/未知的 id 不会影响其他任务。awaitTask 在遇到未知 id 时会同步抛出异常，
+    // 因此要通过异步闭包为每个调用单独包裹 try/catch。
     try {
       const segments = await Promise.all(
         taskIds.map(async (taskId) => {

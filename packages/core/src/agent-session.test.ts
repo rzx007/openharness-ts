@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAgentSession } from "./agent-session.js";
-import type { QueryEngine, StreamEvent } from "./index.js";
+import type { AgentExecutionContext, QueryEngine, StreamEvent } from "./index.js";
 
-function createQueryEngine(
-  submit: QueryEngine["submitMessage"],
-): QueryEngine {
+function createQueryEngine(submit: QueryEngine["submitMessage"]): QueryEngine {
   return {
     submitMessage: submit,
     getHistory: vi.fn(() => [{ type: "user", content: "hi" }]),
@@ -26,63 +24,24 @@ function createQueryEngine(
 }
 
 describe("AgentSession", () => {
-  it("runs a message through QueryEngine and forwards stream events to the host callback", async () => {
+  it("is a thin stateful QueryEngine wrapper", async () => {
     const events: StreamEvent[] = [
       { type: "text_delta", delta: "hello" },
-      { type: "text_delta", delta: " world" },
       { type: "complete", stopReason: "end_turn" },
     ];
-    const onStream = vi.fn();
-    const engine = createQueryEngine(async function* () {
+    const execution = {} as AgentExecutionContext;
+    const submit = vi.fn(async function* () {
       for (const event of events) yield event;
     });
-    const session = createAgentSession({
-      queryEngine: engine,
-      cwd: "/repo",
-      sessionId: "s1",
-      emitStreamEvent: onStream,
-    });
+    const engine = createQueryEngine(submit);
+    const session = createAgentSession({ queryEngine: engine, sessionId: "s1" });
 
-    const result = await session.runMessage("hi");
+    const received: StreamEvent[] = [];
+    for await (const event of session.submitMessage("hi", { execution })) received.push(event);
 
-    expect(result.output).toBe("hello world");
-    expect(result.events).toEqual(events);
-    expect(onStream).toHaveBeenCalledTimes(3);
+    expect(received).toEqual(events);
+    expect(submit).toHaveBeenCalledWith("hi", { execution });
     expect(engine.setSessionId).toHaveBeenCalledWith("s1");
-  });
-
-  it("provides a run-scoped host with permission callback support", async () => {
-    const requestPermission = vi.fn(async () => ({ status: "approved" as const, decision: "once" as const }));
-    const engine = createQueryEngine(async function* (_content, options) {
-      const decision = await options?.runtimeHost?.requestPermission({
-        toolName: "Write",
-        input: { file: "a.txt" },
-      });
-      yield { type: "text_delta", delta: decision?.status ?? "missing" };
-    });
-    const session = createAgentSession({
-      queryEngine: engine,
-      cwd: "/repo",
-      sessionId: "s1",
-      requestPermission,
-    });
-
-    const result = await session.runMessage("edit");
-
-    expect(result.output).toBe("approved");
-    expect(requestPermission).toHaveBeenCalledWith({ toolName: "Write", input: { file: "a.txt" } });
-  });
-
-  it("denies permissions when no permission callback is configured", async () => {
-    const engine = createQueryEngine(async function* (_content, options) {
-      const decision = await options?.runtimeHost?.requestPermission({ toolName: "Bash" });
-      yield { type: "text_delta", delta: decision?.status ?? "missing" };
-    });
-    const session = createAgentSession({ queryEngine: engine, cwd: "/repo" });
-
-    const result = await session.runMessage("run");
-
-    expect(result.output).toBe("denied");
-    expect(session.createHost().childAgentHost).toBeUndefined();
+    expect(session.getHistory()).toEqual([{ type: "user", content: "hi" }]);
   });
 });

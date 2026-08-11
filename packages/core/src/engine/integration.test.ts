@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { QueryEngine } from "./query-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { RuntimeBuilder } from "./runtime-builder.js";
-import type { StreamEvent, ToolDefinition, Message } from "../index.js";
+import type { AgentEffects, AgentExecutionContext, StreamEvent, ToolDefinition, Message } from "../index.js";
 import { sanitizeMessageHistory } from "../utils/message-history.js";
 
 function createMockStreamClient(responses: StreamEvent[][]): {
@@ -26,6 +26,36 @@ function createMockStreamClient(responses: StreamEvent[][]): {
 
 function allowAll(): any {
   return { checkTool: async () => ({ action: "allow", reason: "test" }) };
+}
+
+function createExecutionContext(options: {
+  emit?: AgentExecutionContext["emit"];
+  requestPermission?: AgentEffects["requestPermission"];
+  takeSteeredInputs?: AgentExecutionContext["takeSteeredInputs"];
+} = {}): AgentExecutionContext {
+  const signal = new AbortController().signal;
+  return {
+    scope: {
+      agentId: "agent-test",
+      sessionId: "session-test",
+      inputId: "input-test",
+      runId: "run-test",
+      traceId: "trace-test",
+      cwd: "/work",
+      signal,
+    },
+    effects: {
+      requestPermission: options.requestPermission ?? (async () => ({ status: "denied" })),
+    },
+    children: {
+      spawnChildAgent: async () => { throw new Error("not implemented in this test"); },
+      sendChildInput: async () => { throw new Error("not implemented in this test"); },
+      interruptChildAgent: async () => {},
+      awaitChildAgent: async () => { throw new Error("not implemented in this test"); },
+    },
+    emit: options.emit ?? (async () => {}),
+    takeSteeredInputs: options.takeSteeredInputs ?? (() => []),
+  };
 }
 
 function denyAll(): any {
@@ -180,15 +210,15 @@ describe("Integration: Full Agent Loop", () => {
     expect(seenSessionIds).toEqual(["session-a"]);
   });
 
-  it("passes the runtime event sink to tool execution context", async () => {
+  it("passes the agent event sink to tool execution context", async () => {
     const registry = new ToolRegistry();
-    const emitted: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+    const emitted: Array<{ type: string; data?: Record<string, unknown> }> = [];
     registry.register({
       name: "Emit",
       description: "Emit tool",
       inputSchema: { type: "object", properties: {} },
       execute: async (_input, context) => {
-        await context.runtimeHost?.emitEvent({ type: "tool.custom", payload: { ok: true } });
+        await context.agent?.emit({ type: "domain.event", data: { name: "tool.custom", payload: { ok: true } } });
         return { content: [{ type: "text" as const, text: "emitted" }] };
       },
     });
@@ -208,15 +238,12 @@ describe("Integration: Full Agent Loop", () => {
 
     const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
     for await (const _event of engine.submitMessage("emit", {
-      runtimeHost: {
-        emitEvent: (event) => emitted.push(event),
-        requestPermission: async () => ({ status: "denied" }),
-      },
+      execution: createExecutionContext({ emit: async (event) => { emitted.push(event); } }),
     })) {
       // drain
     }
 
-    expect(emitted).toEqual([{ type: "tool.custom", payload: { ok: true } }]);
+    expect(emitted).toEqual([{ type: "domain.event", data: { name: "tool.custom", payload: { ok: true } } }]);
   });
 
   it("multi-tool parallel execution", async () => {
@@ -1033,10 +1060,7 @@ describe("Integration: Permission Prompt (ask mode)", () => {
     const engine = new QueryEngine(client, registry, askMode, noopHooks());
     const events: StreamEvent[] = [];
     for await (const e of engine.submitMessage("ls", {
-      runtimeHost: {
-        emitEvent: async () => {},
-        requestPermission: async () => ({ status: "approved" }),
-      },
+      execution: createExecutionContext({ requestPermission: async () => ({ status: "approved" }) }),
     })) { events.push(e); }
 
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
@@ -1063,10 +1087,7 @@ describe("Integration: Permission Prompt (ask mode)", () => {
     const engine = new QueryEngine(client, registry, askMode, noopHooks());
     const events: StreamEvent[] = [];
     for await (const e of engine.submitMessage("run", {
-      runtimeHost: {
-        emitEvent: async () => {},
-        requestPermission: async () => ({ status: "denied" }),
-      },
+      execution: createExecutionContext({ requestPermission: async () => ({ status: "denied" }) }),
     })) { events.push(e); }
 
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
@@ -1134,7 +1155,7 @@ describe("Integration: CostTracker", () => {
 });
 
 describe("Integration: Steer follow-ups", () => {
-  it("injects pullFollowUps at turn boundaries and continues the same run", async () => {
+  it("injects steered inputs at turn boundaries and continues the same run", async () => {
     const registry = new ToolRegistry();
     registry.register(makeTool("Ping", () => "pong"));
 
@@ -1159,13 +1180,13 @@ describe("Integration: Steer follow-ups", () => {
 
     const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
     for await (const _ of engine.submitMessage("start", {
-      pullFollowUps: () => {
+      execution: createExecutionContext({ takeSteeredInputs: () => {
         pullCount++;
         // After tools (1) and before returning from the first text turn (2):
         // inject once when the model would otherwise stop.
-        if (pullCount === 2) return ["steered follow-up"];
+        if (pullCount === 2) return [{ content: "steered follow-up" }];
         return [];
-      },
+      } }),
     })) {}
 
     expect(getCallCount()).toBe(3);

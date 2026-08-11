@@ -25,10 +25,14 @@ export type {
 } from "./extensions.js";
 export { discoverOpenHarnessExtensions } from "./extensions.js";
 export type {
-  AgentChildControls,
-  AgentChildInputProjection,
-  AgentChildInputReceipt,
-  AgentChildProjection,
-  AgentChildProjectionHandle,
-  AgentChildRunProjection,
+  AgentChildEnvironmentLease,
+  AgentChildEnvironmentProvider,
 } from "./child-agent.js";
+export {
+  buildChildAgentWorktreeSlug,
+  computeChildAgentWorktreeBaseDir,
+  createChildAgentWorktreeManager,
+  createDefaultChildEnvironmentProvider,
+  type ChildAgentWorktreeManager,
+  type GitRunner,
+} from "./child-environment.js";

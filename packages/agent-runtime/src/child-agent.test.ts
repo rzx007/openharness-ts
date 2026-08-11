@@ -1,57 +1,20 @@
+import type { AgentChildResult, AgentRunHandle, AgentRunResult, AgentRunScope } from "@openharness/core";
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentChildManager, type AgentChildProjection } from "./child-agent.js";
+import { AgentChildManager } from "./child-agent.js";
+import { AgentEventBus } from "./event-source.js";
 
 describe("AgentChildManager", () => {
-  it("owns child creation, execution and the live invocation handle", async () => {
+  it("owns child identity, execution, events and live directory", async () => {
+    const bus = new AgentEventBus();
+    const eventTypes: string[] = [];
+    bus.subscribe((event) => { eventTypes.push(event.type); });
     const close = vi.fn(async () => {});
-    const submitMessage = vi.fn(async function* () {
-      yield { type: "text_delta" as const, delta: "child output" };
-    });
-    const createAgent = vi.fn(async () => ({ submitMessage, close } as any));
-    const finishRun = vi.fn(async () => {});
-    const projection: AgentChildProjection = {
-      createChild: vi.fn(async ({ invocationId }) => ({
-        invocationId,
-        sessionId: "child-session",
-        cwd: "/repo",
-        taskId: "task-1",
-      })),
-      startRun: vi.fn(async (_child, _content, signal) => ({
-        runId: "run-1",
-        host: {
-          scope: {
-            sessionId: "child-session",
-            inputId: "input-1",
-            runId: "run-1",
-            cwd: "/repo",
-            traceId: "trace-1",
-            signal,
-          },
-          emitEvent: vi.fn(),
-          emitStreamEvent: vi.fn(),
-          requestPermission: vi.fn(),
-        },
-      })),
-      finishRun,
-      closeChild: vi.fn(async () => {}),
-    };
-    const manager = new AgentChildManager({ settings: {} as any, createAgent });
-    const host = manager.createHost({
-      scope: {
-        sessionId: "parent",
-        inputId: "parent-input",
-        runId: "parent-run",
-        cwd: "/repo",
-        traceId: "parent-trace",
-        signal: new AbortController().signal,
-      },
-      emitEvent: vi.fn(),
-      emitStreamEvent: vi.fn(),
-      requestPermission: vi.fn(),
-    }, projection);
+    const submitMessage = vi.fn(() => completedRun("child output"));
+    const manager = createManager(bus, async () => fakeAgent(submitMessage, close));
+    const controller = manager.createController(parentScope());
 
-    const invocation = await host.spawnChildAgent({
+    const invocation = await controller.spawnChildAgent({
       description: "Explore",
       prompt: "inspect",
       agent: "Explore",
@@ -59,70 +22,47 @@ describe("AgentChildManager", () => {
     });
 
     await expect(invocation.result).resolves.toEqual({ status: "completed", output: "child output" });
-    expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "child-session" }));
-    expect(submitMessage).toHaveBeenCalledWith("inspect", expect.objectContaining({ childProjection: projection }));
-    expect(finishRun).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "child-session" }),
-      expect.objectContaining({ runId: "run-1" }),
-      { status: "completed", output: "child output" },
-    );
+    expect(invocation.id).toMatch(/^child_/);
+    expect(manager.get(invocation.id)?.sessionId).toBe(invocation.sessionId);
+    expect(manager.getBySessionId(invocation.sessionId)?.id).toBe(invocation.id);
+    expect(eventTypes).toContain("child.created");
 
     await manager.closeAll();
     expect(close).toHaveBeenCalledOnce();
+    expect(eventTypes).toContain("child.closed");
+    expect(manager.list()).toEqual([]);
   });
 
-  it("interrupts framework-owned children when the parent run is interrupted", async () => {
-    const close = vi.fn(async () => {});
-    const submitMessage = vi.fn(async function* (_content, options) {
-      await new Promise<void>((resolve) => {
-        options.signal.addEventListener("abort", () => resolve(), { once: true });
-      });
-      throw new Error("child interrupted");
+  it("steers an active child through its framework run handle", async () => {
+    const pending = deferred<AgentRunResult>();
+    const steer = vi.fn(async (input) => ({ sessionId: "child-session", inputId: input.id!, runId: "run-1" }));
+    const submitMessage = vi.fn(() => runHandle(pending.promise, steer));
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage));
+    const controller = manager.createController(parentScope());
+    const invocation = await controller.spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+      sessionId: "child-session",
     });
-    const closeChild = vi.fn(async () => {});
-    const projection: AgentChildProjection = {
-      createChild: vi.fn(async ({ invocationId }) => ({
-        invocationId,
-        sessionId: "child-session",
-        cwd: "/repo",
-      })),
-      startRun: vi.fn(async (_child, _content, signal) => ({
-        host: {
-          scope: {
-            sessionId: "child-session",
-            inputId: "input-1",
-            runId: "run-1",
-            cwd: "/repo",
-            traceId: "trace-1",
-            signal,
-          },
-          emitEvent: vi.fn(),
-          emitStreamEvent: vi.fn(),
-          requestPermission: vi.fn(),
-        },
-      })),
-      finishRun: vi.fn(async () => {}),
-      closeChild,
-    };
+
+    const receipt = await controller.sendChildInput(invocation.id, { id: "steer-1", content: "nudge" });
+
+    expect(receipt).toEqual({ sessionId: "child-session", inputId: "steer-1", runId: "run-1" });
+    expect(steer).toHaveBeenCalledWith({ id: "steer-1", content: "nudge" });
+    pending.resolve(completedResult("done"));
+    await invocation.result;
+    await manager.closeAll();
+  });
+
+  it("propagates parent abort to the child", async () => {
+    const pending = deferred<AgentRunResult>();
+    const interrupt = vi.fn(async () => pending.reject(new Error("interrupted")));
+    const submitMessage = vi.fn(() => runHandle(pending.promise, vi.fn(), interrupt));
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage));
     const parent = new AbortController();
-    const manager = new AgentChildManager({
-      settings: {} as any,
-      createAgent: vi.fn(async () => ({ submitMessage, close } as any)),
-    });
-    const host = manager.createHost({
-      scope: {
-        sessionId: "parent",
-        inputId: "parent-input",
-        runId: "parent-run",
-        cwd: "/repo",
-        traceId: "parent-trace",
-        signal: parent.signal,
-      },
-      emitEvent: vi.fn(),
-      emitStreamEvent: vi.fn(),
-      requestPermission: vi.fn(),
-    }, projection);
-    const invocation = await host.spawnChildAgent({
+    const invocation = await manager.createController(parentScope(parent.signal)).spawnChildAgent({
       description: "Explore",
       prompt: "inspect",
       agent: "Explore",
@@ -132,278 +72,162 @@ describe("AgentChildManager", () => {
     parent.abort();
 
     await expect(invocation.result).resolves.toMatchObject({ status: "interrupted" });
-    expect(close).toHaveBeenCalledOnce();
-    expect(closeChild).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "child-session" }),
-      expect.objectContaining({ status: "interrupted" }),
+    expect(interrupt).toHaveBeenCalled();
+  });
+
+  it("queues a new run when an active run has stopped accepting steer", async () => {
+    const first = deferred<AgentRunResult>();
+    const firstRun = runHandle(
+      first.promise,
+      vi.fn(async () => { throw new Error("Run is not accepting input: run-1"); }),
     );
-  });
-
-  it("starts a new serialized run for a completed child by task or agent alias", async () => {
-    const submitMessage = vi.fn(async function* (content: string) {
-      yield { type: "text_delta" as const, delta: `output:${content}` };
-    });
-    let runCount = 0;
-    const projection = createProjection({
-      startRun: vi.fn(async (_child, _input, signal) => {
-        runCount += 1;
-        return childRun(`run-${runCount}`, signal);
-      }),
-    });
-    const manager = new AgentChildManager({
-      settings: {} as any,
-      createAgent: vi.fn(async () => ({ submitMessage, close: vi.fn(async () => {}) } as any)),
-    });
-    const host = manager.createHost(parentHost(), projection);
-    const invocation = await host.spawnChildAgent({
+    const submitMessage = vi.fn()
+      .mockReturnValueOnce(firstRun)
+      .mockReturnValueOnce({ ...completedRun("second"), id: "run-2", inputId: "input-2" });
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(submitMessage));
+    const controller = manager.createController(parentScope());
+    const invocation = await controller.spawnChildAgent({
       description: "Explore",
       prompt: "first",
       agent: "Explore",
       cwd: "/repo",
     });
 
-    await expect(invocation.result).resolves.toMatchObject({ output: "output:first" });
-    await host.sendChildInput("task-1", { content: "second" });
-    await expect(host.awaitChildAgent("task-1")).resolves.toMatchObject({ output: "output:second" });
-    await host.sendChildInput("Explore@default", { content: "third" });
-    await expect(host.awaitChildAgent("Explore@default")).resolves.toMatchObject({ output: "output:third" });
-    await Promise.all([
-      host.sendChildInput("task-1", { id: "request-4", delivery: "queue", content: "fourth" }),
-      host.sendChildInput("task-1", { id: "request-4", delivery: "queue", content: "fourth" }),
-    ]);
-    await expect(host.awaitChildAgent("task-1")).resolves.toMatchObject({ output: "output:fourth" });
-    expect(projection.startRun).toHaveBeenCalledTimes(4);
+    const followUp = controller.sendChildInput(invocation.id, { content: "second" });
+    first.resolve(completedResult("first"));
+
+    const receipt = await followUp;
+    expect(receipt.runId).toMatch(/^run_/);
+    expect(receipt.inputId).toMatch(/^input_/);
+    expect(submitMessage).toHaveBeenCalledTimes(2);
+    expect(submitMessage.mock.calls[1]?.[1]).toMatchObject({
+      ids: { runId: receipt.runId, inputId: receipt.inputId },
+    });
+    await manager.closeAll();
   });
 
-  it("turns projection start failures into a retryable failed result", async () => {
-    const failRunStart = vi.fn(async () => {});
-    const startRun = vi.fn()
-      .mockRejectedValueOnce(new Error("store unavailable"))
-      .mockImplementationOnce(async (_child, _input, signal) => childRun("run-2", signal));
-    const projection = createProjection({ startRun, failRunStart });
-    const manager = new AgentChildManager({
-      settings: {} as any,
-      createAgent: vi.fn(async () => ({
-        submitMessage: vi.fn(async function* () {
-          yield { type: "text_delta" as const, delta: "recovered" };
-        }),
-        close: vi.fn(async () => {}),
-      } as any)),
-    });
-    const host = manager.createHost(parentHost(), projection);
-    const invocation = await host.spawnChildAgent({
-      description: "Explore",
-      prompt: "first",
-      agent: "Explore",
-      cwd: "/repo",
-    });
-
-    await expect(invocation.result).resolves.toMatchObject({ status: "failed", error: "store unavailable" });
-    expect(failRunStart).toHaveBeenCalledOnce();
-    await host.sendChildInput("task-1", { content: "retry" });
-    await expect(host.awaitChildAgent("task-1")).resolves.toMatchObject({ status: "completed", output: "recovered" });
-  });
-
-  it("does not start a follow-up while the previous projection is finishing", async () => {
-    const finishing = deferred<void>();
-    const finishRun = vi.fn(async () => {
-      if (finishRun.mock.calls.length === 1) await finishing.promise;
-    });
-    const startRun = vi.fn(async (_child, _input, signal) => childRun(`run-${startRun.mock.calls.length}`, signal));
-    const projection = createProjection({ startRun, finishRun });
-    const manager = new AgentChildManager({
-      settings: {} as any,
-      createAgent: vi.fn(async () => ({
-        submitMessage: vi.fn(async function* () {
-          yield { type: "text_delta" as const, delta: "done" };
-        }),
-        close: vi.fn(async () => {}),
-      } as any)),
-    });
-    const host = manager.createHost(parentHost(), projection);
-    const invocation = await host.spawnChildAgent({
-      description: "Explore",
-      prompt: "first",
-      agent: "Explore",
-      cwd: "/repo",
-    });
-    await vi.waitFor(() => expect(finishRun).toHaveBeenCalledOnce());
-
-    const followUp = host.sendChildInput("task-1", { content: "second" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(startRun).toHaveBeenCalledOnce();
-    finishing.resolve();
-    await followUp;
-    expect(startRun).toHaveBeenCalledTimes(2);
-    await host.awaitChildAgent("task-1");
-    await invocation.result;
-  });
-
-  it("projects in-flight follow-up input before the child consumes it", async () => {
-    const continueRun = deferred<void>();
-    const submitMessage = vi.fn(async function* (_content: string, options) {
-      yield { type: "text_delta" as const, delta: "start:" };
-      await continueRun.promise;
-      const followUps = await options.pullFollowUps();
-      yield { type: "text_delta" as const, delta: followUps.join(",") };
-    });
-    const steerRun = vi.fn(async () => ({ inputId: "steered-input" }));
-    const projection = createProjection({ steerRun });
-    const manager = new AgentChildManager({
-      settings: {} as any,
-      createAgent: vi.fn(async () => ({
-        submitMessage,
-        close: vi.fn(async () => {}),
-      } as any)),
-    });
-    const host = manager.createHost(parentHost(), projection);
-    const invocation = await host.spawnChildAgent({
-      description: "Explore",
-      prompt: "first",
-      agent: "Explore",
-      cwd: "/repo",
-    });
-
-    const receipt = await host.sendChildInput("task-1", {
-      id: "follow-up-1",
-      content: "nudge",
-    });
-    continueRun.resolve();
-
-    expect(receipt.inputId).toBe("steered-input");
-    expect(steerRun).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "child-session" }),
-      expect.objectContaining({ runId: "run-1" }),
-      expect.objectContaining({ id: "follow-up-1", content: "nudge", delivery: "steer" }),
-    );
-    await expect(invocation.result).resolves.toMatchObject({ output: "start:nudge" });
-  });
-
-  it("makes concurrent interrupt callers wait for projection settlement", async () => {
-    const finishing = deferred<void>();
-    const finishRun = vi.fn(async () => {
-      await finishing.promise;
-    });
-    const closeChild = vi.fn(async () => {});
-    const projection = createProjection({ finishRun, closeChild });
-    const manager = new AgentChildManager({
-      settings: {} as any,
-      createAgent: vi.fn(async () => ({
-        submitMessage: vi.fn(async function* (_content, options) {
-          await new Promise<void>((resolve) => options.signal.addEventListener("abort", () => resolve(), { once: true }));
-          throw new Error("aborted");
-        }),
-        close: vi.fn(async () => {}),
-      } as any)),
-    });
-    const parent = new AbortController();
-    const host = manager.createHost(parentHost(parent.signal), projection);
-    const invocation = await host.spawnChildAgent({
-      description: "Explore",
-      prompt: "first",
-      agent: "Explore",
-      cwd: "/repo",
-    });
-    parent.abort();
-    const interrupted = host.interruptChildAgent(invocation.id, "stop");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(closeChild).not.toHaveBeenCalled();
-
-    finishing.resolve();
-    await interrupted;
-    expect(closeChild).toHaveBeenCalledOnce();
-    expect(finishRun.mock.invocationCallOrder[0]).toBeLessThan(closeChild.mock.invocationCallOrder[0]!);
-  });
-
-  it("suspends idle child resources and revives the same session with restored history", async () => {
-    const close = vi.fn(async () => {});
-    const loadHistory = vi.fn();
-    const createAgent = vi.fn(async () => ({
-      submitMessage: vi.fn(async function* (content: string) {
-        yield { type: "text_delta" as const, delta: content };
-      }),
-      getHistory: vi.fn(() => [{ role: "assistant", content: [{ type: "text", text: "first" }] }]),
-      loadHistory,
-      close,
-    } as any));
-    const manager = new AgentChildManager({ settings: {} as any, idleTtlMs: 1, createAgent });
-    const host = manager.createHost(parentHost(), createProjection());
-    const invocation = await host.spawnChildAgent({
+  it("suspends idle resources and restores history for the next run", async () => {
+    const bus = new AgentEventBus();
+    const events: string[] = [];
+    bus.subscribe((event) => { events.push(event.type); });
+    const firstAgent = fakeAgent(vi.fn(() => completedRun("first")));
+    firstAgent.getHistory.mockReturnValue([{ type: "assistant", content: "remembered" }]);
+    const secondAgent = fakeAgent(vi.fn(() => ({ ...completedRun("second"), id: "run-2", inputId: "input-2" })));
+    const createAgent = vi.fn()
+      .mockResolvedValueOnce(firstAgent)
+      .mockResolvedValueOnce(secondAgent);
+    const manager = createManager(bus, createAgent, 5);
+    const controller = manager.createController(parentScope());
+    const invocation = await controller.spawnChildAgent({
       description: "Explore",
       prompt: "first",
       agent: "Explore",
       cwd: "/repo",
     });
     await invocation.result;
-    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    await waitUntil(() => events.includes("child.suspended"));
 
-    await host.sendChildInput("task-1", { content: "second" });
-    await host.awaitChildAgent("task-1");
+    await controller.sendChildInput(invocation.id, { content: "continue", delivery: "queue" });
 
     expect(createAgent).toHaveBeenCalledTimes(2);
-    expect(createAgent.mock.calls[1]?.[0]).toMatchObject({ sessionId: "child-session" });
-    expect(loadHistory).toHaveBeenCalledWith([
-      { role: "assistant", content: [{ type: "text", text: "first" }] },
-    ]);
+    expect(secondAgent.loadHistory).toHaveBeenCalledWith([{ type: "assistant", content: "remembered" }]);
+    expect(events).toContain("child.resumed");
     await manager.closeAll();
+  });
+
+  it("surfaces required child.closed delivery failures and still removes the handle", async () => {
+    const bus = new AgentEventBus();
+    bus.subscribe((event) => {
+      if (event.type === "child.closed") throw new Error("projection unavailable");
+    });
+    const manager = createManager(bus, async () => fakeAgent(vi.fn(() => completedRun("done"))));
+    const invocation = await manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await invocation.result;
+
+    await expect(manager.closeAll()).rejects.toThrow("projection unavailable");
+    expect(manager.list()).toEqual([]);
   });
 });
 
-function parentHost(signal = new AbortController().signal) {
-  return {
-    scope: {
-      sessionId: "parent",
-      inputId: "parent-input",
-      runId: "parent-run",
-      cwd: "/repo",
-      traceId: "parent-trace",
-      signal,
+function createManager(bus: AgentEventBus, createAgent: () => Promise<any>, idleTtlMs?: number) {
+  return new AgentChildManager({
+    settings: {} as any,
+    cwd: "/repo",
+    eventBus: bus,
+    idleTtlMs,
+    createAgent,
+    environment: {
+      acquire: async (input) => ({ cwd: input.cwd, release: async () => {} }),
     },
-    emitEvent: vi.fn(),
-    emitStreamEvent: vi.fn(),
-    requestPermission: vi.fn(),
+  });
+}
+
+function parentScope(signal = new AbortController().signal): AgentRunScope {
+  return {
+    agentId: "parent",
+    sessionId: "parent",
+    inputId: "parent-input",
+    runId: "parent-run",
+    cwd: "/repo",
+    traceId: "parent-trace",
+    signal,
   };
 }
 
-function childRun(runId: string, signal: AbortSignal) {
+function fakeAgent(submitMessage: any, close = vi.fn(async () => {})) {
   return {
-    inputId: `input-${runId}`,
-    runId,
-    host: {
-      scope: {
-        sessionId: "child-session",
-        inputId: `input-${runId}`,
-        runId,
-        cwd: "/repo",
-        traceId: `trace-${runId}`,
-        signal,
-      },
-      emitEvent: vi.fn(),
-      emitStreamEvent: vi.fn(),
-      requestPermission: vi.fn(),
-    },
+    submitMessage,
+    getHistory: vi.fn(() => []),
+    loadHistory: vi.fn(),
+    close,
   };
 }
 
-function createProjection(overrides: Partial<AgentChildProjection> = {}): AgentChildProjection {
+function completedRun(output: string): AgentRunHandle {
+  return runHandle(Promise.resolve(completedResult(output)), vi.fn());
+}
+
+function runHandle(
+  result: Promise<AgentRunResult>,
+  steer: any,
+  interrupt = vi.fn(async () => {}),
+): AgentRunHandle {
   return {
-    createChild: vi.fn(async ({ invocationId }) => ({
-      invocationId,
-      sessionId: "child-session",
-      cwd: "/repo",
-      taskId: "task-1",
-    })),
-    startRun: vi.fn(async (_child, _input, signal) => childRun("run-1", signal)),
-    finishRun: vi.fn(async () => {}),
-    closeChild: vi.fn(async () => {}),
-    ...overrides,
+    id: "run-1",
+    inputId: "input-1",
+    sessionId: "child-session",
+    traceId: "trace-1",
+    result,
+    steer,
+    interrupt,
+  };
+}
+
+function completedResult(output: string): AgentRunResult {
+  return {
+    status: "completed",
+    output,
+    history: [],
+    usage: { inputTokens: 0, outputTokens: 0 },
   };
 }
 
 function deferred<T>() {
-  let resolve!: (value?: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = (value) => done(value as T);
-  });
-  return { promise, resolve };
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Condition was not met");
 }

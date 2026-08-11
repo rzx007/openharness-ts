@@ -1,8 +1,6 @@
 import type { ContentBlock } from "./messages";
 import type { Settings } from "./settings";
-import type { QueryRuntimeHost } from "./runtime";
-
-export interface ToolRuntimeHost extends QueryRuntimeHost {}
+import type { AgentExecutionContext } from "./runtime";
 
 export interface ToolContext {
   cwd: string;
@@ -15,7 +13,7 @@ export interface ToolContext {
   skillRegistry?: unknown;
   /** MCP 客户端管理器，供 McpToolCall / ListMcpResources / ReadMcpResource 元工具使用。 */
   mcpManager?: unknown;
-  runtimeHost?: ToolRuntimeHost;
+  agent?: AgentExecutionContext;
 }
 
 export interface ToolResult {
