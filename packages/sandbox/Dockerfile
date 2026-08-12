@@ -7,6 +7,7 @@ RUN apt-get update \
     curl \
     git \
     ripgrep \
+    util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

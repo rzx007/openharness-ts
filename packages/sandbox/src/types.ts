@@ -86,6 +86,8 @@ export interface ShellSpawnOptions {
   settings?: Settings;
   stdio?: StdioOptions;
   env?: Record<string, string>;
+  signal?: AbortSignal;
+  detached?: boolean;
 }
 
 export interface SandboxSession {

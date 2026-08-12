@@ -56,6 +56,20 @@ export function dockerContainerRunning(containerName: string): boolean {
   return result.status === 0 && result.stdout.trim() === "true";
 }
 
+export function dockerProcessRunning(containerName: string, pid: number): boolean {
+  const result = spawnSync("docker", [
+    "exec",
+    containerName,
+    "/bin/kill",
+    "-0",
+    String(pid),
+  ], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
 export function dockerRmForce(containerName: string): void {
   spawnSync("docker", ["rm", "-f", containerName], {
     windowsHide: true,

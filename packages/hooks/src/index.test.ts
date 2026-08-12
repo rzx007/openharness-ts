@@ -35,6 +35,31 @@ function fakeClient(responseText: string): {
 }
 
 describe("HookExecutor", () => {
+  it("fails closed for a blocking command hook when strict Docker sandbox is unavailable", async () => {
+    const executor = new HookExecutor({
+      cwd: process.cwd(),
+      sessionId: "strict-hook",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    });
+    const result = await executor.executeCommand(
+      "echo must-not-run-on-host",
+      new AbortController().signal,
+      undefined,
+      undefined,
+      true,
+    );
+    expect(result).toEqual({
+      blocked: true,
+      reason: "Docker sandbox session is not running",
+    });
+  });
+
   it("registers and retrieves hooks", () => {
     const executor = new HookExecutor();
     const hook: HookDefinition = {

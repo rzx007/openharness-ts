@@ -1,8 +1,14 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
-import { getProjectConfigDir, getTasksDir } from "@openharness/core";
+import { getProjectConfigDir, getTasksDir, type Settings } from "@openharness/core";
+import {
+  createProcess,
+  createShellProcess,
+  signalProcessTree,
+  terminateProcessTree,
+} from "@openharness/sandbox";
 
 export type TaskType = "shell" | "agent" | "dream";
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "stopped";
@@ -61,6 +67,8 @@ export interface CreateShellTaskOptions {
   sessionId?: string;
   type?: TaskType;
   env?: Record<string, string>;
+  /** Effective runtime settings used to select and configure the sandbox backend. */
+  settings?: Settings;
 }
 
 export interface CreateAgentTaskOptions {
@@ -74,6 +82,8 @@ export interface CreateAgentTaskOptions {
   command?: string;
   argv?: string[];
   env?: Record<string, string>;
+  /** Effective runtime settings used to select and configure the sandbox backend. */
+  settings?: Settings;
 }
 
 export interface RegisterSessionTaskOptions {
@@ -123,6 +133,7 @@ export class TaskManager {
   private sessionTaskCallbacks = new Map<string, Pick<RegisterSessionTaskOptions, "onInput" | "onStop">>();
   private idCounter = 0;
   private readonly tasksDir: string;
+  private taskSettings = new Map<string, Settings>();
 
   constructor(tasksDir?: string) {
     // Lazily fall back to a temp dir if core paths are unavailable; callers in
@@ -178,8 +189,24 @@ export class TaskManager {
     this.ensureTasksDir();
     writeFileSync(outputFile, "");
     this.tasks.set(id, task);
+    if (opts.settings) this.taskSettings.set(id, opts.settings);
     this.notifyTaskEvent(task, "created");
-    this.startProcess(id);
+    try {
+      await this.startProcess(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      task.status = "failed";
+      task.exitCode = 1;
+      task.finishedAt = Date.now();
+      task.metadata.status_note = message;
+      try {
+        appendFileSync(outputFile, `[spawn error] ${message}\n`);
+      } catch {
+        /* output file may have been removed by shutdown */
+      }
+      await this.notifyCompletion(task);
+      throw error;
+    }
     return task;
   }
 
@@ -251,6 +278,7 @@ export class TaskManager {
       sessionId: opts.sessionId,
       type: opts.type ?? "agent",
       env: opts.env,
+      settings: opts.settings,
     });
     task.prompt = opts.prompt;
     // Forward the prompt to the freshly spawned agent over stdin.
@@ -592,15 +620,13 @@ export class TaskManager {
     }
   }
 
-  private startProcess(taskId: string): RunState {
+  private async startProcess(taskId: string): Promise<RunState> {
     const task = this.tasks.get(taskId)!;
     if (task.command == null && task.argv == null) {
       throw new Error(`Task ${taskId} does not have a command or argv to run`);
     }
     const generation = (this.generations.get(taskId) ?? 0) + 1;
     this.generations.set(taskId, generation);
-
-    const env = task.env ? { ...process.env, ...task.env } : process.env;
 
     // On POSIX, run each task in its own process group (detached) so that, on
     // stop, we can signal the whole tree (the shell plus any grandchildren it
@@ -611,22 +637,23 @@ export class TaskManager {
 
     let child: ChildProcess;
     if (task.argv != null) {
-      const [cmd, ...args] = task.argv;
-      child = spawn(cmd!, args, {
+      child = await createProcess(task.argv, {
         cwd: task.cwd,
-        env,
+        sessionId: task.sessionId,
+        settings: this.taskSettings.get(taskId),
+        env: task.env,
         detached,
         stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
       });
     } else {
-      child = spawn(task.command!, {
+      child = await createShellProcess(task.command!, {
         cwd: task.cwd,
-        env,
-        shell: true,
+        sessionId: task.sessionId,
+        settings: this.taskSettings.get(taskId),
+        env: task.env,
         detached,
+        hostShell: "system",
         stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
       });
     }
 
@@ -809,138 +836,40 @@ function encodeWorkerPayload(data: string): string {
 /** SIGTERM, then SIGKILL after `graceMs`. Resolves when the child has exited. */
 function terminateProcess(child: ChildProcess, graceMs: number): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      if (timer) clearTimeout(timer);
-      resolve();
-    };
-    child.once("exit", finish);
+  return (async () => {
     try {
       child.stdin?.end();
     } catch {
       /* ignore */
     }
-    if (process.platform === "win32") {
-      // Windows has no real SIGTERM for console apps; kill the whole tree.
-      void killProcessTreeAsync(child, graceMs).then(() => {
-        setTimeout(finish, 50);
-      });
-    } else if (child.pid != null) {
-      // Graceful SIGTERM to the whole process group (the child leads its own
-      // group via `detached`), so shell-spawned grandchildren get a chance to
-      // exit cleanly. Fall back to the single child if the group send fails.
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    timer = setTimeout(() => {
-      try {
-        killProcessTree(child);
-      } catch {
-        /* ignore */
-      }
-      // Give the OS a beat to report the exit.
-      setTimeout(finish, 200);
-    }, graceMs);
-    if (child.exitCode !== null) finish();
-  });
+    await terminateProcessTree(child, "SIGTERM").catch(() => false);
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    if (await waitForProcessExit(child, graceMs)) return;
+    await terminateProcessTree(child, "SIGKILL").catch(() => false);
+    await waitForProcessExit(child, 200);
+  })();
 }
 
-function killProcessTreeAsync(child: ChildProcess, timeoutMs: number): Promise<void> {
-  if (child.pid == null) return Promise.resolve();
-  if (process.platform !== "win32") {
-    killProcessTree(child);
-    return Promise.resolve();
-  }
-  return new Promise<void>((resolve) => {
-    let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      if (timer) clearTimeout(timer);
-      resolve();
+function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (exited: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      resolve(exited);
     };
-    try {
-      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      killer.once("exit", finish);
-      killer.once("error", () => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* ignore */
-        }
-        finish();
-      });
-      timer = setTimeout(() => {
-        try {
-          killer.kill();
-        } catch {
-          /* ignore */
-        }
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* ignore */
-        }
-        finish();
-      }, Math.max(200, timeoutMs));
-    } catch {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-      finish();
-    }
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    child.once("exit", onExit);
   });
 }
 
 /** Force-kill a process and its children, cross-platform. */
 function killProcessTree(child: ChildProcess): void {
-  if (child.pid == null) return;
-  if (process.platform === "win32") {
-    // taskkill /T kills the whole tree, /F forces it.
-    try {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-    } catch {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-    }
-  } else {
-    // The child was spawned `detached`, so it leads its own process group whose
-    // gid equals its pid. Signalling the negative pid kills the whole group —
-    // the shell plus any grandchildren it forked. Fall back to a single-process
-    // kill if the group send fails (e.g. the group is already gone).
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-    }
-  }
+  signalProcessTree(child, "SIGKILL");
 }
 
 export interface TaskManagerScope {

@@ -10,12 +10,15 @@ OpenHarness 的 sandbox runtime 辅助层。
 - 启动前检查 Docker 镜像；镜像缺失且开启 `autoBuildImage` 时，可用内置 Dockerfile 构建。
 - `ohs sandbox on` 默认启用**项目本地、可复用**的 Docker 容器。容器名由工作区路径派生，
   CLI/TUI 退出后仍保留，直到 `ohs sandbox clean` 删除。
+- 取消或超时不会只关掉宿主上的 `docker exec`，还会停止容器内命令及其启动的子进程。
+- 自定义 Docker 镜像必须提供 `setsid`、`sleep` 和 `/bin/kill`，否则启动时直接报错。
 - 文件工具仍在宿主侧执行；开启 sandbox 时走路径校验。
 - `SandboxAdapter` 是兼容旧接口的门面，底层走统一 runtime 路径。
 
 已知缺口：
 
-- Docker/SRT E2E 为可选、按环境跳过；CI 接线仍待完成。
+- Docker/SRT E2E 为可选、按环境跳过；Docker 进程树停止已有 E2E 用例，但 CI 接线仍待完成。
+- 主 daemon 托管的 Cron 已通过自己的 `cwd + cron:<jobId>` 范围接入 Sandbox。MCP stdio 和容器内文件操作还没有完整接入 Sandbox。
 
 ## CLI
 
@@ -44,7 +47,7 @@ ohs sandbox doctor
 3. 镜像缺失且 `autoBuildImage=true` 时，从 `packages/sandbox/Dockerfile` 构建。
 4. 可复用容器名由工作区路径派生，例如 `openharness-sandbox-my-project-<hash>`。
 5. 若容器已存在：需要时先 start，再通过 `docker exec` 跑 shell。
-6. CLI/TUI 退出时**不删除**可复用容器，留给下次使用。
+6. CLI/TUI 退出时先停止仍在容器里运行的命令，但**不删除**可复用容器，留给下次使用。
 7. `ohs sandbox clean` 删除当前工作区对应的可复用容器。
 
 使用 `ohs sandbox on --no-reuse` 时，每次 OpenHarness 会话创建带 `--rm` 的会话级容器，

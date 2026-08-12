@@ -18,7 +18,14 @@ export const lspTool: ToolDefinition = {
   async execute(input, context) {
     const { LspClient } = await import("@openharness/services");
     const operation = input.operation as string;
-    const client = new LspClient({ command: "", args: [] });
+    const client = new LspClient({
+      command: "",
+      args: [],
+      cwd: context.cwd,
+      sessionId: context.sessionId,
+      settings: context.settings,
+      signal: context.abortSignal,
+    });
 
     if (operation === "workspace_symbol") {
       const results = await client.workspaceSymbolSearch(context.cwd, (input.query as string) ?? "");

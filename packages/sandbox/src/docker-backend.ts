@@ -1,11 +1,16 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
 import { normalizeSandboxConfig } from "./config.js";
+import {
+  bindProcessAbortSignal,
+  registerManagedProcess,
+  type ProcessSignal,
+} from "./process-control.js";
 import type { SandboxRuntimeReporter, ShellSpawnOptions } from "./types.js";
 
 export class SandboxUnavailableError extends Error {
@@ -52,6 +57,52 @@ export interface DockerSandboxDiagnostics {
 
 export const DOCKER_CONFIG_HASH_LABEL = "org.openharness.sandbox.config-hash";
 export const DOCKER_WORKSPACE_LABEL = "org.openharness.sandbox.workspace";
+const DOCKER_EXEC_STATE_DIR = "/tmp/openharness-exec";
+
+const DOCKER_EXEC_SUPERVISOR = `
+marker="$1"
+cancel="$2"
+shift 2
+if [ -f "$cancel" ]; then
+  rm -f "$marker" "$cancel"
+  exit 143
+fi
+setsid "$@" &
+pid=$!
+printf '%s\n' "$pid" > "$marker"
+if [ -f "$cancel" ]; then
+  /bin/kill -TERM -- "-$pid" 2>/dev/null || true
+fi
+wait "$pid"
+status=$?
+rm -f "$marker" "$cancel"
+exit "$status"
+`.trim();
+
+const DOCKER_EXEC_STOPPER = `
+marker="$1"
+cancel="$2"
+signal="$3"
+: > "$cancel"
+i=0
+while [ ! -s "$marker" ] && [ -f "$cancel" ] && [ "$i" -lt 100 ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+if [ -s "$marker" ]; then
+  pid=$(cat "$marker")
+  /bin/kill "-$signal" -- "-$pid" 2>/dev/null || true
+  if [ "$signal" != "KILL" ]; then
+    i=0
+    while /bin/kill -0 -- "-$pid" 2>/dev/null && [ "$i" -lt 20 ]; do
+      sleep 0.05
+      i=$((i + 1))
+    done
+    /bin/kill -KILL -- "-$pid" 2>/dev/null || true
+  fi
+  rm -f "$marker" "$cancel"
+fi
+`.trim();
 
 export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
   const config = normalizeSandboxConfig(options.config);
@@ -149,6 +200,20 @@ export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
   return argv;
 }
 
+/** Wrap one Docker command in a process group that can be stopped from the host. */
+export function buildDockerSupervisedArgv(argv: string[], executionId: string): string[] {
+  const { marker, cancel } = dockerExecutionStatePaths(executionId);
+  return [
+    "/bin/sh",
+    "-c",
+    DOCKER_EXEC_SUPERVISOR,
+    "openharness-exec",
+    marker,
+    cancel,
+    ...argv,
+  ];
+}
+
 export function buildDockerImageInspectArgs(image: string, dockerCommand = "docker"): string[] {
   return [dockerCommand, "image", "inspect", image];
 }
@@ -167,6 +232,10 @@ export function buildDockerBuildArgs(options: DockerBuildArgsOptions): string[] 
 
 export class DockerSandboxSession {
   private running = false;
+  private readonly activeExecutions = new Map<string, {
+    child: ChildProcess;
+    nativeKill: ChildProcess["kill"];
+  }>();
   readonly containerName: string;
   readonly containerCwd: string;
   private dockerCommand = "docker";
@@ -219,10 +288,20 @@ export class DockerSandboxSession {
         expectedHash: dockerSandboxConfigHash(config, resolve(this.options.cwd)),
       });
       this.options.reporter?.({ type: "start-container", containerName: this.containerName, reused: true });
-      if (!await dockerContainerRunning(this.dockerCommand, this.containerName)) {
+      const wasRunning = await dockerContainerRunning(this.dockerCommand, this.containerName);
+      if (!wasRunning) {
         await runToCompletion([this.dockerCommand, "start", this.containerName]);
       }
-      this.running = true;
+      try {
+        await this.assertProcessSupervisorAvailable();
+        this.running = true;
+      } catch (error) {
+        if (!wasRunning) {
+          await runToCompletion([this.dockerCommand, "stop", "-t", "1", this.containerName]).catch(() => {});
+        }
+        this.running = false;
+        throw error;
+      }
       return;
     }
     this.options.reporter?.({
@@ -237,12 +316,30 @@ export class DockerSandboxSession {
       dockerCommand: this.dockerCommand,
     });
     await runToCompletion(argv);
-    this.running = true;
+    try {
+      await this.assertProcessSupervisorAvailable();
+      this.running = true;
+    } catch (error) {
+      await runToCompletion([this.dockerCommand, "rm", "-f", this.containerName]).catch(() => {});
+      this.running = false;
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
     if (!this.running) return;
     const config = normalizeSandboxConfig(this.options.settings.sandbox);
+    await Promise.all([...this.activeExecutions.entries()].map(async ([executionId, execution]) => {
+      await stopDockerExecution({
+        dockerCommand: this.dockerCommand,
+        containerName: this.containerName,
+        executionId,
+        signal: "SIGKILL",
+      }).catch(() => {});
+      if (execution.child.exitCode === null && execution.child.signalCode === null) {
+        execution.nativeKill("SIGKILL");
+      }
+    }));
     if (config.docker.reuseContainer) {
       this.running = false;
       return;
@@ -257,6 +354,16 @@ export class DockerSandboxSession {
   stopSync(): void {
     if (!this.running) return;
     const config = normalizeSandboxConfig(this.options.settings.sandbox);
+    for (const [executionId, execution] of this.activeExecutions) {
+      stopDockerExecutionSync({
+        dockerCommand: this.dockerCommand,
+        containerName: this.containerName,
+        executionId,
+      });
+      if (execution.child.exitCode === null && execution.child.signalCode === null) {
+        execution.nativeKill("SIGKILL");
+      }
+    }
     if (config.docker.reuseContainer) {
       this.running = false;
       return;
@@ -275,14 +382,50 @@ export class DockerSandboxSession {
     if (!this.running) {
       throw new SandboxUnavailableError("Docker sandbox session is not running");
     }
+    const executionId = randomUUID().replaceAll("-", "");
     const execArgs = buildDockerExecArgs({
       containerName: this.containerName,
       cwd: options.cwd,
-      argv,
+      argv: buildDockerSupervisedArgv(argv, executionId),
       env: options.env,
       dockerCommand: this.dockerCommand,
     });
-    return spawn(execArgs[0]!, execArgs.slice(1), spawnOptions(options));
+    const child = spawn(execArgs[0]!, execArgs.slice(1), spawnOptions(options));
+    const nativeKill = child.kill.bind(child);
+    this.activeExecutions.set(executionId, { child, nativeKill });
+    const cleanup = () => this.activeExecutions.delete(executionId);
+    child.once("close", cleanup);
+    child.once("error", cleanup);
+    registerManagedProcess(child, (signal) => {
+      return stopDockerExecution({
+        dockerCommand: this.dockerCommand,
+        containerName: this.containerName,
+        executionId,
+        signal,
+      }).catch(() => {}).finally(() => {
+        setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) nativeKill("SIGKILL");
+        }, 100).unref?.();
+      });
+    });
+    bindProcessAbortSignal(child, options.signal);
+    return child;
+  }
+
+  private async assertProcessSupervisorAvailable(): Promise<void> {
+    const available = await runProbe([
+      this.dockerCommand,
+      "exec",
+      this.containerName,
+      "/bin/sh",
+      "-c",
+      `mkdir -p ${DOCKER_EXEC_STATE_DIR} && command -v setsid >/dev/null 2>&1 && command -v sleep >/dev/null 2>&1 && test -x /bin/kill`,
+    ]);
+    if (!available) {
+      throw new SandboxUnavailableError(
+        "Docker sandbox image must provide setsid, sleep, and /bin/kill so stopped tasks cannot keep running",
+      );
+    }
   }
 }
 
@@ -408,7 +551,65 @@ function spawnOptions(options: ShellSpawnOptions): SpawnOptions {
     env: options.env ? { ...process.env, ...options.env } : process.env,
     windowsHide: true,
     stdio: options.stdio,
+    detached: options.detached,
   };
+}
+
+function dockerExecutionStatePaths(executionId: string): { marker: string; cancel: string } {
+  const safeId = executionId.replace(/[^a-zA-Z0-9_.-]/g, "");
+  return {
+    marker: `${DOCKER_EXEC_STATE_DIR}/${safeId}.pid`,
+    cancel: `${DOCKER_EXEC_STATE_DIR}/${safeId}.cancel`,
+  };
+}
+
+function dockerSignalName(signal: ProcessSignal): string {
+  if (typeof signal === "number") return String(signal);
+  return /^SIG[A-Z0-9]+$/.test(signal) ? signal.slice(3) : "TERM";
+}
+
+async function stopDockerExecution(options: {
+  dockerCommand: string;
+  containerName: string;
+  executionId: string;
+  signal: ProcessSignal;
+}): Promise<void> {
+  const { marker, cancel } = dockerExecutionStatePaths(options.executionId);
+  await runToCompletion([
+    options.dockerCommand,
+    "exec",
+    options.containerName,
+    "/bin/sh",
+    "-c",
+    `mkdir -p ${DOCKER_EXEC_STATE_DIR}; ${DOCKER_EXEC_STOPPER}`,
+    "openharness-stop",
+    marker,
+    cancel,
+    dockerSignalName(options.signal),
+  ]);
+}
+
+function stopDockerExecutionSync(options: {
+  dockerCommand: string;
+  containerName: string;
+  executionId: string;
+}): void {
+  const { marker, cancel } = dockerExecutionStatePaths(options.executionId);
+  spawnSync(options.dockerCommand, [
+    "exec",
+    options.containerName,
+    "/bin/sh",
+    "-c",
+    `mkdir -p ${DOCKER_EXEC_STATE_DIR}; ${DOCKER_EXEC_STOPPER}`,
+    "openharness-stop",
+    marker,
+    cancel,
+    "KILL",
+  ], {
+    windowsHide: true,
+    stdio: "ignore",
+    timeout: 3000,
+  });
 }
 
 async function runToCompletion(argv: string[]): Promise<void> {

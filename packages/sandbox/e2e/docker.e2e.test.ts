@@ -1,4 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { basename, join } from "node:path";
 import {
   createShellProcess,
   SandboxUnavailableError,
@@ -11,6 +14,7 @@ import {
   dockerAvailable,
   dockerContainerExists,
   dockerContainerRunning,
+  dockerProcessRunning,
   dockerImageAvailable,
   dockerRmForce,
 } from "./helpers.js";
@@ -203,6 +207,106 @@ maybeDescribe("docker sandbox e2e", () => {
     expect(dockerContainerExists(containerName)).toBe(false);
   }, 60_000);
 
+  it("aborting a command removes its whole container process tree", async () => {
+    const sessionId = `e2e-abort-${Date.now()}`;
+    const sandbox = {
+      enabled: true,
+      backend: "docker" as const,
+      failIfUnavailable: true,
+      network: { mode: "none" as const },
+      docker: { image, autoBuildImage: false },
+    };
+    runtime = await startSandboxRuntime({
+      settings: { ...baseSettings, sandbox },
+      cwd: process.cwd(),
+      sessionId,
+    });
+    const containerName = runtime.status.containerName!;
+    const workDir = await mkdtemp(join(process.cwd(), ".sandbox-e2e-abort-"));
+    const pidFile = join(workDir, "pids");
+    const containerPidFile = `${basename(workDir)}/pids`;
+    const controller = new AbortController();
+
+    try {
+      const child = await createShellProcess(
+        `trap '' TERM; sleep 300 & printf '%s %s\\n' "$$" "$!" > '${containerPidFile}'; wait`,
+        {
+          cwd: process.cwd(),
+          sessionId,
+          settings: { ...baseSettings, sandbox },
+          signal: controller.signal,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const resultPromise = collectProcess(child);
+      await waitFor(() => existsSync(pidFile), 10_000);
+      const pids = (await readFile(pidFile, "utf8")).trim().split(/\s+/).map(Number);
+      expect(pids).toHaveLength(2);
+      expect(pids.every((pid) => dockerProcessRunning(containerName, pid))).toBe(true);
+
+      controller.abort();
+      const result = await withTimeout(resultPromise, 10_000, "aborted docker command did not close");
+      expect(result.exitCode).not.toBe(0);
+      await waitFor(
+        () => pids.every((pid) => !dockerProcessRunning(containerName, pid)),
+        5_000,
+      );
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("stopping a reusable runtime removes commands but keeps the container", async () => {
+    const sessionId = `e2e-reuse-stop-${Date.now()}`;
+    const sandbox = {
+      enabled: true,
+      backend: "docker" as const,
+      failIfUnavailable: true,
+      network: { mode: "none" as const },
+      docker: {
+        image,
+        autoBuildImage: false,
+        reuseContainer: true,
+        containerNamePrefix: `${reusablePrefix}-stop`,
+      },
+    };
+    runtime = await startSandboxRuntime({
+      settings: { ...baseSettings, sandbox },
+      cwd: process.cwd(),
+      sessionId,
+    });
+    const containerName = runtime.status.containerName!;
+    ownedContainers.add(containerName);
+    const workDir = await mkdtemp(join(process.cwd(), ".sandbox-e2e-stop-"));
+    const pidFile = join(workDir, "pids");
+    const containerPidFile = `${basename(workDir)}/pids`;
+
+    try {
+      const child = await createShellProcess(
+        `trap '' TERM; sleep 300 & printf '%s %s\\n' "$$" "$!" > '${containerPidFile}'; wait`,
+        {
+          cwd: process.cwd(),
+          sessionId,
+          settings: { ...baseSettings, sandbox },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      child.on("error", () => {});
+      await waitFor(() => existsSync(pidFile), 10_000);
+      const pids = (await readFile(pidFile, "utf8")).trim().split(/\s+/).map(Number);
+
+      await runtime.stop();
+      runtime = undefined;
+      expect(dockerContainerRunning(containerName)).toBe(true);
+      await waitFor(
+        () => pids.every((pid) => !dockerProcessRunning(containerName, pid)),
+        5_000,
+      );
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("blocks outbound network when Docker network mode is none", async () => {
     const sessionId = `e2e-docker-none-${Date.now()}`;
     runtime = await startSandboxRuntime({
@@ -305,3 +409,26 @@ maybeDescribe("docker sandbox e2e", () => {
     60_000,
   );
 });
+
+async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`condition was not met within ${timeoutMs}ms`);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}

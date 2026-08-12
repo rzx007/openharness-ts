@@ -4,6 +4,7 @@ import { loadSettings, type Settings } from "@openharness/core";
 import { getSrtAvailability } from "./availability.js";
 import { SandboxUnavailableError } from "./docker-backend.js";
 import { normalizeSandboxConfig } from "./config.js";
+import { bindProcessAbortSignal } from "./process-control.js";
 import { getActiveSandboxSession } from "./session.js";
 import { wrapCommandForSrt } from "./srt-adapter.js";
 
@@ -13,6 +14,25 @@ export interface CreateShellProcessOptions {
   settings?: Settings;
   env?: Record<string, string>;
   stdio?: StdioOptions;
+  signal?: AbortSignal;
+  detached?: boolean;
+  /** Host-only shell policy. Docker always uses /bin/sh; SRT follows the host platform. */
+  hostShell?: "preferred" | "system";
+}
+
+export interface CreateProcessOptions extends CreateShellProcessOptions {}
+
+/** Start an argv process through the configured sandbox backend. */
+export async function createProcess(
+  argv: string[],
+  options: CreateProcessOptions,
+): Promise<ChildProcess> {
+  if (argv.length === 0 || !argv[0]) throw new Error("createProcess requires a non-empty argv");
+  const settings = options.settings ?? await loadSettings(undefined, {
+    projectRoot: options.cwd,
+    includeProject: true,
+  });
+  return createResolvedProcess(argv, argv, options, settings);
 }
 
 type HostShellLauncher =
@@ -28,32 +48,54 @@ export async function createShellProcess(
   command: string,
   options: CreateShellProcessOptions,
 ): Promise<ChildProcess> {
-  const settings = options.settings ?? await loadSettings();
-  const sandbox = normalizeSandboxConfig(settings.sandbox);
+  const settings = options.settings ?? await loadSettings(undefined, {
+    projectRoot: options.cwd,
+    includeProject: true,
+  });
+  const spawnHostOverride = options.hostShell === "system"
+    ? () => spawnSystemShell(command, options)
+    : undefined;
+  return createResolvedProcess(
+    options.hostShell === "system" ? resolveSystemShellArgv(command) : resolveShellArgv(command),
+    resolveContainerShellArgv(command),
+    options,
+    settings,
+    spawnHostOverride,
+  );
+}
 
-  if (!sandbox.enabled) {
-    return spawnHost(resolveShellArgv(command), options);
-  }
+function resolveSystemShellArgv(command: string): string[] {
+  if (process.platform === "win32") return [process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", command];
+  return [process.env.SHELL || "/bin/sh", "-c", command];
+}
+
+async function createResolvedProcess(
+  hostArgv: string[],
+  containerArgv: string[],
+  options: CreateProcessOptions,
+  settings: Settings,
+  spawnHostOverride?: () => ChildProcess,
+): Promise<ChildProcess> {
+  const sandbox = normalizeSandboxConfig(settings.sandbox);
+  const spawnLocal = () => spawnHostOverride?.() ?? spawnHost(hostArgv, options);
+  if (!sandbox.enabled) return spawnLocal();
 
   if (sandbox.backend === "docker") {
-    // Container image is Linux; never reuse host (e.g. Windows bash.exe) argv.
-    const argv = resolveContainerShellArgv(command);
-    const session = getActiveSandboxSession({
-      cwd: options.cwd,
-      sessionId: options.sessionId,
-    });
+    const session = getActiveSandboxSession({ cwd: options.cwd, sessionId: options.sessionId });
     if (session?.backend === "docker" && session.active && session.execCommand) {
-      return session.execCommand(argv, {
+      return session.execCommand(containerArgv, {
         cwd: options.cwd,
         settings,
         env: options.env,
         stdio: options.stdio,
+        signal: options.signal,
+        detached: options.detached,
       });
     }
     if (sandbox.failIfUnavailable) {
       throw new SandboxUnavailableError("Docker sandbox session is not running");
     }
-    return spawnHost(resolveShellArgv(command), options);
+    return spawnLocal();
   }
 
   const availability = getSrtAvailability(settings.sandbox);
@@ -61,11 +103,10 @@ export async function createShellProcess(
     if (sandbox.failIfUnavailable) {
       throw new SandboxUnavailableError(availability.reason ?? "srt sandbox is unavailable");
     }
-    return spawnHost(resolveShellArgv(command), options);
+    return spawnLocal();
   }
 
-  const argv = resolveShellArgv(command);
-  const wrapped = await wrapCommandForSrt(argv, settings.sandbox);
+  const wrapped = await wrapCommandForSrt(hostArgv, settings.sandbox);
   const child = spawnHost(wrapped.argv, options);
   const cleanup = () => void wrapped.cleanup();
   child.once("close", cleanup);
@@ -146,11 +187,26 @@ function isUsableCommand(
 }
 
 function spawnHost(argv: string[], options: CreateShellProcessOptions): ChildProcess {
-  return spawn(argv[0]!, argv.slice(1), {
+  const child = spawn(argv[0]!, argv.slice(1), {
     cwd: resolve(options.cwd),
     env: options.env ? { ...process.env, ...options.env } : process.env,
     windowsHide: true,
-    detached: process.platform !== "win32",
+    detached: options.detached ?? process.platform !== "win32",
     stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
   });
+  bindProcessAbortSignal(child, options.signal);
+  return child;
+}
+
+function spawnSystemShell(command: string, options: CreateShellProcessOptions): ChildProcess {
+  const child = spawn(command, {
+    cwd: resolve(options.cwd),
+    env: options.env ? { ...process.env, ...options.env } : process.env,
+    windowsHide: true,
+    detached: options.detached ?? process.platform !== "win32",
+    shell: true,
+    stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
+  });
+  bindProcessAbortSignal(child, options.signal);
+  return child;
 }

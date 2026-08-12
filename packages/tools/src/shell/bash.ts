@@ -1,6 +1,10 @@
-import { execFile } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import type { Settings, ToolDefinition } from "@openharness/core";
-import { createShellProcess, SandboxUnavailableError } from "@openharness/sandbox";
+import {
+  createShellProcess,
+  SandboxUnavailableError,
+  signalProcessTree,
+} from "@openharness/sandbox";
 
 // Matches the Python implementation's output cap.
 const MAX_OUTPUT_CHARS = 12000;
@@ -107,7 +111,7 @@ function runShell(
         finish(null);
         return;
       }
-      killTree(child.pid);
+      killTree(child);
       child.stdout?.pause();
       child.stderr?.pause();
       finish(child.exitCode);
@@ -128,7 +132,7 @@ function runShell(
     const runningChild = startedChild;
     child = runningChild;
     if (options.abortSignal?.aborted || settled) {
-      killTree(runningChild.pid);
+      killTree(runningChild);
       return;
     }
 
@@ -141,7 +145,7 @@ function runShell(
       // hold the stdout pipe open, then resolve after a short grace window even
       // if `close` never fires (a leaked grandchild keeping the pipe alive).
       timedOut = true;
-      killTree(runningChild.pid);
+      killTree(runningChild);
       graceTimer = setTimeout(() => {
         // Pause before resolving to stop new OS reads; data already delivered
         // via 'data' events (in buffer) is captured; late OS-buffered bytes are
@@ -175,23 +179,8 @@ function runShell(
   });
 }
 
-function killTree(pid: number | undefined): void {
-  if (pid === undefined) return;
-  if (process.platform === "win32") {
-    // taskkill /T terminates the process and its descendants.
-    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
-    return;
-  }
-  try {
-    // Negative pid signals the whole process group (created via `detached`).
-    process.kill(-pid, "SIGKILL");
-  } catch {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // already gone
-    }
-  }
+function killTree(child: ChildProcess): void {
+  signalProcessTree(child, "SIGKILL");
 }
 
 function normalize(raw: string): string {

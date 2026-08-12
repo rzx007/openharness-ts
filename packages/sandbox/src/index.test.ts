@@ -8,6 +8,8 @@ import {
   buildDockerBuildArgs,
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
+  buildDockerSupervisedArgv,
+  createProcess,
   DOCKER_CONFIG_HASH_LABEL,
   DOCKER_WORKSPACE_LABEL,
   dockerContainerName,
@@ -529,6 +531,18 @@ describe("docker backend argv builders", () => {
     expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
   });
 
+  it("keeps docker command argv intact inside the process supervisor", () => {
+    const argv = buildDockerSupervisedArgv(
+      ["node", "-e", "console.log('a b')"],
+      "exec-123",
+    );
+
+    expect(argv.slice(0, 2)).toEqual(["/bin/sh", "-c"]);
+    expect(argv).toContain("/tmp/openharness-exec/exec-123.pid");
+    expect(argv).toContain("/tmp/openharness-exec/exec-123.cancel");
+    expect(argv.slice(-3)).toEqual(["node", "-e", "console.log('a b')"]);
+  });
+
   it("builds docker image inspect args", () => {
     expect(buildDockerImageInspectArgs("openharness-sandbox:latest", "/bin/docker")).toEqual([
       "/bin/docker",
@@ -682,6 +696,112 @@ describe("resolveShellArgv", () => {
       expect(["-Command", "/c"]).toContain(argv[argv.length - 2]);
       expect(argv.at(-1)).toBe("echo hi");
     }
+  });
+});
+
+describe("createProcess", () => {
+  afterEach(() => {
+    setActiveSandboxSession(null);
+  });
+
+  it("runs argv directly when sandbox is disabled", async () => {
+    const child = await createProcess(
+      [process.execPath, "-e", "process.stdout.write('argv-ok')"],
+      {
+        cwd: process.cwd(),
+        settings: {
+          model: "test",
+          apiFormat: "openai",
+          maxTurns: 1,
+          permission: { mode: "default" },
+          sandbox: { enabled: false },
+        },
+      },
+    );
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      child.once("error", reject);
+      child.once("close", () => resolvePromise());
+    });
+    expect(output).toBe("argv-ok");
+  });
+
+  it("routes argv to the active Docker session selected by cwd and sessionId", async () => {
+    const cwd = resolve("D:/shared-create-process");
+    const seen: string[][] = [];
+    const expected = new Error("captured");
+    setActiveSandboxSession({
+      backend: "docker",
+      cwd,
+      active: true,
+      start: async () => {},
+      stop: async () => {},
+      execCommand: async (argv) => {
+        seen.push(argv);
+        throw expected;
+      },
+    }, { cwd, sessionId: "session-a" });
+
+    await expect(createProcess(["node", "script.js"], {
+      cwd,
+      sessionId: "session-a",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    })).rejects.toBe(expected);
+    expect(seen).toEqual([["node", "script.js"]]);
+  });
+
+  it("fails closed when strict Docker mode has no matching active session", async () => {
+    await expect(createProcess(["node", "script.js"], {
+      cwd: process.cwd(),
+      sessionId: "missing",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    })).rejects.toThrow("Docker sandbox session is not running");
+  });
+
+  it("rejects an empty argv", async () => {
+    await expect(createProcess([], { cwd: process.cwd() })).rejects.toThrow("non-empty argv");
+  });
+});
+
+describe("createShellProcess host shell policy", () => {
+  it("uses the system shell without changing command quoting", async () => {
+    const { createShellProcess } = await import("./index.js");
+    const command = `"${process.execPath}" -e "process.stdout.write('system-shell-ok')"`;
+    const child = await createShellProcess(command, {
+      cwd: process.cwd(),
+      hostShell: "system",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+      },
+    });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      child.once("error", reject);
+      child.once("close", () => resolvePromise());
+    });
+    expect(output).toBe("system-shell-ok");
   });
 });
 

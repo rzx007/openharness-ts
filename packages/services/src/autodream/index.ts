@@ -57,6 +57,7 @@ export interface DreamTaskRunner {
     cwd: string;
     env?: Record<string, string>;
     type?: string;
+    settings?: Settings;
   }): Promise<TaskInfo>;
   registerTaskListener(listener: (task: TaskInfo, event: string) => void): () => void;
   /** 取活任务对象（监听器收到的是快照；缺省实现可不提供）。 */
@@ -201,6 +202,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
       cwd,
       env,
       type: "dream",
+      settings,
     });
   } catch (err) {
     unregister();

@@ -44,6 +44,7 @@ export {
   buildDockerBuildArgs,
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
+  buildDockerSupervisedArgv,
   DOCKER_CONFIG_HASH_LABEL,
   DOCKER_WORKSPACE_LABEL,
   dockerDefaultDockerfilePath,
@@ -65,13 +66,16 @@ export {
   stopActiveSandboxSessionSync,
 } from "./session.js";
 export type { SandboxSessionLookup, SandboxSessionScope } from "./session.js";
+export { signalProcessTree, terminateProcessTree } from "./process-control.js";
+export type { ProcessSignal } from "./process-control.js";
 export {
+  createProcess,
   createShellProcess,
   resolveContainerShellArgv,
   resolveShellArgv,
   resetHostShellCacheForTests,
 } from "./shell.js";
-export type { CreateShellProcessOptions } from "./shell.js";
+export type { CreateProcessOptions, CreateShellProcessOptions } from "./shell.js";
 export { startSandboxRuntime } from "./lifecycle.js";
 export type { SandboxRuntimeOptions, StartedSandboxRuntime } from "./lifecycle.js";
 

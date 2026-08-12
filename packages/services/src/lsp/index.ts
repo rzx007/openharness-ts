@@ -1,14 +1,14 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
-import { resolve, relative, extname } from "node:path";
 import { readFile } from "node:fs/promises";
-
-const execAsync = promisify(exec);
+import type { Settings } from "@openharness/core";
+import { createProcess, SandboxUnavailableError } from "@openharness/sandbox";
 
 export interface LspServerConfig {
   command: string;
   args: string[];
   cwd?: string;
+  sessionId?: string;
+  settings?: Settings;
+  signal?: AbortSignal;
 }
 
 export interface SymbolInfo {
@@ -58,13 +58,25 @@ export class LspClient {
   }
 
   async workspaceSymbolSearch(root: string, query: string): Promise<SymbolInfo[]> {
-    const ext = extname(root);
     if (!query) return [];
     try {
-      const { stdout } = await execAsync(
-        `rg --no-heading -n "${query.replace(/"/g, '\\"')}" --type-add 'source:*.{ts,js,py}' -t source -g "*.ts" -g "*.js" -g "*.py" --max-count 5`,
-        { cwd: root, maxBuffer: 1024 * 1024, windowsHide: true }
-      );
+      const stdout = await this.runRipgrep(root, [
+        "--no-heading",
+        "-n",
+        query,
+        "--type-add",
+        "source:*.{ts,js,py}",
+        "-t",
+        "source",
+        "-g",
+        "*.ts",
+        "-g",
+        "*.js",
+        "-g",
+        "*.py",
+        "--max-count",
+        "5",
+      ]);
       return stdout
         .split("\n")
         .filter(Boolean)
@@ -79,7 +91,8 @@ export class LspClient {
             character: 0,
           };
         });
-    } catch {
+    } catch (error) {
+      if (error instanceof SandboxUnavailableError) throw error;
       return [];
     }
   }
@@ -102,10 +115,19 @@ export class LspClient {
   ): Promise<Array<{ path: string; line: number; text: string }>> {
     if (!symbol) return [];
     try {
-      const { stdout } = await execAsync(
-        `rg --no-heading -n "${symbol.replace(/"/g, '\\"')}" -g "*.ts" -g "*.js" -g "*.py" --max-count 20`,
-        { cwd: root, maxBuffer: 1024 * 1024, windowsHide: true }
-      );
+      const stdout = await this.runRipgrep(root, [
+        "--no-heading",
+        "-n",
+        symbol,
+        "-g",
+        "*.ts",
+        "-g",
+        "*.js",
+        "-g",
+        "*.py",
+        "--max-count",
+        "20",
+      ]);
       return stdout
         .split("\n")
         .filter(Boolean)
@@ -113,7 +135,8 @@ export class LspClient {
           const [file, lineStr, ...rest] = l.split(":");
           return { path: file ?? "", line: parseInt(lineStr ?? "0", 10), text: rest.join(":") };
         });
-    } catch {
+    } catch (error) {
+      if (error instanceof SandboxUnavailableError) throw error;
       return [];
     }
   }
@@ -158,5 +181,30 @@ export class LspClient {
       }
     }
     return symbols;
+  }
+
+  private async runRipgrep(root: string, args: string[]): Promise<string> {
+    const child = await createProcess(["rg", ...args], {
+      cwd: root,
+      sessionId: this.config.sessionId,
+      settings: this.config.settings,
+      signal: this.config.signal,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return new Promise<string>((resolve, reject) => {
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout = (stdout + chunk.toString()).slice(0, 1024 * 1024);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(0, 1024 * 1024);
+      });
+      child.once("error", reject);
+      child.once("close", (code) => {
+        if (code === 0) resolve(stdout);
+        else reject(new Error(stderr.trim() || `rg exited with code ${code ?? 1}`));
+      });
+    });
   }
 }

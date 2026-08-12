@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import type {
   HookEvent,
   HookType,
@@ -7,7 +6,9 @@ import type {
   IHookExecutor,
   StreamingMessageClient,
   StreamMessageParams,
+  Settings,
 } from "@openharness/core";
+import { createShellProcess } from "@openharness/sandbox";
 
 export type { HookEvent, HookType, HookDefinition, HookResult };
 
@@ -27,6 +28,10 @@ export interface HookExecutorOptions {
   client?: StreamingMessageClient;
   /** 默认模型 ID，当 `prompt`/`agent` 钩子未指定时使用。 */
   defaultModel?: string;
+  /** Workspace and runtime identity used by sandbox-aware command hooks. */
+  cwd?: string;
+  sessionId?: string;
+  settings?: Settings;
 }
 
 /**
@@ -127,10 +132,16 @@ export class HookExecutor implements IHookExecutor {
   private hooks = new Map<string, HookDefinition>();
   private client?: StreamingMessageClient;
   private defaultModel?: string;
+  private cwd: string;
+  private sessionId?: string;
+  private settings?: Settings;
 
   constructor(options?: HookExecutorOptions) {
     this.client = options?.client;
     this.defaultModel = options?.defaultModel;
+    this.cwd = options?.cwd ?? process.cwd();
+    this.sessionId = options?.sessionId;
+    this.settings = options?.settings;
   }
 
   /** Inject (or replace) the model client used for prompt/agent hooks. */
@@ -266,18 +277,27 @@ export class HookExecutor implements IHookExecutor {
     blockOnFailure = false
   ): Promise<HookResult> {
     const resolved = payload ? injectArguments(command, payload, true) : command;
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    const env: Record<string, string> = {};
     if (event) env.OPENHARNESS_HOOK_EVENT = event;
     if (payload) env.OPENHARNESS_HOOK_PAYLOAD = JSON.stringify(payload);
 
-    return new Promise<HookResult>((resolve) => {
-      const proc = spawn(resolved, [], {
-        shell: true,
-        signal,
+    let proc: Awaited<ReturnType<typeof createShellProcess>>;
+    try {
+      proc = await createShellProcess(resolved, {
+        cwd: this.cwd,
+        sessionId: this.sessionId,
+        settings: this.settings,
         env,
-        windowsHide: true,
+        signal,
+        hostShell: "system",
+        stdio: ["ignore", "pipe", "pipe"],
       });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { blocked: blockOnFailure, reason };
+    }
 
+    return new Promise<HookResult>((resolve) => {
       let stdout = "";
       let stderr = "";
 

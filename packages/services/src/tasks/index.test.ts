@@ -3,6 +3,7 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getTaskManager, resetTaskManager, TaskManager } from "./index.js";
+import { setActiveSandboxSession } from "@openharness/sandbox";
 
 const NODE = process.execPath;
 
@@ -37,6 +38,7 @@ function makeManager(): TaskManager {
 }
 
 afterEach(async () => {
+  setActiveSandboxSession(null);
   resetTaskManager();
   while (managers.length) {
     const mgr = managers.pop()!;
@@ -218,6 +220,31 @@ describe("TaskManager session task bridge", () => {
 });
 
 describe("TaskManager real execution", () => {
+  it("records a failed task and rejects when strict Docker sandbox is unavailable", async () => {
+    const mgr = makeManager();
+    await expect(mgr.createShellTask({
+      command: "echo must-not-run-on-host",
+      description: "strict sandbox",
+      cwd: process.cwd(),
+      sessionId: "strict-session",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    })).rejects.toThrow("Docker sandbox session is not running");
+
+    const [task] = mgr.listTasks("failed");
+    expect(task).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      metadata: { status_note: "Docker sandbox session is not running" },
+    });
+    expect(mgr.readTaskOutput(task!.id)).toContain("[spawn error]");
+  });
+
   it("runs a shell task and captures output to the log file", async () => {
     const mgr = makeManager();
     const task = await mgr.createShellTask(
@@ -235,11 +262,11 @@ describe("TaskManager real execution", () => {
 
   it("captures stderr and marks non-zero exit as failed", async () => {
     const mgr = makeManager();
-    const task = await mgr.createShellTask(
-      `${NODE} -e "process.stderr.write('boom'); process.exit(3)"`,
-      "failing task",
-      process.cwd(),
-    );
+    const task = await mgr.createShellTask({
+      argv: [NODE, "-e", "process.stderr.write('boom'); process.exit(3)"],
+      description: "failing task",
+      cwd: process.cwd(),
+    });
     await waitFor(() => mgr.getTask(task.id)!.status === "failed");
     expect(mgr.getTask(task.id)!.exitCode).toBe(3);
     expect(mgr.readTaskOutput(task.id)).toContain("boom");
@@ -338,8 +365,8 @@ describe("TaskManager real execution", () => {
     const readyFile = join(dir, "ready");
 
     // A node grandchild that records its own pid, signals readiness, and then
-    // sleeps forever. It is launched as a *child of the shell*, so a naive
-    // single-process kill of the shell would leave it orphaned and alive.
+    // sleeps forever. It inherits the task process group, so killing only the
+    // direct parent would leave it orphaned and alive.
     const grandchildJs =
       `const fs=require('fs');` +
       `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));` +
@@ -348,12 +375,10 @@ describe("TaskManager real execution", () => {
 
     let command: string;
     if (process.platform === "win32") {
-      // Start the grandchild as a separate process, then keep the shell alive.
       command =
         `start /b "" "${NODE}" -e "${grandchildJs.replace(/"/g, '""')}" & ` +
         `"${NODE}" -e "setInterval(()=>{},1000)"`;
     } else {
-      // Background the grandchild under the shell, then keep the shell alive.
       command =
         `'${NODE}' -e '${grandchildJs.replace(/'/g, "'\\''")}' & ` +
         `'${NODE}' -e 'setInterval(()=>{},1000)'`;
@@ -505,11 +530,11 @@ describe("TaskManager.awaitTask", () => {
 
   it("resolves with failed status for a non-zero exit", async () => {
     const mgr = makeManager();
-    const task = await mgr.createShellTask(
-      `${NODE} -e "process.stderr.write('nope'); process.exit(2)"`,
-      "fails",
-      process.cwd(),
-    );
+    const task = await mgr.createShellTask({
+      argv: [NODE, "-e", "process.stderr.write('nope'); process.exit(2)"],
+      description: "fails",
+      cwd: process.cwd(),
+    });
     await waitFor(() => mgr.getTask(task.id)!.status === "failed");
     const res = await mgr.awaitTask(task.id);
     expect(res.status).toBe("failed");
