@@ -30,7 +30,7 @@ function createContext(factory = vi.fn(async () => createAgent())) {
       listMessageParts: vi.fn(() => []),
       listSessions: vi.fn(() => [session]),
     },
-    createAgent: factory,
+    loadAgent: factory,
   };
 }
 
@@ -43,8 +43,8 @@ describe("AgentPool", () => {
     } as any);
 
     await pool.warm("s1");
-    expect(context.createAgent).not.toHaveBeenCalled();
-    await expect(pool.acquire(session as any, [], [])).rejects.toThrow("owned by a live child agent");
+    expect(context.loadAgent).not.toHaveBeenCalled();
+    await expect(pool.acquireSession(session.id)).rejects.toThrow("owned by a live child agent");
   });
 
   it("deduplicates concurrent agent creation and closes the cached agent", async () => {
@@ -53,8 +53,8 @@ describe("AgentPool", () => {
     const pool = new AgentPool(createContext(factory) as any);
 
     const [first, second] = await Promise.all([
-      pool.acquire(session as any, [], []),
-      pool.acquire(session as any, [], []),
+      pool.acquireSession(session.id),
+      pool.acquireSession(session.id),
     ]);
 
     expect(first).toBe(second);
@@ -76,9 +76,51 @@ describe("AgentPool", () => {
     await pool.warm(session.id);
     expect(pool.size).toBe(0);
 
-    await pool.acquire(session as any, [], []);
+    await pool.acquireSession(session.id);
     expect(factory).toHaveBeenCalledTimes(2);
     expect(pool.size).toBe(1);
+  });
+
+  it("evicts a failed close without hiding the cleanup error", async () => {
+    const closeError = new Error("close failed");
+    const pool = new AgentPool(createContext(
+      vi.fn(async () => createAgent(vi.fn(async () => { throw closeError; }))),
+    ) as any);
+    await pool.acquireSession(session.id);
+
+    await expect(pool.close(session.id)).rejects.toBe(closeError);
+    expect(pool.size).toBe(0);
+  });
+
+  it("waits for every cached agent to close before reporting cleanup failures", async () => {
+    const secondSession = { ...session, id: "s2" };
+    const delayedClose = deferred();
+    const closeError = new Error("first close failed");
+    const first = createAgent(vi.fn(async () => { throw closeError; }));
+    const second = createAgent(vi.fn(async () => { await delayedClose.promise; }));
+    const context = createContext(vi.fn(async ({ session: loaded }: any) => loaded.id === "s1" ? first : second));
+    context.store.getSession.mockImplementation((id: string) => id === "s1" ? session : secondSession);
+    const pool = new AgentPool(context as any);
+    await Promise.all([pool.acquireSession("s1"), pool.acquireSession("s2")]);
+
+    let settled = false;
+    const closing = pool.closeAll().finally(() => { settled = true; });
+    await vi.waitFor(() => expect(second.close).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    delayedClose.resolve();
+
+    await expect(closing).rejects.toBe(closeError);
+    expect(pool.size).toBe(0);
+  });
+
+  it("rejects archived sessions before reading their transcript", async () => {
+    const context = createContext();
+    context.store.getSession.mockReturnValue({ ...session, status: "archived" });
+    const pool = new AgentPool(context as any);
+
+    await expect(pool.acquireSession(session.id)).rejects.toThrow("Session runtime is not available");
+    expect(context.store.listMessages).not.toHaveBeenCalled();
+    expect(context.store.listMessageParts).not.toHaveBeenCalled();
   });
 
   it("waits for the old generation to close before creating a replacement", async () => {
@@ -88,17 +130,12 @@ describe("AgentPool", () => {
     const factory = vi.fn()
       .mockResolvedValueOnce(oldAgent)
       .mockResolvedValueOnce(newAgent);
-    const oldUnsubscribe = vi.fn();
-    const newUnsubscribe = vi.fn();
-    const bindAgent = vi.fn()
-      .mockReturnValueOnce({ unsubscribe: oldUnsubscribe })
-      .mockReturnValueOnce({ unsubscribe: newUnsubscribe });
-    const pool = new AgentPool({ ...createContext(factory), bindAgent } as any);
+    const pool = new AgentPool(createContext(factory) as any);
 
-    await pool.acquire(session as any, [], []);
+    await pool.acquireSession(session.id);
     const closing = pool.close(session.id);
     await vi.waitFor(() => expect(oldAgent.close).toHaveBeenCalledOnce());
-    const replacement = pool.acquire(session as any, [], []);
+    const replacement = pool.acquireSession(session.id);
     await Promise.resolve();
     expect(factory).toHaveBeenCalledOnce();
     expect(await pool.get(session.id)).toBeUndefined();
@@ -106,8 +143,6 @@ describe("AgentPool", () => {
     await closing;
     expect(await replacement).toBe(newAgent);
 
-    expect(oldUnsubscribe).toHaveBeenCalledOnce();
-    expect(newUnsubscribe).not.toHaveBeenCalled();
     expect(await pool.get(session.id)).toBe(newAgent);
     await pool.closeAll();
   });
@@ -121,9 +156,9 @@ describe("AgentPool", () => {
     context.store.getSession.mockImplementation(() => ({ ...session, status }));
     const pool = new AgentPool(context as any);
 
-    await pool.acquire(session as any, [], []);
+    await pool.acquireSession(session.id);
     const closing = pool.close(session.id);
-    const replacement = pool.acquire(session as any, [], []);
+    const replacement = pool.acquireSession(session.id);
     status = "archived";
     oldClose.resolve();
 

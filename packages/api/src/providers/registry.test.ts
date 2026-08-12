@@ -4,6 +4,7 @@ import {
   detectProvider,
   detectProviderFromEnv,
   findByName,
+  resolveProviderScopedBaseUrl,
 } from "./registry.js";
 
 describe("PROVIDERS", () => {
@@ -198,5 +199,19 @@ describe("detectProviderFromEnv", () => {
   it("detects ollama (no env key, skipped)", () => {
     const result = detectProviderFromEnv({});
     expect(result).toBeUndefined();
+  });
+});
+
+describe("resolveProviderScopedBaseUrl", () => {
+  it("drops a base URL owned by another provider", () => {
+    expect(
+      resolveProviderScopedBaseUrl("https://open.bigmodel.cn/api/paas/v4", "codex"),
+    ).toBeUndefined();
+  });
+
+  it("keeps custom base URLs without a known provider marker", () => {
+    expect(
+      resolveProviderScopedBaseUrl("https://custom.example/v1", "openai"),
+    ).toBe("https://custom.example/v1");
   });
 });

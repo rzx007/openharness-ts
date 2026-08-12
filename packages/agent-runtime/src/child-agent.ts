@@ -17,6 +17,7 @@ import type {
 import { AgentRunNotAcceptingInputError } from "@openharness/core";
 
 import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "./agent.js";
+import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import {
   createDefaultChildEnvironmentProvider,
   type AgentChildEnvironmentLease,
@@ -56,6 +57,7 @@ const MAX_CHILD_REQUEST_HISTORY = 256;
 
 export interface AgentChildManagerOptions {
   settings: Settings;
+  configuration: OpenHarnessAgentConfiguration;
   cwd: string;
   idleTtlMs?: number;
   eventBus: AgentEventBus;
@@ -102,6 +104,7 @@ export class AgentChildRegistry implements AgentChildDirectory {
 
 export class AgentChildManager implements AgentChildDirectory {
   private readonly records = new Map<string, ChildRecord>();
+  private readonly backgroundClosures = new Set<Promise<void>>();
   private readonly environment: AgentChildEnvironmentProvider;
   private readonly directory: AgentChildRegistry;
 
@@ -139,7 +142,16 @@ export class AgentChildManager implements AgentChildDirectory {
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all([...this.records.keys()].map((id) => this.close(id, "Parent agent closed")));
+    const background = [...this.backgroundClosures];
+    const settled = await Promise.allSettled([
+      ...[...this.records.keys()].map((id) => this.close(id, "Parent agent closed")),
+      ...background,
+    ]);
+    for (const closing of background) this.backgroundClosures.delete(closing);
+    const failures = [...new Set(settled
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason))];
+    throwFailures(failures, "Child agent cleanup failed");
   }
 
   private async spawn(parentScope: AgentRunScope, input: AgentChildSpawnInput): Promise<AgentChildInvocation> {
@@ -159,20 +171,19 @@ export class AgentChildManager implements AgentChildDirectory {
       parentScope,
       lease,
       createAgent: () => this.options.createAgent({
+        ...this.options.configuration,
         settings: this.options.settings,
         cwd: lease.cwd,
         sessionId,
-        overrides: {
-          model: input.model,
-          systemPrompt: input.systemPrompt,
-          permissionMode: input.permissionMode,
-          allowedTools: input.allowedTools,
-          disallowedTools: input.disallowedTools,
-          maxTurns: input.maxTurns,
-          effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"
-            ? input.effort
-            : undefined,
-        },
+        model: input.model ?? this.options.configuration.model,
+        systemPrompt: input.systemPrompt ?? this.options.configuration.systemPrompt,
+        permissionMode: input.permissionMode ?? this.options.configuration.permissionMode,
+        allowedTools: input.allowedTools ?? this.options.configuration.allowedTools,
+        disallowedTools: input.disallowedTools ?? this.options.configuration.disallowedTools,
+        maxTurns: input.maxTurns ?? this.options.configuration.maxTurns,
+        effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"
+          ? input.effort
+          : this.options.configuration.effort,
       }, {
         childId,
         parentSessionId: parentScope.sessionId,
@@ -220,7 +231,11 @@ export class AgentChildManager implements AgentChildDirectory {
         ...(lease.worktree ? { worktree: lease.worktree } : {}),
       };
     } catch (error) {
-      await this.closeRecord(record, failedResult(error), announced);
+      try {
+        await this.closeRecord(record, failedResult(error), announced);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `Child agent startup cleanup failed: ${childId}`);
+      }
       throw error;
     }
   }
@@ -262,13 +277,26 @@ export class AgentChildManager implements AgentChildDirectory {
     if (record.closePromise) return await record.closePromise;
     record.state = "closing";
     const closing = (async () => {
+      const failures: unknown[] = [];
+      const activeRun = record.currentRun;
       record.abortController?.abort(reason ?? "Child agent closed");
-      await record.currentRun?.interrupt(reason ?? "Child agent closed");
-      const settled = await record.result.catch((error) => failedResult(error));
-      const result = record.currentRun
-        ? settled
+      try {
+        await activeRun?.interrupt(reason ?? "Child agent closed");
+      } catch (error) {
+        failures.push(error);
+      }
+      const settled = activeRun && failures.length === 0
+        ? await record.result.catch((error) => failedResult(error))
+        : undefined;
+      const result = activeRun
+        ? settled ?? { status: "interrupted" as const, output: reason ?? "Child agent stopped" }
         : record.lastResult ?? { status: "stopped" as const, output: reason ?? "Child agent stopped" };
-      await this.closeRecord(record, result, true);
+      try {
+        await this.closeRecord(record, result, true);
+      } catch (error) {
+        failures.push(error);
+      }
+      throwFailures(failures, `Child agent cleanup failed: ${childId}`);
     })();
     record.closePromise = closing;
     await closing;
@@ -380,7 +408,17 @@ export class AgentChildManager implements AgentChildDirectory {
       const agent = await creating.catch(() => undefined);
       if (agent) {
         if (record.agent === agent) record.agent = undefined;
-        if (!record.cleanupPromise) await agent.close().catch(() => {});
+        if (!record.cleanupPromise) {
+          try {
+            await agent.close();
+          } catch (cleanupError) {
+            throw combineFailures(
+              error,
+              cleanupError,
+              `Child agent initialization and cleanup failed: ${record.id}`,
+            );
+          }
+        }
       }
       throw error;
     } finally {
@@ -398,7 +436,7 @@ export class AgentChildManager implements AgentChildDirectory {
       const agent = record.agent;
       const suspending = (async () => {
         record.suspendedHistory = agent.getHistory();
-        await agent.close().catch(() => {});
+        await agent.close();
         if (record.agent === agent) record.agent = undefined;
         if (isChildUnavailable(record)) return;
         record.state = "suspended";
@@ -410,7 +448,25 @@ export class AgentChildManager implements AgentChildDirectory {
         if (record.suspending === suspending) record.suspending = undefined;
       });
       record.suspending = suspending;
-      void suspending.catch(() => {});
+      void suspending.catch((error) => {
+        if (isChildUnavailable(record) || !this.records.has(record.id)) return;
+        record.state = "closing";
+        const closing = (async () => {
+          try {
+            await this.closeRecord(record, failedResult(error), true);
+          } catch (cleanupError) {
+            throw combineFailures(
+              error,
+              cleanupError,
+              `Child agent suspension and cleanup failed: ${record.id}`,
+            );
+          }
+          throw error;
+        })();
+        record.closePromise = closing;
+        this.backgroundClosures.add(closing);
+        void closing.catch(() => {});
+      });
     }, idleTtlMs);
     record.idleTimer.unref?.();
   }
@@ -424,25 +480,43 @@ export class AgentChildManager implements AgentChildDirectory {
 
   private async closeRecordWork(record: ChildRecord, result: AgentChildResult, emit: boolean): Promise<void> {
     if (record.state === "closed" && !this.records.has(record.id)) return;
+    const failures: unknown[] = [];
     record.state = "closed";
     this.detachParentAbort(record);
     this.clearIdleTimer(record);
-    await record.suspending?.catch(() => {});
+    try {
+      await record.suspending;
+    } catch (error) {
+      failures.push(error);
+    }
     const creating = record.creating;
     const created = creating ? await creating.catch(() => undefined) : undefined;
-    await (record.agent ?? created)?.close().catch(() => {});
+    try {
+      await (record.agent ?? created)?.close();
+    } catch (error) {
+      failures.push(error);
+    }
     record.agent = undefined;
-    await record.lease.release(result).catch(() => {});
+    try {
+      await record.lease.release(result);
+    } catch (error) {
+      failures.push(error);
+    }
     try {
       if (emit) {
-        await this.emitChild(record, {
-          type: "child.closed",
-          data: { childId: record.id, sessionId: record.sessionId, result },
-        });
+        try {
+          await this.emitChild(record, {
+            type: "child.closed",
+            data: { childId: record.id, sessionId: record.sessionId, result },
+          });
+        } catch (error) {
+          failures.push(error);
+        }
       }
     } finally {
       this.deleteRecord(record);
     }
+    throwFailures(failures, `Child agent cleanup failed: ${record.id}`);
   }
 
   private async emitChild(record: ChildRecord, event: Parameters<AgentEventBus["emit"]>[0]): Promise<void> {
@@ -516,4 +590,15 @@ function failedResult(error: unknown): AgentChildResult {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function throwFailures(failures: unknown[], message: string): void {
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, message);
+}
+
+function combineFailures(primary: unknown, cleanup: unknown, message: string): unknown {
+  const cleanupFailures = cleanup instanceof AggregateError ? cleanup.errors : [cleanup];
+  const failures = [primary, ...cleanupFailures.filter((failure) => failure !== primary)];
+  return failures.length === 1 ? primary : new AggregateError(failures, message);
 }

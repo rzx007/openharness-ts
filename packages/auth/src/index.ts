@@ -9,6 +9,10 @@ export {
   loadCodexCredential,
 } from "./external";
 export type { ExternalAuthCredential, ExternalAuthState } from "./external";
+export {
+  resolveApiKey,
+  type ApiKeyResolutionOptions,
+} from "./credential-resolution";
 
 export interface AuthCredentials {
   provider: string;

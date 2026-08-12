@@ -32,15 +32,16 @@ function createControl() {
     closeAll: vi.fn(async () => {}),
     closeForCwd: vi.fn(async () => {}),
   };
+  const operationGate = new DaemonOperationGate();
   const control = new DaemonControlService({
     store: store as any,
     runEngine: runEngine as any,
     agentPool: agentPool as any,
-    operationGate: new DaemonOperationGate(),
+    operationGate,
     startedAt: Date.now() - 100,
     sseClientCount: () => 2,
   });
-  return { control, store, runEngine, agentPool };
+  return { control, store, runEngine, agentPool, operationGate };
 }
 
 describe("DaemonControlService", () => {
@@ -66,5 +67,31 @@ describe("DaemonControlService", () => {
       { id: "hook-1", event: "pre_tool_use", type: "command", enabled: true, origin: "runtime" },
     ]);
     expect(agentPool.acquireSession).toHaveBeenCalledWith("s1");
+  });
+
+  it("closes agents and seals admission even when run draining fails", async () => {
+    const { control, runEngine, agentPool, operationGate } = createControl();
+    runEngine.stopAndDrain.mockRejectedValueOnce(new Error("drain failed"));
+
+    await expect(control.shutdown()).rejects.toThrow("drain failed");
+    expect(agentPool.closeAll).toHaveBeenCalledOnce();
+    expect(operationGate.accepting).toBe(false);
+    expect(() => operationGate.enter({ sessionId: "s1", cwd: "/repo" })).toThrow("Daemon is closing");
+  });
+
+  it("aggregates drain and pool failures after sealing the operation gate", async () => {
+    const { control, runEngine, agentPool, operationGate } = createControl();
+    const drainError = new Error("drain failed");
+    const poolError = new Error("pool close failed");
+    runEngine.stopAndDrain.mockRejectedValueOnce(drainError);
+    agentPool.closeAll.mockRejectedValueOnce(poolError);
+
+    const failure = await control.shutdown().catch((error) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([drainError, poolError]);
+    expect(runEngine.stopAndDrain).toHaveBeenCalledOnce();
+    expect(agentPool.closeAll).toHaveBeenCalledOnce();
+    expect(operationGate.accepting).toBe(false);
+    expect(() => operationGate.enter({ sessionId: "s1", cwd: "/repo" })).toThrow("Daemon is closing");
   });
 });

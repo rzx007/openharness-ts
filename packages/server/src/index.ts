@@ -4,13 +4,14 @@ export {
   type ListenResult,
   type OpenHarnessServerHealth,
   type OpenHarnessServerOptions,
+  type OpenHarnessServerServices,
   type OpenHarnessRuntimeSnapshot,
 } from "./http.js";
 export {
   startOpenHarnessDaemon,
   type OpenHarnessDaemonOptions,
 } from "./default-daemon.js";
-export type { CreateDaemonAgent, CreateDaemonAgentContext } from "./http/agent-pool.js";
+export type { CreateDaemonAgent, CreateDaemonAgentContext } from "./daemon-agent.js";
 export {
   BUILTIN_SESSION_COMMANDS,
   mergeCommandCatalog,
@@ -47,7 +48,6 @@ export type {
   ProjectInitService,
   ProviderInfo,
   ProviderService,
-  SessionRuntimeInspect,
   SettingsService,
 } from "./settings-api.js";
 export type {

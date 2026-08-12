@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { PROVIDERS, findByName } from "@openharness/api";
+import { PROVIDERS, findByName, resolveProviderScopedBaseUrl } from "@openharness/api";
 import { CredentialStorage, describeCodexAuthState } from "@openharness/auth";
 import {
   getProjectMemoryDir,
@@ -20,7 +20,6 @@ import { getProjectSessionDir, startDreamNow } from "@openharness/services";
 import { loadOutputStyles } from "@openharness/output-styles";
 import {
   discoverOpenHarnessExtensions,
-  resolveProviderScopedBaseUrl,
 } from "@openharness/agent-runtime";
 
 import type {
@@ -634,5 +633,24 @@ export function createDefaultGitService(): GitService {
         throw new Error(`git commit failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
+  };
+}
+
+/** Complete resource-service set installed by the opinionated daemon application. */
+export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
+  return {
+    settings: createDefaultSettingsService(ref),
+    provider: createDefaultProviderService(ref),
+    memory: createDefaultMemoryService(),
+    auth: createDefaultAuthService(),
+    context: createDefaultContextService(ref),
+    dream: createDefaultDreamService(ref),
+    profile: createDefaultProfileService(),
+    outputStyle: createDefaultOutputStyleService(),
+    projectInit: createDefaultProjectInitService(),
+    plugin: createDefaultPluginService(ref),
+    agentPersona: createDefaultAgentPersonaService(),
+    hooks: createDefaultHooksService(ref),
+    git: createDefaultGitService(),
   };
 }

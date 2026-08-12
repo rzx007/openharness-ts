@@ -300,6 +300,9 @@ importers:
 
   packages/auth:
     dependencies:
+      '@openharness/api':
+        specifier: workspace:*
+        version: link:../api
       '@openharness/core':
         specifier: workspace:*
         version: link:../core

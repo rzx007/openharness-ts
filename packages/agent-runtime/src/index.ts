@@ -1,16 +1,4 @@
 export {
-  createOpenHarnessRuntime,
-  formatSandboxUnavailableError,
-  resolveApiClient,
-  resolveApiKey,
-  resolveAutoApproveTools,
-  resolveProviderScopedBaseUrl,
-  resolveRuntimeModel,
-  switchApiClientForBundle,
-  type OpenHarnessRuntimeOptions,
-  type OpenHarnessRuntimeOverrides,
-} from "./default-runtime.js";
-export {
   AgentOperationConflictError,
   createOpenHarnessAgent,
   type AgentCompactResult,
@@ -20,6 +8,7 @@ export {
   type OpenHarnessAgentState,
   type OpenHarnessAgentSubmitOptions,
 } from "./agent.js";
+export type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 export type { AgentRememberResult } from "./memory-runtime.js";
 export type {
   OpenHarnessAgentExtension,

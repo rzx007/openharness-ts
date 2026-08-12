@@ -61,24 +61,25 @@ function testAgent(
   }) => Promise<void>,
 ): CreateDaemonAgent {
   return async ({ session, options: agentOptions }) => {
-    let listener: AgentEventListener | undefined;
+    const listeners = new Set<AgentEventListener>();
     let sequence = 0;
     const publish = async (input: AgentEventInput, context: AgentEventContext) => {
-      await listener?.({
+      const event = {
         ...input,
         id: `print-test-${++sequence}`,
         sequence,
         occurredAt: new Date().toISOString(),
         context,
-      } as AgentEvent);
+      } as AgentEvent;
+      await agentOptions.onEvent?.(event);
+      for (const listener of listeners) await listener(event);
     };
     const agent: OpenHarnessAgent = {
       id: session.id,
-      events: {
-        subscribe(next) {
-          listener = next;
-          return { unsubscribe: () => { if (listener === next) listener = undefined; } };
-        },
+      state: "idle",
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
       },
       children: { get: () => undefined, getBySessionId: () => undefined, list: () => [] },
       submitMessage(content, options = {}) {
@@ -97,7 +98,7 @@ function testAgent(
             requestPermission: async (request) => {
               const requestId = `permission-${sequence + 1}`;
               await publish({ type: "permission.requested", data: { requestId, request } }, context);
-              const requestPermission = agentOptions.effects?.requestPermission;
+              const requestPermission = agentOptions.requestPermission;
               if (!requestPermission) throw new Error("Permission effect is not configured");
               const decision = await requestPermission(request, {
                 agentId: session.id,

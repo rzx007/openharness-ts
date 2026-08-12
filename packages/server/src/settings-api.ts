@@ -40,11 +40,6 @@ export interface HookInfo {
   origin: "settings" | "runtime";
 }
 
-export interface SessionRuntimeInspect {
-  mcpServers: McpServerStatus[];
-  hooks?: HookInfo[];
-}
-
 export interface MemoryEntryRecord {
   id: string;
   content: string;

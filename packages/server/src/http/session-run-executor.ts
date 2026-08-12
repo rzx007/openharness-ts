@@ -33,11 +33,7 @@ export class SessionRunExecutor {
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
-      const agent = await this.context.agentPool.acquire(
-        session,
-        this.context.store.listMessages(sessionId),
-        this.context.store.listMessageParts(sessionId),
-      );
+      const agent = await this.context.agentPool.acquireSession(sessionId);
       agent.setModel(session.model);
       const run = agent.submitMessage(admitted.content, {
         signal: workContext.signal,
@@ -52,8 +48,23 @@ export class SessionRunExecutor {
       await workContext.registerHandle(run);
       await run.result;
     } catch (error) {
-      await this.context.agentPool.close(sessionId);
+      let cleanupError: unknown;
+      try {
+        await this.context.agentPool.close(sessionId);
+      } catch (closeError) {
+        cleanupError = closeError;
+      }
       const current = this.context.store.getRun(runId);
+      if (cleanupError) {
+        this.context.log({
+          level: "error",
+          event: "session.agent.cleanup_failed",
+          traceId: this.context.traceIdForRun(runId),
+          sessionId,
+          runId,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
       if (current && ["completed", "failed", "interrupted"].includes(current.status)) return;
       const message = error instanceof Error ? error.message : String(error);
       const traceId = this.context.traceIdForRun(runId);

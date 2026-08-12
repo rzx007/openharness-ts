@@ -26,7 +26,7 @@ export { isAllowed } from "./bus/acl";
 export { ChannelManager } from "./manager";
 export type { ChannelManagerOptions, ChannelStatus } from "./manager";
 export { ChannelBridge } from "./bridge";
-export type { BridgeEngine } from "./bridge";
+export type { BridgeAgent } from "./bridge";
 export { StdioAdapter } from "./impl/stdio";
 export { HttpAdapter } from "./impl/http";
 export { FeishuAdapter } from "./impl/feishu";

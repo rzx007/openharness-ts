@@ -162,9 +162,7 @@ export type AgentEvent = AgentEventInput & {
 
 export type AgentEventListener = (event: AgentEvent) => void | Promise<void>;
 
-export interface AgentEventSubscription {
-  unsubscribe(): void;
-}
+export type AgentEventSubscription = () => void;
 
 export interface AgentEventSource {
   subscribe(listener: AgentEventListener): AgentEventSubscription;

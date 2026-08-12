@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from "@openharness/coordinator";
 import type {
@@ -21,10 +21,11 @@ import type {
 } from "@openharness/core";
 import type { AgentCompactResult, AgentInspection, AgentRememberResult, OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { CommandCatalogProvider } from "./commands.js";
-import { OpenHarnessHttpServer } from "./http.js";
+import { SessionStore } from "@openharness/services";
+import type { CreateDaemonAgent, CreateDaemonAgentContext } from "./daemon-agent.js";
+import { OpenHarnessHttpServer, startOpenHarnessServer } from "./http.js";
 import { getDefaultSessionStorePath } from "./paths.js";
-import type { CreateDaemonAgent, CreateDaemonAgentContext } from "./http/agent-pool.js";
-import type { OpenHarnessServerOptions } from "./http.js";
+import type { OpenHarnessServerOptions, OpenHarnessServerServices } from "./http.js";
 import type { ObservabilityEvent } from "./observability.js";
 
 interface TestAgentProgram {
@@ -50,7 +51,7 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
   return async (context) => {
     const program = await factory.createRuntime(context);
     let history: Message[] = [];
-    let listener: AgentEventListener | undefined;
+    const listeners = new Set<AgentEventListener>();
     let sequence = 0;
     let state: OpenHarnessAgent["state"] = "idle";
     let activeHandle: AgentRunHandle | undefined;
@@ -63,16 +64,15 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
         occurredAt: new Date().toISOString(),
         context: eventContext,
       } as AgentEvent;
-      await listener?.(event);
+      await context.options.onEvent?.(event);
+      for (const listener of listeners) await listener(event);
     };
     return {
       id: context.session.id,
       get state() { return state; },
-      events: {
-        subscribe(next) {
-          listener = next;
-          return { unsubscribe: () => { if (listener === next) listener = undefined; } };
-        },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
       },
       children: program.children ?? { get: () => undefined, getBySessionId: () => undefined, list: () => [] },
       submitMessage(content, options = {}) {
@@ -112,7 +112,7 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
               requestPermission: async (request) => {
                 const requestId = `permission-${sequence + 1}`;
                 await emit({ type: "permission.requested", data: { requestId, request } }, eventContext);
-                const requestPermission = context.options.effects?.requestPermission;
+                const requestPermission = context.options.requestPermission;
                 if (!requestPermission) throw new Error("Permission effect is not configured");
                 const decision = await requestPermission(request, {
                   agentId: context.session.id,
@@ -253,26 +253,7 @@ function deferred<T = void>(): {
 
 async function withServer(
   test: (ctx: { baseUrl: string; token: string; storePath: string; server: OpenHarnessHttpServer }) => Promise<void>,
-  options: Omit<Pick<
-    OpenHarnessServerOptions,
-    | "createAgent"
-    | "allowedOrigins"
-    | "commandCatalog"
-    | "settingsService"
-    | "providerService"
-    | "memoryService"
-    | "authService"
-    | "contextService"
-    | "dreamService"
-    | "profileService"
-    | "outputStyleService"
-    | "projectInitService"
-    | "pluginService"
-    | "agentPersonaService"
-    | "hooksService"
-    | "gitService"
-    | "logger"
-  >, "createAgent"> & { runtimeFactory?: TestAgentProgramFactory; createAgent?: CreateDaemonAgent } = {},
+  options: TestServerOptions = {},
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-server-"));
   const token = "test-token";
@@ -281,20 +262,22 @@ async function withServer(
     allowedOrigins: options.allowedOrigins,
     storePath: join(dir, "sessions.db"),
     createAgent: options.createAgent ?? (options.runtimeFactory ? adaptTestAgentFactory(options.runtimeFactory) : undefined),
-    commandCatalog: options.commandCatalog,
-    settingsService: options.settingsService,
-    providerService: options.providerService,
-    memoryService: options.memoryService,
-    authService: options.authService,
-    contextService: options.contextService,
-    dreamService: options.dreamService,
-    profileService: options.profileService,
-    outputStyleService: options.outputStyleService,
-    projectInitService: options.projectInitService,
-    pluginService: options.pluginService,
-    agentPersonaService: options.agentPersonaService,
-    hooksService: options.hooksService,
-    gitService: options.gitService,
+    services: {
+      commandCatalog: options.commandCatalog,
+      settings: options.settingsService,
+      provider: options.providerService,
+      memory: options.memoryService,
+      auth: options.authService,
+      context: options.contextService,
+      dream: options.dreamService,
+      profile: options.profileService,
+      outputStyle: options.outputStyleService,
+      projectInit: options.projectInitService,
+      plugin: options.pluginService,
+      agentPersona: options.agentPersonaService,
+      hooks: options.hooksService,
+      git: options.gitService,
+    },
     logger: options.logger ?? (() => {}),
   });
   const listen = await server.listen();
@@ -304,6 +287,25 @@ async function withServer(
     await server.close();
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+interface TestServerOptions extends Pick<OpenHarnessServerOptions, "allowedOrigins" | "logger"> {
+  runtimeFactory?: TestAgentProgramFactory;
+  createAgent?: CreateDaemonAgent;
+  commandCatalog?: OpenHarnessServerServices["commandCatalog"];
+  settingsService?: OpenHarnessServerServices["settings"];
+  providerService?: OpenHarnessServerServices["provider"];
+  memoryService?: OpenHarnessServerServices["memory"];
+  authService?: OpenHarnessServerServices["auth"];
+  contextService?: OpenHarnessServerServices["context"];
+  dreamService?: OpenHarnessServerServices["dream"];
+  profileService?: OpenHarnessServerServices["profile"];
+  outputStyleService?: OpenHarnessServerServices["outputStyle"];
+  projectInitService?: OpenHarnessServerServices["projectInit"];
+  pluginService?: OpenHarnessServerServices["plugin"];
+  agentPersonaService?: OpenHarnessServerServices["agentPersona"];
+  hooksService?: OpenHarnessServerServices["hooks"];
+  gitService?: OpenHarnessServerServices["git"];
 }
 
 function auth(token: string): HeadersInit {
@@ -326,6 +328,88 @@ async function waitForEvent(
 }
 
 describe("OpenHarnessHttpServer", () => {
+  it("aggregates daemon, listener, SSE, and store close failures after attempting every stage", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-server-close-matrix-"));
+    const server = new OpenHarnessHttpServer({ storePath: join(dir, "sessions.db") });
+    await (server as any).daemon.ready();
+    const daemonError = new Error("daemon shutdown failed");
+    const listenerError = new Error("listener close failed");
+    const sseError = new Error("SSE close failed");
+    const storeError = new Error("store close failed");
+    const originalStoreClose = server.store.close.bind(server.store);
+    const daemonShutdown = vi.fn(async () => { throw daemonError; });
+    const closeClients = vi.fn(() => { throw sseError; });
+    const listenerClose = vi.fn((callback: (error?: Error) => void) => callback(listenerError));
+    (server as any).daemon.shutdown = daemonShutdown;
+    (server as any).eventHub.closeClients = closeClients;
+    (server as any).listener = { close: listenerClose };
+    const storeClose = vi.spyOn(server.store, "close").mockImplementation(() => { throw storeError; });
+
+    try {
+      const firstFailure = await server.close().catch((error) => error);
+      expect(firstFailure).toBeInstanceOf(AggregateError);
+      expect((firstFailure as AggregateError).errors).toEqual([
+        sseError,
+        daemonError,
+        listenerError,
+        storeError,
+      ]);
+      const secondFailure = await server.close().catch((error) => error);
+      expect(secondFailure).toBe(firstFailure);
+      expect(daemonShutdown).toHaveBeenCalledOnce();
+      expect(closeClients).toHaveBeenCalledOnce();
+      expect(listenerClose).toHaveBeenCalledOnce();
+      expect(storeClose).toHaveBeenCalledOnce();
+    } finally {
+      storeClose.mockRestore();
+      originalStoreClose();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("closes the durable store even when daemon shutdown fails", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-close-"));
+    const server = new OpenHarnessHttpServer({
+      storePath: join(dir, "sessions.db"),
+      logger: () => {},
+    });
+    const failure = new Error("shutdown failed");
+    (server as any).daemon.shutdown = vi.fn(async () => { throw failure; });
+    const closeStore = vi.spyOn(server.store, "close");
+
+    try {
+      await expect(server.close()).rejects.toBe(failure);
+      expect(closeStore).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("closes a provided durable store when the HTTP listener cannot start", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-listen-failure-"));
+    const blocker = new OpenHarnessHttpServer({
+      storePath: join(dir, "blocker.db"),
+      logger: () => {},
+    });
+    const occupied = await blocker.listen();
+    const store = new SessionStore({ path: join(dir, "failed.db") });
+    const closeStore = vi.spyOn(store, "close");
+
+    try {
+      await expect(startOpenHarnessServer({
+        host: occupied.host,
+        port: occupied.port,
+        store,
+        logger: () => {},
+      })).rejects.toBeDefined();
+      expect(closeStore).toHaveBeenCalledOnce();
+    } finally {
+      await blocker.close();
+      if (!closeStore.mock.calls.length) store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("projects framework-owned child execution into durable child sessions", async () => {
     const closed: string[] = [];
     const runtimeFactory: TestAgentProgramFactory = {

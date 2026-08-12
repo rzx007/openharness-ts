@@ -1,6 +1,4 @@
-import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "@openharness/agent-runtime";
-import { createOpenHarnessAgent } from "@openharness/agent-runtime";
-import type { AgentEffects, AgentEventSubscription, Settings } from "@openharness/core";
+import type { OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { SessionStore } from "@openharness/services";
 import type {
   SessionMessagePartRecord,
@@ -8,31 +6,17 @@ import type {
   SessionRecord,
 } from "@openharness/services/session-runtime/types";
 
-import { transcriptToAgentMessages } from "./agent-transcript.js";
-
-export interface CreateDaemonAgentContext {
-  session: SessionRecord;
-  history: SessionMessageRecord[];
-  parts: SessionMessagePartRecord[];
-  options: OpenHarnessAgentOptions;
-}
-
-export type CreateDaemonAgent = (context: CreateDaemonAgentContext) => Promise<OpenHarnessAgent>;
+import type { LoadDaemonAgent } from "../daemon-agent.js";
 
 export interface AgentPoolContext {
   store: Pick<SessionStore, "getSession" | "listMessageParts" | "listMessages" | "listSessions">;
-  settings?: Settings;
-  getSettings?: () => Settings;
-  createAgent?: CreateDaemonAgent;
+  loadAgent?: LoadDaemonAgent;
   isSessionExternallyOwned?(sessionId: string): boolean;
-  effects?: AgentEffects;
-  bindAgent?(agent: OpenHarnessAgent, session: SessionRecord): AgentEventSubscription;
 }
 
 interface AgentPoolEntry {
   promise: Promise<OpenHarnessAgent>;
   agent?: OpenHarnessAgent;
-  subscription?: AgentEventSubscription;
   state: "active" | "closing";
   closePromise?: Promise<void>;
 }
@@ -44,7 +28,7 @@ export class AgentPool {
   constructor(private readonly context: AgentPoolContext) {}
 
   get configured(): boolean {
-    return this.context.createAgent !== undefined || this.context.settings !== undefined;
+    return this.context.loadAgent !== undefined;
   }
 
   get size(): number {
@@ -69,11 +53,7 @@ export class AgentPool {
     if (!this.configured || this.agents.has(sessionId) || this.context.isSessionExternallyOwned?.(sessionId)) return;
     const session = this.context.store.getSession(sessionId);
     if (!session || session.status === "closing" || session.status === "archived") return;
-    await this.acquire(
-      session,
-      this.context.store.listMessages(sessionId),
-      this.context.store.listMessageParts(sessionId),
-    ).catch(() => {});
+    await this.acquireSession(sessionId).catch(() => {});
   }
 
   async get(sessionId: string): Promise<OpenHarnessAgent | undefined> {
@@ -82,50 +62,38 @@ export class AgentPool {
   }
 
   async acquireSession(sessionId: string): Promise<OpenHarnessAgent> {
-    const session = this.context.store.getSession(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
-    return await this.acquire(
-      session,
-      this.context.store.listMessages(sessionId),
-      this.context.store.listMessageParts(sessionId),
-    );
+    return await this.acquire(sessionId);
   }
 
-  async acquire(
-    session: SessionRecord,
-    history: SessionMessageRecord[],
-    parts: SessionMessagePartRecord[],
-  ): Promise<OpenHarnessAgent> {
+  private async acquire(sessionId: string): Promise<OpenHarnessAgent> {
     if (!this.configured) throw new Error("Agent runtime is not configured");
-    if (this.context.isSessionExternallyOwned?.(session.id)) {
-      throw new Error(`Session runtime is owned by a live child agent: ${session.id}`);
+    if (this.context.isSessionExternallyOwned?.(sessionId)) {
+      throw new Error(`Session runtime is owned by a live child agent: ${sessionId}`);
     }
-    const current = this.context.store.getSession(session.id);
-    if (!current || current.status === "closing" || current.status === "archived") {
-      throw new Error(`Session runtime is not available: ${session.id}`);
+    const current = this.context.store.getSession(sessionId);
+    if (!current) throw new Error(`Session not found: ${sessionId}`);
+    if (current.status === "closing" || current.status === "archived") {
+      throw new Error(`Session runtime is not available: ${sessionId}`);
     }
-    const existing = this.agents.get(session.id);
+    const existing = this.agents.get(sessionId);
     if (existing?.state === "active") return await existing.promise;
     if (existing?.closePromise) {
       await existing.closePromise;
-      const refreshed = this.context.store.getSession(session.id);
-      if (!refreshed || refreshed.status === "closing" || refreshed.status === "archived") {
-        throw new Error(`Session runtime is not available: ${session.id}`);
-      }
-      return await this.acquire(
-        refreshed,
-        this.context.store.listMessages(session.id),
-        this.context.store.listMessageParts(session.id),
-      );
+      return await this.acquire(sessionId);
     }
 
     const entry = { state: "active" as const } as AgentPoolEntry;
-    const promise = this.create(session, history, parts, entry).catch((error) => {
-      if (entry.state === "active" && this.agents.get(session.id) === entry) this.agents.delete(session.id);
+    const promise = this.create(
+      current,
+      this.context.store.listMessages(sessionId),
+      this.context.store.listMessageParts(sessionId),
+      entry,
+    ).catch((error) => {
+      if (entry.state === "active" && this.agents.get(sessionId) === entry) this.agents.delete(sessionId);
       throw error;
     });
     entry.promise = promise;
-    this.agents.set(session.id, entry);
+    this.agents.set(sessionId, entry);
     return await promise;
   }
 
@@ -136,12 +104,15 @@ export class AgentPool {
     entry.state = "closing";
     const closing = (async () => {
       try {
-        await (await entry.promise).close();
-      } catch {
-        // Failed creation has no usable agent resource to close.
+        let agent: OpenHarnessAgent;
+        try {
+          agent = await entry.promise;
+        } catch {
+          // Failed creation has no usable agent resource to close.
+          return;
+        }
+        await agent.close();
       } finally {
-        entry.subscription?.unsubscribe();
-        entry.subscription = undefined;
         entry.agent = undefined;
         if (this.agents.get(sessionId) === entry) this.agents.delete(sessionId);
       }
@@ -152,11 +123,11 @@ export class AgentPool {
 
   async closeForCwd(cwd: string): Promise<void> {
     const sessions = this.context.store.listSessions({ cwd, includeArchived: true });
-    await Promise.all(sessions.map((session) => this.close(session.id)));
+    await this.closeSessions(sessions.map((session) => session.id), `Agent pool cleanup failed for cwd: ${cwd}`);
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all([...this.agents.keys()].map((sessionId) => this.close(sessionId)));
+    await this.closeSessions([...this.agents.keys()], "Agent pool cleanup failed");
   }
 
   private async create(
@@ -165,30 +136,11 @@ export class AgentPool {
     parts: SessionMessagePartRecord[],
     entry: AgentPoolEntry,
   ): Promise<OpenHarnessAgent> {
-    const settings = this.context.getSettings?.() ?? this.context.settings;
-    const options: OpenHarnessAgentOptions = {
-      ...(settings ? { settings } : {}),
-      cwd: session.cwd,
-      sessionId: session.id,
-      overrides: runtimeOverridesFromSession(session),
-      ...(this.context.effects ? { effects: this.context.effects } : {}),
-    };
-    if (!this.context.createAgent && !settings) throw new Error("Agent settings are not configured");
-    const agent = this.context.createAgent
-      ? await this.context.createAgent({ session, history, parts, options })
-      : await createOpenHarnessAgent(options);
-    try {
-      agent.loadHistory(transcriptToAgentMessages(history, parts));
-      const subscription = this.context.bindAgent?.(agent, session);
-      if (subscription) entry.subscription = subscription;
-      entry.agent = agent;
-      return agent;
-    } catch (error) {
-      entry.subscription?.unsubscribe();
-      entry.subscription = undefined;
-      await agent.close();
-      throw error;
-    }
+    const loadAgent = this.context.loadAgent;
+    if (!loadAgent) throw new Error("Agent runtime is not configured");
+    const agent = await loadAgent({ session, history, parts });
+    entry.agent = agent;
+    return agent;
   }
 
   private entryHasActiveWork(entry: AgentPoolEntry): boolean {
@@ -197,26 +149,13 @@ export class AgentPool {
     return entry.agent.children.list().some((child) =>
       child.state === "starting" || child.state === "running" || child.state === "closing");
   }
-}
 
-function runtimeOverridesFromSession(session: SessionRecord): NonNullable<OpenHarnessAgentOptions["overrides"]> {
-  const permissionMode = session.metadata.permissionMode;
-  const effort = session.metadata.effort;
-  return {
-    model: session.model || undefined,
-    permissionMode: permissionMode === "default" || permissionMode === "plan" || permissionMode === "full_auto"
-      ? permissionMode
-      : undefined,
-    systemPrompt: typeof session.metadata.systemPrompt === "string"
-      ? session.metadata.systemPrompt
-      : undefined,
-    maxTurns: typeof session.metadata.maxTurns === "number" ? session.metadata.maxTurns : undefined,
-    allowedTools: Array.isArray(session.metadata.allowedTools)
-      ? session.metadata.allowedTools.filter((tool): tool is string => typeof tool === "string")
-      : undefined,
-    disallowedTools: Array.isArray(session.metadata.disallowedTools)
-      ? session.metadata.disallowedTools.filter((tool): tool is string => typeof tool === "string")
-      : undefined,
-    effort: effort === "low" || effort === "medium" || effort === "high" ? effort : undefined,
-  };
+  private async closeSessions(sessionIds: string[], message: string): Promise<void> {
+    const settled = await Promise.allSettled(sessionIds.map((sessionId) => this.close(sessionId)));
+    const failures = settled
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, message);
+  }
 }

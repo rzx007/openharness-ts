@@ -1,19 +1,7 @@
 import { loadSettings } from "@openharness/core";
 
 import {
-  createDefaultAgentPersonaService,
-  createDefaultAuthService,
-  createDefaultContextService,
-  createDefaultDreamService,
-  createDefaultGitService,
-  createDefaultHooksService,
-  createDefaultMemoryService,
-  createDefaultOutputStyleService,
-  createDefaultPluginService,
-  createDefaultProfileService,
-  createDefaultProjectInitService,
-  createDefaultProviderService,
-  createDefaultSettingsService,
+  createDefaultApplicationServices,
   type DaemonSettingsRef,
 } from "./default-application-services.js";
 import { createDefaultCommandCatalog } from "./default-command-catalog.js";
@@ -34,19 +22,9 @@ export async function startOpenHarnessDaemon(options: OpenHarnessDaemonOptions =
     ...options,
     settings: settingsRef.current,
     getSettings: () => settingsRef.current,
-    commandCatalog: createDefaultCommandCatalog(() => settingsRef.current),
-    settingsService: createDefaultSettingsService(settingsRef),
-    providerService: createDefaultProviderService(settingsRef),
-    memoryService: createDefaultMemoryService(),
-    authService: createDefaultAuthService(),
-    contextService: createDefaultContextService(settingsRef),
-    dreamService: createDefaultDreamService(settingsRef),
-    profileService: createDefaultProfileService(),
-    outputStyleService: createDefaultOutputStyleService(),
-    projectInitService: createDefaultProjectInitService(),
-    pluginService: createDefaultPluginService(settingsRef),
-    agentPersonaService: createDefaultAgentPersonaService(),
-    hooksService: createDefaultHooksService(settingsRef),
-    gitService: createDefaultGitService(),
+    services: {
+      commandCatalog: createDefaultCommandCatalog(() => settingsRef.current),
+      ...createDefaultApplicationServices(settingsRef),
+    },
   });
 }

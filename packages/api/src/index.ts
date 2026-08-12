@@ -6,6 +6,7 @@ export {
   detectProvider,
   detectProviderFromEnv,
   findByName,
+  resolveProviderScopedBaseUrl,
 } from "./providers/registry";
 export type {
   ProviderSpec,

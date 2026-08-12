@@ -63,13 +63,7 @@ async function runChannelsServe(): Promise<void> {
     return;
   }
 
-  // 引擎组装复用 agent-runtime 的默认 composition root。
-  const { SkillRegistry } = await import("@openharness/skills");
-  const { CredentialStorage } = await import("@openharness/auth");
-  const { createOpenHarnessRuntime } = await import("@openharness/agent-runtime");
-  const { loadSkillsThreeSources } = await import("./main");
-  const skillRegistry = new SkillRegistry();
-  await loadSkillsThreeSources(skillRegistry, process.cwd(), settings);
+  const { createOpenHarnessAgent } = await import("@openharness/agent-runtime");
   // 无头模式 ask 无人确认会全拒——放行只读工具让"看"可用,写/Bash 仍拒。
   // 比 swarm 的 READ_ONLY_TOOLS 再剔除 WebFetch/WebSearch:远程通道语境下
   // Read+WebFetch 构成"读本地文件→出站外带"链(且 WebFetch 可打内网)。
@@ -79,11 +73,9 @@ async function runChannelsServe(): Promise<void> {
   //   (t) => t !== "WebFetch" && t !== "WebSearch",
   // );
   const channelSafeTools = [...READ_ONLY_TOOLS];
-  const bundle = await createOpenHarnessRuntime({
+  const agent = await createOpenHarnessAgent({
     settings,
-    overrides: { autoApproveTools: channelSafeTools },
-    skillRegistry,
-    credentialStorage: new CredentialStorage(),
+    autoApproveTools: channelSafeTools,
   });
 
   const { MessageBus, ChannelManager, ChannelBridge } = await import("@openharness/channels");
@@ -95,51 +87,64 @@ async function runChannelsServe(): Promise<void> {
     onWarning: (w) => console.warn(`[channels] ${w}`),
   });
   const bridge = new ChannelBridge({
-    engine: bundle.queryEngine,
+    agent,
     bus,
     onWarning: (w) => console.warn(`[channels] ${w}`),
   });
 
-  bridge.start();
-  await manager.startAll();
+  let removeSignalHandlers = () => {};
+  try {
+    bridge.start();
+    await manager.startAll();
 
-  const status = manager.getStatus();
-  for (const [name, s] of Object.entries(status)) {
-    console.log(
-      `[channels] ${name}: ${s.running ? "running" : `failed${s.lastError ? ` (${s.lastError})` : ""}`}`,
-    );
-  }
-  if (Object.values(status).every((s) => !s.running)) {
-    console.error("[channels] 所有通道启动失败，退出。");
-    // manager 也要停:出站分发循环已启动,半连接 adapter(如 lark WS 重连
-    // 定时器)不清理会让进程挂着不退。
-    await bridge.stop();
-    await manager.stopAll();
-    process.exitCode = 1;
-    return;
-  }
-  console.log("[channels] 桥接已就绪，Ctrl+C 退出。");
+    const status = manager.getStatus();
+    for (const [name, s] of Object.entries(status)) {
+      console.log(
+        `[channels] ${name}: ${s.running ? "running" : `failed${s.lastError ? ` (${s.lastError})` : ""}`}`,
+      );
+    }
+    if (Object.values(status).every((s) => !s.running)) {
+      console.error("[channels] 所有通道启动失败，退出。");
+      process.exitCode = 1;
+      return;
+    }
+    console.log("[channels] 桥接已就绪，Ctrl+C 退出。");
 
-  await new Promise<void>((resolve) => {
-    let stopping = false;
-    const shutdown = () => {
-      if (stopping) {
-        // bridge.stop 不打断 in-flight 的引擎流(与 Python task.cancel 的
-        // 已记录差异)——引擎卡死时给用户强退逃生口。
-        console.error("\n[channels] 强制退出。");
-        process.exit(130);
-      }
-      stopping = true;
-      console.log("\n[channels] 正在停止…(再按一次 Ctrl+C 强制退出)");
-      void (async () => {
-        await bridge.stop();
-        await manager.stopAll();
+    await new Promise<void>((resolve) => {
+      let stopping = false;
+      const shutdown = () => {
+        if (stopping) {
+          console.error("\n[channels] 强制退出。");
+          process.exit(130);
+        }
+        stopping = true;
+        console.log("\n[channels] 正在停止…(再按一次 Ctrl+C 强制退出)");
         resolve();
-      })();
-    };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
-  });
+      };
+      removeSignalHandlers = () => {
+        process.off("SIGINT", shutdown);
+        process.off("SIGTERM", shutdown);
+      };
+      process.on("SIGINT", shutdown);
+      process.on("SIGTERM", shutdown);
+    });
+  } finally {
+    const failures: unknown[] = [];
+    for (const cleanup of [
+      () => bridge.stop(),
+      () => manager.stopAll(),
+      () => agent.close(),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    removeSignalHandlers();
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "Channel shutdown failed");
+  }
 }
 
 export function createChannelsCommand(): Command {
@@ -147,7 +152,7 @@ export function createChannelsCommand(): Command {
 
   cmd
     .command("serve")
-    .description("Start enabled channels and bridge them to the engine (long-running)")
+    .description("Start enabled channels and bridge them to the agent (long-running)")
     .action(async () => {
       await runChannelsServe();
     });

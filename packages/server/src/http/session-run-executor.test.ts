@@ -13,7 +13,7 @@ describe("SessionRunExecutor", () => {
       store: store as any,
       agentPool: {
         configured: true,
-        acquire: vi.fn(async () => agent),
+        acquireSession: vi.fn(async () => agent),
         close: vi.fn(async () => {}),
       } as any,
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
@@ -46,7 +46,7 @@ describe("SessionRunExecutor", () => {
       store: store as any,
       agentPool: {
         configured: true,
-        acquire: vi.fn(async () => { throw new Error("agent failed"); }),
+        acquireSession: vi.fn(async () => { throw new Error("agent failed"); }),
         close,
       } as any,
       events: { checkpoint: () => 7, publishSince },
@@ -65,6 +65,35 @@ describe("SessionRunExecutor", () => {
     expect(store.updateRun).toHaveBeenCalledWith("run-1", { status: "failed", error: "agent failed" });
     expect(publishSince).toHaveBeenCalledWith(7);
   });
+
+  it("terminalizes the durable run even when failed-agent cleanup also fails", async () => {
+    const store = createStore();
+    const closeError = new Error("close failed");
+    const log = vi.fn();
+    const executor = new SessionRunExecutor({
+      store: store as any,
+      agentPool: {
+        configured: true,
+        acquireSession: vi.fn(async () => { throw new Error("agent failed"); }),
+        close: vi.fn(async () => { throw closeError; }),
+      } as any,
+      events: { checkpoint: () => 3, publishSince: vi.fn() },
+      transcriptProjection: { finalizeRunParts: vi.fn() },
+      traceIdForRun: () => "trace-1",
+      log,
+    });
+
+    await executor.execute(
+      { sessionId: "s1", inputId: "input-1", runId: "run-1" },
+      { signal: new AbortController().signal, registerHandle: vi.fn() },
+    );
+
+    expect(store.updateRun).toHaveBeenCalledWith("run-1", { status: "failed", error: "agent failed" });
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({
+      event: "session.agent.cleanup_failed",
+      error: "close failed",
+    }));
+  });
 });
 
 function createStore() {
@@ -80,8 +109,6 @@ function createStore() {
       metadata: { requestedBy: "test", traceId: "trace-1" },
     })),
     getRun: vi.fn(() => run),
-    listMessages: vi.fn(() => []),
-    listMessageParts: vi.fn(() => []),
     appendEvent: vi.fn(),
     updateRun: vi.fn((id, update) => Object.assign(run, update, { id })),
   };

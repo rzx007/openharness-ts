@@ -118,10 +118,9 @@ const server = new OpenHarnessHttpServer({
   storePath: ${JSON.stringify(join(dir, "sessions.db"))},
   logger: () => {},
   async createAgent({ session, options: agentOptions }) {
-    let listener;
     let sequence = 0;
     const publish = async (event, context) => {
-      await listener?.({
+      await agentOptions.onEvent?.({
         ...event,
         id: \`fixture-event-\${++sequence}\`,
         sequence,
@@ -131,12 +130,8 @@ const server = new OpenHarnessHttpServer({
     };
     return {
       id: session.id,
-      events: {
-        subscribe(next) {
-          listener = next;
-          return { unsubscribe() { if (listener === next) listener = undefined; } };
-        },
-      },
+      state: "idle",
+      subscribe() { return () => {}; },
       children: { get() {}, getBySessionId() {}, list() { return []; } },
       submitMessage(content, options) {
         if (content !== "please edit") {
@@ -150,7 +145,7 @@ const server = new OpenHarnessHttpServer({
           const request = { toolName: "Write", reason: "exercise TUI permission flow", input: { path: "README.md" } };
           const requestId = \`permission-\${sequence + 1}\`;
           await publish({ type: "permission.requested", data: { requestId, request } }, context);
-          const decision = await agentOptions.effects.requestPermission(request, {
+          const decision = await agentOptions.requestPermission(request, {
             ...context,
             cwd: session.cwd,
             signal: new AbortController().signal,
@@ -166,6 +161,7 @@ const server = new OpenHarnessHttpServer({
           inputId: ids.inputId,
           sessionId: session.id,
           traceId: ids.traceId,
+          started: Promise.resolve({ sessionId: session.id, inputId: ids.inputId, runId: ids.runId }),
           result,
           async steer() { throw new Error("steer is not used in this fixture"); },
           async interrupt() { await result.catch(() => {}); },

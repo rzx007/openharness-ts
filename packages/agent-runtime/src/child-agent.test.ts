@@ -6,6 +6,38 @@ import { AgentChildManager, AgentChildRegistry } from "./child-agent.js";
 import { AgentEventBus } from "./event-source.js";
 
 describe("AgentChildManager", () => {
+  it("inherits root configuration unless the child explicitly overrides it", async () => {
+    const createAgent = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("done"))));
+    const manager = createManager(
+      new AgentEventBus(),
+      createAgent,
+      undefined,
+      undefined,
+      false,
+      {
+        model: "root-model",
+        systemPrompt: "root prompt",
+        permissionMode: "plan",
+        maxTurns: 9,
+      },
+    );
+
+    await manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+
+    expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
+      model: "root-model",
+      systemPrompt: "root prompt",
+      permissionMode: "plan",
+      maxTurns: 9,
+    });
+    await manager.closeAll();
+  });
+
   it("owns child identity, execution, events and live directory", async () => {
     const bus = new AgentEventBus();
     const eventTypes: string[] = [];
@@ -370,8 +402,7 @@ describe("AgentChildManager", () => {
   });
 
   it("surfaces required child.closed delivery failures and still removes the handle", async () => {
-    const bus = new AgentEventBus();
-    bus.subscribe((event) => {
+    const bus = new AgentEventBus((event) => {
       if (event.type === "child.closed") throw new Error("projection unavailable");
     });
     const manager = createManager(bus, async () => fakeAgent(vi.fn(() => completedRun("done"))));
@@ -385,6 +416,76 @@ describe("AgentChildManager", () => {
 
     await expect(manager.closeAll()).rejects.toThrow("projection unavailable");
     expect(manager.list()).toEqual([]);
+  });
+
+  it("finishes child cleanup when run interruption fails", async () => {
+    const interruptError = new Error("interrupt failed");
+    const close = vi.fn(async () => {});
+    const run = runHandle(new Promise<AgentRunResult>(() => {}), vi.fn(), vi.fn(async () => {
+      throw interruptError;
+    }));
+    const manager = createManager(new AgentEventBus(), async () => fakeAgent(vi.fn(() => run), close));
+    const invocation = await manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+
+    await expect(manager.close(invocation.id)).rejects.toBe(interruptError);
+    expect(close).toHaveBeenCalledOnce();
+    expect(manager.list()).toEqual([]);
+  });
+
+  it("reports agent cleanup failure after releasing the child handle", async () => {
+    const closeError = new Error("agent close failed");
+    const events: string[] = [];
+    const bus = new AgentEventBus();
+    bus.subscribe((event) => { events.push(event.type); });
+    const manager = createManager(
+      bus,
+      async () => fakeAgent(vi.fn(() => completedRun("done")), vi.fn(async () => { throw closeError; })),
+    );
+    const invocation = await manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await invocation.result;
+
+    await expect(manager.closeAll()).rejects.toBe(closeError);
+    expect(events).toContain("child.closed");
+    expect(manager.list()).toEqual([]);
+  });
+
+  it("removes a child whose idle suspension cannot close its Agent", async () => {
+    const events: string[] = [];
+    const bus = new AgentEventBus();
+    bus.subscribe((event) => { events.push(event.type); });
+    const close = vi.fn(async () => { throw new Error("suspend close failed"); });
+    const manager = createManager(
+      bus,
+      async () => fakeAgent(vi.fn(() => completedRun("done")), close),
+      5,
+    );
+    const invocation = await manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+    });
+    await invocation.result;
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalled(), { timeout: 3_000 });
+    await vi.waitFor(() => expect(manager.list()).toEqual([]), { timeout: 3_000 });
+    expect(events).not.toContain("child.suspended");
+    expect(events).toContain("child.closed");
+    const failure = await manager.closeAll().catch((error) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toHaveLength(2);
+    expect((failure as AggregateError).errors.every((error) => error.message === "suspend close failed")).toBe(true);
+    await expect(manager.closeAll()).resolves.toBeUndefined();
   });
 
   it("bounds settled child input idempotency history", async () => {
@@ -420,9 +521,11 @@ function createManager(
   idleTtlMs?: number,
   directory?: AgentChildRegistry,
   preserveRunIdentity = false,
+  configuration: Record<string, unknown> = {},
 ) {
   return new AgentChildManager({
     settings: {} as any,
+    configuration,
     cwd: "/repo",
     eventBus: bus,
     idleTtlMs,

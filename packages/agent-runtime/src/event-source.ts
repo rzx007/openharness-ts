@@ -17,20 +17,16 @@ export class AgentEventDeliveryError extends Error {
 }
 
 export class AgentEventBus implements AgentEventSource {
-  private listener?: AgentEventListener;
+  private readonly listeners = new Set<AgentEventListener>();
   private sequence = 0;
   private delivery: Promise<void> = Promise.resolve();
 
+  constructor(private readonly sink?: AgentEventListener) {}
+
   subscribe(listener: AgentEventListener): AgentEventSubscription {
-    if (this.listener) throw new Error("OpenHarnessAgent already has a required event subscriber");
-    this.listener = listener;
-    let active = true;
-    return {
-      unsubscribe: () => {
-        if (!active) return;
-        active = false;
-        if (this.listener === listener) this.listener = undefined;
-      },
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
     };
   }
 
@@ -42,14 +38,20 @@ export class AgentEventBus implements AgentEventSource {
       occurredAt: new Date().toISOString(),
       context,
     } as AgentEvent;
-    const listener = this.listener;
-    if (!listener) return event;
-
     const delivered = this.delivery.then(async () => {
-      try {
-        await listener(event);
-      } catch (error) {
-        throw new AgentEventDeliveryError(error);
+      if (this.sink) {
+        try {
+          await this.sink(event);
+        } catch (error) {
+          throw new AgentEventDeliveryError(error);
+        }
+      }
+      for (const listener of [...this.listeners]) {
+        try {
+          void Promise.resolve(listener(event)).catch(() => {});
+        } catch {
+          // Observers cannot change execution outcome. Use onEvent for reliable host delivery.
+        }
       }
     });
     this.delivery = delivered.catch(() => {});

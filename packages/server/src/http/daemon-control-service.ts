@@ -81,9 +81,20 @@ export class DaemonControlService {
 
   async shutdown(): Promise<void> {
     await this.context.operationGate.beginShutdown();
-    await this.context.runEngine.stopAndDrain();
-    await this.context.agentPool.closeAll();
-    this.context.operationGate.markClosed();
+    const failures: unknown[] = [];
+    try {
+      await this.context.runEngine.stopAndDrain();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await this.context.agentPool.closeAll();
+    } catch (error) {
+      failures.push(error);
+    } finally {
+      this.context.operationGate.markClosed();
+    }
+    throwFailures(failures, "Daemon shutdown failed");
   }
 
   sessionExists(sessionId: string): boolean {
@@ -101,4 +112,9 @@ export class DaemonControlService {
       lease.release();
     }
   }
+}
+
+function throwFailures(failures: unknown[], message: string): void {
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, message);
 }

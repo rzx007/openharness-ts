@@ -5,7 +5,8 @@ import type {
   AgentEffects,
   AgentEventContext,
   AgentEventInput,
-  AgentEventSource,
+  AgentEventListener,
+  AgentEventSubscription,
   AgentExecutionContext,
   AgentInputReceipt,
   AgentRunHandle,
@@ -31,8 +32,8 @@ import { McpClientManager, type McpConnection } from "@openharness/mcp";
 
 import {
   createOpenHarnessRuntime,
-  type OpenHarnessRuntimeOverrides,
 } from "./default-runtime.js";
+import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import {
   configureDiscoveredExtensions,
   discoverOpenHarnessExtensions,
@@ -50,15 +51,16 @@ import {
 } from "./child-agent.js";
 import { AgentEventBus, AgentEventDeliveryError } from "./event-source.js";
 
-export interface OpenHarnessAgentOptions {
+export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
   settings?: Settings;
   cwd?: string;
   sessionId?: string;
-  overrides?: OpenHarnessRuntimeOverrides;
   mcpServers?: Settings["mcpServers"];
   extensions?: OpenHarnessAgentExtension[];
   childIdleTtlMs?: number;
-  effects?: Partial<AgentEffects>;
+  requestPermission?: AgentEffects["requestPermission"];
+  /** Reliable ordered host sink. A rejection fails the active framework operation. */
+  onEvent?: AgentEventListener;
   childEnvironment?: AgentChildEnvironmentProvider;
 }
 
@@ -123,8 +125,9 @@ export interface AgentInspection {
 export interface OpenHarnessAgent {
   readonly id: string;
   readonly state: OpenHarnessAgentState;
-  readonly events: AgentEventSource;
   readonly children: AgentChildDirectory;
+  /** Subscribe to ordered observations. Observer failures never fail agent execution. */
+  subscribe(listener: AgentEventListener): AgentEventSubscription;
   submitMessage(content: string | ContentBlock[], options?: OpenHarnessAgentSubmitOptions): AgentRunHandle;
   runMessage(content: string | ContentBlock[], options?: OpenHarnessAgentSubmitOptions): Promise<AgentRunResult>;
   getHistory(): Message[];
@@ -165,8 +168,8 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     return this.lifecycleState;
   }
 
-  get events(): AgentEventSource {
-    return this.eventBus;
+  subscribe(listener: AgentEventListener): AgentEventSubscription {
+    return this.eventBus.subscribe(listener);
   }
 
   submitMessage(
@@ -272,15 +275,26 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     if (this.lifecycleState === "closed") return Promise.resolve();
     this.lifecycleState = "closing";
     const closing = (async () => {
+      const failures: unknown[] = [];
       try {
-        await this.activeRun?.interrupt("Agent closed");
-        await this.maintenance?.settled;
-        await this.childManager.closeAll();
-        await this.eventBus.drain();
-        await this.runtime.close();
+        for (const cleanup of [
+          () => this.activeRun?.interrupt("Agent closed") ?? Promise.resolve(),
+          () => this.maintenance?.settled ?? Promise.resolve(),
+          () => this.childManager.closeAll(),
+          () => this.eventBus.drain(),
+          () => this.runtime.close(),
+        ]) {
+          try {
+            await cleanup();
+          } catch (error) {
+            failures.push(error);
+          }
+        }
       } finally {
         this.lifecycleState = "closed";
       }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) throw new AggregateError(failures, `Agent cleanup failed: ${this.id}`);
     })();
     this.closePromise = closing;
     return closing;
@@ -532,9 +546,9 @@ class FrameworkAgentRun implements AgentRunHandle {
 export async function createOpenHarnessAgent(
   options: OpenHarnessAgentOptions = {},
 ): Promise<OpenHarnessAgent> {
-  const eventBus = new AgentEventBus();
+  const eventBus = new AgentEventBus(options.onEvent);
   const effects: AgentEffects = {
-    requestPermission: options.effects?.requestPermission ?? (async () => ({
+    requestPermission: options.requestPermission ?? (async () => ({
       status: "denied",
       reason: "No permission effect configured",
     })),
@@ -558,7 +572,7 @@ async function createOpenHarnessAgentInternal(
     settings,
     cwd,
     sessionId: options.sessionId,
-    overrides: options.overrides,
+    configuration: options,
     skillRegistry: discovery.skillRegistry,
   });
   try {
@@ -590,6 +604,7 @@ async function createOpenHarnessAgentInternal(
     const session = createAgentSession({ queryEngine: runtime.queryEngine, sessionId: options.sessionId });
     const children = new AgentChildManager({
       settings,
+      configuration: options,
       cwd,
       idleTtlMs: options.childIdleTtlMs,
       eventBus: internal.eventBus,
@@ -612,10 +627,14 @@ async function createOpenHarnessAgentInternal(
       internal.identity,
       children,
       internal.childDirectory,
-      options.overrides?.model ?? settings.model,
+      options.model ?? settings.model,
     );
   } catch (error) {
-    await runtime.close();
+    try {
+      await runtime.close();
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Agent creation and cleanup failed");
+    }
     throw error;
   }
 }

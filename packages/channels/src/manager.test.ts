@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { MessageBus, type OutboundMessage } from "./bus/queue.js";
 import { ChannelManager } from "./manager.js";
-import { ChannelBridge, type BridgeEngine } from "./bridge.js";
+import { ChannelBridge, type BridgeAgent } from "./bridge.js";
 import type { ChannelAdapter, ChannelMessage } from "./index.js";
 
 /** 可注入收发的假 adapter。 */
@@ -176,20 +176,22 @@ describe("ChannelManager", () => {
 });
 
 describe("ChannelBridge", () => {
-  function makeEngine(deltas: string[], opts: { fail?: boolean } = {}): BridgeEngine {
+  function makeAgent(parts: string[], opts: { fail?: boolean } = {}): BridgeAgent {
     return {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      async *submitMessage() {
-        if (opts.fail) throw new Error("engine down");
-        for (const d of deltas) yield { type: "text_delta" as const, delta: d };
-        yield { type: "complete" as const, stopReason: "end_turn" };
+      submitMessage() {
+        return {
+          result: opts.fail
+            ? Promise.reject(new Error("engine down"))
+            : Promise.resolve({ output: parts.join("") }),
+          interrupt: async () => {},
+        };
       },
     };
   }
 
-  it("消费 inbound,聚合 text_delta,发布 outbound", async () => {
+  it("消费 inbound 并把 agent 输出发布到 outbound", async () => {
     const bus = new MessageBus();
-    const bridge = new ChannelBridge({ engine: makeEngine(["he", "llo"]), bus });
+    const bridge = new ChannelBridge({ agent: makeAgent(["he", "llo"]), bus });
     bridge.start();
     bus.publishInbound({
       channel: "t",
@@ -208,9 +210,9 @@ describe("ChannelBridge", () => {
     await bridge.stop();
   });
 
-  it("引擎抛错回复对齐 Python 的错误文案", async () => {
+  it("agent 抛错回复对齐 Python 的错误文案", async () => {
     const bus = new MessageBus();
-    const bridge = new ChannelBridge({ engine: makeEngine([], { fail: true }), bus });
+    const bridge = new ChannelBridge({ agent: makeAgent([], { fail: true }), bus });
     bridge.start();
     bus.publishInbound({
       channel: "t",
@@ -228,9 +230,9 @@ describe("ChannelBridge", () => {
 
   it("空回复不发布", async () => {
     const bus = new MessageBus();
-    const engine = makeEngine(["  ", ""]);
+    const agent = makeAgent(["  ", ""]);
     const spy = vi.spyOn(bus, "publishOutbound");
-    const bridge = new ChannelBridge({ engine, bus });
+    const bridge = new ChannelBridge({ agent, bus });
     bridge.start();
     bus.publishInbound({
       channel: "t",
@@ -251,14 +253,17 @@ describe("ChannelBridge", () => {
   it("单条处理抛错不杀循环,经 onWarning 上报", async () => {
     const bus = new MessageBus();
     const warnings: string[] = [];
-    const engine: BridgeEngine = {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      async *submitMessage(content: string) {
-        if (content === "boom") throw new Error("engine down");
-        yield { type: "text_delta" as const, delta: "ok" };
+    const agent: BridgeAgent = {
+      submitMessage(content: string) {
+        return {
+          result: content === "boom"
+            ? Promise.reject(new Error("engine down"))
+            : Promise.resolve({ output: "ok" }),
+          interrupt: async () => {},
+        };
       },
     };
-    const bridge = new ChannelBridge({ engine, bus, onWarning: (w) => warnings.push(w) });
+    const bridge = new ChannelBridge({ agent, bus, onWarning: (w) => warnings.push(w) });
     bridge.start();
     const base = {
       channel: "t",
@@ -280,7 +285,7 @@ describe("ChannelBridge", () => {
 
   it("stop 后不再消费", async () => {
     const bus = new MessageBus();
-    const bridge = new ChannelBridge({ engine: makeEngine(["x"]), bus });
+    const bridge = new ChannelBridge({ agent: makeAgent(["x"]), bus });
     bridge.start();
     await bridge.stop();
     bus.publishInbound({
@@ -294,5 +299,64 @@ describe("ChannelBridge", () => {
     });
     await tick();
     expect(bus.inboundSize).toBe(1); // 无人消费
+  });
+
+  it("stop 会中断正在执行的 agent run", async () => {
+    const bus = new MessageBus();
+    let settle!: (value: { output: string }) => void;
+    const result = new Promise<{ output: string }>((resolve) => { settle = resolve; });
+    const interrupt = vi.fn(async () => { settle({ output: "" }); });
+    const agent: BridgeAgent = {
+      submitMessage: () => ({ result, interrupt }),
+    };
+    const bridge = new ChannelBridge({ agent, bus });
+    bridge.start();
+    bus.publishInbound({
+      channel: "t",
+      senderId: "u1",
+      chatId: "c1",
+      content: "hi",
+      timestamp: new Date(0),
+      media: [],
+      metadata: {},
+    });
+    await tick();
+
+    await bridge.stop();
+
+    expect(interrupt).toHaveBeenCalledWith("Channel bridge stopped");
+  });
+
+  it("interrupt 失败时仍完成 bridge 生命周期清理", async () => {
+    const bus = new MessageBus();
+    let settle!: (value: { output: string }) => void;
+    const result = new Promise<{ output: string }>((resolve) => { settle = resolve; });
+    const failure = new Error("interrupt failed");
+    const agent: BridgeAgent = {
+      submitMessage: () => ({
+        result,
+        interrupt: async () => {
+          settle({ output: "" });
+          throw failure;
+        },
+      }),
+    };
+    const bridge = new ChannelBridge({ agent, bus });
+    bridge.start();
+    bus.publishInbound({
+      channel: "t",
+      senderId: "u1",
+      chatId: "c1",
+      content: "hi",
+      timestamp: new Date(0),
+      media: [],
+      metadata: {},
+    });
+    await tick();
+
+    await expect(bridge.stop()).rejects.toBe(failure);
+    bridge.start();
+    settle({ output: "" });
+    await expect(bridge.stop()).resolves.toBeUndefined();
   });
 });

@@ -370,3 +370,13 @@ export function detectProviderFromEnv(
   }
   return undefined;
 }
+
+export function resolveProviderScopedBaseUrl(
+  baseURL: string | undefined,
+  providerName: string | undefined,
+): string | undefined {
+  if (!baseURL || !providerName) return baseURL;
+  const detected = detectProvider("", undefined, baseURL);
+  if (detected && detected.name !== providerName) return undefined;
+  return baseURL;
+}

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AgentRunNotAcceptingInputError, type Settings } from "@openharness/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentOperationConflictError, createOpenHarnessAgent } from "./agent.js";
 
@@ -29,7 +29,7 @@ describe("createOpenHarnessAgent", () => {
     const agent = await createOpenHarnessAgent({ cwd, settings });
 
     expect(agent.id).toMatch(/^agent_session_/);
-    expect(agent.events.subscribe).toBeTypeOf("function");
+    expect(agent.subscribe).toBeTypeOf("function");
     expect(agent.children.list()).toEqual([]);
     expect(agent.getHistory()).toEqual([]);
     expect(agent.inspect().tools.length).toBeGreaterThan(0);
@@ -75,15 +75,18 @@ describe("createOpenHarnessAgent", () => {
       permission: { mode: "default" },
       sandbox: { enabled: false },
     };
-    const agent = await createOpenHarnessAgent({ cwd, settings });
+    const agent = await createOpenHarnessAgent({
+      cwd,
+      settings,
+      onEvent: (event) => {
+        if (event.type === "input.accepted" && event.context.inputId === "input-steer-2") {
+          throw new Error("second projection failed");
+        }
+      },
+    });
     (agent as any).runtime.apiClient.streamMessage = async function* () {
       yield { type: "complete", stopReason: "end_turn" };
     };
-    agent.events.subscribe((event) => {
-      if (event.type === "input.accepted" && event.context.inputId === "input-steer-2") {
-        throw new Error("second projection failed");
-      }
-    });
 
     const run = agent.submitMessage("hello", {
       ids: { inputId: "input-root", runId: "run-root", traceId: "trace-root" },
@@ -137,5 +140,62 @@ describe("createOpenHarnessAgent", () => {
     await closing;
     expect(agent.state).toBe("closed");
     expect(() => agent.submitMessage("after close")).toThrow(AgentOperationConflictError);
+  });
+
+  it("attempts every cleanup stage and reports failures after becoming closed", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
+    tempDirs.push(cwd);
+    const agent = await createOpenHarnessAgent({
+      cwd,
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "claude-test",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+        memory: { enabled: false },
+      },
+    });
+    const childError = new Error("child cleanup failed");
+    (agent as any).childManager.closeAll = async () => { throw childError; };
+    const runtimeClose = vi.spyOn((agent as any).runtime, "close");
+
+    await expect(agent.close()).rejects.toBe(childError);
+    expect(runtimeClose).toHaveBeenCalledOnce();
+    expect(agent.state).toBe("closed");
+  });
+
+  it("aggregates multiple cleanup failures in lifecycle order", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
+    tempDirs.push(cwd);
+    const agent = await createOpenHarnessAgent({
+      cwd,
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "claude-test",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+        memory: { enabled: false },
+      },
+    });
+    const childError = new Error("child cleanup failed");
+    const eventError = new Error("event drain failed");
+    const runtimeError = new Error("runtime cleanup failed");
+    (agent as any).childManager.closeAll = vi.fn(async () => { throw childError; });
+    (agent as any).eventBus.drain = vi.fn(async () => { throw eventError; });
+    (agent as any).runtime.close = vi.fn(async () => { throw runtimeError; });
+
+    const closing = agent.close();
+    const failure = await closing.catch((error) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([childError, eventError, runtimeError]);
+    expect(await agent.close().catch((error) => error)).toBe(failure);
+    expect((agent as any).childManager.closeAll).toHaveBeenCalledOnce();
+    expect((agent as any).eventBus.drain).toHaveBeenCalledOnce();
+    expect((agent as any).runtime.close).toHaveBeenCalledOnce();
+    expect(agent.state).toBe("closed");
   });
 });

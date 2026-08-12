@@ -1,0 +1,125 @@
+import {
+  createOpenHarnessAgent,
+  type OpenHarnessAgent,
+  type OpenHarnessAgentOptions,
+} from "@openharness/agent-runtime";
+import type { AgentEffects, AgentEventListener, Settings } from "@openharness/core";
+import type {
+  SessionMessagePartRecord,
+  SessionMessageRecord,
+  SessionRecord,
+} from "@openharness/services/session-runtime/types";
+
+import { transcriptToAgentMessages } from "./http/agent-transcript.js";
+
+export interface CreateDaemonAgentContext {
+  session: SessionRecord;
+  history: SessionMessageRecord[];
+  parts: SessionMessagePartRecord[];
+  options: OpenHarnessAgentOptions;
+}
+
+/** Low-level creation seam used by tests and embedded hosts. */
+export type CreateDaemonAgent = (context: CreateDaemonAgentContext) => Promise<OpenHarnessAgent>;
+
+export interface LoadDaemonAgentContext {
+  session: SessionRecord;
+  history: SessionMessageRecord[];
+  parts: SessionMessagePartRecord[];
+}
+
+/** Produces a fully initialized daemon-owned Agent for one durable session. */
+export type LoadDaemonAgent = (context: LoadDaemonAgentContext) => Promise<OpenHarnessAgent>;
+
+export interface DaemonAgentLoaderOptions {
+  settings?: Settings;
+  getSettings?: () => Settings;
+  createAgent?: CreateDaemonAgent;
+  requestPermission?: AgentEffects["requestPermission"];
+  createEventSink?(agent: OpenHarnessAgent, session: SessionRecord): AgentEventListener;
+}
+
+/**
+ * Owns the only durable-session -> live-Agent translation in the daemon.
+ * The returned loader also restores transcript history before exposing the Agent.
+ */
+export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): LoadDaemonAgent | undefined {
+  if (!options.createAgent && !options.settings && !options.getSettings) return undefined;
+
+  return async ({ session, history, parts }) => {
+    const settings = options.getSettings?.() ?? options.settings;
+    if (!options.createAgent && !settings) throw new Error("Agent settings are not configured");
+
+    let eventSink: AgentEventListener | undefined;
+    let sinkBinding: Promise<void> | undefined;
+    const pendingEvents: Parameters<AgentEventListener>[0][] = [];
+    const agentOptions: OpenHarnessAgentOptions = {
+      ...(settings ? { settings } : {}),
+      cwd: session.cwd,
+      sessionId: session.id,
+      ...agentConfigurationFromSession(session),
+      ...(options.requestPermission ? { requestPermission: options.requestPermission } : {}),
+      ...(options.createEventSink
+        ? {
+            onEvent: async (event) => {
+              if (!eventSink) {
+                pendingEvents.push(event);
+                return;
+              }
+              await sinkBinding;
+              await eventSink(event);
+            },
+          }
+        : {}),
+    };
+    const agent = options.createAgent
+      ? await options.createAgent({ session, history, parts, options: agentOptions })
+      : await createOpenHarnessAgent(agentOptions);
+    try {
+      agent.loadHistory(transcriptToAgentMessages(history, parts));
+      eventSink = options.createEventSink?.(agent, session);
+      if (eventSink && pendingEvents.length > 0) {
+        const sink = eventSink;
+        sinkBinding = (async () => {
+          for (const event of pendingEvents) await sink(event);
+          pendingEvents.length = 0;
+        })();
+        await sinkBinding;
+        sinkBinding = undefined;
+      }
+      return agent;
+    } catch (error) {
+      try {
+        await agent.close();
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `Daemon Agent initialization and cleanup failed: ${session.id}`,
+        );
+      }
+      throw error;
+    }
+  };
+}
+
+function agentConfigurationFromSession(session: SessionRecord): Partial<OpenHarnessAgentOptions> {
+  const permissionMode = session.metadata.permissionMode;
+  const effort = session.metadata.effort;
+  return {
+    model: session.model || undefined,
+    permissionMode: permissionMode === "default" || permissionMode === "plan" || permissionMode === "full_auto"
+      ? permissionMode
+      : undefined,
+    systemPrompt: typeof session.metadata.systemPrompt === "string"
+      ? session.metadata.systemPrompt
+      : undefined,
+    maxTurns: typeof session.metadata.maxTurns === "number" ? session.metadata.maxTurns : undefined,
+    allowedTools: Array.isArray(session.metadata.allowedTools)
+      ? session.metadata.allowedTools.filter((tool): tool is string => typeof tool === "string")
+      : undefined,
+    disallowedTools: Array.isArray(session.metadata.disallowedTools)
+      ? session.metadata.disallowedTools.filter((tool): tool is string => typeof tool === "string")
+      : undefined,
+    effort: effort === "low" || effort === "medium" || effort === "high" ? effort : undefined,
+  };
+}
