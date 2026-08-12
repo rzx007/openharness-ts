@@ -39,7 +39,9 @@ TUI / print / Web 请求
 
 ## 运行快照
 
-`GET /health` 与 `GET /debug/runtime` 都需要 daemon bearer token。前者适合 CLI、远程 attach 和存活探测，返回版本、启动时间、运行时长、session 总数以及内存 coordinator 的 active/queued run 数量。
+`GET /health` 不需要 daemon bearer token，适合 CLI、系统健康检查和远程存活探测；它只返回版本、启动时间、运行时长、session 总数以及内存 coordinator 的 active/queued run 数量。
+
+`GET /debug/runtime` 需要 daemon bearer token，面向人工排障使用。
 
 `GET /debug/runtime` 用于人工诊断，额外返回 session/run/task/permission 的状态计数、SSE attach 数、warm runtime 数和 coordinator 队列计数。它不返回 store 路径、session 内容、工具参数/结果或认证信息，因此可以作为未来 Desktop/Web 状态页的只读数据源。
 

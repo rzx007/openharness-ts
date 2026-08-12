@@ -31,7 +31,6 @@ export async function probeDaemonRegistry(
   try {
     const fetchImpl = options.fetch ?? fetch;
     const response = await fetchImpl(`${registry.url.replace(/\/+$/, "")}/health`, {
-      headers: { authorization: `Bearer ${registry.token}` },
       signal: controller.signal,
     });
     if (!response.ok) return "unreachable";

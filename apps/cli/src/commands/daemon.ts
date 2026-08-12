@@ -36,6 +36,10 @@ export function assertSafeDaemonBinding(options: Pick<ServeOptions, "host" | "to
   }
 }
 
+export function daemonHealthUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/health`;
+}
+
 async function runServe(options: ServeOptions): Promise<void> {
   const {
     clearDaemonRegistry,
@@ -274,7 +278,7 @@ export function createDaemonCommand(): Command {
         ...(entry ? { minimumStartedAt: statSync(entry).mtimeMs } : {}),
       });
       console.log(`Daemon: ${probe} (PID: ${registry.pid})`);
-      console.log(`URL: ${registry.url}`);
+      console.log(`URL: ${daemonHealthUrl(registry.url)}`);
       console.log(`Store: ${registry.storePath}`);
       console.log(`Version: ${registry.version}`);
     });

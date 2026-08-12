@@ -521,10 +521,9 @@ describe("OpenHarnessHttpServer", () => {
     expect(getDefaultSessionStorePath()).toMatch(/[\\/]session-runtime[\\/]sessions\.db$/);
   });
 
-  it("serves health and protects routes with bearer auth", async () => {
+  it("serves health without bearer auth and protects other routes", async () => {
     await withServer(async ({ baseUrl, token }) => {
-      expect((await fetch(`${baseUrl}/health`)).status).toBe(401);
-      const response = await fetch(`${baseUrl}/health`, { headers: auth(token) });
+      const response = await fetch(`${baseUrl}/health`);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
         ok: true,
@@ -675,7 +674,7 @@ describe("OpenHarnessHttpServer", () => {
   });
 
   it("permits only configured browser origins and handles unauthenticated preflight", async () => {
-    await withServer(async ({ baseUrl, token }) => {
+    await withServer(async ({ baseUrl }) => {
       const preflight = await fetch(`${baseUrl}/sessions`, {
         method: "OPTIONS",
         headers: {
@@ -689,15 +688,13 @@ describe("OpenHarnessHttpServer", () => {
       expect(preflight.headers.get("access-control-allow-headers")).toContain("authorization");
       expect(preflight.headers.get("access-control-allow-headers")).toContain("x-openharness-trace-id");
 
-      const allowed = await fetch(`${baseUrl}/health`, {
-        headers: { ...auth(token), origin: "https://desk.example" },
-      });
+      const allowed = await fetch(`${baseUrl}/health`, { headers: { origin: "https://desk.example" } });
       expect(allowed.status).toBe(200);
       expect(allowed.headers.get("access-control-allow-origin")).toBe("https://desk.example");
       expect(allowed.headers.get("access-control-expose-headers")).toContain("x-openharness-trace-id");
 
       const denied = await fetch(`${baseUrl}/health`, {
-        headers: { ...auth(token), origin: "https://untrusted.example" },
+        headers: { origin: "https://untrusted.example" },
       });
       expect(denied.status).toBe(403);
     }, { allowedOrigins: ["https://desk.example"] });

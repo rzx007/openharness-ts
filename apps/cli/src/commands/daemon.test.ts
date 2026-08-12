@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assertSafeDaemonBinding, isLoopbackHost } from "./daemon.js";
+import { assertSafeDaemonBinding, daemonHealthUrl, isLoopbackHost } from "./daemon.js";
 
 describe("daemon remote binding", () => {
   it("accepts loopback hosts without an explicit token", () => {
@@ -14,5 +14,10 @@ describe("daemon remote binding", () => {
     expect(isLoopbackHost("0.0.0.0")).toBe(false);
     expect(() => assertSafeDaemonBinding({ host: "0.0.0.0" })).toThrow(/explicit --token/);
     expect(() => assertSafeDaemonBinding({ host: "0.0.0.0", token: "shared-secret" })).not.toThrow();
+  });
+
+  it("prints the health URL for status checks", () => {
+    expect(daemonHealthUrl("http://127.0.0.1:61629")).toBe("http://127.0.0.1:61629/health");
+    expect(daemonHealthUrl("http://127.0.0.1:61629/")).toBe("http://127.0.0.1:61629/health");
   });
 });

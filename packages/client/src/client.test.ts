@@ -60,6 +60,25 @@ describe("OpenHarnessClient", () => {
     expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({ id: "s1", model: "m" });
   });
 
+  it("calls health without bearer auth", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({ ok: true });
+    };
+
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      token: "tok",
+      fetch: fetchImpl as typeof fetch,
+    });
+
+    await expect(client.health()).resolves.toMatchObject({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("http://127.0.0.1:3456/health");
+    expect(calls[0]!.init.headers).toEqual({});
+  });
+
   it("lists commands and invokes template commands", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {

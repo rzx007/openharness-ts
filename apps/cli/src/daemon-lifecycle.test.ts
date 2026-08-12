@@ -25,13 +25,18 @@ function response(body: unknown, status = 200): Response {
 
 describe("probeDaemonRegistry", () => {
   it("accepts a healthy daemon from the current build", async () => {
+    const calls: RequestInit[] = [];
     const status = await probeDaemonRegistry(registry(), {
       pidAlive: () => true,
-      fetch: async () => response({ ok: true, version: "0.1.0" }),
+      fetch: async (_url, init) => {
+        calls.push(init ?? {});
+        return response({ ok: true, version: "0.1.0" });
+      },
       expectedVersion: "0.1.0",
       minimumStartedAt: 100,
     });
     expect(status).toBe("ready");
+    expect(calls[0]?.headers).toBeUndefined();
   });
 
   it("marks a daemon started before the current CLI build as stale", async () => {

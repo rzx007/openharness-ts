@@ -120,7 +120,7 @@ export class OpenHarnessClient {
 
   /** `GET /health` */
   async health(options: { signal?: AbortSignal } = {}): Promise<OpenHarnessServerHealth> {
-    return this.request<OpenHarnessServerHealth>("/health", { signal: options.signal });
+    return this.request<OpenHarnessServerHealth>("/health", { auth: false, signal: options.signal });
   }
 
   /** `GET /commands?cwd=` — cwd-scoped slash command catalog for autocomplete. */
@@ -762,11 +762,11 @@ export class OpenHarnessClient {
 
   private async request<T>(
     path: string,
-    options: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+    options: { method?: string; body?: unknown; signal?: AbortSignal; auth?: boolean } = {},
   ): Promise<T> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: options.method ?? "GET",
-      headers: this.headers(options.body !== undefined),
+      headers: this.headers(options.body !== undefined, options.auth ?? true),
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal,
     });
@@ -774,9 +774,9 @@ export class OpenHarnessClient {
     return await response.json() as T;
   }
 
-  private headers(json = false): Record<string, string> {
+  private headers(json = false, auth = true): Record<string, string> {
     return {
-      ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      ...(auth && this.token ? { authorization: `Bearer ${this.token}` } : {}),
       ...(json ? { "content-type": "application/json" } : {}),
     };
   }

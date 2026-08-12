@@ -241,6 +241,10 @@ export class OpenHarnessHttpServer {
     });
 
     this.app.use("*", async (c, next) => {
+      if (c.req.method === "GET" && c.req.path === "/health") {
+        await next();
+        return;
+      }
       if (!this.authorized(c)) return errorResponse(401, "Unauthorized");
       await next();
     });
