@@ -623,10 +623,6 @@ export class SessionStore {
     }
 
     const timestamp = now();
-    part.text = `${part.text ?? ""}${input.delta}`;
-    part.updatedAt = timestamp;
-    message.updatedAt = timestamp;
-    session.updatedAt = timestamp;
     const event = this.appendEventInMemory({
       type: "session.message.part.delta",
       sessionId: input.sessionId,
@@ -638,6 +634,10 @@ export class SessionStore {
         delta: input.delta,
       },
     }, false);
+    part.text = `${part.text ?? ""}${input.delta}`;
+    part.updatedAt = timestamp;
+    message.updatedAt = timestamp;
+    session.updatedAt = timestamp;
     this.dirtyDeltaPartIds.add(part.id);
     this.pendingDeltaBytes += Buffer.byteLength(input.delta, "utf8");
     if (this.transactionDepth === 0) {

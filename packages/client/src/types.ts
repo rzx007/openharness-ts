@@ -345,6 +345,8 @@ export interface OpenHarnessClientState {
   buckets: Record<string, SessionBucket>;
   /** Durable replay events indexed by seq; live text deltas are not retained. */
   eventsBySeq: Record<number, SessionEventRecord>;
+  /** Highest ordered transient event seq already applied; prevents SSE reconnect replay. */
+  transientCursor: number;
   /** 当前已应用到的最大事件序号，用作 SSE cursor。 */
   lastSeq: number;
 }

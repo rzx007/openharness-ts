@@ -244,9 +244,27 @@ describe("session event reducer", () => {
     state = applyEvent(state, event(3, "session.message.created", { message: second }));
 
     expect(state.lastSeq).toBe(5);
+    expect(state.transientCursor).toBe(5);
     expect(Object.keys(state.eventsBySeq).sort()).toEqual(["2", "3", "4"]);
     expect(state.buckets.s1?.messages.map((message) => message.id)).toEqual(["m1", "m2"]);
     expect(state.buckets.s1?.partsByMessageId.m2?.[0]?.text).toBe("second");
+  });
+
+  it("does not append the same transient delta again after an SSE reconnect", () => {
+    const delta = event(5, "session.message.part.delta", {
+      sessionId: "s1",
+      messageId: "m1",
+      partId: "p1",
+      field: "text",
+      delta: "hello",
+    });
+
+    const once = applyEvent(createInitialClientState(), delta);
+    const replayed = applyEvent(once, delta);
+
+    expect(replayed).toBe(once);
+    expect(replayed.buckets.s1?.partsByMessageId.m1?.[0]?.text).toBe("hello");
+    expect(replayed.eventsBySeq[5]).toBeUndefined();
   });
 
   it("creates a placeholder part when a delta arrives before the part snapshot", () => {

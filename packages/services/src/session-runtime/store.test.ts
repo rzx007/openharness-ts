@@ -331,6 +331,31 @@ describe("SessionStore", () => {
     }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
   });
 
+  it("does not mutate live text when transient cursor allocation fails", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+      const part = store.upsertMessagePart({
+        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
+      });
+      const internals = store as any;
+      const database = internals.database as Database.Database;
+      internals.reservedEventSeq = internals.state.nextEventSeq - 1;
+      database.exec(`
+        CREATE TRIGGER fail_event_sequence_reservation BEFORE UPDATE ON session_event_sequence
+        BEGIN
+          SELECT RAISE(ABORT, 'forced sequence reservation failure');
+        END;
+      `);
+
+      expect(() => store.appendMessagePartDelta({
+        sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "ghost",
+      })).toThrow("forced sequence reservation failure");
+      expect(store.listMessageParts("s1")).toMatchObject([{ id: "p1", text: "" }]);
+      database.exec("DROP TRIGGER fail_event_sequence_reservation");
+    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+  });
+
   it("flushes grouped deltas on the timer and retries a failed checkpoint", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-timer-"));
     const path = join(dir, "store.db");
