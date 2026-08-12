@@ -113,10 +113,19 @@ async function tryRipgrepFiles(
   const args = ["--files"];
   // Surface tracked dotfiles (e.g. .github/) inside repos while still honouring
   // .gitignore, so .venv / node_modules stay excluded.
-  if (existsSync(join(basePath, ".git")) || existsSync(join(basePath, ".gitignore"))) {
+  const gitignore = join(basePath, ".gitignore");
+  if (existsSync(join(basePath, ".git")) || existsSync(gitignore)) {
     args.push("--hidden");
   }
-  args.push("--glob", pattern, ".");
+  // ripgrep only discovers .gitignore reliably when the search root belongs to
+  // a Git repository. Explicitly load a root ignore file for arbitrary roots.
+  if (existsSync(gitignore)) args.push("--ignore-file", gitignore);
+  for (const directory of SKIP_DIRS) args.push("--glob", `!${directory}/**`);
+  args.push(".");
+
+  // A positive ripgrep --glob overrides ignore files. Keep rg responsible for
+  // discovery/ignore semantics and apply the caller's include pattern here.
+  const matchesPattern = globToRegex(pattern);
 
   return new Promise<string[] | null>((resolvePromise) => {
     const files: string[] = [];
@@ -146,23 +155,22 @@ async function tryRipgrepFiles(
     const timer = setTimeout(() => {
       stopped = true;
       child.kill("SIGKILL");
-      finish(files.slice(0, limit));
     }, RG_TIMEOUT_MS);
 
     child.stdout.setEncoding("utf-8");
     child.stdout.on("data", (chunk: string) => {
+      if (stopped) return;
       buffer += chunk;
       let idx: number;
       while ((idx = buffer.indexOf("\n")) !== -1) {
         const raw = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 1);
         const line = normalizeRgPath(raw.trim());
-        if (line) files.push(line);
+        if (line && matchesPattern.test(line.replace(/\\/g, "/"))) files.push(line);
         if (files.length >= limit) {
           stopped = true;
           clearTimeout(timer);
           child.kill("SIGKILL");
-          finish(files.slice(0, limit));
           return;
         }
       }
@@ -176,9 +184,9 @@ async function tryRipgrepFiles(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (settled) return;
-      if (buffer) {
+      if (!stopped && buffer) {
         const line = normalizeRgPath(buffer.trim());
-        if (line) files.push(line);
+        if (line && matchesPattern.test(line.replace(/\\/g, "/"))) files.push(line);
       }
       if (stopped || code === 0 || code === 1 || code === null) {
         finish(files.slice(0, limit));

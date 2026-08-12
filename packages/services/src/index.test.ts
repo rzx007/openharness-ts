@@ -6,6 +6,9 @@ import { LspClient } from "./lsp/index.js";
 import { OAuthFlow } from "./oauth/index.js";
 import { TaskManager } from "./tasks/index.js";
 import type { Message } from "@openharness/core";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("CompactService", () => {
   it("returns messages unchanged when under limit", () => {
@@ -223,11 +226,16 @@ describe("TaskManager", () => {
   });
 
   it("shell task completes and produces output", async () => {
-    const mgr = new TaskManager();
-    const task = await mgr.createShellTask("echo done", "test", process.cwd());
-    await new Promise((r) => setTimeout(r, 500));
-    const output = mgr.readTaskOutput(task.id);
-    expect(output).toContain("done");
-    expect(task.status).toBe("completed");
+    const tasksDir = mkdtempSync(join(tmpdir(), "oh-services-task-"));
+    const mgr = new TaskManager(tasksDir);
+    try {
+      const task = await mgr.createShellTask("echo done", "test", process.cwd());
+      const result = await mgr.awaitTask(task.id, { timeoutMs: 5_000 });
+      expect(result.output).toContain("done");
+      expect(result.status).toBe("completed");
+    } finally {
+      mgr.close();
+      rmSync(tasksDir, { recursive: true, force: true });
+    }
   });
 });

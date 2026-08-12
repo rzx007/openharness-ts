@@ -21,6 +21,15 @@ async function waitForStatus(taskId: string, status: string, timeoutMs = 8000): 
   }
 }
 
+async function waitForOutput(taskId: string, expected: string, timeoutMs = 8000): Promise<void> {
+  const start = Date.now();
+  const mgr = getTaskManager(CWD);
+  while (!mgr.readTaskOutput(taskId).includes(expected)) {
+    if (Date.now() - start > timeoutMs) throw new Error(`task ${taskId} never produced ${expected}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 afterEach(() => {
   resetTaskManager(CWD);
   resetTaskManager({ cwd: CWD, sessionId: "session-timeout" });
@@ -136,6 +145,7 @@ describe("taskWaitTool", () => {
       "slow heartbeat task",
       CWD,
     );
+    await waitForOutput(task.id, "working");
 
     const result = await taskWaitTool.execute(
       { taskIds: [task.id], timeoutSeconds: 60, heartbeatSeconds: 0.15 },

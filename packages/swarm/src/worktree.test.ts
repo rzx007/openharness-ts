@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   WorktreeManager,
   validateWorktreeSlug,
@@ -68,7 +68,9 @@ const realRunGit: GitRunner = (args, cwd) =>
   new Promise((resolve) => {
     const child = spawn("git", args, {
       cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      // Temp directories can live inside a user-level Git worktree. Keep each
+      // fixture from discovering repositories above its own test root.
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CEILING_DIRECTORIES: dirname(cwd) },
     });
     let stdout = "";
     let stderr = "";

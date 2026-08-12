@@ -169,7 +169,6 @@ async function tryRipgrep(
     const timer = setTimeout(() => {
       killedForLimit = true;
       child.kill("SIGKILL");
-      finish(matches.slice(0, limit));
     }, 30_000);
 
     const pushLine = (line: string) => {
@@ -181,6 +180,7 @@ async function tryRipgrep(
 
     child.stdout.setEncoding("utf-8");
     child.stdout.on("data", (chunk: string) => {
+      if (killedForLimit) return;
       buffer += chunk;
       let idx: number;
       while ((idx = buffer.indexOf("\n")) !== -1) {
@@ -191,7 +191,6 @@ async function tryRipgrep(
           killedForLimit = true;
           clearTimeout(timer);
           child.kill("SIGKILL");
-          finish(matches.slice(0, limit));
           return;
         }
       }
@@ -206,7 +205,7 @@ async function tryRipgrep(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (settled) return;
-      if (buffer) pushLine(buffer);
+      if (!killedForLimit && buffer) pushLine(buffer);
       // rg: 0 = matches found, 1 = no matches. Either way the results are valid.
       // SIGKILL (null code) from our own limit/timeout handling is also fine.
       if (killedForLimit || code === 0 || code === 1 || code === null) {
