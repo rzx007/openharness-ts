@@ -16,6 +16,7 @@ import {
 } from "./daemon-process.js";
 
 const WINDOWS_TASK_NAME = "OpenHarness Daemon";
+const WINDOWS_LAUNCHER_NAME = "daemon-watchdog.vbs";
 const SERVICE_LABEL = "dev.openharness.daemon";
 const WINDOWS_REGISTER_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
@@ -124,6 +125,7 @@ export class DaemonSystemService {
     mkdirSync(this.logsDir, { recursive: true });
     if (this.platform === "win32") {
       this.stopWindowsTask();
+      const launcherPath = this.writeWindowsLauncher();
       this.checked("powershell.exe", [
         "-NoProfile",
         "-NonInteractive",
@@ -132,8 +134,8 @@ export class DaemonSystemService {
         "-Command",
         WINDOWS_REGISTER_SCRIPT,
       ], {
-        OHS_EXECUTABLE: this.options.invocation.command,
-        OHS_TASK_ARGUMENTS: serializeWindowsArguments(this.options.invocation.args),
+        OHS_EXECUTABLE: windowsScriptHostPath(),
+        OHS_TASK_ARGUMENTS: serializeWindowsArguments(["//B", "//Nologo", launcherPath]),
         OHS_WORKING_DIRECTORY: this.options.invocation.cwd,
       });
       return;
@@ -159,7 +161,10 @@ export class DaemonSystemService {
 
   uninstall(): void {
     const current = this.status();
-    if (current.state === "not-installed") return;
+    if (current.state === "not-installed") {
+      if (this.platform === "win32") rmSync(this.windowsLauncherPath(), { force: true });
+      return;
+    }
     if (this.platform === "win32") {
       this.stopWindowsTask();
       this.checked("powershell.exe", [
@@ -168,6 +173,7 @@ export class DaemonSystemService {
         "-Command",
         `Unregister-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`,
       ]);
+      rmSync(this.windowsLauncherPath(), { force: true });
       return;
     }
 
@@ -260,6 +266,28 @@ export class DaemonSystemService {
 
   private assertInstalled(): void {
     if (!this.isInstalled()) throw new Error("OpenHarness daemon system service is not installed");
+  }
+
+  private writeWindowsLauncher(): string {
+    const launcherPath = this.windowsLauncherPath();
+    mkdirSync(dirname(launcherPath), { recursive: true });
+    const command = serializeWindowsArguments([
+      this.options.invocation.command,
+      ...this.options.invocation.args,
+    ]);
+    const script = [
+      "Set shell = CreateObject(\"WScript.Shell\")",
+      `shell.CurrentDirectory = \"${vbscriptEscape(this.options.invocation.cwd)}\"`,
+      `exitCode = shell.Run(\"${vbscriptEscape(command)}\", 0, True)`,
+      "WScript.Quit exitCode",
+      "",
+    ].join("\r\n");
+    writeFileSync(launcherPath, script, "utf-8");
+    return launcherPath;
+  }
+
+  private windowsLauncherPath(): string {
+    return join(dirname(this.logsDir), "daemon", WINDOWS_LAUNCHER_NAME);
   }
 
   private checked(command: string, args: string[], extraEnv?: NodeJS.ProcessEnv): SystemCommandResult {
@@ -385,6 +413,15 @@ function quoteWindowsArgument(value: string): string {
     }
   }
   return result + "\\".repeat(backslashes * 2) + '"';
+}
+
+function vbscriptEscape(value: string): string {
+  return value.replaceAll('"', '""');
+}
+
+function windowsScriptHostPath(): string {
+  const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  return windowsRoot ? join(windowsRoot, "System32", "wscript.exe") : "wscript.exe";
 }
 
 function xmlEscape(value: string): string {

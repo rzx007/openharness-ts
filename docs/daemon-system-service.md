@@ -46,7 +46,7 @@ flowchart TD
     Health --> Ready["TUI / Web / Desktop 可以连接"]
 ```
 
-macOS 和 Linux 会把普通输出追加到 `~/.openharness-ts/data/logs/daemon.log`。Windows 的每次计划任务只做一次健康检查：daemon 正常就立即退出，不正常才启动 daemon。服务端自己的结构化日志仍使用原来的日志目录。
+macOS 和 Linux 会把普通输出追加到 `~/.openharness-ts/data/logs/daemon.log`。Windows 的每次计划任务只做一次健康检查：daemon 正常就立即退出，不正常才启动 daemon。Windows 通过系统自带的无窗口脚本宿主运行检查，因此每分钟执行时不会弹出终端窗口。服务端自己的结构化日志仍使用原来的日志目录。
 
 ## TUI 自动连接时怎么处理
 

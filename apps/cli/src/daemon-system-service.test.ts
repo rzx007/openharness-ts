@@ -54,12 +54,18 @@ describe("DaemonSystemService", () => {
     service.install();
 
     const register = calls.find((call) => call.args.includes("Bypass") && call.args.at(-1)?.includes("Register-ScheduledTask"));
-    expect(register?.env?.OHS_EXECUTABLE).toBe("C:\\Program Files\\node.exe");
-    expect(register?.env?.OHS_TASK_ARGUMENTS).toContain("dist\\index.js");
-    expect(register?.env?.OHS_TASK_ARGUMENTS).toContain("watchdog");
-    expect(register?.env?.OHS_TASK_ARGUMENTS).toContain("serve");
+    expect(register?.env?.OHS_EXECUTABLE).toMatch(/wscript\.exe$/i);
+    expect(register?.env?.OHS_TASK_ARGUMENTS).toContain("//B");
+    expect(register?.env?.OHS_TASK_ARGUMENTS).toContain("daemon-watchdog.vbs");
     expect(register?.args.at(-1)).toContain("RepetitionInterval");
     expect(register?.env?.OHS_WORKING_DIRECTORY).toBe("D:\\repo");
+
+    const launcher = readFileSync(join(root, "daemon", "daemon-watchdog.vbs"), "utf-8");
+    expect(launcher).toContain('""C:\\Program Files\\node.exe""');
+    expect(launcher).toContain('""D:\\repo\\dist\\index.js""');
+    expect(launcher).toContain('""watchdog""');
+    expect(launcher).toContain("shell.Run(");
+    expect(launcher).toContain(", 0, True)");
   });
 
   it("treats an enabled idle Windows watchdog as running", () => {
@@ -73,12 +79,14 @@ describe("DaemonSystemService", () => {
   });
 
   it("adds the one-shot watchdog command to Windows service invocations", () => {
+    const root = tempRoot();
     const calls: Array<{ env?: NodeJS.ProcessEnv }> = [];
     const service = createDaemonSystemService("D:/repo/index.js", ["serve", "--register"], {
       platform: "win32",
       bunRuntime: true,
       nodePath: "D:/node/node.exe",
       cwd: "D:/repo",
+      logsDir: join(root, "logs"),
       runCommand: (_command, _args, env) => {
         calls.push({ env });
         return ok("not-installed\n");
@@ -87,7 +95,9 @@ describe("DaemonSystemService", () => {
 
     service.install();
     const taskArguments = calls.find((call) => call.env?.OHS_TASK_ARGUMENTS)?.env?.OHS_TASK_ARGUMENTS;
-    expect(taskArguments).toContain('"daemon" "watchdog" "serve" "--register"');
+    expect(taskArguments).toContain("daemon-watchdog.vbs");
+    const launcher = readFileSync(join(root, "daemon", "daemon-watchdog.vbs"), "utf-8");
+    expect(launcher).toContain('""daemon"" ""watchdog"" ""serve"" ""--register""');
   });
 
   it("writes and enables a Linux user service", () => {
