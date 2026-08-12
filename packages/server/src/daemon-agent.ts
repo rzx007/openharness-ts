@@ -34,6 +34,7 @@ export type LoadDaemonAgent = (context: LoadDaemonAgentContext) => Promise<OpenH
 export interface DaemonAgentLoaderOptions {
   settings?: Settings;
   getSettings?: () => Settings;
+  getSettingsForCwd?: (cwd: string) => Promise<Settings> | Settings;
   createAgent?: CreateDaemonAgent;
   requestPermission?: AgentEffects["requestPermission"];
   cron?: AgentCronEffects;
@@ -45,10 +46,10 @@ export interface DaemonAgentLoaderOptions {
  * The returned loader also restores transcript history before exposing the Agent.
  */
 export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): LoadDaemonAgent | undefined {
-  if (!options.createAgent && !options.settings && !options.getSettings) return undefined;
+  if (!options.createAgent && !options.settings && !options.getSettings && !options.getSettingsForCwd) return undefined;
 
   return async ({ session, history, parts }) => {
-    const settings = options.getSettings?.() ?? options.settings;
+    const settings = await resolveSettingsForSession(options, session.cwd);
     if (!options.createAgent && !settings) throw new Error("Agent settings are not configured");
 
     let eventSink: AgentEventListener | undefined;
@@ -102,6 +103,13 @@ export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): Load
       throw error;
     }
   };
+}
+
+async function resolveSettingsForSession(
+  options: DaemonAgentLoaderOptions,
+  cwd: string,
+): Promise<Settings | undefined> {
+  return await options.getSettingsForCwd?.(cwd) ?? options.getSettings?.() ?? options.settings;
 }
 
 function agentConfigurationFromSession(session: SessionRecord): Partial<OpenHarnessAgentOptions> {

@@ -102,6 +102,7 @@ export class DaemonApplication {
     const loadAgent = createDaemonAgentLoader({
       settings: options.settings,
       getSettings: options.getSettings,
+      getSettingsForCwd: options.getSettingsForCwd,
       createAgent: options.createAgent,
       requestPermission: async (request, context) => {
         return await this.permissions.ask({

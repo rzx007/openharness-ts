@@ -61,6 +61,34 @@ describe("createDaemonAgentLoader", () => {
     expect(sink).toHaveBeenCalledWith(event);
   });
 
+  it("loads Agent settings for the durable session cwd", async () => {
+    const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
+    const createAgent = vi.fn(async () => agent);
+    const getSettingsForCwd = vi.fn(async (cwd: string) => ({
+      model: "cwd-model",
+      sandbox: {
+        enabled: cwd === "/repo",
+        backend: "docker",
+      },
+    } as any));
+    const loader = createDaemonAgentLoader({
+      settings: { model: "global-model", sandbox: { enabled: false } } as any,
+      getSettingsForCwd,
+      createAgent,
+    })!;
+
+    await loader({ session, history: [], parts: [] });
+
+    expect(getSettingsForCwd).toHaveBeenCalledWith("/repo");
+    expect(createAgent.mock.calls[0]![0].options.settings).toMatchObject({
+      model: "cwd-model",
+      sandbox: {
+        enabled: true,
+        backend: "docker",
+      },
+    });
+  });
+
   it("closes a newly created Agent when durable history cannot be restored", async () => {
     const error = new Error("bad history");
     const close = vi.fn(async () => {});
