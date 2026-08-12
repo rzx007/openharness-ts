@@ -61,10 +61,16 @@ ohs sandbox doctor
 pnpm --filter @openharness/sandbox e2e:docker
 pnpm --filter @openharness/sandbox e2e:srt
 pnpm --filter @openharness/sandbox e2e
+pnpm --filter @openharness/tools e2e:docker
+pnpm --filter @openharness/mcp e2e:docker
 ```
 
 Docker E2E 默认用 `node:22-bookworm`；Docker 或该镜像不可用时跳过。可用
 `OPENHARNESS_E2E_DOCKER_IMAGE` 指定本地其他镜像。
+
+文件工具 E2E 默认用 `openharness-sandbox:latest`，因为需要 `node` 和 `rg`；缺失时会尝试用内置 Dockerfile 构建。可用 `OPENHARNESS_E2E_DOCKER_FILE_IMAGE` 指定已有镜像。
+
+MCP stdio E2E 默认用 `node:22-bookworm`；可用 `OPENHARNESS_E2E_DOCKER_MCP_IMAGE` 指定已有镜像。
 
 Docker bridge 网络 E2E 为可选（依赖本机网络）：
 

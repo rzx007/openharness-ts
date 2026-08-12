@@ -401,9 +401,8 @@ helper 的好处是避免把多行文本、特殊字符、JSON、Windows 路径�
 
 剩余工作：
 
-1. 补真实 Docker E2E，覆盖 `Glob` / `Grep` / `Read` / `Write` / `Edit`。
-2. `Write` / `Edit` 增加回读校验，确认容器写入后的宿主挂载内容一致。
-3. 评估是否需要 `SrtFileOperations`；当前 SRT 场景仍是宿主文件操作加 path guard。
+1. 把可选 Docker E2E 接入 CI 中有 Docker daemon 的 job。
+2. 评估是否需要 `SrtFileOperations`；当前 SRT 场景仍是宿主文件操作加 path guard。
 
 ## Permission 与 sandbox 的关系
 

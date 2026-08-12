@@ -71,8 +71,8 @@ flowchart LR
 1. Docker 整棵进程停止已经实现并有真实 E2E 用例，但本机 Docker daemon 未启动，本轮这些用例被跳过；还需要在可用的 Docker 环境或 CI 中实际跑通。
 2. Cron 已由主 daemon 托管，并使用 `cwd + cron:<jobId>` 启动自己的 Sandbox 范围。主 daemon 没运行时，Cron 也不运行。
 3. 用户级 `settings.json` 的 `daemon.autoStart` 开启后，主 daemon 会交给 Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 管理；当前用户登录后自动启动，崩溃后由系统恢复。`ohs daemon install` 是开启并立即应用该设置的便捷命令。
-4. `Read` / `Write` / `Edit` / `Glob` / `Grep` 已通过 `FileOperations` 统一入口接入 Docker active session，但还缺真实 Docker E2E 覆盖。
-5. MCP stdio 已通过 sandbox-aware transport 接入 `createProcess`，但还缺真实 MCP stdio + Docker 的 E2E 覆盖。
+4. `Read` / `Write` / `Edit` / `Glob` / `Grep` 已通过 `FileOperations` 统一入口接入 Docker active session，并有可选真实 Docker E2E 覆盖。
+5. MCP stdio 已通过 sandbox-aware transport 接入 `createProcess`，并有可选真实 Docker E2E 覆盖。
 
 Sandbox 有两条后端：
 
@@ -297,9 +297,8 @@ Read / Write / Edit / Glob / Grep
 
 剩余工作：
 
-1. 给 `Read` / `Write` / `Edit` / `Glob` / `Grep` 补真实 Docker E2E，覆盖 Windows `/workspace` 路径映射。
-2. `Write` / `Edit` 后续可增加回读校验，确认容器写入后的宿主挂载内容一致。
-3. SRT 后端的文件工具仍走宿主实现加 path guard；如果后续需要，也可以加 `SrtFileOperations`。
+1. 把可选 Docker E2E 接入 CI 中有 Docker daemon 的 job。
+2. SRT 后端的文件工具仍走宿主实现加 path guard；如果后续需要，也可以加 `SrtFileOperations`。
 
 ## C. Docker 后端细节
 
@@ -452,3 +451,13 @@ Container config matches: yes
 
 测试默认使用本地 `node:22-bookworm`；Docker daemon 或镜像不可用时跳过。可用
 `OPENHARNESS_E2E_DOCKER_IMAGE` 指定其他本地镜像。
+
+另外还有两个面向上层包的 Docker E2E：
+
+```bash
+pnpm --filter @openharness/tools e2e:docker
+pnpm --filter @openharness/mcp e2e:docker
+```
+
+- `@openharness/tools` 覆盖 `Read` / `Write` / `Edit` / `Glob` / `Grep` 真实进入 Docker sandbox。默认使用 `openharness-sandbox:latest`，缺失时允许用内置 Dockerfile 构建；也可用 `OPENHARNESS_E2E_DOCKER_FILE_IMAGE` 指定已存在镜像。
+- `@openharness/mcp` 覆盖 MCP stdio server 通过 Docker sandbox 启动并完成一次 JSON-RPC 往返。默认使用 `node:22-bookworm`；也可用 `OPENHARNESS_E2E_DOCKER_MCP_IMAGE` 指定镜像。

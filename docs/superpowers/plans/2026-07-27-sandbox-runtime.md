@@ -166,7 +166,7 @@ Exit criteria:
 - [x] 主 daemon 支持 Windows 计划任务、macOS LaunchAgent 和 Linux systemd user service；当前用户登录后启动，异常退出后由系统重启。没有主 daemon 时不执行 Cron。
 - [x] MCP stdio transport 通过 `SandboxStdioClientTransport` 接入 `createProcess`。
 - [x] `Read` / `Write` / `Edit` / `Glob` / `Grep` 接入 `FileOperations`；Docker active 时真实读写和搜索进容器。
-- [ ] 文件工具和 MCP stdio 的真实 Docker E2E 进入下一阶段。
+- [x] 文件工具和 MCP stdio 的真实 Docker E2E 进入下一阶段。
 
 ---
 
@@ -206,7 +206,13 @@ Exit criteria:
 - [x] Route `Glob` / `Grep` through container `rg` when a Docker sandbox session is active.
 - [x] Keep host fallback for sandbox off/degraded mode.
 - [x] Add unit tests proving Docker active file tools use the sandbox session instead of host IO/search.
-- [ ] Add real Docker E2E for file tools.
+- [x] Add real Docker E2E for file tools.
+
+### 2026-08-12 MCP stdio Docker E2E
+
+- [x] Add `@openharness/mcp` Docker E2E for sandbox stdio startup.
+- [x] Verify JSON-RPC stdio roundtrip from a server running inside Docker.
+- [x] Verify Docker cwd path mapping and mounted file visibility.
 
 ---
 
@@ -231,6 +237,7 @@ Exit criteria:
 
 - [x] Update `docs/sandbox-runtime-design.md` if implementation differs.
 - [x] Update `docs/sandbox-runtime-flow.md` and `packages/sandbox/README.md` for MCP stdio and Docker file operations.
+- [x] Add `@openharness/tools` and `@openharness/mcp` Docker E2E scripts.
 - [ ] Update README or `docs/permission-flow.md` with sandbox/permission relationship.
 - [x] Run focused tests:
   - `pnpm --filter @openharness/core test`
