@@ -53,6 +53,7 @@ export {
   dockerSandboxConfigHash,
   dockerNetworkMode,
   DockerSandboxSession,
+  hostPathToContainerPath,
   inspectDockerSandbox,
   SandboxUnavailableError,
   toContainerWorkspacePath,

@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
@@ -30,6 +30,7 @@ export interface DockerRunArgsOptions {
 export interface DockerExecArgsOptions {
   containerName: string;
   cwd: string;
+  workspaceRoot?: string;
   argv: string[];
   env?: Record<string, string>;
   dockerCommand?: string;
@@ -190,8 +191,9 @@ export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
   const argv = [
     options.dockerCommand ?? "docker",
     "exec",
+    "-i",
     "-w",
-    toContainerWorkspacePath(cwd),
+    hostPathToContainerPath(cwd, options.workspaceRoot ?? cwd),
   ];
   for (const [key, value] of Object.entries(options.env ?? {})) {
     argv.push("-e", `${key}=${value}`);
@@ -386,6 +388,7 @@ export class DockerSandboxSession {
     const execArgs = buildDockerExecArgs({
       containerName: this.containerName,
       cwd: options.cwd,
+      workspaceRoot: this.cwd,
       argv: buildDockerSupervisedArgv(argv, executionId),
       env: options.env,
       dockerCommand: this.dockerCommand,
@@ -543,6 +546,18 @@ export async function inspectDockerSandbox(options: {
 
 export function toContainerWorkspacePath(hostPath: string): string {
   return process.platform === "win32" ? "/workspace" : hostPath;
+}
+
+export function hostPathToContainerPath(hostPath: string, workspaceRoot: string): string {
+  const root = resolve(workspaceRoot);
+  const target = resolve(hostPath);
+  if (process.platform !== "win32") return target;
+  const rel = relative(root, target).replace(/\\/g, "/");
+  if (!rel || rel === ".") return "/workspace";
+  if (rel.startsWith("../") || rel === ".." || /^[a-zA-Z]:/.test(rel)) {
+    throw new SandboxUnavailableError(`Docker sandbox cannot map path outside the workspace: ${target}`);
+  }
+  return `/workspace/${rel}`;
 }
 
 function spawnOptions(options: ShellSpawnOptions): SpawnOptions {

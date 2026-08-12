@@ -1,7 +1,7 @@
-import { readFile, readdir, stat } from "node:fs/promises";
 import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
 import { sandboxPathError } from "./sandbox-guard.js";
+import { fileOperationsFor } from "./operations.js";
 
 export const fileReadTool: ToolDefinition = {
   name: "Read",
@@ -32,25 +32,26 @@ export const fileReadTool: ToolDefinition = {
         };
       }
 
-      const fileStat = await stat(filePath);
-      if (fileStat.isDirectory()) {
-        const entries = await readdir(filePath, { withFileTypes: true });
+      const operations = fileOperationsFor(context);
+      const fileStat = await operations.stat(filePath);
+      if (fileStat.isDirectory) {
+        const entries = await operations.listDir(filePath);
         const start = Math.max(0, offset - 1);
         const end = start + limit;
         const listed = entries
           .sort((a, b) => {
-            if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+            if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
             return a.name.localeCompare(b.name);
           })
           .slice(start, end)
-          .map((entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`)
+          .map((entry) => `${entry.name}${entry.isDirectory ? "/" : ""}`)
           .join("\n");
         return {
           content: [{ type: "text", text: listed || "(empty directory)" }],
         };
       }
 
-      const content = await readFile(filePath, "utf-8");
+      const content = await operations.readText(filePath);
       const lines = content.split("\n");
       const start = Math.max(0, offset - 1);
       const end = start + limit;

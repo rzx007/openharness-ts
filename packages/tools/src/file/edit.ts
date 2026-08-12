@@ -1,7 +1,7 @@
-import { readFile, writeFile } from "node:fs/promises";
 import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
 import { sandboxPathError } from "./sandbox-guard.js";
+import { fileOperationsFor } from "./operations.js";
 
 // System directories that must never be edited, regardless of permission mode.
 const SYSTEM_DIR_PREFIXES = [
@@ -68,7 +68,8 @@ export const fileEditTool: ToolDefinition = {
         };
       }
 
-      const content = await readFile(filePath, "utf-8");
+      const operations = fileOperationsFor(context);
+      const content = await operations.readText(filePath);
 
       if (!content.includes(oldString)) {
         return {
@@ -94,7 +95,7 @@ export const fileEditTool: ToolDefinition = {
         ? content.replaceAll(oldString, newString)
         : content.replace(oldString, newString);
 
-      await writeFile(filePath, updated, "utf-8");
+      await operations.writeText(filePath, updated);
 
       return {
         content: [{ type: "text", text: `Successfully edited ${filePath}` }],

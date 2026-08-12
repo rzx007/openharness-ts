@@ -16,6 +16,7 @@ import {
   dockerReusableContainerName,
   dockerSandboxConfigHash,
   dockerNetworkMode,
+  hostPathToContainerPath,
   getDockerAvailability,
   getSandboxAvailability,
   getSrtAvailability,
@@ -517,18 +518,33 @@ describe("docker backend argv builders", () => {
   });
 
   it("builds docker exec args with cwd, env, and child argv", () => {
+    const root = resolve("D:/repo");
+    const cwd = resolve("D:/repo/src");
     const argv = buildDockerExecArgs({
       dockerCommand: "/bin/docker",
       containerName: "oh-s",
-      cwd: "D:/repo",
+      cwd,
+      workspaceRoot: root,
       env: { X: "1" },
       argv: ["bash", "-lc", "echo hi"],
     });
 
-    expect(argv.slice(0, 2)).toEqual(["/bin/docker", "exec"]);
-    expect(argv[argv.indexOf("-w") + 1]).toBe(toContainerWorkspacePath(resolve("D:/repo")));
+    expect(argv.slice(0, 3)).toEqual(["/bin/docker", "exec", "-i"]);
+    expect(argv[argv.indexOf("-w") + 1]).toBe(hostPathToContainerPath(cwd, root));
     expect(argv).toContain("X=1");
     expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
+  });
+
+  it("maps host paths to Docker workspace paths", () => {
+    const root = resolve("D:/repo");
+    const file = resolve("D:/repo/src/a.ts");
+    if (process.platform === "win32") {
+      expect(hostPathToContainerPath(root, root)).toBe("/workspace");
+      expect(hostPathToContainerPath(file, root)).toBe("/workspace/src/a.ts");
+      expect(() => hostPathToContainerPath(resolve("D:/other/a.ts"), root)).toThrow("outside the workspace");
+    } else {
+      expect(hostPathToContainerPath(file, root)).toBe(file);
+    }
   });
 
   it("keeps docker command argv intact inside the process supervisor", () => {
