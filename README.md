@@ -220,12 +220,14 @@ ohs serve --host 127.0.0.1 --port 0 --register
 ohs daemon start
 ohs daemon status
 ohs daemon stop
+# 开启或关闭登录启动与崩溃恢复，同时写入 settings.json
 ohs daemon install
 ohs daemon uninstall
 
 # 配置
 ohs config show
-ohs config set <top-level-key> <value>
+ohs config set <key> <value>
+ohs config set daemon.autoStart true|false
 ```
 
 Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-model.md](docs/auth-provider-model.md)。
@@ -237,6 +239,8 @@ TUI 内斜杠命令走 daemon command catalog + client-local UI + template expan
 ### TUI、Web、Desktop 的共享会话
 
 默认 `ohs`（与 `ohs --tui`）会连接已有 daemon；没有可用/stale daemon 时会启动一个。后续 Web、Desktop 或 remote attach 客户端都应通过 `@openharness/client` 连接同一个 daemon，而不是各自启动 agent runtime。
+
+`~/.openharness-ts/settings.json` 的 `daemon.autoStart` 控制本地 daemon 是否在登录后自动启动并在异常退出后恢复，默认关闭。`ohs daemon install/uninstall` 是修改该开关并立即应用的便捷命令。完整说明见 [docs/daemon-system-service.md](docs/daemon-system-service.md)。
 
 远程 attach 使用显式 URL + bearer token，不读取本机 daemon registry；浏览器还必须命中 daemon 的精确 `--allow-origin` 白名单。部署与 SDK 示例见 [docs/remote-attach.md](docs/remote-attach.md)。
 

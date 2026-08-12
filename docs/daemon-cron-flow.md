@@ -87,7 +87,7 @@ Agent Cron tool
 - daemon 启动：读取 SQLite 中全部任务，为启用的任务安装定时器；上次未结束的记录改为 `interrupted`。
 - daemon 正常关闭：先停止定时器，再取消正在执行的命令，等待清理完成后关闭数据库。
 - daemon 崩溃：SQLite 中的 `running` 记录会在下次启动时改为 `interrupted`。
-- 机器重启：执行 `ohs daemon install` 后，操作系统会在当前用户登录时启动主 daemon，并在它崩溃后重启。Cron 没有自己的第二个守护进程。完整流程见 [Daemon 系统常驻流程](./daemon-system-service.md)。
+- 机器重启：用户级 `settings.json` 的 `daemon.autoStart` 开启后，操作系统会在当前用户登录时启动主 daemon，并在它崩溃后恢复。`ohs daemon install` 可以开启并立即应用该设置。Cron 没有自己的第二个守护进程。完整流程见 [Daemon 系统常驻流程](./daemon-system-service.md)。
 
 ## 常用命令
 

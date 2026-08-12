@@ -70,7 +70,7 @@ flowchart LR
 
 1. Docker 整棵进程停止已经实现并有真实 E2E 用例，但本机 Docker daemon 未启动，本轮这些用例被跳过；还需要在可用的 Docker 环境或 CI 中实际跑通。
 2. Cron 已由主 daemon 托管，并使用 `cwd + cron:<jobId>` 启动自己的 Sandbox 范围。主 daemon 没运行时，Cron 也不运行。
-3. 主 daemon 已支持通过 `ohs daemon install` 交给 Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 管理；当前用户登录后自动启动，崩溃后由系统重启。
+3. 用户级 `settings.json` 的 `daemon.autoStart` 开启后，主 daemon 会交给 Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 管理；当前用户登录后自动启动，崩溃后由系统恢复。`ohs daemon install` 是开启并立即应用该设置的便捷命令。
 4. MCP SDK 的 stdio transport 自己创建进程，还不能交给 Sandbox 启动。
 5. Glob/Grep 仍在宿主机器搜索，只做路径边界检查；后续要改成可选择宿主或容器的文件操作接口。
 

@@ -4,9 +4,33 @@
 
 ## 一句话结论
 
-执行一次 `ohs daemon install` 后，OpenHarness 会在当前用户登录时启动主 daemon。daemon 意外退出时，Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 会重新启动它。
+`~/.openharness-ts/settings.json` 中的 `daemon.autoStart` 决定主 daemon 是否交给操作系统常驻。开启后，OpenHarness 会在当前用户登录时启动主 daemon；daemon 意外退出时，Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 会重新启动它。
 
 TUI、Web、Desktop、Cron 和 Agent 仍然连接同一个主 daemon。
+
+## 配置
+
+```json
+{
+  "daemon": {
+    "autoStart": true
+  }
+}
+```
+
+- `true`：登录后自动启动，异常退出后自动恢复。
+- `false`：不注册系统启动项。TUI、print 或 Cron 命令需要本地 daemon 时仍会按需启动，但操作系统不会在登录或崩溃后恢复它。
+- 默认值是 `false`。
+- 这是机器级设置，只读取用户目录的 `settings.json`；项目目录里的 `.openharness/settings.json` 不能覆盖它。
+
+也可以使用命令修改：
+
+```bash
+ohs config set daemon.autoStart true
+ohs config set daemon.autoStart false
+```
+
+`ohs config set` 会立即同步系统启动项。直接编辑 JSON 或在 TUI 中使用 `/config` 后，会在下一次由 CLI 启动或连接本地 daemon 时同步；已经安装的 Windows watchdog 也会先读取这个开关，关闭时不会重新拉起 daemon。
 
 ## 常用命令
 
@@ -18,11 +42,11 @@ ohs daemon start
 ohs daemon uninstall
 ```
 
-- `install`：写入当前系统的用户级启动配置，并立即启动 daemon。
+- `install`：把 `daemon.autoStart` 写成 `true`，安装用户级启动配置，并立即启动 daemon。
 - `status`：同时显示系统启动配置和实际 daemon 进程的状态。
 - `stop`：安装过系统服务时，通过操作系统停止；没有安装时，停止临时后台进程。
 - `start`：安装过系统服务时，通过操作系统启动；没有安装时，沿用临时后台启动。
-- `uninstall`：停止 daemon 并删除系统启动配置，不删除会话、Cron 任务或其它用户数据。
+- `uninstall`：把 `daemon.autoStart` 写成 `false`，停止 daemon 并删除系统启动配置，不删除会话、Cron 任务或其它用户数据。
 
 ## 三个平台分别做什么
 
@@ -38,7 +62,7 @@ ohs daemon uninstall
 
 ```mermaid
 flowchart TD
-    Install["ohs daemon install"] --> Build["根据当前 CLI 位置生成启动命令"]
+    Setting["daemon.autoStart = true"] --> Build["根据当前 CLI 位置生成启动命令"]
     Build --> OS["写入 Windows / macOS / Linux 用户启动配置"]
     OS --> Start["操作系统启动 ohs serve --register"]
     Start --> Registry["daemon 写入 registry.json"]
@@ -52,9 +76,12 @@ macOS 和 Linux 会把普通输出追加到 `~/.openharness-ts/data/logs/daemon.
 
 ```text
 ensureLocalDaemon
+  -> 读取用户级 daemon.autoStart
+  -> 开启：安装或启用系统启动项
+  -> 关闭：删除已有系统启动项
   -> registry + /health 正常：直接连接
-  -> 不正常，并且已安装系统服务：让操作系统重启服务
-  -> 不正常，并且没有安装系统服务：临时启动后台 daemon
+  -> 不正常且开启：让操作系统启动 daemon
+  -> 不正常且关闭：按需启动后台 daemon
 ```
 
 如果当前 CLI 比正在运行的 daemon 更新，已安装系统服务会先刷新自己的启动命令，再启动新 daemon。这样不会出现“系统服务一份、TUI 又偷偷启动一份”的情况。
