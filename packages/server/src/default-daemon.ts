@@ -22,6 +22,10 @@ export async function startOpenHarnessDaemon(options: OpenHarnessDaemonOptions =
     ...options,
     settings: settingsRef.current,
     getSettings: () => settingsRef.current,
+    getSettingsForCwd: async (cwd) => await loadSettings(undefined, {
+      includeProject: true,
+      projectRoot: cwd,
+    }),
     services: {
       commandCatalog: createDefaultCommandCatalog(() => settingsRef.current),
       ...createDefaultApplicationServices(settingsRef),

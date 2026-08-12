@@ -12,10 +12,6 @@ export interface ResolvedPaths {
   memoryDir: string;
   tasksDir: string;
   feedbackDir: string;
-  cronDir: string;
-  cronRegistryPath: string;
-  cronHistoryPath: string;
-  cronLogsDir: string;
   configFilePath: string;
   credentialsFilePath: string;
 }
@@ -40,10 +36,6 @@ export function resolvePaths(projectRoot?: string): ResolvedPaths {
     memoryDir: join(projectRootResolved, ".openharness", "memory"),
     tasksDir: join(dataDir, "tasks"),
     feedbackDir: join(dataDir, "feedback"),
-    cronDir: join(dataDir, "cron"),
-    cronRegistryPath: join(dataDir, "cron", "cron_jobs.json"),
-    cronHistoryPath: join(dataDir, "cron", "cron_history.jsonl"),
-    cronLogsDir: join(dataDir, "cron", "logs"),
     configFilePath: join(configDir, "settings.json"),
     credentialsFilePath: join(configDir, "credentials.json"),
   };
@@ -105,18 +97,6 @@ export function getProjectMemoryDir(projectRoot?: string): string {
 
 export function getFeedbackDir(): string {
   return resolvePaths().feedbackDir;
-}
-
-export function getCronRegistryPath(): string {
-  return resolvePaths().cronRegistryPath;
-}
-
-export function getCronHistoryPath(): string {
-  return resolvePaths().cronHistoryPath;
-}
-
-export function getCronLogsDir(): string {
-  return resolvePaths().cronLogsDir;
 }
 
 export function getCredentialsFilePath(): string {

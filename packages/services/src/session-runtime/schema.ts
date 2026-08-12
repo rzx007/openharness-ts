@@ -132,3 +132,35 @@ export const sessionEventSequence = sqliteTable("session_event_sequence", {
   id: integer("id").primaryKey(),
   reservedThrough: integer("reserved_through").notNull(),
 });
+
+export const cronJobs = sqliteTable("cron_job", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  expression: text("expression").notNull(),
+  command: text("command").notNull(),
+  cwd: text("cwd").notNull(),
+  timezone: text("timezone"),
+  enabled: integer("enabled").notNull(),
+  lastRunAt: integer("last_run_at"),
+  nextRunAt: integer("next_run_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("cron_job_name_unique").on(table.name),
+  index("cron_job_enabled_next_idx").on(table.enabled, table.nextRunAt),
+]);
+
+export const cronRuns = sqliteTable("cron_run", {
+  id: text("id").primaryKey(),
+  jobId: text("job_id").notNull(),
+  jobName: text("job_name").notNull(),
+  cause: text("cause").notNull(),
+  status: text("status").notNull(),
+  output: text("output"),
+  error: text("error"),
+  startedAt: integer("started_at").notNull(),
+  finishedAt: integer("finished_at"),
+}, (table) => [
+  index("cron_run_job_started_idx").on(table.jobId, table.startedAt),
+  index("cron_run_status_idx").on(table.status),
+]);

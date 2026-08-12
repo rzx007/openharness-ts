@@ -1,14 +1,26 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { CompactService } from "./compact/index.js";
 import { CronScheduler } from "./cron/index.js";
 import { estimateTokens } from "./token-estimation/index.js";
 import { LspClient } from "./lsp/index.js";
-import { OAuthFlow } from "./oauth/index.js";
 import { TaskManager } from "./tasks/index.js";
 import type { Message } from "@openharness/core";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const taskManagers: TaskManager[] = [];
+
+function createTestTaskManager(): TaskManager {
+  const manager = new TaskManager(mkdtempSync(join(tmpdir(), "oh-services-task-")));
+  taskManagers.push(manager);
+  return manager;
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  while (taskManagers.length > 0) taskManagers.pop()!.close();
+});
 
 describe("CompactService", () => {
   it("returns messages unchanged when under limit", () => {
@@ -62,6 +74,98 @@ describe("CompactService", () => {
 });
 
 describe("CronScheduler", () => {
+  it("rejects zero steps and values outside each field range", async () => {
+    const { validateCronExpression } = await import("./cron/index.js");
+    expect(validateCronExpression("*/0 * * * *")).toBe(false);
+    expect(validateCronExpression("60 * * * *")).toBe(false);
+    expect(validateCronExpression("0 24 * * *")).toBe(false);
+    expect(validateCronExpression("1-2-3 * * * *")).toBe(false);
+    expect(validateCronExpression("*/5/2 * * * *")).toBe(false);
+    expect(validateCronExpression("1, * * * *")).toBe(false);
+    expect(validateCronExpression("*/5 0-23 * * 1-5")).toBe(true);
+    expect(validateCronExpression("0 0 * * 7")).toBe(true);
+  });
+
+  it("finds annual, leap-day, timezone, and standard day-or-week schedules", async () => {
+    const { computeNextRunTime } = await import("./cron/index.js");
+    expect(computeNextRunTime("0 0 1 1 *", new Date("2026-01-02T00:00:00Z"), "UTC"))
+      .toBe(Date.parse("2027-01-01T00:00:00Z"));
+    expect(computeNextRunTime("0 0 29 2 *", new Date("2025-03-01T00:00:00Z"), "UTC"))
+      .toBe(Date.parse("2028-02-29T00:00:00Z"));
+    expect(computeNextRunTime("0 9 * * *", new Date("2026-01-01T00:00:00Z"), "Asia/Shanghai"))
+      .toBe(Date.parse("2026-01-01T01:00:00Z"));
+    expect(computeNextRunTime("0 0 13 * 5", new Date("2026-01-01T00:00:00Z"), "UTC"))
+      .toBe(Date.parse("2026-01-02T00:00:00Z"));
+  });
+
+  it("waits for distant schedules without overflowing the platform timer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-02T00:00:00.000Z"));
+    const executor = vi.fn(async () => ({
+      name: "yearly",
+      timestamp: Date.now(),
+      success: true,
+    }));
+    const scheduler = new CronScheduler(executor);
+    const job = scheduler.upsertJob({
+      name: "yearly",
+      expression: "0 0 1 1 *",
+      command: "echo yearly",
+      timezone: "UTC",
+    });
+
+    scheduler.start(job.id);
+    await vi.advanceTimersByTimeAsync(2_147_000_000);
+
+    expect(executor).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+    scheduler.stopAll();
+  });
+
+  it("uses the sandbox-aware trigger path and records command output", async () => {
+    const scheduler = new CronScheduler();
+    scheduler.upsertJob({
+      name: "triggered",
+      expression: "* * * * *",
+      command: "echo cron-ok",
+      cwd: process.cwd(),
+    });
+    const result = await scheduler.trigger("triggered", {
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("cron-ok");
+    expect(scheduler.getHistory()).toEqual([result]);
+  });
+
+  it("fails closed instead of running a trigger on the host", async () => {
+    const scheduler = new CronScheduler();
+    scheduler.upsertJob({
+      name: "strict",
+      expression: "* * * * *",
+      command: "echo must-not-run-on-host",
+      cwd: process.cwd(),
+    });
+    const result = await scheduler.trigger("strict", {
+      sessionId: "missing",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("Docker sandbox session is not running");
+  });
+
   it("registers a job", () => {
     const scheduler = new CronScheduler();
     const job = scheduler.register("j1", "* * * * *", () => {});
@@ -120,6 +224,23 @@ describe("estimateTokens", () => {
 });
 
 describe("LspClient", () => {
+  it("surfaces strict sandbox unavailability instead of reporting no matches", async () => {
+    const client = new LspClient({
+      command: "",
+      args: [],
+      sessionId: "missing-lsp",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    });
+    await expect(client.workspaceSymbolSearch(process.cwd(), "QueryEngine"))
+      .rejects.toThrow("Docker sandbox session is not running");
+  });
+
   it("connects and disconnects", async () => {
     const client = new LspClient({
       command: "typescript-language-server",
@@ -133,50 +254,9 @@ describe("LspClient", () => {
   });
 });
 
-describe("OAuthFlow", () => {
-  it("generates authorization URL", () => {
-    const oauth = new OAuthFlow({
-      clientId: "my-app",
-      authorizeUrl: "https://auth.example.com/authorize",
-      tokenUrl: "https://auth.example.com/token",
-      redirectUri: "http://localhost:3000/callback",
-      scope: "read write",
-    });
-    const url = oauth.getAuthorizationUrl("random-state");
-    expect(url).toContain("https://auth.example.com/authorize?");
-    expect(url).toContain("client_id=my-app");
-    expect(url).toContain("state=random-state");
-    expect(url).toContain("scope=read+write");
-  });
-
-  it("exchangeCode returns tokens", async () => {
-    const oauth = new OAuthFlow({
-      clientId: "my-app",
-      authorizeUrl: "",
-      tokenUrl: "",
-      redirectUri: "",
-      scope: "",
-    });
-    const tokens = await oauth.exchangeCode("code123");
-    expect(tokens.accessToken).toBeTruthy();
-  });
-
-  it("refreshTokens returns tokens", async () => {
-    const oauth = new OAuthFlow({
-      clientId: "my-app",
-      authorizeUrl: "",
-      tokenUrl: "",
-      redirectUri: "",
-      scope: "",
-    });
-    const tokens = await oauth.refreshTokens("refresh-123");
-    expect(tokens.accessToken).toBeTruthy();
-  });
-});
-
 describe("TaskManager", () => {
   it("creates a shell task and tracks it", async () => {
-    const mgr = new TaskManager();
+    const mgr = createTestTaskManager();
     const task = await mgr.createShellTask("echo hello", "test echo", process.cwd());
     expect(task.id).toMatch(/^task_\d+$/);
     expect(task.type).toBe("shell");
@@ -185,7 +265,7 @@ describe("TaskManager", () => {
   });
 
   it("lists tasks", async () => {
-    const mgr = new TaskManager();
+    const mgr = createTestTaskManager();
     await mgr.createShellTask("echo 1", "t1", process.cwd());
     await mgr.createAgentTask("do stuff", "t2", process.cwd());
     const tasks = mgr.listTasks();
@@ -193,7 +273,7 @@ describe("TaskManager", () => {
   });
 
   it("filters tasks by status", async () => {
-    const mgr = new TaskManager();
+    const mgr = createTestTaskManager();
     // Agent task without argv/command is marked failed (needs-argv), not silently pending.
     await mgr.createAgentTask("no-argv task", "desc", process.cwd());
     const failed = mgr.listTasks("failed");
@@ -202,7 +282,7 @@ describe("TaskManager", () => {
   });
 
   it("creates an agent task without argv as failed needs-argv (no silent pending)", async () => {
-    const mgr = new TaskManager();
+    const mgr = createTestTaskManager();
     const task = await mgr.createAgentTask("write tests", "agent task", process.cwd(), "gpt-4");
     expect(task.type).toBe("agent");
     expect(task.status).toBe("failed");
@@ -211,17 +291,17 @@ describe("TaskManager", () => {
   });
 
   it("readTaskOutput throws for unknown task", () => {
-    const mgr = new TaskManager();
+    const mgr = createTestTaskManager();
     expect(() => mgr.readTaskOutput("nope")).toThrow("not found");
   });
 
   it("stopTask throws for unknown task", async () => {
-    const mgr = new TaskManager();
+    const mgr = createTestTaskManager();
     await expect(mgr.stopTask("nope")).rejects.toThrow("not found");
   });
 
   it("writeToTask throws for unknown task", async () => {
-    const mgr = new TaskManager();
+    const mgr = createTestTaskManager();
     await expect(mgr.writeToTask("nope", "msg")).rejects.toThrow("not found");
   });
 

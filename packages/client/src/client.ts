@@ -22,6 +22,9 @@ import type {
   AgentPersonaInfo,
   AuthStatus,
   CompactSessionResponse,
+  CronJobRecord,
+  CronRunRecord,
+  CronStatus,
   CreateTaskInput,
   HookInfo,
   ReloadPluginsResponse,
@@ -40,6 +43,7 @@ import type {
   ProviderInfo,
   OutputStyleInfo,
   RememberSessionResponse,
+  SaveCronJobInput,
   ReplyPermissionInput,
   SessionEventRecord,
   SessionExportResponse,
@@ -682,6 +686,64 @@ export class OpenHarnessClient {
   }
 
   /** `GET /events/stream` — SSE 实时事件流；`cursor` 之后的增量。 */
+  async getCronStatus(options: { signal?: AbortSignal } = {}): Promise<CronStatus> {
+    return await this.request<CronStatus>("/cron/status", { signal: options.signal });
+  }
+
+  async listCronJobs(options: { signal?: AbortSignal } = {}): Promise<CronJobRecord[]> {
+    const response = await this.request<{ jobs: CronJobRecord[] }>("/cron/jobs", { signal: options.signal });
+    return response.jobs;
+  }
+
+  async saveCronJob(
+    name: string,
+    input: SaveCronJobInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CronJobRecord> {
+    const response = await this.request<{ job: CronJobRecord }>(`/cron/jobs/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: input,
+      signal: options.signal,
+    });
+    return response.job;
+  }
+
+  async removeCronJob(name: string, options: { signal?: AbortSignal } = {}): Promise<void> {
+    await this.request<{ removed: true }>(`/cron/jobs/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      signal: options.signal,
+    });
+  }
+
+  async setCronJobEnabled(
+    name: string,
+    enabled: boolean,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CronJobRecord> {
+    const response = await this.request<{ job: CronJobRecord }>(`/cron/jobs/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: { enabled },
+      signal: options.signal,
+    });
+    return response.job;
+  }
+
+  async triggerCronJob(name: string, options: { signal?: AbortSignal } = {}): Promise<CronRunRecord> {
+    const response = await this.request<{ run: CronRunRecord }>(`/cron/jobs/${encodeURIComponent(name)}/run`, {
+      method: "POST",
+      signal: options.signal,
+    });
+    return response.run;
+  }
+
+  async listCronRuns(
+    options: { name?: string; limit?: number; signal?: AbortSignal } = {},
+  ): Promise<CronRunRecord[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ runs: CronRunRecord[] }>(this.path("/cron/runs", query), { signal });
+    return response.runs;
+  }
+
   streamEvents(options: EventSyncOptions = {}): AsyncIterable<SessionEventRecord> {
     return streamServerSentEvents(async () => {
       const query = {

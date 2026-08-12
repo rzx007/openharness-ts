@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAuthRoutes } from "./routes/auth.js";
+import { createCronRoutes } from "./routes/cron.js";
 import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
 import { createMemoryRoutes } from "./routes/memory.js";
@@ -40,6 +41,52 @@ function daemonControl(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe("Cron routes", () => {
+  it("saves jobs and lists daemon-owned status", async () => {
+    const saveJob = vi.fn((input) => ({
+      id: "cron-1",
+      ...input,
+      enabled: input.enabled ?? true,
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    const app = createCronRoutes({
+      cron: {
+        saveJob,
+        listJobs: () => [],
+        listRuns: () => [],
+        removeJob: () => true,
+        setEnabled: vi.fn(),
+        status: () => ({ running: true, jobs: 1, enabled: 1, active: 0 }),
+        trigger: vi.fn(),
+      },
+    });
+
+    const saveResponse = await app.request("/jobs/nightly", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expression: "0 0 * * *", command: "echo ok", cwd: "/repo" }),
+    });
+    const statusResponse = await app.request("/status");
+
+    expect(saveResponse.status).toBe(200);
+    expect(saveJob).toHaveBeenCalledWith({
+      name: "nightly",
+      expression: "0 0 * * *",
+      command: "echo ok",
+      cwd: "/repo",
+      timezone: undefined,
+      enabled: undefined,
+    });
+    await expect(statusResponse.json()).resolves.toEqual({
+      running: true,
+      jobs: 1,
+      enabled: 1,
+      active: 0,
+    });
+  });
+});
 
 describe("system routes", () => {
   it("serves health from the runtime snapshot", async () => {

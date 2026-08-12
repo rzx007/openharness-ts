@@ -23,6 +23,59 @@ function withStore(
 }
 
 describe("SessionStore", () => {
+  it("stores Cron jobs and run history in SQLite", () => {
+    withStore((store, path) => {
+      const job = store.upsertCronJob({
+        id: "cron-1",
+        name: "daily-check",
+        expression: "0 9 * * *",
+        command: "echo ok",
+        cwd: process.cwd(),
+        enabled: true,
+        nextRunAt: 200,
+      });
+      const run = store.createCronRun({
+        id: "cron-run-1",
+        jobId: job.id,
+        jobName: job.name,
+        cause: "manual",
+      });
+      store.finishCronRun(run.id, { status: "succeeded", output: "ok" });
+      store.close();
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getCronJobByName("daily-check")).toMatchObject({
+        id: "cron-1",
+        command: "echo ok",
+        enabled: true,
+      });
+      expect(reloaded.listCronRuns({ jobId: job.id })).toMatchObject([{
+        id: "cron-run-1",
+        status: "succeeded",
+        output: "ok",
+      }]);
+      reloaded.close();
+    });
+  });
+
+  it("marks unfinished Cron runs as interrupted after daemon restart", () => {
+    withStore((store) => {
+      const job = store.upsertCronJob({
+        name: "unfinished",
+        expression: "* * * * *",
+        command: "echo later",
+        cwd: process.cwd(),
+      });
+      store.createCronRun({ jobId: job.id, jobName: job.name, cause: "scheduled" });
+
+      expect(store.interruptActiveCronRuns("daemon restarted")).toBe(1);
+      expect(store.listCronRuns()).toMatchObject([{
+        status: "interrupted",
+        error: "daemon restarted",
+      }]);
+    });
+  });
+
   it("lists direct child sessions without mixing descendants or siblings", () => {
     withStore((store) => {
       store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });

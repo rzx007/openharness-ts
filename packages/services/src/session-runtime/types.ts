@@ -133,6 +133,63 @@ export interface SessionStateSnapshot {
   permissions: PermissionRequestRecord[];
 }
 
+export interface CronJobRecord {
+  id: string;
+  name: string;
+  expression: string;
+  command: string;
+  cwd: string;
+  timezone?: string;
+  enabled: boolean;
+  lastRunAt?: number;
+  nextRunAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type CronRunStatus = "running" | "succeeded" | "failed" | "interrupted";
+export type CronRunCause = "scheduled" | "manual";
+
+export interface CronRunRecord {
+  id: string;
+  jobId: string;
+  jobName: string;
+  cause: CronRunCause;
+  status: CronRunStatus;
+  output?: string;
+  error?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface UpsertCronJobInput {
+  id?: string;
+  name: string;
+  expression: string;
+  command: string;
+  cwd: string;
+  timezone?: string;
+  enabled?: boolean;
+  nextRunAt?: number;
+}
+
+export interface UpdateCronJobInput {
+  expression?: string;
+  command?: string;
+  cwd?: string;
+  timezone?: string | null;
+  enabled?: boolean;
+  lastRunAt?: number | null;
+  nextRunAt?: number | null;
+}
+
+export interface CreateCronRunInput {
+  id?: string;
+  jobId: string;
+  jobName: string;
+  cause: CronRunCause;
+}
+
 export interface CreateSessionInput {
   id?: string;
   parentId?: string;

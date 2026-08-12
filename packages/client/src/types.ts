@@ -7,6 +7,8 @@
 
 import type {
   AdmitPromptInput,
+  CronJobRecord,
+  CronRunRecord,
   CreateSessionInput,
   InputDelivery,
   PermissionRequestRecord,
@@ -23,6 +25,8 @@ import type {
 } from "@openharness/services";
 
 export type {
+  CronJobRecord,
+  CronRunRecord,
   InputDelivery,
   PermissionRequestRecord,
   PermissionStatus,
@@ -36,6 +40,21 @@ export type {
   SessionStateSnapshot,
   ListMessagePartsOptions,
 };
+
+export interface SaveCronJobInput {
+  expression: string;
+  command: string;
+  cwd: string;
+  timezone?: string;
+  enabled?: boolean;
+}
+
+export interface CronStatus {
+  running: true;
+  jobs: number;
+  enabled: number;
+  active: number;
+}
 
 /** `OpenHarnessClient` 构造参数。 */
 export interface OpenHarnessClientOptions {

@@ -113,6 +113,44 @@ describe("OpenHarnessClient", () => {
     ]);
   });
 
+  it("uses the daemon Cron endpoints", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const job = {
+      id: "cron-1",
+      name: "check",
+      expression: "* * * * *",
+      command: "echo ok",
+      cwd: "/repo",
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (init?.method === "PUT") return jsonResponse({ job });
+      if (String(url).includes("/cron/runs")) return jsonResponse({ runs: [] });
+      return jsonResponse({ jobs: [job] });
+    };
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      token: "tok",
+      fetch: fetchImpl as typeof fetch,
+    });
+
+    await expect(client.saveCronJob("check", {
+      expression: "* * * * *",
+      command: "echo ok",
+      cwd: "/repo",
+    })).resolves.toEqual(job);
+    await expect(client.listCronJobs()).resolves.toEqual([job]);
+    await expect(client.listCronRuns({ name: "check", limit: 5 })).resolves.toEqual([]);
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "PUT http://127.0.0.1:3456/cron/jobs/check",
+      "GET http://127.0.0.1:3456/cron/jobs",
+      "GET http://127.0.0.1:3456/cron/runs?name=check&limit=5",
+    ]);
+  });
+
   it("replays an interrupted run through the dedicated, idempotent endpoint", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {

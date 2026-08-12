@@ -12,11 +12,15 @@ import type {
   AdmitPromptInput,
   AppendEventInput,
   AppendMessagePartDeltaInput,
+  CreateCronRunInput,
   CreateMessageInput,
   CreatePermissionRequestInput,
   CreateRunInput,
   CreateSessionTaskInput,
   CreateSessionInput,
+  CronJobRecord,
+  CronRunRecord,
+  CronRunStatus,
   ListEventsOptions,
   ListMessagePartsOptions,
   ListMessagesOptions,
@@ -32,7 +36,9 @@ import type {
   SessionRunRecord,
   SessionTaskRecord,
   SessionStateSnapshot,
+  UpsertCronJobInput,
   UpsertMessagePartInput,
+  UpdateCronJobInput,
   UpdateRunInput,
   UpdateSessionTaskInput,
   UpdateSessionInput,
@@ -175,6 +181,36 @@ function assertMessage(state: SessionState, messageId: string): SessionMessageRe
   return message;
 }
 
+function cronJobFromRow(row: Record<string, unknown>): CronJobRecord {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    expression: row.expression as string,
+    command: row.command as string,
+    cwd: row.cwd as string,
+    ...(row.timezone ? { timezone: row.timezone as string } : {}),
+    enabled: row.enabled === 1,
+    ...(row.last_run_at ? { lastRunAt: row.last_run_at as number } : {}),
+    ...(row.next_run_at ? { nextRunAt: row.next_run_at as number } : {}),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+  };
+}
+
+function cronRunFromRow(row: Record<string, unknown>): CronRunRecord {
+  return {
+    id: row.id as string,
+    jobId: row.job_id as string,
+    jobName: row.job_name as string,
+    cause: row.cause as CronRunRecord["cause"],
+    status: row.status as CronRunStatus,
+    ...(row.output ? { output: row.output as string } : {}),
+    ...(row.error ? { error: row.error as string } : {}),
+    startedAt: row.started_at as number,
+    ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}),
+  };
+}
+
 export class SessionStore {
   readonly path: string;
   private readonly database: Database.Database;
@@ -218,6 +254,142 @@ export class SessionStore {
       this.database.close();
       this.closed = true;
     }
+  }
+
+  upsertCronJob(input: UpsertCronJobInput): CronJobRecord {
+    const existing = this.getCronJobByName(input.name);
+    const timestamp = now();
+    const record: CronJobRecord = {
+      id: existing?.id ?? input.id ?? randomUUID(),
+      name: input.name,
+      expression: input.expression,
+      command: input.command,
+      cwd: input.cwd,
+      ...(input.timezone ? { timezone: input.timezone } : {}),
+      enabled: input.enabled ?? existing?.enabled ?? true,
+      ...(existing?.lastRunAt ? { lastRunAt: existing.lastRunAt } : {}),
+      ...(input.nextRunAt ? { nextRunAt: input.nextRunAt } : {}),
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    };
+    this.database.prepare(`
+      INSERT INTO cron_job (
+        id, name, expression, command, cwd, timezone, enabled,
+        last_run_at, next_run_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        expression = excluded.expression,
+        command = excluded.command,
+        cwd = excluded.cwd,
+        timezone = excluded.timezone,
+        enabled = excluded.enabled,
+        next_run_at = excluded.next_run_at,
+        updated_at = excluded.updated_at
+    `).run(
+      record.id, record.name, record.expression, record.command, record.cwd,
+      record.timezone ?? null, record.enabled ? 1 : 0, record.lastRunAt ?? null,
+      record.nextRunAt ?? null, record.createdAt, record.updatedAt,
+    );
+    return this.getCronJobByName(record.name)!;
+  }
+
+  getCronJob(id: string): CronJobRecord | undefined {
+    const row = this.database.prepare("SELECT * FROM cron_job WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? cronJobFromRow(row) : undefined;
+  }
+
+  getCronJobByName(name: string): CronJobRecord | undefined {
+    const row = this.database.prepare("SELECT * FROM cron_job WHERE name = ?").get(name) as Record<string, unknown> | undefined;
+    return row ? cronJobFromRow(row) : undefined;
+  }
+
+  listCronJobs(): CronJobRecord[] {
+    return (this.database.prepare("SELECT * FROM cron_job ORDER BY name").all() as Array<Record<string, unknown>>)
+      .map(cronJobFromRow);
+  }
+
+  updateCronJob(id: string, patch: UpdateCronJobInput): CronJobRecord {
+    const current = this.getCronJob(id);
+    if (!current) throw new Error(`Cron job not found: ${id}`);
+    const updated: CronJobRecord = {
+      ...current,
+      ...(patch.expression !== undefined ? { expression: patch.expression } : {}),
+      ...(patch.command !== undefined ? { command: patch.command } : {}),
+      ...(patch.cwd !== undefined ? { cwd: patch.cwd } : {}),
+      ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+      updatedAt: now(),
+    };
+    if (patch.timezone !== undefined) {
+      if (patch.timezone === null) delete updated.timezone;
+      else updated.timezone = patch.timezone;
+    }
+    if (patch.lastRunAt !== undefined) {
+      if (patch.lastRunAt === null) delete updated.lastRunAt;
+      else updated.lastRunAt = patch.lastRunAt;
+    }
+    if (patch.nextRunAt !== undefined) {
+      if (patch.nextRunAt === null) delete updated.nextRunAt;
+      else updated.nextRunAt = patch.nextRunAt;
+    }
+    this.database.prepare(`
+      UPDATE cron_job SET expression = ?, command = ?, cwd = ?, timezone = ?, enabled = ?,
+        last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?
+    `).run(
+      updated.expression, updated.command, updated.cwd, updated.timezone ?? null,
+      updated.enabled ? 1 : 0, updated.lastRunAt ?? null, updated.nextRunAt ?? null,
+      updated.updatedAt, id,
+    );
+    return updated;
+  }
+
+  deleteCronJob(id: string): boolean {
+    return this.database.prepare("DELETE FROM cron_job WHERE id = ?").run(id).changes > 0;
+  }
+
+  createCronRun(input: CreateCronRunInput): CronRunRecord {
+    const record: CronRunRecord = {
+      id: input.id ?? randomUUID(),
+      jobId: input.jobId,
+      jobName: input.jobName,
+      cause: input.cause,
+      status: "running",
+      startedAt: now(),
+    };
+    this.database.prepare(`
+      INSERT INTO cron_run (id, job_id, job_name, cause, status, started_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(record.id, record.jobId, record.jobName, record.cause, record.status, record.startedAt);
+    return record;
+  }
+
+  finishCronRun(
+    id: string,
+    result: { status: Exclude<CronRunStatus, "running">; output?: string; error?: string },
+  ): CronRunRecord {
+    const finishedAt = now();
+    this.database.prepare(`
+      UPDATE cron_run SET status = ?, output = ?, error = ?, finished_at = ?
+      WHERE id = ? AND status = 'running'
+    `).run(result.status, result.output ?? null, result.error ?? null, finishedAt, id);
+    const row = this.database.prepare("SELECT * FROM cron_run WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    if (!row) throw new Error(`Cron run not found: ${id}`);
+    return cronRunFromRow(row);
+  }
+
+  listCronRuns(options: { jobId?: string; jobName?: string; limit?: number } = {}): CronRunRecord[] {
+    const limit = Math.min(500, Math.max(1, options.limit ?? 50));
+    const rows = options.jobId
+      ? this.database.prepare("SELECT * FROM cron_run WHERE job_id = ? ORDER BY started_at DESC LIMIT ?").all(options.jobId, limit)
+      : options.jobName
+        ? this.database.prepare("SELECT * FROM cron_run WHERE job_name = ? ORDER BY started_at DESC LIMIT ?").all(options.jobName, limit)
+      : this.database.prepare("SELECT * FROM cron_run ORDER BY started_at DESC LIMIT ?").all(limit);
+    return (rows as Array<Record<string, unknown>>).map(cronRunFromRow);
+  }
+
+  interruptActiveCronRuns(reason: string): number {
+    return this.database.prepare(`
+      UPDATE cron_run SET status = 'interrupted', error = ?, finished_at = ? WHERE status = 'running'
+    `).run(reason, now()).changes;
   }
 
   /**

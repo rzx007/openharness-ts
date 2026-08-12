@@ -37,6 +37,7 @@ import {
   type JsonRecord,
 } from "./http/support.js";
 import { createAuthRoutes } from "./http/routes/auth.js";
+import { createCronRoutes } from "./http/routes/cron.js";
 import { HttpEventHub } from "./http/routes/events.js";
 import { createGitRoutes } from "./http/routes/git.js";
 import { createMemoryRoutes } from "./http/routes/memory.js";
@@ -76,6 +77,7 @@ export interface OpenHarnessServerOptions {
   storePath?: string;
   settings?: Settings;
   getSettings?: () => Settings;
+  getSettingsForCwd?: (cwd: string) => Promise<Settings>;
   /** Test/embedding seam. Production daemon creation uses createOpenHarnessAgent directly. */
   createAgent?: CreateDaemonAgent;
   services?: OpenHarnessServerServices;
@@ -122,6 +124,7 @@ export class OpenHarnessHttpServer {
       eventSink: this.eventHub,
       settings: options.settings,
       getSettings: options.getSettings,
+      getSettingsForCwd: options.getSettingsForCwd,
       createAgent: options.createAgent,
       sseClientCount: () => this.eventHub.clientCount,
       log: (event) => this.log(event),
@@ -269,6 +272,7 @@ export class OpenHarnessHttpServer {
       control: this.daemon.control,
     }));
     this.app.route("/git", createGitRoutes({ gitService: this.services.git }));
+    this.app.route("/cron", createCronRoutes({ cron: this.daemon.cron }));
     this.app.route("/tasks", createTaskRoutes({
       tasks: this.daemon.tasks,
     }));

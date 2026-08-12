@@ -27,6 +27,7 @@
     "@openharness/output-styles": "workspace:*",
     "@openharness/plugins": "workspace:*",
     "@openharness/prompts": "workspace:*",
+    "@openharness/sandbox": "workspace:*",
     "@openharness/services": "workspace:*",
     "@openharness/skills": "workspace:*",
     "hono": "catalog:"

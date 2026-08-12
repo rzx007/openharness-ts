@@ -3,7 +3,7 @@ import {
   type OpenHarnessAgent,
   type OpenHarnessAgentOptions,
 } from "@openharness/agent-runtime";
-import type { AgentEffects, AgentEventListener, Settings } from "@openharness/core";
+import type { AgentCronEffects, AgentEffects, AgentEventListener, Settings } from "@openharness/core";
 import type {
   SessionMessagePartRecord,
   SessionMessageRecord,
@@ -36,6 +36,7 @@ export interface DaemonAgentLoaderOptions {
   getSettings?: () => Settings;
   createAgent?: CreateDaemonAgent;
   requestPermission?: AgentEffects["requestPermission"];
+  cron?: AgentCronEffects;
   createEventSink?(agent: OpenHarnessAgent, session: SessionRecord): AgentEventListener;
 }
 
@@ -59,6 +60,7 @@ export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): Load
       sessionId: session.id,
       ...agentConfigurationFromSession(session),
       ...(options.requestPermission ? { requestPermission: options.requestPermission } : {}),
+      ...(options.cron ? { cron: options.cron } : {}),
       ...(options.createEventSink
         ? {
             onEvent: async (event) => {

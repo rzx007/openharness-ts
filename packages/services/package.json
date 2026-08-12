@@ -29,8 +29,8 @@
   "dependencies": {
     "@openharness/core": "workspace:*",
     "@openharness/memory": "workspace:*",
+    "@openharness/sandbox": "workspace:*",
     "better-sqlite3": "^13.0.2",
-    "cron-parser": "catalog:",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

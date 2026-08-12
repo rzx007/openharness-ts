@@ -1,12 +1,9 @@
-import { exec as nodeExec } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-
-const execAsync = promisify(nodeExec);
+import type { Settings } from "@openharness/core";
+import { createShellProcess } from "@openharness/sandbox";
 
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 const OUTPUT_MAX_CHARS = 10_000;
+const MAX_TIMER_DELAY_MS = 2_147_000_000;
 
 export interface CronJob {
   id: string;
@@ -24,26 +21,38 @@ export interface CronJob {
   createdAt?: number;
 }
 
-type HistoryEntry = {
+export type HistoryEntry = {
   name: string;
   timestamp: number;
   success: boolean;
   output?: string;
 };
 
+export interface CronTriggerOptions {
+  cwd?: string;
+  sessionId?: string;
+  settings?: Settings;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface CronTriggerResult extends HistoryEntry {
+  interrupted?: boolean;
+}
+
+export type CronExecutionCause = "scheduled" | "manual";
+export type CronExecutor = (
+  job: CronJob,
+  cause: CronExecutionCause,
+  options: CronTriggerOptions,
+) => Promise<CronTriggerResult>;
+
 export class CronScheduler {
   private jobs = new Map<string, CronJob>();
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private history: HistoryEntry[] = [];
-  private logDir?: string;
 
-  constructor(logDir?: string) {
-    this.logDir = logDir;
-  }
-
-  setLogDir(dir: string): void {
-    this.logDir = dir;
-  }
+  constructor(private readonly executor: CronExecutor = executeCronJob) {}
 
   register(
     id: string,
@@ -65,6 +74,7 @@ export class CronScheduler {
   }
 
   upsertJob(jobData: {
+    id?: string;
     name: string;
     expression: string;
     command: string;
@@ -73,7 +83,7 @@ export class CronScheduler {
     enabled?: boolean;
   }): CronJob {
     const existing = this.findByName(jobData.name);
-    const id = existing?.id ?? `cron_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const id = existing?.id ?? jobData.id ?? `cron_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const job: CronJob = {
       id,
       name: jobData.name,
@@ -111,47 +121,35 @@ export class CronScheduler {
     job.running = true;
 
     const scheduleNext = () => {
-      const delay = Math.max(0, computeNextRunTime(job.expression, undefined, job.timezone) - Date.now());
+      if (!job.running) return;
+      const target = computeNextRunTime(job.expression, undefined, job.timezone);
+      job.nextRun = target;
+      const delay = Math.max(0, target - Date.now());
       const timer = setTimeout(async () => {
-        let output: string | undefined;
-        let success = true;
+        this.timers.delete(id);
+        if (!job.running) return;
+        if (Date.now() < target) {
+          scheduleNext();
+          return;
+        }
         try {
-          if (job.command) {
-            const result = await execAsync(job.command, {
-              cwd: job.cwd,
-              timeout: COMMAND_TIMEOUT_MS,
-              windowsHide: true,
-            });
-            output = (result.stdout + result.stderr).trim().slice(0, OUTPUT_MAX_CHARS) || undefined;
-          } else {
-            const handler = job.handler ?? (() => {});
-            await handler();
-          }
-          job.lastRun = Date.now();
-        } catch (err) {
-          success = false;
-          output = String(err).slice(0, OUTPUT_MAX_CHARS);
+          await this.executeJob(job, "scheduled");
+        } finally {
+          if (job.running) scheduleNext();
         }
-
-        const entry: HistoryEntry = { name: job.name, timestamp: Date.now(), success, output };
-        this.history.push(entry);
-
-        if (this.logDir && job.command) {
-          const logLine = `[${new Date(entry.timestamp).toISOString()}] ${success ? "OK" : "FAIL"}${output ? " " + output : ""}\n`;
-          const logPath = `${this.logDir}/${job.name}.log`;
-          await mkdir(this.logDir, { recursive: true }).catch(() => {});
-          await appendFile(logPath, logLine, "utf-8").catch(() => {});
-        }
-
-        job.nextRun = computeNextRunTime(job.expression, undefined, job.timezone);
-        if (job.running) scheduleNext();
-      }, delay);
+      }, Math.min(delay, MAX_TIMER_DELAY_MS));
       this.timers.set(id, timer);
     };
 
-    job.nextRun = computeNextRunTime(job.expression, undefined, job.timezone);
     scheduleNext();
     return true;
+  }
+
+  /** Execute a configured job immediately through the same sandbox-aware path as scheduled runs. */
+  async trigger(name: string, options: CronTriggerOptions = {}): Promise<CronTriggerResult> {
+    const job = this.findByName(name);
+    if (!job) throw new Error(`Cron job not found: ${name}`);
+    return this.executeJob(job, "manual", options);
   }
 
   stop(id: string): boolean {
@@ -208,167 +206,280 @@ export class CronScheduler {
     this.history = [];
   }
 
-  async saveHistory(filePath: string): Promise<void> {
-    await mkdir(dirname(filePath), { recursive: true });
-    for (const entry of this.history) {
-      await appendFile(filePath, JSON.stringify(entry) + "\n", "utf-8");
-    }
-    this.history = [];
+  private async executeJob(
+    job: CronJob,
+    cause: CronExecutionCause,
+    options: CronTriggerOptions = {},
+  ): Promise<CronTriggerResult> {
+    const entry = await this.executor(job, cause, options);
+    if (entry.success) job.lastRun = entry.timestamp;
+    this.history.push(entry);
+    job.nextRun = computeNextRunTime(job.expression, undefined, job.timezone);
+    return entry;
   }
+}
 
-  /** Persist job definitions (without handler functions) to a JSON file. */
-  async saveJobs(filePath: string): Promise<void> {
-    await mkdir(dirname(filePath), { recursive: true });
-    const serializable = [...this.jobs.values()].map(({ handler: _h, running: _r, ...rest }) => rest);
-    await writeFile(filePath, JSON.stringify(serializable, null, 2), "utf-8");
-  }
-
-  /** Load job definitions from a JSON file. Skips IDs already registered. */
-  async loadJobs(filePath: string): Promise<number> {
-    try {
-      const raw = await readFile(filePath, "utf-8");
-      const jobs: CronJob[] = JSON.parse(raw);
-      let count = 0;
-      for (const job of jobs) {
-        if (!this.jobs.has(job.id)) {
-          this.jobs.set(job.id, { ...job, running: false, handler: undefined });
-          count++;
-        }
+export async function executeCronJob(
+  job: CronJob,
+  _cause: CronExecutionCause,
+  options: CronTriggerOptions = {},
+): Promise<CronTriggerResult> {
+  let output: string | undefined;
+  let success = true;
+  let interrupted = false;
+  try {
+    if (job.command) {
+      const result = await runSandboxedCommand(job.command, {
+        cwd: job.cwd ?? options.cwd ?? process.cwd(),
+        sessionId: options.sessionId,
+        settings: options.settings,
+        timeoutMs: options.timeoutMs ?? COMMAND_TIMEOUT_MS,
+        signal: options.signal,
+      });
+      interrupted = result.interrupted;
+      success = result.exitCode === 0 && !result.timedOut && !interrupted;
+      output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim().slice(0, OUTPUT_MAX_CHARS) || undefined;
+      if (result.timedOut) {
+        output = `Command timed out after ${options.timeoutMs ?? COMMAND_TIMEOUT_MS}ms${output ? `\n${output}` : ""}`;
+      } else if (interrupted) {
+        output = `Command was stopped${output ? `\n${output}` : ""}`;
       }
-      return count;
-    } catch {
-      return 0;
+    } else {
+      await (job.handler ?? (() => {}))();
     }
+  } catch (error) {
+    success = false;
+    interrupted = options.signal?.aborted ?? false;
+    output = (error instanceof Error ? error.message : String(error)).slice(0, OUTPUT_MAX_CHARS);
+  }
+  return {
+    name: job.name,
+    timestamp: Date.now(),
+    success,
+    ...(output ? { output } : {}),
+    ...(interrupted ? { interrupted: true } : {}),
+  };
+}
+
+async function runSandboxedCommand(
+  command: string,
+  options: Required<Pick<CronTriggerOptions, "cwd" | "timeoutMs">> &
+    Pick<CronTriggerOptions, "sessionId" | "settings" | "signal">,
+): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean; interrupted: boolean }> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (options.signal?.aborted) abortFromCaller();
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.timeoutMs);
+  try {
+    const child = await createShellProcess(command, {
+      cwd: options.cwd,
+      sessionId: options.sessionId,
+      settings: options.settings,
+      signal: controller.signal,
+      hostShell: "system",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return await new Promise((resolve, reject) => {
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+      const append = (current: string, chunk: Buffer): string =>
+        (current + chunk.toString()).slice(0, OUTPUT_MAX_CHARS);
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout = append(stdout, chunk);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr = append(stderr, chunk);
+      });
+      child.once("error", (error) => {
+        if (settled) return;
+        settled = true;
+        if (controller.signal.aborted) {
+          resolve({ exitCode: 1, stdout, stderr, timedOut, interrupted: !timedOut });
+        } else {
+          reject(error);
+        }
+      });
+      child.once("close", (code) => {
+        if (settled) return;
+        settled = true;
+        resolve({
+          exitCode: code ?? 1,
+          stdout,
+          stderr,
+          timedOut,
+          interrupted: controller.signal.aborted && !timedOut,
+        });
+      });
+    });
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
 export function validateCronExpression(expression: string): boolean {
   const parts = expression.trim().split(/\s+/);
   if (parts.length !== 5) return false;
-  return parts.every((p) => /^[\d*/,\-]+$/.test(p));
+  const ranges: Array<[number, number]> = [
+    [0, 59],
+    [0, 23],
+    [1, 31],
+    [1, 12],
+    [0, 7],
+  ];
+  return parts.every((part, index) => parseField(part, ...ranges[index]!).size > 0);
 }
 
-/**
- * Returns the wall-clock fields (minute/hour/dom/month/dow) for `date` in the
- * given IANA timezone, or local time if `tz` is undefined/empty.
- */
+interface WallClockFields {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+const timezoneFormatters = new Map<string, Intl.DateTimeFormat>();
+
 function getTimezoneFields(
   date: Date,
   tz?: string,
-): { minute: number; hour: number; dom: number; month: number; dow: number } {
+): WallClockFields {
   if (!tz) {
     return {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
       minute: date.getMinutes(),
       hour: date.getHours(),
-      dom: date.getDate(),
-      month: date.getMonth() + 1,
-      dow: date.getDay(),
     };
   }
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
+
+  let formatter = timezoneFormatters.get(tz);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
       timeZone: tz,
+      year: "numeric",
       minute: "2-digit",
       hour: "2-digit",
       day: "2-digit",
       month: "2-digit",
-      weekday: "short",
-      hourCycle: "h23", // 0–23, avoids hour12:false quirks in some runtimes
-    }).formatToParts(date);
-    const get = (type: string): number => {
-      const v = parts.find((p) => p.type === type)?.value ?? "0";
-      const n = parseInt(v, 10);
-      return Number.isNaN(n) ? 0 : n % 24; // handle "24" for midnight
-    };
-    const DOW_MAP: Record<string, number> = {
-      Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
-    };
-    const weekdayStr = parts.find((p) => p.type === "weekday")?.value ?? "";
-    return {
-      minute: get("minute"),
-      hour: get("hour"),
-      dom: get("day"),
-      month: get("month"),
-      dow: DOW_MAP[weekdayStr] ?? date.getDay(),
-    };
-  } catch {
-    // Unknown timezone identifier: fall back to local time.
-    return {
-      minute: date.getMinutes(),
-      hour: date.getHours(),
-      dom: date.getDate(),
-      month: date.getMonth() + 1,
-      dow: date.getDay(),
-    };
+      hourCycle: "h23", // 0-23, avoids hour12:false quirks in some runtimes
+    });
+    timezoneFormatters.set(tz, formatter);
   }
+  const parts = formatter.formatToParts(date);
+  const get = (type: string): number => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour") % 24,
+    minute: get("minute"),
+  };
 }
 
-/**
- * Compute the next UTC timestamp (ms) at which the cron expression fires.
- * The optional `timezone` parameter controls which timezone the expression is
- * evaluated in (e.g. `"Asia/Shanghai"`). Defaults to system local time.
- */
 export function computeNextRunTime(expression: string, base?: Date, timezone?: string): number {
   const now = base ?? new Date();
   const parts = expression.trim().split(/\s+/);
-  if (parts.length !== 5) return now.getTime() + 60_000;
+  if (!validateCronExpression(expression)) throw new Error(`Invalid cron expression: ${expression}`);
 
-  const minute = parseField(parts[0]!, 0, 59);
-  const hour = parseField(parts[1]!, 0, 23);
+  const minutes = [...parseField(parts[0]!, 0, 59)].sort((a, b) => a - b);
+  const hours = [...parseField(parts[1]!, 0, 23)].sort((a, b) => a - b);
   const dayOfMonth = parseField(parts[2]!, 1, 31);
-  const month = parseField(parts[3]!, 1, 12);
-  const dayOfWeek = parseField(parts[4]!, 0, 6);
+  const months = parseField(parts[3]!, 1, 12);
+  const dayOfWeek = new Set([...parseField(parts[4]!, 0, 7)].map((value) => value % 7));
+  const anyDayOfMonth = parts[2] === "*";
+  const anyDayOfWeek = parts[4] === "*";
+  const current = getTimezoneFields(now, timezone);
+  const calendar = new Date(Date.UTC(current.year, current.month - 1, current.day));
 
-  const next = new Date(now);
-  next.setSeconds(0, 0);
-  next.setMinutes(next.getMinutes() + 1);
+  for (let offset = 0; offset < 366 * 5; offset++) {
+    const year = calendar.getUTCFullYear();
+    const month = calendar.getUTCMonth() + 1;
+    const day = calendar.getUTCDate();
+    const domMatches = dayOfMonth.has(day);
+    const dowMatches = dayOfWeek.has(calendar.getUTCDay());
+    const dayMatches = anyDayOfMonth
+      ? anyDayOfWeek || dowMatches
+      : anyDayOfWeek
+        ? domMatches
+        : domMatches || dowMatches;
 
-  for (let i = 0; i < 366 * 24 * 60; i++) {
-    const f = getTimezoneFields(next, timezone);
-    if (
-      minute.has(f.minute) &&
-      hour.has(f.hour) &&
-      dayOfMonth.has(f.dom) &&
-      month.has(f.month) &&
-      dayOfWeek.has(f.dow)
-    ) {
-      return next.getTime();
+    if (months.has(month) && dayMatches) {
+      for (const hour of hours) {
+        for (const minute of minutes) {
+          const candidate = wallClockToTimestamp({ year, month, day, hour, minute }, timezone);
+          if (candidate !== undefined && candidate > now.getTime()) return candidate;
+        }
+      }
     }
-    next.setMinutes(next.getMinutes() + 1);
+    calendar.setUTCDate(calendar.getUTCDate() + 1);
   }
 
-  return now.getTime() + 60_000;
+  throw new Error(`Cron expression has no matching time in the next five years: ${expression}`);
 }
 
 function parseField(field: string, min: number, max: number): Set<number> {
   const values = new Set<number>();
-  for (const part of field.split(",")) {
-    const trimmed = part.trim();
-    if (trimmed === "*") {
-      for (let i = min; i <= max; i++) values.add(i);
-      continue;
+  const segments = field.split(",");
+  if (segments.some((segment) => segment.length === 0)) return values;
+  for (const segment of segments) {
+    const stepParts = segment.split("/");
+    if (stepParts.length > 2) return new Set();
+    const range = stepParts[0]!;
+    const step = stepParts.length === 2 && /^\d+$/.test(stepParts[1]!) ? Number(stepParts[1]) : 1;
+    if (!Number.isInteger(step) || step <= 0 || (stepParts.length === 2 && !/^\d+$/.test(stepParts[1]!))) {
+      return new Set();
     }
-    if (trimmed.includes("/")) {
-      const [range, stepStr] = trimmed.split("/");
-      const step = parseInt(stepStr!, 10);
-      const start = range === "*" ? min : parseInt(range!, 10);
-      for (let i = start; i <= max; i += step) values.add(i);
-      continue;
+
+    let start: number;
+    let end: number;
+    if (range === "*") {
+      start = min;
+      end = max;
+    } else if (/^\d+$/.test(range)) {
+      start = Number(range);
+      end = stepParts.length === 2 ? max : start;
+    } else {
+      const match = /^(\d+)-(\d+)$/.exec(range);
+      if (!match) return new Set();
+      start = Number(match[1]);
+      end = Number(match[2]);
     }
-    if (trimmed.includes("-")) {
-      const [lo, hi] = trimmed.split("-");
-      for (let i = parseInt(lo!, 10); i <= parseInt(hi!, 10); i++) values.add(i);
-      continue;
-    }
-    const val = parseInt(trimmed, 10);
-    if (!isNaN(val)) values.add(val);
+    if (start < min || end > max || start > end) return new Set();
+    for (let value = start; value <= end; value += step) values.add(value);
   }
   return values;
 }
 
-let _default: CronScheduler | undefined;
+function wallClockToTimestamp(fields: WallClockFields, timezone?: string): number | undefined {
+  if (!timezone) {
+    const date = new Date(fields.year, fields.month - 1, fields.day, fields.hour, fields.minute, 0, 0);
+    return sameWallClock(getTimezoneFields(date), fields) ? date.getTime() : undefined;
+  }
 
-export function getCronScheduler(): CronScheduler {
-  if (!_default) _default = new CronScheduler();
-  return _default;
+  const target = Date.UTC(fields.year, fields.month - 1, fields.day, fields.hour, fields.minute);
+  let candidate = target;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const actual = getTimezoneFields(new Date(candidate), timezone);
+    const actualAsUtc = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute);
+    const adjustment = target - actualAsUtc;
+    if (adjustment === 0) break;
+    candidate += adjustment;
+  }
+  return sameWallClock(getTimezoneFields(new Date(candidate), timezone), fields) ? candidate : undefined;
+}
+
+function sameWallClock(left: WallClockFields, right: WallClockFields): boolean {
+  return left.year === right.year
+    && left.month === right.month
+    && left.day === right.day
+    && left.hour === right.hour
+    && left.minute === right.minute;
 }

@@ -4,6 +4,7 @@ import type { Settings } from "@openharness/core";
 import { getTaskManager, type SessionStore } from "@openharness/services";
 
 import { createDaemonAgentLoader, type CreateDaemonAgent } from "./daemon-agent.js";
+import { DaemonCronService } from "./daemon-cron-service.js";
 import type { ObservabilityEvent } from "./observability.js";
 import { StorePermissionBroker } from "./permission-broker.js";
 import {
@@ -36,6 +37,7 @@ export interface DaemonApplicationOptions {
   eventSink: SessionEventSink;
   settings?: Settings;
   getSettings?: () => Settings;
+  getSettingsForCwd?: (cwd: string) => Promise<Settings>;
   createAgent?: CreateDaemonAgent;
   sseClientCount(): number;
   log(event: ObservabilityEvent): void;
@@ -49,6 +51,7 @@ export class DaemonApplication {
   readonly maintenance: SessionMaintenanceService;
   readonly queries: SessionQueryService;
   readonly control: DaemonControlService;
+  readonly cron: DaemonCronService;
 
   private readonly events: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -65,6 +68,15 @@ export class DaemonApplication {
     store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
     store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
     store.finalizeClosingSessions();
+
+    this.cron = new DaemonCronService({
+      store,
+      getSettingsForCwd: options.getSettingsForCwd ?? (async () => {
+        const settings = options.getSettings?.() ?? options.settings;
+        if (!settings) throw new Error("Daemon settings are unavailable");
+        return settings;
+      }),
+    });
 
     this.events = new SessionEventPublisher(store, options.eventSink);
     this.permissions = new StorePermissionBroker({
@@ -101,6 +113,15 @@ export class DaemonApplication {
           input: request.input,
           signal: context.signal,
         });
+      },
+      cron: {
+        save: async (input) => this.cron.saveJob(input),
+        remove: async (name) => {
+          this.cron.removeJob(name);
+        },
+        list: async () => this.cron.listJobs(),
+        setEnabled: async (name, enabled) => this.cron.setEnabled(name, enabled),
+        trigger: async (name) => this.cron.trigger(name),
       },
       createEventSink: (agent) => {
         const projector = new DaemonAgentEventProjector({
@@ -172,6 +193,11 @@ export class DaemonApplication {
     const failures: unknown[] = [];
     try {
       await this.startupRecovery;
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await this.cron.shutdown();
     } catch (error) {
       failures.push(error);
     }

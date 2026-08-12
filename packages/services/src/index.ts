@@ -6,12 +6,17 @@ export type {
   AdmitPromptInput,
   AppendEventInput,
   AppendMessagePartDeltaInput,
+  CreateCronRunInput,
   CreateMessageInput,
   CreatePermissionRequestInput,
   CreateRunInput,
   CreateSessionTaskInput,
   CreateSessionInput,
   InputDelivery,
+  CronJobRecord,
+  CronRunCause,
+  CronRunRecord,
+  CronRunStatus,
   ListEventsOptions,
   ListMessagePartsOptions,
   ListMessagesOptions,
@@ -35,6 +40,8 @@ export type {
   SessionStatus,
   SessionStateSnapshot,
   UpsertMessagePartInput,
+  UpsertCronJobInput,
+  UpdateCronJobInput,
   UpdateRunInput,
   UpdateSessionTaskInput,
   UpdateSessionInput,
@@ -56,8 +63,19 @@ export {
   type SaveSessionOptions,
 } from "./session";
 
-export { CronScheduler, getCronScheduler, validateCronExpression, computeNextRunTime } from "./cron";
-export type { CronJob } from "./cron";
+export {
+  CronScheduler,
+  executeCronJob,
+  validateCronExpression,
+  computeNextRunTime,
+} from "./cron";
+export type {
+  CronExecutionCause,
+  CronExecutor,
+  CronJob,
+  CronTriggerOptions,
+  CronTriggerResult,
+} from "./cron";
 
 export { estimateTokens } from "./token-estimation";
 export type { TokenEstimate } from "./token-estimation";
@@ -65,8 +83,6 @@ export type { TokenEstimate } from "./token-estimation";
 export { LspClient } from "./lsp";
 export type { LspServerConfig } from "./lsp";
 
-export { OAuthFlow } from "./oauth";
-export type { OAuthConfig, OAuthTokens } from "./oauth";
 
 export { TaskManager, getTaskManager, resetTaskManager } from "./tasks";
 export type {
