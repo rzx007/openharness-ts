@@ -420,6 +420,7 @@ describe("docker backend argv builders", () => {
     });
 
     expect(argv.slice(0, 2)).toEqual(["/bin/docker", "run"]);
+    expect(argv).toContain("--init");
     expect(argv).toContain("--network");
     expect(argv[argv.indexOf("--network") + 1]).toBe("bridge");
     expect(argv[argv.indexOf("--name") + 1]).toBe("openharness-sandbox-abc-123");
@@ -525,13 +526,14 @@ describe("docker backend argv builders", () => {
       containerName: "oh-s",
       cwd,
       workspaceRoot: root,
-      env: { X: "1" },
+      env: { X: "1", PATH: "C:\\Windows\\System32" },
       argv: ["bash", "-lc", "echo hi"],
     });
 
     expect(argv.slice(0, 3)).toEqual(["/bin/docker", "exec", "-i"]);
     expect(argv[argv.indexOf("-w") + 1]).toBe(hostPathToContainerPath(cwd, root));
     expect(argv).toContain("X=1");
+    expect(argv).not.toContain("PATH=C:\\Windows\\System32");
     expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
   });
 
@@ -567,7 +569,7 @@ describe("docker backend argv builders", () => {
     );
 
     expect(argv.slice(0, 2)).toEqual(["/bin/sh", "-c"]);
-    expect(argv[2]).toContain("exec setsid /bin/sh");
+    expect(argv[2]).toContain("exec \"$setsid_bin\" /bin/sh");
     expect(argv).toContain("/tmp/openharness-exec/exec-stdin.pid");
     expect(argv.slice(-3)).toEqual(["node", "-e", "process.stdin.pipe(process.stdout)"]);
   });

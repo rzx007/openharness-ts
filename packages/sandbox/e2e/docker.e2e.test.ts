@@ -20,9 +20,10 @@ import {
   dockerRmForce,
 } from "./helpers.js";
 
-const image = process.env.OPENHARNESS_E2E_DOCKER_IMAGE ?? "node:22-bookworm";
+const image = process.env.OPENHARNESS_E2E_DOCKER_IMAGE ?? "openharness-sandbox:latest";
+const autoBuildImage = process.env.OPENHARNESS_E2E_DOCKER_IMAGE === undefined;
 const runDocker = dockerAvailable();
-const runWithImage = runDocker && dockerImageAvailable(image);
+const runWithImage = runDocker && (autoBuildImage || dockerImageAvailable(image));
 const maybeDescribe = runWithImage ? describe : describe.skip;
 
 let runtime: StartedSandboxRuntime | undefined;
@@ -66,7 +67,7 @@ maybeDescribe("docker sandbox e2e", () => {
           backend: "docker",
           failIfUnavailable: true,
           network: { mode: "none" },
-          docker: { image, autoBuildImage: false },
+          docker: { image, autoBuildImage },
         },
       },
       cwd: process.cwd(),
@@ -91,7 +92,7 @@ maybeDescribe("docker sandbox e2e", () => {
           backend: "docker",
           failIfUnavailable: true,
           network: { mode: "none" },
-          docker: { image, autoBuildImage: false },
+          docker: { image, autoBuildImage },
         },
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -109,7 +110,7 @@ maybeDescribe("docker sandbox e2e", () => {
       backend: "docker" as const,
       failIfUnavailable: true,
       network: { mode: "none" as const },
-      docker: { image, autoBuildImage: false },
+      docker: { image, autoBuildImage },
     };
     runtime = await startSandboxRuntime({
       settings: { ...baseSettings, sandbox },
@@ -145,7 +146,7 @@ maybeDescribe("docker sandbox e2e", () => {
       network: { mode: "none" as const },
       docker: {
         image,
-        autoBuildImage: false,
+        autoBuildImage,
         reuseContainer: true,
         containerNamePrefix: reusablePrefix,
       },
@@ -183,7 +184,7 @@ maybeDescribe("docker sandbox e2e", () => {
       network: { mode: "none" as const },
       docker: {
         image,
-        autoBuildImage: false,
+        autoBuildImage,
         reuseContainer: true,
         containerNamePrefix: `${reusablePrefix}-drift`,
       },
@@ -226,7 +227,7 @@ maybeDescribe("docker sandbox e2e", () => {
           network: { mode: "none" },
           docker: {
             image,
-            autoBuildImage: false,
+            autoBuildImage,
             reuseContainer: false,
             containerNamePrefix: tempPrefix,
           },
@@ -250,7 +251,7 @@ maybeDescribe("docker sandbox e2e", () => {
       backend: "docker" as const,
       failIfUnavailable: true,
       network: { mode: "none" as const },
-      docker: { image, autoBuildImage: false },
+      docker: { image, autoBuildImage },
     };
     runtime = await startSandboxRuntime({
       settings: { ...baseSettings, sandbox },
@@ -301,7 +302,7 @@ maybeDescribe("docker sandbox e2e", () => {
       network: { mode: "none" as const },
       docker: {
         image,
-        autoBuildImage: false,
+        autoBuildImage,
         reuseContainer: true,
         containerNamePrefix: `${reusablePrefix}-stop`,
       },
@@ -353,7 +354,7 @@ maybeDescribe("docker sandbox e2e", () => {
           backend: "docker",
           failIfUnavailable: true,
           network: { mode: "none" },
-          docker: { image, autoBuildImage: false },
+          docker: { image, autoBuildImage },
         },
       },
       cwd: process.cwd(),
@@ -372,7 +373,7 @@ maybeDescribe("docker sandbox e2e", () => {
             backend: "docker",
             failIfUnavailable: true,
             network: { mode: "none" },
-            docker: { image, autoBuildImage: false },
+            docker: { image, autoBuildImage },
           },
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -392,7 +393,7 @@ maybeDescribe("docker sandbox e2e", () => {
           backend: "docker",
           failIfUnavailable: true,
           network: { mode: "proxy" },
-          docker: { image, autoBuildImage: false },
+          docker: { image, autoBuildImage },
         },
       },
       cwd: process.cwd(),
@@ -412,7 +413,7 @@ maybeDescribe("docker sandbox e2e", () => {
             backend: "docker",
             failIfUnavailable: true,
             network: { mode: "bridge" },
-            docker: { image, autoBuildImage: false },
+            docker: { image, autoBuildImage },
           },
         },
         cwd: process.cwd(),
@@ -431,7 +432,7 @@ maybeDescribe("docker sandbox e2e", () => {
               backend: "docker",
               failIfUnavailable: true,
               network: { mode: "bridge" },
-              docker: { image, autoBuildImage: false },
+              docker: { image, autoBuildImage },
             },
           },
           stdio: ["ignore", "pipe", "pipe"],

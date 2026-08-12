@@ -445,10 +445,12 @@ native Windows 不支持的原因：
 
 默认内置 Dockerfile 基于 `node:22-bookworm`，并安装 `ripgrep`、`setsid` 所在的 `util-linux`、`sleep`、`/bin/kill` 等基础命令。自定义镜像也需要提供 `node`、`rg`、`setsid`、`sleep` 和 `/bin/kill`。
 
+Docker 容器启动时带 `--init`。原因很简单：Agent 中途 stop / abort 时可能会强杀一整棵进程树，如果容器 PID 1 不回收子进程，已退出的子进程会留在进程表里，看起来像还活着。
+
 启动 argv 形态：
 
 ```text
-docker run -d --rm
+docker run -d --rm --init
   --name openharness-sandbox-<sessionId>
   --network <none|bridge|host>
   -v <cwd>:<cwd>
@@ -465,11 +467,21 @@ docker run -d --rm
 
 ```text
 docker exec
+  -i
   -w <cwd>
   [-e KEY=VALUE]
   openharness-sandbox-<sessionId>
   <shell> -c <command>
 ```
+
+Docker exec 不传宿主 `PATH`。容器里的命令应该用镜像自己的 `PATH`，否则 Windows / macOS 宿主路径会污染 Linux 容器，导致 `node`、`rm`、`setsid` 这类命令找不到。
+
+文件工具说明：
+
+- `Glob` / `Grep` 优先在容器里跑 `rg`。
+- `Read` / `Write` / `Edit` 会启动一个短命 Node helper。
+- 工具层把 `{ op, path, content }` 这样的 JSON 通过 stdin 传给 helper。
+- 当前 helper 是内嵌 `node -e` 脚本；后续更好的形态是镜像里固定提供 `oh-file-helper`。
 
 ## 错误与降级
 
@@ -501,6 +513,12 @@ type SandboxAvailability = {
 
 - `failIfUnavailable=true`：抛错，工具返回 error，runtime 可启动失败。
 - `failIfUnavailable=false`：记录 warning，shell 回宿主执行，状态标记 degraded。
+
+当前网络边界：
+
+- `network=none` 已真实阻断外网。
+- `proxy` 模式会走 Docker bridge 并注入代理环境变量。
+- 域名 allow/deny 还没有真实拦截；在 bridge/host 下只能标记 degraded。后续要补代理层或防火墙层 enforcement。
 
 ## 测试计划
 

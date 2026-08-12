@@ -59,6 +59,7 @@ export interface DockerSandboxDiagnostics {
 export const DOCKER_CONFIG_HASH_LABEL = "org.openharness.sandbox.config-hash";
 export const DOCKER_WORKSPACE_LABEL = "org.openharness.sandbox.workspace";
 const DOCKER_EXEC_STATE_DIR = "/tmp/openharness-exec";
+const DOCKER_SUPERVISOR_VERSION = "docker-init-v1";
 
 const DOCKER_EXEC_SUPERVISOR = `
 marker="$1"
@@ -68,7 +69,10 @@ if [ -f "$cancel" ]; then
   rm -f "$marker" "$cancel"
   exit 143
 fi
-setsid "$@" &
+setsid_bin=/usr/bin/setsid
+if [ ! -x "$setsid_bin" ]; then setsid_bin=/bin/setsid; fi
+if [ ! -x "$setsid_bin" ]; then setsid_bin=setsid; fi
+"$setsid_bin" "$@" &
 pid=$!
 printf '%s\n' "$pid" > "$marker"
 if [ -f "$cancel" ]; then
@@ -88,7 +92,10 @@ if [ -f "$cancel" ]; then
   rm -f "$marker" "$cancel"
   exit 143
 fi
-exec setsid /bin/sh -c '
+setsid_bin=/usr/bin/setsid
+if [ ! -x "$setsid_bin" ]; then setsid_bin=/bin/setsid; fi
+if [ ! -x "$setsid_bin" ]; then setsid_bin=setsid; fi
+exec "$setsid_bin" /bin/sh -c '
 marker="$1"
 cancel="$2"
 shift 2
@@ -159,6 +166,7 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
     options.dockerCommand ?? "docker",
     "run",
     "-d",
+    "--init",
     "--name",
     containerName,
     "--network",
@@ -219,7 +227,7 @@ export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
     "-w",
     hostPathToContainerPath(cwd, options.workspaceRoot ?? cwd),
   ];
-  for (const [key, value] of Object.entries(options.env ?? {})) {
+  for (const [key, value] of Object.entries(containerExecEnv(options.env))) {
     argv.push("-e", `${key}=${value}`);
   }
   argv.push(options.containerName, ...options.argv);
@@ -532,6 +540,7 @@ export function dockerSandboxConfigHash(
     dns: [...config.docker.dns].sort(),
     extraMounts: [...config.docker.extraMounts].sort(),
     extraEnv: stableRecord(config.docker.extraEnv),
+    supervisorVersion: DOCKER_SUPERVISOR_VERSION,
   };
   return createHash("sha1").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
 }
@@ -600,6 +609,13 @@ function spawnOptions(options: ShellSpawnOptions): SpawnOptions {
 
 function usesStdinPipe(stdio: ShellSpawnOptions["stdio"]): boolean {
   return stdio === "pipe" || (Array.isArray(stdio) && stdio[0] === "pipe");
+}
+
+function containerExecEnv(env: Record<string, string> | undefined): Record<string, string> {
+  if (!env) return {};
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => key.toUpperCase() !== "PATH"),
+  );
 }
 
 function dockerExecutionStatePaths(executionId: string): { marker: string; cancel: string } {

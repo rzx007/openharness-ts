@@ -66,13 +66,13 @@ flowchart LR
 - Docker 镜像必须提供 `node`、`rg`、`setsid`、`sleep` 和 `/bin/kill`。默认内置 Dockerfile 已包含这些依赖；自定义镜像缺少它们时，shell 停止或文件工具会失败。
 - 可复用容器关闭 runtime 时仍保留容器，但会先清掉该 runtime 启动且仍在运行的命令。
 
-## 当前未闭环
+## 当前状态
 
-1. Docker 整棵进程停止已经实现并有真实 E2E 用例，但本机 Docker daemon 未启动，本轮这些用例被跳过；还需要在可用的 Docker 环境或 CI 中实际跑通。
+1. Docker 整棵进程停止已经实现，并在真实 Docker E2E 中覆盖 abort、timeout/runtime stop、临时容器清理和复用容器保留。
 2. Cron 已由主 daemon 托管，并使用 `cwd + cron:<jobId>` 启动自己的 Sandbox 范围。主 daemon 没运行时，Cron 也不运行。
 3. 用户级 `settings.json` 的 `daemon.autoStart` 开启后，主 daemon 会交给 Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 管理；当前用户登录后自动启动，崩溃后由系统恢复。`ohs daemon install` 是开启并立即应用该设置的便捷命令。
-4. `Read` / `Write` / `Edit` / `Glob` / `Grep` 已通过 `FileOperations` 统一入口接入 Docker active session，并有可选真实 Docker E2E 覆盖。
-5. MCP stdio 已通过 sandbox-aware transport 接入 `createProcess`，并有可选真实 Docker E2E 覆盖。
+4. `Read` / `Write` / `Edit` / `Glob` / `Grep` 已通过 `FileOperations` 统一入口接入 Docker active session，并有真实 Docker E2E 覆盖。
+5. MCP stdio 已通过 sandbox-aware transport 接入 `createProcess`，并有真实 Docker E2E 覆盖。
 
 Sandbox 有两条后端：
 
@@ -447,10 +447,12 @@ Container config matches: yes
 - 项目级 `reuseContainer=true` 时，连续两次 runtime 启动复用同一个容器。
 - 复用容器的 config hash 过期时 fail fast，并提示 `ohs sandbox rebuild`。
 - `reuseContainer=false` 时，会话临时容器 stop 后被 Docker `--rm` 删除。
+- Docker 容器使用 `--init`，保证 stop / abort 后被杀掉的子进程能被回收，不会长期留在容器进程表里。
+- 需要 stdin 的 argv 进程保留 stdin，例如文件 helper 和 MCP stdio。
 - `OPENHARNESS_E2E_DOCKER_NETWORK=1` 时额外测试 bridge 网络访问 `https://example.com`。
 
-测试默认使用本地 `node:22-bookworm`；Docker daemon 或镜像不可用时跳过。可用
-`OPENHARNESS_E2E_DOCKER_IMAGE` 指定其他本地镜像。
+测试默认使用 `openharness-sandbox:latest`；Docker daemon 不可用时跳过。默认镜像缺失时允许用内置 Dockerfile 构建。可用
+`OPENHARNESS_E2E_DOCKER_IMAGE` 指定其他本地镜像；显式指定镜像时，镜像不存在会跳过。
 
 另外还有两个面向上层包的 Docker E2E：
 
@@ -460,4 +462,9 @@ pnpm --filter @openharness/mcp e2e:docker
 ```
 
 - `@openharness/tools` 覆盖 `Read` / `Write` / `Edit` / `Glob` / `Grep` 真实进入 Docker sandbox。默认使用 `openharness-sandbox:latest`，缺失时允许用内置 Dockerfile 构建；也可用 `OPENHARNESS_E2E_DOCKER_FILE_IMAGE` 指定已存在镜像。
-- `@openharness/mcp` 覆盖 MCP stdio server 通过 Docker sandbox 启动并完成一次 JSON-RPC 往返。默认使用 `node:22-bookworm`；也可用 `OPENHARNESS_E2E_DOCKER_MCP_IMAGE` 指定镜像。
+- `@openharness/mcp` 覆盖 MCP stdio server 通过 Docker sandbox 启动并完成一次 JSON-RPC 往返。默认使用 `openharness-sandbox:latest`，缺失时允许用内置 Dockerfile 构建；也可用 `OPENHARNESS_E2E_DOCKER_MCP_IMAGE` 指定镜像。
+
+## H. 仍未完成的安全增强
+
+- `network=none` 已经是真隔离；`bridge` / `host` 下的域名 allow/deny 还没有真正拦截。当前只会在设置了 domain policy 时标记 degraded。后续要补真实网络策略，例如代理层或防火墙规则。
+- 文件 helper 现在是一次性 `node -e` 脚本，工具层通过 stdin 传 JSON 请求。这个实现能跑通，但协议藏在代码字符串里。后续建议把 helper 固化成镜像内命令，例如 `oh-file-helper`，让文件操作入口更清楚，也方便版本化。

@@ -14,9 +14,11 @@ import { SandboxStdioClientTransport } from "../src/sandbox-stdio-transport.js";
 
 const image = process.env.OPENHARNESS_E2E_DOCKER_MCP_IMAGE ??
   process.env.OPENHARNESS_E2E_DOCKER_IMAGE ??
-  "node:22-bookworm";
+  "openharness-sandbox:latest";
+const autoBuildImage = process.env.OPENHARNESS_E2E_DOCKER_MCP_IMAGE === undefined &&
+  process.env.OPENHARNESS_E2E_DOCKER_IMAGE === undefined;
 const runDocker = dockerAvailable();
-const runWithImage = runDocker && dockerImageAvailable(image);
+const runWithImage = runDocker && (autoBuildImage || dockerImageAvailable(image));
 const maybeDescribe = runWithImage ? describe : describe.skip;
 
 let runtime: StartedSandboxRuntime | undefined;
@@ -125,7 +127,7 @@ function dockerSettings(): Settings {
       network: { mode: "none" },
       docker: {
         image,
-        autoBuildImage: false,
+        autoBuildImage,
         reuseContainer: false,
       },
     },
