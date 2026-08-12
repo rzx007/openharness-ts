@@ -80,6 +80,30 @@ rm -f "$marker" "$cancel"
 exit "$status"
 `.trim();
 
+const DOCKER_EXEC_STDIN_SUPERVISOR = `
+marker="$1"
+cancel="$2"
+shift 2
+if [ -f "$cancel" ]; then
+  rm -f "$marker" "$cancel"
+  exit 143
+fi
+exec setsid /bin/sh -c '
+marker="$1"
+cancel="$2"
+shift 2
+printf "%s\\n" "$$" > "$marker"
+if [ -f "$cancel" ]; then
+  rm -f "$marker" "$cancel"
+  exit 143
+fi
+"$@"
+status=$?
+rm -f "$marker" "$cancel"
+exit "$status"
+' openharness-child "$marker" "$cancel" "$@"
+`.trim();
+
 const DOCKER_EXEC_STOPPER = `
 marker="$1"
 cancel="$2"
@@ -203,12 +227,16 @@ export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
 }
 
 /** Wrap one Docker command in a process group that can be stopped from the host. */
-export function buildDockerSupervisedArgv(argv: string[], executionId: string): string[] {
+export function buildDockerSupervisedArgv(
+  argv: string[],
+  executionId: string,
+  options: { preserveStdin?: boolean } = {},
+): string[] {
   const { marker, cancel } = dockerExecutionStatePaths(executionId);
   return [
     "/bin/sh",
     "-c",
-    DOCKER_EXEC_SUPERVISOR,
+    options.preserveStdin ? DOCKER_EXEC_STDIN_SUPERVISOR : DOCKER_EXEC_SUPERVISOR,
     "openharness-exec",
     marker,
     cancel,
@@ -389,7 +417,7 @@ export class DockerSandboxSession {
       containerName: this.containerName,
       cwd: options.cwd,
       workspaceRoot: this.cwd,
-      argv: buildDockerSupervisedArgv(argv, executionId),
+      argv: buildDockerSupervisedArgv(argv, executionId, { preserveStdin: usesStdinPipe(options.stdio) }),
       env: options.env,
       dockerCommand: this.dockerCommand,
     });
@@ -568,6 +596,10 @@ function spawnOptions(options: ShellSpawnOptions): SpawnOptions {
     stdio: options.stdio,
     detached: options.detached,
   };
+}
+
+function usesStdinPipe(stdio: ShellSpawnOptions["stdio"]): boolean {
+  return stdio === "pipe" || (Array.isArray(stdio) && stdio[0] === "pipe");
 }
 
 function dockerExecutionStatePaths(executionId: string): { marker: string; cancel: string } {

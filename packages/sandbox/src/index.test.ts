@@ -559,6 +559,19 @@ describe("docker backend argv builders", () => {
     expect(argv.slice(-3)).toEqual(["node", "-e", "console.log('a b')"]);
   });
 
+  it("can build a stdin-preserving docker process supervisor", () => {
+    const argv = buildDockerSupervisedArgv(
+      ["node", "-e", "process.stdin.pipe(process.stdout)"],
+      "exec-stdin",
+      { preserveStdin: true },
+    );
+
+    expect(argv.slice(0, 2)).toEqual(["/bin/sh", "-c"]);
+    expect(argv[2]).toContain("exec setsid /bin/sh");
+    expect(argv).toContain("/tmp/openharness-exec/exec-stdin.pid");
+    expect(argv.slice(-3)).toEqual(["node", "-e", "process.stdin.pipe(process.stdout)"]);
+  });
+
   it("builds docker image inspect args", () => {
     expect(buildDockerImageInspectArgs("openharness-sandbox:latest", "/bin/docker")).toEqual([
       "/bin/docker",

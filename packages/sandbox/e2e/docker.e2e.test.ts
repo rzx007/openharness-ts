@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
+  createProcess,
   createShellProcess,
   SandboxUnavailableError,
   startSandboxRuntime,
@@ -99,6 +100,41 @@ maybeDescribe("docker sandbox e2e", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("node-ok");
+  }, 60_000);
+
+  it("preserves stdin for supervised docker argv processes", async () => {
+    const sessionId = `e2e-docker-stdin-${Date.now()}`;
+    const sandbox = {
+      enabled: true,
+      backend: "docker" as const,
+      failIfUnavailable: true,
+      network: { mode: "none" as const },
+      docker: { image, autoBuildImage: false },
+    };
+    runtime = await startSandboxRuntime({
+      settings: { ...baseSettings, sandbox },
+      cwd: process.cwd(),
+      sessionId,
+    });
+
+    const child = await createProcess(
+      [
+        "node",
+        "-e",
+        "let raw='';process.stdin.on('data',c=>raw+=c);process.stdin.on('end',()=>process.stdout.write(JSON.parse(raw).op));",
+      ],
+      {
+        cwd: process.cwd(),
+        sessionId,
+        settings: { ...baseSettings, sandbox },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const resultPromise = collectProcess(child);
+    child.stdin?.end(JSON.stringify({ op: "writeText" }));
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({ exitCode: 0, stdout: "writeText" });
   }, 60_000);
 
   it("reuses the same project container across runtime starts", async () => {
