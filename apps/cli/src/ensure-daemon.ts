@@ -7,6 +7,7 @@ import {
   spawnDaemonProcess,
   type SpawnedDaemonProcess,
 } from "./daemon-process.js";
+import { createDaemonSystemService } from "./daemon-system-service.js";
 
 export interface LocalDaemonHandle {
   url: string;
@@ -60,11 +61,27 @@ export async function ensureLocalDaemon(
   let daemon = readDaemonRegistry();
   const daemonStatus = daemon ? await probeDaemonRegistry(daemon, daemonProbeOptions) : "unreachable";
   if (!daemon || daemonStatus !== "ready") {
-    if (daemon && daemonStatus === "stale") terminateDaemonProcess(daemon.pid);
-    clearDaemonRegistry();
-    const serveArgs = [cliPath, "serve", "--register", "--host", "127.0.0.1", "--port", "0"];
-    const spawned = spawnDaemonProcess(serveArgs[0]!, serveArgs.slice(1));
-    daemon = await waitForDaemonRegistry(spawned);
+    const systemService = createDaemonSystemService(cliPath);
+    if (systemService.isInstalled()) {
+      clearDaemonRegistry();
+      if (daemonStatus === "stale") systemService.install();
+      else systemService.restart();
+      for (let i = 0; i < 100; i += 1) {
+        daemon = readDaemonRegistry();
+        if (daemon && await probeDaemonRegistry(daemon, daemonProbeOptions) === "ready") break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!daemon || await probeDaemonRegistry(daemon, daemonProbeOptions) !== "ready") {
+        const status = systemService.status();
+        throw new Error(`The OpenHarness daemon system service did not become ready (state: ${status.state})`);
+      }
+    } else {
+      if (daemon && daemonStatus === "stale") terminateDaemonProcess(daemon.pid);
+      clearDaemonRegistry();
+      const serveArgs = [cliPath, "serve", "--register", "--host", "127.0.0.1", "--port", "0"];
+      const spawned = spawnDaemonProcess(serveArgs[0]!, serveArgs.slice(1));
+      daemon = await waitForDaemonRegistry(spawned);
+    }
   }
 
   return {

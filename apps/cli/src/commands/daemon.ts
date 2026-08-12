@@ -1,5 +1,6 @@
 import { statSync } from "node:fs";
 import { Command } from "commander";
+import type { DaemonRegistry } from "@openharness/server";
 
 import {
   daemonPidAlive,
@@ -7,6 +8,7 @@ import {
   terminateDaemonProcess,
 } from "../daemon-lifecycle.js";
 import { daemonStartupError, spawnDaemonProcess } from "../daemon-process.js";
+import { createDaemonSystemService } from "../daemon-system-service.js";
 import { VERSION } from "../version.js";
 
 interface ServeOptions {
@@ -120,27 +122,123 @@ export function createDaemonCommand(): Command {
         console.log(`Daemon already running at ${existing.url} (PID: ${existing.pid})`);
         return;
       }
-      if (existing && existingStatus === "stale") terminateDaemonProcess(existing.pid);
-      clearDaemonRegistry();
-
       const args = ["serve", "--register", "--host", options.host ?? "127.0.0.1"];
       if (options.port !== undefined) args.push("--port", String(options.port));
       if (options.token) args.push("--token", options.token);
       for (const origin of options.allowOrigin ?? []) args.push("--allow-origin", origin);
       if (options.storePath) args.push("--store-path", options.storePath);
 
-      const spawned = spawnDaemonProcess(entry, args);
-      for (let attempt = 0; attempt < 40; attempt += 1) {
-        const registry = readDaemonRegistry();
-        if (registry && await probeDaemonRegistry(registry, probeOptions) === "ready") {
-          console.log(`Daemon started at ${registry.url} (PID: ${registry.pid})`);
-          return;
-        }
-        if (spawned.failure()) throw daemonStartupError(spawned);
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      const systemService = createDaemonSystemService(entry, args);
+      if (systemService.isInstalled()) {
+        clearDaemonRegistry();
+        if (existingStatus === "stale") systemService.install();
+        else systemService.restart();
+        const registry = await waitForReadyDaemon(probeOptions, readDaemonRegistry);
+        console.log(`Daemon started by the system service at ${registry.url} (PID: ${registry.pid})`);
+        return;
       }
-      console.log(`Daemon spawned (PID: ${spawned.child.pid ?? "unknown"}); registry not ready yet.`);
-      console.log(`Log: ${spawned.logPath}`);
+
+      if (existing && existingStatus === "stale") {
+        terminateDaemonProcess(existing.pid);
+        await waitForProcessExit(existing.pid);
+      }
+      clearDaemonRegistry();
+
+      const spawned = spawnDaemonProcess(entry, args);
+      const registry = await waitForReadyDaemon(probeOptions, readDaemonRegistry, () => {
+        if (spawned.failure()) throw daemonStartupError(spawned);
+      }).catch((error) => {
+        if (error instanceof Error && error.message.includes("did not become ready")) throw daemonStartupError(spawned);
+        throw error;
+      });
+      console.log(`Daemon started at ${registry.url} (PID: ${registry.pid})`);
+    });
+
+  cmd
+    .command("install")
+    .description("Start the daemon after sign-in and restart it after crashes")
+    .option("--host <host>", "Host to bind", "127.0.0.1")
+    .option("--port <port>", "Port to bind", (value) => Number.parseInt(value, 10), 0)
+    .option("--token <token>", "Bearer token; generated when omitted")
+    .option("--allow-origin <origin...>", "Allow browser requests from exact origin(s)")
+    .option("--store-path <path>", "Session store path")
+    .action(async (options: ServeOptions) => {
+      assertSafeDaemonBinding(options);
+      const entry = process.argv[1];
+      if (!entry) throw new Error("Cannot locate CLI entrypoint.");
+      const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
+      const args = ["serve", "--register", "--host", options.host ?? "127.0.0.1"];
+      if (options.port !== undefined) args.push("--port", String(options.port));
+      if (options.token) args.push("--token", options.token);
+      for (const origin of options.allowOrigin ?? []) args.push("--allow-origin", origin);
+      if (options.storePath) args.push("--store-path", options.storePath);
+
+      const existing = readDaemonRegistry();
+      if (existing) {
+        const probe = await probeDaemonRegistry(existing, { expectedVersion: VERSION });
+        if ((probe === "ready" || probe === "stale") && daemonPidAlive(existing.pid)) {
+          terminateDaemonProcess(existing.pid);
+          await waitForProcessExit(existing.pid);
+        }
+      }
+      clearDaemonRegistry();
+
+      const service = createDaemonSystemService(entry, args);
+      service.install();
+      const registry = await waitForReadyDaemon(
+        { expectedVersion: VERSION, minimumStartedAt: statSync(entry).mtimeMs },
+        readDaemonRegistry,
+      );
+      console.log(`Daemon system service installed for ${service.status().platform}.`);
+      console.log(`Daemon running at ${registry.url} (PID: ${registry.pid})`);
+    });
+
+  cmd
+    .command("uninstall")
+    .description("Remove the daemon from automatic system startup")
+    .action(async () => {
+      const entry = process.argv[1];
+      if (!entry) throw new Error("Cannot locate CLI entrypoint.");
+      const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
+      const service = createDaemonSystemService(entry);
+      if (!service.isInstalled()) {
+        console.log("Daemon system service is not installed.");
+        return;
+      }
+      const registry = readDaemonRegistry();
+      service.uninstall();
+      if (registry && daemonPidAlive(registry.pid)) {
+        terminateDaemonProcess(registry.pid);
+        await waitForProcessExit(registry.pid);
+      }
+      clearDaemonRegistry();
+      console.log("Daemon system service uninstalled.");
+    });
+
+  cmd
+    .command("watchdog", { hidden: true })
+    .description("Check the local daemon once and start it when needed")
+    .allowUnknownOption()
+    .argument("<serve-command>")
+    .argument("[serve-args...]")
+    .action(async (serveCommand: string, serveArgs: string[]) => {
+      if (serveCommand !== "serve") throw new Error("Daemon watchdog only accepts the serve command");
+      const entry = process.argv[1];
+      if (!entry) throw new Error("Cannot locate CLI entrypoint.");
+      const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
+      const registry = readDaemonRegistry();
+      const probeOptions = { expectedVersion: VERSION, minimumStartedAt: statSync(entry).mtimeMs };
+      const status = registry ? await probeDaemonRegistry(registry, probeOptions) : "unreachable";
+      if (status === "ready") return;
+      if (registry && status === "stale") {
+        terminateDaemonProcess(registry.pid);
+        await waitForProcessExit(registry.pid);
+      }
+      clearDaemonRegistry();
+      const spawned = spawnDaemonProcess(entry, [serveCommand, ...serveArgs]);
+      await waitForReadyDaemon(probeOptions, readDaemonRegistry, () => {
+        if (spawned.failure()) throw daemonStartupError(spawned);
+      });
     });
 
   cmd
@@ -148,12 +246,15 @@ export function createDaemonCommand(): Command {
     .description("Show daemon status")
     .action(async () => {
       const { readDaemonRegistry } = await import("@openharness/server");
+      const entry = process.argv[1];
+      const service = entry ? createDaemonSystemService(entry) : undefined;
+      const serviceStatus = service?.status();
+      console.log(`System service: ${serviceStatus?.state ?? "unknown"}${serviceStatus ? ` (${serviceStatus.platform})` : ""}`);
       const registry = readDaemonRegistry();
       if (!registry) {
         console.log("Daemon: stopped");
         return;
       }
-      const entry = process.argv[1];
       const probe = await probeDaemonRegistry(registry, {
         expectedVersion: VERSION,
         ...(entry ? { minimumStartedAt: statSync(entry).mtimeMs } : {}),
@@ -169,7 +270,20 @@ export function createDaemonCommand(): Command {
     .description("Stop the daemon")
     .action(async () => {
       const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
+      const entry = process.argv[1];
+      const service = entry ? createDaemonSystemService(entry) : undefined;
       const registry = readDaemonRegistry();
+      if (service?.isInstalled()) {
+        service.stop();
+        if (registry && daemonPidAlive(registry.pid)) {
+          terminateDaemonProcess(registry.pid);
+          await waitForProcessExit(registry.pid);
+        }
+        if (registry) console.log(`Daemon system service stopped (last PID: ${registry.pid})`);
+        else console.log("Daemon system service stopped.");
+        clearDaemonRegistry();
+        return;
+      }
       if (!registry) {
         console.log("Daemon is not running.");
         return;
@@ -184,4 +298,25 @@ export function createDaemonCommand(): Command {
     });
 
   return cmd;
+}
+
+async function waitForReadyDaemon(
+  probeOptions: { expectedVersion: string; minimumStartedAt?: number },
+  readRegistry: () => DaemonRegistry | undefined,
+  checkFailure?: () => void,
+): Promise<DaemonRegistry> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const registry = readRegistry();
+    if (registry && await probeDaemonRegistry(registry, probeOptions) === "ready") return registry;
+    checkFailure?.();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("The OpenHarness daemon did not become ready within 10 seconds");
+}
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 50 && daemonPidAlive(pid); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (daemonPidAlive(pid)) throw new Error(`Daemon process did not stop: ${pid}`);
 }

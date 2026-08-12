@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 
@@ -9,6 +9,7 @@ export interface DaemonInvocationOptions {
   execPath?: string;
   nodePath?: string;
   tsxImport?: string;
+  locateNode?: () => string | undefined;
 }
 
 export interface SpawnedDaemonProcess {
@@ -33,12 +34,29 @@ export function resolveDaemonInvocation(
 ): { command: string; args: string[] } {
   const bunRuntime = options.bunRuntime ?? "bun" in process.versions;
   const command = bunRuntime
-    ? options.nodePath ?? process.env.OPENHARNESS_NODE_EXECUTABLE ?? "node"
+    ? options.nodePath
+      ?? process.env.OPENHARNESS_NODE_EXECUTABLE
+      ?? options.locateNode?.()
+      ?? locateNodeExecutable()
+      ?? "node"
     : options.execPath ?? process.execPath;
   const loaderArgs = isTypeScriptEntry(entry)
     ? ["--import", options.tsxImport ?? import.meta.resolve("tsx")]
     : [];
   return { command, args: [...loaderArgs, entry, ...args] };
+}
+
+export function locateNodeExecutable(platform: NodeJS.Platform = process.platform): string | undefined {
+  const command = platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(command, [platform === "win32" ? "node.exe" : "node"], {
+    encoding: "utf-8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) return undefined;
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
 }
 
 export function spawnDaemonProcess(entry: string, args: string[]): SpawnedDaemonProcess {

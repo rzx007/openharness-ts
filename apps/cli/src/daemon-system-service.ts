@@ -1,0 +1,415 @@
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+
+import { getLogsDir } from "@openharness/core";
+
+import {
+  resolveDaemonInvocation,
+  type DaemonInvocationOptions,
+} from "./daemon-process.js";
+
+const WINDOWS_TASK_NAME = "OpenHarness Daemon";
+const SERVICE_LABEL = "dev.openharness.daemon";
+const WINDOWS_REGISTER_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  "$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name",
+  "$action = New-ScheduledTaskAction -Execute $env:OHS_EXECUTABLE -Argument $env:OHS_TASK_ARGUMENTS -WorkingDirectory $env:OHS_WORKING_DIRECTORY",
+  "$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $identity",
+  "$watchdogTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(2) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)",
+  "$triggers = @($logonTrigger, $watchdogTrigger)",
+  "$principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited",
+  "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew",
+  `Register-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}' -Description 'Keeps the local OpenHarness daemon running after sign-in.' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Force | Out-Null`,
+  `Start-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}'`,
+].join("; ");
+
+export type DaemonSystemServiceState = "not-installed" | "stopped" | "running" | "unknown";
+
+export interface DaemonSystemServiceStatus {
+  platform: NodeJS.Platform;
+  state: DaemonSystemServiceState;
+  configPath?: string;
+  detail?: string;
+}
+
+export interface SystemCommandResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+}
+
+export interface DaemonServiceInvocation {
+  command: string;
+  args: string[];
+  cwd: string;
+}
+
+export interface DaemonSystemServiceOptions {
+  invocation: DaemonServiceInvocation;
+  platform?: NodeJS.Platform;
+  homeDir?: string;
+  logsDir?: string;
+  uid?: number;
+  runCommand?: (command: string, args: string[], env?: NodeJS.ProcessEnv) => SystemCommandResult;
+}
+
+export interface CreateDaemonSystemServiceOptions extends DaemonInvocationOptions {
+  platform?: NodeJS.Platform;
+  homeDir?: string;
+  logsDir?: string;
+  uid?: number;
+  cwd?: string;
+  runCommand?: DaemonSystemServiceOptions["runCommand"];
+}
+
+export class DaemonSystemService {
+  private readonly platform: NodeJS.Platform;
+  private readonly homeDir: string;
+  private readonly logsDir: string;
+  private readonly uid?: number;
+  private readonly runCommand: NonNullable<DaemonSystemServiceOptions["runCommand"]>;
+
+  constructor(private readonly options: DaemonSystemServiceOptions) {
+    this.platform = options.platform ?? process.platform;
+    this.homeDir = options.homeDir ?? homedir();
+    this.logsDir = options.logsDir ?? getLogsDir();
+    this.uid = options.uid ?? process.getuid?.();
+    this.runCommand = options.runCommand ?? runSystemCommand;
+  }
+
+  status(): DaemonSystemServiceStatus {
+    if (this.platform === "win32") return this.windowsStatus();
+    const configPath = this.configPath();
+    if (!existsSync(configPath)) return { platform: this.platform, state: "not-installed", configPath };
+
+    if (this.platform === "darwin") {
+      const result = this.runCommand("launchctl", ["print", this.launchdTarget()]);
+      if (result.status !== 0) return { platform: this.platform, state: "stopped", configPath };
+      const match = /\bstate\s*=\s*([^\r\n]+)/.exec(result.stdout);
+      return {
+        platform: this.platform,
+        state: match?.[1]?.trim() === "running" ? "running" : "unknown",
+        configPath,
+        ...(match?.[1] ? { detail: match[1].trim() } : {}),
+      };
+    }
+
+    if (this.platform === "linux") {
+      const result = this.runCommand("systemctl", ["--user", "is-active", SERVICE_LABEL]);
+      const detail = result.stdout.trim() || result.stderr.trim();
+      return {
+        platform: this.platform,
+        state: detail === "active" ? "running" : detail === "inactive" || detail === "failed" ? "stopped" : "unknown",
+        configPath,
+        ...(detail ? { detail } : {}),
+      };
+    }
+
+    return { platform: this.platform, state: "not-installed" };
+  }
+
+  isInstalled(): boolean {
+    return this.status().state !== "not-installed";
+  }
+
+  install(): void {
+    mkdirSync(this.logsDir, { recursive: true });
+    if (this.platform === "win32") {
+      this.stopWindowsTask();
+      this.checked("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        WINDOWS_REGISTER_SCRIPT,
+      ], {
+        OHS_EXECUTABLE: this.options.invocation.command,
+        OHS_TASK_ARGUMENTS: serializeWindowsArguments(this.options.invocation.args),
+        OHS_WORKING_DIRECTORY: this.options.invocation.cwd,
+      });
+      return;
+    }
+
+    const configPath = this.configPath();
+    mkdirSync(dirname(configPath), { recursive: true });
+    if (this.platform === "darwin") {
+      this.runCommand("launchctl", ["bootout", this.launchdTarget()]);
+      writeFileSync(configPath, this.launchdPlist(), "utf-8");
+      this.checked("launchctl", ["bootstrap", this.launchdDomain(), configPath]);
+      return;
+    }
+    if (this.platform === "linux") {
+      this.runCommand("systemctl", ["--user", "stop", SERVICE_LABEL]);
+      writeFileSync(configPath, this.systemdUnit(), "utf-8");
+      this.checked("systemctl", ["--user", "daemon-reload"]);
+      this.checked("systemctl", ["--user", "enable", "--now", SERVICE_LABEL]);
+      return;
+    }
+    throw new Error(`Daemon system service is not supported on ${this.platform}`);
+  }
+
+  uninstall(): void {
+    const current = this.status();
+    if (current.state === "not-installed") return;
+    if (this.platform === "win32") {
+      this.stopWindowsTask();
+      this.checked("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Unregister-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`,
+      ]);
+      return;
+    }
+
+    const configPath = this.configPath();
+    if (this.platform === "darwin") {
+      if (current.state !== "stopped") this.checked("launchctl", ["bootout", this.launchdTarget()]);
+      rmSync(configPath, { force: true });
+      return;
+    }
+    if (this.platform === "linux") {
+      this.checked("systemctl", ["--user", "disable", "--now", SERVICE_LABEL]);
+      rmSync(configPath, { force: true });
+      this.checked("systemctl", ["--user", "daemon-reload"]);
+      this.runCommand("systemctl", ["--user", "reset-failed", SERVICE_LABEL]);
+      return;
+    }
+    throw new Error(`Daemon system service is not supported on ${this.platform}`);
+  }
+
+  start(): void {
+    this.assertInstalled();
+    if (this.platform === "win32") {
+      this.checked("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Enable-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}' | Out-Null; Start-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}'`,
+      ]);
+    } else if (this.platform === "darwin") {
+      const current = this.status();
+      if (current.state === "stopped") this.checked("launchctl", ["bootstrap", this.launchdDomain(), this.configPath()]);
+      else this.checked("launchctl", ["kickstart", "-k", this.launchdTarget()]);
+    } else if (this.platform === "linux") {
+      this.checked("systemctl", ["--user", "start", SERVICE_LABEL]);
+    }
+  }
+
+  stop(): void {
+    const current = this.status();
+    if (current.state === "not-installed" || current.state === "stopped") return;
+    if (this.platform === "win32") this.stopWindowsTask(true, true);
+    else if (this.platform === "darwin") this.checked("launchctl", ["bootout", this.launchdTarget()]);
+    else if (this.platform === "linux") this.checked("systemctl", ["--user", "stop", SERVICE_LABEL]);
+  }
+
+  restart(): void {
+    this.assertInstalled();
+    if (this.platform === "win32") {
+      this.stopWindowsTask(true);
+      this.start();
+    } else if (this.platform === "darwin") {
+      this.runCommand("launchctl", ["bootout", this.launchdTarget()]);
+      this.checked("launchctl", ["bootstrap", this.launchdDomain(), this.configPath()]);
+    } else if (this.platform === "linux") {
+      this.checked("systemctl", ["--user", "restart", SERVICE_LABEL]);
+    }
+  }
+
+  private windowsStatus(): DaemonSystemServiceStatus {
+    const script = `$task = Get-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}' -ErrorAction SilentlyContinue; if ($null -eq $task) { 'not-installed' } else { $task.State.ToString().ToLowerInvariant() }`;
+    const result = this.runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+    if (result.error) throw new Error(`Cannot query Windows Task Scheduler: ${result.error.message}`);
+    if (result.status !== 0) throw new Error(`Cannot query Windows Task Scheduler: ${result.stderr.trim() || `exit ${result.status}`}`);
+    const detail = result.stdout.trim();
+    const state = detail === "not-installed"
+      ? "not-installed"
+      : detail === "disabled"
+        ? "stopped"
+        : detail
+          ? "running"
+          : "unknown";
+    return { platform: this.platform, state, ...(detail ? { detail } : {}) };
+  }
+
+  private stopWindowsTask(required = false, disable = false): void {
+    const commands = [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      [
+        ...(disable ? [`Disable-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}' -ErrorAction SilentlyContinue | Out-Null`] : []),
+        `Stop-ScheduledTask -TaskName '${WINDOWS_TASK_NAME}' -ErrorAction SilentlyContinue`,
+      ].join("; "),
+    ];
+    const result = this.runCommand("powershell.exe", commands);
+    if (required && (result.error || result.status !== 0)) {
+      throw new Error(`Cannot stop Windows scheduled task: ${result.error?.message ?? (result.stderr.trim() || `exit ${result.status}`)}`);
+    }
+  }
+
+  private assertInstalled(): void {
+    if (!this.isInstalled()) throw new Error("OpenHarness daemon system service is not installed");
+  }
+
+  private checked(command: string, args: string[], extraEnv?: NodeJS.ProcessEnv): SystemCommandResult {
+    const result = this.runCommand(command, args, extraEnv);
+    if (result.error || result.status !== 0) {
+      const detail = result.error?.message ?? (result.stderr.trim() || result.stdout.trim() || `exit ${result.status}`);
+      throw new Error(`Failed to manage daemon system service: ${command}: ${detail}`);
+    }
+    return result;
+  }
+
+  private configPath(): string {
+    if (this.platform === "darwin") return join(this.homeDir, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
+    if (this.platform === "linux") return join(this.homeDir, ".config", "systemd", "user", `${SERVICE_LABEL}.service`);
+    throw new Error(`Daemon system service configuration is not file-based on ${this.platform}`);
+  }
+
+  private launchdDomain(): string {
+    if (this.uid === undefined) throw new Error("Cannot determine the current user ID for launchd");
+    return `gui/${this.uid}`;
+  }
+
+  private launchdTarget(): string {
+    return `${this.launchdDomain()}/${SERVICE_LABEL}`;
+  }
+
+  private launchdPlist(): string {
+    const invocation = this.options.invocation;
+    const programArguments = [invocation.command, ...invocation.args]
+      .map((value) => `      <string>${xmlEscape(value)}</string>`)
+      .join("\n");
+    const logPath = join(this.logsDir, "daemon.log");
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${SERVICE_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+${programArguments}
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${xmlEscape(invocation.cwd)}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>${xmlEscape(logPath)}</string>
+    <key>StandardErrorPath</key>
+    <string>${xmlEscape(logPath)}</string>
+  </dict>
+</plist>
+`;
+  }
+
+  private systemdUnit(): string {
+    const invocation = this.options.invocation;
+    const command = [invocation.command, ...invocation.args].map(systemdQuote).join(" ");
+    return `[Unit]
+Description=OpenHarness daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${command}
+WorkingDirectory=${systemdQuote(invocation.cwd)}
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:${systemdQuote(join(this.logsDir, "daemon.log"))}
+StandardError=append:${systemdQuote(join(this.logsDir, "daemon.log"))}
+
+[Install]
+WantedBy=default.target
+`;
+  }
+}
+
+export function createDaemonSystemService(
+  entry: string,
+  serveArgs: string[] = ["serve", "--register", "--host", "127.0.0.1", "--port", "0"],
+  options: CreateDaemonSystemServiceOptions = {},
+): DaemonSystemService {
+  const platform = options.platform ?? process.platform;
+  const invocationArgs = platform === "win32"
+    ? ["daemon", "watchdog", ...serveArgs]
+    : serveArgs;
+  const invocation = resolveDaemonInvocation(entry, invocationArgs, options);
+  return new DaemonSystemService({
+    invocation: {
+      ...invocation,
+      cwd: options.cwd ?? process.cwd(),
+    },
+    platform,
+    homeDir: options.homeDir,
+    logsDir: options.logsDir,
+    uid: options.uid,
+    runCommand: options.runCommand,
+  });
+}
+
+export function serializeWindowsArguments(args: string[]): string {
+  return args.map(quoteWindowsArgument).join(" ");
+}
+
+function quoteWindowsArgument(value: string): string {
+  let result = '"';
+  let backslashes = 0;
+  for (const character of value) {
+    if (character === "\\") {
+      backslashes += 1;
+    } else if (character === '"') {
+      result += "\\".repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+    } else {
+      result += "\\".repeat(backslashes) + character;
+      backslashes = 0;
+    }
+  }
+  return result + "\\".repeat(backslashes * 2) + '"';
+}
+
+function xmlEscape(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function systemdQuote(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
+}
+
+function runSystemCommand(command: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}): SystemCommandResult {
+  const result = spawnSync(command, args, {
+    encoding: "utf-8",
+    windowsHide: true,
+    env: { ...process.env, ...extraEnv },
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    ...(result.error ? { error: result.error } : {}),
+  };
+}

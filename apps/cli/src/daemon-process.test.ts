@@ -29,6 +29,16 @@ describe("resolveDaemonInvocation", () => {
     });
   });
 
+  it("resolves an absolute Node path for a long-running daemon launched from Bun", () => {
+    expect(resolveDaemonInvocation("D:/repo/apps/cli/dist/index.js", ["serve"], {
+      bunRuntime: true,
+      locateNode: () => "D:/node/node.exe",
+    })).toEqual({
+      command: "D:/node/node.exe",
+      args: ["D:/repo/apps/cli/dist/index.js", "serve"],
+    });
+  });
+
   it("uses the current Node executable for a bundled CLI", () => {
     expect(resolveDaemonInvocation("/repo/apps/cli/dist/index.js", ["serve"], {
       bunRuntime: false,
