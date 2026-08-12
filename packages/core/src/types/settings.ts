@@ -8,6 +8,7 @@ export interface McpServerConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  cwd?: string;
   // http / sse
   url?: string;
   headers?: Record<string, string>;

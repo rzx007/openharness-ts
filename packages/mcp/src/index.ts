@@ -1,9 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { McpServerConfig, ToolDefinition } from "@openharness/core";
+import type { McpServerConfig, Settings, ToolDefinition } from "@openharness/core";
+import { SandboxStdioClientTransport } from "./sandbox-stdio-transport.js";
 
 export type { McpServerConfig };
 
@@ -75,6 +75,8 @@ export class McpClientManager {
   private connections = new Map<string, McpConnection>();
   private clients = new Map<string, Client>();
   private transports = new Map<string, Transport>();
+
+  constructor(private readonly options: { cwd?: string; settings?: Settings; sessionId?: string } = {}) {}
 
   async connect(name: string, config: McpServerConfig): Promise<McpConnection> {
     const kind = resolveTransportKind(config);
@@ -170,10 +172,13 @@ export class McpClientManager {
         });
       case "stdio":
       default:
-        return new StdioClientTransport({
+        return new SandboxStdioClientTransport({
           command: config.command!,
           args: config.args,
           env: config.env as Record<string, string> | undefined,
+          cwd: config.cwd ?? this.options.cwd,
+          settings: this.options.settings,
+          sessionId: this.options.sessionId,
         });
     }
   }

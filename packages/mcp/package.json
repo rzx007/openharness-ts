@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
-    "@openharness/core": "workspace:*"
+    "@openharness/core": "workspace:*",
+    "@openharness/sandbox": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

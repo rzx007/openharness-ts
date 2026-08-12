@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpClientManager, resolveTransportKind } from "./index.js";
 import type { McpConnection, McpToolInfo, McpResourceInfo } from "./index.js";
+import { SandboxStdioClientTransport } from "./sandbox-stdio-transport.js";
+import { createProcess } from "@openharness/sandbox";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
   const tools = [
@@ -30,6 +34,11 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
 
 vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   StdioClientTransport: vi.fn().mockImplementation(() => ({ kind: "stdio" })),
+  getDefaultEnvironment: vi.fn(() => ({ PATH: "/usr/bin" })),
+}));
+
+vi.mock("@openharness/sandbox", () => ({
+  createProcess: vi.fn(),
 }));
 
 vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
@@ -238,12 +247,7 @@ describe("McpClientManager", () => {
     expect(opts!.requestInit!.headers).toEqual(headers);
   });
 
-  it("stdio servers still go through StdioClientTransport", async () => {
-    const { StdioClientTransport } = await import(
-      "@modelcontextprotocol/sdk/client/stdio.js"
-    );
-    vi.mocked(StdioClientTransport).mockClear();
-
+  it("stdio servers use the sandbox-aware stdio transport", async () => {
     const conn = await manager.connect("stdio-srv", {
       command: "node",
       args: ["server.js"],
@@ -251,7 +255,39 @@ describe("McpClientManager", () => {
 
     expect(conn.status).toBe("connected");
     expect(conn.transport).toBe("stdio");
-    expect(StdioClientTransport).toHaveBeenCalledTimes(1);
+    expect(manager["transports"].get("stdio-srv")).toBeInstanceOf(SandboxStdioClientTransport);
+  });
+
+  it("sandbox stdio transport starts MCP servers through createProcess", async () => {
+    const child = makeChildProcess();
+    vi.mocked(createProcess).mockResolvedValueOnce(child as any);
+    const transport = new SandboxStdioClientTransport({
+      command: "node",
+      args: ["server.js"],
+      env: { TOKEN: "abc" },
+      cwd: "/repo",
+      settings: {
+        model: "m",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+      sessionId: "s1",
+    });
+
+    const started = transport.start();
+    await Promise.resolve();
+    child.emit("spawn");
+    await started;
+
+    expect(createProcess).toHaveBeenCalledWith(["node", "server.js"], expect.objectContaining({
+      cwd: "/repo",
+      sessionId: "s1",
+      env: { PATH: "/usr/bin", TOKEN: "abc" },
+      stdio: ["pipe", "pipe", "inherit"],
+      detached: false,
+    }));
   });
 
   it("authConfigured reflects headers (http) and env (stdio)", async () => {
@@ -334,6 +370,31 @@ describe("McpClientManager", () => {
     expect(conn.resourceError!.message).toContain("connection reset");
   });
 });
+
+function makeChildProcess(): EventEmitter & {
+  stdin: PassThrough;
+  stdout: PassThrough;
+  stderr: PassThrough;
+  kill: ReturnType<typeof vi.fn>;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+} {
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: PassThrough;
+    stdout: PassThrough;
+    stderr: PassThrough;
+    kill: ReturnType<typeof vi.fn>;
+    exitCode: number | null;
+    signalCode: NodeJS.Signals | null;
+  };
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = vi.fn();
+  child.exitCode = null;
+  child.signalCode = null;
+  return child;
+}
 
 describe("resolveTransportKind", () => {
   it("infers http from url", () => {

@@ -1,0 +1,166 @@
+import type { IOType } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import process from "node:process";
+import { PassThrough, type Stream } from "node:stream";
+import type { Settings } from "@openharness/core";
+import { createProcess } from "@openharness/sandbox";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import {
+  getDefaultEnvironment,
+  type StdioServerParameters,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+
+export interface SandboxStdioClientTransportOptions extends StdioServerParameters {
+  settings?: Settings;
+  sessionId?: string;
+}
+
+/**
+ * MCP stdio transport that starts the server through OpenHarness' process
+ * factory, so Docker/SRT/fail-closed rules apply to MCP servers too.
+ */
+export class SandboxStdioClientTransport implements Transport {
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: (message: JSONRPCMessage) => void;
+
+  private process?: ChildProcess;
+  private readonly readBuffer = new ReadBuffer();
+  private readonly stderrStream: PassThrough | null;
+
+  constructor(private readonly options: SandboxStdioClientTransportOptions) {
+    this.stderrStream = options.stderr === "pipe" || options.stderr === "overlapped"
+      ? new PassThrough()
+      : null;
+  }
+
+  async start(): Promise<void> {
+    if (this.process) {
+      throw new Error("SandboxStdioClientTransport already started");
+    }
+    const cwd = this.options.cwd ?? process.cwd();
+    const env = {
+      ...getDefaultEnvironment(),
+      ...this.options.env,
+    };
+    const stderr = this.stderrStream ? "pipe" : this.options.stderr ?? "inherit";
+    const child = await createProcess(
+      [this.options.command, ...(this.options.args ?? [])],
+      {
+        cwd,
+        settings: this.options.settings,
+        sessionId: this.options.sessionId,
+        env,
+        stdio: ["pipe", "pipe", stderr as IOType],
+        detached: false,
+      },
+    );
+    this.process = child;
+
+    await new Promise<void>((resolve, reject) => {
+      let started = false;
+      const resolveStarted = () => {
+        if (started) return;
+        started = true;
+        resolve();
+      };
+      const rejectStarted = (error: Error) => {
+        if (started) return;
+        started = true;
+        reject(error);
+      };
+
+      child.once("error", (error: Error) => {
+        rejectStarted(error);
+        this.onerror?.(error);
+      });
+      child.once("spawn", resolveStarted);
+      child.on("close", (code, signal) => {
+        this.process = undefined;
+        if (!started) {
+          rejectStarted(new Error(`MCP stdio process exited before startup: code=${code ?? "null"} signal=${signal ?? "null"}`));
+        }
+        this.onclose?.();
+      });
+      child.stdin?.on("error", (error: Error) => this.onerror?.(error));
+      child.stdout?.on("data", (chunk: Buffer | string) => {
+        this.readBuffer.append(Buffer.from(chunk));
+        this.processReadBuffer();
+      });
+      child.stdout?.on("error", (error: Error) => this.onerror?.(error));
+      if (this.stderrStream && child.stderr) child.stderr.pipe(this.stderrStream);
+      setImmediate(() => {
+        if (child.pid !== undefined) resolveStarted();
+      });
+    });
+  }
+
+  get stderr(): Stream | null {
+    return this.stderrStream ?? this.process?.stderr ?? null;
+  }
+
+  get pid(): number | null {
+    return this.process?.pid ?? null;
+  }
+
+  async close(): Promise<void> {
+    if (this.process) {
+      const processToClose = this.process;
+      this.process = undefined;
+      const closePromise = new Promise<void>((resolve) => {
+        processToClose.once("close", () => resolve());
+      });
+      try {
+        processToClose.stdin?.end();
+      } catch {
+        // ignore
+      }
+      await Promise.race([closePromise, sleep(2_000)]);
+      if (processToClose.exitCode === null) {
+        try {
+          processToClose.kill("SIGTERM");
+        } catch {
+          // ignore
+        }
+        await Promise.race([closePromise, sleep(2_000)]);
+      }
+      if (processToClose.exitCode === null) {
+        try {
+          processToClose.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+      }
+    }
+    this.readBuffer.clear();
+  }
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    if (!this.process?.stdin) throw new Error("Not connected");
+    const json = serializeMessage(message);
+    await new Promise<void>((resolve) => {
+      if (this.process!.stdin!.write(json)) resolve();
+      else this.process!.stdin!.once("drain", resolve);
+    });
+  }
+
+  private processReadBuffer(): void {
+    while (true) {
+      try {
+        const message = this.readBuffer.readMessage();
+        if (message === null) break;
+        this.onmessage?.(message);
+      } catch (error) {
+        this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref();
+  });
+}

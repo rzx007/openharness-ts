@@ -592,7 +592,7 @@ async function createOpenHarnessAgentInternal(
       });
     }
 
-    const mcpManager = new McpClientManager();
+    const mcpManager = new McpClientManager({ cwd, settings, sessionId: options.sessionId });
     const mcpServers = options.mcpServers ?? discovery.mcpServers;
     if (Object.keys(mcpServers).length > 0) await mcpManager.connectAll(mcpServers);
     for (const tool of mcpManager.getAsToolDefinitions()) runtime.toolRegistry.register(tool);
