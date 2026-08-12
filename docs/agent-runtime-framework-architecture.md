@@ -1,19 +1,28 @@
-# Agent Runtime Framework Architecture
+# Agent Runtime 框架架构
 
-> 状态：当前实现与权威内部代码索引。programmatic 用法见 [OpenHarness Agent SDK](./agent-sdk.md)，生命周期终态与失败语义见 [Agent Lifecycle Contract](./agent-lifecycle-contract.md)，边界约束见 [Agent Framework Capability Boundary](./agent-framework-capability-boundary.md)，daemon 托管流程见 [Daemon Application Architecture](./daemon-application-architecture.md)。
+> 状态：描述当前实现，并作为内部代码索引。
+>
+> 用代码直接调用 agent 时，见 [OpenHarness Agent SDK](./agent-sdk.md)。
+>
+> 一次运行怎样算成功/失败，见 [Agent Lifecycle Contract](./agent-lifecycle-contract.md)。
+>
+> 框架和 daemon 各管什么，见 [Agent Framework Capability Boundary](./agent-framework-capability-boundary.md)。
+> daemon 如何托管 agent，见 [Daemon Application Architecture](./daemon-application-architecture.md)。
 
 ## 一句话模型
 
+把整套东西想成：
+
 ```text
-OpenHarnessAgent = QueryEngine + history + resources + active run + child directory
-AgentEvent       = framework 已经发生的执行事实
-onEvent          = framework 等待 application 可靠消费执行事实
-subscribe        = 不影响执行结果的普通观察
-requestPermission = framework 必须等待外部返回值的决策
-Run/ChildHandle  = 调用方控制 live execution 的能力
+OpenHarnessAgent = 对话引擎 + 历史记录 + 资源 + 当前这一轮运行 + 子 agent 目录
+AgentEvent       = 「已经发生了什么」的事实记录
+onEvent          = 框架要求上层「必须可靠地处理」这些事实
+subscribe        = 旁观记录/渲染，不参与执行结果
+requestPermission = 执行卡住，等外部点同意或拒绝
+Run/ChildHandle  = 调用方用来控制「还在跑的那一轮」的把手
 ```
 
-framework 不依赖 HTTP、daemon、SQLite session schema 或 UI。最小使用形态是：
+框架本身不依赖 HTTP、daemon、SQLite 会话表或 UI。最小用法：
 
 ```ts
 const agent = await createOpenHarnessAgent({ cwd: process.cwd() });
@@ -26,27 +35,27 @@ await agent.close();
 
 ## 核心对象
 
-| 对象 | 文件 | 职责 |
+| 对象 | 文件 | 职责（白话） |
 |---|---|---|
-| `OpenHarnessAgent` | `packages/agent-runtime/src/agent.ts` | public facade、资源与 active run 所有权 |
-| `FrameworkAgentRun` | `packages/agent-runtime/src/agent.ts` | 一轮执行、事件归一化、steer、interrupt、terminal barrier |
-| `AgentEventBus` | `packages/agent-runtime/src/event-source.ts` | agent 级有序 reliable sink 与隔离 observer delivery |
-| `AgentChildManager` | `packages/agent-runtime/src/child-agent.ts` | 当前 agent 的 direct child 生命周期与资源所有权 |
-| `AgentChildRegistry` | `packages/agent-runtime/src/child-agent.ts` | 一个 root tree 共享的全部 descendant handle 索引 |
-| child environment | `packages/agent-runtime/src/child-environment.ts` | worktree acquire/release |
-| `AgentSession` | `packages/core/src/agent-session.ts` | QueryEngine 的薄 session facade |
-| `QueryEngine` | `packages/core/src/engine/query-engine.ts` | model/tool loop 与 history |
-| execution contracts | `packages/core/src/types/runtime.ts` | events、effects、handles、internal execution context |
+| `OpenHarnessAgent` | `packages/agent-runtime/src/agent.ts` | 对外主入口；管资源，以及当前这一轮运行归谁 |
+| `FrameworkAgentRun` | `packages/agent-runtime/src/agent.ts` | 一轮执行：把内部事件整理成对外事件，支持中途插话、打断、等结束 |
+| `AgentEventBus` | `packages/agent-runtime/src/event-source.ts` | 按顺序把事件交给「必须处理」的监听器；旁观者不互相拖累 |
+| `AgentChildManager` | `packages/agent-runtime/src/child-agent.ts` | 管当前 agent **直接创建** 的子 agent：创建、运行、关闭 |
+| `AgentChildRegistry` | `packages/agent-runtime/src/child-agent.ts` | 整棵子树共用的「按 ID 查 handle」目录 |
+| child environment | `packages/agent-runtime/src/child-environment.ts` | 给子 agent 申请/释放工作目录（worktree） |
+| `AgentSession` | `packages/core/src/agent-session.ts` | 对 QueryEngine 的薄包装 |
+| `QueryEngine` | `packages/core/src/engine/query-engine.ts` | 真正跑「模型 ↔ 工具」循环，并维护历史 |
+| execution contracts | `packages/core/src/types/runtime.ts` | 事件、回调、handle、内部执行上下文的类型约定 |
 
 ## 创建流程
 
 ```mermaid
 flowchart TD
   Create["createOpenHarnessAgent(options)"]
-  Runtime["internal default composition"]
-  MCP["MCP / extensions / memory"]
+  Runtime["内部默认组装"]
+  MCP["MCP / 扩展 / memory"]
   Session["createAgentSession(QueryEngine)"]
-  Bus["AgentEventBus + requestPermission effect"]
+  Bus["事件总线 + 权限回调"]
   Children["AgentChildManager"]
   Agent["OpenHarnessAgent"]
 
@@ -57,148 +66,165 @@ flowchart TD
   Bus --> Agent
 ```
 
-`createOpenHarnessAgent()` 是唯一应用入口。它在内部组装 provider、QueryEngine、tools、hooks、permission policy、prompt、skills、plugins、MCP、memory、sandbox、event/effect 边界与 child lifecycle。`createOpenHarnessRuntime()` 不再从 package root 导出。
+应用侧只应调用 `createOpenHarnessAgent()`。它在内部组装：模型提供方、QueryEngine、工具、hooks、权限策略、prompt、skills、插件、MCP、memory、沙箱、事件/回调边界，以及子 agent 生命周期。
+`createOpenHarnessRuntime()` 已不再从包的公开入口导出。
 
 ## 一轮 submitMessage
 
 ```mermaid
 sequenceDiagram
-  participant Caller
+  participant Caller as 调用方
   participant Agent as OpenHarnessAgent
   participant Run as AgentRunHandle
   participant Session as AgentSession
   participant QE as QueryEngine
   participant Bus as AgentEventBus
 
-  Caller->>Agent: submitMessage(content, ids?)
-  Agent-->>Caller: AgentRunHandle
+  Caller->>Agent: submitMessage(内容, ids?)
+  Agent-->>Caller: AgentRunHandle（立刻返回）
   Run->>Bus: input.accepted
   Run->>Bus: run.started
-  Bus-->>Run: required listener settled
-  Run-->>Caller: started receipt resolves
-  Run->>Session: submitMessage(content, execution)
-  Session->>QE: submitMessage(content, execution)
-  loop provider/tool turns
-    QE-->>Run: StreamEvent
-    Run->>Bus: output/tool/usage event
+  Bus-->>Run: 「必须处理」的监听器处理完
+  Run-->>Caller: started 回执完成
+  Run->>Session: submitMessage(内容, execution)
+  Session->>QE: submitMessage(内容, execution)
+  loop 模型/工具回合
+    QE-->>Run: StreamEvent（仅内部）
+    Run->>Bus: 输出/工具/用量等对外事件
   end
   Run->>Bus: run.completed / failed / interrupted
-  Bus-->>Run: required listener settled
-  Run-->>Caller: result settled
+  Bus-->>Run: 「必须处理」的监听器处理完
+  Run-->>Caller: result 完成
 ```
 
-关键语义：
+关键约定：
 
-- `submitMessage()` 同步返回 live handle，执行在 microtask 中启动。
-- 同一 agent 同时只允许一个 active root run。
-- provider `StreamEvent` 只在 framework 内部存在；外部只观察 `AgentEvent`。
-- terminal event 被 required listener 消费后，`run.result` 才 settle。
-- `run.started` 被 required listener 消费后，`run.started` receipt 才 settle；child/HTTP 调用方不会拿到尚未 durable start 的 run。
-- listener 失败会使 run 失败；不会再通过同一个失败 listener 递归发送 terminal event。
-- `runMessage()` 只是 `await submitMessage(...).result` 的 convenience API。
+- `submitMessage()` **同步**返回一个还活着的 handle；真正执行在之后的 microtask 里启动。
+- 同一个 agent **同时只能有一轮**根级运行。
+- 模型流式事件（`StreamEvent`）只在框架内部流转；外面只看 `AgentEvent`。
+- 结束类事件被「必须处理」的监听器消费完之后，`run.result` 才会完成。
+- `run.started` 同理：必须处理的监听器消费完后，`run.started` 回执才完成。这样子 agent / HTTP 调用方不会拿到「其实还没真正开跑」的 run。
+- 监听器自己抛错，会让这一轮 run 失败；框架不会再通过**同一个已经失败的监听器**递归发结束事件。
+- `runMessage()` 只是 `await submitMessage(...).result` 的快捷写法。
 
-## Event / Effect / Handle
+## 事件 / 回调 / Handle：怎么选？
 
-选择规则：
-
-| 需要 | 使用 |
+| 你需要的是… | 用这个 |
 |---|---|
-| application 必须可靠消费“已经发生” | `onEvent` |
-| 日志、渲染等普通观察 | `agent.subscribe()` |
-| 执行必须等待外部决策 | `requestPermission` |
-| 外部主动控制仍存活的执行 | `AgentRunHandle` / `AgentChildHandle` |
+| 上层必须可靠地处理「已经发生的事」（例如持久化、记账） | `onEvent` |
+| 打日志、画界面等旁观，不影响执行结果 | `agent.subscribe()` |
+| 执行必须等外部决定（同意/拒绝） | `requestPermission` |
+| 主动控制还在跑的一轮（插话、打断） | `AgentRunHandle` / `AgentChildHandle` |
 
-当前 event 包含 input、run terminal、text delta、model turn boundary、tool、usage、domain、permission observation 和 child lifecycle。事件 payload 可序列化，不携带 Promise、resolver、AbortSignal 或 controls。
+当前事件涵盖：输入受理、运行结束、文本增量、模型回合边界、工具、用量、领域事件、权限过程观察、子 agent 生命周期。
+事件载荷可序列化，**不带** Promise、resolver、AbortSignal 或控制方法。
 
-`onEvent` 是单个、ordered、awaited host sink；失败会使当前 framework operation 失败。`subscribe()` 支持多个按事件顺序调用的 non-blocking observers；framework 不等待 observer 的异步结果，listener 异常与延迟都被隔离。当前唯一 effect 是 `requestPermission(request, scope)`，未配置时 framework 默认拒绝。
+补充说明：
+
+- `onEvent`：整条 agent 上只有一个；按顺序调用，且会 `await`。它失败 → 当前框架操作失败。
+- `subscribe()`：可以挂多个旁观者；按事件顺序调用，但**不等待**它们的异步结果。某个旁观者抛错或拖慢，不会拖垮框架。
+- 目前唯一需要「等返回值」的回调是 `requestPermission(request, scope)`。没配置时，框架默认拒绝。
 
 `AgentRunHandle` 提供：
 
 ```text
-started
-result
-steer(input)
-interrupt(reason?)
+started   // 这一轮何时真正开始
+result    // 这一轮最终结果
+steer(input)      // 中途插话（下一回合再吃进）
+interrupt(reason?) // 打断
 ```
 
-steer 在同步检查后先预占 framework pending FIFO，但此时 receipt **不会**成功。QueryEngine 每到一个仍可继续模型执行的 turn boundary，只取一个 steer：framework 先投递 `input.accepted(delivery=steer)`，再把该输入交给 QueryEngine 并单独结算 receipt。并发 steer 因而按多个 boundary 顺序消费；后一个投影失败不会把已经交付的前一个伪装成失败。若 provider/tool/event projection 先失败、run 被中断，或已没有剩余 turn，所有尚未消费的 receipt 都以 `AgentRunNotAcceptingInputError` 拒绝。
+### 中途插话（steer）怎么排队
 
-最终无工具回合和 max-turn boundary 会先关闭 steering，不再取走无法触发下一模型回合的输入。framework 只负责拒绝未消费 handle 请求；是否把 durable 输入转成 replacement run，是 daemon 的应用策略。
+1. 调用 `steer()` 时，框架先同步检查，并把请求放进待处理队列；此时回执**还不算成功**。
+2. QueryEngine 每到一个「还能继续跑模型」的回合边界，只取**一条** steer：先发 `input.accepted(delivery=steer)`，再把内容交给 QueryEngine，再单独把这条回执标成成功/失败。
+3. 多条并发 steer 会按多个回合边界依次消费；后面那条投影失败，不会把已经交付成功的前面那条假装成失败。
+4. 若模型/工具/事件投影先失败、run 被打断，或已经没有下一回合，队列里还没消费的回执一律以 `AgentRunNotAcceptingInputError` 拒绝。
+
+最后一轮「不再调工具」的回合，以及达到最大回合数的边界，会先关掉插话通道，避免取走「再也触发不了下一模型回合」的输入。
+框架只负责拒绝这些还没被消费的请求；要不要把「已持久化的输入」变成新一轮 run，是 daemon 的应用策略，不是框架的事。
 
 ## Tool 与权限
 
 ```text
 QueryEngine
-  -> permission checker
-  -> execution.emit(permission.requested)
-  -> execution.effects.requestPermission(request, scope)
-  -> execution.emit(permission.resolved)
-  -> approved: execute tool
-  -> denied/expired: return denied tool result
+  -> 权限检查
+  -> 发出 permission.requested 事件
+  -> 调用 requestPermission（等外部决定）
+  -> 发出 permission.resolved 事件
+  -> 同意：执行工具
+  -> 拒绝/超时：返回「被拒绝」的工具结果
 ```
 
-工具通过 `ToolContext.agent` 获得 framework-internal execution context。Agent、SendMessage、Workflow 使用 `context.agent.children`；domain telemetry 使用 `context.agent.emit(domain.event)`。
+工具通过 `ToolContext.agent` 拿到框架内部的执行上下文。
+Agent / SendMessage / Workflow 等工具用 `context.agent.children` 管子 agent；领域遥测用 `context.agent.emit(domain.event)`。
 
-## Child agent
+## 子 Agent
 
-`AgentChildManager` 完整拥有 child live lifecycle：
+`AgentChildManager` 完整拥有「直接创建的子 agent」的活体生命周期：
 
-1. 生成 canonical `childId` 与 `sessionId`。
-2. 在 tree-wide registry 中预检 sessionId；live 冲突在获取环境资源前失败。
-3. 通过 `AgentChildEnvironmentProvider` 获取 cwd/worktree lease。
-4. 把 handle 注册到 root tree 共享的 `AgentChildRegistry`，再发布 `child.created`。
-5. 递归创建共享 reliable event sink、observer stream 与 permission effect 的 `OpenHarnessAgent`。
-6. 启动 child run；child run 使用普通 input/run/output/tool events。
-7. active follow-up 调用当前 run 的 `steer()`；queue follow-up 串行启动下一轮。
-8. idle TTL 到期后保存 history、关闭重资源并发布 suspended；后续输入恢复同一 child。
-9. close/parent abort 先进入 `closing` 并拒绝所有新 input，再终止 run、等待任何 in-flight agent creation、释放环境并发布一次 `child.closed`。
+1. 生成规范的 `childId` 和 `sessionId`。
+2. 在整棵树的目录里预检 `sessionId`；若活体已冲突，在申请工作目录之前就失败。
+3. 通过 `AgentChildEnvironmentProvider` 申请 cwd / worktree。
+4. 把 handle 登记到根树共享的 `AgentChildRegistry`，再发布 `child.created`。
+5. 递归创建一个新的 `OpenHarnessAgent`，与父级共享：必须处理的事件出口、旁观者流、权限回调。
+6. 启动子 run；子 run 使用普通的 input / run / output / tool 事件。
+7. 活跃跟进：调用当前 run 的 `steer()`；排队跟进：串行启动下一轮。
+8. 空闲超时（TTL）到期后：保存历史、关掉重资源、发布 suspended；之后再有输入，会恢复同一个子 agent。
+9. `close` / 父级 abort：先进入 `closing` 并拒绝一切新输入 → 终止 run → 等任何进行中的 agent 创建结束 → 释放环境 → 只发布一次 `child.closed`。
 
-child run 返回的 `started` receipt 必须逐项匹配 manager 预分配的 `sessionId/inputId/runId`；不一致时 framework 中断该 run、关闭 child，并拒绝调用方，不能用本地 ID 覆盖 framework receipt。
+子 run 返回的 `started` 回执里，`sessionId` / `inputId` / `runId` 必须与 manager 预先分配的完全一致。不一致时：框架打断该 run、关闭子 agent，并拒绝调用方——**不能**用本地 ID 覆盖框架回执。
 
-caller 提供 child input ID 时，manager 在 live 实例内缓存最近 256 个已结算请求，加上全部未结算请求：相同 ID、相同 payload 返回同一结果，相同 ID、不同 payload 拒绝。这个窗口只保护 framework live handle；daemon 的长期 HTTP 幂等由 durable input/run 关系负责，因此 framework 不持有无界历史。
+若调用方自己提供 child 的 input ID：manager 在活体实例内缓存最近 256 个已完成请求，再加上全部未完成请求。
+相同 ID + 相同内容 → 返回同一结果；相同 ID + 不同内容 → 拒绝。
+这个窗口只保护框架活体 handle；daemon 的长期 HTTP 幂等由「持久化的 input/run 关系」负责，所以框架不会无限留历史。
 
-child command 只接受 canonical `childId`。`sessionId` 通过 tree-wide directory 的 `getBySessionId()` 查询；`agent@team` 不作为 command alias，因此同类型 worker 并行时不存在静默覆盖或关闭后 alias 丢失。
+子 agent 命令只接受规范的 `childId`。要用 `sessionId` 查找，走整棵树目录的 `getBySessionId()`。
+`agent@team` **不是**命令别名，因此同类型 worker 并行时，不会静默互相覆盖，也不会在关闭后丢别名。
 
-每个 `AgentChildManager` 只 close 自己直接拥有的 child；root 与所有递归 child 共享一个 `AgentChildRegistry`。因此 `rootAgent.children.get(id|getBySessionId)` 可以定位任意深度 descendant，而生命周期释放仍由创建它的 manager 负责。daemon 不向 framework 回传 taskId、host、controls 或 opaque projection state。
+每个 `AgentChildManager` 只关闭自己直接拥有的子 agent；根与所有递归子 agent 共享同一个 `AgentChildRegistry`。
+因此 `rootAgent.children.get(id)` / `getBySessionId(...)` 可以查到任意深度的后代，但真正释放资源仍由**创建它的那个 manager** 负责。
+daemon 不会向框架回传 taskId、host、controls 或「投影用的不透明状态」。
 
-## Agent operation state machine
+## Agent 操作状态机
 
 `OpenHarnessAgent.state` 是公开只读状态：
 
 ```text
-idle --submitMessage--> running --run.result settled--> idle
-idle --compact/remember--> maintaining --settled--> idle
-idle/running/maintaining --close--> closing --> closed
+idle --submitMessage--> running --run.result 完成--> idle
+idle --compact/remember--> maintaining --完成--> idle
+idle / running / maintaining --close--> closing --> closed
 ```
 
-互斥规则由同一个状态机执行，而不是由每个 API 各自检查：
+互斥由**同一套状态机**执行，而不是每个 API 各自 if 一下：
 
-- `submitMessage` 同步预占 `running`，所以两个同 tick 的 submit 也不可能同时启动。
-- `loadHistory`、`clear`、`setModel`、`compact`、`remember` 只允许从 `idle` 进入；冲突抛出 `AgentOperationConflictError`。
-- compact/remember 在整个异步 operation 期间保持 `maintaining`，不能与 run 或历史/模型修改穿插。
-- `close()` 幂等，进入 `closing` 后拒绝新 operation；active run 先 interrupt，maintenance 先 settle，然后 close children、drain reliable event sink、释放 runtime。各清理阶段全部执行，最后统一上报失败。
+- `submitMessage` 同步抢占 `running`，所以同一个 tick 里连发两次也不会同时开跑。
+- `loadHistory`、`clear`、`setModel`、`compact`、`remember` 只能从 `idle` 进入；冲突抛 `AgentOperationConflictError`。
+- `compact` / `remember` 在整个异步过程中保持 `maintaining`，不能和 run、历史/模型修改穿插。
+- `close()` 可重复调用：进入 `closing` 后拒绝新操作；先打断进行中的 run，等维护操作结束，再关子 agent、排空必须处理的事件、释放运行时。各清理阶段都会跑完，最后再统一上报失败。
 
-这层状态机是 framework 独立运行时的完整约束，不依赖 daemon。daemon 的 scope admission gate 只在多客户端应用形态上增加 session/cwd/global 策略。
+这层状态机是框架独立运行时的完整约束，不依赖 daemon。
+daemon 在多客户端场景下还会额外加 session / cwd / 全局层面的准入策略。
 
 ## 维护 API
 
 | API | 行为 |
 |---|---|
-| `getHistory/loadHistory/clear` | 管理 live conversation history |
-| `setModel` | 更新当前 model 与 QueryEngine |
-| `compact` | 压缩 live history |
-| `remember` | 从 history 提取 memory |
-| `getUsage` | 累计 token usage |
-| `inspect` | model/tools/hooks/MCP/sandbox 快照 |
-| `close` | interrupt run、close children、drain events、释放 runtime |
+| `getHistory` / `loadHistory` / `clear` | 管理当前内存里的对话历史 |
+| `setModel` | 更新当前模型与 QueryEngine |
+| `compact` | 压缩当前历史 |
+| `remember` | 从历史里提炼 memory |
+| `getUsage` | 累计 token 用量 |
+| `inspect` | 模型 / 工具 / hooks / MCP / 沙箱快照 |
+| `close` | 打断 run、关闭子 agent、排空事件、释放运行时 |
 
-## 不变量
+## 不变量（必须一直成立）
 
-- agent-runtime 不 import server/daemon。
-- framework 拥有执行状态和 live handles。
-- 单个 agent 的 run、maintenance、history/model mutation 与 close 服从同一 operation state machine。
-- application 只通过 `onEvent`、`subscribe`、`requestPermission` 与 handles 接入。
-- child 递归继承同一 provider/client、reliable event sink、observer stream 与 permission effect。
-- child 递归共享同一个 tree-wide handle directory，但不共享 manager ownership。
-- `AgentSession` 不再生成 ID、保存 callbacks 或组装 host。
-- 不存在 daemon adapter、run host 或 child projection public API。
+- `agent-runtime` 不 import server / daemon。
+- 执行状态和活着的 handle 由框架拥有。
+- 单个 agent 上：run、维护操作、历史/模型修改、close，服从同一套操作状态机。
+- 应用只通过 `onEvent`、`subscribe`、`requestPermission` 和各类 handle 接入。
+- 子 agent 递归继承同一套：模型客户端、必须处理的事件出口、旁观者流、权限回调。
+- 子 agent 递归共享同一棵「按 ID 查 handle」的目录，但**不共享** manager 的所有权（谁创建谁关闭）。
+- `AgentSession` 不再生成 ID、保存回调，或组装宿主环境。
+- 不存在对外的 daemon adapter、run host、或 child projection 公开 API。

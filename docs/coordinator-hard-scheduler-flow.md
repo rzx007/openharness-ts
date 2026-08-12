@@ -7,7 +7,7 @@
 ```text
 Coordinator  → 理解目标、提交 Workflow spec、汇总结果
 硬调度器     → 按排班表决定何时开工、重试、跳过、串行写冲突
-Agent runner → 通过 swarm / TaskManager 真正跑 worker
+Agent runner → 通过 framework child（或显式 external task adapter）真正跑 worker
 ```
 
 设计演进与路线图见 [`coordinator-hard-scheduler-design.md`](./coordinator-hard-scheduler-design.md)。Coordinator 模式 / agent 加载见 [`coordinator-agents-design.md`](./coordinator-agents-design.md)。
@@ -18,7 +18,7 @@ Agent runner → 通过 swarm / TaskManager 真正跑 worker
 
 1. **入口**：模型调 `Workflow` 工具（`run` / `resume` / `status`），或代码直接 `runWorkflow` / `runPersistentWorkflow`。
 2. **调度**：`runWorkflow` 维护 ready 队列、并发上限、失败策略、写冲突串行、预算与超时。
-3. **执行**：每个 task 经 `WorkflowRunner`（默认 `createAgentWorkflowRunner`）spawn worker → `TaskManager.awaitTask` → 结构化结果回填。
+3. **执行**：每个 task 经 `WorkflowRunner`（默认 `createAgentWorkflowRunner`）spawn framework child → `awaitChildAgent` → 结构化结果回填；显式 external worker 才走 TaskManager adapter。
 
 ```text
 ┌─ 模型 / 代码入口 ─────────────────────────────────────┐
@@ -40,7 +40,7 @@ Agent runner → 通过 swarm / TaskManager 真正跑 worker
                           │
                           ▼
 ┌─ Agent WorkflowRunner（每个 task）─────────────────────┐
-│ resume 有 taskManagerTaskId → 优先 await 旧任务         │
+│ resume 有 taskManagerTaskId → 优先 await 现有 worker    │
 │ 否则 swarm.spawnWorker → awaitTask → git diff 摘要     │
 │ 返回 summary / result / metadata / budget / status     │
 └────────────────────────────────────────────────────────┘
@@ -204,20 +204,22 @@ createAgentWorkflowRunner()(context)
     + pipeline input（mode=pipeline）
   │
   ├─ resumeFrom.metadata.taskManagerTaskId 存在
-  │    → awaitTask(旧 id)
+  │    → live framework child 存在：awaitChildAgent(旧 id)
+  │    → 否则：awaitTask(旧 durable/external task id)
   │    成功 → 映射结果 + git diff
   │    失败 → 记 resumeError，改走 spawn
   │
   └─ agent.children.spawnChildAgent(WorkflowWorkerSpawnConfig)
        isolate / permissionMode / tools / maxTurns（conserve 可覆盖）
-       → awaitTask(spawn.taskId, { timeoutMs })
+       → agent.children.awaitChildAgent(spawn.taskId, { timeoutMs })
+       → timeout 时 interruptChildAgent(spawn.taskId)
        → getDiffSummary（worktree/cwd git）
        → WorkflowWorkerResult
             status / summary / result
             metadata: agentId, taskManagerTaskId, backendType, worktree, diff, changedFiles
 ```
 
-调度器本身不依赖 swarm；adapter 放在 `@openharness/tools`，`@openharness/coordinator` 保持纯调度。
+调度器本身不依赖 swarm；adapter 放在 `@openharness/tools`，`@openharness/coordinator` 保持纯调度。显式注入的 external worker 仍可通过 `awaitTask` / `stopTask` adapter 接入；默认 framework worker 不经过 TaskManager projection。
 
 ## D. 持久化与恢复
 

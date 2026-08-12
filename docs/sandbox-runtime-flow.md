@@ -1,5 +1,79 @@
 # Sandbox Runtime 调用链
 
+> 本文是 Sandbox 运行边界的权威说明。代码入口以 `packages/sandbox/src/shell.ts` 为准。
+
+## 统一进程入口
+
+Agent Framework 能力触发的外部工作负载只通过两个 API 启动：
+
+```ts
+createShellProcess(command, { cwd, sessionId, settings, signal })
+createProcess(argv, { cwd, sessionId, settings, signal })
+```
+
+- `createShellProcess` 接收一整条命令文本，供 Bash、command hook、Cron 使用；在宿主机器上可以选 Bash 或系统默认命令行，在 Docker 中固定使用 `/bin/sh`。
+- `createProcess` 接收已经拆好的程序名和参数，不再让 shell 二次解释，供 Task argv 和 LSP/ripgrep 使用。
+- 两者用同一套规则决定命令在哪里运行：Sandbox 关闭时在宿主机器运行；SRT 开启时交给 SRT；Docker 开启时进入当前 `cwd + sessionId` 对应的容器。
+- `failIfUnavailable=true` 时没有匹配后端必须抛错，不允许偷偷回宿主执行。
+
+```mermaid
+flowchart LR
+    Action["Agent action"] --> Entry["createShellProcess / createProcess"]
+    Entry --> Off["Sandbox off: host process"]
+    Entry --> SRT["SRT: wrapped process"]
+    Entry --> Docker["Docker: scoped session.execCommand"]
+    Docker --> Scope["cwd + sessionId"]
+```
+
+当前入口矩阵：
+
+| 调用方 | 入口 | 执行边界 |
+|---|---|---|
+| Bash | `createShellProcess` | Sandbox workload |
+| TaskManager shell / argv / autodream | `createShellProcess` / `createProcess` | Sandbox workload |
+| command hook | `createShellProcess` | Sandbox workload |
+| Cron scheduled run / RemoteTrigger | `CronScheduler.trigger` -> `createShellProcess` | Sandbox workload |
+| LSP 的 ripgrep 查询 | `createProcess` | Sandbox workload |
+| Read / Write / Edit | Node filesystem + `sandboxPathError` | host-guarded file IO |
+| Glob / Grep 的 host ripgrep 加速 | direct host utility + `sandboxPathError` | host-guarded，明确例外 |
+| 主 daemon/TUI/frontend 自启动 | host process | application infrastructure |
+| git worktree / merge / runtime repo setup | host process | host workspace infrastructure |
+| MCP stdio transport | MCP SDK 内部启动 | 第三方 transport 边界，尚未接入 Sandbox |
+
+这里的“统一”针对 **Agent 工作负载**，不把 daemon 自启动、Docker CLI、git worktree 管理误当成模型命令。宿主例外必须出现在上表，不能在业务模块里静默新增 `child_process`。
+
+## 停止命令时发生什么
+
+不能只杀宿主机器上的 `docker exec`。如果只杀这一层，容器内的命令和它启动的后台进程可能继续运行。
+
+现在每次 Docker 命令都有自己的容器内进程组：
+
+```mermaid
+flowchart LR
+    Caller["Bash / Task / Hook / Cron"] --> Stop["signalProcessTree / AbortSignal"]
+    Stop --> Host["宿主进程: 停止整棵本地进程树"]
+    Stop --> Docker["Docker 命令: 读取本次执行的容器内进程组"]
+    Docker --> Term["先请求整组退出"]
+    Term --> Check{"仍在运行?"}
+    Check -->|"是"| Kill["强制结束整组"]
+    Check -->|"否"| Done["清理本次执行标记"]
+    Kill --> Done
+```
+
+- `process-control.ts` 提供统一的整棵进程停止入口。
+- `docker-backend.ts` 给每次容器命令分配执行编号，并记录容器内进程组。
+- `AbortSignal`、Bash 超时、TaskStop 和 runtime 关闭都走这套停止规则。
+- Docker 镜像必须提供 `setsid`、`sleep` 和 `/bin/kill`。缺少时启动直接失败，不会降级成可能清理不干净的执行。
+- 可复用容器关闭 runtime 时仍保留容器，但会先清掉该 runtime 启动且仍在运行的命令。
+
+## 当前未闭环
+
+1. Docker 整棵进程停止已经实现并有真实 E2E 用例，但本机 Docker daemon 未启动，本轮这些用例被跳过；还需要在可用的 Docker 环境或 CI 中实际跑通。
+2. Cron 已由主 daemon 托管，并使用 `cwd + cron:<jobId>` 启动自己的 Sandbox 范围。主 daemon 没运行时，Cron 也不运行。
+3. 主 daemon 已支持通过 `ohs daemon install` 交给 Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 管理；当前用户登录后自动启动，崩溃后由系统重启。
+4. MCP SDK 的 stdio transport 自己创建进程，还不能交给 Sandbox 启动。
+5. Glob/Grep 仍在宿主机器搜索，只做路径边界检查；后续要改成可选择宿主或容器的文件操作接口。
+
 Sandbox 有两条后端：
 
 - **`srt`**：用 Anthropic Sandbox Runtime（`@anthropic-ai/sandbox-runtime`）把**每条** shell 命令包一层。
@@ -41,9 +115,10 @@ Sandbox 有两条后端：
 | 可用性 | `packages/sandbox/src/availability.ts` | 平台 / `srt` / `bwrap` / `sandbox-exec` / Docker CLI·daemon |
 | 生命周期 | `packages/sandbox/src/lifecycle.ts` | `startSandboxRuntime`：按 backend 分支启动或 inert |
 | SRT 包装 | `packages/sandbox/src/srt-adapter.ts` | 写临时 settings，拼 `srt --settings … -c …` |
-| Docker 后端 | `packages/sandbox/src/docker-backend.ts` | `DockerSandboxSession`：`docker run` / `exec` / stop；Win 挂载 `/workspace` |
-| Session | `packages/sandbox/src/session.ts` | 进程内唯一 active sandbox session |
-| Shell helper | `packages/sandbox/src/shell.ts` | `createShellProcess`；宿主 `resolveShellArgv`（探测缓存）；容器 `resolveContainerShellArgv` |
+| Docker 后端 | `packages/sandbox/src/docker-backend.ts` | 启动容器、在容器里执行命令，并在停止时清理容器内整棵进程树 |
+| 进程停止 | `packages/sandbox/src/process-control.ts` | 给宿主、SRT、Docker 提供同一个“停止命令及其子进程”入口 |
+| Session | `packages/sandbox/src/session.ts` | 按 `cwd + sessionId` 保存当前可用的 Sandbox session |
+| 命令入口 | `packages/sandbox/src/shell.ts` | `createShellProcess` / `createProcess`；读取设置并选择宿主、SRT 或 Docker |
 | 路径校验 | `packages/sandbox/src/path-validator.ts` | 文件工具路径是否在 sandbox root / allow 列表 |
 | Runtime 挂载 | `packages/agent-runtime/src/default-runtime.ts` | `attachSandboxRuntime`：默认 runtime 组装后启动，docker 时注册 cleanup |
 | Bash | `packages/tools/src/shell/bash.ts` | timeout / 输出截断；spawn 走 `createShellProcess` |

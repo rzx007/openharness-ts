@@ -193,15 +193,14 @@ ohs plugin list
 ohs plugin install <path-or-package>
 ohs plugin uninstall <name>
 
-# Cron 定时任务（持久化到 ~/.openharness-ts/cron_jobs.json）
+# Cron 定时任务（由主 daemon 托管，保存到 daemon SQLite）
 ohs cron add <name> "<min hour dom month dow>" "<command>" [--cwd <dir>] [--timezone <tz>] [--disabled]
 ohs cron list
 ohs cron status
-ohs cron start
-ohs cron stop
 ohs cron toggle <name> on|off
-ohs cron history [-n <limit>]
-ohs cron logs <name> [-n <lines>]
+ohs cron run <name>
+ohs cron history [name] [-n <limit>]
+ohs cron logs <name> [-n <limit>]
 ohs cron remove <name>
 
 # Workflow run 管理（持久化到项目 .openharness/workflows）
@@ -221,6 +220,8 @@ ohs serve --host 127.0.0.1 --port 0 --register
 ohs daemon start
 ohs daemon status
 ohs daemon stop
+ohs daemon install
+ohs daemon uninstall
 
 # 配置
 ohs config show
@@ -271,7 +272,7 @@ OpenHarness-ts/
 │   ├── client/               # daemon HTTP/SSE typed client + event reducer（TUI/Web/Desktop 共用）
 │   ├── tools/                # 内置工具（createDefaultToolRegistry，当前 45）
 │   ├── server/               # daemon HTTP server、run engine、permission broker
-│   ├── services/             # 服务层（Compact、Session、Cron、Task、LSP、OAuth）
+│   ├── services/             # 服务层（Compact、Session、Cron、Task、LSP）
 │   ├── coordinator/          # 多 Agent 编排器
 │   ├── mcp/                  # MCP 协议客户端
 │   ├── channels/             # 通信通道（Stdio、HTTP、飞书）
@@ -398,10 +399,10 @@ OpenHarness-ts/
 │  │ Service      │ │ parts/events │ │ Scheduler    │ │ Manager   │ │
 │  │ (LLM摘要)   │ │ (daemon)     │ │ (cron解析)   │ │ (生命周期)│ │
 │  └──────────────┘ └──────────────┘ └──────────────┘ └───────────┘ │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐               │
-│  │ Memory       │ │ LSP Client   │ │ OAuth Flow   │               │
-│  │ (加权搜索)   │ │              │ │              │               │
-│  └──────────────┘ └──────────────┘ └──────────────┘               │
+│  ┌──────────────┐ ┌──────────────┐                                │
+│  │ Memory       │ │ LSP Client   │                                │
+│  │ (加权搜索)   │ │              │                                │
+│  └──────────────┘ └──────────────┘                                │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -475,7 +476,6 @@ OpenHarness-ts/
 | `TaskManager`    | 进程内执行器：创建/查询/停止/输出与 stdin/callback；跨端可恢复的生命周期由 `SessionStore` task 投影持久化                                                                                                                                           |
 | `MemoryManager`  | 四层记忆体系的持久层：frontmatter + 加权搜索 + MEMORY.md 索引；配套 `/remember`（LLM 提取持久记忆）、`/dream`（梦境整合）、会话 checkpoint 与环境事实抽取。详见 [docs/memory-system.md](docs/memory-system.md)                                                                   |
 | `LspClient`      | LSP 客户端：与 Language Server Protocol 通信                                                                                                                                                                                            |
-| `OAuthFlow`      | OAuth URL 生成骨架；token exchange / refresh 仍为 placeholder，生产 OAuth 链路待补                                                                                                                                                             |
 
 
 ### 扩展层
@@ -692,7 +692,7 @@ ohs --tui  (或其它 client attach)
 | 飞书     | @larksuiteoapi/node-sdk                          |
 | TUI    | opentui + React 19（Bun 运行时）                      |
 | Schema | Zod                                              |
-| Cron   | cron-parser                                      |
+| Cron   | 内置五段 Cron 解析和调度                         |
 
 
 ## 配置

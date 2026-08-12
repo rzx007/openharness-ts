@@ -36,6 +36,21 @@ flowchart LR
 
 daemon 不向 framework 返回 sessionId、taskId、run host、controls 或 opaque state。task 使用 `childId` 作为可见 ID，因此 Agent 返回的 `task_id` 可直接用于 TaskWait/SendMessage。
 
+## Wait 闭环
+
+```text
+Agent / Workflow -> spawnChildAgent() -> childId
+TaskWait(childId)
+  -> children.hasChildAgent(childId)
+  -> children.awaitChildAgent(childId)
+  -> completed / failed / stopped result
+
+TaskCreate taskId
+  -> TaskManager.awaitTask(taskId)
+```
+
+framework child 的 wait/stop 不依赖 daemon task projection。daemon projector 可以并行建立同 ID 的 durable task，负责 UI、恢复和审计；它不是 SDK 执行闭环的一环。`heartbeatSeconds` 只观察 live child，不 interrupt；硬超时与 TaskStop 才调用 `interruptChildAgent()`。
+
 ## Follow-up
 
 ```text

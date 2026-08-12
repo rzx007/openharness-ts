@@ -16,6 +16,8 @@
 - [x] channels 改用 agent run handle，并在 shutdown 时 interrupt active run。
 - [x] provider URL 与 credential resolution 回归所属 package。
 - [x] 增加无 daemon 的完整 SDK 回合测试。
+- [x] Agent 返回的 child ID 可由 `TaskWait` / `TaskStop` 直接路由到 framework live handle，不依赖 daemon task projection。
+- [x] Workflow 默认在同一个 framework child backend 上完成 spawn / await / timeout stop；external task adapter 仅用于显式外部 worker。
 - [x] 更新权威文档并删除旧概念稿、旧 event/host ADR、旧 session runtime 设计和旧 channels 设计。
 
 ## 不变量

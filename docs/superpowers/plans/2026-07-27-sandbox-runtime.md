@@ -154,6 +154,18 @@ Exit criteria:
 - [x] Keep timeout handling in `Bash` for now to minimize churn.
 - [x] Unit test using mocked spawn/session.
 
+### 2026-08-12 收口
+
+- [x] 增加 argv 入口 `createProcess(argv, options)`，与 shell 入口共享 backend/session/fail-closed 规则。
+- [x] TaskManager shell/argv、autodream、command hooks、Cron/RemoteTrigger、LSP ripgrep 接入统一入口。
+- [x] Cron 手动触发与定时触发统一为 `CronScheduler.trigger()` / `executeJob()`，不再重复维护 `exec`、历史和超时逻辑。
+- [x] 增加 argv 路由、per-session Docker、Task/Hook/Cron fail-closed 测试。
+- [x] Docker 命令使用容器内独立进程组；Abort、TaskStop、Bash timeout 和 runtime stop 都能清理命令及其子进程。
+- [x] 增加 Docker Abort 与可复用 runtime stop 的真实进程树 E2E；本轮因 Docker daemon 未启动而跳过，等待 CI/可用环境执行。
+- [x] 删除独立 cron daemon；Cron 改由主 daemon 启动、停止并通过自己的 Sandbox scope 执行。
+- [x] 主 daemon 支持 Windows 计划任务、macOS LaunchAgent 和 Linux systemd user service；当前用户登录后启动，异常退出后由系统重启。没有主 daemon 时不执行 Cron。
+- [ ] MCP stdio transport process factory 与 FileOperations/container-search 进入下一阶段。
+
 ---
 
 ## Task 7: Bash Tool Integration

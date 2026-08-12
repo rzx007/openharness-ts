@@ -58,7 +58,7 @@ OpenHarnessAgent onEvent sink
 
 ## Composition 与 transport
 
-`packages/server/src/daemon-application.ts` 是 daemon durable application 的唯一 composition root。它组装 store recovery、permission broker、Agent loader/pool、event projection、run engine、task、Application / Query / Maintenance / Control。
+`packages/server/src/daemon-application.ts` 是 daemon durable application 的唯一 composition root。它组装 store recovery、permission broker、Agent loader/pool、event projection、run engine、task、Cron、Application / Query / Maintenance / Control。
 
 `packages/server/src/http.ts` 只负责 Hono、鉴权、CORS、route mounting、HTTP listener 和 SSE client lifecycle。HTTP transport 不再创建或持有 AgentPool、run engine、projector 等内部组件。
 
@@ -74,6 +74,7 @@ routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装；应用对�
 | `SessionQueryService` | `http/session-query-service.ts` | session/state/message/part 查询 |
 | `SessionMaintenanceService` | `http/session-maintenance-service.ts` | compact、rewind、export、remember、MCP、usage |
 | `DaemonControlService` | `http/daemon-control-service.ts` | runtime snapshot、run barrier、pool close/inspect |
+| `DaemonCronService` | `daemon-cron-service.ts` | 保存定时任务、启动定时器、运行 Sandbox 命令、保存执行记录 |
 
 它们是 HTTP 后面的应用用例门面，不是四个独立网络服务。
 
@@ -84,8 +85,11 @@ routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装；应用对�
 | compact/rewind/export/remember/MCP/usage | `http/routes/session-utility.ts` | Maintenance |
 | permission list/reply | `http/routes/permission.ts` | `StorePermissionBroker` |
 | task create/get/list/stop | `http/routes/task.ts` | `SessionTaskService` |
+| Cron add/list/run/history | `http/routes/cron.ts` | `DaemonCronService` |
 | health/settings/provider | `http/routes/system.ts` | Control/default services |
 | replay/live SSE | `http/routes/events.ts` | `HttpEventHub` |
+
+Cron 的添加、到点执行、Agent 工具接入和 daemon 启停流程见 [Daemon Cron 运行流程](./daemon-cron-flow.md)。
 
 ## TUI 发送 hi
 

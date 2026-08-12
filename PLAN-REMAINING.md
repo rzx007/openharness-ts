@@ -34,7 +34,7 @@
 | bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
-| sandbox | 🔴 | 占位 stub，无 Docker backend |
+| sandbox | 🟡 | ✅ SRT/Docker runtime、per-session 容器、统一进程入口、host file guard、Docker 整棵进程停止、daemon 托管 Cron、主 daemon 系统常驻与 E2E 用例；缺 Docker CI 实跑、MCP stdio、容器文件操作 |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
 | personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 自动抽取尚未接 standalone 或 daemon/TUI lifecycle(C.5) |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
@@ -46,23 +46,23 @@
 
 这些能力不一定阻塞本地 coding agent 使用，但会影响“可托管、可审计、可多租户、可回归验证”的生产化程度。
 
-1. **Agent `mode` 尚未真正选择后端**
-   - 现状：`packages/tools/src/agent/index.ts` 校验 `mode` 只能是 `local_agent` / `remote_agent` / `in_process_teammate`，但实际取 executor 时仍固定按 `in_process` → `subprocess` → first fallback。
-   - 风险：未来同时注册 in-process、subprocess、remote backend 后，调用者显式指定的模式可能不生效。
-   - 预期：`local_agent` → `subprocess`，`in_process_teammate` → `in_process`，`remote_agent` → `remote`；显式指定的 backend 缺失时应报错，而不是静默 fallback。
+1. **Remote Agent backend 尚未实现**
+   - 现状：`Agent.mode` 只暴露 `in_process_teammate` 与保留值 `remote_agent`；默认 framework child 已闭环，`remote_agent` 会明确报错。
+   - 边界：`local_agent` 已删除且不兼容，不再存在 subprocess 静默 fallback。
+   - 下一步：只有出现真实远端执行服务时再实现 remote backend；在此之前可考虑隐藏保留参数以降低认知负担。
 
-2. **OAuthFlow 仍是 placeholder**
-   - 现状：`packages/services/src/oauth/index.ts` 的 `exchangeCode()` / `refreshTokens()` 仍返回 `{ accessToken: "placeholder" }`。
-   - 含义：只能生成授权 URL，不能真的用 authorization code 换 access token，也不能 refresh 过期 token。
-   - 影响：Copilot、企业 OAuth provider、云端平台接入等需要 OAuth 的能力还不能作为生产认证链路使用。
-
-3. **MCP OAuth 未完成**
+2. **MCP OAuth 未完成**
    - 现状：MCP 已支持 stdio + HTTP/SSE + headers 鉴权，但 OAuth 授权流、token 存储/刷新、McpAuth 交互链路还未落地。
    - 含义：只能用静态 headers/env token 连接需要鉴权的 MCP server；需要 OAuth 动态授权的 MCP server 仍缺闭环。
 
-4. **缺统一 run trace / tool trace / audit chain / cost metrics**
-   - 现状：核心里有 `CostTracker` 汇总 usage，也有 hooks 可做扩展；但没有统一的 run_id/span_id、工具调用 trace、审计事件链、可查询的成本指标存储。
-   - 含义：出了问题很难回答“这次 run 里模型调用了几次、每个工具耗时多少、谁批准了什么、总成本是多少、输出给了哪个 channel”。
+3. **Sandbox 进程入口已统一，生命周期与文件 IO 仍需闭环**
+   - 已完成：Bash、TaskManager/autodream、command hooks、Cron/RemoteTrigger、LSP ripgrep 统一走 `createShellProcess` / `createProcess`；严格模式缺失后端时 fail-closed。
+   - 仍缺：Docker 容器内任务树 stop/timeout 的真实 E2E；MCP stdio transport 注入；Glob/Grep 的 host-guarded 搜索迁入 `FileOperations`。
+   - 权威流程：`docs/sandbox-runtime-flow.md`。
+
+4. **Trace 基础已完成，span / 指标查询仍不完整**
+   - 现状：`runId/traceId` 已贯穿 Agent、HTTP、tool、permission 和 session store；仍缺统一 span、阶段耗时拆分、长期指标持久化与查询面板。
+   - 含义：可以按 run/trace 关联事件，但还不能稳定回答每个 provider/tool 阶段耗时、跨 channel 交付与长期成本趋势。
    - 影响：企业审计、SLO、成本看板、事故复盘、多租户治理都缺基础数据。
 
 5. **缺系统化 Agent evaluation / regression benchmark**
@@ -311,12 +311,11 @@
   executeAutoDream 自动触发（归 cron）。详见 `docs/services-memory-quartet-design.md`。
 - ✅ cron 调度升级（第一刀）：`CronScheduler.start()` 改为 `setTimeout` 自重调度，
   每次触发后用 `computeNextRunTime()` 精确计算下一次绝对时刻，替代近似 `setInterval`。
-- ✅ cron 升级（第二刀）：
+- ✅ cron 升级（第二刀，旧实现，已由 daemon 托管方案替代）：
   - `command` 字段接线：触发时 `execAsync()` 运行 shell 命令（5 min 超时，输出写日志）。
   - 时区支持：`CronJob.timezone`（IANA 名），`computeNextRunTime(expr, base?, tz?)` 用
     `Intl.DateTimeFormat + hourCycle:'h23'` 按时区计算触发时刻；无效 tz 安全回退本地。
-  - 独立守护进程：`saveJobs`/`loadJobs` 持久化 job 定义；`ohs cron add/remove/daemon`；
-    `ohs cron start` spawn detached daemon + PID 文件；`ohs cron stop` 按 PID 发 SIGTERM。
+  - 当前实现不再使用独立 Cron 进程、JSON、JSONL 或 PID 文件。主 daemon 从 SQLite 加载任务，负责触发、Sandbox 生命周期和执行记录；CLI 与 Agent Cron 工具都调用主 daemon 的同一套能力。
   留待：通知回调（job 完成后 webhook/channel 通知）。
 - ✅ session 存储（第二刀）：cwd 哈希分目录 + latest/id 双写 + load 侧配对修复 +
   Markdown 导出；--continue/--resume 已接线（裸 continue 不串项目）。

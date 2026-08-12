@@ -128,6 +128,17 @@ await child?.interrupt("No longer needed");
 
 durable child session/task/run 不进入 SDK；它们由 daemon 根据 `child.*` 与 child run events 建立。
 
+默认工具在纯 SDK 形态下同样闭环，不依赖 daemon 先建立 task projection：
+
+```text
+Agent -> context.agent.children.spawnChildAgent() -> childId
+TaskWait(childId) -> children.awaitChildAgent(childId)
+TaskStop(childId) -> children.interruptChildAgent(childId)
+Workflow -> spawn framework child -> await/stop the same child backend
+```
+
+`TaskCreate` 创建的 shell/agent background task 仍由 `TaskManager` 等待和停止。daemon 可以把 `child.*` 事件投影为 durable task，供 UI、恢复和审计使用，但该投影不再是 framework child 完成一轮执行的前置条件。
+
 ## 两种应用形态
 
 ```mermaid
@@ -163,6 +174,8 @@ daemon 不实例化 QueryEngine，不接收 runtime factory，也不复制 child
 | 默认 composition root | `packages/agent-runtime/src/default-runtime.ts` |
 | ordered sink 与 observers | `packages/agent-runtime/src/event-source.ts` |
 | child lifecycle | `packages/agent-runtime/src/child-agent.ts` |
+| Agent/TaskWait/TaskStop live child 路由 | `packages/tools/src/task/index.ts` |
+| Workflow child spawn/wait | `packages/tools/src/agent/workflow-runner.ts` |
 | child worktree | `packages/agent-runtime/src/child-environment.ts` |
 | daemon application composition | `packages/server/src/daemon-application.ts` |
 | durable session -> live Agent | `packages/server/src/daemon-agent.ts` |

@@ -265,21 +265,22 @@ OpenHarness-ts 可以先做内存版，等稳定后再考虑持久化。
 
 这一步不启动真实 agent。
 
-### R2：接 TaskManager / Agent runner
+### R2：接 Agent runner
 
 调度器不直接 spawn 进程，而是通过一个 adapter：
 
 ```text
-runWorker(task) -> taskManagerTaskId
-waitWorker(taskManagerTaskId) -> result
-stopWorker(taskManagerTaskId)
+runWorker(task) -> workerTaskId
+waitWorker(workerTaskId) -> result
+stopWorker(workerTaskId)
 ```
 
 adapter 里面复用现有：
 
 - `Agent`;
 - `TaskWait`;
-- `TaskManager.awaitTask`;
+- framework child `awaitChildAgent` / `interruptChildAgent`;
+- external worker 的 `TaskManager.awaitTask` / `stopTask` adapter；
 - `swarm` backend；
 - `isolate` worktree。
 
@@ -359,14 +360,14 @@ adapter 里面复用现有：
 - 给一组 fake tasks，调度器能稳定算出谁先跑、谁后跑、谁跳过；
 - 测试能覆盖环依赖、缺失依赖、失败重试、并发上限。
 
-### V2：接入真实 Agent / TaskManager
+### V2：接入真实 Agent runner
 
 目标：让硬调度器真的能调 swarm 工人干活。
 
 交付：
 
 - runner adapter：`runWorker`、`waitWorker`、`stopWorker`；
-- 复用现有 `Agent` / `TaskWait` / `TaskManager.awaitTask`；
+- 默认复用 framework `Agent` / `TaskWait` live handle；external worker 复用 `TaskManager` adapter；
 - worker 完成后写入 workflow ledger；
 - pipeline 下游能收到上游 summary/result；
 - 失败后按策略跳过或重试。
@@ -496,13 +497,13 @@ V1 内存调度核心
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
-- V2：已完成基础版。`@openharness/tools` 提供 `createAgentWorkflowRunner`，通过现有 swarm backend 启动 worker，并通过 `TaskManager.awaitTask` 等待结果。
+- V2：已完成基础版。`@openharness/tools` 提供 `createAgentWorkflowRunner`；默认通过 framework child controller 启动并直接等待 worker，显式 external backend 通过注入的 task adapter 等待结果。
 - V2.5：已完成。默认工具注册表新增 `Workflow` 工具，Coordinator/Leader 可以一次提交 workflow spec，让代码负责调度顺序、依赖、重试和聚合。
-- V2.6：已完成。增加 smoke 测试，覆盖 `Workflow` 工具 -> scheduler -> agent runner -> 真实 `TaskManager.awaitTask` 的闭环。
+- V2.6：已完成。增加 smoke 测试，覆盖 `Workflow` 工具 -> scheduler -> agent runner -> framework child spawn/await 的无 daemon 闭环。
 - V2.7：已完成。固定 `<workflow-notification>` envelope，提供 formatter/parser，并让 `Workflow` 工具返回结构化结果。
 - V3.1：已完成。新增 workflow snapshot / store：运行开始、worker 运行中、task terminal、最终完成都会产出快照；`Workflow` 工具默认把 run 写到项目 `.openharness/workflows`。
 - V3.2：已完成。新增恢复入口：scheduler 支持 `initialResults` 续跑；store 支持 `latest/load/resume/resumeLatest`；`Workflow` 工具支持 `action: "status"` 和 `action: "resume"`，恢复时不会重跑已完成 terminal task。
-- V3.3：已完成。running snapshot 会记录 runner 上报的 `taskManagerTaskId` 等 metadata；恢复时 agent runner 会优先 `awaitTask` 旧 TaskManager task，不可达时才 spawn replacement worker。
+- V3.3：已完成。running snapshot 会记录 runner 上报的 `taskManagerTaskId` 等 metadata；恢复时 agent runner 会优先等待仍存活的 framework child 或 external task，不可达时才 spawn replacement worker。
 - V4.1：已完成。scheduler 会检测声明了 `writeScope` 的非隔离写任务；重叠 scope 在共享 cwd 下自动串行，不重叠 scope 可以并行；`readOnly: true` 和 `isolate: true` 不参与共享 cwd 写冲突。
 - V4.2：已完成。snapshot/status 会记录 `blockedTaskIds` 和 `blockedTasks`，说明哪个 ready task 因为 `writeScope` 冲突暂缓、正在等待哪些 running task。
 - V5.1：已完成基础版。支持 workflow 默认 task timeout 和单 task timeout；超时 attempt 会标记为 `failed + timedOut`，继续走既有 retry / failurePolicy。
@@ -529,7 +530,7 @@ V1 内存调度核心
 - V11.2：已完成基础版。新增 `createWorkflowSpecFromReconciliationPlan` 和 `Workflow action: "reconcile"`，可把已持久化 run 的 `reconciliationPlan.actions` 转成 follow-up workflow spec。
 - V11.3：已完成基础版。`Workflow action: "template"` 支持 `templateParameters`，可覆盖 task prompt、writeScope、maxConcurrency、budgetPreset 和 failurePolicy。
 - V12.1：已完成基础版。新增 `createWorkflowValidationReport` 和 `Workflow action: "validate"`，可在启动 worker 前 dry-run 展开 DAG、预算 preset 和非隔离写范围冲突。
-- V12.2：已完成基础版。新增 `cancelPersistentWorkflow` 和 `Workflow action: "cancel"`，会停止 backing TaskManager task，并把 running task 标记为 killed、未启动 task 标记为 skipped 后持久化 terminal snapshot。
+- V12.2：已完成基础版。新增 `cancelPersistentWorkflow` 和 `Workflow action: "cancel"`，会停止 backing framework child 或 external task，并把 running task 标记为 killed、未启动 task 标记为 skipped 后持久化 terminal snapshot。
 - V12.3：已完成基础版。内置 workflow templates 增加 `version` 字段，模板输出可明确说明模板版本和含义。
 - V13.1：已完成基础版。新增普通 CLI 管理面 `ohs workflow list/status/validate/template/reconcile/cancel`，对接同一份 `.openharness/workflows` 持久化数据，输出 JSON，方便脚本和后续 TUI/Web 复用。完整用法见 [`workflow-cli.md`](./workflow-cli.md)。
 - V13.2：已完成基础版。TUI 新增 Workflow Runs 管理面板，接入同一份 workflow JSON 状态，支持 run 列表、详情、timeline task/event/status filter、reconcile action 选择和 running workflow 取消。

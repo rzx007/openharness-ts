@@ -1,8 +1,8 @@
 # 设计：Sandbox runtime 接入
 
-> 状态：设计中。目标是把 Python 原版的 sandbox 能力移植到 TS 版，并补上 Docker 网络策略的显式配置。
+> 状态（2026-08-12）：Bash、TaskManager、autodream、command hooks、Cron/RemoteTrigger 和 LSP ripgrep 已统一经过 `@openharness/sandbox` 的 shell/argv process API。文件工具仍采用 host-guarded MVP；MCP stdio 与宿主基础设施不在该统一入口内。
 >
-> 实现后的完整调用链见 [`sandbox-runtime-flow.md`](./sandbox-runtime-flow.md)。
+> 当前完整调用链和下一步见 [`sandbox-runtime-flow.md`](./sandbox-runtime-flow.md)。
 
 ## 背景
 
