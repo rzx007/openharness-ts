@@ -48,12 +48,12 @@ NPE。
 露同名工具，或 MCP 工具与内置工具同名时，后注册的静默替换前者。  
 **修复**：冲突时 `console.warn` 记录被覆盖的工具名和来源，方便用户排查意外替换。
 
-### ~~M-5 ChannelBridge engine 报错时截断消息行为不明确~~ ✅ 已正确实现（catch 清空 parts 并发错误文案）
+### ~~M-5 ChannelBridge agent 报错时截断消息行为不明确~~ ✅ 已正确实现（只发送错误文案）
 **文件**：`packages/channels/src/bridge.ts`  
-**描述**：`handleInbound` 调用 `engine.submitMessage` 并聚合输出发 outbound。若
+**描述**：`handle` 调用 `agent.submitMessage` 并等待 `run.result`。若
 `submitMessage` 在中途抛错（如 `MaxTurnsExceeded`），已聚合的部分文本是否发出取决于
 实现。用户可能收到截断消息而无任何错误提示。  
-**修复**：在 catch 里明确发送一条错误消息给用户（"抱歉，处理出错：…"），而非静默截断。
+**修复**：在 catch 里只发送 `[Error: failed to process your message]`；`bridge.stop()` 会中断 active run。
 
 ### ~~M-6 REPL Ctrl+C 和正常退出可能双写 session 快照~~ ✅ 已修复（saveOnce flag）
 **文件**：`apps/cli/src/commands/main.ts`  

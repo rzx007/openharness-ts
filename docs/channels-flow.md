@@ -1,10 +1,8 @@
 # Channels 调用链
 
-Channels 把远程聊天通道接到本地 `QueryEngine`：通道消息进引擎，模型回复再发回通道。
+Channels 把远程聊天通道接到本地 `OpenHarnessAgent`：通道消息进入 programmatic agent，模型回复再发回通道。Channels 不创建或持有 `QueryEngine`。
 
 当前 CLI 真正接线的是 **飞书基础版**（`FeishuAdapter`）。库里还有 `StdioAdapter` / `HttpAdapter`，但 `ohs channels serve` 暂未组装它们。
-
-设计细节见 [`channels-bridge-design.md`](./channels-bridge-design.md)。
 
 ## 核心模型：长驻桥接 + 双队列
 
@@ -17,7 +15,7 @@ Channels 把远程聊天通道接到本地 `QueryEngine`：通道消息进引擎
 ┌─ 启动（一次）─────────────────────────────────────────┐
 │ ohs channels serve                                     │
 │   loadSettings → assembleChannelAdapters(feishu)       │
-│   bootstrap(QueryEngine) → MessageBus                  │
+│   createOpenHarnessAgent() → MessageBus                │
 │   ChannelBridge.start() + ChannelManager.startAll()    │
 └────────────────────────────────────────────────────────┘
                           │
@@ -26,7 +24,7 @@ Channels 把远程聊天通道接到本地 `QueryEngine`：通道消息进引擎
 │ Feishu WS → FeishuAdapter                              │
 │   → ChannelManager ACL（fail-closed）                  │
 │   → MessageBus.inbound                                 │
-│   → ChannelBridge → engine.submitMessage()             │
+│   → ChannelBridge → agent.submitMessage()              │
 │   → 聚合 text_delta → MessageBus.outbound              │
 │   → ChannelManager.dispatch → adapter.send()           │
 └────────────────────────────────────────────────────────┘
@@ -42,7 +40,7 @@ Channels 把远程聊天通道接到本地 `QueryEngine`：通道消息进引擎
 | MessageBus | `packages/channels/src/bus/queue.ts` | inbound/outbound 双异步 FIFO；会话键 `channel:chatId` |
 | ACL | `packages/channels/src/bus/acl.ts` | `isAllowed`：空拒 / `*` 全放 / 分段匹配 |
 | ChannelManager | `packages/channels/src/manager.ts` | 启停 adapter、入站 ACL、出站分发循环 |
-| ChannelBridge | `packages/channels/src/bridge.ts` | 消费 inbound → `submitMessage` → 发布 outbound |
+| ChannelBridge | `packages/channels/src/bridge.ts` | 消费 inbound → agent run handle → 发布 outbound |
 | FeishuAdapter | `packages/channels/src/impl/feishu.ts` | 飞书 WS 收消息、文本发送、@bot / 去重 |
 | FeishuPush 工具 | `packages/tools/src/channels/feishu-push.ts` | REPL 侧主动推送到 allowFrom 目标 |
 | Settings | `packages/core/src/types/settings.ts` | `ChannelsConfig` / `FeishuChannelSettings` |
@@ -58,11 +56,11 @@ ohs channels serve
        │    └─ feishu.enabled + appId/appSecret
        │         → new FeishuAdapter(...)
        │         → allowFrom["feishu"] = Object.values(feishu.allowFrom)
-       ├─ createOpenHarnessRuntime({ autoApproveTools: READ_ONLY_TOOLS, ... })
-       │    └─ QueryEngine / ToolRegistry / skills …
+       ├─ createOpenHarnessAgent({ autoApproveTools: READ_ONLY_TOOLS, ... })
+       │    └─ 内部组装 QueryEngine / tools / skills / resources
        ├─ new MessageBus()
        ├─ new ChannelManager(adapters, bus, { allowFrom, sendProgress, sendToolHints })
-       ├─ new ChannelBridge({ engine, bus })
+       ├─ new ChannelBridge({ agent, bus })
        ├─ bridge.start()                           # 消费 inbound 循环
        └─ manager.startAll()                       # connect adapters + 出站循环
 ```
@@ -136,15 +134,15 @@ ChannelManager.handleInbound(channel, msg)
 
 队列满（默认 1000）时丢弃并打 warn，避免内存爆。
 
-### B3. Bridge → QueryEngine
+### B3. Bridge → OpenHarnessAgent
 
 ```text
 ChannelBridge.loop
   └─ bus.consumeInbound(signal)
        └─ handle(msg)
-            ├─ for await engine.submitMessage(msg.content)
-            │    只聚合 type === "text_delta"
-            ├─ 引擎抛错 → 回复 "[Error: failed to process your message]"
+            ├─ run = agent.submitMessage(msg.content)
+            ├─ await run.result.output
+            ├─ agent 抛错 → 回复 "[Error: failed to process your message]"
             └─ 非空 reply → bus.publishOutbound({
                  channel, chatId, content,
                  metadata: { _session_key: "channel:chatId" }
@@ -154,10 +152,10 @@ ChannelBridge.loop
 要点：
 
 - **顺序处理**（一次一条）；并发多会话隔离留待。
-- 工具调用过程不原样透传通道；只回最终文本聚合结果。
-- `bridge.stop` 只打断挂起消费，**不取消**正在跑的 `submitMessage`；二次 Ctrl+C 强退。
+- 工具调用过程不原样透传通道；只回 `AgentRunResult.output`。
+- `bridge.stop` 会调用 active run handle 的 `interrupt()`，然后等待 bridge loop 退出。
 
-## C. 出站：引擎 → 通道
+## C. 出站：Agent → 通道
 
 ```text
 ChannelManager.dispatchOutbound
@@ -176,8 +174,8 @@ ChannelManager.dispatchOutbound
 `channels serve` 无人确认权限弹窗。启动时把 `READ_ONLY_TOOLS` 注入 `autoApproveTools`，让“看”可用、“写/Bash”仍走拒绝。
 
 ```text
-createOpenHarnessRuntime({
-  overrides: { autoApproveTools: [...READ_ONLY_TOOLS] }
+createOpenHarnessAgent({
+  autoApproveTools: [...READ_ONLY_TOOLS]
 })
 ```
 

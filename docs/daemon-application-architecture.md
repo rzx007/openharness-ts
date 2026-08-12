@@ -1,6 +1,6 @@
 # Daemon Application Architecture
 
-> 状态：当前实现的权威运行索引。查询 prompt、steer、interrupt、permission、child、compact/remember/usage 等流程时，从本文进入。
+> 状态：当前实现的权威运行索引。查询 prompt、steer、interrupt、permission、child、compact/remember/usage 等流程时，从本文进入；跨层终态和失败语义见 [Agent Lifecycle Contract](./agent-lifecycle-contract.md)。
 
 ## 总体模型
 
@@ -19,6 +19,7 @@ flowchart TD
   Surface["TUI / Web / Desktop / print"]
   Client["OpenHarnessClient"]
   Routes["HTTP routes"]
+  Daemon["DaemonApplication"]
   App["SessionApplicationService"]
   Engine["SessionRunEngine"]
   Lane["SessionRunCoordinator"]
@@ -32,7 +33,7 @@ flowchart TD
   Store["SessionStore"]
   SSE["SessionEventPublisher / SSE"]
 
-  Surface --> Client --> Routes --> App --> Engine --> Lane --> Executor
+  Surface --> Client --> Routes --> Daemon --> App --> Engine --> Lane --> Executor
   Executor --> Pool --> Agent --> QE
   Agent --> Events --> Projector --> Transcript --> Store --> SSE --> Client
   Projector --> Store
@@ -41,23 +42,31 @@ flowchart TD
 准确表述是：
 
 ```text
-Surface -> Client -> routes -> Application service
+Surface -> Client -> routes -> DaemonApplication-owned service
   -> SessionRunEngine (admission)
   -> SessionRunCoordinator (per-session lane)
   -> SessionRunExecutor (one admitted root run)
   -> AgentPool -> OpenHarnessAgent -> QueryEngine
 
-OpenHarnessAgent.events
+OpenHarnessAgent onEvent sink
   -> DaemonAgentEventProjector.apply(event)
   -> transcript/session/run/task/event durable state
   -> SSE
 ```
 
-`DaemonAgentEventProjector` 是单向 reducer，不是 framework 执行所需的 host 插座。
+`DaemonAgentEventProjector` 是 daemon-owned 单向 reducer。framework 只看到创建参数里的 `onEvent(event)` callback，不依赖 projector、store 或 daemon 类型。
+
+## Composition 与 transport
+
+`packages/server/src/daemon-application.ts` 是 daemon durable application 的唯一 composition root。它组装 store recovery、permission broker、Agent loader/pool、event projection、run engine、task、Application / Query / Maintenance / Control。
+
+`packages/server/src/http.ts` 只负责 Hono、鉴权、CORS、route mounting、HTTP listener 和 SSE client lifecycle。HTTP transport 不再创建或持有 AgentPool、run engine、projector 等内部组件。
+
+`packages/server/src/daemon-agent.ts` 是唯一的 durable session -> live Agent 翻译点：读取动态 settings、合并 session metadata、注入 permission/event callback、创建 agent、恢复 history。`AgentPool` 不再理解配置和投影。
 
 ## 请求入口与四个服务
 
-routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装。
+routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装；应用对象来自 `DaemonApplication`。
 
 | 服务 | 文件 | 负责 |
 |---|---|---|
@@ -100,7 +109,7 @@ sequenceDiagram
   E->>S: durable input + pending run
   E->>L: enqueue(sessionId, runId)
   L->>X: execute(workContext)
-  X->>P: acquire(session + transcript)
+  X->>P: acquireSession(sessionId)
   P-->>X: warm/cached agent
   X->>G: submitMessage(hi, durable IDs)
   G-->>X: AgentRunHandle
@@ -123,11 +132,13 @@ sequenceDiagram
 apps/frontend/src/hooks/useServerSync.ts
 packages/client/src/client.ts
 packages/server/src/http/routes/run-execution.ts
+packages/server/src/daemon-application.ts
 packages/server/src/http/session-application-service.ts
 packages/server/src/http/session-run-engine.ts
 packages/server/src/run-coordinator.ts
 packages/server/src/http/session-run-executor.ts
 packages/server/src/http/agent-pool.ts
+packages/server/src/daemon-agent.ts
 packages/agent-runtime/src/agent.ts
 packages/core/src/engine/query-engine.ts
 packages/server/src/http/daemon-agent-event-projector.ts
@@ -138,19 +149,19 @@ packages/server/src/http/daemon-agent-event-projector.ts
 `AgentPool` 缓存一个带代际所有权的 entry：
 
 ```text
-sessionId -> { promise: Promise<OpenHarnessAgent>, subscription }
+sessionId -> { promise: Promise<OpenHarnessAgent>, agent?, state, closePromise? }
 ```
 
-流程：
+职责分工：
 
-1. 读取 durable session/messages/parts。
-2. 创建 agent，daemon effects 已在 `OpenHarnessAgentOptions` 中注入。
-3. `loadHistory(transcriptToAgentMessages(...))`。
-4. 在任何 submit 前订阅 `agent.events`。
-5. 后续 root run 复用实例。
-6. archive、runtime config change、failure 或 shutdown 时 close 并 unsubscribe。
+1. `AgentPool` 读取 durable session/messages/parts，并负责同 session 创建去重、代际关闭和缓存。
+2. `createDaemonAgentLoader()` 合并 settings 与 session metadata。
+3. loader 注入 daemon 的 `requestPermission` 与可靠 `onEvent` callback，创建 agent。
+4. loader 执行 `loadHistory(transcriptToAgentMessages(...))` 并绑定 projector，然后才返回完整 agent。
+5. Pool 缓存返回值，后续 root run 复用实例。
+6. archive、runtime config change、failure 或 shutdown 时 Pool close。
 
-close 只清理自己捕获的 entry/subscription。entry 一旦进入 `closing`，同一 session 的 acquire 会等待旧实例完整释放，再重新读取 durable session/history 创建 replacement；旧代际的 finally 不会误删或 unsubscribe 新代际。
+close 只清理自己捕获的 entry。entry 一旦进入 `closing`，同一 session 的 acquire 会等待旧实例完整释放，再重新读取 durable session/history 创建 replacement；旧代际的 finally 不会误删新代际。批量 close 等待全部 entry settle 后再聚合上报，单个 cleanup 失败不会让 shutdown 提前越过仍在关闭的 agent。
 
 live child 由 root agent 的 `AgentChildManager` 持有，不进入 AgentPool。`LiveChildAgentDirectory` 让 pool 拒绝为该 durable child session 创建第二个 agent。
 
@@ -173,7 +184,11 @@ framework 实例内部还有更小一层状态机：`idle -> running | maintaini
 唯一入口：
 
 ```ts
-agent.events.subscribe((event) => projector.apply(event));
+createDaemonAgentLoader({
+  // loader 内部调用 createOpenHarnessAgent(...)
+  createEventSink: () => (event) => projector.apply(event),
+  requestPermission: (request, context) => permissionBroker.ask(/* ... */),
+});
 ```
 
 | AgentEvent | daemon 行为 |
@@ -199,7 +214,7 @@ input/run/stream/terminal 的多步 durable 归约使用 `SessionStore.transacti
 
 delta 有两条彼此独立的输出：`liveEvent` 立即发给当前 SSE 客户端；durable text 按 part 累积 dirty checkpoint。默认每 `150ms` 或 `8KB` flush，同批 dirty part 在一个 SQLite transaction 中更新 part/message/session。part complete、tool boundary、run terminal 和 `SessionStore.close()` 会通过普通 unit-of-work 或显式 close 强制落盘。
 
-异常进程退出最多丢失最后一个 checkpoint 窗口；正常 terminal/shutdown/close 不丢失。transient delta 不进入 `SessionStore.events`，client reducer 也不把它保留在 durable `eventsBySeq` 索引。durable event 与 live delta 共用全局 SSE 序号，store 每次预留 1024 个序号并持久化高水位；重启可以留下空洞，但绝不复用客户端已经见过的 cursor。
+异常进程退出最多丢失最后一个 checkpoint 窗口；正常 terminal/shutdown/close 不丢失。transient delta 不进入 `SessionStore.events`，client reducer 也不把它保留在 durable `eventsBySeq` 索引，只记录 `transientCursor` 防止 SSE 重连重复追加。durable event 与 live delta 共用全局 SSE 序号，store 每次预留 1024 个序号并持久化高水位；重启可以留下空洞，但绝不复用客户端已经见过的 cursor。
 
 `SessionStore` 的普通写使用 row-level mutation/unit-of-work：只 upsert dirty row、只 append 新 durable event，`replaceTranscript` 只删除目标 session 的旧 message/part。成本不再随全库历史线性增长。
 
@@ -314,11 +329,11 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 ## 启动与关闭
 
 - `startOpenHarnessDaemon()`：默认完整应用，CLI daemon command 使用。
-- `startOpenHarnessServer()`：低层 embedding API，可注入服务或测试 agent。
-- 默认组合：`default-daemon.ts`、`default-application-services.ts`、`default-command-catalog.ts`。
+- `startOpenHarnessServer()`：低层 embedding API，通过 `services` 注入 HTTP resource services，测试可注入 agent creator。
+- 默认组合：`default-daemon.ts` 调用 `createDefaultApplicationServices()` 与 `createDefaultCommandCatalog()`，具体实现分别位于 `default-application-services.ts`、`default-command-catalog.ts`。
 - CLI `commands/daemon.ts` 只处理 host/port/token、registry 与进程信号。
 
-constructor 在开放 HTTP 前执行 durable recovery：
+`DaemonApplication` constructor 在开放 HTTP 前执行 durable recovery：
 
 1. pending/running run -> `interrupted`，并把该 run 的 `running` transcript parts 同步置为 `interrupted`。
 2. pending/running task -> `interrupted`。

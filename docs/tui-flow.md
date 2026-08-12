@@ -51,11 +51,11 @@ sequenceDiagram
   Sync-->>Input: render transcript, tools, status
 ```
 
-`StreamEvent` 只存在于 framework 内部。daemon 订阅的是 `OpenHarnessAgent.events`，TUI 接收的是 `SessionStore` 产生的 durable SSE，而不是 framework event 直通。
+`StreamEvent` 只存在于 framework 内部。daemon 在创建 agent 时通过可靠、ordered、awaited 的 `onEvent` sink 消费 `AgentEvent`；TUI 接收的是 `SessionStore` 产生的 durable SSE，而不是 framework event 直通。`agent.subscribe()` 只用于不影响执行结果的普通观察，不承担 daemon projection。
 
 ## Permission
 
-1. QueryEngine 触发 framework `AgentEffects.requestPermission`。
+1. QueryEngine 触发 framework `requestPermission(request, scope)` effect。
 2. daemon `StorePermissionBroker` 创建 pending request，SSE 推给 TUI。
 3. 用户批准、拒绝或 run 被中断后，broker 返回 `approved`、`denied` 或 `expired`。
 4. framework 继续工具执行或生成拒绝结果，并通过普通 AgentEvent/durable SSE 更新界面。

@@ -4,7 +4,7 @@
 
 **目标：** 用类似 opencode 的 daemon/server runtime 替换遗留的单一 `BackendHost` TUI 架构，以支持 TUI、Web、Desktop、远程 attach、持久化 session，以及跨客户端恢复。
 
-**参考设计：** [docs/daemon-session-runtime-design.md](../../daemon-session-runtime-design.md)
+**当前实现：** [Daemon Application Architecture](../../daemon-application-architecture.md)
 
 ---
 

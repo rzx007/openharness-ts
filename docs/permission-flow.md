@@ -4,10 +4,10 @@
 
 ## 核心语义
 
-permission 是 effect，不是带 resolver 的 event：
+permission decision 通过 SDK callback 返回，不是带 resolver 的 event：
 
 ```text
-request/decision : AgentEffects.requestPermission()
+request/decision : createOpenHarnessAgent({ requestPermission })
 observability    : permission.requested / permission.resolved AgentEvent
 durable UI flow  : daemon StorePermissionBroker
 ```
@@ -18,17 +18,15 @@ framework 等待 decision；event 只描述事实，保持可序列化。
 
 ```ts
 const agent = await createOpenHarnessAgent({
-  effects: {
-    requestPermission: async (request, scope) => {
-      return terminalPrompt(request, scope.signal)
-        ? { status: "approved" }
-        : { status: "denied" };
-    },
+  requestPermission: async (request, scope) => {
+    return terminalPrompt(request, scope.signal)
+      ? { status: "approved" }
+      : { status: "denied" };
   },
 });
 ```
 
-未提供 effect 时默认拒绝，不隐式放行。
+未提供 callback 时默认拒绝，不隐式放行。
 
 ## Daemon
 
@@ -36,21 +34,21 @@ const agent = await createOpenHarnessAgent({
 sequenceDiagram
   participant QE as QueryEngine
   participant Run as FrameworkAgentRun
-  participant FX as AgentEffects
+  participant Callback as requestPermission callback
   participant Broker as StorePermissionBroker
   participant Store as SessionStore
   participant UI
 
   QE->>Run: permission required
   Run->>Run: emit permission.requested
-  Run->>FX: requestPermission(request, scope)
-  FX->>Broker: ask(session/run/trace/request/signal)
+  Run->>Callback: requestPermission(request, scope)
+  Callback->>Broker: ask(session/run/trace/request/signal)
   Broker->>Store: create pending record
   Store-->>UI: SSE permission.created
   UI->>Broker: HTTP reply
   Broker->>Store: persist decision
-  Broker-->>FX: approved / denied / expired
-  FX-->>Run: decision
+  Broker-->>Callback: approved / denied / expired
+  Callback-->>Run: decision
   Run->>Run: emit permission.resolved
   Run-->>QE: decision
 ```
@@ -61,8 +59,8 @@ sequenceDiagram
 |---|---|
 | permission checker 与 tool gate | `packages/core/src/engine/query-engine.ts` |
 | request/decision/event contracts | `packages/core/src/types/runtime.ts` |
-| framework event/effect 调用 | `packages/agent-runtime/src/agent.ts` |
-| daemon effect 注入 | `packages/server/src/http.ts` |
+| framework event/callback 调用 | `packages/agent-runtime/src/agent.ts` |
+| daemon callback 注入 | `packages/server/src/http.ts` |
 | durable broker | `packages/server/src/permission-broker.ts` |
 | live resolver/expiration | `packages/server/src/permission-controller.ts` |
 | list/reply routes | `packages/server/src/http/routes/permission.ts` |
@@ -71,7 +69,7 @@ sequenceDiagram
 ## Cancellation 与 lineage
 
 - run `AbortSignal` 传给 broker/controller。
-- interrupt/archive 时 pending request 变为 `expired`，broker 保留该 decision，不再降格成 `denied`；等待中的 effect 返回且不继续执行工具。
+- interrupt/archive 时 pending request 变为 `expired`，broker 保留该 decision，不再降格成 `denied`；等待中的 callback 返回且不继续执行工具。
 - child scope 使用 child session/run；broker 沿 parent lineage 把 prompt 暴露给顶层 session。
 - durable payload 保留 child session/run identity，UI 无需持有 framework handle。
 
@@ -83,6 +81,6 @@ permission resolver 只存在于创建它的 daemon 进程。新 daemon 启动�
 
 - event payload 中没有 resolve/reject/function。
 - daemon 不向 QueryEngine 注入 host。
-- effect 未配置或失效时绝不默认批准。
-- daemon effect 必须原样传递 `approved | denied | expired`，不得用 boolean 压平状态。
-- `permission.resolved` 在 effect settle 后发布，供日志与 projection 使用。
+- callback 未配置或失效时绝不默认批准。
+- daemon callback 必须原样传递 `approved | denied | expired`，不得用 boolean 压平状态。
+- `permission.resolved` 在 callback settle 后发布，供日志与 projection 使用。

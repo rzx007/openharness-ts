@@ -1,6 +1,6 @@
 # Agent Run Events / Effects 实施计划
 
-> 状态：已完成。当前架构见 [Agent Run Events / Effects Architecture](../../agent-run-events-effects-architecture.md)。
+> 状态：已完成。当前架构见 [OpenHarness Agent SDK](../../agent-sdk.md) 与 [Agent Runtime Framework Architecture](../../agent-runtime-framework-architecture.md)。
 >
 > 迁移原则：**不做兼容**。不提交双 public API、deprecated alias、daemon adapter 或旧 projection fallback；每个提交都必须通过相关 typecheck/tests。
 
@@ -51,7 +51,7 @@ daemon consumes events and projects durable state
 ## Task 2：一次性切换 daemon root run 与 permission
 
 - [x] 新增单入口 `DaemonAgentEventProjector.apply(event)`，复用 `SessionTranscriptProjection`、store、event publisher 和 observability。
-- [x] `AgentPool` 创建 agent 时注入 daemon `AgentEffects`，并在 hydrate/submit 前建立 required event subscription。
+- [x] daemon Agent loader 创建 agent 时注入 `requestPermission` 与可靠 `onEvent` sink，并在返回 agent 前恢复 history、绑定 projector；`AgentPool` 只缓存完整实例。
 - [x] `SessionRunExecutor` 只 acquire agent、submit admitted IDs、注册 active run handle、await result 和处理基础设施兜底。
 - [x] permission effect 直接调用 `StorePermissionBroker.ask(context + request + signal)`；保留现有 durable request、lineage、HTTP reply 和 expiration 语义。
 - [x] `SessionRunCoordinator` 保存 active run handle 引用；steer 直接调用 `run.steer()`，interrupt 调用 `run.interrupt()`。
@@ -177,6 +177,8 @@ daemon consumes events and projects durable state
 
 > 状态：已完成。delta 立即更新内存 read model 并 live publish；durable text 默认按 `150ms/8KB` checkpoint。异常退出最多丢失一个 checkpoint 尾窗，正常 terminal/close 不丢失。
 
+对照 OpenCode 当前实现后确认这里是有意增强，而不是逐 delta event sourcing：OpenCode 的 `Text.Delta` / `message.part.delta` 同样是 live-only，完整文本只在可 replay 的 `Text.Ended` / `PartUpdated` 边界持久化；OpenHarness 保留相同的 transient delta + full-value terminal 边界，并额外 checkpoint 聚合后的 part row，以较小的固定写放大换取有界的 daemon 崩溃尾窗。该策略仍归 `SessionStore` 所有，不进入 framework 或 projector 的业务协议。
+
 - [x] delta 先更新内存 read model 并立即发布 SSE，以 part 为单位累计 dirty checkpoint。
 - [x] delta hot path 不再触发整份 `SessionState` 的 `structuredClone` 或全量 `save()`；事务回滚覆盖 dirty part/checkpoint 状态。
 - [x] 默认按 `150ms` 或 `8KB` 阈值批量 flush；同批 dirty part 使用单个 SQLite 事务。
@@ -184,6 +186,7 @@ daemon consumes events and projects durable state
 - [x] transient delta event 只做 live publish；daemon store 与 client durable event index 都不保留逐 chunk 事件。
 - [x] 明确 durability contract：异常进程退出最多丢失一个 checkpoint 窗口；正常 terminal/close 不丢失。
 - [x] 增加 100 chunk/1 checkpoint 写事务、定时 flush、阈值 flush、terminal/close flush、失败重试与 restart cursor 回归测试。
+- [x] transient cursor 续租先于内存正文 mutation；序号预留失败不得留下未发布、未持久化的 ghost delta。
 
 退出标准：delta 写事务数量不再随 chunk 数量线性增长；SSE 实时性不依赖 durable flush；正常生命周期边界可恢复完整文本；文档明确异常退出的有界尾部丢失语义。
 
@@ -229,7 +232,8 @@ daemon consumes events and projects durable state
 
 ```text
 agent.submitMessage() -> AgentRunHandle
-agent.events          -> 执行事实
+agent onEvent         -> daemon 可靠消费执行事实
+agent.subscribe       -> 普通观察
 agent.effects         -> 外部决定
 agent.children        -> live child handles
 

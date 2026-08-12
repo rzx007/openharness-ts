@@ -50,7 +50,8 @@
 │  · PATCH /sessions/:id    /model 等                              │
 │  · GET/PATCH /settings    /config /effort /fast /turns …         │
 │  · 其它资源 API           memory / tasks / git / plugins …       │
-│  · SessionRuntime         compact / remember / mcp inspect …     │
+│  · MaintenanceService -> AgentPool / OpenHarnessAgent            │
+│                           compact / remember / mcp inspect …     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

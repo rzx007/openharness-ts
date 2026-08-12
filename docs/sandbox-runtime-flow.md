@@ -53,17 +53,16 @@ Sandbox 有两条后端：
 ## A. 启动阶段
 
 ```text
-apps/cli/src/commands/main.ts
-  mainAction()
-    └─ loadSettings(overrides, { includeProject: true })
-         └─ mergeSandboxConfig / buildSandboxEnvOverrides
-
-    └─ createOpenHarnessRuntime(settings)          # packages/agent-runtime/src/default-runtime.ts
-         └─ 组装 QueryEngine / ToolRegistry / …
-         └─ RuntimeBuilder.build(settings)
-         └─ attachSandboxRuntime(bundle, cwd)
-              └─ startSandboxRuntime({ settings, cwd, sessionId })
-                   # packages/sandbox/src/lifecycle.ts
+surface / daemon AgentPool
+  └─ createOpenHarnessAgent({ settings, cwd, sessionId })
+       # packages/agent-runtime/src/agent.ts
+       └─ internal default composition
+            # packages/agent-runtime/src/default-runtime.ts
+            └─ 组装 QueryEngine / ToolRegistry / …
+            └─ RuntimeBuilder.build(settings)
+            └─ attachSandboxRuntime(bundle, cwd)
+                 └─ startSandboxRuntime({ settings, cwd, sessionId })
+                      # packages/sandbox/src/lifecycle.ts
 ```
 
 推荐用子命令切换 sandbox：

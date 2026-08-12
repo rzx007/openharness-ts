@@ -38,7 +38,7 @@ framework 负责：
 - 单实例 `idle/running/maintaining/closing/closed` operation state machine
 - permission wait 的执行语义
 - child identity、实例、递归执行、tree-wide descendant directory、follow-up、interrupt、suspend/resume、worktree lease
-- 有序 `AgentEvent`、`AgentEffects` 和 run/child handles
+- 有序 reliable `onEvent`、隔离 `subscribe`、permission effect 和 run/child handles
 - compact、remember、inspect 等 agent 能力
 
 framework 不负责：
@@ -54,8 +54,8 @@ daemon 负责：
 
 - root prompt durable admission 与 per-session run lane
 - 每个 pool-owned session 的 warm agent cache
-- 实现 `AgentEffects.requestPermission`
-- 每个 root agent 一次 required event subscription
+- 实现 `requestPermission` callback
+- 每个 root agent 注入一次可靠 `onEvent` sink
 - 把 `AgentEvent` 单向归约为 durable transcript/run/task/session/event 和 SSE
 - 把 HTTP/task commands 路由到 framework-owned run/child handles
 - restart recovery、maintenance 与 product APIs
@@ -83,8 +83,8 @@ daemon 可以保存 `rootAgent + childId` 的路由索引，但不复制 child c
 ## 边界协议
 
 ```text
-framework -> daemon : ordered AgentEvent facts
-framework -> daemon : AgentEffects call when a result is required
+framework -> daemon : ordered AgentEvent facts through onEvent
+framework -> daemon : requestPermission call when a result is required
 daemon -> framework : run.steer / run.interrupt / child.send / child.interrupt
 ```
 
@@ -93,8 +93,8 @@ daemon -> framework : run.steer / run.interrupt / child.send / child.interrupt
 ## 扩展判断
 
 1. programmatic agent 是否也需要？需要则优先进入 framework。
-2. 是否必须等待外部返回值？是则定义窄 effect。
-3. 是否只是已发生事实？是则扩展 `AgentEvent` union。
+2. 是否必须等待外部返回值？是则定义窄 callback/effect。
+3. 是否只是已发生事实？是则扩展 `AgentEvent` union，并由 `onEvent`/`subscribe` 消费。
 4. 是否控制 live execution？是则扩展 handle。
 5. 是否操作 HTTP、SSE、durable schema 或多客户端策略？是则进入 daemon。
 6. 是否只影响 TUI/Web 的交互与渲染？是则留在 surface。

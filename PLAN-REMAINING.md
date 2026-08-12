@@ -30,13 +30,13 @@
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
 | coordinator | ✅ | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；✅agent 级字段运行时生效(tools/disallowedTools/maxTurns/effort/permissionMode) |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
-| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；✅MCP connectAll+工具注册(REPL+daemon session-runtime+task-worker) |
+| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；✅`OpenHarnessAgent` composition 统一完成 MCP connectAll 与工具注册 |
 | bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🔴 | 占位 stub，无 Docker backend |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
-| personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 已接 REPL/print/task-worker，daemon/TUI 未接(C.5) |
+| personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 自动抽取尚未接 standalone 或 daemon/TUI lifecycle(C.5) |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
 | autopilot | ⛔ | 不复刻 |
 
@@ -131,7 +131,7 @@
 ### B.2 Compact 高级链路 ✅ 已完成
 - ✅ context collapse（确定性折叠超长文本）、PTL（prompt-too-long）重试 + 头部截断、tool_use/result 配对保护、图片占位替换。
 - ✅ boundary marker、PRE/POST_COMPACT hooks、progress/checkpoint。
-- ✅ compact attachments（B.2 尾巴）：`extractRecentFiles()`（Read/Write/Edit tool_use 历史，最近 20）、`deriveWorkLog()`（工具调用计数摘要）、`buildCompactPrompt()`（拼入 `<context>` 段）；`setAttachmentsProvider()` 外部注入 taskFocus/plan；REPL 接线 `TaskManager.listTasks("running")` 提供 task_focus。daemon `SessionRuntime` 尚未接 attachments provider。
+- ✅ compact attachments（B.2 尾巴）：`extractRecentFiles()`（Read/Write/Edit tool_use 历史，最近 20）、`deriveWorkLog()`（工具调用计数摘要）、`buildCompactPrompt()`（拼入 `<context>` 段）；`setAttachmentsProvider()` 可外部注入 taskFocus/plan。当前 `OpenHarnessAgent` 默认 composition 尚未注入 daemon task focus/plan provider。
 - **文件**：`packages/core/src/engine/compact-service.ts`、`packages/core/src/types/runtime.ts`、`packages/core/src/engine/query-engine.ts`、`apps/cli/src/commands/main.ts`
 
 ### B.3 Tasks 真实执行
@@ -151,7 +151,7 @@
 - permission-mode 段、delegation/subagent 段。
 - **文件**：`packages/prompts/src/index.ts`
 
-> B.5 per-turn 相关记忆检索已于后续完成：`QueryEngine.memoryRetriever` 回调 + `composeTurnSystemPrompt()` 瞬态注入，REPL 与 print 两路均接线。daemon `SessionRuntime` 尚未接 memoryRetriever。B.5 对 CLI 直连路径全部完成。
+> B.5 per-turn 相关记忆检索已于后续完成：`QueryEngine.memoryRetriever` 回调 + `composeTurnSystemPrompt()` 瞬态注入。当前由 `createOpenHarnessAgent()` 统一创建 `AgentMemoryRuntime` 并接入所有 standalone/daemon agent。
 
 ---
 
@@ -164,9 +164,9 @@
 - ✅ project 信任门控（allowProjectPlugins，默认禁）+ 卸载路径穿越防护。
 - ✅ plugin agents 已随 C.4 收口（`packages/plugins/src/agents.ts`）。
 - ✅ `tools_dir` 动态 import（`registerPluginTools`，二段注册在 bootstrap 后，
-  REPL / daemon `session-runtime` / task-worker 三路均接线；default export ToolDefinition | ToolDefinition[]）。
-- ✅ MCP 接线：`connectAll` + `getAsToolDefinitions()` 注册 + `setMcpManager()` 注入 ToolContext；REPL、daemon `session-runtime` 与 task-worker 均生效。旧 BackendHost 路径已删除。
-- **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`apps/cli/src/plugin-contributions.ts`、`apps/cli/src/session-runtime.ts`
+  standalone/daemon agent 均由 framework composition 接线；default export ToolDefinition | ToolDefinition[]）。
+- ✅ MCP 接线：`OpenHarnessAgent` 内部执行 `connectAll` + `getAsToolDefinitions()` 注册 + `setMcpManager()` 注入 ToolContext。旧 BackendHost 路径已删除。
+- **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`packages/agent-runtime/src/extensions.ts`、`apps/cli/src/plugin-contributions.ts`
 
 ### C.2 Auth ProviderProfile 体系
 - 命名 ProviderProfile（list/use/add/edit/remove/switch；base_url/api_format/model/credential_slot 等字段）。
@@ -190,7 +190,7 @@
 - ✅ CLI 接线：session 快照存 `session_mode`；`--continue/--resume` 恢复时调
   `matchSessionMode` 自动同步 env；REPL 启动时若 coordinator 模式
   调 `queryEngine.setAllowedTools(getCoordinatorTools())`（Agent/SendMessage/TaskStop/Workflow）。
-  daemon `SessionRuntime` 尚未按 session_mode 限制 coordinator 工具集。
+  daemon `createDaemonAgentLoader()` 尚未按 durable `session_mode` 向 framework agent 应用 coordinator 工具集限制。
 - `QueryEngine.setAllowedTools(string[]|null)`：在 submitMessage 内 streamMessage
   调用前过滤 toolRegistry，null 解除限制。
 - ✅ agent 级字段运行时生效：`tools/disallowedTools/maxTurns/effort/permissionMode` 经 `TeammateSpawnConfig` → `ChildSessionBackend` 写入 child session metadata，由 daemon runtime 应用。留待：agent 级 `hooks/mcpServers` 的运行时生效。
@@ -200,9 +200,9 @@
 - ✅ `packages/personalization`：10 类环境事实正则抽取（SSH/IP/数据路径/conda/
   Python/端点/env/git remote/Ray/cron），去重合并 + 置信度胜出。
 - ✅ `local_rules/` rules.md + facts.json 持久化（尊重 OPENHARNESS_CONFIG_DIR）。
-- ✅ session-end best-effort 抽取已接 print / daemon session runtime；rules.md 注入
+- ✅ `rules.md` 已注入 framework 默认 system prompt；`updateRulesFromSession()` 抽取能力已实现
   system prompt（CLAUDE.md 后，含 daemon bootstrap）。
-- 留待：daemon/TUI session archive 或进程退出时调用 `updateRulesFromSession`。
+- 留待：standalone host 与 daemon/TUI session archive 或进程退出时调用 `updateRulesFromSession`。
   旧 BackendHost shutdown 路径已删除。详见 `docs/personalization-design.md`。
 - 顺带修了 Python git_remote 正则的失效模式（恒捕获 1 字符被过滤）。
 - **文件**：`packages/personalization/src/index.ts`、`packages/prompts/src/index.ts`、`apps/cli/src/commands/main.ts`
@@ -228,13 +228,13 @@
 ### D.2 Channels 多通道 + 引擎桥接
 - ✅ 基座：`MessageBus`（双异步队列，AbortSignal 退出）、ACL（fail-closed：
   空全拒/`"*"`全放/`"|"`分段）、`ChannelManager`（注入式 adapter、启停/出站
-  分发、单通道失败不拖垮）、`ChannelBridge`（inbound → `engine.submitMessage`
+  分发、单通道失败不拖垮）、`ChannelBridge`（inbound → `agent.submitMessage`
   聚合 text_delta → outbound）。
 - ✅ 接线（TS 自有，Python 侧是 ohmo 消费的库）：`ohs channels serve|status`
   长驻模式 + `settings.channels` 配置段；飞书基础版（文本收发 + @bot 过滤，
   ACL 上移 manager）。微信不做（用户裁决，Python 本无）。serve 无头模式
   只读工具自动放行（写/Bash 仍拒）；`settings.permission.autoApproveTools`
-  顺带接线。详见 `docs/channels-bridge-design.md`。
+  顺带接线。详见 `docs/channels-flow.md`。
 - 留待：Telegram/Discord/Slack 等其余通道、媒体收发、长消息分片、飞书消息
   去重 + bot 消息跳过、线程级会话隔离。
 - **文件**：`packages/channels/src/`、`apps/cli/src/commands/channels.ts`
@@ -302,7 +302,7 @@
 - ✅ **每命令 model 覆盖**：`/<skill>` 调用时若 `skill.model` 非空，在 `submitMessage` 前
   临时 `setModel(skill.model)`，finally 块恢复原 model（REPL 接线；旧 BackendHost 路径已删除）。
 - 留待：skill-creator/diagnose 重工作流 skill；TUI/daemon 的 user-invocable skill 斜杠命令。
-- **文件**：`packages/skills/src/index.ts`、`apps/cli/src/commands/main.ts`、`apps/cli/src/session-runtime.ts`
+- **文件**：`packages/skills/src/index.ts`、`packages/agent-runtime/src/extensions.ts`、`apps/cli/src/commands/main.ts`
 
 ### E.6 Services 杂项
 - ✅ 记忆四件套（第一刀）：`autodream`（/dream 命令+锁/备份/回滚）、`memory_extract`

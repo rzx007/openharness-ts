@@ -6,7 +6,7 @@
 > `frontend → @openharness/client → ohs serve`。
 >
 > **当前权威计划以 [PLAN-REMAINING.md](PLAN-REMAINING.md) 为准。**
-> 当前 TUI / 会话同步见 [docs/tui-flow.md](docs/tui-flow.md)、[docs/client-sync-flow.md](docs/client-sync-flow.md)、[docs/daemon-session-runtime-design.md](docs/daemon-session-runtime-design.md)。
+> 当前 TUI / 会话同步见 [docs/tui-flow.md](docs/tui-flow.md)、[docs/client-sync-flow.md](docs/client-sync-flow.md)、[docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)。
 
 ## 历史状态（仅供追溯）
 
