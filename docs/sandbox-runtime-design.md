@@ -1,6 +1,6 @@
 # 设计：Sandbox runtime 接入
 
-> 状态（2026-08-12）：Bash、TaskManager、autodream、command hooks、Cron/RemoteTrigger 和 LSP ripgrep 已统一经过 `@openharness/sandbox` 的 shell/argv process API。文件工具仍采用 host-guarded MVP；MCP stdio 与宿主基础设施不在该统一入口内。
+> 状态（2026-08-12）：Bash、TaskManager、autodream、command hooks、Cron/RemoteTrigger、LSP ripgrep、MCP stdio、Read/Write/Edit/Glob/Grep 已接入 `@openharness/sandbox` 的统一入口。Docker active 时文件工具真实读写和搜索发生在容器内；宿主仍负责 permission、路径边界和 diff 编排。
 >
 > 当前完整调用链和下一步见 [`sandbox-runtime-flow.md`](./sandbox-runtime-flow.md)。
 
@@ -11,19 +11,19 @@ Python 原版已经有两类 sandbox 后端：
 - `srt`：通过 `@anthropic-ai/sandbox-runtime` 的 `srt --settings <file> -c <command>` 包装 shell 命令。
 - `docker`：启动一个长驻容器，后续 shell 命令通过 `docker exec` 在容器内运行。
 
-TS 版当前已经有可用的 sandbox MVP：CLI 启动 runtime，`Bash` 通过统一 shell helper 进入 `srt` 或 Docker，文件工具仍在宿主进程执行但受 sandbox 路径边界约束。本文保留实现边界和后续收口事项。
+TS 版当前已经有可用的 sandbox runtime：CLI 启动 runtime，`Bash` 通过统一 shell helper 进入 `srt` 或 Docker；文件工具通过 `FileOperations` 选择宿主或 Docker 容器执行。本文保留实现边界和后续收口事项。
 
 ## 目标
 
 - 给 TS 版增加可用的 sandbox runtime 层，覆盖 `Bash` 和其他共享 shell helper 的调用。
 - 支持 `srt` 和 `docker` 两个后端，默认关闭。
 - Docker 后端支持网络策略配置，不再只能硬编码断网。
-- Docker active 时，`Read` / `Write` / `Edit` / `Glob` / `Grep` 等宿主文件工具必须被 sandbox 边界约束。
+- Docker active 时，`Read` / `Write` / `Edit` / `Glob` / `Grep` 必须先过 sandbox 边界检查，再在容器内执行真实 IO/search。
 - sandbox 不可用时可配置为降级运行或 fail closed。
 
 ## 非目标
 
-- MVP 不做所有工具完全容器化：`Bash` 走 sandbox，文件工具仍在宿主进程执行并通过 path guard 限界。
+- SRT 文件工具暂不做独立容器化/包装：SRT active 时仍走宿主文件操作加 path guard。
 - MVP 不承诺 Docker `bridge`/`host` 的域名级 allow/deny 过滤；严格域名策略只能由可执行该策略的后端承诺。
 - MVP 的 `srt` 不支持 native Windows；Docker backend 支持 Windows Docker Desktop，容器内工作目录映射为 `/workspace`。Windows 用户也可以继续通过 WSL 使用。
 - MVP 不改变现有 permission 模型：permission 决定工具是否允许调用，sandbox 是额外执行边界，不替代 permission。
@@ -34,15 +34,15 @@ Docker sandbox 启用后：
 
 - `Bash` 在容器里跑。
 - 项目目录 bind mount 到容器里，所以 shell 能读写项目文件。
-- `Read` / `Write` / `Edit` 这类内置文件工具仍由 TS 主进程在宿主机读写。
-- 这些宿主文件工具必须先做路径校验，只允许访问 sandbox root 及显式 allow 的目录。
+- `Read` / `Write` / `Edit` 这类内置文件工具必须先做路径校验，只允许访问 sandbox root 及显式 allow 的目录。
+- Docker active 时，文件工具把宿主路径翻译为容器路径，然后在容器内读写。
 
 也就是说，MVP 是：
 
 ```text
 shell 命令：容器内执行
 项目目录：宿主和容器共享
-内置文件工具：宿主执行 + sandbox 路径边界检查
+内置文件工具：宿主先判边界，Docker active 时容器内执行
 ```
 
 ## 配置
@@ -301,7 +301,7 @@ closeRuntime:
 
 ## 文件工具边界
 
-当 Docker sandbox active 时，宿主文件工具必须调用：
+文件工具分两步：先在宿主判权限和路径，再选择真实执行位置。
 
 ```ts
 validateSandboxPath(path, {
@@ -321,7 +321,12 @@ validateSandboxPath(path, {
 - 系统保护路径仍然保留现有硬拒绝，比如 home、root、系统目录、`.git` 危险写入等。
 - 校验失败时返回 tool error：`Sandbox: path is outside sandbox boundary`。
 
-需要接线的工具：
+校验通过后，`fileOperationsFor(context)` 负责选择：
+
+- Docker active：`DockerFileOperations`。`Read` / `Write` / `Edit` 走容器内 Node helper，`Glob` / `Grep` 走容器内 `rg`。
+- 其他情况：`HostFileOperations`，行为保持和原来一致。
+
+已经接线的工具：
 
 - `Read`
 - `Write`
@@ -332,17 +337,17 @@ validateSandboxPath(path, {
 
 ## 文件工具容器化路线
 
-当前 MVP 是“宿主文件工具 + sandbox path guard”。这不是最终形态，但它有两个好处：
+当前实现是“宿主先判边界，Docker active 时容器内执行”。这样有两个好处：
 
 - 保留现有 permission、diff approval、错误展示和测试行为。
-- Docker / SRT 先把高风险 shell 执行边界收住，避免一次性重写所有文件工具。
+- 文件工具真实 IO/search 不再绕过 Docker sandbox。
 
 对照上游和参考项目：
 
 - Python OpenHarness：`Read` / `Write` / `Edit` 仍由宿主 `Path` 执行，只在 Docker active 时校验 sandbox path；`Glob` / `Grep` 在 `rg` 可用时通过 active Docker session `exec_command()` 跑进容器。
 - Hermes-agent：文件工具统一封装为 `ShellFileOperations`，再交给当前 execution environment；environment 可以是 local、Docker、SSH、Modal、Daytona 等。这个模型更完整，但大量依赖 shell quoting、POSIX 工具、BOM/CRLF 保留、原子写、回读验证和 cwd tracking。
 
-OpenHarness-ts 推荐吸收 Hermes 的抽象，而不是直接照搬 shell 实现：
+OpenHarness-ts 吸收 Hermes 的抽象，而不是直接照搬 shell 实现：
 
 ```ts
 export interface FileOperations {
@@ -361,13 +366,13 @@ HostFileOperations
   使用宿主 fs / fast-glob / ripgrep，保持当前行为。
 
 DockerFileOperations
-  先做宿主 permission + validateSandboxPath。
   再把宿主路径翻译为容器路径。
-  最后通过 active DockerSandboxSession.execCommand() 执行。
+  Read/Write/Edit 通过容器内 Node helper 读写。
+  Glob/Grep 通过容器内 rg 搜索。
 
 SrtFileOperations
   每次操作通过 srt 包装宿主命令。
-  适合后续接入；MVP 可先不做。
+  适合后续接入；当前仍走 HostFileOperations + path guard。
 ```
 
 Docker 路径翻译必须集中实现：
@@ -377,14 +382,14 @@ Docker 路径翻译必须集中实现：
 | Linux / WSL / macOS | `<cwd>/src/a.ts` | `<cwd>/src/a.ts` |
 | Windows Docker Desktop | `D:\repo\src\a.ts` | `/workspace/src/a.ts` |
 
-迁移顺序：
+已完成：
 
-1. `Glob` / `Grep`：优先迁移。它们本来就常调用 `rg`，通过 `docker exec rg ...` 成本最低。
-2. `Read`：容器内读取文本、二进制检测、分页；返回结构化结果。
-3. `Write`：宿主生成 diff 和 approval，容器内原子写入。
-4. `Edit`：容器读旧内容，宿主计算替换和 diff，批准后容器写回并回读验证。
+1. `FileOperations` 统一入口。
+2. `hostPathToContainerPath()` 集中处理 Windows Docker Desktop 的 `/workspace` 映射。
+3. `Glob` / `Grep` 在 Docker active 时进入容器跑 `rg`。
+4. `Read` / `Write` / `Edit` 在 Docker active 时进入容器跑 Node helper。
 
-如果 Docker shell 拼接开始变复杂，再引入容器内 helper：
+当前 helper 使用 `docker exec -i ... node -e <script>`，通过 stdin/stdout 传 JSON：
 
 ```text
 docker exec -i <container> node /opt/openharness/file-helper.mjs
@@ -392,23 +397,13 @@ stdin:  { "op": "readText", "path": "/workspace/src/a.ts", "offset": 0, "limit":
 stdout: { "ok": true, "content": "...", "totalLines": 123, "truncated": false }
 ```
 
-helper 的好处是避免把多行文本、特殊字符、JSON、Windows 路径、错误码都塞进 shell 字符串；缺点是镜像需要携带 helper，Dockerfile 和 autoBuildImage 要保证版本匹配。
+helper 的好处是避免把多行文本、特殊字符、JSON、Windows 路径、错误码都塞进 shell 字符串。当前先内联脚本，后续如果需要稳定版本管理，可以放进 Docker 镜像。
 
-建议新增配置：
+剩余工作：
 
-```ts
-export interface SandboxFileToolsConfig {
-  mode?: "host-guarded" | "container-search" | "container";
-}
-```
-
-语义：
-
-- `host-guarded`：当前 MVP，文件工具宿主执行，必须 path guard。
-- `container-search`：`Glob` / `Grep` 进容器，读写编辑仍宿主执行。
-- `container`：读写搜索都进容器，宿主只负责 permission、path guard、diff approval 编排。
-
-默认先保持 `host-guarded`。当 Docker E2E 覆盖 `Glob` / `Grep` 容器执行、Windows `/workspace` 映射、`Write` / `Edit` diff approval 和回读验证后，再考虑提升默认级别。
+1. 补真实 Docker E2E，覆盖 `Glob` / `Grep` / `Read` / `Write` / `Edit`。
+2. `Write` / `Edit` 增加回读校验，确认容器写入后的宿主挂载内容一致。
+3. 评估是否需要 `SrtFileOperations`；当前 SRT 场景仍是宿主文件操作加 path guard。
 
 ## Permission 与 sandbox 的关系
 
@@ -448,6 +443,8 @@ native Windows 不支持的原因：
 - 当前 TS `Bash` 依赖 `bash.exe`，Windows 上经常是 Git Bash 或 WSL bash，语义不稳定。
 
 ## Docker 容器参数
+
+默认内置 Dockerfile 基于 `node:22-bookworm`，并安装 `ripgrep`、`setsid` 所在的 `util-linux`、`sleep`、`/bin/kill` 等基础命令。自定义镜像也需要提供 `node`、`rg`、`setsid`、`sleep` 和 `/bin/kill`。
 
 启动 argv 形态：
 

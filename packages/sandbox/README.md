@@ -11,14 +11,16 @@ OpenHarness 的 sandbox runtime 辅助层。
 - `ohs sandbox on` 默认启用**项目本地、可复用**的 Docker 容器。容器名由工作区路径派生，
   CLI/TUI 退出后仍保留，直到 `ohs sandbox clean` 删除。
 - 取消或超时不会只关掉宿主上的 `docker exec`，还会停止容器内命令及其启动的子进程。
-- 自定义 Docker 镜像必须提供 `setsid`、`sleep` 和 `/bin/kill`，否则启动时直接报错。
-- 文件工具仍在宿主侧执行；开启 sandbox 时走路径校验。
+- 自定义 Docker 镜像必须提供 `node`、`rg`、`setsid`、`sleep` 和 `/bin/kill`，否则 shell 或文件工具可能无法运行。
+- `Read` / `Write` / `Edit` / `Glob` / `Grep` 先做路径校验；Docker active 时真实读写和搜索在容器内执行。
+- MCP stdio server 通过 `createProcess` 启动，和普通 Agent 工作负载走同一套 sandbox 规则。
 - `SandboxAdapter` 是兼容旧接口的门面，底层走统一 runtime 路径。
 
 已知缺口：
 
 - Docker/SRT E2E 为可选、按环境跳过；Docker 进程树停止已有 E2E 用例，但 CI 接线仍待完成。
-- 主 daemon 托管的 Cron 已通过自己的 `cwd + cron:<jobId>` 范围接入 Sandbox。MCP stdio 和容器内文件操作还没有完整接入 Sandbox。
+- 主 daemon 托管的 Cron 已通过自己的 `cwd + cron:<jobId>` 范围接入 Sandbox。
+- 文件工具和 MCP stdio 已接入统一入口，但还缺真实 Docker E2E 覆盖。
 
 ## CLI
 

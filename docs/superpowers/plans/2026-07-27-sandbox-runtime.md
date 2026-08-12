@@ -164,7 +164,9 @@ Exit criteria:
 - [x] 增加 Docker Abort 与可复用 runtime stop 的真实进程树 E2E；本轮因 Docker daemon 未启动而跳过，等待 CI/可用环境执行。
 - [x] 删除独立 cron daemon；Cron 改由主 daemon 启动、停止并通过自己的 Sandbox scope 执行。
 - [x] 主 daemon 支持 Windows 计划任务、macOS LaunchAgent 和 Linux systemd user service；当前用户登录后启动，异常退出后由系统重启。没有主 daemon 时不执行 Cron。
-- [ ] MCP stdio transport process factory 与 FileOperations/container-search 进入下一阶段。
+- [x] MCP stdio transport 通过 `SandboxStdioClientTransport` 接入 `createProcess`。
+- [x] `Read` / `Write` / `Edit` / `Glob` / `Grep` 接入 `FileOperations`；Docker active 时真实读写和搜索进容器。
+- [ ] 文件工具和 MCP stdio 的真实 Docker E2E 进入下一阶段。
 
 ---
 
@@ -197,6 +199,15 @@ Exit criteria:
   - outside path rejected when sandbox active.
   - behavior unchanged when sandbox disabled.
 
+### 2026-08-12 文件工具容器化收口
+
+- [x] Add `FileOperations` with host and Docker implementations.
+- [x] Route `Read` / `Write` / `Edit` through Docker file helper when a Docker sandbox session is active.
+- [x] Route `Glob` / `Grep` through container `rg` when a Docker sandbox session is active.
+- [x] Keep host fallback for sandbox off/degraded mode.
+- [x] Add unit tests proving Docker active file tools use the sandbox session instead of host IO/search.
+- [ ] Add real Docker E2E for file tools.
+
 ---
 
 ## Task 9: Runtime Lifecycle Wiring
@@ -219,6 +230,7 @@ Exit criteria:
 ## Task 10: Documentation and Verification
 
 - [x] Update `docs/sandbox-runtime-design.md` if implementation differs.
+- [x] Update `docs/sandbox-runtime-flow.md` and `packages/sandbox/README.md` for MCP stdio and Docker file operations.
 - [ ] Update README or `docs/permission-flow.md` with sandbox/permission relationship.
 - [x] Run focused tests:
   - `pnpm --filter @openharness/core test`

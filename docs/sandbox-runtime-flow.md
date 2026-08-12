@@ -34,11 +34,11 @@ flowchart LR
 | command hook | `createShellProcess` | Sandbox workload |
 | Cron scheduled run / RemoteTrigger | `CronScheduler.trigger` -> `createShellProcess` | Sandbox workload |
 | LSP 的 ripgrep 查询 | `createProcess` | Sandbox workload |
-| Read / Write / Edit | Node filesystem + `sandboxPathError` | host-guarded file IO |
-| Glob / Grep 的 host ripgrep 加速 | direct host utility + `sandboxPathError` | host-guarded，明确例外 |
+| Read / Write / Edit | `sandboxPathError` -> `FileOperations` | Docker active 时进容器；否则宿主执行 |
+| Glob / Grep | `sandboxPathError` -> `FileOperations` | Docker active 时进容器跑 `rg`；否则宿主执行 |
 | 主 daemon/TUI/frontend 自启动 | host process | application infrastructure |
 | git worktree / merge / runtime repo setup | host process | host workspace infrastructure |
-| MCP stdio transport | MCP SDK 内部启动 | 第三方 transport 边界，尚未接入 Sandbox |
+| MCP stdio transport | `SandboxStdioClientTransport` -> `createProcess` | Sandbox workload |
 
 这里的“统一”针对 **Agent 工作负载**，不把 daemon 自启动、Docker CLI、git worktree 管理误当成模型命令。宿主例外必须出现在上表，不能在业务模块里静默新增 `child_process`。
 
@@ -63,7 +63,7 @@ flowchart LR
 - `process-control.ts` 提供统一的整棵进程停止入口。
 - `docker-backend.ts` 给每次容器命令分配执行编号，并记录容器内进程组。
 - `AbortSignal`、Bash 超时、TaskStop 和 runtime 关闭都走这套停止规则。
-- Docker 镜像必须提供 `setsid`、`sleep` 和 `/bin/kill`。缺少时启动直接失败，不会降级成可能清理不干净的执行。
+- Docker 镜像必须提供 `node`、`rg`、`setsid`、`sleep` 和 `/bin/kill`。默认内置 Dockerfile 已包含这些依赖；自定义镜像缺少它们时，shell 停止或文件工具会失败。
 - 可复用容器关闭 runtime 时仍保留容器，但会先清掉该 runtime 启动且仍在运行的命令。
 
 ## 当前未闭环
@@ -71,8 +71,8 @@ flowchart LR
 1. Docker 整棵进程停止已经实现并有真实 E2E 用例，但本机 Docker daemon 未启动，本轮这些用例被跳过；还需要在可用的 Docker 环境或 CI 中实际跑通。
 2. Cron 已由主 daemon 托管，并使用 `cwd + cron:<jobId>` 启动自己的 Sandbox 范围。主 daemon 没运行时，Cron 也不运行。
 3. 用户级 `settings.json` 的 `daemon.autoStart` 开启后，主 daemon 会交给 Windows 计划任务、macOS LaunchAgent 或 Linux systemd user service 管理；当前用户登录后自动启动，崩溃后由系统恢复。`ohs daemon install` 是开启并立即应用该设置的便捷命令。
-4. MCP SDK 的 stdio transport 自己创建进程，还不能交给 Sandbox 启动。
-5. Glob/Grep 仍在宿主机器搜索，只做路径边界检查；后续要改成可选择宿主或容器的文件操作接口。
+4. `Read` / `Write` / `Edit` / `Glob` / `Grep` 已通过 `FileOperations` 统一入口接入 Docker active session，但还缺真实 Docker E2E 覆盖。
+5. MCP stdio 已通过 sandbox-aware transport 接入 `createProcess`，但还缺真实 MCP stdio + Docker 的 E2E 覆盖。
 
 Sandbox 有两条后端：
 
@@ -88,7 +88,7 @@ Sandbox 有两条后端：
 分两阶段：
 
 1. **启动**：按配置/环境选后端并准备（srt 只检查可用性；docker 起容器）。
-2. **执行**：Bash 走对应后端；文件工具仍在宿主进程，但过路径校验。
+2. **执行**：Bash 走对应后端；文件工具先在宿主判权限和路径，再按当前后端选择宿主或容器执行。
 
 ```text
 ┌─ 启动（一次）─────────────────────────────────────────┐
@@ -103,7 +103,9 @@ Sandbox 有两条后端：
 │           srt    → wrapCommandForSrt → spawn srt -c …  │
 │           docker → docker exec … /bin/sh -c …          │
 │           off    → 宿主 shell                          │
-│ 文件工具 → sandboxPathError → 宿主读写 + 路径校验      │
+│ 文件工具 → sandboxPathError → FileOperations          │
+│          docker active → 容器内读写/搜索               │
+│          off/degraded  → 宿主读写/搜索                 │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -123,6 +125,7 @@ Sandbox 有两条后端：
 | Runtime 挂载 | `packages/agent-runtime/src/default-runtime.ts` | `attachSandboxRuntime`：默认 runtime 组装后启动，docker 时注册 cleanup |
 | Bash | `packages/tools/src/shell/bash.ts` | timeout / 输出截断；spawn 走 `createShellProcess` |
 | 文件守卫 | `packages/tools/src/file/sandbox-guard.ts` | Read/Write/Edit/Glob/Grep 调 `validateSandboxPath` |
+| 文件操作 | `packages/tools/src/file/operations.ts` | 统一选择宿主文件操作或 Docker 容器内文件操作 |
 | Settings | `packages/core/src/config/settings.ts` | env 覆盖 `OPENHARNESS_SANDBOX_*` |
 
 ## A. 启动阶段
@@ -236,14 +239,17 @@ normalizeSandboxConfig(settings.sandbox)
                                   → close/error 时 cleanup 临时目录
 ```
 
-### B2. 文件工具（宿主执行 + 路径边界）
+### B2. 文件工具（先判边界，再选择执行位置）
 
-MVP 不做文件工具容器化：`Read` / `Write` / `Edit` / `Glob` / `Grep` 仍在宿主进程读写，sandbox 开启时必须过路径校验。
+文件工具不直接碰宿主 filesystem。它们先做两件事：
+
+1. `sandboxPathError(...)` 判断路径是否允许访问。
+2. `fileOperationsFor(context)` 按当前 runtime 选择执行位置。
 
 ```text
 Bash              → docker exec 或 srt 包装
-Read/Write/Edit   → 宿主进程 + path guard
-Glob/Grep         → 宿主进程 + path guard
+Read/Write/Edit   → path guard → FileOperations
+Glob/Grep         → path guard → FileOperations
 ```
 
 ```text
@@ -253,6 +259,11 @@ Glob/Grep         → 宿主进程 + path guard
        └─ validateSandboxPath(...)
             deny 优先于 allow；拒绝 .. / 越界 symlink；
             默认只允许 sandboxRoot（cwd）及 allow / extraAllowedRoots
+  └─ fileOperationsFor(context)                    # operations.ts
+       ├─ Docker active → DockerFileOperations
+       │    ├─ Read/Write/Edit: 容器内 Node helper，经 stdin/stdout 传 JSON
+       │    └─ Glob/Grep: 容器内 `rg`
+       └─ 否则 → HostFileOperations
 ```
 
 ### B3. 文件工具容器化演进
@@ -264,56 +275,31 @@ Python 原版 OpenHarness 和 Hermes-agent 的做法不同：
 | Python OpenHarness | `Read` / `Write` / `Edit` 仍由宿主 `Path` 读写；Docker active 时加 path guard。`Glob` / `Grep` 在可用 `rg` 时通过 Docker session `exec_command()` 进容器。 | 适合作为稳定 MVP：先隔离 Bash，再把搜索类工具迁到容器。 |
 | Hermes-agent | 文件工具统一走 `ShellFileOperations`，文件操作被表达为 shell 命令，再交给当前 `Environment.execute()`；environment 可以是 local / docker / ssh / modal / daytona。 | 适合作为最终架构：文件工具不直接依赖宿主 fs，而是依赖执行环境。 |
 
-OpenHarness-ts 推荐走中间路线：先补统一文件操作抽象，再分批迁移。
+OpenHarness-ts 现在采用中间路线：文件工具统一接到 `FileOperations`，Docker active 时真实读写和搜索都进容器；没有 Docker active 且允许降级时才走宿主实现。
 
 ```text
 Read / Write / Edit / Glob / Grep
   └─ FileOperations
        ├─ HostFileOperations
        │    └─ 宿主 fs / fast-glob / ripgrep
-       └─ SandboxFileOperations
-            ├─ Docker: active session.execCommand(...)
-            └─ SRT: wrapCommandForSrt(...) 后 spawn
+       └─ DockerFileOperations
+            ├─ Read/Write/Edit: node -e file helper
+            └─ Glob/Grep: rg
 ```
 
 迁移原则：
 
 - **宿主先判权**：permission 和 `validateSandboxPath` 仍在宿主执行；通过后再把路径翻译到容器路径。
-- **实际 IO 可进容器**：Docker active 且 file tool mode 支持时，真实 read/write/search 在容器内发生。
+- **实际 IO 进容器**：Docker active 时，真实 read/write/search 在容器内发生。
 - **diff/approval 不变**：`Write` / `Edit` 的审批和 diff 仍由宿主编排；宿主从容器读取旧内容，生成 diff，批准后再写回容器。
-- **先搜索，后读写**：`Glob` / `Grep` 最容易先迁到 Docker `rg`；`Read` 次之；`Write` / `Edit` 最后迁移。
+- **读写搜索同一入口**：`Glob` / `Grep` 通过容器内 `rg`，`Read` / `Write` / `Edit` 通过容器内 Node helper。
 - **路径翻译集中处理**：Windows Docker Desktop 下宿主 workspace 映射到 `/workspace`，不能让各工具分散拼路径。
 
-推荐阶段：
+剩余工作：
 
-1. 引入 `FileOperations` 接口，当前所有文件工具先接到 `HostFileOperations`，行为不变。
-2. 给 Docker runtime 增加 `runFileCommand()` 或复用 `execCommand()`，让 `Glob` / `Grep` 在容器内跑 `rg`。
-3. 增加 `hostPathToContainerPath()` / `containerPathToHostPath()`，覆盖 Windows `/workspace` 映射和 POSIX 同路径映射。
-4. 迁移 `Read`：宿主 path guard 后，容器内读取文本、做二进制检测和分页，返回结构化结果。
-5. 迁移 `Write` / `Edit`：容器读旧内容，宿主 diff/approval，容器原子写入并回读验证。
-6. 若 shell 拼接复杂度上升，再引入容器内 helper，例如 `/opt/openharness/file-helper.mjs`，用 JSON stdin/stdout 承载 read/write/glob/grep。
-
-初期建议配置为显式开关：
-
-```json
-{
-  "sandbox": {
-    "fileTools": {
-      "mode": "host-guarded"
-    }
-  }
-}
-```
-
-可选值：
-
-| 值 | 行为 |
-|----|------|
-| `host-guarded` | 当前 MVP：宿主执行 + path guard。 |
-| `container-search` | `Glob` / `Grep` 进容器，`Read` / `Write` / `Edit` 仍宿主执行。 |
-| `container` | 文件工具真实 IO 进容器；permission/path guard 仍宿主判定。 |
-
-默认值先保持 `host-guarded`，等 Docker E2E 覆盖读写、diff、Windows 路径映射后，再考虑让 Docker sandbox 默认 `container-search` 或 `container`。
+1. 给 `Read` / `Write` / `Edit` / `Glob` / `Grep` 补真实 Docker E2E，覆盖 Windows `/workspace` 路径映射。
+2. `Write` / `Edit` 后续可增加回读校验，确认容器写入后的宿主挂载内容一致。
+3. SRT 后端的文件工具仍走宿主实现加 path guard；如果后续需要，也可以加 `SrtFileOperations`。
 
 ## C. Docker 后端细节
 
