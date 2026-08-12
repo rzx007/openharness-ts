@@ -34,6 +34,7 @@ describe("Workflow tool smoke", () => {
       takeSteeredInputs: async () => [],
       closeSteering: () => {},
       children: {
+        hasChildAgent: (id) => outputs.has(id),
         spawnChildAgent: async (input) => {
           spawned.push(input);
           const taskName = input.sessionId?.match(/^wf-(.+)-\d+-/)?.[1] ?? input.agent;
@@ -47,18 +48,13 @@ describe("Workflow tool smoke", () => {
         },
         sendChildInput: async () => {},
         interruptChildAgent: async () => {},
-        awaitChildAgent: async (id) => ({ status: "completed", output: `worker:${id}` }),
+        awaitChildAgent: async (id) => ({ status: "completed", output: outputs.get(id) ?? "" }),
       },
     };
     const tool = createWorkflowTool({
       createRunner: (options) =>
         createAgentWorkflowRunner({
           ...options,
-          awaitTask: async (taskId) => ({
-            status: "completed",
-            output: outputs.get(taskId) ?? "",
-            exitCode: 0,
-          }),
           getDiffSummary: async () => ({ changedFiles: [], insertions: 0, deletions: 0 }),
           getAgentDefinition: () => undefined,
         }),

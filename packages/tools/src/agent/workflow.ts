@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@openharness/core";
+import type { ToolContext, ToolDefinition } from "@openharness/core";
 import {
   WORKFLOW_SPEC_TEMPLATES,
   cancelPersistentWorkflow,
@@ -284,7 +284,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         return workflowReconcile(input, context.cwd);
       }
       if (action === "cancel") {
-        return workflowCancel(input, context.cwd, context.sessionId, options.stopTask, (event) => emitWorkflowRuntimeEvent(context, event));
+        return workflowCancel(input, context, options.stopTask, (event) => emitWorkflowRuntimeEvent(context, event));
       }
 
       const specOrError = parseWorkflowSpec(input);
@@ -317,7 +317,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
             void cancelPersistentWorkflow(workflowRunId, {
               store,
               reason: "Parent session interrupted",
-              stopTask: options.stopTask ?? ((taskId) => stopTaskInCwd(context.cwd, context.sessionId, taskId)),
+              stopTask: options.stopTask ?? ((taskId) => stopWorkflowTask(context, taskId, "Parent session interrupted")),
               onEvent,
             }).catch(() => {});
           };
@@ -456,25 +456,36 @@ function workflowReconcile(input: Record<string, unknown>, cwd: string) {
 
 async function workflowCancel(
   input: Record<string, unknown>,
-  cwd: string,
-  sessionId: string | undefined,
+  context: ToolContext,
   stopTask: ((taskId: string) => Promise<unknown>) | undefined,
   onEvent?: (event: WorkflowRunEvent) => void,
 ) {
-  const store = new WorkflowRunStore({ cwd });
+  const store = new WorkflowRunStore({ cwd: context.cwd });
   const snapshot = loadWorkflowSnapshot(store, input);
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
   }
+  const reason = asOptionalString(input.cancelReason);
   const result = await cancelPersistentWorkflow(snapshot, {
     store,
-    reason: asOptionalString(input.cancelReason),
-    stopTask: stopTask ?? ((taskId) => stopTaskInCwd(cwd, sessionId, taskId)),
+    reason,
+    stopTask: stopTask ?? ((taskId) => stopWorkflowTask(context, taskId, reason ?? "Workflow cancelled")),
     onEvent,
   });
   return {
     content: [{ type: "text" as const, text: formatWorkflowNotification(result) }],
   };
+}
+
+async function stopWorkflowTask(
+  context: ToolContext,
+  taskId: string,
+  reason: string,
+): Promise<unknown> {
+  if (context.agent?.children.hasChildAgent(taskId)) {
+    return context.agent.children.interruptChildAgent(taskId, reason);
+  }
+  return stopTaskInCwd(context.cwd, context.sessionId, taskId);
 }
 
 async function workflowResume(

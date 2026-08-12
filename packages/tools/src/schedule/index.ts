@@ -1,208 +1,147 @@
-import type { ToolDefinition } from "@openharness/core";
+import type { AgentCronEffects, ToolContext, ToolDefinition, ToolResult } from "@openharness/core";
+import { validateCronExpression } from "@openharness/services";
+
+function cronHost(context: ToolContext): AgentCronEffects | undefined {
+  return context.agent?.effects.cron;
+}
+
+function unavailable(): ToolResult {
+  return {
+    content: [{ type: "text", text: "This host does not provide persistent scheduled commands." }],
+    isError: true,
+  };
+}
 
 export const cronCreateTool: ToolDefinition = {
   name: "CronCreate",
-  description: "Create or replace a local cron job with a standard cron expression.",
+  description: "Create or replace a persistent scheduled command.",
   inputSchema: {
     type: "object",
     properties: {
-      name: { type: "string", description: "Unique cron job name" },
-      schedule: {
-        type: "string",
-        description:
-          "Cron schedule expression (e.g. '*/5 * * * *' for every 5 minutes)",
-      },
-      command: { type: "string", description: "Shell command to run when triggered" },
-      cwd: { type: "string", description: "Optional working directory override" },
-      enabled: { type: "boolean", default: true, description: "Whether the job is active" },
+      name: { type: "string", description: "Unique job name" },
+      schedule: { type: "string", description: "Five-field cron expression" },
+      command: { type: "string", description: "Shell command to run" },
+      cwd: { type: "string", description: "Working directory" },
+      timezone: { type: "string", description: "Optional IANA timezone" },
+      enabled: { type: "boolean", default: true },
     },
     required: ["name", "schedule", "command"],
   },
-  async execute(input) {
-    const { getCronScheduler, validateCronExpression } = await import(
-      "@openharness/services"
-    );
-    const schedule = input.schedule as string;
-    if (!validateCronExpression(schedule)) {
+  async execute(input, context) {
+    const host = cronHost(context);
+    if (!host) return unavailable();
+    const expression = String(input.schedule ?? "");
+    if (!validateCronExpression(expression)) {
       return {
-        content: [
-          {
-            type: "text",
-            text: `Invalid cron expression: '${schedule}'. Expected 5-field cron format (min hour day month weekday).`,
-          },
-        ],
+        content: [{ type: "text", text: `Invalid cron expression: '${expression}'. Expected 5 fields.` }],
         isError: true,
       };
     }
-    const scheduler = getCronScheduler();
-    const job = scheduler.upsertJob({
-      name: input.name as string,
-      expression: schedule,
-      command: input.command as string,
-      cwd: input.cwd as string | undefined,
-      enabled: (input.enabled as boolean) ?? true,
-    });
-    const status = job.enabled ? "enabled" : "disabled";
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Created cron job '${input.name}' [${schedule}] (${status})`,
-        },
-      ],
-    };
+    try {
+      const job = await host.save({
+        name: String(input.name ?? ""),
+        expression,
+        command: String(input.command ?? ""),
+        cwd: typeof input.cwd === "string" ? input.cwd : context.cwd,
+        timezone: typeof input.timezone === "string" ? input.timezone : undefined,
+        enabled: typeof input.enabled === "boolean" ? input.enabled : true,
+      });
+      return { content: [{ type: "text", text: `Saved cron job '${job.name}' (${job.enabled ? "enabled" : "disabled"}).` }] };
+    } catch (error) {
+      return failed(error);
+    }
   },
 };
 
 export const cronDeleteTool: ToolDefinition = {
   name: "CronDelete",
-  description: "Delete a local cron job by name.",
+  description: "Delete a persistent scheduled command.",
   inputSchema: {
     type: "object",
-    properties: { name: { type: "string", description: "Cron job name" } },
+    properties: { name: { type: "string" } },
     required: ["name"],
   },
-  async execute(input) {
-    const { getCronScheduler } = await import("@openharness/services");
-    const scheduler = getCronScheduler();
-    const deleted = scheduler.deleteByName(input.name as string);
-    if (!deleted) {
-      return {
-        content: [{ type: "text", text: `Cron job not found: ${input.name}` }],
-        isError: true,
-      };
+  async execute(input, context) {
+    const host = cronHost(context);
+    if (!host) return unavailable();
+    try {
+      await host.remove(String(input.name ?? ""));
+      return { content: [{ type: "text", text: `Deleted cron job '${input.name}'.` }] };
+    } catch (error) {
+      return failed(error);
     }
-    return {
-      content: [{ type: "text", text: `Deleted cron job ${input.name}` }],
-    };
   },
 };
 
 export const cronListTool: ToolDefinition = {
   name: "CronList",
-  description:
-    "List configured local cron jobs with schedule, status, and next run time.",
+  description: "List persistent scheduled commands.",
   inputSchema: { type: "object", properties: {} },
-  async execute() {
-    const { getCronScheduler } = await import("@openharness/services");
-    const scheduler = getCronScheduler();
-    const jobs = scheduler.listJobs();
-    if (!jobs.length) {
+  async execute(_input, context) {
+    const host = cronHost(context);
+    if (!host) return unavailable();
+    try {
+      const jobs = await host.list();
+      if (jobs.length === 0) return { content: [{ type: "text", text: "No cron jobs configured." }] };
       return {
-        content: [{ type: "text", text: "No cron jobs configured." }],
+        content: [{
+          type: "text",
+          text: jobs.map((job) => `${job.name} [${job.expression}] ${job.enabled ? "enabled" : "disabled"} cmd=${job.command}`).join("\n"),
+        }],
       };
+    } catch (error) {
+      return failed(error);
     }
-    const lines = jobs.map((j) => {
-      const state = j.enabled ? "enabled" : "disabled";
-      const runState = j.running ? "running" : "idle";
-      return `${j.name} [${j.expression}] ${state} ${runState} cmd=${j.command}`;
-    });
-    return { content: [{ type: "text", text: lines.join("\n") }] };
   },
 };
 
 export const cronToggleTool: ToolDefinition = {
   name: "CronToggle",
-  description: "Enable or disable a local cron job by name.",
+  description: "Enable or disable a persistent scheduled command.",
   inputSchema: {
     type: "object",
-    properties: {
-      name: { type: "string", description: "Cron job name" },
-      enabled: { type: "boolean", description: "True to enable, false to disable" },
-    },
+    properties: { name: { type: "string" }, enabled: { type: "boolean" } },
     required: ["name", "enabled"],
   },
-  async execute(input) {
-    const { getCronScheduler } = await import("@openharness/services");
-    const scheduler = getCronScheduler();
-    const job = scheduler.setEnabled(
-      input.name as string,
-      input.enabled as boolean
-    );
-    if (!job) {
-      return {
-        content: [{ type: "text", text: `Cron job not found: ${input.name}` }],
-        isError: true,
-      };
+  async execute(input, context) {
+    const host = cronHost(context);
+    if (!host) return unavailable();
+    try {
+      const job = await host.setEnabled(String(input.name ?? ""), Boolean(input.enabled));
+      return { content: [{ type: "text", text: `Cron job '${job.name}' is now ${job.enabled ? "enabled" : "disabled"}.` }] };
+    } catch (error) {
+      return failed(error);
     }
-    const state = job.enabled ? "enabled" : "disabled";
-    return {
-      content: [
-        { type: "text", text: `Cron job '${input.name}' is now ${state}` },
-      ],
-    };
   },
 };
 
 export const remoteTriggerTool: ToolDefinition = {
   name: "RemoteTrigger",
-  description: "Trigger a configured local cron job immediately and capture output.",
+  description: "Run a persistent scheduled command now and return its saved output.",
   inputSchema: {
     type: "object",
-    properties: {
-      name: { type: "string", description: "Cron job name to trigger" },
-    },
+    properties: { name: { type: "string" } },
     required: ["name"],
   },
-  async execute(input) {
-    const { getCronScheduler } = await import("@openharness/services");
-    const scheduler = getCronScheduler();
-    const job = scheduler.findByName(input.name as string);
-    if (!job) {
-      return {
-        content: [{ type: "text", text: `Cron job not found: ${input.name}` }],
-        isError: true,
-      };
-    }
-    if (!job.command) {
-      return {
-        content: [{ type: "text", text: `Cron job '${input.name}' has no command` }],
-        isError: true,
-      };
-    }
-
-    const { exec } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execAsync = promisify(exec);
-
+  async execute(input, context) {
+    const host = cronHost(context);
+    if (!host) return unavailable();
     try {
-      const cwd = job.cwd ?? process.cwd();
-      const { stdout, stderr } = await execAsync(job.command, {
-        cwd,
-        maxBuffer: 1024 * 1024,
-        timeout: 60_000,
-        windowsHide: true,
-      });
-
-      job.lastRun = Date.now();
-      job.nextRun = (await import("@openharness/services")).computeNextRunTime(job.expression);
-      scheduler["history"].push({
-        name: job.name,
-        timestamp: Date.now(),
-        success: true,
-        output: (stdout ?? "").slice(0, 500),
-      });
-
-      const output = [stdout, stderr].filter(Boolean).join("\n").slice(0, 5000);
+      const run = await host.trigger(String(input.name ?? ""));
+      const text = run.output ?? run.error ?? "(no output)";
       return {
-        content: [
-          { type: "text", text: `Triggered '${input.name}':\n${output || "(no output)"}` },
-        ],
+        content: [{ type: "text", text }],
+        ...(run.status !== "succeeded" ? { isError: true } : {}),
       };
-    } catch (err: any) {
-      scheduler["history"].push({
-        name: job.name,
-        timestamp: Date.now(),
-        success: false,
-        output: err.message,
-      });
-
-      return {
-        content: [
-          { type: "text", text: `Trigger '${input.name}' failed: ${err.message}` },
-        ],
-        isError: true,
-      };
+    } catch (error) {
+      return failed(error);
     }
   },
 };
+
+function failed(error: unknown): ToolResult {
+  return {
+    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+    isError: true,
+  };
+}

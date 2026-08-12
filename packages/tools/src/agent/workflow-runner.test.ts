@@ -400,6 +400,7 @@ describe("createAgentWorkflowRunner", () => {
       takeSteeredInputs: async () => [],
       closeSteering: vi.fn(),
       children: {
+        hasChildAgent: vi.fn((id: string) => id === "task_framework"),
         spawnChildAgent: vi.fn(async () => ({
           id: "task_framework",
           sessionId: "child-1",
@@ -413,7 +414,6 @@ describe("createAgentWorkflowRunner", () => {
     const runner = createAgentWorkflowRunner({
       cwd: "/repo",
       agent,
-      awaitTask: async () => ({ status: "completed", output: "ok", exitCode: 0 }),
       getDiffSummary: async () => ({ changedFiles: [], insertions: 0, deletions: 0 }),
       getAgentDefinition: () => undefined,
     });
@@ -426,6 +426,7 @@ describe("createAgentWorkflowRunner", () => {
       agent: "worker",
       cwd: "/repo",
     }));
+    expect(agent.children.awaitChildAgent).toHaveBeenCalledWith("task_framework");
   });
 
   it("fails remote_agent mode before spawning a worker", async () => {
@@ -436,6 +437,7 @@ describe("createAgentWorkflowRunner", () => {
       takeSteeredInputs: async () => [],
       closeSteering: vi.fn(),
       children: {
+        hasChildAgent: vi.fn(() => false),
         spawnChildAgent: vi.fn(async () => ({
           id: "unreachable",
           result: Promise.resolve({ status: "completed" as const, output: "unreachable" }),

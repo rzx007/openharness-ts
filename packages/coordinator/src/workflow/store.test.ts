@@ -228,7 +228,7 @@ describe("WorkflowRunStore", () => {
     expect(result.orderedResults.map((task) => task.taskId)).toEqual(["done"]);
   });
 
-  it("cancels a running snapshot and stops backing TaskManager tasks", async () => {
+  it("cancels a running snapshot and stops backing worker tasks", async () => {
     const store = new WorkflowRunStore({ dir: tempDir() });
     const spec = {
       mode: "parallel" as const,

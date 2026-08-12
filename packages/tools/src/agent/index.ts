@@ -5,7 +5,7 @@ type AgentExecutionMode = "in_process_teammate" | "remote_agent";
 export const agentTool: ToolDefinition = {
   name: "Agent",
   description:
-    "Spawn an in-process teammate task. Returns a user-visible task_id backed by a durable task projection. " +
+    "Spawn an in-process teammate task. Returns a framework-owned live task_id. " +
     "Use TaskWait with that task_id to block until the task finishes and retrieve its result; " +
     "use SendMessage for follow-up input while the live child invocation is still active.",
   inputSchema: {
@@ -144,13 +144,9 @@ export const sendMessageTool: ToolDefinition = {
 
     try {
       const children = context.agent?.children;
-      if (children) {
-        try {
-          await children.sendChildInput(taskId, { content: message });
-          return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
-        } catch (error) {
-          if (!(error instanceof Error) || !error.message.startsWith("Child agent not found:")) throw error;
-        }
+      if (children?.hasChildAgent(taskId)) {
+        await children.sendChildInput(taskId, { content: message });
+        return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
       }
       const { getTaskManager } = await import("@openharness/services");
       await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).writeToTask(taskId, message);

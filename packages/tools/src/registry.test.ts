@@ -38,20 +38,26 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("Workflow");
     expect(names).toContain("TeamCreate");
     expect(names).toContain("TeamDelete");
-    expect(names).toContain("CronCreate");
-    expect(names).toContain("CronDelete");
-    expect(names).toContain("CronList");
-    expect(names).toContain("CronToggle");
     expect(names).toContain("McpToolCall");
     expect(names).toContain("ListMcpResources");
     expect(names).toContain("ReadMcpResource");
     expect(names).toContain("McpAuth");
-    expect(names).toContain("RemoteTrigger");
     expect(names).toContain("Lsp");
     expect(names).toContain("ImageToText");
     expect(names).toContain("ImageGeneration");
     expect(names).toContain("FeishuPush");
-    expect(tools).toHaveLength(45);
+    expect(tools).toHaveLength(40);
+  });
+
+  it("registers daemon-owned Cron tools only when the host provides Cron", () => {
+    const names = createDefaultToolRegistry({ cron: true }).getAll().map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "CronCreate",
+      "CronDelete",
+      "CronList",
+      "CronToggle",
+      "RemoteTrigger",
+    ]));
   });
 
   it("each tool has required fields", () => {

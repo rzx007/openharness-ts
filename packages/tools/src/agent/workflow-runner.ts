@@ -7,11 +7,15 @@ import type {
   WorkflowWorkerResult,
 } from "@openharness/coordinator";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { AwaitTaskResult } from "@openharness/services";
 import type { AgentExecutionContext } from "@openharness/core";
 import { promisify } from "node:util";
+import { awaitFrameworkChildTask } from "./child-task.js";
 
 const execFileAsync = promisify(execFile);
+const GIT_SUMMARY_TIMEOUT_MS = 2_000;
 
 export interface WorkflowWorkerSpawnConfig {
   name: string;
@@ -59,8 +63,9 @@ export interface AgentWorkflowRunnerOptions {
 }
 
 /**
- * Build a WorkflowRunner that executes each workflow task as a child worker
- * and waits for the corresponding TaskManager task projection to finish.
+ * Build a WorkflowRunner that executes each workflow task as a child worker.
+ * Framework children are awaited directly; externally spawned workers use the
+ * durable TaskManager representation supplied by their host.
  *
  * This lives in @openharness/tools, not @openharness/coordinator, so the
  * coordinator package can stay a pure scheduler with no dependency on services
@@ -76,8 +81,8 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
     const team = task.team ?? options.team ?? "default";
     const workerSessionId = createWorkerSessionId(task.id, attempt);
     const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, config, options.mode, options.agent));
-    const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions));
-    const stopTask = options.stopTask ?? ((taskId) => defaultStopTask(options.cwd, options.sessionId, taskId));
+    const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions, options.agent));
+    const stopTask = options.stopTask ?? ((taskId) => defaultStopTask(options.cwd, options.sessionId, taskId, options.agent));
 
     const resumedTaskId = getStringMetadata(resumeFrom?.metadata, "taskManagerTaskId");
     if (resumedTaskId) {
@@ -148,6 +153,10 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
     });
     const waited = await awaitTask(spawn.taskId, { timeoutMs: options.timeoutMs });
     await stopTimedOutTask(stopTask, spawn.taskId, waited);
+    reportProgress?.({
+      summary: `Worker task ${spawn.taskId} ${waited.timedOut ? "timed out" : "finished"}; collecting changes`,
+      metadata: spawnMetadata(spawn),
+    });
     const diff = await getDiffSummaryForWorker(options, spawn);
     return mapAwaitedTaskToWorkerResult(task, spawn, waited, diff);
   };
@@ -286,13 +295,28 @@ async function getDiffSummaryForWorker(
 }
 
 async function defaultGetDiffSummary(cwd: string, knownChangedFiles?: string[]): Promise<WorkflowDiffSummary> {
+  if (!hasGitMetadata(cwd)) {
+    return buildDiffSummary([], new Map(), knownChangedFiles);
+  }
   const statusResult = await execFileAsync("git", ["-C", cwd, "status", "--porcelain", "--untracked-files=all"], {
     windowsHide: true,
+    timeout: GIT_SUMMARY_TIMEOUT_MS,
   });
   const numstatResult = await execFileAsync("git", ["-C", cwd, "diff", "--numstat", "HEAD", "--"], {
     windowsHide: true,
+    timeout: GIT_SUMMARY_TIMEOUT_MS,
   }).catch(() => ({ stdout: "" }));
   return buildDiffSummary(parseGitStatusPorcelain(statusResult.stdout), parseGitDiffNumstat(numstatResult.stdout), knownChangedFiles);
+}
+
+function hasGitMetadata(cwd: string): boolean {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
 }
 
 function parseGitStatusPorcelain(output: string): Array<{ path: string; status: WorkflowDiffSummary["files"][number]["status"] }> {
@@ -466,7 +490,11 @@ async function defaultAwaitTask(
   sessionId: string | undefined,
   taskId: string,
   options?: { timeoutMs?: number },
+  agent?: AgentExecutionContext,
 ): Promise<AwaitTaskResult> {
+  if (agent?.children.hasChildAgent(taskId)) {
+    return await awaitFrameworkChildTask(agent.children, taskId, options?.timeoutMs);
+  }
   const { getTaskManager } = await import("@openharness/services");
   return getTaskManager({ cwd, sessionId }).awaitTask(taskId, options);
 }
@@ -475,7 +503,12 @@ async function defaultStopTask(
   cwd: string,
   sessionId: string | undefined,
   taskId: string,
+  agent?: AgentExecutionContext,
 ): Promise<unknown> {
+  if (agent?.children.hasChildAgent(taskId)) {
+    await agent.children.interruptChildAgent(taskId, "Workflow task timed out");
+    return;
+  }
   const { getTaskManager } = await import("@openharness/services");
   return getTaskManager({ cwd, sessionId }).stopTask(taskId);
 }

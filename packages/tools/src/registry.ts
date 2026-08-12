@@ -28,7 +28,7 @@ import { imageToTextTool } from "./media/image-to-text";
 import { imageGenerationTool } from "./media/image-generation";
 import { feishuPushTool } from "./channels/feishu-push";
 
-export function createDefaultToolRegistry(): ToolRegistry {
+export function createDefaultToolRegistry(options: { cron?: boolean } = {}): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(bashTool);
   registry.register(fileReadTool);
@@ -62,11 +62,13 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(workflowTool);
   registry.register(teamCreateTool);
   registry.register(teamDeleteTool);
-  registry.register(cronCreateTool);
-  registry.register(cronDeleteTool);
-  registry.register(cronListTool);
-  registry.register(cronToggleTool);
-  registry.register(remoteTriggerTool);
+  if (options.cron) {
+    registry.register(cronCreateTool);
+    registry.register(cronDeleteTool);
+    registry.register(cronListTool);
+    registry.register(cronToggleTool);
+    registry.register(remoteTriggerTool);
+  }
   registry.register(mcpToolCallTool);
   registry.register(listMcpResourcesTool);
   registry.register(readMcpResourceTool);

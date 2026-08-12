@@ -14,10 +14,14 @@ function createAgentContext(
     }),
 ) {
   const calls: SpawnInput[] = [];
+  const childIds = new Set<string>();
   const children: AgentChildController = {
+    hasChildAgent: vi.fn((id: string) => childIds.has(id)),
     spawnChildAgent: vi.fn(async (input: SpawnInput) => {
       calls.push(input);
-      return await spawnImpl(input);
+      const result = await spawnImpl(input);
+      childIds.add(result.id);
+      return result;
     }),
     sendChildInput: vi.fn(async () => {}),
     interruptChildAgent: vi.fn(async () => {}),

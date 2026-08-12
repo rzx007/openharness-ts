@@ -32,6 +32,7 @@ interface OpenHarnessRuntimeOptions {
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
+  hostCapabilities?: { cron?: boolean };
 }
 
 /**
@@ -72,7 +73,7 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
 
   const apiClient = configuration.client ?? await resolveApiClient(settings, configuration, storage);
 
-  let toolRegistry = createDefaultToolRegistry();
+  let toolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
 
   const effectiveAllowed = new Set([
     ...(settings.permission.allowedTools ?? []),
@@ -116,7 +117,11 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
     autoApproveTools,
   });
 
-  const hookExecutor = new HookExecutor();
+  const hookExecutor = new HookExecutor({
+    cwd,
+    sessionId: options.sessionId,
+    settings,
+  });
   const runtimeModel = resolveRuntimeModel(settings, configuration);
 
   // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt

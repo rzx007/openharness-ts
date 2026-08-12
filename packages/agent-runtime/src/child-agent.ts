@@ -119,6 +119,7 @@ export class AgentChildManager implements AgentChildDirectory {
 
   createController(parentScope: AgentRunScope): AgentChildController {
     return {
+      hasChildAgent: (childId) => this.find(childId) !== undefined,
       spawnChildAgent: (input) => this.spawn(parentScope, input),
       sendChildInput: (childId, input) => this.send(childId, input),
       interruptChildAgent: (childId, reason) => this.interrupt(childId, reason),

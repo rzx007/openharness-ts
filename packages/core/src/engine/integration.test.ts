@@ -48,6 +48,7 @@ function createExecutionContext(options: {
       requestPermission: options.requestPermission ?? (async () => ({ status: "denied" })),
     },
     children: {
+      hasChildAgent: () => false,
       spawnChildAgent: async () => { throw new Error("not implemented in this test"); },
       sendChildInput: async () => { throw new Error("not implemented in this test"); },
       interruptChildAgent: async () => {},

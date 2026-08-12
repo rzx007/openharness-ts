@@ -82,6 +82,10 @@ export type {
   AgentChildInvocation,
   AgentChildResult,
   AgentChildSpawnInput,
+  AgentCronEffects,
+  AgentCronJob,
+  AgentCronJobInput,
+  AgentCronRun,
   AgentEffectContext,
   AgentEffects,
   AgentEvent,
@@ -116,7 +120,7 @@ export { CompactService } from "./engine/compact-service";
 export { CostTracker } from "./engine/cost-tracker";
 
 export { loadSettings, saveSettings, loadProjectSettings, saveProjectSettings } from "./config/settings";
-export { resolvePaths, getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath, getDataDir, getLogsDir, getSessionsDir, getTasksDir, getPluginsDir, getSkillsDir, getMemoryDir, getProjectMemoryDir, getFeedbackDir, getCronRegistryPath, getCronHistoryPath, getCronLogsDir, getCredentialsFilePath } from "./config/paths";
+export { resolvePaths, getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath, getDataDir, getLogsDir, getSessionsDir, getTasksDir, getPluginsDir, getSkillsDir, getMemoryDir, getProjectMemoryDir, getFeedbackDir, getCredentialsFilePath } from "./config/paths";
 export { resolveGitRepository, type GitRepositoryInfo } from "./config/git";
 
 export type { AppState } from "./state/app-state";

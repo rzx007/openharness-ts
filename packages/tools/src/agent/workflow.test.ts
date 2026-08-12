@@ -11,10 +11,39 @@ import {
   type WorkflowSpec,
   type WorkflowTaskRunResult,
 } from "@openharness/coordinator";
+import type { AgentExecutionContext } from "@openharness/core";
 import { createWorkflowTool } from "./workflow";
 import type { AgentWorkflowRunnerOptions } from "./workflow-runner";
 
 const ctx = { cwd: "/work" };
+
+function createAgentContext(
+  taskIds: string[],
+  onInterrupt?: (taskId: string, reason?: string) => void | Promise<void>,
+): AgentExecutionContext {
+  return {
+    scope: {
+      agentId: "workflow-agent",
+      sessionId: "workflow-session",
+      inputId: "workflow-input",
+      runId: "workflow-run",
+      traceId: "workflow-trace",
+      cwd: "/work",
+      signal: new AbortController().signal,
+    },
+    effects: { requestPermission: async () => ({ status: "approved" }) },
+    children: {
+      hasChildAgent: (taskId) => taskIds.includes(taskId),
+      spawnChildAgent: async () => { throw new Error("not used"); },
+      sendChildInput: async () => { throw new Error("not used"); },
+      interruptChildAgent: vi.fn(async (taskId, reason) => { await onInterrupt?.(taskId, reason); }),
+      awaitChildAgent: async () => { throw new Error("not used"); },
+    },
+    emit: async () => {},
+    takeSteeredInputs: async () => [],
+    closeSteering: () => {},
+  };
+}
 
 describe("workflowTool", () => {
   it("passes parsed workflow specs to the scheduler and formats successful results", async () => {
@@ -258,8 +287,8 @@ describe("workflowTool", () => {
           releaseWorker = () => resolve({ summary: "late worker completion" });
         });
       });
-      const stopTask = vi.fn(async () => releaseWorker?.());
-      const tool = createWorkflowTool({ createRunner: () => runner, stopTask });
+      const agent = createAgentContext(["child-task"], () => releaseWorker?.());
+      const tool = createWorkflowTool({ createRunner: () => runner });
 
       await tool.execute(
         { mode: "pipeline", runId: "parent-owned", tasks: [{ id: "research" }] },
@@ -268,6 +297,7 @@ describe("workflowTool", () => {
           sessionId: "parent",
           abortSignal: new AbortController().signal,
           runAbortSignal: controller.signal,
+          agent,
         },
       );
       const store = new WorkflowRunStore({ cwd });
@@ -277,7 +307,7 @@ describe("workflowTool", () => {
 
       controller.abort(new Error("parent interrupted"));
       await vi.waitFor(() => expect(store.load("parent-owned")?.status).toBe("failed"));
-      expect(stopTask).toHaveBeenCalledWith("child-task");
+      expect(agent.children.interruptChildAgent).toHaveBeenCalledWith("child-task", "Parent session interrupted");
       await vi.waitFor(() => expect(store.load("parent-owned")?.summary).toBe("Parent session interrupted"));
     } finally {
       releaseWorker?.();
@@ -662,13 +692,16 @@ describe("workflowTool", () => {
         ]]),
         createdAt: 1,
       }));
-      const stopTask = vi.fn(async () => undefined);
-      const tool = createWorkflowTool({ createRunner: vi.fn(), stopTask });
+      const agent = createAgentContext(["task_running"]);
+      const tool = createWorkflowTool({ createRunner: vi.fn() });
 
-      const result = await tool.execute({ action: "cancel", runId: "cancel-run", cancelReason: "stop now" }, { cwd });
+      const result = await tool.execute(
+        { action: "cancel", runId: "cancel-run", cancelReason: "stop now" },
+        { cwd, agent },
+      );
 
       expect(result.isError).toBeUndefined();
-      expect(stopTask).toHaveBeenCalledWith("task_running");
+      expect(agent.children.interruptChildAgent).toHaveBeenCalledWith("task_running", "stop now");
       const notification = parseWorkflowNotification(textOf(result));
       expect(notification).toMatchObject({
         runId: "cancel-run",

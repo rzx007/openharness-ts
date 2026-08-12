@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
+import { awaitFrameworkChildTask } from "../agent/child-task.js";
 
 export const taskCreateTool: ToolDefinition = {
   name: "TaskCreate",
@@ -25,7 +26,13 @@ export const taskCreateTool: ToolDefinition = {
       if (!command) {
         return { content: [{ type: "text", text: "command is required for local_bash tasks" }], isError: true };
       }
-      const task = await mgr.createShellTask({ command, description: desc, cwd: context.cwd, sessionId: context.sessionId });
+      const task = await mgr.createShellTask({
+        command,
+        description: desc,
+        cwd: context.cwd,
+        sessionId: context.sessionId,
+        settings: context.settings,
+      });
       return { content: [{ type: "text", text: `Created task ${task.id} (${task.type})` }] };
     }
 
@@ -34,7 +41,14 @@ export const taskCreateTool: ToolDefinition = {
       if (!prompt) {
         return { content: [{ type: "text", text: "prompt is required for local_agent tasks" }], isError: true };
       }
-      const task = await mgr.createAgentTask({ prompt, description: desc, cwd: context.cwd, sessionId: context.sessionId, model: input.model as string });
+      const task = await mgr.createAgentTask({
+        prompt,
+        description: desc,
+        cwd: context.cwd,
+        sessionId: context.sessionId,
+        model: input.model as string,
+        settings: context.settings,
+      });
       return { content: [{ type: "text", text: `Created task ${task.id} (${task.type})` }] };
     }
 
@@ -108,9 +122,14 @@ export const taskStopTool: ToolDefinition = {
     required: ["taskId"],
   },
   async execute(input, context) {
-    const { getTaskManager } = await import("@openharness/services");
+    const taskId = input.taskId as string;
     try {
-      const task = await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).stopTask(input.taskId as string);
+      if (context.agent?.children.hasChildAgent(taskId)) {
+        await context.agent.children.interruptChildAgent(taskId, "TaskStop requested");
+        return { content: [{ type: "text", text: `Stopped task ${taskId}` }] };
+      }
+      const { getTaskManager } = await import("@openharness/services");
+      const task = await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).stopTask(taskId);
       return { content: [{ type: "text", text: `Stopped task ${task.id}` }] };
     } catch (err) {
       return { content: [{ type: "text", text: (err as Error).message }], isError: true };
@@ -123,8 +142,8 @@ export const taskWaitTool: ToolDefinition = {
   description:
     "Block until one or more background tasks finish and return their results. " +
     "Use this to wait for task_id values returned by Agent or TaskCreate. For Agent-created " +
-    "child sessions, TaskWait waits on the user-visible task projection; the live child " +
-    "invocation stays owned by the framework child directory. " +
+    "child sessions, TaskWait waits on the live framework child directly. Other background " +
+    "tasks are awaited through TaskManager. " +
     "Accepts taskIds (string[], also tolerates a single string) and an optional " +
     "timeoutSeconds (default 300). When heartbeatSeconds is provided, TaskWait " +
     "returns a running progress summary after that interval without stopping the task; " +
@@ -153,9 +172,6 @@ export const taskWaitTool: ToolDefinition = {
     required: ["taskIds"],
   },
   async execute(input, context) {
-    const { getTaskManager } = await import("@openharness/services");
-    const mgr = getTaskManager({ cwd: context.cwd, sessionId: context.sessionId });
-
     // Normalize taskIds: accept a single string or an array of strings.
     const raw = input.taskIds;
     let taskIds: string[];
@@ -171,14 +187,30 @@ export const taskWaitTool: ToolDefinition = {
     }
 
     const timeoutSeconds = typeof input.timeoutSeconds === "number" ? input.timeoutSeconds : 300;
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0) {
+      return { content: [{ type: "text", text: "timeoutSeconds must be a non-negative number" }], isError: true };
+    }
     const heartbeatSeconds = typeof input.heartbeatSeconds === "number" ? input.heartbeatSeconds : undefined;
     if (heartbeatSeconds !== undefined && (!Number.isFinite(heartbeatSeconds) || heartbeatSeconds <= 0)) {
       return { content: [{ type: "text", text: "heartbeatSeconds must be a positive number" }], isError: true };
     }
     const timeoutMs = timeoutSeconds * 1000;
     const heartbeatMs = heartbeatSeconds !== undefined ? heartbeatSeconds * 1000 : undefined;
+    const children = context.agent?.children;
+    const frameworkTaskIds = new Set(taskIds.filter((taskId) => children?.hasChildAgent(taskId)));
+    const externalTaskIds = taskIds.filter((taskId) => !frameworkTaskIds.has(taskId));
+    const mgr = externalTaskIds.length > 0
+      ? (await import("@openharness/services")).getTaskManager({ cwd: context.cwd, sessionId: context.sessionId })
+      : undefined;
+    const stopTask = async (taskId: string): Promise<void> => {
+      if (frameworkTaskIds.has(taskId)) {
+        await children!.interruptChildAgent(taskId, "TaskWait interrupted or timed out");
+        return;
+      }
+      await mgr!.stopTask(taskId);
+    };
     const stopOnAbort = () => {
-      void Promise.all(taskIds.map((taskId) => mgr.stopTask(taskId).catch(() => {})));
+      void Promise.all(taskIds.map((taskId) => stopTask(taskId).catch(() => {})));
     };
     if (context.abortSignal?.aborted) {
       stopOnAbort();
@@ -186,24 +218,22 @@ export const taskWaitTool: ToolDefinition = {
       context.abortSignal?.addEventListener("abort", stopOnAbort, { once: true });
     }
 
-    // 独立地等待每个用户可见的 task 投影结果。对于 Agent 创建的子会话，
-    // framework child directory 会保留实际的 live invocation；
-    // TaskWait 只需要模型返回的 task_id。
-    //
-    // 单个失败/未知的 id 不会影响其他任务。awaitTask 在遇到未知 id 时会同步抛出异常，
-    // 因此要通过异步闭包为每个调用单独包裹 try/catch。
+    // Resolve every id independently so an unknown or failed task cannot mask
+    // successful siblings. Live children and durable tasks keep one result shape.
     try {
       const segments = await Promise.all(
         taskIds.map(async (taskId) => {
           try {
             const waitMs = heartbeatMs !== undefined ? Math.min(timeoutMs, heartbeatMs) : timeoutMs;
-            const res = await mgr.awaitTask(taskId, { timeoutMs: waitMs });
+            const res = frameworkTaskIds.has(taskId)
+              ? await awaitFrameworkChildTask(children!, taskId, waitMs)
+              : await mgr!.awaitTask(taskId, { timeoutMs: waitMs });
             if (res.timedOut) {
               if (heartbeatMs !== undefined && heartbeatMs < timeoutMs) {
                 return formatHeartbeat(taskId, res.status, heartbeatSeconds!, res.output);
               }
               // Best-effort: stop the child so a hard wait timeout does not leave it orphaned.
-              await mgr.stopTask(taskId).catch(() => {});
+              await stopTask(taskId).catch(() => {});
               return (
                 `${taskId} (${res.status}): did not finish within ${timeoutSeconds}s - stop requested.\n` +
                 `Output so far:\n${res.output}`

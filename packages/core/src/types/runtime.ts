@@ -19,6 +19,39 @@ export interface AgentPermissionDecision {
   reason?: string;
 }
 
+export interface AgentCronJobInput {
+  name: string;
+  expression: string;
+  command: string;
+  cwd: string;
+  timezone?: string;
+  enabled?: boolean;
+}
+
+export interface AgentCronJob {
+  name: string;
+  expression: string;
+  command: string;
+  cwd: string;
+  timezone?: string;
+  enabled: boolean;
+  nextRunAt?: number;
+}
+
+export interface AgentCronRun {
+  status: "running" | "succeeded" | "failed" | "interrupted";
+  output?: string;
+  error?: string;
+}
+
+export interface AgentCronEffects {
+  save(input: AgentCronJobInput): Promise<AgentCronJob>;
+  remove(name: string): Promise<void>;
+  list(): Promise<AgentCronJob[]>;
+  setEnabled(name: string, enabled: boolean): Promise<AgentCronJob>;
+  trigger(name: string): Promise<AgentCronRun>;
+}
+
 export interface AgentEffectContext {
   agentId: string;
   sessionId: string;
@@ -35,6 +68,7 @@ export interface AgentEffects {
     input: AgentPermissionRequest,
     context: AgentEffectContext,
   ): Promise<AgentPermissionDecision>;
+  cron?: AgentCronEffects;
 }
 
 export interface AgentChildSpawnInput {
@@ -93,6 +127,7 @@ export interface AgentChildInvocation {
 }
 
 export interface AgentChildController {
+  hasChildAgent(invocationId: string): boolean;
   spawnChildAgent(input: AgentChildSpawnInput): Promise<AgentChildInvocation>;
   sendChildInput(invocationId: string, input: AgentChildInput): Promise<AgentInputReceipt>;
   interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
