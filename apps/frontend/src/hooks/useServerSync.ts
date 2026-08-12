@@ -3,21 +3,19 @@ import {
   OpenHarnessClient,
   createPromptRequestId,
   createInitialClientState,
-  selectSessionMessagesWithParts,
   syncEvents,
   type CommandCatalogEntry,
   type OpenHarnessClientState,
   type PermissionRequestRecord,
   type PresentationReadRequest,
   type SessionBucket,
-  type SessionMessagePartRecord,
-  type SessionMessageRecord,
   type SessionRecord,
   type SyncEventUpdate,
 } from "@openharness/client";
 
 import type { FrontendConfig, TranscriptItem } from "../types";
 import type { TuiSessionController } from "./sessionController";
+import { bucketToTranscript, splitStreamingAssistant } from "./transcript";
 import {
   dispatchSessionSlashCommand,
   hasActiveRun,
@@ -25,22 +23,6 @@ import {
   parseSlashLine,
 } from "./sessionSlashCommands";
 
-function contentToText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((block) => {
-        if (block && typeof block === "object" && "text" in block) return String(block.text ?? "");
-        return JSON.stringify(block);
-      })
-      .join("");
-  }
-  if (content == null) return "";
-  return JSON.stringify(content);
-}
-
-type OrderedTranscriptItem = TranscriptItem & { order: number };
-type TranscriptView = { items: TranscriptItem[]; assistantBuffer: string };
 type DisplayRequest = NonNullable<TuiSessionController["displayRequest"]>;
 type PresentationCacheEntry = {
   title: string;
@@ -115,111 +97,6 @@ function recoverableInterruptedRuns(bucket?: SessionBucket): RecoverableRun[] {
       const input = bucket.inputs.find((candidate) => candidate.id === run.inputId);
       return input ? [{ id: run.id, error: run.error, prompt: input.content }] : [];
     });
-}
-
-function textFromParts(parts: SessionMessagePartRecord[]): string {
-  return parts
-    .filter((part) => part.type === "text" || part.type === "reasoning")
-    .map((part) => part.text ?? "")
-    .join("");
-}
-
-function messageToTranscriptItems(
-  message: SessionMessageRecord,
-  parts: SessionMessagePartRecord[],
-): TranscriptItem[] {
-  if (message.role === "user") return [{ id: message.id, role: "user", text: textFromParts(parts) }];
-  if (message.role === "system") return [{ id: message.id, role: "system", text: textFromParts(parts) }];
-
-  const items: TranscriptItem[] = [];
-  for (const part of parts) {
-    if (part.type === "text" || part.type === "reasoning") {
-      if (part.text) items.push({
-        id: `${message.id}:${part.id}`,
-        role: "assistant",
-        text: part.text,
-        streaming: part.status === "pending" || part.status === "running",
-      });
-      continue;
-    }
-    if (part.type === "tool") {
-      const toolName = part.toolName ?? "tool";
-      items.push({
-        id: `${message.id}:${part.id}:tool`,
-        role: "tool",
-        text: toolName,
-        tool_name: toolName,
-        tool_input: part.input,
-      });
-      if (part.output !== undefined) {
-        const output = isRecord(part.output) ? part.output : {};
-        items.push({
-          id: `${message.id}:${part.id}:result`,
-          role: "tool_result",
-          text: contentToText(output.content),
-          tool_name: toolName,
-          is_error: part.isError === true,
-        });
-      }
-      continue;
-    }
-    if (part.type === "tool_result") {
-      items.push({
-        id: `${message.id}:${part.id}:result`,
-        role: "tool_result",
-        text: contentToText(part.output ?? part.text ?? ""),
-        tool_name: part.toolName,
-        is_error: part.isError === true,
-      });
-      continue;
-    }
-    if (part.type === "error") {
-      items.push({ id: `${message.id}:${part.id}`, role: "system", text: part.text ?? "error" });
-      continue;
-    }
-    if (part.type === "log") {
-      items.push({ id: `${message.id}:${part.id}`, role: "log", text: part.text ?? "" });
-    }
-  }
-  return items;
-}
-
-function bucketToTranscript(bucket: SessionBucket | undefined): TranscriptItem[] {
-  if (!bucket) return [];
-  const rows: OrderedTranscriptItem[] = [];
-  for (const { message, parts } of selectSessionMessagesWithParts(bucket)) {
-    const items = messageToTranscriptItems(message, parts);
-    items.forEach((item, index) => {
-      rows.push({ ...item, order: message.seq * 100 + index });
-    });
-  }
-  const userMessageTexts = new Set(
-    rows.filter((item) => item.role === "user").map((item) => item.text),
-  );
-  for (const input of bucket.inputs
-    .filter((input) => !userMessageTexts.has(input.content))
-  ) {
-    rows.push({ role: "user", text: input.content, order: input.seq * 100 - 1 });
-  }
-  return rows
-    .sort((a, b) => a.order - b.order)
-    .map(({ order: _order, ...item }) => item);
-}
-
-function splitStreamingAssistant(items: TranscriptItem[]): TranscriptView {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (!item) continue;
-    if (item.role !== "assistant" || item.streaming !== true || !item.text) continue;
-    return {
-      items: [
-        ...items.slice(0, index),
-        ...items.slice(index + 1),
-      ],
-      assistantBuffer: item.text,
-    };
-  }
-  return { items, assistantBuffer: "" };
 }
 
 function shouldCoalesceClientState(update: SyncEventUpdate): boolean {
