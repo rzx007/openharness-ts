@@ -107,6 +107,11 @@ export interface ChannelsConfig {
   feishu?: FeishuChannelSettings;
 }
 
+export interface DaemonConfig {
+  /** Start the local daemon after sign-in and restore it after unexpected exits. */
+  autoStart: boolean;
+}
+
 export interface Settings {
   apiKey?: string;
   model: string;
@@ -125,6 +130,7 @@ export interface Settings {
   allowProjectPlugins?: boolean;
   mcpServers?: Record<string, McpServerConfig>;
   channels?: ChannelsConfig;
+  daemon?: DaemonConfig;
   theme?: string;
   outputStyle?: string;
   vimMode?: boolean;

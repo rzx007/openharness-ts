@@ -1,5 +1,8 @@
 import { stat } from "node:fs/promises";
 
+import { loadSettings } from "@openharness/core";
+
+import { reconcileDaemonAutoStart } from "./daemon-auto-start.js";
 import { VERSION } from "./version.js";
 import { probeDaemonRegistry, terminateDaemonProcess } from "./daemon-lifecycle.js";
 import {
@@ -7,7 +10,6 @@ import {
   spawnDaemonProcess,
   type SpawnedDaemonProcess,
 } from "./daemon-process.js";
-import { createDaemonSystemService } from "./daemon-system-service.js";
 
 export interface LocalDaemonHandle {
   url: string;
@@ -21,6 +23,8 @@ export interface EnsureLocalDaemonOptions {
   /** Absolute or relative CLI entry used to spawn `serve`. Defaults to `process.argv[1]`. */
   cliPath?: string;
   expectedVersion?: string;
+  /** Override the global daemon.autoStart setting. Intended for tests and embedded hosts. */
+  autoStart?: boolean;
 }
 
 /**
@@ -59,20 +63,26 @@ export async function ensureLocalDaemon(
   };
 
   let daemon = readDaemonRegistry();
-  const daemonStatus = daemon ? await probeDaemonRegistry(daemon, daemonProbeOptions) : "unreachable";
+  let daemonStatus = daemon ? await probeDaemonRegistry(daemon, daemonProbeOptions) : "unreachable";
+  const autoStart = options.autoStart ?? (await loadSettings()).daemon?.autoStart ?? false;
+  const reconciliation = reconcileDaemonAutoStart(cliPath, autoStart);
+  if (daemon && daemonStatus === "ready" && reconciliation.action === "uninstalled") {
+    daemonStatus = await probeDaemonRegistry(daemon, daemonProbeOptions);
+  }
+
   if (!daemon || daemonStatus !== "ready") {
-    const systemService = createDaemonSystemService(cliPath);
-    if (systemService.isInstalled()) {
-      clearDaemonRegistry();
-      if (daemonStatus === "stale") systemService.install();
-      else systemService.restart();
+    if (autoStart) {
+      if (reconciliation.action === "none") {
+        if (daemonStatus === "stale") reconciliation.service.install();
+        else reconciliation.service.restart();
+      }
       for (let i = 0; i < 100; i += 1) {
         daemon = readDaemonRegistry();
         if (daemon && await probeDaemonRegistry(daemon, daemonProbeOptions) === "ready") break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       if (!daemon || await probeDaemonRegistry(daemon, daemonProbeOptions) !== "ready") {
-        const status = systemService.status();
+        const status = reconciliation.service.status();
         throw new Error(`The OpenHarness daemon system service did not become ready (state: ${status.state})`);
       }
     } else {

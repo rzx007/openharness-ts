@@ -6,6 +6,7 @@ describe("config coerce helpers", () => {
   it("coerces booleans and nested memory keys", () => {
     expect(coerceConfigValue("fastMode", "on")).toBe(true);
     expect(coerceConfigValue("memory.enabled", "false")).toBe(false);
+    expect(coerceConfigValue("daemon.autoStart", "on")).toBe(true);
     expect(coerceConfigValue("permission.mode", "plan")).toBe("plan");
     expect(coerceConfigValue("permission.mode", "nope")).toBeUndefined();
   });

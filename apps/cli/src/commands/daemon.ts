@@ -7,6 +7,11 @@ import {
   probeDaemonRegistry,
   terminateDaemonProcess,
 } from "../daemon-lifecycle.js";
+import {
+  loadDaemonAutoStart,
+  reconcileDaemonAutoStart,
+  saveDaemonAutoStart,
+} from "../daemon-auto-start.js";
 import { daemonStartupError, spawnDaemonProcess } from "../daemon-process.js";
 import { createDaemonSystemService } from "../daemon-system-service.js";
 import { VERSION } from "../version.js";
@@ -117,22 +122,27 @@ export function createDaemonCommand(): Command {
       }
       const probeOptions = { expectedVersion: VERSION, minimumStartedAt: statSync(entry).mtimeMs };
       const existing = readDaemonRegistry();
-      const existingStatus = existing ? await probeDaemonRegistry(existing, probeOptions) : "unreachable";
-      if (existing && existingStatus === "ready") {
-        console.log(`Daemon already running at ${existing.url} (PID: ${existing.pid})`);
-        return;
-      }
+      let existingStatus = existing ? await probeDaemonRegistry(existing, probeOptions) : "unreachable";
       const args = ["serve", "--register", "--host", options.host ?? "127.0.0.1"];
       if (options.port !== undefined) args.push("--port", String(options.port));
       if (options.token) args.push("--token", options.token);
       for (const origin of options.allowOrigin ?? []) args.push("--allow-origin", origin);
       if (options.storePath) args.push("--store-path", options.storePath);
+      const autoStart = await loadDaemonAutoStart();
+      const reconciliation = reconcileDaemonAutoStart(entry, autoStart, args);
+      if (existing && existingStatus === "ready" && reconciliation.action === "uninstalled") {
+        existingStatus = await probeDaemonRegistry(existing, probeOptions);
+      }
+      if (existing && existingStatus === "ready") {
+        console.log(`Daemon already running at ${existing.url} (PID: ${existing.pid})`);
+        return;
+      }
 
-      const systemService = createDaemonSystemService(entry, args);
-      if (systemService.isInstalled()) {
-        clearDaemonRegistry();
-        if (existingStatus === "stale") systemService.install();
-        else systemService.restart();
+      if (autoStart) {
+        if (reconciliation.action === "none") {
+          if (existingStatus === "stale") reconciliation.service.install();
+          else reconciliation.service.restart();
+        }
         const registry = await waitForReadyDaemon(probeOptions, readDaemonRegistry);
         console.log(`Daemon started by the system service at ${registry.url} (PID: ${registry.pid})`);
         return;
@@ -164,6 +174,7 @@ export function createDaemonCommand(): Command {
     .option("--store-path <path>", "Session store path")
     .action(async (options: ServeOptions) => {
       assertSafeDaemonBinding(options);
+      await saveDaemonAutoStart(true);
       const entry = process.argv[1];
       if (!entry) throw new Error("Cannot locate CLI entrypoint.");
       const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
@@ -197,6 +208,7 @@ export function createDaemonCommand(): Command {
     .command("uninstall")
     .description("Remove the daemon from automatic system startup")
     .action(async () => {
+      await saveDaemonAutoStart(false);
       const entry = process.argv[1];
       if (!entry) throw new Error("Cannot locate CLI entrypoint.");
       const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
@@ -223,6 +235,7 @@ export function createDaemonCommand(): Command {
     .argument("[serve-args...]")
     .action(async (serveCommand: string, serveArgs: string[]) => {
       if (serveCommand !== "serve") throw new Error("Daemon watchdog only accepts the serve command");
+      if (!await loadDaemonAutoStart()) return;
       const entry = process.argv[1];
       if (!entry) throw new Error("Cannot locate CLI entrypoint.");
       const { clearDaemonRegistry, readDaemonRegistry } = await import("@openharness/server");
@@ -246,6 +259,7 @@ export function createDaemonCommand(): Command {
     .description("Show daemon status")
     .action(async () => {
       const { readDaemonRegistry } = await import("@openharness/server");
+      console.log(`Automatic startup: ${await loadDaemonAutoStart() ? "enabled" : "disabled"}`);
       const entry = process.argv[1];
       const service = entry ? createDaemonSystemService(entry) : undefined;
       const serviceStatus = service?.status();

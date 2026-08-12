@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createDefaultContextService,
   createDefaultProfileService,
+  createDefaultSettingsService,
 } from "./default-application-services.js";
 
 let temporaryDirectory: string;
@@ -51,5 +52,23 @@ describe("default daemon application services", () => {
     expect(preview.report).toContain("ignore_higher_priority_instructions");
     expect(preview.report).toContain("section 1:");
     expect(preview.report).toContain("... (truncated)");
+  });
+
+  it("updates daemon.autoStart without restarting live agent runtimes", async () => {
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "anthropic" as const,
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        daemon: { autoStart: false },
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    const result = await settings.patch({ path: "daemon.autoStart", value: "true" });
+
+    expect(ref.current.daemon.autoStart).toBe(true);
+    expect(result.restartRuntimes).toBe(false);
   });
 });

@@ -27,6 +27,7 @@ export function coerceConfigValue(key: string, value: string): unknown {
     case "memory.sessionMemoryEnabled":
     case "memory.autoExtractEnabled":
     case "memory.autoDreamEnabled":
+    case "daemon.autoStart":
       if (value === "true" || value === "on") return true;
       if (value === "false" || value === "off") return false;
       return undefined;

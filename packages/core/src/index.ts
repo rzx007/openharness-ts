@@ -63,6 +63,7 @@ export type {
   PermissionSettings,
   PathRuleConfig,
   ChannelsConfig,
+  DaemonConfig,
   FeishuChannelSettings,
 } from "./types/settings";
 

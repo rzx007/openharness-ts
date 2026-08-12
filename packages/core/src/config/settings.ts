@@ -52,13 +52,17 @@ const DEFAULT_SETTINGS: Settings = {
       runtimeCommand: "srt",
     },
   },
+  daemon: {
+    autoStart: false,
+  },
   effort: "medium",
   passes: 1,
   outputStyle: "default",
 };
 
-type SettingsPatch = Partial<Omit<Settings, "sandbox">> & {
+type SettingsPatch = Partial<Omit<Settings, "sandbox" | "daemon">> & {
   sandbox?: Partial<NonNullable<Settings["sandbox"]>>;
+  daemon?: Partial<NonNullable<Settings["daemon"]>>;
 };
 
 /**
@@ -113,6 +117,12 @@ export async function loadSettings(
     envSettings.sandbox,
     cliOverrides?.sandbox,
   );
+  merged.daemon = {
+    ...DEFAULT_SETTINGS.daemon,
+    ...fileSettings?.daemon,
+    ...envSettings.daemon,
+    ...cliOverrides?.daemon,
+  } as NonNullable<Settings["daemon"]>;
   return merged;
 }
 

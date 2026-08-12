@@ -64,6 +64,10 @@ function mergeSettingsPatch(current: Settings, patch: Record<string, unknown>): 
       ...current.sandbox,
       ...(isRecord(patch.sandbox) ? patch.sandbox : {}),
     },
+    daemon: {
+      ...current.daemon,
+      ...(isRecord(patch.daemon) ? patch.daemon : {}),
+    },
   } as Settings;
   return next;
 }
@@ -89,6 +93,7 @@ function coerceConfigValue(key: string, value: string): unknown {
     "memory.sessionMemoryEnabled",
     "memory.autoExtractEnabled",
     "memory.autoDreamEnabled",
+    "daemon.autoStart",
   ].includes(key)) {
     if (value === "true" || value === "on") return true;
     if (value === "false" || value === "off") return false;

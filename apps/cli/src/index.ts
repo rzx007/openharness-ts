@@ -10,6 +10,8 @@ import { createSetupCommand } from "./commands/setup";
 import { createSandboxCommand } from "./commands/sandbox";
 import { createWorkflowCommand } from "./commands/workflow";
 import { createDaemonCommand, createServeCommand } from "./commands/daemon";
+import { buildSettingsPatch, coerceConfigValue } from "./config-coerce";
+import { reconcileDaemonAutoStart } from "./daemon-auto-start";
 import { VERSION } from "./version";
 
 const program = new Command();
@@ -77,12 +79,25 @@ program
     if (action === "show" || !key) {
       console.log(JSON.stringify(settings, null, 2));
     } else if (action === "set" && key && value !== undefined) {
-      if (!(key in settings)) {
+      const topLevelKey = key.split(".")[0]!;
+      if (!(topLevelKey in settings)) {
         console.error(`Unknown config key: ${key}`);
         process.exit(1);
+        return;
       }
-      (settings as any)[key] = value;
-      await saveSettings(settings);
+      const coerced = coerceConfigValue(key, value);
+      if (coerced === undefined) {
+        console.error(`Invalid value for ${key}: ${value}`);
+        process.exit(1);
+        return;
+      }
+      const patch = buildSettingsPatch(settings as unknown as Record<string, unknown>, key, coerced);
+      await saveSettings({ ...settings, ...patch } as typeof settings);
+      if (key === "daemon.autoStart") {
+        const entry = process.argv[1];
+        if (!entry) throw new Error("Cannot locate CLI entrypoint.");
+        reconcileDaemonAutoStart(entry, coerced as boolean);
+      }
       console.log(`Updated ${key}`);
     } else {
       console.error("Usage: oh config show | oh config set <key> <value>");
