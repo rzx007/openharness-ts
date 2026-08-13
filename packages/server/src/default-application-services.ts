@@ -1,6 +1,13 @@
 import { join } from "node:path";
 
-import { PROVIDERS, findByName, resolveProviderScopedBaseUrl } from "@openharness/api";
+import {
+  PROVIDERS,
+  createModelCatalogService,
+  findByName,
+  resolveProviderScopedBaseUrl,
+  type ModelsDevCatalog,
+  type ModelsDevModel,
+} from "@openharness/api";
 import { CredentialStorage, describeCodexAuthState } from "@openharness/auth";
 import {
   getProjectMemoryDir,
@@ -31,6 +38,9 @@ import type {
   HooksService,
   MemoryEntryRecord,
   MemoryService,
+  ModelInfo,
+  ModelProviderInfo,
+  ModelService,
   OutputStyleService,
   PluginService,
   ProfileService,
@@ -264,6 +274,95 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
         });
       }
       return rows;
+    },
+  };
+}
+
+const CATALOG_PROVIDER_ALIASES: Record<string, string[]> = {
+  bedrock: ["amazon-bedrock"],
+  codex: ["codex", "opencode"],
+  dashscope: ["dashscope", "alibaba"],
+  gemini: ["gemini", "google"],
+  vertex: ["google-vertex", "vertex"],
+  zhipu: ["zhipu", "z-ai"],
+};
+
+function catalogProviderKeys(providerName: string): string[] {
+  return [providerName, ...(CATALOG_PROVIDER_ALIASES[providerName] ?? [])]
+    .filter((item, index, items) => item && items.indexOf(item) === index);
+}
+
+function readCatalogProvider(catalog: ModelsDevCatalog, providerName: string) {
+  for (const key of catalogProviderKeys(providerName)) {
+    const provider = catalog[key];
+    if (provider?.models && Object.keys(provider.models).length > 0) return provider;
+  }
+  return undefined;
+}
+
+function modelHint(model: ModelsDevModel): string | undefined {
+  const cost = model.cost;
+  if (cost && cost.input === 0 && cost.output === 0) return "Free";
+  return undefined;
+}
+
+function modelVision(model: ModelsDevModel): boolean | undefined {
+  const input = model.modalities?.input;
+  if (!input) return undefined;
+  return input.includes("image") || input.includes("pdf") || input.includes("video");
+}
+
+function toModelInfo(providerName: string, providerDisplayName: string, id: string, model: ModelsDevModel): ModelInfo {
+  return {
+    id,
+    label: model.name ?? model.id ?? id,
+    provider: providerDisplayName,
+    providerName,
+    ...(modelHint(model) ? { hint: modelHint(model) } : {}),
+    ...(typeof model.limit?.context === "number" ? { contextWindow: model.limit.context } : {}),
+    ...(typeof model.limit?.output === "number" ? { outputLimit: model.limit.output } : {}),
+    ...(typeof model.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
+    ...(typeof modelVision(model) === "boolean" ? { vision: modelVision(model) } : {}),
+    ...(typeof model.tool_call === "boolean" ? { toolCalling: model.tool_call } : {}),
+    ...(model.status === "beta" ? { status: "beta" as const } : { status: "active" as const }),
+  };
+}
+
+async function isProviderConnected(providerName: string, storage: CredentialStorage): Promise<boolean> {
+  const spec = findByName(providerName);
+  if (!spec) return false;
+  if (spec.isLocal) return true;
+  if (providerName === "codex") return (await describeCodexAuthState()).configured;
+  if (await storage.loadApiKey(providerName)) return true;
+  return !!(spec.envKey && process.env[spec.envKey]);
+}
+
+export function createDefaultModelService(): ModelService {
+  const storage = new CredentialStorage();
+  const catalogService = createModelCatalogService();
+  return {
+    async list(): Promise<ModelProviderInfo[]> {
+      const catalog = await catalogService.load();
+      const result: ModelProviderInfo[] = [];
+
+      for (const spec of PROVIDERS) {
+        if (!await isProviderConnected(spec.name, storage)) continue;
+        const catalogProvider = readCatalogProvider(catalog, spec.name);
+        if (!catalogProvider?.models) continue;
+
+        const models = Object.entries(catalogProvider.models)
+          .filter(([, model]) => model.status !== "deprecated" && model.status !== "alpha")
+          .map(([id, model]) => toModelInfo(spec.name, spec.displayName, model.id ?? id, model));
+        if (models.length === 0) continue;
+
+        result.push({
+          name: spec.name,
+          displayName: spec.displayName,
+          models,
+        });
+      }
+
+      return result;
     },
   };
 }
@@ -655,6 +754,7 @@ export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
   return {
     settings: createDefaultSettingsService(ref),
     provider: createDefaultProviderService(ref),
+    model: createDefaultModelService(),
     memory: createDefaultMemoryService(),
     auth: createDefaultAuthService(),
     context: createDefaultContextService(ref),

@@ -195,6 +195,26 @@ export interface ProviderInfo {
   local?: boolean;
 }
 
+export interface ModelInfo {
+  id: string;
+  label: string;
+  provider: string;
+  providerName: string;
+  hint?: string;
+  contextWindow?: number;
+  outputLimit?: number;
+  reasoning?: boolean;
+  vision?: boolean;
+  toolCalling?: boolean;
+  status?: "active" | "beta";
+}
+
+export interface ModelProviderInfo {
+  name: string;
+  displayName: string;
+  models: ModelInfo[];
+}
+
 export interface McpServerStatus {
   name: string;
   status: string;

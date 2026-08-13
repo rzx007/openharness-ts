@@ -67,6 +67,8 @@ export type {
   McpServerStatus,
   MemoryEntryRecord,
   MemoryListResponse,
+  ModelInfo,
+  ModelProviderInfo,
   OpenHarnessClientOptions,
   OpenHarnessClientState,
   OpenHarnessServerHealth,

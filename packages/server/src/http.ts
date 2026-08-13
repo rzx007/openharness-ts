@@ -16,6 +16,7 @@ import type {
   GitService,
   HooksService,
   MemoryService,
+  ModelService,
   OutputStyleService,
   PluginService,
   ProfileService,
@@ -54,6 +55,7 @@ export interface OpenHarnessServerServices {
   commandCatalog?: CommandCatalogProvider;
   settings?: SettingsService;
   provider?: ProviderService;
+  model?: ModelService;
   memory?: MemoryService;
   auth?: AuthService;
   context?: ContextService;
@@ -254,6 +256,7 @@ export class OpenHarnessHttpServer {
       commandCatalog: this.services.commandCatalog,
       settingsService: this.services.settings,
       providerService: this.services.provider,
+      modelService: this.services.model,
       control: this.daemon.control,
     }));
     this.app.route("/memory", createMemoryRoutes({

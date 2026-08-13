@@ -13,5 +13,15 @@ export type {
   ProviderConfig,
   BackendType,
 } from "./providers/registry";
+export {
+  ModelCatalogService,
+  createModelCatalogService,
+} from "./models/catalog";
+export type {
+  ModelsDevCatalog,
+  ModelsDevProvider,
+  ModelsDevModel,
+  ModelsDevCost,
+} from "./models/catalog";
 
 export { AuthenticationFailure, RateLimitFailure, RequestFailure } from "./errors";

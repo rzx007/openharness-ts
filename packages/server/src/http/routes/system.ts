@@ -7,7 +7,7 @@ import {
   readJson,
   type OpenHarnessServerHealth,
 } from "../support.js";
-import type { ProviderService, SettingsService } from "../../settings-api.js";
+import type { ModelService, ProviderService, SettingsService } from "../../settings-api.js";
 import type { DaemonControlService } from "../daemon-control-service.js";
 
 export interface SystemRoutesContext {
@@ -15,6 +15,7 @@ export interface SystemRoutesContext {
   commandCatalog?: CommandCatalogProvider;
   settingsService?: SettingsService;
   providerService?: ProviderService;
+  modelService?: ModelService;
   control: Pick<DaemonControlService, "acquireGlobalMutation" | "closeAllRuntimes" | "runtimeSnapshot">;
 }
 
@@ -72,6 +73,14 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
       if (!context.providerService) return errorResponse(501, "Provider service is not configured");
       try {
         return jsonResponse({ providers: await context.providerService.list() });
+      } catch (error) {
+        return errorResponse(500, error instanceof Error ? error.message : String(error));
+      }
+    })
+    .get("/models", async () => {
+      if (!context.modelService) return errorResponse(501, "Model service is not configured");
+      try {
+        return jsonResponse({ providers: await context.modelService.list() });
       } catch (error) {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
       }

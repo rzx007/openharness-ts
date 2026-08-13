@@ -33,6 +33,7 @@ import type {
   McpServerStatus,
   MemoryEntryRecord,
   MemoryListResponse,
+  ModelProviderInfo,
   OpenHarnessClientOptions,
   OpenHarnessServerHealth,
   PermissionRequestRecord,
@@ -152,6 +153,12 @@ export class OpenHarnessClient {
   /** `GET /providers` */
   async listProviders(options: { signal?: AbortSignal } = {}): Promise<ProviderInfo[]> {
     const response = await this.request<{ providers: ProviderInfo[] }>("/providers", { signal: options.signal });
+    return response.providers;
+  }
+
+  /** `GET /models` */
+  async listModels(options: { signal?: AbortSignal } = {}): Promise<ModelProviderInfo[]> {
+    const response = await this.request<{ providers: ModelProviderInfo[] }>("/models", { signal: options.signal });
     return response.providers;
   }
 
