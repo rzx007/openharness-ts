@@ -13,7 +13,7 @@
   "scripts": {
     "build": "exit 0",
     "check-types": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config ../../vitest.e2e.config.ts e2e/docker-stdio.e2e.test.ts",
     "e2e:docker": "vitest run --config ../../vitest.e2e.config.ts e2e/docker-stdio.e2e.test.ts",
     "clean": "rimraf dist"
   },
