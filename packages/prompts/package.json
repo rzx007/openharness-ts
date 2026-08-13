@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@openharness/core": "workspace:*",
-    "@openharness/personalization": "workspace:*"
+    "@openharness/personalization": "workspace:*",
+    "@openharness/sandbox": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

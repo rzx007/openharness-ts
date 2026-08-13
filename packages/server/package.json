@@ -25,6 +25,7 @@
     "@openharness/core": "workspace:*",
     "@openharness/memory": "workspace:*",
     "@openharness/output-styles": "workspace:*",
+    "@openharness/personalization": "workspace:*",
     "@openharness/plugins": "workspace:*",
     "@openharness/prompts": "workspace:*",
     "@openharness/sandbox": "workspace:*",

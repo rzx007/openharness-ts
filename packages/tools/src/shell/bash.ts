@@ -2,8 +2,13 @@ import type { ChildProcess } from "node:child_process";
 import type { Settings, ToolDefinition } from "@openharness/core";
 import {
   createShellProcess,
+  describeHostShellLauncher,
+  getActiveSandboxSession,
+  normalizeSandboxConfig,
+  resolveHostShellLauncher,
   SandboxUnavailableError,
   signalProcessTree,
+  type HostShellLauncher,
 } from "@openharness/sandbox";
 
 // Matches the Python implementation's output cap.
@@ -16,11 +21,11 @@ const TIMEOUT_GRACE_MS = 2000;
 export const bashTool: ToolDefinition = {
   name: "Bash",
   description:
-    "Execute a shell command. On Windows this prefers bash.exe when usable and falls back to PowerShell/cmd when bash.exe is unavailable. Use for git, npm, docker, etc.",
+    "Execute a shell command using the environment's active shell. On Windows this may be bash.exe, PowerShell, or cmd; check the Environment shell facts before choosing syntax. Use for git, npm, docker, etc.",
   inputSchema: {
     type: "object",
     properties: {
-      command: { type: "string", description: "The bash command to execute." },
+      command: { type: "string", description: "The shell command to execute." },
       timeout: {
         type: "number",
         description: "Optional timeout in milliseconds.",
@@ -36,6 +41,17 @@ export const bashTool: ToolDefinition = {
     const command = input.command as string;
     const timeout = (input.timeout as number) ?? 120_000;
     const cwd = (input.workdir as string) ?? context.cwd;
+    const dialectMismatch = diagnoseShellCommand(command, {
+      cwd,
+      sessionId: context.sessionId,
+      settings: context.settings,
+    });
+    if (dialectMismatch) {
+      return {
+        content: [{ type: "text", text: formatShellDialectMismatch(dialectMismatch) }],
+        isError: true,
+      };
+    }
 
     const result = await runShell(command, cwd, timeout, {
       sessionId: context.sessionId,
@@ -68,6 +84,125 @@ export const bashTool: ToolDefinition = {
     };
   },
 };
+
+export interface ShellDialectProblem {
+  code: string;
+  message: string;
+  suggestion: string;
+}
+
+export interface ShellDialectMismatch {
+  shell: HostShellLauncher;
+  problems: ShellDialectProblem[];
+}
+
+export function diagnoseShellDialectMismatch(
+  command: string,
+  shell: HostShellLauncher = resolveHostShellLauncher(),
+): ShellDialectProblem[] {
+  if (shell.kind === "bash" || shell.kind === "posix-sh") return [];
+
+  const checks: Array<{
+    code: string;
+    pattern: RegExp;
+    message: string;
+    suggestion: string;
+    shells?: ReadonlyArray<HostShellLauncher["kind"]>;
+  }> = [
+    {
+      code: "dev-null",
+      pattern: /\/dev\/null\b/i,
+      message: "uses `/dev/null`, which is a POSIX null device path.",
+      suggestion: shell.kind === "powershell" ? "Use `$null` in PowerShell." : "Use `NUL` in cmd.exe.",
+    },
+    {
+      code: "posix-temp-path",
+      pattern: /(^|[\s"'=])\/tmp(?:\/|\b)/i,
+      message: "uses `/tmp`, which is a POSIX temp path.",
+      suggestion: shell.kind === "powershell" ? "Use `$env:TEMP` or a Windows path." : "Use `%TEMP%` or a Windows path.",
+    },
+    {
+      code: "posix-root-path",
+      pattern: /(^|[\s"'=])\/(?:home|mnt|var|etc|usr|bin)(?:\/|\b)/i,
+      message: "uses an absolute POSIX path.",
+      suggestion: "Use the workspace path shown in the Environment section or another confirmed Windows path.",
+    },
+    {
+      code: "ls-la",
+      pattern: /(^|[;&|]\s*)ls\s+-[A-Za-z]*[al][A-Za-z]*(?:\s|$)/,
+      message: "uses `ls -la` style flags, which are Bash/POSIX syntax.",
+      suggestion: shell.kind === "powershell" ? "Use `Get-ChildItem -Force`." : "Use `dir /a`.",
+    },
+    {
+      code: "head",
+      pattern: /(^|[;&|]\s*)head(?:\s+-\d+|\s+-n\b|\s|$)/,
+      message: "uses `head`, which is not a built-in Windows shell command.",
+      suggestion: shell.kind === "powershell" ? "Pipe to `Select-Object -First N`." : "Use a cmd-compatible command or run through bash.exe.",
+    },
+    {
+      code: "find-root",
+      pattern: /(^|[;&|]\s*)find\s+\/(?:\s|$)/,
+      message: "uses POSIX `find /` syntax.",
+      suggestion: shell.kind === "powershell" ? "Use `Get-ChildItem -Recurse` from a confirmed directory." : "Use `dir /s` from a confirmed directory.",
+    },
+    {
+      code: "cd-root",
+      pattern: /(^|[;&|]\s*)cd\s+\/(?:\s|$)/,
+      message: "uses `cd /`, which means filesystem root in POSIX shells.",
+      suggestion: "Use a Windows drive path such as `C:\\` or the current workspace path.",
+    },
+    {
+      code: "powershell-control-operator",
+      pattern: /(^|\s)(?:&&|\|\|)(?=\s|$)/,
+      message: "uses Bash-style `&&` or `||` command chaining.",
+      suggestion: "Use separate PowerShell commands or explicit `if ($LASTEXITCODE -eq 0) { ... }` logic.",
+      shells: ["powershell"],
+    },
+  ];
+
+  const problems: ShellDialectProblem[] = [];
+  for (const check of checks) {
+    if (check.shells && !check.shells.includes(shell.kind)) continue;
+    check.pattern.lastIndex = 0;
+    if (!check.pattern.test(command)) continue;
+    problems.push({
+      code: check.code,
+      message: check.message,
+      suggestion: check.suggestion,
+    });
+  }
+  return problems;
+}
+
+function diagnoseShellCommand(
+  command: string,
+  options: { cwd: string; sessionId?: string; settings?: Settings },
+): ShellDialectMismatch | null {
+  const shell = resolveHostShellLauncher();
+  if (shell.kind === "bash" || shell.kind === "posix-sh") return null;
+
+  const sandbox = normalizeSandboxConfig(options.settings?.sandbox);
+  if (sandbox.enabled && sandbox.backend === "docker") {
+    const session = getActiveSandboxSession({ cwd: options.cwd, sessionId: options.sessionId });
+    if (session?.backend === "docker" && session.active) return null;
+  }
+
+  const problems = diagnoseShellDialectMismatch(command, shell);
+  return problems.length > 0 ? { shell, problems } : null;
+}
+
+function formatShellDialectMismatch(mismatch: ShellDialectMismatch): string {
+  const lines = [
+    `Shell dialect mismatch: the active shell is ${describeHostShellLauncher(mismatch.shell)}, but this command looks like Bash/POSIX syntax.`,
+    "",
+    "Problems:",
+  ];
+  for (const problem of mismatch.problems) {
+    lines.push(`- ${problem.message} ${problem.suggestion}`);
+  }
+  lines.push("", "Rewrite the command using the active shell syntax, or configure/install bash.exe before using Bash syntax.");
+  return lines.join("\n");
+}
 
 interface ShellResult {
   output: string;

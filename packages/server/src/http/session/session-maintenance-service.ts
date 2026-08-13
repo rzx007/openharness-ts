@@ -1,5 +1,6 @@
-import type { SessionStore } from "@openharness/services";
+import type { SessionMessagePartRecord, SessionMessageRecord, SessionStore } from "@openharness/services";
 import type { AgentRememberResult } from "@openharness/agent-runtime";
+import { updateRulesFromSession, type SessionMessageLike } from "@openharness/personalization";
 
 import { writeSessionExport, type SessionExportFormat } from "../../session/export-session.js";
 import { rewindTranscript } from "../../session/rewind.js";
@@ -32,6 +33,7 @@ export interface SessionMaintenanceServiceContext {
   liveChildren: Pick<LiveChildAgentDirectory, "has">;
   operationGate: Pick<DaemonOperationGate, "enter" | "tryEnterBarrier">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
+  personalizationUpdater?: (messages: SessionMessageLike[]) => number;
 }
 
 /**
@@ -174,6 +176,7 @@ export class SessionMaintenanceService {
     try {
       const agent = await this.context.agentPool.acquireSession(sessionId);
       const result = await agent.remember();
+      this.updateLocalEnvironmentRules(sessionId);
       await this.context.agentPool.closeForCwd(session.cwd);
       return result;
     } finally {
@@ -219,4 +222,41 @@ export class SessionMaintenanceService {
       throw error;
     }
   }
+
+  private updateLocalEnvironmentRules(sessionId: string): void {
+    try {
+      const messages = transcriptToPersonalizationMessages(
+        this.context.store.listMessages(sessionId),
+        this.context.store.listMessageParts(sessionId),
+      );
+      const updater = this.context.personalizationUpdater ?? updateRulesFromSession;
+      updater(messages);
+    } catch {
+      // Local personalization is best-effort and must not block the remember flow.
+    }
+  }
+}
+
+function transcriptToPersonalizationMessages(
+  messages: SessionMessageRecord[],
+  parts: SessionMessagePartRecord[],
+): SessionMessageLike[] {
+  const partsByMessage = new Map<string, SessionMessagePartRecord[]>();
+  for (const part of parts) {
+    const list = partsByMessage.get(part.messageId) ?? [];
+    list.push(part);
+    partsByMessage.set(part.messageId, list);
+  }
+
+  return [...messages]
+    .sort((a, b) => a.seq - b.seq)
+    .map((message) => {
+      const content = (partsByMessage.get(message.id) ?? [])
+        .sort((a, b) => a.seq - b.seq)
+        .map((part) => part.text)
+        .filter((text): text is string => typeof text === "string" && text.trim().length > 0)
+        .join("\n");
+      return { role: message.role, content };
+    })
+    .filter((message) => message.content.length > 0);
 }

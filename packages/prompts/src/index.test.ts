@@ -43,6 +43,7 @@ describe("formatEnvironmentSection", () => {
       osVersion: "linux",
       platformMachine: "x86_64",
       shell: "bash",
+      shellCommandRules: ["Shell tool commands run in POSIX `/bin/sh` syntax."],
       cwd: "/project",
       homeDir: "/home/user",
       date: "2026-04-11",
@@ -57,6 +58,7 @@ describe("formatEnvironmentSection", () => {
     expect(section).toContain("/project");
     expect(section).toContain("main");
     expect(section).toContain("Home directory: /home/user");
+    expect(section).toContain("Shell Command Rules");
   });
 
   it("formats env info without git", () => {
@@ -64,7 +66,8 @@ describe("formatEnvironmentSection", () => {
       osName: "Windows",
       osVersion: "win32",
       platformMachine: "x64",
-      shell: "cmd.exe",
+      shell: "cmd.exe /d /s /c",
+      shellCommandRules: ["Shell tool commands run in Windows cmd.exe syntax."],
       cwd: "C:\\project",
       homeDir: "C:\\Users\\dev",
       date: "2026-04-11",
@@ -89,11 +92,11 @@ describe("getEnvironmentInfo (homeDir bug fix)", () => {
     expect(env.hostname.length).toBeGreaterThan(0);
   });
 
-  it("describes the Bash tool shell on Windows instead of only the host shell", async () => {
+  it("describes the actual shell tool launcher on Windows", async () => {
     const env = await getEnvironmentInfo(process.cwd());
     if (process.platform === "win32") {
-      expect(env.shell).toContain("Bash tool on Windows");
-      expect(env.shell).toContain("bash.exe");
+      expect(env.shell).toMatch(/(?:bash\.exe -c|powershell\.exe -NoLogo -NoProfile -Command|cmd\.exe \/d \/s \/c)/i);
+      expect(env.shellCommandRules?.join("\n")).toMatch(/Shell tool commands run/);
     }
   });
 });

@@ -72,11 +72,13 @@ export type { ProcessSignal } from "./process-control.js";
 export {
   createProcess,
   createShellProcess,
+  describeHostShellLauncher,
   resolveContainerShellArgv,
+  resolveHostShellLauncher,
   resolveShellArgv,
   resetHostShellCacheForTests,
 } from "./shell.js";
-export type { CreateProcessOptions, CreateShellProcessOptions } from "./shell.js";
+export type { CreateProcessOptions, CreateShellProcessOptions, HostShellLauncher } from "./shell.js";
 export { startSandboxRuntime } from "./lifecycle.js";
 export type { SandboxRuntimeOptions, StartedSandboxRuntime } from "./lifecycle.js";
 

@@ -1,9 +1,14 @@
 import { readFile, access, readdir, mkdir, writeFile, rm } from "node:fs/promises";
-import { join, basename, resolve, dirname } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { platform, machine, homedir, hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { getConfigDir, resolveGitRepository } from "@openharness/core";
 import { loadLocalRules } from "@openharness/personalization";
+import {
+  describeHostShellLauncher,
+  resolveHostShellLauncher,
+  type HostShellLauncher,
+} from "@openharness/sandbox";
 
 export type PromptPermissionMode = "default" | "plan" | "full_auto";
 
@@ -12,6 +17,7 @@ export interface EnvironmentInfo {
   osVersion: string;
   platformMachine: string;
   shell: string;
+  shellCommandRules?: string[];
   cwd: string;
   homeDir: string;
   date: string;
@@ -164,14 +170,15 @@ export function getInvariantGuidance(): string {
 
 export async function getEnvironmentInfo(cwd?: string): Promise<EnvironmentInfo> {
   const workDir = cwd ?? process.cwd();
-  const shell = detectShell();
+  const shellLauncher = resolveHostShellLauncher();
   const [isGit, gitBranch] = await detectGitInfo(workDir);
 
   return {
     osName: platform() === "win32" ? "Windows" : platform() === "darwin" ? "macOS" : "Linux",
     osVersion: platform(),
     platformMachine: machine(),
-    shell,
+    shell: describeHostShellLauncher(shellLauncher),
+    shellCommandRules: buildShellCommandRules(shellLauncher),
     cwd: workDir,
     // Bug fix: previously computed via basename(join(...)) on a Promise, which
     // produced garbage. Use os.homedir() directly for the absolute home path.
@@ -184,16 +191,34 @@ export async function getEnvironmentInfo(cwd?: string): Promise<EnvironmentInfo>
   };
 }
 
-function detectShell(): string {
-  const hostShell = process.env.SHELL ?? process.env.COMSPEC ?? "";
-  const hostShellName = hostShell ? basename(hostShell) : "";
-  if (platform() === "win32") {
-    return hostShellName
-      ? `bash.exe (Bash tool on Windows; host shell: ${hostShellName})`
-      : "bash.exe (Bash tool on Windows)";
+function buildShellCommandRules(shell: HostShellLauncher): string[] {
+  if (shell.kind === "powershell") {
+    return [
+      "Shell tool commands run in Windows PowerShell syntax.",
+      "Use Windows paths like `C:\\path` or `$env:TEMP`; do not assume `/tmp` exists.",
+      "Use `$null` for the null device instead of `/dev/null`.",
+      "Use PowerShell commands such as `Get-ChildItem`, `Select-Object -First N`, and `Where-Object`; avoid Bash-only commands like `ls -la`, `head`, and `find /`.",
+      "Do not use Bash-only control operators or redirection unless you have first confirmed `bash.exe` is the active shell.",
+    ];
   }
-  if (hostShellName) return hostShellName;
-  return platform() === "win32" ? "cmd.exe" : "unknown";
+
+  if (shell.kind === "cmd") {
+    return [
+      "Shell tool commands run in Windows cmd.exe syntax.",
+      "Use Windows paths like `C:\\path` or `%TEMP%`; do not assume `/tmp` exists.",
+      "Use `NUL` for the null device instead of `/dev/null`.",
+      "Use cmd commands such as `dir` and `where`; avoid Bash-only commands like `ls -la`, `head`, and `find /`.",
+    ];
+  }
+
+  if (shell.kind === "bash") {
+    return [
+      "Shell tool commands run in Bash syntax through bash.exe.",
+      "The host OS is still Windows, so prefer confirmed workspace paths when touching files.",
+    ];
+  }
+
+  return ["Shell tool commands run in POSIX `/bin/sh` syntax."];
 }
 
 async function detectGitInfo(cwd: string): Promise<[boolean, string | null]> {
@@ -217,6 +242,11 @@ export function formatEnvironmentSection(env: EnvironmentInfo): string {
     let gitLine = "- Git: yes";
     if (env.gitBranch) gitLine += ` (branch: ${env.gitBranch})`;
     lines.push(gitLine);
+  }
+
+  if (env.shellCommandRules?.length) {
+    lines.push("", "## Shell Command Rules");
+    for (const rule of env.shellCommandRules) lines.push(`- ${rule}`);
   }
 
   return lines.join("\n");

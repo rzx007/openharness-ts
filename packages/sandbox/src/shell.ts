@@ -35,7 +35,7 @@ export async function createProcess(
   return createResolvedProcess(argv, argv, options, settings);
 }
 
-type HostShellLauncher =
+export type HostShellLauncher =
   | { kind: "posix-sh" }
   | { kind: "bash"; bin: string }
   | { kind: "powershell"; bin: string }
@@ -117,6 +117,23 @@ async function createResolvedProcess(
 /** Linux container shell — used for docker exec, independent of host platform. */
 export function resolveContainerShellArgv(command: string): string[] {
   return ["/bin/sh", "-c", command];
+}
+
+export function resolveHostShellLauncher(): HostShellLauncher {
+  return detectHostShell();
+}
+
+export function describeHostShellLauncher(shell: HostShellLauncher = resolveHostShellLauncher()): string {
+  switch (shell.kind) {
+    case "bash":
+      return `${shell.bin} -c`;
+    case "powershell":
+      return `${shell.bin} -NoLogo -NoProfile -Command`;
+    case "cmd":
+      return `${shell.bin} /d /s /c`;
+    case "posix-sh":
+      return "/bin/sh -c";
+  }
 }
 
 /**

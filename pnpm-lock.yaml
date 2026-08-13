@@ -569,6 +569,9 @@ importers:
       '@openharness/personalization':
         specifier: workspace:*
         version: link:../personalization
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -622,6 +625,9 @@ importers:
       '@openharness/output-styles':
         specifier: workspace:*
         version: link:../output-styles
+      '@openharness/personalization':
+        specifier: workspace:*
+        version: link:../personalization
       '@openharness/plugins':
         specifier: workspace:*
         version: link:../plugins

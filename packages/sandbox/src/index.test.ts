@@ -22,7 +22,9 @@ import {
   getSrtAvailability,
   shellJoin,
   normalizeSandboxConfig,
+  describeHostShellLauncher,
   resolveContainerShellArgv,
+  resolveHostShellLauncher,
   resolveShellArgv,
   resetHostShellCacheForTests,
   SandboxAdapter,
@@ -727,6 +729,14 @@ describe("resolveShellArgv", () => {
       expect(["-Command", "/c"]).toContain(argv[argv.length - 2]);
       expect(argv.at(-1)).toBe("echo hi");
     }
+  });
+
+  it("describes the active host shell launcher", () => {
+    const shell = resolveHostShellLauncher();
+    const description = describeHostShellLauncher(shell);
+
+    expect(description).toContain(shell.kind === "posix-sh" ? "/bin/sh" : shell.bin);
+    expect(description).toMatch(/(?:-c|-Command|\/c)$/);
   });
 });
 
