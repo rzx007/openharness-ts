@@ -13,6 +13,7 @@ import { HISTORY_LIMIT, SIDEBAR_AUTO_OPEN_WIDTH } from "./ui/constants";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { AppView } from "./routes/session/AppView";
 import { WorkflowRunsPanel } from "./components/WorkflowRunsPanel";
+import { modelCatalogWithCurrent } from "./modelCatalog";
 import type { FrontendConfig } from "./types";
 import { copySelectionToClipboard } from "./utils/selection";
 
@@ -78,6 +79,41 @@ function AppInner({ config }: { config: FrontendConfig }) {
     [session],
   );
 
+  const openModelPicker = useCallback(() => {
+    const currentModel = typeof session.status.model === "string"
+      ? session.status.model
+      : config.daemon?.model ?? undefined;
+    const currentProvider = typeof session.status.provider === "string"
+      ? session.status.provider
+      : undefined;
+    const models = modelCatalogWithCurrent(currentModel, currentProvider);
+    const currentIndex = Math.max(0, models.findIndex((item) => item.model === currentModel));
+
+    dialog.replace(
+      <DialogSelect
+        title="Select model"
+        items={models.map((item) => ({
+          value: item.model,
+          label: item.label,
+          description: item.provider,
+          hint: item.hint,
+          active: item.model === currentModel,
+        }))}
+        onSelect={(model) => {
+          const item = models.find((candidate) => candidate.model === model);
+          session.sendRequest({
+            type: "select_model",
+            model,
+            provider: item?.providerName,
+          });
+          dialog.close();
+          toast(`Model: ${model}`);
+        }}
+        initialIndex={currentIndex}
+      />,
+    );
+  }, [config.daemon?.model, dialog, session, toast]);
+
   // ──────────── handleCommand: intercept special slash commands ───────────────
   const handleCommand = useCallback(
     (line: string): boolean => {
@@ -108,6 +144,11 @@ function AppInner({ config }: { config: FrontendConfig }) {
             }}
           />,
         );
+        return true;
+      }
+
+      if (line.trim() === "/models") {
+        openModelPicker();
         return true;
       }
 
@@ -180,7 +221,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
 
       return false;
     },
-    [activeSessionId, dialog, session, setThemeName, theme.name, toast],
+    [activeSessionId, dialog, openModelPicker, session, setThemeName, theme.name, toast],
   );
 
   // ─────────────────────── openCommandPalette helper ───────────────────────────
@@ -238,7 +279,9 @@ function AppInner({ config }: { config: FrontendConfig }) {
         backendCommands: (session.commandDetails.length > 0
           ? [...session.commandDetails]
           : session.commands.map((name) => ({ name }))
-        ).sort((a, b) => a.name.localeCompare(b.name)),
+        )
+          .filter((entry) => entry.name !== "/model")
+          .sort((a, b) => a.name.localeCompare(b.name)),
         local: [
           {
             id: "app.palette",
@@ -256,6 +299,11 @@ function AppInner({ config }: { config: FrontendConfig }) {
             id: "/permissions",
             title: "Change Permission Mode",
             run: () => handleCommand("/permissions"),
+          },
+          {
+            id: "/models",
+            title: "Select Model",
+            run: () => handleCommand("/models"),
           },
           {
             id: "/coordinator",

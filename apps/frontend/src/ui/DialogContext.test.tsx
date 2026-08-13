@@ -81,6 +81,45 @@ test("dialog replace replaces entire stack", async () => {
   renderer.destroy();
 });
 
+test("dialog update changes content without calling onClose", async () => {
+  let api: ReturnType<typeof useDialog> | null = null;
+  let closedCount = 0;
+
+  function Capture() {
+    api = useDialog();
+    return null;
+  }
+
+  const { renderer, renderOnce, captureCharFrame, waitForFrame } =
+    await testRender(
+      <ThemeProvider>
+        <DialogProvider>
+          <Capture />
+        </DialogProvider>
+      </ThemeProvider>,
+      { width: 80, height: 24 },
+    );
+
+  await renderOnce();
+  await act(async () => {
+    api!.push(<text>session-a</text>, () => {
+      closedCount++;
+    });
+  });
+  await waitForFrame((f) => f.includes("session-a"));
+
+  await act(async () => {
+    api!.update(<text>session-b</text>);
+  });
+  await waitForFrame((f) => f.includes("session-b"));
+  expect(captureCharFrame()).not.toContain("session-a");
+  expect(captureCharFrame()).toContain("session-b");
+  expect(closedCount).toBe(0);
+  expect(api!.isOpen).toBe(true);
+
+  renderer.destroy();
+});
+
 test("onClose callback is called when dialog closes", async () => {
   let api: ReturnType<typeof useDialog> | null = null;
   let closedCount = 0;

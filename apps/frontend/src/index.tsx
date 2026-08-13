@@ -45,6 +45,7 @@ try {
     backgroundColor: initialBg,
     onDestroy: () => process.exit(process.exitCode ?? 0),
   });
+  renderer.setTerminalTitle("OpenHarness");
   createRoot(renderer).render(createElement(App, { config }));
 } catch (err) {
   console.error("[openharness] 终端渲染器初始化失败（需要 Bun + 支持的平台）：", err);

@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { DialogSelect } from "../ui/DialogSelect";
 import { DialogText } from "../ui/DialogText";
 import { PermissionDialog } from "../components/dialogs/PermissionDialog";
@@ -104,12 +104,21 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
   }, [session.displayRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Dialog wiring for selectRequest ─────────────────────────────────────────
+  // replace() 会触发旧弹层 onClose；ctrl+d 删会话只是更新 options，必须用 update()
+  // 热刷新，否则 selectRequest 会被清掉，列表看起来没变。
+  const selectOpenRef = useRef(false);
   useEffect(() => {
     const req = session.selectRequest;
-    if (!req) return;
+    if (!req) {
+      if (selectOpenRef.current) {
+        selectOpenRef.current = false;
+        dialog.close();
+      }
+      return;
+    }
 
     const isSessions = req.submitPrefix === "/sessions open ";
-    dialog.replace(
+    const node = (
       <DialogSelect
         title={req.title}
         items={req.options.map((opt) => ({
@@ -118,20 +127,29 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
           description: opt.description,
         }))}
         onSelect={(value) => {
+          selectOpenRef.current = false;
           session.sendRequest({
             type: "submit_line",
             line: `${req.submitPrefix}${value}`,
           });
-          dialog.close();
           session.setSelectRequest(null);
+          dialog.close();
         }}
         onDelete={isSessions ? (value) => {
           session.sendRequest({ type: "delete_session", session_id: value });
         } : undefined}
-      />,
-      () => {
-        session.setSelectRequest(null);
-      },
+      />
     );
+
+    if (selectOpenRef.current) {
+      dialog.update(node);
+      return;
+    }
+
+    selectOpenRef.current = true;
+    dialog.replace(node, () => {
+      selectOpenRef.current = false;
+      session.setSelectRequest(null);
+    });
   }, [session.selectRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 }

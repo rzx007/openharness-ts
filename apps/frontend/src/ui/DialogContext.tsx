@@ -16,6 +16,8 @@ export type DialogApi = {
   push: (node: UiNode, onClose?: () => void) => void;
   /** Close the whole stack and push a new entry (for mutually exclusive dialogs like command palette). */
   replace: (node: UiNode, onClose?: () => void) => void;
+  /** Update the top dialog node without firing onClose. Use this to refresh items in-place. */
+  update: (node: UiNode) => void;
   close: () => void;
   closeAll: () => void;
   isOpen: boolean;
@@ -24,6 +26,7 @@ export type DialogApi = {
 const DialogContext = createContext<DialogApi>({
   push: () => undefined,
   replace: () => undefined,
+  update: () => undefined,
   close: () => undefined,
   closeAll: () => undefined,
   isOpen: false,
@@ -65,6 +68,14 @@ export function DialogProvider({
     [],
   );
 
+  const update = useCallback((node: UiNode) => {
+    setStack((prev) => {
+      if (prev.length === 0) return prev;
+      const top = prev[prev.length - 1]!;
+      return [...prev.slice(0, -1), { ...top, node }];
+    });
+  }, []);
+
   const close = useCallback(() => {
     setStack((prev) => {
       if (prev.length === 0) return prev;
@@ -100,8 +111,8 @@ export function DialogProvider({
   const dialogLeft = Math.max(0, Math.floor((width - dialogWidth) / 2));
 
   const api = useMemo<DialogApi>(
-    () => ({ push, replace, close, closeAll, isOpen }),
-    [push, replace, close, closeAll, isOpen],
+    () => ({ push, replace, update, close, closeAll, isOpen }),
+    [push, replace, update, close, closeAll, isOpen],
   );
 
   return (

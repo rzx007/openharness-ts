@@ -45,6 +45,12 @@ export function DialogSelect(props: {
     setSelectedIndex(0);
   }, [query]);
 
+  // ctrl+d 删掉当前项后列表变短，把高亮夹回可见范围
+  useEffect(() => {
+    if (filtered.length === 0) return;
+    if (selectedIndex >= filtered.length) setSelectedIndex(filtered.length - 1);
+  }, [filtered.length, selectedIndex, setSelectedIndex]);
+
   // Compute visible window: ensure selectedIndex is visible
   const windowStart = Math.max(
     0,
