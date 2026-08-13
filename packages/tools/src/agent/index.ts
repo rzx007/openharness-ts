@@ -1,7 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
 
-type AgentExecutionMode = "in_process_teammate" | "remote_agent";
-
 export const agentTool: ToolDefinition = {
   name: "Agent",
   description:
@@ -16,14 +14,6 @@ export const agentTool: ToolDefinition = {
       subagentType: { type: "string", description: "Agent type (e.g. general-purpose, Explore, worker)" },
       model: { type: "string", description: "Model override" },
       team: { type: "string", description: "Optional team to attach the agent to" },
-      mode: {
-        type: "string",
-        enum: ["in_process_teammate", "remote_agent"],
-        description:
-          "Agent execution mode. in_process_teammate uses the framework child manager; " +
-          "remote_agent is reserved and currently unsupported.",
-        default: "in_process_teammate",
-      },
       permissionMode: {
         type: "string",
         enum: ["default", "plan", "full_auto"],
@@ -43,12 +33,11 @@ export const agentTool: ToolDefinition = {
   async execute(input, context) {
     const { getAgentDefinition, getTeamRegistry } = await import("@openharness/coordinator");
 
-    const mode = parseAgentExecutionMode(input.mode);
-    if (!mode) {
-      return { content: [{ type: "text", text: "Invalid mode. Use in_process_teammate or remote_agent." }], isError: true };
-    }
-    if (mode === "remote_agent") {
-      return { content: [{ type: "text", text: "remote_agent mode is not implemented yet." }], isError: true };
+    if (input.mode !== undefined) {
+      return {
+        content: [{ type: "text", text: "Agent.mode is not supported. Agent always uses the framework child manager." }],
+        isError: true,
+      };
     }
 
     const permissionMode = input.permissionMode as string | undefined;
@@ -157,8 +146,3 @@ export const sendMessageTool: ToolDefinition = {
   },
 };
 
-function parseAgentExecutionMode(value: unknown): AgentExecutionMode | undefined {
-  if (value === undefined) return "in_process_teammate";
-  if (value === "in_process_teammate" || value === "remote_agent") return value;
-  return undefined;
-}

@@ -429,39 +429,6 @@ describe("createAgentWorkflowRunner", () => {
     expect(agent.children.awaitChildAgent).toHaveBeenCalledWith("task_framework");
   });
 
-  it("fails remote_agent mode before spawning a worker", async () => {
-    const agent = {
-      scope: { agentId: "leader", sessionId: "s1", inputId: "i1", runId: "r1", traceId: "t1", cwd: "/repo", signal: new AbortController().signal },
-      effects: { requestPermission: vi.fn(async () => ({ status: "approved" as const })) },
-      emit: vi.fn(),
-      takeSteeredInputs: async () => [],
-      closeSteering: vi.fn(),
-      children: {
-        hasChildAgent: vi.fn(() => false),
-        spawnChildAgent: vi.fn(async () => ({
-          id: "unreachable",
-          result: Promise.resolve({ status: "completed" as const, output: "unreachable" }),
-        })),
-        sendChildInput: vi.fn(async () => {}),
-        interruptChildAgent: vi.fn(async () => {}),
-        awaitChildAgent: vi.fn(async () => ({ status: "completed" as const, output: "unreachable" })),
-      },
-    };
-    const runner = createAgentWorkflowRunner({
-      cwd: "/repo",
-      mode: "remote_agent",
-      agent,
-      awaitTask: async () => ({ status: "completed", output: "unreachable" }),
-      getAgentDefinition: () => undefined,
-    });
-
-    const result = await runner({ task: { id: "remote" }, attempt: 1, dependencyResults: {} });
-
-    expect(result.status).toBe("failed");
-    expect(result.summary).toContain("not implemented");
-    expect(agent.children.spawnChildAgent).not.toHaveBeenCalled();
-  });
-
   it("can be used by runWorkflow as a real runner adapter", async () => {
     const spawnWorker = vi.fn(async (config: WorkflowWorkerSpawnConfig): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,

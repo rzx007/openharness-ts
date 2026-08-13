@@ -49,7 +49,6 @@ export interface AgentWorkflowRunnerOptions {
   cwd: string;
   sessionId?: string;
   team?: string;
-  mode?: "remote_agent" | "in_process_teammate";
   timeoutMs?: number;
   permissionMode?: "default" | "plan" | "full_auto";
   fromAgent?: string;
@@ -80,7 +79,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
       : await defaultGetAgentDefinition(subagentType);
     const team = task.team ?? options.team ?? "default";
     const workerSessionId = createWorkerSessionId(task.id, attempt);
-    const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, config, options.mode, options.agent));
+    const spawnWorker = options.spawnWorker ?? ((config) => defaultSpawnWorker(options.cwd, config, options.agent));
     const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions, options.agent));
     const stopTask = options.stopTask ?? ((taskId) => defaultStopTask(options.cwd, options.sessionId, taskId, options.agent));
 
@@ -436,19 +435,9 @@ function normalizeDiffSummary(diff: WorkflowDiffSummary): WorkflowDiffSummary {
 async function defaultSpawnWorker(
   cwd: string,
   config: WorkflowWorkerSpawnConfig,
-  mode: "remote_agent" | "in_process_teammate" = "in_process_teammate",
   agent?: AgentExecutionContext,
 ): Promise<WorkflowWorkerSpawnResult> {
   const agentId = `${config.name}@${config.team}`;
-  if (mode === "remote_agent") {
-    return {
-      success: false,
-      agentId,
-      taskId: "",
-      backendType: "remote",
-      error: "remote_agent mode is not implemented yet.",
-    };
-  }
   if (!agent) {
     return {
       success: false,

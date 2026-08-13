@@ -53,13 +53,12 @@ describe("agentTool framework child controller", () => {
     expect((props.isolate as { type: string }).type).toBe("boolean");
   });
 
-  it("defaults to in_process_teammate mode", () => {
-    const props = (agentTool.inputSchema as { properties: Record<string, { default?: string; enum?: string[] }> }).properties;
-    expect(props.mode?.default).toBe("in_process_teammate");
-    expect(props.mode?.enum).toEqual(["in_process_teammate", "remote_agent"]);
+  it("does not expose an execution mode selector", () => {
+    const props = (agentTool.inputSchema as { properties: Record<string, unknown> }).properties;
+    expect(props.mode).toBeUndefined();
   });
 
-  it("rejects local_agent mode instead of treating it as compatibility", async () => {
+  it("rejects explicit mode instead of treating it as compatibility", async () => {
     const { agent, children } = createAgentContext();
 
     const result = await agentTool.execute(
@@ -68,20 +67,7 @@ describe("agentTool framework child controller", () => {
     );
 
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain("Invalid mode");
-    expect(children.spawnChildAgent).not.toHaveBeenCalled();
-  });
-
-  it("reports remote_agent as unsupported without spawning", async () => {
-    const { agent, children } = createAgentContext();
-
-    const result = await agentTool.execute(
-      { description: "d", prompt: "explore", mode: "remote_agent" },
-      { cwd: "/work", agent },
-    );
-
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain("not implemented");
+    expect((result.content[0] as { text: string }).text).toContain("Agent.mode is not supported");
     expect(children.spawnChildAgent).not.toHaveBeenCalled();
   });
 
