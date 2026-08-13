@@ -1,19 +1,25 @@
-export { createDefaultToolRegistry } from "./registry";
-export { bashTool } from "./shell/bash";
-export { fileReadTool } from "./file/read";
-export { fileWriteTool } from "./file/write";
-export { fileEditTool } from "./file/edit";
-export { computeFileChange, type FileChangePreview } from "./file/preview";
-export { buildUnifiedDiff, computeToolDiff } from "./file/diff";
-export { globTool } from "./file/glob";
-export { normalizeToolPath, resolveToolPath } from "./file/path";
-export { grepTool } from "./search/grep";
-export { webFetchTool } from "./web/fetch";
-export { webSearchTool } from "./web/search";
-export { taskUpdateTool } from "./task";
-export { createAgentWorkflowRunner, type AgentWorkflowRunnerOptions } from "./agent/workflow-runner.js";
-export { workflowTool } from "./agent/workflow";
-export { mcpAuthTool } from "./mcp";
-export { imageToTextTool } from "./media/image-to-text";
-export { imageGenerationTool } from "./media/image-generation";
-export { feishuPushTool } from "./channels/feishu-push";
+export { createDefaultToolRegistry } from "./registry.js";
+export { bashTool } from "./shell/index.js";
+export {
+  buildUnifiedDiff,
+  computeFileChange,
+  computeToolDiff,
+  fileEditTool,
+  fileReadTool,
+  fileWriteTool,
+  globTool,
+  normalizeToolPath,
+  resolveToolPath,
+  type FileChangePreview,
+} from "./file/index.js";
+export { grepTool } from "./search/index.js";
+export { webFetchTool, webSearchTool } from "./web/index.js";
+export { taskUpdateTool } from "./task/index.js";
+export {
+  createAgentWorkflowRunner,
+  workflowTool,
+  type AgentWorkflowRunnerOptions,
+} from "./agent/index.js";
+export { mcpAuthTool } from "./mcp/index.js";
+export { imageGenerationTool, imageToTextTool } from "./media/index.js";
+export { feishuPushTool } from "./channels/index.js";

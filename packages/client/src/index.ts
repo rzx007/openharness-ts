@@ -11,9 +11,16 @@ export {
   OpenHarnessApiError,
   OpenHarnessClient,
   streamServerSentEvents,
-} from "./client.js";
-export { applyEvent, applyEvents, applySessionSnapshot, createInitialClientState } from "./reducer.js";
-export { selectSessionMessagesWithParts } from "./selectors.js";
+} from "./transport/index.js";
+export {
+  applyEvent,
+  applyEvents,
+  applySessionSnapshot,
+  createInitialClientState,
+  hydrateState,
+  selectSessionMessagesWithParts,
+  syncEvents,
+} from "./state/index.js";
 export {
   LOCAL_COMMAND_DETAILS,
   LOCAL_COMMAND_NAMES,
@@ -22,8 +29,7 @@ export {
   mergeCommandDetails,
   parseSlashLine,
   resolveSessionCwd,
-} from "./session-commands.js";
-export { hydrateState, syncEvents } from "./sync.js";
+} from "./commands/index.js";
 export {
   patchSessionRuntimeMetadata,
   readRuntimeMetadata,
@@ -35,7 +41,7 @@ export type {
   SessionCommandHost,
   SessionCommandOutcome,
   SlashLine,
-} from "./session-commands.js";
+} from "./commands/index.js";
 export type {
   AdmitClientPromptInput,
   AgentPersonaInfo,
@@ -96,5 +102,5 @@ export type {
   SyncEventUpdate,
   TaskSnapshot,
   UpdateClientSessionInput,
-} from "./types.js";
-export type { SessionMessageWithParts } from "./selectors.js";
+} from "./types/index.js";
+export type { SessionMessageWithParts } from "./state/index.js";
