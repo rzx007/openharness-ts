@@ -1,9 +1,10 @@
 import type { DaemonRegistry } from "@openharness/server";
 
 export type DaemonProbeStatus = "ready" | "stale" | "unreachable";
+export type DaemonProbeFetch = (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>;
 
 export interface DaemonProbeOptions {
-  fetch?: typeof fetch;
+  fetch?: DaemonProbeFetch;
   pidAlive?: (pid: number) => boolean;
   timeoutMs?: number;
   expectedVersion?: string;
