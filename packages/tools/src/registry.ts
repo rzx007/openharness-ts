@@ -1,32 +1,25 @@
 import { ToolRegistry } from "@openharness/core";
-import { bashTool } from "./shell/bash";
-import { fileReadTool } from "./file/read";
-import { fileWriteTool } from "./file/write";
-import { fileEditTool } from "./file/edit";
-import { globTool } from "./file/glob";
-import { grepTool } from "./search/grep";
-import { webFetchTool } from "./web/fetch";
-import { webSearchTool } from "./web/search";
-import { todoWriteTool } from "./meta/todo-write";
-import { configTool } from "./meta/config";
-import { sleepTool } from "./meta/sleep";
-import { skillTool } from "./meta/skill";
-import { toolSearchTool } from "./meta/tool-search";
-import { askUserTool } from "./meta/ask-user";
-import { briefTool } from "./meta/brief";
-import { taskCreateTool, taskGetTool, taskListTool, taskOutputTool, taskStopTool, taskUpdateTool, taskWaitTool } from "./task";
-import { enterPlanModeTool, exitPlanModeTool } from "./mode/plan-mode";
-import { enterWorktreeTool, exitWorktreeTool } from "./mode/worktree";
-import { notebookEditTool } from "./notebook";
-import { agentTool, sendMessageTool } from "./agent";
-import { workflowTool } from "./agent/workflow";
-import { teamCreateTool, teamDeleteTool } from "./agent/team";
-import { cronCreateTool, cronDeleteTool, cronListTool, cronToggleTool, remoteTriggerTool } from "./schedule";
-import { mcpToolCallTool, listMcpResourcesTool, readMcpResourceTool, mcpAuthTool } from "./mcp";
-import { lspTool } from "./search/lsp";
-import { imageToTextTool } from "./media/image-to-text";
-import { imageGenerationTool } from "./media/image-generation";
-import { feishuPushTool } from "./channels/feishu-push";
+import { agentTool, sendMessageTool, teamCreateTool, teamDeleteTool, workflowTool } from "./agent/index.js";
+import { feishuPushTool } from "./channels/index.js";
+import { fileEditTool, fileReadTool, fileWriteTool, globTool } from "./file/index.js";
+import { imageGenerationTool, imageToTextTool } from "./media/index.js";
+import { askUserTool, briefTool, configTool, skillTool, sleepTool, todoWriteTool, toolSearchTool } from "./meta/index.js";
+import { enterPlanModeTool, enterWorktreeTool, exitPlanModeTool, exitWorktreeTool } from "./mode/index.js";
+import { listMcpResourcesTool, mcpAuthTool, mcpToolCallTool, readMcpResourceTool } from "./mcp/index.js";
+import { notebookEditTool } from "./notebook/index.js";
+import { cronCreateTool, cronDeleteTool, cronListTool, cronToggleTool, remoteTriggerTool } from "./schedule/index.js";
+import { grepTool, lspTool } from "./search/index.js";
+import { bashTool } from "./shell/index.js";
+import {
+  taskCreateTool,
+  taskGetTool,
+  taskListTool,
+  taskOutputTool,
+  taskStopTool,
+  taskUpdateTool,
+  taskWaitTool,
+} from "./task/index.js";
+import { webFetchTool, webSearchTool } from "./web/index.js";
 
 export function createDefaultToolRegistry(options: { cron?: boolean } = {}): ToolRegistry {
   const registry = new ToolRegistry();
