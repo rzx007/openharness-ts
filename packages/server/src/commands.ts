@@ -11,7 +11,7 @@ export type CommandKind = "session" | "template";
 export type CommandSource = "builtin" | "skill" | "plugin" | "project";
 
 export interface CommandCatalogEntry {
-  /** Slash form, e.g. `/model` or `/commit`. */
+  /** Slash form, e.g. `/models` or `/commit`. */
   name: string;
   description?: string;
   kind: CommandKind;
@@ -42,13 +42,6 @@ export interface CommandCatalogProvider {
 
 /** Always-visible server/session commands (resource APIs, not REPL handlers). */
 export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
-  {
-    name: "/model",
-    description: "Show or switch the session model",
-    kind: "session",
-    source: "builtin",
-    argumentHint: "[model]",
-  },
   {
     name: "/skills",
     description: "List user-invocable skills / template commands",

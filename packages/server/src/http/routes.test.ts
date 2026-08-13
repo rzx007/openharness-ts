@@ -120,7 +120,30 @@ describe("system routes", () => {
 
     expect(response.status).toBe(200);
     expect(body.commands.some((command) => command.name === "/custom")).toBe(true);
-    expect(body.commands.some((command) => command.name === "/model")).toBe(true);
+    expect(body.commands.some((command) => command.name === "/model")).toBe(false);
+  });
+
+  it("lists connected model providers", async () => {
+    const app = createSystemRoutes({
+      control: daemonControl(),
+      modelService: {
+        list: () => [
+          {
+            name: "deepseek",
+            displayName: "DeepSeek",
+            models: [{ id: "deepseek-chat", label: "DeepSeek Chat", provider: "DeepSeek", providerName: "deepseek" }],
+          },
+        ],
+      },
+    });
+
+    const response = await app.request("/models");
+    const body = await response.json() as { providers: Array<{ name: string; models: Array<{ id: string }> }> };
+
+    expect(response.status).toBe(200);
+    expect(body.providers).toEqual([
+      { name: "deepseek", displayName: "DeepSeek", models: [{ id: "deepseek-chat", label: "DeepSeek Chat", provider: "DeepSeek", providerName: "deepseek" }] },
+    ]);
   });
 });
 

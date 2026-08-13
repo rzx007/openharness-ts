@@ -39,6 +39,7 @@ function SelectHarness(props: {
     setSelectRequest,
     setDisplayRequest: () => undefined,
     setBusy: () => undefined,
+    loadModels: async () => [],
     sendRequest: (payload) => {
       sent.push(payload);
     },

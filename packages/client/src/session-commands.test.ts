@@ -42,7 +42,7 @@ function host(partial: {
 describe("parseSlashLine", () => {
   it("parses command name and args", () => {
     expect(parseSlashLine("/help")).toEqual({ name: "/help", args: "" });
-    expect(parseSlashLine("  /model gpt-4o  ")).toEqual({ name: "/model", args: "gpt-4o" });
+    expect(parseSlashLine("  /provider openai  ")).toEqual({ name: "/provider", args: "openai" });
     expect(parseSlashLine("hello")).toBeNull();
   });
 });

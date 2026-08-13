@@ -1,6 +1,6 @@
 import type { OpenHarnessClient } from "./client.js";
 import type { CommandCatalogEntry, OpenHarnessClientState } from "./types.js";
-import { patchSessionRuntimeMetadata, readSessionRuntimeConfig } from "@openharness/services";
+import { patchSessionRuntimeMetadata } from "@openharness/services";
 
 export type SlashLine = { name: string; args: string };
 
@@ -15,7 +15,7 @@ export type SessionCommandHost = {
   sessionId?: string;
   /** Project cwd for memory/git/plugins/etc. */
   cwd: string;
-  /** Values used by /status /model show */
+  /** Values used by /status */
   model?: string;
   permissionMode?: string;
   statusSessionId?: string;
@@ -28,7 +28,7 @@ export type SessionCommandHost = {
   present?(title: string, content: string): void;
   /** Present cached read-only output immediately and refresh it asynchronously. */
   cacheFirstRead?(request: PresentationReadRequest): void;
-  /** Optional status patch for /plan /model /provider */
+  /** Optional status patch for /plan /provider */
   patchStatus?(patch: Record<string, unknown>): void;
 };
 
@@ -211,21 +211,6 @@ export async function dispatchSessionCommand(
       });
     }
     emit(`Permission mode: ${next}`);
-    return "handled";
-  }
-
-  if (slash?.name === "/model") {
-    if (!sessionId) return "handled";
-    if (!slash.args) {
-      emit(`Model: ${model ?? "default"}`);
-      return "handled";
-    }
-    const session = await client.updateSession(sessionId, {
-      metadata: patchSessionRuntimeMetadata({}, { model: slash.args }),
-    });
-    const runtime = readSessionRuntimeConfig(session);
-    patchStatus({ model: runtime.model });
-    emit(`Model set to ${runtime.model}`);
     return "handled";
   }
 

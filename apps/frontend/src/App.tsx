@@ -7,13 +7,13 @@ import { ThemeProvider, useTheme } from "./theme/ThemeContext";
 import { DialogProvider, useDialog } from "./ui/DialogContext";
 import { ToastProvider, useToast } from "./ui/Toast";
 import { DialogSelect } from "./ui/DialogSelect";
+import { ModelPickerDialog } from "./ui/ModelPickerDialog";
 import { buildRegistry, type CommandRegistry } from "./keymap/commands";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "./keymap/permissionModes";
 import { HISTORY_LIMIT, SIDEBAR_AUTO_OPEN_WIDTH } from "./ui/constants";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { AppView } from "./routes/session/AppView";
 import { WorkflowRunsPanel } from "./components/WorkflowRunsPanel";
-import { modelCatalogWithCurrent } from "./modelCatalog";
 import type { FrontendConfig } from "./types";
 import { copySelectionToClipboard } from "./utils/selection";
 
@@ -83,35 +83,36 @@ function AppInner({ config }: { config: FrontendConfig }) {
     const currentModel = typeof session.status.model === "string"
       ? session.status.model
       : config.daemon?.model ?? undefined;
-    const currentProvider = typeof session.status.provider === "string"
-      ? session.status.provider
-      : undefined;
-    const models = modelCatalogWithCurrent(currentModel, currentProvider);
-    const currentIndex = Math.max(0, models.findIndex((item) => item.model === currentModel));
 
     dialog.replace(
-      <DialogSelect
-        title="Select model"
-        items={models.map((item) => ({
-          value: item.model,
-          label: item.label,
-          description: item.provider,
-          hint: item.hint,
-          active: item.model === currentModel,
-        }))}
-        onSelect={(model) => {
-          const item = models.find((candidate) => candidate.model === model);
-          session.sendRequest({
-            type: "select_model",
-            model,
-            provider: item?.providerName,
-          });
-          dialog.close();
-          toast(`Model: ${model}`);
-        }}
-        initialIndex={currentIndex}
-      />,
+      <box flexDirection="column">
+        <text>Loading models...</text>
+      </box>,
     );
+
+    void session.loadModels()
+      .then((providers) => {
+        dialog.replace(
+          <ModelPickerDialog
+            providers={providers}
+            currentModel={currentModel}
+            onSelect={(model) => {
+              session.sendRequest({
+                type: "select_model",
+                model: model.id,
+                provider: model.providerName,
+              });
+              dialog.close();
+              toast(`Model: ${model.id}`);
+            }}
+          />,
+        );
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        dialog.close();
+        toast(`Models: ${message}`, "error");
+      });
   }, [config.daemon?.model, dialog, session, toast]);
 
   // ──────────── handleCommand: intercept special slash commands ───────────────
@@ -280,7 +281,6 @@ function AppInner({ config }: { config: FrontendConfig }) {
           ? [...session.commandDetails]
           : session.commands.map((name) => ({ name }))
         )
-          .filter((entry) => entry.name !== "/model")
           .sort((a, b) => a.name.localeCompare(b.name)),
         local: [
           {

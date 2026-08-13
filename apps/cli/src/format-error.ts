@@ -39,8 +39,8 @@ export function formatApiError(err: Error, settings: Settings): string {
         "",
         "  Your account has reached its usage limit.",
         "  Check your billing dashboard or switch to a different provider:",
-        "    /provider          — list available providers",
-        "    /model <new-model> — switch to a different model",
+        "    /provider          - list available providers",
+        "    /models            - select a different model",
       ].join("\n");
     }
     return [
@@ -48,7 +48,7 @@ export function formatApiError(err: Error, settings: Settings): string {
       "",
       "  Please wait a moment and try again.",
       "  If this persists, consider using a different model:",
-      "    /model <new-model>",
+      "    /models",
     ].join("\n");
   }
 

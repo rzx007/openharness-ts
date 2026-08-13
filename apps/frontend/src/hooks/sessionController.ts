@@ -8,6 +8,7 @@ import type {
   TranscriptItem,
   WorkflowTuiState,
 } from "../types";
+import type { ModelProviderInfo } from "@openharness/client";
 
 export type TuiSessionController = {
   transcript: TranscriptItem[];
@@ -39,5 +40,6 @@ export type TuiSessionController = {
   setSelectRequest(value: TuiSessionController["selectRequest"]): void;
   setDisplayRequest(value: TuiSessionController["displayRequest"]): void;
   setBusy(value: boolean): void;
+  loadModels(): Promise<ModelProviderInfo[]>;
   sendRequest(payload: Record<string, unknown>): void;
 };

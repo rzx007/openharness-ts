@@ -7,6 +7,7 @@ import {
   readSessionRuntimeConfig,
   syncEvents,
   type CommandCatalogEntry,
+  type ModelProviderInfo,
   type OpenHarnessClientState,
   type PermissionRequestRecord,
   type PresentationReadRequest,
@@ -290,6 +291,12 @@ export function useServerSync(
     setLocalBusy(false);
     setSubmittedRun(null);
   }, [pushSystem]);
+
+  const loadModels = useCallback(async (): Promise<ModelProviderInfo[]> => {
+    const client = clientRef.current;
+    if (!client) return [];
+    return await client.listModels();
+  }, []);
 
   const cacheFirstRead = useCallback((request: PresentationReadRequest): void => {
     const cached = presentationCacheRef.current[request.key];
@@ -880,8 +887,9 @@ export function useServerSync(
       setSelectRequest,
       setDisplayRequest,
       setBusy: setLocalBusy,
+      loadModels,
       sendRequest,
     }),
-    [commandDetails, commands, displayRequest, localBusy, modal, ready, running, selectRequest, sendRequest, status, transcriptView, waitingForSubmittedRun],
+    [commandDetails, commands, displayRequest, loadModels, localBusy, modal, ready, running, selectRequest, sendRequest, status, transcriptView, waitingForSubmittedRun],
   );
 }

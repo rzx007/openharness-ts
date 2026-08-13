@@ -9,7 +9,7 @@ import {
 
 describe("command catalog helpers", () => {
   it("normalizes and parses slash lines", () => {
-    expect(normalizeCommandName("model")).toBe("/model");
+    expect(normalizeCommandName("models")).toBe("/models");
     expect(normalizeCommandName("/commit")).toBe("/commit");
     expect(parseSlashLine("/commit fix parser")).toEqual({
       name: "/commit",
@@ -21,9 +21,11 @@ describe("command catalog helpers", () => {
   it("merges builtins with extras while keeping builtin precedence", () => {
     const merged = mergeCommandCatalog([
       { name: "commit", description: "Commit skill", kind: "template", source: "skill" },
-      { name: "/model", description: "hijack", kind: "template", source: "skill" },
+      { name: "/skills", description: "hijack", kind: "template", source: "skill" },
     ]);
-    expect(merged.find((entry) => entry.name === "/model")).toEqual(BUILTIN_SESSION_COMMANDS[0]);
+    expect(merged.find((entry) => entry.name === "/skills")).toEqual(
+      BUILTIN_SESSION_COMMANDS.find((entry) => entry.name === "/skills"),
+    );
     expect(merged.find((entry) => entry.name === "/commit")).toEqual(
       BUILTIN_SESSION_COMMANDS.find((entry) => entry.name === "/commit"),
     );

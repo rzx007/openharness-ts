@@ -1161,8 +1161,9 @@ describe("OpenHarnessHttpServer", () => {
         commands: Array<{ name: string; kind: string; description?: string }>;
       };
       expect(body.commands.map((command) => command.name)).toEqual(
-        expect.arrayContaining(["/model", "/skills", "/pr", "/commit"]),
+        expect.arrayContaining(["/skills", "/pr", "/commit"]),
       );
+      expect(body.commands.map((command) => command.name)).not.toContain("/model");
       expect(body.commands.find((command) => command.name === "/pr")).toMatchObject({
         kind: "template",
         description: "Write a PR",

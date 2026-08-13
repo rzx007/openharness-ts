@@ -203,9 +203,9 @@ test("exact slash command submits the typed line instead of executing autocomple
 
 test("slash command with args submits raw text instead of being swallowed by autocomplete", async () => {
   const onSubmit = mock((_line: string) => undefined);
-  const modelRun = mock(() => undefined);
+  const providerRun = mock(() => undefined);
   const commands: Command[] = [
-    { id: "/model", title: "Set model", run: modelRun },
+    { id: "/provider", title: "Set provider", run: providerRun },
   ];
 
   const { renderer, renderOnce, mockInput, waitForFrame } =
@@ -216,9 +216,9 @@ test("slash command with args submits raw text instead of being swallowed by aut
 
   await renderOnce();
   await act(async () => {
-    await mockInput.typeText("/model gpt-test");
+    await mockInput.typeText("/provider openai");
   });
-  await waitForFrame((f) => f.includes("/model gpt-test"));
+  await waitForFrame((f) => f.includes("/provider openai"));
 
   await act(async () => {
     mockInput.pressEnter();
@@ -226,8 +226,8 @@ test("slash command with args submits raw text instead of being swallowed by aut
   await new Promise((r) => setTimeout(r, 50));
   await renderOnce();
 
-  expect(onSubmit).toHaveBeenCalledWith("/model gpt-test");
-  expect(modelRun).not.toHaveBeenCalled();
+  expect(onSubmit).toHaveBeenCalledWith("/provider openai");
+  expect(providerRun).not.toHaveBeenCalled();
 
   renderer.destroy();
 });
@@ -297,7 +297,7 @@ test("busy state submits exact slash commands even before autocomplete settles",
 test("busy state submits slash commands with args", async () => {
   const onSubmit = mock((_line: string) => undefined);
   const commands: Command[] = [
-    { id: "/model", title: "Set model", run: mock(() => undefined) },
+    { id: "/provider", title: "Set provider", run: mock(() => undefined) },
   ];
 
   const { renderer, renderOnce, mockInput, waitForFrame } =
@@ -310,13 +310,13 @@ test("busy state submits slash commands with args", async () => {
   await waitForFrame((f) => f.includes("working"));
 
   await act(async () => {
-    await mockInput.typeText("/model gpt-test");
+    await mockInput.typeText("/provider openai");
     mockInput.pressEnter();
   });
   await new Promise((r) => setTimeout(r, 50));
   await renderOnce();
 
-  expect(onSubmit).toHaveBeenCalledWith("/model gpt-test");
+  expect(onSubmit).toHaveBeenCalledWith("/provider openai");
 
   renderer.destroy();
 });

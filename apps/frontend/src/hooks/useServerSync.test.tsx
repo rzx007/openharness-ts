@@ -407,7 +407,6 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     if (pathname === "/commands") {
       return jsonResponse({
         commands: [
-          { name: "/model", kind: "session", source: "builtin", description: "Show or switch the session model" },
           { name: "/skills", kind: "session", source: "builtin", description: "List skills" },
           { name: "/config", kind: "session", source: "builtin", description: "Show or edit settings" },
           { name: "/provider", kind: "session", source: "builtin", description: "Show or switch provider" },
@@ -954,15 +953,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   });
   expect(captured?.selectRequest?.options.some((option) => option.value === "s2")).toBe(false);
 
-  expect(captured?.commands).toEqual(expect.arrayContaining(["/new", "/model", "/pr", "/skills"]));
-
-  await act(async () => {
-    captured?.sendRequest({ type: "submit_line", line: "/model gpt-test" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  });
-  expect(calls.some((call) => call.url === "http://daemon.test/sessions/s1" && call.init.method === "PATCH")).toBe(true);
-  expect(captured?.status.model).toBe("gpt-test");
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Model set to gpt-test"))).toBe(true);
+  expect(captured?.commands).toEqual(expect.arrayContaining(["/new", "/models", "/pr", "/skills"]));
+  expect(captured?.commands).not.toContain("/model");
 
   await act(async () => {
     captured?.sendRequest({
