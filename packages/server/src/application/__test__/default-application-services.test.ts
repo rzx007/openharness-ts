@@ -55,6 +55,27 @@ describe("default daemon application services", () => {
     expect(preview.report).toContain("... (truncated)");
   });
 
+  it("shows a context status table", async () => {
+    const context = createDefaultContextService({
+      current: {
+        model: "m",
+        apiFormat: "anthropic",
+        maxTurns: 50,
+        permission: { mode: "default" },
+        systemPrompt: "Be direct.",
+      } as never,
+    });
+
+    const status = await context.status({ cwd: temporaryDirectory });
+
+    expect(status.report).toContain("Context status:");
+    expect(status.report).toContain("| Source");
+    expect(status.report).toContain("SOUL.md");
+    expect(status.report).toContain("settings.systemPrompt");
+    expect(status.report).toContain("Project Memory");
+    expect(status.report).toContain("Credentials");
+  });
+
   it("updates daemon.autoStart without restarting live agent runtimes", async () => {
     const ref = {
       current: {

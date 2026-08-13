@@ -1535,6 +1535,9 @@ describe("OpenHarnessHttpServer", () => {
         async preview() {
           return { report: "CONTEXT REPORT" };
         },
+        async status() {
+          return { report: "CONTEXT STATUS" };
+        },
       },
     });
   });

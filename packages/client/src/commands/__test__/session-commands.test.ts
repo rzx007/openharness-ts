@@ -136,6 +136,27 @@ describe("dispatchSessionCommand", () => {
     expect(getContextPreview).toHaveBeenCalledWith({ cwd: "/tmp/project" });
   });
 
+  it("routes /context status to the context status reader", async () => {
+    const getContextStatus = vi.fn(async () => "STATUS TABLE");
+    const client = fakeClient({ getContextStatus });
+    const { host: h, emitted } = host({ client });
+    const reads: Array<{ key: string; title: string; load: () => Promise<string> }> = [];
+    Object.assign(h, {
+      present: vi.fn(),
+      cacheFirstRead: (request: { key: string; title: string; load: () => Promise<string> }) => {
+        reads.push(request);
+      },
+    });
+
+    const outcome = await dispatchSessionCommand({ name: "/context", args: "status" }, h);
+
+    expect(outcome).toBe("handled");
+    expect(emitted).toHaveLength(0);
+    expect(reads[0]?.key).toBe("context:/tmp/project:status");
+    await expect(reads[0]!.load()).resolves.toBe("STATUS TABLE");
+    expect(getContextStatus).toHaveBeenCalledWith({ cwd: "/tmp/project" });
+  });
+
   it("returns unhandled for unknown non-local commands", async () => {
     const { host: h, emitted } = host();
     const outcome = await dispatchSessionCommand({ name: "/not-a-real-cmd", args: "" }, h);

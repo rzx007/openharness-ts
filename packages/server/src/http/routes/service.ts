@@ -46,6 +46,16 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
       }
     })
+    .get("/context/status", async (c) => {
+      if (!context.contextService) return errorResponse(501, "Context service is not configured");
+      const cwd = c.req.query("cwd");
+      if (!cwd) return errorResponse(400, "cwd is required");
+      try {
+        return jsonResponse(await context.contextService.status({ cwd }));
+      } catch (error) {
+        return errorResponse(500, error instanceof Error ? error.message : String(error));
+      }
+    })
     .post("/dream", async (c) => {
       if (!context.dreamService) return errorResponse(501, "Dream service is not configured");
       const body = await readJson(c);

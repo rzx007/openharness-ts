@@ -100,6 +100,7 @@ export interface AuthService {
 
 export interface ContextService {
   preview(input: { cwd: string }): Promise<{ report: string }> | { report: string };
+  status(input: { cwd: string }): Promise<{ report: string }> | { report: string };
 }
 
 export interface DreamStartResult {

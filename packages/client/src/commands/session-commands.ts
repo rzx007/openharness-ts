@@ -489,6 +489,15 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/context") {
+    const action = slash.args.trim().split(/\s+/).filter(Boolean)[0] ?? "preview";
+    if (action === "status") {
+      await readPresentation(`context:${cwd}:status`, "Context", async () => await client.getContextStatus({ cwd }));
+      return "handled";
+    }
+    if (action !== "preview") {
+      emit("Usage: /context [status]");
+      return "handled";
+    }
     await readPresentation(`context:${cwd}`, "Context", async () => await client.getContextPreview({ cwd }));
     return "handled";
   }

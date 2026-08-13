@@ -196,6 +196,21 @@ describe("auth routes", () => {
 });
 
 describe("service routes", () => {
+  it("serves context status", async () => {
+    const app = createServiceRoutes({
+      contextService: {
+        preview: async () => ({ report: "preview" }),
+        status: async () => ({ report: "status table" }),
+      },
+      control: daemonControl(),
+    });
+
+    const response = await app.request("/context/status?cwd=/repo");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ report: "status table" });
+  });
+
   it("blocks plugin reload while runs are active for the cwd", async () => {
     const app = createServiceRoutes({
       pluginService: {

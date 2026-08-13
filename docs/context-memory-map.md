@@ -239,13 +239,14 @@ Session runtime history 存 daemon 会话的完整运行状态，包括 sessions
 
 当模型行为看起来被“某个记忆”影响时，按这个顺序查：
 
-1. `/context` 或 context preview：看最终 prompt 分层。
-2. `/profile status`：看 `SOUL.md` / `USER.md` 是否 loaded、blocked、truncated。
-3. `~/.openharness-ts/local_rules/rules.md`：看是否有自动抽取的环境事实。
-4. `/memory list` / `/memory show <id>`：看项目长期记忆。
-5. 当前 repo 的 `CLAUDE.md`、`.claude/CLAUDE.md`、`.claude/rules/*.md`。
-6. `settings.json`：看 `systemPrompt`、memory 开关、权限模式。
-7. compact 问题再查 `data/session-memory/<project>-<hash>/<sessionId>.md`。
+1. `/context status`：先看每条上下文/记忆线的加载状态、写入时机和注入位置。
+2. `/context` 或 context preview：看最终 prompt 分层和内容预览。
+3. `/profile status`：看 `SOUL.md` / `USER.md` 是否 loaded、blocked、truncated。
+4. `~/.openharness-ts/local_rules/rules.md`：看是否有自动抽取的环境事实。
+5. `/memory list` / `/memory show <id>`：看项目长期记忆。
+6. 当前 repo 的 `CLAUDE.md`、`.claude/CLAUDE.md`、`.claude/rules/*.md`。
+7. `settings.json`：看 `systemPrompt`、memory 开关、权限模式。
+8. compact 问题再查 `data/session-memory/<project>-<hash>/<sessionId>.md`。
 
 ## 维护原则
 

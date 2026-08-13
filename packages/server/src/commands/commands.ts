@@ -109,8 +109,9 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
   },
   {
     name: "/context",
-    description: "Show the current system prompt sent to the model",
+    description: "Show context preview or status table",
     kind: "session",
+    argumentHint: "[status]",
     source: "builtin",
   },
   {

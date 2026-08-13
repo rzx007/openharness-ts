@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -11,18 +12,23 @@ import {
 import { CredentialStorage, describeCodexAuthState } from "@openharness/auth";
 import {
   getProjectMemoryDir,
+  getCredentialsFilePath,
+  getConfigDir,
   saveSettings,
   type Settings,
 } from "@openharness/core";
 import { MemoryManager, type MemoryEntry } from "@openharness/memory";
 import {
   buildPromptLayers,
+  discoverClaudeMdFiles,
   initializePersonalPromptFiles,
   inspectPersonalPromptFiles,
+  listPendingUserProfileUpdates,
   renderPromptLayers,
   type PersonalPromptFileDiagnostic,
   type PromptLayers,
 } from "@openharness/prompts";
+import { getLocalRulesDir, loadFacts, loadLocalRules } from "@openharness/personalization";
 import { getProjectSessionDir, startDreamNow } from "@openharness/services";
 import { loadOutputStyles } from "@openharness/output-styles";
 import {
@@ -205,6 +211,47 @@ function formatPromptLayersReport(
 
 function layerCharCount(parts: string[]): number {
   return parts.filter((part) => part.trim()).join("\n\n").length;
+}
+
+interface ContextStatusRow {
+  source: string;
+  status: string;
+  written: string;
+  injected: string;
+  purpose: string;
+}
+
+function formatContextStatusTable(rows: ContextStatusRow[]): string {
+  const headers = ["Source", "Status", "Written", "Injected / read", "Purpose"];
+  const body = rows.map((row) => [row.source, row.status, row.written, row.injected, row.purpose]);
+  const widths = headers.map((header, index) =>
+    Math.max(header.length, ...body.map((row) => row[index]!.length)));
+  const formatRow = (cells: string[]) =>
+    `| ${cells.map((cell, index) => cell.padEnd(widths[index]!)).join(" | ")} |`;
+  return [
+    formatRow(headers),
+    formatRow(widths.map((width) => "-".repeat(width))),
+    ...body.map(formatRow),
+  ].join("\n");
+}
+
+function diagnosticStatus(diagnostics: PersonalPromptFileDiagnostic[], file: "SOUL.md" | "USER.md"): string {
+  const item = diagnostics.find((diagnostic) => diagnostic.file === file);
+  if (!item) return "unknown";
+  const flags = [
+    item.truncated ? "truncated" : "",
+    item.issues.length ? `${item.issues.length} issue(s)` : "",
+  ].filter(Boolean);
+  return flags.length ? `${item.status} (${flags.join(", ")})` : item.status;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const RUNTIME_RESTART_KEYS = new Set([
@@ -476,7 +523,7 @@ export function createDefaultAuthService(): AuthService {
 export function createDefaultContextService(ref: DaemonSettingsRef): ContextService {
   return {
     async preview({ cwd }) {
-      const settings = ref.current;
+      const settings = await readCurrentSettings(ref);
       const { manager } = await openMemoryManager(cwd);
       const memoryContent =
         settings.memory?.enabled !== false
@@ -495,6 +542,133 @@ export function createDefaultContextService(ref: DaemonSettingsRef): ContextServ
       });
       const diagnostics = await inspectPersonalPromptFiles();
       return { report: formatPromptLayersReport(layers, 2_000, diagnostics) };
+    },
+    async status({ cwd }) {
+      const settings = await readCurrentSettings(ref);
+      const diagnostics = await inspectPersonalPromptFiles();
+      const pendingUserUpdates = await listPendingUserProfileUpdates();
+      const projectInstructionFiles = await discoverClaudeMdFiles(cwd);
+      const { manager, directory: memoryDirectory } = await openMemoryManager(cwd);
+      const memoryEntries = await manager.getAll();
+      const { skillRegistry } = await discoverOpenHarnessExtensions(cwd, settings);
+      const localRules = loadLocalRules();
+      const facts = loadFacts();
+      const credentialsPath = getCredentialsFilePath();
+      const credentialsConfigured = await pathExists(credentialsPath);
+      const outputStyles = loadOutputStyles();
+
+      const rows: ContextStatusRow[] = [
+        {
+          source: "SOUL.md",
+          status: diagnosticStatus(diagnostics, "SOUL.md"),
+          written: "/profile init or manual edit",
+          injected: "system prompt stable identity",
+          purpose: "agent identity and tone",
+        },
+        {
+          source: "USER.md",
+          status: diagnosticStatus(diagnostics, "USER.md"),
+          written: "/profile init, manual edit, approved pending update",
+          injected: "system prompt volatile User Profile",
+          purpose: "user long-term preferences",
+        },
+        {
+          source: "USER pending",
+          status: `${pendingUserUpdates.length} pending`,
+          written: "queueUserProfileUpdate()",
+          injected: "not injected until approved",
+          purpose: "review boundary for USER.md changes",
+        },
+        {
+          source: "local_rules",
+          status: localRules ? `${facts.facts.length} fact(s)` : "missing",
+          written: "/remember success best-effort",
+          injected: "system prompt volatile local rules",
+          purpose: "machine environment facts",
+        },
+        {
+          source: "Project Instructions",
+          status: `${projectInstructionFiles.length} file(s)`,
+          written: "manual project files",
+          injected: "system prompt context Project Instructions",
+          purpose: "repo rules and workflows",
+        },
+        {
+          source: "settings.systemPrompt",
+          status: settings.systemPrompt?.trim() ? "set" : "empty",
+          written: "/config, CLI args, session runtime metadata",
+          injected: "system prompt context Custom Instructions",
+          purpose: "extra user-configured instructions",
+        },
+        {
+          source: "Environment",
+          status: "dynamic",
+          written: "computed per prompt build",
+          injected: "system prompt stable Environment",
+          purpose: "cwd, OS, git, shell facts",
+        },
+        {
+          source: "Runtime modes",
+          status: `permission=${settings.permission.mode}, fast=${settings.fastMode ? "on" : "off"}, effort=${settings.effort ?? "medium"}`,
+          written: "settings or session runtime metadata",
+          injected: "system prompt stable runtime sections",
+          purpose: "execution policy and reasoning knobs",
+        },
+        {
+          source: "Available Skills",
+          status: `${skillRegistry.modelVisibleList().length} visible`,
+          written: "skill/plugin discovery",
+          injected: "system prompt stable Available Skills",
+          purpose: "model-visible extension catalog",
+        },
+        {
+          source: "Project Memory",
+          status: `${memoryEntries.length} entr${memoryEntries.length === 1 ? "y" : "ies"}`,
+          written: "/memory, /remember, auto extract",
+          injected: "per-turn system-reminder; preview may show full prompt",
+          purpose: "project durable semantic facts",
+        },
+        {
+          source: "Session Memory",
+          status: "per-session checkpoint",
+          written: "after each successful turn",
+          injected: "compact/autocompact summary prompt only",
+          purpose: "conversation continuity after compact",
+        },
+        {
+          source: "Session History",
+          status: "daemon runtime store",
+          written: "session events/messages/runs/tasks",
+          injected: "/sessions, /resume, daemon recovery",
+          purpose: "restore conversation state",
+        },
+        {
+          source: "Output styles",
+          status: `${outputStyles.length} style(s)`,
+          written: "manual files",
+          injected: "output style selection service",
+          purpose: "presentation style",
+        },
+        {
+          source: "Credentials",
+          status: credentialsConfigured ? "configured" : "missing",
+          written: "/auth login or provider setup",
+          injected: "provider/auth resolution only",
+          purpose: "API keys; never prompt context",
+        },
+      ];
+
+      return {
+        report: [
+          "Context status:",
+          `cwd: ${cwd}`,
+          `config: ${getConfigDir()}`,
+          `local_rules: ${getLocalRulesDir()}`,
+          `project_memory: ${memoryDirectory}`,
+          "",
+          formatContextStatusTable(rows),
+        ].join("\n"),
+      };
     },
   };
 }

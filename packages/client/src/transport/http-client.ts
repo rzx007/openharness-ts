@@ -297,6 +297,13 @@ export class OpenHarnessClient {
     return response.report;
   }
 
+  /** `GET /context/status?cwd=` */
+  async getContextStatus(options: { cwd: string; signal?: AbortSignal }): Promise<string> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ report: string }>(this.path("/context/status", query), { signal });
+    return response.report;
+  }
+
   /** `POST /sessions/:id/compact` */
   async compactSession(
     sessionId: string,
