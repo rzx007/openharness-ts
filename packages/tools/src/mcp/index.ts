@@ -13,21 +13,22 @@ export const mcpToolCallTool: ToolDefinition = {
     required: ["serverName", "toolName"],
   },
   async execute(input, context) {
-    const mgr = (context as any).mcpManager;
-    if (!mgr) {
-      return { content: [{ type: "text", text: "MCP manager not available in context" }], isError: true };
+    const serverName = String(input.serverName ?? "");
+    const toolName = String(input.toolName ?? "");
+    const qualifiedName = `mcp__${serverName}__${toolName}`;
+    // Route through the filtered registry so allow/deny rules on mcp__* tools
+    // cannot be bypassed by calling the generic proxy with the raw server tool name.
+    const tool = context.toolRegistry?.get(qualifiedName);
+    if (!tool) {
+      return {
+        content: [{
+          type: "text",
+          text: `Unknown or disallowed MCP tool: ${qualifiedName}`,
+        }],
+        isError: true,
+      };
     }
-    try {
-      const result = await mgr.callTool(
-        input.serverName as string,
-        input.toolName as string,
-        (input.args as Record<string, unknown>) ?? {},
-        context.abortSignal,
-      );
-      return { content: [{ type: "text", text: result.content }], isError: result.isError };
-    } catch (err) {
-      return { content: [{ type: "text", text: (err as Error).message }], isError: true };
-    }
+    return tool.execute((input.args as Record<string, unknown>) ?? {}, context);
   },
 };
 

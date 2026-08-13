@@ -1,5 +1,5 @@
 import { readFile, writeFile, access, mkdir } from "node:fs/promises";
-import type { Settings } from "../index";
+import type { McpServerConfig, Settings } from "../index";
 import { getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath } from "./paths";
 
 const DEFAULT_SETTINGS: Settings = {
@@ -156,6 +156,38 @@ export async function saveProjectSettings(
   const configPath = getProjectSettingsFilePath(projectRoot);
   await mkdir(configDir, { recursive: true });
   await writeFile(configPath, JSON.stringify(settings, null, 2), "utf-8");
+}
+
+/**
+ * Persist one MCP server config without dumping a merged runtime Settings object.
+ * Project-scoped servers stay in project settings; otherwise only the global file is patched.
+ */
+export async function saveMcpServerConfig(
+  serverName: string,
+  config: McpServerConfig,
+  options: { projectRoot?: string } = {},
+): Promise<"project" | "global"> {
+  const project = await loadProjectSettings(options.projectRoot);
+  if (project?.mcpServers?.[serverName]) {
+    await saveProjectSettings({
+      ...project,
+      mcpServers: {
+        ...project.mcpServers,
+        [serverName]: config,
+      },
+    }, options.projectRoot);
+    return "project";
+  }
+
+  const existing = (await loadFromFile()) ?? {};
+  await saveSettings({
+    ...existing,
+    mcpServers: {
+      ...(existing.mcpServers ?? {}),
+      [serverName]: config,
+    },
+  } as Settings);
+  return "global";
 }
 
 function loadFromEnv(): SettingsPatch {

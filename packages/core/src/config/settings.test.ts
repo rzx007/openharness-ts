@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { loadSettings } from "./settings.js";
+import { loadSettings, saveMcpServerConfig } from "./settings.js";
 
 describe("daemon settings", () => {
   let configDir: string;
@@ -51,5 +51,45 @@ describe("daemon settings", () => {
     const settings = await loadSettings(undefined, { includeProject: true, projectRoot });
 
     expect(settings.daemon).toEqual({ autoStart: false });
+  });
+
+  it("patches MCP auth into project settings without dumping merged runtime secrets", async () => {
+    const projectRoot = join(configDir, "project");
+    const projectConfigDir = join(projectRoot, ".openharness");
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(configDir, "settings.json"), JSON.stringify({
+      model: "global-model",
+      apiKey: "should-stay-untouched",
+      mcpServers: {
+        globalOnly: { url: "https://global.example" },
+      },
+    }));
+    writeFileSync(join(projectConfigDir, "settings.json"), JSON.stringify({
+      mcpServers: {
+        remote: { url: "https://mcp.example" },
+      },
+    }));
+
+    const scope = await saveMcpServerConfig("remote", {
+      url: "https://mcp.example",
+      headers: { Authorization: "Bearer tok" },
+    }, { projectRoot });
+
+    expect(scope).toBe("project");
+    expect(JSON.parse(readFileSync(join(projectConfigDir, "settings.json"), "utf-8"))).toEqual({
+      mcpServers: {
+        remote: {
+          url: "https://mcp.example",
+          headers: { Authorization: "Bearer tok" },
+        },
+      },
+    });
+    expect(JSON.parse(readFileSync(join(configDir, "settings.json"), "utf-8"))).toEqual({
+      model: "global-model",
+      apiKey: "should-stay-untouched",
+      mcpServers: {
+        globalOnly: { url: "https://global.example" },
+      },
+    });
   });
 });

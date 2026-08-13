@@ -602,6 +602,7 @@ async function createOpenHarnessAgentInternal(
       settings,
       mcpManager,
       toolRegistry: runtime.toolRegistry,
+      cwd,
     }));
     runtime.addCleanup(() => mcpManager.disconnectAll());
 

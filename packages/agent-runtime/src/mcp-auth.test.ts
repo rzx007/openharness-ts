@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ToolRegistry, type Settings } from "@openharness/core";
+import { ToolRegistry, type McpServerConfig, type Settings } from "@openharness/core";
 import type { McpClientManager, McpConnection } from "@openharness/mcp";
 
 import { applyMcpAuthConfig, createMcpAuthHost, defaultMcpEnvKey } from "./mcp-auth.js";
@@ -69,15 +69,15 @@ describe("applyMcpAuthConfig", () => {
 });
 
 describe("createMcpAuthHost", () => {
-  it("persists config, reconnects with the new config, and registers live MCP tools", async () => {
+  it("reconnects first, persists only after success, and registers live MCP tools", async () => {
     const settings: Settings = {
       ...baseSettings,
       mcpServers: { remote: { url: "https://mcp.example" } },
     };
-    let persisted: Settings | undefined;
+    const persisted: Array<{ serverName: string; config: McpServerConfig }> = [];
     const connection: Partial<McpConnection> = { status: "connected" };
     const manager = {
-      getConnection: vi.fn(),
+      getConnection: vi.fn(() => ({ status: "connected", config: settings.mcpServers!.remote })),
       reconnect: vi.fn(async () => connection),
       getAsToolDefinitions: vi.fn(() => [
         {
@@ -99,7 +99,9 @@ describe("createMcpAuthHost", () => {
       settings,
       mcpManager: manager,
       toolRegistry: registry,
-      persistSettings: async (next) => { persisted = next; },
+      persistMcpServer: async (serverName, config) => {
+        persisted.push({ serverName, config });
+      },
     });
 
     const result = await host.configure({
@@ -109,7 +111,13 @@ describe("createMcpAuthHost", () => {
     });
 
     expect(result.message).toContain("Saved MCP auth for remote");
-    expect(persisted?.mcpServers?.remote?.headers).toEqual({ Authorization: "Bearer tok" });
+    expect(persisted).toEqual([{
+      serverName: "remote",
+      config: {
+        url: "https://mcp.example",
+        headers: { Authorization: "Bearer tok" },
+      },
+    }]);
     expect(settings.mcpServers?.remote?.headers).toEqual({ Authorization: "Bearer tok" });
     expect(manager.reconnect).toHaveBeenCalledWith("remote", {
       url: "https://mcp.example",
@@ -119,30 +127,48 @@ describe("createMcpAuthHost", () => {
     expect(registry.has("mcp__other__query")).toBe(false);
   });
 
-  it("reports reconnect failure instead of claiming success", async () => {
+  it("does not persist auth and restores the previous connection after reconnect failure", async () => {
+    const previous = {
+      url: "https://mcp.example",
+      headers: { Authorization: "Bearer good" },
+    };
     const settings: Settings = {
       ...baseSettings,
-      mcpServers: { remote: { url: "https://mcp.example" } },
+      mcpServers: { remote: previous },
     };
+    const persistMcpServer = vi.fn(async () => "global" as const);
     const manager = {
-      getConnection: vi.fn(),
-      reconnect: vi.fn(async () => ({
-        status: "error",
-        error: new Error("401 Unauthorized"),
-      })),
+      getConnection: vi.fn(() => ({ status: "connected", config: previous })),
+      reconnect: vi.fn(async (_name: string, config: McpServerConfig) => {
+        if (config.headers?.Authorization === "Bearer bad") {
+          return {
+            status: "error",
+            error: new Error("401 Unauthorized"),
+          };
+        }
+        return { status: "connected", config };
+      }),
       getAsToolDefinitions: vi.fn(() => []),
     } as unknown as McpClientManager;
     const host = createMcpAuthHost({
       settings,
       mcpManager: manager,
       toolRegistry: new ToolRegistry(),
-      persistSettings: async () => {},
+      persistMcpServer,
     });
 
     await expect(host.configure({
       serverName: "remote",
       mode: "bearer",
-      value: "tok",
-    })).rejects.toThrow("reconnect failed: 401 Unauthorized");
+      value: "bad",
+    })).rejects.toThrow("Auth was not saved");
+
+    expect(persistMcpServer).not.toHaveBeenCalled();
+    expect(settings.mcpServers?.remote).toEqual(previous);
+    expect(manager.reconnect).toHaveBeenNthCalledWith(1, "remote", {
+      url: "https://mcp.example",
+      headers: { Authorization: "Bearer bad" },
+    });
+    expect(manager.reconnect).toHaveBeenNthCalledWith(2, "remote", previous);
   });
 });
