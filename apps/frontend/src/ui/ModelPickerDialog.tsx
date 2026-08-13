@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { TextAttributes } from "@opentui/core";
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type { ModelInfo, ModelProviderInfo } from "@openharness/client";
 
@@ -7,8 +7,12 @@ import { useTheme } from "../theme/ThemeContext";
 import { AC_VISIBLE_ITEMS } from "./constants";
 
 type Row =
+  | { kind: "spacer"; key: string }
   | { kind: "provider"; key: string; label: string }
   | { kind: "model"; key: string; provider: ModelProviderInfo; model: ModelInfo };
+
+const SCROLLBOX_CHROME_ROWS = 4;
+const MODEL_LIST_HEIGHT = AC_VISIBLE_ITEMS + SCROLLBOX_CHROME_ROWS;
 
 function matches(value: string, query: string): boolean {
   return value.toLowerCase().includes(query.toLowerCase());
@@ -32,6 +36,7 @@ function buildRows(providers: ModelProviderInfo[], query: string): Row[] {
       ? provider.models.filter((model) => providerMatches || matches(modelSearchText(provider, model), query))
       : provider.models;
     if (models.length === 0) continue;
+    if (rows.length > 0) rows.push({ kind: "spacer", key: `spacer:${provider.name}` });
     rows.push({ kind: "provider", key: `provider:${provider.name}`, label: provider.displayName });
     for (const model of models) {
       rows.push({ kind: "model", key: `model:${provider.name}:${model.id}`, provider, model });
@@ -67,6 +72,7 @@ export function ModelPickerDialog(props: {
   const rows = useMemo(() => buildRows(providers, query.trim()), [providers, query]);
   const [selectedIndex, setSelectedIndex] = useState(() => closestModelIndex(rows, currentModel));
   const mountedRef = useRef(false);
+  const listRef = useRef<ScrollBoxRenderable | null>(null);
 
   useEffect(() => {
     if (!mountedRef.current) {
@@ -75,6 +81,11 @@ export function ModelPickerDialog(props: {
     }
     setSelectedIndex(closestModelIndex(rows, currentModel));
   }, [currentModel, rows]);
+
+  useEffect(() => {
+    if (selectedIndex < 0) return;
+    listRef.current?.scrollChildIntoView(`model-picker-row-${selectedIndex}`);
+  }, [selectedIndex, rows]);
 
   useKeyboard((key) => {
     if (rows.length === 0) return;
@@ -89,22 +100,88 @@ export function ModelPickerDialog(props: {
     if (key.name === "return") {
       const row = rows[selectedIndex];
       if (row?.kind === "model") onSelect(row.model);
+      return;
+    }
+    if (key.name === "pageup") {
+      listRef.current?.scrollBy(-1, "viewport");
+      return;
+    }
+    if (key.name === "pagedown") {
+      listRef.current?.scrollBy(1, "viewport");
     }
   });
 
-  const windowStart = Math.max(
-    0,
-    Math.min(
-      selectedIndex - Math.floor(AC_VISIBLE_ITEMS / 2),
-      rows.length - AC_VISIBLE_ITEMS,
-    ),
-  );
-  const visibleRows = rows.slice(windowStart, windowStart + AC_VISIBLE_ITEMS);
+  const isScrollable = rows.length > AC_VISIBLE_ITEMS;
+  const listHeight = MODEL_LIST_HEIGHT;
+
+  const rowNodes = rows.map((row, index) => {
+    if (row.kind === "spacer") {
+      return (
+        <box
+          key={row.key}
+          id={`model-picker-row-${index}`}
+          width="100%"
+          height={1}
+          flexShrink={0}
+        />
+      );
+    }
+
+    if (row.kind === "provider") {
+      return (
+        <box
+          key={row.key}
+          id={`model-picker-row-${index}`}
+          flexDirection="row"
+          width="100%"
+          height={1}
+          flexShrink={0}
+        >
+          <text attributes={TextAttributes.BOLD} fg={theme.colors.accent}>
+            {row.label}
+          </text>
+        </box>
+      );
+    }
+
+    const isSelected = index === selectedIndex;
+    const isCurrent = row.model.id === currentModel;
+    return (
+      <box
+        key={row.key}
+        id={`model-picker-row-${index}`}
+        flexDirection="row"
+        width="100%"
+        paddingLeft={1}
+        height={1}
+        flexShrink={0}
+        backgroundColor={isSelected ? theme.colors.accent : undefined}
+        onMouseUp={() => {
+          setSelectedIndex(index);
+          onSelect(row.model);
+        }}
+      >
+        <text
+          attributes={isCurrent ? TextAttributes.BOLD : undefined}
+          fg={isSelected ? theme.colors.background : theme.colors.foreground}
+        >
+          {row.model.label}
+        </text>
+        <box flexGrow={1} />
+        {row.model.hint ? (
+          <text fg={isSelected ? theme.colors.background : theme.colors.muted}>
+            {row.model.hint}
+          </text>
+        ) : null}
+      </box>
+    );
+  });
 
   return (
-    <box flexDirection="column">
-      <box flexDirection="row">
+    <box flexDirection="column" gap={1}>
+      <box flexDirection="row" paddingBottom={1}>
         <text attributes={TextAttributes.BOLD} fg={theme.colors.accent}>Select model</text>
+        <box flexGrow={1} />
         <text fg={theme.colors.muted}>   esc</text>
       </box>
 
@@ -114,46 +191,27 @@ export function ModelPickerDialog(props: {
         onInput={(value: string) => setQuery(value)}
       />
 
-      {visibleRows.length === 0 ? (
+      {rows.length === 0 ? (
         <text fg={theme.colors.muted}>No connected providers.</text>
+      ) : !isScrollable ? (
+        <box flexDirection="column" width="100%">
+          {rowNodes}
+        </box>
       ) : (
-        <>
-          {visibleRows.map((row) => {
-            if (row.kind === "provider") {
-              return (
-                <text key={row.key} fg={theme.colors.accent}>
-                  {row.label}
-                </text>
-              );
-            }
-
-            const isSelected = rows.indexOf(row) === selectedIndex;
-            const isCurrent = row.model.id === currentModel;
-            return (
-              <box
-                key={row.key}
-                flexDirection="row"
-                backgroundColor={isSelected ? theme.colors.accent : undefined}
-              >
-                <text
-                  attributes={isCurrent ? TextAttributes.BOLD : undefined}
-                  fg={isSelected ? theme.colors.background : theme.colors.foreground}
-                >
-                  {row.model.label}
-                </text>
-                <box flexGrow={1} />
-                {row.model.hint ? (
-                  <text fg={isSelected ? theme.colors.background : theme.colors.muted}>
-                    {row.model.hint}
-                  </text>
-                ) : null}
-              </box>
-            );
-          })}
-        </>
+        <scrollbox
+          ref={listRef}
+          scrollY
+          width="100%"
+          height={listHeight}
+          flexDirection="column"
+          viewportCulling={false}
+          horizontalScrollbarOptions={{ visible: false }}
+        >
+          {rowNodes}
+        </scrollbox>
       )}
 
-      <box flexDirection="row">
+      <box flexDirection="row" paddingTop={1}>
         <text fg={theme.colors.foreground}>Connect provider </text>
         <text fg={theme.colors.muted}>ctrl+a  </text>
         <text fg={theme.colors.foreground}>Favorite </text>

@@ -50,7 +50,6 @@ test("search narrows down to matching items", async () => {
 
   await renderOnce();
 
-  // Type "/p" to filter - wrap in act to flush React state
   await act(async () => {
     await mockInput.typeText("/p");
   });
@@ -83,7 +82,6 @@ test("down arrow + enter triggers onSelect with correct value", async () => {
 
   await renderOnce();
 
-  // Press down once (moves from index 0 to index 1), then enter
   mockInput.pressArrow("down");
   await new Promise((r) => setTimeout(r, 50));
   await renderOnce();
@@ -93,6 +91,63 @@ test("down arrow + enter triggers onSelect with correct value", async () => {
   await renderOnce();
 
   expect(selected).toBe("permissions");
+
+  renderer.destroy();
+});
+
+test("mouse click selects the clicked item", async () => {
+  let selected: string | undefined;
+
+  const { renderer, renderOnce, mockMouse } = await testRender(
+    <ThemeProvider>
+      <DialogSelect
+        title="Select Command"
+        items={sampleItems}
+        onSelect={(value) => {
+          selected = value;
+        }}
+      />
+    </ThemeProvider>,
+    { width: 80, height: 24 },
+  );
+
+  await renderOnce();
+  await mockMouse.click(4, 4);
+  await renderOnce();
+
+  expect(selected).toBe("plan");
+
+  renderer.destroy();
+});
+
+test("mouse wheel scrolls long option lists", async () => {
+  const longItems: DialogSelectItem[] = Array.from({ length: 18 }, (_, index) => ({
+    value: `item-${index}`,
+    label: `Item ${index}`,
+  }));
+
+  const { renderer, renderOnce, waitForFrame, captureCharFrame, mockMouse } = await testRender(
+    <ThemeProvider>
+      <DialogSelect
+        title="Long List"
+        items={longItems}
+        searchable={false}
+        onSelect={() => undefined}
+      />
+    </ThemeProvider>,
+    { width: 80, height: 24 },
+  );
+
+  await renderOnce();
+  expect(captureCharFrame()).not.toContain("Item 17");
+
+  for (let i = 0; i < 12; i += 1) {
+    await mockMouse.scroll(4, 5, "down");
+  }
+  await renderOnce();
+  await waitForFrame((frame) => frame.includes("Item 17"));
+
+  expect(captureCharFrame()).toContain("Item 17");
 
   renderer.destroy();
 });
@@ -165,7 +220,6 @@ test("digit shortcut works when searchable=false", async () => {
 
   await renderOnce();
 
-  // Press "2" to select the second item (/permissions)
   mockInput.pressKey("2");
   await new Promise((r) => setTimeout(r, 50));
   await renderOnce();

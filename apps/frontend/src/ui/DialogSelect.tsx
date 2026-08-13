@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useKeyboard } from "@opentui/react";
-import { TextAttributes } from "@opentui/core";
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useTheme } from "../theme/ThemeContext";
 import { fuzzyFilter } from "./fuzzy";
 import { useListNavigation } from "../hooks/useListNavigation";
 import { AC_VISIBLE_ITEMS } from "./constants";
+
+const SCROLLBOX_CHROME_ROWS = 3;
 
 export type DialogSelectItem = {
   value: string;
@@ -27,6 +29,7 @@ export function DialogSelect(props: {
 
   const [query, setQuery] = useState("");
   const mountedRef = useRef(false);
+  const listRef = useRef<ScrollBoxRenderable | null>(null);
 
   const filtered = searchable
     ? fuzzyFilter(items, query, (i) => i.label)
@@ -35,7 +38,7 @@ export function DialogSelect(props: {
   const { index: selectedIndex, setIndex: setSelectedIndex, moveUp, moveDown } =
     useListNavigation(filtered.length);
 
-  // Reset selection when query changes（跳过挂载帧，保住 initialIndex）
+  // Keep the caller's initial preselection on mount, then reset filtered lists to the top.
   useEffect(() => {
     if (!mountedRef.current) {
       mountedRef.current = true;
@@ -43,23 +46,21 @@ export function DialogSelect(props: {
       return;
     }
     setSelectedIndex(0);
-  }, [query]);
+    listRef.current?.scrollTo(0);
+  }, [query, initialIndex, setSelectedIndex]);
 
-  // ctrl+d 删掉当前项后列表变短，把高亮夹回可见范围
+  // After deleting/filtering items, keep the highlighted row inside the list.
   useEffect(() => {
     if (filtered.length === 0) return;
     if (selectedIndex >= filtered.length) setSelectedIndex(filtered.length - 1);
   }, [filtered.length, selectedIndex, setSelectedIndex]);
 
-  // Compute visible window: ensure selectedIndex is visible
-  const windowStart = Math.max(
-    0,
-    Math.min(
-      selectedIndex - Math.floor(AC_VISIBLE_ITEMS / 2),
-      filtered.length - AC_VISIBLE_ITEMS,
-    ),
-  );
-  const visibleItems = filtered.slice(windowStart, windowStart + AC_VISIBLE_ITEMS);
+  useEffect(() => {
+    if (filtered.length === 0) return;
+    listRef.current?.scrollChildIntoView(`dialog-select-row-${selectedIndex}`);
+  }, [filtered.length, selectedIndex]);
+
+  const listHeight = Math.min(filtered.length, AC_VISIBLE_ITEMS) + SCROLLBOX_CHROME_ROWS;
 
   useKeyboard((key) => {
     if (filtered.length === 0) return;
@@ -76,8 +77,16 @@ export function DialogSelect(props: {
       if (item) onDelete(item.value);
       return;
     }
+    if (key.name === "pageup") {
+      listRef.current?.scrollBy(-1, "viewport");
+      return;
+    }
+    if (key.name === "pagedown") {
+      listRef.current?.scrollBy(1, "viewport");
+      return;
+    }
 
-    // Digit shortcuts 1-9 only when not searchable
+    // Digit shortcuts 1-9 only when not searchable.
     if (!searchable) {
       const digit = key.name ? parseInt(key.name, 10) : NaN;
       if (!isNaN(digit) && digit >= 1 && digit <= 9) {
@@ -90,12 +99,10 @@ export function DialogSelect(props: {
 
   return (
     <box flexDirection="column">
-      {/* Title row */}
       <text attributes={TextAttributes.BOLD} fg={theme.colors.accent}>
         {title}
       </text>
 
-      {/* Search input */}
       {searchable && (
         <input
           focused
@@ -104,35 +111,51 @@ export function DialogSelect(props: {
         />
       )}
 
-      {/* List */}
       {filtered.length === 0 ? (
         <text fg={theme.colors.muted}>no matches</text>
       ) : (
         <>
-          {visibleItems.map((item, visibleIdx) => {
-            const absoluteIdx = windowStart + visibleIdx;
-            const isSelected = absoluteIdx === selectedIndex;
-            const prefix = item.active ? "✓ " : "  ";
+          <scrollbox
+            ref={listRef}
+            scrollY
+            width="100%"
+            height={listHeight}
+            flexDirection="column"
+            viewportCulling={false}
+            horizontalScrollbarOptions={{ visible: false }}
+          >
+            {filtered.map((item, index) => {
+              const isSelected = index === selectedIndex;
+              const prefix = item.active ? "✓ " : "  ";
 
-            return (
-              <box
-                key={item.value}
-                flexDirection="row"
-                backgroundColor={isSelected ? theme.colors.accent : undefined}
-              >
-                <text fg={isSelected ? theme.colors.background : theme.colors.foreground}>
-                  {prefix}
-                  {item.label}
-                </text>
-                {item.description != null && (
-                  <text fg={theme.colors.muted}> {item.description}</text>
-                )}
-                {item.hint != null && (
-                  <text fg={theme.colors.muted}> {item.hint}</text>
-                )}
-              </box>
-            );
-          })}
+              return (
+                <box
+                  key={item.value}
+                  id={`dialog-select-row-${index}`}
+                  flexDirection="row"
+                  width="100%"
+                  height={1}
+                  flexShrink={0}
+                  backgroundColor={isSelected ? theme.colors.accent : undefined}
+                  onMouseUp={() => {
+                    setSelectedIndex(index);
+                    onSelect(item.value);
+                  }}
+                >
+                  <text fg={isSelected ? theme.colors.background : theme.colors.foreground}>
+                    {prefix}
+                    {item.label}
+                  </text>
+                  {item.description != null && (
+                    <text fg={theme.colors.muted}> {item.description}</text>
+                  )}
+                  {item.hint != null && (
+                    <text fg={theme.colors.muted}> {item.hint}</text>
+                  )}
+                </box>
+              );
+            })}
+          </scrollbox>
           {onDelete && (
             <text fg={theme.colors.muted}>  ctrl+d delete</text>
           )}
