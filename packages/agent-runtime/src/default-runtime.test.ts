@@ -115,4 +115,64 @@ describe("createOpenHarnessRuntime tool visibility", () => {
       await runtime.close();
     }
   });
+
+  it("treats '*' as all tools while deniedTools still wins", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        allowedTools: ["*"],
+        disallowedTools: ["file_write"],
+      },
+    });
+
+    runtime.toolRegistry.register({
+      name: "DynamicMcpTool",
+      description: "Dynamic MCP tool",
+      inputSchema: {},
+      async execute() {
+        return { content: [] };
+      },
+    });
+
+    try {
+      const names = runtime.toolRegistry.getAll().map((tool) => tool.name);
+      expect(names).toContain("Bash");
+      expect(names).toContain("Read");
+      expect(names).toContain("DynamicMcpTool");
+      expect(names).not.toContain("Write");
+      expect(runtime.toolRegistry.get("Write")).toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("normalizes common old-world tool names before filtering", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        allowedTools: ["bash", "file_edit", "tool_search"],
+        disallowedTools: ["TOOL_SEARCH"],
+      },
+    });
+
+    try {
+      const names = runtime.toolRegistry.getAll().map((tool) => tool.name);
+      expect(names).toEqual(["Bash", "Edit"]);
+      expect(runtime.toolRegistry.get("Bash")).toBeDefined();
+      expect(runtime.toolRegistry.get("Edit")).toBeDefined();
+      expect(runtime.toolRegistry.get("ToolSearch")).toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
+  });
 });

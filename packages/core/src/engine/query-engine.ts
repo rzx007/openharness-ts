@@ -666,7 +666,7 @@ export class QueryEngine implements IQueryEngine {
 
   private visibleToolRegistry(): IToolRegistry {
     const allowedTools = this.allowedTools;
-    if (!allowedTools) return this.toolRegistry;
+    if (!allowedTools || allowedTools.includes("*")) return this.toolRegistry;
     const allowed = new Set(allowedTools);
     const inner = this.toolRegistry;
     return {

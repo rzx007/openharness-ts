@@ -1,5 +1,6 @@
 import type { IToolRegistry, Settings, StreamingMessageClient, ToolDefinition } from "@openharness/core";
 import { QueryEngine, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
+import { normalizeToolNames, resolveAllowedToolNames } from "@openharness/core";
 import {
   AnthropicClient,
   CodexSubscriptionClient,
@@ -75,13 +76,15 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
 
   const baseToolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
 
-  const effectiveAllowed = new Set(
+  const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
+  const effectiveAllowed = new Set(resolveAllowedToolNames(
     configuration.allowedTools ?? settings.permission.allowedTools ?? [],
-  );
-  const effectiveDenied = new Set([
+    knownToolNames,
+  ));
+  const effectiveDenied = new Set(normalizeToolNames([
     ...(settings.permission.deniedTools ?? []),
     ...(configuration.disallowedTools ?? []),
-  ]);
+  ], knownToolNames));
 
   const toolRegistry = new RuntimeToolRegistry(baseToolRegistry, effectiveAllowed, effectiveDenied);
 
