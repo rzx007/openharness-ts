@@ -40,6 +40,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function sessionRuntimeMetadata(input: {
   permissionMode?: unknown;
   maxTurns?: unknown;
+  sessionMode?: unknown;
 }): Record<string, unknown> {
   const metadata: Record<string, unknown> = {};
   if (typeof input.permissionMode === "string" && input.permissionMode) {
@@ -47,6 +48,9 @@ function sessionRuntimeMetadata(input: {
   }
   if (typeof input.maxTurns === "number" && Number.isFinite(input.maxTurns)) {
     metadata.maxTurns = input.maxTurns;
+  }
+  if (input.sessionMode === "coordinator") {
+    metadata.sessionMode = "coordinator";
   }
   return metadata;
 }
@@ -330,6 +334,7 @@ export function useServerSync(
         const metadata = sessionRuntimeMetadata({
           permissionMode: daemon?.permissionMode ?? "default",
           maxTurns: daemon?.maxTurns,
+          sessionMode: daemon?.sessionMode,
         });
         if (cancelled) return;
         listedSessionsRef.current = Object.fromEntries(sessions.map((session) => [session.id, session]));
@@ -360,7 +365,7 @@ export function useServerSync(
       cancelled = true;
       clientRef.current = null;
     };
-  }, [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.token, daemon?.url, reportError]);
+  }, [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.sessionMode, daemon?.token, daemon?.url, reportError]);
 
   useEffect(() => {
     const client = clientRef.current;
@@ -429,6 +434,7 @@ export function useServerSync(
     const metadata = sessionRuntimeMetadata({
       permissionMode: statusRef.current.permission_mode ?? daemon?.permissionMode ?? "default",
       maxTurns: statusRef.current.max_turns ?? daemon?.maxTurns,
+      sessionMode: daemon?.sessionMode,
     });
     const session = await client.createSession({
       cwd,
@@ -442,7 +448,7 @@ export function useServerSync(
     setSubmittedRun(null);
     pendingNewSessionTitleRef.current = undefined;
     return session;
-  }, [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode]);
+  }, [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.sessionMode]);
 
   useEffect(() => {
     if (!ready || sentInitialPromptRef.current || !config.initial_prompt) return;

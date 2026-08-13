@@ -353,6 +353,7 @@ async function runTuiMode(
       model: options.model ?? settings.model,
       permissionMode: options.permissionMode ?? settings.permission.mode,
       maxTurns: options.maxTurns ?? settings.maxTurns,
+      sessionMode: isCoordinatorMode() ? "coordinator" : null,
     },
     initial_prompt: prompt ?? null,
     theme: options.theme ?? "default",

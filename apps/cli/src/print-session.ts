@@ -11,6 +11,7 @@ import {
   type SessionStateSnapshot,
 } from "@openharness/client";
 import type { Settings } from "@openharness/core";
+import { isCoordinatorMode } from "@openharness/coordinator";
 
 import { ensureLocalDaemon } from "./ensure-daemon.js";
 import { EventRenderer } from "./renderer.js";
@@ -58,6 +59,7 @@ export function buildPrintSessionMetadata(
   if (allowedTools && allowedTools.length > 0) metadata.allowedTools = allowedTools;
   if (disallowedTools && disallowedTools.length > 0) metadata.disallowedTools = disallowedTools;
   if (typeof effort === "string" && effort) metadata.effort = effort;
+  if (isCoordinatorMode()) metadata.sessionMode = "coordinator";
   return metadata;
 }
 

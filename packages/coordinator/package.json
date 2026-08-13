@@ -8,6 +8,10 @@
     ".": {
       "import": "./src/index.ts",
       "types": "./src/index.ts"
+    },
+    "./coordinator-mode": {
+      "import": "./src/coordinator-mode.ts",
+      "types": "./src/coordinator-mode.ts"
     }
   },
   "scripts": {

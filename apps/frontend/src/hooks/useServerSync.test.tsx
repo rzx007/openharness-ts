@@ -747,6 +747,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
         model: "m",
         permissionMode: "plan",
         maxTurns: 11,
+        sessionMode: "coordinator",
       },
     }, (message) => errors.push(message));
     return <box />;
@@ -882,7 +883,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(createCall).toBeTruthy();
   expect(JSON.parse(String(createCall?.init.body ?? "{}"))).toMatchObject({
     title: "Scratch",
-    metadata: { permissionMode: "plan", maxTurns: 11 },
+    metadata: { permissionMode: "plan", maxTurns: 11, sessionMode: "coordinator" },
   });
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2/prompts")).toBe(true);
   expect(captured?.status.session_id).toBe("s2");

@@ -41,7 +41,7 @@ describe("matchSessionMode", () => {
 
 describe("getCoordinatorTools", () => {
   it("reserves orchestration tools for the coordinator", () => {
-    expect(getCoordinatorTools()).toEqual(["Agent", "SendMessage", "TaskStop", "Workflow"]);
+    expect(getCoordinatorTools()).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);
   });
 });
 

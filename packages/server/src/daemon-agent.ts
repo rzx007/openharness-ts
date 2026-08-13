@@ -3,6 +3,7 @@ import {
   type OpenHarnessAgent,
   type OpenHarnessAgentOptions,
 } from "@openharness/agent-runtime";
+import { getCoordinatorSystemPrompt, getCoordinatorTools } from "@openharness/coordinator/coordinator-mode";
 import type { AgentCronEffects, AgentEffects, AgentEventListener, Settings } from "@openharness/core";
 import type {
   SessionMessagePartRecord,
@@ -115,7 +116,7 @@ async function resolveSettingsForSession(
 function agentConfigurationFromSession(session: SessionRecord): Partial<OpenHarnessAgentOptions> {
   const permissionMode = session.metadata.permissionMode;
   const effort = session.metadata.effort;
-  return {
+  const configuration: Partial<OpenHarnessAgentOptions> = {
     model: session.model || undefined,
     permissionMode: permissionMode === "default" || permissionMode === "plan" || permissionMode === "full_auto"
       ? permissionMode
@@ -132,4 +133,15 @@ function agentConfigurationFromSession(session: SessionRecord): Partial<OpenHarn
       : undefined,
     effort: effort === "low" || effort === "medium" || effort === "high" ? effort : undefined,
   };
+  if (session.metadata.sessionMode === "coordinator") {
+    configuration.systemPrompt = coordinatorSystemPrompt(configuration.systemPrompt);
+    configuration.allowedTools = getCoordinatorTools();
+  }
+  return configuration;
+}
+
+function coordinatorSystemPrompt(sessionPrompt: string | undefined): string {
+  const prompt = getCoordinatorSystemPrompt();
+  if (!sessionPrompt?.trim()) return prompt;
+  return `${prompt}\n\n## Additional Session Instructions\n\n${sessionPrompt.trim()}`;
 }

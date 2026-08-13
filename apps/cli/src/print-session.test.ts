@@ -55,10 +55,12 @@ describe("runPrintSession", () => {
   let exitSpy: MockInstance<(code?: string | number | null) => never>;
 
   beforeEach(() => {
+    delete process.env.OPENHARNESS_COORDINATOR_MODE;
     exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
   });
 
   afterEach(() => {
+    delete process.env.OPENHARNESS_COORDINATOR_MODE;
     exitSpy.mockRestore();
     vi.clearAllMocks();
   });
@@ -432,6 +434,8 @@ describe("runPrintSession", () => {
       },
     }));
 
+    process.env.OPENHARNESS_COORDINATOR_MODE = "1";
+
     await runPrintSession(
       { model: "m", outputStyle: "default", permission: { mode: "default" }, maxTurns: 50 } as never,
       "hi",
@@ -456,6 +460,7 @@ describe("runPrintSession", () => {
         systemPrompt: "be brief",
         allowedTools: ["Read", "Glob"],
         effort: "low",
+        sessionMode: "coordinator",
       },
     });
   });

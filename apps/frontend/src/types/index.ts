@@ -6,6 +6,7 @@ export type FrontendConfig = {
     model?: string | null;
     permissionMode?: string | null;
     maxTurns?: number | null;
+    sessionMode?: string | null;
   } | null;
   initial_prompt?: string | null;
   theme?: string | null;

@@ -53,6 +53,7 @@ const RUNTIME_SESSION_METADATA_KEYS = [
   "allowedTools",
   "disallowedTools",
   "effort",
+  "sessionMode",
 ] as const;
 
 export function runtimeSessionMetadataChanged(

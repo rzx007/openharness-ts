@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("@openharness/coordinator/coordinator-mode", () => ({
+  getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
+  getCoordinatorTools: () => ["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"],
+}));
+
+vi.mock("@openharness/agent-runtime", () => ({
+  createOpenHarnessAgent: vi.fn(async () => {
+    throw new Error("createOpenHarnessAgent should not be used by this test");
+  }),
+}));
+
 import { createDaemonAgentLoader } from "./daemon-agent.js";
 
 const session = {
@@ -87,6 +98,36 @@ describe("createDaemonAgentLoader", () => {
         backend: "docker",
       },
     });
+  });
+
+  it("turns durable coordinator sessions into coordinator Agents", async () => {
+    const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
+    const createAgent = vi.fn(async () => agent);
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model" } as any,
+      createAgent,
+    })!;
+
+    await loader({
+      session: {
+        ...session,
+        metadata: {
+          ...session.metadata,
+          sessionMode: "coordinator",
+          systemPrompt: "Keep updates short.",
+          allowedTools: ["Bash"],
+        },
+      },
+      history: [],
+      parts: [],
+    });
+
+    const options = createAgent.mock.calls[0]![0].options;
+    expect(options.systemPrompt).toContain("You are a **coordinator**");
+    expect(options.systemPrompt).toContain("## Additional Session Instructions");
+    expect(options.systemPrompt).toContain("Keep updates short.");
+    expect(options.allowedTools).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);
+    expect(options.allowedTools).not.toContain("Bash");
   });
 
   it("closes a newly created Agent when durable history cannot be restored", async () => {
