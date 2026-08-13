@@ -38,7 +38,8 @@ const providers: ModelProviderInfo[] = [
     name: "deepseek",
     displayName: "DeepSeek",
     models: [
-      model("deepseek", "deepseek-chat", "DeepSeek Chat"),
+      model("deepseek", "deepseek/deepseek-v4-flash", "DeepSeek V4 Flash"),
+      model("deepseek", "deepseek/deepseek-v4-pro", "DeepSeek V4 Pro"),
     ],
   },
 ];
@@ -61,7 +62,8 @@ test("renders provider groups with model rows", async () => {
   expect(frame).toContain("Alpha");
   expect(frame).toContain("Beta");
   expect(frame).toContain("DeepSeek");
-  expect(frame).toContain("DeepSeek Chat");
+  expect(frame).toContain("DeepSeek V4 Flash");
+  expect(frame).toContain("DeepSeek V4 Pro");
 
   renderer.destroy();
 });
