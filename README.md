@@ -115,7 +115,6 @@ pnpm release:cli:plan      # 查看本地版本、npm 最新版本和自动计�
 pnpm release:cli:dry       # 根目录发布预演：自动版本管理 + build + publish --dry-run
 pnpm release:cli           # 根目录正式发布；首发用本地版本，后续自动 patch
 pnpm release:cli -- minor  # 显式发 minor 版本，也支持 major、patch、0.2.0
-# publish:cli* 是同一套 release:cli* 的别名
 
 # 本地调试 CLI 源码（不需要先 build）
 bun apps/cli/src/index.ts --dry-run
