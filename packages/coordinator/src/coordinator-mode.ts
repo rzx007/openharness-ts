@@ -65,8 +65,9 @@ export function getCoordinatorTools(): string[] {
 export function getCoordinatorUserContext(
   mcpClients?: Array<{ name: string }>,
   scratchpadDir?: string,
+  options: { enabled?: boolean } = {},
 ): Record<string, string> {
-  if (!isCoordinatorMode()) return {};
+  if (options.enabled !== true && !isCoordinatorMode()) return {};
 
   const tools = [...(isSimpleMode() ? SIMPLE_WORKER_TOOLS : WORKER_TOOLS)].sort();
   let content = `Workers spawned via the Agent tool have access to these tools: ${tools.join(", ")}`;
@@ -79,8 +80,7 @@ export function getCoordinatorUserContext(
   if (scratchpadDir) {
     content +=
       `\n\nScratchpad directory: ${scratchpadDir}\n` +
-      "Workers can read and write here without permission prompts. " +
-      "Use this for durable cross-worker knowledge — structure files however fits the work.";
+      "Use this for durable cross-worker notes. Normal tool permissions still apply.";
   }
 
   return { workerToolsContext: content };

@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@openharness/coordinator/coordinator-mode", () => ({
+vi.mock("@openharness/coordinator", () => ({
   getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
   getCoordinatorTools: () => ["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"],
+  getCoordinatorUserContext: () => ({
+    workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, TaskWait",
+  }),
 }));
 
 vi.mock("@openharness/agent-runtime", () => ({
@@ -124,6 +127,8 @@ describe("createDaemonAgentLoader", () => {
 
     const options = createAgent.mock.calls[0]![0].options;
     expect(options.systemPrompt).toContain("You are a **coordinator**");
+    expect(options.systemPrompt).toContain("## Runtime Context");
+    expect(options.systemPrompt).toContain("Workers spawned via the Agent tool");
     expect(options.systemPrompt).toContain("## Additional Session Instructions");
     expect(options.systemPrompt).toContain("Keep updates short.");
     expect(options.allowedTools).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);

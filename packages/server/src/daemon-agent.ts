@@ -3,7 +3,12 @@ import {
   type OpenHarnessAgent,
   type OpenHarnessAgentOptions,
 } from "@openharness/agent-runtime";
-import { getCoordinatorSystemPrompt, getCoordinatorTools } from "@openharness/coordinator/coordinator-mode";
+import { join } from "node:path";
+import {
+  getCoordinatorSystemPrompt,
+  getCoordinatorTools,
+  getCoordinatorUserContext,
+} from "@openharness/coordinator";
 import type { AgentCronEffects, AgentEffects, AgentEventListener, Settings } from "@openharness/core";
 import type {
   SessionMessagePartRecord,
@@ -60,7 +65,7 @@ export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): Load
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
       sessionId: session.id,
-      ...agentConfigurationFromSession(session),
+      ...agentConfigurationFromSession(session, settings),
       ...(options.requestPermission ? { requestPermission: options.requestPermission } : {}),
       ...(options.cron ? { cron: options.cron } : {}),
       ...(options.createEventSink
@@ -113,7 +118,10 @@ async function resolveSettingsForSession(
   return await options.getSettingsForCwd?.(cwd) ?? options.getSettings?.() ?? options.settings;
 }
 
-function agentConfigurationFromSession(session: SessionRecord): Partial<OpenHarnessAgentOptions> {
+function agentConfigurationFromSession(
+  session: SessionRecord,
+  settings: Settings | undefined,
+): Partial<OpenHarnessAgentOptions> {
   const permissionMode = session.metadata.permissionMode;
   const effort = session.metadata.effort;
   const configuration: Partial<OpenHarnessAgentOptions> = {
@@ -134,14 +142,35 @@ function agentConfigurationFromSession(session: SessionRecord): Partial<OpenHarn
     effort: effort === "low" || effort === "medium" || effort === "high" ? effort : undefined,
   };
   if (session.metadata.sessionMode === "coordinator") {
-    configuration.systemPrompt = coordinatorSystemPrompt(configuration.systemPrompt);
+    configuration.systemPrompt = coordinatorSystemPrompt({
+      settings,
+      cwd: session.cwd,
+      sessionPrompt: configuration.systemPrompt,
+    });
     configuration.allowedTools = getCoordinatorTools();
   }
   return configuration;
 }
 
-function coordinatorSystemPrompt(sessionPrompt: string | undefined): string {
-  const prompt = getCoordinatorSystemPrompt();
-  if (!sessionPrompt?.trim()) return prompt;
-  return `${prompt}\n\n## Additional Session Instructions\n\n${sessionPrompt.trim()}`;
+function coordinatorSystemPrompt(options: {
+  settings: Settings | undefined;
+  cwd: string;
+  sessionPrompt: string | undefined;
+}): string {
+  const sections = [getCoordinatorSystemPrompt()];
+  const mcpClients = Object.keys(options.settings?.mcpServers ?? {})
+    .sort()
+    .map((name) => ({ name }));
+  const context = getCoordinatorUserContext(
+    mcpClients,
+    join(options.cwd, ".openharness", "scratchpad"),
+    { enabled: true },
+  );
+  if (context.workerToolsContext?.trim()) {
+    sections.push(`## Runtime Context\n\n${context.workerToolsContext.trim()}`);
+  }
+  if (options.sessionPrompt?.trim()) {
+    sections.push(`## Additional Session Instructions\n\n${options.sessionPrompt.trim()}`);
+  }
+  return sections.join("\n\n");
 }

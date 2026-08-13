@@ -50,6 +50,11 @@ describe("getCoordinatorUserContext", () => {
     expect(getCoordinatorUserContext()).toEqual({});
   });
 
+  it("can be enabled explicitly by a session-owned host", () => {
+    const ctx = getCoordinatorUserContext([{ name: "db" }], undefined, { enabled: true });
+    expect(ctx.workerToolsContext).toContain("MCP servers: db");
+  });
+
   it("lists worker tools, MCP servers, and scratchpad when provided", () => {
     process.env.OPENHARNESS_COORDINATOR_MODE = "1";
     const ctx = getCoordinatorUserContext([{ name: "db" }, { name: "web" }], "/tmp/pad");
