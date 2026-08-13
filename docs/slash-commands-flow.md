@@ -32,7 +32,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  @openharness/client  dispatchSessionCommand(host)               │
 │  · parseSlashLine / mergeCommandDetails / LOCAL_COMMAND_*        │
-│  · /model /config /memory /tasks /rewind /plugin … 呈现 + API    │
+│  · /config /memory /tasks /rewind /plugin … 呈现 + API           │
 │  · emit(text) 把系统消息交回宿主                                  │
 │  · outcome: handled | local_ui | unhandled                       │
 └────────────────────────────┬────────────────────────────────────┘
@@ -47,7 +47,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  Daemon (@openharness/server)                                    │
 │  · GET /commands          catalog（builtin session + skills）    │
-│  · PATCH /sessions/:id    /model 等                              │
+│  · PATCH /sessions/:id    runtime config 等                     │
 │  · GET/PATCH /settings    /config /effort /fast /turns …         │
 │  · 其它资源 API           memory / tasks / git / plugins …       │
 │  · MaintenanceService -> AgentPool / OpenHarnessAgent            │
@@ -129,15 +129,15 @@ type SessionCommandOutcome = "handled" | "unhandled" | "local_ui";
 ```
 
 - `emit`：呈现层唯一出口（系统/通知文案）。
-- `patchStatus`：可选；`/plan` `/model` `/provider` 写本地 UI 状态。
+- `patchStatus`：可选；`/plan` `/provider` 写本地 UI 状态。
 - `cwd`：由宿主解析（`resolveSessionCwd`），不要在共享层读 React refs。
 
 ## 命令归属速查
 
 | 层 | 代表命令 | 执行位置 |
 |---|---|---|
-| Client-local UI | `/new` `/sessions` `/resume` `/theme` `/permissions` `/workflow(s)` | 宿主 App；其中 `/resume` 调用专用恢复 API，catalog 可不列或仅 autocomplete |
-| Shared session（资源 API） | `/model` `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/rewind` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/init` `/plugin` `/reload-plugins` `/hooks` `/subagents` `/diff` `/branch` `/commit` `/help` `/status` `/version` `/skills` | `dispatchSessionCommand` |
+| Client-local UI | `/new` `/sessions` `/resume` `/models` `/theme` `/permissions` `/workflow(s)` | 宿主 App；其中 `/resume` 调用专用恢复 API，catalog 可不列或仅 autocomplete |
+| Shared session（资源 API） | `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/rewind` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/init` `/plugin` `/reload-plugins` `/hooks` `/subagents` `/diff` `/branch` `/commit` `/help` `/status` `/version` `/skills` | `dispatchSessionCommand` |
 | Template | user-invocable skills、plugin commands | `POST /sessions/:id/commands` |
 | 禁止 | 通用 `runCommand`、未知 slash 当 prompt | — |
 

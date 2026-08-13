@@ -27,10 +27,10 @@ REPL/TUI：
 ```text
 /auth login deepseek sk-xxx
 /provider deepseek
-/model deepseek-chat
+/models
 ```
 
-`ohs provider add deepseek -k sk-xxx --use --model deepseek-chat` 是快捷方式：一条命令写入 API key，并可选择同时激活 provider/model。
+`ohs provider add deepseek -k sk-xxx --use --model deepseek-chat` 是快捷方式：一条命令写入 API key，并可选择同时激活 provider + model。
 
 `ohs provider use <name>` 默认只切换 provider；要同时切换模型，请加
 `-m/--model`，例如 `ohs provider use deepseek -m deepseek-chat`。
@@ -52,7 +52,7 @@ REPL/TUI：
 ```text
 /auth login codex
 /provider codex
-/model gpt-5.4
+/models
 ```
 
 `auth login codex` 会检查 Codex CLI 的认证源是否就绪；真正的登录仍由 Codex CLI 管理。`auth codex-login` 仍可作为别名使用。

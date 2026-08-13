@@ -34,13 +34,13 @@ skill 经 command catalog 以 template 形式出现。
 
 | 命令 | 用法 / 说明 |
 |---|---|
-| `/model` | 查看/切换模型 |
+| `/models` | 查看/切换模型 |
 | `/provider` | 查看/切换 API provider（`auto` 自动探测） |
 | `/effort` | 推理力度 `low \| medium \| high` |
 | `/fast` | fast 模式 `on \| off \| toggle` |
 | `/auth` | 凭证来源管理 `login \| logout \| status`（`codex-login` 为兼容别名） |
 
-`/auth` 准备认证来源，`/provider` 切换模型供应商，`/model` 切换模型名。普通 API key 与 Codex 订阅的完整流程见 [auth-provider-model.md](auth-provider-model.md)。
+`/auth` 准备认证来源，`/provider` 切换模型供应商，`/models` 打开模型选择器。普通 API key 与 Codex 订阅的完整流程见 [auth-provider-model.md](auth-provider-model.md)。
 
 ### 记忆
 
