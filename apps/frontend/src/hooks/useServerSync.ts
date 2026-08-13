@@ -55,6 +55,14 @@ function sessionRuntimeMetadata(input: {
   return metadata;
 }
 
+function normalizeSessionMode(value: unknown): "coordinator" | null {
+  return value === "coordinator" ? "coordinator" : null;
+}
+
+function statusSessionMode(value: unknown): "coordinator" | "direct" {
+  return normalizeSessionMode(value) ?? "direct";
+}
+
 type RecoverableRun = {
   id: string;
   error?: string;
@@ -140,6 +148,7 @@ export function useServerSync(
   const [status, setStatus] = useState<Record<string, unknown>>({
     permission_mode: daemon?.permissionMode ?? "default",
     model: daemon?.model ?? "default",
+    session_mode: statusSessionMode(daemon?.sessionMode),
     ...(typeof daemon?.maxTurns === "number" ? { max_turns: daemon.maxTurns } : {}),
   });
   const [modal, setModal] = useState<Record<string, unknown> | null>(null);
@@ -154,6 +163,7 @@ export function useServerSync(
   const clientRef = useRef<OpenHarnessClient | null>(null);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
   const commandCatalogRef = useRef<CommandCatalogEntry[]>([]);
+  const nextSessionModeRef = useRef<"coordinator" | "direct">(statusSessionMode(daemon?.sessionMode));
   const statusRef = useRef(status);
   const sentInitialPromptRef = useRef(false);
   const pendingNewSessionTitleRef = useRef<string | undefined>(undefined);
@@ -293,6 +303,7 @@ export function useServerSync(
       ...(typeof session.metadata.maxTurns === "number"
         ? { max_turns: session.metadata.maxTurns }
         : {}),
+      session_mode: statusSessionMode(session.metadata.sessionMode),
     }));
   }, []);
 
@@ -308,6 +319,7 @@ export function useServerSync(
     setStatus((current) => {
       const next = { ...current };
       delete next.session_id;
+      next.session_mode = nextSessionModeRef.current;
       return next;
     });
   }, [clearDisplayRequest]);
@@ -347,6 +359,7 @@ export function useServerSync(
             ? metadata.permissionMode
             : current.permission_mode,
           ...(typeof metadata.maxTurns === "number" ? { max_turns: metadata.maxTurns } : {}),
+          session_mode: statusSessionMode(metadata.sessionMode),
         }));
         const session = sessions[0];
         if (session) {
@@ -434,7 +447,7 @@ export function useServerSync(
     const metadata = sessionRuntimeMetadata({
       permissionMode: statusRef.current.permission_mode ?? daemon?.permissionMode ?? "default",
       maxTurns: statusRef.current.max_turns ?? daemon?.maxTurns,
-      sessionMode: daemon?.sessionMode,
+      sessionMode: nextSessionModeRef.current,
     });
     const session = await client.createSession({
       cwd,
@@ -668,6 +681,17 @@ export function useServerSync(
             metadata: { ...current.metadata, permissionMode: mode },
           });
         }
+        return;
+      }
+
+      if (type === "set_session_mode") {
+        if (sessionId) {
+          pushSystem("Coordinator mode can only be changed before starting a new session. Use /new first.");
+          return;
+        }
+        const mode = normalizeSessionMode(payload.session_mode);
+        nextSessionModeRef.current = statusSessionMode(mode);
+        setStatus((current) => ({ ...current, session_mode: nextSessionModeRef.current }));
         return;
       }
 

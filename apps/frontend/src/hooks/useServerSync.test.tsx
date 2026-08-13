@@ -869,6 +869,18 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.busy).toBe(false);
 
   await act(async () => {
+    captured?.sendRequest({ type: "set_session_mode", session_mode: "direct" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.status.session_mode).toBe("direct");
+
+  await act(async () => {
+    captured?.sendRequest({ type: "set_session_mode", session_mode: "coordinator" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.status.session_mode).toBe("coordinator");
+
+  await act(async () => {
     captured?.sendRequest({ type: "list_sessions" });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });

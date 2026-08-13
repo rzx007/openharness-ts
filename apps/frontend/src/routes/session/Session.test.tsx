@@ -124,6 +124,7 @@ test("Footer renders plan indicator, MCP count, tokens, version", async () => {
   const status: Record<string, unknown> = {
     model: "claude-3-5-sonnet",
     permission_mode: "plan",
+    session_mode: "coordinator",
     input_tokens: 12345,
     output_tokens: 678,
   };
@@ -145,6 +146,7 @@ test("Footer renders plan indicator, MCP count, tokens, version", async () => {
 
   // Plan mode indicator
   expect(frame).toContain("[PLAN]");
+  expect(frame).toContain("[COORDINATOR]");
 
   // MCP servers count
   expect(frame).toContain("2 MCP");

@@ -60,6 +60,7 @@ export function Footer({ status, mcpServers, version }: FooterProps) {
 
   const { mode, inputTokens, outputTokens } = parseStatus(status);
   const isPlan = mode === "plan" || mode === "Plan Mode";
+  const isCoordinator = status.session_mode === "coordinator";
   const hasTokens = inputTokens > 0 || outputTokens > 0;
 
   const mcpCount = mcpServers.length;
@@ -83,6 +84,7 @@ export function Footer({ status, mcpServers, version }: FooterProps) {
       <text fg={c.muted}>
         {leftLabel}
         {isPlan ? <span fg={c.warning}>{" [PLAN]"}</span> : null}
+        {isCoordinator ? <span fg={c.accent}>{" [COORDINATOR]"}</span> : null}
         {mcpCount > 0 ? <span fg={mcpColor}>{`  ⊙ ${mcpCount} MCP`}</span> : null}
         <span fg={c.muted}>{"  /status"}</span>
       </text>

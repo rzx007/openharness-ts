@@ -23,6 +23,7 @@ export interface PrintSessionOptions {
   outputFormat?: string;
   dangerouslySkipPermissions?: boolean;
   permissionMode?: string;
+  coordinator?: boolean;
   maxTurns?: number;
   systemPrompt?: string;
   allowedTools?: string;
@@ -59,7 +60,7 @@ export function buildPrintSessionMetadata(
   if (allowedTools && allowedTools.length > 0) metadata.allowedTools = allowedTools;
   if (disallowedTools && disallowedTools.length > 0) metadata.disallowedTools = disallowedTools;
   if (typeof effort === "string" && effort) metadata.effort = effort;
-  if (isCoordinatorMode()) metadata.sessionMode = "coordinator";
+  if (options.coordinator === true || isCoordinatorMode()) metadata.sessionMode = "coordinator";
   return metadata;
 }
 

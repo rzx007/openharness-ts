@@ -31,6 +31,7 @@ interface MainOptions {
   name?: string;
   provider?: string;
   permissionMode?: string;
+  coordinator?: boolean;
   maxTurns?: number;
   systemPrompt?: string;
   apiKey?: string;
@@ -216,6 +217,10 @@ export function resolveMainEntryMode(
   return "tui";
 }
 
+function isCoordinatorSessionRequested(options: Pick<MainOptions, "coordinator">): boolean {
+  return options.coordinator === true || isCoordinatorMode();
+}
+
 function rejectInteractiveContinueResume(options: MainOptions): void {
   if (!options.continue && !options.resume) return;
   console.error(
@@ -288,6 +293,7 @@ async function runPrintMode(
     outputFormat: options.outputFormat,
     dangerouslySkipPermissions: options.dangerouslySkipPermissions,
     permissionMode: options.permissionMode,
+    coordinator: options.coordinator,
     maxTurns: options.maxTurns ?? settings.maxTurns,
     systemPrompt: options.systemPrompt,
     allowedTools: options.allowedTools,
@@ -353,7 +359,7 @@ async function runTuiMode(
       model: options.model ?? settings.model,
       permissionMode: options.permissionMode ?? settings.permission.mode,
       maxTurns: options.maxTurns ?? settings.maxTurns,
-      sessionMode: isCoordinatorMode() ? "coordinator" : null,
+      sessionMode: isCoordinatorSessionRequested(options) ? "coordinator" : null,
     },
     initial_prompt: prompt ?? null,
     theme: options.theme ?? "default",

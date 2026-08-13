@@ -146,6 +146,26 @@ function AppInner({ config }: { config: FrontendConfig }) {
         return true;
       }
 
+      const coordinatorMatch = line.trim().match(/^\/coordinator(?:\s+(on|off|status))?$/);
+      if (coordinatorMatch) {
+        const currentMode = String(session.status.session_mode ?? "direct");
+        const action = coordinatorMatch[1] ?? (currentMode === "coordinator" ? "off" : "on");
+        if (action === "status") {
+          toast(`Coordinator mode: ${currentMode === "coordinator" ? "on" : "off"}`);
+          return true;
+        }
+        if (activeSessionId) {
+          toast("Use /new before changing coordinator mode", "error");
+          return true;
+        }
+        session.sendRequest({
+          type: "set_session_mode",
+          session_mode: action === "on" ? "coordinator" : "direct",
+        });
+        toast(`Coordinator mode: ${action}`);
+        return true;
+      }
+
       // /sessions — 列出并切换会话；/resume 专用于显式重放中断 run。
       if (line.trim() === "/sessions") {
         session.sendRequest({ type: "list_sessions" });
@@ -160,7 +180,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
 
       return false;
     },
-    [dialog, session, setThemeName, theme.name, toast],
+    [activeSessionId, dialog, session, setThemeName, theme.name, toast],
   );
 
   // ─────────────────────── openCommandPalette helper ───────────────────────────
@@ -236,6 +256,11 @@ function AppInner({ config }: { config: FrontendConfig }) {
             id: "/permissions",
             title: "Change Permission Mode",
             run: () => handleCommand("/permissions"),
+          },
+          {
+            id: "/coordinator",
+            title: "Toggle Coordinator Mode",
+            run: () => handleCommand("/coordinator"),
           },
           {
             id: "/sessions",

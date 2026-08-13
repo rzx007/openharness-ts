@@ -434,8 +434,6 @@ describe("runPrintSession", () => {
       },
     }));
 
-    process.env.OPENHARNESS_COORDINATOR_MODE = "1";
-
     await runPrintSession(
       { model: "m", outputStyle: "default", permission: { mode: "default" }, maxTurns: 50 } as never,
       "hi",
@@ -443,6 +441,7 @@ describe("runPrintSession", () => {
         model: "m",
         cwd: "/tmp",
         permissionMode: "plan",
+        coordinator: true,
         maxTurns: 7,
         systemPrompt: "be brief",
         allowedTools: "Read,Glob",

@@ -31,6 +31,7 @@ program
   .option("-n, --name <name>", "Name the session")
   .option("--provider <provider>", "API provider")
   .option("--permission-mode <mode>", "Permission mode (default | plan | full_auto)")
+  .option("--coordinator", "Start new daemon sessions in coordinator mode")
   .option("--max-turns <n>", "Maximum agentic turns", parseInt)
   .option("-s, --system-prompt <prompt>", "Override system prompt")
   .option("--api-key <key>", "API key override")
