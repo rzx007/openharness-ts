@@ -797,7 +797,11 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
 
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s1/prompts")).toBe(true);
   expect(calls.some((call) => call.url === "http://daemon.test/permissions/p1/reply")).toBe(true);
-  expect(calls.every((call) => (call.init.headers as Record<string, string> | undefined)?.authorization === "Bearer tok")).toBe(true);
+  const healthCalls = calls.filter((call) => new URL(call.url).pathname === "/health");
+  const authenticatedCalls = calls.filter((call) => new URL(call.url).pathname !== "/health");
+  expect(healthCalls.length).toBeGreaterThan(0);
+  expect(healthCalls.every((call) => (call.init.headers as Record<string, string> | undefined)?.authorization === undefined)).toBe(true);
+  expect(authenticatedCalls.every((call) => (call.init.headers as Record<string, string> | undefined)?.authorization === "Bearer tok")).toBe(true);
 
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "/resume r-interrupted" });
