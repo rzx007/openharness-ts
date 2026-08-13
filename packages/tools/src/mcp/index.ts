@@ -97,7 +97,7 @@ export const mcpAuthTool: ToolDefinition = {
     },
     required: ["serverName", "mode", "value"],
   },
-  async execute(input) {
+  async execute(input, context) {
     const serverName = input.serverName as string;
     const mode = input.mode as string;
     const value = input.value as string;
@@ -112,15 +112,46 @@ export const mcpAuthTool: ToolDefinition = {
       };
     }
 
-    if (mode === "env" || mode === "bearer") {
-      const envKey = key ?? (mode === "bearer" ? `${serverName.toUpperCase()}_API_KEY` : serverName.toUpperCase());
-      process.env[envKey] = value;
+    if (!serverName.trim()) {
+      return {
+        content: [{ type: "text", text: "MCP server name is required." }],
+        isError: true,
+      };
     }
 
-    return {
-      content: [
-        { type: "text", text: `Saved MCP auth for ${serverName} (mode=${mode})` },
-      ],
-    };
+    if (!value.trim()) {
+      return {
+        content: [{ type: "text", text: "MCP auth value is required." }],
+        isError: true,
+      };
+    }
+
+    const mcpAuth = context.mcpAuth;
+    if (!mcpAuth) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "MCP auth is not available in this host. No auth was saved and no MCP server was reconnected.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    try {
+      const result = await mcpAuth.configure({
+        serverName,
+        mode: mode as "bearer" | "header" | "env",
+        value,
+        ...(key ? { key } : {}),
+      });
+      return { content: [{ type: "text", text: result.message }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+        isError: true,
+      };
+    }
   },
 };

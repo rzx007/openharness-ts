@@ -1,5 +1,5 @@
 import type { StreamingMessageClient } from "./client";
-import type { ToolRegistry } from "./tools";
+import type { McpAuthHost, ToolRegistry } from "./tools";
 import type { PermissionChecker } from "./permissions";
 import type { HookExecutor } from "./hooks";
 import type { ContentBlock, Message } from "./messages";
@@ -271,6 +271,7 @@ export interface QueryEngine {
   setAllowedTools(tools: string[] | null): void;
   setSessionId(sessionId: string | undefined): void;
   setMcpManager(mgr: unknown): void;
+  setMcpAuth(auth: McpAuthHost | undefined): void;
 }
 
 export interface MemoryRetriever {

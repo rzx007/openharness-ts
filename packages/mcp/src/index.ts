@@ -214,7 +214,11 @@ export class McpClientManager {
     }
   }
 
-  async reconnect(name: string): Promise<McpConnection | undefined> {
+  async reconnect(name: string, config?: McpServerConfig): Promise<McpConnection | undefined> {
+    if (config) {
+      await this.disconnect(name);
+      return this.connect(name, config);
+    }
     const existing = this.connections.get(name);
     if (existing) {
       await this.disconnect(name);

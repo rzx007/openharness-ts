@@ -26,6 +26,9 @@ export type {
   ToolContext,
   ToolResult,
   ToolExecutionResult,
+  McpAuthConfigureInput,
+  McpAuthConfigureResult,
+  McpAuthHost,
   ToolRegistry as IToolRegistry,
 } from "./types/tools";
 

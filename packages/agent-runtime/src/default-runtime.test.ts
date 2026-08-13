@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  createOpenHarnessRuntime,
   resolveAutoApproveTools,
   resolveRuntimeModel,
 } from "./default-runtime.js";
@@ -65,5 +66,49 @@ describe("resolveRuntimeModel", () => {
 
   it("falls back to settings model when no override is provided", () => {
     expect(resolveRuntimeModel(BASE_SETTINGS, {})).toBe(BASE_SETTINGS.model);
+  });
+});
+
+describe("createOpenHarnessRuntime tool visibility", () => {
+  it("applies allowedTools and deniedTools to tools registered after runtime creation", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        allowedTools: ["ToolSearch", "DynamicAllowed"],
+        disallowedTools: ["DynamicDenied"],
+      },
+    });
+
+    runtime.toolRegistry.register({
+      name: "DynamicAllowed",
+      description: "Allowed dynamic tool",
+      inputSchema: {},
+      async execute() {
+        return { content: [] };
+      },
+    });
+    runtime.toolRegistry.register({
+      name: "DynamicDenied",
+      description: "Denied dynamic tool",
+      inputSchema: {},
+      async execute() {
+        return { content: [] };
+      },
+    });
+
+    try {
+      const names = runtime.toolRegistry.getAll().map((tool) => tool.name);
+      expect(names).toEqual(["ToolSearch", "DynamicAllowed"]);
+      expect(runtime.toolRegistry.get("DynamicAllowed")).toBeDefined();
+      expect(runtime.toolRegistry.get("DynamicDenied")).toBeUndefined();
+      expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
   });
 });

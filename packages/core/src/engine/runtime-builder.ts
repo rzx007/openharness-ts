@@ -1,8 +1,8 @@
 import { RuntimeBundle } from "../types/runtime";
 import type { Settings } from "../index";
+import type { ToolRegistry as IToolRegistry } from "../types/tools";
 import type {
   StreamingMessageClient,
-  ToolRegistry as IToolRegistry,
   IPermissionChecker,
   IHookExecutor,
   IQueryEngine,

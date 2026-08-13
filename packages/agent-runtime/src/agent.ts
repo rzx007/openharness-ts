@@ -45,6 +45,7 @@ import {
   type AgentMemoryRuntime,
   type AgentRememberResult,
 } from "./memory-runtime.js";
+import { createMcpAuthHost } from "./mcp-auth.js";
 import {
   AgentChildRegistry,
   AgentChildManager,
@@ -597,6 +598,11 @@ async function createOpenHarnessAgentInternal(
     if (Object.keys(mcpServers).length > 0) await mcpManager.connectAll(mcpServers);
     for (const tool of mcpManager.getAsToolDefinitions()) runtime.toolRegistry.register(tool);
     runtime.queryEngine.setMcpManager(mcpManager);
+    runtime.queryEngine.setMcpAuth(createMcpAuthHost({
+      settings,
+      mcpManager,
+      toolRegistry: runtime.toolRegistry,
+    }));
     runtime.addCleanup(() => mcpManager.disconnectAll());
 
     const memory = settings.memory?.enabled === false

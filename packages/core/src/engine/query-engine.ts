@@ -4,15 +4,14 @@ import type { Message, StreamEvent, ToolUseBlock, UsageSnapshot, ContentBlock } 
 import type {
   AgentExecutionContext,
   StreamingMessageClient,
-  ToolRegistry as IToolRegistry,
   IPermissionChecker,
   IHookExecutor,
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
   MemoryRetriever,
-  ToolContext,
-  ToolExecutionResult,
+  McpAuthHost,
 } from "../index";
+import type { ToolContext, ToolDefinition, ToolExecutionResult, ToolRegistry as IToolRegistry } from "../types/tools";
 import { CompactService, type CompactClient, type CompactAttachmentsProvider } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
@@ -153,6 +152,7 @@ export class QueryEngine implements IQueryEngine {
   private memoryRetriever?: MemoryRetriever;
   private allowedTools: string[] | null = null;
   private mcpManager: unknown = undefined;
+  private mcpAuth: McpAuthHost | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -204,6 +204,10 @@ export class QueryEngine implements IQueryEngine {
 
   setMcpManager(mgr: unknown): void {
     this.mcpManager = mgr;
+  }
+
+  setMcpAuth(auth: McpAuthHost | undefined): void {
+    this.mcpAuth = auth;
   }
 
   /**
@@ -273,10 +277,7 @@ export class QueryEngine implements IQueryEngine {
       }
       this.messages = sanitizeMessageHistory(this.messages);
 
-      const allTools = this.toolRegistry.getAll();
-      const tools = this.allowedTools
-        ? allTools.filter((t) => this.allowedTools!.includes(t.name))
-        : allTools;
+      const tools = this.visibleToolRegistry().getAll();
       const stream = this.apiClient.streamMessage({
         model: this.model,
         messages: this.messages,
@@ -562,8 +563,10 @@ export class QueryEngine implements IQueryEngine {
             sessionId: this.sessionId,
             runAbortSignal: signal,
             settings: this.options.settings,
+            toolRegistry: this.visibleToolRegistry(),
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
+            mcpAuth: this.mcpAuth,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(
@@ -658,5 +661,26 @@ export class QueryEngine implements IQueryEngine {
       }
       externalSignal?.removeEventListener("abort", abortFromExternal);
     }
+  }
+
+  private visibleToolRegistry(): IToolRegistry {
+    const allowedTools = this.allowedTools;
+    if (!allowedTools) return this.toolRegistry;
+    const allowed = new Set(allowedTools);
+    const inner = this.toolRegistry;
+    return {
+      register(tool: ToolDefinition): void {
+        inner.register(tool);
+      },
+      get(name: string): ToolDefinition | undefined {
+        return allowed.has(name) ? inner.get(name) : undefined;
+      },
+      getAll(): ToolDefinition[] {
+        return inner.getAll().filter((tool) => allowed.has(tool.name));
+      },
+      has(name: string): boolean {
+        return allowed.has(name) && inner.has(name);
+      },
+    };
   }
 }

@@ -10,10 +10,15 @@ export const toolSearchTool: ToolDefinition = {
     },
     required: ["query"],
   },
-  async execute(input) {
-    const { createDefaultToolRegistry } = await import("../registry");
+  async execute(input, context) {
     const query = (input.query as string).toLowerCase();
-    const registry = createDefaultToolRegistry();
+    const registry = context.toolRegistry;
+    if (!registry) {
+      return {
+        content: [{ type: "text", text: "ToolSearch requires the current runtime tool registry." }],
+        isError: true,
+      };
+    }
     const allTools = registry.getAll();
     const matches = allTools.filter(
       (t) => t.name.toLowerCase().includes(query) || t.description.toLowerCase().includes(query)

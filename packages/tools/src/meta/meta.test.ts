@@ -6,6 +6,7 @@ import { configTool } from "./config.js";
 import { toolSearchTool } from "./tool-search.js";
 import { askUserTool } from "./ask-user.js";
 import { skillTool } from "./skill.js";
+import { ToolRegistry } from "@openharness/core";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -97,15 +98,48 @@ describe("configTool", () => {
 
 describe("toolSearchTool", () => {
   it("finds matching tools", async () => {
-    const result = await toolSearchTool.execute!({ query: "bash" }, { cwd: process.cwd() });
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "Bash",
+      description: "Run shell commands",
+      inputSchema: {},
+      async execute() {
+        return { content: [] };
+      },
+    });
+    const result = await toolSearchTool.execute!({ query: "bash" }, { cwd: process.cwd(), toolRegistry: registry });
     const text = (result.content[0] as any).text;
     expect(text).toContain("Bash");
   });
 
   it("returns no matches message", async () => {
-    const result = await toolSearchTool.execute!({ query: "zzznonexistent" }, { cwd: process.cwd() });
+    const registry = new ToolRegistry();
+    const result = await toolSearchTool.execute!({ query: "zzznonexistent" }, { cwd: process.cwd(), toolRegistry: registry });
     const text = (result.content[0] as any).text;
     expect(text).toContain("no matches");
+  });
+
+  it("uses the current runtime registry instead of creating the default registry", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "PluginDynamicTool",
+      description: "Dynamic plugin capability",
+      inputSchema: {},
+      async execute() {
+        return { content: [] };
+      },
+    });
+
+    const result = await toolSearchTool.execute!({ query: "dynamic" }, { cwd: process.cwd(), toolRegistry: registry });
+    const text = (result.content[0] as any).text;
+    expect(text).toContain("PluginDynamicTool");
+    expect(text).not.toContain("Bash");
+  });
+
+  it("fails when no runtime registry is provided", async () => {
+    const result = await toolSearchTool.execute!({ query: "bash" }, { cwd: process.cwd() });
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as any).text).toContain("current runtime tool registry");
   });
 });
 

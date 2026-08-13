@@ -1,5 +1,5 @@
-import type { Settings, StreamingMessageClient } from "@openharness/core";
-import { QueryEngine, ToolRegistry, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
+import type { IToolRegistry, Settings, StreamingMessageClient, ToolDefinition } from "@openharness/core";
+import { QueryEngine, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
 import {
   AnthropicClient,
   CodexSubscriptionClient,
@@ -73,7 +73,7 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
 
   const apiClient = configuration.client ?? await resolveApiClient(settings, configuration, storage);
 
-  let toolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
+  const baseToolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
 
   const effectiveAllowed = new Set([
     ...(settings.permission.allowedTools ?? []),
@@ -84,21 +84,7 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
     ...(configuration.disallowedTools ?? []),
   ]);
 
-  if (effectiveAllowed.size > 0) {
-    const filtered = new ToolRegistry();
-    for (const tool of toolRegistry.getAll()) {
-      if (effectiveAllowed.has(tool.name)) filtered.register(tool);
-    }
-    toolRegistry = filtered;
-  }
-
-  if (effectiveDenied.size > 0) {
-    const filtered = new ToolRegistry();
-    for (const tool of toolRegistry.getAll()) {
-      if (!effectiveDenied.has(tool.name)) filtered.register(tool);
-    }
-    toolRegistry = filtered;
-  }
+  const toolRegistry = new RuntimeToolRegistry(baseToolRegistry, effectiveAllowed, effectiveDenied);
 
   const mode = configuration.permissionMode ?? settings.permission.mode;
 
@@ -165,6 +151,36 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
 
   await attachSandboxRuntime(bundle, cwd, options.sandboxReporter, options.sessionId);
   return bundle;
+}
+
+class RuntimeToolRegistry implements IToolRegistry {
+  constructor(
+    private readonly inner: IToolRegistry,
+    private readonly allowedTools: ReadonlySet<string>,
+    private readonly deniedTools: ReadonlySet<string>,
+  ) {}
+
+  register(tool: ToolDefinition): void {
+    this.inner.register(tool);
+  }
+
+  get(name: string): ToolDefinition | undefined {
+    const tool = this.inner.get(name);
+    return tool && this.isVisible(tool.name) ? tool : undefined;
+  }
+
+  getAll(): ToolDefinition[] {
+    return this.inner.getAll().filter((tool) => this.isVisible(tool.name));
+  }
+
+  has(name: string): boolean {
+    return this.get(name) !== undefined;
+  }
+
+  private isVisible(name: string): boolean {
+    if (this.deniedTools.has(name)) return false;
+    return this.allowedTools.size === 0 || this.allowedTools.has(name);
+  }
 }
 
 async function attachSandboxRuntime(
