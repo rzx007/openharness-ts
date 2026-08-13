@@ -179,8 +179,8 @@ export class AgentChildManager implements AgentChildDirectory {
         model: input.model ?? this.options.configuration.model,
         systemPrompt: input.systemPrompt ?? this.options.configuration.systemPrompt,
         permissionMode: input.permissionMode ?? this.options.configuration.permissionMode,
-        allowedTools: input.allowedTools ?? this.options.configuration.allowedTools,
-        disallowedTools: input.disallowedTools ?? this.options.configuration.disallowedTools,
+        allowedTools: input.allowedTools,
+        disallowedTools: mergeToolLists(this.options.configuration.disallowedTools, input.disallowedTools),
         maxTurns: input.maxTurns ?? this.options.configuration.maxTurns,
         effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"
           ? input.effort
@@ -578,6 +578,14 @@ function sameChildInput(left: AgentChildInput, right: AgentChildInput): boolean 
   return left.content === right.content &&
     (left.delivery ?? "steer") === (right.delivery ?? "steer") &&
     isDeepStrictEqual(left.metadata ?? {}, right.metadata ?? {});
+}
+
+function mergeToolLists(
+  inherited: string[] | undefined,
+  child: string[] | undefined,
+): string[] | undefined {
+  const merged = [...(inherited ?? []), ...(child ?? [])];
+  return merged.length > 0 ? [...new Set(merged)] : undefined;
 }
 
 function isChildUnavailable(record: ChildRecord): boolean {

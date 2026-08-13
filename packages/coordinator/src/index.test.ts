@@ -209,6 +209,30 @@ describe("AgentDefinitions", () => {
       expect((agent.systemPrompt ?? "").trim().length, agent.name).toBeGreaterThan(0);
     }
   });
+
+  it("uses runtime tool names in built-in tool policies", () => {
+    expect(getAgentDefinition("general-purpose")?.tools).toEqual(["*"]);
+    expect(getAgentDefinition("worker")?.tools).toEqual(["*"]);
+    expect(getAgentDefinition("worker")?.disallowedTools).toEqual([
+      "Agent",
+      "SendMessage",
+      "TaskStop",
+      "TaskWait",
+      "Workflow",
+      "TeamCreate",
+      "TeamDelete",
+    ]);
+
+    for (const name of ["Explore", "Plan", "verification"]) {
+      expect(getAgentDefinition(name)?.disallowedTools).toEqual([
+        "Agent",
+        "ExitPlanMode",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+      ]);
+    }
+  });
 });
 
 // These anchor strings come verbatim from the Python original

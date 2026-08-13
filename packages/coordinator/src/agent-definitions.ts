@@ -228,6 +228,24 @@ const VERIFICATION_CRITICAL_REMINDER =
   "IN THE PROJECT DIRECTORY (tmp is allowed for ephemeral test scripts). " +
   "You MUST end with VERDICT: PASS, VERDICT: FAIL, or VERDICT: PARTIAL.";
 
+const WORKER_DISALLOWED_TOOLS = [
+  "Agent",
+  "SendMessage",
+  "TaskStop",
+  "TaskWait",
+  "Workflow",
+  "TeamCreate",
+  "TeamDelete",
+] as const;
+
+const READ_ONLY_AGENT_DISALLOWED_TOOLS = [
+  "Agent",
+  "ExitPlanMode",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+] as const;
+
 const STATUSLINE_PROMPT = `You are a status line setup agent for Claude Code. Your job is to create or update the statusLine command in the user's Claude Code settings.
 
 When asked to convert the user's shell PS1 configuration, follow these steps:
@@ -387,7 +405,7 @@ const BUILTIN_AGENTS: AgentDefinition[] = [
       'desired thoroughness level: "quick" for basic searches, "medium" for ' +
       'moderate exploration, or "very thorough" for comprehensive analysis across ' +
       'multiple locations and naming conventions.',
-    disallowedTools: ["agent", "exit_plan_mode", "file_edit", "file_write", "notebook_edit"],
+    disallowedTools: [...READ_ONLY_AGENT_DISALLOWED_TOOLS],
     systemPrompt: EXPLORE_PROMPT,
     // 不硬编码模型：省略 = 继承会话模型（对齐 Python 的 model="inherit"），
     // 否则非 Anthropic provider（如 OpenRouter）会因 "haiku" 解析失败而跑不起来
@@ -402,7 +420,7 @@ const BUILTIN_AGENTS: AgentDefinition[] = [
       "Software architect agent for designing implementation plans. Use this when you " +
       "need to plan the implementation strategy for a task. Returns step-by-step plans, " +
       "identifies critical files, and considers architectural trade-offs.",
-    disallowedTools: ["agent", "exit_plan_mode", "file_edit", "file_write", "notebook_edit"],
+    disallowedTools: [...READ_ONLY_AGENT_DISALLOWED_TOOLS],
     systemPrompt: PLAN_PROMPT,
     omitClaudeMd: true,
     subagentType: "Plan",
@@ -414,6 +432,8 @@ const BUILTIN_AGENTS: AgentDefinition[] = [
     description:
       "Implementation-focused worker agent. Use this for concrete coding tasks: " +
       "writing features, fixing bugs, refactoring code, and running tests.",
+    tools: ["*"],
+    disallowedTools: [...WORKER_DISALLOWED_TOOLS],
     systemPrompt: WORKER_PROMPT,
     subagentType: "worker",
     source: "builtin",
@@ -427,7 +447,7 @@ const BUILTIN_AGENTS: AgentDefinition[] = [
       "infrastructure changes). Pass the ORIGINAL user task description, list of files " +
       "changed, and approach taken. The agent runs builds, tests, linters, and checks " +
       "to produce a PASS/FAIL/PARTIAL verdict with evidence.",
-    disallowedTools: ["agent", "exit_plan_mode", "file_edit", "file_write", "notebook_edit"],
+    disallowedTools: [...READ_ONLY_AGENT_DISALLOWED_TOOLS],
     systemPrompt: VERIFICATION_PROMPT,
     criticalSystemReminder: VERIFICATION_CRITICAL_REMINDER,
     color: "red",

@@ -50,9 +50,9 @@ export const agentTool: ToolDefinition = {
       return { content: [{ type: "text", text: "No framework child manager registered for Agent tool" }], isError: true };
     }
 
-    const subagentType = input.subagentType as string | undefined;
-    const agentDef = subagentType ? getAgentDefinition(subagentType) : undefined;
-    const agentName = subagentType ?? "agent";
+    const subagentType = (input.subagentType as string | undefined) ?? "worker";
+    const agentDef = getAgentDefinition(subagentType);
+    const agentName = subagentType;
     const team = (input.team as string) ?? "default";
     const agentId = `${agentName}@${team}`;
 

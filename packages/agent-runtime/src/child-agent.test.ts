@@ -38,6 +38,64 @@ describe("AgentChildManager", () => {
     await manager.closeAll();
   });
 
+  it("does not inherit the parent tool allowlist into child workers", async () => {
+    const createAgent = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("done"))));
+    const manager = createManager(
+      new AgentEventBus(),
+      createAgent,
+      undefined,
+      undefined,
+      false,
+      {
+        allowedTools: ["Agent", "TaskWait", "Workflow"],
+        disallowedTools: ["Write"],
+      },
+    );
+
+    await manager.createController(parentScope()).spawnChildAgent({
+      description: "Worker",
+      prompt: "patch",
+      agent: "worker",
+      cwd: "/repo",
+    });
+
+    expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
+      allowedTools: undefined,
+      disallowedTools: ["Write"],
+    });
+    await manager.closeAll();
+  });
+
+  it("uses explicit child tools and merges inherited denies", async () => {
+    const createAgent = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("done"))));
+    const manager = createManager(
+      new AgentEventBus(),
+      createAgent,
+      undefined,
+      undefined,
+      false,
+      {
+        allowedTools: ["Agent"],
+        disallowedTools: ["Write"],
+      },
+    );
+
+    await manager.createController(parentScope()).spawnChildAgent({
+      description: "Explore",
+      prompt: "inspect",
+      agent: "Explore",
+      cwd: "/repo",
+      allowedTools: ["Read", "Grep"],
+      disallowedTools: ["Bash"],
+    });
+
+    expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
+      allowedTools: ["Read", "Grep"],
+      disallowedTools: ["Write", "Bash"],
+    });
+    await manager.closeAll();
+  });
+
   it("owns child identity, execution, events and live directory", async () => {
     const bus = new AgentEventBus();
     const eventTypes: string[] = [];

@@ -100,6 +100,26 @@ describe("agentTool framework child controller", () => {
     expect(calls.at(-1)?.isolate).toBe(false);
   });
 
+  it("defaults omitted subagentType to the built-in worker definition", async () => {
+    const { agent, calls } = createAgentContext();
+
+    await agentTool.execute({ description: "d", prompt: "implement" }, { cwd: "/work", agent });
+
+    expect(calls.at(-1)).toMatchObject({
+      agent: "worker",
+      allowedTools: ["*"],
+      disallowedTools: [
+        "Agent",
+        "SendMessage",
+        "TaskStop",
+        "TaskWait",
+        "Workflow",
+        "TeamCreate",
+        "TeamDelete",
+      ],
+    });
+  });
+
   it("passes a generated child session id to the host", async () => {
     const { agent, calls } = createAgentContext();
 
