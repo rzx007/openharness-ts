@@ -52,6 +52,12 @@ export const agentTool: ToolDefinition = {
 
     const subagentType = (input.subagentType as string | undefined) ?? "worker";
     const agentDef = getAgentDefinition(subagentType);
+    if (!agentDef) {
+      return {
+        content: [{ type: "text", text: `Unknown subagent type: ${subagentType}` }],
+        isError: true,
+      };
+    }
     const agentName = subagentType;
     const team = (input.team as string) ?? "default";
     const agentId = `${agentName}@${team}`;

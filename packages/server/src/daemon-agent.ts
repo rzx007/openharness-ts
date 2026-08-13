@@ -144,7 +144,9 @@ function agentConfigurationFromSession(
     disallowedTools: runtime.disallowedTools,
     effort: runtime.effort,
   };
-  if (runtime.sessionMode === "coordinator") {
+  // Only root sessions may own coordinator mode. Child sessions can inherit a
+  // stale sessionMode from older projections; never elevate them on reload.
+  if (runtime.sessionMode === "coordinator" && !session.parentId) {
     configuration.systemPrompt = coordinatorSystemPrompt({
       settings,
       cwd: session.cwd,

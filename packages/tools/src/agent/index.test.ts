@@ -120,6 +120,19 @@ describe("agentTool framework child controller", () => {
     });
   });
 
+  it("rejects unknown subagentType instead of inheriting the parent role", async () => {
+    const { agent, children } = createAgentContext();
+
+    const result = await agentTool.execute(
+      { description: "d", prompt: "implement", subagentType: "helper" },
+      { cwd: "/work", agent },
+    );
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("Unknown subagent type: helper");
+    expect(children.spawnChildAgent).not.toHaveBeenCalled();
+  });
+
   it("passes a generated child session id to the host", async () => {
     const { agent, calls } = createAgentContext();
 

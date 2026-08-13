@@ -56,12 +56,23 @@ export function readRuntimeMetadata(metadata: Record<string, unknown> | undefine
   return isRecord(metadata?.runtime) ? metadata.runtime : {};
 }
 
+/**
+ * Read durable session runtime config.
+ *
+ * Prefer `metadata.runtime.*`, but fall back to the pre-migration layout
+ * (`session.model` + top-level metadata fields) so existing daemon stores keep
+ * working across the runtime-metadata move.
+ */
 export function readSessionRuntimeConfig(
   session: SessionRecord,
   defaults?: Partial<SessionRuntimeConfig>,
 ): SessionRuntimeConfig {
   const runtime = readRuntimeMetadata(session.metadata);
-  const model = stringValue(runtime.model);
+  const legacy = isRecord(session.metadata) ? session.metadata : {};
+  const model =
+    stringValue(runtime.model) ??
+    stringValue(session.model) ??
+    stringValue(defaults?.model);
   if (!model) {
     throw new Error(`Session runtime config is missing metadata.runtime.model: ${session.id}`);
   }
@@ -76,26 +87,66 @@ export function readSessionRuntimeConfig(
     ...(apiFormatValue(runtime.apiFormat) ?? defaults?.apiFormat
       ? { apiFormat: apiFormatValue(runtime.apiFormat) ?? defaults?.apiFormat }
       : {}),
-    ...(permissionModeValue(runtime.permissionMode) ?? defaults?.permissionMode
-      ? { permissionMode: permissionModeValue(runtime.permissionMode) ?? defaults?.permissionMode }
+    ...(permissionModeValue(runtime.permissionMode) ??
+    permissionModeValue(legacy.permissionMode) ??
+    defaults?.permissionMode
+      ? {
+          permissionMode:
+            permissionModeValue(runtime.permissionMode) ??
+            permissionModeValue(legacy.permissionMode) ??
+            defaults?.permissionMode,
+        }
       : {}),
-    ...(numberValue(runtime.maxTurns) ?? defaults?.maxTurns
-      ? { maxTurns: numberValue(runtime.maxTurns) ?? defaults?.maxTurns }
+    ...(numberValue(runtime.maxTurns) ?? numberValue(legacy.maxTurns) ?? defaults?.maxTurns
+      ? {
+          maxTurns:
+            numberValue(runtime.maxTurns) ?? numberValue(legacy.maxTurns) ?? defaults?.maxTurns,
+        }
       : {}),
-    ...(effortValue(runtime.effort) ?? defaults?.effort
-      ? { effort: effortValue(runtime.effort) ?? defaults?.effort }
+    ...(effortValue(runtime.effort) ?? effortValue(legacy.effort) ?? defaults?.effort
+      ? {
+          effort: effortValue(runtime.effort) ?? effortValue(legacy.effort) ?? defaults?.effort,
+        }
       : {}),
-    ...(sessionModeValue(runtime.sessionMode) ?? defaults?.sessionMode
-      ? { sessionMode: sessionModeValue(runtime.sessionMode) ?? defaults?.sessionMode }
+    ...(sessionModeValue(runtime.sessionMode) ??
+    sessionModeValue(legacy.sessionMode) ??
+    defaults?.sessionMode
+      ? {
+          sessionMode:
+            sessionModeValue(runtime.sessionMode) ??
+            sessionModeValue(legacy.sessionMode) ??
+            defaults?.sessionMode,
+        }
       : {}),
-    ...(stringValue(runtime.systemPrompt) ?? defaults?.systemPrompt
-      ? { systemPrompt: stringValue(runtime.systemPrompt) ?? defaults?.systemPrompt }
+    ...(stringValue(runtime.systemPrompt) ??
+    stringValue(legacy.systemPrompt) ??
+    defaults?.systemPrompt
+      ? {
+          systemPrompt:
+            stringValue(runtime.systemPrompt) ??
+            stringValue(legacy.systemPrompt) ??
+            defaults?.systemPrompt,
+        }
       : {}),
-    ...(stringArrayValue(runtime.allowedTools) ?? defaults?.allowedTools
-      ? { allowedTools: stringArrayValue(runtime.allowedTools) ?? defaults?.allowedTools }
+    ...(stringArrayValue(runtime.allowedTools) ??
+    stringArrayValue(legacy.allowedTools) ??
+    defaults?.allowedTools
+      ? {
+          allowedTools:
+            stringArrayValue(runtime.allowedTools) ??
+            stringArrayValue(legacy.allowedTools) ??
+            defaults?.allowedTools,
+        }
       : {}),
-    ...(stringArrayValue(runtime.disallowedTools) ?? defaults?.disallowedTools
-      ? { disallowedTools: stringArrayValue(runtime.disallowedTools) ?? defaults?.disallowedTools }
+    ...(stringArrayValue(runtime.disallowedTools) ??
+    stringArrayValue(legacy.disallowedTools) ??
+    defaults?.disallowedTools
+      ? {
+          disallowedTools:
+            stringArrayValue(runtime.disallowedTools) ??
+            stringArrayValue(legacy.disallowedTools) ??
+            defaults?.disallowedTools,
+        }
       : {}),
   };
 }

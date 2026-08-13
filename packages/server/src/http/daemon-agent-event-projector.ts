@@ -156,6 +156,10 @@ export class DaemonAgentEventProjector {
       const runtimePatch = {
         ...parentRuntime,
         model,
+        // Child sessions are workers/subagents, never durable coordinator hosts.
+        // Inheriting the parent's sessionMode would rehydrate them with coordinator
+        // tools/prompts after a daemon restart or later admit.
+        sessionMode: "direct" as const,
         ...(spawn.systemPrompt !== undefined ? { systemPrompt: spawn.systemPrompt } : {}),
         ...(spawn.permissionMode !== undefined ? { permissionMode: spawn.permissionMode } : {}),
         ...(spawn.allowedTools !== undefined ? { allowedTools: spawn.allowedTools } : {}),
