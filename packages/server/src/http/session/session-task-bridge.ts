@@ -1,0 +1,238 @@
+import { randomUUID } from "node:crypto";
+
+import type { ObservabilityEvent } from "../../shared/observability.js";
+import type { SessionEventPublisher } from "./session-event-publisher.js";
+
+export interface SessionTaskBridge {
+  registerSessionTask(input: {
+    id: string;
+    description: string;
+    cwd: string;
+    sessionId: string;
+    childSessionId: string;
+    prompt: string;
+    onInput(data: string): Promise<void>;
+    onStop(): Promise<void>;
+  }): { id: string };
+  bindSessionTaskRun(taskId: string, runId: string): Promise<void>;
+  completeSessionTask(
+    taskId: string,
+    input: { status: "completed" | "failed" | "stopped" | "interrupted"; output: string },
+  ): Promise<unknown>;
+}
+
+export interface TaskInfo {
+  id: string;
+  type: string;
+  status: string;
+  description: string;
+  cwd: string;
+  metadata: Record<string, unknown>;
+}
+
+type DurableTaskStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
+
+export interface TaskManager {
+  beginSessionTask(taskId: string): TaskInfo;
+  completeSessionTask(
+    taskId: string,
+    input: { status: "completed" | "failed" | "stopped"; output: string },
+  ): Promise<unknown>;
+  listTasks(status?: string): TaskInfo[];
+  readTaskOutput(taskId: string): string;
+  registerSessionTask(input: Parameters<SessionTaskBridge["registerSessionTask"]>[0]): TaskInfo;
+  registerTaskListener(listener: (task: TaskInfo) => void): void;
+  writeToTask(taskId: string, data: string): Promise<void>;
+}
+
+export type TaskManagerFactory = (scope: { cwd: string; sessionId: string }) => TaskManager;
+
+interface SessionTaskStore {
+  createSessionTask(input: {
+    id: string;
+    sessionId: string;
+    childSessionId?: string;
+    type: string;
+    description: string;
+    cwd: string;
+    metadata: Record<string, unknown>;
+  }): unknown;
+  findSessionTaskByManagerTaskId(sessionId: string, managerTaskId: string): {
+    id: string;
+    sessionId: string;
+  } | undefined;
+  getSessionTask(taskId: string): {
+    id: string;
+    sessionId: string;
+    status: DurableTaskStatus;
+    runId?: string;
+  } | undefined;
+  updateSessionTask(taskId: string, input: {
+    status: DurableTaskStatus;
+    runId?: string;
+    output?: string;
+    error?: string;
+  }): { sessionId: string };
+}
+
+export interface SessionTaskBridgeManagerContext {
+  store: SessionTaskStore;
+  getTaskManager: TaskManagerFactory;
+  events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
+  traceIdForRun(runId: string): string;
+  log(event: ObservabilityEvent): void;
+}
+
+/**
+ * 为每个 session 生成 SessionTaskBridge：把进程内 TaskManager 与 store 的
+ * SessionTask 投影对齐（register/complete/bindRun），供 child session / Agent 使用。
+ */
+export class SessionTaskBridgeManager {
+  constructor(private readonly context: SessionTaskBridgeManagerContext) {}
+
+  createBridge(session: { id: string; cwd: string }): SessionTaskBridge {
+    const manager = this.context.getTaskManager({ cwd: session.cwd, sessionId: session.id });
+    return {
+      registerSessionTask: (input) => {
+        const before = this.context.events.checkpoint();
+        this.context.store.createSessionTask({
+          id: input.id,
+          sessionId: input.sessionId,
+          childSessionId: input.childSessionId,
+          type: "agent",
+          description: input.description,
+          cwd: input.cwd,
+          metadata: { origin: "child_session", agent: input.description, taskManagerId: input.id },
+        });
+        let task: TaskInfo;
+        try {
+          task = manager.registerSessionTask(input);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.context.store.updateSessionTask(input.id, {
+            status: "failed",
+            output: message,
+            error: message,
+          });
+          this.context.events.publishSince(before);
+          throw error;
+        }
+        this.context.log({
+          level: "info",
+          event: "session.task.created",
+          sessionId: input.sessionId,
+          taskId: task.id,
+        });
+        this.context.events.publishSince(before);
+        return { id: task.id };
+      },
+      bindSessionTaskRun: async (taskId, runId) => {
+        const before = this.context.events.checkpoint();
+        manager.beginSessionTask(taskId);
+        const task = this.context.store.updateSessionTask(taskId, { status: "running", runId });
+        this.context.log({
+          level: "info",
+          event: "session.task.bound",
+          traceId: this.context.traceIdForRun(runId),
+          sessionId: task.sessionId,
+          runId,
+          taskId,
+        });
+        this.context.events.publishSince(before);
+      },
+      completeSessionTask: async (taskId, input) => {
+        const managerStatus = input.status === "interrupted" ? "stopped" : input.status;
+        let task: unknown;
+        let managerError: unknown;
+        try {
+          task = await manager.completeSessionTask(taskId, { ...input, status: managerStatus });
+        } catch (error) {
+          managerError = error;
+        }
+        const before = this.context.events.checkpoint();
+        this.context.store.updateSessionTask(taskId, {
+          status: input.status,
+          output: input.output,
+          ...(input.status === "failed" ? { error: input.output } : {}),
+        });
+        const persisted = this.context.store.getSessionTask(taskId);
+        this.context.log({
+          level: input.status === "failed" ? "error" : "info",
+          event: "session.task.completed",
+          ...(persisted?.runId ? {
+            traceId: this.context.traceIdForRun(persisted.runId),
+            runId: persisted.runId,
+          } : {}),
+          sessionId: persisted?.sessionId ?? session.id,
+          taskId,
+          ...(input.status === "failed" ? { error: "task failed" } : {}),
+        });
+        this.context.events.publishSince(before);
+        if (managerError) {
+          this.context.log({
+            level: "warn",
+            event: "session.task.manager_completion_failed",
+            sessionId: persisted?.sessionId ?? session.id,
+            taskId,
+            error: managerError instanceof Error ? managerError.message : String(managerError),
+          });
+        }
+        return task;
+      },
+    };
+  }
+
+  projectManagerTasks(sessionId: string, manager: TaskManager): void {
+    for (const task of manager.listTasks()) {
+      const persisted = this.context.store.findSessionTaskByManagerTaskId(sessionId, task.id);
+      if (!persisted) {
+        const sameId = this.context.store.getSessionTask(task.id);
+        this.context.store.createSessionTask({
+          id: sameId && sameId.sessionId !== sessionId ? `task_${randomUUID()}` : task.id,
+          sessionId,
+          childSessionId: typeof task.metadata.child_session_id === "string" ? task.metadata.child_session_id : undefined,
+          type: task.type,
+          description: task.description,
+          cwd: task.cwd,
+          metadata: { origin: "task_manager", taskManagerId: task.id },
+        });
+      }
+      const durableTask = this.context.store.findSessionTaskByManagerTaskId(sessionId, task.id) ??
+        this.context.store.getSessionTask(task.id);
+      if (durableTask?.sessionId === sessionId) this.syncPersistentTask(task, manager, durableTask.id);
+    }
+  }
+
+  trackTask(manager: TaskManager, taskId: string): void {
+    manager.registerTaskListener((task) => {
+      if (task.id !== taskId) return;
+      const persisted = this.context.store.getSessionTask(taskId);
+      if (!persisted) return;
+      this.syncPersistentTask(task, manager, persisted.id);
+    });
+  }
+
+  syncPersistentTask(task: TaskInfo, manager: TaskManager, durableTaskId = task.id): void {
+    const status: DurableTaskStatus = task.status === "pending" || task.status === "running" ||
+      task.status === "completed" || task.status === "failed" || task.status === "stopped" ? task.status : "failed";
+    const persisted = this.context.store.getSessionTask(durableTaskId);
+    if (
+      persisted &&
+      isTerminalTaskStatus(persisted.status) &&
+      (status === "pending" || status === "running")
+    ) return;
+    let output: string | undefined;
+    try { output = manager.readTaskOutput(task.id); } catch { /* output is optional */ }
+    const before = this.context.events.checkpoint();
+    this.context.store.updateSessionTask(durableTaskId, {
+      status,
+      ...(output !== undefined ? { output } : {}),
+      ...(status === "failed" ? { error: output ?? "Task failed" } : {}),
+    });
+    this.context.events.publishSince(before);
+  }
+}
+
+function isTerminalTaskStatus(status: DurableTaskStatus): boolean {
+  return status === "completed" || status === "failed" || status === "stopped" || status === "interrupted";
+}

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import type { DaemonCronService } from "../../daemon-cron-service.js";
+import type { DaemonCronService } from "../../daemon/index.js";
 import { errorResponse, jsonResponse, readJson, readLimit } from "../support.js";
 
 export interface CronRoutesContext {

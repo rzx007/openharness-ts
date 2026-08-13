@@ -10,8 +10,8 @@ import type {
   PluginService,
   ProfileService,
   ProjectInitService,
-} from "../../settings-api.js";
-import type { DaemonControlService } from "../daemon-control-service.js";
+} from "../../application/index.js";
+import type { DaemonControlService } from "../control/index.js";
 
 export interface ServiceRoutesContext {
   contextService?: ContextService;

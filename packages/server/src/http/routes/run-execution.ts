@@ -7,8 +7,8 @@ import {
   readJson,
   sessionMutationErrorStatus,
 } from "../support.js";
-import type { RequestTraceRegistry } from "../request-trace-registry.js";
-import { SessionApplicationError, type SessionApplicationService } from "../session-application-service.js";
+import type { RequestTraceRegistry } from "../control/index.js";
+import { SessionApplicationError, type SessionApplicationService } from "../session/index.js";
 
 export interface RunExecutionRoutesContext {
   application: Pick<

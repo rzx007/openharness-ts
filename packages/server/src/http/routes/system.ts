@@ -1,14 +1,14 @@
 import { Hono } from "hono";
 
-import { mergeCommandCatalog, type CommandCatalogProvider } from "../../commands.js";
+import { mergeCommandCatalog, type CommandCatalogProvider } from "../../commands/index.js";
 import {
   errorResponse,
   jsonResponse,
   readJson,
   type OpenHarnessServerHealth,
 } from "../support.js";
-import type { ModelService, ProviderService, SettingsService } from "../../settings-api.js";
-import type { DaemonControlService } from "../daemon-control-service.js";
+import type { ModelService, ProviderService, SettingsService } from "../../application/index.js";
+import type { DaemonControlService } from "../control/index.js";
 
 export interface SystemRoutesContext {
   version?: string;

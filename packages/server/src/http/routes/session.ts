@@ -5,7 +5,7 @@ import {
   normalizeCommandName,
   parseSlashLine,
   type CommandCatalogProvider,
-} from "../../commands.js";
+} from "../../commands/index.js";
 import {
   errorResponse,
   isRecord,
@@ -15,11 +15,13 @@ import {
   readLimit,
   sessionMutationErrorStatus,
 } from "../support.js";
-import type { RequestTraceRegistry } from "../request-trace-registry.js";
-import type { SessionApplicationService } from "../session-application-service.js";
-import { SessionApplicationError } from "../session-application-service.js";
-import type { SessionQueryService } from "../session-query-service.js";
-import type { AdmitPromptResult } from "../session-run-engine.js";
+import type { RequestTraceRegistry } from "../control/index.js";
+import {
+  SessionApplicationError,
+  type AdmitPromptResult,
+  type SessionApplicationService,
+  type SessionQueryService,
+} from "../session/index.js";
 
 export interface SessionRoutesContext {
   queries: Pick<

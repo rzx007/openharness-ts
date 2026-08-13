@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import { SessionTaskError, type SessionTaskService } from "../session-task-service.js";
+import { SessionTaskError, type SessionTaskService } from "../session/index.js";
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 
 export interface TaskRoutesContext {

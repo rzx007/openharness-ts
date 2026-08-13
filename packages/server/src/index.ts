@@ -6,12 +6,12 @@ export {
   type OpenHarnessServerOptions,
   type OpenHarnessServerServices,
   type OpenHarnessRuntimeSnapshot,
-} from "./http.js";
+} from "./http/index.js";
 export {
   startOpenHarnessDaemon,
   type OpenHarnessDaemonOptions,
-} from "./default-daemon.js";
-export type { CreateDaemonAgent, CreateDaemonAgentContext } from "./daemon-agent.js";
+} from "./daemon/index.js";
+export type { CreateDaemonAgent, CreateDaemonAgentContext } from "./daemon/index.js";
 export {
   BUILTIN_SESSION_COMMANDS,
   mergeCommandCatalog,
@@ -24,8 +24,8 @@ export {
   type ExpandCommandInput,
   type ExpandCommandResult,
   type ListCommandsInput,
-} from "./commands.js";
-export { rewindTranscript, type RewindTranscriptResult } from "./rewind.js";
+} from "./commands/index.js";
+export { rewindTranscript, type RewindTranscriptResult } from "./session/index.js";
 export type {
   AgentPersonaInfo,
   AgentPersonaService,
@@ -52,7 +52,7 @@ export type {
   ProviderInfo,
   ProviderService,
   SettingsService,
-} from "./settings-api.js";
+} from "./application/index.js";
 export type {
   AgentChildController,
   AgentChildDirectory,
@@ -68,24 +68,24 @@ export type {
   AgentRunHandle,
   AgentRunScope,
 } from "@openharness/core";
-export { estimateCostUsd } from "./usage.js";
+export { estimateCostUsd } from "./shared/index.js";
 export {
   TRACE_ID_HEADER,
   writeStructuredLog,
   type ObservabilityEvent,
   type ObservabilityLevel,
   type StructuredLogger,
-} from "./observability.js";
+} from "./shared/index.js";
 export {
   writeSessionExport,
   type BuildSessionExportInput,
   type SessionExportFormat,
   type SessionExportResult,
-} from "./export-session.js";
+} from "./session/index.js";
 export {
   PermissionController,
   type PermissionControllerWaitInput,
-} from "./permission-controller.js";
+} from "./permissions/index.js";
 export {
   StorePermissionBroker,
   type ListPermissionRequestsInput,
@@ -95,7 +95,7 @@ export {
   type PermissionReplyInput,
   type PermissionReplyStatus,
   type StorePermissionBrokerOptions,
-} from "./permission-broker.js";
+} from "./permissions/index.js";
 export {
   RunInterruptedError,
   SessionRunCoordinator,
@@ -103,7 +103,7 @@ export {
   type EnqueueRunResult,
   type InterruptSessionResult,
   type SessionRunWorkContext,
-} from "./run-coordinator.js";
+} from "./runtime/index.js";
 export {
   clearDaemonRegistry,
   createBearerToken,
@@ -112,4 +112,4 @@ export {
   readDaemonRegistry,
   writeDaemonRegistry,
   type DaemonRegistry,
-} from "./paths.js";
+} from "./daemon/index.js";
