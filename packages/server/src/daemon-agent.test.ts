@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@openharness/coordinator", () => ({
   getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
   getCoordinatorTools: () => ["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"],
-  getCoordinatorUserContext: () => ({
+  getCoordinatorUserContext: vi.fn(() => ({
     workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, TaskWait",
-  }),
+  })),
 }));
 
 vi.mock("@openharness/agent-runtime", () => ({
@@ -15,6 +15,7 @@ vi.mock("@openharness/agent-runtime", () => ({
 }));
 
 import { createDaemonAgentLoader } from "./daemon-agent.js";
+import { getCoordinatorUserContext } from "@openharness/coordinator";
 
 const session = {
   id: "session-1",
@@ -133,6 +134,11 @@ describe("createDaemonAgentLoader", () => {
     expect(options.systemPrompt).toContain("Keep updates short.");
     expect(options.allowedTools).toEqual(["Bash"]);
     expect(options.roleAllowedTools).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);
+    expect(getCoordinatorUserContext).toHaveBeenCalledWith(
+      [],
+      expect.stringContaining(".openharness"),
+      { enabled: true, hostToolCeiling: ["Bash"] },
+    );
   });
 
   it("closes a newly created Agent when durable history cannot be restored", async () => {

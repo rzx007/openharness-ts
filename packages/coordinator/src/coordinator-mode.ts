@@ -1,4 +1,5 @@
 import { COORDINATOR_MODE_ENV, COORDINATOR_SYSTEM_PROMPT, isCoordinatorMode } from "./index.js";
+import { resolveAllowedToolNames } from "@openharness/core";
 
 /**
  * Coordinator 模式辅助（移植自 Python coordinator_mode.py 的 mode/上下文段）。
@@ -65,12 +66,17 @@ export function getCoordinatorTools(): string[] {
 export function getCoordinatorUserContext(
   mcpClients?: Array<{ name: string }>,
   scratchpadDir?: string,
-  options: { enabled?: boolean } = {},
+  options: { enabled?: boolean; hostToolCeiling?: string[] } = {},
 ): Record<string, string> {
   if (options.enabled !== true && !isCoordinatorMode()) return {};
 
-  const tools = [...(isSimpleMode() ? SIMPLE_WORKER_TOOLS : WORKER_TOOLS)].sort();
-  let content = `Workers spawned via the Agent tool have access to these tools: ${tools.join(", ")}`;
+  const tools = filterWorkerToolsByHostCeiling(
+    [...(isSimpleMode() ? SIMPLE_WORKER_TOOLS : WORKER_TOOLS)],
+    options.hostToolCeiling,
+  ).sort();
+  let content = tools.length > 0
+    ? `Workers spawned via the Agent tool have access to these tools: ${tools.join(", ")}`
+    : "Workers spawned via the Agent tool do not have access to any standard tools under the current host tool limit.";
 
   if (mcpClients && mcpClients.length > 0) {
     const serverNames = mcpClients.map((c) => c.name).join(", ");
@@ -84,6 +90,17 @@ export function getCoordinatorUserContext(
   }
 
   return { workerToolsContext: content };
+}
+
+function filterWorkerToolsByHostCeiling(
+  workerTools: string[],
+  hostToolCeiling: string[] | undefined,
+): string[] {
+  if (!hostToolCeiling) return workerTools;
+  const normalized = resolveAllowedToolNames(hostToolCeiling, workerTools);
+  if (normalized.length === 0) return workerTools;
+  const ceiling = new Set(normalized);
+  return workerTools.filter((tool) => ceiling.has(tool));
 }
 
 export const RICH_CAPABILITIES =

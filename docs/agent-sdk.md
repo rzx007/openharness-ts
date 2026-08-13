@@ -65,11 +65,38 @@ const agent = await createOpenHarnessAgent({
 | `model` / `provider` / `apiKey` / `baseUrl` | provider 选择覆盖 |
 | `client` | programmatic embedding、自定义 provider 或测试用消息客户端 |
 | `systemPrompt` / `maxTurns` / `effort` / `fastMode` | 执行行为覆盖 |
-| `allowedTools` / `disallowedTools` | tool scope |
+| `allowedTools` / `roleAllowedTools` / `disallowedTools` | 工具范围，见下一节 |
 | `requestPermission` | framework 必须等待结果的权限 effect；缺省为拒绝 |
 | `onEvent` | 有序、可靠、可等待的 host sink；失败会终止当前 operation |
 | `extensions` / `mcpServers` | OpenHarness extension 与 MCP 增量配置 |
 | `childEnvironment` | child agent cwd/worktree 环境策略 |
+
+## 工具限制
+
+工具限制分三层理解：
+
+| 字段 | 大白话含义 |
+|---|---|
+| `allowedTools` | 宿主给这个 Agent 家族的最大能力。子 Agent 也不能超过它。这个名字保留给 SDK 调用方使用。 |
+| `hostToolCeiling` | `allowedTools` 的明确名字，含义相同：宿主能力上限。内部传给子 Agent 时会用这个名字，避免误会成角色工具集。 |
+| `roleAllowedTools` | 当前 Agent 角色自己想看的工具。例如 Coordinator Leader 只需要 `Agent` / `Workflow` / `TaskWait`，但这不代表 Worker 也只能用这些。 |
+| `disallowedTools` | 永远优先禁止。父 Agent 和子 Agent 的禁止列表会合并。 |
+
+最终能看到的工具是：
+
+```text
+可用工具 = 宿主能力上限 ∩ 当前角色工具集 - 禁止工具
+```
+
+`["*"]` 表示“这一层不额外收窄”，不是“绕过宿主上限”。例如：
+
+```ts
+await createOpenHarnessAgent({
+  allowedTools: ["Read", "Agent", "TaskWait"],
+});
+```
+
+这个 Agent 可以派出 Worker，但 Worker 仍然只能在 `Read` / `Agent` / `TaskWait` 这个上限内活动，不能因为内置 worker 写了 `tools: ["*"]` 就拿到 `Bash` / `Edit` / `Write`。
 
 ## Event 与 Effect
 

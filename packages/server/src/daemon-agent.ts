@@ -146,6 +146,7 @@ function agentConfigurationFromSession(
       settings,
       cwd: session.cwd,
       sessionPrompt: configuration.systemPrompt,
+      hostToolCeiling: configuration.allowedTools ?? settings?.permission.allowedTools,
     });
     configuration.roleAllowedTools = getCoordinatorTools();
   }
@@ -156,6 +157,7 @@ function coordinatorSystemPrompt(options: {
   settings: Settings | undefined;
   cwd: string;
   sessionPrompt: string | undefined;
+  hostToolCeiling: string[] | undefined;
 }): string {
   const sections = [getCoordinatorSystemPrompt()];
   const mcpClients = Object.keys(options.settings?.mcpServers ?? {})
@@ -164,7 +166,10 @@ function coordinatorSystemPrompt(options: {
   const context = getCoordinatorUserContext(
     mcpClients,
     join(options.cwd, ".openharness", "scratchpad"),
-    { enabled: true },
+    {
+      enabled: true,
+      hostToolCeiling: options.hostToolCeiling,
+    },
   );
   if (context.workerToolsContext?.trim()) {
     sections.push(`## Runtime Context\n\n${context.workerToolsContext.trim()}`);

@@ -245,6 +245,14 @@ const READ_ONLY_AGENT_DISALLOWED_TOOLS = [
   "NotebookEdit",
 ] as const;
 
+const VERIFICATION_DISALLOWED_TOOLS = [
+  "Agent",
+  "ExitPlanMode",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+] as const;
+
 const STATUSLINE_PROMPT = `You are a status line setup agent for Claude Code. Your job is to create or update the statusLine command in the user's Claude Code settings.
 
 When asked to convert the user's shell PS1 configuration, follow these steps:
@@ -446,7 +454,7 @@ const BUILTIN_AGENTS: AgentDefinition[] = [
       "infrastructure changes). Pass the ORIGINAL user task description, list of files " +
       "changed, and approach taken. The agent runs builds, tests, linters, and checks " +
       "to produce a PASS/FAIL/PARTIAL verdict with evidence.",
-    disallowedTools: [...READ_ONLY_AGENT_DISALLOWED_TOOLS],
+    disallowedTools: [...VERIFICATION_DISALLOWED_TOOLS],
     systemPrompt: VERIFICATION_PROMPT,
     criticalSystemReminder: VERIFICATION_CRITICAL_REMINDER,
     color: "red",

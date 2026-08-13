@@ -223,7 +223,7 @@ describe("AgentDefinitions", () => {
       "TeamDelete",
     ]);
 
-    for (const name of ["Explore", "Plan", "verification"]) {
+    for (const name of ["Explore", "Plan"]) {
       expect(getAgentDefinition(name)?.disallowedTools).toEqual([
         "Agent",
         "ExitPlanMode",
@@ -233,6 +233,13 @@ describe("AgentDefinitions", () => {
         "NotebookEdit",
       ]);
     }
+    expect(getAgentDefinition("verification")?.disallowedTools).toEqual([
+      "Agent",
+      "ExitPlanMode",
+      "Edit",
+      "Write",
+      "NotebookEdit",
+    ]);
   });
 });
 

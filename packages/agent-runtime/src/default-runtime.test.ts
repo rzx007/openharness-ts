@@ -76,19 +76,25 @@ describe("resolveEffectiveAllowedTools", () => {
       hostToolCeiling: ["Read", "Agent"],
       roleAllowedTools: ["*", "Bash", "Edit"],
       knownToolNames: ["Read", "Agent", "Bash", "Edit"],
-    })).toEqual(["Read", "Agent"]);
+    })).toEqual({ kind: "only", names: new Set(["Read", "Agent"]) });
 
     expect(resolveEffectiveAllowedTools({
       hostToolCeiling: ["Read", "Agent", "Workflow"],
       roleAllowedTools: ["Agent", "Workflow"],
       knownToolNames: ["Read", "Agent", "Workflow"],
-    })).toEqual(["Agent", "Workflow"]);
+    })).toEqual({ kind: "only", names: new Set(["Agent", "Workflow"]) });
 
     expect(resolveEffectiveAllowedTools({
       hostToolCeiling: ["Read"],
       roleAllowedTools: ["Bash"],
       knownToolNames: ["Read", "Bash"],
-    })).toEqual([]);
+    })).toEqual({ kind: "only", names: new Set() });
+  });
+
+  it("represents an unrestricted limit explicitly", () => {
+    expect(resolveEffectiveAllowedTools({
+      knownToolNames: ["Read", "Bash"],
+    })).toEqual({ kind: "all" });
   });
 });
 
@@ -158,6 +164,29 @@ describe("createOpenHarnessRuntime tool visibility", () => {
       expect(names).toEqual(["Read", "Agent"]);
       expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
       expect(runtime.toolRegistry.get("Edit")).toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("exposes zero tools when the host ceiling and role tools do not overlap", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        allowedTools: ["Read"],
+        roleAllowedTools: ["Bash"],
+      },
+    });
+
+    try {
+      expect(runtime.toolRegistry.getAll()).toEqual([]);
+      expect(runtime.toolRegistry.get("Read")).toBeUndefined();
+      expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
     } finally {
       await runtime.close();
     }

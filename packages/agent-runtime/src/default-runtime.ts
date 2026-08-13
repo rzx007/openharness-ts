@@ -25,6 +25,10 @@ import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
 
+export type ToolLimit =
+  | { kind: "all" }
+  | { kind: "only"; names: ReadonlySet<string> };
+
 interface OpenHarnessRuntimeOptions {
   settings: Settings;
   cwd?: string;
@@ -71,13 +75,13 @@ export function resolveEffectiveAllowedTools(options: {
   roleAllowedTools?: string[];
   settingsAllowedTools?: string[];
   knownToolNames?: string[];
-}): string[] {
+}): ToolLimit {
   const knownToolNames = options.knownToolNames ?? [];
-  const hostCeiling = resolveAllowedToolNames(
+  const hostCeiling = resolveToolLimit(
     options.hostToolCeiling ?? options.settingsAllowedTools ?? [],
     knownToolNames,
   );
-  const roleAllowed = resolveAllowedToolNames(options.roleAllowedTools ?? [], knownToolNames);
+  const roleAllowed = resolveToolLimit(options.roleAllowedTools ?? [], knownToolNames);
   return intersectToolLimits(hostCeiling, roleAllowed);
 }
 
@@ -92,12 +96,12 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
   const baseToolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
-  const effectiveAllowed = new Set(resolveEffectiveAllowedTools({
+  const effectiveAllowed = resolveEffectiveAllowedTools({
     hostToolCeiling: configuration.hostToolCeiling ?? configuration.allowedTools,
     roleAllowedTools: configuration.roleAllowedTools,
     settingsAllowedTools: settings.permission.allowedTools,
     knownToolNames,
-  }));
+  });
   const effectiveDenied = new Set(normalizeToolNames([
     ...(settings.permission.deniedTools ?? []),
     ...(configuration.disallowedTools ?? []),
@@ -115,7 +119,7 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
   const permissionChecker = new PermissionChecker({
     mode,
     cwd,
-    allowedTools: [...effectiveAllowed],
+    allowedTools: effectiveAllowed.kind === "only" ? [...effectiveAllowed.names] : [],
     deniedTools: [...effectiveDenied],
     pathRules: settings.permission.pathRules,
     deniedCommands: settings.permission.deniedCommands,
@@ -175,7 +179,7 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
 class RuntimeToolRegistry implements IToolRegistry {
   constructor(
     private readonly inner: IToolRegistry,
-    private readonly allowedTools: ReadonlySet<string>,
+    private readonly allowedTools: ToolLimit,
     private readonly deniedTools: ReadonlySet<string>,
   ) {}
 
@@ -202,15 +206,20 @@ class RuntimeToolRegistry implements IToolRegistry {
 
   private isVisible(name: string): boolean {
     if (this.deniedTools.has(name)) return false;
-    return this.allowedTools.size === 0 || this.allowedTools.has(name);
+    return this.allowedTools.kind === "all" || this.allowedTools.names.has(name);
   }
 }
 
-function intersectToolLimits(left: string[], right: string[]): string[] {
-  if (left.length === 0) return right;
-  if (right.length === 0) return left;
-  const rightSet = new Set(right);
-  return left.filter((tool) => rightSet.has(tool));
+function resolveToolLimit(tools: string[], knownToolNames: string[]): ToolLimit {
+  const names = resolveAllowedToolNames(tools, knownToolNames);
+  return names.length === 0 ? { kind: "all" } : { kind: "only", names: new Set(names) };
+}
+
+function intersectToolLimits(left: ToolLimit, right: ToolLimit): ToolLimit {
+  if (left.kind === "all") return right;
+  if (right.kind === "all") return left;
+  const names = [...left.names].filter((tool) => right.names.has(tool));
+  return { kind: "only", names: new Set(names) };
 }
 
 async function attachSandboxRuntime(

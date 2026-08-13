@@ -73,6 +73,26 @@ describe("getCoordinatorUserContext", () => {
     expect(content).toContain("Bash, Edit, Read");
     expect(content).not.toContain("WebSearch");
   });
+
+  it("filters the worker tool list by the host tool ceiling", () => {
+    const content = getCoordinatorUserContext([], undefined, {
+      enabled: true,
+      hostToolCeiling: ["Read", "Grep"],
+    }).workerToolsContext!;
+
+    expect(content).toContain("Grep, Read");
+    expect(content).not.toContain("Bash");
+    expect(content).not.toContain("Edit");
+  });
+
+  it("says when the host tool ceiling leaves workers with no standard tools", () => {
+    const content = getCoordinatorUserContext([], undefined, {
+      enabled: true,
+      hostToolCeiling: ["Agent", "Workflow"],
+    }).workerToolsContext!;
+
+    expect(content).toContain("do not have access to any standard tools");
+  });
 });
 
 describe("getCoordinatorSystemPrompt", () => {
