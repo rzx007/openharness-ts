@@ -143,6 +143,8 @@ type SessionCommandOutcome = "handled" | "unhandled" | "local_ui";
 
 `/plan`：App 无参 toggle 会改写成 `/plan on|off`；共享层只处理 on/off 并 `patchStatus`。
 
+`/models`：TUI 本地弹窗，不进共享 dispatch。没有 active session 时，它改 settings，作为下一条新 session 的默认模型；有 active session 时，它 PATCH `metadata.runtime.model`，daemon 关闭旧 agent，下一轮消息重建并生效。旧的 `PATCH /sessions/:id { model }` 不再支持。
+
 ## Catalog 与 template
 
 ```text

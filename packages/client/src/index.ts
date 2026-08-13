@@ -24,6 +24,12 @@ export {
   resolveSessionCwd,
 } from "./session-commands.js";
 export { hydrateState, syncEvents } from "./sync.js";
+export {
+  patchSessionRuntimeMetadata,
+  readRuntimeMetadata,
+  readSessionRuntimeConfig,
+} from "@openharness/services";
+export type { SessionRuntimeConfig, SessionRuntimeConfigPatch } from "@openharness/services";
 export type {
   PresentationReadRequest,
   SessionCommandHost,

@@ -171,7 +171,6 @@ export interface ListCommandsOptions {
 /** `PATCH /sessions/:id` 请求体。 */
 export interface UpdateClientSessionInput {
   title?: string;
-  model?: string;
   agent?: string | null;
   metadata?: Record<string, unknown>;
 }

@@ -1,5 +1,6 @@
 import type { OpenHarnessClient } from "./client.js";
 import type { CommandCatalogEntry, OpenHarnessClientState } from "./types.js";
+import { patchSessionRuntimeMetadata, readSessionRuntimeConfig } from "@openharness/services";
 
 export type SlashLine = { name: string; args: string };
 
@@ -44,6 +45,7 @@ export const LOCAL_COMMAND_DETAILS: Array<{ name: string; description?: string }
   { name: "/permissions", description: "Change permission mode" },
   { name: "/plan", description: "Toggle plan mode" },
   { name: "/theme", description: "Change TUI theme" },
+  { name: "/models", description: "Select model" },
   { name: "/workflow", description: "Open workflow runs panel" },
   { name: "/workflows", description: "Open workflow runs panel" },
 ];
@@ -204,9 +206,8 @@ export async function dispatchSessionCommand(
     }
     patchStatus({ permission_mode: next });
     if (sessionId) {
-      const current = await client.getSession(sessionId);
       await client.updateSession(sessionId, {
-        metadata: { ...current.metadata, permissionMode: next },
+        metadata: patchSessionRuntimeMetadata({}, { permissionMode: next }),
       });
     }
     emit(`Permission mode: ${next}`);
@@ -219,9 +220,12 @@ export async function dispatchSessionCommand(
       emit(`Model: ${model ?? "default"}`);
       return "handled";
     }
-    const session = await client.updateSession(sessionId, { model: slash.args });
-    patchStatus({ model: session.model });
-    emit(`Model set to ${session.model}`);
+    const session = await client.updateSession(sessionId, {
+      metadata: patchSessionRuntimeMetadata({}, { model: slash.args }),
+    });
+    const runtime = readSessionRuntimeConfig(session);
+    patchStatus({ model: runtime.model });
+    emit(`Model set to ${runtime.model}`);
     return "handled";
   }
 

@@ -102,7 +102,7 @@ describe("OpenHarnessClient", () => {
             title: "Main",
             model: "new-model",
             status: "idle",
-            metadata: {},
+            metadata: { runtime: { model: "new-model" } },
             createdAt: 1,
             updatedAt: 2,
           },
@@ -124,7 +124,9 @@ describe("OpenHarnessClient", () => {
       command: { name: "/commit", kind: "template" },
       input: { content: "PROMPT" },
     });
-    await expect(client.updateSession("s1", { model: "new-model" })).resolves.toMatchObject({ model: "new-model" });
+    await expect(client.updateSession("s1", {
+      metadata: { runtime: { model: "new-model" } },
+    })).resolves.toMatchObject({ model: "new-model" });
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET http://127.0.0.1:3456/commands?cwd=%2Frepo",
       "POST http://127.0.0.1:3456/sessions/s1/commands",

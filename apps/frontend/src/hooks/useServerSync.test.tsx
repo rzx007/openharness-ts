@@ -235,7 +235,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     title: "TUI",
     model: "m",
     status: "idle",
-    metadata: {},
+    metadata: { runtime: { model: "m" } },
     createdAt: 1,
     updatedAt: 1,
   };
@@ -368,6 +368,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   const calls: Array<{ url: string; init: RequestInit }> = [];
   let holdNextSessionList = false;
   let releaseHeldSessionList: ((response: Response) => void) | undefined;
+  let listedCreatedSession = false;
+  const archivedSessionIds = new Set<string>();
   let holdNextContext = false;
   let releaseHeldContext: ((response: Response) => void) | undefined;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -376,6 +378,31 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     const pathname = requestUrl.pathname;
     if (pathname === "/health") {
       return jsonResponse({ ok: true });
+    }
+    if (pathname === "/settings" && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      return jsonResponse({
+        settings: {
+          model: typeof body.model === "string" ? body.model : "settings-model",
+          provider: typeof body.provider === "string" ? body.provider : "openrouter",
+          permission: { mode: "default" },
+          effort: body.effort ?? "medium",
+          fastMode: body.fastMode ?? false,
+          maxTurns: body.maxTurns ?? 50,
+        },
+      });
+    }
+    if (pathname === "/settings") {
+      return jsonResponse({
+        settings: {
+          model: "settings-model",
+          provider: "openrouter",
+          permission: { mode: "default" },
+          effort: "medium",
+          fastMode: false,
+          maxTurns: 50,
+        },
+      });
     }
     if (pathname === "/commands") {
       return jsonResponse({
@@ -433,32 +460,6 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     }
     if (pathname === "/sessions/s1/export" && init?.method === "POST") {
       return jsonResponse({ format: "md", filepath: "/tmp/export.md", messageCount: 2 });
-    }
-    if (pathname === "/settings" && init?.method === "PATCH") {
-      const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
-      return jsonResponse({
-        settings: {
-          model: "m",
-          provider: typeof body.provider === "string" ? body.provider : "anthropic",
-          permission: { mode: "default" },
-          effort: body.effort ?? "medium",
-          fastMode: body.fastMode ?? false,
-          maxTurns: body.maxTurns ?? 50,
-        },
-      });
-    }
-    if (pathname === "/settings") {
-      return jsonResponse({
-        settings: {
-          model: "m",
-          provider: "openai",
-          permission: { mode: "default" },
-          effort: "medium",
-          fastMode: false,
-          maxTurns: 50,
-          apiFormat: "openai",
-        },
-      });
     }
     if (pathname === "/dream" && init?.method === "POST") {
       return jsonResponse({ taskId: "dream_1" });
@@ -578,10 +579,12 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       return jsonResponse({ report: "CONTEXT PREVIEW" });
     }
     if (pathname === "/sessions" && init?.method === "POST") {
-      const body = JSON.parse(String(init.body ?? "{}")) as { metadata?: Record<string, unknown> };
+      const body = JSON.parse(String(init.body ?? "{}")) as { model?: string; metadata?: Record<string, unknown> };
+      listedCreatedSession = true;
       return jsonResponse({
         session: {
           ...createdSession,
+          model: body.model ?? createdSession.model,
           metadata: body.metadata ?? createdSession.metadata,
         },
       });
@@ -593,7 +596,9 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
           releaseHeldSessionList = resolve;
         });
       }
-      return jsonResponse({ sessions: [session, childSession] });
+      const sessions = [session, childSession];
+      if (listedCreatedSession && !archivedSessionIds.has("s2")) sessions.push(createdSession);
+      return jsonResponse({ sessions });
     }
     if ((pathname === "/sessions/s1" || pathname === "/sessions/s2") && init?.method === "GET") {
       return jsonResponse({
@@ -669,7 +674,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       });
     }
     if (pathname === "/sessions/s2" && init?.method === "DELETE") {
-      return jsonResponse({ session: { ...createdSession, status: "archived" } });
+      archivedSessionIds.add("s2");
+      return jsonResponse({ session: { ...createdSession, status: "archived", archivedAt: 20 } });
     }
     if (pathname === "/events") {
       return jsonResponse({
@@ -894,8 +900,17 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   createCall = calls.find((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST");
   expect(createCall).toBeTruthy();
   expect(JSON.parse(String(createCall?.init.body ?? "{}"))).toMatchObject({
+    model: "m",
     title: "Scratch",
-    metadata: { permissionMode: "plan", maxTurns: 11, sessionMode: "coordinator" },
+    metadata: {
+      runtime: {
+        model: "m",
+        provider: "openrouter",
+        permissionMode: "plan",
+        maxTurns: 11,
+        sessionMode: "coordinator",
+      },
+    },
   });
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2/prompts")).toBe(true);
   expect(captured?.status.session_id).toBe("s2");
@@ -914,11 +929,30 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.status.permission_mode).toBe("full_auto");
 
   await act(async () => {
+    captured?.sendRequest({ type: "list_sessions" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.selectRequest?.options.some((option) => option.value === "s2")).toBe(true);
+
+  await act(async () => {
     captured?.sendRequest({ type: "delete_session", session_id: "s2" });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2" && call.init.method === "DELETE")).toBe(true);
   expect(captured?.status.session_id).toBe("s1");
+  expect(captured?.selectRequest?.options.some((option) => option.value === "s2")).toBe(false);
+
+  await act(async () => {
+    holdNextSessionList = true;
+    captured?.sendRequest({ type: "list_sessions" });
+    await Promise.resolve();
+  });
+  expect(captured?.selectRequest?.options.some((option) => option.value === "s2")).toBe(false);
+  await act(async () => {
+    releaseHeldSessionList?.(jsonResponse({ sessions: [session, childSession] }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(captured?.selectRequest?.options.some((option) => option.value === "s2")).toBe(false);
 
   expect(captured?.commands).toEqual(expect.arrayContaining(["/new", "/model", "/pr", "/skills"]));
 
@@ -929,6 +963,31 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s1" && call.init.method === "PATCH")).toBe(true);
   expect(captured?.status.model).toBe("gpt-test");
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Model set to gpt-test"))).toBe(true);
+
+  await act(async () => {
+    captured?.sendRequest({
+      type: "select_model",
+      model: "nvidia/nemotron-3.5-lightning:free",
+      provider: "openrouter",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const modelSessionPatch = calls.find((call) =>
+    call.url === "http://daemon.test/sessions/s1" && call.init.method === "PATCH"
+      && String(call.init.body ?? "").includes("nvidia/nemotron-3.5-lightning:free"));
+  expect(modelSessionPatch).toBeTruthy();
+  expect(JSON.parse(String(modelSessionPatch?.init.body ?? "{}"))).toMatchObject({
+    metadata: {
+      runtime: {
+        model: "nvidia/nemotron-3.5-lightning:free",
+        provider: "openrouter",
+      },
+    },
+  });
+  expect(captured?.status.model).toBe("nvidia/nemotron-3.5-lightning:free");
+  expect(captured?.transcript.some((item) =>
+    item.role === "system" && item.text.includes("Model selected: nvidia/nemotron-3.5-lightning:free"),
+  )).toBe(true);
 
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "/pr fix auth" });
@@ -1041,6 +1100,81 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.transcript.some((item) =>
     item.text.includes("Unknown command: /definitely-not-a-command") || item.text.includes("Model set to gpt-test"),
   )).toBe(false);
+
+  renderer.destroy();
+});
+
+test("useServerSync starts on the new-session home when the latest session uses an older model", async () => {
+  const oldSession: SessionRecord = {
+    id: "old",
+    cwd: process.cwd(),
+    title: "Old session",
+    model: "old-model",
+    status: "idle",
+    metadata: { runtime: { model: "old-model" } },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    const pathname = new URL(String(url)).pathname;
+    if (pathname === "/health") return jsonResponse({ ok: true });
+    if (pathname === "/settings") return jsonResponse({ settings: { model: "new-model", provider: "openrouter" } });
+    if (pathname === "/commands") return jsonResponse({ commands: [] });
+    if (pathname === "/sessions" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body ?? "{}")) as { model?: string };
+      return jsonResponse({
+        session: {
+          ...oldSession,
+          id: "new",
+          title: "TUI",
+          model: body.model ?? "missing-model",
+          metadata: { runtime: { model: body.model ?? "missing-model" } },
+          updatedAt: 2,
+        },
+      });
+    }
+    if (pathname === "/sessions") return jsonResponse({ sessions: [oldSession] });
+    if (pathname === "/sessions/new/prompts") return jsonResponse({ input: { id: "i-new" } });
+    if (pathname === "/events/stream") return sseResponse([]);
+    return jsonResponse({});
+  }) as typeof fetch;
+
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: oldSession.cwd,
+        model: "new-model",
+        permissionMode: "default",
+      },
+    }, () => {});
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  for (let i = 0; i < 20 && !captured?.ready; i += 1) {
+    await act(async () => {
+      await renderOnce();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  }
+
+  expect(captured?.status.session_id).toBeUndefined();
+  expect(captured?.status.model).toBe("new-model");
+
+  await act(async () => {
+    captured?.sendRequest({ type: "submit_line", line: "hi" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  const createCall = calls.find((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST");
+  expect(JSON.parse(String(createCall?.init.body ?? "{}"))).toMatchObject({ model: "new-model" });
+  expect(calls.some((call) => call.url === "http://daemon.test/sessions/old/prompts")).toBe(false);
+  expect(calls.some((call) => call.url === "http://daemon.test/sessions/new/prompts")).toBe(true);
 
   renderer.destroy();
 });

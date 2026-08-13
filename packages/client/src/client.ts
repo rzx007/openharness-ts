@@ -552,7 +552,7 @@ export class OpenHarnessClient {
     return response.session;
   }
 
-  /** `PATCH /sessions/:id` — update session fields such as model/title. */
+  /** `PATCH /sessions/:id` - update title, agent, or metadata.runtime fields. */
   async updateSession(
     sessionId: string,
     input: UpdateClientSessionInput,

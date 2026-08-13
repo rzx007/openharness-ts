@@ -300,7 +300,7 @@ async function resolveApiClient(
   }
 
   // 确定后端类型：优先使用提供商规范中的类型，否则根据 API 格式推断
-  const backendType: BackendType = spec?.backendType ?? resolveBackendFromFormat(settings.apiFormat);
+  const backendType: BackendType = spec?.backendType ?? resolveBackendFromFormat(configuration?.apiFormat ?? settings.apiFormat);
 
   switch (backendType) {
     case "codex":

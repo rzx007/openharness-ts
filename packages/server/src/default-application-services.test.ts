@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createDefaultContextService,
   createDefaultProfileService,
+  createDefaultProviderService,
   createDefaultSettingsService,
 } from "./default-application-services.js";
 
@@ -70,5 +71,36 @@ describe("default daemon application services", () => {
 
     expect(ref.current.daemon.autoStart).toBe(true);
     expect(result.restartRuntimes).toBe(false);
+  });
+
+  it("refreshes settings before reporting settings and active providers", async () => {
+    const ref = {
+      current: {
+        model: "old-model",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+      reload: async () => ({
+        model: "new-model",
+        apiFormat: "openai" as const,
+        provider: "openrouter",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      }),
+    };
+
+    const settings = createDefaultSettingsService(ref);
+    const provider = createDefaultProviderService(ref);
+
+    await expect(settings.get()).resolves.toMatchObject({
+      model: "new-model",
+      provider: "openrouter",
+    });
+    const providers = await provider.list();
+
+    expect(providers.find((item) => item.name === "openrouter")?.active).toBe(true);
+    expect(providers.find((item) => item.name === "openai")?.active).toBe(false);
   });
 });

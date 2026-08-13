@@ -4,6 +4,7 @@ import {
   createPromptRequestId,
   hasActiveRun,
   normalizeDaemonBaseUrl,
+  patchSessionRuntimeMetadata,
   syncEvents,
   type OpenHarnessClientState,
   type SessionEventRecord,
@@ -53,15 +54,19 @@ export function buildPrintSessionMetadata(
     ? options.disallowedTools.split(",").map((tool) => tool.trim()).filter(Boolean)
     : undefined;
 
-  const metadata: Record<string, unknown> = {};
-  if (typeof permissionMode === "string" && permissionMode) metadata.permissionMode = permissionMode;
-  if (typeof maxTurns === "number") metadata.maxTurns = maxTurns;
-  if (typeof systemPrompt === "string" && systemPrompt) metadata.systemPrompt = systemPrompt;
-  if (allowedTools && allowedTools.length > 0) metadata.allowedTools = allowedTools;
-  if (disallowedTools && disallowedTools.length > 0) metadata.disallowedTools = disallowedTools;
-  if (typeof effort === "string" && effort) metadata.effort = effort;
-  if (options.coordinator === true || isCoordinatorMode()) metadata.sessionMode = "coordinator";
-  return metadata;
+  return patchSessionRuntimeMetadata({}, {
+    model: options.model ?? settings.model,
+    provider: settings.provider,
+    baseUrl: settings.baseUrl,
+    apiFormat: settings.apiFormat,
+    permissionMode: typeof permissionMode === "string" && permissionMode ? permissionMode as "default" | "plan" | "full_auto" : undefined,
+    maxTurns: typeof maxTurns === "number" ? maxTurns : undefined,
+    systemPrompt: typeof systemPrompt === "string" && systemPrompt ? systemPrompt : undefined,
+    allowedTools: allowedTools && allowedTools.length > 0 ? allowedTools : undefined,
+    disallowedTools: disallowedTools && disallowedTools.length > 0 ? disallowedTools : undefined,
+    effort: typeof effort === "string" && effort ? effort as "low" | "medium" | "high" : undefined,
+    sessionMode: options.coordinator === true || isCoordinatorMode() ? "coordinator" : "direct",
+  });
 }
 
 /**

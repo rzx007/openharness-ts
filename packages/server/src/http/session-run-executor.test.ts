@@ -100,7 +100,12 @@ function createStore() {
   const run = { id: "run-1", sessionId: "s1", inputId: "input-1", status: "pending" };
   return {
     transaction: <T>(work: () => T) => work(),
-    getSession: vi.fn(() => ({ id: "s1", cwd: "/repo", model: "gpt-test", metadata: {} })),
+    getSession: vi.fn(() => ({
+      id: "s1",
+      cwd: "/repo",
+      model: "gpt-test",
+      metadata: { runtime: { model: "gpt-test" } },
+    })),
     getInput: vi.fn(() => ({
       id: "input-1",
       sessionId: "s1",

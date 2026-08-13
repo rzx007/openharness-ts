@@ -1,4 +1,4 @@
-import type { SessionStore } from "@openharness/services";
+import { readSessionRuntimeConfig, type SessionStore } from "@openharness/services";
 
 import type { ObservabilityEvent } from "../observability.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../run-coordinator.js";
@@ -34,7 +34,7 @@ export class SessionRunExecutor {
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
       const agent = await this.context.agentPool.acquireSession(sessionId);
-      agent.setModel(session.model);
+      agent.setModel(readSessionRuntimeConfig(session).model);
       const run = agent.submitMessage(admitted.content, {
         signal: workContext.signal,
         delivery: admitted.delivery,

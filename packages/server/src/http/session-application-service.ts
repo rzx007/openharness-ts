@@ -1,4 +1,9 @@
-import type { SessionStore } from "@openharness/services";
+import {
+  patchSessionRuntimeMetadata,
+  readSessionRuntimeConfig,
+  readRuntimeMetadata,
+  type SessionStore,
+} from "@openharness/services";
 
 import type {
   AdmitPromptInput,
@@ -42,7 +47,6 @@ export interface SessionApplicationServiceContext {
 
 export interface UpdateSessionCommand {
   title?: string;
-  model?: string;
   agent?: string | null;
   metadata?: Record<string, unknown>;
 }
@@ -69,7 +73,13 @@ export class SessionApplicationService {
 
   createSession(input: Parameters<SessionStore["createSession"]>[0]): ReturnType<SessionStore["createSession"]> {
     const before = this.context.events.checkpoint();
-    const session = this.context.store.createSession(input);
+    const runtime = readRuntimeMetadata(input.metadata ?? {});
+    const model = typeof runtime.model === "string" ? runtime.model : input.model;
+    const session = this.context.store.createSession({
+      ...input,
+      model,
+      metadata: patchSessionRuntimeMetadata(input.metadata ?? {}, { model }),
+    });
     this.warmWhenAdmitted(session);
     this.context.events.publishSince(before);
     return session;
@@ -90,12 +100,11 @@ export class SessionApplicationService {
     const existing = this.context.store.getSession(sessionId);
     if (!existing) throw new SessionApplicationError(404, "Session not found");
     const metadata = input.metadata
-      ? { ...existing.metadata, ...input.metadata }
+      ? mergeSessionMetadata(existing.metadata, input.metadata)
       : undefined;
     const runtimeMetadataChanged = metadata && runtimeSessionMetadataChanged(existing.metadata, metadata);
     const runtimeConfigurationChanged = Boolean(
       runtimeMetadataChanged ||
-      (input.model !== undefined && input.model !== existing.model) ||
       (input.agent !== undefined && (input.agent ?? undefined) !== existing.agent),
     );
     const lease = runtimeConfigurationChanged
@@ -104,9 +113,12 @@ export class SessionApplicationService {
 
     try {
       const before = this.context.events.checkpoint();
+      const nextModel = metadata
+        ? readSessionRuntimeConfig({ ...existing, metadata }).model
+        : undefined;
       const session = this.context.store.updateSession(sessionId, {
         title: input.title,
-        model: input.model,
+        model: nextModel,
         agent: input.agent,
         metadata,
       });
@@ -375,6 +387,20 @@ export class SessionApplicationService {
     }
     return result;
   }
+}
+
+function mergeSessionMetadata(
+  existing: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...existing, ...patch };
+  if (patch.runtime !== undefined) {
+    next.runtime = {
+      ...readRuntimeMetadata(existing),
+      ...readRuntimeMetadata(patch),
+    };
+  }
+  return next;
 }
 
 function promptResult(

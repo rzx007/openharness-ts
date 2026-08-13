@@ -1,5 +1,12 @@
 export { SessionStore, type SessionStoreOptions } from "./store.js";
 export { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
+export {
+  patchSessionRuntimeMetadata,
+  readRuntimeMetadata,
+  readSessionRuntimeConfig,
+  runtimeMetadataChanged,
+} from "./runtime-config.js";
+export type { SessionRuntimeConfig, SessionRuntimeConfigPatch } from "./runtime-config.js";
 export type {
   AdmitPromptInput,
   AppendEventInput,

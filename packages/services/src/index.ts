@@ -1,7 +1,16 @@
 export { CompactService } from "./compact";
 export type { CompactOptions } from "./compact";
 
-export { SessionStore, type SessionStoreOptions } from "./session-runtime";
+export {
+  SessionStore,
+  patchSessionRuntimeMetadata,
+  readRuntimeMetadata,
+  readSessionRuntimeConfig,
+  runtimeMetadataChanged,
+  type SessionRuntimeConfig,
+  type SessionRuntimeConfigPatch,
+  type SessionStoreOptions,
+} from "./session-runtime";
 export type {
   AdmitPromptInput,
   AppendEventInput,

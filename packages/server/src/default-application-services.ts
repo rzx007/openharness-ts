@@ -41,11 +41,18 @@ import type {
 
 export interface DaemonSettingsRef {
   current: Settings;
+  reload?: () => Promise<Settings> | Settings;
 }
 
 function sanitizeSettings(settings: Settings): Record<string, unknown> {
   const { apiKey: _apiKey, ...rest } = settings as Settings & { apiKey?: string };
   return structuredClone(rest) as Record<string, unknown>;
+}
+
+async function readCurrentSettings(ref: DaemonSettingsRef): Promise<Settings> {
+  const loaded = ref.reload ? await ref.reload() : undefined;
+  if (loaded) ref.current = loaded;
+  return ref.current;
 }
 
 function mergeSettingsPatch(current: Settings, patch: Record<string, unknown>): Settings {
@@ -205,10 +212,11 @@ const RUNTIME_RESTART_KEYS = new Set([
 
 export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsService {
   return {
-    get() {
-      return sanitizeSettings(ref.current);
+    async get() {
+      return sanitizeSettings(await readCurrentSettings(ref));
     },
     async patch(patch) {
+      await readCurrentSettings(ref);
       let effectivePatch = patch;
       if (typeof patch.path === "string" && "value" in patch) {
         const coerced = coerceConfigValue(patch.path, String(patch.value));
@@ -241,7 +249,8 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
   const storage = new CredentialStorage();
   return {
     async list() {
-      const currentName = ref.current.provider ?? "auto";
+      const current = await readCurrentSettings(ref);
+      const currentName = current.provider ?? "auto";
       const rows = [];
       for (const spec of PROVIDERS) {
         const storedKey = await storage.loadApiKey(spec.name);

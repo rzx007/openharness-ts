@@ -5,7 +5,10 @@ import { DaemonAgentEventProjector } from "./daemon-agent-event-projector.js";
 
 describe("DaemonAgentEventProjector", () => {
   it("projects child and run facts without returning execution handles", async () => {
-    const sessions = new Map<string, any>([["parent", { id: "parent", cwd: "/repo", model: "gpt" }]]);
+    const sessions = new Map<string, any>([[
+      "parent",
+      { id: "parent", cwd: "/repo", model: "gpt", metadata: { runtime: { model: "gpt" } } },
+    ]]);
     const inputs = new Map<string, any>();
     const runs = new Map<string, any>();
     const tasks = new Map<string, any>();
@@ -141,7 +144,10 @@ describe("DaemonAgentEventProjector", () => {
   });
 
   it("compensates durable child state when live route registration fails", async () => {
-    const sessions = new Map<string, any>([["parent", { id: "parent", cwd: "/repo", model: "gpt" }]]);
+    const sessions = new Map<string, any>([[
+      "parent",
+      { id: "parent", cwd: "/repo", model: "gpt", metadata: { runtime: { model: "gpt" } } },
+    ]]);
     const tasks = new Map<string, any>();
     const archiveSession = vi.fn((id) => {
       const session = sessions.get(id);
@@ -231,7 +237,7 @@ describe("DaemonAgentEventProjector", () => {
   it("rejects reuse of a durable child session by a different child identity", async () => {
     const store = {
       getSession: vi.fn((id) => id === "parent"
-        ? { id: "parent", cwd: "/repo", model: "gpt", metadata: {} }
+        ? { id: "parent", cwd: "/repo", model: "gpt", metadata: { runtime: { model: "gpt" } } }
         : { id: "child-session", parentId: "parent", cwd: "/repo", metadata: { childId: "old-child" } }),
     };
     const projector = new DaemonAgentEventProjector({
@@ -262,7 +268,7 @@ describe("DaemonAgentEventProjector", () => {
           cwd: "/repo",
           model: "gpt",
           status: "closing",
-          metadata: {},
+          metadata: { runtime: { model: "gpt" } },
         })),
       } as any,
       transcriptProjection: {} as any,

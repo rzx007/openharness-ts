@@ -149,7 +149,13 @@ describe("dispatchSessionCommand", () => {
     expect(outcome).toBe("local_ui");
   });
 
-  it("patches session metadata.permissionMode for /plan", async () => {
+  it("returns local_ui for LOCAL /models", async () => {
+    const { host: h } = host();
+    const outcome = await dispatchSessionCommand({ name: "/models", args: "" }, h);
+    expect(outcome).toBe("local_ui");
+  });
+
+  it("patches session runtime permissionMode for /plan", async () => {
     const updateSession = vi.fn(async (_id: string, input: { metadata?: Record<string, unknown> }) => ({
       id: "s1",
       cwd: "/tmp",
@@ -160,18 +166,8 @@ describe("dispatchSessionCommand", () => {
       createdAt: 1,
       updatedAt: 2,
     }));
-    const getSession = vi.fn(async () => ({
-      id: "s1",
-      cwd: "/tmp",
-      title: "TUI",
-      model: "m",
-      status: "idle",
-      metadata: { maxTurns: 12, effort: "medium" },
-      createdAt: 1,
-      updatedAt: 1,
-    }));
     const patches: Array<Record<string, unknown>> = [];
-    const client = fakeClient({ updateSession, getSession });
+    const client = fakeClient({ updateSession });
     const { host: h, emitted } = host({ client });
     Object.assign(h, {
       sessionId: "s1",
@@ -183,9 +179,8 @@ describe("dispatchSessionCommand", () => {
     const outcome = await dispatchSessionCommand({ name: "/plan", args: "on" }, h);
 
     expect(outcome).toBe("handled");
-    expect(getSession).toHaveBeenCalledWith("s1");
     expect(updateSession).toHaveBeenCalledWith("s1", {
-      metadata: { maxTurns: 12, effort: "medium", permissionMode: "plan" },
+      metadata: { runtime: { permissionMode: "plan" } },
     });
     expect(patches).toEqual([{ permission_mode: "plan" }]);
     expect(emitted[0]).toBe("Permission mode: plan");

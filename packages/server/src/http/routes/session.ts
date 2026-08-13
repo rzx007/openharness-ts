@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { patchSessionRuntimeMetadata, readRuntimeMetadata } from "@openharness/services";
 
 import {
   normalizeCommandName,
@@ -47,16 +48,22 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
     .post("/", async (c) => {
       const body = await readJson(c);
       if (typeof body.cwd !== "string") return errorResponse(400, "cwd is required");
-      if (typeof body.model !== "string") return errorResponse(400, "model is required");
+      const rawMetadata = isRecord(body.metadata) ? body.metadata : {};
+      const runtime = readRuntimeMetadata(rawMetadata);
+      const model = typeof runtime.model === "string"
+        ? runtime.model
+        : typeof body.model === "string" ? body.model : undefined;
+      if (!model) return errorResponse(400, "model is required");
+      const metadata = patchSessionRuntimeMetadata(rawMetadata, { model });
 
       const session = context.application.createSession({
         id: typeof body.id === "string" ? body.id : undefined,
         parentId: typeof body.parentId === "string" ? body.parentId : undefined,
         cwd: body.cwd,
         title: typeof body.title === "string" ? body.title : undefined,
-        model: body.model,
+        model,
         agent: typeof body.agent === "string" ? body.agent : undefined,
-        metadata: isRecord(body.metadata) ? body.metadata : undefined,
+        metadata,
       });
       return jsonResponse({ session }, 201);
     })
@@ -71,12 +78,15 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
       const body = await readJson(c);
+      if (body.model !== undefined) {
+        return errorResponse(400, "model must be changed through metadata.runtime.model");
+      }
+      const rawMetadata = isRecord(body.metadata) ? body.metadata : undefined;
       try {
         const session = await context.application.updateSession(sessionId, {
           title: typeof body.title === "string" ? body.title : undefined,
-          model: typeof body.model === "string" ? body.model : undefined,
           agent: body.agent === null ? null : typeof body.agent === "string" ? body.agent : undefined,
-          metadata: isRecord(body.metadata) ? body.metadata : undefined,
+          metadata: rawMetadata,
         });
         return jsonResponse({ session });
       } catch (error) {

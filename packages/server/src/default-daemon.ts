@@ -17,7 +17,12 @@ export type OpenHarnessDaemonOptions = Pick<
 
 /** Starts the opinionated daemon application with all standard resource services installed. */
 export async function startOpenHarnessDaemon(options: OpenHarnessDaemonOptions = {}) {
-  const settingsRef: DaemonSettingsRef = { current: await loadSettings({}) };
+  const settingsRef: DaemonSettingsRef = {
+    current: await loadSettings({}),
+    async reload() {
+      return await loadSettings({});
+    },
+  };
   return await startOpenHarnessServer({
     ...options,
     settings: settingsRef.current,

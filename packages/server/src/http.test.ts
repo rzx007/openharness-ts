@@ -497,7 +497,7 @@ describe("OpenHarnessHttpServer", () => {
       const closeRuntime = await fetch(`${baseUrl}/sessions/${child!.id}`, {
         method: "PATCH",
         headers: { ...auth(token), "content-type": "application/json" },
-        body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
+        body: JSON.stringify({ metadata: { runtime: { permissionMode: "plan" } } }),
       });
       expect(closeRuntime.status).toBe(409);
       expect(closed).not.toContain(child!.id);
@@ -823,7 +823,12 @@ describe("OpenHarnessHttpServer", () => {
     };
 
     await withServer(async ({ baseUrl, token, server }) => {
-      const session = server.store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const session = server.store.createSession({
+        id: "s1",
+        cwd: process.cwd(),
+        model: "m",
+        metadata: { runtime: { model: "m" } },
+      });
       const input = server.store.admitPrompt({ id: "input-before-restart", sessionId: session.id, content: "finish the report" });
       const interrupted = server.store.createRun({ id: "run-before-restart", sessionId: session.id, inputId: input.id });
       server.store.updateRun(interrupted.id, {
@@ -887,8 +892,18 @@ describe("OpenHarnessHttpServer", () => {
     try {
       first = new OpenHarnessHttpServer({ token, storePath, logger: (event) => logs.push(event) });
       await first.listen();
-      const recoverySession = first.store.createSession({ id: "recover", cwd: process.cwd(), model: "m" });
-      first.store.createSession({ id: "parallel", cwd: process.cwd(), model: "m" });
+      const recoverySession = first.store.createSession({
+        id: "recover",
+        cwd: process.cwd(),
+        model: "m",
+        metadata: { runtime: { model: "m" } },
+      });
+      first.store.createSession({
+        id: "parallel",
+        cwd: process.cwd(),
+        model: "m",
+        metadata: { runtime: { model: "m" } },
+      });
       const sourceInput = first.store.admitPrompt({
         id: "source-input",
         sessionId: recoverySession.id,
@@ -1052,8 +1067,21 @@ describe("OpenHarnessHttpServer", () => {
 
     try {
       const first = new OpenHarnessHttpServer({ storePath });
-      const parent = first.store.createSession({ id: "parent", cwd: projectCwd, model: "m", title: "parent" });
-      const child = first.store.createSession({ id: "child", parentId: parent.id, cwd: projectCwd, model: "m", title: "child" });
+      const parent = first.store.createSession({
+        id: "parent",
+        cwd: projectCwd,
+        model: "m",
+        title: "parent",
+        metadata: { runtime: { model: "m" } },
+      });
+      const child = first.store.createSession({
+        id: "child",
+        parentId: parent.id,
+        cwd: projectCwd,
+        model: "m",
+        title: "child",
+        metadata: { runtime: { model: "m" } },
+      });
       const staleChildRun = first.store.createRun({ id: "child-run", sessionId: child.id });
       first.store.updateRun(staleChildRun.id, { status: "running" });
       first.store.appendEvent({
@@ -1180,7 +1208,31 @@ describe("OpenHarnessHttpServer", () => {
     }, { commandCatalog });
   });
 
-  it("patches session model via PATCH /sessions/:id", async () => {
+  it("patches session runtime model via metadata", async () => {
+    await withServer(async ({ baseUrl, token }) => {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "old-model" }),
+      });
+      const patched = await fetch(`${baseUrl}/sessions/s1`, {
+        method: "PATCH",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ metadata: { runtime: { model: "new-model" } } }),
+      });
+      expect(patched.status).toBe(200);
+      const body = await patched.json() as { session: { model: string; metadata: Record<string, unknown> } };
+      expect(body.session.model).toBe("new-model");
+      expect(body.session.metadata.runtime).toMatchObject({ model: "new-model" });
+
+      const events = await (await fetch(`${baseUrl}/events`, { headers: auth(token) })).json() as {
+        events: Array<{ type: string }>;
+      };
+      expect(events.events.map((event) => event.type)).toContain("session.updated");
+    });
+  });
+
+  it("rejects legacy session model patch bodies", async () => {
     await withServer(async ({ baseUrl, token }) => {
       await fetch(`${baseUrl}/sessions`, {
         method: "POST",
@@ -1192,14 +1244,10 @@ describe("OpenHarnessHttpServer", () => {
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({ model: "new-model" }),
       });
-      expect(patched.status).toBe(200);
-      const body = await patched.json() as { session: { model: string } };
-      expect(body.session.model).toBe("new-model");
-
-      const events = await (await fetch(`${baseUrl}/events`, { headers: auth(token) })).json() as {
-        events: Array<{ type: string }>;
-      };
-      expect(events.events.map((event) => event.type)).toContain("session.updated");
+      expect(patched.status).toBe(400);
+      await expect(patched.json()).resolves.toMatchObject({
+        error: "model must be changed through metadata.runtime.model",
+      });
     });
   });
 
@@ -1228,7 +1276,7 @@ describe("OpenHarnessHttpServer", () => {
           id: "s1",
           cwd: process.cwd(),
           model: "m",
-          metadata: { maxTurns: 9, permissionMode: "default" },
+          metadata: { runtime: { model: "m", maxTurns: 9, permissionMode: "default" } },
         }),
       });
       for (let i = 0; i < 20 && created.length === 0; i++) {
@@ -1239,15 +1287,18 @@ describe("OpenHarnessHttpServer", () => {
       const patched = await fetch(`${baseUrl}/sessions/s1`, {
         method: "PATCH",
         headers: { ...auth(token), "content-type": "application/json" },
-        body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
+        body: JSON.stringify({ metadata: { runtime: { permissionMode: "plan" } } }),
       });
       expect(patched.status).toBe(200);
       const body = await patched.json() as {
         session: { metadata: Record<string, unknown> };
       };
       expect(body.session.metadata).toEqual({
-        maxTurns: 9,
-        permissionMode: "plan",
+        runtime: {
+          model: "m",
+          maxTurns: 9,
+          permissionMode: "plan",
+        },
       });
       expect(closed).toContain("s1");
 
@@ -2270,7 +2321,12 @@ describe("OpenHarnessHttpServer", () => {
       await fetch(`${baseUrl}/sessions`, {
         method: "POST",
         headers: { ...auth(token), "content-type": "application/json" },
-        body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m", metadata: { permissionMode: "default" } }),
+        body: JSON.stringify({
+          id: "s1",
+          cwd: process.cwd(),
+          model: "m",
+          metadata: { runtime: { model: "m", permissionMode: "default" } },
+        }),
       });
       await fetch(`${baseUrl}/sessions/s1/prompts`, {
         method: "POST",
@@ -2282,10 +2338,11 @@ describe("OpenHarnessHttpServer", () => {
       const patched = await fetch(`${baseUrl}/sessions/s1`, {
         method: "PATCH",
         headers: { ...auth(token), "content-type": "application/json" },
-        body: JSON.stringify({ metadata: { permissionMode: "plan" } }),
+        body: JSON.stringify({ metadata: { runtime: { permissionMode: "plan" } } }),
       });
       expect(patched.status).toBe(409);
-      expect(server.store.getSession("s1")?.metadata.permissionMode).toBe("default");
+      expect((server.store.getSession("s1")?.metadata.runtime as Record<string, unknown> | undefined)?.permissionMode)
+        .toBe("default");
       expect(closed).toEqual([]);
     }, { runtimeFactory });
   });

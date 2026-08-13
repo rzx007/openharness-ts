@@ -1,6 +1,11 @@
 import type { OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { AgentEvent, ContentBlock, StreamEvent } from "@openharness/core";
-import type { SessionInputRecord, SessionStore } from "@openharness/services";
+import {
+  patchSessionRuntimeMetadata,
+  readSessionRuntimeConfig,
+  type SessionInputRecord,
+  type SessionStore,
+} from "@openharness/services";
 
 import type { ObservabilityEvent } from "../observability.js";
 import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
@@ -146,26 +151,32 @@ export class DaemonAgentEventProjector {
 
     if (!existing) {
       const before = this.context.events.checkpoint();
+      const parentRuntime = readSessionRuntimeConfig(parent);
+      const model = spawn.model ?? parentRuntime.model;
+      const runtimePatch = {
+        ...parentRuntime,
+        model,
+        ...(spawn.systemPrompt !== undefined ? { systemPrompt: spawn.systemPrompt } : {}),
+        ...(spawn.permissionMode !== undefined ? { permissionMode: spawn.permissionMode } : {}),
+        ...(spawn.allowedTools !== undefined ? { allowedTools: spawn.allowedTools } : {}),
+        ...(spawn.disallowedTools !== undefined ? { disallowedTools: spawn.disallowedTools } : {}),
+        ...(spawn.maxTurns !== undefined ? { maxTurns: spawn.maxTurns } : {}),
+        ...(isRuntimeEffort(spawn.effort) ? { effort: spawn.effort } : {}),
+      };
       this.context.store.createSession({
           id: sessionId,
           parentId: parent.id,
           cwd,
-          model: spawn.model ?? parent.model,
+          model,
           title: `${spawn.agent}@${spawn.team ?? "default"}`,
           agent: spawn.agent,
-          metadata: {
+          metadata: patchSessionRuntimeMetadata({
             ...spawn.metadata,
             team: spawn.team ?? "default",
-            systemPrompt: spawn.systemPrompt,
-            permissionMode: spawn.permissionMode,
-            allowedTools: spawn.allowedTools,
-            disallowedTools: spawn.disallowedTools,
-            maxTurns: spawn.maxTurns,
-            effort: spawn.effort,
             isolate: spawn.isolate,
             childId,
             ...(worktree ? { worktree } : {}),
-          },
+          }, runtimePatch),
       });
       this.context.events.publishSince(before);
     }
@@ -498,6 +509,10 @@ export class DaemonAgentEventProjector {
     });
     if (state) this.children.delete(state.childId);
   }
+}
+
+function isRuntimeEffort(value: unknown): value is "low" | "medium" | "high" {
+  return value === "low" || value === "medium" || value === "high";
 }
 
 function snapshotTranscript(state: ActiveTranscriptProjectionState): ActiveTranscriptProjectionState {

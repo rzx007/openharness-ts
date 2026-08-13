@@ -8,6 +8,7 @@ import type {
 export interface OpenHarnessAgentConfiguration {
   client?: StreamingMessageClient;
   apiKey?: string;
+  apiFormat?: Settings["apiFormat"];
   baseUrl?: string;
   provider?: string;
   model?: string;

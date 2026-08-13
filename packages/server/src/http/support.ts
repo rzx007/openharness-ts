@@ -1,3 +1,4 @@
+import { runtimeMetadataChanged } from "@openharness/services";
 import type { Context } from "hono";
 
 export type JsonRecord = Record<string, unknown>;
@@ -46,23 +47,11 @@ export const SSE_HEADERS = {
 export const CORS_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
 export const CORS_HEADERS = "authorization, content-type, last-event-id, x-openharness-trace-id";
 
-const RUNTIME_SESSION_METADATA_KEYS = [
-  "permissionMode",
-  "maxTurns",
-  "systemPrompt",
-  "allowedTools",
-  "disallowedTools",
-  "effort",
-  "sessionMode",
-] as const;
-
 export function runtimeSessionMetadataChanged(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
 ): boolean {
-  return RUNTIME_SESSION_METADATA_KEYS.some(
-    (key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]),
-  );
+  return runtimeMetadataChanged(before, after);
 }
 
 export function isRecord(value: unknown): value is JsonRecord {

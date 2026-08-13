@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import {
   OpenHarnessClient,
   createPromptRequestId,
   createInitialClientState,
+  patchSessionRuntimeMetadata,
+  readSessionRuntimeConfig,
   syncEvents,
   type CommandCatalogEntry,
   type OpenHarnessClientState,
   type PermissionRequestRecord,
   type PresentationReadRequest,
+  type SessionRuntimeConfigPatch,
   type SessionBucket,
   type SessionRecord,
   type SyncEventUpdate,
@@ -38,21 +41,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function sessionRuntimeMetadata(input: {
+  model?: unknown;
+  provider?: unknown;
+  baseUrl?: unknown;
+  apiFormat?: unknown;
   permissionMode?: unknown;
   maxTurns?: unknown;
   sessionMode?: unknown;
 }): Record<string, unknown> {
-  const metadata: Record<string, unknown> = {};
-  if (typeof input.permissionMode === "string" && input.permissionMode) {
-    metadata.permissionMode = input.permissionMode;
+  const runtime: SessionRuntimeConfigPatch = {};
+  if (typeof input.model === "string" && input.model) {
+    runtime.model = input.model;
+  }
+  if (typeof input.provider === "string" && input.provider) {
+    runtime.provider = input.provider;
+  }
+  if (typeof input.baseUrl === "string" && input.baseUrl) {
+    runtime.baseUrl = input.baseUrl;
+  }
+  if (input.apiFormat === "anthropic" || input.apiFormat === "openai") {
+    runtime.apiFormat = input.apiFormat;
+  }
+  if (input.permissionMode === "default" || input.permissionMode === "plan" || input.permissionMode === "full_auto") {
+    runtime.permissionMode = input.permissionMode;
   }
   if (typeof input.maxTurns === "number" && Number.isFinite(input.maxTurns)) {
-    metadata.maxTurns = input.maxTurns;
+    runtime.maxTurns = input.maxTurns;
   }
-  if (input.sessionMode === "coordinator") {
-    metadata.sessionMode = "coordinator";
+  if (input.sessionMode === "coordinator" || input.sessionMode === "direct") {
+    runtime.sessionMode = input.sessionMode;
   }
-  return metadata;
+  return patchSessionRuntimeMetadata({}, runtime);
 }
 
 function normalizeSessionMode(value: unknown): "coordinator" | null {
@@ -63,11 +82,38 @@ function statusSessionMode(value: unknown): "coordinator" | "direct" {
   return normalizeSessionMode(value) ?? "direct";
 }
 
+function stringSetting(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 type RecoverableRun = {
   id: string;
   error?: string;
   prompt: string;
 };
+
+function archiveClientSession(
+  state: OpenHarnessClientState,
+  sessionId: string,
+  archivedAt: number,
+): OpenHarnessClientState {
+  const current = state.sessions[sessionId];
+  if (!current || current.status === "archived") return state;
+  const archived: SessionRecord = {
+    ...current,
+    status: "archived",
+    archivedAt,
+    updatedAt: Math.max(current.updatedAt, archivedAt),
+  };
+  const bucket = state.buckets[sessionId];
+  return {
+    ...state,
+    sessions: { ...state.sessions, [sessionId]: archived },
+    buckets: bucket
+      ? { ...state.buckets, [sessionId]: { ...bucket, session: archived } }
+      : state.buckets,
+  };
+}
 
 function listTopLevelSessions(
   sessions: Iterable<SessionRecord>,
@@ -91,6 +137,10 @@ function sessionSelectOptions(
     label: `${session.id === activeSessionId ? "* " : ""}${session.title || session.id}`,
     description: `${session.model} | ${session.status}`,
   }));
+}
+
+function shouldAutoActivateSession(session: SessionRecord, defaultModel: string): boolean {
+  return readSessionRuntimeConfig(session).model === defaultModel;
 }
 
 function recoverableInterruptedRuns(bucket?: SessionBucket): RecoverableRun[] {
@@ -163,6 +213,9 @@ export function useServerSync(
   const clientRef = useRef<OpenHarnessClient | null>(null);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
   const commandCatalogRef = useRef<CommandCatalogEntry[]>([]);
+  const defaultRuntimeRef = useRef<{ model: string; provider?: string; baseUrl?: string; apiFormat?: "anthropic" | "openai" }>({
+    model: daemon?.model ?? "default",
+  });
   const nextSessionModeRef = useRef<"coordinator" | "direct">(statusSessionMode(daemon?.sessionMode));
   const statusRef = useRef(status);
   const sentInitialPromptRef = useRef(false);
@@ -201,6 +254,22 @@ export function useServerSync(
     displayRequestRef.current = request;
     setSelectRequest(null);
     setDisplayRequest(request);
+  }, []);
+
+  const setStatusAndDefault = useCallback((value: SetStateAction<Record<string, unknown>>) => {
+    setStatus((current) => {
+      const next = typeof value === "function" ? value(current) : value;
+      if (typeof next.model === "string" && !activeSessionIdRef.current) {
+        defaultRuntimeRef.current = {
+          ...defaultRuntimeRef.current,
+          model: next.model,
+          ...(typeof next.provider === "string" ? { provider: next.provider } : {}),
+          ...(typeof next.baseUrl === "string" ? { baseUrl: next.baseUrl } : {}),
+          ...(next.apiFormat === "anthropic" || next.apiFormat === "openai" ? { apiFormat: next.apiFormat } : {}),
+        };
+      }
+      return next;
+    });
   }, []);
 
   const pushSystem = useCallback((text: string) => {
@@ -289,21 +358,23 @@ export function useServerSync(
   useEffect(() => clearPendingClientState, [clearPendingClientState]);
 
   const activateSession = useCallback((session: SessionRecord): void => {
+    const runtime = readSessionRuntimeConfig(session, defaultRuntimeRef.current);
     activeSessionIdRef.current = session.id;
     setActiveSessionId(session.id);
     setStatus((current) => ({
       ...current,
-      model: session.model,
+      model: runtime.model,
+      ...(runtime.provider ? { provider: runtime.provider } : {}),
       session_id: session.id,
       cwd: session.cwd,
       permission_mode:
-        typeof session.metadata.permissionMode === "string"
-          ? session.metadata.permissionMode
+        typeof runtime.permissionMode === "string"
+          ? runtime.permissionMode
           : current.permission_mode,
-      ...(typeof session.metadata.maxTurns === "number"
-        ? { max_turns: session.metadata.maxTurns }
+      ...(typeof runtime.maxTurns === "number"
+        ? { max_turns: runtime.maxTurns }
         : {}),
-      session_mode: statusSessionMode(session.metadata.sessionMode),
+      session_mode: statusSessionMode(runtime.sessionMode),
     }));
   }, []);
 
@@ -319,6 +390,9 @@ export function useServerSync(
     setStatus((current) => {
       const next = { ...current };
       delete next.session_id;
+      next.model = defaultRuntimeRef.current.model;
+      if (defaultRuntimeRef.current.provider) next.provider = defaultRuntimeRef.current.provider;
+      else delete next.provider;
       next.session_mode = nextSessionModeRef.current;
       return next;
     });
@@ -338,31 +412,37 @@ export function useServerSync(
       try {
         await client.health();
         const cwd = daemon.cwd ?? process.cwd();
-        const model = daemon.model ?? "default";
-        const [sessions, commands] = await Promise.all([
+        const [settings, sessions, commands] = await Promise.all([
+          client.getSettings().catch(() => ({} as Record<string, unknown>)),
           client.listSessions({ cwd, limit: 20 }),
           client.listCommands({ cwd }).catch(() => [] as CommandCatalogEntry[]),
         ]);
-        const metadata = sessionRuntimeMetadata({
-          permissionMode: daemon?.permissionMode ?? "default",
-          maxTurns: daemon?.maxTurns,
-          sessionMode: daemon?.sessionMode,
-        });
+        const model = daemon.model ?? stringSetting(settings.model) ?? "default";
+        const provider = stringSetting(settings.provider);
+        const baseUrl = stringSetting(settings.baseUrl);
+        const apiFormat = settings.apiFormat === "anthropic" || settings.apiFormat === "openai"
+          ? settings.apiFormat
+          : undefined;
+        defaultRuntimeRef.current = {
+          model,
+          ...(provider ? { provider } : {}),
+          ...(baseUrl ? { baseUrl } : {}),
+          ...(apiFormat ? { apiFormat } : {}),
+        };
         if (cancelled) return;
         listedSessionsRef.current = Object.fromEntries(sessions.map((session) => [session.id, session]));
         setCommandCatalog(commands);
         setStatus((current) => ({
           ...current,
           model,
+          ...(provider ? { provider } : {}),
           cwd,
-          permission_mode: typeof metadata.permissionMode === "string"
-            ? metadata.permissionMode
-            : current.permission_mode,
-          ...(typeof metadata.maxTurns === "number" ? { max_turns: metadata.maxTurns } : {}),
-          session_mode: statusSessionMode(metadata.sessionMode),
+          permission_mode: daemon?.permissionMode ?? current.permission_mode,
+          ...(typeof daemon?.maxTurns === "number" ? { max_turns: daemon.maxTurns } : {}),
+          session_mode: statusSessionMode(daemon?.sessionMode),
         }));
         const session = sessions[0];
-        if (session) {
+        if (session && shouldAutoActivateSession(session, model)) {
           activateSession(session);
           void client.getSession(session.id).catch(() => {});
         }
@@ -443,8 +523,12 @@ export function useServerSync(
     if (!client) return undefined;
     setLocalBusy(true);
     const cwd = daemon?.cwd ?? process.cwd();
-    const model = daemon?.model ?? "default";
+    const model = defaultRuntimeRef.current.model;
     const metadata = sessionRuntimeMetadata({
+      model,
+      provider: defaultRuntimeRef.current.provider,
+      baseUrl: defaultRuntimeRef.current.baseUrl,
+      apiFormat: defaultRuntimeRef.current.apiFormat,
       permissionMode: statusRef.current.permission_mode ?? daemon?.permissionMode ?? "default",
       maxTurns: statusRef.current.max_turns ?? daemon?.maxTurns,
       sessionMode: nextSessionModeRef.current,
@@ -490,6 +574,38 @@ export function useServerSync(
 
     void (async () => {
       const type = String(payload.type ?? "");
+      if (type === "select_model") {
+        const model = typeof payload.model === "string" ? payload.model.trim() : "";
+        const provider = typeof payload.provider === "string" ? payload.provider.trim() : "";
+        if (!model) return;
+
+        if (sessionId) {
+          const session = await client.updateSession(sessionId, {
+            metadata: patchSessionRuntimeMetadata({}, {
+              model,
+              ...(provider ? { provider } : {}),
+            }),
+          });
+          activateSession(session);
+        } else {
+          const settingsPatch: Record<string, unknown> = { model };
+          if (provider) settingsPatch.provider = provider;
+          await client.patchSettings(settingsPatch);
+          defaultRuntimeRef.current = {
+            ...defaultRuntimeRef.current,
+            model,
+            ...(provider ? { provider } : {}),
+          };
+          setStatus((current) => ({
+            ...current,
+            model,
+            ...(provider ? { provider } : {}),
+          }));
+        }
+        pushSystem(`Model selected: ${model}`);
+        return;
+      }
+
       if (type === "submit_line") {
         const line = String(payload.line ?? "");
         const slash = parseSlashLine(line);
@@ -563,7 +679,7 @@ export function useServerSync(
           localBusy,
           cacheFirstRead,
           daemon,
-          setStatus,
+          setStatus: setStatusAndDefault,
         });
         if (slashResult === "handled" || slashResult === "local_ui_ignored") return;
 
@@ -599,23 +715,35 @@ export function useServerSync(
       if (type === "delete_session") {
         const target = typeof payload.session_id === "string" ? payload.session_id : undefined;
         if (!target) return;
-        await client.archiveSession(target);
+        const archived = await client.archiveSession(target);
+        const archivedAt = archived.archivedAt ?? Date.now();
+        delete listedSessionsRef.current[target];
+        setClientState((current) => archiveClientSession(current, target, archivedAt));
         setLocalBusy(false);
         setSubmittedRun(null);
         setSelectRequest((current) => current
           ? { ...current, options: current.options.filter((option) => option.value !== target) }
           : current);
         if (target === activeSessionIdRef.current) {
-          const sessions = await client.listSessions({
-            cwd: daemon?.cwd ?? undefined,
-            includeArchived: false,
-            limit: 20,
-          });
-          const next = sessions.find((session) => session.id !== target);
-          if (next) {
-            activateSession(next);
+          const remaining = listTopLevelSessions(
+            Object.values({
+              ...clientState.sessions,
+              ...listedSessionsRef.current,
+              [target]: { ...archived, status: "archived", archivedAt },
+            }),
+          );
+          if (remaining[0]) {
+            activateSession(remaining[0]);
           } else {
-            returnToHome();
+            const sessions = await client.listSessions({
+              cwd: daemon?.cwd ?? undefined,
+              includeArchived: false,
+              limit: 20,
+            });
+            listedSessionsRef.current = Object.fromEntries(sessions.map((session) => [session.id, session]));
+            const remoteNext = sessions.find((session) => session.id !== target);
+            if (remoteNext) activateSession(remoteNext);
+            else returnToHome();
           }
         }
         return;
@@ -673,12 +801,12 @@ export function useServerSync(
       }
 
       if (type === "set_permission_mode") {
-        const mode = String(payload.permission_mode ?? "default");
+        const rawMode = String(payload.permission_mode ?? "default");
+        const mode = rawMode === "plan" || rawMode === "full_auto" ? rawMode : "default";
         setStatus((current) => ({ ...current, permission_mode: mode }));
         if (sessionId) {
-          const current = await client.getSession(sessionId);
           await client.updateSession(sessionId, {
-            metadata: { ...current.metadata, permissionMode: mode },
+            metadata: patchSessionRuntimeMetadata({}, { permissionMode: mode }),
           });
         }
         return;

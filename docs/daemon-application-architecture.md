@@ -64,6 +64,37 @@ OpenHarnessAgent onEvent sink
 
 `packages/server/src/daemon-agent.ts` 是唯一的 durable session -> live Agent 翻译点：读取动态 settings、合并 session metadata、注入 permission/event callback、创建 agent、恢复 history。`AgentPool` 不再理解配置和投影。
 
+## Session 运行配置
+
+一条 session 有两类模型信息，不能混着看：
+
+| 位置 | 大白话含义 | 谁会使用 |
+|---|---|---|
+| `session.model` | 列表、导出、旧表结构里的展示列 | UI 展示、导出、统计展示 |
+| `session.metadata.runtime.model` | 这条 session 下一轮真正要用的模型 | daemon 创建或重建 `OpenHarnessAgent` |
+
+当前规则：
+
+1. 新建 session 时，CLI/TUI/Web 会把默认模型写入 `metadata.runtime.model`，同时同步写入 `session.model` 展示列。
+2. `ohs provider use <provider> -m <model>` 或 Home 页 `/models` 只改 settings，作用是“以后新建 session 的默认模型”。
+3. 已经打开的 session 改模型时，只能 PATCH `metadata.runtime.model`。旧写法 `PATCH /sessions/:id { model }` 会被拒绝。
+4. runtime 读取只认 `metadata.runtime.model`。旧数据行如果缺这个字段，不会再从 `session.model` 静默兜底。
+5. `SessionApplicationService.updateSession()` 发现 runtime metadata 变化后，会先确认当前 session 没有正在跑的任务，再关闭 `AgentPool` 里的旧 agent。下一次发送消息时，pool 会重新读 store，用新的 runtime 配置创建 agent。
+6. `provider`、`baseUrl`、`apiFormat`、`permissionMode`、`maxTurns` 等同理放在 `metadata.runtime`。settings 只作为新 session 的默认值，或补齐 session 没写的可选字段；模型本身不能靠 settings 补。
+
+所以 TUI 下 `/models` 的行为是：
+
+```text
+没有 active session:
+  选择模型 -> PATCH /settings
+  下一次新会话使用这个模型
+
+有 active session:
+  选择模型 -> PATCH /sessions/:id { metadata: { runtime: { model, provider } } }
+  daemon 关闭旧 agent
+  下一次发送消息时重建 agent，并使用这条 session 自己的模型
+```
+
 ## 请求入口与四个服务
 
 routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装；应用对象来自 `DaemonApplication`。

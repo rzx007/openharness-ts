@@ -22,12 +22,15 @@ const session = {
   cwd: "/repo",
   model: "model-from-session",
   metadata: {
-    permissionMode: "plan",
-    systemPrompt: "session prompt",
-    maxTurns: 7,
-    allowedTools: ["Read", 1],
-    disallowedTools: ["Bash", null],
-    effort: "high",
+    runtime: {
+      model: "model-from-session",
+      permissionMode: "plan",
+      systemPrompt: "session prompt",
+      maxTurns: 7,
+      allowedTools: ["Read", 1],
+      disallowedTools: ["Bash", null],
+      effort: "high",
+    },
   },
 } as any;
 
@@ -117,9 +120,12 @@ describe("createDaemonAgentLoader", () => {
         ...session,
         metadata: {
           ...session.metadata,
-          sessionMode: "coordinator",
-          systemPrompt: "Keep updates short.",
-          allowedTools: ["Bash"],
+          runtime: {
+            ...session.metadata.runtime,
+            sessionMode: "coordinator",
+            systemPrompt: "Keep updates short.",
+            allowedTools: ["Bash"],
+          },
         },
       },
       history: [],

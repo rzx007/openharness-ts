@@ -9,7 +9,7 @@ const session = {
   title: "Session",
   model: "gpt-test",
   status: "idle",
-  metadata: {},
+  metadata: { runtime: { model: "gpt-test" } },
   createdAt: 1,
   updatedAt: 1,
 } as const;
@@ -187,7 +187,7 @@ describe("SessionApplicationService", () => {
     const { service, store, agentPool } = createService({ hasWork: true });
 
     await expect(service.updateSession("s1", {
-      metadata: { permissionMode: "strict" },
+      metadata: { runtime: { permissionMode: "plan" } },
     })).rejects.toEqual(expect.objectContaining<Partial<SessionApplicationError>>({
       status: 409,
     }));
@@ -198,10 +198,10 @@ describe("SessionApplicationService", () => {
   it("closes the runtime after changing runtime metadata", async () => {
     const { service, store, agentPool, broadcastSince } = createService();
 
-    await service.updateSession("s1", { metadata: { permissionMode: "strict" } });
+    await service.updateSession("s1", { metadata: { runtime: { permissionMode: "plan" } } });
 
     expect(store.updateSession).toHaveBeenCalledWith("s1", expect.objectContaining({
-      metadata: { permissionMode: "strict" },
+      metadata: { runtime: { model: "gpt-test", permissionMode: "plan" } },
     }));
     expect(agentPool.close).toHaveBeenCalledWith("s1");
     expect(broadcastSince).toHaveBeenCalledWith(7);
@@ -210,9 +210,12 @@ describe("SessionApplicationService", () => {
   it("closes the runtime after changing the model", async () => {
     const { service, store, agentPool } = createService();
 
-    await service.updateSession("s1", { model: "next-model" });
+    await service.updateSession("s1", { metadata: { runtime: { model: "next-model" } } });
 
-    expect(store.updateSession).toHaveBeenCalledWith("s1", expect.objectContaining({ model: "next-model" }));
+    expect(store.updateSession).toHaveBeenCalledWith("s1", expect.objectContaining({
+      model: "next-model",
+      metadata: { runtime: { model: "next-model" } },
+    }));
     expect(agentPool.close).toHaveBeenCalledWith("s1");
   });
 
@@ -222,7 +225,7 @@ describe("SessionApplicationService", () => {
     const closing = new Promise<void>((resolve) => { finishClose = resolve; });
     agentPool.close.mockReturnValue(closing);
 
-    const updating = service.updateSession("s1", { model: "next-model" });
+    const updating = service.updateSession("s1", { metadata: { runtime: { model: "next-model" } } });
     await expect(service.admitPrompt("s1", { content: "too early" })).rejects.toEqual(
       expect.objectContaining<Partial<SessionApplicationError>>({ status: 409 }),
     );

@@ -10,6 +10,7 @@ import {
   getCoordinatorUserContext,
 } from "@openharness/coordinator";
 import type { AgentCronEffects, AgentEffects, AgentEventListener, Settings } from "@openharness/core";
+import { readSessionRuntimeConfig } from "@openharness/services";
 import type {
   SessionMessagePartRecord,
   SessionMessageRecord,
@@ -122,26 +123,28 @@ function agentConfigurationFromSession(
   session: SessionRecord,
   settings: Settings | undefined,
 ): Partial<OpenHarnessAgentOptions> {
-  const permissionMode = session.metadata.permissionMode;
-  const effort = session.metadata.effort;
+  const runtime = readSessionRuntimeConfig(session, {
+    provider: settings?.provider,
+    baseUrl: settings?.baseUrl,
+    apiFormat: settings?.apiFormat,
+    permissionMode: settings?.permission?.mode,
+    maxTurns: settings?.maxTurns,
+    effort: settings?.effort,
+    sessionMode: "direct",
+  });
   const configuration: Partial<OpenHarnessAgentOptions> = {
-    model: session.model || undefined,
-    permissionMode: permissionMode === "default" || permissionMode === "plan" || permissionMode === "full_auto"
-      ? permissionMode
-      : undefined,
-    systemPrompt: typeof session.metadata.systemPrompt === "string"
-      ? session.metadata.systemPrompt
-      : undefined,
-    maxTurns: typeof session.metadata.maxTurns === "number" ? session.metadata.maxTurns : undefined,
-    allowedTools: Array.isArray(session.metadata.allowedTools)
-      ? session.metadata.allowedTools.filter((tool): tool is string => typeof tool === "string")
-      : undefined,
-    disallowedTools: Array.isArray(session.metadata.disallowedTools)
-      ? session.metadata.disallowedTools.filter((tool): tool is string => typeof tool === "string")
-      : undefined,
-    effort: effort === "low" || effort === "medium" || effort === "high" ? effort : undefined,
+    model: runtime.model,
+    provider: runtime.provider,
+    baseUrl: runtime.baseUrl,
+    apiFormat: runtime.apiFormat,
+    permissionMode: runtime.permissionMode,
+    systemPrompt: runtime.systemPrompt,
+    maxTurns: runtime.maxTurns,
+    allowedTools: runtime.allowedTools,
+    disallowedTools: runtime.disallowedTools,
+    effort: runtime.effort,
   };
-  if (session.metadata.sessionMode === "coordinator") {
+  if (runtime.sessionMode === "coordinator") {
     configuration.systemPrompt = coordinatorSystemPrompt({
       settings,
       cwd: session.cwd,
