@@ -95,6 +95,12 @@ describe("createMcpAuthHost", () => {
       ]),
     } as unknown as McpClientManager;
     const registry = new ToolRegistry();
+    registry.register({
+      name: "mcp__remote__old",
+      description: "old",
+      inputSchema: {},
+      execute: vi.fn(),
+    });
     const host = createMcpAuthHost({
       settings,
       mcpManager: manager,
@@ -116,6 +122,7 @@ describe("createMcpAuthHost", () => {
       headers: { Authorization: "Bearer tok" },
     });
     expect(registry.has("mcp__remote__query")).toBe(true);
+    expect(registry.has("mcp__remote__old")).toBe(false);
     expect(registry.has("mcp__other__query")).toBe(false);
   });
 
@@ -132,10 +139,17 @@ describe("createMcpAuthHost", () => {
       })),
       getAsToolDefinitions: vi.fn(() => []),
     } as unknown as McpClientManager;
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "mcp__remote__old",
+      description: "old",
+      inputSchema: {},
+      execute: vi.fn(),
+    });
     const host = createMcpAuthHost({
       settings,
       mcpManager: manager,
-      toolRegistry: new ToolRegistry(),
+      toolRegistry: registry,
       persistSettings: async () => {},
     });
 
@@ -144,5 +158,6 @@ describe("createMcpAuthHost", () => {
       mode: "bearer",
       value: "tok",
     })).rejects.toThrow("reconnect failed: 401 Unauthorized");
+    expect(registry.has("mcp__remote__old")).toBe(false);
   });
 });

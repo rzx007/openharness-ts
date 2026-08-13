@@ -57,6 +57,7 @@ export interface ToolDefinition {
 
 export interface ToolRegistry {
   register(tool: ToolDefinition): void;
+  unregister?(name: string): boolean;
   get(name: string): ToolDefinition | undefined;
   getAll(): ToolDefinition[];
   has(name: string): boolean;

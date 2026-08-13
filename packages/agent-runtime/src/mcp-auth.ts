@@ -34,9 +34,11 @@ export function createMcpAuthHost(options: CreateMcpAuthHostOptions): McpAuthHos
         },
       };
 
+      assertMcpToolUnregisterAvailable(options.toolRegistry, input.serverName);
       await persistSettings(nextSettings);
       Object.assign(options.settings, nextSettings);
 
+      unregisterMcpServerTools(options.toolRegistry, input.serverName);
       const connection = await options.mcpManager.reconnect(input.serverName, nextConfig);
       for (const tool of options.mcpManager.getAsToolDefinitions()) {
         if (tool.name.startsWith(`mcp__${input.serverName}__`)) {
@@ -57,6 +59,20 @@ export function createMcpAuthHost(options: CreateMcpAuthHostOptions): McpAuthHos
       };
     },
   };
+}
+
+function assertMcpToolUnregisterAvailable(toolRegistry: IToolRegistry, serverName: string): void {
+  if (typeof toolRegistry.unregister === "function") return;
+  throw new Error(
+    `Cannot reconnect MCP server ${serverName}: the active tool registry cannot remove old MCP tools.`,
+  );
+}
+
+function unregisterMcpServerTools(toolRegistry: IToolRegistry, serverName: string): void {
+  const prefix = `mcp__${serverName}__`;
+  for (const tool of toolRegistry.getAll()) {
+    if (tool.name.startsWith(prefix)) toolRegistry.unregister?.(tool.name);
+  }
 }
 
 export function applyMcpAuthConfig(

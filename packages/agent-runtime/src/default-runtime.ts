@@ -75,10 +75,9 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
 
   const baseToolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
 
-  const effectiveAllowed = new Set([
-    ...(settings.permission.allowedTools ?? []),
-    ...(configuration.allowedTools ?? []),
-  ]);
+  const effectiveAllowed = new Set(
+    configuration.allowedTools ?? settings.permission.allowedTools ?? [],
+  );
   const effectiveDenied = new Set([
     ...(settings.permission.deniedTools ?? []),
     ...(configuration.disallowedTools ?? []),
@@ -162,6 +161,10 @@ class RuntimeToolRegistry implements IToolRegistry {
 
   register(tool: ToolDefinition): void {
     this.inner.register(tool);
+  }
+
+  unregister(name: string): boolean {
+    return this.inner.unregister?.(name) ?? false;
   }
 
   get(name: string): ToolDefinition | undefined {

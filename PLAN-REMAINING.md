@@ -22,7 +22,7 @@
 |------|------|-----------|
 | api | 🟡 | ✅`<think>`过滤/图片传递/max_completion_tokens(A.1)；仍缺 Codex/Copilot client、reasoning effort、modelscope |
 | tools | 🟡 | ✅bash/grep/glob 健壮性(A.3)；✅ImageToText(视觉 fallback)/ImageGeneration(DALL-E 兼容) |
-| mcp | ✅ | stdio + HTTP(streamable)/SSE 传输 + headers 鉴权 + 失败隔离已补(C.3)；仅 MCP OAuth flow 待补 |
+| mcp | ✅ | stdio + HTTP(streamable)/SSE 传输 + headers/env 静态鉴权 + `McpAuth` 保存配置并重连 + 失败隔离已补(C.3)；仅 MCP OAuth flow 待补 |
 | engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint/attachments 全部完成(B.2) |
 | hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
 | memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
@@ -47,12 +47,13 @@
 这些能力不一定阻塞本地 coding agent 使用，但会影响“可托管、可审计、可多租户、可回归验证”的生产化程度。
 
 1. **Remote Agent backend 尚未实现**
-   - 现状：`Agent.mode` 只暴露 `in_process_teammate` 与保留值 `remote_agent`；默认 framework child 已闭环，`remote_agent` 会明确报错。
-   - 边界：`local_agent` 已删除且不兼容，不再存在 subprocess 静默 fallback。
+   - 现状：`Agent` 工具不再暴露 `mode` 参数，默认只走 framework child manager；历史/手写输入若传 `mode` 会明确报“不支持”。
+   - 边界：`local_agent` / `remote_agent` 都不作为公开执行模式，不再存在 subprocess 静默 fallback。
    - 下一步：只有出现真实远端执行服务时再实现 remote backend；在此之前可考虑隐藏保留参数以降低认知负担。
 
 2. **MCP OAuth 未完成**
-   - 现状：MCP 已支持 stdio + HTTP/SSE + headers 鉴权，但 OAuth 授权流、token 存储/刷新、McpAuth 交互链路还未落地。
+   - 现状：MCP 已支持 stdio + HTTP/SSE + headers 鉴权；`McpAuth` 已能配置静态 Bearer、自定义 Header 或 stdio 环境变量，并保存配置后重连 live MCP server。
+   - 仍缺：OAuth 授权跳转、token 存储/刷新、过期重试和动态授权闭环。
    - 含义：只能用静态 headers/env token 连接需要鉴权的 MCP server；需要 OAuth 动态授权的 MCP server 仍缺闭环。
 
 3. **Sandbox 主链路已闭环，CI 实跑仍需接入**
@@ -176,10 +177,11 @@
 - **文件**：`packages/auth/src/index.ts`、`credential-storage.ts`
 
 ### C.3 MCP HTTP/SSE 传输 ✅ 已完成
-- ✅ streamable-http / SSE 传输；HTTP headers 鉴权 + `authConfigured` 追踪；失败隔离保持。
+- ✅ streamable-http / SSE 传输；HTTP headers / stdio env 静态鉴权 + `authConfigured` 追踪；失败隔离保持。
 - ✅ resources 区分 "Method not found" 与真实错误。
-- 留待：`updateServerConfig`/`getServerConfig` 运行时改配置、MCP OAuth flow。
-- **文件**：`packages/mcp/src/index.ts`、`packages/core/src/types/settings.ts`（commit `1a18988`）
+- ✅ `McpAuth` 静态鉴权配置：Bearer / 自定义 Header / stdio env，保存 settings 后重连 live MCP server。
+- 留待：完整 MCP OAuth flow（授权跳转、token 存储/刷新、过期重试）。
+- **文件**：`packages/mcp/src/index.ts`、`packages/core/src/types/settings.ts`、`packages/agent-runtime/src/mcp-auth.ts`、`packages/tools/src/mcp/index.ts`
 
 ### C.4 Coordinator 加载与 prompt 还原 ✅ 完成
 - ✅ 用户 `.md` agent 加载器（真 YAML frontmatter + 行级回退，~20 字段）；

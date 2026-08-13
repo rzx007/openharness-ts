@@ -249,6 +249,42 @@ describe("Integration: Full Agent Loop", () => {
     expect(toolEnd.result.content[0].text).toBe("SearchProbe");
   });
 
+  it("does not execute tools hidden by QueryEngine.setAllowedTools", async () => {
+    const registry = new ToolRegistry();
+    const hiddenExecute = vi.fn(async () => ({
+      content: [{ type: "text" as const, text: "should not run" }],
+    }));
+    registry.register(makeTool("VisibleTool"));
+    registry.register({
+      name: "HiddenTool",
+      description: "Hidden tool",
+      inputSchema: { type: "object", properties: {} },
+      execute: hiddenExecute,
+    });
+
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "HiddenTool", input: {} },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
+    engine.setAllowedTools(["VisibleTool"]);
+    const events: StreamEvent[] = [];
+    for await (const event of engine.submitMessage("run hidden")) events.push(event);
+
+    const toolEnd = events.find((event) => event.type === "tool_use_end") as any;
+    expect(toolEnd.result.content[0].text).toBe("Unknown tool: HiddenTool");
+    expect(hiddenExecute).not.toHaveBeenCalled();
+  });
+
   it("passes the agent event sink to tool execution context", async () => {
     const registry = new ToolRegistry();
     const emitted: Array<{ type: string; data?: Record<string, unknown> }> = [];

@@ -1,6 +1,6 @@
 # 设计：MCP HTTP/SSE 传输 + headers 鉴权（C.3）
 
-> 状态：已批准，待实现。
+> 状态：HTTP/SSE 传输、headers 鉴权、静态 `McpAuth` 配置与 live reconnect 已实现；完整 MCP OAuth flow 仍未实现。
 
 ## 目标
 
@@ -9,10 +9,11 @@ MCP 客户端从「仅 stdio」补全到支持 **HTTP（streamable）+ SSE** 传
 
 ## 现状
 
-- `McpClientManager`（packages/mcp）只用 `StdioClientTransport`；`connectAll` 已有失败隔离。
-- `McpServerConfig`（packages/core/src/types/settings.ts）= `{ command, args?, env? }`。
-- SDK `@modelcontextprotocol/sdk@1.29.0` 提供 `StreamableHTTPClientTransport(url, { requestInit:{headers} })`
-  与 `SSEClientTransport(url, { requestInit:{headers} })`。
+- `McpClientManager`（packages/mcp）已支持 stdio、streamable HTTP 和 SSE，并保持失败隔离。
+- `McpServerConfig`（packages/core/src/types/settings.ts）已支持 `type`、stdio 的 `command/args/env`，以及 HTTP/SSE 的 `url/headers`。
+- HTTP/SSE 走 headers 静态鉴权；stdio 走 env 静态鉴权；连接状态记录 `authConfigured`。
+- `McpAuth` 工具已支持配置静态 Bearer、自定义 Header 或 stdio 环境变量，保存 settings 后重连 live MCP server。
+- 完整 OAuth 授权流、token 存储/刷新和过期重试仍未实现。
 
 ## 设计
 
@@ -61,4 +62,4 @@ export interface McpServerConfig {
 
 ## 范围外
 
-- MCP 的 OAuth flow（McpAuth 工具占位）；运行时改配置 update_server_config。
+- 完整 MCP OAuth flow：授权跳转、token 存储/刷新、过期重试。

@@ -72,7 +72,10 @@ describe("resolveRuntimeModel", () => {
 describe("createOpenHarnessRuntime tool visibility", () => {
   it("applies allowedTools and deniedTools to tools registered after runtime creation", async () => {
     const runtime = await createOpenHarnessRuntime({
-      settings: BASE_SETTINGS,
+      settings: {
+        ...BASE_SETTINGS,
+        permission: { mode: "default", allowedTools: ["Bash"] },
+      },
       configuration: {
         client: {
           async *streamMessage() {
@@ -106,6 +109,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
       expect(names).toEqual(["ToolSearch", "DynamicAllowed"]);
       expect(runtime.toolRegistry.get("DynamicAllowed")).toBeDefined();
       expect(runtime.toolRegistry.get("DynamicDenied")).toBeUndefined();
+      expect(runtime.toolRegistry.get("ToolSearch")).toBeDefined();
       expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
     } finally {
       await runtime.close();

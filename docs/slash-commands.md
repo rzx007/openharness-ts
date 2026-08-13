@@ -158,7 +158,7 @@ skill 经 command catalog 以 template 形式出现。
 | 工具 | 说明 |
 |---|---|
 | `McpToolCall` | 调用 MCP 服务器工具 |
-| `McpAuth` | MCP OAuth 认证 |
+| `McpAuth` | 配置静态 Bearer / 自定义 Header / stdio 环境变量，并尝试重连 MCP server；不是 OAuth 授权流 |
 | `ListMcpResources` / `ReadMcpResource` | MCP 资源列举/读取 |
 
 ### 定时（schedule/，daemon/host 注入后可用）

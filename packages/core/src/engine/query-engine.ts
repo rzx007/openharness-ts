@@ -436,11 +436,12 @@ export class QueryEngine implements IQueryEngine {
       toolUse: ToolUseBlock;
       tool: NonNullable<ReturnType<IToolRegistry["get"]>>;
     }[] = [];
+    const toolRegistry = this.visibleToolRegistry();
 
     for (let i = 0; i < toolUses.length; i++) {
       const toolUse = toolUses[i]!;
 
-      const tool = this.toolRegistry.get(toolUse.name);
+      const tool = toolRegistry.get(toolUse.name);
       if (!tool) {
         results[i] = {
           toolUseId: toolUse.id,
@@ -671,6 +672,9 @@ export class QueryEngine implements IQueryEngine {
     return {
       register(tool: ToolDefinition): void {
         inner.register(tool);
+      },
+      unregister(name: string): boolean {
+        return inner.unregister?.(name) ?? false;
       },
       get(name: string): ToolDefinition | undefined {
         return allowed.has(name) ? inner.get(name) : undefined;

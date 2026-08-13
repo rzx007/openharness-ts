@@ -10,6 +10,10 @@ export class ToolRegistry implements IToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
   }
