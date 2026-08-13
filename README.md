@@ -6,10 +6,10 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 > ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
 >
-> **易漂移数字以代码/单测为准**：内置工具数 → `packages/tools` `createDefaultToolRegistry`（`registry.test.ts` 锁 45）；Provider 数 → `packages/api` `PROVIDERS`（`registry.test.ts` 锁 21）；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。programmatic 入口见 [docs/agent-sdk.md](docs/agent-sdk.md)，当前架构以 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md) 和 [docs/agent-framework-capability-boundary.md](docs/agent-framework-capability-boundary.md) 为准，跨层终态与失败规则见 [docs/agent-lifecycle-contract.md](docs/agent-lifecycle-contract.md)。
+> **易漂移数字以代码/单测为准**：默认工具数 → `packages/tools` `createDefaultToolRegistry()`（`registry.test.ts` 锁 40；daemon 传入 Cron host capability 后为 45）；Provider 数 → `packages/api` `PROVIDERS`（`registry.test.ts` 锁 21）；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。programmatic 入口见 [docs/agent-sdk.md](docs/agent-sdk.md)，当前架构以 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md) 和 [docs/agent-framework-capability-boundary.md](docs/agent-framework-capability-boundary.md) 为准，跨层终态与失败规则见 [docs/agent-lifecycle-contract.md](docs/agent-lifecycle-contract.md)。
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
-- ✅ **内置工具（45）** — 以 `createDefaultToolRegistry()` 为准：文件 / Bash / Web / Grep / Cron / MCP / Task / Agent / TaskWait / Workflow / ImageToText / ImageGeneration / FeishuPush 等齐全；bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
+- ✅ **默认工具（40；daemon Cron 后 45）** — 默认 `createDefaultToolRegistry()` 提供文件 / Bash / Web / Grep / MCP / Task / Agent / TaskWait / Workflow / ImageToText / ImageGeneration / FeishuPush 等；daemon 注入 Cron host capability 时再追加 `CronCreate/Delete/List/Toggle/RemoteTrigger` 5 个工具。bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
 - ✅ **多 Agent 编排** — 内置 7 agent + 用户/插件自定义 agent（`~/.openharness-ts/agents/*.md`），以及 `TaskWait`、`Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、TUI follow-up 执行和 `ohs workflow` 管理命令。daemon/TUI/print 主路径使用 daemon 内 child session；task、child session 与 child run 的关联通过 daemon 事件持久化，跨客户端可重放。
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers 鉴权、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
@@ -20,7 +20,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。SwarmPanel UI 保留但尚未接 daemon 事件
 - 🟢 **Daemon Application** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、durable session/transcript、SSE、单 session 串行 run lane、持久化 PermissionBroker、child durable projection 和共享 `@openharness/client` reducer。`DaemonApplication` 集中组装 durable 应用，HTTP server 只负责 transport；`AgentPool` 按 session 缓存真实 `OpenHarnessAgent`。权威导览见 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)，framework 见 [docs/agent-runtime-framework-architecture.md](docs/agent-runtime-framework-architecture.md)，客户端同步见 [docs/client-sync-flow.md](docs/client-sync-flow.md)。
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
-- 🟡 **可用但仍在收口** — `sandbox`（Bash 走 SRT/Docker，文件工具宿主执行 + path guard；Docker proxy 为 bridge+代理环境 MVP；Docker/SRT 可选 e2e 已补，CI 接入待补）
+- 🟡 **可用但仍在收口** — `sandbox`（Bash / MCP stdio / hooks / Cron / LSP 等进程入口走 SRT/Docker；Docker active 时 Read/Write/Edit/Glob/Grep 进入容器文件操作；Docker 整棵进程停止和真实 E2E 已补，CI 中 Docker 实跑仍待接入）
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
 - ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
 
@@ -274,7 +274,7 @@ OpenHarness-ts/
 │   ├── core/                 # 核心引擎（QueryEngine、类型、配置）
 │   ├── api/                  # API Provider 抽象层
 │   ├── client/               # daemon HTTP/SSE typed client + event reducer（TUI/Web/Desktop 共用）
-│   ├── tools/                # 内置工具（createDefaultToolRegistry，当前 45）
+│   ├── tools/                # 默认工具（createDefaultToolRegistry，当前 40；daemon Cron 后 45）
 │   ├── server/               # daemon HTTP server、run engine、permission broker
 │   ├── services/             # 服务层（Compact、Session、Cron、Task、LSP）
 │   ├── coordinator/          # 多 Agent 编排器
@@ -452,7 +452,7 @@ OpenHarness-ts/
 | `detectProvider()`       | 从 `(model, apiKey, baseURL)` 三元组自动推断 Provider 和 BackendType |
 
 
-### 工具层（45 Tools，`createDefaultToolRegistry`）
+### 工具层（默认 40 Tools；daemon Cron 后 45）
 
 
 | 分类           | 工具                                                                                                            |
@@ -462,7 +462,7 @@ OpenHarness-ts/
 | **Web**      | `WebFetch`（URL 抓取 + HTML→Text）、`WebSearch`（DuckDuckGo HTML 搜索）                                                |
 | **任务管理**     | `TaskCreate/Get/List/Output/Stop/Update/Wait`（7 个任务生命周期工具）                                                     |
 | **Agent/团队** | `Agent`（daemon child session）、`SendMessage`（child session 多轮）、`Workflow`（硬调度 DAG）、`TeamCreate/Delete`（团队管理）          |
-| **调度**       | `CronCreate/Delete/List/Toggle/RemoteTrigger`（5 个 Cron 工具）                                                    |
+| **调度**       | `CronCreate/Delete/List/Toggle/RemoteTrigger`（5 个 Cron 工具；仅 daemon/host 注入 Cron capability 后注册）         |
 | **MCP**      | `McpToolCall/ListMcpResources/ReadMcpResource/McpAuth`（4 个 MCP 工具）                                            |
 | **媒体/通道**    | `ImageToText`（视觉 fallback）、`ImageGeneration`（DALL-E 兼容）、`FeishuPush`                                          |
 | **元工具**      | `TodoWrite、Config、Sleep、Skill、ToolSearch、AskUser、Brief、EnterPlanMode、ExitPlanMode、EnterWorktree、ExitWorktree` |

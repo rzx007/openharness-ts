@@ -104,10 +104,9 @@ skill 经 command catalog 以 template 形式出现。
 `/keybindings` `/vim` `/passes` `/release-notes` `/login` `/logout` 等低频项，
 见 PLAN-REMAINING E.2。
 
-## 内置工具（41 个）
+## 内置工具（默认 40 个；daemon Cron 后 45 个）
 
-注册处：`packages/tools/src/`（按目录分组），运行时 MCP 服务器工具另行注入
-（`mcp__server__tool` 命名）。
+注册处：`packages/tools/src/`（按目录分组）。默认 `createDefaultToolRegistry()` 是 40 个；daemon/host 传入 Cron capability 后追加 5 个 Cron 工具。运行时 MCP 服务器工具另行注入（`mcp__server__tool` 命名）。
 
 ### 文件（file/）
 
@@ -162,7 +161,7 @@ skill 经 command catalog 以 template 形式出现。
 | `McpAuth` | MCP OAuth 认证 |
 | `ListMcpResources` / `ReadMcpResource` | MCP 资源列举/读取 |
 
-### 定时（schedule/）
+### 定时（schedule/，daemon/host 注入后可用）
 
 | 工具 | 说明 |
 |---|---|
@@ -188,7 +187,7 @@ skill 经 command catalog 以 template 形式出现。
 |---|---|
 | `TodoWrite` | 任务清单跟踪 |
 | `Skill` | 调用 skill |
-| `ToolSearch` | 搜索/加载延迟工具 |
+| `ToolSearch` | 搜索当前 QueryEngine 实际可见的工具 |
 | `AskUser` | 向用户提问 |
 | `Config` | 读写配置 |
 | `Brief` | 会话简报 |

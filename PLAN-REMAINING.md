@@ -34,7 +34,7 @@
 | bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
-| sandbox | 🟡 | ✅ SRT/Docker runtime、per-session 容器、统一进程入口、host file guard、Docker 整棵进程停止、daemon 托管 Cron、主 daemon 系统常驻与 E2E 用例；缺 Docker CI 实跑、MCP stdio、容器文件操作 |
+| sandbox | 🟡 | ✅ SRT/Docker runtime、per-session 容器、统一进程入口、host file guard、Docker 整棵进程停止、daemon 托管 Cron、MCP stdio sandbox-aware transport、Docker active 文件操作、主 daemon 系统常驻与 E2E 用例；缺 Docker CI 实跑 |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
 | personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 自动抽取尚未接 standalone 或 daemon/TUI lifecycle(C.5) |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
@@ -55,9 +55,10 @@
    - 现状：MCP 已支持 stdio + HTTP/SSE + headers 鉴权，但 OAuth 授权流、token 存储/刷新、McpAuth 交互链路还未落地。
    - 含义：只能用静态 headers/env token 连接需要鉴权的 MCP server；需要 OAuth 动态授权的 MCP server 仍缺闭环。
 
-3. **Sandbox 进程入口已统一，生命周期与文件 IO 仍需闭环**
-   - 已完成：Bash、TaskManager/autodream、command hooks、Cron/RemoteTrigger、LSP ripgrep 统一走 `createShellProcess` / `createProcess`；严格模式缺失后端时 fail-closed。
-   - 仍缺：Docker 容器内任务树 stop/timeout 的真实 E2E；MCP stdio transport 注入；Glob/Grep 的 host-guarded 搜索迁入 `FileOperations`。
+3. **Sandbox 主链路已闭环，CI 实跑仍需接入**
+   - 已完成：Bash、TaskManager/autodream、command hooks、Cron/RemoteTrigger、LSP ripgrep、MCP stdio 统一走 `createShellProcess` / `createProcess`；严格模式缺失后端时 fail-closed。
+   - 已完成：Docker 容器内任务树 stop/timeout 真实 E2E；Read/Write/Edit/Glob/Grep 通过 `FileOperations` 在 Docker active session 内执行。
+   - 仍缺：把 Docker/SRT 可选 E2E 接入有对应后端的 CI job，并保留本地无 Docker 环境下的跳过路径。
    - 权威流程：`docs/sandbox-runtime-flow.md`。
 
 4. **Trace 基础已完成，span / 指标查询仍不完整**
@@ -239,10 +240,12 @@
   去重 + bot 消息跳过、线程级会话隔离。
 - **文件**：`packages/channels/src/`、`apps/cli/src/commands/channels.ts`
 
-### D.3 Sandbox Docker backend
-- 实现 Docker backend：`docker run` + 资源限制（`--cpus`/`--memory`）+ 网络隔离（`--network none` + allowed/denied_domains fail-closed）+ 镜像管理 + path validator。
-- 接入 bash 工具的 sandbox 执行路径。
-- **文件**：`packages/sandbox/src/index.ts`
+### D.3 Sandbox Docker backend ✅ 主链路完成
+- ✅ Docker backend：`docker run` + 资源限制（`--cpus`/`--memory`）+ 网络模式 + 镜像管理 + path validator。
+- ✅ Bash / hooks / Cron / LSP / MCP stdio 走 sandbox-aware process entry。
+- ✅ Docker active 时 Read/Write/Edit/Glob/Grep 通过 `FileOperations` 进入容器执行，并有真实 Docker E2E 覆盖。
+- 留待：接入 CI 中有 Docker daemon/SRT 的 job。
+- **文件**：`packages/sandbox/src/*`、`packages/tools/src/file/operations.ts`、`packages/mcp/src/sandbox-stdio-transport.ts`
 
 ### D.4 Bridge 多进程会话（按需）
 - ✅ `spawn(command, cwd)`：`child_process.spawn(shell:true)`，stdout+stderr 并行泵入 `~/.openharness-ts/bridge/logs/<id>.log`。
