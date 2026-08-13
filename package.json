@@ -24,6 +24,14 @@
     "release:major": "node scripts/npm-release.mjs version major",
     "release:publish": "node scripts/npm-release.mjs publish",
     "release:publish:dry": "node scripts/npm-release.mjs publish --dry-run",
+    "release:cli:plan": "node scripts/npm-release.mjs cli-plan",
+    "release:cli:version": "node scripts/npm-release.mjs cli-version",
+    "release:cli": "node scripts/npm-release.mjs cli-publish",
+    "release:cli:dry": "node scripts/npm-release.mjs cli-publish --dry-run",
+    "publish:cli:plan": "pnpm release:cli:plan",
+    "publish:cli:version": "pnpm release:cli:version",
+    "publish:cli": "pnpm release:cli",
+    "publish:cli:dry": "pnpm release:cli:dry",
     "prepare": "husky"
   },
   "devDependencies": {

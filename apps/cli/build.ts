@@ -2,20 +2,25 @@ import { cpSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
-const externals = [...new Set([
+const frontendPkg = JSON.parse(readFileSync("../frontend/package.json", "utf-8"));
+const cliExternals = [...new Set([
   ...Object.keys(pkg.dependencies || {}),
   ...Object.keys(pkg.peerDependencies || {}),
   // Native addon: it must resolve beside the installed package, never from dist.
   "better-sqlite3",
 ])].filter((d) => !d.startsWith("@openharness/"));
+const frontendExternals = [...new Set([
+  ...Object.keys(frontendPkg.dependencies || {}),
+  ...Object.keys(frontendPkg.peerDependencies || {}),
+])].filter((d) => !d.startsWith("@openharness/"));
 
-const result = await Bun.build({
+const cliResult = await Bun.build({
   entrypoints: ["src/index.ts"],
   outdir: "dist",
   target: "node",
   format: "esm",
   sourcemap: "external",
-  external: externals,
+  external: cliExternals,
   plugins: [{
     name: "node-punycode-shim",
     setup(build) {
@@ -26,17 +31,42 @@ const result = await Bun.build({
   }],
 });
 
-if (!result.success) {
-  console.error("Build failed:");
-  for (const log of result.logs) {
+if (!cliResult.success) {
+  console.error("CLI build failed:");
+  for (const log of cliResult.logs) {
     console.error(log);
   }
   process.exit(1);
 }
 
-for (const output of result.outputs) {
+for (const output of cliResult.outputs) {
   if (output.path.endsWith("index.js")) {
     const content = "#!/usr/bin/env node\n" + await output.text();
+    await Bun.write(output.path, content);
+  }
+}
+
+rmSync("dist/frontend", { recursive: true, force: true });
+const frontendResult = await Bun.build({
+  entrypoints: ["../frontend/src/index.tsx"],
+  outdir: "dist/frontend",
+  target: "bun",
+  format: "esm",
+  sourcemap: "external",
+  external: frontendExternals,
+});
+
+if (!frontendResult.success) {
+  console.error("Frontend build failed:");
+  for (const log of frontendResult.logs) {
+    console.error(log);
+  }
+  process.exit(1);
+}
+
+for (const output of frontendResult.outputs) {
+  if (output.path.endsWith("index.js")) {
+    const content = "#!/usr/bin/env bun\n" + await output.text();
     await Bun.write(output.path, content);
   }
 }
@@ -46,4 +76,4 @@ for (const output of result.outputs) {
 rmSync("dist/migrations", { recursive: true, force: true });
 cpSync("../../packages/services/src/session-runtime/migrations", "dist/migrations", { recursive: true });
 
-console.log(`Build complete: ${result.outputs.length} files`);
+console.log(`Build complete: ${cliResult.outputs.length + frontendResult.outputs.length} files`);

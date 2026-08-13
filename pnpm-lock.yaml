@@ -86,6 +86,28 @@ importers:
 
   apps/cli:
     dependencies:
+      '@opentui/core':
+        specifier: 'catalog:'
+        version: 0.4.5(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opentui/react':
+        specifier: 'catalog:'
+        version: 0.4.5(react-devtools-core@7.0.1)(react@19.2.7)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.20.0)
+      better-sqlite3:
+        specifier: ^13.0.2
+        version: 13.0.2
+      chalk:
+        specifier: 'catalog:'
+        version: 5.6.2
+      commander:
+        specifier: 'catalog:'
+        version: 13.1.0
+      diff:
+        specifier: 'catalog:'
+        version: 7.0.0
+      react:
+        specifier: 'catalog:'
+        version: 19.2.7
+    devDependencies:
       '@openharness/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
@@ -155,16 +177,6 @@ importers:
       '@openharness/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      better-sqlite3:
-        specifier: ^13.0.2
-        version: 13.0.2
-      chalk:
-        specifier: 'catalog:'
-        version: 5.6.2
-      commander:
-        specifier: 'catalog:'
-        version: 13.1.0
-    devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.17

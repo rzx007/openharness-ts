@@ -372,7 +372,12 @@ async function runTuiMode(
     if (existsSync(path.join(root, "apps"))) break;
     root = path.dirname(root);
   }
-  const frontendDistPath = path.join(root, "apps", "frontend", "dist", "index.js");
+  const bundledFrontendPath = path.join(cliDir, "frontend", "index.js");
+  const repoFrontendPath = path.join(root, "apps", "frontend", "dist", "index.js");
+  const frontendDistPath = existsSync(bundledFrontendPath) ? bundledFrontendPath : repoFrontendPath;
+  if (!existsSync(frontendDistPath)) {
+    throw new Error(`TUI frontend bundle not found: ${frontendDistPath}`);
+  }
 
   // 启动 TUI 前清空当前终端（含滚动历史），让 Ink 界面从干净屏幕开始渲染。
   if (process.stdout.isTTY) {
