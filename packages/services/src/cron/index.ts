@@ -84,6 +84,11 @@ export class CronScheduler {
   }): CronJob {
     const existing = this.findByName(jobData.name);
     const id = existing?.id ?? jobData.id ?? `cron_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    // Capture schedule state before stop(). During an in-flight run the timer
+    // entry is already gone, but existing.running is still true — we must
+    // invalidate that old object or its finally block will keep rescheduling.
+    const wasScheduled = Boolean(existing && (existing.running || this.timers.has(id)));
+    if (existing) this.stop(existing.id);
     const job: CronJob = {
       id,
       name: jobData.name,
@@ -99,10 +104,7 @@ export class CronScheduler {
       createdAt: existing?.createdAt ?? Date.now(),
     };
     this.jobs.set(id, job);
-    if (existing && this.timers.has(id)) {
-      this.stop(id);
-      if (job.enabled) this.start(id);
-    }
+    if (wasScheduled && job.enabled) this.start(id);
     return job;
   }
 

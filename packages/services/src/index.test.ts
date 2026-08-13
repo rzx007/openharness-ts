@@ -122,6 +122,58 @@ describe("CronScheduler", () => {
     scheduler.stopAll();
   });
 
+  it("stops an in-flight job when upsert disables or replaces it", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    let releaseExecution: (() => void) | undefined;
+    let executionStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      executionStarted = resolve;
+    });
+    const executor = vi.fn(async (job) => {
+      executionStarted();
+      await new Promise<void>((resolve) => {
+        releaseExecution = resolve;
+      });
+      return {
+        name: job.name,
+        timestamp: Date.now(),
+        success: true,
+        output: job.command,
+      };
+    });
+    const scheduler = new CronScheduler(executor);
+    const job = scheduler.upsertJob({
+      name: "nightly",
+      expression: "0 0 * * *",
+      command: "echo stale",
+      timezone: "UTC",
+    });
+    scheduler.start(job.id);
+
+    const running = vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+    await started;
+    expect(executor).toHaveBeenCalledTimes(1);
+
+    scheduler.upsertJob({
+      name: "nightly",
+      expression: "0 0 * * *",
+      command: "echo fresh",
+      timezone: "UTC",
+      enabled: false,
+    });
+
+    releaseExecution?.();
+    await running;
+    await vi.advanceTimersByTimeAsync(48 * 60 * 60 * 1000);
+
+    expect(executor).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(scheduler.findByName("nightly")?.enabled).toBe(false);
+    scheduler.stopAll();
+  });
+
   it("uses the sandbox-aware trigger path and records command output", async () => {
     const scheduler = new CronScheduler();
     scheduler.upsertJob({
