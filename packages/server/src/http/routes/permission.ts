@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
-import type { StorePermissionBroker } from "../../permission-broker.js";
-import type { RequestTraceRegistry } from "../request-trace-registry.js";
+import type { StorePermissionBroker } from "../../permissions/index.js";
+import type { RequestTraceRegistry } from "../control/index.js";
 
 import {
   errorResponse,

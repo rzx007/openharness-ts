@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 
 import { errorResponse, jsonResponse, readJson } from "../support.js";
-import type { AuthService } from "../../settings-api.js";
-import type { DaemonControlService } from "../daemon-control-service.js";
+import type { AuthService } from "../../application/index.js";
+import type { DaemonControlService } from "../control/index.js";
 
 export interface AuthRoutesContext {
   authService?: AuthService;

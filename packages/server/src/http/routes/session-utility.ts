@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 
-import type { SessionExportFormat } from "../../export-session.js";
+import type { SessionExportFormat } from "../../session/index.js";
 import {
   SessionMaintenanceError,
   type SessionMaintenanceService,
-} from "../session-maintenance-service.js";
+} from "../session/index.js";
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 
 export interface SessionUtilityRoutesContext {

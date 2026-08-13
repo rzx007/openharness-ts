@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
 import { errorResponse, jsonResponse, readJson } from "../support.js";
-import type { GitService } from "../../settings-api.js";
+import type { GitService } from "../../application/index.js";
 
 export interface GitRoutesContext {
   gitService?: GitService;
