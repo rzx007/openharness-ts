@@ -147,6 +147,40 @@ describe("createDaemonAgentLoader", () => {
     );
   });
 
+  it("does not elevate child sessions that inherited coordinator sessionMode", async () => {
+    const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
+    const createAgent = vi.fn(async () => agent);
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model" } as any,
+      createAgent,
+    })!;
+
+    await loader({
+      session: {
+        ...session,
+        parentId: "coordinator-parent",
+        metadata: {
+          ...session.metadata,
+          runtime: {
+            ...session.metadata.runtime,
+            sessionMode: "coordinator",
+            systemPrompt: "Worker prompt",
+            allowedTools: ["*"],
+            disallowedTools: ["Agent", "SendMessage"],
+          },
+        },
+      },
+      history: [],
+      parts: [],
+    });
+
+    const options = createAgent.mock.calls[0]![0].options;
+    expect(options.systemPrompt).toBe("Worker prompt");
+    expect(options.roleAllowedTools).toBeUndefined();
+    expect(options.allowedTools).toEqual(["*"]);
+    expect(options.disallowedTools).toEqual(["Agent", "SendMessage"]);
+  });
+
   it("closes a newly created Agent when durable history cannot be restored", async () => {
     const error = new Error("bad history");
     const close = vi.fn(async () => {});

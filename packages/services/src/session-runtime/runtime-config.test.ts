@@ -21,10 +21,7 @@ function session(metadata: Record<string, unknown> = {}): SessionRecord {
 }
 
 describe("session runtime config", () => {
-  it("requires the model to live in runtime metadata", () => {
-    expect(() => readSessionRuntimeConfig(session())).toThrow(
-      "Session runtime config is missing metadata.runtime.model: s1",
-    );
+  it("reads runtime metadata and falls back to the pre-migration layout", () => {
     expect(readSessionRuntimeConfig(session({
       runtime: { model: "runtime-model", provider: "openrouter", permissionMode: "plan" },
     }))).toMatchObject({
@@ -32,6 +29,34 @@ describe("session runtime config", () => {
       provider: "openrouter",
       permissionMode: "plan",
     });
+
+    expect(readSessionRuntimeConfig({
+      ...session({
+        permissionMode: "full_auto",
+        sessionMode: "coordinator",
+        systemPrompt: "legacy prompt",
+        maxTurns: 3,
+        effort: "high",
+        allowedTools: ["Bash"],
+        disallowedTools: ["Write"],
+      }),
+      model: "legacy-model",
+    })).toMatchObject({
+      model: "legacy-model",
+      permissionMode: "full_auto",
+      sessionMode: "coordinator",
+      systemPrompt: "legacy prompt",
+      maxTurns: 3,
+      effort: "high",
+      allowedTools: ["Bash"],
+      disallowedTools: ["Write"],
+    });
+  });
+
+  it("throws only when neither runtime nor session model is available", () => {
+    expect(() => readSessionRuntimeConfig({ ...session(), model: "" })).toThrow(
+      "Session runtime config is missing metadata.runtime.model: s1",
+    );
   });
 
   it("patches runtime metadata without touching unrelated metadata", () => {

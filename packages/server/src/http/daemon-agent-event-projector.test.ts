@@ -129,7 +129,16 @@ describe("DaemonAgentEventProjector", () => {
       childId: "child-1",
     }));
 
-    expect(store.createSession).toHaveBeenCalledWith(expect.objectContaining({ id: "child-session", parentId: "parent" }));
+    expect(store.createSession).toHaveBeenCalledWith(expect.objectContaining({
+      id: "child-session",
+      parentId: "parent",
+      metadata: expect.objectContaining({
+        runtime: expect.objectContaining({
+          model: "gpt",
+          sessionMode: "direct",
+        }),
+      }),
+    }));
     expect(store.admitPrompt).toHaveBeenCalledWith(expect.objectContaining({
       id: "input-1",
       metadata: expect.objectContaining({ requestedBy: "test" }),
@@ -141,6 +150,76 @@ describe("DaemonAgentEventProjector", () => {
     expect(bridge.bindSessionTaskRun).toHaveBeenCalledTimes(2);
     expect(store.updateRun).toHaveBeenLastCalledWith("run-2", { status: "completed" });
     expect(bridge.completeSessionTask).toHaveBeenCalledWith("child-1", { status: "completed", output: "done" });
+  });
+
+  it("does not persist coordinator sessionMode onto projected child sessions", async () => {
+    const sessions = new Map<string, any>([[
+      "parent",
+      {
+        id: "parent",
+        cwd: "/repo",
+        model: "gpt",
+        metadata: {
+          runtime: {
+            model: "gpt",
+            sessionMode: "coordinator",
+            systemPrompt: "Coordinator prompt",
+            allowedTools: ["Agent", "TaskWait"],
+          },
+        },
+      },
+    ]]);
+    const store = {
+      getSession: vi.fn((id) => sessions.get(id)),
+      createSession: vi.fn((input) => {
+        const row = { ...input, status: "idle" };
+        sessions.set(row.id, row);
+        return row;
+      }),
+      getSessionTask: vi.fn(() => undefined),
+      appendEvent: vi.fn(),
+    };
+    const bridge = {
+      registerSessionTask: vi.fn((input) => ({ id: input.id })),
+    };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: store as any,
+      transcriptProjection: {} as any,
+      taskBridgeManager: { createBridge: vi.fn(() => bridge) } as any,
+      liveChildren: { register: vi.fn(), unregister: vi.fn() },
+      events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    await projector.apply(event("child.created", {
+      childId: "child-1",
+      sessionId: "child-session",
+      spawn: {
+        description: "Worker",
+        prompt: "implement",
+        agent: "worker",
+        cwd: "/repo",
+        systemPrompt: "Worker prompt",
+        allowedTools: ["*"],
+        disallowedTools: ["Agent"],
+      },
+      cwd: "/repo",
+    }, { sessionId: "parent", childId: "child-1" }));
+
+    expect(store.createSession).toHaveBeenCalledWith(expect.objectContaining({
+      id: "child-session",
+      parentId: "parent",
+      metadata: expect.objectContaining({
+        runtime: expect.objectContaining({
+          model: "gpt",
+          sessionMode: "direct",
+          systemPrompt: "Worker prompt",
+          allowedTools: ["*"],
+          disallowedTools: ["Agent"],
+        }),
+      }),
+    }));
   });
 
   it("compensates durable child state when live route registration fails", async () => {
