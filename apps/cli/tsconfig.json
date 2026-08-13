@@ -3,6 +3,7 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "../..",
+    "types": ["bun"],
     "baseUrl": ".",
     "paths": {
       "@openharness/coordinator": [
@@ -23,6 +24,10 @@
     }
   },
   "include": [
-    "src"
+    "src",
+    "build.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
   ]
 }

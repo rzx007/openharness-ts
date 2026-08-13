@@ -1,3 +1,4 @@
+/// <reference types="bun" />
 import { cpSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
