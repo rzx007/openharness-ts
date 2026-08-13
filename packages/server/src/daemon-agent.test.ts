@@ -131,8 +131,8 @@ describe("createDaemonAgentLoader", () => {
     expect(options.systemPrompt).toContain("Workers spawned via the Agent tool");
     expect(options.systemPrompt).toContain("## Additional Session Instructions");
     expect(options.systemPrompt).toContain("Keep updates short.");
-    expect(options.allowedTools).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);
-    expect(options.allowedTools).not.toContain("Bash");
+    expect(options.allowedTools).toEqual(["Bash"]);
+    expect(options.roleAllowedTools).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);
   });
 
   it("closes a newly created Agent when durable history cannot be restored", async () => {

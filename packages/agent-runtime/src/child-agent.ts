@@ -179,7 +179,9 @@ export class AgentChildManager implements AgentChildDirectory {
         model: input.model ?? this.options.configuration.model,
         systemPrompt: input.systemPrompt ?? this.options.configuration.systemPrompt,
         permissionMode: input.permissionMode ?? this.options.configuration.permissionMode,
-        allowedTools: input.allowedTools,
+        hostToolCeiling: this.options.configuration.hostToolCeiling ?? this.options.configuration.allowedTools,
+        allowedTools: this.options.configuration.allowedTools,
+        roleAllowedTools: input.allowedTools,
         disallowedTools: mergeToolLists(this.options.configuration.disallowedTools, input.disallowedTools),
         maxTurns: input.maxTurns ?? this.options.configuration.maxTurns,
         effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"

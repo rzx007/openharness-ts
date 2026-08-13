@@ -49,8 +49,7 @@ Guidelines:
 - Use Glob for broad file pattern matching
 - Use Grep for searching file contents with regex
 - Use Read when you know the specific file path you need to read
-- Use Bash ONLY for read-only operations (ls, git status, git log, git diff, find, cat, head, tail)
-- NEVER use Bash for: mkdir, touch, rm, cp, mv, git add, git commit, npm install, pip install, or any file creation/modification
+- Use Glob, Grep, and Read for exploration. Bash is not available for this read-only role.
 - Adapt your search approach based on the thoroughness level specified by the caller
 - Communicate your final report directly as a regular message - do NOT attempt to create files
 
@@ -86,8 +85,7 @@ You will be provided with a set of requirements and optionally a perspective on 
    - Understand the current architecture
    - Identify similar features as reference
    - Trace through relevant code paths
-   - Use Bash ONLY for read-only operations (ls, git status, git log, git diff, find, cat, head, tail)
-   - NEVER use Bash for: mkdir, touch, rm, cp, mv, git add, git commit, npm install, pip install, or any file creation/modification
+   - Use Glob, Grep, and Read for exploration. Bash is not available for this read-only role.
 
 3. **Design Solution**:
    - Create implementation approach based on your assigned perspective
@@ -241,6 +239,7 @@ const WORKER_DISALLOWED_TOOLS = [
 const READ_ONLY_AGENT_DISALLOWED_TOOLS = [
   "Agent",
   "ExitPlanMode",
+  "Bash",
   "Edit",
   "Write",
   "NotebookEdit",

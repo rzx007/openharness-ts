@@ -346,7 +346,7 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      allowedTools: ["workflow", "task_wait", "task_stop", "agent", "send_message"],
+      roleAllowedTools: ["workflow", "task_wait", "task_stop", "agent", "send_message"],
       onEvent: (event) => { events.push(event); },
     });
 
@@ -365,12 +365,119 @@ describe("programmatic agent SDK", () => {
       rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
+
+  it("keeps child worker tools under the SDK host allowlist", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-child-ceiling-"));
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        const firstUser = params.messages.find((message) => message.type === "user");
+        const firstUserText = firstUser?.type === "user" && typeof firstUser.content === "string"
+          ? firstUser.content
+          : "";
+        const usedTools = params.messages
+          .filter((message) => message.type === "assistant")
+          .flatMap((message) => message.type === "assistant" ? message.toolUses ?? [] : [])
+          .map((toolUse) => toolUse.name);
+
+        if (usedTools.includes("TaskWait")) {
+          const waitText = latestToolResultText(params.messages);
+          yield { type: "text_delta" as const, delta: waitText };
+          yield { type: "complete" as const, stopReason: "end_turn" };
+          return;
+        }
+
+        if (usedTools.includes("Agent")) {
+          const toolResult = toolResultText(params.messages, "spawn-restricted-child");
+          const taskId = toolResult.match(/task_id=([^,)\s]+)/)?.[1];
+          if (!taskId) throw new Error(`Agent tool did not return task_id: ${toolResult}`);
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "wait-restricted-child",
+              name: "TaskWait",
+              input: { taskIds: [taskId], timeoutSeconds: 2 },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" };
+          return;
+        }
+
+        if (usedTools.includes("Bash")) {
+          yield { type: "text_delta" as const, delta: latestToolResultText(params.messages) };
+          yield { type: "complete" as const, stopReason: "end_turn" };
+          return;
+        }
+
+        if (firstUserText === "child tries bash") {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "forbidden-bash",
+              name: "Bash",
+              input: { command: "echo should-not-run", workdir: cwd },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" };
+          return;
+        }
+
+        yield {
+          type: "tool_use_start" as const,
+          toolUse: {
+            type: "tool_use" as const,
+            id: "spawn-restricted-child",
+            name: "Agent",
+            input: { description: "restricted child", prompt: "child tries bash" },
+          },
+        };
+        yield { type: "complete" as const, stopReason: "tool_use" };
+      },
+    };
+    const agent = await createOpenHarnessAgent({
+      cwd,
+      settings: {
+        apiFormat: "anthropic",
+        model: "sdk-child-ceiling-test-model",
+        maxTurns: 5,
+        permission: { mode: "full_auto" },
+        sandbox: { enabled: false },
+      },
+      client,
+      allowedTools: ["Read", "Agent", "TaskWait"],
+    });
+
+    try {
+      const result = await agent.submitMessage("spawn restricted worker").result;
+
+      expect(result.output).toContain("Unknown tool: Bash");
+      expect(result.output).not.toContain("should-not-run");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
 });
 
 function latestToolResultText(messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"]): string {
   const latest = messages.filter((message) => message.type === "tool_result").at(-1);
   if (!latest || latest.type !== "tool_result") return "";
   return latest.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
+function toolResultText(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): string {
+  const result = messages.find((message) =>
+    message.type === "tool_result" && message.toolUseId === toolUseId
+  );
+  if (!result || result.type !== "tool_result") return "";
+  return result.content
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("");

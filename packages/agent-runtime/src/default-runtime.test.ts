@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createOpenHarnessRuntime,
   resolveAutoApproveTools,
+  resolveEffectiveAllowedTools,
   resolveRuntimeModel,
 } from "./default-runtime.js";
 import { LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@openharness/permissions";
@@ -69,6 +70,28 @@ describe("resolveRuntimeModel", () => {
   });
 });
 
+describe("resolveEffectiveAllowedTools", () => {
+  it("intersects host ceiling with role tools", () => {
+    expect(resolveEffectiveAllowedTools({
+      hostToolCeiling: ["Read", "Agent"],
+      roleAllowedTools: ["*", "Bash", "Edit"],
+      knownToolNames: ["Read", "Agent", "Bash", "Edit"],
+    })).toEqual(["Read", "Agent"]);
+
+    expect(resolveEffectiveAllowedTools({
+      hostToolCeiling: ["Read", "Agent", "Workflow"],
+      roleAllowedTools: ["Agent", "Workflow"],
+      knownToolNames: ["Read", "Agent", "Workflow"],
+    })).toEqual(["Agent", "Workflow"]);
+
+    expect(resolveEffectiveAllowedTools({
+      hostToolCeiling: ["Read"],
+      roleAllowedTools: ["Bash"],
+      knownToolNames: ["Read", "Bash"],
+    })).toEqual([]);
+  });
+});
+
 describe("createOpenHarnessRuntime tool visibility", () => {
   it("applies allowedTools and deniedTools to tools registered after runtime creation", async () => {
     const runtime = await createOpenHarnessRuntime({
@@ -111,6 +134,30 @@ describe("createOpenHarnessRuntime tool visibility", () => {
       expect(runtime.toolRegistry.get("DynamicDenied")).toBeUndefined();
       expect(runtime.toolRegistry.get("ToolSearch")).toBeDefined();
       expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("keeps roleAllowedTools under the host tool ceiling", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        allowedTools: ["Read", "Agent"],
+        roleAllowedTools: ["*"],
+      },
+    });
+
+    try {
+      const names = runtime.toolRegistry.getAll().map((tool) => tool.name);
+      expect(names).toEqual(["Read", "Agent"]);
+      expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
+      expect(runtime.toolRegistry.get("Edit")).toBeUndefined();
     } finally {
       await runtime.close();
     }

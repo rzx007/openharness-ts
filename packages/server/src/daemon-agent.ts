@@ -147,7 +147,7 @@ function agentConfigurationFromSession(
       cwd: session.cwd,
       sessionPrompt: configuration.systemPrompt,
     });
-    configuration.allowedTools = getCoordinatorTools();
+    configuration.roleAllowedTools = getCoordinatorTools();
   }
   return configuration;
 }

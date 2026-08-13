@@ -14,6 +14,11 @@ export interface OpenHarnessAgentConfiguration {
   systemPrompt?: string;
   permissionMode?: PermissionMode;
   maxTurns?: number;
+  /** Maximum tools granted by the SDK/host. Descendant agents inherit this ceiling. */
+  hostToolCeiling?: string[];
+  /** Tools this agent role wants to see. ["*"] means no extra role narrowing. */
+  roleAllowedTools?: string[];
+  /** Host tool ceiling kept under the existing public SDK option name. */
   allowedTools?: string[];
   disallowedTools?: string[];
   effort?: Settings["effort"];

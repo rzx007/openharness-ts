@@ -66,6 +66,21 @@ export function resolveRuntimeModel(
   return overrides.model ?? settings.model;
 }
 
+export function resolveEffectiveAllowedTools(options: {
+  hostToolCeiling?: string[];
+  roleAllowedTools?: string[];
+  settingsAllowedTools?: string[];
+  knownToolNames?: string[];
+}): string[] {
+  const knownToolNames = options.knownToolNames ?? [];
+  const hostCeiling = resolveAllowedToolNames(
+    options.hostToolCeiling ?? options.settingsAllowedTools ?? [],
+    knownToolNames,
+  );
+  const roleAllowed = resolveAllowedToolNames(options.roleAllowedTools ?? [], knownToolNames);
+  return intersectToolLimits(hostCeiling, roleAllowed);
+}
+
 export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOptions): Promise<RuntimeBundle> {
   const { settings } = options;
   const cwd = options.cwd ?? process.cwd();
@@ -77,10 +92,12 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
   const baseToolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
-  const effectiveAllowed = new Set(resolveAllowedToolNames(
-    configuration.allowedTools ?? settings.permission.allowedTools ?? [],
+  const effectiveAllowed = new Set(resolveEffectiveAllowedTools({
+    hostToolCeiling: configuration.hostToolCeiling ?? configuration.allowedTools,
+    roleAllowedTools: configuration.roleAllowedTools,
+    settingsAllowedTools: settings.permission.allowedTools,
     knownToolNames,
-  ));
+  }));
   const effectiveDenied = new Set(normalizeToolNames([
     ...(settings.permission.deniedTools ?? []),
     ...(configuration.disallowedTools ?? []),
@@ -187,6 +204,13 @@ class RuntimeToolRegistry implements IToolRegistry {
     if (this.deniedTools.has(name)) return false;
     return this.allowedTools.size === 0 || this.allowedTools.has(name);
   }
+}
+
+function intersectToolLimits(left: string[], right: string[]): string[] {
+  if (left.length === 0) return right;
+  if (right.length === 0) return left;
+  const rightSet = new Set(right);
+  return left.filter((tool) => rightSet.has(tool));
 }
 
 async function attachSandboxRuntime(

@@ -38,7 +38,7 @@ describe("AgentChildManager", () => {
     await manager.closeAll();
   });
 
-  it("does not inherit the parent tool allowlist into child workers", async () => {
+  it("passes the parent tool allowlist as the child host ceiling", async () => {
     const createAgent = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("done"))));
     const manager = createManager(
       new AgentEventBus(),
@@ -60,13 +60,15 @@ describe("AgentChildManager", () => {
     });
 
     expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
-      allowedTools: undefined,
+      hostToolCeiling: ["Agent", "TaskWait", "Workflow"],
+      allowedTools: ["Agent", "TaskWait", "Workflow"],
+      roleAllowedTools: undefined,
       disallowedTools: ["Write"],
     });
     await manager.closeAll();
   });
 
-  it("uses explicit child tools and merges inherited denies", async () => {
+  it("treats explicit child tools as role tools and merges inherited denies", async () => {
     const createAgent = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("done"))));
     const manager = createManager(
       new AgentEventBus(),
@@ -90,7 +92,9 @@ describe("AgentChildManager", () => {
     });
 
     expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
-      allowedTools: ["Read", "Grep"],
+      hostToolCeiling: ["Agent"],
+      allowedTools: ["Agent"],
+      roleAllowedTools: ["Read", "Grep"],
       disallowedTools: ["Write", "Bash"],
     });
     await manager.closeAll();
