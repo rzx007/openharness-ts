@@ -440,16 +440,16 @@ export class SessionStore {
     return clone(row);
   }
 
-  /** Prefer first prompt text for list labels; fall back to stored title. */
+  /** Respect renamed titles; use the first prompt only for legacy placeholder titles. */
   resolveSessionListTitle(sessionId: string): string {
     const session = assertSession(this.state, sessionId);
+    const stored = session.title.trim();
+    if (stored && !isPlaceholderSessionTitle(stored)) return formatSessionTitle(stored);
     const first = Object.values(this.state.inputs)
       .filter((input) => input.sessionId === sessionId)
       .sort((a, b) => a.seq - b.seq)[0];
     const fromPrompt = first ? formatSessionTitle(first.content) : "";
     if (fromPrompt) return fromPrompt;
-    const stored = session.title.trim();
-    if (stored && !isPlaceholderSessionTitle(stored)) return formatSessionTitle(stored);
     if (stored) return stored;
     return session.id.slice(0, 8);
   }

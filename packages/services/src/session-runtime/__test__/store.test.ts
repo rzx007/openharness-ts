@@ -201,6 +201,8 @@ describe("SessionStore", () => {
       const prompt = store.admitPrompt({ id: "i1", sessionId: "s1", content: "hello from the first prompt sentence." });
       expect(store.getSession("s1")?.title).toBe("hello from the first");
       expect(store.resolveSessionListTitle("s1")).toBe("hello from the first");
+      store.updateSession("s1", { title: "Renamed conversation" });
+      expect(store.resolveSessionListTitle("s1")).toBe("Renamed conversation");
       const first = store.createMessage({ id: "m1", sessionId: "s1", role: "user", inputId: prompt.id });
       const userPart = store.upsertMessagePart({
         id: "p1",
