@@ -1,34 +1,26 @@
-# my-app
+# OpenHarness Desktop
 
-An Electron application with React and TypeScript
+Electron + React desktop shell for OpenHarness.
 
-## Recommended IDE Setup
+## Structure
 
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
+- `src/main/core`: app context, window manager, IPC registry, lifecycle helpers.
+- `src/main/features/main-window`: primary application window behavior.
+- `src/main/features/tray`: system tray menu, notification, and tray flash helpers.
+- `src/main/features/pet`: transparent desktop Pet window, visibility, click-through, and position persistence.
+- `src/preload`: safe renderer-facing desktop API exposed as `window.desktop`.
+- `src/shared`: IPC channel names and shared request/result types.
 
-## Project Setup
-
-### Install
+## Development
 
 ```bash
-$ pnpm install
+pnpm install
+pnpm --filter @openharness/desktop dev
 ```
 
-### Development
+## Checks
 
 ```bash
-$ pnpm dev
-```
-
-### Build
-
-```bash
-# For windows
-$ pnpm build:win
-
-# For macOS
-$ pnpm build:mac
-
-# For Linux
-$ pnpm build:linux
+pnpm --filter @openharness/desktop typecheck
+pnpm --filter @openharness/desktop lint
 ```

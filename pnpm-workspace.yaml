@@ -2,6 +2,11 @@ packages:
   - apps/*
   - packages/*
 
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - better-sqlite3
+
 overrides:
   '@types/react': ^19.2.0
 

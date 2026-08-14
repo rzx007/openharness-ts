@@ -1,74 +1,90 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, BrowserWindow, Menu } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+
+import { createAppContext, type AppContext } from './core/app-context'
+import { IpcRegistry } from './core/ipc/registry'
+import { quitApp } from './core/services/lifecycle'
+import { WindowManager } from './core/services/window-manager'
+import { allIpcContributions } from './features'
+import { createMainWindow, showMainWindow } from './features/main-window/window'
+import { createPetWindow } from './features/pet/window'
+import { createTray, destroyTray } from './features/tray/tray'
 import icon from '../../resources/icon.png?asset'
 
-function createWindow(): void {
-  // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
-    show: false,
-    autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
-    }
-  })
+let ctx: AppContext | null = null
+let ipcRegistry: IpcRegistry | null = null
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
-  })
-
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
-
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-transparent-visuals')
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+  process.exit(0)
+}
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+app.whenReady().then(() => {
+  electronApp.setAppUserModelId(is.dev ? 'dev.openharness.desktop' : 'app.openharness.desktop')
+  app.setName('OpenHarness')
+  Menu.setApplicationMenu(null)
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+    window.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || input.key !== 'F12') return
+      if (input.control || input.meta || input.alt) return
+
+      event.preventDefault()
+      window.webContents.toggleDevTools()
+    })
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
-
-  createWindow()
-
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  const windowManager = new WindowManager()
+  ctx = createAppContext({
+    mainDirname: __dirname,
+    rendererUrl: is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined,
+    iconPath: icon,
+    windowManager,
+    createMainWindow: () => createMainWindow(requireContext())
   })
+
+  ipcRegistry = new IpcRegistry(ctx)
+  for (const contribution of allIpcContributions) {
+    ipcRegistry.register(contribution)
+  }
+
+  const mainWindow = createMainWindow(ctx)
+  createTray(ctx)
+  createPetWindow(ctx)
+  showMainWindow(mainWindow)
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+app.on('activate', () => {
+  if (!ctx) return
+  const appContext = requireContext()
+  const mainWindow = appContext.windowManager.getMain() ?? createMainWindow(appContext)
+  showMainWindow(mainWindow)
+})
+
+app.on('second-instance', () => {
+  if (!ctx) return
+  const appContext = requireContext()
+  const mainWindow = appContext.windowManager.getMain() ?? createMainWindow(appContext)
+  showMainWindow(mainWindow)
+})
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
+  if (process.platform !== 'darwin' && BrowserWindow.getAllWindows().length === 0) {
+    quitApp()
   }
 })
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
+app.on('before-quit', () => {
+  ipcRegistry?.dispose()
+  destroyTray()
+})
+
+function requireContext(): AppContext {
+  if (!ctx) throw new Error('AppContext is not initialized')
+  return ctx
+}

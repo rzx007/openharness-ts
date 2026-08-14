@@ -1,0 +1,176 @@
+import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
+
+import type { AppContext } from '../../core/app-context'
+import { quitApp } from '../../core/services/lifecycle'
+import { showMainWindow } from '../main-window/window'
+import { hidePetWindow, showPetWindow } from '../pet/window'
+
+let tray: Tray | null = null
+let normalIcon: Electron.NativeImage | null = null
+let notifyIcon: Electron.NativeImage | null = null
+let flashTimer: ReturnType<typeof setInterval> | null = null
+
+export function createTray(ctx: AppContext): void {
+  if (tray || shouldSkipTray()) return
+
+  const baseIcon = nativeImage.createFromPath(ctx.paths.iconPath)
+  normalIcon = prepareTrayIcon(baseIcon)
+  notifyIcon = createNotifyIcon(normalIcon)
+
+  try {
+    tray = new Tray(normalIcon)
+    tray.setToolTip(app.getName())
+    tray.setContextMenu(createTrayMenu(ctx))
+    tray.on('double-click', () => showMainFromTray(ctx))
+  } catch (error) {
+    console.error('[tray] failed to create tray', error)
+    tray = null
+    normalIcon = null
+    notifyIcon = null
+  }
+}
+
+export function showMainFromTray(ctx: AppContext): void {
+  const mainWindow = ctx.windowManager.getMain() ?? ctx.createMainWindow()
+  showMainWindow(mainWindow)
+  stopFlashTray()
+}
+
+export function flashTray(): void {
+  if (!tray || !normalIcon || !notifyIcon || flashTimer) return
+
+  let active = false
+  flashTimer = setInterval(() => {
+    if (!tray || tray.isDestroyed()) {
+      stopFlashTray()
+      return
+    }
+
+    tray.setImage(active ? normalIcon! : notifyIcon!)
+    active = !active
+  }, 500)
+}
+
+export function stopFlashTray(): void {
+  if (flashTimer) {
+    clearInterval(flashTimer)
+    flashTimer = null
+  }
+
+  if (tray && normalIcon && !tray.isDestroyed()) {
+    tray.setImage(normalIcon)
+  }
+}
+
+export function sendTrayNotification(options: {
+  title: string
+  body: string
+  silent?: boolean
+  showWhenFocused?: boolean
+}): void {
+  const focused = Boolean(ctxFocusedWindow())
+  if (focused && !options.showWhenFocused) return
+  if (!Notification.isSupported()) return
+
+  new Notification({
+    title: options.title,
+    body: options.body,
+    silent: options.silent
+  }).show()
+}
+
+export function destroyTray(): void {
+  stopFlashTray()
+  if (tray && !tray.isDestroyed()) tray.destroy()
+  tray = null
+  normalIcon = null
+  notifyIcon = null
+}
+
+function createTrayMenu(ctx: AppContext): Electron.Menu {
+  return Menu.buildFromTemplate([
+    {
+      label: 'Show main window',
+      click: () => showMainFromTray(ctx)
+    },
+    {
+      label: 'Show desktop Pet',
+      click: () => showPetWindow(ctx)
+    },
+    {
+      label: 'Hide desktop Pet',
+      click: () => hidePetWindow(ctx)
+    },
+    { type: 'separator' },
+    {
+      label: 'Restart app',
+      click: () => {
+        app.relaunch({ args: process.argv.slice(1).concat(['--relaunched']) })
+        quitApp()
+      }
+    },
+    {
+      label: 'Quit',
+      click: () => quitApp()
+    }
+  ])
+}
+
+function prepareTrayIcon(image: Electron.NativeImage): Electron.NativeImage {
+  if (process.platform !== 'darwin') return image
+
+  const resized = image.resize({ width: 18, height: 18 })
+  resized.setTemplateImage(true)
+  return resized
+}
+
+function createNotifyIcon(image: Electron.NativeImage): Electron.NativeImage {
+  if (process.platform === 'darwin') return image
+
+  const size = 20
+  const source = image.resize({ width: size, height: size })
+  const canvasSize = size + 4
+  const canvas = Buffer.alloc(canvasSize * canvasSize * 4)
+  const bitmap = source.toBitmap()
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const src = (y * size + x) * 4
+      const dst = ((y + 2) * canvasSize + x + 2) * 4
+      canvas[dst] = bitmap[src + 2]
+      canvas[dst + 1] = bitmap[src + 1]
+      canvas[dst + 2] = bitmap[src]
+      canvas[dst + 3] = bitmap[src + 3]
+    }
+  }
+
+  for (let y = 0; y < 6; y += 1) {
+    for (let x = 0; x < 6; x += 1) {
+      const dx = canvasSize - 7 + x
+      const dy = 1 + y
+      const dst = (dy * canvasSize + dx) * 4
+      canvas[dst] = 235
+      canvas[dst + 1] = 84
+      canvas[dst + 2] = 70
+      canvas[dst + 3] = 255
+    }
+  }
+
+  return nativeImage.createFromBuffer(canvas, {
+    width: canvasSize,
+    height: canvasSize
+  })
+}
+
+function shouldSkipTray(): boolean {
+  if (process.platform !== 'linux') return false
+
+  const gdkBackend = process.env.GDK_BACKEND
+  const waylandOnly = gdkBackend?.split(':').includes('wayland') && !gdkBackend.includes('x11')
+  const hasWayland = process.env.XDG_SESSION_TYPE === 'wayland' || Boolean(process.env.WAYLAND_DISPLAY)
+  return Boolean(waylandOnly || (hasWayland && !process.env.DISPLAY))
+}
+
+function ctxFocusedWindow(): BrowserWindow | null {
+  return BrowserWindow.getFocusedWindow()
+}
