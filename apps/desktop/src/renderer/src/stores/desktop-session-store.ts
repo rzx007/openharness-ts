@@ -1,14 +1,14 @@
-import { create } from 'zustand'
+import { create } from "zustand"
 
 import type {
   DesktopBootstrapData,
   DesktopModel,
   DesktopProject,
   DesktopSessionRecord,
-  DesktopSessionView
-} from '@shared/session-types'
+  DesktopSessionView,
+} from "@shared/session-types"
 
-type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
+type LoadStatus = "idle" | "loading" | "ready" | "error"
 
 interface DesktopSessionState {
   loadStatus: LoadStatus
@@ -29,6 +29,9 @@ interface DesktopSessionState {
   startNewConversation: () => Promise<void>
   chooseProject: () => Promise<void>
   selectProject: (project: DesktopProject) => Promise<void>
+  renameProject: (path: string, name: string) => Promise<void>
+  togglePinProject: (path: string) => Promise<void>
+  removeProject: (path: string) => Promise<void>
   selectModel: (model: string) => void
   openSession: (sessionId: string) => Promise<void>
   startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
@@ -40,15 +43,15 @@ interface DesktopSessionState {
   interrupt: () => Promise<void>
   replyPermission: (
     permissionId: string,
-    status: 'approved' | 'denied',
-    decision?: 'once' | 'session'
+    status: "approved" | "denied",
+    decision?: "once" | "session"
   ) => Promise<void>
   applySessionUpdate: (view: DesktopSessionView) => void
   clearError: () => void
 }
 
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => ({
-  loadStatus: 'idle',
+  loadStatus: "idle",
   error: null,
   projects: [],
   sessions: [],
@@ -64,13 +67,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   sending: false,
 
   async initialize() {
-    if (get().loadStatus === 'loading' || get().loadStatus === 'ready') return
-    set({ loadStatus: 'loading', error: null })
+    if (get().loadStatus === "loading" || get().loadStatus === "ready") return
+    set({ loadStatus: "loading", error: null })
     try {
       const data = await window.desktop.sessions.bootstrap()
       const selectedProject = resolveInitialProject(data, get().selectedProject)
       set({
-        loadStatus: 'ready',
+        loadStatus: "ready",
         projects: data.projects,
         sessions: sortSessions(data.sessions),
         archivedSessions: sortSessions(data.archivedSessions),
@@ -78,11 +81,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         defaultModel: data.defaultModel,
         selectedModel: data.defaultModel,
         selectedProject,
-        error: null
+        error: null,
       })
       if (selectedProject) await get().selectProject(selectedProject)
     } catch (error) {
-      set({ loadStatus: 'error', error: errorMessage(error) })
+      set({ loadStatus: "error", error: errorMessage(error) })
     }
   },
 
@@ -93,7 +96,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       sessionView: null,
       openingSession: false,
       sending: false,
-      error: null
+      error: null,
     })
   },
 
@@ -105,7 +108,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         projects: upsertProject(state.projects, details.project),
         selectedProject: details.project,
         branch: details.branch,
-        error: null
+        error: null,
       }))
     } catch (error) {
       set({ error: errorMessage(error) })
@@ -119,10 +122,70 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       set((state) => ({
         projects: upsertProject(state.projects, details.project),
         selectedProject: details.project,
-        branch: details.branch
+        branch: details.branch,
       }))
     } catch (error) {
       set({ error: errorMessage(error) })
+    }
+  },
+
+  async renameProject(path, name) {
+    const normalizedName = name.replace(/\s+/g, " ").trim()
+    if (!normalizedName) return
+    try {
+      const project = await window.desktop.sessions.renameProject({ path, name: normalizedName })
+      set((state) => ({
+        projects: upsertProject(state.projects, project),
+        selectedProject: samePath(state.selectedProject?.path ?? "", path)
+          ? project
+          : state.selectedProject,
+        error: null,
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
+  async togglePinProject(path) {
+    const existing = get().projects.find((project) => samePath(project.path, path))
+    if (!existing) return
+    try {
+      const project = await window.desktop.sessions.setProjectPinned({
+        path,
+        pinned: !existing.pinnedAt,
+      })
+      set((state) => ({
+        projects: upsertProject(state.projects, project),
+        selectedProject: samePath(state.selectedProject?.path ?? "", path)
+          ? project
+          : state.selectedProject,
+        error: null,
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
+  async removeProject(path) {
+    try {
+      await window.desktop.sessions.removeProject(path)
+      set((state) => {
+        const projects = state.projects.filter((project) => !samePath(project.path, path))
+        const removedSelected = samePath(state.selectedProject?.path ?? "", path)
+        return {
+          projects,
+          selectedProject: removedSelected ? (projects[0] ?? null) : state.selectedProject,
+          branch: removedSelected ? null : state.branch,
+          error: null,
+        }
+      })
+      const project = get().selectedProject
+      if (project) await get().selectProject(project)
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
     }
   },
 
@@ -144,13 +207,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           projectFromSession(view.session),
         selectedModel: view.session.model,
         sessions:
-          view.session.status === 'archived'
+          view.session.status === "archived"
             ? state.sessions.filter((session) => session.id !== view.session.id)
             : upsertSession(state.sessions, view.session),
         archivedSessions:
-          view.session.status === 'archived'
+          view.session.status === "archived"
             ? upsertSession(state.archivedSessions, view.session)
-            : state.archivedSessions
+            : state.archivedSessions,
       }))
     } catch (error) {
       if (get().activeSessionId === sessionId) {
@@ -171,13 +234,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       selectedProject: project,
       selectedModel: session.model,
       branch: null,
-      error: null
+      error: null,
     })
     await get().selectProject(project)
   },
 
   async renameSession(sessionId, title) {
-    const normalizedTitle = title.replace(/\s+/g, ' ').trim()
+    const normalizedTitle = title.replace(/\s+/g, " ").trim()
     if (!normalizedTitle) return
     try {
       const session = await window.desktop.sessions.rename({ sessionId, title: normalizedTitle })
@@ -187,7 +250,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           state.sessionView?.session.id === sessionId
             ? { ...state.sessionView, session }
             : state.sessionView,
-        error: null
+        error: null,
       }))
     } catch (error) {
       set({ error: errorMessage(error) })
@@ -201,7 +264,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     try {
       const session = await window.desktop.sessions.setPinned({
         sessionId,
-        pinned: !isSessionPinned(existing)
+        pinned: !isSessionPinned(existing),
       })
       set((state) => ({
         sessions: upsertSession(state.sessions, session),
@@ -209,7 +272,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           state.sessionView?.session.id === sessionId
             ? { ...state.sessionView, session }
             : state.sessionView,
-        error: null
+        error: null,
       }))
     } catch (error) {
       set({ error: errorMessage(error) })
@@ -231,11 +294,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         openingSession: false,
         sending: false,
         selectedProject: isActive
-          ? state.projects.find((project) => samePath(project.path, existing.cwd)) ??
-            projectFromSession(existing)
+          ? (state.projects.find((project) => samePath(project.path, existing.cwd)) ??
+            projectFromSession(existing))
           : state.selectedProject,
         selectedModel: isActive ? existing.model : state.selectedModel,
-        error: null
+        error: null,
       }))
       if (isActive) {
         const project = get().selectedProject
@@ -253,11 +316,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const model = selectedModel ?? defaultModel
     if (!prompt || get().sending) return
     if (!selectedProject) {
-      set({ error: '请先选择一个项目目录。' })
+      set({ error: "请先选择一个项目目录。" })
       return
     }
     if (!model) {
-      set({ error: '没有可用模型，请先配置模型。' })
+      set({ error: "没有可用模型，请先配置模型。" })
       return
     }
 
@@ -265,12 +328,12 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     try {
       const session = await window.desktop.sessions.create({
         cwd: selectedProject.path,
-        model
+        model,
       })
       set((state) => ({
         activeSessionId: session.id,
         sessions: upsertSession(state.sessions, session),
-        openingSession: true
+        openingSession: true,
       }))
       const view = await window.desktop.sessions.open(session.id)
       set({ sessionView: view, openingSession: false })
@@ -284,9 +347,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
             state.sessionView?.session.id === session.id
               ? {
                   ...state.sessionView,
-                  session: { ...state.sessionView.session, title }
+                  session: { ...state.sessionView.session, title },
                 }
-              : state.sessionView
+              : state.sessionView,
         }
       })
     } catch (error) {
@@ -322,7 +385,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     }
   },
 
-  async replyPermission(permissionId, status, decision = 'once') {
+  async replyPermission(permissionId, status, decision = "once") {
     try {
       await window.desktop.sessions.replyPermission({ permissionId, status, decision })
     } catch (error) {
@@ -347,20 +410,20 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         sessionView: { ...view, session },
         openingSession: false,
         sessions:
-          session.status === 'archived'
+          session.status === "archived"
             ? state.sessions.filter((item) => item.id !== session.id)
             : upsertSession(state.sessions, session),
         archivedSessions:
-          session.status === 'archived'
+          session.status === "archived"
             ? upsertSession(state.archivedSessions, session)
-            : state.archivedSessions
+            : state.archivedSessions,
       }
     })
   },
 
   clearError() {
     set({ error: null })
-  }
+  },
 }))
 
 export function attachDesktopSessionEvents(): () => void {
@@ -382,7 +445,7 @@ function resolveInitialProject(
 
 function upsertProject(projects: DesktopProject[], project: DesktopProject): DesktopProject[] {
   return [project, ...projects.filter((item) => !samePath(item.path, project.path))].sort(
-    (a, b) => b.lastOpenedAt - a.lastOpenedAt
+    (a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) || b.lastOpenedAt - a.lastOpenedAt
   )
 }
 
@@ -405,18 +468,18 @@ export function isSessionPinned(session: DesktopSessionRecord): boolean {
 }
 
 function sessionPinnedAt(session: DesktopSessionRecord): number {
-  const desktop = session.metadata['desktop']
-  if (!desktop || typeof desktop !== 'object' || Array.isArray(desktop)) return 0
-  const pinnedAt = (desktop as Record<string, unknown>)['pinnedAt']
-  return typeof pinnedAt === 'number' ? pinnedAt : 0
+  const desktop = session.metadata["desktop"]
+  if (!desktop || typeof desktop !== "object" || Array.isArray(desktop)) return 0
+  const pinnedAt = (desktop as Record<string, unknown>)["pinnedAt"]
+  return typeof pinnedAt === "number" ? pinnedAt : 0
 }
 
 function projectFromSession(session: DesktopSessionRecord): DesktopProject {
-  const normalized = session.cwd.replace(/[\\/]+$/, '')
+  const normalized = session.cwd.replace(/[\\/]+$/, "")
   return {
     name: normalized.split(/[\\/]/).pop() || session.cwd,
     path: session.cwd,
-    lastOpenedAt: session.updatedAt
+    lastOpenedAt: session.updatedAt,
   }
 }
 
@@ -425,21 +488,22 @@ function samePath(left: string, right: string): boolean {
 }
 
 function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLocaleLowerCase()
+  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase()
 }
 
 function formatSessionTitle(content: string): string {
-  const normalized = content.replace(/\s+/g, ' ').trim()
+  const normalized = content.replace(/\s+/g, " ").trim()
   const firstSentence = normalized.match(/^.*?[。！？.!?]/)?.[0] ?? normalized
-  return [...firstSentence].slice(0, 20).join('')
+  return [...firstSentence].slice(0, 20).join("")
 }
 
 function isPlaceholderTitle(title: string): boolean {
   const normalized = title.trim()
-  return normalized === '' || normalized === 'TUI'
+  return normalized === "" || normalized === "TUI"
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message.replace(/^Error invoking remote method '[^']+': /, '')
+  if (error instanceof Error)
+    return error.message.replace(/^Error invoking remote method '[^']+': /, "")
   return String(error)
 }

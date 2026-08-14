@@ -48,6 +48,11 @@ export const desktopAPI = {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),
     inspectProject: (path: string) => invoke(IpcChannels.sessionInspectProject, path),
+    renameProject: (input: IpcInvokeMap[typeof IpcChannels.projectRename]["args"][0]) =>
+      invoke(IpcChannels.projectRename, input),
+    setProjectPinned: (input: IpcInvokeMap[typeof IpcChannels.projectSetPinned]["args"][0]) =>
+      invoke(IpcChannels.projectSetPinned, input),
+    removeProject: (path: string) => invoke(IpcChannels.projectRemove, path),
     create: (input: IpcInvokeMap[typeof IpcChannels.sessionCreate]["args"][0]) =>
       invoke(IpcChannels.sessionCreate, input),
     open: (sessionId: string) => invoke(IpcChannels.sessionOpen, sessionId),
@@ -75,7 +80,8 @@ export const desktopAPI = {
   },
   events: {
     onMainProcessMessage: (listener: (message: string) => void): (() => void) => {
-      const wrapped = (_event: Electron.IpcRendererEvent, message: string): void => listener(message)
+      const wrapped = (_event: Electron.IpcRendererEvent, message: string): void =>
+        listener(message)
       ipcRenderer.on("main-process-message", wrapped)
       return () => ipcRenderer.removeListener("main-process-message", wrapped)
     },

@@ -29,6 +29,8 @@ import type {
   DesktopProjectDetails,
   DesktopSessionView,
   PinDesktopSessionInput,
+  PinDesktopProjectInput,
+  RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
@@ -36,6 +38,13 @@ import type {
 
 interface DesktopPreferences {
   recentProjects: DesktopProject[]
+  projectPreferences: Record<string, DesktopProjectPreference>
+}
+
+interface DesktopProjectPreference {
+  name?: string
+  pinnedAt?: number
+  hidden?: boolean
 }
 
 interface SessionSubscription {
@@ -45,7 +54,7 @@ interface SessionSubscription {
 
 const preferences = new Store<DesktopPreferences>({
   name: "desktop-preferences",
-  defaults: { recentProjects: [] },
+  defaults: { recentProjects: [], projectPreferences: {} },
 })
 
 class DesktopSessionService {
@@ -123,6 +132,38 @@ class DesktopSessionService {
     const session = await client.createSession({ cwd, model, title: "" })
     this.rememberProject(cwd)
     return session
+  }
+
+  renameProject(input: RenameDesktopProjectInput): DesktopProject {
+    const path = resolveRequiredPath(input.path)
+    const name = requireString(input.name, "项目名称")
+    this.updateProjectPreference(path, { name, hidden: false })
+    return this.projectWithPreferences({
+      name: basename(path),
+      path,
+      lastOpenedAt: this.projectLastOpenedAt(path),
+    })
+  }
+
+  setProjectPinned(input: PinDesktopProjectInput): DesktopProject {
+    const path = resolveRequiredPath(input.path)
+    this.updateProjectPreference(path, { pinnedAt: input.pinned ? Date.now() : undefined })
+    return this.projectWithPreferences({
+      name: basename(path),
+      path,
+      lastOpenedAt: this.projectLastOpenedAt(path),
+    })
+  }
+
+  removeProject(inputPath: string): void {
+    const path = resolveRequiredPath(inputPath)
+    this.updateProjectPreference(path, { hidden: true })
+    preferences.set(
+      "recentProjects",
+      preferences
+        .get("recentProjects")
+        .filter((project) => projectKey(project.path) !== projectKey(path))
+    )
   }
 
   async openSession(webContents: WebContents, sessionIdInput: string): Promise<DesktopSessionView> {
@@ -315,22 +356,62 @@ class DesktopSessionService {
         })
       }
     }
-    return [...projects.values()].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+    return [...projects.values()]
+      .filter((project) => !this.projectPreference(project.path).hidden)
+      .map((project) => this.projectWithPreferences(project))
+      .sort(sortProjects)
   }
 
   private rememberProject(inputPath: string): DesktopProject {
     const path = resolve(inputPath)
-    const project: DesktopProject = {
+    this.updateProjectPreference(path, { hidden: false })
+    const project = this.projectWithPreferences({
       name: basename(path),
       path,
       lastOpenedAt: Date.now(),
-    }
+    })
     const recent = preferences
       .get("recentProjects")
       .filter((item) => projectKey(item.path) !== projectKey(path))
     preferences.set("recentProjects", [project, ...recent].slice(0, 20))
     return project
   }
+
+  private projectPreference(path: string): DesktopProjectPreference {
+    return preferences.get("projectPreferences")[projectKey(path)] ?? {}
+  }
+
+  private updateProjectPreference(path: string, update: DesktopProjectPreference): void {
+    const key = projectKey(path)
+    const all = preferences.get("projectPreferences")
+    const next = { ...all[key], ...update }
+    for (const [field, value] of Object.entries(next)) {
+      if (value === undefined) delete next[field as keyof DesktopProjectPreference]
+    }
+    preferences.set("projectPreferences", { ...all, [key]: next })
+  }
+
+  private projectWithPreferences(project: DesktopProject): DesktopProject {
+    const preference = this.projectPreference(project.path)
+    return {
+      ...project,
+      name: preference.name ?? project.name,
+      ...(preference.pinnedAt ? { pinnedAt: preference.pinnedAt } : {}),
+    }
+  }
+
+  private projectLastOpenedAt(path: string): number {
+    return (
+      preferences
+        .get("recentProjects")
+        .find((project) => projectKey(project.path) === projectKey(path))?.lastOpenedAt ??
+      Date.now()
+    )
+  }
+}
+
+function sortProjects(left: DesktopProject, right: DesktopProject): number {
+  return (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0) || right.lastOpenedAt - left.lastOpenedAt
 }
 
 async function healthWithTimeout(client: OpenHarnessClient): Promise<void> {

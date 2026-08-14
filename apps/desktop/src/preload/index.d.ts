@@ -1,10 +1,10 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
+import { ElectronAPI } from "@electron-toolkit/preload"
 import type {
   DesktopAppInfo,
   PetState,
   PlatformInfo,
-  TrayNotificationOptions
-} from '../shared/ipc-channels'
+  TrayNotificationOptions,
+} from "../shared/ipc-channels"
 import type {
   CreateDesktopSessionInput,
   DesktopBootstrapData,
@@ -12,10 +12,12 @@ import type {
   DesktopSessionRecord,
   DesktopSessionView,
   PinDesktopSessionInput,
+  PinDesktopProjectInput,
+  RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
-  SendDesktopPromptInput
-} from '../shared/session-types'
+  SendDesktopPromptInput,
+} from "../shared/session-types"
 
 export interface DesktopAPI {
   app: {
@@ -48,6 +50,9 @@ export interface DesktopAPI {
     bootstrap: () => Promise<DesktopBootstrapData>
     chooseProject: () => Promise<DesktopProjectDetails | null>
     inspectProject: (path: string) => Promise<DesktopProjectDetails>
+    renameProject: (input: RenameDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
+    setProjectPinned: (input: PinDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
+    removeProject: (path: string) => Promise<void>
     create: (input: CreateDesktopSessionInput) => Promise<DesktopSessionRecord>
     open: (sessionId: string) => Promise<DesktopSessionView>
     close: () => Promise<void>

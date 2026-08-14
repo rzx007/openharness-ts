@@ -2,6 +2,7 @@ export interface DesktopProject {
   name: string
   path: string
   lastOpenedAt: number
+  pinnedAt?: number
 }
 
 export interface DesktopModel {
@@ -15,7 +16,7 @@ export interface DesktopModel {
   reasoning?: boolean
   vision?: boolean
   toolCalling?: boolean
-  status?: 'active' | 'beta'
+  status?: "active" | "beta"
 }
 
 export interface DesktopSessionRecord {
@@ -25,7 +26,7 @@ export interface DesktopSessionRecord {
   title: string
   model: string
   agent?: string
-  status: 'idle' | 'running' | 'closing' | 'archived' | 'error'
+  status: "idle" | "running" | "closing" | "archived" | "error"
   metadata: Record<string, unknown>
   createdAt: number
   updatedAt: number
@@ -36,7 +37,7 @@ export interface DesktopSessionInput {
   id: string
   sessionId: string
   seq: number
-  delivery: 'queue' | 'steer'
+  delivery: "queue" | "steer"
   content: string
   promotedMessageId?: string
   metadata: Record<string, unknown>
@@ -47,7 +48,7 @@ export interface DesktopSessionMessage {
   id: string
   sessionId: string
   seq: number
-  role: 'system' | 'user' | 'assistant'
+  role: "system" | "user" | "assistant"
   runId?: string
   inputId?: string
   metadata: Record<string, unknown>
@@ -60,8 +61,8 @@ export interface DesktopSessionPart {
   sessionId: string
   messageId: string
   seq: number
-  type: 'text' | 'reasoning' | 'tool' | 'tool_result' | 'error' | 'log'
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted'
+  type: "text" | "reasoning" | "tool" | "tool_result" | "error" | "log"
+  status: "pending" | "running" | "completed" | "failed" | "interrupted"
   text?: string
   toolUseId?: string
   toolName?: string
@@ -77,7 +78,7 @@ export interface DesktopSessionRun {
   id: string
   sessionId: string
   inputId?: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted'
+  status: "pending" | "running" | "completed" | "failed" | "interrupted"
   startedAt?: number
   finishedAt?: number
   error?: string
@@ -92,7 +93,7 @@ export interface DesktopSessionTask {
   childSessionId?: string
   runId?: string
   type: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'interrupted'
+  status: "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted"
   description: string
   cwd: string
   output?: string
@@ -110,7 +111,7 @@ export interface DesktopPermissionRequest {
   runId?: string
   toolName: string
   payload: Record<string, unknown>
-  status: 'pending' | 'approved' | 'denied' | 'expired'
+  status: "pending" | "approved" | "denied" | "expired"
   decision?: string
   decidedByClientId?: string
   createdAt: number
@@ -131,7 +132,7 @@ export interface DesktopProjectDetails {
   branch: string | null
 }
 
-export type DesktopSessionSyncStatus = 'connected' | 'reconnecting'
+export type DesktopSessionSyncStatus = "connected" | "reconnecting"
 
 export interface DesktopSessionView {
   cursor: number
@@ -165,8 +166,18 @@ export interface PinDesktopSessionInput {
   pinned: boolean
 }
 
+export interface RenameDesktopProjectInput {
+  path: string
+  name: string
+}
+
+export interface PinDesktopProjectInput {
+  path: string
+  pinned: boolean
+}
+
 export interface ReplyDesktopPermissionInput {
   permissionId: string
-  status: 'approved' | 'denied'
-  decision?: 'once' | 'session'
+  status: "approved" | "denied"
+  decision?: "once" | "session"
 }

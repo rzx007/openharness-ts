@@ -2,6 +2,8 @@ import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
   CreateDesktopSessionInput,
   PinDesktopSessionInput,
+  PinDesktopProjectInput,
+  RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
@@ -24,6 +26,20 @@ export const sessionIpcContribution: IpcContribution = {
       {
         channel: IpcChannels.sessionInspectProject,
         handler: (_event, path) => desktopSessionService.inspectProject(String(path ?? "")),
+      },
+      {
+        channel: IpcChannels.projectRename,
+        handler: (_event, input) =>
+          desktopSessionService.renameProject(input as RenameDesktopProjectInput),
+      },
+      {
+        channel: IpcChannels.projectSetPinned,
+        handler: (_event, input) =>
+          desktopSessionService.setProjectPinned(input as PinDesktopProjectInput),
+      },
+      {
+        channel: IpcChannels.projectRemove,
+        handler: (_event, path) => desktopSessionService.removeProject(String(path ?? "")),
       },
       {
         channel: IpcChannels.sessionCreate,

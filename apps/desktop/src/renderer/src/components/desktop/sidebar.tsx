@@ -10,6 +10,7 @@ import {
   GitBranchPlus,
   GitPullRequest,
   Grid2X2,
+  MessageCircle,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
@@ -17,6 +18,7 @@ import {
   PinOff,
   PlugZap,
   Search,
+  Trash2,
 } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { useMemo, useRef, useState } from "react"
@@ -64,10 +66,16 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
   const renameSession = useDesktopSessionStore((state) => state.renameSession)
   const togglePinSession = useDesktopSessionStore((state) => state.togglePinSession)
   const archiveSession = useDesktopSessionStore((state) => state.archiveSession)
+  const renameProject = useDesktopSessionStore((state) => state.renameProject)
+  const togglePinProject = useDesktopSessionStore((state) => state.togglePinProject)
+  const removeProject = useDesktopSessionStore((state) => state.removeProject)
   const [archiveMode, setArchiveMode] = useState(false)
   const [renameTarget, setRenameTarget] = useState<DesktopSessionRecord | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<DesktopSessionRecord | null>(null)
   const [renameValue, setRenameValue] = useState("")
+  const [renameProjectTarget, setRenameProjectTarget] = useState<DesktopProject | null>(null)
+  const [removeProjectTarget, setRemoveProjectTarget] = useState<DesktopProject | null>(null)
+  const [projectName, setProjectName] = useState("")
   const [busy, setBusy] = useState(false)
   const [projectExpansion, setProjectExpansion] = useState<Record<string, boolean>>({})
   const recentSessions = useMemo(() => sessions.slice(0, 4), [sessions])
@@ -114,12 +122,39 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
       .finally(() => setBusy(false))
   }
 
+  const beginProjectRename = (project: DesktopProject): void => {
+    setProjectName(project.name)
+    setRenameProjectTarget(project)
+  }
+
+  const submitProjectRename = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    if (!renameProjectTarget || !projectName.trim() || busy) return
+    setBusy(true)
+    void renameProject(renameProjectTarget.path, projectName)
+      .then(() => setRenameProjectTarget(null))
+      .finally(() => setBusy(false))
+  }
+
+  const confirmProjectRemove = (): void => {
+    if (!removeProjectTarget || busy) return
+    setBusy(true)
+    void removeProject(removeProjectTarget.path)
+      .then(() => setRemoveProjectTarget(null))
+      .finally(() => setBusy(false))
+  }
+
   const sessionActions: SessionActions = {
     onOpen: (session) => void openSession(session.id),
     onRename: beginRename,
     onTogglePin: (session) => void togglePinSession(session.id),
     onStartFrom: (session) => void startConversationFrom(session),
     onArchive: setArchiveTarget,
+  }
+  const projectActions: ProjectActions = {
+    onRename: beginProjectRename,
+    onTogglePin: (project) => void togglePinProject(project.path),
+    onRemove: setRemoveProjectTarget,
   }
 
   return (
@@ -200,6 +235,7 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
                         onToggle={() =>
                           setProjectExpansion((current) => ({ ...current, [path]: !expanded }))
                         }
+                        projectActions={projectActions}
                         actions={sessionActions}
                       />
                     )
@@ -313,6 +349,64 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
           </div>
         </DialogContent>
       </DialogRoot>
+
+      <DialogRoot
+        open={renameProjectTarget !== null}
+        onOpenChange={(value) => !value && setRenameProjectTarget(null)}
+      >
+        <DialogContent>
+          <form onSubmit={submitProjectRename}>
+            <DialogTitle className="text-sm font-semibold">重命名项目</DialogTitle>
+            <DialogDescription className="mt-1 text-xs text-muted-foreground">
+              只修改 OpenHarness 中显示的名称，不会重命名磁盘目录。
+            </DialogDescription>
+            <input
+              autoFocus
+              value={projectName}
+              onChange={(event) => setProjectName(event.target.value)}
+              maxLength={80}
+              aria-label="项目名称"
+              className="mt-4 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">
+                取消
+              </DialogClose>
+              <button
+                type="submit"
+                disabled={!projectName.trim() || busy}
+                className="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
+              >
+                {busy ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </DialogRoot>
+
+      <DialogRoot
+        open={removeProjectTarget !== null}
+        onOpenChange={(value) => !value && setRemoveProjectTarget(null)}
+      >
+        <DialogContent>
+          <DialogTitle className="text-sm font-semibold">从列表移除项目？</DialogTitle>
+          <DialogDescription className="mt-2 text-xs leading-5 text-muted-foreground">
+            “{removeProjectTarget?.name}
+            ”将不再出现在项目列表中。磁盘目录和已有会话都会保留，之后可以重新选择该目录恢复项目。
+          </DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">取消</DialogClose>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={confirmProjectRemove}
+              className="text-destructive-foreground h-8 rounded-md bg-destructive px-3 text-xs disabled:opacity-50"
+            >
+              {busy ? "移除中..." : "从列表移除"}
+            </button>
+          </div>
+        </DialogContent>
+      </DialogRoot>
     </>
   )
 }
@@ -323,6 +417,12 @@ type SessionActions = {
   onTogglePin: (session: DesktopSessionRecord) => void
   onStartFrom: (session: DesktopSessionRecord) => void
   onArchive: (session: DesktopSessionRecord) => void
+}
+
+type ProjectActions = {
+  onRename: (project: DesktopProject) => void
+  onTogglePin: (project: DesktopProject) => void
+  onRemove: (project: DesktopProject) => void
 }
 
 function SessionRow({
@@ -412,6 +512,7 @@ function ProjectGroup({
   activeSessionId,
   expanded,
   onToggle,
+  projectActions,
   actions,
 }: {
   project: DesktopProject
@@ -419,27 +520,81 @@ function ProjectGroup({
   activeSessionId: string | null
   expanded: boolean
   onToggle: () => void
+  projectActions: ProjectActions
   actions: SessionActions
 }): React.JSX.Element {
   const [showAll, setShowAll] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const visibleSessions = showAll ? sessions : sessions.slice(0, 5)
 
   return (
     <section>
-      <button
-        type="button"
-        title={project.path}
-        aria-expanded={expanded}
-        onClick={onToggle}
-        className="flex h-7.5 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12.5px] font-[450] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        {expanded ? (
-          <FolderOpen className="size-3.75 shrink-0 text-sidebar-muted" strokeWidth={1.7} />
-        ) : (
-          <FolderClosed className="size-3.75 shrink-0 text-sidebar-muted" strokeWidth={1.7} />
-        )}
-        <span className="truncate">{project.name}</span>
-      </button>
+      <DropdownMenu>
+        <div
+          className="group/project relative flex min-w-0 items-center"
+          onContextMenu={(event) => {
+            event.preventDefault()
+            triggerRef.current?.click()
+          }}
+        >
+          <button
+            type="button"
+            title={project.path}
+            aria-expanded={expanded}
+            onClick={onToggle}
+            className="flex h-7.5 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 pr-8 text-left text-[12.5px] font-[450] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {expanded ? (
+              <FolderOpen className="size-3.75 shrink-0 text-sidebar-muted" strokeWidth={1.7} />
+            ) : (
+              <FolderClosed className="size-3.75 shrink-0 text-sidebar-muted" strokeWidth={1.7} />
+            )}
+            <span className="truncate">{project.name}</span>
+            {project.pinnedAt ? (
+              <Pin className="ml-auto size-3 shrink-0 text-sidebar-muted" />
+            ) : null}
+          </button>
+          <DropdownMenuTrigger
+            ref={triggerRef}
+            aria-label={`管理项目 ${project.name}`}
+            title="更多操作"
+            className="absolute right-1 grid size-6 place-items-center rounded text-sidebar-muted opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-accent data-[popup-open]:opacity-100 [&_svg]:size-3.5"
+          >
+            <MoreHorizontal />
+          </DropdownMenuTrigger>
+        </div>
+        <DropdownMenuContent align="start" className="w-72 p-1.5">
+          <div className="px-2 py-1.5">
+            <div className="flex min-w-0 items-center gap-2 text-[13px] font-semibold">
+              <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{project.name}</span>
+              {project.pinnedAt ? <Pin className="ml-auto size-3.5 text-muted-foreground" /> : null}
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <MessageCircle className="size-3.5" />
+              {sessions.length} 个会话
+            </div>
+            <div className="mt-2 flex items-start gap-2 border-t border-border/70 pt-2 text-xs text-muted-foreground">
+              <FolderClosed className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 leading-5 break-all">{project.path}</span>
+            </div>
+          </div>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => projectActions.onRename(project)}>
+            <Pencil />
+            重命名项目
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => projectActions.onTogglePin(project)}>
+            {project.pinnedAt ? <PinOff /> : <Pin />}
+            {project.pinnedAt ? "取消置顶" : "置顶项目"}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem destructive onClick={() => projectActions.onRemove(project)}>
+            <Trash2 />
+            从列表移除
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <AnimatePresence initial={false}>
         {expanded && sessions.length > 0 ? (
           <motion.div

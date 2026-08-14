@@ -5,6 +5,8 @@ import type {
   DesktopSessionRecord,
   DesktopSessionView,
   PinDesktopSessionInput,
+  PinDesktopProjectInput,
+  RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
@@ -35,6 +37,9 @@ export const IpcChannels = {
   sessionBootstrap: "session:bootstrap",
   sessionChooseProject: "session:choose-project",
   sessionInspectProject: "session:inspect-project",
+  projectRename: "project:rename",
+  projectSetPinned: "project:set-pinned",
+  projectRemove: "project:remove",
   sessionCreate: "session:create",
   sessionOpen: "session:open",
   sessionClose: "session:close",
@@ -112,6 +117,15 @@ export interface IpcInvokeMap {
     args: [path: string]
     result: DesktopProjectDetails
   }
+  [IpcChannels.projectRename]: {
+    args: [input: RenameDesktopProjectInput]
+    result: DesktopProjectDetails["project"]
+  }
+  [IpcChannels.projectSetPinned]: {
+    args: [input: PinDesktopProjectInput]
+    result: DesktopProjectDetails["project"]
+  }
+  [IpcChannels.projectRemove]: { args: [path: string]; result: void }
   [IpcChannels.sessionCreate]: {
     args: [input: CreateDesktopSessionInput]
     result: DesktopSessionRecord
