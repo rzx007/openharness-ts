@@ -1,8 +1,8 @@
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow, shell } from "electron"
 
-import type { AppContext } from '../../core/app-context'
-import { isForceQuit } from '../../core/services/lifecycle'
-import { showPetWindow, syncPetWithMainWindow } from '../pet/window'
+import type { AppContext } from "../../core/app-context"
+import { isForceQuit } from "../../core/services/lifecycle"
+import { showPetWindow, syncPetWithMainWindow } from "../pet/window"
 
 export function createMainWindow(ctx: AppContext): BrowserWindow {
   const existing = ctx.windowManager.getMain()
@@ -12,21 +12,23 @@ export function createMainWindow(ctx: AppContext): BrowserWindow {
   }
 
   const mainWindow = ctx.windowManager.createWindow({
-    id: 'main',
-    route: '/',
+    id: "main",
+    route: "/",
     paths: ctx.paths,
     options: {
       width: 1180,
       height: 760,
       minWidth: 960,
       minHeight: 640,
-      title: 'OpenHarness',
-      autoHideMenuBar: true
+      title: "OpenHarness",
+      autoHideMenuBar: true,
+      frame: false,
+      backgroundColor: "#f4f7f9",
     },
     onCreated: (win) => {
       attachMainWindowBehavior(ctx, win)
       attachMainWindowDiagnostics(win)
-    }
+    },
   })
 
   return mainWindow
@@ -39,11 +41,11 @@ export function showMainWindow(win: BrowserWindow): void {
 }
 
 function attachMainWindowBehavior(ctx: AppContext, win: BrowserWindow): void {
-  win.once('ready-to-show', () => {
+  win.once("ready-to-show", () => {
     showMainWindow(win)
   })
 
-  win.on('close', (event) => {
+  win.on("close", (event) => {
     if (isForceQuit()) return
 
     event.preventDefault()
@@ -51,48 +53,48 @@ function attachMainWindowBehavior(ctx: AppContext, win: BrowserWindow): void {
     showPetWindow(ctx)
   })
 
-  win.on('minimize', () => {
+  win.on("minimize", () => {
     showPetWindow(ctx)
   })
 
-  win.on('restore', () => {
+  win.on("restore", () => {
     syncPetWithMainWindow(ctx, win)
   })
 
-  win.on('show', () => {
+  win.on("show", () => {
     syncPetWithMainWindow(ctx, win)
   })
 
-  win.on('maximize', () => {
-    win.webContents.send('window:maximized-changed', true)
+  win.on("maximize", () => {
+    win.webContents.send("window:maximized-changed", true)
   })
 
-  win.on('unmaximize', () => {
-    win.webContents.send('window:maximized-changed', false)
+  win.on("unmaximize", () => {
+    win.webContents.send("window:maximized-changed", false)
   })
 
-  win.webContents.on('did-finish-load', () => {
-    win.webContents.send('main-process-message', new Date().toLocaleString())
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.send("main-process-message", new Date().toLocaleString())
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:') || url.startsWith('http:')) {
+    if (url.startsWith("https:") || url.startsWith("http:")) {
       void shell.openExternal(url)
     }
 
-    return { action: 'deny' }
+    return { action: "deny" }
   })
 }
 
 function attachMainWindowDiagnostics(win: BrowserWindow): void {
   let recoveryCount = 0
 
-  win.webContents.on('render-process-gone', (_event, details) => {
-    console.error('[main-window] renderer process gone', {
+  win.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[main-window] renderer process gone", {
       reason: details.reason,
       exitCode: details.exitCode,
       url: win.webContents.getURL(),
-      recoveryCount
+      recoveryCount,
     })
 
     if (win.isDestroyed() || recoveryCount >= 2) return
@@ -103,22 +105,22 @@ function attachMainWindowDiagnostics(win: BrowserWindow): void {
   })
 
   win.webContents.on(
-    'did-fail-load',
+    "did-fail-load",
     (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return
-      console.error('[main-window] failed to load', {
+      console.error("[main-window] failed to load", {
         errorCode,
         errorDescription,
-        validatedURL
+        validatedURL,
       })
     }
   )
 
-  win.on('unresponsive', () => {
-    console.warn('[main-window] unresponsive')
+  win.on("unresponsive", () => {
+    console.warn("[main-window] unresponsive")
   })
 
-  win.on('responsive', () => {
-    console.info('[main-window] responsive')
+  win.on("responsive", () => {
+    console.info("[main-window] responsive")
   })
 }

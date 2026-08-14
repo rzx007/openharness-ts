@@ -1,0 +1,195 @@
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Group, Panel, useDefaultLayout, usePanelRef } from "react-resizable-panels"
+
+import { ConversationPane } from "@renderer/components/desktop/conversation-pane"
+import { Sidebar } from "@renderer/components/desktop/sidebar"
+import { TitleBar } from "@renderer/components/desktop/title-bar"
+import { UtilityPanel } from "@renderer/components/desktop/utility-panel"
+import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
+
+const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
+const sidebarDefaultWidth = 288
+const sidebarMinimumWidth = 236
+
+export function DesktopShell(): React.JSX.Element {
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [isMaximized, setIsMaximized] = useState(false)
+  const sidebarPanelRef = usePanelRef()
+  const utilityPanelRef = usePanelRef()
+  const contentRef = useRef<HTMLDivElement>(null)
+  const outerLayout = useDefaultLayout({
+    id: "desktop-shell-layout-v1",
+    panelIds: ["sidebar", "workspace"],
+  })
+  const workspaceLayout = useDefaultLayout({
+    id: "desktop-workspace-layout-v1",
+    panelIds: ["conversation", "utility"],
+  })
+
+  useEffect(() => {
+    void window.desktop.window.isMaximized().then(setIsMaximized)
+    return window.desktop.window.onMaximizedChanged(setIsMaximized)
+  }, [])
+
+  const toggleSidebar = useCallback((): void => {
+    const panel = sidebarPanelRef.current
+    if (!panel) {
+      setSidebarOpen((current) => !current)
+      return
+    }
+
+    if (panel.isCollapsed()) {
+      panel.expand()
+    } else {
+      panel.collapse()
+    }
+  }, [sidebarPanelRef])
+
+  const togglePanel = useCallback((): void => {
+    const panel = utilityPanelRef.current
+    if (!panel) {
+      setPanelOpen((current) => !current)
+      return
+    }
+
+    if (panel.isCollapsed()) {
+      if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
+      panel.expand()
+    } else {
+      panel.collapse()
+    }
+  }, [sidebarPanelRef, utilityPanelRef])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+      if (isEditableTarget(event.target)) return
+
+      if (event.key.toLowerCase() === "b") {
+        event.preventDefault()
+        toggleSidebar()
+      }
+
+      if (event.shiftKey && event.key.toLowerCase() === "p") {
+        event.preventDefault()
+        togglePanel()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [togglePanel, toggleSidebar])
+
+  return (
+    <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-shell text-foreground">
+      <TitleBar
+        sidebarOpen={sidebarOpen}
+        isMaximized={isMaximized}
+        onToggleSidebar={toggleSidebar}
+        onMinimize={() => void window.desktop.window.minimize()}
+        onToggleMaximize={() => void window.desktop.window.toggleMaximize()}
+        onClose={() => void window.desktop.window.close()}
+      />
+
+      <div
+        ref={contentRef}
+        className="relative min-h-0 flex-1 overflow-visible"
+        style={{ "--sidebar-width": "288px" } as React.CSSProperties}
+      >
+        <div
+          aria-hidden="true"
+          className="workspace-top-shadow pointer-events-none absolute top-0 right-0 z-20 h-px"
+          style={{ left: "calc(var(--sidebar-width) + 1px)" }}
+        />
+
+        <Group
+          id="desktop-shell"
+          orientation="horizontal"
+          className="h-full min-h-0"
+          resizeTargetMinimumSize={resizeTargetMinimumSize}
+          defaultLayout={outerLayout.defaultLayout}
+          onLayoutChanged={outerLayout.onLayoutChanged}
+        >
+          <Panel
+            id="sidebar"
+            panelRef={sidebarPanelRef}
+            defaultSize={sidebarDefaultWidth}
+            minSize={sidebarMinimumWidth}
+            maxSize={420}
+            collapsedSize={0}
+            collapsible
+            groupResizeBehavior="preserve-pixel-size"
+            className="h-full min-h-0 overflow-hidden"
+            onResize={(size) => {
+              contentRef.current?.style.setProperty("--sidebar-width", `${size.inPixels}px`)
+              const nextOpen = size.inPixels > 1
+              setSidebarOpen((current) => (current === nextOpen ? current : nextOpen))
+            }}
+          >
+            <Sidebar open={sidebarOpen} />
+          </Panel>
+
+          <PanelResizeHandle label="调整侧边栏宽度" />
+
+          <Panel
+            id="workspace"
+            minSize={560}
+            className="h-full min-h-0"
+            style={{ overflow: "visible" }}
+          >
+            <section className="border-workspace flex h-full min-w-0 overflow-hidden rounded-tl-lg border-t border-l bg-conversation shadow-workspace">
+              <Group
+                id="desktop-workspace"
+                orientation="horizontal"
+                className="h-full min-h-0 w-full"
+                resizeTargetMinimumSize={resizeTargetMinimumSize}
+                defaultLayout={workspaceLayout.defaultLayout ?? { conversation: 100, utility: 0 }}
+                onLayoutChanged={workspaceLayout.onLayoutChanged}
+              >
+                <Panel
+                  id="conversation"
+                  defaultSize="100%"
+                  minSize={440}
+                  className="h-full min-h-0 overflow-hidden"
+                >
+                  <ConversationPane panelOpen={panelOpen} onTogglePanel={togglePanel} />
+                </Panel>
+
+                <PanelResizeHandle label="调整工具面板宽度" />
+
+                <Panel
+                  id="utility"
+                  panelRef={utilityPanelRef}
+                  defaultSize={420}
+                  minSize={320}
+                  maxSize="58%"
+                  collapsedSize={0}
+                  collapsible
+                  groupResizeBehavior="preserve-pixel-size"
+                  className="h-full min-h-0 overflow-hidden"
+                  onResize={(size) => {
+                    const nextOpen = size.inPixels > 1
+                    setPanelOpen((current) => (current === nextOpen ? current : nextOpen))
+                  }}
+                >
+                  <UtilityPanel
+                    open={panelOpen}
+                    onClose={() => utilityPanelRef.current?.collapse()}
+                  />
+                </Panel>
+              </Group>
+            </section>
+          </Panel>
+        </Group>
+      </div>
+    </main>
+  )
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(
+    target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']")
+  )
+}
