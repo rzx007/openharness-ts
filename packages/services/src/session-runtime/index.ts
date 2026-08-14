@@ -6,7 +6,10 @@ export {
   readSessionRuntimeConfig,
   runtimeMetadataChanged,
 } from "./runtime-config.js";
-export type { SessionRuntimeConfig, SessionRuntimeConfigPatch } from "./runtime-config.js";
+export type {
+  SessionRuntimeConfig,
+  SessionRuntimeConfigPatch,
+} from "./runtime-config.js";
 export type {
   AdmitPromptInput,
   AppendEventInput,
@@ -28,6 +31,8 @@ export type {
   ListPermissionRequestsOptions,
   ListSessionsOptions,
   PermissionRequestRecord,
+  ProjectLocationRecord,
+  ProjectRecord,
   PermissionStatus,
   ReplyPermissionInput,
   RunStatus,

@@ -3,19 +3,26 @@
  * while an already-running turn is being interrupted and joined before the
  * session becomes permanently archived.
  */
-export type SessionStatus = "idle" | "running" | "closing" | "archived" | "error";
+export type SessionStatus =
+  "idle" | "running" | "closing" | "archived" | "error";
 export type InputDelivery = "queue" | "steer";
-export type RunStatus = "pending" | "running" | "completed" | "failed" | "interrupted";
-export type SessionTaskStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
+export type RunStatus =
+  "pending" | "running" | "completed" | "failed" | "interrupted";
+export type SessionTaskStatus =
+  "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
 export type PermissionStatus = "pending" | "approved" | "denied" | "expired";
 export type SessionMessageRole = "system" | "user" | "assistant";
-export type SessionMessagePartType = "text" | "reasoning" | "tool" | "tool_result" | "error" | "log";
-export type SessionMessagePartStatus = "pending" | "running" | "completed" | "failed" | "interrupted";
+export type SessionMessagePartType =
+  "text" | "reasoning" | "tool" | "tool_result" | "error" | "log";
+export type SessionMessagePartStatus =
+  "pending" | "running" | "completed" | "failed" | "interrupted";
 
 export interface SessionRecord {
   id: string;
   parentId?: string;
+  projectId?: string;
   cwd: string;
+  cwdRelative?: string;
   title: string;
   model: string;
   agent?: string;
@@ -24,6 +31,27 @@ export interface SessionRecord {
   createdAt: number;
   updatedAt: number;
   archivedAt?: number;
+}
+
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  path: string;
+  pinnedAt?: number;
+  lastOpenedAt: number;
+  archivedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectLocationRecord {
+  id: string;
+  projectId: string;
+  path: string;
+  normalizedPath: string;
+  status: "active" | "historical";
+  boundAt: number;
+  lastVerifiedAt?: number;
 }
 
 export interface SessionInputRecord {
@@ -193,6 +221,7 @@ export interface CreateCronRunInput {
 export interface CreateSessionInput {
   id?: string;
   parentId?: string;
+  projectId?: string;
   cwd: string;
   title?: string;
   model: string;

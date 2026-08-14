@@ -10,6 +10,8 @@ export {
   type SessionRuntimeConfig,
   type SessionRuntimeConfigPatch,
   type SessionStoreOptions,
+  type ProjectLocationRecord,
+  type ProjectRecord,
 } from "./session-runtime";
 export type {
   AdmitPromptInput,
@@ -91,7 +93,6 @@ export type { TokenEstimate } from "./token-estimation";
 
 export { LspClient } from "./lsp";
 export type { LspServerConfig } from "./lsp";
-
 
 export { TaskManager, getTaskManager, resetTaskManager } from "./tasks";
 export type {

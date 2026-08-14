@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
@@ -27,6 +27,7 @@ import type {
   ListPermissionRequestsOptions,
   ListSessionsOptions,
   PermissionRequestRecord,
+  ProjectRecord,
   ReplyPermissionInput,
   SessionMessagePartRecord,
   SessionEventRecord,
@@ -115,6 +116,72 @@ export class SessionStore {
       this.database.close();
       this.closed = true;
     }
+  }
+
+  listProjects(options: { includeArchived?: boolean } = {}): ProjectRecord[] {
+    const where = options.includeArchived ? "" : "WHERE p.archived_at IS NULL";
+    return (this.database.prepare(`SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' ${where} ORDER BY (p.pinned_at IS NULL), p.pinned_at DESC, p.last_opened_at DESC`).all() as Array<Record<string, unknown>>).map(projectFromRow);
+  }
+
+  getProject(projectId: string): ProjectRecord | undefined {
+    const row = this.database.prepare("SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' WHERE p.id = ?").get(projectId) as Record<string, unknown> | undefined;
+    return row ? projectFromRow(row) : undefined;
+  }
+
+  inspectProject(inputPath: string): ProjectRecord {
+    const path = resolve(inputPath);
+    const normalizedPath = normalizeProjectPath(path);
+    const row = this.database.prepare("SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' WHERE l.normalized_path = ?").get(normalizedPath) as Record<string, unknown> | undefined;
+    const timestamp = now();
+    if (row) {
+      this.database.prepare("UPDATE project SET archived_at = NULL, last_opened_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, row.id);
+      this.database.prepare("UPDATE project_location SET last_verified_at = ? WHERE project_id = ? AND status = 'active'").run(timestamp, row.id);
+      return this.getProject(row.id as string)!;
+    }
+    const projectId = randomUUID();
+    this.database.transaction(() => {
+      this.database.prepare("INSERT INTO project VALUES (?, ?, NULL, ?, NULL, ?, ?)").run(projectId, basename(path), timestamp, timestamp, timestamp);
+      this.database.prepare("INSERT INTO project_location VALUES (?, ?, ?, ?, 'active', ?, ?)").run(randomUUID(), projectId, path, normalizedPath, timestamp, timestamp);
+    })();
+    return this.getProject(projectId)!;
+  }
+
+  renameProject(projectId: string, name: string): ProjectRecord {
+    const value = name.replace(/\s+/g, " ").trim();
+    if (!value) throw new Error("Project name is required");
+    if (this.database.prepare("UPDATE project SET name = ?, updated_at = ? WHERE id = ?").run(value, now(), projectId).changes === 0) throw new Error(`Project not found: ${projectId}`);
+    return this.getProject(projectId)!;
+  }
+
+  setProjectPinned(projectId: string, pinned: boolean): ProjectRecord {
+    if (this.database.prepare("UPDATE project SET pinned_at = ?, updated_at = ? WHERE id = ?").run(pinned ? now() : null, now(), projectId).changes === 0) throw new Error(`Project not found: ${projectId}`);
+    return this.getProject(projectId)!;
+  }
+
+  archiveProject(projectId: string): ProjectRecord {
+    const timestamp = now();
+    if (this.database.prepare("UPDATE project SET archived_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, projectId).changes === 0) throw new Error(`Project not found: ${projectId}`);
+    return this.getProject(projectId)!;
+  }
+
+  rebindProject(projectId: string, inputPath: string): ProjectRecord {
+    if (!this.getProject(projectId)) throw new Error(`Project not found: ${projectId}`);
+    const path = resolve(inputPath);
+    const normalizedPath = normalizeProjectPath(path);
+    const conflict = this.database.prepare("SELECT project_id FROM project_location WHERE normalized_path = ? AND status = 'active'").get(normalizedPath) as { project_id?: string } | undefined;
+    if (conflict?.project_id && conflict.project_id !== projectId) throw new Error("Project directory is already bound to another project");
+    const timestamp = now();
+    this.database.transaction(() => {
+      this.database.prepare("UPDATE project_location SET status = 'historical' WHERE project_id = ? AND status = 'active'").run(projectId);
+      this.database.prepare("INSERT INTO project_location VALUES (?, ?, ?, ?, 'active', ?, ?)").run(randomUUID(), projectId, path, normalizedPath, timestamp, timestamp);
+      this.database.prepare("UPDATE project SET archived_at = NULL, last_opened_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, projectId);
+      for (const session of Object.values(this.state.sessions)) {
+        if (session.projectId !== projectId) continue;
+        session.cwd = resolve(path, session.cwdRelative ?? "");
+        this.database.prepare("UPDATE session SET cwd = ? WHERE id = ?").run(session.cwd, session.id);
+      }
+    })();
+    return this.getProject(projectId)!;
   }
 
   upsertCronJob(input: UpsertCronJobInput): CronJobRecord {
@@ -306,10 +373,16 @@ export class SessionStore {
     const id = input.id ?? randomUUID();
     if (this.state.sessions[id]) throw new Error(`Session already exists: ${id}`);
     const timestamp = now();
+    const projectId = input.projectId ?? (input.parentId ? this.state.sessions[input.parentId]?.projectId : undefined);
+    const project = projectId ? this.getProject(projectId) : this.inspectProject(input.cwd);
+    if (!project) throw new Error(`Project not found: ${projectId}`);
+    const cwd = resolve(input.cwd);
     const session: SessionRecord = {
       id,
       ...(input.parentId ? { parentId: input.parentId } : {}),
-      cwd: resolve(input.cwd),
+      projectId: project.id,
+      cwd,
+      cwdRelative: relative(project.path, cwd),
       title: input.title ?? "",
       model: input.model,
       ...(input.agent ? { agent: input.agent } : {}),
@@ -1131,7 +1204,9 @@ export class SessionStore {
       const session: SessionRecord = {
         id: row.id as string,
         ...(row.parent_id ? { parentId: row.parent_id as string } : {}),
+        ...(row.project_id ? { projectId: row.project_id as string } : {}),
         cwd: row.cwd as string,
+        ...(row.cwd_relative !== null ? { cwdRelative: row.cwd_relative as string } : {}),
         title: row.title as string,
         model: row.model as string,
         ...(row.agent ? { agent: row.agent as string } : {}),
@@ -1218,15 +1293,16 @@ export class SessionStore {
     for (const id of this.mutations.deletedMessages) deleteMessage.run(id);
 
     const upsertSession = this.database.prepare(`
-      INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id, cwd=excluded.cwd,
+        project_id=excluded.project_id, cwd_relative=excluded.cwd_relative,
         title=excluded.title, model=excluded.model, agent=excluded.agent, status=excluded.status,
         metadata_json=excluded.metadata_json, created_at=excluded.created_at,
         updated_at=excluded.updated_at, archived_at=excluded.archived_at
     `);
     for (const id of this.mutations.sessions) {
       const value = this.state.sessions[id];
-      if (value) upsertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null);
+      if (value) upsertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null, value.projectId ?? null, value.cwdRelative ?? null);
     }
 
     const upsertInput = this.database.prepare(`
@@ -1332,4 +1408,15 @@ export class SessionStore {
     }
   }
 
+}
+
+function projectFromRow(row: Record<string, unknown>): ProjectRecord {
+  return { id: row.id as string, name: row.name as string, path: row.path as string,
+    ...(row.pinned_at ? { pinnedAt: row.pinned_at as number } : {}), lastOpenedAt: row.last_opened_at as number,
+    ...(row.archived_at ? { archivedAt: row.archived_at as number } : {}), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+}
+
+function normalizeProjectPath(path: string): string {
+  const normalized = resolve(path).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? normalized.toLocaleLowerCase() : normalized;
 }

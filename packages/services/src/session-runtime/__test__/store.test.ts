@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -728,6 +728,39 @@ describe("SessionStore", () => {
       expect(store.listSessions().map((session) => session.id)).toEqual([]);
       expect(store.listSessions({ includeArchived: true }).map((session) => session.id)).toEqual(["s1"]);
       expect(store.listEvents().map((event) => event.type)).toEqual(["session.created", "session.archived"]);
+    });
+  });
+
+  it("owns projects in SQLite and keeps session identity when the directory is rebound", () => {
+    withStore((store) => {
+      const root = mkdtempSync(join(tmpdir(), "ohs-project-"));
+      const moved = join(root, "moved");
+      const nested = join(root, "source", "apps", "desktop");
+      mkdirSync(nested, { recursive: true });
+      mkdirSync(join(moved, "apps", "desktop"), { recursive: true });
+      try {
+        const project = store.inspectProject(join(root, "source"));
+        const session = store.createSession({
+          id: "project-session",
+          projectId: project.id,
+          cwd: nested,
+          model: "m",
+        });
+        expect(session.cwdRelative).toBe(join("apps", "desktop"));
+        expect(store.listProjects()).toHaveLength(1);
+
+        store.rebindProject(project.id, moved);
+        expect(store.getSession(session.id)).toMatchObject({
+          projectId: project.id,
+          cwd: join(moved, "apps", "desktop"),
+        });
+
+        store.archiveProject(project.id);
+        expect(store.listProjects()).toEqual([]);
+        expect(store.listProjects({ includeArchived: true })).toHaveLength(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 });

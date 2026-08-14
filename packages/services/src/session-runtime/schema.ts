@@ -3,7 +3,9 @@ import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqli
 export const sessions = sqliteTable("session", {
   id: text("id").primaryKey(),
   parentId: text("parent_id"),
+  projectId: text("project_id"),
   cwd: text("cwd").notNull(),
+  cwdRelative: text("cwd_relative"),
   title: text("title").notNull(),
   model: text("model").notNull(),
   agent: text("agent"),
@@ -16,6 +18,26 @@ export const sessions = sqliteTable("session", {
   index("session_parent_idx").on(table.parentId),
   index("session_cwd_updated_idx").on(table.cwd, table.updatedAt),
 ]);
+
+export const projects = sqliteTable("project", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  pinnedAt: integer("pinned_at"),
+  lastOpenedAt: integer("last_opened_at").notNull(),
+  archivedAt: integer("archived_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const projectLocations = sqliteTable("project_location", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  path: text("path").notNull(),
+  normalizedPath: text("normalized_path").notNull(),
+  status: text("status").notNull(),
+  boundAt: integer("bound_at").notNull(),
+  lastVerifiedAt: integer("last_verified_at"),
+}, (table) => [index("project_location_project_idx").on(table.projectId, table.status)]);
 
 export const sessionInputs = sqliteTable("session_input", {
   id: text("id").primaryKey(),
