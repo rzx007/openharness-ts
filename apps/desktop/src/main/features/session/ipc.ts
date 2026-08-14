@@ -1,6 +1,8 @@
 import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
   CreateDesktopSessionInput,
+  PinDesktopSessionInput,
+  RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
 } from "../../../shared/session-types"
@@ -51,6 +53,21 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionReplyPermission,
         handler: (_event, input) =>
           desktopSessionService.replyPermission(input as ReplyDesktopPermissionInput),
+      },
+      {
+        channel: IpcChannels.sessionRename,
+        handler: (_event, input) =>
+          desktopSessionService.renameSession(input as RenameDesktopSessionInput),
+      },
+      {
+        channel: IpcChannels.sessionSetPinned,
+        handler: (_event, input) =>
+          desktopSessionService.setSessionPinned(input as PinDesktopSessionInput),
+      },
+      {
+        channel: IpcChannels.sessionArchive,
+        handler: (event, sessionId) =>
+          desktopSessionService.archiveSession(event.sender.id, String(sessionId ?? "")),
       },
     ]
   },

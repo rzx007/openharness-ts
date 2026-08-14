@@ -4,6 +4,8 @@ import type {
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
+  PinDesktopSessionInput,
+  RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
 } from "./session-types"
@@ -39,6 +41,9 @@ export const IpcChannels = {
   sessionSendPrompt: "session:send-prompt",
   sessionInterrupt: "session:interrupt",
   sessionReplyPermission: "session:reply-permission",
+  sessionRename: "session:rename",
+  sessionSetPinned: "session:set-pinned",
+  sessionArchive: "session:archive",
 } as const
 
 export const IpcEvents = {
@@ -118,6 +123,18 @@ export interface IpcInvokeMap {
   [IpcChannels.sessionReplyPermission]: {
     args: [input: ReplyDesktopPermissionInput]
     result: void
+  }
+  [IpcChannels.sessionRename]: {
+    args: [input: RenameDesktopSessionInput]
+    result: DesktopSessionRecord
+  }
+  [IpcChannels.sessionSetPinned]: {
+    args: [input: PinDesktopSessionInput]
+    result: DesktopSessionRecord
+  }
+  [IpcChannels.sessionArchive]: {
+    args: [sessionId: string]
+    result: DesktopSessionRecord
   }
 }
 

@@ -11,6 +11,8 @@ import type {
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
+  PinDesktopSessionInput,
+  RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput
 } from '../shared/session-types'
@@ -52,6 +54,9 @@ export interface DesktopAPI {
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
     interrupt: (sessionId: string) => Promise<void>
     replyPermission: (input: ReplyDesktopPermissionInput) => Promise<void>
+    rename: (input: RenameDesktopSessionInput) => Promise<DesktopSessionRecord>
+    setPinned: (input: PinDesktopSessionInput) => Promise<DesktopSessionRecord>
+    archive: (sessionId: string) => Promise<DesktopSessionRecord>
     onUpdated: (listener: (value: DesktopSessionView) => void) => () => void
   }
   events: {

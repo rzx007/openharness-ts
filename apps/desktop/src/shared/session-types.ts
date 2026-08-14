@@ -121,6 +121,7 @@ export interface DesktopBootstrapData {
   connected: true
   projects: DesktopProject[]
   sessions: DesktopSessionRecord[]
+  archivedSessions: DesktopSessionRecord[]
   models: DesktopModel[]
   defaultModel: string
 }
@@ -152,6 +153,16 @@ export interface CreateDesktopSessionInput {
 export interface SendDesktopPromptInput {
   sessionId: string
   content: string
+}
+
+export interface RenameDesktopSessionInput {
+  sessionId: string
+  title: string
+}
+
+export interface PinDesktopSessionInput {
+  sessionId: string
+  pinned: boolean
 }
 
 export interface ReplyDesktopPermissionInput {

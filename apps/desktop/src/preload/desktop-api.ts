@@ -57,6 +57,11 @@ export const desktopAPI = {
     interrupt: (sessionId: string) => invoke(IpcChannels.sessionInterrupt, sessionId),
     replyPermission: (input: IpcInvokeMap[typeof IpcChannels.sessionReplyPermission]["args"][0]) =>
       invoke(IpcChannels.sessionReplyPermission, input),
+    rename: (input: IpcInvokeMap[typeof IpcChannels.sessionRename]["args"][0]) =>
+      invoke(IpcChannels.sessionRename, input),
+    setPinned: (input: IpcInvokeMap[typeof IpcChannels.sessionSetPinned]["args"][0]) =>
+      invoke(IpcChannels.sessionSetPinned, input),
+    archive: (sessionId: string) => invoke(IpcChannels.sessionArchive, sessionId),
     onUpdated: (
       listener: (value: IpcInvokeMap[typeof IpcChannels.sessionOpen]["result"]) => void
     ): (() => void) => {

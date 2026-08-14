@@ -67,6 +67,7 @@ export function ConversationPane({
   const clearError = useDesktopSessionStore((state) => state.clearError)
   const endRef = useRef<HTMLDivElement>(null)
   const hasSession = activeSessionId !== null
+  const archived = sessionView?.session.status === "archived"
 
   useEffect(() => {
     if (!hasSession || !sessionView) return
@@ -75,7 +76,7 @@ export function ConversationPane({
 
   const submitDraft = async (): Promise<void> => {
     const content = draft.trim()
-    if (!content || sending) return
+    if (!content || sending || archived) return
     try {
       if (hasSession) await sendMessage(content)
       else await startSession(content)
@@ -191,16 +192,22 @@ export function ConversationPane({
             </article>
           </ScrollArea>
 
-          <Composer
-            id="message-composer"
-            draft={draft}
-            sending={sending}
-            running={running}
-            modelLabel={modelLabel}
-            onDraftChange={setDraft}
-            onSubmit={() => void submitDraft()}
-            onInterrupt={() => void interrupt()}
-          />
+          {archived ? (
+            <div className="mx-auto mb-5 flex h-12 w-[min(760px,calc(100%-32px))] shrink-0 items-center justify-center rounded-lg border border-border bg-background/90 text-xs text-muted-foreground shadow-sm">
+              此会话已归档，只能查看历史内容
+            </div>
+          ) : (
+            <Composer
+              id="message-composer"
+              draft={draft}
+              sending={sending}
+              running={running}
+              modelLabel={modelLabel}
+              onDraftChange={setDraft}
+              onSubmit={() => void submitDraft()}
+              onInterrupt={() => void interrupt()}
+            />
+          )}
         </>
       )}
     </section>

@@ -28,6 +28,8 @@ import type {
   DesktopProject,
   DesktopProjectDetails,
   DesktopSessionView,
+  PinDesktopSessionInput,
+  RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
 } from "../../../shared/session-types"
@@ -54,11 +56,13 @@ class DesktopSessionService {
 
   async bootstrap(): Promise<DesktopBootstrapData> {
     const client = await this.getClient()
-    const [settings, providers, sessions] = await Promise.all([
+    const [settings, providers, allSessions] = await Promise.all([
       client.getSettings(),
       client.listModels(),
-      client.listSessions({ limit: 200 }),
+      client.listSessions({ includeArchived: true, limit: 400 }),
     ])
+    const sessions = allSessions.filter((session) => session.status !== "archived")
+    const archivedSessions = allSessions.filter((session) => session.status === "archived")
     const models = providers.flatMap((provider) => provider.models)
     const configuredModel = typeof settings["model"] === "string" ? settings["model"] : undefined
     const defaultModel = configuredModel ?? models[0]?.id
@@ -68,13 +72,14 @@ class DesktopSessionService {
     }
 
     const normalizedModels = ensureConfiguredModel(models, defaultModel)
-    const projects = this.collectProjects(sessions)
+    const projects = this.collectProjects(allSessions)
     preferences.set("recentProjects", projects)
 
     return {
       connected: true,
       projects,
       sessions: sortSessions(sessions),
+      archivedSessions: sortSessions(archivedSessions),
       models: normalizedModels,
       defaultModel,
     }
@@ -168,6 +173,36 @@ class DesktopSessionService {
       decision: input.decision ?? "once",
       clientId: "desktop",
     })
+  }
+
+  async renameSession(input: RenameDesktopSessionInput): Promise<SessionRecord> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const title = requireString(input.title, "会话名称")
+    const client = await this.getClient()
+    return await client.updateSession(sessionId, { title })
+  }
+
+  async setSessionPinned(input: PinDesktopSessionInput): Promise<SessionRecord> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const client = await this.getClient()
+    const session = (await client.listSessions({ includeArchived: true, limit: 1_000 })).find(
+      (item) => item.id === sessionId
+    )
+    if (!session) throw new Error(`会话 ${sessionId} 不存在。`)
+    const desktop = readDesktopMetadata(session.metadata)
+    if (input.pinned) desktop.pinnedAt = Date.now()
+    else delete desktop.pinnedAt
+    return await client.updateSession(sessionId, {
+      metadata: { desktop, runtime: { model: session.model } },
+    })
+  }
+
+  async archiveSession(webContentsId: number, sessionIdInput: string): Promise<SessionRecord> {
+    const sessionId = requireString(sessionIdInput, "会话 ID")
+    const subscription = this.subscriptions.get(webContentsId)
+    if (subscription?.sessionId === sessionId) this.closeSession(webContentsId)
+    const client = await this.getClient()
+    return await client.archiveSession(sessionId)
   }
 
   async dispose(): Promise<void> {
@@ -373,6 +408,13 @@ function parseCurrentBranch(output: string): string | null {
     ?.replace(/^\s*\*\s*/, "")
     .trim()
   return starred || trimmed.split(/\r?\n/)[0]?.trim() || null
+}
+
+function readDesktopMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  const desktop = metadata["desktop"]
+  return desktop && typeof desktop === "object" && !Array.isArray(desktop)
+    ? { ...(desktop as Record<string, unknown>) }
+    : {}
 }
 
 function resolveRequiredPath(value: unknown): string {
