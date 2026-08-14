@@ -288,7 +288,7 @@ class DesktopSessionService {
       const registry = readDaemonRegistry()
       if (registry) {
         const client = new OpenHarnessClient({ baseUrl: registry.url, token: registry.token })
-        await healthWithTimeout(client)
+        await verifyDaemonWithTimeout(client)
         return client
       }
     } catch (error) {
@@ -327,11 +327,12 @@ async function toDesktopProject(project: ProjectRecord): Promise<DesktopProject>
   return { ...project, available }
 }
 
-async function healthWithTimeout(client: OpenHarnessClient): Promise<void> {
+async function verifyDaemonWithTimeout(client: OpenHarnessClient): Promise<void> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 1_500)
   try {
     await client.health({ signal: controller.signal })
+    await client.listProjects({ signal: controller.signal })
   } finally {
     clearTimeout(timeout)
   }
