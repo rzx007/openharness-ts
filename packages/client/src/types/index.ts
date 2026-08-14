@@ -175,6 +175,21 @@ export interface UpdateClientSessionInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  path: string;
+  pinnedAt?: number;
+  lastOpenedAt: number;
+  archivedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListProjectsOptions {
+  includeArchived?: boolean;
+}
+
 /** `POST /sessions/:id/commands` 请求体。 */
 export interface InvokeClientCommandInput {
   name?: string;

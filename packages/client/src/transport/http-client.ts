@@ -19,6 +19,8 @@ import type {
   ListMessagesOptions,
   ListPermissionsOptions,
   ListSessionsOptions,
+  ListProjectsOptions,
+  ProjectRecord,
   AgentPersonaInfo,
   AuthStatus,
   CompactSessionResponse,
@@ -530,6 +532,32 @@ export class OpenHarnessClient {
     const { signal, ...query } = options;
     const response = await this.request<{ sessions: SessionRecord[] }>(this.path("/sessions", query), { signal });
     return response.sessions;
+  }
+
+  async listProjects(options: ListProjectsOptions & { signal?: AbortSignal } = {}): Promise<ProjectRecord[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ projects: ProjectRecord[] }>(this.path("/projects", query), { signal });
+    return response.projects;
+  }
+
+  async inspectProject(path: string): Promise<ProjectRecord> {
+    return (await this.request<{ project: ProjectRecord }>("/projects/inspect", { method: "POST", body: { path } })).project;
+  }
+
+  async renameProject(projectId: string, name: string): Promise<ProjectRecord> {
+    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}`, { method: "PATCH", body: { name } })).project;
+  }
+
+  async setProjectPinned(projectId: string, pinned: boolean): Promise<ProjectRecord> {
+    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}`, { method: "PATCH", body: { pinned } })).project;
+  }
+
+  async rebindProject(projectId: string, path: string): Promise<ProjectRecord> {
+    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}/rebind`, { method: "POST", body: { path } })).project;
+  }
+
+  async archiveProject(projectId: string): Promise<ProjectRecord> {
+    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" })).project;
   }
 
   /** `POST /sessions` */

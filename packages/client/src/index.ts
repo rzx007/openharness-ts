@@ -35,7 +35,10 @@ export {
   readRuntimeMetadata,
   readSessionRuntimeConfig,
 } from "@openharness/services";
-export type { SessionRuntimeConfig, SessionRuntimeConfigPatch } from "@openharness/services";
+export type {
+  SessionRuntimeConfig,
+  SessionRuntimeConfigPatch,
+} from "@openharness/services";
 export type {
   PresentationReadRequest,
   SessionCommandHost,
@@ -69,6 +72,8 @@ export type {
   ListMessagesOptions,
   ListPermissionsOptions,
   ListSessionsOptions,
+  ListProjectsOptions,
+  ProjectRecord,
   ListTasksOptions,
   McpServerStatus,
   MemoryEntryRecord,

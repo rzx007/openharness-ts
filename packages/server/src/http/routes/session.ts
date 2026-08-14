@@ -61,6 +61,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       const session = context.application.createSession({
         id: typeof body.id === "string" ? body.id : undefined,
         parentId: typeof body.parentId === "string" ? body.parentId : undefined,
+        projectId: typeof body.projectId === "string" ? body.projectId : undefined,
         cwd: body.cwd,
         title: typeof body.title === "string" ? body.title : undefined,
         model,

@@ -4,6 +4,7 @@ export * from "./events.js";
 export * from "./git.js";
 export * from "./memory.js";
 export * from "./permission.js";
+export * from "./project.js";
 export * from "./run-execution.js";
 export * from "./service.js";
 export * from "./session.js";

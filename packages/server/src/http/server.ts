@@ -43,6 +43,7 @@ import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
 import { createMemoryRoutes } from "./routes/memory.js";
 import { createPermissionRoutes } from "./routes/permission.js";
+import { createProjectRoutes } from "./routes/project.js";
 import { createRunExecutionRoutes } from "./routes/run-execution.js";
 import { createServiceRoutes } from "./routes/service.js";
 import { createSessionRoutes } from "./routes/session.js";
@@ -287,6 +288,7 @@ export class OpenHarnessHttpServer {
       permissions: this.daemon.permissions,
       traces: this.requestTraces,
     }));
+    this.app.route("/projects", createProjectRoutes(this.store));
     this.app.route("/sessions", createSessionUtilityRoutes({
       maintenance: this.daemon.maintenance,
     }));
