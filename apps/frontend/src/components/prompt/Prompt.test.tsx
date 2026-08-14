@@ -95,6 +95,31 @@ test("typeText + pressEnter triggers onSubmit and clears input", async () => {
   renderer.destroy();
 });
 
+test("prompt keeps the same height for single-line edits and clear", async () => {
+  const { renderer, renderOnce, mockInput, waitForFrame, captureCharFrame } =
+    await testRender(makePrompt(), { width: 80, height: 24 });
+
+  await renderOnce();
+  const initialModeRow = captureCharFrame().split("\n").findIndex((line) => line.includes("Default"));
+
+  await act(async () => {
+    await mockInput.typeText("hello");
+  });
+  await waitForFrame((f) => f.includes("hello"));
+  const typedModeRow = captureCharFrame().split("\n").findIndex((line) => line.includes("Default"));
+
+  await act(async () => {
+    mockInput.pressEnter();
+  });
+  await waitForFrame((f) => f.includes("Ask anything"));
+  const clearedModeRow = captureCharFrame().split("\n").findIndex((line) => line.includes("Default"));
+
+  expect(typedModeRow).toBe(initialModeRow);
+  expect(clearedModeRow).toBe(initialModeRow);
+
+  renderer.destroy();
+});
+
 test("bracketed paste + pressEnter submits pasted text immediately", async () => {
   const onSubmit = mock((_line: string) => undefined);
 

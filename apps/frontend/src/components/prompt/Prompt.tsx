@@ -10,7 +10,7 @@ import { rankSlashCommands } from "../../ui/commandRanking";
 import { listProjectFiles, detectAtToken, buildAtItems } from "./fileCompletion";
 import { record as frecencyRecord, rank as frecencyRank } from "../../services/frecency";
 import { useListNavigation } from "../../hooks/useListNavigation";
-import { SPINNER_INTERVAL_MS, TEXTAREA_MAX_LINES } from "../../ui/constants";
+import { SPINNER_INTERVAL_MS, TEXTAREA_MAX_LINES, TEXTAREA_MIN_LINES } from "../../ui/constants";
 
 export type PromptProps = {
   busy: boolean;
@@ -77,7 +77,7 @@ export function Prompt({
   const [spinnerFrame, setSpinnerFrame] = useState(0);
 
   // Dynamic textarea height (1–6 lines)
-  const [textareaHeight, setTextareaHeight] = useState(2);
+  const [textareaHeight, setTextareaHeight] = useState(TEXTAREA_MIN_LINES);
 
   // Textarea ref for imperative operations
   const textareaRef = useRef<TextareaRenderable | null>(null);
@@ -154,7 +154,7 @@ export function Prompt({
     setContent(text);
     onDraftChange?.(text);
     const lineCount = textareaRef.current?.lineCount ?? 1;
-    setTextareaHeight(Math.min(TEXTAREA_MAX_LINES, Math.max(1, lineCount)));
+    setTextareaHeight(Math.min(TEXTAREA_MAX_LINES, Math.max(TEXTAREA_MIN_LINES, lineCount)));
     return text;
   }, [onDraftChange]);
 
@@ -186,6 +186,7 @@ export function Prompt({
     }
     setContent("");
     setHistIdx(null);
+    setTextareaHeight(TEXTAREA_MIN_LINES);
     onDraftChange?.("");
   }, [onDraftChange]);
 

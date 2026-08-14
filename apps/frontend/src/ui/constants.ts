@@ -25,3 +25,5 @@ export const CWD_DISPLAY_MAX_LEN = 40;
 export const TOKEN_K_THRESHOLD = 1000;
 /** 多行输入框最大行高 */
 export const TEXTAREA_MAX_LINES = 6;
+/** Minimum prompt textarea rows; keeps the prompt chrome from jumping on single-line edits. */
+export const TEXTAREA_MIN_LINES = 2;
