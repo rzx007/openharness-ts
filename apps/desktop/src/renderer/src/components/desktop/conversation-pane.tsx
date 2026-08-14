@@ -7,6 +7,7 @@ import {
   CircleStop,
   FileText,
   Folder,
+  FolderClosed,
   FolderGit2,
   GitBranch,
   ListFilter,
@@ -18,13 +19,14 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  TerminalSquare,
   Workflow,
   X,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
+import { AssistantMessage } from "@renderer/components/desktop/conversation/assistant-message"
+import { buildConversationEntries } from "@renderer/components/desktop/conversation/conversation-turn-model"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
@@ -34,16 +36,23 @@ import type {
   DesktopProject,
   DesktopSessionMessage,
   DesktopSessionPart,
+  DesktopSessionRun,
 } from "@shared/session-types"
 
 type ConversationPaneProps = {
   panelOpen: boolean
   onTogglePanel: () => void
+  onOpenFile: (path: string, line?: number) => void
+}
+
+interface AddToComposerEventDetail {
+  text: string
 }
 
 export function ConversationPane({
   panelOpen,
   onTogglePanel,
+  onOpenFile,
 }: ConversationPaneProps): React.JSX.Element {
   const [draft, setDraft] = useState("")
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
@@ -91,17 +100,34 @@ export function ConversationPane({
   const modelLabel = resolveModelLabel(models, currentModel)
   const running = Boolean(
     sessionView?.runs.some((run) => run.status === "pending" || run.status === "running") ||
-      sessionView?.session.status === "running"
+    sessionView?.session.status === "running"
   )
   const pendingPermissions =
     sessionView?.permissions.filter((permission) => permission.status === "pending") ?? []
+
+  useEffect(() => {
+    const handleAddToComposer = (event: Event): void => {
+      const detail = (event as CustomEvent<AddToComposerEventDetail>).detail
+      if (!detail?.text) return
+      setDraft((current) => appendDraftText(current, detail.text))
+      window.requestAnimationFrame(() => {
+        const composer = document.querySelector<HTMLTextAreaElement>(
+          "#message-composer, #new-conversation-composer"
+        )
+        composer?.focus()
+      })
+    }
+
+    window.addEventListener("desktop:add-to-composer", handleAddToComposer)
+    return () => window.removeEventListener("desktop:add-to-composer", handleAddToComposer)
+  }, [])
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col bg-conversation">
       {hasSession ? (
         <header className="flex h-12 shrink-0 items-center border-b bg-background px-3">
           <div className="flex min-w-0 items-center gap-2">
-            <Folder className="size-4 shrink-0 text-ui-muted" strokeWidth={1.8} />
+            <FolderClosed className="size-4 shrink-0 text-ui-muted" strokeWidth={1.8} />
             <h1 className="truncate text-[13px] font-semibold">{title}</h1>
             {sessionView?.syncStatus === "reconnecting" ? (
               <span className="flex shrink-0 items-center gap-1 text-[11px] text-ui-muted">
@@ -164,8 +190,13 @@ export function ConversationPane({
         />
       ) : (
         <>
-          <ScrollArea className="min-h-0 flex-1">
-            <article className="mx-auto flex min-h-full w-full max-w-190 flex-col px-6 pt-7 pb-5">
+          <ScrollArea
+            horizontal={false}
+            className="min-h-0 min-w-0 flex-1"
+            viewportClassName="overflow-x-hidden"
+            contentClassName="w-full max-w-full"
+          >
+            <article className="mx-auto flex min-h-full w-full max-w-190 min-w-0 flex-col px-6 pt-7 pb-5">
               {openingSession && !sessionView ? (
                 <div className="flex flex-1 items-center justify-center text-sm text-ui-muted">
                   <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -175,7 +206,9 @@ export function ConversationPane({
                 <ConversationTranscript
                   messages={sessionView?.messages ?? []}
                   parts={sessionView?.parts ?? []}
+                  runs={sessionView?.runs ?? []}
                   running={running}
+                  onOpenFile={onOpenFile}
                 />
               )}
 
@@ -217,22 +250,21 @@ export function ConversationPane({
 function ConversationTranscript({
   messages,
   parts,
+  runs,
   running,
+  onOpenFile,
 }: {
   messages: DesktopSessionMessage[]
   parts: DesktopSessionPart[]
+  runs: DesktopSessionRun[]
   running: boolean
+  onOpenFile: (path: string, line?: number) => void
 }): React.JSX.Element {
-  const partsByMessage = useMemo(() => {
-    const grouped = new Map<string, DesktopSessionPart[]>()
-    for (const part of parts) {
-      const current = grouped.get(part.messageId) ?? []
-      current.push(part)
-      grouped.set(part.messageId, current)
-    }
-    for (const current of grouped.values()) current.sort((a, b) => a.seq - b.seq)
-    return grouped
-  }, [parts])
+  const entries = useMemo(
+    () => buildConversationEntries(messages, parts, runs),
+    [messages, parts, runs]
+  )
+  const lastTurn = [...entries].reverse().find((entry) => entry.type === "turn")
 
   if (messages.length === 0 && !running) {
     return (
@@ -243,14 +275,39 @@ function ConversationTranscript({
   }
 
   return (
-    <div className="space-y-7 text-[14px] leading-7 text-content-foreground">
-      {messages.map((message) => (
-        <MessageBlock
-          key={message.id}
-          message={message}
-          parts={partsByMessage.get(message.id) ?? []}
-        />
-      ))}
+    <div className="min-w-0 space-y-8 text-[15px] leading-7 text-content-foreground">
+      {entries.map((entry) => {
+        if (entry.type === "system") {
+          return (
+            <MessageBlock
+              key={entry.system.id}
+              message={entry.system.message}
+              parts={entry.system.parts}
+              streaming={false}
+              onOpenFile={onOpenFile}
+            />
+          )
+        }
+        return (
+          <section key={entry.turn.id} className="min-w-0 space-y-8">
+            {entry.turn.userMessage ? (
+              <MessageBlock
+                message={entry.turn.userMessage}
+                parts={entry.turn.userParts}
+                streaming={false}
+                onOpenFile={onOpenFile}
+              />
+            ) : null}
+            {entry.turn.assistantMessages.length > 0 ? (
+              <AssistantMessage
+                parts={entry.turn.assistantParts}
+                streaming={running && entry === lastTurn}
+                onOpenFile={onOpenFile}
+              />
+            ) : null}
+          </section>
+        )
+      })}
       {running ? (
         <div className="flex items-center gap-2 text-xs text-ui-muted">
           <LoaderCircle className="size-3.5 animate-spin" />
@@ -264,9 +321,13 @@ function ConversationTranscript({
 function MessageBlock({
   message,
   parts,
+  streaming,
+  onOpenFile,
 }: {
   message: DesktopSessionMessage
   parts: DesktopSessionPart[]
+  streaming: boolean
+  onOpenFile: (path: string, line?: number) => void
 }): React.JSX.Element {
   if (message.role === "user") {
     const content = parts
@@ -275,7 +336,7 @@ function MessageBlock({
       .join("")
     return (
       <div className="flex justify-end">
-        <div className="max-w-[78%] whitespace-pre-wrap rounded-xl bg-user-message px-4 py-3 text-[13px] leading-6 text-foreground">
+        <div className="max-w-[78%] rounded-xl bg-user-message px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground">
           {content || "已发送消息"}
         </div>
       </div>
@@ -287,64 +348,7 @@ function MessageBlock({
     return <p className="text-xs whitespace-pre-wrap text-ui-muted">{content}</p>
   }
 
-  return (
-    <div className="space-y-3">
-      {parts.length === 0 ? (
-        <span className="text-xs text-ui-muted">正在生成回复...</span>
-      ) : (
-        parts.map((part) => <MessagePart key={part.id} part={part} />)
-      )}
-    </div>
-  )
-}
-
-function MessagePart({ part }: { part: DesktopSessionPart }): React.JSX.Element | null {
-  if (part.type === "text") {
-    if (!part.text) return null
-    return <p className="whitespace-pre-wrap">{part.text}</p>
-  }
-
-  if (part.type === "reasoning") {
-    return (
-      <details className="text-xs text-ui-muted">
-        <summary className="cursor-pointer select-none">思考过程</summary>
-        <p className="mt-2 whitespace-pre-wrap">{part.text}</p>
-      </details>
-    )
-  }
-
-  if (part.type === "tool" || part.type === "tool_result") {
-    return (
-      <div className="flex min-w-0 items-start gap-2 rounded-lg border bg-background/55 px-3 py-2.5 text-xs">
-        <TerminalSquare className="mt-0.5 size-3.5 shrink-0 text-ui-muted" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate font-medium text-foreground">
-              {part.toolName || (part.type === "tool" ? "运行工具" : "工具结果")}
-            </span>
-            <PartStatus status={part.status} />
-          </div>
-          {part.output !== undefined ? (
-            <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-ui-muted">
-              {formatOutput(part.output)}
-            </pre>
-          ) : null}
-        </div>
-      </div>
-    )
-  }
-
-  if (part.type === "error" || part.isError) {
-    return (
-      <div className="flex items-start gap-2 rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive">
-        <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-        <span className="whitespace-pre-wrap">{part.text || formatOutput(part.output)}</span>
-      </div>
-    )
-  }
-
-  if (!part.text) return null
-  return <p className="whitespace-pre-wrap text-xs text-ui-muted">{part.text}</p>
+  return <AssistantMessage parts={parts} streaming={streaming} onOpenFile={onOpenFile} />
 }
 
 function PermissionCard({
@@ -362,9 +366,7 @@ function PermissionCard({
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="text-[13px] font-semibold text-foreground">需要你的批准</h3>
-          <p className="mt-1 text-xs text-ui-muted">
-            OpenHarness 请求运行 {permission.toolName}
-          </p>
+          <p className="mt-1 text-xs text-ui-muted">OpenHarness 请求运行 {permission.toolName}</p>
         </div>
         <button
           type="button"
@@ -473,9 +475,7 @@ function NewConversationStart({
             <div className="relative min-w-0">
               <StartPickerButton
                 label={
-                  loadStatus === "loading"
-                    ? "加载项目..."
-                    : selectedProject?.name ?? "选择项目"
+                  loadStatus === "loading" ? "加载项目..." : (selectedProject?.name ?? "选择项目")
                 }
                 expanded={activePicker === "project"}
                 onClick={() => togglePicker("project")}
@@ -515,9 +515,7 @@ function NewConversationStart({
                       </PickerMenuItem>
                     ))}
                     {visibleProjects.length === 0 ? (
-                      <p className="px-2 py-5 text-center text-xs text-ui-muted">
-                        没有匹配的项目
-                      </p>
+                      <p className="px-2 py-5 text-center text-xs text-ui-muted">没有匹配的项目</p>
                     ) : null}
                   </div>
                   <div className="mt-1 border-t pt-1">
@@ -770,7 +768,13 @@ function Composer({
   )
 }
 
-function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }): React.JSX.Element {
+function ErrorBanner({
+  message,
+  onClose,
+}: {
+  message: string
+  onClose: () => void
+}): React.JSX.Element {
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-destructive/15 bg-destructive/6 px-4 py-2 text-xs text-destructive">
       <AlertCircle className="size-3.5 shrink-0" />
@@ -786,22 +790,6 @@ function ErrorBanner({ message, onClose }: { message: string; onClose: () => voi
         <X />
       </button>
     </div>
-  )
-}
-
-function PartStatus({ status }: { status: DesktopSessionPart["status"] }): React.JSX.Element {
-  const labels: Record<DesktopSessionPart["status"], string> = {
-    pending: "等待中",
-    running: "运行中",
-    completed: "已完成",
-    failed: "失败",
-    interrupted: "已停止",
-  }
-  return (
-    <span className="flex shrink-0 items-center gap-1 text-[10px] text-ui-muted">
-      {status === "running" ? <LoaderCircle className="size-2.5 animate-spin" /> : null}
-      {labels[status]}
-    </span>
   )
 }
 
@@ -918,12 +906,10 @@ function projectName(path: string | undefined): string {
   return normalized.split(/[\\/]/).pop() || path
 }
 
-function formatOutput(output: unknown): string {
-  if (typeof output === "string") return output
-  if (output === undefined || output === null) return ""
-  try {
-    return JSON.stringify(output, null, 2)
-  } catch {
-    return String(output)
-  }
+function appendDraftText(current: string, text: string): string {
+  const trimmedText = text.trim()
+  if (!trimmedText) return current
+  if (!current.trim()) return trimmedText
+  if (current.endsWith(" ") || current.endsWith("\n")) return `${current}${trimmedText}`
+  return `${current} ${trimmedText}`
 }
