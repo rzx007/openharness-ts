@@ -6,12 +6,17 @@ import { Sidebar } from "@renderer/components/desktop/sidebar"
 import { TitleBar } from "@renderer/components/desktop/title-bar"
 import { UtilityPanel } from "@renderer/components/desktop/utility-panel"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
+import {
+  attachDesktopSessionEvents,
+  useDesktopSessionStore,
+} from "@renderer/stores/desktop-session-store"
 
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
 const sidebarMinimumWidth = 236
 
 export function DesktopShell(): React.JSX.Element {
+  const initializeSessions = useDesktopSessionStore((state) => state.initialize)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [panelOpen, setPanelOpen] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
@@ -31,6 +36,12 @@ export function DesktopShell(): React.JSX.Element {
     void window.desktop.window.isMaximized().then(setIsMaximized)
     return window.desktop.window.onMaximizedChanged(setIsMaximized)
   }, [])
+
+  useEffect(() => {
+    const detach = attachDesktopSessionEvents()
+    void initializeSessions()
+    return detach
+  }, [initializeSessions])
 
   const toggleSidebar = useCallback((): void => {
     const panel = sidebarPanelRef.current

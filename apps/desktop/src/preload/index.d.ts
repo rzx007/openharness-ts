@@ -5,6 +5,15 @@ import type {
   PlatformInfo,
   TrayNotificationOptions
 } from '../shared/ipc-channels'
+import type {
+  CreateDesktopSessionInput,
+  DesktopBootstrapData,
+  DesktopProjectDetails,
+  DesktopSessionRecord,
+  DesktopSessionView,
+  ReplyDesktopPermissionInput,
+  SendDesktopPromptInput
+} from '../shared/session-types'
 
 export interface DesktopAPI {
   app: {
@@ -32,6 +41,18 @@ export interface DesktopAPI {
     getState: () => Promise<PetState>
     setAlwaysOnTop: (value: boolean) => Promise<PetState>
     setIgnoreMouseEvents: (value: boolean) => Promise<PetState>
+  }
+  sessions: {
+    bootstrap: () => Promise<DesktopBootstrapData>
+    chooseProject: () => Promise<DesktopProjectDetails | null>
+    inspectProject: (path: string) => Promise<DesktopProjectDetails>
+    create: (input: CreateDesktopSessionInput) => Promise<DesktopSessionRecord>
+    open: (sessionId: string) => Promise<DesktopSessionView>
+    close: () => Promise<void>
+    sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
+    interrupt: (sessionId: string) => Promise<void>
+    replyPermission: (input: ReplyDesktopPermissionInput) => Promise<void>
+    onUpdated: (listener: (value: DesktopSessionView) => void) => () => void
   }
   events: {
     onMainProcessMessage: (listener: (message: string) => void) => () => void

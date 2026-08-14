@@ -51,6 +51,7 @@ import type {
   PluginService,
   ProfileService,
   ProjectInitService,
+  ProviderInfo,
   ProviderService,
   SettingsService,
 } from "./settings-api.js";
@@ -308,7 +309,7 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
     async list() {
       const current = await readCurrentSettings(ref);
       const currentName = current.provider ?? "auto";
-      const rows = [];
+      const rows: ProviderInfo[] = [];
       for (const spec of PROVIDERS) {
         const storedKey = await storage.loadApiKey(spec.name);
         const hasKey = !!storedKey || (spec.envKey ? !!process.env[spec.envKey] : false);

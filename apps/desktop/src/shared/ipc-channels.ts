@@ -1,24 +1,48 @@
+import type {
+  CreateDesktopSessionInput,
+  DesktopBootstrapData,
+  DesktopProjectDetails,
+  DesktopSessionRecord,
+  DesktopSessionView,
+  ReplyDesktopPermissionInput,
+  SendDesktopPromptInput,
+} from "./session-types"
+
 export const IpcChannels = {
-  appGetInfo: 'app:get-info',
-  appGetPlatform: 'app:get-platform',
-  appQuit: 'app:quit',
+  appGetInfo: "app:get-info",
+  appGetPlatform: "app:get-platform",
+  appQuit: "app:quit",
 
-  windowShowMain: 'window:show-main',
-  windowMinimize: 'window:minimize',
-  windowClose: 'window:close',
-  windowToggleMaximize: 'window:toggle-maximize',
-  windowIsMaximized: 'window:is-maximized',
+  windowShowMain: "window:show-main",
+  windowMinimize: "window:minimize",
+  windowClose: "window:close",
+  windowToggleMaximize: "window:toggle-maximize",
+  windowIsMaximized: "window:is-maximized",
 
-  trayFlash: 'tray:flash',
-  trayStopFlash: 'tray:stop-flash',
-  trayNotify: 'tray:notify',
+  trayFlash: "tray:flash",
+  trayStopFlash: "tray:stop-flash",
+  trayNotify: "tray:notify",
 
-  petShow: 'pet:show',
-  petHide: 'pet:hide',
-  petToggle: 'pet:toggle',
-  petGetState: 'pet:get-state',
-  petSetAlwaysOnTop: 'pet:set-always-on-top',
-  petSetIgnoreMouseEvents: 'pet:set-ignore-mouse-events'
+  petShow: "pet:show",
+  petHide: "pet:hide",
+  petToggle: "pet:toggle",
+  petGetState: "pet:get-state",
+  petSetAlwaysOnTop: "pet:set-always-on-top",
+  petSetIgnoreMouseEvents: "pet:set-ignore-mouse-events",
+
+  sessionBootstrap: "session:bootstrap",
+  sessionChooseProject: "session:choose-project",
+  sessionInspectProject: "session:inspect-project",
+  sessionCreate: "session:create",
+  sessionOpen: "session:open",
+  sessionClose: "session:close",
+  sessionSendPrompt: "session:send-prompt",
+  sessionInterrupt: "session:interrupt",
+  sessionReplyPermission: "session:reply-permission",
+} as const
+
+export const IpcEvents = {
+  sessionUpdated: "session:updated",
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -76,6 +100,25 @@ export interface IpcInvokeMap {
   [IpcChannels.petGetState]: { args: []; result: PetState }
   [IpcChannels.petSetAlwaysOnTop]: { args: [value: boolean]; result: PetState }
   [IpcChannels.petSetIgnoreMouseEvents]: { args: [value: boolean]; result: PetState }
+
+  [IpcChannels.sessionBootstrap]: { args: []; result: DesktopBootstrapData }
+  [IpcChannels.sessionChooseProject]: { args: []; result: DesktopProjectDetails | null }
+  [IpcChannels.sessionInspectProject]: {
+    args: [path: string]
+    result: DesktopProjectDetails
+  }
+  [IpcChannels.sessionCreate]: {
+    args: [input: CreateDesktopSessionInput]
+    result: DesktopSessionRecord
+  }
+  [IpcChannels.sessionOpen]: { args: [sessionId: string]; result: DesktopSessionView }
+  [IpcChannels.sessionClose]: { args: []; result: void }
+  [IpcChannels.sessionSendPrompt]: { args: [input: SendDesktopPromptInput]; result: void }
+  [IpcChannels.sessionInterrupt]: { args: [sessionId: string]; result: void }
+  [IpcChannels.sessionReplyPermission]: {
+    args: [input: ReplyDesktopPermissionInput]
+    result: void
+  }
 }
 
-export type IpcResult<C extends IpcChannel> = IpcInvokeMap[C]['result']
+export type IpcResult<C extends IpcChannel> = IpcInvokeMap[C]["result"]
