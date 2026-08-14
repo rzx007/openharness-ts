@@ -1,4 +1,4 @@
-import { BrowserWindow, shell } from "electron"
+import { BrowserWindow, shell, type WebPreferences } from "electron"
 
 import type { AppContext } from "../../core/app-context"
 import { isForceQuit } from "../../core/services/lifecycle"
@@ -24,6 +24,9 @@ export function createMainWindow(ctx: AppContext): BrowserWindow {
       autoHideMenuBar: true,
       frame: false,
       backgroundColor: "#f4f7f9",
+      webPreferences: {
+        webviewTag: true,
+      },
     },
     onCreated: (win) => {
       attachMainWindowBehavior(ctx, win)
@@ -41,6 +44,8 @@ export function showMainWindow(win: BrowserWindow): void {
 }
 
 function attachMainWindowBehavior(ctx: AppContext, win: BrowserWindow): void {
+  attachWebviewPolicy(win)
+
   win.once("ready-to-show", () => {
     showMainWindow(win)
   })
@@ -84,6 +89,36 @@ function attachMainWindowBehavior(ctx: AppContext, win: BrowserWindow): void {
 
     return { action: "deny" }
   })
+}
+
+function attachWebviewPolicy(win: BrowserWindow): void {
+  win.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (!isAllowedWebviewUrl(params.src)) {
+      event.preventDefault()
+      return
+    }
+
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.nodeIntegrationInSubFrames = false
+    webPreferences.contextIsolation = true
+    webPreferences.webSecurity = true
+    webPreferences.allowRunningInsecureContent = false
+    webPreferences.sandbox = true
+    ;(webPreferences as WebPreferences & { javascript?: boolean }).javascript = true
+    params.partition = "persist:openharness-browser"
+  })
+}
+
+function isAllowedWebviewUrl(value: string | undefined): boolean {
+  if (!value) return true
+  if (value === "about:blank") return true
+  try {
+    const url = new URL(value)
+    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:"
+  } catch {
+    return false
+  }
 }
 
 function attachMainWindowDiagnostics(win: BrowserWindow): void {

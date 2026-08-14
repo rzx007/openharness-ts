@@ -3,10 +3,12 @@ import { petIpcContribution } from './pet/ipc'
 import { sessionIpcContribution } from './session/ipc'
 import { trayIpcContribution } from './tray/ipc'
 import { windowControlsIpcContribution } from './window-controls/ipc'
+import { workspaceIpcContribution } from './workspace/ipc'
 
 export const allIpcContributions: IpcContribution[] = [
   windowControlsIpcContribution,
   trayIpcContribution,
   petIpcContribution,
-  sessionIpcContribution
+  sessionIpcContribution,
+  workspaceIpcContribution
 ]

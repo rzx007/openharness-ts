@@ -44,6 +44,16 @@ export const desktopAPI = {
     setAlwaysOnTop: (value: boolean) => invoke(IpcChannels.petSetAlwaysOnTop, value),
     setIgnoreMouseEvents: (value: boolean) => invoke(IpcChannels.petSetIgnoreMouseEvents, value),
   },
+  workspace: {
+    listFiles: (input: IpcInvokeMap[typeof IpcChannels.workspaceListFiles]["args"][0]) =>
+      invoke(IpcChannels.workspaceListFiles, input),
+    readFile: (input: IpcInvokeMap[typeof IpcChannels.workspaceReadFile]["args"][0]) =>
+      invoke(IpcChannels.workspaceReadFile, input),
+    revealPath: (input: IpcInvokeMap[typeof IpcChannels.workspaceRevealPath]["args"][0]) =>
+      invoke(IpcChannels.workspaceRevealPath, input),
+    copyPath: (input: IpcInvokeMap[typeof IpcChannels.workspaceCopyPath]["args"][0]) =>
+      invoke(IpcChannels.workspaceCopyPath, input),
+  },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),

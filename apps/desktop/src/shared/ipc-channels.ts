@@ -11,6 +11,14 @@ import type {
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
 } from "./session-types"
+import type {
+  WorkspaceListFilesInput,
+  WorkspaceListFilesResult,
+  WorkspaceCopyPathInput,
+  WorkspaceReadFileInput,
+  WorkspaceReadFileResult,
+  WorkspaceRevealPathInput,
+} from "./workspace-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -50,6 +58,11 @@ export const IpcChannels = {
   sessionRename: "session:rename",
   sessionSetPinned: "session:set-pinned",
   sessionArchive: "session:archive",
+
+  workspaceListFiles: "workspace:list-files",
+  workspaceReadFile: "workspace:read-file",
+  workspaceRevealPath: "workspace:reveal-path",
+  workspaceCopyPath: "workspace:copy-path",
 } as const
 
 export const IpcEvents = {
@@ -154,6 +167,23 @@ export interface IpcInvokeMap {
   [IpcChannels.sessionArchive]: {
     args: [sessionId: string]
     result: DesktopSessionRecord
+  }
+
+  [IpcChannels.workspaceListFiles]: {
+    args: [input: WorkspaceListFilesInput]
+    result: WorkspaceListFilesResult
+  }
+  [IpcChannels.workspaceReadFile]: {
+    args: [input: WorkspaceReadFileInput]
+    result: WorkspaceReadFileResult
+  }
+  [IpcChannels.workspaceRevealPath]: {
+    args: [input: WorkspaceRevealPathInput]
+    result: void
+  }
+  [IpcChannels.workspaceCopyPath]: {
+    args: [input: WorkspaceCopyPathInput]
+    result: string
   }
 }
 

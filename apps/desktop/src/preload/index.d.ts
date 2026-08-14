@@ -1,4 +1,5 @@
 import { ElectronAPI } from "@electron-toolkit/preload"
+import type * as React from "react"
 import type {
   DesktopAppInfo,
   PetState,
@@ -18,6 +19,14 @@ import type {
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
 } from "../shared/session-types"
+import type {
+  WorkspaceListFilesInput,
+  WorkspaceListFilesResult,
+  WorkspaceCopyPathInput,
+  WorkspaceReadFileInput,
+  WorkspaceReadFileResult,
+  WorkspaceRevealPathInput,
+} from "../shared/workspace-types"
 
 export interface DesktopAPI {
   app: {
@@ -45,6 +54,12 @@ export interface DesktopAPI {
     getState: () => Promise<PetState>
     setAlwaysOnTop: (value: boolean) => Promise<PetState>
     setIgnoreMouseEvents: (value: boolean) => Promise<PetState>
+  }
+  workspace: {
+    listFiles: (input: WorkspaceListFilesInput) => Promise<WorkspaceListFilesResult>
+    readFile: (input: WorkspaceReadFileInput) => Promise<WorkspaceReadFileResult>
+    revealPath: (input: WorkspaceRevealPathInput) => Promise<void>
+    copyPath: (input: WorkspaceCopyPathInput) => Promise<string>
   }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>
@@ -74,5 +89,21 @@ declare global {
   interface Window {
     electron: ElectronAPI
     desktop: DesktopAPI
+  }
+
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        allowpopups?: string
+        autosize?: string
+        disableblinkfeatures?: string
+        httpreferrer?: string
+        partition?: string
+        preload?: string
+        src?: string
+        useragent?: string
+        webpreferences?: string
+      }
+    }
   }
 }

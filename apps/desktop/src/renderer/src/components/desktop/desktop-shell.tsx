@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Group, Panel, useDefaultLayout, usePanelRef } from "react-resizable-panels"
+import {
+  Group,
+  Panel,
+  type Layout,
+  type LayoutChangedMeta,
+  useDefaultLayout,
+  useGroupRef,
+  usePanelRef,
+} from "react-resizable-panels"
 
 import { ConversationPane } from "@renderer/components/desktop/conversation-pane"
 import { Sidebar } from "@renderer/components/desktop/sidebar"
@@ -19,9 +27,17 @@ export function DesktopShell(): React.JSX.Element {
   const initializeSessions = useDesktopSessionStore((state) => state.initialize)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [utilityMaximized, setUtilityMaximized] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
+  const [fileOpenRequest, setFileOpenRequest] = useState<{
+    id: number
+    path: string
+    line?: number
+  } | null>(null)
   const sidebarPanelRef = usePanelRef()
   const utilityPanelRef = usePanelRef()
+  const workspaceGroupRef = useGroupRef()
+  const previousWorkspaceLayoutRef = useRef<Layout | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const outerLayout = useDefaultLayout({
     id: "desktop-shell-layout-v1",
@@ -68,9 +84,67 @@ export function DesktopShell(): React.JSX.Element {
       if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
       panel.expand()
     } else {
+      previousWorkspaceLayoutRef.current = null
+      setUtilityMaximized(false)
       panel.collapse()
     }
   }, [sidebarPanelRef, utilityPanelRef])
+
+  const openWorkspaceFile = useCallback(
+    (path: string, line?: number): void => {
+      if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
+      utilityPanelRef.current?.expand()
+      setPanelOpen(true)
+      setFileOpenRequest({ id: Date.now(), path, line })
+    },
+    [sidebarPanelRef, utilityPanelRef]
+  )
+
+  const closeUtilityPanel = useCallback((): void => {
+    previousWorkspaceLayoutRef.current = null
+    setUtilityMaximized(false)
+    utilityPanelRef.current?.collapse()
+  }, [utilityPanelRef])
+
+  const toggleUtilityMaximized = useCallback((): void => {
+    if (utilityMaximized) {
+      setUtilityMaximized(false)
+      return
+    }
+
+    const currentLayout = workspaceGroupRef.current?.getLayout()
+    if (currentLayout?.conversation && currentLayout.utility) {
+      previousWorkspaceLayoutRef.current = currentLayout
+    }
+    if (utilityPanelRef.current?.isCollapsed()) utilityPanelRef.current.expand()
+    setPanelOpen(true)
+    setUtilityMaximized(true)
+  }, [utilityMaximized, utilityPanelRef, workspaceGroupRef])
+
+  useEffect(() => {
+    const group = workspaceGroupRef.current
+    if (!group) return
+
+    window.requestAnimationFrame(() => {
+      if (utilityMaximized) {
+        group.setLayout({ conversation: 0, utility: 100 })
+        return
+      }
+
+      const previousLayout = previousWorkspaceLayoutRef.current
+      if (previousLayout) {
+        group.setLayout(previousLayout)
+        previousWorkspaceLayoutRef.current = null
+      }
+    })
+  }, [utilityMaximized, workspaceGroupRef])
+
+  const handleWorkspaceLayoutChanged = useCallback(
+    (layout: Layout, meta: LayoutChangedMeta): void => {
+      if (!utilityMaximized) workspaceLayout.onLayoutChanged(layout, meta)
+    },
+    [utilityMaximized, workspaceLayout]
+  )
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -152,29 +226,36 @@ export function DesktopShell(): React.JSX.Element {
             <section className="border-workspace flex h-full min-w-0 overflow-hidden rounded-tl-lg border-t border-l bg-conversation shadow-workspace">
               <Group
                 id="desktop-workspace"
+                groupRef={workspaceGroupRef}
                 orientation="horizontal"
                 className="h-full min-h-0 w-full"
                 resizeTargetMinimumSize={resizeTargetMinimumSize}
                 defaultLayout={workspaceLayout.defaultLayout ?? { conversation: 100, utility: 0 }}
-                onLayoutChanged={workspaceLayout.onLayoutChanged}
+                onLayoutChanged={handleWorkspaceLayoutChanged}
               >
                 <Panel
                   id="conversation"
                   defaultSize="100%"
-                  minSize={440}
+                  minSize={utilityMaximized ? 0 : 440}
+                  collapsedSize={0}
+                  collapsible
                   className="h-full min-h-0 overflow-hidden"
                 >
-                  <ConversationPane panelOpen={panelOpen} onTogglePanel={togglePanel} />
+                  <ConversationPane
+                    panelOpen={panelOpen}
+                    onTogglePanel={togglePanel}
+                    onOpenFile={openWorkspaceFile}
+                  />
                 </Panel>
 
-                <PanelResizeHandle label="调整工具面板宽度" />
+                {!utilityMaximized && <PanelResizeHandle label="调整工具面板宽度" />}
 
                 <Panel
                   id="utility"
                   panelRef={utilityPanelRef}
                   defaultSize={420}
                   minSize={320}
-                  maxSize="58%"
+                  maxSize={utilityMaximized ? "100%" : "58%"}
                   collapsedSize={0}
                   collapsible
                   groupResizeBehavior="preserve-pixel-size"
@@ -186,7 +267,10 @@ export function DesktopShell(): React.JSX.Element {
                 >
                   <UtilityPanel
                     open={panelOpen}
-                    onClose={() => utilityPanelRef.current?.collapse()}
+                    maximized={utilityMaximized}
+                    onToggleMaximized={toggleUtilityMaximized}
+                    onClose={closeUtilityPanel}
+                    fileOpenRequest={fileOpenRequest}
                   />
                 </Panel>
               </Group>
