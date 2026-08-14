@@ -1,11 +1,11 @@
-import { existsSync } from "node:fs"
 import { stat } from "node:fs/promises"
-import { basename, dirname, resolve } from "node:path"
+import { resolve } from "node:path"
 
 import {
   OpenHarnessClient,
   syncEvents,
   type OpenHarnessClientState,
+  type ProjectRecord,
   type SessionRecord,
   type SyncEventUpdate,
 } from "@openharness/client"
@@ -18,7 +18,6 @@ import {
   type OpenHarnessHttpServer,
 } from "@openharness/server"
 import { app, BrowserWindow, dialog, type OpenDialogOptions, type WebContents } from "electron"
-import Store from "electron-store"
 
 import { IpcEvents } from "../../../shared/ipc-channels"
 import type {
@@ -36,26 +35,10 @@ import type {
   SendDesktopPromptInput,
 } from "../../../shared/session-types"
 
-interface DesktopPreferences {
-  recentProjects: DesktopProject[]
-  projectPreferences: Record<string, DesktopProjectPreference>
-}
-
-interface DesktopProjectPreference {
-  name?: string
-  pinnedAt?: number
-  hidden?: boolean
-}
-
 interface SessionSubscription {
   controller: AbortController
   sessionId: string
 }
-
-const preferences = new Store<DesktopPreferences>({
-  name: "desktop-preferences",
-  defaults: { recentProjects: [], projectPreferences: {} },
-})
 
 class DesktopSessionService {
   private clientPromise: Promise<OpenHarnessClient> | null = null
@@ -65,10 +48,11 @@ class DesktopSessionService {
 
   async bootstrap(): Promise<DesktopBootstrapData> {
     const client = await this.getClient()
-    const [settings, providers, allSessions] = await Promise.all([
+    const [settings, providers, allSessions, projectRecords] = await Promise.all([
       client.getSettings(),
       client.listModels(),
       client.listSessions({ includeArchived: true, limit: 400 }),
+      client.listProjects(),
     ])
     const sessions = allSessions.filter((session) => session.status !== "archived")
     const archivedSessions = allSessions.filter((session) => session.status === "archived")
@@ -81,8 +65,7 @@ class DesktopSessionService {
     }
 
     const normalizedModels = ensureConfiguredModel(models, defaultModel)
-    const projects = this.collectProjects(allSessions)
-    preferences.set("recentProjects", projects)
+    const projects = await Promise.all(projectRecords.map(toDesktopProject))
 
     return {
       connected: true,
@@ -113,8 +96,8 @@ class DesktopSessionService {
     const info = await stat(path)
     if (!info.isDirectory()) throw new Error("选择的项目路径不是目录。")
 
-    const project = this.rememberProject(path)
     const client = await this.getClient()
+    const project = await toDesktopProject(await client.inspectProject(path))
     let branch: string | null = null
     try {
       branch = parseCurrentBranch(await client.getGitBranch({ cwd: path }))
@@ -129,41 +112,46 @@ class DesktopSessionService {
     const cwd = resolveRequiredPath(input.cwd)
     const model = requireString(input.model, "模型")
     const client = await this.getClient()
-    const session = await client.createSession({ cwd, model, title: "" })
-    this.rememberProject(cwd)
+    const projectId = requireString(input.projectId, "Project ID")
+    const session = await client.createSession({ projectId, cwd, model, title: "" })
     return session
   }
 
-  renameProject(input: RenameDesktopProjectInput): DesktopProject {
-    const path = resolveRequiredPath(input.path)
+  async renameProject(input: RenameDesktopProjectInput): Promise<DesktopProject> {
     const name = requireString(input.name, "项目名称")
-    this.updateProjectPreference(path, { name, hidden: false })
-    return this.projectWithPreferences({
-      name: basename(path),
-      path,
-      lastOpenedAt: this.projectLastOpenedAt(path),
-    })
-  }
-
-  setProjectPinned(input: PinDesktopProjectInput): DesktopProject {
-    const path = resolveRequiredPath(input.path)
-    this.updateProjectPreference(path, { pinnedAt: input.pinned ? Date.now() : undefined })
-    return this.projectWithPreferences({
-      name: basename(path),
-      path,
-      lastOpenedAt: this.projectLastOpenedAt(path),
-    })
-  }
-
-  removeProject(inputPath: string): void {
-    const path = resolveRequiredPath(inputPath)
-    this.updateProjectPreference(path, { hidden: true })
-    preferences.set(
-      "recentProjects",
-      preferences
-        .get("recentProjects")
-        .filter((project) => projectKey(project.path) !== projectKey(path))
+    return await toDesktopProject(
+      await (await this.getClient()).renameProject(input.projectId, name)
     )
+  }
+
+  async setProjectPinned(input: PinDesktopProjectInput): Promise<DesktopProject> {
+    return await toDesktopProject(
+      await (await this.getClient()).setProjectPinned(input.projectId, input.pinned)
+    )
+  }
+
+  async removeProject(projectId: string): Promise<void> {
+    await (await this.getClient()).archiveProject(requireString(projectId, "Project ID"))
+  }
+
+  async rebindProject(
+    webContents: WebContents,
+    projectIdInput: string
+  ): Promise<DesktopProject | null> {
+    const owner = BrowserWindow.fromWebContents(webContents) ?? undefined
+    const options: OpenDialogOptions = {
+      title: "重新绑定项目目录",
+      properties: ["openDirectory"],
+    }
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return null
+    const project = await (
+      await this.getClient()
+    ).rebindProject(requireString(projectIdInput, "Project ID"), path)
+    return await toDesktopProject(project)
   }
 
   async openSession(webContents: WebContents, sessionIdInput: string): Promise<DesktopSessionView> {
@@ -327,91 +315,16 @@ class DesktopSessionService {
     })
     return new OpenHarnessClient({ baseUrl: listen.url, token })
   }
-
-  private collectProjects(sessions: SessionRecord[]): DesktopProject[] {
-    const projects = new Map<string, DesktopProject>()
-    for (const project of preferences.get("recentProjects")) {
-      if (existsSync(project.path)) projects.set(projectKey(project.path), project)
-    }
-    for (const session of sessions) {
-      if (!existsSync(session.cwd)) continue
-      const key = projectKey(session.cwd)
-      const existing = projects.get(key)
-      projects.set(key, {
-        name: basename(session.cwd),
-        path: session.cwd,
-        lastOpenedAt: Math.max(existing?.lastOpenedAt ?? 0, session.updatedAt),
-      })
-    }
-    if (!app.isPackaged) {
-      const rawDevPath = resolve(process.env["INIT_CWD"] ?? process.cwd())
-      const devPath = findGitRoot(rawDevPath) ?? rawDevPath
-      if (devPath !== rawDevPath) projects.delete(projectKey(rawDevPath))
-      if (existsSync(devPath)) {
-        const key = projectKey(devPath)
-        projects.set(key, {
-          name: basename(devPath),
-          path: resolve(devPath),
-          lastOpenedAt: projects.get(key)?.lastOpenedAt ?? Date.now(),
-        })
-      }
-    }
-    return [...projects.values()]
-      .filter((project) => !this.projectPreference(project.path).hidden)
-      .map((project) => this.projectWithPreferences(project))
-      .sort(sortProjects)
-  }
-
-  private rememberProject(inputPath: string): DesktopProject {
-    const path = resolve(inputPath)
-    this.updateProjectPreference(path, { hidden: false })
-    const project = this.projectWithPreferences({
-      name: basename(path),
-      path,
-      lastOpenedAt: Date.now(),
-    })
-    const recent = preferences
-      .get("recentProjects")
-      .filter((item) => projectKey(item.path) !== projectKey(path))
-    preferences.set("recentProjects", [project, ...recent].slice(0, 20))
-    return project
-  }
-
-  private projectPreference(path: string): DesktopProjectPreference {
-    return preferences.get("projectPreferences")[projectKey(path)] ?? {}
-  }
-
-  private updateProjectPreference(path: string, update: DesktopProjectPreference): void {
-    const key = projectKey(path)
-    const all = preferences.get("projectPreferences")
-    const next = { ...all[key], ...update }
-    for (const [field, value] of Object.entries(next)) {
-      if (value === undefined) delete next[field as keyof DesktopProjectPreference]
-    }
-    preferences.set("projectPreferences", { ...all, [key]: next })
-  }
-
-  private projectWithPreferences(project: DesktopProject): DesktopProject {
-    const preference = this.projectPreference(project.path)
-    return {
-      ...project,
-      name: preference.name ?? project.name,
-      ...(preference.pinnedAt ? { pinnedAt: preference.pinnedAt } : {}),
-    }
-  }
-
-  private projectLastOpenedAt(path: string): number {
-    return (
-      preferences
-        .get("recentProjects")
-        .find((project) => projectKey(project.path) === projectKey(path))?.lastOpenedAt ??
-      Date.now()
-    )
-  }
 }
 
-function sortProjects(left: DesktopProject, right: DesktopProject): number {
-  return (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0) || right.lastOpenedAt - left.lastOpenedAt
+async function toDesktopProject(project: ProjectRecord): Promise<DesktopProject> {
+  let available = false
+  try {
+    available = (await stat(project.path)).isDirectory()
+  } catch {
+    available = false
+  }
+  return { ...project, available }
 }
 
 async function healthWithTimeout(client: OpenHarnessClient): Promise<void> {
@@ -461,21 +374,6 @@ function ensureConfiguredModel(models: DesktopModel[], configuredModel: string):
 
 function sortSessions(sessions: SessionRecord[]): SessionRecord[] {
   return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
-}
-
-function projectKey(path: string): string {
-  const normalized = resolve(path)
-  return process.platform === "win32" ? normalized.toLocaleLowerCase() : normalized
-}
-
-function findGitRoot(startPath: string): string | null {
-  let current = resolve(startPath)
-  while (true) {
-    if (existsSync(resolve(current, ".git"))) return current
-    const parent = dirname(current)
-    if (parent === current) return null
-    current = parent
-  }
 }
 
 function parseCurrentBranch(output: string): string | null {

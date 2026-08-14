@@ -53,6 +53,7 @@ export const desktopAPI = {
     setProjectPinned: (input: IpcInvokeMap[typeof IpcChannels.projectSetPinned]["args"][0]) =>
       invoke(IpcChannels.projectSetPinned, input),
     removeProject: (path: string) => invoke(IpcChannels.projectRemove, path),
+    rebindProject: (projectId: string) => invoke(IpcChannels.projectRebind, projectId),
     create: (input: IpcInvokeMap[typeof IpcChannels.sessionCreate]["args"][0]) =>
       invoke(IpcChannels.sessionCreate, input),
     open: (sessionId: string) => invoke(IpcChannels.sessionOpen, sessionId),

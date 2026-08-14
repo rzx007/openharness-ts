@@ -42,6 +42,11 @@ export const sessionIpcContribution: IpcContribution = {
         handler: (_event, path) => desktopSessionService.removeProject(String(path ?? "")),
       },
       {
+        channel: IpcChannels.projectRebind,
+        handler: (event, projectId) =>
+          desktopSessionService.rebindProject(event.sender, String(projectId ?? "")),
+      },
+      {
         channel: IpcChannels.sessionCreate,
         handler: (_event, input) =>
           desktopSessionService.createSession(input as CreateDesktopSessionInput),

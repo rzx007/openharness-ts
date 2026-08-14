@@ -1,8 +1,10 @@
 export interface DesktopProject {
+  id: string
   name: string
   path: string
   lastOpenedAt: number
   pinnedAt?: number
+  available: boolean
 }
 
 export interface DesktopModel {
@@ -22,7 +24,9 @@ export interface DesktopModel {
 export interface DesktopSessionRecord {
   id: string
   parentId?: string
+  projectId?: string
   cwd: string
+  cwdRelative?: string
   title: string
   model: string
   agent?: string
@@ -147,6 +151,7 @@ export interface DesktopSessionView {
 }
 
 export interface CreateDesktopSessionInput {
+  projectId: string
   cwd: string
   model: string
 }
@@ -167,12 +172,12 @@ export interface PinDesktopSessionInput {
 }
 
 export interface RenameDesktopProjectInput {
-  path: string
+  projectId: string
   name: string
 }
 
 export interface PinDesktopProjectInput {
-  path: string
+  projectId: string
   pinned: boolean
 }
 

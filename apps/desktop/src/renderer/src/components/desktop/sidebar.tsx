@@ -7,6 +7,7 @@ import {
   Clock3,
   FolderClosed,
   FolderOpen,
+  FolderSync,
   GitBranchPlus,
   GitPullRequest,
   Grid2X2,
@@ -69,6 +70,7 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
   const renameProject = useDesktopSessionStore((state) => state.renameProject)
   const togglePinProject = useDesktopSessionStore((state) => state.togglePinProject)
   const removeProject = useDesktopSessionStore((state) => state.removeProject)
+  const rebindProject = useDesktopSessionStore((state) => state.rebindProject)
   const [archiveMode, setArchiveMode] = useState(false)
   const [renameTarget, setRenameTarget] = useState<DesktopSessionRecord | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<DesktopSessionRecord | null>(null)
@@ -155,6 +157,7 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
     onRename: beginProjectRename,
     onTogglePin: (project) => void togglePinProject(project.path),
     onRemove: setRemoveProjectTarget,
+    onRebind: (project) => void rebindProject(project.id),
   }
 
   return (
@@ -423,6 +426,7 @@ type ProjectActions = {
   onRename: (project: DesktopProject) => void
   onTogglePin: (project: DesktopProject) => void
   onRemove: (project: DesktopProject) => void
+  onRebind: (project: DesktopProject) => void
 }
 
 function SessionRow({
@@ -550,6 +554,9 @@ function ProjectGroup({
               <FolderClosed className="size-3.75 shrink-0 text-sidebar-muted" strokeWidth={1.7} />
             )}
             <span className="truncate">{project.name}</span>
+            {!project.available ? (
+              <span className="shrink-0 text-[10px] font-normal text-amber-600">目录不可用</span>
+            ) : null}
             {project.pinnedAt ? (
               <Pin className="ml-auto size-3 shrink-0 text-sidebar-muted" />
             ) : null}
@@ -580,6 +587,10 @@ function ProjectGroup({
             </div>
           </div>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => projectActions.onRebind(project)}>
+            <FolderSync />
+            重新绑定目录
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => projectActions.onRename(project)}>
             <Pencil />
             重命名项目

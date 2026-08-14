@@ -32,6 +32,7 @@ interface DesktopSessionState {
   renameProject: (path: string, name: string) => Promise<void>
   togglePinProject: (path: string) => Promise<void>
   removeProject: (path: string) => Promise<void>
+  rebindProject: (projectId: string) => Promise<void>
   selectModel: (model: string) => void
   openSession: (sessionId: string) => Promise<void>
   startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
@@ -133,7 +134,12 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const normalizedName = name.replace(/\s+/g, " ").trim()
     if (!normalizedName) return
     try {
-      const project = await window.desktop.sessions.renameProject({ path, name: normalizedName })
+      const existing = get().projects.find((project) => samePath(project.path, path))
+      if (!existing) return
+      const project = await window.desktop.sessions.renameProject({
+        projectId: existing.id,
+        name: normalizedName,
+      })
       set((state) => ({
         projects: upsertProject(state.projects, project),
         selectedProject: samePath(state.selectedProject?.path ?? "", path)
@@ -152,7 +158,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     if (!existing) return
     try {
       const project = await window.desktop.sessions.setProjectPinned({
-        path,
+        projectId: existing.id,
         pinned: !existing.pinnedAt,
       })
       set((state) => ({
@@ -170,7 +176,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async removeProject(path) {
     try {
-      await window.desktop.sessions.removeProject(path)
+      const existing = get().projects.find((project) => samePath(project.path, path))
+      if (!existing) return
+      await window.desktop.sessions.removeProject(existing.id)
       set((state) => {
         const projects = state.projects.filter((project) => !samePath(project.path, path))
         const removedSelected = samePath(state.selectedProject?.path ?? "", path)
@@ -183,6 +191,21 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       })
       const project = get().selectedProject
       if (project) await get().selectProject(project)
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
+  async rebindProject(projectId) {
+    try {
+      const project = await window.desktop.sessions.rebindProject(projectId)
+      if (!project) return
+      set((state) => ({
+        projects: upsertProject(state.projects, project),
+        selectedProject: state.selectedProject?.id === projectId ? project : state.selectedProject,
+        error: null,
+      }))
     } catch (error) {
       set({ error: errorMessage(error) })
       throw error
@@ -327,6 +350,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     set({ sending: true, error: null })
     try {
       const session = await window.desktop.sessions.create({
+        projectId: selectedProject.id,
         cwd: selectedProject.path,
         model,
       })
@@ -477,9 +501,11 @@ function sessionPinnedAt(session: DesktopSessionRecord): number {
 function projectFromSession(session: DesktopSessionRecord): DesktopProject {
   const normalized = session.cwd.replace(/[\\/]+$/, "")
   return {
+    id: session.projectId ?? session.cwd,
     name: normalized.split(/[\\/]/).pop() || session.cwd,
     path: session.cwd,
     lastOpenedAt: session.updatedAt,
+    available: true,
   }
 }
 

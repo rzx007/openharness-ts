@@ -40,6 +40,7 @@ export const IpcChannels = {
   projectRename: "project:rename",
   projectSetPinned: "project:set-pinned",
   projectRemove: "project:remove",
+  projectRebind: "project:rebind",
   sessionCreate: "session:create",
   sessionOpen: "session:open",
   sessionClose: "session:close",
@@ -126,6 +127,10 @@ export interface IpcInvokeMap {
     result: DesktopProjectDetails["project"]
   }
   [IpcChannels.projectRemove]: { args: [path: string]; result: void }
+  [IpcChannels.projectRebind]: {
+    args: [projectId: string]
+    result: DesktopProjectDetails["project"] | null
+  }
   [IpcChannels.sessionCreate]: {
     args: [input: CreateDesktopSessionInput]
     result: DesktopSessionRecord
