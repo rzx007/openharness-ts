@@ -55,6 +55,10 @@ export const desktopAPI = {
     copyPath: (input: IpcInvokeMap[typeof IpcChannels.workspaceCopyPath]["args"][0]) =>
       invoke(IpcChannels.workspaceCopyPath, input),
   },
+  clipboard: {
+    readText: () => invoke(IpcChannels.clipboardReadText),
+    writeText: (text: string) => invoke(IpcChannels.clipboardWriteText, text),
+  },
   terminal: {
     create: (input: IpcInvokeMap[typeof IpcChannels.terminalCreate]["args"][0]) =>
       invoke(IpcChannels.terminalCreate, input),
@@ -87,6 +91,9 @@ export const desktopAPI = {
       invoke(IpcChannels.projectRename, input),
     setProjectPinned: (input: IpcInvokeMap[typeof IpcChannels.projectSetPinned]["args"][0]) =>
       invoke(IpcChannels.projectSetPinned, input),
+    setProjectDefaultShell: (
+      input: IpcInvokeMap[typeof IpcChannels.projectSetDefaultShell]["args"][0]
+    ) => invoke(IpcChannels.projectSetDefaultShell, input),
     removeProject: (path: string) => invoke(IpcChannels.projectRemove, path),
     rebindProject: (projectId: string) => invoke(IpcChannels.projectRebind, projectId),
     create: (input: IpcInvokeMap[typeof IpcChannels.sessionCreate]["args"][0]) =>
@@ -113,6 +120,7 @@ export const desktopAPI = {
     setPinned: (input: IpcInvokeMap[typeof IpcChannels.sessionSetPinned]["args"][0]) =>
       invoke(IpcChannels.sessionSetPinned, input),
     archive: (sessionId: string) => invoke(IpcChannels.sessionArchive, sessionId),
+    delete: (sessionId: string) => invoke(IpcChannels.sessionDelete, sessionId),
     onUpdated: (
       listener: (value: IpcInvokeMap[typeof IpcChannels.sessionOpen]["result"]) => void
     ): (() => void) => {

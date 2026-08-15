@@ -169,13 +169,11 @@ export function ConversationPane({
             <HeaderIconButton label="会话视图">
               <ListFilter />
             </HeaderIconButton>
-            <HeaderIconButton
-              label={panelOpen ? "收起工具面板" : "展开工具面板"}
-              pressed={panelOpen}
-              onClick={onTogglePanel}
-            >
-              <PanelRight />
-            </HeaderIconButton>
+            {!panelOpen && (
+              <HeaderIconButton label="展开工具面板" onClick={onTogglePanel}>
+                <PanelRight />
+              </HeaderIconButton>
+            )}
           </div>
         </header>
       ) : null}
@@ -194,12 +192,14 @@ export function ConversationPane({
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
           selectedPermissionMode={selectedPermissionMode}
+          panelOpen={panelOpen}
           onDraftChange={setDraft}
           onSubmit={() => void submitDraft()}
           onChooseProject={() => void chooseProject()}
           onSelectProject={(project) => void selectProject(project)}
           onSelectModel={(model) => void selectModel(model)}
           onSelectPermissionMode={(permissionMode) => void selectPermissionMode(permissionMode)}
+          onTogglePanel={onTogglePanel}
         />
       ) : (
         <>
@@ -496,12 +496,14 @@ function NewConversationStart({
   selectedModel,
   selectedProvider,
   selectedPermissionMode,
+  panelOpen,
   onDraftChange,
   onSubmit,
   onChooseProject,
   onSelectProject,
   onSelectModel,
   onSelectPermissionMode,
+  onTogglePanel,
 }: {
   draft: string
   sending: boolean
@@ -513,12 +515,14 @@ function NewConversationStart({
   selectedModel: string | null
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
+  panelOpen: boolean
   onDraftChange: (value: string) => void
   onSubmit: () => void
   onChooseProject: () => void
   onSelectProject: (project: DesktopProject) => void
   onSelectModel: (model: DesktopModel) => void
   onSelectPermissionMode: (mode: DesktopPermissionMode) => void
+  onTogglePanel: () => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<StartPicker | null>(null)
   const [projectQuery, setProjectQuery] = useState("")
@@ -550,7 +554,14 @@ function NewConversationStart({
   }
 
   return (
-    <div className="min-h-0 flex-1 px-5 py-5">
+    <div className="relative min-h-0 flex-1 px-5 py-5">
+      {selectedProject && !panelOpen ? (
+        <div className="absolute top-4 right-4">
+          <HeaderIconButton label="展开工具面板" onClick={onTogglePanel}>
+            <PanelRight />
+          </HeaderIconButton>
+        </div>
+      ) : null}
       <div className="mx-auto flex h-full w-full max-w-[760px] flex-col items-center justify-center pb-[5vh]">
         <div className="mb-7 flex flex-col items-center text-center">
           <Workflow

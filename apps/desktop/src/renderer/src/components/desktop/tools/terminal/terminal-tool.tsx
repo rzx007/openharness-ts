@@ -3,13 +3,27 @@ import "@xterm/xterm/css/xterm.css"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebLinksAddon } from "@xterm/addon-web-links"
 import { Terminal as XTermTerminal } from "@xterm/xterm"
-import { Eraser, Folder, LoaderCircle, Plus, RotateCcw, SquareTerminal, X } from "lucide-react"
+import {
+  ClipboardCopy,
+  ClipboardPaste,
+  Eraser,
+  Folder,
+  Plus,
+  RotateCcw,
+  SquareTerminal,
+  X,
+} from "lucide-react"
 import type * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
-import type { DesktopTerminalEvent, DesktopTerminalRecord } from "@shared/terminal-types"
+import type {
+  DesktopTerminalCreateInput,
+  DesktopTerminalEvent,
+  DesktopTerminalRecord,
+} from "@shared/terminal-types"
 
 import { getXtermTheme } from "./xterm-theme"
 
@@ -20,12 +34,47 @@ type PendingAttach = {
   events: TerminalDataEvent[]
 }
 
+type TerminalContextMenuState = {
+  x: number
+  y: number
+  selectedText: string
+}
+
+type TerminalRuntimeMode = DesktopTerminalCreateInput["runtime"]
+
+export type TerminalSessionTabInfo = {
+  id: string
+  title: string
+}
+
+export type TerminalPanelCommand = {
+  id: number
+  type: "ensure" | "create" | "close"
+  terminalId?: string
+}
+
 export function TerminalTool({
   active,
+  activeTerminalId: selectedTerminalId,
   openRequest,
+  command,
+  actionsHost,
+  onSessionUpsert,
+  onSessionRemove,
+  onSessionsHydrate,
+  onActiveTerminalChange,
+  onCommandSettled,
 }: {
   active: boolean
+  activeTerminalId: string | null
   openRequest: { id: number; terminalId: string } | null
+  command: TerminalPanelCommand | null
+  actionsHost: HTMLElement | null
+  onSessionUpsert: (session: TerminalSessionTabInfo, activate: boolean) => void
+  onSessionRemove: (terminalId: string) => void
+  onSessionsHydrate: (sessions: TerminalSessionTabInfo[]) => void
+  onActiveTerminalChange: (terminalId: string | null) => void
+  onCommandSettled: () => void
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<XTermTerminal | null>(null)
@@ -40,6 +89,18 @@ export function TerminalTool({
   const creatingRef = useRef(false)
   const resizeFrameRef = useRef<number | null>(null)
   const lastSizeRef = useRef({ cols: 0, rows: 0 })
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
+  const onSessionUpsertRef = useRef(onSessionUpsert)
+  const onSessionRemoveRef = useRef(onSessionRemove)
+  const onSessionsHydrateRef = useRef(onSessionsHydrate)
+  const onActiveTerminalChangeRef = useRef(onActiveTerminalChange)
+  const onCommandSettledRef = useRef(onCommandSettled)
+
+  onSessionUpsertRef.current = onSessionUpsert
+  onSessionRemoveRef.current = onSessionRemove
+  onSessionsHydrateRef.current = onSessionsHydrate
+  onActiveTerminalChangeRef.current = onActiveTerminalChange
+  onCommandSettledRef.current = onCommandSettled
 
   const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
   const rebindProject = useDesktopSessionStore((state) => state.rebindProject)
@@ -48,11 +109,9 @@ export function TerminalTool({
   const [terminalReady, setTerminalReady] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<TerminalContextMenuState | null>(null)
+  const [runtimeMode, setRuntimeMode] = useState<TerminalRuntimeMode>("local")
 
-  const projectRecords = useMemo(
-    () => records.filter((record) => record.projectId === selectedProject?.id),
-    [records, selectedProject?.id]
-  )
   const activeRecord = useMemo(
     () =>
       records.find(
@@ -108,6 +167,7 @@ export function TerminalTool({
       fontWeight: 400,
       fontWeightBold: 600,
       lineHeight: 1.22,
+      minimumContrastRatio: 4.5,
       scrollback: 5_000,
       theme: getXtermTheme(),
       windowsMode: window.navigator.userAgent.includes("Windows"),
@@ -173,8 +233,11 @@ export function TerminalTool({
       try {
         const nextRecord = await window.desktop.terminal.create({
           projectId: project.id,
-          runtime: "local",
+          runtime: runtimeMode,
           name,
+          ...(runtimeMode === "local" && project.defaultShell
+            ? { shell: project.defaultShell }
+            : {}),
           cols: terminal.cols || 80,
           rows: terminal.rows || 24,
         })
@@ -182,7 +245,11 @@ export function TerminalTool({
           ...current.filter((record) => record.id !== nextRecord.id),
           nextRecord,
         ])
-        if (selectedProjectIdRef.current === project.id) setActiveTerminalId(nextRecord.id)
+        if (selectedProjectIdRef.current === project.id) {
+          setActiveTerminalId(nextRecord.id)
+          onSessionUpsertRef.current(toTabInfo(nextRecord), true)
+          onActiveTerminalChangeRef.current(nextRecord.id)
+        }
       } catch (caught) {
         setError(errorMessage(caught))
       } finally {
@@ -190,8 +257,13 @@ export function TerminalTool({
         setCreating(false)
       }
     },
-    [fitAndResize, selectedProject]
+    [fitAndResize, runtimeMode, selectedProject]
   )
+
+  useEffect(() => {
+    if (!selectedTerminalId) return
+    setActiveTerminalId(selectedTerminalId)
+  }, [selectedTerminalId])
 
   useEffect(() => {
     if (!terminalReady || !active) return
@@ -203,23 +275,6 @@ export function TerminalTool({
       .then((nextRecords) => {
         if (cancelled) return
         setRecords(nextRecords)
-        const currentProjectRecords = nextRecords.filter(
-          (record) => record.projectId === selectedProject.id
-        )
-        const currentActive = currentProjectRecords.find(
-          (record) => record.id === activeTerminalIdRef.current
-        )
-        if (currentActive) {
-          setActiveTerminalId(currentActive.id)
-          return
-        }
-        const firstRunning = currentProjectRecords.find((record) => record.status === "running")
-        const firstRecord = firstRunning ?? currentProjectRecords[0]
-        if (firstRecord) {
-          setActiveTerminalId(firstRecord.id)
-          return
-        }
-        void createTerminal(undefined, nextRecords)
       })
       .catch((caught) => {
         if (!cancelled) setError(errorMessage(caught))
@@ -228,7 +283,7 @@ export function TerminalTool({
     return () => {
       cancelled = true
     }
-  }, [active, createTerminal, selectedProject?.available, selectedProject?.id, terminalReady])
+  }, [active, selectedProject?.available, selectedProject?.id, terminalReady])
 
   useEffect(() => {
     if (!openRequest || !terminalReady) return
@@ -241,6 +296,8 @@ export function TerminalTool({
         if (!requested) throw new Error("Terminal is no longer available.")
         setRecords(nextRecords)
         setActiveTerminalId(requested.id)
+        onSessionUpsertRef.current(toTabInfo(requested), true)
+        onActiveTerminalChangeRef.current(requested.id)
       })
       .catch((caught) => {
         if (!cancelled) setError(errorMessage(caught))
@@ -343,30 +400,108 @@ export function TerminalTool({
     terminalRef.current?.focus()
   }, [active, fitAndResize])
 
-  const closeTerminal = async (terminalId: string): Promise<void> => {
-    renderedSequenceRef.current.delete(terminalId)
-    const currentProjectRecords = recordsRef.current.filter(
-      (record) => record.projectId === selectedProjectIdRef.current
-    )
-    const closingIndex = currentProjectRecords.findIndex((record) => record.id === terminalId)
-    const remaining = recordsRef.current.filter((record) => record.id !== terminalId)
+  useEffect(() => {
+    if (!contextMenu) return
 
-    if (activeTerminalIdRef.current === terminalId) {
-      const remainingProjectRecords = remaining.filter(
-        (record) => record.projectId === selectedProjectIdRef.current
-      )
-      const nextActive =
-        remainingProjectRecords[Math.min(closingIndex, remainingProjectRecords.length - 1)] ?? null
-      setActiveTerminalId(nextActive?.id ?? null)
+    const handlePointerDown = (event: PointerEvent): void => {
+      const menu = contextMenuRef.current
+      if (menu?.contains(event.target as Node)) return
+      setContextMenu(null)
+    }
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setContextMenu(null)
     }
 
+    window.addEventListener("pointerdown", handlePointerDown)
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown)
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [contextMenu])
+
+  const closeTerminal = async (
+    terminalId: string,
+    options?: { notifyParent?: boolean }
+  ): Promise<void> => {
+    renderedSequenceRef.current.delete(terminalId)
+    const remaining = recordsRef.current.filter((record) => record.id !== terminalId)
     setRecords(remaining)
+    if (options?.notifyParent !== false) onSessionRemoveRef.current(terminalId)
+
     try {
       await window.desktop.terminal.kill(terminalId)
     } catch (caught) {
       setError(errorMessage(caught))
     }
   }
+
+  useEffect(() => {
+    if (!command) return
+
+    if (command.type === "close") {
+      if (command.terminalId) void closeTerminal(command.terminalId, { notifyParent: false })
+      onCommandSettledRef.current()
+      return
+    }
+
+    if (!terminalReady) return
+
+    if (command.type === "create") {
+      let cancelled = false
+      void createTerminal().finally(() => {
+        if (!cancelled) onCommandSettledRef.current()
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (!selectedProject?.available) {
+      onCommandSettledRef.current()
+      return
+    }
+
+    let cancelled = false
+    void window.desktop.terminal
+      .list()
+      .then(async (nextRecords) => {
+        if (cancelled) return
+        setRecords(nextRecords)
+        const currentProjectRecords = nextRecords.filter(
+          (record) => record.projectId === selectedProject.id
+        )
+        if (currentProjectRecords.length === 0) {
+          await createTerminal(undefined, nextRecords)
+          return
+        }
+        onSessionsHydrateRef.current(currentProjectRecords.map(toTabInfo))
+        const currentActive = currentProjectRecords.find(
+          (record) => record.id === activeTerminalIdRef.current || record.id === selectedTerminalId
+        )
+        const firstRunning = currentProjectRecords.find((record) => record.status === "running")
+        const firstRecord = currentActive ?? firstRunning ?? currentProjectRecords[0]
+        setActiveTerminalId(firstRecord.id)
+        onActiveTerminalChangeRef.current(firstRecord.id)
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(errorMessage(caught))
+      })
+      .finally(() => {
+        if (!cancelled) onCommandSettledRef.current()
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    command,
+    createTerminal,
+    selectedProject?.available,
+    selectedProject?.id,
+    selectedTerminalId,
+    terminalReady,
+  ])
 
   const restartTerminal = async (): Promise<void> => {
     const record = activeRecordRef.current
@@ -375,6 +510,7 @@ export function TerminalTool({
     const remaining = recordsRef.current.filter((item) => item.id !== record.id)
     setActiveTerminalId(null)
     setRecords(remaining)
+    onSessionRemoveRef.current(record.id)
 
     try {
       await window.desktop.terminal.kill(record.id)
@@ -392,6 +528,48 @@ export function TerminalTool({
     }
   }
 
+  const openContextMenu = (event: React.MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault()
+    const terminal = terminalRef.current
+    const selectedText = terminal?.hasSelection() ? terminal.getSelection() : ""
+    const position = clampContextMenuPosition(event.clientX, event.clientY)
+    setContextMenu({ ...position, selectedText })
+  }
+
+  const copySelection = async (): Promise<void> => {
+    const selectedText = contextMenu?.selectedText
+    setContextMenu(null)
+    if (!selectedText) return
+    await window.desktop.clipboard.writeText(selectedText)
+    terminalRef.current?.focus()
+  }
+
+  const pasteClipboard = async (): Promise<void> => {
+    setContextMenu(null)
+    const record = activeRecordRef.current
+    if (record?.status !== "running") return
+    const text = await window.desktop.clipboard.readText()
+    if (text) await window.desktop.terminal.write({ terminalId: record.id, data: text })
+    terminalRef.current?.focus()
+  }
+
+  const clearFromMenu = (): void => {
+    setContextMenu(null)
+    clearTerminal()
+    terminalRef.current?.focus()
+  }
+
+  const restartFromMenu = async (): Promise<void> => {
+    setContextMenu(null)
+    await restartTerminal()
+  }
+
+  const closeFromMenu = async (): Promise<void> => {
+    const record = activeRecordRef.current
+    setContextMenu(null)
+    if (record) await closeTerminal(record.id)
+  }
+
   return (
     <section
       aria-hidden={!active}
@@ -400,48 +578,68 @@ export function TerminalTool({
         !active && "pointer-events-none opacity-0"
       )}
     >
-      <div className="flex h-10 shrink-0 items-center border-b px-2 text-[12px] text-ui-muted">
-        <div className="terminal-session-strip flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-          {projectRecords.map((record) => (
-            <TerminalSessionTab
-              key={record.id}
-              record={record}
-              active={record.id === activeTerminalId}
-              onSelect={() => setActiveTerminalId(record.id)}
-              onClose={() => void closeTerminal(record.id)}
-            />
-          ))}
-          <IconButton
-            label="新建终端"
-            onClick={() => void createTerminal()}
-            disabled={creating || !selectedProject?.available}
-          >
-            {creating ? <LoaderCircle className="animate-spin" /> : <Plus />}
-          </IconButton>
-        </div>
-
-        {activeRecord && (
-          <span
-            className="ml-2 max-w-28 shrink-0 truncate rounded-md bg-code px-1.5 py-0.5 font-sans"
-            title={`${activeRecord.shell} · ${activeRecord.cwd}`}
-          >
-            {activeRecord.status === "running" ? shellName(activeRecord.shell) : "exited"}
-          </span>
+      {actionsHost &&
+        active &&
+        createPortal(
+          <>
+            {activeRecord && (
+              <span
+                className="max-w-28 shrink-0 truncate rounded-md bg-code px-1.5 py-0.5 font-sans text-[12px] text-ui-muted"
+                title={`${activeRecord.runtime} · ${activeRecord.shell} · ${activeRecord.cwd}`}
+              >
+                {activeRecord.status === "running"
+                  ? activeRecord.runtime === "sandbox"
+                    ? "Sandbox"
+                    : shellName(activeRecord.shell)
+                  : "exited"}
+              </span>
+            )}
+            <div className="flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5">
+              <RuntimeButton
+                active={runtimeMode === "local"}
+                label="本地"
+                onClick={() => setRuntimeMode("local")}
+              />
+              <RuntimeButton
+                active={runtimeMode === "sandbox"}
+                label="沙箱"
+                onClick={() => setRuntimeMode("sandbox")}
+              />
+            </div>
+            <IconButton label="清空终端" onClick={clearTerminal} disabled={!activeRecord}>
+              <Eraser />
+            </IconButton>
+            <IconButton
+              label="重启终端"
+              onClick={() => void restartTerminal()}
+              disabled={!activeRecord}
+            >
+              <RotateCcw />
+            </IconButton>
+          </>,
+          actionsHost
         )}
-        <IconButton label="清空终端" onClick={clearTerminal} disabled={!activeRecord}>
-          <Eraser />
-        </IconButton>
-        <IconButton
-          label="重启终端"
-          onClick={() => void restartTerminal()}
-          disabled={!activeRecord}
-        >
-          <RotateCcw />
-        </IconButton>
-      </div>
 
       <div className="relative min-h-0 flex-1 bg-background/55">
-        <div ref={containerRef} className="desktop-terminal h-full min-h-0 w-full p-2" />
+        <div
+          ref={containerRef}
+          onContextMenu={openContextMenu}
+          className="desktop-terminal h-full min-h-0 w-full p-2"
+        />
+
+        {contextMenu && (
+          <TerminalContextMenu
+            menuRef={contextMenuRef}
+            state={contextMenu}
+            canPaste={activeRecord?.status === "running"}
+            canManage={Boolean(activeRecord)}
+            onCopy={() => void copySelection()}
+            onPaste={() => void pasteClipboard()}
+            onClear={clearFromMenu}
+            onRestart={() => void restartFromMenu()}
+            onClose={() => void closeFromMenu()}
+          />
+        )}
 
         {(!selectedProject || !selectedProject.available) && (
           <div className="absolute inset-0 grid place-items-center bg-panel/90 px-8 text-center backdrop-blur-sm">
@@ -502,53 +700,84 @@ export function TerminalTool({
   )
 }
 
-function TerminalSessionTab({
-  record,
-  active,
-  onSelect,
+function TerminalContextMenu({
+  menuRef,
+  state,
+  canPaste,
+  canManage,
+  onCopy,
+  onPaste,
+  onClear,
+  onRestart,
   onClose,
 }: {
-  record: DesktopTerminalRecord
-  active: boolean
-  onSelect: () => void
+  menuRef: React.RefObject<HTMLDivElement | null>
+  state: TerminalContextMenuState
+  canPaste: boolean
+  canManage: boolean
+  onCopy: () => void
+  onPaste: () => void
+  onClear: () => void
+  onRestart: () => void
   onClose: () => void
 }): React.JSX.Element {
   return (
     <div
+      ref={menuRef}
+      role="menu"
+      style={{ left: state.x, top: state.y }}
+      className="fixed z-[100] w-44 rounded-md border border-border/80 bg-popover p-1 text-[12.5px] text-popover-foreground shadow-xl outline-none"
+    >
+      <TerminalContextMenuItem disabled={!state.selectedText} onClick={onCopy}>
+        <ClipboardCopy />
+        复制选区
+      </TerminalContextMenuItem>
+      <TerminalContextMenuItem disabled={!canPaste} onClick={onPaste}>
+        <ClipboardPaste />
+        粘贴
+      </TerminalContextMenuItem>
+      <div role="separator" className="-mx-1 my-1 h-px bg-border/75" />
+      <TerminalContextMenuItem disabled={!canManage} onClick={onClear}>
+        <Eraser />
+        清空
+      </TerminalContextMenuItem>
+      <TerminalContextMenuItem disabled={!canManage} onClick={onRestart}>
+        <RotateCcw />
+        重启
+      </TerminalContextMenuItem>
+      <TerminalContextMenuItem disabled={!canManage} onClick={onClose} destructive>
+        <X />
+        关闭
+      </TerminalContextMenuItem>
+    </div>
+  )
+}
+
+function TerminalContextMenuItem({
+  disabled,
+  destructive,
+  onClick,
+  children,
+}: {
+  disabled?: boolean
+  destructive?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
       className={cn(
-        "group flex h-7 max-w-36 shrink-0 items-center rounded-md transition-colors",
-        active
-          ? "bg-muted text-ui-foreground"
-          : "text-ui-muted hover:bg-muted/55 hover:text-ui-foreground"
+        "flex h-8 w-full items-center gap-2 rounded px-2 text-left outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-3.5",
+        destructive &&
+          "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
       )}
     >
-      <button
-        type="button"
-        title={`${record.name} · ${record.cwd}`}
-        onClick={onSelect}
-        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-2 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        <span
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            record.status === "running" ? "bg-emerald-500" : "bg-ui-muted/55"
-          )}
-        />
-        <span className="min-w-0 truncate">{record.name}</span>
-      </button>
-      <button
-        type="button"
-        title="关闭终端"
-        aria-label={`关闭 ${record.name}`}
-        onClick={onClose}
-        className={cn(
-          "mr-1 grid size-5 shrink-0 place-items-center rounded text-ui-muted transition-opacity hover:bg-background/70 hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          active ? "opacity-70" : "opacity-0 group-hover:opacity-70"
-        )}
-      >
-        <X className="size-3" />
-      </button>
-    </div>
+      {children}
+    </button>
   )
 }
 
@@ -577,6 +806,31 @@ function IconButton({
   )
 }
 
+function RuntimeButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "h-6 rounded px-2 text-[11.5px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        active
+          ? "bg-background text-ui-foreground shadow-sm"
+          : "text-ui-muted hover:bg-background/55 hover:text-ui-foreground"
+      )}
+    >
+      {label}
+    </button>
+  )
+}
+
 function nextTerminalName(records: DesktopTerminalRecord[], projectId: string): string {
   const used = new Set(
     records
@@ -590,6 +844,16 @@ function nextTerminalName(records: DesktopTerminalRecord[], projectId: string): 
   return `Terminal ${index}`
 }
 
+function clampContextMenuPosition(x: number, y: number): { x: number; y: number } {
+  const width = 176
+  const height = 200
+  const margin = 8
+  return {
+    x: Math.max(margin, Math.min(x, window.innerWidth - width - margin)),
+    y: Math.max(margin, Math.min(y, window.innerHeight - height - margin)),
+  }
+}
+
 function shellName(shell: string): string {
   return (
     shell
@@ -597,6 +861,13 @@ function shellName(shell: string): string {
       .pop()
       ?.replace(/\.exe$/i, "") || shell
   )
+}
+
+function toTabInfo(record: DesktopTerminalRecord): TerminalSessionTabInfo {
+  return {
+    id: record.id,
+    title: `${shellName(record.shell)}:${record.cwd}`,
+  }
 }
 
 function errorMessage(error: unknown): string {

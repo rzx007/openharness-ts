@@ -215,13 +215,11 @@
     box-shadow: var(--workspace-top-shadow);
   }
 
-  .utility-tab-strip,
-  .terminal-session-strip {
+  .utility-tab-strip {
     scrollbar-width: none;
   }
 
-  .utility-tab-strip::-webkit-scrollbar,
-  .terminal-session-strip::-webkit-scrollbar {
+  .utility-tab-strip::-webkit-scrollbar {
     display: none;
   }
 

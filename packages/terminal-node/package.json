@@ -17,6 +17,8 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@openharness/core": "workspace:*",
+    "@openharness/sandbox": "workspace:*",
     "@openharness/terminal": "workspace:*",
     "node-pty": "^1.0.0"
   },

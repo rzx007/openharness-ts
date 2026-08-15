@@ -954,6 +954,12 @@ importers:
 
   packages/terminal-node:
     dependencies:
+      '@openharness/core':
+        specifier: workspace:*
+        version: link:../core
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
       '@openharness/terminal':
         specifier: workspace:*
         version: link:../terminal

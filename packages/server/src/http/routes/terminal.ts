@@ -119,6 +119,9 @@ export function createTerminalRoutes(
           rows: numberValue(body.rows, 24),
           name: optionalText(body.name),
           shell: optionalText(body.shell),
+          cwd: optionalText(body.cwd),
+          source: readSource(body.source) ?? "user",
+          sessionId: optionalText(body.sessionId),
         });
         return jsonResponse({ terminal }, 201);
       } catch (error) {

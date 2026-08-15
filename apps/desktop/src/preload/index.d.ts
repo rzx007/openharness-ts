@@ -17,6 +17,7 @@ import type {
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
+  SetDefaultDesktopProjectShellInput,
   SendDesktopPromptInput,
   SetDefaultDesktopModelInput,
   SetDefaultDesktopPermissionModeInput,
@@ -74,6 +75,10 @@ export interface DesktopAPI {
     revealPath: (input: WorkspaceRevealPathInput) => Promise<void>
     copyPath: (input: WorkspaceCopyPathInput) => Promise<string>
   }
+  clipboard: {
+    readText: () => Promise<string>
+    writeText: (text: string) => Promise<void>
+  }
   terminal: {
     create: (input: DesktopTerminalCreateInput) => Promise<DesktopTerminalRecord>
     write: (input: DesktopTerminalWriteInput) => Promise<void>
@@ -89,6 +94,9 @@ export interface DesktopAPI {
     inspectProject: (path: string) => Promise<DesktopProjectDetails>
     renameProject: (input: RenameDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectPinned: (input: PinDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
+    setProjectDefaultShell: (
+      input: SetDefaultDesktopProjectShellInput
+    ) => Promise<DesktopProjectDetails["project"]>
     removeProject: (path: string) => Promise<void>
     rebindProject: (projectId: string) => Promise<DesktopProjectDetails["project"] | null>
     create: (input: CreateDesktopSessionInput) => Promise<DesktopSessionRecord>
@@ -108,6 +116,7 @@ export interface DesktopAPI {
     rename: (input: RenameDesktopSessionInput) => Promise<DesktopSessionRecord>
     setPinned: (input: PinDesktopSessionInput) => Promise<DesktopSessionRecord>
     archive: (sessionId: string) => Promise<DesktopSessionRecord>
+    delete: (sessionId: string) => Promise<string[]>
     onUpdated: (listener: (value: DesktopSessionView) => void) => () => void
   }
   events: {

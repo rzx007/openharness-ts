@@ -20,6 +20,10 @@ import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
 import type { FileViewerTab } from "@renderer/components/desktop/tools/file-viewer"
 import { PlaceholderTool } from "@renderer/components/desktop/tools/placeholder-tool"
 import { TerminalTool } from "@renderer/components/desktop/tools/terminal/terminal-tool"
+import type {
+  TerminalPanelCommand,
+  TerminalSessionTabInfo,
+} from "@renderer/components/desktop/tools/terminal/terminal-tool"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 
@@ -33,6 +37,7 @@ type UtilityTab = {
   fileIcon?: LucideIcon
   fileType?: FileViewerTab["type"]
   projectPath?: string
+  terminalId?: string
 }
 
 type UtilityPanelProps = {
@@ -74,17 +79,8 @@ const toolMeta: Record<
 
 const toolOrder: UtilityTool[] = ["review", "terminal", "browser", "files", "side-chat"]
 const filesTabId = "files-tab"
+const unavailableTerminalTabId = "terminal-tab:unavailable"
 const persistedFileTabsKey = "openharness.desktop.file-tabs.v1"
-
-const initialBrowserTab: BrowserToolTab = {
-  id: "browser-tab-1",
-  title: "新标签页",
-  url: null,
-  input: "",
-  loading: false,
-  canGoBack: false,
-  canGoForward: false,
-}
 
 export function UtilityPanel({
   open,
@@ -94,20 +90,24 @@ export function UtilityPanel({
   fileOpenRequest,
   terminalOpenRequest,
 }: UtilityPanelProps): React.JSX.Element {
-  const [tabs, setTabs] = useState<UtilityTab[]>([
-    { id: initialBrowserTab.id, tool: "browser", title: initialBrowserTab.title },
-  ])
-  const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>([initialBrowserTab])
+  const [tabs, setTabs] = useState<UtilityTab[]>([])
+  const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>([])
   const [fileTabs, setFileTabs] = useState<FileViewerTab[]>([])
   const [fileProjectPath, setFileProjectPath] = useState<string | null>(null)
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [loadingFilePath, setLoadingFilePath] = useState<string | null>(null)
-  const [activeTabId, setActiveTabId] = useState(initialBrowserTab.id)
+  const [activeTabId, setActiveTabId] = useState("")
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [addMenuPosition, setAddMenuPosition] = useState<MenuPosition | null>(null)
+  const [terminalMounted, setTerminalMounted] = useState(false)
+  const [terminalCommand, setTerminalCommand] = useState<TerminalPanelCommand | null>(null)
+  const [terminalActionsHost, setTerminalActionsHost] = useState<HTMLDivElement | null>(null)
   const [persistedFileTabs, setPersistedFileTabs] =
     useState<PersistedFileTabState>(readPersistedFileTabs)
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
+  const selectedProjectAvailable = useDesktopSessionStore(
+    (state) => state.selectedProject?.available ?? false
+  )
   const persistedFileState = selectedProjectPath
     ? persistedFileTabs[selectedProjectPath]
     : undefined
@@ -115,9 +115,12 @@ export function UtilityPanel({
   const visibleFileTabs = fileStateVisible ? fileTabs : []
   const visibleActiveFilePath = fileStateVisible ? activeFilePath : null
   const visibleLoadingFilePath = fileStateVisible ? loadingFilePath : null
-  const visibleTabs = tabs.filter((tab) => !tab.filePath || tab.projectPath === selectedProjectPath)
+  const visibleTabs = tabs.filter((tab) => !tab.projectPath || tab.projectPath === selectedProjectPath)
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
-  const terminalTabVisible = visibleTabs.some((tab) => tab.id === toolTabId("terminal"))
+  const pendingTerminal =
+    Boolean(terminalOpenRequest) ||
+    terminalCommand?.type === "ensure" ||
+    terminalCommand?.type === "create"
 
   useEffect(() => {
     if (!fileOpenRequest) return
@@ -134,20 +137,33 @@ export function UtilityPanel({
 
   useEffect(() => {
     if (!terminalOpenRequest) return
-    const id = toolTabId("terminal")
-    const timer = window.setTimeout(() => {
-      setTabs((current) =>
-        current.some((tab) => tab.id === id)
-          ? current
-          : [...current, { id, tool: "terminal", title: toolMeta.terminal.label }]
-      )
-      setActiveTabId(id)
-    }, 0)
-    return () => window.clearTimeout(timer)
+    setTerminalMounted(true)
   }, [terminalOpenRequest])
 
   const addTab = (tool: UtilityTool): void => {
     setAddMenuOpen(false)
+
+    if (tool === "terminal") {
+      setTerminalMounted(true)
+      if (!selectedProjectPath || !selectedProjectAvailable) {
+        const id = unavailableTerminalTabId
+        setTabs((current) =>
+          current.some((tab) => tab.id === id)
+            ? current
+            : [...current, { id, tool, title: toolMeta.terminal.label }]
+        )
+        setActiveTabId(id)
+        return
+      }
+      const hasTerminalTabs = tabs.some(
+        (tab) => tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
+      )
+      setTerminalCommand({
+        id: Date.now(),
+        type: hasTerminalTabs ? "create" : "ensure",
+      })
+      return
+    }
 
     if (tool === "browser") {
       const id = `browser-tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -183,6 +199,13 @@ export function UtilityPanel({
       const nextTabs = current.filter((tab) => tab.id !== tabId)
       if (closing?.tool === "browser") {
         setBrowserTabs((browserCurrent) => browserCurrent.filter((tab) => tab.id !== tabId))
+      }
+      if (closing?.terminalId) {
+        setTerminalCommand({
+          id: Date.now(),
+          type: "close",
+          terminalId: closing.terminalId,
+        })
       }
       if (closing?.filePath) {
         const nextFileTabs = visibleFileTabs.filter((tab) => tab.preview.path !== closing.filePath)
@@ -326,6 +349,66 @@ export function UtilityPanel({
     }
   }
 
+  const upsertTerminalTab = (session: TerminalSessionTabInfo, activate: boolean): void => {
+    const id = terminalTabId(session.id)
+    setTabs((current) => {
+      if (current.some((tab) => tab.id === id)) {
+        return current.map((tab) => (tab.id === id ? { ...tab, title: session.title } : tab))
+      }
+      return [
+        ...current.filter((tab) => tab.id !== unavailableTerminalTabId),
+        {
+          id,
+          tool: "terminal",
+          title: session.title,
+          terminalId: session.id,
+          projectPath: selectedProjectPath,
+        },
+      ]
+    })
+    if (activate) setActiveTabId(id)
+  }
+
+  const removeTerminalTab = (terminalId: string): void => {
+    const id = terminalTabId(terminalId)
+    setTabs((current) => {
+      if (!current.some((tab) => tab.id === id)) return current
+      const nextTabs = current.filter((tab) => tab.id !== id)
+      if (nextTabs.length === 0) {
+        setActiveTabId("")
+        return []
+      }
+      if (activeTabId === id) {
+        const previousIndex = current.findIndex((tab) => tab.id === id)
+        const nextActive = nextTabs[Math.max(0, previousIndex - 1)] ?? nextTabs[0]
+        setActiveTabId(nextActive.id)
+        if (nextActive.filePath) setActiveFilePath(nextActive.filePath)
+      }
+      return nextTabs
+    })
+  }
+
+  const hydrateTerminalTabs = (sessions: TerminalSessionTabInfo[]): void => {
+    setTabs((current) => {
+      const others = current.filter(
+        (tab) =>
+          tab.tool !== "terminal" || (tab.projectPath && tab.projectPath !== selectedProjectPath)
+      )
+      const terminalTabs = sessions.map((session) => ({
+        id: terminalTabId(session.id),
+        tool: "terminal" as const,
+        title: session.title,
+        terminalId: session.id,
+        projectPath: selectedProjectPath,
+      }))
+      return [...others.filter((tab) => tab.id !== unavailableTerminalTabId), ...terminalTabs]
+    })
+  }
+
+  const handleActiveTerminalChange = (terminalId: string | null): void => {
+    if (terminalId) setActiveTabId(terminalTabId(terminalId))
+  }
+
   const toggleAddMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
     const rect = event.currentTarget.getBoundingClientRect()
     const menuWidth = 320
@@ -367,6 +450,8 @@ export function UtilityPanel({
             )}
           </div>
 
+          <div ref={setTerminalActionsHost} className="flex shrink-0 items-center gap-0.5 text-ui-muted" />
+
           <PanelIconButton
             label={maximized ? "恢复面板" : "最大化面板"}
             pressed={maximized}
@@ -381,7 +466,7 @@ export function UtilityPanel({
         </header>
 
         <div className="relative min-h-0 flex-1 bg-panel">
-          {!activeTab && <EmptyUtilityPanelState onAdd={addTab} />}
+          {!activeTab && !pendingTerminal && <EmptyUtilityPanelState onAdd={addTab} />}
           {browserTabs.map((tab) => (
             <BrowserTool
               key={tab.id}
@@ -404,10 +489,18 @@ export function UtilityPanel({
               openRequest={fileOpenRequest}
             />
           )}
-          {terminalTabVisible && (
+          {terminalMounted && (
             <TerminalTool
               active={activeTab?.tool === "terminal"}
+              activeTerminalId={activeTab?.terminalId ?? null}
               openRequest={terminalOpenRequest}
+              command={terminalCommand}
+              actionsHost={terminalActionsHost}
+              onSessionUpsert={upsertTerminalTab}
+              onSessionRemove={removeTerminalTab}
+              onSessionsHydrate={hydrateTerminalTabs}
+              onActiveTerminalChange={handleActiveTerminalChange}
+              onCommandSettled={() => setTerminalCommand(null)}
             />
           )}
           {activeTab?.tool === "review" && (
@@ -504,6 +597,7 @@ function UtilityTabButton({
         type="button"
         onClick={onSelect}
         className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xl px-2.5 pr-1 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        title={tab.title}
       >
         <TabIcon
           className={cn("size-3.5 shrink-0", loading && "animate-pulse")}
@@ -535,6 +629,10 @@ function fileTabId(path: string, projectPath?: string): string {
 
 function toolTabId(tool: UtilityTool): string {
   return tool === "files" ? filesTabId : `${tool}-tab`
+}
+
+function terminalTabId(terminalId: string): string {
+  return `terminal-tab:${terminalId}`
 }
 
 function fileNameFromPath(path: string): string {
@@ -587,7 +685,7 @@ function AddTabMenu({
     >
       {toolOrder.map((tool) => {
         const Icon = toolMeta[tool].icon
-        const disabled = tool !== "browser" && activeTab?.tool === tool
+        const disabled = tool !== "browser" && tool !== "terminal" && activeTab?.tool === tool
         return (
           <button
             key={tool}

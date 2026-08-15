@@ -2,9 +2,11 @@ import type { ITheme } from "@xterm/xterm"
 
 const lightTheme: ITheme = {
   background: "#fbfcfc",
-  foreground: "#1f2529",
-  cursor: "#24292d",
-  selectionBackground: "#cfd7df",
+  foreground: "#182026",
+  cursor: "#1f2529",
+  cursorAccent: "#fbfcfc",
+  selectionBackground: "#d8e3eb",
+  selectionForeground: "#11181d",
   black: "#24292d",
   red: "#c2410c",
   green: "#12805c",
@@ -12,15 +14,15 @@ const lightTheme: ITheme = {
   blue: "#0969da",
   magenta: "#8250df",
   cyan: "#1b7c83",
-  white: "#57606a",
-  brightBlack: "#6e7781",
+  white: "#4d5963",
+  brightBlack: "#687782",
   brightRed: "#d1242f",
   brightGreen: "#1a7f37",
   brightYellow: "#bf8700",
   brightBlue: "#218bff",
   brightMagenta: "#a475f9",
   brightCyan: "#3192aa",
-  brightWhite: "#24292f",
+  brightWhite: "#11181d",
 }
 
 const darkTheme: ITheme = {

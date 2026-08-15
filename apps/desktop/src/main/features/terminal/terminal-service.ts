@@ -1,4 +1,5 @@
 import type { WebContents } from "electron"
+import type { OpenHarnessClient } from "@openharness/client"
 import type {
   TerminalCreateRequest,
   TerminalReadRequest,
@@ -23,32 +24,32 @@ class DesktopTerminalService {
     input: TerminalCreateRequest
   ): Promise<TerminalSessionInfo> {
     this.ensureSubscription(webContents)
-    return await (await desktopSessionService.daemonClient()).createTerminal(input)
+    return await withDaemonRetry((client) => client.createTerminal(input))
   }
 
   async write(webContents: WebContents, input: TerminalWriteRequest): Promise<void> {
     this.ensureSubscription(webContents)
-    await (await desktopSessionService.daemonClient()).writeTerminal(input)
+    await withDaemonRetry((client) => client.writeTerminal(input))
   }
 
   async resize(webContents: WebContents, input: TerminalResizeRequest): Promise<void> {
     this.ensureSubscription(webContents)
-    await (await desktopSessionService.daemonClient()).resizeTerminal(input)
+    await withDaemonRetry((client) => client.resizeTerminal(input))
   }
 
   async read(webContents: WebContents, input: TerminalReadRequest): Promise<TerminalReadResult> {
     this.ensureSubscription(webContents)
-    return await (await desktopSessionService.daemonClient()).readTerminal(input.terminalId)
+    return await withDaemonRetry((client) => client.readTerminal(input.terminalId))
   }
 
   async kill(webContents: WebContents, terminalId: string): Promise<void> {
     this.ensureSubscription(webContents)
-    await (await desktopSessionService.daemonClient()).closeTerminal(terminalId)
+    await withDaemonRetry((client) => client.closeTerminal(terminalId))
   }
 
   async list(webContents: WebContents): Promise<TerminalSessionInfo[]> {
     this.ensureSubscription(webContents)
-    return await (await desktopSessionService.daemonClient()).listTerminals()
+    return await withDaemonRetry((client) => client.listTerminals())
   }
 
   async dispose(): Promise<void> {
@@ -85,3 +86,23 @@ class DesktopTerminalService {
 }
 
 export const desktopTerminalService = new DesktopTerminalService()
+
+async function withDaemonRetry<T>(operation: (client: OpenHarnessClient) => Promise<T>): Promise<T> {
+  try {
+    return await operation(await desktopSessionService.daemonClient())
+  } catch (error) {
+    if (!shouldRefreshDaemonClient(error)) throw error
+    return await operation(await desktopSessionService.refreshDaemonClient())
+  }
+}
+
+function shouldRefreshDaemonClient(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    message.includes("Failed to fetch") ||
+    message.includes("ECONNREFUSED") ||
+    message.includes("ECONNRESET") ||
+    message.includes("Cannot find module './prebuilds") ||
+    message.includes("Failed to load native module: conpty.node")
+  )
+}

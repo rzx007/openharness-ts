@@ -22,11 +22,12 @@ import {
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
 const sidebarMinimumWidth = 236
+const defaultWorkspaceLayout: Layout = { conversation: 55, utility: 45 }
 
 export function DesktopShell(): React.JSX.Element {
   const initializeSessions = useDesktopSessionStore((state) => state.initialize)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(true)
   const [utilityMaximized, setUtilityMaximized] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
   const [fileOpenRequest, setFileOpenRequest] = useState<{
@@ -51,6 +52,7 @@ export function DesktopShell(): React.JSX.Element {
     id: "desktop-workspace-layout-v1",
     panelIds: ["conversation", "utility"],
   })
+  const workspaceDefaultLayout = workspaceLayout.defaultLayout ?? defaultWorkspaceLayout
 
   useEffect(() => {
     void window.desktop.window.isMaximized().then(setIsMaximized)
@@ -62,6 +64,31 @@ export function DesktopShell(): React.JSX.Element {
     void initializeSessions()
     return detach
   }, [initializeSessions])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const sidebarSize = sidebarPanelRef.current?.getSize()
+      if (!sidebarSize) return
+      contentRef.current?.style.setProperty("--sidebar-width", `${sidebarSize.inPixels}px`)
+      setSidebarOpen((current) => {
+        const nextOpen = sidebarSize.inPixels > 1
+        return current === nextOpen ? current : nextOpen
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [sidebarPanelRef])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const utilitySize = utilityPanelRef.current?.getSize()
+      if (!utilitySize) return
+      setPanelOpen((current) => {
+        const nextOpen = utilitySize.inPixels > 1
+        return current === nextOpen ? current : nextOpen
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [utilityPanelRef])
 
   const toggleSidebar = useCallback((): void => {
     const panel = sidebarPanelRef.current
@@ -194,7 +221,7 @@ export function DesktopShell(): React.JSX.Element {
       <div
         ref={contentRef}
         className="relative min-h-0 flex-1 overflow-visible"
-        style={{ "--sidebar-width": "288px" } as React.CSSProperties}
+        style={{ "--sidebar-width": `${sidebarDefaultWidth}px` } as React.CSSProperties}
       >
         <div
           aria-hidden="true"
@@ -244,13 +271,13 @@ export function DesktopShell(): React.JSX.Element {
                 orientation="horizontal"
                 className="h-full min-h-0 w-full"
                 resizeTargetMinimumSize={resizeTargetMinimumSize}
-                defaultLayout={workspaceLayout.defaultLayout ?? { conversation: 100, utility: 0 }}
+                defaultLayout={workspaceDefaultLayout}
                 onLayoutChanged={handleWorkspaceLayoutChanged}
               >
                 <Panel
                   id="conversation"
                   defaultSize="100%"
-                  minSize={utilityMaximized ? 0 : 440}
+                  minSize={utilityMaximized ? 0 : 380}
                   collapsedSize={0}
                   collapsible
                   className="h-full min-h-0 overflow-hidden"
@@ -268,7 +295,7 @@ export function DesktopShell(): React.JSX.Element {
                 <Panel
                   id="utility"
                   panelRef={utilityPanelRef}
-                  defaultSize={420}
+                  defaultSize={`${defaultWorkspaceLayout.utility}%`}
                   minSize={320}
                   maxSize={utilityMaximized ? "100%" : "58%"}
                   collapsedSize={0}

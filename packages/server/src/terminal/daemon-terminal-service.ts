@@ -46,7 +46,9 @@ export class DaemonTerminalService {
       rows: input.rows,
       name: input.name,
       shell: input.shell,
-      source: "user",
+      cwd: input.cwd,
+      source: input.source ?? "user",
+      sessionId: input.sessionId,
     });
   }
 

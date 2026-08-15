@@ -9,6 +9,7 @@ import type {
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
+  SetDefaultDesktopProjectShellInput,
   SendDesktopPromptInput,
   SetDefaultDesktopModelInput,
   SetDefaultDesktopPermissionModeInput,
@@ -59,6 +60,7 @@ export const IpcChannels = {
   sessionInspectProject: "session:inspect-project",
   projectRename: "project:rename",
   projectSetPinned: "project:set-pinned",
+  projectSetDefaultShell: "project:set-default-shell",
   projectRemove: "project:remove",
   projectRebind: "project:rebind",
   sessionCreate: "session:create",
@@ -74,11 +76,15 @@ export const IpcChannels = {
   sessionRename: "session:rename",
   sessionSetPinned: "session:set-pinned",
   sessionArchive: "session:archive",
+  sessionDelete: "session:delete",
 
   workspaceListFiles: "workspace:list-files",
   workspaceReadFile: "workspace:read-file",
   workspaceRevealPath: "workspace:reveal-path",
   workspaceCopyPath: "workspace:copy-path",
+
+  clipboardReadText: "clipboard:read-text",
+  clipboardWriteText: "clipboard:write-text",
 
   terminalCreate: "terminal:create",
   terminalWrite: "terminal:write",
@@ -165,6 +171,10 @@ export interface IpcInvokeMap {
     args: [input: PinDesktopProjectInput]
     result: DesktopProjectDetails["project"]
   }
+  [IpcChannels.projectSetDefaultShell]: {
+    args: [input: SetDefaultDesktopProjectShellInput]
+    result: DesktopProjectDetails["project"]
+  }
   [IpcChannels.projectRemove]: { args: [path: string]; result: void }
   [IpcChannels.projectRebind]: {
     args: [projectId: string]
@@ -210,6 +220,10 @@ export interface IpcInvokeMap {
     args: [sessionId: string]
     result: DesktopSessionRecord
   }
+  [IpcChannels.sessionDelete]: {
+    args: [sessionId: string]
+    result: string[]
+  }
 
   [IpcChannels.workspaceListFiles]: {
     args: [input: WorkspaceListFilesInput]
@@ -226,6 +240,15 @@ export interface IpcInvokeMap {
   [IpcChannels.workspaceCopyPath]: {
     args: [input: WorkspaceCopyPathInput]
     result: string
+  }
+
+  [IpcChannels.clipboardReadText]: {
+    args: []
+    result: string
+  }
+  [IpcChannels.clipboardWriteText]: {
+    args: [text: string]
+    result: void
   }
 
   [IpcChannels.terminalCreate]: {
