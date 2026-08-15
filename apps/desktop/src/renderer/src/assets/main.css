@@ -228,80 +228,8 @@
     mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
   }
 
-  .desktop-markdown-preview :where(h1, h2, h3, h4) {
-    color: var(--ui-foreground);
-    font-weight: 680;
-    line-height: 1.28;
-    text-wrap: balance;
-  }
-
-  .desktop-markdown-preview :where(h1) {
-    margin-block: 0 1.1rem;
-    font-size: 1.45rem;
-  }
-
-  .desktop-markdown-preview :where(h2) {
-    margin-block: 1.55rem 0.65rem;
-    font-size: 1.15rem;
-  }
-
-  .desktop-markdown-preview :where(h3) {
-    margin-block: 1.25rem 0.5rem;
-    font-size: 1rem;
-  }
-
-  .desktop-markdown-preview :where(p, ul, ol, blockquote, pre, table) {
-    margin-block: 0.75rem;
-  }
-
-  .desktop-markdown-preview :where(ul, ol) {
-    padding-inline-start: 1.25rem;
-  }
-
-  .desktop-markdown-preview :where(li) {
-    margin-block: 0.2rem;
-  }
-
-  .desktop-markdown-preview :where(a) {
-    color: var(--ui-foreground);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
-  .desktop-markdown-preview :where(code:not(pre code)) {
-    border-radius: 0.35rem;
-    background: var(--code);
-    padding: 0.12rem 0.35rem;
-    color: var(--code-foreground);
-    font-family: var(--font-mono);
-    font-size: 0.92em;
-  }
-
-  .desktop-markdown-preview :where(pre) {
-    overflow: auto;
-    border-radius: 0.5rem;
-    background: var(--code);
-  }
-
-  .desktop-markdown-preview :where(blockquote) {
-    border-inline-start: 2px solid color-mix(in oklab, var(--border) 72%, transparent);
-    padding-inline-start: 0.85rem;
-    color: var(--ui-muted);
-  }
-
-  .desktop-markdown-preview :where(table) {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.95em;
-  }
-
-  .desktop-markdown-preview :where(th, td) {
-    border: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
-    padding: 0.42rem 0.55rem;
-    text-align: start;
-  }
-
-  .assistant-markdown {
+  .assistant-markdown,
+  .desktop-markdown-preview {
     width: 100%;
     min-width: 0;
     max-width: 100%;
@@ -375,7 +303,7 @@
 
   /* Inline code — subtle */
   [data-streamdown="inline-code"] {
-    background: oklch(0.97 0.002 0);
+    /* background: oklch(0.97 0.002 0); */
     padding: 0.1em 0.4em;
     border-radius: 4px;
     font-size: 0.875em;
@@ -429,6 +357,173 @@
     border-radius: 0.5rem;
     margin: 0.75rem 0;
   }
+
+  .assistant-streamdown {
+    --sd-prose-gap: 0.65rem;
+  }
+
+  .assistant-paragraph {
+    margin: var(--sd-prose-gap) 0;
+    color: var(--content-foreground);
+    font-size: 0.875rem;
+    line-height: 1.75;
+  }
+
+  .assistant-heading-1,
+  .assistant-heading-2,
+  .assistant-heading-3,
+  .assistant-heading-4,
+  .assistant-heading-5,
+  .assistant-heading-6 {
+    color: var(--ui-foreground);
+    font-weight: 640;
+    letter-spacing: 0;
+    line-height: 1.35;
+  }
+
+  .assistant-heading-1 {
+    margin: 1.35rem 0 0.55rem;
+    font-size: 1.02rem;
+  }
+
+  .assistant-heading-2 {
+    margin: 1.15rem 0 0.45rem;
+    font-size: 0.95rem;
+  }
+
+  .assistant-heading-3 {
+    margin: 1rem 0 0.35rem;
+    font-size: 0.9rem;
+  }
+
+  .assistant-heading-4,
+  .assistant-heading-5,
+  .assistant-heading-6 {
+    margin: 0.85rem 0 0.3rem;
+    font-size: 0.82rem;
+  }
+
+  .assistant-link {
+    color: color-mix(in oklab, var(--content-foreground) 74%, var(--file-link));
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, currentColor 32%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition:
+      color 0.15s ease,
+      text-decoration-color 0.15s ease;
+  }
+
+  .assistant-link:hover {
+    color: var(--ui-foreground);
+    text-decoration-color: currentColor;
+  }
+
+  .assistant-inline-code {
+    border-radius: 0.28rem;
+    background: color-mix(in oklab, var(--code) 64%, transparent);
+    padding: 0.08em 0.32em;
+    color: var(--code-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    font-weight: 450;
+  }
+
+  [data-streamdown="code-block"] {
+    margin: 0.85rem 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--border) 72%, transparent) !important;
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--code) 58%, var(--conversation));
+    box-shadow: none;
+  }
+
+  [data-streamdown="code-block"] pre,
+  .assistant-code-pre {
+    border-radius: 0;
+    background: transparent !important;
+    padding: 0.875rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.65;
+  }
+
+  [data-streamdown="code-block"] [data-streamdown="code-block-header"],
+  [data-streamdown="code-block"] > div:first-child {
+    min-height: 2rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 56%, transparent);
+    background: color-mix(in oklab, var(--conversation) 72%, transparent);
+    padding: 0.35rem 0.75rem;
+    color: var(--ui-muted);
+    font-size: 0.7rem;
+    font-weight: 500;
+  }
+
+  .assistant-list {
+    margin: 0.6rem 0;
+    padding-left: 1.15rem;
+  }
+
+  .assistant-list-ordered {
+    padding-left: 1.35rem;
+  }
+
+  .assistant-list-item {
+    margin: 0.18rem 0;
+    padding-left: 0.12rem;
+    line-height: 1.7;
+  }
+
+  .assistant-list-item::marker {
+    color: var(--ui-muted);
+  }
+
+  .assistant-blockquote {
+    margin: 0.85rem 0;
+    border-left: 2px solid color-mix(in oklab, var(--ui-muted) 38%, transparent);
+    padding: 0.1rem 0 0.1rem 0.85rem;
+    color: color-mix(in oklab, var(--content-foreground) 78%, var(--ui-muted));
+  }
+
+  .assistant-horizontal-rule {
+    margin: 1.25rem 0;
+    border: 0;
+    border-top: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  }
+
+  .assistant-table-wrapper {
+    margin: 0.9rem 0;
+    overflow: auto;
+    border: 1px solid color-mix(in oklab, var(--border) 74%, transparent);
+    border-radius: 0.5rem;
+  }
+
+  .assistant-table {
+    width: 100%;
+    min-width: 32rem;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    line-height: 1.55;
+  }
+
+  .assistant-table-header-cell,
+  .assistant-table-cell {
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 62%, transparent);
+    padding: 0.48rem 0.65rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .assistant-table-header-cell {
+    background: color-mix(in oklab, var(--muted) 48%, transparent);
+    color: var(--ui-foreground);
+    font-weight: 620;
+  }
+
+  .assistant-table tr:last-child .assistant-table-cell {
+    border-bottom: 0;
+  }
+
   .assistant-file-link {
     background: color-mix(in oklab, var(--conversation) 72%, var(--muted));
     color: var(--code-foreground);
@@ -458,6 +553,100 @@
     font-size: 0.43rem;
     font-weight: 700;
     line-height: 1;
+  }
+
+  .assistant-mermaid {
+    position: relative;
+    margin: 0.875rem 0;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--border) 82%, transparent);
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--conversation) 88%, var(--muted));
+  }
+
+  .assistant-mermaid-canvas {
+    overflow: auto;
+    padding: 1rem;
+  }
+
+  .assistant-mermaid-canvas svg {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    height: auto;
+    min-width: 280px;
+    margin: 0 auto;
+  }
+
+  .assistant-mermaid-controls {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 1;
+    display: flex;
+    gap: 0.25rem;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .assistant-mermaid:hover .assistant-mermaid-controls,
+  .assistant-mermaid:focus-within .assistant-mermaid-controls {
+    opacity: 1;
+  }
+
+  .assistant-mermaid-control {
+    display: inline-grid;
+    width: 1.75rem;
+    height: 1.75rem;
+    place-items: center;
+    border: 1px solid color-mix(in oklab, var(--border) 86%, transparent);
+    border-radius: 0.375rem;
+    background: color-mix(in oklab, var(--background) 90%, transparent);
+    color: var(--ui-muted);
+    box-shadow: 0 1px 4px oklch(0 0 0 / 8%);
+  }
+
+  .assistant-mermaid-control:hover {
+    color: var(--ui-foreground);
+    background: var(--background);
+  }
+
+  .assistant-mermaid-control:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .assistant-mermaid-loading,
+  .assistant-mermaid-error {
+    padding: 0.875rem 1rem;
+    color: var(--ui-muted);
+    font-size: 0.8125rem;
+  }
+
+  .assistant-mermaid-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .assistant-mermaid-error {
+    display: grid;
+    gap: 0.75rem;
+    color: var(--destructive);
+  }
+
+  .assistant-mermaid-error pre {
+    max-height: 12rem;
+    overflow: auto;
+    border-radius: 0.375rem;
+    background: var(--code);
+    padding: 0.75rem;
+    color: var(--code-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
   }
 }
 

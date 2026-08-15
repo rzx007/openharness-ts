@@ -22,6 +22,8 @@ import {
   type AssistantContentUnit,
   type ChangedFile,
 } from "./message-render-model"
+import { QuietInlineCode, QuietLink, quietStreamdownComponents } from "./streamdown-components"
+import { streamdownPlugins } from "./streamdown-plugins"
 
 export function AssistantMessage({
   parts,
@@ -110,14 +112,16 @@ function AssistantMarkdown({
         controls
         lineNumbers={false}
         parseIncompleteMarkdown={streaming}
+        plugins={streamdownPlugins}
         components={{
+          ...quietStreamdownComponents,
           a: ({ href, children, ...props }) => {
             const file = href ? parseFileReference(href) : null
             if (!file)
               return (
-                <a href={href} data-streamdown="link" {...props}>
+                <QuietLink href={href} {...props}>
                   {children}
-                </a>
+                </QuietLink>
               )
             return (
               <FileButton path={file.path} line={file.line} onOpenFile={onOpenFile}>
@@ -128,12 +132,7 @@ function AssistantMarkdown({
           inlineCode: ({ children, ...props }) => {
             const value = String(children).replace(/\n$/, "")
             const file = parseFileReference(value)
-            if (!file)
-              return (
-                <code data-streamdown="inline-code" {...props}>
-                  {children}
-                </code>
-              )
+            if (!file) return <QuietInlineCode {...props}>{children}</QuietInlineCode>
             return (
               <FileButton path={file.path} line={file.line} onOpenFile={onOpenFile}>
                 {children}
