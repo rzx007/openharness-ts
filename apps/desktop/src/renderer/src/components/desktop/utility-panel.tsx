@@ -115,7 +115,9 @@ export function UtilityPanel({
   const visibleFileTabs = fileStateVisible ? fileTabs : []
   const visibleActiveFilePath = fileStateVisible ? activeFilePath : null
   const visibleLoadingFilePath = fileStateVisible ? loadingFilePath : null
-  const visibleTabs = tabs.filter((tab) => !tab.projectPath || tab.projectPath === selectedProjectPath)
+  const visibleTabs = tabs.filter(
+    (tab) => !tab.projectPath || tab.projectPath === selectedProjectPath
+  )
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
   const pendingTerminal =
     Boolean(terminalOpenRequest) ||
@@ -124,16 +126,34 @@ export function UtilityPanel({
 
   useEffect(() => {
     if (!fileOpenRequest) return
+    const relativePath = toRelativeWorkspacePath(fileOpenRequest.path, selectedProjectPath)
     const timer = window.setTimeout(() => {
+      if (!relativePath) {
+        setTabs((current) =>
+          current.some((tab) => tab.id === filesTabId || tab.tool === "files")
+            ? current
+            : [...current, { id: filesTabId, tool: "files", title: toolMeta.files.label }]
+        )
+        setActiveTabId(filesTabId)
+        return
+      }
+      const id = fileTabId(relativePath, selectedProjectPath)
       setTabs((current) =>
-        current.some((tab) => tab.id === filesTabId)
-          ? current
-          : [...current, { id: filesTabId, tool: "files", title: toolMeta.files.label }]
+        placeFileTab(current, {
+          id,
+          tool: "files",
+          title: fileNameFromPath(relativePath),
+          filePath: relativePath,
+          fileIcon: getFileIcon(relativePath),
+          projectPath: selectedProjectPath,
+        })
       )
-      setActiveTabId(filesTabId)
+      setFileProjectPath(selectedProjectPath ?? null)
+      setActiveTabId(id)
+      setActiveFilePath(relativePath)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [fileOpenRequest])
+  }, [fileOpenRequest, selectedProjectPath])
 
   useEffect(() => {
     if (!terminalOpenRequest) return
@@ -156,7 +176,8 @@ export function UtilityPanel({
         return
       }
       const hasTerminalTabs = tabs.some(
-        (tab) => tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
+        (tab) =>
+          tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
       )
       setTerminalCommand({
         id: Date.now(),
@@ -179,6 +200,32 @@ export function UtilityPanel({
       setBrowserTabs((current) => [...current, tab])
       setTabs((current) => [...current, { id, tool, title: tab.title }])
       setActiveTabId(id)
+      return
+    }
+
+    if (tool === "files") {
+      const emptyFilesTab = tabs.find((tab) => tab.id === filesTabId)
+      if (emptyFilesTab) {
+        setActiveTabId(emptyFilesTab.id)
+        return
+      }
+      const existingFileTab =
+        tabs.find(
+          (tab) =>
+            tab.tool === "files" &&
+            tab.filePath &&
+            tab.filePath === activeFilePath &&
+            tab.projectPath === selectedProjectPath
+        ) ??
+        tabs.find(
+          (tab) => tab.tool === "files" && tab.filePath && tab.projectPath === selectedProjectPath
+        )
+      if (existingFileTab) {
+        setActiveTabId(existingFileTab.id)
+        return
+      }
+      setTabs((current) => [...current, { id: filesTabId, tool, title: toolMeta.files.label }])
+      setActiveTabId(filesTabId)
       return
     }
 
@@ -256,19 +303,14 @@ export function UtilityPanel({
   const startFileTab = (path: string): void => {
     const id = fileTabId(path, selectedProjectPath)
     setTabs((current) =>
-      current.some((tab) => tab.id === id)
-        ? current
-        : [
-            ...current,
-            {
-              id,
-              tool: "files",
-              title: fileNameFromPath(path),
-              filePath: path,
-              fileIcon: getFileIcon(path),
-              projectPath: selectedProjectPath,
-            },
-          ]
+      placeFileTab(current, {
+        id,
+        tool: "files",
+        title: fileNameFromPath(path),
+        filePath: path,
+        fileIcon: getFileIcon(path),
+        projectPath: selectedProjectPath,
+      })
     )
     setFileProjectPath(selectedProjectPath ?? null)
     setActiveTabId(id)
@@ -292,29 +334,15 @@ export function UtilityPanel({
       ]
     })
     setTabs((current) =>
-      current.some((tab) => tab.id === id)
-        ? current.map((tab) =>
-            tab.id === id
-              ? {
-                  ...tab,
-                  title: nextFileTab.preview.name,
-                  fileIcon: getFileIcon(nextFileTab.preview.path),
-                  fileType: nextFileTab.type,
-                }
-              : tab
-          )
-        : [
-            ...current,
-            {
-              id,
-              tool: "files",
-              title: nextFileTab.preview.name,
-              filePath: nextFileTab.preview.path,
-              fileIcon: getFileIcon(nextFileTab.preview.path),
-              fileType: nextFileTab.type,
-              projectPath: selectedProjectPath,
-            },
-          ]
+      placeFileTab(current, {
+        id,
+        tool: "files",
+        title: nextFileTab.preview.name,
+        filePath: nextFileTab.preview.path,
+        fileIcon: getFileIcon(nextFileTab.preview.path),
+        fileType: nextFileTab.type,
+        projectPath: selectedProjectPath,
+      })
     )
     setActiveTabId(id)
     setActiveFilePath(nextFileTab.preview.path)
@@ -450,7 +478,10 @@ export function UtilityPanel({
             )}
           </div>
 
-          <div ref={setTerminalActionsHost} className="flex shrink-0 items-center gap-0.5 text-ui-muted" />
+          <div
+            ref={setTerminalActionsHost}
+            className="flex shrink-0 items-center gap-0.5 text-ui-muted"
+          />
 
           <PanelIconButton
             label={maximized ? "恢复面板" : "最大化面板"}
@@ -458,10 +489,10 @@ export function UtilityPanel({
             onClick={onToggleMaximized}
             subtle
           >
-            <Minimize2 className={cn(!maximized && "rotate-180")} />
+            <Minimize2 className={cn(!maximized && "rotate-180", "size-3.5")} />
           </PanelIconButton>
           <PanelIconButton label="关闭面板" onClick={onClose}>
-            <PanelRightClose />
+            <PanelRightClose className="size-3.5" />
           </PanelIconButton>
         </header>
 
@@ -536,7 +567,7 @@ function EmptyUtilityPanelState({
 }): React.JSX.Element {
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-8">
-      <div className="w-full max-w-[520px]">
+      <div className="w-full max-w-130">
         {toolOrder.map((tool) => {
           const Icon = toolMeta[tool].icon
           return (
@@ -544,13 +575,13 @@ function EmptyUtilityPanelState({
               key={tool}
               type="button"
               onClick={() => onAdd(tool)}
-              className="group flex h-14 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-ui-foreground transition-colors hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="group flex h-12.5 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-ui-foreground transition-colors hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
               <Icon
-                className="size-4 shrink-0 text-ui-muted transition-colors group-hover:text-ui-foreground"
+                className="size-3.5 shrink-0 text-ui-muted transition-colors group-hover:text-ui-foreground"
                 strokeWidth={1.8}
               />
-              <span className="min-w-0 flex-1 truncate">{toolMeta[tool].label}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px]">{toolMeta[tool].label}</span>
               {toolMeta[tool].shortcut && (
                 <kbd className="rounded-md bg-code px-1.5 py-0.5 font-sans text-[11px] text-ui-muted">
                   {toolMeta[tool].shortcut}
@@ -590,7 +621,7 @@ function UtilityTabButton({
           ? "bg-muted/55 text-ui-foreground"
           : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
         showSeparator &&
-          "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
+        "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
       )}
     >
       <button
@@ -627,6 +658,31 @@ function fileTabId(path: string, projectPath?: string): string {
   return `file-tab:${projectPath ?? "no-project"}:${path}`
 }
 
+function placeFileTab(current: UtilityTab[], fileTab: UtilityTab): UtilityTab[] {
+  const existingIndex = current.findIndex((tab) => tab.id === fileTab.id)
+  if (existingIndex >= 0) {
+    return current.map((tab, index) =>
+      index === existingIndex
+        ? {
+          ...tab,
+          title: fileTab.title,
+          fileIcon: fileTab.fileIcon ?? tab.fileIcon,
+          fileType: fileTab.fileType ?? tab.fileType,
+          filePath: fileTab.filePath,
+          projectPath: fileTab.projectPath,
+        }
+        : tab
+    )
+  }
+
+  const emptyIndex = current.findIndex((tab) => tab.id === filesTabId)
+  if (emptyIndex >= 0) {
+    return current.map((tab, index) => (index === emptyIndex ? fileTab : tab))
+  }
+
+  return [...current, fileTab]
+}
+
 function toolTabId(tool: UtilityTool): string {
   return tool === "files" ? filesTabId : `${tool}-tab`
 }
@@ -636,7 +692,20 @@ function terminalTabId(terminalId: string): string {
 }
 
 function fileNameFromPath(path: string): string {
-  return path.split("/").filter(Boolean).pop() ?? path
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path
+}
+
+function toRelativeWorkspacePath(path: string, projectPath: string | undefined): string | null {
+  const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "")
+  const normalizedPath = withoutLocation.replace(/\\/g, "/")
+  const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "")
+  if (/^[a-z]:\//i.test(normalizedPath)) {
+    if (!normalizedProject) return null
+    const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`
+    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return null
+    return normalizedPath.slice(normalizedProject.length + 1)
+  }
+  return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
 }
 
 function readPersistedFileTabs(): PersistedFileTabState {
