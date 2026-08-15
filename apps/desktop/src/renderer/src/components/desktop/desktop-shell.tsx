@@ -34,6 +34,10 @@ export function DesktopShell(): React.JSX.Element {
     path: string
     line?: number
   } | null>(null)
+  const [terminalOpenRequest, setTerminalOpenRequest] = useState<{
+    id: number
+    terminalId: string
+  } | null>(null)
   const sidebarPanelRef = usePanelRef()
   const utilityPanelRef = usePanelRef()
   const workspaceGroupRef = useGroupRef()
@@ -96,6 +100,16 @@ export function DesktopShell(): React.JSX.Element {
       utilityPanelRef.current?.expand()
       setPanelOpen(true)
       setFileOpenRequest({ id: Date.now(), path, line })
+    },
+    [sidebarPanelRef, utilityPanelRef]
+  )
+
+  const openTerminal = useCallback(
+    (terminalId: string): void => {
+      if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
+      utilityPanelRef.current?.expand()
+      setPanelOpen(true)
+      setTerminalOpenRequest({ id: Date.now(), terminalId })
     },
     [sidebarPanelRef, utilityPanelRef]
   )
@@ -245,6 +259,7 @@ export function DesktopShell(): React.JSX.Element {
                     panelOpen={panelOpen}
                     onTogglePanel={togglePanel}
                     onOpenFile={openWorkspaceFile}
+                    onOpenTerminal={openTerminal}
                   />
                 </Panel>
 
@@ -271,6 +286,7 @@ export function DesktopShell(): React.JSX.Element {
                     onToggleMaximized={toggleUtilityMaximized}
                     onClose={closeUtilityPanel}
                     fileOpenRequest={fileOpenRequest}
+                    terminalOpenRequest={terminalOpenRequest}
                   />
                 </Panel>
               </Group>

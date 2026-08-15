@@ -122,6 +122,8 @@ export interface DesktopPermissionRequest {
   updatedAt: number
 }
 
+export type DesktopPermissionMode = "default" | "plan" | "full_auto"
+
 export interface DesktopBootstrapData {
   connected: true
   projects: DesktopProject[]
@@ -129,6 +131,8 @@ export interface DesktopBootstrapData {
   archivedSessions: DesktopSessionRecord[]
   models: DesktopModel[]
   defaultModel: string
+  defaultProvider?: string
+  defaultPermissionMode: DesktopPermissionMode
 }
 
 export interface DesktopProjectDetails {
@@ -154,6 +158,8 @@ export interface CreateDesktopSessionInput {
   projectId: string
   cwd: string
   model: string
+  provider?: string
+  permissionMode?: DesktopPermissionMode
 }
 
 export interface SendDesktopPromptInput {
@@ -185,4 +191,24 @@ export interface ReplyDesktopPermissionInput {
   permissionId: string
   status: "approved" | "denied"
   decision?: "once" | "session"
+}
+
+export interface SetDefaultDesktopModelInput {
+  model: string
+  provider?: string
+}
+
+export interface SetDefaultDesktopPermissionModeInput {
+  permissionMode: DesktopPermissionMode
+}
+
+export interface UpdateDesktopSessionModelInput {
+  sessionId: string
+  model: string
+  provider?: string
+}
+
+export interface UpdateDesktopSessionPermissionModeInput {
+  sessionId: string
+  permissionMode: DesktopPermissionMode
 }

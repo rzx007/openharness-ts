@@ -25,7 +25,13 @@ export default defineConfig({
     plugins: [copySessionMigrations()],
     build: {
       externalizeDeps: {
-        exclude: ["@openharness/client", "@openharness/server", "electron-store"],
+        exclude: [
+          "@openharness/client",
+          "@openharness/server",
+          "@openharness/terminal",
+          "@openharness/terminal-node",
+          "electron-store",
+        ],
       },
     },
   },

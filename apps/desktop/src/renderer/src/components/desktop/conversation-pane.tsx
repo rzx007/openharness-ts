@@ -32,6 +32,7 @@ import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type {
   DesktopModel,
+  DesktopPermissionMode,
   DesktopPermissionRequest,
   DesktopProject,
   DesktopSessionMessage,
@@ -43,6 +44,7 @@ type ConversationPaneProps = {
   panelOpen: boolean
   onTogglePanel: () => void
   onOpenFile: (path: string, line?: number) => void
+  onOpenTerminal: (terminalId: string) => void
 }
 
 interface AddToComposerEventDetail {
@@ -53,6 +55,7 @@ export function ConversationPane({
   panelOpen,
   onTogglePanel,
   onOpenFile,
+  onOpenTerminal,
 }: ConversationPaneProps): React.JSX.Element {
   const [draft, setDraft] = useState("")
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
@@ -62,6 +65,8 @@ export function ConversationPane({
   const error = useDesktopSessionStore((state) => state.error)
   const models = useDesktopSessionStore((state) => state.models)
   const selectedModel = useDesktopSessionStore((state) => state.selectedModel)
+  const selectedProvider = useDesktopSessionStore((state) => state.selectedProvider)
+  const selectedPermissionMode = useDesktopSessionStore((state) => state.selectedPermissionMode)
   const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
   const branch = useDesktopSessionStore((state) => state.branch)
   const projects = useDesktopSessionStore((state) => state.projects)
@@ -71,6 +76,11 @@ export function ConversationPane({
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
   const selectModel = useDesktopSessionStore((state) => state.selectModel)
+  const selectPermissionMode = useDesktopSessionStore((state) => state.selectPermissionMode)
+  const updateSessionModel = useDesktopSessionStore((state) => state.updateSessionModel)
+  const updateSessionPermissionMode = useDesktopSessionStore(
+    (state) => state.updateSessionPermissionMode
+  )
   const interrupt = useDesktopSessionStore((state) => state.interrupt)
   const replyPermission = useDesktopSessionStore((state) => state.replyPermission)
   const clearError = useDesktopSessionStore((state) => state.clearError)
@@ -97,7 +107,7 @@ export function ConversationPane({
 
   const title = sessionView?.session.title.trim() || "新对话"
   const currentModel = sessionView?.session.model ?? selectedModel
-  const modelLabel = resolveModelLabel(models, currentModel)
+  const modelLabel = resolveModelLabel(models, currentModel, selectedProvider)
   const running = Boolean(
     sessionView?.runs.some((run) => run.status === "pending" || run.status === "running") ||
     sessionView?.session.status === "running"
@@ -182,11 +192,14 @@ export function ConversationPane({
           branch={branch}
           models={models}
           selectedModel={selectedModel}
+          selectedProvider={selectedProvider}
+          selectedPermissionMode={selectedPermissionMode}
           onDraftChange={setDraft}
           onSubmit={() => void submitDraft()}
           onChooseProject={() => void chooseProject()}
           onSelectProject={(project) => void selectProject(project)}
-          onSelectModel={selectModel}
+          onSelectModel={(model) => void selectModel(model)}
+          onSelectPermissionMode={(permissionMode) => void selectPermissionMode(permissionMode)}
         />
       ) : (
         <>
@@ -209,6 +222,7 @@ export function ConversationPane({
                   runs={sessionView?.runs ?? []}
                   running={running}
                   onOpenFile={onOpenFile}
+                  onOpenTerminal={onOpenTerminal}
                 />
               )}
 
@@ -235,10 +249,21 @@ export function ConversationPane({
               draft={draft}
               sending={sending}
               running={running}
+              models={models}
+              selectedModel={currentModel}
+              selectedProvider={selectedProvider}
               modelLabel={modelLabel}
+              permissionMode={selectedPermissionMode}
               onDraftChange={setDraft}
               onSubmit={() => void submitDraft()}
               onInterrupt={() => void interrupt()}
+              onSelectModel={(model) => {
+                if (activeSessionId) void updateSessionModel(activeSessionId, model)
+              }}
+              onSelectPermissionMode={(permissionMode) => {
+                if (activeSessionId)
+                  void updateSessionPermissionMode(activeSessionId, permissionMode)
+              }}
             />
           )}
         </>
@@ -253,20 +278,36 @@ function ConversationTranscript({
   runs,
   running,
   onOpenFile,
+  onOpenTerminal,
 }: {
   messages: DesktopSessionMessage[]
   parts: DesktopSessionPart[]
   runs: DesktopSessionRun[]
   running: boolean
   onOpenFile: (path: string, line?: number) => void
+  onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
   const entries = useMemo(
     () => buildConversationEntries(messages, parts, runs),
     [messages, parts, runs]
   )
   const lastTurn = [...entries].reverse().find((entry) => entry.type === "turn")
+  const failedRuns = runs.filter((run) => run.status === "failed")
+  const attachedRunIds = new Set(
+    entries.flatMap((entry) => {
+      if (entry.type !== "turn") return []
+      return failedRuns
+        .filter(
+          (run) =>
+            entry.turn.runIds.includes(run.id) ||
+            (Boolean(run.inputId) && run.inputId === entry.turn.inputId)
+        )
+        .map((run) => run.id)
+    })
+  )
+  const unattachedFailures = failedRuns.filter((run) => !attachedRunIds.has(run.id))
 
-  if (messages.length === 0 && !running) {
+  if (messages.length === 0 && !running && failedRuns.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-ui-muted">
         这个会话还没有消息
@@ -285,9 +326,15 @@ function ConversationTranscript({
               parts={entry.system.parts}
               streaming={false}
               onOpenFile={onOpenFile}
+              onOpenTerminal={onOpenTerminal}
             />
           )
         }
+        const turnFailures = failedRuns.filter(
+          (run) =>
+            entry.turn.runIds.includes(run.id) ||
+            (Boolean(run.inputId) && run.inputId === entry.turn.inputId)
+        )
         return (
           <section key={entry.turn.id} className="min-w-0 space-y-8">
             {entry.turn.userMessage ? (
@@ -296,6 +343,7 @@ function ConversationTranscript({
                 parts={entry.turn.userParts}
                 streaming={false}
                 onOpenFile={onOpenFile}
+                onOpenTerminal={onOpenTerminal}
               />
             ) : null}
             {entry.turn.assistantMessages.length > 0 ? (
@@ -303,11 +351,18 @@ function ConversationTranscript({
                 parts={entry.turn.assistantParts}
                 streaming={running && entry === lastTurn}
                 onOpenFile={onOpenFile}
+                onOpenTerminal={onOpenTerminal}
               />
             ) : null}
+            {turnFailures.map((run) => (
+              <RunErrorNotice key={run.id} error={run.error} />
+            ))}
           </section>
         )
       })}
+      {unattachedFailures.map((run) => (
+        <RunErrorNotice key={run.id} error={run.error} />
+      ))}
       {running ? (
         <div className="flex items-center gap-2 text-xs text-ui-muted">
           <LoaderCircle className="size-3.5 animate-spin" />
@@ -318,16 +373,50 @@ function ConversationTranscript({
   )
 }
 
+function RunErrorNotice({ error }: { error?: string }): React.JSX.Element {
+  const detail = error?.trim() || "运行失败，但服务端没有返回具体原因。"
+  const guidance = runFailureGuidance(detail)
+  return (
+    <section
+      role="alert"
+      className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm"
+    >
+      <div className="flex items-start gap-2.5">
+        <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[13px] font-semibold text-destructive">请求失败</h3>
+          {guidance ? <p className="mt-1 text-xs leading-5 text-foreground">{guidance}</p> : null}
+          <p className="mt-1.5 text-xs leading-5 break-words whitespace-pre-wrap text-ui-muted">
+            {detail}
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function runFailureGuidance(error: string): string | null {
+  if (
+    error.includes("not supported when using Codex") ||
+    error.includes("supported API model names")
+  ) {
+    return "当前模型与供应商不匹配，请在输入框右下角重新选择模型。"
+  }
+  return null
+}
+
 function MessageBlock({
   message,
   parts,
   streaming,
   onOpenFile,
+  onOpenTerminal,
 }: {
   message: DesktopSessionMessage
   parts: DesktopSessionPart[]
   streaming: boolean
   onOpenFile: (path: string, line?: number) => void
+  onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
   if (message.role === "user") {
     const content = parts
@@ -348,7 +437,14 @@ function MessageBlock({
     return <p className="text-xs whitespace-pre-wrap text-ui-muted">{content}</p>
   }
 
-  return <AssistantMessage parts={parts} streaming={streaming} onOpenFile={onOpenFile} />
+  return (
+    <AssistantMessage
+      parts={parts}
+      streaming={streaming}
+      onOpenFile={onOpenFile}
+      onOpenTerminal={onOpenTerminal}
+    />
+  )
 }
 
 function PermissionCard({
@@ -387,7 +483,7 @@ function PermissionCard({
   )
 }
 
-type StartPicker = "project" | "runtime" | "branch" | "model"
+type StartPicker = "project" | "runtime" | "branch" | "model" | "permission"
 
 function NewConversationStart({
   draft,
@@ -398,11 +494,14 @@ function NewConversationStart({
   branch,
   models,
   selectedModel,
+  selectedProvider,
+  selectedPermissionMode,
   onDraftChange,
   onSubmit,
   onChooseProject,
   onSelectProject,
   onSelectModel,
+  onSelectPermissionMode,
 }: {
   draft: string
   sending: boolean
@@ -412,11 +511,14 @@ function NewConversationStart({
   branch: string | null
   models: DesktopModel[]
   selectedModel: string | null
+  selectedProvider: string | null
+  selectedPermissionMode: DesktopPermissionMode
   onDraftChange: (value: string) => void
   onSubmit: () => void
   onChooseProject: () => void
   onSelectProject: (project: DesktopProject) => void
-  onSelectModel: (model: string) => void
+  onSelectModel: (model: DesktopModel) => void
+  onSelectPermissionMode: (mode: DesktopPermissionMode) => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<StartPicker | null>(null)
   const [projectQuery, setProjectQuery] = useState("")
@@ -424,7 +526,8 @@ function NewConversationStart({
   const visibleProjects = projects.filter((project) =>
     project.name.toLocaleLowerCase().includes(projectQuery.trim().toLocaleLowerCase())
   )
-  const modelLabel = resolveModelLabel(models, selectedModel)
+  const modelLabel = resolveModelLabel(models, selectedModel, selectedProvider)
+  const permissionLabel = resolvePermissionModeLabel(selectedPermissionMode)
 
   useEffect(() => {
     const closeOnOutsidePointer = (event: PointerEvent): void => {
@@ -612,13 +715,28 @@ function NewConversationStart({
               <ComposerIconButton label="添加附件">
                 <Plus />
               </ComposerIconButton>
-              <button
-                type="button"
-                className="ml-1 flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                <ShieldCheck className="size-3.5" />
-                帮我批准
-              </button>
+              <div className="relative ml-1">
+                <button
+                  type="button"
+                  aria-expanded={activePicker === "permission"}
+                  onClick={() => togglePicker("permission")}
+                  className="flex h-8 max-w-36 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <ShieldCheck className="size-3.5 shrink-0" />
+                  <span className="truncate">{permissionLabel}</span>
+                  <ChevronDown className="size-3 shrink-0" />
+                </button>
+                {activePicker === "permission" ? (
+                  <PermissionModeMenu
+                    selected={selectedPermissionMode}
+                    onSelect={(permissionMode) => {
+                      onSelectPermissionMode(permissionMode)
+                      setActivePicker(null)
+                    }}
+                    className="absolute bottom-full left-0 z-50 mb-2 w-64"
+                  />
+                ) : null}
+              </div>
 
               <div className="relative ml-auto flex items-center gap-0.5">
                 <button
@@ -635,14 +753,17 @@ function NewConversationStart({
                     {models.map((model) => (
                       <PickerMenuItem
                         key={`${model.provider}:${model.id}`}
-                        selected={model.id === selectedModel}
+                        selected={
+                          model.id === selectedModel && model.providerName === selectedProvider
+                        }
                         onClick={() => {
-                          onSelectModel(model.id)
+                          onSelectModel(model)
                           setActivePicker(null)
                         }}
                       >
                         <FileText />
                         <span className="min-w-0 flex-1 truncate">{model.label}</span>
+                        <span className="shrink-0 text-[10px] text-ui-muted">{model.provider}</span>
                       </PickerMenuItem>
                     ))}
                   </div>
@@ -678,22 +799,54 @@ function Composer({
   draft,
   sending,
   running,
+  models,
+  selectedModel,
+  selectedProvider,
   modelLabel,
+  permissionMode,
   onDraftChange,
   onSubmit,
   onInterrupt,
+  onSelectModel,
+  onSelectPermissionMode,
 }: {
   id: string
   draft: string
   sending: boolean
   running: boolean
+  models: DesktopModel[]
+  selectedModel: string | null
+  selectedProvider: string | null
   modelLabel: string
+  permissionMode: DesktopPermissionMode
   onDraftChange: (value: string) => void
   onSubmit: () => void
   onInterrupt: () => void
+  onSelectModel: (model: DesktopModel) => void
+  onSelectPermissionMode: (mode: DesktopPermissionMode) => void
 }): React.JSX.Element {
+  const [activePicker, setActivePicker] = useState<"model" | "permission" | null>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  const permissionLabel = resolvePermissionModeLabel(permissionMode)
+
+  useEffect(() => {
+    const closeOnOutsidePointer = (event: PointerEvent): void => {
+      if (composerRef.current?.contains(event.target as Node)) return
+      setActivePicker(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setActivePicker(null)
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer)
+    window.addEventListener("keydown", closeOnEscape)
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer)
+      window.removeEventListener("keydown", closeOnEscape)
+    }
+  }, [])
+
   return (
-    <div className="relative z-10 shrink-0 bg-conversation px-4 pb-4">
+    <div ref={composerRef} className="relative z-10 shrink-0 bg-conversation px-4 pb-4">
       <form
         className="mx-auto w-full max-w-190 rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
         onSubmit={(event) => {
@@ -722,15 +875,58 @@ function Composer({
           <ComposerIconButton label="添加附件">
             <Plus />
           </ComposerIconButton>
-          <button
-            type="button"
-            className="ml-1 flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            <ShieldCheck className="size-3.5" />
-            帮我批准
-          </button>
-          <div className="ml-auto flex items-center gap-0.5">
-            <span className="max-w-44 truncate px-2 text-xs text-ui-muted">{modelLabel}</span>
+          <div className="relative ml-1">
+            <button
+              type="button"
+              aria-expanded={activePicker === "permission"}
+              onClick={() =>
+                setActivePicker((current) => (current === "permission" ? null : "permission"))
+              }
+              className="flex h-8 max-w-36 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <ShieldCheck className="size-3.5 shrink-0" />
+              <span className="truncate">{permissionLabel}</span>
+              <ChevronDown className="size-3 shrink-0" />
+            </button>
+            {activePicker === "permission" ? (
+              <PermissionModeMenu
+                selected={permissionMode}
+                onSelect={(nextMode) => {
+                  onSelectPermissionMode(nextMode)
+                  setActivePicker(null)
+                }}
+                className="absolute bottom-full left-0 z-50 mb-2 w-64"
+              />
+            ) : null}
+          </div>
+          <div className="relative ml-auto flex items-center gap-0.5">
+            <button
+              type="button"
+              aria-expanded={activePicker === "model"}
+              onClick={() => setActivePicker((current) => (current === "model" ? null : "model"))}
+              className="flex h-8 max-w-44 items-center gap-1 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <span className="truncate">{modelLabel}</span>
+              <ChevronDown className="size-3 shrink-0" />
+            </button>
+            {activePicker === "model" ? (
+              <div className="absolute right-16 bottom-full z-50 mb-2 max-h-64 w-64 overflow-y-auto rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10">
+                {models.map((model) => (
+                  <PickerMenuItem
+                    key={`${model.provider}:${model.id}`}
+                    selected={model.id === selectedModel && model.providerName === selectedProvider}
+                    onClick={() => {
+                      onSelectModel(model)
+                      setActivePicker(null)
+                    }}
+                  >
+                    <FileText />
+                    <span className="min-w-0 flex-1 truncate">{model.label}</span>
+                    <span className="shrink-0 text-[10px] text-ui-muted">{model.provider}</span>
+                  </PickerMenuItem>
+                ))}
+              </div>
+            ) : null}
             <ComposerIconButton label="语音输入">
               <Mic />
             </ComposerIconButton>
@@ -776,11 +972,12 @@ function ErrorBanner({
   onClose: () => void
 }): React.JSX.Element {
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-destructive/15 bg-destructive/6 px-4 py-2 text-xs text-destructive">
-      <AlertCircle className="size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1 truncate" title={message}>
-        {message}
-      </span>
+    <div
+      role="alert"
+      className="flex shrink-0 items-start gap-2 border-b border-destructive/15 bg-destructive/6 px-4 py-2.5 text-xs text-destructive"
+    >
+      <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+      <span className="min-w-0 flex-1 leading-5 break-words whitespace-pre-wrap">{message}</span>
       <button
         type="button"
         aria-label="关闭错误提示"
@@ -789,6 +986,71 @@ function ErrorBanner({
       >
         <X />
       </button>
+    </div>
+  )
+}
+
+const permissionModeOptions: Array<{
+  value: DesktopPermissionMode
+  label: string
+  description: string
+}> = [
+  {
+    value: "default",
+    label: "手动批准",
+    description: "写入、命令等敏感操作会请求确认。",
+  },
+  {
+    value: "plan",
+    label: "计划模式",
+    description: "保持只读分析，适合先审方案。",
+  },
+  {
+    value: "full_auto",
+    label: "自动批准",
+    description: "尽量自动放行工具操作。",
+  },
+]
+
+function PermissionModeMenu({
+  selected,
+  onSelect,
+  className,
+}: {
+  selected: DesktopPermissionMode
+  onSelect: (mode: DesktopPermissionMode) => void
+  className?: string
+}): React.JSX.Element {
+  return (
+    <div
+      role="menu"
+      className={cn(
+        "rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10",
+        className
+      )}
+    >
+      {permissionModeOptions.map((mode) => (
+        <button
+          key={mode.value}
+          type="button"
+          role="menuitemradio"
+          aria-checked={selected === mode.value}
+          onClick={() => onSelect(mode.value)}
+          className={cn(
+            "flex w-full min-w-0 items-start gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            selected === mode.value && "bg-muted"
+          )}
+        >
+          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-ui-muted" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-medium text-foreground">{mode.label}</span>
+            <span className="mt-0.5 block text-[11px] leading-4 text-ui-muted">
+              {mode.description}
+            </span>
+          </span>
+          {selected === mode.value ? <Check className="mt-0.5 size-3.5 shrink-0" /> : null}
+        </button>
+      ))}
     </div>
   )
 }
@@ -895,9 +1157,21 @@ function ComposerIconButton({
   )
 }
 
-function resolveModelLabel(models: DesktopModel[], modelId: string | null): string {
+function resolveModelLabel(
+  models: DesktopModel[],
+  modelId: string | null,
+  providerName: string | null
+): string {
   if (!modelId) return "选择模型"
-  return models.find((model) => model.id === modelId)?.label ?? modelId
+  return (
+    models.find((model) => model.id === modelId && model.providerName === providerName)?.label ??
+    models.find((model) => model.id === modelId)?.label ??
+    modelId
+  )
+}
+
+function resolvePermissionModeLabel(mode: DesktopPermissionMode): string {
+  return permissionModeOptions.find((option) => option.value === mode)?.label ?? "手动批准"
 }
 
 function projectName(path: string | undefined): string {

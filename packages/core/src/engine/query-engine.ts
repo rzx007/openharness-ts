@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import type { Message, StreamEvent, ToolUseBlock, UsageSnapshot, ContentBlock } from "../index";
+import type {
+  Message,
+  StreamEvent,
+  ToolUseBlock,
+  UsageSnapshot,
+  ContentBlock,
+} from "../index";
 import type {
   AgentExecutionContext,
   StreamingMessageClient,
@@ -11,8 +17,18 @@ import type {
   MemoryRetriever,
   McpAuthHost,
 } from "../index";
-import type { ToolContext, ToolDefinition, ToolExecutionResult, ToolRegistry as IToolRegistry } from "../types/tools";
-import { CompactService, type CompactClient, type CompactAttachmentsProvider } from "./compact-service";
+import type {
+  ToolContext,
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolRegistry as IToolRegistry,
+} from "../types/tools";
+import type { AgentTerminalHost } from "@openharness/terminal";
+import {
+  CompactService,
+  type CompactClient,
+  type CompactAttachmentsProvider,
+} from "./compact-service";
 import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
 import { validateToolInput } from "./tool-input-schema";
@@ -25,7 +41,11 @@ const DEFAULT_TOOL_TIMEOUT_MS = 300_000;
 // Tool output budget — mirrors packages/services/src/tool-outputs.ts
 // ---------------------------------------------------------------------------
 
-function readPositiveIntEnv(name: string, defaultValue: number, minimum: number): number {
+function readPositiveIntEnv(
+  name: string,
+  defaultValue: number,
+  minimum: number,
+): number {
   const raw = (process.env[name] ?? "").trim();
   if (!raw) return defaultValue;
   const parsed = Number(raw);
@@ -34,16 +54,33 @@ function readPositiveIntEnv(name: string, defaultValue: number, minimum: number)
 }
 
 function toolOutputInlineChars(): number {
-  return readPositiveIntEnv("OPENHARNESS_TOOL_OUTPUT_INLINE_CHARS", 16_000, 256);
+  return readPositiveIntEnv(
+    "OPENHARNESS_TOOL_OUTPUT_INLINE_CHARS",
+    16_000,
+    256,
+  );
 }
 
 function toolOutputPreviewChars(): number {
-  return readPositiveIntEnv("OPENHARNESS_TOOL_OUTPUT_PREVIEW_CHARS", 3_000, 128);
+  return readPositiveIntEnv(
+    "OPENHARNESS_TOOL_OUTPUT_PREVIEW_CHARS",
+    3_000,
+    128,
+  );
 }
 
 function toolExecutionTimeoutMs(override: number | undefined): number {
-  if (typeof override === "number" && Number.isInteger(override) && override > 0) return override;
-  return readPositiveIntEnv("OPENHARNESS_TOOL_TIMEOUT_MS", DEFAULT_TOOL_TIMEOUT_MS, 1);
+  if (
+    typeof override === "number" &&
+    Number.isInteger(override) &&
+    override > 0
+  )
+    return override;
+  return readPositiveIntEnv(
+    "OPENHARNESS_TOOL_TIMEOUT_MS",
+    DEFAULT_TOOL_TIMEOUT_MS,
+    1,
+  );
 }
 
 class ToolTimeoutError extends Error {
@@ -153,6 +190,7 @@ export class QueryEngine implements IQueryEngine {
   private allowedTools: string[] | null = null;
   private mcpManager: unknown = undefined;
   private mcpAuth: McpAuthHost | undefined;
+  private terminal: AgentTerminalHost | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -161,7 +199,7 @@ export class QueryEngine implements IQueryEngine {
     private toolRegistry: IToolRegistry,
     private permissionChecker: IPermissionChecker,
     private hookExecutor: IHookExecutor,
-    private options: QueryEngineOptions = {}
+    private options: QueryEngineOptions = {},
   ) {
     this.model = options.model ?? "deepchat-chat";
     this.compactService = new CompactService(
@@ -210,6 +248,10 @@ export class QueryEngine implements IQueryEngine {
     this.mcpAuth = auth;
   }
 
+  setTerminal(terminal: AgentTerminalHost | undefined): void {
+    this.terminal = terminal;
+  }
+
   /**
    * 组合本轮发往 API 的 system 提示。
    *
@@ -217,7 +259,9 @@ export class QueryEngine implements IQueryEngine {
    * streamMessage 调用，不写入 this.systemPrompt，也不进入 this.messages。
    * 注入风格参考 Python 的「# Relevant Memories」段（追加在 system 末尾）。
    */
-  private composeTurnSystemPrompt(memoryContext: string | null): string | undefined {
+  private composeTurnSystemPrompt(
+    memoryContext: string | null,
+  ): string | undefined {
     if (!memoryContext || !memoryContext.trim()) {
       return this.systemPrompt;
     }
@@ -307,7 +351,8 @@ export class QueryEngine implements IQueryEngine {
 
       // 输出 token 用尽时追加截断提示，避免静默截断
       if (stopReason === "max_tokens" && toolUses.length === 0) {
-        const notice = "\n\n⚠️ *输出已被截断（达到 max_tokens 上限）。可用 /compact 压缩上下文后继续。*";
+        const notice =
+          "\n\n⚠️ *输出已被截断（达到 max_tokens 上限）。可用 /compact 压缩上下文后继续。*";
         assistantText += notice;
         yield { type: "text_delta", delta: notice };
       }
@@ -323,7 +368,11 @@ export class QueryEngine implements IQueryEngine {
 
       if (toolUses.length > 0) {
         // 执行所有请求的工具调用，并将结果作为工具结果消息加入历史记录
-        const results = await this.executeTools(toolUses, options.signal, options.execution);
+        const results = await this.executeTools(
+          toolUses,
+          options.signal,
+          options.execution,
+        );
         for (const result of results) {
           this.messages.push({
             type: "tool_result",
@@ -357,8 +406,13 @@ export class QueryEngine implements IQueryEngine {
     throw new MaxTurnsExceeded(this.maxTurns);
   }
 
-  private async consumeFollowUps(options: SubmitMessageOptions, closeIfEmpty = false): Promise<boolean> {
-    const followUps = await (options.execution?.takeSteeredInputs({ closeIfEmpty }) ?? []);
+  private async consumeFollowUps(
+    options: SubmitMessageOptions,
+    closeIfEmpty = false,
+  ): Promise<boolean> {
+    const followUps = await (options.execution?.takeSteeredInputs({
+      closeIfEmpty,
+    }) ?? []);
     if (followUps.length === 0) return false;
     for (const input of followUps) {
       this.messages.push({ type: "user", content: input.content });
@@ -375,7 +429,10 @@ export class QueryEngine implements IQueryEngine {
    */
   async compact(): Promise<void> {
     const microResult = this.compactService.microCompact(this.messages);
-    if (this.compactService.estimateTokens(microResult) < (this.options.maxTokens ?? 100_000)) {
+    if (
+      this.compactService.estimateTokens(microResult) <
+      (this.options.maxTokens ?? 100_000)
+    ) {
       this.messages = microResult;
       return;
     }
@@ -416,7 +473,7 @@ export class QueryEngine implements IQueryEngine {
 
   /**
    * 执行一组工具调用请求，并在执行前进行权限检查、钩子拦截及用户确认。
-   * 
+   *
    * 该函数会并行检查所有工具的权限，并根据检查结果决定是直接拒绝、询问用户还是继续执行。
    * 对于允许执行的工具，会在执行前后触发相应的生命周期钩子（pre_tool_use 和 post_tool_use）。
    * 最终返回与输入顺序对应的执行结果数组。
@@ -446,18 +503,28 @@ export class QueryEngine implements IQueryEngine {
         results[i] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          content: [{ type: "text" as const, text: `Unknown tool: ${toolUse.name}` }],
+          content: [
+            { type: "text" as const, text: `Unknown tool: ${toolUse.name}` },
+          ],
           isError: true,
         };
         continue;
       }
 
-      const validationError = validateToolInput(tool.inputSchema, toolUse.input);
+      const validationError = validateToolInput(
+        tool.inputSchema,
+        toolUse.input,
+      );
       if (validationError) {
         results[i] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          content: [{ type: "text" as const, text: `Tool input validation failed: ${validationError}` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Tool input validation failed: ${validationError}`,
+            },
+          ],
           isError: true,
         };
         continue;
@@ -470,11 +537,14 @@ export class QueryEngine implements IQueryEngine {
     const checks = await Promise.all(
       readyForPermission.map(async ({ toolUse }) => {
         try {
-          return await this.permissionChecker.checkTool(toolUse.name, toolUse.input);
+          return await this.permissionChecker.checkTool(
+            toolUse.name,
+            toolUse.input,
+          );
         } catch {
           return { action: "deny" as const, reason: "permission check failed" };
         }
-      })
+      }),
     );
 
     const executable: {
@@ -483,7 +553,11 @@ export class QueryEngine implements IQueryEngine {
       tool: NonNullable<ReturnType<IToolRegistry["get"]>>;
     }[] = [];
 
-    for (let readyIndex = 0; readyIndex < readyForPermission.length; readyIndex++) {
+    for (
+      let readyIndex = 0;
+      readyIndex < readyForPermission.length;
+      readyIndex++
+    ) {
       const { idx, toolUse, tool } = readyForPermission[readyIndex]!;
       const decision = checks[readyIndex]!;
 
@@ -492,7 +566,12 @@ export class QueryEngine implements IQueryEngine {
         results[idx] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          content: [{ type: "text" as const, text: `Permission denied: ${decision.reason ?? "not allowed"}` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Permission denied: ${decision.reason ?? "not allowed"}`,
+            },
+          ],
           isError: true,
         };
         continue;
@@ -512,7 +591,10 @@ export class QueryEngine implements IQueryEngine {
             type: "permission.requested",
             data: { requestId, request },
           });
-          const approval = await execution.effects.requestPermission(request, execution.scope);
+          const approval = await execution.effects.requestPermission(
+            request,
+            execution.scope,
+          );
           await execution.emit({
             type: "permission.resolved",
             data: { requestId, decision: approval },
@@ -523,7 +605,12 @@ export class QueryEngine implements IQueryEngine {
           results[idx] = {
             toolUseId: toolUse.id,
             toolName: toolUse.name,
-            content: [{ type: "text" as const, text: `Permission denied by user: ${decision.reason ?? "not confirmed"}` }],
+            content: [
+              {
+                type: "text" as const,
+                text: `Permission denied by user: ${decision.reason ?? "not confirmed"}`,
+              },
+            ],
             isError: true,
           };
           continue;
@@ -545,7 +632,12 @@ export class QueryEngine implements IQueryEngine {
         results[idx] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          content: [{ type: "text" as const, text: `Blocked by hook: ${hookResult.reason ?? "pre-tool hook blocked execution"}` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Blocked by hook: ${hookResult.reason ?? "pre-tool hook blocked execution"}`,
+            },
+          ],
           isError: true,
         };
         continue;
@@ -568,6 +660,7 @@ export class QueryEngine implements IQueryEngine {
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
             mcpAuth: this.mcpAuth,
+            terminal: this.terminal,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(
@@ -577,7 +670,14 @@ export class QueryEngine implements IQueryEngine {
             timeoutMs,
             signal,
           );
-          return { idx, result: { toolUseId: toolUse.id, toolName: toolUse.name, ...result } as ToolExecutionResult };
+          return {
+            idx,
+            result: {
+              toolUseId: toolUse.id,
+              toolName: toolUse.name,
+              ...result,
+            } as ToolExecutionResult,
+          };
         } catch (error) {
           if (signal?.aborted) {
             throw signal.reason;
@@ -592,7 +692,7 @@ export class QueryEngine implements IQueryEngine {
             } as ToolExecutionResult,
           };
         }
-      })
+      }),
     );
 
     // 将执行结果回填至结果数组，并执行工具使用后的钩子
@@ -611,7 +711,12 @@ export class QueryEngine implements IQueryEngine {
         results[i] = {
           toolUseId: toolUses[i]!.id,
           toolName: toolUses[i]!.name,
-          content: [{ type: "text" as const, text: "Internal error: tool result was not computed" }],
+          content: [
+            {
+              type: "text" as const,
+              text: "Internal error: tool result was not computed",
+            },
+          ],
           isError: true,
         };
       }
@@ -626,7 +731,11 @@ export class QueryEngine implements IQueryEngine {
     context: ToolContext,
     timeoutMs: number,
     externalSignal?: AbortSignal,
-  ): Promise<Awaited<ReturnType<NonNullable<ReturnType<IToolRegistry["get"]>>["execute"]>>> {
+  ): Promise<
+    Awaited<
+      ReturnType<NonNullable<ReturnType<IToolRegistry["get"]>>["execute"]>
+    >
+  > {
     const controller = new AbortController();
     const timeoutError = new ToolTimeoutError(timeoutMs);
     let abortListener: (() => void) | undefined;
@@ -634,7 +743,9 @@ export class QueryEngine implements IQueryEngine {
     if (externalSignal?.aborted) {
       abortFromExternal();
     } else {
-      externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+      externalSignal?.addEventListener("abort", abortFromExternal, {
+        once: true,
+      });
     }
     const timeout = setTimeout(() => {
       controller.abort(timeoutError);
@@ -646,7 +757,9 @@ export class QueryEngine implements IQueryEngine {
       if (controller.signal.aborted) {
         abortListener();
       } else {
-        controller.signal.addEventListener("abort", abortListener, { once: true });
+        controller.signal.addEventListener("abort", abortListener, {
+          once: true,
+        });
       }
     });
 

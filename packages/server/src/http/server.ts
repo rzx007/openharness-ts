@@ -51,6 +51,11 @@ import { createSessionUtilityRoutes } from "./routes/session-utility.js";
 import { createSystemRoutes } from "./routes/system.js";
 import { createTaskRoutes } from "./routes/task.js";
 import { RequestTraceRegistry } from "./control/request-trace-registry.js";
+import {
+  createTerminalRoutes,
+  TerminalHttpEventHub,
+} from "./routes/terminal.js";
+import { DaemonTerminalService } from "../terminal/index.js";
 
 export interface OpenHarnessServerServices {
   commandCatalog?: CommandCatalogProvider;
@@ -88,7 +93,10 @@ export interface OpenHarnessServerOptions {
   logger?: StructuredLogger;
 }
 
-export type { OpenHarnessRuntimeSnapshot, OpenHarnessServerHealth } from "./support.js";
+export type {
+  OpenHarnessRuntimeSnapshot,
+  OpenHarnessServerHealth,
+} from "./support.js";
 
 export interface ListenResult {
   host: string;
@@ -108,6 +116,8 @@ export class OpenHarnessHttpServer {
   private readonly logger: StructuredLogger;
   private readonly eventHub: HttpEventHub;
   private readonly daemon: DaemonApplication;
+  private readonly terminals: DaemonTerminalService;
+  private readonly terminalEvents: TerminalHttpEventHub;
   private readonly requestTraces = new RequestTraceRegistry();
   private listener?: Listener;
   private listenResult?: ListenResult;
@@ -115,13 +125,19 @@ export class OpenHarnessHttpServer {
 
   constructor(options: OpenHarnessServerOptions = {}) {
     this.app = new Hono();
-    this.store = options.store ?? new SessionStore({ path: options.storePath ?? getDefaultSessionStorePath() });
+    this.store =
+      options.store ??
+      new SessionStore({
+        path: options.storePath ?? getDefaultSessionStorePath(),
+      });
     this.token = options.token;
     this.allowedOrigins = normalizeAllowedOrigins(options.allowedOrigins ?? []);
     this.services = options.services ?? {};
     this.version = options.version;
     this.logger = options.logger ?? writeStructuredLog;
     this.eventHub = new HttpEventHub(this.store);
+    this.terminals = new DaemonTerminalService(this.store);
+    this.terminalEvents = new TerminalHttpEventHub(this.terminals);
     this.daemon = new DaemonApplication({
       store: this.store,
       eventSink: this.eventHub,
@@ -129,7 +145,9 @@ export class OpenHarnessHttpServer {
       getSettings: options.getSettings,
       getSettingsForCwd: options.getSettingsForCwd,
       createAgent: options.createAgent,
-      sseClientCount: () => this.eventHub.clientCount,
+      createTerminalHost: (session) => this.terminals.createAgentHost(session),
+      sseClientCount: () =>
+        this.eventHub.clientCount + this.terminalEvents.clientCount,
       log: (event) => this.log(event),
     });
     this.mountRoutes();
@@ -139,7 +157,9 @@ export class OpenHarnessHttpServer {
     return this.listenResult?.url;
   }
 
-  async listen(options: Pick<OpenHarnessServerOptions, "host" | "port"> = {}): Promise<ListenResult> {
+  async listen(
+    options: Pick<OpenHarnessServerOptions, "host" | "port"> = {},
+  ): Promise<ListenResult> {
     await this.daemon.ready();
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 0;
@@ -179,6 +199,11 @@ export class OpenHarnessHttpServer {
     } catch (error) {
       failures.push(error);
     }
+    try {
+      this.terminalEvents.closeClients();
+    } catch (error) {
+      failures.push(error);
+    }
     const listener = this.listener;
     this.listener = undefined;
     const listenerClosed = listener
@@ -194,6 +219,11 @@ export class OpenHarnessHttpServer {
       if (result.status === "rejected") failures.push(result.reason);
     }
     try {
+      await this.terminals.dispose();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
       this.store.close();
     } catch (error) {
       failures.push(error);
@@ -202,10 +232,18 @@ export class OpenHarnessHttpServer {
   }
 
   private mountRoutes(): void {
-    this.app.onError((error) => errorResponse(500, error instanceof Error ? error.message : String(error)));
+    this.app.onError((error) =>
+      errorResponse(
+        500,
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
 
     this.app.use("*", async (c, next) => {
-      const traceId = this.requestTraces.assign(c.req.raw, c.req.header(TRACE_ID_HEADER));
+      const traceId = this.requestTraces.assign(
+        c.req.raw,
+        c.req.header(TRACE_ID_HEADER),
+      );
       const startedAt = Date.now();
       try {
         await next();
@@ -229,7 +267,8 @@ export class OpenHarnessHttpServer {
         await next();
         return;
       }
-      if (!this.allowedOrigins.has(origin)) return errorResponse(403, "Origin is not allowed");
+      if (!this.allowedOrigins.has(origin))
+        return errorResponse(403, "Origin is not allowed");
       const headers = {
         "access-control-allow-origin": origin,
         "access-control-allow-methods": CORS_METHODS,
@@ -238,9 +277,11 @@ export class OpenHarnessHttpServer {
         "access-control-max-age": "600",
         vary: "Origin",
       };
-      if (c.req.method === "OPTIONS") return new Response(null, { status: 204, headers });
+      if (c.req.method === "OPTIONS")
+        return new Response(null, { status: 204, headers });
       await next();
-      for (const [name, value] of Object.entries(headers)) c.res.headers.set(name, value);
+      for (const [name, value] of Object.entries(headers))
+        c.res.headers.set(name, value);
     });
 
     this.app.use("*", async (c, next) => {
@@ -252,56 +293,87 @@ export class OpenHarnessHttpServer {
       await next();
     });
 
-    this.app.route("/", createSystemRoutes({
-      version: this.version,
-      commandCatalog: this.services.commandCatalog,
-      settingsService: this.services.settings,
-      providerService: this.services.provider,
-      modelService: this.services.model,
-      control: this.daemon.control,
-    }));
-    this.app.route("/memory", createMemoryRoutes({
-      memoryService: this.services.memory,
-      control: this.daemon.control,
-    }));
-    this.app.route("/auth", createAuthRoutes({
-      authService: this.services.auth,
-      control: this.daemon.control,
-    }));
-    this.app.route("/", createServiceRoutes({
-      contextService: this.services.context,
-      dreamService: this.services.dream,
-      profileService: this.services.profile,
-      outputStyleService: this.services.outputStyle,
-      projectInitService: this.services.projectInit,
-      pluginService: this.services.plugin,
-      agentPersonaService: this.services.agentPersona,
-      hooksService: this.services.hooks,
-      control: this.daemon.control,
-    }));
+    this.app.route(
+      "/",
+      createSystemRoutes({
+        version: this.version,
+        commandCatalog: this.services.commandCatalog,
+        settingsService: this.services.settings,
+        providerService: this.services.provider,
+        modelService: this.services.model,
+        control: this.daemon.control,
+      }),
+    );
+    this.app.route(
+      "/memory",
+      createMemoryRoutes({
+        memoryService: this.services.memory,
+        control: this.daemon.control,
+      }),
+    );
+    this.app.route(
+      "/auth",
+      createAuthRoutes({
+        authService: this.services.auth,
+        control: this.daemon.control,
+      }),
+    );
+    this.app.route(
+      "/",
+      createServiceRoutes({
+        contextService: this.services.context,
+        dreamService: this.services.dream,
+        profileService: this.services.profile,
+        outputStyleService: this.services.outputStyle,
+        projectInitService: this.services.projectInit,
+        pluginService: this.services.plugin,
+        agentPersonaService: this.services.agentPersona,
+        hooksService: this.services.hooks,
+        control: this.daemon.control,
+      }),
+    );
     this.app.route("/git", createGitRoutes({ gitService: this.services.git }));
     this.app.route("/cron", createCronRoutes({ cron: this.daemon.cron }));
-    this.app.route("/tasks", createTaskRoutes({
-      tasks: this.daemon.tasks,
-    }));
-    this.app.route("/permissions", createPermissionRoutes({
-      permissions: this.daemon.permissions,
-      traces: this.requestTraces,
-    }));
+    this.app.route(
+      "/tasks",
+      createTaskRoutes({
+        tasks: this.daemon.tasks,
+      }),
+    );
+    this.app.route(
+      "/permissions",
+      createPermissionRoutes({
+        permissions: this.daemon.permissions,
+        traces: this.requestTraces,
+      }),
+    );
+    this.app.route(
+      "/terminals",
+      createTerminalRoutes(this.terminals, this.terminalEvents),
+    );
     this.app.route("/projects", createProjectRoutes(this.store));
-    this.app.route("/sessions", createSessionUtilityRoutes({
-      maintenance: this.daemon.maintenance,
-    }));
-    this.app.route("/sessions", createSessionRoutes({
-      queries: this.daemon.queries,
-      application: this.daemon.sessions,
-      commandCatalog: this.services.commandCatalog,
-      traces: this.requestTraces,
-    }));
-    this.app.route("/sessions", createRunExecutionRoutes({
-      application: this.daemon.sessions,
-      traces: this.requestTraces,
-    }));
+    this.app.route(
+      "/sessions",
+      createSessionUtilityRoutes({
+        maintenance: this.daemon.maintenance,
+      }),
+    );
+    this.app.route(
+      "/sessions",
+      createSessionRoutes({
+        queries: this.daemon.queries,
+        application: this.daemon.sessions,
+        commandCatalog: this.services.commandCatalog,
+        traces: this.requestTraces,
+      }),
+    );
+    this.app.route(
+      "/sessions",
+      createRunExecutionRoutes({
+        application: this.daemon.sessions,
+        traces: this.requestTraces,
+      }),
+    );
     this.app.route("/events", this.eventHub.createRoutes());
   }
 
@@ -315,7 +387,9 @@ export class OpenHarnessHttpServer {
   }
 }
 
-export async function startOpenHarnessServer(options: OpenHarnessServerOptions = {}): Promise<{
+export async function startOpenHarnessServer(
+  options: OpenHarnessServerOptions = {},
+): Promise<{
   server: OpenHarnessHttpServer;
   listen: ListenResult;
 }> {
@@ -327,7 +401,10 @@ export async function startOpenHarnessServer(options: OpenHarnessServerOptions =
     try {
       await server.close();
     } catch (closeError) {
-      throw new AggregateError([error, closeError], "OpenHarness server startup and cleanup failed");
+      throw new AggregateError(
+        [error, closeError],
+        "OpenHarness server startup and cleanup failed",
+      );
     }
     throw error;
   }

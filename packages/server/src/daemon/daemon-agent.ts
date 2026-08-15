@@ -9,7 +9,13 @@ import {
   getCoordinatorTools,
   getCoordinatorUserContext,
 } from "@openharness/coordinator";
-import type { AgentCronEffects, AgentEffects, AgentEventListener, Settings } from "@openharness/core";
+import type {
+  AgentCronEffects,
+  AgentEffects,
+  AgentEventListener,
+  Settings,
+} from "@openharness/core";
+import type { AgentTerminalHost } from "@openharness/terminal";
 import { readSessionRuntimeConfig } from "@openharness/services";
 import type {
   SessionMessagePartRecord,
@@ -27,7 +33,9 @@ export interface CreateDaemonAgentContext {
 }
 
 /** Low-level creation seam used by tests and embedded hosts. */
-export type CreateDaemonAgent = (context: CreateDaemonAgentContext) => Promise<OpenHarnessAgent>;
+export type CreateDaemonAgent = (
+  context: CreateDaemonAgentContext,
+) => Promise<OpenHarnessAgent>;
 
 export interface LoadDaemonAgentContext {
   session: SessionRecord;
@@ -36,7 +44,9 @@ export interface LoadDaemonAgentContext {
 }
 
 /** Produces a fully initialized daemon-owned Agent for one durable session. */
-export type LoadDaemonAgent = (context: LoadDaemonAgentContext) => Promise<OpenHarnessAgent>;
+export type LoadDaemonAgent = (
+  context: LoadDaemonAgentContext,
+) => Promise<OpenHarnessAgent>;
 
 export interface DaemonAgentLoaderOptions {
   settings?: Settings;
@@ -45,19 +55,32 @@ export interface DaemonAgentLoaderOptions {
   createAgent?: CreateDaemonAgent;
   requestPermission?: AgentEffects["requestPermission"];
   cron?: AgentCronEffects;
-  createEventSink?(agent: OpenHarnessAgent, session: SessionRecord): AgentEventListener;
+  createTerminalHost?(session: SessionRecord): AgentTerminalHost;
+  createEventSink?(
+    agent: OpenHarnessAgent,
+    session: SessionRecord,
+  ): AgentEventListener;
 }
 
 /**
  * Owns the only durable-session -> live-Agent translation in the daemon.
  * The returned loader also restores transcript history before exposing the Agent.
  */
-export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): LoadDaemonAgent | undefined {
-  if (!options.createAgent && !options.settings && !options.getSettings && !options.getSettingsForCwd) return undefined;
+export function createDaemonAgentLoader(
+  options: DaemonAgentLoaderOptions,
+): LoadDaemonAgent | undefined {
+  if (
+    !options.createAgent &&
+    !options.settings &&
+    !options.getSettings &&
+    !options.getSettingsForCwd
+  )
+    return undefined;
 
   return async ({ session, history, parts }) => {
     const settings = await resolveSettingsForSession(options, session.cwd);
-    if (!options.createAgent && !settings) throw new Error("Agent settings are not configured");
+    if (!options.createAgent && !settings)
+      throw new Error("Agent settings are not configured");
 
     let eventSink: AgentEventListener | undefined;
     let sinkBinding: Promise<void> | undefined;
@@ -67,8 +90,13 @@ export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): Load
       cwd: session.cwd,
       sessionId: session.id,
       ...agentConfigurationFromSession(session, settings),
-      ...(options.requestPermission ? { requestPermission: options.requestPermission } : {}),
+      ...(options.requestPermission
+        ? { requestPermission: options.requestPermission }
+        : {}),
       ...(options.cron ? { cron: options.cron } : {}),
+      ...(options.createTerminalHost
+        ? { terminal: options.createTerminalHost(session) }
+        : {}),
       ...(options.createEventSink
         ? {
             onEvent: async (event) => {
@@ -83,7 +111,12 @@ export function createDaemonAgentLoader(options: DaemonAgentLoaderOptions): Load
         : {}),
     };
     const agent = options.createAgent
-      ? await options.createAgent({ session, history, parts, options: agentOptions })
+      ? await options.createAgent({
+          session,
+          history,
+          parts,
+          options: agentOptions,
+        })
       : await createOpenHarnessAgent(agentOptions);
     try {
       agent.loadHistory(transcriptToAgentMessages(history, parts));
@@ -116,7 +149,11 @@ async function resolveSettingsForSession(
   options: DaemonAgentLoaderOptions,
   cwd: string,
 ): Promise<Settings | undefined> {
-  return await options.getSettingsForCwd?.(cwd) ?? options.getSettings?.() ?? options.settings;
+  return (
+    (await options.getSettingsForCwd?.(cwd)) ??
+    options.getSettings?.() ??
+    options.settings
+  );
 }
 
 function agentConfigurationFromSession(
@@ -149,7 +186,8 @@ function agentConfigurationFromSession(
       settings,
       cwd: session.cwd,
       sessionPrompt: configuration.systemPrompt,
-      hostToolCeiling: configuration.allowedTools ?? settings?.permission.allowedTools,
+      hostToolCeiling:
+        configuration.allowedTools ?? settings?.permission.allowedTools,
     });
     configuration.roleAllowedTools = getCoordinatorTools();
   }
@@ -178,7 +216,9 @@ function coordinatorSystemPrompt(options: {
     sections.push(`## Runtime Context\n\n${context.workerToolsContext.trim()}`);
   }
   if (options.sessionPrompt?.trim()) {
-    sections.push(`## Additional Session Instructions\n\n${options.sessionPrompt.trim()}`);
+    sections.push(
+      `## Additional Session Instructions\n\n${options.sessionPrompt.trim()}`,
+    );
   }
   return sections.join("\n\n");
 }

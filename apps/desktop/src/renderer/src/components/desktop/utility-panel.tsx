@@ -19,6 +19,7 @@ import { FilesTool } from "@renderer/components/desktop/tools/files-tool"
 import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
 import type { FileViewerTab } from "@renderer/components/desktop/tools/file-viewer"
 import { PlaceholderTool } from "@renderer/components/desktop/tools/placeholder-tool"
+import { TerminalTool } from "@renderer/components/desktop/tools/terminal/terminal-tool"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 
@@ -40,6 +41,7 @@ type UtilityPanelProps = {
   onToggleMaximized: () => void
   onClose: () => void
   fileOpenRequest: { id: number; path: string; line?: number } | null
+  terminalOpenRequest: { id: number; terminalId: string } | null
 }
 
 type MenuPosition = {
@@ -90,6 +92,7 @@ export function UtilityPanel({
   onToggleMaximized,
   onClose,
   fileOpenRequest,
+  terminalOpenRequest,
 }: UtilityPanelProps): React.JSX.Element {
   const [tabs, setTabs] = useState<UtilityTab[]>([
     { id: initialBrowserTab.id, tool: "browser", title: initialBrowserTab.title },
@@ -114,6 +117,7 @@ export function UtilityPanel({
   const visibleLoadingFilePath = fileStateVisible ? loadingFilePath : null
   const visibleTabs = tabs.filter((tab) => !tab.filePath || tab.projectPath === selectedProjectPath)
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
+  const terminalTabVisible = visibleTabs.some((tab) => tab.id === toolTabId("terminal"))
 
   useEffect(() => {
     if (!fileOpenRequest) return
@@ -127,6 +131,20 @@ export function UtilityPanel({
     }, 0)
     return () => window.clearTimeout(timer)
   }, [fileOpenRequest])
+
+  useEffect(() => {
+    if (!terminalOpenRequest) return
+    const id = toolTabId("terminal")
+    const timer = window.setTimeout(() => {
+      setTabs((current) =>
+        current.some((tab) => tab.id === id)
+          ? current
+          : [...current, { id, tool: "terminal", title: toolMeta.terminal.label }]
+      )
+      setActiveTabId(id)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [terminalOpenRequest])
 
   const addTab = (tool: UtilityTool): void => {
     setAddMenuOpen(false)
@@ -386,12 +404,10 @@ export function UtilityPanel({
               openRequest={fileOpenRequest}
             />
           )}
-          {activeTab?.tool === "terminal" && (
-            <PlaceholderTool
-              icon={SquareTerminal}
-              title="终端"
-              description="后续会接入当前项目环境和可复用会话。"
-              footer="rzx007@openharness:/workspace$"
+          {terminalTabVisible && (
+            <TerminalTool
+              active={activeTab?.tool === "terminal"}
+              openRequest={terminalOpenRequest}
             />
           )}
           {activeTab?.tool === "review" && (

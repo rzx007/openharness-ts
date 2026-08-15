@@ -50,14 +50,38 @@ describe("createDefaultToolRegistry", () => {
   });
 
   it("registers daemon-owned Cron tools only when the host provides Cron", () => {
-    const names = createDefaultToolRegistry({ cron: true }).getAll().map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining([
-      "CronCreate",
-      "CronDelete",
-      "CronList",
-      "CronToggle",
-      "RemoteTrigger",
-    ]));
+    const names = createDefaultToolRegistry({ cron: true })
+      .getAll()
+      .map((tool) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "CronToggle",
+        "RemoteTrigger",
+      ]),
+    );
+  });
+
+  it("registers persistent terminal tools only when the host provides a terminal runtime", () => {
+    const defaultNames = createDefaultToolRegistry()
+      .getAll()
+      .map((tool) => tool.name);
+    const terminalNames = createDefaultToolRegistry({ terminal: true })
+      .getAll()
+      .map((tool) => tool.name);
+    expect(defaultNames).not.toContain("TerminalOpen");
+    expect(terminalNames).toEqual(
+      expect.arrayContaining([
+        "TerminalOpen",
+        "TerminalSend",
+        "TerminalRead",
+        "TerminalSignal",
+        "TerminalClose",
+        "TerminalList",
+      ]),
+    );
   });
 
   it("each tool has required fields", () => {

@@ -208,6 +208,10 @@ function isUsableCatalog(value: ModelsDevCatalog | undefined): value is ModelsDe
   return !!value && Object.keys(value).length > 0;
 }
 
+function withFallbackProviders(catalog: ModelsDevCatalog): ModelsDevCatalog {
+  return { ...FALLBACK_CATALOG, ...catalog };
+}
+
 export class ModelCatalogService {
   private loaded: ModelsDevCatalog | undefined;
 
@@ -225,7 +229,7 @@ export class ModelCatalogService {
 
     const cached = await readJsonFile(modelsCachePath());
     if (process.env.OPENHARNESS_DISABLE_MODELS_FETCH) {
-      this.loaded = isUsableCatalog(cached) ? cached : FALLBACK_CATALOG;
+      this.loaded = isUsableCatalog(cached) ? withFallbackProviders(cached) : FALLBACK_CATALOG;
       return this.loaded;
     }
 
@@ -240,10 +244,10 @@ export class ModelCatalogService {
       if (!isUsableCatalog(parsed)) throw new Error("Models.dev returned an empty catalog");
       await mkdir(dirname(modelsCachePath()), { recursive: true });
       await writeFile(modelsCachePath(), JSON.stringify(parsed, null, 2) + "\n", "utf-8");
-      this.loaded = parsed;
-      return parsed;
+      this.loaded = withFallbackProviders(parsed);
+      return this.loaded;
     } catch {
-      this.loaded = isUsableCatalog(cached) ? cached : FALLBACK_CATALOG;
+      this.loaded = isUsableCatalog(cached) ? withFallbackProviders(cached) : FALLBACK_CATALOG;
       return this.loaded;
     }
   }

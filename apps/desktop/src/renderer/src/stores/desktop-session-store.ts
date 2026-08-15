@@ -3,6 +3,7 @@ import { create } from "zustand"
 import type {
   DesktopBootstrapData,
   DesktopModel,
+  DesktopPermissionMode,
   DesktopProject,
   DesktopSessionRecord,
   DesktopSessionView,
@@ -18,7 +19,11 @@ interface DesktopSessionState {
   archivedSessions: DesktopSessionRecord[]
   models: DesktopModel[]
   defaultModel: string | null
+  defaultProvider: string | null
+  defaultPermissionMode: DesktopPermissionMode
   selectedModel: string | null
+  selectedProvider: string | null
+  selectedPermissionMode: DesktopPermissionMode
   selectedProject: DesktopProject | null
   branch: string | null
   activeSessionId: string | null
@@ -33,7 +38,13 @@ interface DesktopSessionState {
   togglePinProject: (path: string) => Promise<void>
   removeProject: (path: string) => Promise<void>
   rebindProject: (projectId: string) => Promise<void>
-  selectModel: (model: string) => void
+  selectModel: (model: DesktopModel) => Promise<void>
+  selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>
+  updateSessionModel: (sessionId: string, model: DesktopModel) => Promise<void>
+  updateSessionPermissionMode: (
+    sessionId: string,
+    permissionMode: DesktopPermissionMode
+  ) => Promise<void>
   openSession: (sessionId: string) => Promise<void>
   startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
@@ -59,7 +70,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   archivedSessions: [],
   models: [],
   defaultModel: null,
+  defaultProvider: null,
+  defaultPermissionMode: "default",
   selectedModel: null,
+  selectedProvider: null,
+  selectedPermissionMode: "default",
   selectedProject: null,
   branch: null,
   activeSessionId: null,
@@ -80,7 +95,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         archivedSessions: sortSessions(data.archivedSessions),
         models: data.models,
         defaultModel: data.defaultModel,
+        defaultProvider: data.defaultProvider ?? null,
+        defaultPermissionMode: data.defaultPermissionMode,
         selectedModel: data.defaultModel,
+        selectedProvider: data.defaultProvider ?? null,
+        selectedPermissionMode: data.defaultPermissionMode,
         selectedProject,
         error: null,
       })
@@ -95,6 +114,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     set({
       activeSessionId: null,
       sessionView: null,
+      selectedModel: get().defaultModel,
+      selectedProvider: get().defaultProvider,
+      selectedPermissionMode: get().defaultPermissionMode,
       openingSession: false,
       sending: false,
       error: null,
@@ -212,8 +234,104 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     }
   },
 
-  selectModel(model) {
-    set({ selectedModel: model })
+  async selectModel(model) {
+    const previousModel = get().selectedModel
+    const previousProvider = get().selectedProvider
+    set({
+      selectedModel: model.id,
+      selectedProvider: model.providerName,
+      defaultModel: model.id,
+      defaultProvider: model.providerName,
+      error: null,
+    })
+    try {
+      const data = await window.desktop.sessions.setDefaultModel({
+        model: model.id,
+        provider: model.providerName,
+      })
+      set((state) =>
+        applyBootstrapData(data, state.selectedProject, model.id, model.providerName)
+      )
+    } catch (error) {
+      set({
+        selectedModel: previousModel,
+        selectedProvider: previousProvider,
+        defaultModel: previousModel,
+        defaultProvider: previousProvider,
+        error: errorMessage(error),
+      })
+    }
+  },
+
+  async selectPermissionMode(permissionMode) {
+    const previous = get().selectedPermissionMode
+    set({ selectedPermissionMode: permissionMode, defaultPermissionMode: permissionMode, error: null })
+    try {
+      const data = await window.desktop.sessions.setDefaultPermissionMode({ permissionMode })
+      set((state) => ({
+        ...applyBootstrapData(
+          data,
+          state.selectedProject,
+          state.selectedModel,
+          state.selectedProvider
+        ),
+        selectedPermissionMode: data.defaultPermissionMode,
+      }))
+    } catch (error) {
+      set({
+        selectedPermissionMode: previous,
+        defaultPermissionMode: previous,
+        error: errorMessage(error),
+      })
+    }
+  },
+
+  async updateSessionModel(sessionId, model) {
+    try {
+      const session = await window.desktop.sessions.updateModel({
+        sessionId,
+        model: model.id,
+        provider: model.providerName,
+      })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        selectedModel: state.activeSessionId === sessionId ? session.model : state.selectedModel,
+        selectedProvider:
+          state.activeSessionId === sessionId
+            ? sessionProvider(session, model.providerName)
+            : state.selectedProvider,
+        sessionView:
+          state.sessionView?.session.id === sessionId
+            ? { ...state.sessionView, session }
+            : state.sessionView,
+        error: null,
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
+  async updateSessionPermissionMode(sessionId, permissionMode) {
+    try {
+      const session = await window.desktop.sessions.updatePermissionMode({
+        sessionId,
+        permissionMode,
+      })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        selectedPermissionMode:
+          state.activeSessionId === sessionId ? sessionPermissionMode(session) : state.selectedPermissionMode,
+        sessionView:
+          state.sessionView?.session.id === sessionId
+            ? { ...state.sessionView, session }
+            : state.sessionView,
+        error: null,
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
   },
 
   async openSession(sessionId) {
@@ -225,10 +343,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       set((state) => ({
         sessionView: view,
         openingSession: false,
+        error: latestRunFailure(view.runs)?.error ?? null,
         selectedProject:
           state.projects.find((project) => samePath(project.path, view.session.cwd)) ??
           projectFromSession(view.session),
         selectedModel: view.session.model,
+        selectedProvider: sessionProvider(view.session, state.defaultProvider),
+        selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
         sessions:
           view.session.status === "archived"
             ? state.sessions.filter((session) => session.id !== view.session.id)
@@ -256,6 +377,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       sending: false,
       selectedProject: project,
       selectedModel: session.model,
+      selectedProvider: sessionProvider(session, get().defaultProvider),
+      selectedPermissionMode: sessionPermissionMode(session, get().defaultPermissionMode),
       branch: null,
       error: null,
     })
@@ -321,6 +444,12 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
             projectFromSession(existing))
           : state.selectedProject,
         selectedModel: isActive ? existing.model : state.selectedModel,
+        selectedProvider: isActive
+          ? sessionProvider(existing, state.defaultProvider)
+          : state.selectedProvider,
+        selectedPermissionMode: isActive
+          ? sessionPermissionMode(existing, state.defaultPermissionMode)
+          : state.selectedPermissionMode,
         error: null,
       }))
       if (isActive) {
@@ -335,8 +464,16 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async startSession(content) {
     const prompt = content.trim()
-    const { selectedProject, selectedModel, defaultModel } = get()
+    const {
+      selectedProject,
+      selectedModel,
+      selectedProvider,
+      defaultModel,
+      defaultProvider,
+      selectedPermissionMode,
+    } = get()
     const model = selectedModel ?? defaultModel
+    const provider = selectedProvider ?? defaultProvider
     if (!prompt || get().sending) return
     if (!selectedProject) {
       set({ error: "请先选择一个项目目录。" })
@@ -353,6 +490,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         projectId: selectedProject.id,
         cwd: selectedProject.path,
         model,
+        ...(provider ? { provider } : {}),
+        permissionMode: selectedPermissionMode,
       })
       set((state) => ({
         activeSessionId: session.id,
@@ -360,7 +499,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         openingSession: true,
       }))
       const view = await window.desktop.sessions.open(session.id)
-      set({ sessionView: view, openingSession: false })
+      set((state) => ({
+        sessionView: view,
+        openingSession: false,
+        selectedModel: view.session.model,
+        selectedProvider: sessionProvider(view.session, provider),
+        selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
+      }))
       await window.desktop.sessions.sendPrompt({ sessionId: session.id, content: prompt })
       const title = formatSessionTitle(prompt)
       set((state) => {
@@ -423,6 +568,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     if (current && view.cursor < current.cursor) return
     set((state) => {
       const knownSession = state.sessions.find((session) => session.id === view.session.id)
+      const runFailure = findNewRunFailure(current?.runs ?? [], view.runs)
       const session =
         knownSession &&
         isPlaceholderTitle(view.session.title) &&
@@ -433,6 +579,10 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       return {
         sessionView: { ...view, session },
         openingSession: false,
+        ...(runFailure ? { error: runFailure.error ?? "会话运行失败。" } : {}),
+        selectedModel: session.model,
+        selectedProvider: sessionProvider(session, state.defaultProvider),
+        selectedPermissionMode: sessionPermissionMode(session, state.defaultPermissionMode),
         sessions:
           session.status === "archived"
             ? state.sessions.filter((item) => item.id !== session.id)
@@ -454,6 +604,37 @@ export function attachDesktopSessionEvents(): () => void {
   return window.desktop.sessions.onUpdated((view) => {
     useDesktopSessionStore.getState().applySessionUpdate(view)
   })
+}
+
+function applyBootstrapData(
+  data: DesktopBootstrapData,
+  currentProject: DesktopProject | null,
+  preferredModel: string | null,
+  preferredProvider: string | null
+): Partial<DesktopSessionState> {
+  const selectedProject = resolveInitialProject(data, currentProject)
+  const preferredExists =
+    preferredModel &&
+    data.models.some(
+      (item) => item.id === preferredModel && item.providerName === preferredProvider
+    )
+  const model = preferredExists ? preferredModel : data.defaultModel
+  const provider = preferredExists ? preferredProvider : (data.defaultProvider ?? null)
+  return {
+    loadStatus: "ready",
+    projects: data.projects,
+    sessions: sortSessions(data.sessions),
+    archivedSessions: sortSessions(data.archivedSessions),
+    models: data.models,
+    defaultModel: data.defaultModel,
+    defaultProvider: data.defaultProvider ?? null,
+    defaultPermissionMode: data.defaultPermissionMode,
+    selectedModel: model,
+    selectedProvider: provider,
+    selectedPermissionMode: data.defaultPermissionMode,
+    selectedProject,
+    error: null,
+  }
 }
 
 function resolveInitialProject(
@@ -489,6 +670,46 @@ function sortSessions(sessions: DesktopSessionRecord[]): DesktopSessionRecord[] 
 
 export function isSessionPinned(session: DesktopSessionRecord): boolean {
   return sessionPinnedAt(session) > 0
+}
+
+function sessionPermissionMode(
+  session: DesktopSessionRecord,
+  fallback: DesktopPermissionMode = "default"
+): DesktopPermissionMode {
+  const runtime = session.metadata["runtime"]
+  if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return fallback
+  const mode = (runtime as Record<string, unknown>)["permissionMode"]
+  return mode === "default" || mode === "plan" || mode === "full_auto" ? mode : fallback
+}
+
+function sessionProvider(
+  session: DesktopSessionRecord,
+  fallback: string | null = null
+): string | null {
+  const runtime = session.metadata["runtime"]
+  if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return fallback
+  const provider = (runtime as Record<string, unknown>)["provider"]
+  return typeof provider === "string" && provider.trim() ? provider.trim() : fallback
+}
+
+function findNewRunFailure(
+  previousRuns: DesktopSessionView["runs"],
+  nextRuns: DesktopSessionView["runs"]
+): DesktopSessionView["runs"][number] | undefined {
+  const previousFailedIds = new Set(
+    previousRuns.filter((run) => run.status === "failed").map((run) => run.id)
+  )
+  return latestRunFailure(
+    nextRuns.filter((run) => run.status === "failed" && !previousFailedIds.has(run.id))
+  )
+}
+
+function latestRunFailure(
+  runs: DesktopSessionView["runs"]
+): DesktopSessionView["runs"][number] | undefined {
+  return [...runs]
+    .filter((run) => run.status === "failed")
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0]
 }
 
 function sessionPinnedAt(session: DesktopSessionRecord): number {

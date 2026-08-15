@@ -34,6 +34,8 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "TaskWait",
   "CronList",
   "Lsp",
+  "TerminalRead",
+  "TerminalList",
 ]);
 
 export const LOCAL_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
@@ -90,7 +92,7 @@ export class PermissionChecker implements IPermissionChecker {
 
   async checkTool(
     toolName: string,
-    input: Record<string, unknown>
+    input: Record<string, unknown>,
   ): Promise<PermissionDecision> {
     if (this.mode === "full_auto") {
       return { action: "allow", reason: "Full auto mode" };
@@ -107,7 +109,10 @@ export class PermissionChecker implements IPermissionChecker {
     if (this.deniedCommands.length > 0 && typeof input.command === "string") {
       for (const pattern of this.deniedCommands) {
         if (matchPattern(pattern, input.command)) {
-          return { action: "deny", reason: `Command matches denied pattern: ${pattern}` };
+          return {
+            action: "deny",
+            reason: `Command matches denied pattern: ${pattern}`,
+          };
         }
       }
     }
@@ -122,7 +127,10 @@ export class PermissionChecker implements IPermissionChecker {
         for (const rule of this.pathRules) {
           if (matchPattern(rule.pattern, path)) {
             if (!rule.allow) {
-              return { action: "deny", reason: `Path matched deny rule: ${rule.pattern}` };
+              return {
+                action: "deny",
+                reason: `Path matched deny rule: ${rule.pattern}`,
+              };
             }
             pathAllowReason = `Path matched allow rule: ${rule.pattern}`;
             break;
@@ -136,7 +144,10 @@ export class PermissionChecker implements IPermissionChecker {
     }
 
     if (this.allowedTools.size > 0 && !this.allowedTools.has(toolName)) {
-      return { action: "deny", reason: `Tool '${toolName}' is not in allowed list` };
+      return {
+        action: "deny",
+        reason: `Tool '${toolName}' is not in allowed list`,
+      };
     }
 
     if (pathAllowReason !== null) {
@@ -166,7 +177,10 @@ export class PermissionChecker implements IPermissionChecker {
     }
 
     if (isLocalReadOnlyToolAllowed(toolName, input, this.cwd)) {
-      return { action: "allow", reason: `Local read-only tool '${toolName}' is within cwd` };
+      return {
+        action: "allow",
+        reason: `Local read-only tool '${toolName}' is within cwd`,
+      };
     }
 
     if (this.mode === "plan") {
@@ -211,7 +225,8 @@ function isLocalReadOnlyToolAllowed(
 ): boolean {
   if (!cwd || !LOCAL_READ_ONLY_TOOLS.has(toolName)) return false;
   const path = readToolPathInput(input);
-  if (!path) return toolName === "Glob" || toolName === "Grep" || toolName === "Lsp";
+  if (!path)
+    return toolName === "Glob" || toolName === "Grep" || toolName === "Lsp";
   return isWithinCwd(resolve(cwd, path), cwd);
 }
 
@@ -222,7 +237,7 @@ function isWithinCwd(target: string, cwd: string): boolean {
 
 function matchPattern(pattern: string, value: string): boolean {
   const regex = new RegExp(
-    "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$"
+    "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
   );
   return regex.test(value);
 }

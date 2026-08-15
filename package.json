@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "turbo dev",
+    "dev:apps": "turbo dev --filter=@openharness/desktop",
     "build": "turbo build",
     "lint": "turbo lint",
     "check-types": "turbo check-types",

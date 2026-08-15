@@ -1,13 +1,48 @@
 import { ToolRegistry } from "@openharness/core";
-import { agentTool, sendMessageTool, teamCreateTool, teamDeleteTool, workflowTool } from "./agent/index.js";
+import {
+  agentTool,
+  sendMessageTool,
+  teamCreateTool,
+  teamDeleteTool,
+  workflowTool,
+} from "./agent/index.js";
 import { feishuPushTool } from "./channels/index.js";
-import { fileEditTool, fileReadTool, fileWriteTool, globTool } from "./file/index.js";
+import {
+  fileEditTool,
+  fileReadTool,
+  fileWriteTool,
+  globTool,
+} from "./file/index.js";
 import { imageGenerationTool, imageToTextTool } from "./media/index.js";
-import { askUserTool, briefTool, configTool, skillTool, sleepTool, todoWriteTool, toolSearchTool } from "./meta/index.js";
-import { enterPlanModeTool, enterWorktreeTool, exitPlanModeTool, exitWorktreeTool } from "./mode/index.js";
-import { listMcpResourcesTool, mcpAuthTool, mcpToolCallTool, readMcpResourceTool } from "./mcp/index.js";
+import {
+  askUserTool,
+  briefTool,
+  configTool,
+  skillTool,
+  sleepTool,
+  todoWriteTool,
+  toolSearchTool,
+} from "./meta/index.js";
+import {
+  enterPlanModeTool,
+  enterWorktreeTool,
+  exitPlanModeTool,
+  exitWorktreeTool,
+} from "./mode/index.js";
+import {
+  listMcpResourcesTool,
+  mcpAuthTool,
+  mcpToolCallTool,
+  readMcpResourceTool,
+} from "./mcp/index.js";
 import { notebookEditTool } from "./notebook/index.js";
-import { cronCreateTool, cronDeleteTool, cronListTool, cronToggleTool, remoteTriggerTool } from "./schedule/index.js";
+import {
+  cronCreateTool,
+  cronDeleteTool,
+  cronListTool,
+  cronToggleTool,
+  remoteTriggerTool,
+} from "./schedule/index.js";
 import { grepTool, lspTool } from "./search/index.js";
 import { bashTool } from "./shell/index.js";
 import {
@@ -20,8 +55,11 @@ import {
   taskWaitTool,
 } from "./task/index.js";
 import { webFetchTool, webSearchTool } from "./web/index.js";
+import { terminalTools } from "./terminal/index.js";
 
-export function createDefaultToolRegistry(options: { cron?: boolean } = {}): ToolRegistry {
+export function createDefaultToolRegistry(
+  options: { cron?: boolean; terminal?: boolean } = {},
+): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(bashTool);
   registry.register(fileReadTool);
@@ -61,6 +99,9 @@ export function createDefaultToolRegistry(options: { cron?: boolean } = {}): Too
     registry.register(cronListTool);
     registry.register(cronToggleTool);
     registry.register(remoteTriggerTool);
+  }
+  if (options.terminal) {
+    for (const tool of terminalTools) registry.register(tool);
   }
   registry.register(mcpToolCallTool);
   registry.register(listMcpResourcesTool);

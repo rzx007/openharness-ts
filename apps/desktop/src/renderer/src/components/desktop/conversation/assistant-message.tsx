@@ -1,4 +1,11 @@
-import { AlertCircle, ChevronDown, FileCode2, Pencil, TerminalSquare } from "lucide-react"
+import {
+  AlertCircle,
+  ChevronDown,
+  FileCode2,
+  PanelRightOpen,
+  Pencil,
+  TerminalSquare,
+} from "lucide-react"
 import { useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 
@@ -20,10 +27,12 @@ export function AssistantMessage({
   parts,
   streaming,
   onOpenFile,
+  onOpenTerminal,
 }: {
   parts: DesktopSessionPart[]
   streaming: boolean
   onOpenFile: (path: string, line?: number) => void
+  onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
   const units = useMemo(() => buildAssistantContent(parts), [parts])
   const blocks = useMemo(() => groupToolUnits(units), [units])
@@ -35,6 +44,15 @@ export function AssistantMessage({
       {blocks.map((block, index) => {
         if (block.type === "tool-group") {
           return <ToolActivityGroup key={block.id} tools={block.tools} initiallyOpen={streaming} />
+        }
+        if (block.type === "terminal") {
+          return (
+            <TerminalActivityCard
+              key={block.id}
+              payload={block.payload}
+              onOpenTerminal={onOpenTerminal}
+            />
+          )
         }
         const unit = block.unit
         if (unit.type === "markdown") {
@@ -162,6 +180,7 @@ type ToolUnit = Extract<AssistantContentUnit, { type: "tool" }>
 type ContentBlock =
   | { id: string; type: "unit"; unit: Exclude<AssistantContentUnit, ToolUnit> }
   | { id: string; type: "tool-group"; tools: ToolUnit[] }
+  | { id: string; type: "terminal"; payload: TerminalToolPayload }
 
 function groupToolUnits(units: AssistantContentUnit[]): ContentBlock[] {
   const blocks: ContentBlock[] = []
@@ -170,11 +189,100 @@ function groupToolUnits(units: AssistantContentUnit[]): ContentBlock[] {
       blocks.push({ id: unit.id, type: "unit", unit })
       continue
     }
+    const terminal = parseTerminalToolPayload(unit.call.output ?? unit.result?.output)
+    if (terminal?.action === "open" && terminal.terminal) {
+      blocks.push({ id: `terminal-${unit.id}`, type: "terminal", payload: terminal })
+      continue
+    }
     const previous = blocks.at(-1)
     if (previous?.type === "tool-group") previous.tools.push(unit)
     else blocks.push({ id: `tools-${unit.id}`, type: "tool-group", tools: [unit] })
   }
   return blocks
+}
+
+type TerminalToolPayload = {
+  kind: "terminal"
+  action: string
+  terminal?: {
+    id: string
+    name: string
+    cwd: string
+    shell: string
+    status: "running" | "exited"
+  }
+}
+
+function TerminalActivityCard({
+  payload,
+  onOpenTerminal,
+}: {
+  payload: TerminalToolPayload
+  onOpenTerminal: (terminalId: string) => void
+}): React.JSX.Element | null {
+  const terminal = payload.terminal
+  if (!terminal) return null
+  return (
+    <section className="overflow-hidden rounded-lg border border-border/80 bg-muted/18 text-[13px] shadow-sm">
+      <div className="flex min-h-16 items-center gap-3 px-3.5 py-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-ui-muted">
+          <TerminalSquare className="size-[18px]" strokeWidth={1.7} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                terminal.status === "running" ? "bg-emerald-500" : "bg-ui-muted/60"
+              )}
+            />
+            <h3 className="truncate font-semibold text-foreground">{terminal.name}</h3>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-ui-muted" title={terminal.cwd}>
+            {terminal.cwd}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onOpenTerminal(terminal.id)}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 font-medium text-ui-foreground shadow-xs transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <PanelRightOpen className="size-3.5" />
+          打开终端
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function parseTerminalToolPayload(value: unknown): TerminalToolPayload | null {
+  const text = terminalPayloadText(value)
+  if (!text) return null
+  try {
+    const parsed = JSON.parse(text) as Partial<TerminalToolPayload>
+    return parsed.kind === "terminal" && typeof parsed.action === "string"
+      ? (parsed as TerminalToolPayload)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function terminalPayloadText(value: unknown): string | null {
+  if (typeof value === "string") return value
+  if (!value || typeof value !== "object") return null
+  const content = "content" in value ? value.content : undefined
+  if (!Array.isArray(content)) return null
+  const block = content.find(
+    (item): item is { type: "text"; text: string } =>
+      !!item &&
+      typeof item === "object" &&
+      "type" in item &&
+      item.type === "text" &&
+      "text" in item &&
+      typeof item.text === "string"
+  )
+  return block?.text ?? null
 }
 
 function ToolActivityGroup({

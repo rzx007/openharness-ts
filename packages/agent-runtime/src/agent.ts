@@ -31,9 +31,7 @@ import {
 } from "@openharness/core";
 import { McpClientManager, type McpConnection } from "@openharness/mcp";
 
-import {
-  createOpenHarnessRuntime,
-} from "./default-runtime.js";
+import { createOpenHarnessRuntime } from "./default-runtime.js";
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import {
   configureDiscoveredExtensions,
@@ -98,7 +96,8 @@ export interface AgentCompactResult {
   afterMessageCount: number;
 }
 
-export type OpenHarnessAgentState = "idle" | "running" | "maintaining" | "closing" | "closed";
+export type OpenHarnessAgentState =
+  "idle" | "running" | "maintaining" | "closing" | "closed";
 
 export class AgentOperationConflictError extends Error {
   constructor(
@@ -132,8 +131,14 @@ export interface OpenHarnessAgent {
   readonly children: AgentChildDirectory;
   /** Subscribe to ordered observations. Observer failures never fail agent execution. */
   subscribe(listener: AgentEventListener): AgentEventSubscription;
-  submitMessage(content: string | ContentBlock[], options?: OpenHarnessAgentSubmitOptions): AgentRunHandle;
-  runMessage(content: string | ContentBlock[], options?: OpenHarnessAgentSubmitOptions): Promise<AgentRunResult>;
+  submitMessage(
+    content: string | ContentBlock[],
+    options?: OpenHarnessAgentSubmitOptions,
+  ): AgentRunHandle;
+  runMessage(
+    content: string | ContentBlock[],
+    options?: OpenHarnessAgentSubmitOptions,
+  ): Promise<AgentRunResult>;
   getHistory(): Message[];
   loadHistory(messages: Message[]): void;
   clear(): void;
@@ -147,7 +152,10 @@ export interface OpenHarnessAgent {
 
 class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   private activeRun?: FrameworkAgentRun;
-  private maintenance?: { kind: "compact" | "remember"; settled: Promise<void> };
+  private maintenance?: {
+    kind: "compact" | "remember";
+    settled: Promise<void>;
+  };
   private lifecycleState: OpenHarnessAgentState = "idle";
   private closePromise?: Promise<void>;
 
@@ -249,9 +257,18 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   remember(): Promise<AgentRememberResult> {
     return this.runMaintenance("remember", async () => {
       if (!this.memory) {
-        return { skipped: true, reason: "memory is disabled", writtenIds: [], titles: [] };
+        return {
+          skipped: true,
+          reason: "memory is disabled",
+          writtenIds: [],
+          titles: [],
+        };
       }
-      return await this.memory.remember(this.getHistory(), this.runtime.apiClient, this.model);
+      return await this.memory.remember(
+        this.getHistory(),
+        this.runtime.apiClient,
+        this.model,
+      );
     });
   }
 
@@ -262,7 +279,9 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   inspect(): AgentInspection {
     return {
       model: this.model,
-      tools: this.runtime.toolRegistry.getAll().map((tool) => ({ name: tool.name })),
+      tools: this.runtime.toolRegistry
+        .getAll()
+        .map((tool) => ({ name: tool.name })),
       hooks: (this.runtime.hookExecutor.getAll?.() ?? []).map((hook) => ({
         id: hook.id,
         event: hook.event,
@@ -270,7 +289,9 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         enabled: hook.enabled,
       })),
       mcpServers: this.mcpManager.getConnections().map(toMcpInspection),
-      ...(this.runtime.sandboxStatus ? { sandbox: this.runtime.sandboxStatus } : {}),
+      ...(this.runtime.sandboxStatus
+        ? { sandbox: this.runtime.sandboxStatus }
+        : {}),
     };
   }
 
@@ -298,7 +319,8 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         this.lifecycleState = "closed";
       }
       if (failures.length === 1) throw failures[0];
-      if (failures.length > 1) throw new AggregateError(failures, `Agent cleanup failed: ${this.id}`);
+      if (failures.length > 1)
+        throw new AggregateError(failures, `Agent cleanup failed: ${this.id}`);
     })();
     this.closePromise = closing;
     return closing;
@@ -306,15 +328,24 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
 
   private assertIdle(operation: string): void {
     if (this.lifecycleState !== "idle") {
-      throw new AgentOperationConflictError(this.id, this.lifecycleState, operation);
+      throw new AgentOperationConflictError(
+        this.id,
+        this.lifecycleState,
+        operation,
+      );
     }
   }
 
-  private runMaintenance<T>(kind: "compact" | "remember", work: () => Promise<T>): Promise<T> {
+  private runMaintenance<T>(
+    kind: "compact" | "remember",
+    work: () => Promise<T>,
+  ): Promise<T> {
     this.assertIdle(kind);
     this.lifecycleState = "maintaining";
     let settle!: () => void;
-    const settled = new Promise<void>((resolve) => { settle = resolve; });
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
     const operation = { kind, settled };
     this.maintenance = operation;
     return (async () => {
@@ -373,24 +404,36 @@ class FrameworkAgentRun implements AgentRunHandle {
     this.traceId = options.ids.traceId;
     this.started = this.start.promise;
     if (options.externalSignal) {
-      this.externalAbort = () => this.controller.abort(options.externalSignal!.reason ?? "Run interrupted");
+      this.externalAbort = () =>
+        this.controller.abort(
+          options.externalSignal!.reason ?? "Run interrupted",
+        );
       if (options.externalSignal.aborted) this.externalAbort();
-      else options.externalSignal.addEventListener("abort", this.externalAbort, { once: true });
+      else
+        options.externalSignal.addEventListener("abort", this.externalAbort, {
+          once: true,
+        });
     }
-    this.result = Promise.resolve().then(() => this.execute()).finally(() => {
-      this.active = false;
-      this.acceptingInput = false;
-      if (this.externalAbort && options.externalSignal) {
-        options.externalSignal.removeEventListener("abort", this.externalAbort);
-      }
-      options.onSettled();
-    });
+    this.result = Promise.resolve()
+      .then(() => this.execute())
+      .finally(() => {
+        this.active = false;
+        this.acceptingInput = false;
+        if (this.externalAbort && options.externalSignal) {
+          options.externalSignal.removeEventListener(
+            "abort",
+            this.externalAbort,
+          );
+        }
+        options.onSettled();
+      });
     void this.started.catch(() => {});
     void this.result.catch(() => {});
   }
 
   async steer(input: AgentSteerInput): Promise<AgentInputReceipt> {
-    if (!this.active || !this.acceptingInput) throw new AgentRunNotAcceptingInputError(this.id);
+    if (!this.active || !this.acceptingInput)
+      throw new AgentRunNotAcceptingInputError(this.id);
     const accepted = {
       ...input,
       id: input.id ?? `input_${randomUUID()}`,
@@ -406,7 +449,8 @@ class FrameworkAgentRun implements AgentRunHandle {
   }
 
   async interrupt(reason?: string): Promise<void> {
-    if (!this.controller.signal.aborted) this.controller.abort(reason ?? "Run interrupted");
+    if (!this.controller.signal.aborted)
+      this.controller.abort(reason ?? "Run interrupted");
     await this.result.catch(() => {});
   }
 
@@ -428,7 +472,9 @@ class FrameworkAgentRun implements AgentRunHandle {
       children: this.options.children.createController(scope),
       emit: (event) => this.emit(event),
       takeSteeredInputs: (options) => this.takeSteeredInputs(options),
-      closeSteering: () => { this.acceptingInput = false; },
+      closeSteering: () => {
+        this.acceptingInput = false;
+      },
     };
 
     try {
@@ -441,20 +487,32 @@ class FrameworkAgentRun implements AgentRunHandle {
         },
       });
       await this.emit({ type: "run.started", data: {} });
-      this.start.resolve({ sessionId: this.sessionId, inputId: this.inputId, runId: this.id });
-      for await (const event of this.options.session.submitMessage(this.options.content, {
-        signal: this.controller.signal,
-        execution,
-      })) {
-        if (this.controller.signal.aborted) throw abortError(this.controller.signal);
+      this.start.resolve({
+        sessionId: this.sessionId,
+        inputId: this.inputId,
+        runId: this.id,
+      });
+      for await (const event of this.options.session.submitMessage(
+        this.options.content,
+        {
+          signal: this.controller.signal,
+          execution,
+        },
+      )) {
+        if (this.controller.signal.aborted)
+          throw abortError(this.controller.signal);
         if (event.type === "text_delta") output += event.delta;
         if (event.type === "complete") stopReason = event.stopReason;
         await this.projectStreamEvent(event);
       }
-      if (this.controller.signal.aborted) throw abortError(this.controller.signal);
+      if (this.controller.signal.aborted)
+        throw abortError(this.controller.signal);
       this.acceptingInput = false;
       this.rejectPendingSteers();
-      await this.emit({ type: "run.completed", data: { output, ...(stopReason ? { stopReason } : {}) } });
+      await this.emit({
+        type: "run.completed",
+        data: { output, ...(stopReason ? { stopReason } : {}) },
+      });
       return {
         status: "completed",
         output,
@@ -476,20 +534,26 @@ class FrameworkAgentRun implements AgentRunHandle {
     }
   }
 
-  private async takeSteeredInputs(options: { closeIfEmpty?: boolean } = {}): Promise<AgentSteerInput[]> {
+  private async takeSteeredInputs(
+    options: { closeIfEmpty?: boolean } = {},
+  ): Promise<AgentSteerInput[]> {
     const pending = this.steered.splice(0, 1);
-    if (pending.length === 0 && options.closeIfEmpty) this.acceptingInput = false;
+    if (pending.length === 0 && options.closeIfEmpty)
+      this.acceptingInput = false;
     const inputs: AgentSteerInput[] = [];
     try {
       for (const { input } of pending) {
-        await this.emit({
-          type: "input.accepted",
-          data: {
-            content: input.content,
-            delivery: "steer",
-            ...(input.metadata ? { metadata: input.metadata } : {}),
+        await this.emit(
+          {
+            type: "input.accepted",
+            data: {
+              content: input.content,
+              delivery: "steer",
+              ...(input.metadata ? { metadata: input.metadata } : {}),
+            },
           },
-        }, { inputId: input.id, traceId: input.traceId });
+          { inputId: input.id, traceId: input.traceId },
+        );
         inputs.push(input);
       }
     } catch (error) {
@@ -500,7 +564,11 @@ class FrameworkAgentRun implements AgentRunHandle {
       for (const item of pending) this.pendingSteers.delete(item);
     }
     for (const { input, receipt } of pending) {
-      receipt.resolve({ sessionId: this.sessionId, inputId: input.id!, runId: this.id });
+      receipt.resolve({
+        sessionId: this.sessionId,
+        inputId: input.id!,
+        runId: this.id,
+      });
     }
     return inputs;
   }
@@ -514,11 +582,20 @@ class FrameworkAgentRun implements AgentRunHandle {
 
   private async projectStreamEvent(event: StreamEvent): Promise<void> {
     if (event.type === "text_delta") {
-      await this.emit({ type: "output.text.delta", data: { delta: event.delta } });
+      await this.emit({
+        type: "output.text.delta",
+        data: { delta: event.delta },
+      });
     } else if (event.type === "complete") {
-      await this.emit({ type: "output.turn.completed", data: { stopReason: event.stopReason } });
+      await this.emit({
+        type: "output.turn.completed",
+        data: { stopReason: event.stopReason },
+      });
     } else if (event.type === "tool_use_start") {
-      await this.emit({ type: "tool.started", data: { toolUse: event.toolUse } });
+      await this.emit({
+        type: "tool.started",
+        data: { toolUse: event.toolUse },
+      });
     } else if (event.type === "tool_use_end") {
       await this.emit({
         type: "tool.completed",
@@ -552,10 +629,12 @@ export async function createOpenHarnessAgent(
 ): Promise<OpenHarnessAgent> {
   const eventBus = new AgentEventBus(options.onEvent);
   const effects: AgentEffects = {
-    requestPermission: options.requestPermission ?? (async () => ({
-      status: "denied",
-      reason: "No permission effect configured",
-    })),
+    requestPermission:
+      options.requestPermission ??
+      (async () => ({
+        status: "denied",
+        reason: "No permission effect configured",
+      })),
     ...(options.cron ? { cron: options.cron } : {}),
   };
   return await createOpenHarnessAgentInternal(options, {
@@ -570,15 +649,19 @@ async function createOpenHarnessAgentInternal(
   internal: InternalAgentOptions,
 ): Promise<OpenHarnessAgent> {
   const cwd = options.cwd ?? process.cwd();
-  const settings = options.settings ?? await loadSettings({});
+  const settings = options.settings ?? (await loadSettings({}));
   const discovery = await discoverOpenHarnessExtensions(cwd, settings);
-  for (const warning of discovery.warnings) process.stderr.write(`[plugins] ${warning}\n`);
+  for (const warning of discovery.warnings)
+    process.stderr.write(`[plugins] ${warning}\n`);
   const runtime = await createOpenHarnessRuntime({
     settings,
     cwd,
     sessionId: options.sessionId,
     configuration: options,
-    hostCapabilities: { cron: Boolean(internal.effects.cron) },
+    hostCapabilities: {
+      cron: Boolean(internal.effects.cron),
+      terminal: Boolean(options.terminal),
+    },
     skillRegistry: discovery.skillRegistry,
   });
   try {
@@ -593,26 +676,39 @@ async function createOpenHarnessAgentInternal(
       });
     }
 
-    const mcpManager = new McpClientManager({ cwd, settings, sessionId: options.sessionId });
-    const mcpServers = options.mcpServers ?? discovery.mcpServers;
-    if (Object.keys(mcpServers).length > 0) await mcpManager.connectAll(mcpServers);
-    for (const tool of mcpManager.getAsToolDefinitions()) runtime.toolRegistry.register(tool);
-    runtime.queryEngine.setMcpManager(mcpManager);
-    runtime.queryEngine.setMcpAuth(createMcpAuthHost({
+    const mcpManager = new McpClientManager({
+      cwd,
       settings,
-      mcpManager,
-      toolRegistry: runtime.toolRegistry,
-    }));
+      sessionId: options.sessionId,
+    });
+    const mcpServers = options.mcpServers ?? discovery.mcpServers;
+    if (Object.keys(mcpServers).length > 0)
+      await mcpManager.connectAll(mcpServers);
+    for (const tool of mcpManager.getAsToolDefinitions())
+      runtime.toolRegistry.register(tool);
+    runtime.queryEngine.setMcpManager(mcpManager);
+    runtime.queryEngine.setMcpAuth(
+      createMcpAuthHost({
+        settings,
+        mcpManager,
+        toolRegistry: runtime.toolRegistry,
+      }),
+    );
+    runtime.queryEngine.setTerminal(options.terminal);
     runtime.addCleanup(() => mcpManager.disconnectAll());
 
-    const memory = settings.memory?.enabled === false
-      ? undefined
-      : await createAgentMemoryRuntime(cwd, settings.memory?.maxFiles ?? 10);
-    runtime.queryEngine.setMemoryRetriever(memory
-      ? (userInput) => memory.retrieve(userInput)
-      : undefined);
+    const memory =
+      settings.memory?.enabled === false
+        ? undefined
+        : await createAgentMemoryRuntime(cwd, settings.memory?.maxFiles ?? 10);
+    runtime.queryEngine.setMemoryRetriever(
+      memory ? (userInput) => memory.retrieve(userInput) : undefined,
+    );
 
-    const session = createAgentSession({ queryEngine: runtime.queryEngine, sessionId: options.sessionId });
+    const session = createAgentSession({
+      queryEngine: runtime.queryEngine,
+      sessionId: options.sessionId,
+    });
     const children = new AgentChildManager({
       settings,
       configuration: options,
@@ -621,12 +717,13 @@ async function createOpenHarnessAgentInternal(
       eventBus: internal.eventBus,
       directory: internal.childDirectory,
       environment: options.childEnvironment,
-      createAgent: (childOptions, identity) => createOpenHarnessAgentInternal(childOptions, {
-        eventBus: internal.eventBus,
-        effects: internal.effects,
-        childDirectory: internal.childDirectory,
-        identity,
-      }),
+      createAgent: (childOptions, identity) =>
+        createOpenHarnessAgentInternal(childOptions, {
+          eventBus: internal.eventBus,
+          effects: internal.effects,
+          childDirectory: internal.childDirectory,
+          identity,
+        }),
     });
     return new DefaultOpenHarnessAgent(
       runtime,
@@ -644,7 +741,10 @@ async function createOpenHarnessAgentInternal(
     try {
       await runtime.close();
     } catch (cleanupError) {
-      throw new AggregateError([error, cleanupError], "Agent creation and cleanup failed");
+      throw new AggregateError(
+        [error, cleanupError],
+        "Agent creation and cleanup failed",
+      );
     }
     throw error;
   }
@@ -666,12 +766,17 @@ function deferred<T>(): {
 
 function abortError(signal: AbortSignal): Error {
   const reason = signal.reason;
-  return reason instanceof Error ? reason : new Error(typeof reason === "string" ? reason : "Run interrupted");
+  return reason instanceof Error
+    ? reason
+    : new Error(typeof reason === "string" ? reason : "Run interrupted");
 }
 
 export function serializeError(error: unknown): AgentSerializedError {
   if (error instanceof Error) {
-    const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
+    const code =
+      "code" in error && typeof error.code === "string"
+        ? error.code
+        : undefined;
     return {
       name: error.name,
       message: error.message,
@@ -682,7 +787,9 @@ export function serializeError(error: unknown): AgentSerializedError {
   return { name: "Error", message: String(error) };
 }
 
-function toMcpInspection(connection: McpConnection): AgentInspection["mcpServers"][number] {
+function toMcpInspection(
+  connection: McpConnection,
+): AgentInspection["mcpServers"][number] {
   return {
     name: connection.name,
     status: connection.status,

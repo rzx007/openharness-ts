@@ -24,6 +24,7 @@
     "@openharness/sandbox": "workspace:*",
     "@openharness/services": "workspace:*",
     "@openharness/skills": "workspace:*",
+    "@openharness/terminal": "workspace:*",
     "@openharness/utils": "workspace:*",
     "diff": "catalog:",
     "zod": "catalog:"

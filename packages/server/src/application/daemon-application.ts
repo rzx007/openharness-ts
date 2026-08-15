@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import type { Settings } from "@openharness/core";
+import type { AgentTerminalHost } from "@openharness/terminal";
+import type { SessionRecord } from "@openharness/services";
 import { getTaskManager, type SessionStore } from "@openharness/services";
 
-import { createDaemonAgentLoader, type CreateDaemonAgent } from "../daemon/daemon-agent.js";
+import {
+  createDaemonAgentLoader,
+  type CreateDaemonAgent,
+} from "../daemon/daemon-agent.js";
 import { DaemonCronService } from "../daemon/daemon-cron-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
@@ -39,6 +44,7 @@ export interface DaemonApplicationOptions {
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
   createAgent?: CreateDaemonAgent;
+  createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   sseClientCount(): number;
   log(event: ObservabilityEvent): void;
 }
@@ -71,17 +77,20 @@ export class DaemonApplication {
 
     this.cron = new DaemonCronService({
       store,
-      getSettingsForCwd: options.getSettingsForCwd ?? (async () => {
-        const settings = options.getSettings?.() ?? options.settings;
-        if (!settings) throw new Error("Daemon settings are unavailable");
-        return settings;
-      }),
+      getSettingsForCwd:
+        options.getSettingsForCwd ??
+        (async () => {
+          const settings = options.getSettings?.() ?? options.settings;
+          if (!settings) throw new Error("Daemon settings are unavailable");
+          return settings;
+        }),
     });
 
     this.events = new SessionEventPublisher(store, options.eventSink);
     this.permissions = new StorePermissionBroker({
       store,
-      onChange: (previousEventSeq) => this.events.publishSince(previousEventSeq),
+      onChange: (previousEventSeq) =>
+        this.events.publishSince(previousEventSeq),
       logger: options.log,
     });
     this.transcriptProjection = new SessionTranscriptProjection(store);
@@ -104,6 +113,7 @@ export class DaemonApplication {
       getSettings: options.getSettings,
       getSettingsForCwd: options.getSettingsForCwd,
       createAgent: options.createAgent,
+      createTerminalHost: options.createTerminalHost,
       requestPermission: async (request, context) => {
         return await this.permissions.ask({
           sessionId: context.sessionId,
@@ -121,7 +131,8 @@ export class DaemonApplication {
           this.cron.removeJob(name);
         },
         list: async () => this.cron.listJobs(),
-        setEnabled: async (name, enabled) => this.cron.setEnabled(name, enabled),
+        setEnabled: async (name, enabled) =>
+          this.cron.setEnabled(name, enabled),
         trigger: async (name) => this.cron.trigger(name),
       },
       createEventSink: (agent) => {
@@ -182,7 +193,10 @@ export class DaemonApplication {
       events: this.events,
     });
     this.queries = new SessionQueryService(store);
-    this.startupRecovery = recoverInterruptedWorkflows({ store, events: this.events });
+    this.startupRecovery = recoverInterruptedWorkflows({
+      store,
+      events: this.events,
+    });
     void this.startupRecovery.catch(() => {});
   }
 
@@ -208,7 +222,8 @@ export class DaemonApplication {
       failures.push(error);
     }
     if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) throw new AggregateError(failures, "Daemon application shutdown failed");
+    if (failures.length > 1)
+      throw new AggregateError(failures, "Daemon application shutdown failed");
   }
 
   private traceIdForRun(runId: string): string {
@@ -216,7 +231,8 @@ export class DaemonApplication {
     const traceId = normalizeTraceId(run?.metadata.traceId);
     if (traceId) return traceId;
     const generated = randomUUID();
-    if (run) this.options.store.updateRun(runId, { metadata: { traceId: generated } });
+    if (run)
+      this.options.store.updateRun(runId, { metadata: { traceId: generated } });
     return generated;
   }
 }

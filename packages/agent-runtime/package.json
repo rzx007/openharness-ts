@@ -29,6 +29,7 @@
     "@openharness/prompts": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "@openharness/skills": "workspace:*",
+    "@openharness/terminal": "workspace:*",
     "@openharness/tools": "workspace:*"
   },
   "devDependencies": {

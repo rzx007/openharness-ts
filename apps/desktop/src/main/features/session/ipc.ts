@@ -7,6 +7,10 @@ import type {
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
+  SetDefaultDesktopModelInput,
+  SetDefaultDesktopPermissionModeInput,
+  UpdateDesktopSessionModelInput,
+  UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
 import type { IpcContribution } from "../../core/ipc/types"
 import { desktopSessionService } from "./session-service"
@@ -74,6 +78,30 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionReplyPermission,
         handler: (_event, input) =>
           desktopSessionService.replyPermission(input as ReplyDesktopPermissionInput),
+      },
+      {
+        channel: IpcChannels.sessionSetDefaultModel,
+        handler: (_event, input) =>
+          desktopSessionService.setDefaultModel(input as SetDefaultDesktopModelInput),
+      },
+      {
+        channel: IpcChannels.sessionSetDefaultPermissionMode,
+        handler: (_event, input) =>
+          desktopSessionService.setDefaultPermissionMode(
+            input as SetDefaultDesktopPermissionModeInput
+          ),
+      },
+      {
+        channel: IpcChannels.sessionUpdateModel,
+        handler: (_event, input) =>
+          desktopSessionService.updateSessionModel(input as UpdateDesktopSessionModelInput),
+      },
+      {
+        channel: IpcChannels.sessionUpdatePermissionMode,
+        handler: (_event, input) =>
+          desktopSessionService.updateSessionPermissionMode(
+            input as UpdateDesktopSessionPermissionModeInput
+          ),
       },
       {
         channel: IpcChannels.sessionRename,

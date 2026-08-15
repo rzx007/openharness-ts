@@ -59,6 +59,16 @@ import type {
   TaskSnapshot,
   UpdateClientSessionInput,
 } from "../types/index.js";
+import type {
+  TerminalCreateRequest,
+  TerminalEvent,
+  TerminalReadResult,
+  TerminalResizeRequest,
+  TerminalSessionInfo,
+  TerminalSignal,
+  TerminalSource,
+  TerminalWriteRequest,
+} from "@openharness/terminal";
 
 let promptRequestCounter = 0;
 
@@ -77,10 +87,14 @@ export function normalizeDaemonBaseUrl(value: string): string {
     throw new Error("Daemon URL must use http or https");
   }
   if (url.username || url.password) {
-    throw new Error("Daemon URL must not contain credentials; use a bearer token instead");
+    throw new Error(
+      "Daemon URL must not contain credentials; use a bearer token instead",
+    );
   }
   if (url.search || url.hash) {
-    throw new Error("Daemon URL must not contain query parameters or a fragment");
+    throw new Error(
+      "Daemon URL must not contain query parameters or a fragment",
+    );
   }
 
   const pathname = url.pathname.replace(/\/+$/, "");
@@ -89,7 +103,8 @@ export function normalizeDaemonBaseUrl(value: string): string {
 
 /** Generate a caller-stable id for one prompt admission attempt. */
 export function createPromptRequestId(): string {
-  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  if (typeof globalThis.crypto?.randomUUID === "function")
+    return globalThis.crypto.randomUUID();
   promptRequestCounter += 1;
   return `prompt-${Date.now().toString(36)}-${promptRequestCounter.toString(36)}`;
 }
@@ -122,20 +137,35 @@ export class OpenHarnessClient {
   }
 
   /** `GET /health` */
-  async health(options: { signal?: AbortSignal } = {}): Promise<OpenHarnessServerHealth> {
-    return this.request<OpenHarnessServerHealth>("/health", { auth: false, signal: options.signal });
+  async health(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<OpenHarnessServerHealth> {
+    return this.request<OpenHarnessServerHealth>("/health", {
+      auth: false,
+      signal: options.signal,
+    });
   }
 
   /** `GET /commands?cwd=` — cwd-scoped slash command catalog for autocomplete. */
-  async listCommands(options: ListCommandsOptions & { signal?: AbortSignal }): Promise<CommandCatalogEntry[]> {
+  async listCommands(
+    options: ListCommandsOptions & { signal?: AbortSignal },
+  ): Promise<CommandCatalogEntry[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ commands: CommandCatalogEntry[] }>(this.path("/commands", query), { signal });
+    const response = await this.request<{ commands: CommandCatalogEntry[] }>(
+      this.path("/commands", query),
+      { signal },
+    );
     return response.commands;
   }
 
   /** `GET /settings` */
-  async getSettings(options: { signal?: AbortSignal } = {}): Promise<Record<string, unknown>> {
-    const response = await this.request<{ settings: Record<string, unknown> }>("/settings", { signal: options.signal });
+  async getSettings(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Record<string, unknown>> {
+    const response = await this.request<{ settings: Record<string, unknown> }>(
+      "/settings",
+      { signal: options.signal },
+    );
     return response.settings;
   }
 
@@ -144,30 +174,48 @@ export class OpenHarnessClient {
     patch: Record<string, unknown>,
     options: { signal?: AbortSignal } = {},
   ): Promise<Record<string, unknown>> {
-    const response = await this.request<{ settings: Record<string, unknown> }>("/settings", {
-      method: "PATCH",
-      body: patch,
-      signal: options.signal,
-    });
+    const response = await this.request<{ settings: Record<string, unknown> }>(
+      "/settings",
+      {
+        method: "PATCH",
+        body: patch,
+        signal: options.signal,
+      },
+    );
     return response.settings;
   }
 
   /** `GET /providers` */
-  async listProviders(options: { signal?: AbortSignal } = {}): Promise<ProviderInfo[]> {
-    const response = await this.request<{ providers: ProviderInfo[] }>("/providers", { signal: options.signal });
+  async listProviders(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ProviderInfo[]> {
+    const response = await this.request<{ providers: ProviderInfo[] }>(
+      "/providers",
+      { signal: options.signal },
+    );
     return response.providers;
   }
 
   /** `GET /models` */
-  async listModels(options: { signal?: AbortSignal } = {}): Promise<ModelProviderInfo[]> {
-    const response = await this.request<{ providers: ModelProviderInfo[] }>("/models", { signal: options.signal });
+  async listModels(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ModelProviderInfo[]> {
+    const response = await this.request<{ providers: ModelProviderInfo[] }>(
+      "/models",
+      { signal: options.signal },
+    );
     return response.providers;
   }
 
   /** `GET /tasks` */
-  async listTasks(options: ListTasksOptions & { signal?: AbortSignal } = {}): Promise<TaskSnapshot[]> {
+  async listTasks(
+    options: ListTasksOptions & { signal?: AbortSignal } = {},
+  ): Promise<TaskSnapshot[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ tasks: TaskSnapshot[] }>(this.path("/tasks", query), { signal });
+    const response = await this.request<{ tasks: TaskSnapshot[] }>(
+      this.path("/tasks", query),
+      { signal },
+    );
     return response.tasks;
   }
 
@@ -210,7 +258,10 @@ export class OpenHarnessClient {
   }
 
   /** `GET /sessions/:id/mcp` */
-  async getSessionMcp(sessionId: string, options: { signal?: AbortSignal } = {}): Promise<McpServerStatus[]> {
+  async getSessionMcp(
+    sessionId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<McpServerStatus[]> {
     const response = await this.request<{ servers: McpServerStatus[] }>(
       `/sessions/${encodeURIComponent(sessionId)}/mcp`,
       { signal: options.signal },
@@ -219,9 +270,14 @@ export class OpenHarnessClient {
   }
 
   /** `GET /memory?cwd=` */
-  async listMemory(options: { cwd: string; signal?: AbortSignal }): Promise<MemoryListResponse> {
+  async listMemory(options: {
+    cwd: string;
+    signal?: AbortSignal;
+  }): Promise<MemoryListResponse> {
     const { signal, ...query } = options;
-    return await this.request<MemoryListResponse>(this.path("/memory", query), { signal });
+    return await this.request<MemoryListResponse>(this.path("/memory", query), {
+      signal,
+    });
   }
 
   /** `GET /memory/:id?cwd=` */
@@ -242,11 +298,14 @@ export class OpenHarnessClient {
     input: { cwd: string; content: string; tags?: string[] },
     options: { signal?: AbortSignal } = {},
   ): Promise<MemoryEntryRecord> {
-    const response = await this.request<{ entry: MemoryEntryRecord }>("/memory", {
-      method: "POST",
-      body: input,
-      signal: options.signal,
-    });
+    const response = await this.request<{ entry: MemoryEntryRecord }>(
+      "/memory",
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
     return response.entry;
   }
 
@@ -263,8 +322,12 @@ export class OpenHarnessClient {
   }
 
   /** `GET /auth` */
-  async getAuthStatus(options: { signal?: AbortSignal } = {}): Promise<AuthStatus> {
-    const response = await this.request<{ auth: AuthStatus }>("/auth", { signal: options.signal });
+  async getAuthStatus(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AuthStatus> {
+    const response = await this.request<{ auth: AuthStatus }>("/auth", {
+      signal: options.signal,
+    });
     return response.auth;
   }
 
@@ -293,16 +356,28 @@ export class OpenHarnessClient {
   }
 
   /** `GET /context?cwd=` */
-  async getContextPreview(options: { cwd: string; signal?: AbortSignal }): Promise<string> {
+  async getContextPreview(options: {
+    cwd: string;
+    signal?: AbortSignal;
+  }): Promise<string> {
     const { signal, ...query } = options;
-    const response = await this.request<{ report: string }>(this.path("/context", query), { signal });
+    const response = await this.request<{ report: string }>(
+      this.path("/context", query),
+      { signal },
+    );
     return response.report;
   }
 
   /** `GET /context/status?cwd=` */
-  async getContextStatus(options: { cwd: string; signal?: AbortSignal }): Promise<string> {
+  async getContextStatus(options: {
+    cwd: string;
+    signal?: AbortSignal;
+  }): Promise<string> {
     const { signal, ...query } = options;
-    const response = await this.request<{ report: string }>(this.path("/context/status", query), { signal });
+    const response = await this.request<{ report: string }>(
+      this.path("/context/status", query),
+      { signal },
+    );
     return response.report;
   }
 
@@ -353,8 +428,12 @@ export class OpenHarnessClient {
   }
 
   /** `GET /profile` */
-  async getProfileStatus(options: { signal?: AbortSignal } = {}): Promise<string> {
-    const response = await this.request<{ report: string }>("/profile", { signal: options.signal });
+  async getProfileStatus(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
+    const response = await this.request<{ report: string }>("/profile", {
+      signal: options.signal,
+    });
     return response.report;
   }
 
@@ -368,10 +447,15 @@ export class OpenHarnessClient {
   }
 
   /** `GET /output-styles` */
-  async listOutputStyles(options: { signal?: AbortSignal } = {}): Promise<OutputStyleInfo[]> {
-    const response = await this.request<{ styles: OutputStyleInfo[] }>("/output-styles", {
-      signal: options.signal,
-    });
+  async listOutputStyles(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<OutputStyleInfo[]> {
+    const response = await this.request<{ styles: OutputStyleInfo[] }>(
+      "/output-styles",
+      {
+        signal: options.signal,
+      },
+    );
     return response.styles;
   }
 
@@ -435,10 +519,15 @@ export class OpenHarnessClient {
   }
 
   /** `GET /agent-personas` */
-  async listAgentPersonas(options: { signal?: AbortSignal } = {}): Promise<AgentPersonaInfo[]> {
-    const response = await this.request<{ agents: AgentPersonaInfo[] }>("/agent-personas", {
-      signal: options.signal,
-    });
+  async listAgentPersonas(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AgentPersonaInfo[]> {
+    const response = await this.request<{ agents: AgentPersonaInfo[] }>(
+      "/agent-personas",
+      {
+        signal: options.signal,
+      },
+    );
     return response.agents;
   }
 
@@ -449,7 +538,10 @@ export class OpenHarnessClient {
     signal?: AbortSignal;
   }): Promise<HookInfo[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ hooks: HookInfo[] }>(this.path("/hooks", query), { signal });
+    const response = await this.request<{ hooks: HookInfo[] }>(
+      this.path("/hooks", query),
+      { signal },
+    );
     return response.hooks;
   }
 
@@ -482,7 +574,10 @@ export class OpenHarnessClient {
   }
 
   /** `GET /git/status?cwd=` */
-  async getGitStatus(options: { cwd: string; signal?: AbortSignal }): Promise<string> {
+  async getGitStatus(options: {
+    cwd: string;
+    signal?: AbortSignal;
+  }): Promise<string> {
     const { signal, cwd } = options;
     const response = await this.request<{ output: string }>(
       this.path("/git/status", { cwd }),
@@ -528,69 +623,131 @@ export class OpenHarnessClient {
   }
 
   /** `GET /sessions` */
-  async listSessions(options: ListSessionsOptions & { signal?: AbortSignal } = {}): Promise<SessionRecord[]> {
+  async listSessions(
+    options: ListSessionsOptions & { signal?: AbortSignal } = {},
+  ): Promise<SessionRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ sessions: SessionRecord[] }>(this.path("/sessions", query), { signal });
+    const response = await this.request<{ sessions: SessionRecord[] }>(
+      this.path("/sessions", query),
+      { signal },
+    );
     return response.sessions;
   }
 
-  async listProjects(options: ListProjectsOptions & { signal?: AbortSignal } = {}): Promise<ProjectRecord[]> {
+  async listProjects(
+    options: ListProjectsOptions & { signal?: AbortSignal } = {},
+  ): Promise<ProjectRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ projects: ProjectRecord[] }>(this.path("/projects", query), { signal });
+    const response = await this.request<{ projects: ProjectRecord[] }>(
+      this.path("/projects", query),
+      { signal },
+    );
     return response.projects;
   }
 
   async inspectProject(path: string): Promise<ProjectRecord> {
-    return (await this.request<{ project: ProjectRecord }>("/projects/inspect", { method: "POST", body: { path } })).project;
+    return (
+      await this.request<{ project: ProjectRecord }>("/projects/inspect", {
+        method: "POST",
+        body: { path },
+      })
+    ).project;
   }
 
   async renameProject(projectId: string, name: string): Promise<ProjectRecord> {
-    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}`, { method: "PATCH", body: { name } })).project;
+    return (
+      await this.request<{ project: ProjectRecord }>(
+        `/projects/${encodeURIComponent(projectId)}`,
+        { method: "PATCH", body: { name } },
+      )
+    ).project;
   }
 
-  async setProjectPinned(projectId: string, pinned: boolean): Promise<ProjectRecord> {
-    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}`, { method: "PATCH", body: { pinned } })).project;
+  async setProjectPinned(
+    projectId: string,
+    pinned: boolean,
+  ): Promise<ProjectRecord> {
+    return (
+      await this.request<{ project: ProjectRecord }>(
+        `/projects/${encodeURIComponent(projectId)}`,
+        { method: "PATCH", body: { pinned } },
+      )
+    ).project;
   }
 
   async rebindProject(projectId: string, path: string): Promise<ProjectRecord> {
-    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}/rebind`, { method: "POST", body: { path } })).project;
+    return (
+      await this.request<{ project: ProjectRecord }>(
+        `/projects/${encodeURIComponent(projectId)}/rebind`,
+        { method: "POST", body: { path } },
+      )
+    ).project;
   }
 
   async archiveProject(projectId: string): Promise<ProjectRecord> {
-    return (await this.request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" })).project;
+    return (
+      await this.request<{ project: ProjectRecord }>(
+        `/projects/${encodeURIComponent(projectId)}`,
+        { method: "DELETE" },
+      )
+    ).project;
   }
 
   /** `POST /sessions` */
-  async createSession(input: CreateClientSessionInput, options: { signal?: AbortSignal } = {}): Promise<SessionRecord> {
-    const response = await this.request<{ session: SessionRecord }>("/sessions", {
-      method: "POST",
-      body: input,
-      signal: options.signal,
-    });
+  async createSession(
+    input: CreateClientSessionInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SessionRecord> {
+    const response = await this.request<{ session: SessionRecord }>(
+      "/sessions",
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
     return response.session;
   }
 
   /** `GET /sessions/:id` */
-  async getSession(sessionId: string, options: { signal?: AbortSignal } = {}): Promise<SessionRecord> {
-    const response = await this.request<{ session: SessionRecord }>(`/sessions/${encodeURIComponent(sessionId)}`, {
-      signal: options.signal,
-    });
+  async getSession(
+    sessionId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SessionRecord> {
+    const response = await this.request<{ session: SessionRecord }>(
+      `/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        signal: options.signal,
+      },
+    );
     return response.session;
   }
 
   /** `GET /sessions/:id/state` - atomic attach snapshot plus SSE cursor. */
-  async getSessionState(sessionId: string, options: { signal?: AbortSignal } = {}): Promise<SessionStateSnapshot> {
-    return await this.request<SessionStateSnapshot>(`/sessions/${encodeURIComponent(sessionId)}/state`, {
-      signal: options.signal,
-    });
+  async getSessionState(
+    sessionId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SessionStateSnapshot> {
+    return await this.request<SessionStateSnapshot>(
+      `/sessions/${encodeURIComponent(sessionId)}/state`,
+      {
+        signal: options.signal,
+      },
+    );
   }
 
   /** `DELETE /sessions/:id` */
-  async archiveSession(sessionId: string, options: { signal?: AbortSignal } = {}): Promise<SessionRecord> {
-    const response = await this.request<{ session: SessionRecord }>(`/sessions/${encodeURIComponent(sessionId)}`, {
-      method: "DELETE",
-      signal: options.signal,
-    });
+  async archiveSession(
+    sessionId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SessionRecord> {
+    const response = await this.request<{ session: SessionRecord }>(
+      `/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        method: "DELETE",
+        signal: options.signal,
+      },
+    );
     return response.session;
   }
 
@@ -600,11 +757,14 @@ export class OpenHarnessClient {
     input: UpdateClientSessionInput,
     options: { signal?: AbortSignal } = {},
   ): Promise<SessionRecord> {
-    const response = await this.request<{ session: SessionRecord }>(`/sessions/${encodeURIComponent(sessionId)}`, {
-      method: "PATCH",
-      body: input,
-      signal: options.signal,
-    });
+    const response = await this.request<{ session: SessionRecord }>(
+      `/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        method: "PATCH",
+        body: input,
+        signal: options.signal,
+      },
+    );
     return response.session;
   }
 
@@ -640,11 +800,14 @@ export class OpenHarnessClient {
     input: AdmitClientPromptInput,
     options: { signal?: AbortSignal } = {},
   ): Promise<PromptResponse> {
-    return await this.request<PromptResponse>(`/sessions/${encodeURIComponent(sessionId)}/prompts`, {
-      method: "POST",
-      body: { ...input, id: input.id ?? createPromptRequestId() },
-      signal: options.signal,
-    });
+    return await this.request<PromptResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/prompts`,
+      {
+        method: "POST",
+        body: { ...input, id: input.id ?? createPromptRequestId() },
+        signal: options.signal,
+      },
+    );
   }
 
   /**
@@ -676,25 +839,39 @@ export class OpenHarnessClient {
     input: InvokeClientCommandInput,
     options: { signal?: AbortSignal } = {},
   ): Promise<InvokeCommandResponse> {
-    return await this.request<InvokeCommandResponse>(`/sessions/${encodeURIComponent(sessionId)}/commands`, {
-      method: "POST",
-      body: input,
-      signal: options.signal,
-    });
+    return await this.request<InvokeCommandResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/commands`,
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
   }
 
   /** `POST /sessions/:id/interrupt` — 中断当前/排队中的 run。 */
-  async interruptSession(sessionId: string, options: { signal?: AbortSignal } = {}): Promise<InterruptSessionResponse> {
-    return await this.request<InterruptSessionResponse>(`/sessions/${encodeURIComponent(sessionId)}/interrupt`, {
-      method: "POST",
-      signal: options.signal,
-    });
+  async interruptSession(
+    sessionId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<InterruptSessionResponse> {
+    return await this.request<InterruptSessionResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/interrupt`,
+      {
+        method: "POST",
+        signal: options.signal,
+      },
+    );
   }
 
   /** `GET /events` — 用于 attach 时的历史 replay。 */
-  async listEvents(options: ListEventsOptions & { signal?: AbortSignal } = {}): Promise<SessionEventRecord[]> {
+  async listEvents(
+    options: ListEventsOptions & { signal?: AbortSignal } = {},
+  ): Promise<SessionEventRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ events: SessionEventRecord[] }>(this.path("/events", query), { signal });
+    const response = await this.request<{ events: SessionEventRecord[] }>(
+      this.path("/events", query),
+      { signal },
+    );
     return response.events;
   }
 
@@ -703,10 +880,9 @@ export class OpenHarnessClient {
     options: ListPermissionsOptions & { signal?: AbortSignal } = {},
   ): Promise<PermissionRequestRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ requests: PermissionRequestRecord[] }>(
-      this.path("/permissions", query),
-      { signal },
-    );
+    const response = await this.request<{
+      requests: PermissionRequestRecord[];
+    }>(this.path("/permissions", query), { signal });
     return response.requests;
   }
 
@@ -728,12 +904,21 @@ export class OpenHarnessClient {
   }
 
   /** `GET /events/stream` — SSE 实时事件流；`cursor` 之后的增量。 */
-  async getCronStatus(options: { signal?: AbortSignal } = {}): Promise<CronStatus> {
-    return await this.request<CronStatus>("/cron/status", { signal: options.signal });
+  async getCronStatus(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CronStatus> {
+    return await this.request<CronStatus>("/cron/status", {
+      signal: options.signal,
+    });
   }
 
-  async listCronJobs(options: { signal?: AbortSignal } = {}): Promise<CronJobRecord[]> {
-    const response = await this.request<{ jobs: CronJobRecord[] }>("/cron/jobs", { signal: options.signal });
+  async listCronJobs(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CronJobRecord[]> {
+    const response = await this.request<{ jobs: CronJobRecord[] }>(
+      "/cron/jobs",
+      { signal: options.signal },
+    );
     return response.jobs;
   }
 
@@ -742,19 +927,28 @@ export class OpenHarnessClient {
     input: SaveCronJobInput,
     options: { signal?: AbortSignal } = {},
   ): Promise<CronJobRecord> {
-    const response = await this.request<{ job: CronJobRecord }>(`/cron/jobs/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      body: input,
-      signal: options.signal,
-    });
+    const response = await this.request<{ job: CronJobRecord }>(
+      `/cron/jobs/${encodeURIComponent(name)}`,
+      {
+        method: "PUT",
+        body: input,
+        signal: options.signal,
+      },
+    );
     return response.job;
   }
 
-  async removeCronJob(name: string, options: { signal?: AbortSignal } = {}): Promise<void> {
-    await this.request<{ removed: true }>(`/cron/jobs/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-      signal: options.signal,
-    });
+  async removeCronJob(
+    name: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request<{ removed: true }>(
+      `/cron/jobs/${encodeURIComponent(name)}`,
+      {
+        method: "DELETE",
+        signal: options.signal,
+      },
+    );
   }
 
   async setCronJobEnabled(
@@ -762,19 +956,28 @@ export class OpenHarnessClient {
     enabled: boolean,
     options: { signal?: AbortSignal } = {},
   ): Promise<CronJobRecord> {
-    const response = await this.request<{ job: CronJobRecord }>(`/cron/jobs/${encodeURIComponent(name)}`, {
-      method: "PATCH",
-      body: { enabled },
-      signal: options.signal,
-    });
+    const response = await this.request<{ job: CronJobRecord }>(
+      `/cron/jobs/${encodeURIComponent(name)}`,
+      {
+        method: "PATCH",
+        body: { enabled },
+        signal: options.signal,
+      },
+    );
     return response.job;
   }
 
-  async triggerCronJob(name: string, options: { signal?: AbortSignal } = {}): Promise<CronRunRecord> {
-    const response = await this.request<{ run: CronRunRecord }>(`/cron/jobs/${encodeURIComponent(name)}/run`, {
-      method: "POST",
-      signal: options.signal,
-    });
+  async triggerCronJob(
+    name: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CronRunRecord> {
+    const response = await this.request<{ run: CronRunRecord }>(
+      `/cron/jobs/${encodeURIComponent(name)}/run`,
+      {
+        method: "POST",
+        signal: options.signal,
+      },
+    );
     return response.run;
   }
 
@@ -782,20 +985,147 @@ export class OpenHarnessClient {
     options: { name?: string; limit?: number; signal?: AbortSignal } = {},
   ): Promise<CronRunRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ runs: CronRunRecord[] }>(this.path("/cron/runs", query), { signal });
+    const response = await this.request<{ runs: CronRunRecord[] }>(
+      this.path("/cron/runs", query),
+      { signal },
+    );
     return response.runs;
   }
 
-  streamEvents(options: EventSyncOptions = {}): AsyncIterable<SessionEventRecord> {
+  async createTerminal(
+    input: TerminalCreateRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<TerminalSessionInfo> {
+    const response = await this.request<{ terminal: TerminalSessionInfo }>(
+      "/terminals",
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
+    return response.terminal;
+  }
+
+  async listTerminals(
+    options: {
+      projectId?: string;
+      sessionId?: string;
+      source?: TerminalSource;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<TerminalSessionInfo[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ terminals: TerminalSessionInfo[] }>(
+      this.path("/terminals", query),
+      { signal },
+    );
+    return response.terminals;
+  }
+
+  async getTerminal(
+    terminalId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<TerminalSessionInfo> {
+    const response = await this.request<{ terminal: TerminalSessionInfo }>(
+      `/terminals/${encodeURIComponent(terminalId)}`,
+      { signal: options.signal },
+    );
+    return response.terminal;
+  }
+
+  async readTerminal(
+    terminalId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<TerminalReadResult> {
+    const response = await this.request<{ snapshot: TerminalReadResult }>(
+      `/terminals/${encodeURIComponent(terminalId)}/output`,
+      { signal: options.signal },
+    );
+    return response.snapshot;
+  }
+
+  async writeTerminal(
+    input: TerminalWriteRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request<{ written: true }>(
+      `/terminals/${encodeURIComponent(input.terminalId)}/input`,
+      { method: "POST", body: { data: input.data }, signal: options.signal },
+    );
+  }
+
+  async resizeTerminal(
+    input: TerminalResizeRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request<{ resized: true }>(
+      `/terminals/${encodeURIComponent(input.terminalId)}/resize`,
+      {
+        method: "POST",
+        body: { cols: input.cols, rows: input.rows },
+        signal: options.signal,
+      },
+    );
+  }
+
+  async signalTerminal(
+    terminalId: string,
+    signal: TerminalSignal,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request<{ signaled: true }>(
+      `/terminals/${encodeURIComponent(terminalId)}/signal`,
+      { method: "POST", body: { signal }, signal: options.signal },
+    );
+  }
+
+  async closeTerminal(
+    terminalId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request<{ removed: true }>(
+      `/terminals/${encodeURIComponent(terminalId)}`,
+      {
+        method: "DELETE",
+        signal: options.signal,
+      },
+    );
+  }
+
+  streamTerminalEvents(
+    options: { signal?: AbortSignal } = {},
+  ): AsyncIterable<TerminalEvent> {
+    return streamServerSentEvents<TerminalEvent>(async () => {
+      const response = await this.fetchImpl(
+        `${this.baseUrl}/terminals/stream`,
+        {
+          headers: this.headers(),
+          signal: options.signal,
+        },
+      );
+      if (!response.ok) await this.throwResponseError(response);
+      if (!response.body)
+        throw new Error("Terminal event stream response has no body");
+      return response.body;
+    });
+  }
+
+  streamEvents(
+    options: EventSyncOptions = {},
+  ): AsyncIterable<SessionEventRecord> {
     return streamServerSentEvents(async () => {
       const query = {
         cursor: options.cursor,
         sessionId: options.sessionId,
       };
-      const response = await this.fetchImpl(`${this.baseUrl}${this.path("/events/stream", query)}`, {
-        headers: this.headers(),
-        signal: options.signal,
-      });
+      const response = await this.fetchImpl(
+        `${this.baseUrl}${this.path("/events/stream", query)}`,
+        {
+          headers: this.headers(),
+          signal: options.signal,
+        },
+      );
       if (!response.ok) await this.throwResponseError(response);
       if (!response.body) throw new Error("Event stream response has no body");
       return response.body;
@@ -804,16 +1134,22 @@ export class OpenHarnessClient {
 
   private async request<T>(
     path: string,
-    options: { method?: string; body?: unknown; signal?: AbortSignal; auth?: boolean } = {},
+    options: {
+      method?: string;
+      body?: unknown;
+      signal?: AbortSignal;
+      auth?: boolean;
+    } = {},
   ): Promise<T> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: options.method ?? "GET",
       headers: this.headers(options.body !== undefined, options.auth ?? true),
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body:
+        options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal,
     });
     if (!response.ok) await this.throwResponseError(response);
-    return await response.json() as T;
+    return (await response.json()) as T;
   }
 
   private headers(json = false, auth = true): Record<string, string> {
@@ -842,7 +1178,10 @@ export class OpenHarnessClient {
       body = await response.text().catch(() => "");
     }
     const message =
-      body && typeof body === "object" && "error" in body && typeof body.error === "string"
+      body &&
+      typeof body === "object" &&
+      "error" in body &&
+      typeof body.error === "string"
         ? body.error
         : `OpenHarness API request failed with ${response.status}`;
     throw new OpenHarnessApiError(message, response.status, body);
@@ -853,9 +1192,9 @@ export class OpenHarnessClient {
  * 将 SSE 字节流解析为 `SessionEventRecord` 异步迭代。
  * `open` 负责建立连接并返回 response body，便于重试或注入。
  */
-export async function* streamServerSentEvents(
+export async function* streamServerSentEvents<T = SessionEventRecord>(
   open: () => Promise<ReadableStream<Uint8Array>>,
-): AsyncIterable<SessionEventRecord> {
+): AsyncIterable<T> {
   const reader = (await open()).getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -868,12 +1207,12 @@ export async function* streamServerSentEvents(
       const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() ?? "";
       for (const frame of frames) {
-        const event = parseSseFrame(frame);
+        const event = parseSseFrame<T>(frame);
         if (event) yield event;
       }
     }
     buffer += decoder.decode();
-    const event = parseSseFrame(buffer);
+    const event = parseSseFrame<T>(buffer);
     if (event) yield event;
   } finally {
     reader.releaseLock();
@@ -881,12 +1220,12 @@ export async function* streamServerSentEvents(
 }
 
 /** 解析单个 SSE frame 的 `data:` 行，得到事件 JSON。 */
-function parseSseFrame(frame: string): SessionEventRecord | undefined {
+function parseSseFrame<T>(frame: string): T | undefined {
   let data = "";
   for (const line of frame.split(/\r?\n/)) {
     if (!line || line.startsWith(":")) continue;
     if (line.startsWith("data:")) data += line.slice(5).trimStart();
   }
   if (!data) return undefined;
-  return JSON.parse(data) as SessionEventRecord;
+  return JSON.parse(data) as T;
 }

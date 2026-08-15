@@ -1,0 +1,28 @@
+{
+  "name": "@openharness/terminal-node",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "exit 0",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@openharness/terminal": "workspace:*",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "^5.7.3",
+    "vitest": "catalog:"
+  }
+}

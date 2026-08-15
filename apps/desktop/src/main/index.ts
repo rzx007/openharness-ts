@@ -9,6 +9,7 @@ import { allIpcContributions } from "./features"
 import { createMainWindow, showMainWindow } from "./features/main-window/window"
 import { createPetWindow } from "./features/pet/window"
 import { desktopSessionService } from "./features/session/session-service"
+import { desktopTerminalService } from "./features/terminal/terminal-service"
 import { createTray, destroyTray } from "./features/tray/tray"
 import icon from "../../resources/icon.png?asset"
 
@@ -83,6 +84,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   ipcRegistry?.dispose()
   destroyTray()
+  void desktopTerminalService.dispose()
   void desktopSessionService.dispose()
 })
 

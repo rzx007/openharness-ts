@@ -1,4 +1,9 @@
-import type { IToolRegistry, Settings, StreamingMessageClient, ToolDefinition } from "@openharness/core";
+import type {
+  IToolRegistry,
+  Settings,
+  StreamingMessageClient,
+  ToolDefinition,
+} from "@openharness/core";
 import { QueryEngine, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
 import { normalizeToolNames, resolveAllowedToolNames } from "@openharness/core";
 import {
@@ -12,7 +17,11 @@ import {
 } from "@openharness/api";
 import type { BackendType, ProviderSpec } from "@openharness/api";
 import { CredentialStorage, resolveApiKey } from "@openharness/auth";
-import { PermissionChecker, LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@openharness/permissions";
+import {
+  PermissionChecker,
+  LOCAL_READ_ONLY_TOOLS,
+  READ_ONLY_TOOLS,
+} from "@openharness/permissions";
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
@@ -26,8 +35,7 @@ const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
 
 export type ToolLimit =
-  | { kind: "all" }
-  | { kind: "only"; names: ReadonlySet<string> };
+  { kind: "all" } | { kind: "only"; names: ReadonlySet<string> };
 
 interface OpenHarnessRuntimeOptions {
   settings: Settings;
@@ -37,7 +45,7 @@ interface OpenHarnessRuntimeOptions {
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
-  hostCapabilities?: { cron?: boolean };
+  hostCapabilities?: { cron?: boolean; terminal?: boolean };
 }
 
 /**
@@ -81,33 +89,53 @@ export function resolveEffectiveAllowedTools(options: {
     options.hostToolCeiling ?? options.settingsAllowedTools ?? [],
     knownToolNames,
   );
-  const roleAllowed = resolveToolLimit(options.roleAllowedTools ?? [], knownToolNames);
+  const roleAllowed = resolveToolLimit(
+    options.roleAllowedTools ?? [],
+    knownToolNames,
+  );
   return intersectToolLimits(hostCeiling, roleAllowed);
 }
 
-export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOptions): Promise<RuntimeBundle> {
+export async function createOpenHarnessRuntime(
+  options: OpenHarnessRuntimeOptions,
+): Promise<RuntimeBundle> {
   const { settings } = options;
   const cwd = options.cwd ?? process.cwd();
   const configuration = options.configuration;
   const storage = options.credentialStorage ?? new CredentialStorage();
 
-  const apiClient = configuration.client ?? await resolveApiClient(settings, configuration, storage);
+  const apiClient =
+    configuration.client ??
+    (await resolveApiClient(settings, configuration, storage));
 
-  const baseToolRegistry = createDefaultToolRegistry({ cron: options.hostCapabilities?.cron });
+  const baseToolRegistry = createDefaultToolRegistry({
+    cron: options.hostCapabilities?.cron,
+    terminal: options.hostCapabilities?.terminal,
+  });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
   const effectiveAllowed = resolveEffectiveAllowedTools({
-    hostToolCeiling: configuration.hostToolCeiling ?? configuration.allowedTools,
+    hostToolCeiling:
+      configuration.hostToolCeiling ?? configuration.allowedTools,
     roleAllowedTools: configuration.roleAllowedTools,
     settingsAllowedTools: settings.permission.allowedTools,
     knownToolNames,
   });
-  const effectiveDenied = new Set(normalizeToolNames([
-    ...(settings.permission.deniedTools ?? []),
-    ...(configuration.disallowedTools ?? []),
-  ], knownToolNames));
+  const effectiveDenied = new Set(
+    normalizeToolNames(
+      [
+        ...(settings.permission.deniedTools ?? []),
+        ...(configuration.disallowedTools ?? []),
+      ],
+      knownToolNames,
+    ),
+  );
 
-  const toolRegistry = new RuntimeToolRegistry(baseToolRegistry, effectiveAllowed, effectiveDenied);
+  const toolRegistry = new RuntimeToolRegistry(
+    baseToolRegistry,
+    effectiveAllowed,
+    effectiveDenied,
+  );
 
   const mode = configuration.permissionMode ?? settings.permission.mode;
 
@@ -119,7 +147,8 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
   const permissionChecker = new PermissionChecker({
     mode,
     cwd,
-    allowedTools: effectiveAllowed.kind === "only" ? [...effectiveAllowed.names] : [],
+    allowedTools:
+      effectiveAllowed.kind === "only" ? [...effectiveAllowed.names] : [],
     deniedTools: [...effectiveDenied],
     pathRules: settings.permission.pathRules,
     deniedCommands: settings.permission.deniedCommands,
@@ -136,15 +165,17 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
   // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt
   // 时才注入 model 可见的 skills 段，使 print/backend 三模式与 REPL 一致——REPL
   // 由 refreshSystemPrompt 注入，print/backend 走默认 composition root 由此处注入。
-  const systemPrompt = configuration.systemPrompt ?? await buildRuntimeSystemPrompt({
-    customPrompt: settings.systemPrompt,
-    cwd,
-    permissionMode: mode,
-    fastMode: configuration.fastMode ?? settings.fastMode,
-    effort: configuration.effort ?? settings.effort,
-    passes: settings.passes,
-    skillsList: options.skillRegistry?.modelVisibleList(),
-  });
+  const systemPrompt =
+    configuration.systemPrompt ??
+    (await buildRuntimeSystemPrompt({
+      customPrompt: settings.systemPrompt,
+      cwd,
+      permissionMode: mode,
+      fastMode: configuration.fastMode ?? settings.fastMode,
+      effort: configuration.effort ?? settings.effort,
+      passes: settings.passes,
+      skillsList: options.skillRegistry?.modelVisibleList(),
+    }));
 
   const engineOptions = {
     maxTurns: configuration.maxTurns ?? settings.maxTurns,
@@ -172,7 +203,12 @@ export async function createOpenHarnessRuntime(options: OpenHarnessRuntimeOption
     .setQueryEngine(queryEngine)
     .build(settings);
 
-  await attachSandboxRuntime(bundle, cwd, options.sandboxReporter, options.sessionId);
+  await attachSandboxRuntime(
+    bundle,
+    cwd,
+    options.sandboxReporter,
+    options.sessionId,
+  );
   return bundle;
 }
 
@@ -206,13 +242,20 @@ class RuntimeToolRegistry implements IToolRegistry {
 
   private isVisible(name: string): boolean {
     if (this.deniedTools.has(name)) return false;
-    return this.allowedTools.kind === "all" || this.allowedTools.names.has(name);
+    return (
+      this.allowedTools.kind === "all" || this.allowedTools.names.has(name)
+    );
   }
 }
 
-function resolveToolLimit(tools: string[], knownToolNames: string[]): ToolLimit {
+function resolveToolLimit(
+  tools: string[],
+  knownToolNames: string[],
+): ToolLimit {
   const names = resolveAllowedToolNames(tools, knownToolNames);
-  return names.length === 0 ? { kind: "all" } : { kind: "only", names: new Set(names) };
+  return names.length === 0
+    ? { kind: "all" }
+    : { kind: "only", names: new Set(names) };
 }
 
 function intersectToolLimits(left: ToolLimit, right: ToolLimit): ToolLimit {
@@ -236,7 +279,10 @@ async function attachSandboxRuntime(
   });
   bundle.sandboxStatus = sandboxRuntime.status;
 
-  if (sandboxRuntime.status.backend !== "docker" || !sandboxRuntime.status.active) {
+  if (
+    sandboxRuntime.status.backend !== "docker" ||
+    !sandboxRuntime.status.active
+  ) {
     return;
   }
 
@@ -300,7 +346,9 @@ async function resolveApiClient(
   }
 
   // 确定后端类型：优先使用提供商规范中的类型，否则根据 API 格式推断
-  const backendType: BackendType = spec?.backendType ?? resolveBackendFromFormat(configuration?.apiFormat ?? settings.apiFormat);
+  const backendType: BackendType =
+    spec?.backendType ??
+    resolveBackendFromFormat(configuration?.apiFormat ?? settings.apiFormat);
 
   switch (backendType) {
     case "codex":
@@ -326,7 +374,9 @@ async function resolveApiClient(
 
 function resolveBackendFromFormat(format: string): BackendType {
   switch (format) {
-    case "openai": return "openai_compat";
-    default: return "anthropic";
+    case "openai":
+      return "openai_compat";
+    default:
+      return "anthropic";
   }
 }

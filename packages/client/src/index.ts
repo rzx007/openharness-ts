@@ -109,3 +109,16 @@ export type {
   UpdateClientSessionInput,
 } from "./types/index.js";
 export type { SessionMessageWithParts } from "./state/index.js";
+export type {
+  TerminalCreateRequest,
+  TerminalEvent,
+  TerminalReadRequest,
+  TerminalReadResult,
+  TerminalResizeRequest,
+  TerminalRuntime,
+  TerminalSessionInfo,
+  TerminalSessionStatus,
+  TerminalSignal,
+  TerminalSource,
+  TerminalWriteRequest,
+} from "@openharness/terminal";

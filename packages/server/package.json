@@ -31,6 +31,8 @@
     "@openharness/sandbox": "workspace:*",
     "@openharness/services": "workspace:*",
     "@openharness/skills": "workspace:*",
+    "@openharness/terminal": "workspace:*",
+    "@openharness/terminal-node": "workspace:*",
     "hono": "catalog:"
   },
   "devDependencies": {

@@ -10,6 +10,10 @@ import type {
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
+  SetDefaultDesktopModelInput,
+  SetDefaultDesktopPermissionModeInput,
+  UpdateDesktopSessionModelInput,
+  UpdateDesktopSessionPermissionModeInput,
 } from "./session-types"
 import type {
   WorkspaceListFilesInput,
@@ -19,6 +23,14 @@ import type {
   WorkspaceReadFileResult,
   WorkspaceRevealPathInput,
 } from "./workspace-types"
+import type {
+  DesktopTerminalCreateInput,
+  DesktopTerminalReadInput,
+  DesktopTerminalReadResult,
+  DesktopTerminalRecord,
+  DesktopTerminalResizeInput,
+  DesktopTerminalWriteInput,
+} from "./terminal-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -55,6 +67,10 @@ export const IpcChannels = {
   sessionSendPrompt: "session:send-prompt",
   sessionInterrupt: "session:interrupt",
   sessionReplyPermission: "session:reply-permission",
+  sessionSetDefaultModel: "session:set-default-model",
+  sessionSetDefaultPermissionMode: "session:set-default-permission-mode",
+  sessionUpdateModel: "session:update-model",
+  sessionUpdatePermissionMode: "session:update-permission-mode",
   sessionRename: "session:rename",
   sessionSetPinned: "session:set-pinned",
   sessionArchive: "session:archive",
@@ -63,10 +79,20 @@ export const IpcChannels = {
   workspaceReadFile: "workspace:read-file",
   workspaceRevealPath: "workspace:reveal-path",
   workspaceCopyPath: "workspace:copy-path",
+
+  terminalCreate: "terminal:create",
+  terminalWrite: "terminal:write",
+  terminalResize: "terminal:resize",
+  terminalRead: "terminal:read",
+  terminalKill: "terminal:kill",
+  terminalList: "terminal:list",
 } as const
 
 export const IpcEvents = {
   sessionUpdated: "session:updated",
+  terminalData: "terminal:data",
+  terminalExit: "terminal:exit",
+  terminalError: "terminal:error",
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -156,6 +182,22 @@ export interface IpcInvokeMap {
     args: [input: ReplyDesktopPermissionInput]
     result: void
   }
+  [IpcChannels.sessionSetDefaultModel]: {
+    args: [input: SetDefaultDesktopModelInput]
+    result: DesktopBootstrapData
+  }
+  [IpcChannels.sessionSetDefaultPermissionMode]: {
+    args: [input: SetDefaultDesktopPermissionModeInput]
+    result: DesktopBootstrapData
+  }
+  [IpcChannels.sessionUpdateModel]: {
+    args: [input: UpdateDesktopSessionModelInput]
+    result: DesktopSessionRecord
+  }
+  [IpcChannels.sessionUpdatePermissionMode]: {
+    args: [input: UpdateDesktopSessionPermissionModeInput]
+    result: DesktopSessionRecord
+  }
   [IpcChannels.sessionRename]: {
     args: [input: RenameDesktopSessionInput]
     result: DesktopSessionRecord
@@ -184,6 +226,31 @@ export interface IpcInvokeMap {
   [IpcChannels.workspaceCopyPath]: {
     args: [input: WorkspaceCopyPathInput]
     result: string
+  }
+
+  [IpcChannels.terminalCreate]: {
+    args: [input: DesktopTerminalCreateInput]
+    result: DesktopTerminalRecord
+  }
+  [IpcChannels.terminalWrite]: {
+    args: [input: DesktopTerminalWriteInput]
+    result: void
+  }
+  [IpcChannels.terminalResize]: {
+    args: [input: DesktopTerminalResizeInput]
+    result: void
+  }
+  [IpcChannels.terminalRead]: {
+    args: [input: DesktopTerminalReadInput]
+    result: DesktopTerminalReadResult
+  }
+  [IpcChannels.terminalKill]: {
+    args: [terminalId: string]
+    result: void
+  }
+  [IpcChannels.terminalList]: {
+    args: []
+    result: DesktopTerminalRecord[]
   }
 }
 

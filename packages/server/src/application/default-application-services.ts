@@ -328,7 +328,6 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
 
 const CATALOG_PROVIDER_ALIASES: Record<string, string[]> = {
   bedrock: ["amazon-bedrock"],
-  codex: ["codex", "opencode"],
   dashscope: ["dashscope", "alibaba"],
   gemini: ["gemini", "google"],
   vertex: ["google-vertex", "vertex"],

@@ -3,6 +3,7 @@ import type {
   Settings,
   StreamingMessageClient,
 } from "@openharness/core";
+import type { AgentTerminalHost } from "@openharness/terminal";
 
 /** Opinionated runtime configuration exposed by the programmatic agent API. */
 export interface OpenHarnessAgentConfiguration {
@@ -26,4 +27,6 @@ export interface OpenHarnessAgentConfiguration {
   fastMode?: boolean;
   autoApproveReadOnly?: boolean;
   autoApproveTools?: string[];
+  /** Host-owned persistent terminal capability. Descendant agents inherit it. */
+  terminal?: AgentTerminalHost;
 }

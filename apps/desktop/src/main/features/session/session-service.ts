@@ -26,6 +26,7 @@ import type {
   DesktopModel,
   DesktopProject,
   DesktopProjectDetails,
+  DesktopPermissionMode,
   DesktopSessionView,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
@@ -33,6 +34,10 @@ import type {
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
+  SetDefaultDesktopModelInput,
+  SetDefaultDesktopPermissionModeInput,
+  UpdateDesktopSessionModelInput,
+  UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
 
 interface SessionSubscription {
@@ -58,13 +63,23 @@ class DesktopSessionService {
     const archivedSessions = allSessions.filter((session) => session.status === "archived")
     const models = providers.flatMap((provider) => provider.models)
     const configuredModel = typeof settings["model"] === "string" ? settings["model"] : undefined
+    const configuredProvider = optionalProvider(settings["provider"])
     const defaultModel = configuredModel ?? models[0]?.id
+    const defaultPermissionMode = readSettingsPermissionMode(settings)
 
     if (!defaultModel) {
       throw new Error("没有找到可用模型，请先在 OpenHarness 设置中配置模型。")
     }
 
     const normalizedModels = ensureConfiguredModel(models, defaultModel)
+    const defaultProvider = resolveDefaultProvider(
+      normalizedModels,
+      defaultModel,
+      configuredProvider
+    )
+    if (defaultProvider && defaultProvider !== configuredProvider) {
+      await client.patchSettings({ model: defaultModel, provider: defaultProvider })
+    }
     const projects = await Promise.all(projectRecords.map(toDesktopProject))
 
     return {
@@ -74,6 +89,8 @@ class DesktopSessionService {
       archivedSessions: sortSessions(archivedSessions),
       models: normalizedModels,
       defaultModel,
+      ...(defaultProvider ? { defaultProvider } : {}),
+      defaultPermissionMode,
     }
   }
 
@@ -111,9 +128,23 @@ class DesktopSessionService {
   async createSession(input: CreateDesktopSessionInput): Promise<SessionRecord> {
     const cwd = resolveRequiredPath(input.cwd)
     const model = requireString(input.model, "模型")
+    const permissionMode = normalizePermissionMode(input.permissionMode)
     const client = await this.getClient()
+    const provider = await resolveProviderForModel(client, model, input.provider)
     const projectId = requireString(input.projectId, "Project ID")
-    const session = await client.createSession({ projectId, cwd, model, title: "" })
+    const session = await client.createSession({
+      projectId,
+      cwd,
+      model,
+      title: "",
+      metadata: {
+        runtime: {
+          model,
+          ...(provider ? { provider } : {}),
+          ...(permissionMode ? { permissionMode } : {}),
+        },
+      },
+    })
     return session
   }
 
@@ -132,6 +163,17 @@ class DesktopSessionService {
 
   async removeProject(projectId: string): Promise<void> {
     await (await this.getClient()).archiveProject(requireString(projectId, "Project ID"))
+  }
+
+  async resolveProjectDirectory(projectIdInput: string): Promise<string> {
+    const projectId = requireString(projectIdInput, "Project ID")
+    const client = await this.getClient()
+    const project = (await client.listProjects()).find((item) => item.id === projectId)
+    if (!project) throw new Error(`Project ${projectId} does not exist.`)
+
+    const info = await stat(project.path)
+    if (!info.isDirectory()) throw new Error(`Project ${project.name} directory is unavailable.`)
+    return project.path
   }
 
   async rebindProject(
@@ -204,6 +246,62 @@ class DesktopSessionService {
     })
   }
 
+  async setDefaultModel(input: SetDefaultDesktopModelInput): Promise<DesktopBootstrapData> {
+    const model = requireString(input.model, "模型")
+    const client = await this.getClient()
+    const provider = await resolveProviderForModel(client, model, input.provider)
+    await client.patchSettings({
+      model,
+      ...(provider ? { provider } : {}),
+    })
+    return await this.bootstrap()
+  }
+
+  async setDefaultPermissionMode(
+    input: SetDefaultDesktopPermissionModeInput
+  ): Promise<DesktopBootstrapData> {
+    const permissionMode = requirePermissionMode(input.permissionMode)
+    const client = await this.getClient()
+    const settings = await client.getSettings()
+    const permission = settings["permission"]
+    await client.patchSettings({
+      permission: {
+        ...(permission && typeof permission === "object" && !Array.isArray(permission)
+          ? permission
+          : {}),
+        mode: permissionMode,
+      },
+    })
+    return await this.bootstrap()
+  }
+
+  async updateSessionModel(input: UpdateDesktopSessionModelInput): Promise<SessionRecord> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const model = requireString(input.model, "模型")
+    const client = await this.getClient()
+    const provider = await resolveProviderForModel(client, model, input.provider)
+    return await client.updateSession(sessionId, {
+      metadata: {
+        runtime: {
+          model,
+          ...(provider ? { provider } : {}),
+        },
+      },
+    })
+  }
+
+  async updateSessionPermissionMode(
+    input: UpdateDesktopSessionPermissionModeInput
+  ): Promise<SessionRecord> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const permissionMode = requirePermissionMode(input.permissionMode)
+    return await (
+      await this.getClient()
+    ).updateSession(sessionId, {
+      metadata: { runtime: { permissionMode } },
+    })
+  }
+
   async renameSession(input: RenameDesktopSessionInput): Promise<SessionRecord> {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const title = requireString(input.title, "会话名称")
@@ -252,6 +350,10 @@ class DesktopSessionService {
       clearDaemonRegistry()
     }
     await server.close()
+  }
+
+  daemonClient(): Promise<OpenHarnessClient> {
+    return this.getClient()
   }
 
   private async pumpSession(
@@ -395,6 +497,78 @@ function readDesktopMetadata(metadata: Record<string, unknown>): Record<string, 
   return desktop && typeof desktop === "object" && !Array.isArray(desktop)
     ? { ...(desktop as Record<string, unknown>) }
     : {}
+}
+
+function readSettingsPermissionMode(settings: Record<string, unknown>): DesktopPermissionMode {
+  const permission = settings["permission"]
+  if (!permission || typeof permission !== "object" || Array.isArray(permission)) return "default"
+  return normalizePermissionMode((permission as Record<string, unknown>)["mode"]) ?? "default"
+}
+
+function normalizePermissionMode(value: unknown): DesktopPermissionMode | undefined {
+  return value === "default" || value === "plan" || value === "full_auto" ? value : undefined
+}
+
+function requirePermissionMode(value: unknown): DesktopPermissionMode {
+  const mode = normalizePermissionMode(value)
+  if (!mode) throw new Error("权限模式必须是 default、plan 或 full_auto。")
+  return mode
+}
+
+function optionalProvider(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const provider = value.trim()
+  if (!provider || provider.toLowerCase() === "configured") return undefined
+  return provider
+}
+
+function resolveDefaultProvider(
+  models: DesktopModel[],
+  model: string,
+  configuredProvider: string | undefined
+): string | undefined {
+  if (
+    configuredProvider &&
+    models.some((item) => item.id === model && item.providerName === configuredProvider)
+  ) {
+    return configuredProvider
+  }
+  const providers = uniqueModelProviders(models, model)
+  return providers.length === 1 ? providers[0] : configuredProvider
+}
+
+async function resolveProviderForModel(
+  client: OpenHarnessClient,
+  model: string,
+  requestedProvider: unknown
+): Promise<string | undefined> {
+  const provider = optionalProvider(requestedProvider)
+  const models = (await client.listModels()).flatMap((item) => item.models)
+  if (provider) {
+    if (!models.some((item) => item.id === model && item.providerName === provider)) {
+      throw new Error(`模型 ${model} 不属于 provider ${provider}。`)
+    }
+    return provider
+  }
+
+  const providers = uniqueModelProviders(models, model)
+  if (providers.length <= 1) return providers[0]
+
+  const settings = await client.getSettings()
+  const configuredProvider = optionalProvider(settings["provider"])
+  if (configuredProvider && providers.includes(configuredProvider)) return configuredProvider
+  throw new Error(`模型 ${model} 在多个 provider 中同名，请明确指定 provider。`)
+}
+
+function uniqueModelProviders(models: DesktopModel[], model: string): string[] {
+  return [
+    ...new Set(
+      models
+        .filter((item) => item.id === model)
+        .map((item) => optionalProvider(item.providerName))
+        .filter((item): item is string => Boolean(item))
+    ),
+  ]
 }
 
 function resolveRequiredPath(value: unknown): string {

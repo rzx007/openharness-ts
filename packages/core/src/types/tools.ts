@@ -1,6 +1,7 @@
 import type { ContentBlock } from "./messages";
 import type { Settings } from "./settings";
 import type { AgentExecutionContext } from "./runtime";
+import type { AgentTerminalHost } from "@openharness/terminal";
 
 export interface McpAuthConfigureInput {
   serverName: string;
@@ -32,6 +33,8 @@ export interface ToolContext {
   mcpManager?: unknown;
   /** Host-owned MCP auth updater. It saves config and reconnects the live MCP manager. */
   mcpAuth?: McpAuthHost;
+  /** Host-owned persistent terminal capability. Omitted in runtimes without PTY support. */
+  terminal?: AgentTerminalHost;
   agent?: AgentExecutionContext;
 }
 
@@ -51,7 +54,7 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
   execute: (
     input: Record<string, unknown>,
-    context: ToolContext
+    context: ToolContext,
   ) => Promise<ToolResult>;
 }
 

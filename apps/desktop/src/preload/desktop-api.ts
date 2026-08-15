@@ -7,6 +7,7 @@ import {
   type IpcInvokeMap,
   type TrayNotificationOptions,
 } from "../shared/ipc-channels"
+import type { DesktopTerminalEvent } from "../shared/terminal-types"
 
 const invoke = <C extends IpcChannel>(
   channel: C,
@@ -54,6 +55,30 @@ export const desktopAPI = {
     copyPath: (input: IpcInvokeMap[typeof IpcChannels.workspaceCopyPath]["args"][0]) =>
       invoke(IpcChannels.workspaceCopyPath, input),
   },
+  terminal: {
+    create: (input: IpcInvokeMap[typeof IpcChannels.terminalCreate]["args"][0]) =>
+      invoke(IpcChannels.terminalCreate, input),
+    write: (input: IpcInvokeMap[typeof IpcChannels.terminalWrite]["args"][0]) =>
+      invoke(IpcChannels.terminalWrite, input),
+    resize: (input: IpcInvokeMap[typeof IpcChannels.terminalResize]["args"][0]) =>
+      invoke(IpcChannels.terminalResize, input),
+    read: (input: IpcInvokeMap[typeof IpcChannels.terminalRead]["args"][0]) =>
+      invoke(IpcChannels.terminalRead, input),
+    kill: (terminalId: string) => invoke(IpcChannels.terminalKill, terminalId),
+    list: () => invoke(IpcChannels.terminalList),
+    onEvent: (listener: (event: DesktopTerminalEvent) => void): (() => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: DesktopTerminalEvent): void =>
+        listener(value)
+      ipcRenderer.on(IpcEvents.terminalData, wrapped)
+      ipcRenderer.on(IpcEvents.terminalExit, wrapped)
+      ipcRenderer.on(IpcEvents.terminalError, wrapped)
+      return () => {
+        ipcRenderer.removeListener(IpcEvents.terminalData, wrapped)
+        ipcRenderer.removeListener(IpcEvents.terminalExit, wrapped)
+        ipcRenderer.removeListener(IpcEvents.terminalError, wrapped)
+      }
+    },
+  },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),
@@ -73,6 +98,16 @@ export const desktopAPI = {
     interrupt: (sessionId: string) => invoke(IpcChannels.sessionInterrupt, sessionId),
     replyPermission: (input: IpcInvokeMap[typeof IpcChannels.sessionReplyPermission]["args"][0]) =>
       invoke(IpcChannels.sessionReplyPermission, input),
+    setDefaultModel: (input: IpcInvokeMap[typeof IpcChannels.sessionSetDefaultModel]["args"][0]) =>
+      invoke(IpcChannels.sessionSetDefaultModel, input),
+    setDefaultPermissionMode: (
+      input: IpcInvokeMap[typeof IpcChannels.sessionSetDefaultPermissionMode]["args"][0]
+    ) => invoke(IpcChannels.sessionSetDefaultPermissionMode, input),
+    updateModel: (input: IpcInvokeMap[typeof IpcChannels.sessionUpdateModel]["args"][0]) =>
+      invoke(IpcChannels.sessionUpdateModel, input),
+    updatePermissionMode: (
+      input: IpcInvokeMap[typeof IpcChannels.sessionUpdatePermissionMode]["args"][0]
+    ) => invoke(IpcChannels.sessionUpdatePermissionMode, input),
     rename: (input: IpcInvokeMap[typeof IpcChannels.sessionRename]["args"][0]) =>
       invoke(IpcChannels.sessionRename, input),
     setPinned: (input: IpcInvokeMap[typeof IpcChannels.sessionSetPinned]["args"][0]) =>

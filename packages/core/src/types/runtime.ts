@@ -6,6 +6,7 @@ import type { ContentBlock, Message } from "./messages";
 import type { StreamEvent } from "./events";
 import type { Settings } from "./settings";
 import type { CompactAttachmentsProvider } from "../engine/compact-service";
+import type { AgentTerminalHost } from "@openharness/terminal";
 
 export interface AgentPermissionRequest {
   toolName: string;
@@ -129,7 +130,10 @@ export interface AgentChildInvocation {
 export interface AgentChildController {
   hasChildAgent(invocationId: string): boolean;
   spawnChildAgent(input: AgentChildSpawnInput): Promise<AgentChildInvocation>;
-  sendChildInput(invocationId: string, input: AgentChildInput): Promise<AgentInputReceipt>;
+  sendChildInput(
+    invocationId: string,
+    input: AgentChildInput,
+  ): Promise<AgentInputReceipt>;
   interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
   awaitChildAgent(invocationId: string): Promise<AgentChildResult>;
 }
@@ -173,20 +177,63 @@ export type AgentEventInput =
     }
   | { type: "run.started"; data: Record<string, never> }
   | { type: "run.completed"; data: { output: string; stopReason?: string } }
-  | { type: "run.failed"; data: { error: AgentSerializedError; output?: string } }
-  | { type: "run.interrupted"; data: { error: AgentSerializedError; output?: string } }
+  | {
+      type: "run.failed";
+      data: { error: AgentSerializedError; output?: string };
+    }
+  | {
+      type: "run.interrupted";
+      data: { error: AgentSerializedError; output?: string };
+    }
   | { type: "output.text.delta"; data: { delta: string } }
   | { type: "output.turn.completed"; data: { stopReason: string } }
-  | { type: "tool.started"; data: { toolUse: { type: "tool_use"; id: string; name: string; input: Record<string, unknown> } } }
-  | { type: "tool.completed"; data: { toolUseId: string; result: { content: ContentBlock[]; isError?: boolean } } }
+  | {
+      type: "tool.started";
+      data: {
+        toolUse: {
+          type: "tool_use";
+          id: string;
+          name: string;
+          input: Record<string, unknown>;
+        };
+      };
+    }
+  | {
+      type: "tool.completed";
+      data: {
+        toolUseId: string;
+        result: { content: ContentBlock[]; isError?: boolean };
+      };
+    }
   | { type: "usage.updated"; data: { usage: import("./usage").UsageSnapshot } }
-  | { type: "domain.event"; data: { name: string; payload?: Record<string, unknown> } }
-  | { type: "permission.requested"; data: { requestId: string; request: AgentPermissionRequest } }
-  | { type: "permission.resolved"; data: { requestId: string; decision: AgentPermissionDecision } }
-  | { type: "child.created"; data: { childId: string; sessionId: string; spawn: AgentChildSpawnInput; cwd: string; worktree?: { path: string; branch: string } } }
+  | {
+      type: "domain.event";
+      data: { name: string; payload?: Record<string, unknown> };
+    }
+  | {
+      type: "permission.requested";
+      data: { requestId: string; request: AgentPermissionRequest };
+    }
+  | {
+      type: "permission.resolved";
+      data: { requestId: string; decision: AgentPermissionDecision };
+    }
+  | {
+      type: "child.created";
+      data: {
+        childId: string;
+        sessionId: string;
+        spawn: AgentChildSpawnInput;
+        cwd: string;
+        worktree?: { path: string; branch: string };
+      };
+    }
   | { type: "child.suspended"; data: { childId: string; sessionId: string } }
   | { type: "child.resumed"; data: { childId: string; sessionId: string } }
-  | { type: "child.closed"; data: { childId: string; sessionId: string; result: AgentChildResult } };
+  | {
+      type: "child.closed";
+      data: { childId: string; sessionId: string; result: AgentChildResult };
+    };
 
 export type AgentEvent = AgentEventInput & {
   id: string;
@@ -209,7 +256,9 @@ export interface AgentExecutionContext {
   readonly effects: AgentEffects;
   readonly children: AgentChildController;
   emit(event: AgentEventInput): Promise<void>;
-  takeSteeredInputs(options?: { closeIfEmpty?: boolean }): Promise<AgentChildInput[]>;
+  takeSteeredInputs(options?: {
+    closeIfEmpty?: boolean;
+  }): Promise<AgentChildInput[]>;
   closeSteering(): void;
 }
 
@@ -236,7 +285,8 @@ export interface AgentRunHandle {
 export interface AgentChildHandle {
   readonly id: string;
   readonly sessionId: string;
-  readonly state: "starting" | "running" | "idle" | "suspended" | "closing" | "closed";
+  readonly state:
+    "starting" | "running" | "idle" | "suspended" | "closing" | "closed";
   readonly result: Promise<AgentChildResult>;
   send(input: AgentChildInput): Promise<AgentInputReceipt>;
   interrupt(reason?: string): Promise<void>;
@@ -272,6 +322,7 @@ export interface QueryEngine {
   setSessionId(sessionId: string | undefined): void;
   setMcpManager(mgr: unknown): void;
   setMcpAuth(auth: McpAuthHost | undefined): void;
+  setTerminal(terminal: AgentTerminalHost | undefined): void;
 }
 
 export interface MemoryRetriever {
@@ -332,7 +383,10 @@ export class RuntimeBundle {
     this.queryEngine.setApiClient(newClient);
   }
 
-  addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void {
+  addCleanup(
+    cleanup: () => Promise<void> | void,
+    cleanupSync?: () => void,
+  ): void {
     this.cleanupCallbacks.push(cleanup);
     if (cleanupSync) this.syncCleanupCallbacks.push(cleanupSync);
   }

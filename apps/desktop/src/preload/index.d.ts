@@ -18,6 +18,10 @@ import type {
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
   SendDesktopPromptInput,
+  SetDefaultDesktopModelInput,
+  SetDefaultDesktopPermissionModeInput,
+  UpdateDesktopSessionModelInput,
+  UpdateDesktopSessionPermissionModeInput,
 } from "../shared/session-types"
 import type {
   WorkspaceListFilesInput,
@@ -27,6 +31,15 @@ import type {
   WorkspaceReadFileResult,
   WorkspaceRevealPathInput,
 } from "../shared/workspace-types"
+import type {
+  DesktopTerminalCreateInput,
+  DesktopTerminalEvent,
+  DesktopTerminalReadInput,
+  DesktopTerminalReadResult,
+  DesktopTerminalRecord,
+  DesktopTerminalResizeInput,
+  DesktopTerminalWriteInput,
+} from "../shared/terminal-types"
 
 export interface DesktopAPI {
   app: {
@@ -61,6 +74,15 @@ export interface DesktopAPI {
     revealPath: (input: WorkspaceRevealPathInput) => Promise<void>
     copyPath: (input: WorkspaceCopyPathInput) => Promise<string>
   }
+  terminal: {
+    create: (input: DesktopTerminalCreateInput) => Promise<DesktopTerminalRecord>
+    write: (input: DesktopTerminalWriteInput) => Promise<void>
+    resize: (input: DesktopTerminalResizeInput) => Promise<void>
+    read: (input: DesktopTerminalReadInput) => Promise<DesktopTerminalReadResult>
+    kill: (terminalId: string) => Promise<void>
+    list: () => Promise<DesktopTerminalRecord[]>
+    onEvent: (listener: (event: DesktopTerminalEvent) => void) => () => void
+  }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>
     chooseProject: () => Promise<DesktopProjectDetails | null>
@@ -75,6 +97,14 @@ export interface DesktopAPI {
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
     interrupt: (sessionId: string) => Promise<void>
     replyPermission: (input: ReplyDesktopPermissionInput) => Promise<void>
+    setDefaultModel: (input: SetDefaultDesktopModelInput) => Promise<DesktopBootstrapData>
+    setDefaultPermissionMode: (
+      input: SetDefaultDesktopPermissionModeInput
+    ) => Promise<DesktopBootstrapData>
+    updateModel: (input: UpdateDesktopSessionModelInput) => Promise<DesktopSessionRecord>
+    updatePermissionMode: (
+      input: UpdateDesktopSessionPermissionModeInput
+    ) => Promise<DesktopSessionRecord>
     rename: (input: RenameDesktopSessionInput) => Promise<DesktopSessionRecord>
     setPinned: (input: PinDesktopSessionInput) => Promise<DesktopSessionRecord>
     archive: (sessionId: string) => Promise<DesktopSessionRecord>

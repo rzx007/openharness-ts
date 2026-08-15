@@ -2,10 +2,16 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { PermissionChecker, LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "../src/index.js";
+import {
+  PermissionChecker,
+  LOCAL_READ_ONLY_TOOLS,
+  READ_ONLY_TOOLS,
+} from "../src/index.js";
 import type { PermissionCheckOptions } from "../src/index.js";
 
-async function withTempCwd(fn: (cwd: string) => Promise<void> | void): Promise<void> {
+async function withTempCwd(
+  fn: (cwd: string) => Promise<void> | void,
+): Promise<void> {
   const cwd = mkdtempSync(join(tmpdir(), "ohs-permissions-"));
   try {
     await fn(cwd);
@@ -72,11 +78,11 @@ describe("PermissionChecker", () => {
   it("matches pathPattern with glob", async () => {
     const checker = new PermissionChecker({
       mode: "default",
-      rules: [
-        { pathPattern: "/safe/*", action: "allow" },
-      ],
+      rules: [{ pathPattern: "/safe/*", action: "allow" }],
     });
-    const allow = await checker.checkTool("read_file", { path: "/safe/file.txt" });
+    const allow = await checker.checkTool("read_file", {
+      path: "/safe/file.txt",
+    });
     expect(allow.action).toBe("allow");
     const deny = await checker.checkTool("read_file", { path: "/etc/passwd" });
     expect(deny.action).toBe("ask");
@@ -85,9 +91,7 @@ describe("PermissionChecker", () => {
   it("matches commandPattern with glob", async () => {
     const checker = new PermissionChecker({
       mode: "default",
-      rules: [
-        { commandPattern: "git *", action: "allow" },
-      ],
+      rules: [{ commandPattern: "git *", action: "allow" }],
     });
     const allow = await checker.checkTool("bash", { command: "git status" });
     expect(allow.action).toBe("allow");
@@ -194,8 +198,12 @@ describe("autoApproveTools (swarm worker read-only auto-approval)", () => {
       autoApproveTools: ["Read"],
       pathRules: [{ pattern: "*.env", allow: false }],
     });
-    expect((await checker.checkTool("Read", { path: "/app/.env" })).action).toBe("deny");
-    expect((await checker.checkTool("Read", { path: "/app/a.ts" })).action).toBe("allow");
+    expect(
+      (await checker.checkTool("Read", { path: "/app/.env" })).action,
+    ).toBe("deny");
+    expect(
+      (await checker.checkTool("Read", { path: "/app/a.ts" })).action,
+    ).toBe("allow");
   });
 
   it("deniedCommands 优先于 autoApprove(Bash 进放行名单也拦黑名单命令)", async () => {
@@ -204,8 +212,12 @@ describe("autoApproveTools (swarm worker read-only auto-approval)", () => {
       autoApproveTools: ["Bash"],
       deniedCommands: ["rm -rf*"],
     });
-    expect((await checker.checkTool("Bash", { command: "rm -rf /" })).action).toBe("deny");
-    expect((await checker.checkTool("Bash", { command: "ls" })).action).toBe("allow");
+    expect(
+      (await checker.checkTool("Bash", { command: "rm -rf /" })).action,
+    ).toBe("deny");
+    expect((await checker.checkTool("Bash", { command: "ls" })).action).toBe(
+      "allow",
+    );
   });
 
   it("pathRules allow 仍受 allowedTools 白名单收窄(原序语义保留)", async () => {
@@ -214,8 +226,12 @@ describe("autoApproveTools (swarm worker read-only auto-approval)", () => {
       allowedTools: ["Grep"],
       pathRules: [{ pattern: "/app/*", allow: true }],
     });
-    expect((await checker.checkTool("Read", { path: "/app/a.ts" })).action).toBe("deny");
-    expect((await checker.checkTool("Grep", { path: "/app/a.ts" })).action).toBe("allow");
+    expect(
+      (await checker.checkTool("Read", { path: "/app/a.ts" })).action,
+    ).toBe("deny");
+    expect(
+      (await checker.checkTool("Grep", { path: "/app/a.ts" })).action,
+    ).toBe("allow");
   });
 });
 
@@ -224,10 +240,29 @@ describe("local read-only cwd auto-approval", () => {
     await withTempCwd(async (cwd) => {
       const checker = new PermissionChecker({ mode: "default", cwd });
 
-      expect((await checker.checkTool("Read", { file_path: join(cwd, "src/a.ts") })).action).toBe("allow");
-      expect((await checker.checkTool("Grep", { path: join(cwd, "src") })).action).toBe("allow");
-      expect((await checker.checkTool("Glob", { path: join(cwd, "src"), pattern: "**/*.ts" })).action).toBe("allow");
-      expect((await checker.checkTool("Lsp", { filePath: join(cwd, "src/a.ts"), operation: "hover" })).action).toBe("allow");
+      expect(
+        (await checker.checkTool("Read", { file_path: join(cwd, "src/a.ts") }))
+          .action,
+      ).toBe("allow");
+      expect(
+        (await checker.checkTool("Grep", { path: join(cwd, "src") })).action,
+      ).toBe("allow");
+      expect(
+        (
+          await checker.checkTool("Glob", {
+            path: join(cwd, "src"),
+            pattern: "**/*.ts",
+          })
+        ).action,
+      ).toBe("allow");
+      expect(
+        (
+          await checker.checkTool("Lsp", {
+            filePath: join(cwd, "src/a.ts"),
+            operation: "hover",
+          })
+        ).action,
+      ).toBe("allow");
     });
   });
 
@@ -235,9 +270,20 @@ describe("local read-only cwd auto-approval", () => {
     await withTempCwd(async (cwd) => {
       const checker = new PermissionChecker({ mode: "default", cwd });
 
-      expect((await checker.checkTool("Grep", { pattern: "foo" })).action).toBe("allow");
-      expect((await checker.checkTool("Glob", { pattern: "**/*.ts" })).action).toBe("allow");
-      expect((await checker.checkTool("Lsp", { operation: "workspace_symbol", query: "foo" })).action).toBe("allow");
+      expect((await checker.checkTool("Grep", { pattern: "foo" })).action).toBe(
+        "allow",
+      );
+      expect(
+        (await checker.checkTool("Glob", { pattern: "**/*.ts" })).action,
+      ).toBe("allow");
+      expect(
+        (
+          await checker.checkTool("Lsp", {
+            operation: "workspace_symbol",
+            query: "foo",
+          })
+        ).action,
+      ).toBe("allow");
     });
   });
 
@@ -246,8 +292,12 @@ describe("local read-only cwd auto-approval", () => {
       const checker = new PermissionChecker({ mode: "default", cwd });
       const outside = join(cwd, "..", "outside.txt");
 
-      expect((await checker.checkTool("Read", { file_path: outside })).action).toBe("ask");
-      expect((await checker.checkTool("Grep", { path: outside })).action).toBe("ask");
+      expect(
+        (await checker.checkTool("Read", { file_path: outside })).action,
+      ).toBe("ask");
+      expect((await checker.checkTool("Grep", { path: outside })).action).toBe(
+        "ask",
+      );
     });
   });
 
@@ -255,21 +305,44 @@ describe("local read-only cwd auto-approval", () => {
     await withTempCwd(async (cwd) => {
       const checker = new PermissionChecker({ mode: "default", cwd });
 
-      expect((await checker.checkTool("WebFetch", { url: "https://example.com" })).action).toBe("ask");
-      expect((await checker.checkTool("WebSearch", { query: "openharness" })).action).toBe("ask");
+      expect(
+        (await checker.checkTool("WebFetch", { url: "https://example.com" }))
+          .action,
+      ).toBe("ask");
+      expect(
+        (await checker.checkTool("WebSearch", { query: "openharness" })).action,
+      ).toBe("ask");
     });
   });
 
   it("keeps deny, rules, and allowedTools ahead of cwd local read-only allow", async () => {
     await withTempCwd(async (cwd) => {
       const file = join(cwd, "src/a.ts");
-      const deniedTool = new PermissionChecker({ mode: "default", cwd, deniedTools: ["Read"] });
-      const deniedRule = new PermissionChecker({ mode: "default", cwd, rules: [{ tool: "Read", action: "deny" }] });
-      const narrowed = new PermissionChecker({ mode: "default", cwd, allowedTools: ["Write"] });
+      const deniedTool = new PermissionChecker({
+        mode: "default",
+        cwd,
+        deniedTools: ["Read"],
+      });
+      const deniedRule = new PermissionChecker({
+        mode: "default",
+        cwd,
+        rules: [{ tool: "Read", action: "deny" }],
+      });
+      const narrowed = new PermissionChecker({
+        mode: "default",
+        cwd,
+        allowedTools: ["Write"],
+      });
 
-      expect((await deniedTool.checkTool("Read", { file_path: file })).action).toBe("deny");
-      expect((await deniedRule.checkTool("Read", { file_path: file })).action).toBe("deny");
-      expect((await narrowed.checkTool("Read", { file_path: file })).action).toBe("deny");
+      expect(
+        (await deniedTool.checkTool("Read", { file_path: file })).action,
+      ).toBe("deny");
+      expect(
+        (await deniedRule.checkTool("Read", { file_path: file })).action,
+      ).toBe("deny");
+      expect(
+        (await narrowed.checkTool("Read", { file_path: file })).action,
+      ).toBe("deny");
     });
   });
 
@@ -281,15 +354,29 @@ describe("local read-only cwd auto-approval", () => {
         pathRules: [{ pattern: "*.env", allow: false }],
       });
 
-      expect((await checker.checkTool("Read", { file_path: join(cwd, ".env") })).action).toBe("deny");
-      expect((await checker.checkTool("Read", { file_path: join(cwd, "a.ts") })).action).toBe("allow");
+      expect(
+        (await checker.checkTool("Read", { file_path: join(cwd, ".env") }))
+          .action,
+      ).toBe("deny");
+      expect(
+        (await checker.checkTool("Read", { file_path: join(cwd, "a.ts") }))
+          .action,
+      ).toBe("allow");
     });
   });
 });
 
 describe("READ_ONLY_TOOLS", () => {
   it("contains common read-only tools", () => {
-    for (const tool of ["Read", "Grep", "Glob", "WebFetch", "WebSearch"]) {
+    for (const tool of [
+      "Read",
+      "Grep",
+      "Glob",
+      "WebFetch",
+      "WebSearch",
+      "TerminalRead",
+      "TerminalList",
+    ]) {
       expect(READ_ONLY_TOOLS.has(tool)).toBe(true);
     }
   });
