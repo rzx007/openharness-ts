@@ -12,6 +12,8 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/prebuilds/**
+  - node_modules/node-pty/build/**
+  - node_modules/node-pty/prebuilds/**
 win:
   executableName: OpenHarness
 nsis:

@@ -9,6 +9,8 @@ const cliExternals = [...new Set([
   ...Object.keys(pkg.peerDependencies || {}),
   // Native addon: it must resolve beside the installed package, never from dist.
   "better-sqlite3",
+  // Native addon: node-pty loads conpty.node from its own package directory.
+  "node-pty",
 ])].filter((d) => !d.startsWith("@openharness/"));
 const frontendExternals = [...new Set([
   ...Object.keys(frontendPkg.dependencies || {}),

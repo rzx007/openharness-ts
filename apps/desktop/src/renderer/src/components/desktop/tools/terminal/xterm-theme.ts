@@ -12,7 +12,7 @@ const lightTheme: ITheme = {
   blue: "#0969da",
   magenta: "#8250df",
   cyan: "#1b7c83",
-  white: "#f6f8fa",
+  white: "#57606a",
   brightBlack: "#6e7781",
   brightRed: "#d1242f",
   brightGreen: "#1a7f37",
@@ -20,7 +20,7 @@ const lightTheme: ITheme = {
   brightBlue: "#218bff",
   brightMagenta: "#a475f9",
   brightCyan: "#3192aa",
-  brightWhite: "#ffffff",
+  brightWhite: "#24292f",
 }
 
 const darkTheme: ITheme = {

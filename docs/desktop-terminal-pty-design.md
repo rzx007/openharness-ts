@@ -100,7 +100,7 @@ Desktop main 通过 `OpenHarnessClient` 调用 daemon，不直接持有 PTY：
 - MVP 不做远程共享终端。
 - MVP 不持久化终端输出历史，避免误存 token、密码和敏感日志。
 - 终端输出不写入会话数据库，只把 Agent 工具调用和精简结果写入 transcript。
-- MVP 不做完整 shell profile 管理，只选择当前平台上最合理的默认 shell。
+- 当前版本不提供终端 Profile 配置界面。也就是说，用户暂时不能在界面里维护 `PowerShell`、`pwsh`、`cmd`、`Git Bash`、自定义启动参数和环境变量这些预设；创建终端时先自动选择当前平台上最合理的默认 shell。
 - MVP 不支持任意路径启动终端，只允许在已绑定项目目录内启动。
 
 ## 方案选择
@@ -690,7 +690,7 @@ pnpm install
 - [x] 终端退出后保留最后输出、exit code 和重启入口。
 - [x] 使用有上限的内存输出快照恢复终端视图，不写入数据库。
 - [ ] 支持 copy selected text 和 paste 菜单。
-- 细化 light/dark 主题。
+- [x] 细化 light/dark 主题，保证 light 主题下 ANSI 白色/亮白色文本不会和背景撞色。
 - 保存每个项目的默认 shell。
 
 ## 在 Agent 应用中的定位

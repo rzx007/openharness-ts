@@ -30,6 +30,7 @@
     "chalk": "catalog:",
     "commander": "catalog:",
     "diff": "catalog:",
+    "node-pty": "^1.0.0",
     "react": "catalog:"
   },
   "devDependencies": {
