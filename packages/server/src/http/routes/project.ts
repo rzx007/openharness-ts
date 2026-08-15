@@ -3,9 +3,16 @@ import { stat } from "node:fs/promises";
 import type { SessionStore } from "@openharness/services";
 import { Hono } from "hono";
 
+import {
+  ProjectApplicationError,
+  type ProjectApplicationService,
+} from "../project/project-application-service.js";
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 
-export function createProjectRoutes(store: SessionStore): Hono {
+export function createProjectRoutes(
+  store: SessionStore,
+  projects?: Pick<ProjectApplicationService, "rebindProject">,
+): Hono {
   return new Hono()
     .get("/", (c) =>
       jsonResponse({
@@ -55,10 +62,14 @@ export function createProjectRoutes(store: SessionStore): Hono {
       try {
         if (!(await stat(body.path)).isDirectory())
           return errorResponse(400, "path is not a directory");
-        return jsonResponse({
-          project: store.rebindProject(c.req.param("projectId"), body.path),
-        });
+        const project = projects
+          ? await projects.rebindProject(c.req.param("projectId"), body.path)
+          : store.rebindProject(c.req.param("projectId"), body.path);
+        return jsonResponse({ project });
       } catch (error) {
+        if (error instanceof ProjectApplicationError) {
+          return errorResponse(error.status, error.message);
+        }
         return errorResponse(
           400,
           error instanceof Error ? error.message : String(error),

@@ -288,7 +288,7 @@ export class OpenHarnessHttpServer {
       permissions: this.daemon.permissions,
       traces: this.requestTraces,
     }));
-    this.app.route("/projects", createProjectRoutes(this.store));
+    this.app.route("/projects", createProjectRoutes(this.store, this.daemon.projects));
     this.app.route("/sessions", createSessionUtilityRoutes({
       maintenance: this.daemon.maintenance,
     }));

@@ -1,4 +1,4 @@
-export { SessionStore, type SessionStoreOptions } from "./store.js";
+export { SessionStore, isPathInsideOrEqual, type SessionStoreOptions } from "./store.js";
 export { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
 export {
   patchSessionRuntimeMetadata,

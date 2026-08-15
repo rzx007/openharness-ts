@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
@@ -754,10 +754,53 @@ describe("SessionStore", () => {
           projectId: project.id,
           cwd: join(moved, "apps", "desktop"),
         });
+        expect(store.listEvents({ sessionId: session.id }).map((event) => event.type)).toContain("session.updated");
 
         store.archiveProject(project.id);
         expect(store.listProjects()).toEqual([]);
         expect(store.listProjects({ includeArchived: true })).toHaveLength(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("rejects top-level sessions whose cwd escapes the project and preserves external worktree cwds on rebind", () => {
+    withStore((store) => {
+      const root = mkdtempSync(join(tmpdir(), "ohs-project-escape-"));
+      const source = join(root, "source");
+      const moved = join(root, "moved");
+      const outside = join(root, "worktree");
+      mkdirSync(source, { recursive: true });
+      mkdirSync(moved, { recursive: true });
+      mkdirSync(outside, { recursive: true });
+      try {
+        const project = store.inspectProject(source);
+        expect(() => store.createSession({
+          id: "escaped",
+          projectId: project.id,
+          cwd: outside,
+          model: "m",
+        })).toThrow(/inside project directory/);
+
+        const parent = store.createSession({
+          id: "parent",
+          projectId: project.id,
+          cwd: source,
+          model: "m",
+        });
+        const child = store.createSession({
+          id: "child-worktree",
+          parentId: parent.id,
+          cwd: outside,
+          model: "m",
+        });
+        expect(child.projectId).toBe(project.id);
+        expect(child.cwd).toBe(resolve(outside));
+
+        store.rebindProject(project.id, moved);
+        expect(store.getSession(parent.id)?.cwd).toBe(resolve(moved));
+        expect(store.getSession(child.id)?.cwd).toBe(resolve(outside));
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

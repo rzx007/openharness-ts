@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { mkdirSync } from "node:fs";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
@@ -165,22 +165,39 @@ export class SessionStore {
   }
 
   rebindProject(projectId: string, inputPath: string): ProjectRecord {
-    if (!this.getProject(projectId)) throw new Error(`Project not found: ${projectId}`);
+    const existing = this.getProject(projectId);
+    if (!existing) throw new Error(`Project not found: ${projectId}`);
+    const previousPath = existing.path;
     const path = resolve(inputPath);
     const normalizedPath = normalizeProjectPath(path);
     const conflict = this.database.prepare("SELECT project_id FROM project_location WHERE normalized_path = ? AND status = 'active'").get(normalizedPath) as { project_id?: string } | undefined;
     if (conflict?.project_id && conflict.project_id !== projectId) throw new Error("Project directory is already bound to another project");
     const timestamp = now();
+    const rewrittenSessions: SessionRecord[] = [];
     this.database.transaction(() => {
       this.database.prepare("UPDATE project_location SET status = 'historical' WHERE project_id = ? AND status = 'active'").run(projectId);
       this.database.prepare("INSERT INTO project_location VALUES (?, ?, ?, ?, 'active', ?, ?)").run(randomUUID(), projectId, path, normalizedPath, timestamp, timestamp);
       this.database.prepare("UPDATE project SET archived_at = NULL, last_opened_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, projectId);
       for (const session of Object.values(this.state.sessions)) {
         if (session.projectId !== projectId) continue;
-        session.cwd = resolve(path, session.cwdRelative ?? "");
-        this.database.prepare("UPDATE session SET cwd = ? WHERE id = ?").run(session.cwd, session.id);
+        // Isolated worktrees and other out-of-tree cwds keep their absolute path.
+        if (!isPathInsideOrEqual(previousPath, session.cwd)) continue;
+        session.cwd = resolve(path, relative(previousPath, session.cwd));
+        session.cwdRelative = relative(path, session.cwd);
+        session.updatedAt = timestamp;
+        this.database.prepare("UPDATE session SET cwd = ?, cwd_relative = ?, updated_at = ? WHERE id = ?")
+          .run(session.cwd, session.cwdRelative, timestamp, session.id);
+        rewrittenSessions.push(session);
       }
     })();
+    for (const session of rewrittenSessions) {
+      this.appendEventInMemory({
+        type: "session.updated",
+        sessionId: session.id,
+        payload: { session: clone(session) },
+      });
+    }
+    if (rewrittenSessions.length > 0) this.save();
     return this.getProject(projectId)!;
   }
 
@@ -377,6 +394,10 @@ export class SessionStore {
     const project = projectId ? this.getProject(projectId) : this.inspectProject(input.cwd);
     if (!project) throw new Error(`Project not found: ${projectId}`);
     const cwd = resolve(input.cwd);
+    // Top-level sessions must stay inside the bound project. Child/worktree sessions may live outside.
+    if (!input.parentId && !isPathInsideOrEqual(project.path, cwd)) {
+      throw new Error(`Session cwd must be inside project directory: ${project.path}`);
+    }
     const session: SessionRecord = {
       id,
       ...(input.parentId ? { parentId: input.parentId } : {}),
@@ -1419,4 +1440,10 @@ function projectFromRow(row: Record<string, unknown>): ProjectRecord {
 function normalizeProjectPath(path: string): string {
   const normalized = resolve(path).replace(/\\/g, "/").replace(/\/+$/, "");
   return process.platform === "win32" ? normalized.toLocaleLowerCase() : normalized;
+}
+
+/** True when target is the root itself or a path under root (no .. escape). */
+export function isPathInsideOrEqual(root: string, target: string): boolean {
+  const relativePath = relative(resolve(root), resolve(target));
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }

@@ -232,7 +232,11 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
                       <ProjectGroup
                         key={project.path}
                         project={project}
-                        sessions={sessions.filter((session) => samePath(session.cwd, project.path))}
+                        sessions={sessions.filter(
+                          (session) =>
+                            !session.parentId &&
+                            (session.projectId === project.id || samePath(session.cwd, project.path))
+                        )}
                         activeSessionId={activeSessionId}
                         expanded={expanded}
                         onToggle={() =>
