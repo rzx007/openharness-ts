@@ -31,6 +31,7 @@ import { SessionTaskBridgeManager } from "../http/session/session-task-bridge.js
 import { SessionTaskService } from "../http/session/session-task-service.js";
 import { SessionTranscriptProjection } from "../http/session/transcript-projection.js";
 import { recoverInterruptedWorkflows } from "../http/session/workflow-recovery.js";
+import { ProjectApplicationService } from "../http/project/project-application-service.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -48,6 +49,7 @@ export class DaemonApplication {
   readonly permissions: StorePermissionBroker;
   readonly tasks: SessionTaskService;
   readonly sessions: SessionApplicationService;
+  readonly projects: ProjectApplicationService;
   readonly maintenance: SessionMaintenanceService;
   readonly queries: SessionQueryService;
   readonly control: DaemonControlService;
@@ -179,6 +181,13 @@ export class DaemonApplication {
       agentPool: this.agentPool,
       liveChildren: this.liveChildren,
       operationGate: this.operationGate,
+      events: this.events,
+    });
+    this.projects = new ProjectApplicationService({
+      store,
+      runEngine: this.runEngine,
+      agentPool: this.agentPool,
+      liveChildren: this.liveChildren,
       events: this.events,
     });
     this.queries = new SessionQueryService(store);

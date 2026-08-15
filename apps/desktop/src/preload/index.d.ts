@@ -68,7 +68,11 @@ export interface DesktopAPI {
     renameProject: (input: RenameDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectPinned: (input: PinDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     removeProject: (path: string) => Promise<void>
-    rebindProject: (projectId: string) => Promise<DesktopProjectDetails["project"] | null>
+    rebindProject: (projectId: string) => Promise<{
+      project: DesktopProjectDetails["project"]
+      sessions: DesktopSessionRecord[]
+      archivedSessions: DesktopSessionRecord[]
+    } | null>
     create: (input: CreateDesktopSessionInput) => Promise<DesktopSessionRecord>
     open: (sessionId: string) => Promise<DesktopSessionView>
     close: () => Promise<void>

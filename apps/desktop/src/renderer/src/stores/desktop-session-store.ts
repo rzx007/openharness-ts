@@ -199,13 +199,27 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async rebindProject(projectId) {
     try {
-      const project = await window.desktop.sessions.rebindProject(projectId)
-      if (!project) return
+      const result = await window.desktop.sessions.rebindProject(projectId)
+      if (!result) return
+      const { project, sessions, archivedSessions } = result
       set((state) => ({
         projects: upsertProject(state.projects, project),
         selectedProject: state.selectedProject?.id === projectId ? project : state.selectedProject,
+        sessions,
+        archivedSessions,
+        sessionView:
+          state.sessionView && sessions.some((session) => session.id === state.sessionView?.session.id)
+            ? {
+                ...state.sessionView,
+                session:
+                  sessions.find((session) => session.id === state.sessionView?.session.id) ??
+                  state.sessionView.session,
+              }
+            : state.sessionView,
         error: null,
       }))
+      const selected = get().selectedProject
+      if (selected?.id === projectId) await get().selectProject(selected)
     } catch (error) {
       set({ error: errorMessage(error) })
       throw error

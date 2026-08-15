@@ -137,7 +137,11 @@ class DesktopSessionService {
   async rebindProject(
     webContents: WebContents,
     projectIdInput: string
-  ): Promise<DesktopProject | null> {
+  ): Promise<{
+    project: DesktopProject
+    sessions: SessionRecord[]
+    archivedSessions: SessionRecord[]
+  } | null> {
     const owner = BrowserWindow.fromWebContents(webContents) ?? undefined
     const options: OpenDialogOptions = {
       title: "重新绑定项目目录",
@@ -148,10 +152,16 @@ class DesktopSessionService {
       : await dialog.showOpenDialog(options)
     const path = result.filePaths[0]
     if (result.canceled || !path) return null
-    const project = await (
-      await this.getClient()
-    ).rebindProject(requireString(projectIdInput, "Project ID"), path)
-    return await toDesktopProject(project)
+    const client = await this.getClient()
+    const project = await toDesktopProject(
+      await client.rebindProject(requireString(projectIdInput, "Project ID"), path)
+    )
+    const allSessions = await client.listSessions({ includeArchived: true, limit: 1_000 })
+    return {
+      project,
+      sessions: sortSessions(allSessions.filter((session) => session.status !== "archived")),
+      archivedSessions: sortSessions(allSessions.filter((session) => session.status === "archived")),
+    }
   }
 
   async openSession(webContents: WebContents, sessionIdInput: string): Promise<DesktopSessionView> {

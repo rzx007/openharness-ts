@@ -142,7 +142,11 @@ export interface IpcInvokeMap {
   [IpcChannels.projectRemove]: { args: [path: string]; result: void }
   [IpcChannels.projectRebind]: {
     args: [projectId: string]
-    result: DesktopProjectDetails["project"] | null
+    result: {
+      project: DesktopProjectDetails["project"]
+      sessions: DesktopSessionRecord[]
+      archivedSessions: DesktopSessionRecord[]
+    } | null
   }
   [IpcChannels.sessionCreate]: {
     args: [input: CreateDesktopSessionInput]

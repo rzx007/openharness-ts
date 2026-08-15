@@ -3,6 +3,7 @@ export type { CompactOptions } from "./compact";
 
 export {
   SessionStore,
+  isPathInsideOrEqual,
   patchSessionRuntimeMetadata,
   readRuntimeMetadata,
   readSessionRuntimeConfig,
