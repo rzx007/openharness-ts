@@ -33,6 +33,8 @@ import type {
   WorkspaceReadFileInput,
   WorkspaceReadFileResult,
   WorkspaceRevealPathInput,
+  WorkspaceOpenWithInput,
+  WorkspaceOpener,
 } from "../shared/workspace-types"
 import type {
   DesktopTerminalCreateInput,
@@ -76,6 +78,8 @@ export interface DesktopAPI {
     readFile: (input: WorkspaceReadFileInput) => Promise<WorkspaceReadFileResult>
     revealPath: (input: WorkspaceRevealPathInput) => Promise<void>
     copyPath: (input: WorkspaceCopyPathInput) => Promise<string>
+    listOpeners: () => Promise<WorkspaceOpener[]>
+    openWith: (input: WorkspaceOpenWithInput) => Promise<void>
   }
   clipboard: {
     readText: () => Promise<string>

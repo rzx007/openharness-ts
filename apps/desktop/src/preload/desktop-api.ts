@@ -54,6 +54,9 @@ export const desktopAPI = {
       invoke(IpcChannels.workspaceRevealPath, input),
     copyPath: (input: IpcInvokeMap[typeof IpcChannels.workspaceCopyPath]["args"][0]) =>
       invoke(IpcChannels.workspaceCopyPath, input),
+    listOpeners: () => invoke(IpcChannels.workspaceListOpeners),
+    openWith: (input: IpcInvokeMap[typeof IpcChannels.workspaceOpenWith]["args"][0]) =>
+      invoke(IpcChannels.workspaceOpenWith, input),
   },
   clipboard: {
     readText: () => invoke(IpcChannels.clipboardReadText),

@@ -38,3 +38,18 @@ export interface WorkspaceCopyPathInput {
   path: string
   absolute?: boolean
 }
+
+export type WorkspaceOpenerKind = "editor" | "folder" | "terminal"
+
+export interface WorkspaceOpener {
+  id: string
+  label: string
+  kind: WorkspaceOpenerKind
+  iconDataUrl: string | null
+}
+
+export interface WorkspaceOpenWithInput {
+  openerId: string
+  path: string
+  rootPath?: string
+}

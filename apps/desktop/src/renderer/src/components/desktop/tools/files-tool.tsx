@@ -13,7 +13,6 @@ import {
   PanelRightClose,
   RefreshCw,
   Search,
-  TerminalSquare,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -23,6 +22,7 @@ import { prepareFileTreeInput, type ContextMenuItem } from "@pierre/trees"
 import { FileTree, useFileTree } from "@pierre/trees/react"
 import { Group, Panel, usePanelRef } from "react-resizable-panels"
 
+import { OpenWithSubmenu } from "@renderer/components/desktop/open-with"
 import {
   FileViewer,
   type FileSearchMatch,
@@ -265,11 +265,7 @@ export function FilesTool({
 
   if (!selectedProject) {
     return (
-      <EmptyFilesState
-        icon={FolderOpen}
-        title="没有选中项目"
-        description="在起始页或左侧栏选择项目后，这里会显示资源管理器。"
-      />
+      <EmptyFilesState icon={FolderOpen} title="打开文件" description="从工作区目录树中选择文件" />
     )
   }
 
@@ -363,7 +359,7 @@ export function FilesTool({
               searchMatches={searchMatches}
               targetLine={
                 openRequest &&
-                toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
+                  toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
                   ? openRequest.line
                   : undefined
               }
@@ -560,6 +556,9 @@ function ProjectFileTree({
       renderContextMenu={(item, context) => (
         <FileTreeContextMenu
           item={item}
+          rootPath={rootPath}
+          onClose={context.close}
+          onActionError={onActionError}
           onAction={(action) => {
             context.close()
             void handleContextAction(action, item)
@@ -573,10 +572,16 @@ function ProjectFileTree({
 
 function FileTreeContextMenu({
   item,
+  rootPath,
   onAction,
+  onClose,
+  onActionError,
 }: {
   item: ContextMenuItem
+  rootPath: string
   onAction: (action: FileTreeAction) => void
+  onClose: () => void
+  onActionError: (error: unknown) => void
 }): React.JSX.Element {
   return (
     <div
@@ -587,28 +592,12 @@ function FileTreeContextMenu({
         在 File Explorer 中打开
       </FileTreeMenuButton>
 
-      <div className="group/open-with relative">
-        <button
-          type="button"
-          className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4 [&_svg]:shrink-0"
-        >
-          <Code2 className="text-ui-muted" strokeWidth={1.8} />
-          <span className="min-w-0 flex-1">打开方式</span>
-          <ChevronRight className="text-ui-muted" strokeWidth={1.8} />
-        </button>
-        <div className="invisible absolute top-0 left-[calc(100%-2px)] w-56 rounded-xl border border-border/55 bg-popover p-1.5 opacity-0 shadow-xl shadow-black/12 transition-[opacity,visibility] group-hover/open-with:visible group-hover/open-with:opacity-100 dark:border-white/8 dark:shadow-black/40">
-          <FileTreeMenuButton icon={Code2} disabled>
-            VS Code
-          </FileTreeMenuButton>
-          <FileTreeMenuButton icon={Code2} disabled>
-            Cursor
-          </FileTreeMenuButton>
-          <FileTreeMenuButton icon={TerminalSquare} disabled>
-            Terminal
-          </FileTreeMenuButton>
-          <p className="px-2.5 pt-1.5 pb-1 text-[11px] text-ui-muted">后续接入应用路径和终端配置</p>
-        </div>
-      </div>
+      <OpenWithSubmenu
+        path={item.path}
+        rootPath={rootPath}
+        onPicked={onClose}
+        onError={onActionError}
+      />
 
       <div className="my-1 h-px bg-border/45" />
 
@@ -669,12 +658,13 @@ function EmptyFilesState({
 }): React.JSX.Element {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-      <Icon className="mb-4 size-9 text-ui-muted" strokeWidth={1.6} />
-      <h2 className="text-[17px] font-semibold text-ui-foreground">{title}</h2>
+      <Icon className="mb-4 size-8 text-ui-muted" strokeWidth={1.6} />
+      <h2 className="text-[15px] font-semibold text-ui-foreground">{title}</h2>
       <p className="mt-2 max-w-72 text-[13px] leading-6 text-ui-muted">{description}</p>
     </div>
   )
 }
+
 
 function FileSearchControls({
   query,

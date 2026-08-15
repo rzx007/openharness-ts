@@ -25,6 +25,8 @@ import type {
   WorkspaceReadFileInput,
   WorkspaceReadFileResult,
   WorkspaceRevealPathInput,
+  WorkspaceOpenWithInput,
+  WorkspaceOpener,
 } from "./workspace-types"
 import type {
   DesktopTerminalCreateInput,
@@ -86,6 +88,8 @@ export const IpcChannels = {
   workspaceReadFile: "workspace:read-file",
   workspaceRevealPath: "workspace:reveal-path",
   workspaceCopyPath: "workspace:copy-path",
+  workspaceListOpeners: "workspace:list-openers",
+  workspaceOpenWith: "workspace:open-with",
 
   clipboardReadText: "clipboard:read-text",
   clipboardWriteText: "clipboard:write-text",
@@ -252,6 +256,14 @@ export interface IpcInvokeMap {
   [IpcChannels.workspaceCopyPath]: {
     args: [input: WorkspaceCopyPathInput]
     result: string
+  }
+  [IpcChannels.workspaceListOpeners]: {
+    args: []
+    result: WorkspaceOpener[]
+  }
+  [IpcChannels.workspaceOpenWith]: {
+    args: [input: WorkspaceOpenWithInput]
+    result: void
   }
 
   [IpcChannels.clipboardReadText]: {
