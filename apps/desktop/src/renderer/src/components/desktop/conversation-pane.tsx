@@ -5,17 +5,19 @@ import {
   Check,
   ChevronDown,
   CircleStop,
+  Copy,
   FileText,
   Folder,
   FolderClosed,
-  FolderGit2,
   GitBranch,
+  GitBranchPlus,
   ListFilter,
   LoaderCircle,
   Mic,
   Monitor,
   MoreHorizontal,
   PanelRight,
+  PencilLine,
   Plus,
   Search,
   ShieldCheck,
@@ -27,6 +29,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@renderer/components/ui/button"
 import { AssistantMessage } from "@renderer/components/desktop/conversation/assistant-message"
 import { buildConversationEntries } from "@renderer/components/desktop/conversation/conversation-turn-model"
+import { formatMessageTime } from "@renderer/components/desktop/conversation/format-message-time"
+import { OpenWithSplitButton } from "@renderer/components/desktop/open-with"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
@@ -73,6 +77,8 @@ export function ConversationPane({
   const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
   const startSession = useDesktopSessionStore((state) => state.startSession)
   const sendMessage = useDesktopSessionStore((state) => state.sendMessage)
+  const editLatestMessage = useDesktopSessionStore((state) => state.editLatestMessage)
+  const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
   const selectModel = useDesktopSessionStore((state) => state.selectModel)
@@ -115,6 +121,20 @@ export function ConversationPane({
   const pendingPermissions =
     sessionView?.permissions.filter((permission) => permission.status === "pending") ?? []
 
+  const copyAssistantMessage = async (content: string): Promise<void> => {
+    await window.desktop.clipboard.writeText(content)
+  }
+
+  const forkFromAssistantMessage = async (messageId: string): Promise<void> => {
+    if (!activeSessionId || archived || running) return
+    await forkSession(activeSessionId, { afterMessageId: messageId })
+  }
+
+  const editLatestUserMessage = async (content: string): Promise<void> => {
+    if (archived || running) return
+    await editLatestMessage(content)
+  }
+
   useEffect(() => {
     const handleAddToComposer = (event: Event): void => {
       const detail = (event as CustomEvent<AddToComposerEventDetail>).detail
@@ -137,8 +157,8 @@ export function ConversationPane({
       {hasSession ? (
         <header className="flex h-12 shrink-0 items-center border-b bg-background px-3">
           <div className="flex min-w-0 items-center gap-2">
-            <FolderClosed className="size-4 shrink-0 text-ui-muted" strokeWidth={1.8} />
-            <h1 className="truncate text-[13px] font-semibold">{title}</h1>
+            <FolderClosed className="size-3.5 shrink-0 text-ui-muted" strokeWidth={1.8} />
+            <h1 className="truncate text-[13px] font-medium">{title}</h1>
             {sessionView?.syncStatus === "reconnecting" ? (
               <span className="flex shrink-0 items-center gap-1 text-[11px] text-ui-muted">
                 <LoaderCircle className="size-3 animate-spin" />
@@ -149,23 +169,14 @@ export function ConversationPane({
               type="button"
               title="更多操作"
               aria-label="更多操作"
-              className="grid size-7 shrink-0 place-items-center rounded-md text-ui-muted hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4"
+              className="grid size-7 shrink-0 place-items-center rounded-md text-ui-muted hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5"
             >
               <MoreHorizontal />
             </button>
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              title={sessionView?.session.cwd}
-              className="flex h-8 items-center gap-2 rounded-lg border bg-background px-2.5 text-xs text-ui-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              <FolderGit2 className="size-3.5 text-amber-500" />
-              <span className="hidden max-w-32 truncate sm:inline">
-                {projectName(sessionView?.session.cwd)}
-              </span>
-            </button>
+            <OpenWithSplitButton folderPath={sessionView?.session.cwd ?? selectedProject?.path} />
             <HeaderIconButton label="会话视图">
               <ListFilter />
             </HeaderIconButton>
@@ -221,6 +232,10 @@ export function ConversationPane({
                   parts={sessionView?.parts ?? []}
                   runs={sessionView?.runs ?? []}
                   running={running}
+                  canEditLastUserMessage={!archived && !running && !sending}
+                  onEditLastUserMessage={(content) => void editLatestUserMessage(content)}
+                  onCopyAssistantMessage={(content) => void copyAssistantMessage(content)}
+                  onForkAssistantMessage={(messageId) => void forkFromAssistantMessage(messageId)}
                   onOpenFile={onOpenFile}
                   onOpenTerminal={onOpenTerminal}
                 />
@@ -277,6 +292,10 @@ function ConversationTranscript({
   parts,
   runs,
   running,
+  canEditLastUserMessage,
+  onEditLastUserMessage,
+  onCopyAssistantMessage,
+  onForkAssistantMessage,
   onOpenFile,
   onOpenTerminal,
 }: {
@@ -284,6 +303,10 @@ function ConversationTranscript({
   parts: DesktopSessionPart[]
   runs: DesktopSessionRun[]
   running: boolean
+  canEditLastUserMessage: boolean
+  onEditLastUserMessage: (content: string) => void
+  onCopyAssistantMessage: (content: string) => void
+  onForkAssistantMessage: (messageId: string) => void
   onOpenFile: (path: string, line?: number) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
@@ -292,6 +315,11 @@ function ConversationTranscript({
     [messages, parts, runs]
   )
   const lastTurn = [...entries].reverse().find((entry) => entry.type === "turn")
+  const lastUserMessage = [...entries]
+    .reverse()
+    .flatMap((entry) =>
+      entry.type === "turn" && entry.turn.userMessage ? [entry.turn.userMessage] : []
+    )[0]
   const failedRuns = runs.filter((run) => run.status === "failed")
   const attachedRunIds = new Set(
     entries.flatMap((entry) => {
@@ -342,17 +370,31 @@ function ConversationTranscript({
                 message={entry.turn.userMessage}
                 parts={entry.turn.userParts}
                 streaming={false}
+                userActions={{
+                  canEdit:
+                    canEditLastUserMessage && entry.turn.userMessage.id === lastUserMessage?.id,
+                  onEdit: onEditLastUserMessage,
+                }}
                 onOpenFile={onOpenFile}
                 onOpenTerminal={onOpenTerminal}
               />
             ) : null}
             {entry.turn.assistantMessages.length > 0 ? (
-              <AssistantMessage
-                parts={entry.turn.assistantParts}
-                streaming={running && entry === lastTurn}
-                onOpenFile={onOpenFile}
-                onOpenTerminal={onOpenTerminal}
-              />
+              <div className="group/msg min-w-0">
+                <AssistantMessage
+                  parts={entry.turn.assistantParts}
+                  streaming={running && entry === lastTurn}
+                  onOpenFile={onOpenFile}
+                  onOpenTerminal={onOpenTerminal}
+                />
+                <AssistantMessageActions
+                  message={entry.turn.assistantMessages.at(-1)}
+                  content={messageTextContent(entry.turn.assistantParts)}
+                  disabled={running && entry === lastTurn}
+                  onCopy={onCopyAssistantMessage}
+                  onFork={onForkAssistantMessage}
+                />
+              </div>
             ) : null}
             {turnFailures.map((run) => (
               <RunErrorNotice key={run.id} error={run.error} />
@@ -409,26 +451,28 @@ function MessageBlock({
   message,
   parts,
   streaming,
+  userActions,
   onOpenFile,
   onOpenTerminal,
 }: {
   message: DesktopSessionMessage
   parts: DesktopSessionPart[]
   streaming: boolean
+  userActions?: {
+    canEdit: boolean
+    onEdit: (content: string) => void
+  }
   onOpenFile: (path: string, line?: number) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
   if (message.role === "user") {
-    const content = parts
-      .filter((part) => part.type === "text")
-      .map((part) => part.text ?? "")
-      .join("")
+    const content = messageTextContent(parts)
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[78%] rounded-xl bg-user-message px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground">
-          {content || "已发送消息"}
-        </div>
-      </div>
+      <UserMessageBlock
+        content={content}
+        timestamp={message.updatedAt}
+        userActions={userActions}
+      />
     )
   }
 
@@ -444,6 +488,185 @@ function MessageBlock({
       onOpenFile={onOpenFile}
       onOpenTerminal={onOpenTerminal}
     />
+  )
+}
+
+function messageTextContent(parts: DesktopSessionPart[]): string {
+  return parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .join("")
+}
+
+function UserMessageBlock({
+  content,
+  timestamp,
+  userActions,
+}: {
+  content: string
+  timestamp: number
+  userActions?: { canEdit: boolean; onEdit: (content: string) => void }
+}): React.JSX.Element {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(content)
+  const canEdit = Boolean(userActions?.canEdit && content.trim())
+
+  useEffect(() => {
+    if (!editing) setDraft(content)
+  }, [content, editing])
+
+  if (editing && userActions) {
+    const normalized = draft.trim()
+    return (
+      <form
+        className="ml-auto flex w-full max-w-[78%] flex-col items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!normalized) return
+          setEditing(false)
+          userActions.onEdit(normalized)
+        }}
+      >
+        <label className="sr-only" htmlFor="latest-message-editor">
+          编辑最新消息
+        </label>
+        <textarea
+          id="latest-message-editor"
+          autoFocus
+          value={draft}
+          rows={Math.max(2, Math.min(8, draft.split("\n").length))}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault()
+              if (!normalized) return
+              setEditing(false)
+              userActions.onEdit(normalized)
+            }
+            if (event.key === "Escape") setEditing(false)
+          }}
+          className="min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground outline-none"
+        />
+        <div className="flex items-center gap-1">
+          <MessageActionButton label="取消编辑" onClick={() => setEditing(false)}>
+            <X />
+          </MessageActionButton>
+          <button
+            type="submit"
+            disabled={!normalized}
+            className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-45"
+          >
+            <Check className="size-3.5" />
+            重新生成
+          </button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <div className="group/msg flex flex-col items-end">
+      <div className="max-w-[78%] rounded-xl bg-user-message/50 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground">
+        {content || "已发送消息"}
+      </div>
+      <MessageToolbar align="end" timestamp={timestamp}>
+        {canEdit ? (
+          <MessageActionButton label="重新编辑" onClick={() => setEditing(true)}>
+            <PencilLine />
+          </MessageActionButton>
+        ) : null}
+      </MessageToolbar>
+    </div>
+  )
+}
+
+function AssistantMessageActions({
+  message,
+  content,
+  disabled,
+  onCopy,
+  onFork,
+}: {
+  message?: DesktopSessionMessage
+  content: string
+  disabled: boolean
+  onCopy: (content: string) => void
+  onFork: (messageId: string) => void
+}): React.JSX.Element | null {
+  if (!message) return null
+  return (
+    <MessageToolbar align="start" timestamp={message.updatedAt}>
+      {content.trim() ? (
+        <MessageActionButton label="复制回复" onClick={() => onCopy(content)} disabled={disabled}>
+          <Copy />
+        </MessageActionButton>
+      ) : null}
+      <MessageActionButton
+        label="从这条回复分叉"
+        onClick={() => onFork(message.id)}
+        disabled={disabled}
+      >
+        <GitBranchPlus />
+      </MessageActionButton>
+    </MessageToolbar>
+  )
+}
+
+function MessageToolbar({
+  align,
+  timestamp,
+  children,
+}: {
+  align: "start" | "end"
+  timestamp: number
+  children?: React.ReactNode
+}): React.JSX.Element {
+  const label = formatMessageTime(timestamp)
+  const absolute = new Date(timestamp).toLocaleString()
+  const time = (
+    <time dateTime={new Date(timestamp).toISOString()} title={absolute} className="ml-0.5 shrink-0">
+      {label}
+    </time>
+  )
+
+  return (
+    <div
+      className={cn(
+        "mt-1.5 flex h-7 items-center gap-0.5 text-xs text-ui-muted",
+        "pointer-events-none opacity-0 transition-opacity",
+        "group-hover/msg:pointer-events-auto group-hover/msg:opacity-100",
+        "group-focus-within/msg:pointer-events-auto group-focus-within/msg:opacity-100",
+        align === "end" ? "justify-end" : "justify-start"
+      )}
+    >
+      {children}
+      {time}
+    </div>
+  )
+}
+
+function MessageActionButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="grid size-6 place-items-center rounded-md text-ui-muted/50 transition-colors hover:bg-muted hover:text-ui-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3"
+    >
+      {children}
+    </button>
   )
 }
 
@@ -1006,22 +1229,22 @@ const permissionModeOptions: Array<{
   label: string
   description: string
 }> = [
-  {
-    value: "default",
-    label: "手动批准",
-    description: "写入、命令等敏感操作会请求确认。",
-  },
-  {
-    value: "plan",
-    label: "计划模式",
-    description: "保持只读分析，适合先审方案。",
-  },
-  {
-    value: "full_auto",
-    label: "自动批准",
-    description: "尽量自动放行工具操作。",
-  },
-]
+    {
+      value: "default",
+      label: "手动批准",
+      description: "写入、命令等敏感操作会请求确认。",
+    },
+    {
+      value: "plan",
+      label: "计划模式",
+      description: "保持只读分析，适合先审方案。",
+    },
+    {
+      value: "full_auto",
+      label: "自动批准",
+      description: "尽量自动放行工具操作。",
+    },
+  ]
 
 function PermissionModeMenu({
   selected,
@@ -1140,7 +1363,7 @@ function HeaderIconButton({
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        "grid size-8 place-items-center rounded-lg text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4",
+        "grid size-7 place-items-center rounded-md text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5",
         pressed && "bg-muted text-foreground"
       )}
     >
@@ -1183,12 +1406,6 @@ function resolveModelLabel(
 
 function resolvePermissionModeLabel(mode: DesktopPermissionMode): string {
   return permissionModeOptions.find((option) => option.value === mode)?.label ?? "手动批准"
-}
-
-function projectName(path: string | undefined): string {
-  if (!path) return "项目"
-  const normalized = path.replace(/[\\/]+$/, "")
-  return normalized.split(/[\\/]/).pop() || path
 }
 
 function appendDraftText(current: string, text: string): string {
