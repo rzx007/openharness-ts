@@ -4,6 +4,7 @@ export interface DesktopProject {
   path: string
   lastOpenedAt: number
   pinnedAt?: number
+  defaultShell?: string
   available: boolean
 }
 
@@ -185,6 +186,11 @@ export interface RenameDesktopProjectInput {
 export interface PinDesktopProjectInput {
   projectId: string
   pinned: boolean
+}
+
+export interface SetDefaultDesktopProjectShellInput {
+  projectId: string
+  shell: string | null
 }
 
 export interface ReplyDesktopPermissionInput {

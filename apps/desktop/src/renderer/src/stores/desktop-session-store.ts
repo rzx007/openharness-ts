@@ -36,6 +36,7 @@ interface DesktopSessionState {
   selectProject: (project: DesktopProject) => Promise<void>
   renameProject: (path: string, name: string) => Promise<void>
   togglePinProject: (path: string) => Promise<void>
+  setProjectDefaultShell: (path: string, shell: string | null) => Promise<void>
   removeProject: (path: string) => Promise<void>
   rebindProject: (projectId: string) => Promise<void>
   selectModel: (model: DesktopModel) => Promise<void>
@@ -50,6 +51,7 @@ interface DesktopSessionState {
   renameSession: (sessionId: string, title: string) => Promise<void>
   togglePinSession: (sessionId: string) => Promise<void>
   archiveSession: (sessionId: string) => Promise<void>
+  deleteSession: (sessionId: string) => Promise<void>
   startSession: (content: string) => Promise<void>
   sendMessage: (content: string) => Promise<void>
   interrupt: () => Promise<void>
@@ -196,6 +198,28 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     }
   },
 
+  async setProjectDefaultShell(path, shell) {
+    const existing = get().projects.find((project) => samePath(project.path, path))
+    if (!existing) return
+    const normalizedShell = shell?.replace(/\s+/g, " ").trim() || null
+    try {
+      const project = await window.desktop.sessions.setProjectDefaultShell({
+        projectId: existing.id,
+        shell: normalizedShell,
+      })
+      set((state) => ({
+        projects: upsertProject(state.projects, project),
+        selectedProject: samePath(state.selectedProject?.path ?? "", path)
+          ? project
+          : state.selectedProject,
+        error: null,
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
   async removeProject(path) {
     try {
       const existing = get().projects.find((project) => samePath(project.path, path))
@@ -249,9 +273,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         model: model.id,
         provider: model.providerName,
       })
-      set((state) =>
-        applyBootstrapData(data, state.selectedProject, model.id, model.providerName)
-      )
+      set((state) => applyBootstrapData(data, state.selectedProject, model.id, model.providerName))
     } catch (error) {
       set({
         selectedModel: previousModel,
@@ -265,7 +287,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async selectPermissionMode(permissionMode) {
     const previous = get().selectedPermissionMode
-    set({ selectedPermissionMode: permissionMode, defaultPermissionMode: permissionMode, error: null })
+    set({
+      selectedPermissionMode: permissionMode,
+      defaultPermissionMode: permissionMode,
+      error: null,
+    })
     try {
       const data = await window.desktop.sessions.setDefaultPermissionMode({ permissionMode })
       set((state) => ({
@@ -321,7 +347,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       set((state) => ({
         sessions: upsertSession(state.sessions, session),
         selectedPermissionMode:
-          state.activeSessionId === sessionId ? sessionPermissionMode(session) : state.selectedPermissionMode,
+          state.activeSessionId === sessionId
+            ? sessionPermissionMode(session)
+            : state.selectedPermissionMode,
         sessionView:
           state.sessionView?.session.id === sessionId
             ? { ...state.sessionView, session }
@@ -439,6 +467,47 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         sessionView: isActive ? null : state.sessionView,
         openingSession: false,
         sending: false,
+        selectedProject: isActive
+          ? (state.projects.find((project) => samePath(project.path, existing.cwd)) ??
+            projectFromSession(existing))
+          : state.selectedProject,
+        selectedModel: isActive ? existing.model : state.selectedModel,
+        selectedProvider: isActive
+          ? sessionProvider(existing, state.defaultProvider)
+          : state.selectedProvider,
+        selectedPermissionMode: isActive
+          ? sessionPermissionMode(existing, state.defaultPermissionMode)
+          : state.selectedPermissionMode,
+        error: null,
+      }))
+      if (isActive) {
+        const project = get().selectedProject
+        if (project) await get().selectProject(project)
+      }
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
+  async deleteSession(sessionId) {
+    const existing =
+      get().sessions.find((session) => session.id === sessionId) ??
+      get().archivedSessions.find((session) => session.id === sessionId)
+    if (!existing) return
+    try {
+      const deletedSessionIds = await window.desktop.sessions.delete(sessionId)
+      const deleted = new Set(deletedSessionIds)
+      const activeSessionId = get().activeSessionId
+      const isActive = activeSessionId !== null && deleted.has(activeSessionId)
+      set((state) => ({
+        sessions: state.sessions.filter((session) => !deleted.has(session.id)),
+        archivedSessions: state.archivedSessions.filter((session) => !deleted.has(session.id)),
+        activeSessionId: isActive ? null : state.activeSessionId,
+        sessionView:
+          state.sessionView && deleted.has(state.sessionView.session.id) ? null : state.sessionView,
+        openingSession: isActive ? false : state.openingSession,
+        sending: isActive ? false : state.sending,
         selectedProject: isActive
           ? (state.projects.find((project) => samePath(project.path, existing.cwd)) ??
             projectFromSession(existing))
@@ -726,6 +795,9 @@ function projectFromSession(session: DesktopSessionRecord): DesktopProject {
     name: normalized.split(/[\\/]/).pop() || session.cwd,
     path: session.cwd,
     lastOpenedAt: session.updatedAt,
+    ...(typeof session.metadata["defaultShell"] === "string"
+      ? { defaultShell: session.metadata["defaultShell"] }
+      : {}),
     available: true,
   }
 }

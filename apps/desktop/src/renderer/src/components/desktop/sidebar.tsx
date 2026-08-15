@@ -19,6 +19,7 @@ import {
   PinOff,
   PlugZap,
   Search,
+  SquareTerminal,
   Trash2,
 } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
@@ -67,17 +68,22 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
   const renameSession = useDesktopSessionStore((state) => state.renameSession)
   const togglePinSession = useDesktopSessionStore((state) => state.togglePinSession)
   const archiveSession = useDesktopSessionStore((state) => state.archiveSession)
+  const deleteSession = useDesktopSessionStore((state) => state.deleteSession)
   const renameProject = useDesktopSessionStore((state) => state.renameProject)
   const togglePinProject = useDesktopSessionStore((state) => state.togglePinProject)
+  const setProjectDefaultShell = useDesktopSessionStore((state) => state.setProjectDefaultShell)
   const removeProject = useDesktopSessionStore((state) => state.removeProject)
   const rebindProject = useDesktopSessionStore((state) => state.rebindProject)
   const [archiveMode, setArchiveMode] = useState(false)
   const [renameTarget, setRenameTarget] = useState<DesktopSessionRecord | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<DesktopSessionRecord | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<DesktopSessionRecord | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [renameProjectTarget, setRenameProjectTarget] = useState<DesktopProject | null>(null)
+  const [shellProjectTarget, setShellProjectTarget] = useState<DesktopProject | null>(null)
   const [removeProjectTarget, setRemoveProjectTarget] = useState<DesktopProject | null>(null)
   const [projectName, setProjectName] = useState("")
+  const [projectShell, setProjectShell] = useState("")
   const [busy, setBusy] = useState(false)
   const [projectExpansion, setProjectExpansion] = useState<Record<string, boolean>>({})
   const recentSessions = useMemo(() => sessions.slice(0, 4), [sessions])
@@ -124,9 +130,22 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
       .finally(() => setBusy(false))
   }
 
+  const confirmDelete = (): void => {
+    if (!deleteTarget || busy) return
+    setBusy(true)
+    void deleteSession(deleteTarget.id)
+      .then(() => setDeleteTarget(null))
+      .finally(() => setBusy(false))
+  }
+
   const beginProjectRename = (project: DesktopProject): void => {
     setProjectName(project.name)
     setRenameProjectTarget(project)
+  }
+
+  const beginProjectShellSettings = (project: DesktopProject): void => {
+    setProjectShell(project.defaultShell ?? "")
+    setShellProjectTarget(project)
   }
 
   const submitProjectRename = (event: React.FormEvent<HTMLFormElement>): void => {
@@ -146,16 +165,27 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
       .finally(() => setBusy(false))
   }
 
+  const submitProjectShell = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    if (!shellProjectTarget || busy) return
+    setBusy(true)
+    void setProjectDefaultShell(shellProjectTarget.path, projectShell)
+      .then(() => setShellProjectTarget(null))
+      .finally(() => setBusy(false))
+  }
+
   const sessionActions: SessionActions = {
     onOpen: (session) => void openSession(session.id),
     onRename: beginRename,
     onTogglePin: (session) => void togglePinSession(session.id),
     onStartFrom: (session) => void startConversationFrom(session),
     onArchive: setArchiveTarget,
+    onDelete: setDeleteTarget,
   }
   const projectActions: ProjectActions = {
     onRename: beginProjectRename,
     onTogglePin: (project) => void togglePinProject(project.path),
+    onSetDefaultShell: beginProjectShellSettings,
     onRemove: setRemoveProjectTarget,
     onRebind: (project) => void rebindProject(project.id),
   }
@@ -354,6 +384,29 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
       </DialogRoot>
 
       <DialogRoot
+        open={deleteTarget !== null}
+        onOpenChange={(value) => !value && setDeleteTarget(null)}
+      >
+        <DialogContent>
+          <DialogTitle className="text-sm font-semibold">永久删除会话？</DialogTitle>
+          <DialogDescription className="mt-2 text-xs leading-5 text-muted-foreground">
+            删除后会话、消息、运行记录和权限记录都会从本机存储中移除，无法从已归档列表恢复。
+          </DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">取消</DialogClose>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={confirmDelete}
+              className="text-destructive-foreground h-8 rounded-md bg-destructive px-3 text-xs disabled:opacity-50"
+            >
+              {busy ? "删除中..." : "永久删除"}
+            </button>
+          </div>
+        </DialogContent>
+      </DialogRoot>
+
+      <DialogRoot
         open={renameProjectTarget !== null}
         onOpenChange={(value) => !value && setRenameProjectTarget(null)}
       >
@@ -378,6 +431,43 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
               <button
                 type="submit"
                 disabled={!projectName.trim() || busy}
+                className="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
+              >
+                {busy ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </DialogRoot>
+
+      <DialogRoot
+        open={shellProjectTarget !== null}
+        onOpenChange={(value) => !value && setShellProjectTarget(null)}
+      >
+        <DialogContent>
+          <form onSubmit={submitProjectShell}>
+            <DialogTitle className="text-sm font-semibold">设置默认 Shell</DialogTitle>
+            <DialogDescription className="mt-1 text-xs text-muted-foreground">
+              只影响这个项目新开的终端。留空会继续使用当前系统默认 Shell。
+            </DialogDescription>
+            <input
+              autoFocus
+              value={projectShell}
+              onChange={(event) => setProjectShell(event.target.value)}
+              placeholder="pwsh.exe / powershell.exe / C:\\Program Files\\Git\\bin\\bash.exe"
+              aria-label="默认 Shell"
+              className="mt-4 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+            <div className="mt-3 rounded-md bg-muted/55 px-3 py-2 text-[11.5px] leading-5 text-muted-foreground">
+              当前项目：{shellProjectTarget?.name}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">
+                取消
+              </DialogClose>
+              <button
+                type="submit"
+                disabled={busy}
                 className="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
               >
                 {busy ? "保存中..." : "保存"}
@@ -420,11 +510,13 @@ type SessionActions = {
   onTogglePin: (session: DesktopSessionRecord) => void
   onStartFrom: (session: DesktopSessionRecord) => void
   onArchive: (session: DesktopSessionRecord) => void
+  onDelete: (session: DesktopSessionRecord) => void
 }
 
 type ProjectActions = {
   onRename: (project: DesktopProject) => void
   onTogglePin: (project: DesktopProject) => void
+  onSetDefaultShell: (project: DesktopProject) => void
   onRemove: (project: DesktopProject) => void
   onRebind: (project: DesktopProject) => void
 }
@@ -503,8 +595,20 @@ function SessionRow({
               <Archive />
               归档
             </DropdownMenuItem>
+            <DropdownMenuItem destructive onClick={() => actions.onDelete(session)}>
+              <Trash2 />
+              删除
+            </DropdownMenuItem>
           </>
-        ) : null}
+        ) : (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem destructive onClick={() => actions.onDelete(session)}>
+              <Trash2 />
+              删除
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -585,11 +689,21 @@ function ProjectGroup({
               <FolderClosed className="mt-0.5 size-3.5 shrink-0" />
               <span className="min-w-0 leading-5 break-all">{project.path}</span>
             </div>
+            <div className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+              <SquareTerminal className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 leading-5 break-all">
+                {project.defaultShell ? project.defaultShell : "使用系统默认 Shell"}
+              </span>
+            </div>
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => projectActions.onRebind(project)}>
             <FolderSync />
             重新绑定目录
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => projectActions.onSetDefaultShell(project)}>
+            <SquareTerminal />
+            设置默认 Shell
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => projectActions.onRename(project)}>
             <Pencil />

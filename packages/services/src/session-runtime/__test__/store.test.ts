@@ -49,11 +49,13 @@ describe("SessionStore", () => {
         command: "echo ok",
         enabled: true,
       });
-      expect(reloaded.listCronRuns({ jobId: job.id })).toMatchObject([{
-        id: "cron-run-1",
-        status: "succeeded",
-        output: "ok",
-      }]);
+      expect(reloaded.listCronRuns({ jobId: job.id })).toMatchObject([
+        {
+          id: "cron-run-1",
+          status: "succeeded",
+          output: "ok",
+        },
+      ]);
       reloaded.close();
     });
   });
@@ -66,29 +68,54 @@ describe("SessionStore", () => {
         command: "echo later",
         cwd: process.cwd(),
       });
-      store.createCronRun({ jobId: job.id, jobName: job.name, cause: "scheduled" });
+      store.createCronRun({
+        jobId: job.id,
+        jobName: job.name,
+        cause: "scheduled",
+      });
 
       expect(store.interruptActiveCronRuns("daemon restarted")).toBe(1);
-      expect(store.listCronRuns()).toMatchObject([{
-        status: "interrupted",
-        error: "daemon restarted",
-      }]);
+      expect(store.listCronRuns()).toMatchObject([
+        {
+          status: "interrupted",
+          error: "daemon restarted",
+        },
+      ]);
     });
   });
 
   it("lists direct child sessions without mixing descendants or siblings", () => {
     withStore((store) => {
       store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
-      store.createSession({ id: "child-1", parentId: "parent", cwd: process.cwd(), model: "m" });
-      store.createSession({ id: "child-2", parentId: "parent", cwd: process.cwd(), model: "m" });
-      store.createSession({ id: "grandchild", parentId: "child-1", cwd: process.cwd(), model: "m" });
+      store.createSession({
+        id: "child-1",
+        parentId: "parent",
+        cwd: process.cwd(),
+        model: "m",
+      });
+      store.createSession({
+        id: "child-2",
+        parentId: "parent",
+        cwd: process.cwd(),
+        model: "m",
+      });
+      store.createSession({
+        id: "grandchild",
+        parentId: "child-1",
+        cwd: process.cwd(),
+        model: "m",
+      });
       store.createSession({ id: "other", cwd: process.cwd(), model: "m" });
 
-      expect(store.listChildSessions("parent").map((session) => session.id).sort()).toEqual([
-        "child-1",
-        "child-2",
-      ]);
-      expect(store.listChildSessions("child-1").map((session) => session.id)).toEqual(["grandchild"]);
+      expect(
+        store
+          .listChildSessions("parent")
+          .map((session) => session.id)
+          .sort(),
+      ).toEqual(["child-1", "child-2"]);
+      expect(
+        store.listChildSessions("child-1").map((session) => session.id),
+      ).toEqual(["grandchild"]);
     });
   });
 
@@ -113,7 +140,11 @@ describe("SessionStore", () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
     const path = join(dir, "legacy.json");
     try {
-      writeFileSync(path, JSON.stringify({ sessions: { legacy: { id: "legacy" } } }), "utf-8");
+      writeFileSync(
+        path,
+        JSON.stringify({ sessions: { legacy: { id: "legacy" } } }),
+        "utf-8",
+      );
       expect(() => new SessionStore({ path })).toThrow(/database/i);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -132,12 +163,18 @@ describe("SessionStore", () => {
           created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER
         );
       `);
-      database.prepare("INSERT INTO session VALUES (?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)")
+      database
+        .prepare(
+          "INSERT INTO session VALUES (?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)",
+        )
         .run("s1", process.cwd(), "existing", "m", "idle", "{}", 1, 1);
       database.close();
 
       const store = new SessionStore({ path });
-      expect(store.getSession("s1")).toMatchObject({ id: "s1", title: "existing" });
+      expect(store.getSession("s1")).toMatchObject({
+        id: "s1",
+        title: "existing",
+      });
       store.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -149,7 +186,9 @@ describe("SessionStore", () => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "old" });
       const updated = store.updateSession("s1", { model: "new" });
       expect(updated.model).toBe("new");
-      expect(store.listEvents().map((event) => event.type)).toContain("session.updated");
+      expect(store.listEvents().map((event) => event.type)).toContain(
+        "session.updated",
+      );
       expect(store.getSession("s1")?.model).toBe("new");
     });
   });
@@ -157,7 +196,11 @@ describe("SessionStore", () => {
   it("replaces a session transcript atomically", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const old = store.createMessage({ id: "m1", sessionId: "s1", role: "user" });
+      const old = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "user",
+      });
       store.upsertMessagePart({
         id: "p1",
         sessionId: "s1",
@@ -172,7 +215,9 @@ describe("SessionStore", () => {
         messages: [
           {
             role: "assistant",
-            parts: [{ type: "text", status: "completed", text: "compacted summary" }],
+            parts: [
+              { type: "text", status: "completed", text: "compacted summary" },
+            ],
           },
           {
             role: "user",
@@ -189,7 +234,9 @@ describe("SessionStore", () => {
         "compacted summary",
         "recent",
       ]);
-      expect(store.listEvents().map((event) => event.type)).toContain("session.transcript.replaced");
+      expect(store.listEvents().map((event) => event.type)).toContain(
+        "session.transcript.replaced",
+      );
     });
   });
 
@@ -198,12 +245,21 @@ describe("SessionStore", () => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
       store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
 
-      const prompt = store.admitPrompt({ id: "i1", sessionId: "s1", content: "hello from the first prompt sentence." });
+      const prompt = store.admitPrompt({
+        id: "i1",
+        sessionId: "s1",
+        content: "hello from the first prompt sentence.",
+      });
       expect(store.getSession("s1")?.title).toBe("hello from the first");
       expect(store.resolveSessionListTitle("s1")).toBe("hello from the first");
       store.updateSession("s1", { title: "Renamed conversation" });
       expect(store.resolveSessionListTitle("s1")).toBe("Renamed conversation");
-      const first = store.createMessage({ id: "m1", sessionId: "s1", role: "user", inputId: prompt.id });
+      const first = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "user",
+        inputId: prompt.id,
+      });
       const userPart = store.upsertMessagePart({
         id: "p1",
         sessionId: "s1",
@@ -212,7 +268,11 @@ describe("SessionStore", () => {
         status: "completed",
         text: "hello",
       });
-      const second = store.createMessage({ id: "m2", sessionId: "s1", role: "assistant" });
+      const second = store.createMessage({
+        id: "m2",
+        sessionId: "s1",
+        role: "assistant",
+      });
       const assistantPart = store.upsertMessagePart({
         id: "p2",
         sessionId: "s1",
@@ -233,24 +293,37 @@ describe("SessionStore", () => {
       expect(first.seq).toBe(1);
       expect(second.seq).toBe(2);
       expect(userPart.seq).toBe(1);
-      expect(store.listMessages("s1").map((row) => row.id)).toEqual(["m1", "m2"]);
-      expect(store.listMessages("s1", { afterSeq: 1 }).map((row) => row.id)).toEqual(["m2"]);
-      expect(store.listMessageParts("s1").map((row) => [row.id, row.text])).toEqual([
+      expect(store.listMessages("s1").map((row) => row.id)).toEqual([
+        "m1",
+        "m2",
+      ]);
+      expect(
+        store.listMessages("s1", { afterSeq: 1 }).map((row) => row.id),
+      ).toEqual(["m2"]);
+      expect(
+        store.listMessageParts("s1").map((row) => [row.id, row.text]),
+      ).toEqual([
         ["p1", "hello"],
         ["p2", "hi"],
       ]);
-      expect(store.listMessageParts("s1", { messageId: second.id }).map((row) => row.id)).toEqual(["p2"]);
-      expect(store.listEvents().map((event) => event.type)).not.toContain("session.message.part.delta");
+      expect(
+        store
+          .listMessageParts("s1", { messageId: second.id })
+          .map((row) => row.id),
+      ).toEqual(["p2"]);
+      expect(store.listEvents().map((event) => event.type)).not.toContain(
+        "session.message.part.delta",
+      );
       const runningReloaded = new SessionStore({ path });
-      expect(runningReloaded.listMessageParts("s1", { messageId: second.id })).toMatchObject([
-        { id: "p2", text: "h", status: "running" },
-      ]);
+      expect(
+        runningReloaded.listMessageParts("s1", { messageId: second.id }),
+      ).toMatchObject([{ id: "p2", text: "h", status: "running" }]);
       runningReloaded.close();
       store.flushMessagePartDeltas();
       const checkpointReloaded = new SessionStore({ path });
-      expect(checkpointReloaded.listMessageParts("s1", { messageId: second.id })).toMatchObject([
-        { id: "p2", text: "hi", status: "running" },
-      ]);
+      expect(
+        checkpointReloaded.listMessageParts("s1", { messageId: second.id }),
+      ).toMatchObject([{ id: "p2", text: "hi", status: "running" }]);
       checkpointReloaded.close();
       store.createMessage({ id: "m3", sessionId: "s2", role: "user" });
       store.upsertMessagePart({
@@ -262,11 +335,17 @@ describe("SessionStore", () => {
       });
 
       const reloaded = new SessionStore({ path });
-      expect(reloaded.listMessageParts("s1", { messageId: second.id }).map((row) => [row.id, row.text])).toEqual([
-        ["p2", "hi"],
-      ]);
-      expect(reloaded.listEvents().map((event) => event.type)).not.toContain("session.message.part.delta");
-      expect(reloaded.listEvents().map((event) => event.type)).toContain("session.message.part.updated");
+      expect(
+        reloaded
+          .listMessageParts("s1", { messageId: second.id })
+          .map((row) => [row.id, row.text]),
+      ).toEqual([["p2", "hi"]]);
+      expect(reloaded.listEvents().map((event) => event.type)).not.toContain(
+        "session.message.part.delta",
+      );
+      expect(reloaded.listEvents().map((event) => event.type)).toContain(
+        "session.message.part.updated",
+      );
       reloaded.close();
     });
   });
@@ -279,56 +358,104 @@ describe("SessionStore", () => {
       store.admitPrompt({ sessionId: "s1", content: "wake" });
       store.appendEvent({ type: "daemon.heartbeat", payload: { ok: true } });
 
-      expect(store.listEvents().map((event) => event.seq)).toEqual([1, 2, 3, 4]);
-      expect(store.listEvents({ afterSeq: cursor }).map((event) => event.type)).toEqual([
+      expect(store.listEvents().map((event) => event.seq)).toEqual([
+        1, 2, 3, 4,
+      ]);
+      expect(
+        store.listEvents({ afterSeq: cursor }).map((event) => event.type),
+      ).toEqual([
         "session.created",
         "session.input.admitted",
         "daemon.heartbeat",
       ]);
-      expect(store.listEvents({ afterSeq: cursor, sessionId: "s1" }).map((event) => event.type)).toEqual([
-        "session.input.admitted",
-        "daemon.heartbeat",
-      ]);
+      expect(
+        store
+          .listEvents({ afterSeq: cursor, sessionId: "s1" })
+          .map((event) => event.type),
+      ).toEqual(["session.input.admitted", "daemon.heartbeat"]);
     });
   });
 
   it("keeps runs terminal while allowing a child task to bind a later run", () => {
-    withStore((store) => {
-      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
-      store.createSession({ id: "child", parentId: "parent", cwd: process.cwd(), model: "m" });
-      const input = store.admitPrompt({ id: "i1", sessionId: "child", content: "first" });
-      const run = store.createRun({ id: "r1", sessionId: "child", inputId: input.id });
-      store.updateRun(run.id, { status: "failed", error: "first failed" });
-      expect(() => store.updateRun(run.id, { status: "running" })).toThrow("Session run is already terminal");
-      expect(store.getRun(run.id)).toMatchObject({ status: "failed", error: "first failed" });
+    withStore(
+      (store) => {
+        store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+        store.createSession({
+          id: "child",
+          parentId: "parent",
+          cwd: process.cwd(),
+          model: "m",
+        });
+        const input = store.admitPrompt({
+          id: "i1",
+          sessionId: "child",
+          content: "first",
+        });
+        const run = store.createRun({
+          id: "r1",
+          sessionId: "child",
+          inputId: input.id,
+        });
+        store.updateRun(run.id, { status: "failed", error: "first failed" });
+        expect(() => store.updateRun(run.id, { status: "running" })).toThrow(
+          "Session run is already terminal",
+        );
+        expect(store.getRun(run.id)).toMatchObject({
+          status: "failed",
+          error: "first failed",
+        });
 
-      const nextInput = store.admitPrompt({ id: "i2", sessionId: "child", content: "second" });
-      const nextRun = store.createRun({ id: "r2", sessionId: "child", inputId: nextInput.id });
+        const nextInput = store.admitPrompt({
+          id: "i2",
+          sessionId: "child",
+          content: "second",
+        });
+        const nextRun = store.createRun({
+          id: "r2",
+          sessionId: "child",
+          inputId: nextInput.id,
+        });
 
-      store.createSessionTask({
-        id: "task-1",
-        sessionId: "parent",
-        childSessionId: "child",
-        runId: nextRun.id,
-        type: "agent",
-        description: "Explore",
-        cwd: process.cwd(),
-      });
-      store.updateSessionTask("task-1", { status: "failed", output: "old", error: "old error" });
-      store.updateSessionTask("task-1", { status: "running" });
-      expect(store.getSessionTask("task-1")).toMatchObject({ status: "running" });
-      expect(store.getSessionTask("task-1")).not.toHaveProperty("finishedAt");
-      expect(store.getSessionTask("task-1")).not.toHaveProperty("output");
-      expect(store.getSessionTask("task-1")).not.toHaveProperty("error");
-    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+        store.createSessionTask({
+          id: "task-1",
+          sessionId: "parent",
+          childSessionId: "child",
+          runId: nextRun.id,
+          type: "agent",
+          description: "Explore",
+          cwd: process.cwd(),
+        });
+        store.updateSessionTask("task-1", {
+          status: "failed",
+          output: "old",
+          error: "old error",
+        });
+        store.updateSessionTask("task-1", { status: "running" });
+        expect(store.getSessionTask("task-1")).toMatchObject({
+          status: "running",
+        });
+        expect(store.getSessionTask("task-1")).not.toHaveProperty("finishedAt");
+        expect(store.getSessionTask("task-1")).not.toHaveProperty("output");
+        expect(store.getSessionTask("task-1")).not.toHaveProperty("error");
+      },
+      { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 },
+    );
   });
 
   it("flushes pending text deltas when the store closes", () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-close-"));
     const path = join(dir, "store.db");
-    const store = new SessionStore({ path, deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+    const store = new SessionStore({
+      path,
+      deltaFlushIntervalMs: 60_000,
+      deltaFlushBytes: 1024 * 1024,
+    });
     store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-    const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+    const message = store.createMessage({
+      id: "m1",
+      sessionId: "s1",
+      role: "assistant",
+    });
     const part = store.upsertMessagePart({
       id: "p1",
       sessionId: "s1",
@@ -347,20 +474,32 @@ describe("SessionStore", () => {
 
     store.close();
     const reloaded = new SessionStore({ path });
-    expect(reloaded.listMessageParts("s1")).toMatchObject([{ id: "p1", text: "checkpointed" }]);
+    expect(reloaded.listMessageParts("s1")).toMatchObject([
+      { id: "p1", text: "checkpointed" },
+    ]);
     reloaded.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
   it("checkpoints high-frequency deltas in one write transaction", () => {
-    withStore((store) => {
-      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
-      const part = store.upsertMessagePart({
-        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
-      });
-      const database = (store as any).database as Database.Database;
-      database.exec(`
+    withStore(
+      (store) => {
+        store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+        const message = store.createMessage({
+          id: "m1",
+          sessionId: "s1",
+          role: "assistant",
+        });
+        const part = store.upsertMessagePart({
+          id: "p1",
+          sessionId: "s1",
+          messageId: message.id,
+          type: "text",
+          status: "running",
+          text: "",
+        });
+        const database = (store as any).database as Database.Database;
+        database.exec(`
         CREATE TABLE delta_audit (count INTEGER NOT NULL);
         INSERT INTO delta_audit VALUES (0);
         CREATE TRIGGER count_delta_update AFTER UPDATE OF text ON session_message_part
@@ -370,56 +509,105 @@ describe("SessionStore", () => {
         END;
       `);
 
-      for (let index = 0; index < 100; index++) {
-        store.appendMessagePartDelta({
-          sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "x",
-        });
-      }
-      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
-        .toEqual({ text: "" });
+        for (let index = 0; index < 100; index++) {
+          store.appendMessagePartDelta({
+            sessionId: "s1",
+            messageId: message.id,
+            partId: part.id,
+            field: "text",
+            delta: "x",
+          });
+        }
+        expect(
+          database
+            .prepare("SELECT text FROM session_message_part WHERE id = 'p1'")
+            .get(),
+        ).toEqual({ text: "" });
 
-      store.flushMessagePartDeltas();
+        store.flushMessagePartDeltas();
 
-      expect(database.prepare("SELECT count FROM delta_audit").get()).toEqual({ count: 1 });
-      expect(database.prepare("SELECT length(text) AS length FROM session_message_part WHERE id = 'p1'").get())
-        .toEqual({ length: 100 });
-    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+        expect(database.prepare("SELECT count FROM delta_audit").get()).toEqual(
+          { count: 1 },
+        );
+        expect(
+          database
+            .prepare(
+              "SELECT length(text) AS length FROM session_message_part WHERE id = 'p1'",
+            )
+            .get(),
+        ).toEqual({ length: 100 });
+      },
+      { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 },
+    );
   });
 
   it("does not mutate live text when transient cursor allocation fails", () => {
-    withStore((store) => {
-      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
-      const part = store.upsertMessagePart({
-        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
-      });
-      const internals = store as any;
-      const database = internals.database as Database.Database;
-      internals.reservedEventSeq = internals.state.nextEventSeq - 1;
-      database.exec(`
+    withStore(
+      (store) => {
+        store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+        const message = store.createMessage({
+          id: "m1",
+          sessionId: "s1",
+          role: "assistant",
+        });
+        const part = store.upsertMessagePart({
+          id: "p1",
+          sessionId: "s1",
+          messageId: message.id,
+          type: "text",
+          status: "running",
+          text: "",
+        });
+        const internals = store as any;
+        const database = internals.database as Database.Database;
+        internals.reservedEventSeq = internals.state.nextEventSeq - 1;
+        database.exec(`
         CREATE TRIGGER fail_event_sequence_reservation BEFORE UPDATE ON session_event_sequence
         BEGIN
           SELECT RAISE(ABORT, 'forced sequence reservation failure');
         END;
       `);
 
-      expect(() => store.appendMessagePartDelta({
-        sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "ghost",
-      })).toThrow("forced sequence reservation failure");
-      expect(store.listMessageParts("s1")).toMatchObject([{ id: "p1", text: "" }]);
-      database.exec("DROP TRIGGER fail_event_sequence_reservation");
-    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 });
+        expect(() =>
+          store.appendMessagePartDelta({
+            sessionId: "s1",
+            messageId: message.id,
+            partId: part.id,
+            field: "text",
+            delta: "ghost",
+          }),
+        ).toThrow("forced sequence reservation failure");
+        expect(store.listMessageParts("s1")).toMatchObject([
+          { id: "p1", text: "" },
+        ]);
+        database.exec("DROP TRIGGER fail_event_sequence_reservation");
+      },
+      { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 1024 * 1024 },
+    );
   });
 
   it("flushes grouped deltas on the timer and retries a failed checkpoint", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-timer-"));
     const path = join(dir, "store.db");
-    const store = new SessionStore({ path, deltaFlushIntervalMs: 10, deltaFlushBytes: 1024 * 1024 });
+    const store = new SessionStore({
+      path,
+      deltaFlushIntervalMs: 10,
+      deltaFlushBytes: 1024 * 1024,
+    });
     try {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+      const message = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+      });
       const part = store.upsertMessagePart({
-        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
+        id: "p1",
+        sessionId: "s1",
+        messageId: message.id,
+        type: "text",
+        status: "running",
+        text: "",
       });
       const database = (store as any).database as Database.Database;
       database.exec(`
@@ -431,18 +619,28 @@ describe("SessionStore", () => {
       `);
       store.transaction(() => {
         store.appendMessagePartDelta({
-          sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "timer",
+          sessionId: "s1",
+          messageId: message.id,
+          partId: part.id,
+          field: "text",
+          delta: "timer",
         });
       });
 
       await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
-        .toEqual({ text: "" });
+      expect(
+        database
+          .prepare("SELECT text FROM session_message_part WHERE id = 'p1'")
+          .get(),
+      ).toEqual({ text: "" });
       database.exec("DROP TRIGGER fail_delta_update");
 
       await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
-        .toEqual({ text: "timer" });
+      expect(
+        database
+          .prepare("SELECT text FROM session_message_part WHERE id = 'p1'")
+          .get(),
+      ).toEqual({ text: "timer" });
     } finally {
       store.close();
       rmSync(dir, { recursive: true, force: true });
@@ -450,48 +648,86 @@ describe("SessionStore", () => {
   });
 
   it("flushes immediately when the delta byte threshold is reached", () => {
-    withStore((store) => {
-      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
-      const part = store.upsertMessagePart({
-        id: "p1", sessionId: "s1", messageId: message.id, type: "text", status: "running", text: "",
-      });
-      const database = (store as any).database as Database.Database;
-      store.appendMessagePartDelta({
-        sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "he",
-      });
-      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
-        .toEqual({ text: "" });
-      store.appendMessagePartDelta({
-        sessionId: "s1", messageId: message.id, partId: part.id, field: "text", delta: "llo",
-      });
-      expect(database.prepare("SELECT text FROM session_message_part WHERE id = 'p1'").get())
-        .toEqual({ text: "hello" });
-    }, { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 5 });
+    withStore(
+      (store) => {
+        store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+        const message = store.createMessage({
+          id: "m1",
+          sessionId: "s1",
+          role: "assistant",
+        });
+        const part = store.upsertMessagePart({
+          id: "p1",
+          sessionId: "s1",
+          messageId: message.id,
+          type: "text",
+          status: "running",
+          text: "",
+        });
+        const database = (store as any).database as Database.Database;
+        store.appendMessagePartDelta({
+          sessionId: "s1",
+          messageId: message.id,
+          partId: part.id,
+          field: "text",
+          delta: "he",
+        });
+        expect(
+          database
+            .prepare("SELECT text FROM session_message_part WHERE id = 'p1'")
+            .get(),
+        ).toEqual({ text: "" });
+        store.appendMessagePartDelta({
+          sessionId: "s1",
+          messageId: message.id,
+          partId: part.id,
+          field: "text",
+          delta: "llo",
+        });
+        expect(
+          database
+            .prepare("SELECT text FROM session_message_part WHERE id = 'p1'")
+            .get(),
+        ).toEqual({ text: "hello" });
+      },
+      { deltaFlushIntervalMs: 60_000, deltaFlushBytes: 5 },
+    );
   });
 
   it("rolls back both SQLite and the in-memory read model when a grouped write fails", () => {
     withStore((store, path) => {
       store.createSession({ id: "existing", cwd: process.cwd(), model: "m" });
 
-      expect(() => store.transaction(() => {
-        store.createSession({ id: "transient", cwd: process.cwd(), model: "m" });
-        (store as any).database.exec(`
+      expect(() =>
+        store.transaction(() => {
+          store.createSession({
+            id: "transient",
+            cwd: process.cwd(),
+            model: "m",
+          });
+          (store as any).database.exec(`
           CREATE TRIGGER fail_session_insert
           BEFORE INSERT ON session
           BEGIN
             SELECT RAISE(ABORT, 'forced store failure');
           END;
         `);
-        store.createSession({ id: "never-committed", cwd: process.cwd(), model: "m" });
-      })).toThrow("forced store failure");
+          store.createSession({
+            id: "never-committed",
+            cwd: process.cwd(),
+            model: "m",
+          });
+        }),
+      ).toThrow("forced store failure");
 
       expect(store.getSession("existing")).toBeDefined();
       expect(store.getSession("transient")).toBeUndefined();
       expect(store.getSession("never-committed")).toBeUndefined();
 
       const reloaded = new SessionStore({ path });
-      expect(reloaded.listSessions().map((session) => session.id)).toEqual(["existing"]);
+      expect(reloaded.listSessions().map((session) => session.id)).toEqual([
+        "existing",
+      ]);
       reloaded.close();
     });
   });
@@ -502,7 +738,11 @@ describe("SessionStore", () => {
     try {
       const store = new SessionStore({ path, deltaFlushIntervalMs: 60_000 });
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant" });
+      const message = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+      });
       const part = store.upsertMessagePart({
         id: "p1",
         sessionId: "s1",
@@ -521,9 +761,14 @@ describe("SessionStore", () => {
       store.close();
 
       const reloaded = new SessionStore({ path });
-      const durable = reloaded.appendEvent({ type: "daemon.after-restart", sessionId: "s1" });
+      const durable = reloaded.appendEvent({
+        type: "daemon.after-restart",
+        sessionId: "s1",
+      });
       expect(durable.seq).toBeGreaterThan(delta.seq);
-      expect(reloaded.listEvents({ afterSeq: delta.seq }).map((event) => event.id)).toContain(durable.id);
+      expect(
+        reloaded.listEvents({ afterSeq: delta.seq }).map((event) => event.id),
+      ).toContain(durable.id);
       reloaded.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -554,7 +799,9 @@ describe("SessionStore", () => {
         store.updateSession("s1", { title: "final" });
       });
 
-      expect(database.prepare("SELECT count FROM mutation_audit").get()).toEqual({ count: 1 });
+      expect(
+        database.prepare("SELECT count FROM mutation_audit").get(),
+      ).toEqual({ count: 1 });
       const reloaded = new SessionStore({ path });
       expect(reloaded.getSession("s1")?.title).toBe("final");
       expect(reloaded.getSession("s2")).toBeDefined();
@@ -565,10 +812,23 @@ describe("SessionStore", () => {
   it("tracks runs and permission replies as durable events", () => {
     withStore((store, path) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const input = store.admitPrompt({ id: "i1", sessionId: "s1", content: "edit file" });
-      const run = store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
+      const input = store.admitPrompt({
+        id: "i1",
+        sessionId: "s1",
+        content: "edit file",
+      });
+      const run = store.createRun({
+        id: "r1",
+        sessionId: "s1",
+        inputId: input.id,
+      });
       store.updateRun(run.id, { status: "running" });
-      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "assistant", runId: run.id });
+      const message = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+        runId: run.id,
+      });
       store.upsertMessagePart({
         id: "part-tool",
         sessionId: "s1",
@@ -603,8 +863,9 @@ describe("SessionStore", () => {
         decision: "once",
         clientId: "tui-1",
       });
-      expect(() => store.replyPermission({ requestId: permission.id, status: "denied" }))
-        .toThrow("Permission request already resolved");
+      expect(() =>
+        store.replyPermission({ requestId: permission.id, status: "denied" }),
+      ).toThrow("Permission request already resolved");
       store.updateRun(run.id, { status: "completed" });
 
       const reloaded = new SessionStore({ path });
@@ -622,11 +883,18 @@ describe("SessionStore", () => {
         decision: "once",
         decidedByClientId: "tui-1",
       });
-      expect(reloaded.listPermissionRequests({ sessionId: "s1", status: "approved" })).toMatchObject([
-        { id: "p1", toolName: "shell" },
-      ]);
-      expect(reloaded.listEvents().map((event) => event.type)).toContain("permission.replied");
-      expect(reloaded.listEvents().map((event) => event.type)).toContain("session.message.part.updated");
+      expect(
+        reloaded.listPermissionRequests({
+          sessionId: "s1",
+          status: "approved",
+        }),
+      ).toMatchObject([{ id: "p1", toolName: "shell" }]);
+      expect(reloaded.listEvents().map((event) => event.type)).toContain(
+        "permission.replied",
+      );
+      expect(reloaded.listEvents().map((event) => event.type)).toContain(
+        "session.message.part.updated",
+      );
       reloaded.close();
     });
   });
@@ -634,13 +902,32 @@ describe("SessionStore", () => {
   it("returns an atomic attach snapshot and interrupts runs left by a previous daemon", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const input = store.admitPrompt({ id: "i1", sessionId: "s1", content: "hello" });
-      store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
-      const message = store.createMessage({ id: "m1", sessionId: "s1", role: "user", inputId: input.id });
-      store.upsertMessagePart({
-        id: "part1", sessionId: "s1", messageId: message.id, type: "text", status: "completed", text: "hello",
+      const input = store.admitPrompt({
+        id: "i1",
+        sessionId: "s1",
+        content: "hello",
       });
-      const assistant = store.createMessage({ id: "m2", sessionId: "s1", role: "assistant", runId: "r1" });
+      store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
+      const message = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "user",
+        inputId: input.id,
+      });
+      store.upsertMessagePart({
+        id: "part1",
+        sessionId: "s1",
+        messageId: message.id,
+        type: "text",
+        status: "completed",
+        text: "hello",
+      });
+      const assistant = store.createMessage({
+        id: "m2",
+        sessionId: "s1",
+        role: "assistant",
+        runId: "r1",
+      });
       store.upsertMessagePart({
         id: "part-running-text",
         sessionId: "s1",
@@ -664,19 +951,38 @@ describe("SessionStore", () => {
       expect(snapshot.cursor).toBe(store.listEvents().at(-1)?.seq);
       expect(snapshot.inputs.map((row) => row.id)).toEqual(["i1"]);
       expect(snapshot.messages.map((row) => row.id)).toEqual(["m1", "m2"]);
-      expect(snapshot.parts.find((row) => row.id === "part1")?.text).toBe("hello");
-      expect(snapshot.runs).toMatchObject([{ id: "r1", status: "interrupted" }]);
-      expect(snapshot.parts.filter((part) => part.messageId === "m2").map((part) => part.status))
-        .toEqual(["interrupted", "interrupted"]);
+      expect(snapshot.parts.find((row) => row.id === "part1")?.text).toBe(
+        "hello",
+      );
+      expect(snapshot.runs).toMatchObject([
+        { id: "r1", status: "interrupted" },
+      ]);
+      expect(
+        snapshot.parts
+          .filter((part) => part.messageId === "m2")
+          .map((part) => part.status),
+      ).toEqual(["interrupted", "interrupted"]);
     });
   });
 
   it("expires permission requests whose live resolver belonged to a previous daemon", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      store.createPermissionRequest({ id: "pending", sessionId: "s1", toolName: "Write" });
-      const resolved = store.createPermissionRequest({ id: "resolved", sessionId: "s1", toolName: "Read" });
-      store.replyPermission({ requestId: resolved.id, status: "approved", decision: "once" });
+      store.createPermissionRequest({
+        id: "pending",
+        sessionId: "s1",
+        toolName: "Write",
+      });
+      const resolved = store.createPermissionRequest({
+        id: "resolved",
+        sessionId: "s1",
+        toolName: "Read",
+      });
+      store.replyPermission({
+        requestId: resolved.id,
+        status: "approved",
+        decision: "once",
+      });
 
       expect(store.expirePendingPermissionRequests()).toBe(1);
       expect(store.getPermissionRequest("pending")).toMatchObject({
@@ -690,9 +996,22 @@ describe("SessionStore", () => {
   it("persists task/child/run links and terminalizes active tasks after a restart", () => {
     withStore((store, path) => {
       store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
-      store.createSession({ id: "child", parentId: "parent", cwd: process.cwd(), model: "m" });
-      const input = store.admitPrompt({ id: "child-input", sessionId: "child", content: "inspect" });
-      const run = store.createRun({ id: "child-run", sessionId: "child", inputId: input.id });
+      store.createSession({
+        id: "child",
+        parentId: "parent",
+        cwd: process.cwd(),
+        model: "m",
+      });
+      const input = store.admitPrompt({
+        id: "child-input",
+        sessionId: "child",
+        content: "inspect",
+      });
+      const run = store.createRun({
+        id: "child-run",
+        sessionId: "child",
+        inputId: input.id,
+      });
       store.createSessionTask({
         id: "task-child",
         sessionId: "parent",
@@ -704,18 +1023,22 @@ describe("SessionStore", () => {
       store.updateSessionTask("task-child", { runId: run.id });
 
       const reloaded = new SessionStore({ path });
-      expect(reloaded.getSessionState("parent").tasks).toMatchObject([{
-        id: "task-child",
-        childSessionId: "child",
-        runId: "child-run",
-        status: "running",
-      }]);
+      expect(reloaded.getSessionState("parent").tasks).toMatchObject([
+        {
+          id: "task-child",
+          childSessionId: "child",
+          runId: "child-run",
+          status: "running",
+        },
+      ]);
       expect(reloaded.interruptActiveSessionTasks()).toBe(1);
       expect(reloaded.getSessionTask("task-child")).toMatchObject({
         status: "interrupted",
         error: "Daemon restarted before the task completed",
       });
-      expect(reloaded.listEvents({ sessionId: "parent" }).map((event) => event.type)).toContain("session.task.updated");
+      expect(
+        reloaded.listEvents({ sessionId: "parent" }).map((event) => event.type),
+      ).toContain("session.task.updated");
       reloaded.close();
     });
   });
@@ -726,8 +1049,71 @@ describe("SessionStore", () => {
       store.archiveSession("s1");
 
       expect(store.listSessions().map((session) => session.id)).toEqual([]);
-      expect(store.listSessions({ includeArchived: true }).map((session) => session.id)).toEqual(["s1"]);
-      expect(store.listEvents().map((event) => event.type)).toEqual(["session.created", "session.archived"]);
+      expect(
+        store
+          .listSessions({ includeArchived: true })
+          .map((session) => session.id),
+      ).toEqual(["s1"]);
+      expect(store.listEvents().map((event) => event.type)).toEqual([
+        "session.created",
+        "session.archived",
+      ]);
+    });
+  });
+
+  it("hard deletes session trees and their replay history", () => {
+    withStore((store) => {
+      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({
+        id: "child",
+        parentId: "parent",
+        cwd: process.cwd(),
+        model: "m",
+      });
+      const input = store.admitPrompt({
+        id: "input-parent",
+        sessionId: "parent",
+        content: "hello",
+      });
+      const run = store.createRun({
+        id: "run-parent",
+        sessionId: "parent",
+        inputId: input.id,
+      });
+      const message = store.createMessage({
+        id: "message-parent",
+        sessionId: "parent",
+        role: "assistant",
+        runId: run.id,
+      });
+      store.upsertMessagePart({
+        id: "part-parent",
+        sessionId: "parent",
+        messageId: message.id,
+        type: "text",
+        status: "completed",
+        text: "done",
+      });
+      store.createPermissionRequest({
+        id: "permission-parent",
+        sessionId: "parent",
+        runId: run.id,
+        toolName: "Write",
+        payload: {},
+      });
+
+      expect(store.deleteSessionTree("parent")).toEqual(["parent", "child"]);
+
+      expect(store.listSessions({ includeArchived: true })).toEqual([]);
+      expect(store.listEvents().map((event) => event.sessionId)).not.toContain(
+        "parent",
+      );
+      expect(() => store.getSessionState("parent")).toThrow(
+        "Session not found: parent",
+      );
+      expect(() => store.getSessionState("child")).toThrow(
+        "Session not found: child",
+      );
     });
   });
 
@@ -758,6 +1144,28 @@ describe("SessionStore", () => {
         store.archiveProject(project.id);
         expect(store.listProjects()).toEqual([]);
         expect(store.listProjects({ includeArchived: true })).toHaveLength(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("stores and clears a project default shell", () => {
+    withStore((store) => {
+      const root = mkdtempSync(join(tmpdir(), "ohs-project-shell-"));
+      try {
+        const project = store.inspectProject(root);
+        expect(project.defaultShell).toBeUndefined();
+
+        const updated = store.setProjectDefaultShell(
+          project.id,
+          "  pwsh.exe  ",
+        );
+        expect(updated.defaultShell).toBe("pwsh.exe");
+        expect(store.getProject(project.id)?.defaultShell).toBe("pwsh.exe");
+
+        const cleared = store.setProjectDefaultShell(project.id, "");
+        expect(cleared.defaultShell).toBeUndefined();
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

@@ -5,6 +5,7 @@
     { "idx": 0, "version": "1", "when": 1780000000000, "tag": "0000_session_runtime", "breakpoints": true },
     { "idx": 1, "version": "1", "when": 1786464000000, "tag": "0001_event_sequence", "breakpoints": true },
     { "idx": 2, "version": "1", "when": 1786492800000, "tag": "0002_cron", "breakpoints": true },
-    { "idx": 3, "version": "1", "when": 1786723200000, "tag": "0003_projects", "breakpoints": true }
+    { "idx": 3, "version": "1", "when": 1786723200000, "tag": "0003_projects", "breakpoints": true },
+    { "idx": 4, "version": "1", "when": 1786809600000, "tag": "0004_project_default_shell", "breakpoints": true }
   ]
 }

@@ -675,6 +675,18 @@ export class OpenHarnessClient {
     ).project;
   }
 
+  async setProjectDefaultShell(
+    projectId: string,
+    defaultShell: string | null,
+  ): Promise<ProjectRecord> {
+    return (
+      await this.request<{ project: ProjectRecord }>(
+        `/projects/${encodeURIComponent(projectId)}`,
+        { method: "PATCH", body: { defaultShell } },
+      )
+    ).project;
+  }
+
   async rebindProject(projectId: string, path: string): Promise<ProjectRecord> {
     return (
       await this.request<{ project: ProjectRecord }>(
@@ -749,6 +761,21 @@ export class OpenHarnessClient {
       },
     );
     return response.session;
+  }
+
+  /** `DELETE /sessions/:id/hard` */
+  async deleteSession(
+    sessionId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string[]> {
+    const response = await this.request<{ deletedSessionIds: string[] }>(
+      `/sessions/${encodeURIComponent(sessionId)}/hard`,
+      {
+        method: "DELETE",
+        signal: options.signal,
+      },
+    );
+    return response.deletedSessionIds;
   }
 
   /** `PATCH /sessions/:id` - update title, agent, or metadata.runtime fields. */

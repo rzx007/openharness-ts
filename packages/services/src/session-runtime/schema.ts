@@ -23,6 +23,7 @@ export const projects = sqliteTable("project", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   pinnedAt: integer("pinned_at"),
+  defaultShell: text("default_shell"),
   lastOpenedAt: integer("last_opened_at").notNull(),
   archivedAt: integer("archived_at"),
   createdAt: integer("created_at").notNull(),

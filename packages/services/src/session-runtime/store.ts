@@ -90,8 +90,14 @@ export class SessionStore {
 
   constructor(options: SessionStoreOptions) {
     this.path = resolve(options.path);
-    this.deltaFlushIntervalMs = Math.max(1, options.deltaFlushIntervalMs ?? DEFAULT_DELTA_FLUSH_INTERVAL_MS);
-    this.deltaFlushBytes = Math.max(1, options.deltaFlushBytes ?? DEFAULT_DELTA_FLUSH_BYTES);
+    this.deltaFlushIntervalMs = Math.max(
+      1,
+      options.deltaFlushIntervalMs ?? DEFAULT_DELTA_FLUSH_INTERVAL_MS,
+    );
+    this.deltaFlushBytes = Math.max(
+      1,
+      options.deltaFlushBytes ?? DEFAULT_DELTA_FLUSH_BYTES,
+    );
     mkdirSync(dirname(this.path), { recursive: true });
     this.database = new Database(this.path);
     try {
@@ -120,28 +126,65 @@ export class SessionStore {
 
   listProjects(options: { includeArchived?: boolean } = {}): ProjectRecord[] {
     const where = options.includeArchived ? "" : "WHERE p.archived_at IS NULL";
-    return (this.database.prepare(`SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' ${where} ORDER BY (p.pinned_at IS NULL), p.pinned_at DESC, p.last_opened_at DESC`).all() as Array<Record<string, unknown>>).map(projectFromRow);
+    return (
+      this.database
+        .prepare(
+          `SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' ${where} ORDER BY (p.pinned_at IS NULL), p.pinned_at DESC, p.last_opened_at DESC`,
+        )
+        .all() as Array<Record<string, unknown>>
+    ).map(projectFromRow);
   }
 
   getProject(projectId: string): ProjectRecord | undefined {
-    const row = this.database.prepare("SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' WHERE p.id = ?").get(projectId) as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare(
+        "SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' WHERE p.id = ?",
+      )
+      .get(projectId) as Record<string, unknown> | undefined;
     return row ? projectFromRow(row) : undefined;
   }
 
   inspectProject(inputPath: string): ProjectRecord {
     const path = resolve(inputPath);
     const normalizedPath = normalizeProjectPath(path);
-    const row = this.database.prepare("SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' WHERE l.normalized_path = ?").get(normalizedPath) as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare(
+        "SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' WHERE l.normalized_path = ?",
+      )
+      .get(normalizedPath) as Record<string, unknown> | undefined;
     const timestamp = now();
     if (row) {
-      this.database.prepare("UPDATE project SET archived_at = NULL, last_opened_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, row.id);
-      this.database.prepare("UPDATE project_location SET last_verified_at = ? WHERE project_id = ? AND status = 'active'").run(timestamp, row.id);
+      this.database
+        .prepare(
+          "UPDATE project SET archived_at = NULL, last_opened_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(timestamp, timestamp, row.id);
+      this.database
+        .prepare(
+          "UPDATE project_location SET last_verified_at = ? WHERE project_id = ? AND status = 'active'",
+        )
+        .run(timestamp, row.id);
       return this.getProject(row.id as string)!;
     }
     const projectId = randomUUID();
     this.database.transaction(() => {
-      this.database.prepare("INSERT INTO project VALUES (?, ?, NULL, ?, NULL, ?, ?)").run(projectId, basename(path), timestamp, timestamp, timestamp);
-      this.database.prepare("INSERT INTO project_location VALUES (?, ?, ?, ?, 'active', ?, ?)").run(randomUUID(), projectId, path, normalizedPath, timestamp, timestamp);
+      this.database
+        .prepare(
+          "INSERT INTO project (id, name, pinned_at, default_shell, last_opened_at, archived_at, created_at, updated_at) VALUES (?, ?, NULL, NULL, ?, NULL, ?, ?)",
+        )
+        .run(projectId, basename(path), timestamp, timestamp, timestamp);
+      this.database
+        .prepare(
+          "INSERT INTO project_location VALUES (?, ?, ?, ?, 'active', ?, ?)",
+        )
+        .run(
+          randomUUID(),
+          projectId,
+          path,
+          normalizedPath,
+          timestamp,
+          timestamp,
+        );
     })();
     return this.getProject(projectId)!;
   }
@@ -149,36 +192,98 @@ export class SessionStore {
   renameProject(projectId: string, name: string): ProjectRecord {
     const value = name.replace(/\s+/g, " ").trim();
     if (!value) throw new Error("Project name is required");
-    if (this.database.prepare("UPDATE project SET name = ?, updated_at = ? WHERE id = ?").run(value, now(), projectId).changes === 0) throw new Error(`Project not found: ${projectId}`);
+    if (
+      this.database
+        .prepare("UPDATE project SET name = ?, updated_at = ? WHERE id = ?")
+        .run(value, now(), projectId).changes === 0
+    )
+      throw new Error(`Project not found: ${projectId}`);
     return this.getProject(projectId)!;
   }
 
   setProjectPinned(projectId: string, pinned: boolean): ProjectRecord {
-    if (this.database.prepare("UPDATE project SET pinned_at = ?, updated_at = ? WHERE id = ?").run(pinned ? now() : null, now(), projectId).changes === 0) throw new Error(`Project not found: ${projectId}`);
+    if (
+      this.database
+        .prepare(
+          "UPDATE project SET pinned_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(pinned ? now() : null, now(), projectId).changes === 0
+    )
+      throw new Error(`Project not found: ${projectId}`);
+    return this.getProject(projectId)!;
+  }
+
+  setProjectDefaultShell(
+    projectId: string,
+    shell: string | null,
+  ): ProjectRecord {
+    const value = shell?.replace(/\s+/g, " ").trim() ?? "";
+    if (
+      this.database
+        .prepare(
+          "UPDATE project SET default_shell = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(value || null, now(), projectId).changes === 0
+    )
+      throw new Error(`Project not found: ${projectId}`);
     return this.getProject(projectId)!;
   }
 
   archiveProject(projectId: string): ProjectRecord {
     const timestamp = now();
-    if (this.database.prepare("UPDATE project SET archived_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, projectId).changes === 0) throw new Error(`Project not found: ${projectId}`);
+    if (
+      this.database
+        .prepare(
+          "UPDATE project SET archived_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(timestamp, timestamp, projectId).changes === 0
+    )
+      throw new Error(`Project not found: ${projectId}`);
     return this.getProject(projectId)!;
   }
 
   rebindProject(projectId: string, inputPath: string): ProjectRecord {
-    if (!this.getProject(projectId)) throw new Error(`Project not found: ${projectId}`);
+    if (!this.getProject(projectId))
+      throw new Error(`Project not found: ${projectId}`);
     const path = resolve(inputPath);
     const normalizedPath = normalizeProjectPath(path);
-    const conflict = this.database.prepare("SELECT project_id FROM project_location WHERE normalized_path = ? AND status = 'active'").get(normalizedPath) as { project_id?: string } | undefined;
-    if (conflict?.project_id && conflict.project_id !== projectId) throw new Error("Project directory is already bound to another project");
+    const conflict = this.database
+      .prepare(
+        "SELECT project_id FROM project_location WHERE normalized_path = ? AND status = 'active'",
+      )
+      .get(normalizedPath) as { project_id?: string } | undefined;
+    if (conflict?.project_id && conflict.project_id !== projectId)
+      throw new Error("Project directory is already bound to another project");
     const timestamp = now();
     this.database.transaction(() => {
-      this.database.prepare("UPDATE project_location SET status = 'historical' WHERE project_id = ? AND status = 'active'").run(projectId);
-      this.database.prepare("INSERT INTO project_location VALUES (?, ?, ?, ?, 'active', ?, ?)").run(randomUUID(), projectId, path, normalizedPath, timestamp, timestamp);
-      this.database.prepare("UPDATE project SET archived_at = NULL, last_opened_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, projectId);
+      this.database
+        .prepare(
+          "UPDATE project_location SET status = 'historical' WHERE project_id = ? AND status = 'active'",
+        )
+        .run(projectId);
+      this.database
+        .prepare(
+          "INSERT INTO project_location VALUES (?, ?, ?, ?, 'active', ?, ?)",
+        )
+        .run(
+          randomUUID(),
+          projectId,
+          path,
+          normalizedPath,
+          timestamp,
+          timestamp,
+        );
+      this.database
+        .prepare(
+          "UPDATE project SET archived_at = NULL, last_opened_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(timestamp, timestamp, projectId);
       for (const session of Object.values(this.state.sessions)) {
         if (session.projectId !== projectId) continue;
         session.cwd = resolve(path, session.cwdRelative ?? "");
-        this.database.prepare("UPDATE session SET cwd = ? WHERE id = ?").run(session.cwd, session.id);
+        this.database
+          .prepare("UPDATE session SET cwd = ? WHERE id = ?")
+          .run(session.cwd, session.id);
       }
     })();
     return this.getProject(projectId)!;
@@ -200,7 +305,9 @@ export class SessionStore {
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp,
     };
-    this.database.prepare(`
+    this.database
+      .prepare(
+        `
       INSERT INTO cron_job (
         id, name, expression, command, cwd, timezone, enabled,
         last_run_at, next_run_at, created_at, updated_at
@@ -213,27 +320,44 @@ export class SessionStore {
         enabled = excluded.enabled,
         next_run_at = excluded.next_run_at,
         updated_at = excluded.updated_at
-    `).run(
-      record.id, record.name, record.expression, record.command, record.cwd,
-      record.timezone ?? null, record.enabled ? 1 : 0, record.lastRunAt ?? null,
-      record.nextRunAt ?? null, record.createdAt, record.updatedAt,
-    );
+    `,
+      )
+      .run(
+        record.id,
+        record.name,
+        record.expression,
+        record.command,
+        record.cwd,
+        record.timezone ?? null,
+        record.enabled ? 1 : 0,
+        record.lastRunAt ?? null,
+        record.nextRunAt ?? null,
+        record.createdAt,
+        record.updatedAt,
+      );
     return this.getCronJobByName(record.name)!;
   }
 
   getCronJob(id: string): CronJobRecord | undefined {
-    const row = this.database.prepare("SELECT * FROM cron_job WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare("SELECT * FROM cron_job WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
     return row ? cronJobFromRow(row) : undefined;
   }
 
   getCronJobByName(name: string): CronJobRecord | undefined {
-    const row = this.database.prepare("SELECT * FROM cron_job WHERE name = ?").get(name) as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare("SELECT * FROM cron_job WHERE name = ?")
+      .get(name) as Record<string, unknown> | undefined;
     return row ? cronJobFromRow(row) : undefined;
   }
 
   listCronJobs(): CronJobRecord[] {
-    return (this.database.prepare("SELECT * FROM cron_job ORDER BY name").all() as Array<Record<string, unknown>>)
-      .map(cronJobFromRow);
+    return (
+      this.database
+        .prepare("SELECT * FROM cron_job ORDER BY name")
+        .all() as Array<Record<string, unknown>>
+    ).map(cronJobFromRow);
   }
 
   updateCronJob(id: string, patch: UpdateCronJobInput): CronJobRecord {
@@ -241,7 +365,9 @@ export class SessionStore {
     if (!current) throw new Error(`Cron job not found: ${id}`);
     const updated: CronJobRecord = {
       ...current,
-      ...(patch.expression !== undefined ? { expression: patch.expression } : {}),
+      ...(patch.expression !== undefined
+        ? { expression: patch.expression }
+        : {}),
       ...(patch.command !== undefined ? { command: patch.command } : {}),
       ...(patch.cwd !== undefined ? { cwd: patch.cwd } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
@@ -259,19 +385,32 @@ export class SessionStore {
       if (patch.nextRunAt === null) delete updated.nextRunAt;
       else updated.nextRunAt = patch.nextRunAt;
     }
-    this.database.prepare(`
+    this.database
+      .prepare(
+        `
       UPDATE cron_job SET expression = ?, command = ?, cwd = ?, timezone = ?, enabled = ?,
         last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?
-    `).run(
-      updated.expression, updated.command, updated.cwd, updated.timezone ?? null,
-      updated.enabled ? 1 : 0, updated.lastRunAt ?? null, updated.nextRunAt ?? null,
-      updated.updatedAt, id,
-    );
+    `,
+      )
+      .run(
+        updated.expression,
+        updated.command,
+        updated.cwd,
+        updated.timezone ?? null,
+        updated.enabled ? 1 : 0,
+        updated.lastRunAt ?? null,
+        updated.nextRunAt ?? null,
+        updated.updatedAt,
+        id,
+      );
     return updated;
   }
 
   deleteCronJob(id: string): boolean {
-    return this.database.prepare("DELETE FROM cron_job WHERE id = ?").run(id).changes > 0;
+    return (
+      this.database.prepare("DELETE FROM cron_job WHERE id = ?").run(id)
+        .changes > 0
+    );
   }
 
   createCronRun(input: CreateCronRunInput): CronRunRecord {
@@ -283,41 +422,84 @@ export class SessionStore {
       status: "running",
       startedAt: now(),
     };
-    this.database.prepare(`
+    this.database
+      .prepare(
+        `
       INSERT INTO cron_run (id, job_id, job_name, cause, status, started_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(record.id, record.jobId, record.jobName, record.cause, record.status, record.startedAt);
+    `,
+      )
+      .run(
+        record.id,
+        record.jobId,
+        record.jobName,
+        record.cause,
+        record.status,
+        record.startedAt,
+      );
     return record;
   }
 
   finishCronRun(
     id: string,
-    result: { status: Exclude<CronRunStatus, "running">; output?: string; error?: string },
+    result: {
+      status: Exclude<CronRunStatus, "running">;
+      output?: string;
+      error?: string;
+    },
   ): CronRunRecord {
     const finishedAt = now();
-    this.database.prepare(`
+    this.database
+      .prepare(
+        `
       UPDATE cron_run SET status = ?, output = ?, error = ?, finished_at = ?
       WHERE id = ? AND status = 'running'
-    `).run(result.status, result.output ?? null, result.error ?? null, finishedAt, id);
-    const row = this.database.prepare("SELECT * FROM cron_run WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    `,
+      )
+      .run(
+        result.status,
+        result.output ?? null,
+        result.error ?? null,
+        finishedAt,
+        id,
+      );
+    const row = this.database
+      .prepare("SELECT * FROM cron_run WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
     if (!row) throw new Error(`Cron run not found: ${id}`);
     return cronRunFromRow(row);
   }
 
-  listCronRuns(options: { jobId?: string; jobName?: string; limit?: number } = {}): CronRunRecord[] {
+  listCronRuns(
+    options: { jobId?: string; jobName?: string; limit?: number } = {},
+  ): CronRunRecord[] {
     const limit = Math.min(500, Math.max(1, options.limit ?? 50));
     const rows = options.jobId
-      ? this.database.prepare("SELECT * FROM cron_run WHERE job_id = ? ORDER BY started_at DESC LIMIT ?").all(options.jobId, limit)
+      ? this.database
+          .prepare(
+            "SELECT * FROM cron_run WHERE job_id = ? ORDER BY started_at DESC LIMIT ?",
+          )
+          .all(options.jobId, limit)
       : options.jobName
-        ? this.database.prepare("SELECT * FROM cron_run WHERE job_name = ? ORDER BY started_at DESC LIMIT ?").all(options.jobName, limit)
-      : this.database.prepare("SELECT * FROM cron_run ORDER BY started_at DESC LIMIT ?").all(limit);
+        ? this.database
+            .prepare(
+              "SELECT * FROM cron_run WHERE job_name = ? ORDER BY started_at DESC LIMIT ?",
+            )
+            .all(options.jobName, limit)
+        : this.database
+            .prepare("SELECT * FROM cron_run ORDER BY started_at DESC LIMIT ?")
+            .all(limit);
     return (rows as Array<Record<string, unknown>>).map(cronRunFromRow);
   }
 
   interruptActiveCronRuns(reason: string): number {
-    return this.database.prepare(`
+    return this.database
+      .prepare(
+        `
       UPDATE cron_run SET status = 'interrupted', error = ?, finished_at = ? WHERE status = 'running'
-    `).run(reason, now()).changes;
+    `,
+      )
+      .run(reason, now()).changes;
   }
 
   /**
@@ -362,7 +544,8 @@ export class SessionStore {
       if (this.transactionDepth === 0) {
         this.saveRequested = previousSaveRequested;
         if (this.dirtyDeltaPartIds.size > 0) {
-          if (completed && this.pendingDeltaBytes >= this.deltaFlushBytes) this.flushMessagePartDeltas();
+          if (completed && this.pendingDeltaBytes >= this.deltaFlushBytes)
+            this.flushMessagePartDeltas();
           else this.scheduleDeltaFlush();
         }
       }
@@ -371,10 +554,17 @@ export class SessionStore {
 
   createSession(input: CreateSessionInput): SessionRecord {
     const id = input.id ?? randomUUID();
-    if (this.state.sessions[id]) throw new Error(`Session already exists: ${id}`);
+    if (this.state.sessions[id])
+      throw new Error(`Session already exists: ${id}`);
     const timestamp = now();
-    const projectId = input.projectId ?? (input.parentId ? this.state.sessions[input.parentId]?.projectId : undefined);
-    const project = projectId ? this.getProject(projectId) : this.inspectProject(input.cwd);
+    const projectId =
+      input.projectId ??
+      (input.parentId
+        ? this.state.sessions[input.parentId]?.projectId
+        : undefined);
+    const project = projectId
+      ? this.getProject(projectId)
+      : this.inspectProject(input.cwd);
     if (!project) throw new Error(`Project not found: ${projectId}`);
     const cwd = resolve(input.cwd);
     const session: SessionRecord = {
@@ -411,17 +601,112 @@ export class SessionStore {
     const cwd = options.cwd ? resolve(options.cwd) : undefined;
     let sessions = Object.values(this.state.sessions);
     if (cwd) sessions = sessions.filter((session) => session.cwd === cwd);
-    if (!options.includeArchived) sessions = sessions.filter((session) => session.status !== "archived");
+    if (!options.includeArchived)
+      sessions = sessions.filter((session) => session.status !== "archived");
     sessions = sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-    if (options.limit !== undefined) sessions = sessions.slice(0, options.limit);
+    if (options.limit !== undefined)
+      sessions = sessions.slice(0, options.limit);
     return clone(sessions);
   }
 
-  listChildSessions(parentId: string): SessionRecord[] {
+  listChildSessions(
+    parentId: string,
+    options: { includeArchived?: boolean } = {},
+  ): SessionRecord[] {
     assertSession(this.state, parentId);
-    return clone(Object.values(this.state.sessions)
-      .filter((session) => session.parentId === parentId && session.status !== "archived")
-      .sort((a, b) => a.createdAt - b.createdAt));
+    return clone(
+      Object.values(this.state.sessions)
+        .filter(
+          (session) =>
+            session.parentId === parentId &&
+            (options.includeArchived || session.status !== "archived"),
+        )
+        .sort((a, b) => a.createdAt - b.createdAt),
+    );
+  }
+
+  deleteSessionTree(sessionId: string): string[] {
+    if (this.transactionDepth > 0) {
+      throw new Error(
+        "deleteSessionTree cannot be called inside a store transaction",
+      );
+    }
+    assertSession(this.state, sessionId);
+    const sessionIds = this.collectSessionTreeIds(sessionId);
+    const sessionIdSet = new Set(sessionIds);
+
+    this.database.transaction(() => {
+      const placeholders = sessionIds.map(() => "?").join(", ");
+      this.database
+        .prepare(
+          `DELETE FROM permission_request WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(
+          `DELETE FROM session_task WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(
+          `DELETE FROM session_run WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(
+          `DELETE FROM session_message_part WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(
+          `DELETE FROM session_message WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(
+          `DELETE FROM session_input WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(
+          `DELETE FROM session_event WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(`DELETE FROM session WHERE id IN (${placeholders})`)
+        .run(...sessionIds);
+    })();
+
+    for (const id of sessionIds) delete this.state.sessions[id];
+    for (const [id, input] of Object.entries(this.state.inputs)) {
+      if (sessionIdSet.has(input.sessionId)) delete this.state.inputs[id];
+    }
+    for (const [id, message] of Object.entries(this.state.messages)) {
+      if (sessionIdSet.has(message.sessionId)) delete this.state.messages[id];
+    }
+    for (const [id, part] of Object.entries(this.state.parts)) {
+      if (sessionIdSet.has(part.sessionId)) {
+        delete this.state.parts[id];
+        this.dirtyDeltaPartIds.delete(id);
+      }
+    }
+    if (this.dirtyDeltaPartIds.size === 0) this.pendingDeltaBytes = 0;
+    for (const [id, run] of Object.entries(this.state.runs)) {
+      if (sessionIdSet.has(run.sessionId)) delete this.state.runs[id];
+    }
+    for (const [id, task] of Object.entries(this.state.tasks)) {
+      if (sessionIdSet.has(task.sessionId)) delete this.state.tasks[id];
+    }
+    for (const [id, permission] of Object.entries(this.state.permissions)) {
+      if (sessionIdSet.has(permission.sessionId))
+        delete this.state.permissions[id];
+    }
+    this.state.events = this.state.events.filter(
+      (event) => !event.sessionId || !sessionIdSet.has(event.sessionId),
+    );
+    this.mutations = emptyMutations();
+
+    return sessionIds;
   }
 
   archiveSession(sessionId: string): SessionRecord {
@@ -444,7 +729,8 @@ export class SessionStore {
   /** Prevent further mutation while the server joins interrupted work. */
   beginArchive(sessionId: string): SessionRecord {
     const session = assertSession(this.state, sessionId);
-    if (session.status === "archived" || session.status === "closing") return clone(session);
+    if (session.status === "archived" || session.status === "closing")
+      return clone(session);
     const timestamp = now();
     session.status = "closing";
     session.updatedAt = timestamp;
@@ -484,7 +770,8 @@ export class SessionStore {
     const session = assertSession(this.state, input.sessionId);
     assertMutableSession(session);
     const id = input.id ?? randomUUID();
-    if (this.state.inputs[id]) throw new Error(`Session input already exists: ${id}`);
+    if (this.state.inputs[id])
+      throw new Error(`Session input already exists: ${id}`);
     const timestamp = now();
     const seq = maxSeq(this.state.inputs, input.sessionId) + 1;
     const row: SessionInputRecord = {
@@ -517,7 +804,8 @@ export class SessionStore {
   resolveSessionListTitle(sessionId: string): string {
     const session = assertSession(this.state, sessionId);
     const stored = session.title.trim();
-    if (stored && !isPlaceholderSessionTitle(stored)) return formatSessionTitle(stored);
+    if (stored && !isPlaceholderSessionTitle(stored))
+      return formatSessionTitle(stored);
     const first = Object.values(this.state.inputs)
       .filter((input) => input.sessionId === sessionId)
       .sort((a, b) => a.seq - b.seq)[0];
@@ -534,15 +822,18 @@ export class SessionStore {
 
   listInputs(sessionId: string): SessionInputRecord[] {
     assertSession(this.state, sessionId);
-    return clone(Object.values(this.state.inputs)
-      .filter((input) => input.sessionId === sessionId)
-      .sort((a, b) => a.seq - b.seq));
+    return clone(
+      Object.values(this.state.inputs)
+        .filter((input) => input.sessionId === sessionId)
+        .sort((a, b) => a.seq - b.seq),
+    );
   }
 
   createMessage(input: CreateMessageInput): SessionMessageRecord {
     const session = assertSession(this.state, input.sessionId);
     const id = input.id ?? randomUUID();
-    if (this.state.messages[id]) throw new Error(`Session message already exists: ${id}`);
+    if (this.state.messages[id])
+      throw new Error(`Session message already exists: ${id}`);
     const timestamp = now();
     const row: SessionMessageRecord = {
       id,
@@ -568,13 +859,18 @@ export class SessionStore {
     return clone(row);
   }
 
-  listMessages(sessionId: string, options: ListMessagesOptions = {}): SessionMessageRecord[] {
+  listMessages(
+    sessionId: string,
+    options: ListMessagesOptions = {},
+  ): SessionMessageRecord[] {
     assertSession(this.state, sessionId);
     let messages = Object.values(this.state.messages)
       .filter((message) => message.sessionId === sessionId)
       .sort((a, b) => a.seq - b.seq);
-    if (options.afterSeq !== undefined) messages = messages.filter((message) => message.seq > options.afterSeq!);
-    if (options.limit !== undefined) messages = messages.slice(0, options.limit);
+    if (options.afterSeq !== undefined)
+      messages = messages.filter((message) => message.seq > options.afterSeq!);
+    if (options.limit !== undefined)
+      messages = messages.slice(0, options.limit);
     return clone(messages);
   }
 
@@ -637,11 +933,19 @@ export class SessionStore {
           type: partInput.type,
           status: partInput.status ?? "completed",
           ...(partInput.text !== undefined ? { text: partInput.text } : {}),
-          ...(partInput.toolUseId !== undefined ? { toolUseId: partInput.toolUseId } : {}),
-          ...(partInput.toolName !== undefined ? { toolName: partInput.toolName } : {}),
+          ...(partInput.toolUseId !== undefined
+            ? { toolUseId: partInput.toolUseId }
+            : {}),
+          ...(partInput.toolName !== undefined
+            ? { toolName: partInput.toolName }
+            : {}),
           ...(partInput.input !== undefined ? { input: partInput.input } : {}),
-          ...(partInput.output !== undefined ? { output: partInput.output } : {}),
-          ...(partInput.isError !== undefined ? { isError: partInput.isError } : {}),
+          ...(partInput.output !== undefined
+            ? { output: partInput.output }
+            : {}),
+          ...(partInput.isError !== undefined
+            ? { isError: partInput.isError }
+            : {}),
           metadata: partInput.metadata ?? {},
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -667,7 +971,9 @@ export class SessionStore {
     const session = assertSession(this.state, input.sessionId);
     const message = assertMessage(this.state, input.messageId);
     if (message.sessionId !== input.sessionId) {
-      throw new Error(`Session message ${input.messageId} does not belong to session ${input.sessionId}`);
+      throw new Error(
+        `Session message ${input.messageId} does not belong to session ${input.sessionId}`,
+      );
     }
     const id = input.id ?? randomUUID();
     const timestamp = now();
@@ -678,12 +984,16 @@ export class SessionStore {
           type: input.type,
           status: input.status ?? existing.status,
           ...(input.text !== undefined ? { text: input.text } : {}),
-          ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
+          ...(input.toolUseId !== undefined
+            ? { toolUseId: input.toolUseId }
+            : {}),
           ...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
           ...(input.input !== undefined ? { input: input.input } : {}),
           ...(input.output !== undefined ? { output: input.output } : {}),
           ...(input.isError !== undefined ? { isError: input.isError } : {}),
-          metadata: input.metadata ? { ...existing.metadata, ...input.metadata } : existing.metadata,
+          metadata: input.metadata
+            ? { ...existing.metadata, ...input.metadata }
+            : existing.metadata,
           updatedAt: timestamp,
         }
       : {
@@ -694,7 +1004,9 @@ export class SessionStore {
           type: input.type,
           status: input.status ?? "pending",
           ...(input.text !== undefined ? { text: input.text } : {}),
-          ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
+          ...(input.toolUseId !== undefined
+            ? { toolUseId: input.toolUseId }
+            : {}),
           ...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
           ...(input.input !== undefined ? { input: input.input } : {}),
           ...(input.output !== undefined ? { output: input.output } : {}),
@@ -719,27 +1031,39 @@ export class SessionStore {
     return clone(row);
   }
 
-  appendMessagePartDelta(input: AppendMessagePartDeltaInput): SessionEventRecord {
+  appendMessagePartDelta(
+    input: AppendMessagePartDeltaInput,
+  ): SessionEventRecord {
     const session = assertSession(this.state, input.sessionId);
     const message = assertMessage(this.state, input.messageId);
     const part = this.state.parts[input.partId];
-    if (!part) throw new Error(`Session message part not found: ${input.partId}`);
-    if (message.sessionId !== input.sessionId || part.sessionId !== input.sessionId || part.messageId !== input.messageId) {
-      throw new Error(`Session message part ${input.partId} does not belong to message ${input.messageId}`);
+    if (!part)
+      throw new Error(`Session message part not found: ${input.partId}`);
+    if (
+      message.sessionId !== input.sessionId ||
+      part.sessionId !== input.sessionId ||
+      part.messageId !== input.messageId
+    ) {
+      throw new Error(
+        `Session message part ${input.partId} does not belong to message ${input.messageId}`,
+      );
     }
 
     const timestamp = now();
-    const event = this.appendEventInMemory({
-      type: "session.message.part.delta",
-      sessionId: input.sessionId,
-      payload: {
+    const event = this.appendEventInMemory(
+      {
+        type: "session.message.part.delta",
         sessionId: input.sessionId,
-        messageId: input.messageId,
-        partId: input.partId,
-        field: input.field,
-        delta: input.delta,
+        payload: {
+          sessionId: input.sessionId,
+          messageId: input.messageId,
+          partId: input.partId,
+          field: input.field,
+          delta: input.delta,
+        },
       },
-    }, false);
+      false,
+    );
     part.text = `${part.text ?? ""}${input.delta}`;
     part.updatedAt = timestamp;
     message.updatedAt = timestamp;
@@ -747,7 +1071,8 @@ export class SessionStore {
     this.dirtyDeltaPartIds.add(part.id);
     this.pendingDeltaBytes += Buffer.byteLength(input.delta, "utf8");
     if (this.transactionDepth === 0) {
-      if (this.pendingDeltaBytes >= this.deltaFlushBytes) this.flushMessagePartDeltas();
+      if (this.pendingDeltaBytes >= this.deltaFlushBytes)
+        this.flushMessagePartDeltas();
       else this.scheduleDeltaFlush();
     }
     return clone(event);
@@ -766,13 +1091,18 @@ export class SessionStore {
     }
   }
 
-  listMessageParts(sessionId: string, options: ListMessagePartsOptions = {}): SessionMessagePartRecord[] {
+  listMessageParts(
+    sessionId: string,
+    options: ListMessagePartsOptions = {},
+  ): SessionMessagePartRecord[] {
     assertSession(this.state, sessionId);
     let parts = Object.values(this.state.parts)
       .filter((part) => part.sessionId === sessionId)
       .sort((a, b) => a.seq - b.seq);
-    if (options.messageId) parts = parts.filter((part) => part.messageId === options.messageId);
-    if (options.afterSeq !== undefined) parts = parts.filter((part) => part.seq > options.afterSeq!);
+    if (options.messageId)
+      parts = parts.filter((part) => part.messageId === options.messageId);
+    if (options.afterSeq !== undefined)
+      parts = parts.filter((part) => part.seq > options.afterSeq!);
     if (options.limit !== undefined) parts = parts.slice(0, options.limit);
     return clone(parts);
   }
@@ -786,9 +1116,14 @@ export class SessionStore {
 
   listEvents(options: ListEventsOptions = {}): SessionEventRecord[] {
     let events = this.state.events;
-    if (options.afterSeq !== undefined) events = events.filter((event) => event.seq > options.afterSeq!);
+    if (options.afterSeq !== undefined)
+      events = events.filter((event) => event.seq > options.afterSeq!);
     if (options.sessionId) {
-      events = events.filter((event) => event.sessionId === undefined || event.sessionId === options.sessionId);
+      events = events.filter(
+        (event) =>
+          event.sessionId === undefined ||
+          event.sessionId === options.sessionId,
+      );
     }
     events = events.sort((a, b) => a.seq - b.seq);
     if (options.limit !== undefined) events = events.slice(0, options.limit);
@@ -805,11 +1140,17 @@ export class SessionStore {
     if (input.inputId && !this.state.inputs[input.inputId]) {
       throw new Error(`Session input not found: ${input.inputId}`);
     }
-    if (input.inputId && this.state.inputs[input.inputId]!.sessionId !== input.sessionId) {
-      throw new Error(`Session input does not belong to session: ${input.inputId}`);
+    if (
+      input.inputId &&
+      this.state.inputs[input.inputId]!.sessionId !== input.sessionId
+    ) {
+      throw new Error(
+        `Session input does not belong to session: ${input.inputId}`,
+      );
     }
     const id = input.id ?? randomUUID();
-    if (this.state.runs[id]) throw new Error(`Session run already exists: ${id}`);
+    if (this.state.runs[id])
+      throw new Error(`Session run already exists: ${id}`);
     const timestamp = now();
     const run: SessionRunRecord = {
       id,
@@ -850,7 +1191,8 @@ export class SessionStore {
         delete run.finishedAt;
         delete run.error;
       }
-      if (["completed", "failed", "interrupted"].includes(input.status)) run.finishedAt = timestamp;
+      if (["completed", "failed", "interrupted"].includes(input.status))
+        run.finishedAt = timestamp;
     }
     if (input.error !== undefined) run.error = input.error;
     if (input.metadata) run.metadata = { ...run.metadata, ...input.metadata };
@@ -874,10 +1216,12 @@ export class SessionStore {
   }
 
   findRunByInput(inputId: string): SessionRunRecord | undefined {
-    const direct = Object.values(this.state.runs).find((candidate) => candidate.inputId === inputId);
+    const direct = Object.values(this.state.runs).find(
+      (candidate) => candidate.inputId === inputId,
+    );
     if (direct) return clone(direct);
-    const promoted = Object.values(this.state.messages).find((message) =>
-      message.inputId === inputId && message.runId,
+    const promoted = Object.values(this.state.messages).find(
+      (message) => message.inputId === inputId && message.runId,
     );
     const run = promoted?.runId ? this.state.runs[promoted.runId] : undefined;
     return run ? clone(run) : undefined;
@@ -885,25 +1229,36 @@ export class SessionStore {
 
   listRuns(sessionId: string): SessionRunRecord[] {
     assertSession(this.state, sessionId);
-    return clone(Object.values(this.state.runs)
-      .filter((run) => run.sessionId === sessionId)
-      .sort((a, b) => a.createdAt - b.createdAt));
+    return clone(
+      Object.values(this.state.runs)
+        .filter((run) => run.sessionId === sessionId)
+        .sort((a, b) => a.createdAt - b.createdAt),
+    );
   }
 
   createSessionTask(input: CreateSessionTaskInput): SessionTaskRecord {
     const session = assertSession(this.state, input.sessionId);
     const id = input.id ?? randomUUID();
-    if (this.state.tasks[id]) throw new Error(`Session task already exists: ${id}`);
+    if (this.state.tasks[id])
+      throw new Error(`Session task already exists: ${id}`);
     if (input.childSessionId) {
       const child = assertSession(this.state, input.childSessionId);
       if (child.parentId !== input.sessionId) {
-        throw new Error(`Child session does not belong to task session: ${input.childSessionId}`);
+        throw new Error(
+          `Child session does not belong to task session: ${input.childSessionId}`,
+        );
       }
     }
     if (input.runId) {
       const run = this.state.runs[input.runId];
-      if (!run || run.sessionId !== input.childSessionId && run.sessionId !== input.sessionId) {
-        throw new Error(`Task run does not belong to task session: ${input.runId}`);
+      if (
+        !run ||
+        (run.sessionId !== input.childSessionId &&
+          run.sessionId !== input.sessionId)
+      ) {
+        throw new Error(
+          `Task run does not belong to task session: ${input.runId}`,
+        );
       }
     }
     const timestamp = now();
@@ -925,18 +1280,29 @@ export class SessionStore {
     session.updatedAt = timestamp;
     this.mutations.tasks.add(id);
     this.mutations.sessions.add(session.id);
-    this.appendEventInMemory({ type: "session.task.created", sessionId: task.sessionId, payload: { task } });
+    this.appendEventInMemory({
+      type: "session.task.created",
+      sessionId: task.sessionId,
+      payload: { task },
+    });
     this.save();
     return clone(task);
   }
 
-  updateSessionTask(taskId: string, input: UpdateSessionTaskInput): SessionTaskRecord {
+  updateSessionTask(
+    taskId: string,
+    input: UpdateSessionTaskInput,
+  ): SessionTaskRecord {
     const task = this.state.tasks[taskId];
     if (!task) throw new Error(`Session task not found: ${taskId}`);
     const session = assertSession(this.state, task.sessionId);
     if (input.runId !== undefined) {
       const run = this.state.runs[input.runId];
-      if (!run || (run.sessionId !== task.sessionId && run.sessionId !== task.childSessionId)) {
+      if (
+        !run ||
+        (run.sessionId !== task.sessionId &&
+          run.sessionId !== task.childSessionId)
+      ) {
         throw new Error(`Task run does not belong to task: ${input.runId}`);
       }
       task.runId = input.runId;
@@ -951,7 +1317,10 @@ export class SessionStore {
         delete task.output;
         delete task.error;
       }
-      if (["completed", "failed", "stopped", "interrupted"].includes(input.status)) task.finishedAt = timestamp;
+      if (
+        ["completed", "failed", "stopped", "interrupted"].includes(input.status)
+      )
+        task.finishedAt = timestamp;
     }
     if (input.output !== undefined) task.output = input.output;
     if (input.error !== undefined) task.error = input.error;
@@ -976,22 +1345,33 @@ export class SessionStore {
 
   listSessionTasks(sessionId: string): SessionTaskRecord[] {
     assertSession(this.state, sessionId);
-    return clone(Object.values(this.state.tasks)
-      .filter((task) => task.sessionId === sessionId)
-      .sort((a, b) => a.createdAt - b.createdAt));
+    return clone(
+      Object.values(this.state.tasks)
+        .filter((task) => task.sessionId === sessionId)
+        .sort((a, b) => a.createdAt - b.createdAt),
+    );
   }
 
-  findSessionTaskByManagerTaskId(sessionId: string, taskManagerId: string): SessionTaskRecord | undefined {
+  findSessionTaskByManagerTaskId(
+    sessionId: string,
+    taskManagerId: string,
+  ): SessionTaskRecord | undefined {
     assertSession(this.state, sessionId);
-    const task = Object.values(this.state.tasks).find((candidate) =>
-      candidate.sessionId === sessionId && candidate.metadata.taskManagerId === taskManagerId);
+    const task = Object.values(this.state.tasks).find(
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        candidate.metadata.taskManagerId === taskManagerId,
+    );
     return task ? clone(task) : undefined;
   }
 
   /** A daemon restart cannot retain TaskManager callbacks or process handles. */
-  interruptActiveSessionTasks(reason = "Daemon restarted before the task completed"): number {
-    const active = Object.values(this.state.tasks)
-      .filter((task) => task.status === "pending" || task.status === "running");
+  interruptActiveSessionTasks(
+    reason = "Daemon restarted before the task completed",
+  ): number {
+    const active = Object.values(this.state.tasks).filter(
+      (task) => task.status === "pending" || task.status === "running",
+    );
     for (const task of active) {
       this.updateSessionTask(task.id, { status: "interrupted", error: reason });
     }
@@ -1003,15 +1383,21 @@ export class SessionStore {
    * cannot resume an in-memory QueryEngine run, so leaving these rows active
    * would keep every attached client permanently busy.
    */
-  interruptActiveRuns(reason = "Daemon restarted before the run completed"): number {
-    const active = Object.values(this.state.runs)
-      .filter((run) => run.status === "pending" || run.status === "running");
+  interruptActiveRuns(
+    reason = "Daemon restarted before the run completed",
+  ): number {
+    const active = Object.values(this.state.runs).filter(
+      (run) => run.status === "pending" || run.status === "running",
+    );
     for (const run of active) {
-      const messageIds = new Set(Object.values(this.state.messages)
-        .filter((message) => message.runId === run.id)
-        .map((message) => message.id));
+      const messageIds = new Set(
+        Object.values(this.state.messages)
+          .filter((message) => message.runId === run.id)
+          .map((message) => message.id),
+      );
       for (const part of Object.values(this.state.parts)) {
-        if (!messageIds.has(part.messageId) || part.status !== "running") continue;
+        if (!messageIds.has(part.messageId) || part.status !== "running")
+          continue;
         this.upsertMessagePart({
           id: part.id,
           sessionId: part.sessionId,
@@ -1026,32 +1412,47 @@ export class SessionStore {
   }
 
   /** A previous process cannot retain the resolver behind a pending permission prompt. */
-  expirePendingPermissionRequests(reason = "Daemon restarted before the permission was resolved"): number {
-    const pending = Object.values(this.state.permissions)
-      .filter((request) => request.status === "pending");
+  expirePendingPermissionRequests(
+    reason = "Daemon restarted before the permission was resolved",
+  ): number {
+    const pending = Object.values(this.state.permissions).filter(
+      (request) => request.status === "pending",
+    );
     for (const request of pending) {
-      this.replyPermission({ requestId: request.id, status: "expired", decision: reason });
+      this.replyPermission({
+        requestId: request.id,
+        status: "expired",
+        decision: reason,
+      });
     }
     return pending.length;
   }
 
   /** Complete an archive that was interrupted by a daemon process exit. */
   finalizeClosingSessions(): number {
-    const closing = Object.values(this.state.sessions).filter((session) => session.status === "closing");
+    const closing = Object.values(this.state.sessions).filter(
+      (session) => session.status === "closing",
+    );
     for (const session of closing) {
       const hasActiveRun = Object.values(this.state.runs).some(
-        (run) => run.sessionId === session.id && (run.status === "pending" || run.status === "running"),
+        (run) =>
+          run.sessionId === session.id &&
+          (run.status === "pending" || run.status === "running"),
       );
       if (!hasActiveRun) this.archiveSession(session.id);
     }
     return closing.length;
   }
 
-  createPermissionRequest(input: CreatePermissionRequestInput): PermissionRequestRecord {
+  createPermissionRequest(
+    input: CreatePermissionRequestInput,
+  ): PermissionRequestRecord {
     assertSession(this.state, input.sessionId);
-    if (input.runId && !this.state.runs[input.runId]) throw new Error(`Session run not found: ${input.runId}`);
+    if (input.runId && !this.state.runs[input.runId])
+      throw new Error(`Session run not found: ${input.runId}`);
     const id = input.id ?? randomUUID();
-    if (this.state.permissions[id]) throw new Error(`Permission request already exists: ${id}`);
+    if (this.state.permissions[id])
+      throw new Error(`Permission request already exists: ${id}`);
     const timestamp = now();
     const request: PermissionRequestRecord = {
       id,
@@ -1076,12 +1477,17 @@ export class SessionStore {
 
   replyPermission(input: ReplyPermissionInput): PermissionRequestRecord {
     const request = this.state.permissions[input.requestId];
-    if (!request) throw new Error(`Permission request not found: ${input.requestId}`);
-    if (request.status !== "pending") throw new Error(`Permission request already resolved: ${input.requestId}`);
+    if (!request)
+      throw new Error(`Permission request not found: ${input.requestId}`);
+    if (request.status !== "pending")
+      throw new Error(
+        `Permission request already resolved: ${input.requestId}`,
+      );
     const timestamp = now();
     request.status = input.status;
     if (input.decision !== undefined) request.decision = input.decision;
-    if (input.clientId !== undefined) request.decidedByClientId = input.clientId;
+    if (input.clientId !== undefined)
+      request.decidedByClientId = input.clientId;
     request.updatedAt = timestamp;
     this.mutations.permissions.add(request.id);
     this.appendEventInMemory({
@@ -1098,13 +1504,25 @@ export class SessionStore {
     return request ? clone(request) : undefined;
   }
 
-  listPermissionRequests(options: ListPermissionRequestsOptions = {}): PermissionRequestRecord[] {
+  listPermissionRequests(
+    options: ListPermissionRequestsOptions = {},
+  ): PermissionRequestRecord[] {
     let requests = Object.values(this.state.permissions);
-    if (options.sessionId) requests = requests.filter((request) => request.sessionId === options.sessionId);
-    if (options.status) requests = requests.filter((request) => request.status === options.status);
-    if (options.toolName) requests = requests.filter((request) => request.toolName === options.toolName);
+    if (options.sessionId)
+      requests = requests.filter(
+        (request) => request.sessionId === options.sessionId,
+      );
+    if (options.status)
+      requests = requests.filter(
+        (request) => request.status === options.status,
+      );
+    if (options.toolName)
+      requests = requests.filter(
+        (request) => request.toolName === options.toolName,
+      );
     requests = requests.sort((a, b) => a.createdAt - b.createdAt);
-    if (options.limit !== undefined) requests = requests.slice(0, options.limit);
+    if (options.limit !== undefined)
+      requests = requests.slice(0, options.limit);
     return clone(requests);
   }
 
@@ -1135,7 +1553,10 @@ export class SessionStore {
     });
   }
 
-  private appendEventInMemory(input: AppendEventInput, retain = true): SessionEventRecord {
+  private appendEventInMemory(
+    input: AppendEventInput,
+    retain = true,
+  ): SessionEventRecord {
     const event: SessionEventRecord = {
       id: input.id ?? randomUUID(),
       seq: this.allocateEventSequence(),
@@ -1152,7 +1573,12 @@ export class SessionStore {
   }
 
   private scheduleDeltaFlush(): void {
-    if (this.deltaFlushTimer || this.closed || this.dirtyDeltaPartIds.size === 0) return;
+    if (
+      this.deltaFlushTimer ||
+      this.closed ||
+      this.dirtyDeltaPartIds.size === 0
+    )
+      return;
     this.deltaFlushTimer = setTimeout(() => {
       this.deltaFlushTimer = undefined;
       try {
@@ -1187,9 +1613,25 @@ export class SessionStore {
   private refreshSessionStatus(session: SessionRecord): void {
     if (session.status === "archived" || session.status === "closing") return;
     const hasActiveRun = Object.values(this.state.runs).some(
-      (run) => run.sessionId === session.id && (run.status === "pending" || run.status === "running"),
+      (run) =>
+        run.sessionId === session.id &&
+        (run.status === "pending" || run.status === "running"),
     );
     session.status = hasActiveRun ? "running" : "idle";
+  }
+
+  private collectSessionTreeIds(sessionId: string): string[] {
+    const result: string[] = [];
+    const visit = (id: string): void => {
+      result.push(id);
+      for (const child of Object.values(this.state.sessions)
+        .filter((session) => session.parentId === id)
+        .sort((a, b) => a.createdAt - b.createdAt)) {
+        visit(child.id);
+      }
+    };
+    visit(sessionId);
+    return result;
   }
 
   private applyMigrations(): void {
@@ -1200,13 +1642,17 @@ export class SessionStore {
 
   private load(): SessionState {
     const state = emptyState();
-    for (const row of this.database.prepare("SELECT * FROM session").all() as Array<Record<string, unknown>>) {
+    for (const row of this.database
+      .prepare("SELECT * FROM session")
+      .all() as Array<Record<string, unknown>>) {
       const session: SessionRecord = {
         id: row.id as string,
         ...(row.parent_id ? { parentId: row.parent_id as string } : {}),
         ...(row.project_id ? { projectId: row.project_id as string } : {}),
         cwd: row.cwd as string,
-        ...(row.cwd_relative !== null ? { cwdRelative: row.cwd_relative as string } : {}),
+        ...(row.cwd_relative !== null
+          ? { cwdRelative: row.cwd_relative as string }
+          : {}),
         title: row.title as string,
         model: row.model as string,
         ...(row.agent ? { agent: row.agent as string } : {}),
@@ -1218,50 +1664,159 @@ export class SessionStore {
       };
       state.sessions[session.id] = session;
     }
-    for (const row of this.database.prepare("SELECT * FROM session_input").all() as Array<Record<string, unknown>>) {
-      const input: SessionInputRecord = { id: row.id as string, sessionId: row.session_id as string, seq: row.seq as number, delivery: row.delivery as SessionInputRecord["delivery"], content: row.content as string, metadata: decode(row.metadata_json as string), createdAt: row.created_at as number };
+    for (const row of this.database
+      .prepare("SELECT * FROM session_input")
+      .all() as Array<Record<string, unknown>>) {
+      const input: SessionInputRecord = {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        seq: row.seq as number,
+        delivery: row.delivery as SessionInputRecord["delivery"],
+        content: row.content as string,
+        metadata: decode(row.metadata_json as string),
+        createdAt: row.created_at as number,
+      };
       state.inputs[input.id] = input;
     }
-    for (const row of this.database.prepare("SELECT * FROM session_message").all() as Array<Record<string, unknown>>) {
-      const message: SessionMessageRecord = { id: row.id as string, sessionId: row.session_id as string, seq: row.seq as number, role: row.role as SessionMessageRecord["role"], ...(row.run_id ? { runId: row.run_id as string } : {}), ...(row.input_id ? { inputId: row.input_id as string } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+    for (const row of this.database
+      .prepare("SELECT * FROM session_message")
+      .all() as Array<Record<string, unknown>>) {
+      const message: SessionMessageRecord = {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        seq: row.seq as number,
+        role: row.role as SessionMessageRecord["role"],
+        ...(row.run_id ? { runId: row.run_id as string } : {}),
+        ...(row.input_id ? { inputId: row.input_id as string } : {}),
+        metadata: decode(row.metadata_json as string),
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+      };
       state.messages[message.id] = message;
     }
-    for (const row of this.database.prepare("SELECT * FROM session_message_part").all() as Array<Record<string, unknown>>) {
-      const part: SessionMessagePartRecord = { id: row.id as string, sessionId: row.session_id as string, messageId: row.message_id as string, seq: row.seq as number, type: row.type as SessionMessagePartRecord["type"], status: row.status as SessionMessagePartRecord["status"], ...(row.text !== null ? { text: row.text as string } : {}), ...(row.tool_use_id ? { toolUseId: row.tool_use_id as string } : {}), ...(row.tool_name ? { toolName: row.tool_name as string } : {}), ...(row.input_json ? { input: decode(row.input_json as string) } : {}), ...(row.output_json ? { output: JSON.parse(row.output_json as string) } : {}), ...(row.is_error !== null ? { isError: Boolean(row.is_error) } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+    for (const row of this.database
+      .prepare("SELECT * FROM session_message_part")
+      .all() as Array<Record<string, unknown>>) {
+      const part: SessionMessagePartRecord = {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        messageId: row.message_id as string,
+        seq: row.seq as number,
+        type: row.type as SessionMessagePartRecord["type"],
+        status: row.status as SessionMessagePartRecord["status"],
+        ...(row.text !== null ? { text: row.text as string } : {}),
+        ...(row.tool_use_id ? { toolUseId: row.tool_use_id as string } : {}),
+        ...(row.tool_name ? { toolName: row.tool_name as string } : {}),
+        ...(row.input_json ? { input: decode(row.input_json as string) } : {}),
+        ...(row.output_json
+          ? { output: JSON.parse(row.output_json as string) }
+          : {}),
+        ...(row.is_error !== null ? { isError: Boolean(row.is_error) } : {}),
+        metadata: decode(row.metadata_json as string),
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+      };
       state.parts[part.id] = part;
     }
-    for (const row of this.database.prepare("SELECT * FROM session_run").all() as Array<Record<string, unknown>>) {
-      const run: SessionRunRecord = { id: row.id as string, sessionId: row.session_id as string, ...(row.input_id ? { inputId: row.input_id as string } : {}), status: row.status as SessionRunRecord["status"], ...(row.started_at ? { startedAt: row.started_at as number } : {}), ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}), ...(row.error ? { error: row.error as string } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+    for (const row of this.database
+      .prepare("SELECT * FROM session_run")
+      .all() as Array<Record<string, unknown>>) {
+      const run: SessionRunRecord = {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        ...(row.input_id ? { inputId: row.input_id as string } : {}),
+        status: row.status as SessionRunRecord["status"],
+        ...(row.started_at ? { startedAt: row.started_at as number } : {}),
+        ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}),
+        ...(row.error ? { error: row.error as string } : {}),
+        metadata: decode(row.metadata_json as string),
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+      };
       state.runs[run.id] = run;
     }
-    for (const row of this.database.prepare("SELECT * FROM session_task").all() as Array<Record<string, unknown>>) {
-      const task: SessionTaskRecord = { id: row.id as string, sessionId: row.session_id as string, ...(row.child_session_id ? { childSessionId: row.child_session_id as string } : {}), ...(row.run_id ? { runId: row.run_id as string } : {}), type: row.type as string, status: row.status as SessionTaskRecord["status"], description: row.description as string, cwd: row.cwd as string, ...(row.output ? { output: row.output as string } : {}), ...(row.error ? { error: row.error as string } : {}), metadata: decode(row.metadata_json as string), createdAt: row.created_at as number, ...(row.started_at ? { startedAt: row.started_at as number } : {}), ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}), updatedAt: row.updated_at as number };
+    for (const row of this.database
+      .prepare("SELECT * FROM session_task")
+      .all() as Array<Record<string, unknown>>) {
+      const task: SessionTaskRecord = {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        ...(row.child_session_id
+          ? { childSessionId: row.child_session_id as string }
+          : {}),
+        ...(row.run_id ? { runId: row.run_id as string } : {}),
+        type: row.type as string,
+        status: row.status as SessionTaskRecord["status"],
+        description: row.description as string,
+        cwd: row.cwd as string,
+        ...(row.output ? { output: row.output as string } : {}),
+        ...(row.error ? { error: row.error as string } : {}),
+        metadata: decode(row.metadata_json as string),
+        createdAt: row.created_at as number,
+        ...(row.started_at ? { startedAt: row.started_at as number } : {}),
+        ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}),
+        updatedAt: row.updated_at as number,
+      };
       state.tasks[task.id] = task;
     }
-    for (const row of this.database.prepare("SELECT * FROM permission_request").all() as Array<Record<string, unknown>>) {
-      const request: PermissionRequestRecord = { id: row.id as string, sessionId: row.session_id as string, ...(row.run_id ? { runId: row.run_id as string } : {}), toolName: row.tool_name as string, payload: decode(row.payload_json as string), status: row.status as PermissionRequestRecord["status"], ...(row.decision ? { decision: row.decision as string } : {}), ...(row.decided_by_client_id ? { decidedByClientId: row.decided_by_client_id as string } : {}), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+    for (const row of this.database
+      .prepare("SELECT * FROM permission_request")
+      .all() as Array<Record<string, unknown>>) {
+      const request: PermissionRequestRecord = {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        ...(row.run_id ? { runId: row.run_id as string } : {}),
+        toolName: row.tool_name as string,
+        payload: decode(row.payload_json as string),
+        status: row.status as PermissionRequestRecord["status"],
+        ...(row.decision ? { decision: row.decision as string } : {}),
+        ...(row.decided_by_client_id
+          ? { decidedByClientId: row.decided_by_client_id as string }
+          : {}),
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+      };
       state.permissions[request.id] = request;
     }
-    for (const row of this.database.prepare("SELECT * FROM session_event ORDER BY seq").all() as Array<Record<string, unknown>>) {
-      const event: SessionEventRecord = { id: row.id as string, seq: row.seq as number, type: row.type as string, ...(row.session_id ? { sessionId: row.session_id as string } : {}), payload: decode(row.payload_json as string), createdAt: row.created_at as number };
+    for (const row of this.database
+      .prepare("SELECT * FROM session_event ORDER BY seq")
+      .all() as Array<Record<string, unknown>>) {
+      const event: SessionEventRecord = {
+        id: row.id as string,
+        seq: row.seq as number,
+        type: row.type as string,
+        ...(row.session_id ? { sessionId: row.session_id as string } : {}),
+        payload: decode(row.payload_json as string),
+        createdAt: row.created_at as number,
+      };
       state.events.push(event);
       state.nextEventSeq = Math.max(state.nextEventSeq, event.seq + 1);
     }
-    const sequence = this.database.prepare(
-      "SELECT reserved_through FROM session_event_sequence WHERE id = 1",
-    ).get() as { reserved_through?: number } | undefined;
+    const sequence = this.database
+      .prepare(
+        "SELECT reserved_through FROM session_event_sequence WHERE id = 1",
+      )
+      .get() as { reserved_through?: number } | undefined;
     this.reservedEventSeq = sequence?.reserved_through ?? 0;
-    state.nextEventSeq = Math.max(state.nextEventSeq, this.reservedEventSeq + 1);
+    state.nextEventSeq = Math.max(
+      state.nextEventSeq,
+      this.reservedEventSeq + 1,
+    );
     return state;
   }
 
   private allocateEventSequence(): number {
     if (this.state.nextEventSeq > this.reservedEventSeq) {
-      const reservedThrough = this.state.nextEventSeq + EVENT_SEQUENCE_BLOCK_SIZE - 1;
-      this.database.prepare(`
+      const reservedThrough =
+        this.state.nextEventSeq + EVENT_SEQUENCE_BLOCK_SIZE - 1;
+      this.database
+        .prepare(
+          `
         INSERT INTO session_event_sequence (id, reserved_through) VALUES (1, ?)
         ON CONFLICT(id) DO UPDATE SET reserved_through = excluded.reserved_through
-      `).run(reservedThrough);
+      `,
+        )
+        .run(reservedThrough);
       this.reservedEventSeq = reservedThrough;
     }
     return this.state.nextEventSeq++;
@@ -1285,11 +1840,16 @@ export class SessionStore {
   }
 
   private persistChanges(): void {
-    if (this.dirtyDeltaPartIds.size > 0) this.persistDeltaPartRows([...this.dirtyDeltaPartIds]);
+    if (this.dirtyDeltaPartIds.size > 0)
+      this.persistDeltaPartRows([...this.dirtyDeltaPartIds]);
 
-    const deletePart = this.database.prepare("DELETE FROM session_message_part WHERE id = ?");
+    const deletePart = this.database.prepare(
+      "DELETE FROM session_message_part WHERE id = ?",
+    );
     for (const id of this.mutations.deletedParts) deletePart.run(id);
-    const deleteMessage = this.database.prepare("DELETE FROM session_message WHERE id = ?");
+    const deleteMessage = this.database.prepare(
+      "DELETE FROM session_message WHERE id = ?",
+    );
     for (const id of this.mutations.deletedMessages) deleteMessage.run(id);
 
     const upsertSession = this.database.prepare(`
@@ -1302,7 +1862,22 @@ export class SessionStore {
     `);
     for (const id of this.mutations.sessions) {
       const value = this.state.sessions[id];
-      if (value) upsertSession.run(value.id, value.parentId ?? null, value.cwd, value.title, value.model, value.agent ?? null, value.status, encode(value.metadata), value.createdAt, value.updatedAt, value.archivedAt ?? null, value.projectId ?? null, value.cwdRelative ?? null);
+      if (value)
+        upsertSession.run(
+          value.id,
+          value.parentId ?? null,
+          value.cwd,
+          value.title,
+          value.model,
+          value.agent ?? null,
+          value.status,
+          encode(value.metadata),
+          value.createdAt,
+          value.updatedAt,
+          value.archivedAt ?? null,
+          value.projectId ?? null,
+          value.cwdRelative ?? null,
+        );
     }
 
     const upsertInput = this.database.prepare(`
@@ -1313,7 +1888,16 @@ export class SessionStore {
     `);
     for (const id of this.mutations.inputs) {
       const value = this.state.inputs[id];
-      if (value) upsertInput.run(value.id, value.sessionId, value.seq, value.delivery, value.content, encode(value.metadata), value.createdAt);
+      if (value)
+        upsertInput.run(
+          value.id,
+          value.sessionId,
+          value.seq,
+          value.delivery,
+          value.content,
+          encode(value.metadata),
+          value.createdAt,
+        );
     }
 
     const upsertMessage = this.database.prepare(`
@@ -1324,7 +1908,18 @@ export class SessionStore {
     `);
     for (const id of this.mutations.messages) {
       const value = this.state.messages[id];
-      if (value) upsertMessage.run(value.id, value.sessionId, value.seq, value.role, value.runId ?? null, value.inputId ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+      if (value)
+        upsertMessage.run(
+          value.id,
+          value.sessionId,
+          value.seq,
+          value.role,
+          value.runId ?? null,
+          value.inputId ?? null,
+          encode(value.metadata),
+          value.createdAt,
+          value.updatedAt,
+        );
     }
 
     const upsertPart = this.database.prepare(`
@@ -1337,7 +1932,24 @@ export class SessionStore {
     `);
     for (const id of this.mutations.parts) {
       const value = this.state.parts[id];
-      if (value) upsertPart.run(value.id, value.sessionId, value.messageId, value.seq, value.type, value.status, value.text ?? null, value.toolUseId ?? null, value.toolName ?? null, value.input === undefined ? null : encode(value.input), value.output === undefined ? null : JSON.stringify(value.output), value.isError === undefined ? null : Number(value.isError), encode(value.metadata), value.createdAt, value.updatedAt);
+      if (value)
+        upsertPart.run(
+          value.id,
+          value.sessionId,
+          value.messageId,
+          value.seq,
+          value.type,
+          value.status,
+          value.text ?? null,
+          value.toolUseId ?? null,
+          value.toolName ?? null,
+          value.input === undefined ? null : encode(value.input),
+          value.output === undefined ? null : JSON.stringify(value.output),
+          value.isError === undefined ? null : Number(value.isError),
+          encode(value.metadata),
+          value.createdAt,
+          value.updatedAt,
+        );
     }
 
     const upsertRun = this.database.prepare(`
@@ -1349,7 +1961,19 @@ export class SessionStore {
     `);
     for (const id of this.mutations.runs) {
       const value = this.state.runs[id];
-      if (value) upsertRun.run(value.id, value.sessionId, value.inputId ?? null, value.status, value.startedAt ?? null, value.finishedAt ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.updatedAt);
+      if (value)
+        upsertRun.run(
+          value.id,
+          value.sessionId,
+          value.inputId ?? null,
+          value.status,
+          value.startedAt ?? null,
+          value.finishedAt ?? null,
+          value.error ?? null,
+          encode(value.metadata),
+          value.createdAt,
+          value.updatedAt,
+        );
     }
 
     const upsertTask = this.database.prepare(`
@@ -1363,7 +1987,24 @@ export class SessionStore {
     `);
     for (const id of this.mutations.tasks) {
       const value = this.state.tasks[id];
-      if (value) upsertTask.run(value.id, value.sessionId, value.childSessionId ?? null, value.runId ?? null, value.type, value.status, value.description, value.cwd, value.output ?? null, value.error ?? null, encode(value.metadata), value.createdAt, value.startedAt ?? null, value.finishedAt ?? null, value.updatedAt);
+      if (value)
+        upsertTask.run(
+          value.id,
+          value.sessionId,
+          value.childSessionId ?? null,
+          value.runId ?? null,
+          value.type,
+          value.status,
+          value.description,
+          value.cwd,
+          value.output ?? null,
+          value.error ?? null,
+          encode(value.metadata),
+          value.createdAt,
+          value.startedAt ?? null,
+          value.finishedAt ?? null,
+          value.updatedAt,
+        );
     }
 
     const upsertPermission = this.database.prepare(`
@@ -1375,20 +2016,48 @@ export class SessionStore {
     `);
     for (const id of this.mutations.permissions) {
       const value = this.state.permissions[id];
-      if (value) upsertPermission.run(value.id, value.sessionId, value.runId ?? null, value.toolName, encode(value.payload), value.status, value.decision ?? null, value.decidedByClientId ?? null, value.createdAt, value.updatedAt);
+      if (value)
+        upsertPermission.run(
+          value.id,
+          value.sessionId,
+          value.runId ?? null,
+          value.toolName,
+          encode(value.payload),
+          value.status,
+          value.decision ?? null,
+          value.decidedByClientId ?? null,
+          value.createdAt,
+          value.updatedAt,
+        );
     }
 
-    const insertEvent = this.database.prepare("INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)");
+    const insertEvent = this.database.prepare(
+      "INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)",
+    );
     for (const value of this.state.events) {
-      if (!this.mutations.events.has(value.id) || !isDurableEvent(value)) continue;
-      insertEvent.run(value.id, value.seq, value.type, value.sessionId ?? null, encode(value.payload), value.createdAt);
+      if (!this.mutations.events.has(value.id) || !isDurableEvent(value))
+        continue;
+      insertEvent.run(
+        value.id,
+        value.seq,
+        value.type,
+        value.sessionId ?? null,
+        encode(value.payload),
+        value.createdAt,
+      );
     }
   }
 
   private persistDeltaPartRows(partIds: string[]): void {
-    const updatePart = this.database.prepare("UPDATE session_message_part SET text = ?, updated_at = ? WHERE id = ?");
-    const updateMessage = this.database.prepare("UPDATE session_message SET updated_at = ? WHERE id = ?");
-    const updateSession = this.database.prepare("UPDATE session SET updated_at = ? WHERE id = ?");
+    const updatePart = this.database.prepare(
+      "UPDATE session_message_part SET text = ?, updated_at = ? WHERE id = ?",
+    );
+    const updateMessage = this.database.prepare(
+      "UPDATE session_message SET updated_at = ? WHERE id = ?",
+    );
+    const updateSession = this.database.prepare(
+      "UPDATE session SET updated_at = ? WHERE id = ?",
+    );
     const messageIds = new Set<string>();
     const sessionIds = new Set<string>();
     for (const partId of partIds) {
@@ -1407,16 +2076,25 @@ export class SessionStore {
       if (session) updateSession.run(session.updatedAt, session.id);
     }
   }
-
 }
 
 function projectFromRow(row: Record<string, unknown>): ProjectRecord {
-  return { id: row.id as string, name: row.name as string, path: row.path as string,
-    ...(row.pinned_at ? { pinnedAt: row.pinned_at as number } : {}), lastOpenedAt: row.last_opened_at as number,
-    ...(row.archived_at ? { archivedAt: row.archived_at as number } : {}), createdAt: row.created_at as number, updatedAt: row.updated_at as number };
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    path: row.path as string,
+    ...(row.pinned_at ? { pinnedAt: row.pinned_at as number } : {}),
+    ...(row.default_shell ? { defaultShell: row.default_shell as string } : {}),
+    lastOpenedAt: row.last_opened_at as number,
+    ...(row.archived_at ? { archivedAt: row.archived_at as number } : {}),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+  };
 }
 
 function normalizeProjectPath(path: string): string {
   const normalized = resolve(path).replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? normalized.toLocaleLowerCase() : normalized;
+  return process.platform === "win32"
+    ? normalized.toLocaleLowerCase()
+    : normalized;
 }

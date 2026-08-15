@@ -30,17 +30,29 @@ export function createProjectRoutes(store: SessionStore): Hono {
       }
     })
     .patch("/:projectId", async (c) => {
-      const body = await readJson(c);
+      const body = (await readJson(c)) as Record<string, unknown>;
       try {
-        const project =
-          typeof body.name === "string"
+        const hasDefaultShell = Object.prototype.hasOwnProperty.call(body, "defaultShell");
+        if (
+          hasDefaultShell &&
+          body.defaultShell !== null &&
+          typeof body.defaultShell !== "string"
+        ) {
+          return errorResponse(400, "defaultShell must be a string or null");
+        }
+        const project = hasDefaultShell
+          ? store.setProjectDefaultShell(
+              c.req.param("projectId"),
+              typeof body.defaultShell === "string" ? body.defaultShell : null,
+            )
+          : typeof body.name === "string"
             ? store.renameProject(c.req.param("projectId"), body.name)
             : typeof body.pinned === "boolean"
               ? store.setProjectPinned(c.req.param("projectId"), body.pinned)
               : null;
         return project
           ? jsonResponse({ project })
-          : errorResponse(400, "name or pinned is required");
+          : errorResponse(400, "name, pinned or defaultShell is required");
       } catch (error) {
         return errorResponse(
           404,

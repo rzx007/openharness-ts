@@ -180,6 +180,7 @@ export interface ProjectRecord {
   name: string;
   path: string;
   pinnedAt?: number;
+  defaultShell?: string;
   lastOpenedAt: number;
   archivedAt?: number;
   createdAt: number;

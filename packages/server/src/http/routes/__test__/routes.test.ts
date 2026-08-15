@@ -66,7 +66,11 @@ describe("Cron routes", () => {
     const saveResponse = await app.request("/jobs/nightly", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expression: "0 0 * * *", command: "echo ok", cwd: "/repo" }),
+      body: JSON.stringify({
+        expression: "0 0 * * *",
+        command: "echo ok",
+        cwd: "/repo",
+      }),
     });
     const statusResponse = await app.request("/status");
 
@@ -116,11 +120,17 @@ describe("system routes", () => {
     });
 
     const response = await app.request("/commands?cwd=/repo");
-    const body = await response.json() as { commands: Array<{ name: string }> };
+    const body = (await response.json()) as {
+      commands: Array<{ name: string }>;
+    };
 
     expect(response.status).toBe(200);
-    expect(body.commands.some((command) => command.name === "/custom")).toBe(true);
-    expect(body.commands.some((command) => command.name === "/model")).toBe(false);
+    expect(body.commands.some((command) => command.name === "/custom")).toBe(
+      true,
+    );
+    expect(body.commands.some((command) => command.name === "/model")).toBe(
+      false,
+    );
   });
 
   it("lists connected model providers", async () => {
@@ -131,18 +141,38 @@ describe("system routes", () => {
           {
             name: "deepseek",
             displayName: "DeepSeek",
-            models: [{ id: "deepseek-chat", label: "DeepSeek Chat", provider: "DeepSeek", providerName: "deepseek" }],
+            models: [
+              {
+                id: "deepseek-chat",
+                label: "DeepSeek Chat",
+                provider: "DeepSeek",
+                providerName: "deepseek",
+              },
+            ],
           },
         ],
       },
     });
 
     const response = await app.request("/models");
-    const body = await response.json() as { providers: Array<{ name: string; models: Array<{ id: string }> }> };
+    const body = (await response.json()) as {
+      providers: Array<{ name: string; models: Array<{ id: string }> }>;
+    };
 
     expect(response.status).toBe(200);
     expect(body.providers).toEqual([
-      { name: "deepseek", displayName: "DeepSeek", models: [{ id: "deepseek-chat", label: "DeepSeek Chat", provider: "DeepSeek", providerName: "deepseek" }] },
+      {
+        name: "deepseek",
+        displayName: "DeepSeek",
+        models: [
+          {
+            id: "deepseek-chat",
+            label: "DeepSeek Chat",
+            provider: "DeepSeek",
+            providerName: "deepseek",
+          },
+        ],
+      },
     ]);
   });
 });
@@ -163,7 +193,11 @@ describe("memory routes", () => {
     const response = await app.request("/", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: "/repo", content: "Remember this", tags: ["a"] }),
+      body: JSON.stringify({
+        cwd: "/repo",
+        content: "Remember this",
+        tags: ["a"],
+      }),
     });
 
     expect(response.status).toBe(201);
@@ -244,7 +278,9 @@ describe("git routes", () => {
     const response = await app.request("/status");
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "cwd is required" });
+    await expect(response.json()).resolves.toEqual({
+      error: "cwd is required",
+    });
   });
 });
 
@@ -259,7 +295,11 @@ describe("permission routes", () => {
     const response = await app.request("/p1/reply", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "approved", decision: "once", clientId: "desk" }),
+      body: JSON.stringify({
+        status: "approved",
+        decision: "once",
+        clientId: "desk",
+      }),
     });
 
     expect(response.status).toBe(200);
@@ -299,6 +339,7 @@ describe("session routes", () => {
         getSession: vi.fn(),
         updateSession: vi.fn(),
         archiveSessionTree: vi.fn(async () => session),
+        deleteSessionTree: vi.fn(),
         admitPrompt: vi.fn(),
       },
       traces: { get: () => "trace-1" },
@@ -311,7 +352,9 @@ describe("session routes", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ id: "s1", cwd: "/repo" }));
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s1", cwd: "/repo" }),
+    );
   });
 
   it("expands slash commands into admitted prompts", async () => {
@@ -348,6 +391,7 @@ describe("session routes", () => {
         getSession: vi.fn(),
         updateSession: vi.fn(),
         archiveSessionTree: vi.fn(),
+        deleteSessionTree: vi.fn(),
         admitPrompt: admitPromptAndMaybeRun,
       },
       commandCatalog: {
@@ -400,6 +444,7 @@ describe("session routes", () => {
         getSession: vi.fn(),
         updateSession: vi.fn(),
         archiveSessionTree: vi.fn(),
+        deleteSessionTree: vi.fn(),
         admitPrompt: vi.fn(async () => {
           throw new SessionApplicationError(500, "Child projection mismatch");
         }),
@@ -421,6 +466,36 @@ describe("session routes", () => {
 
     expect(response.status).toBe(500);
   });
+
+  it("hard deletes a session through the explicit hard-delete route", async () => {
+    const deleteSessionTree = vi.fn(async () => ["child", "parent"]);
+    const app = createSessionRoutes({
+      queries: {
+        getSession: vi.fn(),
+        getSessionState: vi.fn(),
+        listMessageParts: vi.fn(() => []),
+        listMessages: vi.fn(() => []),
+        listSessions: vi.fn(() => []),
+      },
+      application: {
+        createSession: vi.fn(),
+        getSession: vi.fn(),
+        updateSession: vi.fn(),
+        archiveSessionTree: vi.fn(),
+        deleteSessionTree,
+        admitPrompt: vi.fn(),
+      },
+      traces: { get: () => "trace-1" },
+    });
+
+    const response = await app.request("/parent/hard", { method: "DELETE" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      deletedSessionIds: ["child", "parent"],
+    });
+    expect(deleteSessionTree).toHaveBeenCalledWith("parent");
+  });
 });
 
 describe("run execution routes", () => {
@@ -440,7 +515,10 @@ describe("run execution routes", () => {
       application: {
         admitPrompt: admitPromptAndMaybeRun,
         resumeRun: vi.fn(),
-        interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
+        interruptSession: vi.fn(() => ({
+          interrupted: false,
+          queuedRunIds: [],
+        })),
       },
       traces: { get: () => "trace-1" },
     });
@@ -448,7 +526,12 @@ describe("run execution routes", () => {
     const response = await app.request("/s1/prompts", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "i1", delivery: "steer", content: "hello", metadata: { source: "test" } }),
+      body: JSON.stringify({
+        id: "i1",
+        delivery: "steer",
+        content: "hello",
+        metadata: { source: "test" },
+      }),
     });
 
     expect(response.status).toBe(202);
@@ -464,9 +547,14 @@ describe("run execution routes", () => {
   it("preserves session application error status for prompt failures", async () => {
     const app = createRunExecutionRoutes({
       application: {
-        admitPrompt: vi.fn(async () => { throw new SessionApplicationError(500, "projection mismatch"); }),
+        admitPrompt: vi.fn(async () => {
+          throw new SessionApplicationError(500, "projection mismatch");
+        }),
         resumeRun: vi.fn(),
-        interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
+        interruptSession: vi.fn(() => ({
+          interrupted: false,
+          queuedRunIds: [],
+        })),
       },
       traces: { get: () => "trace-1" },
     });
@@ -490,7 +578,10 @@ describe("run execution routes", () => {
       application: {
         admitPrompt: vi.fn(),
         resumeRun,
-        interruptSession: vi.fn(() => ({ interrupted: false, queuedRunIds: [] })),
+        interruptSession: vi.fn(() => ({
+          interrupted: false,
+          queuedRunIds: [],
+        })),
       },
       traces: { get: () => "trace-1" },
     });
@@ -498,7 +589,10 @@ describe("run execution routes", () => {
     const response = await app.request("/s1/runs/source-run/resume", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "recovery-input", metadata: { requestedBy: "test" } }),
+      body: JSON.stringify({
+        id: "recovery-input",
+        metadata: { requestedBy: "test" },
+      }),
     });
 
     expect(response.status).toBe(202);
@@ -512,7 +606,12 @@ describe("run execution routes", () => {
 
 describe("session utility routes", () => {
   it("forwards rewind parameters to session maintenance", async () => {
-    const rewind = vi.fn(async () => ({ turns: 2, removed: 4, messages: [], parts: [] }));
+    const rewind = vi.fn(async () => ({
+      turns: 2,
+      removed: 4,
+      messages: [],
+      parts: [],
+    }));
     const app = createSessionUtilityRoutes({
       maintenance: {
         listMcpServers: vi.fn(),
@@ -537,7 +636,9 @@ describe("session utility routes", () => {
 
 describe("task routes", () => {
   it("forwards shell task creation to the task service", async () => {
-    const create = vi.fn(async () => ({ task: { id: "task-1", status: "running" } }));
+    const create = vi.fn(async () => ({
+      task: { id: "task-1", status: "running" },
+    }));
     const app = createTaskRoutes({
       tasks: {
         list: vi.fn(),
@@ -564,29 +665,39 @@ describe("task routes", () => {
 
 describe("event routes", () => {
   it("lists events with cursor, session, and limit filters", async () => {
-    const listEvents = vi.fn(() => [{
-      id: "e1",
-      seq: 2,
-      type: "session.updated",
-      sessionId: "s1",
-      payload: {},
-      createdAt: 1,
-    }]);
-    const hub = new HttpEventHub({ listEvents });
-
-    const response = await hub.createRoutes().request("/?cursor=1&sessionId=s1&limit=5");
-
-    expect(response.status).toBe(200);
-    expect(listEvents).toHaveBeenCalledWith({ afterSeq: 1, sessionId: "s1", limit: 5 });
-    await expect(response.json()).resolves.toEqual({
-      events: [{
+    const listEvents = vi.fn(() => [
+      {
         id: "e1",
         seq: 2,
         type: "session.updated",
         sessionId: "s1",
         payload: {},
         createdAt: 1,
-      }],
+      },
+    ]);
+    const hub = new HttpEventHub({ listEvents });
+
+    const response = await hub
+      .createRoutes()
+      .request("/?cursor=1&sessionId=s1&limit=5");
+
+    expect(response.status).toBe(200);
+    expect(listEvents).toHaveBeenCalledWith({
+      afterSeq: 1,
+      sessionId: "s1",
+      limit: 5,
+    });
+    await expect(response.json()).resolves.toEqual({
+      events: [
+        {
+          id: "e1",
+          seq: 2,
+          type: "session.updated",
+          sessionId: "s1",
+          payload: {},
+          createdAt: 1,
+        },
+      ],
     });
   });
 });

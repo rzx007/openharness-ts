@@ -33,6 +33,7 @@ import type {
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
+  SetDefaultDesktopProjectShellInput,
   SendDesktopPromptInput,
   SetDefaultDesktopModelInput,
   SetDefaultDesktopPermissionModeInput,
@@ -158,6 +159,12 @@ class DesktopSessionService {
   async setProjectPinned(input: PinDesktopProjectInput): Promise<DesktopProject> {
     return await toDesktopProject(
       await (await this.getClient()).setProjectPinned(input.projectId, input.pinned)
+    )
+  }
+
+  async setProjectDefaultShell(input: SetDefaultDesktopProjectShellInput): Promise<DesktopProject> {
+    return await toDesktopProject(
+      await (await this.getClient()).setProjectDefaultShell(input.projectId, input.shell)
     )
   }
 
@@ -332,6 +339,14 @@ class DesktopSessionService {
     return await client.archiveSession(sessionId)
   }
 
+  async deleteSession(webContentsId: number, sessionIdInput: string): Promise<string[]> {
+    const sessionId = requireString(sessionIdInput, "会话 ID")
+    const subscription = this.subscriptions.get(webContentsId)
+    if (subscription?.sessionId === sessionId) this.closeSession(webContentsId)
+    const client = await this.getClient()
+    return await client.deleteSession(sessionId)
+  }
+
   async dispose(): Promise<void> {
     for (const subscription of this.subscriptions.values()) subscription.controller.abort()
     this.subscriptions.clear()
@@ -353,6 +368,11 @@ class DesktopSessionService {
   }
 
   daemonClient(): Promise<OpenHarnessClient> {
+    return this.getClient()
+  }
+
+  refreshDaemonClient(): Promise<OpenHarnessClient> {
+    this.clientPromise = null
     return this.getClient()
   }
 

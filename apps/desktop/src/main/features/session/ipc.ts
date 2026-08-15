@@ -6,6 +6,7 @@ import type {
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
+  SetDefaultDesktopProjectShellInput,
   SendDesktopPromptInput,
   SetDefaultDesktopModelInput,
   SetDefaultDesktopPermissionModeInput,
@@ -40,6 +41,11 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.projectSetPinned,
         handler: (_event, input) =>
           desktopSessionService.setProjectPinned(input as PinDesktopProjectInput),
+      },
+      {
+        channel: IpcChannels.projectSetDefaultShell,
+        handler: (_event, input) =>
+          desktopSessionService.setProjectDefaultShell(input as SetDefaultDesktopProjectShellInput),
       },
       {
         channel: IpcChannels.projectRemove,
@@ -117,6 +123,11 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionArchive,
         handler: (event, sessionId) =>
           desktopSessionService.archiveSession(event.sender.id, String(sessionId ?? "")),
+      },
+      {
+        channel: IpcChannels.sessionDelete,
+        handler: (event, sessionId) =>
+          desktopSessionService.deleteSession(event.sender.id, String(sessionId ?? "")),
       },
     ]
   },
