@@ -51,19 +51,51 @@ describe("persistent terminal tools", () => {
     });
   });
 
-  it("sends exact input without adding an implicit newline", async () => {
+  it("sends input without adding an implicit newline", async () => {
     const send = vi.fn(async () => undefined);
     const context = createContext({ send });
 
     await terminalSendTool.execute(
-      { terminalId: "terminal-1", data: "npm run dev\n" },
+      { terminalId: "terminal-1", data: "npm run dev" },
       context,
     );
 
     expect(send).toHaveBeenCalledWith({
       sessionId: "session-1",
       terminalId: "terminal-1",
-      data: "npm run dev\n",
+      data: "npm run dev",
+    });
+  });
+
+  it("normalizes newlines to terminal enter by default", async () => {
+    const send = vi.fn(async () => undefined);
+    const context = createContext({ send });
+
+    await terminalSendTool.execute(
+      { terminalId: "terminal-1", data: "Get-ChildItem\nls\r\necho ok\r" },
+      context,
+    );
+
+    expect(send).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      terminalId: "terminal-1",
+      data: "Get-ChildItem\rls\recho ok\r",
+    });
+  });
+
+  it("preserves exact input when raw mode is requested", async () => {
+    const send = vi.fn(async () => undefined);
+    const context = createContext({ send });
+
+    await terminalSendTool.execute(
+      { terminalId: "terminal-1", data: "line one\nline two", raw: true },
+      context,
+    );
+
+    expect(send).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      terminalId: "terminal-1",
+      data: "line one\nline two",
     });
   });
 

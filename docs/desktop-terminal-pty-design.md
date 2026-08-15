@@ -1,6 +1,6 @@
 # 设计：Desktop 右侧 Panel 终端 PTY
 
-> 状态：本地用户终端、Agent 持久终端、Desktop 挂接和 daemon 传输均已实现；沙箱终端待实现。
+> 状态：本地用户终端、Agent 持久终端、Desktop 挂接、daemon 传输、右键菜单、每项目默认 shell 和沙箱终端 MVP 均已实现。
 >
 > 日期：2026-08-15
 
@@ -23,22 +23,26 @@ Desktop 右侧 panel 已经提供可交互的 PTY 终端。用户可以在当前
 | 输出恢复        | 已实现 | Panel 重新打开或切换终端时先读取内存快照，再接续 SSE 实时输出。                  |
 | 进程状态        | 已实现 | 记录 `running`、`exited`、退出时间和退出码；进程退出后仍可查看最后输出。         |
 | 项目目录        | 已实现 | 用户终端从当前项目绑定目录启动；目录失效时引导用户重新绑定项目。                 |
+| 项目默认 shell  | 已实现 | 项目记录持久化 `defaultShell`；新建本地终端时按项目带入 shell，留空则使用系统默认。 |
+| 右键菜单        | 已实现 | xterm 区域支持复制选区、粘贴、清空、重启和关闭。                                |
 | light/dark 主题 | 已实现 | xterm 配色跟随 Desktop 主题。                                                    |
 | 本地运行        | 已实现 | `LocalTerminalProvider` 通过 `node-pty` 创建本机 PTY。                           |
-| 沙箱运行        | 待实现 | 后续增加 `SandboxTerminalProvider`，复用同一协议和视图。                         |
+| 沙箱运行        | MVP 已实现 | 复用 `runtime: "sandbox"` 和现有 sandbox runtime。当前是 pipe-backed interactive shell，不承诺完整 PTY 行编辑和尺寸语义。 |
 
 ### Agent 工具
 
 | 工具             | 用途                                           | 权限属性                           |
 | ---------------- | ---------------------------------------------- | ---------------------------------- |
 | `TerminalOpen`   | 在当前 Agent 的 `cwd` 创建持久终端。           | 执行类操作，需要现有权限流程批准。 |
-| `TerminalSend`   | 向终端写入原始文本或控制字符；不会自动补换行。 | 写入类操作，需要批准。             |
+| `TerminalSend`   | 向终端写入文本或控制字符；不会自动补换行，但默认把 `\n` 规范成终端回车。 | 写入类操作，需要批准。             |
 | `TerminalRead`   | 读取终端当前保留输出和 sequence。              | 只读。                             |
 | `TerminalSignal` | 发送 `interrupt`、`eof` 或 `terminate`。       | 执行类操作，需要批准。             |
 | `TerminalClose`  | 终止并移除 Agent 拥有的终端。                  | 执行类操作，需要批准。             |
 | `TerminalList`   | 列出当前 Agent session 拥有的终端。            | 只读。                             |
 
 Agent 不应该用持久终端替代所有命令执行。一次性的构建、测试、查询和脚本仍优先使用 `Bash`；只有进程需要持续运行、需要多轮输入，或者需要用户后续接管时才使用 Terminal 工具。
+
+`TerminalSend` 默认会把 `\n` 和 `\r\n` 转成 `\r`，也就是终端里真实 Enter 键发送给 PTY 的控制字符。这样可以避免 Windows PowerShell 把 `ls\n` 识别成续行输入并进入 `>>` 提示符。如果确实要向正在运行的程序写入完全原始内容，可以传 `raw: true`。
 
 `TerminalRead` 最多向模型返回末尾 12000 个字符，避免大量日志占满模型上下文。Desktop 使用的完整内存快照上限约为 20 万字符，不写入数据库。
 
@@ -93,14 +97,14 @@ Desktop main 通过 `OpenHarnessClient` 调用 daemon，不直接持有 PTY：
 - 支持输入、输出、窗口尺寸变化、关闭终端、进程退出提示。
 - 终端 UI 跟随当前 light/dark 主题。
 - 终端 runtime 由 daemon 持有；Desktop 和 Agent 通过公共客户端接入，TUI 的界面与既有会话流程不需要改动。
-- 为后续本地 / 沙箱运行模式预留扩展点。
+- 支持本地 / 沙箱运行模式切换；Desktop 只传 `runtime`，实际 runtime 选择和边界由 daemon/server 持有。
 
 ## 非目标
 
 - MVP 不做远程共享终端。
 - MVP 不持久化终端输出历史，避免误存 token、密码和敏感日志。
 - 终端输出不写入会话数据库，只把 Agent 工具调用和精简结果写入 transcript。
-- 当前版本不提供终端 Profile 配置界面。也就是说，用户暂时不能在界面里维护 `PowerShell`、`pwsh`、`cmd`、`Git Bash`、自定义启动参数和环境变量这些预设；创建终端时先自动选择当前平台上最合理的默认 shell。
+- 当前版本不提供完整终端 Profile 配置界面。用户可以为每个项目设置一个默认 shell，但还不能维护 `PowerShell`、`pwsh`、`cmd`、`Git Bash`、自定义启动参数和环境变量这些成套预设。
 - MVP 不支持任意路径启动终端，只允许在已绑定项目目录内启动。
 
 ## 方案选择
@@ -109,9 +113,9 @@ Desktop main 通过 `OpenHarnessClient` 调用 daemon，不直接持有 PTY：
 
 ```text
 Renderer: @xterm/xterm
-Runtime:  daemon + @openharness/terminal-node + node-pty
+Runtime:  daemon + @openharness/terminal-node + node-pty / @openharness/sandbox
 Network:  REST commands + SSE output
-Desktop:  Electron IPC + preload 安全 API + OpenHarnessClient
+Desktop:  Electron IPC + preload 安全 API + OpenHarnessClient + Electron clipboard
 Resize:   @xterm/addon-fit + ResizeObserver
 Links:    @xterm/addon-web-links
 ```
@@ -119,6 +123,8 @@ Links:    @xterm/addon-web-links
 `@xterm/xterm` 负责在前端渲染终端和处理键盘输入。它不是 shell，也不负责创建进程。它通常会连接到 PTY 后端，把用户输入写给 PTY，把 PTY 输出写回屏幕。
 
 `node-pty` 由 daemon 内的 `LocalTerminalProvider` 懒加载并启动真实 PTY。它能让很多交互式 CLI 正常工作，这是 `child_process.spawn` 做不到的。
+
+`runtime: "sandbox"` 也走同一个 `LocalTerminalProvider` 接口，但内部复用 `@openharness/sandbox` 的 `startSandboxRuntime()` 与 `createShellProcess()`。当前它是 pipe-backed interactive shell，适合基础命令和输出查看；完整 PTY 交互后续在 sandbox backend 有稳定 pseudo-terminal 能力时再替换。
 
 Electron renderer 和 Desktop main 都不直接加载 `node-pty`。渲染层只通过 preload 暴露的安全 API 与 main 通信，main 再通过 `OpenHarnessClient` 连接 daemon。
 
@@ -348,14 +354,17 @@ export const IpcChannels = {
   terminalCreate: "terminal:create",
   terminalWrite: "terminal:write",
   terminalResize: "terminal:resize",
+  terminalRead: "terminal:read",
   terminalKill: "terminal:kill",
-  terminalClear: "terminal:clear",
   terminalList: "terminal:list",
+  clipboardReadText: "clipboard:read-text",
+  clipboardWriteText: "clipboard:write-text",
 };
 
 export const IpcEvents = {
   terminalData: "terminal:data",
   terminalExit: "terminal:exit",
+  terminalError: "terminal:error",
 };
 ```
 
@@ -369,13 +378,21 @@ export interface TerminalCreateInput {
   runtime: DesktopTerminalRuntime;
   cols: number;
   rows: number;
+  name?: string;
   shell?: string;
+  cwd?: string;
+  source?: "user" | "agent";
+  sessionId?: string;
 }
 
 export interface TerminalRecord {
   id: string;
+  name: string;
   projectId: string;
   runtime: DesktopTerminalRuntime;
+  source: "user" | "agent";
+  sessionId?: string;
+  status: "running" | "exited";
   cwd: string;
   shell: string;
   cols: number;
@@ -396,9 +413,21 @@ export interface TerminalResizeInput {
   rows: number;
 }
 
+export interface TerminalReadInput {
+  terminalId: string;
+}
+
+export interface TerminalReadResult {
+  terminalId: string;
+  data: string;
+  sequence: number;
+  truncated: boolean;
+}
+
 export interface TerminalDataEvent {
   terminalId: string;
   data: string;
+  sequence: number;
 }
 
 export interface TerminalExitEvent {
@@ -414,10 +443,15 @@ window.desktop.terminal = {
   create(input),
   write(input),
   resize(input),
+  read(input),
   kill(terminalId),
   list(),
-  onData(listener),
-  onExit(listener),
+  onEvent(listener),
+}
+
+window.desktop.clipboard = {
+  readText(),
+  writeText(text),
 }
 ```
 
@@ -447,13 +481,13 @@ Renderer 显示“项目目录不可用”
 
 ## 本地和沙箱运行模式
 
-MVP 只实现本地：
+终端创建请求统一使用同一个 runtime 字段：
 
 ```ts
-runtime: "local";
+runtime: "local" | "sandbox";
 ```
 
-但是 `TerminalCreateInput` 保留 `runtime` 字段，后续可以接入沙箱：
+Desktop 不直接判断 sandbox 细节，只把 `runtime` 传给 daemon。daemon/server 再复用现有 sandbox runtime 配置、项目挂载和可用性检查：
 
 ```ts
 interface TerminalProvider {
@@ -464,26 +498,27 @@ interface TerminalProvider {
 }
 ```
 
-第一版：
+本地终端：
 
 ```text
 LocalTerminalProvider
-  -> Electron main
+  -> daemon/server
   -> node-pty
   -> host project cwd
 ```
 
-后续：
+沙箱终端 MVP：
 
 ```text
-SandboxTerminalProvider
-  -> daemon/server
-  -> websocket 或 SSE + command channel
-  -> container PTY
-  -> /workspace
+LocalTerminalProvider runtime="sandbox"
+  -> @openharness/sandbox startSandboxRuntime()
+  -> createShellProcess()
+  -> pipe-backed interactive shell
 ```
 
-沙箱终端应该复用现有 sandbox runtime 的边界和项目挂载规则，不在 Desktop 里单独复制一套 sandbox 逻辑。
+当前沙箱终端不是完整 PTY。它能支持基础输入、输出、关闭和重启，但复杂行编辑、全屏 TUI 和严格窗口尺寸语义仍以本地 `node-pty` 为准。后续如果 sandbox backend 提供稳定 pseudo-terminal 能力，可以在同一 `TerminalProvider` 接口下替换为真正的 container PTY。
+
+沙箱终端必须复用现有 sandbox runtime 的边界和项目挂载规则，不在 Desktop 里单独复制一套 sandbox 逻辑。
 
 ## Shell 选择
 
@@ -659,6 +694,45 @@ MSVC v143 - VS 2022 C++ x64/x86 Spectre-mitigated libs
 pnpm install
 ```
 
+## 测试场景
+
+当前需要守住的核心场景：
+
+- Desktop typecheck：保证 Electron main/preload/renderer 的 IPC 类型闭合，尤其是 `window.desktop.terminal` 与 `window.desktop.clipboard`。
+- terminal-node test + check-types：保证本地 PTY shell 选择和 sandbox runtime 分支类型正确。
+- services test：保证项目表 migration、项目重新绑定、项目默认 shell 设置与清空都能落库。
+- server test：保证 `/terminals` HTTP route 不吞字段，尤其是 `runtime: "sandbox"`、`cwd`、`source`、`sessionId` 和 `shell` 会原样转发到 `DaemonTerminalService.create()`。
+- tools test：保证 Agent terminal tools 和普通工具注册不受 Desktop terminal UI 改动影响。
+
+本轮新增的具体自动化场景：
+
+```text
+packages/server/src/http/routes/terminal.test.ts
+  -> POST /terminals
+  -> body.runtime = "sandbox"
+  -> body.cwd/source/sessionId/shell 均传入
+  -> 断言 DaemonTerminalService.create 收到完整 TerminalCreateRequest
+
+packages/services/src/session-runtime/__test__/store.test.ts
+  -> inspectProject 创建项目
+  -> setProjectDefaultShell("pwsh.exe")
+  -> getProject/listProjects 可读到 defaultShell
+  -> setProjectDefaultShell("")
+  -> defaultShell 被清空
+```
+
+推荐回归命令：
+
+```bash
+pnpm --filter @openharness/desktop run typecheck
+pnpm --filter @openharness/terminal-node run test
+pnpm --filter @openharness/terminal-node run check-types
+pnpm --filter @openharness/terminal run check-types
+pnpm --filter @openharness/services run test
+pnpm --filter @openharness/server run test
+pnpm --filter @openharness/tools run test
+```
+
 ## 分阶段实现
 
 第一批：本地终端 MVP
@@ -689,9 +763,9 @@ pnpm install
 - [x] 项目目录不可用时接入重新绑定。
 - [x] 终端退出后保留最后输出、exit code 和重启入口。
 - [x] 使用有上限的内存输出快照恢复终端视图，不写入数据库。
-- [ ] 支持 copy selected text 和 paste 菜单。
+- [x] 支持 copy selected text 和 paste 菜单，并补齐清空、重启、关闭入口。
 - [x] 细化 light/dark 主题，保证 light 主题下 ANSI 白色/亮白色文本不会和背景撞色。
-- 保存每个项目的默认 shell。
+- [x] 保存每个项目的默认 shell，并在新建本地终端时透传给 terminal runtime。
 
 ## 在 Agent 应用中的定位
 
@@ -764,6 +838,7 @@ Desktop TerminalTool
 
 - 普通构建、测试、查询和一次性脚本继续使用 `Bash`，因为它有明确的结束点和完整结果。
 - 开发服务器、watch、REPL、调试器以及需要多轮输入的 CLI 使用持久终端。
+- `TerminalSend` 不会自动补换行；要提交命令仍需要在 `data` 末尾包含换行。工具层会把换行规范成 PTY 回车，`raw: true` 时才保持完全原样。
 - `TerminalRead` 最多向模型返回末尾 12000 个字符，完整的 UI 快照仍按终端内存上限保留，避免大量日志占满模型上下文。
 
 所有权和权限：
@@ -776,11 +851,11 @@ Desktop TerminalTool
 
 当前传输采用 REST 处理命令、SSE 推送输出。这里没有使用 WebSocket，是因为终端输入和 resize 都是短请求，输出才是单向高频流；如果以后需要远程高吞吐或二进制协议，可以只替换 transport，不改 provider、Agent 工具和 xterm 视图。
 
-第三批：沙箱终端
+第三批：沙箱终端 MVP
 
 - 抽象 `TerminalProvider`。
-- 新增 `SandboxTerminalProvider`。
-- 通过 daemon/server 连接容器 PTY。
+- 复用 `runtime: "sandbox"` 接入现有 sandbox runtime。
+- 通过 daemon/server 启动 pipe-backed interactive shell。
 - 和开始页的“本地 / 沙箱”运行模式统一。
 - 明确 sandbox terminal 的权限提示、网络策略和文件边界。
 

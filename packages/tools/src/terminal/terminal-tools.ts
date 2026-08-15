@@ -56,14 +56,19 @@ export const terminalOpenTool: ToolDefinition = {
 export const terminalSendTool: ToolDefinition = {
   name: "TerminalSend",
   description:
-    "Send exact text or control characters to a persistent terminal. Include a newline when the command should be submitted.",
+    "Send text or control characters to a persistent terminal. Include a newline when the command should be submitted; newline characters are normalized to the terminal Enter key unless raw is true.",
   inputSchema: {
     type: "object",
     properties: {
       terminalId: terminalIdProperty,
       data: {
         type: "string",
-        description: "Exact input, for example `npm run dev\n`",
+        description: "Input text, for example `npm run dev\n`",
+      },
+      raw: {
+        type: "boolean",
+        description:
+          "When true, send data exactly as provided without newline normalization.",
       },
     },
     required: ["terminalId", "data"],
@@ -73,7 +78,10 @@ export const terminalSendTool: ToolDefinition = {
     if ("content" in resolved) return resolved;
     try {
       const terminalId = requiredString(input.terminalId, "terminalId");
-      const data = typeof input.data === "string" ? input.data : "";
+      const data =
+        typeof input.data === "string"
+          ? prepareTerminalInput(input.data, { raw: input.raw === true })
+          : "";
       await resolved.host.send({
         sessionId: resolved.sessionId,
         terminalId,
@@ -239,6 +247,14 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? value
     : undefined;
+}
+
+function prepareTerminalInput(
+  data: string,
+  options: { raw: boolean },
+): string {
+  if (options.raw) return data;
+  return data.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
 }
 
 function readSignal(value: unknown): TerminalSignal {
