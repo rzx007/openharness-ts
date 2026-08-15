@@ -1,6 +1,8 @@
 import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
   CreateDesktopSessionInput,
+  EditLatestDesktopPromptInput,
+  ForkDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   RenameDesktopProjectInput,
@@ -67,6 +69,11 @@ export const sessionIpcContribution: IpcContribution = {
           desktopSessionService.openSession(event.sender, String(sessionId ?? "")),
       },
       {
+        channel: IpcChannels.sessionFork,
+        handler: (_event, input) =>
+          desktopSessionService.forkSession(input as ForkDesktopSessionInput),
+      },
+      {
         channel: IpcChannels.sessionClose,
         handler: (event) => desktopSessionService.closeSession(event.sender.id),
       },
@@ -74,6 +81,11 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionSendPrompt,
         handler: (_event, input) =>
           desktopSessionService.sendPrompt(input as SendDesktopPromptInput),
+      },
+      {
+        channel: IpcChannels.sessionEditLatestPrompt,
+        handler: (_event, input) =>
+          desktopSessionService.editLatestPrompt(input as EditLatestDesktopPromptInput),
       },
       {
         channel: IpcChannels.sessionInterrupt,

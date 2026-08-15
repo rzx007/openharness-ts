@@ -48,12 +48,17 @@ interface DesktopSessionState {
   ) => Promise<void>
   openSession: (sessionId: string) => Promise<void>
   startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
+  forkSession: (
+    sessionId: string,
+    options?: { beforeMessageId?: string; afterMessageId?: string }
+  ) => Promise<DesktopSessionRecord>
   renameSession: (sessionId: string, title: string) => Promise<void>
   togglePinSession: (sessionId: string) => Promise<void>
   archiveSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   startSession: (content: string) => Promise<void>
   sendMessage: (content: string) => Promise<void>
+  editLatestMessage: (content: string) => Promise<void>
   interrupt: () => Promise<void>
   replyPermission: (
     permissionId: string,
@@ -413,6 +418,27 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     await get().selectProject(project)
   },
 
+  async forkSession(sessionId, options) {
+    if (!sessionId) throw new Error("会话 ID 不能为空")
+    try {
+      const session = await window.desktop.sessions.fork({
+        sessionId,
+        ...(options?.beforeMessageId ? { beforeMessageId: options.beforeMessageId } : {}),
+        ...(options?.afterMessageId ? { afterMessageId: options.afterMessageId } : {}),
+      })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        archivedSessions: state.archivedSessions.filter((item) => item.id !== session.id),
+        error: null,
+      }))
+      await get().openSession(session.id)
+      return session
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
   async renameSession(sessionId, title) {
     const normalizedTitle = title.replace(/\s+/g, " ").trim()
     if (!normalizedTitle) return
@@ -605,6 +631,21 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     set({ sending: true, error: null })
     try {
       await window.desktop.sessions.sendPrompt({ sessionId, content: prompt })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    } finally {
+      set({ sending: false })
+    }
+  },
+
+  async editLatestMessage(content) {
+    const prompt = content.trim()
+    const sessionId = get().activeSessionId
+    if (!prompt || !sessionId || get().sending) return
+    set({ sending: true, error: null })
+    try {
+      await window.desktop.sessions.editLatestPrompt({ sessionId, content: prompt })
     } catch (error) {
       set({ error: errorMessage(error) })
       throw error

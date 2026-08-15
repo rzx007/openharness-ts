@@ -340,6 +340,7 @@ describe("session routes", () => {
         updateSession: vi.fn(),
         archiveSessionTree: vi.fn(async () => session),
         deleteSessionTree: vi.fn(),
+        forkSession: vi.fn(),
         admitPrompt: vi.fn(),
       },
       traces: { get: () => "trace-1" },
@@ -355,6 +356,52 @@ describe("session routes", () => {
     expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: "s1", cwd: "/repo" }),
     );
+  });
+
+  it("forks a session after a selected message", async () => {
+    const fork = {
+      id: "fork-1",
+      parentId: "s1",
+      cwd: "/repo",
+      title: "Session fork",
+      model: "gpt-test",
+      status: "idle",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    const forkSession = vi.fn(() => fork);
+    const app = createSessionRoutes({
+      queries: {
+        getSession: vi.fn(),
+        getSessionState: vi.fn(),
+        listMessageParts: vi.fn(() => []),
+        listMessages: vi.fn(() => []),
+        listSessions: vi.fn(() => []),
+      },
+      application: {
+        createSession: vi.fn(),
+        getSession: vi.fn(),
+        updateSession: vi.fn(),
+        archiveSessionTree: vi.fn(),
+        deleteSessionTree: vi.fn(),
+        forkSession,
+        admitPrompt: vi.fn(),
+      },
+      traces: { get: () => "trace-1" },
+    });
+
+    const response = await app.request("/s1/fork", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ afterMessageId: "m2" }),
+    });
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({ session: fork });
+    expect(forkSession).toHaveBeenCalledWith("s1", {
+      afterMessageId: "m2",
+    });
   });
 
   it("expands slash commands into admitted prompts", async () => {
@@ -392,6 +439,7 @@ describe("session routes", () => {
         updateSession: vi.fn(),
         archiveSessionTree: vi.fn(),
         deleteSessionTree: vi.fn(),
+        forkSession: vi.fn(),
         admitPrompt: admitPromptAndMaybeRun,
       },
       commandCatalog: {
@@ -445,6 +493,7 @@ describe("session routes", () => {
         updateSession: vi.fn(),
         archiveSessionTree: vi.fn(),
         deleteSessionTree: vi.fn(),
+        forkSession: vi.fn(),
         admitPrompt: vi.fn(async () => {
           throw new SessionApplicationError(500, "Child projection mismatch");
         }),
@@ -483,6 +532,7 @@ describe("session routes", () => {
         updateSession: vi.fn(),
         archiveSessionTree: vi.fn(),
         deleteSessionTree,
+        forkSession: vi.fn(),
         admitPrompt: vi.fn(),
       },
       traces: { get: () => "trace-1" },
@@ -514,6 +564,7 @@ describe("run execution routes", () => {
     const app = createRunExecutionRoutes({
       application: {
         admitPrompt: admitPromptAndMaybeRun,
+        editLatestPrompt: vi.fn(),
         resumeRun: vi.fn(),
         interruptSession: vi.fn(() => ({
           interrupted: false,
@@ -550,6 +601,7 @@ describe("run execution routes", () => {
         admitPrompt: vi.fn(async () => {
           throw new SessionApplicationError(500, "projection mismatch");
         }),
+        editLatestPrompt: vi.fn(),
         resumeRun: vi.fn(),
         interruptSession: vi.fn(() => ({
           interrupted: false,
@@ -577,6 +629,7 @@ describe("run execution routes", () => {
     const app = createRunExecutionRoutes({
       application: {
         admitPrompt: vi.fn(),
+        editLatestPrompt: vi.fn(),
         resumeRun,
         interruptSession: vi.fn(() => ({
           interrupted: false,

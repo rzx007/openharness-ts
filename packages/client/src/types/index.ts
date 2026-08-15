@@ -87,6 +87,15 @@ export interface ListSessionsOptions {
 /** `POST /sessions` 请求体。 */
 export type CreateClientSessionInput = CreateSessionInput;
 
+export interface ForkClientSessionInput {
+  beforeMessageId?: string;
+  afterMessageId?: string;
+}
+
+export interface EditLatestClientPromptInput {
+  content: string;
+}
+
 /** `POST /sessions/:id/prompts` 请求体。 */
 export interface AdmitClientPromptInput {
   id?: string;

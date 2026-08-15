@@ -41,6 +41,7 @@ export interface SessionRoutesContext {
     | "archiveSessionTree"
     | "createSession"
     | "deleteSessionTree"
+    | "forkSession"
     | "getSession"
     | "updateSession"
   >;
@@ -93,6 +94,31 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       const session = context.application.getSession(sessionId, { warm: true });
       if (!session) return errorResponse(404, "Session not found");
       return jsonResponse({ session });
+    })
+    .post("/:sessionId/fork", async (c) => {
+      const sessionId = c.req.param("sessionId");
+      if (!sessionId) return errorResponse(400, "sessionId is required");
+      const body = await readJson(c);
+      try {
+        const session = context.application.forkSession(sessionId, {
+          beforeMessageId:
+            typeof body.beforeMessageId === "string"
+              ? body.beforeMessageId
+              : undefined,
+          afterMessageId:
+            typeof body.afterMessageId === "string"
+              ? body.afterMessageId
+              : undefined,
+        });
+        return jsonResponse({ session }, 201);
+      } catch (error) {
+        const status =
+          error instanceof SessionApplicationError ? error.status : 404;
+        return errorResponse(
+          status,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     })
     .patch("/:sessionId", async (c) => {
       const sessionId = c.req.param("sessionId");

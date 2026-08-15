@@ -168,6 +168,17 @@ export interface SendDesktopPromptInput {
   content: string
 }
 
+export interface EditLatestDesktopPromptInput {
+  sessionId: string
+  content: string
+}
+
+export interface ForkDesktopSessionInput {
+  sessionId: string
+  beforeMessageId?: string
+  afterMessageId?: string
+}
+
 export interface RenameDesktopSessionInput {
   sessionId: string
   title: string

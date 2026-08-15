@@ -2,6 +2,7 @@ import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
   readRuntimeMetadata,
+  type ReplaceTranscriptMessageInput,
   type SessionStore,
 } from "@openharness/services";
 
@@ -28,7 +29,7 @@ import {
 
 export class SessionApplicationError extends Error {
   constructor(
-    readonly status: 404 | 409 | 500,
+    readonly status: 400 | 404 | 409 | 500,
     message: string,
   ) {
     super(message);
@@ -49,6 +50,16 @@ export interface UpdateSessionCommand {
   title?: string;
   agent?: string | null;
   metadata?: Record<string, unknown>;
+}
+
+export interface ForkSessionCommand {
+  beforeMessageId?: string;
+  afterMessageId?: string;
+}
+
+export interface EditLatestPromptCommand {
+  content: string;
+  traceId: string;
 }
 
 export interface ResumeSessionRunCommand {
@@ -100,6 +111,116 @@ export class SessionApplicationService {
       this.warmWhenAdmitted(session);
     }
     return session;
+  }
+
+  forkSession(
+    sessionId: string,
+    input: ForkSessionCommand = {},
+  ): ReturnType<SessionStore["createSession"]> {
+    const source = this.context.store.getSession(sessionId);
+    if (!source)
+      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+
+    const sourceMessages = this.context.store.listMessages(sessionId);
+    const sourceParts = this.context.store.listMessageParts(sessionId);
+    const beforeMessage = input.beforeMessageId
+      ? sourceMessages.find((message) => message.id === input.beforeMessageId)
+      : undefined;
+    const afterMessage = input.afterMessageId
+      ? sourceMessages.find((message) => message.id === input.afterMessageId)
+      : undefined;
+    if (input.beforeMessageId && !beforeMessage) {
+      throw new SessionApplicationError(404, "Fork point not found");
+    }
+    if (input.afterMessageId && !afterMessage) {
+      throw new SessionApplicationError(404, "Fork point not found");
+    }
+
+    const beforeSeq = beforeMessage?.seq ?? Number.POSITIVE_INFINITY;
+    const afterSeq = afterMessage?.seq ?? Number.POSITIVE_INFINITY;
+    const copiedMessages = sourceMessages.filter(
+      (message) => message.seq < beforeSeq && message.seq <= afterSeq,
+    );
+    const transcript = copyTranscript(copiedMessages, sourceParts);
+    const before = this.context.events.checkpoint();
+    const metadata = forkSessionMetadata(source.metadata, {
+      sourceSessionId: source.id,
+      ...(input.beforeMessageId
+        ? { beforeMessageId: input.beforeMessageId }
+        : {}),
+      ...(input.afterMessageId ? { afterMessageId: input.afterMessageId } : {}),
+    });
+    const fork = this.context.store.createSession({
+      parentId: source.id,
+      ...(source.projectId ? { projectId: source.projectId } : {}),
+      cwd: source.cwd,
+      title: source.title ? `${source.title} fork` : "",
+      model: source.model,
+      ...(source.agent ? { agent: source.agent } : {}),
+      metadata,
+    });
+    if (transcript.length > 0) {
+      this.context.store.replaceTranscript({
+        sessionId: fork.id,
+        messages: transcript,
+      });
+    }
+    this.warmWhenAdmitted(fork);
+    this.context.events.publishSince(before);
+    return this.context.store.getSession(fork.id) ?? fork;
+  }
+
+  async editLatestPrompt(
+    sessionId: string,
+    input: EditLatestPromptCommand,
+  ): Promise<AdmitPromptResult> {
+    const session = this.context.store.getSession(sessionId);
+    if (!session)
+      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    const content = input.content.trim();
+    if (!content) throw new SessionApplicationError(400, "content is required");
+    if (this.context.runEngine.hasWork(sessionId)) {
+      throw new SessionApplicationError(
+        409,
+        "Wait for the active session run before editing the latest prompt",
+      );
+    }
+    const latestUserMessage = [...this.context.store.listMessages(sessionId)]
+      .reverse()
+      .find((message) => message.role === "user");
+    if (!latestUserMessage) {
+      throw new SessionApplicationError(
+        409,
+        "No user prompt is available to edit",
+      );
+    }
+
+    const lease = this.enterSessionOperation(session);
+    try {
+      const messages = this.context.store
+        .listMessages(sessionId)
+        .filter((message) => message.seq < latestUserMessage.seq);
+      const parts = this.context.store.listMessageParts(sessionId);
+      const before = this.context.events.checkpoint();
+      this.context.store.replaceTranscript({
+        sessionId,
+        messages: copyTranscript(messages, parts),
+      });
+      await this.context.agentPool.close(sessionId);
+      this.context.events.publishSince(before);
+      return await this.admitPromptWork(sessionId, {
+        content,
+        traceId: input.traceId,
+        metadata: {
+          edit: {
+            kind: "latest_prompt",
+            sourceMessageId: latestUserMessage.id,
+          },
+        },
+      });
+    } finally {
+      lease.release();
+    }
   }
 
   async updateSession(
@@ -565,6 +686,58 @@ function mergeSessionMetadata(
     };
   }
   return next;
+}
+
+function forkSessionMetadata(
+  existing: Record<string, unknown>,
+  fork: {
+    sourceSessionId: string;
+    beforeMessageId?: string;
+    afterMessageId?: string;
+  },
+): Record<string, unknown> {
+  const next: Record<string, unknown> = {
+    ...existing,
+    fork: {
+      ...fork,
+      createdAt: Date.now(),
+    },
+  };
+  if (isRecord(next.desktop)) {
+    const desktop = { ...next.desktop };
+    delete desktop.pinnedAt;
+    next.desktop = desktop;
+  }
+  return next;
+}
+
+function copyTranscript(
+  messages: ReturnType<SessionStore["listMessages"]>,
+  parts: ReturnType<SessionStore["listMessageParts"]>,
+): ReplaceTranscriptMessageInput[] {
+  const partsByMessage = new Map<string, typeof parts>();
+  for (const part of parts) {
+    const group = partsByMessage.get(part.messageId) ?? [];
+    group.push(part);
+    partsByMessage.set(part.messageId, group);
+  }
+  return messages.map((message) => ({
+    role: message.role,
+    metadata: { ...message.metadata },
+    parts: (partsByMessage.get(message.id) ?? [])
+      .sort((a, b) => a.seq - b.seq)
+      .map((part) => ({
+        type: part.type,
+        status: part.status,
+        ...(part.text !== undefined ? { text: part.text } : {}),
+        ...(part.toolUseId !== undefined ? { toolUseId: part.toolUseId } : {}),
+        ...(part.toolName !== undefined ? { toolName: part.toolName } : {}),
+        ...(part.input !== undefined ? { input: part.input } : {}),
+        ...(part.output !== undefined ? { output: part.output } : {}),
+        ...(part.isError !== undefined ? { isError: part.isError } : {}),
+        metadata: { ...part.metadata },
+      })),
+  }));
 }
 
 function promptResult(

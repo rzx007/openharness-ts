@@ -4,6 +4,8 @@ import type {
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
+  EditLatestDesktopPromptInput,
+  ForkDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   RenameDesktopProjectInput,
@@ -65,8 +67,10 @@ export const IpcChannels = {
   projectRebind: "project:rebind",
   sessionCreate: "session:create",
   sessionOpen: "session:open",
+  sessionFork: "session:fork",
   sessionClose: "session:close",
   sessionSendPrompt: "session:send-prompt",
+  sessionEditLatestPrompt: "session:edit-latest-prompt",
   sessionInterrupt: "session:interrupt",
   sessionReplyPermission: "session:reply-permission",
   sessionSetDefaultModel: "session:set-default-model",
@@ -185,8 +189,16 @@ export interface IpcInvokeMap {
     result: DesktopSessionRecord
   }
   [IpcChannels.sessionOpen]: { args: [sessionId: string]; result: DesktopSessionView }
+  [IpcChannels.sessionFork]: {
+    args: [input: ForkDesktopSessionInput]
+    result: DesktopSessionRecord
+  }
   [IpcChannels.sessionClose]: { args: []; result: void }
   [IpcChannels.sessionSendPrompt]: { args: [input: SendDesktopPromptInput]; result: void }
+  [IpcChannels.sessionEditLatestPrompt]: {
+    args: [input: EditLatestDesktopPromptInput]
+    result: void
+  }
   [IpcChannels.sessionInterrupt]: { args: [sessionId: string]; result: void }
   [IpcChannels.sessionReplyPermission]: {
     args: [input: ReplyDesktopPermissionInput]

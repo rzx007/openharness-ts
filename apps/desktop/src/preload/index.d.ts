@@ -12,6 +12,8 @@ import type {
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
+  EditLatestDesktopPromptInput,
+  ForkDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   RenameDesktopProjectInput,
@@ -101,8 +103,10 @@ export interface DesktopAPI {
     rebindProject: (projectId: string) => Promise<DesktopProjectDetails["project"] | null>
     create: (input: CreateDesktopSessionInput) => Promise<DesktopSessionRecord>
     open: (sessionId: string) => Promise<DesktopSessionView>
+    fork: (input: ForkDesktopSessionInput) => Promise<DesktopSessionRecord>
     close: () => Promise<void>
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
+    editLatestPrompt: (input: EditLatestDesktopPromptInput) => Promise<void>
     interrupt: (sessionId: string) => Promise<void>
     replyPermission: (input: ReplyDesktopPermissionInput) => Promise<void>
     setDefaultModel: (input: SetDefaultDesktopModelInput) => Promise<DesktopBootstrapData>

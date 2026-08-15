@@ -9,7 +9,9 @@ import type {
   AdmitClientPromptInput,
   CommandCatalogEntry,
   CreateClientSessionInput,
+  EditLatestClientPromptInput,
   EventSyncOptions,
+  ForkClientSessionInput,
   InterruptSessionResponse,
   InvokeClientCommandInput,
   InvokeCommandResponse,
@@ -735,6 +737,23 @@ export class OpenHarnessClient {
     return response.session;
   }
 
+  /** `POST /sessions/:id/fork` */
+  async forkSession(
+    sessionId: string,
+    input: ForkClientSessionInput = {},
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SessionRecord> {
+    const response = await this.request<{ session: SessionRecord }>(
+      `/sessions/${encodeURIComponent(sessionId)}/fork`,
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
+    return response.session;
+  }
+
   /** `GET /sessions/:id/state` - atomic attach snapshot plus SSE cursor. */
   async getSessionState(
     sessionId: string,
@@ -832,6 +851,22 @@ export class OpenHarnessClient {
       {
         method: "POST",
         body: { ...input, id: input.id ?? createPromptRequestId() },
+        signal: options.signal,
+      },
+    );
+  }
+
+  /** `POST /sessions/:id/prompts/latest/edit` */
+  async editLatestPrompt(
+    sessionId: string,
+    input: EditLatestClientPromptInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<PromptResponse> {
+    return await this.request<PromptResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/prompts/latest/edit`,
+      {
+        method: "POST",
+        body: input,
         signal: options.signal,
       },
     );

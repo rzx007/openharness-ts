@@ -99,9 +99,14 @@ export const desktopAPI = {
     create: (input: IpcInvokeMap[typeof IpcChannels.sessionCreate]["args"][0]) =>
       invoke(IpcChannels.sessionCreate, input),
     open: (sessionId: string) => invoke(IpcChannels.sessionOpen, sessionId),
+    fork: (input: IpcInvokeMap[typeof IpcChannels.sessionFork]["args"][0]) =>
+      invoke(IpcChannels.sessionFork, input),
     close: () => invoke(IpcChannels.sessionClose),
     sendPrompt: (input: IpcInvokeMap[typeof IpcChannels.sessionSendPrompt]["args"][0]) =>
       invoke(IpcChannels.sessionSendPrompt, input),
+    editLatestPrompt: (
+      input: IpcInvokeMap[typeof IpcChannels.sessionEditLatestPrompt]["args"][0]
+    ) => invoke(IpcChannels.sessionEditLatestPrompt, input),
     interrupt: (sessionId: string) => invoke(IpcChannels.sessionInterrupt, sessionId),
     replyPermission: (input: IpcInvokeMap[typeof IpcChannels.sessionReplyPermission]["args"][0]) =>
       invoke(IpcChannels.sessionReplyPermission, input),

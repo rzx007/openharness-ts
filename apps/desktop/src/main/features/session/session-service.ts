@@ -28,6 +28,8 @@ import type {
   DesktopProjectDetails,
   DesktopPermissionMode,
   DesktopSessionView,
+  EditLatestDesktopPromptInput,
+  ForkDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   RenameDesktopProjectInput,
@@ -235,6 +237,22 @@ class DesktopSessionService {
     const content = requireString(input.content, "消息内容")
     const client = await this.getClient()
     await client.admitPrompt(sessionId, { content, delivery: "queue" })
+  }
+
+  async editLatestPrompt(input: EditLatestDesktopPromptInput): Promise<void> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const content = requireString(input.content, "消息内容")
+    const client = await this.getClient()
+    await client.editLatestPrompt(sessionId, { content })
+  }
+
+  async forkSession(input: ForkDesktopSessionInput): Promise<SessionRecord> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const client = await this.getClient()
+    return await client.forkSession(sessionId, {
+      ...(input.beforeMessageId ? { beforeMessageId: input.beforeMessageId } : {}),
+      ...(input.afterMessageId ? { afterMessageId: input.afterMessageId } : {}),
+    })
   }
 
   async interruptSession(sessionIdInput: string): Promise<void> {
