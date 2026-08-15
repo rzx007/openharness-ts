@@ -22,6 +22,7 @@ import {
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
 const sidebarMinimumWidth = 236
+const conversationMinimumWidth = 300
 const defaultWorkspaceLayout: Layout = { conversation: 55, utility: 45 }
 
 export function DesktopShell(): React.JSX.Element {
@@ -40,6 +41,7 @@ export function DesktopShell(): React.JSX.Element {
     terminalId: string
   } | null>(null)
   const sidebarPanelRef = usePanelRef()
+  const conversationPanelRef = usePanelRef()
   const utilityPanelRef = usePanelRef()
   const workspaceGroupRef = useGroupRef()
   const previousWorkspaceLayoutRef = useRef<Layout | null>(null)
@@ -149,6 +151,7 @@ export function DesktopShell(): React.JSX.Element {
 
   const toggleUtilityMaximized = useCallback((): void => {
     if (utilityMaximized) {
+      conversationPanelRef.current?.expand()
       setUtilityMaximized(false)
       return
     }
@@ -158,9 +161,10 @@ export function DesktopShell(): React.JSX.Element {
       previousWorkspaceLayoutRef.current = currentLayout
     }
     if (utilityPanelRef.current?.isCollapsed()) utilityPanelRef.current.expand()
+    conversationPanelRef.current?.collapse()
     setPanelOpen(true)
     setUtilityMaximized(true)
-  }, [utilityMaximized, utilityPanelRef, workspaceGroupRef])
+  }, [conversationPanelRef, utilityMaximized, utilityPanelRef, workspaceGroupRef])
 
   useEffect(() => {
     const group = workspaceGroupRef.current
@@ -168,17 +172,19 @@ export function DesktopShell(): React.JSX.Element {
 
     window.requestAnimationFrame(() => {
       if (utilityMaximized) {
+        conversationPanelRef.current?.collapse()
         group.setLayout({ conversation: 0, utility: 100 })
         return
       }
 
+      conversationPanelRef.current?.expand()
       const previousLayout = previousWorkspaceLayoutRef.current
       if (previousLayout) {
         group.setLayout(previousLayout)
         previousWorkspaceLayoutRef.current = null
       }
     })
-  }, [utilityMaximized, workspaceGroupRef])
+  }, [conversationPanelRef, sidebarOpen, utilityMaximized, workspaceGroupRef])
 
   const handleWorkspaceLayoutChanged = useCallback(
     (layout: Layout, meta: LayoutChangedMeta): void => {
@@ -276,8 +282,9 @@ export function DesktopShell(): React.JSX.Element {
               >
                 <Panel
                   id="conversation"
+                  panelRef={conversationPanelRef}
                   defaultSize="100%"
-                  minSize={utilityMaximized ? 0 : 380}
+                  minSize={utilityMaximized ? 0 : conversationMinimumWidth}
                   collapsedSize={0}
                   collapsible
                   className="h-full min-h-0 overflow-hidden"

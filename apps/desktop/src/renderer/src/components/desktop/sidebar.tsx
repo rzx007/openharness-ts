@@ -235,6 +235,7 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
         </nav>
 
         <ScrollArea
+          horizontal={false}
           className="min-h-0 min-w-0 flex-1"
           viewportClassName="px-2 pt-4"
           contentClassName="pb-4"
