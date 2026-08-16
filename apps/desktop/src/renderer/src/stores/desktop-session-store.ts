@@ -11,6 +11,8 @@ import type {
 
 type LoadStatus = "idle" | "loading" | "ready" | "error"
 
+const persistedActiveSessionKey = "openharness.desktop.active-session.v1"
+
 interface DesktopSessionState {
   loadStatus: LoadStatus
   error: string | null
@@ -25,7 +27,9 @@ interface DesktopSessionState {
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
   selectedProject: DesktopProject | null
+  selectedProjectGit: boolean
   branch: string | null
+  branches: string[]
   activeSessionId: string | null
   sessionView: DesktopSessionView | null
   openingSession: boolean
@@ -34,6 +38,8 @@ interface DesktopSessionState {
   startNewConversation: () => Promise<void>
   chooseProject: () => Promise<void>
   selectProject: (project: DesktopProject) => Promise<void>
+  checkoutBranch: (branch: string) => Promise<void>
+  createAndCheckoutBranch: (branch: string) => Promise<void>
   renameProject: (path: string, name: string) => Promise<void>
   togglePinProject: (path: string) => Promise<void>
   setProjectDefaultShell: (path: string, shell: string | null) => Promise<void>
@@ -83,7 +89,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   selectedProvider: null,
   selectedPermissionMode: "default",
   selectedProject: null,
+  selectedProjectGit: false,
   branch: null,
+  branches: [],
   activeSessionId: null,
   sessionView: null,
   openingSession: false,
@@ -95,11 +103,14 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     try {
       const data = await window.desktop.sessions.bootstrap()
       const selectedProject = resolveInitialProject(data, get().selectedProject)
+      const sessions = sortSessions(data.sessions)
+      const archivedSessions = sortSessions(data.archivedSessions)
+      const persistedSessionId = readPersistedActiveSessionId()
       set({
         loadStatus: "ready",
         projects: data.projects,
-        sessions: sortSessions(data.sessions),
-        archivedSessions: sortSessions(data.archivedSessions),
+        sessions,
+        archivedSessions,
         models: data.models,
         defaultModel: data.defaultModel,
         defaultProvider: data.defaultProvider ?? null,
@@ -108,9 +119,16 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         selectedProvider: data.defaultProvider ?? null,
         selectedPermissionMode: data.defaultPermissionMode,
         selectedProject,
+        selectedProjectGit: false,
+        branches: [],
         error: null,
       })
       if (selectedProject) await get().selectProject(selectedProject)
+      if (persistedSessionId && sessions.some((session) => session.id === persistedSessionId)) {
+        await get().openSession(persistedSessionId)
+      } else if (persistedSessionId) {
+        clearPersistedActiveSessionId()
+      }
     } catch (error) {
       set({ loadStatus: "error", error: errorMessage(error) })
     }
@@ -118,6 +136,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async startNewConversation() {
     await window.desktop.sessions.close()
+    clearPersistedActiveSessionId()
     set({
       activeSessionId: null,
       sessionView: null,
@@ -137,7 +156,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       set((state) => ({
         projects: upsertProject(state.projects, details.project),
         selectedProject: details.project,
+        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
         branch: details.branch,
+        branches: details.branches ?? [],
         error: null,
       }))
     } catch (error) {
@@ -146,16 +167,68 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   },
 
   async selectProject(project) {
-    set({ selectedProject: project, branch: null, error: null })
+    set({
+      selectedProject: project,
+      selectedProjectGit: false,
+      branch: null,
+      branches: [],
+      error: null,
+    })
     try {
       const details = await window.desktop.sessions.inspectProject(project.path)
       set((state) => ({
         projects: upsertProject(state.projects, details.project),
         selectedProject: details.project,
+        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
         branch: details.branch,
+        branches: details.branches ?? [],
       }))
     } catch (error) {
       set({ error: errorMessage(error) })
+    }
+  },
+
+  async checkoutBranch(branch) {
+    const selectedProject = get().selectedProject
+    if (!selectedProject) return
+    try {
+      const details = await window.desktop.sessions.checkoutBranch({
+        path: selectedProject.path,
+        branch,
+      })
+      set((state) => ({
+        projects: upsertProject(state.projects, details.project),
+        selectedProject: details.project,
+        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+        branch: details.branch,
+        branches: details.branches ?? [],
+        error: null,
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
+    }
+  },
+
+  async createAndCheckoutBranch(branch) {
+    const selectedProject = get().selectedProject
+    if (!selectedProject) return
+    try {
+      const details = await window.desktop.sessions.createBranch({
+        path: selectedProject.path,
+        branch,
+      })
+      set((state) => ({
+        projects: upsertProject(state.projects, details.project),
+        selectedProject: details.project,
+        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+        branch: details.branch,
+        branches: details.branches ?? [],
+        error: null,
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      throw error
     }
   },
 
@@ -236,7 +309,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         return {
           projects,
           selectedProject: removedSelected ? (projects[0] ?? null) : state.selectedProject,
+          selectedProjectGit: removedSelected ? false : state.selectedProjectGit,
           branch: removedSelected ? null : state.branch,
+          branches: removedSelected ? [] : state.branches,
           error: null,
         }
       })
@@ -373,6 +448,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     try {
       const view = await window.desktop.sessions.open(sessionId)
       if (get().activeSessionId !== sessionId) return
+      writePersistedActiveSessionId(sessionId)
       set((state) => ({
         sessionView: view,
         openingSession: false,
@@ -394,6 +470,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       }))
     } catch (error) {
       if (get().activeSessionId === sessionId) {
+        clearPersistedActiveSessionId()
         set({ openingSession: false, error: errorMessage(error) })
       }
     }
@@ -401,6 +478,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async startConversationFrom(session) {
     await window.desktop.sessions.close()
+    clearPersistedActiveSessionId()
     const project =
       get().projects.find((item) => samePath(item.path, session.cwd)) ?? projectFromSession(session)
     set({
@@ -412,7 +490,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       selectedModel: session.model,
       selectedProvider: sessionProvider(session, get().defaultProvider),
       selectedPermissionMode: sessionPermissionMode(session, get().defaultPermissionMode),
+      selectedProjectGit: false,
       branch: null,
+      branches: [],
       error: null,
     })
     await get().selectProject(project)
@@ -507,6 +587,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         error: null,
       }))
       if (isActive) {
+        clearPersistedActiveSessionId()
         const project = get().selectedProject
         if (project) await get().selectProject(project)
       }
@@ -548,6 +629,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         error: null,
       }))
       if (isActive) {
+        clearPersistedActiveSessionId()
         const project = get().selectedProject
         if (project) await get().selectProject(project)
       }
@@ -593,6 +675,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         sessions: upsertSession(state.sessions, session),
         openingSession: true,
       }))
+      writePersistedActiveSessionId(session.id)
       const view = await window.desktop.sessions.open(session.id)
       set((state) => ({
         sessionView: view,
@@ -676,6 +759,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const current = get().sessionView
     if (get().activeSessionId !== view.session.id) return
     if (current && view.cursor < current.cursor) return
+    if (view.session.status === "archived") clearPersistedActiveSessionId()
+    else writePersistedActiveSessionId(view.session.id)
     set((state) => {
       const knownSession = state.sessions.find((session) => session.id === view.session.id)
       const runFailure = findNewRunFailure(current?.runs ?? [], view.runs)
@@ -756,6 +841,31 @@ function resolveInitialProject(
     if (match) return match
   }
   return data.projects[0] ?? null
+}
+
+function readPersistedActiveSessionId(): string | null {
+  try {
+    const value = localStorage.getItem(persistedActiveSessionKey)?.trim()
+    return value || null
+  } catch {
+    return null
+  }
+}
+
+function writePersistedActiveSessionId(sessionId: string): void {
+  try {
+    localStorage.setItem(persistedActiveSessionKey, sessionId)
+  } catch {
+    // Session restore is a convenience feature; storage failures should not interrupt chat use.
+  }
+}
+
+function clearPersistedActiveSessionId(): void {
+  try {
+    localStorage.removeItem(persistedActiveSessionKey)
+  } catch {
+    // Ignore storage failures for the same reason as writes.
+  }
 }
 
 function upsertProject(projects: DesktopProject[], project: DesktopProject): DesktopProject[] {

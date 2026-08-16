@@ -99,6 +99,10 @@ export const desktopAPI = {
     ) => invoke(IpcChannels.projectSetDefaultShell, input),
     removeProject: (path: string) => invoke(IpcChannels.projectRemove, path),
     rebindProject: (projectId: string) => invoke(IpcChannels.projectRebind, projectId),
+    checkoutBranch: (input: IpcInvokeMap[typeof IpcChannels.projectCheckoutBranch]["args"][0]) =>
+      invoke(IpcChannels.projectCheckoutBranch, input),
+    createBranch: (input: IpcInvokeMap[typeof IpcChannels.projectCreateBranch]["args"][0]) =>
+      invoke(IpcChannels.projectCreateBranch, input),
     create: (input: IpcInvokeMap[typeof IpcChannels.sessionCreate]["args"][0]) =>
       invoke(IpcChannels.sessionCreate, input),
     open: (sessionId: string) => invoke(IpcChannels.sessionOpen, sessionId),

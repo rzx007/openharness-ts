@@ -138,7 +138,9 @@ export interface DesktopBootstrapData {
 
 export interface DesktopProjectDetails {
   project: DesktopProject
+  git: boolean
   branch: string | null
+  branches: string[]
 }
 
 export type DesktopSessionSyncStatus = "connected" | "reconnecting"
@@ -202,6 +204,16 @@ export interface PinDesktopProjectInput {
 export interface SetDefaultDesktopProjectShellInput {
   projectId: string
   shell: string | null
+}
+
+export interface CheckoutDesktopProjectBranchInput {
+  path: string
+  branch: string
+}
+
+export interface CreateDesktopProjectBranchInput {
+  path: string
+  branch: string
 }
 
 export interface ReplyDesktopPermissionInput {

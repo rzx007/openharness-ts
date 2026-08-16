@@ -7,7 +7,9 @@ import type {
   TrayNotificationOptions,
 } from "../shared/ipc-channels"
 import type {
+  CheckoutDesktopProjectBranchInput,
   CreateDesktopSessionInput,
+  CreateDesktopProjectBranchInput,
   DesktopBootstrapData,
   DesktopProjectDetails,
   DesktopSessionRecord,
@@ -105,6 +107,8 @@ export interface DesktopAPI {
     ) => Promise<DesktopProjectDetails["project"]>
     removeProject: (path: string) => Promise<void>
     rebindProject: (projectId: string) => Promise<DesktopProjectDetails["project"] | null>
+    checkoutBranch: (input: CheckoutDesktopProjectBranchInput) => Promise<DesktopProjectDetails>
+    createBranch: (input: CreateDesktopProjectBranchInput) => Promise<DesktopProjectDetails>
     create: (input: CreateDesktopSessionInput) => Promise<DesktopSessionRecord>
     open: (sessionId: string) => Promise<DesktopSessionView>
     fork: (input: ForkDesktopSessionInput) => Promise<DesktopSessionRecord>

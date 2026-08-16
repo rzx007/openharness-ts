@@ -1,5 +1,7 @@
 import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
+  CheckoutDesktopProjectBranchInput,
+  CreateDesktopProjectBranchInput,
   CreateDesktopSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
@@ -57,6 +59,16 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.projectRebind,
         handler: (event, projectId) =>
           desktopSessionService.rebindProject(event.sender, String(projectId ?? "")),
+      },
+      {
+        channel: IpcChannels.projectCheckoutBranch,
+        handler: (_event, input) =>
+          desktopSessionService.checkoutProjectBranch(input as CheckoutDesktopProjectBranchInput),
+      },
+      {
+        channel: IpcChannels.projectCreateBranch,
+        handler: (_event, input) =>
+          desktopSessionService.createProjectBranch(input as CreateDesktopProjectBranchInput),
       },
       {
         channel: IpcChannels.sessionCreate,

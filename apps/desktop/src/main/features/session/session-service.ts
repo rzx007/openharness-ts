@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
+import { promisify } from "node:util"
 
 import {
   OpenHarnessClient,
@@ -21,6 +23,8 @@ import { app, BrowserWindow, dialog, type OpenDialogOptions, type WebContents } 
 
 import { IpcEvents } from "../../../shared/ipc-channels"
 import type {
+  CheckoutDesktopProjectBranchInput,
+  CreateDesktopProjectBranchInput,
   CreateDesktopSessionInput,
   DesktopBootstrapData,
   DesktopModel,
@@ -42,6 +46,8 @@ import type {
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
+
+const execFileAsync = promisify(execFile)
 
 interface SessionSubscription {
   controller: AbortController
@@ -118,14 +124,48 @@ class DesktopSessionService {
 
     const client = await this.getClient()
     const project = await toDesktopProject(await client.inspectProject(path))
+    let git = false
     let branch: string | null = null
+    let branches: string[] = []
     try {
-      branch = parseCurrentBranch(await client.getGitBranch({ cwd: path }))
+      await execGit(path, ["rev-parse", "--is-inside-work-tree"])
+      git = true
+      try {
+        branch = parseCurrentBranch(await client.getGitBranch({ cwd: path }))
+      } catch {
+        branch = null
+      }
+      try {
+        branches = await listLocalBranches(path)
+      } catch {
+        branches = []
+      }
     } catch {
+      git = false
       branch = null
+      branches = []
     }
 
-    return { project, branch }
+    return { project, git, branch, branches }
+  }
+
+  async checkoutProjectBranch(
+    input: CheckoutDesktopProjectBranchInput
+  ): Promise<DesktopProjectDetails> {
+    const path = resolveRequiredPath(input.path)
+    const branch = requireGitBranchName(input.branch)
+    await execGit(path, ["switch", branch])
+    return await this.inspectProject(path)
+  }
+
+  async createProjectBranch(
+    input: CreateDesktopProjectBranchInput
+  ): Promise<DesktopProjectDetails> {
+    const path = resolveRequiredPath(input.path)
+    const branch = requireGitBranchName(input.branch)
+    await execGit(path, ["check-ref-format", "--branch", branch])
+    await execGit(path, ["switch", "-c", branch])
+    return await this.inspectProject(path)
   }
 
   async createSession(input: CreateDesktopSessionInput): Promise<SessionRecord> {
@@ -528,6 +568,31 @@ function parseCurrentBranch(output: string): string | null {
     ?.replace(/^\s*\*\s*/, "")
     .trim()
   return starred || trimmed.split(/\r?\n/)[0]?.trim() || null
+}
+
+async function listLocalBranches(cwd: string): Promise<string[]> {
+  const { stdout } = await execGit(cwd, ["branch", "--format=%(refname:short)"])
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+async function execGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("git", args, { cwd, windowsHide: true })
+    return { stdout, stderr }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Git operation failed: ${message}`)
+  }
+}
+
+function requireGitBranchName(value: unknown): string {
+  const branch = requireString(value, "分支名称")
+  if (branch.startsWith("-")) throw new Error("分支名称不能以 - 开头。")
+  if (/[\u0000-\u001f\u007f]/.test(branch)) throw new Error("分支名称不能包含控制字符。")
+  return branch
 }
 
 function readDesktopMetadata(metadata: Record<string, unknown>): Record<string, unknown> {

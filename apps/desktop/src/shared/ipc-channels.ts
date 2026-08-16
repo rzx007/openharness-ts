@@ -1,5 +1,7 @@
 import type {
   CreateDesktopSessionInput,
+  CheckoutDesktopProjectBranchInput,
+  CreateDesktopProjectBranchInput,
   DesktopBootstrapData,
   DesktopProjectDetails,
   DesktopSessionRecord,
@@ -67,6 +69,8 @@ export const IpcChannels = {
   projectSetDefaultShell: "project:set-default-shell",
   projectRemove: "project:remove",
   projectRebind: "project:rebind",
+  projectCheckoutBranch: "project:checkout-branch",
+  projectCreateBranch: "project:create-branch",
   sessionCreate: "session:create",
   sessionOpen: "session:open",
   sessionFork: "session:fork",
@@ -187,6 +191,14 @@ export interface IpcInvokeMap {
   [IpcChannels.projectRebind]: {
     args: [projectId: string]
     result: DesktopProjectDetails["project"] | null
+  }
+  [IpcChannels.projectCheckoutBranch]: {
+    args: [input: CheckoutDesktopProjectBranchInput]
+    result: DesktopProjectDetails
+  }
+  [IpcChannels.projectCreateBranch]: {
+    args: [input: CreateDesktopProjectBranchInput]
+    result: DesktopProjectDetails
   }
   [IpcChannels.sessionCreate]: {
     args: [input: CreateDesktopSessionInput]

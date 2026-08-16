@@ -6,7 +6,6 @@ import {
   ChevronDown,
   CircleStop,
   Copy,
-  FileText,
   Folder,
   FolderClosed,
   GitBranch,
@@ -24,14 +23,24 @@ import {
   Workflow,
   X,
 } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { forwardRef, Fragment, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
 import { AssistantMessage } from "@renderer/components/desktop/conversation/assistant-message"
 import { buildConversationEntries } from "@renderer/components/desktop/conversation/conversation-turn-model"
 import { formatMessageTime } from "@renderer/components/desktop/conversation/format-message-time"
 import { OpenWithSplitButton } from "@renderer/components/desktop/open-with"
-import { ScrollArea } from "@renderer/components/ui/scroll-area"
+import { Marker, MarkerContent, MarkerIcon } from "@renderer/components/ui/marker"
+import { Message, MessageContent } from "@renderer/components/ui/message"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@renderer/components/ui/message-scroller"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type {
@@ -72,7 +81,9 @@ export function ConversationPane({
   const selectedProvider = useDesktopSessionStore((state) => state.selectedProvider)
   const selectedPermissionMode = useDesktopSessionStore((state) => state.selectedPermissionMode)
   const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
+  const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const branch = useDesktopSessionStore((state) => state.branch)
+  const branches = useDesktopSessionStore((state) => state.branches)
   const projects = useDesktopSessionStore((state) => state.projects)
   const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
   const startSession = useDesktopSessionStore((state) => state.startSession)
@@ -81,6 +92,8 @@ export function ConversationPane({
   const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
+  const checkoutBranch = useDesktopSessionStore((state) => state.checkoutBranch)
+  const createAndCheckoutBranch = useDesktopSessionStore((state) => state.createAndCheckoutBranch)
   const selectModel = useDesktopSessionStore((state) => state.selectModel)
   const selectPermissionMode = useDesktopSessionStore((state) => state.selectPermissionMode)
   const updateSessionModel = useDesktopSessionStore((state) => state.updateSessionModel)
@@ -90,14 +103,8 @@ export function ConversationPane({
   const interrupt = useDesktopSessionStore((state) => state.interrupt)
   const replyPermission = useDesktopSessionStore((state) => state.replyPermission)
   const clearError = useDesktopSessionStore((state) => state.clearError)
-  const endRef = useRef<HTMLDivElement>(null)
   const hasSession = activeSessionId !== null
   const archived = sessionView?.session.status === "archived"
-
-  useEffect(() => {
-    if (!hasSession || !sessionView) return
-    endRef.current?.scrollIntoView({ block: "end" })
-  }, [hasSession, sessionView?.cursor, sessionView])
 
   const submitDraft = async (): Promise<void> => {
     const content = draft.trim()
@@ -198,7 +205,9 @@ export function ConversationPane({
           loadStatus={loadStatus}
           projects={projects}
           selectedProject={selectedProject}
+          selectedProjectGit={selectedProjectGit}
           branch={branch}
+          branches={branches}
           models={models}
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
@@ -208,55 +217,69 @@ export function ConversationPane({
           onSubmit={() => void submitDraft()}
           onChooseProject={() => void chooseProject()}
           onSelectProject={(project) => void selectProject(project)}
+          onCheckoutBranch={checkoutBranch}
+          onCreateAndCheckoutBranch={createAndCheckoutBranch}
           onSelectModel={(model) => void selectModel(model)}
           onSelectPermissionMode={(permissionMode) => void selectPermissionMode(permissionMode)}
           onTogglePanel={onTogglePanel}
         />
       ) : (
         <>
-          <ScrollArea
-            horizontal={false}
-            className="min-h-0 min-w-0 flex-1"
-            viewportClassName="overflow-x-hidden"
-            contentClassName="w-full max-w-full"
+          <MessageScrollerProvider
+            key={activeSessionId ?? "new-session"}
+            autoScroll
+            defaultScrollPosition="last-anchor"
+            scrollPreviousItemPeek={72}
           >
-            <article className="mx-auto flex min-h-full w-full max-w-190 min-w-0 flex-col px-6 pt-7 pb-5">
-              {openingSession && !sessionView ? (
-                <div className="flex flex-1 items-center justify-center text-sm text-ui-muted">
-                  <LoaderCircle className="mr-2 size-4 animate-spin" />
-                  正在加载会话
-                </div>
-              ) : (
-                <ConversationTranscript
-                  messages={sessionView?.messages ?? []}
-                  parts={sessionView?.parts ?? []}
-                  runs={sessionView?.runs ?? []}
-                  running={running}
-                  canEditLastUserMessage={!archived && !running && !sending}
-                  onEditLastUserMessage={(content) => void editLatestUserMessage(content)}
-                  onCopyAssistantMessage={(content) => void copyAssistantMessage(content)}
-                  onForkAssistantMessage={(messageId) => void forkFromAssistantMessage(messageId)}
-                  onOpenFile={onOpenFile}
-                  onOpenTerminal={onOpenTerminal}
-                />
-              )}
+            <MessageScroller className="min-h-0 min-w-0 flex-1">
+              <MessageScrollerViewport className="overflow-x-hidden">
+                <MessageScrollerContent className="mx-auto min-h-full w-full max-w-190 min-w-0 gap-6 px-6 pt-7 pb-5 text-content-foreground">
+                  {openingSession && !sessionView ? (
+                    <MessageScrollerItem>
+                      <div className="flex min-h-80 items-center justify-center text-sm text-ui-muted">
+                        <LoaderCircle className="mr-2 size-4 animate-spin" />
+                        正在加载会话
+                      </div>
+                    </MessageScrollerItem>
+                  ) : (
+                    <ConversationTranscript
+                      messages={sessionView?.messages ?? []}
+                      parts={sessionView?.parts ?? []}
+                      runs={sessionView?.runs ?? []}
+                      running={running}
+                      canEditLastUserMessage={!archived && !running && !sending}
+                      onEditLastUserMessage={(content) => void editLatestUserMessage(content)}
+                      onCopyAssistantMessage={(content) => void copyAssistantMessage(content)}
+                      onForkAssistantMessage={(messageId) =>
+                        void forkFromAssistantMessage(messageId)
+                      }
+                      onOpenFile={onOpenFile}
+                      onOpenTerminal={onOpenTerminal}
+                    />
+                  )}
 
-              {pendingPermissions.map((permission) => (
-                <PermissionCard
-                  key={permission.id}
-                  permission={permission}
-                  onReply={(status, decision) =>
-                    void replyPermission(permission.id, status, decision)
-                  }
-                />
-              ))}
-              <div ref={endRef} />
-            </article>
-          </ScrollArea>
+                  {pendingPermissions.map((permission) => (
+                    <MessageScrollerItem
+                      key={permission.id}
+                      messageId={`permission-${permission.id}`}
+                    >
+                      <PermissionCard
+                        permission={permission}
+                        onReply={(status, decision) =>
+                          void replyPermission(permission.id, status, decision)
+                        }
+                      />
+                    </MessageScrollerItem>
+                  ))}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton className="bottom-5" />
+            </MessageScroller>
+          </MessageScrollerProvider>
 
           {archived ? (
             <div className="mx-auto mb-5 flex h-12 w-[min(760px,calc(100%-32px))] shrink-0 items-center justify-center rounded-lg border border-border bg-background/90 text-xs text-muted-foreground shadow-sm">
-              此会话已归档，只能查看历史内容
+              {"此会话已归档，只能查看历史内容"}
             </div>
           ) : (
             <Composer
@@ -337,25 +360,28 @@ function ConversationTranscript({
 
   if (messages.length === 0 && !running && failedRuns.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-ui-muted">
-        这个会话还没有消息
-      </div>
+      <MessageScrollerItem>
+        <div className="flex min-h-80 items-center justify-center text-sm text-ui-muted">
+          这个会话还没有消息
+        </div>
+      </MessageScrollerItem>
     )
   }
 
   return (
-    <div className="min-w-0 space-y-8 text-[15px] leading-7 text-content-foreground">
+    <>
       {entries.map((entry) => {
         if (entry.type === "system") {
           return (
-            <MessageBlock
-              key={entry.system.id}
-              message={entry.system.message}
-              parts={entry.system.parts}
-              streaming={false}
-              onOpenFile={onOpenFile}
-              onOpenTerminal={onOpenTerminal}
-            />
+            <MessageScrollerItem key={entry.system.id} messageId={entry.system.id}>
+              <MessageBlock
+                message={entry.system.message}
+                parts={entry.system.parts}
+                streaming={false}
+                onOpenFile={onOpenFile}
+                onOpenTerminal={onOpenTerminal}
+              />
+            </MessageScrollerItem>
           )
         }
         const turnFailures = failedRuns.filter(
@@ -364,23 +390,32 @@ function ConversationTranscript({
             (Boolean(run.inputId) && run.inputId === entry.turn.inputId)
         )
         return (
-          <section key={entry.turn.id} className="min-w-0 space-y-8">
+          <Fragment key={entry.turn.id}>
             {entry.turn.userMessage ? (
-              <MessageBlock
-                message={entry.turn.userMessage}
-                parts={entry.turn.userParts}
-                streaming={false}
-                userActions={{
-                  canEdit:
-                    canEditLastUserMessage && entry.turn.userMessage.id === lastUserMessage?.id,
-                  onEdit: onEditLastUserMessage,
-                }}
-                onOpenFile={onOpenFile}
-                onOpenTerminal={onOpenTerminal}
-              />
+              <MessageScrollerItem
+                messageId={entry.turn.userMessage.id}
+                scrollAnchor
+                className="pt-2"
+              >
+                <MessageBlock
+                  message={entry.turn.userMessage}
+                  parts={entry.turn.userParts}
+                  streaming={false}
+                  userActions={{
+                    canEdit:
+                      canEditLastUserMessage && entry.turn.userMessage.id === lastUserMessage?.id,
+                    onEdit: onEditLastUserMessage,
+                  }}
+                  onOpenFile={onOpenFile}
+                  onOpenTerminal={onOpenTerminal}
+                />
+              </MessageScrollerItem>
             ) : null}
             {entry.turn.assistantMessages.length > 0 ? (
-              <div className="group/msg min-w-0">
+              <MessageScrollerItem
+                messageId={entry.turn.assistantMessages.at(-1)?.id ?? `${entry.turn.id}-assistant`}
+                className="group/msg min-w-0"
+              >
                 <AssistantMessage
                   parts={entry.turn.assistantParts}
                   streaming={running && entry === lastTurn}
@@ -394,24 +429,32 @@ function ConversationTranscript({
                   onCopy={onCopyAssistantMessage}
                   onFork={onForkAssistantMessage}
                 />
-              </div>
+              </MessageScrollerItem>
             ) : null}
             {turnFailures.map((run) => (
-              <RunErrorNotice key={run.id} error={run.error} />
+              <MessageScrollerItem key={run.id} messageId={`run-error-${run.id}`}>
+                <RunErrorNotice error={run.error} />
+              </MessageScrollerItem>
             ))}
-          </section>
+          </Fragment>
         )
       })}
       {unattachedFailures.map((run) => (
-        <RunErrorNotice key={run.id} error={run.error} />
+        <MessageScrollerItem key={run.id} messageId={`run-error-${run.id}`}>
+          <RunErrorNotice error={run.error} />
+        </MessageScrollerItem>
       ))}
       {running ? (
-        <div className="flex items-center gap-2 text-xs text-ui-muted">
-          <LoaderCircle className="size-3.5 animate-spin" />
-          OpenHarness 正在处理
-        </div>
+        <MessageScrollerItem messageId="conversation-running-status">
+          <Marker>
+            <MarkerIcon>
+              <LoaderCircle className="animate-spin" />
+            </MarkerIcon>
+            <MarkerContent>OpenHarness 正在处理</MarkerContent>
+          </Marker>
+        </MessageScrollerItem>
       ) : null}
-    </div>
+    </>
   )
 }
 
@@ -468,11 +511,7 @@ function MessageBlock({
   if (message.role === "user") {
     const content = messageTextContent(parts)
     return (
-      <UserMessageBlock
-        content={content}
-        timestamp={message.updatedAt}
-        userActions={userActions}
-      />
+      <UserMessageBlock content={content} timestamp={message.updatedAt} userActions={userActions} />
     )
   }
 
@@ -518,65 +557,71 @@ function UserMessageBlock({
   if (editing && userActions) {
     const normalized = draft.trim()
     return (
-      <form
-        className="ml-auto flex w-full max-w-[78%] flex-col items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!normalized) return
-          setEditing(false)
-          userActions.onEdit(normalized)
-        }}
-      >
-        <label className="sr-only" htmlFor="latest-message-editor">
-          编辑最新消息
-        </label>
-        <textarea
-          id="latest-message-editor"
-          autoFocus
-          value={draft}
-          rows={Math.max(2, Math.min(8, draft.split("\n").length))}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+      <Message align="end" className="group/msg">
+        <MessageContent className="items-end">
+          <form
+            className="flex w-full max-w-[78%] flex-col items-end gap-2"
+            onSubmit={(event) => {
               event.preventDefault()
               if (!normalized) return
               setEditing(false)
               userActions.onEdit(normalized)
-            }
-            if (event.key === "Escape") setEditing(false)
-          }}
-          className="min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground outline-none"
-        />
-        <div className="flex items-center gap-1">
-          <MessageActionButton label="取消编辑" onClick={() => setEditing(false)}>
-            <X />
-          </MessageActionButton>
-          <button
-            type="submit"
-            disabled={!normalized}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-45"
+            }}
           >
-            <Check className="size-3.5" />
-            重新生成
-          </button>
-        </div>
-      </form>
+            <label className="sr-only" htmlFor="latest-message-editor">
+              编辑最新消息
+            </label>
+            <textarea
+              id="latest-message-editor"
+              autoFocus
+              value={draft}
+              rows={Math.max(2, Math.min(8, draft.split("\n").length))}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  if (!normalized) return
+                  setEditing(false)
+                  userActions.onEdit(normalized)
+                }
+                if (event.key === "Escape") setEditing(false)
+              }}
+              className="min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground outline-none"
+            />
+            <div className="flex items-center gap-1">
+              <MessageActionButton label="取消编辑" onClick={() => setEditing(false)}>
+                <X />
+              </MessageActionButton>
+              <button
+                type="submit"
+                disabled={!normalized}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-45"
+              >
+                <Check className="size-3.5" />
+                重新生成
+              </button>
+            </div>
+          </form>
+        </MessageContent>
+      </Message>
     )
   }
 
   return (
-    <div className="group/msg flex flex-col items-end">
-      <div className="max-w-[78%] rounded-xl bg-user-message/50 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground">
-        {content || "已发送消息"}
-      </div>
-      <MessageToolbar align="end" timestamp={timestamp}>
-        {canEdit ? (
-          <MessageActionButton label="重新编辑" onClick={() => setEditing(true)}>
-            <PencilLine />
-          </MessageActionButton>
-        ) : null}
-      </MessageToolbar>
-    </div>
+    <Message align="end" className="group/msg">
+      <MessageContent className="items-end">
+        <div className="max-w-[78%] rounded-xl bg-user-message/50 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground">
+          {content || "已发送消息"}
+        </div>
+        <MessageToolbar align="end" timestamp={timestamp}>
+          {canEdit ? (
+            <MessageActionButton label="重新编辑" onClick={() => setEditing(true)}>
+              <PencilLine />
+            </MessageActionButton>
+          ) : null}
+        </MessageToolbar>
+      </MessageContent>
+    </Message>
   )
 }
 
@@ -685,14 +730,17 @@ function PermissionCard({
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="text-[13px] font-semibold text-foreground">需要你的批准</h3>
-          <p className="mt-1 text-xs text-ui-muted">OpenHarness 请求运行 {permission.toolName}</p>
+          <p className="mt-1 text-xs text-ui-muted">
+            {"OpenHarness 请求运行 "}
+            {permission.toolName}
+          </p>
         </div>
         <button
           type="button"
           onClick={() => onReply("denied")}
           className="h-8 rounded-md px-3 text-xs text-ui-muted hover:bg-muted hover:text-foreground"
         >
-          拒绝
+          鎷掔粷
         </button>
         <button
           type="button"
@@ -714,7 +762,9 @@ function NewConversationStart({
   loadStatus,
   projects,
   selectedProject,
+  selectedProjectGit,
   branch,
+  branches,
   models,
   selectedModel,
   selectedProvider,
@@ -724,6 +774,8 @@ function NewConversationStart({
   onSubmit,
   onChooseProject,
   onSelectProject,
+  onCheckoutBranch,
+  onCreateAndCheckoutBranch,
   onSelectModel,
   onSelectPermissionMode,
   onTogglePanel,
@@ -733,7 +785,9 @@ function NewConversationStart({
   loadStatus: "idle" | "loading" | "ready" | "error"
   projects: DesktopProject[]
   selectedProject: DesktopProject | null
+  selectedProjectGit: boolean
   branch: string | null
+  branches: string[]
   models: DesktopModel[]
   selectedModel: string | null
   selectedProvider: string | null
@@ -743,38 +797,31 @@ function NewConversationStart({
   onSubmit: () => void
   onChooseProject: () => void
   onSelectProject: (project: DesktopProject) => void
+  onCheckoutBranch: (branch: string) => Promise<void>
+  onCreateAndCheckoutBranch: (branch: string) => Promise<void>
   onSelectModel: (model: DesktopModel) => void
   onSelectPermissionMode: (mode: DesktopPermissionMode) => void
   onTogglePanel: () => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<StartPicker | null>(null)
   const [projectQuery, setProjectQuery] = useState("")
-  const pickerAreaRef = useRef<HTMLDivElement>(null)
+  const [branchQuery, setBranchQuery] = useState("")
+  const [creatingBranch, setCreatingBranch] = useState(false)
   const visibleProjects = projects.filter((project) =>
     project.name.toLocaleLowerCase().includes(projectQuery.trim().toLocaleLowerCase())
   )
+  const normalizedBranchQuery = branchQuery.trim()
+  const branchItems = branches ?? []
+  const visibleBranches = branchItems.filter((item) =>
+    item.toLocaleLowerCase().includes(normalizedBranchQuery.toLocaleLowerCase())
+  )
+  const canCreateBranch =
+    normalizedBranchQuery.length > 0 && !branchItems.some((item) => item === normalizedBranchQuery)
+  const isGitProject = selectedProjectGit
   const modelLabel = resolveModelLabel(models, selectedModel, selectedProvider)
   const permissionLabel = resolvePermissionModeLabel(selectedPermissionMode)
 
-  useEffect(() => {
-    const closeOnOutsidePointer = (event: PointerEvent): void => {
-      if (pickerAreaRef.current?.contains(event.target as Node)) return
-      setActivePicker(null)
-    }
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setActivePicker(null)
-    }
-    document.addEventListener("pointerdown", closeOnOutsidePointer)
-    window.addEventListener("keydown", closeOnEscape)
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer)
-      window.removeEventListener("keydown", closeOnEscape)
-    }
-  }, [])
-
-  const togglePicker = (picker: StartPicker): void => {
-    setActivePicker((current) => (current === picker ? null : picker))
-  }
+  const closePicker = (): void => setActivePicker(null)
 
   return (
     <div className="relative min-h-0 flex-1 px-5 py-5">
@@ -785,7 +832,7 @@ function NewConversationStart({
           </HeaderIconButton>
         </div>
       ) : null}
-      <div className="mx-auto flex h-full w-full max-w-[760px] flex-col items-center justify-center pb-[5vh]">
+      <div className="mx-auto flex h-full w-full max-w-190 flex-col items-center justify-center pb-[5vh]">
         <div className="mb-7 flex flex-col items-center text-center">
           <Workflow
             aria-hidden="true"
@@ -795,7 +842,7 @@ function NewConversationStart({
           <h2 className="text-[26px] leading-9 font-medium text-foreground">
             {selectedProject ? (
               <>
-                要在{" "}
+                {"要在 "}
                 <span className="underline decoration-foreground/25 underline-offset-4">
                   {selectedProject.name}
                 </span>{" "}
@@ -807,117 +854,191 @@ function NewConversationStart({
           </h2>
         </div>
 
-        <div ref={pickerAreaRef} className="relative w-full">
+        <div className="relative w-full">
           <div className="mx-3 flex h-12 min-w-0 items-start gap-0.5 rounded-t-2xl bg-muted/70 px-2.5 pt-2">
-            <div className="relative min-w-0">
-              <StartPickerButton
-                label={
-                  loadStatus === "loading" ? "加载项目..." : (selectedProject?.name ?? "选择项目")
+            <Popover
+              open={activePicker === "project"}
+              onOpenChange={(open) => setActivePicker(open ? "project" : null)}
+            >
+              <PopoverTrigger
+                render={
+                  <StartPickerButton
+                    label={
+                      loadStatus === "loading"
+                        ? "加载项目..."
+                        : (selectedProject?.name ?? "选择项目")
+                    }
+                    expanded={activePicker === "project"}
+                  >
+                    <Folder />
+                  </StartPickerButton>
                 }
-                expanded={activePicker === "project"}
-                onClick={() => togglePicker("project")}
+              />
+              <PopoverContent
+                role="menu"
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="w-[290px] gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
               >
-                <Folder />
-              </StartPickerButton>
+                <label className="flex h-9 items-center gap-2 px-2 text-ui-muted">
+                  <Search className="size-3.5 shrink-0" />
+                  <span className="sr-only">搜索项目</span>
+                  <input
+                    autoFocus
+                    value={projectQuery}
+                    placeholder="搜索项目"
+                    onChange={(event) => setProjectQuery(event.target.value)}
+                    className="h-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-placeholder"
+                  />
+                </label>
+                <div className="max-h-44 overflow-y-auto py-0.5">
+                  {visibleProjects.map((project) => (
+                    <PickerMenuItem
+                      key={project.path}
+                      selected={project.path === selectedProject?.path}
+                      onClick={() => {
+                        onSelectProject(project)
+                        setProjectQuery("")
+                        closePicker()
+                      }}
+                    >
+                      <Folder />
+                      <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                    </PickerMenuItem>
+                  ))}
+                  {visibleProjects.length === 0 ? (
+                    <p className="px-2 py-5 text-center text-xs text-ui-muted">没有匹配的项目</p>
+                  ) : null}
+                </div>
+                <div className="mt-1 border-t pt-1">
+                  <PickerMenuItem
+                    onClick={() => {
+                      onChooseProject()
+                      closePicker()
+                    }}
+                  >
+                    <Plus />
+                    <span>选择其他文件夹</span>
+                  </PickerMenuItem>
+                </div>
+              </PopoverContent>
+            </Popover>
 
-              {activePicker === "project" ? (
-                <div
+            <Popover
+              open={activePicker === "runtime"}
+              onOpenChange={(open) => setActivePicker(open ? "runtime" : null)}
+            >
+              <PopoverTrigger
+                render={
+                  <StartPickerButton label="本地" expanded={activePicker === "runtime"}>
+                    <Monitor />
+                  </StartPickerButton>
+                }
+              />
+              <PopoverContent
+                role="menu"
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="w-44 gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
+              >
+                <PickerMenuItem selected onClick={closePicker}>
+                  <Monitor />
+                  <span>本地</span>
+                </PickerMenuItem>
+                <button
+                  type="button"
+                  disabled
+                  title="沙箱模式将在后续版本接入"
+                  className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-ui-muted opacity-45 [&_svg]:size-3.5"
+                >
+                  <Box />
+                  <span>沙箱</span>
+                  <span className="ml-auto text-[10px]">即将支持</span>
+                </button>
+              </PopoverContent>
+            </Popover>
+
+            {isGitProject ? (
+              <Popover
+                open={activePicker === "branch"}
+                onOpenChange={(open) => setActivePicker(open ? "branch" : null)}
+              >
+                <PopoverTrigger
+                  render={
+                    <StartPickerButton
+                      label={branch ?? "选择分支"}
+                      expanded={activePicker === "branch"}
+                    >
+                      <GitBranch />
+                    </StartPickerButton>
+                  }
+                />
+                <PopoverContent
                   role="menu"
-                  className="absolute bottom-full left-0 z-50 mb-2 w-[290px] rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10"
+                  side="top"
+                  align="start"
+                  sideOffset={8}
+                  className="w-[320px] gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
                 >
                   <label className="flex h-9 items-center gap-2 px-2 text-ui-muted">
                     <Search className="size-3.5 shrink-0" />
-                    <span className="sr-only">搜索项目</span>
+                    <span className="sr-only">搜索分支</span>
                     <input
                       autoFocus
-                      value={projectQuery}
-                      placeholder="搜索项目"
-                      onChange={(event) => setProjectQuery(event.target.value)}
+                      value={branchQuery}
+                      placeholder={`搜索 ${selectedProject?.name ?? "项目"} 分支`}
+                      onChange={(event) => setBranchQuery(event.target.value)}
                       className="h-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-placeholder"
                     />
                   </label>
-                  <div className="max-h-44 overflow-y-auto py-0.5">
-                    {visibleProjects.map((project) => (
+                  <div className="border-b px-2 pt-1 pb-2 text-[11px] text-ui-muted">分支</div>
+                  <div className="max-h-56 overflow-y-auto py-0.5">
+                    {visibleBranches.map((item) => (
                       <PickerMenuItem
-                        key={project.path}
-                        selected={project.path === selectedProject?.path}
+                        key={item}
+                        selected={item === branch}
                         onClick={() => {
-                          onSelectProject(project)
-                          setProjectQuery("")
-                          setActivePicker(null)
+                          if (item !== branch) void onCheckoutBranch(item)
+                          setBranchQuery("")
+                          closePicker()
                         }}
                       >
-                        <Folder />
-                        <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                        <GitBranch />
+                        <span className="min-w-0 flex-1 truncate">{item}</span>
                       </PickerMenuItem>
                     ))}
-                    {visibleProjects.length === 0 ? (
-                      <p className="px-2 py-5 text-center text-xs text-ui-muted">没有匹配的项目</p>
+                    {visibleBranches.length === 0 ? (
+                      <p className="px-2 py-5 text-center text-xs text-ui-muted">没有匹配的分支</p>
                     ) : null}
                   </div>
-                  <div className="mt-1 border-t pt-1">
-                    <PickerMenuItem
-                      onClick={() => {
-                        onChooseProject()
-                        setActivePicker(null)
-                      }}
-                    >
-                      <Plus />
-                      <span>选择其他文件夹</span>
-                    </PickerMenuItem>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="relative shrink-0">
-              <StartPickerButton
-                label="本地"
-                expanded={activePicker === "runtime"}
-                onClick={() => togglePicker("runtime")}
-              >
-                <Monitor />
-              </StartPickerButton>
-              {activePicker === "runtime" ? (
-                <div
-                  role="menu"
-                  className="absolute bottom-full left-0 z-50 mb-2 w-44 rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10"
-                >
-                  <PickerMenuItem selected onClick={() => setActivePicker(null)}>
-                    <Monitor />
-                    <span>本地</span>
-                  </PickerMenuItem>
-                  <button
-                    type="button"
-                    disabled
-                    title="沙箱模式将在后续版本接入"
-                    className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-ui-muted opacity-45 [&_svg]:size-3.5"
-                  >
-                    <Box />
-                    <span>沙箱</span>
-                    <span className="ml-auto text-[10px]">即将支持</span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="relative min-w-0">
-              <StartPickerButton
-                label={branch ?? "非 Git 项目"}
-                expanded={activePicker === "branch"}
-                onClick={() => togglePicker("branch")}
-              >
-                <GitBranch />
-              </StartPickerButton>
-              {activePicker === "branch" ? (
-                <div className="absolute bottom-full left-0 z-50 mb-2 w-52 rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10">
-                  <PickerMenuItem selected onClick={() => setActivePicker(null)}>
-                    <GitBranch />
-                    <span className="min-w-0 flex-1 truncate">{branch ?? "非 Git 项目"}</span>
-                  </PickerMenuItem>
-                </div>
-              ) : null}
-            </div>
+                  {canCreateBranch ? (
+                    <div className="mt-1 border-t pt-1">
+                      <PickerMenuItem
+                        disabled={creatingBranch}
+                        onClick={() => {
+                          const nextBranch = normalizedBranchQuery
+                          setCreatingBranch(true)
+                          void onCreateAndCheckoutBranch(nextBranch)
+                            .then(() => {
+                              setBranchQuery("")
+                              closePicker()
+                            })
+                            .finally(() => setCreatingBranch(false))
+                        }}
+                      >
+                        {creatingBranch ? <LoaderCircle className="animate-spin" /> : <Plus />}
+                        <span className="min-w-0 flex-1 truncate">
+                          {"创建并检出 "}
+                          {normalizedBranchQuery}
+                        </span>
+                      </PickerMenuItem>
+                    </div>
+                  ) : null}
+                </PopoverContent>
+              </Popover>
+            ) : null}
           </div>
 
           <form
@@ -942,66 +1063,86 @@ function NewConversationStart({
                   onSubmit()
                 }
               }}
-              className="block max-h-48 min-h-24 w-full resize-none bg-transparent px-4 pt-4 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder"
+              className="block max-h-48 min-h-24 w-full resize-none bg-transparent px-4 pt-4 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/60"
             />
 
             <div className="flex h-12 items-center gap-1 px-3 pb-2">
               <ComposerIconButton label="添加附件">
                 <Plus />
               </ComposerIconButton>
-              <div className="relative ml-1">
-                <button
-                  type="button"
-                  aria-expanded={activePicker === "permission"}
-                  onClick={() => togglePicker("permission")}
-                  className="flex h-8 max-w-36 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              <Popover
+                open={activePicker === "permission"}
+                onOpenChange={(open) => setActivePicker(open ? "permission" : null)}
+              >
+                <PopoverTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-expanded={activePicker === "permission"}
+                      className="ml-1 flex h-8 max-w-36 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                      <ShieldCheck className="size-3.5 shrink-0" />
+                      <span className="truncate">{permissionLabel}</span>
+                      <ChevronDown className="size-3 shrink-0" />
+                    </button>
+                  }
+                />
+                <PopoverContent
+                  side="top"
+                  align="start"
+                  sideOffset={8}
+                  className="w-56 gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
                 >
-                  <ShieldCheck className="size-3.5 shrink-0" />
-                  <span className="truncate">{permissionLabel}</span>
-                  <ChevronDown className="size-3 shrink-0" />
-                </button>
-                {activePicker === "permission" ? (
                   <PermissionModeMenu
                     selected={selectedPermissionMode}
                     onSelect={(permissionMode) => {
                       onSelectPermissionMode(permissionMode)
-                      setActivePicker(null)
+                      closePicker()
                     }}
-                    className="absolute bottom-full left-0 z-50 mb-2 w-64"
                   />
-                ) : null}
-              </div>
-
-              <div className="relative ml-auto flex items-center gap-0.5">
-                <button
-                  type="button"
-                  aria-expanded={activePicker === "model"}
-                  onClick={() => togglePicker("model")}
-                  className="flex h-8 max-w-44 items-center gap-1 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                </PopoverContent>
+              </Popover>
+              <div className="ml-auto flex items-center gap-1">
+                <Popover
+                  open={activePicker === "model"}
+                  onOpenChange={(open) => setActivePicker(open ? "model" : null)}
                 >
-                  <span className="truncate">{modelLabel}</span>
-                  <ChevronDown className="size-3 shrink-0" />
-                </button>
-                {activePicker === "model" ? (
-                  <div className="absolute right-16 bottom-full z-50 mb-2 max-h-64 w-64 overflow-y-auto rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10">
-                    {models.map((model) => (
-                      <PickerMenuItem
-                        key={`${model.provider}:${model.id}`}
-                        selected={
-                          model.id === selectedModel && model.providerName === selectedProvider
-                        }
-                        onClick={() => {
-                          onSelectModel(model)
-                          setActivePicker(null)
-                        }}
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-expanded={activePicker === "model"}
+                        className="flex h-8 max-w-52 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                       >
-                        <FileText />
-                        <span className="min-w-0 flex-1 truncate">{model.label}</span>
-                        <span className="shrink-0 text-[10px] text-ui-muted">{model.provider}</span>
-                      </PickerMenuItem>
-                    ))}
-                  </div>
-                ) : null}
+                        <span className="truncate">{modelLabel}</span>
+                        <ChevronDown className="size-3 shrink-0" />
+                      </button>
+                    }
+                  />
+                  <PopoverContent
+                    side="top"
+                    align="end"
+                    sideOffset={8}
+                    className="w-64 gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
+                  >
+                    <div className="max-h-64 overflow-y-auto py-0.5">
+                      {models.map((model) => (
+                        <PickerMenuItem
+                          key={`${model.providerName}:${model.id}`}
+                          selected={
+                            model.id === selectedModel && model.providerName === selectedProvider
+                          }
+                          onClick={() => {
+                            onSelectModel(model)
+                            closePicker()
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{model.label}</span>
+                        </PickerMenuItem>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 <ComposerIconButton label="语音输入">
                   <Mic />
                 </ComposerIconButton>
@@ -1027,7 +1168,6 @@ function NewConversationStart({
     </div>
   )
 }
-
 function Composer({
   id,
   draft,
@@ -1060,144 +1200,144 @@ function Composer({
   onSelectPermissionMode: (mode: DesktopPermissionMode) => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<"model" | "permission" | null>(null)
-  const composerRef = useRef<HTMLDivElement>(null)
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
-
-  useEffect(() => {
-    const closeOnOutsidePointer = (event: PointerEvent): void => {
-      if (composerRef.current?.contains(event.target as Node)) return
-      setActivePicker(null)
-    }
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setActivePicker(null)
-    }
-    document.addEventListener("pointerdown", closeOnOutsidePointer)
-    window.addEventListener("keydown", closeOnEscape)
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer)
-      window.removeEventListener("keydown", closeOnEscape)
-    }
-  }, [])
+  const closePicker = (): void => setActivePicker(null)
 
   return (
-    <div ref={composerRef} className="relative z-10 shrink-0 bg-conversation px-4 pb-4">
-      <form
-        className="mx-auto w-full max-w-190 rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
-        onSubmit={(event) => {
-          event.preventDefault()
-          onSubmit()
+    <form
+      className="mx-auto mb-5 w-[min(760px,calc(100%-32px))] shrink-0 rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit()
+      }}
+    >
+      <label htmlFor={id} className="sr-only">
+        输入对话内容
+      </label>
+      <textarea
+        id={id}
+        value={draft}
+        rows={2}
+        placeholder="随心输入"
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault()
+            onSubmit()
+          }
         }}
-      >
-        <label htmlFor={id} className="sr-only">
-          输入消息
-        </label>
-        <textarea
-          id={id}
-          value={draft}
-          rows={2}
-          placeholder="随心输入"
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault()
-              onSubmit()
+        className="block max-h-44 min-h-18 w-full resize-none bg-transparent px-4 pt-3 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/65"
+      />
+      <div className="flex h-12 items-center gap-1 px-3 pb-2">
+        <ComposerIconButton label="添加附件">
+          <Plus />
+        </ComposerIconButton>
+        <Popover
+          open={activePicker === "permission"}
+          onOpenChange={(open) => setActivePicker(open ? "permission" : null)}
+        >
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                aria-expanded={activePicker === "permission"}
+                className="ml-1 flex h-8 max-w-36 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <ShieldCheck className="size-3.5 shrink-0" />
+                <span className="truncate">{permissionLabel}</span>
+                <ChevronDown className="size-3 shrink-0" />
+              </button>
             }
-          }}
-          className="block max-h-44 min-h-20 w-full resize-none bg-transparent px-4 pt-4 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder"
-        />
-        <div className="flex h-12 items-center gap-1 px-3 pb-2">
-          <ComposerIconButton label="添加附件">
-            <Plus />
-          </ComposerIconButton>
-          <div className="relative ml-1">
-            <button
-              type="button"
-              aria-expanded={activePicker === "permission"}
-              onClick={() =>
-                setActivePicker((current) => (current === "permission" ? null : "permission"))
+          />
+          <PopoverContent
+            side="top"
+            align="start"
+            sideOffset={8}
+            className="w-56 gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
+          >
+            <PermissionModeMenu
+              selected={permissionMode}
+              onSelect={(mode) => {
+                onSelectPermissionMode(mode)
+                closePicker()
+              }}
+            />
+          </PopoverContent>
+        </Popover>
+        <div className="ml-auto flex items-center gap-1">
+          <Popover
+            open={activePicker === "model"}
+            onOpenChange={(open) => setActivePicker(open ? "model" : null)}
+          >
+            <PopoverTrigger
+              render={
+                <button
+                  type="button"
+                  aria-expanded={activePicker === "model"}
+                  className="flex h-8 max-w-52 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <span className="truncate">{modelLabel}</span>
+                  <ChevronDown className="size-3 shrink-0" />
+                </button>
               }
-              className="flex h-8 max-w-36 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            />
+            <PopoverContent
+              side="top"
+              align="end"
+              sideOffset={8}
+              className="w-64 gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
             >
-              <ShieldCheck className="size-3.5 shrink-0" />
-              <span className="truncate">{permissionLabel}</span>
-              <ChevronDown className="size-3 shrink-0" />
-            </button>
-            {activePicker === "permission" ? (
-              <PermissionModeMenu
-                selected={permissionMode}
-                onSelect={(nextMode) => {
-                  onSelectPermissionMode(nextMode)
-                  setActivePicker(null)
-                }}
-                className="absolute bottom-full left-0 z-50 mb-2 w-64"
-              />
-            ) : null}
-          </div>
-          <div className="relative ml-auto flex items-center gap-0.5">
-            <button
-              type="button"
-              aria-expanded={activePicker === "model"}
-              onClick={() => setActivePicker((current) => (current === "model" ? null : "model"))}
-              className="flex h-8 max-w-44 items-center gap-1 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              <span className="truncate">{modelLabel}</span>
-              <ChevronDown className="size-3 shrink-0" />
-            </button>
-            {activePicker === "model" ? (
-              <div className="absolute right-16 bottom-full z-50 mb-2 max-h-64 w-64 overflow-y-auto rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10">
+              <div className="max-h-64 overflow-y-auto py-0.5">
                 {models.map((model) => (
                   <PickerMenuItem
-                    key={`${model.provider}:${model.id}`}
+                    key={`${model.providerName}:${model.id}`}
                     selected={model.id === selectedModel && model.providerName === selectedProvider}
                     onClick={() => {
                       onSelectModel(model)
-                      setActivePicker(null)
+                      closePicker()
                     }}
                   >
-                    <FileText />
                     <span className="min-w-0 flex-1 truncate">{model.label}</span>
-                    <span className="shrink-0 text-[10px] text-ui-muted">{model.provider}</span>
                   </PickerMenuItem>
                 ))}
               </div>
-            ) : null}
-            <ComposerIconButton label="语音输入">
-              <Mic />
-            </ComposerIconButton>
-            {running ? (
-              <Button
-                type="button"
-                size="icon"
-                aria-label="停止生成"
-                title="停止生成"
-                onClick={onInterrupt}
-                className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85"
-              >
-                <CircleStop className="size-4" />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                size="icon"
-                aria-label="发送"
-                title="发送"
-                disabled={!draft.trim() || sending}
-                className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:bg-ui-muted disabled:text-background disabled:opacity-55"
-              >
-                {sending ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <ArrowUp className="size-4" />
-                )}
-              </Button>
-            )}
-          </div>
+            </PopoverContent>
+          </Popover>
+          <ComposerIconButton label="语音输入">
+            <Mic />
+          </ComposerIconButton>
+          {running ? (
+            <Button
+              type="button"
+              size="icon"
+              aria-label="停止生成"
+              title="停止生成"
+              onClick={onInterrupt}
+              className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85"
+            >
+              <CircleStop className="size-4" />
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              size="icon"
+              aria-label="发送"
+              title="发送"
+              disabled={!draft.trim() || sending}
+              className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:bg-ui-muted disabled:text-background disabled:opacity-55"
+            >
+              {sending ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
+            </Button>
+          )}
         </div>
-      </form>
-    </div>
+      </div>
+    </form>
   )
 }
-
 function ErrorBanner({
   message,
   onClose,
@@ -1245,7 +1385,6 @@ const permissionModeOptions: Array<{
       description: "尽量自动放行工具操作。",
     },
   ]
-
 function PermissionModeMenu({
   selected,
   onSelect,
@@ -1256,13 +1395,7 @@ function PermissionModeMenu({
   className?: string
 }): React.JSX.Element {
   return (
-    <div
-      role="menu"
-      className={cn(
-        "rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-black/10",
-        className
-      )}
-    >
+    <div role="menu" className={cn("text-popover-foreground", className)}>
       {permissionModeOptions.map((mode) => (
         <button
           key={mode.value}
@@ -1289,41 +1422,42 @@ function PermissionModeMenu({
   )
 }
 
-function StartPickerButton({
-  label,
-  expanded,
-  onClick,
-  children,
-}: {
-  label: string
-  expanded: boolean
-  onClick: () => void
-  children: React.ReactNode
-}): React.JSX.Element {
+const StartPickerButton = forwardRef<
+  HTMLButtonElement,
+  {
+    label: string
+    expanded: boolean
+    children: React.ReactNode
+  } & React.ButtonHTMLAttributes<HTMLButtonElement>
+>(function StartPickerButton({ label, expanded, children, className, ...props }, ref) {
   return (
     <button
+      ref={ref}
       type="button"
       aria-expanded={expanded}
       aria-haspopup="menu"
-      onClick={onClick}
       className={cn(
         "flex h-8 max-w-56 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-ui-foreground transition-colors hover:bg-background/75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-        expanded && "bg-background/85"
+        expanded && "bg-background/85",
+        className
       )}
+      {...props}
     >
       {children}
       <span className="min-w-0 truncate">{label}</span>
       <ChevronDown className="size-3 text-ui-muted" />
     </button>
   )
-}
+})
 
 function PickerMenuItem({
   selected,
+  disabled,
   onClick,
   children,
 }: {
   selected?: boolean
+  disabled?: boolean
   onClick: () => void
   children: React.ReactNode
 }): React.JSX.Element {
@@ -1332,9 +1466,10 @@ function PickerMenuItem({
       type="button"
       role={selected === undefined ? "menuitem" : "menuitemradio"}
       aria-checked={selected}
+      disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-ui-muted",
+        "flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-ui-muted",
         selected && "bg-muted"
       )}
     >
@@ -1405,9 +1540,8 @@ function resolveModelLabel(
 }
 
 function resolvePermissionModeLabel(mode: DesktopPermissionMode): string {
-  return permissionModeOptions.find((option) => option.value === mode)?.label ?? "手动批准"
+  return permissionModeOptions.find((option) => option.value === mode)?.label ?? mode
 }
-
 function appendDraftText(current: string, text: string): string {
   const trimmedText = text.trim()
   if (!trimmedText) return current
