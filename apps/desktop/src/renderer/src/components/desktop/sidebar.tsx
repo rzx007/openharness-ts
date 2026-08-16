@@ -824,7 +824,7 @@ function SidebarSectionLabel({
   className?: string
 }): React.JSX.Element {
   return (
-    <div className={cn("px-2.5 pb-1.5 text-[11.5px] font-normal text-sidebar-muted", className)}>
+    <div className={cn("px-2.5 pb-1.5 text-[13px] font-normal text-sidebar-muted/70", className)}>
       {children}
     </div>
   )

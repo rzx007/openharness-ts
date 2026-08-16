@@ -29,7 +29,7 @@ export function TitleBar({
           pressed={sidebarOpen}
           onClick={onToggleSidebar}
         >
-          <PanelLeft />
+          <PanelLeft className="size-3.6!" />
         </ToolbarButton>
         <ToolbarButton label="后退" disabled>
           <ArrowLeft />
@@ -44,7 +44,7 @@ export function TitleBar({
           <button
             key={item}
             type="button"
-            className="h-7 rounded px-2.5 text-[13px] text-ui-muted transition-colors hover:bg-black/5 hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+            className="h-7 rounded px-2.5 text-[13px] text-ui-muted/70 transition-colors hover:bg-black/5 hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
           >
             {item}
           </button>

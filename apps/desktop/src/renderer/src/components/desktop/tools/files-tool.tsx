@@ -148,11 +148,15 @@ export function FilesTool({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [activeTab?.preview.content, searchOpen])
 
-  const openFile = async (path: string): Promise<void> => {
+  const openFile = async (
+    path: string,
+    options: { requireListedFile?: boolean } = {}
+  ): Promise<void> => {
     if (!selectedProject?.path) return
+    const requireListedFile = options.requireListedFile ?? true
     const normalizedPath = path.replace(/\/$/, "")
     const entry = fileEntries.get(normalizedPath)
-    if (!entry || entry.type !== "file") return
+    if (requireListedFile && (!entry || entry.type !== "file")) return
 
     onActivePathChange(normalizedPath)
     onOpenFileStart(normalizedPath)
@@ -177,7 +181,7 @@ export function FilesTool({
     const path = toProjectRelativePath(openRequest.path, selectedProject?.path)
     handledOpenRequestRef.current = openRequest.id
     const timer = window.setTimeout(() => {
-      if (path) void openFile(path)
+      if (path) void openFile(path, { requireListedFile: false })
     }, 0)
     return () => window.clearTimeout(timer)
   }, [fileEntries, loadState, openRequest, selectedProject?.path])
@@ -359,7 +363,7 @@ export function FilesTool({
               searchMatches={searchMatches}
               targetLine={
                 openRequest &&
-                  toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
+                toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
                   ? openRequest.line
                   : undefined
               }
@@ -664,7 +668,6 @@ function EmptyFilesState({
     </div>
   )
 }
-
 
 function FileSearchControls({
   query,

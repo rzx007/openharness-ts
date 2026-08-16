@@ -24,6 +24,12 @@ import type {
   TerminalPanelCommand,
   TerminalSessionTabInfo,
 } from "@renderer/components/desktop/tools/terminal/terminal-tool"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@renderer/components/ui/context-menu"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 
@@ -240,53 +246,79 @@ export function UtilityPanel({
     setActiveTabId(id)
   }
 
-  const closeTab = (tabId: string): void => {
-    setTabs((current) => {
-      const closing = current.find((tab) => tab.id === tabId)
-      const nextTabs = current.filter((tab) => tab.id !== tabId)
-      if (closing?.tool === "browser") {
-        setBrowserTabs((browserCurrent) => browserCurrent.filter((tab) => tab.id !== tabId))
-      }
-      if (closing?.terminalId) {
-        setTerminalCommand({
-          id: Date.now(),
-          type: "close",
-          terminalId: closing.terminalId,
-        })
-      }
-      if (closing?.filePath) {
-        const nextFileTabs = visibleFileTabs.filter((tab) => tab.preview.path !== closing.filePath)
-        setFileTabs((fileCurrent) =>
-          fileCurrent.filter((tab) => tab.preview.path !== closing.filePath)
-        )
-        const nextActivePath =
-          closing.filePath === activeFilePath
-            ? (nextFileTabs[0]?.preview.path ?? null)
-            : activeFilePath
-        persistFileTabs(
-          nextFileTabs.map((tab) => tab.preview.path),
-          nextActivePath
-        )
-      }
+  const closeTabs = (tabIds: string[], preferredActiveTabId?: string): void => {
+    const closingIds = new Set(tabIds)
+    if (closingIds.size === 0) return
 
+    const closingTabs = tabs.filter((tab) => closingIds.has(tab.id))
+    const closingFilePaths = new Set(
+      closingTabs.map((tab) => tab.filePath).filter((path): path is string => Boolean(path))
+    )
+    const closingTerminalIds = closingTabs
+      .map((tab) => tab.terminalId)
+      .filter((terminalId): terminalId is string => Boolean(terminalId))
+
+    setBrowserTabs((current) => current.filter((tab) => !closingIds.has(tab.id)))
+
+    if (closingFilePaths.size > 0) {
+      const nextFileTabs = visibleFileTabs.filter((tab) => !closingFilePaths.has(tab.preview.path))
+      const preferredTab = tabs.find((tab) => tab.id === preferredActiveTabId)
+      const preferredFilePath = preferredTab?.filePath
+      const nextActivePath =
+        preferredFilePath && !closingFilePaths.has(preferredFilePath)
+          ? preferredFilePath
+          : preferredTab && !preferredTab.filePath
+            ? (nextFileTabs[0]?.preview.path ?? null)
+            : activeFilePath && !closingFilePaths.has(activeFilePath)
+              ? activeFilePath
+              : (nextFileTabs[0]?.preview.path ?? null)
+
+      setFileTabs((current) => current.filter((tab) => !closingFilePaths.has(tab.preview.path)))
+      setActiveFilePath(nextActivePath)
+      persistFileTabs(
+        nextFileTabs.map((tab) => tab.preview.path),
+        nextActivePath
+      )
+    }
+
+    setTabs((current) => {
+      const nextTabs = current.filter((tab) => !closingIds.has(tab.id))
       if (nextTabs.length === 0) {
         setActiveTabId("")
-        if (closing?.filePath && activeFilePath === closing.filePath) setActiveFilePath(null)
+        setActiveFilePath(null)
         return []
       }
 
-      if (activeTabId === tabId) {
-        const previousIndex = current.findIndex((tab) => tab.id === tabId)
-        const nextActive = nextTabs[Math.max(0, previousIndex - 1)] ?? nextTabs[0]
-        setActiveTabId(nextActive.id)
-        if (nextActive.filePath) setActiveFilePath(nextActive.filePath)
-      }
-      if (closing?.filePath && activeFilePath === closing.filePath) {
-        const nextFile = nextTabs.find((tab) => tab.filePath)?.filePath ?? null
-        setActiveFilePath(nextFile)
-      }
+      const visibleNextTabs = nextTabs.filter(
+        (tab) => !tab.projectPath || tab.projectPath === selectedProjectPath
+      )
+      const preferredTab = preferredActiveTabId
+        ? visibleNextTabs.find((tab) => tab.id === preferredActiveTabId)
+        : undefined
+      const fallbackTab = closingIds.has(activeTabId)
+        ? (visibleNextTabs[0] ?? nextTabs[0])
+        : (visibleNextTabs.find((tab) => tab.id === activeTabId) ??
+          visibleNextTabs[0] ??
+          nextTabs[0])
+      const nextActive = preferredTab ?? fallbackTab
+      setActiveTabId(nextActive.id)
+      if (nextActive.filePath) setActiveFilePath(nextActive.filePath)
       return nextTabs
     })
+
+    closingTerminalIds.forEach((terminalId, index) => {
+      window.setTimeout(() => {
+        setTerminalCommand({
+          id: Date.now() + index,
+          type: "close",
+          terminalId,
+        })
+      }, index * 30)
+    })
+  }
+
+  const closeTab = (tabId: string): void => {
+    closeTabs([tabId])
   }
 
   const selectTab = (tab: UtilityTab): void => {
@@ -447,6 +479,24 @@ export function UtilityPanel({
     setAddMenuOpen((current) => !current)
   }
 
+  const closeOtherTabs = (tab: UtilityTab): void => {
+    selectTab(tab)
+    closeTabs(
+      visibleTabs.filter((item) => item.id !== tab.id).map((item) => item.id),
+      tab.id
+    )
+  }
+
+  const closeTabsToRight = (tab: UtilityTab): void => {
+    const index = visibleTabs.findIndex((item) => item.id === tab.id)
+    if (index < 0) return
+    selectTab(tab)
+    closeTabs(
+      visibleTabs.slice(index + 1).map((item) => item.id),
+      tab.id
+    )
+  }
+
   return (
     <aside
       aria-hidden={!open}
@@ -465,8 +515,12 @@ export function UtilityPanel({
                 active={tab.id === activeTab?.id}
                 loading={browserTabs.find((item) => item.id === tab.id)?.loading}
                 showSeparator={index < visibleTabs.length - 1}
+                tabCount={visibleTabs.length}
+                rightCount={visibleTabs.length - index - 1}
                 onSelect={() => selectTab(tab)}
                 onClose={() => closeTab(tab.id)}
+                onCloseOthers={() => closeOtherTabs(tab)}
+                onCloseRight={() => closeTabsToRight(tab)}
               />
             ))}
             {visibleTabs.length > 0 && (
@@ -600,57 +654,76 @@ function UtilityTabButton({
   active,
   loading,
   showSeparator,
+  tabCount,
+  rightCount,
   onSelect,
   onClose,
+  onCloseOthers,
+  onCloseRight,
 }: {
   tab: UtilityTab
   active: boolean
   loading?: boolean
   showSeparator: boolean
+  tabCount: number
+  rightCount: number
   onSelect: () => void
   onClose: () => void
+  onCloseOthers: () => void
+  onCloseRight: () => void
 }): React.JSX.Element {
   const Icon = toolMeta[tab.tool].icon
   const TabIcon = tab.fileIcon ?? Icon
 
   return (
-    <div
-      className={cn(
-        "group relative flex h-8 max-w-42 min-w-28 flex-[1_1_10.5rem] items-center rounded-xl text-[12.5px] transition-colors",
-        active
-          ? "bg-muted/55 text-ui-foreground"
-          : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
-        showSeparator &&
-        "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
-      )}
-    >
-      <button
-        type="button"
-        onClick={onSelect}
-        className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xl px-2.5 pr-1 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        title={tab.title}
-      >
-        <TabIcon
-          className={cn("size-3.5 shrink-0", loading && "animate-pulse")}
-          strokeWidth={1.8}
-        />
-        <span className="utility-tab-title relative min-w-0 flex-1 overflow-hidden text-[12px] whitespace-nowrap">
-          {tab.title}
-        </span>
-      </button>
-      <button
-        type="button"
-        aria-label="关闭标签"
-        title="关闭标签"
-        onClick={onClose}
+    <ContextMenu>
+      <ContextMenuTrigger
         className={cn(
-          "mr-1 grid size-5 shrink-0 place-items-center rounded-md text-ui-muted transition-opacity group-hover:opacity-100 hover:bg-background hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          active ? "opacity-75" : "opacity-0"
+          "group relative flex h-8 max-w-42 min-w-28 flex-[1_1_10.5rem] items-center rounded-xl text-[12.5px] transition-colors",
+          active
+            ? "bg-muted/55 text-ui-foreground"
+            : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
+          showSeparator &&
+            "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
         )}
       >
-        <X className="size-3.5" />
-      </button>
-    </div>
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xl px-2.5 pr-1 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          title={tab.title}
+        >
+          <TabIcon
+            className={cn("size-3.5 shrink-0", loading && "animate-pulse")}
+            strokeWidth={1.8}
+          />
+          <span className="utility-tab-title relative min-w-0 flex-1 overflow-hidden text-[12px] whitespace-nowrap">
+            {tab.title}
+          </span>
+        </button>
+        <button
+          type="button"
+          aria-label="关闭标签"
+          title="关闭标签"
+          onClick={onClose}
+          className={cn(
+            "mr-1 grid size-5 shrink-0 place-items-center rounded-md text-ui-muted transition-opacity group-hover:opacity-100 hover:bg-background hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            active ? "opacity-75" : "opacity-0"
+          )}
+        >
+          <X className="size-3.5" />
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-44">
+        <ContextMenuItem onClick={onClose}>关闭</ContextMenuItem>
+        <ContextMenuItem disabled={tabCount <= 1} onClick={onCloseOthers}>
+          关闭其他标签
+        </ContextMenuItem>
+        <ContextMenuItem disabled={rightCount === 0} onClick={onCloseRight}>
+          关闭右侧标签
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -664,13 +737,13 @@ function placeFileTab(current: UtilityTab[], fileTab: UtilityTab): UtilityTab[] 
     return current.map((tab, index) =>
       index === existingIndex
         ? {
-          ...tab,
-          title: fileTab.title,
-          fileIcon: fileTab.fileIcon ?? tab.fileIcon,
-          fileType: fileTab.fileType ?? tab.fileType,
-          filePath: fileTab.filePath,
-          projectPath: fileTab.projectPath,
-        }
+            ...tab,
+            title: fileTab.title,
+            fileIcon: fileTab.fileIcon ?? tab.fileIcon,
+            fileType: fileTab.fileType ?? tab.fileType,
+            filePath: fileTab.filePath,
+            projectPath: fileTab.projectPath,
+          }
         : tab
     )
   }
