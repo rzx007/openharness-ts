@@ -22,7 +22,6 @@ import {
   type AssistantContentUnit,
   type ChangedFile,
 } from "./message-render-model"
-import { QuietInlineCode, QuietLink, quietStreamdownComponents } from "./streamdown-components"
 import { streamdownPlugins } from "./streamdown-plugins"
 
 export function AssistantMessage({
@@ -107,21 +106,20 @@ function AssistantMarkdown({
   return (
     <div className="assistant-markdown min-w-0">
       <Streamdown
-        className="assistant-streamdown"
+        className="desktop-streamdown"
         mode={streaming ? "streaming" : "static"}
         controls
         lineNumbers={false}
         parseIncompleteMarkdown={streaming}
         plugins={streamdownPlugins}
         components={{
-          ...quietStreamdownComponents,
           a: ({ href, children, ...props }) => {
             const file = href ? parseFileReference(href) : null
             if (!file)
               return (
-                <QuietLink href={href} {...props}>
+                <a href={href} data-streamdown="link" {...props}>
                   {children}
-                </QuietLink>
+                </a>
               )
             return (
               <FileButton path={file.path} line={file.line} onOpenFile={onOpenFile}>
@@ -132,7 +130,12 @@ function AssistantMarkdown({
           inlineCode: ({ children, ...props }) => {
             const value = String(children).replace(/\n$/, "")
             const file = parseFileReference(value)
-            if (!file) return <QuietInlineCode {...props}>{children}</QuietInlineCode>
+            if (!file)
+              return (
+                <code data-streamdown="inline-code" {...props}>
+                  {children}
+                </code>
+              )
             return (
               <FileButton path={file.path} line={file.line} onOpenFile={onOpenFile}>
                 {children}
@@ -165,7 +168,7 @@ function FileButton({
       title={`打开 ${path}`}
       onClick={() => onOpenFile(path, line)}
       className={cn(
-        "assistant-file-link inline-flex max-w-full items-baseline gap-1 rounded-[4px] px-1 py-px align-baseline font-mono text-[0.9em] font-normal focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "assistant-file-link inline-flex max-w-full items-baseline gap-1 rounded-sm px-1 py-px align-baseline font-mono text-[0.9em] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         sourceFile && "assistant-file-link-source"
       )}
     >
