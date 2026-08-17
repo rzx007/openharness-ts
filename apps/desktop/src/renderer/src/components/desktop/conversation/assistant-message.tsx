@@ -10,6 +10,7 @@ import { useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { cn } from "@renderer/lib/utils"
+import { Button } from "@renderer/components/ui/button"
 import type { DesktopSessionPart } from "@shared/session-types"
 
 import {
@@ -244,14 +245,10 @@ function TerminalActivityCard({
             {terminal.cwd}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onOpenTerminal(terminal.id)}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 font-medium text-ui-foreground shadow-xs transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        >
-          <PanelRightOpen className="size-3.5" />
+        <Button type="button" variant="outline" onClick={() => onOpenTerminal(terminal.id)}>
+          <PanelRightOpen data-icon="inline-start" />
           打开终端
-        </button>
+        </Button>
       </div>
     </section>
   )

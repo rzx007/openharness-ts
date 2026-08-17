@@ -1,6 +1,8 @@
 import { Check, ChevronDown, ShieldCheck } from "lucide-react"
 import { forwardRef } from "react"
 
+import { Button } from "@renderer/components/ui/button"
+import { Item, ItemActions } from "@renderer/components/ui/item"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopPermissionMode } from "@shared/session-types"
 import type { PermissionModeOption } from "./types"
@@ -35,26 +37,27 @@ export function PermissionModeMenu({
   return (
     <div role="menu" className={cn("text-popover-foreground", className)}>
       {permissionModeOptions.map((mode) => (
-        <button
+        <Button
           key={mode.value}
           type="button"
+          variant="ghost"
           role="menuitemradio"
           aria-checked={selected === mode.value}
           onClick={() => onSelect(mode.value)}
           className={cn(
-            "flex w-full min-w-0 items-start gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "h-auto w-full items-start justify-start gap-2 px-2 py-2 text-left font-normal",
             selected === mode.value && "bg-muted"
           )}
         >
-          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-ui-muted" />
+          <ShieldCheck className="mt-0.5 text-muted-foreground" />
           <span className="min-w-0 flex-1">
             <span className="block text-xs font-medium text-foreground">{mode.label}</span>
-            <span className="mt-0.5 block text-[11px] leading-4 text-ui-muted">
+            <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
               {mode.description}
             </span>
           </span>
-          {selected === mode.value ? <Check className="mt-0.5 size-3.5 shrink-0" /> : null}
-        </button>
+          {selected === mode.value ? <Check className="mt-0.5" /> : null}
+        </Button>
       ))}
     </div>
   )
@@ -66,54 +69,60 @@ export const StartPickerButton = forwardRef<
     label: string
     expanded: boolean
     children: React.ReactNode
-  } & React.ButtonHTMLAttributes<HTMLButtonElement>
+  } & React.ComponentProps<typeof Button>
 >(function StartPickerButton({ label, expanded, children, className, ...props }, ref) {
   return (
-    <button
+    <Button
       ref={ref}
       type="button"
+      variant="ghost"
       aria-expanded={expanded}
       aria-haspopup="menu"
       className={cn(
-        "flex h-8 max-w-56 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-ui-foreground transition-colors hover:bg-background/75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-        expanded && "bg-background/85",
+        "h-8 max-w-56 min-w-0 shrink overflow-hidden px-2 text-xs font-normal text-muted-foreground hover:bg-background/75 aria-expanded:bg-background/85",
         className
       )}
       {...props}
     >
       {children}
       <span className="min-w-0 truncate">{label}</span>
-      <ChevronDown className="size-3 text-ui-muted" />
-    </button>
+      <ChevronDown data-icon="inline-end" className="text-muted-foreground" />
+    </Button>
   )
 })
 
 export function PickerMenuItem({
   selected,
   disabled,
+  title,
   onClick,
   children,
 }: {
   selected?: boolean
   disabled?: boolean
+  title?: string
   onClick: () => void
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <button
-      type="button"
+    <Item
+      size="xs"
+      render={<button type="button" disabled={disabled} onClick={onClick} />}
       role={selected === undefined ? "menuitem" : "menuitemradio"}
       aria-checked={selected}
-      disabled={disabled}
-      onClick={onClick}
+      title={title}
       className={cn(
-        "flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-ui-muted",
+        "h-8 w-full flex-nowrap justify-start bg-transparent text-left text-xs font-normal [&_svg]:shrink-0 [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-3.5",
         selected && "bg-muted"
       )}
     >
       {children}
-      {selected ? <Check className="ml-auto size-3.5 text-foreground" /> : null}
-    </button>
+      {selected ? (
+        <ItemActions>
+          <Check className="size-3.5 text-foreground" />
+        </ItemActions>
+      ) : null}
+    </Item>
   )
 }
 
@@ -129,19 +138,18 @@ export function HeaderIconButton({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       title={label}
       aria-label={label}
       aria-pressed={pressed}
       onClick={onClick}
-      className={cn(
-        "grid size-7 place-items-center rounded-md text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5",
-        pressed && "bg-muted text-foreground"
-      )}
+      className="text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -153,13 +161,15 @@ export function ComposerIconButton({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon"
       title={label}
       aria-label={label}
-      className="grid size-8 place-items-center rounded-md text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4"
+      className="text-muted-foreground"
     >
       {children}
-    </button>
+    </Button>
   )
 }

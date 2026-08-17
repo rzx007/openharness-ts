@@ -11,7 +11,6 @@ import {
   GitBranchPlus,
   GitPullRequest,
   Grid2X2,
-  MessageCircle,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
@@ -214,12 +213,27 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
             <ChevronDown className="size-3.5 text-sidebar-muted" />
           </button>
           <div className="ml-auto flex items-center gap-0.5">
-            <SidebarIconButton label="搜索">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="搜索"
+              aria-label="搜索"
+              className="text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            >
               <Search />
-            </SidebarIconButton>
-            <SidebarIconButton label="通知" onClick={notify}>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="通知"
+              aria-label="通知"
+              onClick={notify}
+              className="text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            >
               <Bell />
-            </SidebarIconButton>
+            </Button>
           </div>
         </div>
 
@@ -570,7 +584,7 @@ function SessionRow({
           <MoreHorizontal />
         </DropdownMenuTrigger>
       </div>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="max-w-64">
         {!archived ? (
           <>
             <DropdownMenuItem onClick={() => actions.onRename(session)}>
@@ -590,11 +604,11 @@ function SessionRow({
         {!archived ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem destructive onClick={() => actions.onArchive(session)}>
+            <DropdownMenuItem variant="destructive" onClick={() => actions.onArchive(session)}>
               <Archive />
               归档
             </DropdownMenuItem>
-            <DropdownMenuItem destructive onClick={() => actions.onDelete(session)}>
+            <DropdownMenuItem variant="destructive" onClick={() => actions.onDelete(session)}>
               <Trash2 />
               删除
             </DropdownMenuItem>
@@ -602,7 +616,7 @@ function SessionRow({
         ) : (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem destructive onClick={() => actions.onDelete(session)}>
+            <DropdownMenuItem variant="destructive" onClick={() => actions.onDelete(session)}>
               <Trash2 />
               删除
             </DropdownMenuItem>
@@ -673,29 +687,19 @@ function ProjectGroup({
             <MoreHorizontal />
           </DropdownMenuTrigger>
         </div>
-        <DropdownMenuContent align="start" className="w-72 p-1.5">
-          <div className="px-2 py-1.5">
-            <div className="flex min-w-0 items-center gap-2 text-[13px] font-semibold">
-              <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{project.name}</span>
-              {project.pinnedAt ? <Pin className="ml-auto size-3.5 text-muted-foreground" /> : null}
-            </div>
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <MessageCircle className="size-3.5" />
-              {sessions.length} 个会话
-            </div>
-            <div className="mt-2 flex items-start gap-2 border-t border-border/70 pt-2 text-xs text-muted-foreground">
-              <FolderClosed className="mt-0.5 size-3.5 shrink-0" />
-              <span className="min-w-0 leading-5 break-all">{project.path}</span>
-            </div>
-            <div className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
-              <SquareTerminal className="mt-0.5 size-3.5 shrink-0" />
-              <span className="min-w-0 leading-5 break-all">
-                {project.defaultShell ? project.defaultShell : "使用系统默认 Shell"}
-              </span>
-            </div>
-          </div>
-          <DropdownMenuSeparator />
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem onClick={() => projectActions.onTogglePin(project)}>
+            {project.pinnedAt ? <PinOff /> : <Pin />}
+            {project.pinnedAt ? "取消置顶" : "置顶项目"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() =>
+              void window.desktop.workspace.revealPath({ rootPath: project.path, path: "." })
+            }
+          >
+            <FolderOpen />
+            在资源管理器中打开
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => projectActions.onRebind(project)}>
             <FolderSync />
             重新绑定目录
@@ -708,12 +712,8 @@ function ProjectGroup({
             <Pencil />
             重命名项目
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => projectActions.onTogglePin(project)}>
-            {project.pinnedAt ? <PinOff /> : <Pin />}
-            {project.pinnedAt ? "取消置顶" : "置顶项目"}
-          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem destructive onClick={() => projectActions.onRemove(project)}>
+          <DropdownMenuItem variant="destructive" onClick={() => projectActions.onRemove(project)}>
             <Trash2 />
             从列表移除
           </DropdownMenuItem>
@@ -825,28 +825,6 @@ function SidebarSectionLabel({
     <div className={cn("px-2.5 pb-1.5 text-[13px] font-normal text-sidebar-muted/70", className)}>
       {children}
     </div>
-  )
-}
-
-function SidebarIconButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string
-  onClick?: () => void
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      onClick={onClick}
-      className="grid size-8 place-items-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4"
-    >
-      {children}
-    </button>
   )
 }
 

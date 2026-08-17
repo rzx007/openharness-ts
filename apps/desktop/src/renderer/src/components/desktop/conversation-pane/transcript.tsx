@@ -1,10 +1,10 @@
 import { Fragment, useMemo } from "react"
-import { LoaderCircle } from "lucide-react"
 
 import { AssistantMessage } from "@renderer/components/desktop/conversation/assistant-message"
 import { buildConversationEntries } from "@renderer/components/desktop/conversation/conversation-turn-model"
 import { Marker, MarkerContent, MarkerIcon } from "@renderer/components/ui/marker"
 import { MessageScrollerItem } from "@renderer/components/ui/message-scroller"
+import { Spinner } from "@renderer/components/ui/spinner"
 import type {
   DesktopSessionMessage,
   DesktopSessionPart,
@@ -155,7 +155,7 @@ export function ConversationTranscript({
         <MessageScrollerItem messageId="conversation-running-status">
           <Marker>
             <MarkerIcon>
-              <LoaderCircle className="animate-spin" />
+              <Spinner />
             </MarkerIcon>
             <MarkerContent>OpenHarness 正在处理</MarkerContent>
           </Marker>

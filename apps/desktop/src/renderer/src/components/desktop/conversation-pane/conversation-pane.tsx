@@ -1,4 +1,4 @@
-import { FolderClosed, ListFilter, LoaderCircle, MoreHorizontal, PanelRight } from "lucide-react"
+import { FolderClosed, ListFilter, MoreHorizontal, PanelRight } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { OpenWithSplitButton } from "@renderer/components/desktop/open-with"
@@ -10,6 +10,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@renderer/components/ui/message-scroller"
+import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import { Composer } from "./composer"
 import { ErrorBanner } from "./error-banner"
@@ -116,7 +117,7 @@ function ConversationPane({
   }, [])
 
   return (
-    <section className="flex h-full min-w-0 flex-1 flex-col bg-conversation">
+    <section className="flex h-full min-w-0 flex-1 flex-col overflow-x-hidden bg-conversation">
       {hasSession ? (
         <header className="flex h-12 shrink-0 items-center border-b bg-background px-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -124,18 +125,13 @@ function ConversationPane({
             <h1 className="truncate text-[13px] font-medium">{title}</h1>
             {sessionView?.syncStatus === "reconnecting" ? (
               <span className="flex shrink-0 items-center gap-1 text-[11px] text-ui-muted">
-                <LoaderCircle className="size-3 animate-spin" />
+                <Spinner className="size-3" />
                 正在重连
               </span>
             ) : null}
-            <button
-              type="button"
-              title="更多操作"
-              aria-label="更多操作"
-              className="grid size-7 shrink-0 place-items-center rounded-md text-ui-muted hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5"
-            >
+            <HeaderIconButton label="更多操作">
               <MoreHorizontal />
-            </button>
+            </HeaderIconButton>
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -192,8 +188,8 @@ function ConversationPane({
                 <MessageScrollerContent className="mx-auto min-h-full w-full max-w-190 min-w-0 gap-6 px-6 pt-7 pb-5 text-content-foreground">
                   {openingSession && !sessionView ? (
                     <MessageScrollerItem>
-                      <div className="flex min-h-80 items-center justify-center text-sm text-ui-muted">
-                        <LoaderCircle className="mr-2 size-4 animate-spin" />
+                      <div className="flex min-h-80 items-center justify-center gap-2 text-sm text-ui-muted">
+                        <Spinner className="size-4" />
                         正在加载会话
                       </div>
                     </MessageScrollerItem>

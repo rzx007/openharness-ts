@@ -1,11 +1,13 @@
 import { DEFAULT_THEMES, type FileContents } from "@pierre/diffs"
 import { File as PierreFile, type FileOptions } from "@pierre/diffs/react"
-import { FileCode2, FileText, Loader2, type LucideIcon } from "lucide-react"
+import { FileCode2, FileText } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { streamdownPlugins } from "@renderer/components/desktop/conversation/streamdown-plugins"
+import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
+import { Spinner } from "@renderer/components/ui/spinner"
 import type { WorkspaceReadFileResult } from "@shared/workspace-types"
 
 export type FileViewMode = "preview" | "source"
@@ -84,7 +86,7 @@ export function FileViewer({
 
   if (tabs.length === 0 && !loadingPath) {
     return (
-      <EmptyViewerState
+      <DesktopEmptyState
         icon={FileCode2}
         title="选择文件以预览"
         description="打开的文件会在顶部标签页里保留。"
@@ -97,7 +99,7 @@ export function FileViewer({
       <div className="min-h-0 min-w-0 flex-1">
         {loadingPath && loadingPath === activePath ? (
           <div className="flex h-full items-center justify-center gap-2 text-[13px] text-ui-muted">
-            <Loader2 className="size-4 animate-spin" />
+            <Spinner />
             正在读取文件...
           </div>
         ) : activeTab?.type === "document" ? (
@@ -113,7 +115,7 @@ export function FileViewer({
             targetLine={targetLine}
           />
         ) : (
-          <EmptyViewerState
+          <DesktopEmptyState
             icon={FileCode2}
             title="选择文件以预览"
             description="打开的文件会在顶部标签页里保留。"
@@ -213,29 +215,11 @@ function MarkdownPreview({ preview }: { preview: WorkspaceReadFileResult }): Rea
 
 function DocumentPlaceholder({ preview }: { preview: WorkspaceReadFileResult }): React.JSX.Element {
   return (
-    <EmptyViewerState
+    <DesktopEmptyState
       icon={FileText}
       title={preview.name}
       description="这类文件的预览后续接入，这里先保留标签页占位。"
     />
-  )
-}
-
-function EmptyViewerState({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: LucideIcon
-  title: string
-  description: string
-}): React.JSX.Element {
-  return (
-    <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-      <Icon className="mb-4 size-9 text-ui-muted" strokeWidth={1.6} />
-      <h2 className="text-[17px] font-semibold text-ui-foreground">{title}</h2>
-      <p className="mt-2 max-w-72 text-[13px] leading-6 text-ui-muted">{description}</p>
-    </div>
   )
 }
 

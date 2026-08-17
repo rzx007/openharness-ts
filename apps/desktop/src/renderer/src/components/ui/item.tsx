@@ -67,7 +67,7 @@ function Item({
     defaultTagName: "div",
     props: mergeProps<"div">(
       {
-        className: cn(itemVariants({ variant, size, className })),
+        className: cn(itemVariants({ variant, size }), className),
       },
       props
     ),

@@ -22,14 +22,14 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative min-h-0 overflow-hidden", className)}
+      className={cn("relative flex min-h-0 flex-col overflow-hidden", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
         data-slot="scroll-area-viewport"
         className={cn(
-          "h-full w-full overscroll-contain focus-visible:outline-none",
+          "min-h-0 w-full flex-1 overscroll-contain focus-visible:outline-none",
           viewportClassName
         )}
       >

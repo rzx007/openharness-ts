@@ -1,16 +1,9 @@
-import {
-  ArrowUp,
-  ChevronDown,
-  CircleStop,
-  LoaderCircle,
-  Mic,
-  Plus,
-  ShieldCheck,
-} from "lucide-react"
+import { ArrowUp, ChevronDown, CircleStop, Mic, Plus, ShieldCheck } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
+import { Spinner } from "@renderer/components/ui/spinner"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
 import { ComposerIconButton, PermissionModeMenu, PickerMenuItem } from "./controls"
 import { resolvePermissionModeLabel } from "./utils"
@@ -52,7 +45,7 @@ export function Composer({
 
   return (
     <form
-      className="mx-auto mb-5 w-[min(760px,calc(100%-32px))] shrink-0 rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
+      className="mx-auto mb-5 w-[min(760px,calc(100%-32px))] min-w-0 shrink-0 overflow-hidden rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
       onSubmit={(event) => {
         event.preventDefault()
         onSubmit()
@@ -75,7 +68,7 @@ export function Composer({
         }}
         className="block max-h-44 min-h-18 w-full resize-none bg-transparent px-4 pt-3 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/65"
       />
-      <div className="flex h-12 items-center gap-1 px-3 pb-2">
+      <div className="flex h-12 min-w-0 items-center gap-1 overflow-hidden px-3 pb-2">
         <ComposerIconButton label="添加附件">
           <Plus />
         </ComposerIconButton>
@@ -85,17 +78,17 @@ export function Composer({
         >
           <PopoverTrigger
             render={
-              <button
+              <Button
                 type="button"
-                aria-expanded={activePicker === "permission"}
-                className="ml-1 flex h-8 max-w-36 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                <ShieldCheck className="size-3.5 shrink-0" />
-                <span className="truncate">{permissionLabel}</span>
-                <ChevronDown className="size-3 shrink-0" />
-              </button>
+                variant="ghost"
+                className="ml-1 h-8 max-w-36 min-w-0 shrink overflow-hidden px-2 text-xs font-normal text-muted-foreground"
+              />
             }
-          />
+          >
+            <ShieldCheck data-icon="inline-start" />
+            <span className="min-w-0 truncate">{permissionLabel}</span>
+            <ChevronDown data-icon="inline-end" />
+          </PopoverTrigger>
           <PopoverContent
             side="top"
             align="start"
@@ -111,23 +104,23 @@ export function Composer({
             />
           </PopoverContent>
         </Popover>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex min-w-0 items-center gap-1">
           <Popover
             open={activePicker === "model"}
             onOpenChange={(open) => setActivePicker(open ? "model" : null)}
           >
             <PopoverTrigger
               render={
-                <button
+                <Button
                   type="button"
-                  aria-expanded={activePicker === "model"}
-                  className="flex h-8 max-w-52 items-center gap-1.5 rounded-md px-2 text-xs text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
-                  <span className="truncate">{modelLabel}</span>
-                  <ChevronDown className="size-3 shrink-0" />
-                </button>
+                  variant="ghost"
+                  className="h-8 max-w-52 min-w-0 shrink overflow-hidden px-2 text-xs font-normal text-muted-foreground"
+                />
               }
-            />
+            >
+              <span className="min-w-0 truncate">{modelLabel}</span>
+              <ChevronDown data-icon="inline-end" />
+            </PopoverTrigger>
             <PopoverContent
               side="top"
               align="end"
@@ -162,7 +155,7 @@ export function Composer({
               onClick={onInterrupt}
               className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85"
             >
-              <CircleStop className="size-4" />
+              <CircleStop />
             </Button>
           ) : (
             <Button
@@ -173,11 +166,7 @@ export function Composer({
               disabled={!draft.trim() || sending}
               className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:bg-ui-muted disabled:text-background disabled:opacity-55"
             >
-              {sending ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : (
-                <ArrowUp className="size-4" />
-              )}
+              {sending ? <Spinner /> : <ArrowUp />}
             </Button>
           )}
         </div>

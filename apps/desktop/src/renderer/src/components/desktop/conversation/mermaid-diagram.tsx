@@ -1,8 +1,8 @@
-import { Check, Copy, Download, Loader2, TriangleAlert } from "lucide-react"
+import { Check, Copy, Download, TriangleAlert } from "lucide-react"
 import mermaid from "mermaid"
 import { useEffect, useId, useMemo, useState } from "react"
 
-import { cn } from "@renderer/lib/utils"
+import { Spinner } from "@renderer/components/ui/spinner"
 
 type MermaidRenderState =
   | { status: "idle"; svg: null; error: null }
@@ -127,7 +127,7 @@ export function MermaidDiagram({ code, isIncomplete }: MermaidDiagramProps): Rea
         </div>
       ) : (
         <div className="assistant-mermaid-loading">
-          <Loader2 className={cn("size-4", state.status === "loading" && "animate-spin")} />
+          <Spinner />
           <span>Rendering diagram...</span>
         </div>
       )}

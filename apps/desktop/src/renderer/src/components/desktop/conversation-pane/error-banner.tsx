@@ -1,5 +1,7 @@
 import { AlertCircle, X } from "lucide-react"
 
+import { Button } from "@renderer/components/ui/button"
+
 export function ErrorBanner({
   message,
   onClose,
@@ -14,14 +16,16 @@ export function ErrorBanner({
     >
       <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
       <span className="min-w-0 flex-1 leading-5 break-words whitespace-pre-wrap">{message}</span>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-xs"
         aria-label="关闭错误提示"
         onClick={onClose}
-        className="grid size-6 place-items-center rounded-md hover:bg-destructive/10 [&_svg]:size-3.5"
+        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
       >
         <X />
-      </button>
+      </Button>
     </div>
   )
 }

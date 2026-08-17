@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 
 import { AssistantMessage } from "@renderer/components/desktop/conversation/assistant-message"
 import { formatMessageTime } from "@renderer/components/desktop/conversation/format-message-time"
+import { Button } from "@renderer/components/ui/button"
 import { Message, MessageContent } from "@renderer/components/ui/message"
 import { cn } from "@renderer/lib/utils"
 import type {
@@ -145,14 +146,15 @@ function UserMessageBlock({
               <MessageActionButton label="取消编辑" onClick={() => setEditing(false)}>
                 <X />
               </MessageActionButton>
-              <button
+              <Button
                 type="submit"
+                size="sm"
                 disabled={!normalized}
-                className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-45"
+                className="bg-foreground text-background hover:bg-foreground/85"
               >
-                <Check className="size-3.5" />
+                <Check data-icon="inline-start" />
                 重新生成
-              </button>
+              </Button>
             </div>
           </form>
         </MessageContent>
@@ -255,16 +257,18 @@ function MessageActionButton({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-xs"
       title={label}
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="grid size-6 place-items-center rounded-md text-ui-muted/50 transition-colors hover:bg-muted hover:text-ui-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3"
+      className="text-muted-foreground/50 hover:text-muted-foreground"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -288,20 +292,22 @@ export function PermissionCard({
             {permission.toolName}
           </p>
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          className="text-xs text-muted-foreground"
           onClick={() => onReply("denied")}
-          className="h-8 rounded-md px-3 text-xs text-ui-muted hover:bg-muted hover:text-foreground"
         >
-          鎷掔粷
-        </button>
-        <button
+          拒绝
+        </Button>
+        <Button
           type="button"
+          variant="outline"
+          className="text-xs"
           onClick={() => onReply("approved", "once")}
-          className="h-8 rounded-lg border px-3 text-xs font-medium text-foreground hover:bg-muted"
         >
           允许
-        </button>
+        </Button>
       </div>
     </section>
   )

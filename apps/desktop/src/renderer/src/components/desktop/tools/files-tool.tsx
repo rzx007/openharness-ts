@@ -8,7 +8,6 @@ import {
   FileCode2,
   FilePlus2,
   FolderOpen,
-  Loader2,
   PanelRight,
   PanelRightClose,
   RefreshCw,
@@ -23,6 +22,7 @@ import { FileTree, useFileTree } from "@pierre/trees/react"
 import { Group, Panel, usePanelRef } from "react-resizable-panels"
 
 import { OpenWithSubmenu } from "@renderer/components/desktop/open-with"
+import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
 import {
   FileViewer,
   type FileSearchMatch,
@@ -30,7 +30,9 @@ import {
   type FileViewerTab,
 } from "@renderer/components/desktop/tools/file-viewer"
 import { isMarkdownPath } from "@renderer/components/desktop/tools/file-icons"
+import { Button } from "@renderer/components/ui/button"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
+import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type {
   WorkspaceFileEntry,
@@ -269,7 +271,12 @@ export function FilesTool({
 
   if (!selectedProject) {
     return (
-      <EmptyFilesState icon={FolderOpen} title="打开文件" description="从工作区目录树中选择文件" />
+      <DesktopEmptyState
+        icon={FolderOpen}
+        size="sm"
+        title="打开文件"
+        description="从工作区目录树中选择文件"
+      />
     )
   }
 
@@ -278,47 +285,54 @@ export function FilesTool({
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/45 px-2.5">
         <FileBreadcrumb projectName={selectedProject.name} path={activePath ?? "/"} />
         {activeIsMarkdown && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             aria-label={activeViewMode === "preview" ? "查看 Markdown 源码" : "预览 Markdown"}
             title={activeViewMode === "preview" ? "查看 Markdown 源码" : "预览 Markdown"}
             onClick={() => setActiveViewMode(activeViewMode === "preview" ? "source" : "preview")}
-            className="grid size-8 shrink-0 place-items-center rounded-lg text-ui-muted hover:bg-muted hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-[active=true]:bg-muted data-[active=true]:text-ui-foreground [&_svg]:size-4"
-            data-active={activeViewMode === "preview"}
+            aria-pressed={activeViewMode === "preview"}
+            className="text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
           >
             {activeViewMode === "preview" ? <Code2 /> : <BookOpenText />}
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           aria-label={treeOpen ? "收起文件树" : "展开文件树"}
           title={treeOpen ? "收起文件树" : "展开文件树"}
           onClick={toggleTree}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-ui-muted hover:bg-muted hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4"
+          className="text-muted-foreground"
         >
           {treeOpen ? <PanelRightClose /> : <PanelRight />}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           aria-label="刷新文件树"
           title="刷新文件树"
           onClick={() => void loadFiles()}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-ui-muted hover:bg-muted hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4"
+          className="text-muted-foreground"
         >
           <RefreshCw />
-        </button>
+        </Button>
       </div>
 
       {loadState === "loading" && (
         <div className="flex flex-1 items-center justify-center gap-2 text-[13px] text-ui-muted">
-          <Loader2 className="size-4 animate-spin" />
+          <Spinner />
           正在读取项目文件...
         </div>
       )}
 
       {loadState === "error" && (
-        <EmptyFilesState
+        <DesktopEmptyState
           icon={FileCode2}
+          size="sm"
           title="无法读取项目"
           description={error ?? "请稍后重试。"}
         />
@@ -634,39 +648,22 @@ function FileTreeMenuButton({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       disabled={disabled}
       onClick={onClick}
-      className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-ui-muted"
+      className="h-9 w-full justify-start px-2.5 font-normal"
     >
-      <Icon strokeWidth={1.8} />
+      <Icon className="text-muted-foreground" strokeWidth={1.8} />
       <span className="min-w-0 flex-1 truncate">{children}</span>
-    </button>
+    </Button>
   )
 }
 
 function formatFileMention(item: ContextMenuItem): string {
   const path = item.kind === "directory" ? item.path.replace(/\/$/, "") : item.path
   return item.kind === "directory" ? `@${path}/` : `@${path}`
-}
-
-function EmptyFilesState({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: LucideIcon
-  title: string
-  description: string
-}): React.JSX.Element {
-  return (
-    <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-      <Icon className="mb-4 size-8 text-ui-muted" strokeWidth={1.6} />
-      <h2 className="text-[15px] font-semibold text-ui-foreground">{title}</h2>
-      <p className="mt-2 max-w-72 text-[13px] leading-6 text-ui-muted">{description}</p>
-    </div>
-  )
 }
 
 function FileSearchControls({
@@ -730,35 +727,38 @@ function FileSearchControls({
           {matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : "No results"}
         </span>
       )}
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-sm"
         aria-label="上一个搜索结果"
         title="上一个搜索结果"
         disabled={!canNavigate}
         onClick={onPrevious}
-        className="grid size-7 shrink-0 place-items-center rounded-md hover:bg-muted hover:text-ui-foreground disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent [&_svg]:size-4"
       >
         <ChevronUp />
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-sm"
         aria-label="下一个搜索结果"
         title="下一个搜索结果"
         disabled={!canNavigate}
         onClick={onNext}
-        className="grid size-7 shrink-0 place-items-center rounded-md hover:bg-muted hover:text-ui-foreground disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent [&_svg]:size-4"
       >
         <ChevronDown />
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
+        size="icon-sm"
         aria-label="关闭搜索"
         title="关闭搜索"
         onClick={onClose}
-        className="-mt-9 -mr-4 ml-1 grid size-7 shrink-0 place-items-center rounded-full bg-ui-muted text-popover hover:bg-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-4"
+        className="-mt-9 -mr-4 ml-1 rounded-full bg-muted-foreground text-popover hover:bg-foreground"
       >
         <X />
-      </button>
+      </Button>
     </div>
   )
 }

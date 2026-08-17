@@ -30,6 +30,16 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@renderer/components/ui/context-menu"
+import { Button } from "@renderer/components/ui/button"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@renderer/components/ui/item"
+import { Kbd } from "@renderer/components/ui/kbd"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 
@@ -525,9 +535,17 @@ export function UtilityPanel({
             ))}
             {visibleTabs.length > 0 && (
               <div className="relative ml-1 shrink-0">
-                <PanelIconButton label="新建工具标签" onClick={toggleAddMenu} subtle>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title="新建工具标签"
+                  aria-label="新建工具标签"
+                  onClick={toggleAddMenu}
+                  className="text-muted-foreground"
+                >
                   <Plus />
-                </PanelIconButton>
+                </Button>
               </div>
             )}
           </div>
@@ -537,17 +555,29 @@ export function UtilityPanel({
             className="flex shrink-0 items-center gap-0.5 text-ui-muted"
           />
 
-          <PanelIconButton
-            label={maximized ? "恢复面板" : "最大化面板"}
-            pressed={maximized}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            title={maximized ? "恢复面板" : "最大化面板"}
+            aria-label={maximized ? "恢复面板" : "最大化面板"}
+            aria-pressed={maximized}
             onClick={onToggleMaximized}
-            subtle
+            className="text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
           >
             <Minimize2 className={cn(!maximized && "rotate-180", "size-3.5")} />
-          </PanelIconButton>
-          <PanelIconButton label="关闭面板" onClick={onClose}>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            title="关闭面板"
+            aria-label="关闭面板"
+            onClick={onClose}
+            className="bg-muted/55 text-muted-foreground"
+          >
             <PanelRightClose className="size-3.5" />
-          </PanelIconButton>
+          </Button>
         </header>
 
         <div className="relative min-h-0 flex-1 bg-panel">
@@ -621,30 +651,33 @@ function EmptyUtilityPanelState({
 }): React.JSX.Element {
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-8">
-      <div className="w-full max-w-130">
+      <ItemGroup className="w-full max-w-130 gap-0.5">
         {toolOrder.map((tool) => {
           const Icon = toolMeta[tool].icon
           return (
-            <button
+            <Item
               key={tool}
-              type="button"
-              onClick={() => onAdd(tool)}
-              className="group flex h-12.5 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-ui-foreground transition-colors hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              size="sm"
+              render={<button type="button" onClick={() => onAdd(tool)} />}
+              className="h-12.5 cursor-pointer flex-nowrap bg-transparent text-left hover:bg-muted/45"
             >
-              <Icon
-                className="size-3.5 shrink-0 text-ui-muted transition-colors group-hover:text-ui-foreground"
-                strokeWidth={1.8}
-              />
-              <span className="min-w-0 flex-1 truncate text-[13px]">{toolMeta[tool].label}</span>
-              {toolMeta[tool].shortcut && (
-                <kbd className="rounded-md bg-code px-1.5 py-0.5 font-sans text-[11px] text-ui-muted">
-                  {toolMeta[tool].shortcut}
-                </kbd>
-              )}
-            </button>
+              <ItemMedia variant="icon" className="size-4 text-muted-foreground">
+                <Icon strokeWidth={1.8} />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle className="text-[13px] font-normal">{toolMeta[tool].label}</ItemTitle>
+              </ItemContent>
+              <ItemActions className="min-w-28 justify-end">
+                {toolMeta[tool].shortcut ? (
+                  <Kbd className="bg-code text-[11px] text-muted-foreground">
+                    {toolMeta[tool].shortcut}
+                  </Kbd>
+                ) : null}
+              </ItemActions>
+            </Item>
           )
         })}
-      </div>
+      </ItemGroup>
     </div>
   )
 }
@@ -829,54 +862,24 @@ function AddTabMenu({
         const Icon = toolMeta[tool].icon
         const disabled = tool !== "browser" && tool !== "terminal" && activeTab?.tool === tool
         return (
-          <button
+          <Button
             key={tool}
             type="button"
+            variant="ghost"
             disabled={disabled}
             onClick={() => onAdd(tool)}
-            className="flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[14px] transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-45"
+            className="h-10 w-full justify-start gap-2 px-2.5 text-[14px] font-normal"
           >
-            <Icon className="size-4 text-ui-muted" strokeWidth={1.8} />
+            <Icon className="text-muted-foreground" strokeWidth={1.8} />
             <span>{toolMeta[tool].label}</span>
             {toolMeta[tool].shortcut && (
-              <kbd className="ml-auto rounded bg-code px-1.5 py-0.5 font-sans text-[11px] text-ui-muted">
+              <Kbd className="ml-auto bg-code text-[11px] text-muted-foreground">
                 {toolMeta[tool].shortcut}
-              </kbd>
+              </Kbd>
             )}
-          </button>
+          </Button>
         )
       })}
     </div>
-  )
-}
-
-function PanelIconButton({
-  label,
-  pressed,
-  onClick,
-  subtle,
-  children,
-}: {
-  label: string
-  pressed?: boolean
-  onClick?: React.MouseEventHandler<HTMLButtonElement>
-  subtle?: boolean
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={cn(
-        "grid shrink-0 place-items-center rounded-md text-ui-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-[pressed=true]:bg-muted [&_svg]:size-4",
-        subtle ? "size-7" : "size-8 bg-muted/55"
-      )}
-      data-pressed={pressed}
-    >
-      {children}
-    </button>
   )
 }

@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 
 import { cn } from "@renderer/lib/utils"
+import { Button } from "@renderer/components/ui/button"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type {
   DesktopTerminalCreateInput,
@@ -606,16 +607,28 @@ export function TerminalTool({
                 onClick={() => setRuntimeMode("sandbox")}
               />
             </div>
-            <IconButton label="清空终端" onClick={clearTerminal} disabled={!activeRecord}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              title="清空终端"
+              aria-label="清空终端"
+              onClick={clearTerminal}
+              disabled={!activeRecord}
+            >
               <Eraser />
-            </IconButton>
-            <IconButton
-              label="重启终端"
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              title="重启终端"
+              aria-label="重启终端"
               onClick={() => void restartTerminal()}
               disabled={!activeRecord}
             >
               <RotateCcw />
-            </IconButton>
+            </Button>
           </>,
           actionsHost
         )}
@@ -654,13 +667,13 @@ export function TerminalTool({
                   : "选择项目后，终端会在项目目录中启动。"}
               </p>
               {selectedProject && (
-                <button
+                <Button
                   type="button"
+                  className="mt-4"
                   onClick={() => void rebindProject(selectedProject.id)}
-                  className="mt-4 inline-flex h-8 items-center rounded-lg bg-foreground px-3 text-[13px] font-medium text-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 >
                   重新绑定目录
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -671,14 +684,10 @@ export function TerminalTool({
             <div>
               <SquareTerminal className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
               <p className="text-[13px] text-ui-muted">当前项目没有打开的终端</p>
-              <button
-                type="button"
-                onClick={() => void createTerminal()}
-                className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-3 text-[13px] font-medium text-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                <Plus className="size-3.5" />
+              <Button type="button" className="mt-4" onClick={() => void createTerminal()}>
+                <Plus data-icon="inline-start" />
                 新建终端
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -686,13 +695,14 @@ export function TerminalTool({
         {error && selectedProject?.available && (
           <div className="absolute right-3 bottom-3 max-w-[calc(100%-1.5rem)] rounded-lg border bg-popover px-3 py-2 text-[12px] text-popover-foreground shadow-lg">
             <span>{error}</span>
-            <button
+            <Button
               type="button"
+              variant="link"
               onClick={() => setError(null)}
-              className="ml-3 font-medium text-ui-foreground hover:underline"
+              className="ml-3 h-auto px-0 text-[12px] text-foreground"
             >
               关闭
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -775,31 +785,6 @@ function TerminalContextMenuItem({
         destructive &&
           "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
       )}
-    >
-      {children}
-    </button>
-  )
-}
-
-function IconButton({
-  label,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string
-  disabled?: boolean
-  onClick: () => void
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="grid size-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-muted hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-35 [&_svg]:size-3.5"
     >
       {children}
     </button>
