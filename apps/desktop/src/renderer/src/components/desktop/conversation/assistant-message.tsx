@@ -6,11 +6,12 @@ import {
   Pencil,
   TerminalSquare,
 } from "lucide-react"
-import { useMemo, useState } from "react"
-import { Streamdown } from "streamdown"
+import { isValidElement, useMemo, useState } from "react"
+import { Streamdown, useIsCodeFenceIncomplete, type ExtraProps } from "streamdown"
 
 import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
+import { CodeBlock } from "@renderer/components/ui/code-block"
 import type { DesktopSessionPart } from "@shared/session-types"
 
 import {
@@ -24,6 +25,7 @@ import {
   type ChangedFile,
 } from "./message-render-model"
 import { streamdownPlugins } from "./streamdown-plugins"
+import { MermaidDiagram } from "./mermaid-diagram"
 
 export function AssistantMessage({
   parts,
@@ -108,6 +110,7 @@ function AssistantMarkdown({
     <div className="assistant-markdown min-w-0">
       <Streamdown
         className="desktop-streamdown space-y-0"
+        animated
         mode={streaming ? "streaming" : "static"}
         controls
         lineNumbers={false}
@@ -143,12 +146,47 @@ function AssistantMarkdown({
               </FileButton>
             )
           },
+          code: StreamdownCodeBlock,
         }}
       >
         {text}
       </Streamdown>
     </div>
   )
+}
+
+function StreamdownCodeBlock({
+  className,
+  children,
+}: React.HTMLAttributes<HTMLElement> & ExtraProps): React.JSX.Element {
+  const isIncomplete = useIsCodeFenceIncomplete()
+  const language = className?.match(/language-([^\s]+)/)?.[1] ?? ""
+  const code = markdownNodeText(children).replace(/\n$/, "")
+
+  if (language === "mermaid" || language === "mmd") {
+    return <MermaidDiagram code={code} isIncomplete={isIncomplete} />
+  }
+
+  const codeType = language || "text"
+  return (
+    <CodeBlock
+      className="my-4"
+      code={code}
+      language={codeType}
+      filename={codeType}
+      showLineNumbers={false}
+    />
+  )
+}
+
+function markdownNodeText(value: React.ReactNode): string {
+  if (value == null || typeof value === "boolean") return ""
+  if (typeof value === "string" || typeof value === "number") return String(value)
+  if (Array.isArray(value)) return value.map(markdownNodeText).join("")
+  if (isValidElement(value)) {
+    return markdownNodeText((value.props as { children?: React.ReactNode }).children)
+  }
+  return ""
 }
 
 function FileButton({

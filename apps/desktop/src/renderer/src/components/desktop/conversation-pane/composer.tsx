@@ -1,11 +1,10 @@
-import { ArrowUp, ChevronDown, CircleStop, Mic, Plus, ShieldCheck } from "lucide-react"
+import { ChevronDown, Mic, Plus, ShieldCheck } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
-import { Spinner } from "@renderer/components/ui/spinner"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
-import { ComposerIconButton, PermissionModeMenu } from "./controls"
+import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
 import { ModelPicker } from "./model-picker"
 import { resolvePermissionModeLabel } from "./utils"
 
@@ -49,6 +48,7 @@ export function Composer({
       className="mx-auto mb-5 w-[min(760px,calc(100%-32px))] min-w-0 shrink-0 overflow-hidden rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
       onSubmit={(event) => {
         event.preventDefault()
+        if (sending || running) return
         onSubmit()
       }}
     >
@@ -64,6 +64,7 @@ export function Composer({
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault()
+            if (sending || running) return
             onSubmit()
           }
         }}
@@ -121,29 +122,12 @@ export function Composer({
           <ComposerIconButton label="语音输入">
             <Mic />
           </ComposerIconButton>
-          {running ? (
-            <Button
-              type="button"
-              size="icon"
-              aria-label="停止生成"
-              title="停止生成"
-              onClick={onInterrupt}
-              className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85"
-            >
-              <CircleStop />
-            </Button>
-          ) : (
-            <Button
-              type="submit"
-              size="icon"
-              aria-label="发送"
-              title="发送"
-              disabled={!draft.trim() || sending}
-              className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:bg-ui-muted disabled:text-background disabled:opacity-55"
-            >
-              {sending ? <Spinner /> : <ArrowUp />}
-            </Button>
-          )}
+          <ComposerSendButton
+            sending={sending}
+            running={running}
+            disabled={!draft.trim()}
+            onInterrupt={onInterrupt}
+          />
         </div>
       </div>
     </form>

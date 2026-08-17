@@ -1,8 +1,9 @@
-import { Check, ChevronDown, ShieldCheck } from "lucide-react"
+import { ArrowUp, Check, ChevronDown, ShieldCheck, Square } from "lucide-react"
 import { forwardRef } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { Item, ItemActions } from "@renderer/components/ui/item"
+import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopPermissionMode } from "@shared/session-types"
 import type { PermissionModeOption } from "./types"
@@ -170,6 +171,62 @@ export function ComposerIconButton({
       className="text-muted-foreground"
     >
       {children}
+    </Button>
+  )
+}
+
+export function ComposerSendButton({
+  sending,
+  running = false,
+  disabled,
+  onInterrupt,
+}: {
+  sending: boolean
+  running?: boolean
+  disabled: boolean
+  onInterrupt?: () => void
+}): React.JSX.Element {
+  if (sending) {
+    return (
+      <Button
+        type="button"
+        size="icon"
+        disabled
+        aria-busy
+        aria-label="正在发送"
+        title="正在发送"
+        className="ml-1 size-8 rounded-full bg-foreground text-background disabled:opacity-100"
+      >
+        <Spinner />
+      </Button>
+    )
+  }
+
+  if (running) {
+    return (
+      <Button
+        type="button"
+        size="icon"
+        aria-label="停止生成"
+        title="停止生成"
+        onClick={onInterrupt}
+        className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85"
+      >
+        <Square fill="currentColor" />
+      </Button>
+    )
+  }
+
+  return (
+    <Button
+      type="submit"
+      size="icon"
+      aria-label="发送"
+      title="发送"
+      disabled={disabled}
+      className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:bg-ui-muted disabled:text-background disabled:opacity-55"
+    >
+      <ArrowUp />
     </Button>
   )
 }

@@ -1,5 +1,4 @@
 import {
-  ArrowUp,
   Box,
   ChevronDown,
   Folder,
@@ -23,6 +22,7 @@ import type { DesktopModel, DesktopPermissionMode, DesktopProject } from "@share
 import type { LoadStatus, StartPicker } from "./types"
 import {
   ComposerIconButton,
+  ComposerSendButton,
   HeaderIconButton,
   PermissionModeMenu,
   PickerMenuItem,
@@ -339,6 +339,7 @@ export function NewConversationStart({
             className="relative -mt-0.5 min-w-0 overflow-hidden rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
             onSubmit={(event) => {
               event.preventDefault()
+              if (sending) return
               onSubmit()
             }}
           >
@@ -354,6 +355,7 @@ export function NewConversationStart({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault()
+                  if (sending) return
                   onSubmit()
                 }
               }}
@@ -412,16 +414,10 @@ export function NewConversationStart({
                 <ComposerIconButton label="语音输入">
                   <Mic />
                 </ComposerIconButton>
-                <Button
-                  type="submit"
-                  size="icon"
-                  aria-label="发送"
-                  title="发送"
-                  disabled={!draft.trim() || !selectedProject || sending}
-                  className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:bg-ui-muted disabled:text-background disabled:opacity-55"
-                >
-                  {sending ? <Spinner /> : <ArrowUp />}
-                </Button>
+                <ComposerSendButton
+                  sending={sending}
+                  disabled={!draft.trim() || !selectedProject}
+                />
               </div>
             </div>
           </form>

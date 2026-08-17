@@ -1,4 +1,4 @@
-import { FolderClosed, ListFilter, MoreHorizontal, PanelRight } from "lucide-react"
+import { ListFilter, MoreHorizontal, PanelRight } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { OpenWithSplitButton } from "@renderer/components/desktop/open-with"
@@ -17,6 +17,9 @@ import { ErrorBanner } from "./error-banner"
 import { HeaderIconButton } from "./controls"
 import { NewConversationStart } from "./new-conversation-start"
 import { PermissionCard } from "./message-block"
+import { ProjectInfoButton } from "./project-info-popover"
+import { SessionMoreMenu } from "./session-more-menu"
+import { useSessionActionDialogs } from "./session-action-dialogs"
 import { ConversationTranscript } from "./transcript"
 import type { AddToComposerEventDetail, ConversationPaneProps } from "./types"
 import { appendDraftText, resolveModelLabel } from "./utils"
@@ -42,6 +45,7 @@ function ConversationPane({
   const branch = useDesktopSessionStore((state) => state.branch)
   const branches = useDesktopSessionStore((state) => state.branches)
   const projects = useDesktopSessionStore((state) => state.projects)
+  const sessions = useDesktopSessionStore((state) => state.sessions)
   const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
   const startSession = useDesktopSessionStore((state) => state.startSession)
   const sendMessage = useDesktopSessionStore((state) => state.sendMessage)
@@ -62,6 +66,7 @@ function ConversationPane({
   const clearError = useDesktopSessionStore((state) => state.clearError)
   const hasSession = activeSessionId !== null
   const archived = sessionView?.session.status === "archived"
+  const sessionActions = useSessionActionDialogs()
 
   const submitDraft = async (): Promise<void> => {
     const content = draft.trim()
@@ -121,7 +126,12 @@ function ConversationPane({
       {hasSession ? (
         <header className="flex h-12 shrink-0 items-center border-b bg-background px-3">
           <div className="flex min-w-0 items-center gap-2">
-            <FolderClosed className="size-3.5 shrink-0 text-ui-muted" strokeWidth={1.8} />
+            <ProjectInfoButton
+              selectedProject={selectedProject}
+              projects={projects}
+              cwd={sessionView?.session.cwd ?? null}
+              sessions={sessions}
+            />
             <h1 className="truncate text-[13px] font-medium">{title}</h1>
             {sessionView?.syncStatus === "reconnecting" ? (
               <span className="flex shrink-0 items-center gap-1 text-[11px] text-ui-muted">
@@ -129,9 +139,19 @@ function ConversationPane({
                 正在重连
               </span>
             ) : null}
-            <HeaderIconButton label="更多操作">
-              <MoreHorizontal />
-            </HeaderIconButton>
+            {sessionView ? (
+              <SessionMoreMenu
+                session={sessionView.session}
+                archived={archived}
+                onRename={() => sessionActions.beginRename(sessionView.session)}
+                onArchive={() => sessionActions.beginArchive(sessionView.session)}
+                onDelete={() => sessionActions.beginDelete(sessionView.session)}
+              />
+            ) : (
+              <HeaderIconButton label="更多操作">
+                <MoreHorizontal />
+              </HeaderIconButton>
+            )}
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -258,6 +278,7 @@ function ConversationPane({
           )}
         </>
       )}
+      {sessionActions.dialogs}
     </section>
   )
 }

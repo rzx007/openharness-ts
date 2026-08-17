@@ -27,6 +27,10 @@ const utilityMinimumWidth = 320
 const workspaceMinimumWidth = conversationMinimumWidth + utilityMinimumWidth
 const defaultWorkspaceLayout: Layout = { conversation: 40, utility: 60 }
 
+function isOpenWorkspaceLayout(layout: Layout | null | undefined): layout is Layout {
+  return Number(layout?.conversation) > 5 && Number(layout?.utility) > 5
+}
+
 export function DesktopShell(): React.JSX.Element {
   const initializeSessions = useDesktopSessionStore((state) => state.initialize)
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -47,16 +51,22 @@ export function DesktopShell(): React.JSX.Element {
   const utilityPanelRef = usePanelRef()
   const workspaceGroupRef = useGroupRef()
   const previousWorkspaceLayoutRef = useRef<Layout | null>(null)
+  const lastOpenWorkspaceLayoutRef = useRef<Layout | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const outerLayout = useDefaultLayout({
     id: "desktop-shell-layout-v1",
     panelIds: ["sidebar", "workspace"],
   })
   const workspaceLayout = useDefaultLayout({
-    id: "desktop-workspace-layout-v2",
+    id: "desktop-workspace-layout-v3",
     panelIds: ["conversation", "utility"],
   })
-  const workspaceDefaultLayout = workspaceLayout.defaultLayout ?? defaultWorkspaceLayout
+  const workspaceDefaultLayout = isOpenWorkspaceLayout(workspaceLayout.defaultLayout)
+    ? workspaceLayout.defaultLayout
+    : defaultWorkspaceLayout
+  if (lastOpenWorkspaceLayoutRef.current === null) {
+    lastOpenWorkspaceLayoutRef.current = workspaceDefaultLayout
+  }
 
   useEffect(() => {
     void window.desktop.window.isMaximized().then(setIsMaximized)
@@ -108,6 +118,30 @@ export function DesktopShell(): React.JSX.Element {
     }
   }, [sidebarPanelRef])
 
+  const restoreUtilityPanel = useCallback((): void => {
+    if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
+    const group = workspaceGroupRef.current
+    const panel = utilityPanelRef.current
+    const layout = lastOpenWorkspaceLayoutRef.current ?? defaultWorkspaceLayout
+    if (panel?.isCollapsed()) {
+      panel.expand()
+      window.requestAnimationFrame(() => {
+        group?.setLayout(layout)
+      })
+    }
+    setPanelOpen(true)
+  }, [sidebarPanelRef, utilityPanelRef, workspaceGroupRef])
+
+  const collapseUtilityPanel = useCallback((): void => {
+    const currentLayout = workspaceGroupRef.current?.getLayout()
+    if (isOpenWorkspaceLayout(currentLayout)) {
+      lastOpenWorkspaceLayoutRef.current = currentLayout
+    }
+    previousWorkspaceLayoutRef.current = null
+    setUtilityMaximized(false)
+    utilityPanelRef.current?.collapse()
+  }, [utilityPanelRef, workspaceGroupRef])
+
   const togglePanel = useCallback((): void => {
     const panel = utilityPanelRef.current
     if (!panel) {
@@ -115,41 +149,29 @@ export function DesktopShell(): React.JSX.Element {
       return
     }
 
-    if (panel.isCollapsed()) {
-      if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
-      panel.expand()
-    } else {
-      previousWorkspaceLayoutRef.current = null
-      setUtilityMaximized(false)
-      panel.collapse()
-    }
-  }, [sidebarPanelRef, utilityPanelRef])
+    if (panel.isCollapsed()) restoreUtilityPanel()
+    else collapseUtilityPanel()
+  }, [collapseUtilityPanel, restoreUtilityPanel, utilityPanelRef])
 
   const openWorkspaceFile = useCallback(
     (path: string, line?: number): void => {
-      if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
-      utilityPanelRef.current?.expand()
-      setPanelOpen(true)
+      restoreUtilityPanel()
       setFileOpenRequest({ id: Date.now(), path, line })
     },
-    [sidebarPanelRef, utilityPanelRef]
+    [restoreUtilityPanel]
   )
 
   const openTerminal = useCallback(
     (terminalId: string): void => {
-      if (window.innerWidth < 1180) sidebarPanelRef.current?.collapse()
-      utilityPanelRef.current?.expand()
-      setPanelOpen(true)
+      restoreUtilityPanel()
       setTerminalOpenRequest({ id: Date.now(), terminalId })
     },
-    [sidebarPanelRef, utilityPanelRef]
+    [restoreUtilityPanel]
   )
 
   const closeUtilityPanel = useCallback((): void => {
-    previousWorkspaceLayoutRef.current = null
-    setUtilityMaximized(false)
-    utilityPanelRef.current?.collapse()
-  }, [utilityPanelRef])
+    collapseUtilityPanel()
+  }, [collapseUtilityPanel])
 
   const toggleUtilityMaximized = useCallback((): void => {
     if (utilityMaximized) {
@@ -190,7 +212,9 @@ export function DesktopShell(): React.JSX.Element {
 
   const handleWorkspaceLayoutChanged = useCallback(
     (layout: Layout, meta: LayoutChangedMeta): void => {
-      if (!utilityMaximized) workspaceLayout.onLayoutChanged(layout, meta)
+      if (utilityMaximized || !isOpenWorkspaceLayout(layout)) return
+      lastOpenWorkspaceLayoutRef.current = layout
+      workspaceLayout.onLayoutChanged(layout, meta)
     },
     [utilityMaximized, workspaceLayout]
   )

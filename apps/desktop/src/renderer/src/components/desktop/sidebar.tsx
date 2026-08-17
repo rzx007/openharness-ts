@@ -8,7 +8,6 @@ import {
   FolderClosed,
   FolderOpen,
   FolderSync,
-  GitBranchPlus,
   GitPullRequest,
   Grid2X2,
   MessageSquarePlus,
@@ -49,6 +48,8 @@ import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import { isSessionPinned, useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
+import { useSessionActionDialogs } from "./conversation-pane/session-action-dialogs"
+import { SessionMoreMenu } from "./conversation-pane/session-more-menu"
 
 type SidebarProps = {
   open: boolean
@@ -69,22 +70,14 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
   const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
   const openSession = useDesktopSessionStore((state) => state.openSession)
   const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
-  const startConversationFrom = useDesktopSessionStore((state) => state.startConversationFrom)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
-  const renameSession = useDesktopSessionStore((state) => state.renameSession)
-  const togglePinSession = useDesktopSessionStore((state) => state.togglePinSession)
-  const archiveSession = useDesktopSessionStore((state) => state.archiveSession)
-  const deleteSession = useDesktopSessionStore((state) => state.deleteSession)
   const renameProject = useDesktopSessionStore((state) => state.renameProject)
   const togglePinProject = useDesktopSessionStore((state) => state.togglePinProject)
   const setProjectDefaultShell = useDesktopSessionStore((state) => state.setProjectDefaultShell)
   const removeProject = useDesktopSessionStore((state) => state.removeProject)
   const rebindProject = useDesktopSessionStore((state) => state.rebindProject)
+  const sessionActionsDialogs = useSessionActionDialogs()
   const [archiveMode, setArchiveMode] = useState(false)
-  const [renameTarget, setRenameTarget] = useState<DesktopSessionRecord | null>(null)
-  const [archiveTarget, setArchiveTarget] = useState<DesktopSessionRecord | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<DesktopSessionRecord | null>(null)
-  const [renameValue, setRenameValue] = useState("")
   const [renameProjectTarget, setRenameProjectTarget] = useState<DesktopProject | null>(null)
   const [shellProjectTarget, setShellProjectTarget] = useState<DesktopProject | null>(null)
   const [removeProjectTarget, setRemoveProjectTarget] = useState<DesktopProject | null>(null)
@@ -112,36 +105,6 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
       await startNewConversation()
       if (project) await selectProject(project)
     })()
-  }
-
-  const beginRename = (session: DesktopSessionRecord): void => {
-    setRenameValue(sessionTitle(session))
-    setRenameTarget(session)
-  }
-
-  const submitRename = (event: React.FormEvent<HTMLFormElement>): void => {
-    event.preventDefault()
-    if (!renameTarget || !renameValue.trim() || busy) return
-    setBusy(true)
-    void renameSession(renameTarget.id, renameValue)
-      .then(() => setRenameTarget(null))
-      .finally(() => setBusy(false))
-  }
-
-  const confirmArchive = (): void => {
-    if (!archiveTarget || busy) return
-    setBusy(true)
-    void archiveSession(archiveTarget.id)
-      .then(() => setArchiveTarget(null))
-      .finally(() => setBusy(false))
-  }
-
-  const confirmDelete = (): void => {
-    if (!deleteTarget || busy) return
-    setBusy(true)
-    void deleteSession(deleteTarget.id)
-      .then(() => setDeleteTarget(null))
-      .finally(() => setBusy(false))
   }
 
   const beginProjectRename = (project: DesktopProject): void => {
@@ -182,11 +145,9 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
 
   const sessionActions: SessionActions = {
     onOpen: (session) => void openSession(session.id),
-    onRename: beginRename,
-    onTogglePin: (session) => void togglePinSession(session.id),
-    onStartFrom: (session) => void startConversationFrom(session),
-    onArchive: setArchiveTarget,
-    onDelete: setDeleteTarget,
+    onRename: sessionActionsDialogs.beginRename,
+    onArchive: sessionActionsDialogs.beginArchive,
+    onDelete: sessionActionsDialogs.beginDelete,
   }
   const projectActions: ProjectActions = {
     onRename: beginProjectRename,
@@ -346,80 +307,7 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
         </div>
       </aside>
 
-      <Dialog
-        open={renameTarget !== null}
-        onOpenChange={(value) => !value && setRenameTarget(null)}
-      >
-        <DialogContent>
-          <form onSubmit={submitRename} className="contents">
-            <DialogHeader>
-              <DialogTitle>重命名会话</DialogTitle>
-              <DialogDescription>使用一个便于稍后识别的名称。</DialogDescription>
-            </DialogHeader>
-            <FieldGroup>
-              <Field>
-                <Label htmlFor="session-name">会话名称</Label>
-                <Input
-                  id="session-name"
-                  name="name"
-                  autoFocus
-                  value={renameValue}
-                  onChange={(event) => setRenameValue(event.target.value)}
-                  maxLength={80}
-                />
-              </Field>
-            </FieldGroup>
-            <DialogFooter>
-              <DialogClose render={<Button variant="outline">取消</Button>} />
-              <Button type="submit" disabled={!renameValue.trim() || busy}>
-                {busy ? "保存中..." : "保存"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={archiveTarget !== null}
-        onOpenChange={(value) => !value && setArchiveTarget(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>归档会话？</DialogTitle>
-            <DialogDescription>
-              {archiveTarget?.status === "running"
-                ? "会话仍在运行。归档会先停止当前任务，再将会话移入已归档列表。"
-                : "归档后会话将从项目和最近列表移除，但历史消息仍会保留。"}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline">取消</Button>} />
-            <Button variant="destructive" disabled={busy} onClick={confirmArchive}>
-              {busy ? "归档中..." : "归档"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={deleteTarget !== null}
-        onOpenChange={(value) => !value && setDeleteTarget(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>永久删除会话？</DialogTitle>
-            <DialogDescription>
-              删除后会话、消息、运行记录和权限记录都会从本机存储中移除，无法从已归档列表恢复。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline">取消</Button>} />
-            <Button variant="destructive" disabled={busy} onClick={confirmDelete}>
-              {busy ? "删除中..." : "永久删除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {sessionActionsDialogs.dialogs}
 
       <Dialog
         open={renameProjectTarget !== null}
@@ -521,8 +409,6 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
 type SessionActions = {
   onOpen: (session: DesktopSessionRecord) => void
   onRename: (session: DesktopSessionRecord) => void
-  onTogglePin: (session: DesktopSessionRecord) => void
-  onStartFrom: (session: DesktopSessionRecord) => void
   onArchive: (session: DesktopSessionRecord) => void
   onDelete: (session: DesktopSessionRecord) => void
 }
@@ -554,92 +440,62 @@ function SessionRow({
   const title = sessionTitle(session)
 
   return (
-    <DropdownMenu>
-      <div
-        className="group/session relative flex min-w-0 items-center"
-        onContextMenu={(event) => {
-          event.preventDefault()
-          triggerRef.current?.click()
-        }}
+    <div
+      className="group/session relative flex min-w-0 items-center"
+      onContextMenu={(event) => {
+        event.preventDefault()
+        triggerRef.current?.click()
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => actions.onOpen(session)}
+        className={cn(
+          "h-7.5 min-w-0 flex-1 truncate rounded-md pr-8 text-left text-[12.5px] leading-7.5 font-normal transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          nested ? "pl-8" : "pl-2.5",
+          active
+            ? "bg-sidebar-selected text-sidebar-foreground"
+            : "text-sidebar-foreground/82 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        )}
       >
-        <button
-          type="button"
-          onClick={() => actions.onOpen(session)}
-          className={cn(
-            "h-7.5 min-w-0 flex-1 truncate rounded-md pr-8 text-left text-[12.5px] leading-7.5 font-normal transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            nested ? "pl-8" : "pl-2.5",
-            active
-              ? "bg-sidebar-selected text-sidebar-foreground"
-              : "text-sidebar-foreground/82 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          )}
-        >
-          {pinned ? (
-            <Pin className="mr-1 inline size-3 -translate-y-px text-sidebar-muted" />
-          ) : null}
-          {title}
-        </button>
-        <DropdownMenuTrigger
-          ref={triggerRef}
-          aria-label={running ? `${title} 正在运行，打开更多操作` : `管理会话 ${title}`}
-          title={running ? "会话运行中" : "更多操作"}
-          className={cn(
-            "absolute right-1 grid size-6 place-items-center rounded text-sidebar-muted transition-opacity outline-none hover:bg-sidebar-accent focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-accent data-popup-open:opacity-100 [&_svg]:size-3.5",
-            running ? "opacity-100" : "opacity-0 group-hover/session:opacity-100"
-          )}
-        >
-          {running ? (
-            <>
-              <Spinner
-                aria-hidden="true"
-                className="size-3.5 group-hover/session:hidden in-data-popup-open:hidden"
-              />
-              <MoreHorizontal className="hidden group-hover/session:inline in-data-popup-open:inline" />
-            </>
-          ) : (
-            <MoreHorizontal />
-          )}
-        </DropdownMenuTrigger>
-      </div>
-      <DropdownMenuContent align="end" className="max-w-64">
-        {!archived ? (
-          <>
-            <DropdownMenuItem onClick={() => actions.onRename(session)}>
-              <Pencil />
-              重命名
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => actions.onTogglePin(session)}>
-              {pinned ? <PinOff /> : <Pin />}
-              {pinned ? "取消置顶" : "置顶"}
-            </DropdownMenuItem>
-          </>
+        {pinned ? (
+          <Pin className="mr-1 inline size-3 -translate-y-px text-sidebar-muted" />
         ) : null}
-        <DropdownMenuItem onClick={() => actions.onStartFrom(session)}>
-          <GitBranchPlus />
-          基于此配置开始新会话
-        </DropdownMenuItem>
-        {!archived ? (
+        {title}
+      </button>
+      <SessionMoreMenu
+        session={session}
+        archived={archived}
+        align="end"
+        triggerRef={triggerRef}
+        trigger={
+          <button
+            type="button"
+            aria-label={running ? `${title} 正在运行，打开更多操作` : `管理会话 ${title}`}
+            title={running ? "会话运行中" : "更多操作"}
+            className={cn(
+              "absolute right-1 grid size-6 place-items-center rounded text-sidebar-muted transition-opacity outline-none hover:bg-sidebar-accent focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-accent data-popup-open:opacity-100 [&_svg]:size-3.5",
+              running ? "opacity-100" : "opacity-0 group-hover/session:opacity-100"
+            )}
+          />
+        }
+        onRename={() => actions.onRename(session)}
+        onArchive={() => actions.onArchive(session)}
+        onDelete={() => actions.onDelete(session)}
+      >
+        {running ? (
           <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={() => actions.onArchive(session)}>
-              <Archive />
-              归档
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={() => actions.onDelete(session)}>
-              <Trash2 />
-              删除
-            </DropdownMenuItem>
+            <Spinner
+              aria-hidden="true"
+              className="size-3.5 group-hover/session:hidden in-data-popup-open:hidden"
+            />
+            <MoreHorizontal className="hidden group-hover/session:inline in-data-popup-open:inline" />
           </>
         ) : (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={() => actions.onDelete(session)}>
-              <Trash2 />
-              删除
-            </DropdownMenuItem>
-          </>
+          <MoreHorizontal />
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </SessionMoreMenu>
+    </div>
   )
 }
 
@@ -698,15 +554,15 @@ function ProjectGroup({
             ref={triggerRef}
             aria-label={`管理项目 ${project.name}`}
             title="更多操作"
-            className="absolute right-1 grid size-6 place-items-center rounded text-sidebar-muted opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-accent data-[popup-open]:opacity-100 [&_svg]:size-3.5"
+            className="absolute right-1 grid size-6 place-items-center rounded text-sidebar-muted opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-accent data-popup-open:opacity-100 [&_svg]:size-3.5"
           >
             <MoreHorizontal />
           </DropdownMenuTrigger>
         </div>
-        <DropdownMenuContent align="start">
+        <DropdownMenuContent align="start" className="min-w-56">
           <DropdownMenuItem onClick={() => projectActions.onTogglePin(project)}>
             {project.pinnedAt ? <PinOff /> : <Pin />}
-            {project.pinnedAt ? "取消置顶" : "置顶项目"}
+            {project.pinnedAt ? "取消置顶项目" : "置顶项目"}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() =>

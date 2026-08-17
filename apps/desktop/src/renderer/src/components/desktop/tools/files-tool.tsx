@@ -18,7 +18,7 @@ import {
 import type * as React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { prepareFileTreeInput, type ContextMenuItem } from "@pierre/trees"
-import { FileTree, useFileTree } from "@pierre/trees/react"
+import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
 import { Group, Panel, usePanelRef } from "react-resizable-panels"
 
 import { OpenWithSubmenu } from "@renderer/components/desktop/open-with"
@@ -31,6 +31,7 @@ import {
 } from "@renderer/components/desktop/tools/file-viewer"
 import { isMarkdownPath } from "@renderer/components/desktop/tools/file-icons"
 import { Button } from "@renderer/components/ui/button"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@renderer/components/ui/input-group"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
@@ -528,11 +529,12 @@ function ProjectFileTree({
         font-weight: 520;
       }
 
-      [data-file-tree-search-input] {
-        box-shadow: none;
+      [data-file-tree-search-container] {
+        display: none;
       }
     `,
   })
+  const search = useFileTreeSearch(model)
 
   useEffect(() => {
     model.resetPaths({ preparedInput, initialExpandedPaths: [] })
@@ -569,22 +571,47 @@ function ProjectFileTree({
   }
 
   return (
-    <FileTree
-      model={model}
-      renderContextMenu={(item, context) => (
-        <FileTreeContextMenu
-          item={item}
-          rootPath={rootPath}
-          onClose={context.close}
-          onActionError={onActionError}
-          onAction={(action) => {
-            context.close()
-            void handleContextAction(action, item)
-          }}
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-border/45 px-2 py-2">
+        <InputGroup className="h-8 bg-transparent shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0">
+          <InputGroupAddon align="inline-start">
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
+            value={search.value}
+            placeholder="搜索文件"
+            onChange={(event) => {
+              const next = event.target.value
+              search.setValue(next.length > 0 ? next : null)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && search.value) {
+                event.preventDefault()
+                search.close()
+              }
+            }}
+          />
+        </InputGroup>
+      </div>
+      <div className="min-h-0 flex-1">
+        <FileTree
+          model={model}
+          renderContextMenu={(item, context) => (
+            <FileTreeContextMenu
+              item={item}
+              rootPath={rootPath}
+              onClose={context.close}
+              onActionError={onActionError}
+              onAction={(action) => {
+                context.close()
+                void handleContextAction(action, item)
+              }}
+            />
+          )}
+          style={{ height: "100%" }}
         />
-      )}
-      style={{ height: "100%" }}
-    />
+      </div>
+    </div>
   )
 }
 
