@@ -25,6 +25,25 @@ DeepSeek Harness 最值得借鉴的是能力边界，而不是某段具体实现
 
 OpenHarness-ts 当前已经有相当多实现，尤其是 `@openharness/sandbox`。后续不需要推倒重来，更适合在现有包内逐步补出这些边界。
 
+## 落地进度
+
+### 2026-08-17：第一阶段 Web seam 已完成
+
+本次保持 `WebSearch` 和 `WebFetch` 的工具名称、输入 schema、默认 DuckDuckGo endpoint、超时和正常结果文本不变，完成了以下内部拆分：
+
+- `packages/tools/src/web/types.ts`：定义 provider、request、result、availability 和结构化错误契约。
+- `packages/tools/src/web/runtime.ts`：选择并检查 provider，统一处理未知错误、取消、HTML 转文本和输出截断。
+- `packages/tools/src/web/providers/duckduckgo-search.ts`：负责 DuckDuckGo HTML 请求、结果解析和跳转 URL 还原。
+- `packages/tools/src/web/providers/http-fetch.ts`：负责 HTTP 请求，分开返回状态、响应头和响应体。
+- `packages/tools/src/web/search.ts`、`fetch.ts`：只负责工具输入、调用 runtime 和面向模型的结果文本。
+- 默认 runtime 仍只装配 DuckDuckGo search provider 和普通 HTTP fetch provider，没有增加配置 UI 或新的外部服务。
+
+错误现在可以区分：provider 不可用、输入 URL 不合法、网络失败、HTTP 非 2xx、响应读取失败、搜索结果解析失败和请求取消。`available()` 只检查本地配置，不发网络请求。
+
+验证结果：Web provider/runtime/tool 共 13 个聚焦测试通过；`packages/tools` 中可正常收集的 122 个测试全部通过。完整 tools 测试和包级类型检查仍有 3 个测试套件被仓库现有的 `drizzle-orm/better-sqlite3` 依赖缺失阻断，与本次 Web 改动无关；Web 新增实现和测试已通过单独的严格类型检查。
+
+下一步仍按本文顺序进入第二阶段 Shell executor。Web policy，特别是内网地址阻断、redirect 和响应体大小限制，尚未落地，不能因为 provider 边界已经拆出就视为安全策略已经完成。
+
 ## 本地现状
 
 当前相关实现主要在：

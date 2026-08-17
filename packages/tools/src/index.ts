@@ -13,7 +13,28 @@ export {
   type FileChangePreview,
 } from "./file/index.js";
 export { grepTool } from "./search/index.js";
-export { webFetchTool, webSearchTool } from "./web/index.js";
+export {
+  createWebFetchTool,
+  createWebSearchTool,
+  defaultWebRuntime,
+  DuckDuckGoSearchProvider,
+  HttpFetchProvider,
+  WebProviderError,
+  WebRuntime,
+  webFetchTool,
+  webSearchTool,
+  type WebFetchProvider,
+  type WebFetchProviderResult,
+  type WebFetchRequest,
+  type WebFetchResult,
+  type WebProviderAvailability,
+  type WebProviderErrorCode,
+  type WebRuntimeLike,
+  type WebSearchProvider,
+  type WebSearchRequest,
+  type WebSearchResult,
+  type WebSearchSource,
+} from "./web/index.js";
 export { taskUpdateTool } from "./task/index.js";
 export {
   createAgentWorkflowRunner,
