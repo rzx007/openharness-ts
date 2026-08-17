@@ -63,6 +63,29 @@ executor 只保留最多 `maxOutputChars + 1` 个字符，而不是先把无限�
 
 下一步进入第三阶段 Sandbox policy service。该阶段需要统一 shell、file、MCP、cron 和 child-agent 对 sandbox settings 的解释，并在跨能力结果中统一 runner failure、policy denial 和 command failure；本次只完成了 Shell 一侧的结果分类，没有提前修改其它能力。
 
+### 2026-08-17：第三阶段 Sandbox policy service 已完成
+
+本次在 `@openharness/sandbox` 内新增每次调用解析的 `SandboxPolicy`。它不是全局可变配置，而是由调用入口携带的 `cwd + workspaceRoot + sessionId + settings/config` 生成的策略快照。
+
+主要落地点：
+
+- `packages/sandbox/src/policy.ts`：新增 `DefaultSandboxPolicyService`、`resolveSandboxPolicy`、`SandboxPolicyDeniedError` 和失败分类函数。
+- `packages/sandbox/src/types.ts`：新增 policy scope、mode、enforcement、filesystem/network 快照、结构化 denial 和 `runner | policy | command` 失败类型。
+- `packages/sandbox/src/shell.ts`：`createProcess` / `createShellProcess` 每次调用解析或接收显式 policy。MCP stdio、cron、background task 和 agent task 都经过这两个中央入口。
+- `packages/sandbox/src/lifecycle.ts`：runtime 启动也消费同一 policy，不再单独解释 `failIfUnavailable` 和 backend。
+- `packages/sandbox/src/path-validator.ts`：路径结果增加 `decision`、`failureKind: "policy"` 和 `filesystem_denied`；显式空 `allowWrite` 现在能真实表达 read-only。
+- `packages/tools/src/file/*`：文件路径检查和 host/Docker operations 选择改为消费 policy。
+- `packages/tools/src/shell/*`：resolved shell spec 携带 policy，启动阶段能区分 runner failure 和 policy denial。
+- `packages/mcp`、`packages/services/src/cron`、`packages/services/src/tasks`：增加可选显式 policy，并沿调用链传到中央 process factory；agent task 会继续把 policy 转交给实际子进程。
+
+当前 policy mode 为 `off | read-only | workspace-write`；enforcement 为 `off | best-effort | required`。这两个字段分别回答“文件能力允许做到什么”和“runner 不可用时是否允许降级”，避免把文件权限和运行后端可用性混成一个布尔值。
+
+兼容性方面，原有 `enabled=false`、best-effort host fallback、strict Docker fail-closed、active Docker session 路由和工具返回文本都保持不变。调用方不传显式 policy 时仍从当前 settings 解析；传入时以该次调用的 policy 为准。
+
+验证结果：sandbox 60 个测试、MCP 29 个测试、Shell/File 24 个测试通过；cron、shell task 和 agent task 的显式 policy 定向测试通过。sandbox、MCP、tools 改动范围和 services 相关文件均通过本地严格 TypeScript 检查。全仓 Turbo 类型检查被当前 pnpm 启动器访问 registry 做签名校验失败所阻断，不是 TypeScript 错误。
+
+仍未落地的部分：network allowed/denied domains 还没有真实拦截；HTTP/Web 的内网地址策略属于 Web policy；不同能力面向用户的错误展示还可以继续统一。下一阶段按本文进入 Terminal service 和 jobs 对齐。
+
 ## 本地现状
 
 当前相关实现主要在：

@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig, Settings, ToolDefinition } from "@openharness/core";
+import type { SandboxPolicy } from "@openharness/sandbox";
 import { SandboxStdioClientTransport } from "./sandbox-stdio-transport.js";
 
 export type { McpServerConfig };
@@ -76,7 +77,12 @@ export class McpClientManager {
   private clients = new Map<string, Client>();
   private transports = new Map<string, Transport>();
 
-  constructor(private readonly options: { cwd?: string; settings?: Settings; sessionId?: string } = {}) {}
+  constructor(private readonly options: {
+    cwd?: string;
+    settings?: Settings;
+    sessionId?: string;
+    policy?: SandboxPolicy;
+  } = {}) {}
 
   async connect(name: string, config: McpServerConfig): Promise<McpConnection> {
     const kind = resolveTransportKind(config);
@@ -179,6 +185,7 @@ export class McpClientManager {
           cwd: config.cwd ?? this.options.cwd,
           settings: this.options.settings,
           sessionId: this.options.sessionId,
+          policy: this.options.policy,
         });
     }
   }

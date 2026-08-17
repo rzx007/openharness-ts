@@ -3,7 +3,7 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getTaskManager, resetTaskManager, TaskManager } from "../index.js";
-import { setActiveSandboxSession } from "@openharness/sandbox";
+import { resolveSandboxPolicy, setActiveSandboxSession } from "@openharness/sandbox";
 
 const NODE = process.execPath;
 
@@ -243,6 +243,53 @@ describe("TaskManager real execution", () => {
       metadata: { status_note: "Docker sandbox session is not running" },
     });
     expect(mgr.readTaskOutput(task!.id)).toContain("[spawn error]");
+  });
+
+  it("uses an explicit task policy instead of re-resolving strict settings", async () => {
+    const mgr = makeManager();
+    const policy = resolveSandboxPolicy({ cwd: process.cwd(), config: { enabled: false } });
+    const task = await mgr.createShellTask({
+      argv: [NODE, "-e", "process.stdout.write('task-policy-ok')"],
+      description: "explicit policy",
+      cwd: process.cwd(),
+      policy,
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    });
+
+    await waitFor(() => mgr.getTask(task.id)?.status === "completed");
+    expect(mgr.readTaskOutput(task.id)).toContain("task-policy-ok");
+  });
+
+  it("forwards an explicit policy through agent task creation", async () => {
+    const mgr = makeManager();
+    const policy = resolveSandboxPolicy({ cwd: process.cwd(), config: { enabled: false } });
+    const task = await mgr.createAgentTask({
+      prompt: "run",
+      description: "agent explicit policy",
+      cwd: process.cwd(),
+      argv: [
+        NODE,
+        "-e",
+        "process.stdin.once('data',()=>{process.stdout.write('agent-policy-ok');process.exit(0)})",
+      ],
+      policy,
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    });
+
+    await waitFor(() => mgr.getTask(task.id)?.status === "completed");
+    expect(mgr.readTaskOutput(task.id)).toContain("agent-policy-ok");
   });
 
   it("runs a shell task and captures output to the log file", async () => {

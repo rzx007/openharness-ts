@@ -3,7 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import process from "node:process";
 import { PassThrough, type Stream } from "node:stream";
 import type { Settings } from "@openharness/core";
-import { createProcess } from "@openharness/sandbox";
+import { createProcess, type SandboxPolicy } from "@openharness/sandbox";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -15,6 +15,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 export interface SandboxStdioClientTransportOptions extends StdioServerParameters {
   settings?: Settings;
   sessionId?: string;
+  policy?: SandboxPolicy;
 }
 
 /**
@@ -52,6 +53,7 @@ export class SandboxStdioClientTransport implements Transport {
         cwd,
         settings: this.options.settings,
         sessionId: this.options.sessionId,
+        policy: this.options.policy,
         env,
         stdio: ["pipe", "pipe", stderr as IOType],
         detached: false,

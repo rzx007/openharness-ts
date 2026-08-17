@@ -1,4 +1,5 @@
 import type { Settings } from "@openharness/core";
+import type { SandboxPolicy } from "@openharness/sandbox";
 
 export type TaskType = "shell" | "agent" | "dream";
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "stopped";
@@ -43,6 +44,7 @@ export interface CreateShellTaskOptions {
   type?: TaskType;
   env?: Record<string, string>;
   settings?: Settings;
+  policy?: SandboxPolicy;
 }
 
 export interface CreateAgentTaskOptions {
@@ -57,6 +59,7 @@ export interface CreateAgentTaskOptions {
   argv?: string[];
   env?: Record<string, string>;
   settings?: Settings;
+  policy?: SandboxPolicy;
 }
 
 export interface RegisterSessionTaskOptions {

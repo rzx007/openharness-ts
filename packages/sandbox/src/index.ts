@@ -7,9 +7,18 @@ export type {
   ResolvedSandboxConfig,
   SandboxAvailability,
   SandboxBackend,
+  SandboxFailureKind,
   SandboxNetworkMode,
   SandboxOperation,
   SandboxPathValidationResult,
+  SandboxPolicy,
+  SandboxPolicyDenial,
+  SandboxPolicyEnforcement,
+  SandboxPolicyInput,
+  SandboxPolicyMode,
+  SandboxPolicyOperation,
+  SandboxPolicyScope,
+  SandboxPolicyService,
   SandboxPlatform,
   SandboxRuntimeEvent,
   SandboxRuntimeReporter,
@@ -20,6 +29,13 @@ export type {
   ValidateSandboxPathOptions,
 } from "./types.js";
 export { normalizeSandboxConfig } from "./config.js";
+export {
+  classifySandboxFailure,
+  defaultSandboxPolicyService,
+  DefaultSandboxPolicyService,
+  resolveSandboxPolicy,
+  SandboxPolicyDeniedError,
+} from "./policy.js";
 export {
   detectSandboxPlatform,
   supportsDockerSandbox,

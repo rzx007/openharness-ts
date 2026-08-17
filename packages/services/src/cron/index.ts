@@ -1,5 +1,5 @@
 import type { Settings } from "@openharness/core";
-import { createShellProcess } from "@openharness/sandbox";
+import { createShellProcess, type SandboxPolicy } from "@openharness/sandbox";
 
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 const OUTPUT_MAX_CHARS = 10_000;
@@ -32,6 +32,7 @@ export interface CronTriggerOptions {
   cwd?: string;
   sessionId?: string;
   settings?: Settings;
+  policy?: SandboxPolicy;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -233,6 +234,7 @@ export async function executeCronJob(
         cwd: job.cwd ?? options.cwd ?? process.cwd(),
         sessionId: options.sessionId,
         settings: options.settings,
+        policy: options.policy,
         timeoutMs: options.timeoutMs ?? COMMAND_TIMEOUT_MS,
         signal: options.signal,
       });
@@ -264,7 +266,7 @@ export async function executeCronJob(
 async function runSandboxedCommand(
   command: string,
   options: Required<Pick<CronTriggerOptions, "cwd" | "timeoutMs">> &
-    Pick<CronTriggerOptions, "sessionId" | "settings" | "signal">,
+    Pick<CronTriggerOptions, "sessionId" | "settings" | "policy" | "signal">,
 ): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean; interrupted: boolean }> {
   const controller = new AbortController();
   let timedOut = false;
@@ -280,6 +282,7 @@ async function runSandboxedCommand(
       cwd: options.cwd,
       sessionId: options.sessionId,
       settings: options.settings,
+      policy: options.policy,
       signal: controller.signal,
       hostShell: "system",
       stdio: ["ignore", "pipe", "pipe"],

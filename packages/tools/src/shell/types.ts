@@ -1,5 +1,5 @@
 import type { Settings } from "@openharness/core";
-import type { HostShellLauncher, SandboxBackend } from "@openharness/sandbox";
+import type { HostShellLauncher, SandboxBackend, SandboxPolicy } from "@openharness/sandbox";
 
 export interface ShellExecRequest {
   command: string;
@@ -13,6 +13,7 @@ export interface ShellExecContext {
   cwd: string;
   sessionId?: string;
   settings?: Settings;
+  policy?: SandboxPolicy;
 }
 
 export type ShellRunnerMode =
@@ -35,12 +36,13 @@ export interface ShellExecSpec {
   env?: Record<string, string>;
   sessionId?: string;
   settings?: Settings;
+  policy: SandboxPolicy;
   hostShell: HostShellLauncher;
   runner: ShellRunnerSpec;
 }
 
 export type ShellRunStatus = "completed" | "failed" | "timed_out" | "interrupted";
-export type ShellFailureKind = "command" | "runner" | "timeout" | "interrupted";
+export type ShellFailureKind = "command" | "runner" | "policy" | "timeout" | "interrupted";
 
 export interface ShellRunnerError {
   name: string;

@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 import type { Settings } from "@openharness/core";
-import type { HostShellLauncher, SandboxSession } from "@openharness/sandbox";
+import {
+  SandboxPolicyDeniedError,
+  type HostShellLauncher,
+  type SandboxSession,
+} from "@openharness/sandbox";
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SHELL_TIMEOUT_MS,
@@ -119,6 +123,25 @@ describe("DefaultShellExecutor.run", () => {
       exitCode: null,
       output: "runner unavailable",
       runnerError: { name: "Error", message: "runner unavailable" },
+    });
+  });
+
+  it("keeps policy denial separate from runner startup failure", async () => {
+    const executor = new DefaultShellExecutor({
+      resolveHostShell: () => posixShell,
+      createProcess: async () => {
+        throw new SandboxPolicyDeniedError("execution_denied", "execute", "execution denied");
+      },
+    });
+    const spec = await executor.resolve({ command: "ignored" }, { cwd: process.cwd() });
+
+    const result = await executor.run(spec);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failureKind: "policy",
+      exitCode: null,
+      output: "execution denied",
     });
   });
 

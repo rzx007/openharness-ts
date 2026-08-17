@@ -1,4 +1,4 @@
-import type { HostShellLauncher } from "@openharness/sandbox";
+import { resolveSandboxPolicy, type HostShellLauncher } from "@openharness/sandbox";
 import { describe, expect, it, vi } from "vitest";
 import { createBashTool } from "../bash.js";
 import type {
@@ -144,6 +144,7 @@ function spec(overrides: Partial<ShellExecSpec> = {}): ShellExecSpec {
     cwd: process.cwd(),
     timeoutMs: 120_000,
     maxOutputChars: 12_000,
+    policy: resolveSandboxPolicy({ cwd: process.cwd(), config: { enabled: false } }),
     hostShell: posixShell,
     runner: { mode: "host", fallbackToHost: false },
     ...overrides,

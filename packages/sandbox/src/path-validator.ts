@@ -1,6 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
+  ResolvedSandboxConfig,
   SandboxOperation,
   SandboxPathValidationResult,
   ValidateSandboxPathOptions,
@@ -11,12 +12,17 @@ export async function validateSandboxPath(
   targetPath: string,
   options: ValidateSandboxPathOptions,
 ): Promise<SandboxPathValidationResult> {
-  const config = normalizeSandboxConfig(options.config);
+  const config = options.policy?.config ?? normalizeSandboxConfig(options.config);
   const operation = options.operation;
-  const sandboxRoot = await canonicalizeExistingPath(resolve(options.sandboxRoot));
-  const resolvedPath = resolve(options.sandboxRoot, targetPath);
+  const configuredRoot = options.policy?.scope.workspaceRoot ?? options.sandboxRoot;
+  const sandboxRoot = await canonicalizeExistingPath(resolve(configuredRoot));
+  const resolvedPath = resolve(configuredRoot, targetPath);
   const canonicalPath = await canonicalizePossiblyMissingPath(resolvedPath);
-  const roots = await allowedRootsForOperation(options, operation, sandboxRoot);
+  if (options.policy?.mode === "off") {
+    return { allowed: true, decision: "allow", resolvedPath: canonicalPath };
+  }
+
+  const roots = await allowedRootsForOperation(options, operation, sandboxRoot, config);
   const denyPatterns = operation === "read"
     ? config.filesystem.denyRead
     : config.filesystem.denyWrite;
@@ -24,31 +30,31 @@ export async function validateSandboxPath(
   for (const pattern of denyPatterns) {
     const deniedRoot = await canonicalizeRulePath(pattern, sandboxRoot);
     if (isPathInside(canonicalPath, deniedRoot)) {
-      return {
-        allowed: false,
-        resolvedPath: canonicalPath,
-        reason: `path ${canonicalPath} is denied by sandbox rule ${pattern}`,
-      };
+      return deniedPathResult(
+        canonicalPath,
+        operation,
+        `path ${canonicalPath} is denied by sandbox rule ${pattern}`,
+      );
     }
   }
 
   if (!roots.some((root) => isPathInside(canonicalPath, root))) {
-    return {
-      allowed: false,
-      resolvedPath: canonicalPath,
-      reason: `path ${canonicalPath} is outside the sandbox boundary (${sandboxRoot})`,
-    };
+    return deniedPathResult(
+      canonicalPath,
+      operation,
+      `path ${canonicalPath} is outside the sandbox boundary (${sandboxRoot})`,
+    );
   }
 
-  return { allowed: true, resolvedPath: canonicalPath };
+  return { allowed: true, decision: "allow", resolvedPath: canonicalPath };
 }
 
 async function allowedRootsForOperation(
   options: ValidateSandboxPathOptions,
   operation: SandboxOperation,
   sandboxRoot: string,
+  config: ResolvedSandboxConfig,
 ): Promise<string[]> {
-  const config = normalizeSandboxConfig(options.config);
   const allowRules = operation === "read"
     ? config.filesystem.allowRead
     : config.filesystem.allowWrite;
@@ -57,8 +63,27 @@ async function allowedRootsForOperation(
     ...(options.extraAllowedRoots ?? []),
   ];
   const roots = [...allowRules, ...extraRules];
-  const normalized = roots.length > 0 ? roots : ["."];
-  return Promise.all(normalized.map((rule) => canonicalizeRulePath(rule, sandboxRoot)));
+  return Promise.all(roots.map((rule) => canonicalizeRulePath(rule, sandboxRoot)));
+}
+
+function deniedPathResult(
+  resolvedPath: string,
+  operation: SandboxOperation,
+  reason: string,
+): SandboxPathValidationResult {
+  return {
+    allowed: false,
+    decision: "deny",
+    resolvedPath,
+    reason,
+    failureKind: "policy",
+    denial: {
+      kind: "policy",
+      code: "filesystem_denied",
+      operation,
+      reason,
+    },
+  };
 }
 
 async function canonicalizeRulePath(rule: string, sandboxRoot: string): Promise<string> {

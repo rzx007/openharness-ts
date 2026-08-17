@@ -14,6 +14,8 @@ import {
 import type { SandboxRuntimeReporter, ShellSpawnOptions } from "./types.js";
 
 export class SandboxUnavailableError extends Error {
+  readonly failureKind = "runner" as const;
+
   constructor(message: string) {
     super(message);
     this.name = "SandboxUnavailableError";

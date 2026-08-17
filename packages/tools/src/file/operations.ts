@@ -7,7 +7,7 @@ import {
   createProcess,
   getActiveSandboxSession,
   hostPathToContainerPath,
-  normalizeSandboxConfig,
+  resolveSandboxPolicy,
   SandboxUnavailableError,
 } from "@openharness/sandbox";
 
@@ -39,13 +39,16 @@ export interface FileOperations {
 export function fileOperationsFor(context: ToolContext): FileOperations {
   const cwd = context.cwd ?? process.cwd();
   const settings = context.settings;
-  const sandbox = normalizeSandboxConfig(settings?.sandbox);
-  if (sandbox.enabled && sandbox.backend === "docker") {
-    const session = getActiveSandboxSession({ cwd, sessionId: context.sessionId });
+  const policy = resolveSandboxPolicy({ cwd, sessionId: context.sessionId, settings });
+  if (policy.enabled && policy.backend === "docker") {
+    const session = getActiveSandboxSession({
+      cwd: policy.scope.cwd,
+      sessionId: policy.scope.sessionId,
+    });
     if (session?.backend === "docker" && session.active && session.execCommand) {
       return new DockerFileOperations({ cwd, settings, sessionId: context.sessionId, signal: context.abortSignal });
     }
-    if (sandbox.failIfUnavailable) {
+    if (policy.failClosed) {
       throw new SandboxUnavailableError("Docker sandbox session is not running");
     }
   }

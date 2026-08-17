@@ -1,5 +1,27 @@
 import { loadSettings, type Settings } from "@openharness/core";
-import { validateSandboxPath, type SandboxOperation } from "@openharness/sandbox";
+import {
+  resolveSandboxPolicy,
+  validateSandboxPath,
+  type SandboxOperation,
+  type SandboxPathValidationResult,
+} from "@openharness/sandbox";
+
+export async function sandboxPathDecision(
+  filePath: string,
+  cwd: string,
+  operation: SandboxOperation,
+  settingsOverride?: Settings,
+): Promise<SandboxPathValidationResult | undefined> {
+  const settings = settingsOverride ?? await loadSettings();
+  const policy = resolveSandboxPolicy({ cwd, settings });
+  if (!policy.enabled) return undefined;
+
+  return validateSandboxPath(filePath, {
+    sandboxRoot: cwd,
+    operation,
+    policy,
+  });
+}
 
 export async function sandboxPathError(
   filePath: string,
@@ -7,13 +29,7 @@ export async function sandboxPathError(
   operation: SandboxOperation,
   settingsOverride?: Settings,
 ): Promise<string | undefined> {
-  const settings = settingsOverride ?? await loadSettings();
-  if (settings.sandbox?.enabled !== true) return undefined;
-
-  const result = await validateSandboxPath(filePath, {
-    sandboxRoot: cwd,
-    operation,
-    config: settings.sandbox,
-  });
+  const result = await sandboxPathDecision(filePath, cwd, operation, settingsOverride);
+  if (!result) return undefined;
   return result.allowed ? undefined : `Sandbox: ${result.reason}`;
 }

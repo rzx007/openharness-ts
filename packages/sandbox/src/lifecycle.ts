@@ -4,16 +4,22 @@ import {
   getSrtAvailability,
   type AvailabilityDeps,
 } from "./availability.js";
-import { normalizeSandboxConfig } from "./config.js";
 import { DockerSandboxSession, SandboxUnavailableError } from "./docker-backend.js";
+import { resolveSandboxPolicy } from "./policy.js";
 import { setActiveSandboxSession } from "./session.js";
-import type { SandboxRuntimeReporter, SandboxRuntimeStatus } from "./types.js";
+import type {
+  ResolvedSandboxConfig,
+  SandboxPolicy,
+  SandboxRuntimeReporter,
+  SandboxRuntimeStatus,
+} from "./types.js";
 
 export interface SandboxRuntimeOptions {
   settings: Settings;
   cwd: string;
   /** Daemon sessions must pass this; omit for cwd-only callers such as channels. */
   sessionId?: string;
+  policy?: SandboxPolicy;
   deps?: AvailabilityDeps;
   reporter?: SandboxRuntimeReporter;
 }
@@ -27,7 +33,13 @@ export interface StartedSandboxRuntime {
 export async function startSandboxRuntime(
   options: SandboxRuntimeOptions,
 ): Promise<StartedSandboxRuntime> {
-  const sandbox = normalizeSandboxConfig(options.settings.sandbox);
+  const policy = options.policy ?? resolveSandboxPolicy({
+    cwd: options.cwd,
+    sessionId: options.sessionId,
+    settings: options.settings,
+  });
+  const sandbox = policy.config;
+  const runtimeSettings: Settings = { ...options.settings, sandbox };
 
   if (!sandbox.enabled) {
     return inertRuntime({
@@ -47,7 +59,7 @@ export async function startSandboxRuntime(
 
   if (sandbox.backend === "srt") {
     options.reporter?.({ type: "check-availability", backend: "srt" });
-    const availability = getSrtAvailability(options.settings.sandbox, options.deps);
+    const availability = getSrtAvailability(sandbox, options.deps);
     if (!availability.available) {
       if (sandbox.failIfUnavailable) {
         throw new SandboxUnavailableError(availability.reason ?? "srt sandbox is unavailable");
@@ -64,7 +76,7 @@ export async function startSandboxRuntime(
   }
 
   options.reporter?.({ type: "check-availability", backend: "docker" });
-  const availability = getDockerAvailability(options.settings.sandbox, options.deps);
+  const availability = getDockerAvailability(sandbox, options.deps);
   if (!availability.available) {
     if (sandbox.failIfUnavailable) {
       throw new SandboxUnavailableError(availability.reason ?? "Docker sandbox is unavailable");
@@ -81,7 +93,7 @@ export async function startSandboxRuntime(
     options.sessionId?.trim() ||
     `sandbox-${process.pid}-${Date.now().toString(36)}`;
   const session = new DockerSandboxSession({
-    settings: options.settings,
+    settings: runtimeSettings,
     sessionId: dockerSessionId,
     cwd: options.cwd,
     deps: options.deps,
@@ -150,7 +162,7 @@ function inertRuntime(status: SandboxRuntimeStatus): StartedSandboxRuntime {
 function statusFromAvailability(
   state: SandboxRuntimeStatus["state"],
   availability: ReturnType<typeof getSrtAvailability>,
-  sandbox?: ReturnType<typeof normalizeSandboxConfig>,
+  sandbox?: ResolvedSandboxConfig,
   details?: {
     containerName?: string;
     containerCwd?: string;

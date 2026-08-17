@@ -3,6 +3,7 @@ import { McpClientManager, resolveTransportKind } from "./index.js";
 import type { McpConnection, McpToolInfo, McpResourceInfo } from "./index.js";
 import { SandboxStdioClientTransport } from "./sandbox-stdio-transport.js";
 import { createProcess } from "@openharness/sandbox";
+import type { SandboxPolicy } from "@openharness/sandbox";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 
@@ -260,6 +261,7 @@ describe("McpClientManager", () => {
 
   it("sandbox stdio transport starts MCP servers through createProcess", async () => {
     const child = makeChildProcess();
+    const policy = { test: "policy" } as unknown as SandboxPolicy;
     vi.mocked(createProcess).mockResolvedValueOnce(child as any);
     const transport = new SandboxStdioClientTransport({
       command: "node",
@@ -274,6 +276,7 @@ describe("McpClientManager", () => {
         sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
       },
       sessionId: "s1",
+      policy,
     });
 
     const started = transport.start();
@@ -287,6 +290,7 @@ describe("McpClientManager", () => {
       env: { PATH: "/usr/bin", TOKEN: "abc" },
       stdio: ["pipe", "pipe", "inherit"],
       detached: false,
+      policy,
     }));
   });
 

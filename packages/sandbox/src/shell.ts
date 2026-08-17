@@ -3,15 +3,17 @@ import { resolve } from "node:path";
 import { loadSettings, type Settings } from "@openharness/core";
 import { getSrtAvailability } from "./availability.js";
 import { SandboxUnavailableError } from "./docker-backend.js";
-import { normalizeSandboxConfig } from "./config.js";
 import { bindProcessAbortSignal } from "./process-control.js";
+import { resolveSandboxPolicy } from "./policy.js";
 import { getActiveSandboxSession } from "./session.js";
 import { wrapCommandForSrt } from "./srt-adapter.js";
+import type { SandboxPolicy } from "./types.js";
 
 export interface CreateShellProcessOptions {
   cwd: string;
   sessionId?: string;
   settings?: Settings;
+  policy?: SandboxPolicy;
   env?: Record<string, string>;
   stdio?: StdioOptions;
   signal?: AbortSignal;
@@ -32,7 +34,12 @@ export async function createProcess(
     projectRoot: options.cwd,
     includeProject: true,
   });
-  return createResolvedProcess(argv, argv, options, settings);
+  const policy = options.policy ?? resolveSandboxPolicy({
+    cwd: options.cwd,
+    sessionId: options.sessionId,
+    settings,
+  });
+  return createResolvedProcess(argv, argv, options, settings, policy);
 }
 
 export type HostShellLauncher =
@@ -52,6 +59,11 @@ export async function createShellProcess(
     projectRoot: options.cwd,
     includeProject: true,
   });
+  const policy = options.policy ?? resolveSandboxPolicy({
+    cwd: options.cwd,
+    sessionId: options.sessionId,
+    settings,
+  });
   const spawnHostOverride = options.hostShell === "system"
     ? () => spawnSystemShell(command, options)
     : undefined;
@@ -60,6 +72,7 @@ export async function createShellProcess(
     resolveContainerShellArgv(command),
     options,
     settings,
+    policy,
     spawnHostOverride,
   );
 }
@@ -74,14 +87,18 @@ async function createResolvedProcess(
   containerArgv: string[],
   options: CreateProcessOptions,
   settings: Settings,
+  policy: SandboxPolicy,
   spawnHostOverride?: () => ChildProcess,
 ): Promise<ChildProcess> {
-  const sandbox = normalizeSandboxConfig(settings.sandbox);
+  const sandbox = policy.config;
   const spawnLocal = () => spawnHostOverride?.() ?? spawnHost(hostArgv, options);
   if (!sandbox.enabled) return spawnLocal();
 
   if (sandbox.backend === "docker") {
-    const session = getActiveSandboxSession({ cwd: options.cwd, sessionId: options.sessionId });
+    const session = getActiveSandboxSession({
+      cwd: policy.scope.cwd,
+      sessionId: policy.scope.sessionId,
+    });
     if (session?.backend === "docker" && session.active && session.execCommand) {
       return session.execCommand(containerArgv, {
         cwd: options.cwd,
@@ -98,7 +115,7 @@ async function createResolvedProcess(
     return spawnLocal();
   }
 
-  const availability = getSrtAvailability(settings.sandbox);
+  const availability = getSrtAvailability(policy.config);
   if (!availability.available) {
     if (sandbox.failIfUnavailable) {
       throw new SandboxUnavailableError(availability.reason ?? "srt sandbox is unavailable");
@@ -106,7 +123,7 @@ async function createResolvedProcess(
     return spawnLocal();
   }
 
-  const wrapped = await wrapCommandForSrt(hostArgv, settings.sandbox);
+  const wrapped = await wrapCommandForSrt(hostArgv, policy.config);
   const child = spawnHost(wrapped.argv, options);
   const cleanup = () => void wrapped.cleanup();
   child.once("close", cleanup);

@@ -8,6 +8,7 @@ import {
   createShellProcess,
   signalProcessTree,
   terminateProcessTree,
+  type SandboxPolicy,
 } from "@openharness/sandbox";
 import type {
   AwaitTaskResult,
@@ -54,6 +55,7 @@ export class TaskManager {
   private idCounter = 0;
   private readonly tasksDir: string;
   private taskSettings = new Map<string, Settings>();
+  private taskPolicies = new Map<string, SandboxPolicy>();
 
   constructor(tasksDir?: string) {
     // Lazily fall back to a temp dir if core paths are unavailable; callers in
@@ -110,6 +112,7 @@ export class TaskManager {
     writeFileSync(outputFile, "");
     this.tasks.set(id, task);
     if (opts.settings) this.taskSettings.set(id, opts.settings);
+    if (opts.policy) this.taskPolicies.set(id, opts.policy);
     this.notifyTaskEvent(task, "created");
     try {
       await this.startProcess(id);
@@ -199,6 +202,7 @@ export class TaskManager {
       type: opts.type ?? "agent",
       env: opts.env,
       settings: opts.settings,
+      policy: opts.policy,
     });
     task.prompt = opts.prompt;
     // Forward the prompt to the freshly spawned agent over stdin.
@@ -561,6 +565,7 @@ export class TaskManager {
         cwd: task.cwd,
         sessionId: task.sessionId,
         settings: this.taskSettings.get(taskId),
+        policy: this.taskPolicies.get(taskId),
         env: task.env,
         detached,
         stdio: ["pipe", "pipe", "pipe"],
@@ -570,6 +575,7 @@ export class TaskManager {
         cwd: task.cwd,
         sessionId: task.sessionId,
         settings: this.taskSettings.get(taskId),
+        policy: this.taskPolicies.get(taskId),
         env: task.env,
         detached,
         hostShell: "system",

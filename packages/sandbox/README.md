@@ -16,6 +16,26 @@ OpenHarness 的 sandbox runtime 辅助层。
 - MCP stdio server 通过 `createProcess` 启动，和普通 Agent 工作负载走同一套 sandbox 规则。
 - `SandboxAdapter` 是兼容旧接口的门面，底层走统一 runtime 路径。
 
+## 每次调用的 Sandbox Policy
+
+`SandboxPolicy` 是一次调用实际使用的沙箱策略快照。它由 `resolveSandboxPolicy({ cwd, sessionId, settings })` 生成，包含：
+
+- scope：本次调用的 cwd、workspace root 和可选 sessionId。
+- mode：`off`、`read-only` 或 `workspace-write`。
+- enforcement：关闭、允许降级到宿主机，或者 sandbox 不可用时必须失败。
+- backend、filesystem、network 和 fail-closed 状态。
+
+重要流程：
+
+1. shell、argv process、MCP stdio、cron 和 background task 从各自入口把 `settings + cwd + sessionId` 传给 `createShellProcess` / `createProcess`。
+2. 中央 process factory 为这一次调用解析 policy；调用方也可以显式传入已经解析好的 `policy`，不会从 provider 的全局状态猜测。
+3. 文件工具用同一个 policy 做路径判断，再选择 host 或 active Docker file operations。
+4. 运行结果区分 command failure、runner failure 和 policy denial。路径拒绝会返回 `failureKind: "policy"` 和 `filesystem_denied`；sandbox runtime 不可用属于 runner failure。
+
+`failIfUnavailable=false` 会解析成 best-effort，现有行为仍允许 sandbox 不可用时降级到宿主机；`failIfUnavailable=true` 会解析成 required，并保持 fail-closed。显式 `filesystem.allowWrite=[]` 会解析成 read-only，写入路径全部被拒绝。
+
+policy 目前统一了配置解释和失败形状，但没有把尚未实现的能力伪装成已实现：域名 allow/deny 仍未真实拦截，网络降级状态仍由 runtime availability 报告。
+
 已知缺口与后续：
 
 - Docker/SRT E2E 仍按环境可选；Docker daemon 不可用时会跳过。Docker 默认 E2E、文件工具 E2E、MCP stdio E2E 已有真实 Docker 覆盖，CI 固定运行环境还待接线。

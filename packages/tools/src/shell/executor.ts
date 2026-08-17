@@ -1,14 +1,15 @@
 import type { ChildProcess } from "node:child_process";
 import {
+  classifySandboxFailure,
   createShellProcess,
   getActiveSandboxSession,
-  normalizeSandboxConfig,
+  resolveSandboxPolicy,
   resolveHostShellLauncher,
   SandboxUnavailableError,
   signalProcessTree,
   type CreateShellProcessOptions,
   type HostShellLauncher,
-  type ResolvedSandboxConfig,
+  type SandboxPolicy,
   type SandboxSession,
 } from "@openharness/sandbox";
 import { decodeShellChunk, DEFAULT_MAX_OUTPUT_CHARS } from "./output.js";
@@ -52,9 +53,13 @@ export class DefaultShellExecutor implements ShellExecutor {
 
   async resolve(request: ShellExecRequest, context: ShellExecContext): Promise<ShellExecSpec> {
     const cwd = request.workdir ?? context.cwd;
-    const sandbox = normalizeSandboxConfig(context.settings?.sandbox);
-    const activeSession = sandbox.enabled && sandbox.backend === "docker"
-      ? this.getActiveSession({ cwd, sessionId: context.sessionId })
+    const policy = context.policy ?? resolveSandboxPolicy({
+      cwd,
+      sessionId: context.sessionId,
+      settings: context.settings,
+    });
+    const activeSession = policy.enabled && policy.backend === "docker"
+      ? this.getActiveSession({ cwd: policy.scope.cwd, sessionId: policy.scope.sessionId })
       : null;
 
     return {
@@ -65,8 +70,9 @@ export class DefaultShellExecutor implements ShellExecutor {
       env: request.env,
       sessionId: context.sessionId,
       settings: context.settings,
+      policy,
       hostShell: this.resolveHostShell(),
-      runner: resolveRunner(sandbox, activeSession),
+      runner: resolveRunner(policy, activeSession),
     };
   }
 
@@ -79,6 +85,7 @@ export class DefaultShellExecutor implements ShellExecutor {
       let timedOut = false;
       let interrupted = false;
       let runnerError: ShellRunnerError | undefined;
+      let executionFailureKind: "runner" | "policy" = "runner";
       let timer: NodeJS.Timeout | undefined;
       let graceTimer: NodeJS.Timeout | undefined;
 
@@ -104,6 +111,7 @@ export class DefaultShellExecutor implements ShellExecutor {
           timedOut,
           interrupted,
           runnerError,
+          executionFailureKind,
         }));
       };
 
@@ -130,6 +138,7 @@ export class DefaultShellExecutor implements ShellExecutor {
         cwd: spec.cwd,
         sessionId: spec.sessionId,
         settings: spec.settings,
+        policy: spec.policy,
         env: spec.env,
         stdio: ["ignore", "pipe", "pipe"],
       }).then((startedChild) => {
@@ -154,6 +163,7 @@ export class DefaultShellExecutor implements ShellExecutor {
         }, spec.timeoutMs);
 
         startedChild.on("error", (error) => {
+          executionFailureKind = "runner";
           runnerError = serializeRunnerError(error);
           append(`${error.message}\n`);
           finish(null);
@@ -164,6 +174,7 @@ export class DefaultShellExecutor implements ShellExecutor {
         });
       }).catch((error) => {
         if (settled) return;
+        executionFailureKind = classifySandboxFailure(error) ?? "runner";
         runnerError = serializeRunnerError(error);
         append(runnerError.message);
         finish(null);
@@ -175,19 +186,19 @@ export class DefaultShellExecutor implements ShellExecutor {
 export const defaultShellExecutor: ShellExecutor = new DefaultShellExecutor();
 
 function resolveRunner(
-  sandbox: ResolvedSandboxConfig,
+  policy: SandboxPolicy,
   activeSession: SandboxSession | null,
 ): ShellRunnerSpec {
-  if (!sandbox.enabled) {
+  if (!policy.enabled) {
     return { mode: "host", fallbackToHost: false };
   }
-  if (sandbox.backend === "docker" && activeSession?.backend === "docker" && activeSession.active) {
+  if (policy.backend === "docker" && activeSession?.backend === "docker" && activeSession.active) {
     return { mode: "sandbox-active", backend: "docker", fallbackToHost: false };
   }
   return {
-    mode: sandbox.failIfUnavailable ? "sandbox-required" : "sandbox-preferred",
-    backend: sandbox.backend,
-    fallbackToHost: !sandbox.failIfUnavailable,
+    mode: policy.failClosed ? "sandbox-required" : "sandbox-preferred",
+    backend: policy.backend,
+    fallbackToHost: !policy.failClosed,
   };
 }
 
@@ -198,6 +209,7 @@ function createRunResult(input: {
   timedOut: boolean;
   interrupted: boolean;
   runnerError?: ShellRunnerError;
+  executionFailureKind: "runner" | "policy";
 }): ShellRunResult {
   if (input.interrupted) {
     return {
@@ -220,7 +232,7 @@ function createRunResult(input: {
   if (input.runnerError) {
     return {
       status: "failed",
-      failureKind: "runner",
+      failureKind: input.executionFailureKind,
       output: input.output,
       outputTruncated: input.outputTruncated,
       exitCode: input.exitCode,
