@@ -56,9 +56,10 @@ import {
 } from "./task/index.js";
 import { webFetchTool, webSearchTool } from "./web/index.js";
 import { terminalTools } from "./terminal/index.js";
+import { jobTools } from "./job/index.js";
 
 export function createDefaultToolRegistry(
-  options: { cron?: boolean; terminal?: boolean } = {},
+  options: { cron?: boolean; terminal?: boolean; jobs?: boolean } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(bashTool);
@@ -102,6 +103,9 @@ export function createDefaultToolRegistry(
   }
   if (options.terminal) {
     for (const tool of terminalTools) registry.register(tool);
+  }
+  if (options.jobs) {
+    for (const tool of jobTools) registry.register(tool);
   }
   registry.register(mcpToolCallTool);
   registry.register(listMcpResourcesTool);

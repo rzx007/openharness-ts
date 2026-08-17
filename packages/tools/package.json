@@ -20,6 +20,7 @@
   "dependencies": {
     "@openharness/coordinator": "workspace:*",
     "@openharness/core": "workspace:*",
+    "@openharness/jobs": "workspace:*",
     "@openharness/mcp": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "@openharness/services": "workspace:*",

@@ -86,6 +86,25 @@ executor 只保留最多 `maxOutputChars + 1` 个字符，而不是先把无限�
 
 仍未落地的部分：network allowed/denied domains 还没有真实拦截；HTTP/Web 的内网地址策略属于 Web policy；不同能力面向用户的错误展示还可以继续统一。下一阶段按本文进入 Terminal service 和 jobs 对齐。
 
+### 2026-08-17：第四阶段 Terminal service 与 jobs 协议对齐已完成
+
+本阶段先审计了现有实现，没有重做已经存在的 Terminal。`@openharness/terminal`、`@openharness/terminal-node`、daemon Terminal service、HTTP SSE、Desktop IPC 和 Agent Terminal 工具原本已经具备 PTY、sandbox process、session ownership、scrollback、实时输出与清理能力；child session 也已经通过 `SessionTaskBridgeManager` 进入持久 `SessionTaskRecord` 投影。
+
+本次补齐的是这些长期工作之间的共同控制面：
+
+- 新增 `@openharness/jobs`，定义 owner-scoped `JobSnapshot`，统一 `running | stopping | completed | killed | failed` 状态，以及 `list/read/wait/send/cancel` 契约。
+- 新增 daemon `DaemonJobService` 和 `/jobs` HTTP API。它不复制运行状态，而是聚合 Terminal provider、`SessionTaskRecord + TaskManager` 与 `WorkflowRunStore`。
+- `ToolContext` 和 daemon Agent host 增加 `jobs` 能力，模型侧新增 `JobList`、`JobRead`、`JobWait`、`JobSend`、`JobCancel`。Terminal 工具注册面只保留 `TerminalOpen` 负责创建持久交互会话，后续观察与控制统一走 Job 工具。
+- Terminal 输出存储增加 sequence cursor 和每次读取的字符上限；`wait` 等待真实进程结算。取消先进入 `stopping`，进程资源释放后才进入 `killed`，正常退出按 exit code 投影为 `completed` 或 `failed`。
+- Workflow 持久快照增加 `ownerSession`，只有同一 durable session 能通过 jobs 读取或取消；历史无 owner workflow 不会被投影给任意 Agent。
+- HTTP client 增加 jobs API；Desktop Terminal 对新的 status 事件和状态集合完成接入。
+
+这次没有新增第二套 job 数据库，也没有把 Terminal 合并进 Bash。Terminal、TaskManager 和 WorkflowRunStore 仍分别拥有执行资源与原始状态，jobs 只负责授权、统一快照和控制路由。
+
+验证结果：Terminal output cursor 3 个测试、Job tools 4 个测试、daemon jobs 4 个测试、jobs HTTP route 2 个测试、workflow store 7 个测试通过；精简后的 TerminalOpen 2 个测试通过。全仓 33 个 package 的 TypeScript 检查通过；相关聚焦回归共 39 个测试通过。
+
+仍可后续增强：当前 Task/Workflow 的 wait 使用 store 快照轮询，未来可接各自事件源；jobs 还没有统一完成通知的 reported/claim 语义，也没有 per-owner 并发准入限制。这两项适合在确实需要自动 completion turn 和统一后台配额时再加。
+
 ## 本地现状
 
 当前相关实现主要在：

@@ -24,6 +24,7 @@ import type {
   ToolRegistry as IToolRegistry,
 } from "../types/tools";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import type { AgentJobHost } from "@openharness/jobs";
 import {
   CompactService,
   type CompactClient,
@@ -191,6 +192,7 @@ export class QueryEngine implements IQueryEngine {
   private mcpManager: unknown = undefined;
   private mcpAuth: McpAuthHost | undefined;
   private terminal: AgentTerminalHost | undefined;
+  private jobs: AgentJobHost | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -250,6 +252,10 @@ export class QueryEngine implements IQueryEngine {
 
   setTerminal(terminal: AgentTerminalHost | undefined): void {
     this.terminal = terminal;
+  }
+
+  setJobs(jobs: AgentJobHost | undefined): void {
+    this.jobs = jobs;
   }
 
   /**
@@ -661,6 +667,7 @@ export class QueryEngine implements IQueryEngine {
             mcpManager: this.mcpManager,
             mcpAuth: this.mcpAuth,
             terminal: this.terminal,
+            jobs: this.jobs,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(

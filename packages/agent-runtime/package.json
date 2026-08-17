@@ -22,6 +22,7 @@
     "@openharness/coordinator": "workspace:*",
     "@openharness/core": "workspace:*",
     "@openharness/hooks": "workspace:*",
+    "@openharness/jobs": "workspace:*",
     "@openharness/mcp": "workspace:*",
     "@openharness/memory": "workspace:*",
     "@openharness/permissions": "workspace:*",

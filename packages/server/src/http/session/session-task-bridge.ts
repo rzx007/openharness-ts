@@ -88,6 +88,8 @@ export interface SessionTaskBridgeManagerContext {
  * SessionTask 投影对齐（register/complete/bindRun），供 child session / Agent 使用。
  */
 export class SessionTaskBridgeManager {
+  private readonly trackedTasks = new WeakMap<object, Set<string>>();
+
   constructor(private readonly context: SessionTaskBridgeManagerContext) {}
 
   createBridge(session: { id: string; cwd: string }): SessionTaskBridge {
@@ -199,11 +201,18 @@ export class SessionTaskBridgeManager {
       }
       const durableTask = this.context.store.findSessionTaskByManagerTaskId(sessionId, task.id) ??
         this.context.store.getSessionTask(task.id);
-      if (durableTask?.sessionId === sessionId) this.syncPersistentTask(task, manager, durableTask.id);
+      if (durableTask?.sessionId === sessionId) {
+        this.trackTask(manager, task.id);
+        this.syncPersistentTask(task, manager, durableTask.id);
+      }
     }
   }
 
   trackTask(manager: TaskManager, taskId: string): void {
+    const tracked = this.trackedTasks.get(manager as object) ?? new Set<string>();
+    if (tracked.has(taskId)) return;
+    tracked.add(taskId);
+    this.trackedTasks.set(manager as object, tracked);
     manager.registerTaskListener((task) => {
       if (task.id !== taskId) return;
       const persisted = this.context.store.getSessionTask(taskId);

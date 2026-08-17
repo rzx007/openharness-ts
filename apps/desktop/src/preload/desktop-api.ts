@@ -77,10 +77,12 @@ export const desktopAPI = {
       const wrapped = (_event: Electron.IpcRendererEvent, value: DesktopTerminalEvent): void =>
         listener(value)
       ipcRenderer.on(IpcEvents.terminalData, wrapped)
+      ipcRenderer.on(IpcEvents.terminalStatus, wrapped)
       ipcRenderer.on(IpcEvents.terminalExit, wrapped)
       ipcRenderer.on(IpcEvents.terminalError, wrapped)
       return () => {
         ipcRenderer.removeListener(IpcEvents.terminalData, wrapped)
+        ipcRenderer.removeListener(IpcEvents.terminalStatus, wrapped)
         ipcRenderer.removeListener(IpcEvents.terminalExit, wrapped)
         ipcRenderer.removeListener(IpcEvents.terminalError, wrapped)
       }

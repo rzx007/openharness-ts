@@ -212,7 +212,7 @@ type TerminalToolPayload = {
     name: string
     cwd: string
     shell: string
-    status: "running" | "exited"
+    status: "running" | "stopping" | "completed" | "killed" | "failed"
   }
 }
 

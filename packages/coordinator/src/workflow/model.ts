@@ -175,6 +175,7 @@ export interface WorkflowRunResult {
 
 export interface WorkflowRunSummary {
   runId: string;
+  ownerSession?: string;
   status: WorkflowRunSnapshotStatus;
   summary: string;
   mode: WorkflowMode;
@@ -294,7 +295,9 @@ export type WorkflowRunSnapshotStatus = "running" | "completed" | "failed";
 export interface WorkflowRunSnapshot {
   version: 1;
   runId: string;
+  ownerSession?: string;
   status: WorkflowRunSnapshotStatus;
+  termination?: "cancelled";
   summary: string;
   spec: WorkflowSpec;
   plan: WorkflowRunSnapshotPlan;
@@ -312,6 +315,7 @@ export interface WorkflowRunSnapshot {
 
 export interface WorkflowRunOptions {
   runId?: string;
+  ownerSession?: string;
   onSnapshot?: (snapshot: WorkflowRunSnapshot) => void;
   onEvent?: (event: WorkflowRunEvent) => void;
   initialResults?: Record<string, WorkflowTaskRunResult>;

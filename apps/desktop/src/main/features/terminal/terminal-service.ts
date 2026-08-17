@@ -74,6 +74,7 @@ class DesktopTerminalService {
       for await (const event of client.streamTerminalEvents({ signal: controller.signal })) {
         if (controller.signal.aborted || webContents.isDestroyed()) return
         if (event.type === "data") webContents.send(IpcEvents.terminalData, event)
+        else if (event.type === "status") webContents.send(IpcEvents.terminalStatus, event)
         else if (event.type === "exit") webContents.send(IpcEvents.terminalExit, event)
         else if (event.type === "error") webContents.send(IpcEvents.terminalError, event)
       }

@@ -4,6 +4,7 @@ import type {
   StreamingMessageClient,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import type { AgentJobHost } from "@openharness/jobs";
 
 /** Opinionated runtime configuration exposed by the programmatic agent API. */
 export interface OpenHarnessAgentConfiguration {
@@ -29,4 +30,6 @@ export interface OpenHarnessAgentConfiguration {
   autoApproveTools?: string[];
   /** Host-owned persistent terminal capability. Descendant agents inherit it. */
   terminal?: AgentTerminalHost;
+  /** Host-owned long-running job controller. Descendant agents inherit it. */
+  jobs?: AgentJobHost;
 }

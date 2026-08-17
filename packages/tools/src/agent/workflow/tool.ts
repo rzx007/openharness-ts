@@ -324,6 +324,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           const workflow = runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
             cwd: context.cwd,
             runId: workflowRunId,
+            ownerSession: context.sessionId,
             store,
             onEvent,
             signal: ownerSignal,
@@ -353,6 +354,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
             ? await runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
                 cwd: context.cwd,
                 runId,
+                ownerSession: context.sessionId,
                 onEvent: (event) => emitWorkflowRuntimeEvent(context, event),
               })
             : runId

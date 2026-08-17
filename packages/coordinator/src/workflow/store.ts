@@ -26,6 +26,7 @@ export interface WorkflowRunStoreOptions {
 
 export interface RunPersistentWorkflowOptions extends WorkflowRunStoreOptions {
   runId?: string;
+  ownerSession?: string;
   store?: WorkflowRunStore;
   onEvent?: (event: WorkflowRunEvent) => void;
   /** Prevent a cancelled owner from writing a later running/completed snapshot. */
@@ -140,6 +141,7 @@ export async function runPersistentWorkflow(
   const store = options.store ?? new WorkflowRunStore({ cwd: options.cwd, dir: options.dir });
   return runWorkflow(spec, runner, {
     runId: options.runId,
+    ownerSession: options.ownerSession,
     onSnapshot: (snapshot) => {
       if (!options.signal?.aborted) store.save(snapshot);
     },
@@ -169,6 +171,7 @@ export async function resumePersistentWorkflow(
   }
   return runWorkflow(snapshot.spec, runner, {
     runId: snapshot.runId,
+    ownerSession: snapshot.ownerSession,
     createdAt: snapshot.createdAt,
     initialResults: snapshot.results,
     initialRunningTasks: snapshot.runningTasks,
@@ -249,7 +252,9 @@ export async function cancelPersistentWorkflow(
 
   const cancelledSnapshot = createWorkflowRunSnapshot({
     runId: snapshot.runId,
+    ownerSession: snapshot.ownerSession,
     status: "failed",
+    termination: "cancelled",
     summary: reason,
     spec: snapshot.spec,
     plan,
@@ -311,6 +316,7 @@ function isWorkflowRunSnapshot(value: unknown): value is WorkflowRunSnapshot {
     candidate.version === 1 &&
     typeof candidate.runId === "string" &&
     (candidate.status === "running" || candidate.status === "completed" || candidate.status === "failed") &&
+    (candidate.termination === undefined || candidate.termination === "cancelled") &&
     typeof candidate.summary === "string" &&
     typeof candidate.spec === "object" &&
     candidate.spec !== null &&

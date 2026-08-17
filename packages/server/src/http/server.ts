@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 
-import { SessionStore } from "@openharness/services";
+import { getTaskManager, SessionStore } from "@openharness/services";
 import type { Settings } from "@openharness/core";
 
 import type { CommandCatalogProvider } from "../commands/commands.js";
@@ -41,6 +41,7 @@ import { createAuthRoutes } from "./routes/auth.js";
 import { createCronRoutes } from "./routes/cron.js";
 import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
+import { createJobRoutes } from "./routes/job.js";
 import { createMemoryRoutes } from "./routes/memory.js";
 import { createPermissionRoutes } from "./routes/permission.js";
 import { createProjectRoutes } from "./routes/project.js";
@@ -56,6 +57,7 @@ import {
   TerminalHttpEventHub,
 } from "./routes/terminal.js";
 import { DaemonTerminalService } from "../terminal/index.js";
+import { DaemonJobService } from "../jobs/index.js";
 
 export interface OpenHarnessServerServices {
   commandCatalog?: CommandCatalogProvider;
@@ -117,6 +119,7 @@ export class OpenHarnessHttpServer {
   private readonly eventHub: HttpEventHub;
   private readonly daemon: DaemonApplication;
   private readonly terminals: DaemonTerminalService;
+  private readonly jobs: DaemonJobService;
   private readonly terminalEvents: TerminalHttpEventHub;
   private readonly requestTraces = new RequestTraceRegistry();
   private listener?: Listener;
@@ -146,10 +149,17 @@ export class OpenHarnessHttpServer {
       getSettingsForCwd: options.getSettingsForCwd,
       createAgent: options.createAgent,
       createTerminalHost: (session) => this.terminals.createAgentHost(session),
+      createJobHost: (session) => this.jobs.createAgentHost(session),
       sseClientCount: () =>
         this.eventHub.clientCount + this.terminalEvents.clientCount,
       log: (event) => this.log(event),
     });
+    this.jobs = new DaemonJobService(
+      this.store,
+      this.terminals,
+      this.daemon.tasks,
+      (scope) => getTaskManager(scope),
+    );
     this.mountRoutes();
   }
 
@@ -340,6 +350,7 @@ export class OpenHarnessHttpServer {
         tasks: this.daemon.tasks,
       }),
     );
+    this.app.route("/jobs", createJobRoutes(this.jobs));
     this.app.route(
       "/permissions",
       createPermissionRoutes({

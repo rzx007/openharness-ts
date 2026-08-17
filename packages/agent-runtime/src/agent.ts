@@ -661,6 +661,7 @@ async function createOpenHarnessAgentInternal(
     hostCapabilities: {
       cron: Boolean(internal.effects.cron),
       terminal: Boolean(options.terminal),
+      jobs: Boolean(options.jobs),
     },
     skillRegistry: discovery.skillRegistry,
   });
@@ -695,6 +696,7 @@ async function createOpenHarnessAgentInternal(
       }),
     );
     runtime.queryEngine.setTerminal(options.terminal);
+    runtime.queryEngine.setJobs(options.jobs);
     runtime.addCleanup(() => mcpManager.disconnectAll());
 
     const memory =

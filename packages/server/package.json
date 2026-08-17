@@ -23,6 +23,7 @@
     "@openharness/auth": "workspace:*",
     "@openharness/coordinator": "workspace:*",
     "@openharness/core": "workspace:*",
+    "@openharness/jobs": "workspace:*",
     "@openharness/memory": "workspace:*",
     "@openharness/output-styles": "workspace:*",
     "@openharness/personalization": "workspace:*",

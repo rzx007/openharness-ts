@@ -4,11 +4,14 @@ import type {
   AgentTerminalHost,
   TerminalCreateRequest,
   TerminalEventListener,
+  TerminalReadRequest,
   TerminalReadResult,
   TerminalResizeRequest,
   TerminalSessionInfo,
   TerminalSignalRequest,
   TerminalSource,
+  TerminalWaitRequest,
+  TerminalWaitResult,
   TerminalWriteRequest,
 } from "@openharness/terminal";
 import { LocalTerminalProvider } from "@openharness/terminal-node";
@@ -89,6 +92,14 @@ export class DaemonTerminalService {
     return await this.provider.read({ terminalId });
   }
 
+  async readRequest(input: TerminalReadRequest): Promise<TerminalReadResult> {
+    return await this.provider.read(input);
+  }
+
+  async wait(input: TerminalWaitRequest): Promise<TerminalWaitResult> {
+    return await this.provider.wait(input);
+  }
+
   async signal(input: TerminalSignalRequest): Promise<void> {
     await this.provider.signal(input);
   }
@@ -110,19 +121,6 @@ export class DaemonTerminalService {
         `Session ${rootSession.id} is not attached to a project.`,
       );
     }
-    const requireOwned = async (
-      sessionId: string,
-      terminalId: string,
-    ): Promise<void> => {
-      const terminal = await this.get(terminalId);
-      if (terminal.source !== "agent" || terminal.sessionId !== sessionId) {
-        throw new DaemonTerminalError(
-          403,
-          `Terminal ${terminalId} is not owned by this Agent session.`,
-        );
-      }
-    };
-
     return {
       open: async (input) =>
         await this.provider.create({
@@ -136,24 +134,6 @@ export class DaemonTerminalService {
           source: "agent",
           sessionId: input.sessionId,
         }),
-      send: async (input) => {
-        await requireOwned(input.sessionId, input.terminalId);
-        await this.provider.write(input);
-      },
-      read: async (input) => {
-        await requireOwned(input.sessionId, input.terminalId);
-        return await this.provider.read(input);
-      },
-      signal: async (input) => {
-        await requireOwned(input.sessionId, input.terminalId);
-        await this.provider.signal(input);
-      },
-      close: async (input) => {
-        await requireOwned(input.sessionId, input.terminalId);
-        await this.provider.kill(input.terminalId);
-      },
-      list: async (sessionId) =>
-        await this.list({ sessionId, source: "agent" }),
     };
   }
 

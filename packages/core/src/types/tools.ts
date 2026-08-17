@@ -2,6 +2,7 @@ import type { ContentBlock } from "./messages";
 import type { Settings } from "./settings";
 import type { AgentExecutionContext } from "./runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import type { AgentJobHost } from "@openharness/jobs";
 
 export interface McpAuthConfigureInput {
   serverName: string;
@@ -35,6 +36,8 @@ export interface ToolContext {
   mcpAuth?: McpAuthHost;
   /** Host-owned persistent terminal capability. Omitted in runtimes without PTY support. */
   terminal?: AgentTerminalHost;
+  /** Host-owned controller for all long-running work in the durable session. */
+  jobs?: AgentJobHost;
   agent?: AgentExecutionContext;
 }
 

@@ -71,6 +71,12 @@ import type {
   TerminalSource,
   TerminalWriteRequest,
 } from "@openharness/terminal";
+import type {
+  JobReadResult,
+  JobSnapshot,
+  JobStatus,
+  JobWaitResult,
+} from "@openharness/jobs";
 
 let promptRequestCounter = 0;
 
@@ -1067,6 +1073,61 @@ export class OpenHarnessClient {
       },
     );
     return response.terminal;
+  }
+
+  async listJobs(
+    options: { sessionId: string; status?: JobStatus; signal?: AbortSignal },
+  ): Promise<JobSnapshot[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ jobs: JobSnapshot[] }>(this.path("/jobs", query), { signal });
+    return response.jobs;
+  }
+
+  async readJob(
+    jobId: string,
+    options: { sessionId: string; after?: number; maxChars?: number; signal?: AbortSignal },
+  ): Promise<JobReadResult> {
+    const { signal, ...query } = options;
+    return await this.request<JobReadResult>(
+      this.path(`/jobs/${encodeURIComponent(jobId)}`, query),
+      { signal },
+    );
+  }
+
+  async waitJob(
+    jobId: string,
+    input: { sessionId: string; timeoutMs?: number; after?: number; maxChars?: number },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<JobWaitResult> {
+    return await this.request<JobWaitResult>(`/jobs/${encodeURIComponent(jobId)}/wait`, {
+      method: "POST",
+      body: input,
+      signal: options.signal,
+    });
+  }
+
+  async sendJob(
+    jobId: string,
+    input: { sessionId: string; data: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request(`/jobs/${encodeURIComponent(jobId)}/input`, {
+      method: "POST",
+      body: input,
+      signal: options.signal,
+    });
+  }
+
+  async cancelJob(
+    jobId: string,
+    input: { sessionId: string; reason?: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<JobSnapshot> {
+    const response = await this.request<{ snapshot: JobSnapshot }>(
+      `/jobs/${encodeURIComponent(jobId)}/cancel`,
+      { method: "POST", body: input, signal: options.signal },
+    );
+    return response.snapshot;
   }
 
   async listTerminals(

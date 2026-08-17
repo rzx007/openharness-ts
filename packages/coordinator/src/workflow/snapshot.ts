@@ -19,6 +19,7 @@ export function createWorkflowRunSummary(snapshot: WorkflowRunSnapshot): Workflo
   const result = createWorkflowResultFromSnapshot(snapshot);
   return {
     runId: snapshot.runId,
+    ...(snapshot.ownerSession ? { ownerSession: snapshot.ownerSession } : {}),
     status: snapshot.status,
     summary: snapshot.summary,
     mode: snapshot.plan.mode,
@@ -68,7 +69,9 @@ export function createWorkflowRunId(now = Date.now()): string {
 
 export function createWorkflowRunSnapshot(input: {
   runId: string;
+  ownerSession?: string;
   status: WorkflowRunSnapshotStatus;
+  termination?: "cancelled";
   summary: string;
   spec: WorkflowSpec;
   plan: WorkflowPlan;
@@ -85,7 +88,9 @@ export function createWorkflowRunSnapshot(input: {
   return {
     version: 1,
     runId: input.runId,
+    ...(input.ownerSession ? { ownerSession: input.ownerSession } : {}),
     status: input.status,
+    ...(input.termination ? { termination: input.termination } : {}),
     summary: input.summary,
     spec: input.spec,
     plan: snapshotPlan(input.plan),

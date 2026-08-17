@@ -16,6 +16,8 @@ import type {
   TerminalResizeRequest,
   TerminalSessionInfo,
   TerminalSignalRequest,
+  TerminalWaitRequest,
+  TerminalWaitResult,
   TerminalWriteRequest,
 } from "@openharness/terminal";
 import {
@@ -38,6 +40,7 @@ interface LocalTerminalSession {
   pty: IPty | null;
   output: OutputBuffer;
   transcript: TerminalOutputStore;
+  cancelRequested: boolean;
 }
 
 interface SandboxTerminalSession {
@@ -47,6 +50,7 @@ interface SandboxTerminalSession {
   runtime: StartedSandboxRuntime;
   output: OutputBuffer;
   transcript: TerminalOutputStore;
+  cancelRequested: boolean;
 }
 
 type TerminalSession = LocalTerminalSession | SandboxTerminalSession;
@@ -107,7 +111,7 @@ export class LocalTerminalProvider implements TerminalProvider {
       createdAt: new Date().toISOString(),
     };
 
-    this.sessions.set(id, { info, kind: "pty", pty, output, transcript });
+    this.sessions.set(id, { info, kind: "pty", pty, output, transcript, cancelRequested: false });
 
     pty.onData((data) => output.push(data));
     pty.onExit(({ exitCode }) => {
@@ -115,12 +119,14 @@ export class LocalTerminalProvider implements TerminalProvider {
       const session = this.sessions.get(id);
       if (!session || session.kind !== "pty") return;
       session.pty = null;
+      const status = session.cancelRequested ? "killed" : exitCode === 0 ? "completed" : "failed";
       session.info = {
         ...session.info,
-        status: "exited",
+        status,
         exitedAt: new Date().toISOString(),
         exitCode,
       };
+      if (status === "killed") this.events.emit({ type: "status", terminalId: id, status });
       this.events.emit({ type: "exit", terminalId: id, exitCode });
     });
 
@@ -184,7 +190,15 @@ export class LocalTerminalProvider implements TerminalProvider {
         createdAt: new Date().toISOString(),
       };
 
-      this.sessions.set(id, { info, kind: "process", child, runtime, output, transcript });
+      this.sessions.set(id, {
+        info,
+        kind: "process",
+        child,
+        runtime,
+        output,
+        transcript,
+        cancelRequested: false,
+      });
 
       child.stdout?.on("data", (data) => output.push(data.toString()));
       child.stderr?.on("data", (data) => output.push(data.toString()));
@@ -194,13 +208,15 @@ export class LocalTerminalProvider implements TerminalProvider {
         const session = this.sessions.get(id);
         if (!session || session.kind !== "process") return;
         session.child = null;
+        const status = session.cancelRequested ? "killed" : exitCode === 0 ? "completed" : "failed";
         session.info = {
           ...session.info,
-          status: "exited",
+          status,
           exitedAt: new Date().toISOString(),
           exitCode,
         };
         void session.runtime.stop().catch(() => {});
+        if (status === "killed") this.events.emit({ type: "status", terminalId: id, status });
         this.events.emit({ type: "exit", terminalId: id, exitCode });
       });
 
@@ -228,7 +244,42 @@ export class LocalTerminalProvider implements TerminalProvider {
   async read(input: TerminalReadRequest): Promise<TerminalReadResult> {
     const session = this.requireSession(input.terminalId);
     session.output.drain();
-    return session.transcript.read(input.terminalId);
+    return session.transcript.read(input.terminalId, {
+      after: input.after,
+      maxChars: input.maxChars,
+    });
+  }
+
+  async wait(input: TerminalWaitRequest): Promise<TerminalWaitResult> {
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {
+      throw new Error("Terminal wait timeoutMs must be a positive finite number.");
+    }
+    const current = this.requireSession(input.terminalId);
+    if (isTerminalStatus(current.info.status)) return this.waitResult(input, false);
+
+    return await new Promise<TerminalWaitResult>((resolve, reject) => {
+      let settled = false;
+      const finish = (timedOut: boolean, error?: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        input.signal?.removeEventListener("abort", onAbort);
+        if (error) reject(error);
+        else resolve(this.waitResult(input, timedOut));
+      };
+      const unsubscribe = this.subscribe((event) => {
+        if (event.terminalId !== input.terminalId) return;
+        if (event.type === "exit" || (event.type === "status" && event.status === "killed")) {
+          finish(false);
+        }
+      });
+      const timer = setTimeout(() => finish(true), input.timeoutMs);
+      timer.unref?.();
+      const onAbort = () => finish(false, input.signal?.reason ?? new Error("Terminal wait aborted."));
+      if (input.signal?.aborted) onAbort();
+      else input.signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   async signal(input: TerminalSignalRequest): Promise<void> {
@@ -248,8 +299,11 @@ export class LocalTerminalProvider implements TerminalProvider {
   async kill(terminalId: string): Promise<void> {
     const session = this.sessions.get(terminalId);
     if (!session) return;
+    if (isTerminalStatus(session.info.status) || session.info.status === "stopping") return;
     session.output.dispose();
-    this.sessions.delete(terminalId);
+    session.cancelRequested = true;
+    session.info = { ...session.info, status: "stopping" };
+    this.events.emit({ type: "status", terminalId, status: "stopping" });
     if (session.kind === "pty") {
       session.pty?.kill();
     } else {
@@ -259,7 +313,7 @@ export class LocalTerminalProvider implements TerminalProvider {
   }
 
   async list(): Promise<TerminalSessionInfo[]> {
-    return [...this.sessions.values()].map((session) => session.info);
+    return [...this.sessions.values()].map((session) => ({ ...session.info }));
   }
 
   subscribe(listener: TerminalEventListener): () => void {
@@ -269,7 +323,26 @@ export class LocalTerminalProvider implements TerminalProvider {
   async dispose(): Promise<void> {
     const ids = [...this.sessions.keys()];
     await Promise.all(ids.map((id) => this.kill(id)));
+    await Promise.all(
+      ids.map((id) =>
+        this.wait({ terminalId: id, timeoutMs: 1_000 }).catch(() => undefined),
+      ),
+    );
+    this.sessions.clear();
     this.events.clear();
+  }
+
+  private waitResult(input: TerminalWaitRequest, timedOut: boolean): TerminalWaitResult {
+    const session = this.requireSession(input.terminalId);
+    session.output.drain();
+    return {
+      ...session.transcript.read(input.terminalId, {
+        after: input.after,
+        maxChars: input.maxChars,
+      }),
+      terminal: { ...session.info },
+      timedOut,
+    };
   }
 
   private requireSession(terminalId: string): TerminalSession {
@@ -293,6 +366,10 @@ export class LocalTerminalProvider implements TerminalProvider {
       | (LocalTerminalSession & { pty: IPty })
       | (SandboxTerminalSession & { child: ChildProcess });
   }
+}
+
+function isTerminalStatus(status: TerminalSessionInfo["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "killed";
 }
 
 function normalizeTerminalName(value?: string): string {

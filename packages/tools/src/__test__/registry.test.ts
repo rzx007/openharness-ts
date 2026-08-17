@@ -64,24 +64,25 @@ describe("createDefaultToolRegistry", () => {
     );
   });
 
-  it("registers persistent terminal tools only when the host provides a terminal runtime", () => {
+  it("registers terminal creation separately from common job controls", () => {
     const defaultNames = createDefaultToolRegistry()
       .getAll()
       .map((tool) => tool.name);
-    const terminalNames = createDefaultToolRegistry({ terminal: true })
+    const terminalNames = createDefaultToolRegistry({ terminal: true, jobs: true })
       .getAll()
       .map((tool) => tool.name);
     expect(defaultNames).not.toContain("TerminalOpen");
     expect(terminalNames).toEqual(
       expect.arrayContaining([
         "TerminalOpen",
-        "TerminalSend",
-        "TerminalRead",
-        "TerminalSignal",
-        "TerminalClose",
-        "TerminalList",
+        "JobSend",
+        "JobRead",
+        "JobWait",
+        "JobCancel",
+        "JobList",
       ]),
     );
+    expect(terminalNames).not.toEqual(expect.arrayContaining(["TerminalRead", "TerminalClose"]));
   });
 
   it("each tool has required fields", () => {

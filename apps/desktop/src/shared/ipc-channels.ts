@@ -109,6 +109,7 @@ export const IpcChannels = {
 export const IpcEvents = {
   sessionUpdated: "session:updated",
   terminalData: "terminal:data",
+  terminalStatus: "terminal:status",
   terminalExit: "terminal:exit",
   terminalError: "terminal:error",
 } as const

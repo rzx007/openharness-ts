@@ -16,6 +16,7 @@ import type {
   Settings,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import type { AgentJobHost } from "@openharness/jobs";
 import { readSessionRuntimeConfig } from "@openharness/services";
 import type {
   SessionMessagePartRecord,
@@ -56,6 +57,7 @@ export interface DaemonAgentLoaderOptions {
   requestPermission?: AgentEffects["requestPermission"];
   cron?: AgentCronEffects;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
+  createJobHost?(session: SessionRecord): AgentJobHost;
   createEventSink?(
     agent: OpenHarnessAgent,
     session: SessionRecord,
@@ -97,6 +99,7 @@ export function createDaemonAgentLoader(
       ...(options.createTerminalHost
         ? { terminal: options.createTerminalHost(session) }
         : {}),
+      ...(options.createJobHost ? { jobs: options.createJobHost(session) } : {}),
       ...(options.createEventSink
         ? {
             onEvent: async (event) => {

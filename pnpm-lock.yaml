@@ -446,6 +446,9 @@ importers:
       '@openharness/hooks':
         specifier: workspace:*
         version: link:../hooks
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
       '@openharness/mcp':
         specifier: workspace:*
         version: link:../mcp
@@ -565,6 +568,9 @@ importers:
 
   packages/client:
     dependencies:
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
       '@openharness/services':
         specifier: workspace:*
         version: link:../services
@@ -619,6 +625,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
       '@openharness/terminal':
         specifier: workspace:*
         version: link:../terminal
@@ -647,6 +656,18 @@ importers:
       '@openharness/sandbox':
         specifier: workspace:*
         version: link:../sandbox
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.17
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
+
+  packages/jobs:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -839,6 +860,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
       '@openharness/memory':
         specifier: workspace:*
         version: link:../memory
@@ -950,6 +974,10 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/terminal:
+    dependencies:
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1010,6 +1038,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
       '@openharness/mcp':
         specifier: workspace:*
         version: link:../mcp

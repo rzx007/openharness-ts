@@ -373,7 +373,9 @@ export function TerminalTool({
             record.id === event.terminalId
               ? {
                   ...record,
-                  status: "exited",
+                  status: record.status === "stopping" || record.status === "killed"
+                    ? "killed"
+                    : event.exitCode === 0 ? "completed" : "failed",
                   exitedAt: new Date().toISOString(),
                   exitCode: event.exitCode,
                 }
@@ -385,6 +387,13 @@ export function TerminalTool({
             `\r\n\x1b[2m[Process exited with code ${event.exitCode ?? "unknown"}]\x1b[0m`
           )
         }
+        return
+      }
+
+      if (event.type === "status") {
+        setRecords((current) => current.map((record) =>
+          record.id === event.terminalId ? { ...record, status: event.status } : record
+        ))
         return
       }
 
@@ -592,7 +601,7 @@ export function TerminalTool({
                   ? activeRecord.runtime === "sandbox"
                     ? "Sandbox"
                     : shellName(activeRecord.shell)
-                  : "exited"}
+                  : activeRecord.status}
               </span>
             )}
             <div className="flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5">

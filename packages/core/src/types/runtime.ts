@@ -7,6 +7,7 @@ import type { StreamEvent } from "./events";
 import type { Settings } from "./settings";
 import type { CompactAttachmentsProvider } from "../engine/compact-service";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import type { AgentJobHost } from "@openharness/jobs";
 
 export interface AgentPermissionRequest {
   toolName: string;
@@ -323,6 +324,7 @@ export interface QueryEngine {
   setMcpManager(mgr: unknown): void;
   setMcpAuth(auth: McpAuthHost | undefined): void;
   setTerminal(terminal: AgentTerminalHost | undefined): void;
+  setJobs(jobs: AgentJobHost | undefined): void;
 }
 
 export interface MemoryRetriever {

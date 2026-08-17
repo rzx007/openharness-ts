@@ -1,7 +1,8 @@
+import type { JobStatus } from "@openharness/jobs";
 import type { TerminalEventListener } from "./events";
 
 export type TerminalRuntime = "local" | "sandbox";
-export type TerminalSessionStatus = "running" | "exited";
+export type TerminalSessionStatus = JobStatus;
 export type TerminalSource = "user" | "agent";
 export type TerminalSignal = "interrupt" | "eof" | "terminate";
 
@@ -47,6 +48,8 @@ export interface TerminalResizeRequest {
 
 export interface TerminalReadRequest {
   terminalId: string;
+  after?: number;
+  maxChars?: number;
 }
 
 export interface TerminalReadResult {
@@ -61,6 +64,16 @@ export interface TerminalSignalRequest {
   signal: TerminalSignal;
 }
 
+export interface TerminalWaitRequest extends TerminalReadRequest {
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+export interface TerminalWaitResult extends TerminalReadResult {
+  terminal: TerminalSessionInfo;
+  timedOut: boolean;
+}
+
 export interface AgentTerminalOpenRequest {
   sessionId: string;
   cwd: string;
@@ -70,27 +83,9 @@ export interface AgentTerminalOpenRequest {
   shell?: string;
 }
 
-export interface AgentTerminalSessionRequest {
-  sessionId: string;
-  terminalId: string;
-}
-
-export interface AgentTerminalWriteRequest extends AgentTerminalSessionRequest {
-  data: string;
-}
-
-export interface AgentTerminalSignalRequest extends AgentTerminalSessionRequest {
-  signal: TerminalSignal;
-}
-
-/** Host-owned persistent terminals exposed to an Agent with strict session ownership. */
+/** Host-owned Terminal producer. Observation and control use AgentJobHost. */
 export interface AgentTerminalHost {
   open(input: AgentTerminalOpenRequest): Promise<TerminalSessionInfo>;
-  send(input: AgentTerminalWriteRequest): Promise<void>;
-  read(input: AgentTerminalSessionRequest): Promise<TerminalReadResult>;
-  signal(input: AgentTerminalSignalRequest): Promise<void>;
-  close(input: AgentTerminalSessionRequest): Promise<void>;
-  list(sessionId: string): Promise<TerminalSessionInfo[]>;
 }
 
 export interface TerminalProvider {
@@ -98,6 +93,7 @@ export interface TerminalProvider {
   write(input: TerminalWriteRequest): Promise<void>;
   resize(input: TerminalResizeRequest): Promise<void>;
   read(input: TerminalReadRequest): Promise<TerminalReadResult>;
+  wait(input: TerminalWaitRequest): Promise<TerminalWaitResult>;
   signal(input: TerminalSignalRequest): Promise<void>;
   kill(terminalId: string): Promise<void>;
   list(): Promise<TerminalSessionInfo[]>;

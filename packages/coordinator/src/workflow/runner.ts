@@ -50,6 +50,7 @@ export async function runWorkflow(
     try {
       options.onSnapshot?.(createWorkflowRunSnapshot({
         runId,
+        ownerSession: options.ownerSession,
         status,
         summary,
         spec,

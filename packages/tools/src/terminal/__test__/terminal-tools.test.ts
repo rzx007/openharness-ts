@@ -7,8 +7,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   terminalOpenTool,
-  terminalReadTool,
-  terminalSendTool,
 } from "../terminal-tools.js";
 
 const terminal: TerminalSessionInfo = {
@@ -51,73 +49,6 @@ describe("persistent terminal tools", () => {
     });
   });
 
-  it("sends input without adding an implicit newline", async () => {
-    const send = vi.fn(async () => undefined);
-    const context = createContext({ send });
-
-    await terminalSendTool.execute(
-      { terminalId: "terminal-1", data: "npm run dev" },
-      context,
-    );
-
-    expect(send).toHaveBeenCalledWith({
-      sessionId: "session-1",
-      terminalId: "terminal-1",
-      data: "npm run dev",
-    });
-  });
-
-  it("normalizes newlines to terminal enter by default", async () => {
-    const send = vi.fn(async () => undefined);
-    const context = createContext({ send });
-
-    await terminalSendTool.execute(
-      { terminalId: "terminal-1", data: "Get-ChildItem\nls\r\necho ok\r" },
-      context,
-    );
-
-    expect(send).toHaveBeenCalledWith({
-      sessionId: "session-1",
-      terminalId: "terminal-1",
-      data: "Get-ChildItem\rls\recho ok\r",
-    });
-  });
-
-  it("preserves exact input when raw mode is requested", async () => {
-    const send = vi.fn(async () => undefined);
-    const context = createContext({ send });
-
-    await terminalSendTool.execute(
-      { terminalId: "terminal-1", data: "line one\nline two", raw: true },
-      context,
-    );
-
-    expect(send).toHaveBeenCalledWith({
-      sessionId: "session-1",
-      terminalId: "terminal-1",
-      data: "line one\nline two",
-    });
-  });
-
-  it("limits output returned to the model while preserving the truncation signal", async () => {
-    const read = vi.fn(async () => ({
-      terminalId: "terminal-1",
-      data: `prefix-${"x".repeat(13_000)}`,
-      sequence: 9,
-      truncated: false,
-    }));
-
-    const result = await terminalReadTool.execute(
-      { terminalId: "terminal-1" },
-      createContext({ read }),
-    );
-    const payload = parseResult(result);
-
-    expect(payload.output).toHaveLength(12_000);
-    expect(payload.truncated).toBe(true);
-    expect(payload.sequence).toBe(9);
-  });
-
   it("fails before touching the host when no durable session exists", async () => {
     const open = vi.fn(async () => terminal);
     const result = await terminalOpenTool.execute(
@@ -144,16 +75,6 @@ function createContext(overrides: Partial<AgentTerminalHost>): ToolContext {
 function createHost(overrides: Partial<AgentTerminalHost>): AgentTerminalHost {
   return {
     open: async () => terminal,
-    send: async () => undefined,
-    read: async () => ({
-      terminalId: terminal.id,
-      data: "",
-      sequence: 0,
-      truncated: false,
-    }),
-    signal: async () => undefined,
-    close: async () => undefined,
-    list: async () => [terminal],
     ...overrides,
   };
 }

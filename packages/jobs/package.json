@@ -1,5 +1,5 @@
 {
-  "name": "@openharness/client",
+  "name": "@openharness/jobs",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -15,11 +15,6 @@
     "check-types": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rimraf dist"
-  },
-  "dependencies": {
-    "@openharness/jobs": "workspace:*",
-    "@openharness/services": "workspace:*",
-    "@openharness/terminal": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

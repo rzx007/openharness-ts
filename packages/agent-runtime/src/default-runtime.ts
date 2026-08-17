@@ -45,7 +45,7 @@ interface OpenHarnessRuntimeOptions {
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
-  hostCapabilities?: { cron?: boolean; terminal?: boolean };
+  hostCapabilities?: { cron?: boolean; terminal?: boolean; jobs?: boolean };
 }
 
 /**
@@ -111,6 +111,7 @@ export async function createOpenHarnessRuntime(
   const baseToolRegistry = createDefaultToolRegistry({
     cron: options.hostCapabilities?.cron,
     terminal: options.hostCapabilities?.terminal,
+    jobs: options.hostCapabilities?.jobs,
   });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);

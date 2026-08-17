@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Settings } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import type { AgentJobHost } from "@openharness/jobs";
 import type { SessionRecord } from "@openharness/services";
 import { getTaskManager, type SessionStore } from "@openharness/services";
 
@@ -45,6 +46,7 @@ export interface DaemonApplicationOptions {
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
   createAgent?: CreateDaemonAgent;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
+  createJobHost?(session: SessionRecord): AgentJobHost;
   sseClientCount(): number;
   log(event: ObservabilityEvent): void;
 }
@@ -114,6 +116,7 @@ export class DaemonApplication {
       getSettingsForCwd: options.getSettingsForCwd,
       createAgent: options.createAgent,
       createTerminalHost: options.createTerminalHost,
+      createJobHost: options.createJobHost,
       requestPermission: async (request, context) => {
         return await this.permissions.ask({
           sessionId: context.sessionId,
