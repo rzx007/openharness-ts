@@ -107,7 +107,7 @@ function AssistantMarkdown({
   return (
     <div className="assistant-markdown min-w-0">
       <Streamdown
-        className="desktop-streamdown"
+        className="desktop-streamdown space-y-0"
         mode={streaming ? "streaming" : "static"}
         controls
         lineNumbers={false}

@@ -45,6 +45,7 @@ import { Field, FieldGroup } from "@renderer/components/ui/field"
 import { Input } from "@renderer/components/ui/input"
 import { Label } from "@renderer/components/ui/label"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
+import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import { isSessionPinned, useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
@@ -549,6 +550,8 @@ function SessionRow({
 }): React.JSX.Element {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const pinned = isSessionPinned(session)
+  const running = !archived && session.status === "running"
+  const title = sessionTitle(session)
 
   return (
     <DropdownMenu>
@@ -573,15 +576,28 @@ function SessionRow({
           {pinned ? (
             <Pin className="mr-1 inline size-3 -translate-y-px text-sidebar-muted" />
           ) : null}
-          {sessionTitle(session)}
+          {title}
         </button>
         <DropdownMenuTrigger
           ref={triggerRef}
-          aria-label={`管理会话 ${sessionTitle(session)}`}
-          title="更多操作"
-          className="absolute right-1 grid size-6 place-items-center rounded text-sidebar-muted opacity-0 transition-opacity outline-none group-hover/session:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-accent data-[popup-open]:opacity-100 [&_svg]:size-3.5"
+          aria-label={running ? `${title} 正在运行，打开更多操作` : `管理会话 ${title}`}
+          title={running ? "会话运行中" : "更多操作"}
+          className={cn(
+            "absolute right-1 grid size-6 place-items-center rounded text-sidebar-muted transition-opacity outline-none hover:bg-sidebar-accent focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-accent data-popup-open:opacity-100 [&_svg]:size-3.5",
+            running ? "opacity-100" : "opacity-0 group-hover/session:opacity-100"
+          )}
         >
-          <MoreHorizontal />
+          {running ? (
+            <>
+              <Spinner
+                aria-hidden="true"
+                className="size-3.5 group-hover/session:hidden in-data-popup-open:hidden"
+              />
+              <MoreHorizontal className="hidden group-hover/session:inline in-data-popup-open:inline" />
+            </>
+          ) : (
+            <MoreHorizontal />
+          )}
         </DropdownMenuTrigger>
       </div>
       <DropdownMenuContent align="end" className="max-w-64">

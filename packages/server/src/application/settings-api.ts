@@ -33,6 +33,7 @@ export interface ModelInfo {
   outputLimit?: number;
   reasoning?: boolean;
   vision?: boolean;
+  inputModalities?: string[];
   toolCalling?: boolean;
   status?: "active" | "beta";
 }

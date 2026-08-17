@@ -5,7 +5,8 @@ import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
 import { Spinner } from "@renderer/components/ui/spinner"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
-import { ComposerIconButton, PermissionModeMenu, PickerMenuItem } from "./controls"
+import { ComposerIconButton, PermissionModeMenu } from "./controls"
+import { ModelPicker } from "./model-picker"
 import { resolvePermissionModeLabel } from "./utils"
 
 export function Composer({
@@ -105,44 +106,18 @@ export function Composer({
           </PopoverContent>
         </Popover>
         <div className="ml-auto flex min-w-0 items-center gap-1">
-          <Popover
+          <ModelPicker
             open={activePicker === "model"}
             onOpenChange={(open) => setActivePicker(open ? "model" : null)}
-          >
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-8 max-w-52 min-w-0 shrink overflow-hidden px-2 text-xs font-normal text-muted-foreground"
-                />
-              }
-            >
-              <span className="min-w-0 truncate">{modelLabel}</span>
-              <ChevronDown data-icon="inline-end" />
-            </PopoverTrigger>
-            <PopoverContent
-              side="top"
-              align="end"
-              sideOffset={8}
-              className="w-64 gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
-            >
-              <div className="max-h-64 overflow-y-auto py-0.5">
-                {models.map((model) => (
-                  <PickerMenuItem
-                    key={`${model.providerName}:${model.id}`}
-                    selected={model.id === selectedModel && model.providerName === selectedProvider}
-                    onClick={() => {
-                      onSelectModel(model)
-                      closePicker()
-                    }}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{model.label}</span>
-                  </PickerMenuItem>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
+            models={models}
+            selectedModel={selectedModel}
+            selectedProvider={selectedProvider}
+            modelLabel={modelLabel}
+            onSelectModel={(model) => {
+              onSelectModel(model)
+              closePicker()
+            }}
+          />
           <ComposerIconButton label="语音输入">
             <Mic />
           </ComposerIconButton>

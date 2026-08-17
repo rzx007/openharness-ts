@@ -271,7 +271,7 @@
     font-size: 1rem;
     font-weight: 600;
     letter-spacing: 0;
-    margin-top: 1.5rem;
+    margin-top: 0.5rem;
     margin-bottom: 0.5rem;
     padding-bottom: 0;
     border-bottom: none;
@@ -371,13 +371,10 @@
   /* Lists — tighter spacing */
   .desktop-streamdown [data-streamdown="unordered-list"],
   .desktop-streamdown [data-streamdown="ordered-list"] {
-    margin: 0.5rem 0;
+    /* margin: 0.5rem 0; */
     /* padding-left: 1.25rem; */
   }
 
-  .desktop-streamdown [data-streamdown="list-item"] {
-    margin: 0.125rem 0;
-  }
 
   /* Paragraphs — tighter between blocks */
   .desktop-streamdown [data-streamdown="paragraph"] + [data-streamdown="paragraph"] {

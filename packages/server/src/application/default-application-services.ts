@@ -360,6 +360,7 @@ function modelVision(model: ModelsDevModel): boolean | undefined {
 }
 
 function toModelInfo(providerName: string, providerDisplayName: string, id: string, model: ModelsDevModel): ModelInfo {
+  const inputModalities = model.modalities?.input?.filter((item) => item.trim().length > 0);
   return {
     id,
     label: model.name ?? model.id ?? id,
@@ -370,6 +371,7 @@ function toModelInfo(providerName: string, providerDisplayName: string, id: stri
     ...(typeof model.limit?.output === "number" ? { outputLimit: model.limit.output } : {}),
     ...(typeof model.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
     ...(typeof modelVision(model) === "boolean" ? { vision: modelVision(model) } : {}),
+    ...(inputModalities && inputModalities.length > 0 ? { inputModalities } : {}),
     ...(typeof model.tool_call === "boolean" ? { toolCalling: model.tool_call } : {}),
     ...(model.status === "beta" ? { status: "beta" as const } : { status: "active" as const }),
   };
