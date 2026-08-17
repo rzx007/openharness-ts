@@ -44,6 +44,25 @@ OpenHarness-ts 当前已经有相当多实现，尤其是 `@openharness/sandbox`
 
 下一步仍按本文顺序进入第二阶段 Shell executor。Web policy，特别是内网地址阻断、redirect 和响应体大小限制，尚未落地，不能因为 provider 边界已经拆出就视为安全策略已经完成。
 
+### 2026-08-17：第二阶段 Shell executor 已完成
+
+本次保持 `Bash` 的工具名称、输入 schema、默认 120 秒超时、Windows shell 方言检查、取消、超时提示和输出文本不变，完成了以下内部拆分：
+
+- `packages/tools/src/shell/types.ts`：定义 `ShellExecRequest`、`ShellExecSpec`、`ShellRunResult` 和 `ShellExecutor` 契约。
+- `packages/tools/src/shell/executor.ts`：负责补齐 cwd、timeout、env、输出上限、session/settings、宿主 shell 和 runner 状态，并负责进程启动、输出收集、超时、取消及进程树清理。
+- `packages/tools/src/shell/output.ts`：统一 UTF-8 / UTF-16LE 输出解码、换行归一化和输出截断。
+- `packages/tools/src/shell/bash.ts`：改为通过 `createBashTool(executor)` 注入 executor，只负责工具输入、方言检查和结果文本渲染；默认 `bashTool` 继续使用本地默认 executor。
+
+resolved spec 会明确记录 runner 状态：直接走宿主机、优先 sandbox 但允许降级、必须走 sandbox，或者已经有 active Docker sandbox。这个状态是执行前事实，不改变 `@openharness/sandbox` 当前已有的实际降级规则。
+
+运行结果现在能在内部区分：命令返回非 0、runner 启动失败、执行超时和用户取消。Bash 对模型返回的文本暂时保持兼容；下一阶段接 sandbox policy 时，可以基于这些稳定字段给不同失败提供不同处理建议。
+
+executor 只保留最多 `maxOutputChars + 1` 个字符，而不是先把无限输出全部放进内存再截断；工具层仍生成原有 `...[truncated]...` 标记。`env` 已进入 executor 契约，但没有新增到 Bash 工具 schema，供 hooks、cron 或未来调用方直接复用。
+
+验证结果：Shell executor/tool/dialect 共 20 个测试通过；`packages/tools` 中可正常收集的 134 个测试全部通过。完整 tools 测试仍有 3 个测试套件被仓库现有的 `drizzle-orm/better-sqlite3` 依赖缺失阻断；Shell 新增实现和测试已通过单独的严格类型检查。
+
+下一步进入第三阶段 Sandbox policy service。该阶段需要统一 shell、file、MCP、cron 和 child-agent 对 sandbox settings 的解释，并在跨能力结果中统一 runner failure、policy denial 和 command failure；本次只完成了 Shell 一侧的结果分类，没有提前修改其它能力。
+
 ## 本地现状
 
 当前相关实现主要在：

@@ -1,0 +1,255 @@
+import type { ChildProcess } from "node:child_process";
+import {
+  createShellProcess,
+  getActiveSandboxSession,
+  normalizeSandboxConfig,
+  resolveHostShellLauncher,
+  SandboxUnavailableError,
+  signalProcessTree,
+  type CreateShellProcessOptions,
+  type HostShellLauncher,
+  type ResolvedSandboxConfig,
+  type SandboxSession,
+} from "@openharness/sandbox";
+import { decodeShellChunk, DEFAULT_MAX_OUTPUT_CHARS } from "./output.js";
+import type {
+  ShellExecContext,
+  ShellExecRequest,
+  ShellExecSpec,
+  ShellExecutor,
+  ShellRunResult,
+  ShellRunnerError,
+  ShellRunnerSpec,
+} from "./types.js";
+
+export const DEFAULT_SHELL_TIMEOUT_MS = 120_000;
+const TIMEOUT_GRACE_MS = 2_000;
+
+type ShellProcessFactory = (
+  command: string,
+  options: CreateShellProcessOptions,
+) => Promise<ChildProcess>;
+
+export interface DefaultShellExecutorDependencies {
+  createProcess?: ShellProcessFactory;
+  getActiveSession?: (scope: { cwd: string; sessionId?: string }) => SandboxSession | null;
+  resolveHostShell?: () => HostShellLauncher;
+  killProcessTree?: (child: ChildProcess) => void;
+}
+
+export class DefaultShellExecutor implements ShellExecutor {
+  private readonly createProcess: ShellProcessFactory;
+  private readonly getActiveSession: NonNullable<DefaultShellExecutorDependencies["getActiveSession"]>;
+  private readonly resolveHostShell: NonNullable<DefaultShellExecutorDependencies["resolveHostShell"]>;
+  private readonly killProcessTree: NonNullable<DefaultShellExecutorDependencies["killProcessTree"]>;
+
+  constructor(dependencies: DefaultShellExecutorDependencies = {}) {
+    this.createProcess = dependencies.createProcess ?? createShellProcess;
+    this.getActiveSession = dependencies.getActiveSession ?? getActiveSandboxSession;
+    this.resolveHostShell = dependencies.resolveHostShell ?? resolveHostShellLauncher;
+    this.killProcessTree = dependencies.killProcessTree ?? ((child) => signalProcessTree(child, "SIGKILL"));
+  }
+
+  async resolve(request: ShellExecRequest, context: ShellExecContext): Promise<ShellExecSpec> {
+    const cwd = request.workdir ?? context.cwd;
+    const sandbox = normalizeSandboxConfig(context.settings?.sandbox);
+    const activeSession = sandbox.enabled && sandbox.backend === "docker"
+      ? this.getActiveSession({ cwd, sessionId: context.sessionId })
+      : null;
+
+    return {
+      command: request.command,
+      cwd,
+      timeoutMs: request.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
+      maxOutputChars: request.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS,
+      env: request.env,
+      sessionId: context.sessionId,
+      settings: context.settings,
+      hostShell: this.resolveHostShell(),
+      runner: resolveRunner(sandbox, activeSession),
+    };
+  }
+
+  run(spec: ShellExecSpec, signal?: AbortSignal): Promise<ShellRunResult> {
+    return new Promise<ShellRunResult>((resolve) => {
+      let child: ChildProcess | undefined;
+      let output = "";
+      let outputTruncated = false;
+      let settled = false;
+      let timedOut = false;
+      let interrupted = false;
+      let runnerError: ShellRunnerError | undefined;
+      let timer: NodeJS.Timeout | undefined;
+      let graceTimer: NodeJS.Timeout | undefined;
+
+      const append = (chunk: Buffer | string) => {
+        const decoded = decodeShellChunk(chunk);
+        const retainedLimit = spec.maxOutputChars + 1;
+        const available = Math.max(0, retainedLimit - output.length);
+        if (decoded.length > available) outputTruncated = true;
+        if (available > 0) output += decoded.slice(0, available);
+        if (output.length > spec.maxOutputChars) outputTruncated = true;
+      };
+
+      const finish = (exitCode: number | null) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (graceTimer) clearTimeout(graceTimer);
+        signal?.removeEventListener("abort", interrupt);
+        resolve(createRunResult({
+          output,
+          outputTruncated,
+          exitCode,
+          timedOut,
+          interrupted,
+          runnerError,
+        }));
+      };
+
+      const interrupt = () => {
+        if (settled) return;
+        interrupted = true;
+        if (!child) {
+          finish(null);
+          return;
+        }
+        this.killProcessTree(child);
+        child.stdout?.pause();
+        child.stderr?.pause();
+        finish(child.exitCode);
+      };
+
+      if (signal?.aborted) {
+        interrupt();
+        return;
+      }
+      signal?.addEventListener("abort", interrupt, { once: true });
+
+      this.createProcess(spec.command, {
+        cwd: spec.cwd,
+        sessionId: spec.sessionId,
+        settings: spec.settings,
+        env: spec.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      }).then((startedChild) => {
+        child = startedChild;
+        if (signal?.aborted || settled) {
+          this.killProcessTree(startedChild);
+          return;
+        }
+
+        startedChild.stdout?.on("data", append);
+        startedChild.stderr?.on("data", append);
+
+        timer = setTimeout(() => {
+          timedOut = true;
+          this.killProcessTree(startedChild);
+          graceTimer = setTimeout(() => {
+            startedChild.stdout?.pause();
+            startedChild.stderr?.pause();
+            finish(startedChild.exitCode);
+          }, TIMEOUT_GRACE_MS);
+          graceTimer.unref?.();
+        }, spec.timeoutMs);
+
+        startedChild.on("error", (error) => {
+          runnerError = serializeRunnerError(error);
+          append(`${error.message}\n`);
+          finish(null);
+        });
+
+        startedChild.on("close", (code) => {
+          finish(code);
+        });
+      }).catch((error) => {
+        if (settled) return;
+        runnerError = serializeRunnerError(error);
+        append(runnerError.message);
+        finish(null);
+      });
+    });
+  }
+}
+
+export const defaultShellExecutor: ShellExecutor = new DefaultShellExecutor();
+
+function resolveRunner(
+  sandbox: ResolvedSandboxConfig,
+  activeSession: SandboxSession | null,
+): ShellRunnerSpec {
+  if (!sandbox.enabled) {
+    return { mode: "host", fallbackToHost: false };
+  }
+  if (sandbox.backend === "docker" && activeSession?.backend === "docker" && activeSession.active) {
+    return { mode: "sandbox-active", backend: "docker", fallbackToHost: false };
+  }
+  return {
+    mode: sandbox.failIfUnavailable ? "sandbox-required" : "sandbox-preferred",
+    backend: sandbox.backend,
+    fallbackToHost: !sandbox.failIfUnavailable,
+  };
+}
+
+function createRunResult(input: {
+  output: string;
+  outputTruncated: boolean;
+  exitCode: number | null;
+  timedOut: boolean;
+  interrupted: boolean;
+  runnerError?: ShellRunnerError;
+}): ShellRunResult {
+  if (input.interrupted) {
+    return {
+      status: "interrupted",
+      failureKind: "interrupted",
+      output: input.output,
+      outputTruncated: input.outputTruncated,
+      exitCode: input.exitCode,
+    };
+  }
+  if (input.timedOut) {
+    return {
+      status: "timed_out",
+      failureKind: "timeout",
+      output: input.output,
+      outputTruncated: input.outputTruncated,
+      exitCode: input.exitCode,
+    };
+  }
+  if (input.runnerError) {
+    return {
+      status: "failed",
+      failureKind: "runner",
+      output: input.output,
+      outputTruncated: input.outputTruncated,
+      exitCode: input.exitCode,
+      runnerError: input.runnerError,
+    };
+  }
+  if (input.exitCode !== 0) {
+    return {
+      status: "failed",
+      failureKind: "command",
+      output: input.output,
+      outputTruncated: input.outputTruncated,
+      exitCode: input.exitCode,
+    };
+  }
+  return {
+    status: "completed",
+    output: input.output,
+    outputTruncated: input.outputTruncated,
+    exitCode: input.exitCode,
+  };
+}
+
+function serializeRunnerError(error: unknown): ShellRunnerError {
+  if (error instanceof SandboxUnavailableError) {
+    return { name: error.name, message: error.message };
+  }
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message };
+  }
+  return { name: "Error", message: String(error) };
+}

@@ -1,5 +1,19 @@
 export { createDefaultToolRegistry } from "./registry.js";
-export { bashTool } from "./shell/index.js";
+export {
+  bashTool,
+  createBashTool,
+  defaultShellExecutor,
+  DefaultShellExecutor,
+  type ShellExecContext,
+  type ShellExecRequest,
+  type ShellExecSpec,
+  type ShellExecutor,
+  type ShellFailureKind,
+  type ShellRunResult,
+  type ShellRunStatus,
+  type ShellRunnerMode,
+  type ShellRunnerSpec,
+} from "./shell/index.js";
 export {
   buildUnifiedDiff,
   computeFileChange,
