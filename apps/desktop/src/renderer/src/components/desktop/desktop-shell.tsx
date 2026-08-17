@@ -22,8 +22,10 @@ import {
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
 const sidebarMinimumWidth = 236
-const conversationMinimumWidth = 300
-const defaultWorkspaceLayout: Layout = { conversation: 55, utility: 45 }
+const conversationMinimumWidth = 350
+const utilityMinimumWidth = 320
+const workspaceMinimumWidth = conversationMinimumWidth + utilityMinimumWidth
+const defaultWorkspaceLayout: Layout = { conversation: 40, utility: 60 }
 
 export function DesktopShell(): React.JSX.Element {
   const initializeSessions = useDesktopSessionStore((state) => state.initialize)
@@ -51,7 +53,7 @@ export function DesktopShell(): React.JSX.Element {
     panelIds: ["sidebar", "workspace"],
   })
   const workspaceLayout = useDefaultLayout({
-    id: "desktop-workspace-layout-v1",
+    id: "desktop-workspace-layout-v2",
     panelIds: ["conversation", "utility"],
   })
   const workspaceDefaultLayout = workspaceLayout.defaultLayout ?? defaultWorkspaceLayout
@@ -266,7 +268,7 @@ export function DesktopShell(): React.JSX.Element {
 
           <Panel
             id="workspace"
-            minSize={560}
+            minSize={workspaceMinimumWidth}
             className="h-full min-h-0"
             style={{ overflow: "visible" }}
           >
@@ -303,8 +305,8 @@ export function DesktopShell(): React.JSX.Element {
                   id="utility"
                   panelRef={utilityPanelRef}
                   defaultSize={`${defaultWorkspaceLayout.utility}%`}
-                  minSize={320}
-                  maxSize={utilityMaximized ? "100%" : "58%"}
+                  minSize={utilityMinimumWidth}
+                  maxSize={utilityMaximized ? "100%" : "70%"}
                   collapsedSize={0}
                   collapsible
                   groupResizeBehavior="preserve-pixel-size"
