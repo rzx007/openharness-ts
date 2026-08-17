@@ -18,8 +18,8 @@ export type {
 
 /**
  * 只读工具集：swarm worker（teammate）对这些工具自动放行，无需父进程开 full_auto。
- * 对齐 Python `_READ_ONLY_TOOLS`（read_file/glob/grep/web_fetch/web_search/
- * task_get/task_list/task_output/cron_list），TS 额外加 TaskWait、Lsp。
+ * 包含文件、Web、Cron 和统一 Jobs 观察工具。JobSend/JobCancel 会改变后台工作，
+ * 不属于只读集合。
  * 不含 Write/Edit/Bash 等写/执行类工具。
  */
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
@@ -28,14 +28,11 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "Grep",
   "WebFetch",
   "WebSearch",
-  "TaskGet",
-  "TaskList",
-  "TaskOutput",
-  "TaskWait",
+  "JobList",
+  "JobRead",
+  "JobWait",
   "CronList",
   "Lsp",
-  "TerminalRead",
-  "TerminalList",
 ]);
 
 export const LOCAL_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([

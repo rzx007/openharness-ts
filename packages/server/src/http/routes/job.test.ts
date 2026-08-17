@@ -20,11 +20,28 @@ describe("Job routes", () => {
     const list = vi.fn(async () => [snapshot]);
     const app = createJobRoutes({ list } as any);
 
-    const response = await app.request("/?sessionId=session-1&status=running");
+    const response = await app.request(
+      "/?sessionId=session-1&kinds=terminal%2Cagent&statuses=running&includeFinished=false&startedAfter=10&limit=5",
+    );
 
     expect(response.status).toBe(200);
-    expect(list).toHaveBeenCalledWith({ sessionId: "session-1", status: "running" });
+    expect(list).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      kinds: ["terminal", "agent"],
+      statuses: ["running"],
+      includeFinished: false,
+      startedAfter: 10,
+      limit: 5,
+    });
     await expect(response.json()).resolves.toMatchObject({ jobs: [{ id: "terminal-1" }] });
+  });
+
+  it("rejects unsupported list filters", async () => {
+    const app = createJobRoutes({ list: vi.fn() } as any);
+
+    const response = await app.request("/?sessionId=session-1&kinds=cron");
+
+    expect(response.status).toBe(400);
   });
 
   it("keeps wait bounded in the request contract", async () => {
@@ -44,6 +61,7 @@ describe("Job routes", () => {
       timeoutMs: 250,
       after: 1,
       maxChars: undefined,
+      signal: expect.any(AbortSignal),
     });
   });
 });

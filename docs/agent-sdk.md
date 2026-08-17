@@ -79,7 +79,7 @@ const agent = await createOpenHarnessAgent({
 |---|---|
 | `allowedTools` | 宿主给这个 Agent 家族的最大能力。子 Agent 也不能超过它。这个名字保留给 SDK 调用方使用。 |
 | `hostToolCeiling` | `allowedTools` 的明确名字，含义相同：宿主能力上限。内部传给子 Agent 时会用这个名字，避免误会成角色工具集。 |
-| `roleAllowedTools` | 当前 Agent 角色自己想看的工具。例如 Coordinator Leader 只需要 `Agent` / `Workflow` / `TaskWait`，但这不代表 Worker 也只能用这些。 |
+| `roleAllowedTools` | 当前 Agent 角色自己想看的工具。例如 Coordinator Leader 只需要 `Agent` / `Workflow` / `Job*`，但这不代表 Worker 也只能用这些。 |
 | `disallowedTools` | 永远优先禁止。父 Agent 和子 Agent 的禁止列表会合并。 |
 
 最终能看到的工具是：
@@ -92,11 +92,11 @@ const agent = await createOpenHarnessAgent({
 
 ```ts
 await createOpenHarnessAgent({
-  allowedTools: ["Read", "Agent", "TaskWait"],
+  allowedTools: ["Read", "Agent", "JobWait"],
 });
 ```
 
-这个 Agent 可以派出 Worker，但 Worker 仍然只能在 `Read` / `Agent` / `TaskWait` 这个上限内活动，不能因为内置 worker 写了 `tools: ["*"]` 就拿到 `Bash` / `Edit` / `Write`。
+这个 Agent 可以派出 Worker，但 Worker 仍然只能在 `Read` / `Agent` / `JobWait` 这个上限内活动，不能因为内置 worker 写了 `tools: ["*"]` 就拿到 `Bash` / `Edit` / `Write`。
 
 ## Event 与 Effect
 
@@ -158,9 +158,9 @@ durable child session/task/run 不进入 SDK；它们由 daemon 根据 `child.*`
 默认工具在纯 SDK 形态下同样闭环，不依赖 daemon 先建立 task projection：
 
 ```text
-Agent -> context.agent.children.spawnChildAgent() -> childId
-TaskWait(childId) -> children.awaitChildAgent(childId)
-TaskStop(childId) -> children.interruptChildAgent(childId)
+Agent -> context.agent.children.spawnChildAgent() -> jobId
+JobWait(jobId) -> AgentJobHost.wait()
+JobCancel(jobId) -> AgentJobHost.cancel()
 Workflow -> spawn framework child -> await/stop the same child backend
 ```
 
@@ -201,7 +201,8 @@ daemon 不实例化 QueryEngine，不接收 runtime factory，也不复制 child
 | 默认 composition root | `packages/agent-runtime/src/default-runtime.ts` |
 | ordered sink 与 observers | `packages/agent-runtime/src/event-source.ts` |
 | child lifecycle | `packages/agent-runtime/src/child-agent.ts` |
-| Agent/TaskWait/TaskStop live child 路由 | `packages/tools/src/task/index.ts` |
+| Agent producer | `packages/tools/src/agent/agent-tools.ts` |
+| Job lifecycle routing | `packages/tools/src/job`、`packages/server/src/jobs` |
 | Workflow child spawn/wait | `packages/tools/src/agent/workflow-runner.ts` |
 | child worktree | `packages/agent-runtime/src/child-environment.ts` |
 | daemon application composition | `packages/server/src/daemon-application.ts` |

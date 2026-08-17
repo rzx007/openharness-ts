@@ -157,7 +157,7 @@ QueryEngine
 ```
 
 工具通过 `ToolContext.agent` 拿到框架内部的执行上下文。
-Agent / SendMessage / Workflow 等工具用 `context.agent.children` 管子 agent；领域遥测用 `context.agent.emit(domain.event)`。
+`Agent` / `Workflow` producer 用 `context.agent.children` 管子 agent；`JobSend` / `JobWait` / `JobCancel` 通过 `AgentJobHost` 路由到同一批 handle，领域遥测用 `context.agent.emit(domain.event)`。
 
 ## 子 Agent
 

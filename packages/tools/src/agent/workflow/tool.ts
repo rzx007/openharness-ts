@@ -45,7 +45,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
     description:
       "Run a hard-scheduled multi-agent workflow. Use this when work has an explicit DAG, " +
       "sequential steps, a pipeline, retries, failure policy, or concurrency limits. " +
-      "For one-off delegation, Agent plus TaskWait is still simpler.",
+      "For one-off delegation, Agent plus JobWait is still simpler.",
     inputSchema: {
       type: "object",
       properties: {

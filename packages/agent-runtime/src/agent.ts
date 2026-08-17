@@ -30,6 +30,7 @@ import {
   type RuntimeBundle,
 } from "@openharness/core";
 import { McpClientManager, type McpConnection } from "@openharness/mcp";
+import { LocalAgentJobHost } from "@openharness/tools";
 
 import { createOpenHarnessRuntime } from "./default-runtime.js";
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
@@ -661,7 +662,7 @@ async function createOpenHarnessAgentInternal(
     hostCapabilities: {
       cron: Boolean(internal.effects.cron),
       terminal: Boolean(options.terminal),
-      jobs: Boolean(options.jobs),
+      jobs: true,
     },
     skillRegistry: discovery.skillRegistry,
   });
@@ -696,7 +697,6 @@ async function createOpenHarnessAgentInternal(
       }),
     );
     runtime.queryEngine.setTerminal(options.terminal);
-    runtime.queryEngine.setJobs(options.jobs);
     runtime.addCleanup(() => mcpManager.disconnectAll());
 
     const memory =
@@ -727,6 +727,9 @@ async function createOpenHarnessAgentInternal(
           identity,
         }),
     });
+    runtime.queryEngine.setJobs(
+      options.jobs ?? new LocalAgentJobHost(cwd, session.id, children),
+    );
     return new DefaultOpenHarnessAgent(
       runtime,
       session,

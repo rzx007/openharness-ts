@@ -215,9 +215,9 @@ describe("AgentDefinitions", () => {
     expect(getAgentDefinition("worker")?.tools).toEqual(["*"]);
     expect(getAgentDefinition("worker")?.disallowedTools).toEqual([
       "Agent",
-      "SendMessage",
-      "TaskStop",
-      "TaskWait",
+      "JobSend",
+      "JobCancel",
+      "JobWait",
       "Workflow",
       "TeamCreate",
       "TeamDelete",
@@ -335,7 +335,7 @@ describe("COORDINATOR_SYSTEM_PROMPT anchors (Python v0.1.9 alignment)", () => {
     "<task-notification>",
     "subscribe_pr_activity / unsubscribe_pr_activity",
     "Parallelism is your superpower",
-    "call the `TaskWait` tool with its `task_id`",
+    "Wait for one or more workers with `JobWait",
   ];
 
   for (const anchor of anchors) {

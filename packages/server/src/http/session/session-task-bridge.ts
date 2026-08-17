@@ -202,22 +202,22 @@ export class SessionTaskBridgeManager {
       const durableTask = this.context.store.findSessionTaskByManagerTaskId(sessionId, task.id) ??
         this.context.store.getSessionTask(task.id);
       if (durableTask?.sessionId === sessionId) {
-        this.trackTask(manager, task.id);
+        this.trackTask(manager, task.id, durableTask.id);
         this.syncPersistentTask(task, manager, durableTask.id);
       }
     }
   }
 
-  trackTask(manager: TaskManager, taskId: string): void {
+  trackTask(manager: TaskManager, taskId: string, durableTaskId = taskId): void {
     const tracked = this.trackedTasks.get(manager as object) ?? new Set<string>();
     if (tracked.has(taskId)) return;
     tracked.add(taskId);
     this.trackedTasks.set(manager as object, tracked);
     manager.registerTaskListener((task) => {
       if (task.id !== taskId) return;
-      const persisted = this.context.store.getSessionTask(taskId);
+      const persisted = this.context.store.getSessionTask(durableTaskId);
       if (!persisted) return;
-      this.syncPersistentTask(task, manager, persisted.id);
+      this.syncPersistentTask(task, manager, durableTaskId);
     });
   }
 

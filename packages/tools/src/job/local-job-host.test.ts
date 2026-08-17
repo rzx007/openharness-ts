@@ -1,0 +1,146 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import type {
+  AgentChildDirectory,
+  AgentChildHandle,
+  AgentChildResult,
+} from "@openharness/core";
+import {
+  createWorkflowPlan,
+  createWorkflowRunSnapshot,
+  WorkflowRunStore,
+} from "@openharness/coordinator";
+import { getTaskManager, resetTaskManager } from "@openharness/services/tasks";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { LocalAgentJobHost } from "./local-job-host.js";
+
+const createdDirectories: string[] = [];
+
+afterEach(() => {
+  for (const cwd of createdDirectories.splice(0)) {
+    resetTaskManager({ cwd, sessionId: "session-1" });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+describe("LocalAgentJobHost adapter", () => {
+  it("lists, sends to, and waits for a framework child", async () => {
+    const cwd = temporaryDirectory();
+    let state: AgentChildHandle["state"] = "running";
+    let settle!: (result: AgentChildResult) => void;
+    const result = new Promise<AgentChildResult>((resolve) => { settle = resolve; });
+    const send = vi.fn(async () => ({ sessionId: "child-session", inputId: "input-2", runId: "run-2" }));
+    const handle: AgentChildHandle = {
+      id: "child-1",
+      sessionId: "child-session",
+      get state() { return state; },
+      result,
+      send,
+      interrupt: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    };
+    const host = new LocalAgentJobHost(cwd, "session-1", directory(handle));
+
+    await expect(host.list({
+      sessionId: "session-1",
+      kinds: ["agent"],
+      statuses: ["running"],
+    })).resolves.toEqual([
+      expect.objectContaining({ id: "child-1", kind: "agent", status: "running" }),
+    ]);
+
+    await host.send({ sessionId: "session-1", jobId: "child-1", data: "continue" });
+    expect(send).toHaveBeenCalledWith({ content: "continue" });
+
+    const waiting = host.wait({ sessionId: "session-1", jobId: "child-1", timeoutMs: 1_000 });
+    state = "idle";
+    settle({ status: "completed", output: "child result" });
+
+    await expect(waiting).resolves.toMatchObject({
+      text: "child result",
+      timedOut: false,
+      snapshot: { id: "child-1", status: "completed" },
+    });
+  });
+
+  it("rejects a different session owner", async () => {
+    const cwd = temporaryDirectory();
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+
+    await expect(host.list({ sessionId: "session-2" })).rejects.toThrow("owner session mismatch");
+  });
+
+  it("continues a completed local Agent session through JobSend", async () => {
+    const cwd = temporaryDirectory();
+    const manager = getTaskManager({ cwd, sessionId: "session-1" });
+    const onInput = vi.fn(async () => undefined);
+    const task = manager.registerSessionTask({
+      id: "local-agent-1",
+      description: "review",
+      cwd,
+      sessionId: "session-1",
+      childSessionId: "child-session",
+      prompt: "review",
+      onInput,
+      onStop: vi.fn(async () => undefined),
+    });
+    await manager.completeSessionTask(task.id, { status: "completed", output: "first result" });
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+
+    await expect(host.list({ sessionId: "session-1" })).resolves.toEqual([
+      expect.objectContaining({
+        id: task.id,
+        status: "completed",
+        capabilities: expect.objectContaining({ send: true }),
+      }),
+    ]);
+    await host.send({ sessionId: "session-1", jobId: task.id, data: "continue" });
+
+    expect(onInput).toHaveBeenCalledWith("continue");
+    expect(manager.getTask(task.id)?.status).toBe("running");
+  });
+
+  it("returns structured Workflow details from JobRead", async () => {
+    const cwd = temporaryDirectory();
+    const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
+    new WorkflowRunStore({ cwd }).save(createWorkflowRunSnapshot({
+      runId: "workflow-1",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "review in progress",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(["review"]),
+      createdAt: 10,
+    }));
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+
+    await expect(host.read({ sessionId: "session-1", jobId: "workflow-1" }))
+      .resolves.toMatchObject({
+        snapshot: { kind: "workflow", status: "running" },
+        details: {
+          status: "running",
+          plan: { executionOrder: ["review"] },
+          runningTaskIds: ["review"],
+        },
+      });
+  });
+});
+
+function directory(...handles: AgentChildHandle[]): AgentChildDirectory {
+  return {
+    get: (id) => handles.find((handle) => handle.id === id),
+    getBySessionId: (sessionId) => handles.find((handle) => handle.sessionId === sessionId),
+    list: () => handles,
+  };
+}
+
+function temporaryDirectory(): string {
+  const cwd = mkdtempSync(join(tmpdir(), "openharness-local-jobs-"));
+  createdDirectories.push(cwd);
+  return cwd;
+}

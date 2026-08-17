@@ -78,13 +78,50 @@ describe("DaemonJobService", () => {
     const host = service.createAgentHost({ id: "session-1" } as any);
     await expect(host.list({ sessionId: "session-2" })).rejects.toThrow("owner session mismatch");
   });
+
+  it.each([
+    { type: "shell", status: "running" },
+    { type: "agent", status: "stopped" },
+    { type: "agent", status: "interrupted" },
+  ] as const)("rejects input when a $status $type job does not advertise send", async (change) => {
+    const projected = { ...task, ...change };
+    const { service, manager } = createService(projected);
+
+    await expect(service.send({
+      sessionId: "session-1",
+      jobId: projected.id,
+      data: "continue",
+    })).rejects.toThrow("does not accept input");
+    expect(manager.writeToTask).not.toHaveBeenCalled();
+  });
+
+  it.each(["pending", "running", "completed", "failed"] as const)(
+    "sends input to a %s Agent job so its session can continue",
+    async (status) => {
+      const projected = { ...task, status };
+      const { service, manager } = createService(projected);
+
+      await service.send({
+        sessionId: "session-1",
+        jobId: projected.id,
+        data: "continue",
+      });
+
+      expect(manager.writeToTask).toHaveBeenCalledWith("manager-1", "continue");
+      await expect(service.list({ sessionId: "session-1" })).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: projected.id, capabilities: expect.objectContaining({ send: true }) }),
+        ]),
+      );
+    },
+  );
 });
 
-function createService() {
+function createService(projectedTask: SessionTaskRecord = task) {
   const store = {
     getSession: vi.fn((id: string) => id === "session-1" ? { id, cwd: "/repo" } : undefined),
-    listSessionTasks: vi.fn(() => [task]),
-    getSessionTask: vi.fn((id: string) => id === task.id ? task : undefined),
+    listSessionTasks: vi.fn(() => [projectedTask]),
+    getSessionTask: vi.fn((id: string) => id === projectedTask.id ? projectedTask : undefined),
   };
   const terminals = {
     list: vi.fn(async () => [terminal]),
@@ -95,13 +132,13 @@ function createService() {
     wait: vi.fn(),
   };
   const projection = {
-    list: vi.fn(() => ({ tasks: [task] })),
-    stop: vi.fn(async () => ({ task })),
+    list: vi.fn(() => ({ tasks: [projectedTask] })),
+    stop: vi.fn(async () => ({ task: projectedTask })),
   };
   const manager = {
     readTaskOutput: vi.fn(() => "task output"),
     writeToTask: vi.fn(async () => undefined),
-    stopTask: vi.fn(async () => task),
+    stopTask: vi.fn(async () => projectedTask),
   };
   return {
     service: new DaemonJobService(store as any, terminals as any, projection, () => manager),

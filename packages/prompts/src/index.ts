@@ -283,16 +283,17 @@ export function buildDelegationSection(): string {
   return [
     "# Delegation And Subagents",
     "",
-    "OpenHarness can delegate background work with the `agent` tool.",
+    "OpenHarness can delegate background work with the `Agent` tool.",
     "Use it when the user explicitly asks for a subagent, background worker, or parallel investigation, " +
       "or when the task clearly benefits from splitting off a focused worker.",
     "",
     "Default pattern:",
-    '- Spawn with `agent(description=..., prompt=..., subagent_type="worker")`.',
+    '- Spawn with `Agent(description=..., prompt=..., subagentType="worker")`; it returns a `jobId`.',
     "- Inspect running or recorded workers with `/agents`.",
     "- Inspect one worker in detail with `/agents show TASK_ID`.",
-    "- Send follow-up instructions with `send_message(task_id=..., message=...)`.",
-    "- Read worker output with `task_output(task_id=...)`.",
+    "- Wait for workers with `JobWait(jobIds=[...])` and inspect one immediately with `JobRead(jobId=...)`.",
+    "- Send follow-up instructions with `JobSend(jobId=..., data=...)`.",
+    "- Stop unwanted work explicitly with `JobCancel(jobId=...)`.",
     "",
     "Prefer a normal direct answer for simple tasks. Use subagents only when they materially help.",
   ].join("\n");

@@ -35,7 +35,7 @@ describe("resolveAutoApproveTools", () => {
     expect(tools.has("Glob")).toBe(false);
     expect(tools.has("Grep")).toBe(false);
     expect(tools.has("Lsp")).toBe(false);
-    expect(tools.has("TaskList")).toBe(true);
+    expect(tools.has("JobList")).toBe(true);
     expect(tools.has("WebFetch")).toBe(true);
     expect(tools.has("Write")).toBe(false);
     expect(tools.has("Bash")).toBe(false);

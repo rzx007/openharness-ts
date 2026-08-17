@@ -2,9 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@openharness/coordinator", () => ({
   getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
-  getCoordinatorTools: () => ["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"],
+  getCoordinatorTools: () => [
+    "Agent",
+    "JobList",
+    "JobRead",
+    "JobWait",
+    "JobSend",
+    "JobCancel",
+    "Workflow",
+  ],
   getCoordinatorUserContext: vi.fn(() => ({
-    workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, TaskWait",
+    workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, JobWait",
   })),
 }));
 
@@ -139,7 +147,15 @@ describe("createDaemonAgentLoader", () => {
     expect(options.systemPrompt).toContain("## Additional Session Instructions");
     expect(options.systemPrompt).toContain("Keep updates short.");
     expect(options.allowedTools).toEqual(["Bash"]);
-    expect(options.roleAllowedTools).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);
+    expect(options.roleAllowedTools).toEqual([
+      "Agent",
+      "JobList",
+      "JobRead",
+      "JobWait",
+      "JobSend",
+      "JobCancel",
+      "Workflow",
+    ]);
     expect(getCoordinatorUserContext).toHaveBeenCalledWith(
       [],
       expect.stringContaining(".openharness"),

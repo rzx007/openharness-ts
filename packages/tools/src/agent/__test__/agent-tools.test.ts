@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { agentTool, sendMessageTool } from "../index.js";
+import { agentTool } from "../index.js";
 import type { AgentChildController, AgentExecutionContext } from "@openharness/core";
 
 type SpawnInput = Parameters<AgentChildController["spawnChildAgent"]>[0];
@@ -110,9 +110,9 @@ describe("agentTool framework child controller", () => {
       allowedTools: ["*"],
       disallowedTools: [
         "Agent",
-        "SendMessage",
-        "TaskStop",
-        "TaskWait",
+        "JobSend",
+        "JobCancel",
+        "JobWait",
         "Workflow",
         "TeamCreate",
         "TeamDelete",
@@ -147,6 +147,24 @@ describe("agentTool framework child controller", () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("worktree-alpha-build-xyz");
     expect(text).toContain("/wt/alpha-build-xyz");
+  });
+
+  it("returns the worker identity through the Jobs protocol", async () => {
+    const { agent } = createAgentContext();
+
+    const result = await agentTool.execute(
+      { description: "d", prompt: "do work" },
+      { cwd: "/work", agent },
+    );
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as Record<string, unknown>;
+
+    expect(payload).toMatchObject({
+      kind: "job",
+      action: "created",
+      jobId: "task_1",
+      jobKind: "agent",
+      sessionId: "child-1",
+    });
   });
 
   it("passes permissionMode through to the framework child controller", async () => {
@@ -196,23 +214,4 @@ describe("agentTool framework child controller", () => {
     expect(text).toContain("isolate requested but unavailable");
   });
 
-  it("sends follow-up input through the framework controller", async () => {
-    const { agent, children } = createAgentContext(async () => ({
-      id: "task_follow_up",
-      sessionId: "child-follow-up",
-      result: Promise.resolve({ status: "completed", output: "done" }),
-    }));
-    await agentTool.execute(
-      { description: "d", prompt: "do work" },
-      { cwd: "/work", agent },
-    );
-
-    const result = await sendMessageTool.execute(
-      { taskId: "task_follow_up", message: "continue" },
-      { cwd: "/work", agent },
-    );
-
-    expect(result.isError).toBeUndefined();
-    expect(children.sendChildInput).toHaveBeenCalledWith("task_follow_up", { content: "continue" });
-  });
 });

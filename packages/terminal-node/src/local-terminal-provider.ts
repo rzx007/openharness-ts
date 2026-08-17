@@ -259,26 +259,29 @@ export class LocalTerminalProvider implements TerminalProvider {
 
     return await new Promise<TerminalWaitResult>((resolve, reject) => {
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe: () => void = () => {};
       const finish = (timedOut: boolean, error?: unknown) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         unsubscribe();
         input.signal?.removeEventListener("abort", onAbort);
         if (error) reject(error);
         else resolve(this.waitResult(input, timedOut));
       };
-      const unsubscribe = this.subscribe((event) => {
+      unsubscribe = this.subscribe((event) => {
         if (event.terminalId !== input.terminalId) return;
         if (event.type === "exit" || (event.type === "status" && event.status === "killed")) {
           finish(false);
         }
       });
-      const timer = setTimeout(() => finish(true), input.timeoutMs);
+      timer = setTimeout(() => finish(true), input.timeoutMs);
       timer.unref?.();
       const onAbort = () => finish(false, input.signal?.reason ?? new Error("Terminal wait aborted."));
       if (input.signal?.aborted) onAbort();
       else input.signal?.addEventListener("abort", onAbort, { once: true });
+      if (isTerminalStatus(this.requireSession(input.terminalId).info.status)) finish(false);
     });
   }
 

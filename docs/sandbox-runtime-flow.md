@@ -62,7 +62,7 @@ flowchart LR
 
 - `process-control.ts` 提供统一的整棵进程停止入口。
 - `docker-backend.ts` 给每次容器命令分配执行编号，并记录容器内进程组。
-- `AbortSignal`、Bash 超时、TaskStop 和 runtime 关闭都走这套停止规则。
+- `AbortSignal`、Bash 超时、`JobCancel` 和 runtime 关闭都走这套停止规则。
 - Docker 镜像必须提供 `node`、`rg`、`setsid`、`sleep` 和 `/bin/kill`。默认内置 Dockerfile 已包含这些依赖；自定义镜像缺少它们时，shell 停止或文件工具会失败。
 - 可复用容器关闭 runtime 时仍保留容器，但会先清掉该 runtime 启动且仍在运行的命令。
 

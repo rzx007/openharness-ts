@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart LR
-  Tool["Agent / SendMessage / Workflow"]
+  Tool["Agent / Workflow producers + Job controls"]
   Manager["AgentChildManager"]
   Registry["tree-wide AgentChildRegistry"]
   Child["child OpenHarnessAgent"]
@@ -34,27 +34,28 @@ flowchart LR
 8. child 启动普通 run，发布 input/run/output/tool/terminal events；`run.started` 投影成功且 receipt 与 manager 预分配的 session/input/run ID 完全一致后，spawn receipt 才返回。
 9. daemon 使用同一个 event reducer 创建 child input/run/transcript 并绑定/完成 task；child input metadata 由 `input.accepted` 原样携带，application 不再补造记录。
 
-daemon 不向 framework 返回 sessionId、taskId、run host、controls 或 opaque state。task 使用 `childId` 作为可见 ID，因此 Agent 返回的 `task_id` 可直接用于 TaskWait/SendMessage。
+daemon 不向 framework 返回 run host、controls 或 opaque state。parent-visible task 使用 `childId` 作为可见 ID，因此 `Agent` 返回的 `jobId` 可以直接交给 `JobRead/Wait/Send/Cancel`。
 
 ## Wait 闭环
 
 ```text
-Agent / Workflow -> spawnChildAgent() -> childId
-TaskWait(childId)
-  -> children.hasChildAgent(childId)
-  -> children.awaitChildAgent(childId)
-  -> completed / failed / stopped result
+Agent / Workflow -> spawnChildAgent() -> jobId
+JobWait(jobId)
+  -> AgentJobHost.resolve(jobId)
+  -> standalone 观察 live child；daemon 刷新 durable task
+  -> completed / failed / killed snapshot
 
-TaskCreate taskId
-  -> TaskManager.awaitTask(taskId)
+TaskCreate -> shell jobId
+  -> AgentJobHost 读取 TaskManager 状态
 ```
 
-framework child 的 wait/stop 不依赖 daemon task projection。daemon projector 可以并行建立同 ID 的 durable task，负责 UI、恢复和审计；它不是 SDK 执行闭环的一环。`heartbeatSeconds` 只观察 live child，不 interrupt；硬超时与 TaskStop 才调用 `interruptChildAgent()`。
+framework child 的执行不依赖 daemon task projection。daemon projector 可以并行建立同 ID 的 durable task，负责 UI、恢复和审计；它不是 SDK 执行闭环的一环。`JobWait` timeout 只返回当前快照，不会 interrupt；只有显式 `JobCancel` 才停止 child。
 
 ## Follow-up
 
 ```text
-Agent SendMessage
+JobSend(jobId)
+  -> AgentJobHost.send(jobId, input)
   -> context.agent.children.sendChildInput(childId, input)
 
 HTTP child prompt
@@ -62,7 +63,7 @@ HTTP child prompt
   -> LiveChildAgentDirectory.send(childSessionId)
   -> rootAgent.children.get(childId).send(input)
 
-SendMessage 的普通 TaskManager fallback
+JobSend 的 TaskManager session-task 路由
   -> registered session-task callback
   -> rootAgent.children.get(childId).send(input)
 ```
@@ -77,7 +78,7 @@ SendMessage 的普通 TaskManager fallback
 ## Stop / interrupt / close
 
 ```text
-TaskStop / HTTP interrupt -> child handle.interrupt()
+JobCancel / HTTP interrupt -> child handle.interrupt()
 parent run abort          -> manager interrupt(childId)
 parent agent close        -> manager.closeAll()
 ```

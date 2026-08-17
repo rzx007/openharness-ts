@@ -280,4 +280,47 @@ describe("WorkflowRunStore", () => {
       summary: "user cancelled",
     }));
   });
+
+  it("does not launch pending work or overwrite an externally cancelled active run", async () => {
+    const store = new WorkflowRunStore({ dir: tempDir() });
+    const started: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const workflow = runPersistentWorkflow(
+      {
+        mode: "parallel",
+        maxConcurrency: 1,
+        tasks: [{ id: "first" }, { id: "second" }],
+      },
+      async ({ task, reportProgress }) => {
+        started.push(task.id);
+        if (task.id === "first") {
+          reportProgress?.({ metadata: { taskManagerTaskId: "task-first" } });
+          await new Promise<void>((resolve) => { releaseFirst = resolve; });
+        }
+        return { summary: `${task.id} done` };
+      },
+      { store, runId: "run-active-cancel" },
+    );
+
+    await vi.waitFor(() => {
+      expect(store.load("run-active-cancel")?.runningTasks.first?.metadata).toMatchObject({
+        taskManagerTaskId: "task-first",
+      });
+    });
+    await cancelPersistentWorkflow("run-active-cancel", {
+      store,
+      reason: "stop active run",
+      stopTask: async () => releaseFirst?.(),
+    });
+    await workflow;
+
+    expect(started).toEqual(["first"]);
+    expect(store.load("run-active-cancel")).toMatchObject({
+      status: "failed",
+      termination: "cancelled",
+      summary: "stop active run",
+      runningTaskIds: [],
+    });
+    expect(store.loadEvents("run-active-cancel").map((event) => event.type)).not.toContain("workflow_finished");
+  });
 });

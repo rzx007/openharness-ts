@@ -72,6 +72,7 @@ import type {
   TerminalWriteRequest,
 } from "@openharness/terminal";
 import type {
+  JobKind,
   JobReadResult,
   JobSnapshot,
   JobStatus,
@@ -1076,10 +1077,26 @@ export class OpenHarnessClient {
   }
 
   async listJobs(
-    options: { sessionId: string; status?: JobStatus; signal?: AbortSignal },
+    options: {
+      sessionId: string;
+      kinds?: JobKind[];
+      statuses?: JobStatus[];
+      startedAfter?: number;
+      startedBefore?: number;
+      updatedAfter?: number;
+      updatedBefore?: number;
+      includeFinished?: boolean;
+      limit?: number;
+      signal?: AbortSignal;
+    },
   ): Promise<JobSnapshot[]> {
-    const { signal, ...query } = options;
-    const response = await this.request<{ jobs: JobSnapshot[] }>(this.path("/jobs", query), { signal });
+    const { signal, kinds, statuses, includeFinished, ...query } = options;
+    const response = await this.request<{ jobs: JobSnapshot[] }>(this.path("/jobs", {
+      ...query,
+      ...(kinds ? { kinds: kinds.join(",") } : {}),
+      ...(statuses ? { statuses: statuses.join(",") } : {}),
+      ...(includeFinished !== undefined ? { includeFinished: String(includeFinished) } : {}),
+    }), { signal });
     return response.jobs;
   }
 

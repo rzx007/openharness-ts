@@ -6,3 +6,7 @@ The package defines owner-scoped snapshots and the common `list`, `read`, `wait`
 `cancel` operations. Producers keep ownership of execution and storage: terminals remain in the
 terminal provider, tasks remain in `TaskManager` and `SessionTaskRecord`, and workflows remain in
 `WorkflowRunStore`.
+
+See [Jobs 统一后台任务协议](../../docs/jobs-protocol.md) for lifecycle, ownership, cursor, and
+adapter requirements. The proposed hard cut from Task/Workflow-specific controls is documented in
+[Jobs Task/Workflow Convergence](../../docs/jobs-task-workflow-convergence.md).

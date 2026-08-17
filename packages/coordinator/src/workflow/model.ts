@@ -316,6 +316,8 @@ export interface WorkflowRunSnapshot {
 export interface WorkflowRunOptions {
   runId?: string;
   ownerSession?: string;
+  /** Return a reason when an external controller has requested this run to stop scheduling work. */
+  shouldStop?: () => string | undefined;
   onSnapshot?: (snapshot: WorkflowRunSnapshot) => void;
   onEvent?: (event: WorkflowRunEvent) => void;
   initialResults?: Record<string, WorkflowTaskRunResult>;

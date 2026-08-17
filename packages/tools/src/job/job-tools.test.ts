@@ -18,8 +18,19 @@ const snapshot: JobSnapshot = {
 describe("job tools", () => {
   it("lists only through the durable session owner", async () => {
     const list = vi.fn(async () => [snapshot]);
-    const result = await jobListTool.execute({}, context({ list }));
-    expect(list).toHaveBeenCalledWith({ sessionId: "session-1" });
+    const result = await jobListTool.execute({
+      kinds: ["terminal"],
+      statuses: ["running"],
+      includeFinished: false,
+      limit: 5,
+    }, context({ list }));
+    expect(list).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      kinds: ["terminal"],
+      statuses: ["running"],
+      includeFinished: false,
+      limit: 5,
+    });
     expect(payload(result)).toMatchObject({ kind: "job", action: "list", jobs: [{ id: "terminal-1" }] });
   });
 
@@ -37,9 +48,55 @@ describe("job tools", () => {
   it("waits without turning timeout into cancellation", async () => {
     const wait = vi.fn(async () => ({ text: "", cursor: 4, truncated: false, snapshot, timedOut: true }));
     const cancel = vi.fn(async () => snapshot);
-    const result = await jobWaitTool.execute({ jobId: "terminal-1", timeoutSeconds: 2 }, context({ wait, cancel }));
-    expect(payload(result)).toMatchObject({ action: "wait", timedOut: true });
+    const result = await jobWaitTool.execute({ jobIds: ["terminal-1"], timeoutSeconds: 2 }, context({ wait, cancel }));
+    expect(payload(result)).toMatchObject({
+      action: "wait",
+      results: [{ jobId: "terminal-1", timedOut: true }],
+    });
     expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("waits for several jobs concurrently through the single-job host protocol", async () => {
+    const wait = vi.fn(async (input) => ({
+      text: input.jobId,
+      cursor: 1,
+      truncated: false,
+      snapshot: { ...snapshot, id: input.jobId },
+      timedOut: false,
+    }));
+    const result = await jobWaitTool.execute({
+      jobIds: ["terminal-1", "task-2"],
+      timeoutSeconds: 1,
+      after: { "terminal-1": 4, "task-2": 7 },
+    }, context({ wait }));
+
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(expect.objectContaining({ jobId: "terminal-1", after: 4 }));
+    expect(wait).toHaveBeenCalledWith(expect.objectContaining({ jobId: "task-2", after: 7 }));
+    expect(payload(result)).toMatchObject({
+      results: [
+        { jobId: "terminal-1", text: "terminal-1" },
+        { jobId: "task-2", text: "task-2" },
+      ],
+    });
+  });
+
+  it("keeps one failed wait from hiding the other job results", async () => {
+    const wait = vi.fn(async (input) => {
+      if (input.jobId === "missing") throw new Error("Job not found: missing");
+      return { text: "done", cursor: 1, truncated: false, snapshot, timedOut: false };
+    });
+    const result = await jobWaitTool.execute({
+      jobIds: ["terminal-1", "missing"],
+      timeoutSeconds: 1,
+    }, context({ wait }));
+
+    expect(payload(result)).toMatchObject({
+      results: [
+        { jobId: "terminal-1", text: "done" },
+        { jobId: "missing", error: "Job not found: missing" },
+      ],
+    });
   });
 
   it("cancels through the common host", async () => {

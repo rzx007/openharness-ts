@@ -228,9 +228,9 @@ const VERIFICATION_CRITICAL_REMINDER =
 
 const WORKER_DISALLOWED_TOOLS = [
   "Agent",
-  "SendMessage",
-  "TaskStop",
-  "TaskWait",
+  "JobSend",
+  "JobCancel",
+  "JobWait",
   "Workflow",
   "TeamCreate",
   "TeamDelete",
@@ -483,7 +483,7 @@ const BUILTIN_AGENTS: AgentDefinition[] = [
       "(2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic " +
       "API) - API usage, tool use, Anthropic SDK usage. **IMPORTANT:** Before spawning a " +
       "new agent, check if there is already a running or recently completed claude-code-guide " +
-      "agent that you can continue via SendMessage.",
+      "agent that you can continue via JobSend.",
     tools: ["Glob", "Grep", "Read", "WebFetch", "WebSearch"],
     systemPrompt: CLAUDE_CODE_GUIDE_PROMPT,
     permissionMode: "dontAsk",

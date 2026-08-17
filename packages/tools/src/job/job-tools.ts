@@ -1,5 +1,5 @@
 import type { ToolContext, ToolDefinition, ToolResult } from "@openharness/core";
-import type { JobStatus } from "@openharness/jobs";
+import type { JobKind, JobStatus } from "@openharness/jobs";
 
 const jobIdProperty = { type: "string", description: "Job id returned by a long-running tool or JobList" };
 
@@ -9,7 +9,22 @@ export const jobListTool: ToolDefinition = {
   inputSchema: {
     type: "object",
     properties: {
-      status: { type: "string", enum: ["running", "stopping", "completed", "killed", "failed"] },
+      kinds: {
+        type: "array",
+        items: { type: "string", enum: ["terminal", "shell", "agent", "dream", "workflow"] },
+        description: "Only return these job kinds",
+      },
+      statuses: {
+        type: "array",
+        items: { type: "string", enum: ["running", "stopping", "completed", "killed", "failed"] },
+        description: "Only return these lifecycle states",
+      },
+      startedAfter: { type: "number", description: "Inclusive Unix timestamp in milliseconds" },
+      startedBefore: { type: "number", description: "Inclusive Unix timestamp in milliseconds" },
+      updatedAfter: { type: "number", description: "Inclusive Unix timestamp in milliseconds" },
+      updatedBefore: { type: "number", description: "Inclusive Unix timestamp in milliseconds" },
+      includeFinished: { type: "boolean", default: true },
+      limit: { type: "number", minimum: 1 },
     },
   },
   async execute(input, context) {
@@ -18,7 +33,7 @@ export const jobListTool: ToolDefinition = {
     try {
       const jobs = await host.jobs.list({
         sessionId: host.sessionId,
-        ...(input.status ? { status: input.status as JobStatus } : {}),
+        ...optionalListFilters(input),
       });
       return result("list", { jobs });
     } catch (error) {
@@ -58,16 +73,25 @@ export const jobReadTool: ToolDefinition = {
 
 export const jobWaitTool: ToolDefinition = {
   name: "JobWait",
-  description: "Wait for a job to finish without cancelling it, bounded by timeoutSeconds.",
+  description: "Wait for one or more jobs to finish without cancelling them, bounded by timeoutSeconds.",
   inputSchema: {
     type: "object",
     properties: {
-      jobId: jobIdProperty,
-      after: { type: "number", description: "Cursor returned by an earlier JobRead or JobWait" },
+      jobIds: {
+        type: "array",
+        items: jobIdProperty,
+        minItems: 1,
+        description: "Job ids to wait for concurrently",
+      },
+      after: {
+        type: "object",
+        additionalProperties: { type: "number" },
+        description: "Per-job cursors returned by earlier JobRead or JobWait calls",
+      },
       timeoutSeconds: { type: "number", default: 30 },
       maxChars: { type: "number", default: 12000 },
     },
-    required: ["jobId"],
+    required: ["jobIds"],
   },
   async execute(input, context) {
     const host = resolveHost(context);
@@ -75,15 +99,26 @@ export const jobWaitTool: ToolDefinition = {
     try {
       const timeoutSeconds = optionalNumber(input.timeoutSeconds) ?? 30;
       if (timeoutSeconds <= 0) throw new Error("timeoutSeconds must be positive.");
-      const waited = await host.jobs.wait({
-        sessionId: host.sessionId,
-        jobId: requiredString(input.jobId, "jobId"),
-        timeoutMs: timeoutSeconds * 1_000,
-        after: optionalNumber(input.after),
-        maxChars: optionalNumber(input.maxChars),
-        signal: context.abortSignal,
-      });
-      return result("wait", waited);
+      const jobIds = requiredStringArray(input.jobIds, "jobIds");
+      const cursors = optionalCursorMap(input.after);
+      const results = await Promise.all(jobIds.map(async (jobId) => {
+        try {
+          return {
+            jobId,
+            ...await host.jobs.wait({
+              sessionId: host.sessionId,
+              jobId,
+              timeoutMs: timeoutSeconds * 1_000,
+              ...(cursors?.[jobId] !== undefined ? { after: cursors[jobId] } : {}),
+              maxChars: optionalNumber(input.maxChars),
+              signal: context.abortSignal,
+            }),
+          };
+        } catch (error) {
+          return { jobId, error: error instanceof Error ? error.message : String(error) };
+        }
+      }));
+      return result("wait", { results });
     } catch (error) {
       return failed(error);
     }
@@ -161,4 +196,36 @@ function requiredString(value: unknown, name: string): string {
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalListFilters(input: Record<string, unknown>) {
+  return {
+    ...(Array.isArray(input.kinds) ? { kinds: input.kinds as JobKind[] } : {}),
+    ...(Array.isArray(input.statuses) ? { statuses: input.statuses as JobStatus[] } : {}),
+    ...(optionalNumber(input.startedAfter) !== undefined ? { startedAfter: optionalNumber(input.startedAfter) } : {}),
+    ...(optionalNumber(input.startedBefore) !== undefined ? { startedBefore: optionalNumber(input.startedBefore) } : {}),
+    ...(optionalNumber(input.updatedAfter) !== undefined ? { updatedAfter: optionalNumber(input.updatedAfter) } : {}),
+    ...(optionalNumber(input.updatedBefore) !== undefined ? { updatedBefore: optionalNumber(input.updatedBefore) } : {}),
+    ...(typeof input.includeFinished === "boolean" ? { includeFinished: input.includeFinished } : {}),
+    ...(optionalNumber(input.limit) !== undefined ? { limit: optionalNumber(input.limit) } : {}),
+  };
+}
+
+function requiredStringArray(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${name} must contain at least one job id.`);
+  return [...new Set(value.map((item) => requiredString(item, name)))];
+}
+
+function optionalCursorMap(value: unknown): Record<string, number> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("after must be an object keyed by job id.");
+  }
+  const cursors: Record<string, number> = {};
+  for (const [jobId, cursor] of Object.entries(value)) {
+    const parsed = optionalNumber(cursor);
+    if (parsed === undefined) throw new Error(`after.${jobId} must be a finite number.`);
+    cursors[jobId] = parsed;
+  }
+  return cursors;
 }

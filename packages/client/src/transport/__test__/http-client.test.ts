@@ -172,6 +172,31 @@ describe("OpenHarnessClient", () => {
     ]);
   });
 
+  it("serializes the complete Jobs list query", async () => {
+    const calls: string[] = [];
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      token: "tok",
+      fetch: (async (url: string | URL | Request) => {
+        calls.push(String(url));
+        return jsonResponse({ jobs: [] });
+      }) as typeof fetch,
+    });
+
+    await expect(client.listJobs({
+      sessionId: "session-1",
+      kinds: ["terminal", "agent"],
+      statuses: ["running", "failed"],
+      startedAfter: 10,
+      limit: 5,
+      includeFinished: false,
+    })).resolves.toEqual([]);
+
+    expect(calls).toEqual([
+      "http://127.0.0.1:3456/jobs?sessionId=session-1&startedAfter=10&limit=5&kinds=terminal%2Cagent&statuses=running%2Cfailed&includeFinished=false",
+    ]);
+  });
+
   it("replays an interrupted run through the dedicated, idempotent endpoint", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {

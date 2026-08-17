@@ -3,17 +3,18 @@ import {
   WorkflowRunStore,
   type WorkflowRunSnapshot,
 } from "@openharness/coordinator";
-import type {
-  AgentJobHost,
-  JobCancelRequest,
-  JobKind,
-  JobListRequest,
-  JobReadRequest,
-  JobReadResult,
-  JobSnapshot,
-  JobStatus,
-  JobWaitRequest,
-  JobWaitResult,
+import {
+  filterJobSnapshots,
+  type AgentJobHost,
+  type JobCancelRequest,
+  type JobKind,
+  type JobListRequest,
+  type JobReadRequest,
+  type JobReadResult,
+  type JobSnapshot,
+  type JobStatus,
+  type JobWaitRequest,
+  type JobWaitResult,
 } from "@openharness/jobs";
 import type { SessionRecord, SessionTaskRecord } from "@openharness/services/session-runtime/types";
 import type { TerminalSessionInfo } from "@openharness/terminal";
@@ -66,13 +67,11 @@ export class DaemonJobService {
     const workflows = new WorkflowRunStore({ cwd: session.cwd })
       .list()
       .filter((workflow) => workflow.ownerSession === session.id);
-    return [
+    return filterJobSnapshots([
       ...terminals.map(terminalSnapshot),
       ...tasks.map(taskSnapshot),
       ...workflows.map((workflow) => workflowSnapshot(workflow, session.cwd)),
-    ]
-      .filter((job) => !input.status || job.status === input.status)
-      .sort((a, b) => b.startedAt - a.startedAt);
+    ], input);
   }
 
   async read(input: JobReadRequest): Promise<JobReadResult> {
@@ -103,7 +102,12 @@ export class DaemonJobService {
       ? ""
       : formatWorkflowOutput(source.value);
     const limited = limitOutput(text, input.maxChars);
-    return { ...limited, cursor: snapshot.updatedAt, snapshot };
+    return {
+      ...limited,
+      cursor: snapshot.updatedAt,
+      snapshot,
+      details: workflowDetails(source.value),
+    };
   }
 
   async wait(input: JobWaitRequest): Promise<JobWaitResult> {
@@ -145,6 +149,9 @@ export class DaemonJobService {
       return;
     }
     if (source.kind === "task") {
+      if (!taskAcceptsInput(source.value)) {
+        throw new Error(`Job ${input.jobId} does not accept input.`);
+      }
       const manager = this.managerFor(input.sessionId);
       await manager.writeToTask(managerTaskId(source.value), input.data);
       return;
@@ -244,7 +251,7 @@ function taskSnapshot(task: SessionTaskRecord): JobSnapshot {
     capabilities: {
       read: true,
       wait: true,
-      send: task.status === "running" && task.type === "agent",
+      send: taskAcceptsInput(task),
       cancel: task.status === "pending" || task.status === "running",
     },
     cwd: task.cwd,
@@ -288,6 +295,10 @@ function taskStatus(status: SessionTaskRecord["status"]): JobStatus {
   return "running";
 }
 
+function taskAcceptsInput(task: SessionTaskRecord): boolean {
+  return task.type === "agent" && task.status !== "stopped" && task.status !== "interrupted";
+}
+
 function managerTaskId(task: SessionTaskRecord): string {
   return typeof task.metadata.taskManagerId === "string" ? task.metadata.taskManagerId : task.id;
 }
@@ -302,8 +313,25 @@ function formatWorkflowOutput(workflow: WorkflowRunSnapshot): string {
   }, null, 2);
 }
 
+function workflowDetails(workflow: WorkflowRunSnapshot): Record<string, unknown> {
+  return {
+    status: workflow.status,
+    termination: workflow.termination,
+    plan: workflow.plan,
+    pendingTaskIds: workflow.pendingTaskIds,
+    blockedTaskIds: workflow.blockedTaskIds,
+    blockedTasks: workflow.blockedTasks,
+    runningTaskIds: workflow.runningTaskIds,
+    runningTasks: workflow.runningTasks,
+    results: workflow.results,
+    budget: workflow.budget,
+  };
+}
+
 function normalizeLimit(value: number | undefined): number {
-  return value === undefined ? DEFAULT_OUTPUT_LIMIT : Math.max(1, Math.floor(value));
+  return value === undefined || !Number.isFinite(value)
+    ? DEFAULT_OUTPUT_LIMIT
+    : Math.max(1, Math.floor(value));
 }
 
 function limitOutput(text: string, maxChars = DEFAULT_OUTPUT_LIMIT): Pick<JobReadResult, "text" | "truncated"> {
@@ -316,7 +344,6 @@ function isFinished(status: JobStatus): boolean {
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("Job wait aborted."));
   return new Promise((resolve, reject) => {
     const timer = setTimeout(done, Math.max(1, ms));
     timer.unref?.();
@@ -329,5 +356,6 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
       reject(signal?.reason ?? new Error("Job wait aborted."));
     }
     signal?.addEventListener("abort", aborted, { once: true });
+    if (signal?.aborted) aborted();
   });
 }

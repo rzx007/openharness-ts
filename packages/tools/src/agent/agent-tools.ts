@@ -3,9 +3,7 @@ import type { ToolDefinition } from "@openharness/core";
 export const agentTool: ToolDefinition = {
   name: "Agent",
   description:
-    "Spawn an in-process teammate task. Returns a framework-owned live task_id. " +
-    "Use TaskWait with that task_id to block until the task finishes and retrieve its result; " +
-    "use SendMessage for follow-up input while the live child invocation is still active.",
+    "Spawn an in-process child-agent job. Use JobWait, JobRead, JobSend, and JobCancel with the returned jobId.",
   inputSchema: {
     type: "object",
     properties: {
@@ -52,16 +50,14 @@ export const agentTool: ToolDefinition = {
 
     const subagentType = (input.subagentType as string | undefined) ?? "worker";
     const agentDef = getAgentDefinition(subagentType);
-    const agentName = subagentType;
     const team = (input.team as string) ?? "default";
-    const agentId = `${agentName}@${team}`;
 
     try {
       const workerSessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const invocation = await children.spawnChildAgent({
         description: input.description as string,
         prompt: input.prompt as string,
-        agent: agentName,
+        agent: subagentType,
         team,
         cwd: context.cwd,
         sessionId: workerSessionId,
@@ -75,72 +71,39 @@ export const agentTool: ToolDefinition = {
         effort: agentDef?.effort != null ? String(agentDef.effort) : undefined,
       });
 
-      const taskId = invocation.id;
-
       if (input.team) {
         try {
-          getTeamRegistry().addAgent(input.team as string, taskId);
+          getTeamRegistry().addAgent(input.team as string, invocation.id);
         } catch {
           // Team registration is best-effort; spawning already succeeded.
         }
       }
 
-      let text = `Spawned agent ${agentId} (task_id=${taskId}, backend=framework)`;
-      text += `\nsession_id=${invocation.sessionId}`;
-      if (invocation.worktree) {
-        text += `\nIsolated: changes land on branch \`${invocation.worktree.branch}\`, worktree path \`${invocation.worktree.path}\` - review/merge it yourself.`;
-        text += `\nWhen done reviewing, clean it up with \`git worktree remove ${invocation.worktree.path}\` (or \`git worktree remove --force ${invocation.worktree.path}\` to discard uncommitted changes).`;
-      }
-      if (invocation.notice) {
-        text += `\nNotice: ${invocation.notice}`;
-      }
-      return { content: [{ type: "text", text }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: (err as Error).message }], isError: true };
-    }
-  },
-};
-export const sendMessageTool: ToolDefinition = {
-  name: "SendMessage",
-  description:
-    "Send a follow-up message to a running teammate task. For Agent-created child sessions, " +
-    "the task_id is resolved to the run-local child invocation handle before falling back to ordinary TaskManager input.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      taskId: { type: "string", description: "Target task id returned by Agent" },
-      message: { type: "string", description: "Message to send" },
-    },
-    required: ["taskId", "message"],
-  },
-  async execute(input, context) {
-    const taskId = input.taskId as string;
-    const message = input.message as string;
-
-    if (taskId.includes("@")) {
-      const children = context.agent?.children;
-      if (!children) {
-        return { content: [{ type: "text", text: `No active child invocation for agent ${taskId}` }], isError: true };
-      }
-      try {
-        await children.sendChildInput(taskId, { content: message });
-        return { content: [{ type: "text", text: `Sent message to agent ${taskId}` }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: (err as Error).message }], isError: true };
-      }
-    }
-
-    try {
-      const children = context.agent?.children;
-      if (children?.hasChildAgent(taskId)) {
-        await children.sendChildInput(taskId, { content: message });
-        return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
-      }
-      const { getTaskManager } = await import("@openharness/services");
-      await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).writeToTask(taskId, message);
-      return { content: [{ type: "text", text: `Sent message to task ${taskId}` }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: (err as Error).message }], isError: true };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            kind: "job",
+            action: "created",
+            jobId: invocation.id,
+            jobKind: "agent",
+            label: input.description,
+            agent: `${subagentType}@${team}`,
+            sessionId: invocation.sessionId,
+            backend: "framework",
+            ...(invocation.worktree ? {
+              worktree: invocation.worktree,
+              cleanup: `git worktree remove ${invocation.worktree.path}`,
+            } : {}),
+            ...(invocation.notice ? { notice: invocation.notice } : {}),
+          }),
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+        isError: true,
+      };
     }
   },
 };

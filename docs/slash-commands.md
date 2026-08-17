@@ -136,15 +136,14 @@ skill 经 command catalog 以 template 形式出现。
 |---|---|
 | `Agent` | 派发子代理执行任务 |
 | `TeamCreate` / `TeamDelete` | 创建/解散 swarm 团队（`~/.openharness-ts/teams/<team>/`，team.json 生命周期） |
-| `SendMessage` | 给 teammate 发消息（child session task 输入，见 [agent-child-session-flow.md](agent-child-session-flow.md)） |
 
 ### 后台任务（task/）
 
 | 工具 | 说明 |
 |---|---|
-| `TaskCreate` / `TaskGet` / `TaskList` / `TaskUpdate` | 任务 CRUD |
-| `TaskOutput` / `TaskStop` | 读输出 / 停止 |
-| `TaskWait` | 等待 Agent/TaskCreate 返回的 `task_id` 完成；Agent child 直接等待 live framework handle，TaskCreate 任务等待 TaskManager |
+| `TaskCreate` | 创建后台 shell，并返回 `jobId` |
+| `JobList` / `JobRead` / `JobWait` | 统一列出、读取和等待 Terminal、shell、Agent、Workflow |
+| `JobSend` / `JobCancel` | 给可交互 Job 输入，或明确停止 Job |
 
 ### 计划与工作区（mode/）
 

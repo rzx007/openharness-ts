@@ -133,6 +133,41 @@ describe("SessionTaskBridgeManager", () => {
     expect(context.events.publishSince).toHaveBeenCalledWith(4);
   });
 
+  it("keeps collision-renamed durable tasks synced by their durable id", () => {
+    const context = createContext();
+    const liveTask = {
+      id: "task-1",
+      type: "shell",
+      status: "running",
+      description: "npm test",
+      cwd: "/repo",
+      metadata: {},
+    };
+    let listener: ((task: typeof liveTask) => void) | undefined;
+    const manager = createTaskManager({
+      listTasks: vi.fn(() => [liveTask]),
+      registerTaskListener: vi.fn((next) => { listener = next as (task: typeof liveTask) => void; }),
+    });
+    context.store.findSessionTaskByManagerTaskId
+      .mockReturnValueOnce(undefined)
+      .mockReturnValue({ id: "durable-1", sessionId: "s1" });
+    context.store.getSessionTask.mockImplementation((id: string) =>
+      id === "task-1"
+        ? { id, sessionId: "other", status: "running" }
+        : { id, sessionId: "s1", status: "running" });
+    const bridge = new SessionTaskBridgeManager(context);
+
+    bridge.projectManagerTasks("s1", manager);
+    context.store.updateSessionTask.mockClear();
+    listener?.({ ...liveTask, status: "completed" });
+
+    expect(context.store.getSessionTask).toHaveBeenLastCalledWith("durable-1");
+    expect(context.store.updateSessionTask).toHaveBeenCalledWith("durable-1", {
+      status: "completed",
+      output: "output",
+    });
+  });
+
   it("syncs failed task output into durable state", () => {
     const context = createContext();
     const manager = createTaskManager({

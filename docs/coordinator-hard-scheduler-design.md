@@ -17,9 +17,9 @@ OpenHarness-ts 已经能拉起子 agent，也能用 swarm 管通信、任务和 
 | 部分 | 现在负责什么 | 后续仍然负责什么 |
 | --- | --- | --- |
 | `Agent` 工具 | 拉起一个子 agent | 继续作为启动 worker 的入口 |
-| `SendMessage` | 给已有 worker 发后续消息 | 继续负责 continuation / 修正 |
-| `TaskWait` | 等一个或多个后台任务结束 | 继续作为等待 worker 完成的底座 |
-| `TaskStop` | 停止后台任务 | 继续作为取消/失败处理手段 |
+| `JobSend` | 给已有 worker 发后续消息 | 统一负责 continuation / 修正 |
+| `JobWait` | 等一个或多个后台任务结束 | 统一负责等待 worker 完成 |
+| `JobCancel` | 停止后台任务 | 统一负责取消/失败处理 |
 | `TaskManager` | 记录任务状态、输出、完成监听 | 继续作为任务生命周期真相 |
 | `swarm` | 管 agent backend、消息、worktree 隔离 | 继续负责 worker 实际运行环境 |
 | `Coordinator` | 理解用户目标、拆任务、总结结果 | 逐步从“自己记调度”变成“生成计划 + 汇总结果” |
@@ -31,7 +31,7 @@ OpenHarness-ts 已经能拉起子 agent，也能用 swarm 管通信、任务和 
   -> Coordinator 拆任务
   -> 硬调度器按排班表执行
   -> Agent / swarm / TaskManager 真正跑 worker
-  -> TaskWait / completion listener 收结果
+  -> JobWait / completion listener 收结果
   -> Coordinator 汇总回复用户
 ```
 
@@ -221,7 +221,7 @@ Python 原版值得保留的思路：
 
 - `packages/coordinator` 继续管 prompt、agent 定义、模式判断；
 - `packages/services/src/tasks` 继续管真实任务生命周期；
-- `packages/tools/src/agent` 继续管 Agent / SendMessage；
+- `packages/tools/src/agent` 管 Agent 创建，`packages/tools/src/job` 管生命周期控制；
 - 新增调度层只做 workflow 状态机和执行顺序。
 
 ## 借鉴 Hermes
@@ -278,7 +278,7 @@ stopWorker(workerTaskId)
 adapter 里面复用现有：
 
 - `Agent`;
-- `TaskWait`;
+- `JobWait` / `JobCancel`;
 - framework child `awaitChildAgent` / `interruptChildAgent`;
 - external worker 的 `TaskManager.awaitTask` / `stopTask` adapter；
 - `swarm` backend；
@@ -367,7 +367,7 @@ adapter 里面复用现有：
 交付：
 
 - runner adapter：`runWorker`、`waitWorker`、`stopWorker`；
-- 默认复用 framework `Agent` / `TaskWait` live handle；external worker 复用 `TaskManager` adapter；
+- 默认通过 `Agent` 创建 framework child，并由 Jobs adapter 控制 live handle；external worker 复用 `TaskManager` adapter；
 - worker 完成后写入 workflow ledger；
 - pipeline 下游能收到上游 summary/result；
 - 失败后按策略跳过或重试。

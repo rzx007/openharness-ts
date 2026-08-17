@@ -1,7 +1,6 @@
 import { ToolRegistry } from "@openharness/core";
 import {
   agentTool,
-  sendMessageTool,
   teamCreateTool,
   teamDeleteTool,
   workflowTool,
@@ -45,15 +44,7 @@ import {
 } from "./schedule/index.js";
 import { grepTool, lspTool } from "./search/index.js";
 import { bashTool } from "./shell/index.js";
-import {
-  taskCreateTool,
-  taskGetTool,
-  taskListTool,
-  taskOutputTool,
-  taskStopTool,
-  taskUpdateTool,
-  taskWaitTool,
-} from "./task/index.js";
+import { taskCreateTool } from "./task/index.js";
 import { webFetchTool, webSearchTool } from "./web/index.js";
 import { terminalTools } from "./terminal/index.js";
 import { jobTools } from "./job/index.js";
@@ -78,19 +69,12 @@ export function createDefaultToolRegistry(
   registry.register(askUserTool);
   registry.register(briefTool);
   registry.register(taskCreateTool);
-  registry.register(taskGetTool);
-  registry.register(taskListTool);
-  registry.register(taskOutputTool);
-  registry.register(taskStopTool);
-  registry.register(taskUpdateTool);
-  registry.register(taskWaitTool);
   registry.register(enterPlanModeTool);
   registry.register(exitPlanModeTool);
   registry.register(enterWorktreeTool);
   registry.register(exitWorktreeTool);
   registry.register(notebookEditTool);
   registry.register(agentTool);
-  registry.register(sendMessageTool);
   registry.register(workflowTool);
   registry.register(teamCreateTool);
   registry.register(teamDeleteTool);

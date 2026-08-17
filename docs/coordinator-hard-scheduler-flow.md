@@ -78,10 +78,10 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 apps/cli/src/commands/main.ts
   if (isCoordinatorMode())
     queryEngine.setAllowedTools(getCoordinatorTools())
-    # = ["Agent", "SendMessage", "TaskStop", "Workflow"]
+    # = ["Agent", "JobList", "JobRead", "JobWait", "JobSend", "JobCancel", "Workflow"]
 ```
 
-Leader 不能直接 Read/Bash；简单委托仍用 `Agent` + `TaskWait`，有明确 DAG / 重试 / 失败策略时用 `Workflow`。
+Leader 不能直接 Read/Bash；简单委托使用 `Agent` + `JobWait`，后续输入和停止分别使用 `JobSend` / `JobCancel`；有明确 DAG / 重试 / 失败策略时用 `Workflow`。
 
 ### A1.5. Workflow CLI 管理面
 
@@ -309,7 +309,7 @@ status 另用：
 
 | 场景 | 选择 |
 |------|------|
-| 一次性调研 / 交互式来回修正 | `Agent` + `SendMessage` / `TaskWait` |
+| 一次性调研 / 交互式来回修正 | `Agent` + `JobWait` / `JobSend` |
 | 明确 DAG、顺序、pipeline、重试、失败策略、并发上限 | `Workflow` |
 | 并行写同一目录且未 isolate | 声明 `writeScope`，让调度器串行 |
 | 可隔离的并行写 | `isolate: true`（worktree） |

@@ -47,7 +47,7 @@ describe("AgentChildManager", () => {
       undefined,
       false,
       {
-        allowedTools: ["Agent", "TaskWait", "Workflow"],
+        allowedTools: ["Agent", "JobWait", "Workflow"],
         disallowedTools: ["Write"],
       },
     );
@@ -60,8 +60,8 @@ describe("AgentChildManager", () => {
     });
 
     expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
-      hostToolCeiling: ["Agent", "TaskWait", "Workflow"],
-      allowedTools: ["Agent", "TaskWait", "Workflow"],
+      hostToolCeiling: ["Agent", "JobWait", "Workflow"],
+      allowedTools: ["Agent", "JobWait", "Workflow"],
       roleAllowedTools: undefined,
       disallowedTools: ["Write"],
     });

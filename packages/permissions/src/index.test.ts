@@ -374,15 +374,26 @@ describe("READ_ONLY_TOOLS", () => {
       "Glob",
       "WebFetch",
       "WebSearch",
-      "TerminalRead",
-      "TerminalList",
+      "JobList",
+      "JobRead",
+      "JobWait",
     ]) {
       expect(READ_ONLY_TOOLS.has(tool)).toBe(true);
     }
   });
 
   it("does not contain write/execute tools", () => {
-    for (const tool of ["Write", "Edit", "Bash"]) {
+    for (const tool of [
+      "Write",
+      "Edit",
+      "Bash",
+      "TaskGet",
+      "TaskList",
+      "TaskOutput",
+      "TaskWait",
+      "TerminalRead",
+      "TerminalList",
+    ]) {
       expect(READ_ONLY_TOOLS.has(tool)).toBe(false);
     }
   });

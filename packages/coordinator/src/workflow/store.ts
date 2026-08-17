@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { getProjectConfigDir } from "@openharness/core";
 import { createWorkflowPlan } from "./validation.js";
 import {
+  createWorkflowRunId,
   createWorkflowRunSnapshot,
   createWorkflowRunSummary,
   createWorkflowResultFromSnapshot,
@@ -45,6 +46,12 @@ export interface CancelPersistentWorkflowOptions extends WorkflowRunStoreOptions
   stopTask?: (taskId: string) => Promise<unknown>;
   onEvent?: (event: WorkflowRunEvent) => void;
 }
+
+interface ActiveWorkflowRun {
+  stopReason?: string;
+}
+
+const activeWorkflowRuns = new Map<string, Set<ActiveWorkflowRun>>();
 
 export function getWorkflowRunsDir(cwd?: string): string {
   return join(getProjectConfigDir(cwd), "workflows");
@@ -139,18 +146,25 @@ export async function runPersistentWorkflow(
   options: RunPersistentWorkflowOptions = {},
 ): Promise<WorkflowRunResult> {
   const store = options.store ?? new WorkflowRunStore({ cwd: options.cwd, dir: options.dir });
-  return runWorkflow(spec, runner, {
-    runId: options.runId,
-    ownerSession: options.ownerSession,
-    onSnapshot: (snapshot) => {
-      if (!options.signal?.aborted) store.save(snapshot);
-    },
-    onEvent: (event) => {
-      if (options.signal?.aborted) return;
-      store.appendEvent(event);
-      options.onEvent?.(event);
-    },
-  });
+  const runId = options.runId ?? createWorkflowRunId();
+  const active = registerActiveWorkflow(store, runId);
+  try {
+    return await runWorkflow(spec, runner, {
+      runId,
+      ownerSession: options.ownerSession,
+      shouldStop: () => active.stopReason,
+      onSnapshot: (snapshot) => {
+        if (!options.signal?.aborted && !active.stopReason) store.save(snapshot);
+      },
+      onEvent: (event) => {
+        if (options.signal?.aborted || active.stopReason) return;
+        store.appendEvent(event);
+        options.onEvent?.(event);
+      },
+    });
+  } finally {
+    unregisterActiveWorkflow(store, runId, active);
+  }
 }
 
 export async function resumePersistentWorkflow(
@@ -169,21 +183,27 @@ export async function resumePersistentWorkflow(
   if (snapshot.status !== "running") {
     return createWorkflowResultFromSnapshot(snapshot);
   }
-  return runWorkflow(snapshot.spec, runner, {
-    runId: snapshot.runId,
-    ownerSession: snapshot.ownerSession,
-    createdAt: snapshot.createdAt,
-    initialResults: snapshot.results,
-    initialRunningTasks: snapshot.runningTasks,
-    onSnapshot: (next) => {
-      if (!options.signal?.aborted) store.save(next);
-    },
-    onEvent: (event) => {
-      if (options.signal?.aborted) return;
-      store.appendEvent(event);
-      options.onEvent?.(event);
-    },
-  });
+  const active = registerActiveWorkflow(store, snapshot.runId);
+  try {
+    return await runWorkflow(snapshot.spec, runner, {
+      runId: snapshot.runId,
+      ownerSession: snapshot.ownerSession,
+      shouldStop: () => active.stopReason,
+      createdAt: snapshot.createdAt,
+      initialResults: snapshot.results,
+      initialRunningTasks: snapshot.runningTasks,
+      onSnapshot: (next) => {
+        if (!options.signal?.aborted && !active.stopReason) store.save(next);
+      },
+      onEvent: (event) => {
+        if (options.signal?.aborted || active.stopReason) return;
+        store.appendEvent(event);
+        options.onEvent?.(event);
+      },
+    });
+  } finally {
+    unregisterActiveWorkflow(store, snapshot.runId, active);
+  }
 }
 
 export async function cancelPersistentWorkflow(
@@ -203,6 +223,7 @@ export async function cancelPersistentWorkflow(
   }
 
   const reason = options.reason ?? "Workflow cancelled";
+  requestActiveWorkflowStop(store, snapshot.runId, reason);
   const stopErrors: Record<string, string> = {};
   for (const runningTask of Object.values(snapshot.runningTasks)) {
     const taskManagerTaskId = taskManagerTaskIdFromMetadata(runningTask.metadata);
@@ -276,6 +297,37 @@ export async function cancelPersistentWorkflow(
   store.appendEvent(event);
   options.onEvent?.(event);
   return createWorkflowResultFromSnapshot(cancelledSnapshot);
+}
+
+function activeWorkflowKey(store: WorkflowRunStore, runId: string): string {
+  return `${store.dir}\0${runId}`;
+}
+
+function registerActiveWorkflow(store: WorkflowRunStore, runId: string): ActiveWorkflowRun {
+  const key = activeWorkflowKey(store, runId);
+  const runs = activeWorkflowRuns.get(key) ?? new Set<ActiveWorkflowRun>();
+  const active: ActiveWorkflowRun = {};
+  runs.add(active);
+  activeWorkflowRuns.set(key, runs);
+  return active;
+}
+
+function unregisterActiveWorkflow(
+  store: WorkflowRunStore,
+  runId: string,
+  active: ActiveWorkflowRun,
+): void {
+  const key = activeWorkflowKey(store, runId);
+  const runs = activeWorkflowRuns.get(key);
+  if (!runs) return;
+  runs.delete(active);
+  if (runs.size === 0) activeWorkflowRuns.delete(key);
+}
+
+function requestActiveWorkflowStop(store: WorkflowRunStore, runId: string, reason: string): void {
+  for (const active of activeWorkflowRuns.get(activeWorkflowKey(store, runId)) ?? []) {
+    active.stopReason = reason;
+  }
 }
 
 function sanitizeRunId(runId: string): string {

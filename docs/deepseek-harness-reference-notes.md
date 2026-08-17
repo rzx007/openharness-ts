@@ -88,6 +88,8 @@ executor 只保留最多 `maxOutputChars + 1` 个字符，而不是先把无限�
 
 ### 2026-08-17：第四阶段 Terminal service 与 jobs 协议对齐已完成
 
+独立协议与首次大改复盘已经拆出到 [Jobs 统一后台任务协议](./jobs-protocol.md) 和 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)。本节只保留阶段摘要。
+
 本阶段先审计了现有实现，没有重做已经存在的 Terminal。`@openharness/terminal`、`@openharness/terminal-node`、daemon Terminal service、HTTP SSE、Desktop IPC 和 Agent Terminal 工具原本已经具备 PTY、sandbox process、session ownership、scrollback、实时输出与清理能力；child session 也已经通过 `SessionTaskBridgeManager` 进入持久 `SessionTaskRecord` 投影。
 
 本次补齐的是这些长期工作之间的共同控制面：

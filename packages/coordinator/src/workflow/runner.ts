@@ -184,6 +184,11 @@ export async function runWorkflow(
 
     const scheduleMore = () => {
       if (failFastTriggered) return;
+      const stopReason = options.shouldStop?.();
+      if (stopReason) {
+        skipUnstarted(stopReason);
+        return;
+      }
       while (running.size < plan.maxConcurrency && ready.length > 0) {
         const budget = collectWorkflowBudgetUsage([...results.values()], [...runningTasks.values()]);
         const exceededBudget = workflowBudgetPolicyExceeded(plan.budgetPolicy, budget);

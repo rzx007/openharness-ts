@@ -93,7 +93,7 @@ describe("programmatic agent SDK", () => {
     }
   });
 
-  it("closes Agent -> TaskWait without a daemon task projection", async () => {
+  it("closes Agent -> JobWait through the standalone Jobs host", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-child-"));
     const events: AgentEvent[] = [];
     const client: StreamingMessageClient = {
@@ -127,15 +127,15 @@ describe("programmatic agent SDK", () => {
             .filter((block) => block.type === "text")
             .map((block) => block.text)
             .join("");
-          const taskId = text.match(/task_id=([^,)\s]+)/)?.[1];
-          if (!taskId) throw new Error(`Agent tool did not return task_id: ${text}`);
+          const jobId = (JSON.parse(text) as { jobId?: string }).jobId;
+          if (!jobId) throw new Error(`Agent tool did not return jobId: ${text}`);
           yield {
             type: "tool_use_start" as const,
             toolUse: {
               type: "tool_use" as const,
-              id: "sdk-task-wait-tool",
-              name: "TaskWait",
-              input: { taskIds: [taskId], timeoutSeconds: 2 },
+              id: "sdk-job-wait-tool",
+              name: "JobWait",
+              input: { jobIds: [jobId], timeoutSeconds: 2 },
             },
           };
           yield { type: "complete" as const, stopReason: "tool_use" };
@@ -346,7 +346,15 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      roleAllowedTools: ["workflow", "task_wait", "task_stop", "agent", "send_message"],
+      roleAllowedTools: [
+        "workflow",
+        "job_list",
+        "job_read",
+        "job_wait",
+        "job_send",
+        "job_cancel",
+        "agent",
+      ],
       onEvent: (event) => { events.push(event); },
     });
 
@@ -379,7 +387,7 @@ describe("programmatic agent SDK", () => {
           .flatMap((message) => message.type === "assistant" ? message.toolUses ?? [] : [])
           .map((toolUse) => toolUse.name);
 
-        if (usedTools.includes("TaskWait")) {
+        if (usedTools.includes("JobWait")) {
           const waitText = latestToolResultText(params.messages);
           yield { type: "text_delta" as const, delta: waitText };
           yield { type: "complete" as const, stopReason: "end_turn" };
@@ -388,15 +396,15 @@ describe("programmatic agent SDK", () => {
 
         if (usedTools.includes("Agent")) {
           const toolResult = toolResultText(params.messages, "spawn-restricted-child");
-          const taskId = toolResult.match(/task_id=([^,)\s]+)/)?.[1];
-          if (!taskId) throw new Error(`Agent tool did not return task_id: ${toolResult}`);
+          const jobId = (JSON.parse(toolResult) as { jobId?: string }).jobId;
+          if (!jobId) throw new Error(`Agent tool did not return jobId: ${toolResult}`);
           yield {
             type: "tool_use_start" as const,
             toolUse: {
               type: "tool_use" as const,
               id: "wait-restricted-child",
-              name: "TaskWait",
-              input: { taskIds: [taskId], timeoutSeconds: 2 },
+              name: "JobWait",
+              input: { jobIds: [jobId], timeoutSeconds: 2 },
             },
           };
           yield { type: "complete" as const, stopReason: "tool_use" };
@@ -445,7 +453,7 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      allowedTools: ["Read", "Agent", "TaskWait"],
+      allowedTools: ["Read", "Agent", "JobWait"],
     });
 
     try {

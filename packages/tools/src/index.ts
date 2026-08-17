@@ -49,7 +49,6 @@ export {
   type WebSearchResult,
   type WebSearchSource,
 } from "./web/index.js";
-export { taskUpdateTool } from "./task/index.js";
 export {
   createAgentWorkflowRunner,
   workflowTool,
@@ -58,3 +57,4 @@ export {
 export { mcpAuthTool } from "./mcp/index.js";
 export { imageGenerationTool, imageToTextTool } from "./media/index.js";
 export { feishuPushTool } from "./channels/index.js";
+export { LocalAgentJobHost } from "./job/index.js";

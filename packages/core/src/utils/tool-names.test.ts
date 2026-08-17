@@ -9,9 +9,11 @@ describe("tool name normalization", () => {
   it("converts Python-style tool names to TS runtime names", () => {
     expect(normalizeToolNames([
       "agent",
-      "send_message",
-      "task_stop",
-      "task_wait",
+      "job_list",
+      "job_read",
+      "job_wait",
+      "job_send",
+      "job_cancel",
       "file_edit",
       "file_write",
       "notebook_edit",
@@ -19,9 +21,11 @@ describe("tool name normalization", () => {
       "web_fetch",
     ])).toEqual([
       "Agent",
-      "SendMessage",
-      "TaskStop",
-      "TaskWait",
+      "JobList",
+      "JobRead",
+      "JobWait",
+      "JobSend",
+      "JobCancel",
       "Edit",
       "Write",
       "NotebookEdit",
@@ -40,7 +44,12 @@ describe("tool name normalization", () => {
   it("deduplicates normalized names and treats '*' as an unrestricted allowlist", () => {
     expect(normalizeToolNames(["bash", "Bash", "file_edit", "Edit"]))
       .toEqual(["Bash", "Edit"]);
-    expect(resolveAllowedToolNames(["TaskWait", "*", "Read"]))
+    expect(resolveAllowedToolNames(["JobWait", "*", "Read"]))
       .toEqual([]);
+  });
+
+  it("does not translate removed Task control aliases", () => {
+    expect(normalizeToolNames(["task_wait", "task_output", "send_message"]))
+      .toEqual(["task_wait", "task_output", "send_message"]);
   });
 });

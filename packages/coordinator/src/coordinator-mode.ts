@@ -4,7 +4,7 @@ import { resolveAllowedToolNames } from "@openharness/core";
 /**
  * Coordinator 模式辅助（移植自 Python coordinator_mode.py 的 mode/上下文段）。
  *
- * 工具名用 TS 侧命名（Agent/SendMessage/TaskStop 等 PascalCase），
+ * 工具名用 TS 侧命名（Agent/JobWait/JobSend 等 PascalCase），
  * 其余语义与 Python 一致。
  */
 
@@ -19,9 +19,8 @@ const WORKER_TOOLS = [
   "WebFetch",
   "WebSearch",
   "TaskCreate",
-  "TaskGet",
-  "TaskList",
-  "TaskOutput",
+  "JobList",
+  "JobRead",
   "Skill",
 ] as const;
 
@@ -56,7 +55,7 @@ export function matchSessionMode(sessionMode?: string): string | undefined {
 
 /** coordinator 专属工具集。 */
 export function getCoordinatorTools(): string[] {
-  return ["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"];
+  return ["Agent", "JobList", "JobRead", "JobWait", "JobSend", "JobCancel", "Workflow"];
 }
 
 /**

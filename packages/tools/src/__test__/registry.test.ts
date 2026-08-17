@@ -22,19 +22,12 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("AskUser");
     expect(names).toContain("Brief");
     expect(names).toContain("TaskCreate");
-    expect(names).toContain("TaskGet");
-    expect(names).toContain("TaskList");
-    expect(names).toContain("TaskOutput");
-    expect(names).toContain("TaskStop");
-    expect(names).toContain("TaskUpdate");
-    expect(names).toContain("TaskWait");
     expect(names).toContain("EnterPlanMode");
     expect(names).toContain("ExitPlanMode");
     expect(names).toContain("EnterWorktree");
     expect(names).toContain("ExitWorktree");
     expect(names).toContain("NotebookEdit");
     expect(names).toContain("Agent");
-    expect(names).toContain("SendMessage");
     expect(names).toContain("Workflow");
     expect(names).toContain("TeamCreate");
     expect(names).toContain("TeamDelete");
@@ -46,7 +39,16 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("ImageToText");
     expect(names).toContain("ImageGeneration");
     expect(names).toContain("FeishuPush");
-    expect(tools).toHaveLength(40);
+    expect(tools).toHaveLength(33);
+    expect(names).not.toEqual(expect.arrayContaining([
+      "TaskGet",
+      "TaskList",
+      "TaskOutput",
+      "TaskStop",
+      "TaskUpdate",
+      "TaskWait",
+      "SendMessage",
+    ]));
   });
 
   it("registers daemon-owned Cron tools only when the host provides Cron", () => {

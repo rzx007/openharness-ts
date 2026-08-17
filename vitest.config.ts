@@ -18,6 +18,8 @@ for (const name of readdirSync(packagesDir)) {
   } catch {}
 }
 
+aliases["@openharness/services/tasks"] = resolve(packagesDir, "services", "src", "tasks", "index.ts");
+
 export default defineConfig({
   test: {
     globals: true,
@@ -29,6 +31,8 @@ export default defineConfig({
     hookTimeout: 20000,
   },
   resolve: {
-    alias: aliases,
+    alias: Object.fromEntries(
+      Object.entries(aliases).sort(([left], [right]) => right.length - left.length),
+    ),
   },
 });

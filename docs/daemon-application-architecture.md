@@ -340,7 +340,7 @@ Agent tool -> framework AgentChildManager
   -> ordinary input/run/output/tool terminal events
 ```
 
-HTTP child prompt、SendMessage 的 session-task callback 和 TaskStop 最终都通过 `rootAgent.children` 调 live handle。daemon 只保存路由索引，不复制 controls。完整流程见 [Agent Child Session Flow](./agent-child-session-flow.md)。
+HTTP child prompt、`JobSend` 的 session-task callback 和 `JobCancel` 最终都通过 `rootAgent.children` 调 live handle。daemon 只保存路由索引，不复制 controls。完整流程见 [Agent Child Session Flow](./agent-child-session-flow.md)。
 
 `rootAgent.children` 是 framework root tree 共享的 descendant directory，不只包含 direct child。`child.created` durable 建模若在 task/live-route 阶段失败，projector 会失败 task、注销已注册 route，并 archive 本次新建的 child session；framework 随后回滚 handle 与 environment lease。parent 一旦进入 `closing/archived`，projector 拒绝新的 `child.created`。
 

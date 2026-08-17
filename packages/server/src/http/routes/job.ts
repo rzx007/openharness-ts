@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import type { JobStatus } from "@openharness/jobs";
+import type { JobKind, JobStatus } from "@openharness/jobs";
 
 import type { DaemonJobService } from "../../jobs/index.js";
 import { errorResponse, jsonResponse, readJson } from "../support.js";
@@ -10,8 +10,10 @@ export function createJobRoutes(jobs: DaemonJobService): Hono {
     .get("/", async (c) => {
       try {
         const sessionId = required(c.req.query("sessionId"), "sessionId");
-        const status = readStatus(c.req.query("status"));
-        return jsonResponse({ jobs: await jobs.list({ sessionId, ...(status ? { status } : {}) }) });
+        return jsonResponse({ jobs: await jobs.list({
+          sessionId,
+          ...readListQuery((name) => c.req.query(name)),
+        }) });
       } catch (error) {
         return jobError(error);
       }
@@ -37,6 +39,7 @@ export function createJobRoutes(jobs: DaemonJobService): Hono {
           timeoutMs: numberValue(body.timeoutMs, 30_000),
           after: numberOrUndefined(body.after),
           maxChars: numberOrUndefined(body.maxChars),
+          signal: c.req.raw.signal,
         }));
       } catch (error) {
         return jobError(error);
@@ -79,10 +82,52 @@ function required(value: unknown, name: string): string {
   return value.trim();
 }
 
-function readStatus(value: unknown): JobStatus | undefined {
-  return value === "running" || value === "stopping" || value === "completed" || value === "killed" || value === "failed"
-    ? value
-    : undefined;
+function readListQuery(query: (name: string) => string | undefined) {
+  return {
+    ...enumList(query("kinds"), ["terminal", "shell", "agent", "dream", "workflow"] as const, "kinds"),
+    ...enumList(query("statuses"), ["running", "stopping", "completed", "killed", "failed"] as const, "statuses"),
+    ...optionalQueryNumber(query("startedAfter"), "startedAfter"),
+    ...optionalQueryNumber(query("startedBefore"), "startedBefore"),
+    ...optionalQueryNumber(query("updatedAfter"), "updatedAfter"),
+    ...optionalQueryNumber(query("updatedBefore"), "updatedBefore"),
+    ...optionalQueryBoolean(query("includeFinished"), "includeFinished"),
+    ...optionalQueryNumber(query("limit"), "limit"),
+  } as {
+    kinds?: JobKind[];
+    statuses?: JobStatus[];
+    startedAfter?: number;
+    startedBefore?: number;
+    updatedAfter?: number;
+    updatedBefore?: number;
+    includeFinished?: boolean;
+    limit?: number;
+  };
+}
+
+function enumList<const T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+  name: string,
+): Record<string, T[]> {
+  if (value === undefined) return {};
+  const values = value.split(",").filter(Boolean);
+  if (values.length === 0 || values.some((item) => !allowed.includes(item as T))) {
+    throw new Error(`${name} contains an unsupported value.`);
+  }
+  return { [name]: values as T[] };
+}
+
+function optionalQueryNumber(value: string | undefined, name: string): Record<string, number> {
+  if (value === undefined) return {};
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`${name} must be a finite number.`);
+  return { [name]: parsed };
+}
+
+function optionalQueryBoolean(value: string | undefined, name: string): Record<string, boolean> {
+  if (value === undefined) return {};
+  if (value !== "true" && value !== "false") throw new Error(`${name} must be true or false.`);
+  return { [name]: value === "true" };
 }
 
 function optionalNumber(value: string | undefined): number | undefined {

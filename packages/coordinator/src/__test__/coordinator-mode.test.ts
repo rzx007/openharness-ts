@@ -41,7 +41,15 @@ describe("matchSessionMode", () => {
 
 describe("getCoordinatorTools", () => {
   it("reserves orchestration tools for the coordinator", () => {
-    expect(getCoordinatorTools()).toEqual(["Agent", "SendMessage", "TaskStop", "TaskWait", "Workflow"]);
+    expect(getCoordinatorTools()).toEqual([
+      "Agent",
+      "JobList",
+      "JobRead",
+      "JobWait",
+      "JobSend",
+      "JobCancel",
+      "Workflow",
+    ]);
   });
 });
 
@@ -61,6 +69,9 @@ describe("getCoordinatorUserContext", () => {
     const content = ctx.workerToolsContext!;
     expect(content).toContain("Bash");
     expect(content).toContain("Skill");
+    expect(content).toContain("JobList");
+    expect(content).toContain("JobRead");
+    expect(content).not.toContain("TaskList");
     expect(content).toContain("MCP servers: db, web");
     expect(content).toContain("Scratchpad directory: /tmp/pad");
   });
