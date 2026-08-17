@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertNoRemovedLifecycleToolNames,
   normalizeToolName,
   normalizeToolNames,
   resolveAllowedToolNames,
@@ -51,5 +52,18 @@ describe("tool name normalization", () => {
   it("does not translate removed Task control aliases", () => {
     expect(normalizeToolNames(["task_wait", "task_output", "send_message"]))
       .toEqual(["task_wait", "task_output", "send_message"]);
+  });
+
+  it("reports removed lifecycle tools without rejecting dynamic plugin names", () => {
+    expect(() => assertNoRemovedLifecycleToolNames(
+      ["DynamicPluginTool", "TaskWait", "terminal_send", "TaskUpdate"],
+      "configuration.allowedTools",
+    )).toThrow(
+      'configuration.allowedTools contains removed lifecycle tool names: "TaskWait" -> "JobWait", "terminal_send" -> "JobSend", "TaskUpdate" (remove it; no Job equivalent). Compatibility aliases are not supported.',
+    );
+    expect(() => assertNoRemovedLifecycleToolNames(
+      ["DynamicPluginTool"],
+      "configuration.allowedTools",
+    )).not.toThrow();
   });
 });

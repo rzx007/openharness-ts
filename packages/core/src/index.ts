@@ -133,6 +133,7 @@ export { AppStateStore } from "./state/state-store";
 export { retryWithBackoff } from "./utils/retry";
 export { estimateTokens } from "./utils/token-counter";
 export {
+  assertNoRemovedLifecycleToolNames,
   normalizeToolName,
   normalizeToolNames,
   resolveAllowedToolNames,

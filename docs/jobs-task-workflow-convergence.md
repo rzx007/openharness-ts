@@ -1,6 +1,6 @@
 # Jobs Task/Workflow Convergence
 
-> 状态（2026-08-17）：前三阶段均已实施，模型侧后台生命周期控制已经统一到 Jobs；下一步是清理与运行观察。Jobs 权威契约见 [Jobs 统一后台任务协议](./jobs-protocol.md)，首次实现复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)。
+> 状态（2026-08-17）：前三阶段均已实施，模型侧后台生命周期控制已经统一到 Jobs；第四阶段已完成旧配置名诊断、当前文档清理、`JobList` 默认窗口和 `JobWait` 批量上限，剩余工作转入运行观察。Jobs 权威契约见 [Jobs 统一后台任务协议](./jobs-protocol.md)，首次实现复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)。
 
 ## 结论
 
@@ -24,9 +24,9 @@ Task 和 Workflow 自己仍可保留创建、验证、恢复、模板、reconcil
 
 | 工具 | 当前能力 |
 |---|---|
-| `JobList` | 按 kind/status/时间/终态/limit 列出 Terminal、Task、child Agent、dream、Workflow |
+| `JobList` | 按 kind/status/时间/终态/limit 列出 Terminal、Task、child Agent、dream、Workflow；模型侧默认最近 100 条 |
 | `JobRead` | 返回输出、cursor、截断标记、统一快照和可选 producer details |
-| `JobWait` | 并发等待一个或多个 Job；分别返回结果或错误；timeout 不取消 |
+| `JobWait` | 并发等待 1 到 32 个 Job；分别返回结果或错误；timeout 不取消 |
 | `JobSend` | 给 running Terminal/Agent 输入 |
 | `JobCancel` | 按 owner 路由到底层 producer 取消 |
 
@@ -264,12 +264,12 @@ daemon 和 standalone 必须都注入 `AgentJobHost`，然后才能从默认 reg
 
 落地结果：detached `Workflow run` 返回标准 Job receipt；模型工具删除 `status/list/cancel`，新增语义明确的 `timeline/history`。普通状态、等待、列表和取消全部走 Jobs；CLI/TUI 的同名管理命令作为人工管理面继续保留。
 
-### 第四阶段：清理与观察
+### 第四阶段：清理与观察（部分完成）
 
-1. 删除文档、prompt、slash command catalog 中的旧工具名。
-2. 检查 settings/plugin/agent definitions 中的旧 allow/deny 名称，按“不兼容硬切”返回明确 unknown-tool 错误。
-3. 观察 JobWait 并发、JobList 数量和终态保留成本。
-4. 再决定事件式 wait、retention/pagination、namespaced Job ID 和 completion claim。
+1. 已清理当前文档、prompt、slash command catalog 中面向模型的旧工具名；迁移复盘和历史实施计划保留旧名用于说明变更。
+2. 已检查 settings/plugin/agent definitions；运行时会明确拒绝被删除的 allow/deny/auto-approve 名称并提示对应 `Job*`，未知插件工具仍允许稍后动态注册。
+3. 已给模型侧 `JobList` 增加最近 100 条默认窗口和窗口元数据，给单次 `JobWait` 增加 32 项输入上限。这些是返回量和并发护栏，不是历史清理策略。
+4. 继续观察 JobList 总量、终态保留成本和轮询 wait 压力，再决定事件式 wait、retention/pagination、namespaced Job ID 和 completion claim。
 
 ## 验收标准
 

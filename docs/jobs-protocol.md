@@ -170,7 +170,7 @@ stateDiagram-v2
 
 | 工具 | 输入重点 | 返回重点 | 支持范围 |
 |---|---|---|---|
-| `JobList` | 可选 `kinds/statuses/时间/includeFinished/limit` | owner session 的 `JobSnapshot[]` | Terminal、shell、Agent、dream、Workflow |
+| `JobList` | 可选 `kinds/statuses/时间/includeFinished/limit` | owner session 的 `JobSnapshot[]` 和返回窗口信息 | Terminal、shell、Agent、dream、Workflow |
 | `JobRead` | `jobId`、可选 `after/maxChars` | `text/cursor/truncated/snapshot/details?` | 所有 Job |
 | `JobWait` | `jobIds[]`、`timeoutSeconds`、可选逐 Job cursor | 每个 Job 的独立 wait 结果或错误 | 所有 Job |
 | `JobSend` | `jobId/data` | 已发送确认 | running Terminal；未取消且会话可恢复的 Agent |
@@ -217,7 +217,7 @@ JobCancel({ jobId, reason: "no longer needed" })
 
 - `JobWait` timeout 和调用方中断都只结束本次等待，不隐式调用 `JobCancel`。
 - `JobSend` 会在服务端重新检查当前类型与状态，不能靠旧快照绕过能力边界。
-- `JobWait` 会并发等待多个 ID；某个 ID 不存在时只在对应 result 返回 `error`，不会遮住其他 Job 的结果。
+- `JobWait` 会并发等待最多 32 个 ID；某个 ID 不存在时只在对应 result 返回 `error`，不会遮住其他 Job 的结果。
 - Cron 是“将来何时启动命令”的计划，不是已经运行的 Job，不进入这五个工具的聚合范围。
 - `Bash` 是等待命令返回的一次性调用；需要后台运行或长期交互时使用 `TaskCreate` 或 `TerminalOpen`。
 
@@ -225,7 +225,7 @@ JobCancel({ jobId, reason: "no longer needed" })
 
 列出当前 owner session 的工作。可用过滤包括 `kinds`、`statuses`、started/updated 起止时间、`includeFinished` 和 `limit`。调用前 daemon 会刷新 TaskManager 到 durable task 的投影。
 
-返回的是新快照数组，不是 live handle。排序按 `startedAt` 从新到旧。
+返回的是新快照数组，不是 live handle。排序按 `startedAt` 从新到旧。模型工具在没有传 `limit` 时默认只取最近 100 条，并返回 `window: { limit, returned, possiblyTruncated }`；`possiblyTruncated: true` 表示结果刚好占满窗口，调用方应增加过滤条件或显式调整 limit。这个窗口只限制本次返回，不删除 producer 保存的历史。底层 `AgentJobHost.list()` 仍以请求里的显式 `limit` 为准。
 
 ```ts
 interface JobListRequest {
@@ -263,14 +263,14 @@ JobReadResult = { text, cursor, truncated, snapshot, details? }
 AgentJobHost.wait({ sessionId, jobId, timeoutMs, after?, maxChars? })
 
 JobWait({
-  jobIds: string[],
+  jobIds: string[], // 1..32 项；重复 ID 会去重
   timeoutSeconds?: number,
   after?: Record<string, number>,
   maxChars?: number,
 })
 ```
 
-底层 host 一次等待一个 Job；模型工具在上层并发调用，并为每个 `jobId` 返回独立的 `JobWaitResult` 或 `{ jobId, error }`。
+底层 host 一次等待一个 Job；模型工具在上层接受最多 32 项，去重后并发调用，并为每个 `jobId` 返回独立的 `JobWaitResult` 或 `{ jobId, error }`。上限在启动任何 wait 前检查，避免单次模型调用无界放大并发。
 
 - 已经结束时立即返回，`timedOut: false`。
 - timeout 到达时返回当前快照，`timedOut: true`。
@@ -353,7 +353,7 @@ HTTP `/jobs` 由 daemon Bearer token 保护。HTTP 里的 `sessionId` 用于选�
 
 - Task/Workflow wait 仍是轮询，不是事件订阅。
 - Task/Workflow cursor 是快照版本，不是严格日志 offset。
-- Terminal 会在 daemon 生命周期内保留终态 session；durable task/workflow 也没有统一 retention policy。
+- Terminal 会在 daemon 生命周期内保留终态 session；durable task/workflow 也没有统一 retention policy。当前只限制模型侧默认列表窗口，没有删除历史。
 - Jobs 还没有 completion reported/claim 语义，不能自动保证“完成通知只消费一次”。
 - Jobs 还没有 owner 级并发配额。
 - 协议依赖 producer ID 实际不冲突，但目前没有统一的 namespaced ID 编码和运行时冲突检测。

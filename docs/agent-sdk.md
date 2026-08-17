@@ -82,6 +82,8 @@ const agent = await createOpenHarnessAgent({
 | `roleAllowedTools` | 当前 Agent 角色自己想看的工具。例如 Coordinator Leader 只需要 `Agent` / `Workflow` / `Job*`，但这不代表 Worker 也只能用这些。 |
 | `disallowedTools` | 永远优先禁止。父 Agent 和子 Agent 的禁止列表会合并。 |
 
+后台生命周期旧名已经硬切，不提供兼容别名。`allowedTools`、`roleAllowedTools`、`disallowedTools` 和 auto-approve 配置若仍包含已删除的 `TaskGet/List/Output/Stop/Wait/Update`、`SendMessage` 或 `TerminalRead/List/Send/Signal/Close`，runtime 会在启动时直接报错并给出对应 `Job*`；其他尚未注册的名字仍被保留，供插件动态注册工具使用。
+
 最终能看到的工具是：
 
 ```text

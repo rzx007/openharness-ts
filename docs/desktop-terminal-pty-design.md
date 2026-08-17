@@ -31,20 +31,20 @@ Desktop 右侧 panel 已经提供可交互的 PTY 终端。用户可以在当前
 
 ### Agent 工具
 
-| 工具             | 用途                                           | 权限属性                           |
-| ---------------- | ---------------------------------------------- | ---------------------------------- |
-| `TerminalOpen`   | 在当前 Agent 的 `cwd` 创建持久终端。           | 执行类操作，需要现有权限流程批准。 |
-| `TerminalSend`   | 向终端写入文本或控制字符；不会自动补换行，但默认把 `\n` 规范成终端回车。 | 写入类操作，需要批准。             |
-| `TerminalRead`   | 读取终端当前保留输出和 sequence。              | 只读。                             |
-| `TerminalSignal` | 发送 `interrupt`、`eof` 或 `terminate`。       | 执行类操作，需要批准。             |
-| `TerminalClose`  | 终止并移除 Agent 拥有的终端。                  | 执行类操作，需要批准。             |
-| `TerminalList`   | 列出当前 Agent session 拥有的终端。            | 只读。                             |
+| 工具 | 用途 | 权限属性 |
+| --- | --- | --- |
+| `TerminalOpen` | 在当前 Agent 的 `cwd` 创建持久终端并返回 `jobId`。 | 执行类操作，需要现有权限流程批准。 |
+| `JobSend` | 向运行中的终端写入文本或控制字符。 | 写入类操作，需要批准。 |
+| `JobRead` | 读取终端当前状态、增量输出和 cursor。 | 只读。 |
+| `JobWait` | 等待终端退出或本次等待超时；超时不会关闭终端。 | 只读。 |
+| `JobCancel` | 终止终端。 | 执行类操作，需要批准。 |
+| `JobList` | 列出当前 Agent session 拥有的终端 Job。 | 只读。 |
 
 Agent 不应该用持久终端替代所有命令执行。一次性的构建、测试、查询和脚本仍优先使用 `Bash`；只有进程需要持续运行、需要多轮输入，或者需要用户后续接管时才使用 Terminal 工具。
 
-`TerminalSend` 默认会把 `\n` 和 `\r\n` 转成 `\r`，也就是终端里真实 Enter 键发送给 PTY 的控制字符。这样可以避免 Windows PowerShell 把 `ls\n` 识别成续行输入并进入 `>>` 提示符。如果确实要向正在运行的程序写入完全原始内容，可以传 `raw: true`。
+`JobSend` 会原样写入 `data`。提交命令时发送终端 Enter 字符 `\r`；需要中断或 EOF 时分别发送 `\u0003` 或 `\u0004`。终止整个终端使用 `JobCancel`。
 
-`TerminalRead` 最多向模型返回末尾 12000 个字符，避免大量日志占满模型上下文。Desktop 使用的完整内存快照上限约为 20 万字符，不写入数据库。
+`JobRead` 默认最多向模型返回 12000 个字符，避免大量日志占满模型上下文。Desktop 使用的完整内存快照上限约为 20 万字符，不写入数据库。
 
 ### Desktop 操作
 
@@ -811,9 +811,11 @@ token 或敏感日志长期写入数据库。
 PTY 的最终所有者已经从 Electron main 移到 daemon。这样 Agent 工具和桌面右侧 Panel 连接的是同一个进程，桌面窗口只负责转发 HTTP/SSE 与 Electron IPC，不再保存第二套终端状态。
 
 ```text
-Agent TerminalOpen / TerminalSend / TerminalRead / TerminalSignal / TerminalClose / TerminalList
-  -> ToolContext.terminal
-  -> DaemonTerminalService.createAgentHost(rootSession)
+Agent TerminalOpen
+  -> ToolContext.terminal -> DaemonTerminalService.createAgentHost(rootSession)
+Agent JobList / JobRead / JobWait / JobSend / JobCancel
+  -> ToolContext.jobs -> DaemonJobService.createAgentHost(rootSession)
+两条路径
   -> LocalTerminalProvider
   -> node-pty
 
@@ -828,7 +830,7 @@ Desktop TerminalTool
 运行入口和结果返回：
 
 1. daemon 加载持久会话 Agent 时，根据根会话创建一个终端宿主，并注入 `OpenHarnessAgentOptions.terminal`。
-2. `QueryEngine` 执行终端工具时，把宿主、当前 `sessionId` 和 `cwd` 放进 `ToolContext`。
+2. `QueryEngine` 创建终端时使用 `ToolContext.terminal`；后续观察和控制通过同一上下文里的 `jobs` 宿主进入 `DaemonJobService`。
 3. `TerminalOpen` 创建 `source: "agent"` 的 PTY；记录只保存在 daemon 内存中，不写入会话数据库。
 4. 工具结果以稳定的 `kind: "terminal"` JSON 返回模型，同时进入会话 transcript。
 5. Desktop 把 `TerminalOpen` 结果渲染成终端卡片；点击卡片后展开右侧 Panel，并通过 terminal id 附着到原 PTY。
@@ -838,15 +840,15 @@ Desktop TerminalTool
 
 - 普通构建、测试、查询和一次性脚本继续使用 `Bash`，因为它有明确的结束点和完整结果。
 - 开发服务器、watch、REPL、调试器以及需要多轮输入的 CLI 使用持久终端。
-- `TerminalSend` 不会自动补换行；要提交命令仍需要在 `data` 末尾包含换行。工具层会把换行规范成 PTY 回车，`raw: true` 时才保持完全原样。
-- `TerminalRead` 最多向模型返回末尾 12000 个字符，完整的 UI 快照仍按终端内存上限保留，避免大量日志占满模型上下文。
+- `JobSend` 原样写入数据；提交命令发送 `\r`，Ctrl-C 发送 `\u0003`，EOF 发送 `\u0004`。
+- `JobRead` 默认最多向模型返回 12000 个字符，完整的 UI 快照仍按终端内存上限保留，避免大量日志占满模型上下文。
 
 所有权和权限：
 
 - Agent 只能读写 `source: "agent"` 且 `sessionId` 与当前 Agent 完全一致的终端。
 - 子 Agent 继承同一个宿主对象，但使用自己的 session id，因此不能操作父 Agent 或兄弟 Agent 的终端。
 - 用户可在已认证的 Desktop 客户端查看和接管 Agent 终端；Agent 默认不能操作用户手动创建的终端。
-- `TerminalRead` 和 `TerminalList` 是只读工具；创建、写入、发送信号和关闭仍走现有工具权限审批。
+- `JobRead`、`JobList` 和 `JobWait` 是只读工具；`TerminalOpen`、`JobSend` 和 `JobCancel` 仍走现有工具权限审批。
 - daemon 退出时先关闭 Agent，再回收全部 PTY。关闭 Panel 或 Electron renderer 只断开订阅，不结束 PTY。
 
 当前传输采用 REST 处理命令、SSE 推送输出。这里没有使用 WebSocket，是因为终端输入和 resize 都是短请求，输出才是单向高频流；如果以后需要远程高吞吐或二进制协议，可以只替换 transport，不改 provider、Agent 工具和 xterm 视图。

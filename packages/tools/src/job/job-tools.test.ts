@@ -31,7 +31,22 @@ describe("job tools", () => {
       includeFinished: false,
       limit: 5,
     });
-    expect(payload(result)).toMatchObject({ kind: "job", action: "list", jobs: [{ id: "terminal-1" }] });
+    expect(payload(result)).toMatchObject({
+      kind: "job",
+      action: "list",
+      jobs: [{ id: "terminal-1" }],
+      window: { limit: 5, returned: 1, possiblyTruncated: false },
+    });
+  });
+
+  it("bounds the default model-visible list without deleting host history", async () => {
+    const list = vi.fn(async () => [snapshot]);
+    const result = await jobListTool.execute({}, context({ list }));
+
+    expect(list).toHaveBeenCalledWith({ sessionId: "session-1", limit: 100 });
+    expect(payload(result)).toMatchObject({
+      window: { limit: 100, returned: 1, possiblyTruncated: false },
+    });
   });
 
   it("forwards read cursors and output limits", async () => {
@@ -97,6 +112,20 @@ describe("job tools", () => {
         { jobId: "missing", error: "Job not found: missing" },
       ],
     });
+  });
+
+  it("rejects oversized wait batches before starting concurrent waits", async () => {
+    const wait = vi.fn();
+    const result = await jobWaitTool.execute({
+      jobIds: Array.from({ length: 33 }, (_, index) => `job-${index}`),
+    }, context({ wait }));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: "jobIds cannot contain more than 32 entries.",
+    });
+    expect(wait).not.toHaveBeenCalled();
   });
 
   it("cancels through the common host", async () => {

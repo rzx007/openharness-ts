@@ -99,6 +99,24 @@ describe("resolveEffectiveAllowedTools", () => {
 });
 
 describe("createOpenHarnessRuntime tool visibility", () => {
+  it("rejects removed lifecycle names with the Jobs replacement", async () => {
+    await expect(createOpenHarnessRuntime({
+      settings: {
+        ...BASE_SETTINGS,
+        permission: { mode: "default", deniedTools: ["task_wait"] },
+      },
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+      },
+    })).rejects.toThrow(
+      'settings.permission.deniedTools contains removed lifecycle tool names: "task_wait" -> "JobWait"',
+    );
+  });
+
   it("applies allowedTools and deniedTools to tools registered after runtime creation", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: {

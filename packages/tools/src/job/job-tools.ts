@@ -1,11 +1,13 @@
 import type { ToolContext, ToolDefinition, ToolResult } from "@openharness/core";
 import type { JobKind, JobStatus } from "@openharness/jobs";
 
+const DEFAULT_JOB_LIST_LIMIT = 100;
+const MAX_JOB_WAIT_IDS = 32;
 const jobIdProperty = { type: "string", description: "Job id returned by a long-running tool or JobList" };
 
 export const jobListTool: ToolDefinition = {
   name: "JobList",
-  description: "List terminal, background task, child-agent, and workflow jobs owned by this session.",
+  description: "List the latest terminal, background task, child-agent, and workflow jobs owned by this session. Returns at most 100 by default.",
   inputSchema: {
     type: "object",
     properties: {
@@ -24,18 +26,27 @@ export const jobListTool: ToolDefinition = {
       updatedAfter: { type: "number", description: "Inclusive Unix timestamp in milliseconds" },
       updatedBefore: { type: "number", description: "Inclusive Unix timestamp in milliseconds" },
       includeFinished: { type: "boolean", default: true },
-      limit: { type: "number", minimum: 1 },
+      limit: { type: "number", minimum: 1, default: DEFAULT_JOB_LIST_LIMIT },
     },
   },
   async execute(input, context) {
     const host = resolveHost(context);
     if ("content" in host) return host;
     try {
+      const limit = optionalNumber(input.limit) ?? DEFAULT_JOB_LIST_LIMIT;
       const jobs = await host.jobs.list({
         sessionId: host.sessionId,
         ...optionalListFilters(input),
+        limit,
       });
-      return result("list", { jobs });
+      return result("list", {
+        jobs,
+        window: {
+          limit,
+          returned: jobs.length,
+          possiblyTruncated: jobs.length === limit,
+        },
+      });
     } catch (error) {
       return failed(error);
     }
@@ -81,6 +92,7 @@ export const jobWaitTool: ToolDefinition = {
         type: "array",
         items: jobIdProperty,
         minItems: 1,
+        maxItems: MAX_JOB_WAIT_IDS,
         description: "Job ids to wait for concurrently",
       },
       after: {
@@ -99,6 +111,9 @@ export const jobWaitTool: ToolDefinition = {
     try {
       const timeoutSeconds = optionalNumber(input.timeoutSeconds) ?? 30;
       if (timeoutSeconds <= 0) throw new Error("timeoutSeconds must be positive.");
+      if (Array.isArray(input.jobIds) && input.jobIds.length > MAX_JOB_WAIT_IDS) {
+        throw new Error(`jobIds cannot contain more than ${MAX_JOB_WAIT_IDS} entries.`);
+      }
       const jobIds = requiredStringArray(input.jobIds, "jobIds");
       const cursors = optionalCursorMap(input.after);
       const results = await Promise.all(jobIds.map(async (jobId) => {

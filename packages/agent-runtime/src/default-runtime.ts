@@ -5,7 +5,11 @@ import type {
   ToolDefinition,
 } from "@openharness/core";
 import { QueryEngine, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
-import { normalizeToolNames, resolveAllowedToolNames } from "@openharness/core";
+import {
+  assertNoRemovedLifecycleToolNames,
+  normalizeToolNames,
+  resolveAllowedToolNames,
+} from "@openharness/core";
 import {
   AnthropicClient,
   CodexSubscriptionClient,
@@ -103,6 +107,8 @@ export async function createOpenHarnessRuntime(
   const cwd = options.cwd ?? process.cwd();
   const configuration = options.configuration;
   const storage = options.credentialStorage ?? new CredentialStorage();
+
+  validateLifecycleToolConfiguration(settings, configuration);
 
   const apiClient =
     configuration.client ??
@@ -211,6 +217,25 @@ export async function createOpenHarnessRuntime(
     options.sessionId,
   );
   return bundle;
+}
+
+function validateLifecycleToolConfiguration(
+  settings: Settings,
+  configuration: OpenHarnessAgentConfiguration,
+): void {
+  const configuredLists: Array<[string, readonly string[] | undefined]> = [
+    ["settings.permission.allowedTools", settings.permission.allowedTools],
+    ["settings.permission.deniedTools", settings.permission.deniedTools],
+    ["settings.permission.autoApproveTools", settings.permission.autoApproveTools],
+    ["configuration.allowedTools", configuration.allowedTools],
+    ["configuration.hostToolCeiling", configuration.hostToolCeiling],
+    ["configuration.roleAllowedTools", configuration.roleAllowedTools],
+    ["configuration.disallowedTools", configuration.disallowedTools],
+    ["configuration.autoApproveTools", configuration.autoApproveTools],
+  ];
+  for (const [source, tools] of configuredLists) {
+    assertNoRemovedLifecycleToolNames(tools ?? [], source);
+  }
 }
 
 class RuntimeToolRegistry implements IToolRegistry {
