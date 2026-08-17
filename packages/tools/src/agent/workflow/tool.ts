@@ -27,7 +27,7 @@ import { createAgentWorkflowRunner } from "./runner.js";
 
 const WORKFLOW_MODES = new Set<WorkflowMode>(["parallel", "sequential", "pipeline"]);
 const FAILURE_POLICIES = new Set<WorkflowFailurePolicy>(["skip-dependents", "fail-fast", "continue"]);
-const WORKFLOW_ACTIONS = new Set(["run", "resume", "status", "list", "template", "reconcile", "validate", "cancel"]);
+const WORKFLOW_ACTIONS = new Set(["run", "resume", "timeline", "history", "template", "reconcile", "validate"]);
 const BUDGET_POLICY_PRESETS = new Set<WorkflowBudgetPolicyPreset>(["cheap-review", "safe-write", "fast-parallel"]);
 
 export interface WorkflowToolOptions {
@@ -45,63 +45,59 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
     description:
       "Run a hard-scheduled multi-agent workflow. Use this when work has an explicit DAG, " +
       "sequential steps, a pipeline, retries, failure policy, or concurrency limits. " +
+      "Detached runs return a jobId for JobRead, JobWait, and JobCancel. " +
       "For one-off delegation, Agent plus JobWait is still simpler.",
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["run", "resume", "status", "list", "template", "reconcile", "validate", "cancel"],
-          description: "Workflow action. Defaults to run. Use validate before launching workers, cancel to stop a persisted running workflow.",
-        },
-        view: {
-          type: "string",
-          enum: ["json", "timeline"],
-          description: "For status, choose the default structured JSON payload or a readable timeline view.",
+          enum: ["run", "resume", "timeline", "history", "template", "reconcile", "validate"],
+          description: "Workflow domain action. Defaults to run. Use Jobs for ordinary status, list, wait, and cancel operations.",
         },
         taskIds: {
           type: "array",
           items: { type: "string" },
-          description: "For status timeline, include only events for these task ids.",
+          description: "For action=timeline, include only events for these task ids.",
         },
         eventTypes: {
           type: "array",
           items: { type: "string" },
-          description: "For status timeline, include only these event types.",
+          description: "For action=timeline, include only these event types.",
         },
         statuses: {
           type: "array",
           items: { type: "string" },
-          description: "For status timeline, include only events with these statuses.",
+          description: "For action=timeline, include only events with these statuses.",
         },
         runStatuses: {
           type: "array",
           items: { type: "string", enum: ["running", "completed", "failed"] },
-          description: "For action=list, include only workflow runs with these statuses.",
+          description: "For action=history, include only workflow runs with these statuses.",
         },
         limit: {
           type: "number",
-          description: "For action=list, maximum number of workflow runs to return.",
+          description: "For action=history, maximum number of workflow runs to return.",
         },
         runIdPrefix: {
           type: "string",
-          description: "For action=list, include only workflow runs whose runId starts with this prefix.",
+          description: "For action=history, include only workflow runs whose runId starts with this prefix.",
         },
         createdAfter: {
-          description: "For action=list, include runs created at or after this timestamp. Accepts epoch milliseconds or an ISO date string.",
+          description: "For action=history, include runs created at or after this timestamp. Accepts epoch milliseconds or an ISO date string.",
         },
         createdBefore: {
-          description: "For action=list, include runs created at or before this timestamp. Accepts epoch milliseconds or an ISO date string.",
+          description: "For action=history, include runs created at or before this timestamp. Accepts epoch milliseconds or an ISO date string.",
         },
         updatedAfter: {
-          description: "For action=list, include runs updated at or after this timestamp. Accepts epoch milliseconds or an ISO date string.",
+          description: "For action=history, include runs updated at or after this timestamp. Accepts epoch milliseconds or an ISO date string.",
         },
         updatedBefore: {
-          description: "For action=list, include runs updated at or before this timestamp. Accepts epoch milliseconds or an ISO date string.",
+          description: "For action=history, include runs updated at or before this timestamp. Accepts epoch milliseconds or an ISO date string.",
         },
         needsReconciliation: {
           type: "boolean",
-          description: "For action=list, include only runs matching this reconciliation state.",
+          description: "For action=history, include only runs matching this reconciliation state.",
         },
         actionIds: {
           type: "array",
@@ -253,11 +249,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         },
         latest: {
           type: "boolean",
-          description: "For resume/status, use the latest persisted workflow run when runId is omitted.",
-        },
-        cancelReason: {
-          type: "string",
-          description: "For action=cancel, reason written into the terminal workflow snapshot.",
+          description: "For resume/timeline/reconcile, use the latest owned persisted workflow run when runId is omitted.",
         },
       },
       required: [],
@@ -265,26 +257,23 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
     async execute(input, context) {
       const action = parseAction(input.action);
       if (!action) {
-        return { content: [{ type: "text", text: "action must be one of: run, resume, status, list, template, reconcile, validate, cancel" }], isError: true };
+        return { content: [{ type: "text", text: "action must be one of: run, resume, timeline, history, template, reconcile, validate. Use JobRead, JobList, or JobCancel for lifecycle control." }], isError: true };
       }
 
       if (action === "validate") {
         return workflowValidate(input);
       }
-      if (action === "status") {
-        return workflowStatus(input, context.cwd);
+      if (action === "timeline") {
+        return workflowTimeline(input, context.cwd, context.sessionId);
       }
-      if (action === "list") {
-        return workflowList(input, context.cwd);
+      if (action === "history") {
+        return workflowHistory(input, context.cwd, context.sessionId);
       }
       if (action === "template") {
         return workflowTemplate(input);
       }
       if (action === "reconcile") {
-        return workflowReconcile(input, context.cwd);
-      }
-      if (action === "cancel") {
-        return workflowCancel(input, context, options.stopTask, (event) => emitWorkflowRuntimeEvent(context, event));
+        return workflowReconcile(input, context.cwd, context.sessionId);
       }
 
       const specOrError = parseWorkflowSpec(input);
@@ -344,12 +333,24 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
             .finally(() => ownerSignal?.removeEventListener("abort", cancelForParentInterrupt));
           const snapshot = store.load(workflowRunId);
           if (!snapshot) {
-            return { content: [{ type: "text", text: "Workflow submitted, but no running snapshot was written yet. Use Workflow status/latest or /workflow to refresh." }] };
+            return { content: [{ type: "text", text: "Workflow submitted, but no running snapshot was written yet." }], isError: true };
           }
-          return { content: [{ type: "text", text: formatWorkflowSnapshot(snapshot, store.loadEvents(snapshot.runId)) }] };
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                kind: "job",
+                action: "created",
+                jobId: snapshot.runId,
+                jobKind: "workflow",
+                label: snapshot.summary,
+                status: snapshot.status,
+              }),
+            }],
+          };
         }
         const result = action === "resume"
-          ? await workflowResume(input, context.cwd, runner as WorkflowRunner, (event) => emitWorkflowRuntimeEvent(context, event))
+          ? await workflowResume(input, context.cwd, context.sessionId, runner as WorkflowRunner, (event) => emitWorkflowRuntimeEvent(context, event))
           : persist && options.run === undefined
             ? await runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
                 cwd: context.cwd,
@@ -388,30 +389,30 @@ function workflowValidate(input: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text: formatWorkflowValidationReport(report) }] };
 }
 
-function workflowStatus(input: Record<string, unknown>, cwd: string) {
+function workflowTimeline(input: Record<string, unknown>, cwd: string, ownerSession?: string) {
   const store = new WorkflowRunStore({ cwd });
-  const snapshot = loadWorkflowSnapshot(store, input);
+  const snapshot = loadWorkflowSnapshot(store, input, ownerSession);
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
   }
   const filters = parseTimelineFilters(input);
   const events = store.loadEvents(snapshot.runId);
-  if (input.view === "timeline") {
-    return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events, filters) }] };
-  }
-  return { content: [{ type: "text" as const, text: formatWorkflowSnapshot(snapshot, events, filters) }] };
+  return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events, filters) }] };
 }
 
-function workflowList(input: Record<string, unknown>, cwd: string) {
+function workflowHistory(input: Record<string, unknown>, cwd: string, ownerSession?: string) {
   const store = new WorkflowRunStore({ cwd });
   const filters = parseRunListFilters(input);
   if (typeof filters === "string") {
     return { content: [{ type: "text" as const, text: filters }], isError: true };
   }
-  const runs = filterWorkflowRunSummaries(store.listSummaries(), filters)
+  const runs = filterWorkflowRunSummaries(
+    store.listSummaries().filter((run) => ownerSession === undefined || run.ownerSession === ownerSession),
+    filters,
+  )
     .slice(0, filters.limit ?? undefined);
   return {
-    content: [{ type: "text" as const, text: formatWorkflowRunList(runs, filters) }],
+    content: [{ type: "text" as const, text: formatWorkflowHistory(runs, filters) }],
   };
 }
 
@@ -431,9 +432,9 @@ function workflowTemplate(input: Record<string, unknown>) {
   };
 }
 
-function workflowReconcile(input: Record<string, unknown>, cwd: string) {
+function workflowReconcile(input: Record<string, unknown>, cwd: string, ownerSession?: string) {
   const store = new WorkflowRunStore({ cwd });
-  const snapshot = loadWorkflowSnapshot(store, input);
+  const snapshot = loadWorkflowSnapshot(store, input, ownerSession);
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
   }
@@ -456,29 +457,6 @@ function workflowReconcile(input: Record<string, unknown>, cwd: string) {
   };
 }
 
-async function workflowCancel(
-  input: Record<string, unknown>,
-  context: ToolContext,
-  stopTask: ((taskId: string) => Promise<unknown>) | undefined,
-  onEvent?: (event: WorkflowRunEvent) => void,
-) {
-  const store = new WorkflowRunStore({ cwd: context.cwd });
-  const snapshot = loadWorkflowSnapshot(store, input);
-  if (typeof snapshot === "string") {
-    return { content: [{ type: "text" as const, text: snapshot }], isError: true };
-  }
-  const reason = asOptionalString(input.cancelReason);
-  const result = await cancelPersistentWorkflow(snapshot, {
-    store,
-    reason,
-    stopTask: stopTask ?? ((taskId) => stopWorkflowTask(context, taskId, reason ?? "Workflow cancelled")),
-    onEvent,
-  });
-  return {
-    content: [{ type: "text" as const, text: formatWorkflowNotification(result) }],
-  };
-}
-
 async function stopWorkflowTask(
   context: ToolContext,
   taskId: string,
@@ -493,11 +471,12 @@ async function stopWorkflowTask(
 async function workflowResume(
   input: Record<string, unknown>,
   cwd: string,
+  ownerSession: string | undefined,
   runner: WorkflowRunner,
   onEvent?: (event: WorkflowRunEvent) => void,
 ) {
   const store = new WorkflowRunStore({ cwd });
-  const snapshot = loadWorkflowSnapshot(store, input);
+  const snapshot = loadWorkflowSnapshot(store, input, ownerSession);
   if (typeof snapshot === "string") {
     throw new Error(snapshot);
   }
@@ -524,11 +503,17 @@ function emitWorkflowRuntimeEvent(
 function loadWorkflowSnapshot(
   store: WorkflowRunStore,
   input: Record<string, unknown>,
+  ownerSession?: string,
 ): WorkflowRunSnapshot | string {
   const runId = asOptionalString(input.runId);
-  const snapshot = runId ? store.load(runId) : store.latest();
+  const snapshot = runId
+    ? store.load(runId)
+    : store.list().find((candidate) => ownerSession === undefined || candidate.ownerSession === ownerSession);
   if (!snapshot) {
     return runId ? `Workflow run not found: ${runId}` : "No workflow runs found";
+  }
+  if (ownerSession !== undefined && snapshot.ownerSession !== ownerSession) {
+    return `Workflow run not found: ${snapshot.runId}`;
   }
   return snapshot;
 }
@@ -583,10 +568,10 @@ function parseWorkflowSpec(input: Record<string, unknown>): WorkflowSpec | strin
   };
 }
 
-function parseAction(value: unknown): "run" | "resume" | "status" | "list" | "template" | "reconcile" | "validate" | "cancel" | undefined {
+function parseAction(value: unknown): "run" | "resume" | "timeline" | "history" | "template" | "reconcile" | "validate" | undefined {
   if (value === undefined) return "run";
   return typeof value === "string" && WORKFLOW_ACTIONS.has(value)
-    ? value as "run" | "resume" | "status" | "list" | "template" | "reconcile" | "validate" | "cancel"
+    ? value as "run" | "resume" | "timeline" | "history" | "template" | "reconcile" | "validate"
     : undefined;
 }
 
@@ -846,18 +831,6 @@ function filterWorkflowRunSummaries(runs: WorkflowRunSummary[], filters: RunList
   });
 }
 
-function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[] = [], filters: TimelineFilters = {}): string {
-  const filteredEvents = filterWorkflowEvents(events, filters);
-  const timeline = createWorkflowTimeline(filteredEvents);
-  const timelineControls = createTimelineControls(snapshot, events, filters);
-  const timelineSummary = createTimelineSummary(timeline);
-  return [
-    "<workflow-run-snapshot>",
-    `<payload>${escapeXml(JSON.stringify({ snapshot, events: filteredEvents, filters, timelineControls, timelineSummary, timeline, timelineText: formatTimelineText(snapshot, timeline, filters, timelineSummary) }))}</payload>`,
-    "</workflow-run-snapshot>",
-  ].join("\n");
-}
-
 function formatWorkflowTimeline(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[], filters: TimelineFilters = {}): string {
   const timeline = createWorkflowTimeline(filterWorkflowEvents(events, filters));
   return formatTimelineText(snapshot, timeline, filters, createTimelineSummary(timeline));
@@ -894,24 +867,6 @@ function formatTimelineText(
   return lines.join("\n");
 }
 
-function createTimelineControls(snapshot: WorkflowRunSnapshot, events: WorkflowRunEvent[], filters: TimelineFilters = {}) {
-  const available = {
-    taskIds: [...new Set([...snapshot.plan.tasks.map((task) => task.id), ...events.map((event) => event.taskId).filter((id): id is string => id !== undefined)])].sort(),
-    eventTypes: [...new Set(events.map((event) => event.type))].sort(),
-    statuses: [...new Set(events.map((event) => event.status).filter((status) => typeof status === "string").map(String))].sort(),
-  };
-  const selected = {
-    taskIds: filters.taskIds ?? [],
-    eventTypes: filters.eventTypes ?? [],
-    statuses: filters.statuses ?? [],
-  };
-  return {
-    ...available,
-    available,
-    selected,
-  };
-}
-
 function createTimelineSummary(
   timeline: Array<{ timestamp: number; type: string; taskId?: string; status?: string; summary: string }>,
 ) {
@@ -938,14 +893,14 @@ function formatTimelineFilters(filters: TimelineFilters): string | undefined {
   return parts.length > 0 ? `Filters: ${parts.join(" ")}` : undefined;
 }
 
-function formatWorkflowRunList(
+function formatWorkflowHistory(
   runs: WorkflowRunSummary[],
   filters: RunListFilters = {},
 ): string {
   return [
-    "<workflow-run-list>",
+    "<workflow-history>",
     `<payload>${escapeXml(JSON.stringify({ runs, total: runs.length, filters }))}</payload>`,
-    "</workflow-run-list>",
+    "</workflow-history>",
   ].join("\n");
 }
 

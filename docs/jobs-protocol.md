@@ -253,7 +253,7 @@ JobReadResult = { text, cursor, truncated, snapshot, details? }
 - `after` 是上一次返回的 `cursor`。
 - `maxChars` 限制本次响应，不改变 producer 保留的原始输出。
 - `truncated: true` 表示调用方没有拿到完整历史，可能因为保留窗口或本次响应上限。
-- `details` 是 producer 自己的结构化状态。当前 Workflow 会在这里返回 plan、pending/running/blocked、results 和 budget；普通调用方仍可只处理通用 snapshot。
+- `details` 是 producer 自己的结构化状态。当前 Workflow 会在这里返回 plan、pending/running/blocked、results、budget，以及 reconciliation issues/summary/plan；普通调用方仍可只处理通用 snapshot。
 
 ### JobWait
 

@@ -1,5 +1,7 @@
 import {
   cancelPersistentWorkflow,
+  createWorkflowNotification,
+  createWorkflowResultFromSnapshot,
   WorkflowRunStore,
   type WorkflowRunSnapshot,
 } from "@openharness/coordinator";
@@ -314,6 +316,7 @@ function formatWorkflowOutput(workflow: WorkflowRunSnapshot): string {
 }
 
 function workflowDetails(workflow: WorkflowRunSnapshot): Record<string, unknown> {
+  const notification = createWorkflowNotification(createWorkflowResultFromSnapshot(workflow));
   return {
     status: workflow.status,
     termination: workflow.termination,
@@ -325,6 +328,10 @@ function workflowDetails(workflow: WorkflowRunSnapshot): Record<string, unknown>
     runningTasks: workflow.runningTasks,
     results: workflow.results,
     budget: workflow.budget,
+    needsReconciliation: notification.needsReconciliation,
+    reconciliationIssues: notification.reconciliationIssues,
+    reconciliationSummary: notification.reconciliationSummary,
+    reconciliationPlan: notification.reconciliationPlan,
   };
 }
 

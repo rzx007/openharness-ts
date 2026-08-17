@@ -1,6 +1,6 @@
 # Jobs Task/Workflow Convergence
 
-> 状态（2026-08-17）：第一阶段 Jobs 能力补齐与第二阶段 Task/Agent 硬切均已实施；下一步是 Workflow 硬切。Jobs 权威契约见 [Jobs 统一后台任务协议](./jobs-protocol.md)，首次实现复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)。
+> 状态（2026-08-17）：前三阶段均已实施，模型侧后台生命周期控制已经统一到 Jobs；下一步是清理与运行观察。Jobs 权威契约见 [Jobs 统一后台任务协议](./jobs-protocol.md)，首次实现复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)。
 
 ## 结论
 
@@ -254,13 +254,15 @@ daemon 和 standalone 必须都注入 `AgentJobHost`，然后才能从默认 reg
 
 落地结果：`TaskCreate` 只创建后台 shell，`Agent` 返回结构化 `jobId`；所有模型侧 list/read/wait/send/cancel 都通过 Jobs。已完成或失败但会话仍可恢复的 Agent 允许 `JobSend` 继续，已取消的 Agent 不可恢复。
 
-### 第三阶段：Workflow 硬切
+### 第三阶段：Workflow 硬切（已完成）
 
 1. detached Workflow 返回 `jobId`，提示使用 JobRead/JobWait/JobCancel。
 2. 删除 `status/list/cancel` actions。
 3. 将 timeline 和高级历史查询改成明确的 `timeline/history` actions。
 4. 当前状态、普通列表、取消的测试迁到 DaemonJobService 和 Job tools。
 5. 验证 JobCancel 仍停止 active scheduler，JobRead payload 能表达 blocked/budget/reconciliation。
+
+落地结果：detached `Workflow run` 返回标准 Job receipt；模型工具删除 `status/list/cancel`，新增语义明确的 `timeline/history`。普通状态、等待、列表和取消全部走 Jobs；CLI/TUI 的同名管理命令作为人工管理面继续保留。
 
 ### 第四阶段：清理与观察
 

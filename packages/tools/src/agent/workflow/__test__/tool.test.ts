@@ -46,6 +46,24 @@ function createAgentContext(
 }
 
 describe("workflowTool", () => {
+  it("exposes Workflow domain actions and leaves lifecycle control to Jobs", () => {
+    const tool = createWorkflowTool();
+    const action = (tool.inputSchema as {
+      properties: { action: { enum: string[] } };
+    }).properties.action;
+
+    expect(action.enum).toEqual([
+      "run",
+      "resume",
+      "timeline",
+      "history",
+      "template",
+      "reconcile",
+      "validate",
+    ]);
+    expect(action.enum).not.toEqual(expect.arrayContaining(["status", "list", "cancel"]));
+  });
+
   it("passes parsed workflow specs to the scheduler and formats successful results", async () => {
     const runner: WorkflowRunner = vi.fn(async ({ task }) => ({
       summary: `ran ${task.id}`,
@@ -250,23 +268,30 @@ describe("workflowTool", () => {
             { id: "summarize", description: "Summarize" },
           ],
         },
-        { cwd },
+        { cwd, sessionId: "session-1" },
       );
 
       expect(result.isError).toBeUndefined();
       expect(createRunner).toHaveBeenCalledWith({
         cwd,
+        sessionId: "session-1",
         team: undefined,
         timeoutMs: undefined,
         permissionMode: undefined,
+        agent: undefined,
       });
-      expect(textOf(result)).toContain("<workflow-run-snapshot>");
-      expect(textOf(result)).toContain('"runId":"detached-run"');
-      expect(textOf(result)).toContain('"status":"running"');
+      expect(JSON.parse(textOf(result))).toMatchObject({
+        kind: "job",
+        action: "created",
+        jobId: "detached-run",
+        jobKind: "workflow",
+        status: "running",
+      });
 
       const snapshot = new WorkflowRunStore({ cwd }).load("detached-run");
       expect(snapshot).toMatchObject({
         runId: "detached-run",
+        ownerSession: "session-1",
         status: "running",
         runningTaskIds: ["research"],
         pendingTaskIds: ["summarize"],
@@ -398,7 +423,7 @@ describe("workflowTool", () => {
     });
   });
 
-  it("returns persisted workflow status snapshots", async () => {
+  it("returns filtered persisted workflow timelines", async () => {
     const cwd = makeTempDir();
     try {
       const store = new WorkflowRunStore({ cwd });
@@ -440,26 +465,13 @@ describe("workflowTool", () => {
       });
 
       const tool = createWorkflowTool({ createRunner: vi.fn() });
-      const result = await tool.execute({ action: "status", runId: "status-run" }, { cwd });
-
-      expect(result.isError).toBeUndefined();
-      expect(textOf(result)).toContain("<workflow-run-snapshot>");
-      expect(textOf(result)).toContain("status-run");
-      expect(textOf(result)).toContain("research");
-      expect(textOf(result)).toContain("workflow_started");
-      expect(textOf(result)).toContain("timelineControls");
-      expect(textOf(result)).toContain("timelineSummary");
-      expect(textOf(result)).toContain("available");
-      expect(textOf(result)).toContain("selected");
-
-      const timelineResult = await tool.execute({ action: "status", runId: "status-run", view: "timeline" }, { cwd });
+      const timelineResult = await tool.execute({ action: "timeline", runId: "status-run" }, { cwd });
       expect(textOf(timelineResult)).toContain("Workflow status-run (running)");
       expect(textOf(timelineResult)).toContain("workflow_started");
 
       const filteredTimeline = await tool.execute({
-        action: "status",
+        action: "timeline",
         runId: "status-run",
-        view: "timeline",
         taskIds: ["research"],
         eventTypes: ["task_started"],
         statuses: ["running"],
@@ -468,23 +480,12 @@ describe("workflowTool", () => {
       expect(textOf(filteredTimeline)).toContain("task_started research [running]");
       expect(textOf(filteredTimeline)).not.toContain("workflow_started");
       expect(textOf(filteredTimeline)).not.toContain("Other done");
-
-      const filteredSnapshot = await tool.execute({
-        action: "status",
-        runId: "status-run",
-        taskIds: ["research"],
-        eventTypes: ["task_started"],
-        statuses: ["running"],
-      }, { cwd });
-      expect(textOf(filteredSnapshot)).toContain('"selected":{"taskIds":["research"],"eventTypes":["task_started"],"statuses":["running"]}');
-      expect(textOf(filteredSnapshot)).toContain('"eventTypes":["task_finished","task_started","workflow_started"]');
-      expect(textOf(filteredSnapshot)).not.toContain("Other done");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
 
-  it("lists persisted workflow run summaries", async () => {
+  it("queries persisted workflow history with domain filters", async () => {
     const cwd = makeTempDir();
     try {
       const store = new WorkflowRunStore({ cwd });
@@ -560,7 +561,7 @@ describe("workflowTool", () => {
 
       const tool = createWorkflowTool({ createRunner: vi.fn() });
       const result = await tool.execute({
-        action: "list",
+        action: "history",
         runIdPrefix: "conflict",
         createdAfter: 3,
         needsReconciliation: true,
@@ -569,12 +570,47 @@ describe("workflowTool", () => {
       }, { cwd });
 
       expect(result.isError).toBeUndefined();
-      expect(textOf(result)).toContain("<workflow-run-list>");
+      expect(textOf(result)).toContain("<workflow-history>");
       expect(textOf(result)).toContain('"runId":"conflict-run"');
       expect(textOf(result)).toContain('"budgetPolicyPreset":"safe-write"');
       expect(textOf(result)).toContain('"needsReconciliation":true');
       expect(textOf(result)).not.toContain("completed-run");
       expect(textOf(result)).not.toContain("running-run");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("scopes timeline and history queries to the runtime owner", async () => {
+    const cwd = makeTempDir();
+    try {
+      const store = new WorkflowRunStore({ cwd });
+      const spec = { mode: "parallel" as const, tasks: [{ id: "review" }] };
+      for (const [runId, ownerSession] of [["owned-run", "session-1"], ["other-run", "session-2"]] as const) {
+        store.save(createWorkflowRunSnapshot({
+          runId,
+          ownerSession,
+          status: "completed",
+          summary: `${runId} completed`,
+          spec,
+          plan: createWorkflowPlan(spec),
+          results: new Map(),
+          running: new Set(),
+          createdAt: ownerSession === "session-1" ? 1 : 2,
+        }));
+      }
+      const tool = createWorkflowTool({ createRunner: vi.fn() });
+
+      const history = await tool.execute({ action: "history" }, { cwd, sessionId: "session-1" });
+      expect(textOf(history)).toContain("owned-run");
+      expect(textOf(history)).not.toContain("other-run");
+
+      const timeline = await tool.execute(
+        { action: "timeline", runId: "other-run" },
+        { cwd, sessionId: "session-1" },
+      );
+      expect(timeline.isError).toBe(true);
+      expect(textOf(timeline)).toBe("Workflow run not found: other-run");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -663,59 +699,16 @@ describe("workflowTool", () => {
     }
   });
 
-  it("cancels persisted running workflow snapshots", async () => {
-    const cwd = makeTempDir();
-    try {
-      const store = new WorkflowRunStore({ cwd });
-      const spec = {
-        mode: "parallel" as const,
-        tasks: [{ id: "running" }, { id: "pending", dependsOn: ["running"] }],
-      };
-      store.save(createWorkflowRunSnapshot({
-        runId: "cancel-run",
-        status: "running",
-        summary: "in progress",
-        spec,
-        plan: createWorkflowPlan(spec),
-        results: new Map(),
-        running: new Set(["running"]),
-        runningTasks: new Map([[
-          "running",
-          {
-            taskId: "running",
-            attempt: 1,
-            dependencies: [],
-            startedAt: 1,
-            summary: "Waiting for task task_running",
-            metadata: { taskManagerTaskId: "task_running" },
-          },
-        ]]),
-        createdAt: 1,
-      }));
-      const agent = createAgentContext(["task_running"]);
+  it.each(["status", "list", "cancel"])(
+    "rejects the removed %s lifecycle action and points to Jobs",
+    async (action) => {
       const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const result = await tool.execute({ action }, ctx);
 
-      const result = await tool.execute(
-        { action: "cancel", runId: "cancel-run", cancelReason: "stop now" },
-        { cwd, agent },
-      );
-
-      expect(result.isError).toBeUndefined();
-      expect(agent.children.interruptChildAgent).toHaveBeenCalledWith("task_running", "stop now");
-      const notification = parseWorkflowNotification(textOf(result));
-      expect(notification).toMatchObject({
-        runId: "cancel-run",
-        status: "failed",
-        summary: "stop now",
-      });
-      expect(notification?.tasks.map((task) => [task.taskId, task.status])).toEqual([
-        ["running", "killed"],
-        ["pending", "skipped"],
-      ]);
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Use JobRead, JobList, or JobCancel");
+    },
+  );
 
   it("resumes persisted workflow snapshots through the tool", async () => {
     const cwd = makeTempDir();

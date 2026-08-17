@@ -493,7 +493,7 @@ V1 内存调度核心
 
 运行时细节（工具入口、调度循环、持久化路径、信封格式）见 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md)。
 
-截至目前，已经落地到 V13.1：
+截至目前，已经落地到 V14.2：
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -537,6 +537,7 @@ V1 内存调度核心
 - V13.3：已完成基础版。持久化 `Workflow action: "run"` 默认 detached 提交，快速返回 running snapshot 和 runId，后台继续调度 worker；不再给 worker wait 隐式套 300s 默认超时，只有显式 `timeoutSeconds` / task timeout 才会判超时。
 - V13.4：已完成基础版。修复 subprocess task-worker 一轮完成后 stdin pipe 未释放导致 child process 不退出、TaskManager task 长时间停留在 running、Workflow awaitTask 卡住的问题；worker 结束时会释放 stdin 并关闭 runtime cleanup。
 - V14.1：已完成基础版。TUI `/workflow` 面板支持 reconciliation follow-up 一键提交执行：数字键选择 action，`f` 将选中 action 转成 follow-up workflow spec，并以 detached 方式提交新的持久化 run，面板自动切到新 run。
+- V14.2：已完成。模型侧 Workflow 生命周期控制硬切到 Jobs：detached run 返回 `jobId`，普通状态/列表/取消使用 `JobRead/JobList/JobCancel`；Workflow 工具只保留 run/resume/validate/template/reconcile 以及明确的 timeline/history 领域查询。CLI/TUI 人工管理面保持不变。
 
 下一步建议：
 

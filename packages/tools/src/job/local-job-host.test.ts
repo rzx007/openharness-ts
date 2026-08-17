@@ -126,8 +126,43 @@ describe("LocalAgentJobHost adapter", () => {
           status: "running",
           plan: { executionOrder: ["review"] },
           runningTaskIds: ["review"],
+          needsReconciliation: false,
+          reconciliationPlan: { actions: [] },
         },
       });
+  });
+
+  it("cancels a Workflow through JobCancel instead of a Workflow action", async () => {
+    const cwd = temporaryDirectory();
+    const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
+    new WorkflowRunStore({ cwd }).save(createWorkflowRunSnapshot({
+      runId: "workflow-cancel",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "queued",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(),
+      createdAt: 10,
+    }));
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+
+    await expect(host.cancel({
+      sessionId: "session-1",
+      jobId: "workflow-cancel",
+      reason: "no longer needed",
+    })).resolves.toMatchObject({
+      id: "workflow-cancel",
+      kind: "workflow",
+      status: "killed",
+      capabilities: { cancel: false },
+    });
+    expect(new WorkflowRunStore({ cwd }).load("workflow-cancel")).toMatchObject({
+      status: "failed",
+      termination: "cancelled",
+      summary: "no longer needed",
+    });
   });
 });
 
