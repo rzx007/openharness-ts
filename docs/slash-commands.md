@@ -104,9 +104,9 @@ skill 经 command catalog 以 template 形式出现。
 `/keybindings` `/vim` `/passes` `/release-notes` `/login` `/logout` 等低频项，
 见 PLAN-REMAINING E.2。
 
-## 内置工具（默认 40 个；daemon Cron 后 45 个）
+## 内置工具（基础 33 个；完整 daemon 工具面 44 个）
 
-注册处：`packages/tools/src/`（按目录分组）。默认 `createDefaultToolRegistry()` 是 40 个；daemon/host 传入 Cron capability 后追加 5 个 Cron 工具。运行时 MCP 服务器工具另行注入（`mcp__server__tool` 命名）。
+注册处：`packages/tools/src/`（按目录分组）。基础 `createDefaultToolRegistry()` 是 33 个；daemon/host 根据 capability 追加 `TerminalOpen`、5 个 `Job*` 和 5 个 Cron 工具，三组能力全开时为 44 个。运行时 MCP 服务器工具另行注入（`mcp__server__tool` 命名）。
 
 ### 文件（file/）
 

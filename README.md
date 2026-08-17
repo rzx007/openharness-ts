@@ -6,7 +6,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 > ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
 >
-> **易漂移数字以代码/单测为准**：默认工具数 → `packages/tools` `createDefaultToolRegistry()`（`registry.test.ts` 锁 40；daemon 传入 Cron host capability 后为 45）；Provider 数 → `packages/api` `PROVIDERS`（`registry.test.ts` 锁 21）；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。programmatic 入口见 [docs/agent-sdk.md](docs/agent-sdk.md)，当前架构以 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md) 和 [docs/agent-framework-capability-boundary.md](docs/agent-framework-capability-boundary.md) 为准，跨层终态与失败规则见 [docs/agent-lifecycle-contract.md](docs/agent-lifecycle-contract.md)。
+> **易漂移数字以代码/单测为准**：基础工具数 → `packages/tools` `createDefaultToolRegistry()`（`registry.test.ts` 锁 33）；daemon 按 host capability 再注入 `TerminalOpen`、5 个 `Job*` 和 5 个 Cron 工具，完整工具面为 44；Provider 数 → `packages/api` `PROVIDERS`（`registry.test.ts` 锁 21）；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。programmatic 入口见 [docs/agent-sdk.md](docs/agent-sdk.md)，当前架构以 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md) 和 [docs/agent-framework-capability-boundary.md](docs/agent-framework-capability-boundary.md) 为准，跨层终态与失败规则见 [docs/agent-lifecycle-contract.md](docs/agent-lifecycle-contract.md)。
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
 - ✅ **工具能力** — 基础 registry 提供 33 个文件 / Bash / Web / Grep / MCP / TaskCreate / Agent / Workflow / 媒体与元工具；runtime host 按能力注入 `JobList/Read/Wait/Send/Cancel`、`TerminalOpen` 和 5 个 Cron 工具。bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
@@ -19,7 +19,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **Channels Agent 桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 `OpenHarnessAgent`；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-flow.md](docs/channels-flow.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。SwarmPanel UI 保留但尚未接 daemon 事件
 - 🟢 **Daemon Application** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、durable session/transcript、SSE、单 session 串行 run lane、持久化 PermissionBroker、child durable projection 和共享 `@openharness/client` reducer。`DaemonApplication` 集中组装 durable 应用，HTTP server 只负责 transport；`AgentPool` 按 session 缓存真实 `OpenHarnessAgent`。权威导览见 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)，framework 见 [docs/agent-runtime-framework-architecture.md](docs/agent-runtime-framework-architecture.md)，客户端同步见 [docs/client-sync-flow.md](docs/client-sync-flow.md)。
-- ✅ **Terminal** — daemon 统一持有终端 runtime，Desktop 右侧 Panel 与 Agent 连接同一个终端；支持多终端、输出快照恢复、右键菜单、每项目默认 shell、REST/SSE 传输、对话卡片挂接、沙箱终端 MVP，以及 `TerminalOpen/Send/Read/Signal/Close/List` 六个 Agent 工具。完整功能、权限和生命周期见 [docs/desktop-terminal-pty-design.md](docs/desktop-terminal-pty-design.md)。
+- ✅ **Terminal** — daemon 统一持有终端 runtime，Desktop 右侧 Panel 与 Agent 连接同一个终端；支持多终端、输出快照恢复、右键菜单、每项目默认 shell、REST/SSE 传输、对话卡片挂接和沙箱终端 MVP。模型用 `TerminalOpen` 创建持久终端，后续统一通过 `JobList/Read/Wait/Send/Cancel` 观察和控制。完整功能、权限和生命周期见 [docs/desktop-terminal-pty-design.md](docs/desktop-terminal-pty-design.md)。
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
 - 🟡 **可用但仍在收口** — `sandbox`（Bash / MCP stdio / hooks / Cron / LSP 等进程入口走 SRT/Docker；Docker active 时 Read/Write/Edit/Glob/Grep 进入容器文件操作；Docker 整棵进程停止和真实 E2E 已补，CI 中 Docker 实跑仍待接入）
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
@@ -89,7 +89,7 @@ bun apps/cli/src/index.ts "hello"
 bun apps/cli/src/index.ts --tui
 
 # 方式三：Bun watch（自动重载源码）
-pnpm --filter @openharness/cli dev   # = bun --watch src/index.ts
+pnpm --filter @rzx/ohs dev   # = bun --watch src/index.ts
 ```
 
 开发阶段建议用 **方式二**（Bun 直跑源码，改了代码立刻生效），稳定后用方式一。
@@ -106,8 +106,8 @@ pnpm lint          # 跑所有 workspace lint 任务（如果对应包定义了 
 pnpm clean         # 清理各 workspace 的构建产物
 
 # 只跑某个包
-pnpm --filter @openharness/cli build
-pnpm --filter @openharness/cli test
+pnpm --filter @rzx/ohs build
+pnpm --filter @rzx/ohs test
 pnpm --filter @openharness/frontend dev
 pnpm --filter @openharness/tools test
 
@@ -281,7 +281,7 @@ OpenHarness-ts/
 │   ├── core/                 # 核心引擎（QueryEngine、类型、配置）
 │   ├── api/                  # API Provider 抽象层
 │   ├── client/               # daemon HTTP/SSE typed client + event reducer（TUI/Web/Desktop 共用）
-│   ├── tools/                # 默认工具（createDefaultToolRegistry，当前 40；daemon Cron 后 45）
+│   ├── tools/                # 工具 registry（基础 33；daemon 全 capability 为 44）
 │   ├── server/               # daemon HTTP server、run engine、permission broker
 │   ├── services/             # 服务层（Compact、Session、Cron、Task、LSP）
 │   ├── coordinator/          # 多 Agent 编排器
