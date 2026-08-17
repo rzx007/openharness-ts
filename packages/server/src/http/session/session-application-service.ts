@@ -179,45 +179,82 @@ export class SessionApplicationService {
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const content = input.content.trim();
     if (!content) throw new SessionApplicationError(400, "content is required");
-    if (this.context.runEngine.hasWork(sessionId)) {
-      throw new SessionApplicationError(
-        409,
-        "Wait for the active session run before editing the latest prompt",
-      );
-    }
-    const latestUserMessage = [...this.context.store.listMessages(sessionId)]
-      .reverse()
-      .find((message) => message.role === "user");
-    if (!latestUserMessage) {
-      throw new SessionApplicationError(
-        409,
-        "No user prompt is available to edit",
-      );
-    }
 
-    const lease = this.enterSessionOperation(session);
+    // Exclusive barrier: truncate + admit must not overlap other session writes.
+    const lease = this.acquireSessionMutation(
+      session,
+      "Wait for the active session run before editing the latest prompt",
+    );
     try {
-      const messages = this.context.store
-        .listMessages(sessionId)
-        .filter((message) => message.seq < latestUserMessage.seq);
+      const latestUserMessage = [...this.context.store.listMessages(sessionId)]
+        .reverse()
+        .find((message) => message.role === "user");
+      if (!latestUserMessage) {
+        throw new SessionApplicationError(
+          409,
+          "No user prompt is available to edit",
+        );
+      }
+
+      const allMessages = this.context.store.listMessages(sessionId);
       const parts = this.context.store.listMessageParts(sessionId);
+      const previousTranscript = copyTranscript(allMessages, parts);
+      const keptMessages = allMessages.filter(
+        (message) => message.seq < latestUserMessage.seq,
+      );
       const before = this.context.events.checkpoint();
       this.context.store.replaceTranscript({
         sessionId,
-        messages: copyTranscript(messages, parts),
+        messages: copyTranscript(keptMessages, parts),
       });
-      await this.context.agentPool.close(sessionId);
-      this.context.events.publishSince(before);
-      return await this.admitPromptWork(sessionId, {
-        content,
-        traceId: input.traceId,
-        metadata: {
-          edit: {
-            kind: "latest_prompt",
-            sourceMessageId: latestUserMessage.id,
+
+      try {
+        await this.context.agentPool.close(sessionId);
+        const admitted = await this.admitPromptWork(sessionId, {
+          content,
+          traceId: input.traceId,
+          metadata: {
+            edit: {
+              kind: "latest_prompt",
+              sourceMessageId: latestUserMessage.id,
+            },
           },
-        },
-      });
+        });
+        // Use pre-truncate kept messages: replaceTranscript does not preserve
+        // inputId/runId on rewritten rows, so post-replace lookups would falsely
+        // treat every interrupted run as orphaned.
+        const keptInputIds = new Set(
+          keptMessages
+            .map((message) => message.inputId)
+            .filter((inputId): inputId is string => !!inputId),
+        );
+        for (const run of this.context.store.listRuns(sessionId)) {
+          if (run.status !== "interrupted" || !run.inputId) continue;
+          if (keptInputIds.has(run.inputId)) continue;
+          if (isRecord(run.metadata.superseded)) continue;
+          this.context.store.updateRun(run.id, {
+            metadata: {
+              superseded: {
+                reason: "edit_latest_prompt",
+                sourceMessageId: latestUserMessage.id,
+                at: Date.now(),
+              },
+            },
+          });
+        }
+        this.context.events.publishSince(before);
+        return admitted;
+      } catch (error) {
+        // replaceTranscript already committed; restore the prior transcript so a
+        // failed close/admit cannot permanently delete the edited turn.
+        const restoreBefore = this.context.events.checkpoint();
+        this.context.store.replaceTranscript({
+          sessionId,
+          messages: previousTranscript,
+        });
+        this.context.events.publishSince(restoreBefore);
+        throw error;
+      }
     } finally {
       lease.release();
     }
@@ -380,6 +417,12 @@ export class SessionApplicationService {
         throw new SessionApplicationError(
           409,
           "Only interrupted runs can be resumed",
+        );
+      }
+      if (isRecord(sourceRun.metadata?.superseded)) {
+        throw new SessionApplicationError(
+          409,
+          "This interrupted run was superseded by an edited prompt",
         );
       }
       if (!sourceRun.inputId) {

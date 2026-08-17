@@ -21,7 +21,13 @@ function createService(options: {
   inputs?: Array<Record<string, any>>;
   live?: boolean;
   owningRun?: Record<string, any>;
+  messages?: Array<Record<string, any>>;
+  parts?: Array<Record<string, any>>;
+  runs?: Array<Record<string, any>>;
 } = {}) {
+  let messages = [...(options.messages ?? [])];
+  let parts = [...(options.parts ?? [])];
+  const runs = [...(options.runs ?? (options.run ? [options.run] : []))];
   const store = {
     createSession: vi.fn((input) => ({ ...session, ...input })),
     getSession: vi.fn(() => session),
@@ -29,12 +35,43 @@ function createService(options: {
     listChildSessions: vi.fn(() => []),
     beginArchive: vi.fn(),
     archiveSession: vi.fn(() => ({ ...session, status: "archived" })),
-    getRun: vi.fn(() => options.run),
+    getRun: vi.fn((runId: string) => runs.find((run) => run.id === runId) ?? options.run),
     getInput: vi.fn(() => options.input),
     listInputs: vi.fn(() => options.inputs ?? []),
     findRunByInput: vi.fn(() => options.owningRun),
     admitPrompt: vi.fn((input) => ({ id: input.id ?? "live-input", ...input })),
     appendEvent: vi.fn(),
+    listMessages: vi.fn(() => messages),
+    listMessageParts: vi.fn(() => parts),
+    replaceTranscript: vi.fn((input) => {
+      messages = input.messages.map((message: Record<string, any>, index: number) => ({
+        id: `msg-${index + 1}`,
+        sessionId: input.sessionId,
+        seq: index + 1,
+        role: message.role,
+        inputId: message.inputId,
+        metadata: message.metadata ?? {},
+      }));
+      parts = input.messages.flatMap((message: Record<string, any>, messageIndex: number) =>
+        (message.parts ?? []).map((part: Record<string, any>, partIndex: number) => ({
+          id: `part-${messageIndex + 1}-${partIndex + 1}`,
+          sessionId: input.sessionId,
+          messageId: `msg-${messageIndex + 1}`,
+          seq: partIndex + 1,
+          ...part,
+        })),
+      );
+      return { messages, parts };
+    }),
+    listRuns: vi.fn(() => runs),
+    updateRun: vi.fn((runId: string, input: Record<string, any>) => {
+      const run = runs.find((candidate) => candidate.id === runId);
+      if (!run) throw new Error(`missing run ${runId}`);
+      if (input.metadata) run.metadata = { ...(run.metadata ?? {}), ...input.metadata };
+      if (input.status) run.status = input.status;
+      if (input.error !== undefined) run.error = input.error;
+      return run;
+    }),
   };
   const runEngine = {
     admitPromptAndMaybeRun: vi.fn(() => ({
@@ -252,6 +289,7 @@ describe("SessionApplicationService", () => {
       sessionId: "s1",
       inputId: "source-input",
       status: "interrupted",
+      metadata: {},
     };
     const sourceInput = {
       id: "source-input",
@@ -302,6 +340,160 @@ describe("SessionApplicationService", () => {
       },
     });
     expect(broadcastSince).toHaveBeenCalledWith(7);
+  });
+
+  it("restores the transcript when edit-latest fails after truncation", async () => {
+    const previous = [
+      {
+        id: "u1",
+        sessionId: "s1",
+        seq: 1,
+        role: "user",
+        inputId: "input-1",
+        metadata: {},
+      },
+      {
+        id: "a1",
+        sessionId: "s1",
+        seq: 2,
+        role: "assistant",
+        metadata: {},
+      },
+    ];
+    const previousParts = [
+      {
+        id: "p1",
+        sessionId: "s1",
+        messageId: "u1",
+        seq: 1,
+        type: "text",
+        text: "original prompt",
+        status: "completed",
+        metadata: {},
+      },
+      {
+        id: "p2",
+        sessionId: "s1",
+        messageId: "a1",
+        seq: 1,
+        type: "text",
+        text: "assistant reply",
+        status: "completed",
+        metadata: {},
+      },
+    ];
+    const { service, store, agentPool, runEngine, broadcastSince } = createService({
+      messages: previous,
+      parts: previousParts,
+    });
+    agentPool.close.mockRejectedValue(new Error("agent close failed"));
+
+    await expect(
+      service.editLatestPrompt("s1", { content: "edited prompt", traceId: "trace-edit" }),
+    ).rejects.toThrow("agent close failed");
+
+    expect(store.replaceTranscript).toHaveBeenCalledTimes(2);
+    expect(store.replaceTranscript.mock.calls[0]![0]).toEqual({
+      sessionId: "s1",
+      messages: [],
+    });
+    expect(store.replaceTranscript.mock.calls[1]![0]).toMatchObject({
+      sessionId: "s1",
+      messages: [
+        {
+          role: "user",
+          parts: [expect.objectContaining({ text: "original prompt" })],
+        },
+        {
+          role: "assistant",
+          parts: [expect.objectContaining({ text: "assistant reply" })],
+        },
+      ],
+    });
+    expect(runEngine.admitPromptAndMaybeRun).not.toHaveBeenCalled();
+    expect(broadcastSince).toHaveBeenCalled();
+    expect(store.listMessages("s1")).toHaveLength(2);
+  });
+
+  it("marks orphaned interrupted runs as superseded after a successful edit-latest", async () => {
+    const interrupted = {
+      id: "source-run",
+      sessionId: "s1",
+      inputId: "input-1",
+      status: "interrupted",
+      metadata: {},
+    };
+    const { service, store } = createService({
+      messages: [
+        {
+          id: "u1",
+          sessionId: "s1",
+          seq: 1,
+          role: "user",
+          inputId: "input-1",
+          metadata: {},
+        },
+      ],
+      parts: [
+        {
+          id: "p1",
+          sessionId: "s1",
+          messageId: "u1",
+          seq: 1,
+          type: "text",
+          text: "old prompt",
+          status: "completed",
+          metadata: {},
+        },
+      ],
+      runs: [interrupted],
+    });
+
+    await service.editLatestPrompt("s1", {
+      content: "new prompt",
+      traceId: "trace-edit",
+    });
+
+    expect(store.updateRun).toHaveBeenCalledWith(
+      "source-run",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          superseded: expect.objectContaining({ reason: "edit_latest_prompt" }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects resume for interrupted runs superseded by edit-latest", async () => {
+    const sourceRun = {
+      id: "source-run",
+      sessionId: "s1",
+      inputId: "source-input",
+      status: "interrupted",
+      metadata: {
+        superseded: { reason: "edit_latest_prompt", at: 1 },
+      },
+    };
+    const sourceInput = {
+      id: "source-input",
+      sessionId: "s1",
+      content: "retry this",
+      metadata: {},
+    };
+    const { service, runEngine } = createService({
+      run: sourceRun,
+      input: sourceInput,
+    });
+
+    await expect(
+      service.resumeRun("s1", "source-run", { traceId: "trace-1" }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<SessionApplicationError>>({
+        status: 409,
+        message: "This interrupted run was superseded by an edited prompt",
+      }),
+    );
+    expect(runEngine.admitPromptAndMaybeRun).not.toHaveBeenCalled();
   });
 
   it("closes child admission before taking the archive descendant snapshot", async () => {
