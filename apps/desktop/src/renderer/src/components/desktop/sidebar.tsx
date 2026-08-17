@@ -25,12 +25,14 @@ import {
 import { AnimatePresence, motion } from "motion/react"
 import { useMemo, useRef, useState } from "react"
 
-import { ScrollArea } from "@renderer/components/ui/scroll-area"
+import { Button } from "@renderer/components/ui/button"
 import {
+  Dialog,
   DialogClose,
   DialogContent,
   DialogDescription,
-  DialogRoot,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@renderer/components/ui/dialog"
 import {
@@ -40,6 +42,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@renderer/components/ui/dropdown-menu"
+import { Field, FieldGroup } from "@renderer/components/ui/field"
+import { Input } from "@renderer/components/ui/input"
+import { Label } from "@renderer/components/ui/label"
+import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { cn } from "@renderer/lib/utils"
 import { isSessionPinned, useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
@@ -325,182 +331,174 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
         </div>
       </aside>
 
-      <DialogRoot
+      <Dialog
         open={renameTarget !== null}
         onOpenChange={(value) => !value && setRenameTarget(null)}
       >
         <DialogContent>
-          <form onSubmit={submitRename}>
-            <DialogTitle className="text-sm font-semibold">重命名会话</DialogTitle>
-            <DialogDescription className="mt-1 text-xs text-muted-foreground">
-              使用一个便于稍后识别的名称。
-            </DialogDescription>
-            <input
-              autoFocus
-              value={renameValue}
-              onChange={(event) => setRenameValue(event.target.value)}
-              maxLength={80}
-              aria-label="会话名称"
-              className="mt-4 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">
-                取消
-              </DialogClose>
-              <button
-                type="submit"
-                disabled={!renameValue.trim() || busy}
-                className="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
-              >
+          <form onSubmit={submitRename} className="contents">
+            <DialogHeader>
+              <DialogTitle>重命名会话</DialogTitle>
+              <DialogDescription>使用一个便于稍后识别的名称。</DialogDescription>
+            </DialogHeader>
+            <FieldGroup>
+              <Field>
+                <Label htmlFor="session-name">会话名称</Label>
+                <Input
+                  id="session-name"
+                  name="name"
+                  autoFocus
+                  value={renameValue}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  maxLength={80}
+                />
+              </Field>
+            </FieldGroup>
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline">取消</Button>} />
+              <Button type="submit" disabled={!renameValue.trim() || busy}>
                 {busy ? "保存中..." : "保存"}
-              </button>
-            </div>
+              </Button>
+            </DialogFooter>
           </form>
         </DialogContent>
-      </DialogRoot>
+      </Dialog>
 
-      <DialogRoot
+      <Dialog
         open={archiveTarget !== null}
         onOpenChange={(value) => !value && setArchiveTarget(null)}
       >
         <DialogContent>
-          <DialogTitle className="text-sm font-semibold">归档会话？</DialogTitle>
-          <DialogDescription className="mt-2 text-xs leading-5 text-muted-foreground">
-            {archiveTarget?.status === "running"
-              ? "会话仍在运行。归档会先停止当前任务，再将会话移入已归档列表。"
-              : "归档后会话将从项目和最近列表移除，但历史消息仍会保留。"}
-          </DialogDescription>
-          <div className="mt-4 flex justify-end gap-2">
-            <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">取消</DialogClose>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={confirmArchive}
-              className="text-destructive-foreground h-8 rounded-md bg-destructive px-3 text-xs disabled:opacity-50"
-            >
+          <DialogHeader>
+            <DialogTitle>归档会话？</DialogTitle>
+            <DialogDescription>
+              {archiveTarget?.status === "running"
+                ? "会话仍在运行。归档会先停止当前任务，再将会话移入已归档列表。"
+                : "归档后会话将从项目和最近列表移除，但历史消息仍会保留。"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline">取消</Button>} />
+            <Button variant="destructive" disabled={busy} onClick={confirmArchive}>
               {busy ? "归档中..." : "归档"}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </DialogContent>
-      </DialogRoot>
+      </Dialog>
 
-      <DialogRoot
+      <Dialog
         open={deleteTarget !== null}
         onOpenChange={(value) => !value && setDeleteTarget(null)}
       >
         <DialogContent>
-          <DialogTitle className="text-sm font-semibold">永久删除会话？</DialogTitle>
-          <DialogDescription className="mt-2 text-xs leading-5 text-muted-foreground">
-            删除后会话、消息、运行记录和权限记录都会从本机存储中移除，无法从已归档列表恢复。
-          </DialogDescription>
-          <div className="mt-4 flex justify-end gap-2">
-            <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">取消</DialogClose>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={confirmDelete}
-              className="text-destructive-foreground h-8 rounded-md bg-destructive px-3 text-xs disabled:opacity-50"
-            >
+          <DialogHeader>
+            <DialogTitle>永久删除会话？</DialogTitle>
+            <DialogDescription>
+              删除后会话、消息、运行记录和权限记录都会从本机存储中移除，无法从已归档列表恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline">取消</Button>} />
+            <Button variant="destructive" disabled={busy} onClick={confirmDelete}>
               {busy ? "删除中..." : "永久删除"}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </DialogContent>
-      </DialogRoot>
+      </Dialog>
 
-      <DialogRoot
+      <Dialog
         open={renameProjectTarget !== null}
         onOpenChange={(value) => !value && setRenameProjectTarget(null)}
       >
         <DialogContent>
-          <form onSubmit={submitProjectRename}>
-            <DialogTitle className="text-sm font-semibold">重命名项目</DialogTitle>
-            <DialogDescription className="mt-1 text-xs text-muted-foreground">
-              只修改 OpenHarness 中显示的名称，不会重命名磁盘目录。
-            </DialogDescription>
-            <input
-              autoFocus
-              value={projectName}
-              onChange={(event) => setProjectName(event.target.value)}
-              maxLength={80}
-              aria-label="项目名称"
-              className="mt-4 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">
-                取消
-              </DialogClose>
-              <button
-                type="submit"
-                disabled={!projectName.trim() || busy}
-                className="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
-              >
+          <form onSubmit={submitProjectRename} className="contents">
+            <DialogHeader>
+              <DialogTitle>重命名项目</DialogTitle>
+              <DialogDescription>
+                只修改 OpenHarness 中显示的名称，不会重命名磁盘目录。
+              </DialogDescription>
+            </DialogHeader>
+            <FieldGroup>
+              <Field>
+                <Label htmlFor="project-name">项目名称</Label>
+                <Input
+                  id="project-name"
+                  name="name"
+                  autoFocus
+                  value={projectName}
+                  onChange={(event) => setProjectName(event.target.value)}
+                  maxLength={80}
+                />
+              </Field>
+            </FieldGroup>
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline">取消</Button>} />
+              <Button type="submit" disabled={!projectName.trim() || busy}>
                 {busy ? "保存中..." : "保存"}
-              </button>
-            </div>
+              </Button>
+            </DialogFooter>
           </form>
         </DialogContent>
-      </DialogRoot>
+      </Dialog>
 
-      <DialogRoot
+      <Dialog
         open={shellProjectTarget !== null}
         onOpenChange={(value) => !value && setShellProjectTarget(null)}
       >
         <DialogContent>
-          <form onSubmit={submitProjectShell}>
-            <DialogTitle className="text-sm font-semibold">设置默认 Shell</DialogTitle>
-            <DialogDescription className="mt-1 text-xs text-muted-foreground">
-              只影响这个项目新开的终端。留空会继续使用当前系统默认 Shell。
-            </DialogDescription>
-            <input
-              autoFocus
-              value={projectShell}
-              onChange={(event) => setProjectShell(event.target.value)}
-              placeholder="pwsh.exe / powershell.exe / C:\\Program Files\\Git\\bin\\bash.exe"
-              aria-label="默认 Shell"
-              className="mt-4 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <div className="mt-3 rounded-md bg-muted/55 px-3 py-2 text-[11.5px] leading-5 text-muted-foreground">
+          <form onSubmit={submitProjectShell} className="contents">
+            <DialogHeader>
+              <DialogTitle>设置默认 Shell</DialogTitle>
+              <DialogDescription>
+                只影响这个项目新开的终端。留空会继续使用当前系统默认 Shell。
+              </DialogDescription>
+            </DialogHeader>
+            <FieldGroup>
+              <Field>
+                <Label htmlFor="project-shell">默认 Shell</Label>
+                <Input
+                  id="project-shell"
+                  name="shell"
+                  autoFocus
+                  value={projectShell}
+                  onChange={(event) => setProjectShell(event.target.value)}
+                  placeholder="pwsh.exe / powershell.exe / C:\\Program Files\\Git\\bin\\bash.exe"
+                />
+              </Field>
+            </FieldGroup>
+            <div className="rounded-md bg-muted/55 px-3 py-2 text-[11.5px] leading-5 text-muted-foreground">
               当前项目：{shellProjectTarget?.name}
             </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">
-                取消
-              </DialogClose>
-              <button
-                type="submit"
-                disabled={busy}
-                className="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
-              >
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline">取消</Button>} />
+              <Button type="submit" disabled={busy}>
                 {busy ? "保存中..." : "保存"}
-              </button>
-            </div>
+              </Button>
+            </DialogFooter>
           </form>
         </DialogContent>
-      </DialogRoot>
+      </Dialog>
 
-      <DialogRoot
+      <Dialog
         open={removeProjectTarget !== null}
         onOpenChange={(value) => !value && setRemoveProjectTarget(null)}
       >
         <DialogContent>
-          <DialogTitle className="text-sm font-semibold">从列表移除项目？</DialogTitle>
-          <DialogDescription className="mt-2 text-xs leading-5 text-muted-foreground">
-            “{removeProjectTarget?.name}
-            ”将不再出现在项目列表中。磁盘目录和已有会话都会保留，之后可以重新选择该目录恢复项目。
-          </DialogDescription>
-          <div className="mt-4 flex justify-end gap-2">
-            <DialogClose className="h-8 rounded-md px-3 text-xs hover:bg-accent">取消</DialogClose>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={confirmProjectRemove}
-              className="text-destructive-foreground h-8 rounded-md bg-destructive px-3 text-xs disabled:opacity-50"
-            >
+          <DialogHeader>
+            <DialogTitle>从列表移除项目？</DialogTitle>
+            <DialogDescription>
+              “{removeProjectTarget?.name}
+              ”将不再出现在项目列表中。磁盘目录和已有会话都会保留，之后可以重新选择该目录恢复项目。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline">取消</Button>} />
+            <Button variant="destructive" disabled={busy} onClick={confirmProjectRemove}>
               {busy ? "移除中..." : "从列表移除"}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </DialogContent>
-      </DialogRoot>
+      </Dialog>
     </>
   )
 }
