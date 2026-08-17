@@ -1,14 +1,8 @@
 import { Check, Copy, Download, TriangleAlert } from "lucide-react"
-import mermaid from "mermaid"
-import { useEffect, useId, useMemo, useState } from "react"
+import { renderMermaidSVG } from "beautiful-mermaid"
+import { useMemo, useState } from "react"
 
 import { Spinner } from "@renderer/components/ui/spinner"
-
-type MermaidRenderState =
-  | { status: "idle"; svg: null; error: null }
-  | { status: "loading"; svg: null; error: null }
-  | { status: "success"; svg: string; error: null }
-  | { status: "error"; svg: null; error: string }
 
 interface MermaidDiagramProps {
   code: string
@@ -16,71 +10,24 @@ interface MermaidDiagramProps {
 }
 
 export function MermaidDiagram({ code, isIncomplete }: MermaidDiagramProps): React.JSX.Element {
-  const reactId = useId()
-  const theme = useMermaidTheme()
-  const [copied, setCopied] = useState(false)
-  const [state, setState] = useState<MermaidRenderState>({
-    status: "idle",
-    svg: null,
-    error: null,
-  })
-
   const source = useMemo(() => code.trim(), [code])
-  const diagramId = useMemo(
-    () => `openharness-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}-${hashString(source)}`,
-    [reactId, source]
-  )
-
-  useEffect(() => {
-    setCopied(false)
-  }, [source])
-
-  useEffect(() => {
-    if (!source) {
-      setState({ status: "idle", svg: null, error: null })
-      return
-    }
-
-    if (isIncomplete) {
-      setState({ status: "loading", svg: null, error: null })
-      return
-    }
-
-    let cancelled = false
-    setState({ status: "loading", svg: null, error: null })
-
-    mermaid.initialize({
-      flowchart: { htmlLabels: false },
-      securityLevel: "strict",
-      startOnLoad: false,
-      theme,
-    })
-
-    void mermaid
-      .render(diagramId, source)
-      .then(({ svg }) => {
-        if (!cancelled) setState({ status: "success", svg, error: null })
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error)
-        if (!cancelled) setState({ status: "error", svg: null, error: message })
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [diagramId, isIncomplete, source, theme])
+  const [copiedSource, setCopiedSource] = useState<string | null>(null)
+  const { svg, error } = useMemo(() => renderDiagram(source, isIncomplete), [isIncomplete, source])
+  const copied = copiedSource === source
 
   const copySvg = async (): Promise<void> => {
-    if (state.status !== "success") return
-    await navigator.clipboard.writeText(state.svg)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
+    if (!svg) return
+    await navigator.clipboard.writeText(svg)
+    setCopiedSource(source)
+    window.setTimeout(
+      () => setCopiedSource((current) => (current === source ? null : current)),
+      1400
+    )
   }
 
   const downloadSvg = (): void => {
-    if (state.status !== "success") return
-    const blob = new Blob([state.svg], { type: "image/svg+xml;charset=utf-8" })
+    if (!svg) return
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
@@ -91,7 +38,7 @@ export function MermaidDiagram({ code, isIncomplete }: MermaidDiagramProps): Rea
 
   return (
     <figure className="assistant-mermaid group/mermaid">
-      {state.status === "success" ? (
+      {svg ? (
         <>
           <div className="assistant-mermaid-controls">
             <button
@@ -111,19 +58,16 @@ export function MermaidDiagram({ code, isIncomplete }: MermaidDiagramProps): Rea
               <Download className="size-3.5" />
             </button>
           </div>
-          <div
-            className="assistant-mermaid-canvas"
-            dangerouslySetInnerHTML={{ __html: state.svg }}
-          />
+          <div className="assistant-mermaid-canvas" dangerouslySetInnerHTML={{ __html: svg }} />
         </>
-      ) : state.status === "error" ? (
+      ) : error ? (
         <div className="assistant-mermaid-error">
           <div className="flex items-center gap-2 font-medium">
             <TriangleAlert className="size-4 shrink-0" />
             Mermaid render failed
           </div>
           <pre>{source}</pre>
-          <p>{state.error}</p>
+          <p>{error}</p>
         </div>
       ) : (
         <div className="assistant-mermaid-loading">
@@ -135,28 +79,30 @@ export function MermaidDiagram({ code, isIncomplete }: MermaidDiagramProps): Rea
   )
 }
 
-function useMermaidTheme(): "default" | "dark" {
-  const [theme, setTheme] = useState<"default" | "dark">(() => resolveMermaidTheme())
-
-  useEffect(() => {
-    const update = (): void => setTheme(resolveMermaidTheme())
-    const observer = new MutationObserver(update)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => observer.disconnect()
-  }, [])
-
-  return theme
-}
-
-function resolveMermaidTheme(): "default" | "dark" {
-  return document.documentElement.classList.contains("dark") ? "dark" : "default"
-}
-
-function hashString(value: string): string {
-  let hash = 0
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(index)
-    hash |= 0
+function renderDiagram(
+  source: string,
+  isIncomplete: boolean
+): { svg: string | null; error: string | null } {
+  if (!source || isIncomplete) return { svg: null, error: null }
+  try {
+    return {
+      svg: renderMermaidSVG(source, desktopMermaidTheme),
+      error: null,
+    }
+  } catch (error) {
+    return { svg: null, error: error instanceof Error ? error.message : String(error) }
   }
-  return Math.abs(hash).toString(36)
 }
+
+const desktopMermaidTheme = {
+  accent: "var(--content-foreground)",
+  bg: "var(--conversation)",
+  border: "var(--input)",
+  fg: "var(--content-foreground)",
+  font: "Microsoft YaHei UI",
+  line: "color-mix(in oklab, var(--content-foreground) 42%, var(--conversation))",
+  muted: "color-mix(in oklab, var(--content-foreground) 58%, var(--conversation))",
+  padding: 24,
+  surface: "var(--card)",
+  transparent: true,
+} as const

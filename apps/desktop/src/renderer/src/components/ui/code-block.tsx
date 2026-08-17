@@ -1,9 +1,9 @@
 "use client"
 
-import { codeToHtml } from "shiki"
-import type { BundledLanguage } from "shiki"
+import { DEFAULT_THEMES, type FileContents } from "@pierre/diffs"
+import { File as PierreFile, type FileOptions } from "@pierre/diffs/react"
 import { Check, Copy, FileCode2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
 
@@ -98,9 +98,7 @@ const BunIcon = (p: SVGProps<SVGSVGElement>): React.JSX.Element => (
 // modifications to globals.css required.
 
 const CB_STYLES = `
-.cbln code{counter-reset:line;counter-increment:line 0}
-.cbln .line::before{content:counter(line);counter-increment:line;display:inline-block;min-width:1.5rem;padding-right:.75rem;margin-right:1rem;text-align:right;font-size:.75rem;line-height:1.7;user-select:none;color:color-mix(in srgb,var(--muted-foreground,#888) 55%,transparent)}
-.cbhl .line-highlighted{display:block;background-color:oklch(0.828 0.189 84.429/.12);border-left:2px solid oklch(0.769 0.188 70.08);margin:0 -1rem;padding:0 1rem}`
+.cbhl pierre-file::part(line){background-color:oklch(0.828 0.189 84.429/.12)}`
 
 function injectStyles(): void {
   if (typeof document === "undefined") return
@@ -137,43 +135,6 @@ export interface LanguageTab {
   filename: string
   code: string
   language?: string
-}
-
-// -- Shiki renderer --
-
-async function renderCode(
-  code: string,
-  language: string,
-  highlightLines?: number[]
-): Promise<string> {
-  return codeToHtml(code, {
-    lang: language as BundledLanguage,
-    themes: { light: "github-light", dark: "github-dark-default" },
-    tabindex: false,
-    transformers: [
-      {
-        pre(node) {
-          // Strip shiki's inline background-color so the wrapper's bodyClassName shows through
-          if (node.properties?.style) {
-            node.properties.style = (node.properties.style as string)
-              .replace(/background-color:\s*[^;]+;?\s*/gi, "")
-              .replace(/--shiki-dark-bg:\s*[^;]+;?\s*/gi, "")
-          }
-        },
-        line(node, line) {
-          if (highlightLines?.includes(line)) {
-            this.addClassToHast(node, "line-highlighted")
-          }
-        },
-      },
-    ],
-  }).catch(() =>
-    codeToHtml(code, {
-      lang: "text",
-      themes: { light: "github-light", dark: "github-dark-default" },
-      tabindex: false,
-    })
-  )
 }
 
 // -- Copy button --
@@ -215,12 +176,54 @@ function CodeRenderer({
   highlightLines,
   bodyClassName,
 }: RendererProps): React.JSX.Element {
-  const [html, setHtml] = useState<string | null>(null)
+  const file = useMemo<FileContents>(
+    () => ({
+      name: codeBlockFilename(language),
+      contents: code,
+      lang: normalizeLanguage(language),
+      cacheKey: `${language}:${code.length}:${hashCode(code)}`,
+    }),
+    [code, language]
+  )
+  const options = useMemo<FileOptions<undefined>>(
+    () => ({
+      disableFileHeader: true,
+      disableLineNumbers: !showLineNumbers,
+      overflow: "scroll",
+      preferredHighlighter: "shiki-js",
+      theme: DEFAULT_THEMES,
+      themeType: "system",
+      tokenizeMaxLength: 220_000,
+      tokenizeMaxLineLength: 20_000,
+      unsafeCSS: `
+        :host {
+          display: block;
+          min-width: max-content;
+          background: transparent;
+          color: var(--content-foreground);
+          font-family: var(--font-mono);
+          font-size: 12px;
+          line-height: 20px;
+        }
+
+        pre {
+          margin: 0;
+          min-width: max-content;
+          background: transparent !important;
+          font-family: var(--font-mono) !important;
+          font-size: 12px !important;
+          line-height: 20px !important;
+          white-space: pre;
+          word-break: normal;
+        }
+      `,
+    }),
+    [showLineNumbers]
+  )
 
   useEffect(() => {
     injectStyles()
-    renderCode(code, language, highlightLines).then(setHtml)
-  }, [code, language, highlightLines])
+  }, [])
 
   return (
     <div
@@ -231,22 +234,61 @@ function CodeRenderer({
       )}
       style={scrollable ? { maxHeight: `${maxHeight}px` } : undefined}
     >
-      {html ? (
-        <div
-          dangerouslySetInnerHTML={{ __html: html }}
-          className={cn(
-            "text-sm [&_.line]:leading-[1.7] [&>pre]:p-4",
-            showLineNumbers && "cbln",
-            highlightLines?.length && "cbhl"
-          )}
-        />
-      ) : (
-        <div className="flex h-16 items-center justify-center">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-        </div>
-      )}
+      <div className={cn("px-4 py-3", highlightLines?.length && "cbhl")}>
+        <PierreFile file={file} options={options} />
+      </div>
     </div>
   )
+}
+
+function codeBlockFilename(language: string): string {
+  const extension = languageToExtension(language)
+  return extension ? `snippet.${extension}` : "snippet.txt"
+}
+
+function normalizeLanguage(language: string): FileContents["lang"] | undefined {
+  const normalized = language.trim().toLocaleLowerCase()
+  if (!normalized || normalized === "text" || normalized === "txt" || normalized === "plain") {
+    return undefined
+  }
+  const aliases: Record<string, string> = {
+    bash: "shellscript",
+    cjs: "javascript",
+    h: "c",
+    js: "javascript",
+    jsx: "jsx",
+    mjs: "javascript",
+    ps1: "powershell",
+    py: "python",
+    rb: "ruby",
+    sh: "shellscript",
+    ts: "typescript",
+    tsx: "tsx",
+    yml: "yaml",
+  }
+  return (aliases[normalized] ?? normalized) as FileContents["lang"]
+}
+
+function languageToExtension(language: string): string {
+  const normalized = language.trim().toLocaleLowerCase()
+  const extensions: Record<string, string> = {
+    bash: "sh",
+    javascript: "js",
+    powershell: "ps1",
+    python: "py",
+    shellscript: "sh",
+    typescript: "ts",
+    yaml: "yml",
+  }
+  return (extensions[normalized] ?? normalized.replace(/[^a-z0-9_-]/g, "")) || "txt"
+}
+
+function hashCode(value: string): string {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0
+  }
+  return hash.toString(36)
 }
 
 // -- CodeBlock --

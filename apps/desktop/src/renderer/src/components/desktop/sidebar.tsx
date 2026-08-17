@@ -17,6 +17,7 @@ import {
   PinOff,
   PlugZap,
   Search,
+  SquarePen,
   SquareTerminal,
   Trash2,
 } from "lucide-react"
@@ -201,7 +202,7 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
 
         <nav className="min-w-0 px-2" aria-label="主要导航">
           <SidebarNavigationButton
-            icon={MessageSquarePlus}
+            icon={SquarePen}
             label="新对话"
             onClick={() => beginNewConversation()}
           />

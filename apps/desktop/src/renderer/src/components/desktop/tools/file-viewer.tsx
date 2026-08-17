@@ -4,6 +4,7 @@ import { FileCode2, FileText } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
+import { streamdownComponents } from "@renderer/components/desktop/conversation/streamdown-components"
 import { streamdownPlugins } from "@renderer/components/desktop/conversation/streamdown-plugins"
 import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
@@ -204,6 +205,7 @@ function MarkdownPreview({ preview }: { preview: WorkspaceReadFileResult }): Rea
           controls={false}
           lineNumbers
           plugins={streamdownPlugins}
+          components={streamdownComponents}
           className="desktop-streamdown"
         >
           {preview.content ?? ""}

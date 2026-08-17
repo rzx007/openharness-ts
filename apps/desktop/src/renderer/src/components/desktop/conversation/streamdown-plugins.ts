@@ -9,6 +9,16 @@ const customRenderers: CustomRenderer[] = [
   },
 ]
 
+const cspSafeCodeHighlighter: NonNullable<PluginConfig["code"]> = {
+  name: "shiki",
+  type: "code-highlighter",
+  getSupportedLanguages: () => [],
+  getThemes: () => ["github-light", "github-dark"],
+  supportsLanguage: () => false,
+  highlight: () => null,
+}
+
 export const streamdownPlugins: PluginConfig = {
+  code: cspSafeCodeHighlighter,
   renderers: customRenderers,
 }
