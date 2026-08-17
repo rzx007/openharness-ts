@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react"
 import { Streamdown } from "streamdown"
 
-import { parseFileReference } from "./message-render-model"
+import { parseFileReference, parseInlineFileReference } from "./message-render-model"
 import { FileButton, StreamdownCodeBlock } from "./streamdown-renderers"
 
 type StreamdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>
@@ -29,7 +29,7 @@ export function createStreamdownComponents({
     },
     inlineCode: ({ children, ...props }) => {
       const value = String(children).replace(/\n$/, "")
-      const file = parseFileReference(value)
+      const file = parseInlineFileReference(value)
       if (!file || !onOpenFile) {
         return (
           <code data-streamdown="inline-code" {...props}>
