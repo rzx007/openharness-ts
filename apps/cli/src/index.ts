@@ -3,7 +3,6 @@ import { mainAction } from "./commands/main";
 import { createAuthCommand } from "./commands/auth";
 import { createMcpCommand } from "./commands/mcp";
 import { createPluginCommand } from "./commands/plugin";
-import { createCronCommand } from "./commands/cron";
 import { createChannelsCommand } from "./commands/channels";
 import { createProviderCommand } from "./commands/provider";
 import { createSetupCommand } from "./commands/setup";
@@ -23,14 +22,29 @@ program
     "OpenHarness-ts - Open Source AI Agent Framework. Interactive default: TUI/daemon (requires Bun). One-shot: pass a prompt or use -p/--print.",
   )
   .version(VERSION)
-  .argument("[prompt]", "Initial prompt to send (print mode; omit for interactive TUI)")
+  .argument(
+    "[prompt]",
+    "Initial prompt to send (print mode; omit for interactive TUI)",
+  )
   .option("-m, --model <model>", "Model to use")
-  .option("-p, --print", "Print via daemon Session API and exit (non-interactive; requires a prompt)")
-  .option("-c, --continue", "Unavailable: legacy project snapshot continue (use TUI /sessions)")
-  .option("-r, --resume <session>", "Unavailable: legacy project snapshot resume (use TUI /resume)")
+  .option(
+    "-p, --print",
+    "Print via daemon Session API and exit (non-interactive; requires a prompt)",
+  )
+  .option(
+    "-c, --continue",
+    "Unavailable: legacy project snapshot continue (use TUI /sessions)",
+  )
+  .option(
+    "-r, --resume <session>",
+    "Unavailable: legacy project snapshot resume (use TUI /resume)",
+  )
   .option("-n, --name <name>", "Name the session")
   .option("--provider <provider>", "API provider")
-  .option("--permission-mode <mode>", "Permission mode (default | plan | full_auto)")
+  .option(
+    "--permission-mode <mode>",
+    "Permission mode (default | plan | full_auto)",
+  )
   .option("--coordinator", "Start new daemon sessions in coordinator mode")
   .option("--max-turns <n>", "Maximum agentic turns", parseInt)
   .option("-s, --system-prompt <prompt>", "Override system prompt")
@@ -43,13 +57,22 @@ program
   .option("--effort <level>", "Effort level (low | medium | high)")
   .option("--verbose", "Verbose output")
   .option("-d, --debug", "Debug mode")
-  .option("--tui", "Explicitly launch TUI/daemon (default when no prompt; requires Bun)")
-  .option("--daemon-url <url>", "Attach TUI to an explicit daemon URL instead of starting a local daemon")
+  .option(
+    "--tui",
+    "Explicitly launch TUI/daemon (default when no prompt; requires Bun)",
+  )
+  .option(
+    "--daemon-url <url>",
+    "Attach TUI to an explicit daemon URL instead of starting a local daemon",
+  )
   .option("--daemon-token <token>", "Bearer token for --daemon-url")
   .option("--dangerously-skip-permissions", "Skip all permission checks")
   .option("--allowed-tools <tools>", "Comma-separated allowed tools")
   .option("--disallowed-tools <tools>", "Comma-separated disallowed tools")
-  .option("--output-format <format>", "Output format (text | json | stream-json)")
+  .option(
+    "--output-format <format>",
+    "Output format (text | json | stream-json)",
+  )
   .option("--append-system-prompt <prompt>", "Append to default system prompt")
   .option("--bare", "Skip hooks/plugins/MCP loading")
   .option("--dry-run", "预览解析后的运行时配置，不调用模型")
@@ -59,7 +82,6 @@ program
 program.addCommand(createAuthCommand());
 program.addCommand(createMcpCommand());
 program.addCommand(createPluginCommand());
-program.addCommand(createCronCommand());
 program.addCommand(createChannelsCommand());
 program.addCommand(createProviderCommand());
 program.addCommand(createSetupCommand());
@@ -92,7 +114,11 @@ program
         process.exit(1);
         return;
       }
-      const patch = buildSettingsPatch(settings as unknown as Record<string, unknown>, key, coerced);
+      const patch = buildSettingsPatch(
+        settings as unknown as Record<string, unknown>,
+        key,
+        coerced,
+      );
       await saveSettings({ ...settings, ...patch } as typeof settings);
       if (key === "daemon.autoStart") {
         const entry = process.argv[1];
@@ -140,9 +166,17 @@ program
     if (settings) {
       const { checkApiKey } = await import("./doctor");
       const keyCheck = await checkApiKey(settings);
-      checks.push({ label: "API key", ok: keyCheck.ok, detail: keyCheck.source });
+      checks.push({
+        label: "API key",
+        ok: keyCheck.ok,
+        detail: keyCheck.source,
+      });
     } else {
-      checks.push({ label: "API key", ok: false, detail: "settings not loaded" });
+      checks.push({
+        label: "API key",
+        ok: false,
+        detail: "settings not loaded",
+      });
     }
 
     try {
@@ -153,12 +187,18 @@ program
       await readFile(claudeMd, "utf-8");
       checks.push({ label: "CLAUDE.md", ok: true, detail: "found in cwd" });
     } catch {
-      checks.push({ label: "CLAUDE.md", ok: false, detail: "not found in cwd" });
+      checks.push({
+        label: "CLAUDE.md",
+        ok: false,
+        detail: "not found in cwd",
+      });
     }
 
     for (const c of checks) {
       const icon = c.ok ? chalk.green("✓") : chalk.red("✗");
-      console.log(`  ${icon} ${c.label}${c.detail ? chalk.gray(` (${c.detail})`) : ""}`);
+      console.log(
+        `  ${icon} ${c.label}${c.detail ? chalk.gray(` (${c.detail})`) : ""}`,
+      );
     }
   });
 
