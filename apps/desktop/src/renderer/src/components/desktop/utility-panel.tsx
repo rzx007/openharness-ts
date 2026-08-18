@@ -11,10 +11,11 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import type * as React from "react"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 
 import { BrowserTool, type BrowserToolTab } from "@renderer/components/desktop/tools/browser-tool"
+import type { UtilityToolRequest } from "@renderer/components/desktop/title-bar"
 import { FilesTool } from "@renderer/components/desktop/tools/files-tool"
 import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
 import type { FileViewerTab } from "@renderer/components/desktop/tools/file-viewer"
@@ -63,6 +64,7 @@ type UtilityPanelProps = {
   onClose: () => void
   fileOpenRequest: { id: number; path: string; line?: number } | null
   terminalOpenRequest: { id: number; terminalId: string } | null
+  toolOpenRequest: { id: number; tool: UtilityToolRequest } | null
 }
 
 type MenuPosition = {
@@ -105,6 +107,7 @@ export function UtilityPanel({
   onClose,
   fileOpenRequest,
   terminalOpenRequest,
+  toolOpenRequest,
 }: UtilityPanelProps): React.JSX.Element {
   const [tabs, setTabs] = useState<UtilityTab[]>([])
   const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>([])
@@ -118,6 +121,7 @@ export function UtilityPanel({
   const [terminalMounted, setTerminalMounted] = useState(false)
   const [terminalCommand, setTerminalCommand] = useState<TerminalPanelCommand | null>(null)
   const [terminalActionsHost, setTerminalActionsHost] = useState<HTMLDivElement | null>(null)
+  const handledToolRequestIdRef = useRef<number | null>(null)
   const [persistedFileTabs, setPersistedFileTabs] =
     useState<PersistedFileTabState>(readPersistedFileTabs)
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
@@ -173,88 +177,101 @@ export function UtilityPanel({
 
   useEffect(() => {
     if (!terminalOpenRequest) return
-    setTerminalMounted(true)
+    const timer = window.setTimeout(() => setTerminalMounted(true), 0)
+    return () => window.clearTimeout(timer)
   }, [terminalOpenRequest])
 
-  const addTab = (tool: UtilityTool): void => {
-    setAddMenuOpen(false)
+  const addTab = useCallback(
+    (tool: UtilityTool): void => {
+      setAddMenuOpen(false)
 
-    if (tool === "terminal") {
-      setTerminalMounted(true)
-      if (!selectedProjectPath || !selectedProjectAvailable) {
-        const id = unavailableTerminalTabId
-        setTabs((current) =>
-          current.some((tab) => tab.id === id)
-            ? current
-            : [...current, { id, tool, title: toolMeta.terminal.label }]
+      if (tool === "terminal") {
+        setTerminalMounted(true)
+        if (!selectedProjectPath || !selectedProjectAvailable) {
+          const id = unavailableTerminalTabId
+          setTabs((current) =>
+            current.some((tab) => tab.id === id)
+              ? current
+              : [...current, { id, tool, title: toolMeta.terminal.label }]
+          )
+          setActiveTabId(id)
+          return
+        }
+        const hasTerminalTabs = tabs.some(
+          (tab) =>
+            tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
         )
+        setTerminalCommand({
+          id: Date.now(),
+          type: hasTerminalTabs ? "create" : "ensure",
+        })
+        return
+      }
+
+      if (tool === "browser") {
+        const id = `browser-tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const tab: BrowserToolTab = {
+          id,
+          title: "新标签页",
+          url: null,
+          input: "",
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        }
+        setBrowserTabs((current) => [...current, tab])
+        setTabs((current) => [...current, { id, tool, title: tab.title }])
         setActiveTabId(id)
         return
       }
-      const hasTerminalTabs = tabs.some(
-        (tab) =>
-          tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
-      )
-      setTerminalCommand({
-        id: Date.now(),
-        type: hasTerminalTabs ? "create" : "ensure",
-      })
-      return
-    }
 
-    if (tool === "browser") {
-      const id = `browser-tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
-      const tab: BrowserToolTab = {
-        id,
-        title: "新标签页",
-        url: null,
-        input: "",
-        loading: false,
-        canGoBack: false,
-        canGoForward: false,
+      if (tool === "files") {
+        const emptyFilesTab = tabs.find((tab) => tab.id === filesTabId)
+        if (emptyFilesTab) {
+          setActiveTabId(emptyFilesTab.id)
+          return
+        }
+        const existingFileTab =
+          tabs.find(
+            (tab) =>
+              tab.tool === "files" &&
+              tab.filePath &&
+              tab.filePath === activeFilePath &&
+              tab.projectPath === selectedProjectPath
+          ) ??
+          tabs.find(
+            (tab) => tab.tool === "files" && tab.filePath && tab.projectPath === selectedProjectPath
+          )
+        if (existingFileTab) {
+          setActiveTabId(existingFileTab.id)
+          return
+        }
+        setTabs((current) => [...current, { id: filesTabId, tool, title: toolMeta.files.label }])
+        setActiveTabId(filesTabId)
+        return
       }
-      setBrowserTabs((current) => [...current, tab])
-      setTabs((current) => [...current, { id, tool, title: tab.title }])
+
+      const id = toolTabId(tool)
+      const existing = tabs.find((tab) => tab.id === id)
+      if (existing) {
+        setActiveTabId(existing.id)
+        return
+      }
+
+      setTabs((current) => [...current, { id, tool, title: toolMeta[tool].label }])
       setActiveTabId(id)
-      return
-    }
+    },
+    [activeFilePath, selectedProjectAvailable, selectedProjectPath, tabs]
+  )
 
-    if (tool === "files") {
-      const emptyFilesTab = tabs.find((tab) => tab.id === filesTabId)
-      if (emptyFilesTab) {
-        setActiveTabId(emptyFilesTab.id)
-        return
-      }
-      const existingFileTab =
-        tabs.find(
-          (tab) =>
-            tab.tool === "files" &&
-            tab.filePath &&
-            tab.filePath === activeFilePath &&
-            tab.projectPath === selectedProjectPath
-        ) ??
-        tabs.find(
-          (tab) => tab.tool === "files" && tab.filePath && tab.projectPath === selectedProjectPath
-        )
-      if (existingFileTab) {
-        setActiveTabId(existingFileTab.id)
-        return
-      }
-      setTabs((current) => [...current, { id: filesTabId, tool, title: toolMeta.files.label }])
-      setActiveTabId(filesTabId)
-      return
-    }
-
-    const id = toolTabId(tool)
-    const existing = tabs.find((tab) => tab.id === id)
-    if (existing) {
-      setActiveTabId(existing.id)
-      return
-    }
-
-    setTabs((current) => [...current, { id, tool, title: toolMeta[tool].label }])
-    setActiveTabId(id)
-  }
+  useEffect(() => {
+    if (!toolOpenRequest || handledToolRequestIdRef.current === toolOpenRequest.id) return
+    const timer = window.setTimeout(() => {
+      handledToolRequestIdRef.current = toolOpenRequest.id
+      addTab(toolOpenRequest.tool)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [addTab, toolOpenRequest])
 
   const closeTabs = (tabIds: string[], preferredActiveTabId?: string): void => {
     const closingIds = new Set(tabIds)

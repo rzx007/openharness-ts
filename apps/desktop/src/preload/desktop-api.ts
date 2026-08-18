@@ -26,6 +26,8 @@ export const desktopAPI = {
     close: () => invoke(IpcChannels.windowClose),
     toggleMaximize: () => invoke(IpcChannels.windowToggleMaximize),
     isMaximized: () => invoke(IpcChannels.windowIsMaximized),
+    getZoomLevel: () => invoke(IpcChannels.windowGetZoomLevel),
+    setZoomLevel: (level: number) => invoke(IpcChannels.windowSetZoomLevel, level),
     onMaximizedChanged: (listener: (value: boolean) => void): (() => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, value: boolean): void => listener(value)
       ipcRenderer.on("window:maximized-changed", wrapped)

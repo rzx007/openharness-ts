@@ -11,13 +11,21 @@ import {
 
 import { ConversationPane } from "@renderer/components/desktop/conversation-pane"
 import { Sidebar } from "@renderer/components/desktop/sidebar"
-import { TitleBar } from "@renderer/components/desktop/title-bar"
+import { TitleBar, type UtilityToolRequest } from "@renderer/components/desktop/title-bar"
+import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { UtilityPanel } from "@renderer/components/desktop/utility-panel"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
+import {
+  createSessionNavigationState,
+  currentSessionDestination,
+  moveSessionNavigation,
+  recordSessionDestination,
+} from "@renderer/components/desktop/session-navigation"
 import {
   attachDesktopSessionEvents,
   useDesktopSessionStore,
 } from "@renderer/stores/desktop-session-store"
+import { actualSizeZoomLevel, normalizeZoomLevel } from "@shared/zoom"
 
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
@@ -33,10 +41,18 @@ function isOpenWorkspaceLayout(layout: Layout | null | undefined): layout is Lay
 
 export function DesktopShell(): React.JSX.Element {
   const initializeSessions = useDesktopSessionStore((state) => state.initialize)
+  const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
+  const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
+  const openSession = useDesktopSessionStore((state) => state.openSession)
+  const sessions = useDesktopSessionStore((state) => state.sessions)
+  const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [panelOpen, setPanelOpen] = useState(true)
   const [utilityMaximized, setUtilityMaximized] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
+  const [zoomLevel, setZoomLevel] = useState(actualSizeZoomLevel)
+  const [navigationReady, setNavigationReady] = useState(false)
+  const [navigation, setNavigation] = useState(() => createSessionNavigationState(null))
   const [fileOpenRequest, setFileOpenRequest] = useState<{
     id: number
     path: string
@@ -46,6 +62,10 @@ export function DesktopShell(): React.JSX.Element {
     id: number
     terminalId: string
   } | null>(null)
+  const [toolOpenRequest, setToolOpenRequest] = useState<{
+    id: number
+    tool: UtilityToolRequest
+  } | null>(null)
   const sidebarPanelRef = usePanelRef()
   const conversationPanelRef = usePanelRef()
   const utilityPanelRef = usePanelRef()
@@ -53,6 +73,9 @@ export function DesktopShell(): React.JSX.Element {
   const previousWorkspaceLayoutRef = useRef<Layout | null>(null)
   const lastOpenWorkspaceLayoutRef = useRef<Layout | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const zoomLevelRef = useRef(actualSizeZoomLevel)
+  const initializationRef = useRef<Promise<void> | null>(null)
+  const navigationTargetRef = useRef<{ destination: string | null } | null>(null)
   const outerLayout = useDefaultLayout({
     id: "desktop-shell-layout-v1",
     panelIds: ["sidebar", "workspace"],
@@ -70,14 +93,40 @@ export function DesktopShell(): React.JSX.Element {
 
   useEffect(() => {
     void window.desktop.window.isMaximized().then(setIsMaximized)
+    void window.desktop.window.getZoomLevel().then((level) => {
+      const normalizedLevel = normalizeZoomLevel(level)
+      zoomLevelRef.current = normalizedLevel
+      setZoomLevel(normalizedLevel)
+    })
     return window.desktop.window.onMaximizedChanged(setIsMaximized)
   }, [])
 
   useEffect(() => {
     const detach = attachDesktopSessionEvents()
-    void initializeSessions()
-    return detach
+    let disposed = false
+    const initialization = initializationRef.current ?? initializeSessions()
+    initializationRef.current = initialization
+    void initialization.finally(() => {
+      if (disposed) return
+      const destination = useDesktopSessionStore.getState().activeSessionId
+      setNavigation(createSessionNavigationState(destination))
+      setNavigationReady(true)
+    })
+    return () => {
+      disposed = true
+      detach()
+    }
   }, [initializeSessions])
+
+  useEffect(() => {
+    if (!navigationReady) return
+    const expected = navigationTargetRef.current
+    if (expected && expected.destination === activeSessionId) {
+      navigationTargetRef.current = null
+      return
+    }
+    setNavigation((current) => recordSessionDestination(current, activeSessionId))
+  }, [activeSessionId, navigationReady])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -169,6 +218,14 @@ export function DesktopShell(): React.JSX.Element {
     [restoreUtilityPanel]
   )
 
+  const openUtilityTool = useCallback(
+    (tool: UtilityToolRequest): void => {
+      restoreUtilityPanel()
+      setToolOpenRequest({ id: Date.now(), tool })
+    },
+    [restoreUtilityPanel]
+  )
+
   const closeUtilityPanel = useCallback((): void => {
     collapseUtilityPanel()
   }, [collapseUtilityPanel])
@@ -189,6 +246,63 @@ export function DesktopShell(): React.JSX.Element {
     setPanelOpen(true)
     setUtilityMaximized(true)
   }, [conversationPanelRef, utilityMaximized, utilityPanelRef, workspaceGroupRef])
+
+  const restoreSessionDestination = useCallback(
+    (destination: string | null): void => {
+      navigationTargetRef.current = { destination }
+      if (destination) void openSession(destination)
+      else void startNewConversation()
+    },
+    [openSession, startNewConversation]
+  )
+
+  const moveNavigation = useCallback(
+    (offset: -1 | 1): void => {
+      const next = moveSessionNavigation(navigation, offset)
+      if (next === navigation) return
+      setNavigation(next)
+      restoreSessionDestination(currentSessionDestination(next))
+    },
+    [navigation, restoreSessionDestination]
+  )
+
+  const activeSessionIndex = sessions.findIndex((session) => session.id === activeSessionId)
+  const previousSession = activeSessionIndex > 0 ? sessions[activeSessionIndex - 1] : null
+  const nextSession =
+    activeSessionIndex >= 0 && activeSessionIndex < sessions.length - 1
+      ? sessions[activeSessionIndex + 1]
+      : null
+
+  const openPreviousSession = useCallback((): void => {
+    if (previousSession) void openSession(previousSession.id)
+  }, [openSession, previousSession])
+
+  const openNextSession = useCallback((): void => {
+    if (nextSession) void openSession(nextSession.id)
+  }, [nextSession, openSession])
+
+  const applyZoomLevel = useCallback((requestedLevel: number): void => {
+    const nextLevel = normalizeZoomLevel(requestedLevel)
+    zoomLevelRef.current = nextLevel
+    setZoomLevel(nextLevel)
+    void window.desktop.window.setZoomLevel(nextLevel).then((appliedLevel) => {
+      const normalizedLevel = normalizeZoomLevel(appliedLevel)
+      zoomLevelRef.current = normalizedLevel
+      setZoomLevel(normalizedLevel)
+    })
+  }, [])
+
+  const zoomIn = useCallback((): void => {
+    applyZoomLevel(zoomLevelRef.current + 1)
+  }, [applyZoomLevel])
+
+  const zoomOut = useCallback((): void => {
+    applyZoomLevel(zoomLevelRef.current - 1)
+  }, [applyZoomLevel])
+
+  const resetZoom = useCallback((): void => {
+    applyZoomLevel(actualSizeZoomLevel)
+  }, [applyZoomLevel])
 
   useEffect(() => {
     const group = workspaceGroupRef.current
@@ -219,32 +333,52 @@ export function DesktopShell(): React.JSX.Element {
     [utilityMaximized, workspaceLayout]
   )
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
-      if (isEditableTarget(event.target)) return
-
-      if (event.key.toLowerCase() === "b") {
-        event.preventDefault()
-        toggleSidebar()
-      }
-
-      if (event.shiftKey && event.key.toLowerCase() === "p") {
-        event.preventDefault()
-        togglePanel()
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [togglePanel, toggleSidebar])
+  useDesktopShortcuts({
+    newConversation: () => void startNewConversation(),
+    chooseProject: () => void chooseProject(),
+    closeConversation: () => {
+      if (activeSessionId) void startNewConversation()
+    },
+    quit: () => void window.desktop.app.quit(),
+    toggleSidebar,
+    togglePanel,
+    openBrowser: () => openUtilityTool("browser"),
+    openFiles: () => openUtilityTool("files"),
+    openTerminal: () => openUtilityTool("terminal"),
+    previousSession: openPreviousSession,
+    nextSession: openNextSession,
+    goBack: () => moveNavigation(-1),
+    goForward: () => moveNavigation(1),
+    zoomIn,
+    zoomOut,
+    resetZoom,
+  })
 
   return (
     <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-shell text-foreground">
       <TitleBar
         sidebarOpen={sidebarOpen}
+        panelOpen={panelOpen}
         isMaximized={isMaximized}
+        hasActiveSession={Boolean(activeSessionId)}
+        canGoBack={navigation.index > 0}
+        canGoForward={navigation.index < navigation.entries.length - 1}
+        canOpenPreviousSession={Boolean(previousSession)}
+        canOpenNextSession={Boolean(nextSession)}
+        zoomLevel={zoomLevel}
+        onGoBack={() => moveNavigation(-1)}
+        onGoForward={() => moveNavigation(1)}
+        onNewConversation={() => void startNewConversation()}
+        onChooseProject={() => void chooseProject()}
+        onCloseConversation={() => void startNewConversation()}
+        onOpenPreviousSession={openPreviousSession}
+        onOpenNextSession={openNextSession}
         onToggleSidebar={toggleSidebar}
+        onTogglePanel={togglePanel}
+        onOpenUtilityTool={openUtilityTool}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
         onMinimize={() => void window.desktop.window.minimize()}
         onToggleMaximize={() => void window.desktop.window.toggleMaximize()}
         onClose={() => void window.desktop.window.close()}
@@ -347,6 +481,7 @@ export function DesktopShell(): React.JSX.Element {
                     onClose={closeUtilityPanel}
                     fileOpenRequest={fileOpenRequest}
                     terminalOpenRequest={terminalOpenRequest}
+                    toolOpenRequest={toolOpenRequest}
                   />
                 </Panel>
               </Group>
@@ -355,12 +490,5 @@ export function DesktopShell(): React.JSX.Element {
         </Group>
       </div>
     </main>
-  )
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  return Boolean(
-    target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']")
   )
 }

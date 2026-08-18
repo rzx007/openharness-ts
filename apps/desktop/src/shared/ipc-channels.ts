@@ -49,6 +49,8 @@ export const IpcChannels = {
   windowClose: "window:close",
   windowToggleMaximize: "window:toggle-maximize",
   windowIsMaximized: "window:is-maximized",
+  windowGetZoomLevel: "window:get-zoom-level",
+  windowSetZoomLevel: "window:set-zoom-level",
 
   trayFlash: "tray:flash",
   trayStopFlash: "tray:stop-flash",
@@ -158,6 +160,8 @@ export interface IpcInvokeMap {
   [IpcChannels.windowClose]: { args: []; result: void }
   [IpcChannels.windowToggleMaximize]: { args: []; result: void }
   [IpcChannels.windowIsMaximized]: { args: []; result: boolean }
+  [IpcChannels.windowGetZoomLevel]: { args: []; result: number }
+  [IpcChannels.windowSetZoomLevel]: { args: [level: number]; result: number }
 
   [IpcChannels.trayFlash]: { args: []; result: void }
   [IpcChannels.trayStopFlash]: { args: []; result: void }

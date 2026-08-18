@@ -60,6 +60,8 @@ export interface DesktopAPI {
     close: () => Promise<void>
     toggleMaximize: () => Promise<void>
     isMaximized: () => Promise<boolean>
+    getZoomLevel: () => Promise<number>
+    setZoomLevel: (level: number) => Promise<number>
     onMaximizedChanged: (listener: (value: boolean) => void) => () => void
   }
   tray: {
