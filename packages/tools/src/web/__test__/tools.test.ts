@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWebFetchTool } from "../fetch.js";
 import { createWebSearchTool } from "../search.js";
 import {
@@ -9,6 +9,99 @@ import {
 } from "../types.js";
 
 describe("web tools", () => {
+  it("blocks WebFetch when sandbox network.mode is none", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("should not reach host fetch");
+    });
+    const tool = createWebFetchTool(runtime({ fetch }));
+
+    const result = await tool.execute(
+      { url: "https://example.com" },
+      {
+        cwd: process.cwd(),
+        settings: {
+          sandbox: {
+            enabled: true,
+            backend: "docker",
+            network: { mode: "none" },
+          },
+        } as never,
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("web_fetch failed [network_denied]"),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks WebSearch when sandbox network.mode is none", async () => {
+    const search = vi.fn(async () => {
+      throw new Error("should not reach host search");
+    });
+    const tool = createWebSearchTool(runtime({ search }));
+
+    const result = await tool.execute(
+      { query: "secrets" },
+      {
+        cwd: process.cwd(),
+        settings: {
+          sandbox: {
+            enabled: true,
+            backend: "docker",
+            network: { mode: "none" },
+          },
+        } as never,
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("web_search failed [network_denied]"),
+    });
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("allows WebFetch when sandbox network.mode is bridge", async () => {
+    const tool = createWebFetchTool(runtime({
+      async fetch() {
+        return {
+          provider: "test-fetch",
+          url: "https://example.com",
+          status: 200,
+          statusText: "OK",
+          ok: true,
+          contentType: "text/plain",
+          body: "ok",
+          truncated: false,
+        };
+      },
+    }));
+
+    const result = await tool.execute(
+      { url: "https://example.com" },
+      {
+        cwd: process.cwd(),
+        settings: {
+          sandbox: {
+            enabled: true,
+            backend: "docker",
+            network: { mode: "bridge" },
+          },
+        } as never,
+      },
+    );
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("ok"),
+    });
+  });
+
   it("keeps the WebSearch result rendering stable", async () => {
     const tool = createWebSearchTool(runtime({
       async search(request) {

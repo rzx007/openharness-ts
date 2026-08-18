@@ -2,6 +2,7 @@ export type WebProviderErrorCode =
   | "provider_unavailable"
   | "invalid_request"
   | "network_failure"
+  | "network_denied"
   | "http_status"
   | "response_read_failed"
   | "parse_failed"

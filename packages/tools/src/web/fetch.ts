@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "@openharness/core";
 import { createToolAbortScope } from "../abort.js";
 import { defaultWebRuntime } from "./default-runtime.js";
+import { assertSandboxAllowsHostWeb } from "./sandbox-network.js";
 import { formatWebError } from "./tool-errors.js";
 import type { WebFetchFormat, WebRuntimeLike } from "./types.js";
 
@@ -32,6 +33,7 @@ export function createWebFetchTool(runtime: WebRuntimeLike = defaultWebRuntime):
       const abortScope = createToolAbortScope(context.abortSignal, 20_000);
 
       try {
+        assertSandboxAllowsHostWeb(context);
         const result = await runtime.fetch(
           { url, maxChars, format },
           abortScope.signal,
