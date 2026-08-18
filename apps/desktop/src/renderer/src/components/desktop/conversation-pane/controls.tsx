@@ -212,7 +212,7 @@ export function ComposerSendButton({
         onClick={onInterrupt}
         className="ml-1 size-8 rounded-full bg-foreground text-background hover:bg-foreground/85"
       >
-        <Square fill="currentColor" />
+        <Square fill="currentColor" className="size-3.5" />
       </Button>
     )
   }
