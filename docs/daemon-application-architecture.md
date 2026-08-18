@@ -58,7 +58,7 @@ OpenHarnessAgent onEvent sink
 
 ## Composition 与 transport
 
-`packages/server/src/daemon-application.ts` 是 daemon durable application 的唯一 composition root。它组装 store recovery、permission broker、Agent loader/pool、event projection、run engine、task、Cron、Application / Query / Maintenance / Control。
+`packages/server/src/daemon-application.ts` 是 daemon durable application 的唯一 composition root。它组装 store recovery、permission broker、Agent loader/pool、event projection、run engine、task、Scheduled Tasks、Application / Query / Maintenance / Control。
 
 `packages/server/src/http.ts` 只负责 Hono、鉴权、CORS、route mounting、HTTP listener 和 SSE client lifecycle。HTTP transport 不再创建或持有 AgentPool、run engine、projector 等内部组件。
 
@@ -68,9 +68,9 @@ OpenHarnessAgent onEvent sink
 
 一条 session 有两类模型信息，不能混着看：
 
-| 位置 | 大白话含义 | 谁会使用 |
-|---|---|---|
-| `session.model` | 列表、导出、旧表结构里的展示列 | UI 展示、导出、统计展示 |
+| 位置                             | 大白话含义                        | 谁会使用                             |
+| -------------------------------- | --------------------------------- | ------------------------------------ |
+| `session.model`                  | 列表、导出、旧表结构里的展示列    | UI 展示、导出、统计展示              |
 | `session.metadata.runtime.model` | 这条 session 下一轮真正要用的模型 | daemon 创建或重建 `OpenHarnessAgent` |
 
 当前规则：
@@ -99,28 +99,28 @@ OpenHarnessAgent onEvent sink
 
 routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装；应用对象来自 `DaemonApplication`。
 
-| 服务 | 文件 | 负责 |
-|---|---|---|
-| `SessionApplicationService` | `http/session-application-service.ts` | create/update/archive、prompt、resume、interrupt、child route |
-| `SessionQueryService` | `http/session-query-service.ts` | session/state/message/part 查询 |
-| `SessionMaintenanceService` | `http/session-maintenance-service.ts` | compact、rewind、export、remember、MCP、usage |
-| `DaemonControlService` | `http/daemon-control-service.ts` | runtime snapshot、run barrier、pool close/inspect |
-| `DaemonCronService` | `daemon-cron-service.ts` | 保存定时任务、启动定时器、运行 Sandbox 命令、保存执行记录 |
+| 服务                        | 文件                                  | 负责                                                               |
+| --------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
+| `SessionApplicationService` | `http/session-application-service.ts` | create/update/archive、prompt、resume、interrupt、child route      |
+| `SessionQueryService`       | `http/session-query-service.ts`       | session/state/message/part 查询                                    |
+| `SessionMaintenanceService` | `http/session-maintenance-service.ts` | compact、rewind、export、remember、MCP、usage                      |
+| `DaemonControlService`      | `http/daemon-control-service.ts`      | runtime snapshot、run barrier、pool close/inspect                  |
+| `ScheduledTaskService`      | `scheduled-task-service.ts`           | 保存已安排任务、启动定时器、运行 Agent、保存执行记录和需要处理状态 |
 
 它们是 HTTP 后面的应用用例门面，不是四个独立网络服务。
 
-| HTTP 能力 | route 文件 | 主要入口 |
-|---|---|---|
-| session CRUD/query | `http/routes/session.ts` | Application / Query |
-| prompt/steer/interrupt/resume | `http/routes/run-execution.ts` | Application |
-| compact/rewind/export/remember/MCP/usage | `http/routes/session-utility.ts` | Maintenance |
-| permission list/reply | `http/routes/permission.ts` | `StorePermissionBroker` |
-| task create/get/list/stop | `http/routes/task.ts` | `SessionTaskService` |
-| Cron add/list/run/history | `http/routes/cron.ts` | `DaemonCronService` |
-| health/settings/provider | `http/routes/system.ts` | Control/default services |
-| replay/live SSE | `http/routes/events.ts` | `HttpEventHub` |
+| HTTP 能力                                | route 文件                       | 主要入口                 |
+| ---------------------------------------- | -------------------------------- | ------------------------ |
+| session CRUD/query                       | `http/routes/session.ts`         | Application / Query      |
+| prompt/steer/interrupt/resume            | `http/routes/run-execution.ts`   | Application              |
+| compact/rewind/export/remember/MCP/usage | `http/routes/session-utility.ts` | Maintenance              |
+| permission list/reply                    | `http/routes/permission.ts`      | `StorePermissionBroker`  |
+| task create/get/list/stop                | `http/routes/task.ts`            | `SessionTaskService`     |
+| Scheduled Task create/list/run/history   | `http/routes/schedules.ts`       | `ScheduledTaskService`   |
+| health/settings/provider                 | `http/routes/system.ts`          | Control/default services |
+| replay/live SSE                          | `http/routes/events.ts`          | `HttpEventHub`           |
 
-Cron 的添加、到点执行、Agent 工具接入和 daemon 启停流程见 [Daemon Cron 运行流程](./daemon-cron-flow.md)。
+已安排任务的创建、到点执行、Agent 工具接入和 daemon 启停流程见 [Scheduled Tasks 运行流程](./scheduled-tasks-flow.md)。
 
 ## TUI 发送 hi
 
@@ -204,11 +204,11 @@ live child 由 root agent 的 `AgentChildManager` 持有，不进入 AgentPool�
 
 `DaemonOperationGate` 是 daemon 应用层的统一准入边界，scope 为 `sessionId + cwd`。普通 runtime 使用持有 shared lease；配置、维护与 archive 持有 exclusive barrier：
 
-| barrier | 阻止的准入 | 典型调用 |
-|---|---|---|
-| session | 同一 session | runtime PATCH、compact、rewind、archive |
-| cwd | 同一 cwd 的所有 session | remember、memory/plugin reload |
-| global | 所有 session | settings/auth/profile/plugin mutation、shutdown |
+| barrier | 阻止的准入              | 典型调用                                        |
+| ------- | ----------------------- | ----------------------------------------------- |
+| session | 同一 session            | runtime PATCH、compact、rewind、archive         |
+| cwd     | 同一 cwd 的所有 session | remember、memory/plugin reload                  |
+| global  | 所有 session            | settings/auth/profile/plugin mutation、shutdown |
 
 线性化顺序固定为：先安装 barrier，原子检查 lane 与 `AgentPool` live state，再执行 mutation/close，最后释放 barrier。prompt、resume、required runtime inspect 和 best-effort warm 都必须经过 shared admission；warm 拿不到 lease 时只跳过预热，Maintenance/Control 的必需 runtime 创建失败则直接向调用方传播。
 
@@ -226,20 +226,20 @@ createDaemonAgentLoader({
 });
 ```
 
-| AgentEvent | daemon 行为 |
-|---|---|
-| `input.accepted` | create/validate durable input；steer 时追加 user transcript |
-| `run.started` | create/validate run、置 running、begin transcript |
-| `output.text.delta` | 立即更新内存 text part 并发 live SSE；dirty part 按 checkpoint 批量持久化，delta event 本身不进入 replay log |
-| `output.turn.completed` | 完成当前 text part，保留 provider model-turn 边界 |
-| `tool.started/completed` | create/update tool part + observability |
-| `usage.updated` | project usage event |
-| `domain.event` | 写 durable domain event |
-| `permission.requested/resolved` | 写 framework observation event |
-| `child.created` | child session + task + live directory |
-| `child.suspended/resumed` | durable lifecycle observation |
-| `child.closed` | finish task、unregister live route；durable 失败时保留 pending projection 供有序重试 |
-| run terminal | complete text、finalize durable run/task |
+| AgentEvent                      | daemon 行为                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `input.accepted`                | create/validate durable input；steer 时追加 user transcript                                                  |
+| `run.started`                   | create/validate run、置 running、begin transcript                                                            |
+| `output.text.delta`             | 立即更新内存 text part 并发 live SSE；dirty part 按 checkpoint 批量持久化，delta event 本身不进入 replay log |
+| `output.turn.completed`         | 完成当前 text part，保留 provider model-turn 边界                                                            |
+| `tool.started/completed`        | create/update tool part + observability                                                                      |
+| `usage.updated`                 | project usage event                                                                                          |
+| `domain.event`                  | 写 durable domain event                                                                                      |
+| `permission.requested/resolved` | 写 framework observation event                                                                               |
+| `child.created`                 | child session + task + live directory                                                                        |
+| `child.suspended/resumed`       | durable lifecycle observation                                                                                |
+| `child.closed`                  | finish task、unregister live route；durable 失败时保留 pending projection 供有序重试                         |
+| run terminal                    | complete text、finalize durable run/task                                                                     |
 
 projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。所有 child required event 共用一个 pending settlement 状态机：`child.closed` 重试原 projection，其他 child event 执行 durable terminal compensation；settlement 再失败时，下一有序事件必须先完成 pending settlement，水位不能越过 poison event。root projection failure 传播给 framework，并由 `SessionRunExecutor` 对仍非 terminal 的 durable run 做 infrastructure fallback。
 
@@ -350,14 +350,14 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 
 ## Maintenance
 
-| 用例 | 主要路径 |
-|---|---|
-| compact | Maintenance -> `agent.compact()` -> replace durable transcript |
-| remember | Maintenance -> `agent.remember()` |
-| usage | Maintenance -> `agent.getUsage()` |
-| inspect/MCP | Maintenance/Control -> `agent.inspect()` |
-| rewind | close agent -> mutate durable transcript -> later rehydrate |
-| archive | parent 先进入 closing -> 固定 descendant snapshot -> interrupt/wait -> close pool/live child -> durable archive |
+| 用例        | 主要路径                                                                                                        |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| compact     | Maintenance -> `agent.compact()` -> replace durable transcript                                                  |
+| remember    | Maintenance -> `agent.remember()`                                                                               |
+| usage       | Maintenance -> `agent.getUsage()`                                                                               |
+| inspect/MCP | Maintenance/Control -> `agent.inspect()`                                                                        |
+| rewind      | close agent -> mutate durable transcript -> later rehydrate                                                     |
+| archive     | parent 先进入 closing -> 固定 descendant snapshot -> interrupt/wait -> close pool/live child -> durable archive |
 
 这些 API 是 framework 能力的 daemon 应用化；daemon 负责 durable 更新和并发保护。compact/rewind 使用 session barrier，remember 使用 cwd barrier；barrier 覆盖 agent operation、durable mutation 与必要的 runtime close，不使用“先检查 active run、稍后再执行”的 check-then-act。
 

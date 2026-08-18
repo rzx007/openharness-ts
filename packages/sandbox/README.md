@@ -27,7 +27,7 @@ OpenHarness 的 sandbox runtime 辅助层。
 
 重要流程：
 
-1. shell、argv process、MCP stdio、cron 和 background task 从各自入口把 `settings + cwd + sessionId` 传给 `createShellProcess` / `createProcess`。
+1. shell、argv process、MCP stdio 和 background task 从各自入口把 `settings + cwd + sessionId` 传给 `createShellProcess` / `createProcess`。
 2. 中央 process factory 为这一次调用解析 policy；调用方也可以显式传入已经解析好的 `policy`，不会从 provider 的全局状态猜测。
 3. 文件工具用同一个 policy 做路径判断，再选择 host 或 active Docker file operations。
 4. 运行结果区分 command failure、runner failure 和 policy denial。路径拒绝会返回 `failureKind: "policy"` 和 `filesystem_denied`；sandbox runtime 不可用属于 runner failure。
@@ -39,7 +39,7 @@ policy 目前统一了配置解释和失败形状，但没有把尚未实现的�
 已知缺口与后续：
 
 - Docker/SRT E2E 仍按环境可选；Docker daemon 不可用时会跳过。Docker 默认 E2E、文件工具 E2E、MCP stdio E2E 已有真实 Docker 覆盖，CI 固定运行环境还待接线。
-- 主 daemon 托管的 Cron 已通过自己的 `cwd + cron:<jobId>` 范围接入 Sandbox。
+- Scheduled Task 运行完整 Agent，会沿用会话和工具现有的权限与 Sandbox 边界。
 - `network=none` 已真实隔离网络；域名 allow/deny 还没有真正拦截，只会在 bridge/host 模式下标记 degraded。后续要补真实网络策略。
 - 文件 helper 目前是 `node -e "<内嵌脚本>" + stdin JSON`。后续可以改成镜像内固定命令，例如 `oh-file-helper`，让协议更清楚，也方便版本管理。
 

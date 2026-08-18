@@ -51,14 +51,14 @@ JobCancel({ jobId, reason: "verification finished" })
 
 ## 术语
 
-| 术语 | 实际含义 |
-|---|---|
-| producer | 真正创建并运行工作的模块，例如 Terminal provider 或 TaskManager |
-| job | 一项已经创建、可能持续一段时间的工作 |
-| control plane | 不亲自执行工作，只负责统一查状态和转发控制动作的这一层 |
-| snapshot | 某一时刻的只读状态照片，不是可修改的运行对象 |
-| cursor | 调用方上次看到输出的位置，用来避免反复返回同一段内容 |
-| owner session | 创建或拥有这项工作的 durable session，也是寻址授权条件 |
+| 术语          | 实际含义                                                        |
+| ------------- | --------------------------------------------------------------- |
+| producer      | 真正创建并运行工作的模块，例如 Terminal provider 或 TaskManager |
+| job           | 一项已经创建、可能持续一段时间的工作                            |
+| control plane | 不亲自执行工作，只负责统一查状态和转发控制动作的这一层          |
+| snapshot      | 某一时刻的只读状态照片，不是可修改的运行对象                    |
+| cursor        | 调用方上次看到输出的位置，用来避免反复返回同一段内容            |
+| owner session | 创建或拥有这项工作的 durable session，也是寻址授权条件          |
 
 ## 架构与所有权
 
@@ -77,13 +77,13 @@ flowchart LR
   Service --> Workflow
 ```
 
-| Job kind | 执行与原始状态所有者 | Jobs 做什么 |
-|---|---|---|
-| `terminal` | `LocalTerminalProvider` | 转换状态、读 sequence 输出、转发输入和终止 |
-| `shell` | `TaskManager`，持久状态投影到 `SessionTaskRecord` | 读输出、等待、取消 |
-| `agent` | `TaskManager` 或 child session bridge | 读输出、等待、继续输入、取消 |
-| `dream` | `TaskManager` | 读输出、等待、取消 |
-| `workflow` | `WorkflowRunStore` 和 Workflow scheduler | 读结构化进度、等待、取消 |
+| Job kind   | 执行与原始状态所有者                              | Jobs 做什么                                |
+| ---------- | ------------------------------------------------- | ------------------------------------------ |
+| `terminal` | `LocalTerminalProvider`                           | 转换状态、读 sequence 输出、转发输入和终止 |
+| `shell`    | `TaskManager`，持久状态投影到 `SessionTaskRecord` | 读输出、等待、取消                         |
+| `agent`    | `TaskManager` 或 child session bridge             | 读输出、等待、继续输入、取消               |
+| `dream`    | `TaskManager`                                     | 读输出、等待、取消                         |
+| `workflow` | `WorkflowRunStore` 和 Workflow scheduler          | 读结构化进度、等待、取消                   |
 
 核心约束：Jobs 可以聚合和路由，但不能成为第二个执行器或第二份持久状态。
 
@@ -91,12 +91,12 @@ flowchart LR
 
 创建仍由最了解资源参数的 producer 完成：
 
-| 要创建的工作 | 创建入口 | 创建后控制 |
-|---|---|---|
-| 持久交互终端 | `TerminalOpen` | `Job*` |
-| 后台 shell | `TaskCreate` 或对应 task API | `Job*` |
-| child Agent | `Agent` | `Job*` |
-| Workflow | Workflow run | `Job*` |
+| 要创建的工作 | 创建入口                     | 创建后控制 |
+| ------------ | ---------------------------- | ---------- |
+| 持久交互终端 | `TerminalOpen`               | `Job*`     |
+| 后台 shell   | `TaskCreate` 或对应 task API | `Job*`     |
+| child Agent  | `Agent`                      | `Job*`     |
+| Workflow     | Workflow run                 | `Job*`     |
 
 这样做的原因很具体：创建 Terminal 需要 shell、cwd、行列数和 runtime；创建 Workflow 需要任务图和并发规则。这些参数无法被一个通用 `JobCreate` 清楚表达。
 
@@ -111,7 +111,12 @@ interface JobSnapshot {
   label: string;
   ownerSession: string;
   status: "running" | "stopping" | "completed" | "killed" | "failed";
-  capabilities: { read: boolean; wait: boolean; send: boolean; cancel: boolean };
+  capabilities: {
+    read: boolean;
+    wait: boolean;
+    send: boolean;
+    cancel: boolean;
+  };
   cwd: string;
   startedAt: number;
   updatedAt: number;
@@ -146,13 +151,13 @@ stateDiagram-v2
 
 状态含义：
 
-| 状态 | 大白话含义 |
-|---|---|
-| `running` | 工作仍可能继续产生输出或接受操作 |
-| `stopping` | 已收到取消请求，但进程或资源还没有完全释放 |
-| `completed` | 正常完成 |
-| `killed` | 因取消或中断结束 |
-| `failed` | 执行或清理失败 |
+| 状态        | 大白话含义                                 |
+| ----------- | ------------------------------------------ |
+| `running`   | 工作仍可能继续产生输出或接受操作           |
+| `stopping`  | 已收到取消请求，但进程或资源还没有完全释放 |
+| `completed` | 正常完成                                   |
+| `killed`    | 因取消或中断结束                           |
+| `failed`    | 执行或清理失败                             |
 
 `stopping` 和 `killed` 不能合并。前者表示“正在关”，后者表示“已经关完”；只有资源实际释放后才能报告 `killed`。
 
@@ -168,13 +173,13 @@ stateDiagram-v2
 
 模型侧的统一控制面就是下面五个工具。daemon 使用持久化 `DaemonJobService`；standalone SDK 在调用方没有注入外部 host 时自动创建 `LocalAgentJobHost`，因此两种运行方式都会注册这五个工具。
 
-| 工具 | 输入重点 | 返回重点 | 支持范围 |
-|---|---|---|---|
-| `JobList` | 可选 `kinds/statuses/时间/includeFinished/limit` | owner session 的 `JobSnapshot[]` 和返回窗口信息 | Terminal、shell、Agent、dream、Workflow |
-| `JobRead` | `jobId`、可选 `after/maxChars` | `text/cursor/truncated/snapshot/details?` | 所有 Job |
-| `JobWait` | `jobIds[]`、`timeoutSeconds`、可选逐 Job cursor | 每个 Job 的独立 wait 结果或错误 | 所有 Job |
-| `JobSend` | `jobId/data` | 已发送确认 | running Terminal；未取消且会话可恢复的 Agent |
-| `JobCancel` | `jobId`、可选 `reason` | 取消后的最新快照 | 当前快照声明 `cancel: true` 的 Job |
+| 工具        | 输入重点                                         | 返回重点                                        | 支持范围                                     |
+| ----------- | ------------------------------------------------ | ----------------------------------------------- | -------------------------------------------- |
+| `JobList`   | 可选 `kinds/statuses/时间/includeFinished/limit` | owner session 的 `JobSnapshot[]` 和返回窗口信息 | Terminal、shell、Agent、dream、Workflow      |
+| `JobRead`   | `jobId`、可选 `after/maxChars`                   | `text/cursor/truncated/snapshot/details?`       | 所有 Job                                     |
+| `JobWait`   | `jobIds[]`、`timeoutSeconds`、可选逐 Job cursor  | 每个 Job 的独立 wait 结果或错误                 | 所有 Job                                     |
+| `JobSend`   | `jobId/data`                                     | 已发送确认                                      | running Terminal；未取消且会话可恢复的 Agent |
+| `JobCancel` | `jobId`、可选 `reason`                           | 取消后的最新快照                                | 当前快照声明 `cancel: true` 的 Job           |
 
 推荐调用路径：
 
@@ -218,7 +223,7 @@ JobCancel({ jobId, reason: "no longer needed" })
 - `JobWait` timeout 和调用方中断都只结束本次等待，不隐式调用 `JobCancel`。
 - `JobSend` 会在服务端重新检查当前类型与状态，不能靠旧快照绕过能力边界。
 - `JobWait` 会并发等待最多 32 个 ID；某个 ID 不存在时只在对应 result 返回 `error`，不会遮住其他 Job 的结果。
-- Cron 是“将来何时启动命令”的计划，不是已经运行的 Job，不进入这五个工具的聚合范围。
+- Scheduled Task 是“将来何时启动 Agent”的计划，不是已经运行的 Job，不进入这五个工具的聚合范围。
 - `Bash` 是等待命令返回的一次性调用；需要后台运行或长期交互时使用 `TaskCreate` 或 `TerminalOpen`。
 
 ### JobList
@@ -298,12 +303,12 @@ JobWait({
 
 统一字段不代表所有 producer 的输出存储完全相同：
 
-| Producer | cursor 实际表示什么 | `after` 后返回什么 |
-|---|---|---|
-| Terminal | transcript chunk sequence | 真正新增的 chunk |
-| Task | durable task `updatedAt` | 有更新时返回当前输出尾部，无更新返回空文本 |
-| Workflow | workflow snapshot `updatedAt` | 有更新时返回当前结构化快照，无更新返回空文本 |
-| standalone child/Task | 当前结果文本长度 | 返回该字符位置之后的文本 |
+| Producer              | cursor 实际表示什么           | `after` 后返回什么                           |
+| --------------------- | ----------------------------- | -------------------------------------------- |
+| Terminal              | transcript chunk sequence     | 真正新增的 chunk                             |
+| Task                  | durable task `updatedAt`      | 有更新时返回当前输出尾部，无更新返回空文本   |
+| Workflow              | workflow snapshot `updatedAt` | 有更新时返回当前结构化快照，无更新返回空文本 |
+| standalone child/Task | 当前结果文本长度              | 返回该字符位置之后的文本                     |
 
 因此调用方必须把 `text + cursor + truncated + snapshot` 一起处理，不能假设所有 text 都是可直接拼接的增量日志。Terminal text 可以按 cursor 追加；Task 和 Workflow text 是“更新后的当前视图”。
 
@@ -337,17 +342,17 @@ HTTP `/jobs` 由 daemon Bearer token 保护。HTTP 里的 `sessionId` 用于选�
 
 ## 当前代码入口
 
-| 位置 | 责任 |
-|---|---|
-| `packages/jobs/src/index.ts` | 可移植类型和 `AgentJobHost` 契约 |
-| `packages/server/src/jobs/daemon-job-service.ts` | owner 校验、聚合、状态转换、控制路由 |
-| `packages/tools/src/job/job-tools.ts` | 模型可调用的五个 `Job*` 工具 |
-| `packages/tools/src/job/local-job-host.ts` | standalone SDK 的 child、TaskManager、Workflow 本地聚合 |
-| `packages/server/src/http/routes/job.ts` | `/jobs` HTTP API |
-| `packages/client/src/transport/http-client.ts` | TypeScript HTTP client |
-| `packages/terminal-node/src/local-terminal-provider.ts` | Terminal 输出、等待和真实退出生命周期 |
-| `packages/server/src/http/session/session-task-bridge.ts` | TaskManager 到 durable task 的持续投影 |
-| `packages/coordinator/src/workflow/store.ts` | Workflow 快照、active run 取消和迟到写回保护 |
+| 位置                                                      | 责任                                                    |
+| --------------------------------------------------------- | ------------------------------------------------------- |
+| `packages/jobs/src/index.ts`                              | 可移植类型和 `AgentJobHost` 契约                        |
+| `packages/server/src/jobs/daemon-job-service.ts`          | owner 校验、聚合、状态转换、控制路由                    |
+| `packages/tools/src/job/job-tools.ts`                     | 模型可调用的五个 `Job*` 工具                            |
+| `packages/tools/src/job/local-job-host.ts`                | standalone SDK 的 child、TaskManager、Workflow 本地聚合 |
+| `packages/server/src/http/routes/job.ts`                  | `/jobs` HTTP API                                        |
+| `packages/client/src/transport/http-client.ts`            | TypeScript HTTP client                                  |
+| `packages/terminal-node/src/local-terminal-provider.ts`   | Terminal 输出、等待和真实退出生命周期                   |
+| `packages/server/src/http/session/session-task-bridge.ts` | TaskManager 到 durable task 的持续投影                  |
+| `packages/coordinator/src/workflow/store.ts`              | Workflow 快照、active run 取消和迟到写回保护            |
 
 ## 已知边界
 
