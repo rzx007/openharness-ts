@@ -12,21 +12,21 @@ import type {
   AdmitPromptInput,
   AppendEventInput,
   AppendMessagePartDeltaInput,
-  CreateCronRunInput,
   CreateMessageInput,
   CreatePermissionRequestInput,
+  CreateScheduledRunInput,
+  CreateScheduledTaskInput,
   CreateRunInput,
   CreateSessionTaskInput,
   CreateSessionInput,
-  CronJobRecord,
-  CronRunRecord,
-  CronRunStatus,
   ListEventsOptions,
   ListMessagePartsOptions,
   ListMessagesOptions,
   ListPermissionRequestsOptions,
   ListSessionsOptions,
   PermissionRequestRecord,
+  ScheduledRunRecord,
+  ScheduledTaskRecord,
   ProjectRecord,
   ReplyPermissionInput,
   SessionMessagePartRecord,
@@ -37,9 +37,9 @@ import type {
   SessionRunRecord,
   SessionTaskRecord,
   SessionStateSnapshot,
-  UpsertCronJobInput,
   UpsertMessagePartInput,
-  UpdateCronJobInput,
+  UpdateScheduledRunInput,
+  UpdateScheduledTaskInput,
   UpdateRunInput,
   UpdateSessionTaskInput,
   UpdateSessionInput,
@@ -56,8 +56,6 @@ import {
   assertSession,
   clone,
   cloneMutations,
-  cronJobFromRow,
-  cronRunFromRow,
   decode,
   emptyMutations,
   emptyState,
@@ -66,9 +64,10 @@ import {
   isTerminalRunStatus,
   maxSeq,
   now,
+  scheduledRunFromRow,
+  scheduledTaskFromRow,
   type SessionStoreOptions,
   type SessionState,
-  type StoreMutations,
 } from "./store-state.js";
 
 export type { SessionStoreOptions } from "./store-state.js";
@@ -289,217 +288,242 @@ export class SessionStore {
     return this.getProject(projectId)!;
   }
 
-  upsertCronJob(input: UpsertCronJobInput): CronJobRecord {
-    const existing = this.getCronJobByName(input.name);
+  createScheduledTask(input: CreateScheduledTaskInput): ScheduledTaskRecord {
     const timestamp = now();
-    const record: CronJobRecord = {
-      id: existing?.id ?? input.id ?? randomUUID(),
-      name: input.name,
-      expression: input.expression,
-      command: input.command,
-      cwd: input.cwd,
-      ...(input.timezone ? { timezone: input.timezone } : {}),
-      enabled: input.enabled ?? existing?.enabled ?? true,
-      ...(existing?.lastRunAt ? { lastRunAt: existing.lastRunAt } : {}),
-      ...(input.nextRunAt ? { nextRunAt: input.nextRunAt } : {}),
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-    };
+    const id = input.id ?? randomUUID();
     this.database
       .prepare(
         `
-      INSERT INTO cron_job (
-        id, name, expression, command, cwd, timezone, enabled,
-        last_run_at, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(name) DO UPDATE SET
-        expression = excluded.expression,
-        command = excluded.command,
-        cwd = excluded.cwd,
-        timezone = excluded.timezone,
-        enabled = excluded.enabled,
-        next_run_at = excluded.next_run_at,
-        updated_at = excluded.updated_at
-    `,
+        INSERT INTO scheduled_task (
+          id, name, description, prompt, recurrence, recurrence_format, timezone,
+          status, destination, session_id, project_paths_json, execution_mode,
+          model, effort, skill_names_json, plugin_names_json, permission_profile_json,
+          overlap_policy, missed_run_policy, stop_policy_json, created_by,
+          created_from_session_id, last_run_at, next_run_at, run_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?)
+      `,
       )
       .run(
-        record.id,
-        record.name,
-        record.expression,
-        record.command,
-        record.cwd,
-        record.timezone ?? null,
-        record.enabled ? 1 : 0,
-        record.lastRunAt ?? null,
-        record.nextRunAt ?? null,
-        record.createdAt,
-        record.updatedAt,
+        id,
+        input.name,
+        input.description ?? null,
+        input.prompt,
+        input.recurrence,
+        input.recurrenceFormat,
+        input.timezone,
+        input.status ?? "active",
+        input.destination,
+        input.sessionId ?? null,
+        encode(input.projectPaths ?? []),
+        input.executionMode ?? "local",
+        input.model ?? null,
+        input.effort ?? null,
+        encode(input.skillNames ?? []),
+        encode(input.pluginNames ?? []),
+        encode(input.permissionProfile ?? { mode: "workspace_write" }),
+        input.overlapPolicy ?? "skip",
+        input.missedRunPolicy ?? "skip",
+        input.stopPolicy ? encode(input.stopPolicy) : null,
+        input.createdBy ?? "user",
+        input.createdFromSessionId ?? null,
+        input.nextRunAt ?? null,
+        timestamp,
+        timestamp,
       );
-    return this.getCronJobByName(record.name)!;
+    return this.getScheduledTask(id)!;
   }
 
-  getCronJob(id: string): CronJobRecord | undefined {
+  getScheduledTask(id: string): ScheduledTaskRecord | undefined {
     const row = this.database
-      .prepare("SELECT * FROM cron_job WHERE id = ?")
+      .prepare("SELECT * FROM scheduled_task WHERE id = ?")
       .get(id) as Record<string, unknown> | undefined;
-    return row ? cronJobFromRow(row) : undefined;
+    return row ? scheduledTaskFromRow(row) : undefined;
   }
 
-  getCronJobByName(name: string): CronJobRecord | undefined {
-    const row = this.database
-      .prepare("SELECT * FROM cron_job WHERE name = ?")
-      .get(name) as Record<string, unknown> | undefined;
-    return row ? cronJobFromRow(row) : undefined;
+  listScheduledTasks(
+    options: { status?: ScheduledTaskRecord["status"] } = {},
+  ): ScheduledTaskRecord[] {
+    const rows = options.status
+      ? this.database
+          .prepare(
+            "SELECT * FROM scheduled_task WHERE status = ? ORDER BY created_at DESC",
+          )
+          .all(options.status)
+      : this.database
+          .prepare("SELECT * FROM scheduled_task ORDER BY created_at DESC")
+          .all();
+    return (rows as Array<Record<string, unknown>>).map(scheduledTaskFromRow);
   }
 
-  listCronJobs(): CronJobRecord[] {
-    return (
-      this.database
-        .prepare("SELECT * FROM cron_job ORDER BY name")
-        .all() as Array<Record<string, unknown>>
-    ).map(cronJobFromRow);
-  }
-
-  updateCronJob(id: string, patch: UpdateCronJobInput): CronJobRecord {
-    const current = this.getCronJob(id);
-    if (!current) throw new Error(`Cron job not found: ${id}`);
-    const updated: CronJobRecord = {
+  updateScheduledTask(
+    id: string,
+    patch: UpdateScheduledTaskInput,
+  ): ScheduledTaskRecord {
+    const current = this.getScheduledTask(id);
+    if (!current) throw new Error(`Scheduled task not found: ${id}`);
+    const updated: ScheduledTaskRecord = {
       ...current,
-      ...(patch.expression !== undefined
-        ? { expression: patch.expression }
-        : {}),
-      ...(patch.command !== undefined ? { command: patch.command } : {}),
-      ...(patch.cwd !== undefined ? { cwd: patch.cwd } : {}),
-      ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+      ...withoutUndefined(patch),
       updatedAt: now(),
-    };
-    if (patch.timezone !== undefined) {
-      if (patch.timezone === null) delete updated.timezone;
-      else updated.timezone = patch.timezone;
-    }
-    if (patch.lastRunAt !== undefined) {
-      if (patch.lastRunAt === null) delete updated.lastRunAt;
-      else updated.lastRunAt = patch.lastRunAt;
-    }
-    if (patch.nextRunAt !== undefined) {
-      if (patch.nextRunAt === null) delete updated.nextRunAt;
-      else updated.nextRunAt = patch.nextRunAt;
-    }
+    } as ScheduledTaskRecord;
+    if (patch.lastRunAt === null) delete updated.lastRunAt;
+    if (patch.nextRunAt === null) delete updated.nextRunAt;
     this.database
       .prepare(
         `
-      UPDATE cron_job SET expression = ?, command = ?, cwd = ?, timezone = ?, enabled = ?,
-        last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?
-    `,
+        UPDATE scheduled_task SET
+          name = ?, description = ?, prompt = ?, recurrence = ?, recurrence_format = ?,
+          timezone = ?, status = ?, destination = ?, session_id = ?, project_paths_json = ?,
+          execution_mode = ?, model = ?, effort = ?, skill_names_json = ?, plugin_names_json = ?,
+          permission_profile_json = ?, overlap_policy = ?, missed_run_policy = ?, stop_policy_json = ?,
+          created_by = ?, created_from_session_id = ?, last_run_at = ?, next_run_at = ?,
+          run_count = ?, updated_at = ? WHERE id = ?
+      `,
       )
       .run(
-        updated.expression,
-        updated.command,
-        updated.cwd,
-        updated.timezone ?? null,
-        updated.enabled ? 1 : 0,
+        updated.name,
+        updated.description ?? null,
+        updated.prompt,
+        updated.recurrence,
+        updated.recurrenceFormat,
+        updated.timezone,
+        updated.status,
+        updated.destination,
+        updated.sessionId ?? null,
+        encode(updated.projectPaths),
+        updated.executionMode,
+        updated.model ?? null,
+        updated.effort ?? null,
+        encode(updated.skillNames),
+        encode(updated.pluginNames),
+        encode(updated.permissionProfile),
+        updated.overlapPolicy,
+        updated.missedRunPolicy,
+        updated.stopPolicy ? encode(updated.stopPolicy) : null,
+        updated.createdBy,
+        updated.createdFromSessionId ?? null,
         updated.lastRunAt ?? null,
         updated.nextRunAt ?? null,
+        updated.runCount,
         updated.updatedAt,
         id,
       );
-    return updated;
+    return this.getScheduledTask(id)!;
   }
 
-  deleteCronJob(id: string): boolean {
-    return (
-      this.database.prepare("DELETE FROM cron_job WHERE id = ?").run(id)
-        .changes > 0
-    );
-  }
-
-  createCronRun(input: CreateCronRunInput): CronRunRecord {
-    const record: CronRunRecord = {
-      id: input.id ?? randomUUID(),
-      jobId: input.jobId,
-      jobName: input.jobName,
-      cause: input.cause,
-      status: "running",
-      startedAt: now(),
-    };
-    this.database
-      .prepare(
-        `
-      INSERT INTO cron_run (id, job_id, job_name, cause, status, started_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `,
-      )
-      .run(
-        record.id,
-        record.jobId,
-        record.jobName,
-        record.cause,
-        record.status,
-        record.startedAt,
+  deleteScheduledTask(id: string): boolean {
+    return this.database.transaction(() => {
+      this.database
+        .prepare("DELETE FROM scheduled_run WHERE task_id = ?")
+        .run(id);
+      return (
+        this.database.prepare("DELETE FROM scheduled_task WHERE id = ?").run(id)
+          .changes > 0
       );
-    return record;
+    })();
   }
 
-  finishCronRun(
-    id: string,
-    result: {
-      status: Exclude<CronRunStatus, "running">;
-      output?: string;
-      error?: string;
-    },
-  ): CronRunRecord {
-    const finishedAt = now();
+  createScheduledRun(input: CreateScheduledRunInput): ScheduledRunRecord {
+    if (!this.getScheduledTask(input.taskId)) {
+      throw new Error(`Scheduled task not found: ${input.taskId}`);
+    }
+    const timestamp = now();
+    const id = input.id ?? randomUUID();
     this.database
       .prepare(
         `
-      UPDATE cron_run SET status = ?, output = ?, error = ?, finished_at = ?
-      WHERE id = ? AND status = 'running'
-    `,
+        INSERT INTO scheduled_run (
+          id, task_id, cause, status, scheduled_for, unread, created_at, updated_at
+        ) VALUES (?, ?, ?, 'queued', ?, 0, ?, ?)
+      `,
       )
       .run(
-        result.status,
-        result.output ?? null,
-        result.error ?? null,
-        finishedAt,
+        id,
+        input.taskId,
+        input.cause,
+        input.scheduledFor,
+        timestamp,
+        timestamp,
+      );
+    return this.getScheduledRun(id)!;
+  }
+
+  getScheduledRun(id: string): ScheduledRunRecord | undefined {
+    const row = this.database
+      .prepare("SELECT * FROM scheduled_run WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? scheduledRunFromRow(row) : undefined;
+  }
+
+  listScheduledRuns(
+    options: { taskId?: string; unread?: boolean; limit?: number } = {},
+  ): ScheduledRunRecord[] {
+    const limit = Math.min(500, Math.max(1, options.limit ?? 50));
+    let sql = "SELECT * FROM scheduled_run";
+    const conditions: string[] = [];
+    const values: Array<string | number> = [];
+    if (options.taskId) {
+      conditions.push("task_id = ?");
+      values.push(options.taskId);
+    }
+    if (options.unread !== undefined) {
+      conditions.push("unread = ?");
+      values.push(options.unread ? 1 : 0);
+    }
+    if (conditions.length > 0) sql += ` WHERE ${conditions.join(" AND ")}`;
+    sql += " ORDER BY created_at DESC LIMIT ?";
+    values.push(limit);
+    return (
+      this.database.prepare(sql).all(...values) as Array<
+        Record<string, unknown>
+      >
+    ).map(scheduledRunFromRow);
+  }
+
+  updateScheduledRun(
+    id: string,
+    patch: UpdateScheduledRunInput,
+  ): ScheduledRunRecord {
+    const current = this.getScheduledRun(id);
+    if (!current) throw new Error(`Scheduled run not found: ${id}`);
+    const updated = {
+      ...current,
+      ...withoutUndefined(patch),
+      updatedAt: now(),
+    } as ScheduledRunRecord;
+    this.database
+      .prepare(
+        `
+        UPDATE scheduled_run SET status = ?, session_id = ?, run_id = ?, summary = ?,
+          error = ?, unread = ?, attention_reason = ?, started_at = ?, finished_at = ?,
+          updated_at = ? WHERE id = ?
+      `,
+      )
+      .run(
+        updated.status,
+        updated.sessionId ?? null,
+        updated.runId ?? null,
+        updated.summary ?? null,
+        updated.error ?? null,
+        updated.unread ? 1 : 0,
+        updated.attentionReason ?? null,
+        updated.startedAt ?? null,
+        updated.finishedAt ?? null,
+        updated.updatedAt,
         id,
       );
-    const row = this.database
-      .prepare("SELECT * FROM cron_run WHERE id = ?")
-      .get(id) as Record<string, unknown> | undefined;
-    if (!row) throw new Error(`Cron run not found: ${id}`);
-    return cronRunFromRow(row);
+    return this.getScheduledRun(id)!;
   }
 
-  listCronRuns(
-    options: { jobId?: string; jobName?: string; limit?: number } = {},
-  ): CronRunRecord[] {
-    const limit = Math.min(500, Math.max(1, options.limit ?? 50));
-    const rows = options.jobId
-      ? this.database
-          .prepare(
-            "SELECT * FROM cron_run WHERE job_id = ? ORDER BY started_at DESC LIMIT ?",
-          )
-          .all(options.jobId, limit)
-      : options.jobName
-        ? this.database
-            .prepare(
-              "SELECT * FROM cron_run WHERE job_name = ? ORDER BY started_at DESC LIMIT ?",
-            )
-            .all(options.jobName, limit)
-        : this.database
-            .prepare("SELECT * FROM cron_run ORDER BY started_at DESC LIMIT ?")
-            .all(limit);
-    return (rows as Array<Record<string, unknown>>).map(cronRunFromRow);
-  }
-
-  interruptActiveCronRuns(reason: string): number {
+  interruptActiveScheduledRuns(reason: string): number {
     return this.database
       .prepare(
         `
-      UPDATE cron_run SET status = 'interrupted', error = ?, finished_at = ? WHERE status = 'running'
-    `,
+        UPDATE scheduled_run SET status = 'interrupted', error = ?, unread = 1,
+          finished_at = ?, updated_at = ? WHERE status IN ('queued', 'running')
+      `,
       )
-      .run(reason, now()).changes;
+      .run(reason, now(), now()).changes;
   }
 
   /**
@@ -2076,6 +2100,12 @@ export class SessionStore {
       if (session) updateSession.run(session.updatedAt, session.id);
     }
   }
+}
+
+function withoutUndefined<T extends object>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as Partial<T>;
 }
 
 function projectFromRow(row: Record<string, unknown>): ProjectRecord {

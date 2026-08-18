@@ -162,61 +162,136 @@ export interface SessionStateSnapshot {
   permissions: PermissionRequestRecord[];
 }
 
-export interface CronJobRecord {
+export type ScheduledTaskStatus = "active" | "paused" | "completed";
+export type ScheduledTaskDestination = "standalone" | "chat";
+export type ScheduledTaskExecutionMode = "local" | "worktree";
+export type ScheduledRecurrenceFormat = "rrule" | "once";
+export type ScheduledOverlapPolicy = "skip" | "queue";
+export type ScheduledMissedRunPolicy = "skip" | "run_once";
+
+export interface ScheduledPermissionProfile {
+  mode: "read_only" | "workspace_write" | "full_access";
+  network?: boolean;
+  allowedTools?: string[];
+  deniedTools?: string[];
+}
+
+export interface ScheduledStopPolicy {
+  runOnce?: boolean;
+  maxRuns?: number;
+  stopWhenCompleted?: boolean;
+  expiresAt?: number;
+}
+
+export interface ScheduledTaskRecord {
   id: string;
   name: string;
-  expression: string;
-  command: string;
-  cwd: string;
-  timezone?: string;
-  enabled: boolean;
+  description?: string;
+  prompt: string;
+  recurrence: string;
+  recurrenceFormat: ScheduledRecurrenceFormat;
+  timezone: string;
+  status: ScheduledTaskStatus;
+  destination: ScheduledTaskDestination;
+  sessionId?: string;
+  projectPaths: string[];
+  executionMode: ScheduledTaskExecutionMode;
+  model?: string;
+  effort?: string;
+  skillNames: string[];
+  pluginNames: string[];
+  permissionProfile: ScheduledPermissionProfile;
+  overlapPolicy: ScheduledOverlapPolicy;
+  missedRunPolicy: ScheduledMissedRunPolicy;
+  stopPolicy?: ScheduledStopPolicy;
+  createdBy: "user" | "agent" | "migration";
+  createdFromSessionId?: string;
   lastRunAt?: number;
   nextRunAt?: number;
+  runCount: number;
   createdAt: number;
   updatedAt: number;
 }
 
-export type CronRunStatus = "running" | "succeeded" | "failed" | "interrupted";
-export type CronRunCause = "scheduled" | "manual";
+export type ScheduledRunCause = "scheduled" | "manual" | "missed_run";
+export type ScheduledRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "interrupted"
+  | "needs_attention"
+  | "skipped";
 
-export interface CronRunRecord {
+export interface ScheduledRunRecord {
   id: string;
-  jobId: string;
-  jobName: string;
-  cause: CronRunCause;
-  status: CronRunStatus;
-  output?: string;
+  taskId: string;
+  cause: ScheduledRunCause;
+  status: ScheduledRunStatus;
+  scheduledFor: number;
+  sessionId?: string;
+  runId?: string;
+  summary?: string;
   error?: string;
-  startedAt: number;
+  unread: boolean;
+  attentionReason?: string;
+  createdAt: number;
+  startedAt?: number;
   finishedAt?: number;
+  updatedAt: number;
 }
 
-export interface UpsertCronJobInput {
+export interface CreateScheduledTaskInput {
   id?: string;
   name: string;
-  expression: string;
-  command: string;
-  cwd: string;
-  timezone?: string;
-  enabled?: boolean;
+  description?: string;
+  prompt: string;
+  recurrence: string;
+  recurrenceFormat: ScheduledRecurrenceFormat;
+  timezone: string;
+  status?: ScheduledTaskStatus;
+  destination: ScheduledTaskDestination;
+  sessionId?: string;
+  projectPaths?: string[];
+  executionMode?: ScheduledTaskExecutionMode;
+  model?: string;
+  effort?: string;
+  skillNames?: string[];
+  pluginNames?: string[];
+  permissionProfile?: ScheduledPermissionProfile;
+  overlapPolicy?: ScheduledOverlapPolicy;
+  missedRunPolicy?: ScheduledMissedRunPolicy;
+  stopPolicy?: ScheduledStopPolicy;
+  createdBy?: ScheduledTaskRecord["createdBy"];
+  createdFromSessionId?: string;
   nextRunAt?: number;
 }
 
-export interface UpdateCronJobInput {
-  expression?: string;
-  command?: string;
-  cwd?: string;
-  timezone?: string | null;
-  enabled?: boolean;
+export type UpdateScheduledTaskInput = Partial<
+  Omit<CreateScheduledTaskInput, "id" | "nextRunAt">
+> & {
   lastRunAt?: number | null;
   nextRunAt?: number | null;
+  runCount?: number;
+};
+
+export interface CreateScheduledRunInput {
+  id?: string;
+  taskId: string;
+  cause: ScheduledRunCause;
+  scheduledFor: number;
 }
 
-export interface CreateCronRunInput {
-  id?: string;
-  jobId: string;
-  jobName: string;
-  cause: CronRunCause;
+export interface UpdateScheduledRunInput {
+  status?: ScheduledRunStatus;
+  sessionId?: string;
+  runId?: string;
+  summary?: string;
+  error?: string;
+  unread?: boolean;
+  attentionReason?: string;
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 export interface CreateSessionInput {

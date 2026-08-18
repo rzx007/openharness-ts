@@ -1,8 +1,7 @@
 import type {
-  CronJobRecord,
-  CronRunRecord,
-  CronRunStatus,
   PermissionRequestRecord,
+  ScheduledRunRecord,
+  ScheduledTaskRecord,
   SessionEventRecord,
   SessionInputRecord,
   SessionMessagePartRecord,
@@ -74,7 +73,7 @@ export function encode(value: unknown): string {
 }
 
 export function decode(value: string | null): Record<string, unknown> {
-  return value ? JSON.parse(value) as Record<string, unknown> : {};
+  return value ? (JSON.parse(value) as Record<string, unknown>) : {};
 }
 
 export function isDurableEvent(event: SessionEventRecord): boolean {
@@ -111,8 +110,12 @@ export function cloneMutations(value: StoreMutations): StoreMutations {
   };
 }
 
-export function isTerminalRunStatus(status: SessionRunRecord["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "interrupted";
+export function isTerminalRunStatus(
+  status: SessionRunRecord["status"],
+): boolean {
+  return (
+    status === "completed" || status === "failed" || status === "interrupted"
+  );
 }
 
 export function maxSeq<T extends { sessionId: string; seq: number }>(
@@ -126,7 +129,10 @@ export function maxSeq<T extends { sessionId: string; seq: number }>(
   return seq;
 }
 
-export function assertSession(state: SessionState, sessionId: string): SessionRecord {
+export function assertSession(
+  state: SessionState,
+  sessionId: string,
+): SessionRecord {
   const session = state.sessions[sessionId];
   if (!session) throw new Error(`Session not found: ${sessionId}`);
   return session;
@@ -141,38 +147,87 @@ export function assertMutableSession(session: SessionRecord): void {
   }
 }
 
-export function assertMessage(state: SessionState, messageId: string): SessionMessageRecord {
+export function assertMessage(
+  state: SessionState,
+  messageId: string,
+): SessionMessageRecord {
   const message = state.messages[messageId];
   if (!message) throw new Error(`Session message not found: ${messageId}`);
   return message;
 }
 
-export function cronJobFromRow(row: Record<string, unknown>): CronJobRecord {
+export function scheduledTaskFromRow(
+  row: Record<string, unknown>,
+): ScheduledTaskRecord {
   return {
     id: row.id as string,
     name: row.name as string,
-    expression: row.expression as string,
-    command: row.command as string,
-    cwd: row.cwd as string,
-    ...(row.timezone ? { timezone: row.timezone as string } : {}),
-    enabled: row.enabled === 1,
+    ...(row.description ? { description: row.description as string } : {}),
+    prompt: row.prompt as string,
+    recurrence: row.recurrence as string,
+    recurrenceFormat:
+      row.recurrence_format as ScheduledTaskRecord["recurrenceFormat"],
+    timezone: row.timezone as string,
+    status: row.status as ScheduledTaskRecord["status"],
+    destination: row.destination as ScheduledTaskRecord["destination"],
+    ...(row.session_id ? { sessionId: row.session_id as string } : {}),
+    projectPaths: parseJson<string[]>(row.project_paths_json, []),
+    executionMode: row.execution_mode as ScheduledTaskRecord["executionMode"],
+    ...(row.model ? { model: row.model as string } : {}),
+    ...(row.effort ? { effort: row.effort as string } : {}),
+    skillNames: parseJson<string[]>(row.skill_names_json, []),
+    pluginNames: parseJson<string[]>(row.plugin_names_json, []),
+    permissionProfile: parseJson<ScheduledTaskRecord["permissionProfile"]>(
+      row.permission_profile_json,
+      { mode: "workspace_write" },
+    ),
+    overlapPolicy: row.overlap_policy as ScheduledTaskRecord["overlapPolicy"],
+    missedRunPolicy:
+      row.missed_run_policy as ScheduledTaskRecord["missedRunPolicy"],
+    ...(row.stop_policy_json
+      ? { stopPolicy: parseJson(row.stop_policy_json, {}) }
+      : {}),
+    createdBy: row.created_by as ScheduledTaskRecord["createdBy"],
+    ...(row.created_from_session_id
+      ? { createdFromSessionId: row.created_from_session_id as string }
+      : {}),
     ...(row.last_run_at ? { lastRunAt: row.last_run_at as number } : {}),
     ...(row.next_run_at ? { nextRunAt: row.next_run_at as number } : {}),
+    runCount: row.run_count as number,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   };
 }
 
-export function cronRunFromRow(row: Record<string, unknown>): CronRunRecord {
+export function scheduledRunFromRow(
+  row: Record<string, unknown>,
+): ScheduledRunRecord {
   return {
     id: row.id as string,
-    jobId: row.job_id as string,
-    jobName: row.job_name as string,
-    cause: row.cause as CronRunRecord["cause"],
-    status: row.status as CronRunStatus,
-    ...(row.output ? { output: row.output as string } : {}),
+    taskId: row.task_id as string,
+    cause: row.cause as ScheduledRunRecord["cause"],
+    status: row.status as ScheduledRunRecord["status"],
+    scheduledFor: row.scheduled_for as number,
+    ...(row.session_id ? { sessionId: row.session_id as string } : {}),
+    ...(row.run_id ? { runId: row.run_id as string } : {}),
+    ...(row.summary ? { summary: row.summary as string } : {}),
     ...(row.error ? { error: row.error as string } : {}),
-    startedAt: row.started_at as number,
+    unread: row.unread === 1,
+    ...(row.attention_reason
+      ? { attentionReason: row.attention_reason as string }
+      : {}),
+    createdAt: row.created_at as number,
+    ...(row.started_at ? { startedAt: row.started_at as number } : {}),
     ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}),
+    updatedAt: row.updated_at as number,
   };
+}
+
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (typeof value !== "string") return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
 }

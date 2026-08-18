@@ -17,17 +17,14 @@ export type {
   AdmitPromptInput,
   AppendEventInput,
   AppendMessagePartDeltaInput,
-  CreateCronRunInput,
   CreateMessageInput,
   CreatePermissionRequestInput,
+  CreateScheduledRunInput,
+  CreateScheduledTaskInput,
   CreateRunInput,
   CreateSessionTaskInput,
   CreateSessionInput,
   InputDelivery,
-  CronJobRecord,
-  CronRunCause,
-  CronRunRecord,
-  CronRunStatus,
   ListEventsOptions,
   ListMessagePartsOptions,
   ListMessagesOptions,
@@ -37,6 +34,18 @@ export type {
   PermissionStatus,
   ReplyPermissionInput,
   RunStatus,
+  ScheduledMissedRunPolicy,
+  ScheduledOverlapPolicy,
+  ScheduledPermissionProfile,
+  ScheduledRecurrenceFormat,
+  ScheduledRunCause,
+  ScheduledRunRecord,
+  ScheduledRunStatus,
+  ScheduledStopPolicy,
+  ScheduledTaskDestination,
+  ScheduledTaskExecutionMode,
+  ScheduledTaskRecord,
+  ScheduledTaskStatus,
   SessionMessagePartRecord,
   SessionMessagePartStatus,
   SessionMessagePartType,
@@ -51,8 +60,8 @@ export type {
   SessionStatus,
   SessionStateSnapshot,
   UpsertMessagePartInput,
-  UpsertCronJobInput,
-  UpdateCronJobInput,
+  UpdateScheduledRunInput,
+  UpdateScheduledTaskInput,
   UpdateRunInput,
   UpdateSessionTaskInput,
   UpdateSessionInput,
@@ -75,19 +84,12 @@ export {
 } from "./session";
 
 export {
-  CronScheduler,
-  executeCronJob,
-  validateCronExpression,
-  computeNextRunTime,
-} from "./cron";
-export type {
-  CronExecutionCause,
-  CronExecutor,
-  CronJob,
-  CronTriggerOptions,
-  CronTriggerResult,
-} from "./cron";
-
+  computeNextScheduledTime,
+  parseRRule,
+  validateScheduledRecurrence,
+  type NextOccurrenceOptions,
+  type ScheduledRecurrence,
+} from "./schedules/index.js";
 export { estimateTokens } from "./token-estimation";
 export type { TokenEstimate } from "./token-estimation";
 

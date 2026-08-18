@@ -23,64 +23,99 @@ function withStore(
 }
 
 describe("SessionStore", () => {
-  it("stores Cron jobs and run history in SQLite", () => {
+  it("stores Scheduled tasks and Agent run projections in SQLite", () => {
     withStore((store, path) => {
-      const job = store.upsertCronJob({
-        id: "cron-1",
-        name: "daily-check",
-        expression: "0 9 * * *",
-        command: "echo ok",
-        cwd: process.cwd(),
-        enabled: true,
+      const task = store.createScheduledTask({
+        id: "schedule-1",
+        name: "weekday-review",
+        prompt: "Review the last day of changes and report risks.",
+        recurrence:
+          "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0",
+        recurrenceFormat: "rrule",
+        timezone: "Asia/Shanghai",
+        destination: "standalone",
+        projectPaths: [process.cwd()],
+        executionMode: "worktree",
+        skillNames: ["review"],
+        permissionProfile: { mode: "workspace_write", network: false },
+        createdBy: "agent",
         nextRunAt: 200,
       });
-      const run = store.createCronRun({
-        id: "cron-run-1",
-        jobId: job.id,
-        jobName: job.name,
+      const run = store.createScheduledRun({
+        id: "scheduled-run-1",
+        taskId: task.id,
         cause: "manual",
+        scheduledFor: 100,
       });
-      store.finishCronRun(run.id, { status: "succeeded", output: "ok" });
+      store.updateScheduledRun(run.id, {
+        status: "succeeded",
+        sessionId: "session-1",
+        runId: "agent-run-1",
+        summary: "No high-risk changes.",
+        unread: true,
+        startedAt: 110,
+        finishedAt: 150,
+      });
+      store.updateScheduledTask(task.id, {
+        lastRunAt: 150,
+        runCount: 1,
+        nextRunAt: 300,
+      });
       store.close();
 
       const reloaded = new SessionStore({ path });
-      expect(reloaded.getCronJobByName("daily-check")).toMatchObject({
-        id: "cron-1",
-        command: "echo ok",
-        enabled: true,
+      expect(reloaded.getScheduledTask(task.id)).toMatchObject({
+        name: "weekday-review",
+        destination: "standalone",
+        executionMode: "worktree",
+        projectPaths: [process.cwd()],
+        skillNames: ["review"],
+        runCount: 1,
+        nextRunAt: 300,
       });
-      expect(reloaded.listCronRuns({ jobId: job.id })).toMatchObject([
+      expect(
+        reloaded.listScheduledRuns({ taskId: task.id, unread: true }),
+      ).toMatchObject([
         {
-          id: "cron-run-1",
+          id: "scheduled-run-1",
           status: "succeeded",
-          output: "ok",
+          sessionId: "session-1",
+          runId: "agent-run-1",
+          summary: "No high-risk changes.",
+          unread: true,
         },
       ]);
       reloaded.close();
     });
   });
 
-  it("marks unfinished Cron runs as interrupted after daemon restart", () => {
+  it("interrupts unfinished Scheduled runs after daemon restart", () => {
     withStore((store) => {
-      const job = store.upsertCronJob({
-        name: "unfinished",
-        expression: "* * * * *",
-        command: "echo later",
-        cwd: process.cwd(),
+      const task = store.createScheduledTask({
+        name: "follow-up",
+        prompt: "Check deployment status.",
+        recurrence: "RRULE:FREQ=MINUTELY;INTERVAL=10",
+        recurrenceFormat: "rrule",
+        timezone: "UTC",
+        destination: "chat",
+        sessionId: "session-1",
       });
-      store.createCronRun({
-        jobId: job.id,
-        jobName: job.name,
+      const run = store.createScheduledRun({
+        taskId: task.id,
         cause: "scheduled",
+        scheduledFor: Date.now(),
+      });
+      store.updateScheduledRun(run.id, {
+        status: "running",
+        startedAt: Date.now(),
       });
 
-      expect(store.interruptActiveCronRuns("daemon restarted")).toBe(1);
-      expect(store.listCronRuns()).toMatchObject([
-        {
-          status: "interrupted",
-          error: "daemon restarted",
-        },
-      ]);
+      expect(store.interruptActiveScheduledRuns("daemon restarted")).toBe(1);
+      expect(store.getScheduledRun(run.id)).toMatchObject({
+        status: "interrupted",
+        error: "daemon restarted",
+        unread: true,
+      });
     });
   });
 
