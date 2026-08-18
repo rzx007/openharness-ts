@@ -54,6 +54,10 @@ import { SessionMoreMenu } from "./conversation-pane/session-more-menu"
 
 type SidebarProps = {
   open: boolean
+  onOpenSettings: () => void
+  onOpenScheduled: () => void
+  onOpenConversation: () => void
+  scheduledSelected: boolean
 }
 
 const secondaryNavigation = [
@@ -63,7 +67,13 @@ const secondaryNavigation = [
   { icon: PlugZap, label: "插件" },
 ]
 
-export function Sidebar({ open }: SidebarProps): React.JSX.Element {
+export function Sidebar({
+  open,
+  onOpenSettings,
+  onOpenScheduled,
+  onOpenConversation,
+  scheduledSelected,
+}: SidebarProps): React.JSX.Element {
   const projects = useDesktopSessionStore((state) => state.projects)
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const archivedSessions = useDesktopSessionStore((state) => state.archivedSessions)
@@ -102,6 +112,7 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
 
   const beginNewConversation = (project?: DesktopProject): void => {
     setArchiveMode(false)
+    onOpenConversation()
     void (async () => {
       await startNewConversation()
       if (project) await selectProject(project)
@@ -145,7 +156,10 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
   }
 
   const sessionActions: SessionActions = {
-    onOpen: (session) => void openSession(session.id),
+    onOpen: (session) => {
+      onOpenConversation()
+      void openSession(session.id)
+    },
     onRename: sessionActionsDialogs.beginRename,
     onArchive: sessionActionsDialogs.beginArchive,
     onDelete: sessionActionsDialogs.beginDelete,
@@ -206,14 +220,33 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
             label="新对话"
             onClick={() => beginNewConversation()}
           />
-          {secondaryNavigation.map(({ icon, label }) => (
-            <SidebarNavigationButton key={label} icon={icon} label={label} />
-          ))}
+          {secondaryNavigation.map(({ icon, label }) => {
+            const isScheduled = label === "已安排"
+            return (
+              <SidebarNavigationButton
+                key={label}
+                icon={icon}
+                label={label}
+                selected={isScheduled && scheduledSelected}
+                onClick={
+                  isScheduled
+                    ? () => {
+                        setArchiveMode(false)
+                        onOpenScheduled()
+                      }
+                    : undefined
+                }
+              />
+            )
+          })}
           <SidebarNavigationButton
             icon={Archive}
             label="已归档"
-            selected={archiveMode}
-            onClick={() => setArchiveMode((current) => !current)}
+            selected={archiveMode && !scheduledSelected}
+            onClick={() => {
+              onOpenConversation()
+              setArchiveMode((current) => !current)
+            }}
           />
         </nav>
 
@@ -291,17 +324,24 @@ export function Sidebar({ open }: SidebarProps): React.JSX.Element {
           </button>
         </div>
 
-        <div className="flex min-w-0 items-center border-t border-sidebar-border px-4 py-3">
-          <span className="grid size-6 place-items-center rounded-full bg-amber-400 text-[10px] font-semibold text-amber-950">
-            OH
-          </span>
-          <span className="ml-2 text-[13px] font-medium">OpenHarness</span>
+        <div className="flex min-w-0 items-center gap-2 border-t border-sidebar-border px-2 py-2">
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="打开设置"
+            className="flex h-9 min-w-0 flex-1 items-center rounded-md px-2 text-left transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            <span className="grid size-6 place-items-center rounded-full bg-amber-400 text-[10px] font-semibold text-amber-950">
+              OH
+            </span>
+            <span className="ml-2 text-[13px] font-medium">OpenHarness</span>
+          </button>
           <button
             type="button"
             title="桌面宠物"
             aria-label="显示桌面宠物"
             onClick={() => void window.desktop.pet.show()}
-            className="ml-auto grid size-7 place-items-center rounded-full bg-orange-500/15 text-orange-700 transition-colors hover:bg-orange-500/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5"
+            className="grid size-7 shrink-0 place-items-center rounded-full bg-orange-500/15 text-orange-700 transition-colors hover:bg-orange-500/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5"
           >
             <Bot />
           </button>
@@ -459,9 +499,7 @@ function SessionRow({
             : "text-sidebar-foreground/82 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         )}
       >
-        {pinned ? (
-          <Pin className="mr-1 inline size-3 -translate-y-px text-sidebar-muted" />
-        ) : null}
+        {pinned ? <Pin className="mr-1 inline size-3 -translate-y-px text-sidebar-muted" /> : null}
         {title}
       </button>
       <SessionMoreMenu

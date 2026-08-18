@@ -10,7 +10,9 @@ import {
 } from "react-resizable-panels"
 
 import { ConversationPane } from "@renderer/components/desktop/conversation-pane"
+import { ScheduledPage } from "@renderer/components/desktop/scheduled-page"
 import { Sidebar } from "@renderer/components/desktop/sidebar"
+import { SettingsContent, SettingsSidebar } from "@renderer/components/desktop/settings-page"
 import { TitleBar, type UtilityToolRequest } from "@renderer/components/desktop/title-bar"
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { UtilityPanel } from "@renderer/components/desktop/utility-panel"
@@ -47,6 +49,9 @@ export function DesktopShell(): React.JSX.Element {
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState("常规")
+  const [primaryView, setPrimaryView] = useState<"conversation" | "scheduled">("conversation")
   const [panelOpen, setPanelOpen] = useState(true)
   const [utilityMaximized, setUtilityMaximized] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
@@ -249,6 +254,7 @@ export function DesktopShell(): React.JSX.Element {
 
   const restoreSessionDestination = useCallback(
     (destination: string | null): void => {
+      setPrimaryView("conversation")
       navigationTargetRef.current = { destination }
       if (destination) void openSession(destination)
       else void startNewConversation()
@@ -274,11 +280,17 @@ export function DesktopShell(): React.JSX.Element {
       : null
 
   const openPreviousSession = useCallback((): void => {
-    if (previousSession) void openSession(previousSession.id)
+    if (previousSession) {
+      setPrimaryView("conversation")
+      void openSession(previousSession.id)
+    }
   }, [openSession, previousSession])
 
   const openNextSession = useCallback((): void => {
-    if (nextSession) void openSession(nextSession.id)
+    if (nextSession) {
+      setPrimaryView("conversation")
+      void openSession(nextSession.id)
+    }
   }, [nextSession, openSession])
 
   const applyZoomLevel = useCallback((requestedLevel: number): void => {
@@ -334,10 +346,19 @@ export function DesktopShell(): React.JSX.Element {
   )
 
   useDesktopShortcuts({
-    newConversation: () => void startNewConversation(),
-    chooseProject: () => void chooseProject(),
+    newConversation: () => {
+      setPrimaryView("conversation")
+      void startNewConversation()
+    },
+    chooseProject: () => {
+      setPrimaryView("conversation")
+      void chooseProject()
+    },
     closeConversation: () => {
-      if (activeSessionId) void startNewConversation()
+      if (activeSessionId) {
+        setPrimaryView("conversation")
+        void startNewConversation()
+      }
     },
     quit: () => void window.desktop.app.quit(),
     toggleSidebar,
@@ -368,9 +389,18 @@ export function DesktopShell(): React.JSX.Element {
         zoomLevel={zoomLevel}
         onGoBack={() => moveNavigation(-1)}
         onGoForward={() => moveNavigation(1)}
-        onNewConversation={() => void startNewConversation()}
-        onChooseProject={() => void chooseProject()}
-        onCloseConversation={() => void startNewConversation()}
+        onNewConversation={() => {
+          setPrimaryView("conversation")
+          void startNewConversation()
+        }}
+        onChooseProject={() => {
+          setPrimaryView("conversation")
+          void chooseProject()
+        }}
+        onCloseConversation={() => {
+          setPrimaryView("conversation")
+          void startNewConversation()
+        }}
         onOpenPreviousSession={openPreviousSession}
         onOpenNextSession={openNextSession}
         onToggleSidebar={toggleSidebar}
@@ -419,7 +449,21 @@ export function DesktopShell(): React.JSX.Element {
               setSidebarOpen((current) => (current === nextOpen ? current : nextOpen))
             }}
           >
-            <Sidebar open={sidebarOpen} />
+            {settingsOpen ? (
+              <SettingsSidebar
+                selectedSection={settingsSection}
+                onSelectSection={setSettingsSection}
+                onClose={() => setSettingsOpen(false)}
+              />
+            ) : (
+              <Sidebar
+                open={sidebarOpen}
+                scheduledSelected={primaryView === "scheduled"}
+                onOpenScheduled={() => setPrimaryView("scheduled")}
+                onOpenConversation={() => setPrimaryView("conversation")}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+            )}
           </Panel>
 
           <PanelResizeHandle label="调整侧边栏宽度" />
@@ -431,60 +475,71 @@ export function DesktopShell(): React.JSX.Element {
             style={{ overflow: "visible" }}
           >
             <section className="border-workspace flex h-full min-w-0 overflow-hidden rounded-tl-lg border-t border-l bg-conversation shadow-workspace">
-              <Group
-                id="desktop-workspace"
-                groupRef={workspaceGroupRef}
-                orientation="horizontal"
-                className="h-full min-h-0 w-full"
-                resizeTargetMinimumSize={resizeTargetMinimumSize}
-                defaultLayout={workspaceDefaultLayout}
-                onLayoutChanged={handleWorkspaceLayoutChanged}
-              >
-                <Panel
-                  id="conversation"
-                  panelRef={conversationPanelRef}
-                  defaultSize="100%"
-                  minSize={utilityMaximized ? 0 : conversationMinimumWidth}
-                  collapsedSize={0}
-                  collapsible
-                  className="h-full min-h-0 overflow-hidden"
-                >
-                  <ConversationPane
-                    panelOpen={panelOpen}
-                    onTogglePanel={togglePanel}
-                    onOpenFile={openWorkspaceFile}
-                    onOpenTerminal={openTerminal}
-                  />
-                </Panel>
-
-                {!utilityMaximized && <PanelResizeHandle label="调整工具面板宽度" />}
-
-                <Panel
-                  id="utility"
-                  panelRef={utilityPanelRef}
-                  defaultSize={`${defaultWorkspaceLayout.utility}%`}
-                  minSize={utilityMinimumWidth}
-                  maxSize={utilityMaximized ? "100%" : "70%"}
-                  collapsedSize={0}
-                  collapsible
-                  groupResizeBehavior="preserve-pixel-size"
-                  className="h-full min-h-0 overflow-hidden"
-                  onResize={(size) => {
-                    const nextOpen = size.inPixels > 1
-                    setPanelOpen((current) => (current === nextOpen ? current : nextOpen))
+              {settingsOpen ? (
+                <SettingsContent selectedSection={settingsSection} />
+              ) : primaryView === "scheduled" ? (
+                <ScheduledPage
+                  onStartConversation={() => {
+                    setPrimaryView("conversation")
+                    void startNewConversation()
                   }}
+                />
+              ) : (
+                <Group
+                  id="desktop-workspace"
+                  groupRef={workspaceGroupRef}
+                  orientation="horizontal"
+                  className="h-full min-h-0 w-full"
+                  resizeTargetMinimumSize={resizeTargetMinimumSize}
+                  defaultLayout={workspaceDefaultLayout}
+                  onLayoutChanged={handleWorkspaceLayoutChanged}
                 >
-                  <UtilityPanel
-                    open={panelOpen}
-                    maximized={utilityMaximized}
-                    onToggleMaximized={toggleUtilityMaximized}
-                    onClose={closeUtilityPanel}
-                    fileOpenRequest={fileOpenRequest}
-                    terminalOpenRequest={terminalOpenRequest}
-                    toolOpenRequest={toolOpenRequest}
-                  />
-                </Panel>
-              </Group>
+                  <Panel
+                    id="conversation"
+                    panelRef={conversationPanelRef}
+                    defaultSize="100%"
+                    minSize={utilityMaximized ? 0 : conversationMinimumWidth}
+                    collapsedSize={0}
+                    collapsible
+                    className="h-full min-h-0 overflow-hidden"
+                  >
+                    <ConversationPane
+                      panelOpen={panelOpen}
+                      onTogglePanel={togglePanel}
+                      onOpenFile={openWorkspaceFile}
+                      onOpenTerminal={openTerminal}
+                    />
+                  </Panel>
+
+                  {!utilityMaximized && <PanelResizeHandle label="调整工具面板宽度" />}
+
+                  <Panel
+                    id="utility"
+                    panelRef={utilityPanelRef}
+                    defaultSize={`${defaultWorkspaceLayout.utility}%`}
+                    minSize={utilityMinimumWidth}
+                    maxSize={utilityMaximized ? "100%" : "70%"}
+                    collapsedSize={0}
+                    collapsible
+                    groupResizeBehavior="preserve-pixel-size"
+                    className="h-full min-h-0 overflow-hidden"
+                    onResize={(size) => {
+                      const nextOpen = size.inPixels > 1
+                      setPanelOpen((current) => (current === nextOpen ? current : nextOpen))
+                    }}
+                  >
+                    <UtilityPanel
+                      open={panelOpen}
+                      maximized={utilityMaximized}
+                      onToggleMaximized={toggleUtilityMaximized}
+                      onClose={closeUtilityPanel}
+                      fileOpenRequest={fileOpenRequest}
+                      terminalOpenRequest={terminalOpenRequest}
+                      toolOpenRequest={toolOpenRequest}
+                    />
+                  </Panel>
+                </Group>
+              )}
             </section>
           </Panel>
         </Group>

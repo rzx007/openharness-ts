@@ -47,6 +47,13 @@ import type {
   DesktopTerminalResizeInput,
   DesktopTerminalWriteInput,
 } from "../shared/terminal-types"
+import type {
+  DesktopScheduledRun,
+  DesktopScheduledStatus,
+  DesktopScheduledTask,
+  ListDesktopScheduledRunsInput,
+  UpdateDesktopScheduledTaskInput,
+} from "../shared/schedule-types"
 
 export interface DesktopAPI {
   app: {
@@ -97,6 +104,15 @@ export interface DesktopAPI {
     kill: (terminalId: string) => Promise<void>
     list: () => Promise<DesktopTerminalRecord[]>
     onEvent: (listener: (event: DesktopTerminalEvent) => void) => () => void
+  }
+  schedules: {
+    status: () => Promise<DesktopScheduledStatus>
+    list: () => Promise<DesktopScheduledTask[]>
+    update: (id: string, input: UpdateDesktopScheduledTaskInput) => Promise<DesktopScheduledTask>
+    remove: (id: string) => Promise<void>
+    runNow: (id: string) => Promise<DesktopScheduledRun>
+    listRuns: (input: ListDesktopScheduledRunsInput) => Promise<DesktopScheduledRun[]>
+    setRunUnread: (id: string, unread: boolean) => Promise<DesktopScheduledRun>
   }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>

@@ -129,13 +129,15 @@ export function ConversationTranscript({
                   onOpenFile={onOpenFile}
                   onOpenTerminal={onOpenTerminal}
                 />
-                <AssistantMessageActions
-                  message={entry.turn.assistantMessages.at(-1)}
-                  content={messageTextContent(entry.turn.assistantParts)}
-                  disabled={running && entry === lastTurn}
-                  onCopy={onCopyAssistantMessage}
-                  onFork={onForkAssistantMessage}
-                />
+                {running && entry === lastTurn ? null : (
+                  <AssistantMessageActions
+                    message={entry.turn.assistantMessages.at(-1)}
+                    content={messageTextContent(entry.turn.assistantParts)}
+                    disabled={false}
+                    onCopy={onCopyAssistantMessage}
+                    onFork={onForkAssistantMessage}
+                  />
+                )}
               </MessageScrollerItem>
             ) : null}
             {turnFailures.map((run) => (

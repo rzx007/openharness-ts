@@ -38,6 +38,13 @@ import type {
   DesktopTerminalResizeInput,
   DesktopTerminalWriteInput,
 } from "./terminal-types"
+import type {
+  DesktopScheduledRun,
+  DesktopScheduledStatus,
+  DesktopScheduledTask,
+  ListDesktopScheduledRunsInput,
+  UpdateDesktopScheduledTaskInput,
+} from "./schedule-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -106,6 +113,14 @@ export const IpcChannels = {
   terminalRead: "terminal:read",
   terminalKill: "terminal:kill",
   terminalList: "terminal:list",
+
+  scheduleStatus: "schedule:status",
+  scheduleList: "schedule:list",
+  scheduleUpdate: "schedule:update",
+  scheduleRemove: "schedule:remove",
+  scheduleRunNow: "schedule:run-now",
+  scheduleListRuns: "schedule:list-runs",
+  scheduleSetRunUnread: "schedule:set-run-unread",
 } as const
 
 export const IpcEvents = {
@@ -315,6 +330,22 @@ export interface IpcInvokeMap {
   [IpcChannels.terminalList]: {
     args: []
     result: DesktopTerminalRecord[]
+  }
+  [IpcChannels.scheduleStatus]: { args: []; result: DesktopScheduledStatus }
+  [IpcChannels.scheduleList]: { args: []; result: DesktopScheduledTask[] }
+  [IpcChannels.scheduleUpdate]: {
+    args: [id: string, input: UpdateDesktopScheduledTaskInput]
+    result: DesktopScheduledTask
+  }
+  [IpcChannels.scheduleRemove]: { args: [id: string]; result: void }
+  [IpcChannels.scheduleRunNow]: { args: [id: string]; result: DesktopScheduledRun }
+  [IpcChannels.scheduleListRuns]: {
+    args: [input: ListDesktopScheduledRunsInput]
+    result: DesktopScheduledRun[]
+  }
+  [IpcChannels.scheduleSetRunUnread]: {
+    args: [id: string, unread: boolean]
+    result: DesktopScheduledRun
   }
 }
 

@@ -90,6 +90,18 @@ export const desktopAPI = {
       }
     },
   },
+  schedules: {
+    status: () => invoke(IpcChannels.scheduleStatus),
+    list: () => invoke(IpcChannels.scheduleList),
+    update: (id: string, input: IpcInvokeMap[typeof IpcChannels.scheduleUpdate]["args"][1]) =>
+      invoke(IpcChannels.scheduleUpdate, id, input),
+    remove: (id: string) => invoke(IpcChannels.scheduleRemove, id),
+    runNow: (id: string) => invoke(IpcChannels.scheduleRunNow, id),
+    listRuns: (input: IpcInvokeMap[typeof IpcChannels.scheduleListRuns]["args"][0]) =>
+      invoke(IpcChannels.scheduleListRuns, input),
+    setRunUnread: (id: string, unread: boolean) =>
+      invoke(IpcChannels.scheduleSetRunUnread, id, unread),
+  },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),
