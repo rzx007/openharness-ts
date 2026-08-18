@@ -38,7 +38,7 @@ import {
   type JsonRecord,
 } from "./support.js";
 import { createAuthRoutes } from "./routes/auth.js";
-import { createCronRoutes } from "./routes/cron.js";
+import { createScheduleRoutes } from "./routes/schedules.js";
 import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
 import { createJobRoutes } from "./routes/job.js";
@@ -343,7 +343,10 @@ export class OpenHarnessHttpServer {
       }),
     );
     this.app.route("/git", createGitRoutes({ gitService: this.services.git }));
-    this.app.route("/cron", createCronRoutes({ cron: this.daemon.cron }));
+    this.app.route(
+      "/schedules",
+      createScheduleRoutes({ schedules: this.daemon.schedules }),
+    );
     this.app.route(
       "/tasks",
       createTaskRoutes({

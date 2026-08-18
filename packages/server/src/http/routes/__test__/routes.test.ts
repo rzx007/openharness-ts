@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAuthRoutes } from "../auth.js";
-import { createCronRoutes } from "../cron.js";
 import { HttpEventHub } from "../events.js";
 import { createGitRoutes } from "../git.js";
 import { createMemoryRoutes } from "../memory.js";
 import { createPermissionRoutes } from "../permission.js";
 import { createRunExecutionRoutes } from "../run-execution.js";
+import { createScheduleRoutes } from "../schedules.js";
 import { createServiceRoutes } from "../service.js";
 import { createSessionRoutes } from "../session.js";
 import { createSessionUtilityRoutes } from "../session-utility.js";
@@ -42,53 +42,73 @@ function daemonControl(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("Cron routes", () => {
-  it("saves jobs and lists daemon-owned status", async () => {
-    const saveJob = vi.fn((input) => ({
-      id: "cron-1",
-      ...input,
-      enabled: input.enabled ?? true,
+describe("Scheduled task routes", () => {
+  it("creates Agent schedules and lists their runs", async () => {
+    const task = {
+      id: "schedule-1",
+      name: "weekday-review",
+      prompt: "Review changes",
+      recurrence: "RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+      recurrenceFormat: "rrule" as const,
+      timezone: "Asia/Shanghai",
+      status: "active" as const,
+      destination: "standalone" as const,
+      projectPaths: ["/repo"],
+      executionMode: "local" as const,
+      skillNames: [],
+      pluginNames: [],
+      permissionProfile: { mode: "workspace_write" as const },
+      overlapPolicy: "skip" as const,
+      missedRunPolicy: "skip" as const,
+      createdBy: "user" as const,
+      runCount: 0,
       createdAt: 1,
       updatedAt: 1,
-    }));
-    const app = createCronRoutes({
-      cron: {
-        saveJob,
-        listJobs: () => [],
-        listRuns: () => [],
-        removeJob: () => true,
-        setEnabled: vi.fn(),
-        status: () => ({ running: true, jobs: 1, enabled: 1, active: 0 }),
+    };
+    const createTask = vi.fn(() => task);
+    const app = createScheduleRoutes({
+      schedules: {
+        createTask,
+        getTask: vi.fn(() => task),
+        listTasks: vi.fn(() => [task]),
+        updateTask: vi.fn(() => task),
+        removeTask: vi.fn(),
         trigger: vi.fn(),
+        listRuns: vi.fn(() => []),
+        markRunRead: vi.fn(),
+        status: vi.fn(() => ({
+          running: true,
+          tasks: 1,
+          active: 1,
+          paused: 0,
+          executing: 0,
+          unread: 0,
+        })),
       },
     });
 
-    const saveResponse = await app.request("/jobs/nightly", {
-      method: "PUT",
+    const response = await app.request("/tasks", {
+      method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        expression: "0 0 * * *",
-        command: "echo ok",
-        cwd: "/repo",
+        name: task.name,
+        prompt: task.prompt,
+        recurrence: task.recurrence,
+        recurrenceFormat: task.recurrenceFormat,
+        timezone: task.timezone,
+        destination: task.destination,
+        projectPaths: task.projectPaths,
       }),
     });
-    const statusResponse = await app.request("/status");
 
-    expect(saveResponse.status).toBe(200);
-    expect(saveJob).toHaveBeenCalledWith({
-      name: "nightly",
-      expression: "0 0 * * *",
-      command: "echo ok",
-      cwd: "/repo",
-      timezone: undefined,
-      enabled: undefined,
-    });
-    await expect(statusResponse.json()).resolves.toEqual({
-      running: true,
-      jobs: 1,
-      enabled: 1,
-      active: 0,
-    });
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({ task });
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "Review changes" }),
+    );
+    await expect(
+      (await app.request("/runs?taskId=schedule-1&unread=true&limit=5")).json(),
+    ).resolves.toEqual({ runs: [] });
   });
 });
 

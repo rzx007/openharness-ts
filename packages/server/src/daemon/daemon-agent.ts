@@ -10,7 +10,7 @@ import {
   getCoordinatorUserContext,
 } from "@openharness/coordinator";
 import type {
-  AgentCronEffects,
+  AgentScheduleEffects,
   AgentEffects,
   AgentEventListener,
   Settings,
@@ -55,7 +55,7 @@ export interface DaemonAgentLoaderOptions {
   getSettingsForCwd?: (cwd: string) => Promise<Settings> | Settings;
   createAgent?: CreateDaemonAgent;
   requestPermission?: AgentEffects["requestPermission"];
-  cron?: AgentCronEffects;
+  schedules?: AgentScheduleEffects;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
   createEventSink?(
@@ -95,11 +95,13 @@ export function createDaemonAgentLoader(
       ...(options.requestPermission
         ? { requestPermission: options.requestPermission }
         : {}),
-      ...(options.cron ? { cron: options.cron } : {}),
+      ...(options.schedules ? { schedules: options.schedules } : {}),
       ...(options.createTerminalHost
         ? { terminal: options.createTerminalHost(session) }
         : {}),
-      ...(options.createJobHost ? { jobs: options.createJobHost(session) } : {}),
+      ...(options.createJobHost
+        ? { jobs: options.createJobHost(session) }
+        : {}),
       ...(options.createEventSink
         ? {
             onEvent: async (event) => {

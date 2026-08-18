@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import type { Settings } from "@openharness/core";
+import {
+  buildChildAgentWorktreeSlug,
+  createChildAgentWorktreeManager,
+} from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
 import type { SessionRecord } from "@openharness/services";
@@ -10,7 +14,7 @@ import {
   createDaemonAgentLoader,
   type CreateDaemonAgent,
 } from "../daemon/daemon-agent.js";
-import { DaemonCronService } from "../daemon/daemon-cron-service.js";
+import { ScheduledTaskService } from "../daemon/scheduled-task-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
@@ -59,7 +63,7 @@ export class DaemonApplication {
   readonly maintenance: SessionMaintenanceService;
   readonly queries: SessionQueryService;
   readonly control: DaemonControlService;
-  readonly cron: DaemonCronService;
+  readonly schedules: ScheduledTaskService;
 
   private readonly events: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -76,17 +80,6 @@ export class DaemonApplication {
     store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
     store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
     store.finalizeClosingSessions();
-
-    this.cron = new DaemonCronService({
-      store,
-      getSettingsForCwd:
-        options.getSettingsForCwd ??
-        (async () => {
-          const settings = options.getSettings?.() ?? options.settings;
-          if (!settings) throw new Error("Daemon settings are unavailable");
-          return settings;
-        }),
-    });
 
     this.events = new SessionEventPublisher(store, options.eventSink);
     this.permissions = new StorePermissionBroker({
@@ -128,15 +121,14 @@ export class DaemonApplication {
           signal: context.signal,
         });
       },
-      cron: {
-        save: async (input) => this.cron.saveJob(input),
-        remove: async (name) => {
-          this.cron.removeJob(name);
-        },
-        list: async () => this.cron.listJobs(),
-        setEnabled: async (name, enabled) =>
-          this.cron.setEnabled(name, enabled),
-        trigger: async (name) => this.cron.trigger(name),
+      schedules: {
+        create: async (input) =>
+          this.schedules.createTask({ ...input, createdBy: "agent" }),
+        update: async (id, patch) => this.schedules.updateTask(id, patch),
+        remove: async (id) => this.schedules.removeTask(id),
+        list: async () => this.schedules.listTasks(),
+        trigger: async (id) => this.schedules.trigger(id),
+        listRuns: async (taskId) => this.schedules.listRuns({ taskId }),
       },
       createEventSink: (agent) => {
         const projector = new DaemonAgentEventProjector({
@@ -195,6 +187,159 @@ export class DaemonApplication {
       operationGate: this.operationGate,
       events: this.events,
     });
+    this.schedules = new ScheduledTaskService({
+      store,
+      execute: async (task, scheduledRun) => {
+        const projectCwd = task.projectPaths[0];
+        let executionCwd = projectCwd;
+        let worktree:
+          | {
+              manager: ReturnType<typeof createChildAgentWorktreeManager>;
+              slug: string;
+              path: string;
+              branch: string;
+              created: boolean;
+            }
+          | undefined;
+        if (task.executionMode === "worktree") {
+          if (!projectCwd)
+            throw new Error(
+              "Worktree scheduled execution requires user attention: project is unavailable",
+            );
+          const manager = createChildAgentWorktreeManager({ cwd: projectCwd });
+          if (!(await manager.isGitRepo())) {
+            throw new Error(
+              "Worktree scheduled execution requires user attention: project is not a Git repository",
+            );
+          }
+          const slug = buildChildAgentWorktreeSlug({
+            team: "scheduled",
+            agent: task.id,
+            nonce: scheduledRun.id.slice(0, 8),
+          });
+          const created = await manager.create(slug).catch((error) => {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            throw new Error(
+              `Worktree scheduled execution requires user attention: ${message}`,
+            );
+          });
+          worktree = { manager, ...created };
+          executionCwd = created.path;
+        }
+        let session = task.sessionId
+          ? this.sessions.getSession(task.sessionId)
+          : undefined;
+        try {
+          if (task.destination === "chat") {
+            if (!session)
+              throw new Error(
+                `Scheduled task chat is unavailable: ${task.sessionId}`,
+              );
+            if (session.status === "archived") {
+              throw new Error(
+                "Scheduled task chat is archived and requires user attention",
+              );
+            }
+          } else {
+            if (!executionCwd)
+              throw new Error("Scheduled task project is unavailable");
+            const settingsCwd = projectCwd ?? executionCwd;
+            const settings =
+              (await options.getSettingsForCwd?.(settingsCwd)) ??
+              options.getSettings?.() ??
+              options.settings;
+            const model = task.model ?? settings?.model;
+            if (!model) throw new Error("Scheduled task model is unavailable");
+            const permissionMode = scheduledPermissionMode(
+              task.permissionProfile.mode,
+            );
+            const deniedTools = new Set(
+              task.permissionProfile.deniedTools ?? [],
+            );
+            if (task.permissionProfile.network === false) {
+              deniedTools.add("WebFetch");
+              deniedTools.add("WebSearch");
+            }
+            session = this.sessions.createSession({
+              cwd: executionCwd,
+              title: `${task.name} · scheduled run`,
+              model,
+              metadata: {
+                runtime: {
+                  model,
+                  permissionMode,
+                  ...(isScheduledEffort(task.effort)
+                    ? { effort: task.effort }
+                    : {}),
+                  ...(task.permissionProfile.allowedTools?.length
+                    ? { allowedTools: task.permissionProfile.allowedTools }
+                    : {}),
+                  ...(deniedTools.size > 0
+                    ? { disallowedTools: [...deniedTools] }
+                    : {}),
+                },
+                scheduledTask: {
+                  taskId: task.id,
+                  scheduledRunId: scheduledRun.id,
+                  destination: task.destination,
+                  executionMode: task.executionMode,
+                  ...(worktree
+                    ? {
+                        worktree: {
+                          path: worktree.path,
+                          branch: worktree.branch,
+                        },
+                      }
+                    : {}),
+                },
+              },
+            });
+          }
+          const admission = await this.sessions.admitPrompt(session!.id, {
+            id: `scheduled-input:${scheduledRun.id}`,
+            content: scheduledPrompt(task),
+            delivery: "queue",
+            metadata: {
+              source: "scheduled_task",
+              scheduledTaskId: task.id,
+              scheduledRunId: scheduledRun.id,
+              scheduledFor: scheduledRun.scheduledFor,
+            },
+            runMetadata: {
+              source: "scheduled_task",
+              scheduledTaskId: task.id,
+              scheduledRunId: scheduledRun.id,
+            },
+          });
+          if (!admission.run)
+            throw new Error("Scheduled task Agent runtime is unavailable");
+          const result = await this.sessions.awaitRun(
+            session!.id,
+            admission.run.id,
+          );
+          if (result.status !== "completed") {
+            throw new Error(
+              result.error ?? `Scheduled Agent run ${result.status}`,
+            );
+          }
+          return {
+            sessionId: session!.id,
+            runId: admission.run.id,
+            summary: result.output.slice(0, 20_000),
+          };
+        } finally {
+          if (worktree?.created) {
+            const hasChanges = await worktree.manager
+              .hasChanges(worktree.slug)
+              .catch(() => true);
+            if (!hasChanges) {
+              await worktree.manager.remove(worktree.slug).catch(() => {});
+            }
+          }
+        }
+      },
+    });
     this.queries = new SessionQueryService(store);
     this.startupRecovery = recoverInterruptedWorkflows({
       store,
@@ -215,7 +360,7 @@ export class DaemonApplication {
       failures.push(error);
     }
     try {
-      await this.cron.shutdown();
+      await this.schedules.shutdown();
     } catch (error) {
       failures.push(error);
     }
@@ -238,4 +383,39 @@ export class DaemonApplication {
       this.options.store.updateRun(runId, { metadata: { traceId: generated } });
     return generated;
   }
+}
+
+function scheduledPermissionMode(
+  mode: "read_only" | "workspace_write" | "full_access",
+): "plan" | "default" | "full_auto" {
+  if (mode === "read_only") return "plan";
+  if (mode === "full_access") return "full_auto";
+  return "default";
+}
+
+function isScheduledEffort(
+  value: string | undefined,
+): value is "low" | "medium" | "high" {
+  return value === "low" || value === "medium" || value === "high";
+}
+
+function scheduledPrompt(task: {
+  prompt: string;
+  skillNames: string[];
+  pluginNames: string[];
+}): string {
+  const context: string[] = [];
+  if (task.skillNames.length > 0) {
+    context.push(
+      `Use these task skills when applicable: ${task.skillNames.join(", ")}.`,
+    );
+  }
+  if (task.pluginNames.length > 0) {
+    context.push(
+      `Use these connected plugins when applicable: ${task.pluginNames.join(", ")}.`,
+    );
+  }
+  return context.length > 0
+    ? `${task.prompt}\n\n${context.join("\n")}`
+    : task.prompt;
 }

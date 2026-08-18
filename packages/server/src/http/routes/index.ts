@@ -1,5 +1,5 @@
 export * from "./auth.js";
-export * from "./cron.js";
+export * from "./schedules.js";
 export * from "./events.js";
 export * from "./git.js";
 export * from "./memory.js";
