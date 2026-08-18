@@ -70,10 +70,7 @@ export type {
   FeishuChannelSettings,
 } from "./types/settings";
 
-export type {
-  UsageSnapshot,
-  CostTracker as ICostTracker,
-} from "./types/usage";
+export type { UsageSnapshot, CostTracker as ICostTracker } from "./types/usage";
 
 export type {
   QueryEngine as IQueryEngine,
@@ -86,10 +83,10 @@ export type {
   AgentChildInvocation,
   AgentChildResult,
   AgentChildSpawnInput,
-  AgentCronEffects,
-  AgentCronJob,
-  AgentCronJobInput,
-  AgentCronRun,
+  AgentScheduleEffects,
+  AgentScheduledRun,
+  AgentScheduledTask,
+  AgentScheduledTaskInput,
   AgentEffectContext,
   AgentEffects,
   AgentEvent,
@@ -123,8 +120,29 @@ export { RuntimeBuilder } from "./engine/runtime-builder";
 export { CompactService } from "./engine/compact-service";
 export { CostTracker } from "./engine/cost-tracker";
 
-export { loadSettings, saveSettings, loadProjectSettings, saveProjectSettings } from "./config/settings";
-export { resolvePaths, getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath, getDataDir, getLogsDir, getSessionsDir, getTasksDir, getPluginsDir, getSkillsDir, getMemoryDir, getProjectMemoryDir, getFeedbackDir, getCredentialsFilePath } from "./config/paths";
+export {
+  loadSettings,
+  saveSettings,
+  loadProjectSettings,
+  saveProjectSettings,
+} from "./config/settings";
+export {
+  resolvePaths,
+  getConfigDir,
+  getConfigFilePath,
+  getProjectConfigDir,
+  getProjectSettingsFilePath,
+  getDataDir,
+  getLogsDir,
+  getSessionsDir,
+  getTasksDir,
+  getPluginsDir,
+  getSkillsDir,
+  getMemoryDir,
+  getProjectMemoryDir,
+  getFeedbackDir,
+  getCredentialsFilePath,
+} from "./config/paths";
 export { resolveGitRepository, type GitRepositoryInfo } from "./config/git";
 
 export type { AppState } from "./state/app-state";

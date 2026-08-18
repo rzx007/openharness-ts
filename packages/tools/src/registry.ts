@@ -36,11 +36,11 @@ import {
 } from "./mcp/index.js";
 import { notebookEditTool } from "./notebook/index.js";
 import {
-  cronCreateTool,
-  cronDeleteTool,
-  cronListTool,
-  cronToggleTool,
-  remoteTriggerTool,
+  scheduleCreateTool,
+  scheduleDeleteTool,
+  scheduleListTool,
+  scheduleRunNowTool,
+  scheduleUpdateTool,
 } from "./schedule/index.js";
 import { grepTool, lspTool } from "./search/index.js";
 import { bashTool } from "./shell/index.js";
@@ -50,7 +50,11 @@ import { terminalTools } from "./terminal/index.js";
 import { jobTools } from "./job/index.js";
 
 export function createDefaultToolRegistry(
-  options: { cron?: boolean; terminal?: boolean; jobs?: boolean } = {},
+  options: {
+    schedules?: boolean;
+    terminal?: boolean;
+    jobs?: boolean;
+  } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(bashTool);
@@ -78,12 +82,12 @@ export function createDefaultToolRegistry(
   registry.register(workflowTool);
   registry.register(teamCreateTool);
   registry.register(teamDeleteTool);
-  if (options.cron) {
-    registry.register(cronCreateTool);
-    registry.register(cronDeleteTool);
-    registry.register(cronListTool);
-    registry.register(cronToggleTool);
-    registry.register(remoteTriggerTool);
+  if (options.schedules) {
+    registry.register(scheduleCreateTool);
+    registry.register(scheduleUpdateTool);
+    registry.register(scheduleDeleteTool);
+    registry.register(scheduleListTool);
+    registry.register(scheduleRunNowTool);
   }
   if (options.terminal) {
     for (const tool of terminalTools) registry.register(tool);

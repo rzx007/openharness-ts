@@ -21,37 +21,73 @@ export interface AgentPermissionDecision {
   reason?: string;
 }
 
-export interface AgentCronJobInput {
+export interface AgentScheduledTaskInput {
   name: string;
-  expression: string;
-  command: string;
-  cwd: string;
-  timezone?: string;
-  enabled?: boolean;
+  prompt: string;
+  recurrence: string;
+  recurrenceFormat: "rrule" | "once";
+  timezone: string;
+  destination: "standalone" | "chat";
+  sessionId?: string;
+  projectPaths: string[];
+  executionMode?: "local" | "worktree";
+  model?: string;
+  effort?: string;
+  skillNames?: string[];
+  pluginNames?: string[];
+  permissionProfile?: {
+    mode: "read_only" | "workspace_write" | "full_access";
+    network?: boolean;
+    allowedTools?: string[];
+    deniedTools?: string[];
+  };
+  overlapPolicy?: "skip" | "queue";
+  missedRunPolicy?: "skip" | "run_once";
+  stopPolicy?: {
+    runOnce?: boolean;
+    maxRuns?: number;
+    stopWhenCompleted?: boolean;
+    expiresAt?: number;
+  };
 }
 
-export interface AgentCronJob {
-  name: string;
-  expression: string;
-  command: string;
-  cwd: string;
-  timezone?: string;
-  enabled: boolean;
+export interface AgentScheduledTask extends AgentScheduledTaskInput {
+  id: string;
+  status: "active" | "paused" | "completed";
   nextRunAt?: number;
+  lastRunAt?: number;
+  runCount: number;
 }
 
-export interface AgentCronRun {
-  status: "running" | "succeeded" | "failed" | "interrupted";
-  output?: string;
+export interface AgentScheduledRun {
+  id: string;
+  taskId: string;
+  status:
+    | "queued"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "interrupted"
+    | "needs_attention"
+    | "skipped";
+  summary?: string;
   error?: string;
+  sessionId?: string;
+  runId?: string;
 }
 
-export interface AgentCronEffects {
-  save(input: AgentCronJobInput): Promise<AgentCronJob>;
-  remove(name: string): Promise<void>;
-  list(): Promise<AgentCronJob[]>;
-  setEnabled(name: string, enabled: boolean): Promise<AgentCronJob>;
-  trigger(name: string): Promise<AgentCronRun>;
+export interface AgentScheduleEffects {
+  create(input: AgentScheduledTaskInput): Promise<AgentScheduledTask>;
+  update(
+    id: string,
+    patch: Partial<AgentScheduledTaskInput> & {
+      status?: AgentScheduledTask["status"];
+    },
+  ): Promise<AgentScheduledTask>;
+  remove(id: string): Promise<void>;
+  list(): Promise<AgentScheduledTask[]>;
+  trigger(id: string): Promise<AgentScheduledRun>;
+  listRuns(taskId?: string): Promise<AgentScheduledRun[]>;
 }
 
 export interface AgentEffectContext {
@@ -70,7 +106,7 @@ export interface AgentEffects {
     input: AgentPermissionRequest,
     context: AgentEffectContext,
   ): Promise<AgentPermissionDecision>;
-  cron?: AgentCronEffects;
+  schedules?: AgentScheduleEffects;
 }
 
 export interface AgentChildSpawnInput {

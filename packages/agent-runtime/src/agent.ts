@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   AgentChildDirectory,
-  AgentCronEffects,
+  AgentScheduleEffects,
   AgentEffects,
   AgentEventContext,
   AgentEventInput,
@@ -60,8 +60,8 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
   extensions?: OpenHarnessAgentExtension[];
   childIdleTtlMs?: number;
   requestPermission?: AgentEffects["requestPermission"];
-  /** Host-owned durable scheduling. Omit when this application does not provide Cron. */
-  cron?: AgentCronEffects;
+  /** Host-owned Agent scheduled tasks. Omit when the host has no durable scheduler. */
+  schedules?: AgentScheduleEffects;
   /** Reliable ordered host sink. A rejection fails the active framework operation. */
   onEvent?: AgentEventListener;
   childEnvironment?: AgentChildEnvironmentProvider;
@@ -636,7 +636,7 @@ export async function createOpenHarnessAgent(
         status: "denied",
         reason: "No permission effect configured",
       })),
-    ...(options.cron ? { cron: options.cron } : {}),
+    ...(options.schedules ? { schedules: options.schedules } : {}),
   };
   return await createOpenHarnessAgentInternal(options, {
     eventBus,
@@ -660,7 +660,7 @@ async function createOpenHarnessAgentInternal(
     sessionId: options.sessionId,
     configuration: options,
     hostCapabilities: {
-      cron: Boolean(internal.effects.cron),
+      schedules: Boolean(internal.effects.schedules),
       terminal: Boolean(options.terminal),
       jobs: true,
     },

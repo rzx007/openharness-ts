@@ -40,37 +40,43 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("ImageGeneration");
     expect(names).toContain("FeishuPush");
     expect(tools).toHaveLength(33);
-    expect(names).not.toEqual(expect.arrayContaining([
-      "TaskGet",
-      "TaskList",
-      "TaskOutput",
-      "TaskStop",
-      "TaskUpdate",
-      "TaskWait",
-      "SendMessage",
-    ]));
+    expect(names).not.toEqual(
+      expect.arrayContaining([
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "TaskUpdate",
+        "TaskWait",
+        "SendMessage",
+      ]),
+    );
   });
 
-  it("registers daemon-owned Cron tools only when the host provides Cron", () => {
-    const names = createDefaultToolRegistry({ cron: true })
+  it("registers Agent Scheduled tools as the only scheduling capability", () => {
+    const names = createDefaultToolRegistry({ schedules: true })
       .getAll()
       .map((tool) => tool.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        "CronCreate",
-        "CronDelete",
-        "CronList",
-        "CronToggle",
-        "RemoteTrigger",
+        "ScheduleCreate",
+        "ScheduleUpdate",
+        "ScheduleDelete",
+        "ScheduleList",
+        "ScheduleRunNow",
       ]),
     );
+    expect(names.filter((name) => name.startsWith("Cron"))).toEqual([]);
   });
 
   it("registers terminal creation separately from common job controls", () => {
     const defaultNames = createDefaultToolRegistry()
       .getAll()
       .map((tool) => tool.name);
-    const terminalNames = createDefaultToolRegistry({ terminal: true, jobs: true })
+    const terminalNames = createDefaultToolRegistry({
+      terminal: true,
+      jobs: true,
+    })
       .getAll()
       .map((tool) => tool.name);
     expect(defaultNames).not.toContain("TerminalOpen");
@@ -84,7 +90,9 @@ describe("createDefaultToolRegistry", () => {
         "JobList",
       ]),
     );
-    expect(terminalNames).not.toEqual(expect.arrayContaining(["TerminalRead", "TerminalClose"]));
+    expect(terminalNames).not.toEqual(
+      expect.arrayContaining(["TerminalRead", "TerminalClose"]),
+    );
   });
 
   it("each tool has required fields", () => {

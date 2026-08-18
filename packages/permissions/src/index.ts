@@ -18,7 +18,7 @@ export type {
 
 /**
  * 只读工具集：swarm worker（teammate）对这些工具自动放行，无需父进程开 full_auto。
- * 包含文件、Web、Cron 和统一 Jobs 观察工具。JobSend/JobCancel 会改变后台工作，
+ * 包含文件、Web、已安排任务和统一 Jobs 观察工具。JobSend/JobCancel 会改变后台工作，
  * 不属于只读集合。
  * 不含 Write/Edit/Bash 等写/执行类工具。
  */
@@ -31,7 +31,7 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "JobList",
   "JobRead",
   "JobWait",
-  "CronList",
+  "ScheduleList",
   "Lsp",
 ]);
 

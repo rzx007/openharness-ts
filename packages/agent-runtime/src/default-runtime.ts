@@ -49,7 +49,11 @@ interface OpenHarnessRuntimeOptions {
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
-  hostCapabilities?: { cron?: boolean; terminal?: boolean; jobs?: boolean };
+  hostCapabilities?: {
+    schedules?: boolean;
+    terminal?: boolean;
+    jobs?: boolean;
+  };
 }
 
 /**
@@ -115,7 +119,7 @@ export async function createOpenHarnessRuntime(
     (await resolveApiClient(settings, configuration, storage));
 
   const baseToolRegistry = createDefaultToolRegistry({
-    cron: options.hostCapabilities?.cron,
+    schedules: options.hostCapabilities?.schedules,
     terminal: options.hostCapabilities?.terminal,
     jobs: options.hostCapabilities?.jobs,
   });
@@ -226,7 +230,10 @@ function validateLifecycleToolConfiguration(
   const configuredLists: Array<[string, readonly string[] | undefined]> = [
     ["settings.permission.allowedTools", settings.permission.allowedTools],
     ["settings.permission.deniedTools", settings.permission.deniedTools],
-    ["settings.permission.autoApproveTools", settings.permission.autoApproveTools],
+    [
+      "settings.permission.autoApproveTools",
+      settings.permission.autoApproveTools,
+    ],
     ["configuration.allowedTools", configuration.allowedTools],
     ["configuration.hostToolCeiling", configuration.hostToolCeiling],
     ["configuration.roleAllowedTools", configuration.roleAllowedTools],
