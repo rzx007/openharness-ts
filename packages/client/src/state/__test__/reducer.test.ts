@@ -105,7 +105,11 @@ describe("session event reducer", () => {
     ]);
 
     expect(state.sessionOrder).toEqual(["s1"]);
-    expect(state.buckets.s1?.session).toEqual(created);
+    expect(state.buckets.s1?.session).toEqual({
+      ...created,
+      status: "running",
+      updatedAt: run.updatedAt,
+    });
     expect(state.buckets.s1?.messages).toEqual([message]);
     expect(state.buckets.s1?.partsByMessageId.m1).toEqual([part]);
     expect(selectSessionMessagesWithParts(state.buckets.s1)).toEqual([{ message, parts: [part] }]);
@@ -138,6 +142,36 @@ describe("session event reducer", () => {
     ]);
     expect(state.sessions.s1?.model).toBe("new-model");
     expect(state.buckets.s1?.session?.model).toBe("new-model");
+  });
+
+  it("derives the live session status from run updates", () => {
+    const created = session("s1", 1);
+    const running: SessionRunRecord = {
+      id: "r1",
+      sessionId: "s1",
+      status: "running",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    const completed: SessionRunRecord = {
+      ...running,
+      status: "completed",
+      finishedAt: 3,
+      updatedAt: 3,
+    };
+
+    let state = applyEvents(createInitialClientState(), [
+      event(1, "session.created", { session: created }),
+      event(2, "session.run.updated", { run: running }),
+    ]);
+    expect(state.sessions.s1?.status).toBe("running");
+    expect(state.buckets.s1?.session?.status).toBe("running");
+
+    state = applyEvent(state, event(3, "session.run.updated", { run: completed }));
+    expect(state.sessions.s1?.status).toBe("idle");
+    expect(state.buckets.s1?.session?.status).toBe("idle");
+    expect(state.buckets.s1?.session?.updatedAt).toBe(3);
   });
 
   it("replaces a session transcript from session.transcript.replaced", () => {

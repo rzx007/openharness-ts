@@ -277,7 +277,31 @@ function upsertRun(state: OpenHarnessClientState, run: SessionRunRecord | undefi
   if (!run) return state;
   const bucket = cloneBucket(state.buckets[run.sessionId]);
   bucket.runs = { ...bucket.runs, [run.id]: run };
-  return { ...state, buckets: { ...state.buckets, [run.sessionId]: bucket } };
+  const session = refreshSessionStatusFromRuns(bucket.session, bucket.runs, run.updatedAt);
+  bucket.session = session;
+  const sessions = session ? { ...state.sessions, [run.sessionId]: session } : state.sessions;
+  return {
+    ...state,
+    sessions,
+    sessionOrder: session ? sortSessionOrder(sessions) : state.sessionOrder,
+    buckets: { ...state.buckets, [run.sessionId]: bucket },
+  };
+}
+
+function refreshSessionStatusFromRuns(
+  session: SessionRecord | undefined,
+  runs: SessionBucket["runs"],
+  updatedAt: number,
+): SessionRecord | undefined {
+  if (!session || session.status === "archived" || session.status === "closing") return session;
+  const running = Object.values(runs).some(
+    (candidate) => candidate.status === "pending" || candidate.status === "running",
+  );
+  return {
+    ...session,
+    status: running ? "running" : "idle",
+    updatedAt: Math.max(session.updatedAt, updatedAt),
+  };
 }
 
 function upsertPermission(

@@ -26,9 +26,7 @@ import type {
   AgentPersonaInfo,
   AuthStatus,
   CompactSessionResponse,
-  CronJobRecord,
-  CronRunRecord,
-  CronStatus,
+  CreateScheduledTaskInput,
   CreateTaskInput,
   HookInfo,
   ReloadPluginsResponse,
@@ -48,7 +46,9 @@ import type {
   ProviderInfo,
   OutputStyleInfo,
   RememberSessionResponse,
-  SaveCronJobInput,
+  ScheduledRunRecord,
+  ScheduledTaskRecord,
+  ScheduledTaskStatusSummary,
   ReplyPermissionInput,
   SessionEventRecord,
   SessionExportResponse,
@@ -60,6 +60,7 @@ import type {
   StartDreamResponse,
   TaskSnapshot,
   UpdateClientSessionInput,
+  UpdateScheduledTaskInput,
 } from "../types/index.js";
 import type {
   TerminalCreateRequest,
@@ -972,47 +973,72 @@ export class OpenHarnessClient {
     return response.request;
   }
 
-  /** `GET /events/stream` — SSE 实时事件流；`cursor` 之后的增量。 */
-  async getCronStatus(
+  async getScheduledTaskStatus(
     options: { signal?: AbortSignal } = {},
-  ): Promise<CronStatus> {
-    return await this.request<CronStatus>("/cron/status", {
+  ): Promise<ScheduledTaskStatusSummary> {
+    return await this.request<ScheduledTaskStatusSummary>("/schedules/status", {
       signal: options.signal,
     });
   }
 
-  async listCronJobs(
-    options: { signal?: AbortSignal } = {},
-  ): Promise<CronJobRecord[]> {
-    const response = await this.request<{ jobs: CronJobRecord[] }>(
-      "/cron/jobs",
-      { signal: options.signal },
+  async listScheduledTasks(
+    options: {
+      status?: ScheduledTaskRecord["status"];
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<ScheduledTaskRecord[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ tasks: ScheduledTaskRecord[] }>(
+      this.path("/schedules/tasks", query),
+      { signal },
     );
-    return response.jobs;
+    return response.tasks;
   }
 
-  async saveCronJob(
-    name: string,
-    input: SaveCronJobInput,
+  async getScheduledTask(
+    id: string,
     options: { signal?: AbortSignal } = {},
-  ): Promise<CronJobRecord> {
-    const response = await this.request<{ job: CronJobRecord }>(
-      `/cron/jobs/${encodeURIComponent(name)}`,
+  ): Promise<ScheduledTaskRecord> {
+    const response = await this.request<{ task: ScheduledTaskRecord }>(
+      `/schedules/tasks/${encodeURIComponent(id)}`,
+      { signal: options.signal },
+    );
+    return response.task;
+  }
+
+  async createScheduledTask(
+    input: CreateScheduledTaskInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ScheduledTaskRecord> {
+    const response = await this.request<{ task: ScheduledTaskRecord }>(
+      "/schedules/tasks",
       {
-        method: "PUT",
+        method: "POST",
         body: input,
         signal: options.signal,
       },
     );
-    return response.job;
+    return response.task;
   }
 
-  async removeCronJob(
-    name: string,
+  async updateScheduledTask(
+    id: string,
+    input: UpdateScheduledTaskInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ScheduledTaskRecord> {
+    const response = await this.request<{ task: ScheduledTaskRecord }>(
+      `/schedules/tasks/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: input, signal: options.signal },
+    );
+    return response.task;
+  }
+
+  async removeScheduledTask(
+    id: string,
     options: { signal?: AbortSignal } = {},
   ): Promise<void> {
     await this.request<{ removed: true }>(
-      `/cron/jobs/${encodeURIComponent(name)}`,
+      `/schedules/tasks/${encodeURIComponent(id)}`,
       {
         method: "DELETE",
         signal: options.signal,
@@ -1020,45 +1046,43 @@ export class OpenHarnessClient {
     );
   }
 
-  async setCronJobEnabled(
-    name: string,
-    enabled: boolean,
+  async triggerScheduledTask(
+    id: string,
     options: { signal?: AbortSignal } = {},
-  ): Promise<CronJobRecord> {
-    const response = await this.request<{ job: CronJobRecord }>(
-      `/cron/jobs/${encodeURIComponent(name)}`,
-      {
-        method: "PATCH",
-        body: { enabled },
-        signal: options.signal,
-      },
-    );
-    return response.job;
-  }
-
-  async triggerCronJob(
-    name: string,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<CronRunRecord> {
-    const response = await this.request<{ run: CronRunRecord }>(
-      `/cron/jobs/${encodeURIComponent(name)}/run`,
-      {
-        method: "POST",
-        signal: options.signal,
-      },
+  ): Promise<ScheduledRunRecord> {
+    const response = await this.request<{ run: ScheduledRunRecord }>(
+      `/schedules/tasks/${encodeURIComponent(id)}/run`,
+      { method: "POST", signal: options.signal },
     );
     return response.run;
   }
 
-  async listCronRuns(
-    options: { name?: string; limit?: number; signal?: AbortSignal } = {},
-  ): Promise<CronRunRecord[]> {
+  async listScheduledRuns(
+    options: {
+      taskId?: string;
+      unread?: boolean;
+      limit?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<ScheduledRunRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ runs: CronRunRecord[] }>(
-      this.path("/cron/runs", query),
+    const response = await this.request<{ runs: ScheduledRunRecord[] }>(
+      this.path("/schedules/runs", query),
       { signal },
     );
     return response.runs;
+  }
+
+  async setScheduledRunUnread(
+    id: string,
+    unread: boolean,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ScheduledRunRecord> {
+    const response = await this.request<{ run: ScheduledRunRecord }>(
+      `/schedules/runs/${encodeURIComponent(id)}/read`,
+      { method: "PATCH", body: { unread }, signal: options.signal },
+    );
+    return response.run;
   }
 
   async createTerminal(
@@ -1076,33 +1100,41 @@ export class OpenHarnessClient {
     return response.terminal;
   }
 
-  async listJobs(
-    options: {
-      sessionId: string;
-      kinds?: JobKind[];
-      statuses?: JobStatus[];
-      startedAfter?: number;
-      startedBefore?: number;
-      updatedAfter?: number;
-      updatedBefore?: number;
-      includeFinished?: boolean;
-      limit?: number;
-      signal?: AbortSignal;
-    },
-  ): Promise<JobSnapshot[]> {
+  async listJobs(options: {
+    sessionId: string;
+    kinds?: JobKind[];
+    statuses?: JobStatus[];
+    startedAfter?: number;
+    startedBefore?: number;
+    updatedAfter?: number;
+    updatedBefore?: number;
+    includeFinished?: boolean;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<JobSnapshot[]> {
     const { signal, kinds, statuses, includeFinished, ...query } = options;
-    const response = await this.request<{ jobs: JobSnapshot[] }>(this.path("/jobs", {
-      ...query,
-      ...(kinds ? { kinds: kinds.join(",") } : {}),
-      ...(statuses ? { statuses: statuses.join(",") } : {}),
-      ...(includeFinished !== undefined ? { includeFinished: String(includeFinished) } : {}),
-    }), { signal });
+    const response = await this.request<{ jobs: JobSnapshot[] }>(
+      this.path("/jobs", {
+        ...query,
+        ...(kinds ? { kinds: kinds.join(",") } : {}),
+        ...(statuses ? { statuses: statuses.join(",") } : {}),
+        ...(includeFinished !== undefined
+          ? { includeFinished: String(includeFinished) }
+          : {}),
+      }),
+      { signal },
+    );
     return response.jobs;
   }
 
   async readJob(
     jobId: string,
-    options: { sessionId: string; after?: number; maxChars?: number; signal?: AbortSignal },
+    options: {
+      sessionId: string;
+      after?: number;
+      maxChars?: number;
+      signal?: AbortSignal;
+    },
   ): Promise<JobReadResult> {
     const { signal, ...query } = options;
     return await this.request<JobReadResult>(
@@ -1113,14 +1145,22 @@ export class OpenHarnessClient {
 
   async waitJob(
     jobId: string,
-    input: { sessionId: string; timeoutMs?: number; after?: number; maxChars?: number },
+    input: {
+      sessionId: string;
+      timeoutMs?: number;
+      after?: number;
+      maxChars?: number;
+    },
     options: { signal?: AbortSignal } = {},
   ): Promise<JobWaitResult> {
-    return await this.request<JobWaitResult>(`/jobs/${encodeURIComponent(jobId)}/wait`, {
-      method: "POST",
-      body: input,
-      signal: options.signal,
-    });
+    return await this.request<JobWaitResult>(
+      `/jobs/${encodeURIComponent(jobId)}/wait`,
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
   }
 
   async sendJob(

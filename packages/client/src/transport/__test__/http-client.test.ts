@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { normalizeDaemonBaseUrl, OpenHarnessClient, streamServerSentEvents } from "../http-client.js";
+import {
+  normalizeDaemonBaseUrl,
+  OpenHarnessClient,
+  streamServerSentEvents,
+} from "../http-client.js";
 import { syncEvents } from "../../state/sync.js";
-import type { SessionEventRecord, SessionRecord, SessionStateSnapshot } from "../../types/index.js";
+import type {
+  SessionEventRecord,
+  SessionRecord,
+  SessionStateSnapshot,
+} from "../../types/index.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -17,11 +25,21 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 
 describe("OpenHarnessClient", () => {
   it("normalizes safe daemon URLs and rejects URL-based credential leaks", () => {
-    expect(normalizeDaemonBaseUrl(" https://daemon.example/api/ ")).toBe("https://daemon.example/api");
-    expect(() => normalizeDaemonBaseUrl("ftp://daemon.example")).toThrow("http or https");
-    expect(() => normalizeDaemonBaseUrl("https://token@daemon.example")).toThrow("must not contain credentials");
-    expect(() => normalizeDaemonBaseUrl("https://daemon.example?token=secret")).toThrow("must not contain query");
-    expect(() => normalizeDaemonBaseUrl("not-a-url")).toThrow("absolute http or https");
+    expect(normalizeDaemonBaseUrl(" https://daemon.example/api/ ")).toBe(
+      "https://daemon.example/api",
+    );
+    expect(() => normalizeDaemonBaseUrl("ftp://daemon.example")).toThrow(
+      "http or https",
+    );
+    expect(() =>
+      normalizeDaemonBaseUrl("https://token@daemon.example"),
+    ).toThrow("must not contain credentials");
+    expect(() =>
+      normalizeDaemonBaseUrl("https://daemon.example?token=secret"),
+    ).toThrow("must not contain query");
+    expect(() => normalizeDaemonBaseUrl("not-a-url")).toThrow(
+      "absolute http or https",
+    );
   });
 
   it("calls typed API endpoints with bearer auth and JSON bodies", async () => {
@@ -36,7 +54,10 @@ describe("OpenHarnessClient", () => {
       updatedAt: 1,
     };
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init: init ?? {} });
       return jsonResponse({ session });
     };
@@ -47,9 +68,14 @@ describe("OpenHarnessClient", () => {
       fetch: fetchImpl as typeof fetch,
     });
 
-    await expect(client.createSession({ id: "s1", cwd: process.cwd(), model: "m", title: "Main" })).resolves.toEqual(
-      session,
-    );
+    await expect(
+      client.createSession({
+        id: "s1",
+        cwd: process.cwd(),
+        model: "m",
+        title: "Main",
+      }),
+    ).resolves.toEqual(session);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("http://127.0.0.1:3456/sessions");
     expect(calls[0]!.init.method).toBe("POST");
@@ -57,12 +83,18 @@ describe("OpenHarnessClient", () => {
       authorization: "Bearer tok",
       "content-type": "application/json",
     });
-    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({ id: "s1", model: "m" });
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
+      id: "s1",
+      model: "m",
+    });
   });
 
   it("calls health without bearer auth", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init: init ?? {} });
       return jsonResponse({ ok: true });
     };
@@ -81,18 +113,42 @@ describe("OpenHarnessClient", () => {
 
   it("lists commands and invokes template commands", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init: init ?? {} });
-      if (String(url).includes("/commands") && (!init?.method || init.method === "GET")) {
+      if (
+        String(url).includes("/commands") &&
+        (!init?.method || init.method === "GET")
+      ) {
         return jsonResponse({
-          commands: [{ name: "/commit", kind: "template", source: "skill", description: "Commit" }],
+          commands: [
+            {
+              name: "/commit",
+              kind: "template",
+              source: "skill",
+              description: "Commit",
+            },
+          ],
         });
       }
       if (String(url).includes("/sessions/s1/commands")) {
-        return jsonResponse({
-          input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "PROMPT", metadata: {}, createdAt: 1 },
-          command: { name: "/commit", kind: "template", source: "skill" },
-        }, 202);
+        return jsonResponse(
+          {
+            input: {
+              id: "i1",
+              sessionId: "s1",
+              seq: 1,
+              delivery: "queue",
+              content: "PROMPT",
+              metadata: {},
+              createdAt: 1,
+            },
+            command: { name: "/commit", kind: "template", source: "skill" },
+          },
+          202,
+        );
       }
       if (String(url).includes("/sessions/s1") && init?.method === "PATCH") {
         return jsonResponse({
@@ -118,57 +174,94 @@ describe("OpenHarnessClient", () => {
     });
 
     await expect(client.listCommands({ cwd: "/repo" })).resolves.toEqual([
-      { name: "/commit", kind: "template", source: "skill", description: "Commit" },
+      {
+        name: "/commit",
+        kind: "template",
+        source: "skill",
+        description: "Commit",
+      },
     ]);
-    await expect(client.invokeCommand("s1", { name: "/commit", args: "fix" })).resolves.toMatchObject({
+    await expect(
+      client.invokeCommand("s1", { name: "/commit", args: "fix" }),
+    ).resolves.toMatchObject({
       command: { name: "/commit", kind: "template" },
       input: { content: "PROMPT" },
     });
-    await expect(client.updateSession("s1", {
-      metadata: { runtime: { model: "new-model" } },
-    })).resolves.toMatchObject({ model: "new-model" });
-    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+    await expect(
+      client.updateSession("s1", {
+        metadata: { runtime: { model: "new-model" } },
+      }),
+    ).resolves.toMatchObject({ model: "new-model" });
+    expect(
+      calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`),
+    ).toEqual([
       "GET http://127.0.0.1:3456/commands?cwd=%2Frepo",
       "POST http://127.0.0.1:3456/sessions/s1/commands",
       "PATCH http://127.0.0.1:3456/sessions/s1",
     ]);
   });
 
-  it("uses the daemon Cron endpoints", async () => {
+  it("uses the Agent Scheduled task endpoints", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const job = {
-      id: "cron-1",
-      name: "check",
-      expression: "* * * * *",
-      command: "echo ok",
-      cwd: "/repo",
-      enabled: true,
+    const task = {
+      id: "schedule-1",
+      name: "review",
+      prompt: "Review changes",
+      recurrence: "2099-01-01T00:00:00Z",
+      recurrenceFormat: "once" as const,
+      timezone: "UTC",
+      status: "active" as const,
+      destination: "chat" as const,
+      sessionId: "s1",
+      projectPaths: [],
+      executionMode: "local" as const,
+      skillNames: [],
+      pluginNames: [],
+      permissionProfile: { mode: "workspace_write" as const },
+      overlapPolicy: "skip" as const,
+      missedRunPolicy: "skip" as const,
+      createdBy: "agent" as const,
+      runCount: 0,
       createdAt: 1,
       updatedAt: 1,
     };
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init: init ?? {} });
-      if (init?.method === "PUT") return jsonResponse({ job });
-      if (String(url).includes("/cron/runs")) return jsonResponse({ runs: [] });
-      return jsonResponse({ jobs: [job] });
+      if (init?.method === "POST") return jsonResponse({ task });
+      if (String(url).includes("/runs")) return jsonResponse({ runs: [] });
+      return jsonResponse({ tasks: [task] });
     };
     const client = new OpenHarnessClient({
       baseUrl: "http://127.0.0.1:3456",
-      token: "tok",
       fetch: fetchImpl as typeof fetch,
     });
 
-    await expect(client.saveCronJob("check", {
-      expression: "* * * * *",
-      command: "echo ok",
-      cwd: "/repo",
-    })).resolves.toEqual(job);
-    await expect(client.listCronJobs()).resolves.toEqual([job]);
-    await expect(client.listCronRuns({ name: "check", limit: 5 })).resolves.toEqual([]);
-    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
-      "PUT http://127.0.0.1:3456/cron/jobs/check",
-      "GET http://127.0.0.1:3456/cron/jobs",
-      "GET http://127.0.0.1:3456/cron/runs?name=check&limit=5",
+    await expect(
+      client.createScheduledTask({
+        name: task.name,
+        prompt: task.prompt,
+        recurrence: task.recurrence,
+        recurrenceFormat: task.recurrenceFormat,
+        timezone: task.timezone,
+        destination: task.destination,
+        sessionId: task.sessionId,
+      }),
+    ).resolves.toEqual(task);
+    await expect(
+      client.listScheduledTasks({ status: "active" }),
+    ).resolves.toEqual([task]);
+    await expect(
+      client.listScheduledRuns({ taskId: task.id, unread: true }),
+    ).resolves.toEqual([]);
+    expect(
+      calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`),
+    ).toEqual([
+      "POST http://127.0.0.1:3456/schedules/tasks",
+      "GET http://127.0.0.1:3456/schedules/tasks?status=active",
+      "GET http://127.0.0.1:3456/schedules/runs?taskId=schedule-1&unread=true",
     ]);
   });
 
@@ -183,14 +276,16 @@ describe("OpenHarnessClient", () => {
       }) as typeof fetch,
     });
 
-    await expect(client.listJobs({
-      sessionId: "session-1",
-      kinds: ["terminal", "agent"],
-      statuses: ["running", "failed"],
-      startedAfter: 10,
-      limit: 5,
-      includeFinished: false,
-    })).resolves.toEqual([]);
+    await expect(
+      client.listJobs({
+        sessionId: "session-1",
+        kinds: ["terminal", "agent"],
+        statuses: ["running", "failed"],
+        startedAfter: 10,
+        limit: 5,
+        includeFinished: false,
+      }),
+    ).resolves.toEqual([]);
 
     expect(calls).toEqual([
       "http://127.0.0.1:3456/jobs?sessionId=session-1&startedAfter=10&limit=5&kinds=terminal%2Cagent&statuses=running%2Cfailed&includeFinished=false",
@@ -199,13 +294,43 @@ describe("OpenHarnessClient", () => {
 
   it("replays an interrupted run through the dedicated, idempotent endpoint", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init: init ?? {} });
-      return jsonResponse({
-        input: { id: "recovery-i1", sessionId: "s1", seq: 2, delivery: "queue", content: "retry", metadata: {}, createdAt: 2 },
-        run: { id: "recovery-r1", sessionId: "s1", inputId: "recovery-i1", status: "pending", metadata: {}, createdAt: 2, updatedAt: 2 },
-        source_run: { id: "r1", sessionId: "s1", inputId: "i1", status: "interrupted", metadata: {}, createdAt: 1, updatedAt: 2 },
-      }, 202);
+      return jsonResponse(
+        {
+          input: {
+            id: "recovery-i1",
+            sessionId: "s1",
+            seq: 2,
+            delivery: "queue",
+            content: "retry",
+            metadata: {},
+            createdAt: 2,
+          },
+          run: {
+            id: "recovery-r1",
+            sessionId: "s1",
+            inputId: "recovery-i1",
+            status: "pending",
+            metadata: {},
+            createdAt: 2,
+            updatedAt: 2,
+          },
+          source_run: {
+            id: "r1",
+            sessionId: "s1",
+            inputId: "i1",
+            status: "interrupted",
+            metadata: {},
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        },
+        202,
+      );
     };
     const client = new OpenHarnessClient({
       baseUrl: "http://127.0.0.1:3456",
@@ -213,14 +338,20 @@ describe("OpenHarnessClient", () => {
       fetch: fetchImpl as typeof fetch,
     });
 
-    await expect(client.resumeInterruptedRun("s1", "r1", { id: "request-1" })).resolves.toMatchObject({
+    await expect(
+      client.resumeInterruptedRun("s1", "r1", { id: "request-1" }),
+    ).resolves.toMatchObject({
       run: { id: "recovery-r1" },
       source_run: { id: "r1", status: "interrupted" },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe("http://127.0.0.1:3456/sessions/s1/runs/r1/resume");
+    expect(calls[0]!.url).toBe(
+      "http://127.0.0.1:3456/sessions/s1/runs/r1/resume",
+    );
     expect(calls[0]!.init.method).toBe("POST");
-    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ id: "request-1" });
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      id: "request-1",
+    });
   });
 
   it("parses server-sent event frames and ignores comments", async () => {
@@ -228,14 +359,23 @@ describe("OpenHarnessClient", () => {
       start(controller) {
         const encoder = new TextEncoder();
         controller.enqueue(encoder.encode(": connected\n\n"));
-        controller.enqueue(encoder.encode(`id: 1\nevent: session.created\ndata: ${JSON.stringify(event(1))}\n\n`));
-        controller.enqueue(encoder.encode(`id: 2\nevent: session.run.updated\ndata: ${JSON.stringify(event(2))}\n\n`));
+        controller.enqueue(
+          encoder.encode(
+            `id: 1\nevent: session.created\ndata: ${JSON.stringify(event(1))}\n\n`,
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            `id: 2\nevent: session.run.updated\ndata: ${JSON.stringify(event(2))}\n\n`,
+          ),
+        );
         controller.close();
       },
     });
 
     const events: SessionEventRecord[] = [];
-    for await (const parsed of streamServerSentEvents(async () => stream)) events.push(parsed);
+    for await (const parsed of streamServerSentEvents(async () => stream))
+      events.push(parsed);
 
     expect(events.map((item) => item.seq)).toEqual([1, 2]);
   });
@@ -249,14 +389,24 @@ describe("OpenHarnessClient", () => {
       throw new DOMException("Aborted", "AbortError");
     };
     const client = {
-      listEvents: async () => [event(1, "session.created"), event(2, "session.message.created")],
+      listEvents: async () => [
+        event(1, "session.created"),
+        event(2, "session.message.created"),
+      ],
       streamEvents: () => stream(),
     } as unknown as OpenHarnessClient;
 
     const updates: Array<{ seq: number; source: string; lastSeq: number }> = [];
-    for await (const update of syncEvents(client, { signal: controller.signal, reconnectDelayMs: () => 0 })) {
+    for await (const update of syncEvents(client, {
+      signal: controller.signal,
+      reconnectDelayMs: () => 0,
+    })) {
       if (!update.event) continue;
-      updates.push({ seq: update.event.seq, source: update.source, lastSeq: update.state.lastSeq });
+      updates.push({
+        seq: update.event.seq,
+        source: update.source,
+        lastSeq: update.state.lastSeq,
+      });
     }
 
     expect(updates).toEqual([
@@ -294,7 +444,8 @@ describe("OpenHarnessClient", () => {
       signal: controller.signal,
       reconnectDelayMs: () => 0,
     })) {
-      if (update.source === "live" && update.event) liveSeqs.push(update.event.seq);
+      if (update.source === "live" && update.event)
+        liveSeqs.push(update.event.seq);
     }
 
     expect(cursors).toEqual([1, 2]);
@@ -321,7 +472,8 @@ describe("OpenHarnessClient", () => {
       signal: controller.signal,
       reconnectDelayMs: () => 0,
     })) {
-      if (update.source === "live" && update.event) liveSeqs.push(update.event.seq);
+      if (update.source === "live" && update.event)
+        liveSeqs.push(update.event.seq);
     }
 
     expect(streamCalls).toBe(1);
@@ -397,14 +549,28 @@ describe("OpenHarnessClient", () => {
       baseUrl: "http://daemon.test",
       fetch: async (_url, init) => {
         calls.push(init ?? {});
-        return jsonResponse({
-          input: { id: "server-input", sessionId: "s1", seq: 1, delivery: "queue", content: "hello", metadata: {}, createdAt: 1 },
-        }, 202);
+        return jsonResponse(
+          {
+            input: {
+              id: "server-input",
+              sessionId: "s1",
+              seq: 1,
+              delivery: "queue",
+              content: "hello",
+              metadata: {},
+              createdAt: 1,
+            },
+          },
+          202,
+        );
       },
     });
 
     await client.admitPrompt("s1", { content: "hello" });
-    const body = JSON.parse(String(calls[0]!.body)) as { id?: string; content: string };
+    const body = JSON.parse(String(calls[0]!.body)) as {
+      id?: string;
+      content: string;
+    };
     expect(body.content).toBe("hello");
     expect(body.id).toEqual(expect.any(String));
   });
