@@ -102,6 +102,15 @@ export const desktopAPI = {
     setRunUnread: (id: string, unread: boolean) =>
       invoke(IpcChannels.scheduleSetRunUnread, id, unread),
   },
+  providers: {
+    snapshot: () => invoke(IpcChannels.providerSnapshot),
+    connect: (input: IpcInvokeMap[typeof IpcChannels.providerConnect]["args"][0]) =>
+      invoke(IpcChannels.providerConnect, input),
+    activate: (input: IpcInvokeMap[typeof IpcChannels.providerActivate]["args"][0]) =>
+      invoke(IpcChannels.providerActivate, input),
+    disconnect: (input: IpcInvokeMap[typeof IpcChannels.providerDisconnect]["args"][0]) =>
+      invoke(IpcChannels.providerDisconnect, input),
+  },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),

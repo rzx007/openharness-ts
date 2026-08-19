@@ -1,0 +1,23 @@
+import { describe, expect, it } from "vitest"
+
+import {
+  defaultSettingsSection,
+  isSettingsSection,
+  settingsSectionLabel,
+  settingsSectionSlug,
+} from "./settings-navigation"
+
+describe("settings navigation", () => {
+  it("maps stable URL segments to localized labels", () => {
+    expect(settingsSectionLabel("appearance")).toBe("外观")
+    expect(settingsSectionSlug("外观")).toBe("appearance")
+    expect(settingsSectionLabel("providers")).toBe("供应商")
+    expect(settingsSectionSlug("供应商")).toBe("providers")
+  })
+
+  it("falls back to general for an unknown section", () => {
+    expect(isSettingsSection("missing")).toBe(false)
+    expect(settingsSectionLabel("missing")).toBe("常规")
+    expect(settingsSectionSlug("不存在")).toBe(defaultSettingsSection)
+  })
+})

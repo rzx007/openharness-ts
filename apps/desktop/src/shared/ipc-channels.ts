@@ -45,6 +45,12 @@ import type {
   ListDesktopScheduledRunsInput,
   UpdateDesktopScheduledTaskInput,
 } from "./schedule-types"
+import type {
+  ActivateDesktopProviderInput,
+  ConnectDesktopProviderInput,
+  DesktopProviderSnapshot,
+  DisconnectDesktopProviderInput,
+} from "./provider-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -121,6 +127,11 @@ export const IpcChannels = {
   scheduleRunNow: "schedule:run-now",
   scheduleListRuns: "schedule:list-runs",
   scheduleSetRunUnread: "schedule:set-run-unread",
+
+  providerSnapshot: "provider:snapshot",
+  providerConnect: "provider:connect",
+  providerActivate: "provider:activate",
+  providerDisconnect: "provider:disconnect",
 } as const
 
 export const IpcEvents = {
@@ -346,6 +357,19 @@ export interface IpcInvokeMap {
   [IpcChannels.scheduleSetRunUnread]: {
     args: [id: string, unread: boolean]
     result: DesktopScheduledRun
+  }
+  [IpcChannels.providerSnapshot]: { args: []; result: DesktopProviderSnapshot }
+  [IpcChannels.providerConnect]: {
+    args: [input: ConnectDesktopProviderInput]
+    result: DesktopProviderSnapshot
+  }
+  [IpcChannels.providerActivate]: {
+    args: [input: ActivateDesktopProviderInput]
+    result: DesktopProviderSnapshot
+  }
+  [IpcChannels.providerDisconnect]: {
+    args: [input: DisconnectDesktopProviderInput]
+    result: DesktopProviderSnapshot
   }
 }
 

@@ -54,6 +54,12 @@ import type {
   ListDesktopScheduledRunsInput,
   UpdateDesktopScheduledTaskInput,
 } from "../shared/schedule-types"
+import type {
+  ActivateDesktopProviderInput,
+  ConnectDesktopProviderInput,
+  DesktopProviderSnapshot,
+  DisconnectDesktopProviderInput,
+} from "../shared/provider-types"
 
 export interface DesktopAPI {
   app: {
@@ -113,6 +119,12 @@ export interface DesktopAPI {
     runNow: (id: string) => Promise<DesktopScheduledRun>
     listRuns: (input: ListDesktopScheduledRunsInput) => Promise<DesktopScheduledRun[]>
     setRunUnread: (id: string, unread: boolean) => Promise<DesktopScheduledRun>
+  }
+  providers: {
+    snapshot: () => Promise<DesktopProviderSnapshot>
+    connect: (input: ConnectDesktopProviderInput) => Promise<DesktopProviderSnapshot>
+    activate: (input: ActivateDesktopProviderInput) => Promise<DesktopProviderSnapshot>
+    disconnect: (input: DisconnectDesktopProviderInput) => Promise<DesktopProviderSnapshot>
   }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>
