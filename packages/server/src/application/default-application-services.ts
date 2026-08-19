@@ -323,8 +323,11 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
     requiresApiKey: false,
   });
 
-  const saveCustomProviders = async (providers: CustomProviderSettings[]): Promise<void> => {
-    const next = { ...ref.current, customProviders: providers };
+  const saveCustomProviders = async (
+    providers: CustomProviderSettings[],
+    patch: Partial<Settings> = {},
+  ): Promise<void> => {
+    const next = { ...ref.current, ...patch, customProviders: providers };
     await saveSettings(next);
     ref.current = next;
   };
@@ -371,7 +374,13 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
       const provider = normalizeCustomProvider({ ...input, id: normalizedId });
       const nextProviders = [...(current.customProviders ?? [])];
       nextProviders[index] = provider;
-      await saveCustomProviders(nextProviders);
+      const currentModelStillAvailable = provider.models.some((model) => model.id === current.model);
+      await saveCustomProviders(
+        nextProviders,
+        current.provider === provider.id && !currentModelStillAvailable
+          ? { model: provider.models[0]!.id }
+          : {},
+      );
       if (input.apiKey?.trim()) await storage.storeApiKey(provider.id, input.apiKey.trim());
       return await rowForCustomProvider(provider, current.provider ?? "auto");
     },

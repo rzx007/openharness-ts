@@ -193,4 +193,37 @@ describe("default daemon application services", () => {
       models: [{ id: "m", displayName: "M" }],
     })).rejects.toThrow("已被内置供应商使用");
   });
+
+  it("selects a remaining model when editing the active custom provider", async () => {
+    const ref = {
+      current: {
+        model: "old-model",
+        apiFormat: "openai" as const,
+        provider: "office-gateway",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        customProviders: [{
+          id: "office-gateway",
+          displayName: "Office Gateway",
+          baseUrl: "https://gateway.example/v1",
+          apiFormat: "openai" as const,
+          models: [
+            { id: "old-model", displayName: "Old" },
+            { id: "next-model", displayName: "Next" },
+          ],
+        }],
+      },
+    };
+    const providers = createDefaultProviderService(ref);
+
+    await providers.update!("office-gateway", {
+      id: "office-gateway",
+      displayName: "Office Gateway",
+      baseUrl: "https://gateway.example/v1",
+      apiFormat: "openai",
+      models: [{ id: "next-model", displayName: "Next" }],
+    });
+
+    expect(ref.current.model).toBe("next-model");
+  });
 });
