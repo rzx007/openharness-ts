@@ -1,16 +1,35 @@
 import {
+  AiHubMix,
+  Anthropic,
+  Baidu,
+  Bailian,
+  Bedrock,
+  Codex,
+  DeepSeek,
+  Gemini,
+  Groq,
+  Minimax,
+  Mistral,
+  Moonshot,
+  OpenAI,
+  OpenRouter,
+  SiliconCloud,
+  Stepfun,
+  VertexAI,
+  Volcengine,
+  Zhipu,
+  type IconType,
+} from "@lobehub/icons"
+import {
   CheckCircle2,
   CircleAlert,
   CircleCheck,
-  Cloud,
   Link2,
   LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
-  Server,
   Sparkles,
-  TerminalSquare,
   Trash2,
   X,
 } from "lucide-react"
@@ -60,6 +79,31 @@ import type {
 } from "@shared/provider-types"
 import { scheduleProviderNoticeDismissal } from "./provider-feedback"
 import { CustomProviderDialog } from "./custom-provider-dialog"
+import { createProviderBrandIconResolver } from "./provider-icon"
+
+type ProviderBrandIcon = IconType & { Color?: IconType }
+
+const resolveProviderBrandIcon = createProviderBrandIconResolver<ProviderBrandIcon>({
+  aiHubMix: AiHubMix,
+  anthropic: Anthropic,
+  baidu: Baidu,
+  bailian: Bailian,
+  bedrock: Bedrock,
+  codex: Codex,
+  deepSeek: DeepSeek,
+  gemini: Gemini,
+  groq: Groq,
+  minimax: Minimax,
+  mistral: Mistral,
+  moonshot: Moonshot,
+  openAI: OpenAI,
+  openRouter: OpenRouter,
+  siliconCloud: SiliconCloud,
+  stepfun: Stepfun,
+  vertexAI: VertexAI,
+  volcengine: Volcengine,
+  zhiPu: Zhipu,
+})
 
 const popularProviderNames = [
   "openai",
@@ -226,10 +270,7 @@ export function ProviderSettings(): React.JSX.Element {
     ).then((succeeded) => succeeded && setDisconnectTarget(null))
   }
 
-  const saveCustomProvider = (
-    value: DesktopCustomProviderInput,
-    setActive: boolean
-  ): void => {
+  const saveCustomProvider = (value: DesktopCustomProviderInput, setActive: boolean): void => {
     const target = customEditTarget
     void runMutation(
       target?.name ?? value.id,
@@ -758,15 +799,8 @@ function ProviderIcon({
   provider?: DesktopProviderInfo
   emphasized?: boolean
 }): React.JSX.Element {
-  const icon = !provider ? (
-    <Cloud />
-  ) : provider.credentialSource === "subscription" ? (
-    <TerminalSquare />
-  ) : provider.local ? (
-    <Server />
-  ) : (
-    <Sparkles />
-  )
+  const BrandIcon = provider ? resolveProviderBrandIcon(provider.name) : undefined
+  const RenderedBrandIcon = BrandIcon?.Color ?? BrandIcon
 
   return (
     <span
@@ -775,9 +809,17 @@ function ProviderIcon({
         emphasized ? "size-12 shadow-xs [&_svg]:size-5" : "size-10 [&_svg]:size-4"
       )}
     >
-      {icon}
+      {RenderedBrandIcon ? (
+        <ProviderBrandMark icon={RenderedBrandIcon} />
+      ) : (
+        <Sparkles aria-hidden="true" />
+      )}
     </span>
   )
+}
+
+function ProviderBrandMark({ icon: Icon }: { icon: IconType }): React.JSX.Element {
+  return <Icon aria-hidden="true" />
 }
 
 function ProviderSettingsSkeleton(): React.JSX.Element {
