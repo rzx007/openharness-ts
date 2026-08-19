@@ -45,17 +45,61 @@ export type ModelsDevCatalog = Record<string, ModelsDevProvider>;
 
 const DEFAULT_MODELS_URL = "https://models.dev/api.json";
 
+export const CODEX_DEFAULT_MODEL = "gpt-5.6-sol";
+
 const FALLBACK_CATALOG: ModelsDevCatalog = {
   codex: {
     id: "codex",
     name: "Codex Subscription",
     models: {
+      "gpt-5.6-sol": {
+        id: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
+        reasoning: true,
+        tool_call: true,
+        limit: { context: 1_050_000, output: 128_000 },
+      },
+      "gpt-5.6-terra": {
+        id: "gpt-5.6-terra",
+        name: "GPT-5.6 Terra",
+        reasoning: true,
+        tool_call: true,
+        limit: { context: 1_050_000, output: 128_000 },
+      },
+      "gpt-5.6-luna": {
+        id: "gpt-5.6-luna",
+        name: "GPT-5.6 Luna",
+        reasoning: true,
+        tool_call: true,
+        limit: { context: 1_050_000, output: 128_000 },
+      },
+      "gpt-5.5": {
+        id: "gpt-5.5",
+        name: "GPT-5.5",
+        reasoning: true,
+        tool_call: true,
+        limit: { context: 1_050_000, output: 128_000 },
+      },
       "gpt-5.4": {
         id: "gpt-5.4",
         name: "GPT-5.4",
         reasoning: true,
         tool_call: true,
+        limit: { context: 1_050_000, output: 128_000 },
+      },
+      "gpt-5.4-mini": {
+        id: "gpt-5.4-mini",
+        name: "GPT-5.4 Mini",
+        reasoning: true,
+        tool_call: true,
         limit: { context: 400_000, output: 128_000 },
+      },
+      "gpt-5.3-codex-spark": {
+        id: "gpt-5.3-codex-spark",
+        name: "GPT-5.3 Codex Spark",
+        reasoning: false,
+        tool_call: true,
+        limit: { context: 128_000, output: 128_000 },
       },
     },
   },
@@ -66,16 +110,16 @@ const FALLBACK_CATALOG: ModelsDevCatalog = {
       "deepseek/deepseek-v4-flash": {
         id: "deepseek/deepseek-v4-flash",
         name: "DeepSeek V4 Flash",
-        reasoning: false,
+        reasoning: true,
         tool_call: true,
-        limit: { context: 128_000, output: 32_000 },
+        limit: { context: 1_000_000, output: 384_000 },
       },
       "deepseek/deepseek-v4-pro": {
         id: "deepseek/deepseek-v4-pro",
         name: "DeepSeek V4 Pro",
         reasoning: true,
         tool_call: true,
-        limit: { context: 128_000, output: 32_000 },
+        limit: { context: 1_000_000, output: 384_000 },
       },
     },
   },
@@ -118,7 +162,7 @@ const FALLBACK_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.4",
         reasoning: true,
         tool_call: true,
-        limit: { context: 400_000, output: 128_000 },
+        limit: { context: 1_050_000, output: 128_000 },
       },
       "gpt-4.1": {
         id: "gpt-4.1",
@@ -209,7 +253,18 @@ function isUsableCatalog(value: ModelsDevCatalog | undefined): value is ModelsDe
 }
 
 function withFallbackProviders(catalog: ModelsDevCatalog): ModelsDevCatalog {
-  return { ...FALLBACK_CATALOG, ...catalog };
+  const merged: ModelsDevCatalog = { ...FALLBACK_CATALOG };
+  for (const [id, provider] of Object.entries(catalog)) {
+    const fallback = FALLBACK_CATALOG[id];
+    merged[id] = fallback
+      ? {
+        ...fallback,
+        ...provider,
+        models: { ...fallback.models, ...provider.models },
+      }
+      : provider;
+  }
+  return merged;
 }
 
 export class ModelCatalogService {

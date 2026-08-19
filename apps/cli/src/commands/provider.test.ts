@@ -82,7 +82,7 @@ describe("applyProviderConfig", () => {
     const settings = makeSettings({ model: "old-model", provider: "openrouter" });
     const next = applyProviderConfig(settings, { name: "codex", setActive: true });
     expect(next.provider).toBe("codex");
-    expect(next.model).toBe("gpt-5.4");
+    expect(next.model).toBe("gpt-5.6-sol");
   });
 
   it("clears a stale baseUrl from another provider when switching active provider", () => {

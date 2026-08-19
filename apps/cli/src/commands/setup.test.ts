@@ -69,7 +69,7 @@ describe("buildSetupConfig", () => {
     );
     expect(config.settingsPatch).toEqual({
       provider: "codex",
-      model: "gpt-5.4",
+      model: "gpt-5.6-sol",
       apiFormat: "openai",
     });
     expect(config.credential).toBeUndefined();

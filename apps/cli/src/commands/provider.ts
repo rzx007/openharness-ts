@@ -1,10 +1,9 @@
 import { Command } from "commander";
-import { detectProvider } from "@openharness/api";
+import { CODEX_DEFAULT_MODEL, detectProvider } from "@openharness/api";
 import type { ProviderSpec } from "@openharness/api";
 import type { Settings } from "@openharness/core";
 
 export type KeySource = "credentials" | "env" | "external" | "none";
-const CODEX_DEFAULT_MODEL = "gpt-5.4";
 
 /**
  * 判定某个 provider 的 API key 来源：

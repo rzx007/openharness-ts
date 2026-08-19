@@ -14,6 +14,7 @@ export type {
   BackendType,
 } from "./providers/registry";
 export {
+  CODEX_DEFAULT_MODEL,
   ModelCatalogService,
   createModelCatalogService,
 } from "./models/catalog";

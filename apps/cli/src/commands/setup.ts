@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import * as readline from "node:readline";
-import type { ProviderSpec } from "@openharness/api";
+import { CODEX_DEFAULT_MODEL, type ProviderSpec } from "@openharness/api";
 import type { Settings } from "@openharness/core";
 import { applyProviderConfig } from "./provider";
 
@@ -40,7 +40,7 @@ export function buildSetupConfig(
 ): SetupConfig {
   const apiFormat: Settings["apiFormat"] = spec?.backendType === "anthropic" ? "anthropic" : "openai";
   const isCodex = spec?.backendType === "codex" || choice.providerName === "codex";
-  const trimmedModel = choice.model.trim() || (isCodex ? "gpt-5.4" : "");
+  const trimmedModel = choice.model.trim() || (isCodex ? CODEX_DEFAULT_MODEL : "");
   return {
     settingsPatch: {
       provider: choice.providerName,

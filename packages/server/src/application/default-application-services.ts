@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import {
   PROVIDERS,
+  CODEX_DEFAULT_MODEL,
   createModelCatalogService,
   findByName,
   resolveProviderScopedBaseUrl,
@@ -290,7 +291,9 @@ export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsSe
       if (typeof effectivePatch.provider === "string") {
         next.provider = effectivePatch.provider;
         next.baseUrl = resolveProviderScopedBaseUrl(next.baseUrl, effectivePatch.provider);
-        if (effectivePatch.provider === "codex" && !effectivePatch.model) next.model = "gpt-5.4";
+        if (effectivePatch.provider === "codex" && !effectivePatch.model) {
+          next.model = CODEX_DEFAULT_MODEL;
+        }
       }
       if (effectivePatch.provider === "auto") {
         delete next.provider;
