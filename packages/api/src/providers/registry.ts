@@ -4,6 +4,7 @@ export interface ProviderConfig {
   apiKey: string;
   baseURL?: string;
   model?: string;
+  headers?: Record<string, string>;
 }
 
 export interface ProviderSpec {
@@ -266,32 +267,6 @@ export const PROVIDERS: ProviderSpec[] = [
     detectByBaseKeyword: "aiplatform",
     isGateway: false,
     isLocal: false,
-    isOAuth: false,
-  },
-  {
-    name: "ollama",
-    keywords: ["ollama"],
-    envKey: "",
-    displayName: "Ollama",
-    backendType: "openai_compat",
-    defaultBaseURL: "http://localhost:11434/v1",
-    detectByKeyPrefix: "",
-    detectByBaseKeyword: "localhost:11434",
-    isGateway: false,
-    isLocal: true,
-    isOAuth: false,
-  },
-  {
-    name: "vllm",
-    keywords: ["vllm"],
-    envKey: "",
-    displayName: "vLLM/Local",
-    backendType: "openai_compat",
-    defaultBaseURL: "",
-    detectByKeyPrefix: "",
-    detectByBaseKeyword: "",
-    isGateway: false,
-    isLocal: true,
     isOAuth: false,
   },
 ];

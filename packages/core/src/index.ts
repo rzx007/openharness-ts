@@ -68,6 +68,8 @@ export type {
   ChannelsConfig,
   DaemonConfig,
   FeishuChannelSettings,
+  CustomProviderSettings,
+  CustomProviderModelSettings,
 } from "./types/settings";
 
 export type { UsageSnapshot, CostTracker as ICostTracker } from "./types/usage";

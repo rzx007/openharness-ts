@@ -113,6 +113,20 @@ export interface DaemonConfig {
   autoStart: boolean;
 }
 
+export interface CustomProviderModelSettings {
+  id: string;
+  displayName: string;
+}
+
+export interface CustomProviderSettings {
+  id: string;
+  displayName: string;
+  baseUrl: string;
+  apiFormat: "openai";
+  models: CustomProviderModelSettings[];
+  headers?: Record<string, string>;
+}
+
 export interface Settings {
   apiKey?: string;
   model: string;
@@ -120,6 +134,7 @@ export interface Settings {
   maxTokens?: number;
   baseUrl?: string;
   provider?: string;
+  customProviders?: CustomProviderSettings[];
   maxTurns: number;
   systemPrompt?: string;
   permission: PermissionSettings;

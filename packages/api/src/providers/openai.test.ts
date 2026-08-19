@@ -10,6 +10,20 @@ import {
   convertUserContentToOpenAI,
 } from "./openai.js";
 
+describe("OpenAICompatibleClient configuration", () => {
+  it("forwards custom provider headers to the OpenAI SDK", () => {
+    const client = new OpenAICompatibleClient({
+      apiKey: "test",
+      baseURL: "https://gateway.example/v1",
+      headers: { "X-Tenant": "desktop" },
+    });
+
+    expect((client.client as any)._options.defaultHeaders).toEqual({
+      "X-Tenant": "desktop",
+    });
+  });
+});
+
 describe("stripThinkBlocks", () => {
   it("removes a complete <think> block", () => {
     const [visible, leftover] = stripThinkBlocks("before<think>secret</think>after");

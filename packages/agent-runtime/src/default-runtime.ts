@@ -41,6 +41,26 @@ let exitCleanupInstalled = false;
 export type ToolLimit =
   { kind: "all" } | { kind: "only"; names: ReadonlySet<string> };
 
+export interface CustomProviderRuntimeConfig {
+  backendType: "openai_compat";
+  baseURL: string;
+  headers?: Record<string, string>;
+}
+
+export function resolveCustomProviderRuntime(
+  settings: Settings,
+  providerName: string | undefined,
+): CustomProviderRuntimeConfig | undefined {
+  if (!providerName) return undefined;
+  const provider = settings.customProviders?.find((item) => item.id === providerName);
+  if (!provider) return undefined;
+  return {
+    backendType: "openai_compat",
+    baseURL: provider.baseUrl,
+    ...(provider.headers ? { headers: provider.headers } : {}),
+  };
+}
+
 interface OpenHarnessRuntimeOptions {
   settings: Settings;
   cwd?: string;
@@ -360,8 +380,9 @@ async function resolveApiClient(
   const resolvedStorage = storage ?? new CredentialStorage();
   const apiKey = await resolveApiKey(settings, configuration, resolvedStorage);
   const providerName = configuration?.provider ?? settings.provider;
-  const rawBaseURL = configuration?.baseUrl ?? settings.baseUrl;
-  const baseURL = providerName
+  const customProvider = resolveCustomProviderRuntime(settings, providerName);
+  const rawBaseURL = configuration?.baseUrl ?? customProvider?.baseURL ?? settings.baseUrl;
+  const baseURL = providerName && !customProvider
     ? resolveProviderScopedBaseUrl(rawBaseURL, providerName)
     : rawBaseURL;
   const runtimeModel = resolveRuntimeModel(settings, configuration ?? {});
@@ -380,7 +401,7 @@ async function resolveApiClient(
 
   // 确定后端类型：优先使用提供商规范中的类型，否则根据 API 格式推断
   const backendType: BackendType =
-    spec?.backendType ??
+    customProvider?.backendType ?? spec?.backendType ??
     resolveBackendFromFormat(configuration?.apiFormat ?? settings.apiFormat);
 
   switch (backendType) {
@@ -395,6 +416,7 @@ async function resolveApiClient(
         apiKey,
         baseURL: baseURL ?? spec?.defaultBaseURL,
         model: runtimeModel,
+        ...(customProvider?.headers ? { headers: customProvider.headers } : {}),
       });
     case "anthropic":
     default:

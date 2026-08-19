@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createOpenHarnessRuntime,
   resolveAutoApproveTools,
+  resolveCustomProviderRuntime,
   resolveEffectiveAllowedTools,
   resolveRuntimeModel,
 } from "./default-runtime.js";
@@ -67,6 +68,35 @@ describe("resolveRuntimeModel", () => {
 
   it("falls back to settings model when no override is provided", () => {
     expect(resolveRuntimeModel(BASE_SETTINGS, {})).toBe(BASE_SETTINGS.model);
+  });
+});
+
+describe("resolveCustomProviderRuntime", () => {
+  it("resolves a selected custom provider as an OpenAI-compatible endpoint", () => {
+    const settings: Settings = {
+      ...BASE_SETTINGS,
+      provider: "office-gateway",
+      customProviders: [
+        {
+          id: "office-gateway",
+          displayName: "Office Gateway",
+          baseUrl: "https://gateway.example/v1",
+          apiFormat: "openai",
+          models: [{ id: "team-model", displayName: "Team Model" }],
+          headers: { "X-Tenant": "desktop" },
+        },
+      ],
+    };
+
+    expect(resolveCustomProviderRuntime(settings, "office-gateway")).toEqual({
+      backendType: "openai_compat",
+      baseURL: "https://gateway.example/v1",
+      headers: { "X-Tenant": "desktop" },
+    });
+  });
+
+  it("does not resolve a provider that is not custom", () => {
+    expect(resolveCustomProviderRuntime(BASE_SETTINGS, "anthropic")).toBeUndefined();
   });
 });
 

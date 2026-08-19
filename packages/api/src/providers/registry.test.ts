@@ -8,8 +8,10 @@ import {
 } from "./registry.js";
 
 describe("PROVIDERS", () => {
-  it("has 21 providers", () => {
-    expect(PROVIDERS).toHaveLength(21);
+  it("does not advertise local services that were not detected", () => {
+    const names = PROVIDERS.map((provider) => provider.name);
+    expect(names).not.toContain("ollama");
+    expect(names).not.toContain("vllm");
   });
 
   it("each provider has required fields", () => {
@@ -42,13 +44,6 @@ describe("PROVIDERS", () => {
     expect(c).toBeDefined();
     expect(c!.backendType).toBe("codex");
     expect(c!.isOAuth).toBe(true);
-  });
-
-  it("ollama is local provider", () => {
-    const o = findByName("ollama");
-    expect(o).toBeDefined();
-    expect(o!.isLocal).toBe(true);
-    expect(o!.envKey).toBe("");
   });
 
   it("openrouter is gateway", () => {
@@ -144,12 +139,6 @@ describe("detectProvider", () => {
     expect(result!.name).toBe("deepseek");
   });
 
-  it("detects by model keyword (ollama)", () => {
-    const result = detectProvider("llama3", undefined, "http://localhost:11434/v1");
-    expect(result).toBeDefined();
-    expect(result!.name).toBe("ollama");
-  });
-
   it("detects by model keyword (gemini)", () => {
     const result = detectProvider("gemini-pro");
     expect(result).toBeDefined();
@@ -196,10 +185,6 @@ describe("detectProviderFromEnv", () => {
     expect(result).toBeUndefined();
   });
 
-  it("detects ollama (no env key, skipped)", () => {
-    const result = detectProviderFromEnv({});
-    expect(result).toBeUndefined();
-  });
 });
 
 describe("resolveProviderScopedBaseUrl", () => {

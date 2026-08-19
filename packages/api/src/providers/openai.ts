@@ -145,6 +145,7 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
     this._client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
+      defaultHeaders: config.headers,
     });
   }
 
