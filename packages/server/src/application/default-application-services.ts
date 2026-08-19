@@ -17,6 +17,7 @@ import {
   getConfigDir,
   saveSettings,
   type Settings,
+  type CustomProviderSettings,
 } from "@openharness/core";
 import { MemoryManager, type MemoryEntry } from "@openharness/memory";
 import {
@@ -54,6 +55,7 @@ import type {
   ProjectInitService,
   ProviderInfo,
   ProviderService,
+  CustomProviderInput,
   SettingsService,
 } from "./settings-api.js";
 
@@ -308,6 +310,25 @@ export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsSe
 
 export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderService {
   const storage = new CredentialStorage();
+  const rowForCustomProvider = async (
+    provider: CustomProviderSettings,
+    currentName: string,
+  ): Promise<ProviderInfo> => ({
+    name: provider.id,
+    displayName: provider.displayName,
+    hasKey: !!(await storage.loadApiKey(provider.id)),
+    active: provider.id === currentName,
+    local: false,
+    custom: true,
+    requiresApiKey: false,
+  });
+
+  const saveCustomProviders = async (providers: CustomProviderSettings[]): Promise<void> => {
+    const next = { ...ref.current, customProviders: providers };
+    await saveSettings(next);
+    ref.current = next;
+  };
+
   return {
     async list() {
       const current = await readCurrentSettings(ref);
@@ -321,11 +342,106 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
           displayName: spec.displayName,
           hasKey: !!hasKey || !spec.envKey,
           active: spec.name === currentName,
-          local: !spec.envKey,
+          local: spec.isLocal,
         });
+      }
+      for (const provider of current.customProviders ?? []) {
+        rows.push(await rowForCustomProvider(provider, currentName));
       }
       return rows;
     },
+    async create(input) {
+      const current = await readCurrentSettings(ref);
+      const provider = normalizeCustomProvider(input);
+      if (findByName(provider.id)) {
+        throw new ProviderMutationError(400, `供应商 ID “${provider.id}” 已被内置供应商使用。`);
+      }
+      if (current.customProviders?.some((item) => item.id === provider.id)) {
+        throw new ProviderMutationError(409, `自定义供应商 “${provider.id}” 已存在。`);
+      }
+      await saveCustomProviders([...(current.customProviders ?? []), provider]);
+      if (input.apiKey?.trim()) await storage.storeApiKey(provider.id, input.apiKey.trim());
+      return await rowForCustomProvider(provider, current.provider ?? "auto");
+    },
+    async update(id, input) {
+      const current = await readCurrentSettings(ref);
+      const normalizedId = id.trim().toLowerCase();
+      const index = current.customProviders?.findIndex((item) => item.id === normalizedId) ?? -1;
+      if (index < 0) throw new ProviderMutationError(404, `自定义供应商 “${normalizedId}” 不存在。`);
+      const provider = normalizeCustomProvider({ ...input, id: normalizedId });
+      const nextProviders = [...(current.customProviders ?? [])];
+      nextProviders[index] = provider;
+      await saveCustomProviders(nextProviders);
+      if (input.apiKey?.trim()) await storage.storeApiKey(provider.id, input.apiKey.trim());
+      return await rowForCustomProvider(provider, current.provider ?? "auto");
+    },
+    async remove(id) {
+      const current = await readCurrentSettings(ref);
+      const normalizedId = id.trim().toLowerCase();
+      if (current.provider === normalizedId) {
+        throw new ProviderMutationError(409, "该供应商正在使用中。请先切换到其他供应商，再删除。");
+      }
+      const providers = current.customProviders ?? [];
+      if (!providers.some((item) => item.id === normalizedId)) {
+        throw new ProviderMutationError(404, `自定义供应商 “${normalizedId}” 不存在。`);
+      }
+      await saveCustomProviders(providers.filter((item) => item.id !== normalizedId));
+      await storage.clearProviderCredentials(normalizedId);
+    },
+  };
+}
+
+export class ProviderMutationError extends Error {
+  constructor(
+    readonly status: 400 | 404 | 409,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function normalizeCustomProvider(input: CustomProviderInput): CustomProviderSettings {
+  const id = input.id?.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
+    throw new ProviderMutationError(400, "供应商 ID 只能包含小写字母、数字、连字符或下划线。");
+  }
+  const displayName = input.displayName?.trim();
+  if (!displayName) throw new ProviderMutationError(400, "请输入显示名称。");
+  const baseUrl = input.baseUrl?.trim();
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+  } catch {
+    throw new ProviderMutationError(400, "基础 URL 必须是有效的 HTTP 或 HTTPS 地址。");
+  }
+  if (input.apiFormat !== "openai") {
+    throw new ProviderMutationError(400, "当前仅支持 OpenAI 兼容接口。");
+  }
+  if (!Array.isArray(input.models) || input.models.length === 0) {
+    throw new ProviderMutationError(400, "请至少添加一个模型。");
+  }
+  const models = input.models.map((model) => ({
+    id: model.id?.trim(),
+    displayName: model.displayName?.trim() || model.id?.trim(),
+  }));
+  if (models.some((model) => !model.id)) {
+    throw new ProviderMutationError(400, "模型 ID 不能为空。");
+  }
+  if (new Set(models.map((model) => model.id)).size !== models.length) {
+    throw new ProviderMutationError(400, "模型 ID 不能重复。");
+  }
+  const headers = Object.fromEntries(
+    Object.entries(input.headers ?? {})
+      .map(([name, value]) => [name.trim(), value.trim()] as const)
+      .filter(([name, value]) => name && value),
+  );
+  return {
+    id,
+    displayName,
+    baseUrl,
+    apiFormat: "openai",
+    models,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
 }
 
@@ -389,7 +505,7 @@ async function isProviderConnected(providerName: string, storage: CredentialStor
   return !!(spec.envKey && process.env[spec.envKey]);
 }
 
-export function createDefaultModelService(): ModelService {
+export function createDefaultModelService(ref?: DaemonSettingsRef): ModelService {
   const storage = new CredentialStorage();
   const catalogService = createModelCatalogService();
   return {
@@ -411,6 +527,21 @@ export function createDefaultModelService(): ModelService {
           name: spec.name,
           displayName: spec.displayName,
           models,
+        });
+      }
+
+      const current = ref ? await readCurrentSettings(ref) : undefined;
+      for (const provider of current?.customProviders ?? []) {
+        result.push({
+          name: provider.id,
+          displayName: provider.displayName,
+          models: provider.models.map((model) => ({
+            id: model.id,
+            label: model.displayName,
+            provider: provider.displayName,
+            providerName: provider.id,
+            status: "active",
+          })),
         });
       }
 
@@ -933,7 +1064,7 @@ export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
   return {
     settings: createDefaultSettingsService(ref),
     provider: createDefaultProviderService(ref),
-    model: createDefaultModelService(),
+    model: createDefaultModelService(ref),
     memory: createDefaultMemoryService(),
     auth: createDefaultAuthService(),
     context: createDefaultContextService(ref),

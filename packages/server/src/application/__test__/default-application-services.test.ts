@@ -8,6 +8,7 @@ import {
   createDefaultContextService,
   createDefaultProfileService,
   createDefaultProviderService,
+  createDefaultModelService,
   createDefaultSettingsService,
 } from "../default-application-services.js";
 
@@ -123,5 +124,73 @@ describe("default daemon application services", () => {
 
     expect(providers.find((item) => item.name === "openrouter")?.active).toBe(true);
     expect(providers.find((item) => item.name === "openai")?.active).toBe(false);
+  });
+
+  it("creates a custom provider and exposes it with declared models", async () => {
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+    };
+    const providers = createDefaultProviderService(ref);
+
+    await providers.create({
+      id: "office-gateway",
+      displayName: " Office Gateway ",
+      baseUrl: "https://gateway.example/v1",
+      apiFormat: "openai",
+      apiKey: "secret",
+      models: [{ id: "team-model", displayName: "Team Model" }],
+      headers: { " X-Tenant ": " desktop " },
+    });
+
+    expect(ref.current.customProviders).toEqual([{
+      id: "office-gateway",
+      displayName: "Office Gateway",
+      baseUrl: "https://gateway.example/v1",
+      apiFormat: "openai",
+      models: [{ id: "team-model", displayName: "Team Model" }],
+      headers: { "X-Tenant": "desktop" },
+    }]);
+    await expect(providers.list()).resolves.toContainEqual(expect.objectContaining({
+      name: "office-gateway",
+      displayName: "Office Gateway",
+      custom: true,
+      hasKey: true,
+    }));
+
+    const models = await createDefaultModelService(ref).list();
+    expect(models).toContainEqual({
+      name: "office-gateway",
+      displayName: "Office Gateway",
+      models: [expect.objectContaining({
+        id: "team-model",
+        label: "Team Model",
+        providerName: "office-gateway",
+      })],
+    });
+  });
+
+  it("rejects custom providers that collide with built-in IDs", async () => {
+    const providers = createDefaultProviderService({
+      current: {
+        model: "m",
+        apiFormat: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" },
+      },
+    });
+
+    await expect(providers.create({
+      id: "openai",
+      displayName: "Fake OpenAI",
+      baseUrl: "https://example.com/v1",
+      apiFormat: "openai",
+      models: [{ id: "m", displayName: "M" }],
+    })).rejects.toThrow("已被内置供应商使用");
   });
 });

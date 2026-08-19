@@ -26,6 +26,7 @@ import type {
   AgentPersonaInfo,
   AuthStatus,
   CompactSessionResponse,
+  CustomProviderInput,
   CreateScheduledTaskInput,
   CreateTaskInput,
   HookInfo,
@@ -204,6 +205,40 @@ export class OpenHarnessClient {
       { signal: options.signal },
     );
     return response.providers;
+  }
+
+  async createCustomProvider(
+    input: CustomProviderInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ProviderInfo> {
+    const response = await this.request<{ provider: ProviderInfo }>("/providers/custom", {
+      method: "POST",
+      body: input,
+      signal: options.signal,
+    });
+    return response.provider;
+  }
+
+  async updateCustomProvider(
+    id: string,
+    input: CustomProviderInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ProviderInfo> {
+    const response = await this.request<{ provider: ProviderInfo }>(
+      `/providers/custom/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: input, signal: options.signal },
+    );
+    return response.provider;
+  }
+
+  async removeCustomProvider(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request<{ ok: true }>(`/providers/custom/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      signal: options.signal,
+    });
   }
 
   /** `GET /models` */

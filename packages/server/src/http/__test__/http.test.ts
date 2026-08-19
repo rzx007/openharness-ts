@@ -1542,6 +1542,56 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
+  it("creates, updates and removes custom providers through resource APIs", async () => {
+    const records = new Map<string, { id: string; displayName: string }>();
+    await withServer(async ({ baseUrl, token }) => {
+      const input = {
+        id: "office-gateway",
+        displayName: "Office Gateway",
+        baseUrl: "https://gateway.example/v1",
+        apiFormat: "openai",
+        models: [{ id: "team-model", displayName: "Team Model" }],
+      };
+      const created = await fetch(`${baseUrl}/providers/custom`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      expect(created.status).toBe(201);
+      expect(await created.json()).toMatchObject({ provider: { name: "office-gateway" } });
+
+      const updated = await fetch(`${baseUrl}/providers/custom/office-gateway`, {
+        method: "PATCH",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ ...input, displayName: "Office AI" }),
+      });
+      expect(updated.status).toBe(200);
+      expect(await updated.json()).toMatchObject({ provider: { displayName: "Office AI" } });
+
+      const removed = await fetch(`${baseUrl}/providers/custom/office-gateway`, {
+        method: "DELETE",
+        headers: auth(token),
+      });
+      expect(removed.status).toBe(200);
+      expect(records.has("office-gateway")).toBe(false);
+    }, {
+      providerService: {
+        list: () => [],
+        create: (input) => {
+          records.set(input.id, { id: input.id, displayName: input.displayName });
+          return { name: input.id, displayName: input.displayName, hasKey: false, active: false, custom: true };
+        },
+        update: (id, input) => {
+          records.set(id, { id, displayName: input.displayName });
+          return { name: id, displayName: input.displayName, hasKey: false, active: false, custom: true };
+        },
+        remove: (id) => {
+          records.delete(id);
+        },
+      },
+    });
+  });
+
   it("compacts a session transcript through the runtime and store", async () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {

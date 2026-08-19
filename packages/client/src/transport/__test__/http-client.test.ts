@@ -24,6 +24,53 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 }
 
 describe("OpenHarnessClient", () => {
+  it("calls custom provider resource endpoints", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (init?.method === "DELETE") return jsonResponse({ ok: true });
+      const body = JSON.parse(String(init?.body));
+      return jsonResponse({
+        provider: {
+          name: body.id ?? "office-gateway",
+          displayName: body.displayName,
+          hasKey: Boolean(body.apiKey),
+          active: false,
+          custom: true,
+        },
+      }, init?.method === "POST" ? 201 : 200);
+    };
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      token: "tok",
+      fetch: fetchImpl as typeof fetch,
+    });
+    const input = {
+      id: "office-gateway",
+      displayName: "Office Gateway",
+      baseUrl: "https://gateway.example/v1",
+      apiFormat: "openai" as const,
+      apiKey: "secret",
+      models: [{ id: "team-model", displayName: "Team Model" }],
+    };
+
+    await expect(client.createCustomProvider(input)).resolves.toMatchObject({
+      name: "office-gateway",
+      custom: true,
+    });
+    await expect(client.updateCustomProvider("office-gateway", {
+      ...input,
+      displayName: "Office AI",
+    })).resolves.toMatchObject({ displayName: "Office AI" });
+    await expect(client.removeCustomProvider("office-gateway")).resolves.toBeUndefined();
+
+    expect(calls.map((call) => [call.url, call.init.method])).toEqual([
+      ["http://127.0.0.1:3456/providers/custom", "POST"],
+      ["http://127.0.0.1:3456/providers/custom/office-gateway", "PATCH"],
+      ["http://127.0.0.1:3456/providers/custom/office-gateway", "DELETE"],
+    ]);
+  });
+
   it("normalizes safe daemon URLs and rejects URL-based credential leaks", () => {
     expect(normalizeDaemonBaseUrl(" https://daemon.example/api/ ")).toBe(
       "https://daemon.example/api",

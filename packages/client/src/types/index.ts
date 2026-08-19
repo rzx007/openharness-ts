@@ -216,6 +216,18 @@ export interface ProviderInfo {
   hasKey: boolean;
   active: boolean;
   local?: boolean;
+  custom?: boolean;
+  requiresApiKey?: boolean;
+}
+
+export interface CustomProviderInput {
+  id: string;
+  displayName: string;
+  baseUrl: string;
+  apiFormat: "openai";
+  apiKey?: string;
+  models: Array<{ id: string; displayName: string }>;
+  headers?: Record<string, string>;
 }
 
 export interface ModelInfo {

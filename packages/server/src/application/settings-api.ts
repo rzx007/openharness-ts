@@ -17,10 +17,30 @@ export interface ProviderInfo {
   hasKey: boolean;
   active: boolean;
   local?: boolean;
+  custom?: boolean;
+  requiresApiKey?: boolean;
+}
+
+export interface CustomProviderModelInput {
+  id: string;
+  displayName: string;
+}
+
+export interface CustomProviderInput {
+  id: string;
+  displayName: string;
+  baseUrl: string;
+  apiFormat: "openai";
+  apiKey?: string;
+  models: CustomProviderModelInput[];
+  headers?: Record<string, string>;
 }
 
 export interface ProviderService {
   list(): Promise<ProviderInfo[]> | ProviderInfo[];
+  create?(input: CustomProviderInput): Promise<ProviderInfo> | ProviderInfo;
+  update?(id: string, input: CustomProviderInput): Promise<ProviderInfo> | ProviderInfo;
+  remove?(id: string): Promise<void> | void;
 }
 
 export interface ModelInfo {

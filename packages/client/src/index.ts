@@ -89,6 +89,7 @@ export type {
   PluginInfo,
   PromptResponse,
   ProviderInfo,
+  CustomProviderInput,
   RememberSessionResponse,
   ReplyPermissionInput,
   ScheduledRunRecord,
