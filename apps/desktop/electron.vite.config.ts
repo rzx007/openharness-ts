@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import { defineConfig } from "electron-vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
+import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import type { Plugin } from "vite"
 
 function copySessionMigrations(): Plugin {
@@ -44,6 +45,15 @@ export default defineConfig({
         "@shared": resolve("src/shared"),
       },
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      tanstackRouter({
+        target: "react",
+        autoCodeSplitting: true,
+        routesDirectory: "./src/renderer/src/routes",
+        generatedRouteTree: "./src/renderer/src/routeTree.gen.ts",
+      }),
+      react(),
+      tailwindcss(),
+    ],
   },
 })

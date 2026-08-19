@@ -13,7 +13,6 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import { Composer } from "./composer"
-import { ErrorBanner } from "./error-banner"
 import { HeaderIconButton } from "./controls"
 import { NewConversationStart } from "./new-conversation-start"
 import { PermissionCard } from "./message-block"
@@ -35,7 +34,6 @@ function ConversationPane({
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
   const openingSession = useDesktopSessionStore((state) => state.openingSession)
   const sending = useDesktopSessionStore((state) => state.sending)
-  const error = useDesktopSessionStore((state) => state.error)
   const models = useDesktopSessionStore((state) => state.models)
   const selectedModel = useDesktopSessionStore((state) => state.selectedModel)
   const selectedProvider = useDesktopSessionStore((state) => state.selectedProvider)
@@ -63,7 +61,6 @@ function ConversationPane({
   )
   const interrupt = useDesktopSessionStore((state) => state.interrupt)
   const replyPermission = useDesktopSessionStore((state) => state.replyPermission)
-  const clearError = useDesktopSessionStore((state) => state.clearError)
   const hasSession = activeSessionId !== null
   const archived = sessionView?.session.status === "archived"
   const sessionActions = useSessionActionDialogs()
@@ -167,8 +164,6 @@ function ConversationPane({
           </div>
         </header>
       ) : null}
-
-      {error ? <ErrorBanner message={error} onClose={clearError} /> : null}
 
       {!hasSession ? (
         <NewConversationStart

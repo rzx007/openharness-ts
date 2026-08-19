@@ -452,7 +452,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       set((state) => ({
         sessionView: view,
         openingSession: false,
-        error: latestRunFailure(view.runs)?.error ?? null,
         selectedProject:
           state.projects.find((project) => samePath(project.path, view.session.cwd)) ??
           projectFromSession(view.session),
@@ -763,7 +762,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     else writePersistedActiveSessionId(view.session.id)
     set((state) => {
       const knownSession = state.sessions.find((session) => session.id === view.session.id)
-      const runFailure = findNewRunFailure(current?.runs ?? [], view.runs)
       const session =
         knownSession &&
         isPlaceholderTitle(view.session.title) &&
@@ -774,7 +772,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       return {
         sessionView: { ...view, session },
         openingSession: false,
-        ...(runFailure ? { error: runFailure.error ?? "会话运行失败。" } : {}),
         selectedModel: session.model,
         selectedProvider: sessionProvider(session, state.defaultProvider),
         selectedPermissionMode: sessionPermissionMode(session, state.defaultPermissionMode),
@@ -910,26 +907,6 @@ function sessionProvider(
   if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return fallback
   const provider = (runtime as Record<string, unknown>)["provider"]
   return typeof provider === "string" && provider.trim() ? provider.trim() : fallback
-}
-
-function findNewRunFailure(
-  previousRuns: DesktopSessionView["runs"],
-  nextRuns: DesktopSessionView["runs"]
-): DesktopSessionView["runs"][number] | undefined {
-  const previousFailedIds = new Set(
-    previousRuns.filter((run) => run.status === "failed").map((run) => run.id)
-  )
-  return latestRunFailure(
-    nextRuns.filter((run) => run.status === "failed" && !previousFailedIds.has(run.id))
-  )
-}
-
-function latestRunFailure(
-  runs: DesktopSessionView["runs"]
-): DesktopSessionView["runs"][number] | undefined {
-  return [...runs]
-    .filter((run) => run.status === "failed")
-    .sort((left, right) => right.updatedAt - left.updatedAt)[0]
 }
 
 function sessionPinnedAt(session: DesktopSessionRecord): number {

@@ -65,6 +65,37 @@ describe("conversation turn model", () => {
     if (entries[0]?.type !== "turn") throw new Error("Expected a conversation turn")
     expect(entries[0].turn.assistantMessages).toHaveLength(1)
   })
+
+  it("keeps a failed run with its original user turn when no assistant message exists", () => {
+    const failedRun = { ...run("run-1", "input-1"), status: "failed" as const, updatedAt: 2 }
+    const entries = buildConversationEntries(
+      [message("user", 1, { runId: "run-1" }), message("user", 3, { runId: "run-2" })],
+      [],
+      [failedRun, run("run-2", "input-2")]
+    )
+    const turns = entries.flatMap((entry) => (entry.type === "turn" ? [entry.turn] : []))
+
+    expect(turns[0]?.runIds).toContain("run-1")
+    expect(turns[1]?.runIds).not.toContain("run-1")
+  })
+
+  it("places a failed run without messages by its creation time", () => {
+    const failedRun = {
+      ...run("orphan-run", "orphan-input"),
+      status: "failed" as const,
+      createdAt: 2,
+      updatedAt: 2,
+    }
+    const entries = buildConversationEntries(
+      [message("user", 1), message("user", 3)],
+      [],
+      [failedRun]
+    )
+    const turns = entries.flatMap((entry) => (entry.type === "turn" ? [entry.turn] : []))
+
+    expect(turns.map((turn) => turn.id)).toEqual(["message-1", "orphan-input", "message-3"])
+    expect(turns[1]?.runIds).toEqual(["orphan-run"])
+  })
 })
 
 function message(

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router"
 import {
   Group,
   Panel,
@@ -9,20 +10,14 @@ import {
   usePanelRef,
 } from "react-resizable-panels"
 
-import { ConversationPane } from "@renderer/components/desktop/conversation-pane"
-import { ScheduledPage } from "@renderer/components/desktop/scheduled-page"
-import { Sidebar } from "@renderer/components/desktop/sidebar"
-import { SettingsContent, SettingsSidebar } from "@renderer/components/desktop/settings-page"
-import { TitleBar, type UtilityToolRequest } from "@renderer/components/desktop/title-bar"
+import { ConversationPane } from "@renderer/components/desktop/conversation-page"
+import { defaultSettingsSection } from "@renderer/components/desktop/settings-page/settings-navigation"
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
-import { UtilityPanel } from "@renderer/components/desktop/utility-panel"
+import { MainLayoutContext } from "./main-layout-context"
+import { Sidebar } from "./sidebar"
+import { TitleBar, type UtilityToolRequest } from "./title-bar"
+import { UtilityPanel } from "./utility-panel"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
-import {
-  createSessionNavigationState,
-  currentSessionDestination,
-  moveSessionNavigation,
-  recordSessionDestination,
-} from "@renderer/components/desktop/session-navigation"
 import {
   attachDesktopSessionEvents,
   useDesktopSessionStore,
@@ -41,23 +36,21 @@ function isOpenWorkspaceLayout(layout: Layout | null | undefined): layout is Lay
   return Number(layout?.conversation) > 5 && Number(layout?.utility) > 5
 }
 
-export function DesktopShell(): React.JSX.Element {
-  const initializeSessions = useDesktopSessionStore((state) => state.initialize)
+export function MainLayout(): React.JSX.Element {
+  const navigate = useNavigate()
+  const router = useRouter()
+  const historyIndex = useRouterState({
+    select: (state) => state.location.state.__TSR_index,
+  })
   const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
-  const openSession = useDesktopSessionStore((state) => state.openSession)
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsSection, setSettingsSection] = useState("常规")
-  const [primaryView, setPrimaryView] = useState<"conversation" | "scheduled">("conversation")
   const [panelOpen, setPanelOpen] = useState(true)
   const [utilityMaximized, setUtilityMaximized] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(actualSizeZoomLevel)
-  const [navigationReady, setNavigationReady] = useState(false)
-  const [navigation, setNavigation] = useState(() => createSessionNavigationState(null))
   const [fileOpenRequest, setFileOpenRequest] = useState<{
     id: number
     path: string
@@ -79,8 +72,6 @@ export function DesktopShell(): React.JSX.Element {
   const lastOpenWorkspaceLayoutRef = useRef<Layout | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const zoomLevelRef = useRef(actualSizeZoomLevel)
-  const initializationRef = useRef<Promise<void> | null>(null)
-  const navigationTargetRef = useRef<{ destination: string | null } | null>(null)
   const outerLayout = useDefaultLayout({
     id: "desktop-shell-layout-v1",
     panelIds: ["sidebar", "workspace"],
@@ -108,30 +99,8 @@ export function DesktopShell(): React.JSX.Element {
 
   useEffect(() => {
     const detach = attachDesktopSessionEvents()
-    let disposed = false
-    const initialization = initializationRef.current ?? initializeSessions()
-    initializationRef.current = initialization
-    void initialization.finally(() => {
-      if (disposed) return
-      const destination = useDesktopSessionStore.getState().activeSessionId
-      setNavigation(createSessionNavigationState(destination))
-      setNavigationReady(true)
-    })
-    return () => {
-      disposed = true
-      detach()
-    }
-  }, [initializeSessions])
-
-  useEffect(() => {
-    if (!navigationReady) return
-    const expected = navigationTargetRef.current
-    if (expected && expected.destination === activeSessionId) {
-      navigationTargetRef.current = null
-      return
-    }
-    setNavigation((current) => recordSessionDestination(current, activeSessionId))
-  }, [activeSessionId, navigationReady])
+    return detach
+  }, [])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -252,25 +221,28 @@ export function DesktopShell(): React.JSX.Element {
     setUtilityMaximized(true)
   }, [conversationPanelRef, utilityMaximized, utilityPanelRef, workspaceGroupRef])
 
-  const restoreSessionDestination = useCallback(
-    (destination: string | null): void => {
-      setPrimaryView("conversation")
-      navigationTargetRef.current = { destination }
-      if (destination) void openSession(destination)
-      else void startNewConversation()
+  const openConversationRoute = useCallback(
+    (destination: string | null | undefined): void => {
+      const sessionId = destination === undefined ? activeSessionId : destination
+      if (sessionId) {
+        void navigate({
+          to: "/conversation/$sessionId",
+          params: { sessionId },
+        })
+      } else {
+        void navigate({ to: "/" })
+      }
     },
-    [openSession, startNewConversation]
+    [activeSessionId, navigate]
   )
 
-  const moveNavigation = useCallback(
-    (offset: -1 | 1): void => {
-      const next = moveSessionNavigation(navigation, offset)
-      if (next === navigation) return
-      setNavigation(next)
-      restoreSessionDestination(currentSessionDestination(next))
-    },
-    [navigation, restoreSessionDestination]
-  )
+  const startNewConversationRoute = useCallback((): void => {
+    void startNewConversation().then(() => navigate({ to: "/" }))
+  }, [navigate, startNewConversation])
+
+  const showCurrentConversation = useCallback((): void => {
+    openConversationRoute(undefined)
+  }, [openConversationRoute])
 
   const activeSessionIndex = sessions.findIndex((session) => session.id === activeSessionId)
   const previousSession = activeSessionIndex > 0 ? sessions[activeSessionIndex - 1] : null
@@ -280,18 +252,12 @@ export function DesktopShell(): React.JSX.Element {
       : null
 
   const openPreviousSession = useCallback((): void => {
-    if (previousSession) {
-      setPrimaryView("conversation")
-      void openSession(previousSession.id)
-    }
-  }, [openSession, previousSession])
+    if (previousSession) openConversationRoute(previousSession.id)
+  }, [openConversationRoute, previousSession])
 
   const openNextSession = useCallback((): void => {
-    if (nextSession) {
-      setPrimaryView("conversation")
-      void openSession(nextSession.id)
-    }
-  }, [nextSession, openSession])
+    if (nextSession) openConversationRoute(nextSession.id)
+  }, [nextSession, openConversationRoute])
 
   const applyZoomLevel = useCallback((requestedLevel: number): void => {
     const nextLevel = normalizeZoomLevel(requestedLevel)
@@ -346,19 +312,13 @@ export function DesktopShell(): React.JSX.Element {
   )
 
   useDesktopShortcuts({
-    newConversation: () => {
-      setPrimaryView("conversation")
-      void startNewConversation()
-    },
+    newConversation: startNewConversationRoute,
     chooseProject: () => {
-      setPrimaryView("conversation")
+      showCurrentConversation()
       void chooseProject()
     },
     closeConversation: () => {
-      if (activeSessionId) {
-        setPrimaryView("conversation")
-        void startNewConversation()
-      }
+      if (activeSessionId) startNewConversationRoute()
     },
     quit: () => void window.desktop.app.quit(),
     toggleSidebar,
@@ -368,12 +328,119 @@ export function DesktopShell(): React.JSX.Element {
     openTerminal: () => openUtilityTool("terminal"),
     previousSession: openPreviousSession,
     nextSession: openNextSession,
-    goBack: () => moveNavigation(-1),
-    goForward: () => moveNavigation(1),
+    goBack: () => router.history.back(),
+    goForward: () => router.history.forward(),
     zoomIn,
     zoomOut,
     resetZoom,
   })
+
+  const renderPage = (sidebar: React.ReactNode): React.JSX.Element => (
+    <div
+      ref={contentRef}
+      className="relative min-h-0 flex-1 overflow-visible"
+      style={{ "--sidebar-width": `${sidebarDefaultWidth}px` } as React.CSSProperties}
+    >
+      <div
+        aria-hidden="true"
+        className="workspace-top-shadow pointer-events-none absolute top-0 right-0 z-20 h-px"
+        style={{ left: "calc(var(--sidebar-width) + 1px)" }}
+      />
+      <Group
+        id="desktop-shell"
+        orientation="horizontal"
+        className="h-full min-h-0"
+        resizeTargetMinimumSize={resizeTargetMinimumSize}
+        defaultLayout={outerLayout.defaultLayout}
+        onLayoutChanged={outerLayout.onLayoutChanged}
+      >
+        <Panel
+          id="sidebar"
+          panelRef={sidebarPanelRef}
+          defaultSize={sidebarDefaultWidth}
+          minSize={sidebarMinimumWidth}
+          maxSize={420}
+          collapsedSize={0}
+          collapsible
+          groupResizeBehavior="preserve-pixel-size"
+          className="h-full min-h-0 overflow-hidden"
+          onResize={(size) => {
+            contentRef.current?.style.setProperty("--sidebar-width", `${size.inPixels}px`)
+            const nextOpen = size.inPixels > 1
+            setSidebarOpen((current) => (current === nextOpen ? current : nextOpen))
+          }}
+        >
+          {sidebar}
+        </Panel>
+        <PanelResizeHandle label="调整侧边栏宽度" />
+        <Panel
+          id="workspace"
+          minSize={workspaceMinimumWidth}
+          className="h-full min-h-0"
+          style={{ overflow: "visible" }}
+        >
+          <section className="border-workspace flex h-full min-w-0 overflow-hidden rounded-tl-lg border-t border-l bg-conversation shadow-workspace">
+            <Outlet />
+          </section>
+        </Panel>
+      </Group>
+    </div>
+  )
+
+  const renderConversationWorkspace = (): React.JSX.Element => (
+    <Group
+      id="desktop-workspace"
+      groupRef={workspaceGroupRef}
+      orientation="horizontal"
+      className="h-full min-h-0 w-full"
+      resizeTargetMinimumSize={resizeTargetMinimumSize}
+      defaultLayout={workspaceDefaultLayout}
+      onLayoutChanged={handleWorkspaceLayoutChanged}
+    >
+      <Panel
+        id="conversation"
+        panelRef={conversationPanelRef}
+        defaultSize="100%"
+        minSize={utilityMaximized ? 0 : conversationMinimumWidth}
+        collapsedSize={0}
+        collapsible
+        className="h-full min-h-0 overflow-hidden"
+      >
+        <ConversationPane
+          panelOpen={panelOpen}
+          onTogglePanel={togglePanel}
+          onOpenFile={openWorkspaceFile}
+          onOpenTerminal={openTerminal}
+        />
+      </Panel>
+      {!utilityMaximized && <PanelResizeHandle label="调整工具面板宽度" />}
+      <Panel
+        id="utility"
+        panelRef={utilityPanelRef}
+        defaultSize={`${defaultWorkspaceLayout.utility}%`}
+        minSize={utilityMinimumWidth}
+        maxSize={utilityMaximized ? "100%" : "70%"}
+        collapsedSize={0}
+        collapsible
+        groupResizeBehavior="preserve-pixel-size"
+        className="h-full min-h-0 overflow-hidden"
+        onResize={(size) => {
+          const nextOpen = size.inPixels > 1
+          setPanelOpen((current) => (current === nextOpen ? current : nextOpen))
+        }}
+      >
+        <UtilityPanel
+          open={panelOpen}
+          maximized={utilityMaximized}
+          onToggleMaximized={toggleUtilityMaximized}
+          onClose={closeUtilityPanel}
+          fileOpenRequest={fileOpenRequest}
+          terminalOpenRequest={terminalOpenRequest}
+          toolOpenRequest={toolOpenRequest}
+        />
+      </Panel>
+    </Group>
+  )
 
   return (
     <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-shell text-foreground">
@@ -382,25 +449,19 @@ export function DesktopShell(): React.JSX.Element {
         panelOpen={panelOpen}
         isMaximized={isMaximized}
         hasActiveSession={Boolean(activeSessionId)}
-        canGoBack={navigation.index > 0}
-        canGoForward={navigation.index < navigation.entries.length - 1}
+        canGoBack={router.history.canGoBack()}
+        canGoForward={historyIndex < router.history.length - 1}
         canOpenPreviousSession={Boolean(previousSession)}
         canOpenNextSession={Boolean(nextSession)}
         zoomLevel={zoomLevel}
-        onGoBack={() => moveNavigation(-1)}
-        onGoForward={() => moveNavigation(1)}
-        onNewConversation={() => {
-          setPrimaryView("conversation")
-          void startNewConversation()
-        }}
+        onGoBack={() => router.history.back()}
+        onGoForward={() => router.history.forward()}
+        onNewConversation={startNewConversationRoute}
         onChooseProject={() => {
-          setPrimaryView("conversation")
+          showCurrentConversation()
           void chooseProject()
         }}
-        onCloseConversation={() => {
-          setPrimaryView("conversation")
-          void startNewConversation()
-        }}
+        onCloseConversation={startNewConversationRoute}
         onOpenPreviousSession={openPreviousSession}
         onOpenNextSession={openNextSession}
         onToggleSidebar={toggleSidebar}
@@ -413,137 +474,26 @@ export function DesktopShell(): React.JSX.Element {
         onToggleMaximize={() => void window.desktop.window.toggleMaximize()}
         onClose={() => void window.desktop.window.close()}
       />
-
-      <div
-        ref={contentRef}
-        className="relative min-h-0 flex-1 overflow-visible"
-        style={{ "--sidebar-width": `${sidebarDefaultWidth}px` } as React.CSSProperties}
+      <MainLayoutContext.Provider
+        value={{
+          conversationWorkspace: renderConversationWorkspace(),
+          startNewConversation: startNewConversationRoute,
+        }}
       >
-        <div
-          aria-hidden="true"
-          className="workspace-top-shadow pointer-events-none absolute top-0 right-0 z-20 h-px"
-          style={{ left: "calc(var(--sidebar-width) + 1px)" }}
-        />
-
-        <Group
-          id="desktop-shell"
-          orientation="horizontal"
-          className="h-full min-h-0"
-          resizeTargetMinimumSize={resizeTargetMinimumSize}
-          defaultLayout={outerLayout.defaultLayout}
-          onLayoutChanged={outerLayout.onLayoutChanged}
-        >
-          <Panel
-            id="sidebar"
-            panelRef={sidebarPanelRef}
-            defaultSize={sidebarDefaultWidth}
-            minSize={sidebarMinimumWidth}
-            maxSize={420}
-            collapsedSize={0}
-            collapsible
-            groupResizeBehavior="preserve-pixel-size"
-            className="h-full min-h-0 overflow-hidden"
-            onResize={(size) => {
-              contentRef.current?.style.setProperty("--sidebar-width", `${size.inPixels}px`)
-              const nextOpen = size.inPixels > 1
-              setSidebarOpen((current) => (current === nextOpen ? current : nextOpen))
-            }}
-          >
-            {settingsOpen ? (
-              <SettingsSidebar
-                selectedSection={settingsSection}
-                onSelectSection={setSettingsSection}
-                onClose={() => setSettingsOpen(false)}
-              />
-            ) : (
-              <Sidebar
-                open={sidebarOpen}
-                scheduledSelected={primaryView === "scheduled"}
-                onOpenScheduled={() => setPrimaryView("scheduled")}
-                onOpenConversation={() => setPrimaryView("conversation")}
-                onOpenSettings={() => setSettingsOpen(true)}
-              />
-            )}
-          </Panel>
-
-          <PanelResizeHandle label="调整侧边栏宽度" />
-
-          <Panel
-            id="workspace"
-            minSize={workspaceMinimumWidth}
-            className="h-full min-h-0"
-            style={{ overflow: "visible" }}
-          >
-            <section className="border-workspace flex h-full min-w-0 overflow-hidden rounded-tl-lg border-t border-l bg-conversation shadow-workspace">
-              {settingsOpen ? (
-                <SettingsContent selectedSection={settingsSection} />
-              ) : primaryView === "scheduled" ? (
-                <ScheduledPage
-                  onStartConversation={() => {
-                    setPrimaryView("conversation")
-                    void startNewConversation()
-                  }}
-                />
-              ) : (
-                <Group
-                  id="desktop-workspace"
-                  groupRef={workspaceGroupRef}
-                  orientation="horizontal"
-                  className="h-full min-h-0 w-full"
-                  resizeTargetMinimumSize={resizeTargetMinimumSize}
-                  defaultLayout={workspaceDefaultLayout}
-                  onLayoutChanged={handleWorkspaceLayoutChanged}
-                >
-                  <Panel
-                    id="conversation"
-                    panelRef={conversationPanelRef}
-                    defaultSize="100%"
-                    minSize={utilityMaximized ? 0 : conversationMinimumWidth}
-                    collapsedSize={0}
-                    collapsible
-                    className="h-full min-h-0 overflow-hidden"
-                  >
-                    <ConversationPane
-                      panelOpen={panelOpen}
-                      onTogglePanel={togglePanel}
-                      onOpenFile={openWorkspaceFile}
-                      onOpenTerminal={openTerminal}
-                    />
-                  </Panel>
-
-                  {!utilityMaximized && <PanelResizeHandle label="调整工具面板宽度" />}
-
-                  <Panel
-                    id="utility"
-                    panelRef={utilityPanelRef}
-                    defaultSize={`${defaultWorkspaceLayout.utility}%`}
-                    minSize={utilityMinimumWidth}
-                    maxSize={utilityMaximized ? "100%" : "70%"}
-                    collapsedSize={0}
-                    collapsible
-                    groupResizeBehavior="preserve-pixel-size"
-                    className="h-full min-h-0 overflow-hidden"
-                    onResize={(size) => {
-                      const nextOpen = size.inPixels > 1
-                      setPanelOpen((current) => (current === nextOpen ? current : nextOpen))
-                    }}
-                  >
-                    <UtilityPanel
-                      open={panelOpen}
-                      maximized={utilityMaximized}
-                      onToggleMaximized={toggleUtilityMaximized}
-                      onClose={closeUtilityPanel}
-                      fileOpenRequest={fileOpenRequest}
-                      terminalOpenRequest={terminalOpenRequest}
-                      toolOpenRequest={toolOpenRequest}
-                    />
-                  </Panel>
-                </Group>
-              )}
-            </section>
-          </Panel>
-        </Group>
-      </div>
+        {renderPage(
+          <Sidebar
+            open={sidebarOpen}
+            onOpenScheduled={() => void navigate({ to: "/scheduled" })}
+            onOpenConversation={openConversationRoute}
+            onOpenSettings={() =>
+              void navigate({
+                to: "/settings/$section",
+                params: { section: defaultSettingsSection },
+              })
+            }
+          />
+        )}
+      </MainLayoutContext.Provider>
     </main>
   )
 }

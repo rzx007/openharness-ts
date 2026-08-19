@@ -6,6 +6,7 @@ import type {
 
 export interface ConversationTurn {
   id: string
+  createdAt: number
   inputId?: string
   runIds: string[]
   userMessage?: DesktopSessionMessage
@@ -29,6 +30,7 @@ export function buildConversationEntries(
   const partsByMessage = groupPartsByMessage(parts)
   const inputIdByRunId = new Map(runs.map((run) => [run.id, run.inputId]))
   const turnsByInputId = new Map<string, ConversationTurn>()
+  const turnsByRunId = new Map<string, ConversationTurn>()
   const entries: ConversationEntry[] = []
   let latestTurn: ConversationTurn | undefined
 
@@ -49,6 +51,7 @@ export function buildConversationEntries(
       entries.push({ type: "turn", turn })
       latestTurn = turn
       if (inputId) turnsByInputId.set(inputId, turn)
+      if (message.runId) turnsByRunId.set(message.runId, turn)
       continue
     }
 
@@ -63,12 +66,32 @@ export function buildConversationEntries(
 
     turn.assistantMessages.push(message)
     turn.assistantParts.push(...messageParts)
-    if (message.runId && !turn.runIds.includes(message.runId)) turn.runIds.push(message.runId)
+    turn.createdAt = Math.min(turn.createdAt, message.createdAt)
+    if (message.runId) {
+      if (!turn.runIds.includes(message.runId)) turn.runIds.push(message.runId)
+      turnsByRunId.set(message.runId, turn)
+    }
     if (inputId && !turn.inputId) {
       turn.inputId = inputId
       turnsByInputId.set(inputId, turn)
     }
   }
+
+  for (const run of runs) {
+    const turn =
+      (run.inputId ? turnsByInputId.get(run.inputId) : undefined) ?? turnsByRunId.get(run.id)
+    if (turn) {
+      if (!turn.runIds.includes(run.id)) turn.runIds.push(run.id)
+      turnsByRunId.set(run.id, turn)
+      continue
+    }
+    if (run.status !== "failed") continue
+    const failedTurn = createTurn(undefined, [], run.inputId, `failed-run-${run.id}`, run.createdAt)
+    failedTurn.runIds.push(run.id)
+    entries.push({ type: "turn", turn: failedTurn })
+  }
+
+  entries.sort(compareEntries)
 
   return entries
 }
@@ -77,10 +100,12 @@ function createTurn(
   userMessage: DesktopSessionMessage | undefined,
   userParts: DesktopSessionPart[],
   inputId?: string,
-  fallbackId?: string
+  fallbackId?: string,
+  fallbackCreatedAt = Number.MAX_SAFE_INTEGER
 ): ConversationTurn {
   return {
     id: inputId ?? userMessage?.id ?? fallbackId ?? "empty-turn",
+    createdAt: userMessage?.createdAt ?? fallbackCreatedAt,
     inputId,
     runIds: [],
     userMessage,
@@ -88,6 +113,13 @@ function createTurn(
     assistantMessages: [],
     assistantParts: [],
   }
+}
+
+function compareEntries(left: ConversationEntry, right: ConversationEntry): number {
+  const leftCreatedAt = left.type === "system" ? left.system.message.createdAt : left.turn.createdAt
+  const rightCreatedAt =
+    right.type === "system" ? right.system.message.createdAt : right.turn.createdAt
+  return leftCreatedAt - rightCreatedAt
 }
 
 function groupPartsByMessage(parts: DesktopSessionPart[]): Map<string, DesktopSessionPart[]> {

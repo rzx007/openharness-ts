@@ -1,7 +1,7 @@
 import { Fragment, useMemo } from "react"
 
-import { AssistantMessage } from "@renderer/components/desktop/conversation/assistant-message"
-import { buildConversationEntries } from "@renderer/components/desktop/conversation/conversation-turn-model"
+import { AssistantMessage } from "./message/assistant-message"
+import { buildConversationEntries } from "./message/conversation-turn-model"
 import { Marker, MarkerContent, MarkerIcon } from "@renderer/components/ui/marker"
 import { MessageScrollerItem } from "@renderer/components/ui/message-scroller"
 import { Spinner } from "@renderer/components/ui/spinner"
@@ -51,19 +51,6 @@ export function ConversationTranscript({
       entry.type === "turn" && entry.turn.userMessage ? [entry.turn.userMessage] : []
     )[0]
   const failedRuns = runs.filter((run) => run.status === "failed")
-  const attachedRunIds = new Set(
-    entries.flatMap((entry) => {
-      if (entry.type !== "turn") return []
-      return failedRuns
-        .filter(
-          (run) =>
-            entry.turn.runIds.includes(run.id) ||
-            (Boolean(run.inputId) && run.inputId === entry.turn.inputId)
-        )
-        .map((run) => run.id)
-    })
-  )
-  const unattachedFailures = failedRuns.filter((run) => !attachedRunIds.has(run.id))
 
   if (messages.length === 0 && !running && failedRuns.length === 0) {
     return (
@@ -148,11 +135,6 @@ export function ConversationTranscript({
           </Fragment>
         )
       })}
-      {unattachedFailures.map((run) => (
-        <MessageScrollerItem key={run.id} messageId={`run-error-${run.id}`}>
-          <RunErrorNotice error={run.error} />
-        </MessageScrollerItem>
-      ))}
       {running ? (
         <MessageScrollerItem messageId="conversation-running-status">
           <Marker>

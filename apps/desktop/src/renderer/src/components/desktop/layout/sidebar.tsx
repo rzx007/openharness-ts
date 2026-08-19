@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { useMemo, useRef, useState } from "react"
+import { useMatchRoute } from "@tanstack/react-router"
 
 import { Button } from "@renderer/components/ui/button"
 import {
@@ -49,15 +50,14 @@ import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import { isSessionPinned, useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
-import { useSessionActionDialogs } from "./conversation-pane/session-action-dialogs"
-import { SessionMoreMenu } from "./conversation-pane/session-more-menu"
+import { useSessionActionDialogs } from "../conversation-page/session-action-dialogs"
+import { SessionMoreMenu } from "../conversation-page/session-more-menu"
 
 type SidebarProps = {
   open: boolean
   onOpenSettings: () => void
   onOpenScheduled: () => void
-  onOpenConversation: () => void
-  scheduledSelected: boolean
+  onOpenConversation: (sessionId?: string | null) => void
 }
 
 const secondaryNavigation = [
@@ -72,14 +72,14 @@ export function Sidebar({
   onOpenSettings,
   onOpenScheduled,
   onOpenConversation,
-  scheduledSelected,
 }: SidebarProps): React.JSX.Element {
+  const matchRoute = useMatchRoute()
+  const scheduledSelected = Boolean(matchRoute({ to: "/scheduled" }))
   const projects = useDesktopSessionStore((state) => state.projects)
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const archivedSessions = useDesktopSessionStore((state) => state.archivedSessions)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
-  const openSession = useDesktopSessionStore((state) => state.openSession)
   const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
   const renameProject = useDesktopSessionStore((state) => state.renameProject)
@@ -112,10 +112,10 @@ export function Sidebar({
 
   const beginNewConversation = (project?: DesktopProject): void => {
     setArchiveMode(false)
-    onOpenConversation()
     void (async () => {
       await startNewConversation()
       if (project) await selectProject(project)
+      onOpenConversation(null)
     })()
   }
 
@@ -157,8 +157,7 @@ export function Sidebar({
 
   const sessionActions: SessionActions = {
     onOpen: (session) => {
-      onOpenConversation()
-      void openSession(session.id)
+      onOpenConversation(session.id)
     },
     onRename: sessionActionsDialogs.beginRename,
     onArchive: sessionActionsDialogs.beginArchive,

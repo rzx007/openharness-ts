@@ -92,14 +92,17 @@ function previewModelsForGroup(
 function formatContextWindow(value: number | undefined): string {
   if (typeof value !== "number" || value <= 0) return "—"
   if (value >= 1_000_000) {
-    const millions = value / 1_000_000
-    return `${Number.isInteger(millions) ? millions : parseFloat(millions.toFixed(1))}M`
+    return `${formatCompactCount(value / 1_000_000)}M`
   }
   if (value >= 1_000) {
-    const thousands = value / 1_000
-    return `${Number.isInteger(thousands) ? thousands : parseFloat(thousands.toFixed(1))}K`
+    return `${formatCompactCount(value / 1_000)}K`
   }
   return String(value)
+}
+
+function formatCompactCount(value: number): string {
+  if (Number.isInteger(value)) return String(value)
+  return String(parseFloat(value.toFixed(2)))
 }
 
 function formatInput(model: DesktopModel): string {
@@ -151,6 +154,7 @@ function ModelHoverDetails({ model }: { model: DesktopModel }): React.JSX.Elemen
     { label: "输入", value: formatInput(model) },
     { label: "推理", value: formatReasoning(model.reasoning) },
     { label: "上下文", value: formatContextWindow(model.contextWindow) },
+    { label: "最大输出", value: formatContextWindow(model.outputLimit) },
   ]
   return (
     <div className="flex flex-col gap-1.5">

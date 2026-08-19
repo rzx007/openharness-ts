@@ -1,14 +1,9 @@
-import { DesktopShell } from "@renderer/components/desktop/desktop-shell"
-import { PetWindow } from "@renderer/components/desktop/pet-window"
+import { RouterProvider } from "@tanstack/react-router"
+
+import { router } from "@renderer/router"
 
 function App(): React.JSX.Element {
-  const route = window.location.hash.replace(/^#/, "") || "/"
-
-  if (route === "/pet") {
-    return <PetWindow />
-  }
-
-  return <DesktopShell />
+  return <RouterProvider router={router} />
 }
 
 export default App

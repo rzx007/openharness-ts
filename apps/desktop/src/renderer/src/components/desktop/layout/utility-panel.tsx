@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 
 import { BrowserTool, type BrowserToolTab } from "@renderer/components/desktop/tools/browser-tool"
-import type { UtilityToolRequest } from "@renderer/components/desktop/title-bar"
+import type { UtilityToolRequest } from "./title-bar"
 import { FilesTool } from "@renderer/components/desktop/tools/files-tool"
 import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
 import type { FileViewerTab } from "@renderer/components/desktop/tools/file-viewer"

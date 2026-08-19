@@ -1,8 +1,8 @@
 import { AlertCircle, Check, Copy, GitBranchPlus, PencilLine, ShieldCheck, X } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { AssistantMessage } from "@renderer/components/desktop/conversation/assistant-message"
-import { formatMessageTime } from "@renderer/components/desktop/conversation/format-message-time"
+import { AssistantMessage } from "./message/assistant-message"
+import { formatMessageTime } from "./message/format-message-time"
 import { Button } from "@renderer/components/ui/button"
 import { Message, MessageContent } from "@renderer/components/ui/message"
 import { cn } from "@renderer/lib/utils"

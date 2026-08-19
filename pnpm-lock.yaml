@@ -246,9 +246,6 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.14.9
         version: 3.14.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@tanstack/router-plugin':
-        specifier: ^1.168.30
-        version: 1.168.30(@tanstack/react-router@1.170.27(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(esbuild@0.27.7)(rollup@4.60.1)(vite@7.3.2(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       '@xterm/addon-fit':
         specifier: ^0.10.0
         version: 0.10.0(@xterm/xterm@5.5.0)
@@ -349,6 +346,9 @@ importers:
       '@electron-toolkit/tsconfig':
         specifier: ^2.0.0
         version: 2.0.0(@types/node@22.19.17)
+      '@tanstack/router-plugin':
+        specifier: ^1.168.30
+        version: 1.168.30(@tanstack/react-router@1.170.27(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(esbuild@0.27.7)(rollup@4.60.1)(vite@7.3.2(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       '@types/node':
         specifier: ^22.19.1
         version: 22.19.17
