@@ -8,6 +8,7 @@ import {
   type TrayNotificationOptions,
 } from "../shared/ipc-channels"
 import type { DesktopTerminalEvent } from "../shared/terminal-types"
+import type { DesktopAuxSessionUpdate } from "../shared/session-types"
 
 const invoke = <C extends IpcChannel>(
   channel: C,
@@ -110,6 +111,12 @@ export const desktopAPI = {
       invoke(IpcChannels.providerActivate, input),
     disconnect: (input: IpcInvokeMap[typeof IpcChannels.providerDisconnect]["args"][0]) =>
       invoke(IpcChannels.providerDisconnect, input),
+    createCustom: (input: IpcInvokeMap[typeof IpcChannels.providerCustomCreate]["args"][0]) =>
+      invoke(IpcChannels.providerCustomCreate, input),
+    updateCustom: (input: IpcInvokeMap[typeof IpcChannels.providerCustomUpdate]["args"][0]) =>
+      invoke(IpcChannels.providerCustomUpdate, input),
+    removeCustom: (input: IpcInvokeMap[typeof IpcChannels.providerCustomRemove]["args"][0]) =>
+      invoke(IpcChannels.providerCustomRemove, input),
   },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
@@ -131,6 +138,10 @@ export const desktopAPI = {
     create: (input: IpcInvokeMap[typeof IpcChannels.sessionCreate]["args"][0]) =>
       invoke(IpcChannels.sessionCreate, input),
     open: (sessionId: string) => invoke(IpcChannels.sessionOpen, sessionId),
+    openAux: (input: IpcInvokeMap[typeof IpcChannels.sessionAuxOpen]["args"][0]) =>
+      invoke(IpcChannels.sessionAuxOpen, input),
+    closeAux: (input: IpcInvokeMap[typeof IpcChannels.sessionAuxClose]["args"][0]) =>
+      invoke(IpcChannels.sessionAuxClose, input),
     fork: (input: IpcInvokeMap[typeof IpcChannels.sessionFork]["args"][0]) =>
       invoke(IpcChannels.sessionFork, input),
     close: () => invoke(IpcChannels.sessionClose),
@@ -167,6 +178,16 @@ export const desktopAPI = {
       ): void => listener(value)
       ipcRenderer.on(IpcEvents.sessionUpdated, wrapped)
       return () => ipcRenderer.removeListener(IpcEvents.sessionUpdated, wrapped)
+    },
+    onAuxUpdated: (
+      listener: (value: DesktopAuxSessionUpdate) => void
+    ): (() => void) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        value: DesktopAuxSessionUpdate
+      ): void => listener(value)
+      ipcRenderer.on(IpcEvents.sessionAuxUpdated, wrapped)
+      return () => ipcRenderer.removeListener(IpcEvents.sessionAuxUpdated, wrapped)
     },
   },
   events: {

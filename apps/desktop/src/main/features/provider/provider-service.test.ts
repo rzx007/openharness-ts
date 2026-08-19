@@ -13,7 +13,6 @@ describe("buildDesktopProviderSnapshot", () => {
         { name: "openai", displayName: "OpenAI", hasKey: true, active: true },
         { name: "anthropic", displayName: "Anthropic", hasKey: true, active: false },
         { name: "codex", displayName: "Codex Subscription", hasKey: true, active: false },
-        { name: "ollama", displayName: "Ollama", hasKey: true, active: false, local: true },
       ],
       auth: {
         codex: {
@@ -49,10 +48,6 @@ describe("buildDesktopProviderSnapshot", () => {
       credentialSource: "environment",
       credentialLabel: "ANTHROPIC_API_KEY",
     })
-    expect(snapshot.providers.find((item) => item.name === "ollama")).toMatchObject({
-      connected: true,
-      credentialSource: "local",
-    })
     expect(snapshot.providers.find((item) => item.name === "codex")).toMatchObject({
       connected: true,
       credentialSource: "subscription",
@@ -62,10 +57,64 @@ describe("buildDesktopProviderSnapshot", () => {
       "openai",
       "anthropic",
       "codex",
-      "ollama",
     ])
     expect(snapshot).not.toHaveProperty("subscriptions")
     expect(JSON.stringify(snapshot)).not.toContain("sk-")
+  })
+
+  it("merges editable custom provider metadata without requiring an API key", () => {
+    const snapshot = buildDesktopProviderSnapshot({
+      providers: [
+        {
+          name: "office-gateway",
+          displayName: "Office Gateway",
+          hasKey: false,
+          active: false,
+          custom: true,
+          requiresApiKey: false,
+        },
+      ],
+      auth: {
+        codex: { configured: false, state: "missing", source: "none" },
+        storedProviders: [],
+        envProviders: [],
+      },
+      settings: {
+        customProviders: [
+          {
+            id: "office-gateway",
+            displayName: "Office Gateway",
+            baseUrl: "https://gateway.example/v1",
+            apiFormat: "openai",
+            models: [{ id: "team-model", displayName: "Team Model" }],
+            headers: { "X-Tenant": "desktop" },
+          },
+        ],
+      },
+      models: [
+        {
+          name: "office-gateway",
+          displayName: "Office Gateway",
+          models: [
+            {
+              id: "team-model",
+              label: "Team Model",
+              provider: "Office Gateway",
+              providerName: "office-gateway",
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(snapshot.providers[0]).toMatchObject({
+      custom: true,
+      connected: true,
+      credentialSource: "configured",
+      baseUrl: "https://gateway.example/v1",
+      headers: { "X-Tenant": "desktop" },
+      models: [{ id: "team-model", label: "Team Model" }],
+    })
   })
 
   it("does not treat Codex as connected when external auth is missing", () => {

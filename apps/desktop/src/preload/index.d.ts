@@ -11,13 +11,16 @@ import type {
   CreateDesktopSessionInput,
   CreateDesktopProjectBranchInput,
   DesktopBootstrapData,
+  DesktopAuxSessionUpdate,
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
+  CloseDesktopAuxSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
+  OpenDesktopAuxSessionInput,
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
@@ -59,6 +62,9 @@ import type {
   ConnectDesktopProviderInput,
   DesktopProviderSnapshot,
   DisconnectDesktopProviderInput,
+  CreateDesktopCustomProviderInput,
+  UpdateDesktopCustomProviderInput,
+  RemoveDesktopCustomProviderInput,
 } from "../shared/provider-types"
 
 export interface DesktopAPI {
@@ -125,6 +131,9 @@ export interface DesktopAPI {
     connect: (input: ConnectDesktopProviderInput) => Promise<DesktopProviderSnapshot>
     activate: (input: ActivateDesktopProviderInput) => Promise<DesktopProviderSnapshot>
     disconnect: (input: DisconnectDesktopProviderInput) => Promise<DesktopProviderSnapshot>
+    createCustom: (input: CreateDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
+    updateCustom: (input: UpdateDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
+    removeCustom: (input: RemoveDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
   }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>
@@ -141,6 +150,8 @@ export interface DesktopAPI {
     createBranch: (input: CreateDesktopProjectBranchInput) => Promise<DesktopProjectDetails>
     create: (input: CreateDesktopSessionInput) => Promise<DesktopSessionRecord>
     open: (sessionId: string) => Promise<DesktopSessionView>
+    openAux: (input: OpenDesktopAuxSessionInput) => Promise<DesktopSessionView>
+    closeAux: (input: CloseDesktopAuxSessionInput) => Promise<void>
     fork: (input: ForkDesktopSessionInput) => Promise<DesktopSessionRecord>
     close: () => Promise<void>
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
@@ -160,6 +171,7 @@ export interface DesktopAPI {
     archive: (sessionId: string) => Promise<DesktopSessionRecord>
     delete: (sessionId: string) => Promise<string[]>
     onUpdated: (listener: (value: DesktopSessionView) => void) => () => void
+    onAuxUpdated: (listener: (value: DesktopAuxSessionUpdate) => void) => () => void
   }
   events: {
     onMainProcessMessage: (listener: (message: string) => void) => () => void

@@ -5,10 +5,13 @@ import {
   Cloud,
   Link2,
   LoaderCircle,
+  Pencil,
+  Plus,
   RefreshCw,
   Server,
   Sparkles,
   TerminalSquare,
+  Trash2,
   X,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -28,7 +31,6 @@ import { Badge } from "@renderer/components/ui/badge"
 import { Button } from "@renderer/components/ui/button"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -52,10 +54,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@renderer/components/ui
 import { cn } from "@renderer/lib/utils"
 import type {
   DesktopProviderCredentialSource,
+  DesktopCustomProviderInput,
   DesktopProviderInfo,
   DesktopProviderSnapshot,
 } from "@shared/provider-types"
 import { scheduleProviderNoticeDismissal } from "./provider-feedback"
+import { CustomProviderDialog } from "./custom-provider-dialog"
 
 const popularProviderNames = [
   "openai",
@@ -78,8 +82,6 @@ const providerDescriptions: Record<string, string> = {
   zhipu: "智谱 GLM 系列模型",
   groq: "Groq 高速推理服务",
   mistral: "Mistral 与 Codestral 模型",
-  ollama: "本机运行的 Ollama 模型",
-  vllm: "本机或局域网中的 vLLM 服务",
 }
 
 export function ProviderSettings(): React.JSX.Element {
@@ -93,6 +95,9 @@ export function ProviderSettings(): React.JSX.Element {
   const [apiKey, setApiKey] = useState("")
   const [setActiveAfterConnect, setSetActiveAfterConnect] = useState(true)
   const [showAll, setShowAll] = useState(false)
+  const [customDialogOpen, setCustomDialogOpen] = useState(false)
+  const [customEditTarget, setCustomEditTarget] = useState<DesktopProviderInfo | null>(null)
+  const [customRemoveTarget, setCustomRemoveTarget] = useState<DesktopProviderInfo | null>(null)
   const mutationInFlight = useRef(false)
 
   const load = useCallback(async (): Promise<void> => {
@@ -221,6 +226,35 @@ export function ProviderSettings(): React.JSX.Element {
     ).then((succeeded) => succeeded && setDisconnectTarget(null))
   }
 
+  const saveCustomProvider = (
+    value: DesktopCustomProviderInput,
+    setActive: boolean
+  ): void => {
+    const target = customEditTarget
+    void runMutation(
+      target?.name ?? value.id,
+      () =>
+        target
+          ? window.desktop.providers.updateCustom({ provider: target.name, value })
+          : window.desktop.providers.createCustom({ ...value, setActive }),
+      target ? `已更新 ${value.displayName}。` : `已添加 ${value.displayName}。`
+    ).then((succeeded) => {
+      if (!succeeded) return
+      setCustomDialogOpen(false)
+      setCustomEditTarget(null)
+    })
+  }
+
+  const removeCustomProvider = (): void => {
+    if (!customRemoveTarget || busyProvider) return
+    const target = customRemoveTarget
+    void runMutation(
+      target.name,
+      () => window.desktop.providers.removeCustom({ provider: target.name }),
+      `已删除 ${target.displayName}。`
+    ).then((succeeded) => succeeded && setCustomRemoveTarget(null))
+  }
+
   if (loading && !snapshot) return <ProviderSettingsSkeleton />
 
   return (
@@ -300,20 +334,28 @@ export function ProviderSettings(): React.JSX.Element {
           onActivate={activate}
           onConnect={setConnectTarget}
           onDisconnect={setDisconnectTarget}
+          onAddCustom={() => {
+            setCustomEditTarget(null)
+            setCustomDialogOpen(true)
+          }}
+          onEditCustom={(provider) => {
+            setCustomEditTarget(provider)
+            setCustomDialogOpen(true)
+          }}
+          onRemoveCustom={setCustomRemoveTarget}
         />
       </section>
 
-      <Card className="shadow-xs">
-        <CardHeader>
-          <CardTitle>自定义供应商</CardTitle>
-          <CardDescription>连接 OpenAI 兼容接口，并自定义模型与请求头。</CardDescription>
-          <CardAction>
-            <Button type="button" variant="outline" size="sm" disabled>
-              即将支持
-            </Button>
-          </CardAction>
-        </CardHeader>
-      </Card>
+      <CustomProviderDialog
+        open={customDialogOpen}
+        provider={customEditTarget ?? undefined}
+        busy={busyProvider !== null}
+        onOpenChange={(open) => {
+          setCustomDialogOpen(open)
+          if (!open) setCustomEditTarget(null)
+        }}
+        onSubmit={saveCustomProvider}
+      />
 
       <Dialog
         open={connectTarget !== null}
@@ -390,6 +432,30 @@ export function ProviderSettings(): React.JSX.Element {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        open={customRemoveTarget !== null}
+        onOpenChange={(open) => !open && !busyProvider && setCustomRemoveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除 {customRemoveTarget?.displayName}？</AlertDialogTitle>
+            <AlertDialogDescription>
+              这会移除自定义连接、模型和 OpenHarness 保存的对应凭证。该操作不会影响远端服务。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busyProvider !== null}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={busyProvider !== null}
+              onClick={removeCustomProvider}
+            >
+              {busyProvider ? "删除中..." : "删除供应商"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -446,6 +512,9 @@ function ProviderListCard({
   onActivate,
   onConnect,
   onDisconnect,
+  onAddCustom,
+  onEditCustom,
+  onRemoveCustom,
 }: {
   connectedProviders: DesktopProviderInfo[]
   availableProviders: DesktopProviderInfo[]
@@ -456,6 +525,9 @@ function ProviderListCard({
   onActivate: (provider: DesktopProviderInfo) => void
   onConnect: (provider: DesktopProviderInfo) => void
   onDisconnect: (provider: DesktopProviderInfo) => void
+  onAddCustom: () => void
+  onEditCustom: (provider: DesktopProviderInfo) => void
+  onRemoveCustom: (provider: DesktopProviderInfo) => void
 }): React.JSX.Element {
   return (
     <Card className="py-0 shadow-xs">
@@ -472,6 +544,8 @@ function ProviderListCard({
           onActivate={onActivate}
           onConnect={onConnect}
           onDisconnect={onDisconnect}
+          onEditCustom={onEditCustom}
+          onRemoveCustom={onRemoveCustom}
         />
         <Separator />
         <ProviderGroup
@@ -483,6 +557,8 @@ function ProviderListCard({
           onActivate={onActivate}
           onConnect={onConnect}
           onDisconnect={onDisconnect}
+          onEditCustom={onEditCustom}
+          onRemoveCustom={onRemoveCustom}
         />
         {totalAvailableProviders > popularProviderNames.length ? (
           <>
@@ -494,6 +570,30 @@ function ProviderListCard({
             </div>
           </>
         ) : null}
+        <Separator />
+        <div className="flex items-center justify-between gap-4 bg-muted/20 px-6 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-background text-muted-foreground ring-1 ring-foreground/10 [&_svg]:size-4">
+              <Plus />
+            </span>
+            <div className="min-w-0">
+              <p className="font-heading text-sm font-semibold">自定义供应商</p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">
+                添加 Ollama、vLLM 或其他 OpenAI 兼容接口
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busyProvider !== null}
+            onClick={onAddCustom}
+          >
+            <Plus data-icon="inline-start" />
+            添加
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )
@@ -508,6 +608,8 @@ function ProviderGroup({
   onActivate,
   onConnect,
   onDisconnect,
+  onEditCustom,
+  onRemoveCustom,
 }: {
   label: string
   description: string
@@ -517,6 +619,8 @@ function ProviderGroup({
   onActivate: (provider: DesktopProviderInfo) => void
   onConnect: (provider: DesktopProviderInfo) => void
   onDisconnect: (provider: DesktopProviderInfo) => void
+  onEditCustom: (provider: DesktopProviderInfo) => void
+  onRemoveCustom: (provider: DesktopProviderInfo) => void
 }): React.JSX.Element {
   return (
     <div>
@@ -541,6 +645,8 @@ function ProviderGroup({
                 onActivate={() => onActivate(provider)}
                 onConnect={() => onConnect(provider)}
                 onDisconnect={() => onDisconnect(provider)}
+                onEditCustom={() => onEditCustom(provider)}
+                onRemoveCustom={() => onRemoveCustom(provider)}
               />
             </div>
           ))
@@ -557,6 +663,8 @@ function ProviderRow({
   onActivate,
   onConnect,
   onDisconnect,
+  onEditCustom,
+  onRemoveCustom,
 }: {
   provider: DesktopProviderInfo
   busy: boolean
@@ -564,6 +672,8 @@ function ProviderRow({
   onActivate: () => void
   onConnect: () => void
   onDisconnect: () => void
+  onEditCustom: () => void
+  onRemoveCustom: () => void
 }): React.JSX.Element {
   return (
     <div className="flex min-h-24 flex-col items-stretch gap-4 py-5 sm:flex-row sm:items-center">
@@ -586,7 +696,7 @@ function ProviderRow({
           <p className="mt-1 truncate text-xs text-muted-foreground">
             {provider.currentModel ??
               providerDescriptions[provider.name] ??
-              "OpenHarness 内置供应商"}
+              (provider.custom ? provider.baseUrl : "OpenHarness 内置供应商")}
           </p>
         </div>
       </div>
@@ -607,10 +717,34 @@ function ProviderRow({
             {provider.active ? "重新连接" : "连接"}
           </Button>
         )}
-        {provider.credentialSource === "credentials" && !provider.active ? (
+        {provider.credentialSource === "credentials" && !provider.active && !provider.custom ? (
           <Button type="button" size="sm" variant="ghost" disabled={locked} onClick={onDisconnect}>
             断开
           </Button>
+        ) : null}
+        {provider.custom ? (
+          <>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`编辑 ${provider.displayName}`}
+              disabled={locked}
+              onClick={onEditCustom}
+            >
+              <Pencil data-icon="inline-start" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`删除 ${provider.displayName}`}
+              disabled={locked || provider.active}
+              onClick={onRemoveCustom}
+            >
+              <Trash2 data-icon="inline-start" />
+            </Button>
+          </>
         ) : null}
       </div>
     </div>

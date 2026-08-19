@@ -12,6 +12,9 @@ import type {
   DesktopProviderInfo,
   DesktopProviderSnapshot,
   DisconnectDesktopProviderInput,
+  CreateDesktopCustomProviderInput,
+  UpdateDesktopCustomProviderInput,
+  RemoveDesktopCustomProviderInput,
 } from "../../../shared/provider-types"
 import { desktopSessionService } from "../session/session-service"
 
@@ -81,6 +84,26 @@ export class DesktopProviderService {
     })
     return await this.snapshot()
   }
+
+  async createCustom(input: CreateDesktopCustomProviderInput): Promise<DesktopProviderSnapshot> {
+    await withDaemonRetry(async (client) => {
+      await client.createCustomProvider(input)
+      if (input.setActive) {
+        await client.patchSettings({ provider: input.id, model: input.models[0]?.id })
+      }
+    })
+    return await this.snapshot()
+  }
+
+  async updateCustom(input: UpdateDesktopCustomProviderInput): Promise<DesktopProviderSnapshot> {
+    await withDaemonRetry((client) => client.updateCustomProvider(input.provider, input.value))
+    return await this.snapshot()
+  }
+
+  async removeCustom(input: RemoveDesktopCustomProviderInput): Promise<DesktopProviderSnapshot> {
+    await withDaemonRetry((client) => client.removeCustomProvider(input.provider))
+    return await this.snapshot()
+  }
 }
 
 export const desktopProviderService = new DesktopProviderService()
@@ -96,9 +119,11 @@ export function buildDesktopProviderSnapshot(input: {
   const stored = new Set(input.auth.storedProviders)
   const envByProvider = new Map(input.auth.envProviders.map((item) => [item.name, item.envKey]))
   const modelsByProvider = new Map(input.models.map((item) => [item.name, item.models]))
+  const customByProvider = customProviderSettings(input.settings)
 
   const providers = input.providers.map((provider): DesktopProviderInfo => {
     const source = resolveCredentialSource(provider, input.auth, stored, envByProvider)
+    const custom = customByProvider.get(provider.name)
     const models = (modelsByProvider.get(provider.name) ?? []).map((model) => ({
       id: model.id,
       label: model.label,
@@ -115,6 +140,10 @@ export function buildDesktopProviderSnapshot(input: {
         : {}),
       ...(provider.name === activeProvider && activeModel ? { currentModel: activeModel } : {}),
       models,
+      ...(provider.custom ? { custom: true } : {}),
+      ...(custom?.baseUrl ? { baseUrl: custom.baseUrl } : {}),
+      ...(custom?.apiFormat === "openai" ? { apiFormat: "openai" as const } : {}),
+      ...(custom?.headers ? { headers: custom.headers } : {}),
     }
   })
 
@@ -132,10 +161,42 @@ function resolveCredentialSource(
   envByProvider: Map<string, string>
 ): DesktopProviderCredentialSource {
   if (provider.name === "codex") return auth.codex.configured ? "subscription" : "none"
+  if (provider.custom) return stored.has(provider.name) ? "credentials" : "configured"
   if (provider.local) return "local"
   if (stored.has(provider.name)) return "credentials"
   if (envByProvider.has(provider.name)) return "environment"
   return provider.hasKey ? "configured" : "none"
+}
+
+interface CustomProviderSettingView {
+  id: string
+  baseUrl: string
+  apiFormat: "openai"
+  headers?: Record<string, string>
+}
+
+function customProviderSettings(settings: Record<string, unknown>): Map<string, CustomProviderSettingView> {
+  const value = settings.customProviders
+  if (!Array.isArray(value)) return new Map()
+  const entries = value.flatMap((item): Array<[string, CustomProviderSettingView]> => {
+    if (!item || typeof item !== "object") return []
+    const record = item as Record<string, unknown>
+    if (typeof record.id !== "string" || typeof record.baseUrl !== "string") return []
+    const headers = record.headers && typeof record.headers === "object"
+      ? Object.fromEntries(
+          Object.entries(record.headers).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string"
+          )
+        )
+      : undefined
+    return [[record.id, {
+      id: record.id,
+      baseUrl: record.baseUrl,
+      apiFormat: "openai",
+      ...(headers ? { headers } : {}),
+    }]]
+  })
+  return new Map(entries)
 }
 
 function credentialLabel(

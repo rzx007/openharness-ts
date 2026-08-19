@@ -16,6 +16,10 @@ export interface DesktopProviderInfo {
   credentialLabel?: string
   currentModel?: string
   models: DesktopProviderModel[]
+  custom?: boolean
+  baseUrl?: string
+  apiFormat?: "openai"
+  headers?: Record<string, string>
 }
 
 export interface DesktopProviderSnapshot {
@@ -36,5 +40,28 @@ export interface ActivateDesktopProviderInput {
 }
 
 export interface DisconnectDesktopProviderInput {
+  provider: string
+}
+
+export interface DesktopCustomProviderInput {
+  id: string
+  displayName: string
+  baseUrl: string
+  apiFormat: "openai"
+  apiKey?: string
+  models: Array<{ id: string; displayName: string }>
+  headers?: Record<string, string>
+}
+
+export interface CreateDesktopCustomProviderInput extends DesktopCustomProviderInput {
+  setActive?: boolean
+}
+
+export interface UpdateDesktopCustomProviderInput {
+  provider: string
+  value: DesktopCustomProviderInput
+}
+
+export interface RemoveDesktopCustomProviderInput {
   provider: string
 }

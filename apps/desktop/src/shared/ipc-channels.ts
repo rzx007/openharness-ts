@@ -6,10 +6,12 @@ import type {
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
+  CloseDesktopAuxSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
+  OpenDesktopAuxSessionInput,
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
@@ -50,6 +52,9 @@ import type {
   ConnectDesktopProviderInput,
   DesktopProviderSnapshot,
   DisconnectDesktopProviderInput,
+  CreateDesktopCustomProviderInput,
+  UpdateDesktopCustomProviderInput,
+  RemoveDesktopCustomProviderInput,
 } from "./provider-types"
 
 export const IpcChannels = {
@@ -88,6 +93,8 @@ export const IpcChannels = {
   projectCreateBranch: "project:create-branch",
   sessionCreate: "session:create",
   sessionOpen: "session:open",
+  sessionAuxOpen: "session:aux-open",
+  sessionAuxClose: "session:aux-close",
   sessionFork: "session:fork",
   sessionClose: "session:close",
   sessionSendPrompt: "session:send-prompt",
@@ -132,10 +139,14 @@ export const IpcChannels = {
   providerConnect: "provider:connect",
   providerActivate: "provider:activate",
   providerDisconnect: "provider:disconnect",
+  providerCustomCreate: "provider:custom-create",
+  providerCustomUpdate: "provider:custom-update",
+  providerCustomRemove: "provider:custom-remove",
 } as const
 
 export const IpcEvents = {
   sessionUpdated: "session:updated",
+  sessionAuxUpdated: "session:aux-updated",
   terminalData: "terminal:data",
   terminalStatus: "terminal:status",
   terminalExit: "terminal:exit",
@@ -236,6 +247,11 @@ export interface IpcInvokeMap {
     result: DesktopSessionRecord
   }
   [IpcChannels.sessionOpen]: { args: [sessionId: string]; result: DesktopSessionView }
+  [IpcChannels.sessionAuxOpen]: {
+    args: [input: OpenDesktopAuxSessionInput]
+    result: DesktopSessionView
+  }
+  [IpcChannels.sessionAuxClose]: { args: [input: CloseDesktopAuxSessionInput]; result: void }
   [IpcChannels.sessionFork]: {
     args: [input: ForkDesktopSessionInput]
     result: DesktopSessionRecord
@@ -369,6 +385,18 @@ export interface IpcInvokeMap {
   }
   [IpcChannels.providerDisconnect]: {
     args: [input: DisconnectDesktopProviderInput]
+    result: DesktopProviderSnapshot
+  }
+  [IpcChannels.providerCustomCreate]: {
+    args: [input: CreateDesktopCustomProviderInput]
+    result: DesktopProviderSnapshot
+  }
+  [IpcChannels.providerCustomUpdate]: {
+    args: [input: UpdateDesktopCustomProviderInput]
+    result: DesktopProviderSnapshot
+  }
+  [IpcChannels.providerCustomRemove]: {
+    args: [input: RemoveDesktopCustomProviderInput]
     result: DesktopProviderSnapshot
   }
 }
