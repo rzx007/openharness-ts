@@ -179,13 +179,9 @@ export const desktopAPI = {
       ipcRenderer.on(IpcEvents.sessionUpdated, wrapped)
       return () => ipcRenderer.removeListener(IpcEvents.sessionUpdated, wrapped)
     },
-    onAuxUpdated: (
-      listener: (value: DesktopAuxSessionUpdate) => void
-    ): (() => void) => {
-      const wrapped = (
-        _event: Electron.IpcRendererEvent,
-        value: DesktopAuxSessionUpdate
-      ): void => listener(value)
+    onAuxUpdated: (listener: (value: DesktopAuxSessionUpdate) => void): (() => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: DesktopAuxSessionUpdate): void =>
+        listener(value)
       ipcRenderer.on(IpcEvents.sessionAuxUpdated, wrapped)
       return () => ipcRenderer.removeListener(IpcEvents.sessionAuxUpdated, wrapped)
     },

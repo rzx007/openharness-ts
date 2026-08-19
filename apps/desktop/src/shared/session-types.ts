@@ -158,6 +158,20 @@ export interface DesktopSessionView {
   permissions: DesktopPermissionRequest[]
 }
 
+export interface OpenDesktopAuxSessionInput {
+  subscriptionId: string
+  sessionId: string
+}
+
+export interface CloseDesktopAuxSessionInput {
+  subscriptionId: string
+}
+
+export interface DesktopAuxSessionUpdate {
+  subscriptionId: string
+  view: DesktopSessionView
+}
+
 export interface CreateDesktopSessionInput {
   projectId: string
   cwd: string

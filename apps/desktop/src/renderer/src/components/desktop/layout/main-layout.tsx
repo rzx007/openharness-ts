@@ -411,6 +411,7 @@ export function MainLayout(): React.JSX.Element {
           onTogglePanel={togglePanel}
           onOpenFile={openWorkspaceFile}
           onOpenTerminal={openTerminal}
+          onOpenAgents={() => openUtilityTool("agents")}
         />
       </Panel>
       {!utilityMaximized && <PanelResizeHandle label="调整工具面板宽度" />}
@@ -437,6 +438,8 @@ export function MainLayout(): React.JSX.Element {
           fileOpenRequest={fileOpenRequest}
           terminalOpenRequest={terminalOpenRequest}
           toolOpenRequest={toolOpenRequest}
+          onOpenFile={openWorkspaceFile}
+          onOpenTerminal={openTerminal}
         />
       </Panel>
     </Group>

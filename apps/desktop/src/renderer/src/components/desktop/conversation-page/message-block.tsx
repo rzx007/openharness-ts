@@ -191,7 +191,7 @@ export function AssistantMessageActions({
   content: string
   disabled: boolean
   onCopy: (content: string) => void
-  onFork: (messageId: string) => void
+  onFork?: (messageId: string) => void
 }): React.JSX.Element | null {
   if (!message) return null
   return (
@@ -201,13 +201,15 @@ export function AssistantMessageActions({
           <Copy />
         </MessageActionButton>
       ) : null}
-      <MessageActionButton
-        label="从这条回复分叉"
-        onClick={() => onFork(message.id)}
-        disabled={disabled}
-      >
-        <GitBranchPlus />
-      </MessageActionButton>
+      {onFork ? (
+        <MessageActionButton
+          label="从这条回复分叉"
+          onClick={() => onFork(message.id)}
+          disabled={disabled}
+        >
+          <GitBranchPlus />
+        </MessageActionButton>
+      ) : null}
     </MessageToolbar>
   )
 }

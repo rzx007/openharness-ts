@@ -2,6 +2,7 @@ import { Fragment, useMemo } from "react"
 
 import { AssistantMessage } from "./message/assistant-message"
 import { buildConversationEntries } from "./message/conversation-turn-model"
+import { visibleTranscriptParts } from "./transcript-visibility"
 import { Marker, MarkerContent, MarkerIcon } from "@renderer/components/ui/marker"
 import { MessageScrollerItem } from "@renderer/components/ui/message-scroller"
 import { Spinner } from "@renderer/components/ui/spinner"
@@ -28,6 +29,7 @@ export function ConversationTranscript({
   onForkAssistantMessage,
   onOpenFile,
   onOpenTerminal,
+  showReasoning = true,
 }: {
   messages: DesktopSessionMessage[]
   parts: DesktopSessionPart[]
@@ -36,13 +38,18 @@ export function ConversationTranscript({
   canEditLastUserMessage: boolean
   onEditLastUserMessage: (content: string) => void
   onCopyAssistantMessage: (content: string) => void
-  onForkAssistantMessage: (messageId: string) => void
+  onForkAssistantMessage?: (messageId: string) => void
   onOpenFile: (path: string, line?: number) => void
   onOpenTerminal: (terminalId: string) => void
+  showReasoning?: boolean
 }): React.JSX.Element {
+  const visibleParts = useMemo(
+    () => visibleTranscriptParts(parts, showReasoning),
+    [parts, showReasoning]
+  )
   const entries = useMemo(
-    () => buildConversationEntries(messages, parts, runs),
-    [messages, parts, runs]
+    () => buildConversationEntries(messages, visibleParts, runs),
+    [messages, visibleParts, runs]
   )
   const lastTurn = [...entries].reverse().find((entry) => entry.type === "turn")
   const lastUserMessage = [...entries]

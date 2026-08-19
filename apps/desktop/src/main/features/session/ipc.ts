@@ -1,10 +1,12 @@
 import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
   CheckoutDesktopProjectBranchInput,
+  CloseDesktopAuxSessionInput,
   CreateDesktopProjectBranchInput,
   CreateDesktopSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
+  OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   RenameDesktopProjectInput,
@@ -79,6 +81,19 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionOpen,
         handler: (event, sessionId) =>
           desktopSessionService.openSession(event.sender, String(sessionId ?? "")),
+      },
+      {
+        channel: IpcChannels.sessionAuxOpen,
+        handler: (event, input) =>
+          desktopSessionService.openAuxSession(event.sender, input as OpenDesktopAuxSessionInput),
+      },
+      {
+        channel: IpcChannels.sessionAuxClose,
+        handler: (event, input) =>
+          desktopSessionService.closeAuxSession(
+            event.sender.id,
+            input as CloseDesktopAuxSessionInput
+          ),
       },
       {
         channel: IpcChannels.sessionFork,

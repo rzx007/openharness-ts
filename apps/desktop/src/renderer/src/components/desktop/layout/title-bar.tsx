@@ -23,7 +23,7 @@ import { cn } from "@renderer/lib/utils"
 import type { DesktopAppInfo } from "@shared/ipc-channels"
 import { actualSizeZoomLevel, maximumZoomLevel, minimumZoomLevel } from "@shared/zoom"
 
-export type UtilityToolRequest = "terminal" | "files" | "browser"
+export type UtilityToolRequest = "terminal" | "files" | "browser" | "agents"
 
 type TitleBarProps = {
   sidebarOpen: boolean
@@ -246,6 +246,12 @@ export function TitleBar({
               <DropdownMenuItem onClick={() => onOpenUtilityTool("browser")}>
                 打开浏览器
                 <DropdownMenuShortcut>{shortcutLabel("openBrowser", isMac)}</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!hasActiveSession}
+                onClick={() => onOpenUtilityTool("agents")}
+              >
+                打开子智能体
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem disabled={!canOpenPreviousSession} onClick={onOpenPreviousSession}>

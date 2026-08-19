@@ -5,6 +5,7 @@ export type ConversationPaneProps = {
   onTogglePanel: () => void
   onOpenFile: (path: string, line?: number) => void
   onOpenTerminal: (terminalId: string) => void
+  onOpenAgents: () => void
 }
 
 export interface AddToComposerEventDetail {

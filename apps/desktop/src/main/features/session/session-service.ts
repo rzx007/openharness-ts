@@ -24,9 +24,11 @@ import { app, BrowserWindow, dialog, type OpenDialogOptions, type WebContents } 
 import { IpcEvents } from "../../../shared/ipc-channels"
 import type {
   CheckoutDesktopProjectBranchInput,
+  CloseDesktopAuxSessionInput,
   CreateDesktopProjectBranchInput,
   CreateDesktopSessionInput,
   DesktopBootstrapData,
+  DesktopAuxSessionUpdate,
   DesktopModel,
   DesktopProject,
   DesktopProjectDetails,
@@ -34,6 +36,7 @@ import type {
   DesktopSessionView,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
+  OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   RenameDesktopProjectInput,
@@ -46,19 +49,17 @@ import type {
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
+import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
 
 const execFileAsync = promisify(execFile)
 
-interface SessionSubscription {
-  controller: AbortController
-  sessionId: string
-}
+const primarySubscriptionSlot = "primary"
 
 class DesktopSessionService {
   private clientPromise: Promise<OpenHarnessClient> | null = null
   private embeddedServer: OpenHarnessHttpServer | null = null
   private embeddedUrl: string | null = null
-  private readonly subscriptions = new Map<number, SessionSubscription>()
+  private readonly subscriptions = new SessionSubscriptionRegistry()
 
   async bootstrap(): Promise<DesktopBootstrapData> {
     const client = await this.getClient()
@@ -249,27 +250,66 @@ class DesktopSessionService {
     const sessionId = requireString(sessionIdInput, "会话 ID")
     this.closeSession(webContents.id)
 
-    const client = await this.getClient()
     const controller = new AbortController()
-    const iterator = syncEvents(client, {
-      sessionId,
-      signal: controller.signal,
-    })[Symbol.asyncIterator]()
-    const first = await iterator.next()
-    if (first.done) throw new Error("无法加载会话状态。")
-
-    this.subscriptions.set(webContents.id, { controller, sessionId })
+    const subscription = { controller, sessionId }
     webContents.once("destroyed", () => this.closeSession(webContents.id))
+    const { snapshot, iterator } = await reserveSubscriptionSnapshot(
+      this.subscriptions,
+      webContents.id,
+      primarySubscriptionSlot,
+      subscription,
+      async () => {
+        const client = await this.getClient()
+        return syncEvents(client, {
+          sessionId,
+          signal: controller.signal,
+        })[Symbol.asyncIterator]()
+      },
+      "无法加载会话状态。"
+    )
     setTimeout(() => {
-      void this.pumpSession(webContents, sessionId, controller, iterator)
+      void this.pumpSession(webContents, primarySubscriptionSlot, sessionId, controller, iterator)
     }, 0)
 
-    return toDesktopSessionView(first.value.state, sessionId, first.value.source)
+    return toDesktopSessionView(snapshot.state, sessionId, snapshot.source)
   }
 
   closeSession(webContentsId: number): void {
-    this.subscriptions.get(webContentsId)?.controller.abort()
-    this.subscriptions.delete(webContentsId)
+    this.subscriptions.clearOwner(webContentsId)
+  }
+
+  async openAuxSession(
+    webContents: WebContents,
+    input: OpenDesktopAuxSessionInput
+  ): Promise<DesktopSessionView> {
+    const subscriptionId = requireString(input.subscriptionId, "辅助订阅 ID")
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const slot = auxiliarySubscriptionSlot(subscriptionId)
+    const controller = new AbortController()
+    const subscription = { controller, sessionId }
+    const { snapshot, iterator } = await reserveSubscriptionSnapshot(
+      this.subscriptions,
+      webContents.id,
+      slot,
+      subscription,
+      async () => {
+        const client = await this.getClient()
+        return syncEvents(client, {
+          sessionId,
+          signal: controller.signal,
+        })[Symbol.asyncIterator]()
+      },
+      "无法加载辅助会话状态。"
+    )
+    setTimeout(() => {
+      void this.pumpSession(webContents, slot, sessionId, controller, iterator, subscriptionId)
+    }, 0)
+    return toDesktopSessionView(snapshot.state, sessionId, snapshot.source)
+  }
+
+  closeAuxSession(webContentsId: number, input: CloseDesktopAuxSessionInput): void {
+    const subscriptionId = requireString(input.subscriptionId, "辅助订阅 ID")
+    this.subscriptions.delete(webContentsId, auxiliarySubscriptionSlot(subscriptionId))
   }
 
   async sendPrompt(input: SendDesktopPromptInput): Promise<void> {
@@ -391,7 +431,7 @@ class DesktopSessionService {
 
   async archiveSession(webContentsId: number, sessionIdInput: string): Promise<SessionRecord> {
     const sessionId = requireString(sessionIdInput, "会话 ID")
-    const subscription = this.subscriptions.get(webContentsId)
+    const subscription = this.subscriptions.get(webContentsId, primarySubscriptionSlot)
     if (subscription?.sessionId === sessionId) this.closeSession(webContentsId)
     const client = await this.getClient()
     return await client.archiveSession(sessionId)
@@ -399,15 +439,14 @@ class DesktopSessionService {
 
   async deleteSession(webContentsId: number, sessionIdInput: string): Promise<string[]> {
     const sessionId = requireString(sessionIdInput, "会话 ID")
-    const subscription = this.subscriptions.get(webContentsId)
+    const subscription = this.subscriptions.get(webContentsId, primarySubscriptionSlot)
     if (subscription?.sessionId === sessionId) this.closeSession(webContentsId)
     const client = await this.getClient()
     return await client.deleteSession(sessionId)
   }
 
   async dispose(): Promise<void> {
-    for (const subscription of this.subscriptions.values()) subscription.controller.abort()
-    this.subscriptions.clear()
+    this.subscriptions.clearAll()
 
     const server = this.embeddedServer
     const embeddedUrl = this.embeddedUrl
@@ -436,20 +475,28 @@ class DesktopSessionService {
 
   private async pumpSession(
     webContents: WebContents,
+    slot: string,
     sessionId: string,
     controller: AbortController,
-    iterator: AsyncIterator<SyncEventUpdate>
+    iterator: AsyncIterator<SyncEventUpdate>,
+    auxiliarySubscriptionId?: string
   ): Promise<void> {
     try {
       while (!controller.signal.aborted && !webContents.isDestroyed()) {
         const update = await iterator.next()
         if (update.done) return
-        const current = this.subscriptions.get(webContents.id)
+        const current = this.subscriptions.get(webContents.id, slot)
         if (!current || current.controller !== controller || current.sessionId !== sessionId) return
-        webContents.send(
-          IpcEvents.sessionUpdated,
-          toDesktopSessionView(update.value.state, sessionId, update.value.source)
-        )
+        const view = toDesktopSessionView(update.value.state, sessionId, update.value.source)
+        if (auxiliarySubscriptionId) {
+          const payload: DesktopAuxSessionUpdate = {
+            subscriptionId: auxiliarySubscriptionId,
+            view,
+          }
+          webContents.send(IpcEvents.sessionAuxUpdated, payload)
+        } else {
+          webContents.send(IpcEvents.sessionUpdated, view)
+        }
       }
     } catch (error) {
       if (!controller.signal.aborted && !webContents.isDestroyed()) {
@@ -495,6 +542,10 @@ class DesktopSessionService {
     })
     return new OpenHarnessClient({ baseUrl: listen.url, token })
   }
+}
+
+function auxiliarySubscriptionSlot(subscriptionId: string): string {
+  return `aux:${subscriptionId}`
 }
 
 async function toDesktopProject(project: ProjectRecord): Promise<DesktopProject> {

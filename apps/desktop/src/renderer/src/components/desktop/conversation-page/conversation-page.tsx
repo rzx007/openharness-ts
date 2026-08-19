@@ -1,4 +1,4 @@
-import { ListFilter, MoreHorizontal, PanelRight } from "lucide-react"
+import { Bot, ListFilter, MoreHorizontal, PanelRight } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { OpenWithSplitButton } from "@renderer/components/desktop/open-with"
@@ -28,6 +28,7 @@ function ConversationPane({
   onTogglePanel,
   onOpenFile,
   onOpenTerminal,
+  onOpenAgents,
 }: ConversationPaneProps): React.JSX.Element {
   const [draft, setDraft] = useState("")
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
@@ -86,6 +87,9 @@ function ConversationPane({
   )
   const pendingPermissions =
     sessionView?.permissions.filter((permission) => permission.status === "pending") ?? []
+  const hasAgentTasks = Boolean(
+    sessionView?.tasks.some((task) => task.type === "agent" && task.childSessionId)
+  )
 
   const copyAssistantMessage = async (content: string): Promise<void> => {
     await window.desktop.clipboard.writeText(content)
@@ -152,6 +156,11 @@ function ConversationPane({
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {hasAgentTasks ? (
+              <HeaderIconButton label="查看子智能体" onClick={onOpenAgents}>
+                <Bot />
+              </HeaderIconButton>
+            ) : null}
             <OpenWithSplitButton folderPath={sessionView?.session.cwd ?? selectedProject?.path} />
             <HeaderIconButton label="会话视图">
               <ListFilter />

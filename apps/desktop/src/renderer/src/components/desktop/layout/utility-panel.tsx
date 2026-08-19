@@ -2,6 +2,7 @@ import {
   FileText,
   Folder,
   Globe2,
+  Bot,
   MessageCirclePlus,
   Minimize2,
   PanelRightClose,
@@ -21,6 +22,7 @@ import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
 import type { FileViewerTab } from "@renderer/components/desktop/tools/file-viewer"
 import { PlaceholderTool } from "@renderer/components/desktop/tools/placeholder-tool"
 import { TerminalTool } from "@renderer/components/desktop/tools/terminal/terminal-tool"
+import { AgentsTool } from "@renderer/components/desktop/tools/agents/agents-tool"
 import type {
   TerminalPanelCommand,
   TerminalSessionTabInfo,
@@ -44,7 +46,7 @@ import { Kbd } from "@renderer/components/ui/kbd"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 
-type UtilityTool = "review" | "terminal" | "browser" | "files" | "side-chat"
+type UtilityTool = "review" | "terminal" | "browser" | "files" | "side-chat" | "agents"
 
 type UtilityTab = {
   id: string
@@ -65,6 +67,8 @@ type UtilityPanelProps = {
   fileOpenRequest: { id: number; path: string; line?: number } | null
   terminalOpenRequest: { id: number; terminalId: string } | null
   toolOpenRequest: { id: number; tool: UtilityToolRequest } | null
+  onOpenFile: (path: string, line?: number) => void
+  onOpenTerminal: (terminalId: string) => void
 }
 
 type MenuPosition = {
@@ -93,9 +97,10 @@ const toolMeta: Record<
   browser: { icon: Globe2, label: "浏览器", shortcut: "Ctrl+T" },
   files: { icon: Folder, label: "文件", shortcut: "Ctrl+P" },
   "side-chat": { icon: MessageCirclePlus, label: "侧边聊天", shortcut: "Ctrl+Alt+S" },
+  agents: { icon: Bot, label: "子智能体" },
 }
 
-const toolOrder: UtilityTool[] = ["review", "terminal", "browser", "files", "side-chat"]
+const toolOrder: UtilityTool[] = ["agents", "review", "terminal", "browser", "files", "side-chat"]
 const filesTabId = "files-tab"
 const unavailableTerminalTabId = "terminal-tab:unavailable"
 const persistedFileTabsKey = "openharness.desktop.file-tabs.v1"
@@ -108,6 +113,8 @@ export function UtilityPanel({
   fileOpenRequest,
   terminalOpenRequest,
   toolOpenRequest,
+  onOpenFile,
+  onOpenTerminal,
 }: UtilityPanelProps): React.JSX.Element {
   const [tabs, setTabs] = useState<UtilityTab[]>([])
   const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>([])
@@ -125,6 +132,7 @@ export function UtilityPanel({
   const [persistedFileTabs, setPersistedFileTabs] =
     useState<PersistedFileTabState>(readPersistedFileTabs)
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
+  const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const selectedProjectAvailable = useDesktopSessionStore(
     (state) => state.selectedProject?.available ?? false
   )
@@ -649,6 +657,14 @@ export function UtilityPanel({
               description="后续会承接当前会话上下文，用来和主对话并行沟通。"
             />
           )}
+          {tabs.some((tab) => tab.tool === "agents") ? (
+            <AgentsTool
+              key={activeSessionId ?? "no-session"}
+              active={activeTab?.tool === "agents"}
+              onOpenFile={onOpenFile}
+              onOpenTerminal={onOpenTerminal}
+            />
+          ) : null}
         </div>
       </div>
       {addMenuOpen &&
