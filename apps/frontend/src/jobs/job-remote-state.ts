@@ -1,0 +1,97 @@
+import type { JobReadResult, JobSnapshot } from "@openharness/client";
+
+export type JobRemoteState =
+  | { status: "idle"; jobs: JobSnapshot[] }
+  | { status: "loading"; jobs: JobSnapshot[] }
+  | { status: "ready"; jobs: JobSnapshot[]; refreshedAt: number }
+  | { status: "error"; jobs: JobSnapshot[]; error: string; refreshedAt?: number };
+
+export type JobDetailRemoteState =
+  | { status: "idle" }
+  | { status: "loading"; jobId: string; previous?: JobReadResult }
+  | { status: "ready"; jobId: string; result: JobReadResult; refreshedAt: number }
+  | { status: "error"; jobId: string; error: string; previous?: JobReadResult };
+
+export function beginJobList(previous: JobRemoteState): JobRemoteState {
+  return { status: "loading", jobs: [...previous.jobs] };
+}
+
+export function resolveJobList(jobs: JobSnapshot[], now: number): JobRemoteState {
+  return { status: "ready", jobs: [...jobs], refreshedAt: now };
+}
+
+export function rejectJobList(previous: JobRemoteState, error: string): JobRemoteState {
+  const refreshedAt = "refreshedAt" in previous ? previous.refreshedAt : undefined;
+  return {
+    status: "error",
+    jobs: [...previous.jobs],
+    error,
+    ...(refreshedAt !== undefined ? { refreshedAt } : {}),
+  };
+}
+
+export function mergeJobSnapshot(
+  state: JobRemoteState,
+  snapshot: JobSnapshot,
+  now: number,
+): JobRemoteState {
+  const found = state.jobs.some((job) => job.id === snapshot.id);
+  const jobs = found
+    ? state.jobs.map((job) => job.id === snapshot.id ? snapshot : job)
+    : [snapshot, ...state.jobs];
+  return { status: "ready", jobs, refreshedAt: now };
+}
+
+const JOB_KINDS = ["terminal", "shell", "agent", "dream", "workflow"] as const;
+const JOB_STATUSES = ["running", "stopping", "completed", "killed", "failed"] as const;
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJobSnapshot(value: unknown, ownerSession: string): value is JobSnapshot {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const capabilities = value.capabilities;
+  return (
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    value.ownerSession === ownerSession &&
+    typeof value.label === "string" &&
+    typeof value.cwd === "string" &&
+    typeof value.kind === "string" &&
+    JOB_KINDS.includes(value.kind as (typeof JOB_KINDS)[number]) &&
+    typeof value.status === "string" &&
+    JOB_STATUSES.includes(value.status as (typeof JOB_STATUSES)[number]) &&
+    Number.isFinite(value.startedAt) &&
+    Number.isFinite(value.updatedAt) &&
+    (value.finishedAt === undefined || Number.isFinite(value.finishedAt)) &&
+    isRecord(capabilities) &&
+    typeof capabilities.read === "boolean" &&
+    typeof capabilities.wait === "boolean" &&
+    typeof capabilities.send === "boolean" &&
+    typeof capabilities.cancel === "boolean"
+  );
+}
+
+export function validateJobSnapshots(
+  value: unknown,
+  ownerSession: string,
+): { jobs: JobSnapshot[]; error?: string } {
+  if (!Array.isArray(value)) {
+    return { jobs: [], error: "Jobs response must be an array." };
+  }
+
+  const jobs = value.filter((entry): entry is JobSnapshot => isJobSnapshot(entry, ownerSession));
+  const invalidCount = value.length - jobs.length;
+  if (invalidCount === 0) {
+    return { jobs };
+  }
+
+  const noun = invalidCount === 1 ? "snapshot" : "snapshots";
+  return { jobs, error: `Ignored ${invalidCount} invalid Job ${noun}.` };
+}
