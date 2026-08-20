@@ -171,10 +171,14 @@ export class ScheduledTaskService {
 
   private install(task: ScheduledTaskRecord): void {
     this.clearTimer(task.id);
+    // Defer while a run is in flight. Reinstalling a past nextRunAt here
+    // schedules setTimeout(0) → skip/queue → finally → install again (storm).
+    // The active run's finally block reinstalls from the store when it ends.
     if (
       task.status !== "active" ||
       task.nextRunAt === undefined ||
-      this.shuttingDown
+      this.shuttingDown ||
+      this.active.has(task.id)
     )
       return;
     const delay = Math.max(0, task.nextRunAt - Date.now());
@@ -250,7 +254,7 @@ export class ScheduledTaskService {
         unread: true,
         finishedAt: Date.now(),
       });
-      this.finishTask(task, finished.finishedAt!, true);
+      this.finishTask(task.id, finished.finishedAt!, true);
       return finished;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -264,36 +268,60 @@ export class ScheduledTaskService {
         unread: true,
         finishedAt: Date.now(),
       });
-      this.finishTask(task, finished.finishedAt!, false);
+      this.finishTask(task.id, finished.finishedAt!, false);
       return finished;
     }
   }
 
   private finishTask(
-    task: ScheduledTaskRecord,
+    taskId: string,
     finishedAt: number,
     succeeded: boolean,
   ): void {
-    const runCount = task.runCount + 1;
-    const shouldComplete =
-      task.recurrenceFormat === "once" ||
-      task.stopPolicy?.runOnce ||
-      (task.stopPolicy?.stopWhenCompleted && succeeded) ||
-      (task.stopPolicy?.maxRuns !== undefined &&
-        runCount >= task.stopPolicy.maxRuns) ||
-      (task.stopPolicy?.expiresAt !== undefined &&
-        finishedAt >= task.stopPolicy.expiresAt);
-    const nextRunAt = shouldComplete
-      ? null
-      : computeNextScheduledTime(
-          { format: task.recurrenceFormat, value: task.recurrence },
+    // Always re-read: updates during the run (prompt/recurrence/pause) must win
+    // over the start-time snapshot that executeRun captured.
+    const latest = this.options.store.getScheduledTask(taskId);
+    if (!latest) return;
+
+    const runCount = latest.runCount + 1;
+    if (latest.status === "paused" || latest.status === "completed") {
+      this.options.store.updateScheduledTask(taskId, {
+        runCount,
+        lastRunAt: finishedAt,
+        nextRunAt: null,
+      });
+      return;
+    }
+
+    let shouldComplete =
+      latest.recurrenceFormat === "once" ||
+      latest.stopPolicy?.runOnce ||
+      (latest.stopPolicy?.stopWhenCompleted && succeeded) ||
+      (latest.stopPolicy?.maxRuns !== undefined &&
+        runCount >= latest.stopPolicy.maxRuns) ||
+      (latest.stopPolicy?.expiresAt !== undefined &&
+        finishedAt >= latest.stopPolicy.expiresAt);
+
+    let nextRunAt: number | null = null;
+    if (!shouldComplete) {
+      try {
+        nextRunAt = computeNextScheduledTime(
+          { format: latest.recurrenceFormat, value: latest.recurrence },
           {
             after: new Date(finishedAt),
-            anchor: new Date(task.createdAt),
-            timezone: task.timezone,
+            anchor: new Date(latest.createdAt),
+            timezone: latest.timezone,
           },
         );
-    this.options.store.updateScheduledTask(task.id, {
+      } catch {
+        // Exhausted RRULE (UNTIL / no match) — complete rather than leaving a
+        // past nextRunAt that the timer finally-block would re-fire forever.
+        shouldComplete = true;
+        nextRunAt = null;
+      }
+    }
+
+    this.options.store.updateScheduledTask(taskId, {
       runCount,
       lastRunAt: finishedAt,
       nextRunAt,
