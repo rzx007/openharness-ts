@@ -71,6 +71,7 @@ import { Separator } from "@renderer/components/ui/separator"
 import { Skeleton } from "@renderer/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@renderer/components/ui/tooltip"
 import { cn } from "@renderer/lib/utils"
+import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type {
   DesktopProviderCredentialSource,
   DesktopCustomProviderInput,
@@ -220,7 +221,14 @@ export function ProviderSettings(): React.JSX.Element {
     setError(null)
     setMessage(null)
     try {
-      setSnapshot(await operation())
+      const nextSnapshot = await operation()
+      setSnapshot(nextSnapshot)
+      try {
+        await useDesktopSessionStore.getState().refreshBootstrap()
+      } catch (refreshError) {
+        setError(`供应商设置已生效，但对话模型刷新失败：${errorMessage(refreshError)}`)
+        return true
+      }
       setMessage(successMessage)
       return true
     } catch (mutationError) {

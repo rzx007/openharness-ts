@@ -50,6 +50,7 @@ import type {
   UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
 import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
+import { normalizeConfiguredModelId } from "./default-model-resolution"
 
 const execFileAsync = promisify(execFile)
 
@@ -72,8 +73,12 @@ class DesktopSessionService {
     const sessions = allSessions.filter((session) => session.status !== "archived")
     const archivedSessions = allSessions.filter((session) => session.status === "archived")
     const models = providers.flatMap((provider) => provider.models)
-    const configuredModel = typeof settings["model"] === "string" ? settings["model"] : undefined
+    const storedConfiguredModel =
+      typeof settings["model"] === "string" ? settings["model"] : undefined
     const configuredProvider = optionalProvider(settings["provider"])
+    const configuredModel = storedConfiguredModel
+      ? normalizeConfiguredModelId(models, storedConfiguredModel, configuredProvider)
+      : undefined
     const defaultModel = configuredModel ?? models[0]?.id
     const defaultPermissionMode = readSettingsPermissionMode(settings)
 
@@ -87,8 +92,14 @@ class DesktopSessionService {
       defaultModel,
       configuredProvider
     )
-    if (defaultProvider && defaultProvider !== configuredProvider) {
-      await client.patchSettings({ model: defaultModel, provider: defaultProvider })
+    if (
+      defaultModel !== storedConfiguredModel ||
+      (defaultProvider && defaultProvider !== configuredProvider)
+    ) {
+      await client.patchSettings({
+        model: defaultModel,
+        ...(defaultProvider ? { provider: defaultProvider } : {}),
+      })
     }
     const projects = await Promise.all(projectRecords.map(toDesktopProject))
 

@@ -107,15 +107,15 @@ const FALLBACK_CATALOG: ModelsDevCatalog = {
     id: "deepseek",
     name: "DeepSeek",
     models: {
-      "deepseek/deepseek-v4-flash": {
-        id: "deepseek/deepseek-v4-flash",
+      "deepseek-v4-flash": {
+        id: "deepseek-v4-flash",
         name: "DeepSeek V4 Flash",
         reasoning: true,
         tool_call: true,
         limit: { context: 1_000_000, output: 384_000 },
       },
-      "deepseek/deepseek-v4-pro": {
-        id: "deepseek/deepseek-v4-pro",
+      "deepseek-v4-pro": {
+        id: "deepseek-v4-pro",
         name: "DeepSeek V4 Pro",
         reasoning: true,
         tool_call: true,

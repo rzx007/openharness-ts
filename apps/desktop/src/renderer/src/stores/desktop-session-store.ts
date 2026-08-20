@@ -35,6 +35,7 @@ interface DesktopSessionState {
   openingSession: boolean
   sending: boolean
   initialize: () => Promise<void>
+  refreshBootstrap: () => Promise<void>
   startNewConversation: () => Promise<void>
   chooseProject: () => Promise<void>
   selectProject: (project: DesktopProject) => Promise<void>
@@ -132,6 +133,20 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     } catch (error) {
       set({ loadStatus: "error", error: errorMessage(error) })
     }
+  },
+
+  async refreshBootstrap() {
+    const data = await window.desktop.sessions.bootstrap()
+    set((state) => ({
+      ...applyBootstrapData(data, state.selectedProject, null, null),
+      ...(state.activeSessionId
+        ? {
+            selectedModel: state.selectedModel,
+            selectedProvider: state.selectedProvider,
+            selectedPermissionMode: state.selectedPermissionMode,
+          }
+        : {}),
+    }))
   },
 
   async startNewConversation() {
