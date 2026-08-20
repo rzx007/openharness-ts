@@ -536,12 +536,12 @@ export function UtilityPanel({
     <aside
       aria-hidden={!open}
       className={cn(
-        "h-full min-h-0 w-full overflow-hidden bg-panel transition-opacity duration-150 ease-out",
+        "h-full min-h-0 w-full overflow-hidden bg-conversation transition-opacity duration-150 ease-out",
         open ? "border-l opacity-100" : "pointer-events-none opacity-0"
       )}
     >
       <div className="flex h-full min-w-[320px] flex-col">
-        <header className="flex h-10 shrink-0 items-center gap-2 bg-panel px-2.5">
+        <header className="flex h-10 shrink-0 items-center gap-2 bg-conversation px-2.5">
           <div className="utility-tab-strip flex min-w-0 flex-1 items-center overflow-x-auto">
             {visibleTabs.map((tab, index) => (
               <UtilityTabButton
@@ -605,7 +605,7 @@ export function UtilityPanel({
           </Button>
         </header>
 
-        <div className="relative min-h-0 flex-1 bg-panel">
+        <div className="relative min-h-0 flex-1 bg-conversation">
           {!activeTab && !pendingTerminal && <EmptyUtilityPanelState onAdd={addTab} />}
           {browserTabs.map((tab) => (
             <BrowserTool
@@ -684,7 +684,7 @@ function EmptyUtilityPanelState({
 }): React.JSX.Element {
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-8">
-      <ItemGroup className="w-full max-w-130 gap-0.5">
+      <ItemGroup className="w-full max-w-130 gap-0!">
         {toolOrder.map((tool) => {
           const Icon = toolMeta[tool].icon
           return (
@@ -692,7 +692,7 @@ function EmptyUtilityPanelState({
               key={tool}
               size="sm"
               render={<button type="button" onClick={() => onAdd(tool)} />}
-              className="h-12.5 cursor-pointer flex-nowrap bg-transparent text-left hover:bg-muted/45"
+              className="h-10 cursor-pointer flex-nowrap bg-transparent text-left hover:bg-muted"
             >
               <ItemMedia variant="icon" className="size-4 text-muted-foreground">
                 <Icon strokeWidth={1.8} />
@@ -747,7 +747,7 @@ function UtilityTabButton({
         className={cn(
           "group relative flex h-8 max-w-42 min-w-28 flex-[1_1_10.5rem] items-center rounded-xl text-[12.5px] transition-colors",
           active
-            ? "bg-muted/55 text-ui-foreground"
+            ? "bg-neutral-200/80 text-ui-foreground dark:bg-neutral-800"
             : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
           showSeparator &&
             "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"

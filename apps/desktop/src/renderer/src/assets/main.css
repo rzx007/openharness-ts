@@ -74,7 +74,7 @@
 
 :root {
   color-scheme: light;
-  --background: oklch(1 0 0);
+  --background: oklch(0.98 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
@@ -113,7 +113,7 @@
   --user-message: var(--muted);
   --file-link: oklch(0.53 0.105 47);
   --composer-shadow: 0 -8px 22px oklch(0.145 0 0 / 7%), 0 4px 12px oklch(0.145 0 0 / 10%);
-  --workspace-shadow: -4px -2px 8px oklch(0.145 0 0 / 3%), -1px 0 3px oklch(0.145 0 0 / 2%);
+  --workspace-shadow: -4px -2px 18px oklch(0.145 0 0 / 3%), -0px 0 10px oklch(0.145 0 0 / 2%);
   --workspace-top-shadow: -4px -4px 14px oklch(0.145 0 0 / 10%), 0 -1px 4px oklch(0.145 0 0 / 8%);
 
   --sidebar: var(--shell);
@@ -356,7 +356,7 @@
     border-radius: 0.28rem;
     color: var(--code-foreground);
     font-size: 0.84em;
-    font-weight: 200;
+    font-weight: 300;
     border: none;
   }
 

@@ -168,4 +168,275 @@ describe("ScheduledTaskService", () => {
     });
     expect(completed?.nextRunAt).toBeUndefined();
   });
+
+  it("does not create skipped runs when a task is updated during an active run", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T10:00:00Z"));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await gate;
+      return {
+        sessionId: "chat-1",
+        runId: "slow-run",
+        summary: "Still running.",
+      };
+    });
+    const { service, store } = createHarness(execute);
+    const task = service.createTask({
+      name: "live-update",
+      prompt: "Original prompt.",
+      recurrence: "RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+      recurrenceFormat: "rrule",
+      timezone: "UTC",
+      destination: "chat",
+      sessionId: "chat-1",
+    });
+    store.updateScheduledTask(task.id, {
+      nextRunAt: Date.parse("2026-08-20T09:00:00Z"),
+    });
+
+    const running = service.trigger(task.id);
+    await Promise.resolve();
+    service.updateTask(task.id, { prompt: "Updated during the run." });
+    await vi.runOnlyPendingTimersAsync();
+
+    release();
+    await running;
+
+    expect(
+      store
+        .listScheduledRuns({ taskId: task.id })
+        .filter((run) => run.status === "skipped"),
+    ).toHaveLength(0);
+  });
+
+  it("does not start a queued run after the task is paused", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const execute = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await gate;
+        return {
+          sessionId: "chat-1",
+          runId: "active-run",
+          summary: "Active run finished.",
+        };
+      })
+      .mockResolvedValue({
+        sessionId: "chat-1",
+        runId: "queued-run",
+        summary: "Queued run finished.",
+      });
+    const { service } = createHarness(execute);
+    const task = service.createTask({
+      name: "pause-queued-run",
+      prompt: "Do not start after pause.",
+      recurrence: "RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+      recurrenceFormat: "rrule",
+      timezone: "UTC",
+      destination: "chat",
+      sessionId: "chat-1",
+      overlapPolicy: "queue",
+    });
+
+    const running = service.trigger(task.id);
+    await Promise.resolve();
+    const queued = service.trigger(task.id);
+    service.updateTask(task.id, { status: "paused" });
+    release();
+
+    await running;
+    const queuedRun = await queued;
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(queuedRun.status).toBe("skipped");
+  });
+
+  it("does not start a queued run while the service is shutting down", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const execute = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await gate;
+        return {
+          sessionId: "chat-1",
+          runId: "active-run",
+          summary: "Active run finished.",
+        };
+      })
+      .mockResolvedValue({
+        sessionId: "chat-1",
+        runId: "queued-run",
+        summary: "Queued run finished.",
+      });
+    const { service } = createHarness(execute);
+    const task = service.createTask({
+      name: "shutdown-queued-run",
+      prompt: "Do not start during shutdown.",
+      recurrence: "RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+      recurrenceFormat: "rrule",
+      timezone: "UTC",
+      destination: "chat",
+      sessionId: "chat-1",
+      overlapPolicy: "queue",
+    });
+
+    const running = service.trigger(task.id);
+    await Promise.resolve();
+    const queued = service.trigger(task.id);
+    const shuttingDown = service.shutdown();
+    release();
+
+    await running;
+    await shuttingDown;
+    const queuedRun = await queued;
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(queuedRun.status).toBe("skipped");
+    expect(service.status().executing).toBe(0);
+  });
+
+  it("reinstalls an edited recurrence after a manual run finishes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T10:00:00Z"));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const execute = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await gate;
+        return {
+          sessionId: "chat-1",
+          runId: "manual-run",
+          summary: "Manual run finished.",
+        };
+      })
+      .mockResolvedValue({
+        sessionId: "chat-1",
+        runId: "scheduled-run",
+        summary: "Scheduled run finished.",
+      });
+    const { service, store } = createHarness(execute);
+    const task = service.createTask({
+      name: "once-to-rrule",
+      prompt: "Become recurring while running.",
+      recurrence: "2099-01-01T00:00:00Z",
+      recurrenceFormat: "once",
+      timezone: "UTC",
+      destination: "chat",
+      sessionId: "chat-1",
+    });
+
+    const running = service.trigger(task.id);
+    await Promise.resolve();
+    service.updateTask(task.id, {
+      recurrence: "RRULE:FREQ=MINUTELY",
+      recurrenceFormat: "rrule",
+    });
+    release();
+    await running;
+
+    expect(store.getScheduledTask(task.id)).toMatchObject({
+      status: "active",
+      recurrenceFormat: "rrule",
+      runCount: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(store.getScheduledTask(task.id)).toMatchObject({
+      status: "active",
+      runCount: 2,
+    });
+  });
+
+  it("keeps a task paused when its active run finishes", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await gate;
+      return {
+        sessionId: "chat-1",
+        runId: "paused-run",
+        summary: "Run finished after pause.",
+      };
+    });
+    const { service, store } = createHarness(execute);
+    const task = service.createTask({
+      name: "pause-during-run",
+      prompt: "Pause while this runs.",
+      recurrence: "RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+      recurrenceFormat: "rrule",
+      timezone: "UTC",
+      destination: "chat",
+      sessionId: "chat-1",
+    });
+
+    const running = service.trigger(task.id);
+    await Promise.resolve();
+    service.updateTask(task.id, { status: "paused" });
+    release();
+    await running;
+
+    const paused = store.getScheduledTask(task.id);
+    expect(paused).toMatchObject({
+      status: "paused",
+      runCount: 1,
+    });
+    expect(paused?.nextRunAt).toBeUndefined();
+  });
+
+  it("completes an exhausted RRULE after its final scheduled timer fires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T12:00:00Z"));
+    let markExecutionStarted!: () => void;
+    const executionStarted = new Promise<void>((resolve) => {
+      markExecutionStarted = resolve;
+    });
+    const execute = vi.fn(async () => {
+      markExecutionStarted();
+      return {
+        sessionId: "chat-1",
+        runId: "final-run",
+        summary: "Last occurrence finished.",
+      };
+    });
+    const { service, store } = createHarness(execute);
+    const task = service.createTask({
+      name: "until-exhausted",
+      prompt: "Run the final occurrence.",
+      recurrence: "RRULE:FREQ=MINUTELY;UNTIL=20260820T120100Z",
+      recurrenceFormat: "rrule",
+      timezone: "UTC",
+      destination: "chat",
+      sessionId: "chat-1",
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await executionStarted;
+    await Promise.resolve();
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(store.getScheduledTask(task.id)).toMatchObject({
+      status: "completed",
+      runCount: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(execute).toHaveBeenCalledOnce();
+  });
 });

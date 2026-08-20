@@ -87,7 +87,7 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
     <section
       aria-hidden={!active}
       className={cn(
-        "absolute inset-0 flex h-full min-h-0 flex-col bg-panel transition-opacity duration-100",
+        "absolute inset-0 flex h-full min-h-0 flex-col bg-conversation transition-opacity duration-100",
         !active && "pointer-events-none opacity-0"
       )}
     >

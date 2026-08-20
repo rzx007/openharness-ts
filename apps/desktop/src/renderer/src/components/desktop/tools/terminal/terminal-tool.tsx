@@ -372,13 +372,13 @@ export function TerminalTool({
           current.map((record) =>
             record.id === event.terminalId
               ? {
-                  ...record,
-                  status: record.status === "stopping" || record.status === "killed"
-                    ? "killed"
-                    : event.exitCode === 0 ? "completed" : "failed",
-                  exitedAt: new Date().toISOString(),
-                  exitCode: event.exitCode,
-                }
+                ...record,
+                status: record.status === "stopping" || record.status === "killed"
+                  ? "killed"
+                  : event.exitCode === 0 ? "completed" : "failed",
+                exitedAt: new Date().toISOString(),
+                exitCode: event.exitCode,
+              }
               : record
           )
         )
@@ -584,7 +584,7 @@ export function TerminalTool({
     <section
       aria-hidden={!active}
       className={cn(
-        "absolute inset-0 flex h-full min-h-0 flex-col bg-panel transition-opacity duration-100",
+        "absolute inset-0 flex h-full min-h-0 flex-col bg-conversation transition-opacity duration-100",
         !active && "pointer-events-none opacity-0"
       )}
     >
@@ -664,7 +664,7 @@ export function TerminalTool({
         )}
 
         {(!selectedProject || !selectedProject.available) && (
-          <div className="absolute inset-0 grid place-items-center bg-panel/90 px-8 text-center backdrop-blur-sm">
+          <div className="absolute inset-0 grid place-items-center bg-conversation/90 px-8 text-center backdrop-blur-sm">
             <div className="max-w-sm">
               <Folder className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
               <h2 className="text-[15px] font-semibold text-ui-foreground">
@@ -689,7 +689,7 @@ export function TerminalTool({
         )}
 
         {selectedProject?.available && !activeRecord && !creating && (
-          <div className="absolute inset-0 grid place-items-center bg-panel/84 px-8 text-center backdrop-blur-sm">
+          <div className="absolute inset-0 grid place-items-center bg-conversation/84 px-8 text-center backdrop-blur-sm">
             <div>
               <SquareTerminal className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
               <p className="text-[13px] text-ui-muted">当前项目没有打开的终端</p>
@@ -792,7 +792,7 @@ function TerminalContextMenuItem({
       className={cn(
         "flex h-8 w-full items-center gap-2 rounded px-2 text-left outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-3.5",
         destructive &&
-          "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+        "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
       )}
     >
       {children}

@@ -174,7 +174,8 @@ export class ScheduledTaskService {
     if (
       task.status !== "active" ||
       task.nextRunAt === undefined ||
-      this.shuttingDown
+      this.shuttingDown ||
+      this.active.has(task.id)
     )
       return;
     const delay = Math.max(0, task.nextRunAt - Date.now());
@@ -185,10 +186,7 @@ export class ScheduledTaskService {
           this.install(task);
           return;
         }
-        void this.startRun(task, "scheduled", task.nextRunAt!).finally(() => {
-          const latest = this.options.store.getScheduledTask(task.id);
-          if (latest) this.install(latest);
-        });
+        void this.startRun(task, "scheduled", task.nextRunAt!);
       },
       Math.min(delay, MAX_TIMER_DELAY_MS),
     );
@@ -202,21 +200,30 @@ export class ScheduledTaskService {
   ): Promise<ScheduledRunRecord> {
     const existing = this.active.get(task.id);
     if (existing) {
-      if (task.overlapPolicy === "queue")
-        return await existing.then(() =>
-          this.startRun(task, cause, scheduledFor),
-        );
-      const skipped = this.options.store.createScheduledRun({
-        taskId: task.id,
+      if (task.overlapPolicy === "queue") {
+        return await existing.then(() => {
+          const latest = this.options.store.getScheduledTask(task.id);
+          if (!latest)
+            throw new Error(`Scheduled task not found: ${task.id}`);
+          if (this.shuttingDown || latest.status !== "active") {
+            return this.skipRun(
+              task.id,
+              cause,
+              scheduledFor,
+              this.shuttingDown
+                ? "Skipped because the scheduled task service is shutting down"
+                : `Skipped because the scheduled task is ${latest.status}`,
+            );
+          }
+          return this.startRun(latest, cause, scheduledFor);
+        });
+      }
+      return this.skipRun(
+        task.id,
         cause,
         scheduledFor,
-      });
-      return this.options.store.updateScheduledRun(skipped.id, {
-        status: "skipped",
-        summary: "Skipped because the previous scheduled run is still active",
-        unread: true,
-        finishedAt: Date.now(),
-      });
+        "Skipped because the previous scheduled run is still active",
+      );
     }
     const run = this.options.store.createScheduledRun({
       taskId: task.id,
@@ -229,6 +236,8 @@ export class ScheduledTaskService {
       return await promise;
     } finally {
       this.active.delete(task.id);
+      const latest = this.options.store.getScheduledTask(task.id);
+      if (latest) this.install(latest);
     }
   }
 
@@ -250,7 +259,7 @@ export class ScheduledTaskService {
         unread: true,
         finishedAt: Date.now(),
       });
-      this.finishTask(task, finished.finishedAt!, true);
+      this.finishTask(task.id, finished.finishedAt!, true);
       return finished;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -264,36 +273,53 @@ export class ScheduledTaskService {
         unread: true,
         finishedAt: Date.now(),
       });
-      this.finishTask(task, finished.finishedAt!, false);
+      this.finishTask(task.id, finished.finishedAt!, false);
       return finished;
     }
   }
 
   private finishTask(
-    task: ScheduledTaskRecord,
+    taskId: string,
     finishedAt: number,
     succeeded: boolean,
   ): void {
-    const runCount = task.runCount + 1;
-    const shouldComplete =
-      task.recurrenceFormat === "once" ||
-      task.stopPolicy?.runOnce ||
-      (task.stopPolicy?.stopWhenCompleted && succeeded) ||
-      (task.stopPolicy?.maxRuns !== undefined &&
-        runCount >= task.stopPolicy.maxRuns) ||
-      (task.stopPolicy?.expiresAt !== undefined &&
-        finishedAt >= task.stopPolicy.expiresAt);
-    const nextRunAt = shouldComplete
-      ? null
-      : computeNextScheduledTime(
-          { format: task.recurrenceFormat, value: task.recurrence },
+    const latest = this.options.store.getScheduledTask(taskId);
+    if (!latest) return;
+
+    const runCount = latest.runCount + 1;
+    if (latest.status === "paused" || latest.status === "completed") {
+      this.options.store.updateScheduledTask(taskId, {
+        runCount,
+        lastRunAt: finishedAt,
+        nextRunAt: null,
+      });
+      return;
+    }
+
+    let shouldComplete =
+      latest.recurrenceFormat === "once" ||
+      latest.stopPolicy?.runOnce ||
+      (latest.stopPolicy?.stopWhenCompleted && succeeded) ||
+      (latest.stopPolicy?.maxRuns !== undefined &&
+        runCount >= latest.stopPolicy.maxRuns) ||
+      (latest.stopPolicy?.expiresAt !== undefined &&
+        finishedAt >= latest.stopPolicy.expiresAt);
+    let nextRunAt: number | null = null;
+    if (!shouldComplete) {
+      try {
+        nextRunAt = computeNextScheduledTime(
+          { format: latest.recurrenceFormat, value: latest.recurrence },
           {
             after: new Date(finishedAt),
-            anchor: new Date(task.createdAt),
-            timezone: task.timezone,
+            anchor: new Date(latest.createdAt),
+            timezone: latest.timezone,
           },
         );
-    this.options.store.updateScheduledTask(task.id, {
+      } catch {
+        shouldComplete = true;
+      }
+    }
+    this.options.store.updateScheduledTask(taskId, {
       runCount,
       lastRunAt: finishedAt,
       nextRunAt,
@@ -318,6 +344,25 @@ export class ScheduledTaskService {
         nextRunAt: null,
       });
     }
+  }
+
+  private skipRun(
+    taskId: string,
+    cause: ScheduledRunRecord["cause"],
+    scheduledFor: number,
+    summary: string,
+  ): ScheduledRunRecord {
+    const skipped = this.options.store.createScheduledRun({
+      taskId,
+      cause,
+      scheduledFor,
+    });
+    return this.options.store.updateScheduledRun(skipped.id, {
+      status: "skipped",
+      summary,
+      unread: true,
+      finishedAt: Date.now(),
+    });
   }
 
   private validateInput(
