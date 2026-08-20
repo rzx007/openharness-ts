@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { JobSnapshot } from "@openharness/jobs";
 
 import type { OpenHarnessClient } from "../../transport/http-client.js";
 import { createInitialClientState } from "../../state/reducer.js";
@@ -10,6 +11,26 @@ import {
   resolveSessionCwd,
 } from "../session-commands.js";
 import type { CommandCatalogEntry } from "../../types/index.js";
+
+const agentJob: JobSnapshot = {
+  id: "agent-1",
+  kind: "agent",
+  label: "Review the change",
+  ownerSession: "s1",
+  status: "running",
+  capabilities: { read: true, wait: true, send: true, cancel: true },
+  cwd: "/tmp/project",
+  startedAt: 10,
+  updatedAt: 20,
+};
+
+function job(overrides: Partial<JobSnapshot> = {}): JobSnapshot {
+  return {
+    ...agentJob,
+    ...overrides,
+    capabilities: { ...agentJob.capabilities, ...overrides.capabilities },
+  };
+}
 
 function fakeClient(overrides: Partial<OpenHarnessClient> = {}): OpenHarnessClient {
   return {
@@ -155,6 +176,167 @@ describe("dispatchSessionCommand", () => {
     expect(reads[0]?.key).toBe("context:/tmp/project:status");
     await expect(reads[0]!.load()).resolves.toBe("STATUS TABLE");
     expect(getContextStatus).toHaveBeenCalledWith({ cwd: "/tmp/project" });
+  });
+
+  it("lists Jobs through the unified read surface", async () => {
+    const listJobs = vi.fn(async () => [agentJob]);
+    const { host: h, emitted } = host({ client: fakeClient({ listJobs }) });
+    const presented: Array<{ title: string; content: string }> = [];
+    Object.assign(h, {
+      sessionId: "s1",
+      present: (title: string, content: string) => presented.push({ title, content }),
+    });
+
+    await expect(dispatchSessionCommand({ name: "/jobs", args: "" }, h)).resolves.toBe("handled");
+
+    expect(listJobs).toHaveBeenCalledWith({
+      sessionId: "s1",
+      includeFinished: true,
+      limit: 100,
+    });
+    expect(emitted).toHaveLength(0);
+    expect(presented).toContainEqual({
+      title: "Jobs",
+      content: "Jobs (1):\n\n  agent-1 [running] agent: Review the change",
+    });
+  });
+
+  it("reads a normalized Job snapshot and its output", async () => {
+    const readJob = vi.fn(async () => ({
+      snapshot: agentJob,
+      text: "review output",
+      cursor: 13,
+      truncated: false,
+    }));
+    const { host: h, emitted } = host({ client: fakeClient({ readJob }) });
+    Object.assign(h, { sessionId: "s1" });
+
+    await expect(dispatchSessionCommand({ name: "/jobs", args: "show agent-1" }, h))
+      .resolves.toBe("handled");
+
+    expect(readJob).toHaveBeenCalledWith("agent-1", { sessionId: "s1" });
+    expect(emitted[0]).toContain("Job: agent-1");
+    expect(emitted[0]).toContain("Kind:          agent");
+    expect(emitted[0]).toContain("Status:        running");
+    expect(emitted[0]).toContain("Output:\nreview output");
+  });
+
+  it("cancels a Job with an explicit slash-command reason", async () => {
+    const cancelJob = vi.fn(async () => job({ status: "killed", updatedAt: 30 }));
+    const { host: h, emitted } = host({ client: fakeClient({ cancelJob }) });
+    Object.assign(h, { sessionId: "s1" });
+
+    await expect(dispatchSessionCommand({ name: "/jobs", args: "cancel agent-1" }, h))
+      .resolves.toBe("handled");
+
+    expect(cancelJob).toHaveBeenCalledWith("agent-1", {
+      sessionId: "s1",
+      reason: "Cancelled from slash command",
+    });
+    expect(emitted.at(-1)).toContain("killed");
+  });
+
+  it("starts a producer-specific background shell and reports its Job ID", async () => {
+    const shell = job({ id: "shell-1", kind: "shell", label: "pnpm test" });
+    const createBackgroundShell = vi.fn(async () => ({ jobId: shell.id, snapshot: shell }));
+    const { host: h, emitted } = host({ client: fakeClient({ createBackgroundShell }) });
+    Object.assign(h, { sessionId: "s1" });
+
+    await expect(dispatchSessionCommand({ name: "/background", args: "pnpm test" }, h))
+      .resolves.toBe("handled");
+
+    expect(createBackgroundShell).toHaveBeenCalledWith({ sessionId: "s1", command: "pnpm test" });
+    expect(emitted.at(-1)).toBe("Background shell started: shell-1. Use /jobs to inspect it.");
+  });
+
+  it("emits the new Jobs and background usage for malformed commands", async () => {
+    const { host: h, emitted } = host();
+    Object.assign(h, { sessionId: "s1" });
+
+    await dispatchSessionCommand({ name: "/jobs", args: "show" }, h);
+    await dispatchSessionCommand({ name: "/jobs", args: "stop agent-1" }, h);
+    await dispatchSessionCommand({ name: "/background", args: "" }, h);
+
+    expect(emitted).toEqual([
+      "Usage: /jobs [list | show ID | cancel ID]",
+      "Usage: /jobs [list | show ID | cancel ID]",
+      "Usage: /background <command>",
+    ]);
+  });
+
+  it("does not retain the removed /tasks slash-command alias", async () => {
+    const { host: h } = host();
+    Object.assign(h, { sessionId: "s1" });
+
+    await expect(dispatchSessionCommand({ name: "/tasks", args: "" }, h))
+      .resolves.toBe("unhandled");
+  });
+
+  it("counts Jobs in session stats without background-task terminology", async () => {
+    const listJobs = vi.fn(async () => [agentJob, job({ id: "shell-1", kind: "shell" })]);
+    const client = fakeClient({
+      listJobs,
+      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
+      getSettings: vi.fn(async () => ({})),
+    });
+    const { host: h, emitted } = host({ client });
+    Object.assign(h, { sessionId: "s1" });
+
+    await dispatchSessionCommand({ name: "/stats", args: "" }, h);
+
+    expect(listJobs).toHaveBeenCalledWith({ sessionId: "s1", includeFinished: true, limit: 100 });
+    expect(emitted.at(-1)).toContain("- jobs: 2");
+    expect(emitted.at(-1)).not.toContain("background_tasks");
+  });
+
+  it("lists only Agent Jobs for /agents", async () => {
+    const listJobs = vi.fn(async () => [agentJob]);
+    const { host: h, emitted } = host({ client: fakeClient({ listJobs }) });
+    Object.assign(h, { sessionId: "s1" });
+
+    await dispatchSessionCommand({ name: "/agents", args: "" }, h);
+
+    expect(listJobs).toHaveBeenCalledWith({
+      sessionId: "s1",
+      kinds: ["agent"],
+      includeFinished: true,
+      limit: 100,
+    });
+    expect(emitted.at(-1)).toContain("Agent Jobs (1):");
+  });
+
+  it("keeps MCP failures independent while /doctor reports Jobs", async () => {
+    const listJobs = vi.fn(async () => [agentJob]);
+    const client = fakeClient({
+      listJobs,
+      getSettings: vi.fn(async () => ({})),
+      getAuthStatus: vi.fn(async () => ({
+        codex: { configured: false, state: "missing", source: "/tmp/auth.json" },
+        storedProviders: [],
+        envProviders: [],
+      })),
+      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
+      getSessionMcp: vi.fn(async () => {
+        throw new Error("MCP unavailable");
+      }),
+    });
+    const { host: h, emitted } = host({ client });
+    Object.assign(h, { sessionId: "s1" });
+
+    await expect(dispatchSessionCommand({ name: "/doctor", args: "" }, h)).resolves.toBe("handled");
+
+    expect(listJobs).toHaveBeenCalledWith({ sessionId: "s1", includeFinished: true, limit: 100 });
+    expect(emitted.at(-1)).toContain("Jobs:           1");
+  });
+
+  it("presents dream receipts as Jobs", async () => {
+    const startDream = vi.fn(async () => ({ taskId: "dream-1" }));
+    const { host: h, emitted } = host({ client: fakeClient({ startDream }) });
+    Object.assign(h, { sessionId: "s1" });
+
+    await dispatchSessionCommand({ name: "/dream", args: "" }, h);
+
+    expect(emitted.at(-1)).toBe("Dream started as Job dream-1. Use /jobs to inspect it.");
   });
 
   it("returns unhandled for unknown non-local commands", async () => {

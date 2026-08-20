@@ -1,5 +1,6 @@
 import type { OpenHarnessClient } from "../transport/http-client.js";
 import type { CommandCatalogEntry, OpenHarnessClientState } from "../types/index.js";
+import type { JobReadResult, JobSnapshot } from "@openharness/jobs";
 import { patchSessionRuntimeMetadata } from "@openharness/services";
 
 export type SlashLine = { name: string; args: string };
@@ -119,7 +120,7 @@ function shouldPresentSlashOutput(slash: SlashLine): boolean {
     }
     case "/provider":
       return !slash.args.trim();
-    case "/tasks": {
+    case "/jobs": {
       const sub = firstArg(slash.args);
       return !sub || sub === "list" || sub === "show";
     }
@@ -153,6 +154,35 @@ function shouldPresentSlashOutput(slash: SlashLine): boolean {
     default:
       return false;
   }
+}
+
+function formatJobReadResult(result: JobReadResult): string {
+  const snapshot: JobSnapshot = result.snapshot;
+  const capabilities = [
+    `read=${snapshot.capabilities.read}`,
+    `wait=${snapshot.capabilities.wait}`,
+    `send=${snapshot.capabilities.send}`,
+    `cancel=${snapshot.capabilities.cancel}`,
+  ].join(", ");
+  return [
+    `Job: ${snapshot.id}`,
+    `  Kind:          ${snapshot.kind}`,
+    `  Status:        ${snapshot.status}`,
+    `  Label:         ${snapshot.label}`,
+    `  Owner session: ${snapshot.ownerSession}`,
+    `  CWD:           ${snapshot.cwd}`,
+    `  Started at:    ${snapshot.startedAt}`,
+    `  Updated at:    ${snapshot.updatedAt}`,
+    `  Finished at:   ${snapshot.finishedAt ?? "(n/a)"}`,
+    `  Detail:        ${snapshot.detail ?? "(none)"}`,
+    `  Capabilities:  ${capabilities}`,
+    `  Metadata:      ${snapshot.metadata ? JSON.stringify(snapshot.metadata) : "(none)"}`,
+    `  Cursor:        ${result.cursor}`,
+    `  Truncated:     ${result.truncated}`,
+    "",
+    "Output:",
+    result.text || "(no output)",
+  ].join("\n");
 }
 
 function slashOutputTitle(slash: SlashLine): string {
@@ -331,56 +361,54 @@ export async function dispatchSessionCommand(
     return "handled";
   }
 
-  if (slash?.name === "/tasks") {
+  if (slash?.name === "/jobs") {
     if (!sessionId) return "handled";
     const args = slash.args.trim();
-    const [sub, id] = args.split(/\s+/).filter(Boolean);
-    if (!sub || sub === "list") {
-      await readPresentation(`tasks:${sessionId}`, "Tasks", async () => {
-        const tasks = await client.listTasks({ sessionId });
-        if (tasks.length === 0) return "No tasks.";
+    const [sub, id, ...extra] = args.split(/\s+/).filter(Boolean);
+    if ((!sub || sub === "list") && !id) {
+      await readPresentation(`jobs:${sessionId}`, "Jobs", async () => {
+        const jobs = await client.listJobs({
+          sessionId,
+          includeFinished: true,
+          limit: 100,
+        });
+        if (jobs.length === 0) return "No Jobs.";
         return [
-          `Tasks (${tasks.length}):`,
+          `Jobs (${jobs.length}):`,
           "",
-          ...tasks.map((task) => `  ${task.id} [${task.status}] ${task.type}: ${task.description}`),
+          ...jobs.map((job) => `  ${job.id} [${job.status}] ${job.kind}: ${job.label}`),
         ].join("\n");
       });
       return "handled";
     }
-    if (sub === "show" && id) {
-      await readPresentation(`task:${sessionId}:${id}`, "Tasks", async () => {
-        const detail = await client.getTask(id, { sessionId });
-        return [
-          `Task: ${detail.task.id}`,
-          `  Type:        ${detail.task.type}`,
-          `  Status:      ${detail.task.status}`,
-          `  Description: ${detail.task.description}`,
-          `  CWD:         ${detail.task.cwd}`,
-          `  Command:     ${detail.task.command ?? "(none)"}`,
-          `  Exit code:   ${detail.task.exitCode ?? "(n/a)"}`,
-          "",
-          "Output:",
-          detail.output ?? "(no output)",
-        ].join("\n");
+    if (sub === "show" && id && extra.length === 0) {
+      await readPresentation(`job:${sessionId}:${id}`, "Jobs", async () => {
+        const result = await client.readJob(id, { sessionId });
+        return formatJobReadResult(result);
       });
       return "handled";
     }
-    if (sub === "stop" && id) {
-      const task = await client.stopTask(id, { sessionId });
-      emit(`Task ${task.id} stopped.`);
+    if (sub === "cancel" && id && extra.length === 0) {
+      const snapshot = await client.cancelJob(id, {
+        sessionId,
+        reason: "Cancelled from slash command",
+      });
+      emit(`Job ${snapshot.id} status: ${snapshot.status}.`);
       return "handled";
     }
-    if (sub === "run") {
-      const command = args.replace(/^run\s+/i, "").trim();
-      if (!command) {
-        emit("Usage: /tasks run <command>");
-        return "handled";
-      }
-      const task = await client.createTask({ sessionId, command });
-      emit(`Task started: ${task.id} — ${command}`);
+    emit("Usage: /jobs [list | show ID | cancel ID]");
+    return "handled";
+  }
+
+  if (slash?.name === "/background") {
+    const command = slash.args.trim();
+    if (!command) {
+      emit("Usage: /background <command>");
       return "handled";
     }
-    emit("Usage: /tasks [list | show ID | stop ID | run CMD]");
+    if (!sessionId) return "handled";
+    const result = await client.createBackgroundShell({ sessionId, command });
+    emit(`Background shell started: ${result.jobId}. Use /jobs to inspect it.`);
     return "handled";
   }
 
@@ -511,9 +539,9 @@ export async function dispatchSessionCommand(
       .map((part) => part.text ?? "")
       .join(" ");
     const estimatedTokens = Math.max(1, Math.ceil(text.length / 4));
-    const [memory, tasks, settings] = await Promise.all([
+    const [memory, jobs, settings] = await Promise.all([
       client.listMemory({ cwd }).catch(() => ({ entries: [] as Array<{ id: string }> })),
-      client.listTasks({ sessionId }).catch(() => []),
+      client.listJobs({ sessionId, includeFinished: true, limit: 100 }).catch(() => []),
       client.getSettings().catch(() => ({} as Record<string, unknown>)),
     ]);
     emit([
@@ -521,7 +549,7 @@ export async function dispatchSessionCommand(
       `- messages: ${messageCount}`,
       `- estimated_tokens: ${estimatedTokens}`,
       `- memory_entries: ${memory.entries.length}`,
-      `- background_tasks: ${tasks.length}`,
+      `- jobs: ${jobs.length}`,
       `- output_style: ${typeof settings.outputStyle === "string" ? settings.outputStyle : "default"}`,
     ].join("\n"));
     return "handled";
@@ -529,17 +557,21 @@ export async function dispatchSessionCommand(
 
   if (slash?.name === "/agents") {
     if (!sessionId) return "handled";
-    const tasks = await client.listTasks({ sessionId });
-    const agents = tasks.filter((task) => task.type === "agent");
+    const agents = await client.listJobs({
+      sessionId,
+      kinds: ["agent"],
+      includeFinished: true,
+      limit: 100,
+    });
     if (agents.length === 0) {
-      emit("No agent tasks.");
+      emit("No Agent Jobs.");
       return "handled";
     }
     emit(
       [
-        `Agent tasks (${agents.length}):`,
+        `Agent Jobs (${agents.length}):`,
         "",
-        ...agents.map((task) => `  ${task.id} [${task.status}] ${task.description}`),
+        ...agents.map((job) => `  ${job.id} [${job.status}] ${job.label}`),
       ].join("\n"),
     );
     return "handled";
@@ -583,7 +615,7 @@ export async function dispatchSessionCommand(
       ...(sessionId ? { sessionId } : {}),
       preview,
     });
-    emit(`Dream 已启动(task ${result.taskId})。用 /tasks 观察进度。`);
+    emit(`Dream started as Job ${result.taskId}. Use /jobs to inspect it.`);
     return "handled";
   }
 
@@ -602,12 +634,14 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/doctor") {
-    const [settings, auth, memory, mcp, tasks] = await Promise.all([
+    const [settings, auth, memory, mcp, jobs] = await Promise.all([
       client.getSettings().catch(() => ({}) as Record<string, unknown>),
       client.getAuthStatus().catch(() => null),
       client.listMemory({ cwd }).catch(() => ({ directory: "(unavailable)", entries: [] as Array<{ id: string }> })),
       sessionId ? client.getSessionMcp(sessionId).catch(() => []) : Promise.resolve([]),
-      sessionId ? client.listTasks({ sessionId }).catch(() => []) : Promise.resolve([]),
+      sessionId
+        ? client.listJobs({ sessionId, includeFinished: true, limit: 100 }).catch(() => [])
+        : Promise.resolve([]),
     ]);
     const bucket = sessionId ? clientState.buckets[sessionId] : undefined;
     const lines = [
@@ -630,7 +664,7 @@ export async function dispatchSessionCommand(
       `Theme:          ${String(settings.theme ?? "default")}`,
       "",
       `Messages:       ${bucket?.messages.length ?? 0}`,
-      `Background tasks: ${tasks.length}`,
+      `Jobs:           ${jobs.length}`,
       "",
       `Memory dir:     ${memory.directory}`,
       `Memory entries: ${memory.entries.length}`,
@@ -877,7 +911,7 @@ export async function dispatchSessionCommand(
           `    ${agent.description.split("\n")[0]?.slice(0, 100) ?? ""}`,
         ]),
         "",
-        '用法: Agent 工具 subagentType="<name>" 派发;/agents 查看运行中任务。',
+        '用法: Agent 工具 subagentType="<name>" 派发;/agents 查看 Agent Jobs。',
       ].join("\n"),
     );
     return "handled";

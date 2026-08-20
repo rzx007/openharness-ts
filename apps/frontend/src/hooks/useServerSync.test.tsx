@@ -434,10 +434,16 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
             description: "Show MCP status",
           },
           {
-            name: "/tasks",
+            name: "/jobs",
             kind: "session",
             source: "builtin",
-            description: "List tasks",
+            description: "List Jobs",
+          },
+          {
+            name: "/background",
+            kind: "session",
+            source: "builtin",
+            description: "Start a background shell",
           },
           {
             name: "/help",
@@ -638,29 +644,35 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
         ],
       });
     }
-    if (pathname === "/tasks" && init?.method === "POST") {
+    if (pathname === "/background-shells" && init?.method === "POST") {
       return jsonResponse({
-        task: {
-          id: "task_run_1",
-          type: "shell",
+        jobId: "shell_run_1",
+        snapshot: {
+          id: "shell_run_1",
+          kind: "shell",
+          label: "echo hi",
+          ownerSession: "s1",
           status: "running",
-          description: "echo hi",
+          capabilities: { read: true, wait: true, send: false, cancel: true },
           cwd: process.cwd(),
-          command: "echo hi",
-          createdAt: 1,
+          startedAt: 1,
+          updatedAt: 1,
         },
       });
     }
-    if (pathname === "/tasks") {
+    if (pathname === "/jobs") {
       return jsonResponse({
-        tasks: [
+        jobs: [
           {
-            id: "task_1",
-            type: "shell",
+            id: "agent_job_1",
+            kind: "agent",
+            label: "demo",
+            ownerSession: "s1",
             status: "running",
-            description: "demo",
+            capabilities: { read: true, wait: true, send: true, cancel: true },
             cwd: process.cwd(),
-            createdAt: 1,
+            startedAt: 1,
+            updatedAt: 1,
           },
         ],
       });
@@ -1223,8 +1235,16 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   });
   expect(captured?.selectRequest?.options.some((option) => option.value === "s2")).toBe(false);
 
-  expect(captured?.commands).toEqual(expect.arrayContaining(["/new", "/models", "/pr", "/skills"]));
+  expect(captured?.commands).toEqual(expect.arrayContaining([
+    "/new",
+    "/models",
+    "/pr",
+    "/skills",
+    "/jobs",
+    "/background",
+  ]));
   expect(captured?.commands).not.toContain("/model");
+  expect(captured?.commands).not.toContain("/tasks");
 
   await act(async () => {
     captured?.sendRequest({
@@ -1269,7 +1289,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "submit_line", line: "/config show" });
     captured?.sendRequest({ type: "submit_line", line: "/provider" });
     captured?.sendRequest({ type: "submit_line", line: "/mcp" });
-    captured?.sendRequest({ type: "submit_line", line: "/tasks" });
+    captured?.sendRequest({ type: "submit_line", line: "/jobs list" });
     captured?.sendRequest({ type: "submit_line", line: "/memory" });
     captured?.sendRequest({ type: "submit_line", line: "/auth" });
     captured?.sendRequest({ type: "submit_line", line: "/context" });
@@ -1285,7 +1305,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "submit_line", line: "/cost" });
     captured?.sendRequest({ type: "submit_line", line: "/export" });
     captured?.sendRequest({ type: "submit_line", line: "/output-style list" });
-    captured?.sendRequest({ type: "submit_line", line: "/tasks run echo hi" });
+    captured?.sendRequest({ type: "submit_line", line: "/background echo hi" });
     captured?.sendRequest({ type: "submit_line", line: "/init" });
     captured?.sendRequest({ type: "submit_line", line: "/plugin" });
     captured?.sendRequest({ type: "submit_line", line: "/hooks" });
@@ -1302,15 +1322,15 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes('"provider": "openai"'))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenAI"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("MCP Servers"))).toBe(false);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("task_1"))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("agent_job_1"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("prefer pnpm"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Credential status:"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("CONTEXT PREVIEW"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Session stats:"))).toBe(false);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("No agent tasks."))).toBe(false);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Agent Jobs"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Conversation compacted"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("已写入"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Dream 已启动"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Dream started as Job dream_1"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("PROFILE STATUS"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("OpenHarness Environment Diagnostic"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Effort set to: high"))).toBe(true);
@@ -1318,7 +1338,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Cost estimate:"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Exported Markdown to:"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("* default"))).toBe(false);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Task started: task_run_1"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Background shell started: shell_run_1"))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Project initialized successfully."))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("demo@1.0.0"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("h1: stop"))).toBe(false);
