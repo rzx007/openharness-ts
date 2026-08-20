@@ -2,6 +2,7 @@ node_modules
 dist
 build
 *.tsbuildinfo
+.superpowers/*
 
 .env
 .env*.local
