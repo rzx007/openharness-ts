@@ -25,6 +25,7 @@ import type {
   SessionStateSnapshot,
   ListMessagePartsOptions,
 } from "@openharness/services";
+import type { JobSnapshot } from "@openharness/jobs";
 
 export type {
   CreateScheduledTaskInput,
@@ -385,6 +386,20 @@ export interface CreateTaskInput {
   cwd?: string;
   sessionId?: string;
   command: string;
+}
+
+/** `POST /background-shells` 请求体。 */
+export interface CreateBackgroundShellInput {
+  sessionId: string;
+  command: string;
+  cwd?: string;
+  description?: string;
+}
+
+/** `POST /background-shells` 响应。 */
+export interface CreateBackgroundShellResult {
+  jobId: string;
+  snapshot: JobSnapshot;
 }
 
 /** `POST /sessions/:id/interrupt` 响应。 */

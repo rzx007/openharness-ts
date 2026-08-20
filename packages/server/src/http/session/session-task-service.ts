@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { getTaskManager, type SessionStore } from "@openharness/services";
+import { getTaskManager, type SessionStore, type TaskInfo } from "@openharness/services";
 
 import type { SessionTaskBridgeManager } from "./session-task-bridge.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
@@ -43,16 +43,22 @@ export class SessionTaskService {
     return { tasks: manager.listTasks(input.status) };
   }
 
-  async create(input: { cwd?: string; sessionId?: string; command: string }): Promise<{ task: unknown }> {
+  async create(input: {
+    cwd?: string;
+    sessionId?: string;
+    command: string;
+    description?: string;
+  }): Promise<{ task: TaskInfo }> {
     const scope = this.resolveScope(input);
     const command = input.command.trim();
     if (!command) throw new SessionTaskError(400, "command is required");
+    const description = input.description?.trim() || command;
     const id = scope.sessionId ? `task_${randomUUID()}` : undefined;
     const manager = this.context.getTaskManager(scope);
     const task = await manager.createShellTask({
       ...(id ? { id } : {}),
       command,
-      description: command,
+      description,
       cwd: scope.cwd,
       ...(scope.sessionId ? { sessionId: scope.sessionId } : {}),
     });

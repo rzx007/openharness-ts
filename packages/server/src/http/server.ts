@@ -38,6 +38,7 @@ import {
   type JsonRecord,
 } from "./support.js";
 import { createAuthRoutes } from "./routes/auth.js";
+import { createBackgroundShellRoutes } from "./routes/background-shell.js";
 import { createScheduleRoutes } from "./routes/schedules.js";
 import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
@@ -351,6 +352,13 @@ export class OpenHarnessHttpServer {
       "/tasks",
       createTaskRoutes({
         tasks: this.daemon.tasks,
+      }),
+    );
+    this.app.route(
+      "/background-shells",
+      createBackgroundShellRoutes({
+        tasks: this.daemon.tasks,
+        jobs: this.jobs,
       }),
     );
     this.app.route("/jobs", createJobRoutes(this.jobs));

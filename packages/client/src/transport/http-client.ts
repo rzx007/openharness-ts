@@ -26,6 +26,8 @@ import type {
   AgentPersonaInfo,
   AuthStatus,
   CompactSessionResponse,
+  CreateBackgroundShellInput,
+  CreateBackgroundShellResult,
   CustomProviderInput,
   CreateScheduledTaskInput,
   CreateTaskInput,
@@ -1160,6 +1162,17 @@ export class OpenHarnessClient {
       { signal },
     );
     return response.jobs;
+  }
+
+  async createBackgroundShell(
+    input: CreateBackgroundShellInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CreateBackgroundShellResult> {
+    return await this.request<CreateBackgroundShellResult>("/background-shells", {
+      method: "POST",
+      body: input,
+      signal: options.signal,
+    });
   }
 
   async readJob(

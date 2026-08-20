@@ -339,6 +339,39 @@ describe("OpenHarnessClient", () => {
     ]);
   });
 
+  it("creates a producer-specific background shell", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const snapshot = {
+      id: "task-1",
+      kind: "shell" as const,
+      label: "tests",
+      ownerSession: "s1",
+      status: "running" as const,
+      capabilities: { read: true, wait: true, send: false, cancel: true },
+      cwd: "/repo",
+      startedAt: 1,
+      updatedAt: 1,
+    };
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      fetch: (async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return jsonResponse({ jobId: "task-1", snapshot });
+      }) as typeof fetch,
+    });
+
+    await expect(client.createBackgroundShell({
+      sessionId: "s1",
+      command: "pnpm test",
+      description: "tests",
+    })).resolves.toEqual({ jobId: "task-1", snapshot });
+    expect(calls[0]?.url).toBe("http://127.0.0.1:3456/background-shells");
+    expect(calls[0]?.init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ sessionId: "s1", command: "pnpm test", description: "tests" }),
+    });
+  });
+
   it("replays an interrupted run through the dedicated, idempotent endpoint", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (

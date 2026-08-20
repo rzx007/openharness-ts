@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from "@openharness/coordinator";
+import type { JobSnapshot } from "@openharness/jobs";
 import type {
   AgentChildInput,
   AgentChildDirectory,
@@ -1777,18 +1778,40 @@ describe("OpenHarnessHttpServer", () => {
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({ id: "s-task", cwd: process.cwd(), model: "m" }),
       });
+      const successfulShellCommand = `${process.execPath} -e "process.exit(0)"`;
       const created = await fetch(`${baseUrl}/tasks`, {
         method: "POST",
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({
           sessionId: "s-task",
-          command: `${process.execPath} -e "process.exit(0)"`,
+          command: successfulShellCommand,
         }),
       });
       expect(created.status).toBe(201);
       const createdBody = await created.json() as { task: { id: string; status: string; command?: string } };
       expect(createdBody.task.id).toMatch(/^task_/);
       expect(createdBody.task.command).toContain("process.exit(0)");
+
+      const backgroundShell = await fetch(`${baseUrl}/background-shells`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: "s-task", command: successfulShellCommand }),
+      });
+      expect(backgroundShell.status).toBe(201);
+      const receipt = await backgroundShell.json() as { jobId: string; snapshot: JobSnapshot };
+      expect(receipt.snapshot).toMatchObject({
+        id: receipt.jobId,
+        kind: "shell",
+        ownerSession: "s-task",
+      });
+
+      const read = await fetch(`${baseUrl}/jobs/${receipt.jobId}?sessionId=s-task`, {
+        headers: auth(token),
+      });
+      expect(read.status).toBe(200);
+      await expect(read.json()).resolves.toMatchObject({
+        snapshot: { id: receipt.jobId, kind: "shell", ownerSession: "s-task" },
+      });
     }, {
       projectInitService: {
         async init() {

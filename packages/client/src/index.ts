@@ -53,6 +53,8 @@ export type {
   CommandKind,
   CommandSource,
   CompactSessionResponse,
+  CreateBackgroundShellInput,
+  CreateBackgroundShellResult,
   CreateScheduledTaskInput,
   CreateClientSessionInput,
   CreateTaskInput,
