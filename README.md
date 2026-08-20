@@ -232,7 +232,7 @@ ohs config set daemon.autoStart true|false
 ```
 
 Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-model.md](docs/auth-provider-model.md)。
-Workflow CLI 和 TUI `/workflow` 面板的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
+Workflow CLI 和 TUI `/workflow`（统一 Jobs Panel 的别名）的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
 `ohs provider use <name>` 默认只切换供应商；要同时切模型请加 `-m/--model`，例如 `ohs provider use deepseek -m deepseek-chat`。
 
 TUI 内斜杠命令走 daemon command catalog + client-local UI + template expand；共享呈现/派发在 `@openharness/client` `dispatchSessionCommand`（TUI 适配层 `sessionSlashCommands.ts`）。流程见 [docs/slash-commands-flow.md](docs/slash-commands-flow.md)，清单见 [docs/slash-commands.md](docs/slash-commands.md)；运行时以 TUI `/help` 与 `GET /commands` 为准。

@@ -1747,6 +1747,14 @@ describe("OpenHarnessHttpServer", () => {
         body: JSON.stringify({ id: "s-task", cwd: process.cwd(), model: "m" }),
       });
       const successfulShellCommand = `${process.execPath} -e "process.exit(0)"`;
+      const missingSession = await fetch(`${baseUrl}/background-shells`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: "missing-session", command: successfulShellCommand }),
+      });
+      expect(missingSession.status).toBe(404);
+      await expect(missingSession.json()).resolves.toEqual({ error: "Session not found" });
+
       const oldList = await fetch(`${baseUrl}/tasks?sessionId=s-task`, {
         headers: auth(token),
       });
@@ -1900,6 +1908,42 @@ describe("OpenHarnessHttpServer", () => {
           return { output: `[main abc] ${message}` };
         },
       },
+    });
+  });
+
+  it("compensates a real background shell when post-create Job normalization fails", async () => {
+    await withServer(async ({ baseUrl, token, server }) => {
+      const sessionId = "s-background-normalization";
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: sessionId, cwd: process.cwd(), model: "m" }),
+      });
+      const internals = server as unknown as {
+        jobs: { read: (...args: unknown[]) => Promise<unknown> };
+        daemon: { tasks: { stop(taskId: string, input: { sessionId: string }): Promise<unknown> } };
+      };
+      internals.jobs.read = vi.fn(async () => { throw new Error("normalization unavailable"); });
+
+      try {
+        const response = await fetch(`${baseUrl}/background-shells`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            command: `${process.execPath} -e "setInterval(() => {}, 1000)"`,
+          }),
+        });
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({ error: "normalization unavailable" });
+        const [task] = server.store.listSessionTasks(sessionId);
+        expect(task).toBeDefined();
+        expect(task?.status).not.toBe("running");
+      } finally {
+        const [task] = server.store.listSessionTasks(sessionId);
+        if (task) await internals.daemon.tasks.stop(task.id, { sessionId }).catch(() => {});
+      }
     });
   });
 

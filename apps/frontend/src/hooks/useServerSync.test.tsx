@@ -1554,6 +1554,9 @@ function workflowJobFixture(options: {
   failMcp?: boolean;
   failJobsAfterFirst?: boolean;
   failSend?: boolean;
+  failSlashCommand?: "jobs-cancel" | "agents" | "background";
+  deferCancel?: boolean;
+  deferSend?: boolean;
 } = {}) {
   const session: SessionRecord = {
     id: "workflow-session",
@@ -1614,6 +1617,11 @@ function workflowJobFixture(options: {
   let backgroundCreated = false;
   let agentReadOverride: unknown;
   let cancelSnapshotOverride: unknown;
+  let workflowDetailSummary = "Research in progress";
+  let cancelSignal: AbortSignal | null | undefined;
+  let sendSignal: AbortSignal | null | undefined;
+  let releaseCancel: (() => void) | undefined;
+  let releaseSend: (() => void) | undefined;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const requestUrl = new URL(String(url));
     calls.push(requestUrl.pathname + requestUrl.search);
@@ -1661,11 +1669,23 @@ function workflowJobFixture(options: {
       });
     }
     if (requestUrl.pathname === "/background-shells" && init?.method === "POST") {
+      if (options.failSlashCommand === "background") {
+        return new Response(JSON.stringify({ error: "background unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
       backgroundCreated = true;
       return jsonResponse({ jobId: shellJob.id, snapshot: shellJob });
     }
     if (requestUrl.pathname === "/jobs") {
       generalJobsRequests += 1;
+      if (options.failSlashCommand === "agents" && requestUrl.searchParams.get("kinds") === "agent") {
+        return new Response(JSON.stringify({ error: "agents unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
       if (options.failJobsAfterFirst && generalJobsRequests > 1) {
         return new Response(JSON.stringify({ error: "jobs unavailable" }), {
           status: 503,
@@ -1683,8 +1703,23 @@ function workflowJobFixture(options: {
       });
     }
     if (requestUrl.pathname === `/jobs/${agentJob.id}/cancel`) {
+      if (options.failSlashCommand === "jobs-cancel") {
+        return new Response(JSON.stringify({ error: "cancel unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
       if (cancelSnapshotOverride !== undefined) {
         return jsonResponse({ snapshot: cancelSnapshotOverride });
+      }
+      if (options.deferCancel) {
+        cancelSignal = init?.signal;
+        return await new Promise<Response>((resolve) => {
+          releaseCancel = () => {
+            agentCancelled = true;
+            resolve(jsonResponse({ snapshot: killedAgentJob }));
+          };
+        });
       }
       agentCancelled = true;
       return jsonResponse({ snapshot: killedAgentJob });
@@ -1697,7 +1732,27 @@ function workflowJobFixture(options: {
           headers: { "content-type": "application/json" },
         });
       }
+      if (options.deferSend) {
+        sendSignal = init?.signal;
+        return await new Promise<Response>((resolve) => {
+          releaseSend = () => resolve(jsonResponse({}));
+        });
+      }
       return jsonResponse({});
+    }
+    if (requestUrl.pathname === `/sessions/${session.id}/prompts` && init?.method === "POST") {
+      return jsonResponse({
+        input: { id: "input-running" },
+        run: {
+          id: "run-running",
+          sessionId: session.id,
+          inputId: "input-running",
+          status: "pending",
+          metadata: {},
+          createdAt: 40,
+          updatedAt: 40,
+        },
+      });
     }
     if (requestUrl.pathname === `/jobs/${agentJob.id}` && agentReadOverride !== undefined) {
       return jsonResponse(agentReadOverride);
@@ -1722,7 +1777,7 @@ function workflowJobFixture(options: {
           blockedTaskIds: [],
           blockedTasks: {},
           runningTaskIds: ["research"],
-          runningTasks: { research: { summary: "Research in progress" } },
+          runningTasks: { research: { summary: workflowDetailSummary } },
           results: {},
           needsReconciliation: false,
           reconciliationPlan: { actions: [] },
@@ -1744,7 +1799,81 @@ function workflowJobFixture(options: {
     setCancelSnapshotOverride(value: unknown) {
       cancelSnapshotOverride = value;
     },
+    setWorkflowDetailSummary(value: string) {
+      workflowDetailSummary = value;
+    },
+    getCancelSignal() {
+      return cancelSignal;
+    },
+    getSendSignal() {
+      return sendSignal;
+    },
+    releaseCancel() {
+      releaseCancel?.();
+    },
+    releaseSend() {
+      releaseSend?.();
+    },
   };
+}
+
+for (const scenario of [
+  {
+    name: "failed /jobs cancel",
+    option: "jobs-cancel" as const,
+    line: "/jobs cancel agent-1",
+    expectedError: "Jobs: cancel unavailable",
+  },
+  {
+    name: "failed /agents",
+    option: "agents" as const,
+    line: "/agents",
+    expectedError: "Jobs: agents unavailable",
+  },
+  {
+    name: "failed /background",
+    option: "background" as const,
+    line: "/background echo hi",
+    expectedError: "Jobs: background unavailable",
+  },
+]) {
+  test(`useServerSync preserves a submitted busy run after ${scenario.name}`, async () => {
+    workflowJobFixture({ failSlashCommand: scenario.option });
+    let captured: TuiSessionController | undefined;
+    const errors: string[] = [];
+    function Harness() {
+      captured = useServerSync(
+        { daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" } },
+        (message) => errors.push(message),
+      );
+      return <box />;
+    }
+
+    const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+    try {
+      for (let i = 0; i < 30 && captured?.jobState.status !== "ready"; i += 1) {
+        await act(async () => {
+          await renderOnce();
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+      }
+      await act(async () => {
+        captured?.sendRequest({ type: "submit_line", line: "keep running" });
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      });
+      expect(captured?.busy).toBe(true);
+
+      await act(async () => {
+        captured?.sendRequest({ type: "submit_line", line: scenario.line });
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      });
+
+      expect(captured?.busy).toBe(true);
+      expect(errors).toContain(scenario.expectedError);
+    } finally {
+      renderer.destroy();
+    }
+  });
 }
 
 test("useServerSync refreshes Jobs only after a successful /background creation", async () => {
@@ -1870,6 +1999,56 @@ test("useServerSync lists, reads, and cancels Workflow work through job_request 
     expect(requests.filter((request) => request.path.startsWith("/jobs?")).length).toBeGreaterThan(1);
     expect(requests.some((request) => request.path.includes("kinds=workflow"))).toBe(false);
     expect(errors).toEqual([]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync refreshes the selected Workflow detail together with the Jobs list", async () => {
+  const { requests, setWorkflowDetailSummary } = workflowJobFixture({ includeWorkflowInGeneralList: true });
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" },
+    });
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobState.status !== "ready"; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "wf-1" });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(captured?.jobDetailState).toMatchObject({
+      status: "ready",
+      jobId: "wf-1",
+      result: { details: { runningTasks: { research: { summary: "Research in progress" } } } },
+    });
+
+    const listReadsBefore = requests.filter((request) => request.path.startsWith("/jobs?")).length;
+    const detailReadsBefore = requests.filter((request) => request.path === "/jobs/wf-1?sessionId=workflow-session").length;
+    setWorkflowDetailSummary("Research changed on the producer");
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "refresh" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(requests.filter((request) => request.path.startsWith("/jobs?")).length)
+      .toBeGreaterThan(listReadsBefore);
+    expect(requests.filter((request) => request.path === "/jobs/wf-1?sessionId=workflow-session").length)
+      .toBeGreaterThan(detailReadsBefore);
+    expect(captured?.jobDetailState).toMatchObject({
+      status: "ready",
+      jobId: "wf-1",
+      result: { details: { runningTasks: { research: { summary: "Research changed on the producer" } } } },
+    });
   } finally {
     renderer.destroy();
   }
@@ -2105,6 +2284,96 @@ test("useServerSync reads and cancels one Job before refreshing the list", async
       expect.objectContaining({ id: "agent-1", status: "killed" }),
       expect.objectContaining({ id: "agent-2", status: "running" }),
     ]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync does not let a deferred cancel for Job A reclaim detail after selecting Job B", async () => {
+  const fixture = workflowJobFixture({ includeSiblingAgent: true, deferCancel: true });
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" },
+    });
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobs.length !== 2; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "agent-1" });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      captured?.sendRequest({ type: "job_request", job_action: "cancel", job_id: "agent-1", reason: "TUI" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "agent-2" });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(fixture.getCancelSignal()?.aborted).toBe(true);
+
+    await act(async () => {
+      fixture.releaseCancel();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    expect(captured?.jobDetailState).toMatchObject({
+      status: "ready",
+      jobId: "agent-2",
+      result: { snapshot: { id: "agent-2" } },
+    });
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync does not let a deferred send for Job A reclaim detail after selecting Job B", async () => {
+  const fixture = workflowJobFixture({ includeSiblingAgent: true, deferSend: true });
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" },
+    });
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobs.length !== 2; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "agent-1" });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      captured?.sendRequest({ type: "job_request", job_action: "send", job_id: "agent-1", data: "continue" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "agent-2" });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(fixture.getSendSignal()?.aborted).toBe(true);
+
+    await act(async () => {
+      fixture.releaseSend();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    expect(captured?.jobDetailState).toMatchObject({
+      status: "ready",
+      jobId: "agent-2",
+      result: { snapshot: { id: "agent-2" } },
+    });
   } finally {
     renderer.destroy();
   }

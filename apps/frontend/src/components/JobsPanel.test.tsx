@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { act } from "react";
+import { act, useState } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import type { JobReadResult, JobSnapshot } from "@openharness/client";
 import { ThemeProvider } from "../theme/ThemeContext";
@@ -134,6 +134,65 @@ test("JobsPanel selects the navigated job and only cancels snapshots with cancel
       mockInput.pressKey("c");
     });
     expect(cancelled).toEqual(["shell-1"]);
+  } finally {
+    await act(async () => { renderer.destroy(); });
+  }
+});
+
+test("JobsPanel maps the r key directly to refresh", async () => {
+  let refreshes = 0;
+  const { renderer, renderOnce, mockInput } = await renderPanel(
+    { status: "ready", jobs: [baseJob], refreshedAt: 10 },
+    { status: "idle" },
+    { onRefresh: () => { refreshes += 1; } },
+  );
+
+  try {
+    await act(async () => { await renderOnce(); });
+    await act(async () => { mockInput.pressKey("r"); });
+    expect(refreshes).toBe(1);
+  } finally {
+    await act(async () => { renderer.destroy(); });
+  }
+});
+
+test("JobsPanel clamps its stored cursor when a filtered list shrinks", async () => {
+  const initialJobs = Array.from({ length: 5 }, (_, index) => job({
+    id: `agent-${index + 1}`,
+    label: `Agent ${index + 1}`,
+  }));
+  const selected: string[] = [];
+  let shrink = () => {};
+  function Harness() {
+    const [jobs, setJobs] = useState(initialJobs);
+    shrink = () => setJobs(initialJobs.slice(0, 2));
+    return (
+      <ThemeProvider>
+        <JobsPanel
+          state={{ status: "ready", jobs, refreshedAt: 10 }}
+          detailState={{ status: "idle" }}
+          onRefresh={() => {}}
+          onSelect={(jobId) => selected.push(jobId)}
+          onCancel={() => {}}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  const { renderer, renderOnce, mockInput } = await testRender(<Harness />, { width: 88, height: 36 });
+  try {
+    await act(async () => { await renderOnce(); });
+    await act(async () => {
+      for (let index = 0; index < 4; index += 1) mockInput.pressArrow("down");
+    });
+    await act(async () => {
+      shrink();
+      await renderOnce();
+    });
+    await act(async () => { mockInput.pressArrow("up"); });
+    await act(async () => { mockInput.pressKey("RETURN"); });
+
+    expect(selected).toEqual(["agent-1"]);
   } finally {
     await act(async () => { renderer.destroy(); });
   }

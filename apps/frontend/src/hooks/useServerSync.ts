@@ -39,6 +39,14 @@ import {
   parseSlashLine
 } from "./sessionSlashCommands";
 
+const JOBS_AUXILIARY_SLASH_COMMANDS = new Set([
+  "/agents",
+  "/background",
+  "/doctor",
+  "/jobs",
+  "/stats",
+]);
+
 type DisplayRequest = NonNullable<TuiSessionController["displayRequest"]>;
 type PresentationCacheEntry = {
   title: string;
@@ -256,6 +264,8 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
   const jobDetailGenerationRef = useRef(0);
   const jobsAbortRef = useRef<AbortController | null>(null);
   const jobDetailAbortRef = useRef<AbortController | null>(null);
+  const jobControlAbortRef = useRef<AbortController | null>(null);
+  const jobControlGenerationRef = useRef(0);
   const mcpAbortRef = useRef<AbortController | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -299,12 +309,15 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     auxiliaryGenerationRef.current += 1;
     jobGenerationRef.current += 1;
     jobDetailGenerationRef.current += 1;
+    jobControlGenerationRef.current += 1;
     mcpAbortRef.current?.abort();
     jobsAbortRef.current?.abort();
     jobDetailAbortRef.current?.abort();
+    jobControlAbortRef.current?.abort();
     mcpAbortRef.current = null;
     jobsAbortRef.current = null;
     jobDetailAbortRef.current = null;
+    jobControlAbortRef.current = null;
     const emptyJobState: JobRemoteState = { status: "idle", jobs: [] };
     const emptyJobDetailState: JobDetailRemoteState = { status: "idle" };
     jobStateRef.current = emptyJobState;
@@ -391,14 +404,18 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
         const now = Date.now();
         setJobState((current) => {
           const next: JobRemoteState = validated.jobs.length > 0
-            ? { status: "error", jobs: validated.jobs, error: validationError, refreshedAt: now }
+            ? {
+                ...resolveJobList(validated.jobs, now, current),
+                status: "error",
+                error: validationError,
+              }
             : rejectJobList(current, validationError);
           jobStateRef.current = next;
           return next;
         });
         reportAuxiliaryError("Jobs", validationError);
       } else {
-        const next = resolveJobList(validated.jobs, Date.now());
+        const next = resolveJobList(validated.jobs, Date.now(), jobStateRef.current);
         jobStateRef.current = next;
         setJobState(next);
       }
@@ -920,19 +937,28 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
           return;
         }
 
-        const slashResult = await dispatchSessionSlashCommand(slash, {
-          client,
-          sessionId,
-          pushSystem,
-          presentSystem: (title, content) => showDisplayRequest({ title, content }),
-          statusRef,
-          commandCatalogRef,
-          clientState,
-          localBusy,
-          cacheFirstRead,
-          daemon,
-          setStatus: setStatusAndDefault,
-        });
+        let slashResult: Awaited<ReturnType<typeof dispatchSessionSlashCommand>>;
+        try {
+          slashResult = await dispatchSessionSlashCommand(slash, {
+            client,
+            sessionId,
+            pushSystem,
+            presentSystem: (title, content) => showDisplayRequest({ title, content }),
+            statusRef,
+            commandCatalogRef,
+            clientState,
+            localBusy,
+            cacheFirstRead,
+            daemon,
+            setStatus: setStatusAndDefault,
+          });
+        } catch (error) {
+          if (slash && JOBS_AUXILIARY_SLASH_COMMANDS.has(slash.name)) {
+            reportAuxiliaryError("Jobs", error);
+            return;
+          }
+          throw error;
+        }
         if (slashResult === "handled") {
           if (slash?.name === "/background" && slash.args.trim() && sessionId) {
             await refreshJobs();
@@ -1111,18 +1137,55 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
             try {
               switch (action.job_action) {
                 case "open":
-                case "refresh":
                   await refreshJobs();
                   return;
+                case "refresh": {
+                  jobControlGenerationRef.current += 1;
+                  jobControlAbortRef.current?.abort();
+                  jobControlAbortRef.current = null;
+                  const detail = jobDetailStateRef.current;
+                  const detailJobId = detail.status === "idle" ? undefined : detail.jobId;
+                  await Promise.all([
+                    refreshJobs(),
+                    detailJobId
+                      ? loadJobDetail(client, currentSessionId, detailJobId)
+                      : Promise.resolve(),
+                  ]);
+                  return;
+                }
                 case "select":
+                  jobControlGenerationRef.current += 1;
+                  jobControlAbortRef.current?.abort();
+                  jobControlAbortRef.current = null;
                   await loadJobDetail(client, currentSessionId, action.job_id);
                   return;
                 case "cancel": {
-                  const response = await client.cancelJob(action.job_id, {
-                    sessionId: currentSessionId,
-                    reason: action.reason,
-                  });
-                  if (activeSessionIdRef.current !== currentSessionId) return;
+                  const controlGeneration = ++jobControlGenerationRef.current;
+                  const detailGeneration = jobDetailGenerationRef.current;
+                  jobControlAbortRef.current?.abort();
+                  const controller = new AbortController();
+                  jobControlAbortRef.current = controller;
+                  let response: Awaited<ReturnType<OpenHarnessClient["cancelJob"]>>;
+                  try {
+                    response = await client.cancelJob(
+                      action.job_id,
+                      {
+                        sessionId: currentSessionId,
+                        reason: action.reason,
+                      },
+                      { signal: controller.signal },
+                    );
+                  } catch (error) {
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) return;
+                    throw error;
+                  } finally {
+                    if (jobControlAbortRef.current === controller) jobControlAbortRef.current = null;
+                  }
+                  if (
+                    controller.signal.aborted ||
+                    activeSessionIdRef.current !== currentSessionId ||
+                    jobControlGenerationRef.current !== controlGeneration
+                  ) return;
                   const validated = validateJobSnapshot(response, currentSessionId, action.job_id);
                   if (!validated.snapshot) {
                     throw new Error(validated.error ?? "Job snapshot has invalid fields.");
@@ -1133,18 +1196,44 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
                     jobStateRef.current = next;
                     return next;
                   });
-                  await loadJobDetail(client, currentSessionId, action.job_id);
+                  if (jobDetailGenerationRef.current === detailGeneration) {
+                    await loadJobDetail(client, currentSessionId, action.job_id);
+                  }
+                  if (jobControlGenerationRef.current !== controlGeneration) return;
                   await refreshJobs();
                   return;
                 }
-                case "send":
-                  await client.sendJob(action.job_id, {
-                    sessionId: currentSessionId,
-                    data: action.data,
-                  });
-                  if (activeSessionIdRef.current !== currentSessionId) return;
-                  await loadJobDetail(client, currentSessionId, action.job_id);
+                case "send": {
+                  const controlGeneration = ++jobControlGenerationRef.current;
+                  const detailGeneration = jobDetailGenerationRef.current;
+                  jobControlAbortRef.current?.abort();
+                  const controller = new AbortController();
+                  jobControlAbortRef.current = controller;
+                  try {
+                    await client.sendJob(
+                      action.job_id,
+                      {
+                        sessionId: currentSessionId,
+                        data: action.data,
+                      },
+                      { signal: controller.signal },
+                    );
+                  } catch (error) {
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) return;
+                    throw error;
+                  } finally {
+                    if (jobControlAbortRef.current === controller) jobControlAbortRef.current = null;
+                  }
+                  if (
+                    controller.signal.aborted ||
+                    activeSessionIdRef.current !== currentSessionId ||
+                    jobControlGenerationRef.current !== controlGeneration
+                  ) return;
+                  if (jobDetailGenerationRef.current === detailGeneration) {
+                    await loadJobDetail(client, currentSessionId, action.job_id);
+                  }
                   return;
+                }
               }
             } catch (error) {
               reportAuxiliaryError("Jobs", error);

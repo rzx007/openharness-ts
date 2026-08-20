@@ -47,8 +47,8 @@ export const LOCAL_COMMAND_DETAILS: Array<{ name: string; description?: string }
   { name: "/plan", description: "Toggle plan mode" },
   { name: "/theme", description: "Change TUI theme" },
   { name: "/models", description: "Select model" },
-  { name: "/workflow", description: "Open workflow runs panel" },
-  { name: "/workflows", description: "Open workflow runs panel" },
+  { name: "/workflow", description: "Open Jobs panel with Workflow details" },
+  { name: "/workflows", description: "Open Jobs panel with Workflow details" },
 ];
 
 export const LOCAL_COMMAND_NAMES = new Set(LOCAL_COMMAND_DETAILS.map((entry) => entry.name));
@@ -539,17 +539,24 @@ export async function dispatchSessionCommand(
       .map((part) => part.text ?? "")
       .join(" ");
     const estimatedTokens = Math.max(1, Math.ceil(text.length / 4));
-    const [memory, jobs, settings] = await Promise.all([
+    const [memory, jobsResult, settings] = await Promise.all([
       client.listMemory({ cwd }).catch(() => ({ entries: [] as Array<{ id: string }> })),
-      client.listJobs({ sessionId, includeFinished: true, limit: 100 }).catch(() => []),
+      client.listJobs({ sessionId, includeFinished: true, limit: 100 })
+        .then((jobs) => ({ jobs }))
+        .catch((error: unknown) => ({
+          error: error instanceof Error ? error.message : String(error),
+        })),
       client.getSettings().catch(() => ({} as Record<string, unknown>)),
     ]);
+    const jobsSummary = "jobs" in jobsResult
+      ? String(jobsResult.jobs.length)
+      : `unavailable (${jobsResult.error})`;
     emit([
       "Session stats:",
       `- messages: ${messageCount}`,
       `- estimated_tokens: ${estimatedTokens}`,
       `- memory_entries: ${memory.entries.length}`,
-      `- jobs: ${jobs.length}`,
+      `- jobs: ${jobsSummary}`,
       `- output_style: ${typeof settings.outputStyle === "string" ? settings.outputStyle : "default"}`,
     ].join("\n"));
     return "handled";
@@ -634,15 +641,22 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/doctor") {
-    const [settings, auth, memory, mcp, jobs] = await Promise.all([
+    const [settings, auth, memory, mcp, jobsResult] = await Promise.all([
       client.getSettings().catch(() => ({}) as Record<string, unknown>),
       client.getAuthStatus().catch(() => null),
       client.listMemory({ cwd }).catch(() => ({ directory: "(unavailable)", entries: [] as Array<{ id: string }> })),
       sessionId ? client.getSessionMcp(sessionId).catch(() => []) : Promise.resolve([]),
       sessionId
-        ? client.listJobs({ sessionId, includeFinished: true, limit: 100 }).catch(() => [])
-        : Promise.resolve([]),
+        ? client.listJobs({ sessionId, includeFinished: true, limit: 100 })
+          .then((jobs) => ({ jobs }))
+          .catch((error: unknown) => ({
+            error: error instanceof Error ? error.message : String(error),
+          }))
+        : Promise.resolve({ jobs: [] as JobSnapshot[] }),
     ]);
+    const jobsSummary = "jobs" in jobsResult
+      ? String(jobsResult.jobs.length)
+      : `unavailable (${jobsResult.error})`;
     const bucket = sessionId ? clientState.buckets[sessionId] : undefined;
     const lines = [
       "OpenHarness Environment Diagnostic",
@@ -664,7 +678,7 @@ export async function dispatchSessionCommand(
       `Theme:          ${String(settings.theme ?? "default")}`,
       "",
       `Messages:       ${bucket?.messages.length ?? 0}`,
-      `Jobs:           ${jobs.length}`,
+      `Jobs:           ${jobsSummary}`,
       "",
       `Memory dir:     ${memory.directory}`,
       `Memory entries: ${memory.entries.length}`,

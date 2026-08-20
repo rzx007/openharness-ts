@@ -68,6 +68,25 @@ describe("JobRemoteState", () => {
       .toEqual({ status: "ready", jobs: [added, job], refreshedAt: 30 });
   });
 
+  test("an older control snapshot cannot regress a newer cached snapshot", () => {
+    const cached = { ...job, status: "killed" as const, updatedAt: 30, finishedAt: 30 };
+    const stale = { ...job, status: "running" as const, updatedAt: 20 };
+
+    expect(mergeJobSnapshot({ status: "ready", jobs: [cached], refreshedAt: 30 }, stale, 40))
+      .toEqual({ status: "ready", jobs: [cached], refreshedAt: 40 });
+  });
+
+  test("a list refresh cannot regress a cached terminal snapshot", () => {
+    const cached = { ...job, status: "killed" as const, updatedAt: 30, finishedAt: 30 };
+    const stale = { ...job, status: "running" as const, updatedAt: 30 };
+
+    expect(resolveJobList(
+      [stale],
+      40,
+      { status: "ready", jobs: [cached], refreshedAt: 30 },
+    )).toEqual({ status: "ready", jobs: [cached], refreshedAt: 40 });
+  });
+
   test("invalid producer records are skipped without inventing shared IDs", () => {
     expect(validateJobSnapshots([
       job,

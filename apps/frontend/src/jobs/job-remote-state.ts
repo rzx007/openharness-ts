@@ -16,8 +16,17 @@ export function beginJobList(previous: JobRemoteState): JobRemoteState {
   return { status: "loading", jobs: [...previous.jobs] };
 }
 
-export function resolveJobList(jobs: JobSnapshot[], now: number): JobRemoteState {
-  return { status: "ready", jobs: [...jobs], refreshedAt: now };
+export function resolveJobList(
+  jobs: JobSnapshot[],
+  now: number,
+  previous?: JobRemoteState,
+): JobRemoteState {
+  const cachedById = new Map(previous?.jobs.map((job) => [job.id, job]) ?? []);
+  return {
+    status: "ready",
+    jobs: jobs.map((snapshot) => preferMonotonicSnapshot(cachedById.get(snapshot.id), snapshot)),
+    refreshedAt: now,
+  };
 }
 
 export function rejectJobList(previous: JobRemoteState, error: string): JobRemoteState {
@@ -37,9 +46,23 @@ export function mergeJobSnapshot(
 ): JobRemoteState {
   const found = state.jobs.some((job) => job.id === snapshot.id);
   const jobs = found
-    ? state.jobs.map((job) => job.id === snapshot.id ? snapshot : job)
+    ? state.jobs.map((job) => job.id === snapshot.id ? preferMonotonicSnapshot(job, snapshot) : job)
     : [snapshot, ...state.jobs];
   return { status: "ready", jobs, refreshedAt: now };
+}
+
+function preferMonotonicSnapshot(
+  cached: JobSnapshot | undefined,
+  incoming: JobSnapshot,
+): JobSnapshot {
+  if (!cached) return incoming;
+  if (isTerminalStatus(cached.status) && !isTerminalStatus(incoming.status)) return cached;
+  if (incoming.updatedAt < cached.updatedAt) return cached;
+  return incoming;
+}
+
+function isTerminalStatus(status: JobSnapshot["status"]): boolean {
+  return status === "completed" || status === "killed" || status === "failed";
 }
 
 const JOB_KINDS = ["terminal", "shell", "agent", "dream", "workflow"] as const;

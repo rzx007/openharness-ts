@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type { JobReadResult, JobSnapshot } from "@openharness/client";
@@ -36,6 +36,10 @@ export function JobsPanel({ state, detailState, onRefresh, onSelect, onCancel }:
   const { index, setIndex, moveUp, moveDown } = useListNavigation(visibleJobs.length);
   const cursorIndex = Math.min(index, Math.max(0, visibleJobs.length - 1));
   const selectedJob = visibleJobs[cursorIndex];
+
+  useEffect(() => {
+    if (index !== cursorIndex) setIndex(cursorIndex);
+  }, [cursorIndex, index, setIndex]);
 
   useKeyboard((key) => {
     if (key.name === "up") { moveUp(); return; }

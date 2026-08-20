@@ -1505,3 +1505,37 @@ Phase 1 is complete only when all of the following are true:
 8. `/schedules/tasks`, `TaskManager`, `SessionTaskRecord`, `SessionTaskBridge`, `SessionTaskService`, and model `TaskCreate` remain where required.
 9. Focused tests, affected package tests, workspace typecheck, lint, and end-to-end checks pass.
 10. A separate phase 2 plan is written before adding `parentJobId` or normalized Job SSE.
+
+## Final-review corrections (2026-08-21)
+
+This section is the current execution gate and supersedes contradictory examples above. The original task text and evidence remain unchanged as historical records.
+
+### Corrected phase boundary
+
+- Phase 1 converges Workflow list/read/cancel into Jobs and renders Workflow Steps from selected `JobReadResult.details`.
+- `parentJobId`, stable Workflow child metadata, and folding child Agent Jobs beneath Workflow Jobs remain Phase 2. They are not Phase 1 completion requirements.
+
+### Corrected background-shell failure semantics
+
+The Task 1 catch-all `errorResponse(400, ...)` example is unsafe and no longer authoritative. The final route must:
+
+1. preserve `SessionTaskError.status` for failures before a process is created;
+2. return 500 for unexpected create or post-create normalization/read failures;
+3. if creation succeeded but normalization failed, stop the created task through `SessionTaskService.stop` before returning the error;
+4. prove missing-session and real-process compensation behavior with focused and server integration tests.
+
+### Added final-review test matrix
+
+- busy/submitted main run survives failed `/jobs cancel`, `/agents`, and `/background`;
+- `/stats` and `/doctor` distinguish unavailable Jobs from zero Jobs;
+- direct JobsPanel `r` and Hook refresh both cover selected Workflow detail changes;
+- deferred cancel/send A → select B → resolve A cannot reclaim B's detail, and requests carry AbortSignal;
+- control/list snapshot reconciliation cannot regress timestamps or terminal status;
+- orphaned UI-only Workflow snapshot/state types are removed while coordinator scheduler and Job detail types remain;
+- shrinking a Jobs list clamps the stored cursor, not only the rendered cursor.
+
+### Corrected verification gate
+
+The root `package.json` contains `"lint": "turbo lint"`, but `turbo.json` defines no `lint` task and only `apps/desktop` has a package-local ESLint script. Therefore the plan's blanket `pnpm lint` success claim was not a real workspace gate. Do not alter manifests in this fix wave. The current gate is affected/full tests, package and workspace typechecks, repository audits, the dependency-file guard, and `git diff --check`; run the existing desktop ESLint binary only when desktop files are affected.
+
+Accordingly, Phase 1 completion item 9 is read as: focused tests, affected/full package tests, workspace typecheck, audits, dependency guard, and diff check pass. The earlier lint wording is historical and is superseded here.

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { SessionTaskError } from "../session/index.js";
 import { createBackgroundShellRoutes } from "./background-shell.js";
 
 describe("background shell routes", () => {
@@ -21,7 +22,7 @@ describe("background shell routes", () => {
         updatedAt: 1,
       },
     }));
-    const app = createBackgroundShellRoutes({ tasks: { create }, jobs: { read } });
+    const app = createBackgroundShellRoutes({ tasks: { create, stop: vi.fn() }, jobs: { read } });
 
     const response = await app.request("/", {
       method: "POST",
@@ -48,7 +49,7 @@ describe("background shell routes", () => {
     [{ sessionId: "s1", command: "   " }, "command is required"],
   ])("rejects invalid input %#", async (body, message) => {
     const app = createBackgroundShellRoutes({
-      tasks: { create: vi.fn() },
+      tasks: { create: vi.fn(), stop: vi.fn() },
       jobs: { read: vi.fn() },
     });
     const response = await app.request("/", {
@@ -58,5 +59,47 @@ describe("background shell routes", () => {
     });
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({ error: message });
+  });
+
+  it("preserves a SessionTaskError status before a shell is created", async () => {
+    const app = createBackgroundShellRoutes({
+      tasks: {
+        create: vi.fn(async () => { throw new SessionTaskError(404, "Session not found"); }),
+        stop: vi.fn(),
+      },
+      jobs: { read: vi.fn() },
+    });
+
+    const response = await app.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: "missing", command: "echo hi" }),
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Session not found" });
+  });
+
+  it("stops a created shell and returns 500 when Job normalization fails", async () => {
+    const stop = vi.fn(async () => ({ task: { id: "task-1", status: "stopped" } }));
+    const app = createBackgroundShellRoutes({
+      tasks: {
+        create: vi.fn(async () => ({ task: { id: "task-1" } })),
+        stop,
+      },
+      jobs: {
+        read: vi.fn(async () => { throw new Error("normalization unavailable"); }),
+      },
+    });
+
+    const response = await app.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: "s1", command: "echo hi" }),
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "normalization unavailable" });
+    expect(stop).toHaveBeenCalledWith("task-1", { sessionId: "s1" });
   });
 });

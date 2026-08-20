@@ -76,10 +76,14 @@ describe("mergeCommandDetails", () => {
     ]);
     const theme = merged.find((entry) => entry.name === "/theme");
     const help = merged.find((entry) => entry.name === "/help");
+    const workflow = merged.find((entry) => entry.name === "/workflow");
+    const workflows = merged.find((entry) => entry.name === "/workflows");
     expect(theme?.description).toBe(
       LOCAL_COMMAND_DETAILS.find((entry) => entry.name === "/theme")?.description,
     );
     expect(help?.description).toBe("Show help");
+    expect(workflow?.description).toBe("Open Jobs panel with Workflow details");
+    expect(workflows?.description).toBe("Open Jobs panel with Workflow details");
   });
 });
 
@@ -289,6 +293,23 @@ describe("dispatchSessionCommand", () => {
     expect(emitted.at(-1)).not.toContain("background_tasks");
   });
 
+  it("reports unavailable Jobs in session stats instead of an authoritative zero", async () => {
+    const client = fakeClient({
+      listJobs: vi.fn(async () => {
+        throw new Error("jobs unavailable");
+      }),
+      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
+      getSettings: vi.fn(async () => ({})),
+    });
+    const { host: h, emitted } = host({ client });
+    Object.assign(h, { sessionId: "s1" });
+
+    await expect(dispatchSessionCommand({ name: "/stats", args: "" }, h)).resolves.toBe("handled");
+
+    expect(emitted.at(-1)).toContain("- jobs: unavailable (jobs unavailable)");
+    expect(emitted.at(-1)).not.toContain("- jobs: 0");
+  });
+
   it("lists only Agent Jobs for /agents", async () => {
     const listJobs = vi.fn(async () => [agentJob]);
     const { host: h, emitted } = host({ client: fakeClient({ listJobs }) });
@@ -327,6 +348,25 @@ describe("dispatchSessionCommand", () => {
 
     expect(listJobs).toHaveBeenCalledWith({ sessionId: "s1", includeFinished: true, limit: 100 });
     expect(emitted.at(-1)).toContain("Jobs:           1");
+  });
+
+  it("reports unavailable Jobs in /doctor instead of an authoritative zero", async () => {
+    const client = fakeClient({
+      listJobs: vi.fn(async () => {
+        throw new Error("jobs unavailable");
+      }),
+      getSettings: vi.fn(async () => ({})),
+      getAuthStatus: vi.fn(async () => null as never),
+      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
+      getSessionMcp: vi.fn(async () => []),
+    });
+    const { host: h, emitted } = host({ client });
+    Object.assign(h, { sessionId: "s1" });
+
+    await expect(dispatchSessionCommand({ name: "/doctor", args: "" }, h)).resolves.toBe("handled");
+
+    expect(emitted.at(-1)).toContain("Jobs:           unavailable (jobs unavailable)");
+    expect(emitted.at(-1)).not.toContain("Jobs:           0");
   });
 
   it("presents dream receipts as Jobs", async () => {
