@@ -31,7 +31,6 @@ function SelectHarness(props: {
     displayRequest: null,
     busy: false,
     ready: true,
-    workflowState: null,
     setModal: () => undefined,
     setSelectRequest,
     setDisplayRequest: () => undefined,

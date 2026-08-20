@@ -7,8 +7,6 @@ import {
   readSessionRuntimeConfig,
   syncEvents,
   type CommandCatalogEntry,
-  type JobReadResult,
-  type JobSnapshot,
   type McpServerStatus,
   type ModelProviderInfo,
   type OpenHarnessClientState,
@@ -20,7 +18,7 @@ import {
   type SyncEventUpdate,
 } from "@openharness/client";
 
-import type { FrontendConfig, McpServerSnapshot, TranscriptItem, WorkflowTuiState } from "../types";
+import type { FrontendConfig, McpServerSnapshot, TranscriptItem } from "../types";
 import {
   beginJobList,
   mergeJobSnapshot,
@@ -89,10 +87,6 @@ function sessionRuntimeMetadata(input: {
   return patchSessionRuntimeMetadata({}, runtime);
 }
 
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
 function mcpServerSnapshot(server: McpServerStatus): McpServerSnapshot {
   return {
     name: server.name,
@@ -100,107 +94,6 @@ function mcpServerSnapshot(server: McpServerStatus): McpServerSnapshot {
     ...(server.error || server.command ? { detail: server.error ?? server.command } : {}),
     tool_count: server.toolCount,
     resource_count: server.resourceCount,
-  };
-}
-
-function stringValues(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function workflowStateFromJobs(input: { jobs: JobSnapshot[]; selectedRunId?: string; details?: JobReadResult; filters?: WorkflowTuiState["filters"]; notice?: string; error?: string }): WorkflowTuiState {
-  const selectedRunId = input.selectedRunId && input.jobs.some((job) => job.id === input.selectedRunId) ? input.selectedRunId : input.jobs[0]?.id;
-  const details = input.details?.details ?? {};
-  const plan = isRecord(details.plan) ? details.plan : {};
-  const results = isRecord(details.results) ? details.results : {};
-  const blockedTasks = isRecord(details.blockedTasks) ? details.blockedTasks : {};
-  const runningTasks = isRecord(details.runningTasks) ? details.runningTasks : {};
-  const pendingTaskIds = new Set(stringValues(details.pendingTaskIds));
-  const runningTaskIds = new Set(stringValues(details.runningTaskIds));
-  const blockedTaskIds = new Set(stringValues(details.blockedTaskIds));
-  const taskRecords = Array.isArray(plan.tasks) ? plan.tasks.filter(isRecord) : [];
-  const allTasks = taskRecords.map((task) => {
-    const taskId = stringValue(task.id) ?? "unknown";
-    const result = isRecord(results[taskId]) ? results[taskId] : undefined;
-    const running = isRecord(runningTasks[taskId]) ? runningTasks[taskId] : undefined;
-    const blocked = isRecord(blockedTasks[taskId]) ? blockedTasks[taskId] : undefined;
-    const status = stringValue(result?.status) ?? (blockedTaskIds.has(taskId) || blocked ? "blocked" : undefined) ?? (runningTaskIds.has(taskId) || running ? "running" : undefined) ?? (pendingTaskIds.has(taskId) ? "pending" : "pending");
-    return {
-      taskId,
-      status,
-      summary: stringValue(result?.summary) ?? stringValue(running?.summary) ?? stringValue(blocked?.reason) ?? stringValue(task.description),
-      dependencies: stringValues(task.dependsOn),
-      taskManagerTaskId: stringValue(task.taskManagerTaskId),
-    };
-  });
-  const filters = input.filters ?? {};
-  const tasks = allTasks.filter((task) => (!filters.taskId || task.taskId === filters.taskId) && (!filters.status || task.status === filters.status));
-  const selectedJob = input.jobs.find((job) => job.id === selectedRunId);
-  const reconciliationPlan = isRecord(details.reconciliationPlan) ? details.reconciliationPlan : {};
-  const reconciliationActions = Array.isArray(reconciliationPlan.actions)
-    ? reconciliationPlan.actions.filter(isRecord).flatMap((action) => {
-        const actionId = stringValue(action.actionId);
-        const taskId = stringValue(action.taskId);
-        if (!actionId || !taskId) return [];
-        return [
-          {
-            actionId,
-            issueIds: stringValues(action.issueIds),
-            taskId,
-            description: stringValue(action.description) ?? actionId,
-            prompt: stringValue(action.prompt) ?? "",
-            writeScope: stringValues(action.writeScope),
-            dependsOn: stringValues(action.dependsOn),
-          },
-        ];
-      })
-    : [];
-  const needed = details.needsReconciliation === true || reconciliationActions.length > 0;
-  const statuses = [...new Set([...input.jobs.map((job) => job.status), ...tasks.map((task) => task.status)])];
-  return {
-    runs: input.jobs.map((job) => {
-      const metadata = job.metadata ?? {};
-      const totalTasks = numberValue(metadata.totalTasks) ?? tasks.length;
-      return {
-        runId: job.id,
-        status: job.status,
-        summary: job.label || job.detail || job.id,
-        mode: stringValue(metadata.mode) ?? stringValue(plan.mode) ?? "workflow",
-        totalTasks,
-        completedTasks: numberValue(metadata.completedTasks) ?? allTasks.filter((task) => task.status === "completed").length,
-        failedTasks: numberValue(metadata.failedTasks) ?? allTasks.filter((task) => task.status === "failed").length,
-        pendingTasks: numberValue(metadata.pendingTasks) ?? allTasks.filter((task) => task.status === "pending").length,
-        runningTasks: numberValue(metadata.runningTasks) ?? allTasks.filter((task) => task.status === "running").length,
-        blockedTasks: numberValue(metadata.blockedTasks) ?? allTasks.filter((task) => task.status === "blocked").length,
-        needsReconciliation: job.id === selectedRunId ? needed : false,
-        budgetPolicyPreset: stringValue(metadata.budgetPolicyPreset),
-        createdAt: job.startedAt,
-        updatedAt: job.updatedAt,
-      };
-    }),
-    selectedRunId,
-    snapshot: input.details?.details ?? (selectedJob ? { ...selectedJob } : undefined),
-    tasks,
-    timeline: [],
-    filters,
-    available: {
-      taskIds: allTasks.map((task) => task.taskId),
-      statuses,
-    },
-    ...(needed
-      ? {
-          reconciliation: {
-            needed,
-            summary: stringValue(reconciliationPlan.summary) ?? "Workflow reconciliation is required.",
-            actions: reconciliationActions,
-          },
-        }
-      : {}),
-    notice: input.notice,
-    error: input.error,
   };
 }
 
@@ -332,7 +225,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
   const [globalSystemItems, setGlobalSystemItems] = useState<TranscriptItem[]>([]);
   const [systemItemsBySession, setSystemItemsBySession] = useState<Record<string, TranscriptItem[]>>({});
   const [commandCatalog, setCommandCatalog] = useState<CommandCatalogEntry[]>([]);
-  const [workflowState, setWorkflowState] = useState<WorkflowTuiState | null>(null);
   const [jobState, setJobState] = useState<JobRemoteState>({ status: "idle", jobs: [] });
   const [jobDetailState, setJobDetailState] = useState<JobDetailRemoteState>({ status: "idle" });
   const [mcpServers, setMcpServers] = useState<McpServerSnapshot[]>([]);
@@ -357,8 +249,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
   const pendingClientStateRef = useRef<OpenHarnessClientState | null>(null);
   const pendingClientStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shownPermissionIdRef = useRef<string | undefined>(undefined);
-  const workflowStateRef = useRef<WorkflowTuiState | null>(null);
-  const workflowGenerationRef = useRef(0);
   const auxiliaryGenerationRef = useRef(0);
   const jobStateRef = useRef(jobState);
   const jobDetailStateRef = useRef(jobDetailState);
@@ -367,7 +257,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
   const jobsAbortRef = useRef<AbortController | null>(null);
   const jobDetailAbortRef = useRef<AbortController | null>(null);
   const mcpAbortRef = useRef<AbortController | null>(null);
-  const workflowAbortRef = useRef<AbortController | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
@@ -404,17 +293,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     displayRequestRef.current = request;
     setSelectRequest(null);
     setDisplayRequest(request);
-  }, []);
-
-  const setWorkflowStateCurrent = useCallback((state: WorkflowTuiState | null): void => {
-    workflowStateRef.current = state;
-    setWorkflowState(state);
-  }, []);
-
-  const invalidateWorkflowRequests = useCallback((): void => {
-    workflowGenerationRef.current += 1;
-    workflowAbortRef.current?.abort();
-    workflowAbortRef.current = null;
   }, []);
 
   const clearAuxiliaryState = useCallback((): void => {
@@ -681,8 +559,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     const runtime = readSessionRuntimeConfig(session, defaultRuntimeRef.current);
     activeSessionIdRef.current = session.id;
     setActiveSessionId(session.id);
-      invalidateWorkflowRequests();
-      setWorkflowStateCurrent(null);
       clearAuxiliaryState();
     setStatus((current) => ({
       ...current,
@@ -695,7 +571,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       session_mode: statusSessionMode(runtime.sessionMode),
     }));
     },
-    [clearAuxiliaryState, invalidateWorkflowRequests, setWorkflowStateCurrent],
+    [clearAuxiliaryState],
   );
 
   const returnToHome = useCallback(
@@ -703,14 +579,12 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     pendingNewSessionTitleRef.current = title?.trim() || undefined;
     activeSessionIdRef.current = undefined;
     setActiveSessionId(undefined);
-      invalidateWorkflowRequests();
     clearAuxiliaryState();
     setLocalBusy(false);
     setSubmittedRun(null);
     setSelectRequest(null);
     clearDisplayRequest();
     setModal(null);
-      setWorkflowStateCurrent(null);
     setStatus((current) => {
       const next = { ...current };
       delete next.session_id;
@@ -721,7 +595,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       return next;
     });
     },
-    [clearAuxiliaryState, clearDisplayRequest, invalidateWorkflowRequests, setWorkflowStateCurrent],
+    [clearAuxiliaryState, clearDisplayRequest],
   );
 
   useEffect(() => {
@@ -937,89 +811,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       setSubmittedRun(response.run ? { sessionId: session.id, runId: response.run.id } : null);
     })().catch((error) => reportError(error instanceof Error ? error.message : String(error)));
   }, [activeSessionId, clientState.sessions, config.initial_prompt, createAndSwitchSession, ready, reportError]);
-
-  const refreshWorkflowState = useCallback(
-    async (
-      input: {
-        selectedRunId?: string;
-        filters?: WorkflowTuiState["filters"];
-        notice?: string;
-      } = {},
-    ): Promise<void> => {
-      const client = clientRef.current;
-      const sessionId = activeSessionIdRef.current;
-      const generation = ++workflowGenerationRef.current;
-      const isCurrent = () => activeSessionIdRef.current === sessionId && workflowGenerationRef.current === generation;
-      workflowAbortRef.current?.abort();
-      if (!client || !sessionId) {
-        if (!isCurrent()) return;
-        setWorkflowStateCurrent(
-          workflowStateFromJobs({
-            jobs: [],
-            filters: input.filters ?? workflowStateRef.current?.filters,
-            error: "Open a session before viewing workflow runs.",
-          }),
-        );
-        return;
-      }
-      const controller = new AbortController();
-      workflowAbortRef.current = controller;
-      try {
-        const response = await client.listJobs({
-          sessionId,
-          kinds: ["workflow"],
-          includeFinished: true,
-          signal: controller.signal,
-        });
-        if (!isCurrent()) return;
-        const validatedJobs = validateJobSnapshots(response, sessionId);
-        if (validatedJobs.error && validatedJobs.jobs.length === 0) {
-          throw new Error(validatedJobs.error);
-        }
-        if (validatedJobs.error) {
-          reportAuxiliaryError("Workflow", validatedJobs.error);
-        }
-        const jobs = validatedJobs.jobs;
-        const selectedRunId = input.selectedRunId ?? workflowStateRef.current?.selectedRunId ?? jobs[0]?.id;
-        const selected = selectedRunId ? jobs.find((job) => job.id === selectedRunId) : undefined;
-        const detailResponse = selected ? await client.readJob(selected.id, { sessionId, signal: controller.signal }) : undefined;
-        if (!isCurrent()) return;
-        const validatedDetails = selected
-          ? validateJobReadResult(detailResponse, sessionId, selected.id)
-          : undefined;
-        if (validatedDetails && !validatedDetails.result) {
-          throw new Error(validatedDetails.error ?? `Job read response for "${selected?.id ?? "unknown"}" has invalid fields.`);
-        }
-        const details = validatedDetails?.result;
-        setWorkflowStateCurrent(
-          workflowStateFromJobs({
-            jobs,
-            selectedRunId,
-            details,
-            filters: input.filters ?? workflowStateRef.current?.filters,
-            notice: input.notice,
-            error: validatedJobs.error,
-          }),
-        );
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        const message = error instanceof Error ? error.message : String(error);
-        if (!isCurrent()) return;
-        const current = workflowStateRef.current;
-        setWorkflowStateCurrent(current
-          ? { ...current, error: `Unable to load workflow runs: ${message}` }
-          : workflowStateFromJobs({
-              jobs: [],
-              filters: input.filters,
-              error: `Unable to load workflow runs: ${message}`,
-            }));
-        reportAuxiliaryError("Workflow", message);
-      } finally {
-        if (workflowAbortRef.current === controller) workflowAbortRef.current = null;
-      }
-    },
-    [reportAuxiliaryError, setWorkflowStateCurrent],
-  );
 
   const sendRequest = useCallback(
     (action: TuiAction): void => {
@@ -1355,81 +1146,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
             }
           }
 
-          case "workflow_request": {
-            if (!client) {
-              const message = "The daemon client is not connected.";
-              setWorkflowStateCurrent(workflowStateFromJobs({ jobs: [], error: message }));
-              reportAuxiliaryError("Workflow", message);
-              return;
-            }
-            const workflowAction = action.workflow_action;
-            const current = workflowStateRef.current;
-            switch (workflowAction) {
-              case "open":
-              case "refresh":
-                await refreshWorkflowState();
-                return;
-              case "select_run":
-                await refreshWorkflowState({
-                  selectedRunId: action.workflow_run_id,
-                });
-                return;
-              case "set_filter": {
-                const filters = {
-                  ...current?.filters,
-                  ...(action.workflow_task_id !== undefined ? { taskId: action.workflow_task_id || undefined } : {}),
-                  ...(action.workflow_status !== undefined ? { status: action.workflow_status || undefined } : {}),
-                };
-                await refreshWorkflowState({
-                  selectedRunId: current?.selectedRunId,
-                  filters,
-                });
-                return;
-              }
-              case "clear_filters":
-                await refreshWorkflowState({
-                  selectedRunId: current?.selectedRunId,
-                  filters: {},
-                });
-                return;
-              case "cancel": {
-                const runId = action.workflow_run_id ?? current?.selectedRunId;
-                const workflowSessionId = activeSessionIdRef.current;
-                if (!workflowSessionId || !runId) {
-                  const message = "Select a workflow run before cancelling it.";
-                  setWorkflowStateCurrent(current ? { ...current, error: message } : workflowStateFromJobs({ jobs: [], error: message }));
-                  reportAuxiliaryError("Workflow", message);
-        return;
-      }
-                try {
-                  const response = await client.cancelJob(runId, {
-                    sessionId: workflowSessionId,
-                    reason: action.workflow_cancel_reason,
-                  });
-                  if (activeSessionIdRef.current !== workflowSessionId) return;
-                  const validated = validateJobSnapshot(response, workflowSessionId, runId);
-                  if (!validated.snapshot) {
-                    reportAuxiliaryError("Workflow", validated.error ?? "Job snapshot has invalid fields.");
-                    return;
-                  }
-                } catch (error) {
-                  reportAuxiliaryError("Workflow", error);
-                  return;
-                }
-                await refreshWorkflowState({
-                  selectedRunId: runId,
-                  notice: `Cancellation requested for ${runId}.`,
-                });
-                return;
-              }
-              default: {
-                const exhaustive: never = workflowAction;
-                reportError(`Unsupported workflow action: ${String(exhaustive)}`);
-                return;
-              }
-            }
-          }
-
           default: {
             const exhaustive: never = action;
             void exhaustive;
@@ -1441,7 +1157,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       reportError(error instanceof Error ? error.message : String(error));
     });
     },
-    [activeSessionId, activateSession, cacheFirstRead, clearDisplayRequest, clientState, createAndSwitchSession, daemon, loadJobDetail, localBusy, pushSystem, refreshJobs, refreshWorkflowState, reportAuxiliaryError, reportError, returnToHome, setWorkflowStateCurrent, showDisplayRequest],
+    [activeSessionId, activateSession, cacheFirstRead, clearDisplayRequest, clientState, createAndSwitchSession, daemon, loadJobDetail, localBusy, pushSystem, refreshJobs, reportAuxiliaryError, reportError, returnToHome, showDisplayRequest],
   );
 
   const bucket = activeSessionId ? clientState.buckets[activeSessionId] : undefined;
@@ -1482,7 +1198,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       displayRequest,
       busy: localBusy || running || waitingForSubmittedRun,
       ready,
-      workflowState,
       setModal,
       setSelectRequest,
       setDisplayRequest,
@@ -1490,6 +1205,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       loadModels,
       sendRequest,
     }),
-    [commandDetails, commands, displayRequest, jobDetailState, jobState, loadModels, localBusy, mcpServers, modal, ready, running, selectRequest, sendRequest, status, transcriptView, waitingForSubmittedRun, workflowState],
+    [commandDetails, commands, displayRequest, jobDetailState, jobState, loadModels, localBusy, mcpServers, modal, ready, running, selectRequest, sendRequest, status, transcriptView, waitingForSubmittedRun],
   );
 }
