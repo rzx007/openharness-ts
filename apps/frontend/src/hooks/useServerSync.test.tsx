@@ -1592,6 +1592,10 @@ function workflowJobFixture(options: {
   const requests: WorkflowHttpCall[] = [];
   let generalJobsRequests = 0;
   let agentCancelled = false;
+  let agentReadOverride: unknown;
+  let cancelSnapshotOverride: unknown;
+  let workflowJobsOverride: unknown[] | undefined;
+  let workflowReadOverride: unknown;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const requestUrl = new URL(String(url));
     calls.push(requestUrl.pathname + requestUrl.search);
@@ -1640,7 +1644,7 @@ function workflowJobFixture(options: {
     }
     if (requestUrl.pathname === "/jobs") {
       if (requestUrl.searchParams.get("kinds") === "workflow") {
-        return jsonResponse({ jobs: workflowJobs });
+        return jsonResponse({ jobs: workflowJobsOverride ?? workflowJobs });
       }
       generalJobsRequests += 1;
       if (options.failJobsAfterFirst && generalJobsRequests > 1) {
@@ -1657,6 +1661,9 @@ function workflowJobFixture(options: {
       });
     }
     if (requestUrl.pathname === `/jobs/${agentJob.id}/cancel`) {
+      if (cancelSnapshotOverride !== undefined) {
+        return jsonResponse({ snapshot: cancelSnapshotOverride });
+      }
       agentCancelled = true;
       return jsonResponse({ snapshot: killedAgentJob });
     }
@@ -1669,6 +1676,12 @@ function workflowJobFixture(options: {
         });
       }
       return jsonResponse({});
+    }
+    if (requestUrl.pathname === `/jobs/${agentJob.id}` && agentReadOverride !== undefined) {
+      return jsonResponse(agentReadOverride);
+    }
+    if (requestUrl.pathname === `/jobs/${job.id}` && workflowReadOverride !== undefined) {
+      return jsonResponse(workflowReadOverride);
     }
     const selectedJob = [...workflowJobs, agentJob, killedAgentJob, siblingAgentJob].find((candidate) => requestUrl.pathname === `/jobs/${candidate.id}`);
     if (selectedJob) {
@@ -1699,7 +1712,26 @@ function workflowJobFixture(options: {
     }
     return jsonResponse({});
   }) as typeof fetch;
-  return { session, calls, requests, agentJob, killedAgentJob };
+  return {
+    session,
+    calls,
+    requests,
+    agentJob,
+    workflowJob: job,
+    killedAgentJob,
+    setAgentReadOverride(value: unknown) {
+      agentReadOverride = value;
+    },
+    setCancelSnapshotOverride(value: unknown) {
+      cancelSnapshotOverride = value;
+    },
+    setWorkflowJobsOverride(value: unknown[]) {
+      workflowJobsOverride = value;
+    },
+    setWorkflowReadOverride(value: unknown) {
+      workflowReadOverride = value;
+    },
+  };
 }
 
 test("useServerSync loads workflow job state when the workflow panel opens", async () => {
@@ -2049,6 +2081,240 @@ test("useServerSync preserves Job list and detail when sending input fails", asy
     expect(captured?.jobDetailState).toEqual(detailBeforeSend);
     expect(captured?.busy).toBe(true);
     expect(errors).toEqual(["Jobs: send unavailable"]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync rejects malformed, wrong-id, and wrong-session Job reads without replacing cached detail", async () => {
+  const { agentJob, setAgentReadOverride } = workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      { daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" } },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobState.status !== "ready"; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "agent-1" });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    const readyDetail = captured?.jobDetailState;
+    const previousResult = readyDetail?.status === "ready" ? readyDetail.result : undefined;
+    const cachedJobs = captured?.jobs;
+    expect(previousResult?.snapshot.id).toBe("agent-1");
+
+    const invalidResults = [
+      {
+        value: { text: 42, cursor: 20, truncated: false, snapshot: agentJob },
+        error: 'Jobs: Job read response for "agent-1" has invalid fields.',
+      },
+      {
+        value: { text: "", cursor: 20, truncated: false, snapshot: { ...agentJob, id: "agent-other" } },
+        error: 'Jobs: Job snapshot id "agent-other" does not match requested Job "agent-1".',
+      },
+      {
+        value: { text: "", cursor: 20, truncated: false, snapshot: { ...agentJob, ownerSession: "other-session" } },
+        error: 'Jobs: Job snapshot ownerSession "other-session" does not match active session "workflow-session".',
+      },
+    ];
+
+    for (const invalid of invalidResults) {
+      setAgentReadOverride(invalid.value);
+      await act(async () => {
+        captured?.setBusy(true);
+        captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "agent-1" });
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      });
+      expect(captured?.jobDetailState).toEqual({
+        status: "error",
+        jobId: "agent-1",
+        error: invalid.error.slice("Jobs: ".length),
+        previous: previousResult,
+      });
+      expect(captured?.jobs).toEqual(cachedJobs);
+      expect(captured?.jobs.some((job) => job.id === "agent-other" || job.ownerSession === "other-session")).toBe(false);
+      expect(captured?.busy).toBe(true);
+    }
+    expect(errors).toEqual(invalidResults.map((invalid) => invalid.error));
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync rejects missing-id, wrong-id, and wrong-owner cancel snapshots without merging or refreshing", async () => {
+  const { agentJob, requests, setCancelSnapshotOverride } = workflowJobFixture({ includeSiblingAgent: true });
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      { daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" } },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobs.length !== 2; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({ type: "job_request", job_action: "select", job_id: "agent-1" });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    const cachedJobs = captured?.jobs;
+    const cachedDetail = captured?.jobDetailState;
+    const readsBefore = requests.filter((request) => request.path === "/jobs/agent-1?sessionId=workflow-session").length;
+    const listsBefore = requests.filter((request) => request.path.startsWith("/jobs?")).length;
+    const invalidSnapshots = [
+      {
+        value: { ...agentJob, id: undefined },
+        error: "Jobs: Job snapshot has invalid fields.",
+      },
+      {
+        value: { ...agentJob, id: "agent-other" },
+        error: 'Jobs: Job snapshot id "agent-other" does not match requested Job "agent-1".',
+      },
+      {
+        value: { ...agentJob, ownerSession: "other-session" },
+        error: 'Jobs: Job snapshot ownerSession "other-session" does not match active session "workflow-session".',
+      },
+    ];
+
+    for (const invalid of invalidSnapshots) {
+      setCancelSnapshotOverride(invalid.value);
+      await act(async () => {
+        captured?.setBusy(true);
+        captured?.sendRequest({ type: "job_request", job_action: "cancel", job_id: "agent-1", reason: "TUI" });
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      });
+      expect(captured?.jobs).toEqual(cachedJobs);
+      expect(captured?.jobDetailState).toEqual(cachedDetail);
+      expect(captured?.jobs.some((job) => job.id === "agent-other" || job.ownerSession === "other-session")).toBe(false);
+      expect(captured?.busy).toBe(true);
+    }
+    expect(requests.filter((request) => request.path === "/jobs/agent-1?sessionId=workflow-session").length).toBe(readsBefore);
+    expect(requests.filter((request) => request.path.startsWith("/jobs?")).length).toBe(listsBefore);
+    expect(errors).toEqual(invalidSnapshots.map((invalid) => invalid.error));
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync filters mixed temporary Workflow Jobs responses at the shared validation boundary", async () => {
+  const { workflowJob, setWorkflowJobsOverride } = workflowJobFixture();
+  setWorkflowJobsOverride([
+    workflowJob,
+    { ...workflowJob, id: "foreign-workflow", ownerSession: "other-session" },
+  ]);
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      { daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" } },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobState.status !== "ready"; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.setBusy(true);
+      captured?.sendRequest({ type: "workflow_request", workflow_action: "open" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(captured?.workflowState?.runs.map((run) => run.runId)).toEqual(["wf-1"]);
+    expect(captured?.workflowState?.error).toBe("Ignored 1 invalid Job snapshot.");
+    expect(captured?.jobs.some((job) => job.id === "foreign-workflow")).toBe(false);
+    expect(captured?.busy).toBe(true);
+    expect(errors).toEqual(["Workflow: Ignored 1 invalid Job snapshot."]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync preserves temporary Workflow cache when detail validation fails", async () => {
+  const { workflowJob, setWorkflowReadOverride } = workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      { daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" } },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobState.status !== "ready"; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({ type: "workflow_request", workflow_action: "open" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const cachedWorkflow = captured?.workflowState;
+    if (!cachedWorkflow) throw new Error("Expected Workflow cache before invalid detail refresh.");
+    expect(cachedWorkflow?.selectedRunId).toBe("wf-1");
+
+    const invalidDetails = [
+      {
+        value: null,
+        error: 'Job read response for "wf-1" has invalid fields.',
+      },
+      {
+        value: {
+          text: "invalid",
+          cursor: 20,
+          truncated: false,
+          snapshot: { ...workflowJob, id: "wrong-workflow" },
+          details: { marker: "must-not-commit" },
+        },
+        error: 'Job snapshot id "wrong-workflow" does not match requested Job "wf-1".',
+      },
+    ];
+    for (const invalid of invalidDetails) {
+      setWorkflowReadOverride(invalid.value);
+      await act(async () => {
+        captured?.setBusy(true);
+        captured?.sendRequest({ type: "workflow_request", workflow_action: "refresh" });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(captured?.workflowState).toEqual({
+        ...cachedWorkflow,
+        error: `Unable to load workflow runs: ${invalid.error}`,
+      });
+      expect(captured?.busy).toBe(true);
+    }
+    expect(captured?.workflowState?.snapshot).not.toMatchObject({ marker: "must-not-commit" });
+    expect(errors).toEqual(invalidDetails.map((invalid) => `Workflow: ${invalid.error}`));
   } finally {
     renderer.destroy();
   }

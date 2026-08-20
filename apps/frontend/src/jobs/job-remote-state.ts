@@ -70,12 +70,55 @@ function isJobSnapshot(value: unknown, ownerSession: string): value is JobSnapsh
     Number.isFinite(value.startedAt) &&
     Number.isFinite(value.updatedAt) &&
     (value.finishedAt === undefined || Number.isFinite(value.finishedAt)) &&
+    (value.detail === undefined || typeof value.detail === "string") &&
+    (value.metadata === undefined || isRecord(value.metadata)) &&
     isRecord(capabilities) &&
     typeof capabilities.read === "boolean" &&
     typeof capabilities.wait === "boolean" &&
     typeof capabilities.send === "boolean" &&
     typeof capabilities.cancel === "boolean"
   );
+}
+
+export function validateJobSnapshot(
+  value: unknown,
+  ownerSession: string,
+  expectedJobId?: string,
+): { snapshot?: JobSnapshot; error?: string } {
+  if (!isRecord(value)) {
+    return { error: "Job snapshot has invalid fields." };
+  }
+  if (typeof value.id === "string" && expectedJobId !== undefined && value.id !== expectedJobId) {
+    return { error: `Job snapshot id "${value.id}" does not match requested Job "${expectedJobId}".` };
+  }
+  if (typeof value.ownerSession === "string" && value.ownerSession !== ownerSession) {
+    return { error: `Job snapshot ownerSession "${value.ownerSession}" does not match active session "${ownerSession}".` };
+  }
+  if (!isJobSnapshot(value, ownerSession)) {
+    return { error: "Job snapshot has invalid fields." };
+  }
+  return { snapshot: value };
+}
+
+export function validateJobReadResult(
+  value: unknown,
+  ownerSession: string,
+  expectedJobId: string,
+): { result?: JobReadResult; error?: string } {
+  if (
+    !isRecord(value) ||
+    typeof value.text !== "string" ||
+    !Number.isFinite(value.cursor) ||
+    typeof value.truncated !== "boolean" ||
+    (value.details !== undefined && !isRecord(value.details))
+  ) {
+    return { error: `Job read response for "${expectedJobId}" has invalid fields.` };
+  }
+  const snapshotValidation = validateJobSnapshot(value.snapshot, ownerSession, expectedJobId);
+  if (!snapshotValidation.snapshot) {
+    return { error: snapshotValidation.error ?? "Job snapshot has invalid fields." };
+  }
+  return { result: value as unknown as JobReadResult };
 }
 
 export function validateJobSnapshots(

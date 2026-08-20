@@ -26,6 +26,8 @@ import {
   mergeJobSnapshot,
   rejectJobList,
   resolveJobList,
+  validateJobReadResult,
+  validateJobSnapshot,
   validateJobSnapshots,
   type JobDetailRemoteState,
   type JobRemoteState,
@@ -561,11 +563,16 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     setJobDetailState(loading);
 
     try {
-      const result = await client.readJob(jobId, {
+      const response = await client.readJob(jobId, {
         sessionId,
         signal: controller.signal,
       });
       if (activeSessionIdRef.current !== sessionId || jobDetailGenerationRef.current !== generation) return;
+      const validated = validateJobReadResult(response, sessionId, jobId);
+      if (!validated.result) {
+        throw new Error(validated.error ?? `Job read response for "${jobId}" has invalid fields.`);
+      }
+      const result = validated.result;
       const readyState: JobDetailRemoteState = {
         status: "ready",
         jobId,
@@ -958,16 +965,32 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       const controller = new AbortController();
       workflowAbortRef.current = controller;
       try {
-        const jobs = await client.listJobs({
+        const response = await client.listJobs({
           sessionId,
           kinds: ["workflow"],
           includeFinished: true,
           signal: controller.signal,
         });
+        if (!isCurrent()) return;
+        const validatedJobs = validateJobSnapshots(response, sessionId);
+        if (validatedJobs.error && validatedJobs.jobs.length === 0) {
+          throw new Error(validatedJobs.error);
+        }
+        if (validatedJobs.error) {
+          reportAuxiliaryError("Workflow", validatedJobs.error);
+        }
+        const jobs = validatedJobs.jobs;
         const selectedRunId = input.selectedRunId ?? workflowStateRef.current?.selectedRunId ?? jobs[0]?.id;
         const selected = selectedRunId ? jobs.find((job) => job.id === selectedRunId) : undefined;
-        const details = selected ? await client.readJob(selected.id, { sessionId, signal: controller.signal }) : undefined;
+        const detailResponse = selected ? await client.readJob(selected.id, { sessionId, signal: controller.signal }) : undefined;
         if (!isCurrent()) return;
+        const validatedDetails = selected
+          ? validateJobReadResult(detailResponse, sessionId, selected.id)
+          : undefined;
+        if (validatedDetails && !validatedDetails.result) {
+          throw new Error(validatedDetails.error ?? `Job read response for "${selected?.id ?? "unknown"}" has invalid fields.`);
+        }
+        const details = validatedDetails?.result;
         setWorkflowStateCurrent(
           workflowStateFromJobs({
             jobs,
@@ -975,19 +998,21 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
             details,
             filters: input.filters ?? workflowStateRef.current?.filters,
             notice: input.notice,
+            error: validatedJobs.error,
           }),
         );
       } catch (error) {
         if (controller.signal.aborted) return;
         const message = error instanceof Error ? error.message : String(error);
         if (!isCurrent()) return;
-        setWorkflowStateCurrent(
-          workflowStateFromJobs({
-            jobs: [],
-            filters: input.filters ?? workflowStateRef.current?.filters,
-            error: `Unable to load workflow runs: ${message}`,
-          }),
-        );
+        const current = workflowStateRef.current;
+        setWorkflowStateCurrent(current
+          ? { ...current, error: `Unable to load workflow runs: ${message}` }
+          : workflowStateFromJobs({
+              jobs: [],
+              filters: input.filters,
+              error: `Unable to load workflow runs: ${message}`,
+            }));
         reportAuxiliaryError("Workflow", message);
       } finally {
         if (workflowAbortRef.current === controller) workflowAbortRef.current = null;
@@ -1296,11 +1321,16 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
                   await loadJobDetail(client, currentSessionId, action.job_id);
                   return;
                 case "cancel": {
-                  const snapshot = await client.cancelJob(action.job_id, {
+                  const response = await client.cancelJob(action.job_id, {
                     sessionId: currentSessionId,
                     reason: action.reason,
                   });
                   if (activeSessionIdRef.current !== currentSessionId) return;
+                  const validated = validateJobSnapshot(response, currentSessionId, action.job_id);
+                  if (!validated.snapshot) {
+                    throw new Error(validated.error ?? "Job snapshot has invalid fields.");
+                  }
+                  const snapshot = validated.snapshot;
                   setJobState((current) => {
                     const next = mergeJobSnapshot(current, snapshot, Date.now());
                     jobStateRef.current = next;
@@ -1372,10 +1402,16 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
         return;
       }
                 try {
-                  await client.cancelJob(runId, {
+                  const response = await client.cancelJob(runId, {
                     sessionId: workflowSessionId,
                     reason: action.workflow_cancel_reason,
                   });
+                  if (activeSessionIdRef.current !== workflowSessionId) return;
+                  const validated = validateJobSnapshot(response, workflowSessionId, runId);
+                  if (!validated.snapshot) {
+                    reportAuxiliaryError("Workflow", validated.error ?? "Job snapshot has invalid fields.");
+                    return;
+                  }
                 } catch (error) {
                   reportAuxiliaryError("Workflow", error);
                   return;

@@ -5,6 +5,8 @@ import {
   mergeJobSnapshot,
   rejectJobList,
   resolveJobList,
+  validateJobReadResult,
+  validateJobSnapshot,
   validateJobSnapshots,
 } from "./job-remote-state";
 
@@ -93,12 +95,54 @@ describe("JobRemoteState", () => {
       { ...job, startedAt: Number.NaN },
       { ...job, updatedAt: Number.POSITIVE_INFINITY },
       { ...job, finishedAt: Number.NaN },
+      { ...job, detail: 123 },
+      { ...job, metadata: [] },
       { ...job, capabilities: { ...job.capabilities, read: "yes" } },
     ];
 
     expect(validateJobSnapshots(invalidRecords, "s1")).toEqual({
       jobs: [],
-      error: "Ignored 8 invalid Job snapshots.",
+      error: "Ignored 10 invalid Job snapshots.",
+    });
+  });
+
+  test("single snapshot validation requires the requested id and active owner", () => {
+    expect(validateJobSnapshot(job, "s1", "job-1")).toEqual({ snapshot: job });
+    expect(validateJobSnapshot({ ...job, id: "job-2" }, "s1", "job-1")).toEqual({
+      error: 'Job snapshot id "job-2" does not match requested Job "job-1".',
+    });
+    expect(validateJobSnapshot({ ...job, ownerSession: "s2" }, "s1", "job-1")).toEqual({
+      error: 'Job snapshot ownerSession "s2" does not match active session "s1".',
+    });
+    expect(validateJobSnapshot({ ...job, id: undefined }, "s1", "job-1")).toEqual({
+      error: "Job snapshot has invalid fields.",
+    });
+  });
+
+  test("read validation checks transport fields and the nested requested snapshot", () => {
+    const result = {
+      text: "output",
+      cursor: 6,
+      truncated: false,
+      snapshot: job,
+      details: { phase: "running" },
+    };
+
+    expect(validateJobReadResult(result, "s1", "job-1")).toEqual({ result });
+    expect(validateJobReadResult({ ...result, text: 42 }, "s1", "job-1")).toEqual({
+      error: 'Job read response for "job-1" has invalid fields.',
+    });
+    expect(validateJobReadResult({ ...result, cursor: Number.NaN }, "s1", "job-1")).toEqual({
+      error: 'Job read response for "job-1" has invalid fields.',
+    });
+    expect(validateJobReadResult({ ...result, truncated: "no" }, "s1", "job-1")).toEqual({
+      error: 'Job read response for "job-1" has invalid fields.',
+    });
+    expect(validateJobReadResult({ ...result, details: [] }, "s1", "job-1")).toEqual({
+      error: 'Job read response for "job-1" has invalid fields.',
+    });
+    expect(validateJobReadResult({ ...result, snapshot: { ...job, id: "job-2" } }, "s1", "job-1")).toEqual({
+      error: 'Job snapshot id "job-2" does not match requested Job "job-1".',
     });
   });
 });
