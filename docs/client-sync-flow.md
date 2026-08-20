@@ -1,6 +1,6 @@
 # Client Sync Flow
 
-> 状态：Task 9 后，TUI 默认已经通过 `useServerSync` attach 到 daemon；`@openharness/client` 是 TUI、Web、Desktop 共享 daemon API、SSE 事件流和 message-part reducer 的公共层。
+> 状态（2026-08-20）：TUI 默认通过 `useServerSync` attach 到 daemon；`@openharness/client` 是 TUI、Web、Desktop 共享 daemon API、SSE 事件流和 message-part reducer 的公共层。已经启动的长期工作通过 Jobs 查询和控制；phase 1 的 Jobs 缓存按需刷新，规范化 Job SSE 留到 phase 2。
 
 ## 目标
 
@@ -31,12 +31,12 @@ AgentPool / OpenHarnessAgent / QueryEngine
 
 ```text
 packages/client/src
-  client.ts            # OpenHarnessClient：typed HTTP API + SSE parser
-  reducer.ts           # applyEvent/applyEvents：事件归并为 client state
-  sync.ts              # hydrateState/syncEvents：snapshot/replay + live 合并
-  session-commands.ts  # dispatchSessionCommand：斜杠呈现/派发（无 React）
-  types.ts             # 面向客户端的 public types
-  index.ts             # public exports
+  transport/http-client.ts        # OpenHarnessClient：typed HTTP API + SSE parser
+  state/reducer.ts                 # applyEvent/applyEvents：事件归并为 client state
+  state/sync.ts                    # hydrateState/syncEvents：snapshot/replay + live 合并
+  commands/session-commands.ts     # dispatchSessionCommand：斜杠呈现/派发（无 React）
+  types/index.ts                   # 面向客户端的 public types
+  index.ts                         # public exports
 ```
 
 ## API Client
@@ -81,7 +81,10 @@ await client.replyPermission(pending[0].id, {
 | `streamEvents()` | `GET /events/stream` |
 | `listPermissions()` | `GET /permissions` |
 | `replyPermission(id, input)` | `POST /permissions/:requestId/reply` |
-| `createTask(input)` | `POST /tasks`（`/tasks run`） |
+| `listJobs(options)` | `GET /jobs`；按 session、kind、status、时间和窗口列出统一快照 |
+| `readJob(id, options)` / `waitJob(id, options)` | `GET /jobs/:jobId` / `POST /jobs/:jobId/wait` |
+| `sendJob(id, input)` / `cancelJob(id, input)` | `POST /jobs/:jobId/input` / `POST /jobs/:jobId/cancel` |
+| `createBackgroundShell(input)` | `POST /background-shells`；只负责创建 shell，返回 `{ jobId, snapshot }` |
 | `initProject({ cwd })` | `POST /project/init` |
 | `listPlugins({ cwd })` / `enablePlugin` / `disablePlugin` | `/plugins` |
 | `reloadPlugins({ cwd })` | `POST /plugins/reload` |
@@ -186,8 +189,13 @@ apps/frontend/src/hooks/useServerSync.ts
 - `syncEvents()` 驱动 React state。
 - 暴露 `sendPrompt(sessionId, content)`、`replyPermission(...)`、`interruptSession(sessionId)`。
 - 将 active session 从 UI route/state 映射到 `state.buckets[activeSessionId]`。
+- 激活 session 时调用 `listJobs({ sessionId, includeFinished: true, limit: 100 })`，把结果放进可丢弃的 `JobRemoteState`，再由 `JobsPanel` 展示。
+- 打开 Jobs Panel、按 `r`、成功执行 `/background`、完成控制动作和主 run 进入终态时复用同一条 Jobs 刷新路径；选择某一项时用 `readJob` 读取输出和 producer detail。
+- Jobs/MCP/detail 请求失败属于辅助 UI 错误：已有 Jobs 会作为缓存保留并显示错误，不会清掉或结束当前 Agent run。
 
 OHJSON TUI 层与 per-session BackendHost 已从主线删除。
+
+`JobRemoteState` 不写进 SessionStore，也不进入当前 message/run SSE reducer。phase 1 依靠上述刷新点获取 producer 的权威快照；`session.job.created/updated` 这类规范化 Job SSE 是 phase 2 工作。
 
 ## 尚未完成
 

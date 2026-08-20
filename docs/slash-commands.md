@@ -25,7 +25,7 @@ skill 经 command catalog 以 template 形式出现。
 | `/export`  | 导出对话为 Markdown 文件                                                                                                         |
 | `/context` | 按 stable/context/volatile 三层显示当前发送给模型的 system prompt 摘要与预览                                                     |
 | `/profile` | `status \| init` 查看或初始化 `SOUL.md` / `USER.md` 个人 prompt 文件                                                             |
-| `/stats`   | 会话统计：messages/estimated_tokens/tools/memory/tasks/output_style（差异：memory 报会话内条目数，Python 报文件数）              |
+| `/stats`   | 会话统计：messages/estimated_tokens/tools/memory/jobs/output_style（差异：memory 报会话内条目数，Python 报文件数）               |
 | `/cost`    | 估算成本拆解                                                                                                                     |
 | `/usage`   | token 用量统计                                                                                                                   |
 | `/turns`   | 设置最大 agentic 轮数（1-512）                                                                                                   |
@@ -62,13 +62,16 @@ skill 经 command catalog 以 template 形式出现。
 | `/mcp`            | MCP 服务器连接状态                                                                                       |
 | `/hooks`          | 已配置 hooks                                                                                             |
 
-### Agent / Swarm
+### Agent / Jobs
 
-| 命令         | 用法 / 说明                                                                                        |
-| ------------ | -------------------------------------------------------------------------------------------------- |
-| `/agents`    | agent/teammate 任务视图（对齐 Python `/subagents` 的任务语义）                                     |
-| `/subagents` | 三源（builtin/user/plugin）agent 人格定义列表（差异：Python 此名为任务视图，TS 由 `/agents` 覆盖） |
-| `/tasks`     | 后台任务 `list \| show ID \| stop ID \| run CMD`                                                   |
+| 命令          | 用法 / 说明                                                                                                                         |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `/jobs`       | TUI 中无参数时打开统一 Jobs Panel；`list \| show ID \| cancel ID` 列出、读取或取消当前 session 的 Job                               |
+| `/background` | `/background <command>` 通过后台 shell producer 创建工作，返回 `jobId`；创建后的读取、等待、输入与取消统一走 Jobs                   |
+| `/agents`     | 只列出 `kind=agent` 的 Agent Jobs                                                                                                   |
+| `/subagents`  | 三源（builtin/user/plugin）agent 人格定义列表（差异：Python 此名为任务视图，TS 由 `/agents` 覆盖）                                  |
+
+旧 `/tasks` 命令和同名后台 Task HTTP CRUD 已删除，不保留兼容别名。定时安排仍使用 Schedule 命令和 `/schedules/tasks` API；它表示“将来触发什么”，不是已经启动的 Job。
 
 ### 配置与外观
 

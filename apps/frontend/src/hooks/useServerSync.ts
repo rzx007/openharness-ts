@@ -933,7 +933,13 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
           daemon,
           setStatus: setStatusAndDefault,
         });
-        if (slashResult === "handled" || slashResult === "local_ui_ignored") return;
+        if (slashResult === "handled") {
+          if (slash?.name === "/background" && slash.args.trim() && sessionId) {
+            await refreshJobs();
+          }
+          return;
+        }
+        if (slashResult === "local_ui_ignored") return;
 
         if (slash) {
           const catalogEntry = commandCatalogRef.current.find((entry) => entry.name === slash.name);

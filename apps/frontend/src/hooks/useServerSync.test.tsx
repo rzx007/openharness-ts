@@ -1601,10 +1601,17 @@ function workflowJobFixture(options: {
     id: "agent-2",
     label: "Sibling agent",
   };
+  const shellJob = {
+    ...job,
+    id: "shell-1",
+    kind: "shell" as const,
+    label: "echo hi",
+  };
   const calls: string[] = [];
   const requests: WorkflowHttpCall[] = [];
   let generalJobsRequests = 0;
   let agentCancelled = false;
+  let backgroundCreated = false;
   let agentReadOverride: unknown;
   let cancelSnapshotOverride: unknown;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -1653,6 +1660,10 @@ function workflowJobFixture(options: {
         ],
       });
     }
+    if (requestUrl.pathname === "/background-shells" && init?.method === "POST") {
+      backgroundCreated = true;
+      return jsonResponse({ jobId: shellJob.id, snapshot: shellJob });
+    }
     if (requestUrl.pathname === "/jobs") {
       generalJobsRequests += 1;
       if (options.failJobsAfterFirst && generalJobsRequests > 1) {
@@ -1667,6 +1678,7 @@ function workflowJobFixture(options: {
           ...(options.includeWorkflowInGeneralList ? workflowJobs : []),
           currentAgentJob,
           ...(options.includeSiblingAgent ? [siblingAgentJob] : []),
+          ...(backgroundCreated ? [shellJob] : []),
         ],
       });
     }
@@ -1725,6 +1737,7 @@ function workflowJobFixture(options: {
     requests,
     agentJob,
     killedAgentJob,
+    shellJob,
     setAgentReadOverride(value: unknown) {
       agentReadOverride = value;
     },
@@ -1733,6 +1746,54 @@ function workflowJobFixture(options: {
     },
   };
 }
+
+test("useServerSync refreshes Jobs only after a successful /background creation", async () => {
+  const { requests, shellJob } = workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: process.cwd(),
+        model: "m",
+      },
+    });
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.jobState.status !== "ready"; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(captured?.jobs.some((job) => job.id === shellJob.id)).toBe(false);
+
+    await act(async () => {
+      captured?.sendRequest({ type: "submit_line", line: "/background echo hi" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    const createIndex = requests.findIndex((request) => request.path === "/background-shells");
+    const refreshIndex = requests.findIndex((request, index) => index > createIndex && request.path.startsWith("/jobs?"));
+    expect(createIndex).toBeGreaterThanOrEqual(0);
+    expect(refreshIndex).toBeGreaterThan(createIndex);
+    expect(captured?.jobs).toContainEqual(expect.objectContaining({ id: shellJob.id, kind: "shell" }));
+
+    const refreshCount = requests.filter((request) => request.path.startsWith("/jobs?")).length;
+    await act(async () => {
+      captured?.sendRequest({ type: "submit_line", line: "/background   " });
+      captured?.sendRequest({ type: "submit_line", line: "/not-a-command" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(requests.filter((request) => request.path.startsWith("/jobs?")).length).toBe(refreshCount);
+  } finally {
+    renderer.destroy();
+  }
+});
 
 test("useServerSync lists, reads, and cancels Workflow work through job_request only", async () => {
   const { requests } = workflowJobFixture({ includeWorkflowInGeneralList: true });

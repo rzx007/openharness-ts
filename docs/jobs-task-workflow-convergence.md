@@ -18,6 +18,20 @@ Task 和 Workflow 自己仍可保留创建、验证、恢复、模板、reconcil
 
 不建议增加万能 `JobCreate`，也不建议为了保留 `TaskUpdate` 而增加通用 `JobUpdate`。
 
+## 2026-08-20：公共面第一阶段完成
+
+这次收口没有改写下面的模型工具迁移历史，而是把同一条边界落实到 HTTP client、slash command 和 TUI：
+
+- 2026-08-20：HTTP client、slash command 与 TUI 已硬切到 Jobs。
+- 后台 shell 由 `/background` 与 `POST /background-shells` 创建；创建后统一使用 `JobRead/Wait/Send/Cancel`。
+- 旧 `/tasks`、`TaskSnapshot` 与 TUI `session.tasks` 已删除，不保留兼容别名。
+- TUI 的 `jobState/jobs` 只是客户端缓存；权威状态仍在 Terminal、`TaskManager + SessionTaskRecord` 和 `WorkflowRunStore`，由 `DaemonJobService` 在读取时聚合。
+- `TodoPanel`、`SwarmPanel` 和独立 `WorkflowRunsPanel` 已移除。普通 Workflow 列表和详情进入统一 Jobs Panel，Steps 从所选 Workflow Job 的 `JobRead` details 展示。
+
+内部的 `TaskManager`、`SessionTaskRecord`、`SessionTaskBridge`、`SessionTaskService` 与模型 `TaskCreate` 仍有明确职责：前四者运行或投影后台 shell/Agent，`TaskCreate` 只作为模型侧 shell producer。它们不是被删除的公共 Task CRUD。
+
+`parentJobId` 和规范化 Job SSE 不属于 phase 1。它们必须先写独立的 phase 2 计划，再增加父子折叠和 `session.job.created/updated` 实时缓存；当前文档不把这些能力写成已经实现。
+
 ## 当前工具面
 
 ### Jobs
