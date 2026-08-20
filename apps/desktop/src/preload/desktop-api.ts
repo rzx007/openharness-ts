@@ -9,6 +9,7 @@ import {
 } from "../shared/ipc-channels"
 import type { DesktopTerminalEvent } from "../shared/terminal-types"
 import type { DesktopAuxSessionUpdate } from "../shared/session-types"
+import type { DesktopAPI } from "../shared/desktop-api-contract"
 
 const invoke = <C extends IpcChannel>(
   channel: C,
@@ -31,8 +32,8 @@ export const desktopAPI = {
     setZoomLevel: (level: number) => invoke(IpcChannels.windowSetZoomLevel, level),
     onMaximizedChanged: (listener: (value: boolean) => void): (() => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, value: boolean): void => listener(value)
-      ipcRenderer.on("window:maximized-changed", wrapped)
-      return () => ipcRenderer.removeListener("window:maximized-changed", wrapped)
+      ipcRenderer.on(IpcEvents.windowMaximizedChanged, wrapped)
+      return () => ipcRenderer.removeListener(IpcEvents.windowMaximizedChanged, wrapped)
     },
   },
   tray: {
@@ -186,14 +187,4 @@ export const desktopAPI = {
       return () => ipcRenderer.removeListener(IpcEvents.sessionAuxUpdated, wrapped)
     },
   },
-  events: {
-    onMainProcessMessage: (listener: (message: string) => void): (() => void) => {
-      const wrapped = (_event: Electron.IpcRendererEvent, message: string): void =>
-        listener(message)
-      ipcRenderer.on("main-process-message", wrapped)
-      return () => ipcRenderer.removeListener("main-process-message", wrapped)
-    },
-  },
-}
-
-export type DesktopAPI = typeof desktopAPI
+} satisfies DesktopAPI

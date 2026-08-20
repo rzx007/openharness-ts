@@ -17,12 +17,12 @@ import { MainLayoutContext } from "./main-layout-context"
 import { Sidebar } from "./sidebar"
 import { TitleBar, type UtilityToolRequest } from "./title-bar"
 import { UtilityPanel } from "./utility-panel"
+import { useDesktopWindowChrome } from "./use-desktop-window-chrome"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import {
   attachDesktopSessionEvents,
   useDesktopSessionStore,
 } from "@renderer/stores/desktop-session-store"
-import { actualSizeZoomLevel, normalizeZoomLevel } from "@shared/zoom"
 
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
@@ -49,8 +49,6 @@ export function MainLayout(): React.JSX.Element {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [panelOpen, setPanelOpen] = useState(true)
   const [utilityMaximized, setUtilityMaximized] = useState(false)
-  const [isMaximized, setIsMaximized] = useState(false)
-  const [zoomLevel, setZoomLevel] = useState(actualSizeZoomLevel)
   const [fileOpenRequest, setFileOpenRequest] = useState<{
     id: number
     path: string
@@ -71,7 +69,8 @@ export function MainLayout(): React.JSX.Element {
   const previousWorkspaceLayoutRef = useRef<Layout | null>(null)
   const lastOpenWorkspaceLayoutRef = useRef<Layout | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const zoomLevelRef = useRef(actualSizeZoomLevel)
+  const { isMaximized, zoomLevel, zoomIn, zoomOut, resetZoom, minimize, toggleMaximize, close } =
+    useDesktopWindowChrome()
   const outerLayout = useDefaultLayout({
     id: "desktop-shell-layout-v1",
     panelIds: ["sidebar", "workspace"],
@@ -86,16 +85,6 @@ export function MainLayout(): React.JSX.Element {
   if (lastOpenWorkspaceLayoutRef.current === null) {
     lastOpenWorkspaceLayoutRef.current = workspaceDefaultLayout
   }
-
-  useEffect(() => {
-    void window.desktop.window.isMaximized().then(setIsMaximized)
-    void window.desktop.window.getZoomLevel().then((level) => {
-      const normalizedLevel = normalizeZoomLevel(level)
-      zoomLevelRef.current = normalizedLevel
-      setZoomLevel(normalizedLevel)
-    })
-    return window.desktop.window.onMaximizedChanged(setIsMaximized)
-  }, [])
 
   useEffect(() => {
     const detach = attachDesktopSessionEvents()
@@ -258,29 +247,6 @@ export function MainLayout(): React.JSX.Element {
   const openNextSession = useCallback((): void => {
     if (nextSession) openConversationRoute(nextSession.id)
   }, [nextSession, openConversationRoute])
-
-  const applyZoomLevel = useCallback((requestedLevel: number): void => {
-    const nextLevel = normalizeZoomLevel(requestedLevel)
-    zoomLevelRef.current = nextLevel
-    setZoomLevel(nextLevel)
-    void window.desktop.window.setZoomLevel(nextLevel).then((appliedLevel) => {
-      const normalizedLevel = normalizeZoomLevel(appliedLevel)
-      zoomLevelRef.current = normalizedLevel
-      setZoomLevel(normalizedLevel)
-    })
-  }, [])
-
-  const zoomIn = useCallback((): void => {
-    applyZoomLevel(zoomLevelRef.current + 1)
-  }, [applyZoomLevel])
-
-  const zoomOut = useCallback((): void => {
-    applyZoomLevel(zoomLevelRef.current - 1)
-  }, [applyZoomLevel])
-
-  const resetZoom = useCallback((): void => {
-    applyZoomLevel(actualSizeZoomLevel)
-  }, [applyZoomLevel])
 
   useEffect(() => {
     const group = workspaceGroupRef.current
@@ -473,9 +439,9 @@ export function MainLayout(): React.JSX.Element {
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onResetZoom={resetZoom}
-        onMinimize={() => void window.desktop.window.minimize()}
-        onToggleMaximize={() => void window.desktop.window.toggleMaximize()}
-        onClose={() => void window.desktop.window.close()}
+        onMinimize={minimize}
+        onToggleMaximize={toggleMaximize}
+        onClose={close}
       />
       <MainLayoutContext.Provider
         value={{

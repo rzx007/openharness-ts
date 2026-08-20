@@ -1,11 +1,12 @@
 import type { IpcMainInvokeEvent } from "electron"
 
+import type { IpcChannel } from "../../../shared/ipc-channels"
 import type { AppContext } from "../app-context"
 
 export type IpcHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 
 export interface IpcHandlerRegistration {
-  channel: string
+  channel: IpcChannel
   handler: IpcHandler
 }
 

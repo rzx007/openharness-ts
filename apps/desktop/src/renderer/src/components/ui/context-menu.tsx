@@ -51,7 +51,3 @@ export function ContextMenuItem({
     />
   )
 }
-
-export function ContextMenuSeparator({ className }: { className?: string }): React.JSX.Element {
-  return <BaseContextMenu.Separator className={cn("-mx-1 my-1 h-px bg-border/80", className)} />
-}

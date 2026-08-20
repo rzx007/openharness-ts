@@ -145,6 +145,7 @@ export const IpcChannels = {
 } as const
 
 export const IpcEvents = {
+  windowMaximizedChanged: "window:maximized-changed",
   sessionUpdated: "session:updated",
   sessionAuxUpdated: "session:aux-updated",
   terminalData: "terminal:data",
@@ -400,5 +401,3 @@ export interface IpcInvokeMap {
     result: DesktopProviderSnapshot
   }
 }
-
-export type IpcResult<C extends IpcChannel> = IpcInvokeMap[C]["result"]

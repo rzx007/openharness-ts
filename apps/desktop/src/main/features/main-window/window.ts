@@ -1,5 +1,6 @@
 import { BrowserWindow, shell, type WebPreferences } from "electron"
 
+import { IpcEvents } from "../../../shared/ipc-channels"
 import type { AppContext } from "../../core/app-context"
 import { isForceQuit } from "../../core/services/lifecycle"
 import { showPetWindow, syncPetWithMainWindow } from "../pet/window"
@@ -71,15 +72,11 @@ function attachMainWindowBehavior(ctx: AppContext, win: BrowserWindow): void {
   })
 
   win.on("maximize", () => {
-    win.webContents.send("window:maximized-changed", true)
+    win.webContents.send(IpcEvents.windowMaximizedChanged, true)
   })
 
   win.on("unmaximize", () => {
-    win.webContents.send("window:maximized-changed", false)
-  })
-
-  win.webContents.on("did-finish-load", () => {
-    win.webContents.send("main-process-message", new Date().toLocaleString())
+    win.webContents.send(IpcEvents.windowMaximizedChanged, false)
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {

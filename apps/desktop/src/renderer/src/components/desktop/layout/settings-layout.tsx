@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useState } from "react"
 import { Outlet, useNavigate, useParams, useRouter, useRouterState } from "@tanstack/react-router"
 import { Group, Panel, useDefaultLayout, usePanelRef } from "react-resizable-panels"
 
@@ -10,8 +10,8 @@ import {
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
-import { actualSizeZoomLevel, normalizeZoomLevel } from "@shared/zoom"
 import { TitleBar } from "./title-bar"
+import { useDesktopWindowChrome } from "./use-desktop-window-chrome"
 
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
@@ -29,24 +29,13 @@ export function SettingsLayout(): React.JSX.Element {
   const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [isMaximized, setIsMaximized] = useState(false)
-  const [zoomLevel, setZoomLevel] = useState(actualSizeZoomLevel)
-  const zoomLevelRef = useRef(actualSizeZoomLevel)
+  const { isMaximized, zoomLevel, zoomIn, zoomOut, resetZoom, minimize, toggleMaximize, close } =
+    useDesktopWindowChrome()
   const sidebarPanelRef = usePanelRef()
   const layout = useDefaultLayout({
     id: "desktop-settings-layout-v1",
     panelIds: ["settings-sidebar", "settings-content"],
   })
-
-  useEffect(() => {
-    void window.desktop.window.isMaximized().then(setIsMaximized)
-    void window.desktop.window.getZoomLevel().then((level) => {
-      const normalizedLevel = normalizeZoomLevel(level)
-      zoomLevelRef.current = normalizedLevel
-      setZoomLevel(normalizedLevel)
-    })
-    return window.desktop.window.onMaximizedChanged(setIsMaximized)
-  }, [])
 
   const openCurrentConversation = useCallback((): void => {
     if (activeSessionId) {
@@ -69,21 +58,6 @@ export function SettingsLayout(): React.JSX.Element {
     if (panel.isCollapsed()) panel.expand()
     else panel.collapse()
   }, [sidebarPanelRef])
-
-  const applyZoomLevel = useCallback((requestedLevel: number): void => {
-    const nextLevel = normalizeZoomLevel(requestedLevel)
-    zoomLevelRef.current = nextLevel
-    setZoomLevel(nextLevel)
-    void window.desktop.window.setZoomLevel(nextLevel).then((appliedLevel) => {
-      const normalizedLevel = normalizeZoomLevel(appliedLevel)
-      zoomLevelRef.current = normalizedLevel
-      setZoomLevel(normalizedLevel)
-    })
-  }, [])
-
-  const zoomIn = useCallback(() => applyZoomLevel(zoomLevelRef.current + 1), [applyZoomLevel])
-  const zoomOut = useCallback(() => applyZoomLevel(zoomLevelRef.current - 1), [applyZoomLevel])
-  const resetZoom = useCallback(() => applyZoomLevel(actualSizeZoomLevel), [applyZoomLevel])
 
   useDesktopShortcuts({
     newConversation: createConversation,
@@ -128,9 +102,9 @@ export function SettingsLayout(): React.JSX.Element {
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onResetZoom={resetZoom}
-        onMinimize={() => void window.desktop.window.minimize()}
-        onToggleMaximize={() => void window.desktop.window.toggleMaximize()}
-        onClose={() => void window.desktop.window.close()}
+        onMinimize={minimize}
+        onToggleMaximize={toggleMaximize}
+        onClose={close}
       />
       <Group
         id="desktop-settings"
