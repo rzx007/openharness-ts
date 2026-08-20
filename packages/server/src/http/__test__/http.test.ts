@@ -1355,38 +1355,6 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
-  it("lists and stops session-scoped tasks", async () => {
-    const { getTaskManager, resetTaskManager } = await import("@openharness/services");
-    const cwd = process.cwd();
-    resetTaskManager({ cwd, sessionId: "s1" });
-    const manager = getTaskManager({ cwd, sessionId: "s1" });
-    const task = await manager.createShellTask({
-      argv: [process.execPath, "-e", "setInterval(()=>{},1000)"],
-      description: "long runner",
-      cwd,
-      sessionId: "s1",
-    });
-    await withServer(async ({ baseUrl, token }) => {
-      await fetch(`${baseUrl}/sessions`, {
-        method: "POST",
-        headers: { ...auth(token), "content-type": "application/json" },
-        body: JSON.stringify({ id: "s1", cwd, model: "m" }),
-      });
-      const listed = await (await fetch(`${baseUrl}/tasks?sessionId=s1`, { headers: auth(token) })).json() as {
-        tasks: Array<{ id: string }>;
-      };
-      expect(listed.tasks.map((row) => row.id)).toContain(task.id);
-
-      const stopped = await fetch(`${baseUrl}/tasks/${task.id}/stop?sessionId=s1`, {
-        method: "POST",
-        headers: auth(token),
-      });
-      expect(stopped.status).toBe(200);
-      expect(((await stopped.json()) as { task: { status: string } }).task.status).toBe("stopped");
-    });
-    resetTaskManager({ cwd, sessionId: "s1" });
-  });
-
   it("returns MCP inspect status for a warmed session runtime", async () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
@@ -1704,7 +1672,7 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
-  it("exposes project/plugin/hooks/git/task-create resource APIs", async () => {
+  it("exposes project/plugin/hooks/git and background-shell resource APIs", async () => {
     await withServer(async ({ baseUrl, token }) => {
       const init = await fetch(`${baseUrl}/project/init`, {
         method: "POST",
@@ -1779,7 +1747,12 @@ describe("OpenHarnessHttpServer", () => {
         body: JSON.stringify({ id: "s-task", cwd: process.cwd(), model: "m" }),
       });
       const successfulShellCommand = `${process.execPath} -e "process.exit(0)"`;
-      const created = await fetch(`${baseUrl}/tasks`, {
+      const oldList = await fetch(`${baseUrl}/tasks?sessionId=s-task`, {
+        headers: auth(token),
+      });
+      expect(oldList.status).toBe(404);
+
+      const oldCreate = await fetch(`${baseUrl}/tasks`, {
         method: "POST",
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({
@@ -1787,10 +1760,7 @@ describe("OpenHarnessHttpServer", () => {
           command: successfulShellCommand,
         }),
       });
-      expect(created.status).toBe(201);
-      const createdBody = await created.json() as { task: { id: string; status: string; command?: string } };
-      expect(createdBody.task.id).toMatch(/^task_/);
-      expect(createdBody.task.command).toContain("process.exit(0)");
+      expect(oldCreate.status).toBe(404);
 
       const backgroundShell = await fetch(`${baseUrl}/background-shells`, {
         method: "POST",

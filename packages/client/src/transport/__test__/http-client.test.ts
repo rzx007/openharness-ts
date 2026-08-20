@@ -24,6 +24,18 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 }
 
 describe("OpenHarnessClient", () => {
+  it("does not expose the removed public Task CRUD methods", () => {
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+    });
+
+    expect(
+      ["listTasks", "getTask", "stopTask", "createTask"].filter(
+        (method) => method in client,
+      ),
+    ).toEqual([]);
+  });
+
   it("calls custom provider resource endpoints", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {

@@ -30,11 +30,9 @@ import type {
   CreateBackgroundShellResult,
   CustomProviderInput,
   CreateScheduledTaskInput,
-  CreateTaskInput,
   HookInfo,
   ReloadPluginsResponse,
   RewindSessionResponse,
-  ListTasksOptions,
   McpServerStatus,
   MemoryEntryRecord,
   MemoryListResponse,
@@ -61,7 +59,6 @@ import type {
   SessionStateSnapshot,
   SessionUsageResponse,
   StartDreamResponse,
-  TaskSnapshot,
   UpdateClientSessionInput,
   UpdateScheduledTaskInput,
 } from "../types/index.js";
@@ -252,56 +249,6 @@ export class OpenHarnessClient {
       { signal: options.signal },
     );
     return response.providers;
-  }
-
-  /** `GET /tasks` */
-  async listTasks(
-    options: ListTasksOptions & { signal?: AbortSignal } = {},
-  ): Promise<TaskSnapshot[]> {
-    const { signal, ...query } = options;
-    const response = await this.request<{ tasks: TaskSnapshot[] }>(
-      this.path("/tasks", query),
-      { signal },
-    );
-    return response.tasks;
-  }
-
-  /** `GET /tasks/:id` */
-  async getTask(
-    taskId: string,
-    options: ListTasksOptions & { signal?: AbortSignal } = {},
-  ): Promise<{ task: TaskSnapshot; output?: string }> {
-    const { signal, ...query } = options;
-    return await this.request<{ task: TaskSnapshot; output?: string }>(
-      this.path(`/tasks/${encodeURIComponent(taskId)}`, query),
-      { signal },
-    );
-  }
-
-  /** `POST /tasks/:id/stop` */
-  async stopTask(
-    taskId: string,
-    options: ListTasksOptions & { signal?: AbortSignal } = {},
-  ): Promise<TaskSnapshot> {
-    const { signal, ...query } = options;
-    const response = await this.request<{ task: TaskSnapshot }>(
-      this.path(`/tasks/${encodeURIComponent(taskId)}/stop`, query),
-      { method: "POST", signal },
-    );
-    return response.task;
-  }
-
-  /** `POST /tasks` */
-  async createTask(
-    input: CreateTaskInput,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<TaskSnapshot> {
-    const response = await this.request<{ task: TaskSnapshot }>("/tasks", {
-      method: "POST",
-      body: input,
-      signal: options.signal,
-    });
-    return response.task;
   }
 
   /** `GET /sessions/:id/mcp` */

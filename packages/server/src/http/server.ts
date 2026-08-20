@@ -51,7 +51,6 @@ import { createServiceRoutes } from "./routes/service.js";
 import { createSessionRoutes } from "./routes/session.js";
 import { createSessionUtilityRoutes } from "./routes/session-utility.js";
 import { createSystemRoutes } from "./routes/system.js";
-import { createTaskRoutes } from "./routes/task.js";
 import { RequestTraceRegistry } from "./control/request-trace-registry.js";
 import {
   createTerminalRoutes,
@@ -347,12 +346,6 @@ export class OpenHarnessHttpServer {
     this.app.route(
       "/schedules",
       createScheduleRoutes({ schedules: this.daemon.schedules }),
-    );
-    this.app.route(
-      "/tasks",
-      createTaskRoutes({
-        tasks: this.daemon.tasks,
-      }),
     );
     this.app.route(
       "/background-shells",

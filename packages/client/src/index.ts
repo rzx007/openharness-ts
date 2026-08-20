@@ -57,7 +57,6 @@ export type {
   CreateBackgroundShellResult,
   CreateScheduledTaskInput,
   CreateClientSessionInput,
-  CreateTaskInput,
   EditLatestClientPromptInput,
   EventSyncOptions,
   ForkClientSessionInput,
@@ -76,7 +75,6 @@ export type {
   ListSessionsOptions,
   ListProjectsOptions,
   ProjectRecord,
-  ListTasksOptions,
   McpServerStatus,
   MemoryEntryRecord,
   MemoryListResponse,
@@ -111,7 +109,6 @@ export type {
   SessionUsageResponse,
   StartDreamResponse,
   SyncEventUpdate,
-  TaskSnapshot,
   UpdateClientSessionInput,
 } from "./types/index.js";
 export type { SessionMessageWithParts } from "./state/index.js";

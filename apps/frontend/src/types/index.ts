@@ -23,14 +23,6 @@ export type TranscriptItem = {
   is_error?: boolean;
 };
 
-export type TaskSnapshot = {
-  id: string;
-  type: string;
-  status: string;
-  description: string;
-  metadata: Record<string, string>;
-};
-
 export type McpServerSnapshot = {
   name: string;
   state: string;
@@ -55,24 +47,6 @@ export type SelectOptionPayload = {
   value: string;
   label: string;
   description?: string;
-};
-
-export type TodoItemSnapshot = {
-  text: string;
-  checked: boolean;
-};
-
-export type SwarmTeammateSnapshot = {
-  name: string;
-  status: "running" | "idle" | "done" | "error";
-  duration?: number;
-  task?: string;
-};
-
-export type SwarmNotificationSnapshot = {
-  from: string;
-  message: string;
-  timestamp: number;
 };
 
 export type WorkflowRunSummarySnapshot = {
