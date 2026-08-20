@@ -47,8 +47,7 @@ function scheduleSave(): void {
 export function computeScore(timestamps: number[]): number {
   const now = Date.now();
   return timestamps.reduce((sum, ts) => {
-    const deltaDays = (now - ts) / (24 * 60 * 60 * 1000);
-    return sum + Math.pow(2, -deltaDays / 14);
+    return sum + Math.pow(2, -(now - ts) / HALF_LIFE_MS);
   }, 0);
 }
 

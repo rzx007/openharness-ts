@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { DialogSelect } from "../ui/DialogSelect";
 import { DialogText } from "../ui/DialogText";
 import { PermissionDialog } from "../components/dialogs/PermissionDialog";
@@ -24,6 +24,7 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
 
     if (modal.kind === "permission") {
       const requestId = modal.request_id;
+      if (typeof requestId !== "string" || !requestId) return;
       const respondedRef = { current: false };
 
       const sendResponse = (allowed: boolean, scope: "once" | "session"): void => {
@@ -62,6 +63,7 @@ export function useModalWiring(session: Session, dialog: Dialog): void {
 
     if (modal.kind === "question") {
       const requestId = modal.request_id;
+      if (typeof requestId !== "string" || !requestId) return;
       const respondedRef = { current: false };
 
       const sendAnswer = (answer: string): void => {

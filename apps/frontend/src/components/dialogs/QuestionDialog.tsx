@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";

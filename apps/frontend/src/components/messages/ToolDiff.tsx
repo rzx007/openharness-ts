@@ -1,4 +1,3 @@
-import React from "react";
 import { createTwoFilesPatch } from "diff";
 import type { SyntaxStyle } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";

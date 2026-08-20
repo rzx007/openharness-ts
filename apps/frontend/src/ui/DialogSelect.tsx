@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useKeyboard } from "@opentui/react";
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useTheme } from "../theme/ThemeContext";

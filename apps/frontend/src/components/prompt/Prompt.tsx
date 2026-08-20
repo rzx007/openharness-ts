@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, type ReactElement } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useKeyboard } from "@opentui/react";
 import { TextAttributes, decodePasteBytes, stripAnsiSequences } from "@opentui/core";
 import type { PasteEvent, TextareaRenderable } from "@opentui/core";

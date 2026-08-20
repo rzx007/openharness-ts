@@ -1,4 +1,3 @@
-import React from "react";
 import { useTheme } from "../../theme/ThemeContext";
 import { AC_VISIBLE_ITEMS } from "../../ui/constants";
 

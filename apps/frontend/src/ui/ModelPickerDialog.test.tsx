@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import React from "react";
 import { testRender } from "@opentui/react/test-utils";
 import type { ModelInfo, ModelProviderInfo } from "@openharness/client";
 

@@ -1,18 +1,10 @@
-import React from "react";
 import { useTheme } from "../../theme/ThemeContext";
 import { Home } from "../Home";
 import { Session } from "./Session";
 import { Sidebar } from "./Sidebar";
 import { Footer } from "./Footer";
 import { Prompt } from "../../components/prompt/Prompt";
-import { TodoPanel } from "../../components/TodoPanel";
-import { SwarmPanel } from "../../components/SwarmPanel";
-import type {
-  McpServerSnapshot,
-  SwarmNotificationSnapshot,
-  SwarmTeammateSnapshot,
-  TranscriptItem,
-} from "../../types";
+import type { McpServerSnapshot, TranscriptItem } from "../../types";
 import type { Command } from "../../keymap/commands";
 import { parseStatus } from "../../services/status";
 
@@ -23,9 +15,6 @@ export type AppViewProps = {
   busy: boolean;
   status: Record<string, unknown>;
   mcpServers: McpServerSnapshot[];
-  todoMarkdown: string;
-  swarmTeammates: SwarmTeammateSnapshot[];
-  swarmNotifications: SwarmNotificationSnapshot[];
   version?: string | null;
   history: string[];
   slashCommands: Command[];
@@ -51,9 +40,6 @@ export function AppView({
   busy,
   status,
   mcpServers,
-  todoMarkdown,
-  swarmTeammates,
-  swarmNotifications,
   version,
   history,
   slashCommands,
@@ -114,10 +100,6 @@ export function AppView({
       {/* Left column: messages + panels + prompt + footer */}
       <box flexDirection="column" flexGrow={1} backgroundColor={theme.colors.background}>
         <Session items={transcript} assistantBuffer={assistantBuffer} />
-        {!sidebarOpen && todoMarkdown ? <TodoPanel markdown={todoMarkdown} /> : null}
-        {!sidebarOpen && (swarmTeammates.length > 0 || swarmNotifications.length > 0) ? (
-          <SwarmPanel teammates={swarmTeammates} notifications={swarmNotifications} />
-        ) : null}
         {prompt}
         <Footer status={status} mcpServers={mcpServers} version={version} />
       </box>
@@ -127,9 +109,6 @@ export function AppView({
           status={status}
           transcript={transcript}
           mcpServers={mcpServers}
-          todoMarkdown={todoMarkdown}
-          swarmTeammates={swarmTeammates}
-          swarmNotifications={swarmNotifications}
           version={version}
         />
       ) : null}

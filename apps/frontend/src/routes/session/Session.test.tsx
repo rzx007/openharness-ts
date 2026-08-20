@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import React from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ThemeProvider } from "../../theme/ThemeContext";
 import { Session } from "./Session";
@@ -24,7 +23,7 @@ test("Session renders mixed transcript items", async () => {
     { role: "system", text: "System log message" },
   ];
 
-  const { renderer, renderOnce, waitForFrame, captureCharFrame } = await testRender(
+  const { renderer, renderOnce, captureCharFrame } = await testRender(
     <ThemeProvider>
       <Session
         items={items}

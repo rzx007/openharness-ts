@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useKeyboard } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";

@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
-import React, { useMemo, useState } from "react";
-import { act } from "react";
+import { act, useMemo, useState } from "react";
 import { testRender } from "@opentui/react/test-utils";
 
 import { ThemeProvider } from "../theme/ThemeContext";
@@ -25,15 +24,11 @@ function SelectHarness(props: {
     commands: [],
     commandDetails: [],
     mcpServers: [],
-    bridgeSessions: [],
     modal: null,
     selectRequest,
     displayRequest: null,
     busy: false,
     ready: true,
-    todoMarkdown: "",
-    swarmTeammates: [],
-    swarmNotifications: [],
     workflowState: null,
     setModal: () => undefined,
     setSelectRequest,

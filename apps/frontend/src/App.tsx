@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { useServerSync } from "./hooks/useServerSync";
 import { useEscToCancel } from "./hooks/useEscToCancel";
@@ -13,9 +13,46 @@ import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "./keymap/permissionMode
 import { HISTORY_LIMIT, SIDEBAR_AUTO_OPEN_WIDTH } from "./ui/constants";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { AppView } from "./routes/session/AppView";
-import { WorkflowRunsPanel } from "./components/WorkflowRunsPanel";
+import { WorkflowRunsPanel, type WorkflowRunsPanelProps } from "./components/WorkflowRunsPanel";
 import type { FrontendConfig } from "./types";
+import type { TuiAction } from "./hooks/sessionController";
 import { copySelectionToClipboard } from "./utils/selection";
+
+type WorkflowRunsPanelCallbacks = Omit<WorkflowRunsPanelProps, "state">;
+
+export function createWorkflowRunsPanelCallbacks(sendRequest: (action: TuiAction) => void): WorkflowRunsPanelCallbacks {
+  return {
+    onRefresh: () => sendRequest({ type: "workflow_request", workflow_action: "refresh" }),
+    onSelectRun: (runId) =>
+      sendRequest({
+        type: "workflow_request",
+        workflow_action: "select_run",
+        workflow_run_id: runId,
+      }),
+    onSetFilter: (filter) => {
+      const hasTaskId = Object.prototype.hasOwnProperty.call(filter, "taskId");
+      const hasStatus = Object.prototype.hasOwnProperty.call(filter, "status");
+      sendRequest({
+        type: "workflow_request",
+        workflow_action: "set_filter",
+        workflow_task_id: hasTaskId ? (filter.taskId ?? "") : undefined,
+        workflow_status: hasStatus ? (filter.status ?? "") : undefined,
+      });
+    },
+    onClearFilters: () =>
+      sendRequest({
+        type: "workflow_request",
+        workflow_action: "clear_filters",
+      }),
+    onCancelRun: (runId) =>
+      sendRequest({
+        type: "workflow_request",
+        workflow_action: "cancel",
+        workflow_run_id: runId,
+        workflow_cancel_reason: "Cancelled from TUI",
+      }),
+  };
+}
 
 // ─────────── AppInner — session + dialog wiring ─────────────
 
@@ -36,9 +73,10 @@ function AppInner({ config }: { config: FrontendConfig }) {
   const onSessionExit = useCallback((code?: number | null) => {
     process.exitCode = code ?? 0;
     renderer.destroy();
-  }, [renderer]);
+  }, [renderer],);
   const onSessionError = useCallback((message: string) => toast(message, "error"), [toast]);
   const session = useServerSync(config, onSessionError);
+  const workflowPanelCallbacks = useMemo(() => createWorkflowRunsPanelCallbacks(session.sendRequest), [session.sendRequest]);
   const activeSessionId = typeof session.status.session_id === "string"
     ? session.status.session_id
     : undefined;
@@ -74,7 +112,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
 
   const setPermissionMode = useCallback(
     (mode: "default" | "plan" | "full_auto") => {
-      session.sendRequest({ type: "set_permission_mode", permission_mode: mode });
+      session.sendRequest({ type: "set_permission_mode", permission_mode: mode, });
     },
     [session],
   );
@@ -82,7 +120,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
   const openModelPicker = useCallback(() => {
     const currentModel = typeof session.status.model === "string"
       ? session.status.model
-      : config.daemon?.model ?? undefined;
+      : ( config.daemon?.model ?? undefined);
 
     dialog.replace(
       <box flexDirection="column">
@@ -216,7 +254,10 @@ function AppInner({ config }: { config: FrontendConfig }) {
 
       if (line.trim() === "/workflows" || line.trim() === "/workflow") {
         setWorkflowPanelOpen(true);
-        session.sendRequest({ type: "workflow_request", workflow_action: "open" });
+        session.sendRequest({
+          type: "workflow_request",
+          workflow_action: "open",
+        });
         return true;
       }
 
@@ -277,11 +318,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     () =>
       buildRegistry({
         // 优先用带描述的 command_details（补全/面板展示描述），旧后端回退纯名称；按名称排序对齐 opencode
-        backendCommands: (session.commandDetails.length > 0
-          ? [...session.commandDetails]
-          : session.commands.map((name) => ({ name }))
-        )
-          .sort((a, b) => a.name.localeCompare(b.name)),
+        backendCommands: (session.commandDetails.length > 0 ? [...session.commandDetails] : session.commands.map((name) => ({ name }))).sort((a, b) => a.name.localeCompare(b.name)),
         local: [
           {
             id: "app.palette",
@@ -325,7 +362,10 @@ function AppInner({ config }: { config: FrontendConfig }) {
             title: "Workflow Runs",
             run: () => {
               setWorkflowPanelOpen(true);
-              session.sendRequest({ type: "workflow_request", workflow_action: "open" });
+              session.sendRequest({
+                type: "workflow_request",
+                workflow_action: "open",
+              });
             },
           },
           {
@@ -398,9 +438,6 @@ function AppInner({ config }: { config: FrontendConfig }) {
         busy={session.busy}
         status={session.status}
         mcpServers={session.mcpServers}
-        todoMarkdown={session.todoMarkdown}
-        swarmTeammates={session.swarmTeammates}
-        swarmNotifications={session.swarmNotifications}
         version={config.version ?? null}
         history={history}
         slashCommands={registry.slashCommands()}
@@ -414,54 +451,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
         escHint={escHint}
       />
       {workflowPanelOpen ? (
-        <box
-          position="absolute"
-          top={2}
-          left={workflowPanelLeft}
-          width={workflowPanelWidth}
-          zIndex={90}
-          border={true}
-          borderColor={theme.colors.accent}
-          backgroundColor={theme.colors.backgroundPanel}
-          padding={1}
-          flexDirection="column"
-        >
-          <WorkflowRunsPanel
-            state={session.workflowState}
-            onRefresh={() => session.sendRequest({ type: "workflow_request", workflow_action: "refresh" })}
-            onSelectRun={(runId) => session.sendRequest({ type: "workflow_request", workflow_action: "select_run", workflow_run_id: runId })}
-            onSetFilter={(filter) => {
-              const hasTaskId = Object.prototype.hasOwnProperty.call(filter, "taskId");
-              const hasEventType = Object.prototype.hasOwnProperty.call(filter, "eventType");
-              const hasStatus = Object.prototype.hasOwnProperty.call(filter, "status");
-              session.sendRequest({
-                type: "workflow_request",
-                workflow_action: "set_filter",
-                workflow_task_id: hasTaskId ? filter.taskId ?? "" : undefined,
-                workflow_event_type: hasEventType ? filter.eventType ?? "" : undefined,
-                workflow_status: hasStatus ? filter.status ?? "" : undefined,
-              });
-            }}
-            onClearFilters={() => session.sendRequest({ type: "workflow_request", workflow_action: "clear_filters" })}
-            onCancelRun={(runId) => session.sendRequest({
-              type: "workflow_request",
-              workflow_action: "cancel",
-              workflow_run_id: runId,
-              workflow_cancel_reason: "Cancelled from TUI",
-            })}
-            onSelectReconcileAction={(runId, actionId) => session.sendRequest({
-              type: "workflow_request",
-              workflow_action: "reconcile",
-              workflow_run_id: runId,
-              workflow_reconcile_action_id: actionId,
-            })}
-            onRunReconcileAction={(runId, actionId) => session.sendRequest({
-              type: "workflow_request",
-              workflow_action: "run_reconcile",
-              workflow_run_id: runId,
-              workflow_reconcile_action_id: actionId,
-            })}
-          />
+        <box position="absolute" top={2} left={workflowPanelLeft} width={workflowPanelWidth} zIndex={90} border={true} borderColor={theme.colors.accent} backgroundColor={theme.colors.backgroundPanel} padding={1} flexDirection="column">
+          <WorkflowRunsPanel state={session.workflowState} {...workflowPanelCallbacks} />
         </box>
       ) : null}
     </>

@@ -1,4 +1,3 @@
-import React from "react";
 import { useTheme } from "../../theme/ThemeContext";
 
 const MAX_VISIBLE_LINES = 16;

@@ -10,8 +10,6 @@ import type { Command } from "../../keymap/commands";
 // Shared fixtures
 // ---------------------------------------------------------------------------
 
-const noopRun = mock(() => undefined);
-
 const sampleCommands: Command[] = [
   { id: "/theme", title: "Switch theme", run: mock(() => undefined) },
   { id: "/help", title: "Show help", run: mock(() => undefined) },

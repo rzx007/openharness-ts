@@ -116,12 +116,10 @@ export type WorkflowTuiState = {
   timeline: WorkflowTuiTimelineItem[];
   filters: {
     taskId?: string;
-    eventType?: string;
     status?: string;
   };
   available: {
     taskIds: string[];
-    eventTypes: string[];
     statuses: string[];
   };
   reconciliation?: {
@@ -137,8 +135,6 @@ export type WorkflowTuiState = {
       dependsOn: string[];
     }>;
   };
-  selectedReconciliationActionId?: string;
-  reconciliationSpec?: unknown;
   notice?: string;
   error?: string;
 };

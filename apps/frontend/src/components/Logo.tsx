@@ -1,4 +1,3 @@
-import React from "react";
 import { useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../theme/ThemeContext";

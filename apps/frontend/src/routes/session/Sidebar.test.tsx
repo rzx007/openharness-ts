@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import React from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ThemeProvider } from "../../theme/ThemeContext";
 import { Sidebar, computeModifiedFiles, computeWorkflowPanel } from "./Sidebar";
@@ -36,9 +35,6 @@ test("Sidebar renders session info", async () => {
         status={status}
         transcript={[]}
         mcpServers={[]}
-        todoMarkdown=""
-        swarmTeammates={[]}
-        swarmNotifications={[]}
       />
     </ThemeProvider>,
     { width: 40, height: 20 },
@@ -65,9 +61,6 @@ test("Sidebar renders MCP server names", async () => {
         status={{}}
         transcript={[]}
         mcpServers={mcpServers}
-        todoMarkdown=""
-        swarmTeammates={[]}
-        swarmNotifications={[]}
       />
     </ThemeProvider>,
     { width: 40, height: 20 },
@@ -93,9 +86,6 @@ test("Sidebar renders modified files from transcript", async () => {
         status={{}}
         transcript={transcript}
         mcpServers={[]}
-        todoMarkdown=""
-        swarmTeammates={[]}
-        swarmNotifications={[]}
       />
     </ThemeProvider>,
     { width: 40, height: 20 },
@@ -105,37 +95,6 @@ test("Sidebar renders modified files from transcript", async () => {
   const frame = captureCharFrame();
 
   expect(frame).toContain("main.ts");
-
-  renderer.destroy();
-});
-
-test("Sidebar renders detailed swarm teammate state", async () => {
-  const { renderer, renderOnce, captureCharFrame } = await testRender(
-    <ThemeProvider>
-      <Sidebar
-        status={{}}
-        transcript={[]}
-        mcpServers={[]}
-        todoMarkdown=""
-        swarmTeammates={[
-          { name: "task_2", status: "running", duration: 305, task: "worker@default" },
-          { name: "task_1", status: "done", duration: 45, task: "research@default" },
-        ]}
-        swarmNotifications={[]}
-      />
-    </ThemeProvider>,
-    { width: 44, height: 24 },
-  );
-
-  await renderOnce();
-  const frame = captureCharFrame();
-
-  expect(frame).toContain("SWARM");
-  expect(frame).toContain("task_2");
-  expect(frame).toContain("running");
-  expect(frame).toContain("5m5s");
-  expect(frame).toContain("worker@default");
-  expect(frame).toContain("research@default");
 
   renderer.destroy();
 });
@@ -211,9 +170,6 @@ test("Sidebar renders workflow state from transcript", async () => {
         status={{}}
         transcript={transcript}
         mcpServers={[]}
-        todoMarkdown=""
-        swarmTeammates={[]}
-        swarmNotifications={[]}
       />
     </ThemeProvider>,
     { width: 44, height: 30 },

@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import React from "react";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 
@@ -20,7 +19,7 @@ afterEach(() => {
 });
 
 function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" }, });
 }
 
 function event(seq: number, type: string, payload: Record<string, unknown>, sessionId = "s1"): SessionEventRecord {
@@ -29,17 +28,18 @@ function event(seq: number, type: string, payload: Record<string, unknown>, sess
 
 function sseResponse(events: SessionEventRecord[] = []): Response {
   const encoder = new TextEncoder();
-  return new Response(new ReadableStream<Uint8Array>({
+  return new Response(
+    new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode(": connected\n\n"));
       for (const item of events) {
-        controller.enqueue(encoder.encode(
-          `id: ${item.seq}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`,
-        ));
+          controller.enqueue(encoder.encode(`id: ${item.seq}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`));
       }
       controller.close();
     },
-  }), { headers: { "content-type": "text/event-stream" } });
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
 }
 
 type DaemonFixture = {
@@ -73,7 +73,11 @@ function waitForFixtureReady(child: DaemonChild): Promise<{ url: string; token: 
       try {
         resolve(JSON.parse(line) as { url: string; token: string });
       } catch (error) {
-        reject(new Error(`Daemon fixture printed invalid startup JSON: ${line}`, { cause: error }));
+        reject(
+          new Error(`Daemon fixture printed invalid startup JSON: ${line}`, {
+            cause: error,
+          }),
+        );
       }
     };
     const onStderr = (chunk: Buffer) => {
@@ -96,8 +100,7 @@ function waitForFixtureReady(child: DaemonChild): Promise<{ url: string; token: 
 
 function resolveTsxLoader(repoRoot: string): string {
   const pnpmModulesDir = join(repoRoot, "node_modules", ".pnpm");
-  const tsxPackageDir = readdirSync(pnpmModulesDir)
-    .find((name) => name.startsWith("tsx@"));
+  const tsxPackageDir = readdirSync(pnpmModulesDir).find((name) => name.startsWith("tsx@"));
   if (!tsxPackageDir) {
     throw new Error("Unable to find tsx loader under node_modules/.pnpm.");
   }
@@ -110,7 +113,9 @@ async function startDaemonFixture(): Promise<DaemonFixture> {
   const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
   const serverModuleUrl = pathToFileURL(join(repoRoot, "packages/server/src/index.ts")).href;
   const scriptPath = join(dir, "daemon-fixture.mjs");
-  writeFileSync(scriptPath, `
+  writeFileSync(
+    scriptPath,
+    `
 const { OpenHarnessHttpServer } = await import(${JSON.stringify(serverModuleUrl)});
 
 const server = new OpenHarnessHttpServer({
@@ -197,7 +202,8 @@ process.on("SIGINT", () => {
 
 const listen = await server.listen();
 console.log(JSON.stringify({ url: listen.url, token: ${JSON.stringify(token)} }));
-`);
+`,
+  );
 
   const tsxLoaderUrl = pathToFileURL(resolveTsxLoader(repoRoot)).href;
   const child = spawn("node", ["--import", tsxLoaderUrl, scriptPath], {
@@ -210,11 +216,7 @@ console.log(JSON.stringify({ url: listen.url, token: ${JSON.stringify(token)} })
     async stop() {
       try {
         if (child.exitCode == null && !child.killed) {
-          const waitForExit = (ms: number): Promise<boolean> =>
-            Promise.race([
-              new Promise<boolean>((resolve) => child.once("exit", () => resolve(true))),
-              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
-            ]);
+          const waitForExit = (ms: number): Promise<boolean> => Promise.race([new Promise<boolean>((resolve) => child.once("exit", () => resolve(true))), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms))]);
           child.kill("SIGTERM");
           if (!(await waitForExit(2_000)) && child.exitCode == null) {
             child.kill("SIGKILL");
@@ -407,34 +409,174 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     if (pathname === "/commands") {
       return jsonResponse({
         commands: [
-          { name: "/skills", kind: "session", source: "builtin", description: "List skills" },
-          { name: "/config", kind: "session", source: "builtin", description: "Show or edit settings" },
-          { name: "/provider", kind: "session", source: "builtin", description: "Show or switch provider" },
-          { name: "/mcp", kind: "session", source: "builtin", description: "Show MCP status" },
-          { name: "/tasks", kind: "session", source: "builtin", description: "List tasks" },
-          { name: "/help", kind: "session", source: "builtin", description: "List commands" },
-          { name: "/status", kind: "session", source: "builtin", description: "Session status" },
-          { name: "/version", kind: "session", source: "builtin", description: "Version" },
-          { name: "/compact", kind: "session", source: "builtin", description: "Compact" },
-          { name: "/remember", kind: "session", source: "builtin", description: "Remember" },
-          { name: "/dream", kind: "session", source: "builtin", description: "Dream" },
-          { name: "/profile", kind: "session", source: "builtin", description: "Profile" },
-          { name: "/doctor", kind: "session", source: "builtin", description: "Doctor" },
-          { name: "/effort", kind: "session", source: "builtin", description: "Effort" },
-          { name: "/usage", kind: "session", source: "builtin", description: "Usage" },
-          { name: "/cost", kind: "session", source: "builtin", description: "Cost" },
-          { name: "/export", kind: "session", source: "builtin", description: "Export" },
-          { name: "/output-style", kind: "session", source: "builtin", description: "Output style" },
-          { name: "/init", kind: "session", source: "builtin", description: "Init project" },
-          { name: "/plugin", kind: "session", source: "builtin", description: "Plugins" },
-          { name: "/hooks", kind: "session", source: "builtin", description: "Hooks" },
-          { name: "/subagents", kind: "session", source: "builtin", description: "Subagents" },
-          { name: "/diff", kind: "session", source: "builtin", description: "Diff" },
-          { name: "/branch", kind: "session", source: "builtin", description: "Branch" },
-          { name: "/rewind", kind: "session", source: "builtin", description: "Rewind" },
-          { name: "/commit", kind: "session", source: "builtin", description: "Commit" },
-          { name: "/reload-plugins", kind: "session", source: "builtin", description: "Reload plugins" },
-          { name: "/pr", kind: "template", source: "skill", description: "Write a PR" },
+          {
+            name: "/skills",
+            kind: "session",
+            source: "builtin",
+            description: "List skills",
+          },
+          {
+            name: "/config",
+            kind: "session",
+            source: "builtin",
+            description: "Show or edit settings",
+          },
+          {
+            name: "/provider",
+            kind: "session",
+            source: "builtin",
+            description: "Show or switch provider",
+          },
+          {
+            name: "/mcp",
+            kind: "session",
+            source: "builtin",
+            description: "Show MCP status",
+          },
+          {
+            name: "/tasks",
+            kind: "session",
+            source: "builtin",
+            description: "List tasks",
+          },
+          {
+            name: "/help",
+            kind: "session",
+            source: "builtin",
+            description: "List commands",
+          },
+          {
+            name: "/status",
+            kind: "session",
+            source: "builtin",
+            description: "Session status",
+          },
+          {
+            name: "/version",
+            kind: "session",
+            source: "builtin",
+            description: "Version",
+          },
+          {
+            name: "/compact",
+            kind: "session",
+            source: "builtin",
+            description: "Compact",
+          },
+          {
+            name: "/remember",
+            kind: "session",
+            source: "builtin",
+            description: "Remember",
+          },
+          {
+            name: "/dream",
+            kind: "session",
+            source: "builtin",
+            description: "Dream",
+          },
+          {
+            name: "/profile",
+            kind: "session",
+            source: "builtin",
+            description: "Profile",
+          },
+          {
+            name: "/doctor",
+            kind: "session",
+            source: "builtin",
+            description: "Doctor",
+          },
+          {
+            name: "/effort",
+            kind: "session",
+            source: "builtin",
+            description: "Effort",
+          },
+          {
+            name: "/usage",
+            kind: "session",
+            source: "builtin",
+            description: "Usage",
+          },
+          {
+            name: "/cost",
+            kind: "session",
+            source: "builtin",
+            description: "Cost",
+          },
+          {
+            name: "/export",
+            kind: "session",
+            source: "builtin",
+            description: "Export",
+          },
+          {
+            name: "/output-style",
+            kind: "session",
+            source: "builtin",
+            description: "Output style",
+          },
+          {
+            name: "/init",
+            kind: "session",
+            source: "builtin",
+            description: "Init project",
+          },
+          {
+            name: "/plugin",
+            kind: "session",
+            source: "builtin",
+            description: "Plugins",
+          },
+          {
+            name: "/hooks",
+            kind: "session",
+            source: "builtin",
+            description: "Hooks",
+          },
+          {
+            name: "/subagents",
+            kind: "session",
+            source: "builtin",
+            description: "Subagents",
+          },
+          {
+            name: "/diff",
+            kind: "session",
+            source: "builtin",
+            description: "Diff",
+          },
+          {
+            name: "/branch",
+            kind: "session",
+            source: "builtin",
+            description: "Branch",
+          },
+          {
+            name: "/rewind",
+            kind: "session",
+            source: "builtin",
+            description: "Rewind",
+          },
+          {
+            name: "/commit",
+            kind: "session",
+            source: "builtin",
+            description: "Commit",
+          },
+          {
+            name: "/reload-plugins",
+            kind: "session",
+            source: "builtin",
+            description: "Reload plugins",
+          },
+          {
+            name: "/pr",
+            kind: "template",
+            source: "skill",
+            description: "Write a PR",
+          },
         ],
       });
     }
@@ -458,7 +600,11 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       });
     }
     if (pathname === "/sessions/s1/export" && init?.method === "POST") {
-      return jsonResponse({ format: "md", filepath: "/tmp/export.md", messageCount: 2 });
+      return jsonResponse({
+        format: "md",
+        filepath: "/tmp/export.md",
+        messageCount: 2,
+      });
     }
     if (pathname === "/dream" && init?.method === "POST") {
       return jsonResponse({ taskId: "dream_1" });
@@ -473,13 +619,22 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       return jsonResponse({ messageCount: 2, messages: [], parts: [] });
     }
     if (pathname === "/sessions/s1/remember" && init?.method === "POST") {
-      return jsonResponse({ skipped: false, writtenIds: ["mem2"], titles: ["pnpm tip"] });
+      return jsonResponse({
+        skipped: false,
+        writtenIds: ["mem2"],
+        titles: ["pnpm tip"],
+      });
     }
     if (pathname === "/providers") {
       return jsonResponse({
         providers: [
           { name: "openai", displayName: "OpenAI", hasKey: true, active: true },
-          { name: "anthropic", displayName: "Anthropic", hasKey: false, active: false },
+          {
+            name: "anthropic",
+            displayName: "Anthropic",
+            hasKey: false,
+            active: false,
+          },
         ],
       });
     }
@@ -498,7 +653,16 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     }
     if (pathname === "/tasks") {
       return jsonResponse({
-        tasks: [{ id: "task_1", type: "shell", status: "running", description: "demo", cwd: process.cwd(), createdAt: 1 }],
+        tasks: [
+          {
+            id: "task_1",
+            type: "shell",
+            status: "running",
+            description: "demo",
+            cwd: process.cwd(),
+            createdAt: 1,
+          },
+        ],
       });
     }
     if (pathname === "/project/init" && init?.method === "POST") {
@@ -509,7 +673,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     }
     if (pathname === "/plugins") {
       return jsonResponse({
-        plugins: [{
+        plugins: [
+          {
           name: "demo",
           version: "1.0.0",
           enabled: true,
@@ -517,19 +682,22 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
           commandCount: 0,
           hookCount: 0,
           agentCount: 0,
-        }],
+          },
+        ],
         warnings: [],
       });
     }
     if (pathname === "/hooks") {
       return jsonResponse({
-        hooks: [{
+        hooks: [
+          {
           id: "h1",
           event: "stop",
           type: "command",
           enabled: true,
           origin: "settings",
-        }],
+          },
+        ],
       });
     }
     if (pathname === "/agent-personas") {
@@ -545,12 +713,25 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     }
     if (pathname === "/sessions/s1/mcp") {
       return jsonResponse({
-        servers: [{ name: "demo", status: "connected", toolCount: 1, resourceCount: 0, command: "demo" }],
+        servers: [
+          {
+            name: "demo",
+            status: "connected",
+            toolCount: 1,
+            resourceCount: 0,
+            command: "demo",
+          },
+        ],
       });
     }
     if (pathname === "/memory" && init?.method === "POST") {
       return jsonResponse({
-        entry: { id: "mem1", content: "prefer pnpm", createdAt: 1, updatedAt: 1 },
+        entry: {
+          id: "mem1",
+          content: "prefer pnpm",
+          createdAt: 1,
+          updatedAt: 1,
+        },
       });
     }
     if (pathname === "/memory") {
@@ -562,7 +743,11 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     if (pathname === "/auth") {
       return jsonResponse({
         auth: {
-          codex: { configured: false, state: "missing", source: "/tmp/auth.json" },
+          codex: {
+            configured: false,
+            state: "missing",
+            source: "/tmp/auth.json",
+          },
           storedProviders: ["openai"],
           envProviders: [],
         },
@@ -578,7 +763,10 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       return jsonResponse({ report: "CONTEXT PREVIEW" });
     }
     if (pathname === "/sessions" && init?.method === "POST") {
-      const body = JSON.parse(String(init.body ?? "{}")) as { model?: string; metadata?: Record<string, unknown> };
+      const body = JSON.parse(String(init.body ?? "{}")) as {
+        model?: string;
+        metadata?: Record<string, unknown>;
+      };
       listedCreatedSession = true;
       return jsonResponse({
         session: {
@@ -621,8 +809,23 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     }
     if (pathname === "/sessions/s1/commands" && init?.method === "POST") {
       return jsonResponse({
-        input: { id: "i-cmd", sessionId: "s1", seq: 2, delivery: "queue", content: "PR PROMPT", metadata: {}, createdAt: 11 },
-        run: { id: "r-cmd", sessionId: "s1", status: "running", metadata: {}, createdAt: 11, updatedAt: 11 },
+        input: {
+          id: "i-cmd",
+          sessionId: "s1",
+          seq: 2,
+          delivery: "queue",
+          content: "PR PROMPT",
+          metadata: {},
+          createdAt: 11,
+        },
+        run: {
+          id: "r-cmd",
+          sessionId: "s1",
+          status: "running",
+          metadata: {},
+          createdAt: 11,
+          updatedAt: 11,
+        },
         command: { name: "/pr", kind: "template", source: "skill" },
       });
     }
@@ -631,7 +834,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     }
     if (pathname === "/plugins/reload" && init?.method === "POST") {
       return jsonResponse({
-        plugins: [{
+        plugins: [
+          {
           name: "demo",
           version: "1.0.0",
           enabled: true,
@@ -639,7 +843,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
           commandCount: 0,
           hookCount: 0,
           agentCount: 0,
-        }],
+          },
+        ],
         warnings: [],
         message: "Plugins rediscovered; session runtimes will reload on next use.",
       });
@@ -674,7 +879,9 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     }
     if (pathname === "/sessions/s2" && init?.method === "DELETE") {
       archivedSessionIds.add("s2");
-      return jsonResponse({ session: { ...createdSession, status: "archived", archivedAt: 20 } });
+      return jsonResponse({
+        session: { ...createdSession, status: "archived", archivedAt: 20 },
+      });
     }
     if (pathname === "/events") {
       return jsonResponse({
@@ -699,7 +906,11 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       });
     }
     if (pathname === "/events/stream" && requestUrl.searchParams.get("sessionId") === "s2") {
-      return sseResponse([event(11, "session.run.updated", {
+      return sseResponse([
+        event(
+          11,
+          "session.run.updated",
+          {
         run: {
           id: "r2",
           sessionId: "s2",
@@ -709,9 +920,13 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
           createdAt: 12,
           updatedAt: 13,
         },
-      }, "s2")]);
+          },
+          "s2",
+        ),
+      ]);
     }
-    if (pathname === "/events/stream") return sseResponse([
+    if (pathname === "/events/stream")
+      return sseResponse([
       event(7, "session.message.created", { message: liveMessage }),
       event(8, "session.message.part.updated", { part: liveTextPart }),
       event(9, "session.message.part.delta", {
@@ -724,19 +939,38 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       event(10, "session.message.part.updated", { part: liveToolPart }),
     ]);
     if (pathname === "/sessions/s1/prompts") return jsonResponse({ input: { id: "i1" } });
-    if (pathname === "/sessions/s2/prompts") return jsonResponse({
+    if (pathname === "/sessions/s2/prompts")
+      return jsonResponse({
       input: { id: "i2" },
-      run: { id: "r2", sessionId: "s2", status: "running", metadata: {}, createdAt: 12, updatedAt: 12 },
+        run: {
+          id: "r2",
+          sessionId: "s2",
+          status: "running",
+          metadata: {},
+          createdAt: 12,
+          updatedAt: 12,
+        },
     });
     if (pathname === "/sessions/s1/runs/r-interrupted/resume") {
       return jsonResponse({
-        input: { ...interruptedInput, id: "i-recovery", metadata: { recovery: { sourceRunId: interruptedRun.id } } },
-        run: { ...interruptedRun, id: "r-recovery", inputId: "i-recovery", status: "pending" },
+        input: {
+          ...interruptedInput,
+          id: "i-recovery",
+          metadata: { recovery: { sourceRunId: interruptedRun.id } },
+        },
+        run: {
+          ...interruptedRun,
+          id: "r-recovery",
+          inputId: "i-recovery",
+          status: "pending",
+        },
         source_run: interruptedRun,
       });
     }
     if (pathname === "/permissions/p1/reply") {
-      return jsonResponse({ request: { ...permission, status: "approved", decision: "once" } });
+      return jsonResponse({
+        request: { ...permission, status: "approved", decision: "once" },
+      });
     }
     return jsonResponse({});
   }) as typeof fetch;
@@ -744,7 +978,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   let captured: TuiSessionController | undefined;
   const errors: string[] = [];
   function Harness() {
-    captured = useServerSync({
+    captured = useServerSync(
+      {
       daemon: {
         url: "http://daemon.test",
         token: "tok",
@@ -754,11 +989,16 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
         maxTurns: 11,
         sessionMode: "coordinator",
       },
-    }, (message) => errors.push(message));
+      },
+      (message) => errors.push(message),
+    );
     return <box />;
   }
 
-  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
   for (let i = 0; i < 20 && (!captured?.ready || captured.transcript.length === 0 || !captured.modal); i += 1) {
     await act(async () => {
       await renderOnce();
@@ -768,36 +1008,51 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
 
   expect(captured?.ready).toBe(true);
   expect(captured?.transcript.map((item) => item.text)).toContain("hello from daemon");
-  expect(captured?.transcript).toContainEqual(expect.objectContaining({
+  expect(captured?.transcript).toContainEqual(
+    expect.objectContaining({
     role: "tool",
     tool_name: "Read",
     tool_input: { path: "README.md" },
-  }));
-  expect(captured?.transcript).toContainEqual(expect.objectContaining({
+    }),
+  );
+  expect(captured?.transcript).toContainEqual(
+    expect.objectContaining({
     role: "tool_result",
     tool_name: "Read",
     text: "historical output",
-  }));
-  expect(captured?.transcript).toContainEqual(expect.objectContaining({
+    }),
+  );
+  expect(captured?.transcript).toContainEqual(
+    expect.objectContaining({
     role: "tool",
     tool_name: "Bash",
     tool_input: { command: "pwd" },
-  }));
-  expect(captured?.transcript).toContainEqual(expect.objectContaining({
+    }),
+  );
+  expect(captured?.transcript).toContainEqual(
+    expect.objectContaining({
     role: "tool_result",
     tool_name: "Bash",
     text: "live output",
-  }));
-  expect(captured?.transcript.map((item) => item.text)).not.toContain("streaming now");
-  expect(captured?.transcript.map((item) => item.text)).toContain(
-    "Run interrupted: Daemon restarted before the run completed\nUse /resume r-interrupted to replay its original prompt.",
+    }),
   );
+  expect(captured?.transcript.map((item) => item.text)).not.toContain("streaming now");
+  expect(captured?.transcript.map((item) => item.text)).toContain("Run interrupted: Daemon restarted before the run completed\nUse /resume r-interrupted to replay its original prompt.");
   expect(captured?.assistantBuffer).toBe("streaming now");
-  expect(captured?.modal).toMatchObject({ kind: "permission", request_id: "p1", tool_name: "Write" });
+  expect(captured?.modal).toMatchObject({
+    kind: "permission",
+    request_id: "p1",
+    tool_name: "Write",
+  });
 
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "next prompt" });
-    captured?.sendRequest({ type: "permission_response", request_id: "p1", allowed: true, scope: "once" });
+    captured?.sendRequest({
+      type: "permission_response",
+      request_id: "p1",
+      allowed: true,
+      scope: "once",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 
@@ -810,12 +1065,17 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(authenticatedCalls.every((call) => (call.init.headers as Record<string, string> | undefined)?.authorization === "Bearer tok")).toBe(true);
 
   await act(async () => {
-    captured?.sendRequest({ type: "submit_line", line: "/resume r-interrupted" });
+    captured?.sendRequest({
+      type: "submit_line",
+      line: "/resume r-interrupted",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
   const recoveryCall = calls.find((call) => call.url === "http://daemon.test/sessions/s1/runs/r-interrupted/resume");
   expect(recoveryCall?.init.method).toBe("POST");
-  expect(JSON.parse(String(recoveryCall?.init.body ?? "{}"))).toMatchObject({ id: expect.any(String) });
+  expect(JSON.parse(String(recoveryCall?.init.body ?? "{}"))).toMatchObject({
+    id: expect.any(String),
+  });
 
   await act(async () => {
     holdNextSessionList = true;
@@ -880,7 +1140,10 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.status.session_mode).toBe("direct");
 
   await act(async () => {
-    captured?.sendRequest({ type: "set_session_mode", session_mode: "coordinator" });
+    captured?.sendRequest({
+      type: "set_session_mode",
+      session_mode: "coordinator",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
   expect(captured?.status.session_mode).toBe("coordinator");
@@ -893,7 +1156,10 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.selectRequest?.options[0]?.value).toBe("s1");
 
   await act(async () => {
-    captured?.sendRequest({ type: "submit_line", line: "first scratch prompt" });
+    captured?.sendRequest({
+      type: "submit_line",
+      line: "first scratch prompt",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
   createCall = calls.find((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST");
@@ -915,15 +1181,19 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.status.session_id).toBe("s2");
   expect(captured?.busy).toBe(false);
   expect(errors).toContain("provider unavailable");
-  expect(captured?.transcript).toContainEqual({ role: "system", text: "error: provider unavailable" });
+  expect(captured?.transcript).toContainEqual({
+    role: "system",
+    text: "error: provider unavailable",
+  });
 
   await act(async () => {
-    captured?.sendRequest({ type: "set_permission_mode", permission_mode: "full_auto" });
+    captured?.sendRequest({
+      type: "set_permission_mode",
+      permission_mode: "full_auto",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
-  const permissionPatch = calls.find((call) =>
-    call.url === "http://daemon.test/sessions/s2" && call.init.method === "PATCH"
-      && String(call.init.body ?? "").includes("permissionMode"));
+  const permissionPatch = calls.find((call) => call.url === "http://daemon.test/sessions/s2" && call.init.method === "PATCH" && String(call.init.body ?? "").includes("permissionMode"));
   expect(permissionPatch).toBeTruthy();
   expect(captured?.status.permission_mode).toBe("full_auto");
 
@@ -964,9 +1234,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
-  const modelSessionPatch = calls.find((call) =>
-    call.url === "http://daemon.test/sessions/s1" && call.init.method === "PATCH"
-      && String(call.init.body ?? "").includes("nvidia/nemotron-3.5-lightning:free"));
+  const modelSessionPatch = calls.find((call) => call.url === "http://daemon.test/sessions/s1" && call.init.method === "PATCH" && String(call.init.body ?? "").includes("nvidia/nemotron-3.5-lightning:free"));
   expect(modelSessionPatch).toBeTruthy();
   expect(JSON.parse(String(modelSessionPatch?.init.body ?? "{}"))).toMatchObject({
     metadata: {
@@ -977,9 +1245,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     },
   });
   expect(captured?.status.model).toBe("nvidia/nemotron-3.5-lightning:free");
-  expect(captured?.transcript.some((item) =>
-    item.role === "system" && item.text.includes("Model selected: nvidia/nemotron-3.5-lightning:free"),
-  )).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Model selected: nvidia/nemotron-3.5-lightning:free"))).toBe(true);
 
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "/pr fix auth" });
@@ -989,13 +1255,14 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
 
   const promptCallsBeforeUnknown = calls.filter((call) => call.url.includes("/prompts")).length;
   await act(async () => {
-    captured?.sendRequest({ type: "submit_line", line: "/definitely-not-a-command" });
+    captured?.sendRequest({
+      type: "submit_line",
+      line: "/definitely-not-a-command",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
   expect(calls.filter((call) => call.url.includes("/prompts")).length).toBe(promptCallsBeforeUnknown);
-  expect(captured?.transcript.some((item) =>
-    item.role === "system" && item.text.includes("Unknown command: /definitely-not-a-command"),
-  )).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Unknown command: /definitely-not-a-command"))).toBe(true);
 
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "/help" });
@@ -1070,28 +1337,18 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.displayRequest?.content).toContain("M README.md");
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("[main abc123] fix auth"))).toBe(true);
 
-  const createCallsBeforeImmediateNew = calls.filter((call) =>
-    call.url === "http://daemon.test/sessions" && call.init.method === "POST"
-  ).length;
-  const oldPromptCallsBeforeImmediateNew = calls.filter((call) =>
-    call.url === "http://daemon.test/sessions/s1/prompts"
-  ).length;
+  const createCallsBeforeImmediateNew = calls.filter((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST").length;
+  const oldPromptCallsBeforeImmediateNew = calls.filter((call) => call.url === "http://daemon.test/sessions/s1/prompts").length;
   await act(async () => {
     captured?.sendRequest({ type: "submit_line", line: "/new Isolated" });
     captured?.sendRequest({ type: "submit_line", line: "isolated prompt" });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
-  expect(calls.filter((call) =>
-    call.url === "http://daemon.test/sessions" && call.init.method === "POST"
-  )).toHaveLength(createCallsBeforeImmediateNew + 1);
-  expect(calls.filter((call) => call.url === "http://daemon.test/sessions/s1/prompts")).toHaveLength(
-    oldPromptCallsBeforeImmediateNew,
-  );
+  expect(calls.filter((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST")).toHaveLength(createCallsBeforeImmediateNew + 1);
+  expect(calls.filter((call) => call.url === "http://daemon.test/sessions/s1/prompts")).toHaveLength(oldPromptCallsBeforeImmediateNew);
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/s2/prompts")).toBe(true);
   expect(captured?.status.session_id).toBe("s2");
-  expect(captured?.transcript.some((item) =>
-    item.text.includes("Unknown command: /definitely-not-a-command") || item.text.includes("Model set to gpt-test"),
-  )).toBe(false);
+  expect(captured?.transcript.some((item) => item.text.includes("Unknown command: /definitely-not-a-command") || item.text.includes("Model set to gpt-test"))).toBe(false);
 
   renderer.destroy();
 });
@@ -1112,7 +1369,10 @@ test("useServerSync starts on the new-session home when the latest session uses 
     calls.push({ url: String(url), init: init ?? {} });
     const pathname = new URL(String(url)).pathname;
     if (pathname === "/health") return jsonResponse({ ok: true });
-    if (pathname === "/settings") return jsonResponse({ settings: { model: "new-model", provider: "openrouter" } });
+    if (pathname === "/settings")
+      return jsonResponse({
+        settings: { model: "new-model", provider: "openrouter" },
+      });
     if (pathname === "/commands") return jsonResponse({ commands: [] });
     if (pathname === "/sessions" && init?.method === "POST") {
       const body = JSON.parse(String(init.body ?? "{}")) as { model?: string };
@@ -1135,7 +1395,8 @@ test("useServerSync starts on the new-session home when the latest session uses 
 
   let captured: TuiSessionController | undefined;
   function Harness() {
-    captured = useServerSync({
+    captured = useServerSync(
+      {
       daemon: {
         url: "http://daemon.test",
         token: "tok",
@@ -1143,11 +1404,16 @@ test("useServerSync starts on the new-session home when the latest session uses 
         model: "new-model",
         permissionMode: "default",
       },
-    }, () => {});
+      },
+      () => {},
+    );
     return <box />;
   }
 
-  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
   for (let i = 0; i < 20 && !captured?.ready; i += 1) {
     await act(async () => {
       await renderOnce();
@@ -1164,7 +1430,9 @@ test("useServerSync starts on the new-session home when the latest session uses 
   });
 
   const createCall = calls.find((call) => call.url === "http://daemon.test/sessions" && call.init.method === "POST");
-  expect(JSON.parse(String(createCall?.init.body ?? "{}"))).toMatchObject({ model: "new-model" });
+  expect(JSON.parse(String(createCall?.init.body ?? "{}"))).toMatchObject({
+    model: "new-model",
+  });
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/old/prompts")).toBe(false);
   expect(calls.some((call) => call.url === "http://daemon.test/sessions/new/prompts")).toBe(true);
 
@@ -1175,12 +1443,11 @@ test("useServerSync drives a real daemon session through prompt, permission, and
   const fixture = await startDaemonFixture();
   try {
     let captured: TuiSessionController | undefined;
-    const hasApprovedOutput = () =>
-      captured?.assistantBuffer === "edit approved" ||
-      captured?.transcript.some((item) => item.role === "assistant" && item.text === "edit approved") === true;
+    const hasApprovedOutput = () => captured?.assistantBuffer === "edit approved" || captured?.transcript.some((item) => item.role === "assistant" && item.text === "edit approved") === true;
 
     function Harness() {
-      captured = useServerSync({
+      captured = useServerSync(
+        {
         daemon: {
           url: fixture.url,
           token: fixture.token,
@@ -1189,11 +1456,16 @@ test("useServerSync drives a real daemon session through prompt, permission, and
           permissionMode: "default",
           maxTurns: 9,
         },
-      }, () => {});
+        },
+        () => {},
+      );
       return <box />;
     }
 
-    const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+    const { renderer, renderOnce } = await testRender(<Harness />, {
+      width: 80,
+      height: 24,
+    });
     try {
       for (let i = 0; i < 30 && !captured?.ready; i += 1) {
         await act(async () => {
@@ -1249,3 +1521,837 @@ test("useServerSync drives a real daemon session through prompt, permission, and
     await fixture.stop();
   }
 }, 15_000);
+
+type WorkflowHttpCall = {
+  path: string;
+  method: string;
+  body?: unknown;
+};
+
+function workflowJobFixture(options: {
+  includeSecondJob?: boolean;
+  failMcp?: boolean;
+  failTasks?: boolean;
+} = {}) {
+  const session: SessionRecord = {
+    id: "workflow-session",
+    cwd: process.cwd(),
+    title: "Workflow session",
+    model: "m",
+    status: "idle",
+    metadata: { runtime: { model: "m" } },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const job = {
+    id: "wf-1",
+    kind: "workflow" as const,
+    label: "Ship the cleanup",
+    ownerSession: session.id,
+    status: "running" as const,
+    capabilities: { read: true, wait: true, send: false, cancel: true },
+    cwd: session.cwd,
+    startedAt: 10,
+    updatedAt: 20,
+    metadata: {
+      mode: "parallel",
+      totalTasks: 1,
+      runningTasks: 1,
+      pendingTasks: 0,
+    },
+  };
+  const secondJob = {
+    ...job,
+    id: "wf-2",
+    label: "Verify the cleanup",
+    startedAt: 30,
+    updatedAt: 40,
+  };
+  const jobs = options.includeSecondJob ? [job, secondJob] : [job];
+  const calls: string[] = [];
+  const requests: WorkflowHttpCall[] = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const requestUrl = new URL(String(url));
+    calls.push(requestUrl.pathname + requestUrl.search);
+    requests.push({
+      path: requestUrl.pathname + requestUrl.search,
+      method: init?.method ?? "GET",
+      ...(init?.body ? { body: JSON.parse(String(init.body)) as unknown } : {}),
+    });
+    if (requestUrl.pathname === "/health") return jsonResponse({ ok: true });
+    if (requestUrl.pathname === "/settings") return jsonResponse({ settings: { model: "m" } });
+    if (requestUrl.pathname === "/commands") return jsonResponse({ commands: [] });
+    if (requestUrl.pathname === "/sessions") return jsonResponse({ sessions: [session] });
+    if (requestUrl.pathname === `/sessions/${session.id}`) return jsonResponse({ session });
+    if (requestUrl.pathname === `/sessions/${session.id}/state`) {
+      return jsonResponse({
+        cursor: 0,
+        session,
+        inputs: [],
+        messages: [],
+        parts: [],
+        runs: [],
+        permissions: [],
+        tasks: [],
+      });
+    }
+    if (requestUrl.pathname === "/events") return jsonResponse({ events: [] });
+    if (requestUrl.pathname === "/events/stream") return sseResponse([]);
+    if (requestUrl.pathname === `/sessions/${session.id}/mcp`) {
+      if (options.failMcp) {
+        return new Response(JSON.stringify({ error: "MCP unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return jsonResponse({
+        servers: [
+          {
+            name: "filesystem",
+            status: "connected",
+            toolCount: 3,
+            resourceCount: 1,
+            command: "filesystem --root .",
+          },
+        ],
+      });
+    }
+    if (requestUrl.pathname === "/tasks") {
+      if (options.failTasks) {
+        return new Response(JSON.stringify({ error: "Tasks unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return jsonResponse({
+        tasks: [
+          {
+            id: "task-aux-1",
+            type: "shell",
+            status: "running",
+            description: "Check the implementation",
+            cwd: session.cwd,
+            sessionId: session.id,
+            command: "bun test",
+            createdAt: 1,
+          },
+        ],
+      });
+    }
+    if (requestUrl.pathname === "/jobs") return jsonResponse({ jobs });
+    if (requestUrl.pathname === `/jobs/${job.id}/cancel`) return jsonResponse({ snapshot: job });
+    const selectedJob = jobs.find((candidate) => requestUrl.pathname === `/jobs/${candidate.id}`);
+    if (selectedJob) {
+      return jsonResponse({
+        text: "",
+        cursor: 20,
+        truncated: false,
+        snapshot: selectedJob,
+        details: {
+          status: "running",
+          plan: {
+            mode: "parallel",
+            tasks: [
+              { id: "research", description: "Research current state" },
+              { id: "implement", description: "Implement the cleanup" },
+            ],
+          },
+          pendingTaskIds: ["implement"],
+          blockedTaskIds: [],
+          blockedTasks: {},
+          runningTaskIds: ["research"],
+          runningTasks: { research: { summary: "Research in progress" } },
+          results: {},
+          needsReconciliation: false,
+          reconciliationPlan: { actions: [] },
+        },
+      });
+    }
+    return jsonResponse({});
+  }) as typeof fetch;
+  return { session, calls, requests };
+}
+
+test("useServerSync loads workflow job state when the workflow panel opens", async () => {
+  const { calls } = workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      {
+        daemon: {
+          url: "http://daemon.test",
+          token: "tok",
+          cwd: process.cwd(),
+          model: "m",
+        },
+      },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 20 && !captured?.ready; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(captured?.ready).toBe(true);
+
+    await act(async () => {
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "open",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(calls.some((call) => call.startsWith("/jobs?"))).toBe(true);
+    expect(calls).toContain("/jobs/wf-1?sessionId=workflow-session");
+    expect(captured?.workflowState).toMatchObject({
+      selectedRunId: "wf-1",
+      filters: {},
+      runs: [{ runId: "wf-1", status: "running", mode: "parallel", totalTasks: 1 }],
+    });
+    expect(captured?.workflowState?.tasks[0]).toMatchObject({
+      taskId: "research",
+      status: "running",
+      summary: "Research in progress",
+    });
+    expect(errors).toEqual([]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync hydrates MCP and task state from the active session APIs", async () => {
+  const { calls } = workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: process.cwd(),
+        model: "m",
+      },
+    });
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 30 && captured?.mcpServers.length !== 1; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+
+    expect(calls).toContain("/sessions/workflow-session/mcp");
+    expect(calls).toContain("/tasks?sessionId=workflow-session");
+    expect(captured?.mcpServers).toEqual([
+      {
+        name: "filesystem",
+        state: "connected",
+        detail: "filesystem --root .",
+        tool_count: 3,
+        resource_count: 1,
+      },
+    ]);
+    expect(captured?.tasks).toEqual([
+      {
+        id: "task-aux-1",
+        type: "shell",
+        status: "running",
+        description: "Check the implementation",
+        cwd: process.cwd(),
+        sessionId: "workflow-session",
+        command: "bun test",
+        createdAt: 1,
+      },
+    ]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync clears hydrated MCP and task state when leaving the active session", async () => {
+  workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: process.cwd(),
+        model: "m",
+      },
+    });
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 30 && captured?.mcpServers.length !== 1; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(captured?.tasks.map((task) => task.id)).toEqual(["task-aux-1"]);
+
+    await act(async () => {
+      captured?.sendRequest({ type: "submit_line", line: "/new" });
+      await renderOnce();
+    });
+
+    expect(captured?.status.session_id).toBeUndefined();
+    expect(captured?.mcpServers).toEqual([]);
+    expect(captured?.tasks).toEqual([]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync retains task state when MCP hydration fails", async () => {
+  workflowJobFixture({ failMcp: true });
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      {
+        daemon: {
+          url: "http://daemon.test",
+          token: "tok",
+          cwd: process.cwd(),
+          model: "m",
+        },
+      },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.tasks.length !== 1; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(captured?.mcpServers).toEqual([]);
+    expect(captured?.tasks.map((task) => task.id)).toEqual(["task-aux-1"]);
+    expect(errors).toEqual(["MCP unavailable"]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync retains MCP state when task hydration fails", async () => {
+  workflowJobFixture({ failTasks: true });
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      {
+        daemon: {
+          url: "http://daemon.test",
+          token: "tok",
+          cwd: process.cwd(),
+          model: "m",
+        },
+      },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && captured?.mcpServers.length !== 1; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(captured?.mcpServers.map((server) => server.name)).toEqual(["filesystem"]);
+    expect(captured?.tasks).toEqual([]);
+    expect(errors).toEqual(["Tasks unavailable"]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync ignores stale auxiliary responses after switching sessions", async () => {
+  const sessionA: SessionRecord = {
+    id: "aux-session-a",
+    cwd: process.cwd(),
+    title: "Auxiliary A",
+    model: "m",
+    status: "idle",
+    metadata: { runtime: { model: "m" } },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const sessionB: SessionRecord = {
+    ...sessionA,
+    id: "aux-session-b",
+    title: "Auxiliary B",
+    updatedAt: 2,
+  };
+  let releaseAMcp: ((response: Response) => void) | undefined;
+  let releaseATasks: ((response: Response) => void) | undefined;
+  let aMcpRequested = false;
+  let aTasksRequested = false;
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const requestUrl = new URL(String(url));
+    if (requestUrl.pathname === "/health") return jsonResponse({ ok: true });
+    if (requestUrl.pathname === "/settings") return jsonResponse({ settings: { model: "m" } });
+    if (requestUrl.pathname === "/commands") return jsonResponse({ commands: [] });
+    if (requestUrl.pathname === "/sessions") return jsonResponse({ sessions: [sessionA, sessionB] });
+    if (requestUrl.pathname === `/sessions/${sessionA.id}` || requestUrl.pathname === `/sessions/${sessionB.id}`) {
+      return jsonResponse({ session: requestUrl.pathname.endsWith(sessionA.id) ? sessionA : sessionB });
+    }
+    if (requestUrl.pathname.endsWith("/state")) {
+      const session = requestUrl.pathname.includes(sessionA.id) ? sessionA : sessionB;
+      return jsonResponse({ cursor: 0, session, inputs: [], messages: [], parts: [], runs: [], permissions: [], tasks: [] });
+    }
+    if (requestUrl.pathname === "/events") return jsonResponse({ events: [] });
+    if (requestUrl.pathname === "/events/stream") return sseResponse([]);
+    if (requestUrl.pathname === `/sessions/${sessionA.id}/mcp`) {
+      aMcpRequested = true;
+      return await new Promise<Response>((resolve) => {
+        releaseAMcp = resolve;
+      });
+    }
+    if (requestUrl.pathname === "/tasks" && requestUrl.searchParams.get("sessionId") === sessionA.id) {
+      aTasksRequested = true;
+      return await new Promise<Response>((resolve) => {
+        releaseATasks = resolve;
+      });
+    }
+    if (requestUrl.pathname === `/sessions/${sessionB.id}/mcp`) {
+      return jsonResponse({ servers: [{ name: "b-mcp", status: "connected", toolCount: 1, resourceCount: 0 }] });
+    }
+    if (requestUrl.pathname === "/tasks" && requestUrl.searchParams.get("sessionId") === sessionB.id) {
+      return jsonResponse({
+        tasks: [{ id: "b-task", type: "shell", status: "running", description: "B task", cwd: sessionB.cwd, sessionId: sessionB.id, createdAt: 2 }],
+      });
+    }
+    return jsonResponse({});
+  }) as typeof fetch;
+
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      { daemon: { url: "http://daemon.test", token: "tok", cwd: process.cwd(), model: "m" } },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, { width: 80, height: 24 });
+  try {
+    for (let i = 0; i < 30 && (!aMcpRequested || !aTasksRequested); i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(aMcpRequested).toBe(true);
+    expect(aTasksRequested).toBe(true);
+
+    await act(async () => {
+      captured?.sendRequest({ type: "submit_line", line: "/sessions open aux-session-b" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    for (let i = 0; i < 30 && captured?.mcpServers[0]?.name !== "b-mcp"; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(captured?.status.session_id).toBe(sessionB.id);
+    expect(captured?.mcpServers.map((server) => server.name)).toEqual(["b-mcp"]);
+    expect(captured?.tasks.map((task) => task.id)).toEqual(["b-task"]);
+
+    releaseAMcp?.(jsonResponse({ servers: [{ name: "a-mcp", status: "error", toolCount: 0, resourceCount: 0 }] }));
+    releaseATasks?.(jsonResponse({
+      tasks: [{ id: "a-task", type: "shell", status: "running", description: "A task", cwd: sessionA.cwd, sessionId: sessionA.id, createdAt: 1 }],
+    }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(captured?.mcpServers.map((server) => server.name)).toEqual(["b-mcp"]);
+    expect(captured?.tasks.map((task) => task.id)).toEqual(["b-task"]);
+    expect(errors).toEqual([]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync reports an unsupported runtime action instead of silently ignoring it", async () => {
+  workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      {
+        daemon: {
+          url: "http://daemon.test",
+          token: "tok",
+          cwd: process.cwd(),
+          model: "m",
+        },
+      },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 20 && !captured?.ready; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+
+    await act(async () => {
+      captured?.sendRequest({ type: "unsupported_action" } as never);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(errors).toEqual(["Unsupported TUI action: unsupported_action"]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync combines workflow filters and clear restores every task", async () => {
+  workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: process.cwd(),
+        model: "m",
+      },
+    });
+    return <box />;
+  }
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 20 && !captured?.ready; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "open",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    await act(async () => {
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "set_filter",
+        workflow_task_id: "research",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "set_filter",
+        workflow_status: "running",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(captured?.workflowState?.filters).toEqual({
+      taskId: "research",
+      status: "running",
+    });
+    expect(captured?.workflowState?.tasks).toEqual([expect.objectContaining({ taskId: "research", status: "running" })]);
+    await act(async () => {
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "clear_filters",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(captured?.workflowState?.filters).toEqual({});
+    expect(captured?.workflowState?.tasks.map((task) => task.taskId)).toEqual(["research", "implement"]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync select_run reads and selects the requested workflow run", async () => {
+  const { calls } = workflowJobFixture({ includeSecondJob: true });
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: process.cwd(),
+        model: "m",
+      },
+    });
+    return <box />;
+  }
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 20 && !captured?.ready; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "select_run",
+        workflow_run_id: "wf-2",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(calls).toContain("/jobs/wf-2?sessionId=workflow-session");
+    expect(captured?.workflowState?.selectedRunId).toBe("wf-2");
+    expect(captured?.workflowState?.snapshot).toMatchObject({
+      plan: { mode: "parallel" },
+    });
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync cancel posts the session and reason before refreshing workflow state", async () => {
+  const { requests } = workflowJobFixture();
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: process.cwd(),
+        model: "m",
+      },
+    });
+    return <box />;
+  }
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 20 && !captured?.ready; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "cancel",
+        workflow_run_id: "wf-1",
+        workflow_cancel_reason: "Stop from action test",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(requests).toContainEqual({
+      path: "/jobs/wf-1/cancel",
+      method: "POST",
+      body: { sessionId: "workflow-session", reason: "Stop from action test" },
+    });
+    expect(requests.some((request) => request.method === "GET" && request.path.startsWith("/jobs?"))).toBe(true);
+    expect(requests).toContainEqual({
+      path: "/jobs/wf-1?sessionId=workflow-session",
+      method: "GET",
+    });
+    expect(captured?.workflowState?.selectedRunId).toBe("wf-1");
+    expect(captured?.workflowState?.notice).toBe("Cancellation requested for wf-1.");
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync rejects removed reconciliation actions as unsupported runtime input", async () => {
+  workflowJobFixture({ includeSecondJob: true });
+  let captured: TuiSessionController | undefined;
+  const errors: string[] = [];
+  function Harness() {
+    captured = useServerSync(
+      {
+        daemon: {
+          url: "http://daemon.test",
+          token: "tok",
+          cwd: process.cwd(),
+          model: "m",
+        },
+      },
+      (message) => errors.push(message),
+    );
+    return <box />;
+  }
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 20 && !captured?.ready; i += 1) {
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    await act(async () => {
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "reconcile",
+        workflow_run_id: "wf-2",
+        workflow_reconcile_action_id: "retry-task",
+      } as never);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      captured?.sendRequest({
+        type: "workflow_request",
+        workflow_action: "run_reconcile",
+        workflow_run_id: "wf-1",
+        workflow_reconcile_action_id: "retry-task",
+      } as never);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(errors).toEqual([
+      "Unsupported workflow action: reconcile",
+      "Unsupported workflow action: run_reconcile",
+    ]);
+  } finally {
+    renderer.destroy();
+  }
+});
+
+test("useServerSync ignores a stale workflow response after switching sessions", async () => {
+  const sessionA: SessionRecord = {
+    id: "session-a",
+    cwd: process.cwd(),
+    title: "A",
+    model: "m",
+    status: "idle",
+    metadata: { runtime: { model: "m" } },
+    createdAt: 1,
+    updatedAt: 2,
+  };
+  const sessionB: SessionRecord = {
+    ...sessionA,
+    id: "session-b",
+    title: "B",
+    updatedAt: 1,
+  };
+  let releaseJobs: ((response: Response) => void) | undefined;
+  let jobsRequested = false;
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const requestUrl = new URL(String(url));
+    if (requestUrl.pathname === "/health") return jsonResponse({ ok: true });
+    if (requestUrl.pathname === "/settings") return jsonResponse({ settings: { model: "m" } });
+    if (requestUrl.pathname === "/commands") return jsonResponse({ commands: [] });
+    if (requestUrl.pathname === "/sessions") return jsonResponse({ sessions: [sessionA, sessionB] });
+    if (requestUrl.pathname === `/sessions/${sessionA.id}` || requestUrl.pathname === `/sessions/${sessionB.id}`)
+      return jsonResponse({
+        session: requestUrl.pathname.endsWith(sessionA.id) ? sessionA : sessionB,
+      });
+    if (requestUrl.pathname.endsWith("/state"))
+      return jsonResponse({
+        cursor: 0,
+        session: requestUrl.pathname.includes(sessionA.id) ? sessionA : sessionB,
+        inputs: [],
+        messages: [],
+        parts: [],
+        runs: [],
+        permissions: [],
+        tasks: [],
+      });
+    if (requestUrl.pathname === "/events") return jsonResponse({ events: [] });
+    if (requestUrl.pathname === "/events/stream") return sseResponse([]);
+    if (requestUrl.pathname === "/jobs") {
+      jobsRequested = true;
+      return await new Promise<Response>((resolve) => {
+        releaseJobs = resolve;
+      });
+    }
+    return jsonResponse({});
+  }) as typeof fetch;
+  let captured: TuiSessionController | undefined;
+  function Harness() {
+    captured = useServerSync({
+      daemon: {
+        url: "http://daemon.test",
+        token: "tok",
+        cwd: process.cwd(),
+        model: "m",
+      },
+    });
+    return <box />;
+  }
+  const { renderer, renderOnce } = await testRender(<Harness />, {
+    width: 80,
+    height: 24,
+  });
+  try {
+    for (let i = 0; i < 20 && !captured?.ready; i += 1)
+      await act(async () => {
+        await renderOnce();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    captured?.sendRequest({
+      type: "workflow_request",
+      workflow_action: "open",
+    });
+    for (let i = 0; i < 20 && !jobsRequested; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(jobsRequested).toBe(true);
+    await act(async () => {
+      captured?.sendRequest({
+        type: "submit_line",
+        line: "/sessions open session-b",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    releaseJobs?.(jsonResponse({ jobs: [] }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(captured?.status.session_id).toBe("session-b");
+    expect(captured?.workflowState).toBeNull();
+  } finally {
+    renderer.destroy();
+  }
+});

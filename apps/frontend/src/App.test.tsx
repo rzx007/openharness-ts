@@ -6,6 +6,8 @@ import { ThemeProvider } from "./theme/ThemeContext";
 import { AppView } from "./routes/session/AppView";
 import type { AppViewProps } from "./routes/session/AppView";
 import type { TranscriptItem } from "./types";
+import { createWorkflowRunsPanelCallbacks } from "./App";
+import type { TuiAction } from "./hooks/sessionController";
 
 // Shared base props for AppView tests
 const baseProps: AppViewProps = {
@@ -15,9 +17,6 @@ const baseProps: AppViewProps = {
   busy: false,
   status: { permission_mode: "default", model: "claude-opus-4-5" },
   mcpServers: [],
-  todoMarkdown: "",
-  swarmTeammates: [],
-  swarmNotifications: [],
   version: null,
   history: [],
   slashCommands: [],
@@ -27,6 +26,53 @@ const baseProps: AppViewProps = {
   sidebarOpen: false,
   onToggleSidebar: () => {},
 };
+
+test("App maps only supported WorkflowRunsPanel callbacks to typed TUI actions", () => {
+  const actions: TuiAction[] = [];
+  const callbacks = createWorkflowRunsPanelCallbacks((action) => actions.push(action));
+
+  expect(Object.keys(callbacks)).toEqual([
+    "onRefresh",
+    "onSelectRun",
+    "onSetFilter",
+    "onClearFilters",
+    "onCancelRun",
+  ]);
+  callbacks.onRefresh();
+  callbacks.onSelectRun("wf-2");
+  callbacks.onSetFilter({ taskId: "research" });
+  callbacks.onSetFilter({ status: undefined });
+  callbacks.onClearFilters();
+  callbacks.onCancelRun("wf-3");
+
+  expect(actions).toEqual([
+    { type: "workflow_request", workflow_action: "refresh" },
+    {
+      type: "workflow_request",
+      workflow_action: "select_run",
+      workflow_run_id: "wf-2",
+    },
+    {
+      type: "workflow_request",
+      workflow_action: "set_filter",
+      workflow_task_id: "research",
+      workflow_status: undefined,
+    },
+    {
+      type: "workflow_request",
+      workflow_action: "set_filter",
+      workflow_task_id: undefined,
+      workflow_status: "",
+    },
+    { type: "workflow_request", workflow_action: "clear_filters" },
+    {
+      type: "workflow_request",
+      workflow_action: "cancel",
+      workflow_run_id: "wf-3",
+      workflow_cancel_reason: "Cancelled from TUI",
+    },
+  ]);
+});
 
 // ─── Test 1: ready=false → shows Connecting text ─────────────────────────────
 
@@ -117,11 +163,11 @@ test("AppView renders assistant text when a canonical part appears after the use
   let publishAssistant: () => void = () => {};
   function Harness() {
     const [transcript, setTranscript] = React.useState<TranscriptItem[]>([
-      { id: "user-1", role: "user", text: "dynamic user" },
+      { id: "user-1", role: "user", text: "dynamic user" }
     ]);
     publishAssistant = () => setTranscript((items) => [
       ...items,
-      { id: "assistant-1:part-1", role: "assistant", text: "dynamic assistant", streaming: true },
+      { id: "assistant-1:part-1", role: "assistant", text: "dynamic assistant", streaming: true, },
     ]);
     return <AppView {...baseProps} transcript={transcript} busy />;
   }
@@ -132,7 +178,7 @@ test("AppView renders assistant text when a canonical part appears after the use
   );
   await renderOnce();
   await act(async () => publishAssistant());
-  await waitForFrame((frame) => frame.includes("dynamic assistant"), { maxPasses: 60 });
+  await waitForFrame((frame) => frame.includes("dynamic assistant"), { maxPasses: 60, });
   expect(captureCharFrame()).toContain("dynamic assistant");
   renderer.destroy();
 });
@@ -242,7 +288,7 @@ test("AppView with assistantBuffer shows session route with streaming content", 
   );
 
   await renderOnce();
-  await waitForFrame((f) => f.includes("Streaming text here"), { maxPasses: 30 });
+  await waitForFrame((f) => f.includes("Streaming text here"), { maxPasses: 30, });
   const frame = captureCharFrame();
 
   expect(frame).toContain("Streaming text here");

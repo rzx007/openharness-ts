@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type { ModelInfo, ModelProviderInfo } from "@openharness/client";

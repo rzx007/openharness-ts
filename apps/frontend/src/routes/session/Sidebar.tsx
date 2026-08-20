@@ -1,8 +1,6 @@
-import React from "react";
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../../theme/ThemeContext";
-import { parseTodoItems } from "../../components/TodoPanel";
-import type { TranscriptItem, McpServerSnapshot, SwarmTeammateSnapshot, SwarmNotificationSnapshot } from "../../types";
+import type { TranscriptItem, McpServerSnapshot } from "../../types";
 
 export type ModifiedFile = {
   path: string;
@@ -194,14 +192,6 @@ function truncate(value: string, max: number): string {
   return `${value.slice(0, max - 3)}...`;
 }
 
-function formatDuration(seconds: number | undefined): string | undefined {
-  if (seconds === undefined) return undefined;
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return `${minutes}m${rest}s`;
-}
-
 function workflowTaskCounts(workflow: WorkflowPanelState): string {
   const parts = [
     workflow.completedTasks !== undefined ? `${workflow.completedTasks} done` : undefined,
@@ -233,9 +223,6 @@ export type SidebarProps = {
   status: Record<string, unknown>;
   transcript: TranscriptItem[];
   mcpServers: McpServerSnapshot[];
-  todoMarkdown: string;
-  swarmTeammates: SwarmTeammateSnapshot[];
-  swarmNotifications: SwarmNotificationSnapshot[];
   version?: string | null;
 };
 
@@ -243,8 +230,6 @@ export function Sidebar({
   status,
   transcript,
   mcpServers,
-  todoMarkdown,
-  swarmTeammates,
 }: SidebarProps) {
   const { theme } = useTheme();
   const c = theme.colors;
@@ -256,7 +241,6 @@ export function Sidebar({
   const outputTokens = Number(status.output_tokens ?? 0);
 
   const modifiedFiles = computeModifiedFiles(transcript);
-  const todoItems = parseTodoItems(todoMarkdown);
   const workflow = computeWorkflowPanel(transcript);
   const shownFiles = modifiedFiles.slice(0, 15);
   const extraFiles = modifiedFiles.length - shownFiles.length;
@@ -294,40 +278,6 @@ export function Sidebar({
             </text>
           ))}
           {extraFiles > 0 ? <text fg={c.muted}>{`  +${extraFiles} more`}</text> : null}
-        </box>
-      ) : null}
-
-      {todoItems.length > 0 ? (
-        <box flexDirection="column">
-          <text>{" "}</text>
-          <SectionHeader title="Tasks" muted={c.muted} />
-          {todoItems.slice(0, 8).map((item, i) => (
-            <text key={i} fg={item.checked ? c.muted : c.foreground}>
-              {(item.checked ? " ✓ " : " ○ ") + item.text.slice(0, 34)}
-            </text>
-          ))}
-        </box>
-      ) : null}
-
-      {swarmTeammates.length > 0 ? (
-        <box flexDirection="column">
-          <text>{" "}</text>
-          <SectionHeader title="Swarm" muted={c.muted} />
-          {swarmTeammates.slice(0, 6).map((t) => {
-            const duration = formatDuration(t.duration);
-            const meta = [t.status, duration].filter(Boolean).join(" ");
-            return (
-              <box key={t.name} flexDirection="column">
-                <text fg={c.muted}>
-                  <span fg={statusColor(t.status, c)}>{" ●"}</span>
-                  {" " + truncate(t.name, 16)}
-                  {meta ? <span fg={c.muted}>{" " + truncate(meta, 15)}</span> : null}
-                </text>
-                {t.task ? <text fg={c.foreground}>{"  " + truncate(t.task, 34)}</text> : null}
-              </box>
-            );
-          })}
-          {swarmTeammates.length > 6 ? <text fg={c.muted}>{`  +${swarmTeammates.length - 6} more`}</text> : null}
         </box>
       ) : null}
 

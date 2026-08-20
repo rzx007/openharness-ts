@@ -7,6 +7,9 @@ import {
   readSessionRuntimeConfig,
   syncEvents,
   type CommandCatalogEntry,
+  type JobReadResult,
+  type JobSnapshot,
+  type McpServerStatus,
   type ModelProviderInfo,
   type OpenHarnessClientState,
   type PermissionRequestRecord,
@@ -15,16 +18,17 @@ import {
   type SessionBucket,
   type SessionRecord,
   type SyncEventUpdate,
+  type TaskSnapshot,
 } from "@openharness/client";
 
-import type { FrontendConfig, TranscriptItem } from "../types";
-import type { TuiSessionController } from "./sessionController";
+import type { FrontendConfig, McpServerSnapshot, TranscriptItem, WorkflowTuiState } from "../types";
+import type { TuiAction, TuiSessionController } from "./sessionController";
 import { bucketToTranscript, splitStreamingAssistant } from "./transcript";
 import {
   dispatchSessionSlashCommand,
   hasActiveRun,
   mergeCommandDetails,
-  parseSlashLine,
+  parseSlashLine
 } from "./sessionSlashCommands";
 
 type DisplayRequest = NonNullable<TuiSessionController["displayRequest"]>;
@@ -48,7 +52,7 @@ function sessionRuntimeMetadata(input: {
   apiFormat?: unknown;
   permissionMode?: unknown;
   maxTurns?: unknown;
-  sessionMode?: unknown;
+  sessionMode?: unknown
 }): Record<string, unknown> {
   const runtime: SessionRuntimeConfigPatch = {};
   if (typeof input.model === "string" && input.model) {
@@ -75,6 +79,121 @@ function sessionRuntimeMetadata(input: {
   return patchSessionRuntimeMetadata({}, runtime);
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function mcpServerSnapshot(server: McpServerStatus): McpServerSnapshot {
+  return {
+    name: server.name,
+    state: server.status,
+    ...(server.error || server.command ? { detail: server.error ?? server.command } : {}),
+    tool_count: server.toolCount,
+    resource_count: server.resourceCount,
+  };
+}
+
+function stringValues(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function workflowStateFromJobs(input: { jobs: JobSnapshot[]; selectedRunId?: string; details?: JobReadResult; filters?: WorkflowTuiState["filters"]; notice?: string; error?: string }): WorkflowTuiState {
+  const selectedRunId = input.selectedRunId && input.jobs.some((job) => job.id === input.selectedRunId) ? input.selectedRunId : input.jobs[0]?.id;
+  const details = input.details?.details ?? {};
+  const plan = isRecord(details.plan) ? details.plan : {};
+  const results = isRecord(details.results) ? details.results : {};
+  const blockedTasks = isRecord(details.blockedTasks) ? details.blockedTasks : {};
+  const runningTasks = isRecord(details.runningTasks) ? details.runningTasks : {};
+  const pendingTaskIds = new Set(stringValues(details.pendingTaskIds));
+  const runningTaskIds = new Set(stringValues(details.runningTaskIds));
+  const blockedTaskIds = new Set(stringValues(details.blockedTaskIds));
+  const taskRecords = Array.isArray(plan.tasks) ? plan.tasks.filter(isRecord) : [];
+  const allTasks = taskRecords.map((task) => {
+    const taskId = stringValue(task.id) ?? "unknown";
+    const result = isRecord(results[taskId]) ? results[taskId] : undefined;
+    const running = isRecord(runningTasks[taskId]) ? runningTasks[taskId] : undefined;
+    const blocked = isRecord(blockedTasks[taskId]) ? blockedTasks[taskId] : undefined;
+    const status = stringValue(result?.status) ?? (blockedTaskIds.has(taskId) || blocked ? "blocked" : undefined) ?? (runningTaskIds.has(taskId) || running ? "running" : undefined) ?? (pendingTaskIds.has(taskId) ? "pending" : "pending");
+    return {
+      taskId,
+      status,
+      summary: stringValue(result?.summary) ?? stringValue(running?.summary) ?? stringValue(blocked?.reason) ?? stringValue(task.description),
+      dependencies: stringValues(task.dependsOn),
+      taskManagerTaskId: stringValue(task.taskManagerTaskId),
+    };
+  });
+  const filters = input.filters ?? {};
+  const tasks = allTasks.filter((task) => (!filters.taskId || task.taskId === filters.taskId) && (!filters.status || task.status === filters.status));
+  const selectedJob = input.jobs.find((job) => job.id === selectedRunId);
+  const reconciliationPlan = isRecord(details.reconciliationPlan) ? details.reconciliationPlan : {};
+  const reconciliationActions = Array.isArray(reconciliationPlan.actions)
+    ? reconciliationPlan.actions.filter(isRecord).flatMap((action) => {
+        const actionId = stringValue(action.actionId);
+        const taskId = stringValue(action.taskId);
+        if (!actionId || !taskId) return [];
+        return [
+          {
+            actionId,
+            issueIds: stringValues(action.issueIds),
+            taskId,
+            description: stringValue(action.description) ?? actionId,
+            prompt: stringValue(action.prompt) ?? "",
+            writeScope: stringValues(action.writeScope),
+            dependsOn: stringValues(action.dependsOn),
+          },
+        ];
+      })
+    : [];
+  const needed = details.needsReconciliation === true || reconciliationActions.length > 0;
+  const statuses = [...new Set([...input.jobs.map((job) => job.status), ...tasks.map((task) => task.status)])];
+  return {
+    runs: input.jobs.map((job) => {
+      const metadata = job.metadata ?? {};
+      const totalTasks = numberValue(metadata.totalTasks) ?? tasks.length;
+      return {
+        runId: job.id,
+        status: job.status,
+        summary: job.label || job.detail || job.id,
+        mode: stringValue(metadata.mode) ?? stringValue(plan.mode) ?? "workflow",
+        totalTasks,
+        completedTasks: numberValue(metadata.completedTasks) ?? allTasks.filter((task) => task.status === "completed").length,
+        failedTasks: numberValue(metadata.failedTasks) ?? allTasks.filter((task) => task.status === "failed").length,
+        pendingTasks: numberValue(metadata.pendingTasks) ?? allTasks.filter((task) => task.status === "pending").length,
+        runningTasks: numberValue(metadata.runningTasks) ?? allTasks.filter((task) => task.status === "running").length,
+        blockedTasks: numberValue(metadata.blockedTasks) ?? allTasks.filter((task) => task.status === "blocked").length,
+        needsReconciliation: job.id === selectedRunId ? needed : false,
+        budgetPolicyPreset: stringValue(metadata.budgetPolicyPreset),
+        createdAt: job.startedAt,
+        updatedAt: job.updatedAt,
+      };
+    }),
+    selectedRunId,
+    snapshot: input.details?.details ?? (selectedJob ? { ...selectedJob } : undefined),
+    tasks,
+    timeline: [],
+    filters,
+    available: {
+      taskIds: allTasks.map((task) => task.taskId),
+      statuses,
+    },
+    ...(needed
+      ? {
+          reconciliation: {
+            needed,
+            summary: stringValue(reconciliationPlan.summary) ?? "Workflow reconciliation is required.",
+            actions: reconciliationActions,
+          },
+        }
+      : {}),
+    notice: input.notice,
+    error: input.error,
+  };
+}
+
 function normalizeSessionMode(value: unknown): "coordinator" | null {
   return value === "coordinator" ? "coordinator" : null;
 }
@@ -96,7 +215,7 @@ type RecoverableRun = {
 function archiveClientSession(
   state: OpenHarnessClientState,
   sessionId: string,
-  archivedAt: number,
+  archivedAt: number
 ): OpenHarnessClientState {
   const current = state.sessions[sessionId];
   if (!current || current.status === "archived") return state;
@@ -118,7 +237,7 @@ function archiveClientSession(
 
 function listTopLevelSessions(
   sessions: Iterable<SessionRecord>,
-  activeSessionId?: string,
+  activeSessionId?: string
 ): SessionRecord[] {
   return [...sessions]
     .filter((session) => !session.parentId && session.status !== "archived")
@@ -131,7 +250,7 @@ function listTopLevelSessions(
 
 function sessionSelectOptions(
   sessions: Iterable<SessionRecord>,
-  activeSessionId?: string,
+  activeSessionId?: string
 ): NonNullable<TuiSessionController["selectRequest"]>["options"] {
   return listTopLevelSessions(sessions, activeSessionId).map((session) => ({
     value: session.id,
@@ -146,13 +265,7 @@ function shouldAutoActivateSession(session: SessionRecord, defaultModel: string)
 
 function recoverableInterruptedRuns(bucket?: SessionBucket): RecoverableRun[] {
   if (!bucket) return [];
-  const recoveredSourceRunIds = new Set(
-    bucket.inputs.flatMap((input) =>
-      isRecord(input.metadata.recovery) && typeof input.metadata.recovery.sourceRunId === "string"
-        ? [input.metadata.recovery.sourceRunId]
-        : [],
-    ),
-  );
+  const recoveredSourceRunIds = new Set(bucket.inputs.flatMap((input) => (isRecord(input.metadata.recovery) && typeof input.metadata.recovery.sourceRunId === "string" ? [input.metadata.recovery.sourceRunId] : [])));
   return Object.values(bucket.runs)
     .filter((run) => run.status === "interrupted" && !!run.inputId && !recoveredSourceRunIds.has(run.id))
     .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -167,9 +280,7 @@ function shouldCoalesceClientState(update: SyncEventUpdate): boolean {
 }
 
 function permissionToModal(request: PermissionRequestRecord): Record<string, unknown> {
-  const input = request.payload.input && typeof request.payload.input === "object"
-    ? request.payload.input as Record<string, unknown>
-    : {};
+  const input = request.payload.input && typeof request.payload.input === "object" ? (request.payload.input as Record<string, unknown>) : {};
   return {
     kind: "permission",
     request_id: request.id,
@@ -189,10 +300,7 @@ function firstPendingPermission(state: OpenHarnessClientState, sessionId?: strin
     .at(0);
 }
 
-export function useServerSync(
-  config: FrontendConfig,
-  onError?: (message: string) => void,
-): TuiSessionController {
+export function useServerSync(config: FrontendConfig, onError?: (message: string) => void): TuiSessionController {
   const daemon = config.daemon;
   const [clientState, setClientState] = useState<OpenHarnessClientState>(() => createInitialClientState());
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>();
@@ -206,15 +314,26 @@ export function useServerSync(
   const [selectRequest, setSelectRequest] = useState<TuiSessionController["selectRequest"]>(null);
   const [displayRequest, setDisplayRequest] = useState<TuiSessionController["displayRequest"]>(null);
   const [localBusy, setLocalBusy] = useState(false);
-  const [submittedRun, setSubmittedRun] = useState<{ sessionId: string; runId: string } | null>(null);
+  const [submittedRun, setSubmittedRun] = useState<{
+    sessionId: string;
+    runId: string;
+  } | null>(null);
   const [ready, setReady] = useState(false);
   const [globalSystemItems, setGlobalSystemItems] = useState<TranscriptItem[]>([]);
   const [systemItemsBySession, setSystemItemsBySession] = useState<Record<string, TranscriptItem[]>>({});
   const [commandCatalog, setCommandCatalog] = useState<CommandCatalogEntry[]>([]);
+  const [workflowState, setWorkflowState] = useState<WorkflowTuiState | null>(null);
+  const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServerSnapshot[]>([]);
   const clientRef = useRef<OpenHarnessClient | null>(null);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
   const commandCatalogRef = useRef<CommandCatalogEntry[]>([]);
-  const defaultRuntimeRef = useRef<{ model: string; provider?: string; baseUrl?: string; apiFormat?: "anthropic" | "openai" }>({
+  const defaultRuntimeRef = useRef<{
+    model: string;
+    provider?: string;
+    baseUrl?: string;
+    apiFormat?: "anthropic" | "openai";
+  }>({
     model: daemon?.model ?? "default",
   });
   const nextSessionModeRef = useRef<"coordinator" | "direct">(statusSessionMode(daemon?.sessionMode));
@@ -227,6 +346,9 @@ export function useServerSync(
   const pendingClientStateRef = useRef<OpenHarnessClientState | null>(null);
   const pendingClientStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shownPermissionIdRef = useRef<string | undefined>(undefined);
+  const workflowStateRef = useRef<WorkflowTuiState | null>(null);
+  const workflowGenerationRef = useRef(0);
+  const auxiliaryGenerationRef = useRef(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
@@ -257,6 +379,21 @@ export function useServerSync(
     setDisplayRequest(request);
   }, []);
 
+  const setWorkflowStateCurrent = useCallback((state: WorkflowTuiState | null): void => {
+    workflowStateRef.current = state;
+    setWorkflowState(state);
+  }, []);
+
+  const invalidateWorkflowRequests = useCallback((): void => {
+    workflowGenerationRef.current += 1;
+  }, []);
+
+  const clearAuxiliaryState = useCallback((): void => {
+    auxiliaryGenerationRef.current += 1;
+    setTasks([]);
+    setMcpServers([]);
+  }, []);
+
   const setStatusAndDefault = useCallback((value: SetStateAction<Record<string, unknown>>) => {
     setStatus((current) => {
       const next = typeof value === "function" ? value(current) : value;
@@ -285,12 +422,15 @@ export function useServerSync(
     }));
   }, []);
 
-  const reportError = useCallback((message: string) => {
+  const reportError = useCallback(
+    (message: string) => {
     pushSystem(`error: ${message}`);
     onErrorRef.current?.(message);
     setLocalBusy(false);
     setSubmittedRun(null);
-  }, [pushSystem]);
+    },
+    [pushSystem],
+  );
 
   const loadModels = useCallback(async (): Promise<ModelProviderInfo[]> => {
     const client = clientRef.current;
@@ -298,7 +438,8 @@ export function useServerSync(
     return await client.listModels();
   }, []);
 
-  const cacheFirstRead = useCallback((request: PresentationReadRequest): void => {
+  const cacheFirstRead = useCallback(
+    (request: PresentationReadRequest): void => {
     const cached = presentationCacheRef.current[request.key];
     showDisplayRequest({
       key: request.key,
@@ -306,7 +447,8 @@ export function useServerSync(
       content: cached?.content ?? PRESENTATION_LOADING_TEXT,
     });
 
-    void request.load()
+      void request
+        .load()
       .then((content) => {
         presentationCacheRef.current = {
           ...presentationCacheRef.current,
@@ -325,9 +467,7 @@ export function useServerSync(
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
-        const content = cached
-          ? `${cached.content}\n\nRefresh failed: ${message}`
-          : `Failed to load ${request.title}: ${message}`;
+          const content = cached ? `${cached.content}\n\nRefresh failed: ${message}` : `Failed to load ${request.title}: ${message}`;
         if (displayRequestRef.current?.key !== request.key) return;
         showDisplayRequest({
           key: request.key,
@@ -335,7 +475,9 @@ export function useServerSync(
           content,
         });
       });
-  }, [showDisplayRequest]);
+    },
+    [showDisplayRequest],
+  );
 
   const clearPendingClientState = useCallback(() => {
     if (pendingClientStateTimerRef.current) {
@@ -345,7 +487,8 @@ export function useServerSync(
     pendingClientStateRef.current = null;
   }, []);
 
-  const commitClientState = useCallback((state: OpenHarnessClientState, coalesce: boolean) => {
+  const commitClientState = useCallback(
+    (state: OpenHarnessClientState, coalesce: boolean) => {
     if (!coalesce) {
       clearPendingClientState();
       setClientState(state);
@@ -360,40 +503,47 @@ export function useServerSync(
       pendingClientStateRef.current = null;
       if (pending) setClientState(pending);
     }, LIVE_TEXT_DELTA_FLUSH_MS);
-  }, [clearPendingClientState]);
+    },
+    [clearPendingClientState],
+  );
 
   useEffect(() => clearPendingClientState, [clearPendingClientState]);
 
-  const activateSession = useCallback((session: SessionRecord): void => {
+  const activateSession = useCallback(
+    (session: SessionRecord): void => {
     const runtime = readSessionRuntimeConfig(session, defaultRuntimeRef.current);
     activeSessionIdRef.current = session.id;
     setActiveSessionId(session.id);
+      invalidateWorkflowRequests();
+      setWorkflowStateCurrent(null);
+      clearAuxiliaryState();
     setStatus((current) => ({
       ...current,
       model: runtime.model,
       ...(runtime.provider ? { provider: runtime.provider } : {}),
       session_id: session.id,
       cwd: session.cwd,
-      permission_mode:
-        typeof runtime.permissionMode === "string"
-          ? runtime.permissionMode
-          : current.permission_mode,
-      ...(typeof runtime.maxTurns === "number"
-        ? { max_turns: runtime.maxTurns }
-        : {}),
+        permission_mode: typeof runtime.permissionMode === "string" ? runtime.permissionMode : current.permission_mode,
+        ...(typeof runtime.maxTurns === "number" ? { max_turns: runtime.maxTurns } : {}),
       session_mode: statusSessionMode(runtime.sessionMode),
     }));
-  }, []);
+    },
+    [clearAuxiliaryState, invalidateWorkflowRequests, setWorkflowStateCurrent],
+  );
 
-  const returnToHome = useCallback((title?: string): void => {
+  const returnToHome = useCallback(
+    (title?: string): void => {
     pendingNewSessionTitleRef.current = title?.trim() || undefined;
     activeSessionIdRef.current = undefined;
     setActiveSessionId(undefined);
+      invalidateWorkflowRequests();
+    clearAuxiliaryState();
     setLocalBusy(false);
     setSubmittedRun(null);
     setSelectRequest(null);
     clearDisplayRequest();
     setModal(null);
+      setWorkflowStateCurrent(null);
     setStatus((current) => {
       const next = { ...current };
       delete next.session_id;
@@ -403,7 +553,9 @@ export function useServerSync(
       next.session_mode = nextSessionModeRef.current;
       return next;
     });
-  }, [clearDisplayRequest]);
+    },
+    [clearAuxiliaryState, clearDisplayRequest, invalidateWorkflowRequests, setWorkflowStateCurrent],
+  );
 
   useEffect(() => {
     if (!daemon?.url) {
@@ -412,24 +564,21 @@ export function useServerSync(
       return;
     }
     let cancelled = false;
-    const client = new OpenHarnessClient({ baseUrl: daemon.url, token: daemon.token ?? undefined });
+    const client = new OpenHarnessClient({
+      baseUrl: daemon.url,
+      token: daemon.token ?? undefined,
+    });
     clientRef.current = client;
 
     void (async () => {
       try {
         await client.health();
         const cwd = daemon.cwd ?? process.cwd();
-        const [settings, sessions, commands] = await Promise.all([
-          client.getSettings().catch(() => ({} as Record<string, unknown>)),
-          client.listSessions({ cwd, limit: 20 }),
-          client.listCommands({ cwd }).catch(() => [] as CommandCatalogEntry[]),
-        ]);
+        const [settings, sessions, commands] = await Promise.all([client.getSettings().catch(() => ({}) as Record<string, unknown>), client.listSessions({ cwd, limit: 20 }), client.listCommands({ cwd }).catch(() => [] as CommandCatalogEntry[])]);
         const model = daemon.model ?? stringSetting(settings.model) ?? "default";
         const provider = stringSetting(settings.provider);
         const baseUrl = stringSetting(settings.baseUrl);
-        const apiFormat = settings.apiFormat === "anthropic" || settings.apiFormat === "openai"
-          ? settings.apiFormat
-          : undefined;
+        const apiFormat = settings.apiFormat === "anthropic" || settings.apiFormat === "openai" ? settings.apiFormat : undefined;
         defaultRuntimeRef.current = {
           model,
           ...(provider ? { provider } : {}),
@@ -502,6 +651,36 @@ export function useServerSync(
   }, [activeSessionId, clearPendingClientState, commitClientState, pushSystem, reportError]);
 
   useEffect(() => {
+    const client = clientRef.current;
+    const sessionId = activeSessionId;
+    if (!client || !sessionId) return;
+    const generation = ++auxiliaryGenerationRef.current;
+    const isCurrent = () => activeSessionIdRef.current === sessionId && auxiliaryGenerationRef.current === generation;
+
+    void client.getSessionMcp(sessionId)
+      .then((servers) => {
+        if (!isCurrent()) return;
+        setMcpServers(Array.isArray(servers) ? servers.map(mcpServerSnapshot) : []);
+      })
+      .catch((error) => {
+        if (!isCurrent()) return;
+        setMcpServers([]);
+        reportError(error instanceof Error ? error.message : String(error));
+      });
+
+    void client.listTasks({ sessionId })
+      .then((sessionTasks) => {
+        if (!isCurrent()) return;
+        setTasks(Array.isArray(sessionTasks) ? sessionTasks : []);
+      })
+      .catch((error) => {
+        if (!isCurrent()) return;
+        setTasks([]);
+        reportError(error instanceof Error ? error.message : String(error));
+      });
+  }, [activeSessionId, reportError]);
+
+  useEffect(() => {
     const pending = firstPendingPermission(clientState, activeSessionId);
     if (!pending) {
       shownPermissionIdRef.current = undefined;
@@ -525,7 +704,8 @@ export function useServerSync(
     setSubmittedRun(null);
   }, [clientState, reportError, submittedRun]);
 
-  const createAndSwitchSession = useCallback(async (title?: string): Promise<SessionRecord | undefined> => {
+  const createAndSwitchSession = useCallback(
+    async (title?: string): Promise<SessionRecord | undefined> => {
     const client = clientRef.current;
     if (!client) return undefined;
     setLocalBusy(true);
@@ -552,7 +732,9 @@ export function useServerSync(
     setSubmittedRun(null);
     pendingNewSessionTitleRef.current = undefined;
     return session;
-  }, [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.sessionMode]);
+    },
+    [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.sessionMode],
+  );
 
   useEffect(() => {
     if (!ready || sentInitialPromptRef.current || !config.initial_prompt) return;
@@ -561,37 +743,102 @@ export function useServerSync(
     if (!client) return;
     setLocalBusy(true);
     void (async () => {
-      const session = activeSessionId
-        ? clientState.sessions[activeSessionId] ?? await client.getSession(activeSessionId)
-        : await createAndSwitchSession();
+      const session = activeSessionId ? (clientState.sessions[activeSessionId] ?? (await client.getSession(activeSessionId))) : await createAndSwitchSession();
       if (!session) {
         setLocalBusy(false);
         return;
       }
-      const response = await client.admitPrompt(session.id, { id: createPromptRequestId(), content: config.initial_prompt! });
+      const response = await client.admitPrompt(session.id, {
+        id: createPromptRequestId(),
+        content: config.initial_prompt!,
+      });
       setLocalBusy(false);
       setSubmittedRun(response.run ? { sessionId: session.id, runId: response.run.id } : null);
     })().catch((error) => reportError(error instanceof Error ? error.message : String(error)));
   }, [activeSessionId, clientState.sessions, config.initial_prompt, createAndSwitchSession, ready, reportError]);
 
-  const sendRequest = useCallback((payload: Record<string, unknown>): void => {
+  const refreshWorkflowState = useCallback(
+    async (
+      input: {
+        selectedRunId?: string;
+        filters?: WorkflowTuiState["filters"];
+        notice?: string;
+      } = {},
+    ): Promise<void> => {
+      const client = clientRef.current;
+      const sessionId = activeSessionIdRef.current;
+      const generation = ++workflowGenerationRef.current;
+      const isCurrent = () => activeSessionIdRef.current === sessionId && workflowGenerationRef.current === generation;
+      if (!client || !sessionId) {
+        if (!isCurrent()) return;
+        setWorkflowStateCurrent(
+          workflowStateFromJobs({
+            jobs: [],
+            filters: input.filters ?? workflowStateRef.current?.filters,
+            error: "Open a session before viewing workflow runs.",
+          }),
+        );
+        return;
+      }
+      try {
+        const jobs = await client.listJobs({
+          sessionId,
+          kinds: ["workflow"],
+          includeFinished: true,
+        });
+        const selectedRunId = input.selectedRunId ?? workflowStateRef.current?.selectedRunId ?? jobs[0]?.id;
+        const selected = selectedRunId ? jobs.find((job) => job.id === selectedRunId) : undefined;
+        const details = selected ? await client.readJob(selected.id, { sessionId }) : undefined;
+        if (!isCurrent()) return;
+        setWorkflowStateCurrent(
+          workflowStateFromJobs({
+            jobs,
+            selectedRunId,
+            details,
+            filters: input.filters ?? workflowStateRef.current?.filters,
+            notice: input.notice,
+          }),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!isCurrent()) return;
+        setWorkflowStateCurrent(
+          workflowStateFromJobs({
+            jobs: [],
+            filters: input.filters ?? workflowStateRef.current?.filters,
+            error: `Unable to load workflow runs: ${message}`,
+          }),
+        );
+        reportError(message);
+      }
+    },
+    [reportError, setWorkflowStateCurrent],
+  );
+
+  const sendRequest = useCallback(
+    (action: TuiAction): void => {
     const client = clientRef.current;
-    if (!client) return;
     let sessionId = activeSessionIdRef.current;
 
     void (async () => {
-      const type = String(payload.type ?? "");
-      if (type === "select_model") {
-        const model = typeof payload.model === "string" ? payload.model.trim() : "";
-        const provider = typeof payload.provider === "string" ? payload.provider.trim() : "";
+        const runtimeAction = action as TuiAction | { type?: unknown };
+        const runtimeType = typeof runtimeAction.type === "string" ? runtimeAction.type : "unknown";
+        switch (action.type) {
+          case "select_model": {
+            if (!client) return;
+            const model = action.model.trim();
+            const provider = action.provider?.trim() ?? "";
         if (!model) return;
 
         if (sessionId) {
           const session = await client.updateSession(sessionId, {
-            metadata: patchSessionRuntimeMetadata({}, {
+                metadata: patchSessionRuntimeMetadata(
+                  {},
+                  {
               model,
               ...(provider ? { provider } : {}),
-            }),
+                  },
+                ),
           });
           activateSession(session);
         } else {
@@ -613,8 +860,9 @@ export function useServerSync(
         return;
       }
 
-      if (type === "submit_line") {
-        const line = String(payload.line ?? "");
+          case "submit_line": {
+            if (!client) return;
+            const line = action.line;
         const slash = parseSlashLine(line);
 
         const newSession = line.match(/^\/new(?:\s+(.+))?$/);
@@ -713,14 +961,18 @@ export function useServerSync(
           sessionId = session.id;
         }
         setLocalBusy(true);
-        const response = await client.admitPrompt(sessionId, { id: createPromptRequestId(), content: line });
+            const response = await client.admitPrompt(sessionId, {
+              id: createPromptRequestId(),
+              content: line,
+            });
         setLocalBusy(false);
         setSubmittedRun(response.run ? { sessionId, runId: response.run.id } : null);
         return;
       }
 
-      if (type === "delete_session") {
-        const target = typeof payload.session_id === "string" ? payload.session_id : undefined;
+          case "delete_session": {
+            if (!client) return;
+            const target = action.session_id;
         if (!target) return;
         const archived = await client.archiveSession(target);
         const archivedAt = archived.archivedAt ?? Date.now();
@@ -728,9 +980,14 @@ export function useServerSync(
         setClientState((current) => archiveClientSession(current, target, archivedAt));
         setLocalBusy(false);
         setSubmittedRun(null);
-        setSelectRequest((current) => current
-          ? { ...current, options: current.options.filter((option) => option.value !== target) }
-          : current);
+            setSelectRequest((current) =>
+              current
+                ? {
+                    ...current,
+                    options: current.options.filter((option) => option.value !== target),
+                  }
+                : current,
+            );
         if (target === activeSessionIdRef.current) {
           const remaining = listTopLevelSessions(
             Object.values({
@@ -756,35 +1013,34 @@ export function useServerSync(
         return;
       }
 
-      if (type === "interrupt") {
+          case "interrupt": {
+            if (!client) return;
         if (sessionId) await client.interruptSession(sessionId);
         setLocalBusy(false);
         setSubmittedRun(null);
         return;
       }
 
-      if (type === "permission_response") {
-        const requestId = typeof payload.request_id === "string" ? payload.request_id : undefined;
-        if (!requestId) return;
-        const allowed = payload.allowed === true;
+          case "permission_response": {
+            if (!client) return;
+            const requestId = action.request_id;
+            const allowed = action.allowed;
         await client.replyPermission(requestId, {
           status: allowed ? "approved" : "denied",
-          decision: payload.scope === "session" ? "session" : "once",
+              decision: action.scope === "session" ? "session" : "once",
           clientId: "tui",
         });
         setModal(null);
         return;
       }
 
-      if (type === "list_sessions") {
+          case "list_sessions": {
+            if (!client) return;
         const cachedSessions = {
           ...listedSessionsRef.current,
           ...clientState.sessions,
         };
-        const cachedOptions = sessionSelectOptions(
-          Object.values(cachedSessions),
-          activeSessionIdRef.current,
-        );
+            const cachedOptions = sessionSelectOptions(Object.values(cachedSessions), activeSessionIdRef.current);
         clearDisplayRequest();
         setSelectRequest({
           title: "Sessions",
@@ -797,19 +1053,21 @@ export function useServerSync(
           limit: 20,
         });
         listedSessionsRef.current = Object.fromEntries(sessions.map((session) => [session.id, session]));
-        setSelectRequest((current) => current?.submitPrefix === "/sessions open "
+            setSelectRequest((current) =>
+              current?.submitPrefix === "/sessions open "
           ? {
               title: "Sessions",
               submitPrefix: "/sessions open ",
               options: sessionSelectOptions(sessions, activeSessionIdRef.current),
             }
-          : current);
+                : current,
+            );
         return;
       }
 
-      if (type === "set_permission_mode") {
-        const rawMode = String(payload.permission_mode ?? "default");
-        const mode = rawMode === "plan" || rawMode === "full_auto" ? rawMode : "default";
+          case "set_permission_mode": {
+            if (!client) return;
+            const mode = action.permission_mode;
         setStatus((current) => ({ ...current, permission_mode: mode }));
         if (sessionId) {
           await client.updateSession(sessionId, {
@@ -819,25 +1077,109 @@ export function useServerSync(
         return;
       }
 
-      if (type === "set_session_mode") {
+          case "question_response": {
+            if (!client) return;
+            reportError("Interactive question responses are not available through the daemon client.");
+            return;
+          }
+
+          case "set_session_mode": {
+            if (!client) return;
         if (sessionId) {
           pushSystem("Coordinator mode can only be changed before starting a new session. Use /new first.");
           return;
         }
-        const mode = normalizeSessionMode(payload.session_mode);
+            const mode = normalizeSessionMode(action.session_mode);
         nextSessionModeRef.current = statusSessionMode(mode);
-        setStatus((current) => ({ ...current, session_mode: nextSessionModeRef.current }));
+            setStatus((current) => ({
+              ...current,
+              session_mode: nextSessionModeRef.current,
+            }));
+            return;
+          }
+
+          case "workflow_request": {
+            if (!client) {
+              const message = "The daemon client is not connected.";
+              setWorkflowStateCurrent(workflowStateFromJobs({ jobs: [], error: message }));
+              reportError(message);
+              return;
+            }
+            const workflowAction = action.workflow_action;
+            const current = workflowStateRef.current;
+            switch (workflowAction) {
+              case "open":
+              case "refresh":
+                await refreshWorkflowState();
+                return;
+              case "select_run":
+                await refreshWorkflowState({
+                  selectedRunId: action.workflow_run_id,
+                });
+                return;
+              case "set_filter": {
+                const filters = {
+                  ...current?.filters,
+                  ...(action.workflow_task_id !== undefined ? { taskId: action.workflow_task_id || undefined } : {}),
+                  ...(action.workflow_status !== undefined ? { status: action.workflow_status || undefined } : {}),
+                };
+                await refreshWorkflowState({
+                  selectedRunId: current?.selectedRunId,
+                  filters,
+                });
+                return;
+              }
+              case "clear_filters":
+                await refreshWorkflowState({
+                  selectedRunId: current?.selectedRunId,
+                  filters: {},
+                });
+                return;
+              case "cancel": {
+                const runId = action.workflow_run_id ?? current?.selectedRunId;
+                const workflowSessionId = activeSessionIdRef.current;
+                if (!workflowSessionId || !runId) {
+                  const message = "Select a workflow run before cancelling it.";
+                  setWorkflowStateCurrent(current ? { ...current, error: message } : workflowStateFromJobs({ jobs: [], error: message }));
+                  reportError(message);
         return;
       }
+                await client.cancelJob(runId, {
+                  sessionId: workflowSessionId,
+                  reason: action.workflow_cancel_reason,
+                });
+                await refreshWorkflowState({
+                  selectedRunId: runId,
+                  notice: `Cancellation requested for ${runId}.`,
+                });
+                return;
+              }
+              default: {
+                const exhaustive: never = workflowAction;
+                reportError(`Unsupported workflow action: ${String(exhaustive)}`);
+                return;
+              }
+            }
+          }
 
+          default: {
+            const exhaustive: never = action;
+            void exhaustive;
+            reportError(`Unsupported TUI action: ${runtimeType}`);
+            return;
+          }
+        }
     })().catch((error) => {
       reportError(error instanceof Error ? error.message : String(error));
     });
-  }, [activeSessionId, activateSession, cacheFirstRead, clearDisplayRequest, clientState, createAndSwitchSession, daemon, localBusy, pushSystem, reportError, returnToHome, showDisplayRequest]);
+    },
+    [activeSessionId, activateSession, cacheFirstRead, clearDisplayRequest, clientState, createAndSwitchSession, daemon, localBusy, pushSystem, refreshWorkflowState, reportError, returnToHome, setWorkflowStateCurrent, showDisplayRequest],
+  );
 
   const bucket = activeSessionId ? clientState.buckets[activeSessionId] : undefined;
   const recoveryItems = useMemo(
-    () => recoverableInterruptedRuns(bucket).map((run) => ({
+    () =>
+      recoverableInterruptedRuns(bucket).map((run) => ({
       id: `recovery:${run.id}`,
       role: "system" as const,
       text: `Run interrupted${run.error ? `: ${run.error}` : ""}\nUse /resume ${run.id} to replay its original prompt.`,
@@ -847,20 +1189,12 @@ export function useServerSync(
   const transcriptView = useMemo(() => {
     const base = splitStreamingAssistant(bucketToTranscript(bucket));
     return {
-      transcript: [
-        ...base.items,
-        ...recoveryItems,
-        ...(activeSessionId ? systemItemsBySession[activeSessionId] ?? [] : globalSystemItems),
-      ],
+      transcript: [...base.items, ...recoveryItems, ...(activeSessionId ? (systemItemsBySession[activeSessionId] ?? []) : globalSystemItems)],
       assistantBuffer: base.assistantBuffer,
     };
   }, [activeSessionId, bucket, globalSystemItems, recoveryItems, systemItemsBySession]);
-  const submittedRunRecord = submittedRun
-    ? clientState.buckets[submittedRun.sessionId]?.runs[submittedRun.runId]
-    : undefined;
-  const waitingForSubmittedRun = !!submittedRun && (
-    !submittedRunRecord || submittedRunRecord.status === "pending" || submittedRunRecord.status === "running"
-  );
+  const submittedRunRecord = submittedRun ? clientState.buckets[submittedRun.sessionId]?.runs[submittedRun.runId] : undefined;
+  const waitingForSubmittedRun = !!submittedRun && (!submittedRunRecord || submittedRunRecord.status === "pending" || submittedRunRecord.status === "running");
   const commandDetails = useMemo(() => mergeCommandDetails(commandCatalog), [commandCatalog]);
   const commands = useMemo(() => commandDetails.map((entry) => entry.name), [commandDetails]);
 
@@ -869,20 +1203,16 @@ export function useServerSync(
       transcript: transcriptView.transcript,
       assistantBuffer: transcriptView.assistantBuffer,
       status,
-      tasks: [],
+      tasks,
       commands,
       commandDetails,
-      mcpServers: [],
-      bridgeSessions: [],
+      mcpServers,
       modal,
       selectRequest,
       displayRequest,
       busy: localBusy || running || waitingForSubmittedRun,
       ready,
-      todoMarkdown: "",
-      swarmTeammates: [],
-      swarmNotifications: [],
-      workflowState: null,
+      workflowState,
       setModal,
       setSelectRequest,
       setDisplayRequest,
@@ -890,6 +1220,6 @@ export function useServerSync(
       loadModels,
       sendRequest,
     }),
-    [commandDetails, commands, displayRequest, loadModels, localBusy, modal, ready, running, selectRequest, sendRequest, status, transcriptView, waitingForSubmittedRun],
+    [commandDetails, commands, displayRequest, loadModels, localBusy, mcpServers, modal, ready, running, selectRequest, sendRequest, status, tasks, transcriptView, waitingForSubmittedRun, workflowState],
   );
 }

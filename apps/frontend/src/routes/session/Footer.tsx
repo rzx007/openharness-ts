@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useTheme } from "../../theme/ThemeContext";

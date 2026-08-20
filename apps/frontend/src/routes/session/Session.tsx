@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import { useTheme } from "../../theme/ThemeContext";
 import { createSyntaxStyle } from "../../theme/syntax";
 import type { TranscriptItem } from "../../types";

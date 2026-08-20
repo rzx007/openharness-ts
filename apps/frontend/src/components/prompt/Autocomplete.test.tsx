@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import React from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ThemeProvider } from "../../theme/ThemeContext";
 import { Autocomplete } from "./Autocomplete";

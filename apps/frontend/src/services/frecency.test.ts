@@ -16,6 +16,12 @@ test("computeScore gives higher score for recent usage", () => {
   expect(scoreRecent).toBeGreaterThan(scoreOld);
 });
 
+test("computeScore halves a usage after one half-life", () => {
+  const now = Date.now();
+  const halfLifeAgo = now - 14 * 24 * 60 * 60 * 1000;
+  expect(computeScore([halfLifeAgo])).toBeCloseTo(0.5, 4);
+});
+
 test("computeScore accumulates over multiple usages", () => {
   const now = Date.now();
   const scoreOne = computeScore([now]);

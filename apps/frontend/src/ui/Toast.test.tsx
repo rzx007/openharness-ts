@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import React from "react";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ToastProvider, useToast } from "./Toast";
@@ -74,7 +73,7 @@ test("error toast uses error level (renders without crashing)", async () => {
     return null;
   }
 
-  const { renderer, renderOnce, waitForFrame, captureCharFrame } = await testRender(
+  const { renderer, renderOnce, waitForFrame } = await testRender(
     <ThemeProvider>
       <ToastProvider>
         <Capture />

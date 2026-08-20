@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import React from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ThemeProvider } from "../theme/ThemeContext";
 import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
@@ -36,7 +35,6 @@ const state: WorkflowTuiState = {
   filters: { taskId: "research" },
   available: {
     taskIds: ["research", "summarize"],
-    eventTypes: ["workflow_started", "task_started"],
     statuses: ["running", "pending"],
   },
   reconciliation: {
@@ -54,12 +52,10 @@ const state: WorkflowTuiState = {
       },
     ],
   },
-  selectedReconciliationActionId: "reconcile-research",
-  reconciliationSpec: { mode: "parallel", tasks: [] },
-  notice: "Submitted follow-up wf-next from wf-running",
+  notice: "Reconciliation details are read-only with the current daemon Jobs API.",
 };
 
-test("WorkflowRunsPanel renders run list, detail, filters, timeline, and reconcile actions", async () => {
+test("WorkflowRunsPanel renders workflow details and reconciliation status without unsupported action hints", async () => {
   const { renderer, renderOnce, captureCharFrame } = await testRender(
     <ThemeProvider>
       <WorkflowRunsPanel
@@ -69,8 +65,6 @@ test("WorkflowRunsPanel renders run list, detail, filters, timeline, and reconci
         onSetFilter={() => {}}
         onClearFilters={() => {}}
         onCancelRun={() => {}}
-        onSelectReconcileAction={() => {}}
-        onRunReconcileAction={() => {}}
       />
     </ThemeProvider>,
     { width: 90, height: 36 },
@@ -88,8 +82,55 @@ test("WorkflowRunsPanel renders run list, detail, filters, timeline, and reconci
   expect(frame).toContain("task_started");
   expect(frame).toContain("RECONCILE");
   expect(frame).toContain("reconcile-research");
-  expect(frame).toContain("Submitted follow-up");
-  expect(frame).toContain("press f to run");
+  expect(frame).toContain("Reconciliation details are read-only");
+  expect(frame).not.toContain("t/e/s filter");
+  expect(frame).not.toContain("select action");
+  expect(frame).not.toContain("follow-up");
+
+  renderer.destroy();
+});
+
+test("WorkflowRunsPanel ignores unavailable event and reconciliation shortcuts while keeping task and status filters", async () => {
+  const filters: Array<{ taskId?: string; status?: string }> = [];
+  const legacyCalls: string[] = [];
+  const legacyState = {
+    ...state,
+    filters: { ...state.filters, eventType: undefined },
+    available: {
+      ...state.available,
+      eventTypes: ["workflow_started", "task_started"],
+    },
+  } as WorkflowTuiState;
+  const legacyCallbacks = {
+    onSelectReconcileAction: () => legacyCalls.push("select-reconciliation"),
+    onRunReconcileAction: () => legacyCalls.push("run-reconciliation"),
+  };
+  const { renderer, renderOnce, mockInput } = await testRender(
+    <ThemeProvider>
+      <WorkflowRunsPanel
+        state={legacyState}
+        onRefresh={() => {}}
+        onSelectRun={() => {}}
+        onSetFilter={(filter) => filters.push(filter)}
+        onClearFilters={() => {}}
+        onCancelRun={() => {}}
+        {...legacyCallbacks}
+      />
+    </ThemeProvider>,
+    { width: 90, height: 36 },
+  );
+
+  await renderOnce();
+  mockInput.pressKey("e");
+  mockInput.pressKey("f");
+  mockInput.pressKey("1");
+  mockInput.pressKey("t");
+  mockInput.pressKey("s");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await renderOnce();
+
+  expect(filters).toEqual([{ taskId: "summarize" }, { status: "running" }]);
+  expect(legacyCalls).toEqual([]);
 
   renderer.destroy();
 });
@@ -98,14 +139,12 @@ test("WorkflowRunsPanel handles empty state", async () => {
   const { renderer, renderOnce, captureCharFrame } = await testRender(
     <ThemeProvider>
       <WorkflowRunsPanel
-        state={{ runs: [], tasks: [], timeline: [], filters: {}, available: { taskIds: [], eventTypes: [], statuses: [] } }}
+        state={{ runs: [], tasks: [], timeline: [], filters: {}, available: { taskIds: [], statuses: [] } }}
         onRefresh={() => {}}
         onSelectRun={() => {}}
         onSetFilter={() => {}}
         onClearFilters={() => {}}
         onCancelRun={() => {}}
-        onSelectReconcileAction={() => {}}
-        onRunReconcileAction={() => {}}
       />
     </ThemeProvider>,
     { width: 80, height: 12 },

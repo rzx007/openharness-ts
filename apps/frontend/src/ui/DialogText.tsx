@@ -1,4 +1,3 @@
-import React from "react";
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../theme/ThemeContext";
 

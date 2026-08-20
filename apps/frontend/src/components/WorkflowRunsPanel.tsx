@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useListNavigation } from "../hooks/useListNavigation";
@@ -9,11 +9,9 @@ export type WorkflowRunsPanelProps = {
   state: WorkflowTuiState | null;
   onRefresh: () => void;
   onSelectRun: (runId: string) => void;
-  onSetFilter: (filter: { taskId?: string; eventType?: string; status?: string }) => void;
+  onSetFilter: (filter: { taskId?: string; status?: string }) => void;
   onClearFilters: () => void;
   onCancelRun: (runId: string) => void;
-  onSelectReconcileAction: (runId: string, actionId: string) => void;
-  onRunReconcileAction: (runId: string, actionId?: string) => void;
 };
 
 const VISIBLE_RUNS = 5;
@@ -27,8 +25,6 @@ export function WorkflowRunsPanel({
   onSetFilter,
   onClearFilters,
   onCancelRun,
-  onSelectReconcileAction,
-  onRunReconcileAction,
 }: WorkflowRunsPanelProps) {
   const { theme } = useTheme();
   const c = theme.colors;
@@ -52,26 +48,13 @@ export function WorkflowRunsPanel({
       onCancelRun(selectedRun.runId);
       return;
     }
-    if (key.name === "f" && state?.reconciliation?.needed && selectedRun) {
-      onRunReconcileAction(selectedRun.runId, state.selectedReconciliationActionId);
-      return;
-    }
     if (key.name === "t" && state) {
       onSetFilter({ taskId: nextValue(state.available.taskIds, state.filters.taskId) });
-      return;
-    }
-    if (key.name === "e" && state) {
-      onSetFilter({ eventType: nextValue(state.available.eventTypes, state.filters.eventType) });
       return;
     }
     if (key.name === "s" && state) {
       onSetFilter({ status: nextValue(state.available.statuses, state.filters.status) });
       return;
-    }
-    const digit = key.name ? parseInt(key.name, 10) : NaN;
-    if (!Number.isNaN(digit) && digit >= 1 && digit <= 9 && state?.reconciliation?.actions.length && selectedRun) {
-      const action = state.reconciliation.actions[digit - 1];
-      if (action) onSelectReconcileAction(selectedRun.runId, action.actionId);
     }
   });
 
@@ -82,7 +65,7 @@ export function WorkflowRunsPanel({
   return (
     <box flexDirection="column">
       <text attributes={TextAttributes.BOLD} fg={c.accent}>Workflow Runs</text>
-      <text fg={c.muted}>r refresh  enter detail  t/e/s filter  x clear  c cancel  f follow-up</text>
+      <text fg={c.muted}>r refresh  enter detail  t/s filter  x clear  c cancel</text>
       {state?.notice ? <text fg={c.success}>{state.notice}</text> : null}
       {state?.error ? <text fg={c.error}>{state.error}</text> : null}
 
@@ -146,13 +129,11 @@ export function WorkflowRunsPanel({
           <text>{" "}</text>
           <text attributes={TextAttributes.BOLD} fg={c.warning}>RECONCILE</text>
           <text fg={c.warning}>{" " + truncate(state.reconciliation.summary, 52)}</text>
-          <text fg={c.muted}>{" 1-9 select action; f run follow-up"}</text>
-          {state.reconciliation.actions.slice(0, 3).map((action, i) => (
-            <text key={action.actionId} fg={action.actionId === state.selectedReconciliationActionId ? c.success : c.muted}>
-              {`${action.actionId === state.selectedReconciliationActionId ? ">" : " "} ${i + 1}. ${truncate(action.actionId, 18)} ${truncate(action.description, 28)}`}
+          {state.reconciliation.actions.slice(0, 3).map((action) => (
+            <text key={action.actionId} fg={c.muted}>
+              {`  ${truncate(action.actionId, 18)} ${truncate(action.description, 28)}`}
             </text>
           ))}
-          {state.reconciliationSpec ? <text fg={c.success}> follow-up spec selected; press f to run</text> : null}
         </box>
       ) : null}
     </box>
@@ -183,7 +164,6 @@ function formatFilters(state: WorkflowTuiState | null): string | undefined {
   if (!filters) return undefined;
   const parts = [
     filters.taskId ? `task=${filters.taskId}` : undefined,
-    filters.eventType ? `event=${filters.eventType}` : undefined,
     filters.status ? `status=${filters.status}` : undefined,
   ].filter((part): part is string => part !== undefined);
   return parts.length ? parts.join(" ") : undefined;
