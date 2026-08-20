@@ -2,9 +2,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerPluginAgents } from "@openharness/coordinator";
+
+vi.mock("@openharness/services", () => ({
+  getProjectSessionDir: vi.fn(),
+  startDreamNow: vi.fn(),
+}));
 
 import {
+  createDefaultAgentPersonaService,
   createDefaultContextService,
   createDefaultProfileService,
   createDefaultProviderService,
@@ -75,6 +82,24 @@ describe("default daemon application services", () => {
     expect(status.report).toContain("settings.systemPrompt");
     expect(status.report).toContain("Project Memory");
     expect(status.report).toContain("Credentials");
+  });
+
+  it("keeps persona inspection limited to built-in and user definitions", async () => {
+    registerPluginAgents([{
+      name: "leaked:reviewer",
+      description: "Should stay runtime-scoped",
+      model: "leaked-model",
+      source: "plugin",
+    }]);
+
+    try {
+      const result = await createDefaultAgentPersonaService().list();
+
+      expect(result.agents.map((agent) => agent.name)).toContain("worker");
+      expect(result.agents.map((agent) => agent.name)).not.toContain("leaked:reviewer");
+    } finally {
+      registerPluginAgents([]);
+    }
   });
 
   it("updates daemon.autoStart without restarting live agent runtimes", async () => {

@@ -1,10 +1,12 @@
 import { ToolRegistry } from "@openharness/core";
 import {
   agentTool,
+  createAgentTool,
   teamCreateTool,
   teamDeleteTool,
   workflowTool,
 } from "./agent/index.js";
+import type { AgentDefinition } from "@openharness/coordinator";
 import { feishuPushTool } from "./channels/index.js";
 import {
   fileEditTool,
@@ -54,6 +56,7 @@ export function createDefaultToolRegistry(
     schedules?: boolean;
     terminal?: boolean;
     jobs?: boolean;
+    agentDefinitions?: AgentDefinition[];
   } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
@@ -78,7 +81,11 @@ export function createDefaultToolRegistry(
   registry.register(enterWorktreeTool);
   registry.register(exitWorktreeTool);
   registry.register(notebookEditTool);
-  registry.register(agentTool);
+  registry.register(
+    options.agentDefinitions === undefined
+      ? agentTool
+      : createAgentTool({ agentDefinitions: options.agentDefinitions }),
+  );
   registry.register(workflowTool);
   registry.register(teamCreateTool);
   registry.register(teamDeleteTool);

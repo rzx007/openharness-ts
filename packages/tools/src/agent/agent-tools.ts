@@ -1,4 +1,11 @@
 import type { ToolDefinition } from "@openharness/core";
+import {
+  getAgentDefinition,
+  getAllAgentDefinitions,
+  type AgentDefinition,
+} from "@openharness/coordinator";
+
+const scopedAgentDefinitions = new WeakMap<ToolDefinition, AgentDefinition[]>();
 
 export const agentTool: ToolDefinition = {
   name: "Agent",
@@ -29,7 +36,7 @@ export const agentTool: ToolDefinition = {
     required: ["description", "prompt"],
   },
   async execute(input, context) {
-    const { getAgentDefinition, getTeamRegistry } = await import("@openharness/coordinator");
+    const { getTeamRegistry } = await import("@openharness/coordinator");
 
     if (input.mode !== undefined) {
       return {
@@ -49,7 +56,7 @@ export const agentTool: ToolDefinition = {
     }
 
     const subagentType = (input.subagentType as string | undefined) ?? "worker";
-    const agentDef = getAgentDefinition(subagentType);
+    const agentDef = getAgentDefinition(subagentType, scopedAgentDefinitions.get(this));
     const team = (input.team as string) ?? "default";
 
     try {
@@ -107,3 +114,15 @@ export const agentTool: ToolDefinition = {
     }
   },
 };
+
+export interface CreateAgentToolOptions {
+  /** Plugin definitions owned by this tool's runtime. An empty array explicitly disables global plugins. */
+  agentDefinitions?: AgentDefinition[];
+}
+
+export function createAgentTool(options: CreateAgentToolOptions = {}): ToolDefinition {
+  if (options.agentDefinitions === undefined) return agentTool;
+  const tool = { ...agentTool };
+  scopedAgentDefinitions.set(tool, getAllAgentDefinitions(options.agentDefinitions));
+  return tool;
+}

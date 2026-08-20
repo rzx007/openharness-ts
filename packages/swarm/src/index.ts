@@ -70,15 +70,6 @@ export {
   type TeamFile,
 } from "./team-lifecycle.js";
 
-export {
-  WorktreeManager,
-  validateWorktreeSlug,
-  type GitRunner,
-  type WorktreeManagerOptions,
-  type WorktreeCreateResult,
-  type WorktreeListEntry,
-} from "./worktree.js";
-
 export interface TeamMember {
   id: string;
   name: string;

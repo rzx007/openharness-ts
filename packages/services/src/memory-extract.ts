@@ -1,14 +1,11 @@
-import { resolve, isAbsolute, join } from "node:path";
-
 import type { StreamingMessageClient } from "@openharness/core";
 import {
+  buildMemoryExtractionPrompt,
+  isMemoryWriteToolCall,
   MemoryManager,
-  parseMemoryType,
-  parseMemoryScope,
-  DEFAULT_MEMORY_TYPE,
-  DEFAULT_MEMORY_SCOPE,
-  type MemoryType,
-  type MemoryScope,
+  parseMemoryExtractionRecords,
+  selectWritableMemoryExtractionRecords,
+  type MemoryExtractionRecord,
 } from "@openharness/memory";
 
 import type { CheckpointMessageLike } from "./session-memory.js";
@@ -24,16 +21,7 @@ import type { CheckpointMessageLike } from "./session-memory.js";
  * Phase C 缺口）；written_paths 改为 writtenIds（manager 是条目模型非文件路径）。
  */
 
-const MEMORY_WRITE_TOOLS = new Set(["Write", "Edit"]);
-
-export interface ExtractionRecord {
-  title: string;
-  body: string;
-  memoryType: MemoryType;
-  scope: MemoryScope;
-  description: string;
-  tags: string[];
-}
+export type ExtractionRecord = MemoryExtractionRecord;
 
 export interface ExtractionResult {
   skipped: boolean;
@@ -48,19 +36,12 @@ export function hasMemoryWritesSince(
   memoryDir: string,
   cwd?: string,
 ): boolean {
-  const root = resolve(memoryDir);
-  const writeBase = cwd ? resolve(cwd) : root;
   for (const message of messages) {
     if (typeof message.content === "string") continue;
     for (const block of message.content) {
       const b = block as { type?: unknown; name?: unknown; input?: Record<string, unknown> } | null;
       if (b?.type !== "tool_use" || typeof b.name !== "string") continue;
-      if (!MEMORY_WRITE_TOOLS.has(b.name)) continue;
-      const rawPath = String(b.input?.path ?? b.input?.file_path ?? "");
-      if (!rawPath) continue;
-      const path = isAbsolute(rawPath) ? rawPath : join(writeBase, rawPath);
-      const resolved = resolve(path);
-      if (resolved === root || resolved.startsWith(root + "\\") || resolved.startsWith(root + "/")) {
+      if (isMemoryWriteToolCall(b.name, b.input ?? {}, memoryDir, cwd)) {
         return true;
       }
     }
@@ -81,50 +62,16 @@ export function buildExtractionPrompt(
   messages: CheckpointMessageLike[],
   maxRecords = 3,
 ): string {
-  const transcript = messages.slice(-12).map(summarizeMessage).join("\n");
-  return (
-    "Extract only durable memories from the recent conversation.\n" +
-    `Return JSON with at most ${maxRecords} records. Existing memory manifest:\n` +
-    `${existingManifest || "(empty)"}\n\n` +
-    "Recent conversation:\n" +
-    `${transcript}\n\n` +
-    'JSON schema: {"memories":[{"title":"...","type":"user|feedback|project|reference",' +
-    '"scope":"private|project|team","description":"...","body":"...","tags":["..."]}]}'
+  return buildMemoryExtractionPrompt(
+    existingManifest,
+    messages.slice(-12).map(summarizeMessage),
+    maxRecords,
   );
 }
 
 /** 解析 LLM 输出的 JSON（容忍前后噪声文本，坏 JSON 返回空）。 */
 export function parseExtractionRecords(text: string, maxRecords = 3): ExtractionRecord[] {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(extractJsonObject(text));
-  } catch {
-    return [];
-  }
-  const rawRecords =
-    payload && typeof payload === "object" ? (payload as { memories?: unknown }).memories : undefined;
-  if (!Array.isArray(rawRecords)) return [];
-
-  const records: ExtractionRecord[] = [];
-  for (const item of rawRecords.slice(0, maxRecords)) {
-    if (!item || typeof item !== "object") continue;
-    const data = item as Record<string, unknown>;
-    const title = String(data.title ?? "").trim();
-    const body = String(data.body ?? "").trim();
-    if (!title || !body) continue;
-    const tags = Array.isArray(data.tags)
-      ? data.tags.map((t) => String(t).trim()).filter(Boolean)
-      : [];
-    records.push({
-      title,
-      body,
-      memoryType: parseMemoryType(data.type) ?? DEFAULT_MEMORY_TYPE,
-      scope: parseMemoryScope(data.scope) ?? DEFAULT_MEMORY_SCOPE,
-      description: String(data.description ?? "").trim(),
-      tags,
-    });
-  }
-  return records;
+  return parseMemoryExtractionRecords(text, maxRecords);
 }
 
 /** 把通过的记录写进 MemoryManager（team scope 跳过——TS 无团队隔离）。 */
@@ -133,8 +80,7 @@ export async function applyExtractionRecords(
   records: ExtractionRecord[],
 ): Promise<ExtractionResult> {
   const writtenIds: string[] = [];
-  for (const record of records) {
-    if (record.scope === "team") continue;
+  for (const record of selectWritableMemoryExtractionRecords(records)) {
     const entry = await manager.add(record.body, record.tags, undefined, {
       name: record.title,
       description: record.description,
@@ -199,15 +145,6 @@ export async function extractMemoriesFromTurn(options: ExtractMemoriesOptions): 
 // ---------------------------------------------------------------------------
 // 内部
 // ---------------------------------------------------------------------------
-
-function extractJsonObject(text: string): string {
-  const stripped = text.trim();
-  if (stripped.startsWith("{") && stripped.endsWith("}")) return stripped;
-  const start = stripped.indexOf("{");
-  const end = stripped.lastIndexOf("}");
-  if (start >= 0 && end > start) return stripped.slice(start, end + 1);
-  return stripped;
-}
 
 function summarizeMessage(message: CheckpointMessageLike): string {
   const role = message.role ?? "system";

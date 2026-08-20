@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { Settings } from "@openharness/core";
+import {
+  getAgentDefinition,
+  registerPluginAgents,
+} from "@openharness/coordinator";
+import { discoverOpenHarnessExtensions } from "@openharness/agent-runtime";
 
 import { createDefaultCommandCatalog } from "../default-command-catalog.js";
 
@@ -55,6 +60,61 @@ describe("createDefaultCommandCatalog", () => {
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads commands for cwd B without replacing the agent definitions already active for cwd A", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ohs-catalog-scoped-agents-"));
+    const cwdA = join(root, "workspace-a");
+    const cwdB = join(root, "workspace-b");
+    const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    process.env.OPENHARNESS_CONFIG_DIR = join(root, "config");
+
+    function writePlugin(cwd: string, model: string, command: string): void {
+      const pluginDir = join(cwd, ".openharness", "plugins", "scoped");
+      mkdirSync(join(pluginDir, "agents"), { recursive: true });
+      mkdirSync(join(pluginDir, "commands"), { recursive: true });
+      writeFileSync(
+        join(pluginDir, "plugin.json"),
+        JSON.stringify({ name: "scoped", version: "1.0.0" }),
+      );
+      writeFileSync(
+        join(pluginDir, "agents", "reviewer.md"),
+        `---\nmodel: ${model}\n---\nReview this workspace.\n`,
+      );
+      writeFileSync(
+        join(pluginDir, "commands", `${command}.md`),
+        `---\ndescription: ${command} command\n---\nRun ${command}.\n`,
+      );
+    }
+
+    const settings: Settings = {
+      ...minimalSettings(),
+      allowProjectPlugins: true,
+    };
+
+    try {
+      writePlugin(cwdA, "model-a", "command-a");
+      writePlugin(cwdB, "model-b", "command-b");
+      const discoveryA = await discoverOpenHarnessExtensions(cwdA, settings);
+      registerPluginAgents(discoveryA.agentDefinitions);
+
+      const commands = await createDefaultCommandCatalog(settings).list({
+        cwd: cwdB,
+      });
+
+      expect(commands.map((command) => command.name)).toContain(
+        "/scoped:command-b",
+      );
+      expect(getAgentDefinition("scoped:reviewer")?.model).toBe("model-a");
+    } finally {
+      registerPluginAgents([]);
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENHARNESS_CONFIG_DIR;
+      } else {
+        process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+      }
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

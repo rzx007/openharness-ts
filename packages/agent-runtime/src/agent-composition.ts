@@ -1,0 +1,164 @@
+import type {
+  AgentEffects,
+  AgentSession,
+  McpServerConfig,
+  RuntimeBundle,
+  Settings,
+} from "@openharness/core";
+import { createAgentSession, loadSettings } from "@openharness/core";
+import { McpClientManager } from "@openharness/mcp";
+import { LocalAgentJobHost } from "@openharness/tools";
+
+import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+import {
+  AgentChildManager,
+  type AgentChildEnvironmentProvider,
+  type AgentChildManagerOptions,
+  type AgentChildRegistry,
+} from "./child-agent.js";
+import { createOpenHarnessRuntime } from "./default-runtime.js";
+import type { AgentEventBus } from "./event-source.js";
+import {
+  configureDiscoveredExtensions,
+  discoverOpenHarnessExtensions,
+  type OpenHarnessAgentExtension,
+} from "./extensions.js";
+import {
+  createAgentMemoryRuntime,
+  type AgentMemoryRuntime,
+} from "./memory-runtime.js";
+import { createMcpAuthHost } from "./mcp-auth.js";
+
+interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
+  settings?: Settings;
+  cwd?: string;
+  sessionId?: string;
+  mcpServers?: Record<string, McpServerConfig>;
+  extensions?: OpenHarnessAgentExtension[];
+  childIdleTtlMs?: number;
+  childEnvironment?: AgentChildEnvironmentProvider;
+}
+
+export interface AgentIdentity {
+  childId?: string;
+  parentSessionId?: string;
+  parentRunId?: string;
+}
+
+export interface AgentCompositionContext {
+  eventBus: AgentEventBus;
+  effects: AgentEffects;
+  childDirectory: AgentChildRegistry;
+  identity?: AgentIdentity;
+  createAgent: AgentChildManagerOptions["createAgent"];
+}
+
+export interface AgentComposition {
+  runtime: RuntimeBundle;
+  session: AgentSession;
+  mcpManager: McpClientManager;
+  memory: AgentMemoryRuntime | undefined;
+  childManager: AgentChildManager;
+  model: string;
+}
+
+export async function composeOpenHarnessAgent(
+  options: AgentCompositionOptions,
+  internal: AgentCompositionContext,
+): Promise<AgentComposition> {
+  const cwd = options.cwd ?? process.cwd();
+  const settings = options.settings ?? (await loadSettings({}));
+  const discovery = await discoverOpenHarnessExtensions(cwd, settings);
+  for (const warning of discovery.warnings)
+    process.stderr.write(`[plugins] ${warning}\n`);
+  const runtime = await createOpenHarnessRuntime({
+    settings,
+    cwd,
+    sessionId: options.sessionId,
+    configuration: options,
+    hostCapabilities: {
+      schedules: Boolean(internal.effects.schedules),
+      terminal: Boolean(options.terminal),
+      jobs: true,
+    },
+    skillRegistry: discovery.skillRegistry,
+    agentDefinitions: discovery.agentDefinitions,
+  });
+  try {
+    await configureDiscoveredExtensions(discovery, runtime);
+    for (const extension of options.extensions ?? []) {
+      await extension.setup({
+        cwd,
+        settings,
+        skillRegistry: discovery.skillRegistry,
+        toolRegistry: runtime.toolRegistry,
+        hookExecutor: runtime.hookExecutor,
+      });
+    }
+
+    const mcpManager = new McpClientManager({
+      cwd,
+      settings,
+      sessionId: options.sessionId,
+    });
+    runtime.addCleanup(() => mcpManager.disconnectAll());
+    const mcpServers = options.mcpServers ?? discovery.mcpServers;
+    if (Object.keys(mcpServers).length > 0)
+      await mcpManager.connectAll(mcpServers);
+    for (const tool of mcpManager.getAsToolDefinitions())
+      runtime.toolRegistry.register(tool);
+    runtime.queryEngine.setMcpManager(mcpManager);
+    runtime.queryEngine.setMcpAuth(
+      createMcpAuthHost({
+        settings,
+        mcpManager,
+        toolRegistry: runtime.toolRegistry,
+      }),
+    );
+    runtime.queryEngine.setTerminal(options.terminal);
+
+    const memory =
+      settings.memory?.enabled === false
+        ? undefined
+        : await createAgentMemoryRuntime(cwd, settings.memory?.maxFiles ?? 10);
+    runtime.queryEngine.setMemoryRetriever(
+      memory ? (userInput) => memory.retrieve(userInput) : undefined,
+    );
+
+    const session = createAgentSession({
+      queryEngine: runtime.queryEngine,
+      sessionId: options.sessionId,
+    });
+    const childManager = new AgentChildManager({
+      settings,
+      configuration: options,
+      cwd,
+      idleTtlMs: options.childIdleTtlMs,
+      eventBus: internal.eventBus,
+      directory: internal.childDirectory,
+      environment: options.childEnvironment,
+      createAgent: internal.createAgent,
+    });
+    runtime.queryEngine.setJobs(
+      options.jobs ?? new LocalAgentJobHost(cwd, session.id, childManager),
+    );
+    return {
+      runtime,
+      session,
+      mcpManager,
+      memory,
+      childManager,
+      model: options.model ?? settings.model,
+    };
+  } catch (error) {
+    try {
+      await runtime.close();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Agent creation and cleanup failed",
+      );
+    }
+    throw error;
+  }
+}

@@ -60,6 +60,8 @@ describe("buildExtractionPrompt / parseExtractionRecords", () => {
     expect(records).toHaveLength(1);
     expect(records[0]!.title).toBe("Staging IP");
     expect(records[0]!.memoryType).toBe("reference");
+    expect(records[0]!.scope).toBe("project");
+    expect(records[0]!.description).toBe("");
     expect(records[0]!.tags).toEqual(["infra"]);
 
     expect(parseExtractionRecords("not json at all")).toEqual([]);
@@ -71,6 +73,7 @@ describe("buildExtractionPrompt / parseExtractionRecords", () => {
       memories: Array.from({ length: 5 }, (_, i) => ({ title: `t${i}`, body: `b${i}` })),
     });
     expect(parseExtractionRecords(many, 2)).toHaveLength(2);
+    expect(parseExtractionRecords(many, 10)).toHaveLength(3);
   });
 });
 
@@ -92,6 +95,36 @@ describe("extractMemoriesFromTurn", () => {
     expect(result.writtenIds).toHaveLength(1);
     const entries = await manager.getAll();
     expect(entries.some((e) => e.content.includes("10.0.0.7"))).toBe(true);
+  });
+
+  it("uses the canonical defaults, team filter, and three-record cap", async () => {
+    const manager = new MemoryManager(100);
+    const response =
+      "model preface\n" +
+      JSON.stringify({
+        memories: [
+          { title: "Default", body: "default record", type: "unknown", scope: "unknown" },
+          { title: "Team", body: "shared record", scope: "team" },
+          { title: "Private", body: "private record", type: "reference", scope: "private" },
+          { title: "Fourth", body: "must be capped" },
+        ],
+      }) +
+      "\nmodel epilogue";
+
+    const result = await extractMemoriesFromTurn({
+      apiClient: fakeClient(response),
+      model: "test-model",
+      messages,
+      manager,
+      maxRecords: 10,
+    });
+
+    expect(result.records.map((record) => record.title)).toEqual(["Default", "Team", "Private"]);
+    const entries = await manager.getAll();
+    expect(entries.map((entry) => [entry.name, entry.type, entry.scope])).toEqual([
+      ["Default", "project", "project"],
+      ["Private", "reference", "private"],
+    ]);
   });
 
   it("skips: not enough messages / already wrote memory / nothing proposed / team scope", async () => {

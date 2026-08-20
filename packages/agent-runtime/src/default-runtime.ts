@@ -32,6 +32,7 @@ import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
+import type { AgentDefinition } from "@openharness/coordinator";
 
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 
@@ -66,6 +67,7 @@ interface OpenHarnessRuntimeOptions {
   cwd?: string;
   configuration: OpenHarnessAgentConfiguration;
   skillRegistry?: SkillRegistry;
+  agentDefinitions?: AgentDefinition[];
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
@@ -142,6 +144,7 @@ export async function createOpenHarnessRuntime(
     schedules: options.hostCapabilities?.schedules,
     terminal: options.hostCapabilities?.terminal,
     jobs: options.hostCapabilities?.jobs,
+    agentDefinitions: options.agentDefinitions,
   });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);

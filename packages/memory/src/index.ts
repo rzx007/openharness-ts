@@ -2,6 +2,15 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promises";
 
+export {
+  MAX_MEMORY_EXTRACTION_RECORDS,
+  buildMemoryExtractionPrompt,
+  isMemoryWriteToolCall,
+  parseMemoryExtractionRecords,
+  selectWritableMemoryExtractionRecords,
+  type MemoryExtractionRecord,
+} from "./extraction.js";
+
 // ──────────────────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────────────────

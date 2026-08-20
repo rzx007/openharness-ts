@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { registerPluginAgents } from "@openharness/coordinator";
+import type { AgentDefinition } from "@openharness/coordinator";
 import type {
   IHookExecutor,
   McpServerConfig,
@@ -28,6 +28,7 @@ export interface OpenHarnessAgentExtension {
 export interface OpenHarnessExtensionDiscovery {
   skillRegistry: SkillRegistry;
   plugins: LoadedPlugin[];
+  agentDefinitions: AgentDefinition[];
   warnings: string[];
   mcpServers: Record<string, McpServerConfig>;
 }
@@ -41,7 +42,7 @@ export async function discoverOpenHarnessExtensions(
 
   const { plugins, warnings } = await loadPlugins(settings, cwd);
   const enabledPlugins = plugins.filter((plugin) => plugin.enabled);
-  registerPluginAgents(enabledPlugins.flatMap((plugin) => plugin.agents));
+  const agentDefinitions = enabledPlugins.flatMap((plugin) => plugin.agents);
   for (const plugin of enabledPlugins) {
     for (const skill of plugin.skills) skillRegistry.register(skill);
     for (const command of plugin.commands) {
@@ -75,6 +76,7 @@ export async function discoverOpenHarnessExtensions(
   return {
     skillRegistry,
     plugins,
+    agentDefinitions,
     warnings,
     mcpServers: { ...pluginMcpServers, ...(settings.mcpServers ?? {}) },
   };

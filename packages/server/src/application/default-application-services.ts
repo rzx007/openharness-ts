@@ -973,7 +973,7 @@ export function createDefaultAgentPersonaService(): AgentPersonaService {
   return {
     async list() {
       const { getAllAgentDefinitions } = await import("@openharness/coordinator");
-      const agents = getAllAgentDefinitions();
+      const agents = getAllAgentDefinitions([]);
       return {
         agents: agents.map((agent) => ({
           name: agent.name,

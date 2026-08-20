@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AgentRunNotAcceptingInputError, type Settings } from "@openharness/core";
+import {
+  AgentRunNotAcceptingInputError,
+  RuntimeBundle,
+  type Settings,
+} from "@openharness/core";
+import { McpClientManager } from "@openharness/mcp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentOperationConflictError, createOpenHarnessAgent } from "./agent.js";
@@ -10,6 +15,7 @@ import { AgentOperationConflictError, createOpenHarnessAgent } from "./agent.js"
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -36,6 +42,102 @@ describe("createOpenHarnessAgent", () => {
     expect(agent.inspect().model).toBe("claude-test");
     expect(agent.getUsage()).toEqual(expect.objectContaining({ inputTokens: 0, outputTokens: 0 }));
     await agent.close();
+  });
+
+  it("closes the runtime exactly once and preserves an extension setup failure", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
+    tempDirs.push(cwd);
+    const setupError = new Error("extension setup failed");
+    const runtimeClose = vi.spyOn(RuntimeBundle.prototype, "close");
+
+    const creation = createOpenHarnessAgent({
+      cwd,
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "claude-test",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+      },
+      extensions: [{ setup: () => { throw setupError; } }],
+    });
+
+    await expect(creation).rejects.toBe(setupError);
+    expect(runtimeClose).toHaveBeenCalledOnce();
+  });
+
+  it("disconnects manager-owned MCP resources when connection setup rejects", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
+    tempDirs.push(cwd);
+    const connectionError = new Error("MCP connection setup failed");
+    const resourceClose = vi.fn(async () => {});
+    const runtimeClose = vi.spyOn(RuntimeBundle.prototype, "close");
+    vi.spyOn(McpClientManager.prototype, "connectAll").mockImplementationOnce(
+      async function (servers) {
+        const manager = this as unknown as {
+          connections: Map<string, unknown>;
+          clients: Map<string, { close(): Promise<void> }>;
+        };
+        manager.connections.set("partial", {
+          name: "partial",
+          config: servers.partial,
+          status: "connecting",
+          transport: "stdio",
+          authConfigured: false,
+          tools: [],
+          resources: [],
+        });
+        manager.clients.set("partial", { close: resourceClose });
+        throw connectionError;
+      },
+    );
+
+    const creation = createOpenHarnessAgent({
+      cwd,
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "claude-test",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+      },
+      mcpServers: {
+        partial: { command: "partial-mcp" },
+      },
+    });
+
+    await expect(creation).rejects.toBe(connectionError);
+    expect(resourceClose).toHaveBeenCalledOnce();
+    expect(runtimeClose).toHaveBeenCalledOnce();
+  });
+
+  it("aggregates creation and cleanup failures in original-first order", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
+    tempDirs.push(cwd);
+    const setupError = new Error("extension setup failed");
+    const cleanupError = new Error("runtime cleanup failed");
+    const runtimeClose = vi
+      .spyOn(RuntimeBundle.prototype, "close")
+      .mockRejectedValueOnce(cleanupError);
+
+    const failure = await createOpenHarnessAgent({
+      cwd,
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "claude-test",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+      },
+      extensions: [{ setup: () => { throw setupError; } }],
+    }).catch((error) => error);
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([setupError, cleanupError]);
+    expect(runtimeClose).toHaveBeenCalledOnce();
   });
 
   it("rejects an accepted steer when the run fails before a turn boundary", async () => {

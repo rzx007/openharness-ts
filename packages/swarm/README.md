@@ -9,7 +9,6 @@ This package no longer provides the runtime child-agent backend. Current Agent a
 - Team and mailbox helpers
 - File-backed permission synchronization helpers
 - Team lifecycle helpers
-- Worktree helpers
 
 Removed from the public surface:
 

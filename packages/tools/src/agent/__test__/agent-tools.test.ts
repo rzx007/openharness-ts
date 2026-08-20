@@ -1,6 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
-import { agentTool } from "../index.js";
+import { agentTool, createAgentTool } from "../index.js";
 import type { AgentChildController, AgentExecutionContext } from "@openharness/core";
+import type { AgentDefinition } from "@openharness/coordinator";
 
 type SpawnInput = Parameters<AgentChildController["spawnChildAgent"]>[0];
 type SpawnResult = Awaited<ReturnType<AgentChildController["spawnChildAgent"]>>;
@@ -118,6 +123,60 @@ describe("agentTool framework child controller", () => {
         "TeamDelete",
       ],
     });
+  });
+
+  it("resolves builtin < user < scoped plugin precedence inside each Agent tool", async () => {
+    const configDir = mkdtempSync(
+      join(tmpdir(), "ohs-agent-tool-definitions-"),
+    );
+    const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    process.env.OPENHARNESS_CONFIG_DIR = configDir;
+    mkdirSync(join(configDir, "agents"), { recursive: true });
+    writeFileSync(
+      join(configDir, "agents", "worker.md"),
+      "---\nmodel: user-model\n---\nUser worker prompt.\n",
+    );
+    const pluginWorker: AgentDefinition = {
+      name: "worker",
+      description: "Plugin worker",
+      model: "plugin-model",
+      systemPrompt: "Plugin worker prompt.",
+      source: "plugin",
+    };
+
+    try {
+      const userOnlyTool = createAgentTool({ agentDefinitions: [] });
+      const pluginTool = createAgentTool({ agentDefinitions: [pluginWorker] });
+      const userScope = createAgentContext();
+      const pluginScope = createAgentContext();
+
+      await userOnlyTool.execute(
+        { description: "d", prompt: "implement" },
+        { cwd: "/work", agent: userScope.agent },
+      );
+      await pluginTool.execute(
+        { description: "d", prompt: "implement" },
+        { cwd: "/work", agent: pluginScope.agent },
+      );
+
+      expect(userScope.calls.at(-1)).toMatchObject({
+        agent: "worker",
+        model: "user-model",
+        systemPrompt: "User worker prompt.",
+      });
+      expect(pluginScope.calls.at(-1)).toMatchObject({
+        agent: "worker",
+        model: "plugin-model",
+        systemPrompt: "Plugin worker prompt.",
+      });
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENHARNESS_CONFIG_DIR;
+      } else {
+        process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+      }
+      rmSync(configDir, { recursive: true, force: true });
+    }
   });
 
   it("passes a generated child session id to the host", async () => {

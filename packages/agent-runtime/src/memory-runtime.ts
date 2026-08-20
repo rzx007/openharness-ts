@@ -1,13 +1,13 @@
-import { resolve, isAbsolute, join } from "node:path";
+import { join } from "node:path";
 
 import type { Message, StreamingMessageClient } from "@openharness/core";
 import { getProjectMemoryDir } from "@openharness/core";
 import {
-  DEFAULT_MEMORY_SCOPE,
-  DEFAULT_MEMORY_TYPE,
+  buildMemoryExtractionPrompt,
+  isMemoryWriteToolCall,
   MemoryManager,
-  parseMemoryScope,
-  parseMemoryType,
+  parseMemoryExtractionRecords,
+  selectWritableMemoryExtractionRecords,
 } from "@openharness/memory";
 
 export interface AgentRememberResult {
@@ -53,7 +53,7 @@ export async function createAgentMemoryRuntime(
   };
 }
 
-async function extractMemories(options: {
+export async function extractMemories(options: {
   apiClient: StreamingMessageClient;
   model: string;
   messages: Message[];
@@ -77,17 +77,8 @@ async function extractMemories(options: {
     .slice(0, 80)
     .map((entry) => `- ${entry.name ?? entry.id}: ${(entry.description ?? "").slice(0, 80)}`)
     .join("\n");
-  const transcript = options.messages.slice(-12).map(summarizeMessage).join("\n");
-  const prompt = [
-    "Extract only durable memories from the recent conversation.",
-    "Return JSON with at most 3 records. Existing memory manifest:",
-    manifest || "(empty)",
-    "",
-    "Recent conversation:",
-    transcript,
-    "",
-    'JSON schema: {"memories":[{"title":"...","type":"user|feedback|project|reference","scope":"private|project|team","description":"...","body":"...","tags":["..."]}]}',
-  ].join("\n");
+  const transcript = options.messages.slice(-12).map(summarizeMessage);
+  const prompt = buildMemoryExtractionPrompt(manifest, transcript);
 
   let finalText = "";
   for await (const event of options.apiClient.streamMessage({
@@ -105,17 +96,17 @@ async function extractMemories(options: {
     if (event.type === "complete") break;
   }
 
-  const records = parseRecords(finalText);
+  const records = selectWritableMemoryExtractionRecords(
+    parseMemoryExtractionRecords(finalText),
+  );
   const writtenIds: string[] = [];
   const titles: string[] = [];
   for (const record of records) {
-    const scope = parseMemoryScope(record.scope) ?? DEFAULT_MEMORY_SCOPE;
-    if (scope === "team") continue;
     const entry = await options.manager.add(record.body, record.tags, undefined, {
       name: record.title,
       description: record.description,
-      type: parseMemoryType(record.type) ?? DEFAULT_MEMORY_TYPE,
-      scope,
+      type: record.memoryType,
+      scope: record.scope,
     });
     writtenIds.push(entry.id);
     titles.push(record.title);
@@ -127,16 +118,11 @@ async function extractMemories(options: {
 }
 
 function hasMemoryWrites(messages: Message[], memoryDir: string, cwd: string): boolean {
-  const root = resolve(memoryDir);
   for (const message of messages) {
     if (message.type !== "assistant") continue;
     for (const toolUse of message.toolUses ?? []) {
-      if (toolUse.name !== "Write" && toolUse.name !== "Edit") continue;
       const input = toolUse.input as Record<string, unknown>;
-      const rawPath = String(input.path ?? input.file_path ?? "");
-      if (!rawPath) continue;
-      const resolved = resolve(isAbsolute(rawPath) ? rawPath : join(cwd, rawPath));
-      if (resolved === root || resolved.startsWith(`${root}\\`) || resolved.startsWith(`${root}/`)) {
+      if (isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)) {
         return true;
       }
     }
@@ -156,39 +142,4 @@ function summarizeMessage(message: Message): string {
 
 function summarizeContent(content: Array<{ type: string; text?: string }>): string {
   return content.map((block) => block.type === "text" ? block.text ?? "" : `[${block.type}]`).join(" ");
-}
-
-function parseRecords(text: string): Array<{
-  title: string;
-  body: string;
-  description: string;
-  type: string;
-  scope: string;
-  tags: string[];
-}> {
-  const stripped = text.trim();
-  const start = stripped.indexOf("{");
-  const end = stripped.lastIndexOf("}");
-  if (start < 0 || end <= start) return [];
-  try {
-    const payload = JSON.parse(stripped.slice(start, end + 1)) as { memories?: unknown };
-    if (!Array.isArray(payload.memories)) return [];
-    return payload.memories.slice(0, 3).flatMap((candidate) => {
-      if (!candidate || typeof candidate !== "object") return [];
-      const row = candidate as Record<string, unknown>;
-      const title = String(row.title ?? "").trim();
-      const body = String(row.body ?? "").trim();
-      if (!title || !body) return [];
-      return [{
-        title,
-        body,
-        description: String(row.description ?? "").trim(),
-        type: String(row.type ?? ""),
-        scope: String(row.scope ?? ""),
-        tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag).trim()).filter(Boolean) : [],
-      }];
-    });
-  } catch {
-    return [];
-  }
 }
