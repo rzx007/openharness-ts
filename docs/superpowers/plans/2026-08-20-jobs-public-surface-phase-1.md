@@ -1520,18 +1520,20 @@ This section is the current execution gate and supersedes contradictory examples
 The Task 1 catch-all `errorResponse(400, ...)` example is unsafe and no longer authoritative. The final route must:
 
 1. preserve `SessionTaskError.status` for failures before a process is created;
-2. return 500 for unexpected create or post-create normalization/read failures;
-3. if creation succeeded but normalization failed, stop the created task through `SessionTaskService.stop` before returning the error;
-4. prove missing-session and real-process compensation behavior with focused and server integration tests.
+2. make `SessionTaskService.create` failure-safe after manager spawn: store projection, bridge track/sync, or event publication failure must stop the known manager task before the original error escapes; cleanup failure must include the task ID and both errors;
+3. return 500 for unexpected create or post-create normalization/read failures;
+4. if `create` returned but normalization failed, stop the created task through `SessionTaskService.stop` before returning the error;
+5. prove missing-session, injected post-spawn projection failure, and real post-return normalization compensation behavior with focused and server integration tests.
 
 ### Added final-review test matrix
 
 - busy/submitted main run survives failed `/jobs cancel`, `/agents`, and `/background`;
 - `/stats` and `/doctor` distinguish unavailable Jobs from zero Jobs;
 - direct JobsPanel `r` and Hook refresh both cover selected Workflow detail changes;
-- deferred cancel/send A → select B → resolve A cannot reclaim B's detail, and requests carry AbortSignal;
+- deferred cancel/send A → select B → resolve A cannot reclaim B's detail, requests carry AbortSignal, a validated cancel terminal receipt still enters the list, and receipt-less send performs list-only reconciliation;
 - control/list snapshot reconciliation cannot regress timestamps or terminal status;
 - orphaned UI-only Workflow snapshot/state types are removed while coordinator scheduler and Job detail types remain;
+- real long-running manager tasks stop when SessionTaskService post-spawn store/sync projection fails;
 - shrinking a Jobs list clamps the stored cursor, not only the rendered cursor.
 
 ### Corrected verification gate

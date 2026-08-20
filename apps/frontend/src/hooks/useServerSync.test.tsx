@@ -2289,7 +2289,7 @@ test("useServerSync reads and cancels one Job before refreshing the list", async
   }
 });
 
-test("useServerSync does not let a deferred cancel for Job A reclaim detail after selecting Job B", async () => {
+test("useServerSync merges a deferred cancel receipt for Job A without reclaiming Job B detail", async () => {
   const fixture = workflowJobFixture({ includeSiblingAgent: true, deferCancel: true });
   let captured: TuiSessionController | undefined;
   function Harness() {
@@ -2329,6 +2329,10 @@ test("useServerSync does not let a deferred cancel for Job A reclaim detail afte
       jobId: "agent-2",
       result: { snapshot: { id: "agent-2" } },
     });
+    expect(captured?.jobs).toEqual([
+      expect.objectContaining({ id: "agent-1", status: "killed" }),
+      expect.objectContaining({ id: "agent-2", status: "running" }),
+    ]);
   } finally {
     renderer.destroy();
   }
@@ -2363,6 +2367,8 @@ test("useServerSync does not let a deferred send for Job A reclaim detail after 
       await new Promise((resolve) => setTimeout(resolve, 15));
     });
     expect(fixture.getSendSignal()?.aborted).toBe(true);
+    const listReadsBeforeSendResolution = fixture.requests
+      .filter((request) => request.path.startsWith("/jobs?")).length;
 
     await act(async () => {
       fixture.releaseSend();
@@ -2374,6 +2380,8 @@ test("useServerSync does not let a deferred send for Job A reclaim detail after 
       jobId: "agent-2",
       result: { snapshot: { id: "agent-2" } },
     });
+    expect(fixture.requests.filter((request) => request.path.startsWith("/jobs?")).length)
+      .toBeGreaterThan(listReadsBeforeSendResolution);
   } finally {
     renderer.destroy();
   }

@@ -1176,30 +1176,34 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
                       { signal: controller.signal },
                     );
                   } catch (error) {
-                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) return;
+                    if (activeSessionIdRef.current !== currentSessionId) return;
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) {
+                      await refreshJobs();
+                      return;
+                    }
                     throw error;
                   } finally {
                     if (jobControlAbortRef.current === controller) jobControlAbortRef.current = null;
                   }
-                  if (
-                    controller.signal.aborted ||
-                    activeSessionIdRef.current !== currentSessionId ||
-                    jobControlGenerationRef.current !== controlGeneration
-                  ) return;
+                  if (activeSessionIdRef.current !== currentSessionId) return;
+                  const ownsDetail = !controller.signal.aborted &&
+                    jobControlGenerationRef.current === controlGeneration &&
+                    jobDetailGenerationRef.current === detailGeneration;
                   const validated = validateJobSnapshot(response, currentSessionId, action.job_id);
                   if (!validated.snapshot) {
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) {
+                      await refreshJobs();
+                      return;
+                    }
                     throw new Error(validated.error ?? "Job snapshot has invalid fields.");
                   }
                   const snapshot = validated.snapshot;
-                  setJobState((current) => {
-                    const next = mergeJobSnapshot(current, snapshot, Date.now());
-                    jobStateRef.current = next;
-                    return next;
-                  });
-                  if (jobDetailGenerationRef.current === detailGeneration) {
+                  const next = mergeJobSnapshot(jobStateRef.current, snapshot, Date.now());
+                  jobStateRef.current = next;
+                  setJobState(next);
+                  if (ownsDetail) {
                     await loadJobDetail(client, currentSessionId, action.job_id);
                   }
-                  if (jobControlGenerationRef.current !== controlGeneration) return;
                   await refreshJobs();
                   return;
                 }
@@ -1219,19 +1223,23 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
                       { signal: controller.signal },
                     );
                   } catch (error) {
-                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) return;
+                    if (activeSessionIdRef.current !== currentSessionId) return;
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) {
+                      await refreshJobs();
+                      return;
+                    }
                     throw error;
                   } finally {
                     if (jobControlAbortRef.current === controller) jobControlAbortRef.current = null;
                   }
-                  if (
-                    controller.signal.aborted ||
-                    activeSessionIdRef.current !== currentSessionId ||
-                    jobControlGenerationRef.current !== controlGeneration
-                  ) return;
-                  if (jobDetailGenerationRef.current === detailGeneration) {
+                  if (activeSessionIdRef.current !== currentSessionId) return;
+                  const ownsDetail = !controller.signal.aborted &&
+                    jobControlGenerationRef.current === controlGeneration &&
+                    jobDetailGenerationRef.current === detailGeneration;
+                  if (ownsDetail) {
                     await loadJobDetail(client, currentSessionId, action.job_id);
                   }
+                  await refreshJobs();
                   return;
                 }
               }

@@ -63,18 +63,36 @@ export class SessionTaskService {
       ...(scope.sessionId ? { sessionId: scope.sessionId } : {}),
     });
     if (scope.sessionId) {
-      const before = this.context.events.checkpoint();
-      this.context.store.createSessionTask({
-        id: task.id,
-        sessionId: scope.sessionId,
-        type: task.type,
-        description: task.description,
-        cwd: task.cwd,
-        metadata: { origin: "http", taskManagerId: task.id },
-      });
-      this.context.bridgeManager.trackTask(manager, task.id);
-      this.context.bridgeManager.syncPersistentTask(task, manager);
-      this.context.events.publishSince(before);
+      try {
+        const before = this.context.events.checkpoint();
+        this.context.store.createSessionTask({
+          id: task.id,
+          sessionId: scope.sessionId,
+          type: task.type,
+          description: task.description,
+          cwd: task.cwd,
+          metadata: { origin: "http", taskManagerId: task.id },
+        });
+        this.context.bridgeManager.trackTask(manager, task.id);
+        this.context.bridgeManager.syncPersistentTask(task, manager);
+        this.context.events.publishSince(before);
+      } catch (error) {
+        try {
+          const stopped = await manager.stopTask(task.id);
+          try {
+            this.context.bridgeManager.syncPersistentTask(stopped, manager);
+          } catch {
+            // Process cleanup succeeded. A missing/broken projection must not hide that fact.
+          }
+        } catch (cleanupError) {
+          throw new Error(
+            `Failed to project created session task ${task.id}: ${errorMessage(error)}; ` +
+            `cleanup failed: ${errorMessage(cleanupError)}`,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
     }
     return { task };
   }
@@ -134,4 +152,8 @@ export class SessionTaskService {
     if (!cwd) throw new SessionTaskError(400, "cwd or sessionId is required");
     return { cwd, ...(input.sessionId ? { sessionId: input.sessionId } : {}) };
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

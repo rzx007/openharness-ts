@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { TaskManager } from "@openharness/services";
 
 import { SessionTaskService } from "../session-task-service.js";
 
@@ -85,5 +89,60 @@ describe("SessionTaskService", () => {
     const result = service.get("task-1", { sessionId: "s1" });
 
     expect(result).toMatchObject({ output: "durable output" });
+  });
+
+  it.each(["store", "sync"] as const)(
+    "stops a real long-running task when post-spawn %s projection fails",
+    async (failurePoint) => {
+      const manager = new TaskManager(mkdtempSync(join(tmpdir(), "oh-session-create-cleanup-")));
+      const storeFailure = new Error("store projection failed");
+      const syncFailure = new Error("bridge sync failed");
+      const store = {
+        getSession: vi.fn(() => ({ id: "s1", cwd: process.cwd() })),
+        createSessionTask: vi.fn((input) => {
+          if (failurePoint === "store") throw storeFailure;
+          return { ...input, status: "running", metadata: input.metadata ?? {} };
+        }),
+      };
+      const bridgeManager = {
+        projectManagerTasks: vi.fn(),
+        trackTask: vi.fn(),
+        syncPersistentTask: vi.fn(() => {
+          if (failurePoint === "sync") throw syncFailure;
+        }),
+      };
+      const service = new SessionTaskService({
+        store: store as any,
+        bridgeManager: bridgeManager as any,
+        getTaskManager: () => manager,
+        events: { checkpoint: () => 1, publishSince: vi.fn() },
+      });
+
+      try {
+        await expect(service.create({
+          sessionId: "s1",
+          command: `${process.execPath} -e "setInterval(() => {}, 1000)"`,
+        })).rejects.toBe(failurePoint === "store" ? storeFailure : syncFailure);
+
+        const [task] = manager.listTasks();
+        expect(task).toBeDefined();
+        expect(task?.status).toBe("stopped");
+        await expect(manager.awaitTask(task!.id)).resolves.toMatchObject({ status: "stopped" });
+      } finally {
+        await manager.aclose().catch(() => {});
+      }
+    },
+  );
+
+  it("keeps the projection error as cause when post-spawn cleanup also fails", async () => {
+    const { service, store, manager } = createTaskService();
+    const projectionError = new Error("projection failed");
+    store.createSessionTask.mockImplementation(() => { throw projectionError; });
+    manager.stopTask.mockRejectedValue(new Error("stop failed"));
+
+    await expect(service.create({ sessionId: "s1", command: "pnpm test" })).rejects.toMatchObject({
+      message: expect.stringContaining("projection failed; cleanup failed: stop failed"),
+      cause: projectionError,
+    });
   });
 });
