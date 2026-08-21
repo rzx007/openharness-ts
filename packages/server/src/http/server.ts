@@ -1,7 +1,11 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 
-import { getTaskManager, SessionStore } from "@openharness/services";
+import {
+  getChildAgentExecutionRegistry,
+  getDetachedProcessSupervisor,
+  SessionStore,
+} from "@openharness/services";
 import type { Settings } from "@openharness/core";
 
 import type { CommandCatalogProvider } from "../commands/commands.js";
@@ -157,8 +161,9 @@ export class OpenHarnessHttpServer {
     this.jobs = new DaemonJobService(
       this.store,
       this.terminals,
-      this.daemon.tasks,
-      (scope) => getTaskManager(scope),
+      this.daemon.backgroundShells,
+      (scope) => getDetachedProcessSupervisor(scope),
+      (scope) => getChildAgentExecutionRegistry(scope),
     );
     this.mountRoutes();
   }
@@ -350,7 +355,7 @@ export class OpenHarnessHttpServer {
     this.app.route(
       "/background-shells",
       createBackgroundShellRoutes({
-        tasks: this.daemon.tasks,
+        backgroundShells: this.daemon.backgroundShells,
         jobs: this.jobs,
       }),
     );

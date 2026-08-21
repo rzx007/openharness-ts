@@ -35,7 +35,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
   UpsertMessagePartInput,
   UpdateScheduledRunInput,
@@ -1260,7 +1260,7 @@ export class SessionStore {
     );
   }
 
-  createSessionTask(input: CreateSessionTaskInput): SessionTaskRecord {
+  createSessionTask(input: CreateSessionTaskInput): SessionExecutionRecord {
     const session = assertSession(this.state, input.sessionId);
     const id = input.id ?? randomUUID();
     if (this.state.tasks[id])
@@ -1286,7 +1286,7 @@ export class SessionStore {
       }
     }
     const timestamp = now();
-    const task: SessionTaskRecord = {
+    const task: SessionExecutionRecord = {
       id,
       sessionId: input.sessionId,
       ...(input.childSessionId ? { childSessionId: input.childSessionId } : {}),
@@ -1316,7 +1316,7 @@ export class SessionStore {
   updateSessionTask(
     taskId: string,
     input: UpdateSessionTaskInput,
-  ): SessionTaskRecord {
+  ): SessionExecutionRecord {
     const task = this.state.tasks[taskId];
     if (!task) throw new Error(`Session task not found: ${taskId}`);
     const session = assertSession(this.state, task.sessionId);
@@ -1362,12 +1362,12 @@ export class SessionStore {
     return clone(task);
   }
 
-  getSessionTask(taskId: string): SessionTaskRecord | undefined {
+  getSessionTask(taskId: string): SessionExecutionRecord | undefined {
     const task = this.state.tasks[taskId];
     return task ? clone(task) : undefined;
   }
 
-  listSessionTasks(sessionId: string): SessionTaskRecord[] {
+  listSessionTasks(sessionId: string): SessionExecutionRecord[] {
     assertSession(this.state, sessionId);
     return clone(
       Object.values(this.state.tasks)
@@ -1376,20 +1376,23 @@ export class SessionStore {
     );
   }
 
-  findSessionTaskByManagerTaskId(
+  findSessionExecutionByRuntimeId(
     sessionId: string,
-    taskManagerId: string,
-  ): SessionTaskRecord | undefined {
+    runtimeExecutionId: string,
+  ): SessionExecutionRecord | undefined {
     assertSession(this.state, sessionId);
     const task = Object.values(this.state.tasks).find(
       (candidate) =>
         candidate.sessionId === sessionId &&
-        candidate.metadata.taskManagerId === taskManagerId,
+        (
+          candidate.metadata.runtimeExecutionId === runtimeExecutionId ||
+          candidate.metadata.taskManagerId === runtimeExecutionId
+        ),
     );
     return task ? clone(task) : undefined;
   }
 
-  /** A daemon restart cannot retain TaskManager callbacks or process handles. */
+  /** A daemon restart cannot retain child Agent callbacks or detached process handles. */
   interruptActiveSessionTasks(
     reason = "Daemon restarted before the task completed",
   ): number {
@@ -1762,7 +1765,7 @@ export class SessionStore {
     for (const row of this.database
       .prepare("SELECT * FROM session_task")
       .all() as Array<Record<string, unknown>>) {
-      const task: SessionTaskRecord = {
+      const task: SessionExecutionRecord = {
         id: row.id as string,
         sessionId: row.session_id as string,
         ...(row.child_session_id
@@ -1770,7 +1773,7 @@ export class SessionStore {
           : {}),
         ...(row.run_id ? { runId: row.run_id as string } : {}),
         type: row.type as string,
-        status: row.status as SessionTaskRecord["status"],
+        status: row.status as SessionExecutionRecord["status"],
         description: row.description as string,
         cwd: row.cwd as string,
         ...(row.output ? { output: row.output as string } : {}),

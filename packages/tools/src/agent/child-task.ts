@@ -1,12 +1,12 @@
 import type { AgentChildController } from "@openharness/core";
-import type { AwaitTaskResult } from "@openharness/services";
+import type { AwaitExecutionResult } from "@openharness/services";
 
 export async function awaitFrameworkChildTask(
   children: AgentChildController,
   taskId: string,
   timeoutMs?: number,
-): Promise<AwaitTaskResult> {
-  const completion = children.awaitChildAgent(taskId).then((result): AwaitTaskResult => ({
+): Promise<AwaitExecutionResult> {
+  const completion = children.awaitChildAgent(taskId).then((result): AwaitExecutionResult => ({
     status: result.status === "interrupted" ? "stopped" : result.status,
     output: result.output || result.error || "",
   }));
@@ -16,7 +16,7 @@ export async function awaitFrameworkChildTask(
   try {
     return await Promise.race([
       completion,
-      new Promise<AwaitTaskResult>((resolve) => {
+      new Promise<AwaitExecutionResult>((resolve) => {
         timer = setTimeout(
           () => resolve({ status: "running", output: "", timedOut: true }),
           Math.max(0, timeoutMs),

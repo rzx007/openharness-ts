@@ -41,14 +41,14 @@ describe("DaemonAgentEventProjector", () => {
       appendEvent: vi.fn(),
     };
     const bridge = {
-      registerSessionTask: vi.fn((input) => {
+      registerChildExecution: vi.fn((input) => {
         tasks.set(input.id, { id: input.id, status: "pending" });
         return { id: input.id };
       }),
-      bindSessionTaskRun: vi.fn(async (id, runId) => {
+      bindChildExecutionRun: vi.fn(async (id, runId) => {
         Object.assign(tasks.get(id), { status: "running", runId });
       }),
-      completeSessionTask: vi.fn(async (id, result) => {
+      completeChildExecution: vi.fn(async (id, result) => {
         Object.assign(tasks.get(id), { status: result.status, output: result.output });
       }),
     };
@@ -75,7 +75,7 @@ describe("DaemonAgentEventProjector", () => {
       rootAgent,
       store: store as any,
       transcriptProjection: transcript as any,
-      taskBridgeManager: { createBridge: vi.fn(() => bridge) } as any,
+      executionProjector: { createBridge: vi.fn(() => bridge) } as any,
       liveChildren,
       events,
       log: vi.fn(),
@@ -92,7 +92,7 @@ describe("DaemonAgentEventProjector", () => {
       delivery: "queue",
       metadata: { requestedBy: "test" },
     }, { sessionId: "child-session", inputId: "input-1", runId: "run-1", childId: "child-1" }));
-    bridge.bindSessionTaskRun.mockRejectedValueOnce(new Error("bind failed"));
+    bridge.bindChildExecutionRun.mockRejectedValueOnce(new Error("bind failed"));
     const started = event("run.started", {}, {
       sessionId: "child-session",
       inputId: "input-1",
@@ -102,7 +102,7 @@ describe("DaemonAgentEventProjector", () => {
     await expect(projector.apply(started)).rejects.toThrow("bind failed");
     expect(transcript.finalizeRunParts).toHaveBeenCalledWith("child-session", "run-1", "failed");
     expect(store.updateRun).toHaveBeenCalledWith("run-1", { status: "failed", error: "bind failed" });
-    expect(bridge.completeSessionTask).toHaveBeenCalledWith("child-1", {
+    expect(bridge.completeChildExecution).toHaveBeenCalledWith("child-1", {
       status: "failed",
       output: "bind failed",
     });
@@ -134,13 +134,13 @@ describe("DaemonAgentEventProjector", () => {
       id: "input-1",
       metadata: expect.objectContaining({ requestedBy: "test" }),
     }));
-    expect(bridge.registerSessionTask).toHaveBeenCalledWith(expect.objectContaining({ id: "child-1" }));
+    expect(bridge.registerChildExecution).toHaveBeenCalledWith(expect.objectContaining({ id: "child-1" }));
     expect(liveChildren.register).toHaveBeenCalledWith("child-session", "child-1", rootAgent);
     expect(transcript.projectStreamEvent).toHaveBeenCalledWith(expect.anything(), { type: "text_delta", delta: "done" });
     expect(events.publish).toHaveBeenCalledWith(liveDelta);
-    expect(bridge.bindSessionTaskRun).toHaveBeenCalledTimes(2);
+    expect(bridge.bindChildExecutionRun).toHaveBeenCalledTimes(2);
     expect(store.updateRun).toHaveBeenLastCalledWith("run-2", { status: "completed" });
-    expect(bridge.completeSessionTask).toHaveBeenCalledWith("child-1", { status: "completed", output: "done" });
+    expect(bridge.completeChildExecution).toHaveBeenCalledWith("child-1", { status: "completed", output: "done" });
   });
 
   it("compensates durable child state when live route registration fails", async () => {
@@ -165,16 +165,16 @@ describe("DaemonAgentEventProjector", () => {
       getSessionTask: vi.fn((id) => tasks.get(id)),
       appendEvent: vi.fn(),
     };
-    const completeSessionTask = vi.fn(async (id, result) => {
+    const completeChildExecution = vi.fn(async (id, result) => {
       Object.assign(tasks.get(id), { status: result.status, output: result.output });
     });
     const bridge = {
-      registerSessionTask: vi.fn((input) => {
+      registerChildExecution: vi.fn((input) => {
         const task = { id: input.id, status: "pending" };
         tasks.set(task.id, task);
         return task;
       }),
-      completeSessionTask,
+      completeChildExecution,
     };
     const liveChildren = {
       register: vi.fn(() => { throw new Error("route conflict"); }),
@@ -184,7 +184,7 @@ describe("DaemonAgentEventProjector", () => {
       rootAgent: { children: { get: vi.fn() } } as any,
       store: store as any,
       transcriptProjection: {} as any,
-      taskBridgeManager: { createBridge: vi.fn(() => bridge) } as any,
+      executionProjector: { createBridge: vi.fn(() => bridge) } as any,
       liveChildren,
       events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
       log: vi.fn(),
@@ -197,7 +197,7 @@ describe("DaemonAgentEventProjector", () => {
       cwd: "/repo",
     }, { sessionId: "parent", childId: "child-bad" }))).rejects.toThrow("route conflict");
 
-    expect(completeSessionTask).toHaveBeenCalledWith("child-bad", {
+    expect(completeChildExecution).toHaveBeenCalledWith("child-bad", {
       status: "failed",
       output: "route conflict",
     });
@@ -220,7 +220,7 @@ describe("DaemonAgentEventProjector", () => {
       rootAgent: { children: { get: vi.fn() } } as any,
       store: store as any,
       transcriptProjection: {} as any,
-      taskBridgeManager: {} as any,
+      executionProjector: {} as any,
       liveChildren: {} as any,
       events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
       log: vi.fn(),
@@ -244,7 +244,7 @@ describe("DaemonAgentEventProjector", () => {
       rootAgent: { children: { get: vi.fn() } } as any,
       store: store as any,
       transcriptProjection: {} as any,
-      taskBridgeManager: {} as any,
+      executionProjector: {} as any,
       liveChildren: {} as any,
       events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
       log: vi.fn(),
@@ -272,7 +272,7 @@ describe("DaemonAgentEventProjector", () => {
         })),
       } as any,
       transcriptProjection: {} as any,
-      taskBridgeManager: {} as any,
+      executionProjector: {} as any,
       liveChildren: {} as any,
       events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
       log: vi.fn(),
@@ -288,7 +288,7 @@ describe("DaemonAgentEventProjector", () => {
   });
 
   it("retains and retries child close projection state after durable completion fails", async () => {
-    const completeSessionTask = vi.fn()
+    const completeChildExecution = vi.fn()
       .mockRejectedValueOnce(new Error("store unavailable"))
       .mockRejectedValueOnce(new Error("store still unavailable"))
       .mockResolvedValueOnce(undefined);
@@ -301,7 +301,7 @@ describe("DaemonAgentEventProjector", () => {
       rootAgent: { children: { get: vi.fn() } } as any,
       store: store as any,
       transcriptProjection: {} as any,
-      taskBridgeManager: {} as any,
+      executionProjector: {} as any,
       liveChildren: liveChildren as any,
       events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
       log: vi.fn(),
@@ -311,7 +311,7 @@ describe("DaemonAgentEventProjector", () => {
       sessionId: "child-session",
       parentSessionId: "parent",
       taskId: "child-1",
-      bridge: { completeSessionTask },
+      bridge: { completeChildExecution },
     });
 
     const closed = event("child.closed", {
@@ -326,7 +326,7 @@ describe("DaemonAgentEventProjector", () => {
 
     await projector.apply(closed);
 
-    expect(completeSessionTask).toHaveBeenCalledTimes(3);
+    expect(completeChildExecution).toHaveBeenCalledTimes(3);
     expect(store.appendEvent).toHaveBeenCalledOnce();
     expect((projector as any).children.size).toBe(0);
   });
@@ -342,7 +342,7 @@ describe("DaemonAgentEventProjector", () => {
         updateRun,
       } as any,
       transcriptProjection: {} as any,
-      taskBridgeManager: {} as any,
+      executionProjector: {} as any,
       liveChildren: {} as any,
       events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
       log: vi.fn(),

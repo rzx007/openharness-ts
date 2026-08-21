@@ -14,7 +14,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
 } from "../types/index.js";
 
@@ -123,7 +123,7 @@ export function applyEvent(
       break;
     case "session.task.created":
     case "session.task.updated":
-      next = upsertTask(next, readPayloadRecord<SessionTaskRecord>(event, "task"));
+      next = upsertTask(next, readPayloadRecord<SessionExecutionRecord>(event, "task"));
       break;
     case "permission.asked":
     case "permission.replied":
@@ -314,7 +314,7 @@ function upsertPermission(
   return { ...state, buckets: { ...state.buckets, [request.sessionId]: bucket } };
 }
 
-function upsertTask(state: OpenHarnessClientState, task: SessionTaskRecord | undefined): OpenHarnessClientState {
+function upsertTask(state: OpenHarnessClientState, task: SessionExecutionRecord | undefined): OpenHarnessClientState {
   if (!task) return state;
   const bucket = cloneBucket(state.buckets[task.sessionId]);
   bucket.tasks = { ...bucket.tasks, [task.id]: task };

@@ -15,7 +15,7 @@ import {
   type WorkflowSpec,
   type WorkflowTemplateName,
 } from "@openharness/coordinator";
-import { getTaskManager } from "@openharness/services";
+import { getDetachedProcessSupervisor } from "@openharness/services";
 
 interface CwdOption {
   cwd?: string;
@@ -126,7 +126,7 @@ export function createWorkflowCommand(): Command {
 
   cmd
     .command("cancel")
-    .description("Cancel a persisted running workflow and stop backing TaskManager tasks")
+    .description("Cancel a persisted running workflow and stop its detached worker processes")
     .argument("[runId]", "Workflow run id. Defaults to latest run")
     .option("--cwd <dir>", "Project working directory")
     .option("--reason <reason>", "Cancellation reason")
@@ -136,7 +136,7 @@ export function createWorkflowCommand(): Command {
       const result = await cancelPersistentWorkflow(snapshot, {
         store,
         reason: options.reason,
-        stopTask: (taskId) => getTaskManager().stopTask(taskId),
+        stopTask: (taskId) => getDetachedProcessSupervisor().stopExecution(taskId),
       });
       printJson(createWorkflowNotification(result));
     });

@@ -144,7 +144,7 @@ skill 经 command catalog 以 template 形式出现。
 
 | 工具                              | 说明                                                  |
 | --------------------------------- | ----------------------------------------------------- |
-| `TaskCreate`                      | 创建后台 shell，并返回 `jobId`                        |
+| `BackgroundShellCreate`                      | 创建后台 shell，并返回 `jobId`                        |
 | `JobList` / `JobRead` / `JobWait` | 统一列出、读取和等待 Terminal、shell、Agent、Workflow |
 | `JobSend` / `JobCancel`           | 给可交互 Job 输入，或明确停止 Job                     |
 

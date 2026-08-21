@@ -54,7 +54,7 @@ export type {
   SessionMessageRole,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
   SessionTaskStatus,
   SessionStatus,
   SessionStateSnapshot,

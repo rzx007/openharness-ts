@@ -10,7 +10,7 @@
 - **LspClient**: 代码智能服务 (stub；ripgrep 查询走统一 Sandbox argv 入口)
 - **CompactService**: 双层压缩
 
-外部工作负载进程不在 services 内直接 `spawn/exec`：`TaskManager`、autodream 和 LSP 查询统一委托 `@openharness/sandbox`。跨端 durable task 与 Scheduled Task 状态仍由 daemon `SessionStore` 持久化。
+外部工作负载进程不在 services 内直接 `spawn/exec`：`DetachedProcessSupervisor`、autodream 和 LSP 查询统一委托 `@openharness/sandbox`。framework child Agent 的回调句柄只放在 `ChildAgentExecutionRegistry`；跨端执行投影与 Scheduled Task 状态仍由 daemon `SessionStore` 持久化。
 
 ## 使用
 

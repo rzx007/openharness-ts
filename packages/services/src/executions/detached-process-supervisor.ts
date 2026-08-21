@@ -11,16 +11,14 @@ import {
   type SandboxPolicy,
 } from "@openharness/sandbox";
 import type {
-  AwaitTaskResult,
-  CompleteSessionTaskInput,
-  CompletionListener,
-  CreateAgentTaskOptions,
-  CreateShellTaskOptions,
-  RegisterSessionTaskOptions,
-  TaskEvent,
-  TaskInfo,
-  TaskListener,
-  TaskStatus,
+  AwaitExecutionResult,
+  DetachedProcessExecution,
+  ExecutionEvent,
+  ExecutionStatus,
+  ProcessCompletionListener,
+  ProcessExecutionListener,
+  StartAgentProcessOptions,
+  StartShellExecutionOptions,
 } from "./types.js";
 
 const MAX_OUTPUT_BYTES = 12_000;
@@ -36,22 +34,16 @@ interface RunState {
 }
 
 /**
- * Manage shell and agent subprocess tasks with streaming output, stdin writes,
- * completion listeners, automatic agent restart, and graceful shutdown.
- *
- * Mirrors the Python `BackgroundTaskManager` (openharness v0.1.9). Public
- * positional methods (`createShellTask`/`createAgentTask`/...) stay
- * backward-compatible with existing TS callers; richer behaviour is exposed
- * through the options-object overloads.
+ * Supervise locally spawned non-PTY shell, dream, and explicit Agent processes.
+ * Framework child Agent handles live in ChildAgentExecutionRegistry instead.
  */
-export class TaskManager {
-  private tasks = new Map<string, TaskInfo>();
+export class DetachedProcessSupervisor {
+  private executions = new Map<string, DetachedProcessExecution>();
   private states = new Map<string, RunState>();
   private generations = new Map<string, number>();
   private writeChains = new Map<string, Promise<void>>();
-  private completionListeners = new Map<string, CompletionListener>();
-  private taskListeners = new Map<string, TaskListener>();
-  private sessionTaskCallbacks = new Map<string, Pick<RegisterSessionTaskOptions, "onInput" | "onStop">>();
+  private completionListeners = new Map<string, ProcessCompletionListener>();
+  private executionListeners = new Map<string, ProcessExecutionListener>();
   private idCounter = 0;
   private readonly tasksDir: string;
   private taskSettings = new Map<string, Settings>();
@@ -68,33 +60,34 @@ export class TaskManager {
   /**
    * Start a background shell task.
    *
-   * Backward-compatible positional form: `createShellTask(command, description, cwd)`.
+   * Positional form: `startShellExecution(command, description, cwd)`.
    * Options form supports `argv` (direct-exec, no shell) and `env`.
    */
-  async createShellTask(command: string, description: string, cwd: string): Promise<TaskInfo>;
-  async createShellTask(options: CreateShellTaskOptions): Promise<TaskInfo>;
-  async createShellTask(
-    commandOrOptions: string | CreateShellTaskOptions,
+  async startShellExecution(command: string, description: string, cwd: string): Promise<DetachedProcessExecution>;
+  async startShellExecution(options: StartShellExecutionOptions): Promise<DetachedProcessExecution>;
+  async startShellExecution(
+    commandOrOptions: string | StartShellExecutionOptions,
     description?: string,
     cwd?: string,
-  ): Promise<TaskInfo> {
-    const opts: CreateShellTaskOptions =
+  ): Promise<DetachedProcessExecution> {
+    const opts: StartShellExecutionOptions =
       typeof commandOrOptions === "string"
         ? { command: commandOrOptions, description: description!, cwd: cwd! }
         : commandOrOptions;
 
     if (opts.command == null && opts.argv == null) {
-      throw new Error("createShellTask requires either command or argv");
+      throw new Error("startShellExecution requires either command or argv");
     }
     if (opts.command != null && opts.argv != null) {
-      throw new Error("createShellTask accepts only one of command or argv");
+      throw new Error("startShellExecution accepts only one of command or argv");
     }
 
     const id = opts.id ?? `task_${++this.idCounter}`;
-    if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
+    if (this.executions.has(id)) throw new Error(`Execution already exists: ${id}`);
     const outputFile = join(this.tasksDir, `${id}.log`);
-    const task: TaskInfo = {
+    const task: DetachedProcessExecution = {
       id,
+      backend: "detached_process",
       type: opts.type ?? "shell",
       status: "running",
       description: opts.description,
@@ -110,10 +103,10 @@ export class TaskManager {
     };
     this.ensureTasksDir();
     writeFileSync(outputFile, "");
-    this.tasks.set(id, task);
+    this.executions.set(id, task);
     if (opts.settings) this.taskSettings.set(id, opts.settings);
     if (opts.policy) this.taskPolicies.set(id, opts.policy);
-    this.notifyTaskEvent(task, "created");
+    this.notifyExecutionEvent(task, "created");
     try {
       await this.startProcess(id);
     } catch (error) {
@@ -136,7 +129,7 @@ export class TaskManager {
   /**
    * Start a local agent task as a subprocess.
    *
-   * Backward-compatible positional form: `createAgentTask(prompt, description, cwd, model?)`.
+   * Positional form: `startAgentProcess(prompt, description, cwd, model?)`.
    *
    * The agent's concrete command is the swarm's responsibility (Phase D): this
    * manager only spawns whatever `argv`/`command` it is handed and wires it
@@ -145,20 +138,20 @@ export class TaskManager {
    * `failed` with `metadata.needs_argv = "1"` and a clear log line, so callers
    * (and the eventual swarm dispatcher) get an explicit, observable signal.
    */
-  async createAgentTask(
+  async startAgentProcess(
     prompt: string,
     description: string,
     cwd: string,
     model?: string,
-  ): Promise<TaskInfo>;
-  async createAgentTask(options: CreateAgentTaskOptions): Promise<TaskInfo>;
-  async createAgentTask(
-    promptOrOptions: string | CreateAgentTaskOptions,
+  ): Promise<DetachedProcessExecution>;
+  async startAgentProcess(options: StartAgentProcessOptions): Promise<DetachedProcessExecution>;
+  async startAgentProcess(
+    promptOrOptions: string | StartAgentProcessOptions,
     description?: string,
     cwd?: string,
     model?: string,
-  ): Promise<TaskInfo> {
-    const opts: CreateAgentTaskOptions =
+  ): Promise<DetachedProcessExecution> {
+    const opts: StartAgentProcessOptions =
       typeof promptOrOptions === "string"
         ? { prompt: promptOrOptions, description: description!, cwd: cwd!, model }
         : promptOrOptions;
@@ -167,15 +160,16 @@ export class TaskManager {
     // don't go silently pending either: register an explicit failed record.
     if (opts.command == null && opts.argv == null) {
       const id = opts.id ?? `task_${++this.idCounter}`;
-      if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
+      if (this.executions.has(id)) throw new Error(`Execution already exists: ${id}`);
       const outputFile = join(this.tasksDir, `${id}.log`);
       this.ensureTasksDir();
       const message =
         "Agent task requires argv or command to spawn a subprocess " +
         "(swarm dispatch is not wired yet — Phase D).\n";
       writeFileSync(outputFile, message);
-      const task: TaskInfo = {
+      const task: DetachedProcessExecution = {
         id,
+        backend: "detached_process",
         type: opts.type ?? "agent",
         status: "failed",
         description: opts.description,
@@ -187,13 +181,13 @@ export class TaskManager {
         finishedAt: Date.now(),
         metadata: { needs_argv: "1", status_note: "Missing argv/command for agent task" },
       };
-      this.tasks.set(id, task);
-      this.notifyTaskEvent(task, "created");
+      this.executions.set(id, task);
+      this.notifyExecutionEvent(task, "created");
       await this.notifyCompletion(task);
       return task;
     }
 
-    const task = await this.createShellTask({
+    const task = await this.startShellExecution({
       command: opts.command,
       argv: opts.argv,
       description: opts.description,
@@ -206,84 +200,26 @@ export class TaskManager {
     });
     task.prompt = opts.prompt;
     // Forward the prompt to the freshly spawned agent over stdin.
-    await this.writeToTask(task.id, opts.prompt);
-    return task;
-  }
-
-  registerSessionTask(options: RegisterSessionTaskOptions): TaskInfo {
-    const id = options.id ?? `task_${++this.idCounter}`;
-    if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
-    const outputFile = join(this.tasksDir, `${id}.log`);
-    this.ensureTasksDir();
-    writeFileSync(outputFile, "");
-    const task: TaskInfo = {
-      id,
-      type: "agent",
-      status: "running",
-      description: options.description,
-      cwd: options.cwd,
-      sessionId: options.sessionId,
-      prompt: options.prompt,
-      outputFile,
-      createdAt: Date.now(),
-      startedAt: Date.now(),
-      metadata: { child_session_id: options.childSessionId },
-    };
-    this.tasks.set(id, task);
-    this.sessionTaskCallbacks.set(id, {
-      onInput: options.onInput,
-      onStop: options.onStop,
-    });
-    this.notifyTaskEvent(task, "created");
-    return task;
-  }
-
-  async completeSessionTask(taskId: string, input: CompleteSessionTaskInput): Promise<TaskInfo> {
-    const task = this.tasks.get(taskId);
-    if (!task || !this.sessionTaskCallbacks.has(taskId)) {
-      throw new Error(`Session task not found: ${taskId}`);
-    }
-    if (task.outputFile) writeFileSync(task.outputFile, input.output);
-    task.status = input.status;
-    task.exitCode = input.status === "completed" ? 0 : 1;
-    task.finishedAt = Date.now();
-    await this.notifyCompletion(task);
-    return task;
-  }
-
-  beginSessionTask(taskId: string): TaskInfo {
-    const task = this.tasks.get(taskId);
-    if (!task || !this.sessionTaskCallbacks.has(taskId)) {
-      throw new Error(`Session task not found: ${taskId}`);
-    }
-    const reopening = task.status !== "running";
-    task.status = "running";
-    if (reopening) {
-      task.startedAt = Date.now();
-      if (task.outputFile) writeFileSync(task.outputFile, "");
-      delete task.finishedAt;
-      delete task.exitCode;
-    }
-    this.notifyTaskEvent(task, "updated");
+    await this.writeInput(task.id, opts.prompt);
     return task;
   }
 
   // ── queries ─────────────────────────────────────────────
 
-  getTask(taskId: string): TaskInfo | undefined {
-    return this.tasks.get(taskId);
+  getExecution(executionId: string): DetachedProcessExecution | undefined {
+    return this.executions.get(executionId);
   }
 
-  listTasks(status?: string): TaskInfo[] {
-    const all = [...this.tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
+  listExecutions(status?: string): DetachedProcessExecution[] {
+    const all = [...this.executions.values()].sort((a, b) => b.createdAt - a.createdAt);
     if (status) return all.filter((t) => t.status === status);
     return all;
   }
 
   /** Return the tail of a task's output log. */
-  readTaskOutput(taskId: string, maxBytes = MAX_OUTPUT_BYTES): string {
-    const task = this.tasks.get(taskId);
-    if (!task) throw new Error(`Task not found: ${taskId}`);
+  readOutput(executionId: string, maxBytes = MAX_OUTPUT_BYTES): string {
+    const task = this.executions.get(executionId);
+    if (!task) throw new Error(`Execution not found: ${executionId}`);
     let content = "";
     if (task.outputFile && existsSync(task.outputFile)) {
       content = readFileSync(task.outputFile, "utf-8");
@@ -299,51 +235,22 @@ export class TaskManager {
    * that contain embedded newlines are wrapped as a single JSON `{text}` line so
    * a readline-based worker protocol can consume them atomically.
    */
-  async writeToTask(taskId: string, data: string): Promise<void> {
-    const task = this.tasks.get(taskId);
-    if (!task) throw new Error(`Task not found: ${taskId}`);
-    const sessionCallbacks = this.sessionTaskCallbacks.get(taskId);
-    if (sessionCallbacks) {
-      const previous = {
-        status: task.status,
-        startedAt: task.startedAt,
-        finishedAt: task.finishedAt,
-        exitCode: task.exitCode,
-        output: task.outputFile && existsSync(task.outputFile)
-          ? readFileSync(task.outputFile, "utf-8")
-          : undefined,
-      };
-      this.beginSessionTask(taskId);
-      try {
-        await sessionCallbacks.onInput(data);
-      } catch (error) {
-        if (task.status === "running") {
-          task.status = previous.status;
-          task.startedAt = previous.startedAt;
-          task.finishedAt = previous.finishedAt;
-          task.exitCode = previous.exitCode;
-          if (task.outputFile && previous.output !== undefined) {
-            writeFileSync(task.outputFile, previous.output);
-          }
-          this.notifyTaskEvent(task, "updated");
-        }
-        throw error;
-      }
-      return;
-    }
+  async writeInput(executionId: string, data: string): Promise<void> {
+    const task = this.executions.get(executionId);
+    if (!task) throw new Error(`Execution not found: ${executionId}`);
     const payload = encodeWorkerPayload(data);
 
     // Serialize writes per task so frames never interleave.
-    const prev = this.writeChains.get(taskId) ?? Promise.resolve();
+    const prev = this.writeChains.get(executionId) ?? Promise.resolve();
     const next = prev.then(() => this.doWrite(task, payload));
     this.writeChains.set(
-      taskId,
+      executionId,
       next.catch(() => {}),
     );
     return next;
   }
 
-  private async doWrite(task: TaskInfo, payload: string): Promise<void> {
+  private async doWrite(task: DetachedProcessExecution, payload: string): Promise<void> {
     let state = this.states.get(task.id);
     const writable = state?.child.stdin && !state.child.stdin.destroyed && state.child.exitCode === null;
     if (!writable) {
@@ -351,8 +258,8 @@ export class TaskManager {
         throw new Error(`Task ${task.id} does not accept input`);
       }
       // Lazily resurrect the dead agent before writing (restart limit enforced
-      // inside restartAgentTask).
-      state = await this.restartAgentTask(task);
+      // inside restartAgentProcess).
+      state = await this.restartAgentProcess(task);
     }
     const stdin = state!.child.stdin!;
     try {
@@ -361,49 +268,39 @@ export class TaskManager {
       // Broken pipe mid-write: restart the agent once and retry (still bounded
       // by the restart limit). Non-agent tasks just propagate the error.
       if (task.type !== "agent") throw err;
-      const restarted = await this.restartAgentTask(task);
+      const restarted = await this.restartAgentProcess(task);
       await writeToStdin(restarted.child.stdin!, payload);
     }
   }
 
   // ── stop / shutdown ─────────────────────────────────────
 
-  /** Terminate a running task: SIGTERM, then SIGKILL after a grace period. */
-  async stopTask(taskId: string): Promise<TaskInfo> {
-    const task = this.tasks.get(taskId);
-    if (!task) throw new Error(`Task not found: ${taskId}`);
-    const sessionCallbacks = this.sessionTaskCallbacks.get(taskId);
-    if (sessionCallbacks) {
-      if (isTerminal(task.status)) return task;
-      await sessionCallbacks.onStop();
-      task.status = "stopped";
-      task.exitCode = 1;
-      task.finishedAt = Date.now();
-      await this.notifyCompletion(task);
-      return task;
-    }
-    const state = this.states.get(taskId);
+  /** Terminate a running process: graceful signal, then forced tree cleanup. */
+  async stopExecution(executionId: string): Promise<DetachedProcessExecution> {
+    const task = this.executions.get(executionId);
+    if (!task) throw new Error(`Execution not found: ${executionId}`);
+    const state = this.states.get(executionId);
     if (!state) {
       if (task.status === "completed" || task.status === "failed" || task.status === "stopped") {
         return task;
       }
-      throw new Error(`Task ${taskId} is not running`);
+      throw new Error(`Execution ${executionId} is not running`);
     }
 
     // Mark stopped first so the exit watcher does not overwrite the status.
     task.status = "stopped";
     task.finishedAt = Date.now();
     // Bump generation so the watcher ignores this child's exit transition.
-    this.generations.set(taskId, (this.generations.get(taskId) ?? 0) + 1);
+    this.generations.set(executionId, (this.generations.get(executionId) ?? 0) + 1);
 
     await terminateProcess(state.child, STOP_GRACE_MS);
-    this.states.delete(taskId);
+    this.states.delete(executionId);
     await this.notifyCompletion(task);
     return task;
   }
 
   /** Register a completion listener; returns an unregister callback. */
-  registerCompletionListener(listener: CompletionListener): () => void {
+  registerCompletionListener(listener: ProcessCompletionListener): () => void {
     const id = `listener_${Math.random().toString(36).slice(2)}_${Date.now()}`;
     this.completionListeners.set(id, listener);
     return () => {
@@ -417,11 +314,11 @@ export class TaskManager {
    * unregister callback. Listeners receive an immutable snapshot; a throwing
    * listener is isolated from the others.
    */
-  registerTaskListener(listener: TaskListener): () => void {
+  registerExecutionListener(listener: ProcessExecutionListener): () => void {
     const id = `tasklistener_${Math.random().toString(36).slice(2)}_${Date.now()}`;
-    this.taskListeners.set(id, listener);
+    this.executionListeners.set(id, listener);
     return () => {
-      this.taskListeners.delete(id);
+      this.executionListeners.delete(id);
     };
   }
 
@@ -437,19 +334,19 @@ export class TaskManager {
    *   both cleaned up to avoid leaks.
    * - Unknown `taskId` → throws.
    */
-  awaitTask(taskId: string, opts?: { timeoutMs?: number }): Promise<AwaitTaskResult> {
-    const task = this.tasks.get(taskId);
-    if (!task) throw new Error(`Task not found: ${taskId}`);
+  awaitExecution(executionId: string, opts?: { timeoutMs?: number }): Promise<AwaitExecutionResult> {
+    const task = this.executions.get(executionId);
+    if (!task) throw new Error(`Execution not found: ${executionId}`);
 
     if (isTerminal(task.status)) {
       return Promise.resolve({
         status: task.status,
-        output: this.readTaskOutput(taskId),
+        output: this.readOutput(executionId),
         exitCode: task.exitCode,
       });
     }
 
-    return new Promise<AwaitTaskResult>((resolve) => {
+    return new Promise<AwaitExecutionResult>((resolve) => {
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       // Forward-declared so cleanup can reference the unregister handle even
@@ -465,25 +362,25 @@ export class TaskManager {
       };
 
       unregister = this.registerCompletionListener((finished) => {
-        if (settled || finished.id !== taskId) return;
+        if (settled || finished.id !== executionId) return;
         settled = true;
         cleanup();
         resolve({
           status: finished.status,
-          output: this.readTaskOutput(taskId),
+          output: this.readOutput(executionId),
           exitCode: finished.exitCode,
         });
       });
 
       // Late-binding guard: if the task became terminal between the snapshot
       // above and the listener registration, resolve from current state.
-      const now = this.tasks.get(taskId);
+      const now = this.executions.get(executionId);
       if (now && isTerminal(now.status) && !settled) {
         settled = true;
         cleanup();
         resolve({
           status: now.status,
-          output: this.readTaskOutput(taskId),
+          output: this.readOutput(executionId),
           exitCode: now.exitCode,
         });
         return;
@@ -494,10 +391,10 @@ export class TaskManager {
           if (settled) return;
           settled = true;
           cleanup();
-          const current = this.tasks.get(taskId);
+          const current = this.executions.get(executionId);
           resolve({
             status: current?.status ?? "running",
-            output: this.readTaskOutput(taskId),
+            output: this.readOutput(executionId),
             exitCode: current?.exitCode,
             timedOut: true,
           });
@@ -545,7 +442,7 @@ export class TaskManager {
   }
 
   private async startProcess(taskId: string): Promise<RunState> {
-    const task = this.tasks.get(taskId)!;
+    const task = this.executions.get(taskId)!;
     if (task.command == null && task.argv == null) {
       throw new Error(`Task ${taskId} does not have a command or argv to run`);
     }
@@ -616,7 +513,7 @@ export class TaskManager {
   ): Promise<void> {
     // Stale watcher (task was restarted or explicitly stopped).
     if (this.generations.get(taskId) !== generation) return;
-    const task = this.tasks.get(taskId);
+    const task = this.executions.get(taskId);
     if (!task) return;
 
     const exitCode = code ?? 1;
@@ -625,7 +522,7 @@ export class TaskManager {
     // non-zero exit" loop, this mirrors Python's `_watch_process`: a dead
     // process is just marked completed/failed and never proactively restarted.
     // Agent tasks are resurrected lazily, only when something tries to write to
-    // a dead agent's stdin (see `doWrite` -> `restartAgentTask`).
+    // a dead agent's stdin (see `doWrite` -> `restartAgentProcess`).
     task.exitCode = exitCode;
     if (task.status !== "stopped") {
       task.status = exitCode === 0 ? "completed" : "failed";
@@ -644,7 +541,7 @@ export class TaskManager {
    * Python's `_restart_agent_task`, which awaits the prior waiter), so we never
    * leak an un-reaped subprocess.
    */
-  private async restartAgentTask(task: TaskInfo): Promise<RunState> {
+  private async restartAgentProcess(task: DetachedProcessExecution): Promise<RunState> {
     if (task.command == null && task.argv == null) {
       throw new Error(`Task ${task.id} does not have a restart command or argv`);
     }
@@ -680,8 +577,8 @@ export class TaskManager {
     return this.startProcess(task.id);
   }
 
-  private async notifyCompletion(task: TaskInfo): Promise<void> {
-    const snapshot: TaskInfo = { ...task, metadata: { ...task.metadata } };
+  private async notifyCompletion(task: DetachedProcessExecution): Promise<void> {
+    const snapshot: DetachedProcessExecution = { ...task, metadata: { ...task.metadata } };
     for (const listener of [...this.completionListeners.values()]) {
       try {
         await listener(snapshot);
@@ -692,18 +589,18 @@ export class TaskManager {
     // Terminal state is also a lifecycle event: drive the (symmetric) task
     // listeners from the same chokepoint so the two notification paths can
     // never diverge. Reuse the same immutable snapshot.
-    this.notifyTaskEvent(snapshot, "completed");
+    this.notifyExecutionEvent(snapshot, "completed");
   }
 
   /**
-   * Fan a lifecycle event out to every registered {@link TaskListener} using an
+   * Fan a lifecycle event out to every registered process-execution listener using an
    * immutable snapshot. A throwing listener is isolated and never blocks the
    * others. Synchronous on purpose so `created` fires before the caller of a
    * create method observes the returned task.
    */
-  private notifyTaskEvent(task: TaskInfo, event: TaskEvent): void {
-    const snapshot: TaskInfo = { ...task, metadata: { ...task.metadata } };
-    for (const listener of [...this.taskListeners.values()]) {
+  private notifyExecutionEvent(task: DetachedProcessExecution, event: ExecutionEvent): void {
+    const snapshot: DetachedProcessExecution = { ...task, metadata: { ...task.metadata } };
+    for (const listener of [...this.executionListeners.values()]) {
       try {
         const r = listener(snapshot, event);
         // A listener may be async; swallow its rejection so it can't surface as
@@ -722,7 +619,7 @@ export class TaskManager {
 // ── helpers ───────────────────────────────────────────────
 
 /** A task in a terminal state will receive no further status transitions. */
-function isTerminal(status: TaskStatus): boolean {
+function isTerminal(status: ExecutionStatus): boolean {
   return status === "completed" || status === "failed" || status === "stopped";
 }
 

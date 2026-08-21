@@ -18,26 +18,29 @@ import {
   type JobWaitRequest,
   type JobWaitResult,
 } from "@openharness/jobs";
-import type { SessionRecord, SessionTaskRecord } from "@openharness/services/session-runtime/types";
+import type { SessionRecord, SessionExecutionRecord } from "@openharness/services/session-runtime/types";
 import type { TerminalSessionInfo } from "@openharness/terminal";
 
 import type { DaemonTerminalService } from "../terminal/index.js";
 
 interface JobTaskProjection {
-  list(input: { sessionId: string }): { tasks: unknown[] };
-  stop(taskId: string, input: { sessionId: string }): Promise<{ task: unknown }>;
+  list(input: { sessionId: string }): { executions: unknown[] };
 }
 
 interface JobSessionStore {
   getSession(sessionId: string): SessionRecord | undefined;
-  listSessionTasks(sessionId: string): SessionTaskRecord[];
-  getSessionTask(taskId: string): SessionTaskRecord | undefined;
+  listSessionTasks(sessionId: string): SessionExecutionRecord[];
+  getSessionTask(taskId: string): SessionExecutionRecord | undefined;
+  updateSessionTask(taskId: string, input: {
+    status: "stopped";
+    output?: string;
+  }): SessionExecutionRecord;
 }
 
-interface JobTaskManager {
-  readTaskOutput(taskId: string): string;
-  writeToTask(taskId: string, data: string): Promise<void>;
-  stopTask(taskId: string): Promise<unknown>;
+interface JobExecutionRuntime {
+  readOutput(executionId: string): string;
+  writeInput(executionId: string, data: string): Promise<void>;
+  stopExecution(executionId: string): Promise<unknown>;
 }
 
 const POLL_INTERVAL_MS = 50;
@@ -47,8 +50,13 @@ export class DaemonJobService {
   constructor(
     private readonly store: JobSessionStore,
     private readonly terminals: DaemonTerminalService,
-    private readonly tasks: JobTaskProjection,
-    private readonly getTaskManager: (scope: { cwd: string; sessionId: string }) => JobTaskManager,
+    private readonly backgroundShells: JobTaskProjection,
+    private readonly getDetachedProcessSupervisor: (
+      scope: { cwd: string; sessionId: string },
+    ) => JobExecutionRuntime,
+    private readonly getChildAgentExecutionRegistry: (
+      scope: { cwd: string; sessionId: string },
+    ) => JobExecutionRuntime,
   ) {}
 
   createAgentHost(session: SessionRecord): AgentJobHost {
@@ -63,7 +71,7 @@ export class DaemonJobService {
 
   async list(input: JobListRequest): Promise<JobSnapshot[]> {
     const session = this.requireSession(input.sessionId);
-    this.tasks.list({ sessionId: session.id });
+    this.backgroundShells.list({ sessionId: session.id });
     const terminals = await this.terminals.list({ sessionId: session.id, source: "agent" });
     const tasks = this.store.listSessionTasks(session.id);
     const workflows = new WorkflowRunStore({ cwd: session.cwd })
@@ -154,8 +162,8 @@ export class DaemonJobService {
       if (!taskAcceptsInput(source.value)) {
         throw new Error(`Job ${input.jobId} does not accept input.`);
       }
-      const manager = this.managerFor(input.sessionId);
-      await manager.writeToTask(managerTaskId(source.value), input.data);
+      const runtime = this.runtimeFor(source.value);
+      await runtime.writeInput(runtimeExecutionId(source.value), input.data);
       return;
     }
     throw new Error(`Workflow ${input.jobId} does not accept input.`);
@@ -168,16 +176,23 @@ export class DaemonJobService {
       return terminalSnapshot(await this.terminals.get(source.value.id));
     }
     if (source.kind === "task") {
-      await this.tasks.stop(source.value.id, { sessionId: input.sessionId });
-      return taskSnapshot(this.store.getSessionTask(source.value.id) ?? source.value);
+      const runtime = this.runtimeFor(source.value);
+      await runtime.stopExecution(runtimeExecutionId(source.value));
+      let output: string | undefined;
+      try { output = runtime.readOutput(runtimeExecutionId(source.value)); } catch { /* durable output is optional */ }
+      const stopped = this.store.updateSessionTask(source.value.id, {
+        status: "stopped",
+        ...(output !== undefined ? { output } : {}),
+      });
+      return taskSnapshot(stopped);
     }
     const session = this.requireSession(input.sessionId);
-    const manager = this.managerFor(input.sessionId);
+    const manager = this.processSupervisorFor(input.sessionId);
     const store = new WorkflowRunStore({ cwd: session.cwd });
     await cancelPersistentWorkflow(source.value, {
       store,
       reason: input.reason,
-      stopTask: async (taskId) => await manager.stopTask(taskId),
+      stopTask: async (taskId) => await manager.stopExecution(taskId),
     });
     return workflowSnapshot(store.load(source.value.runId)!, session.cwd);
   }
@@ -193,14 +208,22 @@ export class DaemonJobService {
     return session;
   }
 
-  private managerFor(sessionId: string) {
+  private processSupervisorFor(sessionId: string) {
     const session = this.requireSession(sessionId);
-    return this.getTaskManager({ cwd: session.cwd, sessionId });
+    return this.getDetachedProcessSupervisor({ cwd: session.cwd, sessionId });
   }
 
-  private readTaskOutput(task: SessionTaskRecord): string {
+  private runtimeFor(task: SessionExecutionRecord): JobExecutionRuntime {
+    const session = this.requireSession(task.sessionId);
+    const scope = { cwd: session.cwd, sessionId: task.sessionId };
+    return executionBackend(task) === "child_agent"
+      ? this.getChildAgentExecutionRegistry(scope)
+      : this.getDetachedProcessSupervisor(scope);
+  }
+
+  private readTaskOutput(task: SessionExecutionRecord): string {
     try {
-      return this.managerFor(task.sessionId).readTaskOutput(managerTaskId(task));
+      return this.runtimeFor(task).readOutput(runtimeExecutionId(task));
     } catch {
       return task.output ?? "";
     }
@@ -208,11 +231,11 @@ export class DaemonJobService {
 
   private async resolve(sessionId: string, jobId: string): Promise<
     | { kind: "terminal"; value: TerminalSessionInfo }
-    | { kind: "task"; value: SessionTaskRecord }
+    | { kind: "task"; value: SessionExecutionRecord }
     | { kind: "workflow"; value: WorkflowRunSnapshot; cwd: string }
   > {
     this.requireSession(sessionId);
-    this.tasks.list({ sessionId });
+    this.backgroundShells.list({ sessionId });
     const terminal = (await this.terminals.list({ sessionId, source: "agent" }))
       .find((candidate) => candidate.id === jobId);
     if (terminal) return { kind: "terminal", value: terminal };
@@ -243,7 +266,7 @@ function terminalSnapshot(terminal: TerminalSessionInfo): JobSnapshot {
   };
 }
 
-function taskSnapshot(task: SessionTaskRecord): JobSnapshot {
+function taskSnapshot(task: SessionExecutionRecord): JobSnapshot {
   return {
     id: task.id,
     kind: taskKind(task.type),
@@ -291,18 +314,26 @@ function taskKind(type: string): JobKind {
   return type === "shell" || type === "dream" ? type : "agent";
 }
 
-function taskStatus(status: SessionTaskRecord["status"]): JobStatus {
+function taskStatus(status: SessionExecutionRecord["status"]): JobStatus {
   if (status === "completed" || status === "failed") return status;
   if (status === "stopped" || status === "interrupted") return "killed";
   return "running";
 }
 
-function taskAcceptsInput(task: SessionTaskRecord): boolean {
+function taskAcceptsInput(task: SessionExecutionRecord): boolean {
   return task.type === "agent" && task.status !== "stopped" && task.status !== "interrupted";
 }
 
-function managerTaskId(task: SessionTaskRecord): string {
-  return typeof task.metadata.taskManagerId === "string" ? task.metadata.taskManagerId : task.id;
+function runtimeExecutionId(task: SessionExecutionRecord): string {
+  if (typeof task.metadata.runtimeExecutionId === "string") return task.metadata.runtimeExecutionId;
+  if (typeof task.metadata.taskManagerId === "string") return task.metadata.taskManagerId;
+  return task.id;
+}
+
+function executionBackend(task: SessionExecutionRecord): "detached_process" | "child_agent" {
+  if (task.metadata.executionBackend === "child_agent") return "child_agent";
+  if (task.metadata.executionBackend === "detached_process") return "detached_process";
+  return task.metadata.origin === "child_session" ? "child_agent" : "detached_process";
 }
 
 function formatWorkflowOutput(workflow: WorkflowRunSnapshot): string {

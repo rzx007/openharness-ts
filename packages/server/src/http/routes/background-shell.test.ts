@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionTaskError } from "../session/index.js";
+import { BackgroundShellError } from "../session/background-shell-service.js";
 import { createBackgroundShellRoutes } from "./background-shell.js";
 
 describe("background shell routes", () => {
   it("creates a shell and returns its normalized Job snapshot", async () => {
-    const create = vi.fn(async () => ({ task: { id: "task-1" } }));
+    const create = vi.fn(async () => ({ execution: { id: "task-1" } }));
     const read = vi.fn(async () => ({
       text: "",
       cursor: 1,
@@ -22,7 +22,7 @@ describe("background shell routes", () => {
         updatedAt: 1,
       },
     }));
-    const app = createBackgroundShellRoutes({ tasks: { create, stop: vi.fn() }, jobs: { read } });
+    const app = createBackgroundShellRoutes({ backgroundShells: { create, stop: vi.fn() }, jobs: { read } });
 
     const response = await app.request("/", {
       method: "POST",
@@ -49,7 +49,7 @@ describe("background shell routes", () => {
     [{ sessionId: "s1", command: "   " }, "command is required"],
   ])("rejects invalid input %#", async (body, message) => {
     const app = createBackgroundShellRoutes({
-      tasks: { create: vi.fn(), stop: vi.fn() },
+      backgroundShells: { create: vi.fn(), stop: vi.fn() },
       jobs: { read: vi.fn() },
     });
     const response = await app.request("/", {
@@ -61,10 +61,10 @@ describe("background shell routes", () => {
     await expect(response.json()).resolves.toMatchObject({ error: message });
   });
 
-  it("preserves a SessionTaskError status before a shell is created", async () => {
+  it("preserves a BackgroundShellError status before a shell is created", async () => {
     const app = createBackgroundShellRoutes({
-      tasks: {
-        create: vi.fn(async () => { throw new SessionTaskError(404, "Session not found"); }),
+      backgroundShells: {
+        create: vi.fn(async () => { throw new BackgroundShellError(404, "Session not found"); }),
         stop: vi.fn(),
       },
       jobs: { read: vi.fn() },
@@ -81,10 +81,10 @@ describe("background shell routes", () => {
   });
 
   it("stops a created shell and returns 500 when Job normalization fails", async () => {
-    const stop = vi.fn(async () => ({ task: { id: "task-1", status: "stopped" } }));
+    const stop = vi.fn(async () => ({ execution: { id: "task-1", status: "stopped" } }));
     const app = createBackgroundShellRoutes({
-      tasks: {
-        create: vi.fn(async () => ({ task: { id: "task-1" } })),
+      backgroundShells: {
+        create: vi.fn(async () => ({ execution: { id: "task-1" } })),
         stop,
       },
       jobs: {

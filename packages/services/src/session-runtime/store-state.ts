@@ -8,7 +8,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
 } from "./types.js";
 
 export interface SessionState {
@@ -19,7 +19,7 @@ export interface SessionState {
   parts: Record<string, SessionMessagePartRecord>;
   events: SessionEventRecord[];
   runs: Record<string, SessionRunRecord>;
-  tasks: Record<string, SessionTaskRecord>;
+  tasks: Record<string, SessionExecutionRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }
 

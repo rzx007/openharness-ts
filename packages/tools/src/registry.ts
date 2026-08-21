@@ -46,7 +46,7 @@ import {
 } from "./schedule/index.js";
 import { grepTool, lspTool } from "./search/index.js";
 import { bashTool } from "./shell/index.js";
-import { taskCreateTool } from "./task/index.js";
+import { backgroundShellCreateTool } from "./background-shell/index.js";
 import { webFetchTool, webSearchTool } from "./web/index.js";
 import { terminalTools } from "./terminal/index.js";
 import { jobTools } from "./job/index.js";
@@ -75,7 +75,7 @@ export function createDefaultToolRegistry(
   registry.register(toolSearchTool);
   registry.register(askUserTool);
   registry.register(briefTool);
-  registry.register(taskCreateTool);
+  registry.register(backgroundShellCreateTool);
   registry.register(enterPlanModeTool);
   registry.register(exitPlanModeTool);
   registry.register(enterWorktreeTool);

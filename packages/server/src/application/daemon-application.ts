@@ -8,7 +8,11 @@ import {
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
 import type { SessionRecord } from "@openharness/services";
-import { getTaskManager, type SessionStore } from "@openharness/services";
+import {
+  getChildAgentExecutionRegistry,
+  getDetachedProcessSupervisor,
+  type SessionStore,
+} from "@openharness/services";
 
 import {
   createDaemonAgentLoader,
@@ -37,8 +41,8 @@ import { SessionMaintenanceService } from "../http/session/session-maintenance-s
 import { SessionQueryService } from "../http/session/session-query-service.js";
 import { SessionRunEngine } from "../http/session/session-run-engine.js";
 import { SessionRunExecutor } from "../http/session/session-run-executor.js";
-import { SessionTaskBridgeManager } from "../http/session/session-task-bridge.js";
-import { SessionTaskService } from "../http/session/session-task-service.js";
+import { SessionExecutionProjector } from "../http/session/session-execution-projector.js";
+import { BackgroundShellService } from "../http/session/background-shell-service.js";
 import { SessionTranscriptProjection } from "../http/session/transcript-projection.js";
 import { recoverInterruptedWorkflows } from "../http/session/workflow-recovery.js";
 
@@ -58,7 +62,7 @@ export interface DaemonApplicationOptions {
 /** Daemon-owned durable application graph, independent from HTTP routing and listening. */
 export class DaemonApplication {
   readonly permissions: StorePermissionBroker;
-  readonly tasks: SessionTaskService;
+  readonly backgroundShells: BackgroundShellService;
   readonly sessions: SessionApplicationService;
   readonly maintenance: SessionMaintenanceService;
   readonly queries: SessionQueryService;
@@ -67,7 +71,7 @@ export class DaemonApplication {
 
   private readonly events: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
-  private readonly taskBridges: SessionTaskBridgeManager;
+  private readonly executionProjector: SessionExecutionProjector;
   private readonly liveChildren = new LiveChildAgentDirectory();
   private readonly operationGate = new DaemonOperationGate();
   private readonly agentPool: AgentPool;
@@ -89,17 +93,17 @@ export class DaemonApplication {
       logger: options.log,
     });
     this.transcriptProjection = new SessionTranscriptProjection(store);
-    this.taskBridges = new SessionTaskBridgeManager({
+    this.executionProjector = new SessionExecutionProjector({
       store,
-      getTaskManager: (scope) => getTaskManager(scope),
+      getChildAgentExecutionRegistry: (scope) => getChildAgentExecutionRegistry(scope),
       events: this.events,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: options.log,
     });
-    this.tasks = new SessionTaskService({
+    this.backgroundShells = new BackgroundShellService({
       store,
-      bridgeManager: this.taskBridges,
-      getTaskManager: (scope) => getTaskManager(scope),
+      executionProjector: this.executionProjector,
+      getDetachedProcessSupervisor: (scope) => getDetachedProcessSupervisor(scope),
       events: this.events,
     });
 
@@ -135,7 +139,7 @@ export class DaemonApplication {
           rootAgent: agent,
           store,
           transcriptProjection: this.transcriptProjection,
-          taskBridgeManager: this.taskBridges,
+          executionProjector: this.executionProjector,
           liveChildren: this.liveChildren,
           events: this.events,
           log: options.log,

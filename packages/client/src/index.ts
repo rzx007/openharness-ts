@@ -104,7 +104,7 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
   SessionUsageResponse,
   StartDreamResponse,

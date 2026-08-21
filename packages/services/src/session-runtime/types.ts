@@ -118,8 +118,8 @@ export interface SessionRunRecord {
   updatedAt: number;
 }
 
-/** Daemon-owned task projection. Execution handles stay in TaskManager and are never persisted. */
-export interface SessionTaskRecord {
+/** Daemon-owned execution projection. Live handles stay in their backend runtime and are never persisted. */
+export interface SessionExecutionRecord {
   id: string;
   sessionId: string;
   childSessionId?: string;
@@ -158,7 +158,7 @@ export interface SessionStateSnapshot {
   messages: SessionMessageRecord[];
   parts: SessionMessagePartRecord[];
   runs: SessionRunRecord[];
-  tasks?: SessionTaskRecord[];
+  tasks?: SessionExecutionRecord[];
   permissions: PermissionRequestRecord[];
 }
 

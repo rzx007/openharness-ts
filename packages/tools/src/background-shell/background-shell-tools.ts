@@ -1,8 +1,8 @@
 import type { ToolDefinition } from "@openharness/core";
 
-export const taskCreateTool: ToolDefinition = {
-  name: "TaskCreate",
-  description: "Start a background shell job. Use JobRead, JobWait, and JobCancel with the returned jobId.",
+export const backgroundShellCreateTool: ToolDefinition = {
+  name: "BackgroundShellCreate",
+  description: "Start a detached background shell process. Use JobRead, JobWait, and JobCancel with the returned jobId.",
   inputSchema: {
     type: "object",
     properties: {
@@ -16,7 +16,7 @@ export const taskCreateTool: ToolDefinition = {
       return {
         content: [{
           type: "text",
-          text: "TaskCreate only creates background shell jobs. Use Agent to create a child agent.",
+          text: "BackgroundShellCreate only creates detached shell processes. Use Agent to create a child agent.",
         }],
         isError: true,
       };
@@ -27,8 +27,11 @@ export const taskCreateTool: ToolDefinition = {
     if ("error" in command) return failed(command.error);
 
     try {
-      const { getTaskManager } = await import("@openharness/services");
-      const task = await getTaskManager({ cwd: context.cwd, sessionId: context.sessionId }).createShellTask({
+      const { getDetachedProcessSupervisor } = await import("@openharness/services/executions");
+      const execution = await getDetachedProcessSupervisor({
+        cwd: context.cwd,
+        sessionId: context.sessionId,
+      }).startShellExecution({
         command: command.value,
         description: description.value,
         cwd: context.cwd,
@@ -41,9 +44,9 @@ export const taskCreateTool: ToolDefinition = {
           text: JSON.stringify({
             kind: "job",
             action: "created",
-            jobId: task.id,
+            jobId: execution.id,
             jobKind: "shell",
-            label: task.description,
+            label: execution.description,
           }),
         }],
       };

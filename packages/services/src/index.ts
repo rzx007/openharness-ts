@@ -55,7 +55,7 @@ export type {
   SessionMessageRole,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
   SessionTaskStatus,
   SessionStatus,
   SessionStateSnapshot,
@@ -96,18 +96,31 @@ export type { TokenEstimate } from "./token-estimation";
 export { LspClient } from "./lsp";
 export type { LspServerConfig } from "./lsp";
 
-export { TaskManager, getTaskManager, resetTaskManager } from "./tasks";
+export {
+  ChildAgentExecutionRegistry,
+  DetachedProcessSupervisor,
+  getChildAgentExecutionRegistry,
+  getDetachedProcessSupervisor,
+  resetExecutionRuntimes,
+} from "./executions";
 export type {
-  TaskInfo,
-  TaskType,
-  TaskStatus,
-  CompletionListener,
-  TaskListener,
-  TaskEvent,
-  AwaitTaskResult,
-  CreateShellTaskOptions,
-  CreateAgentTaskOptions,
-} from "./tasks";
+  AwaitExecutionResult,
+  ChildAgentExecution,
+  ChildAgentExecutionListener,
+  CompleteChildAgentExecutionInput,
+  DetachedProcessExecution,
+  ExecutionBackend,
+  ExecutionEvent,
+  ExecutionRuntimeScope,
+  ExecutionSnapshot,
+  ExecutionStatus,
+  ExecutionType,
+  ProcessCompletionListener,
+  ProcessExecutionListener,
+  RegisterChildAgentExecutionOptions,
+  StartAgentProcessOptions,
+  StartShellExecutionOptions,
+} from "./executions";
 
 export {
   DEFAULT_TOOL_OUTPUT_INLINE_CHARS,

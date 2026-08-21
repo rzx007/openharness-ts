@@ -21,7 +21,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 } from "@openharness/services";
@@ -41,7 +41,7 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 };
@@ -394,7 +394,7 @@ export interface SessionBucket {
   messages: SessionMessageRecord[];
   partsByMessageId: Record<string, SessionMessagePartRecord[]>;
   runs: Record<string, SessionRunRecord>;
-  tasks: Record<string, SessionTaskRecord>;
+  tasks: Record<string, SessionExecutionRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }
 

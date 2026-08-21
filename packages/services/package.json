@@ -13,9 +13,9 @@
       "import": "./src/memory-extract.ts",
       "types": "./src/memory-extract.ts"
     },
-    "./tasks": {
-      "import": "./src/tasks/index.ts",
-      "types": "./src/tasks/index.ts"
+    "./executions": {
+      "import": "./src/executions/index.ts",
+      "types": "./src/executions/index.ts"
     },
     "./session-runtime/types": {
       "import": "./src/session-runtime/types.ts",

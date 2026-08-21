@@ -1,4 +1,4 @@
-import type { SessionTaskRecord } from "@openharness/services";
+import type { SessionExecutionRecord } from "@openharness/services";
 import type { TerminalSessionInfo } from "@openharness/terminal";
 import { describe, expect, it, vi } from "vitest";
 
@@ -19,14 +19,17 @@ const terminal: TerminalSessionInfo = {
   createdAt: "2026-08-17T00:00:00.000Z",
 };
 
-const task: SessionTaskRecord = {
+const task: SessionExecutionRecord = {
   id: "task-1",
   sessionId: "session-1",
   type: "agent",
   status: "running",
   description: "review",
   cwd: "/repo",
-  metadata: { taskManagerId: "manager-1" },
+  metadata: {
+    executionBackend: "child_agent",
+    runtimeExecutionId: "manager-1",
+  },
   createdAt: 10,
   startedAt: 11,
   updatedAt: 12,
@@ -92,7 +95,7 @@ describe("DaemonJobService", () => {
       jobId: projected.id,
       data: "continue",
     })).rejects.toThrow("does not accept input");
-    expect(manager.writeToTask).not.toHaveBeenCalled();
+    expect(manager.writeInput).not.toHaveBeenCalled();
   });
 
   it.each(["pending", "running", "completed", "failed"] as const)(
@@ -107,7 +110,7 @@ describe("DaemonJobService", () => {
         data: "continue",
       });
 
-      expect(manager.writeToTask).toHaveBeenCalledWith("manager-1", "continue");
+      expect(manager.writeInput).toHaveBeenCalledWith("manager-1", "continue");
       await expect(service.list({ sessionId: "session-1" })).resolves.toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: projected.id, capabilities: expect.objectContaining({ send: true }) }),
@@ -117,11 +120,15 @@ describe("DaemonJobService", () => {
   );
 });
 
-function createService(projectedTask: SessionTaskRecord = task) {
+function createService(projectedTask: SessionExecutionRecord = task) {
   const store = {
     getSession: vi.fn((id: string) => id === "session-1" ? { id, cwd: "/repo" } : undefined),
     listSessionTasks: vi.fn(() => [projectedTask]),
     getSessionTask: vi.fn((id: string) => id === projectedTask.id ? projectedTask : undefined),
+    updateSessionTask: vi.fn((_id: string, input: Record<string, unknown>) => ({
+      ...projectedTask,
+      ...input,
+    })),
   };
   const terminals = {
     list: vi.fn(async () => [terminal]),
@@ -132,16 +139,21 @@ function createService(projectedTask: SessionTaskRecord = task) {
     wait: vi.fn(),
   };
   const projection = {
-    list: vi.fn(() => ({ tasks: [projectedTask] })),
-    stop: vi.fn(async () => ({ task: projectedTask })),
+    list: vi.fn(() => ({ executions: [projectedTask] })),
   };
   const manager = {
-    readTaskOutput: vi.fn(() => "task output"),
-    writeToTask: vi.fn(async () => undefined),
-    stopTask: vi.fn(async () => projectedTask),
+    readOutput: vi.fn(() => "task output"),
+    writeInput: vi.fn(async () => undefined),
+    stopExecution: vi.fn(async () => projectedTask),
   };
   return {
-    service: new DaemonJobService(store as any, terminals as any, projection, () => manager),
+    service: new DaemonJobService(
+      store as any,
+      terminals as any,
+      projection,
+      () => manager,
+      () => manager,
+    ),
     store,
     terminals,
     projection,

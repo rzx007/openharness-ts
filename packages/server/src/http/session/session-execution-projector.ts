@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 
-export interface SessionTaskBridge {
-  registerSessionTask(input: {
+export interface SessionChildExecutionBridge {
+  registerChildExecution(input: {
     id: string;
     description: string;
     cwd: string;
@@ -14,14 +14,14 @@ export interface SessionTaskBridge {
     onInput(data: string): Promise<void>;
     onStop(): Promise<void>;
   }): { id: string };
-  bindSessionTaskRun(taskId: string, runId: string): Promise<void>;
-  completeSessionTask(
+  bindChildExecutionRun(taskId: string, runId: string): Promise<void>;
+  completeChildExecution(
     taskId: string,
     input: { status: "completed" | "failed" | "stopped" | "interrupted"; output: string },
   ): Promise<unknown>;
 }
 
-export interface TaskInfo {
+export interface ExecutionInfo {
   id: string;
   type: string;
   status: string;
@@ -32,20 +32,22 @@ export interface TaskInfo {
 
 type DurableTaskStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
 
-export interface TaskManager {
-  beginSessionTask(taskId: string): TaskInfo;
-  completeSessionTask(
+export interface ChildAgentRegistry {
+  beginExecution(taskId: string): ExecutionInfo;
+  completeExecution(
     taskId: string,
     input: { status: "completed" | "failed" | "stopped"; output: string },
   ): Promise<unknown>;
-  listTasks(status?: string): TaskInfo[];
-  readTaskOutput(taskId: string): string;
-  registerSessionTask(input: Parameters<SessionTaskBridge["registerSessionTask"]>[0]): TaskInfo;
-  registerTaskListener(listener: (task: TaskInfo) => void): void;
-  writeToTask(taskId: string, data: string): Promise<void>;
+  registerChildExecution(input: Parameters<SessionChildExecutionBridge["registerChildExecution"]>[0]): ExecutionInfo;
 }
 
-export type TaskManagerFactory = (scope: { cwd: string; sessionId: string }) => TaskManager;
+export interface DetachedProcessRuntime {
+  listExecutions(status?: string): ExecutionInfo[];
+  readOutput(executionId: string): string;
+  registerExecutionListener(listener: (execution: ExecutionInfo) => void): void;
+}
+
+export type ChildAgentRegistryFactory = (scope: { cwd: string; sessionId: string }) => ChildAgentRegistry;
 
 interface SessionTaskStore {
   createSessionTask(input: {
@@ -57,7 +59,7 @@ interface SessionTaskStore {
     cwd: string;
     metadata: Record<string, unknown>;
   }): unknown;
-  findSessionTaskByManagerTaskId(sessionId: string, managerTaskId: string): {
+  findSessionExecutionByRuntimeId(sessionId: string, runtimeExecutionId: string): {
     id: string;
     sessionId: string;
   } | undefined;
@@ -75,27 +77,27 @@ interface SessionTaskStore {
   }): { sessionId: string };
 }
 
-export interface SessionTaskBridgeManagerContext {
+export interface SessionExecutionProjectorContext {
   store: SessionTaskStore;
-  getTaskManager: TaskManagerFactory;
+  getChildAgentExecutionRegistry: ChildAgentRegistryFactory;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   traceIdForRun(runId: string): string;
   log(event: ObservabilityEvent): void;
 }
 
 /**
- * 为每个 session 生成 SessionTaskBridge：把进程内 TaskManager 与 store 的
- * SessionTask 投影对齐（register/complete/bindRun），供 child session / Agent 使用。
+ * 为每个 session 生成 bridge：把 framework child Agent registry 与 store 的
+ * SessionTask 持久化投影对齐。后台进程由 projectProcessExecutions 单独投影。
  */
-export class SessionTaskBridgeManager {
+export class SessionExecutionProjector {
   private readonly trackedTasks = new WeakMap<object, Set<string>>();
 
-  constructor(private readonly context: SessionTaskBridgeManagerContext) {}
+  constructor(private readonly context: SessionExecutionProjectorContext) {}
 
-  createBridge(session: { id: string; cwd: string }): SessionTaskBridge {
-    const manager = this.context.getTaskManager({ cwd: session.cwd, sessionId: session.id });
+  createBridge(session: { id: string; cwd: string }): SessionChildExecutionBridge {
+    const registry = this.context.getChildAgentExecutionRegistry({ cwd: session.cwd, sessionId: session.id });
     return {
-      registerSessionTask: (input) => {
+      registerChildExecution: (input) => {
         const before = this.context.events.checkpoint();
         this.context.store.createSessionTask({
           id: input.id,
@@ -104,11 +106,16 @@ export class SessionTaskBridgeManager {
           type: "agent",
           description: input.description,
           cwd: input.cwd,
-          metadata: { origin: "child_session", agent: input.description, taskManagerId: input.id },
+          metadata: {
+            origin: "child_session",
+            agent: input.description,
+            executionBackend: "child_agent",
+            runtimeExecutionId: input.id,
+          },
         });
-        let task: TaskInfo;
+        let task: ExecutionInfo;
         try {
-          task = manager.registerSessionTask(input);
+          task = registry.registerChildExecution(input);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           this.context.store.updateSessionTask(input.id, {
@@ -128,9 +135,9 @@ export class SessionTaskBridgeManager {
         this.context.events.publishSince(before);
         return { id: task.id };
       },
-      bindSessionTaskRun: async (taskId, runId) => {
+      bindChildExecutionRun: async (taskId, runId) => {
         const before = this.context.events.checkpoint();
-        manager.beginSessionTask(taskId);
+        registry.beginExecution(taskId);
         const task = this.context.store.updateSessionTask(taskId, { status: "running", runId });
         this.context.log({
           level: "info",
@@ -142,14 +149,14 @@ export class SessionTaskBridgeManager {
         });
         this.context.events.publishSince(before);
       },
-      completeSessionTask: async (taskId, input) => {
-        const managerStatus = input.status === "interrupted" ? "stopped" : input.status;
+      completeChildExecution: async (taskId, input) => {
+        const registryStatus = input.status === "interrupted" ? "stopped" : input.status;
         let task: unknown;
-        let managerError: unknown;
+        let registryError: unknown;
         try {
-          task = await manager.completeSessionTask(taskId, { ...input, status: managerStatus });
+          task = await registry.completeExecution(taskId, { ...input, status: registryStatus });
         } catch (error) {
-          managerError = error;
+          registryError = error;
         }
         const before = this.context.events.checkpoint();
         this.context.store.updateSessionTask(taskId, {
@@ -170,13 +177,13 @@ export class SessionTaskBridgeManager {
           ...(input.status === "failed" ? { error: "task failed" } : {}),
         });
         this.context.events.publishSince(before);
-        if (managerError) {
+        if (registryError) {
           this.context.log({
             level: "warn",
-            event: "session.task.manager_completion_failed",
+            event: "session.execution.registry_completion_failed",
             sessionId: persisted?.sessionId ?? session.id,
             taskId,
-            error: managerError instanceof Error ? managerError.message : String(managerError),
+            error: registryError instanceof Error ? registryError.message : String(registryError),
           });
         }
         return task;
@@ -184,9 +191,9 @@ export class SessionTaskBridgeManager {
     };
   }
 
-  projectManagerTasks(sessionId: string, manager: TaskManager): void {
-    for (const task of manager.listTasks()) {
-      const persisted = this.context.store.findSessionTaskByManagerTaskId(sessionId, task.id);
+  projectProcessExecutions(sessionId: string, runtime: DetachedProcessRuntime): void {
+    for (const task of runtime.listExecutions()) {
+      const persisted = this.context.store.findSessionExecutionByRuntimeId(sessionId, task.id);
       if (!persisted) {
         const sameId = this.context.store.getSessionTask(task.id);
         this.context.store.createSessionTask({
@@ -196,32 +203,32 @@ export class SessionTaskBridgeManager {
           type: task.type,
           description: task.description,
           cwd: task.cwd,
-          metadata: { origin: "task_manager", taskManagerId: task.id },
+          metadata: { origin: "detached_process", executionBackend: "detached_process", runtimeExecutionId: task.id },
         });
       }
-      const durableTask = this.context.store.findSessionTaskByManagerTaskId(sessionId, task.id) ??
+      const durableTask = this.context.store.findSessionExecutionByRuntimeId(sessionId, task.id) ??
         this.context.store.getSessionTask(task.id);
       if (durableTask?.sessionId === sessionId) {
-        this.trackTask(manager, task.id, durableTask.id);
-        this.syncPersistentTask(task, manager, durableTask.id);
+        this.trackProcessExecution(runtime, task.id, durableTask.id);
+        this.syncPersistentExecution(task, runtime, durableTask.id);
       }
     }
   }
 
-  trackTask(manager: TaskManager, taskId: string, durableTaskId = taskId): void {
-    const tracked = this.trackedTasks.get(manager as object) ?? new Set<string>();
+  trackProcessExecution(runtime: DetachedProcessRuntime, taskId: string, durableTaskId = taskId): void {
+    const tracked = this.trackedTasks.get(runtime as object) ?? new Set<string>();
     if (tracked.has(taskId)) return;
     tracked.add(taskId);
-    this.trackedTasks.set(manager as object, tracked);
-    manager.registerTaskListener((task) => {
+    this.trackedTasks.set(runtime as object, tracked);
+    runtime.registerExecutionListener((task) => {
       if (task.id !== taskId) return;
       const persisted = this.context.store.getSessionTask(durableTaskId);
       if (!persisted) return;
-      this.syncPersistentTask(task, manager, durableTaskId);
+      this.syncPersistentExecution(task, runtime, durableTaskId);
     });
   }
 
-  syncPersistentTask(task: TaskInfo, manager: TaskManager, durableTaskId = task.id): void {
+  syncPersistentExecution(task: ExecutionInfo, runtime: DetachedProcessRuntime, durableTaskId = task.id): void {
     const status: DurableTaskStatus = task.status === "pending" || task.status === "running" ||
       task.status === "completed" || task.status === "failed" || task.status === "stopped" ? task.status : "failed";
     const persisted = this.context.store.getSessionTask(durableTaskId);
@@ -231,7 +238,7 @@ export class SessionTaskBridgeManager {
       (status === "pending" || status === "running")
     ) return;
     let output: string | undefined;
-    try { output = manager.readTaskOutput(task.id); } catch { /* output is optional */ }
+    try { output = runtime.readOutput(task.id); } catch { /* output is optional */ }
     const before = this.context.events.checkpoint();
     this.context.store.updateSessionTask(durableTaskId, {
       status,

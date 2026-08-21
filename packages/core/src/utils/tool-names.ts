@@ -32,7 +32,7 @@ const PYTHON_STYLE_TOOL_NAME_ALIASES: Record<string, string> = {
   sleep: "Sleep",
   config: "Config",
   brief: "Brief",
-  task_create: "TaskCreate",
+  background_shell_create: "BackgroundShellCreate",
   schedule_create: "ScheduleCreate",
   schedule_update: "ScheduleUpdate",
   schedule_delete: "ScheduleDelete",

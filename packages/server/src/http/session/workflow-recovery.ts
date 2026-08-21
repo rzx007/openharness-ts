@@ -13,7 +13,7 @@ export interface WorkflowRecoveryContext {
 }
 
 /**
- * Session runs and TaskManager ownership die with the daemon process. Workflow
+ * Session runs and detached worker-process ownership die with the daemon process. Workflow
  * snapshots are project-local, so reconcile only run ids that this session log
  * proves were started by this daemon; unrelated CLI/project workflows are left alone.
  */

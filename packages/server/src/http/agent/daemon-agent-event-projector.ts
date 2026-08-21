@@ -10,7 +10,10 @@ import {
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
 import type { SessionEventPublisher } from "../session/session-event-publisher.js";
-import type { SessionTaskBridge, SessionTaskBridgeManager } from "../session/session-task-bridge.js";
+import type {
+  SessionChildExecutionBridge,
+  SessionExecutionProjector,
+} from "../session/session-execution-projector.js";
 import type { ActiveTranscriptProjectionState, SessionTranscriptProjection } from "../session/transcript-projection.js";
 import { jsonEqual, withoutTraceId } from "../support.js";
 
@@ -19,7 +22,7 @@ interface ChildProjectionState {
   sessionId: string;
   parentSessionId: string;
   taskId: string;
-  bridge: SessionTaskBridge;
+  bridge: SessionChildExecutionBridge;
 }
 
 interface PendingEventSettlement {
@@ -32,7 +35,7 @@ export interface DaemonAgentEventProjectorContext {
   rootAgent: OpenHarnessAgent;
   store: SessionStore;
   transcriptProjection: SessionTranscriptProjection;
-  taskBridgeManager: Pick<SessionTaskBridgeManager, "createBridge">;
+  executionProjector: Pick<SessionExecutionProjector, "createBridge">;
   liveChildren: Pick<LiveChildAgentDirectory, "register" | "unregister">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publish" | "publishSince">;
   log(event: ObservabilityEvent): void;
@@ -181,11 +184,11 @@ export class DaemonAgentEventProjector {
       this.context.events.publishSince(before);
     }
 
-    const bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
+    const bridge = this.context.executionProjector.createBridge({ id: parent.id, cwd: parent.cwd });
     let taskId = this.context.store.getSessionTask(childId)?.id;
     if (!taskId) {
       taskId = childId;
-      const registered = bridge.registerSessionTask({
+      const registered = bridge.registerChildExecution({
           id: childId,
           description: spawn.description,
           cwd,
@@ -303,7 +306,7 @@ export class DaemonAgentEventProjector {
   private async bindChildTaskRun(event: AgentEvent, runId: string): Promise<void> {
     if (!event.context.childId) return;
     const child = this.children.get(event.context.childId);
-    if (child) await child.bridge.bindSessionTaskRun(child.taskId, runId);
+    if (child) await child.bridge.bindChildExecutionRun(child.taskId, runId);
   }
 
   private projectStream(event: AgentEvent, stream: StreamEvent): void {
@@ -405,7 +408,7 @@ export class DaemonAgentEventProjector {
               output: event.data.output ?? error ?? "",
               ...(error ? { error } : {}),
             };
-        await child.bridge.completeSessionTask(child.taskId, result);
+        await child.bridge.completeChildExecution(child.taskId, result);
       }
     }
   }
@@ -445,7 +448,7 @@ export class DaemonAgentEventProjector {
     if (!child) return;
     const task = this.context.store.getSessionTask(child.taskId);
     if (task && (task.status === "pending" || task.status === "running")) {
-      await child.bridge.completeSessionTask(child.taskId, { status: "failed", output: message });
+      await child.bridge.completeChildExecution(child.taskId, { status: "failed", output: message });
     }
   }
 
@@ -459,8 +462,8 @@ export class DaemonAgentEventProjector {
     const task = this.context.store.getSessionTask(childId);
     const parent = this.context.store.getSession(event.context.sessionId);
     if (task && parent && (task.status === "pending" || task.status === "running")) {
-      const bridge = this.context.taskBridgeManager.createBridge({ id: parent.id, cwd: parent.cwd });
-      await bridge.completeSessionTask(task.id, { status: "failed", output: message });
+      const bridge = this.context.executionProjector.createBridge({ id: parent.id, cwd: parent.cwd });
+      await bridge.completeChildExecution(task.id, { status: "failed", output: message });
     }
 
     const child = this.context.store.getSession(childSessionId);
@@ -499,7 +502,7 @@ export class DaemonAgentEventProjector {
     if (state) {
       const task = this.context.store.getSessionTask(state.taskId);
       if (task && (task.status === "pending" || task.status === "running")) {
-        await state.bridge.completeSessionTask(state.taskId, event.data.result);
+        await state.bridge.completeChildExecution(state.taskId, event.data.result);
       }
     }
     this.appendRuntimeEvent(event, {

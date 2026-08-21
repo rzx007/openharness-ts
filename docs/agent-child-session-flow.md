@@ -45,8 +45,8 @@ JobWait(jobId)
   -> standalone 观察 live child；daemon 刷新 durable task
   -> completed / failed / killed snapshot
 
-TaskCreate -> shell jobId
-  -> AgentJobHost 读取 TaskManager 状态
+BackgroundShellCreate -> shell jobId
+  -> AgentJobHost 读取 DetachedProcessSupervisor 状态
 ```
 
 framework child 的执行不依赖 daemon task projection。daemon projector 可以并行建立同 ID 的 durable task，负责 UI、恢复和审计；它不是 SDK 执行闭环的一环。`JobWait` timeout 只返回当前快照，不会 interrupt；只有显式 `JobCancel` 才停止 child。
@@ -63,7 +63,7 @@ HTTP child prompt
   -> LiveChildAgentDirectory.send(childSessionId)
   -> rootAgent.children.get(childId).send(input)
 
-JobSend 的 TaskManager session-task 路由
+JobSend 的 ChildAgentExecutionRegistry 路由
   -> registered session-task callback
   -> rootAgent.children.get(childId).send(input)
 ```
@@ -85,7 +85,7 @@ parent agent close        -> manager.closeAll()
 
 close 会先把 record 置为不可逆的 `closing`，从这一刻起 `send/steer/queue` 都拒绝新输入；然后 abort active run、等待 settlement，也等待首次创建或 suspend-resume 正在创建的 agent。随后关闭资源、释放 environment lease、发布并等待唯一一次 `child.closed`，最后置 `closed` 并从 directory 删除 handle。异步创建或 run settlement 续体发现 `closing/closed` 后不得回写 `idle/running` 或提交孤立 run。
 
-daemon 收到 terminal/closed event 后完成 durable run/task 并移除 live route。若 durable close completion 失败，projector 保留带原始 `child.closed` event 的 pending projection state；后续有序事件或同一事件重试会先完成该 terminal projection，再推进 event sequence 水位。若 child 普通执行事件投影失败，projector 会先把已建立的 durable run、transcript part 和 parent task 收束为 failed，再把 required event failure 传播给 framework。TaskManager 的 live completion 失败不会阻止 durable task terminal 落盘，durable completion 自身失败也不会被静默丢弃。
+daemon 收到 terminal/closed event 后完成 durable run/execution 并移除 live route。若 durable close completion 失败，projector 保留带原始 `child.closed` event 的 pending projection state；后续有序事件或同一事件重试会先完成该 terminal projection，再推进 event sequence 水位。若 child 普通执行事件投影失败，projector 会先把已建立的 durable run、transcript part 和 parent execution 收束为 failed，再把 required event failure 传播给 framework。ChildAgentExecutionRegistry 的 live completion 失败不会阻止 durable execution terminal 落盘，durable completion 自身失败也不会被静默丢弃。
 
 durable task 已 terminal 后，延迟到达的 live `pending/running` snapshot 不得让它回退。显式 follow-up 启动新 run 时才重新置为 `running`，并清除上一轮的 `finishedAt/output/error` 与 live output file。
 
@@ -109,7 +109,7 @@ child run 完成后进入 idle。默认 5 分钟无输入：
 | worktree acquire/release | framework child environment provider |
 | child session/input/run/task/transcript | daemon `SessionStore` + projector |
 | childSessionId -> rootAgent/childId 路由 | daemon `LiveChildAgentDirectory` |
-| task callbacks | daemon `SessionTaskBridge` |
+| child execution callbacks | daemon `SessionExecutionProjector` + `ChildAgentExecutionRegistry` |
 
 ## 代码位置
 

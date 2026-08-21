@@ -21,7 +21,8 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("ToolSearch");
     expect(names).toContain("AskUser");
     expect(names).toContain("Brief");
-    expect(names).toContain("TaskCreate");
+    expect(names).toContain("BackgroundShellCreate");
+    expect(names).not.toContain("TaskCreate");
     expect(names).toContain("EnterPlanMode");
     expect(names).toContain("ExitPlanMode");
     expect(names).toContain("EnterWorktree");

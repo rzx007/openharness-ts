@@ -25,10 +25,10 @@ import {
   type JobWaitResult,
 } from "@openharness/jobs";
 import {
-  getTaskManager,
-  type TaskInfo,
-  type TaskManager,
-} from "@openharness/services/tasks";
+  getDetachedProcessSupervisor,
+  type DetachedProcessExecution,
+  type DetachedProcessSupervisor,
+} from "@openharness/services/executions";
 
 const DEFAULT_OUTPUT_LIMIT = 12_000;
 const POLL_INTERVAL_MS = 50;
@@ -43,12 +43,12 @@ interface ChildObservation {
 
 type LocalJobSource =
   | { kind: "child"; value: ChildObservation }
-  | { kind: "task"; value: TaskInfo }
+  | { kind: "task"; value: DetachedProcessExecution }
   | { kind: "workflow"; value: WorkflowRunSnapshot };
 
 /** Local Jobs controller used when a runtime has no durable host. */
 export class LocalAgentJobHost implements AgentJobHost {
-  private readonly tasks: TaskManager;
+  private readonly processes: DetachedProcessSupervisor;
   private readonly workflows: WorkflowRunStore;
   private readonly childObservations = new Map<string, ChildObservation>();
 
@@ -57,7 +57,7 @@ export class LocalAgentJobHost implements AgentJobHost {
     private readonly ownerSession: string,
     private readonly children: AgentChildDirectory,
   ) {
-    this.tasks = getTaskManager({ cwd, sessionId: ownerSession });
+    this.processes = getDetachedProcessSupervisor({ cwd, sessionId: ownerSession });
     this.workflows = new WorkflowRunStore({ cwd });
   }
 
@@ -69,7 +69,7 @@ export class LocalAgentJobHost implements AgentJobHost {
       .filter((workflow) => workflow.ownerSession === this.ownerSession);
     return filterJobSnapshots([
       ...[...this.childObservations.values()].map((child) => this.childSnapshot(child)),
-      ...this.tasks.listTasks().map((task) => this.taskSnapshot(task)),
+      ...this.processes.listExecutions().map((task) => this.taskSnapshot(task)),
       ...workflows.map((workflow) => this.workflowSnapshot(workflow)),
     ], input);
   }
@@ -85,7 +85,7 @@ export class LocalAgentJobHost implements AgentJobHost {
       return { ...selected, snapshot: this.childSnapshot(source.value) };
     }
     if (source.kind === "task") {
-      const output = this.tasks.readTaskOutput(source.value.id, Number.MAX_SAFE_INTEGER);
+      const output = this.processes.readOutput(source.value.id, Number.MAX_SAFE_INTEGER);
       const selected = selectOutput(output, input.after, input.maxChars);
       return { ...selected, snapshot: this.taskSnapshot(source.value) };
     }
@@ -130,7 +130,7 @@ export class LocalAgentJobHost implements AgentJobHost {
       return;
     }
     if (source.kind === "task" && taskAcceptsInput(source.value)) {
-      await this.tasks.writeToTask(source.value.id, input.data);
+      await this.processes.writeInput(source.value.id, input.data);
       return;
     }
     throw new Error(`Job ${input.jobId} does not accept input.`);
@@ -145,12 +145,12 @@ export class LocalAgentJobHost implements AgentJobHost {
       return this.childSnapshot(source.value);
     }
     if (source.kind === "task") {
-      return this.taskSnapshot(await this.tasks.stopTask(source.value.id));
+      return this.taskSnapshot(await this.processes.stopExecution(source.value.id));
     }
     await cancelPersistentWorkflow(source.value, {
       store: this.workflows,
       reason: input.reason,
-      stopTask: async (taskId) => await this.tasks.stopTask(taskId),
+      stopTask: async (taskId) => await this.processes.stopExecution(taskId),
     });
     return this.workflowSnapshot(this.workflows.load(source.value.runId)!);
   }
@@ -160,7 +160,7 @@ export class LocalAgentJobHost implements AgentJobHost {
     if (liveChild) return { kind: "child", value: this.observeChild(liveChild) };
     const observedChild = this.childObservations.get(jobId);
     if (observedChild) return { kind: "child", value: observedChild };
-    const task = this.tasks.getTask(jobId);
+    const task = this.processes.getExecution(jobId);
     if (task) return { kind: "task", value: task };
     const workflow = this.workflows.load(jobId);
     if (workflow?.ownerSession === this.ownerSession) return { kind: "workflow", value: workflow };
@@ -218,7 +218,7 @@ export class LocalAgentJobHost implements AgentJobHost {
     };
   }
 
-  private taskSnapshot(task: TaskInfo): JobSnapshot {
+  private taskSnapshot(task: DetachedProcessExecution): JobSnapshot {
     const status = taskStatus(task.status);
     const updatedAt = task.finishedAt ?? task.startedAt ?? task.createdAt;
     return {
@@ -278,17 +278,17 @@ function childStatus(child: ChildObservation): JobStatus {
   return "completed";
 }
 
-function taskKind(type: TaskInfo["type"]): JobKind {
+function taskKind(type: DetachedProcessExecution["type"]): JobKind {
   return type === "shell" || type === "dream" ? type : "agent";
 }
 
-function taskStatus(status: TaskInfo["status"]): JobStatus {
+function taskStatus(status: DetachedProcessExecution["status"]): JobStatus {
   if (status === "completed" || status === "failed") return status;
   if (status === "stopped") return "killed";
   return "running";
 }
 
-function taskAcceptsInput(task: TaskInfo): boolean {
+function taskAcceptsInput(task: DetachedProcessExecution): boolean {
   return task.type === "agent" && task.status !== "stopped";
 }
 

@@ -1921,7 +1921,7 @@ describe("OpenHarnessHttpServer", () => {
       });
       const internals = server as unknown as {
         jobs: { read: (...args: unknown[]) => Promise<unknown> };
-        daemon: { tasks: { stop(taskId: string, input: { sessionId: string }): Promise<unknown> } };
+        daemon: { backgroundShells: { stop(taskId: string, input: { sessionId: string }): Promise<unknown> } };
       };
       internals.jobs.read = vi.fn(async () => { throw new Error("normalization unavailable"); });
 
@@ -1942,7 +1942,7 @@ describe("OpenHarnessHttpServer", () => {
         expect(task?.status).not.toBe("running");
       } finally {
         const [task] = server.store.listSessionTasks(sessionId);
-        if (task) await internals.daemon.tasks.stop(task.id, { sessionId }).catch(() => {});
+        if (task) await internals.daemon.backgroundShells.stop(task.id, { sessionId }).catch(() => {});
       }
     });
   });

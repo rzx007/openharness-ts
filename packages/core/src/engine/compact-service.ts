@@ -161,7 +161,7 @@ export interface CompactCheckpoint {
 export interface CompactAttachments {
   /** session_memory checkpoint 内容（帮助压缩后恢复任务状态，由 CLI 读入注入）。 */
   sessionMemory?: string;
-  /** 当前正在进行的任务描述（来自 TaskManager）。 */
+  /** 当前正在进行的执行描述（来自具体运行时）。 */
   taskFocus?: string;
   /** 本会话访问过的文件路径（自动从历史抽取，或由外部注入覆盖）。 */
   recentFiles?: string[];
@@ -332,7 +332,7 @@ export class CompactService {
     this.client = client;
   }
 
-  /** 注册 / 替换附件提供者（由 QueryEngine 或 CLI 接线后注入 TaskManager 等上下文）。 */
+  /** 注册 / 替换附件提供者（由 QueryEngine 或 CLI 接线后注入运行时上下文）。 */
   setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void {
     this.attachmentsProvider = fn;
   }

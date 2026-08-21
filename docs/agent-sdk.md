@@ -166,7 +166,7 @@ JobCancel(jobId) -> AgentJobHost.cancel()
 Workflow -> spawn framework child -> await/stop the same child backend
 ```
 
-`TaskCreate` 只创建由 `TaskManager` 执行的后台 shell Job；child Agent 由 `Agent` 创建，并通过 framework child handle 运行。daemon 可以把 `child.*` 事件投影为 durable task，供 UI、恢复和审计使用，但该投影不再是 framework child 完成一轮执行的前置条件。
+`BackgroundShellCreate` 只创建由 `DetachedProcessSupervisor` 执行的后台 shell Job；child Agent 由 `Agent` 创建，并通过 framework child handle 运行。daemon 可以把 `child.*` 事件投影为 durable execution，供 UI、恢复和审计使用，但该投影不再是 framework child 完成一轮执行的前置条件。
 
 ## 两种应用形态
 

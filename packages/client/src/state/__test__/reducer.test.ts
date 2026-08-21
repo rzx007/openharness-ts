@@ -10,7 +10,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionExecutionRecord,
 } from "../../types/index.js";
 
 function session(id: string, updatedAt: number): SessionRecord {
@@ -119,7 +119,7 @@ describe("session event reducer", () => {
   });
 
   it("hydrates and updates durable task projections", () => {
-    const task: SessionTaskRecord = {
+    const task: SessionExecutionRecord = {
       id: "task-1", sessionId: "s1", childSessionId: "child-1", runId: "run-1",
       type: "agent", status: "running", description: "Explore@default", cwd: process.cwd(),
       metadata: {}, createdAt: 1, startedAt: 1, updatedAt: 1,

@@ -31,7 +31,7 @@ ohs workflow template safe-write --params ./workflow-template-params.json
 ohs workflow reconcile <runId>
 ohs workflow reconcile <runId> --action-ids reconcile-file-src-index-ts --budget-preset safe-write
 
-# 取消 running workflow，并停止背后的 TaskManager task
+# 取消 running workflow，并停止背后的 detached worker process
 ohs workflow cancel <runId> --reason "superseded by manual fix"
 ```
 
@@ -50,7 +50,7 @@ ohs workflow cancel <runId> --reason "superseded by manual fix"
 
 ## Daemon 重启语义
 
-`ohs serve` 重启时不会假装续跑旧进程里的 provider 调用、TaskManager task 或 child session。它会保留 session、child session、消息与 timeline，并将遗留 session run 标为 `interrupted`。
+`ohs serve` 重启时不会假装续跑旧进程里的 provider 调用、detached worker process 或 child session。它会保留 session、child session、消息与 timeline，并将遗留 session run 标为 `interrupted`。
 
 若 workflow 的 `workflow.workflow_started` 事件已写入 daemon session event stream，daemon 会把对应的 running snapshot 收口为 terminal：运行中的 task 为 `killed`，未启动 task 为 `skipped`，并写入 `workflow.workflow_cancelled` 事件。没有这条 session 所有权事件的同项目 workflow 不受影响。之后应由用户显式启动新的工作；不要把重启后的状态理解为后台仍在继续执行。
 

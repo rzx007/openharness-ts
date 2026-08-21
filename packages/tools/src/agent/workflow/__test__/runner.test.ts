@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runWorkflow, type WorkflowTaskRunResult } from "@openharness/coordinator";
-import type { AwaitTaskResult } from "@openharness/services";
+import type { AwaitExecutionResult } from "@openharness/services";
 import {
   createAgentWorkflowRunner,
   type WorkflowWorkerSpawnConfig,
@@ -21,7 +21,7 @@ function completedDependency(taskId: string, result: string): WorkflowTaskRunRes
 }
 
 describe("createAgentWorkflowRunner", () => {
-  it("spawns a child worker and waits for its TaskManager task", async () => {
+  it("spawns a child worker and waits for its execution", async () => {
     const spawnWorker = vi.fn(async (_config: WorkflowWorkerSpawnConfig): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,
       agentId: "worker@alpha",
@@ -29,7 +29,7 @@ describe("createAgentWorkflowRunner", () => {
       backendType: "subprocess",
       worktree: { path: "/wt/worker", branch: "worktree-worker" },
     }));
-    const awaitTask = vi.fn(async (_taskId: string): Promise<AwaitTaskResult> => ({
+    const awaitTask = vi.fn(async (_taskId: string): Promise<AwaitExecutionResult> => ({
       status: "completed",
       output: "worker result",
       exitCode: 0,
@@ -98,7 +98,7 @@ describe("createAgentWorkflowRunner", () => {
       taskId: "task_2",
       backendType: "subprocess",
     }));
-    const awaitTask = vi.fn(async (): Promise<AwaitTaskResult> => ({
+    const awaitTask = vi.fn(async (): Promise<AwaitExecutionResult> => ({
       status: "completed",
       output: "ok",
     }));
@@ -298,11 +298,11 @@ describe("createAgentWorkflowRunner", () => {
     expect(stopTask).toHaveBeenCalledWith("task_resume_timeout");
   });
 
-  it("waits for an existing TaskManager task when resuming a running workflow task", async () => {
+  it("waits for an existing execution when resuming a running workflow task", async () => {
     const spawnWorker = vi.fn(async (): Promise<WorkflowWorkerSpawnResult> => {
       throw new Error("should not spawn");
     });
-    const awaitTask = vi.fn(async (_taskId: string): Promise<AwaitTaskResult> => ({
+    const awaitTask = vi.fn(async (_taskId: string): Promise<AwaitExecutionResult> => ({
       status: "completed",
       output: "resumed output",
       exitCode: 0,
@@ -350,7 +350,7 @@ describe("createAgentWorkflowRunner", () => {
     }));
   });
 
-  it("spawns a replacement worker when the resumed TaskManager task is unavailable", async () => {
+  it("spawns a replacement worker when the resumed execution is unavailable", async () => {
     const spawnWorker = vi.fn(async (): Promise<WorkflowWorkerSpawnResult> => ({
       success: true,
       agentId: "worker@default",
@@ -360,7 +360,7 @@ describe("createAgentWorkflowRunner", () => {
     const awaitTask = vi
       .fn()
       .mockRejectedValueOnce(new Error("Task not found: task_old"))
-      .mockResolvedValueOnce({ status: "completed", output: "new output", exitCode: 0 } satisfies AwaitTaskResult);
+      .mockResolvedValueOnce({ status: "completed", output: "new output", exitCode: 0 } satisfies AwaitExecutionResult);
     const runner = createAgentWorkflowRunner({
       cwd: "/repo",
       spawnWorker,
@@ -436,7 +436,7 @@ describe("createAgentWorkflowRunner", () => {
       taskId: `task_${config.prompt.includes("implement") ? "implement" : "research"}`,
       backendType: "subprocess",
     }));
-    const awaitTask = vi.fn(async (taskId: string): Promise<AwaitTaskResult> => ({
+    const awaitTask = vi.fn(async (taskId: string): Promise<AwaitExecutionResult> => ({
       status: "completed",
       output: `${taskId} output`,
       exitCode: 0,
