@@ -77,6 +77,7 @@ function CodeRenderer({
   highlightLines,
   bodyClassName,
 }: RendererProps): React.JSX.Element {
+  const [renderPass, setRenderPass] = useState(0)
   const file = useMemo<FileContents>(
     () => ({
       name: codeBlockFilename(language),
@@ -126,6 +127,32 @@ function CodeRenderer({
     injectStyles()
   }, [])
 
+  useEffect(() => {
+    let disposed = false
+    let readyFrame: number | null = null
+    const frame = window.requestAnimationFrame(() => {
+      const ready =
+        "customElements" in window && window.customElements.get("pierre-file")
+          ? Promise.resolve()
+          : "customElements" in window
+            ? window.customElements.whenDefined("pierre-file").catch(() => undefined)
+            : Promise.resolve()
+
+      void ready.then(() => {
+        readyFrame = window.requestAnimationFrame(() => {
+          if (disposed) return
+          setRenderPass((pass) => pass + 1)
+        })
+      })
+    })
+
+    return () => {
+      disposed = true
+      window.cancelAnimationFrame(frame)
+      if (readyFrame !== null) window.cancelAnimationFrame(readyFrame)
+    }
+  }, [code, language])
+
   return (
     <div
       className={cn(
@@ -136,7 +163,7 @@ function CodeRenderer({
       style={scrollable ? { maxHeight: `${maxHeight}px` } : undefined}
     >
       <div className={cn("px-4 py-3", highlightLines?.length && "cbhl")}>
-        <PierreFile file={file} options={options} />
+        <PierreFile key={renderPass} file={file} options={options} />
       </div>
     </div>
   )
