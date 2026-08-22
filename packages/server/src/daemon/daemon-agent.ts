@@ -1,5 +1,5 @@
 import {
-  createOpenHarnessAgent,
+  createDefaultNodeAgent,
   type OpenHarnessAgent,
   type OpenHarnessAgentOptions,
 } from "@openharness/agent-runtime";
@@ -87,6 +87,14 @@ export function createDaemonAgentLoader(
     let eventSink: AgentEventListener | undefined;
     let sinkBinding: Promise<void> | undefined;
     const pendingEvents: Parameters<AgentEventListener>[0][] = [];
+    const requestPermission =
+      options.requestPermission ??
+      (async () => ({
+        status: "denied" as const,
+        reason: "Daemon permission host is not configured",
+      }));
+    const terminal = options.createTerminalHost?.(session);
+    const jobs = options.createJobHost?.(session);
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
@@ -96,12 +104,14 @@ export function createDaemonAgentLoader(
         ? { requestPermission: options.requestPermission }
         : {}),
       ...(options.schedules ? { schedules: options.schedules } : {}),
-      ...(options.createTerminalHost
-        ? { terminal: options.createTerminalHost(session) }
-        : {}),
-      ...(options.createJobHost
-        ? { jobs: options.createJobHost(session) }
-        : {}),
+      ...(terminal ? { terminal } : {}),
+      ...(jobs ? { jobs } : {}),
+      hostCapabilities: {
+        permissions: { requestPermission },
+        ...(options.schedules ? { schedules: options.schedules } : {}),
+        ...(terminal ? { terminal } : {}),
+        ...(jobs ? { jobs } : {}),
+      },
       ...(options.createEventSink
         ? {
             onEvent: async (event) => {
@@ -122,7 +132,7 @@ export function createDaemonAgentLoader(
           parts,
           options: agentOptions,
         })
-      : await createOpenHarnessAgent(agentOptions);
+      : await createDefaultNodeAgent(agentOptions);
     try {
       agent.loadHistory(transcriptToAgentMessages(history, parts));
       eventSink = options.createEventSink?.(agent, session);

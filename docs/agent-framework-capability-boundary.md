@@ -29,17 +29,81 @@ flowchart LR
 
 `agent-runtime` 禁止依赖 server、HTTP、SSE、daemon store 或 durable session schema。
 
+## Kernel 与默认 Node 组装
+
+`@openharness/agent-runtime` 现在有三个入口，名字代表它们会做多少事：
+
+| 入口 | 实际做什么 |
+|---|---|
+| `createAgentKernel()` | 只运行 Agent/Run/Child；settings、runtime 和宿主能力都必须由调用方交进来 |
+| `createDefaultNodeAgent()` | 读取本机配置并组装 provider、工具、插件、Skill、MCP、Memory、Sandbox 和 Git child environment |
+| `createOpenHarnessAgent()` | 兼容旧调用方，行为等同 `createDefaultNodeAgent()` |
+
+能力归属清单：
+
+| 能力 | 放在哪里 | 原因 |
+|---|---|---|
+| Agent/Run/Child 状态、event/effect/handle、关闭 | Kernel | 这是一次 Agent 执行本身 |
+| QueryEngine turn loop | Kernel 接收的 runtime | Kernel 使用它，但不替宿主选择 provider |
+| `StreamingMessageClient` 接口 | Kernel runtime contract | 可以用 fake client、远程 client 或 Node client |
+| Anthropic/OpenAI/Codex client | 默认 Node 组装 | 会处理真实网络端点和凭据 |
+| settings 和 CredentialStorage | 默认 Node 组装 | 会读取本机和用户目录 |
+| 插件、Skill、MCP、Memory | 默认 Node 组装 | 会发现或连接外部资源 |
+| Sandbox、process exit cleanup、Git worktree | 默认 Node 能力 | 都依赖具体操作系统环境 |
+| Permission、Jobs、Terminal、Schedule | `AgentHostCapabilities` | 宿主明确提供；Kernel 不创建备用实现 |
+| HTTP、SQLite、SSE、durable Session/Run | Durable Application | 这是多客户端和进程重启后的状态 |
+
+Kernel 的硬规则：
+
+- 不调用 `loadSettings()`；
+- 不创建 `CredentialStorage`；
+- 不发现插件、Skill 或 MCP；
+- 不启动 Sandbox；
+- 不写 `process.stderr`；
+- 不创建 `LocalAgentJobHost`；
+- child 只能拿到父级同一份 `AgentHostCapabilities`；
+- 没有显式 child environment 时只沿用 cwd，不查 Git、不建 worktree。
+
+当前实际可注入的能力是 `permissions`、`jobs`、`terminal`、`schedules` 和 `childEnvironment`。Artifact 与更细的 Workspace 操作还没有稳定接口，因此本阶段没有添加两个只占名字、不能工作的空对象；以后出现真实调用方时再加入。
+
+## 发布形式
+
+当前明确公开发布 `@openharness/agent-runtime`，其他 workspace 包仍按内部包处理。发布包提供两个路径：
+
+```text
+@openharness/agent-runtime          默认 Node 入口和兼容入口
+@openharness/agent-runtime/kernel   只包含 Kernel、最小 runtime builder 和显式能力类型
+```
+
+构建结果在 `dist`，`main`、`types` 和 `exports` 不再指向 TypeScript 源码。Kernel ESM bundle 不需要仓库源码就能运行；完整入口也会生成可直接加载的 ESM bundle。workspace 包只作为开发期和类型 peer，`pnpm pack` 会把发布清单中的 `workspace:*` 转成正常版本号。
+
+`pnpm run test:pack` 每次都会：
+
+1. 重新生成 JavaScript bundle 和声明文件；
+2. 创建 npm tarball；
+3. 检查 tarball 的 manifest 不含 `workspace:`；
+4. 安装到仓库外的临时目录；
+5. 用 fake provider 跑完 root Agent、child Agent 和 close。
+
 ## Framework 边界
 
-framework 负责：
+Kernel 负责：
 
-- provider、model、QueryEngine、tools、hooks、skills、plugins、MCP、sandbox 的默认组装
+- 使用宿主已经准备好的 runtime、model、tools 和 hooks
 - history、usage、当前 run 与资源生命周期
 - 单实例 `idle/running/maintaining/closing/closed` operation state machine
 - permission wait 的执行语义
-- child identity、实例、递归执行、tree-wide descendant directory、follow-up、interrupt、suspend/resume、worktree lease
+- child identity、实例、递归执行、tree-wide descendant directory、follow-up、interrupt、suspend/resume 和宿主提供的环境 lease
 - 有序 reliable `onEvent`、隔离 `subscribe`、permission effect 和 run/child handles
-- compact、remember、inspect 等 agent 能力
+- compact、remember、inspect 等 Agent 操作；没有 Memory 能力时 `remember` 明确跳过
+
+默认 Node 组装负责：
+
+- provider client、默认工具和 prompt；
+- settings、凭据、插件、Skill、MCP 和 Memory；
+- Sandbox 和进程退出清理；
+- 选择 Git worktree child environment；
+- 为旧入口安装明确的本地兼容能力。
 
 framework 不负责：
 

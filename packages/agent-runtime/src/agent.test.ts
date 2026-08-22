@@ -10,7 +10,8 @@ import {
 import { McpClientManager } from "@openharness/mcp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentOperationConflictError, createOpenHarnessAgent } from "./agent.js";
+import { AgentOperationConflictError } from "./agent.js";
+import { createOpenHarnessAgent } from "./default-agent.js";
 
 const tempDirs: string[] = [];
 

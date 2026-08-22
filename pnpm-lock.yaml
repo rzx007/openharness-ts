@@ -442,7 +442,7 @@ importers:
         version: 5.9.3
 
   packages/agent-runtime:
-    dependencies:
+    devDependencies:
       '@openharness/api':
         specifier: workspace:*
         version: link:../api
@@ -473,9 +473,6 @@ importers:
       '@openharness/plugins':
         specifier: workspace:*
         version: link:../plugins
-      '@openharness/protocol':
-        specifier: workspace:*
-        version: link:../protocol
       '@openharness/prompts':
         specifier: workspace:*
         version: link:../prompts
@@ -491,10 +488,12 @@ importers:
       '@openharness/tools':
         specifier: workspace:*
         version: link:../tools
-    devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.17
+      esbuild:
+        specifier: ^0.27.7
+        version: 0.27.7
       typescript:
         specifier: ^5.7.3
         version: 5.9.3

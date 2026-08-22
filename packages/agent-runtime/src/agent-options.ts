@@ -1,11 +1,30 @@
 import type {
   AgentChildBudget,
+  AgentEffects,
+  AgentScheduleEffects,
   PermissionMode,
   Settings,
   StreamingMessageClient,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
+import type { AgentChildEnvironmentProvider } from "./child-environment.js";
+
+/** 宿主怎样处理权限请求。Kernel 不自己决定允许或拒绝。 */
+export interface AgentPermissionHost {
+  requestPermission: AgentEffects["requestPermission"];
+}
+
+/**
+ * 宿主明确交给 Agent 的能力。没提供的能力不会由 Kernel 自己去本机寻找。
+ */
+export interface AgentHostCapabilities {
+  permissions: AgentPermissionHost;
+  jobs?: AgentJobHost;
+  terminal?: AgentTerminalHost;
+  schedules?: AgentScheduleEffects;
+  childEnvironment?: AgentChildEnvironmentProvider;
+}
 
 /** Opinionated runtime configuration exposed by the programmatic agent API. */
 export interface OpenHarnessAgentConfiguration {

@@ -21,7 +21,7 @@ import { AgentChildBudgetExceededError, AgentRunNotAcceptingInputError } from "@
 import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "./agent.js";
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import {
-  createDefaultChildEnvironmentProvider,
+  createInProcessChildEnvironmentProvider,
   type AgentChildEnvironmentLease,
   type AgentChildEnvironmentProvider,
 } from "./child-environment.js";
@@ -77,6 +77,7 @@ export interface AgentChildManagerOptions {
   eventBus: AgentEventBus;
   directory?: AgentChildRegistry;
   environment?: AgentChildEnvironmentProvider;
+  onWarning?(event: Record<string, unknown>): void;
   createAgent(
     options: OpenHarnessAgentOptions,
     identity: { childId: string; parentSessionId: string; parentRunId: string },
@@ -194,7 +195,8 @@ export class AgentChildManager implements AgentChildDirectory {
   private readonly directory: AgentChildRegistry;
 
   constructor(private readonly options: AgentChildManagerOptions) {
-    this.environment = options.environment ?? createDefaultChildEnvironmentProvider();
+    this.environment =
+      options.environment ?? createInProcessChildEnvironmentProvider();
     this.directory = options.directory ?? new AgentChildRegistry();
     this.directory.configureBudget(resolveChildBudget(options.settings.childBudget, options.configuration.childBudget));
   }
@@ -256,14 +258,14 @@ export class AgentChildManager implements AgentChildDirectory {
       budgetReservation = this.directory.reserve(parentScope.sessionId, sessionId);
     } catch (error) {
       if (error instanceof AgentChildBudgetExceededError) {
-        process.stderr.write(`${JSON.stringify({
+        this.options.onWarning?.({
           level: "warn",
           event: "agent.child_budget_exceeded",
           dimension: error.dimension,
           limit: error.limit,
           current: error.current,
           parentSessionId: parentScope.sessionId,
-        })}\n`);
+        });
       }
       throw error;
     }

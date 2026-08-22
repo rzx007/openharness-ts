@@ -9,13 +9,17 @@ import { createAgentSession, loadSettings } from "@openharness/core";
 import { McpClientManager } from "@openharness/mcp";
 import { LocalAgentJobHost } from "@openharness/tools";
 
-import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+import type {
+  AgentHostCapabilities,
+  OpenHarnessAgentConfiguration,
+} from "./agent-options.js";
 import {
   AgentChildManager,
   type AgentChildEnvironmentProvider,
   type AgentChildManagerOptions,
   type AgentChildRegistry,
 } from "./child-agent.js";
+import { createDefaultChildEnvironmentProvider } from "./child-environment.js";
 import { createOpenHarnessRuntime } from "./default-runtime.js";
 import type { AgentEventBus } from "./event-source.js";
 import {
@@ -37,6 +41,7 @@ interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
   extensions?: OpenHarnessAgentExtension[];
   childIdleTtlMs?: number;
   childEnvironment?: AgentChildEnvironmentProvider;
+  hostCapabilities?: AgentHostCapabilities;
 }
 
 export interface AgentIdentity {
@@ -56,9 +61,10 @@ export interface AgentCompositionContext {
 export interface AgentComposition {
   runtime: RuntimeBundle;
   session: AgentSession;
-  mcpManager: McpClientManager;
+  mcpConnections: () => ReturnType<McpClientManager["getConnections"]>;
   memory: AgentMemoryRuntime | undefined;
   childManager: AgentChildManager;
+  hostCapabilities: string[];
   model: string;
 }
 
@@ -68,6 +74,7 @@ export async function composeOpenHarnessAgent(
 ): Promise<AgentComposition> {
   const cwd = options.cwd ?? process.cwd();
   const settings = options.settings ?? (await loadSettings({}));
+  const explicitCapabilities = options.hostCapabilities;
   const discovery = await discoverOpenHarnessExtensions(cwd, settings);
   for (const warning of discovery.warnings)
     process.stderr.write(`[plugins] ${warning}\n`);
@@ -77,9 +84,9 @@ export async function composeOpenHarnessAgent(
     sessionId: options.sessionId,
     configuration: options,
     hostCapabilities: {
-      schedules: Boolean(internal.effects.schedules),
-      terminal: Boolean(options.terminal),
-      jobs: true,
+      schedules: Boolean(explicitCapabilities?.schedules ?? internal.effects.schedules),
+      terminal: Boolean(explicitCapabilities?.terminal ?? options.terminal),
+      jobs: Boolean(explicitCapabilities?.jobs) || !explicitCapabilities,
     },
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
@@ -115,7 +122,9 @@ export async function composeOpenHarnessAgent(
         toolRegistry: runtime.toolRegistry,
       }),
     );
-    runtime.queryEngine.setTerminal(options.terminal);
+    runtime.queryEngine.setTerminal(
+      explicitCapabilities?.terminal ?? options.terminal,
+    );
 
     const memory =
       settings.memory?.enabled === false
@@ -136,18 +145,40 @@ export async function composeOpenHarnessAgent(
       idleTtlMs: options.childIdleTtlMs,
       eventBus: internal.eventBus,
       directory: internal.childDirectory,
-      environment: options.childEnvironment,
+      environment:
+        explicitCapabilities?.childEnvironment ??
+        options.childEnvironment ??
+        createDefaultChildEnvironmentProvider(),
+      onWarning: (event) => process.stderr.write(`${JSON.stringify(event)}\n`),
       createAgent: internal.createAgent,
     });
-    runtime.queryEngine.setJobs(
-      options.jobs ?? new LocalAgentJobHost(cwd, session.id, childManager),
-    );
+    const jobs =
+      explicitCapabilities?.jobs ??
+      options.jobs ??
+      (!explicitCapabilities
+        ? new LocalAgentJobHost(cwd, session.id, childManager)
+        : undefined);
+    runtime.queryEngine.setJobs(jobs);
+    const hostCapabilities = [
+      "permissions",
+      ...(jobs ? ["jobs"] : []),
+      ...(explicitCapabilities?.terminal ?? options.terminal
+        ? ["terminal"]
+        : []),
+      ...(explicitCapabilities?.schedules ?? internal.effects.schedules
+        ? ["schedules"]
+        : []),
+      ...(explicitCapabilities?.childEnvironment ?? options.childEnvironment
+        ? ["childEnvironment"]
+        : []),
+    ];
     return {
       runtime,
       session,
-      mcpManager,
+      mcpConnections: () => mcpManager.getConnections(),
       memory,
       childManager,
+      hostCapabilities,
       model: options.model ?? settings.model,
     };
   } catch (error) {

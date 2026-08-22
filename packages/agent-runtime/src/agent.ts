@@ -17,17 +17,15 @@ import type {
   Settings,
   UsageSnapshot,
 } from "@openharness/core";
-import type { McpClientManager, McpConnection } from "@openharness/mcp";
+import type { McpConnection } from "@openharness/mcp";
 
-import {
-  composeOpenHarnessAgent,
-  type AgentIdentity,
-} from "./agent-composition.js";
+import type { AgentIdentity } from "./agent-composition.js";
 import {
   AgentOperationConflictError,
   type OpenHarnessAgentState,
 } from "./agent-errors.js";
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+import type { AgentHostCapabilities } from "./agent-options.js";
 import {
   AgentChildRegistry,
   type AgentChildEnvironmentProvider,
@@ -59,6 +57,8 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
   /** Reliable ordered host sink. A rejection fails the active framework operation. */
   onEvent?: AgentEventListener;
   childEnvironment?: AgentChildEnvironmentProvider;
+  /** 显式宿主能力。新入口优先使用；旧字段继续兼容。 */
+  hostCapabilities?: AgentHostCapabilities;
 }
 
 export interface OpenHarnessAgentSubmitOptions {
@@ -70,13 +70,6 @@ export interface OpenHarnessAgentSubmitOptions {
     runId: string;
     traceId: string;
   };
-}
-
-interface InternalAgentOptions {
-  eventBus: AgentEventBus;
-  effects: AgentEffects;
-  childDirectory: AgentChildRegistry;
-  identity?: AgentIdentity;
 }
 
 export interface AgentCompactResult {
@@ -99,6 +92,8 @@ export interface AgentInspection {
   }>;
   sandbox?: NonNullable<RuntimeBundle["sandboxStatus"]>;
   childBudget: AgentChildBudgetSnapshot;
+  /** 当前真正安装的宿主能力，不是配置文件中可能存在的能力。 */
+  hostCapabilities: string[];
 }
 
 export interface OpenHarnessAgent {
@@ -138,13 +133,14 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   constructor(
     private readonly runtime: RuntimeBundle,
     private readonly session: AgentSession,
-    private readonly mcpManager: McpClientManager,
+    private readonly mcpConnections: () => readonly McpConnection[],
     private readonly memory: AgentMemoryRuntime | undefined,
     private readonly eventBus: AgentEventBus,
     private readonly effects: AgentEffects,
     private readonly identity: AgentIdentity | undefined,
     private readonly childManager: AgentChildManager,
     readonly children: AgentChildDirectory,
+    private readonly installedHostCapabilities: string[],
     private model: string,
   ) {}
 
@@ -264,8 +260,9 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         type: hook.type,
         enabled: hook.enabled,
       })),
-      mcpServers: this.mcpManager.getConnections().map(toMcpInspection),
+      mcpServers: this.mcpConnections().map(toMcpInspection),
       childBudget: this.childManager.getBudgetSnapshot(),
+      hostCapabilities: [...this.installedHostCapabilities],
       ...(this.runtime.sandboxStatus
         ? { sandbox: this.runtime.sandboxStatus }
         : {}),
@@ -337,51 +334,36 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   }
 }
 
-export async function createOpenHarnessAgent(
-  options: OpenHarnessAgentOptions = {},
-): Promise<OpenHarnessAgent> {
-  const eventBus = new AgentEventBus(options.onEvent);
-  const effects: AgentEffects = {
-    requestPermission:
-      options.requestPermission ??
-      (async () => ({
-        status: "denied",
-        reason: "No permission effect configured",
-      })),
-    ...(options.schedules ? { schedules: options.schedules } : {}),
-  };
-  return await createOpenHarnessAgentInternal(options, {
-    eventBus,
-    effects,
-    childDirectory: new AgentChildRegistry(),
-  });
+export interface AssembledAgentOptions {
+  runtime: RuntimeBundle;
+  session: AgentSession;
+  mcpConnections: () => readonly McpConnection[];
+  memory: AgentMemoryRuntime | undefined;
+  eventBus: AgentEventBus;
+  effects: AgentEffects;
+  identity: AgentIdentity | undefined;
+  childManager: AgentChildManager;
+  childDirectory: AgentChildRegistry;
+  hostCapabilities: string[];
+  model: string;
 }
 
-async function createOpenHarnessAgentInternal(
-  options: OpenHarnessAgentOptions,
-  internal: InternalAgentOptions,
-): Promise<OpenHarnessAgent> {
-  const composition = await composeOpenHarnessAgent(options, {
-    ...internal,
-    createAgent: (childOptions, identity) =>
-      createOpenHarnessAgentInternal(childOptions, {
-        eventBus: internal.eventBus,
-        effects: internal.effects,
-        childDirectory: internal.childDirectory,
-        identity,
-      }),
-  });
+/** Kernel 与默认 Node 组装共用的最后一步；这里只接收已经准备好的对象。 */
+export function createAssembledAgent(
+  options: AssembledAgentOptions,
+): OpenHarnessAgent {
   return new DefaultOpenHarnessAgent(
-    composition.runtime,
-    composition.session,
-    composition.mcpManager,
-    composition.memory,
-    internal.eventBus,
-    internal.effects,
-    internal.identity,
-    composition.childManager,
-    internal.childDirectory,
-    composition.model,
+    options.runtime,
+    options.session,
+    options.mcpConnections,
+    options.memory,
+    options.eventBus,
+    options.effects,
+    options.identity,
+    options.childManager,
+    options.childDirectory,
+    options.hostCapabilities,
+    options.model,
   );
 }
 

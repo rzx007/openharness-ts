@@ -15,7 +15,7 @@
 - [x] B1：AgentPool、Session/Run/Projection/Recovery 和 Control 实现已经移入 `packages/server/src/application`；生产代码不再依赖 Hono 或 HTTP 类型。
 - [x] B2-B4：应用现在自己拥有 Session、Run、Permission、Job、Terminal、Project 和事件入口；HTTP 可以接收外部 Application；事件支持先按游标补历史、再持续接收新事件。
 - [x] C1-C4：Bot 已通过 daemon 进入同一套 durable Session/Run；聊天映射、重复消息准入和回复发送结果都会保存。
-- [ ] D1-D4：拆开 Agent Kernel 与 Node 默认组装，并完成独立打包。
+- [x] D1-D4：Kernel 已改为只接收显式 runtime 和宿主能力；Node 默认组装保留兼容入口；发布包可在仓库外安装并跑完 root、child 和 close。
 - [ ] E1-E4：让 daemon Workflow 使用统一 durable state。
 - [ ] F1-F4：补单执行者保护、协议协商、数据保留与备份。
 

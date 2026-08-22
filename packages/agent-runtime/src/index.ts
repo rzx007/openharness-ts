@@ -1,6 +1,5 @@
 export {
   AgentOperationConflictError,
-  createOpenHarnessAgent,
   type AgentCompactResult,
   type AgentInspection,
   type OpenHarnessAgent,
@@ -8,7 +7,23 @@ export {
   type OpenHarnessAgentState,
   type OpenHarnessAgentSubmitOptions,
 } from "./agent.js";
+export {
+  createDefaultNodeAgent,
+  createOpenHarnessAgent,
+} from "./default-agent.js";
 export type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+export type {
+  AgentHostCapabilities,
+  AgentPermissionHost,
+} from "./agent-options.js";
+export {
+  createAgentKernel,
+  createBasicAgentKernelRuntime,
+  type BasicAgentKernelRuntimeOptions,
+  type AgentKernelOptions,
+  type AgentKernelRuntime,
+  type AgentKernelRuntimeContext,
+} from "./kernel.js";
 export type { AgentRememberResult } from "./memory-runtime.js";
 export type {
   OpenHarnessAgentExtension,
@@ -24,6 +39,7 @@ export {
   computeChildAgentWorktreeBaseDir,
   createChildAgentWorktreeManager,
   createDefaultChildEnvironmentProvider,
+  createInProcessChildEnvironmentProvider,
   type ChildAgentWorktreeManager,
   type GitRunner,
 } from "./child-environment.js";

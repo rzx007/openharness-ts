@@ -25,6 +25,16 @@ export interface GitRunner {
   (args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }>;
 }
 
+/** Kernel 默认环境：沿用调用方给出的 cwd，不读取 Git，也不创建 worktree。 */
+export function createInProcessChildEnvironmentProvider(): AgentChildEnvironmentProvider {
+  return {
+    async acquire(input) {
+      return staticLease(input.cwd);
+    },
+  };
+}
+
+/** 默认 Node 环境：明确允许在 isolate=true 时使用 Git worktree。 */
 export function createDefaultChildEnvironmentProvider(): AgentChildEnvironmentProvider {
   return {
     async acquire(input) {
