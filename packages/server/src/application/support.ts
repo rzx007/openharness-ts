@@ -14,6 +14,7 @@ export interface OpenHarnessRuntimeSnapshot {
   sessions: { total: number; byStatus: Record<string, number> };
   runs: { total: number; byStatus: Record<string, number> };
   tasks: { total: number; byStatus: Record<string, number> };
+  workflows: { total: number; byStatus: Record<string, number> };
   permissions: { total: number; byStatus: Record<string, number> };
   projectionSettlements: { total: number; pending: number; byStatus: Record<string, number> };
   sseClientCount: number;

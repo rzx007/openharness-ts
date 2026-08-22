@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   normalizeDaemonBaseUrl,
+  IncompatibleProtocolError,
   OpenHarnessClient,
   streamServerSentEvents,
 } from "../http-client.js";
@@ -213,6 +214,27 @@ describe("OpenHarnessClient", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("http://127.0.0.1:3456/health");
     expect(calls[0]!.init.headers).toEqual({});
+  });
+
+  it("loads capabilities without auth and rejects an incompatible server", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      serverVersion: "0.4.0",
+      protocol: { version: 1 },
+      features: { jobs: 1 },
+    }));
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      token: "secret",
+      fetch: fetchImpl as typeof fetch,
+    });
+
+    await expect(client.capabilities({
+      support: { version: 2 },
+    })).rejects.toBeInstanceOf(IncompatibleProtocolError);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:3456/capabilities",
+      expect.objectContaining({ headers: {} }),
+    );
   });
 
   it("lists commands and invokes template commands", async () => {

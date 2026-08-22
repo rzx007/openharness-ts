@@ -9,9 +9,16 @@ export {
   createPromptRequestId,
   normalizeDaemonBaseUrl,
   OpenHarnessApiError,
+  IncompatibleProtocolError,
   OpenHarnessClient,
   streamServerSentEvents,
 } from "./transport/index.js";
+export type {
+  ClientProtocolSupport,
+  ProtocolCompatibility,
+  ServerCapabilities,
+} from "@openharness/protocol";
+export { checkProtocolCompatibility, supportsFeature } from "@openharness/protocol";
 export {
   applyEvent,
   applyEvents,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,16 +6,41 @@ import {
   createWorkflowPlan,
   createWorkflowRunSnapshot,
   parseWorkflowNotification,
-  WorkflowRunStore,
+  FileWorkflowRunRepository,
   type WorkflowRunner,
   type WorkflowSpec,
   type WorkflowTaskRunResult,
 } from "@openharness/coordinator";
 import type { AgentExecutionContext } from "@openharness/core";
-import { createWorkflowTool } from "../tool";
+import {
+  createWorkflowTool as createWorkflowToolDefinition,
+  type WorkflowToolOptions,
+} from "../tool";
 import type { AgentWorkflowRunnerOptions } from "../runner";
 
 const ctx = { cwd: "/work" };
+const testRepositoryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of testRepositoryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function createWorkflowTool(options: Omit<WorkflowToolOptions, "repository"> & {
+  repository?: WorkflowToolOptions["repository"];
+} = {}) {
+  return createWorkflowToolDefinition({
+    ...options,
+    repository: options.repository ?? testRepository(),
+  });
+}
+
+function testRepository(): FileWorkflowRunRepository {
+  const directory = makeTempDir();
+  testRepositoryDirectories.push(directory);
+  return new FileWorkflowRunRepository({ dir: directory });
+}
 
 function createAgentContext(
   taskIds: string[],
@@ -222,15 +247,16 @@ describe("workflowTool", () => {
     );
   });
 
-  it("emits persistent workflow events to the runtime event sink", async () => {
+  it("writes persistent workflow events only through the explicit repository", async () => {
     const cwd = makeTempDir();
     const emitted: Array<{ type: string; data?: { name: string; payload?: Record<string, unknown> } }> = [];
     try {
+      const store = new FileWorkflowRunRepository({ cwd });
       const runner: WorkflowRunner = vi.fn(async ({ task }) => ({
         summary: `${task.id} done`,
         result: `${task.id} result`,
       }));
-      const tool = createWorkflowTool({ createRunner: () => runner });
+      const tool = createWorkflowTool({ repository: store, createRunner: () => runner });
 
       const result = await tool.execute(
         {
@@ -243,10 +269,10 @@ describe("workflowTool", () => {
       );
 
       expect(result.isError).toBeUndefined();
-      expect(emitted.map((event) => event.data?.name)).toContain("workflow.workflow_started");
-      expect(emitted.map((event) => event.data?.name)).toContain("workflow.task_started");
-      expect(emitted.map((event) => event.data?.name)).toContain("workflow.workflow_finished");
-      expect(emitted[0]?.data?.payload?.event).toMatchObject({ runId: "sink-run" });
+      expect(emitted).toEqual([]);
+      expect(store.loadEvents("sink-run").map((event) => event.type)).toEqual(
+        expect.arrayContaining(["workflow_started", "task_started", "workflow_finished"]),
+      );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -257,7 +283,8 @@ describe("workflowTool", () => {
     try {
       const runner: WorkflowRunner = vi.fn(() => new Promise(() => undefined));
       const createRunner = vi.fn((_options: AgentWorkflowRunnerOptions) => runner);
-      const tool = createWorkflowTool({ createRunner });
+      const store = new FileWorkflowRunRepository({ cwd });
+      const tool = createWorkflowTool({ repository: store, createRunner });
 
       const result = await tool.execute(
         {
@@ -283,12 +310,12 @@ describe("workflowTool", () => {
       expect(JSON.parse(textOf(result))).toMatchObject({
         kind: "job",
         action: "created",
-        jobId: "detached-run",
+        jobId: "workflow:detached-run",
         jobKind: "workflow",
         status: "running",
       });
 
-      const snapshot = new WorkflowRunStore({ cwd }).load("detached-run");
+      const snapshot = store.load("detached-run");
       expect(snapshot).toMatchObject({
         runId: "detached-run",
         ownerSession: "session-1",
@@ -313,7 +340,8 @@ describe("workflowTool", () => {
         });
       });
       const agent = createAgentContext(["child-task"], () => releaseWorker?.());
-      const tool = createWorkflowTool({ createRunner: () => runner });
+      const store = new FileWorkflowRunRepository({ cwd });
+      const tool = createWorkflowTool({ repository: store, createRunner: () => runner });
 
       await tool.execute(
         { mode: "pipeline", runId: "parent-owned", tasks: [{ id: "research" }] },
@@ -325,7 +353,6 @@ describe("workflowTool", () => {
           agent,
         },
       );
-      const store = new WorkflowRunStore({ cwd });
       await vi.waitFor(() => {
         expect(store.load("parent-owned")?.runningTasks.research?.metadata?.taskManagerTaskId).toBe("child-task");
       });
@@ -426,7 +453,7 @@ describe("workflowTool", () => {
   it("returns filtered persisted workflow timelines", async () => {
     const cwd = makeTempDir();
     try {
-      const store = new WorkflowRunStore({ cwd });
+      const store = new FileWorkflowRunRepository({ cwd });
       const spec = { mode: "parallel" as const, tasks: [{ id: "research" }] };
       store.save(createWorkflowRunSnapshot({
         runId: "status-run",
@@ -464,7 +491,7 @@ describe("workflowTool", () => {
         summary: "Other done",
       });
 
-      const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const tool = createWorkflowTool({ repository: store, createRunner: vi.fn() });
       const timelineResult = await tool.execute({ action: "timeline", runId: "status-run" }, { cwd });
       expect(textOf(timelineResult)).toContain("Workflow status-run (running)");
       expect(textOf(timelineResult)).toContain("workflow_started");
@@ -488,7 +515,7 @@ describe("workflowTool", () => {
   it("queries persisted workflow history with domain filters", async () => {
     const cwd = makeTempDir();
     try {
-      const store = new WorkflowRunStore({ cwd });
+      const store = new FileWorkflowRunRepository({ cwd });
       const completedSpec = { mode: "parallel" as const, tasks: [{ id: "done" }] };
       const runningSpec = { mode: "pipeline" as const, budgetPolicyPreset: "safe-write" as const, tasks: [{ id: "research" }, { id: "write" }] };
       const conflictSpec = {
@@ -559,7 +586,7 @@ describe("workflowTool", () => {
         createdAt: 3,
       }));
 
-      const tool = createWorkflowTool({ createRunner: vi.fn() });
+    const tool = createWorkflowTool({ repository: store, createRunner: vi.fn() });
       const result = await tool.execute({
         action: "history",
         runIdPrefix: "conflict",
@@ -584,7 +611,7 @@ describe("workflowTool", () => {
   it("scopes timeline and history queries to the runtime owner", async () => {
     const cwd = makeTempDir();
     try {
-      const store = new WorkflowRunStore({ cwd });
+      const store = new FileWorkflowRunRepository({ cwd });
       const spec = { mode: "parallel" as const, tasks: [{ id: "review" }] };
       for (const [runId, ownerSession] of [["owned-run", "session-1"], ["other-run", "session-2"]] as const) {
         store.save(createWorkflowRunSnapshot({
@@ -599,7 +626,7 @@ describe("workflowTool", () => {
           createdAt: ownerSession === "session-1" ? 1 : 2,
         }));
       }
-      const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const tool = createWorkflowTool({ repository: store, createRunner: vi.fn() });
 
       const history = await tool.execute({ action: "history" }, { cwd, sessionId: "session-1" });
       expect(textOf(history)).toContain("owned-run");
@@ -617,7 +644,7 @@ describe("workflowTool", () => {
   });
 
   it("returns built-in workflow templates", async () => {
-    const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const tool = createWorkflowTool({ repository: testRepository(), createRunner: vi.fn() });
     const result = await tool.execute({
       action: "template",
       templateName: "research-implement-verify",
@@ -643,7 +670,7 @@ describe("workflowTool", () => {
   it("creates a reconciliation follow-up workflow spec for a persisted run", async () => {
     const cwd = makeTempDir();
     try {
-      const store = new WorkflowRunStore({ cwd });
+      const store = new FileWorkflowRunRepository({ cwd });
       const spec = {
         mode: "parallel" as const,
         tasks: [
@@ -684,7 +711,7 @@ describe("workflowTool", () => {
         createdAt: 1,
       }));
 
-      const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const tool = createWorkflowTool({ repository: store, createRunner: vi.fn() });
       const result = await tool.execute({ action: "reconcile", runId: "reconcile-source", budgetPreset: "cheap-review" }, { cwd });
 
       expect(result.isError).toBeUndefined();
@@ -702,7 +729,7 @@ describe("workflowTool", () => {
   it.each(["status", "list", "cancel"])(
     "rejects the removed %s lifecycle action and points to Jobs",
     async (action) => {
-      const tool = createWorkflowTool({ createRunner: vi.fn() });
+      const tool = createWorkflowTool({ repository: testRepository(), createRunner: vi.fn() });
       const result = await tool.execute({ action }, ctx);
 
       expect(result.isError).toBe(true);
@@ -713,7 +740,7 @@ describe("workflowTool", () => {
   it("resumes persisted workflow snapshots through the tool", async () => {
     const cwd = makeTempDir();
     try {
-      const store = new WorkflowRunStore({ cwd });
+      const store = new FileWorkflowRunRepository({ cwd });
       const spec = {
         mode: "pipeline" as const,
         tasks: [{ id: "research" }, { id: "implement" }, { id: "verify" }],
@@ -744,7 +771,7 @@ describe("workflowTool", () => {
         executed.push(task.id);
         return { summary: `${task.id} done`, result: `${task.id} result` };
       });
-      const tool = createWorkflowTool({ createRunner: () => runner });
+      const tool = createWorkflowTool({ repository: store, createRunner: () => runner });
       const result = await tool.execute({ action: "resume", runId: "resume-run" }, { cwd });
 
       expect(result.isError).toBeUndefined();

@@ -4,9 +4,9 @@ import {
   createAgentTool,
   teamCreateTool,
   teamDeleteTool,
-  workflowTool,
+  createWorkflowTool,
 } from "./agent/index.js";
-import type { AgentDefinition } from "@openharness/coordinator";
+import type { AgentDefinition, WorkflowRunRepository } from "@openharness/coordinator";
 import { feishuPushTool } from "./channels/index.js";
 import {
   fileEditTool,
@@ -57,6 +57,7 @@ export function createDefaultToolRegistry(
     terminal?: boolean;
     jobs?: boolean;
     agentDefinitions?: AgentDefinition[];
+    workflowRepository?: WorkflowRunRepository;
   } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
@@ -86,7 +87,9 @@ export function createDefaultToolRegistry(
       ? agentTool
       : createAgentTool({ agentDefinitions: options.agentDefinitions }),
   );
-  registry.register(workflowTool);
+  if (options.workflowRepository) {
+    registry.register(createWorkflowTool({ repository: options.workflowRepository }));
+  }
   registry.register(teamCreateTool);
   registry.register(teamDeleteTool);
   if (options.schedules) {

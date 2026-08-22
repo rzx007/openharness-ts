@@ -9,7 +9,6 @@ export {
 } from "./agent.js";
 export {
   createDefaultNodeAgent,
-  createOpenHarnessAgent,
 } from "./default-agent.js";
 export type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 export type {

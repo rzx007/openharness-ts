@@ -2,7 +2,7 @@ import {
   cancelPersistentWorkflow,
   createWorkflowNotification,
   createWorkflowResultFromSnapshot,
-  WorkflowRunStore,
+  type WorkflowRunRepository,
   type WorkflowRunSnapshot,
 } from "@openharness/coordinator";
 import {
@@ -18,6 +18,7 @@ import {
   type JobWaitRequest,
   type JobWaitResult,
 } from "@openharness/jobs";
+import { DEFAULT_RETENTION_POLICY } from "@openharness/services";
 import type { SessionRecord, SessionExecutionRecord } from "@openharness/services/session-runtime/types";
 import type { TerminalSessionInfo } from "@openharness/terminal";
 
@@ -35,6 +36,10 @@ interface JobSessionStore {
     status: "stopped";
     output?: string;
   }): SessionExecutionRecord;
+  waitForSessionTaskChange?(taskId: string, after: number, options: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+  }): Promise<SessionExecutionRecord | undefined>;
 }
 
 interface JobExecutionRuntime {
@@ -43,7 +48,6 @@ interface JobExecutionRuntime {
   stopExecution(executionId: string): Promise<unknown>;
 }
 
-const POLL_INTERVAL_MS = 50;
 const DEFAULT_OUTPUT_LIMIT = 12_000;
 
 export class DaemonJobService {
@@ -57,6 +61,7 @@ export class DaemonJobService {
     private readonly getChildAgentExecutionRegistry: (
       scope: { cwd: string; sessionId: string },
     ) => JobExecutionRuntime,
+    private readonly workflows: WorkflowRunRepository,
   ) {}
 
   createAgentHost(session: SessionRecord): AgentJobHost {
@@ -74,14 +79,22 @@ export class DaemonJobService {
     this.backgroundShells.list({ sessionId: session.id });
     const terminals = await this.terminals.list({ sessionId: session.id, source: "agent" });
     const tasks = this.store.listSessionTasks(session.id);
-    const workflows = new WorkflowRunStore({ cwd: session.cwd })
+    const workflows = this.workflows
       .list()
       .filter((workflow) => workflow.ownerSession === session.id);
-    return filterJobSnapshots([
+    const snapshots = [
       ...terminals.map(terminalSnapshot),
       ...tasks.map(taskSnapshot),
       ...workflows.map((workflow) => workflowSnapshot(workflow, session.cwd)),
-    ], input);
+    ];
+    const visible = input.includeFinished === true
+      ? snapshots
+      : snapshots.filter((job) =>
+          !isFinished(job.status) ||
+          job.updatedAt < 1_000_000_000_000 ||
+          job.updatedAt >= Date.now() - DEFAULT_RETENTION_POLICY.completedJobVisibleForMs,
+        );
+    return filterJobSnapshots(visible, input);
   }
 
   async read(input: JobReadRequest): Promise<JobReadResult> {
@@ -143,13 +156,23 @@ export class DaemonJobService {
     }
     const initial = await this.read(input);
     if (isFinished(initial.snapshot.status)) return { ...initial, timedOut: false };
-    const deadline = Date.now() + input.timeoutMs;
-    while (Date.now() < deadline) {
-      await delay(Math.min(POLL_INTERVAL_MS, deadline - Date.now()), input.signal);
+    if (source.kind === "workflow" && source.repository.waitForChange) {
+      await source.repository.waitForChange(source.value.runId, source.value.updatedAt, {
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+      });
       const current = await this.read(input);
-      if (isFinished(current.snapshot.status)) return { ...current, timedOut: false };
+      return { ...current, timedOut: !isFinished(current.snapshot.status) };
     }
-    return { ...(await this.read(input)), timedOut: true };
+    if (source.kind === "task" && this.store.waitForSessionTaskChange) {
+      await this.store.waitForSessionTaskChange(source.value.id, source.value.updatedAt, {
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+      });
+      const current = await this.read(input);
+      return { ...current, timedOut: !isFinished(current.snapshot.status) };
+    }
+    return { ...initial, timedOut: true };
   }
 
   async send(input: { sessionId: string; jobId: string; data: string }): Promise<void> {
@@ -188,13 +211,12 @@ export class DaemonJobService {
     }
     const session = this.requireSession(input.sessionId);
     const manager = this.processSupervisorFor(input.sessionId);
-    const store = new WorkflowRunStore({ cwd: session.cwd });
     await cancelPersistentWorkflow(source.value, {
-      store,
+      store: source.repository,
       reason: input.reason,
       stopTask: async (taskId) => await manager.stopExecution(taskId),
     });
-    return workflowSnapshot(store.load(source.value.runId)!, session.cwd);
+    return workflowSnapshot(source.repository.load(source.value.runId)!, session.cwd);
   }
 
   private owned<T extends { sessionId: string }>(session: SessionRecord, input: T): T {
@@ -232,7 +254,7 @@ export class DaemonJobService {
   private async resolve(sessionId: string, jobId: string): Promise<
     | { kind: "terminal"; value: TerminalSessionInfo }
     | { kind: "task"; value: SessionExecutionRecord }
-    | { kind: "workflow"; value: WorkflowRunSnapshot; cwd: string }
+    | { kind: "workflow"; value: WorkflowRunSnapshot; cwd: string; repository: WorkflowRunRepository }
   > {
     this.requireSession(sessionId);
     this.backgroundShells.list({ sessionId });
@@ -242,8 +264,12 @@ export class DaemonJobService {
     const task = this.store.getSessionTask(jobId);
     if (task?.sessionId === sessionId) return { kind: "task", value: task };
     const session = this.requireSession(sessionId);
-    const workflow = new WorkflowRunStore({ cwd: session.cwd }).load(jobId);
-    if (workflow?.ownerSession === sessionId) return { kind: "workflow", value: workflow, cwd: session.cwd };
+    if (!jobId.startsWith("workflow:")) throw new Error(`Job not found: ${jobId}`);
+    const repository = this.workflows;
+    const workflow = repository.load(jobId.slice("workflow:".length));
+    if (workflow?.ownerSession === sessionId) {
+      return { kind: "workflow", value: workflow, cwd: session.cwd, repository };
+    }
     throw new Error(`Job not found: ${jobId}`);
   }
 }
@@ -291,7 +317,7 @@ function taskSnapshot(task: SessionExecutionRecord): JobSnapshot {
 function workflowSnapshot(workflow: WorkflowRunSnapshot, cwd: string): JobSnapshot {
   const cancelled = workflow.termination === "cancelled";
   return {
-    id: workflow.runId,
+    id: qualifiedWorkflowId(workflow.runId),
     kind: "workflow",
     label: workflow.summary,
     ownerSession: workflow.ownerSession!,
@@ -381,19 +407,6 @@ function isFinished(status: JobStatus): boolean {
   return status === "completed" || status === "failed" || status === "killed";
 }
 
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(done, Math.max(1, ms));
-    timer.unref?.();
-    function done() {
-      signal?.removeEventListener("abort", aborted);
-      resolve();
-    }
-    function aborted() {
-      clearTimeout(timer);
-      reject(signal?.reason ?? new Error("Job wait aborted."));
-    }
-    signal?.addEventListener("abort", aborted, { once: true });
-    if (signal?.aborted) aborted();
-  });
+function qualifiedWorkflowId(runId: string): string {
+  return `workflow:${runId}`;
 }

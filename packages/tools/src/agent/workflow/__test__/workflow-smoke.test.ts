@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseWorkflowNotification, WorkflowRunStore } from "@openharness/coordinator";
+import { FileWorkflowRunRepository, parseWorkflowNotification } from "@openharness/coordinator";
 import type { AgentChildController, AgentExecutionContext } from "@openharness/core";
 import { createAgentWorkflowRunner } from "../runner";
 import { createWorkflowTool } from "../tool";
@@ -52,6 +52,7 @@ describe("Workflow tool smoke", () => {
       },
     };
     const tool = createWorkflowTool({
+      repository: new FileWorkflowRunRepository({ cwd: tempDir! }),
       createRunner: (options) =>
         createAgentWorkflowRunner({
           ...options,
@@ -91,7 +92,7 @@ describe("Workflow tool smoke", () => {
     expect(spawned[1]!.prompt).toContain("Pipeline input:");
     expect(spawned[1]!.prompt).toContain("worker:research");
 
-    const stored = new WorkflowRunStore({ cwd: tempDir! }).list();
+    const stored = new FileWorkflowRunRepository({ cwd: tempDir! }).list();
     expect(stored).toHaveLength(1);
     expect(stored[0]?.status).toBe("completed");
     expect(stored[0]?.orderedResults.map((task) => task.taskId)).toEqual(["research", "verify"]);

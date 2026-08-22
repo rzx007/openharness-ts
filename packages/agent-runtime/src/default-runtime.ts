@@ -33,6 +33,7 @@ import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import type { AgentDefinition } from "@openharness/coordinator";
+import type { WorkflowRunRepository } from "@openharness/coordinator";
 
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 
@@ -75,6 +76,7 @@ interface OpenHarnessRuntimeOptions {
     schedules?: boolean;
     terminal?: boolean;
     jobs?: boolean;
+    workflowRepository?: WorkflowRunRepository;
   };
 }
 
@@ -145,6 +147,7 @@ export async function createOpenHarnessRuntime(
     terminal: options.hostCapabilities?.terminal,
     jobs: options.hostCapabilities?.jobs,
     agentDefinitions: options.agentDefinitions,
+    workflowRepository: options.hostCapabilities?.workflowRepository,
   });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);

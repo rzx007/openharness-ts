@@ -81,8 +81,11 @@ import type {
   RecordChannelDeliveryInput,
   ChannelDeliveryRecord,
   ChannelStatusSnapshot,
+  ClientProtocolSupport,
+  ServerCapabilities,
 } from "@openharness/protocol";
 import {
+  checkProtocolCompatibility,
   decodeJobReadResult,
   decodeJobSnapshot,
   decodeJobWaitResult,
@@ -92,6 +95,7 @@ import {
   decodeTerminalReadResult,
   decodeTerminalSessionInfo,
   ProtocolDataError,
+  parseServerCapabilities,
 } from "@openharness/protocol";
 
 let promptRequestCounter = 0;
@@ -190,6 +194,28 @@ export class OpenHarnessClient {
       auth: false,
       signal: options.signal,
     });
+  }
+
+  /** 连接产品应先调用它，再根据 features 决定显示哪些功能。 */
+  async capabilities(
+    options: { signal?: AbortSignal; support?: ClientProtocolSupport } = {},
+  ): Promise<ServerCapabilities> {
+    const value = await this.request<unknown>("/capabilities", {
+      auth: false,
+      signal: options.signal,
+    });
+    const capabilities = parseServerCapabilities(value);
+    const compatibility = checkProtocolCompatibility(
+      capabilities,
+      options.support ?? { version: 2 },
+    );
+    if (!compatibility.compatible) {
+      throw new IncompatibleProtocolError(
+        capabilities,
+        compatibility.reason ?? "Client and server protocol versions are incompatible",
+      );
+    }
+    return capabilities;
   }
 
   async handleChannelMessage(
@@ -1491,4 +1517,11 @@ function parseSseFrame(frame: string): unknown | undefined {
   }
   if (!data) return undefined;
   return JSON.parse(data) as unknown;
+}
+
+export class IncompatibleProtocolError extends Error {
+  constructor(readonly capabilities: ServerCapabilities, message: string) {
+    super(message);
+    this.name = "IncompatibleProtocolError";
+  }
 }

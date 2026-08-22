@@ -58,16 +58,9 @@ export class DurableEventRegistry {
     payload: Record<string, unknown>,
     sessionId?: string,
   ): PreparedDurableEvent {
-    let resolvedType = type;
-    let resolvedPayload = payload;
-    let definition = this.definitions.get(resolvedType);
-    if (!definition && schemaVersion === 1 && typeof payload.frameworkEventId === "string") {
-      const { frameworkEventId, ...domainPayload } = payload;
-      resolvedType = "agent.domain.event";
-      resolvedPayload = { frameworkEventId, name: type, payload: domainPayload };
-      definition = this.definitions.get(resolvedType);
-    }
-    if (!definition) definition = this.requireDefinition(type);
+    const resolvedType = type;
+    const resolvedPayload = payload;
+    const definition = this.requireDefinition(type);
     this.validateScope(definition, sessionId);
     if (!Number.isInteger(schemaVersion) || schemaVersion < 1 || schemaVersion > definition.currentVersion) {
       throw new DurableEventRegistryError(

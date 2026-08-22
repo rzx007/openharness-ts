@@ -20,28 +20,48 @@ import type {
   WorkflowTaskRunResult,
 } from "./model.js";
 
-export interface WorkflowRunStoreOptions {
+export interface FileWorkflowRunRepositoryOptions {
   cwd?: string;
   dir?: string;
 }
 
-export interface RunPersistentWorkflowOptions extends WorkflowRunStoreOptions {
+/** Workflow 持久化入口。具体数据可以放在项目文件、SQLite 或其他宿主存储中。 */
+export interface WorkflowRunRepository {
+  readonly repositoryKey: string;
+  save(snapshot: WorkflowRunSnapshot): void;
+  appendEvent(event: WorkflowRunEvent): void;
+  loadEvents(runId: string): WorkflowRunEvent[];
+  load(runId: string): WorkflowRunSnapshot | undefined;
+  list(): WorkflowRunSnapshot[];
+  listSummaries(): WorkflowRunSummary[];
+  latest(): WorkflowRunSnapshot | undefined;
+  claim(runId: string): { ownerId: string; generation: number; claimedAt: number };
+  finish(runId: string, status: WorkflowRunSnapshot["status"]): void;
+  waitForChange(runId: string, after: number, options: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+  }): Promise<WorkflowRunSnapshot | undefined>;
+}
+
+export interface RunPersistentWorkflowOptions {
   runId?: string;
   ownerSession?: string;
-  store?: WorkflowRunStore;
+  ownerInput?: string;
+  ownerRun?: string;
+  store: WorkflowRunRepository;
   onEvent?: (event: WorkflowRunEvent) => void;
   /** Prevent a cancelled owner from writing a later running/completed snapshot. */
   signal?: AbortSignal;
 }
 
-export interface ResumePersistentWorkflowOptions extends WorkflowRunStoreOptions {
-  store?: WorkflowRunStore;
+export interface ResumePersistentWorkflowOptions {
+  store: WorkflowRunRepository;
   onEvent?: (event: WorkflowRunEvent) => void;
   signal?: AbortSignal;
 }
 
-export interface CancelPersistentWorkflowOptions extends WorkflowRunStoreOptions {
-  store?: WorkflowRunStore;
+export interface CancelPersistentWorkflowOptions {
+  store: WorkflowRunRepository;
   reason?: string;
   stopTask?: (taskId: string) => Promise<unknown>;
   onEvent?: (event: WorkflowRunEvent) => void;
@@ -57,11 +77,14 @@ export function getWorkflowRunsDir(cwd?: string): string {
   return join(getProjectConfigDir(cwd), "workflows");
 }
 
-export class WorkflowRunStore {
+export class FileWorkflowRunRepository implements WorkflowRunRepository {
   readonly dir: string;
+  readonly repositoryKey: string;
+  private readonly listeners = new Map<string, Set<() => void>>();
 
-  constructor(options: WorkflowRunStoreOptions = {}) {
+  constructor(options: FileWorkflowRunRepositoryOptions = {}) {
     this.dir = options.dir ?? getWorkflowRunsDir(options.cwd);
+    this.repositoryKey = `file:${this.dir}`;
   }
 
   pathFor(runId: string): string {
@@ -75,11 +98,13 @@ export class WorkflowRunStore {
   save(snapshot: WorkflowRunSnapshot): void {
     mkdirSync(this.dir, { recursive: true });
     atomicWrite(this.pathFor(snapshot.runId), JSON.stringify(snapshot, null, 2) + "\n");
+    this.notify(snapshot.runId);
   }
 
   appendEvent(event: WorkflowRunEvent): void {
     mkdirSync(this.dir, { recursive: true });
     appendFileSync(this.eventPathFor(event.runId), JSON.stringify(event) + "\n", "utf-8");
+    this.notify(event.runId);
   }
 
   loadEvents(runId: string): WorkflowRunEvent[] {
@@ -89,8 +114,7 @@ export class WorkflowRunStore {
     for (const line of readFileSync(path, "utf-8").split(/\r?\n/)) {
       if (line.trim() === "") continue;
       try {
-        const event = JSON.parse(line) as unknown;
-        if (isWorkflowRunEvent(event)) events.push(event);
+        events.push(decodeWorkflowRunEvent(line));
       } catch {
         // Ignore corrupt event lines so a partial append doesn't hide the usable timeline.
       }
@@ -101,7 +125,7 @@ export class WorkflowRunStore {
   load(runId: string): WorkflowRunSnapshot | undefined {
     const path = this.pathFor(runId);
     if (!existsSync(path)) return undefined;
-    return parseWorkflowRunSnapshot(readFileSync(path, "utf-8"));
+    return decodeWorkflowRunSnapshot(readFileSync(path, "utf-8"));
   }
 
   list(): WorkflowRunSnapshot[] {
@@ -110,7 +134,7 @@ export class WorkflowRunStore {
     for (const entry of readdirSync(this.dir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
       try {
-        const snapshot = parseWorkflowRunSnapshot(readFileSync(join(this.dir, entry.name), "utf-8"));
+        const snapshot = decodeWorkflowRunSnapshot(readFileSync(join(this.dir, entry.name), "utf-8"));
         snapshots.push(snapshot);
       } catch {
         // Ignore corrupt or partial files so one bad snapshot doesn't hide the rest.
@@ -125,6 +149,60 @@ export class WorkflowRunStore {
 
   latest(): WorkflowRunSnapshot | undefined {
     return this.list()[0];
+  }
+
+  claim(_runId: string): { ownerId: string; generation: number; claimedAt: number } {
+    return { ownerId: `file:${process.pid}`, generation: 1, claimedAt: Date.now() };
+  }
+
+  finish(_runId: string, _status: WorkflowRunSnapshot["status"]): void {}
+
+  async waitForChange(
+    runId: string,
+    after: number,
+    options: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<WorkflowRunSnapshot | undefined> {
+    const current = this.load(runId);
+    if (!current || current.updatedAt > after) return current;
+    return await new Promise((resolve, reject) => {
+      const listeners = this.listeners.get(runId) ?? new Set<() => void>();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = () => {
+        if (timer) clearTimeout(timer);
+        listeners.delete(changed);
+        options.signal?.removeEventListener("abort", aborted);
+        if (listeners.size === 0) this.listeners.delete(runId);
+      };
+      const changed = () => {
+        finish();
+        resolve(this.load(runId));
+      };
+      const aborted = () => {
+        finish();
+        reject(options.signal?.reason ?? new Error("Workflow wait aborted."));
+      };
+      listeners.add(changed);
+      this.listeners.set(runId, listeners);
+      if (options.signal?.aborted) {
+        aborted();
+        return;
+      }
+      options.signal?.addEventListener("abort", aborted, { once: true });
+      const registered = this.load(runId);
+      if (!registered || registered.updatedAt > after) {
+        changed();
+        return;
+      }
+      timer = setTimeout(() => {
+        finish();
+        resolve(this.load(runId));
+      }, Math.max(1, options.timeoutMs));
+      timer.unref?.();
+    });
+  }
+
+  private notify(runId: string): void {
+    for (const listener of [...(this.listeners.get(runId) ?? [])]) listener();
   }
 
   async resume(runId: string, runner: WorkflowRunner): Promise<WorkflowRunResult> {
@@ -143,18 +221,29 @@ export class WorkflowRunStore {
 export async function runPersistentWorkflow(
   spec: WorkflowSpec,
   runner: WorkflowRunner,
-  options: RunPersistentWorkflowOptions = {},
+  options: RunPersistentWorkflowOptions,
 ): Promise<WorkflowRunResult> {
-  const store = options.store ?? new WorkflowRunStore({ cwd: options.cwd, dir: options.dir });
+  const store = options.store;
   const runId = options.runId ?? createWorkflowRunId();
+  if (store.load(runId)) throw new Error(`Workflow run already exists: ${runId}`);
   const active = registerActiveWorkflow(store, runId);
+  let claimed = false;
   try {
     return await runWorkflow(spec, runner, {
       runId,
       ownerSession: options.ownerSession,
+      ownerInput: options.ownerInput,
+      ownerRun: options.ownerRun,
       shouldStop: () => active.stopReason,
       onSnapshot: (snapshot) => {
-        if (!options.signal?.aborted && !active.stopReason) store.save(snapshot);
+        if (!options.signal?.aborted && !active.stopReason) {
+          store.save(snapshot);
+          if (!claimed) {
+            store.claim(runId);
+            claimed = true;
+          }
+          if (snapshot.status !== "running") store.finish(runId, snapshot.status);
+        }
       },
       onEvent: (event) => {
         if (options.signal?.aborted || active.stopReason) return;
@@ -170,9 +259,9 @@ export async function runPersistentWorkflow(
 export async function resumePersistentWorkflow(
   snapshotOrRunId: WorkflowRunSnapshot | string,
   runner: WorkflowRunner,
-  options: ResumePersistentWorkflowOptions = {},
+  options: ResumePersistentWorkflowOptions,
 ): Promise<WorkflowRunResult> {
-  const store = options.store ?? new WorkflowRunStore({ cwd: options.cwd, dir: options.dir });
+  const store = options.store;
   const snapshot =
     typeof snapshotOrRunId === "string"
       ? store.load(snapshotOrRunId)
@@ -184,16 +273,26 @@ export async function resumePersistentWorkflow(
     return createWorkflowResultFromSnapshot(snapshot);
   }
   const active = registerActiveWorkflow(store, snapshot.runId);
+  let claimed = false;
   try {
     return await runWorkflow(snapshot.spec, runner, {
       runId: snapshot.runId,
       ownerSession: snapshot.ownerSession,
+      ownerInput: snapshot.ownerInput,
+      ownerRun: snapshot.ownerRun,
       shouldStop: () => active.stopReason,
       createdAt: snapshot.createdAt,
       initialResults: snapshot.results,
       initialRunningTasks: snapshot.runningTasks,
       onSnapshot: (next) => {
-        if (!options.signal?.aborted && !active.stopReason) store.save(next);
+        if (!options.signal?.aborted && !active.stopReason) {
+          store.save(next);
+          if (!claimed) {
+            store.claim(snapshot.runId);
+            claimed = true;
+          }
+          if (next.status !== "running") store.finish(snapshot.runId, next.status);
+        }
       },
       onEvent: (event) => {
         if (options.signal?.aborted || active.stopReason) return;
@@ -208,9 +307,9 @@ export async function resumePersistentWorkflow(
 
 export async function cancelPersistentWorkflow(
   snapshotOrRunId: WorkflowRunSnapshot | string,
-  options: CancelPersistentWorkflowOptions = {},
+  options: CancelPersistentWorkflowOptions,
 ): Promise<WorkflowRunResult> {
-  const store = options.store ?? new WorkflowRunStore({ cwd: options.cwd, dir: options.dir });
+  const store = options.store;
   const snapshot =
     typeof snapshotOrRunId === "string"
       ? store.load(snapshotOrRunId)
@@ -274,6 +373,8 @@ export async function cancelPersistentWorkflow(
   const cancelledSnapshot = createWorkflowRunSnapshot({
     runId: snapshot.runId,
     ownerSession: snapshot.ownerSession,
+    ownerInput: snapshot.ownerInput,
+    ownerRun: snapshot.ownerRun,
     status: "failed",
     termination: "cancelled",
     summary: reason,
@@ -286,6 +387,7 @@ export async function cancelPersistentWorkflow(
     createdAt: snapshot.createdAt,
   });
   store.save(cancelledSnapshot);
+  store.finish(snapshot.runId, cancelledSnapshot.status);
   const event: WorkflowRunEvent = {
     version: 1,
     runId: snapshot.runId,
@@ -299,11 +401,11 @@ export async function cancelPersistentWorkflow(
   return createWorkflowResultFromSnapshot(cancelledSnapshot);
 }
 
-function activeWorkflowKey(store: WorkflowRunStore, runId: string): string {
-  return `${store.dir}\0${runId}`;
+function activeWorkflowKey(store: WorkflowRunRepository, runId: string): string {
+  return `${store.repositoryKey}\0${runId}`;
 }
 
-function registerActiveWorkflow(store: WorkflowRunStore, runId: string): ActiveWorkflowRun {
+function registerActiveWorkflow(store: WorkflowRunRepository, runId: string): ActiveWorkflowRun {
   const key = activeWorkflowKey(store, runId);
   const runs = activeWorkflowRuns.get(key) ?? new Set<ActiveWorkflowRun>();
   const active: ActiveWorkflowRun = {};
@@ -313,7 +415,7 @@ function registerActiveWorkflow(store: WorkflowRunStore, runId: string): ActiveW
 }
 
 function unregisterActiveWorkflow(
-  store: WorkflowRunStore,
+  store: WorkflowRunRepository,
   runId: string,
   active: ActiveWorkflowRun,
 ): void {
@@ -324,7 +426,7 @@ function unregisterActiveWorkflow(
   if (runs.size === 0) activeWorkflowRuns.delete(key);
 }
 
-function requestActiveWorkflowStop(store: WorkflowRunStore, runId: string, reason: string): void {
+function requestActiveWorkflowStop(store: WorkflowRunRepository, runId: string, reason: string): void {
   for (const active of activeWorkflowRuns.get(activeWorkflowKey(store, runId)) ?? []) {
     active.stopReason = reason;
   }
@@ -347,18 +449,18 @@ function atomicWrite(path: string, data: string): void {
   renameSync(tmp, path);
 }
 
-function parseWorkflowRunSnapshot(text: string): WorkflowRunSnapshot {
+export function decodeWorkflowRunSnapshot(text: string): WorkflowRunSnapshot {
   const value = JSON.parse(text) as unknown;
   if (!isWorkflowRunSnapshot(value)) {
     throw new Error("Invalid workflow run snapshot");
   }
-  return {
-    ...value,
-    blockedTaskIds: value.blockedTaskIds ?? [],
-    blockedTasks: value.blockedTasks ?? {},
-    runningTasks: value.runningTasks ?? {},
-    budget: value.budget ?? { tasks: {} },
-  };
+  return value;
+}
+
+export function decodeWorkflowRunEvent(text: string): WorkflowRunEvent {
+  const value = JSON.parse(text) as unknown;
+  if (!isWorkflowRunEvent(value)) throw new Error("Invalid workflow run event");
+  return value;
 }
 
 function isWorkflowRunSnapshot(value: unknown): value is WorkflowRunSnapshot {
@@ -378,11 +480,11 @@ function isWorkflowRunSnapshot(value: unknown): value is WorkflowRunSnapshot {
     candidate.results !== null &&
     Array.isArray(candidate.orderedResults) &&
     Array.isArray(candidate.pendingTaskIds) &&
-    (candidate.blockedTaskIds === undefined || Array.isArray(candidate.blockedTaskIds)) &&
-    (candidate.blockedTasks === undefined || (typeof candidate.blockedTasks === "object" && candidate.blockedTasks !== null)) &&
+    Array.isArray(candidate.blockedTaskIds) &&
+    typeof candidate.blockedTasks === "object" && candidate.blockedTasks !== null &&
     Array.isArray(candidate.runningTaskIds) &&
-    (candidate.runningTasks === undefined || (typeof candidate.runningTasks === "object" && candidate.runningTasks !== null)) &&
-    (candidate.budget === undefined || (typeof candidate.budget === "object" && candidate.budget !== null)) &&
+    typeof candidate.runningTasks === "object" && candidate.runningTasks !== null &&
+    typeof candidate.budget === "object" && candidate.budget !== null &&
     typeof candidate.createdAt === "number" &&
     typeof candidate.updatedAt === "number"
   );

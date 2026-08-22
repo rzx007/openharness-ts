@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from "@openharness/coordinator";
+import { createWorkflowPlan, createWorkflowRunSnapshot } from "@openharness/coordinator";
 import type { JobSnapshot } from "@openharness/jobs";
 import type {
   AgentChildInput,
@@ -386,6 +386,25 @@ describe("OpenHarnessHttpServer", () => {
     expect(runtimeSnapshot).toHaveBeenCalledOnce();
     await server.close();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("serves protocol capabilities without bearer authentication", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-capabilities-"));
+    const server = new OpenHarnessHttpServer({
+      storePath: join(dir, "sessions.db"),
+      token: "secret",
+      version: "0.4.0",
+      logger: () => {},
+    });
+    const response = await server.app.request("/capabilities");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      serverVersion: "0.4.0",
+      protocol: { version: 2 },
+      features: { jobs: 2, workflow: 2 },
+    });
+    await server.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("aggregates application, listener, and SSE close failures after attempting every stage", async () => {
@@ -1188,19 +1207,19 @@ describe("OpenHarnessHttpServer", () => {
     }
   });
 
-  it("terminalizes daemon-owned running workflows after restart without touching unrelated project workflows", async () => {
+  it("terminalizes durable running workflows after restart", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-workflow-restart-"));
     const storePath = join(dir, "sessions.db");
     const projectCwd = join(dir, "project");
-    const workflowStore = new WorkflowRunStore({ cwd: projectCwd });
     const spec = {
       mode: "sequential" as const,
       tasks: [{ id: "child", prompt: "finish the child task" }],
     };
     const plan = createWorkflowPlan(spec);
     const now = Date.now();
-    const createRunningSnapshot = (runId: string) => createWorkflowRunSnapshot({
+    const createRunningSnapshot = (runId: string, ownerSession?: string) => createWorkflowRunSnapshot({
       runId,
+      ownerSession,
       status: "running",
       summary: "Workflow started",
       spec,
@@ -1218,11 +1237,6 @@ describe("OpenHarnessHttpServer", () => {
       createdAt: now,
     });
     const daemonRunId = "wf-daemon-owned";
-    const unrelatedRunId = "wf-cli-owned";
-    const corruptRunId = "wf-corrupt";
-    workflowStore.save(createRunningSnapshot(daemonRunId));
-    workflowStore.save(createRunningSnapshot(unrelatedRunId));
-
     try {
       const first = new OpenHarnessHttpServer({ storePath });
       const parent = first.store.createSession({
@@ -1242,52 +1256,24 @@ describe("OpenHarnessHttpServer", () => {
       });
       const staleChildRun = first.store.createRun({ id: "child-run", sessionId: child.id });
       first.store.updateRun(staleChildRun.id, { status: "running" });
-      first.store.appendEvent({
-        type: "workflow.workflow_started",
-        sessionId: parent.id,
-        payload: {
-          event: {
-            version: 1,
-            runId: daemonRunId,
-            type: "workflow_started",
-            timestamp: now,
-            status: "running",
-          },
-        },
-      });
-      writeFileSync(workflowStore.pathFor(corruptRunId), "{ not valid JSON", "utf-8");
-      first.store.appendEvent({
-        type: "workflow.workflow_started",
-        sessionId: parent.id,
-        payload: {
-          event: {
-            version: 1,
-            runId: corruptRunId,
-            type: "workflow_started",
-            timestamp: now,
-            status: "running",
-          },
-        },
-      });
+      first.application.workflows.save(createRunningSnapshot(daemonRunId, parent.id));
+      first.application.workflows.claim(daemonRunId);
 
       await first.close();
       const second = new OpenHarnessHttpServer({ storePath });
       await second.listen();
       try {
-        const recovered = workflowStore.load(daemonRunId)!;
+        const recovered = second.application.workflows.load(daemonRunId)!;
         expect(recovered.status).toBe("failed");
         expect(recovered.results.child).toMatchObject({
           status: "killed",
           summary: "Daemon restarted before the workflow completed",
         });
         expect(recovered.runningTaskIds).toEqual([]);
-        expect(workflowStore.load(unrelatedRunId)?.status).toBe("running");
         expect(second.store.getRun(staleChildRun.id)).toMatchObject({ status: "interrupted" });
         expect(second.store.listChildSessions(parent.id).map((session) => session.id)).toEqual([child.id]);
         expect(second.store.listEvents({ sessionId: parent.id }).find((event) => event.type === "workflow.workflow_cancelled"))
-          .toMatchObject({ payload: { recoveredAfterDaemonRestart: true } });
-        expect(second.store.listEvents({ sessionId: parent.id }).find((event) => event.type === "workflow.workflow_recovery_failed"))
-          .toMatchObject({ payload: { runId: corruptRunId, recoveredAfterDaemonRestart: true } });
+          .toMatchObject({ payload: { event: { runId: daemonRunId } } });
       } finally {
         await second.close();
       }

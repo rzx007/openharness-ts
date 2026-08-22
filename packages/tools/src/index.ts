@@ -51,7 +51,6 @@ export {
 } from "./web/index.js";
 export {
   createAgentWorkflowRunner,
-  workflowTool,
   type AgentWorkflowRunnerOptions,
 } from "./agent/index.js";
 export { mcpAuthTool } from "./mcp/index.js";

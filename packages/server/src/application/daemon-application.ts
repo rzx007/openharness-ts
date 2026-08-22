@@ -13,6 +13,7 @@ import {
   getChildAgentExecutionRegistry,
   getDetachedProcessSupervisor,
   type SessionStore,
+  type ApplicationOwnerLease,
 } from "@openharness/services";
 
 import {
@@ -55,6 +56,8 @@ import { recoverInterruptedWorkflows } from "./session/workflow-recovery.js";
 import { ApplicationEventService } from "./events/application-event-service.js";
 import { ProjectApplicationService } from "./project-application-service.js";
 import { ChannelApplicationService } from "./channel/channel-application-service.js";
+import { SessionWorkflowRunRepository } from "./workflow/session-workflow-run-repository.js";
+import { ApplicationRetentionService } from "./retention/application-retention-service.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -67,6 +70,9 @@ export interface DaemonApplicationOptions {
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
   log(event: ObservabilityEvent): void;
+  ownerId?: string;
+  ownerHeartbeatMs?: number;
+  ownerStaleAfterMs?: number;
 }
 
 export interface DurableAgentApplication {
@@ -83,6 +89,8 @@ export interface DurableAgentApplication {
   readonly projects: ProjectApplicationService;
   readonly events: ApplicationEventService;
   readonly channels: ChannelApplicationService;
+  readonly workflows: SessionWorkflowRunRepository;
+  readonly retention: ApplicationRetentionService;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -102,6 +110,8 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly projects: ProjectApplicationService;
   readonly events: ApplicationEventService;
   readonly channels: ChannelApplicationService;
+  readonly workflows: SessionWorkflowRunRepository;
+  readonly retention: ApplicationRetentionService;
 
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -113,10 +123,32 @@ export class DaemonApplication implements DurableAgentApplication {
   private readonly startupRecovery: Promise<void>;
   private closePromise?: Promise<void>;
   private readyState: "starting" | "ready" | "failed" | "closing" | "closed" = "starting";
+  private ownerLease: ApplicationOwnerLease;
+  private readonly ownerHeartbeat: ReturnType<typeof setInterval>;
 
   constructor(private readonly options: DaemonApplicationOptions) {
     const { store } = options;
     this.store = store;
+    this.ownerLease = store.acquireApplicationOwner({
+      ownerId: options.ownerId ?? `daemon:${process.pid}:${randomUUID()}`,
+      pid: process.pid,
+      staleAfterMs: options.ownerStaleAfterMs ?? 30_000,
+    });
+    this.ownerHeartbeat = setInterval(() => {
+      try {
+        this.ownerLease = store.heartbeatApplicationOwner(this.ownerLease);
+      } catch (error) {
+        clearInterval(this.ownerHeartbeat);
+        this.readyState = "failed";
+        options.log({
+          level: "error",
+          event: "application.owner_lost",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, options.ownerHeartbeatMs ?? 5_000);
+    this.ownerHeartbeat.unref?.();
+    try {
     recoverProjectionSettlements(store);
     store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
     store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
@@ -126,6 +158,11 @@ export class DaemonApplication implements DurableAgentApplication {
 
     this.events = new ApplicationEventService(store);
     this.eventPublisher = new SessionEventPublisher(store, this.events);
+    this.workflows = new SessionWorkflowRunRepository(
+      store,
+      (previousEventSeq) => this.eventPublisher.publishSince(previousEventSeq),
+    );
+    this.retention = new ApplicationRetentionService(store);
     this.terminals = new DaemonTerminalService(store);
     this.projects = new ProjectApplicationService(store);
     this.permissions = new StorePermissionBroker({
@@ -154,6 +191,7 @@ export class DaemonApplication implements DurableAgentApplication {
       this.backgroundShells,
       (scope) => getDetachedProcessSupervisor(scope),
       (scope) => getChildAgentExecutionRegistry(scope),
+      this.workflows,
     );
 
     const loadAgent = createDaemonAgentLoader({
@@ -167,6 +205,7 @@ export class DaemonApplication implements DurableAgentApplication {
       createJobHost:
         options.createJobHost ??
         ((session) => this.jobs.createAgentHost(session)),
+      workflowRepository: this.workflows,
       requestPermission: async (request, context) => {
         return await this.permissions.ask({
           sessionId: context.sessionId,
@@ -407,18 +446,24 @@ export class DaemonApplication implements DurableAgentApplication {
     });
     this.queries = new SessionQueryService(store);
     this.startupRecovery = recoverInterruptedWorkflows({
-      store,
-      events: this.eventPublisher,
+      workflows: this.workflows,
     }).then(
       () => {
         if (this.readyState === "starting") this.readyState = "ready";
       },
       (error) => {
         this.readyState = "failed";
+        clearInterval(this.ownerHeartbeat);
+        store.releaseApplicationOwner(this.ownerLease);
         throw error;
       },
     );
     void this.startupRecovery.catch(() => {});
+    } catch (error) {
+      clearInterval(this.ownerHeartbeat);
+      store.releaseApplicationOwner(this.ownerLease);
+      throw error;
+    }
   }
 
   async ready(): Promise<void> {
@@ -430,11 +475,6 @@ export class DaemonApplication implements DurableAgentApplication {
     this.readyState = "closing";
     this.closePromise = this.closeWork();
     return this.closePromise;
-  }
-
-  /** @deprecated 使用 close()。 */
-  shutdown(): Promise<void> {
-    return this.close();
   }
 
   private async closeWork(): Promise<void> {
@@ -476,6 +516,12 @@ export class DaemonApplication implements DurableAgentApplication {
     }
     try {
       this.events.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    clearInterval(this.ownerHeartbeat);
+    try {
+      this.store.releaseApplicationOwner(this.ownerLease);
     } catch (error) {
       failures.push(error);
     }

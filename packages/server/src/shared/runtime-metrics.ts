@@ -32,6 +32,7 @@ export function buildRuntimeMetricsSnapshot(input: {
   tasks: SessionExecutionRecord[];
   permissions: PermissionRequestRecord[];
   settlements: ProjectionSettlementRecord[];
+  workflows?: Array<{ status: string; createdAt: number; updatedAt: number }>;
 }): RuntimeMetricsSnapshot {
   try {
     const result = emptyRuntimeMetricsSnapshot();
@@ -59,6 +60,13 @@ export function buildRuntimeMetricsSnapshot(input: {
     result.gauges.openharness_permissions_pending = input.permissions.filter((row) => row.status === "pending").length;
     result.gauges.openharness_child_agents_active = input.tasks.filter((row) =>
       row.type === "agent" && (row.status === "pending" || row.status === "running")).length;
+    result.gauges.openharness_workflows_active = (input.workflows ?? []).filter((row) => row.status === "running").length;
+    for (const workflow of input.workflows ?? []) {
+      increment(result.counters, metric("openharness_workflows_total", { status: workflow.status }));
+      if (workflow.status !== "running") {
+        observe(result.histograms, "openharness_workflow_duration_ms", duration(workflow.createdAt, workflow.updatedAt));
+      }
+    }
     result.gauges.openharness_projection_settlements_pending = input.settlements.filter((row) =>
       row.status === "pending" || row.status === "retrying").length;
     for (const row of input.settlements) {

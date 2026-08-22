@@ -11,7 +11,7 @@ import { McpClientManager } from "@openharness/mcp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentOperationConflictError } from "./agent.js";
-import { createOpenHarnessAgent } from "./default-agent.js";
+import { createDefaultNodeAgent } from "./default-agent.js";
 
 const tempDirs: string[] = [];
 
@@ -20,7 +20,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("createOpenHarnessAgent", () => {
+describe("createDefaultNodeAgent", () => {
   it("constructs a standalone programmatic agent without daemon services", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);
@@ -33,7 +33,7 @@ describe("createOpenHarnessAgent", () => {
       sandbox: { enabled: false },
     };
 
-    const agent = await createOpenHarnessAgent({ cwd, settings });
+    const agent = await createDefaultNodeAgent({ cwd, settings });
 
     expect(agent.id).toMatch(/^agent_session_/);
     expect(agent.subscribe).toBeTypeOf("function");
@@ -51,7 +51,7 @@ describe("createOpenHarnessAgent", () => {
     const setupError = new Error("extension setup failed");
     const runtimeClose = vi.spyOn(RuntimeBundle.prototype, "close");
 
-    const creation = createOpenHarnessAgent({
+    const creation = createDefaultNodeAgent({
       cwd,
       settings: {
         apiKey: "test-key",
@@ -94,7 +94,7 @@ describe("createOpenHarnessAgent", () => {
       },
     );
 
-    const creation = createOpenHarnessAgent({
+    const creation = createDefaultNodeAgent({
       cwd,
       settings: {
         apiKey: "test-key",
@@ -123,7 +123,7 @@ describe("createOpenHarnessAgent", () => {
       .spyOn(RuntimeBundle.prototype, "close")
       .mockRejectedValueOnce(cleanupError);
 
-    const failure = await createOpenHarnessAgent({
+    const failure = await createDefaultNodeAgent({
       cwd,
       settings: {
         apiKey: "test-key",
@@ -152,7 +152,7 @@ describe("createOpenHarnessAgent", () => {
       permission: { mode: "default" },
       sandbox: { enabled: false },
     };
-    const agent = await createOpenHarnessAgent({ cwd, settings });
+    const agent = await createDefaultNodeAgent({ cwd, settings });
     (agent as any).runtime.apiClient.streamMessage = async function* () {
       throw new Error("provider failed before boundary");
     };
@@ -178,7 +178,7 @@ describe("createOpenHarnessAgent", () => {
       permission: { mode: "default" },
       sandbox: { enabled: false },
     };
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings,
       onEvent: (event) => {
@@ -218,7 +218,7 @@ describe("createOpenHarnessAgent", () => {
       permission: { mode: "default" },
       sandbox: { enabled: false },
     };
-    const agent = await createOpenHarnessAgent({ cwd, settings });
+    const agent = await createDefaultNodeAgent({ cwd, settings });
     let finishCompact!: () => void;
     (agent as any).runtime.queryEngine.compact = () => new Promise<void>((resolve) => {
       finishCompact = resolve;
@@ -248,7 +248,7 @@ describe("createOpenHarnessAgent", () => {
   it("attempts every cleanup stage and reports failures after becoming closed", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings: {
         apiKey: "test-key",
@@ -272,7 +272,7 @@ describe("createOpenHarnessAgent", () => {
   it("aggregates multiple cleanup failures in lifecycle order", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings: {
         apiKey: "test-key",

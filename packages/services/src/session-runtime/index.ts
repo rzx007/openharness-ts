@@ -1,4 +1,13 @@
-export { SessionStore, type SessionStoreOptions } from "./store.js";
+export {
+  SessionStore,
+  type SessionStoreOptions,
+  type StoredWorkflowRunInput,
+  type StoredWorkflowRunRecord,
+  type ApplicationOwnerLease,
+  ApplicationOwnerConflictError,
+  DEFAULT_RETENTION_POLICY,
+  type RetentionPolicy,
+} from "./store.js";
 export { SESSION_EVENT_SCHEMA_VERSION } from "./types.js";
 export {
   createDurableEventRegistry,

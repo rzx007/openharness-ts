@@ -7,7 +7,7 @@ import {
   cancelPersistentWorkflow,
   createWorkflowNotification,
   createWorkflowResultFromSnapshot,
-  WorkflowRunStore,
+  FileWorkflowRunRepository,
   type WorkflowRunSnapshot,
 } from "@openharness/coordinator";
 import {
@@ -49,7 +49,7 @@ type LocalJobSource =
 /** Local Jobs controller used when a runtime has no durable host. */
 export class LocalAgentJobHost implements AgentJobHost {
   private readonly processes: DetachedProcessSupervisor;
-  private readonly workflows: WorkflowRunStore;
+  private readonly workflows: FileWorkflowRunRepository;
   private readonly childObservations = new Map<string, ChildObservation>();
 
   constructor(
@@ -58,7 +58,7 @@ export class LocalAgentJobHost implements AgentJobHost {
     private readonly children: AgentChildDirectory,
   ) {
     this.processes = getDetachedProcessSupervisor({ cwd, sessionId: ownerSession });
-    this.workflows = new WorkflowRunStore({ cwd });
+    this.workflows = new FileWorkflowRunRepository({ cwd });
   }
 
   async list(input: JobListRequest): Promise<JobSnapshot[]> {

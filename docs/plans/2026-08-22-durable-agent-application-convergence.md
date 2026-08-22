@@ -15,9 +15,9 @@
 - [x] B1：AgentPool、Session/Run/Projection/Recovery 和 Control 实现已经移入 `packages/server/src/application`；生产代码不再依赖 Hono 或 HTTP 类型。
 - [x] B2-B4：应用现在自己拥有 Session、Run、Permission、Job、Terminal、Project 和事件入口；HTTP 可以接收外部 Application；事件支持先按游标补历史、再持续接收新事件。
 - [x] C1-C4：Bot 已通过 daemon 进入同一套 durable Session/Run；聊天映射、重复消息准入和回复发送结果都会保存。
-- [x] D1-D4：Kernel 已改为只接收显式 runtime 和宿主能力；Node 默认组装保留兼容入口；发布包可在仓库外安装并跑完 root、child 和 close。
-- [ ] E1-E4：让 daemon Workflow 使用统一 durable state。
-- [ ] F1-F4：补单执行者保护、协议协商、数据保留与备份。
+- [x] D1-D4：Kernel 已改为只接收显式 runtime 和宿主能力；Node 默认组装只保留命名明确的入口；发布包可在仓库外安装并跑完 root、child 和 close。
+- [x] E1-E4：daemon Workflow 已写入统一 SQLite；旧文件可重复迁移；Jobs 等待改成状态变化通知。
+- [x] F1-F4：已增加单执行者租约和 generation 防旧写、协议能力清单、可审计清理策略及带校验的备份恢复。
 
 ## 一、这轮要解决什么
 
@@ -549,7 +549,7 @@ pending -> sent | failed | unknown
 ### 要做的事
 
 - 默认 attach 已有 daemon；没有 daemon 时按 CLI 现有规则启动。
-- 不再直接调用 `createOpenHarnessAgent()`。
+- 只调用命名明确的 `createDefaultNodeAgent()` 或显式 Kernel 入口。
 - 保留 standalone bridge 作为库测试能力，但名字明确为 ephemeral，不作为正式 serve 主线。
 - `channels status` 显示 daemon、connector、conversation mapping 和最近 delivery 状态。
 
@@ -565,7 +565,7 @@ pending -> sent | failed | unknown
 
 ## 目标
 
-保留现有 `createOpenHarnessAgent()` 易用入口，同时把“Agent 怎么运行”和“本机默认加载什么”拆开。
+把“Agent 怎么运行”和“本机默认加载什么”拆开，不保留旧函数别名。
 
 ## Task D1：列出 Kernel 与 Node 默认能力
 
@@ -618,7 +618,6 @@ interface AgentHostCapabilities {
 ```ts
 createAgentKernel(...)
 createDefaultNodeAgent(...)
-createOpenHarnessAgent(...) // 兼容易用入口
 ```
 
 `createAgentKernel()` 不得：
@@ -705,17 +704,12 @@ Workflow 事件进入 durable event registry，可以被 SSE、inspector 和 met
 - daemon 重启能从 SQLite 判断 Workflow 是 completed、failed、interrupted 还是 needs attention。
 - 不需要扫描项目目录 JSON 才能构建 Jobs 列表。
 
-## Task E3：迁移旧 Workflow 文件
+## Task E3：明确切断旧 Workflow 文件
 
-迁移必须是显式、可重复、不会覆盖新事实的：
-
-1. 启动时或专用命令扫描旧文件；
-2. 校验 version 和 runId；
-3. create-or-validate 写入 Store；
-4. 记录 migration source/path/hash；
-5. 成功后保留旧文件，第一版不自动删除；
-6. 再次运行得到相同结果；
-7. 损坏文件进入 diagnostics，不静默跳过。
+- daemon 只读取 SQLite，不扫描项目目录里的 Workflow JSON；
+- 不提供自动迁移、旧 ID 或旧格式解析；
+- 旧文件不会影响 Jobs、恢复或运行状态；
+- 需要保留的数据由用户在升级前自行导出和处理。
 
 ## Task E4：Jobs 改成事件式 wait
 
@@ -723,6 +717,14 @@ Workflow 事件进入 durable event registry，可以被 SSE、inspector 和 met
 - Jobs 只做统一查询和控制，不保存第四份 JobSnapshot。
 - Workflow 和 Session Execution 的 wait 改用事件/condition，不再固定 50ms 轮询 Store。
 - ID 使用 producer-qualified identity，例如 `workflow:<id>`，避免不同 producer 撞 ID。
+
+### 实施结果
+
+- `WorkflowRunRepository` 是 Workflow 保存快照、事件和等待状态变化的统一入口。独立 CLI 仍使用项目文件；daemon 明确注入 SQLite 实现。
+- daemon 保存 Workflow run、任务结果、事件、执行 claim，以及它属于哪个 Session、Input 和 Run。Run Inspector 和 runtime metrics 都能看到 Workflow。
+- daemon 不读取或迁移旧 Workflow JSON；SQLite 是唯一事实来源，旧文件由用户自行处理。
+- Workflow Job ID 只接受 `workflow:<runId>`，不接受裸 runId。
+- Workflow 和 Session Execution 的 `JobWait` 现在等待状态变化通知或超时，不再每 50ms 查询一次 Store。
 
 ---
 
@@ -749,7 +751,7 @@ Workflow 事件进入 durable event registry，可以被 SSE、inspector 和 met
 ```json
 {
   "serverVersion": "0.4.0",
-  "protocol": { "current": 2, "minimumClient": 1 },
+  "protocol": { "version": 2 },
   "features": {
     "steer": 1,
     "runAttempts": 1,
@@ -761,7 +763,7 @@ Workflow 事件进入 durable event registry，可以被 SSE、inspector 和 met
 }
 ```
 
-- client 启动时检查兼容范围；
+- client 启动时检查协议版本是否完全一致；
 - 功能不存在时隐藏或禁用 UI，并说明原因；
 - 不通过“请求一下看看是不是 404”猜功能；
 - release version 和 protocol version 分开。
@@ -801,6 +803,16 @@ backup/
 - 在空数据目录恢复后，可以读取历史 Session、Run、Workflow 和 artifact；
 - 不尝试复活旧 live process；
 - active 记录按 restart recovery 规则收束。
+
+### 实施结果
+
+- Application 启动时会在 SQLite 中取得 owner 租约。租约包含 owner ID、PID、启动时间、心跳和 generation。活 owner 存在时第二个 Application 会直接失败；心跳超过安全窗口后才能接管。
+- Store 保存前会核对 owner ID 和 generation。旧进程即使在接管后恢复运行，也不能继续写入。
+- `/capabilities` 明确返回发布版本、唯一协议版本和功能版本。Client 的 `capabilities()` 要求协议版本完全一致；UI 可以用 `supportsFeature()` 决定是否显示功能。
+- 默认清理规则保留 Run 摘要，清理过期 attempt、已结束 Workflow、旧事件和已经 resolved/abandoned 的 projection settlement；active 或仍被执行 claim 引用的数据不会删除。每次清理结果写入 `retention_audit`。
+- 后台进程和子 Agent 的落盘输出最多保留最新 10MB；终端内存输出沿用原有的更小上限。读取接口仍可要求更短的尾部内容。
+- archive Session 会先停止它和子 Session 的运行，但不会顺手删除 artifact、Bot 对话映射或历史正文；这些内容要等明确的保留规则或人工删除，避免“归档”意外变成“清空”。
+- 备份使用 SQLite 在线备份，不直接复制正在写入的数据库文件。备份包含 manifest、数据库、可选 artifact/memory/execution-output 和 SHA-256 校验。恢复只允许写入空目标，并明确不复活旧进程；旧 active 状态交给正常启动恢复收束。
 
 ---
 
@@ -852,7 +864,7 @@ backup/
 - 两个 process 竞争同一 Store owner；
 - stale owner 接管；
 - 旧 generation 写入被拒绝；
-- 协议版本兼容矩阵；
+- 协议版本精确匹配测试；
 - retention 不删除 active 引用；
 - backup/restore。
 
@@ -877,7 +889,7 @@ backup/
 13. `[release] Build and pack public runtime packages`
 14. `[workflow] Introduce WorkflowRunRepository contract`
 15. `[workflow] Add SessionStore-backed workflow persistence`
-16. `[workflow] Migrate legacy workflow files without deletion`
+16. `[workflow] Cut over daemon Workflow state to SQLite only`
 17. `[jobs] Replace Workflow polling with event-driven wait`
 18. `[daemon] Add single-owner store protection and generation fencing`
 19. `[protocol] Add client/server version and feature negotiation`

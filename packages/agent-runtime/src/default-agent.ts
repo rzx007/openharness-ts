@@ -19,13 +19,6 @@ interface InternalAgentOptions {
   identity?: AgentIdentity;
 }
 
-/** 兼容入口；行为等同 createDefaultNodeAgent。 */
-export async function createOpenHarnessAgent(
-  options: OpenHarnessAgentOptions = {},
-): Promise<OpenHarnessAgent> {
-  return await createDefaultNodeAgent(options);
-}
-
 /** 默认 Node 组装：会读取本机配置、发现扩展，并安装 Node 能力。 */
 export async function createDefaultNodeAgent(
   options: OpenHarnessAgentOptions = {},

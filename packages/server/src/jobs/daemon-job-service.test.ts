@@ -153,6 +153,7 @@ function createService(projectedTask: SessionExecutionRecord = task) {
       projection,
       () => manager,
       () => manager,
+      { list: () => [], load: () => undefined } as any,
     ),
     store,
     terminals,

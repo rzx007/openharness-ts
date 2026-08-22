@@ -51,6 +51,8 @@ export async function runWorkflow(
       options.onSnapshot?.(createWorkflowRunSnapshot({
         runId,
         ownerSession: options.ownerSession,
+        ownerInput: options.ownerInput,
+        ownerRun: options.ownerRun,
         status,
         summary,
         spec,
@@ -292,8 +294,8 @@ export async function runWorkflow(
       }
     };
 
-    emitEvent({ type: "workflow_started", status: "running", summary: "Workflow started" });
     emitSnapshot("running", "Workflow started");
+    emitEvent({ type: "workflow_started", status: "running", summary: "Workflow started" });
     propagateInitialFailures();
     scheduleMore();
     maybeResolve();

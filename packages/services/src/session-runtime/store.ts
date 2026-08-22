@@ -84,6 +84,63 @@ import {
 
 export type { SessionStoreOptions } from "./store-state.js";
 
+export interface StoredWorkflowRunInput {
+  runId: string;
+  ownerSessionId?: string;
+  ownerInputId?: string;
+  ownerRunId?: string;
+  status: string;
+  termination?: string;
+  snapshotJson: string;
+  createdAt: number;
+  updatedAt: number;
+  taskAttempts: Array<{
+    taskId: string;
+    attempt: number;
+    status: string;
+    payloadJson: string;
+    startedAt: number;
+    finishedAt?: number;
+  }>;
+}
+
+export interface StoredWorkflowRunRecord extends Omit<StoredWorkflowRunInput, "taskAttempts"> {}
+
+export interface ApplicationOwnerLease {
+  ownerId: string;
+  pid: number;
+  generation: number;
+  startedAt: number;
+  heartbeatAt: number;
+}
+
+export class ApplicationOwnerConflictError extends Error {
+  constructor(readonly activeOwner: ApplicationOwnerLease) {
+    super(`Data directory is already owned by ${activeOwner.ownerId} (pid ${activeOwner.pid}, generation ${activeOwner.generation})`);
+    this.name = "ApplicationOwnerConflictError";
+  }
+}
+
+export interface RetentionPolicy {
+  durableEventMaxAgeMs: number;
+  workflowEventMaxAgeMs: number;
+  workflowRunMaxAgeMs: number;
+  runAttemptMaxAgeMs: number;
+  projectionSettlementMaxAgeMs: number;
+  completedJobVisibleForMs: number;
+  terminalOutputMaxBytes: number;
+}
+
+export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
+  durableEventMaxAgeMs: 30 * 24 * 60 * 60 * 1_000,
+  workflowEventMaxAgeMs: 30 * 24 * 60 * 60 * 1_000,
+  workflowRunMaxAgeMs: 90 * 24 * 60 * 60 * 1_000,
+  runAttemptMaxAgeMs: 90 * 24 * 60 * 60 * 1_000,
+  projectionSettlementMaxAgeMs: 30 * 24 * 60 * 60 * 1_000,
+  completedJobVisibleForMs: 7 * 24 * 60 * 60 * 1_000,
+  terminalOutputMaxBytes: 10 * 1024 * 1024,
+};
+
 export class SessionStore {
   readonly path: string;
   private readonly database: Database.Database;
@@ -99,6 +156,8 @@ export class SessionStore {
   private reservedEventSeq = 0;
   private mutations = emptyMutations();
   private state: SessionState;
+  private readonly taskListeners = new Map<string, Set<() => void>>();
+  private activeOwnerLease?: ApplicationOwnerLease;
 
   constructor(options: SessionStoreOptions) {
     this.path = resolve(options.path);
@@ -849,6 +908,295 @@ export class SessionStore {
     return clone(row);
   }
 
+  async backupDatabase(destination: string): Promise<void> {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    mkdirSync(dirname(resolve(destination)), { recursive: true });
+    const path = resolve(destination);
+    await this.database.backup(path);
+    const backup = new Database(path);
+    try {
+      // owner 是当前进程的活租约，不能带进恢复目录；Run/Workflow 保留给启动恢复收束。
+      backup.prepare("DELETE FROM application_owner").run();
+    } finally {
+      backup.close();
+    }
+  }
+
+  saveWorkflowRun(input: StoredWorkflowRunInput): void {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO workflow_run
+          (run_id, owner_session_id, owner_input_id, owner_run_id, status, termination,
+           snapshot_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+          owner_session_id = excluded.owner_session_id,
+          owner_input_id = excluded.owner_input_id,
+          owner_run_id = excluded.owner_run_id,
+          status = excluded.status,
+          termination = excluded.termination,
+          snapshot_json = excluded.snapshot_json,
+          updated_at = excluded.updated_at
+      `).run(
+        input.runId,
+        input.ownerSessionId ?? null,
+        input.ownerInputId ?? null,
+        input.ownerRunId ?? null,
+        input.status,
+        input.termination ?? null,
+        input.snapshotJson,
+        input.createdAt,
+        input.updatedAt,
+      );
+      this.database.prepare("DELETE FROM workflow_task_attempt WHERE workflow_run_id = ?").run(input.runId);
+      const insertAttempt = this.database.prepare(`
+        INSERT INTO workflow_task_attempt
+          (workflow_run_id, task_id, attempt, status, payload_json, started_at, finished_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const attempt of input.taskAttempts) {
+        insertAttempt.run(
+          input.runId,
+          attempt.taskId,
+          attempt.attempt,
+          attempt.status,
+          attempt.payloadJson,
+          attempt.startedAt,
+          attempt.finishedAt ?? null,
+        );
+      }
+    })();
+  }
+
+  loadWorkflowRun(runId: string): StoredWorkflowRunRecord | undefined {
+    const row = this.database.prepare("SELECT * FROM workflow_run WHERE run_id = ?").get(runId) as Record<string, unknown> | undefined;
+    return row ? storedWorkflowRunFromRow(row) : undefined;
+  }
+
+  listWorkflowRuns(options: { ownerSessionId?: string; status?: string } = {}): StoredWorkflowRunRecord[] {
+    const clauses: string[] = [];
+    const parameters: unknown[] = [];
+    if (options.ownerSessionId) {
+      clauses.push("owner_session_id = ?");
+      parameters.push(options.ownerSessionId);
+    }
+    if (options.status) {
+      clauses.push("status = ?");
+      parameters.push(options.status);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    return (this.database.prepare(`SELECT * FROM workflow_run ${where} ORDER BY updated_at DESC`).all(...parameters) as Array<Record<string, unknown>>)
+      .map(storedWorkflowRunFromRow);
+  }
+
+  appendWorkflowEvent(input: {
+    runId: string;
+    sessionId?: string;
+    type: string;
+    eventJson: string;
+    createdAt: number;
+  }): number {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    const result = this.database.prepare(`
+      INSERT INTO workflow_event (workflow_run_id, type, event_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(input.runId, input.type, input.eventJson, input.createdAt);
+    if (input.sessionId) {
+      this.appendEvent({
+        type: `workflow.${input.type}`,
+        sessionId: input.sessionId,
+        payload: { event: JSON.parse(input.eventJson) as Record<string, unknown> },
+      });
+    }
+    return Number(result.lastInsertRowid);
+  }
+
+  listWorkflowEvents(runId: string): string[] {
+    return (this.database.prepare("SELECT event_json FROM workflow_event WHERE workflow_run_id = ? ORDER BY seq").all(runId) as Array<{ event_json: string }>)
+      .map((row) => row.event_json);
+  }
+
+  acquireApplicationOwner(input: {
+    ownerId: string;
+    pid: number;
+    staleAfterMs: number;
+    now?: number;
+  }): ApplicationOwnerLease {
+    const timestamp = input.now ?? Date.now();
+    const lease = this.database.transaction(() => {
+      const row = this.database.prepare("SELECT * FROM application_owner WHERE key = 'application'").get() as Record<string, unknown> | undefined;
+      const current = row ? applicationOwnerFromRow(row) : undefined;
+      if (
+        current &&
+        current.heartbeatAt > timestamp - input.staleAfterMs
+      ) {
+        throw new ApplicationOwnerConflictError(current);
+      }
+      const generation = (current?.generation ?? 0) + 1;
+      const next: ApplicationOwnerLease = {
+        ownerId: input.ownerId,
+        pid: input.pid,
+        generation,
+        startedAt: timestamp,
+        heartbeatAt: timestamp,
+      };
+      this.database.prepare(`
+        INSERT INTO application_owner (key, owner_id, pid, generation, started_at, heartbeat_at)
+        VALUES ('application', ?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          owner_id = excluded.owner_id,
+          pid = excluded.pid,
+          generation = excluded.generation,
+          started_at = excluded.started_at,
+          heartbeat_at = excluded.heartbeat_at
+      `).run(next.ownerId, next.pid, next.generation, next.startedAt, next.heartbeatAt);
+      return next;
+    })();
+    this.activeOwnerLease = lease;
+    return lease;
+  }
+
+  heartbeatApplicationOwner(lease: ApplicationOwnerLease, timestamp = Date.now()): ApplicationOwnerLease {
+    const result = this.database.prepare(`
+      UPDATE application_owner SET heartbeat_at = ?
+      WHERE key = 'application' AND owner_id = ? AND generation = ?
+    `).run(timestamp, lease.ownerId, lease.generation);
+    if (result.changes !== 1) this.throwOwnerFenceError();
+    const next = { ...lease, heartbeatAt: timestamp };
+    this.activeOwnerLease = next;
+    return next;
+  }
+
+  releaseApplicationOwner(lease: ApplicationOwnerLease): void {
+    this.database.prepare(`
+      DELETE FROM application_owner
+      WHERE key = 'application' AND owner_id = ? AND generation = ?
+    `).run(lease.ownerId, lease.generation);
+    if (
+      this.activeOwnerLease?.ownerId === lease.ownerId &&
+      this.activeOwnerLease.generation === lease.generation
+    ) this.activeOwnerLease = undefined;
+  }
+
+  assertApplicationOwner(lease: ApplicationOwnerLease): void {
+    const row = this.database.prepare("SELECT * FROM application_owner WHERE key = 'application'").get() as Record<string, unknown> | undefined;
+    if (!row) this.throwOwnerFenceError();
+    const current = applicationOwnerFromRow(row!);
+    if (current.ownerId !== lease.ownerId || current.generation !== lease.generation) {
+      throw new ApplicationOwnerConflictError(current);
+    }
+  }
+
+  applyRetention(
+    policy: RetentionPolicy = DEFAULT_RETENTION_POLICY,
+    timestamp = Date.now(),
+  ): { events: number; workflowEvents: number; workflows: number; runAttempts: number; settlements: number } {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    const result = this.database.transaction(() => {
+      const workflowEvents = this.database.prepare(`
+        DELETE FROM workflow_event
+        WHERE created_at < ? AND workflow_run_id IN (
+          SELECT run_id FROM workflow_run WHERE status != 'running'
+        )
+      `).run(timestamp - policy.workflowEventMaxAgeMs).changes;
+      const workflows = this.database.prepare(`
+        DELETE FROM workflow_run
+        WHERE updated_at < ? AND status != 'running'
+          AND NOT EXISTS (
+            SELECT 1 FROM workflow_execution_claim c
+            WHERE c.workflow_run_id = workflow_run.run_id AND c.status = 'running'
+          )
+      `).run(timestamp - policy.workflowRunMaxAgeMs).changes;
+      const runAttempts = this.database.prepare(`
+        DELETE FROM session_run_attempt
+        WHERE updated_at < ? AND status NOT IN ('pending', 'running')
+      `).run(timestamp - policy.runAttemptMaxAgeMs).changes;
+      const settlements = this.database.prepare(`
+        DELETE FROM projection_settlement
+        WHERE updated_at < ? AND status IN ('resolved', 'abandoned')
+      `).run(timestamp - policy.projectionSettlementMaxAgeMs).changes;
+      const removableEvents = this.database.prepare(`
+        SELECT e.id FROM session_event e
+        LEFT JOIN session s ON s.id = e.session_id
+        WHERE e.created_at < ?
+          AND e.session_id IS NOT NULL
+          AND s.status = 'archived'
+          AND NOT EXISTS (
+            SELECT 1 FROM session_run r
+            WHERE r.session_id = e.session_id AND r.status IN ('pending', 'running')
+          )
+      `).all(timestamp - policy.durableEventMaxAgeMs) as Array<{ id: string }>;
+      if (removableEvents.length > 0) {
+        const remove = this.database.prepare("DELETE FROM session_event WHERE id = ?");
+        for (const event of removableEvents) remove.run(event.id);
+      }
+      const retentionResult = {
+        events: removableEvents.length,
+        workflowEvents,
+        workflows,
+        runAttempts,
+        settlements,
+      };
+      this.database.prepare(`
+        INSERT INTO retention_audit (id, policy, result_json, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(randomUUID(), JSON.stringify(policy), JSON.stringify(retentionResult), timestamp);
+      return retentionResult;
+    })();
+    if (result.events > 0) {
+      const removed = new Set(
+        (this.database.prepare("SELECT id FROM session_event").all() as Array<{ id: string }>).map((row) => row.id),
+      );
+      this.state.events = this.state.events.filter((event) => removed.has(event.id));
+    }
+    return result;
+  }
+
+  listRetentionAudits(): Array<Record<string, unknown>> {
+    return this.database.prepare("SELECT * FROM retention_audit ORDER BY created_at DESC").all() as Array<Record<string, unknown>>;
+  }
+
+  claimWorkflowRun(runId: string, ownerId: string): { ownerId: string; generation: number; claimedAt: number } {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    return this.database.transaction(() => {
+      const current = this.database.prepare(`
+        SELECT owner_id, generation, status FROM workflow_execution_claim
+        WHERE workflow_run_id = ?
+      `).get(runId) as { owner_id: string; generation: number; status: string } | undefined;
+      if (current?.status === "running" && current.owner_id === ownerId) {
+        throw new Error(`Workflow run is already claimed by this Application: ${runId}`);
+      }
+      const generation = (current?.generation ?? 0) + 1;
+      const claimedAt = Date.now();
+      this.database.prepare(`
+        INSERT INTO workflow_execution_claim
+          (workflow_run_id, owner_id, generation, claimed_at, heartbeat_at, finished_at, status)
+        VALUES (?, ?, ?, ?, ?, NULL, 'running')
+        ON CONFLICT(workflow_run_id) DO UPDATE SET
+          owner_id = excluded.owner_id,
+          generation = excluded.generation,
+          claimed_at = excluded.claimed_at,
+          heartbeat_at = excluded.heartbeat_at,
+          finished_at = NULL,
+          status = 'running'
+      `).run(runId, ownerId, generation, claimedAt, claimedAt);
+      return { ownerId, generation, claimedAt };
+    })();
+  }
+
+  finishWorkflowRunClaim(runId: string, ownerId: string, status: string): void {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    const result = this.database.prepare(`
+      UPDATE workflow_execution_claim
+      SET status = ?, finished_at = ?, heartbeat_at = ?
+      WHERE workflow_run_id = ? AND owner_id = ? AND status = 'running'
+    `).run(status, Date.now(), Date.now(), runId, ownerId);
+    if (result.changes !== 1) {
+      throw new Error(`Workflow run claim is not active for this Application: ${runId}`);
+    }
+  }
+
   findExternalConversation(input: {
     connector: string;
     accountId: string;
@@ -878,6 +1226,7 @@ export class SessionStore {
     threadId?: string;
     sessionId: string;
   }): ExternalConversationRecord {
+    this.assertCurrentOwner();
     assertSession(this.state, input.sessionId);
     const existing = this.findExternalConversation(input);
     const timestamp = now();
@@ -937,6 +1286,7 @@ export class SessionStore {
     externalMessageId: string;
     content: string;
   }): ChannelDeliveryRecord {
+    this.assertCurrentOwner();
     const existing = this.findChannelDeliveryByInput(input.inputId);
     if (existing) {
       if (
@@ -998,6 +1348,7 @@ export class SessionStore {
       error?: string;
     },
   ): ChannelDeliveryRecord {
+    this.assertCurrentOwner();
     const existing = this.getChannelDelivery(id);
     if (!existing) throw new Error(`Channel delivery not found: ${id}`);
     const timestamp = now();
@@ -1404,6 +1755,7 @@ export class SessionStore {
   }
 
   createProjectionSettlement(input: CreateProjectionSettlementInput): ProjectionSettlementRecord {
+    this.assertCurrentOwner();
     const existing = this.database.prepare(`
       SELECT * FROM projection_settlement
       WHERE projector = ? AND root_session_id = ? AND event_sequence = ?
@@ -1464,6 +1816,7 @@ export class SessionStore {
   }
 
   markProjectionSettlementRetrying(id: string): ProjectionSettlementRecord {
+    this.assertCurrentOwner();
     const timestamp = now();
     const result = this.database.prepare(`
       UPDATE projection_settlement
@@ -1484,6 +1837,7 @@ export class SessionStore {
     error: string,
     nextRetryAt?: number,
   ): ProjectionSettlementRecord {
+    this.assertCurrentOwner();
     const result = this.database.prepare(`
       UPDATE projection_settlement
       SET status = 'pending', last_error = ?, next_retry_at = ?, updated_at = ?
@@ -1496,6 +1850,7 @@ export class SessionStore {
   }
 
   resolveProjectionSettlement(id: string): ProjectionSettlementRecord {
+    this.assertCurrentOwner();
     const timestamp = now();
     const result = this.database.prepare(`
       UPDATE projection_settlement
@@ -1510,6 +1865,7 @@ export class SessionStore {
   }
 
   abandonProjectionSettlement(id: string, error: string): ProjectionSettlementRecord {
+    this.assertCurrentOwner();
     const result = this.database.prepare(`
       UPDATE projection_settlement
       SET status = 'abandoned', last_error = ?, next_retry_at = NULL, updated_at = ?
@@ -1673,6 +2029,7 @@ export class SessionStore {
       payload: { task },
     });
     this.save();
+    this.notifySessionTask(id);
     return clone(task);
   }
 
@@ -1722,6 +2079,7 @@ export class SessionStore {
       payload: { task, previousStatus },
     });
     this.save();
+    this.notifySessionTask(taskId);
     return clone(task);
   }
 
@@ -1814,6 +2172,54 @@ export class SessionStore {
       });
     }
     return active.length;
+  }
+
+  async waitForSessionTaskChange(
+    taskId: string,
+    after: number,
+    options: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<SessionExecutionRecord | undefined> {
+    const current = this.getSessionTask(taskId);
+    if (!current || current.updatedAt > after) return current;
+    return await new Promise((resolvePromise, reject) => {
+      const listeners = this.taskListeners.get(taskId) ?? new Set<() => void>();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = () => {
+        if (timer) clearTimeout(timer);
+        listeners.delete(changed);
+        options.signal?.removeEventListener("abort", aborted);
+        if (listeners.size === 0) this.taskListeners.delete(taskId);
+      };
+      const changed = () => {
+        finish();
+        resolvePromise(this.getSessionTask(taskId));
+      };
+      const aborted = () => {
+        finish();
+        reject(options.signal?.reason ?? new Error("Session task wait aborted."));
+      };
+      listeners.add(changed);
+      this.taskListeners.set(taskId, listeners);
+      if (options.signal?.aborted) {
+        aborted();
+        return;
+      }
+      options.signal?.addEventListener("abort", aborted, { once: true });
+      const registered = this.getSessionTask(taskId);
+      if (!registered || registered.updatedAt > after) {
+        changed();
+        return;
+      }
+      timer = setTimeout(() => {
+        finish();
+        resolvePromise(this.getSessionTask(taskId));
+      }, Math.max(1, options.timeoutMs));
+      timer.unref?.();
+    });
+  }
+
+  private notifySessionTask(taskId: string): void {
+    for (const listener of [...(this.taskListeners.get(taskId) ?? [])]) listener();
   }
 
   createRunAttempt(input: CreateRunAttemptInput): SessionRunAttemptRecord {
@@ -2404,6 +2810,7 @@ export class SessionStore {
   }
 
   private save(): void {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
     if (this.transactionDepth > 0) {
       this.saveRequested = true;
       return;
@@ -2418,6 +2825,16 @@ export class SessionStore {
       this.mutations = emptyMutations();
       throw error;
     }
+  }
+
+  private assertCurrentOwner(): void {
+    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+  }
+
+  private throwOwnerFenceError(): never {
+    const row = this.database.prepare("SELECT * FROM application_owner WHERE key = 'application'").get() as Record<string, unknown> | undefined;
+    if (row) throw new ApplicationOwnerConflictError(applicationOwnerFromRow(row));
+    throw new Error("Application owner lease is no longer active");
   }
 
   private persistChanges(): void {
@@ -2739,6 +3156,30 @@ function channelDeliveryFromRow(
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     ...(row.sent_at ? { sentAt: row.sent_at as number } : {}),
+  };
+}
+
+function storedWorkflowRunFromRow(row: Record<string, unknown>): StoredWorkflowRunRecord {
+  return {
+    runId: String(row.run_id),
+    ...(typeof row.owner_session_id === "string" ? { ownerSessionId: row.owner_session_id } : {}),
+    ...(typeof row.owner_input_id === "string" ? { ownerInputId: row.owner_input_id } : {}),
+    ...(typeof row.owner_run_id === "string" ? { ownerRunId: row.owner_run_id } : {}),
+    status: String(row.status),
+    ...(typeof row.termination === "string" ? { termination: row.termination } : {}),
+    snapshotJson: String(row.snapshot_json),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function applicationOwnerFromRow(row: Record<string, unknown>): ApplicationOwnerLease {
+  return {
+    ownerId: String(row.owner_id),
+    pid: Number(row.pid),
+    generation: Number(row.generation),
+    startedAt: Number(row.started_at),
+    heartbeatAt: Number(row.heartbeat_at),
   };
 }
 

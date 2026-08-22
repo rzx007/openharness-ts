@@ -29,7 +29,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("ExitWorktree");
     expect(names).toContain("NotebookEdit");
     expect(names).toContain("Agent");
-    expect(names).toContain("Workflow");
+    expect(names).not.toContain("Workflow");
     expect(names).toContain("TeamCreate");
     expect(names).toContain("TeamDelete");
     expect(names).toContain("McpToolCall");
@@ -40,7 +40,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("ImageToText");
     expect(names).toContain("ImageGeneration");
     expect(names).toContain("FeishuPush");
-    expect(tools).toHaveLength(33);
+    expect(tools).toHaveLength(32);
     expect(names).not.toEqual(
       expect.arrayContaining([
         "TaskGet",
@@ -52,6 +52,14 @@ describe("createDefaultToolRegistry", () => {
         "SendMessage",
       ]),
     );
+  });
+
+  it("registers Workflow only when durable storage is explicit", () => {
+    const repository = { repositoryKey: "test", list: () => [] } as any;
+    const names = createDefaultToolRegistry({ workflowRepository: repository })
+      .getAll()
+      .map((tool) => tool.name);
+    expect(names).toContain("Workflow");
   });
 
   it("registers Agent Scheduled tools as the only scheduling capability", () => {

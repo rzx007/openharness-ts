@@ -26,6 +26,14 @@ export interface RunInspection {
   toolCalls: SessionMessagePartRecord[];
   permissions: PermissionRequestRecord[];
   childExecutions: ReturnType<SessionStore["listSessionTasks"]>;
+  workflows: Array<{
+    runId: string;
+    status: string;
+    ownerSessionId?: string;
+    ownerInputId?: string;
+    ownerRunId?: string;
+    snapshot?: Record<string, unknown>;
+  }>;
   traceIds: string[];
   events: SessionEventRecord[];
   projectionSettlements: ProjectionSettlementRecord[];
@@ -43,6 +51,9 @@ export function inspectDurableRun(store: SessionStore, runId: string, includeCon
   const permissions = store.listPermissionRequests({ sessionId: run.sessionId }).filter((row) => row.runId === runId);
   const childExecutions = store.listSessionTasks(run.sessionId).filter((row) => row.runId === runId || row.metadata.sourceRunId === runId);
   const attempts = store.listRunAttempts(runId);
+  const workflows = typeof store.listWorkflowRuns === "function"
+    ? store.listWorkflowRuns().filter((workflow) => workflow.ownerRunId === runId)
+    : [];
   const references = new Set<string>([
     runId,
     ...(run.inputId ? [run.inputId] : []),
@@ -51,6 +62,7 @@ export function inspectDurableRun(store: SessionStore, runId: string, includeCon
     ...parts.flatMap((row) => [row.id, row.toolUseId, stringMetadata(row.metadata.toolAttemptId)]).filter((value): value is string => !!value),
     ...permissions.map((row) => row.id),
     ...childExecutions.flatMap((row) => [row.id, row.childSessionId]).filter((value): value is string => !!value),
+    ...workflows.map((workflow) => workflow.runId),
   ]);
   const events = store.listEvents({ sessionId: run.sessionId }).filter((event) => containsReference(event.payload, references));
   const projectionSettlements = store.listProjectionSettlements().filter((row) =>
@@ -99,6 +111,16 @@ export function inspectDurableRun(store: SessionStore, runId: string, includeCon
       error: row.error ? "[redacted]" : undefined,
       metadata: redactRecord(row.metadata),
     }),
+    workflows: workflows.map((workflow) => ({
+      runId: workflow.runId,
+      status: workflow.status,
+      ownerSessionId: workflow.ownerSessionId,
+      ownerInputId: workflow.ownerInputId,
+      ownerRunId: workflow.ownerRunId,
+      ...(includeContent
+        ? { snapshot: JSON.parse(workflow.snapshotJson) as Record<string, unknown> }
+        : {}),
+    })),
     traceIds,
     events: events.map((row) => includeContent ? row : { ...row, payload: redactRecord(row.payload) }),
     projectionSettlements: projectionSettlements.map((row) => includeContent ? row : { ...row, payload: { redacted: true } }),

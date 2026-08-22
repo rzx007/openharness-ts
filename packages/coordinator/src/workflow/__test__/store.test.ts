@@ -8,7 +8,7 @@ import {
   createWorkflowRunSnapshot,
   type WorkflowTaskRunResult,
 } from "../../workflow-scheduler.js";
-import { cancelPersistentWorkflow, resumePersistentWorkflow, runPersistentWorkflow, WorkflowRunStore } from "../../workflow-store.js";
+import { cancelPersistentWorkflow, FileWorkflowRunRepository, resumePersistentWorkflow, runPersistentWorkflow } from "../../workflow-store.js";
 
 const tempDirs: string[] = [];
 
@@ -24,9 +24,9 @@ afterEach(() => {
   }
 });
 
-describe("WorkflowRunStore", () => {
+describe("FileWorkflowRunRepository", () => {
   it("persists running snapshots before the workflow completes", async () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
     let unblock: (() => void) | undefined;
 
     const workflow = runPersistentWorkflow(
@@ -58,7 +58,7 @@ describe("WorkflowRunStore", () => {
   });
 
   it("does not overwrite a terminal cancellation after its owner aborts", async () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
     const controller = new AbortController();
     let unblock: (() => void) | undefined;
     const workflow = runPersistentWorkflow(
@@ -87,7 +87,7 @@ describe("WorkflowRunStore", () => {
   });
 
   it("loads and lists completed workflow snapshots", async () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
 
     const result = await runPersistentWorkflow(
       {
@@ -131,12 +131,12 @@ describe("WorkflowRunStore", () => {
   });
 
   it("rejects unsafe run ids", () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
     expect(() => store.pathFor("../oops")).toThrow("Invalid workflow run id");
   });
 
   it("resumes a running snapshot without rerunning completed tasks", async () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
     const spec = {
       mode: "pipeline" as const,
       tasks: [{ id: "research" }, { id: "implement" }, { id: "verify" }],
@@ -209,7 +209,7 @@ describe("WorkflowRunStore", () => {
   });
 
   it("returns terminal snapshots without rerunning workers", async () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
     await runPersistentWorkflow(
       { mode: "parallel", tasks: [{ id: "done" }] },
       () => ({ summary: "done" }),
@@ -229,7 +229,7 @@ describe("WorkflowRunStore", () => {
   });
 
   it("cancels a running snapshot and stops backing worker tasks", async () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
     const spec = {
       mode: "parallel" as const,
       tasks: [{ id: "running" }, { id: "pending", dependsOn: ["running"] }],
@@ -282,7 +282,7 @@ describe("WorkflowRunStore", () => {
   });
 
   it("does not launch pending work or overwrite an externally cancelled active run", async () => {
-    const store = new WorkflowRunStore({ dir: tempDir() });
+    const store = new FileWorkflowRunRepository({ dir: tempDir() });
     const started: string[] = [];
     let releaseFirst: (() => void) | undefined;
     const workflow = runPersistentWorkflow(

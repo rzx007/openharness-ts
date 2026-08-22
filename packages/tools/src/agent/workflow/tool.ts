@@ -11,11 +11,11 @@ import {
   resumePersistentWorkflow,
   runWorkflow,
   runPersistentWorkflow,
-  WorkflowRunStore,
   type WorkflowBudgetPolicyPreset,
   type WorkflowFailurePolicy,
   type WorkflowMode,
   type WorkflowRunEvent,
+  type WorkflowRunRepository,
   type WorkflowRunSummary,
   type WorkflowRunSnapshot,
   type WorkflowRunner,
@@ -34,9 +34,10 @@ export interface WorkflowToolOptions {
   createRunner?: typeof createAgentWorkflowRunner;
   run?: typeof runWorkflow;
   stopTask?: (taskId: string) => Promise<unknown>;
+  repository?: WorkflowRunRepository;
 }
 
-export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefinition {
+export function createWorkflowTool(options: WorkflowToolOptions): ToolDefinition {
   const createRunner = options.createRunner ?? createAgentWorkflowRunner;
   const run = options.run ?? runWorkflow;
 
@@ -255,6 +256,8 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
       required: [],
     },
     async execute(input, context) {
+      const repository = options.repository;
+      const onWorkflowEvent = undefined;
       const action = parseAction(input.action);
       if (!action) {
         return { content: [{ type: "text", text: "action must be one of: run, resume, timeline, history, template, reconcile, validate. Use JobRead, JobList, or JobCancel for lifecycle control." }], isError: true };
@@ -264,16 +267,19 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
         return workflowValidate(input);
       }
       if (action === "timeline") {
-        return workflowTimeline(input, context.cwd, context.sessionId);
+        if (!repository) return missingWorkflowRepository();
+        return workflowTimeline(input, repository, context.sessionId);
       }
       if (action === "history") {
-        return workflowHistory(input, context.cwd, context.sessionId);
+        if (!repository) return missingWorkflowRepository();
+        return workflowHistory(input, repository, context.sessionId);
       }
       if (action === "template") {
         return workflowTemplate(input);
       }
       if (action === "reconcile") {
-        return workflowReconcile(input, context.cwd, context.sessionId);
+        if (!repository) return missingWorkflowRepository();
+        return workflowReconcile(input, repository, context.sessionId);
       }
 
       const specOrError = parseWorkflowSpec(input);
@@ -295,13 +301,16 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           agent: context.agent,
         });
         const persist = input.persist !== false;
+        if ((action === "resume" || persist) && !repository) {
+          return missingWorkflowRepository();
+        }
         const runId = asOptionalString(input.runId) ?? (action === "run" && persist && options.run === undefined ? createWorkflowRunId() : undefined);
         const waitForCompletion = input.waitForCompletion === true || !persist || options.run !== undefined;
         if (action === "run" && persist && options.run === undefined && !waitForCompletion) {
-          const store = new WorkflowRunStore({ cwd: context.cwd });
+          const store = repository!;
           const workflowRunId = runId ?? createWorkflowRunId();
           const ownerSignal = context.runAbortSignal ?? context.abortSignal;
-          const onEvent = (event: WorkflowRunEvent) => emitWorkflowRuntimeEvent(context, event);
+          const onEvent = onWorkflowEvent;
           const cancelForParentInterrupt = () => {
             void cancelPersistentWorkflow(workflowRunId, {
               store,
@@ -311,9 +320,10 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
             }).catch(() => {});
           };
           const workflow = runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
-            cwd: context.cwd,
             runId: workflowRunId,
             ownerSession: context.sessionId,
+            ownerInput: context.agent?.scope?.inputId,
+            ownerRun: context.agent?.scope?.runId,
             store,
             onEvent,
             signal: ownerSignal,
@@ -341,7 +351,7 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
               text: JSON.stringify({
                 kind: "job",
                 action: "created",
-                jobId: snapshot.runId,
+                jobId: `workflow:${snapshot.runId}`,
                 jobKind: "workflow",
                 label: snapshot.summary,
                 status: snapshot.status,
@@ -350,13 +360,15 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
           };
         }
         const result = action === "resume"
-          ? await workflowResume(input, context.cwd, context.sessionId, runner as WorkflowRunner, (event) => emitWorkflowRuntimeEvent(context, event))
+          ? await workflowResume(input, repository!, context.sessionId, runner as WorkflowRunner, onWorkflowEvent)
           : persist && options.run === undefined
             ? await runPersistentWorkflow(specOrError as WorkflowSpec, runner as WorkflowRunner, {
-                cwd: context.cwd,
                 runId,
                 ownerSession: context.sessionId,
-                onEvent: (event) => emitWorkflowRuntimeEvent(context, event),
+                ownerInput: context.agent?.scope?.inputId,
+                ownerRun: context.agent?.scope?.runId,
+                store: repository!,
+                onEvent: onWorkflowEvent,
               })
             : runId
               ? await run(specOrError as WorkflowSpec, runner as WorkflowRunner, { runId })
@@ -371,8 +383,6 @@ export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefin
     },
   };
 }
-
-export const workflowTool: ToolDefinition = createWorkflowTool();
 
 function workflowValidate(input: Record<string, unknown>) {
   const specOrError = parseWorkflowSpec(input);
@@ -389,8 +399,17 @@ function workflowValidate(input: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text: formatWorkflowValidationReport(report) }] };
 }
 
-function workflowTimeline(input: Record<string, unknown>, cwd: string, ownerSession?: string) {
-  const store = new WorkflowRunStore({ cwd });
+function missingWorkflowRepository() {
+  return {
+    content: [{
+      type: "text" as const,
+      text: "Workflow durable repository is not configured for this runtime.",
+    }],
+    isError: true,
+  };
+}
+
+function workflowTimeline(input: Record<string, unknown>, store: WorkflowRunRepository, ownerSession?: string) {
   const snapshot = loadWorkflowSnapshot(store, input, ownerSession);
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
@@ -400,8 +419,7 @@ function workflowTimeline(input: Record<string, unknown>, cwd: string, ownerSess
   return { content: [{ type: "text" as const, text: formatWorkflowTimeline(snapshot, events, filters) }] };
 }
 
-function workflowHistory(input: Record<string, unknown>, cwd: string, ownerSession?: string) {
-  const store = new WorkflowRunStore({ cwd });
+function workflowHistory(input: Record<string, unknown>, store: WorkflowRunRepository, ownerSession?: string) {
   const filters = parseRunListFilters(input);
   if (typeof filters === "string") {
     return { content: [{ type: "text" as const, text: filters }], isError: true };
@@ -432,8 +450,7 @@ function workflowTemplate(input: Record<string, unknown>) {
   };
 }
 
-function workflowReconcile(input: Record<string, unknown>, cwd: string, ownerSession?: string) {
-  const store = new WorkflowRunStore({ cwd });
+function workflowReconcile(input: Record<string, unknown>, store: WorkflowRunRepository, ownerSession?: string) {
   const snapshot = loadWorkflowSnapshot(store, input, ownerSession);
   if (typeof snapshot === "string") {
     return { content: [{ type: "text" as const, text: snapshot }], isError: true };
@@ -470,12 +487,11 @@ async function stopWorkflowTask(
 
 async function workflowResume(
   input: Record<string, unknown>,
-  cwd: string,
+  store: WorkflowRunRepository,
   ownerSession: string | undefined,
   runner: WorkflowRunner,
   onEvent?: (event: WorkflowRunEvent) => void,
 ) {
-  const store = new WorkflowRunStore({ cwd });
   const snapshot = loadWorkflowSnapshot(store, input, ownerSession);
   if (typeof snapshot === "string") {
     throw new Error(snapshot);
@@ -483,25 +499,8 @@ async function workflowResume(
   return resumePersistentWorkflow(snapshot, runner, { store, onEvent });
 }
 
-function emitWorkflowRuntimeEvent(
-  context: { agent?: { emit(event: { type: "domain.event"; data: { name: string; payload?: Record<string, unknown> } }): Promise<void> } },
-  event: WorkflowRunEvent,
-): void {
-  try {
-    const emitted = context.agent?.emit({
-      type: "domain.event",
-      data: { name: `workflow.${event.type}`, payload: { event } },
-    });
-    if (emitted && typeof (emitted as Promise<void>).then === "function") {
-      (emitted as Promise<void>).catch(() => {});
-    }
-  } catch {
-    // Runtime telemetry should never change workflow execution behavior.
-  }
-}
-
 function loadWorkflowSnapshot(
-  store: WorkflowRunStore,
+  store: WorkflowRunRepository,
   input: Record<string, unknown>,
   ownerSession?: string,
 ): WorkflowRunSnapshot | string {

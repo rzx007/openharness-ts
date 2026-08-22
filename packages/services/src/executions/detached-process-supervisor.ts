@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { getTasksDir, type Settings } from "@openharness/core";
@@ -20,6 +20,7 @@ import type {
   StartAgentProcessOptions,
   StartShellExecutionOptions,
 } from "./types.js";
+import { appendBoundedOutput } from "./bounded-output-file.js";
 
 const MAX_OUTPUT_BYTES = 12_000;
 const STOP_GRACE_MS = 3_000;
@@ -116,7 +117,7 @@ export class DetachedProcessSupervisor {
       task.finishedAt = Date.now();
       task.metadata.status_note = message;
       try {
-        appendFileSync(outputFile, `[spawn error] ${message}\n`);
+        appendBoundedOutput(outputFile, `[spawn error] ${message}\n`);
       } catch {
         /* output file may have been removed by shutdown */
       }
@@ -482,7 +483,7 @@ export class DetachedProcessSupervisor {
 
     const append = (chunk: Buffer | string) => {
       try {
-        if (task.outputFile) appendFileSync(task.outputFile, chunk);
+        if (task.outputFile) appendBoundedOutput(task.outputFile, chunk);
       } catch {
         /* output file may be gone after shutdown */
       }
@@ -569,7 +570,7 @@ export class DetachedProcessSupervisor {
     task.exitCode = undefined;
     if (task.outputFile) {
       try {
-        appendFileSync(task.outputFile, RESTART_NOTICE);
+        appendBoundedOutput(task.outputFile, RESTART_NOTICE);
       } catch {
         /* ignore */
       }

@@ -225,6 +225,67 @@ export const channelDeliveries = sqliteTable(
   ],
 );
 
+export const workflowRuns = sqliteTable("workflow_run", {
+  runId: text("run_id").primaryKey(),
+  ownerSessionId: text("owner_session_id").references(() => sessions.id, { onDelete: "set null" }),
+  ownerInputId: text("owner_input_id").references(() => sessionInputs.id, { onDelete: "set null" }),
+  ownerRunId: text("owner_run_id").references(() => sessionRuns.id, { onDelete: "set null" }),
+  status: text("status").notNull(),
+  termination: text("termination"),
+  snapshotJson: text("snapshot_json").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  index("workflow_run_owner_idx").on(table.ownerSessionId, table.updatedAt),
+  index("workflow_run_status_idx").on(table.status, table.updatedAt),
+]);
+
+export const workflowTaskAttempts = sqliteTable("workflow_task_attempt", {
+  workflowRunId: text("workflow_run_id").notNull().references(() => workflowRuns.runId, { onDelete: "cascade" }),
+  taskId: text("task_id").notNull(),
+  attempt: integer("attempt").notNull(),
+  status: text("status").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  startedAt: integer("started_at").notNull(),
+  finishedAt: integer("finished_at"),
+}, (table) => [
+  uniqueIndex("workflow_task_attempt_identity").on(table.workflowRunId, table.taskId, table.attempt),
+]);
+
+export const workflowEvents = sqliteTable("workflow_event", {
+  seq: integer("seq").primaryKey({ autoIncrement: true }),
+  workflowRunId: text("workflow_run_id").notNull().references(() => workflowRuns.runId, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  eventJson: text("event_json").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [index("workflow_event_run_seq_idx").on(table.workflowRunId, table.seq)]);
+
+export const workflowExecutionClaims = sqliteTable("workflow_execution_claim", {
+  workflowRunId: text("workflow_run_id").primaryKey().references(() => workflowRuns.runId, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  generation: integer("generation").notNull(),
+  claimedAt: integer("claimed_at").notNull(),
+  heartbeatAt: integer("heartbeat_at").notNull(),
+  finishedAt: integer("finished_at"),
+  status: text("status").notNull(),
+});
+
+export const applicationOwners = sqliteTable("application_owner", {
+  key: text("key").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  pid: integer("pid").notNull(),
+  generation: integer("generation").notNull(),
+  startedAt: integer("started_at").notNull(),
+  heartbeatAt: integer("heartbeat_at").notNull(),
+});
+
+export const retentionAudits = sqliteTable("retention_audit", {
+  id: text("id").primaryKey(),
+  policy: text("policy").notNull(),
+  resultJson: text("result_json").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
 export const sessionTasks = sqliteTable(
   "session_task",
   {

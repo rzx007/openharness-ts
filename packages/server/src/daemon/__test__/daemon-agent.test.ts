@@ -17,8 +17,8 @@ vi.mock("@openharness/coordinator", () => ({
 }));
 
 vi.mock("@openharness/agent-runtime", () => ({
-  createOpenHarnessAgent: vi.fn(async () => {
-    throw new Error("createOpenHarnessAgent should not be used by this test");
+  createDefaultNodeAgent: vi.fn(async () => {
+    throw new Error("createDefaultNodeAgent should not be used by this test");
   }),
 }));
 

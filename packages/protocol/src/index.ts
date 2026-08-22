@@ -5,3 +5,4 @@ export * from "./job.js";
 export * from "./terminal.js";
 export * from "./serialization.js";
 export * from "./channel.js";
+export * from "./capabilities.js";

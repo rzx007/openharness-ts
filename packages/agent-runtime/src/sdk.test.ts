@@ -7,9 +7,10 @@ import type {
   Settings,
   StreamingMessageClient,
 } from "@openharness/core";
+import { FileWorkflowRunRepository } from "@openharness/coordinator";
 import { describe, expect, it, vi } from "vitest";
 
-import { createOpenHarnessAgent } from "./index.js";
+import { createDefaultNodeAgent } from "./index.js";
 
 describe("programmatic agent SDK", () => {
   it("runs a complete turn without daemon, including events and permission decisions", async () => {
@@ -53,7 +54,7 @@ describe("programmatic agent SDK", () => {
       sandbox: { enabled: false },
     };
 
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings,
       client,
@@ -157,7 +158,7 @@ describe("programmatic agent SDK", () => {
       permission: { mode: "full_auto" },
       sandbox: { enabled: false },
     };
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings,
       client,
@@ -218,7 +219,7 @@ describe("programmatic agent SDK", () => {
         yield { type: "complete" as const, stopReason: "end_turn" };
       },
     };
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings: {
         apiFormat: "anthropic",
@@ -228,6 +229,10 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
+      hostCapabilities: {
+        permissions: { requestPermission: async () => ({ status: "approved" }) },
+        workflowRepository: new FileWorkflowRunRepository({ cwd }),
+      },
       onEvent: (event) => { events.push(event); },
     });
 
@@ -336,7 +341,7 @@ describe("programmatic agent SDK", () => {
         yield { type: "complete" as const, stopReason: "tool_use" };
       },
     };
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings: {
         apiFormat: "anthropic",
@@ -346,6 +351,10 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
+      hostCapabilities: {
+        permissions: { requestPermission: async () => ({ status: "approved" }) },
+        workflowRepository: new FileWorkflowRunRepository({ cwd }),
+      },
       roleAllowedTools: [
         "workflow",
         "job_list",
@@ -443,7 +452,7 @@ describe("programmatic agent SDK", () => {
         yield { type: "complete" as const, stopReason: "tool_use" };
       },
     };
-    const agent = await createOpenHarnessAgent({
+    const agent = await createDefaultNodeAgent({
       cwd,
       settings: {
         apiFormat: "anthropic",

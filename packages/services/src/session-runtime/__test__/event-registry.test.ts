@@ -77,21 +77,13 @@ describe("DurableEventRegistry", () => {
     }));
   });
 
-  it("normalizes legacy v1 domain event names only at the read boundary", () => {
-    expect(defaultDurableEventRegistry.prepareRead(
+  it("rejects unregistered event names at both read and write boundaries", () => {
+    expect(() => defaultDurableEventRegistry.prepareRead(
       "provider.rate_limited",
       1,
       { frameworkEventId: "framework-1", retryAfterMs: 1_000 },
       "s1",
-    )).toEqual({
-      type: "agent.domain.event",
-      schemaVersion: 1,
-      payload: {
-        frameworkEventId: "framework-1",
-        name: "provider.rate_limited",
-        payload: { retryAfterMs: 1_000 },
-      },
-    });
+    )).toThrow("Unregistered durable event type");
     expect(() => defaultDurableEventRegistry.prepareWrite(
       "provider.rate_limited",
       { frameworkEventId: "framework-1", retryAfterMs: 1_000 },

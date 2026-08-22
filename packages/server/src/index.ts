@@ -29,6 +29,10 @@ export { rewindTranscript, type RewindTranscriptResult } from "./session/index.j
 export {
   ApplicationEventService,
   ChannelApplicationService,
+  ApplicationRetentionService,
+  SessionWorkflowRunRepository,
+  createApplicationBackup,
+  restoreApplicationBackup,
   DaemonApplication,
   ProjectApplicationService,
   createDefaultNodeApplication,
@@ -38,6 +42,8 @@ export {
   type DefaultNodeApplicationOptions,
   type DurableAgentApplication,
   type ChannelApplicationServiceContext,
+  type ApplicationBackupManifest,
+  type BackupSourceDirectories,
 } from "./application/index.js";
 export type {
   AgentPersonaInfo,

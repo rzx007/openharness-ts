@@ -35,6 +35,9 @@ export class DaemonControlService {
     const sessions = this.context.store.listSessions({ includeArchived: true });
     const runs = sessions.flatMap((session) => this.context.store.listRuns(session.id));
     const tasks = sessions.flatMap((session) => this.context.store.listSessionTasks(session.id));
+    const workflows = typeof this.context.store.listWorkflowRuns === "function"
+      ? this.context.store.listWorkflowRuns()
+      : [];
     const permissions = this.context.store.listPermissionRequests();
     const projectionSettlements = this.context.store.listProjectionSettlements();
     const attempts = typeof this.context.store.listRunAttempts === "function"
@@ -57,6 +60,7 @@ export class DaemonControlService {
       sessions: { total: sessions.length, byStatus: countByStatus(sessions) },
       runs: { total: runs.length, byStatus: countByStatus(runs) },
       tasks: { total: tasks.length, byStatus: countByStatus(tasks) },
+      workflows: { total: workflows.length, byStatus: countByStatus(workflows) },
       permissions: { total: permissions.length, byStatus: countByStatus(permissions) },
       projectionSettlements: {
         total: projectionSettlements.length,
@@ -75,6 +79,7 @@ export class DaemonControlService {
         tasks,
         permissions,
         settlements: projectionSettlements,
+        workflows,
       }),
     };
   }

@@ -10,7 +10,7 @@ import type {
   TerminalWriteRequest,
 } from "@openharness/protocol";
 
-/** 兼容入口；跨端数据的唯一来源已经迁到 @openharness/protocol。 */
+/** Terminal 包对外汇总它实际使用的跨端协议类型。 */
 export type {
   TerminalCreateRequest,
   TerminalReadRequest,

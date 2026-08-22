@@ -9,6 +9,7 @@ import type {
   ExecutionStatus,
   RegisterChildAgentExecutionOptions,
 } from "./types.js";
+import { writeBoundedOutput } from "./bounded-output-file.js";
 
 const MAX_OUTPUT_BYTES = 12_000;
 
@@ -78,7 +79,7 @@ export class ChildAgentExecutionRegistry {
     input: CompleteChildAgentExecutionInput,
   ): Promise<ChildAgentExecution> {
     const execution = this.requireExecution(executionId);
-    if (execution.outputFile) writeFileSync(execution.outputFile, input.output);
+    if (execution.outputFile) writeBoundedOutput(execution.outputFile, input.output);
     execution.status = input.status;
     execution.exitCode = input.status === "completed" ? 0 : 1;
     execution.finishedAt = Date.now();
@@ -124,7 +125,7 @@ export class ChildAgentExecutionRegistry {
         execution.finishedAt = previous.finishedAt;
         execution.exitCode = previous.exitCode;
         if (execution.outputFile && previous.output !== undefined) {
-          writeFileSync(execution.outputFile, previous.output);
+          writeBoundedOutput(execution.outputFile, previous.output);
         }
         this.notify(execution, "updated");
       }

@@ -93,7 +93,7 @@ export interface OpenHarnessServerOptions {
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
-  /** Test/embedding seam. Production daemon creation uses createOpenHarnessAgent directly. */
+  /** Test/embedding seam. Production daemon creation uses createDefaultNodeAgent directly. */
   createAgent?: CreateDaemonAgent;
   services?: OpenHarnessServerServices;
   version?: string;
@@ -286,7 +286,7 @@ export class OpenHarnessHttpServer {
     });
 
     this.app.use("*", async (c, next) => {
-      if (c.req.method === "GET" && c.req.path === "/health") {
+      if (c.req.method === "GET" && (c.req.path === "/health" || c.req.path === "/capabilities")) {
         await next();
         return;
       }

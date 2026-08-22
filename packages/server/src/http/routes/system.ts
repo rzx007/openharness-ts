@@ -10,6 +10,7 @@ import {
 } from "../support.js";
 import type { ModelService, ProviderService, SettingsService } from "../../application/index.js";
 import type { DaemonControlService } from "../../application/control/index.js";
+import type { ServerCapabilities } from "@openharness/protocol";
 
 export interface SystemRoutesContext {
   version?: string;
@@ -18,10 +19,26 @@ export interface SystemRoutesContext {
   providerService?: ProviderService;
   modelService?: ModelService;
   control: Pick<DaemonControlService, "acquireGlobalMutation" | "closeAllRuntimes" | "runtimeSnapshot" | "inspectRun" | "listProjectionDiagnostics">;
+  capabilities?: ServerCapabilities;
 }
 
 export function createSystemRoutes(context: SystemRoutesContext): Hono {
   return new Hono()
+    .get("/capabilities", () => jsonResponse(context.capabilities ?? {
+      serverVersion: context.version ?? "0.1.0",
+      protocol: { version: 2 },
+      features: {
+        steer: 1,
+        runAttempts: 1,
+        toolAttempts: 1,
+        jobs: 2,
+        schedules: 1,
+        workflow: 2,
+        durableChannels: 1,
+        backup: 1,
+        retention: 1,
+      },
+    } satisfies ServerCapabilities))
     .get("/health", () => {
       const snapshot = context.control.runtimeSnapshot();
       return jsonResponse({

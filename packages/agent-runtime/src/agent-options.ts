@@ -8,6 +8,7 @@ import type {
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
+import type { WorkflowRunRepository } from "@openharness/coordinator";
 import type { AgentChildEnvironmentProvider } from "./child-environment.js";
 
 /** 宿主怎样处理权限请求。Kernel 不自己决定允许或拒绝。 */
@@ -24,6 +25,7 @@ export interface AgentHostCapabilities {
   terminal?: AgentTerminalHost;
   schedules?: AgentScheduleEffects;
   childEnvironment?: AgentChildEnvironmentProvider;
+  workflowRepository?: WorkflowRunRepository;
 }
 
 /** Opinionated runtime configuration exposed by the programmatic agent API. */

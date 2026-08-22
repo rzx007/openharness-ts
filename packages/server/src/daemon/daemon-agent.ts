@@ -9,6 +9,7 @@ import {
   getCoordinatorTools,
   getCoordinatorUserContext,
 } from "@openharness/coordinator";
+import type { WorkflowRunRepository } from "@openharness/coordinator";
 import type {
   AgentScheduleEffects,
   AgentEffects,
@@ -58,6 +59,7 @@ export interface DaemonAgentLoaderOptions {
   schedules?: AgentScheduleEffects;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
+  workflowRepository?: WorkflowRunRepository;
   createEventSink?(
     agent: OpenHarnessAgent,
     session: SessionRecord,
@@ -111,6 +113,9 @@ export function createDaemonAgentLoader(
         ...(options.schedules ? { schedules: options.schedules } : {}),
         ...(terminal ? { terminal } : {}),
         ...(jobs ? { jobs } : {}),
+        ...(options.workflowRepository
+          ? { workflowRepository: options.workflowRepository }
+          : {}),
       },
       ...(options.createEventSink
         ? {

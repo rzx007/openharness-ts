@@ -8,7 +8,7 @@ import {
   createWorkflowResultFromSnapshot,
   createWorkflowSpecFromReconciliationPlan,
   createWorkflowValidationReport,
-  WorkflowRunStore,
+  FileWorkflowRunRepository,
   type WorkflowBudgetPolicyPreset,
   type WorkflowRunSummary,
   type WorkflowRunSnapshot,
@@ -71,7 +71,7 @@ export function createWorkflowCommand(): Command {
     .option("--needs-reconciliation", "Only include runs that need reconciliation")
     .option("--budget-preset <preset>", "Only include runs with this budget preset")
     .action((options: ListOptions) => {
-      const store = new WorkflowRunStore({ cwd: options.cwd });
+      const store = new FileWorkflowRunRepository({ cwd: options.cwd });
       printJson(createWorkflowListPayload(store.listSummaries(), options));
     });
 
@@ -82,7 +82,7 @@ export function createWorkflowCommand(): Command {
     .option("--cwd <dir>", "Project working directory")
     .option("--no-events", "Do not include persisted event timeline")
     .action((runId: string | undefined, options: CwdOption & { events?: boolean }) => {
-      const store = new WorkflowRunStore({ cwd: options.cwd });
+      const store = new FileWorkflowRunRepository({ cwd: options.cwd });
       const snapshot = loadSnapshotOrThrow(store, runId);
       printJson({
         snapshot,
@@ -119,7 +119,7 @@ export function createWorkflowCommand(): Command {
     .option("--verify-task-id <id>", "Generated verification task id")
     .option("--budget-preset <preset>", "Budget preset for the generated workflow spec")
     .action((runId: string | undefined, options: ReconcileOptions) => {
-      const store = new WorkflowRunStore({ cwd: options.cwd });
+      const store = new FileWorkflowRunRepository({ cwd: options.cwd });
       const snapshot = loadSnapshotOrThrow(store, runId);
       printJson(createWorkflowReconcilePayload(snapshot, options));
     });
@@ -131,7 +131,7 @@ export function createWorkflowCommand(): Command {
     .option("--cwd <dir>", "Project working directory")
     .option("--reason <reason>", "Cancellation reason")
     .action(async (runId: string | undefined, options: CancelOptions) => {
-      const store = new WorkflowRunStore({ cwd: options.cwd });
+      const store = new FileWorkflowRunRepository({ cwd: options.cwd });
       const snapshot = loadSnapshotOrThrow(store, runId);
       const result = await cancelPersistentWorkflow(snapshot, {
         store,
@@ -217,7 +217,7 @@ function workflowRunMatches(run: WorkflowRunSummary, options: ListOptions): bool
   return true;
 }
 
-function loadSnapshotOrThrow(store: WorkflowRunStore, runId: string | undefined): WorkflowRunSnapshot {
+function loadSnapshotOrThrow(store: FileWorkflowRunRepository, runId: string | undefined): WorkflowRunSnapshot {
   const snapshot = runId ? store.load(runId) : store.latest();
   if (!snapshot) throw new Error(runId ? `Workflow run not found: ${runId}` : "No workflow runs found");
   return snapshot;

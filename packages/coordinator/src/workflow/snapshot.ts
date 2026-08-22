@@ -70,6 +70,8 @@ export function createWorkflowRunId(now = Date.now()): string {
 export function createWorkflowRunSnapshot(input: {
   runId: string;
   ownerSession?: string;
+  ownerInput?: string;
+  ownerRun?: string;
   status: WorkflowRunSnapshotStatus;
   termination?: "cancelled";
   summary: string;
@@ -89,6 +91,8 @@ export function createWorkflowRunSnapshot(input: {
     version: 1,
     runId: input.runId,
     ...(input.ownerSession ? { ownerSession: input.ownerSession } : {}),
+    ...(input.ownerInput ? { ownerInput: input.ownerInput } : {}),
+    ...(input.ownerRun ? { ownerRun: input.ownerRun } : {}),
     status: input.status,
     ...(input.termination ? { termination: input.termination } : {}),
     summary: input.summary,

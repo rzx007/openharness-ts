@@ -87,6 +87,7 @@ export async function composeOpenHarnessAgent(
       schedules: Boolean(explicitCapabilities?.schedules ?? internal.effects.schedules),
       terminal: Boolean(explicitCapabilities?.terminal ?? options.terminal),
       jobs: Boolean(explicitCapabilities?.jobs) || !explicitCapabilities,
+      workflowRepository: explicitCapabilities?.workflowRepository,
     },
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
@@ -171,6 +172,7 @@ export async function composeOpenHarnessAgent(
       ...(explicitCapabilities?.childEnvironment ?? options.childEnvironment
         ? ["childEnvironment"]
         : []),
+      ...(explicitCapabilities?.workflowRepository ? ["workflowRepository"] : []),
     ];
     return {
       runtime,

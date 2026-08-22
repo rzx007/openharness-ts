@@ -296,6 +296,8 @@ export interface WorkflowRunSnapshot {
   version: 1;
   runId: string;
   ownerSession?: string;
+  ownerInput?: string;
+  ownerRun?: string;
   status: WorkflowRunSnapshotStatus;
   termination?: "cancelled";
   summary: string;
@@ -316,6 +318,8 @@ export interface WorkflowRunSnapshot {
 export interface WorkflowRunOptions {
   runId?: string;
   ownerSession?: string;
+  ownerInput?: string;
+  ownerRun?: string;
   /** Return a reason when an external controller has requested this run to stop scheduling work. */
   shouldStop?: () => string | undefined;
   onSnapshot?: (snapshot: WorkflowRunSnapshot) => void;

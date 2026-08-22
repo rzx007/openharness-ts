@@ -9,3 +9,6 @@ export * from "./support.js";
 export * from "./events/index.js";
 export * from "./project-application-service.js";
 export * from "./channel/index.js";
+export * from "./backup/application-backup.js";
+export * from "./retention/application-retention-service.js";
+export * from "./workflow/session-workflow-run-repository.js";

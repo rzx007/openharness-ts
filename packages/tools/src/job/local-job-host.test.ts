@@ -10,7 +10,7 @@ import type {
 import {
   createWorkflowPlan,
   createWorkflowRunSnapshot,
-  WorkflowRunStore,
+  FileWorkflowRunRepository,
 } from "@openharness/coordinator";
 import { resetExecutionRuntimes } from "@openharness/services/executions";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -104,7 +104,7 @@ describe("LocalAgentJobHost adapter", () => {
   it("returns structured Workflow details from JobRead", async () => {
     const cwd = temporaryDirectory();
     const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
-    new WorkflowRunStore({ cwd }).save(createWorkflowRunSnapshot({
+    new FileWorkflowRunRepository({ cwd }).save(createWorkflowRunSnapshot({
       runId: "workflow-1",
       ownerSession: "session-1",
       status: "running",
@@ -133,7 +133,7 @@ describe("LocalAgentJobHost adapter", () => {
   it("cancels a Workflow through JobCancel instead of a Workflow action", async () => {
     const cwd = temporaryDirectory();
     const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
-    new WorkflowRunStore({ cwd }).save(createWorkflowRunSnapshot({
+    new FileWorkflowRunRepository({ cwd }).save(createWorkflowRunSnapshot({
       runId: "workflow-cancel",
       ownerSession: "session-1",
       status: "running",
@@ -156,7 +156,7 @@ describe("LocalAgentJobHost adapter", () => {
       status: "killed",
       capabilities: { cancel: false },
     });
-    expect(new WorkflowRunStore({ cwd }).load("workflow-cancel")).toMatchObject({
+    expect(new FileWorkflowRunRepository({ cwd }).load("workflow-cancel")).toMatchObject({
       status: "failed",
       termination: "cancelled",
       summary: "no longer needed",

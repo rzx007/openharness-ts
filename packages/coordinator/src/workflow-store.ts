@@ -1,13 +1,16 @@
 export {
   cancelPersistentWorkflow,
+  decodeWorkflowRunEvent,
+  decodeWorkflowRunSnapshot,
   getWorkflowRunsDir,
   resumePersistentWorkflow,
   runPersistentWorkflow,
-  WorkflowRunStore,
+  FileWorkflowRunRepository,
 } from "./workflow/store.js";
 export type {
   CancelPersistentWorkflowOptions,
   ResumePersistentWorkflowOptions,
   RunPersistentWorkflowOptions,
-  WorkflowRunStoreOptions,
+  FileWorkflowRunRepositoryOptions,
+  WorkflowRunRepository,
 } from "./workflow/store.js";
