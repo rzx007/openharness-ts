@@ -9,6 +9,7 @@ export interface ChannelMessage {
    * sender open_id). When unset, adapters fall back to `sender`.
    */
   replyTo?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ChannelAdapter {
@@ -25,8 +26,10 @@ export type { InboundMessage, OutboundMessage } from "./bus/queue";
 export { isAllowed } from "./bus/acl";
 export { ChannelManager } from "./manager";
 export type { ChannelManagerOptions, ChannelStatus } from "./manager";
-export { ChannelBridge } from "./bridge";
+export { ChannelBridge, EphemeralChannelBridge } from "./bridge";
 export type { BridgeAgent } from "./bridge";
+export { DurableChannelBridge } from "./durable-bridge";
+export type { DurableChannelPort } from "./durable-bridge";
 export { StdioAdapter } from "./impl/stdio";
 export { HttpAdapter } from "./impl/http";
 export { FeishuAdapter } from "./impl/feishu";

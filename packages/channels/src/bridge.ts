@@ -16,7 +16,7 @@ export interface BridgeAgent {
   };
 }
 
-export class ChannelBridge {
+export class EphemeralChannelBridge {
   private abort: AbortController | null = null;
   private done: Promise<void> | null = null;
   private activeRun: ReturnType<BridgeAgent["submitMessage"]> | null = null;
@@ -101,3 +101,6 @@ export class ChannelBridge {
     });
   }
 }
+
+/** @deprecated 正式 serve 使用 DurableChannelBridge；这里只保留临时库测试兼容。 */
+export const ChannelBridge = EphemeralChannelBridge;

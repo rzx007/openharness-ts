@@ -20,7 +20,9 @@ import {
   type CreateDaemonAgent,
 } from "../daemon/daemon-agent.js";
 import { ScheduledTaskService } from "../daemon/scheduled-task-service.js";
+import { DaemonJobService } from "../jobs/daemon-job-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
+import { DaemonTerminalService } from "../terminal/daemon-terminal-service.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
   DAEMON_RESTART_PERMISSION_REASON,
@@ -28,45 +30,66 @@ import {
   DAEMON_RESTART_RUN_REASON,
   DAEMON_RESTART_TASK_REASON,
   normalizeTraceId,
-} from "../http/support.js";
-import { AgentPool } from "../http/agent/agent-pool.js";
-import { DaemonAgentEventProjector } from "../http/agent/daemon-agent-event-projector.js";
+} from "./support.js";
+import { AgentPool } from "./agent/agent-pool.js";
+import { DaemonAgentEventProjector } from "./agent/daemon-agent-event-projector.js";
 import {
   DAEMON_AGENT_PROJECTOR,
   recoverProjectionSettlements,
-} from "../http/agent/projection-settlement-recovery.js";
-import { DaemonControlService } from "../http/control/daemon-control-service.js";
-import { DaemonOperationGate } from "../http/control/daemon-operation-gate.js";
-import { LiveChildAgentDirectory } from "../http/agent/live-child-agent-directory.js";
-import { SessionApplicationService } from "../http/session/session-application-service.js";
+} from "./agent/projection-settlement-recovery.js";
+import { DaemonControlService } from "./control/daemon-control-service.js";
+import { DaemonOperationGate } from "./control/daemon-operation-gate.js";
+import { LiveChildAgentDirectory } from "./agent/live-child-agent-directory.js";
+import { SessionApplicationService } from "./session/session-application-service.js";
 import {
   SessionEventPublisher,
-  type SessionEventSink,
-} from "../http/session/session-event-publisher.js";
-import { SessionMaintenanceService } from "../http/session/session-maintenance-service.js";
-import { SessionQueryService } from "../http/session/session-query-service.js";
-import { SessionRunEngine } from "../http/session/session-run-engine.js";
-import { SessionRunExecutor } from "../http/session/session-run-executor.js";
-import { SessionExecutionProjector } from "../http/session/session-execution-projector.js";
-import { BackgroundShellService } from "../http/session/background-shell-service.js";
-import { SessionTranscriptProjection } from "../http/session/transcript-projection.js";
-import { recoverInterruptedWorkflows } from "../http/session/workflow-recovery.js";
+} from "./session/session-event-publisher.js";
+import { SessionMaintenanceService } from "./session/session-maintenance-service.js";
+import { SessionQueryService } from "./session/session-query-service.js";
+import { SessionRunEngine } from "./session/session-run-engine.js";
+import { SessionRunExecutor } from "./session/session-run-executor.js";
+import { SessionExecutionProjector } from "./session/session-execution-projector.js";
+import { BackgroundShellService } from "./session/background-shell-service.js";
+import { SessionTranscriptProjection } from "./session/transcript-projection.js";
+import { recoverInterruptedWorkflows } from "./session/workflow-recovery.js";
+import { ApplicationEventService } from "./events/application-event-service.js";
+import { ProjectApplicationService } from "./project-application-service.js";
+import { ChannelApplicationService } from "./channel/channel-application-service.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
-  eventSink: SessionEventSink;
+  /** 只有默认 Node 组装应设为 true；外部注入的 Store 默认由调用方关闭。 */
+  ownsStore?: boolean;
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
   createAgent?: CreateDaemonAgent;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
-  sseClientCount(): number;
   log(event: ObservabilityEvent): void;
 }
 
+export interface DurableAgentApplication {
+  readonly store: SessionStore;
+  readonly sessions: SessionApplicationService;
+  readonly queries: SessionQueryService;
+  readonly permissions: StorePermissionBroker;
+  readonly backgroundShells: BackgroundShellService;
+  readonly maintenance: SessionMaintenanceService;
+  readonly control: DaemonControlService;
+  readonly schedules: ScheduledTaskService;
+  readonly jobs: DaemonJobService;
+  readonly terminals: DaemonTerminalService;
+  readonly projects: ProjectApplicationService;
+  readonly events: ApplicationEventService;
+  readonly channels: ChannelApplicationService;
+  ready(): Promise<void>;
+  close(): Promise<void>;
+}
+
 /** Daemon-owned durable application graph, independent from HTTP routing and listening. */
-export class DaemonApplication {
+export class DaemonApplication implements DurableAgentApplication {
+  readonly store: SessionStore;
   readonly permissions: StorePermissionBroker;
   readonly backgroundShells: BackgroundShellService;
   readonly sessions: SessionApplicationService;
@@ -74,8 +97,13 @@ export class DaemonApplication {
   readonly queries: SessionQueryService;
   readonly control: DaemonControlService;
   readonly schedules: ScheduledTaskService;
+  readonly jobs: DaemonJobService;
+  readonly terminals: DaemonTerminalService;
+  readonly projects: ProjectApplicationService;
+  readonly events: ApplicationEventService;
+  readonly channels: ChannelApplicationService;
 
-  private readonly events: SessionEventPublisher;
+  private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
   private readonly executionProjector: SessionExecutionProjector;
   private readonly liveChildren = new LiveChildAgentDirectory();
@@ -83,9 +111,12 @@ export class DaemonApplication {
   private readonly agentPool: AgentPool;
   private readonly runEngine: SessionRunEngine;
   private readonly startupRecovery: Promise<void>;
+  private closePromise?: Promise<void>;
+  private readyState: "starting" | "ready" | "failed" | "closing" | "closed" = "starting";
 
   constructor(private readonly options: DaemonApplicationOptions) {
     const { store } = options;
+    this.store = store;
     recoverProjectionSettlements(store);
     store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
     store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
@@ -93,18 +124,21 @@ export class DaemonApplication {
     store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
     store.finalizeClosingSessions();
 
-    this.events = new SessionEventPublisher(store, options.eventSink);
+    this.events = new ApplicationEventService(store);
+    this.eventPublisher = new SessionEventPublisher(store, this.events);
+    this.terminals = new DaemonTerminalService(store);
+    this.projects = new ProjectApplicationService(store);
     this.permissions = new StorePermissionBroker({
       store,
       onChange: (previousEventSeq) =>
-        this.events.publishSince(previousEventSeq),
+        this.eventPublisher.publishSince(previousEventSeq),
       logger: options.log,
     });
     this.transcriptProjection = new SessionTranscriptProjection(store);
     this.executionProjector = new SessionExecutionProjector({
       store,
       getChildAgentExecutionRegistry: (scope) => getChildAgentExecutionRegistry(scope),
-      events: this.events,
+      events: this.eventPublisher,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: options.log,
     });
@@ -112,16 +146,27 @@ export class DaemonApplication {
       store,
       executionProjector: this.executionProjector,
       getDetachedProcessSupervisor: (scope) => getDetachedProcessSupervisor(scope),
-      events: this.events,
+      events: this.eventPublisher,
     });
+    this.jobs = new DaemonJobService(
+      store,
+      this.terminals,
+      this.backgroundShells,
+      (scope) => getDetachedProcessSupervisor(scope),
+      (scope) => getChildAgentExecutionRegistry(scope),
+    );
 
     const loadAgent = createDaemonAgentLoader({
       settings: options.settings,
       getSettings: options.getSettings,
       getSettingsForCwd: options.getSettingsForCwd,
       createAgent: options.createAgent,
-      createTerminalHost: options.createTerminalHost,
-      createJobHost: options.createJobHost,
+      createTerminalHost:
+        options.createTerminalHost ??
+        ((session) => this.terminals.createAgentHost(session)),
+      createJobHost:
+        options.createJobHost ??
+        ((session) => this.jobs.createAgentHost(session)),
       requestPermission: async (request, context) => {
         return await this.permissions.ask({
           sessionId: context.sessionId,
@@ -151,7 +196,7 @@ export class DaemonApplication {
           transcriptProjection: this.transcriptProjection,
           executionProjector: this.executionProjector,
           liveChildren: this.liveChildren,
-          events: this.events,
+          events: this.eventPublisher,
           log: options.log,
         });
         return (event) => projector.apply(event);
@@ -166,7 +211,7 @@ export class DaemonApplication {
     const runExecutor = new SessionRunExecutor({
       store,
       agentPool: this.agentPool,
-      events: this.events,
+      events: this.eventPublisher,
       transcriptProjection: this.transcriptProjection,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: options.log,
@@ -175,7 +220,7 @@ export class DaemonApplication {
       store,
       agentPool: this.agentPool,
       runExecutor,
-      events: this.events,
+      events: this.eventPublisher,
     });
     this.control = new DaemonControlService({
       store,
@@ -183,7 +228,7 @@ export class DaemonApplication {
       agentPool: this.agentPool,
       operationGate: this.operationGate,
       startedAt: Date.now(),
-      sseClientCount: options.sseClientCount,
+      sseClientCount: () => this.events.subscriberCount,
     });
     this.maintenance = new SessionMaintenanceService({
       store,
@@ -191,7 +236,7 @@ export class DaemonApplication {
       agentPool: this.agentPool,
       liveChildren: this.liveChildren,
       operationGate: this.operationGate,
-      events: this.events,
+      events: this.eventPublisher,
     });
     this.sessions = new SessionApplicationService({
       store,
@@ -199,7 +244,13 @@ export class DaemonApplication {
       agentPool: this.agentPool,
       liveChildren: this.liveChildren,
       operationGate: this.operationGate,
-      events: this.events,
+      events: this.eventPublisher,
+      assertReady: () => this.assertReady(),
+    });
+    this.channels = new ChannelApplicationService({
+      store,
+      sessions: this.sessions,
+      log: options.log,
     });
     this.schedules = new ScheduledTaskService({
       store,
@@ -357,8 +408,16 @@ export class DaemonApplication {
     this.queries = new SessionQueryService(store);
     this.startupRecovery = recoverInterruptedWorkflows({
       store,
-      events: this.events,
-    });
+      events: this.eventPublisher,
+    }).then(
+      () => {
+        if (this.readyState === "starting") this.readyState = "ready";
+      },
+      (error) => {
+        this.readyState = "failed";
+        throw error;
+      },
+    );
     void this.startupRecovery.catch(() => {});
   }
 
@@ -366,7 +425,19 @@ export class DaemonApplication {
     await this.startupRecovery;
   }
 
-  async shutdown(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.readyState = "closing";
+    this.closePromise = this.closeWork();
+    return this.closePromise;
+  }
+
+  /** @deprecated 使用 close()。 */
+  shutdown(): Promise<void> {
+    return this.close();
+  }
+
+  private async closeWork(): Promise<void> {
     const failures: unknown[] = [];
     try {
       await this.startupRecovery;
@@ -380,6 +451,11 @@ export class DaemonApplication {
     }
     try {
       await this.control.shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await this.terminals.dispose();
     } catch (error) {
       failures.push(error);
     }
@@ -398,9 +474,33 @@ export class DaemonApplication {
     } catch (error) {
       failures.push(error);
     }
+    try {
+      this.events.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    if (this.options.ownsStore) {
+      try {
+        this.store.close();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    this.readyState = "closed";
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1)
       throw new AggregateError(failures, "Daemon application shutdown failed");
+  }
+
+  private assertReady(): void {
+    if (this.readyState === "ready") return;
+    if (this.readyState === "failed") {
+      throw new Error("Durable Agent Application failed to start");
+    }
+    if (this.readyState === "closing" || this.readyState === "closed") {
+      throw new Error("Durable Agent Application is closing or closed");
+    }
+    throw new Error("Durable Agent Application is not ready");
   }
 
   private traceIdForRun(runId: string): string {

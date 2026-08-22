@@ -1,15 +1,13 @@
-import { stat } from "node:fs/promises";
-
-import type { SessionStore } from "@openharness/services";
 import { Hono } from "hono";
 
+import type { ProjectApplicationService } from "../../application/project-application-service.js";
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 
-export function createProjectRoutes(store: SessionStore): Hono {
+export function createProjectRoutes(projects: ProjectApplicationService): Hono {
   return new Hono()
     .get("/", (c) =>
       jsonResponse({
-        projects: store.listProjects({
+        projects: projects.list({
           includeArchived: c.req.query("includeArchived") === "true",
         }),
       }),
@@ -19,9 +17,7 @@ export function createProjectRoutes(store: SessionStore): Hono {
       if (typeof body.path !== "string")
         return errorResponse(400, "path is required");
       try {
-        if (!(await stat(body.path)).isDirectory())
-          return errorResponse(400, "path is not a directory");
-        return jsonResponse({ project: store.inspectProject(body.path) });
+        return jsonResponse({ project: await projects.inspect(body.path) });
       } catch (error) {
         return errorResponse(
           400,
@@ -41,14 +37,14 @@ export function createProjectRoutes(store: SessionStore): Hono {
           return errorResponse(400, "defaultShell must be a string or null");
         }
         const project = hasDefaultShell
-          ? store.setProjectDefaultShell(
+          ? projects.setDefaultShell(
               c.req.param("projectId"),
               typeof body.defaultShell === "string" ? body.defaultShell : null,
             )
           : typeof body.name === "string"
-            ? store.renameProject(c.req.param("projectId"), body.name)
+            ? projects.rename(c.req.param("projectId"), body.name)
             : typeof body.pinned === "boolean"
-              ? store.setProjectPinned(c.req.param("projectId"), body.pinned)
+              ? projects.setPinned(c.req.param("projectId"), body.pinned)
               : null;
         return project
           ? jsonResponse({ project })
@@ -65,10 +61,8 @@ export function createProjectRoutes(store: SessionStore): Hono {
       if (typeof body.path !== "string")
         return errorResponse(400, "path is required");
       try {
-        if (!(await stat(body.path)).isDirectory())
-          return errorResponse(400, "path is not a directory");
         return jsonResponse({
-          project: store.rebindProject(c.req.param("projectId"), body.path),
+          project: await projects.rebind(c.req.param("projectId"), body.path),
         });
       } catch (error) {
         return errorResponse(
@@ -80,7 +74,7 @@ export function createProjectRoutes(store: SessionStore): Hono {
     .delete("/:projectId", (c) => {
       try {
         return jsonResponse({
-          project: store.archiveProject(c.req.param("projectId")),
+          project: projects.archive(c.req.param("projectId")),
         });
       } catch (error) {
         return errorResponse(

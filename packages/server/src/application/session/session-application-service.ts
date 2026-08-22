@@ -26,16 +26,9 @@ import {
   runtimeSessionMetadataChanged,
   withoutTraceId,
 } from "../support.js";
+import { SessionApplicationError } from "./session-application-error.js";
 
-export class SessionApplicationError extends Error {
-  constructor(
-    readonly status: 400 | 404 | 409 | 500,
-    message: string,
-  ) {
-    super(message);
-    this.name = "SessionApplicationError";
-  }
-}
+export { SessionApplicationError } from "./session-application-error.js";
 
 export interface SessionApplicationServiceContext {
   store: SessionStore;
@@ -44,6 +37,8 @@ export interface SessionApplicationServiceContext {
   liveChildren: Pick<LiveChildAgentDirectory, "has" | "send" | "interrupt">;
   operationGate: Pick<DaemonOperationGate, "enter" | "tryEnterBarrier">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
+  /** 应用启动恢复完成前，拒绝新的写操作。测试和独立服务可不提供。 */
+  assertReady?(): void;
 }
 
 export interface UpdateSessionCommand {
@@ -88,6 +83,7 @@ export class SessionApplicationService {
   createSession(
     input: Parameters<SessionStore["createSession"]>[0],
   ): ReturnType<SessionStore["createSession"]> {
+    this.assertReady();
     const before = this.context.events.checkpoint();
     const runtime = readRuntimeMetadata(input.metadata ?? {});
     const model =
@@ -117,6 +113,7 @@ export class SessionApplicationService {
     sessionId: string,
     input: ForkSessionCommand = {},
   ): ReturnType<SessionStore["createSession"]> {
+    this.assertReady();
     const source = this.context.store.getSession(sessionId);
     if (!source)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
@@ -174,6 +171,7 @@ export class SessionApplicationService {
     sessionId: string,
     input: EditLatestPromptCommand,
   ): Promise<AdmitPromptResult> {
+    this.assertReady();
     const session = this.context.store.getSession(sessionId);
     if (!session)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
@@ -227,6 +225,7 @@ export class SessionApplicationService {
     sessionId: string,
     input: UpdateSessionCommand,
   ): Promise<ReturnType<SessionStore["updateSession"]>> {
+    this.assertReady();
     const existing = this.context.store.getSession(sessionId);
     if (!existing) throw new SessionApplicationError(404, "Session not found");
     const metadata = input.metadata
@@ -270,6 +269,7 @@ export class SessionApplicationService {
     sessionId: string,
     input: AdmitPromptInput,
   ): Promise<AdmitPromptResult> {
+    this.assertReady();
     const session = this.context.store.getSession(sessionId);
     if (!session)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
@@ -367,6 +367,7 @@ export class SessionApplicationService {
     runId: string,
     input: ResumeSessionRunCommand,
   ): Promise<ResumeSessionRunResult> {
+    this.assertReady();
     const session = this.context.store.getSession(sessionId);
     if (!session)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
@@ -474,6 +475,7 @@ export class SessionApplicationService {
   async interruptSession(
     sessionId: string,
   ): Promise<ReturnType<SessionRunEngine["interruptSession"]>> {
+    this.assertReady();
     const lane = this.context.runEngine.interruptSession(sessionId);
     const targets = [sessionId, ...this.descendantSessionIds(sessionId)];
     const childInterrupted = (
@@ -496,6 +498,7 @@ export class SessionApplicationService {
   }
 
   async closeRuntime(sessionId: string): Promise<void> {
+    this.assertReady();
     if (
       await this.context.liveChildren.interrupt(
         sessionId,
@@ -509,6 +512,7 @@ export class SessionApplicationService {
   async archiveSessionTree(
     sessionId: string,
   ): Promise<ReturnType<SessionStore["archiveSession"]>> {
+    this.assertReady();
     const existing = this.archivePromises.get(sessionId);
     if (existing) return await existing;
     const archive = this.archiveSessionTreeWork(sessionId).finally(() => {
@@ -520,6 +524,7 @@ export class SessionApplicationService {
   }
 
   async deleteSessionTree(sessionId: string): Promise<string[]> {
+    this.assertReady();
     const current = this.context.store.getSession(sessionId);
     if (!current)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
@@ -663,6 +668,10 @@ export class SessionApplicationService {
       throw error;
     }
     void this.context.agentPool.warm(session.id).finally(() => lease.release());
+  }
+
+  private assertReady(): void {
+    this.context.assertReady?.();
   }
 
   private descendantSessionIds(sessionId: string): string[] {

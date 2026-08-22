@@ -275,6 +275,7 @@ OpenHarness-ts/
 │   ├── core/                 # 核心引擎（QueryEngine、类型、配置）
 │   ├── api/                  # API Provider 抽象层
 │   ├── client/               # daemon HTTP/SSE typed client + event reducer（TUI/Web/Desktop 共用）
+│   ├── protocol/             # 浏览器安全的 Session/Run/Event 请求、响应与公共类型
 │   ├── tools/                # 工具 registry（基础 33；daemon 全 capability 为 44）
 │   ├── server/               # daemon HTTP server、run engine、permission broker
 │   ├── services/             # 服务层（Compact、Session、Scheduled recurrence、Task、LSP）

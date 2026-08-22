@@ -26,6 +26,19 @@ export {
   type ListCommandsInput,
 } from "./commands/index.js";
 export { rewindTranscript, type RewindTranscriptResult } from "./session/index.js";
+export {
+  ApplicationEventService,
+  ChannelApplicationService,
+  DaemonApplication,
+  ProjectApplicationService,
+  createDefaultNodeApplication,
+  type ApplicationEventStreamOptions,
+  type ApplicationEventSubscription,
+  type DaemonApplicationOptions,
+  type DefaultNodeApplicationOptions,
+  type DurableAgentApplication,
+  type ChannelApplicationServiceContext,
+} from "./application/index.js";
 export type {
   AgentPersonaInfo,
   AgentPersonaService,
@@ -69,6 +82,11 @@ export type {
   AgentRunScope,
 } from "@openharness/core";
 export { estimateCostUsd } from "./shared/index.js";
+export {
+  APPLICATION_ERROR_HTTP_STATUS,
+  ApplicationError,
+  type ApplicationErrorCode,
+} from "./shared/index.js";
 export {
   TRACE_ID_HEADER,
   writeStructuredLog,

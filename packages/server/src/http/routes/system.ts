@@ -2,14 +2,14 @@ import { Hono } from "hono";
 
 import { mergeCommandCatalog, type CommandCatalogProvider } from "../../commands/index.js";
 import {
+  applicationErrorResponse,
   errorResponse,
   jsonResponse,
   readJson,
   type OpenHarnessServerHealth,
 } from "../support.js";
 import type { ModelService, ProviderService, SettingsService } from "../../application/index.js";
-import { ProviderMutationError } from "../../application/default-application-services.js";
-import type { DaemonControlService } from "../control/index.js";
+import type { DaemonControlService } from "../../application/control/index.js";
 
 export interface SystemRoutesContext {
   version?: string;
@@ -140,6 +140,5 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
 }
 
 function providerMutationErrorResponse(error: unknown): Response {
-  if (error instanceof ProviderMutationError) return errorResponse(error.status, error.message);
-  return errorResponse(400, error instanceof Error ? error.message : String(error));
+  return applicationErrorResponse(error, 400);
 }

@@ -1,6 +1,26 @@
-import { runtimeMetadataChanged } from "@openharness/services";
+import {
+  ProtocolValidationError,
+  type ProtocolError,
+} from "@openharness/protocol";
 import type { Context } from "hono";
-import type { RuntimeMetricsSnapshot } from "../shared/runtime-metrics.js";
+import {
+  APPLICATION_ERROR_HTTP_STATUS,
+  ApplicationError,
+} from "../shared/application-error.js";
+export {
+  DAEMON_RESTART_INPUT_REASON,
+  DAEMON_RESTART_PERMISSION_REASON,
+  DAEMON_RESTART_RUN_REASON,
+  DAEMON_RESTART_TASK_REASON,
+  DAEMON_RESTART_WORKFLOW_REASON,
+  countByStatus,
+  jsonEqual,
+  normalizeTraceId,
+  runtimeSessionMetadataChanged,
+  withoutTraceId,
+  workflowRunIdFromSessionEvent,
+  type OpenHarnessRuntimeSnapshot,
+} from "../application/support.js";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -16,31 +36,11 @@ export interface OpenHarnessServerHealth {
   queuedRunCount: number;
 }
 
-export interface OpenHarnessRuntimeSnapshot {
-  startedAt: number;
-  uptimeMs: number;
-  sessions: { total: number; byStatus: Record<string, number> };
-  runs: { total: number; byStatus: Record<string, number> };
-  tasks: { total: number; byStatus: Record<string, number> };
-  permissions: { total: number; byStatus: Record<string, number> };
-  projectionSettlements: { total: number; pending: number; byStatus: Record<string, number> };
-  sseClientCount: number;
-  warmAgentCount: number;
-  coordinator: { activeRunCount: number; queuedRunCount: number };
-  metrics: RuntimeMetricsSnapshot;
-}
-
 export type SseClient = {
   sessionId?: string;
   controller: ReadableStreamDefaultController<Uint8Array>;
   heartbeat?: ReturnType<typeof setInterval>;
 };
-
-export const DAEMON_RESTART_RUN_REASON = "Daemon restarted before the run completed";
-export const DAEMON_RESTART_INPUT_REASON = "Daemon restarted before the input was assigned to a run";
-export const DAEMON_RESTART_TASK_REASON = "Daemon restarted before the task completed";
-export const DAEMON_RESTART_PERMISSION_REASON = "Daemon restarted before the permission was resolved";
-export const DAEMON_RESTART_WORKFLOW_REASON = "Daemon restarted before the workflow completed";
 
 export const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 export const SSE_HEADERS = {
@@ -51,33 +51,8 @@ export const SSE_HEADERS = {
 export const CORS_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
 export const CORS_HEADERS = "authorization, content-type, last-event-id, x-openharness-trace-id";
 
-export function runtimeSessionMetadataChanged(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-): boolean {
-  return runtimeMetadataChanged(before, after);
-}
-
 export function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-export function normalizeTraceId(value: unknown): string | undefined {
-  return typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value)
-    ? value
-    : undefined;
-}
-
-export function withoutTraceId(metadata: Record<string, unknown>): Record<string, unknown> {
-  const { traceId: _traceId, ...rest } = metadata;
-  return rest;
-}
-
-export function countByStatus(records: ReadonlyArray<{ status: string }>): Record<string, number> {
-  return records.reduce<Record<string, number>>((counts, record) => {
-    counts[record.status] = (counts[record.status] ?? 0) + 1;
-    return counts;
-  }, {});
 }
 
 export function normalizeAllowedOrigins(origins: readonly string[]): Set<string> {
@@ -98,13 +73,6 @@ export function normalizeAllowedOrigins(origins: readonly string[]): Set<string>
   return normalized;
 }
 
-export function workflowRunIdFromSessionEvent(event: { payload: Record<string, unknown> }): string | undefined {
-  const workflowEvent = event.payload.event;
-  return isRecord(workflowEvent) && typeof workflowEvent.runId === "string"
-    ? workflowEvent.runId
-    : undefined;
-}
-
 export function readLimit(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
@@ -117,21 +85,6 @@ export function readCursor(c: Context): number | undefined {
 
 export function readEventCursor(c: Context): number | undefined {
   return readCursor(c) ?? readLimit(c.req.header("last-event-id"));
-}
-
-export function jsonEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((value, index) => jsonEqual(value, right[index]));
-  }
-  if (isRecord(left) && isRecord(right)) {
-    const leftKeys = Object.keys(left).sort();
-    const rightKeys = Object.keys(right).sort();
-    return leftKeys.length === rightKeys.length && leftKeys.every(
-      (key, index) => key === rightKeys[index] && jsonEqual(left[key], right[key]),
-    );
-  }
-  return false;
 }
 
 export function readPermissionStatus(value: string | undefined): HttpPermissionStatus | undefined {
@@ -155,6 +108,34 @@ export function errorResponse(status: number, message: string): Response {
   return jsonResponse({ error: message }, status);
 }
 
+/** Application error code 到 HTTP status 的唯一转换位置。 */
+export function applicationErrorResponse(
+  error: unknown,
+  fallbackStatus = 500,
+): Response {
+  const status =
+    error instanceof ApplicationError
+      ? APPLICATION_ERROR_HTTP_STATUS[error.code]
+      : fallbackStatus;
+  return errorResponse(
+    status,
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
+export function protocolValidationErrorResponse(error: unknown): Response {
+  const validationError = error instanceof ProtocolValidationError
+    ? error
+    : new ProtocolValidationError(
+      error instanceof SyntaxError
+        ? "Request body must be valid JSON"
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    );
+  return jsonResponse(validationError.toProtocolError() satisfies ProtocolError, 400);
+}
+
 export function sessionMutationErrorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   return message.startsWith("Session is archived:") ||
@@ -167,8 +148,17 @@ export function sessionMutationErrorStatus(error: unknown): number {
 export async function readJson(c: Context): Promise<JsonRecord> {
   const text = await c.req.text();
   if (!text.trim()) return {};
-  if (new TextEncoder().encode(text).byteLength > 1024 * 1024) throw new Error("Request body too large");
-  const parsed = JSON.parse(text) as unknown;
-  if (!isRecord(parsed)) throw new Error("Request body must be a JSON object");
+  if (new TextEncoder().encode(text).byteLength > 1024 * 1024) {
+    throw new ProtocolValidationError("Request body too large");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new ProtocolValidationError("Request body must be valid JSON");
+  }
+  if (!isRecord(parsed)) {
+    throw new ProtocolValidationError("Request body must be a JSON object");
+  }
   return parsed;
 }

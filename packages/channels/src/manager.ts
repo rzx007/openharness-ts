@@ -20,6 +20,13 @@ export interface ChannelManagerOptions {
   /** 是否转发 _tool_hint 出站消息（默认 true，对齐 Python send_tool_hints）。 */
   sendToolHints?: boolean;
   onWarning?: (message: string) => void;
+  /** 每个 connector 的机器人账号标识；同一平台多个机器人不会串 Session。 */
+  accountIds?: Record<string, string>;
+  onDeliveryResult?: (result: {
+    deliveryId: string;
+    status: "sent" | "failed" | "unknown";
+    error?: string;
+  }) => Promise<void> | void;
 }
 
 export interface ChannelStatus {
@@ -113,6 +120,8 @@ export class ChannelManager {
     }
     const inbound: InboundMessage = {
       channel: channelName,
+      accountId: this.opts.accountIds?.[channelName] ?? "default",
+      externalMessageId: msg.id,
       senderId: msg.sender,
       // replyTo 是 adapter 解析出的会话目标（群 chat_id / 私聊 open_id），
       // 作为 chatId 既是回复地址也是 session key 的一半。
@@ -121,6 +130,12 @@ export class ChannelManager {
       timestamp: msg.timestamp,
       media: [],
       metadata: { _message_id: msg.id },
+      ...(typeof msg.metadata?.workspaceId === "string"
+        ? { workspaceId: msg.metadata.workspaceId }
+        : {}),
+      ...(typeof msg.metadata?.threadId === "string"
+        ? { threadId: msg.metadata.threadId }
+        : {}),
     };
     this.bus.publishInbound(inbound);
   }
@@ -142,11 +157,27 @@ export class ChannelManager {
       }
 
       const adapter = this.adapters.get(msg.channel);
+      const deliveryId =
+        typeof meta["_delivery_id"] === "string"
+          ? meta["_delivery_id"]
+          : undefined;
       if (!adapter) {
         this.opts.onWarning?.(`未知通道:${msg.channel}（出站消息丢弃）`);
+        if (deliveryId)
+          await this.reportDelivery({
+            deliveryId,
+            status: "failed",
+            error: `Unknown channel: ${msg.channel}`,
+          });
         continue;
       }
       try {
+        if (
+          deliveryId &&
+          !(await this.reportDelivery({ deliveryId, status: "unknown" }))
+        ) {
+          continue;
+        }
         await adapter.send({
           id: `out_${Date.now()}`,
           channel: msg.channel,
@@ -155,12 +186,36 @@ export class ChannelManager {
           timestamp: new Date(),
           replyTo: msg.chatId,
         });
+        if (deliveryId)
+          await this.reportDelivery({ deliveryId, status: "sent" });
       } catch (err) {
         // 发送失败记日志不中断循环（对齐 Python）。
         this.opts.onWarning?.(
           `通道 ${msg.channel} 发送失败:${err instanceof Error ? err.message : String(err)}`,
         );
+        if (deliveryId)
+          await this.reportDelivery({
+            deliveryId,
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+          });
       }
+    }
+  }
+
+  private async reportDelivery(result: {
+    deliveryId: string;
+    status: "sent" | "failed" | "unknown";
+    error?: string;
+  }): Promise<boolean> {
+    try {
+      await this.opts.onDeliveryResult?.(result);
+      return true;
+    } catch (error) {
+      this.opts.onWarning?.(
+        `回复状态保存失败(${result.deliveryId}):${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
     }
   }
 }

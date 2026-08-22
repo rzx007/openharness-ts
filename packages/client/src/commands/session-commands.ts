@@ -1,7 +1,7 @@
 import type { OpenHarnessClient } from "../transport/http-client.js";
 import type { CommandCatalogEntry, OpenHarnessClientState } from "../types/index.js";
-import type { JobReadResult, JobSnapshot } from "@openharness/jobs";
-import { patchSessionRuntimeMetadata } from "@openharness/services";
+import type { JobReadResult, JobSnapshot } from "@openharness/protocol";
+import { patchSessionRuntimeMetadata } from "@openharness/protocol";
 
 export type SlashLine = { name: string; args: string };
 
@@ -9,6 +9,12 @@ export type PresentationReadRequest = {
   key: string;
   title: string;
   load: () => Promise<string>;
+};
+
+export type RuntimeDiagnostics = {
+  runtime?: string;
+  platform?: string;
+  architecture?: string;
 };
 
 export type SessionCommandHost = {
@@ -31,6 +37,8 @@ export type SessionCommandHost = {
   cacheFirstRead?(request: PresentationReadRequest): void;
   /** Optional status patch for /plan /provider */
   patchStatus?(patch: Record<string, unknown>): void;
+  /** Host-specific runtime information used by /doctor. Browsers may omit it. */
+  getRuntimeDiagnostics?(): RuntimeDiagnostics | Promise<RuntimeDiagnostics>;
 };
 
 export type SessionCommandOutcome =
@@ -90,7 +98,7 @@ export function resolveSessionCwd(input: {
 }): string {
   if (typeof input.statusCwd === "string" && input.statusCwd) return input.statusCwd;
   if (input.daemonCwd) return input.daemonCwd;
-  return input.fallback ?? (typeof process !== "undefined" ? process.cwd() : ".");
+  return input.fallback ?? ".";
 }
 
 function firstArg(args: string): string | undefined {
@@ -658,13 +666,18 @@ export async function dispatchSessionCommand(
       ? String(jobsResult.jobs.length)
       : `unavailable (${jobsResult.error})`;
     const bucket = sessionId ? clientState.buckets[sessionId] : undefined;
+    const diagnostics = await host.getRuntimeDiagnostics?.();
+    const runtime = diagnostics?.runtime ?? "(not provided by this host)";
+    const platform = [diagnostics?.platform, diagnostics?.architecture]
+      .filter(Boolean)
+      .join(" ") || "(not provided by this host)";
     const lines = [
       "OpenHarness Environment Diagnostic",
       "═".repeat(40),
       "",
       `CWD:            ${cwd}`,
-      `Node:           ${process.version}`,
-      `Platform:       ${process.platform} ${process.arch}`,
+      `Runtime:        ${runtime}`,
+      `Platform:       ${platform}`,
       `Model:          ${model ?? String(settings.model ?? "(unknown)")}`,
       `API Format:     ${String(settings.apiFormat ?? "(default)")}`,
       `Base URL:       ${String(settings.baseUrl ?? "(default)")}`,

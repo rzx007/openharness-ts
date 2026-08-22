@@ -15,6 +15,7 @@ export interface AssembledChannels {
   adapters: ChannelAdapter[];
   /** 按通道名的 ACL 白名单（交给 manager 集中过滤，fail-closed）。 */
   allowFrom: Record<string, string[]>;
+  accountIds: Record<string, string>;
   warnings: string[];
 }
 
@@ -25,6 +26,7 @@ export async function assembleChannelAdapters(
   const adapters: ChannelAdapter[] = [];
   const allowFrom: Record<string, string[]> = {};
   const warnings: string[] = [];
+  const accountIds: Record<string, string> = {};
 
   const feishu = channels?.feishu;
   if (feishu?.enabled) {
@@ -43,17 +45,18 @@ export async function assembleChannelAdapters(
         }),
       );
       allowFrom["feishu"] = Object.values(feishu.allowFrom ?? {});
+      accountIds["feishu"] = feishu.appId;
     }
   }
 
-  return { adapters, allowFrom, warnings };
+  return { adapters, allowFrom, accountIds, warnings };
 }
 
 async function runChannelsServe(): Promise<void> {
   const { loadSettings } = await import("@openharness/core");
   const settings: Settings = await loadSettings({});
 
-  const { adapters, allowFrom, warnings } = await assembleChannelAdapters(settings.channels);
+  const { adapters, allowFrom, accountIds, warnings } = await assembleChannelAdapters(settings.channels);
   for (const w of warnings) console.warn(`[channels] ${w}`);
   if (adapters.length === 0) {
     console.error(
@@ -63,32 +66,30 @@ async function runChannelsServe(): Promise<void> {
     return;
   }
 
-  const { createOpenHarnessAgent } = await import("@openharness/agent-runtime");
-  // 无头模式 ask 无人确认会全拒——放行只读工具让"看"可用,写/Bash 仍拒。
-  // 比 swarm 的 READ_ONLY_TOOLS 再剔除 WebFetch/WebSearch:远程通道语境下
-  // Read+WebFetch 构成"读本地文件→出站外带"链(且 WebFetch 可打内网)。
-  // 信任环境想要联网,自己加 settings.permission.autoApproveTools: ["WebFetch"]。
-  const { READ_ONLY_TOOLS } = await import("@openharness/permissions");
-  // const channelSafeTools = [...READ_ONLY_TOOLS].filter(
-  //   (t) => t !== "WebFetch" && t !== "WebSearch",
-  // );
-  const channelSafeTools = [...READ_ONLY_TOOLS];
-  const agent = await createOpenHarnessAgent({
-    settings,
-    autoApproveTools: channelSafeTools,
-  });
+  if (!settings.model) throw new Error("channels serve requires a configured model");
+  const { ensureLocalDaemon } = await import("../ensure-daemon.js");
+  const daemon = await ensureLocalDaemon();
+  const { OpenHarnessClient } = await import("@openharness/client");
+  const client = new OpenHarnessClient({ baseUrl: daemon.url, token: daemon.token });
 
-  const { MessageBus, ChannelManager, ChannelBridge } = await import("@openharness/channels");
+  const { MessageBus, ChannelManager, DurableChannelBridge } = await import("@openharness/channels");
   const bus = new MessageBus();
   const manager = new ChannelManager(adapters, bus, {
     allowFrom,
+    accountIds,
     sendProgress: settings.channels?.sendProgress,
     sendToolHints: settings.channels?.sendToolHints,
     onWarning: (w) => console.warn(`[channels] ${w}`),
+    onDeliveryResult: async ({ deliveryId, status, error }) => {
+      await client.recordChannelDelivery(deliveryId, { status, error });
+    },
   });
-  const bridge = new ChannelBridge({
-    agent,
+  const bridge = new DurableChannelBridge({
+    application: client,
     bus,
+    cwd: process.cwd(),
+    model: settings.model,
+    connectors: adapters.map((adapter) => adapter.name),
     onWarning: (w) => console.warn(`[channels] ${w}`),
   });
 
@@ -108,7 +109,7 @@ async function runChannelsServe(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    console.log("[channels] 桥接已就绪，Ctrl+C 退出。");
+    console.log(`[channels] 已连接 daemon ${daemon.url}，桥接已就绪，Ctrl+C 退出。`);
 
     await new Promise<void>((resolve) => {
       let stopping = false;
@@ -133,7 +134,6 @@ async function runChannelsServe(): Promise<void> {
     for (const cleanup of [
       () => bridge.stop(),
       () => manager.stopAll(),
-      () => agent.close(),
     ]) {
       try {
         await cleanup();
@@ -174,6 +174,33 @@ export function createChannelsCommand(): Command {
           ? "allowFrom empty — ALL DENIED"
           : `allowFrom: ${entries.map(([n, id]) => `${n}(${id})`).join(", ")}`;
       console.log(`feishu: ${feishu.enabled ? "enabled" : "disabled"} (${acl})`);
+      const { readDaemonRegistry } = await import("@openharness/server");
+      const daemon = readDaemonRegistry();
+      if (!daemon) {
+        console.log("daemon: not running; conversation mappings unavailable");
+        return;
+      }
+      try {
+        const { OpenHarnessClient } = await import("@openharness/client");
+        const client = new OpenHarnessClient({
+          baseUrl: daemon.url,
+          token: daemon.token,
+        });
+        await client.health();
+        const status = await client.getChannelStatus({ connector: "feishu", limit: 10 });
+        console.log(
+          `daemon: ready (${daemon.url}); conversations: ${status.conversations.length}; recent deliveries: ${status.deliveries.length}`,
+        );
+        for (const delivery of status.deliveries.slice(0, 5)) {
+          console.log(
+            `delivery ${delivery.id}: ${delivery.status}, chat=${delivery.chatId}, run=${delivery.runId}`,
+          );
+        }
+      } catch (error) {
+        console.log(
+          `daemon: unavailable (${error instanceof Error ? error.message : String(error)})`,
+        );
+      }
     });
 
   return cmd;

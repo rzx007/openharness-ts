@@ -4,13 +4,14 @@ import type {
   TerminalEvent,
   TerminalRuntime,
   TerminalSignal,
-} from "@openharness/terminal";
+} from "@openharness/protocol";
 
 import {
   DaemonTerminalError,
   type DaemonTerminalService,
 } from "../../terminal/index.js";
 import {
+  applicationErrorResponse,
   errorResponse,
   jsonResponse,
   readJson,
@@ -194,12 +195,7 @@ export function createTerminalRoutes(
 }
 
 function terminalError(error: unknown, fallbackStatus: number): Response {
-  const status =
-    error instanceof DaemonTerminalError ? error.status : fallbackStatus;
-  return errorResponse(
-    status,
-    error instanceof Error ? error.message : String(error),
-  );
+  return applicationErrorResponse(error, fallbackStatus);
 }
 
 function text(value: unknown): string {

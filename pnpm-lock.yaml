@@ -473,6 +473,9 @@ importers:
       '@openharness/plugins':
         specifier: workspace:*
         version: link:../plugins
+      '@openharness/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@openharness/prompts':
         specifier: workspace:*
         version: link:../prompts
@@ -567,6 +570,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -580,15 +586,9 @@ importers:
 
   packages/client:
     dependencies:
-      '@openharness/jobs':
+      '@openharness/protocol':
         specifier: workspace:*
-        version: link:../jobs
-      '@openharness/services':
-        specifier: workspace:*
-        version: link:../services
-      '@openharness/terminal':
-        specifier: workspace:*
-        version: link:../terminal
+        version: link:../protocol
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -680,6 +680,10 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/jobs:
+    dependencies:
+      '@openharness/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -814,6 +818,18 @@ importers:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
+  packages/protocol:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.3.2
+        version: 7.3.2(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
+
   packages/prompts:
     dependencies:
       '@openharness/core':
@@ -927,6 +943,9 @@ importers:
       '@openharness/memory':
         specifier: workspace:*
         version: link:../memory
+      '@openharness/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@openharness/sandbox':
         specifier: workspace:*
         version: link:../sandbox
@@ -987,9 +1006,9 @@ importers:
 
   packages/terminal:
     dependencies:
-      '@openharness/jobs':
+      '@openharness/protocol':
         specifier: workspace:*
-        version: link:../jobs
+        version: link:../protocol
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

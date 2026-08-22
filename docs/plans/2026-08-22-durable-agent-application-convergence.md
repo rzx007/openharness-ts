@@ -1,10 +1,23 @@
 # Durable Agent Application 多端收口计划
 
-> 状态：待实施。
+> 状态：实施中。
 >
 > 本计划基于 2026-08-22 对当前代码的架构核查。上一轮 Runtime Hardening 已经补齐 Input/Run 原子准入、重启收束、事件版本、Projection Settlement、Child Budget、Run Attempt、Tool 未知结果、Metrics 和 Run Inspector。本计划不重复这些工作，而是让它们真正被 CLI、TUI、Web、Desktop、IDE、Bot 和 Workflow 共用。
 >
 > Agent 和 Daemon 的生命周期规则继续以 [Agent Lifecycle Contract](../agent-lifecycle-contract.md) 为准；当前请求链继续以 [Daemon Application Architecture](../daemon-application-architecture.md) 为准。本计划只说明下一步怎么改，不另造一套相互冲突的运行规则。
+
+## 实施进度
+
+- [x] A1：创建 `@openharness/protocol`。Session/Run/Schedule/Job/Terminal 跨端类型、runtime metadata 纯函数、主路径请求校验、统一错误、主要成功响应校验及 snapshot/event JSON 往返测试已经完成。
+- [x] A2：移除 `client -> services` 依赖；client 测试不再加载 SQLite Store。
+- [x] A3：共享 client 不再直接读取 Node `process`；`/doctor` 的本机信息由宿主提供。
+- [x] A4：增加无 Node polyfill 的 Vite 浏览器构建 fixture。
+- [x] B1：AgentPool、Session/Run/Projection/Recovery 和 Control 实现已经移入 `packages/server/src/application`；生产代码不再依赖 Hono 或 HTTP 类型。
+- [x] B2-B4：应用现在自己拥有 Session、Run、Permission、Job、Terminal、Project 和事件入口；HTTP 可以接收外部 Application；事件支持先按游标补历史、再持续接收新事件。
+- [x] C1-C4：Bot 已通过 daemon 进入同一套 durable Session/Run；聊天映射、重复消息准入和回复发送结果都会保存。
+- [ ] D1-D4：拆开 Agent Kernel 与 Node 默认组装，并完成独立打包。
+- [ ] E1-E4：让 daemon Workflow 使用统一 durable state。
+- [ ] F1-F4：补单执行者保护、协议协商、数据保留与备份。
 
 ## 一、这轮要解决什么
 
@@ -423,6 +436,16 @@ interface ApplicationEventSubscription {
 - HTTP SSE 与直接 application subscription 对同一个 session 最终得到相同状态。
 - 订阅中断不会取消后台 Run。
 - 重连从 cursor 继续，不重复追加文本。
+
+### 实施结果
+
+- `DaemonApplication` 是可直接调用的应用入口。调用方先等 `ready()`，之后可以创建 Session、提交输入、等待 Run、查询状态，最后重复调用 `close()` 也不会重复释放资源。
+- 默认 Node 组装集中在 `createDefaultNodeApplication()`。它自己创建 SQLite Store 时也负责关闭；Store 由外部传入时，默认仍由外部关闭，也可以明确把所有权交给 Application。
+- `OpenHarnessHttpServer` 可以接收已经创建好的 Application。外部注入时，HTTP Server 默认只关闭 listener 和自己的 SSE 连接，不关闭 Application。
+- Project、Job、Terminal 和事件路由都通过 Application 调用，不再由 HTTP Server 直接组装这些服务。
+- `ApplicationEventService` 只发布已经写入 Store 的事件。订阅建立时先记住当前游标、补齐历史事件，再接收实时事件，避免建立连接的空档丢事件。
+- Application 错误带稳定 code；HTTP 状态码集中转换，不再要求各个路由靠错误文字猜状态。
+- 已增加不启动 HTTP 的完整运行测试、Application 事件重放/过滤/取消测试，以及 HTTP 注入 Application 的测试。
 
 ---
 

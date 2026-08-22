@@ -1,34 +1,20 @@
-export type JobKind = "terminal" | "shell" | "agent" | "dream" | "workflow";
+import type {
+  JobKind,
+  JobReadResult,
+  JobSnapshot,
+  JobStatus,
+  JobWaitResult,
+} from "@openharness/protocol";
 
-export type JobStatus =
-  | "running"
-  | "stopping"
-  | "completed"
-  | "killed"
-  | "failed";
-
-export interface JobCapabilities {
-  read: boolean;
-  wait: boolean;
-  send: boolean;
-  cancel: boolean;
-}
-
-/** Fresh, read-only view. Access is authorized by ownerSession, never by id secrecy. */
-export interface JobSnapshot {
-  id: string;
-  kind: JobKind;
-  label: string;
-  ownerSession: string;
-  status: JobStatus;
-  capabilities: JobCapabilities;
-  cwd: string;
-  startedAt: number;
-  updatedAt: number;
-  finishedAt?: number;
-  detail?: string;
-  metadata?: Record<string, unknown>;
-}
+/** 兼容入口；跨端数据的唯一来源已经迁到 @openharness/protocol。 */
+export type {
+  JobCapabilities,
+  JobKind,
+  JobReadResult,
+  JobSnapshot,
+  JobStatus,
+  JobWaitResult,
+} from "@openharness/protocol";
 
 export interface JobReadRequest {
   sessionId: string;
@@ -37,22 +23,9 @@ export interface JobReadRequest {
   maxChars?: number;
 }
 
-export interface JobReadResult {
-  text: string;
-  cursor: number;
-  truncated: boolean;
-  snapshot: JobSnapshot;
-  /** Producer-owned structured state for callers that need more than text output. */
-  details?: Record<string, unknown>;
-}
-
 export interface JobWaitRequest extends JobReadRequest {
   timeoutMs: number;
   signal?: AbortSignal;
-}
-
-export interface JobWaitResult extends JobReadResult {
-  timedOut: boolean;
 }
 
 export interface JobSendRequest {

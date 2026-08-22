@@ -1,54 +1,72 @@
 import { Hono } from "hono";
 
-import type { SessionEventRecord, SessionStore } from "@openharness/services";
+import type { SessionEventRecord } from "@openharness/protocol";
 
+import type { ApplicationEventService } from "../../application/events/application-event-service.js";
 import {
   SSE_HEADERS,
   jsonResponse,
   readCursor,
   readEventCursor,
   readLimit,
-  type SseClient,
 } from "../support.js";
 
+interface HttpEventClient {
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  abort: AbortController;
+  heartbeat?: ReturnType<typeof setInterval>;
+}
+
+/** 把 Application 的异步事件流翻译成 HTTP SSE；这里不再负责事件分发。 */
 export class HttpEventHub {
   private readonly encoder = new TextEncoder();
-  private readonly sseClients = new Set<SseClient>();
+  private readonly clients = new Set<HttpEventClient>();
 
-  constructor(private readonly store: Pick<SessionStore, "listEvents">) {}
+  constructor(private readonly events: ApplicationEventService) {}
 
   get clientCount(): number {
-    return this.sseClients.size;
+    return this.clients.size;
   }
 
   createRoutes(): Hono {
     return new Hono()
-      .get("/", (c) => {
-        const events = this.store.listEvents({
-          afterSeq: readCursor(c),
-          sessionId: c.req.query("sessionId") ?? undefined,
-          limit: readLimit(c.req.query("limit")),
-        });
-        return jsonResponse({ events });
-      })
+      .get("/", (c) =>
+        jsonResponse({
+          events: this.events.list({
+            afterSeq: readCursor(c),
+            sessionId: c.req.query("sessionId") ?? undefined,
+            limit: readLimit(c.req.query("limit")),
+          }),
+        }),
+      )
       .get("/stream", (c) => {
-        const sessionId = c.req.query("sessionId") ?? undefined;
-        let client: SseClient | undefined;
+        const abort = new AbortController();
+        const requestAbort = () => abort.abort();
+        c.req.raw.signal.addEventListener("abort", requestAbort, { once: true });
+        const subscription = this.events.subscribe({
+          after: readEventCursor(c),
+          sessionId: c.req.query("sessionId") ?? undefined,
+          signal: abort.signal,
+        });
+        let client: HttpEventClient | undefined;
 
         const stream = new ReadableStream<Uint8Array>({
           start: (controller) => {
-            client = { sessionId, controller };
-            this.sseClients.add(client);
+            client = { controller, abort };
+            this.clients.add(client);
             controller.enqueue(this.encoder.encode(": connected\n\n"));
-            const heartbeat = setInterval(() => this.writeSseComment(client!, "keepalive"), 15_000);
+            const heartbeat = setInterval(
+              () => this.writeComment(client!, "keepalive"),
+              15_000,
+            );
             heartbeat.unref?.();
             client.heartbeat = heartbeat;
-            for (const event of this.store.listEvents({ afterSeq: readEventCursor(c), sessionId })) {
-              this.writeSse(client, event);
-            }
+            void this.pump(client, subscription.stream).finally(() => {
+              c.req.raw.signal.removeEventListener("abort", requestAbort);
+            });
           },
           cancel: () => {
-            if (client) this.removeSseClient(client);
+            if (client) this.removeClient(client);
           },
         });
 
@@ -56,51 +74,47 @@ export class HttpEventHub {
       });
   }
 
-  broadcastSince(seq: number): void {
-    const events = this.store.listEvents({ afterSeq: seq });
-    for (const event of events) {
-      this.broadcastEvent(event);
-    }
-  }
-
-  broadcastEvent(event: SessionEventRecord): void {
-    for (const client of this.sseClients) {
-      if (client.sessionId && event.sessionId && event.sessionId !== client.sessionId) continue;
-      this.writeSse(client, event);
-    }
-  }
-
   closeClients(): void {
-    for (const client of [...this.sseClients]) {
+    for (const client of [...this.clients]) {
       try {
         client.controller.close();
       } catch {
         // Client may already be gone.
       }
-      this.removeSseClient(client);
+      this.removeClient(client);
     }
   }
 
-  private writeSse(client: SseClient, event: SessionEventRecord): void {
+  private async pump(
+    client: HttpEventClient,
+    stream: AsyncIterable<SessionEventRecord>,
+  ): Promise<void> {
     try {
-      client.controller.enqueue(
-        this.encoder.encode(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
-      );
+      for await (const event of stream) {
+        client.controller.enqueue(
+          this.encoder.encode(
+            `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+          ),
+        );
+      }
     } catch {
-      this.removeSseClient(client);
+      // Broken HTTP clients are normal; aborting removes the Application subscriber.
+    } finally {
+      this.removeClient(client);
     }
   }
 
-  private writeSseComment(client: SseClient, comment: string): void {
+  private writeComment(client: HttpEventClient, comment: string): void {
     try {
       client.controller.enqueue(this.encoder.encode(`: ${comment}\n\n`));
     } catch {
-      this.removeSseClient(client);
+      this.removeClient(client);
     }
   }
 
-  private removeSseClient(client: SseClient): void {
+  private removeClient(client: HttpEventClient): void {
     if (client.heartbeat) clearInterval(client.heartbeat);
-    this.sseClients.delete(client);
+    client.abort.abort();
+    this.clients.delete(client);
   }
 }

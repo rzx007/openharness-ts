@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { JobSnapshot } from "@openharness/jobs";
+import type { JobSnapshot } from "@openharness/protocol";
 
 import type { OpenHarnessClient } from "../../transport/http-client.js";
 import { createInitialClientState } from "../../state/reducer.js";
@@ -43,6 +43,11 @@ function host(partial: {
   client?: OpenHarnessClient;
   emit?: (text: string) => void;
   commandCatalog?: CommandCatalogEntry[];
+  getRuntimeDiagnostics?: () => {
+    runtime?: string;
+    platform?: string;
+    architecture?: string;
+  };
 } = {}) {
   const emitted: string[] = [];
   return {
@@ -53,6 +58,7 @@ function host(partial: {
       commandCatalog: partial.commandCatalog ?? [],
       clientState: createInitialClientState(),
       busy: false,
+      getRuntimeDiagnostics: partial.getRuntimeDiagnostics,
       emit: partial.emit ?? ((text: string) => {
         emitted.push(text);
       }),
@@ -341,13 +347,38 @@ describe("dispatchSessionCommand", () => {
         throw new Error("MCP unavailable");
       }),
     });
-    const { host: h, emitted } = host({ client });
+    const { host: h, emitted } = host({
+      client,
+      getRuntimeDiagnostics: () => ({
+        runtime: "Node v22-test",
+        platform: "test-os",
+        architecture: "test-arch",
+      }),
+    });
     Object.assign(h, { sessionId: "s1" });
 
     await expect(dispatchSessionCommand({ name: "/doctor", args: "" }, h)).resolves.toBe("handled");
 
     expect(listJobs).toHaveBeenCalledWith({ sessionId: "s1", includeFinished: true, limit: 100 });
     expect(emitted.at(-1)).toContain("Jobs:           1");
+    expect(emitted.at(-1)).toContain("Runtime:        Node v22-test");
+    expect(emitted.at(-1)).toContain("Platform:       test-os test-arch");
+  });
+
+  it("does not assume a Node runtime when /doctor host diagnostics are absent", async () => {
+    const client = fakeClient({
+      listJobs: vi.fn(async () => []),
+      getSettings: vi.fn(async () => ({})),
+      getAuthStatus: vi.fn(async () => null as never),
+      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
+      getSessionMcp: vi.fn(async () => []),
+    });
+    const { host: h, emitted } = host({ client });
+
+    await expect(dispatchSessionCommand({ name: "/doctor", args: "" }, h)).resolves.toBe("handled");
+
+    expect(emitted.at(-1)).toContain("Runtime:        (not provided by this host)");
+    expect(emitted.at(-1)).toContain("Platform:       (not provided by this host)");
   });
 
   it("reports unavailable Jobs in /doctor instead of an authoritative zero", async () => {

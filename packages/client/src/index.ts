@@ -35,11 +35,11 @@ export {
   patchSessionRuntimeMetadata,
   readRuntimeMetadata,
   readSessionRuntimeConfig,
-} from "@openharness/services";
+} from "@openharness/protocol";
 export type {
   SessionRuntimeConfig,
   SessionRuntimeConfigPatch,
-} from "@openharness/services";
+} from "@openharness/protocol";
 export type {
   PresentationReadRequest,
   SessionCommandHost,
@@ -126,12 +126,17 @@ export type {
   TerminalSignal,
   TerminalSource,
   TerminalWriteRequest,
-} from "@openharness/terminal";
-export type {
   JobCapabilities,
   JobKind,
   JobReadResult,
   JobSnapshot,
   JobStatus,
   JobWaitResult,
-} from "@openharness/jobs";
+  DurableChannelMessageInput,
+  DurableChannelMessageResult,
+  ExternalConversationRecord,
+  ChannelDeliveryRecord,
+  ChannelDeliveryStatus,
+  ChannelStatusSnapshot,
+  RecordChannelDeliveryInput,
+} from "@openharness/protocol";

@@ -1,7 +1,7 @@
 /**
  * 客户端公开类型。
  *
- * 会话/事件/权限等记录类型来自 `@openharness/services`；本文件补充
+ * 会话/事件/权限等记录类型来自 `@openharness/protocol`；本文件补充
  * HTTP 请求参数、响应体，以及 reducer 使用的本地聚合状态结构。
  */
 
@@ -25,8 +25,8 @@ import type {
   SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
-} from "@openharness/services";
-import type { JobSnapshot } from "@openharness/jobs";
+  JobSnapshot,
+} from "@openharness/protocol";
 
 export type {
   CreateScheduledTaskInput,

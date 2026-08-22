@@ -101,6 +101,51 @@ describe("OpenHarnessClient", () => {
     );
   });
 
+  it("keeps protocol error messages from non-success responses", async () => {
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      fetch: (async () =>
+        jsonResponse(
+          {
+            code: "invalid_request",
+            message: "delivery must be one of: queue, steer",
+            details: { field: "delivery" },
+          },
+          400,
+        )) as typeof fetch,
+    });
+
+    await expect(client.health()).rejects.toMatchObject({
+      message: "delivery must be one of: queue, steer",
+      status: 400,
+      body: {
+        code: "invalid_request",
+        details: { field: "delivery" },
+      },
+    });
+  });
+
+  it("rejects malformed success data instead of trusting its TypeScript type", async () => {
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      fetch: (async () =>
+        jsonResponse({
+          cursor: "latest",
+          session: {},
+          inputs: [],
+          messages: [],
+          parts: [],
+          runs: [],
+          permissions: [],
+        })) as typeof fetch,
+    });
+
+    await expect(client.getSessionState("s1")).rejects.toMatchObject({
+      code: "invalid_protocol_data",
+      details: { path: "snapshot.cursor" },
+    });
+  });
+
   it("calls typed API endpoints with bearer auth and JSON bodies", async () => {
     const session: SessionRecord = {
       id: "s1",

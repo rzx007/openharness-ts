@@ -163,6 +163,68 @@ export const sessionRunAttempts = sqliteTable(
   ],
 );
 
+export const externalConversations = sqliteTable(
+  "external_conversation",
+  {
+    id: text("id").primaryKey(),
+    connector: text("connector").notNull(),
+    accountId: text("account_id").notNull(),
+    workspaceId: text("workspace_id"),
+    chatId: text("chat_id").notNull(),
+    threadId: text("thread_id").notNull().default(""),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("external_conversation_identity_unique").on(
+      table.connector,
+      table.accountId,
+      table.chatId,
+      table.threadId,
+    ),
+    index("external_conversation_session_idx").on(table.sessionId),
+  ],
+);
+
+export const channelDeliveries = sqliteTable(
+  "channel_delivery",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => externalConversations.id, { onDelete: "cascade" }),
+    connector: text("connector").notNull(),
+    accountId: text("account_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    threadId: text("thread_id").notNull().default(""),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    inputId: text("input_id")
+      .notNull()
+      .references(() => sessionInputs.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => sessionRuns.id, { onDelete: "cascade" }),
+    externalMessageId: text("external_message_id").notNull(),
+    content: text("content").notNull(),
+    status: text("status").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    externalDeliveryId: text("external_delivery_id"),
+    error: text("error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    sentAt: integer("sent_at"),
+  },
+  (table) => [
+    uniqueIndex("channel_delivery_input_unique").on(table.inputId),
+    index("channel_delivery_status_idx").on(table.status, table.updatedAt),
+  ],
+);
+
 export const sessionTasks = sqliteTable(
   "session_task",
   {

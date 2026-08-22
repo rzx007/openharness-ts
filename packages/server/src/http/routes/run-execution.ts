@@ -1,17 +1,17 @@
 import { Hono } from "hono";
+import { parseAdmitPromptRequest } from "@openharness/protocol";
 
 import {
+  applicationErrorResponse,
   errorResponse,
   isRecord,
   jsonResponse,
+  protocolValidationErrorResponse,
   readJson,
   sessionMutationErrorStatus,
 } from "../support.js";
 import type { RequestTraceRegistry } from "../control/index.js";
-import {
-  SessionApplicationError,
-  type SessionApplicationService,
-} from "../session/index.js";
+import type { SessionApplicationService } from "../../application/session/session-application-service.js";
 
 export interface RunExecutionRoutesContext {
   application: Pick<
@@ -28,27 +28,23 @@ export function createRunExecutionRoutes(
     .post("/:sessionId/prompts", async (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
-      const body = await readJson(c);
-      if (typeof body.content !== "string")
-        return errorResponse(400, "content is required");
+      let input;
+      try {
+        input = parseAdmitPromptRequest(await readJson(c));
+      } catch (error) {
+        return protocolValidationErrorResponse(error);
+      }
 
       try {
         const admitted = await context.application.admitPrompt(sessionId, {
-          id: typeof body.id === "string" ? body.id : undefined,
-          delivery: body.delivery === "steer" ? "steer" : "queue",
-          content: body.content,
-          metadata: isRecord(body.metadata) ? body.metadata : undefined,
+          ...input,
           traceId: context.traces.get(c.req.raw),
         });
         return jsonResponse(admitted, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })
@@ -66,13 +62,9 @@ export function createRunExecutionRoutes(
         });
         return jsonResponse(admitted, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })
@@ -95,13 +87,9 @@ export function createRunExecutionRoutes(
         });
         return jsonResponse(resumed, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })

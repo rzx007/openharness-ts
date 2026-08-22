@@ -11,7 +11,7 @@ import type {
   ProfileService,
   ProjectInitService,
 } from "../../application/index.js";
-import type { DaemonControlService } from "../control/index.js";
+import type { DaemonControlService } from "../../application/control/index.js";
 
 export interface ServiceRoutesContext {
   contextService?: ContextService;

@@ -1,6 +1,6 @@
 import type { SessionStore } from "@openharness/services";
 
-import type { HookInfo } from "../../application/settings-api.js";
+import type { HookInfo } from "../settings-api.js";
 import type { SessionRunEngine } from "../session/session-run-engine.js";
 import type { AgentPool } from "../agent/agent-pool.js";
 import type { DaemonOperationGate, DaemonOperationLease } from "./daemon-operation-gate.js";

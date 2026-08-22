@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import {
-  patchSessionRuntimeMetadata,
-  readRuntimeMetadata,
-} from "@openharness/services";
+  parseCreateSessionRequest,
+  parseUpdateSessionRequest,
+} from "@openharness/protocol";
 
 import {
   normalizeCommandName,
@@ -10,21 +10,19 @@ import {
   type CommandCatalogProvider,
 } from "../../commands/index.js";
 import {
+  applicationErrorResponse,
   errorResponse,
-  isRecord,
   jsonResponse,
+  protocolValidationErrorResponse,
   readCursor,
   readJson,
   readLimit,
   sessionMutationErrorStatus,
 } from "../support.js";
 import type { RequestTraceRegistry } from "../control/index.js";
-import {
-  SessionApplicationError,
-  type AdmitPromptResult,
-  type SessionApplicationService,
-  type SessionQueryService,
-} from "../session/index.js";
+import type { SessionApplicationService } from "../../application/session/session-application-service.js";
+import type { SessionQueryService } from "../../application/session/session-query-service.js";
+import type { AdmitPromptResult } from "../../application/session/session-run-engine.js";
 
 export interface SessionRoutesContext {
   queries: Pick<
@@ -61,31 +59,13 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
       return jsonResponse({ sessions });
     })
     .post("/", async (c) => {
-      const body = await readJson(c);
-      if (typeof body.cwd !== "string")
-        return errorResponse(400, "cwd is required");
-      const rawMetadata = isRecord(body.metadata) ? body.metadata : {};
-      const runtime = readRuntimeMetadata(rawMetadata);
-      const model =
-        typeof runtime.model === "string"
-          ? runtime.model
-          : typeof body.model === "string"
-            ? body.model
-            : undefined;
-      if (!model) return errorResponse(400, "model is required");
-      const metadata = patchSessionRuntimeMetadata(rawMetadata, { model });
-
-      const session = context.application.createSession({
-        id: typeof body.id === "string" ? body.id : undefined,
-        parentId: typeof body.parentId === "string" ? body.parentId : undefined,
-        projectId:
-          typeof body.projectId === "string" ? body.projectId : undefined,
-        cwd: body.cwd,
-        title: typeof body.title === "string" ? body.title : undefined,
-        model,
-        agent: typeof body.agent === "string" ? body.agent : undefined,
-        metadata,
-      });
+      let input;
+      try {
+        input = parseCreateSessionRequest(await readJson(c));
+      } catch (error) {
+        return protocolValidationErrorResponse(error);
+      }
+      const session = context.application.createSession(input);
       return jsonResponse({ session }, 201);
     })
     .get("/:sessionId", (c) => {
@@ -112,45 +92,25 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         });
         return jsonResponse({ session }, 201);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError ? error.status : 404;
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
-        );
+        return applicationErrorResponse(error, 404);
       }
     })
     .patch("/:sessionId", async (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
-      const body = await readJson(c);
-      if (body.model !== undefined) {
-        return errorResponse(
-          400,
-          "model must be changed through metadata.runtime.model",
-        );
-      }
-      const rawMetadata = isRecord(body.metadata) ? body.metadata : undefined;
+      let input;
       try {
-        const session = await context.application.updateSession(sessionId, {
-          title: typeof body.title === "string" ? body.title : undefined,
-          agent:
-            body.agent === null
-              ? null
-              : typeof body.agent === "string"
-                ? body.agent
-                : undefined,
-          metadata: rawMetadata,
-        });
+        input = parseUpdateSessionRequest(await readJson(c));
+      } catch (error) {
+        return protocolValidationErrorResponse(error);
+      }
+      try {
+        const session = await context.application.updateSession(sessionId, input);
         return jsonResponse({ session });
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })
@@ -173,12 +133,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         const session = await context.application.archiveSessionTree(sessionId);
         return jsonResponse({ session });
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError ? error.status : 404;
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
-        );
+        return applicationErrorResponse(error, 404);
       }
     })
     .delete("/:sessionId/hard", async (c) => {
@@ -189,12 +144,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
           await context.application.deleteSessionTree(sessionId);
         return jsonResponse({ deletedSessionIds });
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError ? error.status : 404;
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
-        );
+        return applicationErrorResponse(error, 404);
       }
     })
     .get("/:sessionId/messages", (c) => {
@@ -271,13 +221,9 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
           });
         return jsonResponse({ ...admitted, command: expanded.command }, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     });

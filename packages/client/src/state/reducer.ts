@@ -4,7 +4,7 @@
  * 幂等：同一 `seq` 只应用一次。多端用同一套事件流应收敛到相同状态。
  */
 
-import { SESSION_EVENT_SCHEMA_VERSION } from "@openharness/services";
+import { SESSION_EVENT_SCHEMA_VERSION } from "@openharness/protocol";
 
 import type {
   OpenHarnessClientState,

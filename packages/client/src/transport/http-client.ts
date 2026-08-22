@@ -63,6 +63,11 @@ import type {
   UpdateScheduledTaskInput,
 } from "../types/index.js";
 import type {
+  JobKind,
+  JobReadResult,
+  JobSnapshot,
+  JobStatus,
+  JobWaitResult,
   TerminalCreateRequest,
   TerminalEvent,
   TerminalReadResult,
@@ -71,16 +76,47 @@ import type {
   TerminalSignal,
   TerminalSource,
   TerminalWriteRequest,
-} from "@openharness/terminal";
-import type {
-  JobKind,
-  JobReadResult,
-  JobSnapshot,
-  JobStatus,
-  JobWaitResult,
-} from "@openharness/jobs";
+  DurableChannelMessageInput,
+  DurableChannelMessageResult,
+  RecordChannelDeliveryInput,
+  ChannelDeliveryRecord,
+  ChannelStatusSnapshot,
+} from "@openharness/protocol";
+import {
+  decodeJobReadResult,
+  decodeJobSnapshot,
+  decodeJobWaitResult,
+  decodeSessionEventRecord,
+  decodeSessionStateSnapshot,
+  decodeTerminalEvent,
+  decodeTerminalReadResult,
+  decodeTerminalSessionInfo,
+  ProtocolDataError,
+} from "@openharness/protocol";
 
 let promptRequestCounter = 0;
+
+function responseField(value: unknown, field: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProtocolDataError("Response body must be an object");
+  }
+  if (!(field in value)) {
+    throw new ProtocolDataError(`Response body is missing ${field}`, field);
+  }
+  return (value as Record<string, unknown>)[field];
+}
+
+function responseArray<T>(
+  value: unknown,
+  field: string,
+  decode: (item: unknown) => T,
+): T[] {
+  const items = responseField(value, field);
+  if (!Array.isArray(items)) {
+    throw new ProtocolDataError(`Response ${field} must be an array`, field);
+  }
+  return items.map(decode);
+}
 
 /** Normalize a daemon base URL without accepting credentials or request fragments. */
 export function normalizeDaemonBaseUrl(value: string): string {
@@ -154,6 +190,49 @@ export class OpenHarnessClient {
       auth: false,
       signal: options.signal,
     });
+  }
+
+  async handleChannelMessage(
+    input: DurableChannelMessageInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<DurableChannelMessageResult> {
+    return await this.request<DurableChannelMessageResult>(
+      "/channels/messages",
+      { method: "POST", body: input, signal: options.signal },
+    );
+  }
+
+  async recordChannelDelivery(
+    deliveryId: string,
+    input: RecordChannelDeliveryInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ChannelDeliveryRecord> {
+    const response = await this.request<{ delivery: ChannelDeliveryRecord }>(
+      `/channels/deliveries/${encodeURIComponent(deliveryId)}/result`,
+      { method: "POST", body: input, signal: options.signal },
+    );
+    return response.delivery;
+  }
+
+  async getChannelStatus(
+    options: { connector?: string; limit?: number; signal?: AbortSignal } = {},
+  ): Promise<ChannelStatusSnapshot> {
+    const { signal, ...query } = options;
+    return await this.request<ChannelStatusSnapshot>(
+      this.path("/channels/status", query),
+      { signal },
+    );
+  }
+
+  async listPendingChannelDeliveries(
+    options: { connector?: string; limit?: number; signal?: AbortSignal } = {},
+  ): Promise<ChannelDeliveryRecord[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ deliveries: ChannelDeliveryRecord[] }>(
+      this.path("/channels/deliveries/pending", query),
+      { signal },
+    );
+    return response.deliveries;
   }
 
   /** `GET /commands?cwd=` — cwd-scoped slash command catalog for autocomplete. */
@@ -751,12 +830,13 @@ export class OpenHarnessClient {
     sessionId: string,
     options: { signal?: AbortSignal } = {},
   ): Promise<SessionStateSnapshot> {
-    return await this.request<SessionStateSnapshot>(
+    const response = await this.request<unknown>(
       `/sessions/${encodeURIComponent(sessionId)}/state`,
       {
         signal: options.signal,
       },
     );
+    return decodeSessionStateSnapshot(response);
   }
 
   /** `DELETE /sessions/:id` */
@@ -922,11 +1002,11 @@ export class OpenHarnessClient {
     options: ListEventsOptions & { signal?: AbortSignal } = {},
   ): Promise<SessionEventRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ events: SessionEventRecord[] }>(
+    const response = await this.request<unknown>(
       this.path("/events", query),
       { signal },
     );
-    return response.events;
+    return responseArray(response, "events", decodeSessionEventRecord);
   }
 
   /** `GET /permissions` */
@@ -1073,7 +1153,7 @@ export class OpenHarnessClient {
     input: TerminalCreateRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<TerminalSessionInfo> {
-    const response = await this.request<{ terminal: TerminalSessionInfo }>(
+    const response = await this.request<unknown>(
       "/terminals",
       {
         method: "POST",
@@ -1081,7 +1161,7 @@ export class OpenHarnessClient {
         signal: options.signal,
       },
     );
-    return response.terminal;
+    return decodeTerminalSessionInfo(responseField(response, "terminal"));
   }
 
   async listJobs(options: {
@@ -1097,7 +1177,7 @@ export class OpenHarnessClient {
     signal?: AbortSignal;
   }): Promise<JobSnapshot[]> {
     const { signal, kinds, statuses, includeFinished, ...query } = options;
-    const response = await this.request<{ jobs: JobSnapshot[] }>(
+    const response = await this.request<unknown>(
       this.path("/jobs", {
         ...query,
         ...(kinds ? { kinds: kinds.join(",") } : {}),
@@ -1108,7 +1188,7 @@ export class OpenHarnessClient {
       }),
       { signal },
     );
-    return response.jobs;
+    return responseArray(response, "jobs", decodeJobSnapshot);
   }
 
   async createBackgroundShell(
@@ -1132,10 +1212,11 @@ export class OpenHarnessClient {
     },
   ): Promise<JobReadResult> {
     const { signal, ...query } = options;
-    return await this.request<JobReadResult>(
+    const response = await this.request<unknown>(
       this.path(`/jobs/${encodeURIComponent(jobId)}`, query),
       { signal },
     );
+    return decodeJobReadResult(response);
   }
 
   async waitJob(
@@ -1148,7 +1229,7 @@ export class OpenHarnessClient {
     },
     options: { signal?: AbortSignal } = {},
   ): Promise<JobWaitResult> {
-    return await this.request<JobWaitResult>(
+    const response = await this.request<unknown>(
       `/jobs/${encodeURIComponent(jobId)}/wait`,
       {
         method: "POST",
@@ -1156,6 +1237,7 @@ export class OpenHarnessClient {
         signal: options.signal,
       },
     );
+    return decodeJobWaitResult(response);
   }
 
   async sendJob(
@@ -1175,11 +1257,11 @@ export class OpenHarnessClient {
     input: { sessionId: string; reason?: string },
     options: { signal?: AbortSignal } = {},
   ): Promise<JobSnapshot> {
-    const response = await this.request<{ snapshot: JobSnapshot }>(
+    const response = await this.request<unknown>(
       `/jobs/${encodeURIComponent(jobId)}/cancel`,
       { method: "POST", body: input, signal: options.signal },
     );
-    return response.snapshot;
+    return decodeJobSnapshot(responseField(response, "snapshot"));
   }
 
   async listTerminals(
@@ -1191,33 +1273,33 @@ export class OpenHarnessClient {
     } = {},
   ): Promise<TerminalSessionInfo[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ terminals: TerminalSessionInfo[] }>(
+    const response = await this.request<unknown>(
       this.path("/terminals", query),
       { signal },
     );
-    return response.terminals;
+    return responseArray(response, "terminals", decodeTerminalSessionInfo);
   }
 
   async getTerminal(
     terminalId: string,
     options: { signal?: AbortSignal } = {},
   ): Promise<TerminalSessionInfo> {
-    const response = await this.request<{ terminal: TerminalSessionInfo }>(
+    const response = await this.request<unknown>(
       `/terminals/${encodeURIComponent(terminalId)}`,
       { signal: options.signal },
     );
-    return response.terminal;
+    return decodeTerminalSessionInfo(responseField(response, "terminal"));
   }
 
   async readTerminal(
     terminalId: string,
     options: { signal?: AbortSignal } = {},
   ): Promise<TerminalReadResult> {
-    const response = await this.request<{ snapshot: TerminalReadResult }>(
+    const response = await this.request<unknown>(
       `/terminals/${encodeURIComponent(terminalId)}/output`,
       { signal: options.signal },
     );
-    return response.snapshot;
+    return decodeTerminalReadResult(responseField(response, "snapshot"));
   }
 
   async writeTerminal(
@@ -1271,7 +1353,7 @@ export class OpenHarnessClient {
   streamTerminalEvents(
     options: { signal?: AbortSignal } = {},
   ): AsyncIterable<TerminalEvent> {
-    return streamServerSentEvents<TerminalEvent>(async () => {
+    return streamServerSentEvents(async () => {
       const response = await this.fetchImpl(
         `${this.baseUrl}/terminals/stream`,
         {
@@ -1283,7 +1365,7 @@ export class OpenHarnessClient {
       if (!response.body)
         throw new Error("Terminal event stream response has no body");
       return response.body;
-    });
+    }, decodeTerminalEvent);
   }
 
   streamEvents(
@@ -1304,7 +1386,7 @@ export class OpenHarnessClient {
       if (!response.ok) await this.throwResponseError(response);
       if (!response.body) throw new Error("Event stream response has no body");
       return response.body;
-    });
+    }, decodeSessionEventRecord);
   }
 
   private async request<T>(
@@ -1358,6 +1440,11 @@ export class OpenHarnessClient {
       "error" in body &&
       typeof body.error === "string"
         ? body.error
+        : body &&
+            typeof body === "object" &&
+            "message" in body &&
+            typeof body.message === "string"
+          ? body.message
         : `OpenHarness API request failed with ${response.status}`;
     throw new OpenHarnessApiError(message, response.status, body);
   }
@@ -1369,6 +1456,7 @@ export class OpenHarnessClient {
  */
 export async function* streamServerSentEvents<T = SessionEventRecord>(
   open: () => Promise<ReadableStream<Uint8Array>>,
+  decode: (value: unknown) => T = (value) => value as T,
 ): AsyncIterable<T> {
   const reader = (await open()).getReader();
   const decoder = new TextDecoder();
@@ -1382,25 +1470,25 @@ export async function* streamServerSentEvents<T = SessionEventRecord>(
       const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() ?? "";
       for (const frame of frames) {
-        const event = parseSseFrame<T>(frame);
-        if (event) yield event;
+        const event = parseSseFrame(frame);
+        if (event !== undefined) yield decode(event);
       }
     }
     buffer += decoder.decode();
-    const event = parseSseFrame<T>(buffer);
-    if (event) yield event;
+    const event = parseSseFrame(buffer);
+    if (event !== undefined) yield decode(event);
   } finally {
     reader.releaseLock();
   }
 }
 
 /** 解析单个 SSE frame 的 `data:` 行，得到事件 JSON。 */
-function parseSseFrame<T>(frame: string): T | undefined {
+function parseSseFrame(frame: string): unknown | undefined {
   let data = "";
   for (const line of frame.split(/\r?\n/)) {
     if (!line || line.startsWith(":")) continue;
     if (line.startsWith("data:")) data += line.slice(5).trimStart();
   }
   if (!data) return undefined;
-  return JSON.parse(data) as T;
+  return JSON.parse(data) as unknown;
 }

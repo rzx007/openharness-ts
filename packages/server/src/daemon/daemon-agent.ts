@@ -24,7 +24,7 @@ import type {
   SessionRecord,
 } from "@openharness/services/session-runtime/types";
 
-import { transcriptToAgentMessages } from "../http/agent/agent-transcript.js";
+import { transcriptToAgentMessages } from "../application/agent/agent-transcript.js";
 
 export interface CreateDaemonAgentContext {
   session: SessionRecord;
