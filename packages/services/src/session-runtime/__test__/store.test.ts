@@ -6,6 +6,14 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { SessionStore, type SessionStoreOptions } from "../store.js";
+import { createDurableEventRegistry } from "../event-registry.js";
+
+const fixtureEventRegistry = createDurableEventRegistry([
+  { type: "daemon.heartbeat", currentVersion: 1, scope: "global", validate: () => undefined },
+  { type: "daemon.legacy", currentVersion: 1, scope: "global", validate: () => undefined },
+  { type: "daemon.current", currentVersion: 1, scope: "global", validate: () => undefined },
+  { type: "daemon.after-restart", currentVersion: 1, scope: "session", validate: () => undefined },
+]);
 
 function withStore(
   test: (store: SessionStore, path: string) => void,
@@ -385,6 +393,109 @@ describe("SessionStore", () => {
     });
   });
 
+  it("atomically admits a queued prompt with its owning run", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const database = (store as any).database as Database.Database;
+      database.exec(`
+        CREATE TRIGGER fail_atomic_run_insert
+        BEFORE INSERT ON session_run
+        BEGIN
+          SELECT RAISE(ABORT, 'forced run insert failure');
+        END;
+      `);
+
+      expect(() => store.admitPromptWithRun({
+        prompt: { id: "atomic-input", sessionId: "s1", content: "hello" },
+        run: { id: "atomic-run", metadata: { traceId: "trace-atomic" } },
+      })).toThrow("forced run insert failure");
+
+      expect(store.getInput("atomic-input")).toBeUndefined();
+      expect(store.getRun("atomic-run")).toBeUndefined();
+      expect(store.listEvents().map((event) => event.type)).not.toContain(
+        "session.input.admitted",
+      );
+      const failedReload = new SessionStore({ path });
+      expect(failedReload.getInput("atomic-input")).toBeUndefined();
+      expect(failedReload.getRun("atomic-run")).toBeUndefined();
+      failedReload.close();
+
+      database.exec("DROP TRIGGER fail_atomic_run_insert");
+      const admitted = store.admitPromptWithRun({
+        prompt: { id: "atomic-input", sessionId: "s1", content: "hello" },
+        run: { id: "atomic-run", metadata: { traceId: "trace-atomic" } },
+      });
+      expect(admitted).toMatchObject({
+        input: { id: "atomic-input", delivery: "queue" },
+        run: {
+          id: "atomic-run",
+          inputId: "atomic-input",
+          status: "pending",
+          metadata: { traceId: "trace-atomic" },
+        },
+      });
+    });
+  });
+
+  it("terminalizes only inputs that have no durable run ownership", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const owned = store.admitPrompt({
+        id: "owned-input",
+        sessionId: "s1",
+        content: "owned",
+      });
+      store.createRun({ id: "owned-run", sessionId: "s1", inputId: owned.id });
+      const promoted = store.admitPrompt({
+        id: "promoted-input",
+        sessionId: "s1",
+        delivery: "steer",
+        content: "promoted",
+      });
+      const promotedRun = store.createRun({ id: "promoted-run", sessionId: "s1" });
+      store.createMessage({
+        id: "promoted-message",
+        sessionId: "s1",
+        role: "user",
+        inputId: promoted.id,
+        runId: promotedRun.id,
+      });
+      store.admitPrompt({
+        id: "orphan-input",
+        sessionId: "s1",
+        delivery: "steer",
+        content: "orphan",
+        metadata: { traceId: "trace-orphan" },
+      });
+
+      expect(store.terminalizeUnownedInputs("daemon restarted")).toBe(1);
+      expect(store.findRunByInput("owned-input")?.id).toBe("owned-run");
+      expect(store.findRunByInput("promoted-input")?.id).toBe("promoted-run");
+      expect(store.findRunByInput("orphan-input")).toMatchObject({
+        status: "interrupted",
+        error: "daemon restarted",
+        metadata: {
+          traceId: "trace-orphan",
+          recovery: {
+            kind: "orphan_input",
+            inputId: "orphan-input",
+            delivery: "steer",
+            reason: "daemon restarted",
+          },
+        },
+      });
+      expect(store.terminalizeUnownedInputs("daemon restarted")).toBe(0);
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.findRunByInput("orphan-input")).toMatchObject({
+        status: "interrupted",
+        error: "daemon restarted",
+      });
+      expect(reloaded.terminalizeUnownedInputs("daemon restarted")).toBe(0);
+      reloaded.close();
+    });
+  });
+
   it("replays monotonic events by cursor and session", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
@@ -395,6 +506,9 @@ describe("SessionStore", () => {
 
       expect(store.listEvents().map((event) => event.seq)).toEqual([
         1, 2, 3, 4,
+      ]);
+      expect(store.listEvents().map((event) => event.schemaVersion)).toEqual([
+        1, 1, 1, 1,
       ]);
       expect(
         store.listEvents({ afterSeq: cursor }).map((event) => event.type),
@@ -408,6 +522,110 @@ describe("SessionStore", () => {
           .listEvents({ afterSeq: cursor, sessionId: "s1" })
           .map((event) => event.type),
       ).toEqual(["session.input.admitted", "daemon.heartbeat"]);
+    }, { eventRegistry: fixtureEventRegistry });
+  });
+
+  it("migrates legacy durable events to schema version 1", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-session-event-version-"));
+    const path = join(dir, "store.db");
+    try {
+      const legacy = new Database(path);
+      legacy.exec(`
+        CREATE TABLE session_event (
+          id TEXT PRIMARY KEY,
+          seq INTEGER NOT NULL UNIQUE,
+          type TEXT NOT NULL,
+          session_id TEXT,
+          payload_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        INSERT INTO session_event
+          (id, seq, type, session_id, payload_json, created_at)
+        VALUES ('legacy-event', 7, 'daemon.legacy', NULL, '{"ok":true}', 100);
+      `);
+      legacy.close();
+
+      const store = new SessionStore({ path, eventRegistry: fixtureEventRegistry });
+      expect(store.listEvents()).toEqual([
+        {
+          id: "legacy-event",
+          seq: 7,
+          type: "daemon.legacy",
+          schemaVersion: 1,
+          payload: { ok: true },
+          createdAt: 100,
+        },
+      ]);
+      const appended = store.appendEvent({ type: "daemon.current" });
+      expect(appended.schemaVersion).toBe(1);
+      store.close();
+
+      const migrated = new Database(path, { readonly: true });
+      const columns = migrated
+        .prepare("PRAGMA table_info(session_event)")
+        .all() as Array<{ name: string; notnull: number; dflt_value: unknown }>;
+      expect(columns.find((column) => column.name === "schema_version")).toMatchObject({
+        notnull: 1,
+        dflt_value: "1",
+      });
+      expect(
+        migrated
+          .prepare("SELECT schema_version FROM session_event ORDER BY seq")
+          .all(),
+      ).toEqual([{ schema_version: 1 }, { schema_version: 1 }]);
+      migrated.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists idempotent projection settlements and tracks finite repair attempts", () => {
+    withStore((store, path) => {
+      const input = {
+        id: "settlement-1",
+        projector: "daemon-agent:agent-1",
+        rootSessionId: "root-1",
+        eventSequence: 9,
+        action: "retry-terminal-projection" as const,
+        payload: { event: { id: "framework-9", type: "child.closed" } },
+        error: "first projection failed",
+      };
+      const created = store.createProjectionSettlement(input);
+      expect(store.createProjectionSettlement(input)).toEqual(created);
+      expect(() => store.createProjectionSettlement({
+        ...input,
+        action: "compensate-child",
+      })).toThrow("Projection settlement identity conflict");
+
+      expect(store.markProjectionSettlementRetrying(created.id)).toMatchObject({
+        status: "retrying",
+        attemptCount: 1,
+      });
+      expect(store.failProjectionSettlement(created.id, "still unavailable", 123)).toMatchObject({
+        status: "pending",
+        attemptCount: 1,
+        lastError: "still unavailable",
+        nextRetryAt: 123,
+      });
+      expect(store.markProjectionSettlementRetrying(created.id)).toMatchObject({
+        status: "retrying",
+        attemptCount: 2,
+      });
+      expect(store.resolveProjectionSettlement(created.id)).toMatchObject({
+        status: "resolved",
+        attemptCount: 2,
+        resolvedAt: expect.any(Number),
+      });
+      store.close();
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.listProjectionSettlements({
+        projector: input.projector,
+        rootSessionId: input.rootSessionId,
+        status: "resolved",
+      })).toHaveLength(1);
+      expect(reloaded.listProjectionSettlements({ status: ["pending", "retrying"] })).toEqual([]);
+      reloaded.close();
     });
   });
 
@@ -795,7 +1013,7 @@ describe("SessionStore", () => {
       });
       store.close();
 
-      const reloaded = new SessionStore({ path });
+      const reloaded = new SessionStore({ path, eventRegistry: fixtureEventRegistry });
       const durable = reloaded.appendEvent({
         type: "daemon.after-restart",
         sessionId: "s1",
@@ -858,6 +1076,13 @@ describe("SessionStore", () => {
         inputId: input.id,
       });
       store.updateRun(run.id, { status: "running" });
+      const attempt = store.createRunAttempt({
+        id: "attempt-r1-1",
+        runId: run.id,
+        provider: "openrouter",
+        model: "m",
+      });
+      store.updateRunAttempt(attempt.id, { status: "running" });
       const message = store.createMessage({
         id: "m1",
         sessionId: "s1",
@@ -901,10 +1126,18 @@ describe("SessionStore", () => {
       expect(() =>
         store.replyPermission({ requestId: permission.id, status: "denied" }),
       ).toThrow("Permission request already resolved");
+      store.settleActiveRunAttempts(run.id, "completed");
       store.updateRun(run.id, { status: "completed" });
 
       const reloaded = new SessionStore({ path });
       expect(reloaded.getRun("r1")!.status).toBe("completed");
+      expect(reloaded.listRunAttempts("r1")).toMatchObject([{
+        id: "attempt-r1-1",
+        sequence: 1,
+        status: "completed",
+        provider: "openrouter",
+        model: "m",
+      }]);
       expect(reloaded.listMessageParts("s1")).toMatchObject([
         {
           id: "part-tool",
@@ -930,7 +1163,38 @@ describe("SessionStore", () => {
       expect(reloaded.listEvents().map((event) => event.type)).toContain(
         "session.message.part.updated",
       );
+      expect(reloaded.listEvents().map((event) => event.type)).toContain(
+        "session.run_attempt.updated",
+      );
       reloaded.close();
+    });
+  });
+
+  it("records multiple logical provider attempts under one run with independent identities", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const input = store.admitPrompt({ id: "i1", sessionId: "s1", content: "retry me" });
+      store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
+      store.updateRun("r1", { status: "running" });
+
+      const first = store.createRunAttempt({ id: "attempt-1", runId: "r1", provider: "p", model: "m" });
+      store.updateRunAttempt(first.id, { status: "running" });
+      store.updateRunAttempt(first.id, { status: "failed", errorKind: "provider", error: "fallback" });
+      const second = store.createRunAttempt({
+        id: "attempt-2",
+        runId: "r1",
+        provider: "backup",
+        model: "m2",
+        retryReason: "primary provider failed",
+      });
+      store.updateRunAttempt(second.id, { status: "running" });
+      store.updateRunAttempt(second.id, { status: "completed", inputTokens: 10, outputTokens: 4 });
+      store.updateRun("r1", { status: "completed" });
+
+      expect(store.listRunAttempts("r1")).toMatchObject([
+        { id: "attempt-1", runId: "r1", sequence: 1, status: "failed", provider: "p" },
+        { id: "attempt-2", runId: "r1", sequence: 2, status: "completed", provider: "backup" },
+      ]);
     });
   });
 
@@ -943,6 +1207,8 @@ describe("SessionStore", () => {
         content: "hello",
       });
       store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
+      const attempt = store.createRunAttempt({ id: "attempt-r1-1", runId: "r1" });
+      store.updateRunAttempt(attempt.id, { status: "running" });
       const message = store.createMessage({
         id: "m1",
         sessionId: "s1",
@@ -992,11 +1258,19 @@ describe("SessionStore", () => {
       expect(snapshot.runs).toMatchObject([
         { id: "r1", status: "interrupted" },
       ]);
+      expect(snapshot.attempts).toMatchObject([
+        { id: "attempt-r1-1", runId: "r1", status: "cancelled", errorKind: "interrupted" },
+      ]);
       expect(
         snapshot.parts
           .filter((part) => part.messageId === "m2")
           .map((part) => part.status),
-      ).toEqual(["interrupted", "interrupted"]);
+      ).toEqual(["interrupted", "failed"]);
+      expect(snapshot.parts.find((part) => part.id === "part-running-tool")?.metadata).toMatchObject({
+        toolCallId: "tool-1",
+        toolAttemptId: "tool_attempt_tool-1_1",
+        failureKind: "unknown_outcome",
+      });
     });
   });
 

@@ -18,7 +18,13 @@ for (const name of readdirSync(packagesDir)) {
   } catch {}
 }
 
-aliases["@openharness/services/tasks"] = resolve(packagesDir, "services", "src", "tasks", "index.ts");
+aliases["@openharness/services/executions"] = resolve(
+  packagesDir,
+  "services",
+  "src",
+  "executions",
+  "index.ts",
+);
 
 export default defineConfig({
   test: {

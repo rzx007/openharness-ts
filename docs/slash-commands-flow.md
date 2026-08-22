@@ -24,7 +24,7 @@
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  Host UI（TUI App / 未来 Web / Desktop）                         │
-│  · /new /resume /sessions /theme /permissions /workflow …       │
+│  · /new /resume /sessions /theme /permissions /jobs /workflow … │
 │  · template invoke 的 busy/run 状态（setLocalBusy 等）            │
 └────────────────────────────┬────────────────────────────────────┘
                              │ slash line
@@ -32,7 +32,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  @openharness/client  dispatchSessionCommand(host)               │
 │  · parseSlashLine / mergeCommandDetails / LOCAL_COMMAND_*        │
-│  · /config /memory /tasks /rewind /plugin … 呈现 + API           │
+│  · /config /memory /jobs list|show|cancel /background … 呈现 + API│
 │  · emit(text) 把系统消息交回宿主                                  │
 │  · outcome: handled | local_ui | unhandled                       │
 └────────────────────────────┬────────────────────────────────────┘
@@ -49,7 +49,7 @@
 │  · GET /commands          catalog（builtin session + skills）    │
 │  · PATCH /sessions/:id    runtime config 等                     │
 │  · GET/PATCH /settings    /config /effort /fast /turns …         │
-│  · 其它资源 API           memory / tasks / git / plugins …       │
+│  · 其它资源 API           memory / jobs / background-shells …   │
 │  · MaintenanceService -> AgentPool / OpenHarnessAgent            │
 │                           compact / remember / mcp inspect …     │
 └─────────────────────────────────────────────────────────────────┘
@@ -59,11 +59,11 @@
 
 | 组件 | 路径 | 职责 |
 |------|------|------|
-| Builtin catalog | `packages/server/src/commands.ts` | `BUILTIN_SESSION_COMMANDS` + `mergeCommandCatalog` |
-| HTTP routes | `packages/server/src/http.ts` | `/commands`、资源 API、`POST .../commands` expand |
+| Builtin catalog | `packages/server/src/commands/commands.ts` | `BUILTIN_SESSION_COMMANDS` + `mergeCommandCatalog` |
+| HTTP routes | `packages/server/src/http/server.ts` | `/commands`、Jobs/后台 shell 等资源 API、`POST .../commands` expand |
 | CLI catalog extras | `apps/cli/src/command-catalog.ts` | cwd 下 skill/plugin templates |
 | CLI injectables | `apps/cli/src/daemon-services.ts` | settings/memory/git/plugins… 实现 |
-| Shared dispatch | `packages/client/src/session-commands.ts` | 呈现层 + 资源 API 调用 |
+| Shared dispatch | `packages/client/src/commands/session-commands.ts` | 呈现层 + 资源 API 调用 |
 | TUI adapter | `apps/frontend/src/hooks/sessionSlashCommands.ts` | React ctx → `SessionCommandHost` |
 | TUI sync | `apps/frontend/src/hooks/useServerSync.ts` | `/new` `/resume`、template busy、admitPrompt |
 | TUI App | `apps/frontend/src/App.tsx` | 本地 UI 命令（theme/sessions/permissions…） |
@@ -136,14 +136,16 @@ type SessionCommandOutcome = "handled" | "unhandled" | "local_ui";
 
 | 层 | 代表命令 | 执行位置 |
 |---|---|---|
-| Client-local UI | `/new` `/sessions` `/resume` `/models` `/theme` `/permissions` `/workflow(s)` | 宿主 App；其中 `/resume` 调用专用恢复 API，catalog 可不列或仅 autocomplete |
-| Shared session（资源 API） | `/config` `/provider` `/mcp` `/tasks` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/rewind` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/init` `/plugin` `/reload-plugins` `/hooks` `/subagents` `/diff` `/branch` `/commit` `/help` `/status` `/version` `/skills` | `dispatchSessionCommand` |
+| Client-local UI | `/new` `/sessions` `/resume` `/models` `/theme` `/permissions`，以及无参数 `/jobs`、`/workflow(s)` | 宿主 App；后三者打开同一个 Jobs Panel；`/resume` 调用专用恢复 API，catalog 可不列或仅 autocomplete |
+| Shared session（资源 API） | `/config` `/provider` `/mcp` `/jobs list|show|cancel` `/background` `/memory` `/auth` `/context` `/stats` `/agents` `/compact` `/rewind` `/remember` `/dream` `/profile` `/doctor` `/effort` `/fast` `/turns` `/usage` `/cost` `/export` `/output-style` `/init` `/plugin` `/reload-plugins` `/hooks` `/subagents` `/diff` `/branch` `/commit` `/help` `/status` `/version` `/skills` | `dispatchSessionCommand` |
 | Template | user-invocable skills、plugin commands | `POST /sessions/:id/commands` |
 | 禁止 | 通用 `runCommand`、未知 slash 当 prompt | — |
 
 `/plan`：App 无参 toggle 会改写成 `/plan on|off`；共享层只处理 on/off 并 `patchStatus`。
 
 `/models`：TUI 本地弹窗，不进共享 dispatch。没有 active session 时，它改 settings，作为下一条新 session 的默认模型；有 active session 时，它 PATCH `metadata.runtime.model`，daemon 关闭旧 agent，下一轮消息重建并生效。旧的 `PATCH /sessions/:id { model }` 不再支持。
+
+`/background <command>`：共享层调用 `POST /background-shells`。创建成功后 TUI 走现有 Jobs 刷新路径；失败或只有空参数时不刷新。`/jobs show|cancel` 走统一 Job API。无参数 `/jobs` 由 App 拦截并打开 Jobs Panel，避免同时出现文字列表和面板。
 
 ## Catalog 与 template
 

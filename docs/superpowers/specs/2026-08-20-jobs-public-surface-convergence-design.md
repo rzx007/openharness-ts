@@ -1,7 +1,7 @@
 # Jobs 公共面收口设计
 
 日期：2026-08-20
-状态：待用户审阅
+状态：已确认
 
 ## 1. 背景
 
@@ -617,3 +617,26 @@ Workflow -> Step -> Subagent -> child Job -> parentJobId -> Jobs Panel detail
 8. 创建保持 producer-specific，创建后统一返回 jobId。
 9. TUI 只公开 `jobState/jobs`，不公开 `session.tasks`。
 10. Todo、Schedule、Workflow Step 和 Job 的语义互不重叠。
+
+## 19. 2026-08-21 最终审查澄清
+
+本节是当前验收口径，覆盖本文前面与分期不一致的句子；原文保留，用于说明设计演进，没有把已经发生的实现历史改写成另一种结果。
+
+### 19.1 Phase 1 与 Phase 2 的层级边界
+
+- Phase 1 的 Workflow 收口要求是：顶层只有统一 Jobs 列表；选择 Workflow Job 后能从 `JobReadResult.details` 展示 Steps；不再存在独立 `WorkflowRunsPanel`。
+- `parentJobId`、Workflow worker 的稳定 parent/metadata、以及在 Jobs Panel 中把 child Agent 折叠到 Workflow 下，仍属于 Phase 2。
+- 因此，第 9、15.3、15.4、16 节中任何把 child folding 或 `parentJobId` 当作 Phase 1 完成条件的表述，均由本节更正；Phase 1 不应伪造缺失的父子关系。
+
+### 19.2 Phase 1 最终错误与竞争语义
+
+- `/jobs`、`/agents`、`/background` 等 Jobs 辅助命令失败，只报告辅助错误，不得清除正在提交或等待中的主 Agent run。
+- `/stats` 与 `/doctor` 的 Jobs 查询失败必须显示 unavailable/error，不能把失败折叠成权威的 `0`。
+- `r` 同时刷新 Jobs 列表和当前选中详情；cancel/send 使用 AbortSignal 与同会话详情所有权 generation，迟到响应不能夺回较新的选择。列表对账所有权与详情所有权分离：同会话的已验证 cancel terminal receipt 仍须单调合并；send 没有状态 mutation receipt，完成或因较新选择被 abort 后只刷新列表对账，不重选旧 Job。
+- Job 快照合并是单调的：较旧快照不能覆盖较新快照，非终态不能把已终止快照改回 running/stopping。
+- `SessionTaskService.create` 在 manager spawn 成功后，对 store projection、bridge track/sync 或 event publish 的任何失败都必须先停止已知 manager task 再抛出原错误；cleanup 也失败时同时暴露 task ID、原错误和 cleanup 错误。
+- `POST /background-shells` 在 create 前保留 `SessionTaskError.status`；create 返回后 normalization/read 失败返回 500，并通过现有 Task stop 路径补偿，不能留下未报告的 live process。
+
+### 19.3 Phase 1 最终测试范围
+
+除原测试矩阵外，最终审查必须覆盖：忙碌 run 上的辅助 slash 失败、诊断 unavailable、`r` 的 panel/Hook 链路、cancel/send deferred race（B 详情保持且 A cancel terminal receipt 仍进入列表）、单调合并、SessionTaskService post-spawn projection compensation、background-shell missing-session/normalization compensation、游标收缩，以及孤立 UI-only Workflow 类型审计。

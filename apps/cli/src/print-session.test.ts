@@ -126,6 +126,7 @@ describe("runPrintSession", () => {
           id: "e2",
           seq: 2,
           type: "session.run.updated",
+          schemaVersion: 1,
           sessionId: "s1",
           createdAt: 2,
           payload: { run },
@@ -134,6 +135,7 @@ describe("runPrintSession", () => {
           id: "e3",
           seq: 3,
           type: "session.message.part.delta",
+          schemaVersion: 1,
           sessionId: "s1",
           createdAt: 3,
           payload: {
@@ -148,6 +150,7 @@ describe("runPrintSession", () => {
           id: "e4",
           seq: 4,
           type: "session.message.part.updated",
+          schemaVersion: 1,
           sessionId: "s1",
           createdAt: 4,
           payload: { part: { ...textPart, text: "hello from daemon", status: "completed" } },
@@ -156,6 +159,7 @@ describe("runPrintSession", () => {
           id: "e5",
           seq: 5,
           type: "session.run.updated",
+          schemaVersion: 1,
           sessionId: "s1",
           createdAt: 5,
           payload: { run: completedRun },
@@ -425,6 +429,7 @@ describe("runPrintSession", () => {
           id: "e1",
           seq: 1,
           type: "session.run.updated",
+          schemaVersion: 1,
           sessionId: "s1",
           createdAt: 3,
           payload: {
@@ -454,12 +459,15 @@ describe("runPrintSession", () => {
       model: "m",
       title: "print",
       metadata: {
-        permissionMode: "plan",
-        maxTurns: 7,
-        systemPrompt: "be brief",
-        allowedTools: ["Read", "Glob"],
-        effort: "low",
-        sessionMode: "coordinator",
+        runtime: {
+          model: "m",
+          permissionMode: "plan",
+          maxTurns: 7,
+          systemPrompt: "be brief",
+          allowedTools: ["Read", "Glob"],
+          effort: "low",
+          sessionMode: "coordinator",
+        },
       },
     });
   });

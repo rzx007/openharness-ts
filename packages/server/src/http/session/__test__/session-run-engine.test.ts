@@ -152,6 +152,40 @@ describe("SessionRunEngine", () => {
     expect(second.input).toBe(first.input);
   });
 
+  it("uses the atomic store admission before enqueuing queued work", async () => {
+    const store = createStore();
+    const runExecutor = { execute: vi.fn(async () => {}) };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    const admitted = await engine.admitPromptAndMaybeRun("s1", {
+      id: "atomic-input",
+      content: "hello",
+      traceId: "trace-atomic",
+    });
+
+    expect(store.admitPromptWithRun).toHaveBeenCalledWith({
+      prompt: expect.objectContaining({
+        id: "atomic-input",
+        sessionId: "s1",
+        delivery: "queue",
+        content: "hello",
+      }),
+      run: { metadata: { traceId: "trace-atomic" } },
+    });
+    expect(admitted).toMatchObject({
+      input: { id: "atomic-input" },
+      run: { inputId: "atomic-input" },
+      queue_state: "running",
+    });
+    await engine.waitForRuns([admitted.run!.id]);
+    expect(runExecutor.execute).toHaveBeenCalledOnce();
+  });
+
   it("queues a durable replacement run when a late steer is rejected", async () => {
     const store = createStore();
     const pending = deferred<void>();
@@ -242,9 +276,7 @@ function createStore() {
   const inputOwners = new Map<string, string>();
   let inputCount = 0;
   let runCount = 0;
-  return {
-    transaction: <T>(work: () => T) => work(),
-    admitPrompt: vi.fn((input) => {
+  const admitPrompt = vi.fn((input) => {
       const row = {
         ...input,
         id: input.id ?? `i${++inputCount}`,
@@ -253,13 +285,27 @@ function createStore() {
       };
       inputs.set(row.id, row);
       return row;
-    }),
-    getInput: vi.fn((id) => inputs.get(id)),
-    createRun: vi.fn((input) => {
+    });
+  const createRun = vi.fn((input) => {
       const row = { ...input, id: `r${++runCount}`, status: "pending", createdAt: 1, updatedAt: 1 };
       runs.set(row.id, row);
       return row;
+    });
+  return {
+    transaction: <T>(work: () => T) => work(),
+    admitPrompt,
+    admitPromptWithRun: vi.fn((input) => {
+      const admitted = admitPrompt({ ...input.prompt, delivery: "queue" });
+      const run = createRun({
+        id: input.run?.id,
+        sessionId: admitted.sessionId,
+        inputId: admitted.id,
+        metadata: input.run?.metadata,
+      });
+      return { input: admitted, run };
     }),
+    getInput: vi.fn((id) => inputs.get(id)),
+    createRun,
     getRun: vi.fn((id) => runs.get(id)),
     findRunByInput: vi.fn((id) => {
       const direct = [...runs.values()].find((run) => run.inputId === id);

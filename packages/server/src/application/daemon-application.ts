@@ -8,7 +8,12 @@ import {
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
 import type { SessionRecord } from "@openharness/services";
-import { getTaskManager, type SessionStore } from "@openharness/services";
+import {
+  closeExecutionRuntimes,
+  getChildAgentExecutionRegistry,
+  getDetachedProcessSupervisor,
+  type SessionStore,
+} from "@openharness/services";
 
 import {
   createDaemonAgentLoader,
@@ -19,12 +24,17 @@ import type { ObservabilityEvent } from "../shared/observability.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
   DAEMON_RESTART_PERMISSION_REASON,
+  DAEMON_RESTART_INPUT_REASON,
   DAEMON_RESTART_RUN_REASON,
   DAEMON_RESTART_TASK_REASON,
   normalizeTraceId,
 } from "../http/support.js";
 import { AgentPool } from "../http/agent/agent-pool.js";
 import { DaemonAgentEventProjector } from "../http/agent/daemon-agent-event-projector.js";
+import {
+  DAEMON_AGENT_PROJECTOR,
+  recoverProjectionSettlements,
+} from "../http/agent/projection-settlement-recovery.js";
 import { DaemonControlService } from "../http/control/daemon-control-service.js";
 import { DaemonOperationGate } from "../http/control/daemon-operation-gate.js";
 import { LiveChildAgentDirectory } from "../http/agent/live-child-agent-directory.js";
@@ -37,8 +47,8 @@ import { SessionMaintenanceService } from "../http/session/session-maintenance-s
 import { SessionQueryService } from "../http/session/session-query-service.js";
 import { SessionRunEngine } from "../http/session/session-run-engine.js";
 import { SessionRunExecutor } from "../http/session/session-run-executor.js";
-import { SessionTaskBridgeManager } from "../http/session/session-task-bridge.js";
-import { SessionTaskService } from "../http/session/session-task-service.js";
+import { SessionExecutionProjector } from "../http/session/session-execution-projector.js";
+import { BackgroundShellService } from "../http/session/background-shell-service.js";
 import { SessionTranscriptProjection } from "../http/session/transcript-projection.js";
 import { recoverInterruptedWorkflows } from "../http/session/workflow-recovery.js";
 
@@ -58,7 +68,7 @@ export interface DaemonApplicationOptions {
 /** Daemon-owned durable application graph, independent from HTTP routing and listening. */
 export class DaemonApplication {
   readonly permissions: StorePermissionBroker;
-  readonly tasks: SessionTaskService;
+  readonly backgroundShells: BackgroundShellService;
   readonly sessions: SessionApplicationService;
   readonly maintenance: SessionMaintenanceService;
   readonly queries: SessionQueryService;
@@ -67,7 +77,7 @@ export class DaemonApplication {
 
   private readonly events: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
-  private readonly taskBridges: SessionTaskBridgeManager;
+  private readonly executionProjector: SessionExecutionProjector;
   private readonly liveChildren = new LiveChildAgentDirectory();
   private readonly operationGate = new DaemonOperationGate();
   private readonly agentPool: AgentPool;
@@ -76,7 +86,9 @@ export class DaemonApplication {
 
   constructor(private readonly options: DaemonApplicationOptions) {
     const { store } = options;
+    recoverProjectionSettlements(store);
     store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
+    store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
     store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
     store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
     store.finalizeClosingSessions();
@@ -89,17 +101,17 @@ export class DaemonApplication {
       logger: options.log,
     });
     this.transcriptProjection = new SessionTranscriptProjection(store);
-    this.taskBridges = new SessionTaskBridgeManager({
+    this.executionProjector = new SessionExecutionProjector({
       store,
-      getTaskManager: (scope) => getTaskManager(scope),
+      getChildAgentExecutionRegistry: (scope) => getChildAgentExecutionRegistry(scope),
       events: this.events,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: options.log,
     });
-    this.tasks = new SessionTaskService({
+    this.backgroundShells = new BackgroundShellService({
       store,
-      bridgeManager: this.taskBridges,
-      getTaskManager: (scope) => getTaskManager(scope),
+      executionProjector: this.executionProjector,
+      getDetachedProcessSupervisor: (scope) => getDetachedProcessSupervisor(scope),
       events: this.events,
     });
 
@@ -130,12 +142,14 @@ export class DaemonApplication {
         trigger: async (id) => this.schedules.trigger(id),
         listRuns: async (taskId) => this.schedules.listRuns({ taskId }),
       },
-      createEventSink: (agent) => {
+      createEventSink: (agent, session) => {
         const projector = new DaemonAgentEventProjector({
+          projectorId: `${DAEMON_AGENT_PROJECTOR}:${agent.id}`,
+          rootSessionId: session.id,
           rootAgent: agent,
           store,
           transcriptProjection: this.transcriptProjection,
-          taskBridgeManager: this.taskBridges,
+          executionProjector: this.executionProjector,
           liveChildren: this.liveChildren,
           events: this.events,
           log: options.log,
@@ -366,6 +380,21 @@ export class DaemonApplication {
     }
     try {
       await this.control.shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await closeExecutionRuntimes();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      const settlementRecovery = recoverProjectionSettlements(this.options.store);
+      if (settlementRecovery.pending > 0) {
+        throw new Error(
+          `Daemon shutdown left ${settlementRecovery.pending} projection settlement(s) pending`,
+        );
+      }
     } catch (error) {
       failures.push(error);
     }

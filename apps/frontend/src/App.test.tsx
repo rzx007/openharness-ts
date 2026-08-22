@@ -6,7 +6,7 @@ import { ThemeProvider } from "./theme/ThemeContext";
 import { AppView } from "./routes/session/AppView";
 import type { AppViewProps } from "./routes/session/AppView";
 import type { TranscriptItem } from "./types";
-import { createWorkflowRunsPanelCallbacks } from "./App";
+import { createJobsPanelCallbacks, shouldOpenJobsPanel } from "./App";
 import type { TuiAction } from "./hooks/sessionController";
 
 // Shared base props for AppView tests
@@ -27,51 +27,40 @@ const baseProps: AppViewProps = {
   onToggleSidebar: () => {},
 };
 
-test("App maps only supported WorkflowRunsPanel callbacks to typed TUI actions", () => {
+test("App maps JobsPanel callbacks to typed TUI actions", () => {
   const actions: TuiAction[] = [];
-  const callbacks = createWorkflowRunsPanelCallbacks((action) => actions.push(action));
+  const callbacks = createJobsPanelCallbacks((action) => actions.push(action));
 
-  expect(Object.keys(callbacks)).toEqual([
-    "onRefresh",
-    "onSelectRun",
-    "onSetFilter",
-    "onClearFilters",
-    "onCancelRun",
-  ]);
   callbacks.onRefresh();
-  callbacks.onSelectRun("wf-2");
-  callbacks.onSetFilter({ taskId: "research" });
-  callbacks.onSetFilter({ status: undefined });
-  callbacks.onClearFilters();
-  callbacks.onCancelRun("wf-3");
+  callbacks.onSelect("agent-1");
+  callbacks.onCancel("agent-1");
 
   expect(actions).toEqual([
-    { type: "workflow_request", workflow_action: "refresh" },
+    { type: "job_request", job_action: "refresh" },
     {
-      type: "workflow_request",
-      workflow_action: "select_run",
-      workflow_run_id: "wf-2",
+      type: "job_request",
+      job_action: "select",
+      job_id: "agent-1",
     },
     {
-      type: "workflow_request",
-      workflow_action: "set_filter",
-      workflow_task_id: "research",
-      workflow_status: undefined,
-    },
-    {
-      type: "workflow_request",
-      workflow_action: "set_filter",
-      workflow_task_id: undefined,
-      workflow_status: "",
-    },
-    { type: "workflow_request", workflow_action: "clear_filters" },
-    {
-      type: "workflow_request",
-      workflow_action: "cancel",
-      workflow_run_id: "wf-3",
-      workflow_cancel_reason: "Cancelled from TUI",
+      type: "job_request",
+      job_action: "cancel",
+      job_id: "agent-1",
+      reason: "Cancelled from TUI",
     },
   ]);
+});
+
+test("App opens Jobs locally only for the bare panel commands", () => {
+  expect(["/jobs", "/workflow", "/workflows"].map(shouldOpenJobsPanel)).toEqual([
+    true,
+    true,
+    true,
+  ]);
+  expect(shouldOpenJobsPanel("  /jobs  ")).toBe(true);
+  expect(shouldOpenJobsPanel("/jobs show agent-1")).toBe(false);
+  expect(shouldOpenJobsPanel("/jobs cancel agent-1")).toBe(false);
+  expect(shouldOpenJobsPanel("/jobs list")).toBe(false);
 });
 
 // ─── Test 1: ready=false → shows Connecting text ─────────────────────────────

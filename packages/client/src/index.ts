@@ -20,6 +20,7 @@ export {
   hydrateState,
   selectSessionMessagesWithParts,
   syncEvents,
+  UnsupportedSessionEventSchemaVersionError,
 } from "./state/index.js";
 export {
   LOCAL_COMMAND_DETAILS,
@@ -53,9 +54,10 @@ export type {
   CommandKind,
   CommandSource,
   CompactSessionResponse,
+  CreateBackgroundShellInput,
+  CreateBackgroundShellResult,
   CreateScheduledTaskInput,
   CreateClientSessionInput,
-  CreateTaskInput,
   EditLatestClientPromptInput,
   EventSyncOptions,
   ForkClientSessionInput,
@@ -74,7 +76,6 @@ export type {
   ListSessionsOptions,
   ListProjectsOptions,
   ProjectRecord,
-  ListTasksOptions,
   McpServerStatus,
   MemoryEntryRecord,
   MemoryListResponse,
@@ -104,12 +105,12 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionRunAttemptRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
   SessionUsageResponse,
   StartDreamResponse,
   SyncEventUpdate,
-  TaskSnapshot,
   UpdateClientSessionInput,
 } from "./types/index.js";
 export type { SessionMessageWithParts } from "./state/index.js";

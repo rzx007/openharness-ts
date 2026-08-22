@@ -11,7 +11,6 @@ import { createServiceRoutes } from "../service.js";
 import { createSessionRoutes } from "../session.js";
 import { createSessionUtilityRoutes } from "../session-utility.js";
 import { createSystemRoutes } from "../system.js";
-import { createTaskRoutes } from "../task.js";
 import { SessionApplicationError } from "../../session/session-application-service.js";
 
 function runtimeSnapshot() {
@@ -22,9 +21,11 @@ function runtimeSnapshot() {
     runs: { total: 1, byStatus: { completed: 1 } },
     tasks: { total: 0, byStatus: {} },
     permissions: { total: 0, byStatus: {} },
+    projectionSettlements: { total: 0, pending: 0, byStatus: {} },
     sseClientCount: 0,
     warmAgentCount: 1,
     coordinator: { activeRunCount: 1, queuedRunCount: 3 },
+    metrics: { counters: {}, gauges: {}, histograms: {} },
   };
 }
 
@@ -38,6 +39,8 @@ function daemonControl(overrides: Record<string, unknown> = {}) {
     runtimeInspectionAvailable: true,
     sessionExists: () => true,
     inspectRuntimeHooks: async () => [],
+    inspectRun: () => undefined,
+    listProjectionDiagnostics: () => ({ settlements: [], pending: 0, diagnosticOk: true, includeContent: false }),
     ...overrides,
   };
 }
@@ -704,35 +707,6 @@ describe("session utility routes", () => {
 
     expect(response.status).toBe(200);
     expect(rewind).toHaveBeenCalledWith("s1", 2);
-  });
-});
-
-describe("task routes", () => {
-  it("forwards shell task creation to the task service", async () => {
-    const create = vi.fn(async () => ({
-      task: { id: "task-1", status: "running" },
-    }));
-    const app = createTaskRoutes({
-      tasks: {
-        list: vi.fn(),
-        create,
-        get: vi.fn(),
-        stop: vi.fn(),
-      },
-    });
-
-    const response = await app.request("/", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId: "s1", command: "pnpm test" }),
-    });
-
-    expect(response.status).toBe(201);
-    expect(create).toHaveBeenCalledWith({
-      cwd: undefined,
-      sessionId: "s1",
-      command: "pnpm test",
-    });
   });
 });
 

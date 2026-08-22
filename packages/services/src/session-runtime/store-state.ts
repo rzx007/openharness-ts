@@ -8,8 +8,10 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionRunAttemptRecord,
+  SessionExecutionRecord,
 } from "./types.js";
+import type { DurableEventRegistry } from "./event-registry.js";
 
 export interface SessionState {
   nextEventSeq: number;
@@ -19,7 +21,8 @@ export interface SessionState {
   parts: Record<string, SessionMessagePartRecord>;
   events: SessionEventRecord[];
   runs: Record<string, SessionRunRecord>;
-  tasks: Record<string, SessionTaskRecord>;
+  attempts: Record<string, SessionRunAttemptRecord>;
+  tasks: Record<string, SessionExecutionRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }
 
@@ -27,6 +30,8 @@ export interface SessionStoreOptions {
   path: string;
   deltaFlushIntervalMs?: number;
   deltaFlushBytes?: number;
+  /** Dedicated extension point for tests or plugins that own additional event contracts. */
+  eventRegistry?: DurableEventRegistry;
 }
 
 export interface StoreMutations {
@@ -35,6 +40,7 @@ export interface StoreMutations {
   messages: Set<string>;
   parts: Set<string>;
   runs: Set<string>;
+  attempts: Set<string>;
   tasks: Set<string>;
   permissions: Set<string>;
   events: Set<string>;
@@ -59,6 +65,7 @@ export function emptyState(): SessionState {
     parts: {},
     events: [],
     runs: {},
+    attempts: {},
     tasks: {},
     permissions: {},
   };
@@ -87,6 +94,7 @@ export function emptyMutations(): StoreMutations {
     messages: new Set(),
     parts: new Set(),
     runs: new Set(),
+    attempts: new Set(),
     tasks: new Set(),
     permissions: new Set(),
     events: new Set(),
@@ -102,6 +110,7 @@ export function cloneMutations(value: StoreMutations): StoreMutations {
     messages: new Set(value.messages),
     parts: new Set(value.parts),
     runs: new Set(value.runs),
+    attempts: new Set(value.attempts),
     tasks: new Set(value.tasks),
     permissions: new Set(value.permissions),
     events: new Set(value.events),

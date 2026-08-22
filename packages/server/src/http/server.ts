@@ -1,7 +1,11 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 
-import { getTaskManager, SessionStore } from "@openharness/services";
+import {
+  getChildAgentExecutionRegistry,
+  getDetachedProcessSupervisor,
+  SessionStore,
+} from "@openharness/services";
 import type { Settings } from "@openharness/core";
 
 import type { CommandCatalogProvider } from "../commands/commands.js";
@@ -38,6 +42,7 @@ import {
   type JsonRecord,
 } from "./support.js";
 import { createAuthRoutes } from "./routes/auth.js";
+import { createBackgroundShellRoutes } from "./routes/background-shell.js";
 import { createScheduleRoutes } from "./routes/schedules.js";
 import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
@@ -50,7 +55,6 @@ import { createServiceRoutes } from "./routes/service.js";
 import { createSessionRoutes } from "./routes/session.js";
 import { createSessionUtilityRoutes } from "./routes/session-utility.js";
 import { createSystemRoutes } from "./routes/system.js";
-import { createTaskRoutes } from "./routes/task.js";
 import { RequestTraceRegistry } from "./control/request-trace-registry.js";
 import {
   createTerminalRoutes,
@@ -157,8 +161,9 @@ export class OpenHarnessHttpServer {
     this.jobs = new DaemonJobService(
       this.store,
       this.terminals,
-      this.daemon.tasks,
-      (scope) => getTaskManager(scope),
+      this.daemon.backgroundShells,
+      (scope) => getDetachedProcessSupervisor(scope),
+      (scope) => getChildAgentExecutionRegistry(scope),
     );
     this.mountRoutes();
   }
@@ -348,9 +353,10 @@ export class OpenHarnessHttpServer {
       createScheduleRoutes({ schedules: this.daemon.schedules }),
     );
     this.app.route(
-      "/tasks",
-      createTaskRoutes({
-        tasks: this.daemon.tasks,
+      "/background-shells",
+      createBackgroundShellRoutes({
+        backgroundShells: this.daemon.backgroundShells,
+        jobs: this.jobs,
       }),
     );
     this.app.route("/jobs", createJobRoutes(this.jobs));

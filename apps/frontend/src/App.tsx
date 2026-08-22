@@ -13,45 +13,28 @@ import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "./keymap/permissionMode
 import { HISTORY_LIMIT, SIDEBAR_AUTO_OPEN_WIDTH } from "./ui/constants";
 import { BUILTIN_THEMES } from "./theme/builtinThemes";
 import { AppView } from "./routes/session/AppView";
-import { WorkflowRunsPanel, type WorkflowRunsPanelProps } from "./components/WorkflowRunsPanel";
+import { JobsPanel, type JobsPanelProps } from "./components/JobsPanel";
 import type { FrontendConfig } from "./types";
 import type { TuiAction } from "./hooks/sessionController";
 import { copySelectionToClipboard } from "./utils/selection";
 
-type WorkflowRunsPanelCallbacks = Omit<WorkflowRunsPanelProps, "state">;
+type JobsPanelCallbacks = Omit<JobsPanelProps, "state" | "detailState">;
 
-export function createWorkflowRunsPanelCallbacks(sendRequest: (action: TuiAction) => void): WorkflowRunsPanelCallbacks {
+export function createJobsPanelCallbacks(sendRequest: (action: TuiAction) => void): JobsPanelCallbacks {
   return {
-    onRefresh: () => sendRequest({ type: "workflow_request", workflow_action: "refresh" }),
-    onSelectRun: (runId) =>
-      sendRequest({
-        type: "workflow_request",
-        workflow_action: "select_run",
-        workflow_run_id: runId,
-      }),
-    onSetFilter: (filter) => {
-      const hasTaskId = Object.prototype.hasOwnProperty.call(filter, "taskId");
-      const hasStatus = Object.prototype.hasOwnProperty.call(filter, "status");
-      sendRequest({
-        type: "workflow_request",
-        workflow_action: "set_filter",
-        workflow_task_id: hasTaskId ? (filter.taskId ?? "") : undefined,
-        workflow_status: hasStatus ? (filter.status ?? "") : undefined,
-      });
-    },
-    onClearFilters: () =>
-      sendRequest({
-        type: "workflow_request",
-        workflow_action: "clear_filters",
-      }),
-    onCancelRun: (runId) =>
-      sendRequest({
-        type: "workflow_request",
-        workflow_action: "cancel",
-        workflow_run_id: runId,
-        workflow_cancel_reason: "Cancelled from TUI",
-      }),
+    onRefresh: () => sendRequest({ type: "job_request", job_action: "refresh" }),
+    onSelect: (jobId) => sendRequest({ type: "job_request", job_action: "select", job_id: jobId }),
+    onCancel: (jobId) => sendRequest({
+      type: "job_request",
+      job_action: "cancel",
+      job_id: jobId,
+      reason: "Cancelled from TUI",
+    }),
   };
+}
+
+export function shouldOpenJobsPanel(line: string): boolean {
+  return ["/jobs", "/workflow", "/workflows"].includes(line.trim());
 }
 
 // ─────────── AppInner — session + dialog wiring ─────────────
@@ -60,7 +43,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
   const renderer = useRenderer();
   const { width: terminalWidth } = useTerminalDimensions();
   const [sidebarOpen, setSidebarOpen] = useState(() => terminalWidth >= SIDEBAR_AUTO_OPEN_WIDTH);
-  const [workflowPanelOpen, setWorkflowPanelOpen] = useState(false);
+  const [jobsPanelOpen, setJobsPanelOpen] = useState(false);
   const dialog = useDialog();
   const { setThemeName, theme } = useTheme();
   const { toast } = useToast();
@@ -76,7 +59,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
   }, [renderer],);
   const onSessionError = useCallback((message: string) => toast(message, "error"), [toast]);
   const session = useServerSync(config, onSessionError);
-  const workflowPanelCallbacks = useMemo(() => createWorkflowRunsPanelCallbacks(session.sendRequest), [session.sendRequest]);
+  const jobsPanelCallbacks = useMemo(() => createJobsPanelCallbacks(session.sendRequest), [session.sendRequest]);
   const activeSessionId = typeof session.status.session_id === "string"
     ? session.status.session_id
     : undefined;
@@ -86,7 +69,7 @@ function AppInner({ config }: { config: FrontendConfig }) {
     const previousSessionId = previousSessionIdRef.current;
     if (previousSessionId && previousSessionId !== activeSessionId) {
       dialog.closeAll();
-      setWorkflowPanelOpen(false);
+      setJobsPanelOpen(false);
       setDraft("");
     }
     previousSessionIdRef.current = activeSessionId;
@@ -252,12 +235,9 @@ function AppInner({ config }: { config: FrontendConfig }) {
         return true;
       }
 
-      if (line.trim() === "/workflows" || line.trim() === "/workflow") {
-        setWorkflowPanelOpen(true);
-        session.sendRequest({
-          type: "workflow_request",
-          workflow_action: "open",
-        });
+      if (shouldOpenJobsPanel(line)) {
+        setJobsPanelOpen(true);
+        session.sendRequest({ type: "job_request", job_action: "open" });
         return true;
       }
 
@@ -358,24 +338,26 @@ function AppInner({ config }: { config: FrontendConfig }) {
             run: () => setSidebarOpen((v) => !v),
           },
           {
-            id: "app.workflow",
-            title: "Workflow Runs",
+            id: "app.jobs",
+            title: "Jobs",
             run: () => {
-              setWorkflowPanelOpen(true);
-              session.sendRequest({
-                type: "workflow_request",
-                workflow_action: "open",
-              });
+              setJobsPanelOpen(true);
+              session.sendRequest({ type: "job_request", job_action: "open" });
             },
           },
           {
+            id: "/jobs",
+            title: "Open Jobs panel",
+            run: () => handleCommand("/jobs"),
+          },
+          {
             id: "/workflow",
-            title: "Open workflow runs panel",
+            title: "Open Jobs panel",
             run: () => handleCommand("/workflow"),
           },
           {
             id: "/workflows",
-            title: "Open workflow runs panel",
+            title: "Open Jobs panel",
             run: () => handleCommand("/workflows"),
           },
           {
@@ -414,8 +396,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
       if (dialog.isOpen) return;
       openCommandPalette();
     }
-    if (key.name === "escape" && workflowPanelOpen) {
-      setWorkflowPanelOpen(false);
+    if (key.name === "escape" && jobsPanelOpen) {
+      setJobsPanelOpen(false);
       return;
     }
     if (key.ctrl && key.name === "b") {
@@ -426,8 +408,8 @@ function AppInner({ config }: { config: FrontendConfig }) {
     }
   });
 
-  const workflowPanelWidth = Math.min(78, Math.max(54, Math.floor(terminalWidth * 0.7)));
-  const workflowPanelLeft = Math.max(0, Math.floor((terminalWidth - workflowPanelWidth) / 2));
+  const jobsPanelWidth = Math.min(78, Math.max(54, Math.floor(terminalWidth * 0.7)));
+  const jobsPanelLeft = Math.max(0, Math.floor((terminalWidth - jobsPanelWidth) / 2));
 
   return (
     <>
@@ -443,16 +425,20 @@ function AppInner({ config }: { config: FrontendConfig }) {
         slashCommands={registry.slashCommands()}
         onSubmit={onSubmit}
         onCycleMode={onCycleMode}
-        dialogOpen={dialog.isOpen || workflowPanelOpen}
+        dialogOpen={dialog.isOpen || jobsPanelOpen}
         draft={draft}
         onDraftChange={setDraft}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         escHint={escHint}
       />
-      {workflowPanelOpen ? (
-        <box position="absolute" top={2} left={workflowPanelLeft} width={workflowPanelWidth} zIndex={90} border={true} borderColor={theme.colors.accent} backgroundColor={theme.colors.backgroundPanel} padding={1} flexDirection="column">
-          <WorkflowRunsPanel state={session.workflowState} {...workflowPanelCallbacks} />
+      {jobsPanelOpen ? (
+        <box position="absolute" top={2} left={jobsPanelLeft} width={jobsPanelWidth} zIndex={90} border={true} borderColor={theme.colors.accent} backgroundColor={theme.colors.backgroundPanel} padding={1} flexDirection="column">
+          <JobsPanel
+            state={session.jobState}
+            detailState={session.jobDetailState}
+            {...jobsPanelCallbacks}
+          />
         </box>
       ) : null}
     </>

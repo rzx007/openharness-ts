@@ -493,7 +493,7 @@ V1 内存调度核心
 
 运行时细节（工具入口、调度循环、持久化路径、信封格式）见 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md)。
 
-截至目前，已经落地到 V14.2：
+以下 V0-V14.2 条目记录能力演进；其中旧 TUI Workflow Runs 面板及其 `f` follow-up 操作已经被统一 Jobs Panel 收口取代。当前 TUI 只通过 Jobs list/read/cancel 管理 Workflow Job，并在选中详情中展示 Steps；timeline、history、reconcile 和 follow-up spec 生成继续由 Workflow 工具或 `ohs workflow` CLI 提供。
 
 - V0：已完成。边界和路线图写在本文档里。
 - V1：已完成。`@openharness/coordinator` 提供纯内存 `WorkflowSpec`、DAG 校验、三种 mode、并发上限、失败策略、retry 和结构化结果。
@@ -533,11 +533,11 @@ V1 内存调度核心
 - V12.2：已完成基础版。新增 `cancelPersistentWorkflow` 和 `Workflow action: "cancel"`，会停止 backing framework child 或 external task，并把 running task 标记为 killed、未启动 task 标记为 skipped 后持久化 terminal snapshot。
 - V12.3：已完成基础版。内置 workflow templates 增加 `version` 字段，模板输出可明确说明模板版本和含义。
 - V13.1：已完成基础版。新增普通 CLI 管理面 `ohs workflow list/status/validate/template/reconcile/cancel`，对接同一份 `.openharness/workflows` 持久化数据，输出 JSON，方便脚本和后续 TUI/Web 复用。完整用法见 [`workflow-cli.md`](./workflow-cli.md)。
-- V13.2：已完成基础版。TUI 新增 Workflow Runs 管理面板，接入同一份 workflow JSON 状态，支持 run 列表、详情、timeline task/event/status filter、reconcile action 选择和 running workflow 取消。
+- V13.2（历史、已被收口）：当时完成过独立 TUI Workflow Runs 管理面板，读取同一份 workflow JSON 状态。该面板现已删除并由统一 Jobs Panel 取代；timeline/filter/reconcile 等 Workflow 领域查询保留在 Workflow 工具和 CLI。
 - V13.3：已完成基础版。持久化 `Workflow action: "run"` 默认 detached 提交，快速返回 running snapshot 和 runId，后台继续调度 worker；不再给 worker wait 隐式套 300s 默认超时，只有显式 `timeoutSeconds` / task timeout 才会判超时。
 - V13.4：已完成基础版。修复 subprocess task-worker 一轮完成后 stdin pipe 未释放导致 child process 不退出、TaskManager task 长时间停留在 running、Workflow awaitTask 卡住的问题；worker 结束时会释放 stdin 并关闭 runtime cleanup。
-- V14.1：已完成基础版。TUI `/workflow` 面板支持 reconciliation follow-up 一键提交执行：数字键选择 action，`f` 将选中 action 转成 follow-up workflow spec，并以 detached 方式提交新的持久化 run，面板自动切到新 run。
-- V14.2：已完成。模型侧 Workflow 生命周期控制硬切到 Jobs：detached run 返回 `jobId`，普通状态/列表/取消使用 `JobRead/JobList/JobCancel`；Workflow 工具只保留 run/resume/validate/template/reconcile 以及明确的 timeline/history 领域查询。CLI/TUI 人工管理面保持不变。
+- V14.1（历史、已被收口）：独立 TUI `/workflow` 面板曾支持数字键选择 reconciliation action，并用 `f` 提交 detached follow-up run；该面板和快捷键现已删除。当前 follow-up spec 由 Workflow `action: "reconcile"` 或 `ohs workflow reconcile` 生成，后续执行由调用方显式提交。
+- V14.2：已完成。模型侧 Workflow 生命周期控制硬切到 Jobs：detached run 返回 `jobId`，普通状态/列表/取消使用 `JobRead/JobList/JobCancel`；Workflow 工具只保留 run/resume/validate/template/reconcile 以及明确的 timeline/history 领域查询。CLI 继续提供领域管理命令；TUI `/workflow(s)` 现在只是统一 Jobs Panel 的别名，不再恢复独立管理面。
 
 下一步建议：
 

@@ -7,8 +7,6 @@ import {
   readSessionRuntimeConfig,
   syncEvents,
   type CommandCatalogEntry,
-  type JobReadResult,
-  type JobSnapshot,
   type McpServerStatus,
   type ModelProviderInfo,
   type OpenHarnessClientState,
@@ -18,10 +16,20 @@ import {
   type SessionBucket,
   type SessionRecord,
   type SyncEventUpdate,
-  type TaskSnapshot,
 } from "@openharness/client";
 
-import type { FrontendConfig, McpServerSnapshot, TranscriptItem, WorkflowTuiState } from "../types";
+import type { FrontendConfig, McpServerSnapshot, TranscriptItem } from "../types";
+import {
+  beginJobList,
+  mergeJobSnapshot,
+  rejectJobList,
+  resolveJobList,
+  validateJobReadResult,
+  validateJobSnapshot,
+  validateJobSnapshots,
+  type JobDetailRemoteState,
+  type JobRemoteState,
+} from "../jobs/job-remote-state";
 import type { TuiAction, TuiSessionController } from "./sessionController";
 import { bucketToTranscript, splitStreamingAssistant } from "./transcript";
 import {
@@ -30,6 +38,14 @@ import {
   mergeCommandDetails,
   parseSlashLine
 } from "./sessionSlashCommands";
+
+const JOBS_AUXILIARY_SLASH_COMMANDS = new Set([
+  "/agents",
+  "/background",
+  "/doctor",
+  "/jobs",
+  "/stats",
+]);
 
 type DisplayRequest = NonNullable<TuiSessionController["displayRequest"]>;
 type PresentationCacheEntry = {
@@ -79,10 +95,6 @@ function sessionRuntimeMetadata(input: {
   return patchSessionRuntimeMetadata({}, runtime);
 }
 
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
 function mcpServerSnapshot(server: McpServerStatus): McpServerSnapshot {
   return {
     name: server.name,
@@ -90,107 +102,6 @@ function mcpServerSnapshot(server: McpServerStatus): McpServerSnapshot {
     ...(server.error || server.command ? { detail: server.error ?? server.command } : {}),
     tool_count: server.toolCount,
     resource_count: server.resourceCount,
-  };
-}
-
-function stringValues(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function workflowStateFromJobs(input: { jobs: JobSnapshot[]; selectedRunId?: string; details?: JobReadResult; filters?: WorkflowTuiState["filters"]; notice?: string; error?: string }): WorkflowTuiState {
-  const selectedRunId = input.selectedRunId && input.jobs.some((job) => job.id === input.selectedRunId) ? input.selectedRunId : input.jobs[0]?.id;
-  const details = input.details?.details ?? {};
-  const plan = isRecord(details.plan) ? details.plan : {};
-  const results = isRecord(details.results) ? details.results : {};
-  const blockedTasks = isRecord(details.blockedTasks) ? details.blockedTasks : {};
-  const runningTasks = isRecord(details.runningTasks) ? details.runningTasks : {};
-  const pendingTaskIds = new Set(stringValues(details.pendingTaskIds));
-  const runningTaskIds = new Set(stringValues(details.runningTaskIds));
-  const blockedTaskIds = new Set(stringValues(details.blockedTaskIds));
-  const taskRecords = Array.isArray(plan.tasks) ? plan.tasks.filter(isRecord) : [];
-  const allTasks = taskRecords.map((task) => {
-    const taskId = stringValue(task.id) ?? "unknown";
-    const result = isRecord(results[taskId]) ? results[taskId] : undefined;
-    const running = isRecord(runningTasks[taskId]) ? runningTasks[taskId] : undefined;
-    const blocked = isRecord(blockedTasks[taskId]) ? blockedTasks[taskId] : undefined;
-    const status = stringValue(result?.status) ?? (blockedTaskIds.has(taskId) || blocked ? "blocked" : undefined) ?? (runningTaskIds.has(taskId) || running ? "running" : undefined) ?? (pendingTaskIds.has(taskId) ? "pending" : "pending");
-    return {
-      taskId,
-      status,
-      summary: stringValue(result?.summary) ?? stringValue(running?.summary) ?? stringValue(blocked?.reason) ?? stringValue(task.description),
-      dependencies: stringValues(task.dependsOn),
-      taskManagerTaskId: stringValue(task.taskManagerTaskId),
-    };
-  });
-  const filters = input.filters ?? {};
-  const tasks = allTasks.filter((task) => (!filters.taskId || task.taskId === filters.taskId) && (!filters.status || task.status === filters.status));
-  const selectedJob = input.jobs.find((job) => job.id === selectedRunId);
-  const reconciliationPlan = isRecord(details.reconciliationPlan) ? details.reconciliationPlan : {};
-  const reconciliationActions = Array.isArray(reconciliationPlan.actions)
-    ? reconciliationPlan.actions.filter(isRecord).flatMap((action) => {
-        const actionId = stringValue(action.actionId);
-        const taskId = stringValue(action.taskId);
-        if (!actionId || !taskId) return [];
-        return [
-          {
-            actionId,
-            issueIds: stringValues(action.issueIds),
-            taskId,
-            description: stringValue(action.description) ?? actionId,
-            prompt: stringValue(action.prompt) ?? "",
-            writeScope: stringValues(action.writeScope),
-            dependsOn: stringValues(action.dependsOn),
-          },
-        ];
-      })
-    : [];
-  const needed = details.needsReconciliation === true || reconciliationActions.length > 0;
-  const statuses = [...new Set([...input.jobs.map((job) => job.status), ...tasks.map((task) => task.status)])];
-  return {
-    runs: input.jobs.map((job) => {
-      const metadata = job.metadata ?? {};
-      const totalTasks = numberValue(metadata.totalTasks) ?? tasks.length;
-      return {
-        runId: job.id,
-        status: job.status,
-        summary: job.label || job.detail || job.id,
-        mode: stringValue(metadata.mode) ?? stringValue(plan.mode) ?? "workflow",
-        totalTasks,
-        completedTasks: numberValue(metadata.completedTasks) ?? allTasks.filter((task) => task.status === "completed").length,
-        failedTasks: numberValue(metadata.failedTasks) ?? allTasks.filter((task) => task.status === "failed").length,
-        pendingTasks: numberValue(metadata.pendingTasks) ?? allTasks.filter((task) => task.status === "pending").length,
-        runningTasks: numberValue(metadata.runningTasks) ?? allTasks.filter((task) => task.status === "running").length,
-        blockedTasks: numberValue(metadata.blockedTasks) ?? allTasks.filter((task) => task.status === "blocked").length,
-        needsReconciliation: job.id === selectedRunId ? needed : false,
-        budgetPolicyPreset: stringValue(metadata.budgetPolicyPreset),
-        createdAt: job.startedAt,
-        updatedAt: job.updatedAt,
-      };
-    }),
-    selectedRunId,
-    snapshot: input.details?.details ?? (selectedJob ? { ...selectedJob } : undefined),
-    tasks,
-    timeline: [],
-    filters,
-    available: {
-      taskIds: allTasks.map((task) => task.taskId),
-      statuses,
-    },
-    ...(needed
-      ? {
-          reconciliation: {
-            needed,
-            summary: stringValue(reconciliationPlan.summary) ?? "Workflow reconciliation is required.",
-            actions: reconciliationActions,
-          },
-        }
-      : {}),
-    notice: input.notice,
-    error: input.error,
   };
 }
 
@@ -322,8 +233,8 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
   const [globalSystemItems, setGlobalSystemItems] = useState<TranscriptItem[]>([]);
   const [systemItemsBySession, setSystemItemsBySession] = useState<Record<string, TranscriptItem[]>>({});
   const [commandCatalog, setCommandCatalog] = useState<CommandCatalogEntry[]>([]);
-  const [workflowState, setWorkflowState] = useState<WorkflowTuiState | null>(null);
-  const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
+  const [jobState, setJobState] = useState<JobRemoteState>({ status: "idle", jobs: [] });
+  const [jobDetailState, setJobDetailState] = useState<JobDetailRemoteState>({ status: "idle" });
   const [mcpServers, setMcpServers] = useState<McpServerSnapshot[]>([]);
   const clientRef = useRef<OpenHarnessClient | null>(null);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
@@ -346,9 +257,16 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
   const pendingClientStateRef = useRef<OpenHarnessClientState | null>(null);
   const pendingClientStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shownPermissionIdRef = useRef<string | undefined>(undefined);
-  const workflowStateRef = useRef<WorkflowTuiState | null>(null);
-  const workflowGenerationRef = useRef(0);
   const auxiliaryGenerationRef = useRef(0);
+  const jobStateRef = useRef(jobState);
+  const jobDetailStateRef = useRef(jobDetailState);
+  const jobGenerationRef = useRef(0);
+  const jobDetailGenerationRef = useRef(0);
+  const jobsAbortRef = useRef<AbortController | null>(null);
+  const jobDetailAbortRef = useRef<AbortController | null>(null);
+  const jobControlAbortRef = useRef<AbortController | null>(null);
+  const jobControlGenerationRef = useRef(0);
+  const mcpAbortRef = useRef<AbortController | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
@@ -368,6 +286,14 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     displayRequestRef.current = displayRequest;
   }, [displayRequest]);
 
+  useEffect(() => {
+    jobStateRef.current = jobState;
+  }, [jobState]);
+
+  useEffect(() => {
+    jobDetailStateRef.current = jobDetailState;
+  }, [jobDetailState]);
+
   const clearDisplayRequest = useCallback(() => {
     displayRequestRef.current = null;
     setDisplayRequest(null);
@@ -379,18 +305,25 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     setDisplayRequest(request);
   }, []);
 
-  const setWorkflowStateCurrent = useCallback((state: WorkflowTuiState | null): void => {
-    workflowStateRef.current = state;
-    setWorkflowState(state);
-  }, []);
-
-  const invalidateWorkflowRequests = useCallback((): void => {
-    workflowGenerationRef.current += 1;
-  }, []);
-
   const clearAuxiliaryState = useCallback((): void => {
     auxiliaryGenerationRef.current += 1;
-    setTasks([]);
+    jobGenerationRef.current += 1;
+    jobDetailGenerationRef.current += 1;
+    jobControlGenerationRef.current += 1;
+    mcpAbortRef.current?.abort();
+    jobsAbortRef.current?.abort();
+    jobDetailAbortRef.current?.abort();
+    jobControlAbortRef.current?.abort();
+    mcpAbortRef.current = null;
+    jobsAbortRef.current = null;
+    jobDetailAbortRef.current = null;
+    jobControlAbortRef.current = null;
+    const emptyJobState: JobRemoteState = { status: "idle", jobs: [] };
+    const emptyJobDetailState: JobDetailRemoteState = { status: "idle" };
+    jobStateRef.current = emptyJobState;
+    jobDetailStateRef.current = emptyJobDetailState;
+    setJobState(emptyJobState);
+    setJobDetailState(emptyJobDetailState);
     setMcpServers([]);
   }, []);
 
@@ -431,6 +364,135 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     },
     [pushSystem],
   );
+
+  const reportAuxiliaryError = useCallback((scope: string, error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    onErrorRef.current?.(`${scope}: ${message}`);
+  }, []);
+
+  const refreshJobs = useCallback(async (): Promise<void> => {
+    const client = clientRef.current;
+    const sessionId = activeSessionIdRef.current;
+    const generation = ++jobGenerationRef.current;
+    if (!client || !sessionId) {
+      const idle: JobRemoteState = { status: "idle", jobs: [] };
+      jobStateRef.current = idle;
+      setJobState(idle);
+      return;
+    }
+
+    jobsAbortRef.current?.abort();
+    const controller = new AbortController();
+    jobsAbortRef.current = controller;
+    setJobState((current) => {
+      const next = beginJobList(current);
+      jobStateRef.current = next;
+      return next;
+    });
+
+    try {
+      const response = await client.listJobs({
+        sessionId,
+        includeFinished: true,
+        limit: 100,
+        signal: controller.signal,
+      });
+      if (activeSessionIdRef.current !== sessionId || jobGenerationRef.current !== generation) return;
+      const validated = validateJobSnapshots(response, sessionId);
+      if (validated.error) {
+        const validationError = validated.error;
+        const now = Date.now();
+        setJobState((current) => {
+          const next: JobRemoteState = validated.jobs.length > 0
+            ? {
+                ...resolveJobList(validated.jobs, now, current),
+                status: "error",
+                error: validationError,
+              }
+            : rejectJobList(current, validationError);
+          jobStateRef.current = next;
+          return next;
+        });
+        reportAuxiliaryError("Jobs", validationError);
+      } else {
+        const next = resolveJobList(validated.jobs, Date.now(), jobStateRef.current);
+        jobStateRef.current = next;
+        setJobState(next);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (activeSessionIdRef.current !== sessionId || jobGenerationRef.current !== generation) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setJobState((current) => {
+        const next = rejectJobList(current, message);
+        jobStateRef.current = next;
+        return next;
+      });
+      reportAuxiliaryError("Jobs", message);
+    } finally {
+      if (jobsAbortRef.current === controller) jobsAbortRef.current = null;
+    }
+  }, [reportAuxiliaryError]);
+
+  const loadJobDetail = useCallback(async (
+    client: OpenHarnessClient,
+    sessionId: string,
+    jobId: string,
+  ): Promise<void> => {
+    const generation = ++jobDetailGenerationRef.current;
+    jobDetailAbortRef.current?.abort();
+    const controller = new AbortController();
+    jobDetailAbortRef.current = controller;
+    const current = jobDetailStateRef.current;
+    const previous = current.status !== "idle" && current.jobId === jobId
+      ? current.status === "ready"
+        ? current.result
+        : current.previous
+      : undefined;
+    const loading: JobDetailRemoteState = {
+      status: "loading",
+      jobId,
+      ...(previous ? { previous } : {}),
+    };
+    jobDetailStateRef.current = loading;
+    setJobDetailState(loading);
+
+    try {
+      const response = await client.readJob(jobId, {
+        sessionId,
+        signal: controller.signal,
+      });
+      if (activeSessionIdRef.current !== sessionId || jobDetailGenerationRef.current !== generation) return;
+      const validated = validateJobReadResult(response, sessionId, jobId);
+      if (!validated.result) {
+        throw new Error(validated.error ?? `Job read response for "${jobId}" has invalid fields.`);
+      }
+      const result = validated.result;
+      const readyState: JobDetailRemoteState = {
+        status: "ready",
+        jobId,
+        result,
+        refreshedAt: Date.now(),
+      };
+      jobDetailStateRef.current = readyState;
+      setJobDetailState(readyState);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (activeSessionIdRef.current !== sessionId || jobDetailGenerationRef.current !== generation) return;
+      const message = error instanceof Error ? error.message : String(error);
+      const errorState: JobDetailRemoteState = {
+        status: "error",
+        jobId,
+        error: message,
+        ...(previous ? { previous } : {}),
+      };
+      jobDetailStateRef.current = errorState;
+      setJobDetailState(errorState);
+      reportAuxiliaryError("Jobs", message);
+    } finally {
+      if (jobDetailAbortRef.current === controller) jobDetailAbortRef.current = null;
+    }
+  }, [reportAuxiliaryError]);
 
   const loadModels = useCallback(async (): Promise<ModelProviderInfo[]> => {
     const client = clientRef.current;
@@ -514,8 +576,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     const runtime = readSessionRuntimeConfig(session, defaultRuntimeRef.current);
     activeSessionIdRef.current = session.id;
     setActiveSessionId(session.id);
-      invalidateWorkflowRequests();
-      setWorkflowStateCurrent(null);
       clearAuxiliaryState();
     setStatus((current) => ({
       ...current,
@@ -528,7 +588,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       session_mode: statusSessionMode(runtime.sessionMode),
     }));
     },
-    [clearAuxiliaryState, invalidateWorkflowRequests, setWorkflowStateCurrent],
+    [clearAuxiliaryState],
   );
 
   const returnToHome = useCallback(
@@ -536,14 +596,12 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     pendingNewSessionTitleRef.current = title?.trim() || undefined;
     activeSessionIdRef.current = undefined;
     setActiveSessionId(undefined);
-      invalidateWorkflowRequests();
     clearAuxiliaryState();
     setLocalBusy(false);
     setSubmittedRun(null);
     setSelectRequest(null);
     clearDisplayRequest();
     setModal(null);
-      setWorkflowStateCurrent(null);
     setStatus((current) => {
       const next = { ...current };
       delete next.session_id;
@@ -554,7 +612,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       return next;
     });
     },
-    [clearAuxiliaryState, clearDisplayRequest, invalidateWorkflowRequests, setWorkflowStateCurrent],
+    [clearAuxiliaryState, clearDisplayRequest],
   );
 
   useEffect(() => {
@@ -655,30 +713,43 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     const sessionId = activeSessionId;
     if (!client || !sessionId) return;
     const generation = ++auxiliaryGenerationRef.current;
+    mcpAbortRef.current?.abort();
+    const controller = new AbortController();
+    mcpAbortRef.current = controller;
     const isCurrent = () => activeSessionIdRef.current === sessionId && auxiliaryGenerationRef.current === generation;
 
-    void client.getSessionMcp(sessionId)
+    void client.getSessionMcp(sessionId, { signal: controller.signal })
       .then((servers) => {
         if (!isCurrent()) return;
         setMcpServers(Array.isArray(servers) ? servers.map(mcpServerSnapshot) : []);
       })
       .catch((error) => {
+        if (controller.signal.aborted) return;
         if (!isCurrent()) return;
         setMcpServers([]);
-        reportError(error instanceof Error ? error.message : String(error));
+        reportAuxiliaryError("MCP", error);
+      })
+      .finally(() => {
+        if (mcpAbortRef.current === controller) mcpAbortRef.current = null;
       });
 
-    void client.listTasks({ sessionId })
-      .then((sessionTasks) => {
-        if (!isCurrent()) return;
-        setTasks(Array.isArray(sessionTasks) ? sessionTasks : []);
-      })
-      .catch((error) => {
-        if (!isCurrent()) return;
-        setTasks([]);
-        reportError(error instanceof Error ? error.message : String(error));
-      });
-  }, [activeSessionId, reportError]);
+    return () => {
+      controller.abort();
+    };
+  }, [activeSessionId, reportAuxiliaryError]);
+
+  useEffect(() => {
+    jobDetailGenerationRef.current += 1;
+    jobDetailAbortRef.current?.abort();
+    jobDetailAbortRef.current = null;
+    const idle: JobDetailRemoteState = { status: "idle" };
+    jobDetailStateRef.current = idle;
+    setJobDetailState(idle);
+    void refreshJobs();
+    return () => {
+      jobsAbortRef.current?.abort();
+    };
+  }, [activeSessionId, refreshJobs]);
 
   useEffect(() => {
     const pending = firstPendingPermission(clientState, activeSessionId);
@@ -697,12 +768,13 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     if (!submittedRun) return;
     const run = clientState.buckets[submittedRun.sessionId]?.runs[submittedRun.runId];
     if (!run || run.status === "pending" || run.status === "running") return;
+    void refreshJobs();
     if (run.status === "failed") {
       reportError(run.error ?? "Agent run failed");
       return;
     }
     setSubmittedRun(null);
-  }, [clientState, reportError, submittedRun]);
+  }, [clientState, refreshJobs, reportError, submittedRun]);
 
   const createAndSwitchSession = useCallback(
     async (title?: string): Promise<SessionRecord | undefined> => {
@@ -756,64 +828,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       setSubmittedRun(response.run ? { sessionId: session.id, runId: response.run.id } : null);
     })().catch((error) => reportError(error instanceof Error ? error.message : String(error)));
   }, [activeSessionId, clientState.sessions, config.initial_prompt, createAndSwitchSession, ready, reportError]);
-
-  const refreshWorkflowState = useCallback(
-    async (
-      input: {
-        selectedRunId?: string;
-        filters?: WorkflowTuiState["filters"];
-        notice?: string;
-      } = {},
-    ): Promise<void> => {
-      const client = clientRef.current;
-      const sessionId = activeSessionIdRef.current;
-      const generation = ++workflowGenerationRef.current;
-      const isCurrent = () => activeSessionIdRef.current === sessionId && workflowGenerationRef.current === generation;
-      if (!client || !sessionId) {
-        if (!isCurrent()) return;
-        setWorkflowStateCurrent(
-          workflowStateFromJobs({
-            jobs: [],
-            filters: input.filters ?? workflowStateRef.current?.filters,
-            error: "Open a session before viewing workflow runs.",
-          }),
-        );
-        return;
-      }
-      try {
-        const jobs = await client.listJobs({
-          sessionId,
-          kinds: ["workflow"],
-          includeFinished: true,
-        });
-        const selectedRunId = input.selectedRunId ?? workflowStateRef.current?.selectedRunId ?? jobs[0]?.id;
-        const selected = selectedRunId ? jobs.find((job) => job.id === selectedRunId) : undefined;
-        const details = selected ? await client.readJob(selected.id, { sessionId }) : undefined;
-        if (!isCurrent()) return;
-        setWorkflowStateCurrent(
-          workflowStateFromJobs({
-            jobs,
-            selectedRunId,
-            details,
-            filters: input.filters ?? workflowStateRef.current?.filters,
-            notice: input.notice,
-          }),
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!isCurrent()) return;
-        setWorkflowStateCurrent(
-          workflowStateFromJobs({
-            jobs: [],
-            filters: input.filters ?? workflowStateRef.current?.filters,
-            error: `Unable to load workflow runs: ${message}`,
-          }),
-        );
-        reportError(message);
-      }
-    },
-    [reportError, setWorkflowStateCurrent],
-  );
 
   const sendRequest = useCallback(
     (action: TuiAction): void => {
@@ -923,20 +937,35 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
           return;
         }
 
-        const slashResult = await dispatchSessionSlashCommand(slash, {
-          client,
-          sessionId,
-          pushSystem,
-          presentSystem: (title, content) => showDisplayRequest({ title, content }),
-          statusRef,
-          commandCatalogRef,
-          clientState,
-          localBusy,
-          cacheFirstRead,
-          daemon,
-          setStatus: setStatusAndDefault,
-        });
-        if (slashResult === "handled" || slashResult === "local_ui_ignored") return;
+        let slashResult: Awaited<ReturnType<typeof dispatchSessionSlashCommand>>;
+        try {
+          slashResult = await dispatchSessionSlashCommand(slash, {
+            client,
+            sessionId,
+            pushSystem,
+            presentSystem: (title, content) => showDisplayRequest({ title, content }),
+            statusRef,
+            commandCatalogRef,
+            clientState,
+            localBusy,
+            cacheFirstRead,
+            daemon,
+            setStatus: setStatusAndDefault,
+          });
+        } catch (error) {
+          if (slash && JOBS_AUXILIARY_SLASH_COMMANDS.has(slash.name)) {
+            reportAuxiliaryError("Jobs", error);
+            return;
+          }
+          throw error;
+        }
+        if (slashResult === "handled") {
+          if (slash?.name === "/background" && slash.args.trim() && sessionId) {
+            await refreshJobs();
+          }
+          return;
+        }
+        if (slashResult === "local_ui_ignored") return;
 
         if (slash) {
           const catalogEntry = commandCatalogRef.current.find((entry) => entry.name === slash.name);
@@ -1098,67 +1127,125 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
             return;
           }
 
-          case "workflow_request": {
+          case "job_request": {
             if (!client) {
-              const message = "The daemon client is not connected.";
-              setWorkflowStateCurrent(workflowStateFromJobs({ jobs: [], error: message }));
-              reportError(message);
+              reportAuxiliaryError("Jobs", "The daemon client is not connected.");
               return;
             }
-            const workflowAction = action.workflow_action;
-            const current = workflowStateRef.current;
-            switch (workflowAction) {
-              case "open":
-              case "refresh":
-                await refreshWorkflowState();
-                return;
-              case "select_run":
-                await refreshWorkflowState({
-                  selectedRunId: action.workflow_run_id,
-                });
-                return;
-              case "set_filter": {
-                const filters = {
-                  ...current?.filters,
-                  ...(action.workflow_task_id !== undefined ? { taskId: action.workflow_task_id || undefined } : {}),
-                  ...(action.workflow_status !== undefined ? { status: action.workflow_status || undefined } : {}),
-                };
-                await refreshWorkflowState({
-                  selectedRunId: current?.selectedRunId,
-                  filters,
-                });
-                return;
+            const currentSessionId = activeSessionIdRef.current;
+            if (!currentSessionId) return;
+            try {
+              switch (action.job_action) {
+                case "open":
+                  await refreshJobs();
+                  return;
+                case "refresh": {
+                  jobControlGenerationRef.current += 1;
+                  jobControlAbortRef.current?.abort();
+                  jobControlAbortRef.current = null;
+                  const detail = jobDetailStateRef.current;
+                  const detailJobId = detail.status === "idle" ? undefined : detail.jobId;
+                  await Promise.all([
+                    refreshJobs(),
+                    detailJobId
+                      ? loadJobDetail(client, currentSessionId, detailJobId)
+                      : Promise.resolve(),
+                  ]);
+                  return;
+                }
+                case "select":
+                  jobControlGenerationRef.current += 1;
+                  jobControlAbortRef.current?.abort();
+                  jobControlAbortRef.current = null;
+                  await loadJobDetail(client, currentSessionId, action.job_id);
+                  return;
+                case "cancel": {
+                  const controlGeneration = ++jobControlGenerationRef.current;
+                  const detailGeneration = jobDetailGenerationRef.current;
+                  jobControlAbortRef.current?.abort();
+                  const controller = new AbortController();
+                  jobControlAbortRef.current = controller;
+                  let response: Awaited<ReturnType<OpenHarnessClient["cancelJob"]>>;
+                  try {
+                    response = await client.cancelJob(
+                      action.job_id,
+                      {
+                        sessionId: currentSessionId,
+                        reason: action.reason,
+                      },
+                      { signal: controller.signal },
+                    );
+                  } catch (error) {
+                    if (activeSessionIdRef.current !== currentSessionId) return;
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) {
+                      await refreshJobs();
+                      return;
+                    }
+                    throw error;
+                  } finally {
+                    if (jobControlAbortRef.current === controller) jobControlAbortRef.current = null;
+                  }
+                  if (activeSessionIdRef.current !== currentSessionId) return;
+                  const ownsDetail = !controller.signal.aborted &&
+                    jobControlGenerationRef.current === controlGeneration &&
+                    jobDetailGenerationRef.current === detailGeneration;
+                  const validated = validateJobSnapshot(response, currentSessionId, action.job_id);
+                  if (!validated.snapshot) {
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) {
+                      await refreshJobs();
+                      return;
+                    }
+                    throw new Error(validated.error ?? "Job snapshot has invalid fields.");
+                  }
+                  const snapshot = validated.snapshot;
+                  const next = mergeJobSnapshot(jobStateRef.current, snapshot, Date.now());
+                  jobStateRef.current = next;
+                  setJobState(next);
+                  if (ownsDetail) {
+                    await loadJobDetail(client, currentSessionId, action.job_id);
+                  }
+                  await refreshJobs();
+                  return;
+                }
+                case "send": {
+                  const controlGeneration = ++jobControlGenerationRef.current;
+                  const detailGeneration = jobDetailGenerationRef.current;
+                  jobControlAbortRef.current?.abort();
+                  const controller = new AbortController();
+                  jobControlAbortRef.current = controller;
+                  try {
+                    await client.sendJob(
+                      action.job_id,
+                      {
+                        sessionId: currentSessionId,
+                        data: action.data,
+                      },
+                      { signal: controller.signal },
+                    );
+                  } catch (error) {
+                    if (activeSessionIdRef.current !== currentSessionId) return;
+                    if (controller.signal.aborted || jobControlGenerationRef.current !== controlGeneration) {
+                      await refreshJobs();
+                      return;
+                    }
+                    throw error;
+                  } finally {
+                    if (jobControlAbortRef.current === controller) jobControlAbortRef.current = null;
+                  }
+                  if (activeSessionIdRef.current !== currentSessionId) return;
+                  const ownsDetail = !controller.signal.aborted &&
+                    jobControlGenerationRef.current === controlGeneration &&
+                    jobDetailGenerationRef.current === detailGeneration;
+                  if (ownsDetail) {
+                    await loadJobDetail(client, currentSessionId, action.job_id);
+                  }
+                  await refreshJobs();
+                  return;
+                }
               }
-              case "clear_filters":
-                await refreshWorkflowState({
-                  selectedRunId: current?.selectedRunId,
-                  filters: {},
-                });
-                return;
-              case "cancel": {
-                const runId = action.workflow_run_id ?? current?.selectedRunId;
-                const workflowSessionId = activeSessionIdRef.current;
-                if (!workflowSessionId || !runId) {
-                  const message = "Select a workflow run before cancelling it.";
-                  setWorkflowStateCurrent(current ? { ...current, error: message } : workflowStateFromJobs({ jobs: [], error: message }));
-                  reportError(message);
-        return;
-      }
-                await client.cancelJob(runId, {
-                  sessionId: workflowSessionId,
-                  reason: action.workflow_cancel_reason,
-                });
-                await refreshWorkflowState({
-                  selectedRunId: runId,
-                  notice: `Cancellation requested for ${runId}.`,
-                });
-                return;
-              }
-              default: {
-                const exhaustive: never = workflowAction;
-                reportError(`Unsupported workflow action: ${String(exhaustive)}`);
-                return;
-              }
+            } catch (error) {
+              reportAuxiliaryError("Jobs", error);
+              return;
             }
           }
 
@@ -1173,7 +1260,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       reportError(error instanceof Error ? error.message : String(error));
     });
     },
-    [activeSessionId, activateSession, cacheFirstRead, clearDisplayRequest, clientState, createAndSwitchSession, daemon, localBusy, pushSystem, refreshWorkflowState, reportError, returnToHome, setWorkflowStateCurrent, showDisplayRequest],
+    [activeSessionId, activateSession, cacheFirstRead, clearDisplayRequest, clientState, createAndSwitchSession, daemon, loadJobDetail, localBusy, pushSystem, refreshJobs, reportAuxiliaryError, reportError, returnToHome, showDisplayRequest],
   );
 
   const bucket = activeSessionId ? clientState.buckets[activeSessionId] : undefined;
@@ -1203,7 +1290,9 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       transcript: transcriptView.transcript,
       assistantBuffer: transcriptView.assistantBuffer,
       status,
-      tasks,
+      jobState,
+      jobs: jobState.jobs,
+      jobDetailState,
       commands,
       commandDetails,
       mcpServers,
@@ -1212,7 +1301,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       displayRequest,
       busy: localBusy || running || waitingForSubmittedRun,
       ready,
-      workflowState,
       setModal,
       setSelectRequest,
       setDisplayRequest,
@@ -1220,6 +1308,6 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       loadModels,
       sendRequest,
     }),
-    [commandDetails, commands, displayRequest, loadModels, localBusy, mcpServers, modal, ready, running, selectRequest, sendRequest, status, tasks, transcriptView, waitingForSubmittedRun, workflowState],
+    [commandDetails, commands, displayRequest, jobDetailState, jobState, loadModels, localBusy, mcpServers, modal, ready, running, selectRequest, sendRequest, status, transcriptView, waitingForSubmittedRun],
   );
 }

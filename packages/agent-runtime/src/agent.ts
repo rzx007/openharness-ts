@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   AgentChildDirectory,
+  AgentChildBudgetSnapshot,
   AgentEffects,
   AgentEventListener,
   AgentEventSubscription,
@@ -97,6 +98,7 @@ export interface AgentInspection {
     error?: string;
   }>;
   sandbox?: NonNullable<RuntimeBundle["sandboxStatus"]>;
+  childBudget: AgentChildBudgetSnapshot;
 }
 
 export interface OpenHarnessAgent {
@@ -263,6 +265,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         enabled: hook.enabled,
       })),
       mcpServers: this.mcpManager.getConnections().map(toMcpInspection),
+      childBudget: this.childManager.getBudgetSnapshot(),
       ...(this.runtime.sandboxStatus
         ? { sandbox: this.runtime.sandboxStatus }
         : {}),

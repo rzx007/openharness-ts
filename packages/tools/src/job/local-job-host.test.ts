@@ -12,7 +12,7 @@ import {
   createWorkflowRunSnapshot,
   WorkflowRunStore,
 } from "@openharness/coordinator";
-import { getTaskManager, resetTaskManager } from "@openharness/services/tasks";
+import { resetExecutionRuntimes } from "@openharness/services/executions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LocalAgentJobHost } from "./local-job-host.js";
@@ -21,7 +21,7 @@ const createdDirectories: string[] = [];
 
 afterEach(() => {
   for (const cwd of createdDirectories.splice(0)) {
-    resetTaskManager({ cwd, sessionId: "session-1" });
+    resetExecutionRuntimes({ cwd, sessionId: "session-1" });
     rmSync(cwd, { recursive: true, force: true });
   }
 });
@@ -73,34 +73,32 @@ describe("LocalAgentJobHost adapter", () => {
     await expect(host.list({ sessionId: "session-2" })).rejects.toThrow("owner session mismatch");
   });
 
-  it("continues a completed local Agent session through JobSend", async () => {
+  it("reports a failed child as a fact and keeps the parent job host usable", async () => {
     const cwd = temporaryDirectory();
-    const manager = getTaskManager({ cwd, sessionId: "session-1" });
-    const onInput = vi.fn(async () => undefined);
-    const task = manager.registerSessionTask({
-      id: "local-agent-1",
-      description: "review",
-      cwd,
+    const failedHandle: AgentChildHandle = {
+      id: "child-failed",
+      sessionId: "child-failed-session",
+      state: "idle",
+      result: Promise.resolve({ status: "failed", output: "tests failed", error: "tests failed" }),
+      send: vi.fn(async () => ({ sessionId: "child-failed-session", inputId: "i2", runId: "r2" })),
+      interrupt: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    };
+    const host = new LocalAgentJobHost(cwd, "session-1", directory(failedHandle));
+
+    await expect(host.wait({
       sessionId: "session-1",
-      childSessionId: "child-session",
-      prompt: "review",
-      onInput,
-      onStop: vi.fn(async () => undefined),
+      jobId: "child-failed",
+      timeoutMs: 1_000,
+    })).resolves.toMatchObject({
+      text: "tests failed",
+      timedOut: false,
+      snapshot: {
+        status: "failed",
+        metadata: { failureKind: "failed" },
+      },
     });
-    await manager.completeSessionTask(task.id, { status: "completed", output: "first result" });
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
-
-    await expect(host.list({ sessionId: "session-1" })).resolves.toEqual([
-      expect.objectContaining({
-        id: task.id,
-        status: "completed",
-        capabilities: expect.objectContaining({ send: true }),
-      }),
-    ]);
-    await host.send({ sessionId: "session-1", jobId: task.id, data: "continue" });
-
-    expect(onInput).toHaveBeenCalledWith("continue");
-    expect(manager.getTask(task.id)?.status).toBe("running");
+    await expect(host.list({ sessionId: "session-1" })).resolves.toHaveLength(1);
   });
 
   it("returns structured Workflow details from JobRead", async () => {

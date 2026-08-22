@@ -31,7 +31,7 @@ ohs workflow template safe-write --params ./workflow-template-params.json
 ohs workflow reconcile <runId>
 ohs workflow reconcile <runId> --action-ids reconcile-file-src-index-ts --budget-preset safe-write
 
-# 取消 running workflow，并停止背后的 TaskManager task
+# 取消 running workflow，并停止背后的 detached worker process
 ohs workflow cancel <runId> --reason "superseded by manual fix"
 ```
 
@@ -50,7 +50,7 @@ ohs workflow cancel <runId> --reason "superseded by manual fix"
 
 ## Daemon 重启语义
 
-`ohs serve` 重启时不会假装续跑旧进程里的 provider 调用、TaskManager task 或 child session。它会保留 session、child session、消息与 timeline，并将遗留 session run 标为 `interrupted`。
+`ohs serve` 重启时不会假装续跑旧进程里的 provider 调用、detached worker process 或 child session。它会保留 session、child session、消息与 timeline，并将遗留 session run 标为 `interrupted`。
 
 若 workflow 的 `workflow.workflow_started` 事件已写入 daemon session event stream，daemon 会把对应的 running snapshot 收口为 terminal：运行中的 task 为 `killed`，未启动 task 为 `skipped`，并写入 `workflow.workflow_cancelled` 事件。没有这条 session 所有权事件的同项目 workflow 不受影响。之后应由用户显式启动新的工作；不要把重启后的状态理解为后台仍在继续执行。
 
@@ -89,7 +89,7 @@ ohs workflow validate --spec ./workflow.json
 
 真正启动 workflow 仍由 Coordinator/Leader 调 `Workflow` 工具完成；CLI 当前负责“看、验、收口、取消”，不直接替代模型入口提交执行。
 
-`Workflow action: "run"` 默认会快速返回包含 `jobId` 的 Job receipt，并把真实 worker DAG 留在后台继续跑；模型后续使用 `JobRead/JobWait/JobCancel`，不要依赖单次工具调用一直阻塞到全部 task 完成。需要同步等待完整结果时显式传 `waitForCompletion: true`。TUI 和 CLI 是人工管理面，仍可用 `/workflow` 或 `ohs workflow status <runId>` 观察进度。
+`Workflow action: "run"` 默认会快速返回包含 `jobId` 的 Job receipt，并把真实 worker DAG 留在后台继续跑；模型后续使用 `JobRead/JobWait/JobCancel`，不要依赖单次工具调用一直阻塞到全部 task 完成。需要同步等待完整结果时显式传 `waitForCompletion: true`。TUI 的 `/workflow` 是统一 Jobs Panel 的别名；CLI 仍可用 `ohs workflow status <runId>` 读取 Workflow 领域详情。
 
 ## Template 参数示例
 
@@ -113,19 +113,19 @@ ohs workflow template research-implement-verify --params ./workflow-template-par
 
 ## 和 TUI 的关系
 
-当前 `ohs workflow ...` 是底层操作面：
+当前 `ohs workflow ...` 是 Workflow 领域操作面：
 
-- `list/status` 给 TUI/Web 提供 run 列表、详情、时间线和筛选控件数据；
+- `list/status` 提供 run 列表与详情，适合脚本、CLI 诊断和未来 Web 消费；
 - `validate/template` 给 planner 或用户在提交前检查 spec；
 - `reconcile` 把冲突/重叠写入转换成下一轮可执行 spec；
-- `cancel` 是后续 UI 取消按钮可以调用的同一条控制路径。
+- `cancel` 是 Workflow 领域取消入口；TUI 的普通取消统一走 JobCancel。
 
-TUI 的 `/workflow` 面板已经接上这条底层路径：
+TUI 的 `/workflow` 和 `/workflows` 现在都打开统一 Jobs Panel：
 
-- `r` 刷新 run 列表；
-- `enter` 选中 run；
-- `t/e/s` 轮换 task / event type / status filter，`x` 清空筛选；
-- `c` 取消 running run；
-- `1`-`9` 选择 reconciliation action，`f` 把选中的 action 提交为 follow-up workflow。
+- 顶层列表使用 Jobs API，不再维护第二份 Workflow runs 列表；
+- `r` 同时刷新 Jobs 列表和当前选中 Job 的详情；
+- `enter` 读取 Job detail，Workflow 的 Steps 从 `JobReadResult.details` 展示；
+- `c` 仅在 Job capability 允许时取消；`k` / `f` 分别筛选 kind / status；
+- timeline、history、reconcile 和 follow-up 仍是 Workflow 领域操作，通过 CLI 或 Workflow 工具执行。
 
-通俗地说：`ohs workflow reconcile` 负责“把失败后的修复计划生出来”，TUI 的 `f follow-up` 负责“把这个修复计划直接作为新的硬调度 workflow 跑起来”。多 action 时要先按数字选中一个；只有一个 action 时可以直接按 `f`。
+通俗地说：Jobs Panel 负责“看这个后台工作现在怎样、读取详情、按能力取消”；`ohs workflow reconcile` 等命令负责 Workflow 特有的计划修复，不把这些领域动作复制进通用 Jobs 协议。

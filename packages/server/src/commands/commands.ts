@@ -69,11 +69,18 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
     source: "builtin",
   },
   {
-    name: "/tasks",
-    description: "List, stop, or start background tasks (list | show ID | stop ID | run CMD)",
+    name: "/jobs",
+    description: "List, inspect, or cancel Jobs (list | show ID | cancel ID)",
     kind: "session",
     source: "builtin",
-    argumentHint: "[list|show ID|stop ID|run CMD]",
+    argumentHint: "[list|show ID|cancel ID]",
+  },
+  {
+    name: "/background",
+    description: "Start a background shell and return its Job ID",
+    kind: "session",
+    source: "builtin",
+    argumentHint: "<command>",
   },
   {
     name: "/status",
@@ -122,7 +129,7 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
   },
   {
     name: "/agents",
-    description: "Show agent/teammate tasks",
+    description: "Show Agent Jobs",
     kind: "session",
     source: "builtin",
   },

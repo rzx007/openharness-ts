@@ -23,14 +23,6 @@ export type TranscriptItem = {
   is_error?: boolean;
 };
 
-export type TaskSnapshot = {
-  id: string;
-  type: string;
-  status: string;
-  description: string;
-  metadata: Record<string, string>;
-};
-
 export type McpServerSnapshot = {
   name: string;
   state: string;
@@ -55,86 +47,4 @@ export type SelectOptionPayload = {
   value: string;
   label: string;
   description?: string;
-};
-
-export type TodoItemSnapshot = {
-  text: string;
-  checked: boolean;
-};
-
-export type SwarmTeammateSnapshot = {
-  name: string;
-  status: "running" | "idle" | "done" | "error";
-  duration?: number;
-  task?: string;
-};
-
-export type SwarmNotificationSnapshot = {
-  from: string;
-  message: string;
-  timestamp: number;
-};
-
-export type WorkflowRunSummarySnapshot = {
-  runId: string;
-  status: "running" | "completed" | "failed" | string;
-  summary: string;
-  mode: string;
-  totalTasks: number;
-  completedTasks: number;
-  failedTasks: number;
-  pendingTasks: number;
-  runningTasks: number;
-  blockedTasks: number;
-  needsReconciliation: boolean;
-  budgetPolicyPreset?: string;
-  createdAt: number;
-  updatedAt: number;
-};
-
-export type WorkflowTuiTaskSnapshot = {
-  taskId: string;
-  status: string;
-  summary?: string;
-  dependencies: string[];
-  taskManagerTaskId?: string;
-};
-
-export type WorkflowTuiTimelineItem = {
-  timestamp: number;
-  type: string;
-  taskId?: string;
-  status?: string;
-  summary: string;
-};
-
-export type WorkflowTuiState = {
-  runs: WorkflowRunSummarySnapshot[];
-  selectedRunId?: string;
-  snapshot?: Record<string, unknown>;
-  tasks: WorkflowTuiTaskSnapshot[];
-  timeline: WorkflowTuiTimelineItem[];
-  filters: {
-    taskId?: string;
-    status?: string;
-  };
-  available: {
-    taskIds: string[];
-    statuses: string[];
-  };
-  reconciliation?: {
-    needed: boolean;
-    summary: string;
-    actions: Array<{
-      actionId: string;
-      issueIds: string[];
-      taskId: string;
-      description: string;
-      prompt: string;
-      writeScope: string[];
-      dependsOn: string[];
-    }>;
-  };
-  notice?: string;
-  error?: string;
 };

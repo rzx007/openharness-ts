@@ -4,7 +4,7 @@ Portable control protocol for long-running OpenHarness work.
 
 The package defines owner-scoped snapshots and the common `list`, `read`, `wait`, `send`, and
 `cancel` operations. Producers keep ownership of execution and storage: terminals remain in the
-terminal provider, tasks remain in `TaskManager` and `SessionTaskRecord`, and workflows remain in
+terminal state remains in its provider, detached processes in `DetachedProcessSupervisor`, child Agent handles in `ChildAgentExecutionRegistry`, durable projections in `SessionExecutionRecord`, and workflows in
 `WorkflowRunStore`.
 
 See [Jobs 统一后台任务协议](../../docs/jobs-protocol.md) for lifecycle, ownership, cursor, and

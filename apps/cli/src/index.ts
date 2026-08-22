@@ -8,6 +8,7 @@ import { createProviderCommand } from "./commands/provider";
 import { createSetupCommand } from "./commands/setup";
 import { createSandboxCommand } from "./commands/sandbox";
 import { createWorkflowCommand } from "./commands/workflow";
+import { createDebugCommand } from "./commands/debug";
 import { createDaemonCommand, createServeCommand } from "./commands/daemon";
 import { buildSettingsPatch, coerceConfigValue } from "./config-coerce";
 import { reconcileDaemonAutoStart } from "./daemon-auto-start";
@@ -87,6 +88,7 @@ program.addCommand(createProviderCommand());
 program.addCommand(createSetupCommand());
 program.addCommand(createSandboxCommand());
 program.addCommand(createWorkflowCommand());
+program.addCommand(createDebugCommand());
 program.addCommand(createServeCommand());
 program.addCommand(createDaemonCommand());
 

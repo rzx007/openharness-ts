@@ -26,6 +26,7 @@ export type {
   ToolContext,
   ToolResult,
   ToolExecutionResult,
+  ToolFailureKind,
   McpAuthConfigureInput,
   McpAuthConfigureResult,
   McpAuthHost,
@@ -79,6 +80,9 @@ export type {
   QueryEngineOptions,
   MemoryRetriever,
   AgentChildController,
+  AgentChildBudget,
+  AgentChildBudgetDimension,
+  AgentChildBudgetSnapshot,
   AgentChildDirectory,
   AgentChildHandle,
   AgentChildInput,
@@ -107,6 +111,8 @@ export type {
   AgentSerializedError,
   AgentSteerInput,
 } from "./types/runtime";
+
+export { AgentChildBudgetExceededError } from "./types/runtime";
 
 export { AgentRunNotAcceptingInputError, RuntimeBundle } from "./types/runtime";
 export {

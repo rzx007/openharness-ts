@@ -2,25 +2,15 @@ import type {
   McpServerSnapshot,
   SelectOptionPayload,
   TranscriptItem,
-  WorkflowTuiState,
 } from "../types";
-import type { ModelProviderInfo, TaskSnapshot } from "@openharness/client";
+import type { JobSnapshot, ModelProviderInfo } from "@openharness/client";
+import type { JobDetailRemoteState, JobRemoteState } from "../jobs/job-remote-state";
 
-export type WorkflowRequestAction =
-  | { type: "workflow_request"; workflow_action: "open" | "refresh" | "clear_filters" }
-  | { type: "workflow_request"; workflow_action: "select_run"; workflow_run_id: string }
-  | {
-      type: "workflow_request";
-      workflow_action: "set_filter";
-      workflow_task_id?: string;
-      workflow_status?: string;
-    }
-  | {
-      type: "workflow_request";
-      workflow_action: "cancel";
-      workflow_run_id?: string;
-      workflow_cancel_reason?: string;
-    };
+export type JobRequestAction =
+  | { type: "job_request"; job_action: "open" | "refresh" }
+  | { type: "job_request"; job_action: "select"; job_id: string }
+  | { type: "job_request"; job_action: "cancel"; job_id: string; reason?: string }
+  | { type: "job_request"; job_action: "send"; job_id: string; data: string };
 
 export type TuiAction =
   | { type: "select_model"; model: string; provider?: string }
@@ -32,13 +22,15 @@ export type TuiAction =
   | { type: "list_sessions" }
   | { type: "set_permission_mode"; permission_mode: "default" | "plan" | "full_auto" }
   | { type: "set_session_mode"; session_mode: "coordinator" | "direct" }
-  | WorkflowRequestAction;
+  | JobRequestAction;
 
 export type TuiSessionController = {
   transcript: TranscriptItem[];
   assistantBuffer: string;
   status: Record<string, unknown>;
-  tasks: TaskSnapshot[];
+  jobState: JobRemoteState;
+  jobs: JobSnapshot[];
+  jobDetailState: JobDetailRemoteState;
   commands: string[];
   commandDetails: Array<{ name: string; description?: string }>;
   mcpServers: McpServerSnapshot[];
@@ -55,7 +47,6 @@ export type TuiSessionController = {
   } | null;
   busy: boolean;
   ready: boolean;
-  workflowState: WorkflowTuiState | null;
   setModal(value: Record<string, unknown> | null): void;
   setSelectRequest(value: TuiSessionController["selectRequest"]): void;
   setDisplayRequest(value: TuiSessionController["displayRequest"]): void;

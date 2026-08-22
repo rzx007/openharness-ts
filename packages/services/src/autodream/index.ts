@@ -2,7 +2,10 @@ import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { Settings } from "@openharness/core";
-import { getTaskManager, type TaskInfo } from "../tasks/index.js";
+import {
+  getDetachedProcessSupervisor,
+  type DetachedProcessExecution,
+} from "../executions/index.js";
 import {
   listSessionsTouchedSince,
   readLastConsolidatedAt,
@@ -49,19 +52,19 @@ const DEFAULT_MIN_SESSIONS = 3;
 
 const lastSessionScanAt = new Map<string, number>();
 
-/** 最小任务执行面（真实现为 getTaskManager()；测试注入 fake）。 */
+/** AutoDream 需要的最小后台进程执行面（测试可注入 fake）。 */
 export interface DreamTaskRunner {
-  createShellTask(options: {
+  startShellExecution(options: {
     argv: string[];
     description: string;
     cwd: string;
     env?: Record<string, string>;
     type?: string;
     settings?: Settings;
-  }): Promise<TaskInfo>;
-  registerTaskListener(listener: (task: TaskInfo, event: string) => void): () => void;
+  }): Promise<DetachedProcessExecution>;
+  registerExecutionListener(listener: (task: DetachedProcessExecution, event: string) => void): () => void;
   /** 取活任务对象（监听器收到的是快照；缺省实现可不提供）。 */
-  getTask?(id: string): TaskInfo | undefined;
+  getExecution?(id: string): DetachedProcessExecution | undefined;
 }
 
 export interface StartDreamOptions {
@@ -116,7 +119,7 @@ function filesChangedSince(memoryDir: string, before: Map<string, number>): stri
 }
 
 /** 立即起一次 dream（force 可跳过时间/会话数门槛）。被占/被禁/子进程内返回 null。 */
-export async function startDreamNow(options: StartDreamOptions): Promise<TaskInfo | null> {
+export async function startDreamNow(options: StartDreamOptions): Promise<DetachedProcessExecution | null> {
   if (process.env[CHILD_ENV]) return null;
   if (!options.settings.memory?.enabled) return null;
 
@@ -137,7 +140,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
   const priorMtime = tryAcquireConsolidationLock(memoryDir);
   if (priorMtime === null) return null;
 
-  const runner = options.taskRunner ?? (getTaskManager(cwd) as unknown as DreamTaskRunner);
+  const runner = options.taskRunner ?? getDetachedProcessSupervisor(cwd);
   mkdirSync(memoryDir, { recursive: true });
   mkdirSync(sessionDir, { recursive: true });
   const before = memoryFilesMtimeSnapshot(memoryDir);
@@ -170,7 +173,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
 
   // 完成监听先于 spawn 注册（对齐 Python 时序）：子进程秒退也不漏回滚。
   // 同一 memoryDir 的 dream 被锁互斥，env 标记可唯一定位本任务。
-  const unregister = runner.registerTaskListener((done, event) => {
+  const unregister = runner.registerExecutionListener((done, event) => {
     if (event !== "completed") return;
     if (done.type !== "dream" || done.env?.OPENHARNESS_AUTODREAM_MEMORY_DIR !== memoryDir) return;
     unregister();
@@ -180,7 +183,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
       return;
     }
     // 监听器拿到的是快照：取活任务再写 metadata（getTask 可选）。
-    const live = runner.getTask?.(done.id) ?? done;
+    const live = runner.getExecution?.(done.id) ?? done;
     const changed = filesChangedSince(memoryDir, before);
     if (backupDir) {
       const diff = diffMemoryDirs(backupDir, memoryDir);
@@ -194,9 +197,9 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
     }
   });
 
-  let task: TaskInfo;
+  let task: DetachedProcessExecution;
   try {
-    task = await runner.createShellTask({
+    task = await runner.startShellExecution({
       argv,
       description: "dreaming",
       cwd,
@@ -226,7 +229,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<TaskInf
 }
 
 /** 廉价门槛检查后后台起 dream（10 分钟内同目录只扫一次会话）。 */
-export async function executeAutoDream(options: StartDreamOptions): Promise<TaskInfo | null> {
+export async function executeAutoDream(options: StartDreamOptions): Promise<DetachedProcessExecution | null> {
   if (process.env[CHILD_ENV]) return null;
   const memCfg = options.settings.memory;
   if (!memCfg?.enabled || !memCfg.autoDreamEnabled) return null;

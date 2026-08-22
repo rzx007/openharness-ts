@@ -17,7 +17,7 @@ export interface SystemRoutesContext {
   settingsService?: SettingsService;
   providerService?: ProviderService;
   modelService?: ModelService;
-  control: Pick<DaemonControlService, "acquireGlobalMutation" | "closeAllRuntimes" | "runtimeSnapshot">;
+  control: Pick<DaemonControlService, "acquireGlobalMutation" | "closeAllRuntimes" | "runtimeSnapshot" | "inspectRun" | "listProjectionDiagnostics">;
 }
 
 export function createSystemRoutes(context: SystemRoutesContext): Hono {
@@ -35,6 +35,15 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
       } satisfies OpenHarnessServerHealth);
     })
     .get("/debug/runtime", () => jsonResponse(context.control.runtimeSnapshot()))
+    .get("/debug/runs/:runId", (c) => {
+      const inspection = context.control.inspectRun(c.req.param("runId"), {
+        includeContent: c.req.query("includeContent") === "true",
+      });
+      return inspection ? jsonResponse(inspection) : errorResponse(404, "Run not found");
+    })
+    .get("/debug/projection-settlements", (c) => jsonResponse(context.control.listProjectionDiagnostics({
+      includeContent: c.req.query("includeContent") === "true",
+    })))
     .get("/commands", async (c) => {
       const cwd = c.req.query("cwd");
       if (!cwd) return errorResponse(400, "cwd is required");

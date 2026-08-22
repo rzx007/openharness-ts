@@ -206,6 +206,7 @@ function renderSessionSnapshot(
           id: `snapshot:${part.id}`,
           seq: 0,
           type: "session.message.part.updated",
+          schemaVersion: 1,
           sessionId,
           payload: { part },
           createdAt: part.updatedAt,

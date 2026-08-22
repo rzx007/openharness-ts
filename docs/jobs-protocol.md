@@ -1,6 +1,6 @@
 # Jobs 统一后台任务协议
 
-> 状态（2026-08-17）：当前实现的权威契约。Terminal 自身设计见 [Desktop Terminal PTY Design](./desktop-terminal-pty-design.md)，daemon 总入口见 [Daemon Application Architecture](./daemon-application-architecture.md)，首次大改复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)，Task/Workflow 工具收口方案见 [Jobs Task/Workflow Convergence](./jobs-task-workflow-convergence.md)。
+> 状态（2026-08-20）：当前实现的权威契约。模型工具、HTTP client、slash command 与 TUI 已统一使用 Jobs 观察和控制长期工作。Terminal 自身设计见 [Desktop Terminal PTY Design](./desktop-terminal-pty-design.md)，daemon 总入口见 [Daemon Application Architecture](./daemon-application-architecture.md)，首次大改复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)，Task/Workflow 工具收口方案见 [Jobs Task/Workflow Convergence](./jobs-task-workflow-convergence.md)。
 
 ## 一句话解释
 
@@ -8,7 +8,7 @@ Jobs 是所有长期工作的统一遥控器。
 
 `pnpm dev`、后台 shell、child Agent、dream 和 Workflow 的运行方式各不相同，但调用方不应该为每一种工作分别学习一套“列出、读结果、等待、继续输入、取消”接口。Jobs 把这些后续操作统一起来。
 
-Jobs 不执行工作，也不保存第二份权威状态。Terminal provider、`TaskManager + SessionTaskRecord`、`WorkflowRunStore` 仍然分别拥有真实进程、任务和流程状态。
+Jobs 不执行工作，也不保存第二份权威状态。Terminal provider、`DetachedProcessSupervisor`、`ChildAgentExecutionRegistry`、`SessionExecutionRecord` 持久化投影和 `WorkflowRunStore` 分别拥有各自状态。
 
 ## 先看一个场景
 
@@ -43,7 +43,7 @@ JobCancel({ jobId, reason: "verification finished" })
 
 ## 非目标
 
-- Jobs 不替代 `TerminalOpen`、`TaskCreate` 或 Workflow run 等创建接口。
+- Jobs 不替代 `TerminalOpen`、`BackgroundShellCreate`、`Agent` 或 Workflow run 等创建接口。
 - Jobs 不把一次性 `Bash` 强行变成长驻 Terminal。
 - Jobs 不提供新的数据库，也不负责恢复底层进程。
 - Jobs 不保证所有工作都能接收输入；是否可操作以 `capabilities` 为准。
@@ -53,7 +53,7 @@ JobCancel({ jobId, reason: "verification finished" })
 
 | 术语          | 实际含义                                                        |
 | ------------- | --------------------------------------------------------------- |
-| producer      | 真正创建并运行工作的模块，例如 Terminal provider 或 TaskManager |
+| producer      | 真正创建并运行工作的模块，例如 Terminal provider、后台进程监督器或 Agent framework |
 | job           | 一项已经创建、可能持续一段时间的工作                            |
 | control plane | 不亲自执行工作，只负责统一查状态和转发控制动作的这一层          |
 | snapshot      | 某一时刻的只读状态照片，不是可修改的运行对象                    |
@@ -68,21 +68,25 @@ flowchart LR
   Tools["JobList / JobRead / JobWait / JobSend / JobCancel"]
   Service["DaemonJobService"]
   Terminal["Terminal provider\nPTY + transcript"]
-  Tasks["TaskManager + SessionTaskRecord\nprocess + durable projection"]
+  Processes["DetachedProcessSupervisor\nnon-PTY process handles"]
+  Children["ChildAgentExecutionRegistry\nframework child handles"]
+  Projection["SessionExecutionRecord\ndurable projection"]
   Workflow["WorkflowRunStore\nplan + task snapshots"]
 
   Caller --> Tools --> Service
   Service --> Terminal
-  Service --> Tasks
+  Service --> Processes
+  Service --> Children
+  Service --> Projection
   Service --> Workflow
 ```
 
 | Job kind   | 执行与原始状态所有者                              | Jobs 做什么                                |
 | ---------- | ------------------------------------------------- | ------------------------------------------ |
 | `terminal` | `LocalTerminalProvider`                           | 转换状态、读 sequence 输出、转发输入和终止 |
-| `shell`    | `TaskManager`，持久状态投影到 `SessionTaskRecord` | 读输出、等待、取消                         |
-| `agent`    | `TaskManager` 或 child session bridge             | 读输出、等待、继续输入、取消               |
-| `dream`    | `TaskManager`                                     | 读输出、等待、取消                         |
+| `shell`    | `DetachedProcessSupervisor`，持久状态投影到 `SessionExecutionRecord` | 读输出、等待、取消                         |
+| `agent`    | Agent framework + `ChildAgentExecutionRegistry`；状态投影到 `SessionExecutionRecord` | 读输出、等待、继续输入、取消               |
+| `dream`    | `DetachedProcessSupervisor`                       | 读输出、等待、取消                         |
 | `workflow` | `WorkflowRunStore` 和 Workflow scheduler          | 读结构化进度、等待、取消                   |
 
 核心约束：Jobs 可以聚合和路由，但不能成为第二个执行器或第二份持久状态。
@@ -91,14 +95,81 @@ flowchart LR
 
 创建仍由最了解资源参数的 producer 完成：
 
-| 要创建的工作 | 创建入口                     | 创建后控制 |
-| ------------ | ---------------------------- | ---------- |
-| 持久交互终端 | `TerminalOpen`               | `Job*`     |
-| 后台 shell   | `TaskCreate` 或对应 task API | `Job*`     |
-| child Agent  | `Agent`                      | `Job*`     |
-| Workflow     | Workflow run                 | `Job*`     |
+| 要创建的工作 | 创建入口                                                                 | 创建后控制 |
+| ------------ | ------------------------------------------------------------------------ | ---------- |
+| 持久交互终端 | `TerminalOpen`                                                           | `Job*`     |
+| 后台 shell   | 模型用 `BackgroundShellCreate`；人工 TUI 用 `/background`；HTTP 用 `POST /background-shells` | `Job*`     |
+| child Agent  | `Agent`                                                                  | `Job*`     |
+| Workflow     | Workflow run                                                             | `Job*`     |
 
 这样做的原因很具体：创建 Terminal 需要 shell、cwd、行列数和 runtime；创建 Workflow 需要任务图和并发规则。这些参数无法被一个通用 `JobCreate` 清楚表达。
+
+## 公共 HTTP client 与 TUI（phase 1）
+
+### 后台 shell 创建链路
+
+人工用户输入 `/background <command>` 后，共享 slash command 层调用 `OpenHarnessClient.createBackgroundShell()`。daemon 内部仍使用现有 shell producer，完整链路是：
+
+```text
+POST /background-shells
+  -> BackgroundShellService.create
+  -> DetachedProcessSupervisor shell
+  -> SessionExecutionRecord projection
+  -> DaemonJobService.read
+  -> { jobId, snapshot }
+```
+
+每层的责任不同：
+
+- `BackgroundShellService.create` 校验 session/cwd 和命令，再让该 session 的 `DetachedProcessSupervisor` 启动 shell。
+- `DetachedProcessSupervisor` 持有真实进程句柄和输出；`SessionExecutionProjector` 把当前状态持续投影为 `SessionExecutionRecord`。
+- `SessionExecutionRecord` 是 daemon 内部的持久执行记录，不是公共 Task API。
+- `DaemonJobService.read` 把该记录转换成 `JobSnapshot`；HTTP 只返回标准 `{ jobId, snapshot }` receipt。
+
+这个入口只创建 shell，不是通用 `JobCreate`。创建完成后，公共 client 只保留统一控制方法：
+
+| client 方法 | HTTP | 实际作用 |
+| --- | --- | --- |
+| `listJobs` | `GET /jobs` | 聚合当前 session 的 Terminal、shell、Agent、dream 和 Workflow |
+| `readJob` | `GET /jobs/:jobId` | 读取当前快照、输出和可选 producer detail |
+| `waitJob` | `POST /jobs/:jobId/wait` | 等待终态或 timeout；timeout 不取消 Job |
+| `sendJob` | `POST /jobs/:jobId/input` | 只向当前 capability 允许输入的 Job 发送内容 |
+| `cancelJob` | `POST /jobs/:jobId/cancel` | 让 `DaemonJobService` 把取消请求路由回真实 producer |
+
+旧 `/tasks` HTTP CRUD、`TaskSnapshot` 和 public client 的 `listTasks/getTask/stopTask/createTask` 已删除，不保留兼容别名。`/schedules/tasks` 是独立的 Schedule 领域 API，继续保留。
+
+### TUI 列表与详情链路
+
+```text
+TUI session activation
+  -> GET /jobs?sessionId=...&includeFinished=true&limit=100
+  -> JobRemoteState
+  -> JobsPanel
+```
+
+`JobRemoteState` 是可丢弃的客户端缓存，不是新的数据真相：
+
+| 状态 | UI 应表达什么 |
+| --- | --- |
+| `idle` | 尚未选择可查询的 session，不能解释为权威空列表 |
+| `loading` | 正在查询；如果已有缓存，继续显示缓存 |
+| `ready` | 本次查询成功；`jobs: []` 此时才表示当前确实没有 Job |
+| `error` | 查询或协议校验失败；有缓存时保留并标为 cached，无缓存时显示 unavailable |
+
+Jobs、MCP 和 Job detail 错误都是辅助 UI 错误。它们只更新对应 remote state/toast，不会清除 `submittedRun`、结束 `localBusy`，也不会把正在运行的主 Agent run 标成失败。
+
+phase 1 在这些时机重新读取 Jobs：
+
+1. 激活或切换 session；
+2. 打开 Jobs Panel；
+3. 用户按 `r` 手动刷新；
+4. `/background` 创建成功；
+5. Jobs 控制动作完成后（当前面板暴露 cancel；send 已在 controller/client 边界保留）；
+6. 主 Agent run 进入终态。
+
+打开列表项会调用 `readJob` 并写入独立的 `JobDetailRemoteState`。Workflow 仍只在顶层列表显示一个 `workflow` Job；其 Steps 从 `JobReadResult.details` 在同一 Jobs Panel 的详情中展示，不再维护独立的 Workflow Runs 面板。
+
+phase 1 没有偷偷实现 `parentJobId` 或规范化 Job SSE。父子层级字段以及 `session.job.created/updated` 事件属于 phase 2；在此之前，重连或切换 session 仍先用 `listJobs()` 取得权威快照。
 
 ## JobSnapshot
 
@@ -185,7 +256,7 @@ stateDiagram-v2
 
 ```text
 创建长期工作：
-  TerminalOpen / TaskCreate / Agent / Workflow
+  TerminalOpen / BackgroundShellCreate / Agent / Workflow
 
 创建后统一控制：
   JobList / JobRead / JobWait / JobSend / JobCancel
@@ -204,7 +275,7 @@ stateDiagram-v2
 完整例子：
 
 ```text
-TaskCreate({ command: "pnpm test", description: "tests" })
+BackgroundShellCreate({ command: "pnpm test", description: "tests" })
   -> jobId
 
 JobWait({ jobIds: [jobId], timeoutSeconds: 30 })
@@ -224,11 +295,11 @@ JobCancel({ jobId, reason: "no longer needed" })
 - `JobSend` 会在服务端重新检查当前类型与状态，不能靠旧快照绕过能力边界。
 - `JobWait` 会并发等待最多 32 个 ID；某个 ID 不存在时只在对应 result 返回 `error`，不会遮住其他 Job 的结果。
 - Scheduled Task 是“将来何时启动 Agent”的计划，不是已经运行的 Job，不进入这五个工具的聚合范围。
-- `Bash` 是等待命令返回的一次性调用；需要后台运行或长期交互时使用 `TaskCreate` 或 `TerminalOpen`。
+- `Bash` 是等待命令返回的一次性调用；需要后台运行或长期交互时使用 `BackgroundShellCreate` 或 `TerminalOpen`。
 
 ### JobList
 
-列出当前 owner session 的工作。可用过滤包括 `kinds`、`statuses`、started/updated 起止时间、`includeFinished` 和 `limit`。调用前 daemon 会刷新 TaskManager 到 durable task 的投影。
+列出当前 owner session 的工作。可用过滤包括 `kinds`、`statuses`、started/updated 起止时间、`includeFinished` 和 `limit`。调用前 daemon 会刷新 DetachedProcessSupervisor 到 durable task 的投影。
 
 返回的是新快照数组，不是 live handle。排序按 `startedAt` 从新到旧。模型工具在没有传 `limit` 时默认只取最近 100 条，并返回 `window: { limit, returned, possiblyTruncated }`；`possiblyTruncated: true` 表示结果刚好占满窗口，调用方应增加过滤条件或显式调整 limit。这个窗口只限制本次返回，不删除 producer 保存的历史。底层 `AgentJobHost.list()` 仍以请求里的显式 `limit` 为准。
 
@@ -347,16 +418,17 @@ HTTP `/jobs` 由 daemon Bearer token 保护。HTTP 里的 `sessionId` 用于选�
 | `packages/jobs/src/index.ts`                              | 可移植类型和 `AgentJobHost` 契约                        |
 | `packages/server/src/jobs/daemon-job-service.ts`          | owner 校验、聚合、状态转换、控制路由                    |
 | `packages/tools/src/job/job-tools.ts`                     | 模型可调用的五个 `Job*` 工具                            |
-| `packages/tools/src/job/local-job-host.ts`                | standalone SDK 的 child、TaskManager、Workflow 本地聚合 |
+| `packages/tools/src/job/local-job-host.ts`                | standalone SDK 的 child、DetachedProcessSupervisor、Workflow 本地聚合 |
 | `packages/server/src/http/routes/job.ts`                  | `/jobs` HTTP API                                        |
 | `packages/client/src/transport/http-client.ts`            | TypeScript HTTP client                                  |
 | `packages/terminal-node/src/local-terminal-provider.ts`   | Terminal 输出、等待和真实退出生命周期                   |
-| `packages/server/src/http/session/session-task-bridge.ts` | TaskManager 到 durable task 的持续投影                  |
+| `packages/server/src/http/session/session-execution-projector.ts` | DetachedProcessSupervisor 到 durable task 的持续投影                  |
 | `packages/coordinator/src/workflow/store.ts`              | Workflow 快照、active run 取消和迟到写回保护            |
 
 ## 已知边界
 
 - Task/Workflow wait 仍是轮询，不是事件订阅。
+- `parentJobId` 和规范化 `session.job.created/updated` SSE 尚未进入 phase 1 公共契约；当前 TUI 依靠明确刷新点更新缓存。
 - Task/Workflow cursor 是快照版本，不是严格日志 offset。
 - Terminal 会在 daemon 生命周期内保留终态 session；durable task/workflow 也没有统一 retention policy。当前只限制模型侧默认列表窗口，没有删除历史。
 - Jobs 还没有 completion reported/claim 语义，不能自动保证“完成通知只消费一次”。

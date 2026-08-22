@@ -8,6 +8,7 @@ export type SessionStatus =
 export type InputDelivery = "queue" | "steer";
 export type RunStatus =
   "pending" | "running" | "completed" | "failed" | "interrupted";
+export type RunAttemptStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type SessionTaskStatus =
   "pending" | "running" | "completed" | "failed" | "stopped" | "interrupted";
 export type PermissionStatus = "pending" | "approved" | "denied" | "expired";
@@ -16,6 +17,11 @@ export type SessionMessagePartType =
   "text" | "reasoning" | "tool" | "tool_result" | "error" | "log";
 export type SessionMessagePartStatus =
   "pending" | "running" | "completed" | "failed" | "interrupted";
+export type ProjectionSettlementAction = "retry-terminal-projection" | "compensate-child";
+export type ProjectionSettlementStatus = "pending" | "retrying" | "resolved" | "abandoned";
+
+/** Current durable session-event envelope version. Payload versions are added by the event registry. */
+export const SESSION_EVENT_SCHEMA_VERSION = 1;
 
 export interface SessionRecord {
   id: string;
@@ -100,9 +106,26 @@ export interface SessionEventRecord {
   id: string;
   seq: number;
   type: string;
+  schemaVersion: number;
   sessionId?: string;
   payload: Record<string, unknown>;
   createdAt: number;
+}
+
+export interface ProjectionSettlementRecord {
+  id: string;
+  projector: string;
+  rootSessionId: string;
+  eventSequence: number;
+  action: ProjectionSettlementAction;
+  payload: Record<string, unknown>;
+  status: ProjectionSettlementStatus;
+  attemptCount: number;
+  lastError?: string;
+  nextRetryAt?: number;
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt?: number;
 }
 
 export interface SessionRunRecord {
@@ -118,8 +141,26 @@ export interface SessionRunRecord {
   updatedAt: number;
 }
 
-/** Daemon-owned task projection. Execution handles stay in TaskManager and are never persisted. */
-export interface SessionTaskRecord {
+export interface SessionRunAttemptRecord {
+  id: string;
+  runId: string;
+  sequence: number;
+  status: RunAttemptStatus;
+  provider?: string;
+  model?: string;
+  retryReason?: string;
+  errorKind?: string;
+  error?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  startedAt?: number;
+  finishedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Daemon-owned execution projection. Live handles stay in their backend runtime and are never persisted. */
+export interface SessionExecutionRecord {
   id: string;
   sessionId: string;
   childSessionId?: string;
@@ -158,7 +199,9 @@ export interface SessionStateSnapshot {
   messages: SessionMessageRecord[];
   parts: SessionMessagePartRecord[];
   runs: SessionRunRecord[];
-  tasks?: SessionTaskRecord[];
+  /** Absent only when reading a legacy server that predates durable attempts. */
+  attempts?: SessionRunAttemptRecord[];
+  tasks?: SessionExecutionRecord[];
   permissions: PermissionRequestRecord[];
 }
 
@@ -320,6 +363,30 @@ export interface AdmitPromptInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface CreateProjectionSettlementInput {
+  id?: string;
+  projector: string;
+  rootSessionId: string;
+  eventSequence: number;
+  action: ProjectionSettlementAction;
+  payload: Record<string, unknown>;
+  error?: string;
+}
+
+export interface ListProjectionSettlementsOptions {
+  projector?: string;
+  rootSessionId?: string;
+  status?: ProjectionSettlementStatus | readonly ProjectionSettlementStatus[];
+}
+
+export interface AdmitPromptWithRunInput {
+  prompt: AdmitPromptInput;
+  run?: {
+    id?: string;
+    metadata?: Record<string, unknown>;
+  };
+}
+
 export interface CreateMessageInput {
   id?: string;
   sessionId: string;
@@ -393,6 +460,23 @@ export interface UpdateRunInput {
   status?: RunStatus;
   error?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface CreateRunAttemptInput {
+  id?: string;
+  runId: string;
+  sequence?: number;
+  provider?: string;
+  model?: string;
+  retryReason?: string;
+}
+
+export interface UpdateRunAttemptInput {
+  status?: RunAttemptStatus;
+  errorKind?: string;
+  error?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface CreateSessionTaskInput {

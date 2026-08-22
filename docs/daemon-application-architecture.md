@@ -241,9 +241,19 @@ createDaemonAgentLoader({
 | `child.closed`                  | finish task、unregister live route；durable 失败时保留 pending projection 供有序重试                         |
 | run terminal                    | complete text、finalize durable run/task                                                                     |
 
-projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。所有 child required event 共用一个 pending settlement 状态机：`child.closed` 重试原 projection，其他 child event 执行 durable terminal compensation；settlement 再失败时，下一有序事件必须先完成 pending settlement，水位不能越过 poison event。root projection failure 传播给 framework，并由 `SessionRunExecutor` 对仍非 terminal 的 durable run 做 infrastructure fallback。
+projector 按 root event source 单调 `sequence` 保存已成功应用的水位；重复或更旧事件直接跳过，失败事件不推进水位。所有 child required event 共用 SQLite `projection_settlement` 状态机：`child.closed` 重试 durable terminal projection，其他 child event 执行 durable compensation；settlement 再失败时保持 pending，下一有序事件必须先修复同一 root 的 pending 记录，水位不能越过 poison event。root projection failure 传播给 framework，并由 `SessionRunExecutor` 对仍非 terminal 的 durable run 做 infrastructure fallback。详细失败边界见 [ADR 0001](./adr/0001-projection-settlement-failure-policy.md)。
+
+Settlement 保存的是可序列化修复说明，不是旧进程的 Handle。Daemon 对外 ready 前先修复 Settlement，再执行普通的 active Run/Task/Permission 重启收束：terminal child 可以补齐真实结果；live-only child 创建或路由失败只能把 Run/Task 标为 failed，并归档半初始化 child Session。每次原始失败、下一相关事件和显式 recovery 都只尝试一次，不运行无限重试循环。`/debug/runtime` 的 `projectionSettlements.pending` 显示仍需处理的数量；正常完成或正常 shutdown 应为 `0`。
 
 input/run/stream/terminal 的多步 durable 归约使用 `SessionStore.transaction()`，SQLite 与内存 read model 同时提交或同时回滚，transcript projection state 也在失败时恢复。input/run/child identity 使用 create-or-validate：input 会比较去除 traceId 后的完整 metadata，既有 child session 必须匹配 parent/cwd/childId，terminal run 不允许被 `run.started` 重开。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
+
+每个真正进入 `run.started` 的新 Run 会建立一条 durable Run Attempt。Attempt 保存独立的 sequence、provider、model、状态、token 用量和起止时间；当前 Provider 内部的连接/传输 retry 仍属于同一 Attempt。Run terminal 之前必须先把活动 Attempt 收束为 completed、failed 或 cancelled。Daemon 重启不会重新调用模型，而是把旧 pending/running Attempt 标为 cancelled；历史数据库中本来没有 Attempt 的旧 Run 保持“无明细”，不会补造一条看似真实的记录。Attempt 同时进入 session snapshot 和 durable replay event，客户端可以按 Run ID 关联展示。
+
+每条 durable event（持久化后可回放的事件）都带 `schemaVersion`。当前内置事件版本统一为 `1`：新事件按 registry 中各自的当前版本写入，迁移前的旧行在数据库升级时补为 `1`，HTTP replay 与 SSE 返回读取边界已经识别或升级后的完整 envelope。版本表示事件载荷采用哪一版格式，不代表业务发生顺序；顺序仍由 `seq` 决定。未知版本不能被当成当前版本静默读取。
+
+durable event 的格式由 `DurableEventRegistry` 集中登记。登记项包含事件名、当前版本、属于单个 session 还是全局事件、payload 校验器，以及可选的逐版升级函数。Store 写入事件前先查登记表并校验；未登记的名称、缺字段、字段类型错误或错误的 session/global 归属都会在分配 cursor 前被拒绝。Store 从数据库读取旧版本时按 `v1 -> v2 -> ...` 依次升级，再把当前格式交给上层，但不会改写原数据库行，便于审计和排查历史数据。
+
+Framework 的 `domain.event` 统一持久化为 `agent.domain.event`，原始业务名称保存在 payload 的 `name` 字段；Workflow 事件则逐项登记允许的九种事件名。旧版本曾直接用业务名称作为 event type，因此读取 v1 历史行时，如果 payload 带有 Framework event ID，会在内存中规范成 `agent.domain.event`，但原行仍保持不变；这个兼容入口不用于新写入。这样新增业务事件需要显式注册，不会因为字符串拼错而产生客户端永远不认识的历史记录。测试或插件若确实拥有额外事件，可以通过 `createDurableEventRegistry([...extensions])` 建立专用 registry，并在创建 `SessionStore` 时传入，生产默认 registry 不会自动放行它们。
 
 ### Text delta durability
 
@@ -304,6 +314,8 @@ HTTP interrupt
 
 framework 发 `run.interrupted` 后 projector 完成 durable terminal 状态。若 event delivery 或 agent 创建在 terminal event 前失败，`SessionRunExecutor` 只对仍非 terminal 的 run 执行 infrastructure fallback，并把该 run 遗留的 `running` transcript parts 收束为 `failed` 或 `interrupted`。
 
+每个真正进入模型执行的 Run 还会留下独立 Attempt。大白话说，Run 是“用户这件事”，Attempt 是“系统为办成这件事实际找模型试了第几次”。Run 结束前必须把仍在 pending/running 的 Attempt 一并收口；Daemon 重启会把旧活动 Attempt 取消，不会伪装成模型从未被调用。
+
 ## 工具运行与授权
 
 ```mermaid
@@ -326,6 +338,8 @@ sequenceDiagram
 ```
 
 effect 注入位置是 `packages/server/src/http.ts`；durable wait/reply 在 `permission-broker.ts` 与 `permission-controller.ts`。daemon 不创建 run host，也不向 QueryEngine 传 callback。
+
+Tool 的 durable part 同时承担第一版执行账本：`toolCallId` 是模型发起调用的固定编号，`toolAttemptId` 是实际执行次数。Tool 开始后若进程突然退出，Store 会把结果标成 `unknown_outcome`，意思是“可能已经执行，只是结果没来得及记下来”；系统不会因此自动再执行一遍。失败原因通过 permission、policy、timeout、command、transport、provider、interrupted、unknown_outcome 等结构化类别传递，不靠解析报错文字。
 
 ## Child session 与 task
 
@@ -371,17 +385,25 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 `DaemonApplication` constructor 在开放 HTTP 前执行 durable recovery：
 
 1. pending/running run -> `interrupted`，并把该 run 的 `running` transcript parts 同步置为 `interrupted`。
-2. pending/running task -> `interrupted`。
-3. pending permission -> `expired`，因为旧进程的 resolver 已不存在。
-4. 对已无 active run 的 `closing` session 完成 archive。
+2. 没有 primary run、也没有 transcript message 归属的 input -> 创建一个 terminal `interrupted` owner run；它只记录 `recovery.kind=orphan_input`，不会自动重新执行模型或工具。
+3. pending/running task -> `interrupted`。
+4. pending permission -> `expired`，因为旧进程的 resolver 已不存在。
+5. 对已无 active run 的 `closing` session 完成 archive。
 
 shutdown 先把 `DaemonOperationGate` 置为 closing 并等待现有 shared/barrier lease；随后 `SessionRunEngine.stopAndDrain()` 停止新 admission、同时中断 active/queued lanes 并等待 run promise 收敛；最后关闭 agents/children、HTTP listener/SSE 和 store。queued run 不会在已有 agent 关闭后被重新启动。
 
+## 运行指标与只读排障
+
+`GET /debug/runtime` 的 `metrics` 从 durable 数据汇总 Run、Attempt、Tool、token、Permission、Child 和 Projection 状态。它只用有限类别做标签，不把 sessionId、runId、traceId、文件路径、提示词或 Tool 参数塞进指标。指标汇总失败时返回空指标，不影响 Run 执行。
+
+排查单次 Run 可使用 `ohs debug inspect-run <runId>`；查看投影补偿队列可使用 `ohs debug settlements`（旧命令 `list-projection-settlements` 仍是兼容别名）。两条命令都只读，也不会自动启动 Daemon；本机没有已注册的运行中 Daemon 时会提示用户先显式启动。默认隐藏正文和 Tool/Permission payload；`--include-content` 才展开并提示敏感信息风险，`--json` 用于脚本处理。发现数据断链、关闭 Run 仍有活动 Attempt、未知事件、待处理 settlement 或 Tool 结果未知时，命令会给出具体 warning 并返回非零退出码。第一阶段没有自动 repair 命令。
+
 ## 不变量
 
-- root durable input/run 在 submit 前创建。
+- queue 形式的 root durable input/run 在一个 store transaction 中创建，再进入 coordinator；steer input 先 durable admit，成功交付后通过 primary run 或 transcript message 建立归属。
 - 每个 durable input 最终可通过 primary run input 或 transcript message 解析到 owning run；失败/中断的 steer 也必须 terminalize。
 - durable run 一旦 completed/failed/interrupted 就不可重新进入 running；child task 可绑定新的 run 并显式 reopen。
+- 一个 terminal Run 不得留下 pending/running Attempt；旧 Run 没有 Attempt 是合法历史状态，不据此推断模型没有执行。
 - 每个 pool-owned session 最多一个 root agent generation；closing entry 在旧实例完整释放前阻止 replacement，每个 agent 最多一个 active root run。
 - `SessionStore.transaction()` 同时保护 SQLite 与内存 read model；存储失败后不得暴露未提交实体。
 - text delta 立即 live publish，并按 `150ms/8KB` checkpoint durable part；异常退出只允许丢失一个有界尾窗，正常 terminal/close 必须完整。

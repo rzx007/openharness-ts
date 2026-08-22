@@ -6,7 +6,13 @@
  * live SSE 非 abort 断流后按 `state.lastSeq` 指数退避重连；session 路径遇 seq 空洞会 re-snapshot。
  */
 
-import { applyEvent, applyEvents, applySessionSnapshot, createInitialClientState } from "./reducer.js";
+import {
+  applyEvent,
+  applyEvents,
+  applySessionSnapshot,
+  createInitialClientState,
+  UnsupportedSessionEventSchemaVersionError,
+} from "./reducer.js";
 import type {
   EventSyncOptions,
   OpenHarnessClientState,
@@ -100,6 +106,7 @@ async function* liveWithReconnect(
       attempt += 1;
       cursor = state.lastSeq;
     } catch (error) {
+      if (error instanceof UnsupportedSessionEventSchemaVersionError) throw error;
       if (isAbortError(error) || options.signal?.aborted) return;
       yield { state, source: "reconnecting" };
       if (!(await waitForReconnect(delayMs(attempt), options.signal))) return;

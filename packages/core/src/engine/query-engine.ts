@@ -513,6 +513,7 @@ export class QueryEngine implements IQueryEngine {
             { type: "text" as const, text: `Unknown tool: ${toolUse.name}` },
           ],
           isError: true,
+          failureKind: "policy",
         };
         continue;
       }
@@ -532,6 +533,7 @@ export class QueryEngine implements IQueryEngine {
             },
           ],
           isError: true,
+          failureKind: "policy",
         };
         continue;
       }
@@ -579,6 +581,7 @@ export class QueryEngine implements IQueryEngine {
             },
           ],
           isError: true,
+          failureKind: "permission",
         };
         continue;
       }
@@ -618,6 +621,7 @@ export class QueryEngine implements IQueryEngine {
               },
             ],
             isError: true,
+            failureKind: "permission",
           };
           continue;
         }
@@ -645,6 +649,7 @@ export class QueryEngine implements IQueryEngine {
             },
           ],
           isError: true,
+          failureKind: "policy",
         };
         continue;
       }
@@ -656,6 +661,7 @@ export class QueryEngine implements IQueryEngine {
     const timeoutMs = toolExecutionTimeoutMs(this.options.toolTimeoutMs);
     const execResults = await Promise.all(
       executable.map(async ({ idx, toolUse, tool }) => {
+        const toolAttemptId = `tool_attempt_${toolUse.id}_1`;
         try {
           const context: ToolContext = {
             cwd: this.cwd,
@@ -682,6 +688,8 @@ export class QueryEngine implements IQueryEngine {
             result: {
               toolUseId: toolUse.id,
               toolName: toolUse.name,
+              toolAttemptId,
+              ...(result.isError && !result.failureKind ? { failureKind: "command" as const } : {}),
               ...result,
             } as ToolExecutionResult,
           };
@@ -689,13 +697,16 @@ export class QueryEngine implements IQueryEngine {
           if (signal?.aborted) {
             throw signal.reason;
           }
+          const failureKind = error instanceof ToolTimeoutError ? "timeout" as const : "command" as const;
           return {
             idx,
             result: {
               toolUseId: toolUse.id,
               toolName: toolUse.name,
+              toolAttemptId,
               content: [{ type: "text" as const, text: String(error) }],
               isError: true,
+              failureKind,
             } as ToolExecutionResult,
           };
         }

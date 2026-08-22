@@ -10,14 +10,14 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
 - ✅ **工具能力** — 基础 registry 提供文件 / Bash / Web / Grep / MCP / TaskCreate / Agent / Workflow / 媒体与元工具；runtime host 按能力注入 `JobList/Read/Wait/Send/Cancel`、`TerminalOpen` 和 5 个 `Schedule*` 工具。bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
-- ✅ **多 Agent 编排** — 内置 7 agent + 用户/插件自定义 agent（`~/.openharness-ts/agents/*.md`），以及统一 Jobs 控制、`Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、TUI follow-up 执行和 `ohs workflow` 管理命令。daemon/TUI/print 主路径使用 daemon 内 child session；task、child session 与 child run 的关联通过 daemon 事件持久化，跨客户端可重放。
+- ✅ **多 Agent 编排** — 内置 7 agent + 用户/插件自定义 agent（`~/.openharness-ts/agents/*.md`），以及统一 Jobs 控制、`Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、Workflow 工具/CLI 的 reconciliation follow-up spec 生成和 `ohs workflow` 管理命令。daemon/TUI/print 主路径使用 daemon 内 child session；task、child session 与 child run 的关联通过 daemon 事件持久化，跨客户端可重放。
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers/env 静态鉴权、`McpAuth` 配置 Bearer/Header/env 后重连、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
 - ✅ **会话持久化** — TUI / 用户 print / 跨端主线使用 daemon `SessionStore`；单会话通过原子 snapshot + SSE 恢复。daemon 内 `Agent` 使用同一 store 持久化 child session、task 与 child run 的关联；重启会保留审计记录，并将失去进程所有权的 run/task/workflow 明确标记为中断，不会伪造自动续跑。TUI 可用 `/resume` 明确重放某次中断 run 的原始 prompt。
 - ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents/tools_dir 六类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 支持动态 import 插件工具
 - ✅ **Channels Agent 桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 `OpenHarnessAgent`；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-flow.md](docs/channels-flow.md)
-- ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。SwarmPanel UI 保留但尚未接 daemon 事件
+- ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。统一 Jobs Panel 展示和控制 Terminal、后台 shell、child Agent、dream 与 Workflow；Workflow Steps 在所选 Workflow Job 的详情中展示，不再保留独立的后台 Task/Swarm/Workflow Runs 执行面板
 - 🟢 **Daemon Application** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、durable session/transcript、SSE、单 session 串行 run lane、持久化 PermissionBroker、child durable projection 和共享 `@openharness/client` reducer。`DaemonApplication` 集中组装 durable 应用，HTTP server 只负责 transport；`AgentPool` 按 session 缓存真实 `OpenHarnessAgent`。权威导览见 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)，framework 见 [docs/agent-runtime-framework-architecture.md](docs/agent-runtime-framework-architecture.md)，客户端同步见 [docs/client-sync-flow.md](docs/client-sync-flow.md)。
 - ✅ **Terminal** — daemon 统一持有终端 runtime，Desktop 右侧 Panel 与 Agent 连接同一个终端；支持多终端、输出快照恢复、右键菜单、每项目默认 shell、REST/SSE 传输、对话卡片挂接和沙箱终端 MVP。模型用 `TerminalOpen` 创建持久终端，后续统一通过 `JobList/Read/Wait/Send/Cancel` 观察和控制。完整功能、权限和生命周期见 [docs/desktop-terminal-pty-design.md](docs/desktop-terminal-pty-design.md)。
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
@@ -232,7 +232,7 @@ ohs config set daemon.autoStart true|false
 ```
 
 Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-model.md](docs/auth-provider-model.md)。
-Workflow CLI 和 TUI `/workflow` 面板的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
+Workflow CLI 和 TUI `/workflow`（统一 Jobs Panel 的别名）的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
 `ohs provider use <name>` 默认只切换供应商；要同时切模型请加 `-m/--model`，例如 `ohs provider use deepseek -m deepseek-chat`。
 
 TUI 内斜杠命令走 daemon command catalog + client-local UI + template expand；共享呈现/派发在 `@openharness/client` `dispatchSessionCommand`（TUI 适配层 `sessionSlashCommands.ts`）。流程见 [docs/slash-commands-flow.md](docs/slash-commands-flow.md)，清单见 [docs/slash-commands.md](docs/slash-commands.md)；运行时以 TUI `/help` 与 `GET /commands` 为准。

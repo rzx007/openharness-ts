@@ -141,6 +141,32 @@ export interface AgentChildResult {
   error?: string;
 }
 
+/** Limits shared by every descendant of one root agent. The root itself is depth 0. */
+export interface AgentChildBudget {
+  maxDepth: number;
+  maxActiveChildren: number;
+  maxTotalChildren: number;
+}
+
+export interface AgentChildBudgetSnapshot extends AgentChildBudget {
+  activeChildren: number;
+  totalChildren: number;
+}
+
+export type AgentChildBudgetDimension = "depth" | "activeChildren" | "totalChildren";
+
+/** A child was rejected before its environment or worktree was allocated. */
+export class AgentChildBudgetExceededError extends Error {
+  constructor(
+    readonly dimension: AgentChildBudgetDimension,
+    readonly limit: number,
+    readonly current: number,
+  ) {
+    super(`Child agent budget exceeded for ${dimension}: current ${current}, limit ${limit}`);
+    this.name = "AgentChildBudgetExceededError";
+  }
+}
+
 export interface AgentInputReceipt {
   sessionId: string;
   inputId: string;
@@ -239,7 +265,12 @@ export type AgentEventInput =
       type: "tool.completed";
       data: {
         toolUseId: string;
-        result: { content: ContentBlock[]; isError?: boolean };
+        result: {
+          content: ContentBlock[];
+          isError?: boolean;
+          failureKind?: import("./tools").ToolFailureKind;
+          toolAttemptId?: string;
+        };
       };
     }
   | { type: "usage.updated"; data: { usage: import("./usage").UsageSnapshot } }

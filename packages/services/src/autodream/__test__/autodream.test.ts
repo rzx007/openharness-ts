@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Settings } from "@openharness/core";
-import type { TaskInfo } from "../../tasks/index.js";
+import type { DetachedProcessExecution } from "../../executions/index.js";
 import {
   readLastConsolidatedAt,
   tryAcquireConsolidationLock,
@@ -51,12 +51,12 @@ function settings(memory?: Settings["memory"]): Settings {
   } as Settings;
 }
 
-function fakeRunner(): DreamTaskRunner & { tasks: TaskInfo[]; fire: (task: TaskInfo, event: string) => void } {
-  const listeners: Array<(task: TaskInfo, event: string) => void> = [];
-  const tasks: TaskInfo[] = [];
+function fakeRunner(): DreamTaskRunner & { tasks: DetachedProcessExecution[]; fire: (task: DetachedProcessExecution, event: string) => void } {
+  const listeners: Array<(task: DetachedProcessExecution, event: string) => void> = [];
+  const tasks: DetachedProcessExecution[] = [];
   return {
     tasks,
-    async createShellTask(options) {
+    async startShellExecution(options) {
       const task = {
         id: `task_${tasks.length + 1}`,
         type: "dream",
@@ -67,11 +67,11 @@ function fakeRunner(): DreamTaskRunner & { tasks: TaskInfo[]; fire: (task: TaskI
         env: options.env,
         createdAt: Date.now(),
         metadata: {},
-      } as unknown as TaskInfo;
+      } as unknown as DetachedProcessExecution;
       tasks.push(task);
       return task;
     },
-    registerTaskListener(listener) {
+    registerExecutionListener(listener) {
       listeners.push(listener);
       return () => {
         const idx = listeners.indexOf(listener);

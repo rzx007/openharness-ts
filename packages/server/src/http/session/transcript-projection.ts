@@ -135,6 +135,11 @@ export class SessionTranscriptProjection {
           toolUseId: event.toolUse.id,
           toolName: event.toolUse.name,
           input: event.toolUse.input,
+          metadata: {
+            toolCallId: event.toolUse.id,
+            toolAttemptId: `tool_attempt_${event.toolUse.id}_1`,
+            outcome: "pending",
+          },
         });
         state.toolParts.set(event.toolUse.id, {
           partId: part.id,
@@ -158,6 +163,12 @@ export class SessionTranscriptProjection {
           ...(active?.input ? { input: active.input } : {}),
           output: event.result,
           isError: event.result.isError === true,
+          metadata: {
+            toolCallId: event.toolUseId,
+            toolAttemptId: event.result.toolAttemptId ?? `tool_attempt_${event.toolUseId}_1`,
+            outcome: event.result.isError ? "failed" : "completed",
+            ...(event.result.failureKind ? { failureKind: event.result.failureKind } : {}),
+          },
         });
         state.toolParts.delete(event.toolUseId);
         return { completedToolName: active?.toolName };
@@ -222,6 +233,14 @@ export class SessionTranscriptProjection {
         messageId: part.messageId,
         type: part.type,
         status,
+        ...(part.type === "tool" ? {
+          metadata: {
+            ...part.metadata,
+            outcome: status,
+            failureKind: status === "interrupted" ? "interrupted" : "unknown_outcome",
+            ...(status === "failed" ? { outcomeWarning: "Tool may already have executed" } : {}),
+          },
+        } : {}),
       });
     }
   }

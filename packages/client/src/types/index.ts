@@ -21,10 +21,12 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionRunAttemptRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 } from "@openharness/services";
+import type { JobSnapshot } from "@openharness/jobs";
 
 export type {
   CreateScheduledTaskInput,
@@ -40,7 +42,8 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
-  SessionTaskRecord,
+  SessionRunAttemptRecord,
+  SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
 };
@@ -260,25 +263,6 @@ export interface McpServerStatus {
   error?: string;
 }
 
-export interface TaskSnapshot {
-  id: string;
-  type: string;
-  status: string;
-  description: string;
-  cwd: string;
-  sessionId?: string;
-  command?: string;
-  createdAt: number;
-  finishedAt?: number;
-  exitCode?: number;
-}
-
-export interface ListTasksOptions {
-  sessionId?: string;
-  cwd?: string;
-  status?: string;
-}
-
 export interface MemoryEntryRecord {
   id: string;
   content: string;
@@ -381,10 +365,18 @@ export interface HookInfo {
   origin: "settings" | "runtime";
 }
 
-export interface CreateTaskInput {
-  cwd?: string;
-  sessionId?: string;
+/** `POST /background-shells` 请求体。 */
+export interface CreateBackgroundShellInput {
+  sessionId: string;
   command: string;
+  cwd?: string;
+  description?: string;
+}
+
+/** `POST /background-shells` 响应。 */
+export interface CreateBackgroundShellResult {
+  jobId: string;
+  snapshot: JobSnapshot;
 }
 
 /** `POST /sessions/:id/interrupt` 响应。 */
@@ -404,7 +396,8 @@ export interface SessionBucket {
   messages: SessionMessageRecord[];
   partsByMessageId: Record<string, SessionMessagePartRecord[]>;
   runs: Record<string, SessionRunRecord>;
-  tasks: Record<string, SessionTaskRecord>;
+  attempts: Record<string, SessionRunAttemptRecord>;
+  tasks: Record<string, SessionExecutionRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }
 

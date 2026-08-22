@@ -1,4 +1,5 @@
 import type {
+  AgentChildBudget,
   PermissionMode,
   Settings,
   StreamingMessageClient,
@@ -32,4 +33,6 @@ export interface OpenHarnessAgentConfiguration {
   terminal?: AgentTerminalHost;
   /** Host-owned long-running job controller. Descendant agents inherit it. */
   jobs?: AgentJobHost;
+  /** Overrides the root-tree child-agent limits. */
+  childBudget?: Partial<AgentChildBudget>;
 }

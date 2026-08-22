@@ -1,5 +1,6 @@
 import { runtimeMetadataChanged } from "@openharness/services";
 import type { Context } from "hono";
+import type { RuntimeMetricsSnapshot } from "../shared/runtime-metrics.js";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -22,9 +23,11 @@ export interface OpenHarnessRuntimeSnapshot {
   runs: { total: number; byStatus: Record<string, number> };
   tasks: { total: number; byStatus: Record<string, number> };
   permissions: { total: number; byStatus: Record<string, number> };
+  projectionSettlements: { total: number; pending: number; byStatus: Record<string, number> };
   sseClientCount: number;
   warmAgentCount: number;
   coordinator: { activeRunCount: number; queuedRunCount: number };
+  metrics: RuntimeMetricsSnapshot;
 }
 
 export type SseClient = {
@@ -34,6 +37,7 @@ export type SseClient = {
 };
 
 export const DAEMON_RESTART_RUN_REASON = "Daemon restarted before the run completed";
+export const DAEMON_RESTART_INPUT_REASON = "Daemon restarted before the input was assigned to a run";
 export const DAEMON_RESTART_TASK_REASON = "Daemon restarted before the task completed";
 export const DAEMON_RESTART_PERMISSION_REASON = "Daemon restarted before the permission was resolved";
 export const DAEMON_RESTART_WORKFLOW_REASON = "Daemon restarted before the workflow completed";

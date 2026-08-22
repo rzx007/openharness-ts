@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
 import { createWorkflowPlan, createWorkflowRunSnapshot, WorkflowRunStore } from "@openharness/coordinator";
+import type { JobSnapshot } from "@openharness/jobs";
 import type {
   AgentChildInput,
   AgentChildDirectory,
@@ -21,12 +22,13 @@ import type {
 } from "@openharness/core";
 import type { AgentCompactResult, AgentInspection, AgentRememberResult, OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { CommandCatalogProvider } from "../../commands/commands.js";
-import { SessionStore } from "@openharness/services";
+import { getDetachedProcessSupervisor, SessionStore } from "@openharness/services";
 import type { CreateDaemonAgent, CreateDaemonAgentContext } from "../../daemon/daemon-agent.js";
 import { OpenHarnessHttpServer, startOpenHarnessServer } from "../server.js";
 import { getDefaultSessionStorePath } from "../../daemon/paths.js";
 import type { OpenHarnessServerOptions, OpenHarnessServerServices } from "../server.js";
 import type { ObservabilityEvent } from "../../shared/observability.js";
+import { projectionSettlementInput } from "../agent/projection-settlement-recovery.js";
 
 interface TestAgentProgram {
   runPrompt(input: any, run: TestAgentRunContext): Promise<unknown>;
@@ -312,6 +314,23 @@ function auth(token: string): HeadersInit {
   return { authorization: `Bearer ${token}` };
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 async function waitForEvent(
   baseUrl: string,
   token: string,
@@ -381,6 +400,39 @@ describe("OpenHarnessHttpServer", () => {
       await expect(server.close()).rejects.toBe(failure);
       expect(closeStore).toHaveBeenCalledOnce();
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for background process trees to exit before shutdown completes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-process-shutdown-"));
+    const pidFile = join(dir, "child.pid");
+    const server = new OpenHarnessHttpServer({
+      storePath: join(dir, "sessions.db"),
+      logger: () => {},
+    });
+    const supervisor = getDetachedProcessSupervisor({ cwd: dir, sessionId: "shutdown-session" });
+
+    try {
+      await supervisor.startShellExecution({
+        argv: [
+          process.execPath,
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1_000)`,
+        ],
+        cwd: dir,
+        description: "long-running shutdown probe",
+        sessionId: "shutdown-session",
+      });
+      await waitUntil(() => existsSync(pidFile));
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      expect(isProcessAlive(pid)).toBe(true);
+
+      await server.close();
+
+      expect(isProcessAlive(pid)).toBe(false);
+    } finally {
+      await server.close().catch(() => {});
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -544,6 +596,7 @@ describe("OpenHarnessHttpServer", () => {
         runs: { total: 0, byStatus: {} },
         tasks: { total: 0, byStatus: {} },
         permissions: { total: 0, byStatus: {} },
+        projectionSettlements: { total: 0, pending: 0, byStatus: {} },
         sseClientCount: 0,
         warmAgentCount: 0,
         coordinator: { activeRunCount: 0, queuedRunCount: 0 },
@@ -763,6 +816,50 @@ describe("OpenHarnessHttpServer", () => {
         first.store.createSessionTask({
           id: "task-stale", sessionId: "s1", type: "agent", description: "stale child", cwd: process.cwd(),
         });
+        first.store.createSession({
+          id: "child-settlement-session",
+          parentId: "s1",
+          cwd: process.cwd(),
+          model: "m",
+        });
+        first.store.createSessionTask({
+          id: "child-settlement",
+          sessionId: "s1",
+          childSessionId: "child-settlement-session",
+          type: "agent",
+          description: "terminal child awaiting projection repair",
+          cwd: process.cwd(),
+        });
+        first.store.createProjectionSettlement(projectionSettlementInput(
+          "daemon-agent:crashed-agent",
+          "s1",
+          {
+            id: "child-close-before-crash",
+            sequence: 17,
+            occurredAt: new Date().toISOString(),
+            type: "child.closed",
+            data: {
+              childId: "child-settlement",
+              sessionId: "child-settlement-session",
+              result: { status: "completed", output: "recovered child output" },
+            },
+            context: {
+              agentId: "crashed-agent",
+              sessionId: "s1",
+              childId: "child-settlement",
+              traceId: "trace-child-settlement",
+            },
+          },
+          "retry-terminal-projection",
+          new Error("daemon crashed before child task completion persisted"),
+        ));
+        first.store.admitPrompt({
+          id: "input-orphaned-before-restart",
+          sessionId: "s1",
+          delivery: "steer",
+          content: "not yet delivered",
+          metadata: { traceId: "trace-orphaned" },
+        });
       } finally {
         await first.close();
       }
@@ -779,7 +876,7 @@ describe("OpenHarnessHttpServer", () => {
         const state = await (await fetch(`${listen2.url}/sessions/s1/state`, { headers: auth(token) })).json() as {
           messages: Array<{ role: string }>;
           parts: Array<{ id: string; text?: string; status: string }>;
-          runs: Array<{ id: string; status: string }>;
+          runs: Array<{ id: string; inputId?: string; status: string; error?: string; metadata: Record<string, unknown> }>;
           tasks: Array<{ id: string; status: string }>;
           permissions: Array<{ id: string; status: string; decision?: string }>;
         };
@@ -787,7 +884,19 @@ describe("OpenHarnessHttpServer", () => {
         expect(state.parts[0]?.text).toBe("survived restart");
         expect(state.parts.find((part) => part.id === "part-stale")?.status).toBe("interrupted");
         expect(state.runs.find((run) => run.id === "r-stale")?.status).toBe("interrupted");
+        expect(state.runs.find((run) => run.inputId === "input-orphaned-before-restart")).toMatchObject({
+          status: "interrupted",
+          error: "Daemon restarted before the input was assigned to a run",
+          metadata: {
+            traceId: "trace-orphaned",
+            recovery: expect.objectContaining({ kind: "orphan_input" }),
+          },
+        });
         expect(state.tasks.find((task) => task.id === "task-stale")?.status).toBe("interrupted");
+        expect(state.tasks.find((task) => task.id === "child-settlement")).toMatchObject({
+          status: "completed",
+          output: "recovered child output",
+        });
         expect(state.permissions.find((request) => request.id === "permission-stale")).toMatchObject({
           status: "expired",
           decision: "Daemon restarted before the permission was resolved",
@@ -800,6 +909,16 @@ describe("OpenHarnessHttpServer", () => {
         expect(events.events.map((event) => event.type)).toContain("session.run.updated");
         expect(events.events.map((event) => event.type)).toContain("session.task.updated");
         expect(events.events.map((event) => event.type)).toContain("permission.replied");
+        expect(events.events.map((event) => event.type)).toContain("agent.child.closed");
+
+        const runtime = await (await fetch(`${listen2.url}/debug/runtime`, { headers: auth(token) })).json() as {
+          projectionSettlements: { total: number; pending: number; byStatus: Record<string, number> };
+        };
+        expect(runtime.projectionSettlements).toMatchObject({
+          total: 1,
+          pending: 0,
+          byStatus: { resolved: 1 },
+        });
       } finally {
         await second.close();
       }
@@ -1354,38 +1473,6 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
-  it("lists and stops session-scoped tasks", async () => {
-    const { getTaskManager, resetTaskManager } = await import("@openharness/services");
-    const cwd = process.cwd();
-    resetTaskManager({ cwd, sessionId: "s1" });
-    const manager = getTaskManager({ cwd, sessionId: "s1" });
-    const task = await manager.createShellTask({
-      argv: [process.execPath, "-e", "setInterval(()=>{},1000)"],
-      description: "long runner",
-      cwd,
-      sessionId: "s1",
-    });
-    await withServer(async ({ baseUrl, token }) => {
-      await fetch(`${baseUrl}/sessions`, {
-        method: "POST",
-        headers: { ...auth(token), "content-type": "application/json" },
-        body: JSON.stringify({ id: "s1", cwd, model: "m" }),
-      });
-      const listed = await (await fetch(`${baseUrl}/tasks?sessionId=s1`, { headers: auth(token) })).json() as {
-        tasks: Array<{ id: string }>;
-      };
-      expect(listed.tasks.map((row) => row.id)).toContain(task.id);
-
-      const stopped = await fetch(`${baseUrl}/tasks/${task.id}/stop?sessionId=s1`, {
-        method: "POST",
-        headers: auth(token),
-      });
-      expect(stopped.status).toBe(200);
-      expect(((await stopped.json()) as { task: { status: string } }).task.status).toBe("stopped");
-    });
-    resetTaskManager({ cwd, sessionId: "s1" });
-  });
-
   it("returns MCP inspect status for a warmed session runtime", async () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
@@ -1703,7 +1790,7 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
-  it("exposes project/plugin/hooks/git/task-create resource APIs", async () => {
+  it("exposes project/plugin/hooks/git and background-shell resource APIs", async () => {
     await withServer(async ({ baseUrl, token }) => {
       const init = await fetch(`${baseUrl}/project/init`, {
         method: "POST",
@@ -1777,18 +1864,50 @@ describe("OpenHarnessHttpServer", () => {
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({ id: "s-task", cwd: process.cwd(), model: "m" }),
       });
-      const created = await fetch(`${baseUrl}/tasks`, {
+      const successfulShellCommand = `${process.execPath} -e "process.exit(0)"`;
+      const missingSession = await fetch(`${baseUrl}/background-shells`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: "missing-session", command: successfulShellCommand }),
+      });
+      expect(missingSession.status).toBe(404);
+      await expect(missingSession.json()).resolves.toEqual({ error: "Session not found" });
+
+      const oldList = await fetch(`${baseUrl}/tasks?sessionId=s-task`, {
+        headers: auth(token),
+      });
+      expect(oldList.status).toBe(404);
+
+      const oldCreate = await fetch(`${baseUrl}/tasks`, {
         method: "POST",
         headers: { ...auth(token), "content-type": "application/json" },
         body: JSON.stringify({
           sessionId: "s-task",
-          command: `${process.execPath} -e "process.exit(0)"`,
+          command: successfulShellCommand,
         }),
       });
-      expect(created.status).toBe(201);
-      const createdBody = await created.json() as { task: { id: string; status: string; command?: string } };
-      expect(createdBody.task.id).toMatch(/^task_/);
-      expect(createdBody.task.command).toContain("process.exit(0)");
+      expect(oldCreate.status).toBe(404);
+
+      const backgroundShell = await fetch(`${baseUrl}/background-shells`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: "s-task", command: successfulShellCommand }),
+      });
+      expect(backgroundShell.status).toBe(201);
+      const receipt = await backgroundShell.json() as { jobId: string; snapshot: JobSnapshot };
+      expect(receipt.snapshot).toMatchObject({
+        id: receipt.jobId,
+        kind: "shell",
+        ownerSession: "s-task",
+      });
+
+      const read = await fetch(`${baseUrl}/jobs/${receipt.jobId}?sessionId=s-task`, {
+        headers: auth(token),
+      });
+      expect(read.status).toBe(200);
+      await expect(read.json()).resolves.toMatchObject({
+        snapshot: { id: receipt.jobId, kind: "shell", ownerSession: "s-task" },
+      });
     }, {
       projectInitService: {
         async init() {
@@ -1910,6 +2029,42 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
+  it("compensates a real background shell when post-create Job normalization fails", async () => {
+    await withServer(async ({ baseUrl, token, server }) => {
+      const sessionId = "s-background-normalization";
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: sessionId, cwd: process.cwd(), model: "m" }),
+      });
+      const internals = server as unknown as {
+        jobs: { read: (...args: unknown[]) => Promise<unknown> };
+        daemon: { backgroundShells: { stop(taskId: string, input: { sessionId: string }): Promise<unknown> } };
+      };
+      internals.jobs.read = vi.fn(async () => { throw new Error("normalization unavailable"); });
+
+      try {
+        const response = await fetch(`${baseUrl}/background-shells`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            command: `${process.execPath} -e "setInterval(() => {}, 1000)"`,
+          }),
+        });
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({ error: "normalization unavailable" });
+        const [task] = server.store.listSessionTasks(sessionId);
+        expect(task).toBeDefined();
+        expect(task?.status).not.toBe("running");
+      } finally {
+        const [task] = server.store.listSessionTasks(sessionId);
+        if (task) await internals.daemon.backgroundShells.stop(task.id, { sessionId }).catch(() => {});
+      }
+    });
+  });
+
   it("rewinds a session transcript via store replace", async () => {
     const runtimeFactory: TestAgentProgramFactory = {
       async createRuntime() {
@@ -2025,9 +2180,10 @@ describe("OpenHarnessHttpServer", () => {
       expect(created.status).toBe(201);
 
       const firstEvents = await (await fetch(`${baseUrl}/events`, { headers: auth(token) })).json() as {
-        events: Array<{ seq: number; type: string }>;
+        events: Array<{ seq: number; type: string; schemaVersion: number }>;
       };
       expect(firstEvents.events.map((event) => event.type)).toEqual(["session.created"]);
+      expect(firstEvents.events.map((event) => event.schemaVersion)).toEqual([1]);
       const cursor = firstEvents.events[0]!.seq;
 
       const prompt = await fetch(`${baseUrl}/sessions/s1/prompts`, {
@@ -2043,9 +2199,10 @@ describe("OpenHarnessHttpServer", () => {
       expect(sessions.sessions.map((session) => session.id)).toEqual(["s1"]);
 
       const nextEvents = await (await fetch(`${baseUrl}/events?cursor=${cursor}`, { headers: auth(token) })).json() as {
-        events: Array<{ type: string }>;
+        events: Array<{ type: string; schemaVersion: number }>;
       };
       expect(nextEvents.events.map((event) => event.type)).toEqual(["session.input.admitted"]);
+      expect(nextEvents.events.map((event) => event.schemaVersion)).toEqual([1]);
 
       const snapshot = await (await fetch(`${baseUrl}/sessions/s1/state`, { headers: auth(token) })).json() as {
         cursor: number;

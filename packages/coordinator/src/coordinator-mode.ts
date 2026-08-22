@@ -18,7 +18,7 @@ const WORKER_TOOLS = [
   "Grep",
   "WebFetch",
   "WebSearch",
-  "TaskCreate",
+  "BackgroundShellCreate",
   "JobList",
   "JobRead",
   "Skill",

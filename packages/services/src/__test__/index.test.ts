@@ -2,16 +2,16 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { CompactService } from "../compact/index.js";
 import { estimateTokens } from "../token-estimation/index.js";
 import { LspClient } from "../lsp/index.js";
-import { TaskManager } from "../tasks/index.js";
+import { DetachedProcessSupervisor } from "../executions/index.js";
 import type { Message } from "@openharness/core";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const taskManagers: TaskManager[] = [];
+const taskManagers: DetachedProcessSupervisor[] = [];
 
-function createTestTaskManager(): TaskManager {
-  const manager = new TaskManager(mkdtempSync(join(tmpdir(), "oh-services-task-")));
+function createTestDetachedProcessSupervisor(): DetachedProcessSupervisor {
+  const manager = new DetachedProcessSupervisor(mkdtempSync(join(tmpdir(), "oh-services-task-")));
   taskManagers.push(manager);
   return manager;
 }
@@ -121,63 +121,63 @@ describe("LspClient", () => {
   });
 });
 
-describe("TaskManager", () => {
+describe("DetachedProcessSupervisor", () => {
   it("creates a shell task and tracks it", async () => {
-    const mgr = createTestTaskManager();
-    const task = await mgr.createShellTask("echo hello", "test echo", process.cwd());
+    const mgr = createTestDetachedProcessSupervisor();
+    const task = await mgr.startShellExecution("echo hello", "test echo", process.cwd());
     expect(task.id).toMatch(/^task_\d+$/);
     expect(task.type).toBe("shell");
     expect(task.status).toBe("running");
-    expect(mgr.getTask(task.id)).toBe(task);
+    expect(mgr.getExecution(task.id)).toBe(task);
   });
 
   it("lists tasks", async () => {
-    const mgr = createTestTaskManager();
-    await mgr.createShellTask("echo 1", "t1", process.cwd());
-    await mgr.createAgentTask("do stuff", "t2", process.cwd());
-    const tasks = mgr.listTasks();
+    const mgr = createTestDetachedProcessSupervisor();
+    await mgr.startShellExecution("echo 1", "t1", process.cwd());
+    await mgr.startAgentProcess("do stuff", "t2", process.cwd());
+    const tasks = mgr.listExecutions();
     expect(tasks).toHaveLength(2);
   });
 
   it("filters tasks by status", async () => {
-    const mgr = createTestTaskManager();
+    const mgr = createTestDetachedProcessSupervisor();
     // Agent task without argv/command is marked failed (needs-argv), not silently pending.
-    await mgr.createAgentTask("no-argv task", "desc", process.cwd());
-    const failed = mgr.listTasks("failed");
+    await mgr.startAgentProcess("no-argv task", "desc", process.cwd());
+    const failed = mgr.listExecutions("failed");
     expect(failed).toHaveLength(1);
     expect(failed[0]!.type).toBe("agent");
   });
 
   it("creates an agent task without argv as failed needs-argv (no silent pending)", async () => {
-    const mgr = createTestTaskManager();
-    const task = await mgr.createAgentTask("write tests", "agent task", process.cwd(), "gpt-4");
+    const mgr = createTestDetachedProcessSupervisor();
+    const task = await mgr.startAgentProcess("write tests", "agent task", process.cwd(), "gpt-4");
     expect(task.type).toBe("agent");
     expect(task.status).toBe("failed");
     expect(task.metadata.needs_argv).toBe("1");
     expect(task.prompt).toBe("write tests");
   });
 
-  it("readTaskOutput throws for unknown task", () => {
-    const mgr = createTestTaskManager();
-    expect(() => mgr.readTaskOutput("nope")).toThrow("not found");
+  it("readOutput throws for unknown task", () => {
+    const mgr = createTestDetachedProcessSupervisor();
+    expect(() => mgr.readOutput("nope")).toThrow("not found");
   });
 
-  it("stopTask throws for unknown task", async () => {
-    const mgr = createTestTaskManager();
-    await expect(mgr.stopTask("nope")).rejects.toThrow("not found");
+  it("stopExecution throws for unknown task", async () => {
+    const mgr = createTestDetachedProcessSupervisor();
+    await expect(mgr.stopExecution("nope")).rejects.toThrow("not found");
   });
 
-  it("writeToTask throws for unknown task", async () => {
-    const mgr = createTestTaskManager();
-    await expect(mgr.writeToTask("nope", "msg")).rejects.toThrow("not found");
+  it("writeInput throws for unknown task", async () => {
+    const mgr = createTestDetachedProcessSupervisor();
+    await expect(mgr.writeInput("nope", "msg")).rejects.toThrow("not found");
   });
 
   it("shell task completes and produces output", async () => {
     const tasksDir = mkdtempSync(join(tmpdir(), "oh-services-task-"));
-    const mgr = new TaskManager(tasksDir);
+    const mgr = new DetachedProcessSupervisor(tasksDir);
     try {
-      const task = await mgr.createShellTask("echo done", "test", process.cwd());
-      const result = await mgr.awaitTask(task.id, { timeoutMs: 5_000 });
+      const task = await mgr.startShellExecution("echo done", "test", process.cwd());
+      const result = await mgr.awaitExecution(task.id, { timeoutMs: 5_000 });
       expect(result.output).toContain("done");
       expect(result.status).toBe("completed");
     } finally {

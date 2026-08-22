@@ -22,6 +22,8 @@ export interface ToolUseEndEvent {
   result: {
     content: ContentBlock[];
     isError?: boolean;
+    failureKind?: import("./tools").ToolFailureKind;
+    toolAttemptId?: string;
   };
 }
 

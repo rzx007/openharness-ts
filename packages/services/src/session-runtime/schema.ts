@@ -137,6 +137,32 @@ export const sessionRuns = sqliteTable(
   ],
 );
 
+export const sessionRunAttempts = sqliteTable(
+  "session_run_attempt",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    status: text("status").notNull(),
+    provider: text("provider"),
+    model: text("model"),
+    retryReason: text("retry_reason"),
+    errorKind: text("error_kind"),
+    error: text("error"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    startedAt: integer("started_at"),
+    finishedAt: integer("finished_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("session_run_attempt_run_sequence_unique").on(table.runId, table.sequence),
+    index("session_run_attempt_run_idx").on(table.runId),
+    index("session_run_attempt_status_idx").on(table.status),
+  ],
+);
+
 export const sessionTasks = sqliteTable(
   "session_task",
   {
@@ -186,6 +212,7 @@ export const sessionEvents = sqliteTable(
     id: text("id").primaryKey(),
     seq: integer("seq").notNull().unique(),
     type: text("type").notNull(),
+    schemaVersion: integer("schema_version").notNull().default(1),
     sessionId: text("session_id"),
     payloadJson: text("payload_json").notNull(),
     createdAt: integer("created_at").notNull(),
@@ -199,6 +226,33 @@ export const sessionEventSequence = sqliteTable("session_event_sequence", {
   id: integer("id").primaryKey(),
   reservedThrough: integer("reserved_through").notNull(),
 });
+
+export const projectionSettlements = sqliteTable(
+  "projection_settlement",
+  {
+    id: text("id").primaryKey(),
+    projector: text("projector").notNull(),
+    rootSessionId: text("root_session_id").notNull(),
+    eventSequence: integer("event_sequence").notNull(),
+    action: text("action").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    status: text("status").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    nextRetryAt: integer("next_retry_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    resolvedAt: integer("resolved_at"),
+  },
+  (table) => [
+    uniqueIndex("projection_settlement_event_idx").on(
+      table.projector,
+      table.rootSessionId,
+      table.eventSequence,
+    ),
+    index("projection_settlement_status_retry_idx").on(table.status, table.nextRetryAt),
+  ],
+);
 
 export const scheduledTasks = sqliteTable(
   "scheduled_task",

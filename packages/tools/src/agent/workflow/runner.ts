@@ -9,7 +9,7 @@ import type {
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { AwaitTaskResult } from "@openharness/services";
+import type { AwaitExecutionResult } from "@openharness/services";
 import type { AgentExecutionContext } from "@openharness/core";
 import { promisify } from "node:util";
 import { awaitFrameworkChildTask } from "../child-task.js";
@@ -54,7 +54,7 @@ export interface AgentWorkflowRunnerOptions {
   fromAgent?: string;
   agent?: AgentExecutionContext;
   spawnWorker?: (config: WorkflowWorkerSpawnConfig) => Promise<WorkflowWorkerSpawnResult>;
-  awaitTask?: (taskId: string, options?: { timeoutMs?: number }) => Promise<AwaitTaskResult>;
+  awaitTask?: (taskId: string, options?: { timeoutMs?: number }) => Promise<AwaitExecutionResult>;
   stopTask?: (taskId: string) => Promise<unknown>;
   getChangedFiles?: (cwd: string) => Promise<string[]>;
   getDiffSummary?: (cwd: string) => Promise<WorkflowDiffSummary>;
@@ -64,7 +64,7 @@ export interface AgentWorkflowRunnerOptions {
 /**
  * Build a WorkflowRunner that executes each workflow task as a child worker.
  * Framework children are awaited directly; externally spawned workers use the
- * durable TaskManager representation supplied by their host.
+ * durable detached-process representation supplied by their host.
  *
  * This lives in @openharness/tools, not @openharness/coordinator, so the
  * coordinator package can stay a pure scheduler with no dependency on services
@@ -164,7 +164,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
 async function stopTimedOutTask(
   stopTask: (taskId: string) => Promise<unknown>,
   taskId: string,
-  waited: AwaitTaskResult,
+  waited: AwaitExecutionResult,
 ): Promise<void> {
   if (!waited.timedOut) return;
   try {
@@ -222,14 +222,14 @@ function indentBlock(text: string): string {
 function mapAwaitedTaskToWorkerResult(
   task: WorkflowTask,
   spawn: WorkflowWorkerSpawnResult,
-  waited: AwaitTaskResult,
+  waited: AwaitExecutionResult,
   diff: WorkflowDiffSummary | undefined,
 ): WorkflowWorkerResult {
   const status = waited.timedOut
     ? "failed"
-    : waited.status === "completed"
+    : waited.failureKind === "completed" || (!waited.failureKind && waited.status === "completed")
       ? "completed"
-      : waited.status === "stopped"
+      : waited.failureKind === "interrupted" || waited.failureKind === "stopped" || (!waited.failureKind && waited.status === "stopped")
         ? "killed"
         : "failed";
   const detail = waited.timedOut
@@ -249,6 +249,7 @@ function mapAwaitedTaskToWorkerResult(
       ...(spawn.notice ? { notice: spawn.notice } : {}),
       ...(diff && diff.changedFiles.length > 0 ? { changedFiles: diff.changedFiles, diff } : {}),
       ...(waited.timedOut ? { timedOut: true } : {}),
+      ...(waited.failureKind ? { failureKind: waited.failureKind } : {}),
     },
   };
 }
@@ -480,12 +481,12 @@ async function defaultAwaitTask(
   taskId: string,
   options?: { timeoutMs?: number },
   agent?: AgentExecutionContext,
-): Promise<AwaitTaskResult> {
+): Promise<AwaitExecutionResult> {
   if (agent?.children.hasChildAgent(taskId)) {
     return await awaitFrameworkChildTask(agent.children, taskId, options?.timeoutMs);
   }
-  const { getTaskManager } = await import("@openharness/services");
-  return getTaskManager({ cwd, sessionId }).awaitTask(taskId, options);
+  const { getDetachedProcessSupervisor } = await import("@openharness/services");
+  return getDetachedProcessSupervisor({ cwd, sessionId }).awaitExecution(taskId, options);
 }
 
 async function defaultStopTask(
@@ -498,8 +499,8 @@ async function defaultStopTask(
     await agent.children.interruptChildAgent(taskId, "Workflow task timed out");
     return;
   }
-  const { getTaskManager } = await import("@openharness/services");
-  return getTaskManager({ cwd, sessionId }).stopTask(taskId);
+  const { getDetachedProcessSupervisor } = await import("@openharness/services");
+  return getDetachedProcessSupervisor({ cwd, sessionId }).stopExecution(taskId);
 }
 
 async function defaultGetAgentDefinition(name: string): Promise<AgentDefinition | undefined> {
