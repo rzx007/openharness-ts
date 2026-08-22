@@ -1,8 +1,10 @@
-import { ChevronDown, Mic, Plus, ShieldCheck } from "lucide-react"
+import { IconFilePlus, IconFolderPlus, IconPhotoPlus } from "@tabler/icons-react"
+import { ChevronDown, Mic, ShieldCheck } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
+import { PlusMenu } from "@renderer/components/ui/plus-menu"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
 import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
 import { ModelPicker } from "./model-picker"
@@ -70,10 +72,15 @@ export function Composer({
         }}
         className="block max-h-44 min-h-18 w-full resize-none bg-transparent px-4 pt-3 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/65"
       />
-      <div className="flex h-12 min-w-0 items-center gap-1 overflow-hidden px-3 pb-2">
-        <ComposerIconButton label="添加附件">
-          <Plus />
-        </ComposerIconButton>
+      <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
+        <PlusMenu
+          items={[
+            { id: "file", label: "添加文件", icon: <IconFilePlus className="size-4" /> },
+            { id: "image", label: "添加图片", icon: <IconPhotoPlus className="size-4" /> },
+            { id: "folder", label: "添加文件夹", icon: <IconFolderPlus className="size-4" /> },
+          ]}
+          triggerLabel={{ open: "关闭附件菜单", closed: "添加附件" }}
+        />
         <Popover
           open={activePicker === "permission"}
           onOpenChange={(open) => setActivePicker(open ? "permission" : null)}

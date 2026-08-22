@@ -75,6 +75,7 @@ function bucket(
       parts.filter((candidate) => candidate.messageId === row.id),
     ])),
     runs: {},
+    attempts: {},
     tasks: {},
     permissions: {},
   };

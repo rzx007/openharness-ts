@@ -640,3 +640,17 @@
   background: color-mix(in oklab, var(--foreground) 18%, transparent);
   background-clip: content-box;
 }
+
+@keyframes plus-menu-anticip {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(var(--plus-menu-anticip, 5px));
+  }
+}
+
+.plus-menu-anticipating {
+  animation: plus-menu-anticip var(--plus-menu-anticip-dur, 700ms) ease-out;
+}
