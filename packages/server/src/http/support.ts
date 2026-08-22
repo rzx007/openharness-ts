@@ -3,6 +3,10 @@ import {
   type ProtocolError,
 } from "@openharness/protocol";
 import type { Context } from "hono";
+import {
+  APPLICATION_ERROR_HTTP_STATUS,
+  ApplicationError,
+} from "../shared/application-error.js";
 export {
   DAEMON_RESTART_INPUT_REASON,
   DAEMON_RESTART_PERMISSION_REASON,
@@ -102,6 +106,21 @@ export function jsonResponse(body: unknown, status = 200): Response {
 
 export function errorResponse(status: number, message: string): Response {
   return jsonResponse({ error: message }, status);
+}
+
+/** Application error code 到 HTTP status 的唯一转换位置。 */
+export function applicationErrorResponse(
+  error: unknown,
+  fallbackStatus = 500,
+): Response {
+  const status =
+    error instanceof ApplicationError
+      ? APPLICATION_ERROR_HTTP_STATUS[error.code]
+      : fallbackStatus;
+  return errorResponse(
+    status,
+    error instanceof Error ? error.message : String(error),
+  );
 }
 
 export function protocolValidationErrorResponse(error: unknown): Response {

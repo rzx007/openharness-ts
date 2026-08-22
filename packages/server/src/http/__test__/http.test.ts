@@ -347,22 +347,61 @@ async function waitForEvent(
 }
 
 describe("OpenHarnessHttpServer", () => {
-  it("aggregates daemon, listener, SSE, and store close failures after attempting every stage", async () => {
+  it("can use an injected application without creating or closing its resources", async () => {
+    const ready = vi.fn(async () => {});
+    const close = vi.fn(async () => {});
+    const runtimeSnapshot = vi.fn(() => ({
+      startedAt: 1,
+      uptimeMs: 2,
+      sessions: { total: 0, byStatus: {} },
+      runs: { total: 0, byStatus: {} },
+      tasks: { total: 0, byStatus: {} },
+      permissions: { total: 0, byStatus: {} },
+      projectionSettlements: { total: 0, pending: 0, byStatus: {} },
+      sseClientCount: 0,
+      warmAgentCount: 0,
+      coordinator: { activeRunCount: 0, queuedRunCount: 0 },
+      metrics: { counters: {}, gauges: {}, histograms: {} },
+    }));
+    const application = {
+      ready,
+      close,
+      store: {},
+      events: {},
+      terminals: {},
+      jobs: {},
+      projects: {},
+      sessions: {},
+      queries: {},
+      permissions: {},
+      backgroundShells: {},
+      maintenance: {},
+      schedules: {},
+      control: { runtimeSnapshot },
+    } as any;
+    const server = new OpenHarnessHttpServer({ application, logger: () => {} });
+
+    const response = await server.app.request("/health");
+    expect(response.status).toBe(200);
+    expect(runtimeSnapshot).toHaveBeenCalledOnce();
+    await server.close();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("aggregates application, listener, and SSE close failures after attempting every stage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-close-matrix-"));
     const server = new OpenHarnessHttpServer({ storePath: join(dir, "sessions.db") });
-    await (server as any).daemon.ready();
+    await server.application.ready();
     const daemonError = new Error("daemon shutdown failed");
     const listenerError = new Error("listener close failed");
     const sseError = new Error("SSE close failed");
-    const storeError = new Error("store close failed");
     const originalStoreClose = server.store.close.bind(server.store);
-    const daemonShutdown = vi.fn(async () => { throw daemonError; });
+    const applicationClose = vi.fn(async () => { throw daemonError; });
     const closeClients = vi.fn(() => { throw sseError; });
     const listenerClose = vi.fn((callback: (error?: Error) => void) => callback(listenerError));
-    (server as any).daemon.shutdown = daemonShutdown;
+    (server.application as any).close = applicationClose;
     (server as any).eventHub.closeClients = closeClients;
     (server as any).listener = { close: listenerClose };
-    const storeClose = vi.spyOn(server.store, "close").mockImplementation(() => { throw storeError; });
 
     try {
       const firstFailure = await server.close().catch((error) => error);
@@ -371,16 +410,13 @@ describe("OpenHarnessHttpServer", () => {
         sseError,
         daemonError,
         listenerError,
-        storeError,
       ]);
       const secondFailure = await server.close().catch((error) => error);
       expect(secondFailure).toBe(firstFailure);
-      expect(daemonShutdown).toHaveBeenCalledOnce();
+      expect(applicationClose).toHaveBeenCalledOnce();
       expect(closeClients).toHaveBeenCalledOnce();
       expect(listenerClose).toHaveBeenCalledOnce();
-      expect(storeClose).toHaveBeenCalledOnce();
     } finally {
-      storeClose.mockRestore();
       originalStoreClose();
       rmSync(dir, { recursive: true, force: true });
     }
@@ -393,8 +429,11 @@ describe("OpenHarnessHttpServer", () => {
       logger: () => {},
     });
     const failure = new Error("shutdown failed");
-    (server as any).daemon.shutdown = vi.fn(async () => { throw failure; });
     const closeStore = vi.spyOn(server.store, "close");
+    (server.application as any).close = vi.fn(async () => {
+      server.store.close();
+      throw failure;
+    });
 
     try {
       await expect(server.close()).rejects.toBe(failure);
@@ -1366,7 +1405,8 @@ describe("OpenHarnessHttpServer", () => {
       });
       expect(patched.status).toBe(400);
       await expect(patched.json()).resolves.toMatchObject({
-        error: "model must be changed through metadata.runtime.model",
+        code: "invalid_request",
+        message: "model must be changed through metadata.runtime.model",
       });
     });
   });
@@ -2039,7 +2079,7 @@ describe("OpenHarnessHttpServer", () => {
       });
       const internals = server as unknown as {
         jobs: { read: (...args: unknown[]) => Promise<unknown> };
-        daemon: { backgroundShells: { stop(taskId: string, input: { sessionId: string }): Promise<unknown> } };
+        application: { backgroundShells: { stop(taskId: string, input: { sessionId: string }): Promise<unknown> } };
       };
       internals.jobs.read = vi.fn(async () => { throw new Error("normalization unavailable"); });
 
@@ -2060,7 +2100,7 @@ describe("OpenHarnessHttpServer", () => {
         expect(task?.status).not.toBe("running");
       } finally {
         const [task] = server.store.listSessionTasks(sessionId);
-        if (task) await internals.daemon.backgroundShells.stop(task.id, { sessionId }).catch(() => {});
+        if (task) await internals.application.backgroundShells.stop(task.id, { sessionId }).catch(() => {});
       }
     });
   });

@@ -7,6 +7,7 @@ import {
 
 import type { SessionExecutionProjector } from "./session-execution-projector.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
+import { ApplicationError } from "../../shared/application-error.js";
 
 type ProcessSupervisor = ReturnType<typeof getDetachedProcessSupervisor>;
 type TaskScope = { cwd: string; sessionId?: string };
@@ -36,12 +37,12 @@ interface BackgroundShellStore {
   }): unknown;
 }
 
-export class BackgroundShellError extends Error {
+export class BackgroundShellError extends ApplicationError {
   constructor(
-    readonly status: 400 | 404,
+    status: 400 | 404,
     message: string,
   ) {
-    super(message);
+    super(status, message);
     this.name = "BackgroundShellError";
   }
 }

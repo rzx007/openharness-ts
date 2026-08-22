@@ -2,11 +2,13 @@ import { Hono } from "hono";
 
 import type { JobReadResult } from "@openharness/protocol";
 
+import type { BackgroundShellService } from "../../application/session/background-shell-service.js";
 import {
-  BackgroundShellError,
-  type BackgroundShellService,
-} from "../../application/session/background-shell-service.js";
-import { errorResponse, jsonResponse, readJson } from "../support.js";
+  applicationErrorResponse,
+  errorResponse,
+  jsonResponse,
+  readJson,
+} from "../support.js";
 
 export interface BackgroundShellRoutesContext {
   backgroundShells: Pick<BackgroundShellService, "create" | "stop">;
@@ -29,8 +31,7 @@ export function createBackgroundShellRoutes(context: BackgroundShellRoutesContex
         description: typeof body.description === "string" ? body.description : undefined,
       }));
     } catch (error) {
-      const status = error instanceof BackgroundShellError ? error.status : 500;
-      return errorResponse(status, errorMessage(error));
+      return applicationErrorResponse(error);
     }
 
     try {

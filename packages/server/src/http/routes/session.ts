@@ -10,6 +10,7 @@ import {
   type CommandCatalogProvider,
 } from "../../commands/index.js";
 import {
+  applicationErrorResponse,
   errorResponse,
   jsonResponse,
   protocolValidationErrorResponse,
@@ -19,7 +20,6 @@ import {
   sessionMutationErrorStatus,
 } from "../support.js";
 import type { RequestTraceRegistry } from "../control/index.js";
-import { SessionApplicationError } from "../../application/session/session-application-error.js";
 import type { SessionApplicationService } from "../../application/session/session-application-service.js";
 import type { SessionQueryService } from "../../application/session/session-query-service.js";
 import type { AdmitPromptResult } from "../../application/session/session-run-engine.js";
@@ -92,12 +92,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         });
         return jsonResponse({ session }, 201);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError ? error.status : 404;
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
-        );
+        return applicationErrorResponse(error, 404);
       }
     })
     .patch("/:sessionId", async (c) => {
@@ -113,13 +108,9 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         const session = await context.application.updateSession(sessionId, input);
         return jsonResponse({ session });
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })
@@ -142,12 +133,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         const session = await context.application.archiveSessionTree(sessionId);
         return jsonResponse({ session });
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError ? error.status : 404;
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
-        );
+        return applicationErrorResponse(error, 404);
       }
     })
     .delete("/:sessionId/hard", async (c) => {
@@ -158,12 +144,7 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
           await context.application.deleteSessionTree(sessionId);
         return jsonResponse({ deletedSessionIds });
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError ? error.status : 404;
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
-        );
+        return applicationErrorResponse(error, 404);
       }
     })
     .get("/:sessionId/messages", (c) => {
@@ -240,13 +221,9 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
           });
         return jsonResponse({ ...admitted, command: expanded.command }, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     });

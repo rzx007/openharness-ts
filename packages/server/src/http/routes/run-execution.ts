@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { parseAdmitPromptRequest } from "@openharness/protocol";
 
 import {
+  applicationErrorResponse,
   errorResponse,
   isRecord,
   jsonResponse,
@@ -10,7 +11,6 @@ import {
   sessionMutationErrorStatus,
 } from "../support.js";
 import type { RequestTraceRegistry } from "../control/index.js";
-import { SessionApplicationError } from "../../application/session/session-application-error.js";
 import type { SessionApplicationService } from "../../application/session/session-application-service.js";
 
 export interface RunExecutionRoutesContext {
@@ -42,13 +42,9 @@ export function createRunExecutionRoutes(
         });
         return jsonResponse(admitted, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })
@@ -66,13 +62,9 @@ export function createRunExecutionRoutes(
         });
         return jsonResponse(admitted, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })
@@ -95,13 +87,9 @@ export function createRunExecutionRoutes(
         });
         return jsonResponse(resumed, 202);
       } catch (error) {
-        const status =
-          error instanceof SessionApplicationError
-            ? error.status
-            : sessionMutationErrorStatus(error);
-        return errorResponse(
-          status,
-          error instanceof Error ? error.message : String(error),
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
         );
       }
     })

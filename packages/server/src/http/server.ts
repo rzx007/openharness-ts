@@ -1,17 +1,13 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 
-import {
-  getChildAgentExecutionRegistry,
-  getDetachedProcessSupervisor,
-  SessionStore,
-} from "@openharness/services";
+import { SessionStore } from "@openharness/services";
 import type { Settings } from "@openharness/core";
 
 import type { CommandCatalogProvider } from "../commands/commands.js";
-import { DaemonApplication } from "../application/daemon-application.js";
+import type { DurableAgentApplication } from "../application/daemon-application.js";
+import { createDefaultNodeApplication } from "../application/default-node-application.js";
 import type { CreateDaemonAgent } from "../daemon/daemon-agent.js";
-import { getDefaultSessionStorePath } from "../daemon/paths.js";
 import type {
   AgentPersonaService,
   AuthService,
@@ -60,8 +56,8 @@ import {
   createTerminalRoutes,
   TerminalHttpEventHub,
 } from "./routes/terminal.js";
-import { DaemonTerminalService } from "../terminal/index.js";
-import { DaemonJobService } from "../jobs/index.js";
+import type { DaemonTerminalService } from "../terminal/index.js";
+import type { DaemonJobService } from "../jobs/index.js";
 
 export interface OpenHarnessServerServices {
   commandCatalog?: CommandCatalogProvider;
@@ -89,6 +85,10 @@ export interface OpenHarnessServerOptions {
   allowedOrigins?: string[];
   store?: SessionStore;
   storePath?: string;
+  /** 已组装好的应用。传入后，HTTP Server 默认不负责关闭它。 */
+  application?: DurableAgentApplication;
+  /** 仅在传入 application 时生效；明确让 HTTP Server 随自身一起关闭应用。 */
+  closeApplication?: boolean;
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
@@ -121,7 +121,8 @@ export class OpenHarnessHttpServer {
   private readonly version?: string;
   private readonly logger: StructuredLogger;
   private readonly eventHub: HttpEventHub;
-  private readonly daemon: DaemonApplication;
+  readonly application: DurableAgentApplication;
+  private readonly ownsApplication: boolean;
   private readonly terminals: DaemonTerminalService;
   private readonly jobs: DaemonJobService;
   private readonly terminalEvents: TerminalHttpEventHub;
@@ -132,39 +133,31 @@ export class OpenHarnessHttpServer {
 
   constructor(options: OpenHarnessServerOptions = {}) {
     this.app = new Hono();
-    this.store =
-      options.store ??
-      new SessionStore({
-        path: options.storePath ?? getDefaultSessionStorePath(),
-      });
     this.token = options.token;
     this.allowedOrigins = normalizeAllowedOrigins(options.allowedOrigins ?? []);
     this.services = options.services ?? {};
     this.version = options.version;
     this.logger = options.logger ?? writeStructuredLog;
-    this.eventHub = new HttpEventHub(this.store);
-    this.terminals = new DaemonTerminalService(this.store);
+    this.application =
+      options.application ??
+      createDefaultNodeApplication({
+        store: options.store,
+        storePath: options.storePath,
+        ownsStore: true,
+        settings: options.settings,
+        getSettings: options.getSettings,
+        getSettingsForCwd: options.getSettingsForCwd,
+        createAgent: options.createAgent,
+        log: (event) => this.log(event),
+      });
+    this.ownsApplication = options.application
+      ? (options.closeApplication ?? false)
+      : true;
+    this.store = this.application.store;
+    this.terminals = this.application.terminals;
+    this.jobs = this.application.jobs;
+    this.eventHub = new HttpEventHub(this.application.events);
     this.terminalEvents = new TerminalHttpEventHub(this.terminals);
-    this.daemon = new DaemonApplication({
-      store: this.store,
-      eventSink: this.eventHub,
-      settings: options.settings,
-      getSettings: options.getSettings,
-      getSettingsForCwd: options.getSettingsForCwd,
-      createAgent: options.createAgent,
-      createTerminalHost: (session) => this.terminals.createAgentHost(session),
-      createJobHost: (session) => this.jobs.createAgentHost(session),
-      sseClientCount: () =>
-        this.eventHub.clientCount + this.terminalEvents.clientCount,
-      log: (event) => this.log(event),
-    });
-    this.jobs = new DaemonJobService(
-      this.store,
-      this.terminals,
-      this.daemon.backgroundShells,
-      (scope) => getDetachedProcessSupervisor(scope),
-      (scope) => getChildAgentExecutionRegistry(scope),
-    );
     this.mountRoutes();
   }
 
@@ -175,7 +168,7 @@ export class OpenHarnessHttpServer {
   async listen(
     options: Pick<OpenHarnessServerOptions, "host" | "port"> = {},
   ): Promise<ListenResult> {
-    await this.daemon.ready();
+    await this.application.ready();
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 0;
     return await new Promise<ListenResult>((resolve, reject) => {
@@ -207,7 +200,9 @@ export class OpenHarnessHttpServer {
   }
 
   private async closeWork(): Promise<void> {
-    const shutdown = this.daemon.shutdown();
+    const shutdown = this.ownsApplication
+      ? this.application.close()
+      : Promise.resolve();
     const failures: unknown[] = [];
     try {
       this.eventHub.closeClients();
@@ -232,16 +227,6 @@ export class OpenHarnessHttpServer {
     const settled = await Promise.allSettled([shutdown, listenerClosed]);
     for (const result of settled) {
       if (result.status === "rejected") failures.push(result.reason);
-    }
-    try {
-      await this.terminals.dispose();
-    } catch (error) {
-      failures.push(error);
-    }
-    try {
-      this.store.close();
-    } catch (error) {
-      failures.push(error);
     }
     throwFailures(failures, "OpenHarness server shutdown failed");
   }
@@ -316,21 +301,21 @@ export class OpenHarnessHttpServer {
         settingsService: this.services.settings,
         providerService: this.services.provider,
         modelService: this.services.model,
-        control: this.daemon.control,
+        control: this.application.control,
       }),
     );
     this.app.route(
       "/memory",
       createMemoryRoutes({
         memoryService: this.services.memory,
-        control: this.daemon.control,
+        control: this.application.control,
       }),
     );
     this.app.route(
       "/auth",
       createAuthRoutes({
         authService: this.services.auth,
-        control: this.daemon.control,
+        control: this.application.control,
       }),
     );
     this.app.route(
@@ -344,18 +329,18 @@ export class OpenHarnessHttpServer {
         pluginService: this.services.plugin,
         agentPersonaService: this.services.agentPersona,
         hooksService: this.services.hooks,
-        control: this.daemon.control,
+        control: this.application.control,
       }),
     );
     this.app.route("/git", createGitRoutes({ gitService: this.services.git }));
     this.app.route(
       "/schedules",
-      createScheduleRoutes({ schedules: this.daemon.schedules }),
+      createScheduleRoutes({ schedules: this.application.schedules }),
     );
     this.app.route(
       "/background-shells",
       createBackgroundShellRoutes({
-        backgroundShells: this.daemon.backgroundShells,
+        backgroundShells: this.application.backgroundShells,
         jobs: this.jobs,
       }),
     );
@@ -363,7 +348,7 @@ export class OpenHarnessHttpServer {
     this.app.route(
       "/permissions",
       createPermissionRoutes({
-        permissions: this.daemon.permissions,
+        permissions: this.application.permissions,
         traces: this.requestTraces,
       }),
     );
@@ -371,18 +356,18 @@ export class OpenHarnessHttpServer {
       "/terminals",
       createTerminalRoutes(this.terminals, this.terminalEvents),
     );
-    this.app.route("/projects", createProjectRoutes(this.store));
+    this.app.route("/projects", createProjectRoutes(this.application.projects));
     this.app.route(
       "/sessions",
       createSessionUtilityRoutes({
-        maintenance: this.daemon.maintenance,
+        maintenance: this.application.maintenance,
       }),
     );
     this.app.route(
       "/sessions",
       createSessionRoutes({
-        queries: this.daemon.queries,
-        application: this.daemon.sessions,
+        queries: this.application.queries,
+        application: this.application.sessions,
         commandCatalog: this.services.commandCatalog,
         traces: this.requestTraces,
       }),
@@ -390,7 +375,7 @@ export class OpenHarnessHttpServer {
     this.app.route(
       "/sessions",
       createRunExecutionRoutes({
-        application: this.daemon.sessions,
+        application: this.application.sessions,
         traces: this.requestTraces,
       }),
     );

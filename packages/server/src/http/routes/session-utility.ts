@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 
 import type { SessionExportFormat } from "../../session/index.js";
+import type { SessionMaintenanceService } from "../../application/session/index.js";
 import {
-  SessionMaintenanceError,
-  type SessionMaintenanceService,
-} from "../../application/session/index.js";
-import { errorResponse, jsonResponse, readJson } from "../support.js";
+  applicationErrorResponse,
+  errorResponse,
+  jsonResponse,
+  readJson,
+} from "../support.js";
 
 export interface SessionUtilityRoutesContext {
   maintenance: Pick<
@@ -15,8 +17,7 @@ export interface SessionUtilityRoutesContext {
 }
 
 function maintenanceErrorResponse(error: unknown, fallbackStatus: number): Response {
-  const status = error instanceof SessionMaintenanceError ? error.status : fallbackStatus;
-  return errorResponse(status, error instanceof Error ? error.message : String(error));
+  return applicationErrorResponse(error, fallbackStatus);
 }
 
 export function createSessionUtilityRoutes(context: SessionUtilityRoutesContext): Hono {

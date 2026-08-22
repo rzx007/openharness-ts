@@ -33,6 +33,7 @@ import {
 import { getLocalRulesDir, loadFacts, loadLocalRules } from "@openharness/personalization";
 import { getProjectSessionDir, startDreamNow } from "@openharness/services";
 import { loadOutputStyles } from "@openharness/output-styles";
+import { ApplicationError } from "../shared/application-error.js";
 import {
   discoverOpenHarnessExtensions,
 } from "@openharness/agent-runtime";
@@ -400,12 +401,12 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
   };
 }
 
-export class ProviderMutationError extends Error {
+export class ProviderMutationError extends ApplicationError {
   constructor(
-    readonly status: 400 | 404 | 409,
+    status: 400 | 404 | 409,
     message: string,
   ) {
-    super(message);
+    super(status, message);
   }
 }
 

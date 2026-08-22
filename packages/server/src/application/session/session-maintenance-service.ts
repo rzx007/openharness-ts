@@ -15,13 +15,14 @@ import {
 } from "../control/daemon-operation-gate.js";
 import { agentMessagesToTranscript } from "../agent/agent-transcript.js";
 import { estimateCostUsd } from "../../shared/usage.js";
+import { ApplicationError } from "../../shared/application-error.js";
 
-export class SessionMaintenanceError extends Error {
+export class SessionMaintenanceError extends ApplicationError {
   constructor(
-    readonly status: 400 | 404 | 409 | 501,
+    status: 400 | 404 | 409 | 501,
     message: string,
   ) {
-    super(message);
+    super(status, message);
     this.name = "SessionMaintenanceError";
   }
 }

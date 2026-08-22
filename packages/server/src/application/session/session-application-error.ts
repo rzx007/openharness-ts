@@ -1,9 +1,11 @@
-export class SessionApplicationError extends Error {
+import { ApplicationError } from "../../shared/application-error.js";
+
+export class SessionApplicationError extends ApplicationError {
   constructor(
-    readonly status: 400 | 404 | 409 | 500,
+    status: 400 | 404 | 409 | 500,
     message: string,
   ) {
-    super(message);
+    super(status, message);
     this.name = "SessionApplicationError";
   }
 }

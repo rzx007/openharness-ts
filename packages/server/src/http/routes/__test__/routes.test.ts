@@ -722,7 +722,7 @@ describe("event routes", () => {
         createdAt: 1,
       },
     ]);
-    const hub = new HttpEventHub({ listEvents });
+    const hub = new HttpEventHub({ list: listEvents } as any);
 
     const response = await hub
       .createRoutes()

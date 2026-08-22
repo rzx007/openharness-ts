@@ -16,6 +16,7 @@ import type {
 } from "@openharness/terminal";
 import { LocalTerminalProvider } from "@openharness/terminal-node";
 import type { SessionRecord, SessionStore } from "@openharness/services";
+import { ApplicationError } from "../shared/application-error.js";
 
 export interface ListDaemonTerminalsOptions {
   projectId?: string;
@@ -142,12 +143,12 @@ export class DaemonTerminalService {
   }
 }
 
-export class DaemonTerminalError extends Error {
+export class DaemonTerminalError extends ApplicationError {
   constructor(
-    readonly status: number,
+    status: number,
     message: string,
   ) {
-    super(message);
+    super(status, message);
     this.name = "DaemonTerminalError";
   }
 }
