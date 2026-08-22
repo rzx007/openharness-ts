@@ -14,7 +14,7 @@ export interface AddToComposerEventDetail {
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error"
 
-export type StartPicker = "project" | "runtime" | "branch" | "model" | "permission"
+export type StartPicker = "project" | "runtime" | "branch"
 
 export type PermissionModeOption = {
   value: DesktopPermissionMode

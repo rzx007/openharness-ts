@@ -1,35 +1,15 @@
-import {
-  Box,
-  ChevronDown,
-  Folder,
-  GitBranch,
-  Mic,
-  Monitor,
-  PanelRight,
-  Plus,
-  Search,
-  ShieldCheck,
-  Workflow,
-} from "lucide-react"
+import { Box, Folder, GitBranch, Monitor, PanelRight, Plus, Search, Workflow } from "lucide-react"
 import { useState } from "react"
 
-import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Separator } from "@renderer/components/ui/separator"
 import { Spinner } from "@renderer/components/ui/spinner"
 import type { DesktopModel, DesktopPermissionMode, DesktopProject } from "@shared/session-types"
+import { Composer } from "./composer"
+import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
 import type { LoadStatus, StartPicker } from "./types"
-import {
-  ComposerIconButton,
-  ComposerSendButton,
-  HeaderIconButton,
-  PermissionModeMenu,
-  PickerMenuItem,
-  StartPickerButton,
-} from "./controls"
-import { ModelPicker } from "./model-picker"
-import { resolveModelLabel, resolvePermissionModeLabel } from "./utils"
+import { resolveModelLabel } from "./utils"
 
 export function NewConversationStart({
   draft,
@@ -94,7 +74,6 @@ export function NewConversationStart({
     normalizedBranchQuery.length > 0 && !branchItems.some((item) => item === normalizedBranchQuery)
   const isGitProject = selectedProjectGit
   const modelLabel = resolveModelLabel(models, selectedModel, selectedProvider)
-  const permissionLabel = resolvePermissionModeLabel(selectedPermissionMode)
 
   const closePicker = (): void => setActivePicker(null)
 
@@ -130,7 +109,7 @@ export function NewConversationStart({
         </div>
 
         <div className="relative w-full min-w-0">
-          <div className="mx-3 flex h-10 min-w-0 items-center gap-0.5 overflow-hidden rounded-t-2xl bg-muted/70 px-2.5 pt-1">
+          <div className="mx-3 flex h-10 min-w-0 items-center gap-0.5 overflow-hidden rounded-t-2xl bg-muted-foreground/5 px-2.5 pt-1">
             <div className="min-w-0">
               <Popover
                 open={activePicker === "project"}
@@ -335,92 +314,24 @@ export function NewConversationStart({
             ) : null}
           </div>
 
-          <form
-            className="relative -mt-0.5 min-w-0 overflow-hidden rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (sending) return
-              onSubmit()
-            }}
-          >
-            <label htmlFor="new-conversation-composer" className="sr-only">
-              输入新对话内容
-            </label>
-            <textarea
-              id="new-conversation-composer"
-              value={draft}
-              rows={3}
-              placeholder="随心输入"
-              onChange={(event) => onDraftChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  if (sending) return
-                  onSubmit()
-                }
-              }}
-              className="block max-h-48 min-h-24 w-full resize-none bg-transparent px-4 pt-4 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/60"
-            />
-
-            <div className="flex h-12 min-w-0 items-center gap-1 overflow-hidden px-3 pb-2">
-              <ComposerIconButton label="添加附件">
-                <Plus />
-              </ComposerIconButton>
-              <Popover
-                open={activePicker === "permission"}
-                onOpenChange={(open) => setActivePicker(open ? "permission" : null)}
-              >
-                <PopoverTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="ml-1 h-8 max-w-36 min-w-0 shrink overflow-hidden px-2 text-xs font-normal text-muted-foreground"
-                    />
-                  }
-                >
-                  <ShieldCheck data-icon="inline-start" />
-                  <span className="min-w-0 truncate">{permissionLabel}</span>
-                  <ChevronDown data-icon="inline-end" />
-                </PopoverTrigger>
-                <PopoverContent
-                  side="top"
-                  align="start"
-                  sideOffset={8}
-                  className="w-56 gap-0 rounded-xl p-1.5 shadow-lg ring-1 ring-black/10"
-                >
-                  <PermissionModeMenu
-                    selected={selectedPermissionMode}
-                    onSelect={(permissionMode) => {
-                      onSelectPermissionMode(permissionMode)
-                      closePicker()
-                    }}
-                  />
-                </PopoverContent>
-              </Popover>
-              <div className="ml-auto flex min-w-0 items-center gap-1">
-                <ModelPicker
-                  open={activePicker === "model"}
-                  onOpenChange={(open) => setActivePicker(open ? "model" : null)}
-                  models={models}
-                  selectedModel={selectedModel}
-                  selectedProvider={selectedProvider}
-                  modelLabel={modelLabel}
-                  onSelectModel={(model) => {
-                    onSelectModel(model)
-                    closePicker()
-                  }}
-                />
-                <ComposerIconButton label="语音输入">
-                  <Mic />
-                </ComposerIconButton>
-                <ComposerSendButton
-                  sending={sending}
-                  disabled={!draft.trim() || !selectedProject}
-                />
-              </div>
-            </div>
-          </form>
+          <Composer
+            id="new-conversation-composer"
+            className="relative -mt-0.5 w-full"
+            textareaClassName="min-h-24 max-h-48 pt-4"
+            rows={3}
+            draft={draft}
+            sending={sending}
+            models={models}
+            selectedModel={selectedModel}
+            selectedProvider={selectedProvider}
+            modelLabel={modelLabel}
+            permissionMode={selectedPermissionMode}
+            canSubmit={Boolean(draft.trim() && selectedProject)}
+            onDraftChange={onDraftChange}
+            onSubmit={onSubmit}
+            onSelectModel={onSelectModel}
+            onSelectPermissionMode={onSelectPermissionMode}
+          />
         </div>
       </div>
     </div>

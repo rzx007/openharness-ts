@@ -1,8 +1,11 @@
-import { ChevronDown, Mic, Plus, ShieldCheck } from "lucide-react"
+import { IconFilePlus, IconFolderPlus, IconPhotoPlus } from "@tabler/icons-react"
+import { ChevronDown, Mic, ShieldCheck } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
+import { PlusMenu } from "@renderer/components/ui/plus-menu"
+import { cn } from "@renderer/lib/utils"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
 import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
 import { ModelPicker } from "./model-picker"
@@ -12,12 +15,16 @@ export function Composer({
   id,
   draft,
   sending,
-  running,
+  running = false,
   models,
   selectedModel,
   selectedProvider,
   modelLabel,
   permissionMode,
+  className,
+  textareaClassName,
+  rows = 2,
+  canSubmit,
   onDraftChange,
   onSubmit,
   onInterrupt,
@@ -27,29 +34,41 @@ export function Composer({
   id: string
   draft: string
   sending: boolean
-  running: boolean
+  running?: boolean
   models: DesktopModel[]
   selectedModel: string | null
   selectedProvider: string | null
   modelLabel: string
   permissionMode: DesktopPermissionMode
+  className?: string
+  textareaClassName?: string
+  rows?: number
+  canSubmit?: boolean
   onDraftChange: (value: string) => void
   onSubmit: () => void
-  onInterrupt: () => void
+  onInterrupt?: () => void
   onSelectModel: (model: DesktopModel) => void
   onSelectPermissionMode: (mode: DesktopPermissionMode) => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<"model" | "permission" | null>(null)
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
   const closePicker = (): void => setActivePicker(null)
+  const allowSubmit = canSubmit ?? Boolean(draft.trim())
+
+  const submit = (): void => {
+    if (sending || running || !allowSubmit) return
+    onSubmit()
+  }
 
   return (
     <form
-      className="mx-auto mb-5 w-[min(760px,calc(100%-32px))] min-w-0 shrink-0 overflow-hidden rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12"
+      className={cn(
+        "min-w-0 overflow-visible rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12",
+        className
+      )}
       onSubmit={(event) => {
         event.preventDefault()
-        if (sending || running) return
-        onSubmit()
+        submit()
       }}
     >
       <label htmlFor={id} className="sr-only">
@@ -58,22 +77,29 @@ export function Composer({
       <textarea
         id={id}
         value={draft}
-        rows={2}
+        rows={rows}
         placeholder="随心输入"
         onChange={(event) => onDraftChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault()
-            if (sending || running) return
-            onSubmit()
+            submit()
           }
         }}
-        className="block max-h-44 min-h-18 w-full resize-none bg-transparent px-4 pt-3 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/65"
+        className={cn(
+          "block max-h-44 min-h-18 w-full resize-none bg-transparent px-4 pt-3 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/65",
+          textareaClassName
+        )}
       />
-      <div className="flex h-12 min-w-0 items-center gap-1 overflow-hidden px-3 pb-2">
-        <ComposerIconButton label="添加附件">
-          <Plus />
-        </ComposerIconButton>
+      <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
+        <PlusMenu
+          items={[
+            { id: "file", label: "添加文件", icon: <IconFilePlus className="size-4" /> },
+            { id: "image", label: "添加图片", icon: <IconPhotoPlus className="size-4" /> },
+            { id: "folder", label: "添加文件夹", icon: <IconFolderPlus className="size-4" /> },
+          ]}
+          triggerLabel={{ open: "关闭附件菜单", closed: "添加附件" }}
+        />
         <Popover
           open={activePicker === "permission"}
           onOpenChange={(open) => setActivePicker(open ? "permission" : null)}
@@ -125,7 +151,7 @@ export function Composer({
           <ComposerSendButton
             sending={sending}
             running={running}
-            disabled={!draft.trim()}
+            disabled={!allowSubmit}
             onInterrupt={onInterrupt}
           />
         </div>

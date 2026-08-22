@@ -23,7 +23,7 @@ function jsonResponse(body: unknown): Response {
 }
 
 function event(seq: number, type: string, payload: Record<string, unknown>, sessionId = "s1"): SessionEventRecord {
-  return { id: `e${seq}`, seq, type, sessionId, payload, createdAt: seq };
+  return { id: `e${seq}`, seq, type, schemaVersion: 1, sessionId, payload, createdAt: seq };
 }
 
 function sseResponse(events: SessionEventRecord[] = []): Response {
