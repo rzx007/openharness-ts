@@ -1,6 +1,6 @@
 # @openharness/client
 
-连接 OpenHarness daemon（`ohs serve`）的共享客户端 SDK。面向 TUI / Web / Desktop：typed HTTP API、SSE 事件流、事件 reducer、snapshot + live 同步。
+连接 OpenHarness daemon（`ohs serve`）的共享客户端 SDK。面向 TUI / Web / Desktop / IDE：typed HTTP API、SSE 事件流、事件 reducer、snapshot + live 同步。
 
 客户端只负责展示与控制，不拥有 agent runtime。
 
@@ -27,6 +27,9 @@ ohs serve / daemon
 - UI 不直接读 daemon 内部 store 文件
 - 可恢复状态来自 HTTP snapshot + SSE live
 - 多端 attach 同一 daemon 时，用同一套 reducer 收敛状态
+- 公共 Session/Run/Event 类型来自浏览器安全的 `@openharness/protocol`
+- client 生产代码不依赖 `@openharness/services`、SQLite、Drizzle 或 Node builtin
+- `/doctor` 等本机信息由宿主提供；浏览器可以不提供
 
 ## 使用
 
@@ -84,4 +87,5 @@ for await (const update of syncEvents(client, { sessionId: session.id })) {
 ```bash
 pnpm --filter @openharness/client test
 pnpm --filter @openharness/client check-types
+pnpm test:client-browser
 ```

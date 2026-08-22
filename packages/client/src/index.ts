@@ -35,11 +35,11 @@ export {
   patchSessionRuntimeMetadata,
   readRuntimeMetadata,
   readSessionRuntimeConfig,
-} from "@openharness/services";
+} from "@openharness/protocol";
 export type {
   SessionRuntimeConfig,
   SessionRuntimeConfigPatch,
-} from "@openharness/services";
+} from "@openharness/protocol";
 export type {
   PresentationReadRequest,
   SessionCommandHost,

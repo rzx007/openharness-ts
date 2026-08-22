@@ -1,10 +1,22 @@
 # Durable Agent Application 多端收口计划
 
-> 状态：待实施。
+> 状态：实施中。
 >
 > 本计划基于 2026-08-22 对当前代码的架构核查。上一轮 Runtime Hardening 已经补齐 Input/Run 原子准入、重启收束、事件版本、Projection Settlement、Child Budget、Run Attempt、Tool 未知结果、Metrics 和 Run Inspector。本计划不重复这些工作，而是让它们真正被 CLI、TUI、Web、Desktop、IDE、Bot 和 Workflow 共用。
 >
 > Agent 和 Daemon 的生命周期规则继续以 [Agent Lifecycle Contract](../agent-lifecycle-contract.md) 为准；当前请求链继续以 [Daemon Application Architecture](../daemon-application-architecture.md) 为准。本计划只说明下一步怎么改，不另造一套相互冲突的运行规则。
+
+## 实施进度
+
+- [ ] A1：创建 `@openharness/protocol`。包、Session/Run/Schedule 类型和 runtime metadata 纯函数已经迁入；HTTP 请求/响应校验及 Jobs/Terminal DTO 迁移待完成。
+- [x] A2：移除 `client -> services` 依赖；client 测试不再加载 SQLite Store。
+- [x] A3：共享 client 不再直接读取 Node `process`；`/doctor` 的本机信息由宿主提供。
+- [x] A4：增加无 Node polyfill 的 Vite 浏览器构建 fixture。
+- [ ] B1-B4：把 Durable Application 从 HTTP Server 中拿出来。
+- [ ] C1-C4：让 Bot 进入同一个 durable Session/Run。
+- [ ] D1-D4：拆开 Agent Kernel 与 Node 默认组装，并完成独立打包。
+- [ ] E1-E4：让 daemon Workflow 使用统一 durable state。
+- [ ] F1-F4：补单执行者保护、协议协商、数据保留与备份。
 
 ## 一、这轮要解决什么
 

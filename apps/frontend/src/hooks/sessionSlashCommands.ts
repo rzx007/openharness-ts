@@ -80,6 +80,11 @@ export async function dispatchSessionSlashCommand(
     emit: pushSystem,
     present: presentSystem,
     cacheFirstRead,
+    getRuntimeDiagnostics: () => ({
+      runtime: `Node ${process.version}`,
+      platform: process.platform,
+      architecture: process.arch,
+    }),
     patchStatus: (patch) => setStatus((current) => ({ ...current, ...patch })),
   });
 

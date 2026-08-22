@@ -13,6 +13,7 @@
     "lint": "turbo lint",
     "check-types": "turbo check-types",
     "test": "turbo test",
+    "test:client-browser": "vite build --config tests/browser-client/vite.config.ts",
     "clean": "turbo clean",
     "changeset": "changeset",
     "changeset:version": "changeset version",
@@ -38,6 +39,7 @@
     "rimraf": "^6.0.1",
     "turbo": "^2.8.12",
     "typescript": "^5.7.3",
+    "vite": "^7.3.2",
     "vitest": "^3.1.1"
   },
   "packageManager": "pnpm@10.30.2"

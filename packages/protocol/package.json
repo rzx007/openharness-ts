@@ -1,5 +1,5 @@
 {
-  "name": "@openharness/client",
+  "name": "@openharness/protocol",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -16,13 +16,7 @@
     "test": "vitest run",
     "clean": "rimraf dist"
   },
-  "dependencies": {
-    "@openharness/jobs": "workspace:*",
-    "@openharness/protocol": "workspace:*",
-    "@openharness/terminal": "workspace:*"
-  },
   "devDependencies": {
-    "@types/node": "catalog:",
     "typescript": "^5.7.3",
     "vitest": "catalog:"
   }
