@@ -1,4 +1,8 @@
-import { runtimeMetadataChanged } from "@openharness/services";
+import {
+  ProtocolValidationError,
+  runtimeMetadataChanged,
+  type ProtocolError,
+} from "@openharness/protocol";
 import type { Context } from "hono";
 import type { RuntimeMetricsSnapshot } from "../shared/runtime-metrics.js";
 
@@ -155,6 +159,19 @@ export function errorResponse(status: number, message: string): Response {
   return jsonResponse({ error: message }, status);
 }
 
+export function protocolValidationErrorResponse(error: unknown): Response {
+  const validationError = error instanceof ProtocolValidationError
+    ? error
+    : new ProtocolValidationError(
+      error instanceof SyntaxError
+        ? "Request body must be valid JSON"
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    );
+  return jsonResponse(validationError.toProtocolError() satisfies ProtocolError, 400);
+}
+
 export function sessionMutationErrorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   return message.startsWith("Session is archived:") ||
@@ -167,8 +184,17 @@ export function sessionMutationErrorStatus(error: unknown): number {
 export async function readJson(c: Context): Promise<JsonRecord> {
   const text = await c.req.text();
   if (!text.trim()) return {};
-  if (new TextEncoder().encode(text).byteLength > 1024 * 1024) throw new Error("Request body too large");
-  const parsed = JSON.parse(text) as unknown;
-  if (!isRecord(parsed)) throw new Error("Request body must be a JSON object");
+  if (new TextEncoder().encode(text).byteLength > 1024 * 1024) {
+    throw new ProtocolValidationError("Request body too large");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new ProtocolValidationError("Request body must be valid JSON");
+  }
+  if (!isRecord(parsed)) {
+    throw new ProtocolValidationError("Request body must be a JSON object");
+  }
   return parsed;
 }

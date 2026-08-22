@@ -1358,6 +1358,11 @@ export class OpenHarnessClient {
       "error" in body &&
       typeof body.error === "string"
         ? body.error
+        : body &&
+            typeof body === "object" &&
+            "message" in body &&
+            typeof body.message === "string"
+          ? body.message
         : `OpenHarness API request failed with ${response.status}`;
     throw new OpenHarnessApiError(message, response.status, body);
   }

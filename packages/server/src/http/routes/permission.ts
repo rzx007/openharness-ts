@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { parseReplyPermissionRequest } from "@openharness/protocol";
 
 import type { StorePermissionBroker } from "../../permissions/index.js";
 import type { RequestTraceRegistry } from "../control/index.js";
@@ -6,6 +7,7 @@ import type { RequestTraceRegistry } from "../control/index.js";
 import {
   errorResponse,
   jsonResponse,
+  protocolValidationErrorResponse,
   readJson,
   readLimit,
   readPermissionStatus,
@@ -37,23 +39,18 @@ export function createPermissionRoutes(context: PermissionRoutesContext): Hono {
     .post("/:requestId/reply", async (c) => {
       const requestId = c.req.param("requestId");
       if (!requestId) return errorResponse(400, "requestId is required");
-      const body = await readJson(c);
-      const status = body.status;
-      if (status !== "approved" && status !== "denied" && status !== "expired") {
-        return errorResponse(400, "status must be approved, denied, or expired");
-      }
-      const decision = body.decision;
-      if (decision !== undefined && decision !== "once" && decision !== "session") {
-        return errorResponse(400, "decision must be once or session");
+      let input;
+      try {
+        input = parseReplyPermissionRequest(await readJson(c));
+      } catch (error) {
+        return protocolValidationErrorResponse(error);
       }
 
       try {
         const request = context.permissions.reply({
           requestId,
           traceId: context.traces.get(c.req.raw),
-          status,
-          decision,
-          clientId: typeof body.clientId === "string" ? body.clientId : undefined,
+          ...input,
         });
         return jsonResponse({ request });
       } catch (error) {

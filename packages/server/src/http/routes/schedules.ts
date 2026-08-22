@@ -1,14 +1,16 @@
-import type {
-  CreateScheduledTaskInput,
-  ScheduledTaskRecord,
-  UpdateScheduledTaskInput,
-} from "@openharness/services";
+import {
+  parseCreateScheduledTaskRequest,
+  parseUpdateScheduledTaskRequest,
+  ProtocolValidationError,
+  type ScheduledTaskRecord,
+} from "@openharness/protocol";
 import { Hono } from "hono";
 
 import type { ScheduledTaskService } from "../../daemon/scheduled-task-service.js";
 import {
   errorResponse,
   jsonResponse,
+  protocolValidationErrorResponse,
   readJson,
   readLimit,
 } from "../support.js";
@@ -29,6 +31,9 @@ export interface ScheduleRoutesContext {
 }
 
 function scheduleError(error: unknown, fallbackStatus = 400): Response {
+  if (error instanceof ProtocolValidationError || error instanceof SyntaxError) {
+    return protocolValidationErrorResponse(error);
+  }
   const message = error instanceof Error ? error.message : String(error);
   const status = message.includes("not found")
     ? 404
@@ -56,12 +61,10 @@ export function createScheduleRoutes(context: ScheduleRoutesContext): Hono {
     })
     .post("/tasks", async (c) => {
       try {
-        const body = await readJson(c);
+        const input = parseCreateScheduledTaskRequest(await readJson(c));
         return jsonResponse(
           {
-            task: context.schedules.createTask(
-              body as unknown as CreateScheduledTaskInput,
-            ),
+            task: context.schedules.createTask(input),
           },
           201,
         );
@@ -80,12 +83,9 @@ export function createScheduleRoutes(context: ScheduleRoutesContext): Hono {
     })
     .patch("/tasks/:id", async (c) => {
       try {
-        const body = await readJson(c);
+        const input = parseUpdateScheduledTaskRequest(await readJson(c));
         return jsonResponse({
-          task: context.schedules.updateTask(
-            c.req.param("id"),
-            body as unknown as UpdateScheduledTaskInput,
-          ),
+          task: context.schedules.updateTask(c.req.param("id"), input),
         });
       } catch (error) {
         return scheduleError(error);

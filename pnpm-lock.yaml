@@ -473,6 +473,9 @@ importers:
       '@openharness/plugins':
         specifier: workspace:*
         version: link:../plugins
+      '@openharness/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@openharness/prompts':
         specifier: workspace:*
         version: link:../prompts

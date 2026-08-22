@@ -26,16 +26,9 @@ import {
   runtimeSessionMetadataChanged,
   withoutTraceId,
 } from "../support.js";
+import { SessionApplicationError } from "./session-application-error.js";
 
-export class SessionApplicationError extends Error {
-  constructor(
-    readonly status: 400 | 404 | 409 | 500,
-    message: string,
-  ) {
-    super(message);
-    this.name = "SessionApplicationError";
-  }
-}
+export { SessionApplicationError } from "./session-application-error.js";
 
 export interface SessionApplicationServiceContext {
   store: SessionStore;
