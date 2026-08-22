@@ -45,13 +45,14 @@ export function AssistantMessage({
     <div className="group/assistant min-w-0 space-y-4">
       {blocks.map((block, index) => {
         if (block.type === "tool-group") {
-          return <ToolActivityGroup key={block.id} tools={block.tools} initiallyOpen={streaming} />
+          return <ToolActivityGroup key={block.id} tools={block.tools} />
         }
         if (block.type === "terminal") {
           return (
             <TerminalActivityCard
               key={block.id}
               payload={block.payload}
+              active={isTerminalActivityActive(block, streaming && index === blocks.length - 1)}
               onOpenTerminal={onOpenTerminal}
             />
           )
@@ -128,7 +129,21 @@ type ToolUnit = Extract<AssistantContentUnit, { type: "tool" }>
 type ContentBlock =
   | { id: string; type: "unit"; unit: Exclude<AssistantContentUnit, ToolUnit> }
   | { id: string; type: "tool-group"; tools: ToolUnit[] }
-  | { id: string; type: "terminal"; payload: TerminalToolPayload }
+  | { id: string; type: "terminal"; payload: TerminalToolPayload; tool: ToolUnit }
+
+function isToolInFlight(tool: ToolUnit): boolean {
+  const status = tool.call.status
+  if (status === "pending" || status === "running") return true
+  return !tool.result && status !== "completed" && status !== "failed" && status !== "interrupted"
+}
+
+function isTerminalActivityActive(
+  block: Extract<ContentBlock, { type: "terminal" }>,
+  isLiveTail: boolean
+): boolean {
+  if (isToolInFlight(block.tool)) return true
+  return isLiveTail && block.payload.terminal?.status === "running"
+}
 
 function groupToolUnits(units: AssistantContentUnit[]): ContentBlock[] {
   const blocks: ContentBlock[] = []
@@ -139,7 +154,7 @@ function groupToolUnits(units: AssistantContentUnit[]): ContentBlock[] {
     }
     const terminal = parseTerminalToolPayload(unit.call.output ?? unit.result?.output)
     if (terminal?.action === "open" && terminal.terminal) {
-      blocks.push({ id: `terminal-${unit.id}`, type: "terminal", payload: terminal })
+      blocks.push({ id: `terminal-${unit.id}`, type: "terminal", payload: terminal, tool: unit })
       continue
     }
     const previous = blocks.at(-1)
@@ -163,9 +178,11 @@ type TerminalToolPayload = {
 
 function TerminalActivityCard({
   payload,
+  active,
   onOpenTerminal,
 }: {
   payload: TerminalToolPayload
+  active: boolean
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element | null {
   const terminal = payload.terminal
@@ -184,7 +201,14 @@ function TerminalActivityCard({
                 terminal.status === "running" ? "bg-emerald-500" : "bg-ui-muted/60"
               )}
             />
-            <h3 className="truncate font-semibold text-foreground">{terminal.name}</h3>
+            <h3
+              className={cn(
+                "truncate font-semibold text-foreground",
+                active && "shimmer"
+              )}
+            >
+              {terminal.name}
+            </h3>
           </div>
           <p className="mt-0.5 truncate text-xs text-ui-muted" title={terminal.cwd}>
             {terminal.cwd}
@@ -229,15 +253,10 @@ function terminalPayloadText(value: unknown): string | null {
   return block?.text ?? null
 }
 
-function ToolActivityGroup({
-  tools,
-  initiallyOpen,
-}: {
-  tools: ToolUnit[]
-  initiallyOpen: boolean
-}): React.JSX.Element {
-  const [open, setOpen] = useState(initiallyOpen)
+function ToolActivityGroup({ tools }: { tools: ToolUnit[] }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
+  const active = tools.some(isToolInFlight)
   const edits = tools.filter((tool) =>
     /write|edit|patch|create|delete/i.test(tool.call.toolName ?? "")
   )
@@ -257,7 +276,10 @@ function ToolActivityGroup({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex h-7 max-w-full items-center gap-2 hover:text-foreground"
+        className={cn(
+          "flex h-7 max-w-full items-center gap-2 hover:text-foreground",
+          active && "shimmer"
+        )}
       >
         <Pencil className="size-3.5 shrink-0" strokeWidth={1.7} />
         <span className="truncate">{heading || `执行了 ${tools.length} 个工具`}</span>
@@ -270,13 +292,17 @@ function ToolActivityGroup({
           {tools.map((tool) => {
             const summary = summarizeToolCall(tool.call)
             const active = activeId === tool.id
+            const calling = isToolInFlight(tool)
             const output = tool.result?.output ?? tool.call.output ?? tool.call.input
             return (
               <div key={tool.id}>
                 <button
                   type="button"
                   onClick={() => setActiveId(active ? null : tool.id)}
-                  className="flex h-7 w-full min-w-0 items-center gap-2 text-left hover:text-foreground"
+                  className={cn(
+                    "flex h-7 w-full min-w-0 items-center gap-2 text-left hover:text-foreground",
+                    calling && "shimmer"
+                  )}
                 >
                   <TerminalSquare className="size-3.5 shrink-0" strokeWidth={1.6} />
                   <span className="min-w-0 flex-1 truncate">
