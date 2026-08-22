@@ -126,7 +126,10 @@ export function ScheduledPage({
   )
 
   return (
-    <section className="flex h-full min-h-0 w-full flex-col bg-conversation" aria-busy={loading}>
+    <section
+      className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-conversation"
+      aria-busy={loading}
+    >
       <header className="flex min-h-20 items-center gap-4 border-b border-border px-7 py-4">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight">已安排</h1>
@@ -162,8 +165,8 @@ export function ScheduledPage({
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[min(390px,38%)] min-w-72 flex-col border-r border-border">
+      <div className="flex min-h-0 min-w-0 w-full flex-1 overflow-hidden">
+        <aside className="flex w-[min(22.5rem,38%)] shrink-0 flex-col border-r border-border">
           <div className="flex items-center gap-1 border-b border-border px-4 py-3">
             {(["all", "active", "paused", "completed"] as const).map((value) => (
               <button
@@ -232,62 +235,65 @@ export function ScheduledPage({
         </aside>
 
         <ScrollArea
-          className="min-h-0 min-w-0 flex-1"
-          viewportClassName="p-7"
-          contentClassName="mx-auto max-w-4xl"
+          horizontal={false}
+          className="@container min-h-0 min-w-0 flex-1"
+          viewportClassName="p-4 @md:p-6 @xl:p-7"
+          contentClassName="w-full min-w-0"
         >
           {selected ? (
             <>
-              <div className="flex items-start gap-4">
+              <div className="flex flex-col gap-3 @lg:flex-row @lg:items-start @lg:gap-4">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h2 className="truncate text-lg font-semibold">{selected.name}</h2>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h2 className="min-w-0 truncate text-lg font-semibold">{selected.name}</h2>
                     <TaskStatus status={selected.status} />
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-1 text-xs wrap-break-word text-muted-foreground">
                     {recurrenceLabel(selected)} · {selected.timezone}
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy !== null}
-                  onClick={() =>
-                    void mutate("run", () => window.desktop.schedules.runNow(selected.id))
-                  }
-                >
-                  {busy === "run" ? <Spinner /> : <Play />}立即运行
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy !== null || selected.status === "completed"}
-                  onClick={() =>
-                    void mutate("toggle", () =>
-                      window.desktop.schedules.update(selected.id, {
-                        status: selected.status === "paused" ? "active" : "paused",
-                      })
-                    )
-                  }
-                >
-                  {selected.status === "paused" ? <Play /> : <Pause />}
-                  {selected.status === "paused" ? "继续" : "暂停"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  title="删除任务"
-                  aria-label="删除任务"
-                  disabled={busy !== null}
-                  onClick={() =>
-                    void mutate("delete", () => window.desktop.schedules.remove(selected.id))
-                  }
-                >
-                  <Trash2 />
-                </Button>
+                <div className="flex flex-wrap items-center gap-2 @lg:shrink-0 @lg:justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void mutate("run", () => window.desktop.schedules.runNow(selected.id))
+                    }
+                  >
+                    {busy === "run" ? <Spinner /> : <Play />}立即运行
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null || selected.status === "completed"}
+                    onClick={() =>
+                      void mutate("toggle", () =>
+                        window.desktop.schedules.update(selected.id, {
+                          status: selected.status === "paused" ? "active" : "paused",
+                        })
+                      )
+                    }
+                  >
+                    {selected.status === "paused" ? <Play /> : <Pause />}
+                    {selected.status === "paused" ? "继续" : "暂停"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title="删除任务"
+                    aria-label="删除任务"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void mutate("delete", () => window.desktop.schedules.remove(selected.id))
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
               </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-6 grid grid-cols-1 gap-3 @sm:grid-cols-2 @3xl:grid-cols-4">
                 <Info
                   label="运行方式"
                   value={selected.destination === "chat" ? "返回关联对话" : "每次独立对话"}
@@ -302,7 +308,9 @@ export function ScheduledPage({
 
               <div className="mt-6 rounded-lg border border-border bg-background/55 p-4">
                 <h3 className="text-xs font-semibold text-muted-foreground">每次运行的指令</h3>
-                <p className="mt-2 text-sm leading-6 whitespace-pre-wrap">{selected.prompt}</p>
+                <p className="mt-2 text-sm leading-6 wrap-anywhere whitespace-pre-wrap">
+                  {selected.prompt}
+                </p>
               </div>
 
               <div className="mt-7">
@@ -316,9 +324,9 @@ export function ScheduledPage({
                   {runs.map((run) => (
                     <article
                       key={run.id}
-                      className="rounded-md border border-border bg-background/45 px-4 py-3 [content-visibility:auto]"
+                      className="min-w-0 overflow-hidden rounded-md border border-border bg-background/45 px-4 py-3 [content-visibility:auto]"
                     >
-                      <div className="flex items-center gap-2 text-xs">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
                         {run.status === "succeeded" ? (
                           <CheckCircle2 className="size-3.5 text-emerald-600" />
                         ) : run.status === "running" ? (
@@ -333,7 +341,7 @@ export function ScheduledPage({
                         ) : null}
                       </div>
                       {run.summary || run.error ? (
-                        <p className="mt-2 line-clamp-4 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
+                        <p className="mt-2 line-clamp-4 text-xs leading-5 wrap-anywhere whitespace-pre-wrap text-muted-foreground">
                           {run.summary ?? run.error}
                         </p>
                       ) : null}
@@ -343,7 +351,7 @@ export function ScheduledPage({
               </div>
             </>
           ) : (
-            <div className="grid min-h-72 place-items-center text-center">
+            <div className="grid min-h-72 place-items-center px-4 text-center">
               <div>
                 <Clock3 className="mx-auto size-8 text-muted-foreground/45" />
                 <p className="mt-3 text-sm text-muted-foreground">选择一个已安排任务查看详情</p>

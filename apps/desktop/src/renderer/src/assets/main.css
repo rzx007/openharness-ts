@@ -7,11 +7,11 @@
 @source "../../../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
-
+/* "Microsoft YaHei UI", "Microsoft YaHei",  */
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans:
-    "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 
   --color-background: var(--background);

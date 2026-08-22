@@ -133,7 +133,7 @@ function ConversationPane({
               cwd={sessionView?.session.cwd ?? null}
               sessions={sessions}
             />
-            <h1 className="truncate text-[13px] font-medium">{title}</h1>
+            <h1 className="truncate text-[13px] font-semibold">{title}</h1>
             {sessionView?.syncStatus === "reconnecting" ? (
               <span className="flex shrink-0 items-center gap-1 text-[11px] text-ui-muted">
                 <Spinner className="size-3" />
