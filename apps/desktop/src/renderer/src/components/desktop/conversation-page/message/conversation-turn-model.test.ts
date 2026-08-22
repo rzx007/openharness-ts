@@ -79,7 +79,7 @@ describe("conversation turn model", () => {
     expect(turns[1]?.runIds).not.toContain("run-1")
   })
 
-  it("places a failed run without messages by its creation time", () => {
+  it("does not surface failed runs whose transcript was removed by an edit", () => {
     const failedRun = {
       ...run("orphan-run", "orphan-input"),
       status: "failed" as const,
@@ -93,8 +93,22 @@ describe("conversation turn model", () => {
     )
     const turns = entries.flatMap((entry) => (entry.type === "turn" ? [entry.turn] : []))
 
-    expect(turns.map((turn) => turn.id)).toEqual(["message-1", "orphan-input", "message-3"])
-    expect(turns[1]?.runIds).toEqual(["orphan-run"])
+    expect(turns.map((turn) => turn.id)).toEqual(["message-1", "message-3"])
+    expect(turns.flatMap((turn) => turn.runIds)).not.toContain("orphan-run")
+  })
+
+  it("shows a failed run when no transcript messages exist yet", () => {
+    const failedRun = {
+      ...run("orphan-run", "orphan-input"),
+      status: "failed" as const,
+      createdAt: 2,
+      updatedAt: 2,
+    }
+    const entries = buildConversationEntries([], [], [failedRun])
+    const turns = entries.flatMap((entry) => (entry.type === "turn" ? [entry.turn] : []))
+
+    expect(turns.map((turn) => turn.id)).toEqual(["orphan-input"])
+    expect(turns[0]?.runIds).toEqual(["orphan-run"])
   })
 })
 

@@ -15,7 +15,6 @@ import {
 } from "lucide-react"
 import type * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { createPortal } from "react-dom"
 
 import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
@@ -48,18 +47,22 @@ export type TerminalSessionTabInfo = {
   title: string
 }
 
-export type TerminalPanelCommand = {
-  id: number
-  type: "ensure" | "create" | "close"
-  terminalId?: string
-}
+export type TerminalPanelCommand =
+  | {
+    id: number
+    type: "ensure" | "create"
+  }
+  | {
+    id: number
+    type: "close"
+    terminalIds: string[]
+  }
 
 export function TerminalTool({
   active,
   activeTerminalId: selectedTerminalId,
   openRequest,
   command,
-  actionsHost,
   onSessionUpsert,
   onSessionRemove,
   onSessionsHydrate,
@@ -70,12 +73,11 @@ export function TerminalTool({
   activeTerminalId: string | null
   openRequest: { id: number; terminalId: string } | null
   command: TerminalPanelCommand | null
-  actionsHost: HTMLElement | null
   onSessionUpsert: (session: TerminalSessionTabInfo, activate: boolean) => void
   onSessionRemove: (terminalId: string) => void
   onSessionsHydrate: (sessions: TerminalSessionTabInfo[]) => void
   onActiveTerminalChange: (terminalId: string | null) => void
-  onCommandSettled: () => void
+  onCommandSettled: (commandId: number) => void
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<XTermTerminal | null>(null)
@@ -86,6 +88,7 @@ export function TerminalTool({
   const selectedProjectIdRef = useRef<string | null>(null)
   const pendingAttachRef = useRef<PendingAttach | null>(null)
   const renderedSequenceRef = useRef(new Map<string, number>())
+  const closedTerminalIdsRef = useRef(new Set<string>())
   const attachGenerationRef = useRef(0)
   const creatingRef = useRef(false)
   const resizeFrameRef = useRef<number | null>(null)
@@ -111,7 +114,13 @@ export function TerminalTool({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<TerminalContextMenuState | null>(null)
-  const [runtimeMode, setRuntimeMode] = useState<TerminalRuntimeMode>("local")
+  const runtimeMode: TerminalRuntimeMode = "local"
+
+  const visibleRecords = useCallback(
+    (nextRecords: DesktopTerminalRecord[]): DesktopTerminalRecord[] =>
+      nextRecords.filter((record) => !closedTerminalIdsRef.current.has(record.id)),
+    []
+  )
 
   const activeRecord = useMemo(
     () =>
@@ -275,7 +284,7 @@ export function TerminalTool({
       .list()
       .then((nextRecords) => {
         if (cancelled) return
-        setRecords(nextRecords)
+        setRecords(visibleRecords(nextRecords))
       })
       .catch((caught) => {
         if (!cancelled) setError(errorMessage(caught))
@@ -284,7 +293,7 @@ export function TerminalTool({
     return () => {
       cancelled = true
     }
-  }, [active, selectedProject?.available, selectedProject?.id, terminalReady])
+  }, [active, selectedProject?.available, selectedProject?.id, terminalReady, visibleRecords])
 
   useEffect(() => {
     if (!openRequest || !terminalReady) return
@@ -295,7 +304,8 @@ export function TerminalTool({
         if (cancelled) return
         const requested = nextRecords.find((record) => record.id === openRequest.terminalId)
         if (!requested) throw new Error("Terminal is no longer available.")
-        setRecords(nextRecords)
+        closedTerminalIdsRef.current.delete(requested.id)
+        setRecords(visibleRecords(nextRecords))
         setActiveTerminalId(requested.id)
         onSessionUpsertRef.current(toTabInfo(requested), true)
         onActiveTerminalChangeRef.current(requested.id)
@@ -306,7 +316,7 @@ export function TerminalTool({
     return () => {
       cancelled = true
     }
-  }, [openRequest, terminalReady])
+  }, [openRequest, terminalReady, visibleRecords])
 
   useEffect(() => {
     if (!terminalReady) return
@@ -435,7 +445,9 @@ export function TerminalTool({
     options?: { notifyParent?: boolean }
   ): Promise<void> => {
     renderedSequenceRef.current.delete(terminalId)
+    closedTerminalIdsRef.current.add(terminalId)
     const remaining = recordsRef.current.filter((record) => record.id !== terminalId)
+    recordsRef.current = remaining
     setRecords(remaining)
     if (options?.notifyParent !== false) onSessionRemoveRef.current(terminalId)
 
@@ -450,9 +462,17 @@ export function TerminalTool({
     if (!command) return
 
     if (command.type === "close") {
-      if (command.terminalId) void closeTerminal(command.terminalId, { notifyParent: false })
-      onCommandSettledRef.current()
-      return
+      let cancelled = false
+      void Promise.all(
+        command.terminalIds.map((terminalId) =>
+          closeTerminal(terminalId, { notifyParent: false })
+        )
+      ).finally(() => {
+        if (!cancelled) onCommandSettledRef.current(command.id)
+      })
+      return () => {
+        cancelled = true
+      }
     }
 
     if (!terminalReady) return
@@ -460,7 +480,7 @@ export function TerminalTool({
     if (command.type === "create") {
       let cancelled = false
       void createTerminal().finally(() => {
-        if (!cancelled) onCommandSettledRef.current()
+        if (!cancelled) onCommandSettledRef.current(command.id)
       })
       return () => {
         cancelled = true
@@ -468,7 +488,7 @@ export function TerminalTool({
     }
 
     if (!selectedProject?.available) {
-      onCommandSettledRef.current()
+      onCommandSettledRef.current(command.id)
       return
     }
 
@@ -477,8 +497,9 @@ export function TerminalTool({
       .list()
       .then(async (nextRecords) => {
         if (cancelled) return
-        setRecords(nextRecords)
-        const currentProjectRecords = nextRecords.filter(
+        const nextVisibleRecords = visibleRecords(nextRecords)
+        setRecords(nextVisibleRecords)
+        const currentProjectRecords = nextVisibleRecords.filter(
           (record) => record.projectId === selectedProject.id
         )
         if (currentProjectRecords.length === 0) {
@@ -498,7 +519,7 @@ export function TerminalTool({
         if (!cancelled) setError(errorMessage(caught))
       })
       .finally(() => {
-        if (!cancelled) onCommandSettledRef.current()
+        if (!cancelled) onCommandSettledRef.current(command.id)
       })
 
     return () => {
@@ -511,6 +532,7 @@ export function TerminalTool({
     selectedProject?.id,
     selectedTerminalId,
     terminalReady,
+    visibleRecords,
   ])
 
   const restartTerminal = async (): Promise<void> => {
@@ -588,60 +610,6 @@ export function TerminalTool({
         !active && "pointer-events-none opacity-0"
       )}
     >
-      {actionsHost &&
-        active &&
-        createPortal(
-          <>
-            {activeRecord && (
-              <span
-                className="max-w-28 shrink-0 truncate rounded-md bg-code px-1.5 py-0.5 font-sans text-[12px] text-ui-muted"
-                title={`${activeRecord.runtime} · ${activeRecord.shell} · ${activeRecord.cwd}`}
-              >
-                {activeRecord.status === "running"
-                  ? activeRecord.runtime === "sandbox"
-                    ? "Sandbox"
-                    : shellName(activeRecord.shell)
-                  : activeRecord.status}
-              </span>
-            )}
-            <div className="flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5">
-              <RuntimeButton
-                active={runtimeMode === "local"}
-                label="本地"
-                onClick={() => setRuntimeMode("local")}
-              />
-              <RuntimeButton
-                active={runtimeMode === "sandbox"}
-                label="沙箱"
-                onClick={() => setRuntimeMode("sandbox")}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              title="清空终端"
-              aria-label="清空终端"
-              onClick={clearTerminal}
-              disabled={!activeRecord}
-            >
-              <Eraser />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              title="重启终端"
-              aria-label="重启终端"
-              onClick={() => void restartTerminal()}
-              disabled={!activeRecord}
-            >
-              <RotateCcw />
-            </Button>
-          </>,
-          actionsHost
-        )}
-
       <div className="relative min-h-0 flex-1 bg-background/55">
         <div
           ref={containerRef}
@@ -796,31 +764,6 @@ function TerminalContextMenuItem({
       )}
     >
       {children}
-    </button>
-  )
-}
-
-function RuntimeButton({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean
-  label: string
-  onClick: () => void
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "h-6 rounded px-2 text-[11.5px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        active
-          ? "bg-background text-ui-foreground shadow-sm"
-          : "text-ui-muted hover:bg-background/55 hover:text-ui-foreground"
-      )}
-    >
-      {label}
     </button>
   )
 }

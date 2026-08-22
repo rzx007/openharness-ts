@@ -85,7 +85,7 @@ export function buildConversationEntries(
       turnsByRunId.set(run.id, turn)
       continue
     }
-    if (run.status !== "failed") continue
+    if (run.status !== "failed" || messages.length > 0) continue
     const failedTurn = createTurn(undefined, [], run.inputId, `failed-run-${run.id}`, run.createdAt)
     failedTurn.runIds.push(run.id)
     entries.push({ type: "turn", turn: failedTurn })

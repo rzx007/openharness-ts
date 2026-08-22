@@ -126,8 +126,8 @@ export function UtilityPanel({
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [addMenuPosition, setAddMenuPosition] = useState<MenuPosition | null>(null)
   const [terminalMounted, setTerminalMounted] = useState(false)
-  const [terminalCommand, setTerminalCommand] = useState<TerminalPanelCommand | null>(null)
-  const [terminalActionsHost, setTerminalActionsHost] = useState<HTMLDivElement | null>(null)
+  const [terminalCommands, setTerminalCommands] = useState<TerminalPanelCommand[]>([])
+  const terminalCommandSequenceRef = useRef(0)
   const handledToolRequestIdRef = useRef<number | null>(null)
   const [persistedFileTabs, setPersistedFileTabs] =
     useState<PersistedFileTabState>(readPersistedFileTabs)
@@ -147,10 +147,10 @@ export function UtilityPanel({
     (tab) => !tab.projectPath || tab.projectPath === selectedProjectPath
   )
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
+  const terminalCommand = terminalCommands[0] ?? null
   const pendingTerminal =
     Boolean(terminalOpenRequest) ||
-    terminalCommand?.type === "ensure" ||
-    terminalCommand?.type === "create"
+    terminalCommands.some((command) => command.type === "ensure" || command.type === "create")
 
   useEffect(() => {
     if (!fileOpenRequest) return
@@ -209,10 +209,13 @@ export function UtilityPanel({
           (tab) =>
             tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
         )
-        setTerminalCommand({
-          id: Date.now(),
-          type: hasTerminalTabs ? "create" : "ensure",
-        })
+        setTerminalCommands((current) => [
+          ...current,
+          {
+            id: ++terminalCommandSequenceRef.current,
+            type: hasTerminalTabs ? "create" : "ensure",
+          },
+        ])
         return
       }
 
@@ -341,15 +344,16 @@ export function UtilityPanel({
       return nextTabs
     })
 
-    closingTerminalIds.forEach((terminalId, index) => {
-      window.setTimeout(() => {
-        setTerminalCommand({
-          id: Date.now() + index,
+    if (closingTerminalIds.length > 0) {
+      setTerminalCommands((current) => [
+        ...current,
+        {
+          id: ++terminalCommandSequenceRef.current,
           type: "close",
-          terminalId,
-        })
-      }, index * 30)
-    })
+          terminalIds: closingTerminalIds,
+        },
+      ])
+    }
   }
 
   const closeTab = (tabId: string): void => {
@@ -575,11 +579,6 @@ export function UtilityPanel({
             )}
           </div>
 
-          <div
-            ref={setTerminalActionsHost}
-            className="flex shrink-0 items-center gap-0.5 text-ui-muted"
-          />
-
           <Button
             type="button"
             variant="ghost"
@@ -635,12 +634,15 @@ export function UtilityPanel({
               activeTerminalId={activeTab?.terminalId ?? null}
               openRequest={terminalOpenRequest}
               command={terminalCommand}
-              actionsHost={terminalActionsHost}
               onSessionUpsert={upsertTerminalTab}
               onSessionRemove={removeTerminalTab}
               onSessionsHydrate={hydrateTerminalTabs}
               onActiveTerminalChange={handleActiveTerminalChange}
-              onCommandSettled={() => setTerminalCommand(null)}
+              onCommandSettled={(commandId) =>
+                setTerminalCommands((current) =>
+                  current.filter((command) => command.id !== commandId)
+                )
+              }
             />
           )}
           {activeTab?.tool === "review" && (
