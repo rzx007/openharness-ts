@@ -260,6 +260,7 @@ function ConversationPane({
           ) : (
             <Composer
               id="message-composer"
+              className="mx-auto mb-5 w-[min(760px,calc(100%-32px))] shrink-0"
               draft={draft}
               sending={sending}
               running={running}
@@ -268,6 +269,7 @@ function ConversationPane({
               selectedProvider={selectedProvider}
               modelLabel={modelLabel}
               permissionMode={selectedPermissionMode}
+              canSubmit={Boolean(draft.trim())}
               onDraftChange={setDraft}
               onSubmit={() => void submitDraft()}
               onInterrupt={() => void interrupt()}
