@@ -1,4 +1,4 @@
-import type { Settings } from "@openharness/core";
+import type { AgentChildResult, Settings } from "@openharness/core";
 import type { SandboxPolicy } from "@openharness/sandbox";
 
 export type ExecutionBackend = "detached_process" | "child_agent";
@@ -52,6 +52,8 @@ export type ChildAgentExecutionListener = (
 export interface AwaitExecutionResult {
   status: ExecutionStatus;
   output: string;
+  /** Exact framework-child outcome; process backends may omit it. */
+  failureKind?: AgentChildResult["status"];
   exitCode?: number;
   timedOut?: boolean;
 }

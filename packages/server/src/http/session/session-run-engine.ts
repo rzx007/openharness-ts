@@ -195,6 +195,25 @@ export class SessionRunEngine {
     }
 
     const before = this.context.events.checkpoint();
+    if (delivery === "queue" && this.context.agentPool.configured) {
+      const admitted = this.context.store.admitPromptWithRun({
+        prompt: {
+          id: input.id,
+          sessionId,
+          delivery,
+          content: input.content,
+          metadata,
+        },
+        run: { metadata: runMetadata },
+      });
+      this.context.events.publishSince(before);
+      return {
+        input: admitted.input,
+        run: admitted.run,
+        queue_state: this.enqueueRun(admitted.run, admitted.input.id),
+      };
+    }
+
     const admitted = this.context.store.admitPrompt({
       id: input.id,
       sessionId,

@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { mkdirSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -10,21 +11,26 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import type {
   AdmitPromptInput,
+  AdmitPromptWithRunInput,
   AppendEventInput,
   AppendMessagePartDeltaInput,
   CreateMessageInput,
   CreatePermissionRequestInput,
+  CreateProjectionSettlementInput,
   CreateScheduledRunInput,
   CreateScheduledTaskInput,
   CreateRunInput,
+  CreateRunAttemptInput,
   CreateSessionTaskInput,
   CreateSessionInput,
   ListEventsOptions,
   ListMessagePartsOptions,
   ListMessagesOptions,
   ListPermissionRequestsOptions,
+  ListProjectionSettlementsOptions,
   ListSessionsOptions,
   PermissionRequestRecord,
+  ProjectionSettlementRecord,
   ScheduledRunRecord,
   ScheduledTaskRecord,
   ProjectRecord,
@@ -35,17 +41,20 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionStateSnapshot,
   UpsertMessagePartInput,
   UpdateScheduledRunInput,
   UpdateScheduledTaskInput,
   UpdateRunInput,
+  UpdateRunAttemptInput,
   UpdateSessionTaskInput,
   UpdateSessionInput,
   ReplaceTranscriptInput,
 } from "./types.js";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
+import { defaultDurableEventRegistry, type DurableEventRegistry } from "./event-registry.js";
 
 import {
   DEFAULT_DELTA_FLUSH_BYTES,
@@ -80,6 +89,7 @@ export class SessionStore {
   private saveRequested = false;
   private readonly deltaFlushIntervalMs: number;
   private readonly deltaFlushBytes: number;
+  private readonly eventRegistry: DurableEventRegistry;
   private readonly dirtyDeltaPartIds = new Set<string>();
   private pendingDeltaBytes = 0;
   private deltaFlushTimer?: ReturnType<typeof setTimeout>;
@@ -97,6 +107,7 @@ export class SessionStore {
       1,
       options.deltaFlushBytes ?? DEFAULT_DELTA_FLUSH_BYTES,
     );
+    this.eventRegistry = options.eventRegistry ?? defaultDurableEventRegistry;
     mkdirSync(dirname(this.path), { recursive: true });
     this.database = new Database(this.path);
     try {
@@ -658,6 +669,9 @@ export class SessionStore {
     assertSession(this.state, sessionId);
     const sessionIds = this.collectSessionTreeIds(sessionId);
     const sessionIdSet = new Set(sessionIds);
+    const runIds = new Set(Object.values(this.state.runs)
+      .filter((run) => sessionIdSet.has(run.sessionId))
+      .map((run) => run.id));
 
     this.database.transaction(() => {
       const placeholders = sessionIds.map(() => "?").join(", ");
@@ -669,6 +683,11 @@ export class SessionStore {
       this.database
         .prepare(
           `DELETE FROM session_task WHERE session_id IN (${placeholders})`,
+        )
+        .run(...sessionIds);
+      this.database
+        .prepare(
+          `DELETE FROM session_run_attempt WHERE run_id IN (SELECT id FROM session_run WHERE session_id IN (${placeholders}))`,
         )
         .run(...sessionIds);
       this.database
@@ -717,6 +736,9 @@ export class SessionStore {
     if (this.dirtyDeltaPartIds.size === 0) this.pendingDeltaBytes = 0;
     for (const [id, run] of Object.entries(this.state.runs)) {
       if (sessionIdSet.has(run.sessionId)) delete this.state.runs[id];
+    }
+    for (const [id, attempt] of Object.entries(this.state.attempts)) {
+      if (runIds.has(attempt.runId)) delete this.state.attempts[id];
     }
     for (const [id, task] of Object.entries(this.state.tasks)) {
       if (sessionIdSet.has(task.sessionId)) delete this.state.tasks[id];
@@ -822,6 +844,29 @@ export class SessionStore {
     });
     this.save();
     return clone(row);
+  }
+
+  /** Atomically persists a queued prompt and the one root run that owns it. */
+  admitPromptWithRun(input: AdmitPromptWithRunInput): {
+    input: SessionInputRecord;
+    run: SessionRunRecord;
+  } {
+    if (input.prompt.delivery === "steer") {
+      throw new Error("Steered prompts cannot create their owning run during admission");
+    }
+    return this.transaction(() => {
+      const admitted = this.admitPrompt({
+        ...input.prompt,
+        delivery: "queue",
+      });
+      const run = this.createRun({
+        id: input.run?.id,
+        sessionId: admitted.sessionId,
+        inputId: admitted.id,
+        metadata: input.run?.metadata,
+      });
+      return { input: admitted, run };
+    });
   }
 
   /** Respect renamed titles; use the first prompt only for legacy placeholder titles. */
@@ -1158,6 +1203,124 @@ export class SessionStore {
     return this.state.nextEventSeq - 1;
   }
 
+  createProjectionSettlement(input: CreateProjectionSettlementInput): ProjectionSettlementRecord {
+    const existing = this.database.prepare(`
+      SELECT * FROM projection_settlement
+      WHERE projector = ? AND root_session_id = ? AND event_sequence = ?
+    `).get(input.projector, input.rootSessionId, input.eventSequence) as Record<string, unknown> | undefined;
+    if (existing) {
+      const record = projectionSettlementFromRow(existing);
+      if (
+        record.action !== input.action ||
+        !isDeepStrictEqual(record.payload, input.payload)
+      ) {
+        throw new Error(
+          `Projection settlement identity conflict: ${input.projector}/${input.rootSessionId}/${input.eventSequence}`,
+        );
+      }
+      return record;
+    }
+    const timestamp = now();
+    const id = input.id ?? randomUUID();
+    this.database.prepare(`
+      INSERT INTO projection_settlement
+        (id, projector, root_session_id, event_sequence, action, payload_json,
+         status, attempt_count, last_error, next_retry_at, created_at, updated_at, resolved_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, ?, ?, NULL)
+    `).run(
+      id,
+      input.projector,
+      input.rootSessionId,
+      input.eventSequence,
+      input.action,
+      encode(input.payload),
+      input.error ?? null,
+      timestamp,
+      timestamp,
+    );
+    return this.getProjectionSettlement(id)!;
+  }
+
+  getProjectionSettlement(id: string): ProjectionSettlementRecord | undefined {
+    const row = this.database.prepare(
+      "SELECT * FROM projection_settlement WHERE id = ?",
+    ).get(id) as Record<string, unknown> | undefined;
+    return row ? projectionSettlementFromRow(row) : undefined;
+  }
+
+  listProjectionSettlements(
+    options: ListProjectionSettlementsOptions = {},
+  ): ProjectionSettlementRecord[] {
+    let records = (this.database.prepare(
+      "SELECT * FROM projection_settlement ORDER BY created_at, id",
+    ).all() as Array<Record<string, unknown>>).map(projectionSettlementFromRow);
+    if (options.projector) records = records.filter((row) => row.projector === options.projector);
+    if (options.rootSessionId) records = records.filter((row) => row.rootSessionId === options.rootSessionId);
+    if (options.status) {
+      const statuses = new Set(Array.isArray(options.status) ? options.status : [options.status]);
+      records = records.filter((row) => statuses.has(row.status));
+    }
+    return records;
+  }
+
+  markProjectionSettlementRetrying(id: string): ProjectionSettlementRecord {
+    const timestamp = now();
+    const result = this.database.prepare(`
+      UPDATE projection_settlement
+      SET status = 'retrying', attempt_count = attempt_count + 1,
+          last_error = NULL, next_retry_at = NULL, updated_at = ?
+      WHERE id = ? AND status IN ('pending', 'retrying')
+    `).run(timestamp, id);
+    if (result.changes === 0) {
+      const existing = this.getProjectionSettlement(id);
+      if (!existing) throw new Error(`Projection settlement not found: ${id}`);
+      return existing;
+    }
+    return this.getProjectionSettlement(id)!;
+  }
+
+  failProjectionSettlement(
+    id: string,
+    error: string,
+    nextRetryAt?: number,
+  ): ProjectionSettlementRecord {
+    const result = this.database.prepare(`
+      UPDATE projection_settlement
+      SET status = 'pending', last_error = ?, next_retry_at = ?, updated_at = ?
+      WHERE id = ? AND status != 'resolved' AND status != 'abandoned'
+    `).run(error, nextRetryAt ?? null, now(), id);
+    if (result.changes === 0 && !this.getProjectionSettlement(id)) {
+      throw new Error(`Projection settlement not found: ${id}`);
+    }
+    return this.getProjectionSettlement(id)!;
+  }
+
+  resolveProjectionSettlement(id: string): ProjectionSettlementRecord {
+    const timestamp = now();
+    const result = this.database.prepare(`
+      UPDATE projection_settlement
+      SET status = 'resolved', last_error = NULL, next_retry_at = NULL,
+          updated_at = ?, resolved_at = COALESCE(resolved_at, ?)
+      WHERE id = ? AND status != 'abandoned'
+    `).run(timestamp, timestamp, id);
+    if (result.changes === 0 && !this.getProjectionSettlement(id)) {
+      throw new Error(`Projection settlement not found: ${id}`);
+    }
+    return this.getProjectionSettlement(id)!;
+  }
+
+  abandonProjectionSettlement(id: string, error: string): ProjectionSettlementRecord {
+    const result = this.database.prepare(`
+      UPDATE projection_settlement
+      SET status = 'abandoned', last_error = ?, next_retry_at = NULL, updated_at = ?
+      WHERE id = ? AND status != 'resolved'
+    `).run(error, now(), id);
+    if (result.changes === 0 && !this.getProjectionSettlement(id)) {
+      throw new Error(`Projection settlement not found: ${id}`);
+    }
+    return this.getProjectionSettlement(id)!;
+  }
+
   createRun(input: CreateRunInput): SessionRunRecord {
     const session = assertSession(this.state, input.sessionId);
     assertMutableSession(session);
@@ -1430,12 +1593,164 @@ export class SessionStore {
           sessionId: part.sessionId,
           messageId: part.messageId,
           type: part.type,
-          status: "interrupted",
+          status: part.type === "tool" ? "failed" : "interrupted",
+          ...(part.type === "tool" ? {
+            metadata: {
+              ...part.metadata,
+              toolCallId: part.toolUseId ?? part.id,
+              toolAttemptId: typeof part.metadata.toolAttemptId === "string"
+                ? part.metadata.toolAttemptId
+                : `tool_attempt_${part.toolUseId ?? part.id}_1`,
+              outcome: "unknown",
+              failureKind: "unknown_outcome",
+              outcomeWarning: "Tool may already have executed; automatic retry is disabled",
+            },
+          } : {}),
         });
       }
-      this.updateRun(run.id, { status: "interrupted", error: reason });
+      this.transaction(() => {
+        this.settleActiveRunAttempts(run.id, "cancelled", reason);
+        this.updateRun(run.id, { status: "interrupted", error: reason });
+      });
     }
     return active.length;
+  }
+
+  createRunAttempt(input: CreateRunAttemptInput): SessionRunAttemptRecord {
+    const run = this.state.runs[input.runId];
+    if (!run) throw new Error(`Session run not found: ${input.runId}`);
+    if (isTerminalRunStatus(run.status)) throw new Error(`Session run is already terminal: ${input.runId}`);
+    const attempts = Object.values(this.state.attempts).filter((attempt) => attempt.runId === input.runId);
+    const sequence = input.sequence ?? attempts.reduce((max, attempt) => Math.max(max, attempt.sequence), 0) + 1;
+    if (attempts.some((attempt) => attempt.sequence === sequence)) {
+      throw new Error(`Session run attempt sequence already exists: ${input.runId}/${sequence}`);
+    }
+    const id = input.id ?? `attempt_${randomUUID()}`;
+    if (this.state.attempts[id]) throw new Error(`Session run attempt already exists: ${id}`);
+    const timestamp = now();
+    const attempt: SessionRunAttemptRecord = {
+      id,
+      runId: input.runId,
+      sequence,
+      status: "pending",
+      ...(input.provider ? { provider: input.provider } : {}),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.retryReason ? { retryReason: input.retryReason } : {}),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.state.attempts[id] = attempt;
+    this.mutations.attempts.add(id);
+    this.appendEventInMemory({
+      type: "session.run_attempt.created",
+      sessionId: run.sessionId,
+      payload: { attempt },
+    });
+    this.save();
+    return clone(attempt);
+  }
+
+  updateRunAttempt(attemptId: string, input: UpdateRunAttemptInput): SessionRunAttemptRecord {
+    const attempt = this.state.attempts[attemptId];
+    if (!attempt) throw new Error(`Session run attempt not found: ${attemptId}`);
+    const run = this.state.runs[attempt.runId];
+    if (!run) throw new Error(`Session run not found: ${attempt.runId}`);
+    const previous = attempt.status;
+    const timestamp = now();
+    if (input.status) {
+      if (isTerminalAttemptStatus(previous) && input.status !== previous) {
+        throw new Error(`Session run attempt is already terminal: ${attemptId}`);
+      }
+      attempt.status = input.status;
+      if (input.status === "running" && previous !== "running") {
+        attempt.startedAt = timestamp;
+        delete attempt.finishedAt;
+        delete attempt.error;
+        delete attempt.errorKind;
+      }
+      if (isTerminalAttemptStatus(input.status)) attempt.finishedAt = timestamp;
+    }
+    if (input.errorKind !== undefined) attempt.errorKind = input.errorKind;
+    if (input.error !== undefined) attempt.error = input.error;
+    if (input.inputTokens !== undefined) attempt.inputTokens = input.inputTokens;
+    if (input.outputTokens !== undefined) attempt.outputTokens = input.outputTokens;
+    attempt.updatedAt = timestamp;
+    this.mutations.attempts.add(attemptId);
+    this.appendEventInMemory({
+      type: "session.run_attempt.updated",
+      sessionId: run.sessionId,
+      payload: { attempt, previousStatus: previous },
+    });
+    this.save();
+    return clone(attempt);
+  }
+
+  getRunAttempt(attemptId: string): SessionRunAttemptRecord | undefined {
+    const attempt = this.state.attempts[attemptId];
+    return attempt ? clone(attempt) : undefined;
+  }
+
+  listRunAttempts(runId: string): SessionRunAttemptRecord[] {
+    if (!this.state.runs[runId]) throw new Error(`Session run not found: ${runId}`);
+    return clone(Object.values(this.state.attempts)
+      .filter((attempt) => attempt.runId === runId)
+      .sort((left, right) => left.sequence - right.sequence));
+  }
+
+  settleActiveRunAttempts(
+    runId: string,
+    status: "completed" | "failed" | "cancelled",
+    error?: string,
+  ): number {
+    const active = Object.values(this.state.attempts).filter(
+      (attempt) => attempt.runId === runId && !isTerminalAttemptStatus(attempt.status),
+    );
+    for (const attempt of active) {
+      this.updateRunAttempt(attempt.id, {
+        status,
+        ...(error ? { error, errorKind: status === "cancelled" ? "interrupted" : "provider" } : {}),
+      });
+    }
+    return active.length;
+  }
+
+  /**
+   * A durable input without either a primary run or transcript ownership may
+   * have been left between admission and live delivery by a previous daemon.
+   * Give it a terminal owner without replaying the model or any tool effect.
+   */
+  terminalizeUnownedInputs(
+    reason = "Daemon restarted before the input was assigned to a run",
+  ): number {
+    return this.transaction(() => {
+      const unowned = Object.values(this.state.inputs).filter((input) => {
+        const session = this.state.sessions[input.sessionId];
+        return session !== undefined &&
+          session.status !== "archived" &&
+          session.status !== "closing" &&
+          this.findRunByInput(input.id) === undefined;
+      });
+      for (const input of unowned) {
+        const traceId = typeof input.metadata.traceId === "string"
+          ? input.metadata.traceId
+          : undefined;
+        const run = this.createRun({
+          sessionId: input.sessionId,
+          inputId: input.id,
+          metadata: {
+            ...(traceId ? { traceId } : {}),
+            recovery: {
+              kind: "orphan_input",
+              inputId: input.id,
+              delivery: input.delivery,
+              reason,
+            },
+          },
+        });
+        this.updateRun(run.id, { status: "interrupted", error: reason });
+      }
+      return unowned.length;
+    });
   }
 
   /** A previous process cannot retain the resolver behind a pending permission prompt. */
@@ -1571,6 +1886,9 @@ export class SessionStore {
       runs: Object.values(this.state.runs)
         .filter((run) => run.sessionId === sessionId)
         .sort((a, b) => a.createdAt - b.createdAt),
+      attempts: Object.values(this.state.attempts)
+        .filter((attempt) => this.state.runs[attempt.runId]?.sessionId === sessionId)
+        .sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence),
       tasks: Object.values(this.state.tasks)
         .filter((task) => task.sessionId === sessionId)
         .sort((a, b) => a.createdAt - b.createdAt),
@@ -1584,12 +1902,18 @@ export class SessionStore {
     input: AppendEventInput,
     retain = true,
   ): SessionEventRecord {
+    const prepared = this.eventRegistry.prepareWrite(
+      input.type,
+      input.payload ?? {},
+      input.sessionId,
+    );
     const event: SessionEventRecord = {
       id: input.id ?? randomUUID(),
       seq: this.allocateEventSequence(),
       type: input.type,
+      schemaVersion: prepared.schemaVersion,
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      payload: input.payload ?? {},
+      payload: prepared.payload,
       createdAt: now(),
     };
     if (retain) {
@@ -1763,6 +2087,28 @@ export class SessionStore {
       state.runs[run.id] = run;
     }
     for (const row of this.database
+      .prepare("SELECT * FROM session_run_attempt")
+      .all() as Array<Record<string, unknown>>) {
+      const attempt: SessionRunAttemptRecord = {
+        id: row.id as string,
+        runId: row.run_id as string,
+        sequence: row.sequence as number,
+        status: row.status as SessionRunAttemptRecord["status"],
+        ...(row.provider ? { provider: row.provider as string } : {}),
+        ...(row.model ? { model: row.model as string } : {}),
+        ...(row.retry_reason ? { retryReason: row.retry_reason as string } : {}),
+        ...(row.error_kind ? { errorKind: row.error_kind as string } : {}),
+        ...(row.error ? { error: row.error as string } : {}),
+        ...(row.input_tokens !== null ? { inputTokens: row.input_tokens as number } : {}),
+        ...(row.output_tokens !== null ? { outputTokens: row.output_tokens as number } : {}),
+        ...(row.started_at ? { startedAt: row.started_at as number } : {}),
+        ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}),
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+      };
+      state.attempts[attempt.id] = attempt;
+    }
+    for (const row of this.database
       .prepare("SELECT * FROM session_task")
       .all() as Array<Record<string, unknown>>) {
       const task: SessionExecutionRecord = {
@@ -1808,12 +2154,20 @@ export class SessionStore {
     for (const row of this.database
       .prepare("SELECT * FROM session_event ORDER BY seq")
       .all() as Array<Record<string, unknown>>) {
+      const schemaVersion = typeof row.schema_version === "number" ? row.schema_version : 1;
+      const prepared = this.eventRegistry.prepareRead(
+        row.type as string,
+        schemaVersion,
+        decode(row.payload_json as string),
+        row.session_id ? row.session_id as string : undefined,
+      );
       const event: SessionEventRecord = {
         id: row.id as string,
         seq: row.seq as number,
-        type: row.type as string,
+        type: prepared.type,
+        schemaVersion: prepared.schemaVersion,
         ...(row.session_id ? { sessionId: row.session_id as string } : {}),
-        payload: decode(row.payload_json as string),
+        payload: prepared.payload,
         createdAt: row.created_at as number,
       };
       state.events.push(event);
@@ -2003,6 +2357,37 @@ export class SessionStore {
         );
     }
 
+    const upsertAttempt = this.database.prepare(`
+      INSERT INTO session_run_attempt VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET run_id=excluded.run_id, sequence=excluded.sequence,
+        status=excluded.status, provider=excluded.provider, model=excluded.model,
+        retry_reason=excluded.retry_reason, error_kind=excluded.error_kind, error=excluded.error,
+        input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
+        started_at=excluded.started_at, finished_at=excluded.finished_at,
+        created_at=excluded.created_at, updated_at=excluded.updated_at
+    `);
+    for (const id of this.mutations.attempts) {
+      const value = this.state.attempts[id];
+      if (value)
+        upsertAttempt.run(
+          value.id,
+          value.runId,
+          value.sequence,
+          value.status,
+          value.provider ?? null,
+          value.model ?? null,
+          value.retryReason ?? null,
+          value.errorKind ?? null,
+          value.error ?? null,
+          value.inputTokens ?? null,
+          value.outputTokens ?? null,
+          value.startedAt ?? null,
+          value.finishedAt ?? null,
+          value.createdAt,
+          value.updatedAt,
+        );
+    }
+
     const upsertTask = this.database.prepare(`
       INSERT INTO session_task VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id,
@@ -2058,9 +2443,11 @@ export class SessionStore {
         );
     }
 
-    const insertEvent = this.database.prepare(
-      "INSERT INTO session_event VALUES (?, ?, ?, ?, ?, ?)",
-    );
+    const insertEvent = this.database.prepare(`
+      INSERT INTO session_event
+        (id, seq, type, session_id, payload_json, created_at, schema_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
     for (const value of this.state.events) {
       if (!this.mutations.events.has(value.id) || !isDurableEvent(value))
         continue;
@@ -2071,6 +2458,7 @@ export class SessionStore {
         value.sessionId ?? null,
         encode(value.payload),
         value.createdAt,
+        value.schemaVersion,
       );
     }
   }
@@ -2122,6 +2510,32 @@ function projectFromRow(row: Record<string, unknown>): ProjectRecord {
     ...(row.archived_at ? { archivedAt: row.archived_at as number } : {}),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
+  };
+}
+
+function isTerminalAttemptStatus(status: SessionRunAttemptRecord["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function projectionSettlementFromRow(row: Record<string, unknown>): ProjectionSettlementRecord {
+  return {
+    id: row.id as string,
+    projector: row.projector as string,
+    rootSessionId: row.root_session_id as string,
+    eventSequence: row.event_sequence as number,
+    action: row.action as ProjectionSettlementRecord["action"],
+    payload: decode(row.payload_json as string),
+    status: row.status as ProjectionSettlementRecord["status"],
+    attemptCount: row.attempt_count as number,
+    ...(row.last_error ? { lastError: row.last_error as string } : {}),
+    ...(row.next_retry_at !== null && row.next_retry_at !== undefined
+      ? { nextRetryAt: row.next_retry_at as number }
+      : {}),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+    ...(row.resolved_at !== null && row.resolved_at !== undefined
+      ? { resolvedAt: row.resolved_at as number }
+      : {}),
   };
 }
 

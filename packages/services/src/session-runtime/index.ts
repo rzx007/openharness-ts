@@ -1,4 +1,17 @@
 export { SessionStore, type SessionStoreOptions } from "./store.js";
+export { SESSION_EVENT_SCHEMA_VERSION } from "./types.js";
+export {
+  createDurableEventRegistry,
+  defaultDurableEventRegistry,
+  DurableEventRegistry,
+  DurableEventRegistryError,
+  DEFAULT_DURABLE_EVENT_DEFINITIONS,
+} from "./event-registry.js";
+export type {
+  DurableEventDefinition,
+  DurableEventScope,
+  PreparedDurableEvent,
+} from "./event-registry.js";
 export { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
 export {
   patchSessionRuntimeMetadata,
@@ -12,13 +25,16 @@ export type {
 } from "./runtime-config.js";
 export type {
   AdmitPromptInput,
+  AdmitPromptWithRunInput,
   AppendEventInput,
   AppendMessagePartDeltaInput,
   CreateMessageInput,
   CreatePermissionRequestInput,
+  CreateProjectionSettlementInput,
   CreateScheduledRunInput,
   CreateScheduledTaskInput,
   CreateRunInput,
+  CreateRunAttemptInput,
   CreateSessionTaskInput,
   CreateSessionInput,
   InputDelivery,
@@ -26,13 +42,18 @@ export type {
   ListMessagePartsOptions,
   ListMessagesOptions,
   ListPermissionRequestsOptions,
+  ListProjectionSettlementsOptions,
   ListSessionsOptions,
   PermissionRequestRecord,
+  ProjectionSettlementAction,
+  ProjectionSettlementRecord,
+  ProjectionSettlementStatus,
   ProjectLocationRecord,
   ProjectRecord,
   PermissionStatus,
   ReplyPermissionInput,
   RunStatus,
+  RunAttemptStatus,
   ScheduledMissedRunPolicy,
   ScheduledOverlapPolicy,
   ScheduledPermissionProfile,
@@ -54,6 +75,7 @@ export type {
   SessionMessageRole,
   SessionRecord,
   SessionRunRecord,
+  SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionTaskStatus,
   SessionStatus,
@@ -62,6 +84,7 @@ export type {
   UpdateScheduledRunInput,
   UpdateScheduledTaskInput,
   UpdateRunInput,
+  UpdateRunAttemptInput,
   UpdateSessionTaskInput,
   UpdateSessionInput,
   ReplaceTranscriptInput,

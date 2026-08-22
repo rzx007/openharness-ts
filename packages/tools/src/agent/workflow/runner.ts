@@ -227,9 +227,9 @@ function mapAwaitedTaskToWorkerResult(
 ): WorkflowWorkerResult {
   const status = waited.timedOut
     ? "failed"
-    : waited.status === "completed"
+    : waited.failureKind === "completed" || (!waited.failureKind && waited.status === "completed")
       ? "completed"
-      : waited.status === "stopped"
+      : waited.failureKind === "interrupted" || waited.failureKind === "stopped" || (!waited.failureKind && waited.status === "stopped")
         ? "killed"
         : "failed";
   const detail = waited.timedOut
@@ -249,6 +249,7 @@ function mapAwaitedTaskToWorkerResult(
       ...(spawn.notice ? { notice: spawn.notice } : {}),
       ...(diff && diff.changedFiles.length > 0 ? { changedFiles: diff.changedFiles, diff } : {}),
       ...(waited.timedOut ? { timedOut: true } : {}),
+      ...(waited.failureKind ? { failureKind: waited.failureKind } : {}),
     },
   };
 }

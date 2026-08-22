@@ -20,7 +20,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function event(seq: number, type = "daemon.test"): SessionEventRecord {
-  return { id: `e${seq}`, seq, type, payload: {}, createdAt: seq };
+  return { id: `e${seq}`, seq, type, schemaVersion: 1, payload: {}, createdAt: seq };
 }
 
 describe("OpenHarnessClient", () => {

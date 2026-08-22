@@ -261,6 +261,67 @@ describe("createAgentWorkflowRunner", () => {
     expect(stopTask).toHaveBeenCalledWith("task_timeout");
   });
 
+  it("preserves the framework child failure kind for workflow policy decisions", async () => {
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker: async () => ({
+        success: true,
+        agentId: "worker@default",
+        taskId: "task_failed",
+        backendType: "framework",
+      }),
+      awaitTask: async () => ({
+        status: "failed",
+        failureKind: "failed",
+        output: "lint failed",
+      }),
+      getAgentDefinition: () => undefined,
+    });
+
+    await expect(runner({
+      task: { id: "lint" },
+      attempt: 1,
+      dependencyResults: {},
+    })).resolves.toMatchObject({
+      status: "failed",
+      result: "lint failed",
+      metadata: { failureKind: "failed" },
+    });
+  });
+
+  it("workflow retry spawns a fresh child run for every visible attempt", async () => {
+    const sessions: string[] = [];
+    const spawnWorker = vi.fn(async (config: WorkflowWorkerSpawnConfig): Promise<WorkflowWorkerSpawnResult> => {
+      sessions.push(config.sessionId);
+      return {
+        success: true,
+        agentId: "worker@default",
+        taskId: `task_${sessions.length}`,
+        backendType: "framework",
+      };
+    });
+    const awaitTask = vi.fn()
+      .mockResolvedValueOnce({ status: "failed", failureKind: "failed", output: "temporary" })
+      .mockResolvedValueOnce({ status: "completed", failureKind: "completed", output: "recovered" });
+    const runner = createAgentWorkflowRunner({
+      cwd: "/repo",
+      spawnWorker,
+      awaitTask,
+      getAgentDefinition: () => undefined,
+    });
+
+    const result = await runWorkflow({
+      mode: "parallel",
+      tasks: [{ id: "flaky", retry: { maxAttempts: 2 } }],
+    }, runner);
+
+    expect(result.results.flaky).toMatchObject({ status: "completed", attempts: 2 });
+    expect(spawnWorker).toHaveBeenCalledTimes(2);
+    expect(new Set(sessions).size).toBe(2);
+    expect(sessions[0]).toContain("wf-flaky-1-");
+    expect(sessions[1]).toContain("wf-flaky-2-");
+  });
+
   it("requests stop when a resumed workflow task wait times out", async () => {
     const stopTask = vi.fn(async () => undefined);
     const runner = createAgentWorkflowRunner({

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import type {
+  AgentChildBudget,
+  AgentChildBudgetSnapshot,
   AgentChildController,
   AgentChildDirectory,
   AgentChildHandle,
@@ -14,7 +16,7 @@ import type {
   AgentRunScope,
   Settings,
 } from "@openharness/core";
-import { AgentRunNotAcceptingInputError } from "@openharness/core";
+import { AgentChildBudgetExceededError, AgentRunNotAcceptingInputError } from "@openharness/core";
 
 import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "./agent.js";
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
@@ -51,9 +53,21 @@ interface ChildRecord {
   closePromise?: Promise<void>;
   cleanupPromise?: Promise<void>;
   handle: ChildHandle;
+  budgetReservation: AgentChildBudgetReservation;
 }
 
 const MAX_CHILD_REQUEST_HISTORY = 256;
+export const DEFAULT_AGENT_CHILD_BUDGET: AgentChildBudget = {
+  maxDepth: 4,
+  maxActiveChildren: 8,
+  maxTotalChildren: 64,
+};
+
+interface AgentChildBudgetReservation {
+  commit(): void;
+  rollback(): void;
+  release(): void;
+}
 
 export interface AgentChildManagerOptions {
   settings: Settings;
@@ -73,6 +87,77 @@ export interface AgentChildManagerOptions {
 export class AgentChildRegistry implements AgentChildDirectory {
   private readonly byId = new Map<string, AgentChildHandle>();
   private readonly bySessionId = new Map<string, AgentChildHandle>();
+  private readonly depthBySessionId = new Map<string, number>();
+  private budget: AgentChildBudget;
+  private activeChildren = 0;
+  private totalChildren = 0;
+
+  constructor(budget: AgentChildBudget = DEFAULT_AGENT_CHILD_BUDGET) {
+    this.budget = normalizeChildBudget(budget);
+  }
+
+  configureBudget(budget: AgentChildBudget): void {
+    if (this.activeChildren > 0 || this.totalChildren > 0) {
+      if (!isDeepStrictEqual(this.budget, budget)) {
+        throw new Error("Child budget cannot change after the root tree starts allocating children");
+      }
+      return;
+    }
+    this.budget = normalizeChildBudget(budget);
+  }
+
+  snapshotBudget(): AgentChildBudgetSnapshot {
+    return { ...this.budget, activeChildren: this.activeChildren, totalChildren: this.totalChildren };
+  }
+
+  reserve(parentSessionId: string, childSessionId: string): AgentChildBudgetReservation {
+    if (this.depthBySessionId.has(childSessionId)) {
+      throw new Error(`Child agent session is already live or being allocated: ${childSessionId}`);
+    }
+    const childDepth = (this.depthBySessionId.get(parentSessionId) ?? 0) + 1;
+    if (childDepth > this.budget.maxDepth) {
+      throw new AgentChildBudgetExceededError("depth", this.budget.maxDepth, childDepth);
+    }
+    if (this.activeChildren >= this.budget.maxActiveChildren) {
+      throw new AgentChildBudgetExceededError(
+        "activeChildren",
+        this.budget.maxActiveChildren,
+        this.activeChildren,
+      );
+    }
+    if (this.totalChildren >= this.budget.maxTotalChildren) {
+      throw new AgentChildBudgetExceededError(
+        "totalChildren",
+        this.budget.maxTotalChildren,
+        this.totalChildren,
+      );
+    }
+
+    this.activeChildren++;
+    this.totalChildren++;
+    this.depthBySessionId.set(childSessionId, childDepth);
+    let state: "reserved" | "committed" | "released" = "reserved";
+    return {
+      commit: () => {
+        if (state === "reserved") state = "committed";
+      },
+      rollback: () => {
+        if (state !== "reserved") return;
+        state = "released";
+        this.activeChildren--;
+        this.totalChildren--;
+        this.depthBySessionId.delete(childSessionId);
+      },
+      release: () => {
+        if (state === "released") return;
+        const rollbackTotal = state === "reserved";
+        state = "released";
+        this.activeChildren--;
+        if (rollbackTotal) this.totalChildren--;
+        this.depthBySessionId.delete(childSessionId);
+      },
+    };
+  }
 
   register(handle: AgentChildHandle): void {
     const existingId = this.byId.get(handle.id);
@@ -111,6 +196,7 @@ export class AgentChildManager implements AgentChildDirectory {
   constructor(private readonly options: AgentChildManagerOptions) {
     this.environment = options.environment ?? createDefaultChildEnvironmentProvider();
     this.directory = options.directory ?? new AgentChildRegistry();
+    this.directory.configureBudget(resolveChildBudget(options.settings.childBudget, options.configuration.childBudget));
   }
 
   get cwd(): string {
@@ -142,6 +228,10 @@ export class AgentChildManager implements AgentChildDirectory {
     return [...this.records.values()].map((record) => record.handle);
   }
 
+  getBudgetSnapshot(): AgentChildBudgetSnapshot {
+    return this.directory.snapshotBudget();
+  }
+
   async closeAll(): Promise<void> {
     const background = [...this.backgroundClosures];
     const settled = await Promise.allSettled([
@@ -161,7 +251,29 @@ export class AgentChildManager implements AgentChildDirectory {
     if (this.directory.getBySessionId(sessionId)) {
       throw new Error(`Child agent session is already live: ${sessionId}`);
     }
-    const lease = await this.environment.acquire(input, childId);
+    let budgetReservation: AgentChildBudgetReservation;
+    try {
+      budgetReservation = this.directory.reserve(parentScope.sessionId, sessionId);
+    } catch (error) {
+      if (error instanceof AgentChildBudgetExceededError) {
+        process.stderr.write(`${JSON.stringify({
+          level: "warn",
+          event: "agent.child_budget_exceeded",
+          dimension: error.dimension,
+          limit: error.limit,
+          current: error.current,
+          parentSessionId: parentScope.sessionId,
+        })}\n`);
+      }
+      throw error;
+    }
+    let lease: AgentChildEnvironmentLease;
+    try {
+      lease = await this.environment.acquire(input, childId);
+    } catch (error) {
+      budgetReservation.rollback();
+      throw error;
+    }
     const record = {} as ChildRecord;
     const handle = new ChildHandle(this, () => record);
     Object.assign(record, {
@@ -197,6 +309,7 @@ export class AgentChildManager implements AgentChildDirectory {
       requests: new Map(),
       state: "starting",
       handle,
+      budgetReservation,
     } satisfies Partial<ChildRecord>);
 
     let announced = false;
@@ -225,6 +338,7 @@ export class AgentChildManager implements AgentChildDirectory {
         throw new Error("Parent run interrupted");
       }
       const receipt = await this.beginRun(record, { content: input.prompt });
+      budgetReservation.commit();
       return {
         id: childId,
         sessionId,
@@ -546,6 +660,7 @@ export class AgentChildManager implements AgentChildDirectory {
   private deleteRecord(record: ChildRecord): void {
     this.directory.unregister(record.handle);
     this.records.delete(record.id);
+    record.budgetReservation.release();
   }
 
   private clearIdleTimer(record: ChildRecord): void {
@@ -580,6 +695,22 @@ function sameChildInput(left: AgentChildInput, right: AgentChildInput): boolean 
   return left.content === right.content &&
     (left.delivery ?? "steer") === (right.delivery ?? "steer") &&
     isDeepStrictEqual(left.metadata ?? {}, right.metadata ?? {});
+}
+
+function resolveChildBudget(
+  settings: Partial<AgentChildBudget> | undefined,
+  configuration: Partial<AgentChildBudget> | undefined,
+): AgentChildBudget {
+  return normalizeChildBudget({ ...DEFAULT_AGENT_CHILD_BUDGET, ...settings, ...configuration });
+}
+
+function normalizeChildBudget(budget: AgentChildBudget): AgentChildBudget {
+  for (const [name, value] of Object.entries(budget)) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`Child budget ${name} must be a non-negative safe integer`);
+    }
+  }
+  return { ...budget };
 }
 
 function mergeToolLists(

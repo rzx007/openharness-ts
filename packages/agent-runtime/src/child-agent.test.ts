@@ -1,4 +1,4 @@
-import { AgentRunNotAcceptingInputError } from "@openharness/core";
+import { AgentChildBudgetExceededError, AgentRunNotAcceptingInputError } from "@openharness/core";
 import type { AgentChildResult, AgentInputReceipt, AgentRunHandle, AgentRunResult, AgentRunScope } from "@openharness/core";
 import { describe, expect, it, vi } from "vitest";
 
@@ -575,6 +575,137 @@ describe("AgentChildManager", () => {
     expect(record.requests.size).toBe(256);
     await manager.closeAll();
   });
+  it("rejects depth, active, and total limits before allocating another environment", async () => {
+    const budget = { maxDepth: 1, maxActiveChildren: 1, maxTotalChildren: 1 };
+    const directory = new AgentChildRegistry(budget);
+    const acquire = vi.fn(async (input: any) => ({ cwd: input.cwd, release: async () => {} }));
+    const configuration = { childBudget: budget };
+    const root = createManager(
+      new AgentEventBus(),
+      async () => fakeAgent(vi.fn(() => completedRun("root child"))),
+      undefined,
+      directory,
+      false,
+      configuration,
+      acquire,
+    );
+
+    const first = await root.createController(parentScope()).spawnChildAgent({
+      description: "first",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+      sessionId: "level-one",
+    });
+
+    await expect(root.createController(parentScope()).spawnChildAgent({
+      description: "active overflow",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+    })).rejects.toMatchObject({
+      name: "AgentChildBudgetExceededError",
+      dimension: "activeChildren",
+      current: 1,
+      limit: 1,
+    });
+    expect(acquire).toHaveBeenCalledTimes(1);
+
+    const descendant = createManager(
+      new AgentEventBus(),
+      async () => fakeAgent(vi.fn(() => completedRun("descendant"))),
+      undefined,
+      directory,
+      false,
+      configuration,
+      acquire,
+    );
+    await expect(descendant.createController({ ...parentScope(), sessionId: first.sessionId }).spawnChildAgent({
+      description: "too deep",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+    })).rejects.toMatchObject({ dimension: "depth", current: 2, limit: 1 });
+    expect(acquire).toHaveBeenCalledTimes(1);
+
+    await root.closeAll();
+    await expect(root.createController(parentScope()).spawnChildAgent({
+      description: "total overflow",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+    })).rejects.toMatchObject({ dimension: "totalChildren", current: 1, limit: 1 });
+    expect(directory.snapshotBudget()).toEqual({ ...budget, activeChildren: 0, totalChildren: 1 });
+  });
+
+  it("reserves the shared active budget atomically across concurrent spawns", async () => {
+    const budget = { maxDepth: 2, maxActiveChildren: 1, maxTotalChildren: 4 };
+    const directory = new AgentChildRegistry(budget);
+    const acquired = deferred<void>();
+    const acquire = vi.fn(async (input: any) => {
+      await acquired.promise;
+      return { cwd: input.cwd, release: async () => {} };
+    });
+    const manager = createManager(
+      new AgentEventBus(),
+      async () => fakeAgent(vi.fn(() => completedRun("done"))),
+      undefined,
+      directory,
+      false,
+      { childBudget: budget },
+      acquire,
+    );
+
+    const first = manager.createController(parentScope()).spawnChildAgent({
+      description: "first",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+    });
+    await expect(manager.createController(parentScope()).spawnChildAgent({
+      description: "second",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+    })).rejects.toBeInstanceOf(AgentChildBudgetExceededError);
+    expect(acquire).toHaveBeenCalledTimes(1);
+    acquired.resolve();
+    await first;
+    await manager.closeAll();
+  });
+
+  it("rolls budget reservations back when environment allocation fails", async () => {
+    const budget = { maxDepth: 2, maxActiveChildren: 1, maxTotalChildren: 1 };
+    const directory = new AgentChildRegistry(budget);
+    const acquire = vi.fn()
+      .mockRejectedValueOnce(new Error("environment unavailable"))
+      .mockImplementationOnce(async (input: any) => ({ cwd: input.cwd, release: async () => {} }));
+    const manager = createManager(
+      new AgentEventBus(),
+      async () => fakeAgent(vi.fn(() => completedRun("done"))),
+      undefined,
+      directory,
+      false,
+      { childBudget: budget },
+      acquire,
+    );
+
+    await expect(manager.createController(parentScope()).spawnChildAgent({
+      description: "fails",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+    })).rejects.toThrow("environment unavailable");
+    expect(directory.snapshotBudget()).toEqual({ ...budget, activeChildren: 0, totalChildren: 0 });
+
+    await expect(manager.createController(parentScope()).spawnChildAgent({
+      description: "succeeds",
+      prompt: "work",
+      agent: "worker",
+      cwd: "/repo",
+    })).resolves.toBeDefined();
+    await manager.closeAll();
+  });
 });
 
 function createManager(
@@ -584,6 +715,7 @@ function createManager(
   directory?: AgentChildRegistry,
   preserveRunIdentity = false,
   configuration: Record<string, unknown> = {},
+  acquire: (input: any, childId: string) => Promise<any> = async (input) => ({ cwd: input.cwd, release: async () => {} }),
 ) {
   return new AgentChildManager({
     settings: {} as any,
@@ -616,7 +748,7 @@ function createManager(
       };
     },
     environment: {
-      acquire: async (input) => ({ cwd: input.cwd, release: async () => {} }),
+      acquire,
     },
   });
 }

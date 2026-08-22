@@ -13,6 +13,10 @@ function createControl() {
     listRuns: vi.fn((sessionId) => sessionId === "s1" ? [{ status: "running" }] : []),
     listSessionTasks: vi.fn(() => []),
     listPermissionRequests: vi.fn(() => [{ status: "pending" }]),
+    listProjectionSettlements: vi.fn(() => [
+      { status: "pending" },
+      { status: "resolved" },
+    ]),
     getSession: vi.fn((sessionId) => sessions.find((session) => session.id === sessionId)),
   };
   const runEngine = {
@@ -54,6 +58,11 @@ describe("DaemonControlService", () => {
       sessions: { total: 2, byStatus: { idle: 1, archived: 1 } },
       runs: { total: 1, byStatus: { running: 1 } },
       permissions: { total: 1, byStatus: { pending: 1 } },
+      projectionSettlements: {
+        total: 2,
+        pending: 1,
+        byStatus: { pending: 1, resolved: 1 },
+      },
       sseClientCount: 2,
       warmAgentCount: 1,
       coordinator: { activeRunCount: 1, queuedRunCount: 1 },

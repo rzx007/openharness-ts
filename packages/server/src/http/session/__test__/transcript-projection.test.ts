@@ -90,6 +90,11 @@ describe("SessionTranscriptProjection", () => {
       input: { cmd: "pwd" },
       output: { output: "ok", isError: false },
       isError: false,
+      metadata: {
+        toolCallId: "tool-1",
+        toolAttemptId: "tool_attempt_tool-1_1",
+        outcome: "completed",
+      },
     });
   });
 

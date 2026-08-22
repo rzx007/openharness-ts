@@ -26,8 +26,8 @@ flowchart LR
 
 1. Agent/Workflow tool 调用 `context.agent.children.spawnChildAgent()`。
 2. `AgentChildManager` 生成 canonical `childId` 与 `sessionId`。
-3. manager 在 tree-wide registry 预检 sessionId；已有 live child 时不获取环境资源。
-4. `AgentChildEnvironmentProvider` 获取 shared cwd 或 git worktree lease。
+3. manager 在 tree-wide registry 预检 sessionId，并原子预占整棵树的 child 预算；超过递归深度、活跃数或累计数时直接返回结构化错误，不获取环境资源，也不发布假的 `child.created`。
+4. `AgentChildEnvironmentProvider` 获取 shared cwd 或 git worktree lease。环境申请或后续创建失败会回滚这次未成功的预算预占。
 5. manager 把 handle 放入 root tree 共享的 `AgentChildRegistry`，发布并等待 `child.created`。
 6. daemon projector 创建 durable child session、parent-visible task，并登记 `rootAgent + childId` 路由；既有 durable session 还必须匹配同一个 childId。
 7. framework 递归创建共享 effects/event bus 的 child `OpenHarnessAgent`。
@@ -50,6 +50,24 @@ BackgroundShellCreate -> shell jobId
 ```
 
 framework child 的执行不依赖 daemon task projection。daemon projector 可以并行建立同 ID 的 durable task，负责 UI、恢复和审计；它不是 SDK 执行闭环的一环。`JobWait` timeout 只返回当前快照，不会 interrupt；只有显式 `JobCancel` 才停止 child。
+
+## Child 预算（防止无限“叫人”）
+
+默认预算是 `maxDepth=4`、`maxActiveChildren=8`、`maxTotalChildren=64`。现有 Workflow 默认并发是 3，因此活跃上限 8 能容纳常规 Workflow 和少量交互式 Agent，同时会挡住失控的递归创建；累计上限 64 防止通过“创建一个、关闭一个、再创建一个”的循环绕过限制。可以用 Settings 或创建 Agent 时的 `childBudget` 覆盖。
+
+- depth 从 root agent 的 0 开始；child 是 1，grandchild 是 2。
+- active 统计 starting、running、idle、suspended、closing 的全部 live descendant；suspend 不退名额，真正 close 才退。
+- total 统计 root agent 生命周期内成功分配过的 child；close 后不退。root agent 关闭后，共享账本随整棵 live tree 一起释放。
+- `agent.inspect().childBudget` 返回当前上限、active 和 total，供 debug/metrics 读取。
+
+## Child 失败后谁做决定
+
+`AgentChildManager` 只报告事实：`completed`（正常完成）、`failed`（执行失败）、`interrupted`（被上级中断）或 `stopped`（尚无活动 run 就被停止）。它不替父级决定要不要继续。
+
+- 单次 Agent + JobWait：失败会作为 `failed` 和 `failureKind` 返回给父模型；父模型可以改方案、继续其他工作或明确停止，父 run 不会被 ChildManager 暗中判失败。
+- Workflow：默认 `failurePolicy=skip-dependents`，失败任务的下游会跳过；`fail-fast` 会停止调度新任务；`continue` 仍调度下游。只有任务自己的 `retry` 配置会自动重试。
+- Workflow 每次 retry 都调用一次新的 `spawnChildAgent`，生成新的 child session/run；不会把已经 terminal 的 run 重新打开。
+- parent run abort 不属于可选策略：它始终向所有直属 child 传播 interrupt，child 再向自己的 descendant 传播。
 
 ## Follow-up
 

@@ -9,6 +9,7 @@ export async function awaitFrameworkChildTask(
   const completion = children.awaitChildAgent(taskId).then((result): AwaitExecutionResult => ({
     status: result.status === "interrupted" ? "stopped" : result.status,
     output: result.output || result.error || "",
+    failureKind: result.status,
   }));
   if (timeoutMs === undefined) return completion;
 

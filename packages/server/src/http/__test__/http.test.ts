@@ -28,6 +28,7 @@ import { OpenHarnessHttpServer, startOpenHarnessServer } from "../server.js";
 import { getDefaultSessionStorePath } from "../../daemon/paths.js";
 import type { OpenHarnessServerOptions, OpenHarnessServerServices } from "../server.js";
 import type { ObservabilityEvent } from "../../shared/observability.js";
+import { projectionSettlementInput } from "../agent/projection-settlement-recovery.js";
 
 interface TestAgentProgram {
   runPrompt(input: any, run: TestAgentRunContext): Promise<unknown>;
@@ -545,6 +546,7 @@ describe("OpenHarnessHttpServer", () => {
         runs: { total: 0, byStatus: {} },
         tasks: { total: 0, byStatus: {} },
         permissions: { total: 0, byStatus: {} },
+        projectionSettlements: { total: 0, pending: 0, byStatus: {} },
         sseClientCount: 0,
         warmAgentCount: 0,
         coordinator: { activeRunCount: 0, queuedRunCount: 0 },
@@ -764,6 +766,50 @@ describe("OpenHarnessHttpServer", () => {
         first.store.createSessionTask({
           id: "task-stale", sessionId: "s1", type: "agent", description: "stale child", cwd: process.cwd(),
         });
+        first.store.createSession({
+          id: "child-settlement-session",
+          parentId: "s1",
+          cwd: process.cwd(),
+          model: "m",
+        });
+        first.store.createSessionTask({
+          id: "child-settlement",
+          sessionId: "s1",
+          childSessionId: "child-settlement-session",
+          type: "agent",
+          description: "terminal child awaiting projection repair",
+          cwd: process.cwd(),
+        });
+        first.store.createProjectionSettlement(projectionSettlementInput(
+          "daemon-agent:crashed-agent",
+          "s1",
+          {
+            id: "child-close-before-crash",
+            sequence: 17,
+            occurredAt: new Date().toISOString(),
+            type: "child.closed",
+            data: {
+              childId: "child-settlement",
+              sessionId: "child-settlement-session",
+              result: { status: "completed", output: "recovered child output" },
+            },
+            context: {
+              agentId: "crashed-agent",
+              sessionId: "s1",
+              childId: "child-settlement",
+              traceId: "trace-child-settlement",
+            },
+          },
+          "retry-terminal-projection",
+          new Error("daemon crashed before child task completion persisted"),
+        ));
+        first.store.admitPrompt({
+          id: "input-orphaned-before-restart",
+          sessionId: "s1",
+          delivery: "steer",
+          content: "not yet delivered",
+          metadata: { traceId: "trace-orphaned" },
+        });
       } finally {
         await first.close();
       }
@@ -780,7 +826,7 @@ describe("OpenHarnessHttpServer", () => {
         const state = await (await fetch(`${listen2.url}/sessions/s1/state`, { headers: auth(token) })).json() as {
           messages: Array<{ role: string }>;
           parts: Array<{ id: string; text?: string; status: string }>;
-          runs: Array<{ id: string; status: string }>;
+          runs: Array<{ id: string; inputId?: string; status: string; error?: string; metadata: Record<string, unknown> }>;
           tasks: Array<{ id: string; status: string }>;
           permissions: Array<{ id: string; status: string; decision?: string }>;
         };
@@ -788,7 +834,19 @@ describe("OpenHarnessHttpServer", () => {
         expect(state.parts[0]?.text).toBe("survived restart");
         expect(state.parts.find((part) => part.id === "part-stale")?.status).toBe("interrupted");
         expect(state.runs.find((run) => run.id === "r-stale")?.status).toBe("interrupted");
+        expect(state.runs.find((run) => run.inputId === "input-orphaned-before-restart")).toMatchObject({
+          status: "interrupted",
+          error: "Daemon restarted before the input was assigned to a run",
+          metadata: {
+            traceId: "trace-orphaned",
+            recovery: expect.objectContaining({ kind: "orphan_input" }),
+          },
+        });
         expect(state.tasks.find((task) => task.id === "task-stale")?.status).toBe("interrupted");
+        expect(state.tasks.find((task) => task.id === "child-settlement")).toMatchObject({
+          status: "completed",
+          output: "recovered child output",
+        });
         expect(state.permissions.find((request) => request.id === "permission-stale")).toMatchObject({
           status: "expired",
           decision: "Daemon restarted before the permission was resolved",
@@ -801,6 +859,16 @@ describe("OpenHarnessHttpServer", () => {
         expect(events.events.map((event) => event.type)).toContain("session.run.updated");
         expect(events.events.map((event) => event.type)).toContain("session.task.updated");
         expect(events.events.map((event) => event.type)).toContain("permission.replied");
+        expect(events.events.map((event) => event.type)).toContain("agent.child.closed");
+
+        const runtime = await (await fetch(`${listen2.url}/debug/runtime`, { headers: auth(token) })).json() as {
+          projectionSettlements: { total: number; pending: number; byStatus: Record<string, number> };
+        };
+        expect(runtime.projectionSettlements).toMatchObject({
+          total: 1,
+          pending: 0,
+          byStatus: { resolved: 1 },
+        });
       } finally {
         await second.close();
       }
@@ -2062,9 +2130,10 @@ describe("OpenHarnessHttpServer", () => {
       expect(created.status).toBe(201);
 
       const firstEvents = await (await fetch(`${baseUrl}/events`, { headers: auth(token) })).json() as {
-        events: Array<{ seq: number; type: string }>;
+        events: Array<{ seq: number; type: string; schemaVersion: number }>;
       };
       expect(firstEvents.events.map((event) => event.type)).toEqual(["session.created"]);
+      expect(firstEvents.events.map((event) => event.schemaVersion)).toEqual([1]);
       const cursor = firstEvents.events[0]!.seq;
 
       const prompt = await fetch(`${baseUrl}/sessions/s1/prompts`, {
@@ -2080,9 +2149,10 @@ describe("OpenHarnessHttpServer", () => {
       expect(sessions.sessions.map((session) => session.id)).toEqual(["s1"]);
 
       const nextEvents = await (await fetch(`${baseUrl}/events?cursor=${cursor}`, { headers: auth(token) })).json() as {
-        events: Array<{ type: string }>;
+        events: Array<{ type: string; schemaVersion: number }>;
       };
       expect(nextEvents.events.map((event) => event.type)).toEqual(["session.input.admitted"]);
+      expect(nextEvents.events.map((event) => event.schemaVersion)).toEqual([1]);
 
       const snapshot = await (await fetch(`${baseUrl}/sessions/s1/state`, { headers: auth(token) })).json() as {
         cursor: number;

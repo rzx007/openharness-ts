@@ -44,17 +44,25 @@ export interface ToolContext {
 export interface ToolResult {
   content: ContentBlock[];
   isError?: boolean;
+  failureKind?: ToolFailureKind;
 }
+
+export type ToolFailureKind =
+  | "permission" | "policy" | "timeout" | "command" | "transport"
+  | "provider" | "interrupted" | "unknown_outcome";
 
 export interface ToolExecutionResult extends ToolResult {
   toolUseId: string;
   toolName: string;
+  toolAttemptId?: string;
 }
 
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Automatic retry is forbidden unless this is explicitly true. */
+  safeToRetry?: boolean;
   execute: (
     input: Record<string, unknown>,
     context: ToolContext,

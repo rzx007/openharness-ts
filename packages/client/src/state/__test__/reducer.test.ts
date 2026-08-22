@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { applyEvent, applyEvents, applySessionSnapshot, createInitialClientState } from "../reducer.js";
+import {
+  applyEvent,
+  applyEvents,
+  applySessionSnapshot,
+  createInitialClientState,
+  UnsupportedSessionEventSchemaVersionError,
+} from "../reducer.js";
 import { selectSessionMessagesWithParts } from "../selectors.js";
 import { hydrateState } from "../sync.js";
 import type {
@@ -27,10 +33,24 @@ function session(id: string, updatedAt: number): SessionRecord {
 }
 
 function event(seq: number, type: string, payload: Record<string, unknown>, sessionId = "s1"): SessionEventRecord {
-  return { id: `e${seq}`, seq, type, sessionId, payload, createdAt: seq };
+  return { id: `e${seq}`, seq, type, schemaVersion: 1, sessionId, payload, createdAt: seq };
 }
 
 describe("session event reducer", () => {
+  it("rejects an unknown event schema version without advancing the cursor", () => {
+    const state = createInitialClientState();
+    const incompatible = {
+      ...event(1, "session.updated", {}),
+      schemaVersion: 2,
+    };
+
+    expect(() => applyEvent(state, incompatible)).toThrow(
+      UnsupportedSessionEventSchemaVersionError,
+    );
+    expect(state.lastSeq).toBe(0);
+    expect(state.eventsBySeq).toEqual({});
+  });
+
   it("hydrates canonical messages, parts, runs, and permissions from an attach snapshot", () => {
     const current = session("s1", 10);
     const message: SessionMessageRecord = {

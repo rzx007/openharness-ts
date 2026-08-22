@@ -20,6 +20,7 @@ export {
   hydrateState,
   selectSessionMessagesWithParts,
   syncEvents,
+  UnsupportedSessionEventSchemaVersionError,
 } from "./state/index.js";
 export {
   LOCAL_COMMAND_DETAILS,
@@ -104,6 +105,7 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionStateSnapshot,
   SessionUsageResponse,

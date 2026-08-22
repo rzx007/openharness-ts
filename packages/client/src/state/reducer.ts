@@ -4,6 +4,8 @@
  * 幂等：同一 `seq` 只应用一次。多端用同一套事件流应收敛到相同状态。
  */
 
+import { SESSION_EVENT_SCHEMA_VERSION } from "@openharness/services";
+
 import type {
   OpenHarnessClientState,
   PermissionRequestRecord,
@@ -14,9 +16,26 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionStateSnapshot,
 } from "../types/index.js";
+
+export class UnsupportedSessionEventSchemaVersionError extends Error {
+  readonly event: Pick<SessionEventRecord, "seq" | "type" | "schemaVersion">;
+
+  constructor(event: SessionEventRecord) {
+    super(
+      `Unsupported session event schema version ${event.schemaVersion} for ${event.type} at sequence ${event.seq}; expected ${SESSION_EVENT_SCHEMA_VERSION}`,
+    );
+    this.name = "UnsupportedSessionEventSchemaVersionError";
+    this.event = {
+      seq: event.seq,
+      type: event.type,
+      schemaVersion: event.schemaVersion,
+    };
+  }
+}
 
 /** 空客户端状态，作为 replay/hydrate 起点。 */
 export function createInitialClientState(): OpenHarnessClientState {
@@ -66,6 +85,7 @@ export function applySessionSnapshot(
         messages: [...snapshot.messages].sort((a, b) => a.seq - b.seq),
         partsByMessageId,
         runs: Object.fromEntries(snapshot.runs.map((run) => [run.id, run])),
+        attempts: Object.fromEntries((snapshot.attempts ?? []).map((attempt) => [attempt.id, attempt])),
         tasks: Object.fromEntries((snapshot.tasks ?? []).map((task) => [task.id, task])),
         permissions: Object.fromEntries(snapshot.permissions.map((request) => [request.id, request])),
       },
@@ -82,6 +102,9 @@ export function applyEvent(
   state: OpenHarnessClientState,
   event: SessionEventRecord,
 ): OpenHarnessClientState {
+  if (event.schemaVersion !== SESSION_EVENT_SCHEMA_VERSION) {
+    throw new UnsupportedSessionEventSchemaVersionError(event);
+  }
   const transient = event.type === "session.message.part.delta";
   if (transient && event.seq <= state.transientCursor) return state;
   if (!transient && state.eventsBySeq[event.seq]) return state;
@@ -120,6 +143,10 @@ export function applyEvent(
     case "session.run.created":
     case "session.run.updated":
       next = upsertRun(next, readPayloadRecord<SessionRunRecord>(event, "run"));
+      break;
+    case "session.run_attempt.created":
+    case "session.run_attempt.updated":
+      next = upsertRunAttempt(next, readPayloadRecord<SessionRunAttemptRecord>(event, "attempt"));
       break;
     case "session.task.created":
     case "session.task.updated":
@@ -288,6 +315,20 @@ function upsertRun(state: OpenHarnessClientState, run: SessionRunRecord | undefi
   };
 }
 
+function upsertRunAttempt(
+  state: OpenHarnessClientState,
+  attempt: SessionRunAttemptRecord | undefined,
+): OpenHarnessClientState {
+  if (!attempt) return state;
+  const run = Object.values(state.buckets)
+    .flatMap((bucket) => Object.values(bucket.runs))
+    .find((candidate) => candidate.id === attempt.runId);
+  if (!run) return state;
+  const bucket = cloneBucket(state.buckets[run.sessionId]);
+  bucket.attempts = { ...bucket.attempts, [attempt.id]: attempt };
+  return { ...state, buckets: { ...state.buckets, [run.sessionId]: bucket } };
+}
+
 function refreshSessionStatusFromRuns(
   session: SessionRecord | undefined,
   runs: SessionBucket["runs"],
@@ -330,6 +371,7 @@ function cloneBucket(bucket: SessionBucket | undefined): SessionBucket {
       ? Object.fromEntries(Object.entries(bucket.partsByMessageId).map(([id, parts]) => [id, [...parts]]))
       : {},
     runs: bucket?.runs ? { ...bucket.runs } : {},
+    attempts: bucket?.attempts ? { ...bucket.attempts } : {},
     tasks: bucket?.tasks ? { ...bucket.tasks } : {},
     permissions: bucket?.permissions ? { ...bucket.permissions } : {},
   };
@@ -342,6 +384,7 @@ function cloneBucketForPartWrite(bucket: SessionBucket | undefined): SessionBuck
     messages: bucket?.messages ?? [],
     partsByMessageId: bucket?.partsByMessageId ?? {},
     runs: bucket?.runs ?? {},
+    attempts: bucket?.attempts ?? {},
     tasks: bucket?.tasks ?? {},
     permissions: bucket?.permissions ?? {},
   };

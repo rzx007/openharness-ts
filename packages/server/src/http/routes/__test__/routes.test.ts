@@ -21,9 +21,11 @@ function runtimeSnapshot() {
     runs: { total: 1, byStatus: { completed: 1 } },
     tasks: { total: 0, byStatus: {} },
     permissions: { total: 0, byStatus: {} },
+    projectionSettlements: { total: 0, pending: 0, byStatus: {} },
     sseClientCount: 0,
     warmAgentCount: 1,
     coordinator: { activeRunCount: 1, queuedRunCount: 3 },
+    metrics: { counters: {}, gauges: {}, histograms: {} },
   };
 }
 
@@ -37,6 +39,8 @@ function daemonControl(overrides: Record<string, unknown> = {}) {
     runtimeInspectionAvailable: true,
     sessionExists: () => true,
     inspectRuntimeHooks: async () => [],
+    inspectRun: () => undefined,
+    listProjectionDiagnostics: () => ({ settlements: [], pending: 0, diagnosticOk: true, includeContent: false }),
     ...overrides,
   };
 }

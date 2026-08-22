@@ -214,7 +214,11 @@ export class LocalAgentJobHost implements AgentJobHost {
       updatedAt: child.updatedAt,
       ...(isTerminalJobStatus(status) ? { finishedAt: child.updatedAt } : {}),
       ...(child.result?.error ? { detail: child.result.error } : {}),
-      metadata: { childSessionId: child.handle.sessionId, childState: child.handle.state },
+      metadata: {
+        childSessionId: child.handle.sessionId,
+        childState: child.handle.state,
+        ...(child.result ? { failureKind: child.result.status } : {}),
+      },
     };
   }
 

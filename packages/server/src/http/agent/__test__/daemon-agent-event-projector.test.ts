@@ -11,6 +11,7 @@ describe("DaemonAgentEventProjector", () => {
     ]]);
     const inputs = new Map<string, any>();
     const runs = new Map<string, any>();
+    const attempts = new Map<string, any>();
     const tasks = new Map<string, any>();
     const store = {
       transaction: <T>(work: () => T) => work(),
@@ -37,6 +38,24 @@ describe("DaemonAgentEventProjector", () => {
         const row = Object.assign(runs.get(id) ?? { id }, update);
         runs.set(id, row);
         return row;
+      }),
+      listRunAttempts: vi.fn((runId) => [...attempts.values()].filter((attempt) => attempt.runId === runId)),
+      createRunAttempt: vi.fn((input) => {
+        const row = { ...input, status: "pending" };
+        attempts.set(row.id, row);
+        return row;
+      }),
+      updateRunAttempt: vi.fn((id, update) => {
+        const row = Object.assign(attempts.get(id), update);
+        attempts.set(id, row);
+        return row;
+      }),
+      settleActiveRunAttempts: vi.fn((runId, status, error) => {
+        for (const attempt of attempts.values()) {
+          if (attempt.runId === runId && (attempt.status === "pending" || attempt.status === "running")) {
+            Object.assign(attempt, { status }, error ? { error } : {});
+          }
+        }
       }),
       appendEvent: vi.fn(),
     };
@@ -140,6 +159,10 @@ describe("DaemonAgentEventProjector", () => {
     expect(events.publish).toHaveBeenCalledWith(liveDelta);
     expect(bridge.bindChildExecutionRun).toHaveBeenCalledTimes(2);
     expect(store.updateRun).toHaveBeenLastCalledWith("run-2", { status: "completed" });
+    expect([...attempts.values()]).toMatchObject([
+      { id: "attempt_run-1_1", runId: "run-1", sequence: 1, status: "failed" },
+      { id: "attempt_run-2_1", runId: "run-2", sequence: 1, status: "completed" },
+    ]);
     expect(bridge.completeChildExecution).toHaveBeenCalledWith("child-1", { status: "completed", output: "done" });
   });
 
@@ -293,11 +316,41 @@ describe("DaemonAgentEventProjector", () => {
       .mockRejectedValueOnce(new Error("store still unavailable"))
       .mockResolvedValueOnce(undefined);
     const liveChildren = { unregister: vi.fn() };
+    let settlement: any;
     const store = {
       getSessionTask: vi.fn(() => ({ id: "child-1", status: "running" })),
       appendEvent: vi.fn(),
+      createProjectionSettlement: vi.fn((input) => {
+        settlement ??= {
+          ...input,
+          id: "settlement-1",
+          status: "pending",
+          attemptCount: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        };
+        return settlement;
+      }),
+      listProjectionSettlements: vi.fn(() =>
+        settlement && (settlement.status === "pending" || settlement.status === "retrying")
+          ? [settlement]
+          : []),
+      markProjectionSettlementRetrying: vi.fn(() => {
+        Object.assign(settlement, { status: "retrying", attemptCount: settlement.attemptCount + 1 });
+        return settlement;
+      }),
+      failProjectionSettlement: vi.fn((_id, error) => {
+        Object.assign(settlement, { status: "pending", lastError: error });
+        return settlement;
+      }),
+      resolveProjectionSettlement: vi.fn(() => {
+        Object.assign(settlement, { status: "resolved" });
+        return settlement;
+      }),
     };
     const projector = new DaemonAgentEventProjector({
+      projectorId: "daemon-agent:agent-1",
+      rootSessionId: "parent",
       rootAgent: { children: { get: vi.fn() } } as any,
       store: store as any,
       transcriptProjection: {} as any,
@@ -329,6 +382,40 @@ describe("DaemonAgentEventProjector", () => {
     expect(completeChildExecution).toHaveBeenCalledTimes(3);
     expect(store.appendEvent).toHaveBeenCalledOnce();
     expect((projector as any).children.size).toBe(0);
+    expect(store.createProjectionSettlement).toHaveBeenCalledOnce();
+    expect(settlement).toMatchObject({ status: "resolved", attemptCount: 2 });
+  });
+
+  it("does not hide the original projection error when settlement persistence also fails", async () => {
+    const projector = new DaemonAgentEventProjector({
+      projectorId: "daemon-agent:agent-1",
+      rootSessionId: "parent",
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: {
+        listProjectionSettlements: vi.fn(() => []),
+        getSession: vi.fn(() => undefined),
+        createProjectionSettlement: vi.fn(() => { throw new Error("sqlite unavailable"); }),
+      } as any,
+      transcriptProjection: {} as any,
+      executionProjector: {} as any,
+      liveChildren: {} as any,
+      events: { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    const failure = await projector.apply(event("child.created", {
+      childId: "child-1",
+      sessionId: "child-session",
+      spawn: { description: "Explore", prompt: "inspect", agent: "Explore", cwd: "/repo" },
+      cwd: "/repo",
+    }, { sessionId: "parent", childId: "child-1" })).catch((error) => error);
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.message).toContain("settlement could not be persisted");
+    expect((failure as AggregateError).errors.map((error) => error.message)).toEqual([
+      expect.stringContaining("Parent session not found"),
+      "sqlite unavailable",
+    ]);
   });
 
   it("does not reopen a terminal durable run", async () => {
@@ -354,6 +441,41 @@ describe("DaemonAgentEventProjector", () => {
       runId: "run-1",
     }))).rejects.toThrow("Agent run is already terminal");
     expect(updateRun).not.toHaveBeenCalled();
+  });
+
+  it("stores domain events under one registered type and keeps the domain name in the payload", async () => {
+    const durableEvents: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const appendEvent = vi.fn((input) => { durableEvents.push(input); });
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: { appendEvent, listEvents: vi.fn(() => durableEvents) } as any,
+      transcriptProjection: {} as any,
+      executionProjector: {} as any,
+      liveChildren: {} as any,
+      events: { checkpoint: vi.fn(() => 1), publish: vi.fn(), publishSince: vi.fn() },
+      log: vi.fn(),
+    });
+
+    const domainEvent = event("domain.event", {
+      name: "provider.rate_limited",
+      payload: { retryAfterMs: 1_000 },
+    }, { sessionId: "s1" });
+    await projector.apply(domainEvent);
+
+    expect(appendEvent).toHaveBeenCalledWith({
+      type: "agent.domain.event",
+      sessionId: "s1",
+      payload: {
+        frameworkEventId: domainEvent.id,
+        name: "provider.rate_limited",
+        payload: { retryAfterMs: 1_000 },
+      },
+    });
+
+    // Simulate durable projection succeeding just before settlement resolution failed.
+    (projector as any).lastAppliedSequence = 0;
+    await projector.apply(domainEvent);
+    expect(appendEvent).toHaveBeenCalledOnce();
   });
 });
 

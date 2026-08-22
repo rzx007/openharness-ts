@@ -16,6 +16,11 @@ import type {
 } from "../session/session-execution-projector.js";
 import type { ActiveTranscriptProjectionState, SessionTranscriptProjection } from "../session/transcript-projection.js";
 import { jsonEqual, withoutTraceId } from "../support.js";
+import {
+  decodeDaemonAgentSettlement,
+  projectionSettlementInput,
+  recoverProjectionSettlements,
+} from "./projection-settlement-recovery.js";
 
 interface ChildProjectionState {
   childId: string;
@@ -32,6 +37,9 @@ interface PendingEventSettlement {
 }
 
 export interface DaemonAgentEventProjectorContext {
+  /** Required in production; optional only for narrow projector test doubles. */
+  projectorId?: string;
+  rootSessionId?: string;
   rootAgent: OpenHarnessAgent;
   store: SessionStore;
   transcriptProjection: SessionTranscriptProjection;
@@ -51,7 +59,8 @@ export class DaemonAgentEventProjector {
   constructor(private readonly context: DaemonAgentEventProjectorContext) {}
 
   async apply(event: AgentEvent): Promise<void> {
-    await this.reconcilePendingSettlement();
+    if (this.hasDurableSettlementStore()) await this.reconcileDurableSettlements();
+    else await this.reconcilePendingSettlement();
     if (event.sequence <= this.lastAppliedSequence) return;
     try {
       await this.project(event);
@@ -64,21 +73,9 @@ export class DaemonAgentEventProjector {
           action: event.type === "child.closed" ? "retry-projection" : "compensate-child",
           cause: error,
         };
-        try {
-          await this.settle(settlement);
-          this.lastAppliedSequence = event.sequence;
-          recovered = settlement.action === "retry-projection";
-        } catch (settlementError) {
-          this.pendingSettlement = settlement;
-          this.context.log({
-            level: "error",
-            event: "session.child_projection.compensation_failed",
-            traceId: event.context.traceId,
-            sessionId: event.context.sessionId,
-            runId: event.context.runId,
-            error: settlementError instanceof Error ? settlementError.message : String(settlementError),
-          });
-        }
+        recovered = this.hasDurableSettlementStore()
+          ? await this.persistAndSettle(settlement, error)
+          : await this.settleInMemory(settlement);
       }
       if (recovered) return;
       throw error;
@@ -120,10 +117,13 @@ export class DaemonAgentEventProjector {
         });
         return;
       case "usage.updated":
-        this.projectStream(event, { type: "usage", usage: event.data.usage });
+        this.projectUsage(event);
         return;
       case "domain.event":
-        this.appendRuntimeEvent(event, event.data.payload, event.data.name);
+        this.appendRuntimeEvent(event, {
+          name: event.data.name,
+          payload: event.data.payload ?? {},
+        }, "agent.domain.event");
         return;
       case "permission.requested":
       case "permission.resolved":
@@ -288,6 +288,24 @@ export class DaemonAgentEventProjector {
         throw new Error(`Agent run is already terminal: ${runId}`);
       }
       this.context.store.updateRun(runId, { status: "running" });
+      const supportsAttempts = typeof this.context.store.listRunAttempts === "function" &&
+        typeof this.context.store.createRunAttempt === "function" &&
+        typeof this.context.store.updateRunAttempt === "function" &&
+        typeof this.context.store.getSession === "function";
+      const existingAttempts = supportsAttempts ? this.context.store.listRunAttempts(runId) : [];
+      if (supportsAttempts && existingAttempts.length === 0) {
+        const session = this.context.store.getSession(sessionId);
+        if (!session) throw new Error(`Agent run session not found: ${sessionId}`);
+        const runtime = readSessionRuntimeConfig(session);
+        const attempt = this.context.store.createRunAttempt({
+          id: `attempt_${runId}_1`,
+          runId,
+          sequence: 1,
+          provider: runtime.provider,
+          model: runtime.model,
+        });
+        this.context.store.updateRunAttempt(attempt.id, { status: "running" });
+      }
       return this.context.transcriptProjection.beginRun(sessionId, inputId, runId, input.content);
     });
     this.transcripts.set(runId, transcript);
@@ -375,6 +393,20 @@ export class DaemonAgentEventProjector {
             payload: { runId, traceId: event.context.traceId, error },
           });
         }
+        if (typeof this.context.store.settleActiveRunAttempts === "function") {
+          this.context.store.settleActiveRunAttempts(
+            runId,
+            interrupted ? "cancelled" : failed ? "failed" : "completed",
+            error,
+          );
+        }
+        if (interrupted || failed) {
+          this.context.transcriptProjection.finalizeRunParts(
+            event.context.sessionId,
+            runId,
+            interrupted ? "interrupted" : "failed",
+          );
+        }
         this.context.store.updateRun(runId, {
           status: interrupted ? "interrupted" : failed ? "failed" : "completed",
           ...(error ? { error } : {}),
@@ -414,6 +446,12 @@ export class DaemonAgentEventProjector {
   }
 
   private appendRuntimeEvent(event: AgentEvent, payload?: Record<string, unknown>, type = `agent.${event.type}`): void {
+    if (
+      typeof this.context.store.listEvents === "function" &&
+      this.context.store.listEvents({ sessionId: event.context.sessionId }).some(
+        (candidate) => candidate.type === type && candidate.payload.frameworkEventId === event.id,
+      )
+    ) return;
     const before = this.context.events.checkpoint();
     this.context.store.appendEvent({
       type,
@@ -437,6 +475,9 @@ export class DaemonAgentEventProjector {
             sessionId: event.context.sessionId,
             payload: { runId, traceId: event.context.traceId, error: message, projectionFailure: true },
           });
+          if (typeof this.context.store.settleActiveRunAttempts === "function") {
+            this.context.store.settleActiveRunAttempts(runId, "failed", message);
+          }
           this.context.store.updateRun(runId, { status: "failed", error: message });
         });
         this.context.events.publishSince(before);
@@ -480,6 +521,141 @@ export class DaemonAgentEventProjector {
     await this.settle(pending);
     this.lastAppliedSequence = Math.max(this.lastAppliedSequence, pending.event.sequence);
     if (this.pendingSettlement === pending) this.pendingSettlement = undefined;
+  }
+
+  private projectUsage(event: Extract<AgentEvent, { type: "usage.updated" }>): void {
+    this.projectStream(event, { type: "usage", usage: event.data.usage });
+    if (typeof this.context.store.listRunAttempts !== "function" ||
+      typeof this.context.store.updateRunAttempt !== "function") return;
+    const runId = required(event.context.runId, "runId", event.type);
+    const attempt = this.context.store.listRunAttempts(runId)
+      .filter((candidate) => candidate.status === "pending" || candidate.status === "running")
+      .at(-1);
+    if (!attempt) return;
+    this.context.store.updateRunAttempt(attempt.id, {
+      inputTokens: (attempt.inputTokens ?? 0) + event.data.usage.inputTokens,
+      outputTokens: (attempt.outputTokens ?? 0) + event.data.usage.outputTokens,
+    });
+  }
+
+  private hasDurableSettlementStore(): boolean {
+    return Boolean(
+      this.context.projectorId &&
+      this.context.rootSessionId &&
+      typeof this.context.store.createProjectionSettlement === "function" &&
+      typeof this.context.store.listProjectionSettlements === "function",
+    );
+  }
+
+  private async persistAndSettle(pending: PendingEventSettlement, originalError: unknown): Promise<boolean> {
+    let record;
+    try {
+      record = this.context.store.createProjectionSettlement(projectionSettlementInput(
+        this.context.projectorId!,
+        this.context.rootSessionId!,
+        pending.event,
+        pending.action === "retry-projection" ? "retry-terminal-projection" : "compensate-child",
+        pending.cause,
+      ));
+    } catch (persistenceError) {
+      throw new AggregateError(
+        [originalError, persistenceError],
+        `Projection failed and its settlement could not be persisted: ${pending.event.id}`,
+      );
+    }
+
+    try {
+      this.context.store.markProjectionSettlementRetrying(record.id);
+      await this.settle(pending);
+      this.context.store.resolveProjectionSettlement(record.id);
+      this.lastAppliedSequence = pending.event.sequence;
+      return pending.action === "retry-projection";
+    } catch (settlementError) {
+      const message = settlementError instanceof Error ? settlementError.message : String(settlementError);
+      try {
+        this.context.store.failProjectionSettlement(record.id, message);
+      } catch (persistenceError) {
+        throw new AggregateError(
+          [originalError, settlementError, persistenceError],
+          `Projection settlement failed and its pending state could not be persisted: ${record.id}`,
+        );
+      }
+      this.context.log({
+        level: "error",
+        event: "session.child_projection.compensation_failed",
+        traceId: pending.event.context.traceId,
+        sessionId: pending.event.context.sessionId,
+        runId: pending.event.context.runId,
+        error: message,
+      });
+      return false;
+    }
+  }
+
+  private async settleInMemory(pending: PendingEventSettlement): Promise<boolean> {
+    try {
+      await this.settle(pending);
+      this.lastAppliedSequence = pending.event.sequence;
+      return pending.action === "retry-projection";
+    } catch (settlementError) {
+      this.pendingSettlement = pending;
+      this.context.log({
+        level: "error",
+        event: "session.child_projection.compensation_failed",
+        traceId: pending.event.context.traceId,
+        sessionId: pending.event.context.sessionId,
+        runId: pending.event.context.runId,
+        error: settlementError instanceof Error ? settlementError.message : String(settlementError),
+      });
+      return false;
+    }
+  }
+
+  private async reconcileDurableSettlements(): Promise<void> {
+    const records = this.context.store.listProjectionSettlements({
+      rootSessionId: this.context.rootSessionId!,
+      status: ["pending", "retrying"],
+    });
+    for (const record of records) {
+      if (record.projector !== this.context.projectorId) {
+        recoverProjectionSettlements(this.context.store, {
+          projector: record.projector,
+          rootSessionId: record.rootSessionId,
+        });
+        continue;
+      }
+      const { event, cause } = decodeDaemonAgentSettlement(record);
+      const pending: PendingEventSettlement = {
+        event,
+        action: record.action === "retry-terminal-projection" ? "retry-projection" : "compensate-child",
+        cause,
+      };
+      this.context.store.markProjectionSettlementRetrying(record.id);
+      try {
+        await this.settle(pending);
+        this.context.store.resolveProjectionSettlement(record.id);
+        this.lastAppliedSequence = Math.max(this.lastAppliedSequence, event.sequence);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.context.store.failProjectionSettlement(record.id, message);
+        throw error;
+      }
+    }
+    const pendingCount = this.context.store.listProjectionSettlements({
+      rootSessionId: this.context.rootSessionId!,
+      status: ["pending", "retrying"],
+    }).length;
+    if (pendingCount > 0) {
+      throw new Error(
+        `Projection settlement remains pending for root session ${this.context.rootSessionId}`,
+      );
+    }
+    const resolvedSequence = this.context.store.listProjectionSettlements({
+      projector: this.context.projectorId!,
+      rootSessionId: this.context.rootSessionId!,
+      status: "resolved",
+    }).reduce((maximum, record) => Math.max(maximum, record.eventSequence), 0);
+    this.lastAppliedSequence = Math.max(this.lastAppliedSequence, resolvedSequence);
   }
 
   private async settle(pending: PendingEventSettlement): Promise<void> {

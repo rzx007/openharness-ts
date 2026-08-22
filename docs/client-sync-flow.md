@@ -132,11 +132,15 @@ type OpenHarnessClientState = {
 
 Reducer 用 `event.seq` 去重。即使 SSE live 与 replay 重叠，重复事件也不会二次写入。message/input/part 会按自身 `seq` 排序，因此乱序事件最终可收敛。TUI transcript 只从 message + parts selector 派生，不扫描 `runtime.*`。
 
+每条可回放事件都带 `schemaVersion`，也就是“这条事件按第几版数据格式写成”。当前版本统一为 `1`。客户端只在确认版本可理解后才更新状态和 cursor；如果服务端发送了更高、客户端尚不认识的版本，客户端会抛出 `UnsupportedSessionEventSchemaVersionError` 并停止本轮同步。这样会把升级不兼容明确暴露出来，也不会因为盲目跳过事件而让界面悄悄缺状态。升级客户端后，可以继续从原 cursor 重连。
+
 ## Cursor 与重连语义
 
 daemon 事件序列是全局递增的。因此按 `sessionId` 过滤的事件流天然会因其它 session 的事件而出现序号空洞；这不是丢包，不能因此触发 session snapshot。连接断开后，客户端携带已应用的最大全局 cursor 重连。服务端会回放该 cursor 之后匹配的事件，也接受标准 SSE 客户端的 `Last-Event-ID`，并在空闲时发送 keepalive 注释。
 
 调用方复用 `input.id` 时，prompt 准入是幂等的。首次发送前应调用 `createPromptRequestId()`，若传输结果不明则保留同一 id 重试；省略时 `OpenHarnessClient.admitPrompt` 也会自动生成。若使用相同 id 但 content、delivery 或 metadata 不同，服务端返回 `409`，而不会创建第二个 run。
+
+直接手写 HTTP 请求时，body `id` 目前仍为可选字段；省略后由服务端生成 ID，但如果响应在返回前丢失，调用方无法知道应复用哪个 ID。因此需要端到端可靠重试的 HTTP 调用必须自行生成并保留稳定 `id`。本阶段保留可选字段以兼容现有调用者，后续若把它改为必填应作为单独的 API breaking change。
 
 ## Snapshot 与实时事件
 
@@ -153,7 +157,7 @@ for await (const update of syncEvents(client, { sessionId, cursor })) {
 1. 有 `sessionId` 时先调用 `GET /sessions/:sessionId/state`。
 2. 用 snapshot 一次 hydrate session、inputs、messages、parts、runs、permissions。
 3. 用 snapshot 的全局 cursor 打开 `GET /events/stream`，不会漏掉 snapshot 之后的事件。
-4. 对 live SSE 继续 apply；重复 seq 被 reducer 抑制。
+4. 对 live SSE 继续 apply；重复 seq 被 reducer 抑制，未知 `schemaVersion` 不会推进 cursor。
 
 无 `sessionId` 的全局 dashboard 同步仍可使用 `GET /events` replay + SSE；TUI 会话页不再依赖全量 event log 才能恢复历史消息。
 

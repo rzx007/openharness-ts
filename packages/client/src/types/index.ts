@@ -21,6 +21,7 @@ import type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
@@ -41,6 +42,7 @@ export type {
   SessionMessageRecord,
   SessionRecord,
   SessionRunRecord,
+  SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
@@ -394,6 +396,7 @@ export interface SessionBucket {
   messages: SessionMessageRecord[];
   partsByMessageId: Record<string, SessionMessagePartRecord[]>;
   runs: Record<string, SessionRunRecord>;
+  attempts: Record<string, SessionRunAttemptRecord>;
   tasks: Record<string, SessionExecutionRecord>;
   permissions: Record<string, PermissionRequestRecord>;
 }

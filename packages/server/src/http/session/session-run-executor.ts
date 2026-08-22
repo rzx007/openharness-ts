@@ -81,6 +81,13 @@ export class SessionRunExecutor {
           sessionId,
           payload: { runId, traceId, error: message },
         });
+        if (typeof this.context.store.settleActiveRunAttempts === "function") {
+          this.context.store.settleActiveRunAttempts(
+            runId,
+            interrupted ? "cancelled" : "failed",
+            message,
+          );
+        }
         this.context.store.updateRun(runId, { status: interrupted ? "interrupted" : "failed", error: message });
       });
       this.context.log({

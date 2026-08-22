@@ -140,6 +140,7 @@ describe("Integration: Full Agent Loop", () => {
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd.result.content[0].text).toBe("contents of test.txt");
     expect(toolEnd.result.isError).toBeFalsy();
+    expect(toolEnd.result.toolAttemptId).toBe("tool_attempt_tu1_1");
 
     const history = engine.getHistory();
     expect(history).toHaveLength(4);
@@ -383,6 +384,7 @@ describe("Integration: Full Agent Loop", () => {
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd).toBeDefined();
     expect(toolEnd.result.isError).toBe(true);
+    expect(toolEnd.result.failureKind).toBe("permission");
     expect(toolEnd.result.content[0].text).toContain("Permission denied");
   });
 
@@ -409,6 +411,8 @@ describe("Integration: Full Agent Loop", () => {
 
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd.result.isError).toBe(true);
+    expect(toolEnd.result.failureKind).toBe("policy");
+    expect(toolEnd.result.toolAttemptId).toBeUndefined();
     expect(toolEnd.result.content[0].text).toContain("Unknown tool");
   });
 
@@ -568,6 +572,8 @@ describe("Integration: Full Agent Loop", () => {
 
     const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
     expect(toolEnd.result.isError).toBe(true);
+    expect(toolEnd.result.failureKind).toBe("timeout");
+    expect(toolEnd.result.toolAttemptId).toBe("tool_attempt_tu1_1");
     expect(toolEnd.result.content[0].text).toContain("Tool execution timed out after 20 ms");
     expect(toolSignal?.aborted).toBe(true);
     const timeoutReason = toolSignal?.reason;

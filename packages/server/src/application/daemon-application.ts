@@ -23,12 +23,17 @@ import type { ObservabilityEvent } from "../shared/observability.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
   DAEMON_RESTART_PERMISSION_REASON,
+  DAEMON_RESTART_INPUT_REASON,
   DAEMON_RESTART_RUN_REASON,
   DAEMON_RESTART_TASK_REASON,
   normalizeTraceId,
 } from "../http/support.js";
 import { AgentPool } from "../http/agent/agent-pool.js";
 import { DaemonAgentEventProjector } from "../http/agent/daemon-agent-event-projector.js";
+import {
+  DAEMON_AGENT_PROJECTOR,
+  recoverProjectionSettlements,
+} from "../http/agent/projection-settlement-recovery.js";
 import { DaemonControlService } from "../http/control/daemon-control-service.js";
 import { DaemonOperationGate } from "../http/control/daemon-operation-gate.js";
 import { LiveChildAgentDirectory } from "../http/agent/live-child-agent-directory.js";
@@ -80,7 +85,9 @@ export class DaemonApplication {
 
   constructor(private readonly options: DaemonApplicationOptions) {
     const { store } = options;
+    recoverProjectionSettlements(store);
     store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
+    store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
     store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
     store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
     store.finalizeClosingSessions();
@@ -134,8 +141,10 @@ export class DaemonApplication {
         trigger: async (id) => this.schedules.trigger(id),
         listRuns: async (taskId) => this.schedules.listRuns({ taskId }),
       },
-      createEventSink: (agent) => {
+      createEventSink: (agent, session) => {
         const projector = new DaemonAgentEventProjector({
+          projectorId: `${DAEMON_AGENT_PROJECTOR}:${agent.id}`,
+          rootSessionId: session.id,
           rootAgent: agent,
           store,
           transcriptProjection: this.transcriptProjection,
@@ -370,6 +379,16 @@ export class DaemonApplication {
     }
     try {
       await this.control.shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      const settlementRecovery = recoverProjectionSettlements(this.options.store);
+      if (settlementRecovery.pending > 0) {
+        throw new Error(
+          `Daemon shutdown left ${settlementRecovery.pending} projection settlement(s) pending`,
+        );
+      }
     } catch (error) {
       failures.push(error);
     }

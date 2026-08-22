@@ -73,6 +73,34 @@ describe("LocalAgentJobHost adapter", () => {
     await expect(host.list({ sessionId: "session-2" })).rejects.toThrow("owner session mismatch");
   });
 
+  it("reports a failed child as a fact and keeps the parent job host usable", async () => {
+    const cwd = temporaryDirectory();
+    const failedHandle: AgentChildHandle = {
+      id: "child-failed",
+      sessionId: "child-failed-session",
+      state: "idle",
+      result: Promise.resolve({ status: "failed", output: "tests failed", error: "tests failed" }),
+      send: vi.fn(async () => ({ sessionId: "child-failed-session", inputId: "i2", runId: "r2" })),
+      interrupt: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    };
+    const host = new LocalAgentJobHost(cwd, "session-1", directory(failedHandle));
+
+    await expect(host.wait({
+      sessionId: "session-1",
+      jobId: "child-failed",
+      timeoutMs: 1_000,
+    })).resolves.toMatchObject({
+      text: "tests failed",
+      timedOut: false,
+      snapshot: {
+        status: "failed",
+        metadata: { failureKind: "failed" },
+      },
+    });
+    await expect(host.list({ sessionId: "session-1" })).resolves.toHaveLength(1);
+  });
+
   it("returns structured Workflow details from JobRead", async () => {
     const cwd = temporaryDirectory();
     const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
