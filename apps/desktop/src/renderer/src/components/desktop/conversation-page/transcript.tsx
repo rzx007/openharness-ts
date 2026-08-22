@@ -143,12 +143,12 @@ export function ConversationTranscript({
         )
       })}
       {running ? (
-        <MessageScrollerItem messageId="conversation-running-status">
+        <MessageScrollerItem messageId="conversation-running-status text-foreground/30">
           <Marker>
             <MarkerIcon>
               <Spinner />
             </MarkerIcon>
-            <MarkerContent>OpenHarness 正在处理</MarkerContent>
+            <MarkerContent className="shimmer">正在处理</MarkerContent>
           </Marker>
         </MessageScrollerItem>
       ) : null}
