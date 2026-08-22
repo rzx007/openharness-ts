@@ -1,7 +1,6 @@
 import {
   Archive,
   Bell,
-  Bot,
   ChevronDown,
   CircleDot,
   Clock3,
@@ -11,20 +10,25 @@ import {
   GitPullRequest,
   Grid2X2,
   MessageSquarePlus,
+  Moon,
   MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
   PlugZap,
   Search,
+  Settings,
+  Smartphone,
   SquarePen,
   SquareTerminal,
+  Sun,
   Trash2,
 } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { useMemo, useRef, useState } from "react"
 import { useMatchRoute } from "@tanstack/react-router"
 
+import { useTheme } from "@renderer/components/theme-provider"
 import { Button } from "@renderer/components/ui/button"
 import {
   Dialog,
@@ -74,7 +78,9 @@ export function Sidebar({
   onOpenConversation,
 }: SidebarProps): React.JSX.Element {
   const matchRoute = useMatchRoute()
+  const { theme, setTheme } = useTheme()
   const scheduledSelected = Boolean(matchRoute({ to: "/scheduled" }))
+  const darkTheme = isDarkTheme(theme)
   const projects = useDesktopSessionStore((state) => state.projects)
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const archivedSessions = useDesktopSessionStore((state) => state.archivedSessions)
@@ -323,27 +329,41 @@ export function Sidebar({
           </button>
         </div>
 
-        <div className="flex min-w-0 items-center gap-2 border-t border-sidebar-border px-2 py-2">
-          <button
+        <div className="flex min-w-0 items-center justify-between border-t border-sidebar-border/80 px-2 py-2">
+          <Button
             type="button"
-            onClick={onOpenSettings}
+            variant="ghost"
+            title="设置"
             aria-label="打开设置"
-            className="flex h-9 min-w-0 flex-1 items-center rounded-md px-2 text-left transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            onClick={onOpenSettings}
+            className="flex-1 justify-start text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
-            <span className="grid size-6 place-items-center rounded-full bg-amber-400 text-[10px] font-semibold text-amber-950">
-              OH
-            </span>
-            <span className="ml-2 text-[13px] font-medium">OpenHarness</span>
-          </button>
-          <button
-            type="button"
-            title="桌面宠物"
-            aria-label="显示桌面宠物"
-            onClick={() => void window.desktop.pet.show()}
-            className="grid size-7 shrink-0 place-items-center rounded-full bg-orange-500/15 text-orange-700 transition-colors hover:bg-orange-500/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5"
-          >
-            <Bot />
-          </button>
+            <Settings />
+            设置
+          </Button>
+          <div className="flex items-center">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="手机"
+              aria-label="手机"
+              className="text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            >
+              <Smartphone />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title={darkTheme ? "切换到浅色主题" : "切换到深色主题"}
+              aria-label={darkTheme ? "切换到浅色主题" : "切换到深色主题"}
+              onClick={() => setTheme(darkTheme ? "light" : "dark")}
+              className="text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            >
+              {darkTheme ? <Sun /> : <Moon />}
+            </Button>
+          </div>
         </div>
       </aside>
 
@@ -749,4 +769,10 @@ function samePath(left: string, right: string): boolean {
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase()
+}
+
+function isDarkTheme(theme: "dark" | "light" | "system"): boolean {
+  if (theme === "dark") return true
+  if (theme === "light") return false
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
 }

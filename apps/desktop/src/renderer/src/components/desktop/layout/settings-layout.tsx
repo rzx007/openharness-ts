@@ -138,7 +138,12 @@ export function SettingsLayout(): React.JSX.Element {
           />
         </Panel>
         <PanelResizeHandle label="调整设置侧边栏宽度" />
-        <Panel id="settings-content" minSize={420} className="h-full min-h-0">
+        <Panel
+          id="settings-content"
+          minSize={420}
+          className="h-full min-h-0"
+          style={{ overflow: "visible" }}
+        >
           <section className="border-workspace flex h-full min-w-0 overflow-hidden rounded-tl-lg border-t border-l bg-conversation shadow-workspace">
             <Outlet />
           </section>
