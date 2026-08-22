@@ -8,3 +8,4 @@ export * from "./session/index.js";
 export * from "./support.js";
 export * from "./events/index.js";
 export * from "./project-application-service.js";
+export * from "./channel/index.js";

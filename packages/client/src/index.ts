@@ -132,4 +132,11 @@ export type {
   JobSnapshot,
   JobStatus,
   JobWaitResult,
+  DurableChannelMessageInput,
+  DurableChannelMessageResult,
+  ExternalConversationRecord,
+  ChannelDeliveryRecord,
+  ChannelDeliveryStatus,
+  ChannelStatusSnapshot,
+  RecordChannelDeliveryInput,
 } from "@openharness/protocol";

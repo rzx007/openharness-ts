@@ -39,6 +39,7 @@ import {
 } from "./support.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import { createBackgroundShellRoutes } from "./routes/background-shell.js";
+import { createChannelRoutes } from "./routes/channel.js";
 import { createScheduleRoutes } from "./routes/schedules.js";
 import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
@@ -333,6 +334,7 @@ export class OpenHarnessHttpServer {
       }),
     );
     this.app.route("/git", createGitRoutes({ gitService: this.services.git }));
+    this.app.route("/channels", createChannelRoutes(this.application.channels));
     this.app.route(
       "/schedules",
       createScheduleRoutes({ schedules: this.application.schedules }),

@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.60.0",
-    "@openharness/core": "workspace:*"
+    "@openharness/core": "workspace:*",
+    "@openharness/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

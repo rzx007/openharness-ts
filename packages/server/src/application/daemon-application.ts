@@ -54,6 +54,7 @@ import { SessionTranscriptProjection } from "./session/transcript-projection.js"
 import { recoverInterruptedWorkflows } from "./session/workflow-recovery.js";
 import { ApplicationEventService } from "./events/application-event-service.js";
 import { ProjectApplicationService } from "./project-application-service.js";
+import { ChannelApplicationService } from "./channel/channel-application-service.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -81,6 +82,7 @@ export interface DurableAgentApplication {
   readonly terminals: DaemonTerminalService;
   readonly projects: ProjectApplicationService;
   readonly events: ApplicationEventService;
+  readonly channels: ChannelApplicationService;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -99,6 +101,7 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly terminals: DaemonTerminalService;
   readonly projects: ProjectApplicationService;
   readonly events: ApplicationEventService;
+  readonly channels: ChannelApplicationService;
 
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -243,6 +246,11 @@ export class DaemonApplication implements DurableAgentApplication {
       operationGate: this.operationGate,
       events: this.eventPublisher,
       assertReady: () => this.assertReady(),
+    });
+    this.channels = new ChannelApplicationService({
+      store,
+      sessions: this.sessions,
+      log: options.log,
     });
     this.schedules = new ScheduledTaskService({
       store,

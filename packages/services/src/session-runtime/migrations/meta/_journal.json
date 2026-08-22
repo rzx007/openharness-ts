@@ -10,6 +10,7 @@
     { "idx": 5, "version": "1", "when": 1787040000000, "tag": "0005_scheduled_tasks", "breakpoints": true },
     { "idx": 6, "version": "1", "when": 1787356800000, "tag": "0006_event_schema_version", "breakpoints": true },
     { "idx": 7, "version": "1", "when": 1787443200000, "tag": "0007_projection_settlement", "breakpoints": true },
-    { "idx": 8, "version": "1", "when": 1787529600000, "tag": "0008_run_attempt", "breakpoints": true }
+    { "idx": 8, "version": "1", "when": 1787529600000, "tag": "0008_run_attempt", "breakpoints": true },
+    { "idx": 9, "version": "1", "when": 1787616000000, "tag": "0009_external_channels", "breakpoints": true }
   ]
 }

@@ -28,6 +28,7 @@ export {
 export { rewindTranscript, type RewindTranscriptResult } from "./session/index.js";
 export {
   ApplicationEventService,
+  ChannelApplicationService,
   DaemonApplication,
   ProjectApplicationService,
   createDefaultNodeApplication,
@@ -36,6 +37,7 @@ export {
   type DaemonApplicationOptions,
   type DefaultNodeApplicationOptions,
   type DurableAgentApplication,
+  type ChannelApplicationServiceContext,
 } from "./application/index.js";
 export type {
   AgentPersonaInfo,

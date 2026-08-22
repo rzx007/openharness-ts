@@ -5,7 +5,10 @@ import { ChannelBridge, type BridgeAgent } from "./bridge.js";
 import type { ChannelAdapter, ChannelMessage } from "./index.js";
 
 /** 可注入收发的假 adapter。 */
-function makeAdapter(name: string, opts: { failConnect?: boolean } = {}) {
+function makeAdapter(
+  name: string,
+  opts: { failConnect?: boolean; failSend?: boolean } = {},
+) {
   let handler: ((m: ChannelMessage) => void) | undefined;
   const sent: ChannelMessage[] = [];
   const adapter: ChannelAdapter = {
@@ -16,6 +19,7 @@ function makeAdapter(name: string, opts: { failConnect?: boolean } = {}) {
     async disconnect() {},
     async send(m) {
       sent.push(m);
+      if (opts.failSend) throw new Error(`${name} send boom`);
     },
     onMessage(h) {
       handler = h;
@@ -50,6 +54,8 @@ describe("ChannelManager", () => {
     fake.emit({ sender: "u1", content: "hello", replyTo: "chat9" });
     const msg = await bus.consumeInbound();
     expect(msg.channel).toBe("t");
+    expect(msg.accountId).toBe("default");
+    expect(msg.externalMessageId).toBe("m1");
     expect(msg.senderId).toBe("u1");
     expect(msg.chatId).toBe("chat9"); // replyTo 优先作会话目标
     expect(msg.content).toBe("hello");
@@ -84,6 +90,63 @@ describe("ChannelManager", () => {
     expect(b.sent).toHaveLength(1);
     expect(b.sent[0]!.content).toBe("reply");
     expect(b.sent[0]!.replyTo).toBe("c2"); // chatId 映射回 replyTo
+    await mgr.stopAll();
+  });
+
+  it("发送 durable 回复前记 unknown，成功后再记 sent", async () => {
+    const bus = new MessageBus();
+    const fake = makeAdapter("t");
+    const results: Array<{ deliveryId: string; status: string }> = [];
+    const mgr = new ChannelManager([fake.adapter], bus, {
+      allowFrom: { t: ["*"] },
+      onDeliveryResult: async (result) => {
+        results.push(result);
+      },
+    });
+    await mgr.startAll();
+    bus.publishOutbound({
+      channel: "t",
+      chatId: "c2",
+      content: "reply",
+      metadata: { _delivery_id: "delivery-1" },
+    });
+    await tick();
+    await tick();
+    expect(results).toEqual([
+      { deliveryId: "delivery-1", status: "unknown" },
+      { deliveryId: "delivery-1", status: "sent" },
+    ]);
+    await mgr.stopAll();
+  });
+
+  it("平台明确发送失败时记 failed，回复内容仍留在 durable delivery", async () => {
+    const bus = new MessageBus();
+    const fake = makeAdapter("t", { failSend: true });
+    const results: Array<{ deliveryId: string; status: string; error?: string }> = [];
+    const mgr = new ChannelManager([fake.adapter], bus, {
+      allowFrom: { t: ["*"] },
+      onDeliveryResult: async (result) => {
+        results.push(result);
+      },
+    });
+    await mgr.startAll();
+    bus.publishOutbound({
+      channel: "t",
+      chatId: "c2",
+      content: "saved reply",
+      metadata: { _delivery_id: "delivery-2" },
+    });
+    await tick();
+    await tick();
+    expect(results).toEqual([
+      { deliveryId: "delivery-2", status: "unknown" },
+      {
+        deliveryId: "delivery-2",
+        status: "failed",
+        error: "t send boom",
+      },
+    ]);
+    expect(fake.sent[0]?.content).toBe("saved reply");
     await mgr.stopAll();
   });
 

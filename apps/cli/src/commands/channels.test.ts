@@ -30,6 +30,7 @@ describe("assembleChannelAdapters", () => {
     expect(r.adapters).toHaveLength(1);
     expect(r.adapters[0]!.name).toBe("feishu");
     expect(r.allowFrom).toEqual({ feishu: ["ou_1"] });
+    expect(r.accountIds).toEqual({ feishu: "cli_x" });
   });
 
   it("allowFrom 缺省为空数组(fail-closed 由 manager 兜底)", async () => {

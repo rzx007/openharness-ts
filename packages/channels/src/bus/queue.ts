@@ -10,8 +10,12 @@
 
 export interface InboundMessage {
   channel: string;
+  accountId: string;
+  externalMessageId: string;
   senderId: string;
   chatId: string;
+  workspaceId?: string;
+  threadId?: string;
   content: string;
   timestamp: Date;
   /** 媒体 URL 列表（基础版仅透传，下载留待）。 */

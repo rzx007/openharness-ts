@@ -87,6 +87,9 @@ export type {
   ReplaceTranscriptInput,
   ReplaceTranscriptMessageInput,
   ReplaceTranscriptPartInput,
+  ExternalConversationRecord,
+  ChannelDeliveryRecord,
+  ChannelDeliveryStatus,
 } from "./session-runtime";
 export {
   getProjectSessionDir,

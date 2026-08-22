@@ -38,9 +38,6 @@ interface FeishuMention {
   name?: string;
 }
 
-/** 消息去重窗口：60 秒内同一 message_id 只处理一次。 */
-const DEDUP_TTL_MS = 60_000;
-
 export class FeishuAdapter implements ChannelAdapter {
   name = "feishu";
 
@@ -48,9 +45,6 @@ export class FeishuAdapter implements ChannelAdapter {
   private wsClient: LarkWSClient | null = null;
   private handler: ((message: ChannelMessage) => void) | undefined;
   private readonly replyAtBotNames: string[];
-  /** 已处理的 message_id → 过期时刻，用于去重。 */
-  private readonly seenMessageIds = new Map<string, number>();
-
   constructor(private readonly config: FeishuConfig) {
     // 统一转小写，使 @mention 匹配大小写不敏感。
     this.replyAtBotNames = (config.replyAtBotNames ?? []).map((n) => n.toLowerCase());
@@ -85,6 +79,8 @@ export class FeishuAdapter implements ChannelAdapter {
   async _handleEvent(data: unknown): Promise<void> {
     const msg = (data as { message?: {
       message_id?: string;
+      root_id?: string;
+      thread_id?: string;
       chat_id?: string;
       chat_type?: string;
       content?: string;
@@ -96,20 +92,6 @@ export class FeishuAdapter implements ChannelAdapter {
 
     // bot 消息跳过：飞书在某些配置下会把 bot 自己发的消息也推回来，直接忽略。
     if (msg.sender?.sender_type === "bot") return;
-
-    // 消息去重：60 s 内同一 message_id 只处理一次（防飞书重试重复投递）。
-    const now = Date.now();
-    if (msg.message_id) {
-      const expiry = this.seenMessageIds.get(msg.message_id);
-      if (expiry !== undefined && expiry > now) return;
-      this.seenMessageIds.set(msg.message_id, now + DEDUP_TTL_MS);
-      // 摊还清理过期条目，避免 Map 无限增长。
-      if (this.seenMessageIds.size > 500) {
-        for (const [id, exp] of this.seenMessageIds) {
-          if (exp <= now) this.seenMessageIds.delete(id);
-        }
-      }
-    }
 
     let text = "";
     try {
@@ -143,12 +125,17 @@ export class FeishuAdapter implements ChannelAdapter {
     const replyTo = isGroupChat ? msg.chat_id : (senderOpenId ?? msg.chat_id);
 
     const inbound: ChannelMessage = {
-      id: `feishu_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: msg.message_id ?? `feishu_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       channel: "feishu",
       sender: senderId,
       content: contentText,
       timestamp: new Date(Number(msg.create_time) || Date.now()),
       replyTo,
+      metadata: {
+        ...(msg.thread_id || msg.root_id
+          ? { threadId: msg.thread_id ?? msg.root_id }
+          : {}),
+      },
     };
 
     if (this.handler) this.handler(inbound);

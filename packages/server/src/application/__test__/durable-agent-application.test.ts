@@ -172,4 +172,90 @@ describe("DaemonApplication", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("让不同外部聊天使用不同 Session，并对重复平台消息复用同一个 Run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openharness-channel-application-"));
+    const path = join(dir, "store.db");
+    let store = new SessionStore({ path });
+    let application = new DaemonApplication({
+      store,
+      createAgent: createEchoAgent,
+      log: () => {},
+    });
+    const message = {
+      connector: "feishu",
+      accountId: "app-1",
+      externalMessageId: "message-1",
+      senderId: "user-1",
+      content: "hello from bot",
+      cwd: process.cwd(),
+      model: "test-model",
+    };
+    try {
+      await application.ready();
+      const [first, duplicate] = await Promise.all([
+        application.channels.handleMessage({
+          ...message,
+          chatId: "chat-1",
+        }),
+        application.channels.handleMessage({
+          ...message,
+          chatId: "chat-1",
+        }),
+      ]);
+      const otherChat = await application.channels.handleMessage({
+        ...message,
+        externalMessageId: "message-2",
+        chatId: "chat-2",
+      });
+
+      expect(duplicate.duplicate).toBe(true);
+      expect(duplicate.delivery.runId).toBe(first.delivery.runId);
+      expect(duplicate.delivery.id).toBe(first.delivery.id);
+      expect(otherChat.conversation.sessionId).not.toBe(
+        first.conversation.sessionId,
+      );
+      await expect(
+        application.channels.handleMessage({
+          ...message,
+          chatId: "chat-1",
+          content: "changed body with the same platform id",
+        }),
+      ).rejects.toThrow("Prompt id is already used");
+
+      await application.sessions.archiveSessionTree(
+        first.conversation.sessionId,
+      );
+      const afterArchive = await application.channels.handleMessage({
+        ...message,
+        chatId: "chat-1",
+        externalMessageId: "message-3",
+      });
+      expect(afterArchive.conversation.sessionId).not.toBe(
+        first.conversation.sessionId,
+      );
+
+      await application.close();
+      store.close();
+      store = new SessionStore({ path });
+      application = new DaemonApplication({
+        store,
+        createAgent: createEchoAgent,
+        log: () => {},
+      });
+      await application.ready();
+      expect(
+        application.channels.status({ connector: "feishu" }).conversations,
+      ).toContainEqual(
+        expect.objectContaining({
+          chatId: "chat-1",
+          sessionId: afterArchive.conversation.sessionId,
+        }),
+      );
+    } finally {
+      await application.close().catch(() => {});
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

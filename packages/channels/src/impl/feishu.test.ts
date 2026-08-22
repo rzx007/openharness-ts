@@ -79,7 +79,7 @@ describe("FeishuAdapter.send receive_id", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Inbound event handling — dedup + bot skip
+// Inbound event handling — durable idempotency handoff + bot skip
 // ---------------------------------------------------------------------------
 
 /** Simulate FeishuAdapter receiving an im.message.receive_v1 event. */
@@ -114,7 +114,7 @@ async function simulateInbound(
   await (adapter as unknown as { _handleEvent(d: unknown): Promise<void> })._handleEvent(data);
 }
 
-describe("FeishuAdapter inbound dedup + bot skip", () => {
+describe("FeishuAdapter inbound durable idempotency handoff + bot skip", () => {
   it("delivers a normal user message", async () => {
     const adapter = new FeishuAdapter({ appId: "a", appSecret: "s" });
     const received: string[] = [];
@@ -124,14 +124,16 @@ describe("FeishuAdapter inbound dedup + bot skip", () => {
     expect(received[0]).toBe("hello");
   });
 
-  it("skips duplicate message_id within TTL", async () => {
+  it("forwards duplicate message_id so the durable application can return the saved reply", async () => {
     const adapter = new FeishuAdapter({ appId: "a", appSecret: "s" });
-    const received: string[] = [];
-    adapter.onMessage((m) => received.push(m.content));
+    const received: Array<{ id: string; content: string }> = [];
+    adapter.onMessage((m) => received.push({ id: m.id, content: m.content }));
     await simulateInbound(adapter, { message_id: "msg_dup", content: "first" });
-    await simulateInbound(adapter, { message_id: "msg_dup", content: "second" });
-    expect(received).toHaveLength(1);
-    expect(received[0]).toBe("first");
+    await simulateInbound(adapter, { message_id: "msg_dup", content: "first" });
+    expect(received).toEqual([
+      { id: "msg_dup", content: "first" },
+      { id: "msg_dup", content: "first" },
+    ]);
   });
 
   it("skips messages with sender_type=bot", async () => {

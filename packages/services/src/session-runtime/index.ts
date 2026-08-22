@@ -90,4 +90,7 @@ export type {
   ReplaceTranscriptInput,
   ReplaceTranscriptMessageInput,
   ReplaceTranscriptPartInput,
+  ExternalConversationRecord,
+  ChannelDeliveryRecord,
+  ChannelDeliveryStatus,
 } from "./types.js";

@@ -2738,6 +2738,68 @@ describe("OpenHarnessHttpServer", () => {
     });
   });
 
+  it("runs channel messages through durable sessions and keeps delivery separate", async () => {
+    const runtimeFactory: TestAgentProgramFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(input, run) {
+            await run.emit({
+              type: "output.text.delta",
+              data: { delta: `reply: ${input.input.content}` },
+            });
+          },
+          async close() {},
+        };
+      },
+    };
+    await withServer(async ({ baseUrl, token }) => {
+      const request = {
+        connector: "feishu",
+        accountId: "app-1",
+        chatId: "chat-1",
+        externalMessageId: "message-1",
+        senderId: "user-1",
+        content: "hello",
+        cwd: process.cwd(),
+        model: "m",
+      };
+      const send = async (body = request) => {
+        const response = await fetch(`${baseUrl}/channels/messages`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return { response, body: await response.json() as any };
+      };
+
+      const first = await send();
+      const duplicate = await send();
+      const other = await send({
+        ...request,
+        chatId: "chat-2",
+        externalMessageId: "message-2",
+      });
+      expect(first.response.status).toBe(202);
+      expect(first.body.delivery.content).toBe("reply: hello");
+      expect(duplicate.body.duplicate).toBe(true);
+      expect(duplicate.body.delivery.runId).toBe(first.body.delivery.runId);
+      expect(other.body.conversation.sessionId).not.toBe(
+        first.body.conversation.sessionId,
+      );
+
+      const recorded = await fetch(
+        `${baseUrl}/channels/deliveries/${first.body.delivery.id}/result`,
+        {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({ status: "sent" }),
+        },
+      );
+      expect(recorded.status).toBe(200);
+      expect((await recorded.json() as any).delivery.status).toBe("sent");
+    }, { runtimeFactory });
+  });
+
   it("replays a filtered SSE stream from Last-Event-ID", async () => {
     await withServer(async ({ baseUrl, token }) => {
       for (const id of ["s1", "s2"]) {

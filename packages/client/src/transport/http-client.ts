@@ -76,6 +76,11 @@ import type {
   TerminalSignal,
   TerminalSource,
   TerminalWriteRequest,
+  DurableChannelMessageInput,
+  DurableChannelMessageResult,
+  RecordChannelDeliveryInput,
+  ChannelDeliveryRecord,
+  ChannelStatusSnapshot,
 } from "@openharness/protocol";
 import {
   decodeJobReadResult,
@@ -185,6 +190,49 @@ export class OpenHarnessClient {
       auth: false,
       signal: options.signal,
     });
+  }
+
+  async handleChannelMessage(
+    input: DurableChannelMessageInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<DurableChannelMessageResult> {
+    return await this.request<DurableChannelMessageResult>(
+      "/channels/messages",
+      { method: "POST", body: input, signal: options.signal },
+    );
+  }
+
+  async recordChannelDelivery(
+    deliveryId: string,
+    input: RecordChannelDeliveryInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ChannelDeliveryRecord> {
+    const response = await this.request<{ delivery: ChannelDeliveryRecord }>(
+      `/channels/deliveries/${encodeURIComponent(deliveryId)}/result`,
+      { method: "POST", body: input, signal: options.signal },
+    );
+    return response.delivery;
+  }
+
+  async getChannelStatus(
+    options: { connector?: string; limit?: number; signal?: AbortSignal } = {},
+  ): Promise<ChannelStatusSnapshot> {
+    const { signal, ...query } = options;
+    return await this.request<ChannelStatusSnapshot>(
+      this.path("/channels/status", query),
+      { signal },
+    );
+  }
+
+  async listPendingChannelDeliveries(
+    options: { connector?: string; limit?: number; signal?: AbortSignal } = {},
+  ): Promise<ChannelDeliveryRecord[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ deliveries: ChannelDeliveryRecord[] }>(
+      this.path("/channels/deliveries/pending", query),
+      { signal },
+    );
+    return response.deliveries;
   }
 
   /** `GET /commands?cwd=` — cwd-scoped slash command catalog for autocomplete. */
