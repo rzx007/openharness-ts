@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import type { JobReadResult } from "@openharness/jobs";
+import type { JobReadResult } from "@openharness/protocol";
 
 import {
   BackgroundShellError,

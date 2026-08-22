@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { JobSnapshot } from "@openharness/jobs";
+import type { JobSnapshot } from "@openharness/protocol";
 
 import type { OpenHarnessClient } from "../../transport/http-client.js";
 import { createInitialClientState } from "../../state/reducer.js";

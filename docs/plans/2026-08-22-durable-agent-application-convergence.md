@@ -8,7 +8,7 @@
 
 ## 实施进度
 
-- [ ] A1：创建 `@openharness/protocol`。包、Session/Run/Schedule 类型、runtime metadata 纯函数、主路径 HTTP 请求校验和统一 `invalid_request` 错误已经完成；Jobs/Terminal DTO、成功响应校验及 snapshot/event 序列化测试待完成。
+- [x] A1：创建 `@openharness/protocol`。Session/Run/Schedule/Job/Terminal 跨端类型、runtime metadata 纯函数、主路径请求校验、统一错误、主要成功响应校验及 snapshot/event JSON 往返测试已经完成。
 - [x] A2：移除 `client -> services` 依赖；client 测试不再加载 SQLite Store。
 - [x] A3：共享 client 不再直接读取 Node `process`；`/doctor` 的本机信息由宿主提供。
 - [x] A4：增加无 Node polyfill 的 Vite 浏览器构建 fixture。

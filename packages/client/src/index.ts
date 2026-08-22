@@ -126,12 +126,10 @@ export type {
   TerminalSignal,
   TerminalSource,
   TerminalWriteRequest,
-} from "@openharness/terminal";
-export type {
   JobCapabilities,
   JobKind,
   JobReadResult,
   JobSnapshot,
   JobStatus,
   JobWaitResult,
-} from "@openharness/jobs";
+} from "@openharness/protocol";

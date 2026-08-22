@@ -27,8 +27,9 @@ ohs serve / daemon
 - UI 不直接读 daemon 内部 store 文件
 - 可恢复状态来自 HTTP snapshot + SSE live
 - 多端 attach 同一 daemon 时，用同一套 reducer 收敛状态
-- 公共 Session/Run/Event 类型来自浏览器安全的 `@openharness/protocol`
-- client 生产代码不依赖 `@openharness/services`、SQLite、Drizzle 或 Node builtin
+- 公共 Session/Run/Event/Job/Terminal 类型来自浏览器安全的 `@openharness/protocol`
+- client 生产代码不依赖 `@openharness/services`、`@openharness/jobs`、`@openharness/terminal`、SQLite、Drizzle 或 Node builtin
+- Session Snapshot、Event、Job 和 Terminal 响应会在进入客户端状态前检查字段
 - `/doctor` 等本机信息由宿主提供；浏览器可以不提供
 
 ## 使用

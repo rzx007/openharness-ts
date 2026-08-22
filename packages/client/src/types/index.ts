@@ -25,8 +25,8 @@ import type {
   SessionExecutionRecord,
   SessionStateSnapshot,
   ListMessagePartsOptions,
+  JobSnapshot,
 } from "@openharness/protocol";
-import type { JobSnapshot } from "@openharness/jobs";
 
 export type {
   CreateScheduledTaskInput,

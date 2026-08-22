@@ -17,9 +17,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@openharness/jobs": "workspace:*",
-    "@openharness/protocol": "workspace:*",
-    "@openharness/terminal": "workspace:*"
+    "@openharness/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

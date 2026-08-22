@@ -1,6 +1,6 @@
 import type { OpenHarnessClient } from "../transport/http-client.js";
 import type { CommandCatalogEntry, OpenHarnessClientState } from "../types/index.js";
-import type { JobReadResult, JobSnapshot } from "@openharness/jobs";
+import type { JobReadResult, JobSnapshot } from "@openharness/protocol";
 import { patchSessionRuntimeMetadata } from "@openharness/protocol";
 
 export type SlashLine = { name: string; args: string };

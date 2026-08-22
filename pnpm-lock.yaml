@@ -583,15 +583,9 @@ importers:
 
   packages/client:
     dependencies:
-      '@openharness/jobs':
-        specifier: workspace:*
-        version: link:../jobs
       '@openharness/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@openharness/terminal':
-        specifier: workspace:*
-        version: link:../terminal
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -683,6 +677,10 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/jobs:
+    dependencies:
+      '@openharness/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1005,9 +1003,9 @@ importers:
 
   packages/terminal:
     dependencies:
-      '@openharness/jobs':
+      '@openharness/protocol':
         specifier: workspace:*
-        version: link:../jobs
+        version: link:../protocol
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

@@ -4,7 +4,7 @@ import type {
   TerminalEvent,
   TerminalRuntime,
   TerminalSignal,
-} from "@openharness/terminal";
+} from "@openharness/protocol";
 
 import {
   DaemonTerminalError,
