@@ -38,7 +38,7 @@ export function SettingsSidebar({
   onSelectSection,
 }: SettingsSidebarProps): React.JSX.Element {
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col bg-transparent px-3 py-3 text-sidebar-foreground">
+    <aside className="flex h-full min-h-0 w-full flex-col bg-transparent pl-3 py-3 text-sidebar-foreground">
       <Button
         type="button"
         variant="ghost"
