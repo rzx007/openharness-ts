@@ -117,6 +117,7 @@ export type { LspServerConfig } from "./lsp";
 
 export {
   ChildAgentExecutionRegistry,
+  closeExecutionRuntimes,
   DetachedProcessSupervisor,
   getChildAgentExecutionRegistry,
   getDetachedProcessSupervisor,

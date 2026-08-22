@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ChildAgentExecutionRegistry,
+  closeExecutionRuntimes,
   DetachedProcessSupervisor,
   getChildAgentExecutionRegistry,
   getDetachedProcessSupervisor,
@@ -48,5 +49,28 @@ describe("detached execution runtime split", () => {
 
     expect(childAgents.getExecution(child.id)).toEqual(child);
     expect(processes.getExecution(child.id)).toBeUndefined();
+  });
+
+  it("removes registered runtimes immediately and waits for process cleanup", async () => {
+    const scope = { cwd: process.cwd(), sessionId: "shutdown-session" };
+    const processes = getDetachedProcessSupervisor(scope);
+    const childAgents = getChildAgentExecutionRegistry(scope);
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+    const closeProcesses = vi.spyOn(processes, "aclose").mockReturnValue(cleanup);
+    const closeChildren = vi.spyOn(childAgents, "close");
+
+    let closed = false;
+    const closing = closeExecutionRuntimes().then(() => { closed = true; });
+
+    expect(getDetachedProcessSupervisor(scope)).not.toBe(processes);
+    expect(getChildAgentExecutionRegistry(scope)).not.toBe(childAgents);
+    expect(closeChildren).toHaveBeenCalledOnce();
+    expect(closeProcesses).toHaveBeenCalledOnce();
+    expect(closed).toBe(false);
+
+    finishCleanup();
+    await closing;
+    expect(closed).toBe(true);
   });
 });

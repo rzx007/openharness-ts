@@ -9,6 +9,7 @@ import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
 import type { SessionRecord } from "@openharness/services";
 import {
+  closeExecutionRuntimes,
   getChildAgentExecutionRegistry,
   getDetachedProcessSupervisor,
   type SessionStore,
@@ -379,6 +380,11 @@ export class DaemonApplication {
     }
     try {
       await this.control.shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await closeExecutionRuntimes();
     } catch (error) {
       failures.push(error);
     }

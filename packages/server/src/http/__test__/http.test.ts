@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,7 +22,7 @@ import type {
 } from "@openharness/core";
 import type { AgentCompactResult, AgentInspection, AgentRememberResult, OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { CommandCatalogProvider } from "../../commands/commands.js";
-import { SessionStore } from "@openharness/services";
+import { getDetachedProcessSupervisor, SessionStore } from "@openharness/services";
 import type { CreateDaemonAgent, CreateDaemonAgentContext } from "../../daemon/daemon-agent.js";
 import { OpenHarnessHttpServer, startOpenHarnessServer } from "../server.js";
 import { getDefaultSessionStorePath } from "../../daemon/paths.js";
@@ -314,6 +314,23 @@ function auth(token: string): HeadersInit {
   return { authorization: `Bearer ${token}` };
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 async function waitForEvent(
   baseUrl: string,
   token: string,
@@ -383,6 +400,39 @@ describe("OpenHarnessHttpServer", () => {
       await expect(server.close()).rejects.toBe(failure);
       expect(closeStore).toHaveBeenCalledOnce();
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for background process trees to exit before shutdown completes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-process-shutdown-"));
+    const pidFile = join(dir, "child.pid");
+    const server = new OpenHarnessHttpServer({
+      storePath: join(dir, "sessions.db"),
+      logger: () => {},
+    });
+    const supervisor = getDetachedProcessSupervisor({ cwd: dir, sessionId: "shutdown-session" });
+
+    try {
+      await supervisor.startShellExecution({
+        argv: [
+          process.execPath,
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1_000)`,
+        ],
+        cwd: dir,
+        description: "long-running shutdown probe",
+        sessionId: "shutdown-session",
+      });
+      await waitUntil(() => existsSync(pidFile));
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      expect(isProcessAlive(pid)).toBe(true);
+
+      await server.close();
+
+      expect(isProcessAlive(pid)).toBe(false);
+    } finally {
+      await server.close().catch(() => {});
       rmSync(dir, { recursive: true, force: true });
     }
   });

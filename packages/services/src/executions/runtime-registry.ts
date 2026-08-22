@@ -97,3 +97,36 @@ export function resetExecutionRuntimes(scope?: string | ExecutionRuntimeScope): 
     childRegistries.delete(key);
   }
 }
+
+/**
+ * Remove every registered execution runtime and wait for owned process trees to exit.
+ * Daemon shutdown uses this instead of the synchronous test reset so shutdown does
+ * not report success while background commands are still running.
+ */
+export async function closeExecutionRuntimes(): Promise<void> {
+  const supervisors = [
+    ...(defaultProcessSupervisor ? [defaultProcessSupervisor] : []),
+    ...processSupervisors.values(),
+  ];
+  const registries = [
+    ...(defaultChildRegistry ? [defaultChildRegistry] : []),
+    ...childRegistries.values(),
+  ];
+
+  defaultProcessSupervisor = undefined;
+  defaultChildRegistry = undefined;
+  processSupervisors.clear();
+  childRegistries.clear();
+
+  for (const registry of registries) registry.close();
+  const settled = await Promise.allSettled(supervisors.map(async (supervisor) => {
+    await supervisor.aclose();
+  }));
+  const failures = settled.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []
+  );
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "Failed to close execution runtimes");
+  }
+}
