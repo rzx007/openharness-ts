@@ -4,7 +4,7 @@ import type { SessionExportFormat } from "../../session/index.js";
 import {
   SessionMaintenanceError,
   type SessionMaintenanceService,
-} from "../session/index.js";
+} from "../../application/session/index.js";
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 
 export interface SessionUtilityRoutesContext {

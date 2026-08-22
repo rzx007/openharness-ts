@@ -9,7 +9,7 @@ import {
 } from "../support.js";
 import type { ModelService, ProviderService, SettingsService } from "../../application/index.js";
 import { ProviderMutationError } from "../../application/default-application-services.js";
-import type { DaemonControlService } from "../control/index.js";
+import type { DaemonControlService } from "../../application/control/index.js";
 
 export interface SystemRoutesContext {
   version?: string;

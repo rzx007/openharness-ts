@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 import type { MemoryService } from "../../application/index.js";
-import type { DaemonControlService } from "../control/index.js";
+import type { DaemonControlService } from "../../application/control/index.js";
 
 export interface MemoryRoutesContext {
   memoryService?: MemoryService;

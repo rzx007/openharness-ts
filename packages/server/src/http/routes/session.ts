@@ -19,10 +19,10 @@ import {
   sessionMutationErrorStatus,
 } from "../support.js";
 import type { RequestTraceRegistry } from "../control/index.js";
-import { SessionApplicationError } from "../session/session-application-error.js";
-import type { SessionApplicationService } from "../session/session-application-service.js";
-import type { SessionQueryService } from "../session/session-query-service.js";
-import type { AdmitPromptResult } from "../session/session-run-engine.js";
+import { SessionApplicationError } from "../../application/session/session-application-error.js";
+import type { SessionApplicationService } from "../../application/session/session-application-service.js";
+import type { SessionQueryService } from "../../application/session/session-query-service.js";
+import type { AdmitPromptResult } from "../../application/session/session-run-engine.js";
 
 export interface SessionRoutesContext {
   queries: Pick<

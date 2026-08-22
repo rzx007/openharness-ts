@@ -5,7 +5,7 @@ import type { JobReadResult } from "@openharness/protocol";
 import {
   BackgroundShellError,
   type BackgroundShellService,
-} from "../session/background-shell-service.js";
+} from "../../application/session/background-shell-service.js";
 import { errorResponse, jsonResponse, readJson } from "../support.js";
 
 export interface BackgroundShellRoutesContext {

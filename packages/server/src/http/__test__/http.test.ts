@@ -28,7 +28,7 @@ import { OpenHarnessHttpServer, startOpenHarnessServer } from "../server.js";
 import { getDefaultSessionStorePath } from "../../daemon/paths.js";
 import type { OpenHarnessServerOptions, OpenHarnessServerServices } from "../server.js";
 import type { ObservabilityEvent } from "../../shared/observability.js";
-import { projectionSettlementInput } from "../agent/projection-settlement-recovery.js";
+import { projectionSettlementInput } from "../../application/agent/projection-settlement-recovery.js";
 
 interface TestAgentProgram {
   runPrompt(input: any, run: TestAgentRunContext): Promise<unknown>;

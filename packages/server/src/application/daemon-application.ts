@@ -28,29 +28,29 @@ import {
   DAEMON_RESTART_RUN_REASON,
   DAEMON_RESTART_TASK_REASON,
   normalizeTraceId,
-} from "../http/support.js";
-import { AgentPool } from "../http/agent/agent-pool.js";
-import { DaemonAgentEventProjector } from "../http/agent/daemon-agent-event-projector.js";
+} from "./support.js";
+import { AgentPool } from "./agent/agent-pool.js";
+import { DaemonAgentEventProjector } from "./agent/daemon-agent-event-projector.js";
 import {
   DAEMON_AGENT_PROJECTOR,
   recoverProjectionSettlements,
-} from "../http/agent/projection-settlement-recovery.js";
-import { DaemonControlService } from "../http/control/daemon-control-service.js";
-import { DaemonOperationGate } from "../http/control/daemon-operation-gate.js";
-import { LiveChildAgentDirectory } from "../http/agent/live-child-agent-directory.js";
-import { SessionApplicationService } from "../http/session/session-application-service.js";
+} from "./agent/projection-settlement-recovery.js";
+import { DaemonControlService } from "./control/daemon-control-service.js";
+import { DaemonOperationGate } from "./control/daemon-operation-gate.js";
+import { LiveChildAgentDirectory } from "./agent/live-child-agent-directory.js";
+import { SessionApplicationService } from "./session/session-application-service.js";
 import {
   SessionEventPublisher,
   type SessionEventSink,
-} from "../http/session/session-event-publisher.js";
-import { SessionMaintenanceService } from "../http/session/session-maintenance-service.js";
-import { SessionQueryService } from "../http/session/session-query-service.js";
-import { SessionRunEngine } from "../http/session/session-run-engine.js";
-import { SessionRunExecutor } from "../http/session/session-run-executor.js";
-import { SessionExecutionProjector } from "../http/session/session-execution-projector.js";
-import { BackgroundShellService } from "../http/session/background-shell-service.js";
-import { SessionTranscriptProjection } from "../http/session/transcript-projection.js";
-import { recoverInterruptedWorkflows } from "../http/session/workflow-recovery.js";
+} from "./session/session-event-publisher.js";
+import { SessionMaintenanceService } from "./session/session-maintenance-service.js";
+import { SessionQueryService } from "./session/session-query-service.js";
+import { SessionRunEngine } from "./session/session-run-engine.js";
+import { SessionRunExecutor } from "./session/session-run-executor.js";
+import { SessionExecutionProjector } from "./session/session-execution-projector.js";
+import { BackgroundShellService } from "./session/background-shell-service.js";
+import { SessionTranscriptProjection } from "./session/transcript-projection.js";
+import { recoverInterruptedWorkflows } from "./session/workflow-recovery.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BackgroundShellError } from "../session/background-shell-service.js";
+import { BackgroundShellError } from "../../application/session/background-shell-service.js";
 import { createBackgroundShellRoutes } from "./background-shell.js";
 
 describe("background shell routes", () => {

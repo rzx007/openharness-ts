@@ -11,7 +11,7 @@ import { createServiceRoutes } from "../service.js";
 import { createSessionRoutes } from "../session.js";
 import { createSessionUtilityRoutes } from "../session-utility.js";
 import { createSystemRoutes } from "../system.js";
-import { SessionApplicationError } from "../../session/session-application-service.js";
+import { SessionApplicationError } from "../../../application/session/session-application-service.js";
 
 function runtimeSnapshot() {
   return {
