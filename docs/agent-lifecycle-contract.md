@@ -125,7 +125,7 @@ stateDiagram-v2
 - **P4**：客户端用 transient cursor 去重 SSE 重连后的 delta；durable event cursor 可以留洞但不能复用。
 - **P5**：create-or-validate 必须拒绝相同 ID 的不同 payload/ownership，不能用后到数据覆盖事实。
 - **P6**：每条 durable event 必须携带 `schemaVersion`；消费者只有在理解该版本后才能应用事件并推进 cursor，未知版本必须明确报错，不能静默跳过。
-- **P7**：durable event 必须在集中 registry 中登记并通过 payload/scope 校验；旧版本只在读取边界逐版升级，不得为了方便读取而静默覆盖原始事件行。
+- **P7**：durable event 必须在集中 registry 中登记并通过当前版本、payload 和 scope 校验；版本不完全匹配时直接失败，不在读取边界升级。
 - **P8**：child required projection 失败必须先持久化可序列化 Settlement；同一 root 的 pending Settlement 未解决前不得应用后续事件，重启只能恢复 durable 状态，不能假装复活旧 live Handle。
 
 ## 失败矩阵

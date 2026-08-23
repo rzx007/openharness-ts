@@ -1,5 +1,7 @@
 # 记忆系统总览
 
+> 状态：当前实现。持久记忆格式只接受 Markdown + frontmatter schema 1，不读取旧 JSON memory。
+
 OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每层解决不同的问题：
 
 ```
@@ -165,6 +167,8 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 2. 写进 `memory/` 目录（Markdown + YAML frontmatter 格式，带签名去重）
 3. 下次会话启动，相关记忆按轮检索注入 prompt
 
+每个持久记忆文件只接受当前格式：frontmatter 必须包含 `schema_version: 1`、id、name、description、type、scope、importance、signature、created_at、updated_at 和 use_count，文件名必须与 id 一致。缺字段、类型错误、版本不同或空内容都会直接失败；系统不会读取旧 JSON、补默认字段或猜测旧名字。
+
 **内置护栏**：提取 prompt 里写死：不存密钥/令牌、只存稳定且不可推导的事实。
 
 > 状态：✅ `/remember` 手动触发已实现；✅ 按轮自动触发已实现，默认开启，受 `memory.autoExtractEnabled` 与 `memory.autoExtractMaxRecords` 控制。team scope 暂不写入。
@@ -256,11 +260,11 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 | ------- | ------------------------------------------------- | ------------------------------------------- |
 | **目录**  | `~/.openharness-ts/data/session-memory/<项目>-<hash>/` | `~/.openharness-ts/data/sessions/<项目>-<hash>/` |
 | **内容**  | goal + 消息摘要（12k 上限）                               | 完整消息历史 + 元数据                                |
-| **用途**  | 给 compact 提供连续性                                   | 给 `/resume` 恢复会话                            |
-| **由谁读** | compact 边界（attachmentsProvider 注入）                | `--continue` / `--resume`                   |
+| **用途**  | 给 compact 提供连续性                                   | 独立文件快照与 autodream 扫描；不是 daemon 主存储 |
+| **由谁读** | compact 边界（attachmentsProvider 注入）                | services 内明确调用方                        |
 
 
-详见 [session-storage-design.md](./session-storage-design.md)。
+这套文件快照不承担 TUI/Desktop 的会话恢复；多端主线使用 daemon SQLite、snapshot 和 SSE。历史设计见 [session-storage-design.md](./session-storage-design.md)。
 
 ---
 

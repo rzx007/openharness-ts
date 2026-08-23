@@ -7,7 +7,7 @@
 permission decision 通过 SDK callback 返回，不是带 resolver 的 event：
 
 ```text
-request/decision : createDefaultNodeAgent({ requestPermission })
+request/decision : createDefaultNodeAgent({ hostCapabilities: { permissions } })
 observability    : permission.requested / permission.resolved AgentEvent
 durable UI flow  : daemon StorePermissionBroker
 ```
@@ -18,10 +18,14 @@ framework 等待 decision；event 只描述事实，保持可序列化。
 
 ```ts
 const agent = await createDefaultNodeAgent({
-  requestPermission: async (request, scope) => {
-    return terminalPrompt(request, scope.signal)
-      ? { status: "approved" }
-      : { status: "denied" };
+  hostCapabilities: {
+    permissions: {
+      requestPermission: async (request, scope) => {
+        return terminalPrompt(request, scope.signal)
+          ? { status: "approved" }
+          : { status: "denied" };
+      },
+    },
   },
 });
 ```

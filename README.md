@@ -1,12 +1,12 @@
 # OpenHarness-ts
 
-OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式编码助手体验。本项目是其 TypeScript 复刻实现，核心 harness（引擎 / 工具 / 权限 / 会话 / TUI）已可用，仍在持续向 Python 原版 v0.1.9 对齐中。
+OpenHarness 是一套可长期保存运行状态的 Agent 应用。CLI、TUI、Web、Desktop、IDE、Bot 和 Workflow 可以共用同一个 Durable Application；`@openharness/agent-runtime` 则是可独立嵌入的 Agent Runtime Kernel。
+
+第一次了解项目请从 [文档总目录](docs/README.md) 开始：先看 [架构总览](docs/architecture-overview.md)，再按 Runtime、持久化数据、协议、产品接入和运维逐层下钻。
 
 ## 特性
 
-> ⚠️ 本项目仍在复刻中。下表标注各能力相对 Python 原版 **v0.1.9** 的**真实状态**：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现。完整差距清单与补齐路线见 [PLAN-REMAINING.md](PLAN-REMAINING.md)。
->
-> **易漂移数字以代码/单测为准**：基础工具数 → `packages/tools` `createDefaultToolRegistry()`；daemon 按 host capability 注入 `TerminalOpen`、5 个 `Job*` 和 5 个 `Schedule*` 工具；Provider 数 → `packages/api` `PROVIDERS`；默认 `model` / `maxTurns` → `packages/core` `DEFAULT_SETTINGS`。programmatic 入口见 [docs/agent-sdk.md](docs/agent-sdk.md)，当前架构以 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md) 和 [docs/agent-framework-capability-boundary.md](docs/agent-framework-capability-boundary.md) 为准，跨层终态与失败规则见 [docs/agent-lifecycle-contract.md](docs/agent-lifecycle-contract.md)。
+> **易漂移数字以代码和测试为准**：基础工具数看 `packages/tools` 的 `createDefaultToolRegistry()`；Provider 看 `packages/api` 的 `PROVIDERS`；默认 model/maxTurns 看 `packages/core` 的 `DEFAULT_SETTINGS`。当前架构和硬规则统一从 [docs/README.md](docs/README.md) 索引。
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
 - ✅ **工具能力** — 基础 registry 提供文件 / Bash / Web / Grep / MCP / TaskCreate / Agent / Workflow / 媒体与元工具；runtime host 按能力注入 `JobList/Read/Wait/Send/Cancel`、`TerminalOpen` 和 5 个 `Schedule*` 工具。bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
@@ -16,7 +16,7 @@ OpenHarness 是一个开源 AI Agent 框架，提供类 Claude Code 的交互式
 - ✅ **Hook 生命周期** — 10 类事件、priority 排序、command/http/prompt/agent 四种类型、matcher 过滤、`$ARGUMENTS` 注入+shell 转义
 - ✅ **会话持久化** — TUI / 用户 print / 跨端主线使用 daemon `SessionStore`；单会话通过原子 snapshot + SSE 恢复。daemon 内 `Agent` 使用同一 store 持久化 child session、task 与 child run 的关联；重启会保留审计记录，并将失去进程所有权的 run/task/workflow 明确标记为中断，不会伪造自动续跑。TUI 可用 `/resume` 明确重放某次中断 run 的原始 prompt。
 - ✅ **插件系统** — Claude Code 布局兼容：skills/commands/hooks/MCP/agents/tools_dir 六类贡献加载（`/插件:命令` 斜杠路由）、项目插件信任门控、卸载路径防护；`tools_dir` 支持动态 import 插件工具
-- ✅ **Channels Agent 桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `ChannelBridge` 接 `OpenHarnessAgent`；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-flow.md](docs/channels-flow.md)
+- ✅ **Channels Agent 桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `DurableChannelBridge` 接 daemon；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-flow.md](docs/channels-flow.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。统一 Jobs Panel 展示和控制 Terminal、后台 shell、child Agent、dream 与 Workflow；Workflow Steps 在所选 Workflow Job 的详情中展示，不再保留独立的后台 Task/Swarm/Workflow Runs 执行面板
 - 🟢 **Daemon Application** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、durable session/transcript、SSE、单 session 串行 run lane、持久化 PermissionBroker、child durable projection 和共享 `@openharness/client` reducer。`DaemonApplication` 集中组装 durable 应用，HTTP server 只负责 transport；`AgentPool` 按 session 缓存真实 `OpenHarnessAgent`。权威导览见 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)，framework 见 [docs/agent-runtime-framework-architecture.md](docs/agent-runtime-framework-architecture.md)，客户端同步见 [docs/client-sync-flow.md](docs/client-sync-flow.md)。
 - ✅ **Terminal** — daemon 统一持有终端 runtime，Desktop 右侧 Panel 与 Agent 连接同一个终端；支持多终端、输出快照恢复、右键菜单、每项目默认 shell、REST/SSE 传输、对话卡片挂接和沙箱终端 MVP。模型用 `TerminalOpen` 创建持久终端，后续统一通过 `JobList/Read/Wait/Send/Cancel` 观察和控制。完整功能、权限和生命周期见 [docs/desktop-terminal-pty-design.md](docs/desktop-terminal-pty-design.md)。
@@ -144,8 +144,6 @@ Options:
   --effort <level>             推理强度: low | medium | high
   --tui                        显式启动 TUI/daemon（无 prompt 时默认已是 TUI；需 Bun）
   --verbose                    详细输出
-  --continue                   （暂不可用）旧项目级快照续聊；请用 TUI /sessions
-  --resume <session>           （暂不可用）旧项目级快照恢复；会话切换请用 TUI /sessions，中断 run 重放请用 TUI /resume
   -p, --print                  经 daemon Session API 打印响应后退出（有 prompt 时默认即 print）
   -n, --name <name>            命名会话
   --output-format <format>     输出格式: text | json | stream-json
@@ -637,9 +635,9 @@ submitMessage(userInput)
   返回所有 StreamEvent
 ```
 
-### 会话恢复流程
+### 会话与多端同步流程
 
-用户 print（daemon Session API；旧项目级 `--continue`/`--resume` 尚未迁移）：
+用户 print（daemon Session API）：
 
 ```
 ohs -p "…" / ohs "…"
@@ -647,9 +645,6 @@ ohs -p "…" / ohs "…"
        ▼
   ensureLocalDaemon → OpenHarnessClient
   createSession → syncEvents → admitPrompt → 渲染 stdout → run idle 退出
-  （传 --continue/--resume 会明确报错）
-
-# Agent child session 进入 daemon store；deprecated --task-worker fallback 仍用项目级快照
 ```
 
 TUI / Web / Desktop（daemon 权威状态）：
@@ -661,7 +656,7 @@ ohs --tui  (或其它 client attach)
   @openharness/client
        │
        ├─ GET /sessions/:id/state   → 原子 snapshot
-       │    (session / inputs / messages / parts / runs / permissions)
+       │    (session / inputs / messages / parts / runs / attempts / tasks / permissions)
        └─ GET /events/stream?cursor=… → SSE live delta
        │
        ▼
@@ -703,6 +698,7 @@ ohs sandbox status
 
 ```json
 {
+  "_formatVersion": 1,
   "provider": "openrouter",
   "model": "minimax/minimax-m2.5:free",
   "apiFormat": "openai",

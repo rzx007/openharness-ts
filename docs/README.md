@@ -37,13 +37,11 @@
 
 ## 第 0 层：系统鸟瞰
 
-当前还缺一份独立的 `architecture-overview.md`。在它补齐前，按下面顺序建立全局认识：
-
-1. [Framework 与 Durable Application 的能力边界](./agent-framework-capability-boundary.md)：先看 Runtime、daemon 和产品界面分别管什么。
-2. [Daemon Application Architecture](./daemon-application-architecture.md)：再看一个请求怎样从产品入口进入 durable state 和 Agent Runtime。
-3. [Client Sync Flow](./client-sync-flow.md)：最后看 TUI、Web、Desktop、IDE 怎样通过 snapshot 和 SSE 得到同一份状态。
-
-计划补写的鸟瞰文档及边界见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。
+1. [OpenHarness 架构总览](./architecture-overview.md)：先看 CLI/TUI/Web/Desktop/IDE/Bot/Workflow 怎样共用一套 Application 和 Runtime。
+2. [产品入口接入边界](./product-surface-integration.md)：再看每种产品自己负责什么、哪些状态必须共用。
+3. [Framework 与 Durable Application 的能力边界](./agent-framework-capability-boundary.md)：继续下钻 Runtime、daemon 和产品界面的所有权。
+4. [Daemon Application Architecture](./daemon-application-architecture.md)：追踪一个请求怎样进入 durable state 和 Agent Runtime。
+5. [Client Sync Flow](./client-sync-flow.md)：理解 snapshot、SSE、cursor 和多端收敛。
 
 ## 第 1 层：跨模块硬规则
 
@@ -51,20 +49,20 @@
 
 | 核心保证 | 当前权威落点 | 覆盖情况 |
 |---|---|---|
-| 每条运行记录有稳定 ID、固定字段、版本和关系 | [Agent Lifecycle Contract：Durable Projection](./agent-lifecycle-contract.md#durable-projection)、[Daemon Application Architecture：Event projection](./daemon-application-architecture.md#event-projection) | 部分覆盖；缺少一份完整 durable 数据模型 |
+| 每条运行记录有稳定 ID、固定字段、版本和关系 | [Durable Execution Data Model](./durable-execution-data-model.md) | 已有权威数据模型 |
 | 每个 Run、Attempt、Tool、Child 和 Workflow 最终都进入明确终态 | [Agent Lifecycle Contract](./agent-lifecycle-contract.md)、[Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md) | 已有权威契约 |
 | 子 Agent 不得无限递归、无限并发或靠关闭后重建绕过上限 | [Agent Child Session Flow：Child 预算](./agent-child-session-flow.md#child-预算防止无限叫人) | 已完整记录 |
-| 相同请求可以安全重试，不同内容不能复用同一个 ID | [Agent Lifecycle Contract：P5](./agent-lifecycle-contract.md#durable-projection)、[Observability：Trace ID](./observability.md#trace-id) | 已记录，仍应纳入数据模型总表 |
+| 相同请求可以安全重试，不同内容不能复用同一个 ID | [Durable Execution Data Model：ID 和安全重试](./durable-execution-data-model.md#id-和安全重试) | 已记录 |
 | 已结束状态不能被迟到事件重新改回 running | [Agent Lifecycle Contract：D3](./agent-lifecycle-contract.md#daemon)、[Jobs Protocol：状态机](./jobs-protocol.md#状态机) | 已记录 |
 | 投影失败不能假装成功，重启后要继续收束 | [Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md)、[Agent Lifecycle Contract：P8](./agent-lifecycle-contract.md#durable-projection) | 已记录 |
-| 一个数据目录只有一个活动 Application Owner | [Daemon Application Architecture：单执行者保护](./daemon-application-architecture.md#单执行者保护) | 已记录，缺独立运维与恢复文档 |
-| 客户端与服务端必须使用完全相同的协议版本 | [Daemon Application Architecture：协议能力](./daemon-application-architecture.md#协议能力) | 已记录，缺独立协议契约 |
-| 清理、备份和恢复不能留下半完成状态 | [Daemon Application Architecture：清理与备份](./daemon-application-architecture.md#清理与备份) | 已记录，缺操作手册 |
+| 一个数据目录只有一个活动 Application Owner | [Operations and Recovery：Application Owner](./operations-and-recovery.md#application-owner) | 已有权威操作手册 |
+| 客户端与服务端必须使用完全相同的协议版本 | [Protocol Contract](./protocol-contract.md) | 已有权威协议契约 |
+| 清理、备份和恢复不能留下半完成状态 | [Operations and Recovery](./operations-and-recovery.md) | 已有权威操作手册 |
 
 你举的三项目前对应关系是：
 
 ```text
-固定格式的运行记录  → 已分散记录，优先补 durable-execution-data-model.md
+固定格式的运行记录  → durable-execution-data-model.md
 所有运行正确收尾    → agent-lifecycle-contract.md 是权威契约
 限制子 Agent        → agent-child-session-flow.md 的 Child 预算章节
 ```
@@ -84,6 +82,8 @@
 ### Durable Agent Application
 
 - [Daemon Application Architecture](./daemon-application-architecture.md)：Session、Input、Run、Permission、Workflow、Owner、恢复和关闭的总入口。
+- [Durable Execution Data Model](./durable-execution-data-model.md)：所有运行记录的固定格式、关系、终态和版本。
+- [Protocol Contract](./protocol-contract.md)：协议版本、请求错误、snapshot、SSE 和升级规则。
 - [Client Sync Flow](./client-sync-flow.md)：HTTP client、snapshot、SSE、cursor 和 reducer。
 - [Observability](./observability.md)：trace、结构化日志、runtime snapshot 和排障。
 - [Scheduled Tasks Flow](./scheduled-tasks-flow.md)：定时任务怎样保存、触发、运行和记录结果。
@@ -117,6 +117,7 @@
 
 ### 产品界面
 
+- [Product Surface Integration](./product-surface-integration.md)：各种上层产品共同使用 Application 的规则。
 - [TUI Flow](./tui-flow.md)：TUI 怎样连接 daemon 和渲染运行状态。
 - [Desktop Agent Message Rendering](./desktop-agent-message-rendering.md)：Desktop 消息和文件变更展示。
 - [Desktop Terminal PTY](./desktop-terminal-pty-design.md)：Desktop 终端、PTY、IPC 和 Sandbox。
@@ -147,8 +148,8 @@
 - 安装和管理常驻 daemon：[Daemon System Service](./daemon-system-service.md)
 - 配置认证、Provider 和 Model：[Auth、Provider、Model](./auth-provider-model.md)
 - 查看 trace、metrics 和运行诊断：[Observability](./observability.md)
-
-备份恢复、Retention、Owner 接管和协议升级目前还没有独立操作手册，见下面的缺口清单。
+- 处理启动恢复、Owner、Retention 和备份：[Operations and Recovery](./operations-and-recovery.md)
+- 检查认证、权限和 Sandbox 边界：[Security and Trust Boundaries](./security-and-trust-boundaries.md)
 
 ## 第 5 层：决策、计划和历史
 
@@ -166,19 +167,19 @@
   > plans、specs、reviews 和历史设计
 ```
 
-## 还需要补哪些文档
+## 文档建设状态
 
-详细分析见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。优先级摘要：
+详细设计与当时缺口见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。P0/P1 主文档已经完成：
 
 | 优先级 | 建议文档 | 解决的问题 |
 |---|---|---|
-| P0 | `architecture-overview.md` | 给新读者一张 CLI/TUI/Web/Desktop/IDE/Bot/Workflow → Durable Application → Runtime Kernel 的完整鸟瞰图 |
-| P0 | `durable-execution-data-model.md` | 集中定义 Session/Input/Run/Attempt/Tool/Task/Workflow/Event/Settlement 的固定格式、ID、关系和终态 |
-| P0 | `operations-and-recovery.md` | 集中说明启动恢复、Owner 接管、关闭、Retention、备份恢复和故障处理 |
-| P1 | `protocol-contract.md` | 集中说明协议版本 2、feature 版本、错误格式、请求校验、SSE cursor 和升级规则 |
-| P1 | `product-surface-integration.md` | 说明 CLI/TUI/Web/Desktop/IDE/Bot/Workflow 各自只是入口，哪些状态必须共用、哪些逻辑不能复制 |
-| P1 | `security-and-trust-boundaries.md` | 把 Bearer auth、Permission、Sandbox、secret、ownerSession 和 Channel ACL 放进一张信任边界图 |
-| P2 | `contract-test-index.md` | 把每条架构不变量映射到测试文件，便于修改代码时知道必须跑什么 |
+| P0 | [Architecture Overview](./architecture-overview.md) | 已完成 |
+| P0 | [Durable Execution Data Model](./durable-execution-data-model.md) | 已完成 |
+| P0 | [Operations and Recovery](./operations-and-recovery.md) | 已完成 |
+| P1 | [Protocol Contract](./protocol-contract.md) | 已完成 |
+| P1 | [Product Surface Integration](./product-surface-integration.md) | 已完成 |
+| P1 | [Security and Trust Boundaries](./security-and-trust-boundaries.md) | 已完成 |
+| P2 | `contract-test-index.md` | 待做：把每条硬规则映射到测试文件，并尽量由脚本检查 |
 
 ## 仍需整理的现有文档
 
@@ -189,20 +190,14 @@
 - [待修复 Bug 存档](./bugs-unfixed.md) 来自较早审计，需要重新确认每一项是否仍存在，不能继续当当前缺陷列表。
 - 多份 `*-design.md` 没有状态标记，需要逐步补上“当前实现 / 待实现 / 历史设计”。
 
-## 仍待删除的兼容代码
+## 当前格式策略
 
-2026-08-23 的全仓搜索仍能找到下面这些旧入口。它们不是推荐用法，也不能因为文档已经更新就算作完成：
+项目已经删除旧 API 别名、re-export façade、字段别名和旧数据读取路径。当前版本只接受当前接口和当前数据格式：
 
-| 位置 | 仍在兼容什么 |
-|---|---|
-| `apps/cli/src/commands/debug.ts` | `list-projection-settlements` 旧命令别名 |
-| `apps/cli/src/commands/slash-commands.ts` | 旧 import 路径的 re-export 文件 |
-| `packages/core/src/types/settings.ts`、`packages/sandbox/src/config.ts` | Sandbox 的 `runtime` 旧配置字段 |
-| `packages/memory/src/index.ts` | 旧 flat JSON memory 结构和 JSON 文件读取 |
-| `packages/services/src/session-runtime/types.ts`、`runtime-config.ts` | 已移到 `@openharness/protocol` 的旧导出位置 |
-| `packages/channels/src/bridge.ts` | daemon durable channel 之前的 bridge 类 |
-| `apps/desktop/src/main/features/session/default-model-resolution.ts` | 带 provider 前缀的旧 DeepSeek model ID |
-| `packages/swarm/src/permission-sync.ts` | 旧 Permission response 形状 |
+- SQLite、event、settings、Session snapshot、Memory 和 Swarm 文件都有明确版本标记；
+- 缺失标记、版本不同、字段缺失或字段名过时都会直接失败；
+- 不做自动 migration、读取时升级或旧数据猜测；
+- 格式切换和恢复步骤见 [Operations and Recovery](./operations-and-recovery.md#破坏性格式切换)。
 
 ## 写文档时的约定
 

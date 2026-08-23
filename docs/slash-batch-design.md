@@ -1,7 +1,7 @@
 # 设计：E.2 高价值斜杠命令批次
 
 > 状态：已实现并审查。`/stats` `/reload-plugins` `/subagents` `/plugin`，
-> 全部为已测基建的薄组合，注册进 `slash-commands.ts` 既有 CommandRegistry。
+> 这是当时的实现设计。当前命令目录和分发由 server/client command 模块负责；本文不作为现行入口说明。
 
 ## 命令清单
 

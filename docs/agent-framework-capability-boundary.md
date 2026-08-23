@@ -51,7 +51,7 @@ flowchart LR
 | settings 和 CredentialStorage | 默认 Node 组装 | 会读取本机和用户目录 |
 | 插件、Skill、MCP、Memory | 默认 Node 组装 | 会发现或连接外部资源 |
 | Sandbox、process exit cleanup、Git worktree | 默认 Node 能力 | 都依赖具体操作系统环境 |
-| Permission、Jobs、Terminal、Schedule | `AgentHostCapabilities` | 宿主明确提供；Kernel 不创建备用实现 |
+| Permission、Jobs、Terminal、Schedule | `AgentHostCapabilities` | 宿主明确提供；Kernel 不创建备用实现；默认 Node 入口可安装本机默认能力 |
 | HTTP、SQLite、SSE、durable Session/Run | Durable Application | 这是多客户端和进程重启后的状态 |
 
 Kernel 的硬规则：
@@ -104,7 +104,8 @@ Kernel 负责：
 - settings、凭据、插件、Skill、MCP 和 Memory；
 - Sandbox 和进程退出清理；
 - 选择 Git worktree child environment；
-- 根据配置安装 Node 环境中的默认宿主能力。
+- 完全未提供 `hostCapabilities` 时，安装“权限默认拒绝 + 本地 Jobs + 默认 child environment”的 Node 组合；
+- 调用方显式提供 `hostCapabilities` 时只使用这些能力，不读取已删除的顶层备用字段。
 
 framework 不负责：
 

@@ -48,9 +48,13 @@ const agent = await createDefaultNodeAgent({
   model: "gpt-5.4",
   provider: "codex",
   maxTurns: 20,
-  allowedTools: ["Read", "Glob", "Grep"],
-  requestPermission: async (request, context) => {
-    return { status: "denied", reason: `Not allowed: ${request.toolName}` };
+  hostToolCeiling: ["Read", "Glob", "Grep"],
+  hostCapabilities: {
+    permissions: {
+      requestPermission: async (request, context) => {
+        return { status: "denied", reason: `Not allowed: ${request.toolName}` };
+      },
+    },
   },
   onEvent: async (event) => {
     await durableEventSink.apply(event);
@@ -65,11 +69,11 @@ const agent = await createDefaultNodeAgent({
 | `model` / `provider` / `apiKey` / `baseUrl` | provider 选择覆盖 |
 | `client` | programmatic embedding、自定义 provider 或测试用消息客户端 |
 | `systemPrompt` / `maxTurns` / `effort` / `fastMode` | 执行行为覆盖 |
-| `allowedTools` / `roleAllowedTools` / `disallowedTools` | 工具范围，见下一节 |
-| `requestPermission` | framework 必须等待结果的权限 effect；缺省为拒绝 |
+| `hostToolCeiling` / `roleAllowedTools` / `disallowedTools` | 工具范围，见下一节 |
+| `hostCapabilities` | 宿主明确提供的 Permission、Jobs、Terminal、Schedules、child environment 和 Workflow repository |
 | `onEvent` | 有序、可靠、可等待的 host sink；失败会终止当前 operation |
 | `extensions` / `mcpServers` | OpenHarness extension 与 MCP 增量配置 |
-| `childEnvironment` | child agent cwd/worktree 环境策略 |
+| `childBudget` | 整棵 child 树的深度、活动数和累计创建数限制 |
 
 ## 工具限制
 
@@ -77,12 +81,11 @@ const agent = await createDefaultNodeAgent({
 
 | 字段 | 大白话含义 |
 |---|---|
-| `allowedTools` | 宿主给这个 Agent 家族的最大能力。子 Agent 也不能超过它。这个名字保留给 SDK 调用方使用。 |
-| `hostToolCeiling` | `allowedTools` 的明确名字，含义相同：宿主能力上限。内部传给子 Agent 时会用这个名字，避免误会成角色工具集。 |
+| `hostToolCeiling` | 宿主给这个 Agent 家族的最大能力。子 Agent 也不能超过它。 |
 | `roleAllowedTools` | 当前 Agent 角色自己想看的工具。例如 Coordinator Leader 只需要 `Agent` / `Workflow` / `Job*`，但这不代表 Worker 也只能用这些。 |
 | `disallowedTools` | 永远优先禁止。父 Agent 和子 Agent 的禁止列表会合并。 |
 
-后台生命周期旧名已经硬切，不提供兼容别名。`allowedTools`、`roleAllowedTools`、`disallowedTools` 和 auto-approve 配置若仍包含已删除的 `TaskGet/List/Output/Stop/Wait/Update`、`SendMessage` 或 `TerminalRead/List/Send/Signal/Close`，runtime 会在启动时直接报错并给出对应 `Job*`；其他尚未注册的名字仍被保留，供插件动态注册工具使用。
+后台生命周期旧名已经硬切，不提供兼容别名。`hostToolCeiling`、`roleAllowedTools`、`disallowedTools` 和 auto-approve 配置若仍包含已删除的 `TaskGet/List/Output/Stop/Wait/Update`、`SendMessage` 或 `TerminalRead/List/Send/Signal/Close`，runtime 会在启动时直接报错并给出对应 `Job*`；其他尚未注册的名字仍被保留，供插件动态注册工具使用。工具名精确匹配，不接受 snake_case、Python 风格或大小写修复。
 
 最终能看到的工具是：
 
@@ -94,11 +97,17 @@ const agent = await createDefaultNodeAgent({
 
 ```ts
 await createDefaultNodeAgent({
-  allowedTools: ["Read", "Agent", "JobWait"],
+  hostToolCeiling: ["Read", "Agent", "JobWait"],
 });
 ```
 
 这个 Agent 可以派出 Worker，但 Worker 仍然只能在 `Read` / `Agent` / `JobWait` 这个上限内活动，不能因为内置 worker 写了 `tools: ["*"]` 就拿到 `Bash` / `Edit` / `Write`。
+
+## 默认 Node 宿主能力
+
+完全不传 `hostCapabilities` 时，`createDefaultNodeAgent()` 提供适合本机独立运行的默认组合：权限默认拒绝，Jobs 使用本地实现，child environment 使用默认 Git/worktree 策略。显式传入 `hostCapabilities` 后，只使用调用方交进来的能力；其中 `permissions` 必填，其他能力缺失就不可用，不会从旧的顶层字段寻找备用值。
+
+Kernel 入口更严格：它不会创建本地 Jobs、默认 child environment 或其他 Node 能力，所有能力都由调用方明确传入。
 
 ## Event 与 Effect
 

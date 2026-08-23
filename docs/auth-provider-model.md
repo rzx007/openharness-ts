@@ -77,13 +77,15 @@ OPENHARNESS_CONFIG_DIR
 |---|---|
 | `settings.json` | 非机密运行时设置，如 `provider`、`model`、`baseUrl`、`apiFormat`、权限、插件与 UI 偏好 |
 | `credentials.json` | OpenHarness 管理的凭证，按 provider 分组 |
-| `data/sessions` | 会话快照与历史 |
+| daemon SQLite | TUI/Web/Desktop/Bot 共用的 Session、Run、消息和权限记录 |
+| `data/sessions` | services 的独立文件快照；不作为 daemon 多端主存储 |
 | `plugins`、`skills`、`data/*` | 用户安装的插件、技能、日志、任务、cron 状态及其他本地数据 |
 
 `settings.json` 示例：
 
 ```json
 {
+  "_formatVersion": 1,
   "provider": "deepseek",
   "model": "deepseek-chat",
   "apiFormat": "openai",

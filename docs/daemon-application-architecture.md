@@ -70,7 +70,7 @@ OpenHarnessAgent onEvent sink
 
 | 位置                             | 大白话含义                        | 谁会使用                             |
 | -------------------------------- | --------------------------------- | ------------------------------------ |
-| `session.model`                  | 列表、导出、旧表结构里的展示列    | UI 展示、导出、统计展示              |
+| `session.model`                  | 列表、导出和统计使用的展示列       | UI 展示、导出、统计展示              |
 | `session.metadata.runtime.model` | 这条 session 下一轮真正要用的模型 | daemon 创建或重建 `OpenHarnessAgent` |
 
 当前规则：
@@ -78,8 +78,8 @@ OpenHarnessAgent onEvent sink
 1. 新建 session 时，CLI/TUI/Web 会把默认模型写入 `metadata.runtime.model`，同时同步写入 `session.model` 展示列。
 2. `ohs provider use <provider> -m <model>` 或 Home 页 `/models` 只改 settings，作用是“以后新建 session 的默认模型”。
 3. 已经打开的 session 改模型时，只能 PATCH `metadata.runtime.model`。旧写法 `PATCH /sessions/:id { model }` 会被拒绝。
-4. runtime 读取只认 `metadata.runtime.model`。旧数据行如果缺这个字段，不会再从 `session.model` 静默兜底。
-5. `SessionApplicationService.updateSession()` 发现 runtime metadata 变化后，会先确认当前 session 没有正在跑的任务，再关闭 `AgentPool` 里的旧 agent。下一次发送消息时，pool 会重新读 store，用新的 runtime 配置创建 agent。
+4. runtime 读取只认 `metadata.runtime.model`。缺少这个字段时不会从展示用的 `session.model` 猜测运行配置。
+5. `SessionApplicationService.updateSession()` 发现 runtime metadata 变化后，会先确认当前 session 没有正在跑的任务，再关闭 `AgentPool` 里当前 agent。下一次发送消息时，pool 会重新读 store，用新的 runtime 配置创建 agent。
 6. `provider`、`baseUrl`、`apiFormat`、`permissionMode`、`maxTurns` 等同理放在 `metadata.runtime`。settings 只作为新 session 的默认值，或补齐 session 没写的可选字段；模型本身不能靠 settings 补。
 
 所以 TUI 下 `/models` 的行为是：
@@ -247,11 +247,11 @@ Settlement 保存的是可序列化修复说明，不是旧进程的 Handle。Da
 
 input/run/stream/terminal 的多步 durable 归约使用 `SessionStore.transaction()`，SQLite 与内存 read model 同时提交或同时回滚，transcript projection state 也在失败时恢复。input/run/child identity 使用 create-or-validate：input 会比较去除 traceId 后的完整 metadata，既有 child session 必须匹配 parent/cwd/childId，terminal run 不允许被 `run.started` 重开。当前 framework event source 不跨进程 replay，daemon restart 仍走 durable recovery，不恢复 live event stream。
 
-每个真正进入 `run.started` 的新 Run 会建立一条 durable Run Attempt。Attempt 保存独立的 sequence、provider、model、状态、token 用量和起止时间；当前 Provider 内部的连接/传输 retry 仍属于同一 Attempt。Run terminal 之前必须先把活动 Attempt 收束为 completed、failed 或 cancelled。Daemon 重启不会重新调用模型，而是把旧 pending/running Attempt 标为 cancelled；历史数据库中本来没有 Attempt 的旧 Run 保持“无明细”，不会补造一条看似真实的记录。Attempt 同时进入 session snapshot 和 durable replay event，客户端可以按 Run ID 关联展示。
+每个真正进入 `run.started` 的新 Run 会建立一条 durable Run Attempt。Attempt 保存独立的 sequence、provider、model、状态、token 用量和起止时间；当前 Provider 内部的连接/传输 retry 仍属于同一 Attempt。Run terminal 之前必须先把活动 Attempt 收束为 completed、failed 或 cancelled。Daemon 重启不会重新调用模型，而是把 pending/running Attempt 标为 cancelled。Attempt 同时进入 session snapshot 和 durable replay event，客户端可以按 Run ID 关联展示。
 
-每条 durable event（持久化后可回放的事件）都带 `schemaVersion`。当前内置事件版本统一为 `1`：新事件按 registry 中各自的当前版本写入，迁移前的旧行在数据库升级时补为 `1`，HTTP replay 与 SSE 返回读取边界已经识别或升级后的完整 envelope。版本表示事件载荷采用哪一版格式，不代表业务发生顺序；顺序仍由 `seq` 决定。未知版本不能被当成当前版本静默读取。
+每条 durable event（持久化后可回放的事件）都带 `schemaVersion`。当前内置事件版本统一为 `1`。版本表示事件载荷采用哪一版格式，不代表业务发生顺序；顺序仍由 `seq` 决定。缺少版本或版本不同会直接失败。
 
-durable event 的格式由 `DurableEventRegistry` 集中登记。登记项包含事件名、当前版本、属于单个 session 还是全局事件、payload 校验器，以及可选的逐版升级函数。Store 写入事件前先查登记表并校验；未登记的名称、缺字段、字段类型错误或错误的 session/global 归属都会在分配 cursor 前被拒绝。Store 从数据库读取旧版本时按 `v1 -> v2 -> ...` 依次升级，再把当前格式交给上层，但不会改写原数据库行，便于审计和排查历史数据。
+durable event 的格式由 `DurableEventRegistry` 集中登记。登记项包含事件名、当前版本、属于单个 session 还是全局事件，以及 payload 校验器。Store 写入和读取时都要求精确版本；未登记的名称、缺字段、字段类型错误、错误的 session/global 归属或旧版本都会被拒绝。registry 不提供读取时升级函数。
 
 Framework 的 `domain.event` 统一持久化为 `agent.domain.event`，原始业务名称保存在 payload 的 `name` 字段；Workflow 事件则逐项登记允许的九种事件名。读取时不会再把旧的业务事件名猜成 `agent.domain.event`。这样新增业务事件必须显式注册，不会因为字符串拼错而产生客户端永远不认识的历史记录。测试或插件若确实拥有额外事件，可以通过 `createDurableEventRegistry([...extensions])` 建立专用 registry，并在创建 `SessionStore` 时传入，生产默认 registry 不会自动放行它们。
 
@@ -418,11 +418,15 @@ Jobs 层只读取和控制这份 Workflow 状态，不复制第二份快照。Wo
 
 客户端必须在发起普通业务请求前检查它。版本完全相同才继续；版本不同立即报 `IncompatibleProtocolError`，不使用 `minVersion/maxVersion` 范围，也不猜测旧响应。`features` 中各数字表示某项能力自己的版本，例如 Jobs、Workflow、Backup 和 Retention；它们不能代替总协议版本检查。
 
+完整请求、错误、snapshot、SSE 和 breaking change 规则见 [Protocol Contract](./protocol-contract.md)。
+
 ## 清理与备份
 
 `ApplicationRetentionService` 是统一清理入口。它按策略删除过期的 terminal Run、Workflow、事件和审计范围内的数据；删除结果与 `retention_audit` 在同一个 SQLite transaction 中提交，因此不会出现“数据删了但审计没写”或相反的半完成状态。
 
 Application backup 包含 SQLite 数据库，以及明确配置的 artifacts、memory 和 execution output 目录。每个备份带 manifest 和逐文件 SHA-256 校验。恢复前先完成全部检查：manifest 格式、校验和、目标数据库不存在、目标目录为空；检查全部通过后才复制。符号链接和其他特殊文件会被拒绝，备份目录也不能放进被备份的源目录中。恢复只恢复 durable 数据，不复活旧进程；下次启动仍按普通 recovery 收束活动记录。
+
+可执行的启动、Owner、排障、Retention、备份恢复和当前格式规则见 [Operations and Recovery](./operations-and-recovery.md)。
 
 ## 启动与关闭
 
@@ -446,14 +450,14 @@ shutdown 先把 `DaemonOperationGate` 置为 closing 并等待现有 shared/barr
 
 `GET /debug/runtime` 的 `metrics` 从 durable 数据汇总 Run、Attempt、Tool、token、Permission、Child 和 Projection 状态。它只用有限类别做标签，不把 sessionId、runId、traceId、文件路径、提示词或 Tool 参数塞进指标。指标汇总失败时返回空指标，不影响 Run 执行。
 
-排查单次 Run 可使用 `ohs debug inspect-run <runId>`；查看投影补偿队列可使用 `ohs debug settlements`。两条命令都只读，也不会自动启动 Daemon；本机没有已注册的运行中 Daemon 时会提示用户先显式启动。默认隐藏正文和 Tool/Permission payload；`--include-content` 才展开并提示敏感信息风险，`--json` 用于脚本处理。发现数据断链、关闭 Run 仍有活动 Attempt、未知事件、待处理 settlement 或 Tool 结果未知时，命令会给出具体 warning 并返回非零退出码。当前代码仍注册了 `list-projection-settlements` 命令别名；它是待删除的历史入口，不应出现在新脚本中。第一阶段没有自动 repair 命令。
+排查单次 Run 可使用 `ohs debug inspect-run <runId>`；查看投影补偿队列可使用 `ohs debug settlements`。两条命令都只读，也不会自动启动 Daemon；本机没有已注册的运行中 Daemon 时会提示用户先显式启动。默认隐藏正文和 Tool/Permission payload；`--include-content` 才展开并提示敏感信息风险，`--json` 用于脚本处理。发现数据断链、关闭 Run 仍有活动 Attempt、未知事件、待处理 settlement 或 Tool 结果未知时，命令会给出具体 warning 并返回非零退出码。当前没有自动 repair 命令。
 
 ## 不变量
 
 - queue 形式的 root durable input/run 在一个 store transaction 中创建，再进入 coordinator；steer input 先 durable admit，成功交付后通过 primary run 或 transcript message 建立归属。
 - 每个 durable input 最终可通过 primary run input 或 transcript message 解析到 owning run；失败/中断的 steer 也必须 terminalize。
 - durable run 一旦 completed/failed/interrupted 就不可重新进入 running；child task 可绑定新的 run 并显式 reopen。
-- 一个 terminal Run 不得留下 pending/running Attempt；旧 Run 没有 Attempt 是合法历史状态，不据此推断模型没有执行。
+- 一个 terminal Run 不得留下 pending/running Attempt。
 - 每个 pool-owned session 最多一个 root agent generation；closing entry 在旧实例完整释放前阻止 replacement，每个 agent 最多一个 active root run。
 - `SessionStore.transaction()` 同时保护 SQLite 与内存 read model；存储失败后不得暴露未提交实体。
 - text delta 立即 live publish，并按 `150ms/8KB` checkpoint durable part；异常退出只允许丢失一个有界尾窗，正常 terminal/close 必须完整。

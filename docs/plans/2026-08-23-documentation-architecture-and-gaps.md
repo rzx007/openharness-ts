@@ -1,6 +1,6 @@
 # OpenHarness 文档体系设计与缺口
 
-> 状态：文档建设方案，2026-08-23。本文规划“应该有哪些文档”，不定义新的运行时行为；当前行为仍以代码、测试和权威契约为准。
+> 状态：已完成 P0/P1 主文档，2026-08-23。本文保留当时的文档缺口和设计理由；当前入口见 [文档总目录](../README.md)。
 
 ## 目标
 
@@ -183,7 +183,7 @@ Session
 
 ### 1. 每条运行记录都有固定格式
 
-当前覆盖：部分。
+当时覆盖：部分；现已补齐。
 
 已有内容：
 
@@ -192,7 +192,7 @@ Session
 - `@openharness/protocol` 类型和 `SessionStore` schema 定义真实字段；
 - migration 和测试证明数据库格式。
 
-缺口：没有一个地方把完整记录关系、字段责任、ID、状态枚举和版本规则放在一起。P0 的 `durable-execution-data-model.md` 应优先补。
+完成结果：[Durable Execution Data Model](../durable-execution-data-model.md) 已集中记录关系、字段责任、ID、状态枚举和当前版本规则。
 
 ### 2. 所有运行最终都要正确收尾
 
@@ -239,30 +239,30 @@ Lifecycle Contract 现已增加 C6，明确“创建 child 前必须通过 tree-
 | `bugs-unfixed.md` | 记录时间早，条目可能已经失效 | 逐条复核；已修复的移入历史，未修复的写当前证据和测试 |
 | 多份 `*-design.md` | 没有状态，读者不知道已实现还是设想 | 统一增加状态和当前权威链接 |
 
-## 建议实施顺序
+## 实施结果
 
 ```text
-1. architecture-overview.md
-   先让所有读者有同一张地图
+1. architecture-overview.md（已完成）
+   所有读者先使用同一张地图
 
-2. durable-execution-data-model.md
+2. durable-execution-data-model.md（已完成）
    固定运行记录、关系、终态和版本
 
-3. operations-and-recovery.md
+3. operations-and-recovery.md（已完成）
    把长期运行、Owner、恢复、清理、备份写成可执行手册
 
-4. protocol-contract.md
+4. protocol-contract.md（已完成）
    固定多端共同使用的协议边界
 
-5. product-surface-integration.md
+5. product-surface-integration.md（已完成）
    固定 CLI/TUI/Web/Desktop/IDE/Bot/Workflow 的接入责任
 
-6. security-and-trust-boundaries.md
+6. security-and-trust-boundaries.md（已完成）
    汇总认证、权限、Sandbox、Secret 和 Channel ACL
 
-7. 更新 observability/client-sync/lifecycle 等现有文档
+7. 更新 observability/client-sync/lifecycle 等现有文档（持续整理）
 
-8. 建立 contract-test-index 或自动检查脚本
+8. 建立 contract-test-index 或自动检查脚本（P2，待做）
 ```
 
 每完成一份新权威文档，都要删除或缩短旧文档里的重复段落，只保留链接。否则文档数量增加了，权威性反而会下降。

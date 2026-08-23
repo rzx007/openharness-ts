@@ -2,7 +2,7 @@
 
 Channels 把飞书等聊天平台接到正在运行的 daemon。正式入口不会再自己创建一套 Agent；它和 CLI、TUI、Desktop 共用 daemon 里的 Session、Input、Run、权限请求和对话记录。
 
-当前 `ohs channels serve` 只组装飞书基础版。库里的 `StdioAdapter`、`HttpAdapter` 和 `EphemeralChannelBridge` 仍可用于测试或临时嵌入，但不是正式 serve 主线。
+当前 `ohs channels serve` 只组装飞书基础版。`StdioAdapter` 和 `HttpAdapter` 是 adapter 实现；消息进入 Agent 的唯一正式桥接是 `DurableChannelBridge`，不再提供直连 standalone Agent 的临时 bridge。
 
 ## 一条消息实际怎么走
 
@@ -37,6 +37,7 @@ ohs channels serve
 
 ```json
 {
+  "_formatVersion": 1,
   "channels": {
     "sendProgress": true,
     "sendToolHints": true,
@@ -126,6 +127,5 @@ ohs channels status
 | 应用服务 | `packages/server/src/application/channel/channel-application-service.ts` | 映射 Session、幂等准入、等待 Run、保存回复 |
 | HTTP 接入 | `packages/server/src/http/routes/channel.ts` | 把 `/channels/*` 请求转给应用服务 |
 | 数据库 | `packages/services/src/session-runtime/migrations/0009_external_channels.sql` | 保存聊天映射和回复状态 |
-| 临时桥接 | `packages/channels/src/bridge.ts` | 测试或临时嵌入时直连 standalone Agent |
 
 `FeishuPush` 工具仍是另一条主动推送捷径：它由当前 Agent 主动选择目标并发消息，不代表收到一条外部消息后的 durable 回复流程。
