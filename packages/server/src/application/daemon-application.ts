@@ -10,8 +10,11 @@ import type { AgentJobHost } from "@openharness/jobs";
 import type { SessionRecord } from "@openharness/protocol";
 import {
   closeExecutionRuntimes,
+  executeAutoDream,
   getChildAgentExecutionRegistry,
   getDetachedProcessSupervisor,
+  readLastConsolidatedAt,
+  updateSessionMemoryFile,
   type SessionStore,
   type ApplicationOwnerLease,
 } from "@openharness/services";
@@ -49,6 +52,7 @@ import { SessionMaintenanceService } from "./session/session-maintenance-service
 import { SessionQueryService } from "./session/session-query-service.js";
 import { SessionRunEngine } from "./session/session-run-engine.js";
 import { SessionRunExecutor } from "./session/session-run-executor.js";
+import { SessionPostRunMaintenance } from "./session/session-post-run-maintenance.js";
 import { SessionExecutionProjector } from "./session/session-execution-projector.js";
 import { BackgroundShellService } from "./session/background-shell-service.js";
 import { SessionTranscriptProjection } from "./session/transcript-projection.js";
@@ -247,6 +251,18 @@ export class DaemonApplication implements DurableAgentApplication {
       isSessionExternallyOwned: (sessionId) => this.liveChildren.has(sessionId),
     });
 
+    const postRunMaintenance = new SessionPostRunMaintenance({
+      store,
+      getSettings: async (cwd) =>
+        options.getSettingsForCwd
+          ? await options.getSettingsForCwd(cwd)
+          : options.getSettings?.() ?? options.settings,
+      log: options.log,
+      sessionMemoryWriter: (cwd, messages, sessionId) =>
+        updateSessionMemoryFile(cwd, messages, { sessionId }),
+      lastConsolidatedAt: readLastConsolidatedAt,
+      autoDream: executeAutoDream,
+    });
     const runExecutor = new SessionRunExecutor({
       store,
       agentPool: this.agentPool,
@@ -254,6 +270,7 @@ export class DaemonApplication implements DurableAgentApplication {
       transcriptProjection: this.transcriptProjection,
       traceIdForRun: (runId) => this.traceIdForRun(runId),
       log: options.log,
+      postRunMaintenance,
     });
     this.runEngine = new SessionRunEngine({
       store,

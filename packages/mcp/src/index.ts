@@ -13,28 +13,35 @@ export type McpTransportKind = "stdio" | "http" | "sse";
 /**
  * Decide which transport a server config should use.
  *
- * Explicit `type` wins; otherwise it is inferred from the presence of
- * `url` (→ http) or `command` (→ stdio). Returns `{ error }` when the
- * config is ambiguous or missing the field the chosen transport needs.
+ * The current format requires an explicit transport and its required field.
+ * Runtime checks remain because settings and plugin files enter as JSON.
  */
 export function resolveTransportKind(
   config: McpServerConfig
 ): McpTransportKind | { error: string } {
-  const kind: McpTransportKind | undefined =
-    config.type ?? (config.url ? "http" : config.command ? "stdio" : undefined);
+  const raw = config as unknown as Record<string, unknown>;
+  const kind = raw.type;
 
-  if (!kind) {
+  if (kind !== "stdio" && kind !== "http" && kind !== "sse") {
     return {
-      error:
-        "Invalid MCP server config: provide a `command` (stdio) or a `url` (http/sse)",
+      error: "Invalid MCP server config: `type` must be `stdio`, `http`, or `sse`",
     };
   }
 
-  if ((kind === "http" || kind === "sse") && !config.url) {
+  if ((kind === "http" || kind === "sse") &&
+      (typeof raw.url !== "string" || raw.url.trim().length === 0)) {
     return { error: `MCP ${kind} server requires a \`url\`` };
   }
-  if (kind === "stdio" && !config.command) {
+  if (kind === "stdio" &&
+      (typeof raw.command !== "string" || raw.command.trim().length === 0)) {
     return { error: "MCP stdio server requires a `command`" };
+  }
+  if (kind === "stdio" && (raw.url !== undefined || raw.headers !== undefined)) {
+    return { error: "MCP stdio server cannot contain remote transport fields" };
+  }
+  if (kind !== "stdio" &&
+      (raw.command !== undefined || raw.args !== undefined || raw.env !== undefined || raw.cwd !== undefined)) {
+    return { error: `MCP ${kind} server cannot contain stdio transport fields` };
   }
 
   return kind;

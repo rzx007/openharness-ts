@@ -4,14 +4,14 @@
 
 > 交互主线是 daemon TUI：`GET /commands` catalog + client-local UI +
 > template expand。**流程权威文档**：[slash-commands-flow.md](./slash-commands-flow.md)。
-> 运行时以 TUI `/help` 与 `packages/server/src/commands.ts` catalog 为准；
+> 运行时以 TUI `/help` 与 `packages/server/src/commands/default-command-catalog.ts` 为准；
 > 共享呈现层在 `@openharness/client` `dispatchSessionCommand`；TUI 适配层
 > `apps/frontend/src/hooks/sessionSlashCommands.ts`。`slash-helpers.ts` 仅
 > formatters。工具以 `ToolRegistry.getAll()` 为准。
 
 ## 斜杠命令（daemon / TUI 清单）
 
-内置 session 命令见 `packages/server/src/commands.ts`；client-local UI 命令
+内置 session 命令见 `packages/server/src/commands/default-command-catalog.ts`；client-local UI 命令
 （`/new` `/sessions` `/theme` `/permissions` 等）只在 TUI。user-invocable
 skill 经 command catalog 以 template 形式出现。
 

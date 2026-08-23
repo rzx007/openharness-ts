@@ -54,7 +54,7 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| 公共调度入口 | `packages/coordinator/src/workflow-scheduler.ts` | 从这里或 `@openharness/coordinator` 导入调度 API |
+| 公共调度入口 | `packages/coordinator/src/workflow/index.ts` | 从这里或 `@openharness/coordinator` 导入调度 API |
 | 调度循环 | `packages/coordinator/src/workflow/runner.ts` | `runWorkflow`、ready queue、并发、失败策略、budget、blocked task |
 | task attempt | `packages/coordinator/src/workflow/task-runner.ts` | 单 task 执行、retry、timeout、progress budget |
 | plan / 校验 | `packages/coordinator/src/workflow/validation.ts` | `WorkflowSpec` 展开、DAG、mode、writeScope 校验 |
@@ -62,7 +62,7 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 | snapshot | `packages/coordinator/src/workflow/snapshot.ts` | run id、snapshot、summary、snapshot/result 转换 |
 | notification | `packages/coordinator/src/workflow/notification.ts` | `<workflow-notification>` formatter/parser |
 | reconciliation | `packages/coordinator/src/workflow/reconciliation.ts` | changed-file / write-scope overlap 检测、summary、follow-up spec |
-| 公共持久化入口 | `packages/coordinator/src/workflow-store.ts` | 导出 repository contract 与持久运行 API |
+| 公共持久化入口 | `packages/coordinator/src/workflow/index.ts` | 导出 repository contract 与持久运行 API |
 | 文件持久化实现 | `packages/coordinator/src/workflow/store.ts` | `FileWorkflowRunRepository`；`.openharness/workflows/<runId>.json` + `.events.ndjson` |
 | daemon 持久化实现 | `packages/server/src/application/workflow/session-workflow-run-repository.ts` | `SessionWorkflowRunRepository`；写入统一 SQLite |
 | Coordinator 模式 | `packages/coordinator/src/coordinator-mode.ts` | `getCoordinatorTools()` 含 `Workflow`；prompt / user context |

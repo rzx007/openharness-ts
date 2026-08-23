@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import type { McpServerConfig } from "@openharness/core";
 import { join } from "node:path";
 
 import { HOOK_EVENTS, type HookDefinition, type HookEvent } from "@openharness/core";
@@ -134,14 +135,39 @@ export async function loadPluginHooks(pluginPath: string, manifest: PluginManife
 export async function loadPluginMcp(
   pluginPath: string,
   manifest: PluginManifest,
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, McpServerConfig>> {
   for (const file of [join(pluginPath, manifest.mcp_file), join(pluginPath, ".mcp.json")]) {
     const raw = await readJson(file);
     if (!raw) continue;
     const servers = raw.mcpServers;
     if (servers && typeof servers === "object" && !Array.isArray(servers)) {
-      return servers as Record<string, unknown>;
+      return validateMcpServers(servers as Record<string, unknown>);
     }
   }
   return {};
+}
+
+function validateMcpServers(servers: Record<string, unknown>): Record<string, McpServerConfig> {
+  const result: Record<string, McpServerConfig> = {};
+  for (const [name, value] of Object.entries(servers)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`Invalid MCP server config for ${name}`);
+    }
+    const row = value as Record<string, unknown>;
+    if (row.type === "stdio" &&
+        typeof row.command === "string" && row.command.trim().length > 0 &&
+        row.url === undefined && row.headers === undefined) {
+      result[name] = row as unknown as McpServerConfig;
+      continue;
+    }
+    if ((row.type === "http" || row.type === "sse") &&
+        typeof row.url === "string" && row.url.trim().length > 0 &&
+        row.command === undefined && row.args === undefined &&
+        row.env === undefined && row.cwd === undefined) {
+      result[name] = row as unknown as McpServerConfig;
+      continue;
+    }
+    throw new Error(`Invalid MCP server config for ${name}: explicit type and required field are mandatory`);
+  }
+  return result;
 }

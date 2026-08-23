@@ -31,17 +31,10 @@ export function computeReadiness(input: { hasKey: boolean; hasModel: boolean }):
 }
 
 /**
- * 推断单个 MCP server 的 transport：
- * - 显式 type 优先；
- * - 否则有 url → "http"、有 command → "stdio"、都没有 → "unknown"。
- *
- * 纯函数，便于单测。
+ * 返回当前严格 MCP 配置声明的 transport。
  */
 export function inferMcpTransport(cfg: McpServerConfig): string {
-  if (cfg.type) return cfg.type;
-  if (cfg.url) return "http";
-  if (cfg.command) return "stdio";
-  return "unknown";
+  return cfg.type;
 }
 
 /**

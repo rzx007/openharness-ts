@@ -1,18 +1,27 @@
 import type { PermissionMode } from "./permissions";
 import type { HookDefinition } from "./hooks";
 
-export interface McpServerConfig {
-  /** Explicit transport type. When omitted it is inferred from url/command. */
-  type?: "stdio" | "http" | "sse";
-  // stdio
-  command?: string;
+export interface McpStdioServerConfig {
+  type: "stdio";
+  command: string;
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
-  // http / sse
-  url?: string;
-  headers?: Record<string, string>;
+  url?: never;
+  headers?: never;
 }
+
+export interface McpRemoteServerConfig {
+  type: "http" | "sse";
+  url: string;
+  headers?: Record<string, string>;
+  command?: never;
+  args?: never;
+  env?: never;
+  cwd?: never;
+}
+
+export type McpServerConfig = McpStdioServerConfig | McpRemoteServerConfig;
 
 export interface MemoryConfig {
   enabled: boolean;
@@ -22,7 +31,6 @@ export interface MemoryConfig {
   sessionMemoryEnabled?: boolean;
   /** Run a best-effort memory extraction pass after completed user turns. */
   autoExtractEnabled?: boolean;
-  autoExtractMaxRecords?: number;
   /** autodream（记忆梦境整合）开关与触发门槛（E.6）。 */
   autoDreamEnabled?: boolean;
   autoDreamMinHours?: number;

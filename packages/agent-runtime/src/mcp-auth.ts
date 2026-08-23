@@ -87,7 +87,7 @@ export function applyMcpAuthConfig(
 
   switch (input.mode) {
     case "bearer":
-      if (kind !== "http" && kind !== "sse") {
+      if (config.type !== "http" && config.type !== "sse") {
         throw new Error(`MCP auth mode bearer only works for HTTP/SSE servers. Use env for stdio server ${serverName}.`);
       }
       return {
@@ -98,7 +98,7 @@ export function applyMcpAuthConfig(
         },
       };
     case "header":
-      if (kind !== "http" && kind !== "sse") {
+      if (config.type !== "http" && config.type !== "sse") {
         throw new Error(`MCP auth mode header only works for HTTP/SSE servers. Use env for stdio server ${serverName}.`);
       }
       if (!input.key?.trim()) {
@@ -112,7 +112,7 @@ export function applyMcpAuthConfig(
         },
       };
     case "env": {
-      if (kind !== "stdio") {
+      if (config.type !== "stdio") {
         throw new Error(`MCP auth mode env only works for stdio servers. Use bearer or header for ${kind} server ${serverName}.`);
       }
       const envKey = input.key?.trim() || defaultMcpEnvKey(serverName);

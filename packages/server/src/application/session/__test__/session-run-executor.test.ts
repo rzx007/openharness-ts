@@ -9,7 +9,9 @@ describe("SessionRunExecutor", () => {
     const submitMessage = vi.fn(() => handle);
     const agent = { setModel: vi.fn(), submitMessage };
     const store = createStore();
-    const executor = new SessionRunExecutor({
+    const registerHandle = vi.fn(async () => {});
+    const postRunMaintenance = { run: vi.fn(async () => {}) };
+    const executorWithMaintenance = new SessionRunExecutor({
       store: store as any,
       agentPool: {
         configured: true,
@@ -20,10 +22,10 @@ describe("SessionRunExecutor", () => {
       transcriptProjection: { finalizeRunParts: vi.fn() },
       traceIdForRun: () => "trace-1",
       log: vi.fn(),
+      postRunMaintenance,
     });
-    const registerHandle = vi.fn(async () => {});
 
-    await executor.execute(
+    await executorWithMaintenance.execute(
       { sessionId: "s1", inputId: "input-1", runId: "run-1" },
       { signal: new AbortController().signal, registerHandle },
     );
@@ -35,6 +37,7 @@ describe("SessionRunExecutor", () => {
       ids: { inputId: "input-1", runId: "run-1", traceId: "trace-1" },
     });
     expect(registerHandle).toHaveBeenCalledWith(handle);
+    expect(postRunMaintenance.run).toHaveBeenCalledWith("s1", "run-1", agent);
   });
 
   it("falls back to a durable failure when agent creation fails before events", async () => {

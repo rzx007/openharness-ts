@@ -1,13 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { ContentBlock, RuntimeBundle, Settings } from "@openharness/core";
-import { loadSettings, getProjectMemoryDir, getSkillsDir, getDataDir } from "@openharness/core";
+import type { ContentBlock, Settings } from "@openharness/core";
+import { loadSettings, getSkillsDir, getDataDir } from "@openharness/core";
 import { CommandRegistry } from "@openharness/commands";
-import { MemoryManager } from "@openharness/memory";
 import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { resolveToolPath } from "@openharness/tools";
 import { loadPluginContributions } from "../plugin-contributions";
-import { updateSessionMemoryFile } from "@openharness/services";
 import { isCoordinatorMode } from "@openharness/coordinator";
 import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
@@ -383,141 +381,6 @@ async function runTuiMode(
   });
 }
 
-// End-of-turn memory maintenance shared by interactive and print runtimes.
-export function isSessionMemoryEnabled(settings: Settings): boolean {
-  return settings.memory?.enabled !== false && settings.memory?.sessionMemoryEnabled !== false;
-}
-
-export function isMemoryAutoExtractEnabled(settings: Settings): boolean {
-  return settings.memory?.enabled !== false && settings.memory?.autoExtractEnabled !== false;
-}
-
-export function memoryAutoExtractMaxRecords(settings: Settings): number {
-  const configured = settings.memory?.autoExtractMaxRecords;
-  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
-    return Math.floor(configured);
-  }
-  return 3;
-}
-
-export async function buildMemoryExtractionManifest(
-  memoryManager: MemoryManager,
-  limit = 80,
-): Promise<string> {
-  return (await memoryManager.getAll())
-    .slice(0, limit)
-    .map((entry) => {
-      const name = String(entry.metadata?.name ?? entry.id);
-      const description = String(entry.metadata?.description ?? "").slice(0, 80);
-      return `- ${name}: ${description}`;
-    })
-    .join("\n");
-}
-
-async function maybeExtractMemoriesAfterTurn(options: {
-  bundle: RuntimeBundle;
-  settings: Settings;
-  model: string;
-  memoryManager: MemoryManager;
-  memoryDir: string;
-  cwd: string;
-}): Promise<void> {
-  if (!isMemoryAutoExtractEnabled(options.settings)) return;
-
-  try {
-    const history = options.bundle.queryEngine.getHistory() as any[];
-    if (history.length < 2) return;
-
-    const { extractMemoriesFromTurn } = await import("@openharness/services");
-    await extractMemoriesFromTurn({
-      apiClient: options.bundle.apiClient,
-      model: options.model,
-      messages: history,
-      manager: options.memoryManager,
-      existingManifest: await buildMemoryExtractionManifest(options.memoryManager),
-      memoryDir: options.memoryDir,
-      cwd: options.cwd,
-      maxRecords: memoryAutoExtractMaxRecords(options.settings),
-    });
-  } catch {
-    // Memory extraction is opportunistic and must never disturb the main turn.
-  }
-}
-
-async function maybeRunAutoDreamAfterTurn(options: {
-  settings: Settings;
-  model: string;
-  memoryManager: MemoryManager;
-  memoryDir: string;
-  cwd: string;
-  sessionId?: string;
-}): Promise<void> {
-  if (!options.settings.memory?.enabled || !options.settings.memory.autoDreamEnabled) return;
-
-  try {
-    const { executeAutoDream, getProjectSessionDir } = await import("@openharness/services");
-    const stale = await options.memoryManager.findStaleCandidates();
-    const staleSection = stale.length
-      ? stale
-        .slice(0, 20)
-        .map((entry) => `- ${entry.id}: ${entry.id}.md (importance=${entry.importance ?? 0}, updated_at=${new Date(entry.updatedAt).toISOString().slice(0, 10)})`)
-        .join("\n")
-      : undefined;
-
-    await executeAutoDream({
-      cwd: options.cwd,
-      settings: options.settings,
-      memoryDir: options.memoryDir,
-      sessionDir: getProjectSessionDir(options.cwd),
-      model: options.model,
-      currentSessionId: options.sessionId,
-      appLabel: "openharness",
-      staleSection,
-    });
-  } catch {
-    // Auto-dream is a background maintenance hook; failures stay silent here.
-  }
-}
-
-async function maintainMemoryAfterTurn(options: {
-  bundle: RuntimeBundle;
-  settings: Settings;
-  model: string;
-  memoryManager: MemoryManager;
-  memoryDir: string;
-  sessionId?: string;
-}): Promise<void> {
-  const cwd = process.cwd();
-
-  if (isSessionMemoryEnabled(options.settings)) {
-    try {
-      updateSessionMemoryFile(cwd, options.bundle.queryEngine.getHistory(), { sessionId: options.sessionId });
-    } catch {
-      // best-effort
-    }
-  }
-
-  await maybeExtractMemoriesAfterTurn({
-    bundle: options.bundle,
-    settings: options.settings,
-    model: options.model,
-    memoryManager: options.memoryManager,
-    memoryDir: options.memoryDir,
-    cwd,
-  });
-
-  await saveSessionSnapshot(options.sessionId, options.bundle.queryEngine, options.model);
-
-  await maybeRunAutoDreamAfterTurn({
-    settings: options.settings,
-    model: options.model,
-    memoryManager: options.memoryManager,
-    memoryDir: options.memoryDir,
-    cwd,
-    sessionId: options.sessionId,
-  });
-}
-
 /**
  * 根据命令行选项构建 CLI 覆盖配置对象。
  * 
@@ -539,41 +402,6 @@ function buildCliOverrides(options: MainOptions) {
     effort: options.effort,
     fastMode: options.bare ? true : undefined,
   };
-}
-
-/**
- * 保存当前会话快照到磁盘。
- * 
- * 包含会话 ID、消息历史、模型信息和 Token 使用情况。
- * 如果保存失败，错误将被静默忽略。
- * 
- * @param sessionId - 会话 ID
- * @param engine - 查询引擎实例，用于获取消息和使用情况
- * @param model - 当前使用的模型名称
- * @returns Promise<void>
- */
-async function saveSessionSnapshot(
-  sessionId: string | undefined,
-  engine: any,
-  model: string,
-): Promise<void> {
-  if (!sessionId) return;
-  try {
-    // E.6 存储增强：项目分目录 + latest/id 双写 + 完整消息历史（旧实现存空数组）。
-    const { saveSessionSnapshot: save } = await import("@openharness/services");
-    save({
-      cwd: process.cwd(),
-      model,
-      systemPrompt: "",
-      messages: engine.getHistory(),
-      usage: engine.getTotalUsage() as Record<string, unknown>,
-      sessionId,
-      toolMetadata: engine.getToolMetadata?.() as Record<string, unknown> | undefined,
-      sessionMode: isCoordinatorMode() ? "coordinator" : undefined,
-    });
-  } catch {
-    // silently fail
-  }
 }
 
 /**

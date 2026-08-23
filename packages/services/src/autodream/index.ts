@@ -7,7 +7,6 @@ import {
   type DetachedProcessExecution,
 } from "../executions/index.js";
 import {
-  listSessionsTouchedSince,
   readLastConsolidatedAt,
   rollbackConsolidationLock,
   tryAcquireConsolidationLock,
@@ -22,7 +21,6 @@ export {
   tryAcquireConsolidationLock,
   rollbackConsolidationLock,
   recordConsolidation,
-  listSessionsTouchedSince,
 } from "./lock.js";
 export {
   defaultBackupRoot,
@@ -71,7 +69,8 @@ export interface StartDreamOptions {
   cwd: string;
   settings: Settings;
   memoryDir: string;
-  sessionDir: string;
+  /** Durable Application sessions updated since the last consolidation. */
+  recentSessionIds?: string[];
   model?: string;
   currentSessionId?: string;
   force?: boolean;
@@ -125,11 +124,10 @@ export async function startDreamNow(options: StartDreamOptions): Promise<Detache
 
   const cwd = resolve(options.cwd);
   const memoryDir = resolve(options.memoryDir);
-  const sessionDir = resolve(options.sessionDir);
   const memCfg = options.settings.memory;
 
   const lastAt = readLastConsolidatedAt(memoryDir);
-  const sessionIds = listSessionsTouchedSince(sessionDir, lastAt, options.currentSessionId);
+  const sessionIds = [...new Set(options.recentSessionIds ?? [])];
   if (!options.force) {
     const hoursSince = (Date.now() / 1000 - lastAt) / 3600;
     if (hoursSince < (memCfg.autoDreamMinHours ?? DEFAULT_MIN_HOURS)) return null;
@@ -142,7 +140,6 @@ export async function startDreamNow(options: StartDreamOptions): Promise<Detache
 
   const runner = options.taskRunner ?? getDetachedProcessSupervisor(cwd);
   mkdirSync(memoryDir, { recursive: true });
-  mkdirSync(sessionDir, { recursive: true });
   const before = memoryFilesMtimeSnapshot(memoryDir);
   const backupDir = options.preview
     ? null
@@ -157,7 +154,7 @@ export async function startDreamNow(options: StartDreamOptions): Promise<Detache
     (sessionIds.length > 200 ? `\n- ... and ${sessionIds.length - 200} more` : "") +
     "\n\nUsage-based stale candidates:\n" +
     (options.staleSection?.trim() || "- (none)");
-  const prompt = buildConsolidationPrompt(memoryDir, sessionDir, extra, { preview: options.preview });
+  const prompt = buildConsolidationPrompt(memoryDir, extra, { preview: options.preview });
 
   const env: Record<string, string> = {
     [CHILD_ENV]: "1",
@@ -219,7 +216,6 @@ export async function startDreamNow(options: StartDreamOptions): Promise<Detache
     sessions_reviewing: String(sessionIds.length),
     prior_mtime: String(priorMtime),
     memory_dir: memoryDir,
-    session_dir: sessionDir,
     force: String(options.force ?? false),
     preview: String(options.preview ?? false),
     backup_dir: backupDir ?? "",
@@ -242,7 +238,7 @@ export async function executeAutoDream(options: StartDreamOptions): Promise<Deta
   if (now - (lastSessionScanAt.get(memoryDir) ?? 0) < SESSION_SCAN_INTERVAL_SECONDS) return null;
   lastSessionScanAt.set(memoryDir, now);
 
-  const sessionIds = listSessionsTouchedSince(resolve(options.sessionDir), lastAt, options.currentSessionId);
+  const sessionIds = [...new Set(options.recentSessionIds ?? [])];
   if (sessionIds.length < (memCfg.autoDreamMinSessions ?? DEFAULT_MIN_SESSIONS)) return null;
 
   return startDreamNow({ ...options, force: false });

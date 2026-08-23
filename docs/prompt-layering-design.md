@@ -1,6 +1,6 @@
 # 设计：Prompt 三层分层与 SOUL.md / USER.md 迁移
 
-> 状态：基础实现已接入 `packages/prompts`：`SOUL.md` / `USER.md` 读取、
+> 状态：当前部分实现。已接入 `packages/prompts`：`SOUL.md` / `USER.md` 读取、
 > `PromptLayers` 分层构建与渲染、`/context` 分层展示已完成；
 > 安全扫描、可见诊断、`/profile init` 初始化模板与 `USER.md` pending 写入队列底座已完成；
 > 自动抽取写入仍留后续显式接入。

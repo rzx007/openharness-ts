@@ -1,10 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DetachedProcessSupervisor } from "@openharness/services/executions";
 
 import { BackgroundShellService } from "../background-shell-service.js";
+
+let testConfigDir: string;
+let previousConfigDir: string | undefined;
+
+beforeAll(() => {
+  previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+  testConfigDir = mkdtempSync(join(tmpdir(), "oh-background-shell-config-"));
+  process.env.OPENHARNESS_CONFIG_DIR = testConfigDir;
+});
+
+afterAll(() => {
+  if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+  else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+  rmSync(testConfigDir, { recursive: true, force: true });
+});
 
 function createTaskService() {
   const listeners: Array<(task: any) => void> = [];

@@ -46,14 +46,11 @@ describe("inferMcpTransport", () => {
   it("uses explicit type when given", () => {
     expect(inferMcpTransport({ type: "sse", url: "https://x" })).toBe("sse");
   });
-  it("infers http from url", () => {
-    expect(inferMcpTransport({ url: "https://x" })).toBe("http");
+  it("returns the declared http transport", () => {
+    expect(inferMcpTransport({ type: "http", url: "https://x" })).toBe("http");
   });
-  it("infers stdio from command", () => {
-    expect(inferMcpTransport({ command: "node" })).toBe("stdio");
-  });
-  it("returns unknown when neither", () => {
-    expect(inferMcpTransport({})).toBe("unknown");
+  it("returns the declared stdio transport", () => {
+    expect(inferMcpTransport({ type: "stdio", command: "node" })).toBe("stdio");
   });
 });
 
@@ -82,8 +79,8 @@ describe("buildDryRunReport", () => {
       model: "deepseek-chat",
       baseUrl: "https://api.deepseek.com/v1",
       mcpServers: {
-        local: { command: "node", args: ["s.js"] },
-        remote: { url: "https://mcp.example/sse" },
+        local: { type: "stdio", command: "node", args: ["s.js"] },
+        remote: { type: "http", url: "https://mcp.example/sse" },
       },
     });
     const report = buildDryRunReport({

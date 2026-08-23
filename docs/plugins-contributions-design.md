@@ -1,24 +1,18 @@
-# 设计：Plugins 贡献加载·核心集（C.1）
+# Plugin 贡献加载
 
-> 状态：已批准。重写 `packages/plugins`，让插件从「只读清单的空壳」变成真正能给
-> 系统注入 skills / commands / hooks / MCP 的扩展机制。移植自 Python
-> `plugins/loader.py`（730 行）+ `schemas.py` + `installer.py`。
+> 状态：当前实现。插件可以贡献 skills、commands、hooks、MCP、agents 和 tools；发现与文件解析在 `packages/plugins`，每个 runtime 的组装在 `packages/agent-runtime/src/extensions.ts`。
 
 ## 范围
 
-**本轮（核心集）**：发现 + 信任门控 + skills/commands/hooks/MCP 四类贡献 +
-`${CLAUDE_PLUGIN_ROOT}` + 卸载路径穿越防护。
+当前范围：发现、信任门控、skills/commands/hooks/MCP/agents/tools 六类贡献、`${CLAUDE_PLUGIN_ROOT}` 和卸载路径穿越防护。
 
-**范围外（留后续）**：
-- plugin agents（依赖 C.4 的 agent .md frontmatter 解析器）；
-- bundled plugins（Python 侧也是空目录）。
+bundled plugins 当前没有内置目录；用户插件和受信任的项目插件走同一套加载规则。
 
-**已补充完成（C.1 二刀）**：`tools_dir` 动态 import 工具——`registerPluginTools` 函数遍历 `<plugin>/<tools_dir>/*.js|ts`，动态 import 后验证 `name` 与 `execute` 字段，通过则注册进 `toolRegistry`；import 失败只打 stderr 警告，不影响其他工具与插件加载。daemon session runtime 在 `registerPluginHooks` 之后调用。
+`tools_dir` 动态 import 工具：`registerPluginTools` 遍历 `<plugin>/<tools_dir>/*.js|ts`，验证 `name` 与 `execute` 后注册进当前 runtime 的 `toolRegistry`；单个工具 import 失败只产生告警，不阻止其他贡献加载。
 
-## Claude Code 兼容
+## 支持的插件布局
 
-插件目录布局完全对齐 Claude Code 的插件格式（Python 原版即按此移植），
-一个 Claude Code 插件文件夹放进 `~/.openharness-ts/plugins/` 应可直接生效：
+目录位置和多数贡献文件沿用 Claude Code 的插件布局，但 OpenHarness 只接受自己的当前严格字段。尤其 MCP server 必须显式写 `type`，不能把缺少当前字段的旧插件目录直接视为有效配置。
 
 | Claude Code 约定 | 支持方式 |
 |------------------|----------|
@@ -60,7 +54,7 @@ PluginManifest {
   mcp_file: string = "mcp.json";
   author?: object;
   commands?: string | string[] | Record<string, { source?, content?, description?, argumentHint?, model?, allowedTools? }>;
-  agents?: string | string[];      // 本轮只存不加载
+  agents?: string | string[];
   skills?: string | string[];
   hooks?: string | object | array;
 }
@@ -76,7 +70,8 @@ LoadedPlugin {
   skills: SkillDefinition[];           // source: "plugin"
   commands: PluginCommandDefinition[];
   hooks: Record<string, PluginHookEntry[]>;   // event → hooks
-  mcpServers: Record<string, unknown>;        // name → server config
+  mcpServers: Record<string, McpServerConfig>;
+  agents: AgentDefinition[];
 }
 ```
 
@@ -114,7 +109,9 @@ LoadedPlugin {
 - **接线**：enabled 插件的 hooks 注册进 HookExecutor（带来源标记）。
 - **MCP**：`mcp_file`（缺省 `mcp.json`）→ 回退 `.mcp.json`；解析为
   `mcpServers` map；接线时合并进 MCP 配置，**用户 settings 同名 server 优先**，
-  插件不覆盖。
+  插件不覆盖。每个 server 必须显式写 `type` 和对应的 `command` 或 `url`。
+- **agents**：递归读取 `agents/**/*.md` 和 manifest 指定路径，解析 frontmatter，使用插件名前缀生成稳定名字，再进入 runtime 的 agent definitions。
+- **tools**：读取 `tools_dir` 中的 `.js`/`.ts` 模块，只有同时提供合法 `name` 与 `execute` 的模块才注册。
 - **installer 防护**：`install`/`uninstall` 校验插件名（`[A-Za-z0-9._@-]+`，
   拒绝 `..`/路径分隔符/绝对路径）——字符集白名单本身已排除一切穿越构造，
   无需额外 resolve 断言（对齐 PLAN-REMAINING 的「卸载时拒绝 `..`/绝对路径」）。
@@ -124,9 +121,9 @@ LoadedPlugin {
 | 点 | Python | TS | 原因 |
 |----|--------|----|------|
 | 发现目录 mkdir | `get_user_plugins_dir` 等读路径也 mkdir | 发现走纯路径计算，不建目录 | 避免查询留空目录（swarm D.5 的同类教训） |
-| agents / tools 贡献 | loader 里有 | 本轮不做（字段保留） | agents 依赖 C.4 解析器；tools 是代码执行面 |
+| agents / tools 贡献 | loader 里有 | agents 与 tools 均加载 | agents 去掉不允许由插件扩大的 hooks/MCP 等字段；tools 经过导出形状校验 |
 | YAML frontmatter | PyYAML safe_load | 复用 skills 包现有解析 | 不引新依赖 |
-| 贡献消费 | cli.py/registry/mcp config 多点合并 | apps/cli 统一接线函数 | TS 三模式共用一条加载链 |
+| 贡献消费 | cli.py/registry/mcp config 多点合并 | agent-runtime 按 cwd 发现并组装，CLI 管理命令复用相同 loader | daemon 中不同项目不会共享错误的 cwd 缓存 |
 | commands/ 根级 SKILL.md | `relative_to` 抛 ValueError（crash） | `basename(dir)` 兜底正常加载 | 修 Python 的边界崩溃 |
 | 坏贡献文件 | `load_plugin` 未捕获，整体崩 | try/catch → 该插件跳过 | 坏插件不拖垮 CLI 启动 |
 | flat hooks 事件名 | 不校验 | 按 `HOOK_EVENTS` 白名单过滤 | 错事件名静默挂不上不如显式丢弃 |
@@ -140,7 +137,4 @@ LoadedPlugin {
   空间/去重、frontmatter 元数据 override。
 - R3：hooks 两格式 + `${CLAUDE_PLUGIN_ROOT}` 替换、MCP 两文件回退、合并不覆盖
   用户、uninstall 穿越拒绝。
-- 接线：临时插件目录端到端——load 后 SkillRegistry/命令表/HookExecutor/MCP
-  配置可见对应贡献；disabled 插件不注册。
-
-每轮完成 = `pnpm check-types` + `pnpm test` 全绿。
+- 接线：临时插件目录端到端——load 后 SkillRegistry/命令表/HookExecutor/MCP、agents 和 tools 可见对应贡献；disabled 插件不注册。

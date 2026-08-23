@@ -7,7 +7,6 @@ export const ENTRYPOINT_NAME = "MEMORY.md";
 
 export function buildConsolidationPrompt(
   memoryRoot: string,
-  sessionDir: string,
   extra = "",
   options?: { preview?: boolean },
 ): string {
@@ -23,7 +22,6 @@ You are performing a dream — a reflective pass over OpenHarness/ohmo memory fi
 
 Current date: ${today}
 Memory directory: \`${memoryRoot}\`
-Session snapshots: \`${sessionDir}\` (JSON files can be large; inspect narrowly, do not dump everything)
 Mode: ${writeMode}
 
 ---
@@ -72,8 +70,8 @@ Use these categories:
 Look for information worth persisting. Sources in rough priority order:
 
 1. Existing memory files that may need updates or contradiction fixes.
-2. Recent session snapshots (\`session-*.json\`) when you need concrete context.
-3. Focused grep/search terms based on recent work; avoid exhaustive transcript reading.
+2. Durable session ids supplied in Additional context, used as evidence that enough recent work exists.
+3. Focused inspection of existing memory topics; avoid unrelated project files.
 
 Skip idle chats, failed retry noise, implementation details that only matter for the current turn, and facts that cannot be supported.
 

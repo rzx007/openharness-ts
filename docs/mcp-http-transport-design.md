@@ -1,11 +1,10 @@
-# 设计：MCP HTTP/SSE 传输 + headers 鉴权（C.3）
+# MCP 连接与鉴权
 
-> 状态：HTTP/SSE 传输、headers 鉴权、静态 `McpAuth` 配置与 live reconnect 已实现；完整 MCP OAuth flow 仍未实现。
+> 状态：当前实现。HTTP/SSE 传输、headers 鉴权、静态 `McpAuth` 配置与 live reconnect 已接入；完整 MCP OAuth flow 仍未实现。
 
-## 目标
+## 当前入口
 
-MCP 客户端从「仅 stdio」补全到支持 **HTTP（streamable）+ SSE** 传输与 **headers 鉴权**，
-对齐 Python（streamable_http + headers），并顺手修 resources 的 "Method not found" 处理。
+MCP 配置来自当前 settings 或已通过校验的插件贡献，交给 `packages/mcp/src/index.ts` 建立连接。每个 server 必须明确写 `type`，系统不会根据旧字段猜传输方式。
 
 ## 现状
 
@@ -17,24 +16,17 @@ MCP 客户端从「仅 stdio」补全到支持 **HTTP（streamable）+ SSE** 传
 
 ## 设计
 
-### 1. 扩展 `McpServerConfig`（向后兼容）
+### 1. 当前 `McpServerConfig`
 ```ts
-export interface McpServerConfig {
-  type?: "stdio" | "http" | "sse"; // 显式优先
-  // stdio
-  command?: string;   // 现为必填 → 改为可选（http/sse 时不需要）
-  args?: string[];
-  env?: Record<string, string>;
-  // http / sse
-  url?: string;
-  headers?: Record<string, string>;
-}
+type McpServerConfig =
+  | { type: "stdio"; command: string; args?: string[]; env?: Record<string, string>; cwd?: string }
+  | { type: "http" | "sse"; url: string; headers?: Record<string, string> };
 ```
-- 推断：显式 `type` 优先；否则 `url`→http、`command`→stdio。
-- `command` 由必填改可选（注意现有 stdio 调用方/类型不受影响）。
+
+缺少 `type`、stdio 缺少 `command`、HTTP/SSE 缺少 `url` 都会明确失败。settings、CLI 写入和插件 MCP 文件都只接受这个当前格式。
 
 ### 2. `connect` 按传输选择
-- 抽一个纯函数 `resolveTransportKind(config): "stdio" | "http" | "sse" | { error }`（缺字段/冲突返回 error）。
+- `resolveTransportKind(config)` 校验显式 `type` 和必填字段；无效配置返回明确错误。
 - stdio：现有 `StdioClientTransport`（env 作 auth）。
 - http：`new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers: config.headers } })`。
 - sse：`new SSEClientTransport(new URL(config.url), { requestInit: { headers: config.headers } })`。
@@ -54,11 +46,6 @@ export interface McpServerConfig {
 - `connect`：mock SDK transport，断言 http 用 StreamableHTTPClientTransport 且 headers 进了 requestInit；sse 同理；stdio 不变。
 - `authConfigured`：http+headers→true、stdio+env→true、无→false。
 - resources：Method-not-found→[]、其他错误不崩。
-
-## README
-
-- 特性表「MCP 协议」🟡：stdio + **HTTP/SSE + headers 鉴权**；更新措辞。
-- 配置示例补一个 http server（type/url/headers）。
 
 ## 范围外
 

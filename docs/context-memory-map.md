@@ -15,15 +15,15 @@
 | `SOUL.md` | `$OPENHARNESS_CONFIG_DIR/SOUL.md`，默认 `~/.openharness-ts/SOUL.md` | `/profile init` 创建模板；之后用户手动编辑 | `buildPromptLayers()` 的 stable identity slot | 定义 agent 默认身份、语气、长期行为风格 |
 | `USER.md` | `$OPENHARNESS_CONFIG_DIR/USER.md`，默认 `~/.openharness-ts/USER.md` | `/profile init` 创建模板；用户手动编辑；pending 更新审批后合并 | `buildPromptLayers()` 的 volatile `# User Profile` | 记录用户长期偏好，例如语言、回复风格、工作流习惯 |
 | `user_profile_pending/*.json` | `$OPENHARNESS_CONFIG_DIR/user_profile_pending/` | `queueUserProfileUpdate()` 生成候选更新 | 不直接注入；`approvePendingUserProfileUpdate()` 后才合并进 `USER.md` | 防止自动抽取直接改用户档案，保留人工审批边界 |
-| local rules | `$OPENHARNESS_CONFIG_DIR/local_rules/facts.json` 和 `rules.md` | `updateRulesFromSession()` 从会话文本正则抽取；当前接在 `/remember` 成功后 best-effort 执行 | `buildPromptLayers()` 读取 `rules.md`，作为 volatile local environment rules 注入 | 记录环境事实，例如 SSH 主机、IP、路径、conda 环境、API endpoint |
+| local rules | `$OPENHARNESS_CONFIG_DIR/local_rules/facts.json` 和 `rules.md` | daemon root Run 成功收尾后从 durable transcript 正则抽取；`/remember` 也会触发 | `buildPromptLayers()` 读取 `rules.md`，作为 volatile local environment rules 注入 | 记录环境事实，例如 SSH 主机、IP、路径、conda 环境、API endpoint |
 | Project Instructions | 当前 cwd 向上查找 `CLAUDE.md`、`.claude/CLAUDE.md`、`.claude/rules/*.md` | 用户或项目维护者手动写入 | `loadClaudeMdPrompt()` 组装成 `# Project Instructions`，进入 context 层 | 当前项目的构建、测试、协作和代码规范 |
 | `settings.systemPrompt` | `$OPENHARNESS_CONFIG_DIR/settings.json`，也可由 CLI/session runtime 传入 | `/config`、CLI 参数或前端 runtime metadata 更新 | `buildPromptLayers()` 的 `# Custom Instructions` | 当前用户配置的额外系统指令，不替换基础 identity/invariant guidance |
 | Environment facts | 运行时动态生成，不单独落盘 | 每次构建 system prompt 时计算 | `formatEnvironmentSection()` 进入 stable 层 | 告诉模型当前 OS、cwd、home、git branch、真实 shell launcher 和命令规则 |
 | Permission/Fast/Reasoning | settings 或 session runtime metadata | `/plan`、权限模式切换、settings 更新、创建 session 时写入 metadata | `buildPromptLayers()` stable 层 | 让模型知道当前权限模式、是否 fast mode、reasoning effort/passes |
 | Available Skills | skills/plugin discovery 结果 | 启动或刷新 runtime 时发现 | `buildPromptLayers()` stable 层 | 告诉模型当前可用 skill 及其描述 |
 | Project Memory | `$OPENHARNESS_CONFIG_DIR/data/memory/<project>-<hash>/` | `/memory add`、`/remember`、自动 memory extraction 写入 | 运行时由 `QueryEngine` 按当前用户输入检索，作为临时 `system-reminder` 注入；`/context` preview 也会展示 `# Project Memory` | 记录项目级长期语义事实，例如决策、约定、偏好、不可从代码推导的信息 |
-| Session Memory checkpoint | `$OPENHARNESS_CONFIG_DIR/data/session-memory/<project>-<hash>/<sessionId>.md` | 每轮结束后 `maintainMemoryAfterTurn()` 调用 `updateSessionMemoryFile()` | compact/autocompact 时通过 `sessionMemoryToCompactText()` 注入摘要 prompt | 防止 `/compact` 后丢失当前目标、下一步和近期工作 |
-| Session runtime history | `$OPENHARNESS_CONFIG_DIR/data/session-runtime/sessions.db`，旧快照路径在 `data/sessions/` | daemon session 收到输入、消息、part、run、permission、task 事件时写入 | `/sessions`、`/resume`、daemon restart recovery 读取；不是普通 system prompt 记忆 | 会话恢复和重放历史，不等同长期记忆 |
+| Session Memory checkpoint | `$OPENHARNESS_CONFIG_DIR/data/session-memory/<project>-<hash>/<sessionId>.md` | root Run 成功收尾后，`SessionPostRunMaintenance` 从 durable transcript 调用 `updateSessionMemoryFile()` | compact/autocompact 时通过 `sessionMemoryToCompactText()` 注入摘要 prompt | 防止 `/compact` 后丢失当前目标、下一步和近期工作 |
+| Session runtime history | `$OPENHARNESS_CONFIG_DIR/data/session-runtime/sessions.db` | daemon session 收到输入、消息、part、run、permission、task 事件时写入 | `/sessions`、`/resume`、daemon restart recovery 读取；不是普通 system prompt 记忆 | 会话恢复和重放历史，不等同长期记忆 |
 | Output styles | `~/.openharness-ts/output_styles/*.md` | 用户手动添加 | 输出样式服务读取，不作为事实记忆注入 | 改变回答呈现风格 |
 | Credentials | `$OPENHARNESS_CONFIG_DIR/credentials.json` | `/auth login`、provider API key 保存 | provider/auth resolution 读取；不得注入 prompt | 保存供应商凭据 |
 
@@ -124,7 +124,7 @@ local_rules/
 - 会话更新：`updateRulesFromSession()`
 - prompt 读取：`loadLocalRules()`
 
-当前接线：`SessionMaintenanceService.remember()` 成功后 best-effort 调用 local rules 更新。失败不会影响 `/remember` 原流程。
+当前接线：`SessionPostRunMaintenance` 在 root Run 已经 durable completed 后更新 local rules；`SessionMaintenanceService.remember()` 成功后也会更新。失败只记录告警，不改变 Run 或 `/remember` 的结果。
 
 ### Project Instructions
 
@@ -190,7 +190,7 @@ Session Memory checkpoint 是“本次会话的连续性文件”，不是长期
 
 写入时机：
 
-- 每轮结束后 `maintainMemoryAfterTurn()` 调用 `updateSessionMemoryFile()`
+- root Run 成功写入 durable 终态后，`SessionPostRunMaintenance` 调用 `updateSessionMemoryFile()`
 
 读取时机：
 
@@ -215,8 +215,8 @@ Session runtime history 存 daemon 会话的完整运行状态，包括 sessions
 
 | 来源 | 自动写入时机 | 是否需要 LLM | 是否 best-effort |
 | --- | --- | --- | --- |
-| Session Memory checkpoint | 每轮结束后 | 否 | 是 |
-| local rules | `/remember` 成功后扫描会话文本 | 否 | 是 |
+| Session Memory checkpoint | root Run 成功收尾后 | 否 | 是 |
+| local rules | root Run 成功收尾；`/remember` 成功后也扫描 | 否 | 是 |
 | Project Memory auto extract | 每轮成功结束后，受 `memory.autoExtractEnabled` 控制 | 是 | 是 |
 | auto dream memory consolidation | 满足配置阈值后，受 `memory.autoDreamEnabled` 控制 | 是 | 是 |
 | `USER.md` | 不应自动直接写入 | 不适用 | 不适用 |

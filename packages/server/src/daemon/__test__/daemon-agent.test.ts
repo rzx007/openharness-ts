@@ -74,10 +74,12 @@ describe("createDaemonAgentLoader", () => {
       permissionMode: "plan",
       systemPrompt: "session prompt",
       maxTurns: 7,
-      allowedTools: ["Read"],
+      hostToolCeiling: ["Read"],
       disallowedTools: ["Bash"],
       effort: "high",
-      requestPermission,
+      hostCapabilities: {
+        permissions: { requestPermission },
+      },
     });
     expect(loadHistory).toHaveBeenCalledWith([]);
     expect(createEventSink).toHaveBeenCalledWith(agent, session);
@@ -146,7 +148,7 @@ describe("createDaemonAgentLoader", () => {
     expect(options.systemPrompt).toContain("Workers spawned via the Agent tool");
     expect(options.systemPrompt).toContain("## Additional Session Instructions");
     expect(options.systemPrompt).toContain("Keep updates short.");
-    expect(options.allowedTools).toEqual(["Bash"]);
+    expect(options.hostToolCeiling).toEqual(["Bash"]);
     expect(options.roleAllowedTools).toEqual([
       "Agent",
       "JobList",

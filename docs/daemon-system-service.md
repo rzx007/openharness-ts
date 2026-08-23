@@ -102,7 +102,7 @@ ensureLocalDaemon
 | `daemon` 命令                    | `apps/cli/src/commands/daemon.ts`                 |
 | TUI/print 自动连接               | `apps/cli/src/ensure-daemon.ts`                   |
 | daemon 前台运行和 registry 写入  | `apps/cli/src/commands/daemon.ts` 的 `runServe()` |
-| registry 文件                    | `packages/server/src/paths.ts`                    |
+| registry 文件                    | `packages/server/src/daemon/paths.ts`             |
 
 ## 边界
 

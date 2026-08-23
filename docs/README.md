@@ -1,6 +1,6 @@
 # OpenHarness 文档目录
 
-> 状态：文档总入口。最后核对：2026-08-23。
+> 状态：当前文档总入口。
 
 这里不是按文件名堆链接，而是按“先看全局，再逐层下钻”的顺序组织。第一次了解项目从第 0 层开始；修改具体模块时，直接进入对应层级。
 
@@ -50,19 +50,19 @@
 
 这一层记录“不管内部类名怎么改，都必须一直成立”的约束。
 
-| 核心保证 | 当前权威落点 | 覆盖情况 |
-|---|---|---|
-| 每条运行记录有稳定 ID、固定字段、版本和关系 | [Durable Execution Data Model](./durable-execution-data-model.md) | 已有权威数据模型 |
-| 每个 Run、Attempt、Tool、Child 和 Workflow 最终都进入明确终态 | [Agent Lifecycle Contract](./agent-lifecycle-contract.md)、[Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md) | 已有权威契约 |
-| 子 Agent 不得无限递归、无限并发或靠关闭后重建绕过上限 | [Agent Child Session Flow：Child 预算](./agent-child-session-flow.md#child-预算防止无限叫人) | 已完整记录 |
-| 相同请求可以安全重试，不同内容不能复用同一个 ID | [Durable Execution Data Model：ID 和安全重试](./durable-execution-data-model.md#id-和安全重试) | 已记录 |
-| 已结束状态不能被迟到事件重新改回 running | [Agent Lifecycle Contract：D3](./agent-lifecycle-contract.md#daemon)、[Jobs Protocol：状态机](./jobs-protocol.md#状态机) | 已记录 |
-| 投影失败不能假装成功，重启后要继续收束 | [Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md)、[Agent Lifecycle Contract：P8](./agent-lifecycle-contract.md#durable-projection) | 已记录 |
-| 一个数据目录只有一个活动 Application Owner | [Operations and Recovery：Application Owner](./operations-and-recovery.md#application-owner) | 已有权威操作手册 |
-| 客户端与服务端必须使用完全相同的协议版本 | [Protocol Contract](./protocol-contract.md) | 已有权威协议契约 |
-| 清理、备份和恢复不能留下半完成状态 | [Operations and Recovery](./operations-and-recovery.md) | 已有权威操作手册 |
+| 核心保证 | 权威文档 |
+|---|---|
+| 每条运行记录有稳定 ID、固定字段、版本和关系 | [Durable Execution Data Model](./durable-execution-data-model.md) |
+| 每个 Run、Attempt、Tool、Child 和 Workflow 最终都进入明确终态 | [Agent Lifecycle Contract](./agent-lifecycle-contract.md)、[Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md) |
+| 子 Agent 不得无限递归、无限并发或靠关闭后重建绕过上限 | [Agent Child Session Flow：Child 预算](./agent-child-session-flow.md#child-预算防止无限叫人) |
+| 相同请求可以安全重试，不同内容不能复用同一个 ID | [Durable Execution Data Model：ID 和安全重试](./durable-execution-data-model.md#id-和安全重试) |
+| 已结束状态不能被迟到事件重新改回 running | [Agent Lifecycle Contract：D3](./agent-lifecycle-contract.md#daemon)、[Jobs Protocol：状态机](./jobs-protocol.md#状态机) |
+| 投影失败不能假装成功，重启后要继续收束 | [Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md)、[Agent Lifecycle Contract：P8](./agent-lifecycle-contract.md#durable-projection) |
+| 一个数据目录只有一个活动 Application Owner | [Operations and Recovery：Application Owner](./operations-and-recovery.md#application-owner) |
+| 客户端与服务端必须使用完全相同的协议版本 | [Protocol Contract](./protocol-contract.md) |
+| 清理、备份和恢复不能留下半完成状态 | [Operations and Recovery](./operations-and-recovery.md) |
 
-你举的三项目前对应关系是：
+三条一级保证的入口：
 
 ```text
 固定格式的运行记录  → durable-execution-data-model.md
@@ -79,7 +79,6 @@
 - [Agent Child Session Flow](./agent-child-session-flow.md)：child 创建、等待、follow-up、预算、关闭和 durable 投影。
 - [CompactService](./compact-service-design.md)：上下文压缩、checkpoint、Tool 配对和失败策略。
 - [Prompt Layering](./prompt-layering-design.md)：系统提示词怎样分层组装。
-- [Output Styles](./output-styles-design.md)：输出风格怎样进入 prompt 和产品界面。
 - [Personalization](./personalization-design.md)：用户个性化设置的边界。
 
 ### Durable Agent Application
@@ -115,8 +114,7 @@
 - [Sandbox Runtime Design](./sandbox-runtime-design.md)：Sandbox 的详细设计。
 - [MCP HTTP Transport](./mcp-http-transport-design.md)：MCP HTTP/SSE 与鉴权。
 - [Plugin Contributions](./plugins-contributions-design.md)：插件怎样贡献 commands、skills 和其他能力。
-- [Skills Flow](./skills-flow.md) 与 [Skills Enhancement](./skills-enhance-design.md)：Skill 的发现、加载和增强。
-- [Slash Commands](./slash-commands.md)、[Slash Command Flow](./slash-commands-flow.md)、[Slash Batch](./slash-batch-design.md)：命令入口和批处理。
+- [Slash Commands](./slash-commands.md) 与 [Slash Command Flow](./slash-commands-flow.md)：当前命令清单、三层分流和执行入口。
 
 ### 产品界面
 
@@ -168,6 +166,7 @@
 - `docs/plans/`：阶段实施计划和完成记录，不是当前 API 手册。
 - `docs/superpowers/plans/`、`docs/superpowers/specs/`：更细的历史实施过程。
 - 文件名包含 `review`、`notes` 或明确标为“历史设计”的文档：用于解释过去，不用于决定当前 API。
+- [Output Styles 历史设计](./output-styles-design.md)、[Skills Flow 历史设计](./skills-flow.md)、[Skills Enhancement 历史设计](./skills-enhance-design.md)、[Slash Batch 历史设计](./slash-batch-design.md)：保留迁移前背景，当前入口以各文档状态栏指向的新文档为准。
 
 当前文档、ADR、计划和历史发生冲突时，优先级是：
 
@@ -178,34 +177,12 @@
   > plans、specs、reviews 和历史设计
 ```
 
-## 文档建设状态
-
-详细设计与当时缺口见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。P0/P1/P2 已全部完成：
-
-| 优先级 | 建议文档 | 解决的问题 |
-|---|---|---|
-| P0 | [Architecture Overview](./architecture-overview.md) | 已完成 |
-| P0 | [Durable Execution Data Model](./durable-execution-data-model.md) | 已完成 |
-| P0 | [Operations and Recovery](./operations-and-recovery.md) | 已完成 |
-| P1 | [Protocol Contract](./protocol-contract.md) | 已完成 |
-| P1 | [Product Surface Integration](./product-surface-integration.md) | 已完成 |
-| P1 | [Security and Trust Boundaries](./security-and-trust-boundaries.md) | 已完成 |
-| P2 | [Contract Test Index](./contract-test-index.md) | 已完成；测试文件链接由 `pnpm check-docs` 自动检查 |
-
-## 已完成的旧文档整理
-
-- [Runtime Hardening 与可运维性计划](./plans/2026-08-22-runtime-hardening-and-operability.md) 和 [Session 存储增强](./session-storage-design.md) 已明确标成历史资料。
-- [Observability](./observability.md) 已覆盖 Attempt、Tool failure kind、Owner、Workflow、Settlement、Retention 审计和 Backup 清单。
-- [Client Sync Flow](./client-sync-flow.md) 已按当前 snapshot、Attempt/Task reducer、严格事件版本和 Jobs 刷新行为重写。
-- [历史 Bug 审计归档](./bugs-unfixed.md) 已逐条复核，不再冒充当前缺陷列表。
-- 顶层 `docs/*.md` 已统一写明“当前实现、权威契约、历史设计或测试夹具”。
-
 ## 当前格式策略
 
 项目已经删除旧 API 别名、re-export façade、字段别名和旧数据读取路径。当前版本只接受当前接口和当前数据格式：
 
 - SQLite、event、settings、Session snapshot、Memory 和 Swarm 文件都有明确版本标记；
-- 缺失标记、版本不同、字段缺失或字段名过时都会直接失败；
+- 需要版本标记的数据缺失标记或版本不同时直接失败；声明为必填的字段缺失或字段名过时时直接失败；
 - 不做自动 migration、读取时升级或旧数据猜测；
 - 格式切换和恢复步骤见 [Operations and Recovery](./operations-and-recovery.md#破坏性格式切换)。
 
@@ -215,6 +192,5 @@
 - 第一次出现英文术语时，要同时解释它实际做什么。
 - 一条跨模块硬规则只指定一份权威文档，其他地方链接过去，不复制整段契约。
 - 每份当前文档开头必须标明“当前实现”或“权威契约”；计划和历史资料也必须明确状态。
-- 计划完成后把状态改成“已完成”，并把计划开始前的问题写成“当时基线”。
 - 修改公开入口、持久化格式、协议版本、状态机或所有权边界时，必须同步更新本目录和对应权威文档。
 - 不增加兼容代码来维持过时文档。

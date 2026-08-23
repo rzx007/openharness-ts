@@ -32,7 +32,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 │  │  （最多 12k 字符 / 80 行）  │   session-memory/<项目>/<id>.md  │
 │  └─────────────────────────────┘                                  │
 └──────────────────────────────────────────────────────────────────┘
-         ↓ 会话结束时                    ↓ 用户手动触发
+         ↓ Run 成功收尾                   ↓ 用户手动或自动触发
 ┌────────────────────┐         ┌──────────────────────────┐
 │  personalization   │         │  /remember               │
 │  正则抽环境事实     │         │  LLM 提取语义事实         │
@@ -122,7 +122,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 > **当前实现状态：✅ 已完整接线。**
 >
-> - 写入：REPL、TUI、print 模式每轮结束后自动写（可用 `memory.sessionMemoryEnabled=false` 关闭）
+> - 写入：daemon root Run 成功收尾后，从 durable transcript 自动写（可用 `memory.sessionMemoryEnabled=false` 关闭）
 > - 读回：`/compact` 和 autocompact 触发时，通过 `setAttachmentsProvider` 读取 checkpoint，注入摘要 prompt 的 `## Session Memory Checkpoint` 段落
 
 ---
@@ -131,7 +131,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 **解决什么问题**：你提到的服务器 IP、conda 环境、数据路径这类机械事实，每次都要重新说。
 
-**原理**：**用户主动退出**（Ctrl+C / `/exit` / TUI 关闭）时，用 10 个正则扫描全部对话内容，识别：
+**原理**：daemon root Run 成功写入 durable 终态后，用 10 个正则扫描当前 durable transcript，识别：
 
 - SSH 主机 / 服务器 IP
 - 数据路径（`/data/`、`/mnt/` 等开头）
@@ -149,9 +149,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 **效果**：下次启动时，`rules.md` 自动出现在 system prompt 里，不用你再说"测试服在 10.0.0.7"。
 
-> ⚠️ **对话进行中看不到文件是正常的**——退出会话后才写入。Python 原版也是同样设计。
-
-> 状态：✅ 已实现（REPL/print/TUI 三模式退出时均自动触发）。
+这条触发不依赖 TUI、print、Web、Desktop 或 Bot 是否正常退出；不同产品入口只要使用同一个 daemon，就共用同一套收尾规则。失败只记告警，不会把已经完成的 Run 改成失败。
 
 ---
 
@@ -171,16 +169,17 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 **内置护栏**：提取 prompt 里写死：不存密钥/令牌、只存稳定且不可推导的事实。
 
-> 状态：✅ `/remember` 手动触发已实现；✅ 按轮自动触发已实现，默认开启，受 `memory.autoExtractEnabled` 与 `memory.autoExtractMaxRecords` 控制。team scope 暂不写入。
+> 状态：`/remember` 手动触发和 Run 成功后的自动触发都已接入。自动触发默认开启，受 `memory.autoExtractEnabled` 控制；一次最多写 3 条，team scope 暂不写入。
 
 #### 按轮自动提取的精确流程
 
-当 `memory.enabled !== false` 且 `memory.autoExtractEnabled !== false` 时，每个成功完成的用户轮次结束后会进入 `maintainMemoryAfterTurn()`：
+当 `memory.enabled !== false` 且 `memory.autoExtractEnabled !== false` 时，每个成功完成的 root Run 会进入 `SessionPostRunMaintenance`：
 
-1. 先写 session_memory checkpoint。
-2. 再调用 `maybeExtractMemoriesAfterTurn()` 尝试提取长期记忆。
-3. 保存 session snapshot。
-4. 最后按配置尝试 autoDream。
+1. 从 daemon Store 读取已经完成投影的 transcript。
+2. 写 session_memory checkpoint。
+3. 更新 personalization 环境事实。
+4. 调用同一个 live Agent 的 `remember()` 尝试提取长期记忆。
+5. 开启 autoDream 时，根据同一 cwd 下最近更新的 durable Session 判断是否达到门槛。
 
 自动提取是 best-effort，不影响主对话。以下情况会跳过或不写入：
 
@@ -189,9 +188,9 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 - 本轮已经手动写过 memory 目录，避免重复提取。
 - 模型没有提出值得保存的长期记忆。
 - 提出的记录全部被拒绝，例如 team scope 暂不写入。
-- 提取过程报错，会被吞掉，不阻断当前对话。
+- 提取过程报错会写结构化告警，不阻断当前对话，也不回退 Run 终态。
 
-提取时只把最近 12 条消息摘要给模型，默认最多写入 `memory.autoExtractMaxRecords=3` 条。写入后由 `MemoryManager` 做签名去重。下一轮会按当前用户输入检索相关记忆，并以临时 `system-reminder` 注入，不写进消息历史。
+提取时只把最近 12 条消息摘要给模型，一次最多写入 3 条。写入后由 `MemoryManager` 做签名去重。下一轮会按当前用户输入检索相关记忆，并以临时 `system-reminder` 注入，不写进消息历史。
 
 注意：代码默认开启不等于本机一定开启；用户 `settings.json` 里的显式配置会覆盖默认值。例如已有配置写了 `memory.autoExtractEnabled=false` 时，需要用 `/config set memory.autoExtractEnabled true` 重新打开。
 
@@ -227,7 +226,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 | 时机             | 产生什么                                    | 写哪里                                                           |
 | -------------- | --------------------------------------- | ------------------------------------------------------------- |
 | 本轮结束           | session_memory checkpoint（goal + 消息摘要）  | `~/.openharness-ts/data/session-memory/<project>-<hash>/<id>.md` |
-| 会话结束           | personalization 抽出 `10.0.0.7`、`prod-ml` | `~/.openharness-ts/local_rules/facts.json` + `rules.md`          |
+| root Run 成功收尾 | personalization 抽出 `10.0.0.7`、`prod-ml` | `~/.openharness-ts/local_rules/facts.json` + `rules.md`          |
 | 你敲 `/remember` | LLM 提取"移除 /clear 的决策"                   | `~/.openharness-ts/data/memory/<project>-<hash>/xxx.md`          |
 | 你敲 `/dream`    | 整理 memory 目录，合并重复                       | 原地修改 + 备份                                                     |
 
@@ -244,7 +243,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 |          | personalization                   | /remember（memory_extract）                      |
 | -------- | --------------------------------- | ---------------------------------------------- |
-| **触发**   | 会话结束自动                            | 手动 `/remember`，或开启后每轮自动                        |
+| **触发**   | root Run 成功后自动；`/remember` 也触发 | 手动 `/remember`，或开启后每轮自动                        |
 | **方法**   | 正则（10 个模式）                        | LLM 语义理解                                       |
 | **抓什么**  | 机械事实：IP、路径、环境名、端点                 | 语义事实：决策、偏好、约束                                  |
 | **成本**   | 零（无 LLM 调用）                       | 有成本（一次 LLM 调用）                                 |
@@ -258,13 +257,13 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 
 |         | session_memory checkpoint                         | session 快照                                  |
 | ------- | ------------------------------------------------- | ------------------------------------------- |
-| **目录**  | `~/.openharness-ts/data/session-memory/<项目>-<hash>/` | `~/.openharness-ts/data/sessions/<项目>-<hash>/` |
-| **内容**  | goal + 消息摘要（12k 上限）                               | 完整消息历史 + 元数据                                |
-| **用途**  | 给 compact 提供连续性                                   | 独立文件快照与 autodream 扫描；不是 daemon 主存储 |
-| **由谁读** | compact 边界（attachmentsProvider 注入）                | services 内明确调用方                        |
+| **目录**  | `~/.openharness-ts/data/session-memory/<项目>-<hash>/` | daemon SQLite |
+| **内容**  | goal + 消息摘要（12k 上限）                               | 完整 durable Session、Input、Run、Message 和 Part |
+| **用途**  | 给 compact 提供连续性                                   | 多端恢复、审计和运行状态 |
+| **由谁读** | compact 边界（attachmentsProvider 注入）                | daemon Application 和共享 client |
 
 
-这套文件快照不承担 TUI/Desktop 的会话恢复；多端主线使用 daemon SQLite、snapshot 和 SSE。历史设计见 [session-storage-design.md](./session-storage-design.md)。
+项目级旧 Session JSON 不参与 daemon 主线，也不再由 CLI 每轮额外写一份。多端恢复只使用 daemon SQLite、snapshot 和 SSE。历史设计见 [session-storage-design.md](./session-storage-design.md)。
 
 ---
 
@@ -275,9 +274,9 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 | ------------------------------ | -------------------- | ---------------------------------------------------------- |
 | tool_outputs inline/preview 截断 | ✅                    | applyToolOutputBudget 在 query-engine.ts，写入 messages 前截断    |
 | tool_outputs microCompact 接入   | ✅                    | MCP 工具已纳入 microcompactable，同内置工具一起按 keepRecent 清理          |
-| session_memory 每轮写入            | ✅ REPL + TUI + print | 受 `memory.enabled` 与 `memory.sessionMemoryEnabled` 控制      |
+| session_memory 每轮写入            | ✅ daemon 所有产品入口 | root Run 成功后执行，受 `memory.enabled` 与 `memory.sessionMemoryEnabled` 控制 |
 | session_memory compact 读回      | ✅                    | compact 时经 attachmentsProvider 注入摘要 prompt                 |
-| personalization 抽取             | ✅                    | 10 个正则，会话结束自动                                              |
+| personalization 抽取             | ✅                    | 10 个正则，root Run 成功后自动；`/remember` 也触发 |
 | `/remember` 手动提取               | ✅                    | LLM 提取，签名去重                                                |
 | `/remember` 按轮自动               | ✅                    | 默认开启；每轮结束 best-effort 提取，可用 `memory.autoExtractEnabled=false` 关闭 |
 | `/dream` 手动整合                  | ✅                    | 备份 + 锁 + 回滚                                                |

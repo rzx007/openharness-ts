@@ -31,7 +31,7 @@ import {
   type PromptLayers,
 } from "@openharness/prompts";
 import { getLocalRulesDir, loadFacts, loadLocalRules } from "@openharness/personalization";
-import { getProjectSessionDir, startDreamNow } from "@openharness/services";
+import { startDreamNow } from "@openharness/services";
 import { loadOutputStyles } from "@openharness/output-styles";
 import { ApplicationError } from "../shared/application-error.js";
 import {
@@ -130,7 +130,6 @@ function coerceConfigValue(key: string, value: string): unknown {
   if ([
     "memory.maxFiles",
     "memory.maxEntrypointLines",
-    "memory.autoExtractMaxRecords",
     "memory.autoDreamMinHours",
     "memory.autoDreamMinSessions",
   ].includes(key)) {
@@ -837,7 +836,7 @@ export function createDefaultDreamService(ref: DaemonSettingsRef): DreamService 
         cwd,
         settings,
         memoryDir: directory,
-        sessionDir: getProjectSessionDir(cwd),
+        recentSessionIds: sessionId ? [sessionId] : [],
         force: true,
         preview: preview === true,
         currentSessionId: sessionId,

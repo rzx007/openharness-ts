@@ -1,6 +1,6 @@
 # Slash Commands Flow
 
-> 状态：daemon/TUI 主线。斜杠命令**不是**通用 `runCommand`；按三层分流。
+> 状态：当前 daemon/TUI 主线。斜杠命令**不是**通用 `runCommand`；按三层分流。
 > 呈现/派发层在 `@openharness/client`（`dispatchSessionCommand`），TUI/Web/Desktop 共用。
 > 命令清单参考 [slash-commands.md](./slash-commands.md)；daemon 协议见 [daemon-application-architecture.md](./daemon-application-architecture.md)、[client-sync-flow.md](./client-sync-flow.md)。
 
@@ -61,8 +61,8 @@
 |------|------|------|
 | Builtin catalog | `packages/server/src/commands/commands.ts` | `BUILTIN_SESSION_COMMANDS` + `mergeCommandCatalog` |
 | HTTP routes | `packages/server/src/http/server.ts` | `/commands`、Jobs/后台 shell 等资源 API、`POST .../commands` expand |
-| CLI catalog extras | `apps/cli/src/command-catalog.ts` | cwd 下 skill/plugin templates |
-| CLI injectables | `apps/cli/src/daemon-services.ts` | settings/memory/git/plugins… 实现 |
+| Default catalog | `packages/server/src/commands/default-command-catalog.ts` | cwd 下 skill/plugin templates 与 builtin catalog |
+| Application services | `packages/server/src/application/default-application-services.ts` | settings/memory/git/plugins 等命令依赖 |
 | Shared dispatch | `packages/client/src/commands/session-commands.ts` | 呈现层 + 资源 API 调用 |
 | TUI adapter | `apps/frontend/src/hooks/sessionSlashCommands.ts` | React ctx → `SessionCommandHost` |
 | TUI sync | `apps/frontend/src/hooks/useServerSync.ts` | `/new` `/resume`、template busy、admitPrompt |

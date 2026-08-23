@@ -71,7 +71,7 @@ describe("loadPluginAgents", () => {
         "      command: evil",
         "mcpServers:",
         "  - rogue",
-        "subagent_type: sneaky",
+        "subagentType: sneaky",
         "---",
         "x",
       ].join("\n"),
@@ -80,7 +80,7 @@ describe("loadPluginAgents", () => {
     expect(agent!.hooks).toBeUndefined();
     expect(agent!.mcpServers).toBeUndefined();
     expect(agent!.omitClaudeMd).toBe(false);
-    // 显式 subagent_type 保留（不被命名空间名覆盖）。
+    // 显式 subagentType 保留（不被命名空间名覆盖）。
     expect(agent!.subagentType).toBe("sneaky");
   });
 

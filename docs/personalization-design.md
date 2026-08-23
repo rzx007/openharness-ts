@@ -1,14 +1,14 @@
 # 设计：Personalization 环境事实抽取（C.5）
 
-> 状态：事实抽取、持久化与 prompt 注入已实现；session-end 自动抽取目前没有应用入口接线。记忆体系全景见 [memory-system.md](./memory-system.md)。
+> 状态：当前实现。每个成功完成的 daemon root Run 都会从 durable transcript 抽取环境事实，持久化后由后续 runtime 的 prompt 读取。记忆体系全景见 [memory-system.md](./memory-system.md)。
 > 新建 `packages/personalization`，移植 Python
 > `personalization/{extractor,rules,session_hook}.py`（共 273 行）。
 >
-> TUI / daemon session 的 session-end 抽取尚未接线；prompt 注入仍对所有经 `packages/prompts` 构建的 runtime 生效（含 daemon），只要 `rules.md` 非空。
+> CLI、TUI、Web、Desktop、Bot 等经 daemon 提交的 Run 共用同一条收尾接线；SDK 单独嵌入时由自己的宿主决定是否调用 personalization。
 
 ## 它做什么
 
-会话结束时用 10 个正则从对话文本里抽「环境事实」（SSH 主机、服务器 IP、数据
+每个 root Run 成功收尾后，用 10 个正则从当前 durable transcript 抽「环境事实」（SSH 主机、服务器 IP、数据
 路径、conda 环境、Python 版本、API 端点、环境变量、git 远端、Ray 集群、cron
 表达式），去重合并持久化到 `~/.openharness-ts/local_rules/`：
 
@@ -36,19 +36,20 @@ local_rules/
 
 - **prompt 注入**：`packages/prompts` 的 system prompt 构建在 CLAUDE.md 段后
   追加 `# Local Environment Rules\n\n<rules.md 内容>`（非空才注入）。
-- **session-end 触发**：`updateRulesFromSession(messages)` 已作为可调用能力提供，但当前 standalone CLI、TUI/daemon archive、interrupt 与进程退出路径均未自动调用。
-- **边界**：framework 的 `OpenHarnessAgent.close()` 只管理 live 执行资源，不擅自写 personalization durable state；应由 standalone host 或 daemon session lifecycle 在拥有完整 transcript 的位置调用。旧 BackendHost shutdown 路径已删除，不要再按该路径实现。
+- **Run 收尾触发**：`SessionPostRunMaintenance` 只在 durable Run 已经是 `completed` 后读取 Store transcript，再调用 `updateRulesFromSession(messages)`。失败只记告警，不回退 Run 终态。
+- **手动触发**：`/remember` 成功后也会扫描当前 transcript。
+- **边界**：framework 的 `OpenHarnessAgent.close()` 只管理 live 执行资源，不写 personalization；这项持久化由拥有 transcript 的 daemon Application 负责。
 
 ## 与 Python 差异
 
 | 点 | Python | TS | 原因 |
 |----|--------|----|------|
-| 触发点 | ui/runtime 关停一处 | 尚未接入应用入口 | standalone host 与 daemon 需分别选择拥有完整 transcript 的 lifecycle hook |
+| 触发点 | ui/runtime 关停一处 | durable root Run 成功收尾；`/remember` 也会触发 | 不依赖某个界面是否正常退出 |
 | 日志 | logging.info | 无（静默） | TS 无 logger 基建 |
 | 消息形状 | ConversationMessage.content blocks | 宽松 `{role?, content: string \| unknown[]}` | 适配 TS 引擎消息（SystemMessage 无 role） |
 | git_remote 正则 | 懒惰 `\S+?` 后仅跟可选组 → 恒捕获 1 字符,被长度过滤丢弃(死代码) | 追加 `(?=\s\|$)` 锚,真正捕获 `owner/repo` | 修 Python 的失效模式 |
 | prompt 注入包装 | 外层再包一层 `# Local Environment Rules` 标题(与 rules.md 自带标题重复) | 直接注入 rules.md 原文 | 避免双标题 |
-| 信号路径 | 单一关停钩子,同样不覆盖信号杀进程 | SIGINT/SIGTERM 硬杀进程时可能丢当轮事实(swarm 信号钩子保持最小,不挂载) | 对齐 Python 留待 |
+| 信号路径 | 单一关停钩子 | 只处理已经 durable completed 的 Run；进程中断的 Run 不假装完成抽取 | 与 durable 终态一致 |
 | 配置目录 | 默认 ~/.openharness-ts | 尊重 OPENHARNESS_CONFIG_DIR(仓库既有约定) | 测试隔离/Electron 预留 |
 
 ## 测试

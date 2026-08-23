@@ -34,7 +34,6 @@ export function coerceConfigValue(key: string, value: string): unknown {
 
     case "memory.maxFiles":
     case "memory.maxEntrypointLines":
-    case "memory.autoExtractMaxRecords":
     case "memory.autoDreamMinHours":
     case "memory.autoDreamMinSessions": {
       const n = Number(value);

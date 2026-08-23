@@ -8,13 +8,13 @@ import {
   readLastConsolidatedAt,
   tryAcquireConsolidationLock,
   rollbackConsolidationLock,
-  listSessionsTouchedSince,
   createMemoryBackup,
   diffMemoryDirs,
   formatMemoryDiff,
   restoreMemoryBackup,
   buildConsolidationPrompt,
   startDreamNow,
+  executeAutoDream,
   _resetAutodreamStateForTests,
   LOCK_FILE,
   type DreamTaskRunner,
@@ -22,14 +22,11 @@ import {
 
 let tmp: string;
 let memoryDir: string;
-let sessionDir: string;
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "ohs-dream-"));
   memoryDir = join(tmp, "memory");
-  sessionDir = join(tmp, "sessions");
   mkdirSync(memoryDir, { recursive: true });
-  mkdirSync(sessionDir, { recursive: true });
   process.env.OPENHARNESS_CONFIG_DIR = join(tmp, "cfg");
   delete process.env.OPENHARNESS_AUTODREAM_CHILD;
   _resetAutodreamStateForTests();
@@ -112,26 +109,6 @@ describe("consolidation lock", () => {
   });
 });
 
-describe("listSessionsTouchedSince", () => {
-  it("returns current-format ids newer than since and excludes the current session", () => {
-    writeFileSync(join(sessionDir, "session-old.json"), JSON.stringify({ schema_version: 1, session_id: "old" }));
-    const past = (Date.now() - 10000_000) / 1000;
-    utimesSync(join(sessionDir, "session-old.json"), past, past);
-    writeFileSync(join(sessionDir, "session-abc.json"), JSON.stringify({ schema_version: 1, session_id: "abc-real" }));
-    writeFileSync(join(sessionDir, "session-current.json"), JSON.stringify({ schema_version: 1, session_id: "current" }));
-
-    const ids = listSessionsTouchedSince(sessionDir, Date.now() / 1000 - 3600, "current");
-    expect(ids).toContain("abc-real");
-    expect(ids).not.toContain("current");
-    expect(ids).not.toContain("old");
-  });
-
-  it("rejects session snapshots without the current schema marker", () => {
-    writeFileSync(join(sessionDir, "session-old.json"), JSON.stringify({ session_id: "old" }));
-    expect(() => listSessionsTouchedSince(sessionDir, 0)).toThrow("schema version");
-  });
-});
-
 describe("backup / diff / restore", () => {
   it("backs up md files (skipping the lock), diffs content, restores", () => {
     writeFileSync(join(memoryDir, "a.md"), "A1");
@@ -160,12 +137,12 @@ describe("backup / diff / restore", () => {
 
 describe("buildConsolidationPrompt", () => {
   it("contains the policy sections, mode switch, and extra context", () => {
-    const apply = buildConsolidationPrompt("/mem", "/sess", "extra stuff");
+    const apply = buildConsolidationPrompt("/mem", "extra stuff");
     expect(apply).toContain("# Dream: Memory Consolidation");
     expect(apply).toContain("APPLY MODE");
     expect(apply).toContain("Never preserve API keys");
     expect(apply).toContain("## Additional context\n\nextra stuff");
-    expect(buildConsolidationPrompt("/mem", "/sess", "", { preview: true })).toContain("PREVIEW MODE");
+    expect(buildConsolidationPrompt("/mem", "", { preview: true })).toContain("PREVIEW MODE");
   });
 });
 
@@ -179,7 +156,7 @@ describe("startDreamNow", () => {
       cwd: tmp,
       settings: settings(mem),
       memoryDir,
-      sessionDir,
+      recentSessionIds: ["older-session"],
       force: true,
       taskRunner: runner,
       cliEntry: "/cli.js",
@@ -195,7 +172,7 @@ describe("startDreamNow", () => {
     expect(task!.metadata.backup_dir).not.toBe("");
     // 锁已被持有：再次启动被拒。
     expect(
-      await startDreamNow({ cwd: tmp, settings: settings(mem), memoryDir, sessionDir, force: true, taskRunner: runner, cliEntry: "/cli.js" }),
+      await startDreamNow({ cwd: tmp, settings: settings(mem), memoryDir, force: true, taskRunner: runner, cliEntry: "/cli.js" }),
     ).toBeNull();
   });
 
@@ -203,11 +180,11 @@ describe("startDreamNow", () => {
     const runner = fakeRunner();
     process.env.OPENHARNESS_AUTODREAM_CHILD = "1";
     expect(
-      await startDreamNow({ cwd: tmp, settings: settings(mem), memoryDir, sessionDir, force: true, taskRunner: runner }),
+      await startDreamNow({ cwd: tmp, settings: settings(mem), memoryDir, force: true, taskRunner: runner }),
     ).toBeNull();
     delete process.env.OPENHARNESS_AUTODREAM_CHILD;
     expect(
-      await startDreamNow({ cwd: tmp, settings: settings({ enabled: false }), memoryDir, sessionDir, force: true, taskRunner: runner }),
+      await startDreamNow({ cwd: tmp, settings: settings({ enabled: false }), memoryDir, force: true, taskRunner: runner }),
     ).toBeNull();
   });
 
@@ -217,7 +194,6 @@ describe("startDreamNow", () => {
       cwd: tmp,
       settings: settings(mem),
       memoryDir,
-      sessionDir,
       force: true,
       taskRunner: runner,
       cliEntry: "/cli.js",
@@ -226,5 +202,27 @@ describe("startDreamNow", () => {
     runner.fire(task, "completed");
     // 锁回滚到 0 → 文件删除 → 可再次获取。
     expect(existsSync(join(memoryDir, LOCK_FILE))).toBe(false);
+  });
+});
+
+describe("executeAutoDream", () => {
+  it("uses durable recent session ids instead of scanning session JSON files", async () => {
+    const runner = fakeRunner();
+    const task = await executeAutoDream({
+      cwd: tmp,
+      settings: settings({
+        enabled: true,
+        autoDreamEnabled: true,
+        autoDreamMinHours: 0,
+        autoDreamMinSessions: 2,
+      }),
+      memoryDir,
+      recentSessionIds: ["s1", "s2", "s2"],
+      taskRunner: runner,
+      cliEntry: "/cli.js",
+    });
+
+    expect(task).not.toBeNull();
+    expect(task!.argv!.join(" ")).toContain("Sessions since last consolidation (2)");
   });
 });

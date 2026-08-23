@@ -61,6 +61,7 @@ describe("McpClientManager", () => {
 
   it("connects to a server and discovers tools", async () => {
     const conn = await manager.connect("test-server", {
+      type: "stdio",
       command: "node",
       args: ["server.js"],
     });
@@ -74,7 +75,7 @@ describe("McpClientManager", () => {
   });
 
   it("disconnects from a server", async () => {
-    await manager.connect("test", { command: "node" });
+    await manager.connect("test", { type: "stdio", command: "node" });
     await manager.disconnect("test");
 
     const conn = manager.getConnection("test");
@@ -82,26 +83,26 @@ describe("McpClientManager", () => {
   });
 
   it("disconnectAll removes all connections", async () => {
-    await manager.connect("s1", { command: "node" });
-    await manager.connect("s2", { command: "node" });
+    await manager.connect("s1", { type: "stdio", command: "node" });
+    await manager.connect("s2", { type: "stdio", command: "node" });
     await manager.disconnectAll();
 
     expect(manager.getConnections()).toHaveLength(0);
   });
 
   it("getConnections returns all connections", async () => {
-    await manager.connect("a", { command: "node" });
-    await manager.connect("b", { command: "node" });
+    await manager.connect("a", { type: "stdio", command: "node" });
+    await manager.connect("b", { type: "stdio", command: "node" });
 
     const conns = manager.getConnections();
     expect(conns).toHaveLength(2);
   });
 
   it("getConnectedTools returns tools from connected servers only", async () => {
-    await manager.connect("active", { command: "node" });
+    await manager.connect("active", { type: "stdio", command: "node" });
     manager["connections"].set("dead", {
       name: "dead",
-      config: { command: "node" },
+      config: { type: "stdio", command: "node" },
       status: "error",
       transport: "stdio",
       authConfigured: false,
@@ -116,7 +117,7 @@ describe("McpClientManager", () => {
   });
 
   it("getAsToolDefinitions wraps MCP tools with mcp__ prefix", async () => {
-    await manager.connect("fs", { command: "node" });
+    await manager.connect("fs", { type: "stdio", command: "node" });
 
     const defs = manager.getAsToolDefinitions();
     expect(defs).toHaveLength(2);
@@ -132,7 +133,7 @@ describe("McpClientManager", () => {
   });
 
   it("callTool delegates to client and returns result", async () => {
-    await manager.connect("test", { command: "node" });
+    await manager.connect("test", { type: "stdio", command: "node" });
 
     const result = await manager.callTool("test", "read_file", { path: "/tmp" });
     expect(result.content).toBe("result data");
@@ -140,7 +141,7 @@ describe("McpClientManager", () => {
   });
 
   it("forwards a tool abort signal to MCP requests", async () => {
-    await manager.connect("test", { command: "node" });
+    await manager.connect("test", { type: "stdio", command: "node" });
     const controller = new AbortController();
     const client = manager["clients"].get("test") as { callTool: ReturnType<typeof vi.fn> };
 
@@ -160,14 +161,14 @@ describe("McpClientManager", () => {
   });
 
   it("readResource returns resource content", async () => {
-    await manager.connect("test", { command: "node" });
+    await manager.connect("test", { type: "stdio", command: "node" });
 
     const content = await manager.readResource("test", "file:///config.json");
     expect(content).toBe("resource content");
   });
 
   it("forwards a tool abort signal when reading MCP resources", async () => {
-    await manager.connect("test", { command: "node" });
+    await manager.connect("test", { type: "stdio", command: "node" });
     const controller = new AbortController();
     const client = manager["clients"].get("test") as { readResource: ReturnType<typeof vi.fn> };
 
@@ -191,13 +192,13 @@ describe("McpClientManager", () => {
       readResource: vi.fn(),
     }));
 
-    const conn = await manager.connect("bad", { command: "nonexistent" });
+    const conn = await manager.connect("bad", { type: "stdio", command: "nonexistent" });
     expect(conn.status).toBe("error");
     expect(conn.error).toBeDefined();
   });
 
   it("getConnectedResources returns resources from connected servers", async () => {
-    await manager.connect("test", { command: "node" });
+    await manager.connect("test", { type: "stdio", command: "node" });
 
     const resources = manager.getConnectedResources();
     expect(resources).toHaveLength(1);
@@ -212,6 +213,7 @@ describe("McpClientManager", () => {
 
     const headers = { Authorization: "Bearer token-123" };
     const conn = await manager.connect("http-srv", {
+      type: "http",
       url: "https://example.com/mcp",
       headers,
     });
@@ -250,6 +252,7 @@ describe("McpClientManager", () => {
 
   it("stdio servers use the sandbox-aware stdio transport", async () => {
     const conn = await manager.connect("stdio-srv", {
+      type: "stdio",
       command: "node",
       args: ["server.js"],
     });
@@ -296,23 +299,27 @@ describe("McpClientManager", () => {
 
   it("authConfigured reflects headers (http) and env (stdio)", async () => {
     const http = await manager.connect("http-auth", {
+      type: "http",
       url: "https://example.com/mcp",
       headers: { Authorization: "Bearer x" },
     });
     expect(http.authConfigured).toBe(true);
 
     const stdioAuth = await manager.connect("stdio-auth", {
+      type: "stdio",
       command: "node",
       env: { TOKEN: "abc" },
     });
     expect(stdioAuth.authConfigured).toBe(true);
 
     const stdioNoAuth = await manager.connect("stdio-noauth", {
+      type: "stdio",
       command: "node",
     });
     expect(stdioNoAuth.authConfigured).toBe(false);
 
     const httpNoAuth = await manager.connect("http-noauth", {
+      type: "http",
       url: "https://example.com/mcp",
     });
     expect(httpNoAuth.authConfigured).toBe(false);
@@ -321,7 +328,7 @@ describe("McpClientManager", () => {
   it("invalid config sets status=error without throwing, in isolation", async () => {
     await manager.connectAll({
       bad: {} as any,
-      good: { command: "node" },
+      good: { type: "stdio", command: "node" },
     });
 
     const bad = manager.getConnection("bad");
@@ -346,7 +353,7 @@ describe("McpClientManager", () => {
         }) as any
     );
 
-    const conn = await manager.connect("no-resources", { command: "node" });
+    const conn = await manager.connect("no-resources", { type: "stdio", command: "node" });
     expect(conn.status).toBe("connected");
     expect(conn.resources).toEqual([]);
     expect(conn.resourceError).toBeUndefined();
@@ -367,7 +374,7 @@ describe("McpClientManager", () => {
         }) as any
     );
 
-    const conn = await manager.connect("flaky-resources", { command: "node" });
+    const conn = await manager.connect("flaky-resources", { type: "stdio", command: "node" });
     expect(conn.status).toBe("connected");
     expect(conn.resources).toEqual([]);
     expect(conn.resourceError).toBeDefined();
@@ -401,18 +408,17 @@ function makeChildProcess(): EventEmitter & {
 }
 
 describe("resolveTransportKind", () => {
-  it("infers http from url", () => {
-    expect(resolveTransportKind({ url: "https://x/mcp" })).toBe("http");
+  it("uses the required http type", () => {
+    expect(resolveTransportKind({ type: "http", url: "https://x/mcp" })).toBe("http");
   });
 
-  it("infers stdio from command", () => {
-    expect(resolveTransportKind({ command: "node" })).toBe("stdio");
+  it("uses the required stdio type", () => {
+    expect(resolveTransportKind({ type: "stdio", command: "node" })).toBe("stdio");
   });
 
-  it("explicit type wins over inference (type=stdio with url)", () => {
-    expect(
-      resolveTransportKind({ type: "stdio", command: "node", url: "https://x" })
-    ).toBe("stdio");
+  it("rejects a missing type instead of inferring it", () => {
+    const result = resolveTransportKind({ url: "https://x" } as any);
+    expect((result as { error: string }).error).toMatch(/type/);
   });
 
   it("type=sse with url resolves to sse", () => {
@@ -422,21 +428,30 @@ describe("resolveTransportKind", () => {
   });
 
   it("missing both command and url returns error", () => {
-    const r = resolveTransportKind({});
+    const r = resolveTransportKind({} as any);
     expect(typeof r).toBe("object");
-    expect((r as { error: string }).error).toMatch(/command|url/);
+    expect((r as { error: string }).error).toMatch(/type/);
   });
 
   it("http/sse without url returns error", () => {
-    expect((resolveTransportKind({ type: "http" }) as any).error).toMatch(
+    expect((resolveTransportKind({ type: "http" } as any) as any).error).toMatch(
       /url/
     );
-    expect((resolveTransportKind({ type: "sse" }) as any).error).toMatch(/url/);
+    expect((resolveTransportKind({ type: "sse" } as any) as any).error).toMatch(/url/);
   });
 
   it("stdio without command returns error", () => {
     expect(
-      (resolveTransportKind({ type: "stdio" }) as any).error
+      (resolveTransportKind({ type: "stdio" } as any) as any).error
     ).toMatch(/command/);
+  });
+
+  it("rejects empty and mixed transport fields", () => {
+    expect((resolveTransportKind({ type: "stdio", command: " " } as any) as any).error)
+      .toMatch(/command/);
+    expect((resolveTransportKind({ type: "stdio", command: "node", url: "https://x" } as any) as any).error)
+      .toMatch(/remote transport fields/);
+    expect((resolveTransportKind({ type: "http", url: "https://x", command: "node" } as any) as any).error)
+      .toMatch(/stdio transport fields/);
   });
 });

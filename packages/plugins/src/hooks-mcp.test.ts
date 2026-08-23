@@ -139,14 +139,14 @@ describe("loadPluginMcp", () => {
   it("loads mcpServers from the manifest mcp_file", async () => {
     writeFileSync(
       join(tmp, "mcp.json"),
-      JSON.stringify({ mcpServers: { db: { command: "db-server", args: [] } } }),
+      JSON.stringify({ mcpServers: { db: { type: "stdio", command: "db-server", args: [] } } }),
     );
     const servers = await loadPluginMcp(tmp, manifest());
     expect(Object.keys(servers)).toEqual(["db"]);
   });
 
   it("falls back to .mcp.json (Claude Code layout)", async () => {
-    writeFileSync(join(tmp, ".mcp.json"), JSON.stringify({ mcpServers: { web: { url: "http://x" } } }));
+    writeFileSync(join(tmp, ".mcp.json"), JSON.stringify({ mcpServers: { web: { type: "http", url: "http://x" } } }));
     const servers = await loadPluginMcp(tmp, manifest());
     expect(Object.keys(servers)).toEqual(["web"]);
   });
@@ -157,5 +157,17 @@ describe("loadPluginMcp", () => {
     expect(await loadPluginMcp(tmp, manifest())).toEqual({});
     writeFileSync(join(tmp, "mcp.json"), JSON.stringify({ other: 1 }));
     expect(await loadPluginMcp(tmp, manifest())).toEqual({});
+  });
+
+  it("rejects MCP entries without the current explicit transport type", async () => {
+    writeFileSync(join(tmp, "mcp.json"), JSON.stringify({ mcpServers: { old: { command: "legacy" } } }));
+    await expect(loadPluginMcp(tmp, manifest())).rejects.toThrow(/explicit type/);
+  });
+
+  it("rejects mixed transport fields instead of guessing which ones win", async () => {
+    writeFileSync(join(tmp, "mcp.json"), JSON.stringify({
+      mcpServers: { mixed: { type: "stdio", command: "node", url: "http://x" } },
+    }));
+    await expect(loadPluginMcp(tmp, manifest())).rejects.toThrow(/required field/);
   });
 });

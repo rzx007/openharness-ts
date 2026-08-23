@@ -348,7 +348,7 @@ Agent tool -> framework AgentChildManager
   -> child.created event
   -> DaemonAgentEventProjector
      -> durable child session
-     -> SessionTaskBridge task (id = childId)
+     -> SessionExecutionProjector 创建 durable task (id = childId)
      -> LiveChildAgentDirectory(sessionId -> rootAgent + childId)
   -> recursive child OpenHarnessAgent
   -> ordinary input/run/output/tool terminal events
@@ -374,6 +374,8 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 | archive     | parent 先进入 closing -> 固定 descendant snapshot -> interrupt/wait -> close pool/live child -> durable archive |
 
 这些 API 是 framework 能力的 daemon 应用化；daemon 负责 durable 更新和并发保护。compact/rewind 使用 session barrier，remember 使用 cwd barrier；barrier 覆盖 agent operation、durable mutation 与必要的 runtime close，不使用“先检查 active run、稍后再执行”的 check-then-act。
+
+root Run 成功写入 `completed` 后，`SessionPostRunMaintenance` 从 Store 读取已经投影完成的 transcript，依次更新 session memory checkpoint、personalization、可选的长期记忆自动抽取和 auto dream 门槛。任何一步失败都只写结构化告警，不会把已经完成的 Run 改回失败；failed/interrupted Run 不执行这条维护链。
 
 ## Durable Workflow 与 Jobs
 

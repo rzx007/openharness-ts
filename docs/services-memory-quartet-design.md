@@ -1,6 +1,6 @@
 # 设计：Services 记忆四件套（E.6 第一刀）
 
-> 状态：已实现合并。记忆体系全景见 [memory-system.md](./memory-system.md)。
+> 状态：当前实现。记忆体系全景见 [memory-system.md](./memory-system.md)。
 > 移植 Python services 的四个记忆/上下文内功模块（~1170 行），
 > 与 C.5 personalization 同脉。team scope / lsp 真 AST 留后续刀。
 

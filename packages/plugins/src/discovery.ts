@@ -12,7 +12,7 @@ import {
 import { loadPluginHooks, loadPluginMcp } from "./hooks-mcp.js";
 import { loadPluginAgents } from "./agents.js";
 import type { AgentDefinition } from "@openharness/coordinator";
-import type { HookDefinition } from "@openharness/core";
+import type { HookDefinition, McpServerConfig } from "@openharness/core";
 
 /**
  * 插件发现与加载（移植自 Python plugins/loader.py 的发现段）。
@@ -62,7 +62,7 @@ export interface LoadedPlugin {
   skills: SkillDefinition[];
   commands: PluginCommandDefinition[];
   hooks: HookDefinition[];
-  mcpServers: Record<string, unknown>;
+  mcpServers: Record<string, McpServerConfig>;
   agents: AgentDefinition[];
 }
 

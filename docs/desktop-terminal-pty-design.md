@@ -1,6 +1,6 @@
 # 设计：Desktop 右侧 Panel 终端 PTY
 
-> 状态：本地用户终端、Agent 持久终端、Desktop 挂接、daemon 传输、右键菜单、每项目默认 shell 和沙箱终端 MVP 均已实现。
+> 状态：当前实现。本地用户终端、Agent 持久终端、Desktop 挂接、daemon 传输、右键菜单、每项目默认 shell 和沙箱终端 MVP 均已实现。
 >
 > 日期：2026-08-15
 

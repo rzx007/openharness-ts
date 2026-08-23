@@ -4,6 +4,17 @@
 
 这份文档回答一个简单问题：改了某条关键规则，至少要跑哪些测试。测试文件是证据，不是文档附件；表里的链接由 `pnpm check-docs` 检查是否仍存在。
 
+## 生命周期契约编号
+
+| 编号 | 主要测试 |
+|---|---|
+| A1、A2、A3、A4、A5 | [agent.test.ts](../packages/agent-runtime/src/agent.test.ts)、[sdk.test.ts](../packages/agent-runtime/src/sdk.test.ts) |
+| E1、E2、E3、E4、E5 | [event-source.test.ts](../packages/agent-runtime/src/event-source.test.ts)、[agent.test.ts](../packages/agent-runtime/src/agent.test.ts) |
+| C1、C2、C3、C4、C5、C6 | [child-agent.test.ts](../packages/agent-runtime/src/child-agent.test.ts)、[child-environment.test.ts](../packages/agent-runtime/src/child-environment.test.ts) |
+| D1、D2、D3、D4、D5、D6、D7 | [http.test.ts](../packages/server/src/http/__test__/http.test.ts)、[daemon-control-service.test.ts](../packages/server/src/application/control/__test__/daemon-control-service.test.ts)、[session-run-executor.test.ts](../packages/server/src/application/session/__test__/session-run-executor.test.ts)、[agent-pool.test.ts](../packages/server/src/application/agent/__test__/agent-pool.test.ts)、[daemon-lifecycle.soak.test.ts](../packages/server/src/daemon/__test__/daemon-lifecycle.soak.test.ts) |
+| T1、T2、T3 | [http.test.ts](../packages/server/src/http/__test__/http.test.ts) |
+| P1、P2、P3、P4、P5、P6、P7、P8 | [daemon-agent-event-projector.test.ts](../packages/server/src/application/agent/__test__/daemon-agent-event-projector.test.ts)、[transcript-projection.test.ts](../packages/server/src/application/session/__test__/transcript-projection.test.ts)、[event-registry.test.ts](../packages/services/src/session-runtime/__test__/event-registry.test.ts)、[projection-settlement-recovery.test.ts](../packages/server/src/application/agent/__test__/projection-settlement-recovery.test.ts) |
+
 ## Runtime Kernel
 
 | 硬规则 | 主要测试 |
@@ -23,8 +34,12 @@
 | 文件型 Session 数据只接受当前 schema | [storage.test.ts](../packages/services/src/session/__test__/storage.test.ts) |
 | Run engine 串行准入、steer、interrupt 和终态不可回退 | [session-run-engine.test.ts](../packages/server/src/application/session/__test__/session-run-engine.test.ts) |
 | 执行器失败时仍关闭 Agent，并保留原始失败 | [session-run-executor.test.ts](../packages/server/src/application/session/__test__/session-run-executor.test.ts) |
+| 成功 Run 才执行自动记忆维护，维护失败不回退 Run 终态 | [session-post-run-maintenance.test.ts](../packages/server/src/application/session/__test__/session-post-run-maintenance.test.ts)、[session-run-executor.test.ts](../packages/server/src/application/session/__test__/session-run-executor.test.ts) |
 | Message/Part 投影可重试，不重复写 transcript | [transcript-projection.test.ts](../packages/server/src/application/session/__test__/transcript-projection.test.ts) |
 | Child terminal 投影失败会留下 Settlement，重启后幂等修复 | [daemon-agent-event-projector.test.ts](../packages/server/src/application/agent/__test__/daemon-agent-event-projector.test.ts)、[projection-settlement-recovery.test.ts](../packages/server/src/application/agent/__test__/projection-settlement-recovery.test.ts) |
+| P6：每条 durable event 必须带当前 schemaVersion | [event-registry.test.ts](../packages/services/src/session-runtime/__test__/event-registry.test.ts) |
+| P7：event 名字、版本、payload 和 scope 必须全部通过 registry 校验 | [event-registry.test.ts](../packages/services/src/session-runtime/__test__/event-registry.test.ts) |
+| P8：child 必需投影失败后必须保存 Settlement，修好前不能越过这条事件 | [daemon-agent-event-projector.test.ts](../packages/server/src/application/agent/__test__/daemon-agent-event-projector.test.ts)、[projection-settlement-recovery.test.ts](../packages/server/src/application/agent/__test__/projection-settlement-recovery.test.ts) |
 | Owner、恢复、Retention、Backup/Restore 不留下半完成状态 | [durability-boundaries.test.ts](../packages/server/src/application/__test__/durability-boundaries.test.ts)、[daemon-lifecycle.soak.test.ts](../packages/server/src/daemon/__test__/daemon-lifecycle.soak.test.ts) |
 | daemon shutdown 即使一个阶段失败也继续清理其他阶段 | [daemon-control-service.test.ts](../packages/server/src/application/control/__test__/daemon-control-service.test.ts)、[daemon-operation-gate.test.ts](../packages/server/src/application/control/__test__/daemon-operation-gate.test.ts) |
 

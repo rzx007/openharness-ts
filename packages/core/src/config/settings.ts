@@ -15,7 +15,6 @@ const DEFAULT_SETTINGS: Settings = {
     maxEntrypointLines: 200,
     sessionMemoryEnabled: true,
     autoExtractEnabled: true,
-    autoExtractMaxRecords: 3,
     autoDreamEnabled: false,
     autoDreamMinHours: 24,
     autoDreamMinSessions: 5,

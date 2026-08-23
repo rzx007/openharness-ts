@@ -72,7 +72,7 @@ describe("loadPluginContributions", () => {
   it("caches loaded plugins, registers hooks, and merges MCP with user priority", async () => {
     makeProjectPlugin("full", {
       "hooks.json": JSON.stringify({ stop: [{ type: "command", command: "echo bye" }] }),
-      "mcp.json": JSON.stringify({ mcpServers: { db: { command: "plugin-db" }, web: { url: "http://p" } } }),
+      "mcp.json": JSON.stringify({ mcpServers: { db: { type: "stdio", command: "plugin-db" }, web: { type: "http", url: "http://p" } } }),
     });
     const registry = new SkillRegistry();
     await loadPluginContributions(registry, { allowProjectPlugins: true }, tmp);
@@ -84,7 +84,7 @@ describe("loadPluginContributions", () => {
     expect((registered[0] as { event: string }).event).toBe("stop");
 
     // 用户 settings 同名 server 优先，插件不覆盖。
-    const merged = mergePluginMcpServers({ db: { command: "user-db" } } as never);
+    const merged = mergePluginMcpServers({ db: { type: "stdio", command: "user-db" } } as never);
     expect((merged.db as { command: string }).command).toBe("user-db");
     expect(merged.web).toBeDefined();
   });

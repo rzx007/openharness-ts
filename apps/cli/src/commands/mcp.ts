@@ -16,8 +16,10 @@ export function createMcpCommand(): Command {
         return;
       }
       for (const [name, config] of entries) {
-        const c = config as any;
-        console.log(`  ${name}: ${c.command} ${(c.args ?? []).join(" ")}`);
+        const detail = config.type === "stdio"
+          ? `${config.command} ${(config.args ?? []).join(" ")}`.trim()
+          : config.url;
+        console.log(`  ${name} [${config.type}]: ${detail}`);
       }
     });
 
@@ -39,7 +41,12 @@ export function createMcpCommand(): Command {
           if (k) env[k] = v.join("=");
         }
       }
-      settings.mcpServers[name] = { command, args, env: Object.keys(env).length ? env : undefined };
+      settings.mcpServers[name] = {
+        type: "stdio",
+        command,
+        args,
+        env: Object.keys(env).length ? env : undefined,
+      };
       await saveSettings(settings);
       console.log(`Added MCP server: ${name}`);
     });

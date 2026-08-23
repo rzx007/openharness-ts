@@ -4,6 +4,7 @@ import type { SessionStore } from "@openharness/services";
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../../runtime/run-coordinator.js";
 import type { AgentPool } from "../agent/agent-pool.js";
+import type { SessionPostRunMaintenance } from "./session-post-run-maintenance.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { SessionTranscriptProjection } from "./transcript-projection.js";
 
@@ -14,6 +15,7 @@ export interface SessionRunExecutorContext {
   transcriptProjection: Pick<SessionTranscriptProjection, "finalizeRunParts">;
   traceIdForRun(runId: string): string;
   log(event: ObservabilityEvent): void;
+  postRunMaintenance?: Pick<SessionPostRunMaintenance, "run">;
 }
 
 export interface ExecuteSessionRunInput {
@@ -48,6 +50,7 @@ export class SessionRunExecutor {
       });
       await workContext.registerHandle(run);
       await run.result;
+      await this.context.postRunMaintenance?.run(sessionId, runId, agent);
     } catch (error) {
       let cleanupError: unknown;
       try {

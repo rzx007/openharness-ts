@@ -105,7 +105,7 @@ describe("createDefaultNodeAgent", () => {
         sandbox: { enabled: false },
       },
       mcpServers: {
-        partial: { command: "partial-mcp" },
+        partial: { type: "stdio", command: "partial-mcp" },
       },
     });
 
