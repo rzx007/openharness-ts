@@ -19,7 +19,7 @@ import {
   type JobWaitResult,
 } from "@openharness/jobs";
 import { DEFAULT_RETENTION_POLICY } from "@openharness/services";
-import type { SessionRecord, SessionExecutionRecord } from "@openharness/services/session-runtime/types";
+import type { SessionRecord, SessionExecutionRecord } from "@openharness/protocol";
 import type { TerminalSessionInfo } from "@openharness/terminal";
 
 import type { DaemonTerminalService } from "../terminal/index.js";

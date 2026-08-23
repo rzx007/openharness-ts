@@ -1,11 +1,13 @@
 import type { OpenHarnessAgent } from "@openharness/agent-runtime";
 import type { AgentEvent, ContentBlock, StreamEvent } from "@openharness/core";
 import {
+  type SessionStore,
+} from "@openharness/services";
+import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
   type SessionInputRecord,
-  type SessionStore,
-} from "@openharness/services";
+} from "@openharness/protocol";
 
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";

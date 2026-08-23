@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
 
 export {
   MAX_MEMORY_EXTRACTION_RECORDS,
@@ -59,9 +59,7 @@ export const MAX_ENTRYPOINT_LINES = 200;
 export const MAX_ENTRYPOINT_BYTES = 25_000;
 
 /**
- * A single memory entry. The legacy flat-JSON fields (`id`, `content`, `tags`,
- * `createdAt`, `updatedAt`, `metadata`) are preserved for caller
- * compatibility; the structured Markdown+frontmatter fields are added on top.
+ * A single in-memory representation of one Markdown memory record.
  */
 export interface MemoryEntry {
   id: string;
@@ -360,6 +358,10 @@ export class MemoryManager {
   ): Promise<MemoryEntry> {
     await this.ensureLoaded();
 
+    if (!content.trim()) {
+      throw new Error("Memory content must not be empty");
+    }
+
     const type = options?.type ?? DEFAULT_MEMORY_TYPE;
     const signature = computeMemorySignature(content, type, "knowledge");
 
@@ -564,35 +566,6 @@ export class MemoryManager {
     return this.entries.size;
   }
 
-  /** Legacy JSON export; retained for compatibility with old callers. */
-  async saveToFile(filePath: string): Promise<void> {
-    await mkdir(join(filePath, ".."), { recursive: true });
-    const data = [...this.entries.values()];
-    await writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
-  }
-
-  /**
-   * Load entries. Accepts either a legacy JSON file (array of entries) or — if
-   * the path does not resolve to a JSON file — falls back to loading the
-   * Markdown store from {@link storageDir}. Returns the number loaded.
-   */
-  async loadFromFile(filePath: string): Promise<number> {
-    try {
-      const raw = await readFile(filePath, "utf-8");
-      const data: MemoryEntry[] = JSON.parse(raw);
-      for (const entry of data) {
-        this.entries.set(entry.id, this.hydrateLegacy(entry));
-      }
-      this.loaded = true;
-      return data.length;
-    } catch {
-      // No legacy JSON — load the Markdown store instead.
-      const before = this.entries.size;
-      await this.ensureLoaded();
-      return this.entries.size - before;
-    }
-  }
-
   buildMemoryPrompt(maxEntries = 10, query?: string): string {
     return this.selectRelevantForPrompt(maxEntries, query).text;
   }
@@ -756,9 +729,17 @@ export class MemoryManager {
   private metadataToEntry(
     metadata: Record<string, unknown>,
     body: string,
-    fallbackId: string,
-    fallbackTime: number,
   ): MemoryEntry {
+    if (metadata.schema_version !== SCHEMA_VERSION) {
+      throw new Error(
+        `Unsupported memory schema version ${String(metadata.schema_version)}; expected ${SCHEMA_VERSION}`,
+      );
+    }
+    for (const field of ["id", "name", "description", "type", "scope", "importance", "signature", "created_at", "updated_at", "use_count"] as const) {
+      if (metadata[field] === undefined || metadata[field] === "") {
+        throw new Error(`Memory record is missing required field: ${field}`);
+      }
+    }
     const knownKeys = new Set<string>([
       ...FRONTMATTER_FIELDS,
       "category",
@@ -768,8 +749,15 @@ export class MemoryManager {
     for (const [k, v] of Object.entries(metadata)) {
       if (!knownKeys.has(k)) extra[k] = v;
     }
-    const createdAt = fromIso(metadata.created_at) ?? fallbackTime;
-    const updatedAt = fromIso(metadata.updated_at) ?? createdAt;
+    const createdAt = fromIso(metadata.created_at);
+    const updatedAt = fromIso(metadata.updated_at);
+    const type = parseMemoryType(metadata.type);
+    const scope = parseMemoryScope(metadata.scope);
+    const importance = coerceInt(metadata.importance);
+    const useCount = coerceInt(metadata.use_count);
+    if (createdAt === undefined || updatedAt === undefined || !type || !scope || importance === undefined || useCount === undefined) {
+      throw new Error("Memory record contains invalid typed frontmatter fields");
+    }
     const tagsRaw = metadata.tags;
     const tags = Array.isArray(tagsRaw)
       ? tagsRaw.map((t) => String(t))
@@ -777,7 +765,7 @@ export class MemoryManager {
         ? [tagsRaw]
         : undefined;
     return {
-      id: String(metadata.id || fallbackId),
+      id: String(metadata.id),
       content: body.replace(/^\n+/, "").replace(/\n+$/, ""),
       tags,
       createdAt,
@@ -785,29 +773,12 @@ export class MemoryManager {
       metadata: Object.keys(extra).length ? extra : undefined,
       name: metadata.name ? String(metadata.name) : undefined,
       description: metadata.description ? String(metadata.description) : undefined,
-      type: parseMemoryType(metadata.type) ?? DEFAULT_MEMORY_TYPE,
-      scope: parseMemoryScope(metadata.scope) ?? DEFAULT_MEMORY_SCOPE,
-      importance: coerceInt(metadata.importance),
-      signature: metadata.signature ? String(metadata.signature) : undefined,
-      useCount: coerceInt(metadata.use_count),
+      type,
+      scope,
+      importance,
+      signature: String(metadata.signature),
+      useCount,
       lastUsedAt: fromIso(metadata.last_used_at),
-    };
-  }
-
-  private hydrateLegacy(entry: MemoryEntry): MemoryEntry {
-    return {
-      ...entry,
-      type: entry.type ?? DEFAULT_MEMORY_TYPE,
-      scope: entry.scope ?? DEFAULT_MEMORY_SCOPE,
-      importance: entry.importance ?? 0,
-      useCount: entry.useCount ?? 0,
-      signature:
-        entry.signature ??
-        computeMemorySignature(
-          entry.content,
-          entry.type ?? DEFAULT_MEMORY_TYPE,
-          "knowledge",
-        ),
     };
   }
 
@@ -834,26 +805,23 @@ export class MemoryManager {
       return;
     }
     this.loaded = true;
+    let files: string[];
     try {
-      const files = await readdir(this.storageDir);
-      for (const file of files) {
+      files = await readdir(this.storageDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const file of files) {
         if (!file.endsWith(".md") || file === "MEMORY.md") continue;
         const path = join(this.storageDir, file);
-        let raw: string;
-        try {
-          raw = await readFile(path, "utf-8");
-        } catch {
-          continue;
-        }
+        const raw = await readFile(path, "utf-8");
         const { metadata, body } = splitMemoryFile(raw);
-        let mtime = Date.now();
-        try {
-          mtime = (await stat(path)).mtimeMs;
-        } catch {
-          // keep default
+        const entry = this.metadataToEntry(metadata, body);
+        const fileId = file.replace(/\.md$/, "");
+        if (entry.id !== fileId) {
+          throw new Error(`Memory id ${entry.id} does not match filename ${file}`);
         }
-        const fallbackId = file.replace(/\.md$/, "");
-        const entry = this.metadataToEntry(metadata, body, fallbackId, mtime);
         if (!entry.signature) {
           entry.signature = computeMemorySignature(
             entry.content,
@@ -862,9 +830,6 @@ export class MemoryManager {
           );
         }
         this.entries.set(entry.id, entry);
-      }
-    } catch {
-      // directory may not exist yet
     }
   }
 

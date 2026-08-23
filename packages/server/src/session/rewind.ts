@@ -1,13 +1,13 @@
 /**
  * Pure transcript rewind helper for POST /sessions/:id/rewind.
- * Counts user turns from the end (same semantics as legacy REPL /rewind).
+ * Counts user turns from the end.
  */
 
 import type {
   ReplaceTranscriptMessageInput,
   SessionMessagePartRecord,
   SessionMessageRecord,
-} from "@openharness/services";
+} from "@openharness/protocol";
 
 export interface RewindTranscriptResult {
   kept: ReplaceTranscriptMessageInput[];

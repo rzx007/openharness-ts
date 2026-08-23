@@ -644,17 +644,6 @@ export async function loadClaudeMdPrompt(
   return lines.join("\n");
 }
 
-/**
- * @deprecated Use {@link loadClaudeMdPrompt} / {@link discoverClaudeMdFiles}.
- * Retained as a thin wrapper that returns the assembled instruction section
- * (or null) for the directory tree rooted at `projectRoot`.
- */
-export async function discoverClaudeMd(
-  projectRoot: string,
-): Promise<string | null> {
-  return loadClaudeMdPrompt(projectRoot);
-}
-
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);

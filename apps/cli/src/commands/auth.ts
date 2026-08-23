@@ -37,14 +37,6 @@ export function createAuthCommand(): Command {
     });
 
   cmd
-    .command("codex-login")
-    .description("Alias for 'auth login codex'")
-    .action(async () => {
-      const chalk = (await import("chalk")).default;
-      await reportCodexLogin(chalk);
-    });
-
-  cmd
     .command("status")
     .description("Show authentication status")
     .action(async () => {

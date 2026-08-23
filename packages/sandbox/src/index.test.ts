@@ -27,7 +27,6 @@ import {
   resolveHostShellLauncher,
   resolveShellArgv,
   resetHostShellCacheForTests,
-  SandboxAdapter,
   validateSandboxPath,
   wrapCommandForSrt,
   SandboxUnavailableError,
@@ -37,20 +36,6 @@ import {
   setActiveSandboxSession,
   toContainerWorkspacePath,
 } from "./index.js";
-
-describe("SandboxAdapter", () => {
-  it("isAvailable returns false when sandbox is not configured", () => {
-    const adapter = new SandboxAdapter();
-    expect(adapter.isAvailable()).toBe(false);
-  });
-
-  it("execute runs through the shared shell path", async () => {
-    const adapter = new SandboxAdapter();
-    const result = await adapter.execute("echo adapter-ok");
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("adapter-ok");
-  }, 20_000);
-});
 
 describe("normalizeSandboxConfig", () => {
   it("fills defaults and preserves nested overrides", () => {
@@ -72,9 +57,6 @@ describe("normalizeSandboxConfig", () => {
     expect(config.docker.autoBuildImage).toBe(true);
   });
 
-  it("accepts legacy runtime aliases", () => {
-    expect(normalizeSandboxConfig({ enabled: true, runtime: "docker" }).backend).toBe("docker");
-  });
 });
 
 describe("detectSandboxPlatform", () => {

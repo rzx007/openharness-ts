@@ -32,8 +32,6 @@ export interface PrintSessionOptions {
   effort?: string;
   daemonUrl?: string;
   daemonToken?: string;
-  continue?: boolean;
-  resume?: string;
 }
 
 /** Build daemon session.metadata from CLI overrides / settings. */
@@ -67,20 +65,6 @@ export function buildPrintSessionMetadata(
     effort: typeof effort === "string" && effort ? effort as "low" | "medium" | "high" : undefined,
     sessionMode: options.coordinator === true || isCoordinatorMode() ? "coordinator" : "direct",
   });
-}
-
-/**
- * Reject legacy project-level snapshot flags until daemon resume is wired.
- */
-export function rejectPrintContinueResume(options: Pick<PrintSessionOptions, "continue" | "resume">): void {
-  if (!options.continue && !options.resume) return;
-  console.error(
-    "`--continue` / `--resume` for project-level print snapshots are not migrated to the daemon store yet.\n" +
-      "Omit these flags for a new daemon session, or use TUI `/sessions` / `/resume`.\n" +
-      "Example: ohs -p \"follow up\"",
-  );
-  process.exit(1);
-  return;
 }
 
 function runTerminalStatus(
@@ -234,7 +218,6 @@ export async function runPrintSession(
   prompt: string,
   options: PrintSessionOptions,
 ): Promise<void> {
-  rejectPrintContinueResume(options);
 
   let daemon: { url: string; token: string };
   if (options.daemonUrl) {

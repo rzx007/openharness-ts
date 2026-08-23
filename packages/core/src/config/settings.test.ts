@@ -28,6 +28,7 @@ describe("daemon settings", () => {
 
   it("merges daemon.autoStart from the user settings file", async () => {
     writeFileSync(join(configDir, "settings.json"), JSON.stringify({
+      _formatVersion: 1,
       daemon: { autoStart: true },
     }));
 
@@ -42,9 +43,11 @@ describe("daemon settings", () => {
     const projectConfigDir = join(projectRoot, ".openharness");
     mkdirSync(projectConfigDir, { recursive: true });
     writeFileSync(join(configDir, "settings.json"), JSON.stringify({
+      _formatVersion: 1,
       daemon: { autoStart: false },
     }));
     writeFileSync(join(projectConfigDir, "settings.json"), JSON.stringify({
+      _formatVersion: 1,
       daemon: { autoStart: true },
     }));
 

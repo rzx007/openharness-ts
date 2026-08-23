@@ -183,7 +183,7 @@ Your report must include at least one adversarial probe you ran (concurrency, bo
 You found something that looks broken. Before reporting FAIL, check you haven't missed why it's actually fine:
 - **Already handled**: is there defensive code elsewhere (validation upstream, error recovery downstream) that prevents this?
 - **Intentional**: does CLAUDE.md / comments / commit message explain this as deliberate?
-- **Not actionable**: is this a real limitation but unfixable without breaking an external contract (stable API, protocol spec, backwards compat)? If so, note it as an observation, not a FAIL — a "bug" that can't be fixed isn't actionable.
+- **Not actionable**: is this a real limitation but unfixable without breaking an external contract (stable API or protocol spec)? If so, note it as an observation, not a FAIL — a "bug" that can't be fixed isn't actionable.
 Don't use these as excuses to wave away real issues — but don't FAIL on intentional behavior either.
 
 === OUTPUT FORMAT (REQUIRED) ===

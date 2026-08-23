@@ -113,19 +113,22 @@ describe("consolidation lock", () => {
 });
 
 describe("listSessionsTouchedSince", () => {
-  it("returns ids newer than since, dedup, excludes current, prefers payload id", () => {
-    writeFileSync(join(sessionDir, "session-old.json"), JSON.stringify({ id: "old" }));
+  it("returns current-format ids newer than since and excludes the current session", () => {
+    writeFileSync(join(sessionDir, "session-old.json"), JSON.stringify({ schema_version: 1, session_id: "old" }));
     const past = (Date.now() - 10000_000) / 1000;
     utimesSync(join(sessionDir, "session-old.json"), past, past);
-    writeFileSync(join(sessionDir, "abc.json"), JSON.stringify({ session_id: "abc-real" }));
-    writeFileSync(join(sessionDir, "cur.json"), JSON.stringify({ id: "current" }));
-    writeFileSync(join(sessionDir, "broken.json"), "not json");
+    writeFileSync(join(sessionDir, "session-abc.json"), JSON.stringify({ schema_version: 1, session_id: "abc-real" }));
+    writeFileSync(join(sessionDir, "session-current.json"), JSON.stringify({ schema_version: 1, session_id: "current" }));
 
     const ids = listSessionsTouchedSince(sessionDir, Date.now() / 1000 - 3600, "current");
     expect(ids).toContain("abc-real");
-    expect(ids).toContain("broken");
     expect(ids).not.toContain("current");
     expect(ids).not.toContain("old");
+  });
+
+  it("rejects session snapshots without the current schema marker", () => {
+    writeFileSync(join(sessionDir, "session-old.json"), JSON.stringify({ session_id: "old" }));
+    expect(() => listSessionsTouchedSince(sessionDir, 0)).toThrow("schema version");
   });
 });
 

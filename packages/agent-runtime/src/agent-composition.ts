@@ -40,7 +40,6 @@ interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
   mcpServers?: Record<string, McpServerConfig>;
   extensions?: OpenHarnessAgentExtension[];
   childIdleTtlMs?: number;
-  childEnvironment?: AgentChildEnvironmentProvider;
   hostCapabilities?: AgentHostCapabilities;
 }
 
@@ -85,7 +84,7 @@ export async function composeOpenHarnessAgent(
     configuration: options,
     hostCapabilities: {
       schedules: Boolean(explicitCapabilities?.schedules ?? internal.effects.schedules),
-      terminal: Boolean(explicitCapabilities?.terminal ?? options.terminal),
+      terminal: Boolean(explicitCapabilities?.terminal),
       jobs: Boolean(explicitCapabilities?.jobs) || !explicitCapabilities,
       workflowRepository: explicitCapabilities?.workflowRepository,
     },
@@ -123,9 +122,7 @@ export async function composeOpenHarnessAgent(
         toolRegistry: runtime.toolRegistry,
       }),
     );
-    runtime.queryEngine.setTerminal(
-      explicitCapabilities?.terminal ?? options.terminal,
-    );
+    runtime.queryEngine.setTerminal(explicitCapabilities?.terminal);
 
     const memory =
       settings.memory?.enabled === false
@@ -148,14 +145,13 @@ export async function composeOpenHarnessAgent(
       directory: internal.childDirectory,
       environment:
         explicitCapabilities?.childEnvironment ??
-        options.childEnvironment ??
         createDefaultChildEnvironmentProvider(),
+      hostCapabilities: explicitCapabilities,
       onWarning: (event) => process.stderr.write(`${JSON.stringify(event)}\n`),
       createAgent: internal.createAgent,
     });
     const jobs =
       explicitCapabilities?.jobs ??
-      options.jobs ??
       (!explicitCapabilities
         ? new LocalAgentJobHost(cwd, session.id, childManager)
         : undefined);
@@ -163,13 +159,11 @@ export async function composeOpenHarnessAgent(
     const hostCapabilities = [
       "permissions",
       ...(jobs ? ["jobs"] : []),
-      ...(explicitCapabilities?.terminal ?? options.terminal
-        ? ["terminal"]
-        : []),
+      ...(explicitCapabilities?.terminal ? ["terminal"] : []),
       ...(explicitCapabilities?.schedules ?? internal.effects.schedules
         ? ["schedules"]
         : []),
-      ...(explicitCapabilities?.childEnvironment ?? options.childEnvironment
+      ...(!explicitCapabilities || explicitCapabilities.childEnvironment
         ? ["childEnvironment"]
         : []),
       ...(explicitCapabilities?.workflowRepository ? ["workflowRepository"] : []),

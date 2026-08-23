@@ -1,4 +1,5 @@
-import type { SessionEventRecord, SessionStore } from "@openharness/services";
+import type { SessionEventRecord } from "@openharness/protocol";
+import type { SessionStore } from "@openharness/services";
 
 export interface SessionEventSink {
   broadcastSince(seq: number): void;

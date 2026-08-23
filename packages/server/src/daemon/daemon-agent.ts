@@ -18,12 +18,12 @@ import type {
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
-import { readSessionRuntimeConfig } from "@openharness/services";
+import { readSessionRuntimeConfig } from "@openharness/protocol";
 import type {
   SessionMessagePartRecord,
   SessionMessageRecord,
   SessionRecord,
-} from "@openharness/services/session-runtime/types";
+} from "@openharness/protocol";
 
 import { transcriptToAgentMessages } from "../application/agent/agent-transcript.js";
 
@@ -102,12 +102,6 @@ export function createDaemonAgentLoader(
       cwd: session.cwd,
       sessionId: session.id,
       ...agentConfigurationFromSession(session, settings),
-      ...(options.requestPermission
-        ? { requestPermission: options.requestPermission }
-        : {}),
-      ...(options.schedules ? { schedules: options.schedules } : {}),
-      ...(terminal ? { terminal } : {}),
-      ...(jobs ? { jobs } : {}),
       hostCapabilities: {
         permissions: { requestPermission },
         ...(options.schedules ? { schedules: options.schedules } : {}),
@@ -197,7 +191,7 @@ function agentConfigurationFromSession(
     permissionMode: runtime.permissionMode,
     systemPrompt: runtime.systemPrompt,
     maxTurns: runtime.maxTurns,
-    allowedTools: runtime.allowedTools,
+    hostToolCeiling: runtime.allowedTools,
     disallowedTools: runtime.disallowedTools,
     effort: runtime.effort,
   };
@@ -207,7 +201,7 @@ function agentConfigurationFromSession(
       cwd: session.cwd,
       sessionPrompt: configuration.systemPrompt,
       hostToolCeiling:
-        configuration.allowedTools ?? settings?.permission.allowedTools,
+        configuration.hostToolCeiling ?? settings?.permission.allowedTools,
     });
     configuration.roleAllowedTools = getCoordinatorTools();
   }

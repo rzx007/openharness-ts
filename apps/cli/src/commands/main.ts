@@ -26,8 +26,6 @@ type FrontendAttachment = {
 interface MainOptions {
   model?: string;
   print?: boolean;
-  continue?: boolean;
-  resume?: string;
   name?: string;
   provider?: string;
   permissionMode?: string;
@@ -221,16 +219,6 @@ function isCoordinatorSessionRequested(options: Pick<MainOptions, "coordinator">
   return options.coordinator === true || isCoordinatorMode();
 }
 
-function rejectInteractiveContinueResume(options: MainOptions): void {
-  if (!options.continue && !options.resume) return;
-  console.error(
-    "`--continue` / `--resume` are not available for interactive TUI.\n" +
-      "Use TUI `/sessions` or `/resume` for daemon sessions.\n" +
-      "Example: ohs",
-  );
-  process.exit(1);
-}
-
 /**
  * 应用程序的主入口点，根据提供的选项和提示决定执行模式。
  *
@@ -272,7 +260,6 @@ export async function mainAction(
     return;
   }
 
-  rejectInteractiveContinueResume(options);
   await runTuiMode(settings, options, prompt);
 }
 
@@ -301,8 +288,6 @@ async function runPrintMode(
     effort: options.effort,
     daemonUrl: options.daemonUrl,
     daemonToken: options.daemonToken,
-    continue: options.continue,
-    resume: options.resume,
   });
 }
 
@@ -679,18 +664,6 @@ export function buildSkillPrompt(skill: SkillDefinition, args: string): string {
   const trimmedArgs = args.trim();
   if (!trimmedArgs) return base;
   return `${base.trimEnd()}\n\n## Arguments\n${trimmedArgs}\n`;
-}
-
-/**
- * 构建"给模型看"的技能列表（进 system prompt 的 skillsList 来源）。
- *
- * @deprecated 薄封装，直接转发 {@link SkillRegistry.modelVisibleList}。新代码请
- * 直接调用 `skillRegistry.modelVisibleList()`。保留此导出仅为兼容既有测试/调用。
- */
-export function buildModelVisibleSkillsList(
-  skillRegistry: SkillRegistry,
-): Array<{ name: string; description: string }> {
-  return skillRegistry.modelVisibleList();
 }
 
 /**

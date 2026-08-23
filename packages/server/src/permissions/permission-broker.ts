@@ -1,4 +1,5 @@
-import type { PermissionRequestRecord, PermissionStatus, SessionStore } from "@openharness/services";
+import type { PermissionRequestRecord, PermissionStatus } from "@openharness/protocol";
+import type { SessionStore } from "@openharness/services";
 import type { AgentPermissionDecision } from "@openharness/core";
 import type { StructuredLogger } from "../shared/observability.js";
 import { PermissionController } from "./permission-controller.js";

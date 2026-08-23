@@ -35,6 +35,7 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set<MessageType>([
 ]);
 
 export interface MailboxMessage {
+  schemaVersion: 1;
   id: string;
   type: MessageType;
   sender: string;
@@ -85,17 +86,28 @@ export function getAgentMailboxDir(
 // TeammateMailbox
 // ---------------------------------------------------------------------------
 
-function parseMessage(data: Record<string, unknown>): MailboxMessage | null {
-  if (typeof data.id !== "string" || typeof data.timestamp !== "number") return null;
-  if (typeof data.type !== "string" || !MESSAGE_TYPES.has(data.type)) return null;
+function parseMessage(data: Record<string, unknown>): MailboxMessage {
+  if (data.schemaVersion !== 1) {
+    throw new Error(`Unsupported mailbox message schema version: ${String(data.schemaVersion)}`);
+  }
+  if (typeof data.id !== "string" || typeof data.timestamp !== "number") {
+    throw new Error("Mailbox message is missing a valid id or timestamp");
+  }
+  if (typeof data.type !== "string" || !MESSAGE_TYPES.has(data.type)) {
+    throw new Error(`Mailbox message has an invalid type: ${String(data.type)}`);
+  }
+  if (typeof data.sender !== "string" || typeof data.recipient !== "string" || !data.payload || typeof data.payload !== "object" || Array.isArray(data.payload) || typeof data.read !== "boolean") {
+    throw new Error("Mailbox message contains invalid sender, recipient, payload, or read fields");
+  }
   return {
+    schemaVersion: 1,
     id: data.id,
     type: data.type as MessageType,
-    sender: typeof data.sender === "string" ? data.sender : "",
-    recipient: typeof data.recipient === "string" ? data.recipient : "",
-    payload: (data.payload ?? {}) as Record<string, unknown>,
+    sender: data.sender,
+    recipient: data.recipient,
+    payload: data.payload as Record<string, unknown>,
     timestamp: data.timestamp,
-    read: data.read === true,
+    read: data.read,
   };
 }
 
@@ -127,7 +139,7 @@ export class TeammateMailbox {
     });
   }
 
-  /** 按文件名（≈时间）排序返回；跳过点文件/.tmp/损坏 JSON；收件箱不存在视为空。 */
+  /** 按文件名（≈时间）排序返回；跳过点文件/.tmp；收件箱不存在视为空。 */
   async readAll(unreadOnly = true): Promise<MailboxMessage[]> {
     const inbox = this.getMailboxDir();
     if (!existsSync(inbox)) return [];
@@ -138,13 +150,7 @@ export class TeammateMailbox {
 
     const messages: MailboxMessage[] = [];
     for (const name of entries) {
-      let msg: MailboxMessage | null;
-      try {
-        msg = parseMessage(JSON.parse(await fs.readFile(join(inbox, name), "utf-8")));
-      } catch {
-        continue; // 损坏消息跳过而非崩溃
-      }
-      if (!msg) continue;
+      const msg = parseMessage(JSON.parse(await fs.readFile(join(inbox, name), "utf-8")));
       if (!unreadOnly || !msg.read) messages.push(msg);
     }
     return messages;
@@ -160,16 +166,13 @@ export class TeammateMailbox {
       );
       for (const name of entries) {
         const path = join(inbox, name);
-        let data: Record<string, unknown>;
-        try {
-          data = JSON.parse(await fs.readFile(path, "utf-8")) as Record<string, unknown>;
-        } catch {
-          continue;
-        }
-        if (data.id === messageId) {
-          data.read = true;
+        const message = parseMessage(
+          JSON.parse(await fs.readFile(path, "utf-8")) as Record<string, unknown>,
+        );
+        if (message.id === messageId) {
+          const updated: MailboxMessage = { ...message, read: true };
           const tmpPath = `${path}.tmp`;
-          await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+          await fs.writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
           await fs.rename(tmpPath, path);
           return;
         }
@@ -201,6 +204,7 @@ function makeMessage(
   payload: Record<string, unknown>,
 ): MailboxMessage {
   return {
+    schemaVersion: 1,
     id: randomUUID(),
     type,
     sender,
@@ -268,22 +272,11 @@ export function createPermissionResponseMessage(
 }
 
 // ---------------------------------------------------------------------------
-// 类型守卫（兼容 payload.text 内嵌 JSON 的信封格式）
+// 类型守卫
 // ---------------------------------------------------------------------------
 
 function guard(msg: MailboxMessage, type: MessageType): Record<string, unknown> | null {
   if (msg.type === type) return msg.payload;
-  const text = msg.payload.text;
-  if (typeof text === "string" && text) {
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      if (parsed && typeof parsed === "object" && (parsed as Record<string, unknown>).type === type) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {
-      // 非 JSON 文本不是信封
-    }
-  }
   return null;
 }
 
@@ -311,20 +304,10 @@ export async function writeToMailbox(
   const team = teamName ?? process.env.CLAUDE_CODE_TEAM_NAME ?? "default";
   const text = typeof message.text === "string" ? message.text : "";
 
-  let msgType: MessageType = "user_message";
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const t = (parsed as Record<string, unknown>).type;
-      if (typeof t === "string" && MESSAGE_TYPES.has(t)) msgType = t as MessageType;
-    }
-  } catch {
-    // 纯文本按 user_message 处理
-  }
-
   const msg: MailboxMessage = {
+    schemaVersion: 1,
     id: randomUUID(),
-    type: msgType,
+    type: "user_message",
     sender: typeof message.from === "string" ? message.from : "unknown",
     recipient: recipientName,
     payload: {

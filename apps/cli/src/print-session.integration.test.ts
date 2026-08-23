@@ -98,7 +98,7 @@ function testAgent(
             requestPermission: async (request) => {
               const requestId = `permission-${sequence + 1}`;
               await publish({ type: "permission.requested", data: { requestId, request } }, context);
-              const requestPermission = agentOptions.requestPermission;
+              const requestPermission = agentOptions.hostCapabilities?.permissions.requestPermission;
               if (!requestPermission) throw new Error("Permission effect is not configured");
               const decision = await requestPermission(request, {
                 agentId: session.id,

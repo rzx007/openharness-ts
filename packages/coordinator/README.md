@@ -14,8 +14,7 @@
 
 | 模块 | 职责 |
 |------|------|
-| `workflow-scheduler.ts` | 兼容导出入口；真实实现位于 `workflow/` |
-| `workflow-store.ts` | 持久化兼容导出入口；真实实现位于 `workflow/store.ts` |
+| `workflow/` | Workflow 的数据结构、校验、执行、快照与持久化 |
 | `workflow/model.ts` | `WorkflowSpec`、plan、snapshot、notification、reconciliation 等核心类型 |
 | `workflow/validation.ts` | DAG、三种 mode、依赖、writeScope 与 spec 校验 |
 | `workflow/budget.ts` | budget preset、hard/soft limit、usage 汇总 |

@@ -13,7 +13,6 @@ export type SandboxPolicyEnforcement = "off" | "best-effort" | "required";
 export interface ResolvedSandboxConfig {
   enabled: boolean;
   backend: SandboxBackend;
-  runtime?: string;
   failIfUnavailable: boolean;
   enabledPlatforms: Array<"linux" | "wsl" | "macos">;
   filesystem: {

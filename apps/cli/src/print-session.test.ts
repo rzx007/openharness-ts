@@ -18,38 +18,7 @@ vi.mock("@openharness/client", async () => {
 
 import { OpenHarnessClient } from "@openharness/client";
 import { ensureLocalDaemon } from "./ensure-daemon.js";
-import { rejectPrintContinueResume, runPrintSession } from "./print-session.js";
-
-describe("rejectPrintContinueResume", () => {
-  let exitSpy: MockInstance<(code?: string | number | null) => never>;
-  let errorSpy: MockInstance<(...args: unknown[]) => void>;
-
-  beforeEach(() => {
-    exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  });
-
-  afterEach(() => {
-    exitSpy.mockRestore();
-    errorSpy.mockRestore();
-  });
-
-  it("allows print without continue/resume flags", () => {
-    rejectPrintContinueResume({});
-    expect(exitSpy).not.toHaveBeenCalled();
-  });
-
-  it("exits when --continue is set", () => {
-    rejectPrintContinueResume({ continue: true });
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(errorSpy).toHaveBeenCalled();
-  });
-
-  it("exits when --resume is set", () => {
-    rejectPrintContinueResume({ resume: "abc" });
-    expect(exitSpy).toHaveBeenCalledWith(1);
-  });
-});
+import { runPrintSession } from "./print-session.js";
 
 describe("runPrintSession", () => {
   let exitSpy: MockInstance<(code?: string | number | null) => never>;
@@ -118,6 +87,7 @@ describe("runPrintSession", () => {
         messages: [],
         parts: [],
         runs: [],
+        attempts: [],
         permissions: [],
       })),
       replyPermission: vi.fn(),
@@ -259,6 +229,7 @@ describe("runPrintSession", () => {
         },
       ],
       runs: [run],
+      attempts: [],
       permissions: [],
     };
     const Client = OpenHarnessClient as unknown as ReturnType<typeof vi.fn>;
@@ -276,6 +247,7 @@ describe("runPrintSession", () => {
           messages: [],
           parts: [],
           runs: [],
+          attempts: [],
           permissions: [],
         })
         .mockResolvedValue(completedSnapshot),
@@ -352,6 +324,7 @@ describe("runPrintSession", () => {
         },
       ],
       runs: [run],
+      attempts: [],
       permissions: [],
     };
     const Client = OpenHarnessClient as unknown as ReturnType<typeof vi.fn>;
@@ -369,6 +342,7 @@ describe("runPrintSession", () => {
           messages: [],
           parts: [],
           runs: [],
+          attempts: [],
           permissions: [],
         })
         .mockResolvedValue(completedSnapshot),
@@ -421,6 +395,7 @@ describe("runPrintSession", () => {
         messages: [],
         parts: [],
         runs: [],
+        attempts: [],
         permissions: [],
       })),
       replyPermission: vi.fn(),

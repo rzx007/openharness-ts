@@ -1,11 +1,13 @@
 import {
   computeNextScheduledTime,
-  type CreateScheduledTaskInput,
-  type ScheduledRunRecord,
-  type ScheduledTaskRecord,
   type SessionStore,
-  type UpdateScheduledTaskInput,
 } from "@openharness/services";
+import type {
+  CreateScheduledTaskInput,
+  ScheduledRunRecord,
+  ScheduledTaskRecord,
+  UpdateScheduledTaskInput,
+} from "@openharness/protocol";
 
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const DAEMON_RESTART_REASON =

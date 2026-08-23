@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { rewindTranscript } from "../rewind.js";
-import type { SessionMessagePartRecord, SessionMessageRecord } from "@openharness/services";
+import type { SessionMessagePartRecord, SessionMessageRecord } from "@openharness/protocol";
 
 function message(
   id: string,

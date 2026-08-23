@@ -55,7 +55,7 @@ import type {
   ExternalConversationRecord,
   ChannelDeliveryRecord,
   ChannelDeliveryStatus,
-} from "./types.js";
+} from "@openharness/protocol";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
 import { defaultDurableEventRegistry, type DurableEventRegistry } from "./event-registry.js";
 
@@ -177,7 +177,9 @@ export class SessionStore {
       this.database.pragma("foreign_keys = ON");
       this.database.pragma("busy_timeout = 5000");
       this.database.pragma("synchronous = NORMAL");
+      this.assertCurrentStorageFormatOrEmpty();
       this.applyMigrations();
+      this.assertCurrentStorageFormat();
       this.state = this.load();
     } catch (error) {
       this.database.close();
@@ -1420,7 +1422,7 @@ export class SessionStore {
     });
   }
 
-  /** Respect renamed titles; use the first prompt only for legacy placeholder titles. */
+  /** Respect renamed titles; use the first prompt only for initial placeholder titles. */
   resolveSessionListTitle(sessionId: string): string {
     const session = assertSession(this.state, sessionId);
     const stored = session.title.trim();
@@ -2597,6 +2599,30 @@ export class SessionStore {
     });
   }
 
+  private assertCurrentStorageFormatOrEmpty(): void {
+    const tables = this.database
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all() as Array<{ name: string }>;
+    if (tables.length === 0) return;
+    if (!tables.some((table) => table.name === "application_storage_format")) {
+      throw new Error(
+        "Unsupported OpenHarness database format. Existing databases are not upgraded; start with a new database path.",
+      );
+    }
+    this.assertCurrentStorageFormat();
+  }
+
+  private assertCurrentStorageFormat(): void {
+    const row = this.database
+      .prepare("SELECT version FROM application_storage_format WHERE id = 1")
+      .get() as { version?: unknown } | undefined;
+    if (row?.version !== 1) {
+      throw new Error(
+        `Unsupported OpenHarness database format ${String(row?.version)}; expected 1. Existing databases are not upgraded.`,
+      );
+    }
+  }
+
   private load(): SessionState {
     const state = emptyState();
     for (const row of this.database
@@ -2760,7 +2786,7 @@ export class SessionStore {
     for (const row of this.database
       .prepare("SELECT * FROM session_event ORDER BY seq")
       .all() as Array<Record<string, unknown>>) {
-      const schemaVersion = typeof row.schema_version === "number" ? row.schema_version : 1;
+      const schemaVersion = row.schema_version as number;
       const prepared = this.eventRegistry.prepareRead(
         row.type as string,
         schemaVersion,

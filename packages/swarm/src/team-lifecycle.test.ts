@@ -51,7 +51,6 @@ function makeMember(overrides: Partial<TeamMember> = {}): TeamMember {
     subscriptions: [],
     isActive: true,
     mode: null,
-    tmuxPaneId: "",
     cwd: "",
     worktreePath: null,
     permissions: [],
@@ -106,7 +105,7 @@ describe("TeamLifecycleManager CRUD", () => {
     expect(() => manager.createTeam(team)).toThrow(/already exists/);
   });
 
-  it("getTeam returns null for a missing or corrupted team", () => {
+  it("getTeam returns null for missing data and rejects corrupted data", () => {
     const manager = new TeamLifecycleManager();
     // 旧实现的 getTeamDir 读路径也 mkdir，可能留有历史空目录：先清掉再验证。
     rmSync(join(homedir(), ".openharness-ts", "teams", "__test_tl_never_created"), { recursive: true, force: true });
@@ -117,7 +116,7 @@ describe("TeamLifecycleManager CRUD", () => {
     const team = uniqueTeam();
     mkdirSync(join(homedir(), ".openharness-ts", "teams", team), { recursive: true });
     writeFileSync(teamJsonPath(team), "not json");
-    expect(manager.getTeam(team)).toBeNull();
+    expect(() => manager.getTeam(team)).toThrow();
   });
 
   it("deleteTeam removes the whole team directory and throws if missing", () => {
@@ -248,8 +247,8 @@ describe("mode and active-status helpers", () => {
   });
 });
 
-describe("serialization compatibility", () => {
-  it("writes snake_case to disk and reads camelCase fallback", () => {
+describe("current serialization format", () => {
+  it("writes versioned snake_case and rejects unversioned data", () => {
     const team = uniqueTeam();
     new TeamLifecycleManager().createTeam(team);
     writeTeamFile(team, {
@@ -258,7 +257,6 @@ describe("serialization compatibility", () => {
       createdAt: 1,
       leadAgentId: "lead-1",
       leadSessionId: null,
-      hiddenPaneIds: [],
       members: { m1: makeMember({ agentId: "m1", worktreePath: "/wt" }) },
       teamAllowedPaths: [],
       allowedPaths: [],
@@ -266,11 +264,11 @@ describe("serialization compatibility", () => {
     });
 
     const raw = JSON.parse(readFileSync(teamJsonPath(team), "utf-8"));
+    expect(raw.schema_version).toBe(1);
     expect(raw.lead_agent_id).toBe("lead-1");
     expect(raw.members.m1.agent_id).toBe("m1");
     expect(raw.members.m1.worktree_path).toBe("/wt");
 
-    // camelCase 写盘（其他实现产出）也能读回。
     writeFileSync(
       teamJsonPath(team),
       JSON.stringify({
@@ -282,10 +280,7 @@ describe("serialization compatibility", () => {
         },
       }),
     );
-    const file = readTeamFile(team)!;
-    expect(file.createdAt).toBe(2);
-    expect(file.leadAgentId).toBe("lead-camel");
-    expect(file.members["m2"]!.agentId).toBe("m2");
+    expect(() => readTeamFile(team)).toThrow("Unsupported team data schema version");
   });
 });
 

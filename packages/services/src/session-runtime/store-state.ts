@@ -10,7 +10,7 @@ import type {
   SessionRunRecord,
   SessionRunAttemptRecord,
   SessionExecutionRecord,
-} from "./types.js";
+} from "@openharness/protocol";
 import type { DurableEventRegistry } from "./event-registry.js";
 
 export interface SessionState {

@@ -8,7 +8,6 @@ import type {
   AgentEventSubscription,
   AgentRunHandle,
   AgentRunResult,
-  AgentScheduleEffects,
   AgentSession,
   ContentBlock,
   HookDefinition,
@@ -28,7 +27,6 @@ import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import type { AgentHostCapabilities } from "./agent-options.js";
 import {
   AgentChildRegistry,
-  type AgentChildEnvironmentProvider,
   type AgentChildManager,
 } from "./child-agent.js";
 import { AgentEventBus } from "./event-source.js";
@@ -51,13 +49,9 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
   mcpServers?: Settings["mcpServers"];
   extensions?: OpenHarnessAgentExtension[];
   childIdleTtlMs?: number;
-  requestPermission?: AgentEffects["requestPermission"];
-  /** Host-owned Agent scheduled tasks. Omit when the host has no durable scheduler. */
-  schedules?: AgentScheduleEffects;
   /** Reliable ordered host sink. A rejection fails the active framework operation. */
   onEvent?: AgentEventListener;
-  childEnvironment?: AgentChildEnvironmentProvider;
-  /** 显式宿主能力。新入口优先使用；旧字段继续兼容。 */
+  /** 宿主明确交给 Agent 的能力。未提供时使用默认 Node 组装。 */
   hostCapabilities?: AgentHostCapabilities;
 }
 

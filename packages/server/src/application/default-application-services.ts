@@ -573,7 +573,6 @@ function toMemoryRecord(entry: MemoryEntry): MemoryEntryRecord {
 async function openMemoryManager(cwd: string): Promise<{ manager: MemoryManager; directory: string }> {
   const directory = getProjectMemoryDir(cwd);
   const manager = new MemoryManager(1000, directory);
-  await manager.loadFromFile(join(directory, "memory.json")).catch(() => {});
   return { manager, directory };
 }
 

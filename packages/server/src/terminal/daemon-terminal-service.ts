@@ -15,7 +15,8 @@ import type {
   TerminalWriteRequest,
 } from "@openharness/terminal";
 import { LocalTerminalProvider } from "@openharness/terminal-node";
-import type { SessionRecord, SessionStore } from "@openharness/services";
+import type { SessionRecord } from "@openharness/protocol";
+import type { SessionStore } from "@openharness/services";
 import { ApplicationError } from "../shared/application-error.js";
 
 export interface ListDaemonTerminalsOptions {

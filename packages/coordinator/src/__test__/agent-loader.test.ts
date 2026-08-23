@@ -40,13 +40,10 @@ describe("parseAgentFrontmatter", () => {
     expect(body).toBe("You are a reviewer.");
   });
 
-  it("falls back to line-based key:value when YAML is invalid", () => {
-    const { frontmatter, body } = parseAgentFrontmatter(
+  it("rejects invalid YAML instead of guessing a line-based format", () => {
+    expect(() => parseAgentFrontmatter(
       ["---", "name: broken", "desc: [unclosed", "---", "Body"].join("\n"),
-    );
-    expect(frontmatter.name).toBe("broken");
-    expect(frontmatter.desc).toBe("[unclosed");
-    expect(body).toBe("Body");
+    )).toThrow();
   });
 
   it("returns empty frontmatter without the --- header", () => {
@@ -61,7 +58,7 @@ describe("loadAgentsDir", () => {
     writeFileSync(join(tmp, `${name}.md`), content);
   }
 
-  it("loads the full field set with camelCase/snake_case tolerance", () => {
+  it("loads the current camelCase field set", () => {
     writeAgent(
       "full",
       [
@@ -73,14 +70,14 @@ describe("loadAgentsDir", () => {
         "model: inherit",
         "effort: high",
         "permissionMode: plan",
-        "max_turns: 7",
+        "maxTurns: 7",
         "skills: commit, review",
         "color: red",
         "background: true",
         "initialPrompt: start here",
         "memory: project",
         "isolation: worktree",
-        "omit_claude_md: true",
+        "omitClaudeMd: true",
         "criticalSystemReminder: stay safe",
         "requiredMcpServers: [db]",
         "permissions: 'a,b'",

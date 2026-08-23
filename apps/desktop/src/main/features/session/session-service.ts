@@ -50,7 +50,6 @@ import type {
   UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
 import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
-import { normalizeConfiguredModelId } from "./default-model-resolution"
 
 const execFileAsync = promisify(execFile)
 
@@ -77,8 +76,6 @@ class DesktopSessionService {
       typeof settings["model"] === "string" ? settings["model"] : undefined
     const configuredProvider = optionalProvider(settings["provider"])
     const configuredModel = storedConfiguredModel
-      ? normalizeConfiguredModelId(models, storedConfiguredModel, configuredProvider)
-      : undefined
     const defaultModel = configuredModel ?? models[0]?.id
     const defaultPermissionMode = readSettingsPermissionMode(settings)
 

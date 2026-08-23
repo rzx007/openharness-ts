@@ -11,7 +11,7 @@ import {
   runWorkflow,
   type WorkflowRunEvent,
   type WorkflowRunSnapshot,
-} from "../../workflow-scheduler.js";
+} from "../index.js";
 
 describe("createWorkflowPlan", () => {
   it("plans an explicit DAG in topological order", () => {

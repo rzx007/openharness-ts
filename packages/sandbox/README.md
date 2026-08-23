@@ -14,7 +14,6 @@ OpenHarness 的 sandbox runtime 辅助层。
 - 自定义 Docker 镜像必须提供 `node`、`rg`、`setsid`、`sleep` 和 `/bin/kill`，否则 shell 或文件工具可能无法运行。
 - `Read` / `Write` / `Edit` / `Glob` / `Grep` 先做路径校验；Docker active 时真实读写和搜索在容器内执行。`Read` / `Write` / `Edit` 通过容器内一次性 Node helper 执行，工具层用 stdin 传 `{ op, path, content }` 这类请求。
 - MCP stdio server 通过 `createProcess` 启动，和普通 Agent 工作负载走同一套 sandbox 规则。
-- `SandboxAdapter` 是兼容旧接口的门面，底层走统一 runtime 路径。
 
 ## 每次调用的 Sandbox Policy
 

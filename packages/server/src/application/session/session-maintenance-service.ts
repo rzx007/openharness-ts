@@ -1,4 +1,5 @@
-import type { SessionMessagePartRecord, SessionMessageRecord, SessionStore } from "@openharness/services";
+import type { SessionMessagePartRecord, SessionMessageRecord } from "@openharness/protocol";
+import type { SessionStore } from "@openharness/services";
 import type { AgentRememberResult } from "@openharness/agent-runtime";
 import { updateRulesFromSession, type SessionMessageLike } from "@openharness/personalization";
 

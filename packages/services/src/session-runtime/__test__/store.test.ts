@@ -194,36 +194,6 @@ describe("SessionStore", () => {
     }
   });
 
-  it("adopts a pre-Drizzle SQLite schema without replacing session data", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ohs-session-runtime-"));
-    const path = join(dir, "store.db");
-    try {
-      const database = new Database(path);
-      database.exec(`
-        CREATE TABLE session (
-          id TEXT PRIMARY KEY, parent_id TEXT, cwd TEXT NOT NULL, title TEXT NOT NULL,
-          model TEXT NOT NULL, agent TEXT, status TEXT NOT NULL, metadata_json TEXT NOT NULL,
-          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER
-        );
-      `);
-      database
-        .prepare(
-          "INSERT INTO session VALUES (?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)",
-        )
-        .run("s1", process.cwd(), "existing", "m", "idle", "{}", 1, 1);
-      database.close();
-
-      const store = new SessionStore({ path });
-      expect(store.getSession("s1")).toMatchObject({
-        id: "s1",
-        title: "existing",
-      });
-      store.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   it("updates session model and emits session.updated", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "old" });
@@ -525,7 +495,7 @@ describe("SessionStore", () => {
     }, { eventRegistry: fixtureEventRegistry });
   });
 
-  it("migrates legacy durable events to schema version 1", () => {
+  it("rejects databases without the current storage format marker", () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-session-event-version-"));
     const path = join(dir, "store.db");
     try {
@@ -545,35 +515,8 @@ describe("SessionStore", () => {
       `);
       legacy.close();
 
-      const store = new SessionStore({ path, eventRegistry: fixtureEventRegistry });
-      expect(store.listEvents()).toEqual([
-        {
-          id: "legacy-event",
-          seq: 7,
-          type: "daemon.legacy",
-          schemaVersion: 1,
-          payload: { ok: true },
-          createdAt: 100,
-        },
-      ]);
-      const appended = store.appendEvent({ type: "daemon.current" });
-      expect(appended.schemaVersion).toBe(1);
-      store.close();
-
-      const migrated = new Database(path, { readonly: true });
-      const columns = migrated
-        .prepare("PRAGMA table_info(session_event)")
-        .all() as Array<{ name: string; notnull: number; dflt_value: unknown }>;
-      expect(columns.find((column) => column.name === "schema_version")).toMatchObject({
-        notnull: 1,
-        dflt_value: "1",
-      });
-      expect(
-        migrated
-          .prepare("SELECT schema_version FROM session_event ORDER BY seq")
-          .all(),
-      ).toEqual([{ schema_version: 1 }, { schema_version: 1 }]);
-      migrated.close();
+      expect(() => new SessionStore({ path, eventRegistry: fixtureEventRegistry }))
+        .toThrow("Existing databases are not upgraded");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

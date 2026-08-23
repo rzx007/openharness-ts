@@ -159,7 +159,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
             yield { type: "complete" as const, stopReason: "end_turn" as const };
           },
         },
-        allowedTools: ["ToolSearch", "DynamicAllowed"],
+        hostToolCeiling: ["ToolSearch", "DynamicAllowed"],
         disallowedTools: ["DynamicDenied"],
       },
     });
@@ -202,7 +202,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
             yield { type: "complete" as const, stopReason: "end_turn" as const };
           },
         },
-        allowedTools: ["Read", "Agent"],
+        hostToolCeiling: ["Read", "Agent"],
         roleAllowedTools: ["*"],
       },
     });
@@ -226,7 +226,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
             yield { type: "complete" as const, stopReason: "end_turn" as const };
           },
         },
-        allowedTools: ["Read"],
+        hostToolCeiling: ["Read"],
         roleAllowedTools: ["Bash"],
       },
     });
@@ -249,8 +249,8 @@ describe("createOpenHarnessRuntime tool visibility", () => {
             yield { type: "complete" as const, stopReason: "end_turn" as const };
           },
         },
-        allowedTools: ["*"],
-        disallowedTools: ["file_write"],
+        hostToolCeiling: ["*"],
+        disallowedTools: ["Write"],
       },
     });
 
@@ -275,7 +275,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
     }
   });
 
-  it("normalizes common old-world tool names before filtering", async () => {
+  it("uses the current exact tool names when filtering", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,
       configuration: {
@@ -284,8 +284,8 @@ describe("createOpenHarnessRuntime tool visibility", () => {
             yield { type: "complete" as const, stopReason: "end_turn" as const };
           },
         },
-        allowedTools: ["bash", "file_edit", "tool_search"],
-        disallowedTools: ["TOOL_SEARCH"],
+        hostToolCeiling: ["Bash", "Edit", "ToolSearch"],
+        disallowedTools: ["ToolSearch"],
       },
     });
 

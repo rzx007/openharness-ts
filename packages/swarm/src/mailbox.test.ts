@@ -32,6 +32,7 @@ afterEach(() => {
 
 function makeMessage(overrides: Partial<MailboxMessage> = {}): MailboxMessage {
   return {
+    schemaVersion: 1,
     id: overrides.id ?? `id-${Math.random().toString(36).slice(2, 10)}`,
     type: overrides.type ?? "user_message",
     sender: overrides.sender ?? "alice",
@@ -85,6 +86,7 @@ describe("TeammateMailbox.write", () => {
     expect(files).toEqual(["1234.500000_msg-1.json"]);
     const data = JSON.parse(readFileSync(join(mailbox.getMailboxDir(), files[0]!), "utf-8"));
     expect(data).toEqual({
+      schemaVersion: 1,
       id: "msg-1",
       type: "user_message",
       sender: "alice",
@@ -127,15 +129,14 @@ describe("TeammateMailbox.readAll", () => {
     expect(existsSync(join(homedir(), ".openharness-ts", "teams", team))).toBe(false);
   });
 
-  it("skips dotfiles, .tmp files, and corrupted JSON instead of crashing", async () => {
+  it("skips dotfiles and .tmp files but rejects corrupted messages", async () => {
     const mailbox = new TeammateMailbox(team, "bob");
     const inbox = mailbox.getMailboxDir();
     await mailbox.write(makeMessage({ id: "good", timestamp: 1 }));
     writeFileSync(join(inbox, ".write_lock"), "");
     writeFileSync(join(inbox, "2.000000_half.json.tmp"), "{");
     writeFileSync(join(inbox, "3.000000_bad.json"), "not json");
-    const messages = await mailbox.readAll();
-    expect(messages.map((m) => m.id)).toEqual(["good"]);
+    await expect(mailbox.readAll()).rejects.toThrow();
   });
 });
 
@@ -148,6 +149,14 @@ describe("TeammateMailbox.markRead / clear", () => {
     const all = await mailbox.readAll(false);
     expect(all).toHaveLength(1);
     expect(all[0]!.read).toBe(true);
+  });
+
+  it("markRead rejects an old message format", async () => {
+    const mailbox = new TeammateMailbox(team, "bob");
+    const inbox = mailbox.getMailboxDir();
+    mkdirSync(inbox, { recursive: true });
+    writeFileSync(join(inbox, "1.000000_old.json"), JSON.stringify({ id: "old", read: false }));
+    await expect(mailbox.markRead("old")).rejects.toThrow("schema version");
   });
 
   it("clear removes all message files but keeps the inbox dir", async () => {
@@ -239,12 +248,12 @@ describe("type guards", () => {
     expect(isPermissionResponse(msg)).toBeNull();
   });
 
-  it("isPermissionRequest also parses text-envelope payloads", () => {
+  it("does not reinterpret user text as a permission envelope", () => {
     const envelope = makeMessage({
       type: "user_message",
       payload: { text: JSON.stringify({ type: "permission_request", request_id: "p2" }) },
     });
-    expect(isPermissionRequest(envelope)).toEqual({ type: "permission_request", request_id: "p2" });
+    expect(isPermissionRequest(envelope)).toBeNull();
   });
 
   it("returns null for non-matching or unparseable text", () => {
@@ -254,7 +263,7 @@ describe("type guards", () => {
 });
 
 describe("writeToMailbox", () => {
-  it("writes a text message to the recipient inbox with sniffed type", async () => {
+  it("does not infer control message types from user text", async () => {
     await writeToMailbox(
       "bob",
       { from: "alice", text: JSON.stringify({ type: "shutdown" }) },
@@ -262,7 +271,7 @@ describe("writeToMailbox", () => {
     );
     const messages = await new TeammateMailbox(team, "bob").readAll();
     expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("shutdown");
+    expect(messages[0]!.type).toBe("user_message");
     expect(messages[0]!.sender).toBe("alice");
   });
 

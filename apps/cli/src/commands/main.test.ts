@@ -9,7 +9,6 @@ import {
   buildSlashCommandDetails,
   matchUserInvocableSkill,
   buildSkillPrompt,
-  buildModelVisibleSkillsList,
   buildUserContentWithAttachments,
   isSessionMemoryEnabled,
   isMemoryAutoExtractEnabled,
@@ -218,25 +217,6 @@ describe("buildSlashCommandList with skills", () => {
     const list = buildSlashCommandList(makeRegistry());
     expect(list).toContain("/help");
     expect(list).not.toContain("/commit");
-  });
-});
-
-describe("buildModelVisibleSkillsList", () => {
-  it("excludes disableModelInvocation skills (model visibility)", () => {
-    const skills = makeSkillRegistry([
-      makeSkill({ name: "commit" }),
-      makeSkill({ name: "stealth", disableModelInvocation: true }),
-    ]);
-    const list = buildModelVisibleSkillsList(skills);
-    const names = list.map((s) => s.name);
-    expect(names).toContain("commit");
-    expect(names).not.toContain("stealth");
-  });
-
-  it("includes name and description for visible skills", () => {
-    const skills = makeSkillRegistry([makeSkill({ name: "commit", description: "do commit" })]);
-    const list = buildModelVisibleSkillsList(skills);
-    expect(list).toEqual([{ name: "commit", description: "do commit" }]);
   });
 });
 

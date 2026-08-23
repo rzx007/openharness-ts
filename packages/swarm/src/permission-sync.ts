@@ -20,7 +20,7 @@ import { readTeamFile } from "./team-lifecycle.js";
  *   1. worker `writePermissionRequest()` → permissions/pending/<id>.json
  *   2. leader `readPendingPermissions()` 列出待裁决
  *   3. leader `resolvePermission()` → 搬移到 permissions/resolved/<id>.json
- *   4. worker `readResolvedPermission(id)` / `pollForResponse(id)` 取回
+ *   4. worker `readResolvedPermission(id)` 取回
  *
  * 邮箱流：send/poll 系列直接读写双方收件箱（见 mailbox.ts）。
  *
@@ -38,7 +38,7 @@ const getAgentName = (): string | undefined => process.env.CLAUDE_CODE_AGENT_NAM
 const getTeammateColor = (): string | undefined => process.env.CLAUDE_CODE_AGENT_COLOR || undefined;
 
 // ---------------------------------------------------------------------------
-// 数据模型（TS 属性 camelCase，落盘 snake_case + camelCase 容错）
+// 数据模型（TS 属性 camelCase，落盘只使用当前 snake_case 格式）
 // ---------------------------------------------------------------------------
 
 export interface SwarmPermissionRequest {
@@ -69,16 +69,6 @@ export interface PermissionResolution {
   permissionUpdates?: unknown[] | null;
 }
 
-/** worker 轮询用的简化响应（对齐 Python 的 legacy PermissionResponse）。 */
-export interface PermissionResponse {
-  requestId: string;
-  decision: "approved" | "denied";
-  timestamp: string;
-  feedback?: string | null;
-  updatedInput?: Record<string, unknown> | null;
-  permissionUpdates?: unknown[] | null;
-}
-
 export interface SwarmPermissionResponse {
   requestId: string;
   allowed: boolean;
@@ -98,14 +88,14 @@ export interface PermissionDecider {
 
 type Raw = Record<string, unknown>;
 
-function pick<T>(data: Raw, snake: string, camel: string, fallback: T): T {
-  if (snake in data && data[snake] !== undefined) return data[snake] as T;
-  if (camel in data && data[camel] !== undefined) return data[camel] as T;
+function pick<T>(data: Raw, key: string, fallback: T): T {
+  if (key in data && data[key] !== undefined) return data[key] as T;
   return fallback;
 }
 
 function requestToRaw(r: SwarmPermissionRequest): Raw {
   return {
+    schema_version: 1,
     id: r.id,
     worker_id: r.workerId,
     worker_name: r.workerName,
@@ -127,24 +117,36 @@ function requestToRaw(r: SwarmPermissionRequest): Raw {
 }
 
 function requestFromRaw(data: Raw): SwarmPermissionRequest {
+  if (data.schema_version !== 1) {
+    throw new Error(`Unsupported permission data schema version: ${String(data.schema_version)}`);
+  }
+  const required = [
+    "id", "worker_id", "worker_name", "team_name", "tool_name", "tool_use_id", "description",
+    "input", "permission_suggestions", "worker_color", "status", "resolved_by", "resolved_at",
+    "feedback", "updated_input", "permission_updates", "created_at",
+  ];
+  const missing = required.filter((field) => !(field in data));
+  if (missing.length > 0) {
+    throw new Error(`Permission record is missing required fields: ${missing.join(", ")}`);
+  }
   return {
     id: typeof data.id === "string" ? data.id : "",
-    workerId: pick(data, "worker_id", "workerId", ""),
-    workerName: pick(data, "worker_name", "workerName", ""),
-    teamName: pick(data, "team_name", "teamName", ""),
-    toolName: pick(data, "tool_name", "toolName", ""),
-    toolUseId: pick(data, "tool_use_id", "toolUseId", ""),
+    workerId: pick(data, "worker_id", ""),
+    workerName: pick(data, "worker_name", ""),
+    teamName: pick(data, "team_name", ""),
+    toolName: pick(data, "tool_name", ""),
+    toolUseId: pick(data, "tool_use_id", ""),
     description: typeof data.description === "string" ? data.description : "",
     input: (data.input ?? {}) as Record<string, unknown>,
-    permissionSuggestions: pick(data, "permission_suggestions", "permissionSuggestions", []),
-    workerColor: pick<string | null>(data, "worker_color", "workerColor", null),
-    status: pick(data, "status", "status", "pending" as const),
-    resolvedBy: pick<"worker" | "leader" | null>(data, "resolved_by", "resolvedBy", null),
-    resolvedAt: pick<number | null>(data, "resolved_at", "resolvedAt", null),
+    permissionSuggestions: pick(data, "permission_suggestions", []),
+    workerColor: pick<string | null>(data, "worker_color", null),
+    status: pick(data, "status", "pending" as const),
+    resolvedBy: pick<"worker" | "leader" | null>(data, "resolved_by", null),
+    resolvedAt: pick<number | null>(data, "resolved_at", null),
     feedback: typeof data.feedback === "string" ? data.feedback : null,
-    updatedInput: pick<Record<string, unknown> | null>(data, "updated_input", "updatedInput", null),
-    permissionUpdates: pick<unknown[] | null>(data, "permission_updates", "permissionUpdates", null),
-    createdAt: pick(data, "created_at", "createdAt", Date.now() / 1000),
+    updatedInput: pick<Record<string, unknown> | null>(data, "updated_input", null),
+    permissionUpdates: pick<unknown[] | null>(data, "permission_updates", null),
+    createdAt: pick(data, "created_at", Date.now() / 1000),
   };
 }
 
@@ -243,11 +245,7 @@ export async function readPendingPermissions(teamName?: string): Promise<SwarmPe
   const requests: SwarmPermissionRequest[] = [];
   for (const name of (await fs.readdir(pendingDir)).sort()) {
     if (!name.endsWith(".json") || name.startsWith(".")) continue;
-    try {
-      requests.push(requestFromRaw(JSON.parse(await fs.readFile(join(pendingDir, name), "utf-8")) as Raw));
-    } catch {
-      continue;
-    }
+    requests.push(requestFromRaw(JSON.parse(await fs.readFile(join(pendingDir, name), "utf-8")) as Raw));
   }
   requests.sort((a, b) => a.createdAt - b.createdAt);
   return requests;
@@ -264,8 +262,9 @@ export async function readResolvedPermission(
   const resolvedPath = join(getResolvedDir(team), `${requestId}.json`);
   try {
     return requestFromRaw(JSON.parse(await fs.readFile(resolvedPath, "utf-8")) as Raw);
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
 }
 
@@ -288,8 +287,9 @@ export async function resolvePermission(
     let request: SwarmPermissionRequest;
     try {
       request = requestFromRaw(JSON.parse(await fs.readFile(pendingPath, "utf-8")) as Raw);
-    } catch {
-      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
     }
 
     const resolved: SwarmPermissionRequest = {
@@ -322,25 +322,6 @@ export async function deleteResolvedPermission(requestId: string, teamName?: str
   }
 }
 
-/** worker：单次查询裁决结果并转成 legacy 响应（未裁决返回 null）。 */
-export async function pollForResponse(
-  requestId: string,
-  teamName?: string,
-): Promise<PermissionResponse | null> {
-  const resolved = await readResolvedPermission(requestId, teamName);
-  if (!resolved) return null;
-
-  const ts = resolved.resolvedAt ?? resolved.createdAt;
-  return {
-    requestId: resolved.id,
-    decision: resolved.status === "approved" ? "approved" : "denied",
-    timestamp: new Date(ts * 1000).toISOString(),
-    feedback: resolved.feedback,
-    updatedInput: resolved.updatedInput,
-    permissionUpdates: resolved.permissionUpdates,
-  };
-}
-
 /** 周期清理过老的 resolved 文件，返回删除数。 */
 export async function cleanupOldResolutions(teamName?: string, maxAgeSeconds = 3600): Promise<number> {
   const team = teamName ?? getTeamName();
@@ -356,16 +337,14 @@ export async function cleanupOldResolutions(teamName?: string, maxAgeSeconds = 3
     const path = join(resolvedDir, name);
     try {
       const data = JSON.parse(await fs.readFile(path, "utf-8")) as Raw;
-      const resolvedAt =
-        pick<number | null>(data, "resolved_at", "resolvedAt", null) ??
-        pick(data, "created_at", "createdAt", 0);
+      const request = requestFromRaw(data);
+      const resolvedAt = request.resolvedAt ?? request.createdAt;
       if (now - resolvedAt >= maxAgeSeconds) {
         await fs.unlink(path);
         cleaned += 1;
       }
-    } catch {
-      await fs.unlink(path).catch(() => {});
-      cleaned += 1;
+    } catch (error) {
+      throw new Error(`Cannot clean invalid permission record: ${path}`, { cause: error });
     }
   }
   return cleaned;
@@ -441,6 +420,7 @@ function structuredMessage(
   payload: Record<string, unknown>,
 ): MailboxMessage {
   return {
+    schemaVersion: 1,
     id: generateRequestId(),
     type,
     sender,

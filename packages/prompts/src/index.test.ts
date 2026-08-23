@@ -5,7 +5,6 @@ import {
   approvePendingUserProfileUpdate,
   initializePersonalPromptFiles,
   inspectPersonalPromptFiles,
-  discoverClaudeMd,
   discoverClaudeMdFiles,
   listPendingUserProfileUpdates,
   loadClaudeMdPrompt,
@@ -216,10 +215,6 @@ describe("CLAUDE.md upward traversal", () => {
     }
   });
 
-  it("discoverClaudeMd wrapper returns assembled section", async () => {
-    const section = await discoverClaudeMd(child);
-    expect(section).toContain("CHILD_RULES");
-  });
 });
 
 describe("buildRuntimeSystemPrompt", () => {

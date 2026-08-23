@@ -5,7 +5,7 @@ import type {
   SessionMessagePartRecord,
   SessionRunAttemptRecord,
   SessionRunRecord,
-} from "@openharness/services";
+} from "@openharness/protocol";
 
 export interface RuntimeMetricHistogram {
   count: number;

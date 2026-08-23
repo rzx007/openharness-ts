@@ -1,4 +1,4 @@
-import { readFile, writeFile, access, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import type { Settings } from "../index";
 import { getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath } from "./paths";
 
@@ -141,7 +141,11 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await mkdir(configDir, { recursive: true });
 
   // 将设置对象写入 JSON 文件，使用 UTF-8 编码和缩进格式化
-  await writeFile(configPath, JSON.stringify(settings, null, 2), "utf-8");
+  await writeFile(
+    configPath,
+    JSON.stringify({ ...settings, _formatVersion: 1 }, null, 2),
+    "utf-8",
+  );
 }
 
 export async function loadProjectSettings(projectRoot?: string): Promise<Partial<Settings> | null> {
@@ -155,7 +159,11 @@ export async function saveProjectSettings(
   const configDir = getProjectConfigDir(projectRoot);
   const configPath = getProjectSettingsFilePath(projectRoot);
   await mkdir(configDir, { recursive: true });
-  await writeFile(configPath, JSON.stringify(settings, null, 2), "utf-8");
+  await writeFile(
+    configPath,
+    JSON.stringify({ ...settings, _formatVersion: 1 }, null, 2),
+    "utf-8",
+  );
 }
 
 function loadFromEnv(): SettingsPatch {
@@ -254,8 +262,6 @@ function mergeSandboxConfig(
     result.docker = { ...docker, ...config.docker };
     result.srt = { ...srt, ...config.srt };
   }
-  if (!result.backend && result.runtime === "docker") result.backend = "docker";
-  if (!result.backend && result.runtime === "srt") result.backend = "srt";
   return result;
 }
 
@@ -276,13 +282,27 @@ async function loadFromFile(): Promise<Partial<Settings> | null> {
 
 async function loadSettingsFile(configPath: string): Promise<Partial<Settings> | null> {
   try {
-    // 检查配置文件是否存在且可访问
-    await access(configPath);
-    // 读取配置文件内容并解析为 JSON 对象
     const raw = await readFile(configPath, "utf-8");
-    return JSON.parse(raw) as Partial<Settings>;
-  } catch {
-    // 若发生任何错误（如文件不存在、权限不足、JSON 格式错误等），返回 null
-    return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(`Settings file must contain a JSON object: ${configPath}`);
+    }
+    const settings = parsed as Partial<Settings> & {
+      _formatVersion?: unknown;
+      sandbox?: { runtime?: unknown };
+    };
+    if (settings._formatVersion !== 1) {
+      throw new Error(
+        `Unsupported settings format ${String(settings._formatVersion)} in ${configPath}; expected 1`,
+      );
+    }
+    if (settings.sandbox && "runtime" in settings.sandbox) {
+      throw new Error(`Unsupported settings field sandbox.runtime in ${configPath}; use sandbox.backend`);
+    }
+    const { _formatVersion: _discardedFormatVersion, ...currentSettings } = settings;
+    return currentSettings;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
 }

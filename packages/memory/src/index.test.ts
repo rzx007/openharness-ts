@@ -23,6 +23,11 @@ describe("MemoryManager", () => {
     expect(found!.content).toBe("hello world");
   });
 
+  it("rejects empty content instead of writing an unreadable memory", async () => {
+    const mgr = new MemoryManager();
+    await expect(mgr.add("  \n  ")).rejects.toThrow("Memory content must not be empty");
+  });
+
   it("returns undefined for nonexistent entry", async () => {
     const mgr = new MemoryManager();
     expect(await mgr.get("nope")).toBeUndefined();
@@ -457,7 +462,7 @@ describe("MemoryManager Markdown store", () => {
     expect(raw).toContain("use_count: 1");
   });
 
-  it("loadFromFile falls back to the Markdown store when no JSON exists", async () => {
+  it("loads the current Markdown store directly", async () => {
     dir = await mkdtemp(join(tmpdir(), "ohmem-"));
     // Pre-seed a .md file directly.
     const md = renderMemoryFile(
@@ -469,6 +474,7 @@ describe("MemoryManager Markdown store", () => {
         type: "project",
         scope: "project",
         importance: 0,
+        signature: "seed-signature",
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
         use_count: 0,
@@ -477,8 +483,6 @@ describe("MemoryManager Markdown store", () => {
     );
     await writeFile(join(dir, "mem-seed.md"), md, "utf-8");
     const mgr = new MemoryManager(1000, dir);
-    const n = await mgr.loadFromFile(join(dir, "memory.json"));
-    expect(n).toBe(1);
     expect((await mgr.get("mem-seed"))!.content).toBe("seeded body content");
   });
 });

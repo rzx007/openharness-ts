@@ -63,27 +63,15 @@ export class PermissionChecker implements IPermissionChecker {
   private autoApproveTools: Set<string>;
   private cwd: string | undefined;
 
-  constructor(options: PermissionCheckOptions | PermissionSettings) {
-    if ("mode" in options && "allowedTools" in options) {
-      const s = options as PermissionSettings;
-      this.mode = s.mode;
-      this.rules = [];
-      this.allowedTools = new Set(s.allowedTools ?? []);
-      this.deniedTools = new Set(s.deniedTools ?? []);
-      this.pathRules = s.pathRules ?? [];
-      this.deniedCommands = s.deniedCommands ?? [];
-      this.autoApproveTools = new Set(s.autoApproveTools ?? []);
-    } else {
-      const o = options as PermissionCheckOptions;
-      this.mode = o.mode;
-      this.rules = o.rules ?? [];
-      this.allowedTools = new Set(o.allowedTools ?? []);
-      this.deniedTools = new Set(o.deniedTools ?? []);
-      this.pathRules = o.pathRules ?? [];
-      this.deniedCommands = o.deniedCommands ?? [];
-      this.autoApproveTools = new Set(o.autoApproveTools ?? []);
-    }
-    const cwd = (options as PermissionCheckOptions).cwd;
+  constructor(options: PermissionCheckOptions) {
+    this.mode = options.mode;
+    this.rules = options.rules ?? [];
+    this.allowedTools = new Set(options.allowedTools ?? []);
+    this.deniedTools = new Set(options.deniedTools ?? []);
+    this.pathRules = options.pathRules ?? [];
+    this.deniedCommands = options.deniedCommands ?? [];
+    this.autoApproveTools = new Set(options.autoApproveTools ?? []);
+    const cwd = options.cwd;
     this.cwd = typeof cwd === "string" && cwd ? resolve(cwd) : undefined;
   }
 

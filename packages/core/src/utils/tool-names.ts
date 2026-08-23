@@ -1,53 +1,3 @@
-const PYTHON_STYLE_TOOL_NAME_ALIASES: Record<string, string> = {
-  agent: "Agent",
-  job_list: "JobList",
-  job_read: "JobRead",
-  job_wait: "JobWait",
-  job_send: "JobSend",
-  job_cancel: "JobCancel",
-  workflow: "Workflow",
-  team_create: "TeamCreate",
-  team_delete: "TeamDelete",
-  bash: "Bash",
-  read: "Read",
-  read_file: "Read",
-  file_read: "Read",
-  edit: "Edit",
-  file_edit: "Edit",
-  write: "Write",
-  file_write: "Write",
-  glob: "Glob",
-  grep: "Grep",
-  web_fetch: "WebFetch",
-  web_search: "WebSearch",
-  todo_write: "TodoWrite",
-  tool_search: "ToolSearch",
-  ask_user: "AskUser",
-  notebook_edit: "NotebookEdit",
-  enter_plan_mode: "EnterPlanMode",
-  exit_plan_mode: "ExitPlanMode",
-  enter_worktree: "EnterWorktree",
-  exit_worktree: "ExitWorktree",
-  skill: "Skill",
-  sleep: "Sleep",
-  config: "Config",
-  brief: "Brief",
-  background_shell_create: "BackgroundShellCreate",
-  schedule_create: "ScheduleCreate",
-  schedule_update: "ScheduleUpdate",
-  schedule_delete: "ScheduleDelete",
-  schedule_list: "ScheduleList",
-  schedule_run_now: "ScheduleRunNow",
-  mcp_tool_call: "McpToolCall",
-  list_mcp_resources: "ListMcpResources",
-  read_mcp_resource: "ReadMcpResource",
-  mcp_auth: "McpAuth",
-  lsp: "Lsp",
-  image_to_text: "ImageToText",
-  image_generation: "ImageGeneration",
-  feishu_push: "FeishuPush",
-};
-
 const REMOVED_LIFECYCLE_TOOL_REPLACEMENTS: Record<string, string | undefined> =
   {
     taskget: "JobRead",
@@ -115,12 +65,9 @@ export function normalizeToolName(
   if (!trimmed) return undefined;
   if (trimmed === "*") return "*";
 
-  const known = knownToolNames.find(
-    (name) => name.toLowerCase() === trimmed.toLowerCase(),
-  );
+  const known = knownToolNames.find((name) => name === trimmed);
   if (known) return known;
-
-  return PYTHON_STYLE_TOOL_NAME_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+  return trimmed;
 }
 
 export function normalizeToolNames(

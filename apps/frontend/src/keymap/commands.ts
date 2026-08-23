@@ -35,15 +35,12 @@ export type CommandRegistry = {
 export type BackendCommandDetail = { name: string; description?: string };
 
 export function buildRegistry(opts: {
-  backendCommands: Array<string | BackendCommandDetail>;
+  backendCommands: BackendCommandDetail[];
   local: Command[];
   submitLine: (line: string) => void;
 }): CommandRegistry {
   const { local, submitLine } = opts;
-  // 兼容两种来源：纯名称（旧后端 commands）或带描述（command_details）
-  const backendCommands = opts.backendCommands.map((c) =>
-    typeof c === "string" ? { name: c, description: undefined } : c,
-  );
+  const backendCommands = opts.backendCommands;
 
   // Build a map of local commands by id for quick lookup
   const localMap = new Map<string, Command>();

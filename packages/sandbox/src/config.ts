@@ -2,11 +2,10 @@ import type { SandboxConfig } from "@openharness/core";
 import type { ResolvedSandboxConfig } from "./types.js";
 
 export function normalizeSandboxConfig(config?: SandboxConfig): ResolvedSandboxConfig {
-  const backend = config?.backend ?? normalizeRuntimeAlias(config?.runtime) ?? "srt";
+  const backend = config?.backend ?? "srt";
   return {
     enabled: config?.enabled ?? false,
     backend,
-    runtime: config?.runtime,
     failIfUnavailable: config?.failIfUnavailable ?? false,
     enabledPlatforms: config?.enabledPlatforms ?? [],
     filesystem: {
@@ -37,9 +36,4 @@ export function normalizeSandboxConfig(config?: SandboxConfig): ResolvedSandboxC
       runtimeCommand: config?.srt?.runtimeCommand ?? "srt",
     },
   };
-}
-
-function normalizeRuntimeAlias(runtime?: string): "srt" | "docker" | undefined {
-  if (runtime === "srt" || runtime === "docker") return runtime;
-  return undefined;
 }

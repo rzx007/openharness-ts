@@ -28,13 +28,12 @@ export async function createDefaultNodeAgent(
   const effects: AgentEffects = {
     requestPermission:
       capabilities?.permissions.requestPermission ??
-      options.requestPermission ??
       (async () => ({
         status: "denied",
         reason: "No permission effect configured",
       })),
-    ...(capabilities?.schedules ?? options.schedules
-      ? { schedules: capabilities?.schedules ?? options.schedules }
+    ...(capabilities?.schedules
+      ? { schedules: capabilities.schedules }
       : {}),
   };
   return await createDefaultNodeAgentInternal(options, {

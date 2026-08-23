@@ -11,7 +11,6 @@ import {
   readResolvedPermission,
   resolvePermission,
   deleteResolvedPermission,
-  pollForResponse,
   cleanupOldResolutions,
   isTeamLeader,
   isSwarmWorker,
@@ -122,17 +121,6 @@ describe("file-based pending/resolved flow", () => {
     );
   });
 
-  it("pollForResponse converts a resolved request to the legacy response shape", async () => {
-    const req = makeRequest();
-    await writePermissionRequest(req);
-    expect(await pollForResponse(req.id, team)).toBeNull();
-
-    await resolvePermission(req.id, { decision: "approved", resolvedBy: "leader" }, team);
-    const response = await pollForResponse(req.id, team);
-    expect(response!.requestId).toBe(req.id);
-    expect(response!.decision).toBe("approved");
-  });
-
   it("deleteResolvedPermission removes the resolved file once", async () => {
     const req = makeRequest();
     await writePermissionRequest(req);
@@ -198,7 +186,6 @@ describe("getLeaderName", () => {
       subscriptions: [],
       isActive: true,
       mode: null,
-      tmuxPaneId: "",
       cwd: "",
       worktreePath: null,
       permissions: [],

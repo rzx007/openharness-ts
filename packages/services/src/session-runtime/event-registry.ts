@@ -5,7 +5,6 @@ export interface DurableEventDefinition {
   currentVersion: number;
   scope: DurableEventScope;
   validate(payload: Record<string, unknown>): void;
-  upgrades?: Readonly<Record<number, (payload: Record<string, unknown>) => Record<string, unknown>>>;
 }
 
 export interface PreparedDurableEvent {
@@ -62,7 +61,7 @@ export class DurableEventRegistry {
     const resolvedPayload = payload;
     const definition = this.requireDefinition(type);
     this.validateScope(definition, sessionId);
-    if (!Number.isInteger(schemaVersion) || schemaVersion < 1 || schemaVersion > definition.currentVersion) {
+    if (schemaVersion !== definition.currentVersion) {
       throw new DurableEventRegistryError(
         "unsupported_version",
         `Unsupported durable event schema version ${schemaVersion} for ${resolvedType}; current version is ${definition.currentVersion}`,
@@ -71,23 +70,8 @@ export class DurableEventRegistry {
       );
     }
 
-    let currentVersion = schemaVersion;
-    let currentPayload = resolvedPayload;
-    while (currentVersion < definition.currentVersion) {
-      const upgrade = definition.upgrades?.[currentVersion];
-      if (!upgrade) {
-        throw new DurableEventRegistryError(
-          "unsupported_version",
-          `No durable event upgrade from version ${currentVersion} for ${resolvedType}`,
-          resolvedType,
-          currentVersion,
-        );
-      }
-      currentPayload = upgrade(currentPayload);
-      currentVersion += 1;
-    }
-    this.validatePayload(definition, currentPayload);
-    return { type: resolvedType, schemaVersion: currentVersion, payload: currentPayload };
+    this.validatePayload(definition, resolvedPayload);
+    return { type: resolvedType, schemaVersion, payload: resolvedPayload };
   }
 
   private requireDefinition(type: string): DurableEventDefinition {

@@ -198,8 +198,7 @@ export interface SessionStateSnapshot {
   messages: SessionMessageRecord[];
   parts: SessionMessagePartRecord[];
   runs: SessionRunRecord[];
-  /** Absent only when reading a legacy server that predates durable attempts. */
-  attempts?: SessionRunAttemptRecord[];
+  attempts: SessionRunAttemptRecord[];
   tasks?: SessionExecutionRecord[];
   permissions: PermissionRequestRecord[];
 }

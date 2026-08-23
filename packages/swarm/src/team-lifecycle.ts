@@ -18,10 +18,7 @@ import { getTeamDir } from "./mailbox.js";
  *
  * 团队元数据存为 `~/.openharness-ts/teams/<name>/team.json`，与邮箱共用同一团队
  * 目录——这里建好的目录 TeammateMailbox 直接可用。TS 内部属性 camelCase，
- * 落盘 snake_case（与 Python 互通），读取时 camelCase 容错。
- *
- * 不移植 pane 相关行为（hidden_pane helpers、pane 击杀）：TS 无 tmux/iTerm 后端；
- * pane 字段（tmuxPaneId 等）保留以保 schema 兼容。
+ * 落盘固定使用 snake_case。
  */
 
 // ---------------------------------------------------------------------------
@@ -63,7 +60,6 @@ export interface TeamMember {
   subscriptions: string[];
   isActive: boolean;
   mode: string | null;
-  tmuxPaneId: string;
   cwd: string;
   worktreePath: string | null;
   permissions: string[];
@@ -76,7 +72,6 @@ export interface TeamFile {
   createdAt: number;
   leadAgentId: string;
   leadSessionId: string | null;
-  hiddenPaneIds: string[];
   members: Record<string, TeamMember>;
   teamAllowedPaths: AllowedPath[];
   allowedPaths: string[];
@@ -84,15 +79,21 @@ export interface TeamFile {
 }
 
 // ---------------------------------------------------------------------------
-// 序列化：落盘 snake_case，读取 snake 优先 + camel 容错
+// 序列化：落盘和读取都固定使用当前 snake_case 格式
 // ---------------------------------------------------------------------------
 
 type Raw = Record<string, unknown>;
 
-function pick<T>(data: Raw, snake: string, camel: string, fallback: T): T {
-  if (snake in data && data[snake] !== undefined) return data[snake] as T;
-  if (camel in data && data[camel] !== undefined) return data[camel] as T;
+function pick<T>(data: Raw, key: string, fallback: T): T {
+  if (key in data && data[key] !== undefined) return data[key] as T;
   return fallback;
+}
+
+function requireFields(data: Raw, fields: readonly string[], recordType: string): void {
+  const missing = fields.filter((field) => !(field in data));
+  if (missing.length > 0) {
+    throw new Error(`${recordType} is missing required fields: ${missing.join(", ")}`);
+  }
 }
 
 function memberToRaw(m: TeamMember): Raw {
@@ -110,7 +111,6 @@ function memberToRaw(m: TeamMember): Raw {
     subscriptions: m.subscriptions,
     is_active: m.isActive,
     mode: m.mode,
-    tmux_pane_id: m.tmuxPaneId,
     cwd: m.cwd,
     worktree_path: m.worktreePath,
     permissions: m.permissions,
@@ -119,25 +119,29 @@ function memberToRaw(m: TeamMember): Raw {
 }
 
 function memberFromRaw(data: Raw): TeamMember {
+  requireFields(data, [
+    "agent_id", "name", "backend_type", "joined_at", "agent_type", "model", "prompt",
+    "color", "plan_mode_required", "session_id", "subscriptions", "is_active", "mode",
+    "cwd", "worktree_path", "permissions", "status",
+  ], "Team member");
   return {
-    agentId: pick(data, "agent_id", "agentId", ""),
+    agentId: pick(data, "agent_id", ""),
     name: typeof data.name === "string" ? data.name : "",
-    backendType: pick(data, "backend_type", "backendType", ""),
-    joinedAt: pick(data, "joined_at", "joinedAt", 0),
-    agentType: pick<string | null>(data, "agent_type", "agentType", null),
+    backendType: pick(data, "backend_type", ""),
+    joinedAt: pick(data, "joined_at", 0),
+    agentType: pick<string | null>(data, "agent_type", null),
     model: typeof data.model === "string" ? data.model : null,
     prompt: typeof data.prompt === "string" ? data.prompt : null,
     color: typeof data.color === "string" ? data.color : null,
-    planModeRequired: pick(data, "plan_mode_required", "planModeRequired", false),
-    sessionId: pick<string | null>(data, "session_id", "sessionId", null),
+    planModeRequired: pick(data, "plan_mode_required", false),
+    sessionId: pick<string | null>(data, "session_id", null),
     subscriptions: Array.isArray(data.subscriptions) ? (data.subscriptions as string[]) : [],
-    isActive: pick(data, "is_active", "isActive", true),
+    isActive: pick(data, "is_active", true),
     mode: typeof data.mode === "string" ? data.mode : null,
-    tmuxPaneId: pick(data, "tmux_pane_id", "tmuxPaneId", ""),
     cwd: typeof data.cwd === "string" ? data.cwd : "",
-    worktreePath: pick<string | null>(data, "worktree_path", "worktreePath", null),
+    worktreePath: pick<string | null>(data, "worktree_path", null),
     permissions: Array.isArray(data.permissions) ? (data.permissions as string[]) : [],
-    status: pick(data, "status", "status", "active" as const),
+    status: pick(data, "status", "active" as const),
   };
 }
 
@@ -148,20 +152,20 @@ function allowedPathToRaw(p: AllowedPath): Raw {
 function allowedPathFromRaw(data: Raw): AllowedPath {
   return {
     path: typeof data.path === "string" ? data.path : "",
-    toolName: pick(data, "tool_name", "toolName", ""),
-    addedBy: pick(data, "added_by", "addedBy", ""),
-    addedAt: pick(data, "added_at", "addedAt", 0),
+    toolName: pick(data, "tool_name", ""),
+    addedBy: pick(data, "added_by", ""),
+    addedAt: pick(data, "added_at", 0),
   };
 }
 
 function teamFileToRaw(t: TeamFile): Raw {
   return {
+    schema_version: 1,
     name: t.name,
     description: t.description,
     created_at: t.createdAt,
     lead_agent_id: t.leadAgentId,
     lead_session_id: t.leadSessionId,
-    hidden_pane_ids: t.hiddenPaneIds,
     members: Object.fromEntries(Object.entries(t.members).map(([k, v]) => [k, memberToRaw(v)])),
     team_allowed_paths: t.teamAllowedPaths.map(allowedPathToRaw),
     allowed_paths: t.allowedPaths,
@@ -170,21 +174,27 @@ function teamFileToRaw(t: TeamFile): Raw {
 }
 
 function teamFileFromRaw(data: Raw): TeamFile {
-  const rawMembers = (pick(data, "members", "members", {}) ?? {}) as Record<string, Raw>;
-  const rawPaths = pick<Raw[]>(data, "team_allowed_paths", "teamAllowedPaths", []);
+  if (data.schema_version !== 1) {
+    throw new Error(`Unsupported team data schema version: ${String(data.schema_version)}`);
+  }
+  requireFields(data, [
+    "name", "description", "created_at", "lead_agent_id", "lead_session_id", "members",
+    "team_allowed_paths", "allowed_paths", "metadata",
+  ], "Team file");
+  const rawMembers = (pick(data, "members", {}) ?? {}) as Record<string, Raw>;
+  const rawPaths = pick<Raw[]>(data, "team_allowed_paths", []);
   return {
     name: typeof data.name === "string" ? data.name : "",
     description: typeof data.description === "string" ? data.description : "",
-    createdAt: pick(data, "created_at", "createdAt", 0),
-    leadAgentId: pick(data, "lead_agent_id", "leadAgentId", ""),
-    leadSessionId: pick<string | null>(data, "lead_session_id", "leadSessionId", null),
-    hiddenPaneIds: pick(data, "hidden_pane_ids", "hiddenPaneIds", []),
+    createdAt: pick(data, "created_at", 0),
+    leadAgentId: pick(data, "lead_agent_id", ""),
+    leadSessionId: pick<string | null>(data, "lead_session_id", null),
     members: Object.fromEntries(
       Object.entries(rawMembers).map(([k, v]) => [k, memberFromRaw(v)]),
     ),
     teamAllowedPaths: Array.isArray(rawPaths) ? rawPaths.map(allowedPathFromRaw) : [],
-    allowedPaths: pick(data, "allowed_paths", "allowedPaths", []),
-    metadata: pick(data, "metadata", "metadata", {}),
+    allowedPaths: pick(data, "allowed_paths", []),
+    metadata: pick(data, "metadata", {}),
   };
 }
 
@@ -201,11 +211,7 @@ export function getTeamFilePath(teamName: string): string {
 export function readTeamFile(teamName: string): TeamFile | null {
   const path = getTeamFilePath(teamName);
   if (!existsSync(path)) return null;
-  try {
-    return teamFileFromRaw(JSON.parse(readFileSync(path, "utf-8")) as Raw);
-  } catch {
-    return null;
-  }
+  return teamFileFromRaw(JSON.parse(readFileSync(path, "utf-8")) as Raw);
 }
 
 /** `.tmp` + rename 原子写。 */
@@ -233,7 +239,6 @@ export class TeamLifecycleManager {
       createdAt: Date.now() / 1000,
       leadAgentId: "",
       leadSessionId: null,
-      hiddenPaneIds: [],
       members: {},
       teamAllowedPaths: [],
       allowedPaths: [],

@@ -7,7 +7,7 @@ import {
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
-import type { SessionRecord } from "@openharness/services";
+import type { SessionRecord } from "@openharness/protocol";
 import {
   closeExecutionRuntimes,
   getChildAgentExecutionRegistry,

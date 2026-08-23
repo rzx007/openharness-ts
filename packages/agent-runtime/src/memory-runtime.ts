@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import type { Message, StreamingMessageClient } from "@openharness/core";
 import { getProjectMemoryDir } from "@openharness/core";
 import {
@@ -30,7 +28,6 @@ export async function createAgentMemoryRuntime(
 ): Promise<AgentMemoryRuntime> {
   const directory = getProjectMemoryDir(cwd);
   const manager = new MemoryManager(1000, directory);
-  await manager.loadFromFile(join(directory, "memory.json")).catch(() => 0);
 
   return {
     manager,

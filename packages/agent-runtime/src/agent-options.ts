@@ -43,17 +43,11 @@ export interface OpenHarnessAgentConfiguration {
   hostToolCeiling?: string[];
   /** Tools this agent role wants to see. ["*"] means no extra role narrowing. */
   roleAllowedTools?: string[];
-  /** Host tool ceiling kept under the existing public SDK option name. */
-  allowedTools?: string[];
   disallowedTools?: string[];
   effort?: Settings["effort"];
   fastMode?: boolean;
   autoApproveReadOnly?: boolean;
   autoApproveTools?: string[];
-  /** Host-owned persistent terminal capability. Descendant agents inherit it. */
-  terminal?: AgentTerminalHost;
-  /** Host-owned long-running job controller. Descendant agents inherit it. */
-  jobs?: AgentJobHost;
   /** Overrides the root-tree child-agent limits. */
   childBudget?: Partial<AgentChildBudget>;
 }

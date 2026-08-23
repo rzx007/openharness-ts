@@ -4,7 +4,7 @@ import type {
   ReplaceTranscriptPartInput,
   SessionMessagePartRecord,
   SessionMessageRecord,
-} from "@openharness/services/session-runtime/types";
+} from "@openharness/protocol";
 
 type UserMessageContent = Extract<Message, { type: "user" }>["content"];
 

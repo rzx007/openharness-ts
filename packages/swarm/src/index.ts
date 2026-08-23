@@ -28,7 +28,6 @@ export {
   readResolvedPermission,
   resolvePermission,
   deleteResolvedPermission,
-  pollForResponse,
   cleanupOldResolutions,
   isTeamLeader,
   isSwarmWorker,
@@ -41,7 +40,6 @@ export {
   sendPermissionResponseViaMailbox,
   type SwarmPermissionRequest,
   type PermissionResolution,
-  type PermissionResponse,
   type SwarmPermissionResponse,
   type PermissionDecider,
 } from "./permission-sync.js";

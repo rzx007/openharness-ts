@@ -295,7 +295,7 @@ export function decodeSessionStateSnapshot(value: unknown): SessionStateSnapshot
   arrayField(snapshot, "messages", "snapshot", validateMessage);
   arrayField(snapshot, "parts", "snapshot", validatePart);
   arrayField(snapshot, "runs", "snapshot", validateRun);
-  if (snapshot.attempts !== undefined) arrayField(snapshot, "attempts", "snapshot", validateAttempt);
+  arrayField(snapshot, "attempts", "snapshot", validateAttempt);
   if (snapshot.tasks !== undefined) arrayField(snapshot, "tasks", "snapshot", validateTask);
   arrayField(snapshot, "permissions", "snapshot", validatePermission);
   return snapshot as unknown as SessionStateSnapshot;

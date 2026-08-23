@@ -152,8 +152,7 @@ export async function createOpenHarnessRuntime(
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
   const effectiveAllowed = resolveEffectiveAllowedTools({
-    hostToolCeiling:
-      configuration.hostToolCeiling ?? configuration.allowedTools,
+    hostToolCeiling: configuration.hostToolCeiling,
     roleAllowedTools: configuration.roleAllowedTools,
     settingsAllowedTools: settings.permission.allowedTools,
     knownToolNames,
@@ -260,7 +259,6 @@ function validateLifecycleToolConfiguration(
       "settings.permission.autoApproveTools",
       settings.permission.autoApproveTools,
     ],
-    ["configuration.allowedTools", configuration.allowedTools],
     ["configuration.hostToolCeiling", configuration.hostToolCeiling],
     ["configuration.roleAllowedTools", configuration.roleAllowedTools],
     ["configuration.disallowedTools", configuration.disallowedTools],

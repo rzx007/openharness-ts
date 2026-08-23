@@ -5,11 +5,6 @@ export interface FeishuConfig {
   appSecret: string;
   encryptKey?: string;
   verificationToken?: string;
-  /**
-   * @deprecated ACL 已上移 ChannelManager 集中处理（fail-closed：空 = 全拒）。
-   * adapter 不再过滤；保留字段仅为旧调用方类型兼容。
-   */
-  allowFrom?: string[];
   replyAtBotNames?: string[];
 }
 

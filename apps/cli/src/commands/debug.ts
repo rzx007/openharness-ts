@@ -25,7 +25,6 @@ export function createDebugCommand(): Command {
 
   command
     .command("settlements")
-    .alias("list-projection-settlements")
     .description("List durable projection recovery records without changing them")
     .option("--json", "Print machine-readable JSON")
     .option("--include-content", "Reveal settlement payloads")

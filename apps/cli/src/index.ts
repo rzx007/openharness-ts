@@ -32,14 +32,6 @@ program
     "-p, --print",
     "Print via daemon Session API and exit (non-interactive; requires a prompt)",
   )
-  .option(
-    "-c, --continue",
-    "Unavailable: legacy project snapshot continue (use TUI /sessions)",
-  )
-  .option(
-    "-r, --resume <session>",
-    "Unavailable: legacy project snapshot resume (use TUI /resume)",
-  )
   .option("-n, --name <name>", "Name the session")
   .option("--provider <provider>", "API provider")
   .option(

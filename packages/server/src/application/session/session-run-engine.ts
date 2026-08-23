@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import type { SessionRunRecord, SessionStore } from "@openharness/services";
+import type { SessionRunRecord } from "@openharness/protocol";
+import type { SessionStore } from "@openharness/services";
 
 import {
   jsonEqual,

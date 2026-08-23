@@ -1,9 +1,9 @@
 import type { AgentChildResult, AgentEvent } from "@openharness/core";
+import type { SessionStore } from "@openharness/services";
 import type {
   CreateProjectionSettlementInput,
   ProjectionSettlementRecord,
-  SessionStore,
-} from "@openharness/services";
+} from "@openharness/protocol";
 
 export const DAEMON_AGENT_PROJECTOR = "daemon-agent";
 

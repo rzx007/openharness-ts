@@ -40,6 +40,7 @@ export interface StoredMessageLike {
 }
 
 export interface SessionSnapshotPayload {
+  schema_version: 1;
   session_id: string;
   cwd: string;
   model: string;
@@ -148,6 +149,7 @@ export function saveSessionSnapshot(options: SaveSessionOptions): string {
   const messages = sanitizeStoredMessages(options.messages as unknown[]) as StoredMessageLike[];
 
   const payload: SessionSnapshotPayload = {
+    schema_version: 1,
     session_id: sid,
     cwd: resolve(options.cwd),
     model: options.model,
@@ -178,18 +180,19 @@ export function sanitizeStoredMessages(messages: unknown[]): unknown[] {
   return sanitizeMessageHistory(messages);
 }
 
-function sanitizePayload(payload: SessionSnapshotPayload | null): SessionSnapshotPayload | null {
-  if (!payload) return null;
-  const messages = sanitizeStoredMessages(Array.isArray(payload.messages) ? payload.messages : []);
+function sanitizePayload(payload: SessionSnapshotPayload): SessionSnapshotPayload {
+  if (payload.schema_version !== 1) {
+    throw new Error(`Unsupported session snapshot schema version: ${String(payload.schema_version)}`);
+  }
+  if (!payload.session_id || !Array.isArray(payload.messages)) {
+    throw new Error("Invalid session snapshot: session_id and messages are required");
+  }
+  const messages = sanitizeStoredMessages(payload.messages);
   return { ...payload, messages, message_count: messages.length };
 }
 
-function readPayload(path: string): SessionSnapshotPayload | null {
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as SessionSnapshotPayload;
-  } catch {
-    return null;
-  }
+function readPayload(path: string): SessionSnapshotPayload {
+  return JSON.parse(readFileSync(path, "utf-8")) as SessionSnapshotPayload;
 }
 
 /** 读项目最近一次会话（latest.json）。 */
@@ -210,18 +213,16 @@ export function listSessionSnapshots(cwd: string, limit = 20): SessionListItem[]
     .map((name) => join(sessionDir, name))
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
 
-  const toItem = (data: SessionSnapshotPayload, fallbackId: string, fallbackCreated: number): SessionListItem => ({
-    session_id: data.session_id || fallbackId,
-    summary: data.summary || extractSummary((data.messages ?? []) as StoredMessageLike[]),
-    message_count: data.message_count ?? (data.messages?.length ?? 0),
-    model: data.model ?? "",
-    created_at: data.created_at ?? fallbackCreated,
+  const toItem = (data: SessionSnapshotPayload): SessionListItem => ({
+    session_id: data.session_id,
+    summary: data.summary,
+    message_count: data.message_count,
+    model: data.model,
+    created_at: data.created_at,
   });
 
   for (const path of named) {
-    const data = readPayload(path);
-    if (!data) continue;
-    const item = toItem(data, basename(path, ".json").replace(/^session-/, ""), statSync(path).mtimeMs / 1000);
+    const item = toItem(sanitizePayload(readPayload(path)));
     seenIds.add(item.session_id);
     sessions.push(item);
     if (sessions.length >= limit) break;
@@ -229,10 +230,9 @@ export function listSessionSnapshots(cwd: string, limit = 20): SessionListItem[]
 
   const latestPath = join(sessionDir, "latest.json");
   if (existsSync(latestPath) && sessions.length < limit) {
-    const data = readPayload(latestPath);
-    if (data && !seenIds.has(data.session_id || "latest")) {
-      const item = toItem(data, "latest", statSync(latestPath).mtimeMs / 1000);
-      if (!item.summary) item.summary = "(latest session)";
+    const data = sanitizePayload(readPayload(latestPath));
+    if (!seenIds.has(data.session_id)) {
+      const item = toItem(data);
       sessions.push(item);
     }
   }
@@ -253,8 +253,8 @@ export function deleteSessionById(cwd: string, sessionId: string): boolean {
   }
   const latestPath = join(sessionDir, "latest.json");
   if (existsSync(latestPath)) {
-    const data = readPayload(latestPath);
-    if (data?.session_id === sessionId) {
+    const data = sanitizePayload(readPayload(latestPath));
+    if (data.session_id === sessionId) {
       try { unlinkSync(latestPath); } catch { /* ignore */ }
     }
   }
@@ -272,7 +272,7 @@ export function loadSessionById(cwd: string, sessionId: string): SessionSnapshot
   const latestPath = join(sessionDir, "latest.json");
   if (existsSync(latestPath)) {
     const data = readPayload(latestPath);
-    if (data && (data.session_id === sessionId || sessionId === "latest")) return sanitizePayload(data);
+    if (data.session_id === sessionId || sessionId === "latest") return sanitizePayload(data);
   }
   return null;
 }

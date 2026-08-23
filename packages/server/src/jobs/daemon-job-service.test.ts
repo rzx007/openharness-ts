@@ -1,4 +1,4 @@
-import type { SessionExecutionRecord } from "@openharness/services";
+import type { SessionExecutionRecord } from "@openharness/protocol";
 import type { TerminalSessionInfo } from "@openharness/terminal";
 import { describe, expect, it, vi } from "vitest";
 

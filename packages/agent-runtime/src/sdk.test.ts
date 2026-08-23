@@ -58,7 +58,7 @@ describe("programmatic agent SDK", () => {
       cwd,
       settings,
       client,
-      requestPermission,
+      hostCapabilities: { permissions: { requestPermission } },
       onEvent: (event) => { reliableEvents.push(event); },
     });
     agent.subscribe(() => { throw new Error("observer failures are isolated"); });
@@ -356,13 +356,13 @@ describe("programmatic agent SDK", () => {
         workflowRepository: new FileWorkflowRunRepository({ cwd }),
       },
       roleAllowedTools: [
-        "workflow",
-        "job_list",
-        "job_read",
-        "job_wait",
-        "job_send",
-        "job_cancel",
-        "agent",
+        "Workflow",
+        "JobList",
+        "JobRead",
+        "JobWait",
+        "JobSend",
+        "JobCancel",
+        "Agent",
       ],
       onEvent: (event) => { events.push(event); },
     });
@@ -462,7 +462,7 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      allowedTools: ["Read", "Agent", "JobWait"],
+      hostToolCeiling: ["Read", "Agent", "JobWait"],
     });
 
     try {

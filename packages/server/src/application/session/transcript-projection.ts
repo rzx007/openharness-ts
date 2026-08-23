@@ -1,10 +1,10 @@
 import type { StreamEvent } from "@openharness/core";
+import type { SessionStore } from "@openharness/services";
 import type {
   SessionEventRecord,
   SessionInputRecord,
   SessionMessagePartStatus,
-  SessionStore,
-} from "@openharness/services";
+} from "@openharness/protocol";
 
 type ActiveToolPart = {
   partId: string;

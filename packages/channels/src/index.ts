@@ -26,8 +26,6 @@ export type { InboundMessage, OutboundMessage } from "./bus/queue";
 export { isAllowed } from "./bus/acl";
 export { ChannelManager } from "./manager";
 export type { ChannelManagerOptions, ChannelStatus } from "./manager";
-export { ChannelBridge, EphemeralChannelBridge } from "./bridge";
-export type { BridgeAgent } from "./bridge";
 export { DurableChannelBridge } from "./durable-bridge";
 export type { DurableChannelPort } from "./durable-bridge";
 export { StdioAdapter } from "./impl/stdio";

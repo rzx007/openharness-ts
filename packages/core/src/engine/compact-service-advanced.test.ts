@@ -151,7 +151,7 @@ describe("PTL detection", () => {
 describe("PTL head-truncation retry", () => {
   it("retries with older context trimmed when the summarizer reports overflow", async () => {
     const client = makePtlClient(1, "<summary>recovered after truncation</summary>");
-    const svc = new CompactService(SMALL_MAX, 2, client);
+    const svc = new CompactService(SMALL_MAX, 2, { client });
     const result = await svc.autoCompact(bigConversation(15));
 
     // Summarizer was called twice: first failed (PTL), retry succeeded.
@@ -284,7 +284,7 @@ describe("image handling", () => {
 
   it("does not ship raw image data to the summarizer during compaction", async () => {
     const client = makeSummaryClient("<summary>ok</summary>");
-    const svc = new CompactService(SMALL_MAX, 2, client);
+    const svc = new CompactService(SMALL_MAX, 2, { client });
     const messages: Message[] = [
       ...bigConversation(10),
       {
@@ -372,7 +372,7 @@ describe("context collapse", () => {
 describe("boundary marker", () => {
   it("inserts a boundary marker between summarized history and preserved messages", async () => {
     const client = makeSummaryClient("<summary>the gist</summary>");
-    const svc = new CompactService(SMALL_MAX, 2, client);
+    const svc = new CompactService(SMALL_MAX, 2, { client });
     const result = await svc.autoCompact(bigConversation(15));
     const hasBoundary = result.some(
       (m) =>
@@ -423,7 +423,7 @@ describe("pre/post compact hooks", () => {
 
   it("works without a hook executor (no crash)", async () => {
     const client = makeSummaryClient("<summary>fine</summary>");
-    const svc = new CompactService(SMALL_MAX, 2, client);
+    const svc = new CompactService(SMALL_MAX, 2, { client });
     const result = await svc.autoCompact(bigConversation(15));
     expect(result.length).toBeLessThan(bigConversation(15).length);
   });
@@ -451,7 +451,7 @@ describe("progress callback and checkpoints", () => {
 
   it("records checkpoints retrievable via getCheckpoints", async () => {
     const client = makeSummaryClient("<summary>cp</summary>");
-    const svc = new CompactService(SMALL_MAX, 2, client);
+    const svc = new CompactService(SMALL_MAX, 2, { client });
     await svc.autoCompact(bigConversation(15));
     const checkpoints = svc.getCheckpoints().map((c) => c.checkpoint);
     expect(checkpoints).toContain("compact_start");

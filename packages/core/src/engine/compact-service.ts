@@ -176,7 +176,7 @@ export type CompactAttachmentsProvider = () =>
   | CompactAttachments
   | Promise<CompactAttachments>;
 
-/** 构造 CompactService 的可选配置（第三参；也兼容历史上直接传 CompactClient）。 */
+/** 构造 CompactService 的可选配置。 */
 export interface CompactServiceOptions {
   /** 用于生成摘要的 LLM 客户端；未提供时只能走 micro/collapse/simple。 */
   client?: CompactClient;
@@ -298,33 +298,22 @@ export class CompactService {
   /**
    * @param maxTokens 上下文上限
    * @param keepRecent 保留的最近消息/工具结果窗口
-   * @param clientOrOptions 兼容两种写法：
-   *   - 直接传 CompactClient（历史 API）
-   *   - 传 CompactServiceOptions（推荐，可挂 hook / 进度 / attachments）
+   * @param options LLM 客户端、hook、进度和附件等配置
    */
   constructor(
     maxTokens = 100_000,
     keepRecent = 10,
-    clientOrOptions?: CompactClient | CompactServiceOptions,
+    options: CompactServiceOptions = {},
   ) {
     this.maxTokens = maxTokens;
     this.keepRecent = keepRecent;
 
-    // 向后兼容：历史上第三参是裸 CompactClient（带 submitMessage）。
-    if (clientOrOptions && "submitMessage" in clientOrOptions) {
-      this.client = clientOrOptions;
-      this.hookExecutor = undefined;
-      this.progressCallback = undefined;
-      this.imageTokenEstimate = DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE;
-    } else {
-      const opts = (clientOrOptions ?? {}) as CompactServiceOptions;
-      this.client = opts.client;
-      this.hookExecutor = opts.hookExecutor;
-      this.progressCallback = opts.progressCallback;
-      this.imageTokenEstimate =
-        opts.imageTokenEstimate ?? DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE;
-      this.attachmentsProvider = opts.attachmentsProvider;
-    }
+    this.client = options.client;
+    this.hookExecutor = options.hookExecutor;
+    this.progressCallback = options.progressCallback;
+    this.imageTokenEstimate =
+      options.imageTokenEstimate ?? DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE;
+    this.attachmentsProvider = options.attachmentsProvider;
   }
 
   /** 替换摘要客户端（例如切换 API provider 时）。 */
@@ -519,7 +508,7 @@ export class CompactService {
   }
 
   // -------------------------------------------------------------------------
-  // Simple compact —— 不调模型的占位摘要（兼容遗留 / 兜底）
+  // Simple compact —— 不调模型的确定性兜底摘要
   // -------------------------------------------------------------------------
 
   /**

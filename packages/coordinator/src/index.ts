@@ -96,7 +96,7 @@ export {
   type WorkflowTaskStatus,
   type WorkflowTaskTerminalStatus,
   type WorkflowWorkerResult,
-} from "./workflow-scheduler.js";
+} from "./workflow/index.js";
 
 export {
   getWorkflowRunsDir,
@@ -111,4 +111,4 @@ export {
   type RunPersistentWorkflowOptions,
   type FileWorkflowRunRepositoryOptions,
   type WorkflowRunRepository,
-} from "./workflow-store.js";
+} from "./workflow/index.js";

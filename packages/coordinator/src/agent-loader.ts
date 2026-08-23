@@ -8,8 +8,8 @@ import type { AgentDefinition } from "./index.js";
  * 用户/插件 agent 定义加载器（移植自 Python coordinator/agent_definitions.py
  * 的 load_agents_dir 段）。
  *
- * `.md` 文件 = YAML frontmatter（约 20 个字段，驼峰/下划线双形态容错）+
- * 正文作 system prompt。YAML 解析失败回退行级 `key: value`（对齐 Python）。
+ * `.md` 文件 = YAML frontmatter（当前字段只使用 camelCase）+
+ * 正文作 system prompt。YAML 解析失败直接报错，不猜测坏配置。
  * 非法枚举值静默丢弃（Python 是 logger.debug）；坏文件跳过不拖垮整体。
  */
 
@@ -48,20 +48,12 @@ export function parseAgentFrontmatter(content: string): {
 
   const fmText = lines.slice(1, endIndex).join("\n");
   let frontmatter: Record<string, unknown> = {};
-  try {
-    const parsed = parseYaml(fmText) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      frontmatter = parsed as Record<string, unknown>;
+  const parsed = parseYaml(fmText) as unknown;
+  if (parsed !== null && parsed !== undefined) {
+    if (typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Agent frontmatter must be a YAML object");
     }
-  } catch {
-    // 回退行级 key: value（剥引号），对齐 Python 的 YAMLError fallback。
-    for (const line of lines.slice(1, endIndex)) {
-      const idx = line.indexOf(":");
-      if (idx === -1) continue;
-      const key = line.slice(0, idx).trim();
-      const value = line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
-      if (key) frontmatter[key] = value;
-    }
+    frontmatter = parsed as Record<string, unknown>;
   }
 
   const body = lines.slice(endIndex + 1).join("\n").trim();
@@ -96,11 +88,6 @@ function pickEnum(raw: unknown, allowed: ReadonlySet<string>): string | undefine
   return typeof raw === "string" && allowed.has(raw) ? raw : undefined;
 }
 
-/** 驼峰优先、下划线回退取值。 */
-function pick(fm: Record<string, unknown>, camel: string, snake: string): unknown {
-  return fm[camel] !== undefined ? fm[camel] : fm[snake];
-}
-
 // ---------------------------------------------------------------------------
 // 目录加载
 // ---------------------------------------------------------------------------
@@ -131,9 +118,9 @@ export function buildAgentDefinition(
       .replace(/\\n/g, "\n");
 
   const bgRaw = fm.background;
-  const ocmRaw = pick(fm, "omitClaudeMd", "omit_claude_md");
-  const ipRaw = pick(fm, "initialPrompt", "initial_prompt");
-  const csrRaw = pick(fm, "criticalSystemReminder", "critical_system_reminder");
+  const ocmRaw = fm.omitClaudeMd;
+  const ipRaw = fm.initialPrompt;
+  const csrRaw = fm.criticalSystemReminder;
   const permsRaw = fm.permissions;
 
   const modelRaw = fm.model;
@@ -151,7 +138,7 @@ export function buildAgentDefinition(
     effort = pickEnum(effortRaw, EFFORT_LEVELS);
   }
 
-  const mcpRaw = pick(fm, "mcpServers", "mcp_servers");
+  const mcpRaw = fm.mcpServers;
   const mcpServers = Array.isArray(mcpRaw) && mcpRaw.length > 0 ? mcpRaw : undefined;
 
   const hooksRaw = fm.hooks;
@@ -165,11 +152,11 @@ export function buildAgentDefinition(
     description,
     systemPrompt: body || undefined,
     tools: parseStrList(fm.tools),
-    disallowedTools: parseStrList(pick(fm, "disallowedTools", "disallowed_tools")),
+    disallowedTools: parseStrList(fm.disallowedTools),
     model,
     effort,
-    permissionMode: pickEnum(pick(fm, "permissionMode", "permission_mode"), PERMISSION_MODES),
-    maxTurns: parsePositiveInt(pick(fm, "maxTurns", "max_turns")),
+    permissionMode: pickEnum(fm.permissionMode, PERMISSION_MODES),
+    maxTurns: parsePositiveInt(fm.maxTurns),
     skills: parseStrList(fm.skills) ?? [],
     mcpServers,
     hooks,
@@ -180,13 +167,13 @@ export function buildAgentDefinition(
     isolation: pickEnum(fm.isolation, ISOLATION_MODES),
     omitClaudeMd: ocmRaw === true || ocmRaw === "true",
     criticalSystemReminder: typeof csrRaw === "string" && csrRaw.trim() ? csrRaw : undefined,
-    requiredMcpServers: parseStrList(pick(fm, "requiredMcpServers", "required_mcp_servers")),
+    requiredMcpServers: parseStrList(fm.requiredMcpServers),
     permissions: permsRaw
       ? String(permsRaw).split(",").map((p) => p.trim()).filter(Boolean)
       : [],
     filename: options.stem,
     baseDir: options.baseDir,
-    subagentType: typeof fm.subagent_type === "string" ? fm.subagent_type : name,
+    subagentType: typeof fm.subagentType === "string" ? fm.subagentType : name,
     source: options.source,
   };
 }

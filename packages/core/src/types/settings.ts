@@ -32,8 +32,6 @@ export interface MemoryConfig {
 export interface SandboxConfig {
   enabled: boolean;
   backend?: "srt" | "docker";
-  /** Deprecated alias kept for old configs; prefer backend. */
-  runtime?: string;
   failIfUnavailable?: boolean;
   enabledPlatforms?: Array<"linux" | "wsl" | "macos">;
   filesystem?: SandboxFilesystemConfig;

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import type { SessionMessagePartRecord, SessionMessageRecord, SessionRecord } from "@openharness/services";
+import type { SessionMessagePartRecord, SessionMessageRecord, SessionRecord } from "@openharness/protocol";
 
 export type SessionExportFormat = "md" | "json";
 

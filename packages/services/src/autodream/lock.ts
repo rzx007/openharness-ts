@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
+import { join, dirname } from "node:path";
 
 /**
  * autodream 整合锁与会话扫描（移植自 Python autodream/lock.py）。
@@ -95,8 +95,7 @@ export function recordConsolidation(memoryDir: string): void {
 
 /**
  * since 之后被触碰过的会话快照 ID（新→旧去重；排除当前会话）。
- * 与 Python 差异：TS 会话文件是 `<id>.json`（无 session- 前缀约定），
- * 兼容两种命名；ID 优先取 JSON 里的 session_id/id 字段。
+ * 当前会话快照固定使用 `session-<id>.json`，ID 固定来自 `session_id`。
  */
 export function listSessionsTouchedSince(
   sessionDir: string,
@@ -105,7 +104,7 @@ export function listSessionsTouchedSince(
 ): string[] {
   if (!existsSync(sessionDir)) return [];
   const entries = readdirSync(sessionDir)
-    .filter((name) => name.endsWith(".json"))
+    .filter((name) => /^session-.+\.json$/.test(name))
     .map((name) => {
       const path = join(sessionDir, name);
       try {
@@ -121,14 +120,16 @@ export function listSessionsTouchedSince(
   const seen = new Set<string>();
   for (const entry of entries) {
     if (entry.mtime <= sinceTs) continue;
-    let sessionId = basename(entry.name, ".json").replace(/^session-/, "");
-    try {
-      const payload = JSON.parse(readFileSync(entry.path, "utf-8")) as Record<string, unknown>;
-      const rawId = payload.session_id ?? payload.id;
-      if (typeof rawId === "string" && rawId.trim()) sessionId = rawId.trim();
-    } catch {
-      // 用文件名兜底
+    const payload = JSON.parse(readFileSync(entry.path, "utf-8")) as Record<string, unknown>;
+    if (payload.schema_version !== 1) {
+      throw new Error(
+        `Unsupported session snapshot schema version in ${entry.path}: ${String(payload.schema_version)}`,
+      );
     }
+    if (typeof payload.session_id !== "string" || !payload.session_id.trim()) {
+      throw new Error(`Invalid session snapshot: ${entry.path} is missing session_id`);
+    }
+    const sessionId = payload.session_id.trim();
     if (currentSessionId && sessionId === currentSessionId) continue;
     if (seen.has(sessionId)) continue;
     seen.add(sessionId);

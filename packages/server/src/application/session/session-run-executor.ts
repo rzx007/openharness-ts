@@ -1,4 +1,5 @@
-import { readSessionRuntimeConfig, type SessionStore } from "@openharness/services";
+import { readSessionRuntimeConfig } from "@openharness/protocol";
+import type { SessionStore } from "@openharness/services";
 
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import { RunInterruptedError, type SessionRunWorkContext } from "../../runtime/run-coordinator.js";

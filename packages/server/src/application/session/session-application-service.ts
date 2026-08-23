@@ -1,10 +1,12 @@
 import {
+  type SessionStore,
+} from "@openharness/services";
+import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
   readRuntimeMetadata,
   type ReplaceTranscriptMessageInput,
-  type SessionStore,
-} from "@openharness/services";
+} from "@openharness/protocol";
 
 import type {
   AdmitPromptInput,

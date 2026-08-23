@@ -4,7 +4,7 @@ import type {
   SessionMessagePartRecord,
   SessionMessageRecord,
   SessionRecord,
-} from "@openharness/services/session-runtime/types";
+} from "@openharness/protocol";
 
 import type { LoadDaemonAgent } from "../../daemon/daemon-agent.js";
 
