@@ -1,4 +1,9 @@
 import type { ToolDefinition } from "@openharness/core";
+import type { McpClientManager } from "@openharness/mcp";
+
+function mcpManagerFrom(context: { mcpManager?: unknown }): McpClientManager | undefined {
+  return context.mcpManager as McpClientManager | undefined;
+}
 
 export const mcpToolCallTool: ToolDefinition = {
   name: "McpToolCall",
@@ -13,7 +18,7 @@ export const mcpToolCallTool: ToolDefinition = {
     required: ["serverName", "toolName"],
   },
   async execute(input, context) {
-    const mgr = (context as any).mcpManager;
+    const mgr = mcpManagerFrom(context);
     if (!mgr) {
       return { content: [{ type: "text", text: "MCP manager not available in context" }], isError: true };
     }
@@ -40,12 +45,12 @@ export const listMcpResourcesTool: ToolDefinition = {
     required: [],
   },
   async execute(input, context) {
-    const mgr = (context as any).mcpManager;
+    const mgr = mcpManagerFrom(context);
     if (!mgr) return { content: [{ type: "text", text: "MCP manager not available" }], isError: true };
-    const resources: any[] = mgr.getConnectedResources();
-    const filtered = input.serverName ? resources.filter((r: any) => r.serverName === input.serverName) : resources;
+    const resources = mgr.getConnectedResources();
+    const filtered = input.serverName ? resources.filter((resource) => resource.serverName === input.serverName) : resources;
     if (!filtered.length) return { content: [{ type: "text", text: "(no resources)" }] };
-    const text = filtered.map((r: any) => `${r.serverName}: ${r.name} (${r.uri})`).join("\n");
+    const text = filtered.map((resource) => `${resource.serverName}: ${resource.name} (${resource.uri})`).join("\n");
     return { content: [{ type: "text", text }] };
   },
 };
@@ -62,7 +67,7 @@ export const readMcpResourceTool: ToolDefinition = {
     required: ["serverName", "uri"],
   },
   async execute(input, context) {
-    const mgr = (context as any).mcpManager;
+    const mgr = mcpManagerFrom(context);
     if (!mgr) return { content: [{ type: "text", text: "MCP manager not available" }], isError: true };
     try {
       const content = await mgr.readResource(

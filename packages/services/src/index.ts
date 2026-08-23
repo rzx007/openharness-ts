@@ -1,6 +1,3 @@
-export { CompactService } from "./compact";
-export type { CompactOptions } from "./compact";
-
 export {
   SessionStore,
   createDurableEventRegistry,

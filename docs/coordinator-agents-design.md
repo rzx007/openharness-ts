@@ -1,6 +1,6 @@
 # Coordinator Agents Design
 
-> 当前实现。child 执行边界见 [agent-child-session-flow.md](./agent-child-session-flow.md)。
+> 状态：当前实现。child 执行边界见 [agent-child-session-flow.md](./agent-child-session-flow.md)。
 
 ## Agent definitions
 

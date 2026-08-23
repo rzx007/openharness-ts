@@ -176,7 +176,7 @@ Builtin session 名与 skill 重名时 **builtin 胜出**（例如 `/commit` 是
 |---|---|
 | `registerBuiltinCommandsOnRegistry` | 无；catalog + `dispatchSessionCommand` |
 | 进程内 `QueryEngine` 上改历史 | store `replaceTranscript` + `closeRuntime`（如 `/rewind` `/compact`） |
-| print/worker 斜杠 | **不支持**完整 slash 面；print 是一次性 prompt |
+| print 斜杠 | **不支持**完整 slash 面；print 是一次性 prompt |
 
 print 走 daemon Session API，不走本 flow。旧 `--task-worker` 入口已退场。见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
 

@@ -9,7 +9,7 @@ OpenHarness 是一套可长期保存运行状态的 Agent 应用。CLI、TUI、W
 > **易漂移数字以代码和测试为准**：基础工具数看 `packages/tools` 的 `createDefaultToolRegistry()`；Provider 看 `packages/api` 的 `PROVIDERS`；默认 model/maxTurns 看 `packages/core` 的 `DEFAULT_SETTINGS`。当前架构和硬规则统一从 [docs/README.md](docs/README.md) 索引。
 
 - ✅ **多模型支持** — 21 个 Provider 自动检测（`packages/api` `PROVIDERS`；Anthropic 原生 + OpenAI 兼容 + Codex 订阅），含 `<think>` 块过滤、图片/vision 传递、gpt-5/o 系列 token 字段适配。🟡 暂缺 Copilot 订阅；CLI/`settings.effort` 已有，模型原生 reasoning tokens 仍简化
-- ✅ **工具能力** — 基础 registry 提供文件 / Bash / Web / Grep / MCP / TaskCreate / Agent / Workflow / 媒体与元工具；runtime host 按能力注入 `JobList/Read/Wait/Send/Cancel`、`TerminalOpen` 和 5 个 `Schedule*` 工具。bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
+- ✅ **工具能力** — 基础 registry 提供文件 / Bash / Web / Grep / MCP / `BackgroundShellCreate` / Agent / 媒体与元工具；runtime host 按能力注入 `Workflow`、`JobList/Read/Wait/Send/Cancel`、`TerminalOpen` 和 5 个 `Schedule*` 工具。bash/grep/glob 健壮性已对齐 v0.1.8（超时保留输出、进程组杀除、gitignore/超长行处理）
 - ✅ **多 Agent 编排** — 内置 7 agent + 用户/插件自定义 agent（`~/.openharness-ts/agents/*.md`），以及统一 Jobs 控制、`Workflow` DAG、sequential/parallel/pipeline、retry、预算、timeline、reconcile/cancel、Workflow 工具/CLI 的 reconciliation follow-up spec 生成和 `ohs workflow` 管理命令。daemon/TUI/print 主路径使用 daemon 内 child session；task、child session 与 child run 的关联通过 daemon 事件持久化，跨客户端可重放。
 - ✅ **MCP 协议** — stdio + HTTP(streamable)/SSE 传输连接外部 MCP Server，支持 headers/env 静态鉴权、`McpAuth` 配置 Bearer/Header/env 后重连、失败隔离；MCP OAuth 流程待补
 - ✅ **权限系统** — default / plan / full_auto + 工具黑白名单、路径规则、命令拒绝；swarm worker 只读自动放行 + 写操作转 leader 集中裁决；TUI 下 Edit/Write 改文件前显示 unified diff 预览，可本次/整个会话批准
@@ -389,7 +389,7 @@ OpenHarness-ts/
 │  ├─────────┤ ├──────────┤ ├──────────┤ ├───────────┤ ├─────────┤ │
 │  │ Grep    │ │ WebFetch │ │WebSearch │ │ Notebook  │ │ LSP     │ │
 │  ├─────────┤ ├──────────┤ ├──────────┤ ├───────────┤ ├─────────┤ │
-│  │ Agent   │ │ Job×5    │ │TaskCreate│ │ Workflow  │ │Schedule×5│ │
+│  │ Agent   │ │ Job×5    │ │ BgShell  │ │ Workflow  │ │Schedule×5│ │
 │  ├─────────┤ ├──────────┤ ├──────────┤ ├───────────┤ ├─────────┤ │
 │  │ MCP×4   │ │ Image×2  │ │ Skill    │ │ TodoWrite │ │ …      │ │
 │  └─────────┘ └──────────┘ └──────────┘ └───────────┘ └─────────┘ │
@@ -399,9 +399,9 @@ OpenHarness-ts/
 │                    Service Layer                                    │
 │                                                                     │
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌───────────┐ │
-│  │ Compact      │ │ SessionStore │ │ Scheduled    │ │ Task      │ │
-│  │ Service      │ │ parts/events │ │ Scheduler    │ │ Manager   │ │
-│  │ (LLM摘要)   │ │ (daemon)     │ │ (RRULE计算)  │ │ (生命周期)│ │
+│  │ Compact      │ │ SessionStore │ │ Scheduled    │ │ Execution │ │
+│  │ Service      │ │ parts/events │ │ Scheduler    │ │ Supervisor│ │
+│  │ (LLM摘要)   │ │ (daemon)     │ │ (RRULE计算)  │ │ (进程句柄)│ │
 │  └──────────────┘ └──────────────┘ └──────────────┘ └───────────┘ │
 │  ┌──────────────┐ ┌──────────────┐                                │
 │  │ Memory       │ │ LSP Client   │                                │
@@ -455,7 +455,7 @@ OpenHarness-ts/
 | **文件操作**   | `Bash`（命令执行）、`Read`（文件读取）、`Write`（文件写入）、`Edit`（精确字符串替换）、`Glob`（文件模式匹配）、`NotebookEdit`（Jupyter 编辑） |
 | **搜索**       | `Grep`（ripgrep 优先 + JS fallback）、`Lsp`（LSP 集成）                                                                                       |
 | **Web**        | `WebFetch`（URL 抓取 + HTML→Text）、`WebSearch`（DuckDuckGo HTML 搜索）                                                                       |
-| **后台工作**   | `TaskCreate`（只创建后台 shell）、`JobList/Read/Wait/Send/Cancel`（统一控制 Terminal、shell、Agent、Workflow）                                |
+| **后台工作**   | `BackgroundShellCreate`（创建后台 shell）、`JobList/Read/Wait/Send/Cancel`（统一控制 Terminal、shell、Agent、Workflow）                       |
 | **Agent/团队** | `Agent`（创建 daemon child session 并返回 `jobId`）、`Workflow`（硬调度 DAG）、`TeamCreate/Delete`（团队管理）                                |
 | **调度**       | `ScheduleCreate/Update/Delete/List/RunNow`（创建和管理运行 Agent 的已安排任务；仅 daemon/host 注入 schedules capability 后注册）              |
 | **MCP**        | `McpToolCall/ListMcpResources/ReadMcpResource/McpAuth`（4 个 MCP 工具；`McpAuth` 是静态 Bearer/Header/env 配置，不是 OAuth flow）             |
@@ -467,10 +467,10 @@ OpenHarness-ts/
 | 模块                       | 说明                                                                                                                                                                                                                                         |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CompactService`           | LLM 驱动的对话摘要：当 token 接近阈值时自动触发，结构化 `<analysis>/<summary>` 输出。详见 [docs/compact-service-design.md](docs/compact-service-design.md)                                                                                   |
-| session snapshot functions | print/worker 项目级快照：按项目分目录（cwd 哈希）、latest/id 双写、load 侧 tool_use/result 配对修复、tool_metadata 白名单、transcript.md 导出；不参与 daemon/TUI 状态。详见 [docs/session-storage-design.md](docs/session-storage-design.md) |
+| standalone session files   | 独立嵌入场景的严格版本项目快照和 transcript 导出；不参与 daemon/TUI 权威状态。daemon 数据格式见 [docs/durable-execution-data-model.md](docs/durable-execution-data-model.md)                                   |
 | `SessionStore`             | daemon 主线会话存储：session/input/message/canonical message part/event/run/task/permission request；支持单会话原子 snapshot + SSE cursor，使用 daemon 独占的 SQLite 数据库与迁移文件                                                        |
 | `ScheduledTaskService`     | 已安排任务：一次性时间 / RRULE 计算、Agent 执行、重叠与错过策略、运行历史和未读结果                                                                                                                                                          |
-| `TaskManager`              | 进程内执行器：创建/查询/停止/输出与 stdin/callback；跨端可恢复的生命周期由 `SessionStore` task 投影持久化                                                                                                                                    |
+| `DetachedProcessSupervisor` | shell/dream/显式 Agent 子进程的进程内句柄与停止能力；跨端可恢复的状态由 `SessionStore` execution 投影持久化                                                                                                                                |
 | `MemoryManager`            | 四层记忆体系的持久层：frontmatter + 加权搜索 + MEMORY.md 索引；配套 `/remember`（LLM 提取持久记忆）、`/dream`（梦境整合）、会话 checkpoint 与环境事实抽取。详见 [docs/memory-system.md](docs/memory-system.md)                               |
 | `LspClient`                | LSP 客户端：与 Language Server Protocol 通信                                                                                                                                                                                                 |
 
@@ -498,7 +498,6 @@ OpenHarness-ts/
 | `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/channels/workflow/sandbox/daemon/serve/config 子命令；已安排任务通过 Agent 对话创建并由 Desktop 管理                           |
 | `TUI Frontend`      | 默认交互面：opentui + React 19（Bun）。`ohs` / `ohs --tui` 经 `useServerSync` attach daemon，消费 `@openharness/client` reducer。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
 | `Print`             | 用户 headless：ensure daemon → `@openharness/client` admitPrompt + SSE 渲染 stdout                                                                                           |
-| `Task worker`       | 历史内部实现，不属于 daemon/TUI/print 产品链路，也不作为兼容承诺；主路径的 `Agent` 为 daemon child session                                                                   |
 | `ThemeManager`      | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题                                                                                                      |
 | `VimModeHandler`    | Vim 模态编辑：normal / insert / visual / command 模式切换                                                                                                                    |
 | `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析                                                                                                                                           |
@@ -518,14 +517,14 @@ OpenHarness-ts/
 │  解析 flags: --model, --api-key, --permission-mode, ...  │
 └──────────────────────────┬───────────────────────────────┘
                            │
-           ┌───────────────┼──────────────────────────┐
-           ▼               ▼                          ▼
-     ohs / --tui        --print / prompt      --task-worker（deprecated）
-   (daemon 客户端,默认)   (daemon 客户端,单次)     (compatibility fallback)
-           │               │                          │
-           └───────────────┤                          ▼
-                           │                 历史 task worker
-                           ▼
+           ┌───────────────┴──────────────────┐
+           ▼                                  ▼
+     ohs / --tui                       --print / prompt
+   (daemon 客户端,默认)                (daemon 客户端,单次)
+           │                                  │
+           └──────────────────┬───────────────┘
+                              │
+                              ▼
 ┌──────────────────────────────────────────────────────────┐
 │  ensure / attach daemon                                  │
 │  ├─ 读取 daemon registry + GET /health                   │
@@ -613,8 +612,7 @@ submitMessage(userInput)
 │                 │  │ ├─ WebSearch: HTTP     │   │
 │                 │  │ ├─ MCP: stdio/HTTP/SSE │   │
 │                 │  │ └─ Agent: child session│   │
-│                 │  │    （daemon 主路径；   │   │
-│                 │  │     worker 仅兼容）    │   │
+│                 │  │    （daemon child）    │   │
 │                 │  └──────────┬─────────────┘   │
 │                 │             ▼                   │
 │                 │  ┌────────────────────────┐   │

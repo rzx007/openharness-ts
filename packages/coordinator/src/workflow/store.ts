@@ -325,12 +325,12 @@ export async function cancelPersistentWorkflow(
   requestActiveWorkflowStop(store, snapshot.runId, reason);
   const stopErrors: Record<string, string> = {};
   for (const runningTask of Object.values(snapshot.runningTasks)) {
-    const taskManagerTaskId = taskManagerTaskIdFromMetadata(runningTask.metadata);
-    if (!taskManagerTaskId || !options.stopTask) continue;
+    const workerTaskId = workerTaskIdFromMetadata(runningTask.metadata);
+    if (!workerTaskId || !options.stopTask) continue;
     try {
-      await options.stopTask(taskManagerTaskId);
+      await options.stopTask(workerTaskId);
     } catch (error) {
-      stopErrors[taskManagerTaskId] = error instanceof Error ? error.message : String(error);
+      stopErrors[workerTaskId] = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -340,7 +340,7 @@ export async function cancelPersistentWorkflow(
   for (const taskId of plan.executionOrder) {
     if (results.has(taskId)) continue;
     const runningTask = snapshot.runningTasks[taskId];
-    const taskManagerTaskId = taskManagerTaskIdFromMetadata(runningTask?.metadata);
+    const workerTaskId = workerTaskIdFromMetadata(runningTask?.metadata);
     if (runningTask) {
       results.set(taskId, {
         taskId,
@@ -353,7 +353,7 @@ export async function cancelPersistentWorkflow(
         metadata: {
           ...runningTask.metadata,
           cancelled: true,
-          ...(taskManagerTaskId && stopErrors[taskManagerTaskId] ? { stopError: stopErrors[taskManagerTaskId] } : {}),
+          ...(workerTaskId && stopErrors[workerTaskId] ? { stopError: stopErrors[workerTaskId] } : {}),
         },
       });
     } else {
@@ -439,8 +439,8 @@ function sanitizeRunId(runId: string): string {
   return runId;
 }
 
-function taskManagerTaskIdFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
-  return typeof metadata?.taskManagerTaskId === "string" ? metadata.taskManagerTaskId : undefined;
+function workerTaskIdFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
+  return typeof metadata?.workerTaskId === "string" ? metadata.workerTaskId : undefined;
 }
 
 function atomicWrite(path: string, data: string): void {

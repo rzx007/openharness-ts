@@ -83,7 +83,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
     const awaitTask = options.awaitTask ?? ((taskId, waitOptions) => defaultAwaitTask(options.cwd, options.sessionId, taskId, waitOptions, options.agent));
     const stopTask = options.stopTask ?? ((taskId) => defaultStopTask(options.cwd, options.sessionId, taskId, options.agent));
 
-    const resumedTaskId = getStringMetadata(resumeFrom?.metadata, "taskManagerTaskId");
+    const resumedTaskId = getStringMetadata(resumeFrom?.metadata, "workerTaskId");
     if (resumedTaskId) {
       try {
         reportProgress?.({
@@ -140,7 +140,7 @@ export function createAgentWorkflowRunner(options: AgentWorkflowRunnerOptions): 
         summary: spawn.error ?? "Failed to spawn workflow worker",
         metadata: {
           agentId: spawn.agentId,
-          taskManagerTaskId: spawn.taskId,
+          workerTaskId: spawn.taskId,
           backendType: spawn.backendType,
         },
       };
@@ -243,7 +243,7 @@ function mapAwaitedTaskToWorkerResult(
     result: waited.output,
     metadata: {
       agentId: spawn.agentId,
-      taskManagerTaskId: spawn.taskId,
+      workerTaskId: spawn.taskId,
       backendType: spawn.backendType,
       ...(spawn.worktree ? { worktree: spawn.worktree } : {}),
       ...(spawn.notice ? { notice: spawn.notice } : {}),
@@ -257,7 +257,7 @@ function mapAwaitedTaskToWorkerResult(
 function spawnMetadata(spawn: WorkflowWorkerSpawnResult): Record<string, unknown> {
   return {
     agentId: spawn.agentId,
-    taskManagerTaskId: spawn.taskId,
+    workerTaskId: spawn.taskId,
     backendType: spawn.backendType,
     ...(spawn.worktree ? { worktree: spawn.worktree } : {}),
     ...(spawn.notice ? { notice: spawn.notice } : {}),

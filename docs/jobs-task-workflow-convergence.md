@@ -1,6 +1,6 @@
 # Jobs Task/Workflow Convergence
 
-> 状态（2026-08-17）：前三阶段均已实施，模型侧后台生命周期控制已经统一到 Jobs；第四阶段已完成旧配置名诊断、当前文档清理、`JobList` 默认窗口和 `JobWait` 批量上限，剩余工作转入运行观察。Jobs 权威契约见 [Jobs 统一后台任务协议](./jobs-protocol.md)，首次实现复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)。
+> 状态：历史实施完成记录。当前 Jobs 权威契约见 [Jobs 统一后台任务协议](./jobs-protocol.md)，本文只解释 2026-08-17 的收口过程。
 
 ## 结论
 
@@ -28,9 +28,9 @@ Task 和 Workflow 自己仍可保留创建、验证、恢复、模板、reconcil
 - TUI 的 `jobState/jobs` 只是客户端缓存；权威状态仍在 Terminal、两个分离的执行后端、`SessionExecutionRecord` 持久化投影和 daemon SQLite 中的 `SessionWorkflowRunRepository`，由 `DaemonJobService` 在读取时聚合。
 - `TodoPanel`、`SwarmPanel` 和独立 `WorkflowRunsPanel` 已移除。普通 Workflow 列表和详情进入统一 Jobs Panel，Steps 从所选 Workflow Job 的 `JobRead` details 展示。
 
-旧的通用 `TaskManager` 已拆成两块：`DetachedProcessSupervisor` 只管 shell/dream/显式 Agent 子进程，`ChildAgentExecutionRegistry` 只管 framework child Agent 的回调句柄。`SessionExecutionRecord` 是兼容现有数据库的内部持久化投影；模型侧 shell producer 已硬切为 `BackgroundShellCreate`，没有 `TaskCreate` 别名。
+旧的通用 `TaskManager` 已拆成两块：`DetachedProcessSupervisor` 只管 shell/dream/显式 Agent 子进程，`ChildAgentExecutionRegistry` 只管 framework child Agent 的回调句柄。`SessionExecutionRecord` 是当前 schema 的内部持久化投影；模型侧 shell producer 已硬切为 `BackgroundShellCreate`，没有 `TaskCreate` 别名。
 
-`parentJobId` 和规范化 Job SSE 不属于 phase 1。它们必须先写独立的 phase 2 计划，再增加父子折叠和 `session.job.created/updated` 实时缓存；当前文档不把这些能力写成已经实现。
+当前实现没有 `parentJobId` 和规范化 Job SSE。这份历史记录不承诺后续阶段；若要增加这些能力，以新的协议设计、版本和测试为准。
 
 ## 当前工具面
 

@@ -1,8 +1,6 @@
 # 归档：Output Styles（输出样式）
 
-> 历史设计记录。本文以旧 TUI host 的 state/OHJSON 接线为前提，不能作为 daemon TUI 的实现依据；当前客户端会话同步见 [client-sync-flow.md](./client-sync-flow.md)。
-
-> 状态:已批准,待实现。忠实复刻 Python v0.1.9 的 output style 机制。
+> 状态：历史设计记录。本文以旧 TUI host 的 state/OHJSON 接线为前提，不能作为 daemon TUI 的实现依据；当前客户端会话同步见 [client-sync-flow.md](./client-sync-flow.md)。
 
 ## 语义(对照 Python 原版确认)
 

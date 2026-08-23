@@ -1,6 +1,6 @@
 # TUI Flow
 
-> 当前 OpenTUI/daemon 主线。完整 server 细节见 [Daemon Application Architecture](./daemon-application-architecture.md)。
+> 状态：当前 OpenTUI/daemon 主线。完整 server 细节见 [Daemon Application Architecture](./daemon-application-architecture.md)。
 
 ## 启动
 

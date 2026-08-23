@@ -1,6 +1,6 @@
 # 归档：Skills 加载与调用流程（E.5）
 
-> 历史设计记录。本文描述 daemon 化之前的 REPL/BackendHost skills 接线；REPL 行为可作参考，但不能据此推导 TUI/Web/Desktop 的 session API。当前跨端状态同步见 [client-sync-flow.md](./client-sync-flow.md)。
+> 状态：历史设计记录。本文描述 daemon 化之前的 REPL/BackendHost skills 接线；REPL 行为可作参考，但不能据此推导 TUI/Web/Desktop 的 session API。当前跨端状态同步见 [client-sync-flow.md](./client-sync-flow.md)。
 
 skill 是一段带 frontmatter 的 Markdown「方法论/提示词」。它有**两条调用路径**：
 **用户**输入 `/<skill>` 斜杠命令触发，或 **模型**通过 `Skill` 工具按需拉取。本文讲

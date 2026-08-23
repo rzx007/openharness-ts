@@ -1,6 +1,6 @@
 # Jobs 统一后台任务协议
 
-> 状态（2026-08-20）：当前实现的权威契约。模型工具、HTTP client、slash command 与 TUI 已统一使用 Jobs 观察和控制长期工作。Terminal 自身设计见 [Desktop Terminal PTY Design](./desktop-terminal-pty-design.md)，daemon 总入口见 [Daemon Application Architecture](./daemon-application-architecture.md)，首次大改复盘见 [Jobs Protocol Review 2026-08-17](./jobs-protocol-review-2026-08-17.md)，Task/Workflow 工具收口方案见 [Jobs Task/Workflow Convergence](./jobs-task-workflow-convergence.md)。
+> 状态：当前实现的权威契约，最后核对：2026-08-23。模型工具、HTTP client、slash command 与 TUI 已统一使用 Jobs 观察和控制长期工作。Terminal 自身设计见 [Desktop Terminal PTY Design](./desktop-terminal-pty-design.md)，daemon 总入口见 [Daemon Application Architecture](./daemon-application-architecture.md)。
 
 ## 一句话解释
 
@@ -106,7 +106,7 @@ daemon Workflow 和 Session/Run 使用同一份 SQLite。独立 CLI 的 `FileWor
 
 这样做的原因很具体：创建 Terminal 需要 shell、cwd、行列数和 runtime；创建 Workflow 需要任务图和并发规则。这些参数无法被一个通用 `JobCreate` 清楚表达。
 
-## 公共 HTTP client 与 TUI（phase 1）
+## 公共 HTTP client 与 TUI
 
 ### 后台 shell 创建链路
 
@@ -160,7 +160,7 @@ TUI session activation
 
 Jobs、MCP 和 Job detail 错误都是辅助 UI 错误。它们只更新对应 remote state/toast，不会清除 `submittedRun`、结束 `localBusy`，也不会把正在运行的主 Agent run 标成失败。
 
-phase 1 在这些时机重新读取 Jobs：
+当前 TUI 在这些时机重新读取 Jobs：
 
 1. 激活或切换 session；
 2. 打开 Jobs Panel；
@@ -171,7 +171,7 @@ phase 1 在这些时机重新读取 Jobs：
 
 打开列表项会调用 `readJob` 并写入独立的 `JobDetailRemoteState`。Workflow 仍只在顶层列表显示一个 `workflow` Job；其 Steps 从 `JobReadResult.details` 在同一 Jobs Panel 的详情中展示，不再维护独立的 Workflow Runs 面板。
 
-phase 1 没有偷偷实现 `parentJobId` 或规范化 Job SSE。父子层级字段以及 `session.job.created/updated` 事件属于 phase 2；在此之前，重连或切换 session 仍先用 `listJobs()` 取得权威快照。
+当前公共契约不包含 `parentJobId` 或规范化 Job SSE。重连或切换 session 时，客户端用 `listJobs()` 取得权威快照。以后若加入父子层级或 Job SSE，必须同时更新协议版本、客户端 reducer 和契约测试。
 
 ## JobSnapshot
 
@@ -430,7 +430,7 @@ HTTP `/jobs` 由 daemon Bearer token 保护。HTTP 里的 `sessionId` 用于选�
 ## 已知边界
 
 - Task/Workflow wait 仍是轮询，不是事件订阅。
-- `parentJobId` 和规范化 `session.job.created/updated` SSE 尚未进入 phase 1 公共契约；当前 TUI 依靠明确刷新点更新缓存。
+- 当前公共契约没有 `parentJobId` 和规范化 `session.job.created/updated` SSE；TUI 依靠明确刷新点更新缓存。
 - Task/Workflow cursor 是快照版本，不是严格日志 offset。
 - Terminal 会在 daemon 生命周期内保留终态 session；durable task/workflow 也没有统一 retention policy。当前只限制模型侧默认列表窗口，没有删除历史。
 - Jobs 还没有 completion reported/claim 语义，不能自动保证“完成通知只消费一次”。

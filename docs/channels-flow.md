@@ -1,5 +1,7 @@
 # Channels 调用链
 
+> 状态：当前 Bot/Channel 接入 durable Application 的权威流程。
+
 Channels 把飞书等聊天平台接到正在运行的 daemon。正式入口不会再自己创建一套 Agent；它和 CLI、TUI、Desktop 共用 daemon 里的 Session、Input、Run、权限请求和对话记录。
 
 当前 `ohs channels serve` 只组装飞书基础版。`StdioAdapter` 和 `HttpAdapter` 是 adapter 实现；消息进入 Agent 的唯一正式桥接是 `DurableChannelBridge`，不再提供直连 standalone Agent 的临时 bridge。

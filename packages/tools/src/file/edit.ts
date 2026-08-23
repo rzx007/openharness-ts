@@ -80,11 +80,12 @@ export const fileEditTool: ToolDefinition = {
 
       const occurrences = content.split(oldString).length - 1;
       if (occurrences > 1 && !replaceAll) {
+        const lines = findMatchLines(content, oldString);
         return {
           content: [
             {
               type: "text",
-              text: `Found ${occurrences} matches. Use replace_all to replace all.`,
+              text: `Found ${occurrences} matches at lines ${lines.join(", ")}. Make old_string more specific or use replace_all to replace all.`,
             },
           ],
           isError: true,
@@ -108,3 +109,25 @@ export const fileEditTool: ToolDefinition = {
     }
   },
 };
+
+function findMatchLines(content: string, needle: string): number[] {
+  const lines: number[] = [];
+  let currentLine = 1;
+  let scanOffset = 0;
+  let matchOffset = content.indexOf(needle, scanOffset);
+
+  while (matchOffset >= 0) {
+    for (let index = scanOffset; index < matchOffset; index += 1) {
+      if (content.charCodeAt(index) === 10) currentLine += 1;
+    }
+    lines.push(currentLine);
+    const matchEnd = matchOffset + needle.length;
+    for (let index = matchOffset; index < matchEnd; index += 1) {
+      if (content.charCodeAt(index) === 10) currentLine += 1;
+    }
+    scanOffset = matchEnd;
+    matchOffset = content.indexOf(needle, scanOffset);
+  }
+
+  return lines;
+}

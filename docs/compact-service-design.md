@@ -1,11 +1,10 @@
 # CompactService 设计说明
 
-`CompactService` 是 OpenHarness 的上下文压缩服务。它的主实现位于
+> 状态：当前 Runtime 上下文压缩说明；主实现以 `packages/core/src/engine/compact-service.ts` 为准。
+
+`CompactService` 是 OpenHarness 的上下文压缩服务。唯一实现位于
 `packages/core/src/engine/compact-service.ts`，由 `QueryEngine` 在每轮模型调用前自动触发，也可通过
 `/compact` 手动触发。
-
-> 说明：`packages/services/src/compact/` 里仍保留了一个较早的简化版本；当前运行时主链路使用
-> `@openharness/core` 的 `CompactService`。
 
 ---
 
@@ -167,10 +166,7 @@ interface CompactAttachments {
 }
 ```
 
-当前 CLI/TUI 已接入：
-
-- `taskFocus`：来自 `TaskManager.listTasks("running")` 的运行中任务描述。
-- `sessionMemory`：来自 `session_memory` checkpoint，经 `sessionMemoryToCompactText()` 包装。
+`taskFocus`、`sessionMemory` 和 `plan` 由宿主通过附件 provider 显式提供；当前 daemon 没有伪造一份 TaskManager 状态。未接 provider 时这些字段为空。
 
 服务自身还会自动派生：
 

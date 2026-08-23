@@ -168,7 +168,7 @@ describe("FileWorkflowRunRepository", () => {
           dependencies: ["research"],
           startedAt: 3,
           summary: "Waiting for task task_implement",
-          metadata: { taskManagerTaskId: "task_implement" },
+          metadata: { workerTaskId: "task_implement" },
         },
       ]]),
       createdAt: 100,
@@ -181,7 +181,7 @@ describe("FileWorkflowRunRepository", () => {
         executed.push(task.id);
         if (task.id === "implement") {
           expect(pipelineInput?.taskId).toBe("research");
-          expect(resumeFrom?.metadata?.taskManagerTaskId).toBe("task_implement");
+          expect(resumeFrom?.metadata?.workerTaskId).toBe("task_implement");
         }
         if (task.id === "verify") {
           expect(pipelineInput?.taskId).toBe("implement");
@@ -250,7 +250,7 @@ describe("FileWorkflowRunRepository", () => {
           dependencies: [],
           startedAt: 10,
           summary: "Waiting for task task_running",
-          metadata: { taskManagerTaskId: "task_running" },
+          metadata: { workerTaskId: "task_running" },
         },
       ]]),
       createdAt: 1,
@@ -294,7 +294,7 @@ describe("FileWorkflowRunRepository", () => {
       async ({ task, reportProgress }) => {
         started.push(task.id);
         if (task.id === "first") {
-          reportProgress?.({ metadata: { taskManagerTaskId: "task-first" } });
+          reportProgress?.({ metadata: { workerTaskId: "task-first" } });
           await new Promise<void>((resolve) => { releaseFirst = resolve; });
         }
         return { summary: `${task.id} done` };
@@ -304,7 +304,7 @@ describe("FileWorkflowRunRepository", () => {
 
     await vi.waitFor(() => {
       expect(store.load("run-active-cancel")?.runningTasks.first?.metadata).toMatchObject({
-        taskManagerTaskId: "task-first",
+        workerTaskId: "task-first",
       });
     });
     await cancelPersistentWorkflow("run-active-cancel", {

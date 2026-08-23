@@ -1,5 +1,7 @@
 # Context And Memory Map
 
+> 状态：当前 Context、Prompt 与长期记忆的总索引。
+
 这份文档把 OpenHarness 里会影响 agent 上下文、长期记忆或运行行为的几条线放在一张图里。重点回答三个问题：
 
 - 什么时候写入

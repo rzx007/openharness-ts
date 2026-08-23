@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createWorkflowPlan, createWorkflowRunSnapshot } from "@openharness/coordinator";
 import type { JobSnapshot } from "@openharness/jobs";
@@ -29,6 +29,20 @@ import { getDefaultSessionStorePath } from "../../daemon/paths.js";
 import type { OpenHarnessServerOptions, OpenHarnessServerServices } from "../server.js";
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import { projectionSettlementInput } from "../../application/agent/projection-settlement-recovery.js";
+
+const serverTestConfigDir = mkdtempSync(join(tmpdir(), "oh-server-config-"));
+let previousConfigDir: string | undefined;
+
+beforeAll(() => {
+  previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+  process.env.OPENHARNESS_CONFIG_DIR = serverTestConfigDir;
+});
+
+afterAll(() => {
+  if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+  else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+  rmSync(serverTestConfigDir, { recursive: true, force: true });
+});
 
 interface TestAgentProgram {
   runPrompt(input: any, run: TestAgentRunContext): Promise<unknown>;
@@ -114,8 +128,7 @@ function adaptTestAgentFactory(factory: TestAgentProgramFactory): CreateDaemonAg
               requestPermission: async (request) => {
                 const requestId = `permission-${sequence + 1}`;
                 await emit({ type: "permission.requested", data: { requestId, request } }, eventContext);
-                const requestPermission = context.options.requestPermission;
-                if (!requestPermission) throw new Error("Permission effect is not configured");
+                const requestPermission = context.options.hostCapabilities.permissions.requestPermission;
                 const decision = await requestPermission(request, {
                   agentId: context.session.id,
                   sessionId: context.session.id,
@@ -336,14 +349,18 @@ async function waitForEvent(
   token: string,
   predicate: (event: { type: string; payload?: Record<string, unknown> }) => boolean,
 ): Promise<Array<{ type: string; payload?: Record<string, unknown> }>> {
+  let lastEvents: Array<{ type: string; payload?: Record<string, unknown> }> = [];
   for (let i = 0; i < 50; i++) {
     const body = await (await fetch(`${baseUrl}/events`, { headers: auth(token) })).json() as {
       events: Array<{ type: string; payload?: Record<string, unknown> }>;
     };
+    lastEvents = body.events;
     if (body.events.some(predicate)) return body.events;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error("Timed out waiting for event");
+  throw new Error(
+    `Timed out waiting for event; observed: ${lastEvents.map((event) => event.type).join(", ")}; tail: ${JSON.stringify(lastEvents.slice(-5))}`,
+  );
 }
 
 describe("OpenHarnessHttpServer", () => {
@@ -1232,7 +1249,7 @@ describe("OpenHarnessHttpServer", () => {
         dependencies: [],
         startedAt: now,
         summary: "Child session is running",
-        metadata: { taskManagerTaskId: "task-lost-with-daemon" },
+        metadata: { workerTaskId: "task-lost-with-daemon" },
       }]]),
       createdAt: now,
     });

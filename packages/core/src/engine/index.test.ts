@@ -340,6 +340,7 @@ describe("loadSettings", () => {
     await fs.writeFile(
       path.join(configDir, "settings.json"),
       JSON.stringify({
+        _formatVersion: 1,
         sandbox: {
           enabled: true,
           backend: "docker",
@@ -375,6 +376,7 @@ describe("loadSettings", () => {
     await fs.writeFile(
       path.join(configDir, "settings.json"),
       JSON.stringify({
+        _formatVersion: 1,
         sandbox: {
           enabled: true,
           backend: "docker",

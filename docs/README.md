@@ -31,7 +31,10 @@
 第 4 层：开发和运维入口
   SDK、CLI、daemon、远程连接、排障、备份恢复怎样使用
     ↓
-第 5 层：决策与历史
+第 5 层：可执行验证
+  每条硬规则由哪些测试证明，改动后最少要跑什么
+    ↓
+第 6 层：决策与历史
   ADR 解释长期决定；plans/reviews 只解释当时怎样落地
 ```
 
@@ -96,7 +99,7 @@
 - [Coordinator Agents](./coordinator-agents-design.md)：Coordinator 角色与 Agent 定义。
 - [Jobs Protocol](./jobs-protocol.md)：Terminal、shell、Agent、dream、Workflow 的统一观察与控制协议。
 - [Workflow CLI](./workflow-cli.md)：项目文件 CLI 与 daemon SQLite Workflow 的边界。
-- [Workflow Scheduler Tests](./workflow-scheduler-test.md)：调度器的测试场景。
+- 调度器真实测试入口统一列在 [契约与测试索引](./contract-test-index.md)；`workflow-scheduler-test.md` 只是冲突测试夹具，不是产品文档。
 
 ### Context、Memory 与 Prompt
 
@@ -151,7 +154,15 @@
 - 处理启动恢复、Owner、Retention 和备份：[Operations and Recovery](./operations-and-recovery.md)
 - 检查认证、权限和 Sandbox 边界：[Security and Trust Boundaries](./security-and-trust-boundaries.md)
 
-## 第 5 层：决策、计划和历史
+## 第 5 层：可执行验证
+
+- [契约与测试索引](./contract-test-index.md)：把 Runtime、durable 数据、协议、Client、Workflow、Jobs、Channel、Permission 和 Sandbox 的硬规则映射到具体测试文件。
+- `pnpm check-docs`：检查文档状态、总目录必备入口和所有本地 Markdown 链接。
+- `pnpm check-types`：检查跨包 TypeScript 接口。
+- `pnpm test`：运行当前工作区测试。
+- `pnpm test:client-browser`：确认共享 client 能在浏览器构建，不依赖 Node polyfill。
+
+## 第 6 层：决策、计划和历史
 
 - `docs/adr/`：已经作出的长期决定。当前有 [Projection Settlement 失败分类与恢复边界](./adr/0001-projection-settlement-failure-policy.md)。
 - `docs/plans/`：阶段实施计划和完成记录，不是当前 API 手册。
@@ -169,7 +180,7 @@
 
 ## 文档建设状态
 
-详细设计与当时缺口见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。P0/P1 主文档已经完成：
+详细设计与当时缺口见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。P0/P1/P2 已全部完成：
 
 | 优先级 | 建议文档 | 解决的问题 |
 |---|---|---|
@@ -179,16 +190,15 @@
 | P1 | [Protocol Contract](./protocol-contract.md) | 已完成 |
 | P1 | [Product Surface Integration](./product-surface-integration.md) | 已完成 |
 | P1 | [Security and Trust Boundaries](./security-and-trust-boundaries.md) | 已完成 |
-| P2 | `contract-test-index.md` | 待做：把每条硬规则映射到测试文件，并尽量由脚本检查 |
+| P2 | [Contract Test Index](./contract-test-index.md) | 已完成；测试文件链接由 `pnpm check-docs` 自动检查 |
 
-## 仍需整理的现有文档
+## 已完成的旧文档整理
 
-- [Runtime Hardening 与可运维性计划](./plans/2026-08-22-runtime-hardening-and-operability.md) 已标为历史完成记录，正文仍保留当时的实施语境。
-- [Session 存储增强](./session-storage-design.md) 已标为历史资料，不再作为 daemon SQLite 存储说明。
-- [Observability](./observability.md) 还没有覆盖 Run/Tool Attempt 指标、Application Owner 丢失、Workflow、Retention 和 Backup 诊断。
-- [Client Sync Flow](./client-sync-flow.md) 仍带有 phase 1/phase 2 的实施口吻，应重新核对当前 Jobs 刷新和事件能力。
-- [待修复 Bug 存档](./bugs-unfixed.md) 来自较早审计，需要重新确认每一项是否仍存在，不能继续当当前缺陷列表。
-- 多份 `*-design.md` 没有状态标记，需要逐步补上“当前实现 / 待实现 / 历史设计”。
+- [Runtime Hardening 与可运维性计划](./plans/2026-08-22-runtime-hardening-and-operability.md) 和 [Session 存储增强](./session-storage-design.md) 已明确标成历史资料。
+- [Observability](./observability.md) 已覆盖 Attempt、Tool failure kind、Owner、Workflow、Settlement、Retention 审计和 Backup 清单。
+- [Client Sync Flow](./client-sync-flow.md) 已按当前 snapshot、Attempt/Task reducer、严格事件版本和 Jobs 刷新行为重写。
+- [历史 Bug 审计归档](./bugs-unfixed.md) 已逐条复核，不再冒充当前缺陷列表。
+- 顶层 `docs/*.md` 已统一写明“当前实现、权威契约、历史设计或测试夹具”。
 
 ## 当前格式策略
 

@@ -1,6 +1,6 @@
 # OpenHarness 文档体系设计与缺口
 
-> 状态：已完成 P0/P1 主文档，2026-08-23。本文保留当时的文档缺口和设计理由；当前入口见 [文档总目录](../README.md)。
+> 状态：P0/P1/P2 和旧文档整理已全部完成，2026-08-23。本文保留当时的文档缺口和设计理由；当前入口见 [文档总目录](../README.md)。
 
 ## 目标
 
@@ -260,9 +260,9 @@ Lifecycle Contract 现已增加 C6，明确“创建 child 前必须通过 tree-
 6. security-and-trust-boundaries.md（已完成）
    汇总认证、权限、Sandbox、Secret 和 Channel ACL
 
-7. 更新 observability/client-sync/lifecycle 等现有文档（持续整理）
+7. 更新 observability/client-sync/lifecycle 等现有文档（已完成）
 
-8. 建立 contract-test-index 或自动检查脚本（P2，待做）
+8. 建立 contract-test-index 和自动文档检查脚本（P2，已完成）
 ```
 
 每完成一份新权威文档，都要删除或缩短旧文档里的重复段落，只保留链接。否则文档数量增加了，权威性反而会下降。

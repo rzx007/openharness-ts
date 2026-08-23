@@ -12,6 +12,7 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "check-types": "turbo check-types",
+    "check-docs": "node scripts/check-docs.mjs",
     "test": "turbo test",
     "test:client-browser": "vite build --config tests/browser-client/vite.config.ts",
     "clean": "turbo clean",

@@ -1,6 +1,6 @@
 # 设计：Sandbox runtime 接入
 
-> 状态（2026-08-12）：Bash、TaskManager、autodream、command hooks、Cron/RemoteTrigger、LSP ripgrep、MCP stdio、Read/Write/Edit/Glob/Grep 已接入 `@openharness/sandbox` 的统一入口。Docker active 时文件工具真实读写和搜索发生在容器内；宿主仍负责 permission、路径边界和 diff 编排。
+> 状态：当前实现背景，最后核对：2026-08-23。精确运行链以 [Sandbox Runtime Flow](./sandbox-runtime-flow.md) 为准；本文保留接入设计和取舍。
 >
 > 当前完整调用链和下一步见 [`sandbox-runtime-flow.md`](./sandbox-runtime-flow.md)。
 

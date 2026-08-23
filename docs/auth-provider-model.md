@@ -1,5 +1,7 @@
 # Auth、Provider、Model
 
+> 状态：当前认证、Provider 路由和模型选择说明。
+
 本文说明 OpenHarness 如何区分认证、provider 路由、模型选择与本地配置存储。
 
 ## 心智模型

@@ -1,50 +1,124 @@
 # 可观测性与排障
 
-本文件定义 daemon 主路径的第一阶段可观测性约定。目标不是记录用户内容，而是在多客户端、多 session 并发时把一次操作可靠地串起来。
+> 状态：当前实现的权威观察入口。最后核对：2026-08-23。
 
-## Trace ID
+这里说明“不改运行状态，怎样看清 daemon 正在做什么”。真正的运行事实仍在 SQLite 和持久文件里；日志、指标和 debug 接口只是查询这些事实，不能代替它们。
 
-`traceId` 是一次 prompt/run 的关联 ID，格式为 UUID 或客户端传入的安全标识。HTTP 客户端可通过请求头 `x-openharness-trace-id` 提供它；daemon 会在每个响应中返回同名 header。
+## 先用哪一个入口
+
+| 需求 | 入口 | 是否包含内容 |
+|---|---|---|
+| 只确认 daemon 活着 | `GET /health` | 不包含会话内容 |
+| 看全局数量、队列和指标 | `GET /debug/runtime` | 不包含 prompt、模型输出或工具参数 |
+| 追一条 Run 的完整关系 | `GET /debug/runs/:runId` | 默认脱敏；显式 `?includeContent=true` 才返回内容 |
+| 看投影失败是否仍待修复 | `GET /debug/projection-settlements` | 默认隐藏 settlement payload |
+| 串起一次 HTTP、Run、Tool 和 Permission | JSON Lines 结构化日志中的 `traceId` | 禁止记录正文和 secret |
+| 查清理做了什么 | SQLite 的 `retention_audit` | 保存策略与删除数量 |
+| 确认备份可恢复 | 备份目录的 `manifest.json` 和 `checksums.json` | 包含文件清单与校验值，不是运行指标 |
+
+这些 debug 路由需要 daemon bearer token；`/health` 是例外，只返回很小的存活信息。
+
+## Trace ID：把同一次操作串起来
+
+`traceId` 是一次请求链的关联 ID。客户端可以通过 `x-openharness-trace-id` 传入，daemon 也会在响应中返回同名 header；没有传入时由 daemon 生成。
 
 ```text
-TUI / print / Web 请求
-  -> x-openharness-trace-id
-  -> POST /sessions/:id/prompts
-  -> input.metadata.traceId
-  -> run.metadata.traceId
-  -> runtime / tool / permission / task 日志
+CLI / TUI / Web 请求
+  -> HTTP traceId
+  -> Input metadata.traceId
+  -> Run metadata.traceId
+  -> Tool / Permission / Task 日志
 ```
 
-未提供 header 时，daemon 会生成一个新的 ID。child session 内部提交的 prompt 同样会生成并持久化自己的 trace；task 绑定到 child run 后使用该 run 的 trace。
-
-稳定 request ID 的重试不会因 trace 不同而被判定为不同 prompt；idempotency 比较会忽略 `metadata.traceId`，首次准入记录仍是权威值。
+请求幂等 ID 和 traceId 不是一回事：幂等 ID 决定“这是不是同一次提交”，traceId 只帮助排障。稳定请求 ID 重试时可以换 traceId，但首次成功准入后，数据库里的原始 traceId 是权威值。
 
 ## 结构化日志
 
-`@openharness/server` 导出 `StructuredLogger`。默认 daemon 输出 JSON Lines；宿主可以在创建 `OpenHarnessHttpServer` 时传入 `logger`，转发到文件、Desktop 日志窗口或远程日志系统。
+`@openharness/server` 的 logger 每行输出一个 JSON 对象。公共字段是 `level`、`event`、`traceId`；按事件还会带 `sessionId`、`runId`、`requestId`、`taskId`、`toolName`、HTTP 状态和耗时。
 
-当前事件包括：
+当前主路径事件包括：
 
-- `http.request.completed`
-- `session.run.started`、`session.run.completed`、`session.run.interrupted`、`session.run.failed`
-- `session.tool.started`、`session.tool.completed`
-- `permission.requested`、`permission.auto_approved`、`permission.replied`、`permission.expired`
-- `session.task.created`、`session.task.bound`、`session.task.completed`
+- HTTP：`http.request.completed`。
+- Run：`session.run.started`、`session.run.completed`、`session.run.interrupted`、`session.run.failed`。
+- Tool：`session.tool.started`、`session.tool.completed`。
+- Permission：`permission.requested`、`permission.auto_approved`、`permission.replied`、`permission.expired`。
+- Task：`session.task.created`、`session.task.bound`、`session.task.completed`。
+- 需要立即处理的异常：`application.owner_lost`、`session.agent.cleanup_failed`、`session.execution.registry_completion_failed`、`session.child_projection.compensation_failed`、`channel.message.idempotency_conflict`、`agent.child_budget_exceeded`。
 
-公共字段为 `level`、`event`、`traceId`，并按事件附带 `sessionId`、`runId`、`requestId`、`taskId`、`toolName`、HTTP 状态和耗时。
+`application.owner_lost` 表示当前进程已经失去数据目录的写入所有权。它不是普通警告：进程会关闭准入并开始收尾，运维人员应检查是否启动了第二个 daemon、系统时钟是否跳变，以及旧进程是否仍存活。
 
-日志禁止写入 prompt 原文、模型输出、工具参数、工具结果、bearer token、API key 或 permission payload。排障需要内容时，应在受认证保护的 Session API 中按 session/run 查询持久化记录，而不是扩大日志采集范围。
+日志绝不能写 prompt 原文、模型输出、工具参数或结果、permission payload、bearer token、API key。需要正文时，使用受认证保护的 Run Inspector，并明确传 `includeContent=true`；不要扩大常规日志采集范围。
 
-## 后续阶段
+## `/health`
 
-## 运行快照
+这个接口适合存活探针，只返回：版本、启动时间、运行时长、session 总数、活跃 Run 数和排队 Run 数。它回答“服务是否响应”，不回答“数据是否完全收束”。
 
-`GET /health` 不需要 daemon bearer token，适合 CLI、系统健康检查和远程存活探测；它只返回版本、启动时间、运行时长、session 总数以及内存 coordinator 的 active/queued run 数量。
+## `/debug/runtime`
 
-`GET /debug/runtime` 需要 daemon bearer token，面向人工排障使用。
+这个接口从当前持久记录生成快照，包括：
 
-`GET /debug/runtime` 用于人工诊断，额外返回 session/run/task/permission 的状态计数、SSE attach 数、warm runtime 数和 coordinator 队列计数。它不返回 store 路径、session 内容、工具参数/结果或认证信息，因此可以作为未来 Desktop/Web 状态页的只读数据源。
+- Session、Run、Task、Workflow、Permission 按状态计数；
+- Projection Settlement 总数、待处理数和状态计数；
+- SSE 客户端数、warm Agent 数、活跃和排队 Run 数；
+- 从 Run、Attempt、Tool Part、Task、Workflow、Permission 和 Settlement 计算出的有界指标。
 
-## 端到端保障
+当前指标名：
 
-Task 16C 已覆盖一个跨 daemon 重启的真实恢复场景：旧 run 保持 `interrupted`，新 daemon 的 SSE 可从 cursor 回放旧事件；使用同一 `traceId` 的显式恢复会等待持久化 permission reply；另一个 session 即使使用不同 trace，也可以在前者等待授权时独立完成。该用例同时断言 run、permission 和结构化日志仍可按 trace 关联。
+| 指标 | 实际含义 |
+|---|---|
+| `openharness_runs_total{status}` | 数据库中各状态 Run 数 |
+| `openharness_runs_active` | pending 或 running 的 Run 数 |
+| `openharness_run_duration_ms` | 已有开始和结束时间的 Run 耗时 |
+| `openharness_run_attempts_total{provider,model,status}` | 模型尝试次数 |
+| `openharness_model_request_duration_ms{...}` | 模型尝试耗时 |
+| `openharness_tokens_total{provider,model,direction}` | Attempt 记录的输入、输出 token |
+| `openharness_tool_calls_total{tool,status,failure_kind}` | Tool Part 的状态和失败分类 |
+| `openharness_tool_call_duration_ms{tool}` | Tool Part 从创建到更新的耗时 |
+| `openharness_permissions_pending` | 待回答的权限请求数 |
+| `openharness_child_agents_active` | pending 或 running 的 Agent Task 数 |
+| `openharness_workflows_total{status}` | 各状态 Workflow 数 |
+| `openharness_workflows_active` | running Workflow 数 |
+| `openharness_workflow_duration_ms` | 已结束 Workflow 的耗时 |
+| `openharness_projection_settlements_pending` | pending 或 retrying 的 Settlement 数 |
+| `openharness_projection_failures_total{projector,action}` | Settlement 已记录的修复尝试次数 |
+
+指标 label 只用有限枚举或已有名称，不放 traceId、sessionId、runId 这类无限增长的值。这样不会因为运行越多而无限制造指标序列。
+
+## Run Inspector
+
+`GET /debug/runs/:runId` 把一次 Run 相关的 Input、Attempt、Message、Part、Task、Permission、Event、Workflow 和 Projection Settlement 放到一个响应里。它还会给出：
+
+- `traceIds`：相关记录出现过的 trace；
+- `warnings`：终态冲突、未完成 attempt/tool、待处理 settlement 等异常；
+- `diagnosticOk`：没有警告时为 `true`。
+
+默认响应会隐藏消息正文、工具输入输出和 settlement payload，但保留 `outcome`、`failureKind`、`toolAttemptId` 等定位字段。
+
+## 正常安静状态
+
+系统没有工作时，下面这些值应长期回到零：
+
+- `coordinator.activeRunCount` 和 `coordinator.queuedRunCount`；
+- `openharness_runs_active`；
+- `openharness_permissions_pending`；
+- `openharness_child_agents_active`；
+- `openharness_workflows_active`；
+- `openharness_projection_settlements_pending`。
+
+如果 Run 已是终态但 Attempt、Tool 或 Task 仍是 running，Run Inspector 应产生 warning；不要只看顶层 Run 状态就判断成功。
+
+## Retention 与 Backup
+
+Retention 每次运行都会向 `retention_audit` 写一条审计记录，因此当前可靠检查方式是读取 audit，而不是找一条可能丢失的日志。Backup 成功后以 `manifest.json` 和 `checksums.json` 为凭据；恢复前会重新校验所有文件。
+
+当前 `/debug/runtime` 没有“最近一次 retention/backup 成功时间”指标。需要该能力时，应先把持久 audit/manifest 接入控制面并加契约测试，不能用进程内计数冒充 durable 结果。具体操作见 [Operations and Recovery](./operations-and-recovery.md)。
+
+## 推荐排障顺序
+
+1. 用 `/health` 判断 daemon 是否可达。
+2. 用 `/debug/runtime` 看是否有未收尾 Run、Permission、Workflow 或 Settlement。
+3. 已知 runId 时调用 Run Inspector；否则用结构化日志的 traceId 找到 runId。
+4. Settlement 不为零时查看 `/debug/projection-settlements`，再按 [Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md) 处理。
+5. Owner、重启恢复、Retention 或 Backup 问题转到 [Operations and Recovery](./operations-and-recovery.md)，不要直接改 SQLite。
+
+相关自动验证见 [契约与测试索引](./contract-test-index.md)。

@@ -1,5 +1,7 @@
 # 参考：斜杠命令与内置工具
 
+> 状态：当前命令清单参考；流程权威文档是 [Slash Command Flow](./slash-commands-flow.md)。
+
 > 交互主线是 daemon TUI：`GET /commands` catalog + client-local UI +
 > template expand。**流程权威文档**：[slash-commands-flow.md](./slash-commands-flow.md)。
 > 运行时以 TUI `/help` 与 `packages/server/src/commands.ts` catalog 为准；

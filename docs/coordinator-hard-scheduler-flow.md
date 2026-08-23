@@ -1,5 +1,7 @@
 # Coordinator 硬调度器调用链
 
+> 状态：当前 Workflow DAG 调度、持久化和 child 执行的权威流程。
+
 硬调度器用**代码**决定哪个子 agent 先跑、哪个后跑、哪些能并行、失败后怎么办，而不是只靠 Coordinator prompt 让模型自己记住。
 
 它不替代 swarm。分工是：
@@ -208,7 +210,7 @@ createAgentWorkflowRunner()(context)
     + dependency results
     + pipeline input（mode=pipeline）
   │
-  ├─ resumeFrom.metadata.taskManagerTaskId 存在
+  ├─ resumeFrom.metadata.workerTaskId 存在
   │    → live framework child 存在：awaitChildAgent(旧 id)
   │    → 否则：awaitTask(旧 durable/external task id)
   │    成功 → 映射结果 + git diff
@@ -221,10 +223,10 @@ createAgentWorkflowRunner()(context)
        → getDiffSummary（worktree/cwd git）
        → WorkflowWorkerResult
             status / summary / result
-            metadata: agentId, taskManagerTaskId, backendType, worktree, diff, changedFiles
+            metadata: agentId, workerTaskId, backendType, worktree, diff, changedFiles
 ```
 
-调度器本身不依赖 swarm；adapter 放在 `@openharness/tools`，`@openharness/coordinator` 保持纯调度。显式注入的 external worker 仍可通过 `awaitTask` / `stopTask` adapter 接入；默认 framework worker 不经过 TaskManager projection。
+调度器本身不依赖 swarm；adapter 放在 `@openharness/tools`，`@openharness/coordinator` 保持纯调度。显式注入的 external worker 仍可通过 `awaitTask` / `stopTask` adapter 接入；默认 framework worker 直接使用 child handle。
 
 ## D. 持久化与恢复
 
@@ -243,7 +245,7 @@ createAgentWorkflowRunner()(context)
   <runId>.events.ndjson  # 一行一个 WorkflowRunEvent
 ```
 
-快照关键字段：`status`、`spec`、`plan`、`results`、`pendingTaskIds`、`runningTasks`（含 attempt / taskManagerTaskId 等 metadata）、`blockedTasks`、`budget`。
+快照关键字段：`status`、`spec`、`plan`、`results`、`pendingTaskIds`、`runningTasks`（含 attempt / workerTaskId 等 metadata）、`blockedTasks`、`budget`。
 
 恢复：
 

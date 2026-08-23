@@ -84,7 +84,7 @@ describe("createAgentWorkflowRunner", () => {
       result: "worker result",
       metadata: {
         agentId: "worker@alpha",
-        taskManagerTaskId: "task_1",
+        workerTaskId: "task_1",
         backendType: "subprocess",
         worktree: { path: "/wt/worker", branch: "worktree-worker" },
       },
@@ -347,7 +347,7 @@ describe("createAgentWorkflowRunner", () => {
           summary: "old task",
           metadata: {
             agentId: "worker@default",
-            taskManagerTaskId: "task_resume_timeout",
+            workerTaskId: "task_resume_timeout",
             backendType: "subprocess",
           },
         },
@@ -388,7 +388,7 @@ describe("createAgentWorkflowRunner", () => {
         summary: "old task",
         metadata: {
           agentId: "worker@default",
-          taskManagerTaskId: "task_existing",
+          workerTaskId: "task_existing",
           backendType: "subprocess",
         },
       },
@@ -402,7 +402,7 @@ describe("createAgentWorkflowRunner", () => {
       result: "resumed output",
       metadata: {
         agentId: "worker@default",
-        taskManagerTaskId: "task_existing",
+        workerTaskId: "task_existing",
         backendType: "subprocess",
       },
     });
@@ -439,7 +439,7 @@ describe("createAgentWorkflowRunner", () => {
         dependencies: [],
         startedAt: 1,
         summary: "old task",
-        metadata: { taskManagerTaskId: "task_old" },
+        metadata: { workerTaskId: "task_old" },
       },
     });
 
@@ -449,7 +449,7 @@ describe("createAgentWorkflowRunner", () => {
     expect(result).toMatchObject({
       status: "completed",
       result: "new output",
-      metadata: { taskManagerTaskId: "task_new" },
+      metadata: { workerTaskId: "task_new" },
     });
   });
 
@@ -482,7 +482,7 @@ describe("createAgentWorkflowRunner", () => {
     const result = await runner({ task: { id: "default-mode" }, attempt: 1, dependencyResults: {} });
 
     expect(result.metadata?.backendType).toBe("framework");
-    expect(result.metadata?.taskManagerTaskId).toBe("task_framework");
+    expect(result.metadata?.workerTaskId).toBe("task_framework");
     expect(agent.children.spawnChildAgent).toHaveBeenCalledWith(expect.objectContaining({
       agent: "worker",
       cwd: "/repo",
@@ -521,8 +521,8 @@ describe("createAgentWorkflowRunner", () => {
     );
 
     expect(result.status).toBe("completed");
-    expect(result.results.research?.metadata?.taskManagerTaskId).toBe("task_research");
-    expect(result.results.implement?.metadata?.taskManagerTaskId).toBe("task_implement");
+    expect(result.results.research?.metadata?.workerTaskId).toBe("task_research");
+    expect(result.results.implement?.metadata?.workerTaskId).toBe("task_implement");
     expect(spawnWorker.mock.calls[1]![0].prompt).toContain("Pipeline input:");
   });
 });

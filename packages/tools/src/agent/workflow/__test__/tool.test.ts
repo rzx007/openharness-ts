@@ -334,7 +334,7 @@ describe("workflowTool", () => {
     let releaseWorker: (() => void) | undefined;
     try {
       const runner: WorkflowRunner = vi.fn(({ reportProgress }) => {
-        reportProgress?.({ metadata: { taskManagerTaskId: "child-task" } });
+        reportProgress?.({ metadata: { workerTaskId: "child-task" } });
         return new Promise((resolve) => {
           releaseWorker = () => resolve({ summary: "late worker completion" });
         });
@@ -354,7 +354,7 @@ describe("workflowTool", () => {
         },
       );
       await vi.waitFor(() => {
-        expect(store.load("parent-owned")?.runningTasks.research?.metadata?.taskManagerTaskId).toBe("child-task");
+        expect(store.load("parent-owned")?.runningTasks.research?.metadata?.workerTaskId).toBe("child-task");
       });
 
       controller.abort(new Error("parent interrupted"));

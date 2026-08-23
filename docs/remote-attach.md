@@ -1,5 +1,7 @@
 # 远程连接
 
+> 状态：当前 daemon 本机发现与远程连接说明。
+
 Task 12 定义两种彼此隔离的连接模式。
 
 - **本机发现：** `ohs` 与 `ohs --tui` 使用 `~/.openharness-ts/daemon/` 下的私有 daemon registry。该文件含 bearer token，不能复制到其它机器。

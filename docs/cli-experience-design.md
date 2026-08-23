@@ -1,6 +1,6 @@
 # 设计：CLI 体验 — oh provider / --dry-run / oh setup（E.1）
 
-> 状态：已批准，待实现。E.2 选择性斜杠命令留后续规划，不在本批。
+> 状态：历史设计记录。当前认证、Provider 和 Model 行为见 [Auth、Provider、Model](./auth-provider-model.md)；当前斜杠命令见 [Slash Command Flow](./slash-commands-flow.md)。
 
 > Current status: implemented behavior now separates `auth`, `provider`, and
 > `model`. API keys are stored by `auth login` / `provider add`; Codex

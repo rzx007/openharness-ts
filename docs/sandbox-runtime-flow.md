@@ -1,6 +1,6 @@
 # Sandbox Runtime 调用链
 
-> 本文是 Sandbox 运行边界的权威说明。代码入口以 `packages/sandbox/src/shell.ts` 为准。
+> 状态：当前 Sandbox 运行边界的权威说明。代码入口以 `packages/sandbox/src/shell.ts` 为准。
 
 ## 统一进程入口
 
@@ -30,9 +30,9 @@ flowchart LR
 | 调用方 | 入口 | 执行边界 |
 |---|---|---|
 | Bash | `createShellProcess` | Sandbox workload |
-| TaskManager shell / argv / autodream | `createShellProcess` / `createProcess` | Sandbox workload |
+| DetachedProcessSupervisor shell / argv / autodream | `createShellProcess` / `createProcess` | Sandbox workload |
 | command hook | `createShellProcess` | Sandbox workload |
-| Cron scheduled run / RemoteTrigger | `CronScheduler.trigger` -> `createShellProcess` | Sandbox workload |
+| Scheduled Task 启动的 Agent | 进入 daemon Application；Agent 调用的命令再走统一入口 | 每个工具按 Sandbox policy 执行 |
 | LSP 的 ripgrep 查询 | `createProcess` | Sandbox workload |
 | Read / Write / Edit | `sandboxPathError` -> `FileOperations` | Docker active 时进容器；否则宿主执行 |
 | Glob / Grep | `sandboxPathError` -> `FileOperations` | Docker active 时进容器跑 `rg`；否则宿主执行 |
