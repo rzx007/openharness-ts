@@ -971,6 +971,13 @@ function escapeXml(value: string): string {
 }
 
 async function stopTaskInCwd(cwd: string, sessionId: string | undefined, taskId: string): Promise<unknown> {
-  const { getDetachedProcessSupervisor } = await import("@openharness/services");
-  return getDetachedProcessSupervisor({ cwd, sessionId }).stopExecution(taskId);
+  const {
+    getChildAgentExecutionRegistry,
+    getDetachedProcessSupervisor,
+  } = await import("@openharness/services");
+  try {
+    return await getChildAgentExecutionRegistry({ cwd, sessionId }).stopExecution(taskId);
+  } catch {
+    return getDetachedProcessSupervisor({ cwd, sessionId }).stopExecution(taskId);
+  }
 }
