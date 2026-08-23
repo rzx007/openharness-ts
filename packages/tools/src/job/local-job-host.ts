@@ -150,9 +150,20 @@ export class LocalAgentJobHost implements AgentJobHost {
     await cancelPersistentWorkflow(source.value, {
       store: this.workflows,
       reason: input.reason,
-      stopTask: async (taskId) => await this.processes.stopExecution(taskId),
+      stopTask: async (taskId) => await this.stopWorkflowWorker(taskId, input.reason),
     });
     return this.workflowSnapshot(this.workflows.load(source.value.runId)!);
+  }
+
+  /** Stop a Workflow worker whether it is a live child Agent or a detached process. */
+  private async stopWorkflowWorker(taskId: string, reason?: string): Promise<unknown> {
+    const child = this.children.get(taskId);
+    if (child) {
+      await child.interrupt(reason);
+      await this.observeChild(child).resultPromise?.catch(() => undefined);
+      return;
+    }
+    return this.processes.stopExecution(taskId);
   }
 
   private resolve(jobId: string): LocalJobSource {

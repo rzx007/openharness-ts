@@ -118,9 +118,106 @@ describe("DaemonJobService", () => {
       );
     },
   );
+
+  it("cancels a Workflow by stopping child-agent workers, not only detached processes", async () => {
+    const {
+      createWorkflowPlan,
+      createWorkflowRunSnapshot,
+    } = await import("@openharness/coordinator");
+    const worker: SessionExecutionRecord = {
+      ...task,
+      id: "worker-child-1",
+      metadata: {
+        origin: "child_session",
+        executionBackend: "child_agent",
+        runtimeExecutionId: "worker-child-1",
+      },
+    };
+    const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
+    const workflow = createWorkflowRunSnapshot({
+      runId: "wf-cancel-child",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "review running",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(["review"]),
+      runningTasks: new Map([[
+        "review",
+        {
+          taskId: "review",
+          attempt: 1,
+          dependencies: [],
+          startedAt: 10,
+          summary: "Waiting for worker",
+          metadata: { workerTaskId: "worker-child-1" },
+        },
+      ]]),
+      createdAt: 1,
+    });
+    const processes = {
+      readOutput: vi.fn(() => ""),
+      writeInput: vi.fn(async () => undefined),
+      stopExecution: vi.fn(async () => {
+        throw new Error("Execution not found: worker-child-1");
+      }),
+    };
+    const childAgents = {
+      readOutput: vi.fn(() => ""),
+      writeInput: vi.fn(async () => undefined),
+      stopExecution: vi.fn(async () => worker),
+    };
+    let current = workflow;
+    const workflows = {
+      repositoryKey: "test-workflows",
+      list: () => [current],
+      load: (runId: string) => runId === current.runId ? current : undefined,
+      claim: vi.fn(),
+      finish: vi.fn(),
+      save: vi.fn((snapshot: typeof workflow) => {
+        current = snapshot;
+        return snapshot;
+      }),
+      appendEvent: vi.fn(),
+      loadEvents: vi.fn(() => []),
+      listSummaries: vi.fn(() => []),
+      latest: vi.fn(() => current),
+      waitForChange: vi.fn(async () => current),
+    };
+    const { service } = createService(worker, { processes, childAgents, workflows });
+
+    await expect(service.cancel({
+      sessionId: "session-1",
+      jobId: "workflow:wf-cancel-child",
+      reason: "user cancelled",
+    })).resolves.toMatchObject({
+      id: "workflow:wf-cancel-child",
+      kind: "workflow",
+      status: "killed",
+    });
+
+    expect(childAgents.stopExecution).toHaveBeenCalledWith("worker-child-1");
+    expect(processes.stopExecution).not.toHaveBeenCalled();
+  });
 });
 
-function createService(projectedTask: SessionExecutionRecord = task) {
+function createService(
+  projectedTask: SessionExecutionRecord = task,
+  overrides: {
+    processes?: {
+      readOutput: ReturnType<typeof vi.fn>;
+      writeInput: ReturnType<typeof vi.fn>;
+      stopExecution: ReturnType<typeof vi.fn>;
+    };
+    childAgents?: {
+      readOutput: ReturnType<typeof vi.fn>;
+      writeInput: ReturnType<typeof vi.fn>;
+      stopExecution: ReturnType<typeof vi.fn>;
+    };
+    workflows?: Record<string, unknown>;
+  } = {},
+) {
   const store = {
     getSession: vi.fn((id: string) => id === "session-1" ? { id, cwd: "/repo" } : undefined),
     listSessionTasks: vi.fn(() => [projectedTask]),
@@ -141,23 +238,25 @@ function createService(projectedTask: SessionExecutionRecord = task) {
   const projection = {
     list: vi.fn(() => ({ executions: [projectedTask] })),
   };
-  const manager = {
+  const manager = overrides.processes ?? {
     readOutput: vi.fn(() => "task output"),
     writeInput: vi.fn(async () => undefined),
     stopExecution: vi.fn(async () => projectedTask),
   };
+  const childAgents = overrides.childAgents ?? manager;
   return {
     service: new DaemonJobService(
       store as any,
       terminals as any,
       projection,
       () => manager,
-      () => manager,
-      { list: () => [], load: () => undefined } as any,
+      () => childAgents,
+      (overrides.workflows ?? { list: () => [], load: () => undefined }) as any,
     ),
     store,
     terminals,
     projection,
     manager,
+    childAgents,
   };
 }

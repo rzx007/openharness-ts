@@ -162,6 +162,59 @@ describe("LocalAgentJobHost adapter", () => {
       summary: "no longer needed",
     });
   });
+
+  it("interrupts framework child workers when cancelling a Workflow", async () => {
+    const cwd = temporaryDirectory();
+    let settle!: (result: AgentChildResult) => void;
+    const result = new Promise<AgentChildResult>((resolve) => { settle = resolve; });
+    const interrupt = vi.fn(async () => {
+      settle({ status: "failed", output: "interrupted", error: "interrupted" });
+    });
+    const handle: AgentChildHandle = {
+      id: "worker-child-1",
+      sessionId: "child-session",
+      state: "running",
+      result,
+      send: vi.fn(async () => ({ sessionId: "child-session", inputId: "i1", runId: "r1" })),
+      interrupt,
+      close: vi.fn(async () => undefined),
+    };
+    const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
+    new FileWorkflowRunRepository({ cwd }).save(createWorkflowRunSnapshot({
+      runId: "workflow-child-cancel",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "review running",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(["review"]),
+      runningTasks: new Map([[
+        "review",
+        {
+          taskId: "review",
+          attempt: 1,
+          dependencies: [],
+          startedAt: 10,
+          summary: "Waiting for worker",
+          metadata: { workerTaskId: "worker-child-1" },
+        },
+      ]]),
+      createdAt: 10,
+    }));
+    const host = new LocalAgentJobHost(cwd, "session-1", directory(handle));
+
+    await expect(host.cancel({
+      sessionId: "session-1",
+      jobId: "workflow-child-cancel",
+      reason: "stop the worker",
+    })).resolves.toMatchObject({
+      id: "workflow-child-cancel",
+      kind: "workflow",
+      status: "killed",
+    });
+    expect(interrupt).toHaveBeenCalledWith("stop the worker");
+  });
 });
 
 function directory(...handles: AgentChildHandle[]): AgentChildDirectory {

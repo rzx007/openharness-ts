@@ -210,13 +210,29 @@ export class DaemonJobService {
       return taskSnapshot(stopped);
     }
     const session = this.requireSession(input.sessionId);
-    const manager = this.processSupervisorFor(input.sessionId);
     await cancelPersistentWorkflow(source.value, {
       store: source.repository,
       reason: input.reason,
-      stopTask: async (taskId) => await manager.stopExecution(taskId),
+      stopTask: async (taskId) => await this.stopWorkflowWorker(session, taskId),
     });
     return workflowSnapshot(source.repository.load(source.value.runId)!, session.cwd);
+  }
+
+  /**
+   * Workflow workers may be framework child Agents or detached processes.
+   * Route stop through the same backend used for JobCancel on a plain task.
+   */
+  private async stopWorkflowWorker(session: SessionRecord, taskId: string): Promise<unknown> {
+    const task = this.store.getSessionTask(taskId);
+    if (task?.sessionId === session.id) {
+      return this.runtimeFor(task).stopExecution(runtimeExecutionId(task));
+    }
+    const scope = { cwd: session.cwd, sessionId: session.id };
+    try {
+      return await this.getChildAgentExecutionRegistry(scope).stopExecution(taskId);
+    } catch {
+      return this.getDetachedProcessSupervisor(scope).stopExecution(taskId);
+    }
   }
 
   private owned<T extends { sessionId: string }>(session: SessionRecord, input: T): T {
@@ -228,11 +244,6 @@ export class DaemonJobService {
     const session = this.store.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     return session;
-  }
-
-  private processSupervisorFor(sessionId: string) {
-    const session = this.requireSession(sessionId);
-    return this.getDetachedProcessSupervisor({ cwd: session.cwd, sessionId });
   }
 
   private runtimeFor(task: SessionExecutionRecord): JobExecutionRuntime {
