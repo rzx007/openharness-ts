@@ -148,10 +148,10 @@ export function ScheduledPage({
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-conversation" aria-busy={loading}>
-      <header className="flex min-h-[76px] items-center gap-4 border-b border-border/80 px-6 py-3.5">
+      <header className="flex min-h-19 items-center gap-4 border-b border-border/80 px-6 py-3.5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-foreground text-background">
-            <CalendarClock className="size-[18px]" />
+            <CalendarClock className="size-4.5" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -196,7 +196,7 @@ export function ScheduledPage({
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[340px] max-w-[38%] min-w-[280px] flex-col border-r border-border/80 bg-muted/15">
+        <aside className="flex w-85 max-w-[38%] min-w-70 flex-col border-r border-border/80 bg-muted/15">
           <div className="space-y-3 border-b border-border/70 px-3 py-3">
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
