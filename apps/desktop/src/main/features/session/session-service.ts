@@ -1,3 +1,9 @@
+/**
+ * 桌面主进程的会话入口：连 daemon、attach 会话、把状态推给渲染进程。
+ *
+ * 打开一个会话不是拉 GET /events。syncEvents(sessionId) 会先 GET /sessions/:id/state
+ * 拿当前消息快照，再接 GET /events/stream 跟后续增量。发消息走 admitPrompt，与 attach 无关。
+ */
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
@@ -254,6 +260,10 @@ class DesktopSessionService {
     return await toDesktopProject(project)
   }
 
+  /**
+   * 挂上指定会话：先等 snapshot（历史消息），立刻返回给窗口；SSE 增量放到 pumpSession 后台推。
+   * 每个窗口只有一条 primary 订阅，再 open 会关掉上一条。
+   */
   async openSession(webContents: WebContents, sessionIdInput: string): Promise<DesktopSessionView> {
     const sessionId = requireString(sessionIdInput, "会话 ID")
     this.closeSession(webContents.id)
@@ -275,6 +285,7 @@ class DesktopSessionService {
       },
       "无法加载会话状态。"
     )
+    // 等本次 IPC 返回快照后再泵 live，避免第一帧和后续更新抢道。
     setTimeout(() => {
       void this.pumpSession(webContents, primarySubscriptionSlot, sessionId, controller, iterator)
     }, 0)
@@ -286,6 +297,7 @@ class DesktopSessionService {
     this.subscriptions.clearOwner(webContentsId)
   }
 
+  /** 同一窗口上额外挂一个会话（对比/子会话），订阅槽是 aux:{id}，不挤掉 primary。 */
   async openAuxSession(
     webContents: WebContents,
     input: OpenDesktopAuxSessionInput
@@ -320,6 +332,7 @@ class DesktopSessionService {
     this.subscriptions.delete(webContentsId, auxiliarySubscriptionSlot(subscriptionId))
   }
 
+  /** 往已 attach 的会话排队一句用户输入。结果仍从刚才那条 SSE 订阅回来。 */
   async sendPrompt(input: SendDesktopPromptInput): Promise<void> {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const content = requireString(input.content, "消息内容")
