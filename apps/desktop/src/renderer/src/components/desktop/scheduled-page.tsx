@@ -1,12 +1,16 @@
 import {
+  Bot,
   CalendarClock,
   CheckCircle2,
   CircleAlert,
   Clock3,
+  FolderGit2,
+  History,
   Pause,
   Play,
   RefreshCw,
   Search,
+  TimerReset,
   Trash2,
 } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react"
@@ -23,6 +27,14 @@ import type {
 } from "@shared/schedule-types"
 
 type Filter = "all" | "active" | "paused" | "completed"
+
+const filters: Filter[] = ["all", "active", "paused", "completed"]
+const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+})
 
 export function ScheduledPage({
   onStartConversation,
@@ -98,6 +110,15 @@ export function ScheduledPage({
     () => tasks.find((task) => task.id === selectedId) ?? null,
     [selectedId, tasks]
   )
+  const filterCounts = useMemo(
+    () => ({
+      all: tasks.length,
+      active: tasks.filter((task) => task.status === "active").length,
+      paused: tasks.filter((task) => task.status === "paused").length,
+      completed: tasks.filter((task) => task.status === "completed").length,
+    }),
+    [tasks]
+  )
   const visibleTasks = useMemo(() => {
     return tasks.filter((task) => {
       if (filter !== "all" && task.status !== filter) return false
@@ -127,34 +148,46 @@ export function ScheduledPage({
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-conversation" aria-busy={loading}>
-      <header className="flex min-h-20 items-center gap-4 border-b border-border px-7 py-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight">已安排</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            后台 Agent 任务和需要处理的运行结果
-          </p>
+      <header className="flex min-h-[76px] items-center gap-4 border-b border-border/80 px-6 py-3.5">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-foreground text-background">
+            <CalendarClock className="size-[18px]" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold tracking-tight">已安排</h1>
+              {status?.unread ? (
+                <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground">
+                  {status.unread} 个结果待查看
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              管理后台 Agent 任务，跟进每一次运行
+            </p>
+          </div>
         </div>
-        <div className="relative ml-auto w-64 max-w-[32vw]">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜索任务"
-            className="h-8 pl-8"
-          />
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="刷新任务"
+            aria-label="刷新任务"
+            onClick={() => void refresh()}
+            disabled={loading}
+          >
+            <RefreshCw className={cn(loading && "animate-spin")} />
+          </Button>
+          <Button size="sm" onClick={onStartConversation}>
+            <Bot />
+            在对话中安排
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-          <RefreshCw />
-          刷新
-        </Button>
-        <Button size="sm" onClick={onStartConversation}>
-          在对话中安排
-        </Button>
       </header>
 
       {error ? (
         <div
-          className="mx-7 mt-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          className="mx-6 mt-4 flex items-start gap-2 rounded-md bg-destructive/8 px-3 py-2.5 text-xs text-destructive ring-1 ring-destructive/20"
           role="alert"
         >
           <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
@@ -163,28 +196,39 @@ export function ScheduledPage({
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[min(390px,38%)] min-w-72 flex-col border-r border-border">
-          <div className="flex items-center gap-1 border-b border-border px-4 py-3">
-            {(["all", "active", "paused", "completed"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setFilter(value)}
-                className={cn(
-                  "rounded-md px-2.5 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                  filter === value
-                    ? "bg-muted font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-muted/60"
-                )}
-              >
-                {filterLabel(value)}
-              </button>
-            ))}
-            {status?.unread ? (
-              <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-[10px] text-primary-foreground">
-                {status.unread} 未读
-              </span>
-            ) : null}
+        <aside className="flex w-[340px] max-w-[38%] min-w-[280px] flex-col border-r border-border/80 bg-muted/15">
+          <div className="space-y-3 border-b border-border/70 px-3 py-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="搜索任务、项目或指令"
+                aria-label="搜索任务"
+                className="h-8 bg-background pl-8 text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-0.5" aria-label="任务筛选">
+              {filters.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setFilter(value)}
+                  aria-pressed={filter === value}
+                  className={cn(
+                    "flex min-w-0 items-center gap-1 rounded-md px-2 py-1.5 text-[11px] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                    filter === value
+                      ? "bg-background font-medium text-foreground ring-1 ring-border"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  )}
+                >
+                  <span>{filterLabel(value)}</span>
+                  <span className="text-[10px] text-muted-foreground tabular-nums">
+                    {filterCounts[value]}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
           <ScrollArea
             className="min-h-0 flex-1"
@@ -198,11 +242,11 @@ export function ScheduledPage({
               </div>
             ) : null}
             {!loading && visibleTasks.length === 0 ? (
-              <div className="px-4 py-10 text-center">
-                <CalendarClock className="mx-auto size-7 text-muted-foreground/50" />
+              <div className="px-5 py-12 text-center">
+                <CalendarClock className="mx-auto size-7 text-muted-foreground/45" />
                 <p className="mt-3 text-sm font-medium">没有匹配的任务</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  在任意 Agent 对话里描述要做的工作和执行时间。
+                <p className="mx-auto mt-1 max-w-56 text-xs leading-5 text-muted-foreground">
+                  调整筛选条件，或在 Agent 对话中创建一个新任务。
                 </p>
               </div>
             ) : null}
@@ -211,21 +255,32 @@ export function ScheduledPage({
                 type="button"
                 key={task.id}
                 onClick={() => setSelectedId(task.id)}
+                aria-current={task.id === selectedId ? "true" : undefined}
                 className={cn(
-                  "w-full rounded-md px-3 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                  task.id === selectedId ? "bg-muted" : "hover:bg-muted/55"
+                  "group w-full rounded-lg px-3 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                  task.id === selectedId
+                    ? "bg-background text-foreground ring-1 ring-border"
+                    : "text-muted-foreground hover:bg-muted/55 hover:text-foreground"
                 )}
               >
                 <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{task.name}</span>
-                  <TaskStatus status={task.status} />
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+                    {task.name}
+                  </span>
+                  <TaskStatus status={task.status} compact />
                 </div>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
+                <p className="mt-1.5 truncate text-[11px] text-muted-foreground">
                   {recurrenceLabel(task)}
                 </p>
-                <p className="mt-1 text-[11px] text-muted-foreground/75">
-                  {task.nextRunAt ? `下次 ${formatTime(task.nextRunAt)}` : "没有后续运行"}
-                </p>
+                <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground/80">
+                  <Clock3 className="size-3" />
+                  <span>
+                    {task.nextRunAt ? `下次 ${formatTime(task.nextRunAt)}` : "没有后续运行"}
+                  </span>
+                  {task.runCount > 0 ? (
+                    <span className="ml-auto tabular-nums">已运行 {task.runCount} 次</span>
+                  ) : null}
+                </div>
               </button>
             ))}
           </ScrollArea>
@@ -233,120 +288,168 @@ export function ScheduledPage({
 
         <ScrollArea
           className="min-h-0 min-w-0 flex-1"
-          viewportClassName="p-7"
-          contentClassName="mx-auto max-w-4xl"
+          viewportClassName="px-6 py-7 lg:px-8"
+          contentClassName="mx-auto max-w-5xl pb-10"
         >
           {selected ? (
             <>
-              <div className="flex items-start gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h2 className="truncate text-lg font-semibold">{selected.name}</h2>
+              <div className="flex flex-wrap items-start gap-x-5 gap-y-4">
+                <div className="min-w-64 flex-1">
+                  <div className="flex items-center gap-2.5">
+                    <h2 className="min-w-0 truncate text-xl font-semibold tracking-tight">
+                      {selected.name}
+                    </h2>
                     <TaskStatus status={selected.status} />
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {recurrenceLabel(selected)} · {selected.timezone}
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>{recurrenceLabel(selected)}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{selected.timezone}</span>
+                    {selected.nextRunAt ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>下次运行 {formatTime(selected.nextRunAt)}</span>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy !== null}
-                  onClick={() =>
-                    void mutate("run", () => window.desktop.schedules.runNow(selected.id))
-                  }
-                >
-                  {busy === "run" ? <Spinner /> : <Play />}立即运行
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy !== null || selected.status === "completed"}
-                  onClick={() =>
-                    void mutate("toggle", () =>
-                      window.desktop.schedules.update(selected.id, {
-                        status: selected.status === "paused" ? "active" : "paused",
-                      })
-                    )
-                  }
-                >
-                  {selected.status === "paused" ? <Play /> : <Pause />}
-                  {selected.status === "paused" ? "继续" : "暂停"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  title="删除任务"
-                  aria-label="删除任务"
-                  disabled={busy !== null}
-                  onClick={() =>
-                    void mutate("delete", () => window.desktop.schedules.remove(selected.id))
-                  }
-                >
-                  <Trash2 />
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void mutate("run", () => window.desktop.schedules.runNow(selected.id))
+                    }
+                  >
+                    {busy === "run" ? <Spinner /> : <Play />}
+                    立即运行
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy !== null || selected.status === "completed"}
+                    onClick={() =>
+                      void mutate("toggle", () =>
+                        window.desktop.schedules.update(selected.id, {
+                          status: selected.status === "paused" ? "active" : "paused",
+                        })
+                      )
+                    }
+                  >
+                    {selected.status === "paused" ? <Play /> : <Pause />}
+                    {selected.status === "paused" ? "继续" : "暂停"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground hover:text-destructive"
+                    title="删除任务"
+                    aria-label="删除任务"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void mutate("delete", () => window.desktop.schedules.remove(selected.id))
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
               </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <dl className="mt-7 grid grid-cols-2 overflow-hidden rounded-lg bg-muted/35 ring-1 ring-border/80 lg:grid-cols-4">
                 <Info
+                  icon={Bot}
                   label="运行方式"
                   value={selected.destination === "chat" ? "返回关联对话" : "每次独立对话"}
                 />
-                <Info label="项目" value={selected.projectPaths[0] ?? "关联对话项目"} />
                 <Info
+                  icon={FolderGit2}
+                  label="项目"
+                  value={selected.projectPaths[0] ?? "关联对话项目"}
+                />
+                <Info
+                  icon={TimerReset}
                   label="执行环境"
                   value={selected.executionMode === "worktree" ? "独立 worktree" : "本地项目"}
                 />
-                <Info label="已运行" value={`${selected.runCount} 次`} />
-              </div>
+                <Info icon={History} label="累计运行" value={`${selected.runCount} 次`} />
+              </dl>
 
-              <div className="mt-6 rounded-lg border border-border bg-background/55 p-4">
-                <h3 className="text-xs font-semibold text-muted-foreground">每次运行的指令</h3>
-                <p className="mt-2 text-sm leading-6 whitespace-pre-wrap">{selected.prompt}</p>
-              </div>
+              <section className="mt-7 overflow-hidden rounded-lg bg-background ring-1 ring-border/80">
+                <div className="flex items-center justify-between border-b border-border/70 bg-muted/25 px-4 py-3">
+                  <h3 className="text-xs font-semibold">每次运行的指令</h3>
+                  <span className="text-[10px] text-muted-foreground">发送给 Agent</span>
+                </div>
+                <p className="max-w-[75ch] px-4 py-4 text-[13px] leading-6 whitespace-pre-wrap text-foreground/90">
+                  {selected.prompt}
+                </p>
+              </section>
 
-              <div className="mt-7">
-                <h3 className="text-sm font-semibold">最近运行</h3>
-                <div className="mt-3 space-y-2">
+              <section className="mt-8">
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-sm font-semibold">最近运行</h3>
+                  <span className="text-[11px] text-muted-foreground tabular-nums">
+                    {runs.length} 条记录
+                  </span>
+                </div>
+                <div className="mt-3 overflow-hidden rounded-lg bg-background ring-1 ring-border/80">
                   {runs.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border px-4 py-8 text-center text-xs text-muted-foreground">
-                      这个任务还没有运行记录。
-                    </p>
+                    <div className="grid min-h-36 place-items-center px-4 text-center">
+                      <div>
+                        <History className="mx-auto size-6 text-muted-foreground/45" />
+                        <p className="mt-2 text-xs text-muted-foreground">这个任务还没有运行记录</p>
+                      </div>
+                    </div>
                   ) : null}
-                  {runs.map((run) => (
+                  {runs.map((run, index) => (
                     <article
                       key={run.id}
-                      className="rounded-md border border-border bg-background/45 px-4 py-3 [content-visibility:auto]"
+                      className={cn(
+                        "grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-4 py-4 [content-visibility:auto]",
+                        index > 0 && "border-t border-border/70"
+                      )}
                     >
-                      <div className="flex items-center gap-2 text-xs">
-                        {run.status === "succeeded" ? (
-                          <CheckCircle2 className="size-3.5 text-emerald-600" />
-                        ) : run.status === "running" ? (
-                          <Spinner className="size-3.5" />
+                      <RunStatusIcon status={run.status} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium">{runStatusLabel(run.status)}</span>
+                          <time
+                            className="text-muted-foreground"
+                            dateTime={new Date(run.createdAt).toISOString()}
+                          >
+                            {formatTime(run.createdAt)}
+                          </time>
+                          {run.unread ? (
+                            <span className="ml-auto flex items-center gap-1.5 text-[10px] font-medium text-primary">
+                              <span className="size-1.5 rounded-full bg-primary" />
+                              新结果
+                            </span>
+                          ) : null}
+                        </div>
+                        {run.summary || run.error ? (
+                          <p
+                            className={cn(
+                              "mt-2 line-clamp-5 max-w-[80ch] font-mono text-[11px] leading-5 whitespace-pre-wrap",
+                              run.error ? "text-destructive" : "text-muted-foreground"
+                            )}
+                          >
+                            {run.summary ?? run.error}
+                          </p>
                         ) : (
-                          <CircleAlert className="size-3.5 text-amber-600" />
+                          <p className="mt-2 text-xs text-muted-foreground">暂无运行摘要</p>
                         )}
-                        <span className="font-medium">{runStatusLabel(run.status)}</span>
-                        <span className="text-muted-foreground">{formatTime(run.createdAt)}</span>
-                        {run.unread ? (
-                          <span className="ml-auto size-2 rounded-full bg-primary" title="未读" />
-                        ) : null}
                       </div>
-                      {run.summary || run.error ? (
-                        <p className="mt-2 line-clamp-4 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
-                          {run.summary ?? run.error}
-                        </p>
-                      ) : null}
                     </article>
                   ))}
                 </div>
-              </div>
+              </section>
             </>
           ) : (
-            <div className="grid min-h-72 place-items-center text-center">
+            <div className="grid min-h-[60vh] place-items-center text-center">
               <div>
-                <Clock3 className="mx-auto size-8 text-muted-foreground/45" />
-                <p className="mt-3 text-sm text-muted-foreground">选择一个已安排任务查看详情</p>
+                <Clock3 className="mx-auto size-8 text-muted-foreground/40" />
+                <p className="mt-3 text-sm font-medium">选择一个已安排任务</p>
+                <p className="mt-1 text-xs text-muted-foreground">查看配置、运行状态与历史结果</p>
               </div>
             </div>
           )}
@@ -356,51 +459,100 @@ export function ScheduledPage({
   )
 }
 
-function TaskStatus({ status }: { status: DesktopScheduledTask["status"] }): React.JSX.Element {
+function TaskStatus({
+  status,
+  compact = false,
+}: {
+  status: DesktopScheduledTask["status"]
+  compact?: boolean
+}): React.JSX.Element {
   return (
     <span
       className={cn(
-        "rounded-full px-2 py-0.5 text-[10px]",
+        "inline-flex shrink-0 items-center gap-1 rounded-full font-medium",
+        compact ? "px-1.5 py-0.5 text-[9px]" : "px-2 py-0.5 text-[10px]",
         status === "active"
-          ? "bg-emerald-500/12 text-emerald-700"
+          ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-400"
           : status === "paused"
-            ? "bg-amber-500/12 text-amber-700"
+            ? "bg-amber-500/12 text-amber-700 dark:text-amber-400"
             : "bg-muted text-muted-foreground"
       )}
     >
+      <span className="size-1 rounded-full bg-current" />
       {filterLabel(status)}
     </span>
   )
 }
 
-function Info({ label, value }: { label: string; value: string }): React.JSX.Element {
+function Info({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Bot
+  label: string
+  value: string
+}): React.JSX.Element {
   return (
-    <div className="min-w-0 rounded-md border border-border bg-background/45 px-3 py-2.5">
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className="mt-1 truncate text-xs font-medium" title={value}>
+    <div className="min-w-0 px-4 py-3.5 not-last:border-r not-last:border-border/70 max-lg:nth-[2]:border-r-0 max-lg:nth-[n+3]:border-t">
+      <dt className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        <Icon className="size-3" />
+        {label}
+      </dt>
+      <dd className="mt-1.5 truncate text-xs font-medium" title={value}>
         {value}
-      </p>
+      </dd>
     </div>
   )
 }
 
+function RunStatusIcon({ status }: { status: DesktopScheduledRun["status"] }): React.JSX.Element {
+  if (status === "succeeded") {
+    return (
+      <span className="grid size-6 place-items-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+        <CheckCircle2 className="size-3.5" />
+      </span>
+    )
+  }
+  if (status === "running" || status === "queued") {
+    return (
+      <span className="grid size-6 place-items-center rounded-full bg-primary/8 text-primary">
+        <Spinner className="size-3.5" />
+      </span>
+    )
+  }
+  return (
+    <span className="grid size-6 place-items-center rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400">
+      <CircleAlert className="size-3.5" />
+    </span>
+  )
+}
+
 function filterLabel(value: Filter): string {
-  return { all: "全部", active: "活跃", paused: "已暂停", completed: "已完成" }[value]
+  return { all: "全部", active: "运行中", paused: "已暂停", completed: "已完成" }[value]
 }
 
 function recurrenceLabel(task: DesktopScheduledTask): string {
-  return task.recurrenceFormat === "once"
-    ? `一次性 · ${formatTime(Date.parse(task.recurrence))}`
-    : task.recurrence.replace(/^RRULE:/, "")
+  if (task.recurrenceFormat === "once") return `一次性 · ${formatTime(Date.parse(task.recurrence))}`
+
+  const rule = Object.fromEntries(
+    task.recurrence
+      .replace(/^RRULE:/, "")
+      .split(";")
+      .map((part) => part.split("=", 2))
+  )
+  const hour = Number(rule.BYHOUR ?? 0)
+  const minute = Number(rule.BYMINUTE ?? 0)
+  const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+
+  if (rule.FREQ === "DAILY") return `每天 ${time}`
+  if (rule.FREQ === "WEEKLY") return `每周 ${time}`
+  if (rule.FREQ === "MONTHLY") return `每月 ${rule.BYMONTHDAY ?? ""} 日 ${time}`.trim()
+  return task.recurrence.replace(/^RRULE:/, "")
 }
 
 function formatTime(value: number): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(value)
+  return dateTimeFormatter.format(value)
 }
 
 function runStatusLabel(status: DesktopScheduledRun["status"]): string {
