@@ -1,9 +1,8 @@
 # 设计：Session 存储增强（E.6 第二刀）
 
-> 状态：已批准。移植 Python `services/session_storage.py`（230 行），
-> 替换 TS 现状的「平铺 `<sessionsDir>/<id>.json`」。
-
-> 当前定位：本文描述历史项目级快照。daemon 的权威 `SessionStore` 位于 `packages/services/src/session-runtime`，包含 session/input/message/part/event/run/task/permission request，使用 daemon 独占的 SQLite。当前流程见 [daemon-application-architecture.md](./daemon-application-architecture.md)。
+> 状态：历史设计。本文描述已经退场的项目级 JSON snapshot，不是当前 daemon 存储契约。
+>
+> daemon 的权威 `SessionStore` 位于 `packages/services/src/session-runtime`，包含 session/input/message/part/event/run/task/permission request，使用 daemon 独占的 SQLite。当前流程见 [Daemon Application Architecture](./daemon-application-architecture.md)；完整记录格式仍待补入 `durable-execution-data-model.md`。
 
 ## 现状缺口
 

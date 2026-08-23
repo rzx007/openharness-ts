@@ -31,7 +31,7 @@ ohs channels serve
   -> 连接飞书 WebSocket，开始处理新消息
 ```
 
-`channels serve` 不再调用 `createOpenHarnessAgent()`。它通过 `OpenHarnessClient` 调 daemon 的 `/channels/*` 接口，所以 Bot 创建的 Session 和 transcript 能被 TUI、Desktop 或其他客户端直接看到和继续使用。
+`channels serve` 不直接创建 standalone Agent。它通过 `OpenHarnessClient` 调 daemon 的 `/channels/*` 接口，所以 Bot 创建的 Session 和 transcript 能被 TUI、Desktop 或其他客户端直接看到和继续使用。
 
 配置仍放在 `settings.json`：
 

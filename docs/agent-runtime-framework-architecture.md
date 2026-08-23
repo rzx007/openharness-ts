@@ -25,7 +25,9 @@ Run/ChildHandle  = 调用方用来控制「还在跑的那一轮」的把手
 框架本身不依赖 HTTP、daemon、SQLite 会话表或 UI。最小用法：
 
 ```ts
-const agent = await createOpenHarnessAgent({ cwd: process.cwd() });
+import { createDefaultNodeAgent } from "@openharness/agent-runtime";
+
+const agent = await createDefaultNodeAgent({ cwd: process.cwd() });
 const unsubscribe = agent.subscribe((event) => console.log(event.type));
 const run = agent.submitMessage("hi");
 const result = await run.result;
@@ -51,7 +53,7 @@ await agent.close();
 
 ```mermaid
 flowchart TD
-  Create["createOpenHarnessAgent(options)"]
+  Create["createDefaultNodeAgent(options)"]
   Runtime["内部默认组装"]
   MCP["MCP / 扩展 / memory"]
   Session["createAgentSession(QueryEngine)"]
@@ -66,7 +68,7 @@ flowchart TD
   Bus --> Agent
 ```
 
-应用侧只应调用 `createOpenHarnessAgent()`。它在内部组装：模型提供方、QueryEngine、工具、hooks、权限策略、prompt、skills、插件、MCP、memory、沙箱、事件/回调边界，以及子 agent 生命周期。
+需要 OpenHarness 默认 Node 能力的应用调用 `createDefaultNodeAgent()`。它在内部组装：模型提供方、QueryEngine、工具、hooks、权限策略、prompt、skills、插件、MCP、memory、沙箱、事件/回调边界，以及子 agent 生命周期。只需要执行内核的宿主改用 `createAgentKernel()`，并显式提供 runtime 和宿主能力。
 `createOpenHarnessRuntime()` 已不再从包的公开入口导出。
 
 ## 一轮 submitMessage

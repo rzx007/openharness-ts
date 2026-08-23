@@ -60,11 +60,11 @@ daemon hosting 时，同一份字段同时写入 child session metadata，供 du
 ## Code
 
 ```text
-packages/coordinator/src/agents.ts
+packages/coordinator/src/agent-loader.ts
 packages/tools/src/agent/index.ts
-packages/tools/src/agent/workflow-runner.ts
+packages/tools/src/agent/workflow/runner.ts
 packages/agent-runtime/src/child-agent.ts
-packages/server/src/http/daemon-child-agent-projection.ts
+packages/server/src/application/agent/daemon-agent-event-projector.ts
 ```
 
 Coordinator 模式只暴露调度工具；实际文件和 shell 操作由 child agent 执行。

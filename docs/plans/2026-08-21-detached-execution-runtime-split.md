@@ -1,5 +1,7 @@
 # 分离式执行运行时拆分
 
+> 状态：历史实施计划。本文保留当时使用的 `WorkflowRunStore` 等名字；当前 Workflow repository 和 Jobs 关系见 [Coordinator 硬调度器调用链](../coordinator-hard-scheduler-flow.md) 与 [Jobs Protocol](../jobs-protocol.md)。
+
 ## 目标
 
 从分离式执行链路中移除含糊的公共/内部 `Task` 术语，同时避免让人误以为 Terminal 或 Workflow 也由同一个运行时管理。

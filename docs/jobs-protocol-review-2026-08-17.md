@@ -1,6 +1,6 @@
 # Jobs Protocol Review 2026-08-17
 
-> 范围：提交 `decb5ac feat(jobs): unify terminal and background work` 以及本次复盘修正。协议本身见 [Jobs 统一后台任务协议](./jobs-protocol.md)，后续 Task/Workflow 工具收口见 [Jobs Task/Workflow Convergence](./jobs-task-workflow-convergence.md)。
+> 状态：历史复盘，记录 2026-08-17 当时的实现。本文出现的 TaskManager、Workflow 文件快照和轮询等待已经被后续实现替换，不能作为当前 API 契约。当前协议见 [Jobs 统一后台任务协议](./jobs-protocol.md)，后续收口记录见 [Jobs Task/Workflow Convergence](./jobs-task-workflow-convergence.md)。
 
 ## 结论
 

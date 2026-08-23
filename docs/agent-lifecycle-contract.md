@@ -74,6 +74,7 @@ stateDiagram-v2
 - **C3**：close/suspend 必须尝试 interrupt、等待创建、关闭 agent、释放 lease、注销 registry；失败汇总后仍进入终态。
 - **C4**：`child.closed` 只发布一次；daemon durable settlement 可重试，但不能重新激活 live child。
 - **C5**：root tree 共享查询目录，生命周期释放仍由创建 child 的 manager 负责。
+- **C6**：创建 child 前必须在 root tree 共享预算中原子预留 depth、active 和 total 名额；申请环境失败必须退回预留。suspend 不释放 active，close 只释放 active、不退回 total，详细计算见 [Agent Child Session Flow：Child 预算](./agent-child-session-flow.md#child-预算防止无限叫人)。
 
 ### Daemon
 
@@ -146,11 +147,11 @@ stateDiagram-v2
 | 契约 | 回归测试 |
 |---|---|
 | A1-A5、E1-E4 | `packages/agent-runtime/src/agent.test.ts`, `sdk.test.ts`, `event-source.test.ts` |
-| C1-C5 | `packages/agent-runtime/src/child-agent.test.ts` |
-| D2、T1-T3 | `packages/server/src/http/daemon-control-service.test.ts`, `packages/server/src/http.test.ts` |
-| D3-D5、P1-P5 | `packages/server/src/http/daemon-agent-event-projector.test.ts`, `session-run-executor.test.ts` |
-| D6 | `packages/server/src/http/agent-pool.test.ts` |
-| D1、D7、restart | `packages/server/src/http.test.ts`, `packages/server/src/daemon-lifecycle.soak.test.ts` |
+| C1-C6 | `packages/agent-runtime/src/child-agent.test.ts` |
+| D2、T1-T3 | `packages/server/src/application/control/__test__/daemon-control-service.test.ts`, `packages/server/src/http/__test__/http.test.ts` |
+| D3-D5、P1-P5 | `packages/server/src/application/agent/__test__/daemon-agent-event-projector.test.ts`, `packages/server/src/application/session/__test__/session-run-executor.test.ts` |
+| D6 | `packages/server/src/application/agent/__test__/agent-pool.test.ts` |
+| D1、D7、restart | `packages/server/src/http/__test__/http.test.ts`, `packages/server/src/daemon/__test__/daemon-lifecycle.soak.test.ts` |
 
 ## 变更检查
 

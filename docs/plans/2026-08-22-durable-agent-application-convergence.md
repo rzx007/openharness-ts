@@ -1,6 +1,6 @@
 # Durable Agent Application 多端收口计划
 
-> 状态：实施中。
+> 状态：已完成（A1–F4，2026-08-22）。本文是实施记录，不是当前 API 手册；当前文档入口见 [`docs/README.md`](../README.md)。
 >
 > 本计划基于 2026-08-22 对当前代码的架构核查。上一轮 Runtime Hardening 已经补齐 Input/Run 原子准入、重启收束、事件版本、Projection Settlement、Child Budget、Run Attempt、Tool 未知结果、Metrics 和 Run Inspector。本计划不重复这些工作，而是让它们真正被 CLI、TUI、Web、Desktop、IDE、Bot 和 Workflow 共用。
 >
@@ -16,12 +16,12 @@
 - [x] B2-B4：应用现在自己拥有 Session、Run、Permission、Job、Terminal、Project 和事件入口；HTTP 可以接收外部 Application；事件支持先按游标补历史、再持续接收新事件。
 - [x] C1-C4：Bot 已通过 daemon 进入同一套 durable Session/Run；聊天映射、重复消息准入和回复发送结果都会保存。
 - [x] D1-D4：Kernel 已改为只接收显式 runtime 和宿主能力；Node 默认组装只保留命名明确的入口；发布包可在仓库外安装并跑完 root、child 和 close。
-- [x] E1-E4：daemon Workflow 已写入统一 SQLite；旧文件可重复迁移；Jobs 等待改成状态变化通知。
+- [x] E1-E4：daemon Workflow 已写入统一 SQLite；不读取或迁移旧项目文件；Jobs 等待改成状态变化通知并补上订阅竞态保护。
 - [x] F1-F4：已增加单执行者租约和 generation 防旧写、协议能力清单、可审计清理策略及带校验的备份恢复。
 
 ## 一、这轮要解决什么
 
-当前代码已经有三块重要能力：
+以下是计划开始时的代码基线，当时已经有三块重要能力：
 
 ```text
 agent-runtime
@@ -40,7 +40,7 @@ client
 2. 真正负责 durable 业务的 `DaemonApplication` 仍放在 `@openharness/server` 内部，很多实现文件也仍位于 `http/` 目录。
 3. `ohs channels serve` 直接创建 standalone Agent，Bot 消息没有进入 daemon 的 durable Session/Run。
 4. `agent-runtime` 的运行规则已经像独立内核，但默认组装同时读取本机配置、凭据、插件、Skill、MCP、Sandbox 和 Git worktree，包本身也还不能脱离 monorepo 发布。
-5. Workflow 使用项目目录中的 JSON/NDJSON 文件保存状态，没有和 Session/Run 使用同一份 durable 状态与诊断入口。
+5. 当时 Workflow 使用项目目录中的 JSON/NDJSON 文件保存状态，没有和 Session/Run 使用同一份 durable 状态与诊断入口。
 
 用大白话说，这轮的目标是：
 
@@ -115,7 +115,7 @@ CLI / TUI / Web / Desktop / IDE / Bot / Workflow
 7. HTTP、Bot 和未来 IDE 只是入口，不能各自维护第二份 Session/Run 状态。
 8. 浏览器客户端公共入口不能 import Node 文件系统、SQLite、Drizzle 或服务端 Store。
 9. 单机模式下，一个数据目录只能有一个 active application owner，避免两个 Daemon 同时执行同一个 Run。
-10. 新增跨进程保存的数据必须有 migration、旧数据读取测试和异常退出测试。
+10. 新增跨进程保存的数据必须有数据库 migration、严格解码测试和异常退出测试；不为了旧文件格式增加自动读取分支。
 
 ## 五、实施顺序
 
@@ -855,8 +855,8 @@ backup/
 
 - file repository 与 SQLite repository 共享 contract test；
 - restart/cancel/late-write；
-- 旧文件重复迁移；
-- 损坏文件诊断；
+- daemon 不读取或迁移旧项目文件；
+- SQLite 与文件 repository 分别做严格解码和损坏数据诊断；
 - Jobs event-driven wait。
 
 ## F：长期运行
@@ -899,7 +899,7 @@ backup/
 
 - 先写能暴露旧问题的测试；
 - 不顺手改变无关 public API；
-- 新数据有 migration 和旧数据测试；
+- 新数据库结构有 migration 和严格读取测试；
 - 更新一份权威文档，不新增重复说法；
 - focused tests 通过；
 - 受影响 package typecheck 通过；
@@ -961,7 +961,7 @@ backup/
 
 - daemon Workflow 的事实进入统一 Store；
 - Workflow 可被统一 inspector、events、metrics 和 Jobs 查询；
-- 旧文件可重复迁移；
+- daemon 不扫描、不读取也不迁移旧 Workflow 文件；
 - 一个 Store 不会被两个执行者同时执行。
 
 ---

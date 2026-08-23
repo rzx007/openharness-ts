@@ -1,6 +1,6 @@
 # 设计：Coordinator 硬调度器演进
 
-> 状态：演进设计文档（V0–V9.3 已落地）。**当前运行时调用链与模块真相以 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md) 为准**；本文保留动机、分工边界与版本路线图。
+> 状态：历史演进设计。本文保留当时的动机和版本路线，里面的 `TaskManager`、`swarm`、`WorkflowRunStore` 等名字不代表当前入口。**当前运行时调用链与模块真相以 [`coordinator-hard-scheduler-flow.md`](./coordinator-hard-scheduler-flow.md) 为准**。
 
 ## 一句话
 

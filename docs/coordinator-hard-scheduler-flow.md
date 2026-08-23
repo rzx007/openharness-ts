@@ -18,7 +18,7 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 
 1. **入口**：模型调 `Workflow` 工具创建、恢复或做领域查询，普通生命周期控制交给 Jobs；代码也可直接调用 `runWorkflow` / `runPersistentWorkflow`。
 2. **调度**：`runWorkflow` 维护 ready 队列、并发上限、失败策略、写冲突串行、预算与超时。
-3. **执行**：每个 task 经 `WorkflowRunner`（默认 `createAgentWorkflowRunner`）spawn framework child → `awaitChildAgent` → 结构化结果回填；显式 external worker 才走 TaskManager adapter。
+3. **执行**：每个 task 经 `WorkflowRunner`（默认 `createAgentWorkflowRunner`）调用 `context.agent.children.spawnChildAgent()`，再等待同一个 framework child 完成并把结构化结果回填；只有调用方显式提供 external worker adapter 时才走外部 task。
 
 ```text
 ┌─ 模型 / 代码入口 ─────────────────────────────────────┐
@@ -37,13 +37,13 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 │   预算超限 → skip 未启动                                │
 │   writeScope 冲突 → blocked，等运行中写任务结束         │
 │   可跑 → runner(task) → onFinished → 传播失败 / 入队    │
-│ onSnapshot / onEvent → .openharness/workflows/…        │
+│ onSnapshot / onEvent → 显式 WorkflowRunRepository      │
 └────────────────────────────────────────────────────────┘
                           │
                           ▼
 ┌─ Agent WorkflowRunner（每个 task）─────────────────────┐
-│ resume 有 taskManagerTaskId → 优先 await 现有 worker    │
-│ 否则 swarm.spawnWorker → awaitTask → git diff 摘要     │
+│ 默认 spawn framework child → await 同一 child          │
+│ 显式 external adapter → awaitTask → 可选 git diff 摘要  │
 │ 返回 summary / result / metadata / budget / status     │
 └────────────────────────────────────────────────────────┘
 ```
@@ -52,7 +52,7 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| 公共调度入口 | `packages/coordinator/src/workflow-scheduler.ts` | 兼容导出入口；外部仍从这里或 `@openharness/coordinator` 导入 |
+| 公共调度入口 | `packages/coordinator/src/workflow-scheduler.ts` | 从这里或 `@openharness/coordinator` 导入调度 API |
 | 调度循环 | `packages/coordinator/src/workflow/runner.ts` | `runWorkflow`、ready queue、并发、失败策略、budget、blocked task |
 | task attempt | `packages/coordinator/src/workflow/task-runner.ts` | 单 task 执行、retry、timeout、progress budget |
 | plan / 校验 | `packages/coordinator/src/workflow/validation.ts` | `WorkflowSpec` 展开、DAG、mode、writeScope 校验 |
@@ -60,14 +60,15 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 | snapshot | `packages/coordinator/src/workflow/snapshot.ts` | run id、snapshot、summary、snapshot/result 转换 |
 | notification | `packages/coordinator/src/workflow/notification.ts` | `<workflow-notification>` formatter/parser |
 | reconciliation | `packages/coordinator/src/workflow/reconciliation.ts` | changed-file / write-scope overlap 检测、summary、follow-up spec |
-| 公共持久化入口 | `packages/coordinator/src/workflow-store.ts` | 持久化兼容导出入口 |
-| 持久化实现 | `packages/coordinator/src/workflow/store.ts` | `.openharness/workflows/<runId>.json` + `.events.ndjson`；resume/cancel/list |
+| 公共持久化入口 | `packages/coordinator/src/workflow-store.ts` | 导出 repository contract 与持久运行 API |
+| 文件持久化实现 | `packages/coordinator/src/workflow/store.ts` | `FileWorkflowRunRepository`；`.openharness/workflows/<runId>.json` + `.events.ndjson` |
+| daemon 持久化实现 | `packages/server/src/application/workflow/session-workflow-run-repository.ts` | `SessionWorkflowRunRepository`；写入统一 SQLite |
 | Coordinator 模式 | `packages/coordinator/src/coordinator-mode.ts` | `getCoordinatorTools()` 含 `Workflow`；prompt / user context |
 | System prompt | `packages/coordinator/src/index.ts` | `COORDINATOR_SYSTEM_PROMPT` 说明何时用 Workflow vs Agent |
 | Workflow 工具 | `packages/tools/src/agent/workflow/tool.ts` | 创建/恢复 workflow，提供 timeline/history 等领域查询；detached run 返回 `jobId` |
 | Jobs adapter | `packages/server/src/jobs/daemon-job-service.ts`、`packages/tools/src/job/local-job-host.ts` | Workflow 普通 list/read/wait/cancel |
-| Agent runner | `packages/tools/src/agent/workflow-runner.ts` | spawn swarm worker + `awaitTask` + changed files / diff |
-| 工具注册 | `packages/tools/src/registry.ts` | 默认注册表挂上 `workflowTool` |
+| Agent runner | `packages/tools/src/agent/workflow/runner.ts` | 默认 spawn/await framework child；也接受显式 external worker adapter |
+| 工具注册 | `packages/tools/src/registry.ts` | 只有宿主显式提供 Workflow repository 时才注册 Workflow 工具 |
 | CLI 白名单 | `apps/cli/src/commands/main.ts` | coordinator 模式 `setAllowedTools(getCoordinatorTools())` |
 | Workflow CLI | `apps/cli/src/commands/workflow.ts` | `ohs workflow list/status/validate/template/reconcile/cancel`；JSON-first 管理面 |
 
@@ -88,7 +89,7 @@ Leader 不能直接 Read/Bash；简单委托使用 `Agent` + `JobWait`，后续�
 
 ### A1.5. Workflow CLI 管理面
 
-`ohs workflow` 是面向人和 UI 的普通 CLI，不是 Coordinator 模式本身。它读取同一份 `.openharness/workflows/` 持久化数据：
+`ohs workflow` 是面向人的项目文件 CLI，不是 Coordinator 模式本身。它明确创建 `FileWorkflowRunRepository`，只读取 `.openharness/workflows/`：
 
 ```text
 ohs workflow list       # 历史 run 列表，可按状态/时间/reconcile/budget 过滤
@@ -99,7 +100,7 @@ ohs workflow reconcile  # 从 reconciliationPlan 生成 follow-up spec
 ohs workflow cancel     # stop backing task，并写 terminal snapshot
 ```
 
-完整命令和示例见 [`workflow-cli.md`](./workflow-cli.md)。后续 TUI/Web 可以直接消费这些 JSON payload，而不是重新实现一套 workflow store 读取逻辑。
+完整命令和示例见 [`workflow-cli.md`](./workflow-cli.md)。daemon/TUI/Web 使用 SQLite repository 和 Jobs API，不会把这些项目文件当成 daemon 的权威状态。
 
 ### A2. Workflow 工具
 
@@ -115,13 +116,13 @@ ohs workflow cancel     # stop backing task，并写 terminal snapshot
        └─ action=run（默认）
             parseWorkflowSpec(input)
             createAgentWorkflowRunner({ cwd, team, timeoutMs, permissionMode })
-            persist!==false → runPersistentWorkflow(spec, runner, { cwd, runId })
+            persist!==false + repository → runPersistentWorkflow(spec, runner, { store, runId })
             否则 → runWorkflow(spec, runner[, { runId }])
             → detached: { kind: "job", jobId, jobKind: "workflow" }
             → synchronous: formatWorkflowNotification(result)
 ```
 
-`persist` 默认 `true`，快照写到项目 `.openharness/workflows/`。
+`persist` 默认 `true`，但调用方必须显式注入 repository。daemon 注入 `SessionWorkflowRunRepository`，快照进入统一 SQLite；standalone Node Agent 只有显式注入 `FileWorkflowRunRepository` 时才写项目 `.openharness/workflows/`。没有 repository 时，持久化 action 会明确失败，不会创建文件 fallback。
 
 常用 input 字段：
 
@@ -227,7 +228,14 @@ createAgentWorkflowRunner()(context)
 
 ## D. 持久化与恢复
 
-目录（项目级）：
+调度器只依赖 `WorkflowRunRepository`，不自己选择数据位置。当前有两种明确实现：
+
+| 使用场景 | Repository | 状态放在哪里 |
+|---|---|---|
+| daemon、多客户端、Bot、TUI/Web/Desktop | `SessionWorkflowRunRepository` | 与 Session/Run 相同的 SQLite |
+| 独立项目文件 CLI 或显式 standalone 配置 | `FileWorkflowRunRepository` | `.openharness/workflows/` |
+
+文件实现的目录结构：
 
 ```text
 .openharness/workflows/
@@ -250,7 +258,7 @@ resumePersistentWorkflow(snapshot, runner)
      })
 ```
 
-已 terminal 的 task **不会重跑**；仍在跑的优先 `awaitTask` 旧 TaskManager id。
+已 terminal 的 task **不会重跑**；仍在跑的任务会先尝试等待当前进程仍可找到的同一个 framework child 或显式 external task。找不到旧 live worker 时，显式 resume 可以创建 replacement；daemon 进程启动恢复则不会调用 resume 重放工作，而是把遗留 running Workflow 收束为 cancelled terminal 状态。
 
 ## E. 三种 mode / 失败策略 / 预算
 
@@ -317,7 +325,7 @@ detached run 先返回 Job receipt：
 | 明确 DAG、顺序、pipeline、重试、失败策略、并发上限 | `Workflow` |
 | 并行写同一目录且未 isolate | 声明 `writeScope`，让调度器串行 |
 | 可隔离的并行写 | `isolate: true`（worktree） |
-| 中断后续跑 | `action: "resume"`（默认有持久化） |
+| 中断后续跑 | 宿主显式配置 repository 后使用 `action: "resume"` |
 | 只看当前进度 | `JobRead`；需要阻塞等待时用 `JobWait` |
 | 查看事件时间线 | `Workflow action: "timeline"` |
 | 高级历史筛选 | `Workflow action: "history"`；普通 owned Job 列表用 `JobList` |
@@ -326,19 +334,19 @@ detached run 先返回 Job receipt：
 
 | 范围 | 文件 |
 |------|------|
-| 纯调度（fake runner） | `packages/coordinator/src/workflow/scheduler.test.ts` |
-| store / resume | `packages/coordinator/src/workflow/store.test.ts` |
+| 纯调度（fake runner） | `packages/coordinator/src/workflow/__test__/scheduler.test.ts` |
+| repository contract / resume | `packages/coordinator/src/workflow/__test__/store.test.ts` |
 | Workflow 工具解析与 timeline/history | `packages/tools/src/agent/workflow/__test__/tool.test.ts` |
-| runner 单元 | `packages/tools/src/agent/workflow-runner.test.ts` |
-| 工具 → scheduler → TaskManager smoke | `packages/tools/src/agent/workflow-smoke.test.ts` |
+| runner 单元 | `packages/tools/src/agent/workflow/__test__/runner.test.ts` |
+| 工具 → scheduler → framework child smoke | `packages/tools/src/agent/workflow/__test__/workflow-smoke.test.ts` |
 
-## J. 当前能力边界（相对设计文档）
+## J. 当前能力边界
 
-已落地到设计文档所述 **V14.2** 量级：内存调度、真实 Agent runner、持久化恢复、writeScope 串行、timeout、事件流、budget soft/hard + preset、reconcile，以及 Jobs 统一生命周期控制。
+当前已经具备：内存调度、framework child runner、显式 repository 持久化、resume、writeScope 串行、timeout、事件流、budget soft/hard + preset、reconcile follow-up spec、模板，以及 Jobs 统一生命周期控制。TUI 的统一 Jobs Panel 可以看 Workflow 列表和 Steps；它不维护第二份 Workflow 状态。
 
-尚未做（见 design 文档下一步）：
+当前明确不做：
 
-- 跨 run 的列表/索引产品化 UI（store 已有 `list()`）
-- reconcile follow-up action 契约
-- workflow spec 模板库
-- 自动 merge 多 worktree
+- daemon 重启后自动重放模型、Tool 或旧 worker；
+- 自动读取或迁移旧项目 Workflow JSON；
+- 自动 merge 多个 worktree；
+- 用 Jobs 替代 Workflow 自己的 DAG、模板、timeline 和 reconcile 语义。

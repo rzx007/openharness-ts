@@ -8,7 +8,7 @@ Jobs 是所有长期工作的统一遥控器。
 
 `pnpm dev`、后台 shell、child Agent、dream 和 Workflow 的运行方式各不相同，但调用方不应该为每一种工作分别学习一套“列出、读结果、等待、继续输入、取消”接口。Jobs 把这些后续操作统一起来。
 
-Jobs 不执行工作，也不保存第二份权威状态。Terminal provider、`DetachedProcessSupervisor`、`ChildAgentExecutionRegistry`、`SessionExecutionRecord` 持久化投影和 `WorkflowRunStore` 分别拥有各自状态。
+Jobs 不执行工作，也不保存第二份权威状态。Terminal provider、`DetachedProcessSupervisor`、`ChildAgentExecutionRegistry`、`SessionExecutionRecord` 持久化投影和 Workflow repository 分别拥有各自状态。daemon 的 Workflow repository 是写入统一 SQLite 的 `SessionWorkflowRunRepository`。
 
 ## 先看一个场景
 
@@ -71,7 +71,7 @@ flowchart LR
   Processes["DetachedProcessSupervisor\nnon-PTY process handles"]
   Children["ChildAgentExecutionRegistry\nframework child handles"]
   Projection["SessionExecutionRecord\ndurable projection"]
-  Workflow["WorkflowRunStore\nplan + task snapshots"]
+  Workflow["SessionWorkflowRunRepository\nSQLite plan + task snapshots"]
 
   Caller --> Tools --> Service
   Service --> Terminal
@@ -87,9 +87,11 @@ flowchart LR
 | `shell`    | `DetachedProcessSupervisor`，持久状态投影到 `SessionExecutionRecord` | 读输出、等待、取消                         |
 | `agent`    | Agent framework + `ChildAgentExecutionRegistry`；状态投影到 `SessionExecutionRecord` | 读输出、等待、继续输入、取消               |
 | `dream`    | `DetachedProcessSupervisor`                       | 读输出、等待、取消                         |
-| `workflow` | `WorkflowRunStore` 和 Workflow scheduler          | 读结构化进度、等待、取消                   |
+| `workflow` | `SessionWorkflowRunRepository` 和 Workflow scheduler | 读结构化进度、等待、取消                |
 
 核心约束：Jobs 可以聚合和路由，但不能成为第二个执行器或第二份持久状态。
+
+daemon Workflow 和 Session/Run 使用同一份 SQLite。独立 CLI 的 `FileWorkflowRunRepository` 是明确选择的项目文件实现，不是 daemon 的 fallback；两边不会自动迁移或合并。Workflow Job ID 只有 `workflow:<runId>` 一种格式，Jobs API 不接受裸 run ID。
 
 ## 创建与控制分离
 
@@ -422,7 +424,7 @@ HTTP `/jobs` 由 daemon Bearer token 保护。HTTP 里的 `sessionId` 用于选�
 | `packages/server/src/http/routes/job.ts`                  | `/jobs` HTTP API                                        |
 | `packages/client/src/transport/http-client.ts`            | TypeScript HTTP client                                  |
 | `packages/terminal-node/src/local-terminal-provider.ts`   | Terminal 输出、等待和真实退出生命周期                   |
-| `packages/server/src/http/session/session-execution-projector.ts` | DetachedProcessSupervisor 到 durable task 的持续投影                  |
+| `packages/server/src/application/session/session-execution-projector.ts` | DetachedProcessSupervisor 到 durable execution 的持续投影          |
 | `packages/coordinator/src/workflow/store.ts`              | Workflow 快照、active run 取消和迟到写回保护            |
 
 ## 已知边界

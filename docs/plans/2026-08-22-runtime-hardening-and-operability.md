@@ -1,6 +1,6 @@
 # Runtime Hardening 与可运维性实施计划
 
-> 状态：实施中。
+> 状态：已完成（A1-D4，2026-08-22）。本文是历史实施记录；当前生命周期以 [Agent Lifecycle Contract](../agent-lifecycle-contract.md) 为准，当前文档入口见 [`docs/README.md`](../README.md)。
 >
 > 本计划基于 2026-08-22 对当前 `main` 分支的实际代码核查。它只处理当前仍存在的运行时缺口，不重复建设已经完成的 Agent 生命周期、Run lane、输入幂等、Daemon 重启收束、Permission 持久化、SSE cursor replay、Runtime Debug View 等能力。
 >

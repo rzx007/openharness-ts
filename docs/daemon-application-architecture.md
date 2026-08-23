@@ -58,11 +58,11 @@ OpenHarnessAgent onEvent sink
 
 ## Composition 与 transport
 
-`packages/server/src/daemon-application.ts` 是 daemon durable application 的唯一 composition root。它组装 store recovery、permission broker、Agent loader/pool、event projection、run engine、task、Scheduled Tasks、Application / Query / Maintenance / Control。
+`packages/server/src/application/daemon-application.ts` 是 daemon durable application 的唯一 composition root。它组装 store recovery、permission broker、Agent loader/pool、event projection、run engine、Workflow、Scheduled Tasks、Application / Query / Maintenance / Control。
 
-`packages/server/src/http.ts` 只负责 Hono、鉴权、CORS、route mounting、HTTP listener 和 SSE client lifecycle。HTTP transport 不再创建或持有 AgentPool、run engine、projector 等内部组件。
+`packages/server/src/http/server.ts` 只负责 Hono、鉴权、CORS、route mounting、HTTP listener 和 SSE client lifecycle。HTTP transport 不再创建或持有 AgentPool、run engine、projector 等内部组件。
 
-`packages/server/src/daemon-agent.ts` 是唯一的 durable session -> live Agent 翻译点：读取动态 settings、合并 session metadata、注入 permission/event callback、创建 agent、恢复 history。`AgentPool` 不再理解配置和投影。
+`packages/server/src/daemon/daemon-agent.ts` 是唯一的 durable session -> live Agent 翻译点：读取动态 settings、合并 session metadata、注入 permission/event callback、创建 agent、恢复 history。`AgentPool` 不再理解配置和投影。
 
 ## Session 运行配置
 
@@ -95,19 +95,19 @@ OpenHarnessAgent onEvent sink
   下一次发送消息时重建 agent，并使用这条 session 自己的模型
 ```
 
-## 请求入口与四个服务
+## 请求入口与应用服务
 
-routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装；应用对象来自 `DaemonApplication`。
+routes 在 `packages/server/src/http/server.ts` 组装；应用对象来自 `DaemonApplication`。
 
 | 服务                        | 文件                                  | 负责                                                               |
 | --------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
-| `SessionApplicationService` | `http/session-application-service.ts` | create/update/archive、prompt、resume、interrupt、child route      |
-| `SessionQueryService`       | `http/session-query-service.ts`       | session/state/message/part 查询                                    |
-| `SessionMaintenanceService` | `http/session-maintenance-service.ts` | compact、rewind、export、remember、MCP、usage                      |
-| `DaemonControlService`      | `http/daemon-control-service.ts`      | runtime snapshot、run barrier、pool close/inspect                  |
-| `ScheduledTaskService`      | `scheduled-task-service.ts`           | 保存已安排任务、启动定时器、运行 Agent、保存执行记录和需要处理状态 |
+| `SessionApplicationService` | `application/session/session-application-service.ts` | create/update/archive、prompt、resume、interrupt、child route      |
+| `SessionQueryService`       | `application/session/session-query-service.ts`       | session/state/message/part 查询                                    |
+| `SessionMaintenanceService` | `application/session/session-maintenance-service.ts` | compact、rewind、export、remember、MCP、usage                      |
+| `DaemonControlService`      | `application/control/daemon-control-service.ts`      | runtime snapshot、run barrier、pool close/inspect                  |
+| `ScheduledTaskService`      | `daemon/scheduled-task-service.ts`                   | 保存已安排任务、启动定时器、运行 Agent、保存执行记录和需要处理状态 |
 
-它们是 HTTP 后面的应用用例门面，不是四个独立网络服务。
+它们是 HTTP 后面的应用用例门面，不是独立网络服务。
 
 | HTTP 能力                                | route 文件                       | 主要入口                 |
 | ---------------------------------------- | -------------------------------- | ------------------------ |
@@ -115,7 +115,7 @@ routes 在 `packages/server/src/http.ts` 的 `mountRoutes()` 组装；应用对�
 | prompt/steer/interrupt/resume            | `http/routes/run-execution.ts`   | Application              |
 | compact/rewind/export/remember/MCP/usage | `http/routes/session-utility.ts` | Maintenance              |
 | permission list/reply                    | `http/routes/permission.ts`      | `StorePermissionBroker`  |
-| task create/get/list/stop                | `http/routes/task.ts`            | `SessionTaskService`     |
+| Jobs list/read/wait/send/cancel          | `http/routes/job.ts`             | `DaemonJobService`       |
 | Scheduled Task create/list/run/history   | `http/routes/schedules.ts`       | `ScheduledTaskService`   |
 | health/settings/provider                 | `http/routes/system.ts`          | Control/default services |
 | replay/live SSE                          | `http/routes/events.ts`          | `HttpEventHub`           |
@@ -165,18 +165,18 @@ sequenceDiagram
 
 ```text
 apps/frontend/src/hooks/useServerSync.ts
-packages/client/src/client.ts
+packages/client/src/transport/http-client.ts
 packages/server/src/http/routes/run-execution.ts
-packages/server/src/daemon-application.ts
-packages/server/src/http/session-application-service.ts
-packages/server/src/http/session-run-engine.ts
-packages/server/src/run-coordinator.ts
-packages/server/src/http/session-run-executor.ts
-packages/server/src/http/agent-pool.ts
-packages/server/src/daemon-agent.ts
+packages/server/src/application/daemon-application.ts
+packages/server/src/application/session/session-application-service.ts
+packages/server/src/application/session/session-run-engine.ts
+packages/server/src/runtime/run-coordinator.ts
+packages/server/src/application/session/session-run-executor.ts
+packages/server/src/application/agent/agent-pool.ts
+packages/server/src/daemon/daemon-agent.ts
 packages/agent-runtime/src/agent.ts
 packages/core/src/engine/query-engine.ts
-packages/server/src/http/daemon-agent-event-projector.ts
+packages/server/src/application/agent/daemon-agent-event-projector.ts
 ```
 
 ## AgentPool 与实例归属
@@ -220,7 +220,7 @@ framework 实例内部还有更小一层状态机：`idle -> running | maintaini
 
 ```ts
 createDaemonAgentLoader({
-  // loader 内部调用 createOpenHarnessAgent(...)
+  // loader 内部调用 createDefaultNodeAgent(...)
   createEventSink: () => (event) => projector.apply(event),
   requestPermission: (request, context) => permissionBroker.ask(/* ... */),
 });
@@ -253,7 +253,7 @@ input/run/stream/terminal 的多步 durable 归约使用 `SessionStore.transacti
 
 durable event 的格式由 `DurableEventRegistry` 集中登记。登记项包含事件名、当前版本、属于单个 session 还是全局事件、payload 校验器，以及可选的逐版升级函数。Store 写入事件前先查登记表并校验；未登记的名称、缺字段、字段类型错误或错误的 session/global 归属都会在分配 cursor 前被拒绝。Store 从数据库读取旧版本时按 `v1 -> v2 -> ...` 依次升级，再把当前格式交给上层，但不会改写原数据库行，便于审计和排查历史数据。
 
-Framework 的 `domain.event` 统一持久化为 `agent.domain.event`，原始业务名称保存在 payload 的 `name` 字段；Workflow 事件则逐项登记允许的九种事件名。旧版本曾直接用业务名称作为 event type，因此读取 v1 历史行时，如果 payload 带有 Framework event ID，会在内存中规范成 `agent.domain.event`，但原行仍保持不变；这个兼容入口不用于新写入。这样新增业务事件需要显式注册，不会因为字符串拼错而产生客户端永远不认识的历史记录。测试或插件若确实拥有额外事件，可以通过 `createDurableEventRegistry([...extensions])` 建立专用 registry，并在创建 `SessionStore` 时传入，生产默认 registry 不会自动放行它们。
+Framework 的 `domain.event` 统一持久化为 `agent.domain.event`，原始业务名称保存在 payload 的 `name` 字段；Workflow 事件则逐项登记允许的九种事件名。读取时不会再把旧的业务事件名猜成 `agent.domain.event`。这样新增业务事件必须显式注册，不会因为字符串拼错而产生客户端永远不认识的历史记录。测试或插件若确实拥有额外事件，可以通过 `createDurableEventRegistry([...extensions])` 建立专用 registry，并在创建 `SessionStore` 时传入，生产默认 registry 不会自动放行它们。
 
 ### Text delta durability
 
@@ -337,7 +337,7 @@ sequenceDiagram
   Run-->>QE: decision
 ```
 
-effect 注入位置是 `packages/server/src/http.ts`；durable wait/reply 在 `permission-broker.ts` 与 `permission-controller.ts`。daemon 不创建 run host，也不向 QueryEngine 传 callback。
+effect 注入位置是 `packages/server/src/daemon/daemon-agent.ts`；durable wait/reply 在 `packages/server/src/permissions/permission-broker.ts` 与 `permission-controller.ts`。daemon 不创建 run host，也不向 QueryEngine 传 callback。
 
 Tool 的 durable part 同时承担第一版执行账本：`toolCallId` 是模型发起调用的固定编号，`toolAttemptId` 是实际执行次数。Tool 开始后若进程突然退出，Store 会把结果标成 `unknown_outcome`，意思是“可能已经执行，只是结果没来得及记下来”；系统不会因此自动再执行一遍。失败原因通过 permission、policy、timeout、command、transport、provider、interrupted、unknown_outcome 等结构化类别传递，不靠解析报错文字。
 
@@ -375,6 +375,55 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 
 这些 API 是 framework 能力的 daemon 应用化；daemon 负责 durable 更新和并发保护。compact/rewind 使用 session barrier，remember 使用 cwd barrier；barrier 覆盖 agent operation、durable mutation 与必要的 runtime close，不使用“先检查 active run、稍后再执行”的 check-then-act。
 
+## Durable Workflow 与 Jobs
+
+daemon 中的 Workflow 和 Session、Run 使用同一份 SQLite：
+
+```text
+Workflow tool / daemon command
+  -> Workflow scheduler
+  -> SessionWorkflowRunRepository
+  -> workflow_run / workflow_task_attempt / durable event
+  -> DaemonJobService
+  -> HTTP client / TUI / Web / Desktop
+```
+
+`SessionWorkflowRunRepository` 是 daemon 唯一注入的 Workflow 仓库。它保存完整快照、每个 task 的 attempt 和 Workflow 事件；不会读取 `.openharness/workflows`，也不会在启动时迁移旧 JSON。独立 CLI 如果要查看项目文件，必须明确创建 `FileWorkflowRunRepository`，详见 [Workflow CLI](./workflow-cli.md)。
+
+Workflow run ID 只能创建一次。scheduler 开始或恢复前必须 claim，意思是先在数据库里取得这次运行的处理权；重复 ID、重复 claim 或已经被其他执行者取得的 run 会直接失败。Daemon 重启不会重放模型或 Tool，而是先 claim 遗留的 running Workflow，再把 running task 记为 killed、未开始 task 记为 skipped，并写入 terminal 状态。
+
+Jobs 层只读取和控制这份 Workflow 状态，不复制第二份快照。Workflow Job ID 固定为 `workflow:<runId>`，裸 `runId` 不再接受。`JobWait` 订阅状态变化后会立刻再读一次数据库，避免“状态刚好在订阅前完成”导致永久等待；timeout 只返回当时快照，不会取消工作。
+
+## 单执行者保护
+
+每个 SQLite 数据目录同一时间只能有一个活动 `DaemonApplication`：
+
+1. Application 构造时取得 owner lease，也就是带 generation 的数据库租约。
+2. 心跳定期续租；租约丢失后 Application 进入 failed，不能继续写入。
+3. 新实例只有在旧租约过期后才能接管，并得到更大的 generation。
+4. Session、Workflow、Bot 映射、Channel Delivery 和 Projection Settlement 等直接写入路径都会核对当前 owner。
+5. 构造或启动恢复失败会停止心跳并释放租约；正常关闭也会释放。
+
+这套规则挡的是两个进程同时修改一份本地数据库，不是多租户授权系统。
+
+## 协议能力
+
+`GET /capabilities` 返回服务版本、精确协议版本和功能版本。当前协议格式是：
+
+```json
+{
+  "protocol": { "version": 2 }
+}
+```
+
+客户端必须在发起普通业务请求前检查它。版本完全相同才继续；版本不同立即报 `IncompatibleProtocolError`，不使用 `minVersion/maxVersion` 范围，也不猜测旧响应。`features` 中各数字表示某项能力自己的版本，例如 Jobs、Workflow、Backup 和 Retention；它们不能代替总协议版本检查。
+
+## 清理与备份
+
+`ApplicationRetentionService` 是统一清理入口。它按策略删除过期的 terminal Run、Workflow、事件和审计范围内的数据；删除结果与 `retention_audit` 在同一个 SQLite transaction 中提交，因此不会出现“数据删了但审计没写”或相反的半完成状态。
+
+Application backup 包含 SQLite 数据库，以及明确配置的 artifacts、memory 和 execution output 目录。每个备份带 manifest 和逐文件 SHA-256 校验。恢复前先完成全部检查：manifest 格式、校验和、目标数据库不存在、目标目录为空；检查全部通过后才复制。符号链接和其他特殊文件会被拒绝，备份目录也不能放进被备份的源目录中。恢复只恢复 durable 数据，不复活旧进程；下次启动仍按普通 recovery 收束活动记录。
+
 ## 启动与关闭
 
 - `startOpenHarnessDaemon()`：默认完整应用，CLI daemon command 使用。
@@ -382,13 +431,14 @@ durable child task 的 terminal 状态不会被延迟到达的 live `pending/run
 - 默认组合：`default-daemon.ts` 调用 `createDefaultApplicationServices()` 与 `createDefaultCommandCatalog()`，具体实现分别位于 `default-application-services.ts`、`default-command-catalog.ts`。
 - CLI `commands/daemon.ts` 只处理 host/port/token、registry 与进程信号。
 
-`DaemonApplication` constructor 在开放 HTTP 前执行 durable recovery：
+`DaemonApplication.ready()` 在 HTTP 对外可用前等待 durable recovery：
 
 1. pending/running run -> `interrupted`，并把该 run 的 `running` transcript parts 同步置为 `interrupted`。
 2. 没有 primary run、也没有 transcript message 归属的 input -> 创建一个 terminal `interrupted` owner run；它只记录 `recovery.kind=orphan_input`，不会自动重新执行模型或工具。
 3. pending/running task -> `interrupted`。
 4. pending permission -> `expired`，因为旧进程的 resolver 已不存在。
 5. 对已无 active run 的 `closing` session 完成 archive。
+6. claim 并收束遗留的 running Workflow，不重新执行 worker。
 
 shutdown 先把 `DaemonOperationGate` 置为 closing 并等待现有 shared/barrier lease；随后 `SessionRunEngine.stopAndDrain()` 停止新 admission、同时中断 active/queued lanes 并等待 run promise 收敛；最后关闭 agents/children、HTTP listener/SSE 和 store。queued run 不会在已有 agent 关闭后被重新启动。
 
@@ -396,7 +446,7 @@ shutdown 先把 `DaemonOperationGate` 置为 closing 并等待现有 shared/barr
 
 `GET /debug/runtime` 的 `metrics` 从 durable 数据汇总 Run、Attempt、Tool、token、Permission、Child 和 Projection 状态。它只用有限类别做标签，不把 sessionId、runId、traceId、文件路径、提示词或 Tool 参数塞进指标。指标汇总失败时返回空指标，不影响 Run 执行。
 
-排查单次 Run 可使用 `ohs debug inspect-run <runId>`；查看投影补偿队列可使用 `ohs debug settlements`（旧命令 `list-projection-settlements` 仍是兼容别名）。两条命令都只读，也不会自动启动 Daemon；本机没有已注册的运行中 Daemon 时会提示用户先显式启动。默认隐藏正文和 Tool/Permission payload；`--include-content` 才展开并提示敏感信息风险，`--json` 用于脚本处理。发现数据断链、关闭 Run 仍有活动 Attempt、未知事件、待处理 settlement 或 Tool 结果未知时，命令会给出具体 warning 并返回非零退出码。第一阶段没有自动 repair 命令。
+排查单次 Run 可使用 `ohs debug inspect-run <runId>`；查看投影补偿队列可使用 `ohs debug settlements`。两条命令都只读，也不会自动启动 Daemon；本机没有已注册的运行中 Daemon 时会提示用户先显式启动。默认隐藏正文和 Tool/Permission payload；`--include-content` 才展开并提示敏感信息风险，`--json` 用于脚本处理。发现数据断链、关闭 Run 仍有活动 Attempt、未知事件、待处理 settlement 或 Tool 结果未知时，命令会给出具体 warning 并返回非零退出码。当前代码仍注册了 `list-projection-settlements` 命令别名；它是待删除的历史入口，不应出现在新脚本中。第一阶段没有自动 repair 命令。
 
 ## 不变量
 

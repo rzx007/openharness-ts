@@ -31,13 +31,14 @@ flowchart LR
 
 ## Kernel 与默认 Node 组装
 
-`@openharness/agent-runtime` 现在有三个入口，名字代表它们会做多少事：
+`@openharness/agent-runtime` 现在有两个入口，名字代表它们会做多少事：
 
 | 入口 | 实际做什么 |
 |---|---|
 | `createAgentKernel()` | 只运行 Agent/Run/Child；settings、runtime 和宿主能力都必须由调用方交进来 |
 | `createDefaultNodeAgent()` | 读取本机配置并组装 provider、工具、插件、Skill、MCP、Memory、Sandbox 和 Git child environment |
-| `createOpenHarnessAgent()` | 兼容旧调用方，行为等同 `createDefaultNodeAgent()` |
+
+`createOpenHarnessAgent()` 已删除，不提供兼容别名。调用方必须明确选择最小 Kernel 或 Node 默认组装。
 
 能力归属清单：
 
@@ -71,7 +72,7 @@ Kernel 的硬规则：
 当前明确公开发布 `@openharness/agent-runtime`，其他 workspace 包仍按内部包处理。发布包提供两个路径：
 
 ```text
-@openharness/agent-runtime          默认 Node 入口和兼容入口
+@openharness/agent-runtime          默认 Node 入口
 @openharness/agent-runtime/kernel   只包含 Kernel、最小 runtime builder 和显式能力类型
 ```
 
@@ -103,7 +104,7 @@ Kernel 负责：
 - settings、凭据、插件、Skill、MCP 和 Memory；
 - Sandbox 和进程退出清理；
 - 选择 Git worktree child environment；
-- 为旧入口安装明确的本地兼容能力。
+- 根据配置安装 Node 环境中的默认宿主能力。
 
 framework 不负责：
 

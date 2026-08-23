@@ -7,7 +7,7 @@
 `@openharness/agent-runtime` 是 OpenHarness 自己的 opinionated Agent SDK。它提供完整默认组装，但不试图成为通用 agent framework。
 
 ```text
-createOpenHarnessAgent(options)
+createDefaultNodeAgent(options)
   -> OpenHarnessAgent
      -> submitMessage / runMessage
      -> subscribe
@@ -21,9 +21,9 @@ createOpenHarnessAgent(options)
 ## 最小运行
 
 ```ts
-import { createOpenHarnessAgent } from "@openharness/agent-runtime";
+import { createDefaultNodeAgent } from "@openharness/agent-runtime";
 
-const agent = await createOpenHarnessAgent({ cwd: process.cwd() });
+const agent = await createDefaultNodeAgent({ cwd: process.cwd() });
 
 const unsubscribe = agent.subscribe((event) => {
   if (event.type === "output.text.delta") process.stdout.write(event.data.delta);
@@ -36,14 +36,14 @@ unsubscribe();
 await agent.close();
 ```
 
-`createOpenHarnessAgent()` 自动加载 settings、provider、credentials、默认 tools、prompt、skills、plugins、MCP、memory 与 sandbox。调用方只覆盖需要改变的部分。
+`createDefaultNodeAgent()` 自动加载 settings、provider、credentials、默认 tools、prompt、skills、plugins、MCP、memory 与 sandbox。调用方只覆盖需要改变的部分。旧的 `createOpenHarnessAgent()` 已删除，不提供别名。
 
 ## 创建参数
 
 常用参数全部位于顶层，不存在 runtime factory 或 `overrides` 包装层：
 
 ```ts
-const agent = await createOpenHarnessAgent({
+const agent = await createDefaultNodeAgent({
   cwd,
   model: "gpt-5.4",
   provider: "codex",
@@ -93,7 +93,7 @@ const agent = await createOpenHarnessAgent({
 `["*"]` 表示“这一层不额外收窄”，不是“绕过宿主上限”。例如：
 
 ```ts
-await createOpenHarnessAgent({
+await createDefaultNodeAgent({
   allowedTools: ["Read", "Agent", "JobWait"],
 });
 ```
@@ -186,7 +186,7 @@ flowchart LR
 daemon application 每个 durable session 缓存一个 agent：
 
 1. 从 `SessionStore` 读取 durable transcript。
-2. `createDaemonAgentLoader()` 合并 settings/session metadata 并调用 `createOpenHarnessAgent()`。
+2. `createDaemonAgentLoader()` 合并 settings/session metadata 并调用 `createDefaultNodeAgent()`。
 3. loader 通过 `loadHistory()` 恢复 live history并绑定 callbacks。
 4. 通过 `onEvent` 写 durable session/run/task/transcript。
 5. 通过 `requestPermission` 连接 durable permission broker。
@@ -205,12 +205,12 @@ daemon 不实例化 QueryEngine，不接收 runtime factory，也不复制 child
 | child lifecycle | `packages/agent-runtime/src/child-agent.ts` |
 | Agent producer | `packages/tools/src/agent/agent-tools.ts` |
 | Job lifecycle routing | `packages/tools/src/job`、`packages/server/src/jobs` |
-| Workflow child spawn/wait | `packages/tools/src/agent/workflow-runner.ts` |
+| Workflow child spawn/wait | `packages/tools/src/agent/workflow/runner.ts` |
 | child worktree | `packages/agent-runtime/src/child-environment.ts` |
-| daemon application composition | `packages/server/src/daemon-application.ts` |
-| durable session -> live Agent | `packages/server/src/daemon-agent.ts` |
-| daemon agent cache | `packages/server/src/http/agent-pool.ts` |
-| durable event projection | `packages/server/src/http/daemon-agent-event-projector.ts` |
+| daemon application composition | `packages/server/src/application/daemon-application.ts` |
+| durable session -> live Agent | `packages/server/src/daemon/daemon-agent.ts` |
+| daemon agent cache | `packages/server/src/application/agent/agent-pool.ts` |
+| durable event projection | `packages/server/src/application/agent/daemon-agent-event-projector.ts` |
 | standalone SDK contract test | `packages/agent-runtime/src/sdk.test.ts` |
 
 ## 非目标

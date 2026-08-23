@@ -1,5 +1,7 @@
 # DeepSeek Harness 借鉴备忘录
 
+> 状态：历史参考笔记，不是当前实现说明。文中的 `TaskManager`、`WorkflowRunStore` 等名字保留当时语境；当前 Jobs 契约见 [Jobs Protocol](./jobs-protocol.md)。
+
 这份文档记录对 `deepseek-ai/deepseek-harness` 的一次横向观察。它不是立即落地计划，而是给后续合适时机做 `web`、`shell`、`sandbox`、`terminal`、文件工具和后台任务能力重构时提供方向。
 
 参考入口：

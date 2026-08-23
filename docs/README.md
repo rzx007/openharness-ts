@@ -1,0 +1,215 @@
+# OpenHarness 文档目录
+
+> 状态：文档总入口。最后核对：2026-08-23。
+
+这里不是按文件名堆链接，而是按“先看全局，再逐层下钻”的顺序组织。第一次了解项目从第 0 层开始；修改具体模块时，直接进入对应层级。
+
+本目录常用词的白话含义：
+
+- durable：状态已经写进数据库或明确的持久文件，进程退出后还能查到。
+- terminal：这项运行已经结束，例如 completed、failed、interrupted 或 killed，不能再假装回到 running。
+- projection：把 Agent 运行中发生的事写成数据库记录和客户端可读状态。
+- repository：保存和读取某类记录的明确接口，例如 daemon 的 SQLite Workflow repository。
+- contract：代码重构后也不能静默改变的硬规则。
+- snapshot：某一时刻的完整状态；SSE 是服务端持续推送后续变化的连接。
+
+## 阅读顺序
+
+```text
+第 0 层：系统鸟瞰
+  整个产品由哪些层组成，CLI/TUI/Web/Desktop/IDE/Bot/Workflow 怎样共用一套能力
+    ↓
+第 1 层：跨模块硬规则
+  哪些状态归谁、记录长什么样、运行怎样收尾、失败后怎样恢复
+    ↓
+第 2 层：子系统架构
+  Runtime、Durable Application、Client、Workflow、Jobs、Memory、Sandbox 各自怎样工作
+    ↓
+第 3 层：端到端流程
+  一条 prompt、一个 child、一次 permission、一个 Bot 消息实际经过哪些步骤
+    ↓
+第 4 层：开发和运维入口
+  SDK、CLI、daemon、远程连接、排障、备份恢复怎样使用
+    ↓
+第 5 层：决策与历史
+  ADR 解释长期决定；plans/reviews 只解释当时怎样落地
+```
+
+## 第 0 层：系统鸟瞰
+
+当前还缺一份独立的 `architecture-overview.md`。在它补齐前，按下面顺序建立全局认识：
+
+1. [Framework 与 Durable Application 的能力边界](./agent-framework-capability-boundary.md)：先看 Runtime、daemon 和产品界面分别管什么。
+2. [Daemon Application Architecture](./daemon-application-architecture.md)：再看一个请求怎样从产品入口进入 durable state 和 Agent Runtime。
+3. [Client Sync Flow](./client-sync-flow.md)：最后看 TUI、Web、Desktop、IDE 怎样通过 snapshot 和 SSE 得到同一份状态。
+
+计划补写的鸟瞰文档及边界见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。
+
+## 第 1 层：跨模块硬规则
+
+这一层记录“不管内部类名怎么改，都必须一直成立”的约束。
+
+| 核心保证 | 当前权威落点 | 覆盖情况 |
+|---|---|---|
+| 每条运行记录有稳定 ID、固定字段、版本和关系 | [Agent Lifecycle Contract：Durable Projection](./agent-lifecycle-contract.md#durable-projection)、[Daemon Application Architecture：Event projection](./daemon-application-architecture.md#event-projection) | 部分覆盖；缺少一份完整 durable 数据模型 |
+| 每个 Run、Attempt、Tool、Child 和 Workflow 最终都进入明确终态 | [Agent Lifecycle Contract](./agent-lifecycle-contract.md)、[Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md) | 已有权威契约 |
+| 子 Agent 不得无限递归、无限并发或靠关闭后重建绕过上限 | [Agent Child Session Flow：Child 预算](./agent-child-session-flow.md#child-预算防止无限叫人) | 已完整记录 |
+| 相同请求可以安全重试，不同内容不能复用同一个 ID | [Agent Lifecycle Contract：P5](./agent-lifecycle-contract.md#durable-projection)、[Observability：Trace ID](./observability.md#trace-id) | 已记录，仍应纳入数据模型总表 |
+| 已结束状态不能被迟到事件重新改回 running | [Agent Lifecycle Contract：D3](./agent-lifecycle-contract.md#daemon)、[Jobs Protocol：状态机](./jobs-protocol.md#状态机) | 已记录 |
+| 投影失败不能假装成功，重启后要继续收束 | [Projection Settlement ADR](./adr/0001-projection-settlement-failure-policy.md)、[Agent Lifecycle Contract：P8](./agent-lifecycle-contract.md#durable-projection) | 已记录 |
+| 一个数据目录只有一个活动 Application Owner | [Daemon Application Architecture：单执行者保护](./daemon-application-architecture.md#单执行者保护) | 已记录，缺独立运维与恢复文档 |
+| 客户端与服务端必须使用完全相同的协议版本 | [Daemon Application Architecture：协议能力](./daemon-application-architecture.md#协议能力) | 已记录，缺独立协议契约 |
+| 清理、备份和恢复不能留下半完成状态 | [Daemon Application Architecture：清理与备份](./daemon-application-architecture.md#清理与备份) | 已记录，缺操作手册 |
+
+你举的三项目前对应关系是：
+
+```text
+固定格式的运行记录  → 已分散记录，优先补 durable-execution-data-model.md
+所有运行正确收尾    → agent-lifecycle-contract.md 是权威契约
+限制子 Agent        → agent-child-session-flow.md 的 Child 预算章节
+```
+
+## 第 2 层：子系统架构
+
+### Agent Runtime Kernel
+
+- [Agent Runtime 框架架构](./agent-runtime-framework-architecture.md)：Kernel 对象、创建流程、Run、事件、Handle 和状态机。
+- [OpenHarness Agent SDK](./agent-sdk.md)：程序中怎样直接创建和使用 Agent。
+- [Agent Child Session Flow](./agent-child-session-flow.md)：child 创建、等待、follow-up、预算、关闭和 durable 投影。
+- [CompactService](./compact-service-design.md)：上下文压缩、checkpoint、Tool 配对和失败策略。
+- [Prompt Layering](./prompt-layering-design.md)：系统提示词怎样分层组装。
+- [Output Styles](./output-styles-design.md)：输出风格怎样进入 prompt 和产品界面。
+- [Personalization](./personalization-design.md)：用户个性化设置的边界。
+
+### Durable Agent Application
+
+- [Daemon Application Architecture](./daemon-application-architecture.md)：Session、Input、Run、Permission、Workflow、Owner、恢复和关闭的总入口。
+- [Client Sync Flow](./client-sync-flow.md)：HTTP client、snapshot、SSE、cursor 和 reducer。
+- [Observability](./observability.md)：trace、结构化日志、runtime snapshot 和排障。
+- [Scheduled Tasks Flow](./scheduled-tasks-flow.md)：定时任务怎样保存、触发、运行和记录结果。
+- [Channels Flow](./channels-flow.md)：Bot/Channel 消息怎样进入同一套 durable Session/Run。
+- [Daemon System Service](./daemon-system-service.md)：daemon 怎样作为系统常驻服务运行。
+
+### Workflow、Coordinator 与 Jobs
+
+- [Coordinator 硬调度器调用链](./coordinator-hard-scheduler-flow.md)：DAG、并发、重试、预算、repository 和 child runner。
+- [Coordinator Agents](./coordinator-agents-design.md)：Coordinator 角色与 Agent 定义。
+- [Jobs Protocol](./jobs-protocol.md)：Terminal、shell、Agent、dream、Workflow 的统一观察与控制协议。
+- [Workflow CLI](./workflow-cli.md)：项目文件 CLI 与 daemon SQLite Workflow 的边界。
+- [Workflow Scheduler Tests](./workflow-scheduler-test.md)：调度器的测试场景。
+
+### Context、Memory 与 Prompt
+
+- [Context And Memory Map](./context-memory-map.md)：进入模型上下文的信息总图。
+- [Memory System](./memory-system.md)：Memory 的读取、写入和检索。
+- [Memory Quartet](./services-memory-quartet-design.md)：四类 memory service 的职责。
+- [Prompt Runtime Audit](./prompt-runtime-audit.md)：prompt 运行时审计记录。
+
+### 工具、扩展与执行环境
+
+- [Permission Flow](./permission-flow.md)：权限请求、durable decision 和取消。
+- [Sandbox Runtime Flow](./sandbox-runtime-flow.md)：命令和文件工具实际在哪里执行。
+- [Sandbox Runtime Design](./sandbox-runtime-design.md)：Sandbox 的详细设计。
+- [MCP HTTP Transport](./mcp-http-transport-design.md)：MCP HTTP/SSE 与鉴权。
+- [Plugin Contributions](./plugins-contributions-design.md)：插件怎样贡献 commands、skills 和其他能力。
+- [Skills Flow](./skills-flow.md) 与 [Skills Enhancement](./skills-enhance-design.md)：Skill 的发现、加载和增强。
+- [Slash Commands](./slash-commands.md)、[Slash Command Flow](./slash-commands-flow.md)、[Slash Batch](./slash-batch-design.md)：命令入口和批处理。
+
+### 产品界面
+
+- [TUI Flow](./tui-flow.md)：TUI 怎样连接 daemon 和渲染运行状态。
+- [Desktop Agent Message Rendering](./desktop-agent-message-rendering.md)：Desktop 消息和文件变更展示。
+- [Desktop Terminal PTY](./desktop-terminal-pty-design.md)：Desktop 终端、PTY、IPC 和 Sandbox。
+
+## 第 3 层：端到端流程
+
+按实际问题找文档：
+
+| 想追踪的流程 | 文档 |
+|---|---|
+| 用户发送 prompt，直到 Run 和 transcript 收尾 | [Daemon Application Architecture：TUI 发送 hi](./daemon-application-architecture.md#tui-发送-hi) |
+| child Agent 创建、运行、继续输入和关闭 | [Agent Child Session Flow](./agent-child-session-flow.md) |
+| Tool 请求权限，UI 回复，Run 继续 | [Permission Flow](./permission-flow.md) |
+| Bot 收消息、幂等执行、发送或重试回复 | [Channels Flow](./channels-flow.md) |
+| Workflow 拆任务、调度、持久化和恢复 | [Coordinator 硬调度器调用链](./coordinator-hard-scheduler-flow.md) |
+| Job 创建后怎样 read/wait/send/cancel | [Jobs Protocol](./jobs-protocol.md) |
+| 客户端首次同步、断线重连和去重 | [Client Sync Flow](./client-sync-flow.md) |
+| Sandbox 中怎样启动和停止进程 | [Sandbox Runtime Flow](./sandbox-runtime-flow.md) |
+| 定时任务到点后怎样启动 Agent | [Scheduled Tasks Flow](./scheduled-tasks-flow.md) |
+| TUI 怎样 attach daemon | [TUI Flow](./tui-flow.md) |
+
+## 第 4 层：开发和运维入口
+
+- 直接嵌入 Agent：[OpenHarness Agent SDK](./agent-sdk.md)
+- 使用 Workflow 文件 CLI：[Workflow CLI](./workflow-cli.md)
+- 使用 slash command：[Slash Commands](./slash-commands.md)
+- 远程连接 daemon：[Remote Attach](./remote-attach.md)
+- 安装和管理常驻 daemon：[Daemon System Service](./daemon-system-service.md)
+- 配置认证、Provider 和 Model：[Auth、Provider、Model](./auth-provider-model.md)
+- 查看 trace、metrics 和运行诊断：[Observability](./observability.md)
+
+备份恢复、Retention、Owner 接管和协议升级目前还没有独立操作手册，见下面的缺口清单。
+
+## 第 5 层：决策、计划和历史
+
+- `docs/adr/`：已经作出的长期决定。当前有 [Projection Settlement 失败分类与恢复边界](./adr/0001-projection-settlement-failure-policy.md)。
+- `docs/plans/`：阶段实施计划和完成记录，不是当前 API 手册。
+- `docs/superpowers/plans/`、`docs/superpowers/specs/`：更细的历史实施过程。
+- 文件名包含 `review`、`notes` 或明确标为“历史设计”的文档：用于解释过去，不用于决定当前 API。
+
+当前文档、ADR、计划和历史发生冲突时，优先级是：
+
+```text
+当前代码、migration、自动化测试
+  > 标为“权威契约 / 当前实现”的文档
+  > ADR
+  > plans、specs、reviews 和历史设计
+```
+
+## 还需要补哪些文档
+
+详细分析见 [文档体系设计与缺口](./plans/2026-08-23-documentation-architecture-and-gaps.md)。优先级摘要：
+
+| 优先级 | 建议文档 | 解决的问题 |
+|---|---|---|
+| P0 | `architecture-overview.md` | 给新读者一张 CLI/TUI/Web/Desktop/IDE/Bot/Workflow → Durable Application → Runtime Kernel 的完整鸟瞰图 |
+| P0 | `durable-execution-data-model.md` | 集中定义 Session/Input/Run/Attempt/Tool/Task/Workflow/Event/Settlement 的固定格式、ID、关系和终态 |
+| P0 | `operations-and-recovery.md` | 集中说明启动恢复、Owner 接管、关闭、Retention、备份恢复和故障处理 |
+| P1 | `protocol-contract.md` | 集中说明协议版本 2、feature 版本、错误格式、请求校验、SSE cursor 和升级规则 |
+| P1 | `product-surface-integration.md` | 说明 CLI/TUI/Web/Desktop/IDE/Bot/Workflow 各自只是入口，哪些状态必须共用、哪些逻辑不能复制 |
+| P1 | `security-and-trust-boundaries.md` | 把 Bearer auth、Permission、Sandbox、secret、ownerSession 和 Channel ACL 放进一张信任边界图 |
+| P2 | `contract-test-index.md` | 把每条架构不变量映射到测试文件，便于修改代码时知道必须跑什么 |
+
+## 仍需整理的现有文档
+
+- [Runtime Hardening 与可运维性计划](./plans/2026-08-22-runtime-hardening-and-operability.md) 已标为历史完成记录，正文仍保留当时的实施语境。
+- [Session 存储增强](./session-storage-design.md) 已标为历史资料，不再作为 daemon SQLite 存储说明。
+- [Observability](./observability.md) 还没有覆盖 Run/Tool Attempt 指标、Application Owner 丢失、Workflow、Retention 和 Backup 诊断。
+- [Client Sync Flow](./client-sync-flow.md) 仍带有 phase 1/phase 2 的实施口吻，应重新核对当前 Jobs 刷新和事件能力。
+- [待修复 Bug 存档](./bugs-unfixed.md) 来自较早审计，需要重新确认每一项是否仍存在，不能继续当当前缺陷列表。
+- 多份 `*-design.md` 没有状态标记，需要逐步补上“当前实现 / 待实现 / 历史设计”。
+
+## 仍待删除的兼容代码
+
+2026-08-23 的全仓搜索仍能找到下面这些旧入口。它们不是推荐用法，也不能因为文档已经更新就算作完成：
+
+| 位置 | 仍在兼容什么 |
+|---|---|
+| `apps/cli/src/commands/debug.ts` | `list-projection-settlements` 旧命令别名 |
+| `apps/cli/src/commands/slash-commands.ts` | 旧 import 路径的 re-export 文件 |
+| `packages/core/src/types/settings.ts`、`packages/sandbox/src/config.ts` | Sandbox 的 `runtime` 旧配置字段 |
+| `packages/memory/src/index.ts` | 旧 flat JSON memory 结构和 JSON 文件读取 |
+| `packages/services/src/session-runtime/types.ts`、`runtime-config.ts` | 已移到 `@openharness/protocol` 的旧导出位置 |
+| `packages/channels/src/bridge.ts` | daemon durable channel 之前的 bridge 类 |
+| `apps/desktop/src/main/features/session/default-model-resolution.ts` | 带 provider 前缀的旧 DeepSeek model ID |
+| `packages/swarm/src/permission-sync.ts` | 旧 Permission response 形状 |
+
+## 写文档时的约定
+
+- 当前文档先讲入口、关键步骤、状态放在哪里、结果从哪里返回，再讲类型名。
+- 第一次出现英文术语时，要同时解释它实际做什么。
+- 一条跨模块硬规则只指定一份权威文档，其他地方链接过去，不复制整段契约。
+- 每份当前文档开头必须标明“当前实现”或“权威契约”；计划和历史资料也必须明确状态。
+- 计划完成后把状态改成“已完成”，并把计划开始前的问题写成“当时基线”。
+- 修改公开入口、持久化格式、协议版本、状态机或所有权边界时，必须同步更新本目录和对应权威文档。
+- 不增加兼容代码来维持过时文档。

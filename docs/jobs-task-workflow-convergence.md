@@ -25,7 +25,7 @@ Task 和 Workflow 自己仍可保留创建、验证、恢复、模板、reconcil
 - 2026-08-20：HTTP client、slash command 与 TUI 已硬切到 Jobs。
 - 后台 shell 由 `/background` 与 `POST /background-shells` 创建；创建后统一使用 `JobRead/Wait/Send/Cancel`。
 - 旧 `/tasks`、`TaskSnapshot` 与 TUI `session.tasks` 已删除，不保留兼容别名。
-- TUI 的 `jobState/jobs` 只是客户端缓存；权威状态仍在 Terminal、两个分离的执行后端、`SessionExecutionRecord` 持久化投影和 `WorkflowRunStore`，由 `DaemonJobService` 在读取时聚合。
+- TUI 的 `jobState/jobs` 只是客户端缓存；权威状态仍在 Terminal、两个分离的执行后端、`SessionExecutionRecord` 持久化投影和 daemon SQLite 中的 `SessionWorkflowRunRepository`，由 `DaemonJobService` 在读取时聚合。
 - `TodoPanel`、`SwarmPanel` 和独立 `WorkflowRunsPanel` 已移除。普通 Workflow 列表和详情进入统一 Jobs Panel，Steps 从所选 Workflow Job 的 `JobRead` details 展示。
 
 旧的通用 `TaskManager` 已拆成两块：`DetachedProcessSupervisor` 只管 shell/dream/显式 Agent 子进程，`ChildAgentExecutionRegistry` 只管 framework child Agent 的回调句柄。`SessionExecutionRecord` 是兼容现有数据库的内部持久化投影；模型侧 shell producer 已硬切为 `BackgroundShellCreate`，没有 `TaskCreate` 别名。

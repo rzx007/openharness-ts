@@ -7,7 +7,7 @@
 permission decision 通过 SDK callback 返回，不是带 resolver 的 event：
 
 ```text
-request/decision : createOpenHarnessAgent({ requestPermission })
+request/decision : createDefaultNodeAgent({ requestPermission })
 observability    : permission.requested / permission.resolved AgentEvent
 durable UI flow  : daemon StorePermissionBroker
 ```
@@ -17,7 +17,7 @@ framework 等待 decision；event 只描述事实，保持可序列化。
 ## Standalone
 
 ```ts
-const agent = await createOpenHarnessAgent({
+const agent = await createDefaultNodeAgent({
   requestPermission: async (request, scope) => {
     return terminalPrompt(request, scope.signal)
       ? { status: "approved" }
@@ -60,11 +60,11 @@ sequenceDiagram
 | permission checker 与 tool gate | `packages/core/src/engine/query-engine.ts` |
 | request/decision/event contracts | `packages/core/src/types/runtime.ts` |
 | framework event/callback 调用 | `packages/agent-runtime/src/agent.ts` |
-| daemon callback 注入 | `packages/server/src/http.ts` |
-| durable broker | `packages/server/src/permission-broker.ts` |
-| live resolver/expiration | `packages/server/src/permission-controller.ts` |
+| daemon callback 注入 | `packages/server/src/daemon/daemon-agent.ts` |
+| durable broker | `packages/server/src/permissions/permission-broker.ts` |
+| live resolver/expiration | `packages/server/src/permissions/permission-controller.ts` |
 | list/reply routes | `packages/server/src/http/routes/permission.ts` |
-| event durable observation | `packages/server/src/http/daemon-agent-event-projector.ts` |
+| event durable observation | `packages/server/src/application/agent/daemon-agent-event-projector.ts` |
 
 ## Cancellation 与 lineage
 

@@ -132,7 +132,7 @@ Sandbox 有两条后端：
 
 ```text
 surface / daemon AgentPool
-  └─ createOpenHarnessAgent({ settings, cwd, sessionId })
+  └─ createDefaultNodeAgent({ settings, cwd, sessionId })
        # packages/agent-runtime/src/agent.ts
        └─ internal default composition
             # packages/agent-runtime/src/default-runtime.ts
