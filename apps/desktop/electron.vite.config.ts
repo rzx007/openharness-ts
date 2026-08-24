@@ -26,17 +26,26 @@ export default defineConfig({
     plugins: [copySessionMigrations()],
     build: {
       externalizeDeps: {
+        // workspace 包打进主进程 bundle，安装包就不必再拷整棵 monorepo 依赖树
         exclude: [
+          "@electron-toolkit/utils",
           "@openharness/client",
           "@openharness/server",
           "@openharness/terminal",
           "@openharness/terminal-node",
-          "electron-store",
         ],
+        // 原生模块不能打进 JS，运行时从 node_modules 加载
+        include: ["better-sqlite3", "node-pty"],
       },
     },
   },
-  preload: {},
+  preload: {
+    build: {
+      externalizeDeps: {
+        exclude: ["@electron-toolkit/preload"],
+      },
+    },
+  },
   renderer: {
     resolve: {
       alias: {

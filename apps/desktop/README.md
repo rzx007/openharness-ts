@@ -43,6 +43,10 @@ node-gyp failed to rebuild ...\node-pty
 
 `better-sqlite3` 通常能编过；卡住的几乎都是 `node-pty`。没编成功之前，桌面里的内嵌终端无法启动。
 
+## 安装包
+
+日常验证用 `pnpm --filter @openharness/desktop build:unpack`（不解 NSIS）。为什么 production 依赖必须很瘦、以及 `pnpm build:win` 卡在搜索 node modules 时看什么，见 [docs/packaging.md](./docs/packaging.md)。
+
 ## Checks
 
 ```bash

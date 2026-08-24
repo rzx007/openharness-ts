@@ -2,13 +2,12 @@ appId: app.openharness.desktop
 productName: OpenHarness
 directories:
   buildResources: resources
+# 只带编译产物。node_modules 由 electron-builder 按 production dependencies 另收，
+# 不要用默认 **/*，否则会扫整个 apps/desktop（含源码和构建工具）。
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - out/**
+  - resources/**
+  - package.json
 asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/prebuilds/**
