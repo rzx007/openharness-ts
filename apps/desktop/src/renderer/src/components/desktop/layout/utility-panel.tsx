@@ -19,7 +19,10 @@ import { BrowserTool, type BrowserToolTab } from "@renderer/components/desktop/t
 import type { UtilityToolRequest } from "./title-bar"
 import { FilesTool } from "@renderer/components/desktop/tools/files-tool"
 import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
-import type { FileViewerTab } from "@renderer/components/desktop/tools/file-viewer"
+import {
+  mergeFileViewerTabs,
+  type FileViewerTab,
+} from "@renderer/components/desktop/tools/file-viewer"
 import { PlaceholderTool } from "@renderer/components/desktop/tools/placeholder-tool"
 import { TerminalTool } from "@renderer/components/desktop/tools/terminal/terminal-tool"
 import { AgentsTool } from "@renderer/components/desktop/tools/agents/agents-tool"
@@ -119,6 +122,7 @@ export function UtilityPanel({
   const [tabs, setTabs] = useState<UtilityTab[]>([])
   const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>([])
   const [fileTabs, setFileTabs] = useState<FileViewerTab[]>([])
+  const fileTabsRef = useRef<FileViewerTab[]>([])
   const [fileProjectPath, setFileProjectPath] = useState<string | null>(null)
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [loadingFilePath, setLoadingFilePath] = useState<string | null>(null)
@@ -129,6 +133,7 @@ export function UtilityPanel({
   const [terminalCommands, setTerminalCommands] = useState<TerminalPanelCommand[]>([])
   const terminalCommandSequenceRef = useRef(0)
   const handledToolRequestIdRef = useRef<number | null>(null)
+  const tabsRef = useRef(tabs)
   const [persistedFileTabs, setPersistedFileTabs] =
     useState<PersistedFileTabState>(readPersistedFileTabs)
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
@@ -140,17 +145,29 @@ export function UtilityPanel({
     ? persistedFileTabs[selectedProjectPath]
     : undefined
   const fileStateVisible = fileProjectPath === (selectedProjectPath ?? null)
-  const visibleFileTabs = fileStateVisible ? fileTabs : []
-  const visibleActiveFilePath = fileStateVisible ? activeFilePath : null
-  const visibleLoadingFilePath = fileStateVisible ? loadingFilePath : null
+  const visibleFileTabs = fileTabs.filter(
+    (tab) => (tab.projectPath ?? null) === (selectedProjectPath ?? null)
+  )
   const visibleTabs = tabs.filter(
     (tab) => !tab.projectPath || tab.projectPath === selectedProjectPath
   )
+  const visibleActiveFilePath =
+    fileStateVisible || visibleTabs.some((tab) => tab.filePath === activeFilePath)
+      ? activeFilePath
+      : null
+  const visibleLoadingFilePath =
+    fileStateVisible || visibleTabs.some((tab) => tab.filePath === loadingFilePath)
+      ? loadingFilePath
+      : null
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
   const terminalCommand = terminalCommands[0] ?? null
   const pendingTerminal =
     Boolean(terminalOpenRequest) ||
     terminalCommands.some((command) => command.type === "ensure" || command.type === "create")
+
+  useEffect(() => {
+    tabsRef.current = tabs
+  }, [tabs])
 
   useEffect(() => {
     if (!fileOpenRequest) return
@@ -205,12 +222,12 @@ export function UtilityPanel({
           setActiveTabId(id)
           return
         }
-        const hasTerminalTabs = tabs.some(
+        const hasTerminalTabs = tabsRef.current.some(
           (tab) =>
             tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
         )
-        setTerminalCommands((current) => [
-          ...current,
+        setTerminalCommands((commands) => [
+          ...commands,
           {
             id: ++terminalCommandSequenceRef.current,
             type: hasTerminalTabs ? "create" : "ensure",
@@ -237,42 +254,47 @@ export function UtilityPanel({
       }
 
       if (tool === "files") {
-        const emptyFilesTab = tabs.find((tab) => tab.id === filesTabId)
-        if (emptyFilesTab) {
-          setActiveTabId(emptyFilesTab.id)
-          return
-        }
-        const existingFileTab =
-          tabs.find(
-            (tab) =>
-              tab.tool === "files" &&
-              tab.filePath &&
-              tab.filePath === activeFilePath &&
-              tab.projectPath === selectedProjectPath
-          ) ??
-          tabs.find(
-            (tab) => tab.tool === "files" && tab.filePath && tab.projectPath === selectedProjectPath
-          )
-        if (existingFileTab) {
-          setActiveTabId(existingFileTab.id)
-          return
-        }
-        setTabs((current) => [...current, { id: filesTabId, tool, title: toolMeta.files.label }])
-        setActiveTabId(filesTabId)
+        setFileProjectPath(selectedProjectPath ?? null)
+        setTabs((current) => {
+          const emptyFilesTab = current.find((tab) => tab.id === filesTabId)
+          if (emptyFilesTab) {
+            setActiveTabId(emptyFilesTab.id)
+            return current
+          }
+          const existingFileTab =
+            current.find(
+              (tab) =>
+                tab.tool === "files" &&
+                tab.filePath &&
+                tab.filePath === activeFilePath &&
+                tab.projectPath === selectedProjectPath
+            ) ??
+            current.find(
+              (tab) =>
+                tab.tool === "files" && tab.filePath && tab.projectPath === selectedProjectPath
+            )
+          if (existingFileTab) {
+            setActiveTabId(existingFileTab.id)
+            return current
+          }
+          setActiveTabId(filesTabId)
+          return [...current, { id: filesTabId, tool, title: toolMeta.files.label }]
+        })
         return
       }
 
       const id = toolTabId(tool)
-      const existing = tabs.find((tab) => tab.id === id)
-      if (existing) {
-        setActiveTabId(existing.id)
-        return
-      }
-
-      setTabs((current) => [...current, { id, tool, title: toolMeta[tool].label }])
-      setActiveTabId(id)
+      setTabs((current) => {
+        const existing = current.find((tab) => tab.id === id)
+        if (existing) {
+          setActiveTabId(existing.id)
+          return current
+        }
+        setActiveTabId(id)
+        return [...current, { id, tool, title: toolMeta[tool].label }]
+      })
     },
-    [activeFilePath, selectedProjectAvailable, selectedProjectPath, tabs]
+    [activeFilePath, selectedProjectAvailable, selectedProjectPath, setTerminalCommands]
   )
 
   useEffect(() => {
@@ -311,7 +333,11 @@ export function UtilityPanel({
               ? activeFilePath
               : (nextFileTabs[0]?.preview.path ?? null)
 
-      setFileTabs((current) => current.filter((tab) => !closingFilePaths.has(tab.preview.path)))
+      const nextStoredFileTabs = fileTabsRef.current.filter(
+        (tab) => !closingFilePaths.has(tab.preview.path)
+      )
+      fileTabsRef.current = nextStoredFileTabs
+      setFileTabs(nextStoredFileTabs)
       setActiveFilePath(nextActivePath)
       persistFileTabs(
         nextFileTabs.map((tab) => tab.preview.path),
@@ -389,21 +415,12 @@ export function UtilityPanel({
   }
 
   const upsertFileTab = (nextFileTab: FileViewerTab): void => {
+    const nextProject = selectedProjectPath ?? null
     const id = fileTabId(nextFileTab.preview.path, selectedProjectPath)
-    const nextPaths = [
-      nextFileTab.preview.path,
-      ...visibleFileTabs
-        .map((tab) => tab.preview.path)
-        .filter((path) => path !== nextFileTab.preview.path),
-    ]
-    setFileProjectPath(selectedProjectPath ?? null)
-    setFileTabs((current) => {
-      const scopedCurrent = fileProjectPath === (selectedProjectPath ?? null) ? current : []
-      return [
-        nextFileTab,
-        ...scopedCurrent.filter((tab) => tab.preview.path !== nextFileTab.preview.path),
-      ]
-    })
+    const nextTabs = mergeFileViewerTabs(fileTabsRef.current, nextFileTab, nextProject)
+    fileTabsRef.current = nextTabs
+    setFileProjectPath(nextProject)
+    setFileTabs(nextTabs)
     setTabs((current) =>
       placeFileTab(current, {
         id,
@@ -417,7 +434,12 @@ export function UtilityPanel({
     )
     setActiveTabId(id)
     setActiveFilePath(nextFileTab.preview.path)
-    persistFileTabs(nextPaths, nextFileTab.preview.path)
+    persistFileTabs(
+      nextTabs
+        .filter((tab) => (tab.projectPath ?? null) === nextProject)
+        .map((tab) => tab.preview.path),
+      nextFileTab.preview.path
+    )
   }
 
   const persistFileTabs = (paths: string[], activePath: string | null): void => {

@@ -90,6 +90,7 @@ export function FilesTool({
   const treePanelRef = usePanelRef()
   const restoredProjectRef = useRef<string | null>(null)
   const handledOpenRequestRef = useRef<number | null>(null)
+  const attemptedPreviewPathRef = useRef<string | null>(null)
 
   const fileEntries = useMemo(() => {
     const map = new Map<string, WorkspaceFileEntry>()
@@ -182,6 +183,21 @@ export function FilesTool({
       onLoadingPathChange((current) => (current === normalizedPath ? null : current))
     }
   }
+
+  useEffect(() => {
+    if (!activePath || loadState !== "ready") return
+    if (tabs.some((tab) => tab.preview.path === activePath)) {
+      if (attemptedPreviewPathRef.current === activePath) attemptedPreviewPathRef.current = null
+      return
+    }
+    if (loadingPath === activePath) return
+    if (attemptedPreviewPathRef.current === activePath) return
+    attemptedPreviewPathRef.current = activePath
+    const timer = window.setTimeout(() => {
+      void openFile(activePath, { requireListedFile: false })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activePath, loadState, loadingPath, tabs])
 
   useEffect(() => {
     if (!openRequest || loadState !== "ready" || handledOpenRequestRef.current === openRequest.id)
@@ -383,7 +399,7 @@ export function FilesTool({
               searchMatches={searchMatches}
               targetLine={
                 openRequest &&
-                  toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
+                toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
                   ? openRequest.line
                   : undefined
               }

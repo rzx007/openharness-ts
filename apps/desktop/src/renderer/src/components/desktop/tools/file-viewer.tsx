@@ -22,6 +22,22 @@ export interface FileSearchMatch {
 export interface FileViewerTab {
   preview: WorkspaceReadFileResult
   type: "code" | "document" | "markdown"
+  projectPath?: string | null
+}
+
+export function mergeFileViewerTabs(
+  current: FileViewerTab[],
+  nextFileTab: FileViewerTab,
+  projectPath: string | null
+): FileViewerTab[] {
+  const nextTab = { ...nextFileTab, projectPath }
+  return [
+    nextTab,
+    ...current.filter(
+      (tab) =>
+        (tab.projectPath ?? null) === projectPath && tab.preview.path !== nextTab.preview.path
+    ),
+  ]
 }
 
 interface FileViewerProps {
@@ -109,6 +125,7 @@ export function FileViewer({
           <MarkdownPreview preview={activeTab.preview} />
         ) : activeTab ? (
           <CodePreview
+            key={activeTab.preview.path}
             preview={activeTab.preview}
             themeType={themeType}
             searchQuery={searchQuery}
