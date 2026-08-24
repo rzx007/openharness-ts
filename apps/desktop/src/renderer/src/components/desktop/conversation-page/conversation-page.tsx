@@ -39,6 +39,7 @@ function ConversationPane({
   const selectedModel = useDesktopSessionStore((state) => state.selectedModel)
   const selectedProvider = useDesktopSessionStore((state) => state.selectedProvider)
   const selectedPermissionMode = useDesktopSessionStore((state) => state.selectedPermissionMode)
+  const workspaceMode = useDesktopSessionStore((state) => state.workspaceMode)
   const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
   const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const branch = useDesktopSessionStore((state) => state.branch)
@@ -46,12 +47,14 @@ function ConversationPane({
   const projects = useDesktopSessionStore((state) => state.projects)
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
+  const daemonStatus = useDesktopSessionStore((state) => state.daemonStatus)
   const startSession = useDesktopSessionStore((state) => state.startSession)
   const sendMessage = useDesktopSessionStore((state) => state.sendMessage)
   const editLatestMessage = useDesktopSessionStore((state) => state.editLatestMessage)
   const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
+  const selectOutsideProject = useDesktopSessionStore((state) => state.selectOutsideProject)
   const checkoutBranch = useDesktopSessionStore((state) => state.checkoutBranch)
   const createAndCheckoutBranch = useDesktopSessionStore((state) => state.createAndCheckoutBranch)
   const selectModel = useDesktopSessionStore((state) => state.selectModel)
@@ -179,8 +182,10 @@ function ConversationPane({
           draft={draft}
           sending={sending}
           loadStatus={loadStatus}
+          daemonStatus={daemonStatus}
           projects={projects}
           selectedProject={selectedProject}
+          workspaceMode={workspaceMode}
           selectedProjectGit={selectedProjectGit}
           branch={branch}
           branches={branches}
@@ -193,6 +198,7 @@ function ConversationPane({
           onSubmit={() => void submitDraft()}
           onChooseProject={() => void chooseProject()}
           onSelectProject={(project) => void selectProject(project)}
+          onSelectOutsideProject={selectOutsideProject}
           onCheckoutBranch={checkoutBranch}
           onCreateAndCheckoutBranch={createAndCheckoutBranch}
           onSelectModel={(model) => void selectModel(model)}

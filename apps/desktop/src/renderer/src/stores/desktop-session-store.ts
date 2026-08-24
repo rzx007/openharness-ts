@@ -2,19 +2,30 @@ import { create } from "zustand"
 
 import type {
   DesktopBootstrapData,
+  DesktopDaemonStatus,
   DesktopModel,
   DesktopPermissionMode,
   DesktopProject,
   DesktopSessionRecord,
   DesktopSessionView,
+  DesktopWorkspaceMode,
 } from "@shared/session-types"
 
 type LoadStatus = "idle" | "loading" | "ready" | "error"
 
 const persistedActiveSessionKey = "openharness.desktop.active-session.v1"
 
+const initialDaemonStatus: DesktopDaemonStatus = {
+  phase: "idle",
+  message: "等待连接 daemon",
+  updatedAt: Date.now(),
+}
+
+let daemonStatusEventsAttached = false
+
 interface DesktopSessionState {
   loadStatus: LoadStatus
+  daemonStatus: DesktopDaemonStatus
   error: string | null
   projects: DesktopProject[]
   sessions: DesktopSessionRecord[]
@@ -26,6 +37,8 @@ interface DesktopSessionState {
   selectedModel: string | null
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
+  workspaceMode: DesktopWorkspaceMode
+  outsideProjectCwd: string | null
   selectedProject: DesktopProject | null
   selectedProjectGit: boolean
   branch: string | null
@@ -39,6 +52,7 @@ interface DesktopSessionState {
   startNewConversation: () => Promise<void>
   chooseProject: () => Promise<void>
   selectProject: (project: DesktopProject) => Promise<void>
+  selectOutsideProject: () => void
   checkoutBranch: (branch: string) => Promise<void>
   createAndCheckoutBranch: (branch: string) => Promise<void>
   renameProject: (path: string, name: string) => Promise<void>
@@ -78,6 +92,7 @@ interface DesktopSessionState {
 
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => ({
   loadStatus: "idle",
+  daemonStatus: initialDaemonStatus,
   error: null,
   projects: [],
   sessions: [],
@@ -89,6 +104,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   selectedModel: null,
   selectedProvider: null,
   selectedPermissionMode: "default",
+  workspaceMode: "project",
+  outsideProjectCwd: null,
   selectedProject: null,
   selectedProjectGit: false,
   branch: null,
@@ -100,15 +117,34 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async initialize() {
     if (get().loadStatus === "loading" || get().loadStatus === "ready") return
-    set({ loadStatus: "loading", error: null })
+    ensureDesktopDaemonStatusEvents()
+    set({
+      loadStatus: "loading",
+      daemonStatus: {
+        phase: "discovering",
+        message: "正在观察 daemon 状态",
+        updatedAt: Date.now(),
+      },
+      error: null,
+    })
     try {
+      const daemonStatus = await window.desktop.sessions.daemonStatus()
+      set({ daemonStatus })
       const data = await window.desktop.sessions.bootstrap()
-      const selectedProject = resolveInitialProject(data, get().selectedProject)
+      const latestDaemonStatus = await window.desktop.sessions
+        .daemonStatus()
+        .catch(() => get().daemonStatus)
+      const workspaceMode =
+        get().workspaceMode === "outside_project" || data.projects.length === 0
+          ? "outside_project"
+          : "project"
+      const selectedProject = resolveInitialProject(data, get().selectedProject, workspaceMode)
       const sessions = sortSessions(data.sessions)
       const archivedSessions = sortSessions(data.archivedSessions)
       const persistedSessionId = readPersistedActiveSessionId()
       set({
         loadStatus: "ready",
+        daemonStatus: latestDaemonStatus,
         projects: data.projects,
         sessions,
         archivedSessions,
@@ -119,6 +155,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         selectedModel: data.defaultModel,
         selectedProvider: data.defaultProvider ?? null,
         selectedPermissionMode: data.defaultPermissionMode,
+        workspaceMode,
+        outsideProjectCwd: data.outsideProjectCwd,
         selectedProject,
         selectedProjectGit: false,
         branches: [],
@@ -131,14 +169,17 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         clearPersistedActiveSessionId()
       }
     } catch (error) {
-      set({ loadStatus: "error", error: errorMessage(error) })
+      const daemonStatus = await window.desktop.sessions
+        .daemonStatus()
+        .catch(() => get().daemonStatus)
+      set({ loadStatus: "error", daemonStatus, error: errorMessage(error) })
     }
   },
 
   async refreshBootstrap() {
     const data = await window.desktop.sessions.bootstrap()
     set((state) => ({
-      ...applyBootstrapData(data, state.selectedProject, null, null),
+      ...applyBootstrapData(data, state.selectedProject, state.workspaceMode, null, null),
       ...(state.activeSessionId
         ? {
             selectedModel: state.selectedModel,
@@ -170,6 +211,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       if (!details) return
       set((state) => ({
         projects: upsertProject(state.projects, details.project),
+        workspaceMode: "project",
         selectedProject: details.project,
         selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
         branch: details.branch,
@@ -184,6 +226,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   async selectProject(project) {
     set({
       selectedProject: project,
+      workspaceMode: "project",
       selectedProjectGit: false,
       branch: null,
       branches: [],
@@ -201,6 +244,17 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     } catch (error) {
       set({ error: errorMessage(error) })
     }
+  },
+
+  selectOutsideProject() {
+    set({
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedProjectGit: false,
+      branch: null,
+      branches: [],
+      error: null,
+    })
   },
 
   async checkoutBranch(branch) {
@@ -324,6 +378,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         return {
           projects,
           selectedProject: removedSelected ? (projects[0] ?? null) : state.selectedProject,
+          workspaceMode:
+            removedSelected && projects.length === 0 ? "outside_project" : state.workspaceMode,
           selectedProjectGit: removedSelected ? false : state.selectedProjectGit,
           branch: removedSelected ? null : state.branch,
           branches: removedSelected ? [] : state.branches,
@@ -368,7 +424,15 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         model: model.id,
         provider: model.providerName,
       })
-      set((state) => applyBootstrapData(data, state.selectedProject, model.id, model.providerName))
+      set((state) =>
+        applyBootstrapData(
+          data,
+          state.selectedProject,
+          state.workspaceMode,
+          model.id,
+          model.providerName
+        )
+      )
     } catch (error) {
       set({
         selectedModel: previousModel,
@@ -393,6 +457,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         ...applyBootstrapData(
           data,
           state.selectedProject,
+          state.workspaceMode,
           state.selectedModel,
           state.selectedProvider
         ),
@@ -465,11 +530,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       if (get().activeSessionId !== sessionId) return
       writePersistedActiveSessionId(sessionId)
       set((state) => ({
+        ...resolveSessionWorkspace(state.projects, view.session),
         sessionView: view,
         openingSession: false,
-        selectedProject:
-          state.projects.find((project) => samePath(project.path, view.session.cwd)) ??
-          projectFromSession(view.session),
         selectedModel: view.session.model,
         selectedProvider: sessionProvider(view.session, state.defaultProvider),
         selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
@@ -493,14 +556,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   async startConversationFrom(session) {
     await window.desktop.sessions.close()
     clearPersistedActiveSessionId()
-    const project =
-      get().projects.find((item) => samePath(item.path, session.cwd)) ?? projectFromSession(session)
+    const workspace = resolveSessionWorkspace(get().projects, session)
     set({
       activeSessionId: null,
       sessionView: null,
       openingSession: false,
       sending: false,
-      selectedProject: project,
+      ...workspace,
       selectedModel: session.model,
       selectedProvider: sessionProvider(session, get().defaultProvider),
       selectedPermissionMode: sessionPermissionMode(session, get().defaultPermissionMode),
@@ -509,7 +571,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       branches: [],
       error: null,
     })
-    await get().selectProject(project)
+    if (workspace.selectedProject) await get().selectProject(workspace.selectedProject)
   },
 
   async forkSession(sessionId, options) {
@@ -581,16 +643,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       const archived = await window.desktop.sessions.archive(sessionId)
       const isActive = get().activeSessionId === sessionId
       set((state) => ({
+        ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
         sessions: state.sessions.filter((session) => session.id !== sessionId),
         archivedSessions: upsertSession(state.archivedSessions, archived),
         activeSessionId: isActive ? null : state.activeSessionId,
         sessionView: isActive ? null : state.sessionView,
         openingSession: false,
         sending: false,
-        selectedProject: isActive
-          ? (state.projects.find((project) => samePath(project.path, existing.cwd)) ??
-            projectFromSession(existing))
-          : state.selectedProject,
         selectedModel: isActive ? existing.model : state.selectedModel,
         selectedProvider: isActive
           ? sessionProvider(existing, state.defaultProvider)
@@ -622,6 +681,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       const activeSessionId = get().activeSessionId
       const isActive = activeSessionId !== null && deleted.has(activeSessionId)
       set((state) => ({
+        ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
         sessions: state.sessions.filter((session) => !deleted.has(session.id)),
         archivedSessions: state.archivedSessions.filter((session) => !deleted.has(session.id)),
         activeSessionId: isActive ? null : state.activeSessionId,
@@ -629,10 +689,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           state.sessionView && deleted.has(state.sessionView.session.id) ? null : state.sessionView,
         openingSession: isActive ? false : state.openingSession,
         sending: isActive ? false : state.sending,
-        selectedProject: isActive
-          ? (state.projects.find((project) => samePath(project.path, existing.cwd)) ??
-            projectFromSession(existing))
-          : state.selectedProject,
         selectedModel: isActive ? existing.model : state.selectedModel,
         selectedProvider: isActive
           ? sessionProvider(existing, state.defaultProvider)
@@ -657,6 +713,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const prompt = content.trim()
     const {
       selectedProject,
+      workspaceMode,
+      outsideProjectCwd,
       selectedModel,
       selectedProvider,
       defaultModel,
@@ -666,8 +724,12 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const model = selectedModel ?? defaultModel
     const provider = selectedProvider ?? defaultProvider
     if (!prompt || get().sending) return
-    if (!selectedProject) {
+    if (workspaceMode === "project" && !selectedProject) {
       set({ error: "请先选择一个项目目录。" })
+      return
+    }
+    if (workspaceMode === "outside_project" && !outsideProjectCwd) {
+      set({ error: "无法确定项目外模式的工作目录。" })
       return
     }
     if (!model) {
@@ -678,8 +740,13 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     set({ sending: true, error: null })
     try {
       const session = await window.desktop.sessions.create({
-        projectId: selectedProject.id,
-        cwd: selectedProject.path,
+        ...(workspaceMode === "project" && selectedProject
+          ? { projectId: selectedProject.id }
+          : {}),
+        cwd:
+          workspaceMode === "project" && selectedProject
+            ? selectedProject.path
+            : (outsideProjectCwd as string),
         model,
         ...(provider ? { provider } : {}),
         permissionMode: selectedPermissionMode,
@@ -808,18 +875,30 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 }))
 
 export function attachDesktopSessionEvents(): () => void {
+  ensureDesktopDaemonStatusEvents()
   return window.desktop.sessions.onUpdated((view) => {
     useDesktopSessionStore.getState().applySessionUpdate(view)
+  })
+}
+
+function ensureDesktopDaemonStatusEvents(): void {
+  if (daemonStatusEventsAttached) return
+  daemonStatusEventsAttached = true
+  window.desktop.sessions.onDaemonStatusChanged((daemonStatus) => {
+    useDesktopSessionStore.setState({ daemonStatus })
   })
 }
 
 function applyBootstrapData(
   data: DesktopBootstrapData,
   currentProject: DesktopProject | null,
+  workspaceMode: DesktopWorkspaceMode,
   preferredModel: string | null,
   preferredProvider: string | null
 ): Partial<DesktopSessionState> {
-  const selectedProject = resolveInitialProject(data, currentProject)
+  const resolvedWorkspaceMode =
+    workspaceMode === "project" && data.projects.length === 0 ? "outside_project" : workspaceMode
+  const selectedProject = resolveInitialProject(data, currentProject, resolvedWorkspaceMode)
   const preferredExists =
     preferredModel &&
     data.models.some(
@@ -839,6 +918,8 @@ function applyBootstrapData(
     selectedModel: model,
     selectedProvider: provider,
     selectedPermissionMode: data.defaultPermissionMode,
+    workspaceMode: resolvedWorkspaceMode,
+    outsideProjectCwd: data.outsideProjectCwd,
     selectedProject,
     error: null,
   }
@@ -846,13 +927,44 @@ function applyBootstrapData(
 
 function resolveInitialProject(
   data: DesktopBootstrapData,
-  current: DesktopProject | null
+  current: DesktopProject | null,
+  workspaceMode: DesktopWorkspaceMode
 ): DesktopProject | null {
+  if (workspaceMode === "outside_project") return null
   if (current) {
     const match = data.projects.find((project) => samePath(project.path, current.path))
     if (match) return match
   }
   return data.projects[0] ?? null
+}
+
+function resolveSessionWorkspace(
+  projects: DesktopProject[],
+  session: DesktopSessionRecord
+): Pick<
+  DesktopSessionState,
+  "workspaceMode" | "selectedProject" | "selectedProjectGit" | "branch" | "branches"
+> {
+  if (!session.projectId) {
+    return {
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedProjectGit: false,
+      branch: null,
+      branches: [],
+    }
+  }
+  const project =
+    projects.find((item) => item.id === session.projectId) ??
+    projects.find((item) => samePath(item.path, session.cwd)) ??
+    projectFromSession(session)
+  return {
+    workspaceMode: "project",
+    selectedProject: project,
+    selectedProjectGit: false,
+    branch: null,
+    branches: [],
+  }
 }
 
 function readPersistedActiveSessionId(): string | null {

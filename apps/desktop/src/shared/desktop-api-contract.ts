@@ -10,6 +10,7 @@ import type {
   CreateDesktopProjectBranchInput,
   DesktopBootstrapData,
   DesktopAuxSessionUpdate,
+  DesktopDaemonStatus,
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
@@ -135,6 +136,7 @@ export type DesktopAPI = {
   }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>
+    daemonStatus: () => Promise<DesktopDaemonStatus>
     chooseProject: () => Promise<DesktopProjectDetails | null>
     inspectProject: (path: string) => Promise<DesktopProjectDetails>
     renameProject: (input: RenameDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
@@ -168,6 +170,7 @@ export type DesktopAPI = {
     setPinned: (input: PinDesktopSessionInput) => Promise<DesktopSessionRecord>
     archive: (sessionId: string) => Promise<DesktopSessionRecord>
     delete: (sessionId: string) => Promise<string[]>
+    onDaemonStatusChanged: (listener: (value: DesktopDaemonStatus) => void) => () => void
     onUpdated: (listener: (value: DesktopSessionView) => void) => () => void
     onAuxUpdated: (listener: (value: DesktopAuxSessionUpdate) => void) => () => void
   }

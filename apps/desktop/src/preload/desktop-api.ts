@@ -8,7 +8,7 @@ import {
   type TrayNotificationOptions,
 } from "../shared/ipc-channels"
 import type { DesktopTerminalEvent } from "../shared/terminal-types"
-import type { DesktopAuxSessionUpdate } from "../shared/session-types"
+import type { DesktopAuxSessionUpdate, DesktopDaemonStatus } from "../shared/session-types"
 import type { DesktopAPI } from "../shared/desktop-api-contract"
 
 const invoke = <C extends IpcChannel>(
@@ -121,6 +121,7 @@ export const desktopAPI = {
   },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
+    daemonStatus: () => invoke(IpcChannels.sessionDaemonStatus),
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),
     inspectProject: (path: string) => invoke(IpcChannels.sessionInspectProject, path),
     renameProject: (input: IpcInvokeMap[typeof IpcChannels.projectRename]["args"][0]) =>
@@ -170,6 +171,12 @@ export const desktopAPI = {
       invoke(IpcChannels.sessionSetPinned, input),
     archive: (sessionId: string) => invoke(IpcChannels.sessionArchive, sessionId),
     delete: (sessionId: string) => invoke(IpcChannels.sessionDelete, sessionId),
+    onDaemonStatusChanged: (listener: (value: DesktopDaemonStatus) => void): (() => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: DesktopDaemonStatus): void =>
+        listener(value)
+      ipcRenderer.on(IpcEvents.sessionDaemonStatusChanged, wrapped)
+      return () => ipcRenderer.removeListener(IpcEvents.sessionDaemonStatusChanged, wrapped)
+    },
     onUpdated: (
       listener: (value: IpcInvokeMap[typeof IpcChannels.sessionOpen]["result"]) => void
     ): (() => void) => {

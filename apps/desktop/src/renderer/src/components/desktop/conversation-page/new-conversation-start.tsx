@@ -1,5 +1,5 @@
 import { Blobatar } from "@blobatar/react"
-import { Box, Folder, GitBranch, Monitor, PanelRight, Plus, Search } from "lucide-react"
+import { Box, Folder, GitBranch, Monitor, PanelRight, Plus, Search, X } from "lucide-react"
 import { useState } from "react"
 import "blobatar/motion.css"
 
@@ -7,7 +7,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Separator } from "@renderer/components/ui/separator"
 import { Spinner } from "@renderer/components/ui/spinner"
-import type { DesktopModel, DesktopPermissionMode, DesktopProject } from "@shared/session-types"
+import type {
+  DesktopDaemonStatus,
+  DesktopModel,
+  DesktopPermissionMode,
+  DesktopProject,
+  DesktopWorkspaceMode,
+} from "@shared/session-types"
 import { Composer } from "./composer"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
 import type { LoadStatus, StartPicker } from "./types"
@@ -17,8 +23,10 @@ export function NewConversationStart({
   draft,
   sending,
   loadStatus,
+  daemonStatus,
   projects,
   selectedProject,
+  workspaceMode,
   selectedProjectGit,
   branch,
   branches,
@@ -31,6 +39,7 @@ export function NewConversationStart({
   onSubmit,
   onChooseProject,
   onSelectProject,
+  onSelectOutsideProject,
   onCheckoutBranch,
   onCreateAndCheckoutBranch,
   onSelectModel,
@@ -40,8 +49,10 @@ export function NewConversationStart({
   draft: string
   sending: boolean
   loadStatus: LoadStatus
+  daemonStatus: DesktopDaemonStatus
   projects: DesktopProject[]
   selectedProject: DesktopProject | null
+  workspaceMode: DesktopWorkspaceMode
   selectedProjectGit: boolean
   branch: string | null
   branches: string[]
@@ -54,6 +65,7 @@ export function NewConversationStart({
   onSubmit: () => void
   onChooseProject: () => void
   onSelectProject: (project: DesktopProject) => void
+  onSelectOutsideProject: () => void
   onCheckoutBranch: (branch: string) => Promise<void>
   onCreateAndCheckoutBranch: (branch: string) => Promise<void>
   onSelectModel: (model: DesktopModel) => void
@@ -107,11 +119,23 @@ export function NewConversationStart({
                 </span>{" "}
                 中构建什么？
               </>
+            ) : workspaceMode === "outside_project" ? (
+              "今天想做什么？"
             ) : (
               "今天想构建什么？"
             )}
           </h2>
         </div>
+
+        {loadStatus === "loading" ? (
+          <div
+            className="mb-4 flex max-w-full items-center gap-2 rounded-full border bg-background/80 px-3 py-1.5 text-xs text-ui-muted shadow-sm"
+            aria-live="polite"
+          >
+            <Spinner className="size-3.5" />
+            <span className="truncate">{daemonStatus.message}</span>
+          </div>
+        ) : null}
 
         <div className="relative w-full min-w-0">
           <div className="mx-3 flex h-10 min-w-0 items-center gap-0.5 overflow-hidden rounded-t-2xl bg-muted-foreground/5 px-2.5 pt-1">
@@ -126,11 +150,13 @@ export function NewConversationStart({
                       label={
                         loadStatus === "loading"
                           ? "加载项目..."
-                          : (selectedProject?.name ?? "选择项目")
+                          : workspaceMode === "outside_project"
+                            ? "不在项目中工作"
+                            : (selectedProject?.name ?? "选择项目")
                       }
                       expanded={activePicker === "project"}
                     >
-                      <Folder />
+                      {workspaceMode === "outside_project" ? <X /> : <Folder />}
                     </StartPickerButton>
                   }
                 />
@@ -186,6 +212,18 @@ export function NewConversationStart({
                     >
                       <Plus />
                       <span>选择其他文件夹</span>
+                    </PickerMenuItem>
+                    <Separator className="my-1" />
+                    <PickerMenuItem
+                      selected={workspaceMode === "outside_project"}
+                      onClick={() => {
+                        onSelectOutsideProject()
+                        setProjectQuery("")
+                        closePicker()
+                      }}
+                    >
+                      <X />
+                      <span>不在项目中工作</span>
                     </PickerMenuItem>
                   </div>
                 </PopoverContent>
@@ -331,7 +369,9 @@ export function NewConversationStart({
             selectedProvider={selectedProvider}
             modelLabel={modelLabel}
             permissionMode={selectedPermissionMode}
-            canSubmit={Boolean(draft.trim() && selectedProject)}
+            canSubmit={Boolean(
+              draft.trim() && (selectedProject || workspaceMode === "outside_project")
+            )}
             onDraftChange={onDraftChange}
             onSubmit={onSubmit}
             onSelectModel={onSelectModel}

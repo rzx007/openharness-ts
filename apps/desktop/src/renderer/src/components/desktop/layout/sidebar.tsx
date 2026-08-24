@@ -102,7 +102,10 @@ export function Sidebar({
   const [projectShell, setProjectShell] = useState("")
   const [busy, setBusy] = useState(false)
   const [projectExpansion, setProjectExpansion] = useState<Record<string, boolean>>({})
-  const recentSessions = useMemo(() => sessions.slice(0, 4), [sessions])
+  const recentSessions = useMemo(() => {
+    const recentIds = new Set(sessions.slice(0, 4).map((session) => session.id))
+    return sessions.filter((session) => !session.projectId || recentIds.has(session.id))
+  }, [sessions])
   const activeProjectPath = useMemo(() => {
     const session = sessions.find((item) => item.id === activeSessionId)
     return session ? normalizePath(session.cwd) : null

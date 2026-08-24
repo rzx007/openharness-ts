@@ -3,6 +3,7 @@ import type {
   CheckoutDesktopProjectBranchInput,
   CreateDesktopProjectBranchInput,
   DesktopBootstrapData,
+  DesktopDaemonStatus,
   DesktopProjectDetails,
   DesktopSessionRecord,
   DesktopSessionView,
@@ -82,6 +83,7 @@ export const IpcChannels = {
   petSetIgnoreMouseEvents: "pet:set-ignore-mouse-events",
 
   sessionBootstrap: "session:bootstrap",
+  sessionDaemonStatus: "session:daemon-status",
   sessionChooseProject: "session:choose-project",
   sessionInspectProject: "session:inspect-project",
   projectRename: "project:rename",
@@ -148,6 +150,7 @@ export const IpcEvents = {
   windowMaximizedChanged: "window:maximized-changed",
   sessionUpdated: "session:updated",
   sessionAuxUpdated: "session:aux-updated",
+  sessionDaemonStatusChanged: "session:daemon-status-changed",
   terminalData: "terminal:data",
   terminalStatus: "terminal:status",
   terminalExit: "terminal:exit",
@@ -213,6 +216,7 @@ export interface IpcInvokeMap {
   [IpcChannels.petSetIgnoreMouseEvents]: { args: [value: boolean]; result: PetState }
 
   [IpcChannels.sessionBootstrap]: { args: []; result: DesktopBootstrapData }
+  [IpcChannels.sessionDaemonStatus]: { args: []; result: DesktopDaemonStatus }
   [IpcChannels.sessionChooseProject]: { args: []; result: DesktopProjectDetails | null }
   [IpcChannels.sessionInspectProject]: {
     args: [path: string]

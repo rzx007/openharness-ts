@@ -126,8 +126,22 @@ export interface DesktopPermissionRequest {
 
 export type DesktopPermissionMode = "default" | "plan" | "full_auto"
 
+export type DesktopWorkspaceMode = "project" | "outside_project"
+
+export type DesktopDaemonStatusPhase =
+  "idle" | "discovering" | "connecting" | "starting" | "ready" | "error"
+
+export interface DesktopDaemonStatus {
+  phase: DesktopDaemonStatusPhase
+  message: string
+  detail?: string
+  url?: string
+  updatedAt: number
+}
+
 export interface DesktopBootstrapData {
   connected: true
+  outsideProjectCwd: string
   projects: DesktopProject[]
   sessions: DesktopSessionRecord[]
   archivedSessions: DesktopSessionRecord[]
@@ -173,7 +187,7 @@ export interface DesktopAuxSessionUpdate {
 }
 
 export interface CreateDesktopSessionInput {
-  projectId: string
+  projectId?: string
   cwd: string
   model: string
   provider?: string
