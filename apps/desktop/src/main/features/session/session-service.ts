@@ -41,6 +41,7 @@ import type {
   DesktopProject,
   DesktopProjectDetails,
   DesktopPermissionMode,
+  DesktopSessionRecord,
   DesktopSessionView,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
@@ -57,6 +58,11 @@ import type {
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
+import {
+  allocateOutsideProjectWorkspace,
+  isOutsideProjectWorkspacePath,
+  removeEmptyOutsideProjectWorkspace,
+} from "./outside-project-workspace"
 import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
 
 const execFileAsync = promisify(execFile)
@@ -84,8 +90,12 @@ class DesktopSessionService {
       client.listSessions({ includeArchived: true, limit: 400 }),
       client.listProjects(),
     ])
-    const sessions = allSessions.filter((session) => session.status !== "archived")
-    const archivedSessions = allSessions.filter((session) => session.status === "archived")
+    const sessions = allSessions
+      .filter((session) => session.status !== "archived")
+      .map(toDesktopSessionRecord)
+    const archivedSessions = allSessions
+      .filter((session) => session.status === "archived")
+      .map(toDesktopSessionRecord)
     const models = providers.flatMap((provider) => provider.models)
     const storedConfiguredModel =
       typeof settings["model"] === "string" ? settings["model"] : undefined
@@ -113,11 +123,14 @@ class DesktopSessionService {
         ...(defaultProvider ? { provider: defaultProvider } : {}),
       })
     }
-    const projects = await Promise.all(projectRecords.map(toDesktopProject))
+    const projects = await Promise.all(
+      projectRecords
+        .filter((project) => !isOutsideProjectWorkspacePath(project.path, app.getPath("documents")))
+        .map(toDesktopProject)
+    )
 
     return {
       connected: true,
-      outsideProjectCwd: resolve(app.getPath("home")),
       projects,
       sessions: sortSessions(sessions),
       archivedSessions: sortSessions(archivedSessions),
@@ -197,27 +210,36 @@ class DesktopSessionService {
     return await this.inspectProject(path)
   }
 
-  async createSession(input: CreateDesktopSessionInput): Promise<SessionRecord> {
-    const cwd = resolveRequiredPath(input.cwd)
+  async createSession(input: CreateDesktopSessionInput): Promise<DesktopSessionRecord> {
     const model = requireString(input.model, "模型")
     const permissionMode = normalizePermissionMode(input.permissionMode)
     const client = await this.getClient()
     const provider = await resolveProviderForModel(client, model, input.provider)
     const projectId = input.projectId ? requireString(input.projectId, "Project ID") : undefined
-    const session = await client.createSession({
-      ...(projectId ? { projectId } : {}),
-      cwd,
-      model,
-      title: "",
-      metadata: {
-        runtime: {
-          model,
-          ...(provider ? { provider } : {}),
-          ...(permissionMode ? { permissionMode } : {}),
+    const cwd = projectId
+      ? resolveRequiredPath(input.cwd)
+      : await allocateOutsideProjectWorkspace(app.getPath("documents"))
+
+    try {
+      const session = await client.createSession({
+        ...(projectId ? { projectId } : {}),
+        cwd,
+        model,
+        title: "",
+        metadata: {
+          ...(!projectId ? { desktop: { workspaceMode: "outside_project" } } : {}),
+          runtime: {
+            model,
+            ...(provider ? { provider } : {}),
+            ...(permissionMode ? { permissionMode } : {}),
+          },
         },
-      },
-    })
-    return session
+      })
+      return toDesktopSessionRecord(session)
+    } catch (error) {
+      if (!projectId) await removeEmptyOutsideProjectWorkspace(cwd)
+      throw error
+    }
   }
 
   async renameProject(input: RenameDesktopProjectInput): Promise<DesktopProject> {
@@ -361,13 +383,15 @@ class DesktopSessionService {
     await client.editLatestPrompt(sessionId, { content })
   }
 
-  async forkSession(input: ForkDesktopSessionInput): Promise<SessionRecord> {
+  async forkSession(input: ForkDesktopSessionInput): Promise<DesktopSessionRecord> {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const client = await this.getClient()
-    return await client.forkSession(sessionId, {
-      ...(input.beforeMessageId ? { beforeMessageId: input.beforeMessageId } : {}),
-      ...(input.afterMessageId ? { afterMessageId: input.afterMessageId } : {}),
-    })
+    return toDesktopSessionRecord(
+      await client.forkSession(sessionId, {
+        ...(input.beforeMessageId ? { beforeMessageId: input.beforeMessageId } : {}),
+        ...(input.afterMessageId ? { afterMessageId: input.afterMessageId } : {}),
+      })
+    )
   }
 
   async interruptSession(sessionIdInput: string): Promise<void> {
@@ -415,41 +439,45 @@ class DesktopSessionService {
     return await this.bootstrap()
   }
 
-  async updateSessionModel(input: UpdateDesktopSessionModelInput): Promise<SessionRecord> {
+  async updateSessionModel(input: UpdateDesktopSessionModelInput): Promise<DesktopSessionRecord> {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const model = requireString(input.model, "模型")
     const client = await this.getClient()
     const provider = await resolveProviderForModel(client, model, input.provider)
-    return await client.updateSession(sessionId, {
-      metadata: {
-        runtime: {
-          model,
-          ...(provider ? { provider } : {}),
+    return toDesktopSessionRecord(
+      await client.updateSession(sessionId, {
+        metadata: {
+          runtime: {
+            model,
+            ...(provider ? { provider } : {}),
+          },
         },
-      },
-    })
+      })
+    )
   }
 
   async updateSessionPermissionMode(
     input: UpdateDesktopSessionPermissionModeInput
-  ): Promise<SessionRecord> {
+  ): Promise<DesktopSessionRecord> {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const permissionMode = requirePermissionMode(input.permissionMode)
-    return await (
-      await this.getClient()
-    ).updateSession(sessionId, {
-      metadata: { runtime: { permissionMode } },
-    })
+    return toDesktopSessionRecord(
+      await (
+        await this.getClient()
+      ).updateSession(sessionId, {
+        metadata: { runtime: { permissionMode } },
+      })
+    )
   }
 
-  async renameSession(input: RenameDesktopSessionInput): Promise<SessionRecord> {
+  async renameSession(input: RenameDesktopSessionInput): Promise<DesktopSessionRecord> {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const title = requireString(input.title, "会话名称")
     const client = await this.getClient()
-    return await client.updateSession(sessionId, { title })
+    return toDesktopSessionRecord(await client.updateSession(sessionId, { title }))
   }
 
-  async setSessionPinned(input: PinDesktopSessionInput): Promise<SessionRecord> {
+  async setSessionPinned(input: PinDesktopSessionInput): Promise<DesktopSessionRecord> {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const client = await this.getClient()
     const session = (await client.listSessions({ includeArchived: true, limit: 1_000 })).find(
@@ -459,17 +487,22 @@ class DesktopSessionService {
     const desktop = readDesktopMetadata(session.metadata)
     if (input.pinned) desktop.pinnedAt = Date.now()
     else delete desktop.pinnedAt
-    return await client.updateSession(sessionId, {
-      metadata: { desktop, runtime: { model: session.model } },
-    })
+    return toDesktopSessionRecord(
+      await client.updateSession(sessionId, {
+        metadata: { desktop, runtime: { model: session.model } },
+      })
+    )
   }
 
-  async archiveSession(webContentsId: number, sessionIdInput: string): Promise<SessionRecord> {
+  async archiveSession(
+    webContentsId: number,
+    sessionIdInput: string
+  ): Promise<DesktopSessionRecord> {
     const sessionId = requireString(sessionIdInput, "会话 ID")
     const subscription = this.subscriptions.get(webContentsId, primarySubscriptionSlot)
     if (subscription?.sessionId === sessionId) this.closeSession(webContentsId)
     const client = await this.getClient()
-    return await client.archiveSession(sessionId)
+    return toDesktopSessionRecord(await client.archiveSession(sessionId))
   }
 
   async deleteSession(webContentsId: number, sessionIdInput: string): Promise<string[]> {
@@ -660,7 +693,7 @@ function toDesktopSessionView(
   return {
     cursor: state.lastSeq,
     syncStatus: source === "reconnecting" ? "reconnecting" : "connected",
-    session: bucket.session,
+    session: toDesktopSessionRecord(bucket.session),
     inputs: [...bucket.inputs],
     messages: [...bucket.messages].sort((a, b) => a.seq - b.seq),
     parts: Object.values(bucket.partsByMessageId)
@@ -685,8 +718,18 @@ function ensureConfiguredModel(models: DesktopModel[], configuredModel: string):
   ]
 }
 
-function sortSessions(sessions: SessionRecord[]): SessionRecord[] {
+function sortSessions(sessions: DesktopSessionRecord[]): DesktopSessionRecord[] {
   return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+function toDesktopSessionRecord(session: SessionRecord): DesktopSessionRecord {
+  const desktop = readDesktopMetadata(session.metadata)
+  const workspaceMode =
+    desktop["workspaceMode"] === "outside_project" ||
+      isOutsideProjectWorkspacePath(session.cwd, app.getPath("documents"))
+      ? "outside_project"
+      : "project"
+  return { ...session, workspaceMode }
 }
 
 function parseCurrentBranch(output: string): string | null {

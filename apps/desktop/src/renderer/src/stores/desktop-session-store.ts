@@ -1,6 +1,7 @@
 import { create } from "zustand"
 
 import type {
+  CreateDesktopSessionInput,
   DesktopBootstrapData,
   DesktopDaemonStatus,
   DesktopModel,
@@ -38,7 +39,6 @@ interface DesktopSessionState {
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
   workspaceMode: DesktopWorkspaceMode
-  outsideProjectCwd: string | null
   selectedProject: DesktopProject | null
   selectedProjectGit: boolean
   branch: string | null
@@ -105,7 +105,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   selectedProvider: null,
   selectedPermissionMode: "default",
   workspaceMode: "project",
-  outsideProjectCwd: null,
   selectedProject: null,
   selectedProjectGit: false,
   branch: null,
@@ -156,7 +155,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         selectedProvider: data.defaultProvider ?? null,
         selectedPermissionMode: data.defaultPermissionMode,
         workspaceMode,
-        outsideProjectCwd: data.outsideProjectCwd,
         selectedProject,
         selectedProjectGit: false,
         branches: [],
@@ -714,7 +712,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const {
       selectedProject,
       workspaceMode,
-      outsideProjectCwd,
       selectedModel,
       selectedProvider,
       defaultModel,
@@ -728,10 +725,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       set({ error: "请先选择一个项目目录。" })
       return
     }
-    if (workspaceMode === "outside_project" && !outsideProjectCwd) {
-      set({ error: "无法确定项目外模式的工作目录。" })
-      return
-    }
     if (!model) {
       set({ error: "没有可用模型，请先配置模型。" })
       return
@@ -739,18 +732,21 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
     set({ sending: true, error: null })
     try {
-      const session = await window.desktop.sessions.create({
-        ...(workspaceMode === "project" && selectedProject
-          ? { projectId: selectedProject.id }
-          : {}),
-        cwd:
-          workspaceMode === "project" && selectedProject
-            ? selectedProject.path
-            : (outsideProjectCwd as string),
-        model,
-        ...(provider ? { provider } : {}),
-        permissionMode: selectedPermissionMode,
-      })
+      const sessionInput: CreateDesktopSessionInput =
+        workspaceMode === "project" && selectedProject
+          ? {
+              projectId: selectedProject.id,
+              cwd: selectedProject.path,
+              model,
+              ...(provider ? { provider } : {}),
+              permissionMode: selectedPermissionMode,
+            }
+          : {
+              model,
+              ...(provider ? { provider } : {}),
+              permissionMode: selectedPermissionMode,
+            }
+      const session = await window.desktop.sessions.create(sessionInput)
       set((state) => ({
         activeSessionId: session.id,
         sessions: upsertSession(state.sessions, session),
@@ -919,7 +915,6 @@ function applyBootstrapData(
     selectedProvider: provider,
     selectedPermissionMode: data.defaultPermissionMode,
     workspaceMode: resolvedWorkspaceMode,
-    outsideProjectCwd: data.outsideProjectCwd,
     selectedProject,
     error: null,
   }

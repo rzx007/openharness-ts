@@ -5,7 +5,6 @@ import { useDesktopSessionStore } from "./desktop-session-store"
 
 const refreshedBootstrap: DesktopBootstrapData = {
   connected: true,
-  outsideProjectCwd: "C:\\Users\\tester",
   projects: [],
   sessions: [],
   archivedSessions: [],
@@ -91,16 +90,17 @@ describe("desktop session store provider refresh", () => {
     expect(useDesktopSessionStore.getState()).toMatchObject({
       workspaceMode: "outside_project",
       selectedProject: null,
-      outsideProjectCwd: "C:\\Users\\tester",
     })
   })
 })
 
 describe("desktop session store outside-project mode", () => {
-  it("creates a session in the home directory without a project id", async () => {
+  it("lets the main process allocate the directory for a session without a project id", async () => {
     const session = {
       id: "session-outside-project",
-      cwd: "C:\\Users\\tester",
+      projectId: "auto-generated-workspace-project",
+      workspaceMode: "outside_project" as const,
+      cwd: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-08-24\\x1",
       title: "",
       model: "deepseek-chat",
       status: "idle" as const,
@@ -134,7 +134,6 @@ describe("desktop session store outside-project mode", () => {
       sessions: [],
       archivedSessions: [],
       workspaceMode: "outside_project",
-      outsideProjectCwd: "C:\\Users\\tester",
       selectedProject: null,
       selectedModel: "deepseek-chat",
       selectedProvider: "deepseek",
@@ -151,7 +150,6 @@ describe("desktop session store outside-project mode", () => {
     await useDesktopSessionStore.getState().startSession("总结今天的安排")
 
     expect(create).toHaveBeenCalledWith({
-      cwd: "C:\\Users\\tester",
       model: "deepseek-chat",
       provider: "deepseek",
       permissionMode: "default",
@@ -164,6 +162,13 @@ describe("desktop session store outside-project mode", () => {
       workspaceMode: "outside_project",
       selectedProject: null,
       activeSessionId: "session-outside-project",
+      sessions: [
+        {
+          id: "session-outside-project",
+          projectId: "auto-generated-workspace-project",
+          workspaceMode: "outside_project",
+        },
+      ],
     })
   })
 })

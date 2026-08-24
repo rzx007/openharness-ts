@@ -27,6 +27,7 @@ export interface DesktopSessionRecord {
   id: string
   parentId?: string
   projectId?: string
+  workspaceMode?: DesktopWorkspaceMode
   cwd: string
   cwdRelative?: string
   title: string
@@ -141,7 +142,6 @@ export interface DesktopDaemonStatus {
 
 export interface DesktopBootstrapData {
   connected: true
-  outsideProjectCwd: string
   projects: DesktopProject[]
   sessions: DesktopSessionRecord[]
   archivedSessions: DesktopSessionRecord[]
@@ -186,13 +186,14 @@ export interface DesktopAuxSessionUpdate {
   view: DesktopSessionView
 }
 
-export interface CreateDesktopSessionInput {
-  projectId?: string
-  cwd: string
+interface CreateDesktopSessionBaseInput {
   model: string
   provider?: string
   permissionMode?: DesktopPermissionMode
 }
+
+export type CreateDesktopSessionInput = CreateDesktopSessionBaseInput &
+  ({ projectId: string; cwd: string } | { projectId?: undefined; cwd?: undefined })
 
 export interface SendDesktopPromptInput {
   sessionId: string
