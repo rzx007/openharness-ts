@@ -252,6 +252,35 @@ describe("listSkillsTool", () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("freshly scans project .agents/skills directory skills", async () => {
+    const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oh-list-agent-skills-"));
+    process.env.OPENHARNESS_CONFIG_DIR = path.join(dir, "config");
+    try {
+      const skillDir = path.join(dir, ".agents", "skills", "agent-skill");
+      await fs.mkdir(path.join(dir, ".git"), { recursive: true });
+      await fs.mkdir(skillDir, { recursive: true });
+      await fs.writeFile(
+        path.join(skillDir, "SKILL.md"),
+        "---\ndescription: Project agent skill\n---\n\nAgent skill body.",
+        "utf-8",
+      );
+
+      const result = await listSkillsTool.execute!({ visibility: "all" }, {
+        cwd: dir,
+        skillRegistry: new SkillRegistry(),
+      });
+
+      const text = (result.content[0] as any).text;
+      expect(text).toContain("agent-skill — Project agent skill");
+      expect(text).toContain("source=project");
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("askUserTool", () => {

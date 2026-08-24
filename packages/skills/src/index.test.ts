@@ -3,6 +3,7 @@ import {
   SkillRegistry,
   SkillLoader,
   parseSkillMarkdown,
+  findProjectSkillDirs,
   BUNDLED_SKILLS,
   type SkillDefinition,
 } from "../src/index.js";
@@ -29,6 +30,7 @@ vi.mock("node:fs/promises", () => ({
 
 const mockedReadFile = vi.mocked(fs.readFile);
 const mockedReaddir = vi.mocked(fs.readdir);
+const mockedStat = vi.mocked(fs.stat);
 
 describe("SkillRegistry", () => {
   it("registers and retrieves a skill", () => {
@@ -137,6 +139,14 @@ describe("parseSkillMarkdown", () => {
     const result = parseSkillMarkdown("default", md);
     expect(result.name).toBe("Custom Name");
     expect(result.description).toBe("A custom skill");
+  });
+
+  it("parses CRLF YAML frontmatter", () => {
+    const md = "---\r\nname: shadcn\r\ndescription: Manage shadcn components\r\nuser-invocable: false\r\n---\r\n\r\n# Body";
+    const result = parseSkillMarkdown("default", md);
+    expect(result.name).toBe("shadcn");
+    expect(result.description).toBe("Manage shadcn components");
+    expect(result.userInvocable).toBe(false);
   });
 
   it("frontmatter with quoted values", () => {
@@ -436,5 +446,33 @@ describe("SkillLoader.discoverMarkdownFiles path-traversal protection", () => {
     const skills = await loader.loadFromDirectory("/skills");
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe("Good");
+  });
+});
+
+describe("findProjectSkillDirs", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("collects .agents, .openharness, and .claude skill dirs from git root to cwd", async () => {
+    mockedStat.mockImplementation(async (target) => {
+      if (String(target).endsWith(path.join("repo", ".git"))) return {} as any;
+      throw new Error("not found");
+    });
+
+    const cwd = path.resolve("/repo/packages/app");
+    const dirs = await findProjectSkillDirs(cwd);
+
+    expect(dirs).toEqual([
+      path.join(path.resolve("/repo"), ".agents", "skills"),
+      path.join(path.resolve("/repo"), ".openharness", "skills"),
+      path.join(path.resolve("/repo"), ".claude", "skills"),
+      path.join(path.resolve("/repo/packages"), ".agents", "skills"),
+      path.join(path.resolve("/repo/packages"), ".openharness", "skills"),
+      path.join(path.resolve("/repo/packages"), ".claude", "skills"),
+      path.join(path.resolve("/repo/packages/app"), ".agents", "skills"),
+      path.join(path.resolve("/repo/packages/app"), ".openharness", "skills"),
+      path.join(path.resolve("/repo/packages/app"), ".claude", "skills"),
+    ]);
   });
 });

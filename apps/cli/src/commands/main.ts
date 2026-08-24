@@ -406,7 +406,8 @@ function buildCliOverrides(options: MainOptions) {
 
 /**
  * 三源加载技能到给定 registry：bundled（最先）→ user（getSkillsDir）→
- * project（cwd/.openharness/skills + cwd/.claude/skills）。register 是覆盖语义，
+ * project（cwd/.agents/skills + cwd/.openharness/skills + cwd/.claude/skills）。
+ * register 是覆盖语义，
  * 同名后者覆盖前者，故顺序即优先级：bundled < user < project。
  * 1. 创建 SkillRegistry 实例
        ↓
