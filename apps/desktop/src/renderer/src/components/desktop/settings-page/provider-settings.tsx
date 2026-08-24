@@ -1,26 +1,4 @@
 import {
-  AiHubMix,
-  Anthropic,
-  Baidu,
-  Bailian,
-  Bedrock,
-  Codex,
-  DeepSeek,
-  Gemini,
-  Groq,
-  Minimax,
-  Mistral,
-  Moonshot,
-  OpenAI,
-  OpenRouter,
-  SiliconCloud,
-  Stepfun,
-  VertexAI,
-  Volcengine,
-  Zhipu,
-  type IconType,
-} from "@lobehub/icons"
-import {
   CheckCircle2,
   CircleAlert,
   CircleCheck,
@@ -80,31 +58,7 @@ import type {
 } from "@shared/provider-types"
 import { scheduleProviderNoticeDismissal } from "./provider-feedback"
 import { CustomProviderDialog } from "./custom-provider-dialog"
-import { createProviderBrandIconResolver } from "./provider-icon"
-
-type ProviderBrandIcon = IconType & { Color?: IconType }
-
-const resolveProviderBrandIcon = createProviderBrandIconResolver<ProviderBrandIcon>({
-  aiHubMix: AiHubMix,
-  anthropic: Anthropic,
-  baidu: Baidu,
-  bailian: Bailian,
-  bedrock: Bedrock,
-  codex: Codex,
-  deepSeek: DeepSeek,
-  gemini: Gemini,
-  groq: Groq,
-  minimax: Minimax,
-  mistral: Mistral,
-  moonshot: Moonshot,
-  openAI: OpenAI,
-  openRouter: OpenRouter,
-  siliconCloud: SiliconCloud,
-  stepfun: Stepfun,
-  vertexAI: VertexAI,
-  volcengine: Volcengine,
-  zhiPu: Zhipu,
-})
+import { resolveProviderBrandIcon, type ProviderBrandIcon } from "./provider-brand-icons"
 
 const popularProviderNames = [
   "openai",
@@ -808,7 +762,6 @@ function ProviderIcon({
   emphasized?: boolean
 }): React.JSX.Element {
   const BrandIcon = provider ? resolveProviderBrandIcon(provider.name) : undefined
-  const RenderedBrandIcon = BrandIcon?.Color ?? BrandIcon
 
   return (
     <span
@@ -817,8 +770,8 @@ function ProviderIcon({
         emphasized ? "size-12 shadow-xs [&_svg]:size-5" : "size-10 [&_svg]:size-4"
       )}
     >
-      {RenderedBrandIcon ? (
-        <ProviderBrandMark icon={RenderedBrandIcon} />
+      {BrandIcon ? (
+        <ProviderBrandMark icon={BrandIcon} />
       ) : (
         <Sparkles aria-hidden="true" />
       )}
@@ -826,7 +779,7 @@ function ProviderIcon({
   )
 }
 
-function ProviderBrandMark({ icon: Icon }: { icon: IconType }): React.JSX.Element {
+function ProviderBrandMark({ icon: Icon }: { icon: ProviderBrandIcon }): React.JSX.Element {
   return <Icon aria-hidden="true" />
 }
 
