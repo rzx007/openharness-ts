@@ -11,7 +11,7 @@ import {
 import type { CheckpointMessageLike } from "./session-memory.js";
 
 /**
- * 持久记忆提取（移植自 Python services/memory_extract/）。
+ * 持久记忆提取。
  *
  * 回合结束后让 LLM 从最近对话提出「值得长期保存的事实」（JSON，≤3 条），
  * 写进 @openharness/memory 的 MemoryManager（签名去重由 manager 兜底）。

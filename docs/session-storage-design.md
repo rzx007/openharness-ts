@@ -4,27 +4,22 @@
 >
 > daemon 的权威 `SessionStore` 位于 `packages/services/src/session-runtime`，包含 session/input/message/part/event/run/task/permission request，使用 daemon 独占的 SQLite。当前流程见 [Daemon Application Architecture](./daemon-application-architecture.md)；固定记录格式见 [Durable Execution Data Model](./durable-execution-data-model.md)。
 
-## 现状缺口
+## 历史背景
 
-TS（apps/cli main.ts 自带逻辑 + services/session 旧 SessionStorage 类）：
+旧 TS 入口（apps/cli main.ts 自带逻辑 + services/session 旧 SessionStorage 类）曾经有这些缺口：
 - 会话平铺在全局 sessions 目录，**多项目混在一起**；
 - 无 `latest.json`（`--continue` 靠文件名排序猜最新）；
 - 不持久化 tool_metadata；无 Markdown 导出；无 summary 字段。
 
-## 移植面（packages/services/src/session/storage.ts）
+后来曾经实现过一版项目级 JSON snapshot，位置是 `packages/services/src/session/storage.ts`。
+这套代码已经移除；本节只保留历史设计意图，不能作为当前 API 或测试入口引用。
 
-- `getProjectSessionDir(cwd)`：`<sessionsDir>/<项目名>-<sha1(cwd)前12>/`
-  （哈希式与 session-memory 完全一致）。
-- `saveSessionSnapshot({cwd, model, systemPrompt, messages, usage, sessionId?, toolMetadata?})`：
+- 项目目录形如 `<sessionsDir>/<项目名>-<sha1(cwd)前12>/`。
+- snapshot 保存逻辑曾经计划：
   - `latest.json` + `session-<id>.json` **双写**（原子写）；
   - tool_metadata 按白名单 `_PERSISTED_TOOL_METADATA_KEYS` 过滤 + 深度 sanitize；
   - summary 取首条非空 user 消息前 80 字符；记 message_count/created_at。
-- `loadSessionSnapshot(cwd)`：读 latest.json。
-- `listSessionSnapshots(cwd, limit=20)`：session-*.json 新→旧 + latest 去重补位，
-  按 created_at 排序。
-- `loadSessionById(cwd, id)`：named 优先，latest 兜底（id 匹配或 "latest"）。
-- `exportSessionMarkdown({cwd, messages})`：transcript.md（角色分节 +
-  ```tool / ```tool-result 围栏）。
+- snapshot 读取逻辑曾经计划支持 latest、列表、按 id 读取和 transcript markdown 导出。
 
 ## 适配决策
 
@@ -32,21 +27,18 @@ TS（apps/cli main.ts 自带逻辑 + services/session 旧 SessionStorage 类）�
   不引 pydantic 式校验。配对修复做在 **load 侧**（Python save/load 双侧）：
   读回时剔除尾部悬挂 tool_use 与孤儿 tool_result——崩溃/MaxTurns 中断落盘的
   断链历史 resume 后会被 API 直接 400，必须修复。
-- ✅ toolMetadata 已投喂：`saveSessionSnapshot()` 调用处传入
-  `engine.getToolMetadata?.()` ，`persistableToolMetadata()` 按白名单过滤后落盘。
-- ✅ Ctrl+C 保存：REPL `rl.on("close")` 改为 async IIFE，退出前 `await saveSessionSnapshot`。
+- 旧项目级 JSON snapshot API 已从 `@openharness/services` 导出中移除。
 - ✅ `/export` 命令：`/export [filename] [--json]`，`.json` 后缀或 `--json` 标志
   输出 JSON（session_id/model/exported_at/messages），否则 Markdown；默认写
-  `~/.openharness-ts/data/exports/`。`exportSessionMarkdown` 仍用于 session 目录
-  transcript 落盘，`/export` 走独立渲染路径（不依赖 cwd/storage）。
+  `~/.openharness-ts/data/exports/`。`/export` 走独立渲染路径（不依赖旧 cwd/storage）。
 - 留待：systemPrompt 传空串、usage 为 TS camelCase（与 Python 快照不互换）；
   compact 侧读回 checkpoint。
-- 已删除未被主线使用的 `SessionStorage` 类与 `~/.openharness-ts/sessions/<id>.json` 平铺回退；CLI 只调用本页的项目级 snapshot functions。
+- 已删除未被主线使用的 `SessionStorage` 类、`~/.openharness-ts/sessions/<id>.json`
+  平铺回退，以及项目级 JSON snapshot functions。
 - `/dream` 的 `listSessionsTouchedSince` 当前扫 `getSessionsDir()` 平铺根，
   接线后改传项目分目录。
 
 ## 测试
 
-- 路径哈希稳定；双写一致；tool_metadata 白名单（额外键被丢弃、Path→字符串
-  等 sanitize）；summary 提取；list 排序/去重/limit；loadById 三分支；
-  markdown 导出结构。OPENHARNESS_CONFIG_DIR 临时目录隔离。
+- 当前权威存储测试在 `packages/services/src/session-runtime/__test__`。
+- 旧文件型 snapshot 测试已随 `packages/services/src/session` 删除。

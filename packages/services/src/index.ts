@@ -14,19 +14,6 @@ export {
   type DurableEventScope,
   type PreparedDurableEvent,
 } from "./session-runtime";
-export {
-  getProjectSessionDir,
-  saveSessionSnapshot,
-  loadSessionSnapshot,
-  listSessionSnapshots,
-  loadSessionById,
-  deleteSessionById,
-  exportSessionMarkdown,
-  type StoredMessageLike,
-  type SessionSnapshotPayload,
-  type SessionListItem,
-  type SaveSessionOptions,
-} from "./session";
 
 export {
   computeNextScheduledTime,

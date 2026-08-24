@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerPluginAgents } from "@openharness/coordinator";
 
 vi.mock("@openharness/services", () => ({
-  getProjectSessionDir: vi.fn(),
   startDreamNow: vi.fn(),
 }));
 

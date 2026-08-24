@@ -6,7 +6,7 @@ import { getDataDir } from "@openharness/core";
 import { estimateTokens } from "./token-estimation/index.js";
 
 /**
- * 文件型会话记忆 checkpoint（移植自 Python services/session_memory/）。
+ * 文件型会话记忆 checkpoint。
  *
  * compact 连续性的确定性底座：每次更新把 task_focus 状态 + 最近消息摘要写成
  * `<dataDir>/session-memory/<项目名>-<sha1(cwd)前12>/<sessionId>.md`，
