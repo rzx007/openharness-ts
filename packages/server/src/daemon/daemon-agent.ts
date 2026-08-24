@@ -34,7 +34,10 @@ export interface CreateDaemonAgentContext {
   options: OpenHarnessAgentOptions;
 }
 
-/** Low-level creation seam used by tests and embedded hosts. */
+/**
+ * 造 Agent 的最低层缝：测试和嵌入式宿主可以自己 new，不走 createDefaultNodeAgent。
+ * 真正生产路径由 loader 调 createDefaultNodeAgent。
+ */
 export type CreateDaemonAgent = (
   context: CreateDaemonAgentContext,
 ) => Promise<OpenHarnessAgent>;
@@ -45,7 +48,10 @@ export interface LoadDaemonAgentContext {
   parts: SessionMessagePartRecord[];
 }
 
-/** Produces a fully initialized daemon-owned Agent for one durable session. */
+/**
+ * AgentPool.acquireSession 用的入口：给定 durable session + 历史，返回一个已接线的活 Agent。
+ * 不 submitMessage；跑 prompt 是 SessionRunExecutor 的事。
+ */
 export type LoadDaemonAgent = (
   context: LoadDaemonAgentContext,
 ) => Promise<OpenHarnessAgent>;
@@ -60,6 +66,10 @@ export interface DaemonAgentLoaderOptions {
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
   workflowRepository?: WorkflowRunRepository;
+  /**
+   * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
+   * 要等 Agent 造好才能建（投影要用 agent.id），但 onEvent 在造 Agent 时就得先挂上。
+   */
   createEventSink?(
     agent: OpenHarnessAgent,
     session: SessionRecord,
@@ -67,8 +77,14 @@ export interface DaemonAgentLoaderOptions {
 }
 
 /**
- * Owns the only durable-session -> live-Agent translation in the daemon.
- * The returned loader also restores transcript history before exposing the Agent.
+ * daemon 里「durable session → 内存 Agent」的唯一翻译点。
+ *
+ * AgentPool 每个 session 调一次 loader；返回的 Agent 已经：
+ * - 带上该会话的 cwd / 模型 / 权限 / Job / Terminal
+ * - loadHistory 灌过 store 里的 transcript
+ * - onEvent 接到投影（字、工具、这次跑完都从这里进会话记录，再推到窗口）
+ *
+ * 没有 settings 也没有 createAgent 时返回 undefined，AgentPool.configured 就是 false。
  */
 export function createDaemonAgentLoader(
   options: DaemonAgentLoaderOptions,
@@ -86,9 +102,15 @@ export function createDaemonAgentLoader(
     if (!options.createAgent && !settings)
       throw new Error("Agent settings are not configured");
 
+    // 投影（createEventSink）要等 Agent 造好才有。造的过程中事件可能已经来了，不能丢。
+    // pendingEvents：投影还没好时的纸箱
+    // eventSink：准备好的投影
+    // sinkBinding：正在把纸箱倒给投影；倒完之前，新事件先等着，别插队
     let eventSink: AgentEventListener | undefined;
     let sinkBinding: Promise<void> | undefined;
     const pendingEvents: Parameters<AgentEventListener>[0][] = [];
+
+    // 没接线权限宿主时一律拒绝，避免工具在 daemon 里默认放行写操作。
     const requestPermission =
       options.requestPermission ??
       (async () => ({
@@ -113,6 +135,8 @@ export function createDaemonAgentLoader(
       },
       ...(options.createEventSink
         ? {
+            // 窗口上的字从这里来：事件 → 投影 → 会话记录 → 推给 UI。
+            // 失败会打断这次跑；不是旁路看看就算了。
             onEvent: async (event) => {
               if (!eventSink) {
                 pendingEvents.push(event);
@@ -133,7 +157,10 @@ export function createDaemonAgentLoader(
         })
       : await createDefaultNodeAgent(agentOptions);
     try {
+      // 重启 daemon / 热加载 session 时，内存 Agent 是空的；必须先灌历史再对外暴露，
+      // 否则下一句 prompt 会丢上下文。
       agent.loadHistory(transcriptToAgentMessages(history, parts));
+      // Agent 有了，投影才能建。先把纸箱里攒的事件按顺序喂给它。
       eventSink = options.createEventSink?.(agent, session);
       if (eventSink && pendingEvents.length > 0) {
         const sink = eventSink;
@@ -159,6 +186,7 @@ export function createDaemonAgentLoader(
   };
 }
 
+/** 项目级设置优先于进程级，再退回构造时传入的静态 settings。 */
 async function resolveSettingsForSession(
   options: DaemonAgentLoaderOptions,
   cwd: string,
@@ -170,6 +198,10 @@ async function resolveSettingsForSession(
   );
 }
 
+/**
+ * 把 session.metadata.runtime 和全局 settings 合成 Agent 配置。
+ * 会话上存过的 model / permissionMode 覆盖默认值，这样换模型不用重建整个 daemon。
+ */
 function agentConfigurationFromSession(
   session: SessionRecord,
   settings: Settings | undefined,
@@ -196,6 +228,8 @@ function agentConfigurationFromSession(
     effort: runtime.effort,
   };
   if (runtime.sessionMode === "coordinator") {
+    // coordinator 模式换一套编排 prompt + 工具白名单（Agent/Job*/Workflow），
+    // 会话自己的 systemPrompt 降级成「额外说明」附录，避免盖掉协调者角色。
     configuration.systemPrompt = coordinatorSystemPrompt({
       settings,
       cwd: session.cwd,

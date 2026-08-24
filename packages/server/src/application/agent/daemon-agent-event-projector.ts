@@ -51,14 +51,20 @@ export interface DaemonAgentEventProjectorContext {
   log(event: ObservabilityEvent): void;
 }
 
-/** Applies framework execution facts to daemon-owned durable product state. */
+/**
+ * 把 Agent 的 onEvent 事件写成会话记录，再推给窗口。
+ *
+ * 每个会话一条投影，从 daemon 的 AgentPool.onEvent 挂上来。
+ * 事件来源：模型吐字、工具调用、子 Agent 活塞、用户消息、会话生命周期。
+ * 投影目标：会话记录、会话状态、执行投影、会话日志、观测事件。
+ */
 export class DaemonAgentEventProjector {
   private readonly transcripts = new Map<string, ActiveTranscriptProjectionState>();
   private readonly children = new Map<string, ChildProjectionState>();
   private lastAppliedSequence = 0;
   private pendingSettlement?: PendingEventSettlement;
 
-  constructor(private readonly context: DaemonAgentEventProjectorContext) {}
+  constructor(private readonly context: DaemonAgentEventProjectorContext) { }
 
   async apply(event: AgentEvent): Promise<void> {
     if (this.hasDurableSettlementStore()) await this.reconcileDurableSettlements();
@@ -169,19 +175,19 @@ export class DaemonAgentEventProjector {
         ...(isRuntimeEffort(spawn.effort) ? { effort: spawn.effort } : {}),
       };
       this.context.store.createSession({
-          id: sessionId,
-          parentId: parent.id,
-          cwd,
-          model,
-          title: `${spawn.agent}@${spawn.team ?? "default"}`,
-          agent: spawn.agent,
-          metadata: patchSessionRuntimeMetadata({
-            ...spawn.metadata,
-            team: spawn.team ?? "default",
-            isolate: spawn.isolate,
-            childId,
-            ...(worktree ? { worktree } : {}),
-          }, runtimePatch),
+        id: sessionId,
+        parentId: parent.id,
+        cwd,
+        model,
+        title: `${spawn.agent}@${spawn.team ?? "default"}`,
+        agent: spawn.agent,
+        metadata: patchSessionRuntimeMetadata({
+          ...spawn.metadata,
+          team: spawn.team ?? "default",
+          isolate: spawn.isolate,
+          childId,
+          ...(worktree ? { worktree } : {}),
+        }, runtimePatch),
       });
       this.context.events.publishSince(before);
     }
@@ -191,20 +197,20 @@ export class DaemonAgentEventProjector {
     if (!taskId) {
       taskId = childId;
       const registered = bridge.registerChildExecution({
-          id: childId,
-          description: spawn.description,
-          cwd,
-          sessionId: parent.id,
-          childSessionId: sessionId,
-          prompt: spawn.prompt,
-          onInput: async (content) => {
-            const child = this.context.rootAgent.children.get(childId);
-            if (!child) throw new Error(`Live child not found: ${childId}`);
-            await child.send({ content });
-          },
-          onStop: async () => {
-            await this.context.rootAgent.children.get(childId)?.interrupt("Child agent stopped");
-          },
+        id: childId,
+        description: spawn.description,
+        cwd,
+        sessionId: parent.id,
+        childSessionId: sessionId,
+        prompt: spawn.prompt,
+        onInput: async (content) => {
+          const child = this.context.rootAgent.children.get(childId);
+          if (!child) throw new Error(`Live child not found: ${childId}`);
+          await child.send({ content });
+        },
+        onStop: async () => {
+          await this.context.rootAgent.children.get(childId)?.interrupt("Child agent stopped");
+        },
       });
       if (registered.id !== taskId) throw new Error(`Child task identity conflict: ${registered.id}/${taskId}`);
     }
@@ -341,7 +347,7 @@ export class DaemonAgentEventProjector {
       applied = direct
         ? this.context.transcriptProjection.projectStreamEvent(state, stream)
         : this.context.store.transaction(() =>
-            this.context.transcriptProjection.projectStreamEvent(state, stream));
+          this.context.transcriptProjection.projectStreamEvent(state, stream));
     } catch (error) {
       restoreTranscript(state, stateSnapshot);
       throw error;
@@ -438,10 +444,10 @@ export class DaemonAgentEventProjector {
         const result = event.type === "run.completed"
           ? { status: "completed" as const, output: event.data.output }
           : {
-              status: interrupted ? "interrupted" as const : "failed" as const,
-              output: event.data.output ?? error ?? "",
-              ...(error ? { error } : {}),
-            };
+            status: interrupted ? "interrupted" as const : "failed" as const,
+            output: event.data.output ?? error ?? "",
+            ...(error ? { error } : {}),
+          };
         await child.bridge.completeChildExecution(child.taskId, result);
       }
     }

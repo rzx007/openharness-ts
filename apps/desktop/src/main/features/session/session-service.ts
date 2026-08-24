@@ -67,6 +67,12 @@ class DesktopSessionService {
   private embeddedUrl: string | null = null
   private readonly subscriptions = new SessionSubscriptionRegistry()
 
+  /**
+   * 启动壳层数据：项目、侧边栏会话列表、模型与默认权限。
+   * 走 GET /sessions 和 /projects，不拉某个会话的消息。
+   * 对话正文要等 openSession → GET /sessions/:id/state。
+   * 设置里没有可用模型时，会把解析出的默认 model/provider 写回 daemon。
+   */
   async bootstrap(): Promise<DesktopBootstrapData> {
     const client = await this.getClient()
     const [settings, providers, allSessions, projectRecords] = await Promise.all([

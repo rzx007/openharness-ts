@@ -24,11 +24,21 @@ export interface ExecuteSessionRunInput {
   runId: string;
 }
 
-/** Executes one admitted run through the framework-owned AgentRunHandle. */
+/**
+ * 把一条已经入队的 durable run 交给内存里的 Agent 真正执行。
+ *
+ * 调用方是 SessionRunCoordinator：每个 session 一条车道，轮到这条 run 时才会进来。
+ * HTTP admitPrompt 此时已经返回 202；这里的 await 只挡住车道，不挡住客户端。
+ *
+ * 正常终态（completed / failed / interrupted）由 Agent 事件经 DaemonAgentEventProjector
+ * 写进 SessionStore。本类成功路径不再 updateRun；catch 只覆盖「agent 还没发出终态事件」
+ * 的失败（例如 acquireSession 抛错），避免 run 永远停在 pending。
+ */
 export class SessionRunExecutor {
   constructor(private readonly context: SessionRunExecutorContext) {}
 
   async execute(input: ExecuteSessionRunInput, workContext: SessionRunWorkContext): Promise<void> {
+    // 测试或未接线的 daemon：store 里可以有 run，但没有可执行的 agent。
     if (!this.context.agentPool.configured) return;
     const { sessionId, inputId, runId } = input;
     try {
@@ -36,8 +46,13 @@ export class SessionRunExecutor {
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
+
+      // 同一 session 复用同一个 agent，这样历史、子 agent、工具上下文能接着用。
       const agent = await this.context.agentPool.acquireSession(sessionId);
       agent.setModel(readSessionRuntimeConfig(session).model);
+
+      // 把 store 里已有的 inputId/runId/traceId 传进去，投影层才能把流式事件对上这条 durable run。
+      // 不要让 agent 自己再生成一套 id，否则 SSE 里的 run 和 HTTP 回的 run 会对不上。
       const run = agent.submitMessage(admitted.content, {
         signal: workContext.signal,
         delivery: admitted.delivery,
@@ -48,10 +63,19 @@ export class SessionRunExecutor {
           traceId: this.context.traceIdForRun(runId),
         },
       });
+
+      // 先把活句柄交给 coordinator，排队中的 steer / interrupt 才能打到这次 submitMessage 上。
+      // 若在 register 前已经被 abort，coordinator 会立刻 interrupt 这个 handle。
       await workContext.registerHandle(run);
+
+      // 模型回合、工具、JobWait 都在这次 result 里。成功时 projector 已经把 run 标成 completed。
       await run.result;
+
+      // 只在成功走完之后做记忆/个性化/auto-dream。失败路径不跑，避免半截对话被写进长期记忆。
       await this.context.postRunMaintenance?.run(sessionId, runId, agent);
     } catch (error) {
+      // 这次 run 把 session agent 弄脏了（或根本没创建成功）：关掉，下次 acquire 会新建。
+      // close 失败不能盖住原始错误；先记日志，再继续结算 run。
       let cleanupError: unknown;
       try {
         await this.context.agentPool.close(sessionId);
@@ -69,7 +93,10 @@ export class SessionRunExecutor {
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
       }
+
+      // projector / interrupt 已经写下终态就不要再改：否则会把 completed 覆盖成 failed。
       if (current && ["completed", "failed", "interrupted"].includes(current.status)) return;
+
       const message = error instanceof Error ? error.message : String(error);
       const traceId = this.context.traceIdForRun(runId);
       const interrupted = error instanceof RunInterruptedError || workContext.signal.aborted;

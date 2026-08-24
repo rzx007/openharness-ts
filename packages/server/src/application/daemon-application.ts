@@ -79,6 +79,9 @@ export interface DaemonApplicationOptions {
   ownerStaleAfterMs?: number;
 }
 
+/**
+ * daemon 对外暴露的能力面。HTTP 路由只调这些，不自己造 Agent、不自己写会话记录。
+ */
 export interface DurableAgentApplication {
   readonly store: SessionStore;
   readonly sessions: SessionApplicationService;
@@ -99,7 +102,14 @@ export interface DurableAgentApplication {
   close(): Promise<void>;
 }
 
-/** Daemon-owned durable application graph, independent from HTTP routing and listening. */
+/**
+ * daemon 的装配根：把「会话记录、活 Agent、投影、跑 prompt 的车道」接成一张图。
+ * 不管听端口、不管路由；`POST /prompts` 最终会进这里的 sessions.admitPrompt。
+ *
+ * 一条用户消息大概走：
+ * sessions 收下 → runEngine 排队 → runExecutor 调 Agent
+ * → onEvent 进投影 → 写成会话记录 → events 推给窗口。
+ */
 export class DaemonApplication implements DurableAgentApplication {
   readonly store: SessionStore;
   readonly permissions: StorePermissionBroker;
@@ -120,6 +130,7 @@ export class DaemonApplication implements DurableAgentApplication {
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
   private readonly executionProjector: SessionExecutionProjector;
+  /** 正在跑的子 Agent 会话。主会话池不能把它们再当成普通会话 acquire。 */
   private readonly liveChildren = new LiveChildAgentDirectory();
   private readonly operationGate = new DaemonOperationGate();
   private readonly agentPool: AgentPool;
@@ -133,6 +144,7 @@ export class DaemonApplication implements DurableAgentApplication {
   constructor(private readonly options: DaemonApplicationOptions) {
     const { store } = options;
     this.store = store;
+    // 同一份会话库同时只允许一个 daemon 当主人。心跳断了，别人才能接管。
     this.ownerLease = store.acquireApplicationOwner({
       ownerId: options.ownerId ?? `daemon:${process.pid}:${randomUUID()}`,
       pid: process.pid,
@@ -153,6 +165,8 @@ export class DaemonApplication implements DurableAgentApplication {
     }, options.ownerHeartbeatMs ?? 5_000);
     this.ownerHeartbeat.unref?.();
     try {
+    // 上次进程可能是被杀掉的：内存里的 Agent/进程都没了，store 里却还挂着 running。
+    // 先把这些半截状态结掉，再对外服务，免得窗口以为还在跑。
     recoverProjectionSettlements(store);
     store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
     store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
@@ -160,6 +174,7 @@ export class DaemonApplication implements DurableAgentApplication {
     store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
     store.finalizeClosingSessions();
 
+    // events：窗口订的 SSE。eventPublisher：各处写完 store 后，把增量广播出去。
     this.events = new ApplicationEventService(store);
     this.eventPublisher = new SessionEventPublisher(store, this.events);
     this.workflows = new SessionWorkflowRunRepository(
@@ -175,6 +190,8 @@ export class DaemonApplication implements DurableAgentApplication {
         this.eventPublisher.publishSince(previousEventSeq),
       logger: options.log,
     });
+    // transcript：把模型吐出的字/工具块写成消息。
+    // executionProjector：子 Agent、后台 shell 在会话里的那条「任务」记录。
     this.transcriptProjection = new SessionTranscriptProjection(store);
     this.executionProjector = new SessionExecutionProjector({
       store,
@@ -189,6 +206,7 @@ export class DaemonApplication implements DurableAgentApplication {
       getDetachedProcessSupervisor: (scope) => getDetachedProcessSupervisor(scope),
       events: this.eventPublisher,
     });
+    // JobWait / JobList 走这里：终端、后台 shell、子 Agent、workflow 合成一张本会话任务表。
     this.jobs = new DaemonJobService(
       store,
       this.terminals,
@@ -198,6 +216,7 @@ export class DaemonApplication implements DurableAgentApplication {
       this.workflows,
     );
 
+    // 每个会话第一次用时，在这里造活 Agent，并接上投影。
     const loadAgent = createDaemonAgentLoader({
       settings: options.settings,
       getSettings: options.getSettings,
@@ -211,6 +230,7 @@ export class DaemonApplication implements DurableAgentApplication {
         ((session) => this.jobs.createAgentHost(session)),
       workflowRepository: this.workflows,
       requestPermission: async (request, context) => {
+        // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。
         return await this.permissions.ask({
           sessionId: context.sessionId,
           runId: context.runId,
@@ -230,6 +250,7 @@ export class DaemonApplication implements DurableAgentApplication {
         trigger: async (id) => this.schedules.trigger(id),
         listRuns: async (taskId) => this.schedules.listRuns({ taskId }),
       },
+      // 这就是投影：Agent 的 onEvent 进这里，写成会话记录再推给窗口。
       createEventSink: (agent, session) => {
         const projector = new DaemonAgentEventProjector({
           projectorId: `${DAEMON_AGENT_PROJECTOR}:${agent.id}`,
@@ -245,12 +266,14 @@ export class DaemonApplication implements DurableAgentApplication {
         return (event) => projector.apply(event);
       },
     });
+    // 一个会话一个热着的 Agent。子 Agent 自己占会话，不要被这个池子抢去。
     this.agentPool = new AgentPool({
       store,
       loadAgent,
       isSessionExternallyOwned: (sessionId) => this.liveChildren.has(sessionId),
     });
 
+    // 一次 prompt 跑完才做：写记忆、个性化、auto-dream。失败的半截对话不写进去。
     const postRunMaintenance = new SessionPostRunMaintenance({
       store,
       getSettings: async (cwd) =>
@@ -263,6 +286,7 @@ export class DaemonApplication implements DurableAgentApplication {
       lastConsolidatedAt: readLastConsolidatedAt,
       autoDream: executeAutoDream,
     });
+    // 车道轮到这条 run 时，真正 submitMessage 的地方。
     const runExecutor = new SessionRunExecutor({
       store,
       agentPool: this.agentPool,
@@ -272,6 +296,7 @@ export class DaemonApplication implements DurableAgentApplication {
       log: options.log,
       postRunMaintenance,
     });
+    // 每个会话一条车道：收下 prompt、排队、interrupt。HTTP 202 之后工作在这里继续。
     this.runEngine = new SessionRunEngine({
       store,
       agentPool: this.agentPool,
@@ -294,6 +319,7 @@ export class DaemonApplication implements DurableAgentApplication {
       operationGate: this.operationGate,
       events: this.eventPublisher,
     });
+    // HTTP / 桌面看到的会话 API：建会话、admitPrompt、停、改模型，都从这里进。
     this.sessions = new SessionApplicationService({
       store,
       runEngine: this.runEngine,
@@ -310,6 +336,7 @@ export class DaemonApplication implements DurableAgentApplication {
     });
     this.schedules = new ScheduledTaskService({
       store,
+      // 定时任务不是另一套执行器：到期后也是 admitPrompt，走上面同一条 Agent 车道。
       execute: async (task, scheduledRun) => {
         const projectCwd = task.projectPaths[0];
         let executionCwd = projectCwd;
@@ -462,6 +489,7 @@ export class DaemonApplication implements DurableAgentApplication {
       },
     });
     this.queries = new SessionQueryService(store);
+    // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
     this.startupRecovery = recoverInterruptedWorkflows({
       workflows: this.workflows,
     }).then(
@@ -494,6 +522,10 @@ export class DaemonApplication implements DurableAgentApplication {
     return this.closePromise;
   }
 
+  /**
+   * 关机顺序有意为之：先停新活（定时、control），再拆终端和后台进程，
+   * 最后放掉主人锁、关 store。中途失败都攒着，尽量拆干净再一起报。
+   */
   private async closeWork(): Promise<void> {
     const failures: unknown[] = [];
     try {
@@ -555,6 +587,7 @@ export class DaemonApplication implements DurableAgentApplication {
       throw new AggregateError(failures, "Daemon application shutdown failed");
   }
 
+  /** 启动没完或已经在关，会话 API 直接拒绝，避免半套图还在对外收 prompt。 */
   private assertReady(): void {
     if (this.readyState === "ready") return;
     if (this.readyState === "failed") {
@@ -566,6 +599,7 @@ export class DaemonApplication implements DurableAgentApplication {
     throw new Error("Durable Agent Application is not ready");
   }
 
+  /** 一次 run 全程用同一个 traceId，日志和投影才能对上。没有就补一个写回 store。 */
   private traceIdForRun(runId: string): string {
     const run = this.options.store.getRun(runId);
     const traceId = normalizeTraceId(run?.metadata.traceId);
