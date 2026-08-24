@@ -19,7 +19,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "catalog:",
     "@openharness/core": "workspace:*",
-    "@openharness/utils": "workspace:*",
     "openai": "catalog:"
   },
   "devDependencies": {

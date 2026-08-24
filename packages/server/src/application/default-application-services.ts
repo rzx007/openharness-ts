@@ -114,8 +114,6 @@ function coerceConfigValue(key: string, value: string): unknown {
   }
   if ([
     "verbose",
-    "vimMode",
-    "voiceMode",
     "fastMode",
     "memory.enabled",
     "memory.sessionMemoryEnabled",

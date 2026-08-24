@@ -56,7 +56,6 @@
     "@openharness/skills": "workspace:*",
     "@openharness/themes": "workspace:*",
     "@openharness/tools": "workspace:*",
-    "@openharness/utils": "workspace:*",
     "@types/node": "catalog:",
     "@types/bun": "^1.3.14",
     "tsx": "^4.21.0",

@@ -498,10 +498,6 @@ OpenHarness-ts/
 | `CLI`               | Commander.js 命令行：主命令 + auth/mcp/plugin/channels/workflow/sandbox/daemon/serve/config 子命令；已安排任务通过 Agent 对话创建并由 Desktop 管理                           |
 | `TUI Frontend`      | 默认交互面：opentui + React 19（Bun）。`ohs` / `ohs --tui` 经 `useServerSync` attach daemon，消费 `@openharness/client` reducer。流程见 [docs/tui-flow.md](docs/tui-flow.md) |
 | `Print`             | 用户 headless：ensure daemon → `@openharness/client` admitPrompt + SSE 渲染 stdout                                                                                           |
-| `ThemeManager`      | 主题系统：default / dark / minimal / cyberpunk / solarized 5 个内置主题                                                                                                      |
-| `VimModeHandler`    | Vim 模态编辑：normal / insert / visual / command 模式切换                                                                                                                    |
-| `KeyBindingManager` | 快捷键管理：模式感知的按键绑定解析                                                                                                                                           |
-
 ---
 
 ## 运行流程

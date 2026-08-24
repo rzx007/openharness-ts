@@ -155,8 +155,6 @@ export interface Settings {
   daemon?: DaemonConfig;
   theme?: string;
   outputStyle?: string;
-  vimMode?: boolean;
-  voiceMode?: boolean;
   fastMode?: boolean;
   effort?: "low" | "medium" | "high";
   passes?: number;

@@ -20,8 +20,6 @@ export function coerceConfigValue(key: string, value: string): unknown {
     }
 
     case "verbose":
-    case "vimMode":
-    case "voiceMode":
     case "fastMode":
     case "memory.enabled":
     case "memory.sessionMemoryEnabled":

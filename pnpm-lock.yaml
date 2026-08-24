@@ -180,9 +180,6 @@ importers:
       '@openharness/tools':
         specifier: workspace:*
         version: link:../../packages/tools
-      '@openharness/utils':
-        specifier: workspace:*
-        version: link:../../packages/utils
       '@types/bun':
         specifier: ^1.3.14
         version: 1.3.14
@@ -512,9 +509,6 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
-      '@openharness/utils':
-        specifier: workspace:*
-        version: link:../utils
       openai:
         specifier: 'catalog:'
         version: 4.104.0(ws@8.20.0)(zod@3.25.76)
@@ -534,22 +528,6 @@ importers:
       '@openharness/api':
         specifier: workspace:*
         version: link:../api
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.19.17
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: 'catalog:'
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
-
-  packages/bridge:
-    dependencies:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
@@ -645,9 +623,6 @@ importers:
       '@openharness/terminal':
         specifier: workspace:*
         version: link:../terminal
-      '@openharness/utils':
-        specifier: workspace:*
-        version: link:../utils
       zod:
         specifier: 'catalog:'
         version: 3.25.76
@@ -686,22 +661,6 @@ importers:
       '@openharness/protocol':
         specifier: workspace:*
         version: link:../protocol
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.19.17
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: 'catalog:'
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
-
-  packages/keybindings:
-    dependencies:
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1089,9 +1048,6 @@ importers:
       '@openharness/terminal':
         specifier: workspace:*
         version: link:../terminal
-      '@openharness/utils':
-        specifier: workspace:*
-        version: link:../utils
       diff:
         specifier: 'catalog:'
         version: 7.0.0
@@ -1102,50 +1058,6 @@ importers:
       '@types/diff':
         specifier: 'catalog:'
         version: 7.0.2
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.19.17
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: 'catalog:'
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
-
-  packages/utils:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.19.17
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: 'catalog:'
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
-
-  packages/vim:
-    dependencies:
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.19.17
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: 'catalog:'
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
-
-  packages/voice:
-    dependencies:
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.17
