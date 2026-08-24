@@ -26,8 +26,7 @@
     "@openharness/services": "workspace:*",
     "@openharness/skills": "workspace:*",
     "@openharness/terminal": "workspace:*",
-    "diff": "catalog:",
-    "zod": "catalog:"
+    "diff": "catalog:"
   },
   "devDependencies": {
     "@types/diff": "catalog:",

@@ -30,7 +30,6 @@
     "@openharness/plugins": "workspace:*",
     "@openharness/protocol": "workspace:*",
     "@openharness/prompts": "workspace:*",
-    "@openharness/sandbox": "workspace:*",
     "@openharness/services": "workspace:*",
     "@openharness/skills": "workspace:*",
     "@openharness/terminal": "workspace:*",

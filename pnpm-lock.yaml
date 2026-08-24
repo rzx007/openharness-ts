@@ -547,9 +547,6 @@ importers:
       '@larksuiteoapi/node-sdk':
         specifier: ^1.60.0
         version: 1.60.0
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
       '@openharness/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -581,10 +578,6 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/commands:
-    dependencies:
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -623,9 +616,6 @@ importers:
       '@openharness/terminal':
         specifier: workspace:*
         version: link:../terminal
-      zod:
-        specifier: 'catalog:'
-        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -695,10 +685,6 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/memory:
-    dependencies:
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -711,10 +697,6 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/output-styles:
-    dependencies:
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -867,9 +849,6 @@ importers:
       '@openharness/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@openharness/sandbox':
-        specifier: workspace:*
-        version: link:../sandbox
       '@openharness/services':
         specifier: workspace:*
         version: link:../services
@@ -934,10 +913,6 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/skills:
-    dependencies:
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1051,9 +1026,6 @@ importers:
       diff:
         specifier: 'catalog:'
         version: 7.0.0
-      zod:
-        specifier: 'catalog:'
-        version: 3.25.76
     devDependencies:
       '@types/diff':
         specifier: 'catalog:'

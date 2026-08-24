@@ -18,8 +18,7 @@
   },
   "dependencies": {
     "@openharness/jobs": "workspace:*",
-    "@openharness/terminal": "workspace:*",
-    "zod": "catalog:"
+    "@openharness/terminal": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
