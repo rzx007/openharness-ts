@@ -57,7 +57,10 @@ import type {
   ChannelDeliveryStatus,
 } from "@openharness/protocol";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
-import { defaultDurableEventRegistry, type DurableEventRegistry } from "./event-registry.js";
+import {
+  defaultDurableEventRegistry,
+  type DurableEventRegistry,
+} from "./event-registry.js";
 
 import {
   DEFAULT_DELTA_FLUSH_BYTES,
@@ -104,7 +107,10 @@ export interface StoredWorkflowRunInput {
   }>;
 }
 
-export interface StoredWorkflowRunRecord extends Omit<StoredWorkflowRunInput, "taskAttempts"> {}
+export interface StoredWorkflowRunRecord extends Omit<
+  StoredWorkflowRunInput,
+  "taskAttempts"
+> {}
 
 export interface ApplicationOwnerLease {
   ownerId: string;
@@ -116,7 +122,9 @@ export interface ApplicationOwnerLease {
 
 export class ApplicationOwnerConflictError extends Error {
   constructor(readonly activeOwner: ApplicationOwnerLease) {
-    super(`Data directory is already owned by ${activeOwner.ownerId} (pid ${activeOwner.pid}, generation ${activeOwner.generation})`);
+    super(
+      `Data directory is already owned by ${activeOwner.ownerId} (pid ${activeOwner.pid}, generation ${activeOwner.generation})`,
+    );
     this.name = "ApplicationOwnerConflictError";
   }
 }
@@ -733,9 +741,11 @@ export class SessionStore {
     assertSession(this.state, sessionId);
     const sessionIds = this.collectSessionTreeIds(sessionId);
     const sessionIdSet = new Set(sessionIds);
-    const runIds = new Set(Object.values(this.state.runs)
-      .filter((run) => sessionIdSet.has(run.sessionId))
-      .map((run) => run.id));
+    const runIds = new Set(
+      Object.values(this.state.runs)
+        .filter((run) => sessionIdSet.has(run.sessionId))
+        .map((run) => run.id),
+    );
 
     this.database.transaction(() => {
       const placeholders = sessionIds.map(() => "?").join(", ");
@@ -911,7 +921,8 @@ export class SessionStore {
   }
 
   async backupDatabase(destination: string): Promise<void> {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
     mkdirSync(dirname(resolve(destination)), { recursive: true });
     const path = resolve(destination);
     await this.database.backup(path);
@@ -925,9 +936,12 @@ export class SessionStore {
   }
 
   saveWorkflowRun(input: StoredWorkflowRunInput): void {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
     this.database.transaction(() => {
-      this.database.prepare(`
+      this.database
+        .prepare(
+          `
         INSERT INTO workflow_run
           (run_id, owner_session_id, owner_input_id, owner_run_id, status, termination,
            snapshot_json, created_at, updated_at)
@@ -940,18 +954,22 @@ export class SessionStore {
           termination = excluded.termination,
           snapshot_json = excluded.snapshot_json,
           updated_at = excluded.updated_at
-      `).run(
-        input.runId,
-        input.ownerSessionId ?? null,
-        input.ownerInputId ?? null,
-        input.ownerRunId ?? null,
-        input.status,
-        input.termination ?? null,
-        input.snapshotJson,
-        input.createdAt,
-        input.updatedAt,
-      );
-      this.database.prepare("DELETE FROM workflow_task_attempt WHERE workflow_run_id = ?").run(input.runId);
+      `,
+        )
+        .run(
+          input.runId,
+          input.ownerSessionId ?? null,
+          input.ownerInputId ?? null,
+          input.ownerRunId ?? null,
+          input.status,
+          input.termination ?? null,
+          input.snapshotJson,
+          input.createdAt,
+          input.updatedAt,
+        );
+      this.database
+        .prepare("DELETE FROM workflow_task_attempt WHERE workflow_run_id = ?")
+        .run(input.runId);
       const insertAttempt = this.database.prepare(`
         INSERT INTO workflow_task_attempt
           (workflow_run_id, task_id, attempt, status, payload_json, started_at, finished_at)
@@ -972,11 +990,15 @@ export class SessionStore {
   }
 
   loadWorkflowRun(runId: string): StoredWorkflowRunRecord | undefined {
-    const row = this.database.prepare("SELECT * FROM workflow_run WHERE run_id = ?").get(runId) as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare("SELECT * FROM workflow_run WHERE run_id = ?")
+      .get(runId) as Record<string, unknown> | undefined;
     return row ? storedWorkflowRunFromRow(row) : undefined;
   }
 
-  listWorkflowRuns(options: { ownerSessionId?: string; status?: string } = {}): StoredWorkflowRunRecord[] {
+  listWorkflowRuns(
+    options: { ownerSessionId?: string; status?: string } = {},
+  ): StoredWorkflowRunRecord[] {
     const clauses: string[] = [];
     const parameters: unknown[] = [];
     if (options.ownerSessionId) {
@@ -988,8 +1010,11 @@ export class SessionStore {
       parameters.push(options.status);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    return (this.database.prepare(`SELECT * FROM workflow_run ${where} ORDER BY updated_at DESC`).all(...parameters) as Array<Record<string, unknown>>)
-      .map(storedWorkflowRunFromRow);
+    return (
+      this.database
+        .prepare(`SELECT * FROM workflow_run ${where} ORDER BY updated_at DESC`)
+        .all(...parameters) as Array<Record<string, unknown>>
+    ).map(storedWorkflowRunFromRow);
   }
 
   appendWorkflowEvent(input: {
@@ -999,24 +1024,36 @@ export class SessionStore {
     eventJson: string;
     createdAt: number;
   }): number {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
-    const result = this.database.prepare(`
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
+    const result = this.database
+      .prepare(
+        `
       INSERT INTO workflow_event (workflow_run_id, type, event_json, created_at)
       VALUES (?, ?, ?, ?)
-    `).run(input.runId, input.type, input.eventJson, input.createdAt);
+    `,
+      )
+      .run(input.runId, input.type, input.eventJson, input.createdAt);
     if (input.sessionId) {
       this.appendEvent({
         type: `workflow.${input.type}`,
         sessionId: input.sessionId,
-        payload: { event: JSON.parse(input.eventJson) as Record<string, unknown> },
+        payload: {
+          event: JSON.parse(input.eventJson) as Record<string, unknown>,
+        },
       });
     }
     return Number(result.lastInsertRowid);
   }
 
   listWorkflowEvents(runId: string): string[] {
-    return (this.database.prepare("SELECT event_json FROM workflow_event WHERE workflow_run_id = ? ORDER BY seq").all(runId) as Array<{ event_json: string }>)
-      .map((row) => row.event_json);
+    return (
+      this.database
+        .prepare(
+          "SELECT event_json FROM workflow_event WHERE workflow_run_id = ? ORDER BY seq",
+        )
+        .all(runId) as Array<{ event_json: string }>
+    ).map((row) => row.event_json);
   }
 
   acquireApplicationOwner(input: {
@@ -1024,14 +1061,19 @@ export class SessionStore {
     pid: number;
     staleAfterMs: number;
     now?: number;
+    /** 仅在调用方已经独立确认当前 owner 不可能继续写入时返回 true。 */
+    canTakeOver?: (current: ApplicationOwnerLease) => boolean;
   }): ApplicationOwnerLease {
     const timestamp = input.now ?? Date.now();
     const lease = this.database.transaction(() => {
-      const row = this.database.prepare("SELECT * FROM application_owner WHERE key = 'application'").get() as Record<string, unknown> | undefined;
+      const row = this.database
+        .prepare("SELECT * FROM application_owner WHERE key = 'application'")
+        .get() as Record<string, unknown> | undefined;
       const current = row ? applicationOwnerFromRow(row) : undefined;
       if (
         current &&
-        current.heartbeatAt > timestamp - input.staleAfterMs
+        current.heartbeatAt > timestamp - input.staleAfterMs &&
+        !input.canTakeOver?.(current)
       ) {
         throw new ApplicationOwnerConflictError(current);
       }
@@ -1043,7 +1085,9 @@ export class SessionStore {
         startedAt: timestamp,
         heartbeatAt: timestamp,
       };
-      this.database.prepare(`
+      this.database
+        .prepare(
+          `
         INSERT INTO application_owner (key, owner_id, pid, generation, started_at, heartbeat_at)
         VALUES ('application', ?, ?, ?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET
@@ -1052,18 +1096,33 @@ export class SessionStore {
           generation = excluded.generation,
           started_at = excluded.started_at,
           heartbeat_at = excluded.heartbeat_at
-      `).run(next.ownerId, next.pid, next.generation, next.startedAt, next.heartbeatAt);
+      `,
+        )
+        .run(
+          next.ownerId,
+          next.pid,
+          next.generation,
+          next.startedAt,
+          next.heartbeatAt,
+        );
       return next;
     })();
     this.activeOwnerLease = lease;
     return lease;
   }
 
-  heartbeatApplicationOwner(lease: ApplicationOwnerLease, timestamp = Date.now()): ApplicationOwnerLease {
-    const result = this.database.prepare(`
+  heartbeatApplicationOwner(
+    lease: ApplicationOwnerLease,
+    timestamp = Date.now(),
+  ): ApplicationOwnerLease {
+    const result = this.database
+      .prepare(
+        `
       UPDATE application_owner SET heartbeat_at = ?
       WHERE key = 'application' AND owner_id = ? AND generation = ?
-    `).run(timestamp, lease.ownerId, lease.generation);
+    `,
+      )
+      .run(timestamp, lease.ownerId, lease.generation);
     if (result.changes !== 1) this.throwOwnerFenceError();
     const next = { ...lease, heartbeatAt: timestamp };
     this.activeOwnerLease = next;
@@ -1071,21 +1130,31 @@ export class SessionStore {
   }
 
   releaseApplicationOwner(lease: ApplicationOwnerLease): void {
-    this.database.prepare(`
+    this.database
+      .prepare(
+        `
       DELETE FROM application_owner
       WHERE key = 'application' AND owner_id = ? AND generation = ?
-    `).run(lease.ownerId, lease.generation);
+    `,
+      )
+      .run(lease.ownerId, lease.generation);
     if (
       this.activeOwnerLease?.ownerId === lease.ownerId &&
       this.activeOwnerLease.generation === lease.generation
-    ) this.activeOwnerLease = undefined;
+    )
+      this.activeOwnerLease = undefined;
   }
 
   assertApplicationOwner(lease: ApplicationOwnerLease): void {
-    const row = this.database.prepare("SELECT * FROM application_owner WHERE key = 'application'").get() as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare("SELECT * FROM application_owner WHERE key = 'application'")
+      .get() as Record<string, unknown> | undefined;
     if (!row) this.throwOwnerFenceError();
     const current = applicationOwnerFromRow(row!);
-    if (current.ownerId !== lease.ownerId || current.generation !== lease.generation) {
+    if (
+      current.ownerId !== lease.ownerId ||
+      current.generation !== lease.generation
+    ) {
       throw new ApplicationOwnerConflictError(current);
     }
   }
@@ -1093,32 +1162,57 @@ export class SessionStore {
   applyRetention(
     policy: RetentionPolicy = DEFAULT_RETENTION_POLICY,
     timestamp = Date.now(),
-  ): { events: number; workflowEvents: number; workflows: number; runAttempts: number; settlements: number } {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+  ): {
+    events: number;
+    workflowEvents: number;
+    workflows: number;
+    runAttempts: number;
+    settlements: number;
+  } {
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
     const result = this.database.transaction(() => {
-      const workflowEvents = this.database.prepare(`
+      const workflowEvents = this.database
+        .prepare(
+          `
         DELETE FROM workflow_event
         WHERE created_at < ? AND workflow_run_id IN (
           SELECT run_id FROM workflow_run WHERE status != 'running'
         )
-      `).run(timestamp - policy.workflowEventMaxAgeMs).changes;
-      const workflows = this.database.prepare(`
+      `,
+        )
+        .run(timestamp - policy.workflowEventMaxAgeMs).changes;
+      const workflows = this.database
+        .prepare(
+          `
         DELETE FROM workflow_run
         WHERE updated_at < ? AND status != 'running'
           AND NOT EXISTS (
             SELECT 1 FROM workflow_execution_claim c
             WHERE c.workflow_run_id = workflow_run.run_id AND c.status = 'running'
           )
-      `).run(timestamp - policy.workflowRunMaxAgeMs).changes;
-      const runAttempts = this.database.prepare(`
+      `,
+        )
+        .run(timestamp - policy.workflowRunMaxAgeMs).changes;
+      const runAttempts = this.database
+        .prepare(
+          `
         DELETE FROM session_run_attempt
         WHERE updated_at < ? AND status NOT IN ('pending', 'running')
-      `).run(timestamp - policy.runAttemptMaxAgeMs).changes;
-      const settlements = this.database.prepare(`
+      `,
+        )
+        .run(timestamp - policy.runAttemptMaxAgeMs).changes;
+      const settlements = this.database
+        .prepare(
+          `
         DELETE FROM projection_settlement
         WHERE updated_at < ? AND status IN ('resolved', 'abandoned')
-      `).run(timestamp - policy.projectionSettlementMaxAgeMs).changes;
-      const removableEvents = this.database.prepare(`
+      `,
+        )
+        .run(timestamp - policy.projectionSettlementMaxAgeMs).changes;
+      const removableEvents = this.database
+        .prepare(
+          `
         SELECT e.id FROM session_event e
         LEFT JOIN session s ON s.id = e.session_id
         WHERE e.created_at < ?
@@ -1128,9 +1222,13 @@ export class SessionStore {
             SELECT 1 FROM session_run r
             WHERE r.session_id = e.session_id AND r.status IN ('pending', 'running')
           )
-      `).all(timestamp - policy.durableEventMaxAgeMs) as Array<{ id: string }>;
+      `,
+        )
+        .all(timestamp - policy.durableEventMaxAgeMs) as Array<{ id: string }>;
       if (removableEvents.length > 0) {
-        const remove = this.database.prepare("DELETE FROM session_event WHERE id = ?");
+        const remove = this.database.prepare(
+          "DELETE FROM session_event WHERE id = ?",
+        );
         for (const event of removableEvents) remove.run(event.id);
       }
       const retentionResult = {
@@ -1140,38 +1238,68 @@ export class SessionStore {
         runAttempts,
         settlements,
       };
-      this.database.prepare(`
+      this.database
+        .prepare(
+          `
         INSERT INTO retention_audit (id, policy, result_json, created_at)
         VALUES (?, ?, ?, ?)
-      `).run(randomUUID(), JSON.stringify(policy), JSON.stringify(retentionResult), timestamp);
+      `,
+        )
+        .run(
+          randomUUID(),
+          JSON.stringify(policy),
+          JSON.stringify(retentionResult),
+          timestamp,
+        );
       return retentionResult;
     })();
     if (result.events > 0) {
       const removed = new Set(
-        (this.database.prepare("SELECT id FROM session_event").all() as Array<{ id: string }>).map((row) => row.id),
+        (
+          this.database.prepare("SELECT id FROM session_event").all() as Array<{
+            id: string;
+          }>
+        ).map((row) => row.id),
       );
-      this.state.events = this.state.events.filter((event) => removed.has(event.id));
+      this.state.events = this.state.events.filter((event) =>
+        removed.has(event.id),
+      );
     }
     return result;
   }
 
   listRetentionAudits(): Array<Record<string, unknown>> {
-    return this.database.prepare("SELECT * FROM retention_audit ORDER BY created_at DESC").all() as Array<Record<string, unknown>>;
+    return this.database
+      .prepare("SELECT * FROM retention_audit ORDER BY created_at DESC")
+      .all() as Array<Record<string, unknown>>;
   }
 
-  claimWorkflowRun(runId: string, ownerId: string): { ownerId: string; generation: number; claimedAt: number } {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+  claimWorkflowRun(
+    runId: string,
+    ownerId: string,
+  ): { ownerId: string; generation: number; claimedAt: number } {
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
     return this.database.transaction(() => {
-      const current = this.database.prepare(`
+      const current = this.database
+        .prepare(
+          `
         SELECT owner_id, generation, status FROM workflow_execution_claim
         WHERE workflow_run_id = ?
-      `).get(runId) as { owner_id: string; generation: number; status: string } | undefined;
+      `,
+        )
+        .get(runId) as
+        { owner_id: string; generation: number; status: string } | undefined;
       if (current?.status === "running" && current.owner_id === ownerId) {
-        throw new Error(`Workflow run is already claimed by this Application: ${runId}`);
+        throw new Error(
+          `Workflow run is already claimed by this Application: ${runId}`,
+        );
       }
       const generation = (current?.generation ?? 0) + 1;
       const claimedAt = Date.now();
-      this.database.prepare(`
+      this.database
+        .prepare(
+          `
         INSERT INTO workflow_execution_claim
           (workflow_run_id, owner_id, generation, claimed_at, heartbeat_at, finished_at, status)
         VALUES (?, ?, ?, ?, ?, NULL, 'running')
@@ -1182,20 +1310,29 @@ export class SessionStore {
           heartbeat_at = excluded.heartbeat_at,
           finished_at = NULL,
           status = 'running'
-      `).run(runId, ownerId, generation, claimedAt, claimedAt);
+      `,
+        )
+        .run(runId, ownerId, generation, claimedAt, claimedAt);
       return { ownerId, generation, claimedAt };
     })();
   }
 
   finishWorkflowRunClaim(runId: string, ownerId: string, status: string): void {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
-    const result = this.database.prepare(`
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
+    const result = this.database
+      .prepare(
+        `
       UPDATE workflow_execution_claim
       SET status = ?, finished_at = ?, heartbeat_at = ?
       WHERE workflow_run_id = ? AND owner_id = ? AND status = 'running'
-    `).run(status, Date.now(), Date.now(), runId, ownerId);
+    `,
+      )
+      .run(status, Date.now(), Date.now(), runId, ownerId);
     if (result.changes !== 1) {
-      throw new Error(`Workflow run claim is not active for this Application: ${runId}`);
+      throw new Error(
+        `Workflow run claim is not active for this Application: ${runId}`,
+      );
     }
   }
 
@@ -1257,10 +1394,12 @@ export class SessionStore {
     return this.findExternalConversation(input)!;
   }
 
-  listExternalConversations(options: {
-    connector?: string;
-    limit?: number;
-  } = {}): ExternalConversationRecord[] {
+  listExternalConversations(
+    options: {
+      connector?: string;
+      limit?: number;
+    } = {},
+  ): ExternalConversationRecord[] {
     const rows = this.database
       .prepare(
         `SELECT * FROM external_conversation
@@ -1296,7 +1435,9 @@ export class SessionStore {
         existing.runId !== input.runId ||
         existing.content !== input.content
       ) {
-        throw new Error(`Channel delivery input is already used: ${input.inputId}`);
+        throw new Error(
+          `Channel delivery input is already used: ${input.inputId}`,
+        );
       }
       return existing;
     }
@@ -1335,7 +1476,9 @@ export class SessionStore {
     return row ? channelDeliveryFromRow(row) : undefined;
   }
 
-  findChannelDeliveryByInput(inputId: string): ChannelDeliveryRecord | undefined {
+  findChannelDeliveryByInput(
+    inputId: string,
+  ): ChannelDeliveryRecord | undefined {
     const row = this.database
       .prepare("SELECT * FROM channel_delivery WHERE input_id = ?")
       .get(inputId) as Record<string, unknown> | undefined;
@@ -1365,17 +1508,19 @@ export class SessionStore {
         input.externalDeliveryId ?? existing.externalDeliveryId ?? null,
         input.error ?? null,
         timestamp,
-        input.status === "sent" ? timestamp : existing.sentAt ?? null,
+        input.status === "sent" ? timestamp : (existing.sentAt ?? null),
         id,
       );
     return this.getChannelDelivery(id)!;
   }
 
-  listChannelDeliveries(options: {
-    statuses?: ChannelDeliveryStatus[];
-    connector?: string;
-    limit?: number;
-  } = {}): ChannelDeliveryRecord[] {
+  listChannelDeliveries(
+    options: {
+      statuses?: ChannelDeliveryStatus[];
+      connector?: string;
+      limit?: number;
+    } = {},
+  ): ChannelDeliveryRecord[] {
     const clauses: string[] = [];
     const values: unknown[] = [];
     if (options.statuses?.length) {
@@ -1393,9 +1538,10 @@ export class SessionStore {
          ORDER BY updated_at DESC
          ${options.limit !== undefined ? "LIMIT ?" : ""}`,
       )
-      .all(...values, ...(options.limit !== undefined ? [options.limit] : [])) as Array<
-      Record<string, unknown>
-    >;
+      .all(
+        ...values,
+        ...(options.limit !== undefined ? [options.limit] : []),
+      ) as Array<Record<string, unknown>>;
     return rows.map(channelDeliveryFromRow);
   }
 
@@ -1405,7 +1551,9 @@ export class SessionStore {
     run: SessionRunRecord;
   } {
     if (input.prompt.delivery === "steer") {
-      throw new Error("Steered prompts cannot create their owning run during admission");
+      throw new Error(
+        "Steered prompts cannot create their owning run during admission",
+      );
     }
     return this.transaction(() => {
       const admitted = this.admitPrompt({
@@ -1756,12 +1904,19 @@ export class SessionStore {
     return this.state.nextEventSeq - 1;
   }
 
-  createProjectionSettlement(input: CreateProjectionSettlementInput): ProjectionSettlementRecord {
+  createProjectionSettlement(
+    input: CreateProjectionSettlementInput,
+  ): ProjectionSettlementRecord {
     this.assertCurrentOwner();
-    const existing = this.database.prepare(`
+    const existing = this.database
+      .prepare(
+        `
       SELECT * FROM projection_settlement
       WHERE projector = ? AND root_session_id = ? AND event_sequence = ?
-    `).get(input.projector, input.rootSessionId, input.eventSequence) as Record<string, unknown> | undefined;
+    `,
+      )
+      .get(input.projector, input.rootSessionId, input.eventSequence) as
+      Record<string, unknown> | undefined;
     if (existing) {
       const record = projectionSettlementFromRow(existing);
       if (
@@ -1776,42 +1931,54 @@ export class SessionStore {
     }
     const timestamp = now();
     const id = input.id ?? randomUUID();
-    this.database.prepare(`
+    this.database
+      .prepare(
+        `
       INSERT INTO projection_settlement
         (id, projector, root_session_id, event_sequence, action, payload_json,
          status, attempt_count, last_error, next_retry_at, created_at, updated_at, resolved_at)
       VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, ?, ?, NULL)
-    `).run(
-      id,
-      input.projector,
-      input.rootSessionId,
-      input.eventSequence,
-      input.action,
-      encode(input.payload),
-      input.error ?? null,
-      timestamp,
-      timestamp,
-    );
+    `,
+      )
+      .run(
+        id,
+        input.projector,
+        input.rootSessionId,
+        input.eventSequence,
+        input.action,
+        encode(input.payload),
+        input.error ?? null,
+        timestamp,
+        timestamp,
+      );
     return this.getProjectionSettlement(id)!;
   }
 
   getProjectionSettlement(id: string): ProjectionSettlementRecord | undefined {
-    const row = this.database.prepare(
-      "SELECT * FROM projection_settlement WHERE id = ?",
-    ).get(id) as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare("SELECT * FROM projection_settlement WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
     return row ? projectionSettlementFromRow(row) : undefined;
   }
 
   listProjectionSettlements(
     options: ListProjectionSettlementsOptions = {},
   ): ProjectionSettlementRecord[] {
-    let records = (this.database.prepare(
-      "SELECT * FROM projection_settlement ORDER BY created_at, id",
-    ).all() as Array<Record<string, unknown>>).map(projectionSettlementFromRow);
-    if (options.projector) records = records.filter((row) => row.projector === options.projector);
-    if (options.rootSessionId) records = records.filter((row) => row.rootSessionId === options.rootSessionId);
+    let records = (
+      this.database
+        .prepare("SELECT * FROM projection_settlement ORDER BY created_at, id")
+        .all() as Array<Record<string, unknown>>
+    ).map(projectionSettlementFromRow);
+    if (options.projector)
+      records = records.filter((row) => row.projector === options.projector);
+    if (options.rootSessionId)
+      records = records.filter(
+        (row) => row.rootSessionId === options.rootSessionId,
+      );
     if (options.status) {
-      const statuses = new Set(Array.isArray(options.status) ? options.status : [options.status]);
+      const statuses = new Set(
+        Array.isArray(options.status) ? options.status : [options.status],
+      );
       records = records.filter((row) => statuses.has(row.status));
     }
     return records;
@@ -1820,12 +1987,16 @@ export class SessionStore {
   markProjectionSettlementRetrying(id: string): ProjectionSettlementRecord {
     this.assertCurrentOwner();
     const timestamp = now();
-    const result = this.database.prepare(`
+    const result = this.database
+      .prepare(
+        `
       UPDATE projection_settlement
       SET status = 'retrying', attempt_count = attempt_count + 1,
           last_error = NULL, next_retry_at = NULL, updated_at = ?
       WHERE id = ? AND status IN ('pending', 'retrying')
-    `).run(timestamp, id);
+    `,
+      )
+      .run(timestamp, id);
     if (result.changes === 0) {
       const existing = this.getProjectionSettlement(id);
       if (!existing) throw new Error(`Projection settlement not found: ${id}`);
@@ -1840,11 +2011,15 @@ export class SessionStore {
     nextRetryAt?: number,
   ): ProjectionSettlementRecord {
     this.assertCurrentOwner();
-    const result = this.database.prepare(`
+    const result = this.database
+      .prepare(
+        `
       UPDATE projection_settlement
       SET status = 'pending', last_error = ?, next_retry_at = ?, updated_at = ?
       WHERE id = ? AND status != 'resolved' AND status != 'abandoned'
-    `).run(error, nextRetryAt ?? null, now(), id);
+    `,
+      )
+      .run(error, nextRetryAt ?? null, now(), id);
     if (result.changes === 0 && !this.getProjectionSettlement(id)) {
       throw new Error(`Projection settlement not found: ${id}`);
     }
@@ -1854,25 +2029,36 @@ export class SessionStore {
   resolveProjectionSettlement(id: string): ProjectionSettlementRecord {
     this.assertCurrentOwner();
     const timestamp = now();
-    const result = this.database.prepare(`
+    const result = this.database
+      .prepare(
+        `
       UPDATE projection_settlement
       SET status = 'resolved', last_error = NULL, next_retry_at = NULL,
           updated_at = ?, resolved_at = COALESCE(resolved_at, ?)
       WHERE id = ? AND status != 'abandoned'
-    `).run(timestamp, timestamp, id);
+    `,
+      )
+      .run(timestamp, timestamp, id);
     if (result.changes === 0 && !this.getProjectionSettlement(id)) {
       throw new Error(`Projection settlement not found: ${id}`);
     }
     return this.getProjectionSettlement(id)!;
   }
 
-  abandonProjectionSettlement(id: string, error: string): ProjectionSettlementRecord {
+  abandonProjectionSettlement(
+    id: string,
+    error: string,
+  ): ProjectionSettlementRecord {
     this.assertCurrentOwner();
-    const result = this.database.prepare(`
+    const result = this.database
+      .prepare(
+        `
       UPDATE projection_settlement
       SET status = 'abandoned', last_error = ?, next_retry_at = NULL, updated_at = ?
       WHERE id = ? AND status != 'resolved'
-    `).run(error, now(), id);
+    `,
+      )
+      .run(error, now(), id);
     if (result.changes === 0 && !this.getProjectionSettlement(id)) {
       throw new Error(`Projection settlement not found: ${id}`);
     }
@@ -2107,10 +2293,8 @@ export class SessionStore {
     const task = Object.values(this.state.tasks).find(
       (candidate) =>
         candidate.sessionId === sessionId &&
-        (
-          candidate.metadata.runtimeExecutionId === runtimeExecutionId ||
-          candidate.metadata.taskManagerId === runtimeExecutionId
-        ),
+        (candidate.metadata.runtimeExecutionId === runtimeExecutionId ||
+          candidate.metadata.taskManagerId === runtimeExecutionId),
     );
     return task ? clone(task) : undefined;
   }
@@ -2154,18 +2338,22 @@ export class SessionStore {
           messageId: part.messageId,
           type: part.type,
           status: part.type === "tool" ? "failed" : "interrupted",
-          ...(part.type === "tool" ? {
-            metadata: {
-              ...part.metadata,
-              toolCallId: part.toolUseId ?? part.id,
-              toolAttemptId: typeof part.metadata.toolAttemptId === "string"
-                ? part.metadata.toolAttemptId
-                : `tool_attempt_${part.toolUseId ?? part.id}_1`,
-              outcome: "unknown",
-              failureKind: "unknown_outcome",
-              outcomeWarning: "Tool may already have executed; automatic retry is disabled",
-            },
-          } : {}),
+          ...(part.type === "tool"
+            ? {
+                metadata: {
+                  ...part.metadata,
+                  toolCallId: part.toolUseId ?? part.id,
+                  toolAttemptId:
+                    typeof part.metadata.toolAttemptId === "string"
+                      ? part.metadata.toolAttemptId
+                      : `tool_attempt_${part.toolUseId ?? part.id}_1`,
+                  outcome: "unknown",
+                  failureKind: "unknown_outcome",
+                  outcomeWarning:
+                    "Tool may already have executed; automatic retry is disabled",
+                },
+              }
+            : {}),
         });
       }
       this.transaction(() => {
@@ -2198,7 +2386,9 @@ export class SessionStore {
       };
       const aborted = () => {
         finish();
-        reject(options.signal?.reason ?? new Error("Session task wait aborted."));
+        reject(
+          options.signal?.reason ?? new Error("Session task wait aborted."),
+        );
       };
       listeners.add(changed);
       this.taskListeners.set(taskId, listeners);
@@ -2212,29 +2402,41 @@ export class SessionStore {
         changed();
         return;
       }
-      timer = setTimeout(() => {
-        finish();
-        resolvePromise(this.getSessionTask(taskId));
-      }, Math.max(1, options.timeoutMs));
+      timer = setTimeout(
+        () => {
+          finish();
+          resolvePromise(this.getSessionTask(taskId));
+        },
+        Math.max(1, options.timeoutMs),
+      );
       timer.unref?.();
     });
   }
 
   private notifySessionTask(taskId: string): void {
-    for (const listener of [...(this.taskListeners.get(taskId) ?? [])]) listener();
+    for (const listener of [...(this.taskListeners.get(taskId) ?? [])])
+      listener();
   }
 
   createRunAttempt(input: CreateRunAttemptInput): SessionRunAttemptRecord {
     const run = this.state.runs[input.runId];
     if (!run) throw new Error(`Session run not found: ${input.runId}`);
-    if (isTerminalRunStatus(run.status)) throw new Error(`Session run is already terminal: ${input.runId}`);
-    const attempts = Object.values(this.state.attempts).filter((attempt) => attempt.runId === input.runId);
-    const sequence = input.sequence ?? attempts.reduce((max, attempt) => Math.max(max, attempt.sequence), 0) + 1;
+    if (isTerminalRunStatus(run.status))
+      throw new Error(`Session run is already terminal: ${input.runId}`);
+    const attempts = Object.values(this.state.attempts).filter(
+      (attempt) => attempt.runId === input.runId,
+    );
+    const sequence =
+      input.sequence ??
+      attempts.reduce((max, attempt) => Math.max(max, attempt.sequence), 0) + 1;
     if (attempts.some((attempt) => attempt.sequence === sequence)) {
-      throw new Error(`Session run attempt sequence already exists: ${input.runId}/${sequence}`);
+      throw new Error(
+        `Session run attempt sequence already exists: ${input.runId}/${sequence}`,
+      );
     }
     const id = input.id ?? `attempt_${randomUUID()}`;
-    if (this.state.attempts[id]) throw new Error(`Session run attempt already exists: ${id}`);
+    if (this.state.attempts[id])
+      throw new Error(`Session run attempt already exists: ${id}`);
     const timestamp = now();
     const attempt: SessionRunAttemptRecord = {
       id,
@@ -2258,16 +2460,22 @@ export class SessionStore {
     return clone(attempt);
   }
 
-  updateRunAttempt(attemptId: string, input: UpdateRunAttemptInput): SessionRunAttemptRecord {
+  updateRunAttempt(
+    attemptId: string,
+    input: UpdateRunAttemptInput,
+  ): SessionRunAttemptRecord {
     const attempt = this.state.attempts[attemptId];
-    if (!attempt) throw new Error(`Session run attempt not found: ${attemptId}`);
+    if (!attempt)
+      throw new Error(`Session run attempt not found: ${attemptId}`);
     const run = this.state.runs[attempt.runId];
     if (!run) throw new Error(`Session run not found: ${attempt.runId}`);
     const previous = attempt.status;
     const timestamp = now();
     if (input.status) {
       if (isTerminalAttemptStatus(previous) && input.status !== previous) {
-        throw new Error(`Session run attempt is already terminal: ${attemptId}`);
+        throw new Error(
+          `Session run attempt is already terminal: ${attemptId}`,
+        );
       }
       attempt.status = input.status;
       if (input.status === "running" && previous !== "running") {
@@ -2280,8 +2488,10 @@ export class SessionStore {
     }
     if (input.errorKind !== undefined) attempt.errorKind = input.errorKind;
     if (input.error !== undefined) attempt.error = input.error;
-    if (input.inputTokens !== undefined) attempt.inputTokens = input.inputTokens;
-    if (input.outputTokens !== undefined) attempt.outputTokens = input.outputTokens;
+    if (input.inputTokens !== undefined)
+      attempt.inputTokens = input.inputTokens;
+    if (input.outputTokens !== undefined)
+      attempt.outputTokens = input.outputTokens;
     attempt.updatedAt = timestamp;
     this.mutations.attempts.add(attemptId);
     this.appendEventInMemory({
@@ -2299,10 +2509,13 @@ export class SessionStore {
   }
 
   listRunAttempts(runId: string): SessionRunAttemptRecord[] {
-    if (!this.state.runs[runId]) throw new Error(`Session run not found: ${runId}`);
-    return clone(Object.values(this.state.attempts)
-      .filter((attempt) => attempt.runId === runId)
-      .sort((left, right) => left.sequence - right.sequence));
+    if (!this.state.runs[runId])
+      throw new Error(`Session run not found: ${runId}`);
+    return clone(
+      Object.values(this.state.attempts)
+        .filter((attempt) => attempt.runId === runId)
+        .sort((left, right) => left.sequence - right.sequence),
+    );
   }
 
   settleActiveRunAttempts(
@@ -2311,12 +2524,18 @@ export class SessionStore {
     error?: string,
   ): number {
     const active = Object.values(this.state.attempts).filter(
-      (attempt) => attempt.runId === runId && !isTerminalAttemptStatus(attempt.status),
+      (attempt) =>
+        attempt.runId === runId && !isTerminalAttemptStatus(attempt.status),
     );
     for (const attempt of active) {
       this.updateRunAttempt(attempt.id, {
         status,
-        ...(error ? { error, errorKind: status === "cancelled" ? "interrupted" : "provider" } : {}),
+        ...(error
+          ? {
+              error,
+              errorKind: status === "cancelled" ? "interrupted" : "provider",
+            }
+          : {}),
       });
     }
     return active.length;
@@ -2333,15 +2552,18 @@ export class SessionStore {
     return this.transaction(() => {
       const unowned = Object.values(this.state.inputs).filter((input) => {
         const session = this.state.sessions[input.sessionId];
-        return session !== undefined &&
+        return (
+          session !== undefined &&
           session.status !== "archived" &&
           session.status !== "closing" &&
-          this.findRunByInput(input.id) === undefined;
+          this.findRunByInput(input.id) === undefined
+        );
       });
       for (const input of unowned) {
-        const traceId = typeof input.metadata.traceId === "string"
-          ? input.metadata.traceId
-          : undefined;
+        const traceId =
+          typeof input.metadata.traceId === "string"
+            ? input.metadata.traceId
+            : undefined;
         const run = this.createRun({
           sessionId: input.sessionId,
           inputId: input.id,
@@ -2495,7 +2717,9 @@ export class SessionStore {
         .filter((run) => run.sessionId === sessionId)
         .sort((a, b) => a.createdAt - b.createdAt),
       attempts: Object.values(this.state.attempts)
-        .filter((attempt) => this.state.runs[attempt.runId]?.sessionId === sessionId)
+        .filter(
+          (attempt) => this.state.runs[attempt.runId]?.sessionId === sessionId,
+        )
         .sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence),
       tasks: Object.values(this.state.tasks)
         .filter((task) => task.sessionId === sessionId)
@@ -2601,7 +2825,9 @@ export class SessionStore {
 
   private assertCurrentStorageFormatOrEmpty(): void {
     const tables = this.database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+      )
       .all() as Array<{ name: string }>;
     if (tables.length === 0) return;
     if (!tables.some((table) => table.name === "application_storage_format")) {
@@ -2728,11 +2954,17 @@ export class SessionStore {
         status: row.status as SessionRunAttemptRecord["status"],
         ...(row.provider ? { provider: row.provider as string } : {}),
         ...(row.model ? { model: row.model as string } : {}),
-        ...(row.retry_reason ? { retryReason: row.retry_reason as string } : {}),
+        ...(row.retry_reason
+          ? { retryReason: row.retry_reason as string }
+          : {}),
         ...(row.error_kind ? { errorKind: row.error_kind as string } : {}),
         ...(row.error ? { error: row.error as string } : {}),
-        ...(row.input_tokens !== null ? { inputTokens: row.input_tokens as number } : {}),
-        ...(row.output_tokens !== null ? { outputTokens: row.output_tokens as number } : {}),
+        ...(row.input_tokens !== null
+          ? { inputTokens: row.input_tokens as number }
+          : {}),
+        ...(row.output_tokens !== null
+          ? { outputTokens: row.output_tokens as number }
+          : {}),
         ...(row.started_at ? { startedAt: row.started_at as number } : {}),
         ...(row.finished_at ? { finishedAt: row.finished_at as number } : {}),
         createdAt: row.created_at as number,
@@ -2791,7 +3023,7 @@ export class SessionStore {
         row.type as string,
         schemaVersion,
         decode(row.payload_json as string),
-        row.session_id ? row.session_id as string : undefined,
+        row.session_id ? (row.session_id as string) : undefined,
       );
       const event: SessionEventRecord = {
         id: row.id as string,
@@ -2836,7 +3068,8 @@ export class SessionStore {
   }
 
   private save(): void {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
     if (this.transactionDepth > 0) {
       this.saveRequested = true;
       return;
@@ -2854,12 +3087,16 @@ export class SessionStore {
   }
 
   private assertCurrentOwner(): void {
-    if (this.activeOwnerLease) this.assertApplicationOwner(this.activeOwnerLease);
+    if (this.activeOwnerLease)
+      this.assertApplicationOwner(this.activeOwnerLease);
   }
 
   private throwOwnerFenceError(): never {
-    const row = this.database.prepare("SELECT * FROM application_owner WHERE key = 'application'").get() as Record<string, unknown> | undefined;
-    if (row) throw new ApplicationOwnerConflictError(applicationOwnerFromRow(row));
+    const row = this.database
+      .prepare("SELECT * FROM application_owner WHERE key = 'application'")
+      .get() as Record<string, unknown> | undefined;
+    if (row)
+      throw new ApplicationOwnerConflictError(applicationOwnerFromRow(row));
     throw new Error("Application owner lease is no longer active");
   }
 
@@ -3185,21 +3422,33 @@ function channelDeliveryFromRow(
   };
 }
 
-function storedWorkflowRunFromRow(row: Record<string, unknown>): StoredWorkflowRunRecord {
+function storedWorkflowRunFromRow(
+  row: Record<string, unknown>,
+): StoredWorkflowRunRecord {
   return {
     runId: String(row.run_id),
-    ...(typeof row.owner_session_id === "string" ? { ownerSessionId: row.owner_session_id } : {}),
-    ...(typeof row.owner_input_id === "string" ? { ownerInputId: row.owner_input_id } : {}),
-    ...(typeof row.owner_run_id === "string" ? { ownerRunId: row.owner_run_id } : {}),
+    ...(typeof row.owner_session_id === "string"
+      ? { ownerSessionId: row.owner_session_id }
+      : {}),
+    ...(typeof row.owner_input_id === "string"
+      ? { ownerInputId: row.owner_input_id }
+      : {}),
+    ...(typeof row.owner_run_id === "string"
+      ? { ownerRunId: row.owner_run_id }
+      : {}),
     status: String(row.status),
-    ...(typeof row.termination === "string" ? { termination: row.termination } : {}),
+    ...(typeof row.termination === "string"
+      ? { termination: row.termination }
+      : {}),
     snapshotJson: String(row.snapshot_json),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
 }
 
-function applicationOwnerFromRow(row: Record<string, unknown>): ApplicationOwnerLease {
+function applicationOwnerFromRow(
+  row: Record<string, unknown>,
+): ApplicationOwnerLease {
   return {
     ownerId: String(row.owner_id),
     pid: Number(row.pid),
@@ -3223,11 +3472,17 @@ function projectFromRow(row: Record<string, unknown>): ProjectRecord {
   };
 }
 
-function isTerminalAttemptStatus(status: SessionRunAttemptRecord["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
+function isTerminalAttemptStatus(
+  status: SessionRunAttemptRecord["status"],
+): boolean {
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  );
 }
 
-function projectionSettlementFromRow(row: Record<string, unknown>): ProjectionSettlementRecord {
+function projectionSettlementFromRow(
+  row: Record<string, unknown>,
+): ProjectionSettlementRecord {
   return {
     id: row.id as string,
     projector: row.projector as string,

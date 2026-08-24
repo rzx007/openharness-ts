@@ -45,9 +45,7 @@ import { DaemonControlService } from "./control/daemon-control-service.js";
 import { DaemonOperationGate } from "./control/daemon-operation-gate.js";
 import { LiveChildAgentDirectory } from "./agent/live-child-agent-directory.js";
 import { SessionApplicationService } from "./session/session-application-service.js";
-import {
-  SessionEventPublisher,
-} from "./session/session-event-publisher.js";
+import { SessionEventPublisher } from "./session/session-event-publisher.js";
 import { SessionMaintenanceService } from "./session/session-maintenance-service.js";
 import { SessionQueryService } from "./session/session-query-service.js";
 import { SessionRunEngine } from "./session/session-run-engine.js";
@@ -77,6 +75,7 @@ export interface DaemonApplicationOptions {
   ownerId?: string;
   ownerHeartbeatMs?: number;
   ownerStaleAfterMs?: number;
+  ownerProcessAlive?: (pid: number) => boolean;
 }
 
 /**
@@ -137,7 +136,8 @@ export class DaemonApplication implements DurableAgentApplication {
   private readonly runEngine: SessionRunEngine;
   private readonly startupRecovery: Promise<void>;
   private closePromise?: Promise<void>;
-  private readyState: "starting" | "ready" | "failed" | "closing" | "closed" = "starting";
+  private readyState: "starting" | "ready" | "failed" | "closing" | "closed" =
+    "starting";
   private ownerLease: ApplicationOwnerLease;
   private readonly ownerHeartbeat: ReturnType<typeof setInterval>;
 
@@ -149,6 +149,8 @@ export class DaemonApplication implements DurableAgentApplication {
       ownerId: options.ownerId ?? `daemon:${process.pid}:${randomUUID()}`,
       pid: process.pid,
       staleAfterMs: options.ownerStaleAfterMs ?? 30_000,
+      canTakeOver: (current) =>
+        !(options.ownerProcessAlive ?? isProcessAlive)(current.pid),
     });
     this.ownerHeartbeat = setInterval(() => {
       try {
@@ -165,345 +167,352 @@ export class DaemonApplication implements DurableAgentApplication {
     }, options.ownerHeartbeatMs ?? 5_000);
     this.ownerHeartbeat.unref?.();
     try {
-    // 上次进程可能是被杀掉的：内存里的 Agent/进程都没了，store 里却还挂着 running。
-    // 先把这些半截状态结掉，再对外服务，免得窗口以为还在跑。
-    recoverProjectionSettlements(store);
-    store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
-    store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
-    store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
-    store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
-    store.finalizeClosingSessions();
+      // 上次进程可能是被杀掉的：内存里的 Agent/进程都没了，store 里却还挂着 running。
+      // 先把这些半截状态结掉，再对外服务，免得窗口以为还在跑。
+      recoverProjectionSettlements(store);
+      store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
+      store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
+      store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
+      store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
+      store.finalizeClosingSessions();
 
-    // events：窗口订的 SSE。eventPublisher：各处写完 store 后，把增量广播出去。
-    this.events = new ApplicationEventService(store);
-    this.eventPublisher = new SessionEventPublisher(store, this.events);
-    this.workflows = new SessionWorkflowRunRepository(
-      store,
-      (previousEventSeq) => this.eventPublisher.publishSince(previousEventSeq),
-    );
-    this.retention = new ApplicationRetentionService(store);
-    this.terminals = new DaemonTerminalService(store);
-    this.projects = new ProjectApplicationService(store);
-    this.permissions = new StorePermissionBroker({
-      store,
-      onChange: (previousEventSeq) =>
-        this.eventPublisher.publishSince(previousEventSeq),
-      logger: options.log,
-    });
-    // transcript：把模型吐出的字/工具块写成消息。
-    // executionProjector：子 Agent、后台 shell 在会话里的那条「任务」记录。
-    this.transcriptProjection = new SessionTranscriptProjection(store);
-    this.executionProjector = new SessionExecutionProjector({
-      store,
-      getChildAgentExecutionRegistry: (scope) => getChildAgentExecutionRegistry(scope),
-      events: this.eventPublisher,
-      traceIdForRun: (runId) => this.traceIdForRun(runId),
-      log: options.log,
-    });
-    this.backgroundShells = new BackgroundShellService({
-      store,
-      executionProjector: this.executionProjector,
-      getDetachedProcessSupervisor: (scope) => getDetachedProcessSupervisor(scope),
-      events: this.eventPublisher,
-    });
-    // JobWait / JobList 走这里：终端、后台 shell、子 Agent、workflow 合成一张本会话任务表。
-    this.jobs = new DaemonJobService(
-      store,
-      this.terminals,
-      this.backgroundShells,
-      (scope) => getDetachedProcessSupervisor(scope),
-      (scope) => getChildAgentExecutionRegistry(scope),
-      this.workflows,
-    );
+      // events：窗口订的 SSE。eventPublisher：各处写完 store 后，把增量广播出去。
+      this.events = new ApplicationEventService(store);
+      this.eventPublisher = new SessionEventPublisher(store, this.events);
+      this.workflows = new SessionWorkflowRunRepository(
+        store,
+        (previousEventSeq) =>
+          this.eventPublisher.publishSince(previousEventSeq),
+      );
+      this.retention = new ApplicationRetentionService(store);
+      this.terminals = new DaemonTerminalService(store);
+      this.projects = new ProjectApplicationService(store);
+      this.permissions = new StorePermissionBroker({
+        store,
+        onChange: (previousEventSeq) =>
+          this.eventPublisher.publishSince(previousEventSeq),
+        logger: options.log,
+      });
+      // transcript：把模型吐出的字/工具块写成消息。
+      // executionProjector：子 Agent、后台 shell 在会话里的那条「任务」记录。
+      this.transcriptProjection = new SessionTranscriptProjection(store);
+      this.executionProjector = new SessionExecutionProjector({
+        store,
+        getChildAgentExecutionRegistry: (scope) =>
+          getChildAgentExecutionRegistry(scope),
+        events: this.eventPublisher,
+        traceIdForRun: (runId) => this.traceIdForRun(runId),
+        log: options.log,
+      });
+      this.backgroundShells = new BackgroundShellService({
+        store,
+        executionProjector: this.executionProjector,
+        getDetachedProcessSupervisor: (scope) =>
+          getDetachedProcessSupervisor(scope),
+        events: this.eventPublisher,
+      });
+      // JobWait / JobList 走这里：终端、后台 shell、子 Agent、workflow 合成一张本会话任务表。
+      this.jobs = new DaemonJobService(
+        store,
+        this.terminals,
+        this.backgroundShells,
+        (scope) => getDetachedProcessSupervisor(scope),
+        (scope) => getChildAgentExecutionRegistry(scope),
+        this.workflows,
+      );
 
-    // 每个会话第一次用时，在这里造活 Agent，并接上投影。
-    const loadAgent = createDaemonAgentLoader({
-      settings: options.settings,
-      getSettings: options.getSettings,
-      getSettingsForCwd: options.getSettingsForCwd,
-      createAgent: options.createAgent,
-      createTerminalHost:
-        options.createTerminalHost ??
-        ((session) => this.terminals.createAgentHost(session)),
-      createJobHost:
-        options.createJobHost ??
-        ((session) => this.jobs.createAgentHost(session)),
-      workflowRepository: this.workflows,
-      requestPermission: async (request, context) => {
-        // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。
-        return await this.permissions.ask({
-          sessionId: context.sessionId,
-          runId: context.runId,
-          traceId: context.traceId,
-          toolName: request.toolName,
-          reason: request.reason,
-          input: request.input,
-          signal: context.signal,
-        });
-      },
-      schedules: {
-        create: async (input) =>
-          this.schedules.createTask({ ...input, createdBy: "agent" }),
-        update: async (id, patch) => this.schedules.updateTask(id, patch),
-        remove: async (id) => this.schedules.removeTask(id),
-        list: async () => this.schedules.listTasks(),
-        trigger: async (id) => this.schedules.trigger(id),
-        listRuns: async (taskId) => this.schedules.listRuns({ taskId }),
-      },
-      // 这就是投影：Agent 的 onEvent 进这里，写成会话记录再推给窗口。
-      createEventSink: (agent, session) => {
-        const projector = new DaemonAgentEventProjector({
-          projectorId: `${DAEMON_AGENT_PROJECTOR}:${agent.id}`,
-          rootSessionId: session.id,
-          rootAgent: agent,
-          store,
-          transcriptProjection: this.transcriptProjection,
-          executionProjector: this.executionProjector,
-          liveChildren: this.liveChildren,
-          events: this.eventPublisher,
-          log: options.log,
-        });
-        return (event) => projector.apply(event);
-      },
-    });
-    // 一个会话一个热着的 Agent。子 Agent 自己占会话，不要被这个池子抢去。
-    this.agentPool = new AgentPool({
-      store,
-      loadAgent,
-      isSessionExternallyOwned: (sessionId) => this.liveChildren.has(sessionId),
-    });
+      // 每个会话第一次用时，在这里造活 Agent，并接上投影。
+      const loadAgent = createDaemonAgentLoader({
+        settings: options.settings,
+        getSettings: options.getSettings,
+        getSettingsForCwd: options.getSettingsForCwd,
+        createAgent: options.createAgent,
+        createTerminalHost:
+          options.createTerminalHost ??
+          ((session) => this.terminals.createAgentHost(session)),
+        createJobHost:
+          options.createJobHost ??
+          ((session) => this.jobs.createAgentHost(session)),
+        workflowRepository: this.workflows,
+        requestPermission: async (request, context) => {
+          // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。
+          return await this.permissions.ask({
+            sessionId: context.sessionId,
+            runId: context.runId,
+            traceId: context.traceId,
+            toolName: request.toolName,
+            reason: request.reason,
+            input: request.input,
+            signal: context.signal,
+          });
+        },
+        schedules: {
+          create: async (input) =>
+            this.schedules.createTask({ ...input, createdBy: "agent" }),
+          update: async (id, patch) => this.schedules.updateTask(id, patch),
+          remove: async (id) => this.schedules.removeTask(id),
+          list: async () => this.schedules.listTasks(),
+          trigger: async (id) => this.schedules.trigger(id),
+          listRuns: async (taskId) => this.schedules.listRuns({ taskId }),
+        },
+        // 这就是投影：Agent 的 onEvent 进这里，写成会话记录再推给窗口。
+        createEventSink: (agent, session) => {
+          const projector = new DaemonAgentEventProjector({
+            projectorId: `${DAEMON_AGENT_PROJECTOR}:${agent.id}`,
+            rootSessionId: session.id,
+            rootAgent: agent,
+            store,
+            transcriptProjection: this.transcriptProjection,
+            executionProjector: this.executionProjector,
+            liveChildren: this.liveChildren,
+            events: this.eventPublisher,
+            log: options.log,
+          });
+          return (event) => projector.apply(event);
+        },
+      });
+      // 一个会话一个热着的 Agent。子 Agent 自己占会话，不要被这个池子抢去。
+      this.agentPool = new AgentPool({
+        store,
+        loadAgent,
+        isSessionExternallyOwned: (sessionId) =>
+          this.liveChildren.has(sessionId),
+      });
 
-    // 一次 prompt 跑完才做：写记忆、个性化、auto-dream。失败的半截对话不写进去。
-    const postRunMaintenance = new SessionPostRunMaintenance({
-      store,
-      getSettings: async (cwd) =>
-        options.getSettingsForCwd
-          ? await options.getSettingsForCwd(cwd)
-          : options.getSettings?.() ?? options.settings,
-      log: options.log,
-      sessionMemoryWriter: (cwd, messages, sessionId) =>
-        updateSessionMemoryFile(cwd, messages, { sessionId }),
-      lastConsolidatedAt: readLastConsolidatedAt,
-      autoDream: executeAutoDream,
-    });
-    // 车道轮到这条 run 时，真正 submitMessage 的地方。
-    const runExecutor = new SessionRunExecutor({
-      store,
-      agentPool: this.agentPool,
-      events: this.eventPublisher,
-      transcriptProjection: this.transcriptProjection,
-      traceIdForRun: (runId) => this.traceIdForRun(runId),
-      log: options.log,
-      postRunMaintenance,
-    });
-    // 每个会话一条车道：收下 prompt、排队、interrupt。HTTP 202 之后工作在这里继续。
-    this.runEngine = new SessionRunEngine({
-      store,
-      agentPool: this.agentPool,
-      runExecutor,
-      events: this.eventPublisher,
-    });
-    this.control = new DaemonControlService({
-      store,
-      runEngine: this.runEngine,
-      agentPool: this.agentPool,
-      operationGate: this.operationGate,
-      startedAt: Date.now(),
-      sseClientCount: () => this.events.subscriberCount,
-    });
-    this.maintenance = new SessionMaintenanceService({
-      store,
-      runEngine: this.runEngine,
-      agentPool: this.agentPool,
-      liveChildren: this.liveChildren,
-      operationGate: this.operationGate,
-      events: this.eventPublisher,
-    });
-    // HTTP / 桌面看到的会话 API：建会话、admitPrompt、停、改模型，都从这里进。
-    this.sessions = new SessionApplicationService({
-      store,
-      runEngine: this.runEngine,
-      agentPool: this.agentPool,
-      liveChildren: this.liveChildren,
-      operationGate: this.operationGate,
-      events: this.eventPublisher,
-      assertReady: () => this.assertReady(),
-    });
-    this.channels = new ChannelApplicationService({
-      store,
-      sessions: this.sessions,
-      log: options.log,
-    });
-    this.schedules = new ScheduledTaskService({
-      store,
-      // 定时任务不是另一套执行器：到期后也是 admitPrompt，走上面同一条 Agent 车道。
-      execute: async (task, scheduledRun) => {
-        const projectCwd = task.projectPaths[0];
-        let executionCwd = projectCwd;
-        let worktree:
-          | {
-              manager: ReturnType<typeof createChildAgentWorktreeManager>;
-              slug: string;
-              path: string;
-              branch: string;
-              created: boolean;
+      // 一次 prompt 跑完才做：写记忆、个性化、auto-dream。失败的半截对话不写进去。
+      const postRunMaintenance = new SessionPostRunMaintenance({
+        store,
+        getSettings: async (cwd) =>
+          options.getSettingsForCwd
+            ? await options.getSettingsForCwd(cwd)
+            : (options.getSettings?.() ?? options.settings),
+        log: options.log,
+        sessionMemoryWriter: (cwd, messages, sessionId) =>
+          updateSessionMemoryFile(cwd, messages, { sessionId }),
+        lastConsolidatedAt: readLastConsolidatedAt,
+        autoDream: executeAutoDream,
+      });
+      // 车道轮到这条 run 时，真正 submitMessage 的地方。
+      const runExecutor = new SessionRunExecutor({
+        store,
+        agentPool: this.agentPool,
+        events: this.eventPublisher,
+        transcriptProjection: this.transcriptProjection,
+        traceIdForRun: (runId) => this.traceIdForRun(runId),
+        log: options.log,
+        postRunMaintenance,
+      });
+      // 每个会话一条车道：收下 prompt、排队、interrupt。HTTP 202 之后工作在这里继续。
+      this.runEngine = new SessionRunEngine({
+        store,
+        agentPool: this.agentPool,
+        runExecutor,
+        events: this.eventPublisher,
+      });
+      this.control = new DaemonControlService({
+        store,
+        runEngine: this.runEngine,
+        agentPool: this.agentPool,
+        operationGate: this.operationGate,
+        startedAt: Date.now(),
+        sseClientCount: () => this.events.subscriberCount,
+      });
+      this.maintenance = new SessionMaintenanceService({
+        store,
+        runEngine: this.runEngine,
+        agentPool: this.agentPool,
+        liveChildren: this.liveChildren,
+        operationGate: this.operationGate,
+        events: this.eventPublisher,
+      });
+      // HTTP / 桌面看到的会话 API：建会话、admitPrompt、停、改模型，都从这里进。
+      this.sessions = new SessionApplicationService({
+        store,
+        runEngine: this.runEngine,
+        agentPool: this.agentPool,
+        liveChildren: this.liveChildren,
+        operationGate: this.operationGate,
+        events: this.eventPublisher,
+        assertReady: () => this.assertReady(),
+      });
+      this.channels = new ChannelApplicationService({
+        store,
+        sessions: this.sessions,
+        log: options.log,
+      });
+      this.schedules = new ScheduledTaskService({
+        store,
+        // 定时任务不是另一套执行器：到期后也是 admitPrompt，走上面同一条 Agent 车道。
+        execute: async (task, scheduledRun) => {
+          const projectCwd = task.projectPaths[0];
+          let executionCwd = projectCwd;
+          let worktree:
+            | {
+                manager: ReturnType<typeof createChildAgentWorktreeManager>;
+                slug: string;
+                path: string;
+                branch: string;
+                created: boolean;
+              }
+            | undefined;
+          if (task.executionMode === "worktree") {
+            if (!projectCwd)
+              throw new Error(
+                "Worktree scheduled execution requires user attention: project is unavailable",
+              );
+            const manager = createChildAgentWorktreeManager({
+              cwd: projectCwd,
+            });
+            if (!(await manager.isGitRepo())) {
+              throw new Error(
+                "Worktree scheduled execution requires user attention: project is not a Git repository",
+              );
             }
-          | undefined;
-        if (task.executionMode === "worktree") {
-          if (!projectCwd)
-            throw new Error(
-              "Worktree scheduled execution requires user attention: project is unavailable",
-            );
-          const manager = createChildAgentWorktreeManager({ cwd: projectCwd });
-          if (!(await manager.isGitRepo())) {
-            throw new Error(
-              "Worktree scheduled execution requires user attention: project is not a Git repository",
-            );
+            const slug = buildChildAgentWorktreeSlug({
+              team: "scheduled",
+              agent: task.id,
+              nonce: scheduledRun.id.slice(0, 8),
+            });
+            const created = await manager.create(slug).catch((error) => {
+              const message =
+                error instanceof Error ? error.message : String(error);
+              throw new Error(
+                `Worktree scheduled execution requires user attention: ${message}`,
+              );
+            });
+            worktree = { manager, ...created };
+            executionCwd = created.path;
           }
-          const slug = buildChildAgentWorktreeSlug({
-            team: "scheduled",
-            agent: task.id,
-            nonce: scheduledRun.id.slice(0, 8),
-          });
-          const created = await manager.create(slug).catch((error) => {
-            const message =
-              error instanceof Error ? error.message : String(error);
-            throw new Error(
-              `Worktree scheduled execution requires user attention: ${message}`,
-            );
-          });
-          worktree = { manager, ...created };
-          executionCwd = created.path;
-        }
-        let session = task.sessionId
-          ? this.sessions.getSession(task.sessionId)
-          : undefined;
-        try {
-          if (task.destination === "chat") {
-            if (!session)
-              throw new Error(
-                `Scheduled task chat is unavailable: ${task.sessionId}`,
+          let session = task.sessionId
+            ? this.sessions.getSession(task.sessionId)
+            : undefined;
+          try {
+            if (task.destination === "chat") {
+              if (!session)
+                throw new Error(
+                  `Scheduled task chat is unavailable: ${task.sessionId}`,
+                );
+              if (session.status === "archived") {
+                throw new Error(
+                  "Scheduled task chat is archived and requires user attention",
+                );
+              }
+            } else {
+              if (!executionCwd)
+                throw new Error("Scheduled task project is unavailable");
+              const settingsCwd = projectCwd ?? executionCwd;
+              const settings =
+                (await options.getSettingsForCwd?.(settingsCwd)) ??
+                options.getSettings?.() ??
+                options.settings;
+              const model = task.model ?? settings?.model;
+              if (!model)
+                throw new Error("Scheduled task model is unavailable");
+              const permissionMode = scheduledPermissionMode(
+                task.permissionProfile.mode,
               );
-            if (session.status === "archived") {
-              throw new Error(
-                "Scheduled task chat is archived and requires user attention",
+              const deniedTools = new Set(
+                task.permissionProfile.deniedTools ?? [],
               );
+              if (task.permissionProfile.network === false) {
+                deniedTools.add("WebFetch");
+                deniedTools.add("WebSearch");
+              }
+              session = this.sessions.createSession({
+                cwd: executionCwd,
+                title: `${task.name} · scheduled run`,
+                model,
+                metadata: {
+                  runtime: {
+                    model,
+                    permissionMode,
+                    ...(isScheduledEffort(task.effort)
+                      ? { effort: task.effort }
+                      : {}),
+                    ...(task.permissionProfile.allowedTools?.length
+                      ? { allowedTools: task.permissionProfile.allowedTools }
+                      : {}),
+                    ...(deniedTools.size > 0
+                      ? { disallowedTools: [...deniedTools] }
+                      : {}),
+                  },
+                  scheduledTask: {
+                    taskId: task.id,
+                    scheduledRunId: scheduledRun.id,
+                    destination: task.destination,
+                    executionMode: task.executionMode,
+                    ...(worktree
+                      ? {
+                          worktree: {
+                            path: worktree.path,
+                            branch: worktree.branch,
+                          },
+                        }
+                      : {}),
+                  },
+                },
+              });
             }
-          } else {
-            if (!executionCwd)
-              throw new Error("Scheduled task project is unavailable");
-            const settingsCwd = projectCwd ?? executionCwd;
-            const settings =
-              (await options.getSettingsForCwd?.(settingsCwd)) ??
-              options.getSettings?.() ??
-              options.settings;
-            const model = task.model ?? settings?.model;
-            if (!model) throw new Error("Scheduled task model is unavailable");
-            const permissionMode = scheduledPermissionMode(
-              task.permissionProfile.mode,
-            );
-            const deniedTools = new Set(
-              task.permissionProfile.deniedTools ?? [],
-            );
-            if (task.permissionProfile.network === false) {
-              deniedTools.add("WebFetch");
-              deniedTools.add("WebSearch");
-            }
-            session = this.sessions.createSession({
-              cwd: executionCwd,
-              title: `${task.name} · scheduled run`,
-              model,
+            const admission = await this.sessions.admitPrompt(session!.id, {
+              id: `scheduled-input:${scheduledRun.id}`,
+              content: scheduledPrompt(task),
+              delivery: "queue",
               metadata: {
-                runtime: {
-                  model,
-                  permissionMode,
-                  ...(isScheduledEffort(task.effort)
-                    ? { effort: task.effort }
-                    : {}),
-                  ...(task.permissionProfile.allowedTools?.length
-                    ? { allowedTools: task.permissionProfile.allowedTools }
-                    : {}),
-                  ...(deniedTools.size > 0
-                    ? { disallowedTools: [...deniedTools] }
-                    : {}),
-                },
-                scheduledTask: {
-                  taskId: task.id,
-                  scheduledRunId: scheduledRun.id,
-                  destination: task.destination,
-                  executionMode: task.executionMode,
-                  ...(worktree
-                    ? {
-                        worktree: {
-                          path: worktree.path,
-                          branch: worktree.branch,
-                        },
-                      }
-                    : {}),
-                },
+                source: "scheduled_task",
+                scheduledTaskId: task.id,
+                scheduledRunId: scheduledRun.id,
+                scheduledFor: scheduledRun.scheduledFor,
+              },
+              runMetadata: {
+                source: "scheduled_task",
+                scheduledTaskId: task.id,
+                scheduledRunId: scheduledRun.id,
               },
             });
-          }
-          const admission = await this.sessions.admitPrompt(session!.id, {
-            id: `scheduled-input:${scheduledRun.id}`,
-            content: scheduledPrompt(task),
-            delivery: "queue",
-            metadata: {
-              source: "scheduled_task",
-              scheduledTaskId: task.id,
-              scheduledRunId: scheduledRun.id,
-              scheduledFor: scheduledRun.scheduledFor,
-            },
-            runMetadata: {
-              source: "scheduled_task",
-              scheduledTaskId: task.id,
-              scheduledRunId: scheduledRun.id,
-            },
-          });
-          if (!admission.run)
-            throw new Error("Scheduled task Agent runtime is unavailable");
-          const result = await this.sessions.awaitRun(
-            session!.id,
-            admission.run.id,
-          );
-          if (result.status !== "completed") {
-            throw new Error(
-              result.error ?? `Scheduled Agent run ${result.status}`,
+            if (!admission.run)
+              throw new Error("Scheduled task Agent runtime is unavailable");
+            const result = await this.sessions.awaitRun(
+              session!.id,
+              admission.run.id,
             );
-          }
-          return {
-            sessionId: session!.id,
-            runId: admission.run.id,
-            summary: result.output.slice(0, 20_000),
-          };
-        } finally {
-          if (worktree?.created) {
-            const hasChanges = await worktree.manager
-              .hasChanges(worktree.slug)
-              .catch(() => true);
-            if (!hasChanges) {
-              await worktree.manager.remove(worktree.slug).catch(() => {});
+            if (result.status !== "completed") {
+              throw new Error(
+                result.error ?? `Scheduled Agent run ${result.status}`,
+              );
+            }
+            return {
+              sessionId: session!.id,
+              runId: admission.run.id,
+              summary: result.output.slice(0, 20_000),
+            };
+          } finally {
+            if (worktree?.created) {
+              const hasChanges = await worktree.manager
+                .hasChanges(worktree.slug)
+                .catch(() => true);
+              if (!hasChanges) {
+                await worktree.manager.remove(worktree.slug).catch(() => {});
+              }
             }
           }
-        }
-      },
-    });
-    this.queries = new SessionQueryService(store);
-    // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
-    this.startupRecovery = recoverInterruptedWorkflows({
-      workflows: this.workflows,
-    }).then(
-      () => {
-        if (this.readyState === "starting") this.readyState = "ready";
-      },
-      (error) => {
-        this.readyState = "failed";
-        clearInterval(this.ownerHeartbeat);
-        store.releaseApplicationOwner(this.ownerLease);
-        throw error;
-      },
-    );
-    void this.startupRecovery.catch(() => {});
+        },
+      });
+      this.queries = new SessionQueryService(store);
+      // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
+      this.startupRecovery = recoverInterruptedWorkflows({
+        workflows: this.workflows,
+      }).then(
+        () => {
+          if (this.readyState === "starting") this.readyState = "ready";
+        },
+        (error) => {
+          this.readyState = "failed";
+          clearInterval(this.ownerHeartbeat);
+          store.releaseApplicationOwner(this.ownerLease);
+          throw error;
+        },
+      );
+      void this.startupRecovery.catch(() => {});
     } catch (error) {
       clearInterval(this.ownerHeartbeat);
       store.releaseApplicationOwner(this.ownerLease);
@@ -554,7 +563,9 @@ export class DaemonApplication implements DurableAgentApplication {
       failures.push(error);
     }
     try {
-      const settlementRecovery = recoverProjectionSettlements(this.options.store);
+      const settlementRecovery = recoverProjectionSettlements(
+        this.options.store,
+      );
       if (settlementRecovery.pending > 0) {
         throw new Error(
           `Daemon shutdown left ${settlementRecovery.pending} projection settlement(s) pending`,
@@ -608,6 +619,21 @@ export class DaemonApplication implements DurableAgentApplication {
     if (run)
       this.options.store.updateRun(runId, { metadata: { traceId: generated } });
     return generated;
+  }
+}
+
+/**
+ * signal 0 不会终止进程，只检查 PID 是否存在。EPERM 表示进程存在但当前用户无权发信号，
+ * 这种情况必须按“仍存活”处理，不能冒险启动第二个 daemon。
+ */
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // 只有 ESRCH 能确认 PID 不存在；权限错误和未知错误都保守地视为仍存活。
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
 }
 
