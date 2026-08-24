@@ -5,7 +5,7 @@ import { briefTool } from "../brief.js";
 import { configTool } from "../config.js";
 import { toolSearchTool } from "../tool-search.js";
 import { askUserTool } from "../ask-user.js";
-import { skillTool } from "../skill.js";
+import { listSkillsTool, skillTool } from "../skill.js";
 import { ToolRegistry } from "@openharness/core";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
 import * as fs from "node:fs/promises";
@@ -159,6 +159,61 @@ describe("skillTool", () => {
 
     expect(result.isError).not.toBe(true);
     expect((result.content[0] as any).text).toContain("Run the thing.");
+  });
+});
+
+describe("listSkillsTool", () => {
+  it("lists model-visible skills by default", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({
+      name: "visible",
+      description: "Visible skill",
+      source: "project",
+    }));
+    registry.register(makeSkill({
+      name: "hidden",
+      description: "Hidden skill",
+      disableModelInvocation: true,
+      source: "user",
+    }));
+
+    const result = await listSkillsTool.execute!({}, {
+      cwd: process.cwd(),
+      skillRegistry: registry,
+    });
+
+    const text = (result.content[0] as any).text;
+    expect(text).toContain("Model-visible skills:");
+    expect(text).toContain("visible — Visible skill");
+    expect(text).toContain("source=project");
+    expect(text).not.toContain("hidden");
+  });
+
+  it("can list all loaded skills including model-hidden skills", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({
+      name: "visible",
+      description: "Visible skill",
+      userInvocable: false,
+    }));
+    registry.register(makeSkill({
+      name: "hidden",
+      description: "Hidden skill",
+      commandName: "h",
+      disableModelInvocation: true,
+    }));
+
+    const result = await listSkillsTool.execute!({ visibility: "all" }, {
+      cwd: process.cwd(),
+      skillRegistry: registry,
+    });
+
+    const text = (result.content[0] as any).text;
+    expect(text).toContain("All loaded skills:");
+    expect(text).toContain("visible — Visible skill");
+    expect(text).toContain("hidden — Hidden skill");
+    expect(text).toContain("command=/h");
+    expect(text).toContain("model=hidden");
   });
 });
 

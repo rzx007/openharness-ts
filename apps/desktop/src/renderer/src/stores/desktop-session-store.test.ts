@@ -171,4 +171,77 @@ describe("desktop session store outside-project mode", () => {
       ],
     })
   })
+
+  it("keeps the internal xN workspace hidden after opening a session and starting a new one", async () => {
+    const session = {
+      id: "session-outside-project",
+      projectId: "auto-generated-workspace-project",
+      workspaceMode: "outside_project" as const,
+      cwd: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-08-24\\x1",
+      title: "项目外会话",
+      model: "deepseek-chat",
+      status: "idle" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const close = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          close,
+          open: vi.fn(async () => ({
+            cursor: 0,
+            syncStatus: "connected" as const,
+            session,
+            inputs: [],
+            messages: [],
+            parts: [],
+            runs: [],
+            tasks: [],
+            permissions: [],
+          })),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [session],
+      archivedSessions: [],
+      workspaceMode: "project",
+      selectedProject: {
+        id: session.projectId,
+        name: "x1",
+        path: session.cwd,
+        lastOpenedAt: 1,
+        available: true,
+      },
+      defaultModel: "deepseek-chat",
+      defaultProvider: "deepseek",
+      defaultPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+      openingSession: false,
+      sending: false,
+      error: null,
+    })
+
+    await useDesktopSessionStore.getState().openSession(session.id)
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      activeSessionId: session.id,
+    })
+
+    await useDesktopSessionStore.getState().startNewConversation()
+
+    expect(close).toHaveBeenCalledOnce()
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      activeSessionId: null,
+      sessionView: null,
+    })
+  })
 })

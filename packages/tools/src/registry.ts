@@ -19,6 +19,7 @@ import {
   askUserTool,
   briefTool,
   configTool,
+  listSkillsTool,
   skillTool,
   sleepTool,
   todoWriteTool,
@@ -73,6 +74,7 @@ export function createDefaultToolRegistry(
   registry.register(configTool);
   registry.register(sleepTool);
   registry.register(skillTool);
+  registry.register(listSkillsTool);
   registry.register(toolSearchTool);
   registry.register(askUserTool);
   registry.register(briefTool);

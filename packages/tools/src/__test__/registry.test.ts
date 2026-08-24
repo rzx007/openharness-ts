@@ -18,6 +18,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("Config");
     expect(names).toContain("Sleep");
     expect(names).toContain("Skill");
+    expect(names).toContain("ListSkills");
     expect(names).toContain("ToolSearch");
     expect(names).toContain("AskUser");
     expect(names).toContain("Brief");
@@ -40,7 +41,7 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("ImageToText");
     expect(names).toContain("ImageGeneration");
     expect(names).toContain("FeishuPush");
-    expect(tools).toHaveLength(32);
+    expect(tools).toHaveLength(33);
     expect(names).not.toEqual(
       expect.arrayContaining([
         "TaskGet",

@@ -940,7 +940,7 @@ function resolveSessionWorkspace(
   DesktopSessionState,
   "workspaceMode" | "selectedProject" | "selectedProjectGit" | "branch" | "branches"
 > {
-  if (!session.projectId) {
+  if (session.workspaceMode === "outside_project" || !session.projectId) {
     return {
       workspaceMode: "outside_project",
       selectedProject: null,

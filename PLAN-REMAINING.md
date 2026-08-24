@@ -37,6 +37,8 @@
 | sandbox | 🟡 | ✅ SRT/Docker runtime、per-session 容器、统一进程入口、host file guard、Docker 整棵进程停止、daemon 托管 Cron、MCP stdio sandbox-aware transport、Docker active 文件操作、主 daemon 系统常驻与 E2E 用例；缺 Docker CI 实跑 |
 | services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
 | personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 自动抽取尚未接 standalone 或 daemon/TUI lifecycle(C.5) |
+| observability | 🟡 | ✅ trace/结构化日志/持久事实指标/Run Inspector/Projection diagnostics 已闭环；缺统一 span、外部 exporter、长期时序查询、面板与告警 |
+| evaluation | 🔴 | 有单元/集成/恢复/soak 测试，但尚无固定 Agent 任务集、评分器、基线结果、回归阈值和 CI eval 入口 |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
 | autopilot | ⛔ | 不复刻 |
 
@@ -62,15 +64,19 @@
    - 仍缺：把 Docker/SRT 可选 E2E 接入有对应后端的 CI job，并保留本地无 Docker 环境下的跳过路径。
    - 权威流程：`docs/sandbox-runtime-flow.md`。
 
-4. **Trace 基础已完成，span / 指标查询仍不完整**
-   - 现状：`runId/traceId` 已贯穿 Agent、HTTP、tool、permission 和 session store；仍缺统一 span、阶段耗时拆分、长期指标持久化与查询面板。
-   - 含义：可以按 run/trace 关联事件，但还不能稳定回答每个 provider/tool 阶段耗时、跨 channel 交付与长期成本趋势。
-   - 影响：企业审计、SLO、成本看板、事故复盘、多租户治理都缺基础数据。
+4. **单机可观测性第一版已闭环，生产监控平台仍不完整**
+   - 已完成：`traceId` 贯穿 HTTP、Input、Run、模型 Attempt、Tool、Permission、Child Task 和 Workflow；服务端输出脱敏的 JSON Lines 结构化日志。
+   - 已完成：受 bearer token 保护的 `GET /debug/runtime`、`GET /debug/runs/:runId` 和 `GET /debug/projection-settlements`。Run Inspector 能汇总 Input、Attempt、Message/Tool Part、Task、Permission、Event、Workflow 和 Projection Settlement，并给出 `warnings` / `diagnosticOk`；默认隐藏正文和工具输入输出。
+   - 已完成：从 SQLite 持久事实即时汇总有界标签指标，覆盖 Run/Attempt/Tool/Token/Permission/Child Agent/Workflow/Projection Settlement 的数量、状态和已有耗时；指标构建失败不会影响 Run 主流程。
+   - 当前边界：`/debug/runtime.metrics` 是当前持久数据的查询快照，不是长期时序库；日志和 debug 接口是诊断视图，SQLite 中的持久记录仍是运行事实来源。
+   - 仍缺：统一 span 与嵌套阶段模型、首 token/重试/排队/channel delivery 等细分耗时、OpenTelemetry/Prometheus exporter、长期指标存储与时间窗口查询、Grafana 类面板、告警和 SLO、长期 token/成本趋势，以及 Retention/Backup 最近成功状态的统一控制面指标。
+   - 权威说明：`docs/observability.md`；核心实现位于 `packages/server/src/shared/runtime-metrics.ts`、`packages/server/src/application/control/run-inspector.ts` 和 `packages/server/src/http/routes/system.ts`。
 
 5. **缺系统化 Agent evaluation / regression benchmark**
-   - 现状：有单元/集成测试，但没有一套固定任务集来评估 Agent 行为质量。
+   - 现状：已有单元、集成、恢复和 soak 测试用于验证协议与运行正确性，但没有一套固定任务集来评估 Agent 的真实任务质量；仓库也没有统一的 `eval` / `benchmark` 脚本。
    - 含义：改 prompt、工具管线、模型 provider、权限策略后，只能靠零散测试和人工试用判断是否退化。
-   - 预期：建立可重复的任务集、评分器、基线结果和 CI/手动回归入口。
+   - 仍缺：可重复 fixture、任务清单、确定性/模型/人工评分器、成功率与成本指标、基线结果、回归阈值、失败 trace artifact，以及 CI/手动回归入口。
+   - 推荐第一版：先覆盖文件检索、小型代码修改、测试诊断、多工具组合、权限拒绝与恢复、Child Agent 和 Workflow；优先用文件断言、测试结果、越权检查、未收束记录、耗时/token/工具次数做确定性评分，再增加模型评分。
 
 6. **Channels 仍偏单通道 MVP**
    - 现状：Channels 基座 + 飞书文本对话跑通；媒体、长消息分片、去重、线程级会话隔离、Slack/Discord/Telegram 等平台仍待补。
