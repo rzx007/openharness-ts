@@ -1,5 +1,7 @@
-import { Box, Folder, GitBranch, Monitor, PanelRight, Plus, Search, Workflow } from "lucide-react"
+import { Blobatar } from "@blobatar/react"
+import { Box, Folder, GitBranch, Monitor, PanelRight, Plus, Search } from "lucide-react"
 import { useState } from "react"
+import "blobatar/motion.css"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
@@ -59,6 +61,7 @@ export function NewConversationStart({
   onTogglePanel: () => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<StartPicker | null>(null)
+  const [blobatarName] = useState(() => crypto.randomUUID())
   const [projectQuery, setProjectQuery] = useState("")
   const [branchQuery, setBranchQuery] = useState("")
   const [creatingBranch, setCreatingBranch] = useState(false)
@@ -88,10 +91,12 @@ export function NewConversationStart({
       ) : null}
       <div className="mx-auto flex h-full w-full max-w-190 min-w-0 flex-col items-center justify-center pb-[5vh]">
         <div className="mb-7 flex max-w-full min-w-0 flex-col items-center px-2 text-center">
-          <Workflow
+          <Blobatar
+            name={blobatarName}
+            animate="always"
+            size={64}
+            className="mb-5"
             aria-hidden="true"
-            className="mb-5 size-9 text-ui-muted/65"
-            strokeWidth={1.45}
           />
           <h2 className="max-w-full text-[26px] leading-9 font-medium wrap-break-word text-foreground">
             {selectedProject ? (

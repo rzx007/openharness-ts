@@ -78,6 +78,7 @@ function CodeRenderer({
   bodyClassName,
 }: RendererProps): React.JSX.Element {
   const [renderPass, setRenderPass] = useState(0)
+  const [themeType, setThemeType] = useThemeType()
   const file = useMemo<FileContents>(
     () => ({
       name: codeBlockFilename(language),
@@ -94,7 +95,7 @@ function CodeRenderer({
       overflow: "scroll",
       preferredHighlighter: "shiki-js",
       theme: DEFAULT_THEMES,
-      themeType: "system",
+      themeType,
       tokenizeMaxLength: 220_000,
       tokenizeMaxLineLength: 20_000,
       unsafeCSS: `
@@ -120,12 +121,19 @@ function CodeRenderer({
         }
       `,
     }),
-    [showLineNumbers]
+    [showLineNumbers, themeType]
   )
 
   useEffect(() => {
     injectStyles()
   }, [])
+
+  useEffect(() => {
+    const update = (): void => setThemeType(resolveThemeType())
+    const observer = new MutationObserver(update)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    return () => observer.disconnect()
+  }, [setThemeType])
 
   useEffect(() => {
     let disposed = false
@@ -151,7 +159,7 @@ function CodeRenderer({
       window.cancelAnimationFrame(frame)
       if (readyFrame !== null) window.cancelAnimationFrame(readyFrame)
     }
-  }, [code, language])
+  }, [code, language, themeType])
 
   return (
     <div
@@ -163,10 +171,19 @@ function CodeRenderer({
       style={scrollable ? { maxHeight: `${maxHeight}px` } : undefined}
     >
       <div className={cn("px-4 py-3", highlightLines?.length && "cbhl")}>
-        <PierreFile key={renderPass} file={file} options={options} />
+        <PierreFile key={`${themeType}:${renderPass}`} file={file} options={options} />
       </div>
     </div>
   )
+}
+
+function useThemeType(): ["dark" | "light", (value: "dark" | "light") => void] {
+  return useState<"dark" | "light">(() => resolveThemeType())
+}
+
+function resolveThemeType(): "dark" | "light" {
+  if (typeof document === "undefined") return "light"
+  return document.documentElement.classList.contains("dark") ? "dark" : "light"
 }
 
 function codeBlockFilename(language: string): string {

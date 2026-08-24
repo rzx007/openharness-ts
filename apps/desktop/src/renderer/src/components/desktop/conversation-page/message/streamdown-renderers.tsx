@@ -54,7 +54,7 @@ export function FileButton({
       )}
     >
       <FileReferenceIcon path={path} />
-      <span className="truncate">{children}</span>
+      <span className="text-file-link truncate">{children}</span>
     </button>
   )
 }

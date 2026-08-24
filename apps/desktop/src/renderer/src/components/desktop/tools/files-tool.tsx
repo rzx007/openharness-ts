@@ -16,8 +16,13 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import type * as React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
-import { prepareFileTreeInput, type ContextMenuItem } from "@pierre/trees"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import {
+  prepareFileTreeInput,
+  type ContextMenuAnchorRect,
+  type ContextMenuItem,
+} from "@pierre/trees"
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
 import { Group, Panel, usePanelRef } from "react-resizable-panels"
 
@@ -378,7 +383,7 @@ export function FilesTool({
               searchMatches={searchMatches}
               targetLine={
                 openRequest &&
-                toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
+                  toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
                   ? openRequest.line
                   : undefined
               }
@@ -600,6 +605,7 @@ function ProjectFileTree({
             <FileTreeContextMenu
               item={item}
               rootPath={rootPath}
+              anchorRect={context.anchorRect}
               onClose={context.close}
               onActionError={onActionError}
               onAction={(action) => {
@@ -618,20 +624,47 @@ function ProjectFileTree({
 function FileTreeContextMenu({
   item,
   rootPath,
+  anchorRect,
   onAction,
   onClose,
   onActionError,
 }: {
   item: ContextMenuItem
   rootPath: string
+  anchorRect: ContextMenuAnchorRect
   onAction: (action: FileTreeAction) => void
   onClose: () => void
   onActionError: (error: unknown) => void
 }): React.JSX.Element {
-  return (
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState(() => clampFileTreeMenuPosition(anchorRect, 256, 280))
+
+  useLayoutEffect(() => {
+    const place = (): void => {
+      const menu = menuRef.current
+      const width = menu?.offsetWidth || 256
+      const height = menu?.offsetHeight || 280
+      setPosition(clampFileTreeMenuPosition(anchorRect, width, height))
+    }
+
+    place()
+    window.addEventListener("resize", place)
+    window.addEventListener("scroll", place, true)
+    return () => {
+      window.removeEventListener("resize", place)
+      window.removeEventListener("scroll", place, true)
+    }
+  }, [anchorRect])
+
+  return createPortal(
     <div
+      ref={menuRef}
       data-file-tree-context-menu-root="true"
-      className="w-64 rounded-xl border border-border/55 bg-popover p-1.5 text-[13px] text-popover-foreground shadow-xl shadow-black/12 dark:border-white/8 dark:shadow-black/40"
+      style={{ top: position.top, left: position.left }}
+      onMouseDown={(event) => {
+        event.stopPropagation()
+      }}
+      className="fixed z-50 w-64 rounded-xl border border-border/55 bg-popover p-1.5 text-[13px] text-popover-foreground shadow-xl shadow-black/12 dark:border-white/8 dark:shadow-black/40"
     >
       <FileTreeMenuButton icon={FolderOpen} onClick={() => onAction("reveal")}>
         在 File Explorer 中打开
@@ -659,8 +692,28 @@ function FileTreeContextMenu({
       <div className="mt-1 border-t border-border/45 px-2.5 pt-2 pb-1 text-[11px] text-ui-muted">
         {item.kind === "directory" ? "文件夹" : "文件"} · {item.name}
       </div>
-    </div>
+    </div>,
+    document.body
   )
+}
+
+function clampFileTreeMenuPosition(
+  anchor: ContextMenuAnchorRect,
+  width: number,
+  height: number
+): { top: number; left: number } {
+  const margin = 8
+  const openRight = anchor.right + width + margin <= window.innerWidth
+  const left = openRight
+    ? Math.min(anchor.right, window.innerWidth - width - margin)
+    : Math.max(margin, anchor.left - width)
+  return {
+    left: Math.max(margin, Math.min(left, window.innerWidth - width - margin)),
+    top: Math.min(
+      Math.max(margin, anchor.top),
+      Math.max(margin, window.innerHeight - height - margin)
+    ),
+  }
 }
 
 function FileTreeMenuButton({
@@ -683,7 +736,7 @@ function FileTreeMenuButton({
       className="h-9 w-full justify-start px-2.5 font-normal"
     >
       <Icon className="text-muted-foreground" strokeWidth={1.8} />
-      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <span className="min-w-0 flex-1 truncate text-start">{children}</span>
     </Button>
   )
 }

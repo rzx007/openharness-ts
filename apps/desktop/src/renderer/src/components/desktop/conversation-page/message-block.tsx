@@ -165,7 +165,7 @@ function UserMessageBlock({
   return (
     <Message align="end" className="group/msg">
       <MessageContent className="items-end">
-        <div className="max-w-[78%] rounded-xl bg-user-message/50 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground">
+        <div className="max-w-[78%] rounded-xl bg-input/80 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-sidebar-foreground">
           {content || "已发送消息"}
         </div>
         <MessageToolbar align="end" timestamp={timestamp}>

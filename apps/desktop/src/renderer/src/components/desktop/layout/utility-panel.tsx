@@ -93,7 +93,7 @@ const toolMeta: Record<
   }
 > = {
   review: { icon: FileText, label: "审阅", shortcut: "Ctrl+Shift+G" },
-  terminal: { icon: SquareTerminal, label: "终端" },
+  terminal: { icon: SquareTerminal, label: "终端", shortcut: "Ctrl+`" },
   browser: { icon: Globe2, label: "浏览器", shortcut: "Ctrl+T" },
   files: { icon: Folder, label: "文件", shortcut: "Ctrl+P" },
   "side-chat": { icon: MessageCirclePlus, label: "侧边聊天", shortcut: "Ctrl+Alt+S" },
@@ -694,13 +694,13 @@ function EmptyUtilityPanelState({
               key={tool}
               size="sm"
               render={<button type="button" onClick={() => onAdd(tool)} />}
-              className="h-10 cursor-pointer flex-nowrap bg-transparent text-left hover:bg-muted"
+              className="text-sidebar-foregroun h-10 cursor-pointer flex-nowrap bg-transparent text-left hover:bg-muted"
             >
-              <ItemMedia variant="icon" className="size-4 text-muted-foreground">
+              <ItemMedia variant="icon" className="size-4">
                 <Icon strokeWidth={1.8} />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle className="text-[13px] font-normal">{toolMeta[tool].label}</ItemTitle>
+                <ItemTitle className="d text-[13px] font-normal">{toolMeta[tool].label}</ItemTitle>
               </ItemContent>
               <ItemActions className="min-w-28 justify-end">
                 {toolMeta[tool].shortcut ? (
@@ -752,13 +752,13 @@ function UtilityTabButton({
             ? "bg-neutral-200/80 text-ui-foreground dark:bg-neutral-800"
             : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
           showSeparator &&
-            "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
+          "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
         )}
       >
         <button
           type="button"
           onClick={onSelect}
-          className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xl px-2.5 pr-1 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xl px-2.5 pr-1 text-left text-sidebar-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           title={tab.title}
         >
           <TabIcon
@@ -805,13 +805,13 @@ function placeFileTab(current: UtilityTab[], fileTab: UtilityTab): UtilityTab[] 
     return current.map((tab, index) =>
       index === existingIndex
         ? {
-            ...tab,
-            title: fileTab.title,
-            fileIcon: fileTab.fileIcon ?? tab.fileIcon,
-            fileType: fileTab.fileType ?? tab.fileType,
-            filePath: fileTab.filePath,
-            projectPath: fileTab.projectPath,
-          }
+          ...tab,
+          title: fileTab.title,
+          fileIcon: fileTab.fileIcon ?? tab.fileIcon,
+          fileType: fileTab.fileType ?? tab.fileType,
+          filePath: fileTab.filePath,
+          projectPath: fileTab.projectPath,
+        }
         : tab
     )
   }
@@ -890,7 +890,7 @@ function AddTabMenu({
 }): React.JSX.Element {
   return (
     <div
-      className="fixed z-[80] w-80 rounded-xl border bg-popover p-2 text-popover-foreground shadow-lg"
+      className="fixed z-80 w-80 rounded-xl border bg-popover p-2 text-popover-foreground shadow-lg"
       style={{ left: position.left, top: position.top }}
     >
       {toolOrder.map((tool) => {
