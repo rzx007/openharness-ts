@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
 import type { SkillDefinition, SkillRegistry } from "@openharness/skills";
 
@@ -19,7 +18,7 @@ export const skillTool: ToolDefinition = {
   async execute(input, context) {
     const name = input.name as string;
 
-    const registry = await resolveSkillRegistry(context);
+    const registry = await resolveSkillRegistry(context, { refreshFilesystem: true });
 
     const skill = registry.resolve(name);
     if (!skill) {
@@ -49,7 +48,7 @@ export const listSkillsTool: ToolDefinition = {
   },
   async execute(input, context) {
     const visibility = parseVisibility(input.visibility);
-    const registry = await resolveSkillRegistry(context);
+    const registry = await resolveSkillRegistry(context, { refreshFilesystem: true });
     const skills = filterSkills(registry.getAll(), visibility);
 
     if (skills.length === 0) {
@@ -69,24 +68,26 @@ export const listSkillsTool: ToolDefinition = {
   },
 };
 
-async function resolveSkillRegistry(context: { cwd: string; skillRegistry?: unknown }) {
+async function resolveSkillRegistry(
+  context: { cwd: string; skillRegistry?: unknown },
+  options: { refreshFilesystem?: boolean } = {},
+) {
   const sharedRegistry = context.skillRegistry as SkillRegistryInstance | undefined;
-  if (sharedRegistry) return sharedRegistry;
+  if (sharedRegistry && !options.refreshFilesystem) return sharedRegistry;
 
-  const { SkillRegistry, SkillLoader } = await import("@openharness/skills");
+  const { SkillRegistry, SkillLoader, findProjectSkillDirs } = await import("@openharness/skills");
   const { getSkillsDir } = await import("@openharness/core");
   const registry = new SkillRegistry();
-  registry.registerBundled();
+  if (sharedRegistry) {
+    for (const skill of sharedRegistry.getAll()) registry.register(skill);
+  } else {
+    registry.registerBundled();
+  }
   const loader = new SkillLoader(registry);
   await loader.loadFromDirectory(getSkillsDir(), { source: "user", recursive: true });
-  await loader.loadFromDirectory(join(context.cwd, ".openharness", "skills"), {
-    source: "project",
-    recursive: true,
-  });
-  await loader.loadFromDirectory(join(context.cwd, ".claude", "skills"), {
-    source: "project",
-    recursive: true,
-  });
+  for (const directory of await findProjectSkillDirs(context.cwd)) {
+    await loader.loadFromDirectory(directory, { source: "project", recursive: true });
+  }
   return registry;
 }
 

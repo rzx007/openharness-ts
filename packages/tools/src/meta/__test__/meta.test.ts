@@ -215,6 +215,43 @@ describe("listSkillsTool", () => {
     expect(text).toContain("command=/h");
     expect(text).toContain("model=hidden");
   });
+
+  it("freshly scans project .claude/skills directory skills even with a stale shared registry", async () => {
+    const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oh-list-skills-"));
+    process.env.OPENHARNESS_CONFIG_DIR = path.join(dir, "config");
+    try {
+      const skillDir = path.join(dir, ".claude", "skills", "live-skill");
+      await fs.mkdir(path.join(dir, ".git"), { recursive: true });
+      await fs.mkdir(skillDir, { recursive: true });
+      await fs.writeFile(
+        path.join(skillDir, "SKILL.md"),
+        "---\ndescription: Fresh project skill\n---\n\nLive skill body.",
+        "utf-8",
+      );
+      await fs.writeFile(path.join(skillDir, "notes.md"), "not a skill", "utf-8");
+
+      const staleRegistry = new SkillRegistry();
+      staleRegistry.register(makeSkill({
+        name: "stale",
+        description: "Existing runtime skill",
+      }));
+
+      const result = await listSkillsTool.execute!({ visibility: "all" }, {
+        cwd: dir,
+        skillRegistry: staleRegistry,
+      });
+
+      const text = (result.content[0] as any).text;
+      expect(text).toContain("stale — Existing runtime skill");
+      expect(text).toContain("live-skill — Fresh project skill");
+      expect(text).not.toContain("notes");
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("askUserTool", () => {
