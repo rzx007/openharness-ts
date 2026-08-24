@@ -439,11 +439,11 @@ export async function loadSkillsThreeSources(
     process.stderr.write(`[plugins] ${warning}\n`);
   }
   const loader = new SkillLoader(skillRegistry);
-  await loader.loadFromDirectory(getSkillsDir(), { source: "user" });
+  await loader.loadFromDirectory(getSkillsDir(), { source: "user", recursive: true });
   // 从 cwd 向上遍历到 git-root，收集所有层级的 project skill 目录（低优先→高优先）。
   const projectSkillDirs = await findProjectSkillDirs(cwd);
   for (const dir of projectSkillDirs) {
-    await loader.loadFromDirectory(dir, { source: "project" });
+    await loader.loadFromDirectory(dir, { source: "project", recursive: true });
   }
   return pluginContributions;
 }

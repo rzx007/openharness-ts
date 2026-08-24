@@ -364,11 +364,15 @@ export class SkillLoader {
   }
 
   /**
-   * 从文件路径中提取不带扩展名的文件名作为默认技能名称。
-   * @param filePath - 完整的文件路径。
-   * @returns 去除 .md 后缀后的文件名。
+   * 从文件路径中提取默认技能名称。
+   *
+   * 普通 Markdown 文件使用文件名：`skills/review.md` → `review`。
+   * 目录型技能使用目录名：`skills/review/SKILL.md` → `review`。
    */
   private pathToName(filePath: string): string {
+    if (basename(filePath).toLowerCase() === "skill.md") {
+      return basename(dirname(filePath));
+    }
     return basename(filePath, ".md");
   }
 
@@ -386,9 +390,17 @@ export class SkillLoader {
   }
 
   /**
-   * 发现指定目录下的所有 Markdown 文件。
+   * 发现指定目录下的技能 Markdown 文件。
+   *
+   * 支持两种布局：
+   * - `skills/foo.md`
+   * - `skills/foo/SKILL.md`
+   *
+   * recursive=true 时只把子目录里的 `SKILL.md` 视为技能入口，避免把
+   * `references/*.md`、`docs/*.md` 之类辅助文档误注册成技能。
+   *
    * @param dirPath - 要扫描的目录路径。
-   * @param recursive - 是否递归扫描子目录。
+   * @param recursive - 是否扫描子目录中的 SKILL.md。
    * @returns 找到的 Markdown 文件路径数组，已排序。
    */
   async discoverMarkdownFiles(
@@ -407,7 +419,31 @@ export class SkillLoader {
         if (entry.isFile() && entry.name.endsWith(".md")) {
           files.push(full);
         } else if (recursive && entry.isDirectory()) {
-          files.push(...await this.discoverMarkdownFiles(full, true));
+          const nestedEntries = await this.discoverMarkdownFiles(full, false);
+          files.push(...nestedEntries.filter((file) => basename(file).toLowerCase() === "skill.md"));
+          if (!nestedEntries.some((file) => basename(file).toLowerCase() === "skill.md")) {
+            files.push(...await this.discoverSkillEntryFiles(full, resolvedDir));
+          }
+        }
+      }
+      return files.sort();
+    } catch {
+      return [];
+    }
+  }
+
+  private async discoverSkillEntryFiles(dirPath: string, rootDir: string): Promise<string[]> {
+    try {
+      const entries = await readdir(dirPath, { withFileTypes: true });
+      const files: string[] = [];
+      for (const entry of entries) {
+        const full = join(dirPath, entry.name);
+        const resolvedFull = resolve(full);
+        if (!resolvedFull.startsWith(rootDir + sep)) continue;
+        if (entry.isFile() && entry.name.toLowerCase() === "skill.md") {
+          files.push(full);
+        } else if (entry.isDirectory()) {
+          files.push(...await this.discoverSkillEntryFiles(full, rootDir));
         }
       }
       return files.sort();

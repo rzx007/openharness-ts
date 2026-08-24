@@ -353,20 +353,23 @@ describe("SkillLoader", () => {
     expect(skills).toHaveLength(0);
   });
 
-  it("recursive discovery enters subdirectories", async () => {
+  it("recursive discovery loads directory skills from SKILL.md", async () => {
     mockedReaddir
       .mockResolvedValueOnce([
-        { name: "sub", isFile: () => false, isDirectory: () => true } as any,
+        { name: "my-skill", isFile: () => false, isDirectory: () => true } as any,
       ])
       .mockResolvedValueOnce([
-        { name: "deep.md", isFile: () => true, isDirectory: () => false } as any,
+        { name: "SKILL.md", isFile: () => true, isDirectory: () => false } as any,
+        { name: "notes.md", isFile: () => true, isDirectory: () => false } as any,
       ]);
-    mockedReadFile.mockResolvedValue("# Deep\n\nDeep skill");
+    mockedReadFile.mockResolvedValue("Directory skill body.");
     const reg = new SkillRegistry();
     const loader = new SkillLoader(reg);
     const skills = await loader.loadFromDirectory("/skills", true);
     expect(skills).toHaveLength(1);
-    expect(skills[0].name).toBe("Deep");
+    expect(skills[0].name).toBe("my-skill");
+    expect(reg.has("my-skill")).toBe(true);
+    expect(reg.has("notes")).toBe(false);
   });
 });
 
@@ -405,14 +408,14 @@ describe("SkillLoader.discoverMarkdownFiles path-traversal protection", () => {
       { name: "evil-dir-link", isFile: () => false, isDirectory: () => false } as any, // symlink to dir
     ]);
     mockedReaddir.mockResolvedValueOnce([
-      { name: "nested.md", isFile: () => true, isDirectory: () => false } as any,
+      { name: "SKILL.md", isFile: () => true, isDirectory: () => false } as any,
     ]);
     mockedReadFile.mockResolvedValue("# Nested\n\nNested skill");
 
     const reg = new SkillRegistry();
     const loader = new SkillLoader(reg);
     const skills = await loader.loadFromDirectory("/skills", true);
-    // 只有 real-sub/nested.md 被加载；evil-dir-link 被忽略
+    // 只有 real-sub/SKILL.md 被加载；evil-dir-link 被忽略
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe("Nested");
   });

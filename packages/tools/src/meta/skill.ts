@@ -78,9 +78,15 @@ async function resolveSkillRegistry(context: { cwd: string; skillRegistry?: unkn
   const registry = new SkillRegistry();
   registry.registerBundled();
   const loader = new SkillLoader(registry);
-  await loader.loadFromDirectory(getSkillsDir(), { source: "user" });
-  await loader.loadFromDirectory(join(context.cwd, ".openharness", "skills"), { source: "project" });
-  await loader.loadFromDirectory(join(context.cwd, ".claude", "skills"), { source: "project" });
+  await loader.loadFromDirectory(getSkillsDir(), { source: "user", recursive: true });
+  await loader.loadFromDirectory(join(context.cwd, ".openharness", "skills"), {
+    source: "project",
+    recursive: true,
+  });
+  await loader.loadFromDirectory(join(context.cwd, ".claude", "skills"), {
+    source: "project",
+    recursive: true,
+  });
   return registry;
 }
 

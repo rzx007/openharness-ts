@@ -63,9 +63,9 @@ export async function discoverOpenHarnessExtensions(
   }
 
   const loader = new SkillLoader(skillRegistry);
-  await loader.loadFromDirectory(getSkillsDir(), { source: "user" });
+  await loader.loadFromDirectory(getSkillsDir(), { source: "user", recursive: true });
   for (const directory of await findProjectSkillDirs(cwd)) {
-    await loader.loadFromDirectory(directory, { source: "project" });
+    await loader.loadFromDirectory(directory, { source: "project", recursive: true });
   }
 
   const pluginMcpServers: Record<string, McpServerConfig> = {};
