@@ -167,28 +167,24 @@ export function ScheduledPage({
         </div>
       ) : null}
 
-      <div
-        className={cn(
-          "mx-auto flex min-h-0 w-full flex-1",
-          hasSelection ? "max-w-[1600px] gap-8 px-4 py-4" : "max-w-[1360px] px-8 py-10"
-        )}
-      >
-        <div
-          className={cn(
-            "flex min-h-0 flex-col",
+      <div className="flex min-h-0 w-full flex-1 overflow-hidden">
+        <motion.div
+          layout
+          transition={{ layout: { duration: prefersReducedMotion ? 0 : 0.28, ease: easeOutQuint } }}
+          style={
             hasSelection
-              ? "max-w-[42rem] min-w-[34rem] flex-[0_0_43%]"
-              : "mx-auto w-full max-w-[930px]"
+              ? { width: "clamp(30rem, 43vw, 44rem)" }
+              : {
+                  marginLeft: "clamp(2rem, 18vw, 22rem)",
+                  width: "min(46rem, calc(100% - 4rem))",
+                }
+          }
+          className={cn(
+            "flex min-h-0 shrink-0 flex-col bg-background",
+            hasSelection && "border-r border-border/70"
           )}
         >
-          <div
-            className={cn(
-              "flex min-h-0 flex-1 flex-col",
-              hasSelection
-                ? "overflow-hidden rounded-[28px] border border-border/70 bg-background shadow-[0_18px_48px_rgba(15,23,42,0.08)]"
-                : "pt-4"
-            )}
-          >
+          <div className={cn("flex min-h-0 flex-1 flex-col", !hasSelection && "pt-14")}>
             <header className={cn("shrink-0", hasSelection ? "px-5 pt-5 pb-4" : "px-0")}>
               {!hasSelection ? (
                 <OverviewHero
@@ -217,8 +213,8 @@ export function ScheduledPage({
 
             <ScrollArea
               className="min-h-0 flex-1"
-              viewportClassName={cn("min-h-0", hasSelection ? "px-4 pb-4" : "px-0 pb-10")}
-              contentClassName="space-y-3"
+              viewportClassName={cn("min-h-0", hasSelection ? "px-5 pb-5" : "px-0 pb-10")}
+              contentClassName={hasSelection ? "space-y-2" : "space-y-1"}
             >
               {loading ? (
                 <div className="flex items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
@@ -232,7 +228,7 @@ export function ScheduledPage({
                   className={cn(
                     "text-center",
                     hasSelection
-                      ? "rounded-[22px] border border-dashed border-border/70 px-6 py-14"
+                      ? "rounded-xl border border-dashed border-border/70 px-6 py-14"
                       : "px-6 py-16"
                   )}
                 >
@@ -258,7 +254,7 @@ export function ScheduledPage({
               })}
             </ScrollArea>
           </div>
-        </div>
+        </motion.div>
 
         <AnimatePresence initial={false}>
           {selected ? (
@@ -268,12 +264,12 @@ export function ScheduledPage({
               animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, x: 0 }}
               exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 18 }}
               transition={{ duration: prefersReducedMotion ? 0.12 : 0.22, ease: easeOutQuint }}
-              className="min-h-0 min-w-0 flex-1"
+              className="min-h-0 min-w-0 flex-1 bg-muted/16"
             >
               <ScrollArea
                 className="h-full min-h-0"
-                viewportClassName="px-0 py-2"
-                contentClassName="pb-4"
+                viewportClassName="px-8 py-6"
+                contentClassName="mx-auto max-w-[1080px] pb-8"
               >
                 <DetailPanel
                   task={selected}
@@ -327,14 +323,14 @@ function OverviewHero({
   return (
     <>
       <div className="flex items-start justify-between gap-4">
-        <div className="w-full max-w-[560px]">
-          <div className="inline-flex size-12 items-center justify-center rounded-[18px] bg-foreground text-background">
-            <CalendarClock className="size-5" />
+        <div className="w-full max-w-[34rem]">
+          <div className="inline-flex size-12 items-center justify-center rounded-xl bg-foreground text-background">
+            <CalendarClock className="size-5.5" strokeWidth={1.7} />
           </div>
-          <h1 className="mt-7 text-[3.25rem] leading-[1.02] font-semibold tracking-[-0.035em] text-foreground">
+          <h1 className="mt-7 text-[2rem] leading-tight font-semibold tracking-[-0.025em] text-foreground">
             已安排的任务
           </h1>
-          <p className="mt-3 text-[15px] leading-7 text-muted-foreground">
+          <p className="mt-2 text-[15px] leading-6 text-muted-foreground">
             让 ChatGPT 安排任务、设置提醒或监测更新。
           </p>
         </div>
@@ -362,13 +358,13 @@ function OverviewHero({
         </div>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-7">
         <FilterTabs filter={filter} counts={filterCounts} onChange={onFilterChange} />
         <SearchBar
           value={search}
           placeholder="搜索已安排任务"
           onChange={onSearchChange}
-          className="mt-4 h-11 rounded-full"
+          className="mt-3 h-10 rounded-xl"
         />
       </div>
 
@@ -406,7 +402,7 @@ function CompactHeader({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <span className="inline-flex size-10 items-center justify-center rounded-[16px] bg-foreground text-background">
+            <span className="inline-flex size-10 items-center justify-center rounded-xl bg-foreground text-background">
               <CalendarClock className="size-4.5" />
             </span>
             <div className="min-w-0">
@@ -439,7 +435,7 @@ function CompactHeader({
           value={search}
           placeholder="搜索已安排任务"
           onChange={onSearchChange}
-          className="mt-4 h-10 rounded-[14px]"
+          className="mt-3 h-10 rounded-xl"
         />
       </div>
     </>
@@ -465,15 +461,15 @@ function DetailPanel({
 }): React.JSX.Element {
   return (
     <div className="flex min-h-0 flex-col">
-      <div className="flex items-start justify-between gap-4 px-2 pb-5">
+      <div className="flex items-start justify-between gap-4 pb-5">
         <div className="min-w-0">
           <div className="flex items-start gap-3">
-            <h2 className="min-w-0 text-[2.1rem] leading-[1.06] font-semibold tracking-[-0.04em] text-foreground">
+            <h2 className="min-w-0 text-[1.75rem] leading-[1.15] font-semibold tracking-[-0.03em] text-foreground">
               {task.name}
             </h2>
             <StatusBadge status={task.status} />
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-muted-foreground">
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
             <span>{recurrenceShortLabel(task)}</span>
             <span aria-hidden="true">·</span>
             <span>{task.timezone}</span>
@@ -481,21 +477,21 @@ function DetailPanel({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={onBack} className="rounded-full px-3 text-xs">
+          <Button variant="ghost" size="sm" onClick={onBack} className="rounded-lg px-2.5 text-xs">
             <ArrowLeft className="size-3.5" />
             返回总览
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onBack} className="rounded-full">
+          <Button variant="ghost" size="icon-sm" onClick={onBack} className="rounded-lg">
             <X className="size-4" />
           </Button>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-[30px] border border-border/70 bg-background shadow-[0_22px_52px_rgba(15,23,42,0.08)]">
-        <div className="flex items-center justify-between gap-3 border-b border-border/70 px-6 py-4">
+      <div className="overflow-hidden rounded-2xl bg-background shadow-[0_18px_48px_rgba(15,23,42,0.09)]">
+        <div className="flex min-h-16 items-center justify-between gap-3 border-b border-border/70 px-5 py-3.5">
           <div className="flex items-center gap-3">
             <StatusBadge status={task.status} />
-            <span className="text-[18px] font-semibold text-foreground">
+            <span className="text-[15px] font-semibold text-foreground">
               {statusLabel(task.status)}
             </span>
           </div>
@@ -530,15 +526,15 @@ function DetailPanel({
           </div>
         </div>
 
-        <div className="grid gap-5 px-5 py-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-          <div className="space-y-5">
-            <DetailCard title="每次运行的指令" meta="发送给 Agent" className="min-h-[234px]">
-              <div className="max-w-[74ch] text-[14px] leading-8 whitespace-pre-wrap text-foreground/92">
+        <div className="grid gap-4 p-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="space-y-4">
+            <DetailCard title="每次运行的指令" meta="发送给 Agent" className="min-h-[210px]">
+              <div className="max-w-[72ch] text-[13px] leading-6 whitespace-pre-wrap text-foreground/92">
                 {task.prompt}
               </div>
             </DetailCard>
 
-            <DetailCard title="最近运行" meta={`${runs.length} 条记录`} className="min-h-[248px]">
+            <DetailCard title="最近运行" meta={`${runs.length} 条记录`} className="min-h-[220px]">
               {runs.length === 0 ? (
                 <div className="grid min-h-[160px] place-items-center text-center">
                   <div>
@@ -565,7 +561,7 @@ function DetailPanel({
                         </div>
                         <p
                           className={cn(
-                            "mt-2 line-clamp-5 max-w-[78ch] text-[12px] leading-6 whitespace-pre-wrap",
+                            "mt-2 line-clamp-5 max-w-[78ch] text-[12px] leading-5 whitespace-pre-wrap",
                             run.error ? "text-destructive" : "font-mono text-muted-foreground"
                           )}
                         >
@@ -614,11 +610,11 @@ function DetailPanel({
               ]}
             />
 
-            <section className="overflow-hidden rounded-[26px] border border-border/70 bg-background">
-              <div className="border-b border-border/70 px-5 py-4">
-                <h3 className="text-[15px] font-semibold text-foreground">概览</h3>
+            <section className="overflow-hidden rounded-xl border border-border/70 bg-background">
+              <div className="border-b border-border/70 px-4 py-3.5">
+                <h3 className="text-[14px] font-semibold text-foreground">概览</h3>
               </div>
-              <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="grid grid-cols-2 gap-3 p-4 xl:grid-cols-1">
                 <MetricCard label="累计运行" value={`${task.runCount}`} meta="次" />
                 <MetricCard
                   label="当前状态"
@@ -651,23 +647,22 @@ function TaskRow({
       onClick={onSelect}
       aria-current={active ? "true" : undefined}
       className={cn(
-        "group w-full text-left transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        compact ? "rounded-[20px]" : "rounded-[24px]",
+        "group w-full rounded-xl border border-transparent text-left transition-[background-color,border-color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         active
-          ? "bg-background shadow-[0_14px_38px_rgba(15,23,42,0.1)] ring-1 ring-border/70"
+          ? "border-border/60 bg-background shadow-[0_5px_8px_rgba(15,23,42,0.07)]"
           : compact
-            ? "hover:bg-muted/26"
-            : "hover:bg-muted/20"
+            ? "hover:bg-muted/45"
+            : "hover:bg-muted/35"
       )}
     >
-      <div className={cn("flex items-start gap-4", compact ? "px-4 py-4" : "px-5 py-5")}>
+      <div className={cn("flex items-start gap-3.5", compact ? "px-3.5 py-3.5" : "px-3 py-4")}>
         <div className="pt-1">
           {active ? (
-            <span className="inline-flex size-5 items-center justify-center rounded-full border border-foreground/30 bg-foreground text-background">
-              <span className="size-2 rounded-full bg-background" />
+            <span className="inline-flex size-4.5 items-center justify-center rounded-full border border-foreground/30 bg-foreground text-background">
+              <span className="size-1.5 rounded-full bg-background" />
             </span>
           ) : (
-            <Circle className="size-5 text-muted-foreground/55" strokeWidth={1.5} />
+            <Circle className="size-4.5 text-muted-foreground/60" strokeWidth={1.5} />
           )}
         </div>
 
@@ -677,7 +672,7 @@ function TaskRow({
               <div
                 className={cn(
                   "truncate font-medium text-foreground",
-                  compact ? "text-[15px]" : "text-[16px]"
+                  compact ? "text-[14px]" : "text-[15px]"
                 )}
               >
                 {task.name}
@@ -685,7 +680,7 @@ function TaskRow({
               <div
                 className={cn(
                   "mt-1 text-muted-foreground",
-                  compact ? "text-[13px]" : "text-[14px]"
+                  compact ? "text-[12px]" : "text-[13px]"
                 )}
               >
                 {recurrenceShortLabel(task)}
@@ -700,7 +695,7 @@ function TaskRow({
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between gap-4 text-[12px] text-muted-foreground">
+          <div className="mt-2.5 flex items-center justify-between gap-4 text-[12px] text-muted-foreground">
             <div className="flex items-center gap-1.5">
               <Clock3 className="size-3.5" />
               <span>{task.nextRunAt ? formatNextRunLabel(task.nextRunAt) : "没有后续运行"}</span>
@@ -727,7 +722,7 @@ function FilterTabs({
   compact?: boolean
 }): React.JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="任务筛选">
+    <div className="flex flex-wrap items-center gap-1" aria-label="任务筛选">
       {filters.map((value) => (
         <button
           key={value}
@@ -735,8 +730,8 @@ function FilterTabs({
           onClick={() => onChange(value)}
           aria-pressed={filter === value}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            compact ? "px-2.5 py-1 text-[13px]" : "px-3 py-1.5 text-[14px]",
+            "inline-flex items-center gap-1.5 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            compact ? "px-2.5 py-1.5 text-[12px]" : "px-2.5 py-1.5 text-[13px]",
             filter === value
               ? "bg-muted font-medium text-foreground"
               : "text-muted-foreground hover:bg-muted/55 hover:text-foreground"
@@ -763,14 +758,14 @@ function SearchBar({
 }): React.JSX.Element {
   return (
     <div className="relative">
-      <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         aria-label="搜索任务"
         className={cn(
-          "border-border/70 bg-background pl-11 text-[14px] placeholder:text-muted-foreground",
+          "border-border/70 bg-background pl-10 text-[13px] shadow-none placeholder:text-muted-foreground",
           className
         )}
       />
@@ -791,16 +786,13 @@ function DetailCard({
 }): React.JSX.Element {
   return (
     <section
-      className={cn(
-        "overflow-hidden rounded-[26px] border border-border/70 bg-background",
-        className
-      )}
+      className={cn("overflow-hidden rounded-xl border border-border/70 bg-background", className)}
     >
-      <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
-        <h3 className="text-[15px] font-semibold text-foreground">{title}</h3>
+      <div className="flex items-center justify-between border-b border-border/70 px-4 py-3.5">
+        <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
         {meta ? <span className="text-[12px] text-muted-foreground">{meta}</span> : null}
       </div>
-      <div className="px-5 py-5">{children}</div>
+      <div className="px-4 py-4">{children}</div>
     </section>
   )
 }
@@ -817,20 +809,20 @@ function InfoBlock({
   }>
 }): React.JSX.Element {
   return (
-    <section className="overflow-hidden rounded-[26px] border border-border/70 bg-background">
-      <div className="border-b border-border/70 px-5 py-4">
-        <h3 className="text-[15px] font-semibold text-foreground">{title}</h3>
+    <section className="overflow-hidden rounded-xl border border-border/70 bg-background">
+      <div className="border-b border-border/70 px-4 py-3.5">
+        <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
       </div>
       <dl>
         {items.map(({ icon: Icon, label, value }) => (
           <div
             key={label}
-            className="grid grid-cols-[24px_minmax(0,1fr)] items-start gap-x-4 gap-y-1 border-b border-border/70 px-5 py-4 last:border-b-0"
+            className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-3 gap-y-1 border-b border-border/70 px-4 py-3.5 last:border-b-0"
           >
-            <Icon className="mt-0.5 size-4 text-muted-foreground/70" />
+            <Icon className="mt-0.5 size-4 text-muted-foreground/75" />
             <div className="min-w-0">
-              <dt className="text-[13px] text-muted-foreground">{label}</dt>
-              <dd className="mt-1 truncate text-[15px] font-medium text-foreground" title={value}>
+              <dt className="text-[12px] text-muted-foreground">{label}</dt>
+              <dd className="mt-1 truncate text-[14px] font-medium text-foreground" title={value}>
                 {value}
               </dd>
             </div>
@@ -851,10 +843,10 @@ function MetricCard({
   meta?: string
 }): React.JSX.Element {
   return (
-    <div className="rounded-[22px] border border-border/70 bg-muted/18 px-4 py-4">
-      <div className="text-[13px] text-muted-foreground">{label}</div>
-      <div className="mt-4 flex items-end gap-2">
-        <span className="text-[2.15rem] leading-none font-semibold tracking-[-0.04em] text-foreground">
+    <div className="rounded-xl border border-border/70 bg-muted/18 px-4 py-4">
+      <div className="text-[12px] text-muted-foreground">{label}</div>
+      <div className="mt-3 flex items-end gap-2">
+        <span className="text-[1.5rem] leading-none font-semibold tracking-[-0.03em] text-foreground">
           {value}
         </span>
         {meta ? <span className="pb-1 text-[12px] text-muted-foreground">{meta}</span> : null}
@@ -874,7 +866,7 @@ function StatusBadge({
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-muted-foreground",
-        compact ? "text-[11px]" : "text-[12px]"
+        compact ? "text-[10px]" : "text-[11px]"
       )}
     >
       <span className="size-1.5 rounded-full bg-current" />
