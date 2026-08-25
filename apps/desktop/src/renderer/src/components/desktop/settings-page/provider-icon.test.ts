@@ -34,6 +34,8 @@ describe("resolveProviderBrandIcon", () => {
     ["siliconflow", icons.siliconCloud],
     ["bedrock", icons.bedrock],
     ["vertex", icons.vertexAI],
+    ["zhipu", icons.zhiPu],
+    ["zhipuai-coding-plan", icons.zhiPu],
   ])("matches the %s provider to its Lobe icon", (provider, expected) => {
     expect(resolveProviderBrandIcon(provider)).toBe(expected)
   })

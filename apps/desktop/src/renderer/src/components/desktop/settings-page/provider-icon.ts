@@ -43,6 +43,10 @@ export function createProviderBrandIconResolver<T>(
     ["vertex", icons.vertexAI],
     ["volcengine", icons.volcengine],
     ["zhipu", icons.zhiPu],
+    ["zhipuai", icons.zhiPu],
+    ["zhipuai-coding-plan", icons.zhiPu],
+    ["zai", icons.zhiPu],
+    ["zai-coding-plan", icons.zhiPu],
   ])
 
   return (provider) => iconsByProvider.get(provider.trim().toLowerCase())

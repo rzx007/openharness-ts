@@ -70,6 +70,7 @@ const popularProviderNames = [
   "gemini",
   "dashscope",
   "zhipu",
+  "zhipuai-coding-plan",
   "moonshot",
   "minimax",
   "xiaomi",
@@ -85,9 +86,22 @@ const providerDescriptions: Record<string, string> = {
   moonshot: "Moonshot 与 Kimi 系列模型",
   minimax: "MiniMax 系列模型",
   zhipu: "智谱 GLM 系列模型",
+  "zhipuai-coding-plan": "智谱 Coding Plan 专属模型",
   xiaomi: "小米 MiMo 系列模型",
   groq: "Groq 高速推理服务",
   mistral: "Mistral 与 Codestral 模型",
+}
+
+const localizedProviderNames: Record<string, string> = {
+  zhipu: "智谱",
+  zhipuai: "智谱",
+  "zhipuai-coding-plan": "智谱 Coding Plan",
+  zai: "智谱国际版",
+  "zai-coding-plan": "智谱国际版 Coding Plan",
+}
+
+function providerDisplayName(provider: DesktopProviderInfo): string {
+  return localizedProviderNames[provider.name] ?? provider.displayName
 }
 
 export function ProviderSettings(): React.JSX.Element {
@@ -183,7 +197,9 @@ export function ProviderSettings(): React.JSX.Element {
     const query = providerQuery.trim().toLocaleLowerCase()
     if (!query) return additionalAvailableProviders
     return additionalAvailableProviders.filter((provider) =>
-      `${provider.displayName} ${provider.name}`.toLocaleLowerCase().includes(query)
+      `${providerDisplayName(provider)} ${provider.displayName} ${provider.name}`
+        .toLocaleLowerCase()
+        .includes(query)
     )
   }, [additionalAvailableProviders, providerQuery])
   const activeProvider = snapshot?.providers.find((provider) => provider.active)
@@ -223,7 +239,7 @@ export function ProviderSettings(): React.JSX.Element {
     void runMutation(
       provider.name,
       () => window.desktop.providers.activate({ provider: provider.name }),
-      `已将 ${provider.displayName} 设为当前供应商。`
+      `已将 ${providerDisplayName(provider)} 设为当前供应商。`
     )
   }
 
@@ -239,7 +255,7 @@ export function ProviderSettings(): React.JSX.Element {
           apiKey,
           setActive: setActiveAfterConnect,
         }),
-      `已连接 ${target.displayName}。`
+      `已连接 ${providerDisplayName(target)}。`
     ).then((succeeded) => {
       if (!succeeded) return
       setConnectTarget(null)
@@ -259,7 +275,7 @@ export function ProviderSettings(): React.JSX.Element {
     void runMutation(
       target.name,
       () => window.desktop.providers.disconnect({ provider: target.name }),
-      `已断开 ${target.displayName}。`
+      `已断开 ${providerDisplayName(target)}。`
     ).then((succeeded) => succeeded && setDisconnectTarget(null))
   }
 
@@ -797,7 +813,7 @@ function ProviderRow({
         <ProviderIcon provider={provider} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-heading text-sm font-semibold">{provider.displayName}</h3>
+            <h3 className="font-heading text-sm font-semibold">{providerDisplayName(provider)}</h3>
             {provider.connected ? (
               <Badge variant="outline">
                 {sourceLabel(provider.credentialSource, provider.credentialLabel)}
