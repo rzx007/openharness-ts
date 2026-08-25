@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import type { DesktopModel } from "../../../shared/session-types"
-import { resolveBootstrapRuntimeSelection } from "./runtime-selection"
+import {
+  resolveBootstrapRuntimeSelection,
+  resolveDesktopRuntimeSnapshot,
+} from "./runtime-selection"
 
 const models: DesktopModel[] = [
   {
@@ -52,6 +55,38 @@ describe("resolveBootstrapRuntimeSelection", () => {
     expect(resolveBootstrapRuntimeSelection(models, undefined, undefined)).toEqual({
       model: "gpt-5.3-codex-spark",
       provider: "codex",
+    })
+  })
+})
+
+describe("resolveDesktopRuntimeSnapshot", () => {
+  it("returns normalized models and patch flags from the same runtime resolution", () => {
+    expect(
+      resolveDesktopRuntimeSnapshot(models, {
+        model: "gpt-5.3-codex-spark",
+        provider: "gemini",
+      })
+    ).toMatchObject({
+      defaultModel: "gemini-2.5-pro",
+      defaultProvider: "gemini",
+      configuredModel: "gpt-5.3-codex-spark",
+      configuredProvider: "gemini",
+      needsModelPatch: true,
+      needsProviderPatch: false,
+    })
+  })
+
+  it("keeps a configured model visible when it is no longer in the loaded catalog", () => {
+    const snapshot = resolveDesktopRuntimeSnapshot(models, {
+      model: "legacy-model",
+      provider: undefined,
+    })
+
+    expect(snapshot.defaultModel).toBe("legacy-model")
+    expect(snapshot.models[0]).toMatchObject({
+      id: "legacy-model",
+      label: "legacy-model",
+      providerName: "Configured",
     })
   })
 })

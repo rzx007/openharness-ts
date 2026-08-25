@@ -140,4 +140,48 @@ describe("buildDesktopProviderSnapshot", () => {
     })
     expect(snapshot).not.toHaveProperty("subscriptions")
   })
+
+  it("uses the resolved runtime selection so provider snapshot matches bootstrap fallback", () => {
+    const snapshot = buildDesktopProviderSnapshot({
+      providers: [
+        { name: "openai", displayName: "OpenAI", hasKey: true, active: true },
+        { name: "gemini", displayName: "Gemini", hasKey: true, active: false },
+      ],
+      auth: {
+        codex: { configured: false, state: "missing", source: "none" },
+        storedProviders: ["openai", "gemini"],
+        envProviders: [],
+      },
+      settings: { provider: "gemini", model: "gpt-5.4" },
+      models: [
+        {
+          name: "openai",
+          displayName: "OpenAI",
+          models: [{ id: "gpt-5.4", label: "GPT-5.4", provider: "OpenAI", providerName: "openai" }],
+        },
+        {
+          name: "gemini",
+          displayName: "Gemini",
+          models: [
+            {
+              id: "gemini-2.5-pro",
+              label: "Gemini 2.5 Pro",
+              provider: "Gemini",
+              providerName: "gemini",
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(snapshot.activeProvider).toBe("gemini")
+    expect(snapshot.activeModel).toBe("gemini-2.5-pro")
+    expect(snapshot.providers.find((item) => item.name === "gemini")).toMatchObject({
+      active: true,
+      currentModel: "gemini-2.5-pro",
+    })
+    expect(snapshot.providers.find((item) => item.name === "openai")).toMatchObject({
+      active: false,
+    })
+  })
 })

@@ -63,7 +63,7 @@ import {
   isOutsideProjectWorkspacePath,
   removeEmptyOutsideProjectWorkspace,
 } from "./outside-project-workspace"
-import { resolveBootstrapRuntimeSelection } from "./runtime-selection"
+import { resolveDesktopRuntimeSnapshot } from "./runtime-selection"
 import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
 
 const execFileAsync = promisify(execFile)
@@ -98,27 +98,19 @@ class DesktopSessionService {
       .filter((session) => session.status === "archived")
       .map(toDesktopSessionRecord)
     const models = providers.flatMap((provider) => provider.models)
-    const storedConfiguredModel =
-      typeof settings["model"] === "string" ? settings["model"] : undefined
-    const configuredProvider = optionalProvider(settings["provider"])
-    const runtimeSelection = resolveBootstrapRuntimeSelection(
-      models,
-      storedConfiguredModel,
-      configuredProvider
-    )
-    const defaultModel = runtimeSelection.model
-    const defaultProvider = runtimeSelection.provider
+    const runtimeSnapshot = resolveDesktopRuntimeSnapshot(models, {
+      model: settings["model"],
+      provider: settings["provider"],
+    })
+    const defaultModel = runtimeSnapshot.defaultModel
+    const defaultProvider = runtimeSnapshot.defaultProvider
     const defaultPermissionMode = readSettingsPermissionMode(settings)
 
     if (!defaultModel) {
       throw new Error("没有找到可用模型，请先在 OpenHarness 设置中配置模型。")
     }
 
-    const normalizedModels = ensureConfiguredModel(models, defaultModel)
-    if (
-      defaultModel !== storedConfiguredModel ||
-      (defaultProvider && defaultProvider !== configuredProvider)
-    ) {
+    if (runtimeSnapshot.needsModelPatch || runtimeSnapshot.needsProviderPatch) {
       await client.patchSettings({
         model: defaultModel,
         ...(defaultProvider ? { provider: defaultProvider } : {}),
@@ -135,7 +127,7 @@ class DesktopSessionService {
       projects,
       sessions: sortSessions(sessions),
       archivedSessions: sortSessions(archivedSessions),
-      models: normalizedModels,
+      models: runtimeSnapshot.models,
       defaultModel,
       ...(defaultProvider ? { defaultProvider } : {}),
       defaultPermissionMode,
@@ -704,19 +696,6 @@ function toDesktopSessionView(
     tasks: Object.values(bucket.tasks),
     permissions: Object.values(bucket.permissions),
   }
-}
-
-function ensureConfiguredModel(models: DesktopModel[], configuredModel: string): DesktopModel[] {
-  if (models.some((model) => model.id === configuredModel)) return models
-  return [
-    {
-      id: configuredModel,
-      label: configuredModel,
-      provider: "configured",
-      providerName: "Configured",
-    },
-    ...models,
-  ]
 }
 
 function sortSessions(sessions: DesktopSessionRecord[]): DesktopSessionRecord[] {

@@ -17,6 +17,7 @@ import type {
   RemoveDesktopCustomProviderInput,
 } from "../../../shared/provider-types"
 import { desktopSessionService } from "../session/session-service"
+import { resolveDesktopRuntimeSnapshot } from "../session/runtime-selection"
 
 const CODEX_DEFAULT_MODEL = "gpt-5.6-sol"
 
@@ -114,8 +115,13 @@ export function buildDesktopProviderSnapshot(input: {
   settings: Record<string, unknown>
   models: ModelProviderInfo[]
 }): DesktopProviderSnapshot {
-  const activeProvider = stringSetting(input.settings.provider)
-  const activeModel = stringSetting(input.settings.model)
+  const flattenedModels = input.models.flatMap((provider) => provider.models)
+  const runtimeSnapshot = resolveDesktopRuntimeSnapshot(flattenedModels, {
+    model: input.settings.model,
+    provider: input.settings.provider,
+  })
+  const activeProvider = runtimeSnapshot.defaultProvider
+  const activeModel = runtimeSnapshot.defaultModel
   const stored = new Set(input.auth.storedProviders)
   const envByProvider = new Map(input.auth.envProviders.map((item) => [item.name, item.envKey]))
   const modelsByProvider = new Map(input.models.map((item) => [item.name, item.models]))
@@ -215,10 +221,6 @@ function credentialLabel(
 
 function normalizeProviderName(value: string): string {
   return value.trim().toLowerCase()
-}
-
-function stringSetting(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
 async function withDaemonRetry<T>(

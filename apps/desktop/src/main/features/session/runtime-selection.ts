@@ -1,5 +1,36 @@
 import type { DesktopModel } from "../../../shared/session-types"
 
+export interface DesktopRuntimeSnapshot {
+  models: DesktopModel[]
+  defaultModel?: string
+  defaultProvider?: string
+  configuredModel?: string
+  configuredProvider?: string
+  needsModelPatch: boolean
+  needsProviderPatch: boolean
+}
+
+export function resolveDesktopRuntimeSnapshot(
+  models: DesktopModel[],
+  settings: { model?: unknown; provider?: unknown }
+): DesktopRuntimeSnapshot {
+  const configuredModel = optionalString(settings.model)
+  const configuredProvider = optionalProvider(settings.provider)
+  const selection = resolveBootstrapRuntimeSelection(models, configuredModel, configuredProvider)
+  const defaultModel = selection.model
+  const defaultProvider = selection.provider
+
+  return {
+    models: defaultModel ? ensureConfiguredModel(models, defaultModel) : models,
+    ...(configuredModel ? { configuredModel } : {}),
+    ...(configuredProvider ? { configuredProvider } : {}),
+    ...(defaultModel ? { defaultModel } : {}),
+    ...(defaultProvider ? { defaultProvider } : {}),
+    needsModelPatch: !!defaultModel && defaultModel !== configuredModel,
+    needsProviderPatch: !!defaultProvider && defaultProvider !== configuredProvider,
+  }
+}
+
 export function resolveBootstrapRuntimeSelection(
   models: DesktopModel[],
   configuredModel: string | undefined,
@@ -29,6 +60,19 @@ export function resolveBootstrapRuntimeSelection(
   }
 }
 
+function ensureConfiguredModel(models: DesktopModel[], configuredModel: string): DesktopModel[] {
+  if (models.some((model) => model.id === configuredModel)) return models
+  return [
+    {
+      id: configuredModel,
+      label: configuredModel,
+      provider: "configured",
+      providerName: "Configured",
+    },
+    ...models,
+  ]
+}
+
 function uniqueModelProviders(models: DesktopModel[], model: string): string[] {
   return [
     ...new Set(
@@ -45,4 +89,10 @@ function optionalProvider(value: unknown): string | undefined {
   const provider = value.trim()
   if (!provider || provider.toLowerCase() === "configured") return undefined
   return provider
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const result = value.trim()
+  return result || undefined
 }
