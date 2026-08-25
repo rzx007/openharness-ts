@@ -1,21 +1,19 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
-  ArrowLeft,
+  Archive,
   Bot,
   CalendarClock,
-  CheckCircle2,
+  ChevronDown,
   Circle,
   CircleAlert,
   Clock3,
-  FolderGit2,
+  ExternalLink,
   History,
   MoreHorizontal,
   Pause,
   Play,
   RefreshCw,
   Search,
-  TimerReset,
-  Trash2,
   X,
 } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react"
@@ -44,8 +42,10 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 
 export function ScheduledPage({
   onStartConversation,
+  onOpenConversation,
 }: {
   onStartConversation: () => void
+  onOpenConversation: (sessionId?: string) => void
 }): React.JSX.Element {
   const prefersReducedMotion = useReducedMotion()
   const [tasks, setTasks] = useState<DesktopScheduledTask[]>([])
@@ -167,21 +167,19 @@ export function ScheduledPage({
         </div>
       ) : null}
 
-      <div className="flex min-h-0 w-full flex-1 overflow-hidden">
+      <div
+        className={cn(
+          "flex min-h-0 w-full flex-1 overflow-hidden",
+          !hasSelection && "justify-center px-6"
+        )}
+      >
         <motion.div
           layout
           transition={{ layout: { duration: prefersReducedMotion ? 0 : 0.28, ease: easeOutQuint } }}
-          style={
-            hasSelection
-              ? { width: "clamp(30rem, 43vw, 44rem)" }
-              : {
-                  marginLeft: "clamp(2rem, 18vw, 22rem)",
-                  width: "min(46rem, calc(100% - 4rem))",
-                }
-          }
+          style={hasSelection ? { width: "clamp(30rem, 43vw, 44rem)" } : undefined}
           className={cn(
             "flex min-h-0 shrink-0 flex-col bg-background",
-            hasSelection && "border-r border-border/70"
+            hasSelection ? "border-r border-border/70" : "w-full max-w-[46rem]"
           )}
         >
           <div className={cn("flex min-h-0 flex-1 flex-col", !hasSelection && "pt-14")}>
@@ -264,21 +262,18 @@ export function ScheduledPage({
               animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, x: 0 }}
               exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 18 }}
               transition={{ duration: prefersReducedMotion ? 0.12 : 0.22, ease: easeOutQuint }}
-              className="min-h-0 min-w-0 flex-1 bg-muted/16"
+              className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
             >
               <ScrollArea
-                className="h-full min-h-0"
-                viewportClassName="px-8 py-6"
-                contentClassName="mx-auto max-w-[1080px] pb-8"
+                className="min-h-0 flex-1"
+                viewportClassName="px-5 pt-4 pb-8"
+                contentClassName="pb-4"
               >
                 <DetailPanel
                   task={selected}
                   runs={runs}
                   busy={busy}
                   onBack={() => setSelectedId(null)}
-                  onRunNow={() =>
-                    void mutate("run", () => window.desktop.schedules.runNow(selected.id))
-                  }
                   onToggle={() =>
                     void mutate("toggle", () =>
                       window.desktop.schedules.update(selected.id, {
@@ -286,11 +281,19 @@ export function ScheduledPage({
                       })
                     )
                   }
-                  onDelete={() =>
-                    void mutate("delete", () => window.desktop.schedules.remove(selected.id))
-                  }
                 />
               </ScrollArea>
+              <div className="flex h-14 shrink-0 items-center justify-end border-t border-border/70 bg-background px-5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onOpenConversation(selected.sessionId)}
+                  className="h-8 rounded-lg px-3 text-[12px]"
+                >
+                  打开聊天
+                  <ExternalLink className="size-3.5" />
+                </Button>
+              </div>
             </motion.section>
           ) : null}
         </AnimatePresence>
@@ -325,9 +328,9 @@ function OverviewHero({
       <div className="flex items-start justify-between gap-4">
         <div className="w-full max-w-[34rem]">
           <div className="inline-flex size-12 items-center justify-center rounded-xl bg-foreground text-background">
-            <CalendarClock className="size-5.5" strokeWidth={1.7} />
+            <CalendarClock className="size-[22px]" strokeWidth={1.8} aria-hidden="true" />
           </div>
-          <h1 className="mt-7 text-[2rem] leading-tight font-semibold tracking-[-0.025em] text-foreground">
+          <h1 className="mt-6 text-[1.75rem] leading-tight font-medium tracking-[-0.015em] text-foreground">
             已安排的任务
           </h1>
           <p className="mt-2 text-[15px] leading-6 text-muted-foreground">
@@ -403,7 +406,7 @@ function CompactHeader({
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <span className="inline-flex size-10 items-center justify-center rounded-xl bg-foreground text-background">
-              <CalendarClock className="size-4.5" />
+              <CalendarClock className="size-[18px]" aria-hidden="true" />
             </span>
             <div className="min-w-0">
               <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-foreground">
@@ -447,186 +450,158 @@ function DetailPanel({
   runs,
   busy,
   onBack,
-  onRunNow,
   onToggle,
-  onDelete,
 }: {
   task: DesktopScheduledTask
   runs: DesktopScheduledRun[]
   busy: string | null
   onBack: () => void
-  onRunNow: () => void
   onToggle: () => void
-  onDelete: () => void
 }): React.JSX.Element {
   return (
-    <div className="flex min-h-0 flex-col">
-      <div className="flex items-start justify-between gap-4 pb-5">
-        <div className="min-w-0">
-          <div className="flex items-start gap-3">
-            <h2 className="min-w-0 text-[1.75rem] leading-[1.15] font-semibold tracking-[-0.03em] text-foreground">
-              {task.name}
-            </h2>
-            <StatusBadge status={task.status} />
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
-            <span>{recurrenceShortLabel(task)}</span>
-            <span aria-hidden="true">·</span>
-            <span>{task.timezone}</span>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={onBack} className="rounded-lg px-2.5 text-xs">
-            <ArrowLeft className="size-3.5" />
-            返回总览
+    <div className="mx-auto w-full max-w-[860px]">
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-[13px] font-medium text-blue-600 dark:text-blue-400">
+          {statusLabel(task.status)}
+        </span>
+        <div className="flex items-center gap-1 text-muted-foreground">
+          <span className="grid size-8 place-items-center" aria-hidden="true">
+            <MoreHorizontal className="size-4" />
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onToggle}
+            disabled={busy !== null || task.status === "completed"}
+            title={task.status === "paused" ? "继续任务" : "暂停任务"}
+            aria-label={task.status === "paused" ? "继续任务" : "暂停任务"}
+            className="size-8 rounded-lg text-muted-foreground"
+          >
+            {busy === "toggle" ? (
+              <Spinner className="size-3.5" />
+            ) : task.status === "paused" ? (
+              <Play className="size-3.5" />
+            ) : (
+              <Pause className="size-3.5" />
+            )}
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onBack} className="rounded-lg">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onBack}
+            title="关闭详情"
+            aria-label="关闭详情"
+            className="size-8 rounded-lg text-muted-foreground"
+          >
             <X className="size-4" />
           </Button>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-background shadow-[0_18px_48px_rgba(15,23,42,0.09)]">
-        <div className="flex min-h-16 items-center justify-between gap-3 border-b border-border/70 px-5 py-3.5">
-          <div className="flex items-center gap-3">
-            <StatusBadge status={task.status} />
-            <span className="text-[15px] font-semibold text-foreground">
-              {statusLabel(task.status)}
-            </span>
-          </div>
+      <h2 className="mt-3 truncate text-[16px] font-medium tracking-[-0.01em] text-foreground">
+        {task.name}
+      </h2>
 
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onRunNow} disabled={busy !== null}>
-              {busy === "run" ? <Spinner /> : <Play className="size-3.5" />}
-              立即运行
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onToggle}
-              disabled={busy !== null || task.status === "completed"}
-            >
-              {task.status === "paused" ? (
-                <Play className="size-3.5" />
-              ) : (
-                <Pause className="size-3.5" />
-              )}
-              {task.status === "paused" ? "继续" : "暂停"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onDelete}
-              disabled={busy !== null}
-              className="text-muted-foreground hover:text-destructive"
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </div>
+      <ScrollArea
+        className="mt-7 h-[258px] rounded-2xl border border-border/70 bg-muted/10"
+        viewportClassName="px-4 py-4"
+      >
+        <div className="max-w-[76ch] text-[13px] leading-6 whitespace-pre-wrap text-foreground/90">
+          {task.prompt}
+        </div>
+      </ScrollArea>
+
+      <SettingsGroup
+        title="详情"
+        className="mt-8"
+        items={[
+          {
+            label: "运行于",
+            value: task.destination === "chat" ? "现有聊天" : "每次独立对话",
+          },
+          { label: "聊天", value: task.name },
+        ]}
+      />
+
+      <SettingsGroup
+        title="频率"
+        className="mt-8"
+        items={[
+          { label: "重复", value: recurrenceFrequency(task) },
+          { label: "时间", value: recurrenceTime(task) ?? "按规则执行" },
+          { label: "通知", value: "重要更新" },
+        ]}
+      />
+
+      <section className="mt-12">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-[13px] font-normal text-muted-foreground/70">运行历史记录</h3>
+          <MoreHorizontal className="size-4 text-muted-foreground/65" aria-hidden="true" />
         </div>
 
-        <div className="grid gap-4 p-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
-          <div className="space-y-4">
-            <DetailCard title="每次运行的指令" meta="发送给 Agent" className="min-h-[210px]">
-              <div className="max-w-[72ch] text-[13px] leading-6 whitespace-pre-wrap text-foreground/92">
-                {task.prompt}
-              </div>
-            </DetailCard>
-
-            <DetailCard title="最近运行" meta={`${runs.length} 条记录`} className="min-h-[220px]">
-              {runs.length === 0 ? (
-                <div className="grid min-h-[160px] place-items-center text-center">
-                  <div>
-                    <History className="mx-auto size-6 text-muted-foreground/45" />
-                    <p className="mt-2 text-xs text-muted-foreground">这个任务还没有运行记录</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {runs.map((run) => (
-                    <article key={run.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
-                      <RunStatusIcon status={run.status} />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="font-medium text-foreground">
-                            {runStatusLabel(run.status)}
-                          </span>
-                          <time
-                            className="text-muted-foreground"
-                            dateTime={new Date(run.createdAt).toISOString()}
-                          >
-                            {formatTime(run.createdAt)}
-                          </time>
-                        </div>
-                        <p
-                          className={cn(
-                            "mt-2 line-clamp-5 max-w-[78ch] text-[12px] leading-5 whitespace-pre-wrap",
-                            run.error ? "text-destructive" : "font-mono text-muted-foreground"
-                          )}
-                        >
-                          {run.summary ?? run.error ?? "暂无运行摘要"}
-                        </p>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </DetailCard>
+        {runs.length === 0 ? (
+          <div className="flex h-20 items-center gap-2 px-2 text-[12px] text-muted-foreground">
+            <History className="size-4" />
+            这个任务还没有运行记录
           </div>
-
-          <div className="space-y-4">
-            <InfoBlock
-              title="详情"
-              items={[
-                {
-                  icon: Bot,
-                  label: "运行于",
-                  value: task.destination === "chat" ? "现有聊天" : "每次独立对话",
-                },
-                {
-                  icon: FolderGit2,
-                  label: "聊天",
-                  value: task.projectPaths[0] ?? "关联对话项目",
-                },
-                {
-                  icon: TimerReset,
-                  label: "执行环境",
-                  value: task.executionMode === "worktree" ? "独立 worktree" : "本地项目",
-                },
-              ]}
-            />
-
-            <InfoBlock
-              title="频率"
-              items={[
-                { icon: History, label: "重复", value: recurrenceFrequency(task) },
-                { icon: Clock3, label: "时间", value: recurrenceTime(task) ?? "按规则执行" },
-                {
-                  icon: CalendarClock,
-                  label: "通知",
-                  value: task.nextRunAt ? `下次 ${formatTime(task.nextRunAt)}` : "暂无",
-                },
-              ]}
-            />
-
-            <section className="overflow-hidden rounded-xl border border-border/70 bg-background">
-              <div className="border-b border-border/70 px-4 py-3.5">
-                <h3 className="text-[14px] font-semibold text-foreground">概览</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-3 p-4 xl:grid-cols-1">
-                <MetricCard label="累计运行" value={`${task.runCount}`} meta="次" />
-                <MetricCard
-                  label="当前状态"
-                  value={statusBlockLabel(task.status)}
-                  meta={task.timezone}
-                />
-              </div>
-            </section>
+        ) : (
+          <div className="mt-3">
+            {runs.slice(0, 4).map((run, index) => (
+              <article
+                key={run.id}
+                className="flex min-h-10 items-center gap-3 px-2 text-[12px] text-muted-foreground"
+              >
+                {index === 0 ? (
+                  <Circle className="size-2.5 shrink-0 fill-current" strokeWidth={0} />
+                ) : (
+                  <Archive className="size-3.5 shrink-0" strokeWidth={1.6} />
+                )}
+                <span className={cn("truncate", index === 0 && "font-medium text-foreground/80")}>
+                  {task.name}
+                </span>
+                <span className="truncate text-muted-foreground/60">{projectLabel(task)}</span>
+                <time
+                  className="ml-auto shrink-0 text-muted-foreground/60 tabular-nums"
+                  dateTime={new Date(run.createdAt).toISOString()}
+                >
+                  {formatRunAge(run.createdAt)}
+                </time>
+              </article>
+            ))}
           </div>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
+  )
+}
+
+function SettingsGroup({
+  title,
+  items,
+  className,
+}: {
+  title: string
+  items: Array<{ label: string; value: string }>
+  className?: string
+}): React.JSX.Element {
+  return (
+    <section className={className}>
+      <h3 className="px-1 text-[13px] font-normal text-muted-foreground/70">{title}</h3>
+      <dl className="mt-3 overflow-hidden rounded-2xl border border-border/70 bg-background">
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className="flex min-h-[50px] items-center justify-between gap-6 border-b border-border/60 px-4 last:border-b-0"
+          >
+            <dt className="text-[13px] text-foreground/80">{item.label}</dt>
+            <dd className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-foreground">
+              <span className="truncate">{item.value}</span>
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   )
 }
 
@@ -773,88 +748,6 @@ function SearchBar({
   )
 }
 
-function DetailCard({
-  title,
-  meta,
-  className,
-  children,
-}: {
-  title: string
-  meta?: string
-  className?: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section
-      className={cn("overflow-hidden rounded-xl border border-border/70 bg-background", className)}
-    >
-      <div className="flex items-center justify-between border-b border-border/70 px-4 py-3.5">
-        <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
-        {meta ? <span className="text-[12px] text-muted-foreground">{meta}</span> : null}
-      </div>
-      <div className="px-4 py-4">{children}</div>
-    </section>
-  )
-}
-
-function InfoBlock({
-  title,
-  items,
-}: {
-  title: string
-  items: Array<{
-    icon: typeof Bot
-    label: string
-    value: string
-  }>
-}): React.JSX.Element {
-  return (
-    <section className="overflow-hidden rounded-xl border border-border/70 bg-background">
-      <div className="border-b border-border/70 px-4 py-3.5">
-        <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
-      </div>
-      <dl>
-        {items.map(({ icon: Icon, label, value }) => (
-          <div
-            key={label}
-            className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-3 gap-y-1 border-b border-border/70 px-4 py-3.5 last:border-b-0"
-          >
-            <Icon className="mt-0.5 size-4 text-muted-foreground/75" />
-            <div className="min-w-0">
-              <dt className="text-[12px] text-muted-foreground">{label}</dt>
-              <dd className="mt-1 truncate text-[14px] font-medium text-foreground" title={value}>
-                {value}
-              </dd>
-            </div>
-          </div>
-        ))}
-      </dl>
-    </section>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  meta,
-}: {
-  label: string
-  value: string
-  meta?: string
-}): React.JSX.Element {
-  return (
-    <div className="rounded-xl border border-border/70 bg-muted/18 px-4 py-4">
-      <div className="text-[12px] text-muted-foreground">{label}</div>
-      <div className="mt-3 flex items-end gap-2">
-        <span className="text-[1.5rem] leading-none font-semibold tracking-[-0.03em] text-foreground">
-          {value}
-        </span>
-        {meta ? <span className="pb-1 text-[12px] text-muted-foreground">{meta}</span> : null}
-      </div>
-    </div>
-  )
-}
-
 function StatusBadge({
   status,
   compact = false,
@@ -875,38 +768,12 @@ function StatusBadge({
   )
 }
 
-function RunStatusIcon({ status }: { status: DesktopScheduledRun["status"] }): React.JSX.Element {
-  if (status === "succeeded") {
-    return (
-      <span className="grid size-6 place-items-center rounded-full bg-emerald-500/10 text-emerald-600">
-        <CheckCircle2 className="size-3.5" />
-      </span>
-    )
-  }
-  if (status === "running" || status === "queued") {
-    return (
-      <span className="grid size-6 place-items-center rounded-full bg-primary/8 text-primary">
-        <Spinner className="size-3.5" />
-      </span>
-    )
-  }
-  return (
-    <span className="grid size-6 place-items-center rounded-full bg-amber-500/10 text-amber-600">
-      <CircleAlert className="size-3.5" />
-    </span>
-  )
-}
-
 function filterTabLabel(value: Filter): string {
   return { all: "全部", active: "活跃", paused: "已暂停", completed: "已完成" }[value]
 }
 
 function statusLabel(value: DesktopScheduledTask["status"]): string {
   return { active: "活跃", paused: "已暂停", completed: "已完成" }[value]
-}
-
-function statusBlockLabel(value: DesktopScheduledTask["status"]): string {
-  return { active: "活跃", paused: "暂停", completed: "完成" }[value]
 }
 
 function recurrenceShortLabel(task: DesktopScheduledTask): string {
@@ -961,14 +828,13 @@ function formatNextRunLabel(value: number): string {
   return `下次 ${formatTime(value)}`
 }
 
-function runStatusLabel(status: DesktopScheduledRun["status"]): string {
-  return {
-    queued: "等待运行",
-    running: "正在运行",
-    succeeded: "运行成功",
-    failed: "运行失败",
-    interrupted: "已中断",
-    needs_attention: "需要处理",
-    skipped: "已跳过",
-  }[status]
+function projectLabel(task: DesktopScheduledTask): string {
+  const path = task.projectPaths[0]
+  return path?.split(/[\\/]/).filter(Boolean).at(-1) ?? "关联项目"
+}
+
+function formatRunAge(createdAt: number): string {
+  const days = Math.floor((Date.now() - createdAt) / 86_400_000)
+  if (days <= 0) return "今天"
+  return `${days} 天`
 }

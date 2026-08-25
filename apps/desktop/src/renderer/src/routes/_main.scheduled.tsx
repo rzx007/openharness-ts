@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 
 import { useMainLayout } from "@renderer/components/desktop/layout/main-layout-context"
 import { ScheduledPage } from "@renderer/components/desktop/scheduled-page"
@@ -11,5 +11,18 @@ export const Route = createFileRoute("/_main/scheduled")({
 
 function ScheduledRoute(): React.JSX.Element {
   const { startNewConversation } = useMainLayout()
-  return <ScheduledPage onStartConversation={startNewConversation} />
+  const navigate = useNavigate()
+
+  return (
+    <ScheduledPage
+      onStartConversation={startNewConversation}
+      onOpenConversation={(sessionId) => {
+        if (!sessionId) {
+          startNewConversation()
+          return
+        }
+        void navigate({ to: "/conversation/$sessionId", params: { sessionId } })
+      }}
+    />
+  )
 }
