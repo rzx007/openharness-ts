@@ -861,8 +861,10 @@ export async function dispatchSessionCommand(
         return [
           ...listed.plugins.map(
             (plugin) =>
-              `- ${plugin.name}@${plugin.version} [${plugin.enabled ? "enabled" : "disabled"}] ` +
-              `skills=${plugin.skillCount} commands=${plugin.commandCount} hooks=${plugin.hookCount} agents=${plugin.agentCount}`,
+              `- ${plugin.identity.id} (${plugin.identity.name}@${plugin.identity.version}) ` +
+              `[${plugin.origin}/${plugin.scope}/${plugin.enabled ? "enabled" : "disabled"}/${plugin.activation}] ` +
+              Object.entries(plugin.inventory).map(([kind, count]) => `${kind}=${count}`).join(" ") +
+              plugin.diagnostics.map((item) => `\n  ! ${item.code}: ${item.message}`).join(""),
           ),
           ...listed.warnings.map((warning) => `! ${warning}`),
         ].join("\n");
@@ -871,12 +873,12 @@ export async function dispatchSessionCommand(
     }
     if ((sub === "enable" || sub === "disable") && args[1]) {
       const result = sub === "enable"
-        ? await client.enablePlugin(args[1])
-        : await client.disablePlugin(args[1]);
+        ? await client.enablePlugin(args[1], { cwd })
+        : await client.disablePlugin(args[1], { cwd });
       emit(result.message);
       return "handled";
     }
-    emit("Usage: /plugin [list|enable NAME|disable NAME]");
+    emit("Usage: /plugin [list|enable ID|disable ID]");
     return "handled";
   }
 
@@ -891,7 +893,7 @@ export async function dispatchSessionCommand(
         result.message,
         "Reloaded plugins:",
         ...result.plugins.map(
-          (plugin) => `- ${plugin.name} [${plugin.enabled ? "enabled" : "disabled"}]`,
+          (plugin) => `- ${plugin.identity.id} [${plugin.enabled ? "enabled" : "disabled"}]`,
         ),
         ...result.warnings.map((warning) => `! ${warning}`),
       ].join("\n"),

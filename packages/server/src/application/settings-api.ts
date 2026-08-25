@@ -189,13 +189,16 @@ export interface ProjectInitService {
 }
 
 export interface PluginInfo {
-  name: string;
-  version: string;
+  identity: { id: string; name: string; version: string; displayName?: string };
+  origin: "native" | "converted";
+  sourceFormat?: string;
+  scope: "user" | "project" | "local" | "managed";
   enabled: boolean;
-  skillCount: number;
-  commandCount: number;
-  hookCount: number;
-  agentCount: number;
+  installation: "installed" | "missing" | "invalid";
+  activation: "inactive" | "active" | "partial" | "reload-required";
+  inventory: Record<string, number>;
+  permissions: { requested: string[]; approved: string[]; missing: string[] };
+  diagnostics: Array<{ severity: "info" | "warning" | "error"; phase: string; code: string; message: string; path?: string }>;
 }
 
 export interface PluginService {
@@ -205,11 +208,14 @@ export interface PluginService {
     | Promise<{ plugins: PluginInfo[]; warnings: string[] }>
     | { plugins: PluginInfo[]; warnings: string[] };
   setEnabled(input: {
-    name: string;
+    id: string;
+    cwd: string;
     enabled: boolean;
   }):
     | Promise<{ message: string; restartRuntimes?: boolean }>
     | { message: string; restartRuntimes?: boolean };
+  installLocal?(input: { cwd: string; sourcePath: string; scope: "user" | "project" | "local"; approvedPermissions: string[]; link?: boolean }): Promise<{ message: string; restartRuntimes?: boolean }>;
+  uninstall?(input: { cwd: string; id: string }): Promise<{ message: string; restartRuntimes?: boolean }>;
 }
 
 export interface AgentPersonaInfo {

@@ -58,11 +58,13 @@ skill 经 command catalog 以 template 形式出现。
 
 | 命令              | 用法 / 说明                                                                                              |
 | ----------------- | -------------------------------------------------------------------------------------------------------- |
-| `/plugin`         | `list \| enable NAME \| disable NAME`，启停持久化 settings.plugins（install/uninstall 不做——无插件市场） |
-| `/reload-plugins` | 重新发现并注册插件贡献（先清后注册，disable 立即生效）                                                   |
+| `/plugin`         | `list \| enable ID \| disable ID`，按稳定 ID 管理 Native Plugin installed store，并展示来源、scope、inventory、激活状态和诊断 |
+| `/reload-plugins` | 在 cwd mutation barrier 内关闭旧 Runtime；下一次使用时按 installed store 重新发现和激活 Native Plugin |
 | `/skills`         | `list \| SKILL_NAME` 列出/查看 skill                                                                     |
 | `/mcp`            | MCP 服务器连接状态                                                                                       |
 | `/hooks`          | 已配置 hooks                                                                                             |
+
+外部 Claude Code 插件不由斜杠命令直接解析；使用 `ohs plugin convert` 或 `ohs plugin install --from claude-code` 先生成、审阅并安装 Native Plugin。
 
 ### Agent / Jobs
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -70,32 +70,36 @@ describe("createDefaultCommandCatalog", () => {
     const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
     process.env.OPENHARNESS_CONFIG_DIR = join(root, "config");
 
-    function writePlugin(cwd: string, model: string, command: string): void {
-      const pluginDir = join(cwd, ".openharness", "plugins", "scoped");
+    function writePlugin(cwd: string, suffix: string, model: string, command: string): void {
+      const pluginDir = join(root, "cache", suffix);
+      mkdirSync(join(pluginDir, ".openharness-plugin"), { recursive: true });
       mkdirSync(join(pluginDir, "agents"), { recursive: true });
-      mkdirSync(join(pluginDir, "commands"), { recursive: true });
+      mkdirSync(join(pluginDir, "skills", command), { recursive: true });
       writeFileSync(
-        join(pluginDir, "plugin.json"),
-        JSON.stringify({ name: "scoped", version: "1.0.0" }),
+        join(pluginDir, ".openharness-plugin", "plugin.json"),
+        JSON.stringify({ schemaVersion: 1, id: `dev.openharness.${suffix}`, name: "scoped", version: "1.0.0", components: { agents: ["./agents"], skills: ["./skills"] } }),
       );
       writeFileSync(
         join(pluginDir, "agents", "reviewer.md"),
         `---\nmodel: ${model}\n---\nReview this workspace.\n`,
       );
       writeFileSync(
-        join(pluginDir, "commands", `${command}.md`),
-        `---\ndescription: ${command} command\n---\nRun ${command}.\n`,
+        join(pluginDir, "skills", command, "SKILL.md"),
+        `---\nname: ${command}\ndescription: ${command} command\n---\nRun ${command}.\n`,
       );
+      const storePath = join(root, "config", "plugins", "installed.json");
+      mkdirSync(join(storePath, ".."), { recursive: true });
+      let store: { schemaVersion: 1; revision: number; plugins: Record<string, unknown> } = { schemaVersion: 1, revision: 0, plugins: {} };
+      try { store = JSON.parse(readFileSync(storePath, "utf8")); } catch {}
+      store.plugins[`project:${cwd}:dev.openharness.${suffix}`] = { id: `dev.openharness.${suffix}`, scope: "project", projectDir: cwd, enabled: true, currentVersion: "1.0.0", cachePath: pluginDir, origin: "native", requestedPermissions: [], approvedPermissions: [], installedAt: "now", updatedAt: "now" };
+      writeFileSync(storePath, JSON.stringify(store));
     }
 
-    const settings: Settings = {
-      ...minimalSettings(),
-      allowProjectPlugins: true,
-    };
+    const settings: Settings = minimalSettings();
 
     try {
-      writePlugin(cwdA, "model-a", "command-a");
-      writePlugin(cwdB, "model-b", "command-b");
+      writePlugin(cwdA, "plugin-a", "model-a", "command-a");
+      writePlugin(cwdB, "plugin-b", "model-b", "command-b");
       const discoveryA = await discoverOpenHarnessExtensions(cwdA, settings);
       registerPluginAgents(discoveryA.agentDefinitions);
 
@@ -106,7 +110,7 @@ describe("createDefaultCommandCatalog", () => {
       expect(commands.map((command) => command.name)).toContain(
         "/scoped:command-b",
       );
-      expect(getAgentDefinition("scoped:reviewer")?.model).toBe("model-a");
+      expect(getAgentDefinition("dev.openharness.plugin-a:reviewer")?.model).toBe("model-a");
     } finally {
       registerPluginAgents([]);
       if (previousConfigDir === undefined) {

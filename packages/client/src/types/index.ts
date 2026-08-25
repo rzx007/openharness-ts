@@ -342,13 +342,16 @@ export interface OutputStyleInfo {
 }
 
 export interface PluginInfo {
-  name: string;
-  version: string;
+  identity: { id: string; name: string; version: string; displayName?: string };
+  origin: "native" | "converted";
+  sourceFormat?: string;
+  scope: "user" | "project" | "local" | "managed";
   enabled: boolean;
-  skillCount: number;
-  commandCount: number;
-  hookCount: number;
-  agentCount: number;
+  installation: "installed" | "missing" | "invalid";
+  activation: "inactive" | "active" | "partial" | "reload-required";
+  inventory: Record<string, number>;
+  permissions: { requested: string[]; approved: string[]; missing: string[] };
+  diagnostics: Array<{ severity: "info" | "warning" | "error"; phase: string; code: string; message: string; path?: string }>;
 }
 
 export interface AgentPersonaInfo {

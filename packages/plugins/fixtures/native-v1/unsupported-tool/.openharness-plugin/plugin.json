@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.openharness.unsupported-tool",
+  "name": "unsupported-tool",
+  "version": "1.0.0",
+  "components": { "tools": ["./tools/index.js"] }
+}

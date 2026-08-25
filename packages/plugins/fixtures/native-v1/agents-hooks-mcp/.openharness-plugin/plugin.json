@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.openharness.full",
+  "name": "full-plugin",
+  "version": "1.0.0",
+  "components": {
+    "agents": ["./agents"],
+    "hooks": ["./hooks/hooks.json"],
+    "mcpServers": ["./mcp/servers.json"]
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "pre_tool_use": [
+    { "type": "command", "command": "node ./scripts/check.mjs", "matcher": "Bash" }
+  ]
+}

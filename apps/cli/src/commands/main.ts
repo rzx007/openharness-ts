@@ -5,7 +5,7 @@ import { CommandRegistry } from "@openharness/commands";
 import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { resolveToolPath } from "@openharness/tools";
-import { loadPluginContributions } from "../plugin-contributions";
+import { discoverInstalledNativePlugins, loadNativePlugin, validateNativePlugin } from "@openharness/plugins";
 import { isCoordinatorMode } from "@openharness/coordinator";
 import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
@@ -431,9 +431,20 @@ export async function loadSkillsThreeSources(
   settings?: Settings,
 ) {
   skillRegistry.registerBundled();
-  const pluginContributions = settings
-    ? await loadPluginContributions(skillRegistry, settings, cwd)
-    : { plugins: [], warnings: [] };
+  const pluginContributions: { plugins: Awaited<ReturnType<typeof loadNativePlugin>>[]; warnings: string[] } = { plugins: [], warnings: [] };
+  if (settings) {
+    for (const record of await discoverInstalledNativePlugins({ cwd })) {
+      const validation = await validateNativePlugin(record.cachePath);
+      if (!validation.plugin) {
+        pluginContributions.warnings.push(...validation.diagnostics.map((item) => item.message));
+        continue;
+      }
+      const loaded = await loadNativePlugin(validation.plugin);
+      pluginContributions.plugins.push(loaded);
+      pluginContributions.warnings.push(...loaded.diagnostics.map((item) => item.message));
+      for (const skill of loaded.components.skills?.value ?? []) skillRegistry.register(skill);
+    }
+  }
   // 插件贡献插在 bundled 之后、user/project 之前：bundled < plugin < user < project
   // （register 覆盖语义）。信任门控告警直接打到 stderr，三模式一致。
   for (const warning of pluginContributions.warnings) {

@@ -2622,13 +2622,15 @@ describe("OpenHarnessHttpServer", () => {
         expect(await plugins.json()).toEqual({
           plugins: [
             {
-              name: "demo",
-              version: "1.0.0",
+              identity: { id: "demo", name: "demo", version: "1.0.0" },
+              origin: "native",
+              scope: "user",
               enabled: true,
-              skillCount: 1,
-              commandCount: 0,
-              hookCount: 0,
-              agentCount: 0,
+              installation: "installed",
+              activation: "active",
+              inventory: { skills: 1 },
+              permissions: { requested: [], approved: [], missing: [] },
+              diagnostics: [],
             },
           ],
           warnings: [],
@@ -2636,7 +2638,8 @@ describe("OpenHarnessHttpServer", () => {
 
         const enable = await fetch(`${baseUrl}/plugins/demo/enable`, {
           method: "POST",
-          headers: auth(token),
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({ cwd: process.cwd() }),
         });
         expect(enable.status).toBe(200);
         expect(await enable.json()).toEqual({
@@ -2766,22 +2769,14 @@ describe("OpenHarnessHttpServer", () => {
           async list() {
             return {
               plugins: [
-                {
-                  name: "demo",
-                  version: "1.0.0",
-                  enabled: true,
-                  skillCount: 1,
-                  commandCount: 0,
-                  hookCount: 0,
-                  agentCount: 0,
-                },
+                { identity: { id: "demo", name: "demo", version: "1.0.0" }, origin: "native", scope: "user", enabled: true, installation: "installed", activation: "active", inventory: { skills: 1 }, permissions: { requested: [], approved: [], missing: [] }, diagnostics: [] },
               ],
               warnings: [],
             };
           },
-          async setEnabled({ name, enabled }) {
+          async setEnabled({ id, enabled }) {
             return {
-              message: `${enabled ? "Enabled" : "Disabled"} plugin '${name}'.`,
+              message: `${enabled ? "Enabled" : "Disabled"} plugin '${id}'.`,
             };
           },
         },
@@ -3632,7 +3627,8 @@ describe("OpenHarnessHttpServer", () => {
           }),
           fetch(`${baseUrl}/plugins/demo/enable`, {
             method: "POST",
-            headers: auth(token),
+            headers: { ...auth(token), "content-type": "application/json" },
+            body: JSON.stringify({ cwd }),
           }),
           fetch(`${baseUrl}/plugins/reload`, {
             method: "POST",

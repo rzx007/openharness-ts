@@ -30,7 +30,7 @@
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
 | coordinator | ✅ | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；✅agent 级字段运行时生效(tools/disallowedTools/maxTurns/effort/permissionMode) |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
-| plugins | 🟡 | ✅skills/commands/hooks/MCP/agents/tools_dir 贡献+信任门控+卸载防护(C.1+C.4)；✅`OpenHarnessAgent` composition 统一完成 MCP connectAll 与工具注册 |
+| plugins | 🟡 | ✅Native Plugin v1 schema、路径边界、installed store、版本 cache、Skills/Agents/Hooks/MCP、Runtime/API/CLI 硬切；✅Claude Code Converter 主链路；隔离 Native Tool、更多组件和 Marketplace 待后续 |
 | bridge | 🟡 | ✅spawn+stdout捕获+terminate/kill(D.4)；work-secret / SDK WS URL 不做（云端专用） |
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
@@ -165,16 +165,14 @@
 
 ## Phase C — 扩展层补齐（P2）
 
-### C.1 Plugins 贡献加载 ✅ 完成
-- ✅ skills / commands / hooks / MCP 四类贡献加载与注册（Claude Code 布局兼容：
-  `.claude-plugin/` 备用路径、SKILL.md 目录式、结构化 hooks.json、`.mcp.json`、
-  `${CLAUDE_PLUGIN_ROOT}` 替换）；`/plugin:cmd` 斜杠路由复用 skill 链路。
-- ✅ project 信任门控（allowProjectPlugins，默认禁）+ 卸载路径穿越防护。
-- ✅ plugin agents 已随 C.4 收口（`packages/plugins/src/agents.ts`）。
-- ✅ `tools_dir` 动态 import（`registerPluginTools`，二段注册在 bootstrap 后，
-  standalone/daemon agent 均由 framework composition 接线；default export ToolDefinition | ToolDefinition[]）。
-- ✅ MCP 接线：`OpenHarnessAgent` 内部执行 `connectAll` + `getAsToolDefinitions()` 注册 + `setMcpManager()` 注入 ToolContext。旧 BackendHost 路径已删除。
-- **文件**：`packages/plugins/src/{discovery,contributions,hooks-mcp}.ts`、`packages/agent-runtime/src/extensions.ts`、`apps/cli/src/plugin-contributions.ts`
+### C.1 Native Plugin 与外部转换 ✅ 第一阶段完成
+- ✅ Runtime 唯一接受 `.openharness-plugin/plugin.json`，不解析 Claude/Codex manifest。
+- ✅ installed store、user/project/local/managed scope、原子版本 cache、权限批准和结构化诊断。
+- ✅ Native Skills、Agents、Hooks、MCP 加载；单组件失败保持其他组件并报告 degraded。
+- ✅ Claude Code Converter 执行 detect/inspect/plan/convert，产物保留 provenance/plan/report。
+- ✅ 删除旧根级 manifest、Settings 插件字段、CLI 重复 cache 和主进程 Tool 动态 import。
+- ⏳ Native Tool 隔离执行、更多原生组件、Desktop 管理页和 Marketplace 属于后续计划。
+- **文件**：`packages/plugins`、`packages/plugin-converters`、`packages/agent-runtime/src/extensions.ts`
 
 ### C.2 Auth ProviderProfile 体系
 - 命名 ProviderProfile（list/use/add/edit/remove/switch；base_url/api_format/model/credential_slot 等字段）。
@@ -192,7 +190,7 @@
 ### C.4 Coordinator 加载与 prompt 还原 ✅ 完成
 - ✅ 用户 `.md` agent 加载器（真 YAML frontmatter + 行级回退，~20 字段）；
   `getAllAgentDefinitions` 三源合并 builtin < user < plugin。
-- ✅ plugin agents（`plugin:ns:name` 命名，hooks/mcpServers/omitClaudeMd 信任面剥除）。
+- ✅ Native plugin agents 使用稳定 plugin ID 命名，hooks/mcpServers/omitClaudeMd 信任面剥除。
 - ✅ coordinator system prompt 经核对本就全量（「大幅精简」描述过时）；补
   `OPENHARNESS_COORDINATOR_SIMPLE` 简单模式分支、`matchSessionMode`、`getCoordinatorTools`、
   `getCoordinatorUserContext`（scratchpad/worker-tools 注入）。

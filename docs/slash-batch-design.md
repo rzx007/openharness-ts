@@ -10,7 +10,7 @@
   后台任务数、当前 output_style。
 - **`/reload-plugins`** — 重新发现并注册插件贡献。**先清后注册**：先注销
   `source === "plugin"` 的 skills 与 `plugin:` 前缀的 hooks，再
-  `loadPluginContributions` + `registerPluginHooks`，保证 disable 真正下线
+  installed store + Native Plugin activation，保证 disable 后 reload 真正下线
   （agents 由 wholesale 替换天然覆盖）。
 - **`/subagents`** — 列出三源（builtin/user/plugin）agent 人格及 source/model。
 - **`/plugin list|enable|disable NAME`** — 列插件（含贡献计数）；启停写入

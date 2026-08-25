@@ -85,7 +85,7 @@ export function applySessionSnapshot(
         messages: [...snapshot.messages].sort((a, b) => a.seq - b.seq),
         partsByMessageId,
         runs: Object.fromEntries(snapshot.runs.map((run) => [run.id, run])),
-        attempts: Object.fromEntries(snapshot.attempts.map((attempt) => [attempt.id, attempt])),
+        attempts: Object.fromEntries((snapshot.attempts ?? []).map((attempt) => [attempt.id, attempt])),
         tasks: Object.fromEntries((snapshot.tasks ?? []).map((task) => [task.id, task])),
         permissions: Object.fromEntries(snapshot.permissions.map((request) => [request.id, request])),
       },

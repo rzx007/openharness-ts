@@ -1,0 +1,6 @@
+{
+  "servers": {
+    "local": { "type": "stdio", "command": "node", "args": ["server.mjs"] },
+    "remote": { "type": "http", "url": "https://example.test/mcp" }
+  }
+}

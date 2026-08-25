@@ -49,6 +49,7 @@
     "@openharness/permissions": "workspace:*",
     "@openharness/personalization": "workspace:*",
     "@openharness/plugins": "workspace:*",
+    "@openharness/plugin-converters": "workspace:*",
     "@openharness/prompts": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "@openharness/server": "workspace:*",

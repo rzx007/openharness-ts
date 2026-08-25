@@ -611,26 +611,36 @@ export class OpenHarnessClient {
     );
   }
 
-  /** `POST /plugins/:name/enable` */
+  /** `POST /plugins/:id/enable` */
   async enablePlugin(
-    name: string,
+    id: string,
+    input: { cwd: string },
     options: { signal?: AbortSignal } = {},
   ): Promise<{ message: string }> {
     return await this.request<{ message: string }>(
-      `/plugins/${encodeURIComponent(name)}/enable`,
-      { method: "POST", signal: options.signal },
+      `/plugins/${encodeURIComponent(id)}/enable`,
+      { method: "POST", body: input, signal: options.signal },
     );
   }
 
-  /** `POST /plugins/:name/disable` */
+  /** `POST /plugins/:id/disable` */
   async disablePlugin(
-    name: string,
+    id: string,
+    input: { cwd: string },
     options: { signal?: AbortSignal } = {},
   ): Promise<{ message: string }> {
     return await this.request<{ message: string }>(
-      `/plugins/${encodeURIComponent(name)}/disable`,
-      { method: "POST", signal: options.signal },
+      `/plugins/${encodeURIComponent(id)}/disable`,
+      { method: "POST", body: input, signal: options.signal },
     );
+  }
+
+  async installLocalPlugin(input: { cwd: string; sourcePath: string; scope: "user" | "project" | "local"; approvedPermissions: string[]; link?: boolean }): Promise<{ message: string }> {
+    return await this.request<{ message: string }>(input.link ? "/plugins/link-local" : "/plugins/install-local", { method: "POST", body: input });
+  }
+
+  async uninstallPlugin(id: string, input: { cwd: string }): Promise<{ message: string }> {
+    return await this.request<{ message: string }>(`/plugins/${encodeURIComponent(id)}`, { method: "DELETE", body: input });
   }
 
   /** `POST /plugins/reload` */

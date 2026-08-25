@@ -24,7 +24,6 @@ const RUNTIME_RESTART_KEYS = new Set([
   "apiKey",
   "mcpServers",
   "plugins",
-  "allowProjectPlugins",
   "maxTurns",
   "effort",
   "fastMode",

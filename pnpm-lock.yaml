@@ -156,6 +156,9 @@ importers:
       '@openharness/personalization':
         specifier: workspace:*
         version: link:../../packages/personalization
+      '@openharness/plugin-converters':
+        specifier: workspace:*
+        version: link:../../packages/plugin-converters
       '@openharness/plugins':
         specifier: workspace:*
         version: link:../../packages/plugins
@@ -731,6 +734,25 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/personalization:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.17
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
+
+  packages/plugin-converters:
+    dependencies:
+      '@openharness/plugins':
+        specifier: workspace:*
+        version: link:../plugins
+      zod:
+        specifier: 'catalog:'
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

@@ -1,0 +1,101 @@
+import type { PluginDiagnostic } from "./diagnostics.js";
+import type { HookDefinition, McpServerConfig } from "@openharness/core";
+import type { AgentDefinition } from "@openharness/coordinator";
+import type { SkillDefinition } from "@openharness/skills";
+
+export const NATIVE_PLUGIN_COMPONENT_KINDS = [
+  "skills", "agents", "hooks", "mcpServers", "lspServers", "tools", "workflows",
+  "channels", "providers", "ui", "outputStyles", "themes", "monitors", "binaries",
+] as const;
+
+export type NativePluginComponentKind = (typeof NATIVE_PLUGIN_COMPONENT_KINDS)[number];
+
+export interface NativeToolComponent {
+  entry: string;
+  runtime?: "node" | "wasm";
+  permissions?: string[];
+}
+
+export interface OpenHarnessPluginComponents {
+  skills?: string[];
+  agents?: string[];
+  hooks?: string[];
+  mcpServers?: string[];
+  lspServers?: string[];
+  tools?: Array<string | NativeToolComponent>;
+  workflows?: string[];
+  channels?: string[];
+  providers?: string[];
+  ui?: string[];
+  outputStyles?: string[];
+  themes?: string[];
+  monitors?: string[];
+  binaries?: string[];
+}
+
+export interface OpenHarnessPluginPermissions {
+  filesystem?: string[];
+  network?: string[];
+  process?: string[];
+  secrets?: string[];
+}
+
+export interface OpenHarnessPluginRuntime {
+  engine: "node" | "wasm";
+  isolation: "worker" | "process";
+}
+
+export interface OpenHarnessPluginManifestV1 {
+  $schema?: string;
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  displayName?: string;
+  version: string;
+  description?: string;
+  author?: { name: string; email?: string; url?: string };
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  keywords?: string[];
+  metadata?: Record<string, unknown>;
+  components: OpenHarnessPluginComponents;
+  permissions?: OpenHarnessPluginPermissions;
+  runtime?: OpenHarnessPluginRuntime;
+  compatibility?: Record<string, unknown>;
+}
+
+export interface ValidatedNativePlugin {
+  root: string;
+  manifestPath: string;
+  manifest: OpenHarnessPluginManifestV1;
+}
+
+export interface NativePluginValidationResult {
+  status: "valid" | "invalid";
+  plugin?: ValidatedNativePlugin;
+  diagnostics: PluginDiagnostic[];
+}
+
+export interface PluginComponentResult<T> {
+  status: "loaded" | "unsupported" | "invalid" | "blocked";
+  value?: T;
+  diagnostics: PluginDiagnostic[];
+}
+
+export interface NativePluginComponents {
+  skills?: PluginComponentResult<SkillDefinition[]>;
+  agents?: PluginComponentResult<AgentDefinition[]>;
+  hooks?: PluginComponentResult<HookDefinition[]>;
+  mcpServers?: PluginComponentResult<Record<string, McpServerConfig>>;
+  tools?: PluginComponentResult<never>;
+  unsupported?: Partial<Record<NativePluginComponentKind, PluginComponentResult<never>>>;
+}
+
+export interface LoadedNativePlugin {
+  manifest: OpenHarnessPluginManifestV1;
+  root: string;
+  status: "loaded" | "degraded";
+  components: NativePluginComponents;
+  diagnostics: PluginDiagnostic[];
+}

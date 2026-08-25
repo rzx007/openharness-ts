@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { getDataDir } from "@openharness/core";
 
 import type { SessionMessagePartRecord, SessionMessageRecord, SessionRecord } from "@openharness/protocol";
 
@@ -124,7 +124,7 @@ export async function writeSessionExport(input: BuildSessionExportInput): Promis
     throw new Error("No messages to export.");
   }
 
-  const dir = join(homedir(), ".openharness-ts", "data", "exports");
+  const dir = join(getDataDir(), "exports");
   await mkdir(dir, { recursive: true });
 
   const defaultName = `export-${Date.now()}.${input.format === "json" ? "json" : "md"}`;

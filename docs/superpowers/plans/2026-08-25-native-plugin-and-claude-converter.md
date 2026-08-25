@@ -2,6 +2,8 @@
 
 > **执行说明：** 按 Task 顺序实施，并用复选框跟踪。项目偏好中的 superpower 当前不可用；恢复后可使用 `superpowers:executing-plans` 或 `superpowers:subagent-driven-development` 逐任务执行。
 
+> **实施结果（2026-08-25）：** Native v1、安装状态、Runtime/Server/Client/CLI 硬切、Converter core、Claude Code 转换与仓库级验收均已落地。下方逐步复选框保留为实现过程和回归清单；建议提交步骤未执行，因为本次没有获得创建 Git commit 的明确授权。
+
 **目标：** 用版本化 OpenHarness Native Plugin v1 替换当前临时插件格式，让 Runtime 只加载原生插件；随后实现独立 Converter core 和 Claude Code Converter，把 Claude Skills、Commands、Agents、Hooks、MCP 转换、校验并安装为原生插件。
 
 **架构：** `@openharness/plugins` 拥有 Native schema、组件加载、安装状态、版本 cache 和 Runtime 激活；新的 `@openharness/plugin-converters` 只负责外部 source 的 detect、inspect、plan、convert，并生成 provenance/report。CLI 的转换命令可以本地只读运行，所有 installed state 变更经 daemon PluginService 和 mutation barrier 完成。Runtime、Server、Client 和 CLI 不直接解析 Claude manifest。
@@ -152,7 +154,7 @@ export async function resolveNativePluginPath(
 ): Promise<string>;
 ```
 
-- [ ] **Step 1：写 manifest schema 失败测试**
+- [x] **Step 1：写 manifest schema 失败测试**
 
 覆盖：
 
@@ -165,7 +167,7 @@ export async function resolveNativePluginPath(
 - 未知顶层执行字段报错，metadata 类扩展必须放入明确字段；
 - `components.tools` 可以解析，但标记为 v1 recognized/not-yet-activatable。
 
-- [ ] **Step 2：运行测试并确认旧 schema 不满足新接口**
+- [x] **Step 2：运行测试并确认旧 schema 不满足新接口**
 
 ```bash
 pnpm --filter @openharness/plugins exec vitest run src/manifest/schema-v1.test.ts
@@ -173,11 +175,11 @@ pnpm --filter @openharness/plugins exec vitest run src/manifest/schema-v1.test.t
 
 预期：FAIL，因为 Native v1 schema 尚不存在。
 
-- [ ] **Step 3：实现最小 schema 和公共类型**
+- [x] **Step 3：实现最小 schema 和公共类型**
 
 不要导出当前 `PluginManifestSchema` 的别名；使用全新名称并让调用方显式迁移。
 
-- [ ] **Step 4：写路径攻击测试**
+- [x] **Step 4：写路径攻击测试**
 
 至少覆盖：
 
@@ -194,15 +196,15 @@ UNC path
 
 在不能创建 symlink 的 Windows 环境中，测试应检测权限并只跳过 symlink 个案，不跳过普通穿越测试。
 
-- [ ] **Step 5：实现 canonical path validator**
+- [x] **Step 5：实现 canonical path validator**
 
 先 `resolve` declared path，再对存在路径使用 `realpath`；对尚未存在的生成目标逐级检查最近存在父目录。不得仅使用字符串 `startsWith(root)`，必须处理目录分隔边界。
 
-- [ ] **Step 6：实现 Native validator 和结构化诊断**
+- [x] **Step 6：实现 Native validator 和结构化诊断**
 
 损坏 JSON、缺失 manifest、非法 component path、重复 component source 都返回 `PluginDiagnostic[]`，不能只 catch 后返回 null。
 
-- [ ] **Step 7：运行包检查**
+- [x] **Step 7：运行包检查**
 
 ```bash
 pnpm --filter @openharness/plugins exec vitest run src/manifest src/paths.test.ts
@@ -247,7 +249,7 @@ export async function loadNativePlugin(
 ): Promise<LoadedNativePlugin>;
 ```
 
-- [ ] **Step 1：建立离线 Native fixtures**
+- [x] **Step 1：建立离线 Native fixtures**
 
 创建：
 
@@ -258,7 +260,7 @@ packages/plugins/fixtures/native-v1/invalid-component/
 packages/plugins/fixtures/native-v1/unsupported-tool/
 ```
 
-- [ ] **Step 2：写 component 行为测试**
+- [x] **Step 2：写 component 行为测试**
 
 断言：
 
@@ -270,17 +272,17 @@ packages/plugins/fixtures/native-v1/unsupported-tool/
 - Tools 在本阶段返回 recognized-but-unsupported diagnostic；
 - Loader 不扫描 manifest 未声明的目录。
 
-- [ ] **Step 3：运行失败测试**
+- [x] **Step 3：运行失败测试**
 
 ```bash
 pnpm --filter @openharness/plugins exec vitest run src/components src/load-native-plugin.test.ts
 ```
 
-- [ ] **Step 4：复用内部 Skill/Agent/Hook/MCP 类型实现 loader**
+- [x] **Step 4：复用内部 Skill/Agent/Hook/MCP 类型实现 loader**
 
 Native loader 可以复用 `@openharness/skills` 和 `@openharness/coordinator` 的解析器，但不得复用旧 Claude 风格默认目录逻辑。所有文件必须来自已验证 manifest source。
 
-- [ ] **Step 5：定义 component 级结果**
+- [x] **Step 5：定义 component 级结果**
 
 ```ts
 interface PluginComponentResult<T> {
@@ -292,7 +294,7 @@ interface PluginComponentResult<T> {
 
 不要因为 `.mcp.json` 损坏而让 Skills 从列表消失。
 
-- [ ] **Step 6：运行包测试和 typecheck**
+- [x] **Step 6：运行包测试和 typecheck**
 
 ```bash
 pnpm --filter @openharness/plugins exec vitest run src/components src/load-native-plugin.test.ts

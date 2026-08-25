@@ -80,6 +80,22 @@ export function getPluginsDir(): string {
   return resolvePaths().pluginsDir;
 }
 
+export function getPluginCacheDir(): string {
+  return join(getPluginsDir(), "cache");
+}
+
+export function getPluginDataDir(): string {
+  return join(getPluginsDir(), "data");
+}
+
+export function getPluginSourcesDir(): string {
+  return join(getPluginsDir(), "sources");
+}
+
+export function getInstalledPluginStorePath(): string {
+  return join(getPluginsDir(), "installed.json");
+}
+
 export function getSkillsDir(): string {
   return resolvePaths().skillsDir;
 }

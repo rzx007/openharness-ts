@@ -129,8 +129,24 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
       }
     })
-    .post("/plugins/:name/enable", (c) => setPluginEnabled(context, c.req.param("name"), true))
-    .post("/plugins/:name/disable", (c) => setPluginEnabled(context, c.req.param("name"), false))
+    .post("/plugins/install-local", (c) => installLocalPlugin(context, c, false))
+    .post("/plugins/link-local", (c) => installLocalPlugin(context, c, true))
+    .post("/plugins/:id/enable", async (c) => setPluginEnabled(context, c.req.param("id"), true, await readJson(c)))
+    .post("/plugins/:id/disable", async (c) => setPluginEnabled(context, c.req.param("id"), false, await readJson(c)))
+    .delete("/plugins/:id", async (c) => {
+      if (!context.pluginService?.uninstall) return errorResponse(501, "Plugin uninstall is not configured");
+      const body = await readJson(c);
+      const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
+      if (!cwd) return errorResponse(400, "cwd is required");
+      const lease = context.control.acquireCwdMutation(cwd);
+      if (!lease) return errorResponse(409, "Cannot uninstall plugins while session runs are active for this cwd");
+      try {
+        const result = await context.pluginService.uninstall({ cwd, id: c.req.param("id") });
+        if (result.restartRuntimes) await context.control.closeRuntimesForCwd(cwd);
+        return jsonResponse({ message: result.message });
+      } catch (error) { return errorResponse(400, error instanceof Error ? error.message : String(error)); }
+      finally { lease.release(); }
+    })
     .post("/plugins/reload", async (c) => {
       if (!context.pluginService) return errorResponse(501, "Plugin service is not configured");
       const body = await readJson(c);
@@ -188,22 +204,46 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
 
 async function setPluginEnabled(
   context: ServiceRoutesContext,
-  name: string,
+  id: string,
   enabled: boolean,
+  body: Record<string, unknown>,
 ): Promise<Response> {
   if (!context.pluginService) return errorResponse(501, "Plugin service is not configured");
-  if (!name) return errorResponse(400, "plugin name is required");
-  const lease = context.control.acquireGlobalMutation();
+  if (!id) return errorResponse(400, "plugin id is required");
+  const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
+  if (!cwd) return errorResponse(400, "cwd is required");
+  const lease = context.control.acquireCwdMutation(cwd);
   if (!lease) {
     return errorResponse(409, "Cannot update plugins while session runs are active");
   }
   try {
-    const result = await context.pluginService.setEnabled({ name, enabled });
-    if (result.restartRuntimes) await context.control.closeAllRuntimes();
+    const result = await context.pluginService.setEnabled({ id, cwd, enabled });
+    if (result.restartRuntimes) await context.control.closeRuntimesForCwd(cwd);
     return jsonResponse({ message: result.message });
   } catch (error) {
     return errorResponse(400, error instanceof Error ? error.message : String(error));
   } finally {
     lease.release();
   }
+}
+
+async function installLocalPlugin(context: ServiceRoutesContext, c: any, link: boolean): Promise<Response> {
+  if (!context.pluginService?.installLocal) return errorResponse(501, "Plugin installation is not configured");
+  const body = await readJson(c);
+  const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
+  const sourcePath = typeof body.sourcePath === "string" ? body.sourcePath : undefined;
+  const scope = body.scope;
+  const approvedPermissions = Array.isArray(body.approvedPermissions)
+    ? body.approvedPermissions.filter((item): item is string => typeof item === "string") : [];
+  if (!cwd || !sourcePath || (scope !== "user" && scope !== "project" && scope !== "local")) {
+    return errorResponse(400, "cwd, sourcePath and valid scope are required");
+  }
+  const lease = context.control.acquireCwdMutation(cwd);
+  if (!lease) return errorResponse(409, "Cannot install plugins while session runs are active for this cwd");
+  try {
+    const result = await context.pluginService.installLocal({ cwd, sourcePath, scope, approvedPermissions, link });
+    if (result.restartRuntimes) await context.control.closeRuntimesForCwd(cwd);
+    return jsonResponse({ message: result.message });
+  } catch (error) { return errorResponse(400, error instanceof Error ? error.message : String(error)); }
+  finally { lease.release(); }
 }

@@ -132,6 +132,12 @@ Application backup 可以包含：
 
 这样做的代价是升级不能无感；好处是每次读取都只有一种含义，恢复流程不会把猜出来的状态当成事实。
 
+## Native Plugin 恢复
+
+`plugins/installed.json` 是安装和启停真相，`plugins/cache/` 保存不可变版本，`plugins/data/` 独立保存跨版本数据。升级先写完整新 cache，再原子更新 installed record；转换、校验或写状态失败时旧 record 仍指向旧版本。普通卸载保留 data。
+
+坏 artifact 不会从管理列表静默消失，而是显示 invalid 和结构化诊断。应重新转换或重新安装到新 cache 后 reload，不要手工覆盖 current cache 目录。
+
 ## 相关文档与测试
 
 - 数据格式：[Durable Execution Data Model](./durable-execution-data-model.md)

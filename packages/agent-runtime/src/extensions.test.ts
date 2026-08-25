@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,7 +17,6 @@ const BASE_SETTINGS: Settings = {
   apiFormat: "anthropic",
   maxTurns: 8,
   permission: { mode: "default" },
-  allowProjectPlugins: true,
 };
 
 let tempRoot: string;
@@ -38,18 +37,29 @@ afterEach(() => {
   rmSync(tempRoot, { recursive: true, force: true });
 });
 
-function writeProjectAgentPlugin(cwd: string, model: string): void {
-  const pluginDir = join(cwd, ".openharness", "plugins", "scoped");
+function writeProjectAgentPlugin(cwd: string, suffix: string, model: string): void {
+  const pluginDir = join(tempRoot, "cache", suffix);
   const agentsDir = join(pluginDir, "agents");
+  mkdirSync(join(pluginDir, ".openharness-plugin"), { recursive: true });
   mkdirSync(agentsDir, { recursive: true });
   writeFileSync(
-    join(pluginDir, "plugin.json"),
-    JSON.stringify({ name: "scoped", version: "1.0.0" }),
+    join(pluginDir, ".openharness-plugin", "plugin.json"),
+    JSON.stringify({ schemaVersion: 1, id: `dev.openharness.${suffix}`, name: suffix, version: "1.0.0", components: { agents: ["./agents"] } }),
   );
   writeFileSync(
     join(agentsDir, "reviewer.md"),
     `---\nmodel: ${model}\n---\nReview only this workspace.\n`,
   );
+  const storePath = join(tempRoot, "config", "plugins", "installed.json");
+  mkdirSync(join(storePath, ".."), { recursive: true });
+  let store: { schemaVersion: 1; revision: number; plugins: Record<string, unknown> } = { schemaVersion: 1, revision: 0, plugins: {} };
+  try { store = JSON.parse(readFileSync(storePath, "utf8")); } catch {}
+  store.plugins[`project:${cwd}:dev.openharness.${suffix}`] = {
+    id: `dev.openharness.${suffix}`, scope: "project", projectDir: cwd, enabled: true,
+    currentVersion: "1.0.0", cachePath: pluginDir, origin: "native", requestedPermissions: [],
+    approvedPermissions: [], installedAt: "now", updatedAt: "now",
+  };
+  writeFileSync(storePath, JSON.stringify(store));
 }
 
 function createExecutionContext(
@@ -108,7 +118,9 @@ async function spawnReviewer(
     {
       description: "review",
       prompt: "review this workspace",
-      subagentType: "scoped:reviewer",
+      subagentType: cwd.endsWith("workspace-a")
+        ? "dev.openharness.plugin-a:reviewer"
+        : "dev.openharness.plugin-b:reviewer",
     },
     { cwd, agent: createExecutionContext(cwd, calls) },
   );
@@ -120,8 +132,8 @@ describe("extension agent definition scoping", () => {
   it("keeps two live runtimes bound to the plugin agents discovered for their own cwd", async () => {
     const cwdA = join(tempRoot, "workspace-a");
     const cwdB = join(tempRoot, "workspace-b");
-    writeProjectAgentPlugin(cwdA, "model-a");
-    writeProjectAgentPlugin(cwdB, "model-b");
+    writeProjectAgentPlugin(cwdA, "plugin-a", "model-a");
+    writeProjectAgentPlugin(cwdB, "plugin-b", "model-b");
 
     const discoveryA = await discoverOpenHarnessExtensions(cwdA, BASE_SETTINGS);
     const runtimeA = await createOpenHarnessRuntime({
