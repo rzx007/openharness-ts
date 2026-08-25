@@ -31,9 +31,30 @@ const conversationMinimumWidth = 350
 const utilityMinimumWidth = 320
 const workspaceMinimumWidth = conversationMinimumWidth + utilityMinimumWidth
 const defaultWorkspaceLayout: Layout = { conversation: 40, utility: 60 }
+const collapsedWorkspaceLayout: Layout = { conversation: 100, utility: 0 }
+const persistedUtilityPanelOpenKey = "openharness.desktop.utility-panel-open.v1"
 
 function isOpenWorkspaceLayout(layout: Layout | null | undefined): layout is Layout {
   return Number(layout?.conversation) > 5 && Number(layout?.utility) > 5
+}
+
+function readPersistedUtilityPanelOpen(): boolean {
+  try {
+    const value = localStorage.getItem(persistedUtilityPanelOpenKey)
+    if (value === "1") return true
+    if (value === "0") return false
+  } catch {
+    // Ignore storage failures; default to collapsed.
+  }
+  return false
+}
+
+function writePersistedUtilityPanelOpen(open: boolean): void {
+  try {
+    localStorage.setItem(persistedUtilityPanelOpenKey, open ? "1" : "0")
+  } catch {
+    // Panel open state is a convenience; storage failures should not interrupt use.
+  }
 }
 
 export function MainLayout(): React.JSX.Element {
@@ -47,7 +68,7 @@ export function MainLayout(): React.JSX.Element {
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelOpen, setPanelOpen] = useState(readPersistedUtilityPanelOpen)
   const [utilityMaximized, setUtilityMaximized] = useState(false)
   const [fileOpenRequest, setFileOpenRequest] = useState<{
     id: number
@@ -110,7 +131,9 @@ export function MainLayout(): React.JSX.Element {
       if (!utilitySize) return
       setPanelOpen((current) => {
         const nextOpen = utilitySize.inPixels > 1
-        return current === nextOpen ? current : nextOpen
+        if (current === nextOpen) return current
+        writePersistedUtilityPanelOpen(nextOpen)
+        return nextOpen
       })
     })
     return () => window.cancelAnimationFrame(frame)
@@ -141,6 +164,7 @@ export function MainLayout(): React.JSX.Element {
         group?.setLayout(layout)
       })
     }
+    writePersistedUtilityPanelOpen(true)
     setPanelOpen(true)
   }, [sidebarPanelRef, utilityPanelRef, workspaceGroupRef])
 
@@ -151,13 +175,19 @@ export function MainLayout(): React.JSX.Element {
     }
     previousWorkspaceLayoutRef.current = null
     setUtilityMaximized(false)
+    writePersistedUtilityPanelOpen(false)
+    setPanelOpen(false)
     utilityPanelRef.current?.collapse()
   }, [utilityPanelRef, workspaceGroupRef])
 
   const togglePanel = useCallback((): void => {
     const panel = utilityPanelRef.current
     if (!panel) {
-      setPanelOpen((current) => !current)
+      setPanelOpen((current) => {
+        const nextOpen = !current
+        writePersistedUtilityPanelOpen(nextOpen)
+        return nextOpen
+      })
       return
     }
 
@@ -206,6 +236,7 @@ export function MainLayout(): React.JSX.Element {
     }
     if (utilityPanelRef.current?.isCollapsed()) utilityPanelRef.current.expand()
     conversationPanelRef.current?.collapse()
+    writePersistedUtilityPanelOpen(true)
     setPanelOpen(true)
     setUtilityMaximized(true)
   }, [conversationPanelRef, utilityMaximized, utilityPanelRef, workspaceGroupRef])
@@ -360,7 +391,7 @@ export function MainLayout(): React.JSX.Element {
       orientation="horizontal"
       className="h-full min-h-0 w-full"
       resizeTargetMinimumSize={resizeTargetMinimumSize}
-      defaultLayout={workspaceDefaultLayout}
+      defaultLayout={panelOpen ? workspaceDefaultLayout : collapsedWorkspaceLayout}
       onLayoutChanged={handleWorkspaceLayoutChanged}
     >
       <Panel
@@ -384,8 +415,8 @@ export function MainLayout(): React.JSX.Element {
       <Panel
         id="utility"
         panelRef={utilityPanelRef}
-        defaultSize={`${defaultWorkspaceLayout.utility}%`}
-        minSize={utilityMinimumWidth}
+        defaultSize={panelOpen ? `${workspaceDefaultLayout.utility}%` : 0}
+        minSize={panelOpen || utilityMaximized ? utilityMinimumWidth : 0}
         maxSize={utilityMaximized ? "100%" : "70%"}
         collapsedSize={0}
         collapsible
@@ -393,7 +424,11 @@ export function MainLayout(): React.JSX.Element {
         className="h-full min-h-0 overflow-hidden"
         onResize={(size) => {
           const nextOpen = size.inPixels > 1
-          setPanelOpen((current) => (current === nextOpen ? current : nextOpen))
+          setPanelOpen((current) => {
+            if (current === nextOpen) return current
+            writePersistedUtilityPanelOpen(nextOpen)
+            return nextOpen
+          })
         }}
       >
         <UtilityPanel
