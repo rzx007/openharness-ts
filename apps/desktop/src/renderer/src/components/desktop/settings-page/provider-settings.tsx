@@ -179,6 +179,7 @@ export function ProviderSettings(): React.JSX.Element {
       setSnapshot(nextSnapshot)
       try {
         await useDesktopSessionStore.getState().refreshBootstrap()
+        setSnapshot(await window.desktop.providers.snapshot())
       } catch (refreshError) {
         setError(`供应商设置已生效，但对话模型刷新失败：${errorMessage(refreshError)}`)
         return true

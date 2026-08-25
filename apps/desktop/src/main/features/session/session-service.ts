@@ -63,6 +63,7 @@ import {
   isOutsideProjectWorkspacePath,
   removeEmptyOutsideProjectWorkspace,
 } from "./outside-project-workspace"
+import { resolveBootstrapRuntimeSelection } from "./runtime-selection"
 import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
 
 const execFileAsync = promisify(execFile)
@@ -100,8 +101,13 @@ class DesktopSessionService {
     const storedConfiguredModel =
       typeof settings["model"] === "string" ? settings["model"] : undefined
     const configuredProvider = optionalProvider(settings["provider"])
-    const configuredModel = storedConfiguredModel
-    const defaultModel = configuredModel ?? models[0]?.id
+    const runtimeSelection = resolveBootstrapRuntimeSelection(
+      models,
+      storedConfiguredModel,
+      configuredProvider
+    )
+    const defaultModel = runtimeSelection.model
+    const defaultProvider = runtimeSelection.provider
     const defaultPermissionMode = readSettingsPermissionMode(settings)
 
     if (!defaultModel) {
@@ -109,11 +115,6 @@ class DesktopSessionService {
     }
 
     const normalizedModels = ensureConfiguredModel(models, defaultModel)
-    const defaultProvider = resolveDefaultProvider(
-      normalizedModels,
-      defaultModel,
-      configuredProvider
-    )
     if (
       defaultModel !== storedConfiguredModel ||
       (defaultProvider && defaultProvider !== configuredProvider)
@@ -798,21 +799,6 @@ function optionalProvider(value: unknown): string | undefined {
   const provider = value.trim()
   if (!provider || provider.toLowerCase() === "configured") return undefined
   return provider
-}
-
-function resolveDefaultProvider(
-  models: DesktopModel[],
-  model: string,
-  configuredProvider: string | undefined
-): string | undefined {
-  if (
-    configuredProvider &&
-    models.some((item) => item.id === model && item.providerName === configuredProvider)
-  ) {
-    return configuredProvider
-  }
-  const providers = uniqueModelProviders(models, model)
-  return providers.length === 1 ? providers[0] : configuredProvider
 }
 
 async function resolveProviderForModel(
