@@ -624,7 +624,7 @@ function ProviderListCard({
         {additionalProviderCount > 0 ? (
           <>
             <Separator />
-            <div className="flex justify-center px-6 py-3">
+            <div className="flex justify-center px-6 py-2.5">
               <Button type="button" variant="link" size="sm" onClick={onShowMore}>
                 查看更多供应商（{additionalProviderCount}）
               </Button>
@@ -632,7 +632,7 @@ function ProviderListCard({
           </>
         ) : null}
         <Separator />
-        <div className="flex items-center justify-between gap-4 bg-muted/20 px-6 py-4">
+        <div className="flex items-center justify-between gap-4 bg-muted/20 px-6 py-3.5">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-background text-muted-foreground ring-1 ring-foreground/10 [&_svg]:size-4">
               <Plus />
@@ -765,7 +765,7 @@ function ProviderGroup({
 }): React.JSX.Element {
   return (
     <div>
-      <div className="flex items-end justify-between gap-4 bg-muted/20 px-6 py-4">
+      <div className="flex items-center justify-between gap-4 bg-muted/20 px-6 py-3">
         <div className="flex flex-col gap-1">
           <h3 className="font-heading text-sm font-semibold">{label}</h3>
           <p className="text-xs text-muted-foreground">{description}</p>
@@ -774,7 +774,7 @@ function ProviderGroup({
       </div>
       <div className="px-6">
         {providers.length === 0 ? (
-          <p className="py-7 text-center text-xs text-muted-foreground">{emptyText}</p>
+          <p className="py-5 text-center text-xs text-muted-foreground">{emptyText}</p>
         ) : (
           providers.map((provider, index) => (
             <div key={provider.name}>
@@ -817,11 +817,11 @@ function ProviderRow({
   onRemoveCustom: () => void
 }): React.JSX.Element {
   return (
-    <div className="flex min-h-24 flex-col items-stretch gap-4 py-5 sm:flex-row sm:items-center">
-      <div className="flex min-w-0 flex-1 items-center gap-4">
+    <div className="flex min-h-16 flex-col items-stretch gap-3 py-3 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <ProviderIcon provider={provider} />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <h3 className="font-heading text-sm font-semibold">{providerDisplayName(provider)}</h3>
             {provider.connected ? (
               <Badge variant="outline">
@@ -834,7 +834,7 @@ function ProviderRow({
               </Badge>
             ) : null}
           </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
             {provider.currentModel ??
               providerDescriptions[provider.name] ??
               (provider.custom
@@ -845,7 +845,7 @@ function ProviderRow({
           </p>
         </div>
       </div>
-      <div className="flex shrink-0 items-center justify-end gap-2">
+      <div className="flex shrink-0 items-center justify-end gap-1.5">
         {provider.active && provider.connected ? (
           <Button type="button" size="sm" variant="ghost" disabled>
             <CheckCircle2 data-icon="inline-start" />
@@ -915,7 +915,7 @@ function ProviderIcon({
           ? "size-5 rounded-sm bg-transparent ring-0 [&_svg]:size-3.5"
           : emphasized
             ? "size-12 shadow-xs [&_svg]:size-5"
-            : "size-10 [&_svg]:size-4"
+            : "size-9 rounded-lg [&_svg]:size-4"
       )}
     >
       {BrandIcon ? <ProviderBrandMark icon={BrandIcon} /> : <Sparkles aria-hidden="true" />}
