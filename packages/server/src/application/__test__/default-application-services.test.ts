@@ -298,6 +298,35 @@ describe("default daemon application services", () => {
     });
   });
 
+  it("rejects missing or null custom provider ids before storing credentials", async () => {
+    const providers = createDefaultProviderService({
+      current: {
+        model: "m",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+    });
+    const base = {
+      displayName: "Broken",
+      baseUrl: "https://gateway.example/v1",
+      apiFormat: "openai" as const,
+      apiKey: "secret",
+      models: [{ id: "m1" }],
+    };
+
+    await expect(
+      providers.create({ ...base, id: undefined as unknown as string }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      providers.create({ ...base, id: null as unknown as string }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      providers.create({ ...base, id: "  " }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("only exposes and persists models.dev providers that support one direct API key", async () => {
     const catalogPath = join(temporaryDirectory, "models.json");
     writeFileSync(

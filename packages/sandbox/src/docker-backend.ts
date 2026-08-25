@@ -194,7 +194,12 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
     argv.push("--dns", dns);
   }
 
-  argv.push("-v", `${cwd}:${containerCwd}`, "-w", containerCwd);
+  argv.push(
+    "-v",
+    `${cwd}:${containerCwd}${isDockerReadOnlyFilesystem(config) ? ":ro" : ""}`,
+    "-w",
+    containerCwd,
+  );
 
   for (const mount of config.docker.extraMounts) {
     argv.push("-v", mount);
@@ -205,6 +210,16 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
 
   argv.push(config.docker.image, "tail", "-f", "/dev/null");
   return argv;
+}
+
+/** Mirror policy.ts: empty write roots ⇒ read-only workspace mount. */
+function isDockerReadOnlyFilesystem(
+  config: ReturnType<typeof normalizeSandboxConfig>,
+): boolean {
+  return (
+    config.filesystem.allowWrite.length === 0 &&
+    config.filesystem.extraAllowedRoots.length === 0
+  );
 }
 
 export function dockerNetworkMode(mode: ReturnType<typeof normalizeSandboxConfig>["network"]["mode"]): string {
