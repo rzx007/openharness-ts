@@ -48,6 +48,11 @@ import {
 import { Kbd } from "@renderer/components/ui/kbd"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import {
+  persistedUtilityFileTabsKey,
+  readUtilityPanelRuntimeState,
+  writeUtilityPanelRuntimeState,
+} from "./utility-panel-runtime-state"
 
 type UtilityTool = "review" | "terminal" | "browser" | "files" | "side-chat" | "agents"
 
@@ -63,6 +68,7 @@ type UtilityTab = {
 }
 
 type UtilityPanelProps = {
+  scopeId: string
   open: boolean
   maximized: boolean
   onToggleMaximized: () => void
@@ -106,9 +112,21 @@ const toolMeta: Record<
 const toolOrder: UtilityTool[] = ["agents", "review", "terminal", "browser", "files", "side-chat"]
 const filesTabId = "files-tab"
 const unavailableTerminalTabId = "terminal-tab:unavailable"
-const persistedFileTabsKey = "openharness.desktop.file-tabs.v1"
+type UtilityPanelRuntimeState = {
+  tabs: UtilityTab[]
+  browserTabs: BrowserToolTab[]
+  fileTabs: FileViewerTab[]
+  fileProjectPath: string | null
+  activeFilePath: string | null
+  loadingFilePath: string | null
+  activeTabId: string
+  terminalMounted: boolean
+  handledFileRequestId: number | null
+  handledToolRequestId: number | null
+}
 
 export function UtilityPanel({
+  scopeId,
   open,
   maximized,
   onToggleMaximized,
@@ -119,21 +137,38 @@ export function UtilityPanel({
   onOpenFile,
   onOpenTerminal,
 }: UtilityPanelProps): React.JSX.Element {
-  const [tabs, setTabs] = useState<UtilityTab[]>([])
-  const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>([])
-  const [fileTabs, setFileTabs] = useState<FileViewerTab[]>([])
-  const fileTabsRef = useRef<FileViewerTab[]>([])
-  const [fileProjectPath, setFileProjectPath] = useState<string | null>(null)
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
-  const [loadingFilePath, setLoadingFilePath] = useState<string | null>(null)
-  const [activeTabId, setActiveTabId] = useState("")
+  const initialRuntimeState = readUtilityPanelRuntimeState<UtilityPanelRuntimeState>(scopeId)
+  const [tabs, setTabs] = useState<UtilityTab[]>(() => initialRuntimeState?.tabs ?? [])
+  const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>(
+    () => initialRuntimeState?.browserTabs ?? []
+  )
+  const [fileTabs, setFileTabs] = useState<FileViewerTab[]>(
+    () => initialRuntimeState?.fileTabs ?? []
+  )
+  const fileTabsRef = useRef<FileViewerTab[]>(initialRuntimeState?.fileTabs ?? [])
+  const [fileProjectPath, setFileProjectPath] = useState<string | null>(
+    initialRuntimeState?.fileProjectPath ?? null
+  )
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(
+    initialRuntimeState?.activeFilePath ?? null
+  )
+  const [loadingFilePath, setLoadingFilePath] = useState<string | null>(
+    initialRuntimeState?.loadingFilePath ?? null
+  )
+  const [activeTabId, setActiveTabId] = useState(initialRuntimeState?.activeTabId ?? "")
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [addMenuPosition, setAddMenuPosition] = useState<MenuPosition | null>(null)
-  const [terminalMounted, setTerminalMounted] = useState(false)
+  const [terminalMounted, setTerminalMounted] = useState(
+    initialRuntimeState?.terminalMounted ?? false
+  )
   const [terminalCommands, setTerminalCommands] = useState<TerminalPanelCommand[]>([])
   const terminalCommandSequenceRef = useRef(0)
-  const handledToolRequestIdRef = useRef<number | null>(null)
-  const tabsRef = useRef(tabs)
+  const handledFileRequestIdRef = useRef<number | null>(
+    initialRuntimeState?.handledFileRequestId ?? null
+  )
+  const handledToolRequestIdRef = useRef<number | null>(
+    initialRuntimeState?.handledToolRequestId ?? null
+  )
   const [persistedFileTabs, setPersistedFileTabs] =
     useState<PersistedFileTabState>(readPersistedFileTabs)
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
@@ -141,9 +176,7 @@ export function UtilityPanel({
   const selectedProjectAvailable = useDesktopSessionStore(
     (state) => state.selectedProject?.available ?? false
   )
-  const persistedFileState = selectedProjectPath
-    ? persistedFileTabs[selectedProjectPath]
-    : undefined
+  const persistedFileState = selectedProjectPath ? persistedFileTabs[scopeId] : undefined
   const fileStateVisible = fileProjectPath === (selectedProjectPath ?? null)
   const visibleFileTabs = fileTabs.filter(
     (tab) => (tab.projectPath ?? null) === (selectedProjectPath ?? null)
@@ -166,13 +199,36 @@ export function UtilityPanel({
     terminalCommands.some((command) => command.type === "ensure" || command.type === "create")
 
   useEffect(() => {
-    tabsRef.current = tabs
-  }, [tabs])
+    fileTabsRef.current = fileTabs
+    writeUtilityPanelRuntimeState(scopeId, {
+      tabs,
+      browserTabs,
+      fileTabs,
+      fileProjectPath,
+      activeFilePath,
+      loadingFilePath,
+      activeTabId,
+      terminalMounted,
+      handledFileRequestId: handledFileRequestIdRef.current,
+      handledToolRequestId: handledToolRequestIdRef.current,
+    })
+  }, [
+    activeFilePath,
+    activeTabId,
+    browserTabs,
+    fileProjectPath,
+    fileTabs,
+    loadingFilePath,
+    scopeId,
+    tabs,
+    terminalMounted,
+  ])
 
   useEffect(() => {
-    if (!fileOpenRequest) return
+    if (!fileOpenRequest || handledFileRequestIdRef.current === fileOpenRequest.id) return
     const relativePath = toRelativeWorkspacePath(fileOpenRequest.path, selectedProjectPath)
     const timer = window.setTimeout(() => {
+      handledFileRequestIdRef.current = fileOpenRequest.id
       if (!relativePath) {
         setTabs((current) =>
           current.some((tab) => tab.id === filesTabId || tab.tool === "files")
@@ -222,15 +278,11 @@ export function UtilityPanel({
           setActiveTabId(id)
           return
         }
-        const hasTerminalTabs = tabsRef.current.some(
-          (tab) =>
-            tab.tool === "terminal" && tab.terminalId && tab.projectPath === selectedProjectPath
-        )
         setTerminalCommands((commands) => [
           ...commands,
           {
             id: ++terminalCommandSequenceRef.current,
-            type: hasTerminalTabs ? "create" : "ensure",
+            type: "create",
           },
         ])
         return
@@ -447,9 +499,9 @@ export function UtilityPanel({
     setPersistedFileTabs((current) => {
       const nextState = { ...current }
       if (paths.length === 0) {
-        delete nextState[selectedProjectPath]
+        delete nextState[scopeId]
       } else {
-        nextState[selectedProjectPath] = {
+        nextState[scopeId] = {
           activePath,
           paths: paths.slice(0, 12),
         }
@@ -774,7 +826,7 @@ function UtilityTabButton({
             ? "bg-neutral-200/80 text-ui-foreground dark:bg-neutral-800"
             : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
           showSeparator &&
-          "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
+            "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
         )}
       >
         <button
@@ -827,13 +879,13 @@ function placeFileTab(current: UtilityTab[], fileTab: UtilityTab): UtilityTab[] 
     return current.map((tab, index) =>
       index === existingIndex
         ? {
-          ...tab,
-          title: fileTab.title,
-          fileIcon: fileTab.fileIcon ?? tab.fileIcon,
-          fileType: fileTab.fileType ?? tab.fileType,
-          filePath: fileTab.filePath,
-          projectPath: fileTab.projectPath,
-        }
+            ...tab,
+            title: fileTab.title,
+            fileIcon: fileTab.fileIcon ?? tab.fileIcon,
+            fileType: fileTab.fileType ?? tab.fileType,
+            filePath: fileTab.filePath,
+            projectPath: fileTab.projectPath,
+          }
         : tab
     )
   }
@@ -873,7 +925,7 @@ function toRelativeWorkspacePath(path: string, projectPath: string | undefined):
 
 function readPersistedFileTabs(): PersistedFileTabState {
   try {
-    const raw = localStorage.getItem(persistedFileTabsKey)
+    const raw = localStorage.getItem(persistedUtilityFileTabsKey)
     if (!raw) return {}
     const parsed = JSON.parse(raw) as unknown
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
@@ -895,7 +947,7 @@ function readPersistedFileTabs(): PersistedFileTabState {
 
 function writePersistedFileTabs(state: PersistedFileTabState): void {
   try {
-    localStorage.setItem(persistedFileTabsKey, JSON.stringify(state))
+    localStorage.setItem(persistedUtilityFileTabsKey, JSON.stringify(state))
   } catch {
     // Ignore storage quota and private-mode failures; file tabs are recoverable UI state.
   }

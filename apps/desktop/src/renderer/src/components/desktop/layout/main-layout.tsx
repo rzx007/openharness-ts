@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router"
 import {
   Group,
@@ -17,6 +17,15 @@ import { MainLayoutContext } from "./main-layout-context"
 import { Sidebar } from "./sidebar"
 import { TitleBar, type UtilityToolRequest } from "./title-bar"
 import { UtilityPanel } from "./utility-panel"
+import { moveUtilityPanelRuntimeState } from "./utility-panel-runtime-state"
+import {
+  defaultUtilityPanelViewState,
+  readPersistedUtilityPanelStates,
+  shouldMoveDraftPanelToSession,
+  utilityPanelScopeId,
+  writePersistedUtilityPanelStates,
+  type UtilityPanelViewState,
+} from "./utility-panel-state"
 import { useDesktopWindowChrome } from "./use-desktop-window-chrome"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import {
@@ -31,6 +40,7 @@ const conversationMinimumWidth = 350
 const utilityMinimumWidth = 320
 const workspaceMinimumWidth = conversationMinimumWidth + utilityMinimumWidth
 const defaultWorkspaceLayout: Layout = { conversation: 40, utility: 60 }
+const collapsedWorkspaceLayout: Layout = { conversation: 100, utility: 0 }
 
 function isOpenWorkspaceLayout(layout: Layout | null | undefined): layout is Layout {
   return Number(layout?.conversation) > 5 && Number(layout?.utility) > 5
@@ -46,20 +56,34 @@ export function MainLayout(): React.JSX.Element {
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
+  const selectedProjectId = useDesktopSessionStore((state) => state.selectedProject?.id ?? null)
+  const panelScopeId = utilityPanelScopeId(activeSessionId, selectedProjectId)
+  const [initialPanelStates] = useState(readPersistedUtilityPanelStates)
+  const initialPanelState = initialPanelStates[panelScopeId] ?? defaultUtilityPanelViewState()
+  const panelStatesRef = useRef(initialPanelStates)
+  const activePanelScopeRef = useRef(panelScopeId)
+  const previousActiveSessionIdRef = useRef(activeSessionId)
+  const knownSessionIdsRef = useRef(new Set(sessions.map((session) => session.id)))
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [panelOpen, setPanelOpen] = useState(true)
-  const [utilityMaximized, setUtilityMaximized] = useState(false)
+  const [panelInstanceRevision, setPanelInstanceRevision] = useState(0)
+  const [panelStateScopeId, setPanelStateScopeId] = useState(panelScopeId)
+  const [panelOpen, setPanelOpen] = useState(initialPanelState.open)
+  const [utilityMaximized, setUtilityMaximized] = useState(initialPanelState.maximized)
+  const [panelLayout, setPanelLayout] = useState<Layout | null>(initialPanelState.layout)
   const [fileOpenRequest, setFileOpenRequest] = useState<{
     id: number
+    scopeId: string
     path: string
     line?: number
   } | null>(null)
   const [terminalOpenRequest, setTerminalOpenRequest] = useState<{
     id: number
+    scopeId: string
     terminalId: string
   } | null>(null)
   const [toolOpenRequest, setToolOpenRequest] = useState<{
     id: number
+    scopeId: string
     tool: UtilityToolRequest
   } | null>(null)
   const sidebarPanelRef = usePanelRef()
@@ -67,7 +91,7 @@ export function MainLayout(): React.JSX.Element {
   const utilityPanelRef = usePanelRef()
   const workspaceGroupRef = useGroupRef()
   const previousWorkspaceLayoutRef = useRef<Layout | null>(null)
-  const lastOpenWorkspaceLayoutRef = useRef<Layout | null>(null)
+  const lastOpenWorkspaceLayoutRef = useRef<Layout | null>(initialPanelState.layout)
   const contentRef = useRef<HTMLDivElement>(null)
   const { isMaximized, zoomLevel, zoomIn, zoomOut, resetZoom, minimize, toggleMaximize, close } =
     useDesktopWindowChrome()
@@ -82,9 +106,88 @@ export function MainLayout(): React.JSX.Element {
   const workspaceDefaultLayout = isOpenWorkspaceLayout(workspaceLayout.defaultLayout)
     ? workspaceLayout.defaultLayout
     : defaultWorkspaceLayout
+  const visiblePanelLayout = panelLayout ?? workspaceDefaultLayout
   if (lastOpenWorkspaceLayoutRef.current === null) {
     lastOpenWorkspaceLayoutRef.current = workspaceDefaultLayout
   }
+
+  const persistActivePanelState = useCallback((patch: Partial<UtilityPanelViewState>): void => {
+    const scopeId = activePanelScopeRef.current
+    const current = panelStatesRef.current[scopeId] ?? defaultUtilityPanelViewState()
+    const next = { ...current, ...patch }
+    panelStatesRef.current = { ...panelStatesRef.current, [scopeId]: next }
+    writePersistedUtilityPanelStates(panelStatesRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (panelStateScopeId !== activePanelScopeRef.current) return
+    persistActivePanelState({
+      open: panelOpen,
+      maximized: panelOpen && utilityMaximized,
+    })
+  }, [panelOpen, panelStateScopeId, persistActivePanelState, utilityMaximized])
+
+  useLayoutEffect(() => {
+    if (activePanelScopeRef.current === panelScopeId) return
+
+    const previousScopeId = activePanelScopeRef.current
+    const createdSessionFromDraft = shouldMoveDraftPanelToSession(
+      previousActiveSessionIdRef.current,
+      activeSessionId,
+      knownSessionIdsRef.current
+    )
+    if (createdSessionFromDraft) {
+      const draftState = panelStatesRef.current[previousScopeId] ?? defaultUtilityPanelViewState()
+      const nextStates = { ...panelStatesRef.current, [panelScopeId]: draftState }
+      delete nextStates[previousScopeId]
+      panelStatesRef.current = nextStates
+      writePersistedUtilityPanelStates(nextStates)
+      moveUtilityPanelRuntimeState(previousScopeId, panelScopeId)
+      setPanelInstanceRevision((current) => current + 1)
+    }
+
+    activePanelScopeRef.current = panelScopeId
+    const nextState = panelStatesRef.current[panelScopeId] ?? defaultUtilityPanelViewState()
+    const nextLayout = nextState.layout ?? workspaceDefaultLayout
+    lastOpenWorkspaceLayoutRef.current = nextLayout
+    previousWorkspaceLayoutRef.current = null
+    setPanelStateScopeId(panelScopeId)
+    setPanelLayout(nextLayout)
+    setPanelOpen(nextState.open)
+    setUtilityMaximized(nextState.maximized)
+
+    const frame = window.requestAnimationFrame(() => {
+      const group = workspaceGroupRef.current
+      if (nextState.maximized) {
+        utilityPanelRef.current?.expand()
+        conversationPanelRef.current?.collapse()
+        group?.setLayout({ conversation: 0, utility: 100 })
+        return
+      }
+
+      conversationPanelRef.current?.expand()
+      if (nextState.open) {
+        utilityPanelRef.current?.expand()
+        group?.setLayout(nextLayout)
+      } else {
+        utilityPanelRef.current?.collapse()
+        group?.setLayout(collapsedWorkspaceLayout)
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    activeSessionId,
+    conversationPanelRef,
+    panelScopeId,
+    utilityPanelRef,
+    workspaceDefaultLayout,
+    workspaceGroupRef,
+  ])
+
+  useEffect(() => {
+    previousActiveSessionIdRef.current = activeSessionId
+    knownSessionIdsRef.current = new Set(sessions.map((session) => session.id))
+  }, [activeSessionId, sessions])
 
   useEffect(() => {
     const detach = attachDesktopSessionEvents()
@@ -141,34 +244,47 @@ export function MainLayout(): React.JSX.Element {
         group?.setLayout(layout)
       })
     }
+    persistActivePanelState({ open: true })
     setPanelOpen(true)
-  }, [sidebarPanelRef, utilityPanelRef, workspaceGroupRef])
+  }, [persistActivePanelState, sidebarPanelRef, utilityPanelRef, workspaceGroupRef])
 
   const collapseUtilityPanel = useCallback((): void => {
     const currentLayout = workspaceGroupRef.current?.getLayout()
     if (isOpenWorkspaceLayout(currentLayout)) {
       lastOpenWorkspaceLayoutRef.current = currentLayout
+      setPanelLayout(currentLayout)
+      persistActivePanelState({ layout: currentLayout })
     }
     previousWorkspaceLayoutRef.current = null
+    persistActivePanelState({ open: false, maximized: false })
     setUtilityMaximized(false)
+    setPanelOpen(false)
     utilityPanelRef.current?.collapse()
-  }, [utilityPanelRef, workspaceGroupRef])
+  }, [persistActivePanelState, utilityPanelRef, workspaceGroupRef])
 
   const togglePanel = useCallback((): void => {
     const panel = utilityPanelRef.current
     if (!panel) {
-      setPanelOpen((current) => !current)
+      const nextOpen = !panelOpen
+      persistActivePanelState({ open: nextOpen, maximized: false })
+      setPanelOpen(nextOpen)
       return
     }
 
     if (panel.isCollapsed()) restoreUtilityPanel()
     else collapseUtilityPanel()
-  }, [collapseUtilityPanel, restoreUtilityPanel, utilityPanelRef])
+  }, [
+    collapseUtilityPanel,
+    panelOpen,
+    persistActivePanelState,
+    restoreUtilityPanel,
+    utilityPanelRef,
+  ])
 
   const openWorkspaceFile = useCallback(
     (path: string, line?: number): void => {
       restoreUtilityPanel()
-      setFileOpenRequest({ id: Date.now(), path, line })
+      setFileOpenRequest({ id: Date.now(), scopeId: activePanelScopeRef.current, path, line })
     },
     [restoreUtilityPanel]
   )
@@ -176,7 +292,11 @@ export function MainLayout(): React.JSX.Element {
   const openTerminal = useCallback(
     (terminalId: string): void => {
       restoreUtilityPanel()
-      setTerminalOpenRequest({ id: Date.now(), terminalId })
+      setTerminalOpenRequest({
+        id: Date.now(),
+        scopeId: activePanelScopeRef.current,
+        terminalId,
+      })
     },
     [restoreUtilityPanel]
   )
@@ -184,7 +304,7 @@ export function MainLayout(): React.JSX.Element {
   const openUtilityTool = useCallback(
     (tool: UtilityToolRequest): void => {
       restoreUtilityPanel()
-      setToolOpenRequest({ id: Date.now(), tool })
+      setToolOpenRequest({ id: Date.now(), scopeId: activePanelScopeRef.current, tool })
     },
     [restoreUtilityPanel]
   )
@@ -196,6 +316,7 @@ export function MainLayout(): React.JSX.Element {
   const toggleUtilityMaximized = useCallback((): void => {
     if (utilityMaximized) {
       conversationPanelRef.current?.expand()
+      persistActivePanelState({ maximized: false })
       setUtilityMaximized(false)
       return
     }
@@ -206,9 +327,16 @@ export function MainLayout(): React.JSX.Element {
     }
     if (utilityPanelRef.current?.isCollapsed()) utilityPanelRef.current.expand()
     conversationPanelRef.current?.collapse()
+    persistActivePanelState({ open: true, maximized: true })
     setPanelOpen(true)
     setUtilityMaximized(true)
-  }, [conversationPanelRef, utilityMaximized, utilityPanelRef, workspaceGroupRef])
+  }, [
+    conversationPanelRef,
+    persistActivePanelState,
+    utilityMaximized,
+    utilityPanelRef,
+    workspaceGroupRef,
+  ])
 
   const openConversationRoute = useCallback(
     (destination: string | null | undefined): void => {
@@ -272,9 +400,11 @@ export function MainLayout(): React.JSX.Element {
     (layout: Layout, meta: LayoutChangedMeta): void => {
       if (utilityMaximized || !isOpenWorkspaceLayout(layout)) return
       lastOpenWorkspaceLayoutRef.current = layout
+      setPanelLayout(layout)
+      persistActivePanelState({ layout })
       workspaceLayout.onLayoutChanged(layout, meta)
     },
-    [utilityMaximized, workspaceLayout]
+    [persistActivePanelState, utilityMaximized, workspaceLayout]
   )
 
   useDesktopShortcuts({
@@ -360,7 +490,13 @@ export function MainLayout(): React.JSX.Element {
       orientation="horizontal"
       className="h-full min-h-0 w-full"
       resizeTargetMinimumSize={resizeTargetMinimumSize}
-      defaultLayout={workspaceDefaultLayout}
+      defaultLayout={
+        utilityMaximized
+          ? { conversation: 0, utility: 100 }
+          : panelOpen
+            ? visiblePanelLayout
+            : collapsedWorkspaceLayout
+      }
       onLayoutChanged={handleWorkspaceLayoutChanged}
     >
       <Panel
@@ -384,8 +520,8 @@ export function MainLayout(): React.JSX.Element {
       <Panel
         id="utility"
         panelRef={utilityPanelRef}
-        defaultSize={`${defaultWorkspaceLayout.utility}%`}
-        minSize={utilityMinimumWidth}
+        defaultSize={panelOpen ? `${visiblePanelLayout.utility ?? 60}%` : 0}
+        minSize={panelOpen || utilityMaximized ? utilityMinimumWidth : 0}
         maxSize={utilityMaximized ? "100%" : "70%"}
         collapsedSize={0}
         collapsible
@@ -393,17 +529,21 @@ export function MainLayout(): React.JSX.Element {
         className="h-full min-h-0 overflow-hidden"
         onResize={(size) => {
           const nextOpen = size.inPixels > 1
-          setPanelOpen((current) => (current === nextOpen ? current : nextOpen))
+          if (panelOpen !== nextOpen) setPanelOpen(nextOpen)
         }}
       >
         <UtilityPanel
+          key={`${panelScopeId}:${panelInstanceRevision}`}
+          scopeId={panelScopeId}
           open={panelOpen}
           maximized={utilityMaximized}
           onToggleMaximized={toggleUtilityMaximized}
           onClose={closeUtilityPanel}
-          fileOpenRequest={fileOpenRequest}
-          terminalOpenRequest={terminalOpenRequest}
-          toolOpenRequest={toolOpenRequest}
+          fileOpenRequest={fileOpenRequest?.scopeId === panelScopeId ? fileOpenRequest : null}
+          terminalOpenRequest={
+            terminalOpenRequest?.scopeId === panelScopeId ? terminalOpenRequest : null
+          }
+          toolOpenRequest={toolOpenRequest?.scopeId === panelScopeId ? toolOpenRequest : null}
           onOpenFile={openWorkspaceFile}
           onOpenTerminal={openTerminal}
         />
