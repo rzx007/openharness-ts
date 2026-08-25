@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
   Trash2,
   X,
@@ -45,6 +46,7 @@ import {
 } from "@renderer/components/ui/dialog"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@renderer/components/ui/field"
 import { Input } from "@renderer/components/ui/input"
+import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Separator } from "@renderer/components/ui/separator"
 import { Skeleton } from "@renderer/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@renderer/components/ui/tooltip"
@@ -93,7 +95,8 @@ export function ProviderSettings(): React.JSX.Element {
   const [disconnectTarget, setDisconnectTarget] = useState<DesktopProviderInfo | null>(null)
   const [apiKey, setApiKey] = useState("")
   const [setActiveAfterConnect, setSetActiveAfterConnect] = useState(true)
-  const [showAll, setShowAll] = useState(false)
+  const [moreProvidersOpen, setMoreProvidersOpen] = useState(false)
+  const [providerQuery, setProviderQuery] = useState("")
   const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [customEditTarget, setCustomEditTarget] = useState<DesktopProviderInfo | null>(null)
   const [customRemoveTarget, setCustomRemoveTarget] = useState<DesktopProviderInfo | null>(null)
@@ -159,9 +162,21 @@ export function ProviderSettings(): React.JSX.Element {
       return leftIndex - rightIndex
     })
   }, [snapshot])
-  const visibleAvailableProviders = showAll
-    ? availableProviders
-    : availableProviders.slice(0, popularProviderNames.length)
+  const visibleAvailableProviders = useMemo(
+    () => availableProviders.slice(0, popularProviderNames.length),
+    [availableProviders]
+  )
+  const additionalAvailableProviders = useMemo(
+    () => availableProviders.slice(popularProviderNames.length),
+    [availableProviders]
+  )
+  const filteredAdditionalProviders = useMemo(() => {
+    const query = providerQuery.trim().toLocaleLowerCase()
+    if (!query) return additionalAvailableProviders
+    return additionalAvailableProviders.filter((provider) =>
+      `${provider.displayName} ${provider.name}`.toLocaleLowerCase().includes(query)
+    )
+  }, [additionalAvailableProviders, providerQuery])
   const activeProvider = snapshot?.providers.find((provider) => provider.active)
 
   const runMutation = async (
@@ -221,6 +236,12 @@ export function ProviderSettings(): React.JSX.Element {
       setConnectTarget(null)
       setApiKey("")
     })
+  }
+
+  const openConnectDialog = (provider: DesktopProviderInfo): void => {
+    setMoreProvidersOpen(false)
+    setProviderQuery("")
+    setConnectTarget(provider)
   }
 
   const disconnect = (): void => {
@@ -331,12 +352,11 @@ export function ProviderSettings(): React.JSX.Element {
         <ProviderListCard
           connectedProviders={connectedProviders}
           availableProviders={visibleAvailableProviders}
-          totalAvailableProviders={availableProviders.length}
-          expanded={showAll}
+          additionalProviderCount={additionalAvailableProviders.length}
           busyProvider={busyProvider}
-          onToggleExpanded={() => setShowAll((value) => !value)}
+          onShowMore={() => setMoreProvidersOpen(true)}
           onActivate={activate}
-          onConnect={setConnectTarget}
+          onConnect={openConnectDialog}
           onDisconnect={setDisconnectTarget}
           onAddCustom={() => {
             setCustomEditTarget(null)
@@ -349,6 +369,20 @@ export function ProviderSettings(): React.JSX.Element {
           onRemoveCustom={setCustomRemoveTarget}
         />
       </section>
+
+      <MoreProvidersDialog
+        open={moreProvidersOpen}
+        query={providerQuery}
+        providers={filteredAdditionalProviders}
+        totalCount={additionalAvailableProviders.length}
+        busyProvider={busyProvider}
+        onOpenChange={(open) => {
+          setMoreProvidersOpen(open)
+          if (!open) setProviderQuery("")
+        }}
+        onQueryChange={setProviderQuery}
+        onConnect={openConnectDialog}
+      />
 
       <CustomProviderDialog
         open={customDialogOpen}
@@ -509,10 +543,9 @@ function CurrentProviderCard({
 function ProviderListCard({
   connectedProviders,
   availableProviders,
-  totalAvailableProviders,
-  expanded,
+  additionalProviderCount,
   busyProvider,
-  onToggleExpanded,
+  onShowMore,
   onActivate,
   onConnect,
   onDisconnect,
@@ -522,10 +555,9 @@ function ProviderListCard({
 }: {
   connectedProviders: DesktopProviderInfo[]
   availableProviders: DesktopProviderInfo[]
-  totalAvailableProviders: number
-  expanded: boolean
+  additionalProviderCount: number
   busyProvider: string | null
-  onToggleExpanded: () => void
+  onShowMore: () => void
   onActivate: (provider: DesktopProviderInfo) => void
   onConnect: (provider: DesktopProviderInfo) => void
   onDisconnect: (provider: DesktopProviderInfo) => void
@@ -564,12 +596,12 @@ function ProviderListCard({
           onEditCustom={onEditCustom}
           onRemoveCustom={onRemoveCustom}
         />
-        {totalAvailableProviders > popularProviderNames.length ? (
+        {additionalProviderCount > 0 ? (
           <>
             <Separator />
             <div className="flex justify-center px-6 py-3">
-              <Button type="button" variant="ghost" size="sm" onClick={onToggleExpanded}>
-                {expanded ? "收起供应商" : `查看全部 ${totalAvailableProviders} 个供应商`}
+              <Button type="button" variant="link" size="sm" onClick={onShowMore}>
+                查看更多供应商（{additionalProviderCount}）
               </Button>
             </div>
           </>
@@ -600,6 +632,77 @@ function ProviderListCard({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function MoreProvidersDialog({
+  open,
+  query,
+  providers,
+  totalCount,
+  busyProvider,
+  onOpenChange,
+  onQueryChange,
+  onConnect,
+}: {
+  open: boolean
+  query: string
+  providers: DesktopProviderInfo[]
+  totalCount: number
+  busyProvider: string | null
+  onOpenChange: (open: boolean) => void
+  onQueryChange: (query: string) => void
+  onConnect: (provider: DesktopProviderInfo) => void
+}): React.JSX.Element {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[min(42rem,calc(100vh-2rem))] flex-col sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>更多供应商</DialogTitle>
+          <DialogDescription>
+            从 OpenHarness 已支持的供应商中选择。连接时会先验证 API 密钥，再保存凭证。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder={`搜索 ${totalCount} 个供应商`}
+            aria-label="搜索更多供应商"
+            className="pl-9"
+          />
+        </div>
+        <ScrollArea horizontal={false} className="min-h-0 flex-1 pr-3">
+          {providers.length === 0 ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              没有找到匹配的供应商。
+            </p>
+          ) : (
+            <div className="px-1">
+              {providers.map((provider, index) => (
+                <div key={provider.name}>
+                  {index > 0 ? <Separator /> : null}
+                  <ProviderRow
+                    provider={provider}
+                    busy={busyProvider === provider.name}
+                    locked={busyProvider !== null}
+                    onActivate={() => undefined}
+                    onConnect={() => onConnect(provider)}
+                    onDisconnect={() => undefined}
+                    onEditCustom={() => undefined}
+                    onRemoveCustom={() => undefined}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -771,11 +874,7 @@ function ProviderIcon({
         emphasized ? "size-12 shadow-xs [&_svg]:size-5" : "size-10 [&_svg]:size-4"
       )}
     >
-      {BrandIcon ? (
-        <ProviderBrandMark icon={BrandIcon} />
-      ) : (
-        <Sparkles aria-hidden="true" />
-      )}
+      {BrandIcon ? <ProviderBrandMark icon={BrandIcon} /> : <Sparkles aria-hidden="true" />}
     </span>
   )
 }

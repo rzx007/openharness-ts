@@ -8,6 +8,7 @@ const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.resetModules();
   await Promise.all(
     temporaryDirectories
@@ -16,45 +17,91 @@ afterEach(async () => {
   );
 });
 
-describe("ModelCatalogService fallback merge", () => {
-  it("does not duplicate DeepSeek fallback models already supplied by models.dev", async () => {
-    const configDirectory = await mkdtemp(
-      join(tmpdir(), "openharness-model-catalog-"),
+async function createConfigDirectory(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "openharness-model-catalog-"));
+  temporaryDirectories.push(directory);
+  vi.stubEnv("OPENHARNESS_CONFIG_DIR", directory);
+  return directory;
+}
+
+describe("ModelCatalogService sources", () => {
+  it("uses models.dev as the authority for regular online providers", async () => {
+    await createConfigDirectory();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            remote: {
+              id: "remote",
+              name: "Remote Provider",
+              models: { online: { id: "online", name: "Online Model" } },
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
     );
-    temporaryDirectories.push(configDirectory);
+
+    const { createModelCatalogService } = await import("./catalog");
+    const catalog = await createModelCatalogService().load();
+
+    expect(Object.keys(catalog).sort()).toEqual(["codex", "remote"]);
+    expect(catalog.remote?.models?.online?.name).toBe("Online Model");
+    expect(catalog.codex?.name).toBe("Codex Subscription");
+  });
+
+  it("uses the bundled api.json snapshot when online fetching is disabled", async () => {
+    await createConfigDirectory();
+    vi.stubEnv("OPENHARNESS_DISABLE_MODELS_FETCH", "1");
+
+    const { createModelCatalogService } = await import("./catalog");
+    const catalog = await createModelCatalogService().load();
+
+    expect(catalog.google?.name).toBe("Google");
+    expect(Object.keys(catalog.google?.models ?? {})).not.toHaveLength(0);
+    expect(catalog.codex?.name).toBe("Codex Subscription");
+  });
+
+  it("prefers the latest successful cache when an online refresh fails", async () => {
+    const configDirectory = await createConfigDirectory();
     const cacheDirectory = join(configDirectory, "cache");
     await mkdir(cacheDirectory, { recursive: true });
     await writeFile(
       join(cacheDirectory, "models-dev.json"),
       JSON.stringify({
-        deepseek: {
-          id: "deepseek",
-          name: "DeepSeek",
-          models: {
-            "deepseek-v4-flash": {
-              id: "deepseek-v4-flash",
-              name: "DeepSeek V4 Flash",
-              reasoning: true,
-            },
-          },
+        cached: {
+          id: "cached",
+          name: "Cached Provider",
+          models: { cached: { id: "cached", name: "Cached Model" } },
         },
       }),
       "utf8",
     );
-    vi.stubEnv("OPENHARNESS_CONFIG_DIR", configDirectory);
-    vi.stubEnv("OPENHARNESS_DISABLE_MODELS_FETCH", "1");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 
     const { createModelCatalogService } = await import("./catalog");
     const catalog = await createModelCatalogService().load();
-    const matchingModels = Object.values(catalog.deepseek?.models ?? {}).filter(
-      (model) => model.name === "DeepSeek V4 Flash",
-    );
 
-    expect(matchingModels).toEqual([
-      expect.objectContaining({
-        id: "deepseek-v4-flash",
-        name: "DeepSeek V4 Flash",
+    expect(Object.keys(catalog).sort()).toEqual(["cached", "codex"]);
+    expect(catalog.cached?.models?.cached?.name).toBe("Cached Model");
+  });
+
+  it("injects special providers into an explicitly configured catalog", async () => {
+    const configDirectory = await createConfigDirectory();
+    const configuredPath = join(configDirectory, "configured-models.json");
+    await writeFile(
+      configuredPath,
+      JSON.stringify({
+        custom: { id: "custom", name: "Custom Catalog Provider" },
       }),
-    ]);
+      "utf8",
+    );
+    vi.stubEnv("OPENHARNESS_MODELS_PATH", configuredPath);
+
+    const { createModelCatalogService } = await import("./catalog");
+    const catalog = await createModelCatalogService().load();
+
+    expect(Object.keys(catalog).sort()).toEqual(["codex", "custom"]);
   });
 });

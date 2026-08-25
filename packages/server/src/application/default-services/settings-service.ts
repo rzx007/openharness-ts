@@ -1,6 +1,9 @@
 import {
   CODEX_DEFAULT_MODEL,
+  createModelCatalogService,
+  findByName,
   resolveProviderScopedBaseUrl,
+  type ModelsDevCatalog,
 } from "@openharness/api";
 
 import type { SettingsService } from "../settings-api.js";
@@ -26,7 +29,10 @@ const RUNTIME_RESTART_KEYS = new Set([
   "fastMode",
 ]);
 
-export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsService {
+export function createDefaultSettingsService(
+  ref: DaemonSettingsRef,
+): SettingsService {
+  const catalogService = createModelCatalogService();
   return {
     async get() {
       return sanitizeSettings(await readCurrentSettings(ref));
@@ -36,7 +42,8 @@ export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsSe
       let effectivePatch = patch;
       if (typeof patch.path === "string" && "value" in patch) {
         const coerced = coerceConfigValue(patch.path, String(patch.value));
-        if (coerced === undefined) throw new Error(`Unknown or invalid config key/value: ${patch.path}`);
+        if (coerced === undefined)
+          throw new Error(`Unknown or invalid config key/value: ${patch.path}`);
         effectivePatch = buildSettingsPatch(
           sanitizeSettings(ref.current),
           patch.path,
@@ -47,48 +54,190 @@ export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsSe
       const next = mergeSettingsPatch(ref.current, effectivePatch);
       if (typeof effectivePatch.provider === "string") {
         next.provider = effectivePatch.provider;
-        next.baseUrl = resolveProviderScopedBaseUrl(next.baseUrl, effectivePatch.provider);
-        if (effectivePatch.provider === "codex" && !effectivePatch.model) {
-          next.model = CODEX_DEFAULT_MODEL;
+        next.baseUrl = resolveProviderScopedBaseUrl(
+          next.baseUrl,
+          effectivePatch.provider,
+        );
+        if (effectivePatch.provider !== "auto") {
+          next.model = await resolveProviderModelSelection({
+            provider: effectivePatch.provider,
+            requestedModel:
+              typeof effectivePatch.model === "string"
+                ? effectivePatch.model
+                : undefined,
+            currentModel:
+              typeof next.model === "string" ? next.model : undefined,
+            customProviders: next.customProviders,
+            catalog: await catalogService.load(),
+          });
         }
       }
       if (effectivePatch.provider === "auto") {
         delete next.provider;
       }
       await saveSettingsAndRefreshRef(ref, next);
-      const restartRuntimes = Object.keys(effectivePatch).some((key) => RUNTIME_RESTART_KEYS.has(key));
+      const restartRuntimes = Object.keys(effectivePatch).some((key) =>
+        RUNTIME_RESTART_KEYS.has(key),
+      );
       return { settings: sanitizeSettings(next), restartRuntimes };
     },
   };
 }
 
+const CATALOG_PROVIDER_ALIASES: Record<string, string[]> = {
+  bedrock: ["amazon-bedrock"],
+  dashscope: ["dashscope", "alibaba"],
+  gemini: ["gemini", "google"],
+  vertex: ["google-vertex", "vertex"],
+  zhipu: ["zhipu", "z-ai"],
+};
+
+async function resolveProviderModelSelection(input: {
+  provider: string;
+  requestedModel?: string;
+  currentModel?: string;
+  customProviders?: unknown;
+  catalog: ModelsDevCatalog;
+}): Promise<string> {
+  if (input.provider === "codex") {
+    return input.requestedModel || input.currentModel || CODEX_DEFAULT_MODEL;
+  }
+  const customModelIds = customProviderModelIds(
+    input.customProviders,
+    input.provider,
+  );
+  if (customModelIds.length > 0) {
+    return pickPreferredModel(
+      customModelIds,
+      input.requestedModel,
+      input.currentModel,
+      input.provider,
+    );
+  }
+
+  const catalogModelIds = catalogProviderModelIds(
+    input.catalog,
+    input.provider,
+  );
+  if (catalogModelIds.length > 0) {
+    return pickPreferredModel(
+      catalogModelIds,
+      input.requestedModel,
+      input.currentModel,
+      input.provider,
+    );
+  }
+
+  if (!findByName(input.provider)) {
+    throw new Error(`未知供应商：${input.provider}`);
+  }
+  throw new Error(`供应商 ${input.provider} 当前没有可用模型，无法设为默认。`);
+}
+
+function pickPreferredModel(
+  models: string[],
+  requestedModel: string | undefined,
+  currentModel: string | undefined,
+  provider: string,
+): string {
+  if (requestedModel && models.includes(requestedModel)) return requestedModel;
+  if (requestedModel) {
+    throw new Error(`模型 ${requestedModel} 不属于 provider ${provider}。`);
+  }
+  if (currentModel && models.includes(currentModel)) return currentModel;
+  return models[0]!;
+}
+
+function customProviderModelIds(
+  customProviders: unknown,
+  providerName: string,
+): string[] {
+  if (!Array.isArray(customProviders)) return [];
+  const match = customProviders.find(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      (item as Record<string, unknown>).id === providerName,
+  );
+  if (!match || typeof match !== "object") return [];
+  const models = (match as Record<string, unknown>).models;
+  if (!Array.isArray(models)) return [];
+  return models.flatMap((model) => {
+    if (!model || typeof model !== "object") return [];
+    const id = (model as Record<string, unknown>).id;
+    return typeof id === "string" && id.trim() ? [id.trim()] : [];
+  });
+}
+
+function catalogProviderModelIds(
+  catalog: ModelsDevCatalog,
+  providerName: string,
+): string[] {
+  for (const key of catalogProviderKeys(providerName)) {
+    const provider = catalog[key];
+    if (!provider?.models) continue;
+    const modelIds = Object.entries(provider.models)
+      .filter(
+        ([, model]) =>
+          model.status !== "deprecated" && model.status !== "alpha",
+      )
+      .map(([id, model]) =>
+        typeof model.id === "string" && model.id.trim() ? model.id.trim() : id,
+      );
+    if (modelIds.length > 0) return modelIds;
+  }
+  return [];
+}
+
+function catalogProviderKeys(providerName: string): string[] {
+  return [
+    providerName,
+    ...(CATALOG_PROVIDER_ALIASES[providerName] ?? []),
+  ].filter((item, index, items) => item && items.indexOf(item) === index);
+}
+
 function coerceConfigValue(key: string, value: string): unknown {
-  if (["model", "apiFormat", "baseUrl", "systemPrompt", "theme", "outputStyle", "effort", "provider"].includes(key)) {
+  if (
+    [
+      "model",
+      "apiFormat",
+      "baseUrl",
+      "systemPrompt",
+      "theme",
+      "outputStyle",
+      "effort",
+      "provider",
+    ].includes(key)
+  ) {
     return value;
   }
   if (["maxTurns", "maxTokens", "passes"].includes(key)) {
     const parsed = Number.parseInt(value, 10);
     return Number.isNaN(parsed) ? undefined : parsed;
   }
-  if ([
-    "verbose",
-    "fastMode",
-    "memory.enabled",
-    "memory.sessionMemoryEnabled",
-    "memory.autoExtractEnabled",
-    "memory.autoDreamEnabled",
-    "daemon.autoStart",
-  ].includes(key)) {
+  if (
+    [
+      "verbose",
+      "fastMode",
+      "memory.enabled",
+      "memory.sessionMemoryEnabled",
+      "memory.autoExtractEnabled",
+      "memory.autoDreamEnabled",
+      "daemon.autoStart",
+    ].includes(key)
+  ) {
     if (value === "true" || value === "on") return true;
     if (value === "false" || value === "off") return false;
     return undefined;
   }
-  if ([
-    "memory.maxFiles",
-    "memory.maxEntrypointLines",
-    "memory.autoDreamMinHours",
-    "memory.autoDreamMinSessions",
-  ].includes(key)) {
+  if (
+    [
+      "memory.maxFiles",
+      "memory.maxEntrypointLines",
+      "memory.autoDreamMinHours",
+      "memory.autoDreamMinSessions",
+    ].includes(key)
+  ) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
   }

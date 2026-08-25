@@ -19,8 +19,6 @@ import type {
 import { desktopSessionService } from "../session/session-service"
 import { resolveDesktopRuntimeSnapshot } from "../session/runtime-selection"
 
-const CODEX_DEFAULT_MODEL = "gpt-5.6-sol"
-
 export class DesktopProviderService {
   snapshot(): Promise<DesktopProviderSnapshot> {
     return withDaemonRetry(async (client) => {
@@ -50,23 +48,10 @@ export class DesktopProviderService {
     if (!provider) throw new Error("请选择要使用的供应商。")
 
     await withDaemonRetry(async (client) => {
-      const [settings, providerModels] = await Promise.all([
-        client.getSettings(),
-        client.listModels().catch(() => []),
-      ])
-      const currentModel = typeof settings.model === "string" ? settings.model : undefined
-      const models = providerModels.find((item) => item.name === provider)?.models ?? []
       const requestedModel = input.model?.trim()
-      const model =
-        requestedModel ||
-        (currentModel && models.some((item) => item.id === currentModel)
-          ? currentModel
-          : models[0]?.id) ||
-        (provider === "codex" ? CODEX_DEFAULT_MODEL : undefined)
-
       await client.patchSettings({
         provider,
-        ...(model ? { model } : {}),
+        ...(requestedModel ? { model: requestedModel } : {}),
       })
     })
     return await this.snapshot()
@@ -171,7 +156,7 @@ function resolveCredentialSource(
   if (provider.local) return "local"
   if (stored.has(provider.name)) return "credentials"
   if (envByProvider.has(provider.name)) return "environment"
-  return provider.hasKey ? "configured" : "none"
+  return "none"
 }
 
 interface CustomProviderSettingView {
@@ -181,26 +166,34 @@ interface CustomProviderSettingView {
   headers?: Record<string, string>
 }
 
-function customProviderSettings(settings: Record<string, unknown>): Map<string, CustomProviderSettingView> {
+function customProviderSettings(
+  settings: Record<string, unknown>
+): Map<string, CustomProviderSettingView> {
   const value = settings.customProviders
   if (!Array.isArray(value)) return new Map()
   const entries = value.flatMap((item): Array<[string, CustomProviderSettingView]> => {
     if (!item || typeof item !== "object") return []
     const record = item as Record<string, unknown>
     if (typeof record.id !== "string" || typeof record.baseUrl !== "string") return []
-    const headers = record.headers && typeof record.headers === "object"
-      ? Object.fromEntries(
-          Object.entries(record.headers).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string"
+    const headers =
+      record.headers && typeof record.headers === "object"
+        ? Object.fromEntries(
+            Object.entries(record.headers).filter(
+              (entry): entry is [string, string] => typeof entry[1] === "string"
+            )
           )
-        )
-      : undefined
-    return [[record.id, {
-      id: record.id,
-      baseUrl: record.baseUrl,
-      apiFormat: "openai",
-      ...(headers ? { headers } : {}),
-    }]]
+        : undefined
+    return [
+      [
+        record.id,
+        {
+          id: record.id,
+          baseUrl: record.baseUrl,
+          apiFormat: "openai",
+          ...(headers ? { headers } : {}),
+        },
+      ],
+    ]
   })
   return new Map(entries)
 }

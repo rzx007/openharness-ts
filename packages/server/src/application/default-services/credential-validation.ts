@@ -7,6 +7,8 @@ import {
 const VALIDATION_USER_AGENT = "openharness-ts/credential-validation";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
+const DEFAULT_GEMINI_BASE_URL =
+  "https://generativelanguage.googleapis.com/v1beta";
 
 export interface CredentialValidationInput {
   providerName: string;
@@ -17,8 +19,14 @@ export interface CredentialValidationInput {
   headers?: Record<string, string>;
 }
 
-export async function validateProviderCredential(input: CredentialValidationInput): Promise<void> {
+export async function validateProviderCredential(
+  input: CredentialValidationInput,
+): Promise<void> {
   try {
+    if (input.providerName === "gemini") {
+      await validateGeminiCredential(input);
+      return;
+    }
     if (input.backendType === "anthropic") {
       await validateAnthropicCredential(input);
       return;
@@ -30,8 +38,14 @@ export async function validateProviderCredential(input: CredentialValidationInpu
   }
 }
 
-async function validateOpenAICompatibleCredential(input: CredentialValidationInput): Promise<void> {
-  const baseUrl = requireValidationBaseUrl(input.providerName, input.baseUrl, input.backendType);
+async function validateOpenAICompatibleCredential(
+  input: CredentialValidationInput,
+): Promise<void> {
+  const baseUrl = requireValidationBaseUrl(
+    input.providerName,
+    input.baseUrl,
+    input.backendType,
+  );
   let response: Response;
   try {
     response = await fetch(`${baseUrl}/models`, {
@@ -44,11 +58,46 @@ async function validateOpenAICompatibleCredential(input: CredentialValidationInp
   } catch (error) {
     throw validationNetworkError(input.providerDisplayName, error);
   }
-  await assertValidationResponse(input.providerDisplayName, response, "OpenAI 兼容 /models");
+  await assertValidationResponse(
+    input.providerDisplayName,
+    response,
+    "OpenAI 兼容 /models",
+  );
 }
 
-async function validateAnthropicCredential(input: CredentialValidationInput): Promise<void> {
-  const baseUrl = requireValidationBaseUrl(input.providerName, input.baseUrl, input.backendType);
+async function validateGeminiCredential(
+  input: CredentialValidationInput,
+): Promise<void> {
+  const baseUrl = requireGeminiValidationBaseUrl(
+    input.providerName,
+    input.baseUrl,
+  );
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/models`, {
+      headers: {
+        "x-goog-api-key": input.apiKey,
+        "User-Agent": VALIDATION_USER_AGENT,
+      },
+    });
+  } catch (error) {
+    throw validationNetworkError(input.providerDisplayName, error);
+  }
+  await assertValidationResponse(
+    input.providerDisplayName,
+    response,
+    "Gemini 原生 /models",
+  );
+}
+
+async function validateAnthropicCredential(
+  input: CredentialValidationInput,
+): Promise<void> {
+  const baseUrl = requireValidationBaseUrl(
+    input.providerName,
+    input.baseUrl,
+    input.backendType,
+  );
   let response: Response;
   try {
     response = await fetch(`${baseUrl}/models`, {
@@ -61,7 +110,11 @@ async function validateAnthropicCredential(input: CredentialValidationInput): Pr
   } catch (error) {
     throw validationNetworkError(input.providerDisplayName, error);
   }
-  await assertValidationResponse(input.providerDisplayName, response, "Anthropic /models");
+  await assertValidationResponse(
+    input.providerDisplayName,
+    response,
+    "Anthropic /models",
+  );
 }
 
 function requireValidationBaseUrl(
@@ -70,10 +123,30 @@ function requireValidationBaseUrl(
   backendType: Extract<BackendType, "anthropic" | "openai_compat">,
 ): string {
   const provider = findByName(providerName);
-  const scopedBaseUrl = resolveProviderScopedBaseUrl(baseUrl?.trim(), providerName)?.trim();
+  const scopedBaseUrl = resolveProviderScopedBaseUrl(
+    baseUrl?.trim(),
+    providerName,
+  )?.trim();
+  const resolved =
+    scopedBaseUrl ||
+    provider?.defaultBaseURL?.trim() ||
+    (backendType === "anthropic"
+      ? DEFAULT_ANTHROPIC_BASE_URL
+      : DEFAULT_OPENAI_BASE_URL);
+  return resolved.replace(/\/+$/, "");
+}
+
+function requireGeminiValidationBaseUrl(
+  providerName: string,
+  baseUrl: string | undefined,
+): string {
+  const scopedBaseUrl = resolveProviderScopedBaseUrl(
+    baseUrl?.trim(),
+    providerName,
+  )?.trim();
   const resolved = scopedBaseUrl
-    || provider?.defaultBaseURL?.trim()
-    || (backendType === "anthropic" ? DEFAULT_ANTHROPIC_BASE_URL : DEFAULT_OPENAI_BASE_URL);
+    ? scopedBaseUrl.replace(/\/openai\/?$/i, "")
+    : DEFAULT_GEMINI_BASE_URL;
   return resolved.replace(/\/+$/, "");
 }
 
@@ -86,19 +159,19 @@ async function assertValidationResponse(
   const detail = await safeValidationErrorDetail(response);
   if (response.status === 401 || response.status === 403) {
     throw new Error(
-      `${providerDisplayName} API 密钥无效，或当前密钥没有访问权限。`
-      + (detail ? ` ${detail}` : "")
+      `${providerDisplayName} API 密钥无效，或当前密钥没有访问权限。` +
+        (detail ? ` ${detail}` : ""),
     );
   }
   if (response.status === 404) {
     throw new Error(
-      `${providerDisplayName} 凭证校验失败：验证接口 ${endpointLabel} 不可用，请检查 Base URL 或上游兼容性。`
-      + (detail ? ` ${detail}` : "")
+      `${providerDisplayName} 凭证校验失败：验证接口 ${endpointLabel} 不可用，请检查 Base URL 或上游兼容性。` +
+        (detail ? ` ${detail}` : ""),
     );
   }
   throw new Error(
-    `${providerDisplayName} 凭证校验失败（HTTP ${response.status}）。`
-    + (detail ? ` ${detail}` : "")
+    `${providerDisplayName} 凭证校验失败（HTTP ${response.status}）。` +
+      (detail ? ` ${detail}` : ""),
   );
 }
 
@@ -112,7 +185,12 @@ async function safeValidationErrorDetail(response: Response): Promise<string> {
   }
 }
 
-function validationNetworkError(providerDisplayName: string, error: unknown): Error {
+function validationNetworkError(
+  providerDisplayName: string,
+  error: unknown,
+): Error {
   const message = error instanceof Error ? error.message : String(error);
-  return new Error(`无法连接 ${providerDisplayName} 的校验接口，请检查网络、Base URL 或代理设置。${message ? ` ${message}` : ""}`);
+  return new Error(
+    `无法连接 ${providerDisplayName} 的校验接口，请检查网络、Base URL 或代理设置。${message ? ` ${message}` : ""}`,
+  );
 }

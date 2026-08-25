@@ -53,11 +53,7 @@ describe("buildDesktopProviderSnapshot", () => {
       credentialSource: "subscription",
       credentialLabel: "test@example.com",
     })
-    expect(snapshot.providers.map((item) => item.name)).toEqual([
-      "openai",
-      "anthropic",
-      "codex",
-    ])
+    expect(snapshot.providers.map((item) => item.name)).toEqual(["openai", "anthropic", "codex"])
     expect(snapshot).not.toHaveProperty("subscriptions")
     expect(JSON.stringify(snapshot)).not.toContain("sk-")
   })
@@ -182,6 +178,24 @@ describe("buildDesktopProviderSnapshot", () => {
     })
     expect(snapshot.providers.find((item) => item.name === "openai")).toMatchObject({
       active: false,
+    })
+  })
+
+  it("does not keep built-in providers connected when auth cannot attribute a source", () => {
+    const snapshot = buildDesktopProviderSnapshot({
+      providers: [{ name: "deepseek", displayName: "DeepSeek", hasKey: true, active: false }],
+      auth: {
+        codex: { configured: false, state: "missing", source: "none" },
+        storedProviders: [],
+        envProviders: [],
+      },
+      settings: {},
+      models: [],
+    })
+
+    expect(snapshot.providers[0]).toMatchObject({
+      connected: false,
+      credentialSource: "none",
     })
   })
 })

@@ -86,18 +86,22 @@ describe("default daemon application services", () => {
   });
 
   it("keeps persona inspection limited to built-in and user definitions", async () => {
-    registerPluginAgents([{
-      name: "leaked:reviewer",
-      description: "Should stay runtime-scoped",
-      model: "leaked-model",
-      source: "plugin",
-    }]);
+    registerPluginAgents([
+      {
+        name: "leaked:reviewer",
+        description: "Should stay runtime-scoped",
+        model: "leaked-model",
+        source: "plugin",
+      },
+    ]);
 
     try {
       const result = await createDefaultAgentPersonaService().list();
 
       expect(result.agents.map((agent) => agent.name)).toContain("worker");
-      expect(result.agents.map((agent) => agent.name)).not.toContain("leaked:reviewer");
+      expect(result.agents.map((agent) => agent.name)).not.toContain(
+        "leaked:reviewer",
+      );
     } finally {
       registerPluginAgents([]);
     }
@@ -115,10 +119,86 @@ describe("default daemon application services", () => {
     };
     const settings = createDefaultSettingsService(ref);
 
-    const result = await settings.patch({ path: "daemon.autoStart", value: "true" });
+    const result = await settings.patch({
+      path: "daemon.autoStart",
+      value: "true",
+    });
 
     expect(ref.current.daemon.autoStart).toBe(true);
     expect(result.restartRuntimes).toBe(false);
+  });
+
+  it("resolves a built-in provider model when patching provider without a model", async () => {
+    const ref = {
+      current: {
+        model: "gpt-5.4",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    const result = await settings.patch({ provider: "deepseek" });
+
+    expect(ref.current.provider).toBe("deepseek");
+    expect(ref.current.model).toBe("deepseek-v4-flash");
+    expect(result.settings).toMatchObject({
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+    });
+  });
+
+  it("resolves a custom provider model when patching provider without a model", async () => {
+    const ref = {
+      current: {
+        model: "gpt-5.4",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        customProviders: [
+          {
+            id: "office-gateway",
+            displayName: "Office Gateway",
+            baseUrl: "https://gateway.example/v1",
+            apiFormat: "openai" as const,
+            models: [{ id: "team-model", displayName: "Team Model" }],
+          },
+        ],
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    const result = await settings.patch({ provider: "office-gateway" });
+
+    expect(ref.current.provider).toBe("office-gateway");
+    expect(ref.current.model).toBe("team-model");
+    expect(result.settings).toMatchObject({
+      provider: "office-gateway",
+      model: "team-model",
+    });
+  });
+
+  it("rejects provider patches when the requested model does not belong to that provider", async () => {
+    const ref = {
+      current: {
+        model: "gpt-5.4",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    await expect(
+      settings.patch({
+        provider: "deepseek",
+        model: "gpt-5.4",
+      }),
+    ).rejects.toThrow("不属于 provider deepseek");
   });
 
   it("refreshes settings before reporting settings and active providers", async () => {
@@ -148,12 +228,21 @@ describe("default daemon application services", () => {
     });
     const providers = await provider.list();
 
-    expect(providers.find((item) => item.name === "openrouter")?.active).toBe(true);
-    expect(providers.find((item) => item.name === "openai")?.active).toBe(false);
+    expect(providers.find((item) => item.name === "openrouter")?.active).toBe(
+      true,
+    );
+    expect(providers.find((item) => item.name === "openai")?.active).toBe(
+      false,
+    );
   });
 
   it("creates a custom provider and exposes it with declared models", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      ),
+    );
     const ref = {
       current: {
         model: "m",
@@ -175,65 +264,100 @@ describe("default daemon application services", () => {
       headers: { " X-Tenant ": " desktop " },
     });
 
-    expect(ref.current.customProviders).toEqual([{
-      id: "office-gateway",
-      displayName: "Office Gateway",
-      baseUrl: "https://gateway.example/v1",
-      apiFormat: "openai",
-      models: [{ id: "team-model", displayName: "Team Model" }],
-      headers: { "X-Tenant": "desktop" },
-    }]);
-    await expect(providers.list()).resolves.toContainEqual(expect.objectContaining({
-      name: "office-gateway",
-      displayName: "Office Gateway",
-      custom: true,
-      hasKey: true,
-    }));
+    expect(ref.current.customProviders).toEqual([
+      {
+        id: "office-gateway",
+        displayName: "Office Gateway",
+        baseUrl: "https://gateway.example/v1",
+        apiFormat: "openai",
+        models: [{ id: "team-model", displayName: "Team Model" }],
+        headers: { "X-Tenant": "desktop" },
+      },
+    ]);
+    await expect(providers.list()).resolves.toContainEqual(
+      expect.objectContaining({
+        name: "office-gateway",
+        displayName: "Office Gateway",
+        custom: true,
+        hasKey: true,
+      }),
+    );
 
     const models = await createDefaultModelService(ref).list();
     expect(models).toContainEqual({
       name: "office-gateway",
       displayName: "Office Gateway",
-      models: [expect.objectContaining({
-        id: "team-model",
-        label: "Team Model",
-        providerName: "office-gateway",
-      })],
+      models: [
+        expect.objectContaining({
+          id: "team-model",
+          label: "Team Model",
+          providerName: "office-gateway",
+        }),
+      ],
     });
   });
 
   it("rejects invalid built-in provider API keys before storing them", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("invalid api key", { status: 401 })));
+    const fetchMock = vi.fn(
+      async () => new Response("invalid api key", { status: 401 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     const auth = createDefaultAuthService();
 
-    await expect(auth.login({
-      provider: "gemini",
-      apiKey: "bad-key",
-    })).rejects.toThrow("API 密钥无效");
+    await expect(
+      auth.login({
+        provider: "gemini",
+        apiKey: "bad-key",
+      }),
+    ).rejects.toThrow("API 密钥无效");
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://generativelanguage.googleapis.com/v1beta/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-goog-api-key": "bad-key",
+        }),
+      }),
+    );
     await expect(auth.status()).resolves.toMatchObject({
       storedProviders: [],
     });
   });
 
   it("stores built-in provider API keys only after remote validation succeeds", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     const auth = createDefaultAuthService();
 
-    await expect(auth.login({
-      provider: "gemini",
-      apiKey: "valid-key",
-    })).resolves.toMatchObject({
+    await expect(
+      auth.login({
+        provider: "gemini",
+        apiKey: "valid-key",
+      }),
+    ).resolves.toMatchObject({
       message: expect.stringContaining("API key stored"),
     });
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://generativelanguage.googleapis.com/v1beta/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-goog-api-key": "valid-key",
+        }),
+      }),
+    );
     await expect(auth.status()).resolves.toMatchObject({
       storedProviders: ["gemini"],
     });
   });
 
   it("rejects invalid custom provider API keys before saving the provider", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("forbidden", { status: 403 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("forbidden", { status: 403 })),
+    );
     const ref = {
       current: {
         model: "m",
@@ -245,16 +369,53 @@ describe("default daemon application services", () => {
     };
     const providers = createDefaultProviderService(ref);
 
-    await expect(providers.create({
-      id: "office-gateway",
-      displayName: "Office Gateway",
-      baseUrl: "https://gateway.example/v1",
-      apiFormat: "openai",
-      apiKey: "bad-key",
-      models: [{ id: "team-model", displayName: "Team Model" }],
-    })).rejects.toThrow("API 密钥无效");
+    await expect(
+      providers.create({
+        id: "office-gateway",
+        displayName: "Office Gateway",
+        baseUrl: "https://gateway.example/v1",
+        apiFormat: "openai",
+        apiKey: "bad-key",
+        models: [{ id: "team-model", displayName: "Team Model" }],
+      }),
+    ).rejects.toThrow("API 密钥无效");
 
     expect(ref.current.customProviders).toBeUndefined();
+  });
+
+  it("keeps custom providers on Bearer validation", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+    };
+    const providers = createDefaultProviderService(ref);
+
+    await providers.create({
+      id: "team-gateway",
+      displayName: "Team Gateway",
+      baseUrl: "https://gateway.example/v1",
+      apiFormat: "openai",
+      apiKey: "valid-key",
+      models: [{ id: "team-model", displayName: "Team Model" }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gateway.example/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer valid-key",
+        }),
+      }),
+    );
   });
 
   it("rejects custom providers that collide with built-in IDs", async () => {
@@ -267,13 +428,15 @@ describe("default daemon application services", () => {
       },
     });
 
-    await expect(providers.create({
-      id: "openai",
-      displayName: "Fake OpenAI",
-      baseUrl: "https://example.com/v1",
-      apiFormat: "openai",
-      models: [{ id: "m", displayName: "M" }],
-    })).rejects.toThrow("已被内置供应商使用");
+    await expect(
+      providers.create({
+        id: "openai",
+        displayName: "Fake OpenAI",
+        baseUrl: "https://example.com/v1",
+        apiFormat: "openai",
+        models: [{ id: "m", displayName: "M" }],
+      }),
+    ).rejects.toThrow("已被内置供应商使用");
   });
 
   it("selects a remaining model when editing the active custom provider", async () => {
@@ -284,16 +447,18 @@ describe("default daemon application services", () => {
         provider: "office-gateway",
         maxTurns: 50,
         permission: { mode: "default" as const },
-        customProviders: [{
-          id: "office-gateway",
-          displayName: "Office Gateway",
-          baseUrl: "https://gateway.example/v1",
-          apiFormat: "openai" as const,
-          models: [
-            { id: "old-model", displayName: "Old" },
-            { id: "next-model", displayName: "Next" },
-          ],
-        }],
+        customProviders: [
+          {
+            id: "office-gateway",
+            displayName: "Office Gateway",
+            baseUrl: "https://gateway.example/v1",
+            apiFormat: "openai" as const,
+            models: [
+              { id: "old-model", displayName: "Old" },
+              { id: "next-model", displayName: "Next" },
+            ],
+          },
+        ],
       },
     };
     const providers = createDefaultProviderService(ref);
