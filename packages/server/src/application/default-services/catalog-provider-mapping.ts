@@ -4,8 +4,9 @@ const CATALOG_PROVIDER_ALIASES: Record<string, string[]> = {
   bedrock: ["amazon-bedrock"],
   dashscope: ["dashscope", "alibaba"],
   gemini: ["gemini", "google"],
+  moonshot: ["moonshotai", "moonshotai-cn"],
   vertex: ["google-vertex", "vertex"],
-  zhipu: ["zhipu", "z-ai"],
+  zhipu: ["zhipuai", "zai", "zhipu", "z-ai"],
 };
 
 export function readCatalogProvider(

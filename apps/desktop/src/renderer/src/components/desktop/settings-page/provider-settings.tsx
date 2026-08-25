@@ -69,6 +69,10 @@ const popularProviderNames = [
   "openrouter",
   "gemini",
   "dashscope",
+  "zhipu",
+  "moonshot",
+  "minimax",
+  "xiaomi",
 ]
 
 const providerDescriptions: Record<string, string> = {
@@ -81,6 +85,7 @@ const providerDescriptions: Record<string, string> = {
   moonshot: "Moonshot 与 Kimi 系列模型",
   minimax: "MiniMax 系列模型",
   zhipu: "智谱 GLM 系列模型",
+  xiaomi: "小米 MiMo 系列模型",
   groq: "Groq 高速推理服务",
   mistral: "Mistral 与 Codestral 模型",
 }
