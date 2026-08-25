@@ -38,7 +38,7 @@ export function SettingsSidebar({
   onSelectSection,
 }: SettingsSidebarProps): React.JSX.Element {
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col bg-transparent pl-3 py-3 text-sidebar-foreground">
+    <aside className="flex h-full min-h-0 w-full flex-col bg-transparent py-3 text-sidebar-foreground">
       <Button
         type="button"
         variant="ghost"
@@ -50,7 +50,7 @@ export function SettingsSidebar({
         返回应用
       </Button>
 
-      <div className="relative mb-5">
+      <div className="relative mx-2 mb-5">
         <Search
           aria-hidden="true"
           className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
@@ -62,7 +62,7 @@ export function SettingsSidebar({
         />
       </div>
 
-      <ScrollArea horizontal={false} className="min-h-0 flex-1">
+      <ScrollArea horizontal={false} className="min-h-0 flex-1 px-2">
         <SettingsNavigationGroup
           label="个人"
           items={personalSettingsNavigation}

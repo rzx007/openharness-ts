@@ -221,6 +221,7 @@ export interface ProviderInfo {
   local?: boolean;
   custom?: boolean;
   requiresApiKey?: boolean;
+  source?: "builtin" | "catalog" | "custom" | "subscription";
 }
 
 export interface CustomProviderInput {

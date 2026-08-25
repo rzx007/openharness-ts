@@ -1,6 +1,6 @@
 # Plugin 贡献加载
 
-> 状态：当前实现。插件可以贡献 skills、commands、hooks、MCP、agents 和 tools；发现与文件解析在 `packages/plugins`，每个 runtime 的组装在 `packages/agent-runtime/src/extensions.ts`。
+> 状态：待替换的当前实现。本文只描述仓库现在仍在运行的临时格式，不再代表下一版公开插件契约。已确认的破坏性替换方案见 [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：Runtime 只加载版本化的 OpenHarness Native Plugin；Claude Code、Codex 等外部插件由独立 Converter 在安装阶段转换，不兼容本文的 snake_case manifest、根级 `plugin.json` 和 `tools_dir`。
 
 ## 范围
 

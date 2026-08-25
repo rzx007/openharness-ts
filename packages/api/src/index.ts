@@ -1,5 +1,9 @@
 export { AnthropicClient } from "./providers/anthropic";
-export { CodexSubscriptionClient, buildCodexHeaders, resolveCodexUrl } from "./providers/codex";
+export {
+  CodexSubscriptionClient,
+  buildCodexHeaders,
+  resolveCodexUrl,
+} from "./providers/codex";
 export { OpenAICompatibleClient } from "./providers/openai";
 export {
   PROVIDERS,
@@ -18,6 +22,11 @@ export {
   ModelCatalogService,
   createModelCatalogService,
 } from "./models/catalog";
+export {
+  listDirectApiKeyCatalogProviders,
+  toDirectApiKeyProvider,
+} from "./models/direct-api-key-providers";
+export type { DirectApiKeyCatalogProvider } from "./models/direct-api-key-providers";
 export type {
   ModelsDevCatalog,
   ModelsDevProvider,
@@ -25,4 +34,8 @@ export type {
   ModelsDevCost,
 } from "./models/catalog";
 
-export { AuthenticationFailure, RateLimitFailure, RequestFailure } from "./errors";
+export {
+  AuthenticationFailure,
+  RateLimitFailure,
+  RequestFailure,
+} from "./errors";

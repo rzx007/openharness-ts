@@ -131,6 +131,7 @@ export interface CustomProviderSettings {
   apiFormat: "openai";
   models: CustomProviderModelSettings[];
   headers?: Record<string, string>;
+  source?: "models.dev";
 }
 
 export interface Settings {

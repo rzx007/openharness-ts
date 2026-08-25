@@ -212,7 +212,8 @@ export class OpenHarnessClient {
     if (!compatibility.compatible) {
       throw new IncompatibleProtocolError(
         capabilities,
-        compatibility.reason ?? "Client and server protocol versions are incompatible",
+        compatibility.reason ??
+          "Client and server protocol versions are incompatible",
       );
     }
     return capabilities;
@@ -254,10 +255,9 @@ export class OpenHarnessClient {
     options: { connector?: string; limit?: number; signal?: AbortSignal } = {},
   ): Promise<ChannelDeliveryRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<{ deliveries: ChannelDeliveryRecord[] }>(
-      this.path("/channels/deliveries/pending", query),
-      { signal },
-    );
+    const response = await this.request<{
+      deliveries: ChannelDeliveryRecord[];
+    }>(this.path("/channels/deliveries/pending", query), { signal });
     return response.deliveries;
   }
 
@@ -315,12 +315,37 @@ export class OpenHarnessClient {
     input: CustomProviderInput,
     options: { signal?: AbortSignal } = {},
   ): Promise<ProviderInfo> {
-    const response = await this.request<{ provider: ProviderInfo }>("/providers/custom", {
-      method: "POST",
-      body: input,
-      signal: options.signal,
-    });
+    const response = await this.request<{ provider: ProviderInfo }>(
+      "/providers/custom",
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
     return response.provider;
+  }
+
+  async connectCatalogProvider(
+    id: string,
+    apiKey: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ProviderInfo> {
+    const response = await this.request<{ provider: ProviderInfo }>(
+      `/providers/catalog/${encodeURIComponent(id)}/connect`,
+      { method: "POST", body: { apiKey }, signal: options.signal },
+    );
+    return response.provider;
+  }
+
+  async disconnectCatalogProvider(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.request<{ ok: true }>(
+      `/providers/catalog/${encodeURIComponent(id)}/connect`,
+      { method: "DELETE", signal: options.signal },
+    );
   }
 
   async updateCustomProvider(
@@ -339,10 +364,13 @@ export class OpenHarnessClient {
     id: string,
     options: { signal?: AbortSignal } = {},
   ): Promise<void> {
-    await this.request<{ ok: true }>(`/providers/custom/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      signal: options.signal,
-    });
+    await this.request<{ ok: true }>(
+      `/providers/custom/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+        signal: options.signal,
+      },
+    );
   }
 
   /** `GET /models` */
@@ -1028,10 +1056,9 @@ export class OpenHarnessClient {
     options: ListEventsOptions & { signal?: AbortSignal } = {},
   ): Promise<SessionEventRecord[]> {
     const { signal, ...query } = options;
-    const response = await this.request<unknown>(
-      this.path("/events", query),
-      { signal },
-    );
+    const response = await this.request<unknown>(this.path("/events", query), {
+      signal,
+    });
     return responseArray(response, "events", decodeSessionEventRecord);
   }
 
@@ -1179,14 +1206,11 @@ export class OpenHarnessClient {
     input: TerminalCreateRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<TerminalSessionInfo> {
-    const response = await this.request<unknown>(
-      "/terminals",
-      {
-        method: "POST",
-        body: input,
-        signal: options.signal,
-      },
-    );
+    const response = await this.request<unknown>("/terminals", {
+      method: "POST",
+      body: input,
+      signal: options.signal,
+    });
     return decodeTerminalSessionInfo(responseField(response, "terminal"));
   }
 
@@ -1221,11 +1245,14 @@ export class OpenHarnessClient {
     input: CreateBackgroundShellInput,
     options: { signal?: AbortSignal } = {},
   ): Promise<CreateBackgroundShellResult> {
-    return await this.request<CreateBackgroundShellResult>("/background-shells", {
-      method: "POST",
-      body: input,
-      signal: options.signal,
-    });
+    return await this.request<CreateBackgroundShellResult>(
+      "/background-shells",
+      {
+        method: "POST",
+        body: input,
+        signal: options.signal,
+      },
+    );
   }
 
   async readJob(
@@ -1471,7 +1498,7 @@ export class OpenHarnessClient {
             "message" in body &&
             typeof body.message === "string"
           ? body.message
-        : `OpenHarness API request failed with ${response.status}`;
+          : `OpenHarness API request failed with ${response.status}`;
     throw new OpenHarnessApiError(message, response.status, body);
   }
 }
@@ -1520,7 +1547,10 @@ function parseSseFrame(frame: string): unknown | undefined {
 }
 
 export class IncompatibleProtocolError extends Error {
-  constructor(readonly capabilities: ServerCapabilities, message: string) {
+  constructor(
+    readonly capabilities: ServerCapabilities,
+    message: string,
+  ) {
     super(message);
     this.name = "IncompatibleProtocolError";
   }

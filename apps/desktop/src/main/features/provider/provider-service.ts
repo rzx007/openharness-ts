@@ -38,7 +38,13 @@ export class DesktopProviderService {
     if (!provider) throw new Error("请选择要连接的供应商。")
     if (!apiKey) throw new Error("请输入 API 密钥。")
 
-    await withDaemonRetry((client) => client.authLogin({ provider, apiKey }))
+    await withDaemonRetry(async (client) => {
+      const catalogProvider = (await client.listProviders()).find(
+        (item) => item.name === provider && item.source === "catalog"
+      )
+      if (catalogProvider) await client.connectCatalogProvider(provider, apiKey)
+      else await client.authLogin({ provider, apiKey })
+    })
     if (input.setActive) await this.activate({ provider })
     return await this.snapshot()
   }
@@ -66,7 +72,11 @@ export class DesktopProviderService {
       if (settings.provider === provider) {
         throw new Error("该供应商正在使用中。请先切换到其他供应商，再断开连接。")
       }
-      await client.authLogout({ provider })
+      const catalogProvider = (await client.listProviders()).find(
+        (item) => item.name === provider && item.source === "catalog"
+      )
+      if (catalogProvider) await client.disconnectCatalogProvider(provider)
+      else await client.authLogout({ provider })
     })
     return await this.snapshot()
   }
@@ -132,6 +142,7 @@ export function buildDesktopProviderSnapshot(input: {
       ...(provider.name === activeProvider && activeModel ? { currentModel: activeModel } : {}),
       models,
       ...(provider.custom ? { custom: true } : {}),
+      ...(provider.source ? { source: provider.source } : {}),
       ...(custom?.baseUrl ? { baseUrl: custom.baseUrl } : {}),
       ...(custom?.apiFormat === "openai" ? { apiFormat: "openai" as const } : {}),
       ...(custom?.headers ? { headers: custom.headers } : {}),
@@ -152,6 +163,7 @@ function resolveCredentialSource(
   envByProvider: Map<string, string>
 ): DesktopProviderCredentialSource {
   if (provider.name === "codex") return auth.codex.configured ? "subscription" : "none"
+  if (provider.source === "catalog") return stored.has(provider.name) ? "credentials" : "none"
   if (provider.custom) return stored.has(provider.name) ? "credentials" : "configured"
   if (provider.local) return "local"
   if (stored.has(provider.name)) return "credentials"

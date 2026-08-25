@@ -1,6 +1,10 @@
 import {
   PROVIDERS,
+  createModelCatalogService,
   findByName,
+  listDirectApiKeyCatalogProviders,
+  type DirectApiKeyCatalogProvider,
+  type ModelsDevCatalog,
 } from "@openharness/api";
 import { CredentialStorage } from "@openharness/auth";
 import type { CustomProviderSettings, Settings } from "@openharness/core";
@@ -12,14 +16,18 @@ import type {
   ProviderService,
 } from "../settings-api.js";
 import { validateProviderCredential } from "./credential-validation.js";
+import { readCatalogProvider } from "./catalog-provider-mapping.js";
 import {
   readCurrentSettings,
   saveSettingsAndRefreshRef,
   type DaemonSettingsRef,
 } from "./shared.js";
 
-export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderService {
+export function createDefaultProviderService(
+  ref: DaemonSettingsRef,
+): ProviderService {
   const storage = new CredentialStorage();
+  const catalogService = createModelCatalogService();
   const rowForCustomProvider = async (
     provider: CustomProviderSettings,
     currentName: string,
@@ -29,8 +37,9 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
     hasKey: !!(await storage.loadApiKey(provider.id)),
     active: provider.id === currentName,
     local: false,
-    custom: true,
-    requiresApiKey: false,
+    custom: provider.source !== "models.dev",
+    requiresApiKey: provider.source === "models.dev",
+    source: provider.source === "models.dev" ? "catalog" : "custom",
   });
 
   const saveCustomProviders = async (
@@ -44,21 +53,56 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
   return {
     async list() {
       const current = await readCurrentSettings(ref);
+      const catalog = await catalogService.load();
       const currentName = current.provider ?? "auto";
       const rows: ProviderInfo[] = [];
-      for (const spec of PROVIDERS) {
+      const builtinProviders = PROVIDERS.filter((spec) =>
+        isSupportedBuiltinProvider(spec.name, catalog),
+      );
+      for (const spec of builtinProviders) {
         const storedKey = await storage.loadApiKey(spec.name);
-        const hasKey = !!storedKey || (spec.envKey ? !!process.env[spec.envKey] : false);
+        const hasKey =
+          !!storedKey || (spec.envKey ? !!process.env[spec.envKey] : false);
         rows.push({
           name: spec.name,
           displayName: spec.displayName,
           hasKey: !!hasKey || !spec.envKey,
           active: spec.name === currentName,
           local: spec.isLocal,
+          requiresApiKey: !spec.isOAuth && !spec.isLocal,
+          source: spec.isOAuth ? "subscription" : "builtin",
         });
       }
       for (const provider of current.customProviders ?? []) {
         rows.push(await rowForCustomProvider(provider, currentName));
+      }
+      const claimedCatalogProviders = new Set(
+        builtinProviders.flatMap((spec) => {
+          const provider = readCatalogProvider(catalog, spec.name);
+          return provider ? [provider] : [];
+        }),
+      );
+      const configuredIds = new Set(
+        (current.customProviders ?? []).map((item) => item.id),
+      );
+      for (const provider of listDirectApiKeyCatalogProviders(catalog)) {
+        const rawProvider = catalog[provider.catalogId];
+        if (
+          configuredIds.has(provider.id) ||
+          findByName(provider.id) ||
+          (rawProvider && claimedCatalogProviders.has(rawProvider))
+        ) {
+          continue;
+        }
+        rows.push({
+          name: provider.id,
+          displayName: provider.displayName,
+          hasKey: false,
+          active: false,
+          local: false,
+          requiresApiKey: true,
+          source: "catalog",
+        });
       }
       return rows;
     },
@@ -66,10 +110,16 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
       const current = await readCurrentSettings(ref);
       const provider = normalizeCustomProvider(input);
       if (findByName(provider.id)) {
-        throw new ProviderMutationError(400, `供应商 ID “${provider.id}” 已被内置供应商使用。`);
+        throw new ProviderMutationError(
+          400,
+          `供应商 ID “${provider.id}” 已被内置供应商使用。`,
+        );
       }
       if (current.customProviders?.some((item) => item.id === provider.id)) {
-        throw new ProviderMutationError(409, `自定义供应商 “${provider.id}” 已存在。`);
+        throw new ProviderMutationError(
+          409,
+          `自定义供应商 “${provider.id}” 已存在。`,
+        );
       }
       if (input.apiKey?.trim()) {
         await validateProviderCredential({
@@ -82,14 +132,28 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
         });
       }
       await saveCustomProviders([...(current.customProviders ?? []), provider]);
-      if (input.apiKey?.trim()) await storage.storeApiKey(provider.id, input.apiKey.trim());
+      if (input.apiKey?.trim())
+        await storage.storeApiKey(provider.id, input.apiKey.trim());
       return await rowForCustomProvider(provider, current.provider ?? "auto");
     },
     async update(id, input) {
       const current = await readCurrentSettings(ref);
       const normalizedId = id.trim().toLowerCase();
-      const index = current.customProviders?.findIndex((item) => item.id === normalizedId) ?? -1;
-      if (index < 0) throw new ProviderMutationError(404, `自定义供应商 “${normalizedId}” 不存在。`);
+      const index =
+        current.customProviders?.findIndex(
+          (item) => item.id === normalizedId,
+        ) ?? -1;
+      if (index < 0)
+        throw new ProviderMutationError(
+          404,
+          `自定义供应商 “${normalizedId}” 不存在。`,
+        );
+      if (current.customProviders?.[index]?.source === "models.dev") {
+        throw new ProviderMutationError(
+          400,
+          "models.dev 目录供应商不能作为自定义供应商编辑。",
+        );
+      }
       const provider = normalizeCustomProvider({ ...input, id: normalizedId });
       const nextProviders = [...(current.customProviders ?? [])];
       nextProviders[index] = provider;
@@ -103,54 +167,178 @@ export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderSe
           headers: provider.headers,
         });
       }
-      const currentModelStillAvailable = provider.models.some((model) => model.id === current.model);
+      const currentModelStillAvailable = provider.models.some(
+        (model) => model.id === current.model,
+      );
       await saveCustomProviders(
         nextProviders,
         current.provider === provider.id && !currentModelStillAvailable
           ? { model: provider.models[0]!.id }
           : {},
       );
-      if (input.apiKey?.trim()) await storage.storeApiKey(provider.id, input.apiKey.trim());
+      if (input.apiKey?.trim())
+        await storage.storeApiKey(provider.id, input.apiKey.trim());
       return await rowForCustomProvider(provider, current.provider ?? "auto");
     },
     async remove(id) {
       const current = await readCurrentSettings(ref);
       const normalizedId = id.trim().toLowerCase();
       if (current.provider === normalizedId) {
-        throw new ProviderMutationError(409, "该供应商正在使用中。请先切换到其他供应商，再删除。");
+        throw new ProviderMutationError(
+          409,
+          "该供应商正在使用中。请先切换到其他供应商，再删除。",
+        );
       }
       const providers = current.customProviders ?? [];
       if (!providers.some((item) => item.id === normalizedId)) {
-        throw new ProviderMutationError(404, `自定义供应商 “${normalizedId}” 不存在。`);
+        throw new ProviderMutationError(
+          404,
+          `自定义供应商 “${normalizedId}” 不存在。`,
+        );
       }
-      await saveCustomProviders(providers.filter((item) => item.id !== normalizedId));
+      if (
+        providers.find((item) => item.id === normalizedId)?.source ===
+        "models.dev"
+      ) {
+        throw new ProviderMutationError(
+          400,
+          "请使用断开操作移除 models.dev 目录供应商。",
+        );
+      }
+      await saveCustomProviders(
+        providers.filter((item) => item.id !== normalizedId),
+      );
+      await storage.clearProviderCredentials(normalizedId);
+    },
+    async connectCatalog(id, apiKey) {
+      const normalizedId = id.trim().toLowerCase();
+      const credential = apiKey.trim();
+      if (!credential)
+        throw new ProviderMutationError(400, "请输入 API 密钥。");
+      const current = await readCurrentSettings(ref);
+      const catalog = await catalogService.load();
+      const provider = findConnectableCatalogProvider(catalog, normalizedId);
+      if (!provider) {
+        throw new ProviderMutationError(
+          404,
+          "该供应商不支持直接使用单个 API Key 连接。",
+        );
+      }
+      const existing = current.customProviders?.find(
+        (item) => item.id === normalizedId,
+      );
+      if (existing && existing.source !== "models.dev") {
+        throw new ProviderMutationError(
+          409,
+          `供应商 ID “${normalizedId}” 已被自定义供应商使用。`,
+        );
+      }
+      await validateProviderCredential({
+        providerName: provider.id,
+        providerDisplayName: provider.displayName,
+        backendType: "openai_compat",
+        apiKey: credential,
+        baseUrl: provider.baseUrl,
+      });
+      const settingsProvider: CustomProviderSettings = {
+        id: provider.id,
+        displayName: provider.displayName,
+        baseUrl: provider.baseUrl,
+        apiFormat: "openai",
+        models: provider.models,
+        source: "models.dev",
+      };
+      const providers = (current.customProviders ?? []).filter(
+        (item) => item.id !== normalizedId,
+      );
+      await saveCustomProviders([...providers, settingsProvider]);
+      await storage.storeApiKey(provider.id, credential);
+      return await rowForCustomProvider(
+        settingsProvider,
+        current.provider ?? "auto",
+      );
+    },
+    async disconnectCatalog(id) {
+      const normalizedId = id.trim().toLowerCase();
+      const current = await readCurrentSettings(ref);
+      if (current.provider === normalizedId) {
+        throw new ProviderMutationError(
+          409,
+          "该供应商正在使用中。请先切换到其他供应商，再断开连接。",
+        );
+      }
+      const providers = current.customProviders ?? [];
+      const existing = providers.find((item) => item.id === normalizedId);
+      if (existing?.source !== "models.dev") {
+        throw new ProviderMutationError(
+          404,
+          `models.dev 目录供应商 “${normalizedId}” 不存在。`,
+        );
+      }
+      await saveCustomProviders(
+        providers.filter((item) => item.id !== normalizedId),
+      );
       await storage.clearProviderCredentials(normalizedId);
     },
   };
 }
 
+const UNSUPPORTED_BUILTIN_AUTH = new Set(["bedrock", "vertex"]);
+
+function isSupportedBuiltinProvider(
+  providerName: string,
+  catalog: ModelsDevCatalog,
+): boolean {
+  if (providerName === "codex") return true;
+  if (UNSUPPORTED_BUILTIN_AUTH.has(providerName)) return false;
+  const spec = findByName(providerName);
+  return !!spec?.envKey && !!readCatalogProvider(catalog, providerName);
+}
+
+function findConnectableCatalogProvider(
+  catalog: ModelsDevCatalog,
+  providerId: string,
+): DirectApiKeyCatalogProvider | undefined {
+  const provider = listDirectApiKeyCatalogProviders(catalog).find(
+    (item) => item.id === providerId,
+  );
+  if (!provider || findByName(provider.id)) return undefined;
+  const claimedByBuiltin = PROVIDERS.some(
+    (spec) =>
+      isSupportedBuiltinProvider(spec.name, catalog) &&
+      readCatalogProvider(catalog, spec.name) === catalog[provider.catalogId],
+  );
+  return claimedByBuiltin ? undefined : provider;
+}
+
 export class ProviderMutationError extends ApplicationError {
-  constructor(
-    status: 400 | 404 | 409,
-    message: string,
-  ) {
+  constructor(status: 400 | 404 | 409, message: string) {
     super(status, message);
   }
 }
 
-function normalizeCustomProvider(input: CustomProviderInput): CustomProviderSettings {
+function normalizeCustomProvider(
+  input: CustomProviderInput,
+): CustomProviderSettings {
   const id = input.id?.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
-    throw new ProviderMutationError(400, "供应商 ID 只能包含小写字母、数字、连字符或下划线。");
+    throw new ProviderMutationError(
+      400,
+      "供应商 ID 只能包含小写字母、数字、连字符或下划线。",
+    );
   }
   const displayName = input.displayName?.trim();
   if (!displayName) throw new ProviderMutationError(400, "请输入显示名称。");
   const baseUrl = input.baseUrl?.trim();
   try {
     const parsed = new URL(baseUrl);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      throw new Error();
   } catch {
-    throw new ProviderMutationError(400, "基础 URL 必须是有效的 HTTP 或 HTTPS 地址。");
+    throw new ProviderMutationError(
+      400,
+      "基础 URL 必须是有效的 HTTP 或 HTTPS 地址。",
+    );
   }
   if (input.apiFormat !== "openai") {
     throw new ProviderMutationError(400, "当前仅支持 OpenAI 兼容接口。");

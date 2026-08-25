@@ -17,6 +17,7 @@ export interface DesktopProviderInfo {
   currentModel?: string
   models: DesktopProviderModel[]
   custom?: boolean
+  source?: "builtin" | "catalog" | "custom" | "subscription"
   baseUrl?: string
   apiFormat?: "openai"
   headers?: Record<string, string>

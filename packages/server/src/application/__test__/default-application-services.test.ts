@@ -298,6 +298,90 @@ describe("default daemon application services", () => {
     });
   });
 
+  it("only exposes and persists models.dev providers that support one direct API key", async () => {
+    const catalogPath = join(temporaryDirectory, "models.json");
+    writeFileSync(
+      catalogPath,
+      JSON.stringify({
+        remote: {
+          name: "Remote AI",
+          env: ["REMOTE_API_KEY"],
+          api: "https://remote.example/v1",
+          npm: "@ai-sdk/openai-compatible",
+          models: { "remote-chat": { name: "Remote Chat" } },
+        },
+        oauth: {
+          name: "OAuth AI",
+          env: ["OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET"],
+          api: "https://oauth.example/v1",
+          npm: "@ai-sdk/openai-compatible",
+          models: { chat: {} },
+        },
+      }),
+      "utf-8",
+    );
+    vi.stubEnv("OPENHARNESS_MODELS_PATH", catalogPath);
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+    };
+    const providers = createDefaultProviderService(ref);
+
+    const available = await providers.list();
+    expect(available).toContainEqual(
+      expect.objectContaining({
+        name: "remote",
+        source: "catalog",
+        hasKey: false,
+      }),
+    );
+    expect(available.some((item) => item.name === "oauth")).toBe(false);
+    expect(available.some((item) => item.name === "bedrock")).toBe(false);
+    expect(available.some((item) => item.name === "vertex")).toBe(false);
+
+    await providers.connectCatalog!("remote", "valid-key");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer valid-key" }),
+      }),
+    );
+    expect(ref.current.customProviders).toEqual([
+      expect.objectContaining({
+        id: "remote",
+        source: "models.dev",
+        models: [{ id: "remote-chat", displayName: "Remote Chat" }],
+      }),
+    ]);
+    await expect(providers.list()).resolves.toContainEqual(
+      expect.objectContaining({
+        name: "remote",
+        source: "catalog",
+        custom: false,
+        hasKey: true,
+      }),
+    );
+
+    await providers.disconnectCatalog!("remote");
+    expect(ref.current.customProviders).toEqual([]);
+    await expect(providers.list()).resolves.toContainEqual(
+      expect.objectContaining({
+        name: "remote",
+        source: "catalog",
+        hasKey: false,
+      }),
+    );
+  });
+
   it("rejects invalid built-in provider API keys before storing them", async () => {
     const fetchMock = vi.fn(
       async () => new Response("invalid api key", { status: 401 }),

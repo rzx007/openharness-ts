@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 
-import { mergeCommandCatalog, type CommandCatalogProvider } from "../../commands/index.js";
+import {
+  mergeCommandCatalog,
+  type CommandCatalogProvider,
+} from "../../commands/index.js";
 import {
   applicationErrorResponse,
   errorResponse,
@@ -8,7 +11,11 @@ import {
   readJson,
   type OpenHarnessServerHealth,
 } from "../support.js";
-import type { ModelService, ProviderService, SettingsService } from "../../application/index.js";
+import type {
+  ModelService,
+  ProviderService,
+  SettingsService,
+} from "../../application/index.js";
 import type { DaemonControlService } from "../../application/control/index.js";
 import type { ServerCapabilities } from "@openharness/protocol";
 
@@ -18,27 +25,39 @@ export interface SystemRoutesContext {
   settingsService?: SettingsService;
   providerService?: ProviderService;
   modelService?: ModelService;
-  control: Pick<DaemonControlService, "acquireGlobalMutation" | "closeAllRuntimes" | "runtimeSnapshot" | "inspectRun" | "listProjectionDiagnostics">;
+  control: Pick<
+    DaemonControlService,
+    | "acquireGlobalMutation"
+    | "closeAllRuntimes"
+    | "runtimeSnapshot"
+    | "inspectRun"
+    | "listProjectionDiagnostics"
+  >;
   capabilities?: ServerCapabilities;
 }
 
 export function createSystemRoutes(context: SystemRoutesContext): Hono {
   return new Hono()
-    .get("/capabilities", () => jsonResponse(context.capabilities ?? {
-      serverVersion: context.version ?? "0.1.0",
-      protocol: { version: 2 },
-      features: {
-        steer: 1,
-        runAttempts: 1,
-        toolAttempts: 1,
-        jobs: 2,
-        schedules: 1,
-        workflow: 2,
-        durableChannels: 1,
-        backup: 1,
-        retention: 1,
-      },
-    } satisfies ServerCapabilities))
+    .get("/capabilities", () =>
+      jsonResponse(
+        context.capabilities ??
+          ({
+            serverVersion: context.version ?? "0.1.0",
+            protocol: { version: 2 },
+            features: {
+              steer: 1,
+              runAttempts: 1,
+              toolAttempts: 1,
+              jobs: 2,
+              schedules: 1,
+              workflow: 2,
+              durableChannels: 1,
+              backup: 1,
+              retention: 1,
+            },
+          } satisfies ServerCapabilities),
+      ),
+    )
     .get("/health", () => {
       const snapshot = context.control.runtimeSnapshot();
       return jsonResponse({
@@ -51,65 +70,102 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
         queuedRunCount: snapshot.coordinator.queuedRunCount,
       } satisfies OpenHarnessServerHealth);
     })
-    .get("/debug/runtime", () => jsonResponse(context.control.runtimeSnapshot()))
+    .get("/debug/runtime", () =>
+      jsonResponse(context.control.runtimeSnapshot()),
+    )
     .get("/debug/runs/:runId", (c) => {
       const inspection = context.control.inspectRun(c.req.param("runId"), {
         includeContent: c.req.query("includeContent") === "true",
       });
-      return inspection ? jsonResponse(inspection) : errorResponse(404, "Run not found");
+      return inspection
+        ? jsonResponse(inspection)
+        : errorResponse(404, "Run not found");
     })
-    .get("/debug/projection-settlements", (c) => jsonResponse(context.control.listProjectionDiagnostics({
-      includeContent: c.req.query("includeContent") === "true",
-    })))
+    .get("/debug/projection-settlements", (c) =>
+      jsonResponse(
+        context.control.listProjectionDiagnostics({
+          includeContent: c.req.query("includeContent") === "true",
+        }),
+      ),
+    )
     .get("/commands", async (c) => {
       const cwd = c.req.query("cwd");
       if (!cwd) return errorResponse(400, "cwd is required");
       try {
-        const extras = context.commandCatalog ? await context.commandCatalog.list({ cwd }) : [];
+        const extras = context.commandCatalog
+          ? await context.commandCatalog.list({ cwd })
+          : [];
         return jsonResponse({ commands: mergeCommandCatalog(extras) });
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .get("/settings", async () => {
-      if (!context.settingsService) return errorResponse(501, "Settings service is not configured");
+      if (!context.settingsService)
+        return errorResponse(501, "Settings service is not configured");
       try {
         return jsonResponse({ settings: await context.settingsService.get() });
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .patch("/settings", async (c) => {
-      if (!context.settingsService) return errorResponse(501, "Settings service is not configured");
+      if (!context.settingsService)
+        return errorResponse(501, "Settings service is not configured");
       const body = await readJson(c);
       const lease = context.control.acquireGlobalMutation();
       if (!lease) {
-        return errorResponse(409, "Cannot update daemon settings while session runs are active");
+        return errorResponse(
+          409,
+          "Cannot update daemon settings while session runs are active",
+        );
       }
       try {
         const result = await context.settingsService.patch(body);
         if (result.restartRuntimes) await context.control.closeAllRuntimes();
         return jsonResponse({ settings: result.settings });
       } catch (error) {
-        return errorResponse(400, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          400,
+          error instanceof Error ? error.message : String(error),
+        );
       } finally {
         lease.release();
       }
     })
     .get("/providers", async () => {
-      if (!context.providerService) return errorResponse(501, "Provider service is not configured");
+      if (!context.providerService)
+        return errorResponse(501, "Provider service is not configured");
       try {
-        return jsonResponse({ providers: await context.providerService.list() });
+        return jsonResponse({
+          providers: await context.providerService.list(),
+        });
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .post("/providers/custom", async (c) => {
-      if (!context.providerService?.create) return errorResponse(501, "Custom provider creation is not configured");
+      if (!context.providerService?.create)
+        return errorResponse(501, "Custom provider creation is not configured");
       const lease = context.control.acquireGlobalMutation();
-      if (!lease) return errorResponse(409, "Cannot update providers while session runs are active");
+      if (!lease)
+        return errorResponse(
+          409,
+          "Cannot update providers while session runs are active",
+        );
       try {
-        const provider = await context.providerService.create(await readJson(c) as never);
+        const provider = await context.providerService.create(
+          (await readJson(c)) as never,
+        );
         await context.control.closeAllRuntimes();
         return jsonResponse({ provider }, 201);
       } catch (error) {
@@ -118,12 +174,70 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
         lease.release();
       }
     })
-    .patch("/providers/custom/:id", async (c) => {
-      if (!context.providerService?.update) return errorResponse(501, "Custom provider updates are not configured");
+    .post("/providers/catalog/:id/connect", async (c) => {
+      if (!context.providerService?.connectCatalog) {
+        return errorResponse(
+          501,
+          "Catalog provider connections are not configured",
+        );
+      }
       const lease = context.control.acquireGlobalMutation();
-      if (!lease) return errorResponse(409, "Cannot update providers while session runs are active");
+      if (!lease)
+        return errorResponse(
+          409,
+          "Cannot update providers while session runs are active",
+        );
       try {
-        const provider = await context.providerService.update(c.req.param("id"), await readJson(c) as never);
+        const body = (await readJson(c)) as { apiKey?: unknown };
+        const provider = await context.providerService.connectCatalog(
+          c.req.param("id"),
+          typeof body.apiKey === "string" ? body.apiKey : "",
+        );
+        await context.control.closeAllRuntimes();
+        return jsonResponse({ provider });
+      } catch (error) {
+        return providerMutationErrorResponse(error);
+      } finally {
+        lease.release();
+      }
+    })
+    .delete("/providers/catalog/:id/connect", async (c) => {
+      if (!context.providerService?.disconnectCatalog) {
+        return errorResponse(
+          501,
+          "Catalog provider connections are not configured",
+        );
+      }
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease)
+        return errorResponse(
+          409,
+          "Cannot update providers while session runs are active",
+        );
+      try {
+        await context.providerService.disconnectCatalog(c.req.param("id"));
+        await context.control.closeAllRuntimes();
+        return jsonResponse({ ok: true });
+      } catch (error) {
+        return providerMutationErrorResponse(error);
+      } finally {
+        lease.release();
+      }
+    })
+    .patch("/providers/custom/:id", async (c) => {
+      if (!context.providerService?.update)
+        return errorResponse(501, "Custom provider updates are not configured");
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease)
+        return errorResponse(
+          409,
+          "Cannot update providers while session runs are active",
+        );
+      try {
+        const provider = await context.providerService.update(
+          c.req.param("id"),
+          (await readJson(c)) as never,
+        );
         await context.control.closeAllRuntimes();
         return jsonResponse({ provider });
       } catch (error) {
@@ -133,9 +247,14 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
       }
     })
     .delete("/providers/custom/:id", async (c) => {
-      if (!context.providerService?.remove) return errorResponse(501, "Custom provider removal is not configured");
+      if (!context.providerService?.remove)
+        return errorResponse(501, "Custom provider removal is not configured");
       const lease = context.control.acquireGlobalMutation();
-      if (!lease) return errorResponse(409, "Cannot update providers while session runs are active");
+      if (!lease)
+        return errorResponse(
+          409,
+          "Cannot update providers while session runs are active",
+        );
       try {
         await context.providerService.remove(c.req.param("id"));
         await context.control.closeAllRuntimes();
@@ -147,11 +266,15 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
       }
     })
     .get("/models", async () => {
-      if (!context.modelService) return errorResponse(501, "Model service is not configured");
+      if (!context.modelService)
+        return errorResponse(501, "Model service is not configured");
       try {
         return jsonResponse({ providers: await context.modelService.list() });
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     });
 }

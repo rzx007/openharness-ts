@@ -113,7 +113,9 @@
 - [Sandbox Runtime Flow](./sandbox-runtime-flow.md)：命令和文件工具实际在哪里执行。
 - [Sandbox Runtime Design](./sandbox-runtime-design.md)：Sandbox 的详细设计。
 - [MCP HTTP Transport](./mcp-http-transport-design.md)：MCP HTTP/SSE 与鉴权。
-- [Plugin Contributions](./plugins-contributions-design.md)：插件怎样贡献 commands、skills 和其他能力。
+- [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：下一版 Native Plugin 唯一运行时契约，以及 Claude Code、Codex 等外部格式的独立转换流程。
+- [Native Plugin v1 与 Claude Code Converter 实施计划](./superpowers/plans/2026-08-25-native-plugin-and-claude-converter.md)：按 Native schema、安装激活、格式硬切、Converter core 和 Claude 转换闭环拆分的可执行任务。
+- [Plugin Contributions（待替换的当前实现）](./plugins-contributions-design.md)：仓库当前代码怎样加载旧 OpenHarness 专用插件；不代表下一版格式。
 - [Slash Commands](./slash-commands.md) 与 [Slash Command Flow](./slash-commands-flow.md)：当前命令清单、三层分流和执行入口。
 
 ### 产品界面

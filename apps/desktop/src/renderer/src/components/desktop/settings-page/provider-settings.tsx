@@ -163,11 +163,15 @@ export function ProviderSettings(): React.JSX.Element {
     })
   }, [snapshot])
   const visibleAvailableProviders = useMemo(
-    () => availableProviders.slice(0, popularProviderNames.length),
+    () =>
+      popularProviderNames.flatMap((name) => {
+        const provider = availableProviders.find((item) => item.name === name)
+        return provider ? [provider] : []
+      }),
     [availableProviders]
   )
   const additionalAvailableProviders = useMemo(
-    () => availableProviders.slice(popularProviderNames.length),
+    () => availableProviders.filter((provider) => !popularProviderNames.includes(provider.name)),
     [availableProviders]
   )
   const filteredAdditionalProviders = useMemo(() => {
@@ -660,7 +664,7 @@ function MoreProvidersDialog({
         <DialogHeader>
           <DialogTitle>更多供应商</DialogTitle>
           <DialogDescription>
-            从 OpenHarness 已支持的供应商中选择。连接时会先验证 API 密钥，再保存凭证。
+            仅展示 models.dev 中可直接填写单个 API Key 的供应商。连接时会先验证密钥，再保存凭证。
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
@@ -803,7 +807,11 @@ function ProviderRow({
           <p className="mt-1 truncate text-xs text-muted-foreground">
             {provider.currentModel ??
               providerDescriptions[provider.name] ??
-              (provider.custom ? provider.baseUrl : "OpenHarness 内置供应商")}
+              (provider.custom
+                ? provider.baseUrl
+                : provider.source === "catalog"
+                  ? "models.dev 目录供应商"
+                  : "OpenHarness 内置供应商")}
           </p>
         </div>
       </div>

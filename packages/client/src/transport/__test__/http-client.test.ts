@@ -21,7 +21,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function event(seq: number, type = "daemon.test"): SessionEventRecord {
-  return { id: `e${seq}`, seq, type, schemaVersion: 1, payload: {}, createdAt: seq };
+  return {
+    id: `e${seq}`,
+    seq,
+    type,
+    schemaVersion: 1,
+    payload: {},
+    createdAt: seq,
+  };
 }
 
 describe("OpenHarnessClient", () => {
@@ -39,19 +46,25 @@ describe("OpenHarnessClient", () => {
 
   it("calls custom provider resource endpoints", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init: init ?? {} });
       if (init?.method === "DELETE") return jsonResponse({ ok: true });
       const body = JSON.parse(String(init?.body));
-      return jsonResponse({
-        provider: {
-          name: body.id ?? "office-gateway",
-          displayName: body.displayName,
-          hasKey: Boolean(body.apiKey),
-          active: false,
-          custom: true,
+      return jsonResponse(
+        {
+          provider: {
+            name: body.id ?? "office-gateway",
+            displayName: body.displayName,
+            hasKey: Boolean(body.apiKey),
+            active: false,
+            custom: true,
+          },
         },
-      }, init?.method === "POST" ? 201 : 200);
+        init?.method === "POST" ? 201 : 200,
+      );
     };
     const client = new OpenHarnessClient({
       baseUrl: "http://127.0.0.1:3456",
@@ -71,14 +84,26 @@ describe("OpenHarnessClient", () => {
       name: "office-gateway",
       custom: true,
     });
-    await expect(client.updateCustomProvider("office-gateway", {
-      ...input,
-      displayName: "Office AI",
-    })).resolves.toMatchObject({ displayName: "Office AI" });
-    await expect(client.removeCustomProvider("office-gateway")).resolves.toBeUndefined();
+    await expect(
+      client.connectCatalogProvider("remote", "catalog-secret"),
+    ).resolves.toBeDefined();
+    await expect(
+      client.disconnectCatalogProvider("remote"),
+    ).resolves.toBeUndefined();
+    await expect(
+      client.updateCustomProvider("office-gateway", {
+        ...input,
+        displayName: "Office AI",
+      }),
+    ).resolves.toMatchObject({ displayName: "Office AI" });
+    await expect(
+      client.removeCustomProvider("office-gateway"),
+    ).resolves.toBeUndefined();
 
     expect(calls.map((call) => [call.url, call.init.method])).toEqual([
       ["http://127.0.0.1:3456/providers/custom", "POST"],
+      ["http://127.0.0.1:3456/providers/catalog/remote/connect", "POST"],
+      ["http://127.0.0.1:3456/providers/catalog/remote/connect", "DELETE"],
       ["http://127.0.0.1:3456/providers/custom/office-gateway", "PATCH"],
       ["http://127.0.0.1:3456/providers/custom/office-gateway", "DELETE"],
     ]);
@@ -217,20 +242,24 @@ describe("OpenHarnessClient", () => {
   });
 
   it("loads capabilities without auth and rejects an incompatible server", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({
-      serverVersion: "0.4.0",
-      protocol: { version: 1 },
-      features: { jobs: 1 },
-    }));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        serverVersion: "0.4.0",
+        protocol: { version: 1 },
+        features: { jobs: 1 },
+      }),
+    );
     const client = new OpenHarnessClient({
       baseUrl: "http://127.0.0.1:3456",
       token: "secret",
       fetch: fetchImpl as typeof fetch,
     });
 
-    await expect(client.capabilities({
-      support: { version: 2 },
-    })).rejects.toBeInstanceOf(IncompatibleProtocolError);
+    await expect(
+      client.capabilities({
+        support: { version: 2 },
+      }),
+    ).rejects.toBeInstanceOf(IncompatibleProtocolError);
     expect(fetchImpl).toHaveBeenCalledWith(
       "http://127.0.0.1:3456/capabilities",
       expect.objectContaining({ headers: {} }),
@@ -439,15 +468,21 @@ describe("OpenHarnessClient", () => {
       }) as typeof fetch,
     });
 
-    await expect(client.createBackgroundShell({
-      sessionId: "s1",
-      command: "pnpm test",
-      description: "tests",
-    })).resolves.toEqual({ jobId: "task-1", snapshot });
+    await expect(
+      client.createBackgroundShell({
+        sessionId: "s1",
+        command: "pnpm test",
+        description: "tests",
+      }),
+    ).resolves.toEqual({ jobId: "task-1", snapshot });
     expect(calls[0]?.url).toBe("http://127.0.0.1:3456/background-shells");
     expect(calls[0]?.init).toMatchObject({
       method: "POST",
-      body: JSON.stringify({ sessionId: "s1", command: "pnpm test", description: "tests" }),
+      body: JSON.stringify({
+        sessionId: "s1",
+        command: "pnpm test",
+        description: "tests",
+      }),
     });
   });
 

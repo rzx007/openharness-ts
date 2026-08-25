@@ -7,7 +7,8 @@ export interface SettingsService {
   get(): Promise<Record<string, unknown>> | Record<string, unknown>;
   patch(
     patch: Record<string, unknown>,
-  ): Promise<{ settings: Record<string, unknown>; restartRuntimes?: boolean }>
+  ):
+    | Promise<{ settings: Record<string, unknown>; restartRuntimes?: boolean }>
     | { settings: Record<string, unknown>; restartRuntimes?: boolean };
 }
 
@@ -19,6 +20,7 @@ export interface ProviderInfo {
   local?: boolean;
   custom?: boolean;
   requiresApiKey?: boolean;
+  source?: "builtin" | "catalog" | "custom" | "subscription";
 }
 
 export interface CustomProviderModelInput {
@@ -39,8 +41,16 @@ export interface CustomProviderInput {
 export interface ProviderService {
   list(): Promise<ProviderInfo[]> | ProviderInfo[];
   create?(input: CustomProviderInput): Promise<ProviderInfo> | ProviderInfo;
-  update?(id: string, input: CustomProviderInput): Promise<ProviderInfo> | ProviderInfo;
+  update?(
+    id: string,
+    input: CustomProviderInput,
+  ): Promise<ProviderInfo> | ProviderInfo;
   remove?(id: string): Promise<void> | void;
+  connectCatalog?(
+    id: string,
+    apiKey: string,
+  ): Promise<ProviderInfo> | ProviderInfo;
+  disconnectCatalog?(id: string): Promise<void> | void;
 }
 
 export interface ModelInfo {
@@ -94,10 +104,20 @@ export interface MemoryEntryRecord {
 }
 
 export interface MemoryService {
-  list(input: { cwd: string }): Promise<{ directory: string; entries: MemoryEntryRecord[] }>
+  list(input: {
+    cwd: string;
+  }):
+    | Promise<{ directory: string; entries: MemoryEntryRecord[] }>
     | { directory: string; entries: MemoryEntryRecord[] };
-  get(input: { cwd: string; id: string }): Promise<MemoryEntryRecord | null> | MemoryEntryRecord | null;
-  add(input: { cwd: string; content: string; tags?: string[] }): Promise<MemoryEntryRecord> | MemoryEntryRecord;
+  get(input: {
+    cwd: string;
+    id: string;
+  }): Promise<MemoryEntryRecord | null> | MemoryEntryRecord | null;
+  add(input: {
+    cwd: string;
+    content: string;
+    tags?: string[];
+  }): Promise<MemoryEntryRecord> | MemoryEntryRecord;
   remove(input: { cwd: string; id: string }): Promise<boolean> | boolean;
 }
 
@@ -115,13 +135,22 @@ export interface AuthStatus {
 
 export interface AuthService {
   status(): Promise<AuthStatus> | AuthStatus;
-  login(input: { provider: string; apiKey?: string }): Promise<{ message: string }> | { message: string };
-  logout(input: { provider: string }): Promise<{ message: string }> | { message: string };
+  login(input: {
+    provider: string;
+    apiKey?: string;
+  }): Promise<{ message: string }> | { message: string };
+  logout(input: {
+    provider: string;
+  }): Promise<{ message: string }> | { message: string };
 }
 
 export interface ContextService {
-  preview(input: { cwd: string }): Promise<{ report: string }> | { report: string };
-  status(input: { cwd: string }): Promise<{ report: string }> | { report: string };
+  preview(input: {
+    cwd: string;
+  }): Promise<{ report: string }> | { report: string };
+  status(input: {
+    cwd: string;
+  }): Promise<{ report: string }> | { report: string };
 }
 
 export interface DreamStartResult {
@@ -154,7 +183,9 @@ export interface OutputStyleService {
 }
 
 export interface ProjectInitService {
-  init(input: { cwd: string }): Promise<{ report: string }> | { report: string };
+  init(input: {
+    cwd: string;
+  }): Promise<{ report: string }> | { report: string };
 }
 
 export interface PluginInfo {
@@ -168,12 +199,16 @@ export interface PluginInfo {
 }
 
 export interface PluginService {
-  list(input: { cwd: string }): Promise<{ plugins: PluginInfo[]; warnings: string[] }>
+  list(input: {
+    cwd: string;
+  }):
+    | Promise<{ plugins: PluginInfo[]; warnings: string[] }>
     | { plugins: PluginInfo[]; warnings: string[] };
   setEnabled(input: {
     name: string;
     enabled: boolean;
-  }): Promise<{ message: string; restartRuntimes?: boolean }>
+  }):
+    | Promise<{ message: string; restartRuntimes?: boolean }>
     | { message: string; restartRuntimes?: boolean };
 }
 
@@ -185,16 +220,31 @@ export interface AgentPersonaInfo {
 }
 
 export interface AgentPersonaService {
-  list(): Promise<{ agents: AgentPersonaInfo[] }> | { agents: AgentPersonaInfo[] };
+  list():
+    Promise<{ agents: AgentPersonaInfo[] }> | { agents: AgentPersonaInfo[] };
 }
 
 export interface HooksService {
-  list(input: { cwd: string; sessionId?: string }): Promise<{ hooks: HookInfo[] }> | { hooks: HookInfo[] };
+  list(input: {
+    cwd: string;
+    sessionId?: string;
+  }): Promise<{ hooks: HookInfo[] }> | { hooks: HookInfo[] };
 }
 
 export interface GitService {
-  diff(input: { cwd: string; full?: boolean }): Promise<{ output: string }> | { output: string };
-  branch(input: { cwd: string; list?: boolean }): Promise<{ output: string }> | { output: string };
-  status(input: { cwd: string }): Promise<{ output: string }> | { output: string };
-  commit(input: { cwd: string; message: string }): Promise<{ output: string }> | { output: string };
+  diff(input: {
+    cwd: string;
+    full?: boolean;
+  }): Promise<{ output: string }> | { output: string };
+  branch(input: {
+    cwd: string;
+    list?: boolean;
+  }): Promise<{ output: string }> | { output: string };
+  status(input: {
+    cwd: string;
+  }): Promise<{ output: string }> | { output: string };
+  commit(input: {
+    cwd: string;
+    message: string;
+  }): Promise<{ output: string }> | { output: string };
 }

@@ -113,6 +113,59 @@ describe("buildDesktopProviderSnapshot", () => {
     })
   })
 
+  it("treats models.dev providers as credential-backed catalog connections", () => {
+    const snapshot = buildDesktopProviderSnapshot({
+      providers: [
+        {
+          name: "remote",
+          displayName: "Remote AI",
+          hasKey: true,
+          active: false,
+          source: "catalog",
+        },
+      ],
+      auth: {
+        codex: { configured: false, state: "missing", source: "none" },
+        storedProviders: ["remote"],
+        envProviders: [],
+      },
+      settings: {
+        customProviders: [
+          {
+            id: "remote",
+            displayName: "Remote AI",
+            baseUrl: "https://remote.example/v1",
+            apiFormat: "openai",
+            source: "models.dev",
+            models: [{ id: "remote-chat", displayName: "Remote Chat" }],
+          },
+        ],
+      },
+      models: [
+        {
+          name: "remote",
+          displayName: "Remote AI",
+          models: [
+            {
+              id: "remote-chat",
+              label: "Remote Chat",
+              provider: "Remote AI",
+              providerName: "remote",
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(snapshot.providers[0]).toMatchObject({
+      source: "catalog",
+      connected: true,
+      credentialSource: "credentials",
+      models: [{ id: "remote-chat", label: "Remote Chat" }],
+    })
+    expect(snapshot.providers[0]).not.toHaveProperty("custom")
+  })
+
   it("does not treat Codex as connected when external auth is missing", () => {
     const snapshot = buildDesktopProviderSnapshot({
       providers: [{ name: "codex", displayName: "Codex Subscription", hasKey: true, active: true }],
