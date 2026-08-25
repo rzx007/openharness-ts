@@ -681,12 +681,10 @@ function MoreProvidersDialog({
 }): React.JSX.Element {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(42rem,calc(100vh-2rem))] flex-col sm:max-w-2xl">
+      <DialogContent className="flex max-h-[min(38rem,calc(100vh-2rem))] flex-col gap-3 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>更多供应商</DialogTitle>
-          <DialogDescription>
-            仅展示 models.dev 中可直接填写单个 API Key 的供应商。连接时会先验证密钥，再保存凭证。
-          </DialogDescription>
+          <DialogDescription>选择供应商后填写 API Key，验证通过后才会保存。</DialogDescription>
         </DialogHeader>
         <div className="relative">
           <Search
@@ -701,27 +699,38 @@ function MoreProvidersDialog({
             className="pl-9"
           />
         </div>
-        <ScrollArea horizontal={false} className="min-h-0 flex-1 pr-3">
+        <ScrollArea horizontal={false} className="min-h-0 flex-1 pr-2">
           {providers.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">
               没有找到匹配的供应商。
             </p>
           ) : (
-            <div className="px-1">
-              {providers.map((provider, index) => (
-                <div key={provider.name}>
-                  {index > 0 ? <Separator /> : null}
-                  <ProviderRow
-                    provider={provider}
-                    busy={busyProvider === provider.name}
-                    locked={busyProvider !== null}
-                    onActivate={() => undefined}
-                    onConnect={() => onConnect(provider)}
-                    onDisconnect={() => undefined}
-                    onEditCustom={() => undefined}
-                    onRemoveCustom={() => undefined}
-                  />
-                </div>
+            <div className="flex flex-col gap-0.5 px-1 py-1">
+              {providers.map((provider) => (
+                <button
+                  key={provider.name}
+                  type="button"
+                  disabled={busyProvider !== null}
+                  className={cn(
+                    "flex h-10 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm transition-colors outline-none",
+                    "hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+                    "disabled:pointer-events-none disabled:opacity-50",
+                    busyProvider === provider.name && "bg-muted"
+                  )}
+                  aria-label={`连接 ${providerDisplayName(provider)}`}
+                  onClick={() => onConnect(provider)}
+                >
+                  <ProviderIcon provider={provider} compact />
+                  <span className="min-w-0 flex-1 truncate font-medium">
+                    {providerDisplayName(provider)}
+                  </span>
+                  {busyProvider === provider.name ? (
+                    <LoaderCircle
+                      aria-label="正在连接"
+                      className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+                    />
+                  ) : null}
+                </button>
               ))}
             </div>
           )}
@@ -890,9 +899,11 @@ function ProviderRow({
 function ProviderIcon({
   provider,
   emphasized = false,
+  compact = false,
 }: {
   provider?: DesktopProviderInfo
   emphasized?: boolean
+  compact?: boolean
 }): React.JSX.Element {
   const BrandIcon = provider ? resolveProviderBrandIcon(provider.name) : undefined
 
@@ -900,7 +911,11 @@ function ProviderIcon({
     <span
       className={cn(
         "grid shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground ring-1 ring-foreground/10",
-        emphasized ? "size-12 shadow-xs [&_svg]:size-5" : "size-10 [&_svg]:size-4"
+        compact
+          ? "size-5 rounded-sm bg-transparent ring-0 [&_svg]:size-3.5"
+          : emphasized
+            ? "size-12 shadow-xs [&_svg]:size-5"
+            : "size-10 [&_svg]:size-4"
       )}
     >
       {BrandIcon ? <ProviderBrandMark icon={BrandIcon} /> : <Sparkles aria-hidden="true" />}
