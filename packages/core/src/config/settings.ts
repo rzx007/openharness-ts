@@ -139,10 +139,16 @@ export async function saveSettings(settings: Settings): Promise<void> {
   // 确保配置目录存在，若不存在则递归创建
   await mkdir(configDir, { recursive: true });
 
+  // apiKey 只应来自环境变量或 CredentialStorage，不能落盘。
+  // loadFromEnv 会把它合并进内存 settings；若原样写入，任意 save 都会把密钥写进 settings.json。
+  const { apiKey: _apiKey, ...persisted } = settings as Settings & {
+    apiKey?: string;
+  };
+
   // 将设置对象写入 JSON 文件，使用 UTF-8 编码和缩进格式化
   await writeFile(
     configPath,
-    JSON.stringify({ ...settings, _formatVersion: 1 }, null, 2),
+    JSON.stringify({ ...persisted, _formatVersion: 1 }, null, 2),
     "utf-8",
   );
 }
@@ -158,9 +164,12 @@ export async function saveProjectSettings(
   const configDir = getProjectConfigDir(projectRoot);
   const configPath = getProjectSettingsFilePath(projectRoot);
   await mkdir(configDir, { recursive: true });
+  const { apiKey: _apiKey, ...persisted } = settings as Partial<Settings> & {
+    apiKey?: string;
+  };
   await writeFile(
     configPath,
-    JSON.stringify({ ...settings, _formatVersion: 1 }, null, 2),
+    JSON.stringify({ ...persisted, _formatVersion: 1 }, null, 2),
     "utf-8",
   );
 }

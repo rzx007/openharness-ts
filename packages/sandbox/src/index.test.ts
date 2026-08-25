@@ -419,6 +419,23 @@ describe("docker backend argv builders", () => {
     expect(argv.at(-4)).toBe("custom:latest");
   });
 
+  it("mounts the workspace read-only when allowWrite is empty", () => {
+    const cwd = resolve("D:/repo");
+    const containerCwd = toContainerWorkspacePath(cwd);
+    const argv = buildDockerRunArgs({
+      sessionId: "ro",
+      cwd: "D:/repo",
+      config: {
+        enabled: true,
+        backend: "docker",
+        filesystem: { allowRead: ["."], allowWrite: [], extraAllowedRoots: [] },
+      },
+    });
+
+    expect(argv).toContain(`${cwd}:${containerCwd}:ro`);
+    expect(argv).not.toContain(`${cwd}:${containerCwd}`);
+  });
+
   it("defaults docker networking to none", () => {
     const argv = buildDockerRunArgs({
       sessionId: "s",
