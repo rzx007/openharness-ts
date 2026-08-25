@@ -28,7 +28,7 @@
 - LSP、Output Styles、Themes、Monitors；
 - Workflows、Channels、Providers、UI contributions；
 - 第三方 Converter；
-- Native Tool 激活。v1 schema 可以识别 Tool component，但在隔离 Runtime 完成前必须返回 `unsupported`/`blocked`；
+- Native Tool 激活。v1 schema 可以识别 Tool component，但在隔离 Runtime 完成前必须返回 `unsupported`/`blocked`；后续计划见 `docs/superpowers/plans/2026-08-25-native-tool-isolated-runtime.md`；
 - 自动转换旧 OpenHarness 插件。
 
 ## 全局约束

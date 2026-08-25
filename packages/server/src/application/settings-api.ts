@@ -196,6 +196,15 @@ export interface PluginInfo {
   enabled: boolean;
   installation: "installed" | "missing" | "invalid";
   activation: "inactive" | "active" | "partial" | "reload-required";
+  toolRuntime?: {
+    state: "inactive" | "reload-required" | "starting" | "active" | "degraded" | "error";
+    declaredEntries: number;
+    activatableEntries: number;
+    hostCount: number;
+    registeredToolCount: number;
+    lastStartedAt?: string;
+    lastError?: string;
+  };
   inventory: Record<string, number>;
   permissions: { requested: string[]; approved: string[]; missing: string[] };
   diagnostics: Array<{ severity: "info" | "warning" | "error"; phase: string; code: string; message: string; path?: string }>;

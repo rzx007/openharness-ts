@@ -31,7 +31,7 @@ describe("OpenHarnessPluginManifestV1Schema", () => {
     expect(OpenHarnessPluginManifestV1Schema.parse(input).metadata).toEqual(input.metadata);
   });
 
-  it("recognizes tools without claiming that they are activatable", () => {
+  it("recognizes string and configured Native Tool declarations", () => {
     const input = {
       ...validManifest,
       components: {

@@ -1,0 +1,86 @@
+import type { IToolRegistry } from "@openharness/core";
+import type { LoadedNativePlugin, PluginDiagnostic } from "@openharness/plugins";
+import { NativeToolHost, NativeToolHostError, type NativeToolHostState } from "./tool-host.js";
+import { beginNativeToolRuntimeStatus } from "./status.js";
+
+export interface NativeToolActivationResult {
+  pluginId: string;
+  state: NativeToolHostState;
+  toolNames: string[];
+  diagnostics: PluginDiagnostic[];
+  host?: NativeToolHost;
+}
+
+export async function activateNativePluginTools(
+  plugin: LoadedNativePlugin,
+  context: {
+    cwd: string;
+    toolRegistry: IToolRegistry;
+    addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
+    onLog?: (message: string) => void;
+    callTimeoutMs?: number;
+  },
+): Promise<NativeToolActivationResult> {
+  if (!plugin.components.tools?.value?.length) {
+    return { pluginId: plugin.manifest.id, state: "inactive", toolNames: [], diagnostics: [] };
+  }
+  const toolNames: string[] = [];
+  const runtimeStatus = beginNativeToolRuntimeStatus(plugin.manifest.id, plugin.root);
+  const unregisterAll = () => {
+    for (const name of toolNames.splice(0)) context.toolRegistry.unregister?.(name);
+  };
+  const host = new NativeToolHost(plugin, {
+    callTimeoutMs: context.callTimeoutMs,
+    onLog: (event) => context.onLog?.(`[native-tool:${event.level}] ${event.message}`),
+    onCrash: (error) => {
+      unregisterAll();
+      runtimeStatus.update({ state: "error", toolNames: [], lastError: error.message });
+      context.onLog?.(`[native-tool:error] ${plugin.manifest.id}: ${error.message}`);
+    },
+  });
+  context.addCleanup(async () => {
+    unregisterAll();
+    await host.stop();
+    runtimeStatus.remove();
+  }, () => {
+    unregisterAll();
+    host.stopSync();
+    runtimeStatus.remove();
+  });
+  try {
+    const definitions = await host.start();
+    for (const definition of definitions) {
+      if (context.toolRegistry.has(definition.name)) {
+        throw new NativeToolHostError("tool_name_conflict", `Native Tool name is already registered: ${definition.name}`);
+      }
+      context.toolRegistry.register({
+        ...definition,
+        execute: (input, toolContext) => host.call(definition.name, input, {
+          cwd: toolContext.cwd || context.cwd,
+          ...(toolContext.sessionId ? { sessionId: toolContext.sessionId } : {}),
+        }, toolContext.abortSignal),
+      });
+      toolNames.push(definition.name);
+    }
+    runtimeStatus.update({ state: "active", toolNames: [...toolNames] });
+    return { pluginId: plugin.manifest.id, state: host.state, toolNames: [...toolNames], diagnostics: [], host };
+  } catch (error) {
+    unregisterAll();
+    await host.stop().catch(() => undefined);
+    const hostError = error instanceof NativeToolHostError ? error : new NativeToolHostError("tool_register_failed", String(error), { cause: error });
+    runtimeStatus.update({ state: "error", toolNames: [], lastError: hostError.message });
+    return {
+      pluginId: plugin.manifest.id,
+      state: "error",
+      toolNames: [],
+      diagnostics: [{
+        severity: "error",
+        phase: "activate",
+        code: hostError.code,
+        message: hostError.message,
+        pluginId: plugin.manifest.id,
+        component: "tools",
+      }],
+    };
+  }
+}

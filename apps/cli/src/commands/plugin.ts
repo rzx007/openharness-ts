@@ -18,7 +18,12 @@ export function createPluginCommand(): Command {
   cmd.command("list").option("--cwd <path>").action(async (options) => {
     const result = await (await client()).listPlugins({ cwd: resolve(options.cwd ?? process.cwd()) });
     if (!result.plugins.length) return console.log("No Native Plugins installed.");
-    for (const plugin of result.plugins) console.log(`${plugin.identity.id}@${plugin.identity.version} ${plugin.scope} ${plugin.enabled ? "enabled" : "disabled"} ${plugin.activation}`);
+    for (const plugin of result.plugins) {
+      const tools = plugin.toolRuntime
+        ? ` tools=${plugin.toolRuntime.activatableEntries}/${plugin.toolRuntime.declaredEntries}:${plugin.toolRuntime.state}`
+        : "";
+      console.log(`${plugin.identity.id}@${plugin.identity.version} ${plugin.scope} ${plugin.enabled ? "enabled" : "disabled"} ${plugin.activation}${tools}`);
+    }
   });
   cmd.command("validate").argument("<path>").action(async (path) => {
     const result = await validateNativePlugin(resolve(path));

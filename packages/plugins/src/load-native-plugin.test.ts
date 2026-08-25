@@ -16,10 +16,14 @@ describe("loadNativePlugin", () => {
     expect(loaded.components.hooks?.status).toBe("invalid");
   });
 
-  it("recognizes tools but never imports them", async () => {
+  it("loads tool metadata but never imports tool code", async () => {
     const validation = await validateNativePlugin(fixture("unsupported-tool"));
     const loaded = await loadNativePlugin(validation.plugin!);
-    expect(loaded.components.tools?.status).toBe("unsupported");
-    expect(loaded.diagnostics.map((item) => item.code)).toContain("native_tools_not_activatable");
+    expect(loaded.components.tools?.status).toBe("loaded");
+    expect(loaded.components.tools?.value?.[0]).toMatchObject({
+      declaredEntry: "./tools/index.js",
+      runtime: "node",
+      requestedPermissions: [],
+    });
   });
 });

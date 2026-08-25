@@ -7,6 +7,7 @@ export * from "./components/agents.js";
 export * from "./components/hooks.js";
 export * from "./components/mcp.js";
 export * from "./components/skills.js";
+export * from "./components/tools.js";
 export * from "./load-native-plugin.js";
 export * from "./installation/cache.js";
 export * from "./installation/installer.js";

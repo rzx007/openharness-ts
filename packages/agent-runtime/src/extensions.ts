@@ -9,6 +9,7 @@ import {
   type LoadedNativePlugin,
 } from "@openharness/plugins";
 import { SkillLoader, SkillRegistry, findProjectSkillDirs } from "@openharness/skills";
+import { activateNativePluginTools, type NativeToolActivationResult } from "./native-tools/activate.js";
 
 export interface OpenHarnessExtensionContext {
   cwd: string;
@@ -66,9 +67,23 @@ export async function discoverOpenHarnessExtensions(cwd: string, settings: Setti
 
 export async function configureDiscoveredExtensions(
   discovery: OpenHarnessExtensionDiscovery,
-  context: Pick<OpenHarnessExtensionContext, "toolRegistry" | "hookExecutor">,
-): Promise<void> {
+  context: Pick<OpenHarnessExtensionContext, "cwd" | "toolRegistry" | "hookExecutor"> & {
+    addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
+  },
+): Promise<NativeToolActivationResult[]> {
+  const toolActivations: NativeToolActivationResult[] = [];
   for (const plugin of discovery.plugins) {
     for (const hook of plugin.components.hooks?.value ?? []) context.hookExecutor.register(hook);
+    const activation = await activateNativePluginTools(plugin, {
+      cwd: context.cwd,
+      toolRegistry: context.toolRegistry,
+      addCleanup: (cleanup, cleanupSync) => context.addCleanup(cleanup, cleanupSync),
+      onLog: (message) => process.stderr.write(`${message}\n`),
+    });
+    toolActivations.push(activation);
+    for (const diagnostic of activation.diagnostics) {
+      process.stderr.write(`[plugins] ${plugin.manifest.id}: ${diagnostic.message}\n`);
+    }
   }
+  return toolActivations;
 }

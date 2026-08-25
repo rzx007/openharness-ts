@@ -92,7 +92,12 @@ export async function composeOpenHarnessAgent(
     agentDefinitions: discovery.agentDefinitions,
   });
   try {
-    await configureDiscoveredExtensions(discovery, runtime);
+    await configureDiscoveredExtensions(discovery, {
+      cwd,
+      toolRegistry: runtime.toolRegistry,
+      hookExecutor: runtime.hookExecutor,
+      addCleanup: (cleanup, cleanupSync) => runtime.addCleanup(cleanup, cleanupSync),
+    });
     for (const extension of options.extensions ?? []) {
       await extension.setup({
         cwd,

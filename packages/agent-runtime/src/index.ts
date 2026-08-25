@@ -29,6 +29,20 @@ export type {
   OpenHarnessExtensionContext,
 } from "./extensions.js";
 export { discoverOpenHarnessExtensions } from "./extensions.js";
+export {
+  activateNativePluginTools,
+  type NativeToolActivationResult,
+} from "./native-tools/activate.js";
+export {
+  NativeToolHost,
+  NativeToolHostError,
+  type NativeToolHostOptions,
+  type NativeToolHostState,
+} from "./native-tools/tool-host.js";
+export {
+  getNativeToolRuntimeSnapshot,
+  type NativeToolRuntimeSnapshot,
+} from "./native-tools/status.js";
 export type {
   AgentChildEnvironmentLease,
   AgentChildEnvironmentProvider,

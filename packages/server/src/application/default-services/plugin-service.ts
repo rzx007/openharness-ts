@@ -1,6 +1,8 @@
 import { getInstalledPluginStorePath } from "@openharness/core";
+import { getNativeToolRuntimeSnapshot } from "@openharness/agent-runtime";
 import {
   installLocalNativePlugin,
+  loadNativePlugin,
   readInstalledPluginStore,
   updateInstalledPluginStore,
   validateNativePlugin,
@@ -20,6 +22,8 @@ export function createDefaultPluginService(_ref: DaemonSettingsRef): PluginServi
       for (const record of Object.values(store.plugins).filter((item) => applies(item, cwd))) {
         const validation = await validateNativePlugin(record.cachePath);
         const manifest = validation.plugin?.manifest;
+        const loaded = validation.plugin ? await loadNativePlugin(validation.plugin) : undefined;
+        const liveTools = getNativeToolRuntimeSnapshot(validation.plugin?.root ?? record.cachePath);
         const inventory: Record<string, number> = {};
         if (manifest) for (const [kind, values] of Object.entries(manifest.components)) inventory[kind] = values.length;
         plugins.push({
@@ -35,13 +39,26 @@ export function createDefaultPluginService(_ref: DaemonSettingsRef): PluginServi
           enabled: record.enabled,
           installation: validation.status === "valid" ? "installed" : "invalid",
           activation: record.enabled ? "reload-required" : "inactive",
+          ...(manifest?.components.tools ? {
+            toolRuntime: {
+              state: !record.enabled
+                ? "inactive" as const
+                : liveTools.hostCount > 0 ? liveTools.state : "reload-required" as const,
+              declaredEntries: manifest.components.tools.length,
+              activatableEntries: loaded?.components.tools?.value?.length ?? 0,
+              hostCount: liveTools.hostCount,
+              registeredToolCount: liveTools.registeredToolCount,
+              ...(liveTools.lastStartedAt ? { lastStartedAt: liveTools.lastStartedAt } : {}),
+              ...(liveTools.lastError ? { lastError: liveTools.lastError } : {}),
+            },
+          } : {}),
           inventory,
           permissions: {
             requested: record.requestedPermissions,
             approved: record.approvedPermissions,
             missing: record.requestedPermissions.filter((item) => !record.approvedPermissions.includes(item)),
           },
-          diagnostics: validation.diagnostics,
+          diagnostics: [...validation.diagnostics, ...(loaded?.diagnostics ?? [])],
         });
       }
       return { plugins, warnings: [] };

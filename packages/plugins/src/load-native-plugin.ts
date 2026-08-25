@@ -2,6 +2,7 @@ import { loadNativeAgents } from "./components/agents.js";
 import { loadNativeHooks } from "./components/hooks.js";
 import { loadNativeMcpServers } from "./components/mcp.js";
 import { loadNativeSkills } from "./components/skills.js";
+import { loadNativeToolMetadata } from "./components/tools.js";
 import type {
   LoadedNativePlugin,
   NativePluginComponentKind,
@@ -28,11 +29,7 @@ export async function loadNativePlugin(plugin: ValidatedNativePlugin): Promise<L
   if (plugin.manifest.components.hooks) components.hooks = await loadNativeHooks(plugin);
   if (plugin.manifest.components.mcpServers) components.mcpServers = await loadNativeMcpServers(plugin);
   if (plugin.manifest.components.tools) {
-    components.tools = { status: "unsupported", diagnostics: [{
-      severity: "warning", phase: "load", code: "native_tools_not_activatable",
-      message: "Native tools are recognized but cannot run before an isolated tool runtime exists",
-      pluginId: plugin.manifest.id, component: "tools",
-    }] };
+    components.tools = await loadNativeToolMetadata(plugin);
   }
   for (const kind of deferredKinds) {
     if (plugin.manifest.components[kind]) {
@@ -46,7 +43,7 @@ export async function loadNativePlugin(plugin: ValidatedNativePlugin): Promise<L
   return {
     manifest: plugin.manifest,
     root: plugin.root,
-    status: results.some((result) => result.status !== "loaded") ? "degraded" : "loaded",
+    status: results.some((result) => result.status !== "loaded" || result.diagnostics.length > 0) ? "degraded" : "loaded",
     components,
     diagnostics,
   };

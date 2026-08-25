@@ -10,7 +10,8 @@ import type {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createOpenHarnessRuntime } from "./default-runtime.js";
-import { discoverOpenHarnessExtensions } from "./extensions.js";
+import { configureDiscoveredExtensions, discoverOpenHarnessExtensions } from "./extensions.js";
+import { getNativeToolRuntimeSnapshot } from "./native-tools/status.js";
 
 const BASE_SETTINGS: Settings = {
   model: "host-model",
@@ -60,6 +61,48 @@ function writeProjectAgentPlugin(cwd: string, suffix: string, model: string): vo
     approvedPermissions: [], installedAt: "now", updatedAt: "now",
   };
   writeFileSync(storePath, JSON.stringify(store));
+}
+
+function writeProjectToolPlugin(cwd: string): void {
+  const pluginDir = join(tempRoot, "cache", "runtime-tool");
+  mkdirSync(join(pluginDir, ".openharness-plugin"), { recursive: true });
+  mkdirSync(join(pluginDir, "tools"), { recursive: true });
+  writeFileSync(join(pluginDir, ".openharness-plugin", "plugin.json"), JSON.stringify({
+    schemaVersion: 1,
+    id: "dev.openharness.runtime-tool",
+    name: "runtime-tool",
+    version: "1.0.0",
+    components: { tools: ["./tools/index.mjs"] },
+  }));
+  writeFileSync(join(pluginDir, "tools", "index.mjs"), `
+    export async function registerTools() {
+      return [{
+        name: "InstalledPluginEcho", description: "installed plugin echo", inputSchema: {},
+        async invoke(input) { return { content: [{ type: "text", text: String(input.value) }] }; }
+      }];
+    }
+  `);
+  const storePath = join(tempRoot, "config", "plugins", "installed.json");
+  mkdirSync(join(storePath, ".."), { recursive: true });
+  writeFileSync(storePath, JSON.stringify({
+    schemaVersion: 1,
+    revision: 1,
+    plugins: {
+      [`project:${cwd}:dev.openharness.runtime-tool`]: {
+        id: "dev.openharness.runtime-tool",
+        scope: "project",
+        projectDir: cwd,
+        enabled: true,
+        currentVersion: "1.0.0",
+        cachePath: pluginDir,
+        origin: "native",
+        requestedPermissions: [],
+        approvedPermissions: [],
+        installedAt: "now",
+        updatedAt: "now",
+      },
+    },
+  }));
 }
 
 function createExecutionContext(
@@ -179,5 +222,43 @@ describe("extension agent definition scoping", () => {
     } finally {
       await Promise.all([runtimeA.close(), runtimeB.close()]);
     }
+  });
+});
+
+describe("installed Native Tool activation", () => {
+  it("discovers, invokes, and removes a Tool with its owning runtime", async () => {
+    const cwd = join(tempRoot, "tool-workspace");
+    writeProjectToolPlugin(cwd);
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      cwd,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+      },
+    });
+    const activations = await configureDiscoveredExtensions(discovery, {
+      cwd,
+      toolRegistry: runtime.toolRegistry,
+      hookExecutor: runtime.hookExecutor,
+      addCleanup: (cleanup, cleanupSync) => runtime.addCleanup(cleanup, cleanupSync),
+    });
+    expect(activations[0]).toMatchObject({ state: "active", toolNames: ["InstalledPluginEcho"] });
+    expect(getNativeToolRuntimeSnapshot(discovery.plugins[0]!.root)).toMatchObject({
+      state: "active",
+      hostCount: 1,
+      registeredToolCount: 1,
+      toolNames: ["InstalledPluginEcho"],
+    });
+    await expect(runtime.toolRegistry.get("InstalledPluginEcho")!.execute({ value: "hello" }, { cwd })).resolves.toEqual({
+      content: [{ type: "text", text: "hello" }],
+    });
+    await runtime.close();
+    expect(runtime.toolRegistry.has("InstalledPluginEcho")).toBe(false);
+    expect(getNativeToolRuntimeSnapshot(discovery.plugins[0]!.root)).toMatchObject({ state: "inactive", hostCount: 0 });
   });
 });

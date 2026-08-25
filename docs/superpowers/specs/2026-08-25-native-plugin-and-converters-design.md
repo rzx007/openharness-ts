@@ -306,7 +306,7 @@ manifest 描述包本身，不保存：
 | Hooks | 在 Runtime 事件上执行声明动作 | 必须支持 |
 | MCP Servers | 通过标准协议提供外部工具 | 必须支持 |
 | LSP Servers | 提供诊断、定义、引用和代码导航 | 后续阶段 |
-| Native Tools | 提供 OpenHarness 原生工具 | 新隔离模型后支持 |
+| Native Tools | 提供 OpenHarness 原生工具 | Node Tool 已通过独立子进程支持；Wasm 待实现 |
 | Workflows | 提供 DAG/步骤执行模板 | 后续阶段 |
 | Channels | 提供外部消息入口和回复能力 | 后续阶段 |
 | Providers | 增加模型 Provider 或认证适配 | 后续阶段 |
@@ -965,7 +965,7 @@ mcp_file
 ### 阶段 3：原生高级组件
 
 1. LSP、Output Styles、`bin/` 和 plugin settings。
-2. 隔离 Native Tools。
+2. 隔离 Native Tools，见 `docs/superpowers/plans/2026-08-25-native-tool-isolated-runtime.md`。
 3. Workflows、Channels、Providers 和 UI contributions。
 4. Claude Converter 对应组件跟进。
 5. Desktop 插件和转换报告管理页。
@@ -1037,7 +1037,7 @@ CI 使用固定离线 fixture，不实时下载外部 Marketplace。
 4. 安装包、持久 data 和 Runtime 激活状态分离。
 5. enable/disable/reload 后不残留 Hook、连接或进程。
 6. 当前根级旧 manifest 和 `tools_dir` 不再加载。
-7. Native Tool 未完成隔离前不能从第三方插件激活。
+7. Native Node Tool 只能通过独立 Tool Host 子进程激活，daemon 主进程不得直接 import；Wasm Tool 暂不激活。
 
 ### 27.2 Converter core
 

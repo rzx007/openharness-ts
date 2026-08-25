@@ -16,6 +16,16 @@ export interface NativeToolComponent {
   permissions?: string[];
 }
 
+export interface NativeToolMetadata {
+  /** Manifest-relative entry kept for diagnostics and display. */
+  declaredEntry: string;
+  /** Canonical absolute entry path. Only the isolated Tool Host may import it. */
+  entryPath: string;
+  runtime: "node" | "wasm";
+  requestedPermissions: string[];
+  effectivePermissions: OpenHarnessPluginPermissions;
+}
+
 export interface OpenHarnessPluginComponents {
   skills?: string[];
   agents?: string[];
@@ -88,7 +98,7 @@ export interface NativePluginComponents {
   agents?: PluginComponentResult<AgentDefinition[]>;
   hooks?: PluginComponentResult<HookDefinition[]>;
   mcpServers?: PluginComponentResult<Record<string, McpServerConfig>>;
-  tools?: PluginComponentResult<never>;
+  tools?: PluginComponentResult<NativeToolMetadata[]>;
   unsupported?: Partial<Record<NativePluginComponentKind, PluginComponentResult<never>>>;
 }
 
