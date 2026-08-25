@@ -28,6 +28,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENHARNESS_CONFIG_DIR;
+  vi.unstubAllEnvs();
   rmSync(temporaryDirectory, { recursive: true, force: true });
   vi.unstubAllGlobals();
 });
@@ -351,6 +352,33 @@ describe("default daemon application services", () => {
     await expect(auth.status()).resolves.toMatchObject({
       storedProviders: ["gemini"],
     });
+  });
+
+  it("exposes models.dev Google models under the connected Gemini provider", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ models: [] }), { status: 200 }),
+      ),
+    );
+    await createDefaultAuthService().login({
+      provider: "gemini",
+      apiKey: "valid-key",
+    });
+    vi.stubEnv("OPENHARNESS_DISABLE_MODELS_FETCH", "1");
+
+    const providers = await createDefaultModelService().list();
+    const gemini = providers.find((provider) => provider.name === "gemini");
+
+    expect(gemini).toMatchObject({
+      name: "gemini",
+      displayName: "Gemini",
+    });
+    expect(gemini?.models.length).toBeGreaterThan(0);
+    expect(
+      gemini?.models.every((model) => model.providerName === "gemini"),
+    ).toBe(true);
   });
 
   it("rejects invalid custom provider API keys before saving the provider", async () => {

@@ -7,6 +7,7 @@ import {
 } from "@openharness/api";
 
 import type { SettingsService } from "../settings-api.js";
+import { catalogProviderModelIds } from "./catalog-provider-mapping.js";
 import {
   mergeSettingsPatch,
   readCurrentSettings,
@@ -84,14 +85,6 @@ export function createDefaultSettingsService(
   };
 }
 
-const CATALOG_PROVIDER_ALIASES: Record<string, string[]> = {
-  bedrock: ["amazon-bedrock"],
-  dashscope: ["dashscope", "alibaba"],
-  gemini: ["gemini", "google"],
-  vertex: ["google-vertex", "vertex"],
-  zhipu: ["zhipu", "z-ai"],
-};
-
 async function resolveProviderModelSelection(input: {
   provider: string;
   requestedModel?: string;
@@ -167,33 +160,6 @@ function customProviderModelIds(
     const id = (model as Record<string, unknown>).id;
     return typeof id === "string" && id.trim() ? [id.trim()] : [];
   });
-}
-
-function catalogProviderModelIds(
-  catalog: ModelsDevCatalog,
-  providerName: string,
-): string[] {
-  for (const key of catalogProviderKeys(providerName)) {
-    const provider = catalog[key];
-    if (!provider?.models) continue;
-    const modelIds = Object.entries(provider.models)
-      .filter(
-        ([, model]) =>
-          model.status !== "deprecated" && model.status !== "alpha",
-      )
-      .map(([id, model]) =>
-        typeof model.id === "string" && model.id.trim() ? model.id.trim() : id,
-      );
-    if (modelIds.length > 0) return modelIds;
-  }
-  return [];
-}
-
-function catalogProviderKeys(providerName: string): string[] {
-  return [
-    providerName,
-    ...(CATALOG_PROVIDER_ALIASES[providerName] ?? []),
-  ].filter((item, index, items) => item && items.indexOf(item) === index);
 }
 
 function coerceConfigValue(key: string, value: string): unknown {
