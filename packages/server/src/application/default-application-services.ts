@@ -2,22 +2,10 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
-  PROVIDERS,
-  CODEX_DEFAULT_MODEL,
-  createModelCatalogService,
-  findByName,
-  resolveProviderScopedBaseUrl,
-  type ModelsDevCatalog,
-  type ModelsDevModel,
-} from "@openharness/api";
-import { CredentialStorage, describeCodexAuthState } from "@openharness/auth";
-import {
   getProjectMemoryDir,
   getCredentialsFilePath,
   getConfigDir,
   saveSettings,
-  type Settings,
-  type CustomProviderSettings,
 } from "@openharness/core";
 import { MemoryManager, type MemoryEntry } from "@openharness/memory";
 import {
@@ -33,123 +21,40 @@ import {
 import { getLocalRulesDir, loadFacts, loadLocalRules } from "@openharness/personalization";
 import { startDreamNow } from "@openharness/services";
 import { loadOutputStyles } from "@openharness/output-styles";
-import { ApplicationError } from "../shared/application-error.js";
 import {
   discoverOpenHarnessExtensions,
 } from "@openharness/agent-runtime";
 
 import type {
   AgentPersonaService,
-  AuthService,
   ContextService,
   DreamService,
   GitService,
   HooksService,
   MemoryEntryRecord,
   MemoryService,
-  ModelInfo,
-  ModelProviderInfo,
-  ModelService,
   OutputStyleService,
   PluginService,
   ProfileService,
   ProjectInitService,
-  ProviderInfo,
-  ProviderService,
-  CustomProviderInput,
-  SettingsService,
 } from "./settings-api.js";
+import { createDefaultAuthService } from "./default-services/auth-service.js";
+import { createDefaultModelService } from "./default-services/model-service.js";
+import { createDefaultProviderService } from "./default-services/provider-service.js";
+import { createDefaultSettingsService } from "./default-services/settings-service.js";
+import {
+  isRecord,
+  readCurrentSettings,
+  type DaemonSettingsRef,
+} from "./default-services/shared.js";
 
-export interface DaemonSettingsRef {
-  current: Settings;
-  reload?: () => Promise<Settings> | Settings;
-}
-
-function sanitizeSettings(settings: Settings): Record<string, unknown> {
-  const { apiKey: _apiKey, ...rest } = settings as Settings & { apiKey?: string };
-  return structuredClone(rest) as Record<string, unknown>;
-}
-
-async function readCurrentSettings(ref: DaemonSettingsRef): Promise<Settings> {
-  const loaded = ref.reload ? await ref.reload() : undefined;
-  if (loaded) ref.current = loaded;
-  return ref.current;
-}
-
-function mergeSettingsPatch(current: Settings, patch: Record<string, unknown>): Settings {
-  const next: Settings = {
-    ...current,
-    ...patch,
-    permission: {
-      ...current.permission,
-      ...(isRecord(patch.permission) ? patch.permission : {}),
-    },
-    memory: {
-      ...current.memory,
-      ...(isRecord(patch.memory) ? patch.memory : {}),
-    },
-    sandbox: {
-      ...current.sandbox,
-      ...(isRecord(patch.sandbox) ? patch.sandbox : {}),
-    },
-    daemon: {
-      ...current.daemon,
-      ...(isRecord(patch.daemon) ? patch.daemon : {}),
-    },
-  } as Settings;
-  return next;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function coerceConfigValue(key: string, value: string): unknown {
-  if (["model", "apiFormat", "baseUrl", "systemPrompt", "theme", "outputStyle", "effort", "provider"].includes(key)) {
-    return value;
-  }
-  if (["maxTurns", "maxTokens", "passes"].includes(key)) {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isNaN(parsed) ? undefined : parsed;
-  }
-  if ([
-    "verbose",
-    "fastMode",
-    "memory.enabled",
-    "memory.sessionMemoryEnabled",
-    "memory.autoExtractEnabled",
-    "memory.autoDreamEnabled",
-    "daemon.autoStart",
-  ].includes(key)) {
-    if (value === "true" || value === "on") return true;
-    if (value === "false" || value === "off") return false;
-    return undefined;
-  }
-  if ([
-    "memory.maxFiles",
-    "memory.maxEntrypointLines",
-    "memory.autoDreamMinHours",
-    "memory.autoDreamMinSessions",
-  ].includes(key)) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  if (key === "permission.mode") {
-    return ["default", "plan", "full_auto"].includes(value) ? value : undefined;
-  }
-  return value;
-}
-
-function buildSettingsPatch(
-  settings: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): Record<string, unknown> {
-  const [head, child] = key.split(".");
-  if (!head || !child) return { [key]: value };
-  const current = isRecord(settings[head]) ? settings[head] : {};
-  return { [head]: { ...current, [child]: value } };
-}
+export type { DaemonSettingsRef } from "./default-services/shared.js";
+export {
+  createDefaultSettingsService,
+  createDefaultProviderService,
+  createDefaultModelService,
+  createDefaultAuthService,
+};
 
 function formatPersonalPromptDiagnostics(diagnostics: PersonalPromptFileDiagnostic[]): string {
   const lines = ["Personal prompt files:"];
@@ -256,306 +161,7 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-const RUNTIME_RESTART_KEYS = new Set([
-  "provider",
-  "baseUrl",
-  "apiFormat",
-  "apiKey",
-  "mcpServers",
-  "plugins",
-  "allowProjectPlugins",
-  "maxTurns",
-  "effort",
-  "fastMode",
-]);
-
-export function createDefaultSettingsService(ref: DaemonSettingsRef): SettingsService {
-  return {
-    async get() {
-      return sanitizeSettings(await readCurrentSettings(ref));
-    },
-    async patch(patch) {
-      await readCurrentSettings(ref);
-      let effectivePatch = patch;
-      if (typeof patch.path === "string" && "value" in patch) {
-        const coerced = coerceConfigValue(patch.path, String(patch.value));
-        if (coerced === undefined) throw new Error(`Unknown or invalid config key/value: ${patch.path}`);
-        effectivePatch = buildSettingsPatch(
-          sanitizeSettings(ref.current),
-          patch.path,
-          coerced,
-        );
-      }
-
-      const next = mergeSettingsPatch(ref.current, effectivePatch);
-      if (typeof effectivePatch.provider === "string") {
-        next.provider = effectivePatch.provider;
-        next.baseUrl = resolveProviderScopedBaseUrl(next.baseUrl, effectivePatch.provider);
-        if (effectivePatch.provider === "codex" && !effectivePatch.model) {
-          next.model = CODEX_DEFAULT_MODEL;
-        }
-      }
-      if (effectivePatch.provider === "auto") {
-        delete next.provider;
-      }
-      await saveSettings(next);
-      ref.current = next;
-      const restartRuntimes = Object.keys(effectivePatch).some((key) => RUNTIME_RESTART_KEYS.has(key));
-      return { settings: sanitizeSettings(next), restartRuntimes };
-    },
-  };
-}
-
-export function createDefaultProviderService(ref: DaemonSettingsRef): ProviderService {
-  const storage = new CredentialStorage();
-  const rowForCustomProvider = async (
-    provider: CustomProviderSettings,
-    currentName: string,
-  ): Promise<ProviderInfo> => ({
-    name: provider.id,
-    displayName: provider.displayName,
-    hasKey: !!(await storage.loadApiKey(provider.id)),
-    active: provider.id === currentName,
-    local: false,
-    custom: true,
-    requiresApiKey: false,
-  });
-
-  const saveCustomProviders = async (
-    providers: CustomProviderSettings[],
-    patch: Partial<Settings> = {},
-  ): Promise<void> => {
-    const next = { ...ref.current, ...patch, customProviders: providers };
-    await saveSettings(next);
-    ref.current = next;
-  };
-
-  return {
-    async list() {
-      const current = await readCurrentSettings(ref);
-      const currentName = current.provider ?? "auto";
-      const rows: ProviderInfo[] = [];
-      for (const spec of PROVIDERS) {
-        const storedKey = await storage.loadApiKey(spec.name);
-        const hasKey = !!storedKey || (spec.envKey ? !!process.env[spec.envKey] : false);
-        rows.push({
-          name: spec.name,
-          displayName: spec.displayName,
-          hasKey: !!hasKey || !spec.envKey,
-          active: spec.name === currentName,
-          local: spec.isLocal,
-        });
-      }
-      for (const provider of current.customProviders ?? []) {
-        rows.push(await rowForCustomProvider(provider, currentName));
-      }
-      return rows;
-    },
-    async create(input) {
-      const current = await readCurrentSettings(ref);
-      const provider = normalizeCustomProvider(input);
-      if (findByName(provider.id)) {
-        throw new ProviderMutationError(400, `供应商 ID “${provider.id}” 已被内置供应商使用。`);
-      }
-      if (current.customProviders?.some((item) => item.id === provider.id)) {
-        throw new ProviderMutationError(409, `自定义供应商 “${provider.id}” 已存在。`);
-      }
-      await saveCustomProviders([...(current.customProviders ?? []), provider]);
-      if (input.apiKey?.trim()) await storage.storeApiKey(provider.id, input.apiKey.trim());
-      return await rowForCustomProvider(provider, current.provider ?? "auto");
-    },
-    async update(id, input) {
-      const current = await readCurrentSettings(ref);
-      const normalizedId = id.trim().toLowerCase();
-      const index = current.customProviders?.findIndex((item) => item.id === normalizedId) ?? -1;
-      if (index < 0) throw new ProviderMutationError(404, `自定义供应商 “${normalizedId}” 不存在。`);
-      const provider = normalizeCustomProvider({ ...input, id: normalizedId });
-      const nextProviders = [...(current.customProviders ?? [])];
-      nextProviders[index] = provider;
-      const currentModelStillAvailable = provider.models.some((model) => model.id === current.model);
-      await saveCustomProviders(
-        nextProviders,
-        current.provider === provider.id && !currentModelStillAvailable
-          ? { model: provider.models[0]!.id }
-          : {},
-      );
-      if (input.apiKey?.trim()) await storage.storeApiKey(provider.id, input.apiKey.trim());
-      return await rowForCustomProvider(provider, current.provider ?? "auto");
-    },
-    async remove(id) {
-      const current = await readCurrentSettings(ref);
-      const normalizedId = id.trim().toLowerCase();
-      if (current.provider === normalizedId) {
-        throw new ProviderMutationError(409, "该供应商正在使用中。请先切换到其他供应商，再删除。");
-      }
-      const providers = current.customProviders ?? [];
-      if (!providers.some((item) => item.id === normalizedId)) {
-        throw new ProviderMutationError(404, `自定义供应商 “${normalizedId}” 不存在。`);
-      }
-      await saveCustomProviders(providers.filter((item) => item.id !== normalizedId));
-      await storage.clearProviderCredentials(normalizedId);
-    },
-  };
-}
-
-export class ProviderMutationError extends ApplicationError {
-  constructor(
-    status: 400 | 404 | 409,
-    message: string,
-  ) {
-    super(status, message);
-  }
-}
-
-function normalizeCustomProvider(input: CustomProviderInput): CustomProviderSettings {
-  const id = input.id?.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
-    throw new ProviderMutationError(400, "供应商 ID 只能包含小写字母、数字、连字符或下划线。");
-  }
-  const displayName = input.displayName?.trim();
-  if (!displayName) throw new ProviderMutationError(400, "请输入显示名称。");
-  const baseUrl = input.baseUrl?.trim();
-  try {
-    const parsed = new URL(baseUrl);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
-  } catch {
-    throw new ProviderMutationError(400, "基础 URL 必须是有效的 HTTP 或 HTTPS 地址。");
-  }
-  if (input.apiFormat !== "openai") {
-    throw new ProviderMutationError(400, "当前仅支持 OpenAI 兼容接口。");
-  }
-  if (!Array.isArray(input.models) || input.models.length === 0) {
-    throw new ProviderMutationError(400, "请至少添加一个模型。");
-  }
-  const models = input.models.map((model) => ({
-    id: model.id?.trim(),
-    displayName: model.displayName?.trim() || model.id?.trim(),
-  }));
-  if (models.some((model) => !model.id)) {
-    throw new ProviderMutationError(400, "模型 ID 不能为空。");
-  }
-  if (new Set(models.map((model) => model.id)).size !== models.length) {
-    throw new ProviderMutationError(400, "模型 ID 不能重复。");
-  }
-  const headers = Object.fromEntries(
-    Object.entries(input.headers ?? {})
-      .map(([name, value]) => [name.trim(), value.trim()] as const)
-      .filter(([name, value]) => name && value),
-  );
-  return {
-    id,
-    displayName,
-    baseUrl,
-    apiFormat: "openai",
-    models,
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
-  };
-}
-
-const CATALOG_PROVIDER_ALIASES: Record<string, string[]> = {
-  bedrock: ["amazon-bedrock"],
-  dashscope: ["dashscope", "alibaba"],
-  gemini: ["gemini", "google"],
-  vertex: ["google-vertex", "vertex"],
-  zhipu: ["zhipu", "z-ai"],
-};
-
-function catalogProviderKeys(providerName: string): string[] {
-  return [providerName, ...(CATALOG_PROVIDER_ALIASES[providerName] ?? [])]
-    .filter((item, index, items) => item && items.indexOf(item) === index);
-}
-
-function readCatalogProvider(catalog: ModelsDevCatalog, providerName: string) {
-  for (const key of catalogProviderKeys(providerName)) {
-    const provider = catalog[key];
-    if (provider?.models && Object.keys(provider.models).length > 0) return provider;
-  }
-  return undefined;
-}
-
-function modelHint(model: ModelsDevModel): string | undefined {
-  const cost = model.cost;
-  if (cost && cost.input === 0 && cost.output === 0) return "Free";
-  return undefined;
-}
-
-function modelVision(model: ModelsDevModel): boolean | undefined {
-  const input = model.modalities?.input;
-  if (!input) return undefined;
-  return input.includes("image") || input.includes("pdf") || input.includes("video");
-}
-
-function toModelInfo(providerName: string, providerDisplayName: string, id: string, model: ModelsDevModel): ModelInfo {
-  const inputModalities = model.modalities?.input?.filter((item) => item.trim().length > 0);
-  return {
-    id,
-    label: model.name ?? model.id ?? id,
-    provider: providerDisplayName,
-    providerName,
-    ...(modelHint(model) ? { hint: modelHint(model) } : {}),
-    ...(typeof model.limit?.context === "number" ? { contextWindow: model.limit.context } : {}),
-    ...(typeof model.limit?.output === "number" ? { outputLimit: model.limit.output } : {}),
-    ...(typeof model.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
-    ...(typeof modelVision(model) === "boolean" ? { vision: modelVision(model) } : {}),
-    ...(inputModalities && inputModalities.length > 0 ? { inputModalities } : {}),
-    ...(typeof model.tool_call === "boolean" ? { toolCalling: model.tool_call } : {}),
-    ...(model.status === "beta" ? { status: "beta" as const } : { status: "active" as const }),
-  };
-}
-
-async function isProviderConnected(providerName: string, storage: CredentialStorage): Promise<boolean> {
-  const spec = findByName(providerName);
-  if (!spec) return false;
-  if (spec.isLocal) return true;
-  if (providerName === "codex") return (await describeCodexAuthState()).configured;
-  if (await storage.loadApiKey(providerName)) return true;
-  return !!(spec.envKey && process.env[spec.envKey]);
-}
-
-export function createDefaultModelService(ref?: DaemonSettingsRef): ModelService {
-  const storage = new CredentialStorage();
-  const catalogService = createModelCatalogService();
-  return {
-    async list(): Promise<ModelProviderInfo[]> {
-      const catalog = await catalogService.load();
-      const result: ModelProviderInfo[] = [];
-
-      for (const spec of PROVIDERS) {
-        if (!await isProviderConnected(spec.name, storage)) continue;
-        const catalogProvider = readCatalogProvider(catalog, spec.name);
-        if (!catalogProvider?.models) continue;
-
-        const models = Object.entries(catalogProvider.models)
-          .filter(([, model]) => model.status !== "deprecated" && model.status !== "alpha")
-          .map(([id, model]) => toModelInfo(spec.name, spec.displayName, model.id ?? id, model));
-        if (models.length === 0) continue;
-
-        result.push({
-          name: spec.name,
-          displayName: spec.displayName,
-          models,
-        });
-      }
-
-      const current = ref ? await readCurrentSettings(ref) : undefined;
-      for (const provider of current?.customProviders ?? []) {
-        result.push({
-          name: provider.id,
-          displayName: provider.displayName,
-          models: provider.models.map((model) => ({
-            id: model.id,
-            label: model.displayName,
-            provider: provider.displayName,
-            providerName: provider.id,
-            status: "active",
-          })),
-        });
-      }
-
-      return result;
-    },
-  };
-}
+ 
 
 function toMemoryRecord(entry: MemoryEntry): MemoryEntryRecord {
   return {
@@ -593,71 +199,6 @@ export function createDefaultMemoryService(): MemoryService {
     async remove({ cwd, id }) {
       const { manager } = await openMemoryManager(cwd);
       return await manager.delete(id);
-    },
-  };
-}
-
-function normalizeAuthProvider(target?: string): string | undefined {
-  const normalized = target?.trim().toLowerCase().replace(/_/g, "-");
-  if (!normalized) return undefined;
-  if (
-    normalized === "codex" ||
-    normalized === "openai-codex" ||
-    normalized === "codex-subscription"
-  ) {
-    return "codex";
-  }
-  return normalized;
-}
-
-export function createDefaultAuthService(): AuthService {
-  const storage = new CredentialStorage();
-  return {
-    async status() {
-      const providers = await storage.listStoredProviders();
-      const codexState = await describeCodexAuthState();
-      const envProviders: Array<{ name: string; envKey: string }> = [];
-      for (const spec of PROVIDERS) {
-        if (spec.envKey && process.env[spec.envKey]) {
-          envProviders.push({ name: spec.name, envKey: spec.envKey });
-        }
-      }
-      return {
-        codex: {
-          configured: codexState.configured,
-          state: codexState.state,
-          source: codexState.source,
-          ...(codexState.detail ? { detail: codexState.detail } : {}),
-          ...(codexState.profileLabel ? { profileLabel: codexState.profileLabel } : {}),
-        },
-        storedProviders: providers,
-        envProviders,
-      };
-    },
-    async login({ provider, apiKey }) {
-      const providerName = normalizeAuthProvider(provider);
-      if (!providerName) throw new Error("Usage: /auth login <provider> <api-key> or /auth login codex");
-      if (providerName === "codex") {
-        const state = await describeCodexAuthState();
-        if (!state.configured) {
-          throw new Error(`Codex Subscription ${state.state}: ${state.detail ?? state.source}`);
-        }
-        return {
-          message: `Codex Subscription ready${state.profileLabel ? ` (${state.profileLabel})` : ""}. Use /provider codex to switch.`,
-        };
-      }
-      if (!apiKey) throw new Error("Usage: /auth login <provider> <api-key>");
-      const spec = findByName(providerName);
-      if (!spec) throw new Error(`Unknown provider: ${providerName}. Use /provider to see available providers.`);
-      await storage.storeApiKey(providerName, apiKey);
-      return { message: `API key stored for ${spec.displayName} (${spec.name}).` };
-    },
-    async logout({ provider }) {
-      const providerName = normalizeAuthProvider(provider) ?? provider.trim();
-      if (!providerName) throw new Error("Usage: /auth logout <provider>");
-      await storage.clearProviderCredentials(providerName);
-      const suffix = providerName === "codex" ? " Codex CLI auth.json was not removed." : "";
-      return { message: `Credentials cleared for ${providerName}.${suffix}` };
     },
   };
 }

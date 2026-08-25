@@ -11,6 +11,7 @@ vi.mock("@openharness/services", () => ({
 
 import {
   createDefaultAgentPersonaService,
+  createDefaultAuthService,
   createDefaultContextService,
   createDefaultProfileService,
   createDefaultProviderService,
@@ -28,6 +29,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENHARNESS_CONFIG_DIR;
   rmSync(temporaryDirectory, { recursive: true, force: true });
+  vi.unstubAllGlobals();
 });
 
 describe("default daemon application services", () => {
@@ -151,6 +153,7 @@ describe("default daemon application services", () => {
   });
 
   it("creates a custom provider and exposes it with declared models", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
     const ref = {
       current: {
         model: "m",
@@ -197,6 +200,61 @@ describe("default daemon application services", () => {
         providerName: "office-gateway",
       })],
     });
+  });
+
+  it("rejects invalid built-in provider API keys before storing them", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("invalid api key", { status: 401 })));
+    const auth = createDefaultAuthService();
+
+    await expect(auth.login({
+      provider: "gemini",
+      apiKey: "bad-key",
+    })).rejects.toThrow("API 密钥无效");
+
+    await expect(auth.status()).resolves.toMatchObject({
+      storedProviders: [],
+    });
+  });
+
+  it("stores built-in provider API keys only after remote validation succeeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    const auth = createDefaultAuthService();
+
+    await expect(auth.login({
+      provider: "gemini",
+      apiKey: "valid-key",
+    })).resolves.toMatchObject({
+      message: expect.stringContaining("API key stored"),
+    });
+
+    await expect(auth.status()).resolves.toMatchObject({
+      storedProviders: ["gemini"],
+    });
+  });
+
+  it("rejects invalid custom provider API keys before saving the provider", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("forbidden", { status: 403 })));
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "openai" as const,
+        provider: "openai",
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+      },
+    };
+    const providers = createDefaultProviderService(ref);
+
+    await expect(providers.create({
+      id: "office-gateway",
+      displayName: "Office Gateway",
+      baseUrl: "https://gateway.example/v1",
+      apiFormat: "openai",
+      apiKey: "bad-key",
+      models: [{ id: "team-model", displayName: "Team Model" }],
+    })).rejects.toThrow("API 密钥无效");
+
+    expect(ref.current.customProviders).toBeUndefined();
   });
 
   it("rejects custom providers that collide with built-in IDs", async () => {
