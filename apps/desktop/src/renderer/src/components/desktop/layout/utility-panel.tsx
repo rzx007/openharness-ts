@@ -1,19 +1,6 @@
-import {
-  FileText,
-  Folder,
-  Globe2,
-  Bot,
-  MessageCirclePlus,
-  Minimize2,
-  PanelRightClose,
-  Plus,
-  SquareTerminal,
-  X,
-  type LucideIcon,
-} from "lucide-react"
+import { FileText, MessageCirclePlus } from "lucide-react"
 import type * as React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
 
 import { BrowserTool, type BrowserToolTab } from "@renderer/components/desktop/tools/browser-tool"
 import type { UtilityToolRequest } from "./title-bar"
@@ -30,42 +17,16 @@ import type {
   TerminalPanelCommand,
   TerminalSessionTabInfo,
 } from "@renderer/components/desktop/tools/terminal/terminal-tool"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@renderer/components/ui/context-menu"
-import { Button } from "@renderer/components/ui/button"
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@renderer/components/ui/item"
-import { Kbd } from "@renderer/components/ui/kbd"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import {
-  persistedUtilityFileTabsKey,
-  readUtilityPanelRuntimeState,
-  writeUtilityPanelRuntimeState,
-} from "./utility-panel-runtime-state"
-
-type UtilityTool = "review" | "terminal" | "browser" | "files" | "side-chat" | "agents"
-
-type UtilityTab = {
-  id: string
-  tool: UtilityTool
-  title: string
-  filePath?: string
-  fileIcon?: LucideIcon
-  fileType?: FileViewerTab["type"]
-  projectPath?: string
-  terminalId?: string
-}
+  readPersistedUtilityFileTabs,
+  writePersistedUtilityFileTabs,
+} from "./utility-panel-repository"
+import type { PersistedFileTabsByScope } from "./utility-panel-state"
+import { EmptyUtilityPanelState, UtilityPanelTabStrip } from "./utility-panel-tab-strip"
+import { utilityToolMeta, type UtilityTab, type UtilityTool } from "./utility-panel-tabs"
+import { useUtilityPanelRuntime } from "./use-utility-panel-runtime"
 
 type UtilityPanelProps = {
   scopeId: string
@@ -80,50 +41,8 @@ type UtilityPanelProps = {
   onOpenTerminal: (terminalId: string) => void
 }
 
-type MenuPosition = {
-  left: number
-  top: number
-}
-
-type PersistedFileTabState = Record<
-  string,
-  {
-    activePath: string | null
-    paths: string[]
-  }
->
-
-const toolMeta: Record<
-  UtilityTool,
-  {
-    icon: LucideIcon
-    label: string
-    shortcut?: string
-  }
-> = {
-  review: { icon: FileText, label: "审阅", shortcut: "Ctrl+Shift+G" },
-  terminal: { icon: SquareTerminal, label: "终端", shortcut: "Ctrl+`" },
-  browser: { icon: Globe2, label: "浏览器", shortcut: "Ctrl+T" },
-  files: { icon: Folder, label: "文件", shortcut: "Ctrl+P" },
-  "side-chat": { icon: MessageCirclePlus, label: "侧边聊天", shortcut: "Ctrl+Alt+S" },
-  agents: { icon: Bot, label: "子智能体" },
-}
-
-const toolOrder: UtilityTool[] = ["agents", "review", "terminal", "browser", "files", "side-chat"]
 const filesTabId = "files-tab"
 const unavailableTerminalTabId = "terminal-tab:unavailable"
-type UtilityPanelRuntimeState = {
-  tabs: UtilityTab[]
-  browserTabs: BrowserToolTab[]
-  fileTabs: FileViewerTab[]
-  fileProjectPath: string | null
-  activeFilePath: string | null
-  loadingFilePath: string | null
-  activeTabId: string
-  terminalMounted: boolean
-  handledFileRequestId: number | null
-  handledToolRequestId: number | null
-}
 
 export function UtilityPanel({
   scopeId,
@@ -137,40 +56,36 @@ export function UtilityPanel({
   onOpenFile,
   onOpenTerminal,
 }: UtilityPanelProps): React.JSX.Element {
-  const initialRuntimeState = readUtilityPanelRuntimeState<UtilityPanelRuntimeState>(scopeId)
-  const [tabs, setTabs] = useState<UtilityTab[]>(() => initialRuntimeState?.tabs ?? [])
-  const [browserTabs, setBrowserTabs] = useState<BrowserToolTab[]>(
-    () => initialRuntimeState?.browserTabs ?? []
-  )
-  const [fileTabs, setFileTabs] = useState<FileViewerTab[]>(
-    () => initialRuntimeState?.fileTabs ?? []
-  )
-  const fileTabsRef = useRef<FileViewerTab[]>(initialRuntimeState?.fileTabs ?? [])
-  const [fileProjectPath, setFileProjectPath] = useState<string | null>(
-    initialRuntimeState?.fileProjectPath ?? null
-  )
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(
-    initialRuntimeState?.activeFilePath ?? null
-  )
-  const [loadingFilePath, setLoadingFilePath] = useState<string | null>(
-    initialRuntimeState?.loadingFilePath ?? null
-  )
-  const [activeTabId, setActiveTabId] = useState(initialRuntimeState?.activeTabId ?? "")
-  const [addMenuOpen, setAddMenuOpen] = useState(false)
-  const [addMenuPosition, setAddMenuPosition] = useState<MenuPosition | null>(null)
-  const [terminalMounted, setTerminalMounted] = useState(
-    initialRuntimeState?.terminalMounted ?? false
-  )
+  const {
+    state: {
+      tabs,
+      browserTabs,
+      fileTabs,
+      fileProjectPath,
+      activeFilePath,
+      loadingFilePath,
+      activeTabId,
+      terminalMounted,
+      handledFileRequestId,
+      handledToolRequestId,
+    },
+    fileTabsRef,
+    setTabs,
+    setBrowserTabs,
+    setFileTabs,
+    setFileProjectPath,
+    setActiveFilePath,
+    setLoadingFilePath,
+    setActiveTabId,
+    setTerminalMounted,
+    setHandledFileRequestId,
+    setHandledToolRequestId,
+  } = useUtilityPanelRuntime(scopeId)
   const [terminalCommands, setTerminalCommands] = useState<TerminalPanelCommand[]>([])
   const terminalCommandSequenceRef = useRef(0)
-  const handledFileRequestIdRef = useRef<number | null>(
-    initialRuntimeState?.handledFileRequestId ?? null
+  const [persistedFileTabs, setPersistedFileTabs] = useState<PersistedFileTabsByScope>(
+    readPersistedUtilityFileTabs
   )
-  const handledToolRequestIdRef = useRef<number | null>(
-    initialRuntimeState?.handledToolRequestId ?? null
-  )
-  const [persistedFileTabs, setPersistedFileTabs] =
-    useState<PersistedFileTabState>(readPersistedFileTabs)
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const selectedProjectAvailable = useDesktopSessionStore(
@@ -199,41 +114,15 @@ export function UtilityPanel({
     terminalCommands.some((command) => command.type === "ensure" || command.type === "create")
 
   useEffect(() => {
-    fileTabsRef.current = fileTabs
-    writeUtilityPanelRuntimeState(scopeId, {
-      tabs,
-      browserTabs,
-      fileTabs,
-      fileProjectPath,
-      activeFilePath,
-      loadingFilePath,
-      activeTabId,
-      terminalMounted,
-      handledFileRequestId: handledFileRequestIdRef.current,
-      handledToolRequestId: handledToolRequestIdRef.current,
-    })
-  }, [
-    activeFilePath,
-    activeTabId,
-    browserTabs,
-    fileProjectPath,
-    fileTabs,
-    loadingFilePath,
-    scopeId,
-    tabs,
-    terminalMounted,
-  ])
-
-  useEffect(() => {
-    if (!fileOpenRequest || handledFileRequestIdRef.current === fileOpenRequest.id) return
+    if (!fileOpenRequest || handledFileRequestId === fileOpenRequest.id) return
     const relativePath = toRelativeWorkspacePath(fileOpenRequest.path, selectedProjectPath)
     const timer = window.setTimeout(() => {
-      handledFileRequestIdRef.current = fileOpenRequest.id
+      setHandledFileRequestId(fileOpenRequest.id)
       if (!relativePath) {
         setTabs((current) =>
           current.some((tab) => tab.id === filesTabId || tab.tool === "files")
             ? current
-            : [...current, { id: filesTabId, tool: "files", title: toolMeta.files.label }]
+            : [...current, { id: filesTabId, tool: "files", title: utilityToolMeta.files.label }]
         )
         setActiveTabId(filesTabId)
         return
@@ -254,18 +143,25 @@ export function UtilityPanel({
       setActiveFilePath(relativePath)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [fileOpenRequest, selectedProjectPath])
+  }, [
+    fileOpenRequest,
+    handledFileRequestId,
+    selectedProjectPath,
+    setActiveFilePath,
+    setActiveTabId,
+    setFileProjectPath,
+    setHandledFileRequestId,
+    setTabs,
+  ])
 
   useEffect(() => {
     if (!terminalOpenRequest) return
     const timer = window.setTimeout(() => setTerminalMounted(true), 0)
     return () => window.clearTimeout(timer)
-  }, [terminalOpenRequest])
+  }, [setTerminalMounted, terminalOpenRequest])
 
   const addTab = useCallback(
     (tool: UtilityTool): void => {
-      setAddMenuOpen(false)
-
       if (tool === "terminal") {
         setTerminalMounted(true)
         if (!selectedProjectPath || !selectedProjectAvailable) {
@@ -273,7 +169,7 @@ export function UtilityPanel({
           setTabs((current) =>
             current.some((tab) => tab.id === id)
               ? current
-              : [...current, { id, tool, title: toolMeta.terminal.label }]
+              : [...current, { id, tool, title: utilityToolMeta.terminal.label }]
           )
           setActiveTabId(id)
           return
@@ -330,7 +226,7 @@ export function UtilityPanel({
             return current
           }
           setActiveTabId(filesTabId)
-          return [...current, { id: filesTabId, tool, title: toolMeta.files.label }]
+          return [...current, { id: filesTabId, tool, title: utilityToolMeta.files.label }]
         })
         return
       }
@@ -343,20 +239,29 @@ export function UtilityPanel({
           return current
         }
         setActiveTabId(id)
-        return [...current, { id, tool, title: toolMeta[tool].label }]
+        return [...current, { id, tool, title: utilityToolMeta[tool].label }]
       })
     },
-    [activeFilePath, selectedProjectAvailable, selectedProjectPath, setTerminalCommands]
+    [
+      activeFilePath,
+      selectedProjectAvailable,
+      selectedProjectPath,
+      setActiveTabId,
+      setBrowserTabs,
+      setFileProjectPath,
+      setTabs,
+      setTerminalMounted,
+    ]
   )
 
   useEffect(() => {
-    if (!toolOpenRequest || handledToolRequestIdRef.current === toolOpenRequest.id) return
+    if (!toolOpenRequest || handledToolRequestId === toolOpenRequest.id) return
     const timer = window.setTimeout(() => {
-      handledToolRequestIdRef.current = toolOpenRequest.id
+      setHandledToolRequestId(toolOpenRequest.id)
       addTab(toolOpenRequest.tool)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [addTab, toolOpenRequest])
+  }, [addTab, handledToolRequestId, setHandledToolRequestId, toolOpenRequest])
 
   const closeTabs = (tabIds: string[], preferredActiveTabId?: string): void => {
     const closingIds = new Set(tabIds)
@@ -506,7 +411,7 @@ export function UtilityPanel({
           paths: paths.slice(0, 12),
         }
       }
-      writePersistedFileTabs(nextState)
+      writePersistedUtilityFileTabs(nextState)
       return nextState
     })
   }
@@ -582,16 +487,6 @@ export function UtilityPanel({
     if (terminalId) setActiveTabId(terminalTabId(terminalId))
   }
 
-  const toggleAddMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const menuWidth = 320
-    setAddMenuPosition({
-      left: Math.max(12, Math.min(rect.left, window.innerWidth - menuWidth - 12)),
-      top: rect.bottom + 4,
-    })
-    setAddMenuOpen((current) => !current)
-  }
-
   const closeOtherTabs = (tab: UtilityTab): void => {
     selectTab(tab)
     closeTabs(
@@ -619,64 +514,19 @@ export function UtilityPanel({
       )}
     >
       <div className="flex h-full min-w-[320px] flex-col">
-        <header className="flex h-10 shrink-0 items-center gap-2 bg-conversation px-2.5">
-          <div className="utility-tab-strip flex min-w-0 flex-1 items-center overflow-x-auto">
-            {visibleTabs.map((tab, index) => (
-              <UtilityTabButton
-                key={tab.id}
-                tab={tab}
-                active={tab.id === activeTab?.id}
-                loading={browserTabs.find((item) => item.id === tab.id)?.loading}
-                showSeparator={index < visibleTabs.length - 1}
-                tabCount={visibleTabs.length}
-                rightCount={visibleTabs.length - index - 1}
-                onSelect={() => selectTab(tab)}
-                onClose={() => closeTab(tab.id)}
-                onCloseOthers={() => closeOtherTabs(tab)}
-                onCloseRight={() => closeTabsToRight(tab)}
-              />
-            ))}
-            {visibleTabs.length > 0 && (
-              <div className="relative ml-1 shrink-0">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  title="新建工具标签"
-                  aria-label="新建工具标签"
-                  onClick={toggleAddMenu}
-                  className="text-muted-foreground"
-                >
-                  <Plus />
-                </Button>
-              </div>
-            )}
-          </div>
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            title={maximized ? "恢复面板" : "最大化面板"}
-            aria-label={maximized ? "恢复面板" : "最大化面板"}
-            aria-pressed={maximized}
-            onClick={onToggleMaximized}
-            className="text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
-          >
-            <Minimize2 className={cn(!maximized && "rotate-180", "size-3.5")} />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            title="关闭面板"
-            aria-label="关闭面板"
-            onClick={onClose}
-            className="bg-muted/55 text-muted-foreground"
-          >
-            <PanelRightClose className="size-3.5" />
-          </Button>
-        </header>
+        <UtilityPanelTabStrip
+          tabs={visibleTabs}
+          browserTabs={browserTabs}
+          activeTab={activeTab}
+          maximized={maximized}
+          onAdd={addTab}
+          onSelect={selectTab}
+          onCloseTab={closeTab}
+          onCloseOtherTabs={closeOtherTabs}
+          onCloseTabsToRight={closeTabsToRight}
+          onToggleMaximized={onToggleMaximized}
+          onClosePanel={onClose}
+        />
 
         <div className="relative min-h-0 flex-1 bg-conversation">
           {!activeTab && !pendingTerminal && <EmptyUtilityPanelState onAdd={addTab} />}
@@ -743,129 +593,7 @@ export function UtilityPanel({
           ) : null}
         </div>
       </div>
-      {addMenuOpen &&
-        addMenuPosition &&
-        createPortal(
-          <AddTabMenu activeTab={activeTab} position={addMenuPosition} onAdd={addTab} />,
-          document.body
-        )}
     </aside>
-  )
-}
-
-function EmptyUtilityPanelState({
-  onAdd,
-}: {
-  onAdd: (tool: UtilityTool) => void
-}): React.JSX.Element {
-  return (
-    <div className="flex h-full min-h-0 items-center justify-center px-8">
-      <ItemGroup className="w-full max-w-130 gap-0!">
-        {toolOrder.map((tool) => {
-          const Icon = toolMeta[tool].icon
-          return (
-            <Item
-              key={tool}
-              size="sm"
-              render={<button type="button" onClick={() => onAdd(tool)} />}
-              className="text-sidebar-foregroun h-10 cursor-pointer flex-nowrap bg-transparent text-left hover:bg-muted"
-            >
-              <ItemMedia variant="icon" className="size-4">
-                <Icon strokeWidth={1.8} />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle className="d text-[13px] font-normal">{toolMeta[tool].label}</ItemTitle>
-              </ItemContent>
-              <ItemActions className="min-w-28 justify-end">
-                {toolMeta[tool].shortcut ? (
-                  <Kbd className="bg-code text-[11px] text-muted-foreground">
-                    {toolMeta[tool].shortcut}
-                  </Kbd>
-                ) : null}
-              </ItemActions>
-            </Item>
-          )
-        })}
-      </ItemGroup>
-    </div>
-  )
-}
-
-function UtilityTabButton({
-  tab,
-  active,
-  loading,
-  showSeparator,
-  tabCount,
-  rightCount,
-  onSelect,
-  onClose,
-  onCloseOthers,
-  onCloseRight,
-}: {
-  tab: UtilityTab
-  active: boolean
-  loading?: boolean
-  showSeparator: boolean
-  tabCount: number
-  rightCount: number
-  onSelect: () => void
-  onClose: () => void
-  onCloseOthers: () => void
-  onCloseRight: () => void
-}): React.JSX.Element {
-  const Icon = toolMeta[tab.tool].icon
-  const TabIcon = tab.fileIcon ?? Icon
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger
-        className={cn(
-          "group relative flex h-8 max-w-42 min-w-28 flex-[1_1_10.5rem] items-center rounded-xl text-[12.5px] transition-colors",
-          active
-            ? "bg-neutral-200/80 text-ui-foreground dark:bg-neutral-800"
-            : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
-          showSeparator &&
-            "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
-        )}
-      >
-        <button
-          type="button"
-          onClick={onSelect}
-          className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xl px-2.5 pr-1 text-left text-sidebar-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          title={tab.title}
-        >
-          <TabIcon
-            className={cn("size-3.5 shrink-0", loading && "animate-pulse")}
-            strokeWidth={1.8}
-          />
-          <span className="utility-tab-title relative min-w-0 flex-1 overflow-hidden text-[12px] whitespace-nowrap">
-            {tab.title}
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label="关闭标签"
-          title="关闭标签"
-          onClick={onClose}
-          className={cn(
-            "mr-1 grid size-5 shrink-0 place-items-center rounded-md text-ui-muted transition-opacity group-hover:opacity-100 hover:bg-background hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            active ? "opacity-75" : "opacity-0"
-          )}
-        >
-          <X className="size-3.5" />
-        </button>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-44">
-        <ContextMenuItem onClick={onClose}>关闭</ContextMenuItem>
-        <ContextMenuItem disabled={tabCount <= 1} onClick={onCloseOthers}>
-          关闭其他标签
-        </ContextMenuItem>
-        <ContextMenuItem disabled={rightCount === 0} onClick={onCloseRight}>
-          关闭右侧标签
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
   )
 }
 
@@ -921,74 +649,4 @@ function toRelativeWorkspacePath(path: string, projectPath: string | undefined):
     return normalizedPath.slice(normalizedProject.length + 1)
   }
   return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
-}
-
-function readPersistedFileTabs(): PersistedFileTabState {
-  try {
-    const raw = localStorage.getItem(persistedUtilityFileTabsKey)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
-    const result: PersistedFileTabState = {}
-    for (const [projectPath, value] of Object.entries(parsed)) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue
-      const record = value as Record<string, unknown>
-      const paths = Array.isArray(record.paths)
-        ? record.paths.filter((path): path is string => typeof path === "string")
-        : []
-      const activePath = typeof record.activePath === "string" ? record.activePath : null
-      if (paths.length > 0) result[projectPath] = { activePath, paths }
-    }
-    return result
-  } catch {
-    return {}
-  }
-}
-
-function writePersistedFileTabs(state: PersistedFileTabState): void {
-  try {
-    localStorage.setItem(persistedUtilityFileTabsKey, JSON.stringify(state))
-  } catch {
-    // Ignore storage quota and private-mode failures; file tabs are recoverable UI state.
-  }
-}
-
-function AddTabMenu({
-  activeTab,
-  position,
-  onAdd,
-}: {
-  activeTab?: UtilityTab
-  position: MenuPosition
-  onAdd: (tool: UtilityTool) => void
-}): React.JSX.Element {
-  return (
-    <div
-      className="fixed z-80 w-80 rounded-xl border bg-popover p-2 text-popover-foreground shadow-lg"
-      style={{ left: position.left, top: position.top }}
-    >
-      {toolOrder.map((tool) => {
-        const Icon = toolMeta[tool].icon
-        const disabled = tool !== "browser" && tool !== "terminal" && activeTab?.tool === tool
-        return (
-          <Button
-            key={tool}
-            type="button"
-            variant="ghost"
-            disabled={disabled}
-            onClick={() => onAdd(tool)}
-            className="h-10 w-full justify-start gap-2 px-2.5 text-[14px] font-normal"
-          >
-            <Icon className="text-muted-foreground" strokeWidth={1.8} />
-            <span>{toolMeta[tool].label}</span>
-            {toolMeta[tool].shortcut && (
-              <Kbd className="ml-auto bg-code text-[11px] text-muted-foreground">
-                {toolMeta[tool].shortcut}
-              </Kbd>
-            )}
-          </Button>
-        )
-      })}
-    </div>
-  )
 }

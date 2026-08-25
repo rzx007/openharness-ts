@@ -1,3 +1,8 @@
+import type { BrowserToolTab } from "@renderer/components/desktop/tools/browser-tool"
+import type { FileViewerTab } from "@renderer/components/desktop/tools/file-viewer"
+
+import type { UtilityTab } from "./utility-panel-tabs"
+
 export type UtilityPanelLayout = Record<string, number>
 
 export type UtilityPanelViewState = {
@@ -8,7 +13,26 @@ export type UtilityPanelViewState = {
 
 export type UtilityPanelViewStates = Record<string, UtilityPanelViewState>
 
-const persistedUtilityPanelStatesKey = "openharness.desktop.utility-panel-states.v2"
+export type UtilityPanelRuntimeState = {
+  tabs: UtilityTab[]
+  browserTabs: BrowserToolTab[]
+  fileTabs: FileViewerTab[]
+  fileProjectPath: string | null
+  activeFilePath: string | null
+  loadingFilePath: string | null
+  activeTabId: string
+  terminalMounted: boolean
+  handledFileRequestId: number | null
+  handledToolRequestId: number | null
+}
+
+export type PersistedFileTabsByScope = Record<
+  string,
+  {
+    activePath: string | null
+    paths: string[]
+  }
+>
 
 export function utilityPanelScopeId(
   activeSessionId: string | null,
@@ -38,22 +62,6 @@ export function defaultUtilityPanelViewState(): UtilityPanelViewState {
   }
 }
 
-export function readPersistedUtilityPanelStates(): UtilityPanelViewStates {
-  try {
-    return parseUtilityPanelViewStates(localStorage.getItem(persistedUtilityPanelStatesKey))
-  } catch {
-    return {}
-  }
-}
-
-export function writePersistedUtilityPanelStates(states: UtilityPanelViewStates): void {
-  try {
-    localStorage.setItem(persistedUtilityPanelStatesKey, JSON.stringify(states))
-  } catch {
-    // Panel state is recoverable UI state; storage failures must not interrupt the desktop app.
-  }
-}
-
 export function parseUtilityPanelViewStates(raw: string | null): UtilityPanelViewStates {
   if (!raw) return {}
 
@@ -74,6 +82,29 @@ export function parseUtilityPanelViewStates(raw: string | null): UtilityPanelVie
       }
     }
     return states
+  } catch {
+    return {}
+  }
+}
+
+export function parsePersistedFileTabs(raw: string | null): PersistedFileTabsByScope {
+  if (!raw) return {}
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+
+    const result: PersistedFileTabsByScope = {}
+    for (const [scopeId, value] of Object.entries(parsed)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue
+      const record = value as Record<string, unknown>
+      const paths = Array.isArray(record.paths)
+        ? record.paths.filter((path): path is string => typeof path === "string")
+        : []
+      const activePath = typeof record.activePath === "string" ? record.activePath : null
+      if (paths.length > 0) result[scopeId] = { activePath, paths }
+    }
+    return result
   } catch {
     return {}
   }
