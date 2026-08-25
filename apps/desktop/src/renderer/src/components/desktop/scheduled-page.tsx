@@ -14,11 +14,19 @@ import {
   Play,
   RefreshCw,
   Search,
+  Trash2,
   X,
 } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@renderer/components/ui/dropdown-menu"
 import { Input } from "@renderer/components/ui/input"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Spinner } from "@renderer/components/ui/spinner"
@@ -246,7 +254,21 @@ export function ScheduledPage({
                     task={task}
                     active={active}
                     compact={hasSelection}
+                    busy={busy !== null}
                     onSelect={() => setSelectedId(task.id)}
+                    onRunNow={() =>
+                      void mutate("run", () => window.desktop.schedules.runNow(task.id))
+                    }
+                    onToggle={() =>
+                      void mutate("toggle", () =>
+                        window.desktop.schedules.update(task.id, {
+                          status: task.status === "paused" ? "active" : "paused",
+                        })
+                      )
+                    }
+                    onDelete={() =>
+                      void mutate("delete", () => window.desktop.schedules.remove(task.id))
+                    }
                   />
                 )
               })}
@@ -274,12 +296,18 @@ export function ScheduledPage({
                   runs={runs}
                   busy={busy}
                   onBack={() => setSelectedId(null)}
+                  onRunNow={() =>
+                    void mutate("run", () => window.desktop.schedules.runNow(selected.id))
+                  }
                   onToggle={() =>
                     void mutate("toggle", () =>
                       window.desktop.schedules.update(selected.id, {
                         status: selected.status === "paused" ? "active" : "paused",
                       })
                     )
+                  }
+                  onDelete={() =>
+                    void mutate("delete", () => window.desktop.schedules.remove(selected.id))
                   }
                 />
               </ScrollArea>
@@ -450,13 +478,17 @@ function DetailPanel({
   runs,
   busy,
   onBack,
+  onRunNow,
   onToggle,
+  onDelete,
 }: {
   task: DesktopScheduledTask
   runs: DesktopScheduledRun[]
   busy: string | null
   onBack: () => void
+  onRunNow: () => void
   onToggle: () => void
+  onDelete: () => void
 }): React.JSX.Element {
   return (
     <div className="mx-auto w-full max-w-[860px]">
@@ -465,9 +497,12 @@ function DetailPanel({
           {statusLabel(task.status)}
         </span>
         <div className="flex items-center gap-1 text-muted-foreground">
-          <span className="grid size-8 place-items-center" aria-hidden="true">
-            <MoreHorizontal className="size-4" />
-          </span>
+          <TaskActionsMenu
+            task={task}
+            busy={busy !== null}
+            onRunNow={onRunNow}
+            onDelete={onDelete}
+          />
           <Button
             variant="ghost"
             size="icon-sm"
@@ -605,24 +640,78 @@ function SettingsGroup({
   )
 }
 
+function TaskActionsMenu({
+  task,
+  busy,
+  onRunNow,
+  onToggle,
+  onDelete,
+  triggerClassName,
+}: {
+  task: DesktopScheduledTask
+  busy: boolean
+  onRunNow: () => void
+  onToggle?: () => void
+  onDelete: () => void
+  triggerClassName?: string
+}): React.JSX.Element {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`${task.name}的更多操作`}
+        title="更多操作"
+        className={cn(
+          "grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-muted data-[popup-open]:text-foreground [&_svg]:size-4",
+          triggerClassName
+        )}
+      >
+        <MoreHorizontal />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} className="min-w-40">
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={onRunNow} disabled={busy}>
+            <Play />
+            立即运行
+          </DropdownMenuItem>
+          {onToggle ? (
+            <DropdownMenuItem onClick={onToggle} disabled={busy || task.status === "completed"}>
+              {task.status === "paused" ? <Play /> : <Pause />}
+              {task.status === "paused" ? "继续" : "暂停"}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem variant="destructive" onClick={onDelete} disabled={busy}>
+            <Trash2 />
+            删除
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function TaskRow({
   task,
   active,
   compact,
+  busy,
   onSelect,
+  onRunNow,
+  onToggle,
+  onDelete,
 }: {
   task: DesktopScheduledTask
   active: boolean
   compact: boolean
+  busy: boolean
   onSelect: () => void
+  onRunNow: () => void
+  onToggle: () => void
+  onDelete: () => void
 }): React.JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-current={active ? "true" : undefined}
+    <div
       className={cn(
-        "group w-full rounded-xl border border-transparent text-left transition-[background-color,border-color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "group relative w-full rounded-xl border border-transparent transition-[background-color,border-color,box-shadow] duration-150",
         active
           ? "border-border/60 bg-background shadow-[0_5px_8px_rgba(15,23,42,0.07)]"
           : compact
@@ -630,58 +719,74 @@ function TaskRow({
             : "hover:bg-muted/35"
       )}
     >
-      <div className={cn("flex items-start gap-3.5", compact ? "px-3.5 py-3.5" : "px-3 py-4")}>
-        <div className="pt-1">
-          {active ? (
-            <span className="inline-flex size-4.5 items-center justify-center rounded-full border border-foreground/30 bg-foreground text-background">
-              <span className="size-1.5 rounded-full bg-background" />
-            </span>
-          ) : (
-            <Circle className="size-4.5 text-muted-foreground/60" strokeWidth={1.5} />
-          )}
-        </div>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={active ? "true" : undefined}
+        className="w-full rounded-xl text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >
+        <div className={cn("flex items-start gap-3.5", compact ? "px-3.5 py-3.5" : "px-3 py-4")}>
+          <div className="pt-1">
+            {active ? (
+              <span className="inline-flex size-4.5 items-center justify-center rounded-full border border-foreground/30 bg-foreground text-background">
+                <span className="size-1.5 rounded-full bg-background" />
+              </span>
+            ) : (
+              <Circle className="size-4.5 text-muted-foreground/60" strokeWidth={1.5} />
+            )}
+          </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div
-                className={cn(
-                  "truncate font-medium text-foreground",
-                  compact ? "text-[14px]" : "text-[15px]"
-                )}
-              >
-                {task.name}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-4 pr-8">
+              <div className="min-w-0">
+                <div
+                  className={cn(
+                    "truncate font-medium text-foreground",
+                    compact ? "text-[14px]" : "text-[15px]"
+                  )}
+                >
+                  {task.name}
+                </div>
+                <div
+                  className={cn(
+                    "mt-1 text-muted-foreground",
+                    compact ? "text-[12px]" : "text-[13px]"
+                  )}
+                >
+                  {recurrenceShortLabel(task)}
+                </div>
               </div>
-              <div
-                className={cn(
-                  "mt-1 text-muted-foreground",
-                  compact ? "text-[12px]" : "text-[13px]"
-                )}
-              >
-                {recurrenceShortLabel(task)}
-              </div>
-            </div>
 
-            <div className="flex shrink-0 items-center gap-3">
               <StatusBadge status={task.status} compact />
-              {compact && active ? (
-                <MoreHorizontal className="size-4 text-muted-foreground/65" />
-              ) : null}
             </div>
-          </div>
 
-          <div className="mt-2.5 flex items-center justify-between gap-4 text-[12px] text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <Clock3 className="size-3.5" />
-              <span>{task.nextRunAt ? formatNextRunLabel(task.nextRunAt) : "没有后续运行"}</span>
+            <div className="mt-2.5 flex items-center justify-between gap-4 text-[12px] text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <Clock3 className="size-3.5" />
+                <span>{task.nextRunAt ? formatNextRunLabel(task.nextRunAt) : "没有后续运行"}</span>
+              </div>
+              <span className="shrink-0">
+                {task.runCount > 0 ? `已运行 ${task.runCount} 次` : ""}
+              </span>
             </div>
-            <span className="shrink-0">
-              {task.runCount > 0 ? `已运行 ${task.runCount} 次` : ""}
-            </span>
           </div>
         </div>
+      </button>
+
+      <div className="absolute top-2.5 right-2.5">
+        <TaskActionsMenu
+          task={task}
+          busy={busy}
+          onRunNow={onRunNow}
+          onToggle={onToggle}
+          onDelete={onDelete}
+          triggerClassName={cn(
+            "opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100",
+            active && "opacity-100"
+          )}
+        />
       </div>
-    </button>
+    </div>
   )
 }
 
