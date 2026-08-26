@@ -278,25 +278,32 @@ function ConversationPane({
                       onOpenTerminal={onOpenTerminal}
                     />
                   )}
-
-                  {pendingPermissions.map((permission) => (
-                    <MessageScrollerItem
-                      key={permission.id}
-                      messageId={`permission-${permission.id}`}
-                    >
-                      <PermissionCard
-                        permission={permission}
-                        onReply={(status, decision) =>
-                          void replyPermission(permission.id, status, decision)
-                        }
-                      />
-                    </MessageScrollerItem>
-                  ))}
                 </MessageScrollerContent>
               </MessageScrollerViewport>
               <MessageScrollerButton className="bottom-5" />
             </MessageScroller>
           </MessageScrollerProvider>
+
+          {!archived && pendingPermissions.length > 0 ? (
+            <div
+              role="region"
+              aria-label="待处理的授权请求"
+              className="mx-auto mb-2 max-h-[min(18rem,35vh)] w-[min(760px,calc(100%-32px))] shrink-0 scrollbar-thin overflow-y-auto px-px"
+            >
+              <div className="space-y-2">
+                {pendingPermissions.map((permission) => (
+                  <PermissionCard
+                    key={permission.id}
+                    permission={permission}
+                    className="mt-0"
+                    onReply={(status, decision) =>
+                      void replyPermission(permission.id, status, decision)
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {archived ? (
             <div className="mx-auto mb-5 flex h-12 w-[min(760px,calc(100%-32px))] shrink-0 items-center justify-center rounded-lg border border-border bg-background/90 text-xs text-muted-foreground shadow-sm">

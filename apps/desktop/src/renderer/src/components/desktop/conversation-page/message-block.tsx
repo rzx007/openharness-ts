@@ -324,12 +324,14 @@ function MessageActionButton({
 export function PermissionCard({
   permission,
   onReply,
+  className,
 }: {
   permission: DesktopPermissionRequest
   onReply: (status: "approved" | "denied", decision?: "once" | "session") => void
+  className?: string
 }): React.JSX.Element {
   return (
-    <section className="mt-6 rounded-xl border bg-background px-4 py-3 shadow-sm">
+    <section className={cn("mt-6 rounded-xl border bg-background px-4 py-3 shadow-sm", className)}>
       <div className="flex items-start gap-3">
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-ui-muted">
           <ShieldCheck className="size-4" />
