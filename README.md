@@ -149,7 +149,8 @@ Options:
   --output-format <format>     输出格式: text | json | stream-json
   --append-system-prompt <p>   追加到默认 system prompt
   --cwd <dir>                  工作目录
-  --bare                       跳过 hooks/plugins/MCP 加载
+  --no-plugins                 本次 Session 不加载已安装 Native Plugin 的贡献
+  --bare                       --no-plugins 的旧别名
   -d, --debug                  调试模式
   --dangerously-skip-permissions  跳过所有权限检查
   --dry-run                    预览解析后的运行时配置(不调模型)
@@ -227,7 +228,13 @@ ohs daemon uninstall
 ohs config show
 ohs config set <key> <value>
 ohs config set daemon.autoStart true|false
+# 持久关闭或重新开启所有已安装 Native Plugin 的运行贡献
+ohs config set plugins.enabled false|true
 ```
+
+`plugins.enabled=false` 和 `--no-plugins` 只跳过已安装 Native Plugin 提供的 Skills、Agents、Commands、Hooks、MCP Servers 和 Tools，不关闭插件安装、卸载、查看等管理命令，也不影响 OpenHarness 内置 Skill、普通用户/项目 Skill、Settings Hooks 或 Settings MCP。`plugins.enabled` 是持久设置；`--no-plugins` 只影响本次新建 Session。单个插件仍可使用 `ohs plugin enable <id>` 和 `ohs plugin disable <id>` 管理。全局开关关闭后，Session 参数不能绕过它重新启用插件。
+
+修改持久开关后，新建或重新加载的 Session 会应用新设置；正在执行的旧 Agent Runtime 不会在一轮任务中途卸载插件。完整的 Native Plugin 说明见 [packages/plugins/README.md](packages/plugins/README.md)。
 
 Auth、provider、model 的关系和本地存储规则见 [docs/auth-provider-model.md](docs/auth-provider-model.md)。
 Workflow CLI 和 TUI `/workflow`（统一 Jobs Panel 的别名）的完整用法见 [docs/workflow-cli.md](docs/workflow-cli.md)。
