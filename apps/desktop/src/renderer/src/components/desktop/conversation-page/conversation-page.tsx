@@ -27,6 +27,7 @@ function ConversationPane({
   panelOpen,
   onTogglePanel,
   onOpenFile,
+  onOpenReview,
   onOpenTerminal,
   onOpenAgents,
 }: ConversationPaneProps): React.JSX.Element {
@@ -236,6 +237,7 @@ function ConversationPane({
                         void forkFromAssistantMessage(messageId)
                       }
                       onOpenFile={onOpenFile}
+                      onOpenReview={onOpenReview}
                       onOpenTerminal={onOpenTerminal}
                     />
                   )}

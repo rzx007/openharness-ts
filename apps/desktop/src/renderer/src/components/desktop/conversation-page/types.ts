@@ -4,6 +4,7 @@ export type ConversationPaneProps = {
   panelOpen: boolean
   onTogglePanel: () => void
   onOpenFile: (path: string, line?: number) => void
+  onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
   onOpenAgents: () => void
 }

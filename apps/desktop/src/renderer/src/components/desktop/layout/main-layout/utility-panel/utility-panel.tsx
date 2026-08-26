@@ -1,4 +1,4 @@
-import { FileText, MessageCirclePlus } from "lucide-react"
+import { MessageCirclePlus } from "lucide-react"
 import type * as React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
@@ -11,6 +11,7 @@ import {
   type FileViewerTab,
 } from "@renderer/components/desktop/tools/file-viewer"
 import { PlaceholderTool } from "@renderer/components/desktop/tools/placeholder-tool"
+import { ReviewTool } from "@renderer/components/desktop/tools/review-tool"
 import { TerminalTool } from "@renderer/components/desktop/tools/terminal/terminal-tool"
 import { AgentsTool } from "@renderer/components/desktop/tools/agents/agents-tool"
 import type {
@@ -35,9 +36,11 @@ type UtilityPanelProps = {
   onToggleMaximized: () => void
   onClose: () => void
   fileOpenRequest: { id: number; path: string; line?: number } | null
+  reviewOpenRequest: { id: number; path?: string } | null
   terminalOpenRequest: { id: number; terminalId: string } | null
   toolOpenRequest: { id: number; tool: UtilityToolRequest } | null
   onOpenFile: (path: string, line?: number) => void
+  onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }
 
@@ -51,9 +54,11 @@ export function UtilityPanel({
   onToggleMaximized,
   onClose,
   fileOpenRequest,
+  reviewOpenRequest,
   terminalOpenRequest,
   toolOpenRequest,
   onOpenFile,
+  onOpenReview,
   onOpenTerminal,
 }: UtilityPanelProps): React.JSX.Element {
   const {
@@ -83,6 +88,7 @@ export function UtilityPanel({
   } = useUtilityPanelRuntime(scopeId)
   const [terminalCommands, setTerminalCommands] = useState<TerminalPanelCommand[]>([])
   const terminalCommandSequenceRef = useRef(0)
+  const handledReviewRequestRef = useRef<number | null>(null)
   const [persistedFileTabs, setPersistedFileTabs] = useState<PersistedFileTabsByScope>(
     readPersistedUtilityFileTabs
   )
@@ -159,6 +165,24 @@ export function UtilityPanel({
     const timer = window.setTimeout(() => setTerminalMounted(true), 0)
     return () => window.clearTimeout(timer)
   }, [setTerminalMounted, terminalOpenRequest])
+
+  useEffect(() => {
+    if (!reviewOpenRequest || handledReviewRequestRef.current === reviewOpenRequest.id) return
+    handledReviewRequestRef.current = reviewOpenRequest.id
+    const timer = window.setTimeout(() => {
+      const id = toolTabId("review")
+      setTabs((current) => {
+        const existing = current.find((tab) => tab.id === id)
+        if (existing) {
+          setActiveTabId(existing.id)
+          return current
+        }
+        setActiveTabId(id)
+        return [...current, { id, tool: "review", title: utilityToolMeta.review.label }]
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [reviewOpenRequest, setActiveTabId, setTabs])
 
   const addTab = useCallback(
     (tool: UtilityTool): void => {
@@ -569,13 +593,7 @@ export function UtilityPanel({
               }
             />
           )}
-          {activeTab?.tool === "review" && (
-            <PlaceholderTool
-              icon={FileText}
-              title="审阅"
-              description="后续会汇总代码改动、权限请求和可审阅项。"
-            />
-          )}
+          {activeTab?.tool === "review" && <ReviewTool openRequest={reviewOpenRequest} />}
           {activeTab?.tool === "side-chat" && (
             <PlaceholderTool
               icon={MessageCirclePlus}
@@ -588,6 +606,7 @@ export function UtilityPanel({
               key={activeSessionId ?? "no-session"}
               active={activeTab?.tool === "agents"}
               onOpenFile={onOpenFile}
+              onOpenReview={onOpenReview}
               onOpenTerminal={onOpenTerminal}
             />
           ) : null}

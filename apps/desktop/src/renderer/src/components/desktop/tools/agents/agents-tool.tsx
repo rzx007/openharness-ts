@@ -40,10 +40,12 @@ const emptyTasks: DesktopSessionTask[] = []
 export function AgentsTool({
   active,
   onOpenFile,
+  onOpenReview,
   onOpenTerminal,
 }: {
   active: boolean
   onOpenFile: (path: string, line?: number) => void
+  onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
   const tasks = useDesktopSessionStore((state) => state.sessionView?.tasks ?? emptyTasks)
@@ -117,6 +119,7 @@ export function AgentsTool({
           error={error}
           onBack={showList}
           onOpenFile={onOpenFile}
+          onOpenReview={onOpenReview}
           onOpenTerminal={onOpenTerminal}
         />
       ) : (
@@ -231,6 +234,7 @@ function AgentDetails({
   error,
   onBack,
   onOpenFile,
+  onOpenReview,
   onOpenTerminal,
 }: {
   task?: DesktopSessionTask
@@ -239,6 +243,7 @@ function AgentDetails({
   error: string | null
   onBack: () => void
   onOpenFile: (path: string, line?: number) => void
+  onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
   const running = Boolean(
@@ -311,6 +316,7 @@ function AgentDetails({
                   }
                   showReasoning={false}
                   onOpenFile={onOpenFile}
+                  onOpenReview={onOpenReview}
                   onOpenTerminal={onOpenTerminal}
                 />
               </MessageScrollerContent>

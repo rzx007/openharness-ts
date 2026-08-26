@@ -85,6 +85,7 @@ export function MainLayout(): React.JSX.Element {
   const visiblePanelLayout = utilityPanel.visibleLayout
   const togglePanel = utilityPanel.toggle
   const openWorkspaceFile = utilityPanel.openFile
+  const openReview = utilityPanel.openReview
   const openTerminal = utilityPanel.openTerminal
   const openUtilityTool = utilityPanel.openTool
 
@@ -263,6 +264,7 @@ export function MainLayout(): React.JSX.Element {
           panelOpen={panelOpen}
           onTogglePanel={togglePanel}
           onOpenFile={openWorkspaceFile}
+          onOpenReview={openReview}
           onOpenTerminal={openTerminal}
           onOpenAgents={() => openUtilityTool("agents")}
         />
@@ -290,9 +292,11 @@ export function MainLayout(): React.JSX.Element {
           onToggleMaximized={utilityPanel.toggleMaximized}
           onClose={utilityPanel.collapse}
           fileOpenRequest={utilityPanel.fileOpenRequest}
+          reviewOpenRequest={utilityPanel.reviewOpenRequest}
           terminalOpenRequest={utilityPanel.terminalOpenRequest}
           toolOpenRequest={utilityPanel.toolOpenRequest}
           onOpenFile={openWorkspaceFile}
+          onOpenReview={openReview}
           onOpenTerminal={openTerminal}
         />
       </Panel>

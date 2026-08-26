@@ -40,6 +40,12 @@ type ScopedToolRequest = {
   tool: UtilityToolRequest
 }
 
+type ScopedReviewRequest = {
+  id: number
+  scopeId: string
+  path?: string
+}
+
 type UseUtilityPanelControllerOptions = {
   activeSessionId: string | null
   selectedProjectId: string | null
@@ -63,11 +69,13 @@ export type UtilityPanelController = {
   fileOpenRequest: Omit<ScopedFileRequest, "scopeId"> | null
   terminalOpenRequest: Omit<ScopedTerminalRequest, "scopeId"> | null
   toolOpenRequest: Omit<ScopedToolRequest, "scopeId"> | null
+  reviewOpenRequest: Omit<ScopedReviewRequest, "scopeId"> | null
   restore: () => void
   collapse: () => void
   toggle: () => void
   toggleMaximized: () => void
   openFile: (path: string, line?: number) => void
+  openReview: (path?: string) => void
   openTerminal: (terminalId: string) => void
   openTool: (tool: UtilityToolRequest) => void
   handleLayoutChanged: (layout: Layout, meta: LayoutChangedMeta) => void
@@ -110,6 +118,7 @@ export function useUtilityPanelController({
   const [fileRequest, setFileRequest] = useState<ScopedFileRequest | null>(null)
   const [terminalRequest, setTerminalRequest] = useState<ScopedTerminalRequest | null>(null)
   const [toolRequest, setToolRequest] = useState<ScopedToolRequest | null>(null)
+  const [reviewRequest, setReviewRequest] = useState<ScopedReviewRequest | null>(null)
 
   if (lastOpenLayoutRef.current === null) lastOpenLayoutRef.current = defaultLayout
 
@@ -267,6 +276,14 @@ export function useUtilityPanelController({
     [restore]
   )
 
+  const openReview = useCallback(
+    (path?: string): void => {
+      restore()
+      setReviewRequest({ id: Date.now(), scopeId: activeScopeIdRef.current, path })
+    },
+    [restore]
+  )
+
   const openTerminal = useCallback(
     (terminalId: string): void => {
       restore()
@@ -328,11 +345,13 @@ export function useUtilityPanelController({
     fileOpenRequest: fileRequest?.scopeId === scopeId ? fileRequest : null,
     terminalOpenRequest: terminalRequest?.scopeId === scopeId ? terminalRequest : null,
     toolOpenRequest: toolRequest?.scopeId === scopeId ? toolRequest : null,
+    reviewOpenRequest: reviewRequest?.scopeId === scopeId ? reviewRequest : null,
     restore,
     collapse,
     toggle,
     toggleMaximized,
     openFile,
+    openReview,
     openTerminal,
     openTool,
     handleLayoutChanged,

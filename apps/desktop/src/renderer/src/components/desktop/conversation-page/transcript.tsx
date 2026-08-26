@@ -1,5 +1,6 @@
 import { Fragment, useMemo } from "react"
 
+import { messageTextContent } from "./message-content"
 import { AssistantMessage } from "./message/assistant-message"
 import { buildConversationEntries } from "./message/conversation-turn-model"
 import { visibleTranscriptParts } from "./transcript-visibility"
@@ -11,12 +12,7 @@ import type {
   DesktopSessionPart,
   DesktopSessionRun,
 } from "@shared/session-types"
-import {
-  AssistantMessageActions,
-  MessageBlock,
-  messageTextContent,
-  RunErrorNotice,
-} from "./message-block"
+import { AssistantMessageActions, MessageBlock, RunErrorNotice } from "./message-block"
 
 export function ConversationTranscript({
   messages,
@@ -28,6 +24,7 @@ export function ConversationTranscript({
   onCopyAssistantMessage,
   onForkAssistantMessage,
   onOpenFile,
+  onOpenReview,
   onOpenTerminal,
   showReasoning = true,
 }: {
@@ -40,6 +37,7 @@ export function ConversationTranscript({
   onCopyAssistantMessage: (content: string) => void
   onForkAssistantMessage?: (messageId: string) => void
   onOpenFile: (path: string, line?: number) => void
+  onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
   showReasoning?: boolean
 }): React.JSX.Element {
@@ -80,6 +78,7 @@ export function ConversationTranscript({
                 parts={entry.system.parts}
                 streaming={false}
                 onOpenFile={onOpenFile}
+                onOpenReview={onOpenReview}
                 onOpenTerminal={onOpenTerminal}
               />
             </MessageScrollerItem>
@@ -108,6 +107,7 @@ export function ConversationTranscript({
                     onEdit: onEditLastUserMessage,
                   }}
                   onOpenFile={onOpenFile}
+                  onOpenReview={onOpenReview}
                   onOpenTerminal={onOpenTerminal}
                 />
               </MessageScrollerItem>
@@ -121,6 +121,7 @@ export function ConversationTranscript({
                   parts={entry.turn.assistantParts}
                   streaming={running && entry === lastTurn}
                   onOpenFile={onOpenFile}
+                  onOpenReview={onOpenReview}
                   onOpenTerminal={onOpenTerminal}
                 />
                 {running && entry === lastTurn ? null : (

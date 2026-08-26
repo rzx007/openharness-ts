@@ -1,6 +1,7 @@
 import { AlertCircle, Check, Copy, GitBranchPlus, PencilLine, ShieldCheck, X } from "lucide-react"
 import { useEffect, useState } from "react"
 
+import { messageTextContent } from "./message-content"
 import { AssistantMessage } from "./message/assistant-message"
 import { formatMessageTime } from "./message/format-message-time"
 import { Button } from "@renderer/components/ui/button"
@@ -50,6 +51,7 @@ export function MessageBlock({
   streaming,
   userActions,
   onOpenFile,
+  onOpenReview,
   onOpenTerminal,
 }: {
   message: DesktopSessionMessage
@@ -60,6 +62,7 @@ export function MessageBlock({
     onEdit: (content: string) => void
   }
   onOpenFile: (path: string, line?: number) => void
+  onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
   if (message.role === "user") {
@@ -79,16 +82,10 @@ export function MessageBlock({
       parts={parts}
       streaming={streaming}
       onOpenFile={onOpenFile}
+      onOpenReview={onOpenReview}
       onOpenTerminal={onOpenTerminal}
     />
   )
-}
-
-export function messageTextContent(parts: DesktopSessionPart[]): string {
-  return parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text ?? "")
-    .join("")
 }
 
 function UserMessageBlock({
@@ -105,7 +102,9 @@ function UserMessageBlock({
   const canEdit = Boolean(userActions?.canEdit && content.trim())
 
   useEffect(() => {
-    if (!editing) setDraft(content)
+    if (editing) return
+    const timer = window.setTimeout(() => setDraft(content), 0)
+    return () => window.clearTimeout(timer)
   }, [content, editing])
 
   if (editing && userActions) {
