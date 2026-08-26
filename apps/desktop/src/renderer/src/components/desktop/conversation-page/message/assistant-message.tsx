@@ -1,10 +1,7 @@
-import { DEFAULT_THEMES, type FileDiffOptions } from "@pierre/diffs"
-import { PatchDiff } from "@pierre/diffs/react"
 import {
   AlertCircle,
   ChevronDown,
   FileCode2,
-  FileDiff,
   PanelRightOpen,
   Pencil,
   TerminalSquare,
@@ -13,7 +10,6 @@ import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { Button } from "@renderer/components/ui/button"
-import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopSessionPart } from "@shared/session-types"
@@ -30,38 +26,9 @@ import {
 import { createStreamdownComponents } from "./streamdown-components"
 import { streamdownPlugins } from "./streamdown-plugins"
 
-type InlineDiffState = "idle" | "loading" | "ready" | "error"
-
-const inlineDiffOptions: FileDiffOptions<undefined> = {
-  collapsedContextThreshold: 6,
-  disableFileHeader: true,
-  diffStyle: "unified",
-  hunkSeparators: "line-info-basic",
-  lineDiffType: "word",
-  overflow: "scroll",
-  theme: DEFAULT_THEMES,
-  tokenizeMaxLength: 160_000,
-  tokenizeMaxLineLength: 16_000,
-  unsafeCSS: `
-    :host {
-      display: block;
-      min-width: max-content;
-      background: transparent;
-      color: var(--content-foreground);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      line-height: 18px;
-    }
-
-    pre {
-      margin: 0;
-      min-width: max-content;
-      background: transparent !important;
-      font-family: var(--font-mono) !important;
-      font-size: 11px !important;
-      line-height: 18px !important;
-    }
-  `,
+type ChangedFileStats = {
+  additions: number
+  deletions: number
 }
 
 export function AssistantMessage({
@@ -390,56 +357,43 @@ function ChangedFilesSummary({
 }): React.JSX.Element {
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
   const [expanded, setExpanded] = useState(false)
-  const [activePath, setActivePath] = useState<string | null>(null)
-  const [diffState, setDiffState] = useState<InlineDiffState>("idle")
-  const [patch, setPatch] = useState("")
-  const [diffBinary, setDiffBinary] = useState(false)
-  const [diffError, setDiffError] = useState<string | null>(null)
-  const visible = expanded ? files : files.slice(0, 3)
-  const additions = files.reduce((total, file) => total + file.additions, 0)
-  const deletions = files.reduce((total, file) => total + file.deletions, 0)
-  const hasStats = files.some((file) => file.hasStats)
+  const [gitStatsByPath, setGitStatsByPath] = useState<Record<string, ChangedFileStats>>({})
+  const fileKey = useMemo(
+    () =>
+      files
+        .map((file) => normalizeReviewPath(toProjectRelativePath(file.path, selectedProjectPath)))
+        .join("\n"),
+    [files, selectedProjectPath]
+  )
 
   useEffect(() => {
     let cancelled = false
     const timer = window.setTimeout(() => {
-      if (!canOpenReview || !selectedProjectPath || !activePath) {
-        setPatch("")
-        setDiffBinary(false)
-        setDiffError(null)
-        setDiffState("idle")
+      if (!canOpenReview || !selectedProjectPath || files.length === 0) {
+        setGitStatsByPath({})
         return
       }
 
-      const relativePath = toProjectRelativePath(activePath, selectedProjectPath)
-      if (!relativePath) {
-        setPatch("")
-        setDiffBinary(false)
-        setDiffError("该文件不在当前项目目录内。")
-        setDiffState("error")
-        return
-      }
-
-      setDiffState("loading")
-      setDiffError(null)
       void window.desktop.git
-        .fileDiff({
+        .changes({
           rootPath: selectedProjectPath,
-          path: relativePath,
           scope: "uncommitted",
         })
         .then((result) => {
           if (cancelled) return
-          setPatch(result.patch)
-          setDiffBinary(result.binary)
-          setDiffState("ready")
+          const stats: Record<string, ChangedFileStats> = {}
+          for (const file of result.files) {
+            if (file.additions === null && file.deletions === null) continue
+            stats[normalizeReviewPath(file.path)] = {
+              additions: file.additions ?? 0,
+              deletions: file.deletions ?? 0,
+            }
+          }
+          setGitStatsByPath(stats)
         })
-        .catch((error: unknown) => {
+        .catch(() => {
           if (cancelled) return
-          setPatch("")
-          setDiffBinary(false)
-          setDiffError(errorMessage(error))
-          setDiffState("error")
+          setGitStatsByPath({})
         })
     }, 0)
 
@@ -447,22 +401,21 @@ function ChangedFilesSummary({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [activePath, canOpenReview, selectedProjectPath])
+  }, [canOpenReview, fileKey, files.length, selectedProjectPath])
 
-  const handleFileClick = (file: ChangedFile): void => {
-    if (!canOpenReview) {
-      onOpenFile(file.path)
-      return
-    }
-    const nextPath = activePath === file.path ? null : file.path
-    setActivePath(nextPath)
-    setDiffState(nextPath ? "loading" : "idle")
-    if (!nextPath) {
-      setPatch("")
-      setDiffBinary(false)
-      setDiffError(null)
-    }
-  }
+  const filesWithStats = useMemo(
+    () =>
+      files.map((file) => {
+        const stats =
+          gitStatsByPath[normalizeReviewPath(toProjectRelativePath(file.path, selectedProjectPath))]
+        return stats ? { ...file, ...stats, hasStats: true } : file
+      }),
+    [files, gitStatsByPath, selectedProjectPath]
+  )
+  const visible = expanded ? filesWithStats : filesWithStats.slice(0, 3)
+  const additions = filesWithStats.reduce((total, file) => total + file.additions, 0)
+  const deletions = filesWithStats.reduce((total, file) => total + file.deletions, 0)
+  const hasStats = filesWithStats.some((file) => file.hasStats)
 
   return (
     <section className="overflow-hidden rounded-lg border bg-transparent text-[13px]">
@@ -483,61 +436,19 @@ function ChangedFilesSummary({
         </div>
       </header>
       <div className="border-t">
-        {visible.map((file) => {
-          const open = canOpenReview && activePath === file.path
-          return (
-            <div key={file.path} className="border-b last:border-b-0">
-              <div className="flex min-h-11 items-center gap-2 px-3 transition-colors hover:bg-muted/45">
-                <button
-                  type="button"
-                  onClick={() => handleFileClick(file)}
-                  className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
-                >
-                  {canOpenReview ? (
-                    <ChevronDown
-                      className={cn(
-                        "size-3.5 shrink-0 text-ui-muted transition-transform",
-                        open && "rotate-180"
-                      )}
-                    />
-                  ) : null}
-                  <span className="min-w-0 flex-1 truncate text-[14px] text-ui-muted">
-                    {file.path}
-                  </span>
-                  {file.hasStats ? (
-                    <span className="shrink-0 font-mono text-[12px] font-semibold tabular-nums">
-                      <span className="text-emerald-600 dark:text-emerald-400">
-                        +{file.additions}
-                      </span>
-                      <span className="ml-1 text-red-500">-{file.deletions}</span>
-                    </span>
-                  ) : null}
-                </button>
-                {canOpenReview ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 shrink-0 text-ui-muted hover:text-foreground"
-                    title="打开审阅"
-                    aria-label={`打开审阅：${file.path}`}
-                    onClick={() => onOpenReview(file.path)}
-                  >
-                    <PanelRightOpen className="size-4" />
-                  </Button>
-                ) : null}
-              </div>
-              {open ? (
-                <InlineFileDiffPreview
-                  state={diffState}
-                  patch={patch}
-                  binary={diffBinary}
-                  error={diffError}
-                />
-              ) : null}
-            </div>
-          )
-        })}
+        {visible.map((file) => (
+          <button
+            key={file.path}
+            type="button"
+            onClick={() => (canOpenReview ? onOpenReview(file.path) : onOpenFile(file.path))}
+            className="flex h-11 w-full items-center gap-3 px-4 text-left transition-colors hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+          >
+            <span className="min-w-0 flex-1 truncate text-[14px] text-ui-muted">{file.path}</span>
+            {file.hasStats ? (
+              <LineStats additions={file.additions} deletions={file.deletions} />
+            ) : null}
+          </button>
+        ))}
       </div>
       {!expanded && files.length > 3 ? (
         <button
@@ -552,86 +463,33 @@ function ChangedFilesSummary({
   )
 }
 
-function InlineFileDiffPreview({
-  state,
-  patch,
-  binary,
-  error,
+function LineStats({
+  additions,
+  deletions,
 }: {
-  state: InlineDiffState
-  patch: string
-  binary: boolean
-  error: string | null
+  additions: number
+  deletions: number
 }): React.JSX.Element {
-  if (state === "loading") {
-    return (
-      <div className="flex min-h-28 items-center justify-center gap-2 border-t bg-muted/15 text-[13px] text-ui-muted">
-        <Spinner className="size-3.5" />
-        正在读取 diff...
-      </div>
-    )
-  }
-
-  if (state === "error") {
-    return <InlineDiffEmptyState title="无法读取文件 diff" description={error ?? "请稍后重试。"} />
-  }
-
-  if (binary) {
-    return <InlineDiffEmptyState title="二进制文件" description="这类改动暂不展示文本 diff。" />
-  }
-
-  if (!patch.startsWith("diff --git")) {
-    return <InlineDiffEmptyState title="没有可展示的文本 diff" description="该文件没有文本差异。" />
-  }
-
   return (
-    <div className="max-h-96 overflow-auto border-t bg-background">
-      <PatchDiff
-        key={patch.length}
-        patch={patch}
-        options={{ ...inlineDiffOptions, themeType: resolveThemeType() }}
-        className="min-w-max"
-      />
-    </div>
+    <span className="shrink-0 font-mono text-[12px] font-semibold tabular-nums">
+      <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>
+      <span className="ml-1 text-red-500">-{deletions}</span>
+    </span>
   )
 }
 
-function InlineDiffEmptyState({
-  title,
-  description,
-}: {
-  title: string
-  description: string
-}): React.JSX.Element {
-  return (
-    <div className="flex min-h-28 items-center justify-center border-t bg-muted/15 px-4 py-6 text-center">
-      <div className="flex max-w-sm flex-col items-center gap-2">
-        <FileDiff className="size-4 text-muted-foreground" />
-        <div className="text-[13px] font-medium text-foreground">{title}</div>
-        <p className="text-xs leading-5 text-ui-muted">{description}</p>
-      </div>
-    </div>
-  )
+function normalizeReviewPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\//, "").toLocaleLowerCase()
 }
 
-function resolveThemeType(): "dark" | "light" {
-  return document.documentElement.classList.contains("dark") ? "dark" : "light"
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error)
-    return error.message.replace(/^Error invoking remote method '[^']+': /, "")
-  return String(error)
-}
-
-function toProjectRelativePath(path: string, projectPath: string | undefined): string | null {
+function toProjectRelativePath(path: string, projectPath: string | undefined): string {
   const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "")
   const normalizedPath = withoutLocation.replace(/\\/g, "/")
   const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "")
   if (/^[a-z]:\//i.test(normalizedPath)) {
-    if (!normalizedProject) return null
+    if (!normalizedProject) return normalizedPath
     const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`
-    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return null
+    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return normalizedPath
     return normalizedPath.slice(normalizedProject.length + 1)
   }
   return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
