@@ -1402,6 +1402,41 @@ describe("SessionStore", () => {
     });
   });
 
+  it("keeps unpinned project order stable when a project is inspected again", () => {
+    withStore((store, databasePath) => {
+      const root = mkdtempSync(join(tmpdir(), "ohs-project-order-"));
+      const firstPath = join(root, "first");
+      const secondPath = join(root, "second");
+      mkdirSync(firstPath);
+      mkdirSync(secondPath);
+      try {
+        const first = store.inspectProject(firstPath);
+        const second = store.inspectProject(secondPath);
+        const database = new Database(databasePath);
+        try {
+          database.prepare("UPDATE project SET created_at = ?, last_opened_at = ? WHERE id = ?").run(
+            100,
+            100,
+            first.id,
+          );
+          database.prepare("UPDATE project SET created_at = ?, last_opened_at = ? WHERE id = ?").run(
+            200,
+            200,
+            second.id,
+          );
+        } finally {
+          database.close();
+        }
+
+        store.inspectProject(firstPath);
+
+        expect(store.listProjects().map((project) => project.id)).toEqual([second.id, first.id]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   it("stores and clears a project default shell", () => {
     withStore((store) => {
       const root = mkdtempSync(join(tmpdir(), "ohs-project-shell-"));

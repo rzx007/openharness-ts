@@ -94,6 +94,65 @@ describe("desktop session store provider refresh", () => {
   })
 })
 
+describe("desktop session store project order", () => {
+  it("keeps the project list stable when selecting a project", async () => {
+    const projects = [
+      {
+        id: "project-a",
+        name: "Project A",
+        path: "D:\\code\\project-a",
+        lastOpenedAt: 300,
+        available: true,
+      },
+      {
+        id: "project-b",
+        name: "Project B",
+        path: "D:\\code\\project-b",
+        lastOpenedAt: 200,
+        available: true,
+      },
+      {
+        id: "project-c",
+        name: "Project C",
+        path: "D:\\code\\project-c",
+        lastOpenedAt: 100,
+        available: true,
+      },
+    ]
+    const inspectedProject = { ...projects[1], lastOpenedAt: 400 }
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject: vi.fn(async () => ({
+            project: inspectedProject,
+            git: false,
+            branch: null,
+            branches: [],
+          })),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects,
+      workspaceMode: "project",
+      selectedProject: projects[0],
+      selectedProjectGit: false,
+      branch: null,
+      branches: [],
+      error: null,
+    })
+
+    await useDesktopSessionStore.getState().selectProject(projects[1])
+
+    expect(useDesktopSessionStore.getState().projects.map((project) => project.id)).toEqual([
+      "project-a",
+      "project-b",
+      "project-c",
+    ])
+    expect(useDesktopSessionStore.getState().projects[1]).toEqual(inspectedProject)
+  })
+})
+
 describe("desktop session store outside-project mode", () => {
   it("lets the main process allocate the directory for a session without a project id", async () => {
     const session = {

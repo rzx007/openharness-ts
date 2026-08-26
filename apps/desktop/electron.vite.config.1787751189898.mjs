@@ -1,0 +1,68 @@
+// electron.vite.config.ts
+import { cpSync } from "node:fs";
+import { resolve } from "node:path";
+import { defineConfig } from "electron-vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+function copySessionMigrations() {
+  return {
+    name: "copy-session-migrations",
+    writeBundle(options) {
+      const outputDirectory = resolve(options.dir ?? "out/main");
+      cpSync(
+        resolve("../../packages/services/src/session-runtime/migrations"),
+        resolve(outputDirectory, "migrations"),
+        { recursive: true }
+      );
+    }
+  };
+}
+var electron_vite_config_default = defineConfig({
+  main: {
+    plugins: [copySessionMigrations()],
+    build: {
+      externalizeDeps: {
+        // workspace 包打进主进程 bundle，安装包就不必再拷整棵 monorepo 依赖树
+        exclude: [
+          "@electron-toolkit/utils",
+          "@openharness/client",
+          "@openharness/server",
+          "@openharness/terminal",
+          "@openharness/terminal-node"
+        ],
+        // 原生模块不能打进 JS，运行时从 node_modules 加载
+        include: ["better-sqlite3", "node-pty"]
+      }
+    }
+  },
+  preload: {
+    build: {
+      externalizeDeps: {
+        exclude: ["@electron-toolkit/preload"]
+      }
+    }
+  },
+  renderer: {
+    resolve: {
+      alias: {
+        "@renderer": resolve("src/renderer/src"),
+        "@main": resolve("src/main"),
+        "@shared": resolve("src/shared")
+      }
+    },
+    plugins: [
+      tanstackRouter({
+        target: "react",
+        autoCodeSplitting: true,
+        routesDirectory: "./src/routes",
+        generatedRouteTree: "./src/routeTree.gen.ts"
+      }),
+      react(),
+      tailwindcss()
+    ]
+  }
+});
+export {
+  electron_vite_config_default as default
+};

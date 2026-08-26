@@ -1008,9 +1008,18 @@ function clearPersistedActiveSessionId(): void {
 }
 
 function upsertProject(projects: DesktopProject[], project: DesktopProject): DesktopProject[] {
-  return [project, ...projects.filter((item) => !samePath(item.path, project.path))].sort(
-    (a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) || b.lastOpenedAt - a.lastOpenedAt
-  )
+  const existingIndex = projects.findIndex((item) => samePath(item.path, project.path))
+  const nextProjects =
+    existingIndex === -1
+      ? [project, ...projects]
+      : projects.map((item, index) => (index === existingIndex ? project : item))
+
+  return nextProjects.sort((a, b) => {
+    const aPinnedAt = a.pinnedAt ?? 0
+    const bPinnedAt = b.pinnedAt ?? 0
+    const pinGroupDifference = Number(Boolean(bPinnedAt)) - Number(Boolean(aPinnedAt))
+    return pinGroupDifference || (aPinnedAt && bPinnedAt ? bPinnedAt - aPinnedAt : 0)
+  })
 }
 
 function upsertSession(

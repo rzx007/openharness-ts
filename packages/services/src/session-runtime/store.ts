@@ -211,7 +211,7 @@ export class SessionStore {
     return (
       this.database
         .prepare(
-          `SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' ${where} ORDER BY (p.pinned_at IS NULL), p.pinned_at DESC, p.last_opened_at DESC`,
+          `SELECT p.*, l.path FROM project p JOIN project_location l ON l.project_id = p.id AND l.status = 'active' ${where} ORDER BY (p.pinned_at IS NULL), p.pinned_at DESC, p.created_at DESC`,
         )
         .all() as Array<Record<string, unknown>>
     ).map(projectFromRow);
