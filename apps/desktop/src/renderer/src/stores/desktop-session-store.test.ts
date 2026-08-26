@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopBootstrapData } from "@shared/session-types"
 import { useDesktopSessionStore } from "./desktop-session-store"
@@ -150,6 +150,78 @@ describe("desktop session store project order", () => {
       "project-c",
     ])
     expect(useDesktopSessionStore.getState().projects[1]).toEqual(inspectedProject)
+  })
+})
+
+describe("desktop session store git state refresh", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("refreshes a previously non-git project after session updates", async () => {
+    vi.useFakeTimers()
+    const project = {
+      id: "project-a",
+      name: "Project A",
+      path: "D:\\code\\project-a",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const inspectProject = vi.fn(async () => ({
+      project,
+      git: true,
+      branch: "main",
+      branches: ["main"],
+    }))
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject,
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      workspaceMode: "project",
+      selectedProject: project,
+      selectedProjectGit: false,
+      selectedProjectGitCheckedAt: Date.now(),
+      branch: null,
+      branches: [],
+      activeSessionId: "session-1",
+      sessionView: null,
+    })
+
+    useDesktopSessionStore.getState().applySessionUpdate({
+      cursor: 1,
+      syncStatus: "connected",
+      session: {
+        id: "session-1",
+        projectId: project.id,
+        workspaceMode: "project",
+        cwd: project.path,
+        title: "Git init",
+        model: "deepseek-chat",
+        status: "idle",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      inputs: [],
+      messages: [],
+      parts: [],
+      runs: [],
+      tasks: [],
+      permissions: [],
+    })
+    await vi.advanceTimersByTimeAsync(750)
+
+    expect(inspectProject).toHaveBeenCalledWith(project.path)
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedProjectGit: true,
+      branch: "main",
+      branches: ["main"],
+    })
   })
 })
 

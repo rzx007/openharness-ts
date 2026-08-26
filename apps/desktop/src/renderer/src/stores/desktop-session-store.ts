@@ -15,6 +15,10 @@ import type {
 type LoadStatus = "idle" | "loading" | "ready" | "error"
 
 const persistedActiveSessionKey = "openharness.desktop.active-session.v1"
+const selectedProjectGitRefreshTtlMs = 5_000
+const selectedProjectGitRefreshDelayMs = 750
+
+let selectedProjectGitRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 interface SubmitPromptOptions {
   commandLine?: string
@@ -45,6 +49,7 @@ interface DesktopSessionState {
   workspaceMode: DesktopWorkspaceMode
   selectedProject: DesktopProject | null
   selectedProjectGit: boolean
+  selectedProjectGitCheckedAt: number | null
   branch: string | null
   branches: string[]
   activeSessionId: string | null
@@ -57,6 +62,7 @@ interface DesktopSessionState {
   chooseProject: () => Promise<void>
   selectProject: (project: DesktopProject) => Promise<void>
   selectOutsideProject: () => void
+  refreshSelectedProjectGit: (options?: { force?: boolean }) => Promise<boolean>
   checkoutBranch: (branch: string) => Promise<void>
   createAndCheckoutBranch: (branch: string) => Promise<void>
   renameProject: (path: string, name: string) => Promise<void>
@@ -111,6 +117,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   workspaceMode: "project",
   selectedProject: null,
   selectedProjectGit: false,
+  selectedProjectGitCheckedAt: null,
   branch: null,
   branches: [],
   activeSessionId: null,
@@ -161,6 +168,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         workspaceMode,
         selectedProject,
         selectedProjectGit: false,
+        selectedProjectGitCheckedAt: null,
         branches: [],
         error: null,
       })
@@ -216,6 +224,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         workspaceMode: "project",
         selectedProject: details.project,
         selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+        selectedProjectGitCheckedAt: Date.now(),
         branch: details.branch,
         branches: details.branches ?? [],
         error: null,
@@ -230,6 +239,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       selectedProject: project,
       workspaceMode: "project",
       selectedProjectGit: false,
+      selectedProjectGitCheckedAt: null,
       branch: null,
       branches: [],
       error: null,
@@ -240,6 +250,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         projects: upsertProject(state.projects, details.project),
         selectedProject: details.project,
         selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+        selectedProjectGitCheckedAt: Date.now(),
         branch: details.branch,
         branches: details.branches ?? [],
       }))
@@ -253,10 +264,59 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       workspaceMode: "outside_project",
       selectedProject: null,
       selectedProjectGit: false,
+      selectedProjectGitCheckedAt: null,
       branch: null,
       branches: [],
       error: null,
     })
+  },
+
+  async refreshSelectedProjectGit(options) {
+    const { selectedProject, selectedProjectGitCheckedAt } = get()
+    if (!selectedProject) {
+      set({
+        selectedProjectGit: false,
+        selectedProjectGitCheckedAt: null,
+        branch: null,
+        branches: [],
+      })
+      return false
+    }
+
+    if (
+      !options?.force &&
+      selectedProjectGitCheckedAt !== null &&
+      Date.now() - selectedProjectGitCheckedAt < selectedProjectGitRefreshTtlMs
+    ) {
+      return get().selectedProjectGit
+    }
+
+    try {
+      const details = await window.desktop.sessions.inspectProject(selectedProject.path)
+      if (!samePath(get().selectedProject?.path ?? "", selectedProject.path)) {
+        return get().selectedProjectGit
+      }
+      const git = details.git ?? Boolean(details.branch || details.branches?.length)
+      set((state) => ({
+        projects: upsertProject(state.projects, details.project),
+        selectedProject: details.project,
+        selectedProjectGit: git,
+        selectedProjectGitCheckedAt: Date.now(),
+        branch: details.branch,
+        branches: details.branches ?? [],
+      }))
+      return git
+    } catch {
+      if (samePath(get().selectedProject?.path ?? "", selectedProject.path)) {
+        set({
+          selectedProjectGit: false,
+          selectedProjectGitCheckedAt: Date.now(),
+          branch: null,
+          branches: [],
+        })
+      }
+      return false
+    }
   },
 
   async checkoutBranch(branch) {
@@ -271,6 +331,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         projects: upsertProject(state.projects, details.project),
         selectedProject: details.project,
         selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+        selectedProjectGitCheckedAt: Date.now(),
         branch: details.branch,
         branches: details.branches ?? [],
         error: null,
@@ -293,6 +354,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         projects: upsertProject(state.projects, details.project),
         selectedProject: details.project,
         selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+        selectedProjectGitCheckedAt: Date.now(),
         branch: details.branch,
         branches: details.branches ?? [],
         error: null,
@@ -383,6 +445,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           workspaceMode:
             removedSelected && projects.length === 0 ? "outside_project" : state.workspaceMode,
           selectedProjectGit: removedSelected ? false : state.selectedProjectGit,
+          selectedProjectGitCheckedAt: removedSelected ? null : state.selectedProjectGitCheckedAt,
           branch: removedSelected ? null : state.branch,
           branches: removedSelected ? [] : state.branches,
           error: null,
@@ -558,12 +621,18 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
             projects: upsertProject(state.projects, details.project),
             selectedProject: details.project,
             selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+            selectedProjectGitCheckedAt: Date.now(),
             branch: details.branch,
             branches: details.branches ?? [],
           }))
         } catch {
           if (get().activeSessionId === sessionId) {
-            set({ selectedProjectGit: false, branch: null, branches: [] })
+            set({
+              selectedProjectGit: false,
+              selectedProjectGitCheckedAt: Date.now(),
+              branch: null,
+              branches: [],
+            })
           }
         }
       }
@@ -589,6 +658,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       selectedProvider: sessionProvider(session, get().defaultProvider),
       selectedPermissionMode: sessionPermissionMode(session, get().defaultPermissionMode),
       selectedProjectGit: false,
+      selectedProjectGitCheckedAt: null,
       branch: null,
       branches: [],
       error: null,
@@ -812,6 +882,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       throw error
     } finally {
       set({ sending: false })
+      scheduleSelectedProjectGitRefresh(true)
     }
   },
 
@@ -831,6 +902,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       throw error
     } finally {
       set({ sending: false })
+      scheduleSelectedProjectGitRefresh(true)
     }
   },
 
@@ -846,6 +918,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       throw error
     } finally {
       set({ sending: false })
+      scheduleSelectedProjectGitRefresh(true)
     }
   },
 
@@ -898,6 +971,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
             : state.archivedSessions,
       }
     })
+    scheduleSelectedProjectGitRefresh(true)
   },
 
   clearError() {
@@ -973,13 +1047,19 @@ function resolveSessionWorkspace(
   session: DesktopSessionRecord
 ): Pick<
   DesktopSessionState,
-  "workspaceMode" | "selectedProject" | "selectedProjectGit" | "branch" | "branches"
+  | "workspaceMode"
+  | "selectedProject"
+  | "selectedProjectGit"
+  | "selectedProjectGitCheckedAt"
+  | "branch"
+  | "branches"
 > {
   if (session.workspaceMode === "outside_project" || !session.projectId) {
     return {
       workspaceMode: "outside_project",
       selectedProject: null,
       selectedProjectGit: false,
+      selectedProjectGitCheckedAt: null,
       branch: null,
       branches: [],
     }
@@ -992,9 +1072,18 @@ function resolveSessionWorkspace(
     workspaceMode: "project",
     selectedProject: project,
     selectedProjectGit: false,
+    selectedProjectGitCheckedAt: null,
     branch: null,
     branches: [],
   }
+}
+
+function scheduleSelectedProjectGitRefresh(force: boolean): void {
+  if (selectedProjectGitRefreshTimer) clearTimeout(selectedProjectGitRefreshTimer)
+  selectedProjectGitRefreshTimer = setTimeout(() => {
+    selectedProjectGitRefreshTimer = null
+    void useDesktopSessionStore.getState().refreshSelectedProjectGit({ force })
+  }, selectedProjectGitRefreshDelayMs)
 }
 
 function readPersistedActiveSessionId(): string | null {

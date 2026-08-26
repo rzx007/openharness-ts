@@ -48,6 +48,9 @@ export function MainLayout(): React.JSX.Element {
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const selectedProjectId = useDesktopSessionStore((state) => state.selectedProject?.id ?? null)
   const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
+  const refreshSelectedProjectGit = useDesktopSessionStore(
+    (state) => state.refreshSelectedProjectGit
+  )
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const sidebarPanelRef = usePanelRef()
@@ -94,6 +97,19 @@ export function MainLayout(): React.JSX.Element {
     const detach = attachDesktopSessionEvents()
     return detach
   }, [])
+
+  useEffect(() => {
+    if (!selectedProjectId || selectedProjectGit) return
+    const refresh = (): void => {
+      void refreshSelectedProjectGit()
+    }
+    const firstRefresh = window.setTimeout(refresh, 0)
+    const interval = window.setInterval(refresh, 5_000)
+    return () => {
+      window.clearTimeout(firstRefresh)
+      window.clearInterval(interval)
+    }
+  }, [refreshSelectedProjectGit, selectedProjectGit, selectedProjectId])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {

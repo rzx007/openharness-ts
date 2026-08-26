@@ -33,6 +33,7 @@ import type {
   CloseDesktopAuxSessionInput,
   CreateDesktopProjectBranchInput,
   CreateDesktopSessionInput,
+  DesktopCommandCatalogEntry,
   DesktopBootstrapData,
   DesktopAuxSessionUpdate,
   DesktopDaemonStatus,
@@ -165,7 +166,7 @@ class DesktopSessionService {
     let branch: string | null = null
     let branches: string[] = []
     try {
-      await execGit(path, ["rev-parse", "--is-inside-work-tree"])
+      await execGit(path, ["rev-parse", "--show-toplevel"])
       git = true
       try {
         branch = parseCurrentBranch(await client.getGitBranch({ cwd: path }))
@@ -186,7 +187,7 @@ class DesktopSessionService {
     return { project, git, branch, branches }
   }
 
-  async listCommands(cwdInput: string) {
+  async listCommands(cwdInput: string): Promise<DesktopCommandCatalogEntry[]> {
     const cwd = resolveRequiredPath(cwdInput)
     return await (await this.getClient()).listCommands({ cwd })
   }
@@ -721,7 +722,7 @@ function toDesktopSessionRecord(session: SessionRecord): DesktopSessionRecord {
   const desktop = readDesktopMetadata(session.metadata)
   const workspaceMode =
     desktop["workspaceMode"] === "outside_project" ||
-      isOutsideProjectWorkspacePath(session.cwd, app.getPath("documents"))
+    isOutsideProjectWorkspacePath(session.cwd, app.getPath("documents"))
       ? "outside_project"
       : "project"
   return { ...session, workspaceMode }
@@ -761,7 +762,14 @@ async function execGit(cwd: string, args: string[]): Promise<{ stdout: string; s
 function requireGitBranchName(value: unknown): string {
   const branch = requireString(value, "分支名称")
   if (branch.startsWith("-")) throw new Error("分支名称不能以 - 开头。")
-  if (/[\u0000-\u001f\u007f]/.test(branch)) throw new Error("分支名称不能包含控制字符。")
+  if (
+    [...branch].some((character) => {
+      const code = character.charCodeAt(0)
+      return code <= 31 || code === 127
+    })
+  ) {
+    throw new Error("分支名称不能包含控制字符。")
+  }
   return branch
 }
 
