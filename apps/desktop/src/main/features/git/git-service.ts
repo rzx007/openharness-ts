@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { readFile, stat } from "node:fs/promises"
-import { isAbsolute, resolve } from "node:path"
+import { isAbsolute, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 
 import type {
@@ -64,7 +64,7 @@ class GitService {
 
   async fileDiff(input: DesktopGitFileDiffInput): Promise<DesktopGitFileDiffResult> {
     const rootPath = await resolveDirectory(input.rootPath)
-    const path = normalizeRequestedPath(input.path)
+    const path = normalizeRequestedPath(rootPath, input.path)
     const scope = normalizeDiffScope(input.scope)
     try {
       if (
@@ -113,7 +113,7 @@ async function untrackedFileDiff(
   rootPath: string,
   path: string
 ): Promise<DesktopGitFileDiffResult> {
-  const absolutePath = resolve(rootPath, path)
+  const absolutePath = resolvePathInsideRoot(rootPath, path)
   const info = await stat(absolutePath)
   if (!info.isFile()) throw new Error("文件不存在或不是普通文件。")
 
@@ -150,18 +150,32 @@ async function resolveDirectory(value: unknown): Promise<string> {
   return path
 }
 
-function normalizeRequestedPath(value: unknown): string {
+/**
+ * Rejects absolute paths and any relative path that resolves outside rootPath.
+ * Leading `../` alone is not enough — `src/../../secret` must also be blocked.
+ */
+function normalizeRequestedPath(rootPath: string, value: unknown): string {
   if (typeof value !== "string" || !value.trim()) throw new Error("文件路径不能为空。")
   const normalized = normalizeGitPath(value.trim())
+  if (!normalized || isAbsolute(normalized)) {
+    throw new Error("文件必须位于当前项目目录内。")
+  }
+  const absolutePath = resolvePathInsideRoot(rootPath, normalized)
+  return relative(rootPath, absolutePath).split(sep).join("/")
+}
+
+function resolvePathInsideRoot(rootPath: string, relativePath: string): string {
+  const absolutePath = resolve(rootPath, relativePath)
+  const relativeToRoot = relative(rootPath, absolutePath)
   if (
-    !normalized ||
-    normalized.startsWith("../") ||
-    normalized === ".." ||
-    isAbsolute(normalized)
+    !relativeToRoot ||
+    relativeToRoot === ".." ||
+    relativeToRoot.startsWith(`..${sep}`) ||
+    isAbsolute(relativeToRoot)
   ) {
     throw new Error("文件必须位于当前项目目录内。")
   }
-  return normalized
+  return absolutePath
 }
 
 async function runGit(cwd: string, args: string[], maxBuffer = 1024 * 1024): Promise<string> {
