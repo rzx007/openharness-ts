@@ -3,7 +3,7 @@ import { mkdir, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { Settings } from "@openharness/core";
+import type { AgentBackgroundShellHost, Settings } from "@openharness/core";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
@@ -76,6 +76,7 @@ export interface DaemonApplicationOptions {
   createAgent?: CreateDaemonAgent;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
+  createBackgroundShellHost?(session: SessionRecord): AgentBackgroundShellHost;
   log(event: ObservabilityEvent): void;
   ownerId?: string;
   ownerHeartbeatMs?: number;
@@ -238,6 +239,22 @@ export class DaemonApplication implements DurableAgentApplication {
         createJobHost:
           options.createJobHost ??
           ((session) => this.jobs.createAgentHost(session)),
+        createBackgroundShellHost:
+          options.createBackgroundShellHost ??
+          ((session) => ({
+            create: async (input) => {
+              if (input.sessionId !== session.id) throw new Error("Background shell owner session mismatch.");
+              if (input.cwd !== session.cwd) throw new Error("Background shell cwd mismatch.");
+              const { execution } = await this.backgroundShells.create({
+                sessionId: session.id,
+                command: input.command,
+                description: input.description,
+                settings: input.settings,
+                origin: "tool",
+              });
+              return { jobId: execution.id, label: execution.description };
+            },
+          })),
         workflowRepository: this.workflows,
         requestPermission: async (request, context) => {
           // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。

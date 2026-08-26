@@ -157,15 +157,19 @@ export async function composeOpenHarnessAgent(
       onWarning: (event) => process.stderr.write(`${JSON.stringify(event)}\n`),
       createAgent: internal.createAgent,
     });
-    const jobs =
-      explicitCapabilities?.jobs ??
-      (!explicitCapabilities
-        ? new LocalAgentJobHost(cwd, session.id, childManager)
-        : undefined);
+    const localJobs = !explicitCapabilities
+      ? new LocalAgentJobHost(cwd, session.id, childManager)
+      : undefined;
+    const jobs = explicitCapabilities?.jobs ?? localJobs;
     runtime.queryEngine.setJobs(jobs);
+    const backgroundShell =
+      explicitCapabilities?.backgroundShell ??
+      localJobs;
+    runtime.queryEngine.setBackgroundShell(backgroundShell);
     const hostCapabilities = [
       "permissions",
       ...(jobs ? ["jobs"] : []),
+      ...(backgroundShell ? ["backgroundShell"] : []),
       ...(explicitCapabilities?.terminal ? ["terminal"] : []),
       ...(explicitCapabilities?.schedules ?? internal.effects.schedules
         ? ["schedules"]

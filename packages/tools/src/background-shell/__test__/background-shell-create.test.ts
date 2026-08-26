@@ -1,23 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-import {
-  getDetachedProcessSupervisor,
-  resetExecutionRuntimes,
-} from "@openharness/services/executions";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { backgroundShellCreateTool } from "../background-shell-tools.js";
-
-const createdDirectories: string[] = [];
-
-afterEach(() => {
-  for (const cwd of createdDirectories.splice(0)) {
-    resetExecutionRuntimes({ cwd, sessionId: "session-1" });
-    rmSync(cwd, { recursive: true, force: true });
-  }
-});
 
 describe("BackgroundShellCreate", () => {
   it("exposes only background-shell inputs", () => {
@@ -38,11 +21,16 @@ describe("BackgroundShellCreate", () => {
     expect(result.content[0]).toMatchObject({ text: expect.stringContaining("Use Agent") });
   });
 
-  it("returns a shell jobId controlled by the process supervisor", async () => {
-    const cwd = temporaryDirectory();
+  it("delegates creation to the host and returns its durable job id", async () => {
+    const create = vi.fn(async () => ({ jobId: "task-durable", label: "print output" }));
     const result = await backgroundShellCreateTool.execute(
       { description: "print output", command: 'node -e "process.stdout.write(\'ok\')"' },
-      { cwd, sessionId: "session-1" },
+      {
+        cwd: "/repo",
+        sessionId: "session-1",
+        settings: { model: "test" } as any,
+        backgroundShell: { create },
+      },
     );
     const payload = JSON.parse((result.content[0] as { text: string }).text) as Record<string, unknown>;
     expect(payload).toMatchObject({
@@ -50,17 +38,26 @@ describe("BackgroundShellCreate", () => {
       action: "created",
       jobKind: "shell",
       label: "print output",
-      jobId: expect.any(String),
+      jobId: "task-durable",
     });
-    await expect(getDetachedProcessSupervisor({ cwd, sessionId: "session-1" }).awaitExecution(
-      payload.jobId as string,
-      { timeoutMs: 5_000 },
-    )).resolves.toMatchObject({ status: "completed", output: expect.stringContaining("ok") });
+    expect(create).toHaveBeenCalledWith({
+      cwd: "/repo",
+      sessionId: "session-1",
+      command: 'node -e "process.stdout.write(\'ok\')"',
+      description: "print output",
+      settings: { model: "test" },
+    });
+  });
+
+  it("fails before launching when no host is configured", async () => {
+    const result = await backgroundShellCreateTool.execute(
+      { description: "server", command: "npm run dev" },
+      { cwd: "/repo", sessionId: "session-1" },
+    );
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ text: "Background shell host is not configured." }],
+    });
   });
 });
-
-function temporaryDirectory(): string {
-  const cwd = mkdtempSync(join(tmpdir(), "openharness-background-shell-create-"));
-  createdDirectories.push(cwd);
-  return cwd;
-}

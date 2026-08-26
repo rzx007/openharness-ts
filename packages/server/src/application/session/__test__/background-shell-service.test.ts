@@ -95,6 +95,24 @@ describe("BackgroundShellService", () => {
     expect(broadcastSince).toHaveBeenCalledWith(7);
   });
 
+  it("passes tool settings to the process runtime and records the creation origin", async () => {
+    const { service, store, manager } = createTaskService();
+    const settings = { model: "test-model" } as any;
+
+    const result = await service.create({
+      sessionId: "s1",
+      command: "pnpm dev",
+      settings,
+      origin: "tool",
+    });
+
+    expect(manager.startShellExecution).toHaveBeenCalledWith(expect.objectContaining({ settings }));
+    expect(store.createSessionTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: result.execution.id,
+      metadata: expect.objectContaining({ origin: "tool" }),
+    }));
+  });
+
   it("uses durable output when manager output is unavailable after restart", () => {
     const { service, manager } = createTaskService();
     manager.readOutput.mockImplementation(() => {

@@ -12,6 +12,7 @@ import {
 import type { WorkflowRunRepository } from "@openharness/coordinator";
 import type {
   AgentScheduleEffects,
+  AgentBackgroundShellHost,
   AgentEffects,
   AgentEventListener,
   Settings,
@@ -65,6 +66,7 @@ export interface DaemonAgentLoaderOptions {
   schedules?: AgentScheduleEffects;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
+  createBackgroundShellHost?(session: SessionRecord): AgentBackgroundShellHost;
   workflowRepository?: WorkflowRunRepository;
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
@@ -119,6 +121,7 @@ export function createDaemonAgentLoader(
       }));
     const terminal = options.createTerminalHost?.(session);
     const jobs = options.createJobHost?.(session);
+    const backgroundShell = options.createBackgroundShellHost?.(session);
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
@@ -129,6 +132,7 @@ export function createDaemonAgentLoader(
         ...(options.schedules ? { schedules: options.schedules } : {}),
         ...(terminal ? { terminal } : {}),
         ...(jobs ? { jobs } : {}),
+        ...(backgroundShell ? { backgroundShell } : {}),
         ...(options.workflowRepository
           ? { workflowRepository: options.workflowRepository }
           : {}),

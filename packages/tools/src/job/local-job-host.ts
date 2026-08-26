@@ -1,4 +1,5 @@
 import type {
+  AgentBackgroundShellHost,
   AgentChildDirectory,
   AgentChildHandle,
   AgentChildResult,
@@ -47,7 +48,7 @@ type LocalJobSource =
   | { kind: "workflow"; value: WorkflowRunSnapshot };
 
 /** Local Jobs controller used when a runtime has no durable host. */
-export class LocalAgentJobHost implements AgentJobHost {
+export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost {
   private readonly processes: DetachedProcessSupervisor;
   private readonly workflows: FileWorkflowRunRepository;
   private readonly childObservations = new Map<string, ChildObservation>();
@@ -59,6 +60,19 @@ export class LocalAgentJobHost implements AgentJobHost {
   ) {
     this.processes = getDetachedProcessSupervisor({ cwd, sessionId: ownerSession });
     this.workflows = new FileWorkflowRunRepository({ cwd });
+  }
+
+  async create(input: Parameters<AgentBackgroundShellHost["create"]>[0]): Promise<{ jobId: string; label: string }> {
+    this.assertOwner(input.sessionId);
+    if (input.cwd !== this.cwd) throw new Error("Background shell cwd mismatch.");
+    const execution = await this.processes.startShellExecution({
+      command: input.command,
+      description: input.description,
+      cwd: input.cwd,
+      sessionId: input.sessionId,
+      settings: input.settings,
+    });
+    return { jobId: execution.id, label: execution.description };
   }
 
   async list(input: JobListRequest): Promise<JobSnapshot[]> {

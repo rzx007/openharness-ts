@@ -15,6 +15,7 @@ import type {
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
   MemoryRetriever,
+  AgentBackgroundShellHost,
   McpAuthHost,
 } from "../index";
 import type {
@@ -193,6 +194,7 @@ export class QueryEngine implements IQueryEngine {
   private mcpAuth: McpAuthHost | undefined;
   private terminal: AgentTerminalHost | undefined;
   private jobs: AgentJobHost | undefined;
+  private backgroundShell: AgentBackgroundShellHost | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -256,6 +258,10 @@ export class QueryEngine implements IQueryEngine {
 
   setJobs(jobs: AgentJobHost | undefined): void {
     this.jobs = jobs;
+  }
+
+  setBackgroundShell(backgroundShell: AgentBackgroundShellHost | undefined): void {
+    this.backgroundShell = backgroundShell;
   }
 
   /**
@@ -674,6 +680,7 @@ export class QueryEngine implements IQueryEngine {
             mcpAuth: this.mcpAuth,
             terminal: this.terminal,
             jobs: this.jobs,
+            backgroundShell: this.backgroundShell,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(

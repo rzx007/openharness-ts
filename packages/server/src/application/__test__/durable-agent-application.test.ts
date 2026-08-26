@@ -129,6 +129,61 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
 };
 
 describe("DaemonApplication", () => {
+  it("让模型工具创建的后台 shell 立即进入统一 Jobs，并可被取消", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openharness-background-shell-"));
+    const store = new SessionStore({ path: join(dir, "store.db") });
+    let backgroundShellHost: NonNullable<Parameters<CreateDaemonAgent>[0]["options"]["hostCapabilities"]>["backgroundShell"];
+    const application = new DaemonApplication({
+      store,
+      createAgent: async (context) => {
+        backgroundShellHost = context.options.hostCapabilities?.backgroundShell;
+        return await createEchoAgent(context);
+      },
+      log: () => {},
+    });
+
+    try {
+      await application.ready();
+      const session = application.sessions.createSession({
+        cwd: process.cwd(),
+        model: "test-model",
+      });
+      const admission = await application.sessions.admitPrompt(session.id, { content: "initialize" });
+      await application.sessions.awaitRun(session.id, admission.run!.id);
+
+      const created = await backgroundShellHost!.create({
+        cwd: session.cwd,
+        sessionId: session.id,
+        command: `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`,
+        description: "long-running test server",
+      });
+
+      await expect(application.jobs.read({
+        sessionId: session.id,
+        jobId: created.jobId,
+      })).resolves.toMatchObject({
+        snapshot: {
+          id: created.jobId,
+          kind: "shell",
+          status: "running",
+          ownerSession: session.id,
+        },
+      });
+      await expect(application.jobs.list({ sessionId: session.id })).resolves.toContainEqual(
+        expect.objectContaining({ id: created.jobId, kind: "shell" }),
+      );
+      await expect(application.jobs.cancel({
+        sessionId: session.id,
+        jobId: created.jobId,
+        reason: "test complete",
+      })).resolves.toMatchObject({ id: created.jobId, status: "killed" });
+    } finally {
+      await application.close().catch(() => {});
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("不经过 HTTP 也能完成创建会话、提交输入、运行和读取结果", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-application-"));
     const store = new SessionStore({ path: join(dir, "store.db") });

@@ -26,12 +26,11 @@ export const backgroundShellCreateTool: ToolDefinition = {
     const command = readRequiredString(input.command, "command");
     if ("error" in command) return failed(command.error);
 
+    if (!context.sessionId) return failed("Background shell jobs require a durable session.");
+    if (!context.backgroundShell) return failed("Background shell host is not configured.");
+
     try {
-      const { getDetachedProcessSupervisor } = await import("@openharness/services/executions");
-      const execution = await getDetachedProcessSupervisor({
-        cwd: context.cwd,
-        sessionId: context.sessionId,
-      }).startShellExecution({
+      const created = await context.backgroundShell.create({
         command: command.value,
         description: description.value,
         cwd: context.cwd,
@@ -44,9 +43,9 @@ export const backgroundShellCreateTool: ToolDefinition = {
           text: JSON.stringify({
             kind: "job",
             action: "created",
-            jobId: execution.id,
+            jobId: created.jobId,
             jobKind: "shell",
-            label: execution.description,
+            label: created.label,
           }),
         }],
       };

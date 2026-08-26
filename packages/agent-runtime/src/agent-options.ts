@@ -1,5 +1,6 @@
 import type {
   AgentChildBudget,
+  AgentBackgroundShellHost,
   AgentEffects,
   AgentScheduleEffects,
   PermissionMode,
@@ -22,6 +23,7 @@ export interface AgentPermissionHost {
 export interface AgentHostCapabilities {
   permissions: AgentPermissionHost;
   jobs?: AgentJobHost;
+  backgroundShell?: AgentBackgroundShellHost;
   terminal?: AgentTerminalHost;
   schedules?: AgentScheduleEffects;
   childEnvironment?: AgentChildEnvironmentProvider;

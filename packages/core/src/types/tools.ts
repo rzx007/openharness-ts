@@ -19,6 +19,20 @@ export interface McpAuthHost {
   configure(input: McpAuthConfigureInput): Promise<McpAuthConfigureResult>;
 }
 
+/** Host-owned creation boundary for detached shell jobs. */
+export interface AgentBackgroundShellHost {
+  create(input: {
+    cwd: string;
+    sessionId: string;
+    command: string;
+    description: string;
+    settings?: Settings;
+  }): Promise<{
+    jobId: string;
+    label: string;
+  }>;
+}
+
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
@@ -38,6 +52,8 @@ export interface ToolContext {
   terminal?: AgentTerminalHost;
   /** Host-owned controller for all long-running work in the durable session. */
   jobs?: AgentJobHost;
+  /** Host-owned creator for detached shell jobs. */
+  backgroundShell?: AgentBackgroundShellHost;
   agent?: AgentExecutionContext;
 }
 

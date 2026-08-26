@@ -165,6 +165,7 @@ async function createAgentKernelInternal(
   try {
     runtime.queryEngine.setTerminal(options.hostCapabilities.terminal);
     runtime.queryEngine.setJobs(options.hostCapabilities.jobs);
+    runtime.queryEngine.setBackgroundShell(options.hostCapabilities.backgroundShell);
     const session = createAgentSession({
       queryEngine: runtime.queryEngine,
       sessionId: options.sessionId,
@@ -220,6 +221,7 @@ function installedCapabilityNames(
   return [
     "permissions",
     ...(capabilities.jobs ? ["jobs"] : []),
+    ...(capabilities.backgroundShell ? ["backgroundShell"] : []),
     ...(capabilities.terminal ? ["terminal"] : []),
     ...(capabilities.schedules ? ["schedules"] : []),
     ...(capabilities.childEnvironment ? ["childEnvironment"] : []),

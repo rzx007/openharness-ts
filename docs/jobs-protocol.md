@@ -110,10 +110,10 @@ daemon Workflow 和 Session/Run 使用同一份 SQLite。独立 CLI 的 `FileWor
 
 ### 后台 shell 创建链路
 
-人工用户输入 `/background <command>` 后，共享 slash command 层调用 `OpenHarnessClient.createBackgroundShell()`。daemon 内部仍使用现有 shell producer，完整链路是：
+人工用户输入 `/background <command>` 后，共享 slash command 层调用 `OpenHarnessClient.createBackgroundShell()`；模型调用 `BackgroundShellCreate` 时，QueryEngine 通过宿主注入的 `AgentBackgroundShellHost` 进入同一个应用服务。工具层不直接查找或持有 `DetachedProcessSupervisor`。完整链路是：
 
 ```text
-POST /background-shells
+POST /background-shells 或 BackgroundShellCreate
   -> BackgroundShellService.create
   -> DetachedProcessSupervisor shell
   -> SessionExecutionRecord projection
@@ -124,9 +124,12 @@ POST /background-shells
 每层的责任不同：
 
 - `BackgroundShellService.create` 校验 session/cwd 和命令，再让该 session 的 `DetachedProcessSupervisor` 启动 shell。
+- daemon 在创建 Agent 时按 session 注入 `AgentBackgroundShellHost`；它只负责把模型工具请求路由到 `BackgroundShellService.create`，并校验 owner session 与 cwd 没有越界。
 - `DetachedProcessSupervisor` 持有真实进程句柄和输出；`SessionExecutionProjector` 把当前状态持续投影为 `SessionExecutionRecord`。
 - `SessionExecutionRecord` 是 daemon 内部的持久执行记录，不是公共 Task API。
 - `DaemonJobService.read` 把该记录转换成 `JobSnapshot`；HTTP 只返回标准 `{ jobId, snapshot }` receipt。
+
+创建成功以 durable projection 已写入为准：`BackgroundShellCreate` 一旦返回 `jobId`，同一 session 的 `JobRead` 和 `JobList` 必须立即可见。若进程已经启动但 projection 写入失败，应用服务会停止该进程并让创建调用失败，不能返回不可查询的 `jobId`。
 
 这个入口只创建 shell，不是通用 `JobCreate`。创建完成后，公共 client 只保留统一控制方法：
 

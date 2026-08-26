@@ -30,6 +30,7 @@ export type {
   McpAuthConfigureInput,
   McpAuthConfigureResult,
   McpAuthHost,
+  AgentBackgroundShellHost,
   ToolRegistry as IToolRegistry,
 } from "./types/tools";
 

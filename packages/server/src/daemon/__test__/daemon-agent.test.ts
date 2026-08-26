@@ -56,11 +56,15 @@ describe("createDaemonAgentLoader", () => {
     const requestPermission = vi.fn();
     const createAgent = vi.fn(async () => agent);
     const createEventSink = vi.fn(() => sink);
+    const jobs = {} as any;
+    const backgroundShell = { create: vi.fn() } as any;
     const loader = createDaemonAgentLoader({
       settings: { model: "default-model" } as any,
       createAgent,
       requestPermission,
       createEventSink,
+      createJobHost: () => jobs,
+      createBackgroundShellHost: () => backgroundShell,
     })!;
 
     const loaded = await loader({ session, history: [], parts: [] });
@@ -81,6 +85,8 @@ describe("createDaemonAgentLoader", () => {
       pluginsEnabled: false,
       hostCapabilities: {
         permissions: { requestPermission },
+        jobs,
+        backgroundShell,
       },
     });
     expect(loadHistory).toHaveBeenCalledWith([]);

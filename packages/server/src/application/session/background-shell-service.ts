@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  getDetachedProcessSupervisor,
-  type DetachedProcessExecution,
+import type { Settings } from "@openharness/core";
+
+import type {
+  DetachedProcessExecution,
+  DetachedProcessSupervisor,
 } from "@openharness/services/executions";
 
 import type { SessionExecutionProjector } from "./session-execution-projector.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import { ApplicationError } from "../../shared/application-error.js";
 
-type ProcessSupervisor = ReturnType<typeof getDetachedProcessSupervisor>;
+type ProcessSupervisor = DetachedProcessSupervisor;
 type TaskScope = { cwd: string; sessionId?: string };
 
 interface BackgroundShellStore {
@@ -57,7 +59,7 @@ export interface BackgroundShellServiceContext {
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
 }
 
-/** HTTP-facing background-shell use cases over detached processes and their durable projection. */
+/** Shared background-shell creation and control for HTTP and model-tool callers. */
 export class BackgroundShellService {
   constructor(private readonly context: BackgroundShellServiceContext) {}
 
@@ -77,6 +79,8 @@ export class BackgroundShellService {
     sessionId?: string;
     command: string;
     description?: string;
+    settings?: Settings;
+    origin?: "http" | "tool";
   }): Promise<{ execution: DetachedProcessExecution }> {
     const scope = this.resolveScope(input);
     const command = input.command.trim();
@@ -90,6 +94,7 @@ export class BackgroundShellService {
       description,
       cwd: scope.cwd,
       ...(scope.sessionId ? { sessionId: scope.sessionId } : {}),
+      ...(input.settings ? { settings: input.settings } : {}),
     });
     if (scope.sessionId) {
       try {
@@ -100,7 +105,11 @@ export class BackgroundShellService {
           type: task.type,
           description: task.description,
           cwd: task.cwd,
-          metadata: { origin: "http", executionBackend: "detached_process", runtimeExecutionId: task.id },
+          metadata: {
+            origin: input.origin ?? "http",
+            executionBackend: "detached_process",
+            runtimeExecutionId: task.id,
+          },
         });
         this.context.executionProjector.trackProcessExecution(manager, task.id);
         this.context.executionProjector.syncPersistentExecution(task, manager);
