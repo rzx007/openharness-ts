@@ -1,0 +1,8 @@
+export type ScheduledFilter = "all" | "active" | "paused" | "completed"
+
+export type ScheduledPageProps = {
+  onStartConversation: () => void
+  onOpenConversation: (sessionId?: string) => void
+}
+
+export const scheduledFilters: ScheduledFilter[] = ["all", "active", "paused", "completed"]
