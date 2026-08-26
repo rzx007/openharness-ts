@@ -10,6 +10,11 @@
       "cache": false,
       "persistent": true
     },
+    "@openharness/desktop#dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    },
     "check-types": {
       "dependsOn": ["^build"]
     },
