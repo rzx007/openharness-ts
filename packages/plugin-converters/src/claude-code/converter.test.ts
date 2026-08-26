@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,5 +15,18 @@ describe("ClaudeCodePluginConverter", () => {
     const inspection = await converter.inspect(source); const plan = await converter.plan(inspection);
     const report = await converter.convert({ inspection, plan, output, approvals: [] });
     expect(report.status).toBe("success"); expect((await validateNativePlugin(output)).status).toBe("valid");
+  });
+
+  it("does not mark unsupported-only hook files as adapted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohs-convert-hooks-")); outputs.push(root);
+    await mkdir(join(root, ".claude-plugin"), { recursive: true });
+    await mkdir(join(root, "hooks"), { recursive: true });
+    await writeFile(join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "unsupported-hooks", version: "1.0.0" }));
+    await writeFile(join(root, "hooks", "hooks.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }] } }));
+    const converter = new ClaudeCodePluginConverter();
+    const plan = await converter.plan(await converter.inspect(root));
+    expect(plan.items).toEqual([
+      expect.objectContaining({ id: "hooks:event:Stop", fidelity: "unsupported" }),
+    ]);
   });
 });

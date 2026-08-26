@@ -42,14 +42,23 @@ export class ClaudeCodePluginConverter implements PluginConverter {
   inspect = inspectClaudeCodePlugin;
   async plan(inspection: SourceInspection, options: Record<string, unknown> = {}): Promise<ConversionPlan> {
     const items: ConversionItem[] = [];
-    for (const [kind, paths] of Object.entries(inspection.inventory)) for (const path of paths) items.push({
-      id: `${kind}:${rel(inspection, path)}`, sourceKind: kind, sourcePath: rel(inspection, path),
-      targetKind: kind === "commands" ? "skills" : kind,
-      fidelity: kind === "commands" || kind === "agents" || kind === "hooks" || kind === "mcpServers" ? "adapted" : "exact",
-    });
+    for (const [kind, paths] of Object.entries(inspection.inventory)) {
+      if (kind === "hooks") continue;
+      for (const path of paths) items.push({
+        id: `${kind}:${rel(inspection, path)}`, sourceKind: kind, sourcePath: rel(inspection, path),
+        targetKind: kind === "commands" ? "skills" : kind,
+        fidelity: kind === "commands" || kind === "agents" || kind === "mcpServers" ? "adapted" : "exact",
+      });
+    }
     for (const hookFile of inspection.inventory.hooks ?? []) {
       const raw = JSON.parse(await readFile(hookFile, "utf8")) as Record<string, unknown>;
       const rows = (raw.hooks && typeof raw.hooks === "object" ? raw.hooks : raw) as Record<string, unknown>;
+      if (Object.keys(rows).some((event) => CLAUDE_HOOK_EVENT_MAP[event])) {
+        items.push({
+          id: `hooks:${rel(inspection, hookFile)}`, sourceKind: "hooks", sourcePath: rel(inspection, hookFile),
+          targetKind: "hooks", fidelity: "adapted",
+        });
+      }
       for (const event of Object.keys(rows)) if (!CLAUDE_HOOK_EVENT_MAP[event]) items.push({
         id: `hooks:event:${event}`, sourceKind: "hooks", sourcePath: rel(inspection, hookFile),
         fidelity: "unsupported", reason: `Claude hook event ${event} has no Native v1 equivalent`,
