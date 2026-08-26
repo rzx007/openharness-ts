@@ -158,6 +158,52 @@ describe("desktop session store git state refresh", () => {
     vi.useRealTimers()
   })
 
+  it("uses the git cache until a forced refresh is requested", async () => {
+    const project = {
+      id: "project-a",
+      name: "Project A",
+      path: "D:\\code\\project-a",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const inspectProject = vi.fn(async () => ({
+      project,
+      git: true,
+      branch: "main",
+      branches: ["main"],
+    }))
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject,
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      workspaceMode: "project",
+      selectedProject: project,
+      selectedProjectGit: false,
+      selectedProjectGitCheckedAt: Date.now(),
+      branch: null,
+      branches: [],
+    })
+
+    await expect(useDesktopSessionStore.getState().refreshSelectedProjectGit()).resolves.toBe(false)
+    expect(inspectProject).not.toHaveBeenCalled()
+
+    await expect(
+      useDesktopSessionStore.getState().refreshSelectedProjectGit({ force: true })
+    ).resolves.toBe(true)
+
+    expect(inspectProject).toHaveBeenCalledWith(project.path)
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedProjectGit: true,
+      branch: "main",
+      branches: ["main"],
+    })
+  })
+
   it("refreshes a previously non-git project after session updates", async () => {
     vi.useFakeTimers()
     const project = {

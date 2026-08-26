@@ -99,19 +99,6 @@ export function MainLayout(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!selectedProjectId || selectedProjectGit) return
-    const refresh = (): void => {
-      void refreshSelectedProjectGit()
-    }
-    const firstRefresh = window.setTimeout(refresh, 0)
-    const interval = window.setInterval(refresh, 5_000)
-    return () => {
-      window.clearTimeout(firstRefresh)
-      window.clearInterval(interval)
-    }
-  }, [refreshSelectedProjectGit, selectedProjectGit, selectedProjectId])
-
-  useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const sidebarSize = sidebarPanelRef.current?.getSize()
       if (!sidebarSize) return
@@ -160,6 +147,15 @@ export function MainLayout(): React.JSX.Element {
   const showCurrentConversation = useCallback((): void => {
     openConversationRoute(undefined)
   }, [openConversationRoute])
+
+  const requestOpenReview = useCallback(
+    (path?: string): void => {
+      void refreshSelectedProjectGit({ force: true }).then((git) => {
+        if (git) openReview(path)
+      })
+    },
+    [openReview, refreshSelectedProjectGit]
+  )
 
   const activeSessionIndex = sessions.findIndex((session) => session.id === activeSessionId)
   const previousSession = activeSessionIndex > 0 ? sessions[activeSessionIndex - 1] : null
@@ -282,7 +278,7 @@ export function MainLayout(): React.JSX.Element {
           onTogglePanel={togglePanel}
           onOpenFile={openWorkspaceFile}
           canOpenReview={selectedProjectGit}
-          onOpenReview={openReview}
+          onOpenReview={requestOpenReview}
           onOpenTerminal={openTerminal}
           onOpenAgents={() => openUtilityTool("agents")}
         />
@@ -314,7 +310,7 @@ export function MainLayout(): React.JSX.Element {
           terminalOpenRequest={utilityPanel.terminalOpenRequest}
           toolOpenRequest={utilityPanel.toolOpenRequest}
           onOpenFile={openWorkspaceFile}
-          onOpenReview={openReview}
+          onOpenReview={requestOpenReview}
           onOpenTerminal={openTerminal}
         />
       </Panel>
