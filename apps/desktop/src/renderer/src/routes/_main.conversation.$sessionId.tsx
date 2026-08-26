@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 
-import { useMainLayout } from "@renderer/components/desktop/layout/main-layout-context"
+import { useMainLayout } from "@renderer/components/desktop/layout/main-layout"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 
 export const Route = createFileRoute("/_main/conversation/$sessionId")({

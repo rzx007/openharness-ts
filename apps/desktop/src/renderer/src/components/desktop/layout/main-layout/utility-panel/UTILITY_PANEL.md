@@ -26,7 +26,7 @@
 
 ## 文件职责
 
-面板实现集中在 `layout/utility-panel/`。`index.ts` 是对外入口；`MainLayout` 和标题栏只从这里引用面板组件、controller 和 `UtilityToolRequest`。
+面板实现集中在 `layout/main-layout/utility-panel/`。`index.ts` 是对外入口；`MainLayout` 和标题栏只从这里引用面板组件、controller 和 `UtilityToolRequest`。
 
 ### `../main-layout.tsx`
 
@@ -161,7 +161,7 @@ openharness.desktop.file-tabs
 `utility-panel-state.test.ts` 覆盖范围生成、草稿迁移、不同会话隔离、非法持久化数据和 runtime reducer。修改相关逻辑后，至少还应运行：
 
 ```powershell
-..\..\node_modules\.bin\vitest.CMD run src/renderer/src/components/desktop/layout/utility-panel/utility-panel-state.test.ts
+..\..\node_modules\.bin\vitest.CMD run src/renderer/src/components/desktop/layout/main-layout/utility-panel/utility-panel-state.test.ts
 .\node_modules\.bin\tsc.CMD --noEmit -p tsconfig.web.json --composite false
 ```
 

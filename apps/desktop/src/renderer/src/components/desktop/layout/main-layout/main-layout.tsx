@@ -12,16 +12,16 @@ import {
 import { ConversationPane } from "@renderer/components/desktop/conversation-page"
 import { defaultSettingsSection } from "@renderer/components/desktop/settings-page/settings-navigation"
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
-import { MainLayoutContext } from "./main-layout-context"
-import { Sidebar } from "./sidebar"
-import { TitleBar } from "./title-bar"
-import { UtilityPanel, useUtilityPanelController } from "./utility-panel"
-import { useDesktopWindowChrome } from "./use-desktop-window-chrome"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import {
   attachDesktopSessionEvents,
   useDesktopSessionStore,
 } from "@renderer/stores/desktop-session-store"
+import { TitleBar } from "../title-bar"
+import { useDesktopWindowChrome } from "../use-desktop-window-chrome"
+import { MainLayoutContext } from "./main-layout-context"
+import { Sidebar } from "./sidebar"
+import { UtilityPanel, useUtilityPanelController } from "./utility-panel"
 
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288

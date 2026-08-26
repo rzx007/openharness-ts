@@ -3,14 +3,12 @@ import {
   Archive,
   Bot,
   CalendarClock,
-  ChevronDown,
   Circle,
   CircleAlert,
-  Clock3,
   ExternalLink,
   History,
   MoreHorizontal,
-  Pause,
+  CirclePause,
   Play,
   RefreshCw,
   Search,
@@ -41,6 +39,10 @@ type Filter = "all" | "active" | "paused" | "completed"
 
 const filters: Filter[] = ["all", "active", "paused", "completed"]
 const easeOutQuint = [0.22, 1, 0.36, 1] as const
+const splitEase = "cubic-bezier(0.22, 1, 0.36, 1)"
+const splitDuration = "0.42s"
+const overviewColumns = "minmax(0, 1fr) minmax(0, 46rem) minmax(0, 1fr)"
+const splitColumns = "minmax(0, 0fr) minmax(0, 44rem) minmax(0, 1fr)"
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   month: "2-digit",
   day: "2-digit",
@@ -65,6 +67,7 @@ export function ScheduledPage({
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(() => new Set())
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -73,8 +76,17 @@ export function ScheduledPage({
         window.desktop.schedules.status(),
         window.desktop.schedules.list(),
       ])
+      const latestRuns =
+        nextStatus.executing > 0 ? await window.desktop.schedules.listRuns({ limit: 50 }) : []
       setStatus(nextStatus)
       setTasks(nextTasks)
+      setRunningTaskIds(
+        new Set(
+          latestRuns
+            .filter((run) => run.status === "running" || run.status === "queued")
+            .map((run) => run.taskId)
+        )
+      )
       setSelectedId((current) =>
         current && nextTasks.some((task) => task.id === current) ? current : null
       )
@@ -176,45 +188,36 @@ export function ScheduledPage({
       ) : null}
 
       <div
-        className={cn(
-          "flex min-h-0 w-full flex-1 overflow-hidden",
-          !hasSelection && "justify-center px-6"
-        )}
+        className="grid min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
+        style={{
+          gridTemplateColumns: hasSelection ? splitColumns : overviewColumns,
+          transition: prefersReducedMotion
+            ? undefined
+            : `grid-template-columns ${splitDuration} ${splitEase}`,
+        }}
       >
-        <motion.div
-          layout
-          transition={{ layout: { duration: prefersReducedMotion ? 0 : 0.28, ease: easeOutQuint } }}
-          style={hasSelection ? { width: "clamp(30rem, 43vw, 44rem)" } : undefined}
+        <div aria-hidden className="min-h-0 min-w-0 overflow-hidden" />
+
+        <div
           className={cn(
-            "flex min-h-0 shrink-0 flex-col bg-background",
-            hasSelection ? "border-r border-border/70" : "w-full max-w-[46rem]"
+            "flex min-h-0 min-w-0 flex-col overflow-hidden bg-background",
+            hasSelection && "border-r border-border/70"
           )}
         >
-          <div className={cn("flex min-h-0 flex-1 flex-col", !hasSelection && "pt-14")}>
+          <div className={cn("flex min-h-0 flex-1 flex-col space-y-3", !hasSelection && "pt-14")}>
             <header className={cn("shrink-0", hasSelection ? "px-5 pt-5 pb-4" : "px-0")}>
-              {!hasSelection ? (
-                <OverviewHero
-                  filter={filter}
-                  filterCounts={filterCounts}
-                  search={search}
-                  status={status}
-                  onFilterChange={setFilter}
-                  onSearchChange={setSearch}
-                  onRefresh={refresh}
-                  onStartConversation={onStartConversation}
-                  loading={loading}
-                />
-              ) : (
-                <CompactHeader
-                  filter={filter}
-                  filterCounts={filterCounts}
-                  search={search}
-                  onFilterChange={setFilter}
-                  onSearchChange={setSearch}
-                  onRefresh={refresh}
-                  loading={loading}
-                />
-              )}
+              <ScheduledHeader
+                compact={hasSelection}
+                filter={filter}
+                filterCounts={filterCounts}
+                search={search}
+                status={status}
+                onFilterChange={setFilter}
+                onSearchChange={setSearch}
+                onRefresh={refresh}
+                onStartConversation={onStartConversation}
+                loading={loading}
+              />
             </header>
 
             <ScrollArea
@@ -254,6 +257,7 @@ export function ScheduledPage({
                     task={task}
                     active={active}
                     compact={hasSelection}
+                    running={runningTaskIds.has(task.id)}
                     busy={busy !== null}
                     onSelect={() => setSelectedId(task.id)}
                     onRunNow={() =>
@@ -262,7 +266,7 @@ export function ScheduledPage({
                     onToggle={() =>
                       void mutate("toggle", () =>
                         window.desktop.schedules.update(task.id, {
-                          status: task.status === "paused" ? "active" : "paused",
+                          status: nextScheduleStatus(task),
                         })
                       )
                     }
@@ -274,63 +278,71 @@ export function ScheduledPage({
               })}
             </ScrollArea>
           </div>
-        </motion.div>
+        </div>
 
-        <AnimatePresence initial={false}>
-          {selected ? (
-            <motion.section
-              key={selected.id}
-              initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, x: 18 }}
-              animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, x: 0 }}
-              exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 18 }}
-              transition={{ duration: prefersReducedMotion ? 0.12 : 0.22, ease: easeOutQuint }}
-              className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
-            >
-              <ScrollArea
-                className="min-h-0 flex-1"
-                viewportClassName="px-5 pt-4 pb-8"
-                contentClassName="pb-4"
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+          <AnimatePresence initial={false}>
+            {selected ? (
+              <motion.section
+                key="scheduled-detail"
+                initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={prefersReducedMotion ? { opacity: 1 } : { opacity: 0 }}
+                transition={{
+                  duration: prefersReducedMotion ? 0 : 0.32,
+                  ease: easeOutQuint,
+                }}
+                className="flex min-h-0 min-w-0 flex-1 flex-col"
               >
-                <DetailPanel
-                  task={selected}
-                  runs={runs}
-                  busy={busy}
-                  onBack={() => setSelectedId(null)}
-                  onRunNow={() =>
-                    void mutate("run", () => window.desktop.schedules.runNow(selected.id))
-                  }
-                  onToggle={() =>
-                    void mutate("toggle", () =>
-                      window.desktop.schedules.update(selected.id, {
-                        status: selected.status === "paused" ? "active" : "paused",
-                      })
-                    )
-                  }
-                  onDelete={() =>
-                    void mutate("delete", () => window.desktop.schedules.remove(selected.id))
-                  }
-                />
-              </ScrollArea>
-              <div className="flex h-14 shrink-0 items-center justify-end border-t border-border/70 bg-background px-5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onOpenConversation(selected.sessionId)}
-                  className="h-8 rounded-lg px-3 text-[12px]"
+                <ScrollArea
+                  className="min-h-0 flex-1"
+                  viewportClassName="px-5 pt-4 pb-8"
+                  contentClassName="pb-4"
                 >
-                  打开聊天
-                  <ExternalLink className="size-3.5" />
-                </Button>
-              </div>
-            </motion.section>
-          ) : null}
-        </AnimatePresence>
+                  <DetailPanel
+                    task={selected}
+                    runs={runs}
+                    busy={busy}
+                    onBack={() => setSelectedId(null)}
+                    onRunNow={() =>
+                      void mutate(`run:${selected.id}`, () =>
+                        window.desktop.schedules.runNow(selected.id)
+                      )
+                    }
+                    onToggle={() =>
+                      void mutate("toggle", () =>
+                        window.desktop.schedules.update(selected.id, {
+                          status: nextScheduleStatus(selected),
+                        })
+                      )
+                    }
+                    onDelete={() =>
+                      void mutate("delete", () => window.desktop.schedules.remove(selected.id))
+                    }
+                  />
+                </ScrollArea>
+                <div className="flex h-14 shrink-0 items-center justify-end border-t border-border/70 bg-background px-5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onOpenConversation(selected.sessionId)}
+                    className="h-8 rounded-lg px-3 text-[12px]"
+                  >
+                    打开聊天
+                    <ExternalLink className="size-3.5" />
+                  </Button>
+                </div>
+              </motion.section>
+            ) : null}
+          </AnimatePresence>
+        </div>
       </div>
     </section>
   )
 }
 
-function OverviewHero({
+function ScheduledHeader({
+  compact,
   filter,
   filterCounts,
   search,
@@ -341,6 +353,7 @@ function OverviewHero({
   onStartConversation,
   loading,
 }: {
+  compact: boolean
   filter: Filter
   filterCounts: Record<Filter, number>
   search: string
@@ -353,20 +366,32 @@ function OverviewHero({
 }): React.JSX.Element {
   return (
     <>
-      <div className="flex items-start justify-between gap-4">
-        <div className="w-full max-w-[34rem]">
-          <div className="inline-flex size-12 items-center justify-center rounded-xl bg-foreground text-background">
-            <CalendarClock className="size-[22px]" strokeWidth={1.8} aria-hidden="true" />
-          </div>
-          <h1 className="mt-6 text-[1.75rem] leading-tight font-medium tracking-[-0.015em] text-foreground">
+      <div
+        className={cn(
+          "flex items-start justify-between gap-4",
+          !compact && "text-sidebar-foreground"
+        )}
+      >
+        <div className={cn("min-w-0", !compact && "w-full max-w-136")}>
+          <h1
+            className={cn(
+              "leading-tight font-normal tracking-[-0.015em] text-foreground",
+              compact ? "text-[1.25rem]" : "mt-6 text-[1.75rem]"
+            )}
+          >
             已安排的任务
           </h1>
-          <p className="mt-2 text-[15px] leading-6 text-muted-foreground">
+          <p
+            className={cn(
+              "text-muted-foreground",
+              compact ? "mt-0.5 text-[13px]" : "mt-2 text-[15px] leading-6"
+            )}
+          >
             让 ChatGPT 安排任务、设置提醒或监测更新。
           </p>
         </div>
 
-        <div className="flex items-center gap-3 pt-1">
+        <div className={cn("flex shrink-0 items-center gap-3", !compact && "pt-1")}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -389,13 +414,13 @@ function OverviewHero({
         </div>
       </div>
 
-      <div className="mt-7">
+      <div className={cn("space-y-3", compact ? "mt-5" : "mt-7")}>
         <FilterTabs filter={filter} counts={filterCounts} onChange={onFilterChange} />
         <SearchBar
           value={search}
           placeholder="搜索已安排任务"
           onChange={onSearchChange}
-          className="mt-3 h-10 rounded-xl"
+          className="h-10 rounded-xl"
         />
       </div>
 
@@ -407,68 +432,6 @@ function OverviewHero({
           <span className="ml-2">个结果待查看</span>
         </div>
       ) : null}
-    </>
-  )
-}
-
-function CompactHeader({
-  filter,
-  filterCounts,
-  search,
-  onFilterChange,
-  onSearchChange,
-  onRefresh,
-  loading,
-}: {
-  filter: Filter
-  filterCounts: Record<Filter, number>
-  search: string
-  onFilterChange: (value: Filter) => void
-  onSearchChange: (value: string) => void
-  onRefresh: () => Promise<void>
-  loading: boolean
-}): React.JSX.Element {
-  return (
-    <>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex size-10 items-center justify-center rounded-xl bg-foreground text-background">
-              <CalendarClock className="size-[18px]" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-foreground">
-                已安排
-              </h1>
-              <p className="mt-0.5 text-[13px] text-muted-foreground">
-                管理后台 Agent 任务，跟进每一次运行
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          title="刷新任务"
-          aria-label="刷新任务"
-          onClick={() => void onRefresh()}
-          disabled={loading}
-          className="size-9 rounded-full text-muted-foreground"
-        >
-          <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-        </Button>
-      </div>
-
-      <div className="mt-5">
-        <FilterTabs filter={filter} counts={filterCounts} onChange={onFilterChange} compact />
-        <SearchBar
-          value={search}
-          placeholder="搜索已安排任务"
-          onChange={onSearchChange}
-          className="mt-3 h-10 rounded-xl"
-        />
-      </div>
     </>
   )
 }
@@ -491,33 +454,33 @@ function DetailPanel({
   onDelete: () => void
 }): React.JSX.Element {
   return (
-    <div className="mx-auto w-full max-w-[860px]">
+    <div className="mx-auto w-full">
       <div className="flex items-center justify-between gap-4">
         <span className="text-[13px] font-medium text-blue-600 dark:text-blue-400">
           {statusLabel(task.status)}
         </span>
-        <div className="flex items-center gap-1 text-muted-foreground">
+        <div className="flex items-center gap-1">
           <TaskActionsMenu
             task={task}
             busy={busy !== null}
             onRunNow={onRunNow}
+            onToggle={onToggle}
             onDelete={onDelete}
           />
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={onToggle}
-            disabled={busy !== null || task.status === "completed"}
-            title={task.status === "paused" ? "继续任务" : "暂停任务"}
-            aria-label={task.status === "paused" ? "继续任务" : "暂停任务"}
-            className="size-8 rounded-lg text-muted-foreground"
+            disabled={busy !== null}
+            title={task.status === "active" ? "暂停任务" : "继续任务"}
+            className="h-8 rounded-lg px-3 text-[12px]"
           >
             {busy === "toggle" ? (
               <Spinner className="size-3.5" />
-            ) : task.status === "paused" ? (
-              <Play className="size-3.5" />
+            ) : task.status === "active" ? (
+              <CirclePause className="size-3.5" />
             ) : (
-              <Pause className="size-3.5" />
+              <Play className="size-3.5" />
             )}
           </Button>
           <Button
@@ -538,7 +501,7 @@ function DetailPanel({
       </h2>
 
       <ScrollArea
-        className="mt-7 h-[258px] rounded-2xl border border-border/70 bg-muted/10"
+        className="mt-7 max-h-64.5 rounded-2xl border border-border/70 bg-muted/10"
         viewportClassName="px-4 py-4"
       >
         <div className="max-w-[76ch] text-[13px] leading-6 whitespace-pre-wrap text-foreground/90">
@@ -629,9 +592,8 @@ function SettingsGroup({
             className="flex min-h-[50px] items-center justify-between gap-6 border-b border-border/60 px-4 last:border-b-0"
           >
             <dt className="text-[13px] text-foreground/80">{item.label}</dt>
-            <dd className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-foreground">
-              <span className="truncate">{item.value}</span>
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            <dd className="min-w-0 truncate text-[13px] font-medium text-foreground">
+              {item.value}
             </dd>
           </div>
         ))}
@@ -674,9 +636,9 @@ function TaskActionsMenu({
             立即运行
           </DropdownMenuItem>
           {onToggle ? (
-            <DropdownMenuItem onClick={onToggle} disabled={busy || task.status === "completed"}>
-              {task.status === "paused" ? <Play /> : <Pause />}
-              {task.status === "paused" ? "继续" : "暂停"}
+            <DropdownMenuItem onClick={onToggle} disabled={busy}>
+              {task.status === "active" ? <CirclePause /> : <Play />}
+              {task.status === "active" ? "暂停" : "继续"}
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuItem variant="destructive" onClick={onDelete} disabled={busy}>
@@ -693,6 +655,7 @@ function TaskRow({
   task,
   active,
   compact,
+  running,
   busy,
   onSelect,
   onRunNow,
@@ -702,21 +665,19 @@ function TaskRow({
   task: DesktopScheduledTask
   active: boolean
   compact: boolean
+  running: boolean
   busy: boolean
   onSelect: () => void
   onRunNow: () => void
   onToggle: () => void
   onDelete: () => void
 }): React.JSX.Element {
+  const nextRunLabel = task.nextRunAt ? formatNextRunLabel(task.nextRunAt) : null
   return (
     <div
       className={cn(
         "group relative w-full rounded-xl border border-transparent transition-[background-color,border-color,box-shadow] duration-150",
-        active
-          ? "border-border/60 bg-background shadow-[0_5px_8px_rgba(15,23,42,0.07)]"
-          : compact
-            ? "hover:bg-muted/45"
-            : "hover:bg-muted/35"
+        active ? "border-border/60 bg-muted" : "hover:bg-muted/85"
       )}
     >
       <button
@@ -736,38 +697,31 @@ function TaskRow({
             )}
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-4 pr-8">
-              <div className="min-w-0">
-                <div
-                  className={cn(
-                    "truncate font-medium text-foreground",
-                    compact ? "text-[14px]" : "text-[15px]"
-                  )}
-                >
-                  {task.name}
-                </div>
-                <div
-                  className={cn(
-                    "mt-1 text-muted-foreground",
-                    compact ? "text-[12px]" : "text-[13px]"
-                  )}
-                >
-                  {recurrenceShortLabel(task)}
-                </div>
-              </div>
-
-              <StatusBadge status={task.status} compact />
+          <div className="min-w-0 flex-1 pr-8">
+            <div
+              className={cn(
+                "truncate font-medium text-sidebar-foreground",
+                compact ? "text-[14px]" : "text-[15px]"
+              )}
+            >
+              {task.name}
             </div>
-
-            <div className="mt-2.5 flex items-center justify-between gap-4 text-[12px] text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <Clock3 className="size-3.5" />
-                <span>{task.nextRunAt ? formatNextRunLabel(task.nextRunAt) : "没有后续运行"}</span>
-              </div>
-              <span className="shrink-0">
-                {task.runCount > 0 ? `已运行 ${task.runCount} 次` : ""}
-              </span>
+            <div
+              className={cn(
+                "mt-1 flex items-center justify-between gap-4 text-muted-foreground",
+                compact ? "text-[12px]" : "text-[13px]"
+              )}
+            >
+              <p className="min-w-0 truncate">
+                {recurrenceShortLabel(task)}
+                {nextRunLabel ? ` · ${nextRunLabel}` : null}
+              </p>
+              {running ? (
+                <span className="shrink-0">
+                  运行中
+                  {task.runCount > 0 ? ` · 已运行 ${task.runCount} 次` : null}
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
@@ -794,12 +748,10 @@ function FilterTabs({
   filter,
   counts,
   onChange,
-  compact = false,
 }: {
   filter: Filter
   counts: Record<Filter, number>
   onChange: (value: Filter) => void
-  compact?: boolean
 }): React.JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-1" aria-label="任务筛选">
@@ -810,8 +762,7 @@ function FilterTabs({
           onClick={() => onChange(value)}
           aria-pressed={filter === value}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            compact ? "px-2.5 py-1.5 text-[12px]" : "px-2.5 py-1.5 text-[13px]",
+            "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             filter === value
               ? "bg-muted font-medium text-foreground"
               : "text-muted-foreground hover:bg-muted/55 hover:text-foreground"
@@ -838,7 +789,10 @@ function SearchBar({
 }): React.JSX.Element {
   return (
     <div className="relative">
-      <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Search
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+      />
       <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -853,32 +807,16 @@ function SearchBar({
   )
 }
 
-function StatusBadge({
-  status,
-  compact = false,
-}: {
-  status: DesktopScheduledTask["status"]
-  compact?: boolean
-}): React.JSX.Element {
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-muted-foreground",
-        compact ? "text-[10px]" : "text-[11px]"
-      )}
-    >
-      <span className="size-1.5 rounded-full bg-current" />
-      {statusLabel(status)}
-    </span>
-  )
-}
-
 function filterTabLabel(value: Filter): string {
   return { all: "全部", active: "活跃", paused: "已暂停", completed: "已完成" }[value]
 }
 
 function statusLabel(value: DesktopScheduledTask["status"]): string {
   return { active: "活跃", paused: "已暂停", completed: "已完成" }[value]
+}
+
+function nextScheduleStatus(task: DesktopScheduledTask): "active" | "paused" {
+  return task.status === "active" ? "paused" : "active"
 }
 
 function recurrenceShortLabel(task: DesktopScheduledTask): string {
@@ -930,7 +868,7 @@ function formatTime(value: number): string {
 }
 
 function formatNextRunLabel(value: number): string {
-  return `下次 ${formatTime(value)}`
+  return `下次运行 ${formatTime(value)}`
 }
 
 function projectLabel(task: DesktopScheduledTask): string {

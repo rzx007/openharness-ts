@@ -2,7 +2,6 @@ import { useCallback, useState } from "react"
 import { Outlet, useNavigate, useParams, useRouter, useRouterState } from "@tanstack/react-router"
 import { Group, Panel, useDefaultLayout, usePanelRef } from "react-resizable-panels"
 
-import { SettingsSidebar } from "@renderer/components/desktop/settings-page"
 import {
   settingsSectionLabel,
   settingsSectionSlug,
@@ -10,8 +9,9 @@ import {
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
-import { TitleBar } from "./title-bar"
-import { useDesktopWindowChrome } from "./use-desktop-window-chrome"
+import { TitleBar } from "../title-bar"
+import { useDesktopWindowChrome } from "../use-desktop-window-chrome"
+import { SettingsSidebar } from "./settings-sidebar"
 
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288

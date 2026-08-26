@@ -54,8 +54,8 @@ import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import { isSessionPinned, useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
-import { useSessionActionDialogs } from "../conversation-page/session-action-dialogs"
-import { SessionMoreMenu } from "../conversation-page/session-more-menu"
+import { useSessionActionDialogs } from "../../conversation-page/session-action-dialogs"
+import { SessionMoreMenu } from "../../conversation-page/session-more-menu"
 
 type SidebarProps = {
   open: boolean

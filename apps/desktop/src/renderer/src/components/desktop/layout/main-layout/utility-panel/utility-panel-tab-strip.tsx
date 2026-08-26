@@ -160,7 +160,7 @@ export function EmptyUtilityPanelState({
               key={tool}
               size="sm"
               render={<button type="button" onClick={() => onAdd(tool)} />}
-              className="text-sidebar-foregroun h-10 cursor-pointer flex-nowrap bg-transparent text-left hover:bg-muted"
+              className="h-10 cursor-pointer flex-nowrap bg-transparent text-left text-sidebar-foreground hover:bg-muted"
             >
               <ItemMedia variant="icon" className="size-4">
                 <Icon strokeWidth={1.8} />
@@ -220,7 +220,7 @@ function UtilityTabButton({
             ? "bg-neutral-200/80 text-ui-foreground dark:bg-neutral-800"
             : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
           showSeparator &&
-            "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
+          "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
         )}
       >
         <button
