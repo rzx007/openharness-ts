@@ -48,6 +48,7 @@ interface MainOptions {
   outputFormat?: string;
   appendSystemPrompt?: string;
   bare?: boolean;
+  plugins?: boolean;
   dryRun?: boolean;
   sessionId?: string;
 }
@@ -238,6 +239,7 @@ export async function mainAction(
   if (options.apiFormat) overrides.apiFormat = options.apiFormat as Settings["apiFormat"];
   if (options.permissionMode) overrides.permission = { mode: options.permissionMode as Settings["permission"]["mode"] };
   if (options.maxTurns) overrides.maxTurns = options.maxTurns;
+  if (options.bare || options.plugins === false) overrides.plugins = { enabled: false };
 
   const settings = await loadSettings(overrides, { includeProject: true, projectRoot: process.cwd() });
 
@@ -284,6 +286,7 @@ async function runPrintMode(
     allowedTools: options.allowedTools,
     disallowedTools: options.disallowedTools,
     effort: options.effort,
+    pluginsEnabled: options.bare || options.plugins === false ? false : settings.plugins?.enabled,
     daemonUrl: options.daemonUrl,
     daemonToken: options.daemonToken,
   });
@@ -343,6 +346,7 @@ async function runTuiMode(
       permissionMode: options.permissionMode ?? settings.permission.mode,
       maxTurns: options.maxTurns ?? settings.maxTurns,
       sessionMode: isCoordinatorSessionRequested(options) ? "coordinator" : null,
+      pluginsEnabled: options.bare || options.plugins === false ? false : settings.plugins?.enabled,
     },
     initial_prompt: prompt ?? null,
     theme: options.theme ?? "default",
@@ -382,29 +386,6 @@ async function runTuiMode(
 }
 
 /**
- * 根据命令行选项构建 CLI 覆盖配置对象。
- * 
- * @param options - 命令行选项
- * @returns 包含 API 密钥、基础 URL、提供商、系统提示等覆盖值的对象
- */
-function buildCliOverrides(options: MainOptions) {
-  return {
-    apiKey: options.apiKey,
-    baseUrl: options.baseUrl,
-    provider: options.provider,
-    model: options.model,
-    systemPrompt: options.systemPrompt,
-    permissionMode: options.permissionMode,
-    maxTurns: options.maxTurns,
-    dangerouslySkipPermissions: options.dangerouslySkipPermissions,
-    allowedTools: options.allowedTools,
-    disallowedTools: options.disallowedTools,
-    effort: options.effort,
-    fastMode: options.bare ? true : undefined,
-  };
-}
-
-/**
  * 三源加载技能到给定 registry：bundled（最先）→ user（getSkillsDir）→
  * project（cwd/.agents/skills + cwd/.openharness/skills + cwd/.claude/skills）。
  * register 是覆盖语义，
@@ -432,7 +413,7 @@ export async function loadSkillsThreeSources(
 ) {
   skillRegistry.registerBundled();
   const pluginContributions: { plugins: Awaited<ReturnType<typeof loadNativePlugin>>[]; warnings: string[] } = { plugins: [], warnings: [] };
-  if (settings) {
+  if (settings && (settings.plugins?.enabled ?? true)) {
     for (const record of await discoverInstalledNativePlugins({ cwd })) {
       const validation = await validateNativePlugin(record.cachePath);
       if (!validation.plugin) {

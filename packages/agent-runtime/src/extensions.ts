@@ -27,12 +27,19 @@ export interface OpenHarnessExtensionDiscovery {
   mcpServers: Record<string, McpServerConfig>;
 }
 
-export async function discoverOpenHarnessExtensions(cwd: string, settings: Settings): Promise<OpenHarnessExtensionDiscovery> {
+export async function discoverOpenHarnessExtensions(
+  cwd: string,
+  settings: Settings,
+  options: { pluginsEnabled?: boolean } = {},
+): Promise<OpenHarnessExtensionDiscovery> {
   const skillRegistry = new SkillRegistry();
   skillRegistry.registerBundled();
   const plugins: LoadedNativePlugin[] = [];
   const warnings: string[] = [];
-  for (const record of await discoverInstalledNativePlugins({ cwd })) {
+  const installedPlugins = (settings.plugins?.enabled ?? true) && (options.pluginsEnabled ?? true)
+    ? await discoverInstalledNativePlugins({ cwd })
+    : [];
+  for (const record of installedPlugins) {
     const validation = await validateNativePlugin(record.cachePath);
     if (!validation.plugin) {
       warnings.push(...validation.diagnostics.map((item) => `${record.id}: ${item.message}`));

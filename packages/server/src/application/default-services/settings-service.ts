@@ -184,6 +184,7 @@ function coerceConfigValue(key: string, value: string): unknown {
     [
       "verbose",
       "fastMode",
+      "plugins.enabled",
       "memory.enabled",
       "memory.sessionMemoryEnabled",
       "memory.autoExtractEnabled",

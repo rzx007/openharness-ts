@@ -10,6 +10,22 @@ Node Tool 入口必须导出 `registerTools(context)`，并返回 Tool 定义数
 
 当前子进程边界可以隔离崩溃和 daemon 的环境变量，但还不是操作系统级沙箱。第三方 Node 代码仍可直接调用 Node 文件、网络和进程 API；不要把 manifest 权限误解为完整的系统调用拦截。
 
+## 关闭插件功能
+
+持久关闭所有已安装插件贡献：
+
+```bash
+ohs config set plugins.enabled false
+```
+
+重新开启：
+
+```bash
+ohs config set plugins.enabled true
+```
+
+只关闭本次新建 Session 的插件贡献，可以使用 `ohs --no-plugins`；`ohs --bare` 是同义的旧入口。总开关只跳过 installed Native Plugin，不影响内置 Skill、普通用户/项目 Skill、Settings Hooks 或 Settings MCP。单插件仍使用 `ohs plugin enable/disable <id>` 管理。
+
 ```bash
 pnpm --filter @openharness/plugins test
 pnpm --filter @openharness/plugins check-types

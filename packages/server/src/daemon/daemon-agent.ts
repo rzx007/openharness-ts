@@ -214,6 +214,7 @@ function agentConfigurationFromSession(
     maxTurns: settings?.maxTurns,
     effort: settings?.effort,
     sessionMode: "direct",
+    pluginsEnabled: settings?.plugins?.enabled ?? true,
   });
   const configuration: Partial<OpenHarnessAgentOptions> = {
     model: runtime.model,
@@ -226,6 +227,9 @@ function agentConfigurationFromSession(
     hostToolCeiling: runtime.allowedTools,
     disallowedTools: runtime.disallowedTools,
     effort: runtime.effort,
+    // The persistent master switch is a ceiling: session metadata may disable
+    // plugins, but an old session cannot re-enable them globally.
+    pluginsEnabled: (settings?.plugins?.enabled ?? true) && (runtime.pluginsEnabled ?? true),
   };
   if (runtime.sessionMode === "coordinator") {
     // coordinator 模式换一套编排 prompt + 工具白名单（Agent/Job*/Workflow），

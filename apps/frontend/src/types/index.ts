@@ -7,6 +7,7 @@ export type FrontendConfig = {
     permissionMode?: string | null;
     maxTurns?: number | null;
     sessionMode?: string | null;
+    pluginsEnabled?: boolean | null;
   } | null;
   initial_prompt?: string | null;
   theme?: string | null;

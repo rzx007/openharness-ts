@@ -7,6 +7,7 @@ describe("config coerce helpers", () => {
     expect(coerceConfigValue("fastMode", "on")).toBe(true);
     expect(coerceConfigValue("memory.enabled", "false")).toBe(false);
     expect(coerceConfigValue("daemon.autoStart", "on")).toBe(true);
+    expect(coerceConfigValue("plugins.enabled", "off")).toBe(false);
     expect(coerceConfigValue("permission.mode", "plan")).toBe("plan");
     expect(coerceConfigValue("permission.mode", "nope")).toBeUndefined();
   });
@@ -16,5 +17,8 @@ describe("config coerce helpers", () => {
       memory: { enabled: false },
     });
     expect(buildSettingsPatch({}, "model", "gpt-x")).toEqual({ model: "gpt-x" });
+    expect(buildSettingsPatch({ plugins: { enabled: true } }, "plugins.enabled", false)).toEqual({
+      plugins: { enabled: false },
+    });
   });
 });

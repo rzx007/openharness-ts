@@ -226,6 +226,33 @@ describe("extension agent definition scoping", () => {
 });
 
 describe("installed Native Tool activation", () => {
+  it("skips installed plugins when the master switch is disabled", async () => {
+    const cwd = join(tempRoot, "disabled-tool-workspace");
+    writeProjectToolPlugin(cwd);
+    const disabled = await discoverOpenHarnessExtensions(cwd, {
+      ...BASE_SETTINGS,
+      plugins: { enabled: false },
+      mcpServers: { direct: { type: "http", url: "https://mcp.example.test" } },
+    });
+    expect(disabled.plugins).toEqual([]);
+    expect(disabled.mcpServers).toEqual({
+      direct: { type: "http", url: "https://mcp.example.test" },
+    });
+    const cannotBypassMaster = await discoverOpenHarnessExtensions(
+      cwd,
+      { ...BASE_SETTINGS, plugins: { enabled: false } },
+      { pluginsEnabled: true },
+    );
+    expect(cannotBypassMaster.plugins).toEqual([]);
+
+    const overridden = await discoverOpenHarnessExtensions(
+      cwd,
+      { ...BASE_SETTINGS, plugins: { enabled: true } },
+      { pluginsEnabled: false },
+    );
+    expect(overridden.plugins).toEqual([]);
+  });
+
   it("discovers, invokes, and removes a Tool with its owning runtime", async () => {
     const cwd = join(tempRoot, "tool-workspace");
     writeProjectToolPlugin(cwd);

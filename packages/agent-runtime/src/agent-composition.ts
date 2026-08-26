@@ -74,7 +74,9 @@ export async function composeOpenHarnessAgent(
   const cwd = options.cwd ?? process.cwd();
   const settings = options.settings ?? (await loadSettings({}));
   const explicitCapabilities = options.hostCapabilities;
-  const discovery = await discoverOpenHarnessExtensions(cwd, settings);
+  const discovery = await discoverOpenHarnessExtensions(cwd, settings, {
+    pluginsEnabled: options.pluginsEnabled,
+  });
   for (const warning of discovery.warnings)
     process.stderr.write(`[plugins] ${warning}\n`);
   const runtime = await createOpenHarnessRuntime({

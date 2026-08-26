@@ -38,6 +38,7 @@ const session = {
       allowedTools: ["Read", 1],
       disallowedTools: ["Bash", null],
       effort: "high",
+      pluginsEnabled: false,
     },
   },
 } as any;
@@ -77,6 +78,7 @@ describe("createDaemonAgentLoader", () => {
       hostToolCeiling: ["Read"],
       disallowedTools: ["Bash"],
       effort: "high",
+      pluginsEnabled: false,
       hostCapabilities: {
         permissions: { requestPermission },
       },
@@ -115,6 +117,31 @@ describe("createDaemonAgentLoader", () => {
         backend: "docker",
       },
     });
+  });
+
+  it("does not let session metadata bypass the persistent plugin master switch", async () => {
+    const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
+    const createAgent = vi.fn(async () => agent);
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model", plugins: { enabled: false } } as any,
+      createAgent,
+    })!;
+
+    await loader({
+      session: {
+        ...session,
+        metadata: {
+          runtime: {
+            ...session.metadata.runtime,
+            pluginsEnabled: true,
+          },
+        },
+      },
+      history: [],
+      parts: [],
+    });
+
+    expect(createAgent.mock.calls[0]![0].options.pluginsEnabled).toBe(false);
   });
 
   it("turns durable coordinator sessions into coordinator Agents", async () => {

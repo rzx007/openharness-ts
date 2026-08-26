@@ -19,7 +19,7 @@
 | 重复规则    | `packages/services/src/schedules/recurrence.ts`                       | 校验一次性时间或 RRULE，按任务时区计算下一次运行       |
 | 数据库存储  | `packages/services/src/session-runtime/store.ts`                      | 读写 `scheduled_task` 和 `scheduled_run`               |
 | HTTP API    | `packages/server/src/http/routes/schedules.ts`                        | 给 Desktop 和其他客户端提供统一接口                    |
-| Desktop     | `apps/desktop/src/renderer/src/components/desktop/scheduled-page.tsx` | 【已安排】管理界面                                     |
+| Desktop     | `apps/desktop/src/renderer/src/components/desktop/scheduled-page/scheduled-page.tsx` | 【已安排】管理界面                                     |
 
 ## 到点运行
 

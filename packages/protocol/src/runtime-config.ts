@@ -14,6 +14,7 @@ export type SessionRuntimeConfig = {
   systemPrompt?: string;
   allowedTools?: string[];
   disallowedTools?: string[];
+  pluginsEnabled?: boolean;
 };
 
 export type SessionRuntimeConfigPatch = Partial<SessionRuntimeConfig>;
@@ -50,6 +51,10 @@ function sessionModeValue(value: unknown): SessionRuntimeConfig["sessionMode"] |
 
 function apiFormatValue(value: unknown): SessionApiFormat | undefined {
   return value === "anthropic" || value === "openai" ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 export function readRuntimeMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
@@ -96,6 +101,9 @@ export function readSessionRuntimeConfig(
       : {}),
     ...(stringArrayValue(runtime.disallowedTools) ?? defaults?.disallowedTools
       ? { disallowedTools: stringArrayValue(runtime.disallowedTools) ?? defaults?.disallowedTools }
+      : {}),
+    ...((booleanValue(runtime.pluginsEnabled) ?? defaults?.pluginsEnabled) !== undefined
+      ? { pluginsEnabled: booleanValue(runtime.pluginsEnabled) ?? defaults?.pluginsEnabled }
       : {}),
   };
 }

@@ -24,6 +24,27 @@ describe("daemon settings", () => {
 
   it("keeps automatic daemon startup off by default", async () => {
     expect((await loadSettings()).daemon).toEqual({ autoStart: false });
+    expect((await loadSettings()).plugins).toEqual({ enabled: true });
+  });
+
+  it("merges the plugin master switch with project and CLI precedence", async () => {
+    const projectRoot = join(configDir, "plugin-project");
+    const projectConfigDir = join(projectRoot, ".openharness");
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(configDir, "settings.json"), JSON.stringify({
+      _formatVersion: 1,
+      plugins: { enabled: true },
+    }));
+    writeFileSync(join(projectConfigDir, "settings.json"), JSON.stringify({
+      _formatVersion: 1,
+      plugins: { enabled: false },
+    }));
+
+    expect((await loadSettings(undefined, { includeProject: true, projectRoot })).plugins).toEqual({ enabled: false });
+    expect((await loadSettings(
+      { plugins: { enabled: true } },
+      { includeProject: true, projectRoot },
+    )).plugins).toEqual({ enabled: true });
   });
 
   it("merges daemon.autoStart from the user settings file", async () => {

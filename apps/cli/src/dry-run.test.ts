@@ -99,11 +99,23 @@ describe("buildDryRunReport", () => {
     expect(report.permissionMode).toBe("default");
     expect(report.toolCount).toBe(3);
     expect(report.skillCount).toBe(5);
+    expect(report.pluginsEnabled).toBe(true);
     expect(report.mcpServers).toEqual([
       { name: "local", transport: "stdio" },
       { name: "remote", transport: "http" },
     ]);
     expect(report.readiness.verdict).toBe("ready");
+  });
+
+  it("reports the plugin master switch", () => {
+    const report = buildDryRunReport({
+      settings: makeSettings({ plugins: { enabled: false } }),
+      options: {},
+      keyCheck: { ok: true, source: "found" },
+      allToolNames,
+      skillCount: 0,
+    });
+    expect(report.pluginsEnabled).toBe(false);
   });
 
   it("CLI options override settings", () => {

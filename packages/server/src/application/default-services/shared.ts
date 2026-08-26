@@ -39,6 +39,10 @@ export function mergeSettingsPatch(current: Settings, patch: Record<string, unkn
       ...current.daemon,
       ...(isRecord(patch.daemon) ? patch.daemon : {}),
     },
+    plugins: {
+      ...current.plugins,
+      ...(isRecord(patch.plugins) ? patch.plugins : {}),
+    },
   } as Settings;
   return next;
 }

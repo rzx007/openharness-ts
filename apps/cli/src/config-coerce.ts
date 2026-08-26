@@ -21,6 +21,7 @@ export function coerceConfigValue(key: string, value: string): unknown {
 
     case "verbose":
     case "fastMode":
+    case "plugins.enabled":
     case "memory.enabled":
     case "memory.sessionMemoryEnabled":
     case "memory.autoExtractEnabled":

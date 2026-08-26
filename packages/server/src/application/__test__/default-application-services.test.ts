@@ -129,6 +129,24 @@ describe("default daemon application services", () => {
     expect(result.restartRuntimes).toBe(false);
   });
 
+  it("updates the plugin master switch and requests runtime restart", async () => {
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "anthropic" as const,
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        plugins: { enabled: true },
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    const result = await settings.patch({ path: "plugins.enabled", value: "false" });
+
+    expect(ref.current.plugins.enabled).toBe(false);
+    expect(result.restartRuntimes).toBe(true);
+  });
+
   it("resolves a built-in provider model when patching provider without a model", async () => {
     const ref = {
       current: {

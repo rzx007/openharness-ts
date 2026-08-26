@@ -46,6 +46,8 @@ export interface OpenHarnessAgentConfiguration {
   disallowedTools?: string[];
   effort?: Settings["effort"];
   fastMode?: boolean;
+  /** Per-agent override for the installed Native Plugin master switch. */
+  pluginsEnabled?: boolean;
   autoApproveReadOnly?: boolean;
   autoApproveTools?: string[];
   /** Overrides the root-tree child-agent limits. */

@@ -149,6 +149,10 @@ export interface Settings {
   memory?: MemoryConfig;
   sandbox?: SandboxConfig;
   mcpServers?: Record<string, McpServerConfig>;
+  plugins?: {
+    /** Master switch for all installed Native Plugin contributions. Defaults to true. */
+    enabled: boolean;
+  };
   channels?: ChannelsConfig;
   daemon?: DaemonConfig;
   theme?: string;

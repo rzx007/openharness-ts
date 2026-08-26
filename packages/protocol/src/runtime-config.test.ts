@@ -33,6 +33,13 @@ describe("session runtime metadata", () => {
     ).toEqual({ model: "runtime-model", apiFormat: "openai" });
   });
 
+  it("preserves an explicit false plugin runtime override", () => {
+    expect(readSessionRuntimeConfig(
+      session({ runtime: { model: "runtime-model", pluginsEnabled: false } }),
+      { pluginsEnabled: true },
+    )).toMatchObject({ model: "runtime-model", pluginsEnabled: false });
+  });
+
   it("patches runtime fields without discarding unrelated metadata", () => {
     expect(
       patchSessionRuntimeMetadata(

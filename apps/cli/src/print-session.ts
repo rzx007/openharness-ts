@@ -30,6 +30,7 @@ export interface PrintSessionOptions {
   allowedTools?: string;
   disallowedTools?: string;
   effort?: string;
+  pluginsEnabled?: boolean;
   daemonUrl?: string;
   daemonToken?: string;
 }
@@ -64,6 +65,7 @@ export function buildPrintSessionMetadata(
     disallowedTools: disallowedTools && disallowedTools.length > 0 ? disallowedTools : undefined,
     effort: typeof effort === "string" && effort ? effort as "low" | "medium" | "high" : undefined,
     sessionMode: options.coordinator === true || isCoordinatorMode() ? "coordinator" : "direct",
+    pluginsEnabled: options.pluginsEnabled ?? settings.plugins?.enabled,
   });
 }
 

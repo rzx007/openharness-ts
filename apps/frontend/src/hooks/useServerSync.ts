@@ -61,14 +61,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function sessionRuntimeMetadata(input: {
+export function sessionRuntimeMetadata(input: {
   model?: unknown;
   provider?: unknown;
   baseUrl?: unknown;
   apiFormat?: unknown;
   permissionMode?: unknown;
   maxTurns?: unknown;
-  sessionMode?: unknown
+  sessionMode?: unknown;
+  pluginsEnabled?: unknown;
 }): Record<string, unknown> {
   const runtime: SessionRuntimeConfigPatch = {};
   if (typeof input.model === "string" && input.model) {
@@ -91,6 +92,9 @@ function sessionRuntimeMetadata(input: {
   }
   if (input.sessionMode === "coordinator" || input.sessionMode === "direct") {
     runtime.sessionMode = input.sessionMode;
+  }
+  if (typeof input.pluginsEnabled === "boolean") {
+    runtime.pluginsEnabled = input.pluginsEnabled;
   }
   return patchSessionRuntimeMetadata({}, runtime);
 }
@@ -170,8 +174,14 @@ function sessionSelectOptions(
   }));
 }
 
-function shouldAutoActivateSession(session: SessionRecord, defaultModel: string): boolean {
-  return readSessionRuntimeConfig(session).model === defaultModel;
+export function shouldAutoActivateSession(
+  session: SessionRecord,
+  defaultModel: string,
+  pluginsEnabled: boolean | undefined | null,
+): boolean {
+  const runtime = readSessionRuntimeConfig(session);
+  return runtime.model === defaultModel
+    && (pluginsEnabled == null || (runtime.pluginsEnabled ?? true) === pluginsEnabled);
 }
 
 function recoverableInterruptedRuns(bucket?: SessionBucket): RecoverableRun[] {
@@ -656,7 +666,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
           session_mode: statusSessionMode(daemon?.sessionMode),
         }));
         const session = sessions[0];
-        if (session && shouldAutoActivateSession(session, model)) {
+        if (session && shouldAutoActivateSession(session, model, daemon?.pluginsEnabled)) {
           activateSession(session);
           void client.getSession(session.id).catch(() => {});
         }
@@ -672,7 +682,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       cancelled = true;
       clientRef.current = null;
     };
-  }, [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.sessionMode, daemon?.token, daemon?.url, reportError]);
+  }, [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.pluginsEnabled, daemon?.sessionMode, daemon?.token, daemon?.url, reportError]);
 
   useEffect(() => {
     const client = clientRef.current;
@@ -791,6 +801,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       permissionMode: statusRef.current.permission_mode ?? daemon?.permissionMode ?? "default",
       maxTurns: statusRef.current.max_turns ?? daemon?.maxTurns,
       sessionMode: nextSessionModeRef.current,
+      pluginsEnabled: daemon?.pluginsEnabled,
     });
     const session = await client.createSession({
       cwd,
@@ -805,7 +816,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
     pendingNewSessionTitleRef.current = undefined;
     return session;
     },
-    [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.sessionMode],
+    [activateSession, daemon?.cwd, daemon?.maxTurns, daemon?.model, daemon?.permissionMode, daemon?.pluginsEnabled, daemon?.sessionMode],
   );
 
   useEffect(() => {

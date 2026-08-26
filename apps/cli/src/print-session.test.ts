@@ -426,6 +426,7 @@ describe("runPrintSession", () => {
         systemPrompt: "be brief",
         allowedTools: "Read,Glob",
         effort: "low",
+        pluginsEnabled: false,
       },
     );
 
@@ -442,6 +443,7 @@ describe("runPrintSession", () => {
           allowedTools: ["Read", "Glob"],
           effort: "low",
           sessionMode: "coordinator",
+          pluginsEnabled: false,
         },
       },
     });

@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS: Settings = {
   maxTokens: 16384,
   maxTurns: 50,
   permission: { mode: "default" },
+  plugins: { enabled: true },
   memory: {
     enabled: true,
     maxFiles: 5,
@@ -59,9 +60,10 @@ const DEFAULT_SETTINGS: Settings = {
   outputStyle: "default",
 };
 
-type SettingsPatch = Partial<Omit<Settings, "sandbox" | "daemon">> & {
+type SettingsPatch = Partial<Omit<Settings, "sandbox" | "daemon" | "plugins">> & {
   sandbox?: Partial<NonNullable<Settings["sandbox"]>>;
   daemon?: Partial<NonNullable<Settings["daemon"]>>;
+  plugins?: Partial<NonNullable<Settings["plugins"]>>;
 };
 
 /**
@@ -122,6 +124,13 @@ export async function loadSettings(
     ...envSettings.daemon,
     ...cliOverrides?.daemon,
   } as NonNullable<Settings["daemon"]>;
+  merged.plugins = {
+    ...DEFAULT_SETTINGS.plugins,
+    ...fileSettings?.plugins,
+    ...projectSettings?.plugins,
+    ...envSettings.plugins,
+    ...cliOverrides?.plugins,
+  } as NonNullable<Settings["plugins"]>;
   return merged;
 }
 

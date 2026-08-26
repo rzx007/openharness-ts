@@ -85,6 +85,7 @@ export interface DryRunReport {
   toolCount: number;
   mcpServers: McpServerSummary[];
   skillCount: number;
+  pluginsEnabled: boolean;
   readiness: Readiness;
 }
 
@@ -142,6 +143,7 @@ export function buildDryRunReport(input: {
     toolCount,
     mcpServers,
     skillCount: input.skillCount,
+    pluginsEnabled: settings.plugins?.enabled ?? true,
     readiness,
   };
 }
@@ -186,6 +188,7 @@ export async function runDryRun(settings: Settings, options: DryRunOptions): Pro
   console.log(`${label("permission")}${chalk.white(report.permissionMode)}`);
   console.log(`${label("tools")}${chalk.white(String(report.toolCount))}`);
   console.log(`${label("skills")}${chalk.white(String(report.skillCount))}`);
+  console.log(`${label("plugins")}${chalk.white(report.pluginsEnabled ? "enabled" : "disabled")}`);
 
   if (report.mcpServers.length === 0) {
     console.log(`${label("mcp servers")}${chalk.gray("(none)")}`);
