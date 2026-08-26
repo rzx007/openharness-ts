@@ -1,8 +1,11 @@
 import { join, resolve } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { OpenHarnessClient } from "@openharness/client";
-import { requestedPluginPermissions, validateNativePlugin } from "@openharness/plugins";
+import { OpenHarnessClient, type PluginInfo } from "@openharness/client";
+import {
+  requestedPluginPermissions,
+  validateNativePlugin,
+} from "@openharness/plugins";
 import { createBuiltinConverterRegistry } from "@openharness/plugin-converters";
 import { Command, Option } from "commander";
 import { ensureLocalDaemon } from "../ensure-daemon.js";
@@ -13,18 +16,127 @@ async function client(): Promise<OpenHarnessClient> {
 }
 const collect = (value: string, previous: string[]) => [...previous, value];
 
+type PluginListResult = { plugins: PluginInfo[]; warnings: string[] };
+
+const activationLabels: Record<PluginInfo["activation"], string> = {
+  inactive: "inactive",
+  active: "active",
+  partial: "partial",
+  "reload-required": "reload required",
+};
+
+function table(rows: string[][]): string {
+  const widths = rows[0]!.map((_, column) =>
+    Math.max(...rows.map((row) => displayWidth(row[column] ?? ""))),
+  );
+  return rows
+    .map((row, rowIndex) =>
+      row
+        .map((value, column) =>
+          column === row.length - 1
+            ? value
+            : `${value}${" ".repeat(widths[column]! - displayWidth(value))}`,
+        )
+        .join("  "),
+    )
+    .map((line, index) =>
+      index === 0
+        ? `${line}\n${widths.map((width) => "─".repeat(width)).join("  ")}`
+        : line,
+    )
+    .join("\n");
+}
+
+function displayWidth(value: string): number {
+  return [...value].reduce((width, character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return width + (codePoint >= 0x1100 ? 2 : 1);
+  }, 0);
+}
+
+export function formatPluginList(
+  result: PluginListResult,
+  verbose = false,
+): string {
+  if (!result.plugins.length) return "No Native Plugins installed.";
+  const rows = [
+    ["PLUGIN", "VERSION", "SCOPE", "STATUS", "ACTIVATION", "TOOLS"],
+    ...result.plugins.map((plugin) => [
+      plugin.identity.displayName ?? plugin.identity.name ?? plugin.identity.id,
+      plugin.identity.version,
+      plugin.scope,
+      plugin.enabled ? "enabled" : "disabled",
+      activationLabels[plugin.activation],
+      plugin.toolRuntime
+        ? `${plugin.toolRuntime.registeredToolCount}/${plugin.toolRuntime.declaredEntries}`
+        : String(plugin.inventory.tools ?? 0),
+    ]),
+  ];
+  const sections = [table(rows)];
+  if (verbose) {
+    sections.push(
+      result.plugins
+        .map((plugin) => {
+          const runtime = plugin.toolRuntime;
+          const details = [
+            `${plugin.identity.id}@${plugin.identity.version}`,
+            `  origin       ${plugin.origin}${plugin.sourceFormat ? ` (${plugin.sourceFormat})` : ""}`,
+            `  installation ${plugin.installation}`,
+            `  permissions  ${plugin.permissions.approved.length}/${plugin.permissions.requested.length} approved`,
+            `  contributions ${
+              Object.entries(plugin.inventory)
+                .map(([name, count]) => `${name}=${count}`)
+                .join(", ") || "none"
+            }`,
+          ];
+          if (runtime) {
+            details.push(
+              `  tool runtime ${runtime.state}; hosts=${runtime.hostCount}; registered=${runtime.registeredToolCount}`,
+            );
+          }
+          if (plugin.permissions.missing.length) {
+            details.push(
+              `  missing       ${plugin.permissions.missing.join(", ")}`,
+            );
+          }
+          for (const diagnostic of plugin.diagnostics) {
+            details.push(
+              `  ${diagnostic.severity.padEnd(13)} ${diagnostic.code}: ${diagnostic.message}`,
+            );
+          }
+          return details.join("\n");
+        })
+        .join("\n\n"),
+    );
+  }
+  if (result.warnings.length) {
+    sections.push(
+      result.warnings.map((warning) => `warning: ${warning}`).join("\n"),
+    );
+  }
+  return sections.join("\n\n");
+}
+
 export function createPluginCommand(): Command {
   const cmd = new Command("plugin").description("Manage Native Plugins");
-  cmd.command("list").option("--cwd <path>").action(async (options) => {
-    const result = await (await client()).listPlugins({ cwd: resolve(options.cwd ?? process.cwd()) });
-    if (!result.plugins.length) return console.log("No Native Plugins installed.");
-    for (const plugin of result.plugins) {
-      const tools = plugin.toolRuntime
-        ? ` tools=${plugin.toolRuntime.activatableEntries}/${plugin.toolRuntime.declaredEntries}:${plugin.toolRuntime.state}`
-        : "";
-      console.log(`${plugin.identity.id}@${plugin.identity.version} ${plugin.scope} ${plugin.enabled ? "enabled" : "disabled"} ${plugin.activation}${tools}`);
-    }
-  });
+  cmd
+    .command("list")
+    .option("--cwd <path>")
+    .option(
+      "--verbose",
+      "show permissions, contributions, runtime, and diagnostics",
+    )
+    .option("--json", "print the complete machine-readable response")
+    .action(async (options) => {
+      const result = await (
+        await client()
+      ).listPlugins({ cwd: resolve(options.cwd ?? process.cwd()) });
+      console.log(
+        options.json
+          ? JSON.stringify(result, null, 2)
+          : formatPluginList(result, options.verbose),
+      );
+    });
   cmd.command("validate").argument("<path>").action(async (path) => {
     const result = await validateNativePlugin(resolve(path));
     if (result.status === "valid") console.log(`Valid Native Plugin: ${result.plugin!.manifest.id}@${result.plugin!.manifest.version}`);

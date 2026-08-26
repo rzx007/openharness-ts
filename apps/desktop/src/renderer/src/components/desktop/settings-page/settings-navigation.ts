@@ -8,7 +8,6 @@ import {
   Keyboard,
   Link2,
   Palette,
-  Plug,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -33,7 +32,6 @@ export const personalSettingsNavigation: SettingsNavigationItem[] = [
 ]
 
 export const integrationSettingsNavigation: SettingsNavigationItem[] = [
-  { label: "插件", slug: "plugins", icon: Plug },
   { label: "MCP 服务", slug: "mcp", icon: Database },
   { label: "连接", slug: "connections", icon: Link2 },
 ]

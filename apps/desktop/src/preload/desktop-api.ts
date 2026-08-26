@@ -132,6 +132,18 @@ export const desktopAPI = {
     removeCustom: (input: IpcInvokeMap[typeof IpcChannels.providerCustomRemove]["args"][0]) =>
       invoke(IpcChannels.providerCustomRemove, input),
   },
+  plugins: {
+    snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>
+      invoke(IpcChannels.pluginSnapshot, input),
+    enable: (input: IpcInvokeMap[typeof IpcChannels.pluginEnable]["args"][0]) =>
+      invoke(IpcChannels.pluginEnable, input),
+    disable: (input: IpcInvokeMap[typeof IpcChannels.pluginDisable]["args"][0]) =>
+      invoke(IpcChannels.pluginDisable, input),
+    uninstall: (input: IpcInvokeMap[typeof IpcChannels.pluginUninstall]["args"][0]) =>
+      invoke(IpcChannels.pluginUninstall, input),
+    reload: (input: IpcInvokeMap[typeof IpcChannels.pluginReload]["args"][0]) =>
+      invoke(IpcChannels.pluginReload, input),
+  },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
     daemonStatus: () => invoke(IpcChannels.sessionDaemonStatus),

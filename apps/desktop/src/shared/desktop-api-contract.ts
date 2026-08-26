@@ -72,6 +72,11 @@ import type {
   DesktopGitFileDiffInput,
   DesktopGitFileDiffResult,
 } from "./git-types"
+import type {
+  DesktopPluginActionInput,
+  DesktopPluginContextInput,
+  DesktopPluginSnapshot,
+} from "./plugin-types"
 
 export type DesktopAPI = {
   app: {
@@ -146,6 +151,13 @@ export type DesktopAPI = {
     createCustom: (input: CreateDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
     updateCustom: (input: UpdateDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
     removeCustom: (input: RemoveDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
+  }
+  plugins: {
+    snapshot: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>
+    enable: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
+    disable: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
+    uninstall: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
+    reload: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>
   }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>

@@ -13,6 +13,7 @@ describe("settings navigation", () => {
     expect(settingsSectionSlug("外观")).toBe("appearance")
     expect(settingsSectionLabel("providers")).toBe("供应商")
     expect(settingsSectionSlug("供应商")).toBe("providers")
+    expect(isSettingsSection("plugins")).toBe(false)
   })
 
   it("falls back to general for an unknown section", () => {

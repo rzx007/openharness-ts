@@ -64,6 +64,11 @@ import type {
   DesktopGitFileDiffInput,
   DesktopGitFileDiffResult,
 } from "./git-types"
+import type {
+  DesktopPluginActionInput,
+  DesktopPluginContextInput,
+  DesktopPluginSnapshot,
+} from "./plugin-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -155,6 +160,12 @@ export const IpcChannels = {
   providerCustomCreate: "provider:custom-create",
   providerCustomUpdate: "provider:custom-update",
   providerCustomRemove: "provider:custom-remove",
+
+  pluginSnapshot: "plugin:snapshot",
+  pluginEnable: "plugin:enable",
+  pluginDisable: "plugin:disable",
+  pluginUninstall: "plugin:uninstall",
+  pluginReload: "plugin:reload",
 } as const
 
 export const IpcEvents = {
@@ -428,5 +439,25 @@ export interface IpcInvokeMap {
   [IpcChannels.providerCustomRemove]: {
     args: [input: RemoveDesktopCustomProviderInput]
     result: DesktopProviderSnapshot
+  }
+  [IpcChannels.pluginSnapshot]: {
+    args: [input: DesktopPluginContextInput]
+    result: DesktopPluginSnapshot
+  }
+  [IpcChannels.pluginEnable]: {
+    args: [input: DesktopPluginActionInput]
+    result: DesktopPluginSnapshot
+  }
+  [IpcChannels.pluginDisable]: {
+    args: [input: DesktopPluginActionInput]
+    result: DesktopPluginSnapshot
+  }
+  [IpcChannels.pluginUninstall]: {
+    args: [input: DesktopPluginActionInput]
+    result: DesktopPluginSnapshot
+  }
+  [IpcChannels.pluginReload]: {
+    args: [input: DesktopPluginContextInput]
+    result: DesktopPluginSnapshot
   }
 }

@@ -13,6 +13,7 @@ import { Route as MainRouteImport } from './routes/_main'
 import { Route as PetRouteImport } from './routes/pet'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MainIndexRouteImport } from './routes/_main.index'
+import { Route as MainPluginsRouteImport } from './routes/_main.plugins'
 import { Route as MainScheduledRouteImport } from './routes/_main.scheduled'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsSectionRouteImport } from './routes/settings.$section'
@@ -35,6 +36,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const MainIndexRoute = MainIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => MainRoute,
+} as any)
+const MainPluginsRoute = MainPluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
   getParentRoute: () => MainRoute,
 } as any)
 const MainScheduledRoute = MainScheduledRouteImport.update({
@@ -63,6 +69,7 @@ export interface FileRoutesByFullPath {
   '/': typeof MainIndexRoute
   '/pet': typeof PetRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/plugins': typeof MainPluginsRoute
   '/scheduled': typeof MainScheduledRoute
   '/settings/$section': typeof SettingsSectionRoute
   '/settings/': typeof SettingsIndexRoute
@@ -70,6 +77,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/pet': typeof PetRoute
+  '/plugins': typeof MainPluginsRoute
   '/scheduled': typeof MainScheduledRoute
   '/settings/$section': typeof SettingsSectionRoute
   '/': typeof MainIndexRoute
@@ -81,6 +89,7 @@ export interface FileRoutesById {
   '/_main': typeof MainRouteWithChildren
   '/pet': typeof PetRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/_main/plugins': typeof MainPluginsRoute
   '/_main/scheduled': typeof MainScheduledRoute
   '/settings/$section': typeof SettingsSectionRoute
   '/_main/': typeof MainIndexRoute
@@ -93,6 +102,7 @@ export interface FileRouteTypes {
     | '/'
     | '/pet'
     | '/settings'
+    | '/plugins'
     | '/scheduled'
     | '/settings/$section'
     | '/settings/'
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/pet'
+    | '/plugins'
     | '/scheduled'
     | '/settings/$section'
     | '/'
@@ -110,6 +121,7 @@ export interface FileRouteTypes {
     | '/_main'
     | '/pet'
     | '/settings'
+    | '/_main/plugins'
     | '/_main/scheduled'
     | '/settings/$section'
     | '/_main/'
@@ -153,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MainIndexRouteImport
       parentRoute: typeof MainRoute
     }
+    '/_main/plugins': {
+      id: '/_main/plugins'
+      path: '/plugins'
+      fullPath: '/plugins'
+      preLoaderRoute: typeof MainPluginsRouteImport
+      parentRoute: typeof MainRoute
+    }
     '/_main/scheduled': {
       id: '/_main/scheduled'
       path: '/scheduled'
@@ -185,12 +204,14 @@ declare module '@tanstack/react-router' {
 }
 
 interface MainRouteChildren {
+  MainPluginsRoute: typeof MainPluginsRoute
   MainScheduledRoute: typeof MainScheduledRoute
   MainIndexRoute: typeof MainIndexRoute
   MainConversationSessionIdRoute: typeof MainConversationSessionIdRoute
 }
 
 const MainRouteChildren: MainRouteChildren = {
+  MainPluginsRoute: MainPluginsRoute,
   MainScheduledRoute: MainScheduledRoute,
   MainIndexRoute: MainIndexRoute,
   MainConversationSessionIdRoute: MainConversationSessionIdRoute,

@@ -61,6 +61,7 @@ type SidebarProps = {
   open: boolean
   onOpenSettings: () => void
   onOpenScheduled: () => void
+  onOpenPlugins: () => void
   onOpenConversation: (sessionId?: string | null) => void
 }
 
@@ -75,11 +76,13 @@ export function Sidebar({
   open,
   onOpenSettings,
   onOpenScheduled,
+  onOpenPlugins,
   onOpenConversation,
 }: SidebarProps): React.JSX.Element {
   const matchRoute = useMatchRoute()
   const { theme, setTheme } = useTheme()
   const scheduledSelected = Boolean(matchRoute({ to: "/scheduled" }))
+  const pluginsSelected = Boolean(matchRoute({ to: "/plugins" }))
   const darkTheme = isDarkTheme(theme)
   const projects = useDesktopSessionStore((state) => state.projects)
   const sessions = useDesktopSessionStore((state) => state.sessions)
@@ -230,19 +233,25 @@ export function Sidebar({
           />
           {secondaryNavigation.map(({ icon, label }) => {
             const isScheduled = label === "已安排"
+            const isPlugins = label === "插件"
             return (
               <SidebarNavigationButton
                 key={label}
                 icon={icon}
                 label={label}
-                selected={isScheduled && scheduledSelected}
+                selected={(isScheduled && scheduledSelected) || (isPlugins && pluginsSelected)}
                 onClick={
                   isScheduled
                     ? () => {
                         setArchiveMode(false)
                         onOpenScheduled()
                       }
-                    : undefined
+                    : isPlugins
+                      ? () => {
+                          setArchiveMode(false)
+                          onOpenPlugins()
+                        }
+                      : undefined
                 }
               />
             )
