@@ -1,6 +1,7 @@
 import { Bot, ChevronDown, PenLine, RefreshCw, Search } from "lucide-react"
 
 import { Button } from "@renderer/components/ui/button"
+import { ButtonGroup } from "@renderer/components/ui/button-group"
 import { Input } from "@renderer/components/ui/input"
 import {
   DropdownMenu,
@@ -77,25 +78,35 @@ export function ScheduledHeader({
           >
             <RefreshCw className={cn("size-4", loading && "animate-spin")} />
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button size="sm" />}
-              className="h-8 rounded-full bg-foreground px-3 text-[12px] font-medium text-background hover:bg-foreground/92"
+          <ButtonGroup className="[&>[data-slot]:first-child]:rounded-l-full! [&>[data-slot]:last-child]:rounded-r-full!">
+            <Button
+              size="sm"
+              onClick={onStartConversation}
+              className="h-8 bg-foreground px-3 text-[12px] font-medium text-background hover:bg-foreground/92"
             >
               创建
-              <ChevronDown className="size-3.5" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
-              <DropdownMenuItem onClick={onCreateManual}>
-                <PenLine />
-                手动创建
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onStartConversation}>
-                <Bot />
-                在对话中安排
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button size="icon-sm" className="rounded-r-full" aria-label="更多创建方式" />
+                }
+                className="h-8 w-8 bg-foreground text-background hover:bg-foreground/92"
+              >
+                <ChevronDown data-icon="inline-end" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
+                <DropdownMenuItem onClick={onCreateManual}>
+                  <PenLine />
+                  手动创建
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onStartConversation}>
+                  <Bot />
+                  在对话中安排
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
         </div>
       </div>
 

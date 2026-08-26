@@ -12,6 +12,14 @@ import {
 } from "@renderer/components/ui/dialog"
 import { Input } from "@renderer/components/ui/input"
 import { Label } from "@renderer/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@renderer/components/ui/select"
 import { Textarea } from "@renderer/components/ui/textarea"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
@@ -176,21 +184,30 @@ export function ScheduledTaskEditor({
 
               {destination === "chat" ? (
                 <EditorField label="对话">
-                  <Select value={sessionId} onChange={setSessionId}>
-                    <option value="" disabled>
-                      选择一个对话
-                    </option>
-                    {allSessions.map((session) => (
-                      <option
-                        key={session.id}
-                        value={session.id}
-                        disabled={session.status === "archived"}
-                      >
-                        {session.title || "新对话"}
-                        {session.workspaceMode === "outside_project" ? " · 不在项目中工作" : ""}
-                        {session.status === "archived" ? " · 已归档" : ""}
-                      </option>
-                    ))}
+                  <Select
+                    value={sessionId || null}
+                    onValueChange={(value) => {
+                      if (value) setSessionId(value)
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="选择一个对话" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {allSessions.map((session) => (
+                          <SelectItem
+                            key={session.id}
+                            value={session.id}
+                            disabled={session.status === "archived"}
+                          >
+                            {session.title || "新对话"}
+                            {session.workspaceMode === "outside_project" ? " · 不在项目中工作" : ""}
+                            {session.status === "archived" ? " · 已归档" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
                   </Select>
                 </EditorField>
               ) : (
@@ -212,16 +229,29 @@ export function ScheduledTaskEditor({
                     </WorkspaceButton>
                   </div>
                   {workspace === "project" ? (
-                    <Select value={projectPath} onChange={setProjectPath}>
-                      <option value="" disabled>
-                        选择一个项目
-                      </option>
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.path} disabled={!project.available}>
-                          {project.name}
-                          {project.available ? "" : " · 不可用"}
-                        </option>
-                      ))}
+                    <Select
+                      value={projectPath || null}
+                      onValueChange={(value) => {
+                        if (value) setProjectPath(value)
+                      }}
+                    >
+                      <SelectTrigger className="w-full bg-background">
+                        <SelectValue placeholder="选择一个项目" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {projects.map((project) => (
+                            <SelectItem
+                              key={project.id}
+                              value={project.path}
+                              disabled={!project.available}
+                            >
+                              {project.name}
+                              {project.available ? "" : " · 不可用"}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
                     </Select>
                   ) : (
                     <p className="text-[12px] leading-5 text-muted-foreground">
@@ -241,15 +271,27 @@ export function ScheduledTaskEditor({
               <SectionLabel>频率</SectionLabel>
               <div className="grid gap-3 sm:grid-cols-2">
                 <EditorField label="重复">
-                  <Select value={frequency} onChange={(value) => setFrequency(value as Frequency)}>
-                    <option value="daily">每天</option>
-                    <option value="weekdays">每个工作日</option>
-                    <option value="weekly">每周</option>
-                    <option value="monthly">每月</option>
-                    <option value="once">仅一次</option>
-                    {frequency === "custom" ? (
-                      <option value="custom">自定义规则（保持不变）</option>
-                    ) : null}
+                  <Select
+                    value={frequency}
+                    onValueChange={(value) => {
+                      if (value) setFrequency(value as Frequency)
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="daily">每天</SelectItem>
+                        <SelectItem value="weekdays">每个工作日</SelectItem>
+                        <SelectItem value="weekly">每周</SelectItem>
+                        <SelectItem value="monthly">每月</SelectItem>
+                        <SelectItem value="once">仅一次</SelectItem>
+                        {frequency === "custom" ? (
+                          <SelectItem value="custom">自定义规则（保持不变）</SelectItem>
+                        ) : null}
+                      </SelectGroup>
+                    </SelectContent>
                   </Select>
                 </EditorField>
                 {frequency === "custom" ? (
@@ -275,12 +317,24 @@ export function ScheduledTaskEditor({
                 )}
                 {frequency === "weekly" ? (
                   <EditorField label="星期">
-                    <Select value={weekday} onChange={setWeekday}>
-                      {weekdayOptions.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
+                    <Select
+                      value={weekday}
+                      onValueChange={(value) => {
+                        if (value) setWeekday(value)
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {weekdayOptions.map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
                     </Select>
                   </EditorField>
                 ) : null}
@@ -405,26 +459,6 @@ function WorkspaceButton({
       {icon}
       {children}
     </button>
-  )
-}
-
-function Select({
-  value,
-  onChange,
-  children,
-}: {
-  value: string
-  onChange: (value: string) => void
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-    >
-      {children}
-    </select>
   )
 }
 
