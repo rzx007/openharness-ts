@@ -75,6 +75,14 @@ export function ScheduledTaskEditor({
   const allSessions = [...sessions, ...archivedSessions].filter(
     (session, index, items) => items.findIndex((item) => item.id === session.id) === index
   )
+  const selectedSession = allSessions.find((session) => session.id === sessionId)
+  const selectedSessionLabel = selectedSession
+    ? `${selectedSession.title || "新对话"}${
+        selectedSession.workspaceMode === "outside_project" ? " · 不在项目中工作" : ""
+      }${selectedSession.status === "archived" ? " · 已归档" : ""}`
+    : "选择一个对话"
+  const selectedProjectLabel =
+    projects.find((project) => project.path === projectPath)?.name ?? "选择一个项目"
   const standaloneModel = task?.model ?? defaultModel
   const valid =
     name.trim().length > 0 &&
@@ -191,7 +199,7 @@ export function ScheduledTaskEditor({
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="选择一个对话" />
+                      <SelectValue>{selectedSessionLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
@@ -236,7 +244,7 @@ export function ScheduledTaskEditor({
                       }}
                     >
                       <SelectTrigger className="w-full bg-background">
-                        <SelectValue placeholder="选择一个项目" />
+                        <SelectValue>{selectedProjectLabel}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
@@ -278,7 +286,7 @@ export function ScheduledTaskEditor({
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue />
+                      <SelectValue>{frequencyLabels[frequency]}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
@@ -324,7 +332,9 @@ export function ScheduledTaskEditor({
                       }}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>
+                          {weekdayOptions.find(([value]) => value === weekday)?.[1] ?? "选择星期"}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
@@ -471,6 +481,15 @@ const weekdayOptions = [
   ["SA", "星期六"],
   ["SU", "星期日"],
 ] as const
+
+const frequencyLabels: Record<Frequency, string> = {
+  daily: "每天",
+  weekdays: "每个工作日",
+  weekly: "每周",
+  monthly: "每月",
+  once: "仅一次",
+  custom: "自定义规则（保持不变）",
+}
 
 function buildRecurrence(input: {
   frequency: Frequency

@@ -71,27 +71,24 @@ export function ScheduledHeader({
             variant="ghost"
             size="icon-sm"
             title="刷新任务"
-            aria-label="刷新任务"
             onClick={() => void onRefresh()}
             disabled={loading}
             className="size-9 rounded-full text-muted-foreground"
           >
             <RefreshCw className={cn("size-4", loading && "animate-spin")} />
           </Button>
-          <ButtonGroup className="[&>[data-slot]:first-child]:rounded-l-full! [&>[data-slot]:last-child]:rounded-r-full!">
+          <ButtonGroup className="overflow-hidden rounded-full bg-foreground">
             <Button
               size="sm"
               onClick={onStartConversation}
-              className="h-8 bg-foreground px-3 text-[12px] font-medium text-background hover:bg-foreground/92"
+              className="h-8 rounded-none! border-0 bg-transparent px-3 text-[12px] font-medium text-background hover:bg-white/10"
             >
               创建
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={
-                  <Button size="icon-sm" className="rounded-r-full" aria-label="更多创建方式" />
-                }
-                className="h-8 w-8 bg-foreground text-background hover:bg-foreground/92"
+                render={<Button size="icon-sm" title="更多创建方式" />}
+                className="h-8 w-8 rounded-none! border-0 bg-transparent text-background hover:bg-white/10"
               >
                 <ChevronDown data-icon="inline-end" />
               </DropdownMenuTrigger>

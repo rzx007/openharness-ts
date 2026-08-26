@@ -26,10 +26,7 @@ function DropdownMenuContent({
   className,
   ...props
 }: MenuPrimitive.Popup.Props &
-  Pick<
-    MenuPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
-  >) {
+  Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
@@ -42,7 +39,7 @@ function DropdownMenuContent({
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
           className={cn(
-            "z-50 max-h-(--available-height) min-w-52 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-xl bg-popover p-1.5 text-[13px] text-popover-foreground shadow-[0_10px_36px_oklch(0.28_0.012_250/14%),0_2px_8px_oklch(0.28_0.01_250/6%)] ring-1 ring-black/8 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95 dark:ring-white/10",
+            "z-50 max-h-(--available-height) min-w-52 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-xl bg-popover p-1.5 text-[13px] text-popover-foreground shadow-[0_10px_36px_oklch(0.28_0.012_250/14%),0_2px_8px_oklch(0.28_0.01_250/6%)] ring-1 ring-black/8 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 dark:ring-white/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95",
             className
           )}
           {...props}
@@ -173,8 +170,7 @@ function DropdownMenuCheckboxItem({
         data-slot="dropdown-menu-checkbox-item-indicator"
       >
         <MenuPrimitive.CheckboxItemIndicator>
-          <CheckIcon
-          />
+          <CheckIcon />
         </MenuPrimitive.CheckboxItemIndicator>
       </span>
       {children}
@@ -183,12 +179,7 @@ function DropdownMenuCheckboxItem({
 }
 
 function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
-  return (
-    <MenuPrimitive.RadioGroup
-      data-slot="dropdown-menu-radio-group"
-      {...props}
-    />
-  )
+  return <MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />
 }
 
 function DropdownMenuRadioItem({
@@ -214,8 +205,7 @@ function DropdownMenuRadioItem({
         data-slot="dropdown-menu-radio-item-indicator"
       >
         <MenuPrimitive.RadioItemIndicator>
-          <CheckIcon
-          />
+          <CheckIcon />
         </MenuPrimitive.RadioItemIndicator>
       </span>
       {children}
@@ -223,10 +213,7 @@ function DropdownMenuRadioItem({
   )
 }
 
-function DropdownMenuSeparator({
-  className,
-  ...props
-}: MenuPrimitive.Separator.Props) {
+function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
   return (
     <MenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
@@ -236,10 +223,7 @@ function DropdownMenuSeparator({
   )
 }
 
-function DropdownMenuShortcut({
-  className,
-  ...props
-}: React.ComponentProps<"span">) {
+function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="dropdown-menu-shortcut"
