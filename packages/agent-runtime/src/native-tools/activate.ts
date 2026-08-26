@@ -1,5 +1,6 @@
 import type { IToolRegistry } from "@openharness/core";
 import type { LoadedNativePlugin, PluginDiagnostic } from "@openharness/plugins";
+import { formatNativeToolAuditEvent, NativeToolCallGuard, type NativeToolAuditEvent } from "./guard.js";
 import { NativeToolHost, NativeToolHostError, type NativeToolHostState } from "./tool-host.js";
 import { beginNativeToolRuntimeStatus } from "./status.js";
 
@@ -18,8 +19,12 @@ export async function activateNativePluginTools(
     toolRegistry: IToolRegistry;
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
     onLog?: (message: string) => void;
+    onAudit?: (event: NativeToolAuditEvent) => void;
     callTimeoutMs?: number;
     cancellationGraceMs?: number;
+    maxConcurrentCalls?: number;
+    outputMaxBytes?: number;
+    logMessageMaxChars?: number;
   },
 ): Promise<NativeToolActivationResult> {
   if (!plugin.components.tools?.value?.length) {
@@ -27,12 +32,22 @@ export async function activateNativePluginTools(
   }
   const toolNames: string[] = [];
   const runtimeStatus = beginNativeToolRuntimeStatus(plugin.manifest.id, plugin.root);
+  const guard = new NativeToolCallGuard({
+    pluginId: plugin.manifest.id,
+    maxConcurrentCalls: context.maxConcurrentCalls,
+    onAudit: (event) => {
+      context.onAudit?.(event);
+      context.onLog?.(`[native-tool:audit] ${formatNativeToolAuditEvent(event)}`);
+    },
+  });
   const unregisterAll = () => {
     for (const name of toolNames.splice(0)) context.toolRegistry.unregister?.(name);
   };
   const host = new NativeToolHost(plugin, {
     callTimeoutMs: context.callTimeoutMs,
     cancellationGraceMs: context.cancellationGraceMs,
+    outputMaxBytes: context.outputMaxBytes,
+    logMessageMaxChars: context.logMessageMaxChars,
     onLog: (event) => context.onLog?.(`[native-tool:${event.level}] ${event.message}`),
     onCrash: (error) => {
       unregisterAll();
@@ -57,10 +72,16 @@ export async function activateNativePluginTools(
       }
       context.toolRegistry.register({
         ...definition,
-        execute: (input, toolContext) => host.call(definition.name, input, {
-          cwd: toolContext.cwd || context.cwd,
-          ...(toolContext.sessionId ? { sessionId: toolContext.sessionId } : {}),
-        }, toolContext.abortSignal),
+        execute: (input, toolContext) => guard.run(
+          definition.name,
+          definition.inputSchema,
+          input,
+          toolContext,
+          () => host.call(definition.name, input, {
+            cwd: toolContext.cwd || context.cwd,
+            ...(toolContext.sessionId ? { sessionId: toolContext.sessionId } : {}),
+          }, toolContext.abortSignal),
+        ),
       });
       toolNames.push(definition.name);
     }

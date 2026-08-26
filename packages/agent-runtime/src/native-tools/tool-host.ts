@@ -33,6 +33,8 @@ export interface NativeToolHostOptions {
   callTimeoutMs?: number;
   shutdownTimeoutMs?: number;
   cancellationGraceMs?: number;
+  outputMaxBytes?: number;
+  logMessageMaxChars?: number;
   onLog?: (event: NativeToolHostLog) => void;
   onCrash?: (error: NativeToolHostError) => void;
 }
@@ -41,6 +43,8 @@ export class NativeToolHost {
   private child: ChildProcess | undefined;
   private pending = new Map<string, PendingRequest>();
   private stopping = false;
+  private outputBytes = { stdout: 0, stderr: 0, ipc: 0 };
+  private outputLimitNotified = new Set<"stdout" | "stderr" | "ipc">();
   state: NativeToolHostState = "inactive";
 
   constructor(
@@ -71,8 +75,8 @@ export class NativeToolHost {
     child.on("exit", (code, signal) => {
       if (!this.stopping) this.handleCrash(new NativeToolHostError("tool_host_crashed", `Native Tool Host exited (code=${code ?? "none"}, signal=${signal ?? "none"})`));
     });
-    child.stderr?.on("data", (chunk) => this.options.onLog?.({ type: "log", level: "error", message: String(chunk).trimEnd() }));
-    child.stdout?.on("data", (chunk) => this.options.onLog?.({ type: "log", level: "info", message: String(chunk).trimEnd() }));
+    child.stderr?.on("data", (chunk) => this.emitLimitedOutput("stderr", "error", chunk));
+    child.stdout?.on("data", (chunk) => this.emitLimitedOutput("stdout", "info", chunk));
 
     try {
       await this.request("healthcheck", undefined, this.options.registrationTimeoutMs ?? 10_000);
@@ -178,7 +182,8 @@ export class NativeToolHost {
   private handleMessage(message: unknown): void {
     if (!message || typeof message !== "object") return;
     if ((message as NativeToolHostLog).type === "log") {
-      this.options.onLog?.(message as NativeToolHostLog);
+      const event = message as NativeToolHostLog;
+      this.emitLimitedOutput("ipc", event.level, event.message);
       return;
     }
     const response = message as NativeToolHostResponse;
@@ -187,6 +192,39 @@ export class NativeToolHost {
       ? new NativeToolHostError(response.error.code, response.error.message)
       : undefined;
     this.finishPending(response.id, response.result, error);
+  }
+
+  private emitLimitedOutput(source: "stdout" | "stderr" | "ipc", level: NativeToolHostLog["level"], chunk: unknown): void {
+    const raw = String(chunk).trimEnd();
+    if (!raw) return;
+    const maxBytes = this.options.outputMaxBytes ?? 64 * 1024;
+    const currentBytes = this.outputBytes[source];
+    if (currentBytes >= maxBytes) {
+      this.notifyOutputLimit(source, maxBytes);
+      return;
+    }
+    const rawBytes = Buffer.byteLength(raw, "utf8");
+    const remainingBytes = maxBytes - currentBytes;
+    const message = rawBytes > remainingBytes
+      ? `${truncateUtf8(raw, remainingBytes)}\n[truncated: native tool ${source} output exceeded ${maxBytes} bytes]`
+      : raw;
+    this.outputBytes[source] += Math.min(rawBytes, remainingBytes);
+    this.options.onLog?.({
+      type: "log",
+      level,
+      message: truncateChars(message, this.options.logMessageMaxChars ?? 8 * 1024),
+    });
+    if (rawBytes > remainingBytes) this.notifyOutputLimit(source, maxBytes);
+  }
+
+  private notifyOutputLimit(source: "stdout" | "stderr" | "ipc", maxBytes: number): void {
+    if (this.outputLimitNotified.has(source)) return;
+    this.outputLimitNotified.add(source);
+    this.options.onLog?.({
+      type: "log",
+      level: "warn",
+      message: `Native Tool Host ${source} output limit reached (${maxBytes} bytes); further ${source} output is suppressed.`,
+    });
   }
 
   private finishPending(id: string, value: unknown, error?: Error): void {
@@ -249,4 +287,22 @@ export class NativeToolHost {
       }
     }
   }
+}
+
+function truncateChars(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, Math.max(0, maxChars))}\n[truncated: native tool log message exceeded ${maxChars} characters]`;
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  let result = "";
+  let used = 0;
+  for (const char of value) {
+    const size = Buffer.byteLength(char, "utf8");
+    if (used + size > maxBytes) break;
+    result += char;
+    used += size;
+  }
+  return result;
 }

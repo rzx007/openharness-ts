@@ -12,6 +12,9 @@
 - `@openharness/plugins` 只解析并返回 Tool 入口、运行时和有效权限，不 import Tool 模块；
 - `@openharness/agent-runtime` 为每个插件版本启动一个 Node 子进程，在子进程内执行 `registerTools()` 和 `invoke()`；
 - Tool Host 支持健康检查、注册、调用、取消、超时、关闭、崩溃清理和结构化错误；
+- Tool 调用入口已增加 runtime guard：每次调用写审计摘要，执行前按 `inputSchema` 校验输入，限制同一插件版本并发调用数；
+- Tool Host 已对 stdout、stderr 和插件主动日志做大小限制，超出后截断并抑制后续输出；
+- Runtime 发现 installed plugin 时会检查 requested/approved permission 是否一致，缺少批准时跳过该插件并给出重新批准或重装提示；
 - Agent 创建时激活插件 Tool，Agent 关闭时注销 Tool 并回收子进程；
 - 子进程只继承运行所需的少量系统环境变量，不继承 daemon 的 API Key 等环境变量；
 - Server/Client/CLI 可以显示已声明和可激活的 Tool 入口数，并聚合同一 daemon 进程里所有 Agent Runtime 的 Host 数量、状态、已注册 Tool 数和最近错误；没有活跃 Runtime 时明确显示 `reload-required`，不把安装状态冒充成已激活；

@@ -40,6 +40,11 @@ export async function discoverOpenHarnessExtensions(
     ? await discoverInstalledNativePlugins({ cwd })
     : [];
   for (const record of installedPlugins) {
+    const missingPermissions = record.requestedPermissions.filter((permission) => !record.approvedPermissions.includes(permission));
+    if (missingPermissions.length > 0) {
+      warnings.push(`${record.id}: missing approved plugin permissions [${missingPermissions.join(", ")}]; approve the permissions or reinstall the plugin before it can run`);
+      continue;
+    }
     const validation = await validateNativePlugin(record.cachePath);
     if (!validation.plugin) {
       warnings.push(...validation.diagnostics.map((item) => `${record.id}: ${item.message}`));

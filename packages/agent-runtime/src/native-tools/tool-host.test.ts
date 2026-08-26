@@ -122,6 +122,97 @@ describe("NativeToolHost", () => {
     await cleanups[0]!();
   });
 
+  it("rejects invalid input before invoking plugin code and writes an audit event", async () => {
+    const plugin = await loadPlugin(writePlugin(`
+      export async function registerTools() {
+        return [{
+          name: "PluginStrict", description: "strict input", inputSchema: {
+            type: "object",
+            required: ["value"],
+            properties: { value: { type: "string", minLength: 2 } },
+            additionalProperties: false
+          },
+          async invoke() { throw new Error("invoke should not run"); }
+        }];
+      }
+    `, "dev.openharness.strict-tool"));
+    const registry = new TestRegistry();
+    const audits: unknown[] = [];
+    const activation = await activateNativePluginTools(plugin, {
+      cwd: plugin.root,
+      toolRegistry: registry,
+      addCleanup: () => undefined,
+      onAudit: (event) => audits.push(event),
+    });
+
+    expect(activation.state).toBe("active");
+    await expect(registry.get("PluginStrict")!.execute({ value: "x" }, { cwd: plugin.root }))
+      .rejects.toMatchObject({ code: "tool_input_invalid" });
+    expect(audits).toMatchObject([{
+      pluginId: "dev.openharness.strict-tool",
+      toolName: "PluginStrict",
+      status: "failed",
+      errorCode: "tool_input_invalid",
+    }]);
+    await activation.host?.stop();
+  });
+
+  it("enforces a per-plugin Native Tool concurrency limit", async () => {
+    const plugin = await loadPlugin(writePlugin(`
+      export async function registerTools() {
+        return [{
+          name: "PluginWait", description: "wait", inputSchema: {},
+          async invoke(_input, context) {
+            await new Promise((resolve, reject) => {
+              const timer = setTimeout(resolve, 100);
+              context.signal.addEventListener("abort", () => { clearTimeout(timer); reject(context.signal.reason); }, { once: true });
+            });
+            return { content: [] };
+          }
+        }];
+      }
+    `, "dev.openharness.concurrent-tool"));
+    const registry = new TestRegistry();
+    const activation = await activateNativePluginTools(plugin, {
+      cwd: plugin.root,
+      toolRegistry: registry,
+      maxConcurrentCalls: 1,
+      addCleanup: () => undefined,
+    });
+
+    const first = registry.get("PluginWait")!.execute({}, { cwd: plugin.root });
+    await expect(registry.get("PluginWait")!.execute({}, { cwd: plugin.root }))
+      .rejects.toMatchObject({ code: "tool_concurrency_limit" });
+    await expect(first).resolves.toEqual({ content: [] });
+    await activation.host?.stop();
+  });
+
+  it("caps Native Tool stdout and stderr logs", async () => {
+    const plugin = await loadPlugin(writePlugin(`
+      export async function registerTools() {
+        process.stdout.write("o".repeat(64));
+        process.stderr.write("e".repeat(64));
+        return [{
+          name: "PluginNoop", description: "noop", inputSchema: {},
+          async invoke() { return { content: [] }; }
+        }];
+      }
+    `, "dev.openharness.noisy-tool"));
+    const registry = new TestRegistry();
+    const logs: string[] = [];
+    const activation = await activateNativePluginTools(plugin, {
+      cwd: plugin.root,
+      toolRegistry: registry,
+      outputMaxBytes: 16,
+      addCleanup: () => undefined,
+      onLog: (message) => logs.push(message),
+    });
+
+    expect(activation.state).toBe("active");
+    expect(logs.join("\n")).toContain("output limit reached (16 bytes)");
+    await activation.host?.stop();
+  });
+
   it("kills an unresponsive host and unregisters its tools after the cancellation grace period", async () => {
     const plugin = await loadPlugin(writePlugin(`
       export async function registerTools() {

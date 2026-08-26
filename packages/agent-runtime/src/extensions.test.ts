@@ -253,6 +253,25 @@ describe("installed Native Tool activation", () => {
     expect(overridden.plugins).toEqual([]);
   });
 
+  it("does not discover plugins with unapproved permissions", async () => {
+    const cwd = join(tempRoot, "missing-permission-workspace");
+    writeProjectToolPlugin(cwd);
+    const storePath = join(tempRoot, "config", "plugins", "installed.json");
+    const store = JSON.parse(readFileSync(storePath, "utf8")) as {
+      plugins: Record<string, { requestedPermissions: string[]; approvedPermissions: string[] }>;
+    };
+    const record = Object.values(store.plugins)[0]!;
+    record.requestedPermissions = ["filesystem:write"];
+    record.approvedPermissions = [];
+    writeFileSync(storePath, JSON.stringify(store));
+
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+    expect(discovery.plugins).toEqual([]);
+    expect(discovery.warnings).toEqual([
+      "dev.openharness.runtime-tool: missing approved plugin permissions [filesystem:write]; approve the permissions or reinstall the plugin before it can run",
+    ]);
+  });
+
   it("discovers, invokes, and removes a Tool with its owning runtime", async () => {
     const cwd = join(tempRoot, "tool-workspace");
     writeProjectToolPlugin(cwd);

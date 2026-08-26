@@ -8,6 +8,8 @@ Runtime 只接受插件根目录中的 `.openharness-plugin/plugin.json`。Claud
 
 Node Tool 入口必须导出 `registerTools(context)`，并返回 Tool 定义数组。每个定义包含 `name`、`description`、`inputSchema` 和 `invoke(input, context)`；`invoke` 返回标准的 `{ content: [...] }` Tool 结果。一个插件版本共用一个 Tool Host 子进程，Agent Runtime 关闭或 Host 崩溃时会注销该插件注册的全部 Tool。
 
+Agent Runtime 会在进入插件代码前做调用控制：按 `inputSchema` 校验输入、记录每次调用的审计摘要、限制同一插件版本的并发调用数，并对 stdout、stderr 和插件日志做大小限制。权限批准缺失的 installed record 不会被激活，需要重新批准权限或重装插件。
+
 当前子进程边界可以隔离崩溃和 daemon 的环境变量，但还不是操作系统级沙箱。第三方 Node 代码仍可直接调用 Node 文件、网络和进程 API；不要把 manifest 权限误解为完整的系统调用拦截。
 
 ## 关闭插件功能

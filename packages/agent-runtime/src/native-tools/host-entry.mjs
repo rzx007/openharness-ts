@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 const tools = new Map();
 const calls = new Map();
 let plugin;
+const MAX_IPC_LOG_CHARS = 8 * 1024;
 
 function send(message) {
   if (process.connected) process.send(message);
@@ -15,6 +16,12 @@ function serializedError(error, fallbackCode) {
     message: error instanceof Error ? error.message : String(error),
     ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
   };
+}
+
+function truncateLogMessage(message) {
+  const raw = String(message);
+  if (raw.length <= MAX_IPC_LOG_CHARS) return raw;
+  return `${raw.slice(0, MAX_IPC_LOG_CHARS)}\n[truncated: native tool log message exceeded ${MAX_IPC_LOG_CHARS} characters]`;
 }
 
 function validateDefinition(value, entryPath) {
@@ -42,7 +49,7 @@ async function registerTools(payload) {
       permissions: Object.freeze(structuredClone(entry.permissions)),
       log(level, message) {
         const normalized = ["debug", "info", "warn", "error"].includes(level) ? level : "info";
-        send({ type: "log", level: normalized, message: `[${plugin.id}] ${String(message)}` });
+        send({ type: "log", level: normalized, message: truncateLogMessage(`[${plugin.id}] ${message}`) });
       },
     });
     if (!Array.isArray(definitions)) throw new Error(`registerTools() must return an array: ${entry.entryPath}`);
@@ -119,10 +126,10 @@ process.on("message", async (message) => {
 
 process.on("disconnect", () => process.exit(0));
 process.on("uncaughtException", (error) => {
-  send({ type: "log", level: "error", message: error.stack ?? error.message });
+  send({ type: "log", level: "error", message: truncateLogMessage(error.stack ?? error.message) });
   process.exit(1);
 });
 process.on("unhandledRejection", (error) => {
-  send({ type: "log", level: "error", message: error instanceof Error ? error.stack ?? error.message : String(error) });
+  send({ type: "log", level: "error", message: truncateLogMessage(error instanceof Error ? error.stack ?? error.message : String(error)) });
   process.exit(1);
 });
