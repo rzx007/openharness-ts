@@ -27,6 +27,7 @@ function ConversationPane({
   panelOpen,
   onTogglePanel,
   onOpenFile,
+  canOpenReview,
   onOpenReview,
   onOpenTerminal,
   onOpenAgents,
@@ -237,6 +238,7 @@ function ConversationPane({
                         void forkFromAssistantMessage(messageId)
                       }
                       onOpenFile={onOpenFile}
+                      canOpenReview={canOpenReview}
                       onOpenReview={onOpenReview}
                       onOpenTerminal={onOpenTerminal}
                     />

@@ -24,6 +24,7 @@ export function ConversationTranscript({
   onCopyAssistantMessage,
   onForkAssistantMessage,
   onOpenFile,
+  canOpenReview,
   onOpenReview,
   onOpenTerminal,
   showReasoning = true,
@@ -37,6 +38,7 @@ export function ConversationTranscript({
   onCopyAssistantMessage: (content: string) => void
   onForkAssistantMessage?: (messageId: string) => void
   onOpenFile: (path: string, line?: number) => void
+  canOpenReview: boolean
   onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
   showReasoning?: boolean
@@ -78,6 +80,7 @@ export function ConversationTranscript({
                 parts={entry.system.parts}
                 streaming={false}
                 onOpenFile={onOpenFile}
+                canOpenReview={canOpenReview}
                 onOpenReview={onOpenReview}
                 onOpenTerminal={onOpenTerminal}
               />
@@ -107,6 +110,7 @@ export function ConversationTranscript({
                     onEdit: onEditLastUserMessage,
                   }}
                   onOpenFile={onOpenFile}
+                  canOpenReview={canOpenReview}
                   onOpenReview={onOpenReview}
                   onOpenTerminal={onOpenTerminal}
                 />
@@ -121,6 +125,7 @@ export function ConversationTranscript({
                   parts={entry.turn.assistantParts}
                   streaming={running && entry === lastTurn}
                   onOpenFile={onOpenFile}
+                  canOpenReview={canOpenReview}
                   onOpenReview={onOpenReview}
                   onOpenTerminal={onOpenTerminal}
                 />

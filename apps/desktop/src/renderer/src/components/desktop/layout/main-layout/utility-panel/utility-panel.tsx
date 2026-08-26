@@ -26,7 +26,12 @@ import {
 } from "./utility-panel-repository"
 import type { PersistedFileTabsByScope } from "./utility-panel-state"
 import { EmptyUtilityPanelState, UtilityPanelTabStrip } from "./utility-panel-tab-strip"
-import { utilityToolMeta, type UtilityTab, type UtilityTool } from "./utility-panel-tabs"
+import {
+  utilityToolMeta,
+  utilityToolOrder,
+  type UtilityTab,
+  type UtilityTool,
+} from "./utility-panel-tabs"
 import { useUtilityPanelRuntime } from "./use-utility-panel-runtime"
 
 type UtilityPanelProps = {
@@ -94,16 +99,22 @@ export function UtilityPanel({
   )
   const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
+  const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const selectedProjectAvailable = useDesktopSessionStore(
     (state) => state.selectedProject?.available ?? false
   )
+  const availableTools = selectedProjectGit
+    ? utilityToolOrder
+    : utilityToolOrder.filter((tool) => tool !== "review")
   const persistedFileState = selectedProjectPath ? persistedFileTabs[scopeId] : undefined
   const fileStateVisible = fileProjectPath === (selectedProjectPath ?? null)
   const visibleFileTabs = fileTabs.filter(
     (tab) => (tab.projectPath ?? null) === (selectedProjectPath ?? null)
   )
   const visibleTabs = tabs.filter(
-    (tab) => !tab.projectPath || tab.projectPath === selectedProjectPath
+    (tab) =>
+      (!tab.projectPath || tab.projectPath === selectedProjectPath) &&
+      (selectedProjectGit || tab.tool !== "review")
   )
   const visibleActiveFilePath =
     fileStateVisible || visibleTabs.some((tab) => tab.filePath === activeFilePath)
@@ -167,6 +178,7 @@ export function UtilityPanel({
   }, [setTerminalMounted, terminalOpenRequest])
 
   useEffect(() => {
+    if (!selectedProjectGit) return
     if (!reviewOpenRequest || handledReviewRequestRef.current === reviewOpenRequest.id) return
     handledReviewRequestRef.current = reviewOpenRequest.id
     const timer = window.setTimeout(() => {
@@ -182,7 +194,20 @@ export function UtilityPanel({
       })
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [reviewOpenRequest, setActiveTabId, setTabs])
+  }, [reviewOpenRequest, selectedProjectGit, setActiveTabId, setTabs])
+
+  useEffect(() => {
+    if (selectedProjectGit) return
+    const timer = window.setTimeout(() => {
+      setTabs((current) => {
+        if (!current.some((tab) => tab.tool === "review")) return current
+        const nextTabs = current.filter((tab) => tab.tool !== "review")
+        if (activeTabId === toolTabId("review")) setActiveTabId(nextTabs[0]?.id ?? "")
+        return nextTabs
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activeTabId, selectedProjectGit, setActiveTabId, setTabs])
 
   const addTab = useCallback(
     (tool: UtilityTool): void => {
@@ -542,6 +567,7 @@ export function UtilityPanel({
           tabs={visibleTabs}
           browserTabs={browserTabs}
           activeTab={activeTab}
+          availableTools={availableTools}
           maximized={maximized}
           onAdd={addTab}
           onSelect={selectTab}
@@ -553,7 +579,9 @@ export function UtilityPanel({
         />
 
         <div className="relative min-h-0 flex-1 bg-conversation">
-          {!activeTab && !pendingTerminal && <EmptyUtilityPanelState onAdd={addTab} />}
+          {!activeTab && !pendingTerminal && (
+            <EmptyUtilityPanelState availableTools={availableTools} onAdd={addTab} />
+          )}
           {browserTabs.map((tab) => (
             <BrowserTool
               key={tab.id}
@@ -606,6 +634,7 @@ export function UtilityPanel({
               key={activeSessionId ?? "no-session"}
               active={activeTab?.tool === "agents"}
               onOpenFile={onOpenFile}
+              canOpenReview={selectedProjectGit}
               onOpenReview={onOpenReview}
               onOpenTerminal={onOpenTerminal}
             />

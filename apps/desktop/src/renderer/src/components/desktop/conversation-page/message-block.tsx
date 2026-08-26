@@ -51,6 +51,7 @@ export function MessageBlock({
   streaming,
   userActions,
   onOpenFile,
+  canOpenReview,
   onOpenReview,
   onOpenTerminal,
 }: {
@@ -62,6 +63,7 @@ export function MessageBlock({
     onEdit: (content: string) => void
   }
   onOpenFile: (path: string, line?: number) => void
+  canOpenReview: boolean
   onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
@@ -82,6 +84,7 @@ export function MessageBlock({
       parts={parts}
       streaming={streaming}
       onOpenFile={onOpenFile}
+      canOpenReview={canOpenReview}
       onOpenReview={onOpenReview}
       onOpenTerminal={onOpenTerminal}
     />

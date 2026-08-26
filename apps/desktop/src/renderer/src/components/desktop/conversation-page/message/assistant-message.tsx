@@ -29,12 +29,14 @@ export function AssistantMessage({
   parts,
   streaming,
   onOpenFile,
+  canOpenReview,
   onOpenReview,
   onOpenTerminal,
 }: {
   parts: DesktopSessionPart[]
   streaming: boolean
   onOpenFile: (path: string, line?: number) => void
+  canOpenReview: boolean
   onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
@@ -92,7 +94,12 @@ export function AssistantMessage({
       })}
 
       {!streaming && isTurnComplete(parts) && changedFiles.length > 0 ? (
-        <ChangedFilesSummary files={changedFiles} onOpenReview={onOpenReview} />
+        <ChangedFilesSummary
+          files={changedFiles}
+          canOpenReview={canOpenReview}
+          onOpenFile={onOpenFile}
+          onOpenReview={onOpenReview}
+        />
       ) : null}
     </div>
   )
@@ -333,9 +340,13 @@ function ToolActivityGroup({ tools }: { tools: ToolUnit[] }): React.JSX.Element 
 
 function ChangedFilesSummary({
   files,
+  canOpenReview,
+  onOpenFile,
   onOpenReview,
 }: {
   files: ChangedFile[]
+  canOpenReview: boolean
+  onOpenFile: (path: string, line?: number) => void
   onOpenReview: (path?: string) => void
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
@@ -366,7 +377,7 @@ function ChangedFilesSummary({
           <button
             key={file.path}
             type="button"
-            onClick={() => onOpenReview(file.path)}
+            onClick={() => (canOpenReview ? onOpenReview(file.path) : onOpenFile(file.path))}
             className="flex h-11 w-full items-center gap-3 px-4 text-left transition-colors hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
           >
             <span className="min-w-0 flex-1 truncate text-[14px] text-ui-muted">{file.path}</span>

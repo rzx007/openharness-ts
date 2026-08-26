@@ -47,6 +47,7 @@ export function MainLayout(): React.JSX.Element {
   const sessions = useDesktopSessionStore((state) => state.sessions)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const selectedProjectId = useDesktopSessionStore((state) => state.selectedProject?.id ?? null)
+  const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const sidebarPanelRef = usePanelRef()
@@ -264,6 +265,7 @@ export function MainLayout(): React.JSX.Element {
           panelOpen={panelOpen}
           onTogglePanel={togglePanel}
           onOpenFile={openWorkspaceFile}
+          canOpenReview={selectedProjectGit}
           onOpenReview={openReview}
           onOpenTerminal={openTerminal}
           onOpenAgents={() => openUtilityTool("agents")}

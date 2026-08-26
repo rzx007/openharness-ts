@@ -20,17 +20,13 @@ import {
 } from "@renderer/components/ui/item"
 import { Kbd } from "@renderer/components/ui/kbd"
 import { cn } from "@renderer/lib/utils"
-import {
-  utilityToolMeta,
-  utilityToolOrder,
-  type UtilityTab,
-  type UtilityTool,
-} from "./utility-panel-tabs"
+import { utilityToolMeta, type UtilityTab, type UtilityTool } from "./utility-panel-tabs"
 
 type UtilityPanelTabStripProps = {
   tabs: UtilityTab[]
   browserTabs: BrowserToolTab[]
   activeTab?: UtilityTab
+  availableTools: UtilityTool[]
   maximized: boolean
   onAdd: (tool: UtilityTool) => void
   onSelect: (tab: UtilityTab) => void
@@ -45,6 +41,7 @@ export function UtilityPanelTabStrip({
   tabs,
   browserTabs,
   activeTab,
+  availableTools,
   maximized,
   onAdd,
   onSelect,
@@ -138,7 +135,12 @@ export function UtilityPanelTabStrip({
 
       {menuPosition &&
         createPortal(
-          <AddTabMenu activeTab={activeTab} position={menuPosition} onAdd={addTool} />,
+          <AddTabMenu
+            activeTab={activeTab}
+            availableTools={availableTools}
+            position={menuPosition}
+            onAdd={addTool}
+          />,
           document.body
         )}
     </>
@@ -146,14 +148,16 @@ export function UtilityPanelTabStrip({
 }
 
 export function EmptyUtilityPanelState({
+  availableTools,
   onAdd,
 }: {
+  availableTools: UtilityTool[]
   onAdd: (tool: UtilityTool) => void
 }): React.JSX.Element {
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-8">
       <ItemGroup className="w-full max-w-130 gap-0!">
-        {utilityToolOrder.map((tool) => {
+        {availableTools.map((tool) => {
           const Icon = utilityToolMeta[tool].icon
           return (
             <Item
@@ -220,7 +224,7 @@ function UtilityTabButton({
             ? "bg-neutral-200/80 text-ui-foreground dark:bg-neutral-800"
             : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
           showSeparator &&
-          "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
+            "after:absolute after:top-2 after:-right-0.5 after:h-4 after:w-px after:bg-border/55"
         )}
       >
         <button
@@ -265,10 +269,12 @@ function UtilityTabButton({
 
 function AddTabMenu({
   activeTab,
+  availableTools,
   position,
   onAdd,
 }: {
   activeTab?: UtilityTab
+  availableTools: UtilityTool[]
   position: { left: number; top: number }
   onAdd: (tool: UtilityTool) => void
 }): React.JSX.Element {
@@ -277,7 +283,7 @@ function AddTabMenu({
       className="fixed z-80 w-80 rounded-xl border bg-popover p-2 text-popover-foreground shadow-lg"
       style={{ left: position.left, top: position.top }}
     >
-      {utilityToolOrder.map((tool) => {
+      {availableTools.map((tool) => {
         const Icon = utilityToolMeta[tool].icon
         const disabled = tool !== "browser" && tool !== "terminal" && activeTab?.tool === tool
         return (

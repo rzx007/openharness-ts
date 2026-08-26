@@ -40,11 +40,13 @@ const emptyTasks: DesktopSessionTask[] = []
 export function AgentsTool({
   active,
   onOpenFile,
+  canOpenReview,
   onOpenReview,
   onOpenTerminal,
 }: {
   active: boolean
   onOpenFile: (path: string, line?: number) => void
+  canOpenReview: boolean
   onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
@@ -119,6 +121,7 @@ export function AgentsTool({
           error={error}
           onBack={showList}
           onOpenFile={onOpenFile}
+          canOpenReview={canOpenReview}
           onOpenReview={onOpenReview}
           onOpenTerminal={onOpenTerminal}
         />
@@ -234,6 +237,7 @@ function AgentDetails({
   error,
   onBack,
   onOpenFile,
+  canOpenReview,
   onOpenReview,
   onOpenTerminal,
 }: {
@@ -243,6 +247,7 @@ function AgentDetails({
   error: string | null
   onBack: () => void
   onOpenFile: (path: string, line?: number) => void
+  canOpenReview: boolean
   onOpenReview: (path?: string) => void
   onOpenTerminal: (terminalId: string) => void
 }): React.JSX.Element {
@@ -316,6 +321,7 @@ function AgentDetails({
                   }
                   showReasoning={false}
                   onOpenFile={onOpenFile}
+                  canOpenReview={canOpenReview}
                   onOpenReview={onOpenReview}
                   onOpenTerminal={onOpenTerminal}
                 />
