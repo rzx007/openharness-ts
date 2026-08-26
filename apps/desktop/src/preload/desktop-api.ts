@@ -62,6 +62,12 @@ export const desktopAPI = {
     openWith: (input: IpcInvokeMap[typeof IpcChannels.workspaceOpenWith]["args"][0]) =>
       invoke(IpcChannels.workspaceOpenWith, input),
   },
+  git: {
+    changes: (input: IpcInvokeMap[typeof IpcChannels.gitChanges]["args"][0]) =>
+      invoke(IpcChannels.gitChanges, input),
+    fileDiff: (input: IpcInvokeMap[typeof IpcChannels.gitFileDiff]["args"][0]) =>
+      invoke(IpcChannels.gitFileDiff, input),
+  },
   clipboard: {
     readText: () => invoke(IpcChannels.clipboardReadText),
     writeText: (text: string) => invoke(IpcChannels.clipboardWriteText, text),

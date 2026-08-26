@@ -58,6 +58,12 @@ import type {
   UpdateDesktopCustomProviderInput,
   RemoveDesktopCustomProviderInput,
 } from "./provider-types"
+import type {
+  DesktopGitChangesInput,
+  DesktopGitChangesResult,
+  DesktopGitFileDiffInput,
+  DesktopGitFileDiffResult,
+} from "./git-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -119,6 +125,9 @@ export const IpcChannels = {
   workspaceCopyPath: "workspace:copy-path",
   workspaceListOpeners: "workspace:list-openers",
   workspaceOpenWith: "workspace:open-with",
+
+  gitChanges: "git:changes",
+  gitFileDiff: "git:file-diff",
 
   clipboardReadText: "clipboard:read-text",
   clipboardWriteText: "clipboard:write-text",
@@ -330,6 +339,15 @@ export interface IpcInvokeMap {
   [IpcChannels.workspaceOpenWith]: {
     args: [input: WorkspaceOpenWithInput]
     result: void
+  }
+
+  [IpcChannels.gitChanges]: {
+    args: [input: DesktopGitChangesInput]
+    result: DesktopGitChangesResult
+  }
+  [IpcChannels.gitFileDiff]: {
+    args: [input: DesktopGitFileDiffInput]
+    result: DesktopGitFileDiffResult
   }
 
   [IpcChannels.clipboardReadText]: {

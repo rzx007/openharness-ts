@@ -1,5 +1,6 @@
 import type { IpcContribution } from "../core/ipc/types"
 import { clipboardIpcContribution } from "./clipboard/ipc"
+import { gitIpcContribution } from "./git/ipc"
 import { petIpcContribution } from "./pet/ipc"
 import { providerIpcContribution } from "./provider/ipc"
 import { sessionIpcContribution } from "./session/ipc"
@@ -15,6 +16,7 @@ export const allIpcContributions: IpcContribution[] = [
   petIpcContribution,
   providerIpcContribution,
   clipboardIpcContribution,
+  gitIpcContribution,
   sessionIpcContribution,
   scheduleIpcContribution,
   terminalIpcContribution,

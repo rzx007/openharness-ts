@@ -66,6 +66,12 @@ import type {
   UpdateDesktopCustomProviderInput,
   RemoveDesktopCustomProviderInput,
 } from "./provider-types"
+import type {
+  DesktopGitChangesInput,
+  DesktopGitChangesResult,
+  DesktopGitFileDiffInput,
+  DesktopGitFileDiffResult,
+} from "./git-types"
 
 export type DesktopAPI = {
   app: {
@@ -103,6 +109,10 @@ export type DesktopAPI = {
     copyPath: (input: WorkspaceCopyPathInput) => Promise<string>
     listOpeners: () => Promise<WorkspaceOpener[]>
     openWith: (input: WorkspaceOpenWithInput) => Promise<void>
+  }
+  git: {
+    changes: (input: DesktopGitChangesInput) => Promise<DesktopGitChangesResult>
+    fileDiff: (input: DesktopGitFileDiffInput) => Promise<DesktopGitFileDiffResult>
   }
   clipboard: {
     readText: () => Promise<string>
