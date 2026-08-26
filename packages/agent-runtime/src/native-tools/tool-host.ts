@@ -23,6 +23,8 @@ interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: NodeJS.Timeout;
+  cancellationTimer?: NodeJS.Timeout;
+  callerSettled?: boolean;
   removeAbortListener?: () => void;
 }
 
@@ -30,6 +32,7 @@ export interface NativeToolHostOptions {
   registrationTimeoutMs?: number;
   callTimeoutMs?: number;
   shutdownTimeoutMs?: number;
+  cancellationGraceMs?: number;
   onLog?: (event: NativeToolHostLog) => void;
   onCrash?: (error: NativeToolHostError) => void;
 }
@@ -137,18 +140,29 @@ export class NativeToolHost {
     if (signal?.aborted) return Promise.reject(new NativeToolHostError("tool_call_cancelled", "Native Tool call was cancelled"));
     const id = randomUUID();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        child.send({ type: "cancel", id });
-        reject(new NativeToolHostError(method === "callTool" ? "tool_call_timeout" : "tool_protocol_timeout", `${method} timed out after ${timeoutMs} ms`));
-      }, timeoutMs);
-      const pending: PendingRequest = { resolve, reject, timer };
+      const pending: PendingRequest = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          const error = new NativeToolHostError(
+            method === "callTool" ? "tool_call_timeout" : "tool_protocol_timeout",
+            `${method} timed out after ${timeoutMs} ms`,
+          );
+          if (method === "callTool") {
+            this.cancelPendingCall(id, pending, child, error);
+          } else {
+            this.finishPending(id, undefined, error);
+          }
+        }, timeoutMs),
+      };
       if (signal) {
         const onAbort = () => {
-          this.pending.delete(id);
-          clearTimeout(timer);
-          child.send({ type: "cancel", id });
-          reject(new NativeToolHostError("tool_call_cancelled", "Native Tool call was cancelled"));
+          this.cancelPendingCall(
+            id,
+            pending,
+            child,
+            new NativeToolHostError("tool_call_cancelled", "Native Tool call was cancelled"),
+          );
         };
         signal.addEventListener("abort", onAbort, { once: true });
         pending.removeAbortListener = () => signal.removeEventListener("abort", onAbort);
@@ -180,8 +194,39 @@ export class NativeToolHost {
     if (!pending) return;
     this.pending.delete(id);
     clearTimeout(pending.timer);
+    if (pending.cancellationTimer) clearTimeout(pending.cancellationTimer);
     pending.removeAbortListener?.();
+    if (pending.callerSettled) return;
+    pending.callerSettled = true;
     if (error) pending.reject(error); else pending.resolve(value);
+  }
+
+  private cancelPendingCall(
+    id: string,
+    pending: PendingRequest,
+    child: ChildProcess,
+    error: NativeToolHostError,
+  ): void {
+    if (pending.callerSettled) return;
+    pending.callerSettled = true;
+    clearTimeout(pending.timer);
+    pending.removeAbortListener?.();
+    pending.reject(error);
+    try {
+      if (child.connected) child.send({ type: "cancel", id });
+    } catch {
+      // The grace timer below is the authoritative containment boundary.
+    }
+    pending.cancellationTimer = setTimeout(() => {
+      if (this.pending.get(id) !== pending || this.child !== child) return;
+      this.pending.delete(id);
+      child.kill();
+      this.handleCrash(new NativeToolHostError(
+        "tool_host_unresponsive",
+        `Native Tool Host did not stop call ${id} within the cancellation grace period`,
+        { cause: error },
+      ));
+    }, this.options.cancellationGraceMs ?? 250);
   }
 
   private handleCrash(error: NativeToolHostError): void {
@@ -196,8 +241,12 @@ export class NativeToolHost {
     for (const [id, pending] of this.pending) {
       this.pending.delete(id);
       clearTimeout(pending.timer);
+      if (pending.cancellationTimer) clearTimeout(pending.cancellationTimer);
       pending.removeAbortListener?.();
-      pending.reject(error);
+      if (!pending.callerSettled) {
+        pending.callerSettled = true;
+        pending.reject(error);
+      }
     }
   }
 }

@@ -122,6 +122,36 @@ describe("NativeToolHost", () => {
     await cleanups[0]!();
   });
 
+  it("kills an unresponsive host and unregisters its tools after the cancellation grace period", async () => {
+    const plugin = await loadPlugin(writePlugin(`
+      export async function registerTools() {
+        return [{
+          name: "PluginBlocked", description: "blocks synchronously", inputSchema: {},
+          invoke() {
+            const until = Date.now() + 5000;
+            while (Date.now() < until) {}
+            return { content: [] };
+          }
+        }];
+      }
+    `, "dev.openharness.blocked-tool"));
+    const registry = new TestRegistry();
+    const activation = await activateNativePluginTools(plugin, {
+      cwd: plugin.root,
+      toolRegistry: registry,
+      callTimeoutMs: 25,
+      cancellationGraceMs: 25,
+      addCleanup: () => undefined,
+    });
+
+    await expect(registry.get("PluginBlocked")!.execute({}, { cwd: plugin.root }))
+      .rejects.toMatchObject({ code: "tool_call_timeout" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(activation.host?.state).toBe("error");
+    expect(registry.getAll()).toEqual([]);
+  });
+
   it("removes every registered tool when its host process crashes", async () => {
     const plugin = await loadPlugin(writePlugin(`
       export async function registerTools() {

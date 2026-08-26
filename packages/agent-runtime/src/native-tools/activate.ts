@@ -19,6 +19,7 @@ export async function activateNativePluginTools(
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
     onLog?: (message: string) => void;
     callTimeoutMs?: number;
+    cancellationGraceMs?: number;
   },
 ): Promise<NativeToolActivationResult> {
   if (!plugin.components.tools?.value?.length) {
@@ -31,6 +32,7 @@ export async function activateNativePluginTools(
   };
   const host = new NativeToolHost(plugin, {
     callTimeoutMs: context.callTimeoutMs,
+    cancellationGraceMs: context.cancellationGraceMs,
     onLog: (event) => context.onLog?.(`[native-tool:${event.level}] ${event.message}`),
     onCrash: (error) => {
       unregisterAll();
