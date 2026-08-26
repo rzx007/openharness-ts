@@ -13,6 +13,11 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import { Composer } from "./composer"
+import {
+  skillCommandInvocationLine,
+  toComposerSkillCommands,
+  type ComposerSkillCommand,
+} from "./composer-skill-commands"
 import { HeaderIconButton } from "./controls"
 import { NewConversationStart } from "./new-conversation-start"
 import { PermissionCard } from "./message-block"
@@ -33,6 +38,10 @@ function ConversationPane({
   onOpenAgents,
 }: ConversationPaneProps): React.JSX.Element {
   const [draft, setDraft] = useState("")
+  const [skillCommandSnapshot, setSkillCommandSnapshot] = useState<{
+    cwd: string
+    commands: ComposerSkillCommand[]
+  } | null>(null)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
   const openingSession = useDesktopSessionStore((state) => state.openingSession)
@@ -74,9 +83,10 @@ function ConversationPane({
   const submitDraft = async (): Promise<void> => {
     const content = draft.trim()
     if (!content || sending || archived) return
+    const commandLine = skillCommandInvocationLine(content, skillCommands) ?? undefined
     try {
-      if (hasSession) await sendMessage(content)
-      else await startSession(content)
+      if (hasSession) await sendMessage(content, { commandLine })
+      else await startSession(content, { commandLine })
       setDraft("")
     } catch {
       // The store keeps the error and the draft stays available for retry.
@@ -95,6 +105,9 @@ function ConversationPane({
   const hasAgentTasks = Boolean(
     sessionView?.tasks.some((task) => task.type === "agent" && task.childSessionId)
   )
+  const commandCwd = hasSession ? sessionView?.session.cwd : selectedProject?.path
+  const skillCommands =
+    commandCwd && skillCommandSnapshot?.cwd === commandCwd ? skillCommandSnapshot.commands : []
 
   const copyAssistantMessage = async (content: string): Promise<void> => {
     await window.desktop.clipboard.writeText(content)
@@ -126,6 +139,27 @@ function ConversationPane({
     window.addEventListener("desktop:add-to-composer", handleAddToComposer)
     return () => window.removeEventListener("desktop:add-to-composer", handleAddToComposer)
   }, [])
+
+  useEffect(() => {
+    if (!commandCwd || loadStatus !== "ready") {
+      return
+    }
+
+    let cancelled = false
+    void window.desktop.sessions
+      .listCommands(commandCwd)
+      .then((commands) => {
+        if (!cancelled)
+          setSkillCommandSnapshot({ cwd: commandCwd, commands: toComposerSkillCommands(commands) })
+      })
+      .catch(() => {
+        if (!cancelled) setSkillCommandSnapshot({ cwd: commandCwd, commands: [] })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [commandCwd, loadStatus])
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col overflow-x-hidden bg-conversation">
@@ -195,6 +229,7 @@ function ConversationPane({
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
           selectedPermissionMode={selectedPermissionMode}
+          skillCommands={skillCommands}
           panelOpen={panelOpen}
           onDraftChange={setDraft}
           onSubmit={() => void submitDraft()}
@@ -279,6 +314,7 @@ function ConversationPane({
               selectedProvider={selectedProvider}
               modelLabel={modelLabel}
               permissionMode={selectedPermissionMode}
+              skillCommands={skillCommands}
               canSubmit={Boolean(draft.trim())}
               onDraftChange={setDraft}
               onSubmit={() => void submitDraft()}

@@ -158,6 +158,21 @@ export interface DesktopProjectDetails {
   branches: string[]
 }
 
+export type DesktopCommandKind = "session" | "template"
+export type DesktopCommandSource = "builtin" | "skill" | "plugin" | "project"
+
+export interface DesktopCommandCatalogEntry {
+  name: string
+  description?: string
+  kind: DesktopCommandKind
+  source?: DesktopCommandSource
+  argumentHint?: string
+}
+
+export interface ListDesktopCommandsInput {
+  cwd: string
+}
+
 export type DesktopSessionSyncStatus = "connected" | "reconnecting"
 
 export interface DesktopSessionView {
@@ -198,6 +213,11 @@ export type CreateDesktopSessionInput = CreateDesktopSessionBaseInput &
 export interface SendDesktopPromptInput {
   sessionId: string
   content: string
+}
+
+export interface InvokeDesktopCommandInput {
+  sessionId: string
+  line: string
 }
 
 export interface EditLatestDesktopPromptInput {

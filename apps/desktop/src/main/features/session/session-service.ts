@@ -45,6 +45,7 @@ import type {
   DesktopSessionView,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
+  InvokeDesktopCommandInput,
   OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
@@ -183,6 +184,11 @@ class DesktopSessionService {
     }
 
     return { project, git, branch, branches }
+  }
+
+  async listCommands(cwdInput: string) {
+    const cwd = resolveRequiredPath(cwdInput)
+    return await (await this.getClient()).listCommands({ cwd })
   }
 
   async checkoutProjectBranch(
@@ -368,6 +374,13 @@ class DesktopSessionService {
     const content = requireString(input.content, "消息内容")
     const client = await this.getClient()
     await client.admitPrompt(sessionId, { content, delivery: "queue" })
+  }
+
+  async invokeCommand(input: InvokeDesktopCommandInput): Promise<void> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const line = requireString(input.line, "命令内容")
+    const client = await this.getClient()
+    await client.invokeCommand(sessionId, { line })
   }
 
   async editLatestPrompt(input: EditLatestDesktopPromptInput): Promise<void> {

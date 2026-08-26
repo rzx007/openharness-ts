@@ -8,7 +8,10 @@ import { PlusMenu } from "@renderer/components/ui/plus-menu"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
 import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
+import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { ModelPicker } from "./model-picker"
+import { RichPromptInput } from "./rich-prompt-input"
+import { SkillCommandMenu } from "./skill-command-menu"
 import { resolvePermissionModeLabel } from "./utils"
 
 export function Composer({
@@ -21,6 +24,7 @@ export function Composer({
   selectedProvider,
   modelLabel,
   permissionMode,
+  skillCommands = [],
   className,
   textareaClassName,
   rows = 2,
@@ -40,6 +44,7 @@ export function Composer({
   selectedProvider: string | null
   modelLabel: string
   permissionMode: DesktopPermissionMode
+  skillCommands?: ComposerSkillCommand[]
   className?: string
   textareaClassName?: string
   rows?: number
@@ -63,7 +68,7 @@ export function Composer({
   return (
     <form
       className={cn(
-        "min-w-0 overflow-visible rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12",
+        "relative min-w-0 overflow-visible rounded-2xl bg-background shadow-composer ring-1 ring-black/7 dark:bg-card dark:ring-white/12",
         className
       )}
       onSubmit={(event) => {
@@ -74,23 +79,18 @@ export function Composer({
       <label htmlFor={id} className="sr-only">
         输入对话内容
       </label>
-      <textarea
+      <RichPromptInput
         id={id}
         value={draft}
-        rows={rows}
         placeholder="随心输入"
-        onChange={(event) => onDraftChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault()
-            submit()
-          }
-        }}
-        className={cn(
-          "block max-h-44 min-h-18 w-full resize-none bg-transparent px-4 pt-3 text-[13px] leading-6 text-foreground outline-none placeholder:text-placeholder/65",
-          textareaClassName
-        )}
+        rows={rows}
+        disabled={sending}
+        skillCommands={skillCommands}
+        className={textareaClassName}
+        onChange={onDraftChange}
+        onSubmit={submit}
       />
+      <SkillCommandMenu draft={draft} commands={skillCommands} onSelect={onDraftChange} />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
         <PlusMenu
           items={[

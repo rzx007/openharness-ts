@@ -5,11 +5,13 @@ import type {
   DesktopBootstrapData,
   DesktopDaemonStatus,
   DesktopProjectDetails,
+  DesktopCommandCatalogEntry,
   DesktopSessionRecord,
   DesktopSessionView,
   CloseDesktopAuxSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
+  InvokeDesktopCommandInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
@@ -98,6 +100,7 @@ export const IpcChannels = {
   sessionDaemonStatus: "session:daemon-status",
   sessionChooseProject: "session:choose-project",
   sessionInspectProject: "session:inspect-project",
+  sessionListCommands: "session:list-commands",
   projectRename: "project:rename",
   projectSetPinned: "project:set-pinned",
   projectSetDefaultShell: "project:set-default-shell",
@@ -112,6 +115,7 @@ export const IpcChannels = {
   sessionFork: "session:fork",
   sessionClose: "session:close",
   sessionSendPrompt: "session:send-prompt",
+  sessionInvokeCommand: "session:invoke-command",
   sessionEditLatestPrompt: "session:edit-latest-prompt",
   sessionInterrupt: "session:interrupt",
   sessionReplyPermission: "session:reply-permission",
@@ -245,6 +249,10 @@ export interface IpcInvokeMap {
     args: [path: string]
     result: DesktopProjectDetails
   }
+  [IpcChannels.sessionListCommands]: {
+    args: [cwd: string]
+    result: DesktopCommandCatalogEntry[]
+  }
   [IpcChannels.projectRename]: {
     args: [input: RenameDesktopProjectInput]
     result: DesktopProjectDetails["project"]
@@ -286,6 +294,7 @@ export interface IpcInvokeMap {
   }
   [IpcChannels.sessionClose]: { args: []; result: void }
   [IpcChannels.sessionSendPrompt]: { args: [input: SendDesktopPromptInput]; result: void }
+  [IpcChannels.sessionInvokeCommand]: { args: [input: InvokeDesktopCommandInput]; result: void }
   [IpcChannels.sessionEditLatestPrompt]: {
     args: [input: EditLatestDesktopPromptInput]
     result: void

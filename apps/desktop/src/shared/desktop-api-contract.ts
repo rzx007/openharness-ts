@@ -10,6 +10,7 @@ import type {
   CreateDesktopProjectBranchInput,
   DesktopBootstrapData,
   DesktopAuxSessionUpdate,
+  DesktopCommandCatalogEntry,
   DesktopDaemonStatus,
   DesktopProjectDetails,
   DesktopSessionRecord,
@@ -17,6 +18,7 @@ import type {
   CloseDesktopAuxSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
+  InvokeDesktopCommandInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
@@ -164,6 +166,7 @@ export type DesktopAPI = {
     daemonStatus: () => Promise<DesktopDaemonStatus>
     chooseProject: () => Promise<DesktopProjectDetails | null>
     inspectProject: (path: string) => Promise<DesktopProjectDetails>
+    listCommands: (cwd: string) => Promise<DesktopCommandCatalogEntry[]>
     renameProject: (input: RenameDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectPinned: (input: PinDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectDefaultShell: (
@@ -180,6 +183,7 @@ export type DesktopAPI = {
     fork: (input: ForkDesktopSessionInput) => Promise<DesktopSessionRecord>
     close: () => Promise<void>
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
+    invokeCommand: (input: InvokeDesktopCommandInput) => Promise<void>
     editLatestPrompt: (input: EditLatestDesktopPromptInput) => Promise<void>
     interrupt: (sessionId: string) => Promise<void>
     replyPermission: (input: ReplyDesktopPermissionInput) => Promise<void>

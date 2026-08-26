@@ -1,4 +1,14 @@
-import { AlertCircle, Check, Copy, GitBranchPlus, PencilLine, ShieldCheck, X } from "lucide-react"
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  GitBranchPlus,
+  PencilLine,
+  ShieldCheck,
+  X,
+} from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { messageTextContent } from "./message-content"
@@ -12,6 +22,9 @@ import type {
   DesktopSessionMessage,
   DesktopSessionPart,
 } from "@shared/session-types"
+
+const collapsibleUserMessageChars = 900
+const collapsibleUserMessageLines = 14
 
 export function RunErrorNotice({ error }: { error?: string }): React.JSX.Element {
   const detail = error?.trim() || "运行失败，但服务端没有返回具体原因。"
@@ -167,9 +180,7 @@ function UserMessageBlock({
   return (
     <Message align="end" className="group/msg">
       <MessageContent className="items-end">
-        <div className="max-w-[78%] rounded-xl bg-input/80 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-sidebar-foreground">
-          {content || "已发送消息"}
-        </div>
+        <UserMessageBubble content={content} />
         <MessageToolbar align="end" timestamp={timestamp}>
           {canEdit ? (
             <MessageActionButton label="重新编辑" onClick={() => setEditing(true)}>
@@ -179,6 +190,40 @@ function UserMessageBlock({
         </MessageToolbar>
       </MessageContent>
     </Message>
+  )
+}
+
+function UserMessageBubble({ content }: { content: string }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const longEnough =
+    content.length > collapsibleUserMessageChars ||
+    content.split("\n").length > collapsibleUserMessageLines
+  const collapsed = longEnough && !expanded
+
+  return (
+    <div className="max-w-[78%] overflow-hidden rounded-xl bg-input/80 text-[13px] leading-6 text-sidebar-foreground">
+      <div className="relative">
+        <div
+          className={cn("px-4 py-3 whitespace-pre-wrap", collapsed && "max-h-72 overflow-hidden")}
+        >
+          {content || "已发送消息"}
+        </div>
+        {collapsed ? (
+          <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-16 bg-linear-to-b from-input/0 to-input/95" />
+        ) : null}
+      </div>
+      {longEnough ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+          className="flex h-9 w-full items-center justify-start gap-1 border-t border-border/40 px-4 text-xs font-medium text-muted-foreground transition-colors hover:bg-background/35 hover:text-foreground"
+        >
+          <span>{expanded ? "收起" : "显示更多"}</span>
+          {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </button>
+      ) : null}
+    </div>
   )
 }
 

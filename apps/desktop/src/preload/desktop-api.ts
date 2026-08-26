@@ -149,6 +149,7 @@ export const desktopAPI = {
     daemonStatus: () => invoke(IpcChannels.sessionDaemonStatus),
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),
     inspectProject: (path: string) => invoke(IpcChannels.sessionInspectProject, path),
+    listCommands: (cwd: string) => invoke(IpcChannels.sessionListCommands, cwd),
     renameProject: (input: IpcInvokeMap[typeof IpcChannels.projectRename]["args"][0]) =>
       invoke(IpcChannels.projectRename, input),
     setProjectPinned: (input: IpcInvokeMap[typeof IpcChannels.projectSetPinned]["args"][0]) =>
@@ -174,6 +175,8 @@ export const desktopAPI = {
     close: () => invoke(IpcChannels.sessionClose),
     sendPrompt: (input: IpcInvokeMap[typeof IpcChannels.sessionSendPrompt]["args"][0]) =>
       invoke(IpcChannels.sessionSendPrompt, input),
+    invokeCommand: (input: IpcInvokeMap[typeof IpcChannels.sessionInvokeCommand]["args"][0]) =>
+      invoke(IpcChannels.sessionInvokeCommand, input),
     editLatestPrompt: (
       input: IpcInvokeMap[typeof IpcChannels.sessionEditLatestPrompt]["args"][0]
     ) => invoke(IpcChannels.sessionEditLatestPrompt, input),

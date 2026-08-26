@@ -15,6 +15,7 @@ import type {
   DesktopWorkspaceMode,
 } from "@shared/session-types"
 import { Composer } from "./composer"
+import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
 import type { LoadStatus, StartPicker } from "./types"
 import { resolveModelLabel } from "./utils"
@@ -34,6 +35,7 @@ export function NewConversationStart({
   selectedModel,
   selectedProvider,
   selectedPermissionMode,
+  skillCommands,
   panelOpen,
   onDraftChange,
   onSubmit,
@@ -60,6 +62,7 @@ export function NewConversationStart({
   selectedModel: string | null
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
+  skillCommands: ComposerSkillCommand[]
   panelOpen: boolean
   onDraftChange: (value: string) => void
   onSubmit: () => void
@@ -369,6 +372,7 @@ export function NewConversationStart({
             selectedProvider={selectedProvider}
             modelLabel={modelLabel}
             permissionMode={selectedPermissionMode}
+            skillCommands={skillCommands}
             canSubmit={Boolean(
               draft.trim() && (selectedProject || workspaceMode === "outside_project")
             )}

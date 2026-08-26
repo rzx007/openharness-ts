@@ -6,6 +6,7 @@ import type {
   CreateDesktopSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
+  InvokeDesktopCommandInput,
   OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
@@ -41,6 +42,10 @@ export const sessionIpcContribution: IpcContribution = {
       {
         channel: IpcChannels.sessionInspectProject,
         handler: (_event, path) => desktopSessionService.inspectProject(String(path ?? "")),
+      },
+      {
+        channel: IpcChannels.sessionListCommands,
+        handler: (_event, cwd) => desktopSessionService.listCommands(String(cwd ?? "")),
       },
       {
         channel: IpcChannels.projectRename,
@@ -112,6 +117,11 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionSendPrompt,
         handler: (_event, input) =>
           desktopSessionService.sendPrompt(input as SendDesktopPromptInput),
+      },
+      {
+        channel: IpcChannels.sessionInvokeCommand,
+        handler: (_event, input) =>
+          desktopSessionService.invokeCommand(input as InvokeDesktopCommandInput),
       },
       {
         channel: IpcChannels.sessionEditLatestPrompt,

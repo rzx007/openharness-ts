@@ -16,6 +16,10 @@ type LoadStatus = "idle" | "loading" | "ready" | "error"
 
 const persistedActiveSessionKey = "openharness.desktop.active-session.v1"
 
+interface SubmitPromptOptions {
+  commandLine?: string
+}
+
 const initialDaemonStatus: DesktopDaemonStatus = {
   phase: "idle",
   message: "等待连接 daemon",
@@ -77,8 +81,8 @@ interface DesktopSessionState {
   togglePinSession: (sessionId: string) => Promise<void>
   archiveSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
-  startSession: (content: string) => Promise<void>
-  sendMessage: (content: string) => Promise<void>
+  startSession: (content: string, options?: SubmitPromptOptions) => Promise<void>
+  sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
   editLatestMessage: (content: string) => Promise<void>
   interrupt: () => Promise<void>
   replyPermission: (
@@ -727,7 +731,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     }
   },
 
-  async startSession(content) {
+  async startSession(content, options) {
     const prompt = content.trim()
     const {
       selectedProject,
@@ -781,7 +785,14 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         selectedProvider: sessionProvider(view.session, provider),
         selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
       }))
-      await window.desktop.sessions.sendPrompt({ sessionId: session.id, content: prompt })
+      if (options?.commandLine) {
+        await window.desktop.sessions.invokeCommand({
+          sessionId: session.id,
+          line: options.commandLine,
+        })
+      } else {
+        await window.desktop.sessions.sendPrompt({ sessionId: session.id, content: prompt })
+      }
       const title = formatSessionTitle(prompt)
       set((state) => {
         const titledSession = { ...session, title, updatedAt: Date.now() }
@@ -804,13 +815,17 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     }
   },
 
-  async sendMessage(content) {
+  async sendMessage(content, options) {
     const prompt = content.trim()
     const sessionId = get().activeSessionId
     if (!prompt || !sessionId || get().sending) return
     set({ sending: true, error: null })
     try {
-      await window.desktop.sessions.sendPrompt({ sessionId, content: prompt })
+      if (options?.commandLine) {
+        await window.desktop.sessions.invokeCommand({ sessionId, line: options.commandLine })
+      } else {
+        await window.desktop.sessions.sendPrompt({ sessionId, content: prompt })
+      }
     } catch (error) {
       set({ error: errorMessage(error) })
       throw error
