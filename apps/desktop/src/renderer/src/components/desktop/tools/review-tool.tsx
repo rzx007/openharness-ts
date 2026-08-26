@@ -113,7 +113,9 @@ export function ReviewTool({
         scope: gitScopeForRange(reviewRange),
       })
       const visibleResult =
-        reviewRange === "last-turn" ? filterChangesByPaths(result, lastTurnFilePaths) : result
+        reviewRange === "last-turn"
+          ? filterChangesByPaths(result, lastTurnFilePaths, selectedProjectPath)
+          : result
       setChanges(visibleResult)
       setActivePath((current) =>
         current && visibleResult.files.some((file) => file.path === current)
@@ -612,14 +614,23 @@ function gitScopeForRange(value: ReviewRange): DesktopGitDiffScope {
 
 function filterChangesByPaths(
   changes: DesktopGitChangesResult,
-  paths: readonly string[]
+  paths: readonly string[],
+  projectPath: string | undefined
 ): DesktopGitChangesResult {
   if (paths.length === 0) {
     return { ...changes, files: [], totalAdditions: 0, totalDeletions: 0 }
   }
 
-  const pathSet = new Set(paths.map(normalizeReviewPath))
-  const files = changes.files.filter((file) => pathSet.has(normalizeReviewPath(file.path)))
+  const pathSet = new Set(
+    paths
+      .map((path) => toProjectRelativePath(path, projectPath))
+      .filter((path): path is string => Boolean(path))
+      .map(normalizeReviewPath)
+  )
+  const files = changes.files.filter((file) => {
+    if (pathSet.has(normalizeReviewPath(file.path))) return true
+    return file.oldPath ? pathSet.has(normalizeReviewPath(file.oldPath)) : false
+  })
   return {
     ...changes,
     files,
