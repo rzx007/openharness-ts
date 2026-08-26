@@ -1,7 +1,13 @@
-import { Bot, RefreshCw, Search } from "lucide-react"
+import { Bot, ChevronDown, PenLine, RefreshCw, Search } from "lucide-react"
 
 import { Button } from "@renderer/components/ui/button"
 import { Input } from "@renderer/components/ui/input"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@renderer/components/ui/dropdown-menu"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopScheduledStatus } from "@shared/schedule-types"
 import { scheduledFilters, type ScheduledFilter } from "./types"
@@ -16,6 +22,7 @@ export function ScheduledHeader({
   onFilterChange,
   onSearchChange,
   onRefresh,
+  onCreateManual,
   onStartConversation,
   loading,
 }: {
@@ -27,6 +34,7 @@ export function ScheduledHeader({
   onFilterChange: (value: ScheduledFilter) => void
   onSearchChange: (value: string) => void
   onRefresh: () => Promise<void>
+  onCreateManual: () => void
   onStartConversation: () => void
   loading: boolean
 }): React.JSX.Element {
@@ -69,14 +77,25 @@ export function ScheduledHeader({
           >
             <RefreshCw className={cn("size-4", loading && "animate-spin")} />
           </Button>
-          <Button
-            size="sm"
-            onClick={onStartConversation}
-            className="h-8 rounded-full bg-foreground px-3 text-[12px] font-medium text-background hover:bg-foreground/92"
-          >
-            <Bot className="size-3.5" />
-            在对话中安排
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button size="sm" />}
+              className="h-8 rounded-full bg-foreground px-3 text-[12px] font-medium text-background hover:bg-foreground/92"
+            >
+              创建
+              <ChevronDown className="size-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
+              <DropdownMenuItem onClick={onCreateManual}>
+                <PenLine />
+                手动创建
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onStartConversation}>
+                <Bot />
+                在对话中安排
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

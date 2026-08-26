@@ -50,6 +50,7 @@ import type {
   DesktopTerminalWriteInput,
 } from "./terminal-types"
 import type {
+  CreateDesktopScheduledTaskInput,
   DesktopScheduledRun,
   DesktopScheduledStatus,
   DesktopScheduledTask,
@@ -119,6 +120,7 @@ export type DesktopAPI = {
   schedules: {
     status: () => Promise<DesktopScheduledStatus>
     list: () => Promise<DesktopScheduledTask[]>
+    create: (input: CreateDesktopScheduledTaskInput) => Promise<DesktopScheduledTask>
     update: (id: string, input: UpdateDesktopScheduledTaskInput) => Promise<DesktopScheduledTask>
     remove: (id: string) => Promise<void>
     runNow: (id: string) => Promise<DesktopScheduledRun>

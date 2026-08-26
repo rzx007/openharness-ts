@@ -1,5 +1,6 @@
 import type { OpenHarnessClient } from "@openharness/client"
 import type {
+  CreateDesktopScheduledTaskInput,
   DesktopScheduledRun,
   DesktopScheduledStatus,
   DesktopScheduledTask,
@@ -16,6 +17,10 @@ class DesktopScheduleService {
 
   list(): Promise<DesktopScheduledTask[]> {
     return withDaemonRetry((client) => client.listScheduledTasks())
+  }
+
+  create(input: CreateDesktopScheduledTaskInput): Promise<DesktopScheduledTask> {
+    return withDaemonRetry((client) => client.createScheduledTask(input))
   }
 
   update(id: string, input: UpdateDesktopScheduledTaskInput): Promise<DesktopScheduledTask> {

@@ -1,5 +1,6 @@
 import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
+  CreateDesktopScheduledTaskInput,
   ListDesktopScheduledRunsInput,
   UpdateDesktopScheduledTaskInput,
 } from "../../../shared/schedule-types"
@@ -12,6 +13,11 @@ export const scheduleIpcContribution: IpcContribution = {
     return [
       { channel: IpcChannels.scheduleStatus, handler: () => desktopScheduleService.status() },
       { channel: IpcChannels.scheduleList, handler: () => desktopScheduleService.list() },
+      {
+        channel: IpcChannels.scheduleCreate,
+        handler: (_event, input) =>
+          desktopScheduleService.create(input as CreateDesktopScheduledTaskInput),
+      },
       {
         channel: IpcChannels.scheduleUpdate,
         handler: (_event, id, input) =>

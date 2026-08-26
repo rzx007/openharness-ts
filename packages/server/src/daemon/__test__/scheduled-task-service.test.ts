@@ -96,6 +96,18 @@ describe("ScheduledTaskService", () => {
     ).toThrow(/standalone destination/);
     expect(() =>
       service.createTask({
+        name: "invalid-outside-worktree",
+        prompt: "Review without a project.",
+        recurrence: "2099-01-01T00:00:00Z",
+        recurrenceFormat: "once",
+        timezone: "UTC",
+        destination: "standalone",
+        projectPaths: [],
+        executionMode: "worktree",
+      }),
+    ).toThrow(/at least one project path/);
+    expect(() =>
+      service.createTask({
         name: "invalid-chat-policy",
         prompt: "Review without writes.",
         recurrence: "2099-01-01T00:00:00Z",
@@ -106,6 +118,32 @@ describe("ScheduledTaskService", () => {
         permissionProfile: { mode: "read_only" },
       }),
     ).toThrow(/inherit their conversation runtime/);
+  });
+
+  it("accepts standalone tasks without a project for outside-project runs", () => {
+    const { service } = createHarness();
+    const task = service.createTask({
+      name: "outside-project-briefing",
+      prompt: "Summarize today's general priorities.",
+      recurrence: "RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+      recurrenceFormat: "rrule",
+      timezone: "Asia/Shanghai",
+      destination: "standalone",
+      projectPaths: [],
+      executionMode: "local",
+      model: "gpt-test",
+    });
+
+    expect(task).toMatchObject({ destination: "standalone", projectPaths: [] });
+    expect(() =>
+      service.updateTask(task.id, {
+        destination: "chat",
+        sessionId: "chat-1",
+        model: "",
+        effort: "",
+        permissionProfile: { mode: "workspace_write" },
+      }),
+    ).not.toThrow();
   });
 
   it("runs one missed occurrence after daemon recovery when requested", async () => {

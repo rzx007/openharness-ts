@@ -95,6 +95,8 @@ export const desktopAPI = {
   schedules: {
     status: () => invoke(IpcChannels.scheduleStatus),
     list: () => invoke(IpcChannels.scheduleList),
+    create: (input: IpcInvokeMap[typeof IpcChannels.scheduleCreate]["args"][0]) =>
+      invoke(IpcChannels.scheduleCreate, input),
     update: (id: string, input: IpcInvokeMap[typeof IpcChannels.scheduleUpdate]["args"][1]) =>
       invoke(IpcChannels.scheduleUpdate, id, input),
     remove: (id: string) => invoke(IpcChannels.scheduleRemove, id),

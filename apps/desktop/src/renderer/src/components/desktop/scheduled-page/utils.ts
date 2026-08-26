@@ -56,7 +56,7 @@ export function formatNextRunLabel(value: number): string {
 
 export function projectLabel(task: DesktopScheduledTask): string {
   const path = task.projectPaths[0]
-  return path?.split(/[\\/]/).filter(Boolean).at(-1) ?? "关联项目"
+  return path?.split(/[\\/]/).filter(Boolean).at(-1) ?? "不在项目中工作"
 }
 
 export function formatRunAge(createdAt: number): string {

@@ -20,6 +20,7 @@ export function DetailPanel({
   busy,
   onBack,
   onRunNow,
+  onEdit,
   onToggle,
   onDelete,
 }: {
@@ -28,6 +29,7 @@ export function DetailPanel({
   busy: string | null
   onBack: () => void
   onRunNow: () => void
+  onEdit: () => void
   onToggle: () => void
   onDelete: () => void
 }): React.JSX.Element {
@@ -42,6 +44,7 @@ export function DetailPanel({
             task={task}
             busy={busy !== null}
             onRunNow={onRunNow}
+            onEdit={onEdit}
             onToggle={onToggle}
             onDelete={onDelete}
           />
@@ -95,7 +98,15 @@ export function DetailPanel({
             label: "运行于",
             value: task.destination === "chat" ? "现有聊天" : "每次独立对话",
           },
-          { label: "聊天", value: task.name },
+          {
+            label: task.destination === "chat" ? "聊天" : "工作位置",
+            value:
+              task.destination === "chat"
+                ? task.name
+                : task.projectPaths[0]
+                  ? projectLabel(task)
+                  : "不在项目中工作",
+          },
         ]}
       />
 

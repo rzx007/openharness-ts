@@ -12,11 +12,21 @@ import {
 
 export type OpenHarnessDaemonOptions = Pick<
   OpenHarnessServerOptions,
-  "allowedOrigins" | "host" | "logger" | "port" | "store" | "storePath" | "token" | "version"
+  | "allowedOrigins"
+  | "host"
+  | "logger"
+  | "outsideProjectWorkspaceRoot"
+  | "port"
+  | "store"
+  | "storePath"
+  | "token"
+  | "version"
 >;
 
 /** Starts the opinionated daemon application with all standard resource services installed. */
-export async function startOpenHarnessDaemon(options: OpenHarnessDaemonOptions = {}) {
+export async function startOpenHarnessDaemon(
+  options: OpenHarnessDaemonOptions = {},
+) {
   const settingsRef: DaemonSettingsRef = {
     current: await loadSettings({}),
     async reload() {
@@ -27,10 +37,11 @@ export async function startOpenHarnessDaemon(options: OpenHarnessDaemonOptions =
     ...options,
     settings: settingsRef.current,
     getSettings: () => settingsRef.current,
-    getSettingsForCwd: async (cwd) => await loadSettings(undefined, {
-      includeProject: true,
-      projectRoot: cwd,
-    }),
+    getSettingsForCwd: async (cwd) =>
+      await loadSettings(undefined, {
+        includeProject: true,
+        projectRoot: cwd,
+      }),
     services: {
       commandCatalog: createDefaultCommandCatalog(() => settingsRef.current),
       ...createDefaultApplicationServices(settingsRef),

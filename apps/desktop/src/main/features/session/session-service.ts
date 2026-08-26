@@ -60,6 +60,7 @@ import type {
 } from "../../../shared/session-types"
 import {
   allocateOutsideProjectWorkspace,
+  buildOutsideProjectRoot,
   isOutsideProjectWorkspacePath,
   removeEmptyOutsideProjectWorkspace,
 } from "./outside-project-workspace"
@@ -600,6 +601,7 @@ class DesktopSessionService {
         port: 0,
         token,
         version: app.getVersion(),
+        outsideProjectWorkspaceRoot: buildOutsideProjectRoot(app.getPath("documents")),
       })
       this.embeddedServer = server
       this.embeddedUrl = listen.url

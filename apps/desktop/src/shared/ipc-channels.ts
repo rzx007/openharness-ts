@@ -42,6 +42,7 @@ import type {
   DesktopTerminalWriteInput,
 } from "./terminal-types"
 import type {
+  CreateDesktopScheduledTaskInput,
   DesktopScheduledRun,
   DesktopScheduledStatus,
   DesktopScheduledTask,
@@ -131,6 +132,7 @@ export const IpcChannels = {
 
   scheduleStatus: "schedule:status",
   scheduleList: "schedule:list",
+  scheduleCreate: "schedule:create",
   scheduleUpdate: "schedule:update",
   scheduleRemove: "schedule:remove",
   scheduleRunNow: "schedule:run-now",
@@ -365,6 +367,10 @@ export interface IpcInvokeMap {
   }
   [IpcChannels.scheduleStatus]: { args: []; result: DesktopScheduledStatus }
   [IpcChannels.scheduleList]: { args: []; result: DesktopScheduledTask[] }
+  [IpcChannels.scheduleCreate]: {
+    args: [input: CreateDesktopScheduledTaskInput]
+    result: DesktopScheduledTask
+  }
   [IpcChannels.scheduleUpdate]: {
     args: [id: string, input: UpdateDesktopScheduledTaskInput]
     result: DesktopScheduledTask

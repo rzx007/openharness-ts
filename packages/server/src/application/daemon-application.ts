@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, rmdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import type { Settings } from "@openharness/core";
 import {
@@ -68,6 +71,8 @@ export interface DaemonApplicationOptions {
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
+  /** Root used for scheduled conversations that intentionally run outside a project. */
+  outsideProjectWorkspaceRoot?: string;
   createAgent?: CreateDaemonAgent;
   createTerminalHost?(session: SessionRecord): AgentTerminalHost;
   createJobHost?(session: SessionRecord): AgentJobHost;
@@ -345,7 +350,14 @@ export class DaemonApplication implements DurableAgentApplication {
         // 定时任务不是另一套执行器：到期后也是 admitPrompt，走上面同一条 Agent 车道。
         execute: async (task, scheduledRun) => {
           const projectCwd = task.projectPaths[0];
-          let executionCwd = projectCwd;
+          const outsideProject =
+            task.destination === "standalone" && !projectCwd;
+          let executionCwd = outsideProject
+            ? await allocateScheduledOutsideProjectWorkspace(
+                options.outsideProjectWorkspaceRoot,
+                scheduledRun.id,
+              )
+            : projectCwd;
           let worktree:
             | {
                 manager: ReturnType<typeof createChildAgentWorktreeManager>;
@@ -423,6 +435,9 @@ export class DaemonApplication implements DurableAgentApplication {
                 title: `${task.name} · scheduled run`,
                 model,
                 metadata: {
+                  ...(outsideProject
+                    ? { desktop: { workspaceMode: "outside_project" } }
+                    : {}),
                   runtime: {
                     model,
                     permissionMode,
@@ -486,6 +501,9 @@ export class DaemonApplication implements DurableAgentApplication {
               summary: result.output.slice(0, 20_000),
             };
           } finally {
+            if (outsideProject && !session && executionCwd) {
+              await rmdir(executionCwd).catch(() => {});
+            }
             if (worktree?.created) {
               const hasChanges = await worktree.manager
                 .hasChanges(worktree.slug)
@@ -620,6 +638,22 @@ export class DaemonApplication implements DurableAgentApplication {
       this.options.store.updateRun(runId, { metadata: { traceId: generated } });
     return generated;
   }
+}
+
+async function allocateScheduledOutsideProjectWorkspace(
+  configuredRoot: string | undefined,
+  runId: string,
+): Promise<string> {
+  const root = configuredRoot ?? join(homedir(), "Documents", "OpenHarness");
+  const now = new Date();
+  const day = [
+    String(now.getFullYear()).padStart(4, "0"),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  const workspace = join(root, day, `scheduled-${runId}`);
+  await mkdir(workspace, { recursive: true });
+  return workspace;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { CirclePause, MoreHorizontal, Play, Trash2 } from "lucide-react"
+import { CirclePause, MoreHorizontal, Pencil, Play, Trash2 } from "lucide-react"
 
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ export function TaskActionsMenu({
   task,
   busy,
   onRunNow,
+  onEdit,
   onToggle,
   onDelete,
   triggerClassName,
@@ -21,6 +22,7 @@ export function TaskActionsMenu({
   task: DesktopScheduledTask
   busy: boolean
   onRunNow: () => void
+  onEdit: () => void
   onToggle?: () => void
   onDelete: () => void
   triggerClassName?: string
@@ -39,6 +41,10 @@ export function TaskActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-40">
         <DropdownMenuGroup>
+          <DropdownMenuItem onClick={onEdit} disabled={busy}>
+            <Pencil />
+            编辑
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={onRunNow} disabled={busy}>
             <Play />
             立即运行

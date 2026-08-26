@@ -377,14 +377,6 @@ export class ScheduledTaskService {
       throw new Error("A chat scheduled task requires sessionId");
     }
     if (
-      input.destination === "standalone" &&
-      (input.projectPaths?.length ?? 0) === 0
-    ) {
-      throw new Error(
-        "A standalone scheduled task requires at least one project path",
-      );
-    }
-    if (
       input.executionMode === "worktree" &&
       input.destination !== "standalone"
     ) {
@@ -393,9 +385,17 @@ export class ScheduledTaskService {
       );
     }
     if (
+      input.executionMode === "worktree" &&
+      (input.projectPaths?.length ?? 0) === 0
+    ) {
+      throw new Error(
+        "Worktree scheduled execution requires at least one project path",
+      );
+    }
+    if (
       input.destination === "chat" &&
-      (input.model !== undefined ||
-        input.effort !== undefined ||
+      (Boolean(input.model?.trim()) ||
+        Boolean(input.effort?.trim()) ||
         (input.permissionProfile !== undefined &&
           (input.permissionProfile.mode !== "workspace_write" ||
             input.permissionProfile.network !== undefined ||

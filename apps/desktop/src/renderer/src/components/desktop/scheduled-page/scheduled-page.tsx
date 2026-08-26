@@ -7,12 +7,15 @@ import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import type {
+  CreateDesktopScheduledTaskInput,
   DesktopScheduledRun,
   DesktopScheduledStatus,
   DesktopScheduledTask,
+  UpdateDesktopScheduledTaskInput,
 } from "@shared/schedule-types"
 import { DetailPanel } from "./scheduled-detail"
 import { ScheduledHeader } from "./scheduled-header"
+import { ScheduledTaskEditor } from "./scheduled-task-editor"
 import { TaskRow } from "./task-row"
 import type { ScheduledFilter, ScheduledPageProps } from "./types"
 import { nextScheduleStatus } from "./utils"
@@ -38,6 +41,8 @@ export function ScheduledPage({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(() => new Set())
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorTask, setEditorTask] = useState<DesktopScheduledTask | null>(null)
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -145,6 +150,36 @@ export function ScheduledPage({
     [refresh, selectedId]
   )
 
+  const openCreateEditor = (): void => {
+    setEditorTask(null)
+    setEditorOpen(true)
+  }
+
+  const openEditEditor = (task: DesktopScheduledTask): void => {
+    setEditorTask(task)
+    setEditorOpen(true)
+  }
+
+  const saveTask = async (
+    input: CreateDesktopScheduledTaskInput | UpdateDesktopScheduledTaskInput
+  ): Promise<void> => {
+    setBusy("save")
+    try {
+      const saved = editorTask
+        ? await window.desktop.schedules.update(editorTask.id, input)
+        : await window.desktop.schedules.create(input as CreateDesktopScheduledTaskInput)
+      await refresh()
+      setSelectedId(saved.id)
+      setError(null)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setError(message)
+      throw new Error(message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-background" aria-busy={loading}>
       {error ? (
@@ -185,6 +220,7 @@ export function ScheduledPage({
                 onFilterChange={setFilter}
                 onSearchChange={setSearch}
                 onRefresh={refresh}
+                onCreateManual={openCreateEditor}
                 onStartConversation={onStartConversation}
                 loading={loading}
               />
@@ -233,6 +269,7 @@ export function ScheduledPage({
                     onRunNow={() =>
                       void mutate("run", () => window.desktop.schedules.runNow(task.id))
                     }
+                    onEdit={() => openEditEditor(task)}
                     onToggle={() =>
                       void mutate("toggle", () =>
                         window.desktop.schedules.update(task.id, {
@@ -279,6 +316,7 @@ export function ScheduledPage({
                         window.desktop.schedules.runNow(selected.id)
                       )
                     }
+                    onEdit={() => openEditEditor(selected)}
                     onToggle={() =>
                       void mutate("toggle", () =>
                         window.desktop.schedules.update(selected.id, {
@@ -295,7 +333,7 @@ export function ScheduledPage({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => onOpenConversation(selected.sessionId)}
+                    onClick={() => onOpenConversation(selected.sessionId ?? runs[0]?.sessionId)}
                     className="h-8 rounded-lg px-3 text-[12px]"
                   >
                     打开聊天
@@ -307,6 +345,18 @@ export function ScheduledPage({
           </AnimatePresence>
         </div>
       </div>
+      {editorOpen ? (
+        <ScheduledTaskEditor
+          open
+          task={editorTask}
+          busy={busy === "save"}
+          onOpenChange={(open) => {
+            setEditorOpen(open)
+            if (!open) setEditorTask(null)
+          }}
+          onSave={saveTask}
+        />
+      ) : null}
     </section>
   )
 }

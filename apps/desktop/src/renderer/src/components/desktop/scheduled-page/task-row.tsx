@@ -13,6 +13,7 @@ export function TaskRow({
   busy,
   onSelect,
   onRunNow,
+  onEdit,
   onToggle,
   onDelete,
 }: {
@@ -23,6 +24,7 @@ export function TaskRow({
   busy: boolean
   onSelect: () => void
   onRunNow: () => void
+  onEdit: () => void
   onToggle: () => void
   onDelete: () => void
 }): React.JSX.Element {
@@ -86,6 +88,7 @@ export function TaskRow({
           task={task}
           busy={busy}
           onRunNow={onRunNow}
+          onEdit={onEdit}
           onToggle={onToggle}
           onDelete={onDelete}
           triggerClassName={cn(
