@@ -527,8 +527,9 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       const view = await window.desktop.sessions.open(sessionId)
       if (get().activeSessionId !== sessionId) return
       writePersistedActiveSessionId(sessionId)
+      const workspace = resolveSessionWorkspace(get().projects, view.session)
       set((state) => ({
-        ...resolveSessionWorkspace(state.projects, view.session),
+        ...workspace,
         sessionView: view,
         openingSession: false,
         selectedModel: view.session.model,
@@ -543,6 +544,25 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
             ? upsertSession(state.archivedSessions, view.session)
             : state.archivedSessions,
       }))
+      if (workspace.selectedProject) {
+        try {
+          const details = await window.desktop.sessions.inspectProject(
+            workspace.selectedProject.path
+          )
+          if (get().activeSessionId !== sessionId) return
+          set((state) => ({
+            projects: upsertProject(state.projects, details.project),
+            selectedProject: details.project,
+            selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+            branch: details.branch,
+            branches: details.branches ?? [],
+          }))
+        } catch {
+          if (get().activeSessionId === sessionId) {
+            set({ selectedProjectGit: false, branch: null, branches: [] })
+          }
+        }
+      }
     } catch (error) {
       if (get().activeSessionId === sessionId) {
         clearPersistedActiveSessionId()
