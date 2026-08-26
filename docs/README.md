@@ -112,6 +112,7 @@
 - [Permission Flow](./permission-flow.md)：权限请求、durable decision 和取消。
 - [Sandbox Runtime Flow](./sandbox-runtime-flow.md)：命令和文件工具实际在哪里执行。
 - [Sandbox Runtime Design](./sandbox-runtime-design.md)：Sandbox 的详细设计。
+- [LSP Client 设计](./lsp-client-design.md)：把当前正则/ripgrep 近似实现替换成真实语言服务器连接，说明协议库选型、Runtime 生命周期、文档状态、沙箱路径、权限和分阶段验收。
 - [MCP HTTP Transport](./mcp-http-transport-design.md)：MCP HTTP/SSE 与鉴权。
 - [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：下一版 Native Plugin 唯一运行时契约，以及 Claude Code、Codex 等外部格式的独立转换流程。
 - [Native Plugin v1 与 Claude Code Converter 实施计划](./superpowers/plans/2026-08-25-native-plugin-and-claude-converter.md)：按 Native schema、安装激活、格式硬切、Converter core 和 Claude 转换闭环拆分的可执行任务。
