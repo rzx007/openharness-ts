@@ -238,6 +238,12 @@
     letter-spacing: 0;
   }
 
+  html:has([data-pet-window]),
+  html:has([data-pet-window]) body,
+  html:has([data-pet-window]) #root {
+    background: transparent;
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

@@ -101,6 +101,7 @@ export type DesktopAPI = {
     getState: () => Promise<PetState>
     setAlwaysOnTop: (value: boolean) => Promise<PetState>
     setIgnoreMouseEvents: (value: boolean) => Promise<PetState>
+    onClicked: (listener: () => void) => () => void
   }
   workspace: {
     listFiles: (input: WorkspaceListFilesInput) => Promise<WorkspaceListFilesResult>

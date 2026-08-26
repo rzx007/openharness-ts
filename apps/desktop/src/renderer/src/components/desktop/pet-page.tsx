@@ -1,44 +1,53 @@
-import { EyeOff } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Blobatar } from "@blobatar/react"
+import { useEffect, useRef, useState } from "react"
+import "blobatar/motion.css"
 
-import { Button } from "@renderer/components/ui/button"
+const singleClickDelayMs = 280
 
 export function PetWindow(): React.JSX.Element {
-  const [time, setTime] = useState(() => new Date().toLocaleTimeString())
+  const [blobatarName, setBlobatarName] = useState(() => crypto.randomUUID())
+  const clickTimerRef = useRef<number | null>(null)
+
+  const switchAvatar = (): void => {
+    setBlobatarName(crypto.randomUUID())
+  }
+
+  const cancelPendingClick = (): void => {
+    if (clickTimerRef.current === null) return
+    window.clearTimeout(clickTimerRef.current)
+    clickTimerRef.current = null
+  }
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setTime(new Date().toLocaleTimeString())
-    }, 1000)
-
-    return () => window.clearInterval(timer)
+    return window.desktop.pet.onClicked(switchAvatar)
   }, [])
 
-  return (
-    <main className="grid h-screen w-screen place-items-center bg-transparent">
-      <section
-        className="titlebar-drag flex min-h-24 w-48 items-center gap-3 rounded-xl bg-background/95 p-3 text-foreground shadow-lg ring-1 ring-black/8 backdrop-blur"
-        aria-label="OpenHarness 桌面宠物"
-      >
-        <div className="grid size-11 place-items-center rounded-lg bg-foreground text-sm font-bold text-background">
-          OH
-        </div>
-        <div className="min-w-0">
-          <strong className="block truncate text-sm font-semibold">OpenHarness</strong>
-          <span className="block text-xs text-ui-muted">{time}</span>
-        </div>
-      </section>
+  useEffect(() => () => cancelPendingClick(), [])
 
-      <Button
+  return (
+    <main
+      data-pet-window
+      className="grid h-screen w-screen place-items-center bg-transparent"
+      aria-label="OpenHarness 桌面宠物"
+    >
+      <button
         type="button"
-        variant="secondary"
-        size="sm"
-        className="titlebar-no-drag fixed right-4 bottom-4 shadow-sm"
-        onClick={() => void window.desktop.pet.hide()}
+        className="titlebar-drag grid size-full cursor-pointer place-items-center bg-transparent"
+        aria-label="单击切换头像，双击打开主窗口"
+        onClick={() => {
+          cancelPendingClick()
+          clickTimerRef.current = window.setTimeout(() => {
+            clickTimerRef.current = null
+            switchAvatar()
+          }, singleClickDelayMs)
+        }}
+        onDoubleClick={() => {
+          cancelPendingClick()
+          void window.desktop.window.showMain()
+        }}
       >
-        <EyeOff />
-        隐藏
-      </Button>
+        <Blobatar name={blobatarName} animate="always" size={100} />
+      </button>
     </main>
   )
 }

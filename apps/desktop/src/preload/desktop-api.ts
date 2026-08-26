@@ -48,6 +48,11 @@ export const desktopAPI = {
     getState: () => invoke(IpcChannels.petGetState),
     setAlwaysOnTop: (value: boolean) => invoke(IpcChannels.petSetAlwaysOnTop, value),
     setIgnoreMouseEvents: (value: boolean) => invoke(IpcChannels.petSetIgnoreMouseEvents, value),
+    onClicked: (listener: () => void): (() => void) => {
+      const wrapped = (): void => listener()
+      ipcRenderer.on(IpcEvents.petClicked, wrapped)
+      return () => ipcRenderer.removeListener(IpcEvents.petClicked, wrapped)
+    },
   },
   workspace: {
     listFiles: (input: IpcInvokeMap[typeof IpcChannels.workspaceListFiles]["args"][0]) =>

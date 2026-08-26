@@ -159,6 +159,7 @@ export const IpcChannels = {
 
 export const IpcEvents = {
   windowMaximizedChanged: "window:maximized-changed",
+  petClicked: "pet:clicked",
   sessionUpdated: "session:updated",
   sessionAuxUpdated: "session:aux-updated",
   sessionDaemonStatusChanged: "session:daemon-status-changed",
