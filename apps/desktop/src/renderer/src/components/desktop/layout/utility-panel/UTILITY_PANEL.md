@@ -26,7 +26,9 @@
 
 ## 文件职责
 
-### `main-layout.tsx`
+面板实现集中在 `layout/utility-panel/`。`index.ts` 是对外入口；`MainLayout` 和标题栏只从这里引用面板组件、controller 和 `UtilityToolRequest`。
+
+### `../main-layout.tsx`
 
 页面组合层。它创建 `react-resizable-panels` 的引用，将当前会话和引用传给 controller，并把 controller 返回的状态传给 `UtilityPanel`。
 
@@ -80,7 +82,7 @@
 
 ### `utility-panel-tabs.ts`
 
-定义工具种类、标签数据结构、工具名称和图标等静态元数据。该文件不导出 React 组件，避免视图组件同时承担共享配置职责。
+定义工具种类、标签数据结构、工具名称和图标等静态元数据，以及标题栏可请求打开的 `UtilityToolRequest`。该文件不导出 React 组件，避免视图组件同时承担共享配置职责。
 
 ### `utility-panel.tsx`
 
@@ -159,7 +161,7 @@ openharness.desktop.file-tabs
 `utility-panel-state.test.ts` 覆盖范围生成、草稿迁移、不同会话隔离、非法持久化数据和 runtime reducer。修改相关逻辑后，至少还应运行：
 
 ```powershell
-..\..\node_modules\.bin\vitest.CMD run src/renderer/src/components/desktop/layout/utility-panel-state.test.ts
+..\..\node_modules\.bin\vitest.CMD run src/renderer/src/components/desktop/layout/utility-panel/utility-panel-state.test.ts
 .\node_modules\.bin\tsc.CMD --noEmit -p tsconfig.web.json --composite false
 ```
 

@@ -12,6 +12,8 @@ import type { FileViewerTab } from "@renderer/components/desktop/tools/file-view
 
 export type UtilityTool = "review" | "terminal" | "browser" | "files" | "side-chat" | "agents"
 
+export type UtilityToolRequest = Extract<UtilityTool, "terminal" | "files" | "browser" | "agents">
+
 export type UtilityTab = {
   id: string
   tool: UtilityTool

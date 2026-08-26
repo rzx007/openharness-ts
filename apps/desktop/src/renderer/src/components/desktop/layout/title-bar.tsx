@@ -22,8 +22,7 @@ import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-sh
 import { cn } from "@renderer/lib/utils"
 import type { DesktopAppInfo } from "@shared/ipc-channels"
 import { actualSizeZoomLevel, maximumZoomLevel, minimumZoomLevel } from "@shared/zoom"
-
-export type UtilityToolRequest = "terminal" | "files" | "browser" | "agents"
+import type { UtilityToolRequest } from "./utility-panel"
 
 type TitleBarProps = {
   sidebarOpen: boolean

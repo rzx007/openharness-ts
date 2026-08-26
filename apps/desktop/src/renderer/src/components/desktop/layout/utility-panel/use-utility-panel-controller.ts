@@ -6,7 +6,7 @@ import type {
   PanelImperativeHandle,
 } from "react-resizable-panels"
 
-import type { UtilityToolRequest } from "./title-bar"
+import type { UtilityToolRequest } from "./utility-panel-tabs"
 import {
   moveUtilityPanelScope,
   patchUtilityPanelViewState,

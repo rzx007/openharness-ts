@@ -15,8 +15,7 @@ import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-sh
 import { MainLayoutContext } from "./main-layout-context"
 import { Sidebar } from "./sidebar"
 import { TitleBar } from "./title-bar"
-import { UtilityPanel } from "./utility-panel"
-import { useUtilityPanelController } from "./use-utility-panel-controller"
+import { UtilityPanel, useUtilityPanelController } from "./utility-panel"
 import { useDesktopWindowChrome } from "./use-desktop-window-chrome"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import {
