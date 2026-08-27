@@ -1110,6 +1110,8 @@ daemon 启动时：
 
 ### 阶段 1：附件领域、存储与基础 HTTP API
 
+> **状态：已完成（2026-08-28）。** 已交付 migration `0013_attachments`、`features.attachments: 1`、`attachments.limits`、`uploadModes: ["single"]`，以及基于 `POST /attachments` 原始请求体的单文件流式上传协议。阶段 2 的 prompt 引用、阶段 3 的 Composer、阶段 4 的原生图片路由和阶段 5 的本地 OCR / `ImageToText` 改造仍未开始。
+
 #### 目标
 
 建立 daemon 所有的 Attachment Asset、内容寻址存储、普通上传和安全读取能力。此阶段不接 Composer，但 API 与存储已经可独立使用和测试。
@@ -1131,7 +1133,7 @@ daemon 启动时：
 - `packages/protocol/src/attachment.ts`；
 - `packages/services/src/session-runtime/schema.ts` 和 migrations；
 - `packages/services/src/attachment/`；
-- `packages/server/src/application/attachment/`；
+- `packages/server/src/application/daemon-application.ts`；
 - `packages/server/src/http/routes/attachment.ts`；
 - `packages/client/src/transport/http-client.ts`。
 
@@ -1142,7 +1144,7 @@ daemon 启动时：
 - daemon 重启能收束 staging/importing 状态；
 - 远程 Client 可以上传并带鉴权下载；
 - 路径穿越、伪造 MIME、超限和非普通文件测试通过；
-- 数据库 migration、Blob 引用一致性诊断和相关类型检查通过。
+- 数据库 migration、Blob/asset 一致性集成验证和相关类型检查通过。
 
 ### 阶段 2：Prompt 协议、durable 引用与 Transcript
 
