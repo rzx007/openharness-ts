@@ -152,7 +152,6 @@ export interface DesktopSessionState
     QueuedPromptActions {
   loadStatus: LoadStatus
   daemonStatus: DesktopDaemonStatus
-  error: string | null
   projects: DesktopProject[]
   sessions: DesktopSessionRecord[]
   archivedSessions: DesktopSessionRecord[]
@@ -171,14 +170,7 @@ export interface DesktopSessionState
   branches: string[]
   activeSessionId: string | null
   sessionView: DesktopSessionView | null
-  openingSession: boolean
-  sending: boolean
-  pendingPromptSubmissions: Record<string, PendingPromptSubmission>
-  sendingOperationId: string | null
-  pendingPromptEdit: PendingPromptEdit | null
-  queuedPromptActions: Record<string, QueuedPromptAction>
   applySessionUpdate: (view: DesktopSessionView) => void
-  clearError: () => void
 }
 
 export interface DesktopStoreContext {

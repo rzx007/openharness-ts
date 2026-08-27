@@ -10,6 +10,56 @@ import {
 } from "./operation-state"
 
 describe("desktop session operation state", () => {
+  it("replaces all failed operations of the retried kind without clearing another kind", () => {
+    const runtime = {
+      ...createEmptySessionRuntime(),
+      operations: {
+        "send-old": {
+          id: "send-old",
+          kind: "send-prompt" as const,
+          phase: "failed" as const,
+          sessionId: "session-1",
+          startedAt: 1,
+          finishedAt: 2,
+          error: "send failed",
+        },
+        "edit-old": {
+          id: "edit-old",
+          kind: "edit-prompt" as const,
+          phase: "failed" as const,
+          sessionId: "session-1",
+          target: "message-1",
+          startedAt: 1,
+          finishedAt: 2,
+          error: "edit failed",
+        },
+        "edit-other": {
+          id: "edit-other",
+          kind: "edit-prompt" as const,
+          phase: "failed" as const,
+          sessionId: "session-1",
+          target: "message-2",
+          startedAt: 2,
+          finishedAt: 3,
+          error: "another edit failed",
+        },
+      },
+    }
+
+    const next = beginOperation(runtime, {
+      id: "edit-new",
+      kind: "edit-prompt",
+      sessionId: "session-1",
+      target: "message-3",
+      startedAt: 3,
+    })
+
+    expect(next.operations).toHaveProperty("send-old")
+    expect(next.operations).not.toHaveProperty("edit-old")
+    expect(next.operations).not.toHaveProperty("edit-other")
+    expect(next.operations["edit-new"]?.phase).toBe("pending")
+  })
+
   it("only settles the operation with the matching id", () => {
     const runtime = createEmptySessionRuntime()
     const first = beginOperation(runtime, {

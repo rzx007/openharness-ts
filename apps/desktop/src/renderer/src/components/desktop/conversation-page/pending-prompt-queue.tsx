@@ -10,26 +10,22 @@ import {
   ItemTitle,
 } from "@renderer/components/ui/item"
 import { Spinner } from "@renderer/components/ui/spinner"
+import type {
+  PendingPromptSubmission,
+  QueuedPromptAction,
+} from "@renderer/stores/desktop-session/types"
 import type { DesktopSessionInput, DesktopSessionRun } from "@shared/session-types"
 
 interface PendingPrompt {
   input: DesktopSessionInput
   run: DesktopSessionRun
-  action?: {
-    kind: "promote" | "cancel"
-    phase: "pending" | "acknowledged" | "failed"
-    error?: string
-  }
+  action?: Pick<QueuedPromptAction, "kind" | "phase" | "error">
 }
 
-interface LocalPendingSubmission {
-  id: string
-  sessionId: string
-  content: string
-  phase: "submitting" | "accepted" | "failed"
-  placement: "transcript" | "queue"
-  error?: string
-}
+type LocalPendingSubmission = Pick<
+  PendingPromptSubmission,
+  "id" | "sessionId" | "content" | "phase" | "placement" | "error"
+>
 
 export function PendingPromptQueue({
   prompts,

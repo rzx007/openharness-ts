@@ -17,6 +17,7 @@ import {
   attachDesktopSessionEvents,
   useDesktopSessionStore,
 } from "@renderer/stores/desktop-session-store"
+import { selectActiveSessionId, selectSessions } from "@renderer/stores/desktop-session/selectors"
 import { TitleBar } from "../title-bar"
 import { useDesktopWindowChrome } from "../use-desktop-window-chrome"
 import { MainLayoutContext } from "./main-layout-context"
@@ -44,8 +45,8 @@ export function MainLayout(): React.JSX.Element {
   })
   const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
-  const sessions = useDesktopSessionStore((state) => state.sessions)
-  const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
+  const sessions = useDesktopSessionStore(selectSessions)
+  const activeSessionId = useDesktopSessionStore(selectActiveSessionId)
   const selectedProjectId = useDesktopSessionStore((state) => state.selectedProject?.id ?? null)
   const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const refreshSelectedProjectGit = useDesktopSessionStore(

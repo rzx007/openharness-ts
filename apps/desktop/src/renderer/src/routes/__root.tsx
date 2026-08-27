@@ -2,6 +2,7 @@ import { createRootRoute, Outlet } from "@tanstack/react-router"
 
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import { selectDaemonStatus } from "@renderer/stores/desktop-session/selectors"
 
 export const Route = createRootRoute({
   component: Outlet,
@@ -9,7 +10,7 @@ export const Route = createRootRoute({
 })
 
 function DesktopRoutePending(): React.JSX.Element {
-  const daemonStatus = useDesktopSessionStore((state) => state.daemonStatus)
+  const daemonStatus = useDesktopSessionStore(selectDaemonStatus)
 
   return (
     <div className="flex h-screen min-w-0 items-center justify-center bg-background px-6 text-foreground">

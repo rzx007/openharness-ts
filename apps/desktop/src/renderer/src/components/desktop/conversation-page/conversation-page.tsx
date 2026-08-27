@@ -12,6 +12,13 @@ import {
 } from "@renderer/components/ui/message-scroller"
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import {
+  selectActiveSessionOpening,
+  selectActiveSessionPromptSubmissions,
+  selectActiveSessionQueuedPromptActions,
+  selectActiveSessionSending,
+  selectNewConversationSending,
+} from "@renderer/stores/desktop-session/selectors"
 import { Composer } from "./composer"
 import { PendingPromptQueue } from "./pending-prompt-queue"
 import {
@@ -46,8 +53,9 @@ function ConversationPane({
   } | null>(null)
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
-  const openingSession = useDesktopSessionStore((state) => state.openingSession)
-  const sending = useDesktopSessionStore((state) => state.sending)
+  const openingSession = useDesktopSessionStore(selectActiveSessionOpening)
+  const activeSessionSending = useDesktopSessionStore(selectActiveSessionSending)
+  const newConversationSending = useDesktopSessionStore(selectNewConversationSending)
   const models = useDesktopSessionStore((state) => state.models)
   const selectedModel = useDesktopSessionStore((state) => state.selectedModel)
   const selectedProvider = useDesktopSessionStore((state) => state.selectedProvider)
@@ -66,8 +74,8 @@ function ConversationPane({
   const editLatestMessage = useDesktopSessionStore((state) => state.editLatestMessage)
   const promoteQueuedPrompt = useDesktopSessionStore((state) => state.promoteQueuedPrompt)
   const cancelQueuedPrompt = useDesktopSessionStore((state) => state.cancelQueuedPrompt)
-  const queuedPromptActions = useDesktopSessionStore((state) => state.queuedPromptActions)
-  const pendingPromptSubmissions = useDesktopSessionStore((state) => state.pendingPromptSubmissions)
+  const queuedPromptActions = useDesktopSessionStore(selectActiveSessionQueuedPromptActions)
+  const pendingPromptSubmissions = useDesktopSessionStore(selectActiveSessionPromptSubmissions)
   const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
@@ -83,6 +91,7 @@ function ConversationPane({
   const interrupt = useDesktopSessionStore((state) => state.interrupt)
   const replyPermission = useDesktopSessionStore((state) => state.replyPermission)
   const hasSession = activeSessionId !== null
+  const sending = hasSession ? activeSessionSending : newConversationSending
   const archived = sessionView?.session.status === "archived"
   const sessionActions = useSessionActionDialogs()
 

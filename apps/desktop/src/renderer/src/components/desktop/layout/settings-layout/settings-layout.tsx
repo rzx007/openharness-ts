@@ -9,6 +9,7 @@ import {
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import { selectActiveSessionId } from "@renderer/stores/desktop-session/selectors"
 import { TitleBar } from "../title-bar"
 import { useDesktopWindowChrome } from "../use-desktop-window-chrome"
 import { SettingsSidebar } from "./settings-sidebar"
@@ -25,7 +26,7 @@ export function SettingsLayout(): React.JSX.Element {
   })
   const { section } = useParams({ strict: false })
   const selectedSection = settingsSectionLabel(section)
-  const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
+  const activeSessionId = useDesktopSessionStore(selectActiveSessionId)
   const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const [sidebarOpen, setSidebarOpen] = useState(true)

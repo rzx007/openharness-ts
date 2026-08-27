@@ -1,13 +1,5 @@
 import type { DesktopOperation, DesktopSessionRuntime } from "./types"
 
-export interface LegacySessionRuntimeMirror {
-  sending: boolean
-  sendingOperationId: string | null
-  pendingPromptSubmissions: DesktopSessionRuntime["pendingPromptSubmissions"]
-  pendingPromptEdit: DesktopSessionRuntime["pendingPromptEdit"]
-  queuedPromptActions: DesktopSessionRuntime["queuedPromptActions"]
-}
-
 export function createEmptySessionRuntime(): DesktopSessionRuntime {
   return {
     operations: {},
@@ -17,38 +9,19 @@ export function createEmptySessionRuntime(): DesktopSessionRuntime {
   }
 }
 
-export function projectRuntimeToLegacyMirror(
-  runtime: DesktopSessionRuntime,
-  options: { includeCreateSession?: boolean } = {}
-): LegacySessionRuntimeMirror {
-  const composerOperation = Object.values(runtime.operations).find(
-    (operation) =>
-      operation.phase === "pending" &&
-      (operation.kind === "send-prompt" ||
-        operation.kind === "invoke-command" ||
-        operation.kind === "edit-prompt" ||
-        (options.includeCreateSession && operation.kind === "create-session"))
-  )
-  const submittingPrompt = Object.values(runtime.pendingPromptSubmissions).find(
-    (submission) => submission.phase === "submitting"
-  )
-  return {
-    sending: Boolean(composerOperation ?? submittingPrompt),
-    sendingOperationId: composerOperation?.id ?? submittingPrompt?.id ?? null,
-    pendingPromptSubmissions: runtime.pendingPromptSubmissions,
-    pendingPromptEdit: runtime.pendingPromptEdit,
-    queuedPromptActions: runtime.queuedPromptActions,
-  }
-}
-
 export function beginOperation(
   runtime: DesktopSessionRuntime,
   input: Omit<DesktopOperation, "phase">
 ): DesktopSessionRuntime {
+  const operations = Object.fromEntries(
+    Object.entries(runtime.operations).filter(
+      ([, operation]) => operation.phase !== "failed" || operation.kind !== input.kind
+    )
+  )
   return {
     ...runtime,
     operations: {
-      ...runtime.operations,
+      ...operations,
       [input.id]: { ...input, phase: "pending" },
     },
   }

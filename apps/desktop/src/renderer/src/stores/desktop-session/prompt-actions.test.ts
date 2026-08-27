@@ -48,7 +48,7 @@ describe("prompt actions session runtime", () => {
     vi.unstubAllGlobals()
   })
 
-  it("keeps the legacy composer mirror pending until SSE confirms the submitted input", async () => {
+  it("keeps the session runtime pending until SSE confirms the submitted input", async () => {
     let resolveSend!: () => void
     const sendPrompt = vi.fn<
       (input: { id: string; sessionId: string; content: string }) => Promise<void>
@@ -62,11 +62,6 @@ describe("prompt actions session runtime", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: null,
-      sending: false,
-      sendingOperationId: null,
-      pendingPromptSubmissions: {},
-      pendingPromptEdit: null,
-      queuedPromptActions: {},
       sessionRuntimes: { "session-1": createEmptySessionRuntime() },
     })
 
@@ -77,9 +72,10 @@ describe("prompt actions session runtime", () => {
       inputs: [],
     })
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      sending: true,
-      sendingOperationId: inputId,
+    expect(useDesktopSessionStore.getState().sessionRuntimes["session-1"]).toMatchObject({
+      operations: {
+        [inputId]: expect.objectContaining({ phase: "pending" }),
+      },
       pendingPromptSubmissions: {
         [inputId]: expect.objectContaining({ phase: "submitting", content: "pending" }),
       },
@@ -147,9 +143,8 @@ describe("prompt actions session runtime", () => {
       .getState()
       .applySessionUpdate(viewContainingInput("session-1", inputId, 1))
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      sending: false,
-      sendingOperationId: null,
+    expect(useDesktopSessionStore.getState().sessionRuntimes["session-1"]).toMatchObject({
+      operations: {},
       pendingPromptSubmissions: {},
     })
     rejectSend(new Error("response lost"))
@@ -258,7 +253,6 @@ describe("prompt actions session runtime", () => {
         ],
       },
       sessionRuntimes: { "session-1": createEmptySessionRuntime() },
-      error: null,
     })
 
     const request = useDesktopSessionStore.getState().interrupt()
@@ -279,7 +273,6 @@ describe("prompt actions session runtime", () => {
     rejectInterrupt(new Error("response lost"))
     await expect(request).resolves.toBeUndefined()
 
-    expect(useDesktopSessionStore.getState().error).toBeNull()
     expect(useDesktopSessionStore.getState().sessionRuntimes["session-1"]!.operations).toEqual({})
   })
 })

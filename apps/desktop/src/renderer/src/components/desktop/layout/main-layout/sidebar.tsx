@@ -53,6 +53,13 @@ import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Spinner } from "@renderer/components/ui/spinner"
 import { cn } from "@renderer/lib/utils"
 import { isSessionPinned, useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import {
+  selectActiveSessionId,
+  selectArchivedSessions,
+  selectLoadStatus,
+  selectProjects,
+  selectSessions,
+} from "@renderer/stores/desktop-session/selectors"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
 import { useSessionActionDialogs } from "../../conversation-page/session-action-dialogs"
 import { SessionMoreMenu } from "../../conversation-page/session-more-menu"
@@ -84,11 +91,11 @@ export function Sidebar({
   const scheduledSelected = Boolean(matchRoute({ to: "/scheduled" }))
   const pluginsSelected = Boolean(matchRoute({ to: "/plugins" }))
   const darkTheme = isDarkTheme(theme)
-  const projects = useDesktopSessionStore((state) => state.projects)
-  const sessions = useDesktopSessionStore((state) => state.sessions)
-  const archivedSessions = useDesktopSessionStore((state) => state.archivedSessions)
-  const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
-  const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
+  const projects = useDesktopSessionStore(selectProjects)
+  const sessions = useDesktopSessionStore(selectSessions)
+  const archivedSessions = useDesktopSessionStore(selectArchivedSessions)
+  const activeSessionId = useDesktopSessionStore(selectActiveSessionId)
+  const loadStatus = useDesktopSessionStore(selectLoadStatus)
   const startNewConversation = useDesktopSessionStore((state) => state.startNewConversation)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
   const renameProject = useDesktopSessionStore((state) => state.renameProject)

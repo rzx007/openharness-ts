@@ -1,0 +1,193 @@
+import { describe, expect, it } from "vitest"
+
+import { createEmptySessionRuntime } from "./operation-state"
+import {
+  selectActiveSessionOpening,
+  selectActiveSessionPromptSubmissions,
+  selectActiveSessionSending,
+  selectNewConversationError,
+  selectNewConversationSending,
+  selectProjectOperationError,
+  selectSessionComposerError,
+  selectSessionSending,
+} from "./selectors"
+import type { DesktopOperationKind, DesktopSessionState } from "./types"
+
+function stateWithPendingOperation(
+  sessionId: string,
+  kind: DesktopOperationKind
+): DesktopSessionState {
+  const runtime = createEmptySessionRuntime()
+  runtime.operations["operation-1"] = {
+    id: "operation-1",
+    kind,
+    phase: "pending",
+    sessionId,
+    startedAt: 1,
+  }
+  return stateWith({ sessionRuntimes: { [sessionId]: runtime } })
+}
+
+function stateWithNewConversationOperation(kind: DesktopOperationKind): DesktopSessionState {
+  const newConversationRuntime = createEmptySessionRuntime()
+  newConversationRuntime.operations["operation-new"] = {
+    id: "operation-new",
+    kind,
+    phase: "pending",
+    sessionId: null,
+    startedAt: 1,
+  }
+  return stateWith({ newConversationRuntime })
+}
+
+function stateWith(overrides: Partial<DesktopSessionState>): DesktopSessionState {
+  return {
+    activeSessionId: null,
+    newConversationRuntime: createEmptySessionRuntime(),
+    sessionRuntimes: {},
+    appOperations: {},
+    projectOperations: {},
+    ...overrides,
+  } as DesktopSessionState
+}
+
+describe("desktop session selectors", () => {
+  it("selects sending only from the requested session", () => {
+    const state = stateWithPendingOperation("session-a", "send-prompt")
+
+    expect(selectSessionSending(state, "session-a")).toBe(true)
+    expect(selectSessionSending(state, "session-b")).toBe(false)
+  })
+
+  it("selects new-conversation sending independently", () => {
+    const state = stateWithNewConversationOperation("create-session")
+
+    expect(selectNewConversationSending(state)).toBe(true)
+    expect(selectActiveSessionSending({ ...state, activeSessionId: "session-a" })).toBe(false)
+  })
+
+  it("keeps a background session error out of the active composer", () => {
+    const state = stateWith({
+      activeSessionId: "session-b",
+      sessionRuntimes: {
+        "session-a": {
+          ...createEmptySessionRuntime(),
+          operations: {
+            "send-a": {
+              id: "send-a",
+              kind: "send-prompt",
+              phase: "failed",
+              sessionId: "session-a",
+              startedAt: 1,
+              finishedAt: 2,
+              error: "session A failed",
+            },
+          },
+        },
+        "session-b": createEmptySessionRuntime(),
+      },
+    })
+
+    expect(selectSessionComposerError(state, "session-a")).toBe("session A failed")
+    expect(selectSessionComposerError(state, "session-b")).toBeNull()
+  })
+
+  it("prefers a submission error over its duplicate operation error", () => {
+    const state = stateWith({
+      sessionRuntimes: {
+        "session-a": {
+          ...createEmptySessionRuntime(),
+          operations: {
+            "send-a": {
+              id: "send-a",
+              kind: "send-prompt",
+              phase: "failed",
+              sessionId: "session-a",
+              startedAt: 1,
+              finishedAt: 2,
+              error: "operation error",
+            },
+          },
+          pendingPromptSubmissions: {
+            "send-a": {
+              id: "send-a",
+              sessionId: "session-a",
+              content: "message",
+              createdAt: 1,
+              phase: "failed",
+              placement: "transcript",
+              error: "submission error",
+            },
+          },
+        },
+      },
+    })
+
+    expect(selectSessionComposerError(state, "session-a")).toBe("submission error")
+  })
+
+  it("selects opening, prompt submissions, and scope-specific errors", () => {
+    const state = stateWith({
+      activeSessionId: "session-a",
+      newConversationRuntime: {
+        ...createEmptySessionRuntime(),
+        operations: {
+          "create-new": {
+            id: "create-new",
+            kind: "create-session",
+            phase: "failed",
+            sessionId: null,
+            startedAt: 1,
+            finishedAt: 2,
+            error: "cannot create",
+          },
+        },
+      },
+      sessionRuntimes: {
+        "session-a": {
+          ...createEmptySessionRuntime(),
+          operations: {
+            "open-a": {
+              id: "open-a",
+              kind: "open-session",
+              phase: "pending",
+              sessionId: "session-a",
+              startedAt: 1,
+            },
+          },
+          pendingPromptSubmissions: {
+            "prompt-a": {
+              id: "prompt-a",
+              sessionId: "session-a",
+              content: "still local",
+              createdAt: 1,
+              phase: "accepted",
+              placement: "transcript",
+            },
+          },
+        },
+      },
+      projectOperations: {
+        "project-a": {
+          "inspect-a": {
+            id: "inspect-a",
+            kind: "project-action",
+            phase: "failed",
+            sessionId: null,
+            projectId: "project-a",
+            startedAt: 1,
+            finishedAt: 2,
+            error: "cannot inspect project",
+          },
+        },
+      },
+    })
+
+    expect(selectActiveSessionOpening(state)).toBe(true)
+    expect(selectActiveSessionPromptSubmissions(state)).toBe(
+      state.sessionRuntimes["session-a"]!.pendingPromptSubmissions
+    )
+    expect(selectNewConversationError(state)).toBe("cannot create")
+    expect(selectProjectOperationError(state, "project-a")).toBe("cannot inspect project")
+  })
+})

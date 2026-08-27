@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { DesktopSessionView } from "@shared/session-types"
 import { useDesktopSessionStore } from "../desktop-session-store"
 import { beginOperation, createEmptySessionRuntime } from "./operation-state"
+import {
+  selectActiveSessionOpening,
+  selectActiveSessionSending,
+  selectNewConversationSending,
+  selectSessionComposerError,
+} from "./selectors"
 
 function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
   return {
@@ -41,11 +47,6 @@ function resetNewConversationState(): void {
     selectedPermissionMode: "default",
     activeSessionId: null,
     sessionView: null,
-    pendingPromptSubmissions: {},
-    sending: false,
-    sendingOperationId: null,
-    openingSession: false,
-    error: null,
     newConversationRuntime: {
       operations: {},
       pendingPromptSubmissions: {},
@@ -119,39 +120,30 @@ describe("desktop session actions", () => {
     await vi.waitFor(() => expect(sendPrompt).toHaveBeenCalledOnce())
     const inputId = sendPrompt.mock.calls[0]![0].id
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      activeSessionId: session.id,
-      sending: true,
-      sendingOperationId: inputId,
-    })
+    expect(useDesktopSessionStore.getState().activeSessionId).toBe(session.id)
+    expect(selectActiveSessionSending(useDesktopSessionStore.getState())).toBe(true)
 
     useDesktopSessionStore.getState().applySessionUpdate(emptySessionView(session.id, 2))
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      sending: true,
-      sendingOperationId: inputId,
-    })
+    expect(selectActiveSessionSending(useDesktopSessionStore.getState())).toBe(true)
 
     resolvePrompt()
     await starting
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      sending: false,
-      sendingOperationId: null,
+    expect(useDesktopSessionStore.getState().sessionRuntimes[session.id]).toMatchObject({
       pendingPromptSubmissions: {
         [inputId]: expect.objectContaining({ phase: "accepted" }),
       },
     })
+    expect(selectActiveSessionSending(useDesktopSessionStore.getState())).toBe(false)
 
     const confirmed = emptySessionView(session.id, 3)
     confirmed.inputs = [{ id: inputId }] as DesktopSessionView["inputs"]
     useDesktopSessionStore.getState().applySessionUpdate(confirmed)
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      sending: false,
-      sendingOperationId: null,
-      pendingPromptSubmissions: {},
-    })
+    expect(
+      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.pendingPromptSubmissions
+    ).toEqual({})
   })
 
   it("keeps a new blank conversation writable when an older create resolves", async () => {
@@ -177,24 +169,22 @@ describe("desktop session actions", () => {
 
     expect(useDesktopSessionStore.getState()).toMatchObject({
       activeSessionId: null,
-      sending: false,
-      sendingOperationId: null,
       newConversationRuntime: { operations: {} },
     })
+    expect(selectNewConversationSending(useDesktopSessionStore.getState())).toBe(false)
 
     const newStarting = useDesktopSessionStore.getState().startSession("new prompt")
     await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2))
-    const newOperationId = useDesktopSessionStore.getState().sendingOperationId
+    const newOperationId = Object.keys(
+      useDesktopSessionStore.getState().newConversationRuntime.operations
+    )[0]
 
     createResolvers[0]!(oldSession)
     await oldStarting
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      activeSessionId: null,
-      sending: true,
-      sendingOperationId: newOperationId,
-      pendingPromptSubmissions: {},
-    })
+    expect(useDesktopSessionStore.getState().activeSessionId).toBeNull()
+    expect(selectNewConversationSending(useDesktopSessionStore.getState())).toBe(true)
+    expect(newOperationId).toBeDefined()
     expect(open).not.toHaveBeenCalledWith(oldSession.id)
     expect(sendPrompt).toHaveBeenCalledWith({
       id: expect.any(String),
@@ -244,9 +234,9 @@ describe("desktop session actions", () => {
     )
     expect(useDesktopSessionStore.getState()).toMatchObject({
       activeSessionId: null,
-      sending: false,
       newConversationRuntime: { operations: {} },
     })
+    expect(selectNewConversationSending(useDesktopSessionStore.getState())).toBe(false)
 
     await useDesktopSessionStore.getState().openSession(session.id)
 
@@ -284,11 +274,10 @@ describe("desktop session actions", () => {
 
     expect(useDesktopSessionStore.getState()).toMatchObject({
       activeSessionId: null,
-      sending: false,
-      sendingOperationId: null,
       newConversationRuntime: { operations: {} },
       selectedModel: source.model,
     })
+    expect(selectNewConversationSending(useDesktopSessionStore.getState())).toBe(false)
 
     resolveCreate(created)
     await starting
@@ -296,8 +285,8 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState()).toMatchObject({
       activeSessionId: null,
       sessionView: null,
-      sending: false,
     })
+    expect(selectNewConversationSending(useDesktopSessionStore.getState())).toBe(false)
     expect(open).not.toHaveBeenCalledWith(created.id)
   })
 
@@ -321,7 +310,7 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState().sessionView?.cursor).toBe(5)
   })
 
-  it("projects the reopened session runtime into the legacy prompt mirror", async () => {
+  it("keeps the reopened session runtime scoped to the active session", async () => {
     const oldRuntime = {
       ...createEmptySessionRuntime(),
       pendingPromptSubmissions: {
@@ -379,11 +368,6 @@ describe("desktop session actions", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-old",
       sessionView: emptySessionView("session-old", 1),
-      sending: false,
-      sendingOperationId: null,
-      pendingPromptSubmissions: oldRuntime.pendingPromptSubmissions,
-      pendingPromptEdit: oldRuntime.pendingPromptEdit,
-      queuedPromptActions: oldRuntime.queuedPromptActions,
       sessionRuntimes: {
         "session-old": oldRuntime,
         "session-new": reopenedRuntime,
@@ -392,10 +376,9 @@ describe("desktop session actions", () => {
 
     await useDesktopSessionStore.getState().openSession("session-new")
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      activeSessionId: "session-new",
-      sending: true,
-      sendingOperationId: "input-new",
+    expect(useDesktopSessionStore.getState().activeSessionId).toBe("session-new")
+    expect(selectActiveSessionSending(useDesktopSessionStore.getState())).toBe(true)
+    expect(useDesktopSessionStore.getState().sessionRuntimes["session-new"]).toMatchObject({
       pendingPromptSubmissions: {
         "input-new": expect.objectContaining({ content: "new prompt", phase: "submitting" }),
       },
@@ -404,9 +387,9 @@ describe("desktop session actions", () => {
         "session-new:run-new": expect.objectContaining({ phase: "failed" }),
       },
     })
-    expect(useDesktopSessionStore.getState().pendingPromptSubmissions).not.toHaveProperty(
-      "input-old"
-    )
+    expect(
+      useDesktopSessionStore.getState().sessionRuntimes["session-new"]?.pendingPromptSubmissions
+    ).not.toHaveProperty("input-old")
   })
 
   it("only lets the latest same-session open request apply its snapshot", async () => {
@@ -431,8 +414,8 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState()).toMatchObject({
       activeSessionId: "session-1",
       sessionView: null,
-      openingSession: true,
     })
+    expect(selectActiveSessionOpening(useDesktopSessionStore.getState())).toBe(true)
 
     resolvers[1]!(emptySessionView("session-1", 2))
     await secondOpening
@@ -751,7 +734,9 @@ describe("desktop session actions", () => {
     expect(operations).not.toContainEqual(
       expect.objectContaining({ kind: "create-session", phase: "failed" })
     )
-    expect(useDesktopSessionStore.getState().error).toBe("active command failed")
+    expect(selectSessionComposerError(useDesktopSessionStore.getState(), session.id)).toBe(
+      "active command failed"
+    )
     randomUUID.mockRestore()
   })
 
@@ -776,9 +761,15 @@ describe("desktop session actions", () => {
     ).resolves.toBe(session.id)
 
     expect(invokeCommand).not.toHaveBeenCalled()
-    expect(useDesktopSessionStore.getState().error).toBe("open snapshot failed")
     const operations = Object.values(
       useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations ?? {}
+    )
+    expect(operations).toContainEqual(
+      expect.objectContaining({
+        kind: "open-session",
+        phase: "failed",
+        error: "open snapshot failed",
+      })
     )
     expect(operations).toContainEqual(
       expect.objectContaining({ kind: "create-session", phase: "acknowledged" })

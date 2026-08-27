@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopBootstrapData, DesktopSessionView } from "@shared/session-types"
 import { createEmptySessionRuntime } from "./desktop-session/operation-state"
+import {
+  selectActiveSessionQueuedPromptActions,
+  selectSessionSending,
+} from "./desktop-session/selectors"
+import type { DesktopSessionRuntime } from "./desktop-session/types"
 import type { QueuedPromptAction } from "./desktop-session-store"
 import { useDesktopSessionStore } from "./desktop-session-store"
 
@@ -38,10 +43,17 @@ const refreshedBootstrap: DesktopBootstrapData = {
   defaultPermissionMode: "default",
 }
 
-function onlyPendingPromptSubmission(): ReturnType<
-  typeof useDesktopSessionStore.getState
->["pendingPromptSubmissions"][string] {
-  const submissions = Object.values(useDesktopSessionStore.getState().pendingPromptSubmissions)
+function sessionRuntime(sessionId: string): DesktopSessionRuntime {
+  return useDesktopSessionStore.getState().sessionRuntimes[sessionId] ?? createEmptySessionRuntime()
+}
+
+function onlyPendingPromptSubmission(
+  sessionId?: string
+): DesktopSessionRuntime["pendingPromptSubmissions"][string] {
+  const currentSessionId = sessionId ?? useDesktopSessionStore.getState().activeSessionId
+  const submissions = Object.values(
+    currentSessionId ? sessionRuntime(currentSessionId).pendingPromptSubmissions : {}
+  )
   expect(submissions).toHaveLength(1)
   return submissions[0]!
 }
@@ -210,7 +222,6 @@ describe("desktop session store project order", () => {
       selectedProjectGit: false,
       branch: null,
       branches: [],
-      error: null,
     })
 
     await useDesktopSessionStore.getState().selectProject(projects[1])
@@ -648,9 +659,6 @@ describe("desktop session store outside-project mode", () => {
       selectedPermissionMode: "default",
       activeSessionId: null,
       sessionView: null,
-      sending: false,
-      openingSession: false,
-      error: null,
     })
 
     await useDesktopSessionStore.getState().startSession("总结今天的安排")
@@ -726,10 +734,6 @@ describe("desktop session store outside-project mode", () => {
       selectedPermissionMode: "default",
       activeSessionId: null,
       sessionView: null,
-      pendingPromptSubmissions: {},
-      sending: false,
-      openingSession: false,
-      error: null,
     })
 
     await expect(useDesktopSessionStore.getState().startSession("第一条消息")).rejects.toThrow(
@@ -778,35 +782,36 @@ describe("desktop session store outside-project mode", () => {
     useDesktopSessionStore.setState({
       activeSessionId: null,
       sessionView: null,
-      openingSession: false,
-      sending: false,
-      pendingPromptSubmissions: {
-        "input-confirmed": {
-          id: "input-confirmed",
-          sessionId: "session-reopen",
-          content: "confirmed",
-          createdAt: 1,
-          phase: "accepted",
-          placement: "transcript",
-        },
-      },
-      queuedPromptActions: {
-        "session-reopen:run-finished": {
-          sessionId: "session-reopen",
-          inputId: "input-confirmed",
-          runId: "run-finished",
-          kind: "promote",
-          phase: "acknowledged",
+      sessionRuntimes: {
+        "session-reopen": {
+          ...createEmptySessionRuntime(),
+          pendingPromptSubmissions: {
+            "input-confirmed": {
+              id: "input-confirmed",
+              sessionId: "session-reopen",
+              content: "confirmed",
+              createdAt: 1,
+              phase: "accepted",
+              placement: "transcript",
+            },
+          },
+          queuedPromptActions: {
+            "session-reopen:run-finished": {
+              sessionId: "session-reopen",
+              inputId: "input-confirmed",
+              runId: "run-finished",
+              kind: "promote",
+              phase: "acknowledged",
+            },
+          },
         },
       },
     })
 
     await useDesktopSessionStore.getState().openSession("session-reopen")
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      pendingPromptSubmissions: {},
-      queuedPromptActions: {},
-    })
+    expect(sessionRuntime("session-reopen").pendingPromptSubmissions).toEqual({})
+    expect(sessionRuntime("session-reopen").queuedPromptActions).toEqual({})
   })
 
   it("does not let a late new-session snapshot overwrite a session opened afterward", async () => {
@@ -843,10 +848,6 @@ describe("desktop session store outside-project mode", () => {
       selectedPermissionMode: "default",
       activeSessionId: null,
       sessionView: null,
-      pendingPromptSubmissions: {},
-      sending: false,
-      openingSession: false,
-      error: null,
     })
 
     const starting = useDesktopSessionStore.getState().startSession("start A")
@@ -910,9 +911,6 @@ describe("desktop session store outside-project mode", () => {
       defaultPermissionMode: "default",
       activeSessionId: null,
       sessionView: null,
-      openingSession: false,
-      sending: false,
-      error: null,
     })
 
     await useDesktopSessionStore.getState().openSession(session.id)
@@ -940,12 +938,7 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: null,
       sessionView: null,
-      sending: false,
-      sendingOperationId: null,
-      error: null,
-      pendingPromptSubmissions: {},
-      pendingPromptEdit: null,
-      queuedPromptActions: {},
+      newConversationRuntime: createEmptySessionRuntime(),
       sessionRuntimes: {},
     })
   })
@@ -962,8 +955,6 @@ describe("desktop session store prompt intent boundaries", () => {
     })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      sending: false,
-      error: null,
       sessionView: {
         cursor: 1,
         syncStatus: "connected",
@@ -1016,15 +1007,12 @@ describe("desktop session store prompt intent boundaries", () => {
     })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      sending: false,
-      pendingPromptSubmissions: {},
-      error: null,
     })
 
     await useDesktopSessionStore.getState().sendMessage("/compact", { commandLine: "/compact" })
 
     expect(invokeCommand).toHaveBeenCalledWith({ sessionId: "session-1", line: "/compact" })
-    expect(useDesktopSessionStore.getState().pendingPromptSubmissions).toEqual({})
+    expect(sessionRuntime("session-1").pendingPromptSubmissions).toEqual({})
   })
 
   it("does not let an old session request clear a newer session sending state", async () => {
@@ -1039,25 +1027,20 @@ describe("desktop session store prompt intent boundaries", () => {
     vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
     useDesktopSessionStore.setState({
       activeSessionId: "session-old",
-      sending: false,
-      pendingPromptSubmissions: {},
-      error: null,
     })
 
     const oldRequest = useDesktopSessionStore.getState().sendMessage("old request")
-    useDesktopSessionStore.setState({ activeSessionId: "session-new", sending: false })
+    useDesktopSessionStore.setState({ activeSessionId: "session-new" })
     const newRequest = useDesktopSessionStore.getState().sendMessage("new request")
 
     resolveOld()
     await oldRequest
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      activeSessionId: "session-new",
-      sending: true,
-    })
+    expect(useDesktopSessionStore.getState().activeSessionId).toBe("session-new")
+    expect(selectSessionSending(useDesktopSessionStore.getState(), "session-new")).toBe(true)
 
     resolveNew()
     await newRequest
-    expect(useDesktopSessionStore.getState().sending).toBe(false)
+    expect(selectSessionSending(useDesktopSessionStore.getState(), "session-new")).toBe(false)
   })
 
   it("keeps a successful submission visible until the session stream confirms it", async () => {
@@ -1071,9 +1054,6 @@ describe("desktop session store prompt intent boundaries", () => {
     vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      sending: false,
-      error: null,
-      pendingPromptSubmissions: {},
     })
 
     const request = useDesktopSessionStore.getState().sendMessage("new request")
@@ -1121,9 +1101,6 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: runningView,
-      sending: false,
-      error: null,
-      pendingPromptSubmissions: {},
     })
 
     const request = useDesktopSessionStore.getState().sendMessage("queued request")
@@ -1146,9 +1123,6 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: emptySessionView("session-1"),
-      sending: false,
-      pendingPromptSubmissions: {},
-      error: null,
     })
 
     await useDesktopSessionStore.getState().sendMessage("first request")
@@ -1156,15 +1130,13 @@ describe("desktop session store prompt intent boundaries", () => {
 
     const firstCall = sendPrompt.mock.calls[0]!
     const secondCall = sendPrompt.mock.calls[1]!
-    expect(Object.values(useDesktopSessionStore.getState().pendingPromptSubmissions)).toHaveLength(
-      2
-    )
-    expect(
-      useDesktopSessionStore.getState().pendingPromptSubmissions[firstCall[0].id]
-    ).toMatchObject({ placement: "transcript" })
-    expect(
-      useDesktopSessionStore.getState().pendingPromptSubmissions[secondCall[0].id]
-    ).toMatchObject({ placement: "queue" })
+    expect(Object.values(sessionRuntime("session-1").pendingPromptSubmissions)).toHaveLength(2)
+    expect(sessionRuntime("session-1").pendingPromptSubmissions[firstCall[0].id]).toMatchObject({
+      placement: "transcript",
+    })
+    expect(sessionRuntime("session-1").pendingPromptSubmissions[secondCall[0].id]).toMatchObject({
+      placement: "queue",
+    })
 
     useDesktopSessionStore.getState().applySessionUpdate({
       ...emptySessionView("session-1", 1),
@@ -1181,7 +1153,7 @@ describe("desktop session store prompt intent boundaries", () => {
       ],
     })
 
-    expect(Object.keys(useDesktopSessionStore.getState().pendingPromptSubmissions)).toEqual([
+    expect(Object.keys(sessionRuntime("session-1").pendingPromptSubmissions)).toEqual([
       secondCall[0].id,
     ])
   })
@@ -1198,9 +1170,6 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: emptySessionView("session-1"),
-      sending: false,
-      pendingPromptSubmissions: {},
-      error: null,
     })
 
     const request = useDesktopSessionStore.getState().sendMessage("confirmed request")
@@ -1222,15 +1191,11 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-2",
       sessionView: emptySessionView("session-2", 1),
-      error: null,
     })
     rejectSend(new Error("response lost"))
 
     await expect(request).resolves.toBeUndefined()
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      pendingPromptSubmissions: {},
-      error: null,
-    })
+    expect(sessionRuntime("session-1").pendingPromptSubmissions).toEqual({})
   })
 
   it("reuses the same input id when an uncertain send is retried", async () => {
@@ -1241,9 +1206,6 @@ describe("desktop session store prompt intent boundaries", () => {
     vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      sending: false,
-      error: null,
-      pendingPromptSubmissions: {},
     })
 
     await expect(useDesktopSessionStore.getState().sendMessage("retry me")).rejects.toThrow(
@@ -1264,7 +1226,7 @@ describe("desktop session store prompt intent boundaries", () => {
     vi.stubGlobal("window", {
       desktop: { sessions: { editLatestPrompt } },
     })
-    useDesktopSessionStore.setState({ activeSessionId: "session-1", sending: false, error: null })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
 
     await useDesktopSessionStore.getState().editLatestMessage("message-1", "replacement")
 
@@ -1286,9 +1248,6 @@ describe("desktop session store prompt intent boundaries", () => {
     })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      sending: false,
-      error: null,
-      pendingPromptEdit: null,
     })
 
     await expect(
@@ -1298,7 +1257,7 @@ describe("desktop session store prompt intent boundaries", () => {
 
     expect(editLatestPrompt).toHaveBeenCalledTimes(2)
     expect(editLatestPrompt.mock.calls[1]?.[0].id).toBe(editLatestPrompt.mock.calls[0]?.[0].id)
-    expect(useDesktopSessionStore.getState().pendingPromptEdit).toBeNull()
+    expect(sessionRuntime("session-1").pendingPromptEdit).toBeNull()
   })
 
   it("does not let an old edit settle a newer session send", async () => {
@@ -1321,31 +1280,22 @@ describe("desktop session store prompt intent boundaries", () => {
     })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      sending: false,
-      sendingOperationId: null,
-      pendingPromptSubmissions: {},
-      pendingPromptEdit: null,
-      error: null,
     })
 
     const editing = useDesktopSessionStore.getState().editLatestMessage("message-1", "replacement")
     useDesktopSessionStore.setState({
       activeSessionId: "session-2",
-      sending: false,
-      sendingOperationId: null,
     })
     const sending = useDesktopSessionStore.getState().sendMessage("new session request")
 
     resolveEdit()
     await editing
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      activeSessionId: "session-2",
-      sending: true,
-    })
+    expect(useDesktopSessionStore.getState().activeSessionId).toBe("session-2")
+    expect(selectSessionSending(useDesktopSessionStore.getState(), "session-2")).toBe(true)
 
     resolveSend()
     await sending
-    expect(useDesktopSessionStore.getState().sending).toBe(false)
+    expect(selectSessionSending(useDesktopSessionStore.getState(), "session-2")).toBe(false)
   })
 
   it("binds stop to the active run visible at click time", async () => {
@@ -1384,8 +1334,6 @@ describe("desktop session store prompt intent boundaries", () => {
     })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      queuedPromptActions: {},
-      error: null,
     })
 
     await useDesktopSessionStore
@@ -1404,7 +1352,7 @@ describe("desktop session store prompt intent boundaries", () => {
       inputId: "input-other",
       queuedRunId: "run-other",
     })
-    expect(Object.values(useDesktopSessionStore.getState().queuedPromptActions)).toEqual([
+    expect(Object.values(sessionRuntime("session-1").queuedPromptActions)).toEqual([
       expect.objectContaining({ runId: "run-queued", phase: "acknowledged" }),
       expect.objectContaining({ runId: "run-other", phase: "acknowledged" }),
     ])
@@ -1422,15 +1370,13 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: emptySessionView("session-1"),
-      error: null,
-      queuedPromptActions: {},
     })
 
     const request = useDesktopSessionStore
       .getState()
       .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
 
-    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+    expect(sessionRuntime("session-1").queuedPromptActions).toMatchObject({
       "session-1:run-queued": {
         sessionId: "session-1",
         runId: "run-queued",
@@ -1442,7 +1388,7 @@ describe("desktop session store prompt intent boundaries", () => {
     resolvePromote()
     await request
 
-    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+    expect(sessionRuntime("session-1").queuedPromptActions).toMatchObject({
       "session-1:run-queued": {
         sessionId: "session-1",
         runId: "run-queued",
@@ -1476,8 +1422,6 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: pendingView,
-      error: null,
-      queuedPromptActions: {},
     })
 
     const request = useDesktopSessionStore
@@ -1491,15 +1435,11 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-2",
       sessionView: emptySessionView("session-2", 1),
-      error: null,
     })
     rejectPromote(new Error("response lost"))
     await request
 
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      queuedPromptActions: {},
-      error: null,
-    })
+    expect(sessionRuntime("session-1").queuedPromptActions).toEqual({})
   })
 
   it("keeps an action failure on its queued run with a readable message", async () => {
@@ -1510,15 +1450,13 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: emptySessionView("session-1"),
-      error: null,
-      queuedPromptActions: {},
     })
 
     await useDesktopSessionStore
       .getState()
       .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
 
-    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+    expect(sessionRuntime("session-1").queuedPromptActions).toMatchObject({
       "session-1:run-queued": {
         phase: "failed",
         error: "当前回答已经切换，这条消息仍保留在待处理队列中。",
@@ -1538,18 +1476,16 @@ describe("desktop session store prompt intent boundaries", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       sessionView: emptySessionView("session-1"),
-      error: null,
-      queuedPromptActions: {},
     })
 
     const request = useDesktopSessionStore
       .getState()
       .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
-    useDesktopSessionStore.setState({ activeSessionId: "session-2", error: null })
+    useDesktopSessionStore.setState({ activeSessionId: "session-2" })
     rejectPromote(new Error("Active run changed"))
     await request
 
-    expect(useDesktopSessionStore.getState().error).toBeNull()
+    expect(selectActiveSessionQueuedPromptActions(useDesktopSessionStore.getState())).toEqual({})
     expect(
       useDesktopSessionStore.getState().sessionRuntimes["session-1"]?.queuedPromptActions
     ).toMatchObject({
@@ -1560,15 +1496,6 @@ describe("desktop session store prompt intent boundaries", () => {
   it("clears an acknowledged queue action when SSE reports the run terminal", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      queuedPromptActions: {
-        "session-1:run-queued": {
-          sessionId: "session-1",
-          inputId: "input-queued",
-          runId: "run-queued",
-          kind: "promote",
-          phase: "acknowledged",
-        },
-      },
       sessionRuntimes: {
         "session-1": {
           ...createEmptySessionRuntime(),
@@ -1617,6 +1544,6 @@ describe("desktop session store prompt intent boundaries", () => {
       permissions: [],
     })
 
-    expect(useDesktopSessionStore.getState().queuedPromptActions).toEqual({})
+    expect(sessionRuntime("session-1").queuedPromptActions).toEqual({})
   })
 })

@@ -4,7 +4,6 @@ import {
   beginOperation,
   createEmptySessionRuntime,
   failOperation,
-  projectRuntimeToLegacyMirror,
   removeOperation,
 } from "./operation-state"
 import { classifyPromptPlacement, updatePendingPromptSubmission } from "./pending-prompt-state"
@@ -95,26 +94,22 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       } catch (error) {
         const message = errorMessage(error)
         const confirmed = promptSubmissionConfirmed(get(), sessionId, submission.id)
-        replaceRuntime(
-          sessionId,
-          (currentRuntime) => {
-            if (confirmed) return removeOperation(currentRuntime, submission.id)
-            return failOperation(
-              {
-                ...currentRuntime,
-                pendingPromptSubmissions: updatePendingPromptSubmission(
-                  currentRuntime.pendingPromptSubmissions,
-                  submission.id,
-                  (pendingSubmission) => ({ ...pendingSubmission, phase: "failed", error: message })
-                ),
-              },
-              submission.id,
-              message,
-              Date.now()
-            )
-          },
-          confirmed ? undefined : message
-        )
+        replaceRuntime(sessionId, (currentRuntime) => {
+          if (confirmed) return removeOperation(currentRuntime, submission.id)
+          return failOperation(
+            {
+              ...currentRuntime,
+              pendingPromptSubmissions: updatePendingPromptSubmission(
+                currentRuntime.pendingPromptSubmissions,
+                submission.id,
+                (pendingSubmission) => ({ ...pendingSubmission, phase: "failed", error: message })
+              ),
+            },
+            submission.id,
+            message,
+            Date.now()
+          )
+        })
         if (!confirmed) throw error
       } finally {
         context.scheduleSelectedProjectGitRefresh(true)
@@ -163,13 +158,10 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       } catch (error) {
         const message = errorMessage(error)
         const confirmed = !getSessionRuntime(get(), sessionId).pendingPromptEdit
-        replaceRuntime(
-          sessionId,
-          (currentRuntime) =>
-            confirmed
-              ? removeOperation(currentRuntime, edit.id)
-              : failOperation(currentRuntime, edit.id, message, Date.now()),
-          confirmed ? undefined : message
+        replaceRuntime(sessionId, (currentRuntime) =>
+          confirmed
+            ? removeOperation(currentRuntime, edit.id)
+            : failOperation(currentRuntime, edit.id, message, Date.now())
         )
         if (!confirmed) throw error
       } finally {
@@ -205,13 +197,10 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       } catch (error) {
         const message = errorMessage(error)
         const confirmed = !getSessionRuntime(get(), sessionId).operations[operationId]
-        replaceRuntime(
-          sessionId,
-          (runtime) =>
-            confirmed
-              ? removeOperation(runtime, operationId)
-              : failOperation(runtime, operationId, message, Date.now()),
-          confirmed ? undefined : message
+        replaceRuntime(sessionId, (runtime) =>
+          confirmed
+            ? removeOperation(runtime, operationId)
+            : failOperation(runtime, operationId, message, Date.now())
         )
       }
     },
@@ -235,13 +224,10 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       } catch (error) {
         const message = errorMessage(error)
         const confirmed = !getSessionRuntime(get(), sessionId).operations[operationId]
-        replaceRuntime(
-          sessionId,
-          (runtime) =>
-            confirmed
-              ? removeOperation(runtime, operationId)
-              : failOperation(runtime, operationId, message, Date.now()),
-          confirmed ? undefined : message
+        replaceRuntime(sessionId, (runtime) =>
+          confirmed
+            ? removeOperation(runtime, operationId)
+            : failOperation(runtime, operationId, message, Date.now())
         )
       }
     },
@@ -263,10 +249,8 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       replaceRuntime(sessionId, (runtime) => removeOperation(runtime, operationId))
     } catch (error) {
       const message = errorMessage(error)
-      replaceRuntime(
-        sessionId,
-        (runtime) => failOperation(runtime, operationId, message, Date.now()),
-        message
+      replaceRuntime(sessionId, (runtime) =>
+        failOperation(runtime, operationId, message, Date.now())
       )
       throw error
     } finally {
@@ -276,20 +260,14 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
 
   function replaceRuntime(
     sessionId: string,
-    update: (runtime: DesktopSessionRuntime) => DesktopSessionRuntime,
-    activeError?: string
+    update: (runtime: DesktopSessionRuntime) => DesktopSessionRuntime
   ): void {
     set((state) => {
       const runtime = update(getSessionRuntime(state, sessionId))
       const next = {
         sessionRuntimes: { ...state.sessionRuntimes, [sessionId]: runtime },
       }
-      if (state.activeSessionId !== sessionId) return next
-      return {
-        ...next,
-        ...projectRuntimeToLegacyMirror(runtime),
-        error: activeError ?? null,
-      }
+      return next
     })
   }
 }

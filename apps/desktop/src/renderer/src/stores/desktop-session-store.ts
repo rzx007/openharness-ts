@@ -12,10 +12,7 @@ import {
   upsertSession,
 } from "./desktop-session/helpers"
 import { createInitialRuntimeState } from "./desktop-session/initial-state"
-import {
-  createEmptySessionRuntime,
-  projectRuntimeToLegacyMirror,
-} from "./desktop-session/operation-state"
+import { createEmptySessionRuntime } from "./desktop-session/operation-state"
 import {
   acceptActiveSessionView,
   reconcileRuntimeWithView,
@@ -40,7 +37,6 @@ let selectedProjectGitRefreshTimer: ReturnType<typeof setTimeout> | null = null
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => ({
   loadStatus: "idle",
   daemonStatus: createInitialDaemonStatus(),
-  error: null,
   projects: [],
   sessions: [],
   archivedSessions: [],
@@ -59,12 +55,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   branches: [],
   activeSessionId: null,
   sessionView: null,
-  openingSession: false,
-  sending: false,
-  pendingPromptSubmissions: {},
-  sendingOperationId: null,
-  pendingPromptEdit: null,
-  queuedPromptActions: {},
   ...createInitialRuntimeState(),
   ...createBootstrapActions({ set, get }),
   ...createProjectActions({ set, get }),
@@ -98,11 +88,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
       return {
         sessionView: { ...view, session },
-        // These top-level fields remain a temporary compatibility mirror until task 6
-        // migrates the conversation components to session runtime selectors.
-        ...projectRuntimeToLegacyMirror(runtime),
         sessionRuntimes: { ...state.sessionRuntimes, [view.session.id]: runtime },
-        openingSession: false,
         selectedModel: session.model,
         selectedProvider: sessionProvider(session, state.defaultProvider),
         selectedPermissionMode: sessionPermissionMode(session, state.defaultPermissionMode),
@@ -117,10 +103,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       }
     })
     scheduleSelectedProjectGitRefresh(true)
-  },
-
-  clearError() {
-    set({ error: null })
   },
 }))
 

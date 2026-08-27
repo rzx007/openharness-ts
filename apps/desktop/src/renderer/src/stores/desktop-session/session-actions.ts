@@ -17,7 +17,6 @@ import {
   bindOperationToSession,
   createEmptySessionRuntime,
   failOperation,
-  projectRuntimeToLegacyMirror,
   removeOperation,
 } from "./operation-state"
 import {
@@ -59,9 +58,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       return {
         activeSessionId: sessionId,
         sessionView: null,
-        openingSession: true,
-        ...projectRuntimeToLegacyMirror(openingRuntime),
-        error: null,
         sessionRuntimes: {
           ...state.sessionRuntimes,
           [sessionId]: openingRuntime,
@@ -82,8 +78,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         const settledRuntime = reconcileRuntimeWithView(removeOperation(runtime, operationId), view)
         if (acceptedView !== view) {
           return {
-            openingSession: false,
-            ...projectRuntimeToLegacyMirror(settledRuntime),
             sessionRuntimes: {
               ...state.sessionRuntimes,
               [sessionId]: settledRuntime,
@@ -96,8 +90,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         return {
           ...workspace,
           sessionView: view,
-          ...projectRuntimeToLegacyMirror(settledRuntime),
-          openingSession: false,
           selectedModel: view.session.model,
           selectedProvider: sessionProvider(view.session, state.defaultProvider),
           selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
@@ -157,13 +149,10 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         clearPersistedActiveSessionId()
         const failedRuntime = failOperation(runtime, operationId, errorMessage(error), Date.now())
         return {
-          openingSession: false,
-          error: errorMessage(error),
           sessionRuntimes: {
             ...state.sessionRuntimes,
             [sessionId]: failedRuntime,
           },
-          ...projectRuntimeToLegacyMirror(failedRuntime),
         }
       })
       return failed ? "failed" : "cancelled"
@@ -177,16 +166,11 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       clearPersistedActiveSessionId()
       const newConversationRuntime = createEmptySessionRuntime()
       set((state) => ({
-        ...projectRuntimeToLegacyMirror(newConversationRuntime, {
-          includeCreateSession: true,
-        }),
         activeSessionId: null,
         sessionView: null,
         selectedModel: state.defaultModel,
         selectedProvider: state.defaultProvider,
         selectedPermissionMode: state.defaultPermissionMode,
-        openingSession: false,
-        error: null,
         newConversationRuntime,
       }))
     },
@@ -199,7 +183,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         selectedProvider: model.providerName,
         defaultModel: model.id,
         defaultProvider: model.providerName,
-        error: null,
       })
       try {
         const data = await window.desktop.sessions.setDefaultModel({
@@ -215,13 +198,12 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             model.providerName
           )
         )
-      } catch (error) {
+      } catch {
         set({
           selectedModel: previousModel,
           selectedProvider: previousProvider,
           defaultModel: previousModel,
           defaultProvider: previousProvider,
-          error: errorMessage(error),
         })
       }
     },
@@ -231,7 +213,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       set({
         selectedPermissionMode: permissionMode,
         defaultPermissionMode: permissionMode,
-        error: null,
       })
       try {
         const data = await window.desktop.sessions.setDefaultPermissionMode({ permissionMode })
@@ -245,63 +226,50 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           ),
           selectedPermissionMode: data.defaultPermissionMode,
         }))
-      } catch (error) {
+      } catch {
         set({
           selectedPermissionMode: previous,
           defaultPermissionMode: previous,
-          error: errorMessage(error),
         })
       }
     },
 
     async updateSessionModel(sessionId, model) {
-      try {
-        const session = await window.desktop.sessions.updateModel({
-          sessionId,
-          model: model.id,
-          provider: model.providerName,
-        })
-        set((state) => ({
-          sessions: upsertSession(state.sessions, session),
-          selectedModel: state.activeSessionId === sessionId ? session.model : state.selectedModel,
-          selectedProvider:
-            state.activeSessionId === sessionId
-              ? sessionProvider(session, model.providerName)
-              : state.selectedProvider,
-          sessionView:
-            state.sessionView?.session.id === sessionId
-              ? { ...state.sessionView, session }
-              : state.sessionView,
-          error: null,
-        }))
-      } catch (error) {
-        set({ error: errorMessage(error) })
-        throw error
-      }
+      const session = await window.desktop.sessions.updateModel({
+        sessionId,
+        model: model.id,
+        provider: model.providerName,
+      })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        selectedModel: state.activeSessionId === sessionId ? session.model : state.selectedModel,
+        selectedProvider:
+          state.activeSessionId === sessionId
+            ? sessionProvider(session, model.providerName)
+            : state.selectedProvider,
+        sessionView:
+          state.sessionView?.session.id === sessionId
+            ? { ...state.sessionView, session }
+            : state.sessionView,
+      }))
     },
 
     async updateSessionPermissionMode(sessionId, permissionMode) {
-      try {
-        const session = await window.desktop.sessions.updatePermissionMode({
-          sessionId,
-          permissionMode,
-        })
-        set((state) => ({
-          sessions: upsertSession(state.sessions, session),
-          selectedPermissionMode:
-            state.activeSessionId === sessionId
-              ? sessionPermissionMode(session)
-              : state.selectedPermissionMode,
-          sessionView:
-            state.sessionView?.session.id === sessionId
-              ? { ...state.sessionView, session }
-              : state.sessionView,
-          error: null,
-        }))
-      } catch (error) {
-        set({ error: errorMessage(error) })
-        throw error
-      }
+      const session = await window.desktop.sessions.updatePermissionMode({
+        sessionId,
+        permissionMode,
+      })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        selectedPermissionMode:
+          state.activeSessionId === sessionId
+            ? sessionPermissionMode(session)
+            : state.selectedPermissionMode,
+        sessionView:
+          state.sessionView?.session.id === sessionId
+            ? { ...state.sessionView, session }
+            : state.sessionView,
+      }))
     },
 
     async openSession(sessionId) {
@@ -317,12 +285,8 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       const workspace = resolveSessionWorkspace(get().projects, session)
       const newConversationRuntime = createEmptySessionRuntime()
       set(() => ({
-        ...projectRuntimeToLegacyMirror(newConversationRuntime, {
-          includeCreateSession: true,
-        }),
         activeSessionId: null,
         sessionView: null,
-        openingSession: false,
         ...workspace,
         selectedModel: session.model,
         selectedProvider: sessionProvider(session, get().defaultProvider),
@@ -331,7 +295,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         selectedProjectGitCheckedAt: null,
         branch: null,
         branches: [],
-        error: null,
         newConversationRuntime,
       }))
       if (workspace.selectedProject) await get().selectProject(workspace.selectedProject)
@@ -341,69 +304,51 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       if (!sessionId) throw new Error("会话 ID 不能为空")
       const navigationOwnerSessionId = get().activeSessionId
       const navigationOwnerGeneration = primaryNavigationGeneration
-      try {
-        const session = await window.desktop.sessions.fork({
-          sessionId,
-          ...(options?.beforeMessageId ? { beforeMessageId: options.beforeMessageId } : {}),
-          ...(options?.afterMessageId ? { afterMessageId: options.afterMessageId } : {}),
-        })
-        set((state) => ({
-          sessions: upsertSession(state.sessions, session),
-          archivedSessions: state.archivedSessions.filter((item) => item.id !== session.id),
-          error: null,
-        }))
-        if (
-          primaryNavigationGeneration === navigationOwnerGeneration &&
-          get().activeSessionId === navigationOwnerSessionId
-        ) {
-          await get().openSession(session.id)
-        }
-        return session
-      } catch (error) {
-        set({ error: errorMessage(error) })
-        throw error
+      const session = await window.desktop.sessions.fork({
+        sessionId,
+        ...(options?.beforeMessageId ? { beforeMessageId: options.beforeMessageId } : {}),
+        ...(options?.afterMessageId ? { afterMessageId: options.afterMessageId } : {}),
+      })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        archivedSessions: state.archivedSessions.filter((item) => item.id !== session.id),
+      }))
+      if (
+        primaryNavigationGeneration === navigationOwnerGeneration &&
+        get().activeSessionId === navigationOwnerSessionId
+      ) {
+        await get().openSession(session.id)
       }
+      return session
     },
 
     async renameSession(sessionId, title) {
       const normalizedTitle = title.replace(/\s+/g, " ").trim()
       if (!normalizedTitle) return
-      try {
-        const session = await window.desktop.sessions.rename({ sessionId, title: normalizedTitle })
-        set((state) => ({
-          sessions: upsertSession(state.sessions, session),
-          sessionView:
-            state.sessionView?.session.id === sessionId
-              ? { ...state.sessionView, session }
-              : state.sessionView,
-          error: null,
-        }))
-      } catch (error) {
-        set({ error: errorMessage(error) })
-        throw error
-      }
+      const session = await window.desktop.sessions.rename({ sessionId, title: normalizedTitle })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        sessionView:
+          state.sessionView?.session.id === sessionId
+            ? { ...state.sessionView, session }
+            : state.sessionView,
+      }))
     },
 
     async togglePinSession(sessionId) {
       const existing = get().sessions.find((session) => session.id === sessionId)
       if (!existing) return
-      try {
-        const session = await window.desktop.sessions.setPinned({
-          sessionId,
-          pinned: !isSessionPinned(existing),
-        })
-        set((state) => ({
-          sessions: upsertSession(state.sessions, session),
-          sessionView:
-            state.sessionView?.session.id === sessionId
-              ? { ...state.sessionView, session }
-              : state.sessionView,
-          error: null,
-        }))
-      } catch (error) {
-        set({ error: errorMessage(error) })
-        throw error
-      }
+      const session = await window.desktop.sessions.setPinned({
+        sessionId,
+        pinned: !isSessionPinned(existing),
+      })
+      set((state) => ({
+        sessions: upsertSession(state.sessions, session),
+        sessionView:
+          state.sessionView?.session.id === sessionId
+            ? { ...state.sessionView, session }
+            : state.sessionView,
+      }))
     },
 
     async archiveSession(sessionId) {
@@ -411,44 +356,27 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       if (!existing) return
       const invalidatesPrimaryNavigation = get().activeSessionId === sessionId
       if (invalidatesPrimaryNavigation) advancePrimaryNavigation()
-      try {
-        const archived = await window.desktop.sessions.archive(sessionId)
-        const isActive = get().activeSessionId === sessionId
-        set((state) => ({
-          ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
-          sessions: state.sessions.filter((session) => session.id !== sessionId),
-          archivedSessions: upsertSession(state.archivedSessions, archived),
-          activeSessionId: isActive ? null : state.activeSessionId,
-          sessionView: isActive ? null : state.sessionView,
-          pendingPromptSubmissions: filterPendingPromptSubmissions(
-            state.pendingPromptSubmissions,
-            (submission) => submission.sessionId !== sessionId
-          ),
-          queuedPromptActions: filterQueuedPromptActions(
-            state.queuedPromptActions,
-            (action) => action.sessionId !== sessionId
-          ),
-          sessionRuntimes: removeSessionRuntimes(state.sessionRuntimes, new Set([sessionId])),
-          openingSession: isActive ? false : state.openingSession,
-          sending: isActive ? false : state.sending,
-          sendingOperationId: isActive ? null : state.sendingOperationId,
-          selectedModel: isActive ? existing.model : state.selectedModel,
-          selectedProvider: isActive
-            ? sessionProvider(existing, state.defaultProvider)
-            : state.selectedProvider,
-          selectedPermissionMode: isActive
-            ? sessionPermissionMode(existing, state.defaultPermissionMode)
-            : state.selectedPermissionMode,
-          error: null,
-        }))
-        if (isActive) {
-          clearPersistedActiveSessionId()
-          const project = get().selectedProject
-          if (project) await get().selectProject(project)
-        }
-      } catch (error) {
-        set({ error: errorMessage(error) })
-        throw error
+      const archived = await window.desktop.sessions.archive(sessionId)
+      const isActive = get().activeSessionId === sessionId
+      set((state) => ({
+        ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
+        sessions: state.sessions.filter((session) => session.id !== sessionId),
+        archivedSessions: upsertSession(state.archivedSessions, archived),
+        activeSessionId: isActive ? null : state.activeSessionId,
+        sessionView: isActive ? null : state.sessionView,
+        sessionRuntimes: removeSessionRuntimes(state.sessionRuntimes, new Set([sessionId])),
+        selectedModel: isActive ? existing.model : state.selectedModel,
+        selectedProvider: isActive
+          ? sessionProvider(existing, state.defaultProvider)
+          : state.selectedProvider,
+        selectedPermissionMode: isActive
+          ? sessionPermissionMode(existing, state.defaultPermissionMode)
+          : state.selectedPermissionMode,
+      }))
+      if (isActive) {
+        clearPersistedActiveSessionId()
+        const project = get().selectedProject
+        if (project) await get().selectProject(project)
       }
     },
 
@@ -459,49 +387,30 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       if (!existing) return
       const invalidatesPrimaryNavigation = get().activeSessionId === sessionId
       if (invalidatesPrimaryNavigation) advancePrimaryNavigation()
-      try {
-        const deletedSessionIds = await window.desktop.sessions.delete(sessionId)
-        const deleted = new Set(deletedSessionIds)
-        const activeSessionId = get().activeSessionId
-        const isActive = activeSessionId !== null && deleted.has(activeSessionId)
-        set((state) => ({
-          ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
-          sessions: state.sessions.filter((session) => !deleted.has(session.id)),
-          archivedSessions: state.archivedSessions.filter((session) => !deleted.has(session.id)),
-          activeSessionId: isActive ? null : state.activeSessionId,
-          sessionView:
-            state.sessionView && deleted.has(state.sessionView.session.id)
-              ? null
-              : state.sessionView,
-          pendingPromptSubmissions: filterPendingPromptSubmissions(
-            state.pendingPromptSubmissions,
-            (submission) => !deleted.has(submission.sessionId)
-          ),
-          queuedPromptActions: filterQueuedPromptActions(
-            state.queuedPromptActions,
-            (action) => !deleted.has(action.sessionId)
-          ),
-          sessionRuntimes: removeSessionRuntimes(state.sessionRuntimes, deleted),
-          openingSession: isActive ? false : state.openingSession,
-          sending: isActive ? false : state.sending,
-          sendingOperationId: isActive ? null : state.sendingOperationId,
-          selectedModel: isActive ? existing.model : state.selectedModel,
-          selectedProvider: isActive
-            ? sessionProvider(existing, state.defaultProvider)
-            : state.selectedProvider,
-          selectedPermissionMode: isActive
-            ? sessionPermissionMode(existing, state.defaultPermissionMode)
-            : state.selectedPermissionMode,
-          error: null,
-        }))
-        if (isActive) {
-          clearPersistedActiveSessionId()
-          const project = get().selectedProject
-          if (project) await get().selectProject(project)
-        }
-      } catch (error) {
-        set({ error: errorMessage(error) })
-        throw error
+      const deletedSessionIds = await window.desktop.sessions.delete(sessionId)
+      const deleted = new Set(deletedSessionIds)
+      const activeSessionId = get().activeSessionId
+      const isActive = activeSessionId !== null && deleted.has(activeSessionId)
+      set((state) => ({
+        ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
+        sessions: state.sessions.filter((session) => !deleted.has(session.id)),
+        archivedSessions: state.archivedSessions.filter((session) => !deleted.has(session.id)),
+        activeSessionId: isActive ? null : state.activeSessionId,
+        sessionView:
+          state.sessionView && deleted.has(state.sessionView.session.id) ? null : state.sessionView,
+        sessionRuntimes: removeSessionRuntimes(state.sessionRuntimes, deleted),
+        selectedModel: isActive ? existing.model : state.selectedModel,
+        selectedProvider: isActive
+          ? sessionProvider(existing, state.defaultProvider)
+          : state.selectedProvider,
+        selectedPermissionMode: isActive
+          ? sessionPermissionMode(existing, state.defaultPermissionMode)
+          : state.selectedPermissionMode,
+      }))
+      if (isActive) {
+        clearPersistedActiveSessionId()
+        const project = get().selectedProject
+        if (project) await get().selectProject(project)
       }
     },
 
@@ -518,13 +427,17 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       } = get()
       const model = selectedModel ?? defaultModel
       const provider = selectedProvider ?? defaultProvider
-      if (!prompt || get().sending) return null
+      if (
+        !prompt ||
+        Object.values(get().newConversationRuntime.operations).some(
+          (operation) => operation.kind === "create-session" && operation.phase === "pending"
+        )
+      )
+        return null
       if (workspaceMode === "project" && !selectedProject) {
-        set({ error: "请先选择一个项目目录。" })
         return null
       }
       if (!model) {
-        set({ error: "没有可用模型，请先配置模型。" })
         return null
       }
 
@@ -541,8 +454,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       set((state) => {
         const newConversationRuntime = beginOperation(state.newConversationRuntime, createOperation)
         return {
-          ...projectRuntimeToLegacyMirror(newConversationRuntime, { includeCreateSession: true }),
-          error: null,
           newConversationRuntime,
         }
       })
@@ -578,9 +489,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           const ownsNewConversationRuntime =
             state.newConversationRuntime.operations[promptSubmissionId]?.phase === "pending"
           ownsCurrentPage =
-            navigationOwnerGeneration === primaryNavigationGeneration &&
-            state.sendingOperationId === promptSubmissionId &&
-            ownsNewConversationRuntime
+            navigationOwnerGeneration === primaryNavigationGeneration && ownsNewConversationRuntime
           if (ownsCurrentPage) advancePrimaryNavigation()
           const bound = ownsNewConversationRuntime
             ? bindOperationToSession(
@@ -618,8 +527,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             ...(ownsCurrentPage
               ? {
                   activeSessionId: session.id,
-                  openingSession: true,
-                  ...projectRuntimeToLegacyMirror(acknowledgedRuntime),
                 }
               : {}),
           }
@@ -641,13 +548,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                     startedAt: Date.now(),
                   })
               )
-              const runtime = sessionRuntimes[session.id]
-              return {
-                sessionRuntimes,
-                ...(state.activeSessionId === session.id && runtime
-                  ? projectRuntimeToLegacyMirror(runtime)
-                  : {}),
-              }
+              return { sessionRuntimes }
             })
             await window.desktop.sessions.invokeCommand({
               sessionId: session.id,
@@ -660,13 +561,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                   session.id,
                   (runtime) => removeOperation(runtime, invokeCommandOperationId)
                 )
-                const runtime = sessionRuntimes[session.id]
-                return {
-                  sessionRuntimes,
-                  ...(state.activeSessionId === session.id && runtime
-                    ? projectRuntimeToLegacyMirror(runtime)
-                    : {}),
-                }
+                return { sessionRuntimes }
               })
             }
           }
@@ -689,13 +584,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                 ),
               })
             )
-            const runtime = sessionRuntimes[session.id]
-            return {
-              sessionRuntimes,
-              ...(state.activeSessionId === session.id && runtime
-                ? projectRuntimeToLegacyMirror(runtime)
-                : {}),
-            }
+            return { sessionRuntimes }
           })
         }
         const title = formatSessionTitle(prompt)
@@ -729,7 +618,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         set((state) => {
           const ownsNewConversation =
             navigationOwnerGeneration === primaryNavigationGeneration &&
-            state.sendingOperationId === promptSubmissionId &&
             state.newConversationRuntime.operations[promptSubmissionId]?.phase === "pending"
           const sessionRuntimes = startedSessionId
             ? updateSessionRuntime(state.sessionRuntimes, startedSessionId, (runtime) => {
@@ -751,64 +639,22 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                 }
               })
             : state.sessionRuntimes
-          const runtime = startedSessionId ? sessionRuntimes[startedSessionId] : null
-          const isActiveStartedSession = Boolean(
-            startedSessionId && state.activeSessionId === startedSessionId
-          )
           const newConversationRuntime = ownsNewConversation
             ? failOperation(state.newConversationRuntime, promptSubmissionId, message, Date.now())
             : state.newConversationRuntime
           return {
-            openingSession: isActiveStartedSession ? false : state.openingSession,
-            error:
-              (commandOperationId && isActiveStartedSession) ||
-              (!startedSessionId && ownsNewConversation)
-                ? message
-                : state.error,
             newConversationRuntime,
             sessionRuntimes,
-            ...(isActiveStartedSession && runtime ? projectRuntimeToLegacyMirror(runtime) : {}),
-            ...(!startedSessionId && ownsNewConversation
-              ? projectRuntimeToLegacyMirror(newConversationRuntime, { includeCreateSession: true })
-              : {}),
           }
         })
         if (confirmed) return startedSessionId
         throw error
       } finally {
-        set((state) => {
-          const activeRuntime = startedSessionId ? state.sessionRuntimes[startedSessionId] : null
-          if (startedSessionId && state.activeSessionId === startedSessionId && activeRuntime) {
-            return projectRuntimeToLegacyMirror(activeRuntime)
-          }
-          if (state.sendingOperationId === promptSubmissionId) {
-            return projectRuntimeToLegacyMirror(state.newConversationRuntime, {
-              includeCreateSession: true,
-            })
-          }
-          return state
-        })
         context.scheduleSelectedProjectGitRefresh(true)
       }
       return startedSessionId
     },
   }
-}
-
-function filterPendingPromptSubmissions(
-  submissions: Record<string, PendingPromptSubmission>,
-  keep: (submission: PendingPromptSubmission) => boolean
-): Record<string, PendingPromptSubmission> {
-  return Object.fromEntries(
-    Object.entries(submissions).filter(([, submission]) => keep(submission))
-  )
-}
-
-function filterQueuedPromptActions(
-  actions: DesktopSessionRuntime["queuedPromptActions"],
-  keep: (action: DesktopSessionRuntime["queuedPromptActions"][string]) => boolean
-): DesktopSessionRuntime["queuedPromptActions"] {
-  return Object.fromEntries(Object.entries(actions).filter(([, action]) => keep(action)))
 }
 
 function removeSessionRuntimes(

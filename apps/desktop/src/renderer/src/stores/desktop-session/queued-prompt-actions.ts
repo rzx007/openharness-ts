@@ -4,7 +4,6 @@ import {
   beginOperation,
   createEmptySessionRuntime,
   failOperation,
-  projectRuntimeToLegacyMirror,
   removeOperation,
 } from "./operation-state"
 import { queuedPromptActionConfirmed, queuedPromptActionKey } from "./pending-prompt-state"
@@ -67,15 +66,10 @@ export function createQueuedPromptActions(
       } catch (error) {
         const message = queuedPromptActionError("promote", error)
         const confirmed = queuedActionConfirmed(get(), sessionId, actionKey, action)
-        replaceRuntime(
-          sessionId,
-          actionKey,
-          action,
-          (runtime) =>
-            confirmed
-              ? removeActionAndOperation(runtime, actionKey)
-              : failAction(runtime, actionKey, message),
-          confirmed ? undefined : message
+        replaceRuntime(sessionId, actionKey, action, (runtime) =>
+          confirmed
+            ? removeActionAndOperation(runtime, actionKey)
+            : failAction(runtime, actionKey, message)
         )
       } finally {
         context.scheduleSelectedProjectGitRefresh(true)
@@ -119,15 +113,10 @@ export function createQueuedPromptActions(
       } catch (error) {
         const message = queuedPromptActionError("cancel", error)
         const confirmed = queuedActionConfirmed(get(), sessionId, actionKey, action)
-        replaceRuntime(
-          sessionId,
-          actionKey,
-          action,
-          (runtime) =>
-            confirmed
-              ? removeActionAndOperation(runtime, actionKey)
-              : failAction(runtime, actionKey, message),
-          confirmed ? undefined : message
+        replaceRuntime(sessionId, actionKey, action, (runtime) =>
+          confirmed
+            ? removeActionAndOperation(runtime, actionKey)
+            : failAction(runtime, actionKey, message)
         )
       } finally {
         context.scheduleSelectedProjectGitRefresh(true)
@@ -139,18 +128,11 @@ export function createQueuedPromptActions(
     sessionId: string,
     _actionKey: string,
     _action: QueuedPromptAction,
-    update: (runtime: DesktopSessionRuntime) => DesktopSessionRuntime,
-    activeError?: string
+    update: (runtime: DesktopSessionRuntime) => DesktopSessionRuntime
   ): void {
     set((state) => {
       const runtime = update(getSessionRuntime(state, sessionId))
-      const next = { sessionRuntimes: { ...state.sessionRuntimes, [sessionId]: runtime } }
-      if (state.activeSessionId !== sessionId) return next
-      return {
-        ...next,
-        ...projectRuntimeToLegacyMirror(runtime),
-        error: activeError ?? null,
-      }
+      return { sessionRuntimes: { ...state.sessionRuntimes, [sessionId]: runtime } }
     })
   }
 }
