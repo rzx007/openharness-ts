@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopBootstrapData, DesktopSessionView } from "@shared/session-types"
+import { createEmptySessionRuntime } from "./desktop-session/operation-state"
 import type { QueuedPromptAction } from "./desktop-session-store"
 import { useDesktopSessionStore } from "./desktop-session-store"
 
@@ -196,6 +197,39 @@ describe("desktop session store project order", () => {
       "project-c",
     ])
     expect(useDesktopSessionStore.getState().projects[1]).toEqual(inspectedProject)
+  })
+
+  it("keeps a project operation failure out of the active session runtime", async () => {
+    const project = {
+      id: "project-unavailable",
+      name: "Unavailable Project",
+      path: "D:\\code\\project-unavailable",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject: vi.fn(async () => {
+            throw new Error("project unavailable")
+          }),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "s1",
+      sessionRuntimes: { s1: createEmptySessionRuntime() },
+      projectOperations: {},
+    })
+
+    await expect(useDesktopSessionStore.getState().selectProject(project)).rejects.toThrow(
+      "project unavailable"
+    )
+
+    expect(useDesktopSessionStore.getState().sessionRuntimes.s1?.operations).toEqual({})
+    expect(Object.values(useDesktopSessionStore.getState().projectOperations[project.id] ?? {})).toContainEqual(
+      expect.objectContaining({ phase: "failed", error: "project unavailable" })
+    )
   })
 })
 

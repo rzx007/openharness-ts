@@ -1,5 +1,21 @@
 import { create } from "zustand"
 
+import {
+  applyBootstrapData,
+  attachDesktopDaemonStatusEvents,
+  createBootstrapActions,
+  createInitialDaemonStatus,
+} from "./desktop-session/bootstrap-actions"
+import {
+  formatSessionTitle,
+  isPlaceholderTitle,
+  isSessionPinned,
+  resolveSessionWorkspace,
+  sessionPermissionMode,
+  sessionProvider,
+  upsertProject,
+  upsertSession,
+} from "./desktop-session/helpers"
 import { createInitialRuntimeState } from "./desktop-session/initial-state"
 import {
   classifyPromptPlacement,
@@ -11,6 +27,12 @@ import {
   updatePendingPromptSubmission,
 } from "./desktop-session/pending-prompt-state"
 import { acceptActiveSessionView } from "./desktop-session/session-view-state"
+import { createProjectActions } from "./desktop-session/project-actions"
+import {
+  clearPersistedActiveSessionId,
+  writePersistedActiveSessionId,
+} from "./desktop-session/persistence"
+import { errorMessage } from "./desktop-session/error-state"
 import type {
   DesktopSessionState,
   PendingPromptEdit,
@@ -20,34 +42,19 @@ import type {
 } from "./desktop-session/types"
 import type {
   CreateDesktopSessionInput,
-  DesktopBootstrapData,
-  DesktopDaemonStatus,
-  DesktopPermissionMode,
-  DesktopProject,
-  DesktopSessionRecord,
   DesktopSessionView,
-  DesktopWorkspaceMode,
 } from "@shared/session-types"
 
 export type { QueuedPromptAction } from "./desktop-session/types"
+export { isSessionPinned } from "./desktop-session/helpers"
 
-const persistedActiveSessionKey = "openharness.desktop.active-session.v1"
-const selectedProjectGitRefreshTtlMs = 5_000
 const selectedProjectGitRefreshDelayMs = 750
 
 let selectedProjectGitRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
-const initialDaemonStatus: DesktopDaemonStatus = {
-  phase: "idle",
-  message: "等待连接 daemon",
-  updatedAt: Date.now(),
-}
-
-let daemonStatusEventsAttached = false
-
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => ({
   loadStatus: "idle",
-  daemonStatus: initialDaemonStatus,
+  daemonStatus: createInitialDaemonStatus(),
   error: null,
   projects: [],
   sessions: [],
@@ -74,81 +81,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   pendingPromptEdit: null,
   queuedPromptActions: {},
   ...createInitialRuntimeState(),
-
-  async initialize() {
-    if (get().loadStatus === "loading" || get().loadStatus === "ready") return
-    ensureDesktopDaemonStatusEvents()
-    set({
-      loadStatus: "loading",
-      daemonStatus: {
-        phase: "discovering",
-        message: "正在观察 daemon 状态",
-        updatedAt: Date.now(),
-      },
-      error: null,
-    })
-    try {
-      const daemonStatus = await window.desktop.sessions.daemonStatus()
-      set({ daemonStatus })
-      const data = await window.desktop.sessions.bootstrap()
-      const latestDaemonStatus = await window.desktop.sessions
-        .daemonStatus()
-        .catch(() => get().daemonStatus)
-      const workspaceMode =
-        get().workspaceMode === "outside_project" || data.projects.length === 0
-          ? "outside_project"
-          : "project"
-      const selectedProject = resolveInitialProject(data, get().selectedProject, workspaceMode)
-      const sessions = sortSessions(data.sessions)
-      const archivedSessions = sortSessions(data.archivedSessions)
-      const persistedSessionId = readPersistedActiveSessionId()
-      set({
-        loadStatus: "ready",
-        daemonStatus: latestDaemonStatus,
-        projects: data.projects,
-        sessions,
-        archivedSessions,
-        models: data.models,
-        defaultModel: data.defaultModel,
-        defaultProvider: data.defaultProvider ?? null,
-        defaultPermissionMode: data.defaultPermissionMode,
-        selectedModel: data.defaultModel,
-        selectedProvider: data.defaultProvider ?? null,
-        selectedPermissionMode: data.defaultPermissionMode,
-        workspaceMode,
-        selectedProject,
-        selectedProjectGit: false,
-        selectedProjectGitCheckedAt: null,
-        branches: [],
-        error: null,
-      })
-      if (selectedProject) await get().selectProject(selectedProject)
-      if (persistedSessionId && sessions.some((session) => session.id === persistedSessionId)) {
-        await get().openSession(persistedSessionId)
-      } else if (persistedSessionId) {
-        clearPersistedActiveSessionId()
-      }
-    } catch (error) {
-      const daemonStatus = await window.desktop.sessions
-        .daemonStatus()
-        .catch(() => get().daemonStatus)
-      set({ loadStatus: "error", daemonStatus, error: errorMessage(error) })
-    }
-  },
-
-  async refreshBootstrap() {
-    const data = await window.desktop.sessions.bootstrap()
-    set((state) => ({
-      ...applyBootstrapData(data, state.selectedProject, state.workspaceMode, null, null),
-      ...(state.activeSessionId
-        ? {
-            selectedModel: state.selectedModel,
-            selectedProvider: state.selectedProvider,
-            selectedPermissionMode: state.selectedPermissionMode,
-          }
-        : {}),
-    }))
-  },
+  ...createBootstrapActions({ set, get }),
+  ...createProjectActions({ set, get }),
 
   async startNewConversation() {
     await window.desktop.sessions.close()
@@ -164,265 +98,6 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       sendingOperationId: null,
       error: null,
     })
-  },
-
-  async chooseProject() {
-    try {
-      const details = await window.desktop.sessions.chooseProject()
-      if (!details) return
-      set((state) => ({
-        projects: upsertProject(state.projects, details.project),
-        workspaceMode: "project",
-        selectedProject: details.project,
-        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
-        selectedProjectGitCheckedAt: Date.now(),
-        branch: details.branch,
-        branches: details.branches ?? [],
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  async selectProject(project) {
-    set({
-      selectedProject: project,
-      workspaceMode: "project",
-      selectedProjectGit: false,
-      selectedProjectGitCheckedAt: null,
-      branch: null,
-      branches: [],
-      error: null,
-    })
-    try {
-      const details = await window.desktop.sessions.inspectProject(project.path)
-      set((state) => ({
-        projects: upsertProject(state.projects, details.project),
-        selectedProject: details.project,
-        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
-        selectedProjectGitCheckedAt: Date.now(),
-        branch: details.branch,
-        branches: details.branches ?? [],
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  selectOutsideProject() {
-    set({
-      workspaceMode: "outside_project",
-      selectedProject: null,
-      selectedProjectGit: false,
-      selectedProjectGitCheckedAt: null,
-      branch: null,
-      branches: [],
-      error: null,
-    })
-  },
-
-  async refreshSelectedProjectGit(options) {
-    const { selectedProject, selectedProjectGitCheckedAt } = get()
-    if (!selectedProject) {
-      set({
-        selectedProjectGit: false,
-        selectedProjectGitCheckedAt: null,
-        branch: null,
-        branches: [],
-      })
-      return false
-    }
-
-    if (
-      !options?.force &&
-      selectedProjectGitCheckedAt !== null &&
-      Date.now() - selectedProjectGitCheckedAt < selectedProjectGitRefreshTtlMs
-    ) {
-      return get().selectedProjectGit
-    }
-
-    try {
-      const details = await window.desktop.sessions.inspectProject(selectedProject.path)
-      if (!samePath(get().selectedProject?.path ?? "", selectedProject.path)) {
-        return get().selectedProjectGit
-      }
-      const git = details.git ?? Boolean(details.branch || details.branches?.length)
-      set((state) => ({
-        projects: upsertProject(state.projects, details.project),
-        selectedProject: details.project,
-        selectedProjectGit: git,
-        selectedProjectGitCheckedAt: Date.now(),
-        branch: details.branch,
-        branches: details.branches ?? [],
-      }))
-      return git
-    } catch {
-      if (samePath(get().selectedProject?.path ?? "", selectedProject.path)) {
-        set({
-          selectedProjectGit: false,
-          selectedProjectGitCheckedAt: Date.now(),
-          branch: null,
-          branches: [],
-        })
-      }
-      return false
-    }
-  },
-
-  async checkoutBranch(branch) {
-    const selectedProject = get().selectedProject
-    if (!selectedProject) return
-    try {
-      const details = await window.desktop.sessions.checkoutBranch({
-        path: selectedProject.path,
-        branch,
-      })
-      set((state) => ({
-        projects: upsertProject(state.projects, details.project),
-        selectedProject: details.project,
-        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
-        selectedProjectGitCheckedAt: Date.now(),
-        branch: details.branch,
-        branches: details.branches ?? [],
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async createAndCheckoutBranch(branch) {
-    const selectedProject = get().selectedProject
-    if (!selectedProject) return
-    try {
-      const details = await window.desktop.sessions.createBranch({
-        path: selectedProject.path,
-        branch,
-      })
-      set((state) => ({
-        projects: upsertProject(state.projects, details.project),
-        selectedProject: details.project,
-        selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
-        selectedProjectGitCheckedAt: Date.now(),
-        branch: details.branch,
-        branches: details.branches ?? [],
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async renameProject(path, name) {
-    const normalizedName = name.replace(/\s+/g, " ").trim()
-    if (!normalizedName) return
-    try {
-      const existing = get().projects.find((project) => samePath(project.path, path))
-      if (!existing) return
-      const project = await window.desktop.sessions.renameProject({
-        projectId: existing.id,
-        name: normalizedName,
-      })
-      set((state) => ({
-        projects: upsertProject(state.projects, project),
-        selectedProject: samePath(state.selectedProject?.path ?? "", path)
-          ? project
-          : state.selectedProject,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async togglePinProject(path) {
-    const existing = get().projects.find((project) => samePath(project.path, path))
-    if (!existing) return
-    try {
-      const project = await window.desktop.sessions.setProjectPinned({
-        projectId: existing.id,
-        pinned: !existing.pinnedAt,
-      })
-      set((state) => ({
-        projects: upsertProject(state.projects, project),
-        selectedProject: samePath(state.selectedProject?.path ?? "", path)
-          ? project
-          : state.selectedProject,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async setProjectDefaultShell(path, shell) {
-    const existing = get().projects.find((project) => samePath(project.path, path))
-    if (!existing) return
-    const normalizedShell = shell?.replace(/\s+/g, " ").trim() || null
-    try {
-      const project = await window.desktop.sessions.setProjectDefaultShell({
-        projectId: existing.id,
-        shell: normalizedShell,
-      })
-      set((state) => ({
-        projects: upsertProject(state.projects, project),
-        selectedProject: samePath(state.selectedProject?.path ?? "", path)
-          ? project
-          : state.selectedProject,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async removeProject(path) {
-    try {
-      const existing = get().projects.find((project) => samePath(project.path, path))
-      if (!existing) return
-      await window.desktop.sessions.removeProject(existing.id)
-      set((state) => {
-        const projects = state.projects.filter((project) => !samePath(project.path, path))
-        const removedSelected = samePath(state.selectedProject?.path ?? "", path)
-        return {
-          projects,
-          selectedProject: removedSelected ? (projects[0] ?? null) : state.selectedProject,
-          workspaceMode:
-            removedSelected && projects.length === 0 ? "outside_project" : state.workspaceMode,
-          selectedProjectGit: removedSelected ? false : state.selectedProjectGit,
-          selectedProjectGitCheckedAt: removedSelected ? null : state.selectedProjectGitCheckedAt,
-          branch: removedSelected ? null : state.branch,
-          branches: removedSelected ? [] : state.branches,
-          error: null,
-        }
-      })
-      const project = get().selectedProject
-      if (project) await get().selectProject(project)
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async rebindProject(projectId) {
-    try {
-      const project = await window.desktop.sessions.rebindProject(projectId)
-      if (!project) return
-      set((state) => ({
-        projects: upsertProject(state.projects, project),
-        selectedProject: state.selectedProject?.id === projectId ? project : state.selectedProject,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
   },
 
   async selectModel(model) {
@@ -1253,7 +928,10 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 }))
 
 export function attachDesktopSessionEvents(): () => void {
-  ensureDesktopDaemonStatusEvents()
+  attachDesktopDaemonStatusEvents({
+    set: useDesktopSessionStore.setState,
+    get: useDesktopSessionStore.getState,
+  })
   return window.desktop.sessions.onUpdated((view) => {
     useDesktopSessionStore.getState().applySessionUpdate(view)
   })
@@ -1321,226 +999,10 @@ function queuedPromptActionError(kind: "promote" | "cancel", error: unknown): st
   return kind === "promote" ? `调整方向失败：${message}` : `删除失败：${message}`
 }
 
-function ensureDesktopDaemonStatusEvents(): void {
-  if (daemonStatusEventsAttached) return
-  daemonStatusEventsAttached = true
-  window.desktop.sessions.onDaemonStatusChanged((daemonStatus) => {
-    useDesktopSessionStore.setState({ daemonStatus })
-  })
-}
-
-function applyBootstrapData(
-  data: DesktopBootstrapData,
-  currentProject: DesktopProject | null,
-  workspaceMode: DesktopWorkspaceMode,
-  preferredModel: string | null,
-  preferredProvider: string | null
-): Partial<DesktopSessionState> {
-  const resolvedWorkspaceMode =
-    workspaceMode === "project" && data.projects.length === 0 ? "outside_project" : workspaceMode
-  const selectedProject = resolveInitialProject(data, currentProject, resolvedWorkspaceMode)
-  const preferredExists =
-    preferredModel &&
-    data.models.some(
-      (item) => item.id === preferredModel && item.providerName === preferredProvider
-    )
-  const model = preferredExists ? preferredModel : data.defaultModel
-  const provider = preferredExists ? preferredProvider : (data.defaultProvider ?? null)
-  return {
-    loadStatus: "ready",
-    projects: data.projects,
-    sessions: sortSessions(data.sessions),
-    archivedSessions: sortSessions(data.archivedSessions),
-    models: data.models,
-    defaultModel: data.defaultModel,
-    defaultProvider: data.defaultProvider ?? null,
-    defaultPermissionMode: data.defaultPermissionMode,
-    selectedModel: model,
-    selectedProvider: provider,
-    selectedPermissionMode: data.defaultPermissionMode,
-    workspaceMode: resolvedWorkspaceMode,
-    selectedProject,
-    error: null,
-  }
-}
-
-function resolveInitialProject(
-  data: DesktopBootstrapData,
-  current: DesktopProject | null,
-  workspaceMode: DesktopWorkspaceMode
-): DesktopProject | null {
-  if (workspaceMode === "outside_project") return null
-  if (current) {
-    const match = data.projects.find((project) => samePath(project.path, current.path))
-    if (match) return match
-  }
-  return data.projects[0] ?? null
-}
-
-function resolveSessionWorkspace(
-  projects: DesktopProject[],
-  session: DesktopSessionRecord
-): Pick<
-  DesktopSessionState,
-  | "workspaceMode"
-  | "selectedProject"
-  | "selectedProjectGit"
-  | "selectedProjectGitCheckedAt"
-  | "branch"
-  | "branches"
-> {
-  if (session.workspaceMode === "outside_project" || !session.projectId) {
-    return {
-      workspaceMode: "outside_project",
-      selectedProject: null,
-      selectedProjectGit: false,
-      selectedProjectGitCheckedAt: null,
-      branch: null,
-      branches: [],
-    }
-  }
-  const project =
-    projects.find((item) => item.id === session.projectId) ??
-    projects.find((item) => samePath(item.path, session.cwd)) ??
-    projectFromSession(session)
-  return {
-    workspaceMode: "project",
-    selectedProject: project,
-    selectedProjectGit: false,
-    selectedProjectGitCheckedAt: null,
-    branch: null,
-    branches: [],
-  }
-}
-
 function scheduleSelectedProjectGitRefresh(force: boolean): void {
   if (selectedProjectGitRefreshTimer) clearTimeout(selectedProjectGitRefreshTimer)
   selectedProjectGitRefreshTimer = setTimeout(() => {
     selectedProjectGitRefreshTimer = null
     void useDesktopSessionStore.getState().refreshSelectedProjectGit({ force })
   }, selectedProjectGitRefreshDelayMs)
-}
-
-function readPersistedActiveSessionId(): string | null {
-  try {
-    const value = localStorage.getItem(persistedActiveSessionKey)?.trim()
-    return value || null
-  } catch {
-    return null
-  }
-}
-
-function writePersistedActiveSessionId(sessionId: string): void {
-  try {
-    localStorage.setItem(persistedActiveSessionKey, sessionId)
-  } catch {
-    // Session restore is a convenience feature; storage failures should not interrupt chat use.
-  }
-}
-
-function clearPersistedActiveSessionId(): void {
-  try {
-    localStorage.removeItem(persistedActiveSessionKey)
-  } catch {
-    // Ignore storage failures for the same reason as writes.
-  }
-}
-
-function upsertProject(projects: DesktopProject[], project: DesktopProject): DesktopProject[] {
-  const existingIndex = projects.findIndex((item) => samePath(item.path, project.path))
-  const nextProjects =
-    existingIndex === -1
-      ? [project, ...projects]
-      : projects.map((item, index) => (index === existingIndex ? project : item))
-
-  return nextProjects.sort((a, b) => {
-    const aPinnedAt = a.pinnedAt ?? 0
-    const bPinnedAt = b.pinnedAt ?? 0
-    const pinGroupDifference = Number(Boolean(bPinnedAt)) - Number(Boolean(aPinnedAt))
-    return pinGroupDifference || (aPinnedAt && bPinnedAt ? bPinnedAt - aPinnedAt : 0)
-  })
-}
-
-function upsertSession(
-  sessions: DesktopSessionRecord[],
-  session: DesktopSessionRecord
-): DesktopSessionRecord[] {
-  return sortSessions([session, ...sessions.filter((item) => item.id !== session.id)])
-}
-
-function sortSessions(sessions: DesktopSessionRecord[]): DesktopSessionRecord[] {
-  return [...sessions].sort((a, b) => {
-    const pinDifference = sessionPinnedAt(b) - sessionPinnedAt(a)
-    return pinDifference || b.updatedAt - a.updatedAt
-  })
-}
-
-export function isSessionPinned(session: DesktopSessionRecord): boolean {
-  return sessionPinnedAt(session) > 0
-}
-
-function sessionPermissionMode(
-  session: DesktopSessionRecord,
-  fallback: DesktopPermissionMode = "default"
-): DesktopPermissionMode {
-  const runtime = session.metadata["runtime"]
-  if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return fallback
-  const mode = (runtime as Record<string, unknown>)["permissionMode"]
-  return mode === "default" || mode === "plan" || mode === "full_auto" ? mode : fallback
-}
-
-function sessionProvider(
-  session: DesktopSessionRecord,
-  fallback: string | null = null
-): string | null {
-  const runtime = session.metadata["runtime"]
-  if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return fallback
-  const provider = (runtime as Record<string, unknown>)["provider"]
-  return typeof provider === "string" && provider.trim() ? provider.trim() : fallback
-}
-
-function sessionPinnedAt(session: DesktopSessionRecord): number {
-  const desktop = session.metadata["desktop"]
-  if (!desktop || typeof desktop !== "object" || Array.isArray(desktop)) return 0
-  const pinnedAt = (desktop as Record<string, unknown>)["pinnedAt"]
-  return typeof pinnedAt === "number" ? pinnedAt : 0
-}
-
-function projectFromSession(session: DesktopSessionRecord): DesktopProject {
-  const normalized = session.cwd.replace(/[\\/]+$/, "")
-  return {
-    id: session.projectId ?? session.cwd,
-    name: normalized.split(/[\\/]/).pop() || session.cwd,
-    path: session.cwd,
-    lastOpenedAt: session.updatedAt,
-    ...(typeof session.metadata["defaultShell"] === "string"
-      ? { defaultShell: session.metadata["defaultShell"] }
-      : {}),
-    available: true,
-  }
-}
-
-function samePath(left: string, right: string): boolean {
-  return normalizePath(left) === normalizePath(right)
-}
-
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase()
-}
-
-function formatSessionTitle(content: string): string {
-  const normalized = content.replace(/\s+/g, " ").trim()
-  const firstSentence = normalized.match(/^.*?[。！？.!?]/)?.[0] ?? normalized
-  return [...firstSentence].slice(0, 20).join("")
-}
-
-function isPlaceholderTitle(title: string): boolean {
-  const normalized = title.trim()
-  return normalized === "" || normalized === "TUI"
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error)
-    return error.message.replace(/^Error invoking remote method '[^']+': /, "")
-  return String(error)
 }

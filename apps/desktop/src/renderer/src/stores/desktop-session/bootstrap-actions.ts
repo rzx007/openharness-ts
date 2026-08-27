@@ -1,0 +1,160 @@
+import type {
+  DesktopBootstrapData,
+  DesktopDaemonStatus,
+  DesktopProject,
+  DesktopWorkspaceMode,
+} from "@shared/session-types"
+
+import { beginScopedOperation, errorMessage, failScopedOperation, removeScopedOperation } from "./error-state"
+import { resolveInitialProject, sortSessions } from "./helpers"
+import {
+  clearPersistedActiveSessionId,
+  readPersistedActiveSessionId,
+} from "./persistence"
+import type { BootstrapActions, DesktopSessionState, DesktopStoreContext } from "./types"
+
+const initialDaemonStatus: DesktopDaemonStatus = {
+  phase: "idle",
+  message: "等待连接 daemon",
+  updatedAt: Date.now(),
+}
+
+let daemonStatusEventsAttached = false
+
+export function createInitialDaemonStatus(): DesktopDaemonStatus {
+  return initialDaemonStatus
+}
+
+export function createBootstrapActions(context: DesktopStoreContext): BootstrapActions {
+  const { get, set } = context
+
+  return {
+    async initialize() {
+      if (get().loadStatus === "loading" || get().loadStatus === "ready") return
+      attachDesktopDaemonStatusEvents(context)
+      const operationId = globalThis.crypto.randomUUID()
+      set((state) => ({
+        loadStatus: "loading",
+        daemonStatus: {
+          phase: "discovering",
+          message: "正在观察 daemon 状态",
+          updatedAt: Date.now(),
+        },
+        appOperations: beginScopedOperation(state.appOperations, {
+          id: operationId,
+          kind: "project-action",
+          sessionId: null,
+          startedAt: Date.now(),
+        }),
+      }))
+      try {
+        const daemonStatus = await window.desktop.sessions.daemonStatus()
+        set({ daemonStatus })
+        const data = await window.desktop.sessions.bootstrap()
+        const latestDaemonStatus = await window.desktop.sessions
+          .daemonStatus()
+          .catch(() => get().daemonStatus)
+        const workspaceMode =
+          get().workspaceMode === "outside_project" || data.projects.length === 0
+            ? "outside_project"
+            : "project"
+        const selectedProject = resolveInitialProject(data, get().selectedProject, workspaceMode)
+        const sessions = sortSessions(data.sessions)
+        const archivedSessions = sortSessions(data.archivedSessions)
+        const persistedSessionId = readPersistedActiveSessionId()
+        set((state) => ({
+          loadStatus: "ready",
+          daemonStatus: latestDaemonStatus,
+          projects: data.projects,
+          sessions,
+          archivedSessions,
+          models: data.models,
+          defaultModel: data.defaultModel,
+          defaultProvider: data.defaultProvider ?? null,
+          defaultPermissionMode: data.defaultPermissionMode,
+          selectedModel: data.defaultModel,
+          selectedProvider: data.defaultProvider ?? null,
+          selectedPermissionMode: data.defaultPermissionMode,
+          workspaceMode,
+          selectedProject,
+          selectedProjectGit: false,
+          selectedProjectGitCheckedAt: null,
+          branches: [],
+          appOperations: removeScopedOperation(state.appOperations, operationId),
+        }))
+        if (selectedProject) await get().selectProject(selectedProject).catch(() => undefined)
+        if (persistedSessionId && sessions.some((session) => session.id === persistedSessionId)) {
+          await get().openSession(persistedSessionId)
+        } else if (persistedSessionId) {
+          clearPersistedActiveSessionId()
+        }
+      } catch (error) {
+        const daemonStatus = await window.desktop.sessions
+          .daemonStatus()
+          .catch(() => get().daemonStatus)
+        const message = errorMessage(error)
+        set((state) => ({
+          loadStatus: "error",
+          daemonStatus,
+          appOperations: failScopedOperation(state.appOperations, operationId, message, Date.now()),
+        }))
+      }
+    },
+
+    async refreshBootstrap() {
+      const data = await window.desktop.sessions.bootstrap()
+      set((state) => ({
+        ...applyBootstrapData(data, state.selectedProject, state.workspaceMode, null, null),
+        ...(state.activeSessionId
+          ? {
+              selectedModel: state.selectedModel,
+              selectedProvider: state.selectedProvider,
+              selectedPermissionMode: state.selectedPermissionMode,
+            }
+          : {}),
+      }))
+    },
+  }
+}
+
+export function attachDesktopDaemonStatusEvents(context: DesktopStoreContext): void {
+  if (daemonStatusEventsAttached) return
+  daemonStatusEventsAttached = true
+  window.desktop.sessions.onDaemonStatusChanged((daemonStatus) => {
+    context.set({ daemonStatus })
+  })
+}
+
+export function applyBootstrapData(
+  data: DesktopBootstrapData,
+  currentProject: DesktopProject | null,
+  workspaceMode: DesktopWorkspaceMode,
+  preferredModel: string | null,
+  preferredProvider: string | null
+): Partial<DesktopSessionState> {
+  const resolvedWorkspaceMode =
+    workspaceMode === "project" && data.projects.length === 0 ? "outside_project" : workspaceMode
+  const selectedProject = resolveInitialProject(data, currentProject, resolvedWorkspaceMode)
+  const preferredExists =
+    preferredModel &&
+    data.models.some(
+      (item) => item.id === preferredModel && item.providerName === preferredProvider
+    )
+  const model = preferredExists ? preferredModel : data.defaultModel
+  const provider = preferredExists ? preferredProvider : (data.defaultProvider ?? null)
+  return {
+    loadStatus: "ready",
+    projects: data.projects,
+    sessions: sortSessions(data.sessions),
+    archivedSessions: sortSessions(data.archivedSessions),
+    models: data.models,
+    defaultModel: data.defaultModel,
+    defaultProvider: data.defaultProvider ?? null,
+    defaultPermissionMode: data.defaultPermissionMode,
+    selectedModel: model,
+    selectedProvider: provider,
+    selectedPermissionMode: data.defaultPermissionMode,
+    workspaceMode: resolvedWorkspaceMode,
+    selectedProject,
+  }
+}

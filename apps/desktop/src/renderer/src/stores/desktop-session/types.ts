@@ -7,6 +7,7 @@ import type {
   DesktopSessionView,
   DesktopWorkspaceMode,
 } from "@shared/session-types"
+import type { StoreApi } from "zustand"
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error"
 
@@ -79,7 +80,26 @@ export interface DesktopRuntimeState {
   sessionRuntimes: Record<string, DesktopSessionRuntime>
 }
 
-export interface DesktopSessionState extends DesktopRuntimeState {
+export interface BootstrapActions {
+  initialize: () => Promise<void>
+  refreshBootstrap: () => Promise<void>
+}
+
+export interface ProjectActions {
+  chooseProject: () => Promise<void>
+  selectProject: (project: DesktopProject) => Promise<void>
+  selectOutsideProject: () => void
+  refreshSelectedProjectGit: (options?: { force?: boolean }) => Promise<boolean>
+  checkoutBranch: (branch: string) => Promise<void>
+  createAndCheckoutBranch: (branch: string) => Promise<void>
+  renameProject: (path: string, name: string) => Promise<void>
+  togglePinProject: (path: string) => Promise<void>
+  setProjectDefaultShell: (path: string, shell: string | null) => Promise<void>
+  removeProject: (path: string) => Promise<void>
+  rebindProject: (projectId: string) => Promise<void>
+}
+
+export interface DesktopSessionState extends DesktopRuntimeState, BootstrapActions, ProjectActions {
   loadStatus: LoadStatus
   daemonStatus: DesktopDaemonStatus
   error: string | null
@@ -107,20 +127,7 @@ export interface DesktopSessionState extends DesktopRuntimeState {
   sendingOperationId: string | null
   pendingPromptEdit: PendingPromptEdit | null
   queuedPromptActions: Record<string, QueuedPromptAction>
-  initialize: () => Promise<void>
-  refreshBootstrap: () => Promise<void>
   startNewConversation: () => Promise<void>
-  chooseProject: () => Promise<void>
-  selectProject: (project: DesktopProject) => Promise<void>
-  selectOutsideProject: () => void
-  refreshSelectedProjectGit: (options?: { force?: boolean }) => Promise<boolean>
-  checkoutBranch: (branch: string) => Promise<void>
-  createAndCheckoutBranch: (branch: string) => Promise<void>
-  renameProject: (path: string, name: string) => Promise<void>
-  togglePinProject: (path: string) => Promise<void>
-  setProjectDefaultShell: (path: string, shell: string | null) => Promise<void>
-  removeProject: (path: string) => Promise<void>
-  rebindProject: (projectId: string) => Promise<void>
   selectModel: (model: DesktopModel) => Promise<void>
   selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>
   updateSessionModel: (sessionId: string, model: DesktopModel) => Promise<void>
@@ -155,4 +162,9 @@ export interface DesktopSessionState extends DesktopRuntimeState {
   ) => Promise<void>
   applySessionUpdate: (view: DesktopSessionView) => void
   clearError: () => void
+}
+
+export interface DesktopStoreContext {
+  set: StoreApi<DesktopSessionState>["setState"]
+  get: StoreApi<DesktopSessionState>["getState"]
 }
