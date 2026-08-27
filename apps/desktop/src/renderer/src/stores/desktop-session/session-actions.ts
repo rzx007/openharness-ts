@@ -186,7 +186,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           error: null,
           sessionRuntimes: {
             ...state.sessionRuntimes,
-            [sessionId]: beginOperation(runtime, {
+            [sessionId]: beginOperation(abandonOpenSessionOperations(runtime), {
               id: operationId,
               kind: "open-session",
               sessionId,
@@ -330,6 +330,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
     async forkSession(sessionId, options) {
       if (!sessionId) throw new Error("会话 ID 不能为空")
+      const navigationOwnerSessionId = get().activeSessionId
       try {
         const session = await window.desktop.sessions.fork({
           sessionId,
@@ -341,7 +342,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           archivedSessions: state.archivedSessions.filter((item) => item.id !== session.id),
           error: null,
         }))
-        await get().openSession(session.id)
+        if (get().activeSessionId === navigationOwnerSessionId) {
+          await get().openSession(session.id)
+        }
         return session
       } catch (error) {
         set({ error: errorMessage(error) })
@@ -509,6 +512,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       }
 
       const promptSubmissionId = globalThis.crypto.randomUUID()
+      const commandOperationId = options?.commandLine ? globalThis.crypto.randomUUID() : null
       let startedSessionId: string | null = null
       set((state) => ({
         sending: true,
@@ -568,12 +572,21 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                 },
               }
             : bound.target
+          const acknowledgedRuntime = acknowledgeOperation(runtime, promptSubmissionId, Date.now())
+          const initializedRuntime = commandOperationId
+            ? beginOperation(acknowledgedRuntime, {
+                id: commandOperationId,
+                kind: "invoke-command",
+                sessionId: session.id,
+                startedAt: Date.now(),
+              })
+            : acknowledgedRuntime
           return {
             sessions: upsertSession(state.sessions, session),
             newConversationRuntime: bound.source,
             sessionRuntimes: {
               ...state.sessionRuntimes,
-              [session.id]: acknowledgeOperation(runtime, promptSubmissionId, Date.now()),
+              [session.id]: initializedRuntime,
             },
             ...(ownsCurrentPage
               ? {
@@ -597,6 +610,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             sessionId: session.id,
             line: options.commandLine,
           })
+          if (commandOperationId) {
+            set((state) => ({
+              sessionRuntimes: updateSessionRuntime(state.sessionRuntimes, session.id, (runtime) =>
+                removeOperation(runtime, commandOperationId)
+              ),
+            }))
+          }
         } else {
           await window.desktop.sessions.sendPrompt({
             id: promptSubmissionId,
@@ -643,14 +663,29 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             sessionViewContainsInput(currentState.sessionView, promptSubmissionId))
         set((state) => ({
           openingSession: state.activeSessionId === startedSessionId ? false : state.openingSession,
-          error: state.activeSessionId === startedSessionId && !confirmed ? message : state.error,
+          error: startedSessionId ? state.error : message,
           newConversationRuntime: startedSessionId
             ? state.newConversationRuntime
             : failOperation(state.newConversationRuntime, promptSubmissionId, message, Date.now()),
           sessionRuntimes: startedSessionId
-            ? updateSessionRuntime(state.sessionRuntimes, startedSessionId, (runtime) =>
-                failOperation(runtime, promptSubmissionId, message, Date.now())
-              )
+            ? updateSessionRuntime(state.sessionRuntimes, startedSessionId, (runtime) => {
+                if (commandOperationId) {
+                  return failOperation(runtime, commandOperationId, message, Date.now())
+                }
+                return {
+                  ...runtime,
+                  pendingPromptSubmissions: confirmed
+                    ? removePendingPromptSubmission(
+                        runtime.pendingPromptSubmissions,
+                        promptSubmissionId
+                      )
+                    : updatePendingPromptSubmission(
+                        runtime.pendingPromptSubmissions,
+                        promptSubmissionId,
+                        (submission) => ({ ...submission, phase: "failed", error: message })
+                      ),
+                }
+              })
             : state.sessionRuntimes,
           pendingPromptSubmissions: confirmed
             ? removePendingPromptSubmission(state.pendingPromptSubmissions, promptSubmissionId)
@@ -708,6 +743,15 @@ function updateSessionRuntime(
   const runtime = runtimes[sessionId]
   if (!runtime) return runtimes
   return { ...runtimes, [sessionId]: update(runtime) }
+}
+
+function abandonOpenSessionOperations(runtime: DesktopSessionRuntime): DesktopSessionRuntime {
+  const operations = Object.fromEntries(
+    Object.entries(runtime.operations).filter(([, operation]) => operation.kind !== "open-session")
+  )
+  return Object.keys(operations).length === Object.keys(runtime.operations).length
+    ? runtime
+    : { ...runtime, operations }
 }
 
 function sessionViewContainsInput(view: DesktopSessionView | null, inputId: string): boolean {

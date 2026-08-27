@@ -36,3 +36,29 @@
 ## 疑虑 / 后续边界
 
 本任务只迁移 session 生命周期动作。`sending`、顶层 prompt submission、queued action 与其余 prompt 行为仍保持现状，留给后续 prompt-actions / queued-prompt-actions 任务统一迁移；没有提前删除这些兼容状态。
+
+## 审查修复第 1 轮
+
+### RED
+
+新增五项确定性竞态/错误归属测试，修复前全部失败：
+
+- 同一 session 连续两次 open 时，第一次的迟到 snapshot 会被采用并清掉第二次的 opening 状态；
+- A/B/A 导航中，第一次 A 的迟到 snapshot 会覆盖第二次 A；
+- fork IPC 迟到后无条件调用 primary open；
+- 首条普通 prompt 失败会把 `create-session` operation 标记为 failed，且目标 runtime 的 submission 未转为 failed；
+- 首条 slash command 失败同样会污染 create operation，且没有独立的 invoke-command operation。
+
+### GREEN
+
+- 发起同 session 的新 open 时，显式移除该 runtime 中旧的 `open-session` operation；因此只有最新 operation ID 的回包还能满足 pending ownership 检查。已覆盖同 session 乱序及 A/B/A 交错；SSE 先确认时，session view 仍由 SSE 保留。
+- fork 在发起时捕获导航上下文；只有 active session 仍等于该上下文才打开 forked session，背景完成只更新目录。
+- create 成功后，普通 prompt 失败只写入对应 submission；首条 slash command 在 session runtime 建立独立 `invoke-command` operation，其失败只归属该 operation。两种失败都不再改变 acknowledged create operation。
+
+### 验证
+
+- 聚焦 Vitest：session actions、session view、旧 store、router 共 53/53 通过。
+- Desktop 全量 `pnpm test`、`pnpm lint`、Web `tsc --noEmit -p tsconfig.web.json --composite false --pretty false` 通过。
+- `git diff --check` 通过。
+
+修复提交待回填。
