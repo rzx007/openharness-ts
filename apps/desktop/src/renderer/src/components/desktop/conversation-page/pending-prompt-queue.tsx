@@ -17,23 +17,56 @@ interface PendingPrompt {
   run: DesktopSessionRun
 }
 
+interface LocalPendingSubmission {
+  id: string
+  sessionId: string
+  content: string
+  phase: "submitting" | "accepted" | "failed"
+  error?: string
+}
+
 export function PendingPromptQueue({
   prompts,
   activeRunId,
   actionId,
+  localSubmission,
   onPromote,
   onCancel,
 }: {
   prompts: PendingPrompt[]
   activeRunId?: string
   actionId: string | null
+  localSubmission?: LocalPendingSubmission | null
   onPromote: (inputId: string, queuedRunId: string) => void
   onCancel: (inputId: string, queuedRunId: string) => void
 }): React.JSX.Element | null {
-  if (prompts.length === 0) return null
+  const visibleLocalSubmission =
+    localSubmission &&
+    localSubmission.phase !== "failed" &&
+    !prompts.some(({ input }) => input.id === localSubmission.id)
+      ? localSubmission
+      : null
+  if (prompts.length === 0 && !visibleLocalSubmission) return null
 
   return (
     <ItemGroup className="gap-1.5" aria-label="待处理消息">
+      {visibleLocalSubmission ? (
+        <Item key={visibleLocalSubmission.id} variant="outline" size="xs" className="bg-background/95">
+          <ItemMedia aria-hidden>
+            <Spinner className="size-3.5" />
+          </ItemMedia>
+          <ItemContent className="min-w-0">
+            <ItemTitle className="max-w-full truncate font-normal">
+              {visibleLocalSubmission.content}
+            </ItemTitle>
+          </ItemContent>
+          <ItemActions>
+            <span className="text-xs text-muted-foreground">
+              {visibleLocalSubmission.phase === "submitting" ? "正在发送" : "等待处理"}
+            </span>
+          </ItemActions>
+        </Item>
+      ) : null}
       {prompts.map(({ input, run }) => {
         const promoting = actionId === `promote:${input.id}`
         const cancelling = actionId === `cancel:${input.id}`

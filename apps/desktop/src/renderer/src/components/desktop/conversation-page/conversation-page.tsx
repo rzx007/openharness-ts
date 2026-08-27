@@ -66,6 +66,9 @@ function ConversationPane({
   const promoteQueuedPrompt = useDesktopSessionStore((state) => state.promoteQueuedPrompt)
   const cancelQueuedPrompt = useDesktopSessionStore((state) => state.cancelQueuedPrompt)
   const pendingPromptActionId = useDesktopSessionStore((state) => state.pendingPromptActionId)
+  const pendingPromptSubmission = useDesktopSessionStore(
+    (state) => state.pendingPromptSubmission
+  )
   const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
@@ -329,6 +332,11 @@ function ConversationPane({
                 prompts={pendingPrompts}
                 activeRunId={activeRun?.id}
                 actionId={pendingPromptActionId}
+                localSubmission={
+                  pendingPromptSubmission?.sessionId === activeSessionId
+                    ? pendingPromptSubmission
+                    : null
+                }
                 onPromote={(inputId, queuedRunId) => {
                   if (activeRun) void promoteQueuedPrompt(inputId, queuedRunId, activeRun.id)
                 }}

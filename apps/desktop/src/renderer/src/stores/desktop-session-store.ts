@@ -24,6 +24,14 @@ interface SubmitPromptOptions {
   commandLine?: string
 }
 
+interface PendingPromptSubmission {
+  id: string
+  sessionId: string
+  content: string
+  phase: "submitting" | "accepted" | "failed"
+  error?: string
+}
+
 const initialDaemonStatus: DesktopDaemonStatus = {
   phase: "idle",
   message: "等待连接 daemon",
@@ -56,7 +64,7 @@ interface DesktopSessionState {
   sessionView: DesktopSessionView | null
   openingSession: boolean
   sending: boolean
-  pendingPromptSubmission: { id: string; sessionId: string; content: string } | null
+  pendingPromptSubmission: PendingPromptSubmission | null
   pendingPromptEdit: {
     id: string
     sessionId: string
@@ -869,6 +877,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
                 id: promptSubmissionId,
                 sessionId: session.id,
                 content: prompt,
+                phase: "submitting",
               },
             }
           : {}),
@@ -896,7 +905,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         set((state) => ({
           pendingPromptSubmission:
             state.pendingPromptSubmission?.id === promptSubmissionId
-              ? null
+              ? { ...state.pendingPromptSubmission, phase: "accepted", error: undefined }
               : state.pendingPromptSubmission,
         }))
       }
@@ -928,10 +937,15 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const sessionId = get().activeSessionId
     if (!prompt || !sessionId || get().sending) return
     const pending = get().pendingPromptSubmission
-    const submission =
+    const submission: PendingPromptSubmission =
       pending?.sessionId === sessionId && pending.content === prompt
-        ? pending
-        : { id: globalThis.crypto.randomUUID(), sessionId, content: prompt }
+        ? { ...pending, phase: "submitting", error: undefined }
+        : {
+            id: globalThis.crypto.randomUUID(),
+            sessionId,
+            content: prompt,
+            phase: "submitting",
+          }
     set({ sending: true, error: null, pendingPromptSubmission: submission })
     try {
       if (options?.commandLine) {
@@ -946,11 +960,18 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       set((state) => ({
         pendingPromptSubmission:
           state.pendingPromptSubmission?.id === submission.id
-            ? null
+            ? { ...state.pendingPromptSubmission, phase: "accepted", error: undefined }
             : state.pendingPromptSubmission,
       }))
     } catch (error) {
-      set({ error: errorMessage(error) })
+      const message = errorMessage(error)
+      set((state) => ({
+        error: message,
+        pendingPromptSubmission:
+          state.pendingPromptSubmission?.id === submission.id
+            ? { ...state.pendingPromptSubmission, phase: "failed", error: message }
+            : state.pendingPromptSubmission,
+      }))
       throw error
     } finally {
       set({ sending: false })
@@ -1072,6 +1093,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
       return {
         sessionView: { ...view, session },
+        pendingPromptSubmission:
+          state.pendingPromptSubmission?.sessionId === view.session.id &&
+          view.inputs.some((input) => input.id === state.pendingPromptSubmission?.id)
+            ? null
+            : state.pendingPromptSubmission,
         openingSession: false,
         selectedModel: session.model,
         selectedProvider: sessionProvider(session, state.defaultProvider),

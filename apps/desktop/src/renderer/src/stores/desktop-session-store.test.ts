@@ -480,6 +480,40 @@ describe("desktop session store prompt intent boundaries", () => {
     expect(editLatestPrompt).not.toHaveBeenCalled()
   })
 
+  it("keeps a successful submission visible until the session stream confirms it", async () => {
+    let resolveSend!: () => void
+    const sendPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sending: false,
+      error: null,
+      pendingPromptSubmission: null,
+    })
+
+    const request = useDesktopSessionStore.getState().sendMessage("new request")
+
+    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toMatchObject({
+      sessionId: "session-1",
+      content: "new request",
+      phase: "submitting",
+    })
+
+    resolveSend()
+    await request
+
+    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toMatchObject({
+      sessionId: "session-1",
+      content: "new request",
+      phase: "accepted",
+    })
+  })
+
   it("reuses the same input id when an uncertain send is retried", async () => {
     const sendPrompt = vi
       .fn()
@@ -500,7 +534,10 @@ describe("desktop session store prompt intent boundaries", () => {
 
     expect(sendPrompt).toHaveBeenCalledTimes(2)
     expect(sendPrompt.mock.calls[1]?.[0].id).toBe(sendPrompt.mock.calls[0]?.[0].id)
-    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toBeNull()
+    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toMatchObject({
+      content: "retry me",
+      phase: "accepted",
+    })
   })
 
   it("includes the selected source message when explicitly editing", async () => {
