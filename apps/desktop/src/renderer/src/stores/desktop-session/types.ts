@@ -122,8 +122,34 @@ export interface SessionActions {
   startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
 }
 
+export interface PromptActions {
+  sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
+  editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
+  interrupt: () => Promise<void>
+  replyPermission: (
+    permissionId: string,
+    status: "approved" | "denied",
+    decision?: "once" | "session"
+  ) => Promise<void>
+}
+
+export interface QueuedPromptActions {
+  promoteQueuedPrompt: (
+    inputId: string,
+    queuedRunId: string,
+    expectedActiveRunId: string
+  ) => Promise<void>
+  cancelQueuedPrompt: (inputId: string, queuedRunId: string) => Promise<void>
+}
+
 export interface DesktopSessionState
-  extends DesktopRuntimeState, BootstrapActions, ProjectActions, SessionActions {
+  extends
+    DesktopRuntimeState,
+    BootstrapActions,
+    ProjectActions,
+    SessionActions,
+    PromptActions,
+    QueuedPromptActions {
   loadStatus: LoadStatus
   daemonStatus: DesktopDaemonStatus
   error: string | null
@@ -151,20 +177,6 @@ export interface DesktopSessionState
   sendingOperationId: string | null
   pendingPromptEdit: PendingPromptEdit | null
   queuedPromptActions: Record<string, QueuedPromptAction>
-  sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
-  editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
-  promoteQueuedPrompt: (
-    inputId: string,
-    queuedRunId: string,
-    expectedActiveRunId: string
-  ) => Promise<void>
-  cancelQueuedPrompt: (inputId: string, queuedRunId: string) => Promise<void>
-  interrupt: () => Promise<void>
-  replyPermission: (
-    permissionId: string,
-    status: "approved" | "denied",
-    decision?: "once" | "session"
-  ) => Promise<void>
   applySessionUpdate: (view: DesktopSessionView) => void
   clearError: () => void
 }

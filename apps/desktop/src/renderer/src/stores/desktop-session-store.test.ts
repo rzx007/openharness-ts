@@ -936,6 +936,20 @@ describe("desktop session store outside-project mode", () => {
 })
 
 describe("desktop session store prompt intent boundaries", () => {
+  beforeEach(() => {
+    useDesktopSessionStore.setState({
+      activeSessionId: null,
+      sessionView: null,
+      sending: false,
+      sendingOperationId: null,
+      error: null,
+      pendingPromptSubmissions: {},
+      pendingPromptEdit: null,
+      queuedPromptActions: {},
+      sessionRuntimes: {},
+    })
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -1337,24 +1351,22 @@ describe("desktop session store prompt intent boundaries", () => {
   it("binds stop to the active run visible at click time", async () => {
     const interrupt = vi.fn(async () => undefined)
     vi.stubGlobal("window", { desktop: { sessions: { interrupt } } })
-    useDesktopSessionStore.setState((state) => ({
+    useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      sessionView: state.sessionView
-        ? {
-            ...state.sessionView,
-            runs: [
-              {
-                id: "run-at-click",
-                sessionId: "session-1",
-                status: "running",
-                metadata: {},
-                createdAt: 1,
-                updatedAt: 2,
-              },
-            ],
-          }
-        : null,
-    }))
+      sessionView: {
+        ...emptySessionView("session-1"),
+        runs: [
+          {
+            id: "run-at-click",
+            sessionId: "session-1",
+            status: "running",
+            metadata: {},
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      },
+    })
 
     await useDesktopSessionStore.getState().interrupt()
 
@@ -1538,7 +1550,9 @@ describe("desktop session store prompt intent boundaries", () => {
     await request
 
     expect(useDesktopSessionStore.getState().error).toBeNull()
-    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+    expect(
+      useDesktopSessionStore.getState().sessionRuntimes["session-1"]?.queuedPromptActions
+    ).toMatchObject({
       "session-1:run-queued": { phase: "failed" },
     })
   })
@@ -1553,6 +1567,20 @@ describe("desktop session store prompt intent boundaries", () => {
           runId: "run-queued",
           kind: "promote",
           phase: "acknowledged",
+        },
+      },
+      sessionRuntimes: {
+        "session-1": {
+          ...createEmptySessionRuntime(),
+          queuedPromptActions: {
+            "session-1:run-queued": {
+              sessionId: "session-1",
+              inputId: "input-queued",
+              runId: "run-queued",
+              kind: "promote",
+              phase: "acknowledged",
+            },
+          },
         },
       },
       sessionView: null,

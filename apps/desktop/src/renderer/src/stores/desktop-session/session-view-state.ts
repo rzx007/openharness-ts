@@ -3,7 +3,7 @@ import {
   reconcilePendingPromptSubmissions,
   reconcileQueuedPromptActions,
 } from "./pending-prompt-state"
-import type { DesktopSessionRuntime } from "./types"
+import type { DesktopOperation, DesktopSessionRuntime } from "./types"
 
 export function acceptActiveSessionView(
   activeSessionId: string | null,
@@ -30,15 +30,49 @@ export function reconcileRuntimeWithView(
       Object.entries(runtime.operations).filter(
         ([operationId, operation]) =>
           operation.sessionId !== view.session.id ||
-          (!confirmedEntityIds.has(operationId) &&
-            operation.kind !== "open-session" &&
-            operation.kind !== "create-session")
+          !operationConfirmedByView(operation, operationId, confirmedEntityIds, view)
       )
     ),
     pendingPromptSubmissions: reconcilePendingPromptSubmissions(
       runtime.pendingPromptSubmissions,
       view
     ),
+    pendingPromptEdit:
+      runtime.pendingPromptEdit && confirmedEntityIds.has(runtime.pendingPromptEdit.id)
+        ? null
+        : runtime.pendingPromptEdit,
     queuedPromptActions: reconcileQueuedPromptActions(runtime.queuedPromptActions, view),
+  }
+}
+
+function operationConfirmedByView(
+  operation: DesktopOperation,
+  operationId: string,
+  confirmedInputIds: Set<string>,
+  view: DesktopSessionView
+): boolean {
+  switch (operation.kind) {
+    case "create-session":
+    case "open-session":
+      return true
+    case "send-prompt":
+    case "edit-prompt":
+      return confirmedInputIds.has(operationId)
+    case "promote-prompt":
+    case "cancel-prompt": {
+      const run = view.runs.find((candidate) => candidate.id === operation.target)
+      return Boolean(run && run.status !== "pending")
+    }
+    case "interrupt-run": {
+      const run = view.runs.find((candidate) => candidate.id === operation.target)
+      return Boolean(run && run.status !== "pending" && run.status !== "running")
+    }
+    case "reply-permission": {
+      const permission = view.permissions.find((candidate) => candidate.id === operation.target)
+      return Boolean(permission && permission.status !== "pending")
+    }
+    case "invoke-command":
+    case "project-action":
+      return false
   }
 }
