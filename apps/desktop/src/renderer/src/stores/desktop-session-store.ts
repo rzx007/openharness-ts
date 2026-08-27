@@ -19,6 +19,8 @@ import type {
   DesktopWorkspaceMode,
 } from "@shared/session-types"
 
+export type { QueuedPromptAction } from "./desktop-session/types"
+
 const persistedActiveSessionKey = "openharness.desktop.active-session.v1"
 const selectedProjectGitRefreshTtlMs = 5_000
 const selectedProjectGitRefreshDelayMs = 750

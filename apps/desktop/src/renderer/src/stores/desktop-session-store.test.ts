@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopBootstrapData, DesktopSessionView } from "@shared/session-types"
+import type { QueuedPromptAction } from "./desktop-session-store"
 import { useDesktopSessionStore } from "./desktop-session-store"
 
 const refreshedBootstrap: DesktopBootstrapData = {
@@ -51,6 +52,20 @@ function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
     permissions: [],
   }
 }
+
+describe("desktop session store compatibility exports", () => {
+  it("keeps QueuedPromptAction available from the legacy store entry", () => {
+    const action: QueuedPromptAction = {
+      sessionId: "session-1",
+      inputId: "input-1",
+      runId: "run-1",
+      kind: "promote",
+      phase: "pending",
+    }
+
+    expect(action.kind).toBe("promote")
+  })
+})
 
 describe("desktop session store provider refresh", () => {
   beforeEach(() => {
