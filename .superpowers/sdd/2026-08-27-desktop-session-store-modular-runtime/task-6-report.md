@@ -101,3 +101,23 @@
 - Desktop 全量 Vitest：36 个测试文件、223 个测试全部通过。
 - Web TypeScript 与变更文件 ESLint 通过。
 - `git diff --check` 通过。
+
+## 审查修复第 4 轮：项目切换的真实订阅回归
+
+### RED
+
+- 原切换用例在服务端一次性渲染最终的 selected project，store hook 也是同步 fixture；它没有经历项目 A 到 B 的真实 Zustand 订阅与重新渲染。
+- 将新客户端测试中 `MainLayout` 的 selected-project Alert owner 临时移除后，归档、活跃、新会话和 A 到 B 切换的四项断言均失败：初始 A error 与切换后的 B error 都无法从真实布局树找到。
+
+### GREEN
+
+- Desktop 测试开发依赖新增 `jsdom`，以客户端 React root 挂载同一棵真实 `MainLayout`、`Sidebar` 和 `ConversationPane` 树。
+- store module 仅替换 Electron desktop event 绑定，`useDesktopSessionStore` 保持生产 Zustand hook；测试使用 `act` 调用 `setState`，在同一挂载实例中从 selected project A 切到 B。
+- 回归断言初始只显示 A error，状态更新后 A 消失、B 显示且全树只有一个。归档、活跃和新会话仍覆盖 selected-project owner 的单一展示。
+
+### 本轮验证
+
+- 受控 RED 后 GREEN：客户端真实布局集成回归 4/4 通过。
+- Desktop 全量 Vitest：36 个测试文件、223 个测试全部通过。
+- Web TypeScript、变更测试文件 ESLint、`package.json` Prettier 与 `git diff --check` 均通过。
+- 提交钩子的全仓 `turbo check-types`：57/57 task 成功；仅输出仓库既有的 Turbo output 配置警告。

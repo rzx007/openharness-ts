@@ -1,10 +1,10 @@
-import { createElement } from "react"
-import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it, vi } from "vitest"
+// @vitest-environment jsdom
+
+import { act, createElement } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopOperation, DesktopSessionState } from "@renderer/stores/desktop-session/types"
-
-const harness = vi.hoisted(() => ({ state: null as unknown as DesktopSessionState }))
 
 vi.mock("@tanstack/react-router", async () => {
   const { useContext } = await import("react")
@@ -37,6 +37,7 @@ vi.mock("react-resizable-panels", () => ({
 vi.mock("@renderer/components/desktop/settings-page/settings-navigation", () => ({
   defaultSettingsSection: "general",
 }))
+vi.mock("@renderer/components/desktop/open-with", () => ({ OpenWithSplitButton: () => null }))
 vi.mock("@renderer/components/theme-provider", () => ({
   useTheme: () => ({ theme: "light" as const, setTheme: vi.fn() }),
 }))
@@ -45,6 +46,9 @@ vi.mock("@renderer/components/desktop/use-desktop-shortcuts", () => ({
 }))
 vi.mock("@renderer/components/ui/panel-resize-handle", () => ({
   PanelResizeHandle: () => null,
+}))
+vi.mock("@renderer/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children }: { children?: React.ReactNode }) => children,
 }))
 vi.mock("@renderer/components/desktop/layout/title-bar", () => ({ TitleBar: () => null }))
 vi.mock("@renderer/components/desktop/layout/use-desktop-window-chrome", () => ({
@@ -81,14 +85,36 @@ vi.mock("@renderer/components/desktop/layout/main-layout/utility-panel", () => (
     toolOpenRequest: null,
   }),
 }))
-vi.mock("@renderer/stores/desktop-session-store", () => ({
-  attachDesktopSessionEvents: () => () => undefined,
-  isSessionPinned: () => false,
-  useDesktopSessionStore: <T>(selector: (state: DesktopSessionState) => T): T =>
-    selector(harness.state),
-}))
+vi.mock("@renderer/stores/desktop-session-store", async () => {
+  const actual = await vi.importActual<typeof import("@renderer/stores/desktop-session-store")>(
+    "@renderer/stores/desktop-session-store"
+  )
+
+  return { ...actual, attachDesktopSessionEvents: () => () => undefined }
+})
 
 import { MainLayout } from "./main-layout"
+import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+
+const initialStoreState = useDesktopSessionStore.getState()
+let mountedRoot: Root | null = null
+let mountedContainer: HTMLDivElement | null = null
+
+beforeEach(() => {
+  Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
+  useDesktopSessionStore.setState(stateWith({}), true)
+})
+
+afterEach(() => {
+  if (mountedRoot) {
+    act(() => mountedRoot?.unmount())
+    mountedContainer?.remove()
+    mountedRoot = null
+    mountedContainer = null
+  }
+  useDesktopSessionStore.setState(initialStoreState, true)
+  Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT")
+})
 
 function stateWith(overrides: Partial<DesktopSessionState>): DesktopSessionState {
   return {
@@ -111,7 +137,7 @@ function stateWith(overrides: Partial<DesktopSessionState>): DesktopSessionState
     forkSession: vi.fn(async () => ({}) as DesktopSessionState["forkSession"]),
     initialize: vi.fn(async () => undefined),
     interrupt: vi.fn(async () => undefined),
-    loadStatus: "ready",
+    loadStatus: "idle",
     models: [],
     newConversationRuntime: {
       operations: {},
@@ -206,9 +232,18 @@ function failedProjectOperation(projectId: string, error: string): DesktopOperat
   }
 }
 
-function renderLayout(state: DesktopSessionState): string {
-  harness.state = state
-  return renderToStaticMarkup(createElement(MainLayout))
+function mountLayout(state: DesktopSessionState): HTMLDivElement {
+  useDesktopSessionStore.setState(state, true)
+  const container = document.createElement("div")
+  document.body.append(container)
+  mountedContainer = container
+  mountedRoot = createRoot(container)
+
+  act(() => {
+    mountedRoot?.render(createElement(MainLayout))
+  })
+
+  return container
 }
 
 describe("MainLayout selected project operation error owner", () => {
@@ -216,7 +251,7 @@ describe("MainLayout selected project operation error owner", () => {
     const error = "归档会话中的项目操作失败"
     const selectedProject = project("project-a", "项目 A")
     const archivedSession = session("session-archived", "archived")
-    const html = renderLayout(
+    const container = mountLayout(
       stateWith({
         activeSessionId: "session-archived",
         archivedSessions: [archivedSession],
@@ -232,10 +267,10 @@ describe("MainLayout selected project operation error owner", () => {
       })
     )
 
-    expect(html).toContain(error)
-    expect(html.split(error)).toHaveLength(2)
-    expect(html).toContain("此会话已归档，只能查看历史内容")
-    expect(html).toContain("开始使用")
+    expect(container.textContent).toContain(error)
+    expect(container.textContent?.split(error)).toHaveLength(2)
+    expect(container.textContent).toContain("此会话已归档，只能查看历史内容")
+    expect(container.textContent).toContain("开始使用")
   })
 
   it.each([
@@ -245,7 +280,7 @@ describe("MainLayout selected project operation error owner", () => {
     const error = "项目操作失败"
     const selectedProject = project("project-a", "项目 A")
     const activeSession = activeSessionId ? session(activeSessionId, "idle") : null
-    const html = renderLayout(
+    const container = mountLayout(
       stateWith({
         activeSessionId,
         projects: [selectedProject],
@@ -260,27 +295,40 @@ describe("MainLayout selected project operation error owner", () => {
       })
     )
 
-    expect(html.split(error)).toHaveLength(2)
-    expect(html).toContain("开始使用")
-    expect(html).toContain(activeSession ? `${activeSession.id} 会话` : "new-conversation-composer")
+    expect(container.textContent?.split(error)).toHaveLength(2)
+    expect(container.textContent).toContain("开始使用")
+    expect(
+      container.querySelector(activeSession ? "h1" : "#new-conversation-composer")
+    ).not.toBeNull()
   })
 
-  it("does not show the previous selected project's failure after switching projects", () => {
-    const state = stateWith({
-      selectedProject: project("project-b", "项目 B"),
-      projectOperations: {
-        "project-a": {
-          operation: failedProjectOperation("project-a", "项目 A 操作失败"),
+  it("updates the mounted layout from project A's error to project B's error", () => {
+    const projectA = project("project-a", "项目 A")
+    const projectB = project("project-b", "项目 B")
+    const container = mountLayout(
+      stateWith({
+        projects: [projectA, projectB],
+        selectedProject: projectA,
+        projectOperations: {
+          "project-a": {
+            operation: failedProjectOperation("project-a", "项目 A 操作失败"),
+          },
+          "project-b": {
+            operation: failedProjectOperation("project-b", "项目 B 操作失败"),
+          },
         },
-        "project-b": {
-          operation: failedProjectOperation("project-b", "项目 B 操作失败"),
-        },
-      },
+      })
+    )
+
+    expect(container.textContent).toContain("项目 A 操作失败")
+    expect(container.textContent).not.toContain("项目 B 操作失败")
+
+    act(() => {
+      useDesktopSessionStore.setState({ selectedProject: projectB })
     })
 
-    const html = renderLayout(state)
-
-    expect(html).toContain("项目 B 操作失败")
-    expect(html).not.toContain("项目 A 操作失败")
+    expect(container.textContent).not.toContain("项目 A 操作失败")
+    expect(container.textContent).toContain("项目 B 操作失败")
+    expect(container.textContent?.split("项目 B 操作失败")).toHaveLength(2)
   })
 })
