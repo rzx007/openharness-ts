@@ -35,11 +35,10 @@ export function removeScopedOperation(
   operations: Record<string, DesktopOperation>,
   operationId: string
 ): Record<string, DesktopOperation> {
-  const operation = operations[operationId]
-  if (!operation) return operations
+  if (!operations[operationId]) return operations
   const remaining = { ...operations }
   delete remaining[operationId]
-  return removeFailedOperationsForTarget(remaining, operation)
+  return remaining
 }
 
 function removeFailedOperationsForTarget(
