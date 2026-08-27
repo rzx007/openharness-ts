@@ -27,6 +27,7 @@ interface LocalPendingSubmission {
   sessionId: string
   content: string
   phase: "submitting" | "accepted" | "failed"
+  placement: "transcript" | "queue"
   error?: string
 }
 
@@ -45,9 +46,22 @@ export function PendingPromptQueue({
 }): React.JSX.Element | null {
   const authorityInputIds = new Set(prompts.map(({ input }) => input.id))
   const visibleLocalSubmissions = localSubmissions.filter(
-    (submission) => !authorityInputIds.has(submission.id)
+    (submission) =>
+      !authorityInputIds.has(submission.id) &&
+      (submission.placement === "queue" || submission.phase === "failed")
   )
-  const visiblePrompts = prompts.filter(({ action }) => action?.phase !== "acknowledged")
+  const activeCandidateRunId =
+    activeRunId ??
+    prompts.reduce<PendingPrompt | undefined>(
+      (oldest, prompt) =>
+        !oldest || prompt.run.createdAt < oldest.run.createdAt ? prompt : oldest,
+      undefined
+    )?.run.id
+  const visiblePrompts = prompts.filter(
+    ({ run, action }) =>
+      action?.phase !== "acknowledged" &&
+      (run.id !== activeCandidateRunId || action?.phase === "failed")
+  )
   if (visiblePrompts.length === 0 && visibleLocalSubmissions.length === 0) return null
 
   return (

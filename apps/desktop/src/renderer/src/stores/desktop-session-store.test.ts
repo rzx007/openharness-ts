@@ -489,6 +489,7 @@ describe("desktop session store outside-project mode", () => {
           content: "confirmed",
           createdAt: 1,
           phase: "accepted",
+          placement: "transcript",
         },
       },
       queuedPromptActions: {
@@ -847,6 +848,7 @@ describe("desktop session store prompt intent boundaries", () => {
       sessionId: "session-1",
       content: "new request",
       phase: "submitting",
+      placement: "transcript",
     })
 
     resolveSend()
@@ -856,7 +858,50 @@ describe("desktop session store prompt intent boundaries", () => {
       sessionId: "session-1",
       content: "new request",
       phase: "accepted",
+      placement: "transcript",
     })
+  })
+
+  it("marks a submission as queued when another run is already active", async () => {
+    let resolveSend!: () => void
+    const sendPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    const runningView = emptySessionView("session-1")
+    runningView.session.status = "running"
+    runningView.runs = [
+      {
+        id: "run-active",
+        sessionId: "session-1",
+        inputId: "input-active",
+        status: "running",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: runningView,
+      sending: false,
+      error: null,
+      pendingPromptSubmissions: {},
+    })
+
+    const request = useDesktopSessionStore.getState().sendMessage("queued request")
+
+    expect(onlyPendingPromptSubmission()).toMatchObject({
+      content: "queued request",
+      phase: "submitting",
+      placement: "queue",
+    })
+
+    resolveSend()
+    await request
   })
 
   it("keeps multiple accepted submissions until each one is confirmed", async () => {
@@ -880,6 +925,12 @@ describe("desktop session store prompt intent boundaries", () => {
     expect(Object.values(useDesktopSessionStore.getState().pendingPromptSubmissions)).toHaveLength(
       2
     )
+    expect(
+      useDesktopSessionStore.getState().pendingPromptSubmissions[firstCall[0].id]
+    ).toMatchObject({ placement: "transcript" })
+    expect(
+      useDesktopSessionStore.getState().pendingPromptSubmissions[secondCall[0].id]
+    ).toMatchObject({ placement: "queue" })
 
     useDesktopSessionStore.getState().applySessionUpdate({
       ...emptySessionView("session-1", 1),

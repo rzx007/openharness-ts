@@ -30,6 +30,7 @@ interface PendingPromptSubmission {
   content: string
   createdAt: number
   phase: "submitting" | "accepted" | "failed"
+  placement: "transcript" | "queue"
   error?: string
 }
 
@@ -941,6 +942,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
                     content: prompt,
                     createdAt: Date.now(),
                     phase: "submitting",
+                    placement: "transcript",
                   },
                 },
               }
@@ -1059,12 +1061,20 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       }
       return
     }
-    const pending = Object.values(get().pendingPromptSubmissions).find(
+    const currentState = get()
+    const pending = Object.values(currentState.pendingPromptSubmissions).find(
       (submission) =>
         submission.sessionId === sessionId &&
         submission.content === prompt &&
         submission.phase === "failed"
     )
+    const hasUnconfirmedSubmission = Object.values(currentState.pendingPromptSubmissions).some(
+      (submission) => submission.sessionId === sessionId && submission.phase !== "failed"
+    )
+    const placement =
+      sessionViewHasInFlightRun(currentState.sessionView, sessionId) || hasUnconfirmedSubmission
+        ? "queue"
+        : "transcript"
     const submission: PendingPromptSubmission = pending
       ? { ...pending, phase: "submitting", error: undefined }
       : {
@@ -1073,6 +1083,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           content: prompt,
           createdAt: Date.now(),
           phase: "submitting",
+          placement,
         }
     set((state) => ({
       sending: true,
@@ -1336,6 +1347,14 @@ export function attachDesktopSessionEvents(): () => void {
 
 function queuedPromptActionKey(sessionId: string, runId: string): string {
   return `${sessionId}:${runId}`
+}
+
+function sessionViewHasInFlightRun(view: DesktopSessionView | null, sessionId: string): boolean {
+  if (!view || view.session.id !== sessionId) return false
+  return (
+    view.session.status === "running" ||
+    view.runs.some((run) => run.status === "pending" || run.status === "running")
+  )
 }
 
 function updatePendingPromptSubmission(
