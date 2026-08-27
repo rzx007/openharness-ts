@@ -670,7 +670,7 @@ describe("OpenHarnessHttpServer", () => {
           status: string;
         };
       };
-      const uploaded = await upload("报告.pdf");
+      const uploaded = await upload("C:\\private\\报告.pdf");
       const duplicate = await upload("副本.pdf");
       expect(uploaded).toMatchObject({
         displayName: "报告.pdf",
@@ -679,6 +679,8 @@ describe("OpenHarnessHttpServer", () => {
         status: "ready",
       });
       expect(duplicate.sha256).toBe(uploaded.sha256);
+      expect(JSON.stringify(uploaded)).not.toContain("C:\\private");
+      expect(JSON.stringify(uploaded)).not.toMatch(/staging|storage|blob/i);
       expect(
         existsSync(
           join(
@@ -708,6 +710,33 @@ describe("OpenHarnessHttpServer", () => {
         pdf.subarray(1, 4),
       );
 
+      const deleted = await fetch(
+        `${firstListen.url}/attachments/${uploaded.id}`,
+        { method: "DELETE", headers: auth(token) },
+      );
+      expect(deleted.status).toBe(200);
+      const deletedMetadata = await fetch(
+        `${firstListen.url}/attachments/${uploaded.id}`,
+        { headers: auth(token) },
+      );
+      expect(deletedMetadata.status).toBe(404);
+      const deletedContent = await fetch(
+        `${firstListen.url}/attachments/${uploaded.id}/content`,
+        { headers: auth(token) },
+      );
+      expect(deletedContent.status).toBe(404);
+      expect(
+        existsSync(
+          join(
+            dir,
+            "attachments",
+            "blobs",
+            uploaded.sha256.slice(0, 2),
+            uploaded.sha256,
+          ),
+        ),
+      ).toBe(true);
+
       await first.close();
       first = undefined;
       second = new OpenHarnessHttpServer({
@@ -718,12 +747,12 @@ describe("OpenHarnessHttpServer", () => {
       });
       const secondListen = await second.listen();
       const restored = await fetch(
-        `${secondListen.url}/attachments/${uploaded.id}`,
+        `${secondListen.url}/attachments/${duplicate.id}`,
         { headers: auth(token) },
       );
       expect(restored.status).toBe(200);
       await expect(restored.json()).resolves.toMatchObject({
-        id: uploaded.id,
+        id: duplicate.id,
         sha256: uploaded.sha256,
         status: "ready",
       });
