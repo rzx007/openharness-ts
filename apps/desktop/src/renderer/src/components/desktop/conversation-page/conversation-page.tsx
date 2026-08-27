@@ -118,9 +118,9 @@ function ConversationPane({
     await forkSession(activeSessionId, { afterMessageId: messageId })
   }
 
-  const editLatestUserMessage = async (content: string): Promise<void> => {
+  const editLatestUserMessage = async (sourceMessageId: string, content: string): Promise<void> => {
     if (archived || running) return
-    await editLatestMessage(content)
+    await editLatestMessage(sourceMessageId, content)
   }
 
   useEffect(() => {
@@ -267,7 +267,9 @@ function ConversationPane({
                       runs={sessionView?.runs ?? []}
                       running={running}
                       canEditLastUserMessage={!archived && !running && !sending}
-                      onEditLastUserMessage={(content) => void editLatestUserMessage(content)}
+                      onEditLastUserMessage={(sourceMessageId, content) =>
+                        void editLatestUserMessage(sourceMessageId, content)
+                      }
                       onCopyAssistantMessage={(content) => void copyAssistantMessage(content)}
                       onForkAssistantMessage={(messageId) =>
                         void forkFromAssistantMessage(messageId)

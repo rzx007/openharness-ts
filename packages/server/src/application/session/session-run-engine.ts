@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 
-import type { SessionRunRecord } from "@openharness/protocol";
+import type {
+  ReplaceTranscriptMessageInput,
+  SessionRunRecord,
+} from "@openharness/protocol";
 import type { SessionStore } from "@openharness/services";
 
+import { jsonEqual, normalizeTraceId, withoutTraceId } from "../support.js";
 import {
-  jsonEqual,
-  normalizeTraceId,
-  withoutTraceId,
-} from "../support.js";
-import { RunInterruptedError, SessionRunCoordinator } from "../../runtime/run-coordinator.js";
+  RunInterruptedError,
+  SessionRunCoordinator,
+} from "../../runtime/run-coordinator.js";
 import type { SessionRunExecutor } from "./session-run-executor.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "../agent/agent-pool.js";
@@ -29,7 +31,10 @@ export type AdmitPromptResult = {
 };
 
 export type AwaitSessionRunResult = {
-  status: Extract<SessionRunRecord["status"], "completed" | "failed" | "interrupted">;
+  status: Extract<
+    SessionRunRecord["status"],
+    "completed" | "failed" | "interrupted"
+  >;
   output: string;
   error?: string;
 };
@@ -51,13 +56,16 @@ export class SessionRunEngine {
   private readonly runPromises = new Map<string, Promise<void>>();
   private accepting = true;
   private stopPromise?: Promise<void>;
-  private readonly pendingAdmissions = new Map<string, {
-    sessionId: string;
-    delivery: "queue" | "steer";
-    content: string;
-    metadata: Record<string, unknown>;
-    promise: Promise<AdmitPromptResult>;
-  }>();
+  private readonly pendingAdmissions = new Map<
+    string,
+    {
+      sessionId: string;
+      delivery: "queue" | "steer";
+      content: string;
+      metadata: Record<string, unknown>;
+      promise: Promise<AdmitPromptResult>;
+    }
+  >();
 
   constructor(private readonly context: SessionRunEngineContext) {}
 
@@ -77,6 +85,42 @@ export class SessionRunEngine {
     return this.context.store
       .listSessions({ includeArchived: true })
       .some((session) => this.hasWork(session.id));
+  }
+
+  replaceTranscriptAndAdmitPrompt(
+    sessionId: string,
+    messages: ReplaceTranscriptMessageInput[],
+    input: Omit<AdmitPromptInput, "delivery">,
+  ): AdmitPromptResult {
+    if (!this.accepting) throw new Error("Session run engine is stopping");
+    const traceId =
+      normalizeTraceId(input.traceId) ??
+      normalizeTraceId(input.metadata?.traceId) ??
+      randomUUID();
+    const metadata = { ...(input.metadata ?? {}), traceId };
+    const runMetadata = { ...(input.runMetadata ?? {}), traceId };
+    const before = this.context.events.checkpoint();
+    const admitted = this.context.store.replaceTranscriptAndAdmitPrompt({
+      transcript: { sessionId, messages },
+      admission: {
+        prompt: {
+          id: input.id,
+          sessionId,
+          delivery: "queue",
+          content: input.content,
+          metadata,
+        },
+        run: { metadata: runMetadata },
+      },
+      createRun: this.context.agentPool.configured,
+    });
+    this.context.events.publishSince(before);
+    if (!admitted.run) return { input: admitted.input };
+    return {
+      input: admitted.input,
+      run: admitted.run,
+      queue_state: this.enqueueRun(admitted.run, admitted.input.id),
+    };
   }
 
   hasActiveRunsForCwd(cwd: string): boolean {
@@ -101,24 +145,38 @@ export class SessionRunEngine {
     await stopping;
   }
 
-  async awaitRun(sessionId: string, runId: string): Promise<AwaitSessionRunResult> {
+  async awaitRun(
+    sessionId: string,
+    runId: string,
+  ): Promise<AwaitSessionRunResult> {
     const initial = this.context.store.getRun(runId);
-    if (!initial || initial.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
+    if (!initial || initial.sessionId !== sessionId)
+      throw new Error(`Session run not found: ${runId}`);
     if (initial.status === "pending" || initial.status === "running") {
       await this.runPromises.get(runId);
     }
     const run = this.context.store.getRun(runId);
-    if (!run || run.sessionId !== sessionId) throw new Error(`Session run not found: ${runId}`);
+    if (!run || run.sessionId !== sessionId)
+      throw new Error(`Session run not found: ${runId}`);
     if (run.status === "pending" || run.status === "running") {
       throw new Error(`Session run is still active: ${runId}`);
     }
-    const output = this.context.store.listMessages(sessionId)
-      .filter((message) => message.runId === runId && message.role === "assistant")
-      .flatMap((message) => this.context.store.listMessageParts(sessionId, { messageId: message.id }))
+    const output = this.context.store
+      .listMessages(sessionId)
+      .filter(
+        (message) => message.runId === runId && message.role === "assistant",
+      )
+      .flatMap((message) =>
+        this.context.store.listMessageParts(sessionId, {
+          messageId: message.id,
+        }),
+      )
       .map((part) => {
         if (part.text) return part.text;
         if (part.output == null) return "";
-        return typeof part.output === "string" ? part.output : JSON.stringify(part.output);
+        return typeof part.output === "string"
+          ? part.output
+          : JSON.stringify(part.output);
       })
       .filter(Boolean)
       .join("\n");
@@ -130,13 +188,19 @@ export class SessionRunEngine {
   }
 
   async waitForRuns(runIds: string[]): Promise<void> {
-    await Promise.all(runIds
-      .map((runId) => this.runPromises.get(runId))
-      .filter((promise): promise is Promise<void> => promise !== undefined));
+    await Promise.all(
+      runIds
+        .map((runId) => this.runPromises.get(runId))
+        .filter((promise): promise is Promise<void> => promise !== undefined),
+    );
   }
 
-  admitPromptAndMaybeRun(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
-    if (!this.accepting) return Promise.reject(new Error("Session run engine is stopping"));
+  admitPromptAndMaybeRun(
+    sessionId: string,
+    input: AdmitPromptInput,
+  ): Promise<AdmitPromptResult> {
+    if (!this.accepting)
+      return Promise.reject(new Error("Session run engine is stopping"));
     if (!input.id) return this.admitPrompt(sessionId, input);
     const delivery = input.delivery ?? "queue";
     const metadata = withoutTraceId(input.metadata ?? {});
@@ -157,22 +221,39 @@ export class SessionRunEngine {
         this.pendingAdmissions.delete(input.id!);
       }
     });
-    this.pendingAdmissions.set(input.id, { sessionId, delivery, content: input.content, metadata, promise });
+    this.pendingAdmissions.set(input.id, {
+      sessionId,
+      delivery,
+      content: input.content,
+      metadata,
+      promise,
+    });
     return promise;
   }
 
-  private async admitPrompt(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
+  private async admitPrompt(
+    sessionId: string,
+    input: AdmitPromptInput,
+  ): Promise<AdmitPromptResult> {
     const delivery = input.delivery ?? "queue";
-    const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(input.metadata?.traceId) ?? randomUUID();
+    const traceId =
+      normalizeTraceId(input.traceId) ??
+      normalizeTraceId(input.metadata?.traceId) ??
+      randomUUID();
     const metadata = { ...(input.metadata ?? {}), traceId };
     const runMetadata = { ...(input.runMetadata ?? {}), traceId };
-    const existingInput = input.id ? this.context.store.getInput(input.id) : undefined;
+    const existingInput = input.id
+      ? this.context.store.getInput(input.id)
+      : undefined;
     if (existingInput) {
       if (
         existingInput.sessionId !== sessionId ||
         existingInput.content !== input.content ||
         existingInput.delivery !== delivery ||
-        !jsonEqual(withoutTraceId(existingInput.metadata), withoutTraceId(metadata))
+        !jsonEqual(
+          withoutTraceId(existingInput.metadata),
+          withoutTraceId(metadata),
+        )
       ) {
         throw new Error(`Prompt id is already used: ${input.id}`);
       }
@@ -185,13 +266,21 @@ export class SessionRunEngine {
           metadata: { ...runMetadata, recoveredAdmission: true },
         });
         this.context.events.publishSince(before);
-        return { input: existingInput, run: recovered, queue_state: this.enqueueRun(recovered, existingInput.id) };
+        return {
+          input: existingInput,
+          run: recovered,
+          queue_state: this.enqueueRun(recovered, existingInput.id),
+        };
       }
       return {
         input: existingInput,
         ...(existingRun ? { run: existingRun } : {}),
-        ...(existingRun?.status === "running" ? { queue_state: "running" as const } : {}),
-        ...(existingRun?.status === "pending" ? { queue_state: "queued" as const } : {}),
+        ...(existingRun?.status === "running"
+          ? { queue_state: "running" as const }
+          : {}),
+        ...(existingRun?.status === "pending"
+          ? { queue_state: "queued" as const }
+          : {}),
       };
     }
 
@@ -237,31 +326,49 @@ export class SessionRunEngine {
         try {
           delivered = await steered.delivery;
         } catch (error) {
-          this.terminalizeUndeliveredSteer(sessionId, admitted.id, traceId, error);
+          this.terminalizeUndeliveredSteer(
+            sessionId,
+            admitted.id,
+            traceId,
+            error,
+          );
           throw error;
         }
         const activeRun = this.context.store.getRun(delivered.runId);
         if (!activeRun || activeRun.sessionId !== sessionId) {
-          throw new Error(`Steered input run was not found: ${delivered.runId}`);
+          throw new Error(
+            `Steered input run was not found: ${delivered.runId}`,
+          );
         }
         return {
           input: admitted,
           run: activeRun,
-          ...(activeRun.status === "running" ? { queue_state: "running" as const } : {}),
-          ...(activeRun.status === "pending" ? { queue_state: "queued" as const } : {}),
+          ...(activeRun.status === "running"
+            ? { queue_state: "running" as const }
+            : {}),
+          ...(activeRun.status === "pending"
+            ? { queue_state: "queued" as const }
+            : {}),
         };
       }
     }
 
     const run = this.context.agentPool.configured
-      ? this.context.store.createRun({ sessionId, inputId: admitted.id, metadata: runMetadata })
+      ? this.context.store.createRun({
+          sessionId,
+          inputId: admitted.id,
+          metadata: runMetadata,
+        })
       : undefined;
     this.context.events.publishSince(before);
     let queueState: "running" | "queued" | undefined;
     if (run) {
       queueState = this.enqueueRun(run, admitted.id);
     }
-    return { input: admitted, ...(run ? { run, queue_state: queueState } : {}) };
+    return {
+      input: admitted,
+      ...(run ? { run, queue_state: queueState } : {}),
+    };
   }
 
   interruptSession(
@@ -273,7 +380,10 @@ export class SessionRunEngine {
     if (result.interrupted) {
       this.context.store.transaction(() => {
         for (const runId of result.queuedRunIds) {
-          this.context.store.updateRun(runId, { status: "interrupted", error: reason ?? "Queued run interrupted" });
+          this.context.store.updateRun(runId, {
+            status: "interrupted",
+            error: reason ?? "Queued run interrupted",
+          });
         }
         this.context.store.appendEvent({
           type: "session.run.interrupt_requested",
@@ -290,28 +400,74 @@ export class SessionRunEngine {
     return result;
   }
 
-  private enqueueRun(run: SessionRunRecord, inputId: string): "running" | "queued" {
+  interruptRun(
+    sessionId: string,
+    runId: string,
+    reason?: string,
+  ): ReturnType<SessionRunCoordinator["interruptRun"]> {
+    const before = this.context.events.checkpoint();
+    const result = this.runCoordinator.interruptRun(sessionId, runId, reason);
+    if (result.interrupted) {
+      this.context.store.transaction(() => {
+        for (const queuedRunId of result.queuedRunIds) {
+          this.context.store.updateRun(queuedRunId, {
+            status: "interrupted",
+            error: reason ?? "Queued run interrupted",
+          });
+        }
+        this.context.store.appendEvent({
+          type: "session.run.interrupt_requested",
+          sessionId,
+          payload: {
+            runId,
+            queuedRunIds: result.queuedRunIds,
+            reason: reason ?? "Run interrupted",
+            scoped: true,
+          },
+        });
+      });
+      this.context.events.publishSince(before);
+    }
+    return result;
+  }
+
+  private enqueueRun(
+    run: SessionRunRecord,
+    inputId: string,
+  ): "running" | "queued" {
     const enqueued = this.runCoordinator.enqueue({
       sessionId: run.sessionId,
       runId: run.id,
-      work: (workContext) => this.context.runExecutor.execute({
-        sessionId: run.sessionId,
-        inputId,
-        runId: run.id,
-      }, workContext),
-      onSteerRejected: (input) => this.enqueueRejectedSteer(run.sessionId, input),
+      work: (workContext) =>
+        this.context.runExecutor.execute(
+          {
+            sessionId: run.sessionId,
+            inputId,
+            runId: run.id,
+          },
+          workContext,
+        ),
+      onSteerRejected: (input) =>
+        this.enqueueRejectedSteer(run.sessionId, input),
     });
-    const tracked = enqueued.promise.catch(() => {
-      // The persisted run state is updated by SessionRunExecutor or interrupt handling.
-    }).finally(() => {
-      if (this.runPromises.get(run.id) === tracked) this.runPromises.delete(run.id);
-    });
+    const tracked = enqueued.promise
+      .catch(() => {
+        // The persisted run state is updated by SessionRunExecutor or interrupt handling.
+      })
+      .finally(() => {
+        if (this.runPromises.get(run.id) === tracked)
+          this.runPromises.delete(run.id);
+      });
     this.runPromises.set(run.id, tracked);
     return enqueued.state;
   }
 
-  private enqueueRejectedSteer(sessionId: string, input: { id?: string; traceId?: string }): string {
-    if (!input.id) throw new Error("Rejected steer is missing its durable input id");
+  private enqueueRejectedSteer(
+    sessionId: string,
+    input: { id?: string; traceId?: string },
+  ): string {
+    if (!input.id)
+      throw new Error("Rejected steer is missing its durable input id");
     const admitted = this.context.store.getInput(input.id);
     if (!admitted || admitted.sessionId !== sessionId) {
       throw new Error(`Rejected steer input was not found: ${input.id}`);
@@ -319,7 +475,10 @@ export class SessionRunEngine {
     const existing = this.context.store.findRunByInput(admitted.id);
     if (existing?.inputId === admitted.id) return existing.id;
     const before = this.context.events.checkpoint();
-    const traceId = normalizeTraceId(input.traceId) ?? normalizeTraceId(admitted.metadata.traceId) ?? randomUUID();
+    const traceId =
+      normalizeTraceId(input.traceId) ??
+      normalizeTraceId(admitted.metadata.traceId) ??
+      randomUUID();
     const run = this.context.store.createRun({
       sessionId,
       inputId: admitted.id,
@@ -349,7 +508,12 @@ export class SessionRunEngine {
       this.context.store.appendEvent({
         type: interrupted ? "session.run.interrupted" : "session.run.error",
         sessionId,
-        payload: { runId: created.id, traceId, error: message, steerDeliveryFailure: true },
+        payload: {
+          runId: created.id,
+          traceId,
+          error: message,
+          steerDeliveryFailure: true,
+        },
       });
       this.context.store.updateRun(created.id, {
         status: interrupted ? "interrupted" : "failed",

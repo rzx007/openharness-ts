@@ -12,6 +12,7 @@ import type {
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
+  InterruptDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
@@ -309,7 +310,7 @@ export interface IpcInvokeMap {
     args: [input: EditLatestDesktopPromptInput]
     result: void
   }
-  [IpcChannels.sessionInterrupt]: { args: [sessionId: string]; result: void }
+  [IpcChannels.sessionInterrupt]: { args: [input: InterruptDesktopSessionInput]; result: void }
   [IpcChannels.sessionReplyPermission]: {
     args: [input: ReplyDesktopPermissionInput]
     result: void

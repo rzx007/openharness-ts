@@ -185,7 +185,8 @@ export const desktopAPI = {
     editLatestPrompt: (
       input: IpcInvokeMap[typeof IpcChannels.sessionEditLatestPrompt]["args"][0]
     ) => invoke(IpcChannels.sessionEditLatestPrompt, input),
-    interrupt: (sessionId: string) => invoke(IpcChannels.sessionInterrupt, sessionId),
+    interrupt: (input: IpcInvokeMap[typeof IpcChannels.sessionInterrupt]["args"][0]) =>
+      invoke(IpcChannels.sessionInterrupt, input),
     replyPermission: (input: IpcInvokeMap[typeof IpcChannels.sessionReplyPermission]["args"][0]) =>
       invoke(IpcChannels.sessionReplyPermission, input),
     setDefaultModel: (input: IpcInvokeMap[typeof IpcChannels.sessionSetDefaultModel]["args"][0]) =>

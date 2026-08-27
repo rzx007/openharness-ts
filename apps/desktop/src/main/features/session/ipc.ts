@@ -7,6 +7,7 @@ import type {
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
+  InterruptDesktopSessionInput,
   OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
@@ -130,8 +131,8 @@ export const sessionIpcContribution: IpcContribution = {
       },
       {
         channel: IpcChannels.sessionInterrupt,
-        handler: (_event, sessionId) =>
-          desktopSessionService.interruptSession(String(sessionId ?? "")),
+        handler: (_event, input) =>
+          desktopSessionService.interruptSession(input as InterruptDesktopSessionInput),
       },
       {
         channel: IpcChannels.sessionReplyPermission,

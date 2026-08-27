@@ -28,6 +28,14 @@ describe("filterJobSnapshots", () => {
     ]);
   });
 
+  it("treats empty kind and status arrays as no filters", () => {
+    expect(filterJobSnapshots(jobs, { kinds: [], statuses: [] }).map((job) => job.id)).toEqual([
+      "terminal-1",
+      "agent-1",
+      "workflow-1",
+    ]);
+  });
+
   it("can exclude every terminal state", () => {
     expect(filterJobSnapshots(jobs, { includeFinished: false }).map((job) => job.id))
       .toEqual(["terminal-1"]);

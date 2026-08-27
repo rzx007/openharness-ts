@@ -215,8 +215,12 @@ function optionalNumber(value: unknown): number | undefined {
 
 function optionalListFilters(input: Record<string, unknown>) {
   return {
-    ...(Array.isArray(input.kinds) ? { kinds: input.kinds as JobKind[] } : {}),
-    ...(Array.isArray(input.statuses) ? { statuses: input.statuses as JobStatus[] } : {}),
+    ...(Array.isArray(input.kinds) && input.kinds.length > 0
+      ? { kinds: input.kinds as JobKind[] }
+      : {}),
+    ...(Array.isArray(input.statuses) && input.statuses.length > 0
+      ? { statuses: input.statuses as JobStatus[] }
+      : {}),
     ...(optionalNumber(input.startedAfter) !== undefined ? { startedAfter: optionalNumber(input.startedAfter) } : {}),
     ...(optionalNumber(input.startedBefore) !== undefined ? { startedBefore: optionalNumber(input.startedBefore) } : {}),
     ...(optionalNumber(input.updatedAfter) !== undefined ? { updatedAfter: optionalNumber(input.updatedAfter) } : {}),

@@ -52,12 +52,24 @@ export function createRunExecutionRoutes(
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
       const body = await readJson(c);
+      if (typeof body.id !== "string" || !body.id.trim())
+        return errorResponse(400, "id is required");
       if (typeof body.content !== "string")
         return errorResponse(400, "content is required");
+      if (
+        typeof body.sourceMessageId !== "string" ||
+        !body.sourceMessageId.trim()
+      )
+        return errorResponse(400, "sourceMessageId is required");
+      if (body.metadata !== undefined && !isRecord(body.metadata))
+        return errorResponse(400, "metadata must be an object");
 
       try {
         const admitted = await context.application.editLatestPrompt(sessionId, {
+          id: body.id,
           content: body.content,
+          sourceMessageId: body.sourceMessageId,
+          ...(isRecord(body.metadata) ? { metadata: body.metadata } : {}),
           traceId: context.traces.get(c.req.raw),
         });
         return jsonResponse(admitted, 202);
@@ -96,8 +108,16 @@ export function createRunExecutionRoutes(
     .post("/:sessionId/interrupt", async (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
+      const body = await readJson(c);
+      if (
+        body.expectedRunId !== undefined &&
+        (typeof body.expectedRunId !== "string" || !body.expectedRunId.trim())
+      ) {
+        return errorResponse(400, "expectedRunId must be a non-empty string");
+      }
+      const expectedRunId = body.expectedRunId as string | undefined;
       return jsonResponse(
-        await context.application.interruptSession(sessionId),
+        await context.application.interruptSession(sessionId, expectedRunId),
       );
     });
 }

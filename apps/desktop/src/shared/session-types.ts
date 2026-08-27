@@ -211,6 +211,7 @@ export type CreateDesktopSessionInput = CreateDesktopSessionBaseInput &
   ({ projectId: string; cwd: string } | { projectId?: undefined; cwd?: undefined })
 
 export interface SendDesktopPromptInput {
+  id: string
   sessionId: string
   content: string
 }
@@ -221,8 +222,15 @@ export interface InvokeDesktopCommandInput {
 }
 
 export interface EditLatestDesktopPromptInput {
+  id: string
   sessionId: string
   content: string
+  sourceMessageId: string
+}
+
+export interface InterruptDesktopSessionInput {
+  sessionId: string
+  expectedRunId?: string
 }
 
 export interface ForkDesktopSessionInput {

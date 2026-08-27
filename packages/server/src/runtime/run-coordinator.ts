@@ -1,4 +1,8 @@
-import { AgentRunNotAcceptingInputError, type AgentRunHandle, type AgentSteerInput } from "@openharness/core";
+import {
+  AgentRunNotAcceptingInputError,
+  type AgentRunHandle,
+  type AgentSteerInput,
+} from "@openharness/core";
 
 export class RunInterruptedError extends Error {
   constructor(message = "Run interrupted") {
@@ -16,7 +20,10 @@ export interface EnqueueRunOptions {
   sessionId: string;
   runId: string;
   work: (context: SessionRunWorkContext) => Promise<void>;
-  onSteerRejected?(input: AgentSteerInput, error: AgentRunNotAcceptingInputError): string | Promise<string>;
+  onSteerRejected?(
+    input: AgentSteerInput,
+    error: AgentRunNotAcceptingInputError,
+  ): string | Promise<string>;
 }
 
 export interface EnqueueRunResult {
@@ -113,7 +120,10 @@ export class SessionRunCoordinator {
     const activeRunId = lane.active?.runId;
     if (lane.active) {
       const message = reason ?? "Run interrupted";
-      this.rejectSteers(lane.active, new RunInterruptedError(reason ?? "Steered input interrupted"));
+      this.rejectSteers(
+        lane.active,
+        new RunInterruptedError(reason ?? "Steered input interrupted"),
+      );
       lane.active.controller.abort(message);
       void lane.active.handle?.interrupt(message);
     }
@@ -124,12 +134,57 @@ export class SessionRunCoordinator {
     };
   }
 
+  interruptRun(
+    sessionId: string,
+    runId: string,
+    reason?: string,
+  ): InterruptSessionResult {
+    const lane = this.lanes.get(sessionId);
+    if (!lane) return { queuedRunIds: [], interrupted: false };
+
+    if (lane.active?.runId === runId) {
+      const message = reason ?? "Run interrupted";
+      this.rejectSteers(
+        lane.active,
+        new RunInterruptedError(reason ?? "Steered input interrupted"),
+      );
+      lane.active.controller.abort(message);
+      void lane.active.handle?.interrupt(message);
+      return { activeRunId: runId, queuedRunIds: [], interrupted: true };
+    }
+
+    const queuedIndex = lane.queue.findIndex((task) => task.runId === runId);
+    if (queuedIndex >= 0) {
+      const [task] = lane.queue.splice(queuedIndex, 1);
+      if (task) {
+        const message = reason ?? "Queued run interrupted";
+        const error = new RunInterruptedError(message);
+        task.controller.abort(message);
+        this.rejectSteers(task, error);
+        task.reject(error);
+      }
+      return {
+        ...(lane.active ? { activeRunId: lane.active.runId } : {}),
+        queuedRunIds: [runId],
+        interrupted: true,
+      };
+    }
+
+    return {
+      ...(lane.active ? { activeRunId: lane.active.runId } : {}),
+      queuedRunIds: [],
+      interrupted: false,
+    };
+  }
+
   activeRunId(sessionId: string): string | undefined {
     return this.lanes.get(sessionId)?.active?.runId;
   }
 
   queuedRunIds(sessionId: string): string[] {
-    return [...(this.lanes.get(sessionId)?.queue ?? [])].map((task) => task.runId);
+    return [...(this.lanes.get(sessionId)?.queue ?? [])].map(
+      (task) => task.runId,
+    );
   }
 
   hasWork(sessionId: string): boolean {
@@ -183,7 +238,10 @@ export class SessionRunCoordinator {
           signal: task.controller.signal,
           registerHandle: async (handle) => {
             if (task.controller.signal.aborted) {
-              const message = abortReason(task.controller.signal, "Run interrupted");
+              const message = abortReason(
+                task.controller.signal,
+                "Run interrupted",
+              );
               await handle.interrupt(message);
               throw new RunInterruptedError(message);
             }
@@ -212,40 +270,46 @@ export class SessionRunCoordinator {
   private flushSteers(task: RunTask): void {
     if (!task.handle || task.pendingSteers.length === 0) return;
     const pending = task.pendingSteers.splice(0);
-    task.controlChain = task.controlChain.then(async () => {
-      for (const request of pending) {
-        try {
-          const receipt = await task.handle!.steer(request.input);
-          request.resolve({ runId: receipt.runId });
-        } catch (error) {
-          if (task.controller.signal.aborted) {
-            const interrupted = new RunInterruptedError("Steered input interrupted");
-            request.reject(interrupted);
-            throw interrupted;
-          }
-          if (
-            !(error instanceof AgentRunNotAcceptingInputError) ||
-            !task.onSteerRejected
-          ) {
-            request.reject(error);
-            throw error;
-          }
+    task.controlChain = task.controlChain
+      .then(async () => {
+        for (const request of pending) {
           try {
-            const runId = await task.onSteerRejected(request.input, error);
-            request.resolve({ runId });
-          } catch (replacementError) {
-            request.reject(replacementError);
-            throw replacementError;
+            const receipt = await task.handle!.steer(request.input);
+            request.resolve({ runId: receipt.runId });
+          } catch (error) {
+            if (task.controller.signal.aborted) {
+              const interrupted = new RunInterruptedError(
+                "Steered input interrupted",
+              );
+              request.reject(interrupted);
+              throw interrupted;
+            }
+            if (
+              !(error instanceof AgentRunNotAcceptingInputError) ||
+              !task.onSteerRejected
+            ) {
+              request.reject(error);
+              throw error;
+            }
+            try {
+              const runId = await task.onSteerRejected(request.input, error);
+              request.resolve({ runId });
+            } catch (replacementError) {
+              request.reject(replacementError);
+              throw replacementError;
+            }
+          } finally {
+            task.steerRequests.delete(request);
           }
-        } finally {
-          task.steerRequests.delete(request);
         }
-      }
-    }).catch((error) => {
-      task.controller.abort(error);
-      void task.handle?.interrupt(error instanceof Error ? error.message : String(error));
-      throw error;
-    });
+      })
+      .catch((error) => {
+        task.controller.abort(error);
+        void task.handle?.interrupt(
+          error instanceof Error ? error.message : String(error),
+        );
+        throw error;
+      });
     void task.controlChain.catch(() => {});
   }
 
@@ -287,6 +351,7 @@ export class SessionRunCoordinator {
 
 function abortReason(signal: AbortSignal, fallback: string): string {
   if (typeof signal.reason === "string" && signal.reason) return signal.reason;
-  if (signal.reason instanceof Error && signal.reason.message) return signal.reason.message;
+  if (signal.reason instanceof Error && signal.reason.message)
+    return signal.reason.message;
   return fallback;
 }

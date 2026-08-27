@@ -332,6 +332,7 @@ describe("desktop session store outside-project mode", () => {
       permissionMode: "default",
     })
     expect(sendPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
       sessionId: "session-outside-project",
       content: "总结今天的安排",
     })
@@ -419,6 +420,158 @@ describe("desktop session store outside-project mode", () => {
       selectedProject: null,
       activeSessionId: null,
       sessionView: null,
+    })
+  })
+})
+
+describe("desktop session store prompt intent boundaries", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("keeps normal composer sends on sendPrompt after an interrupted run", async () => {
+    const sendPrompt = vi.fn(async () => undefined)
+    const editLatestPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: { sessions: { sendPrompt, editLatestPrompt } },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sending: false,
+      error: null,
+      sessionView: {
+        cursor: 1,
+        syncStatus: "connected",
+        session: {
+          id: "session-1",
+          cwd: "D:\\repo",
+          title: "test",
+          model: "test-model",
+          status: "idle",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        inputs: [],
+        messages: [],
+        parts: [],
+        runs: [
+          {
+            id: "interrupted-run",
+            sessionId: "session-1",
+            status: "interrupted",
+            metadata: {},
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+        tasks: [],
+        permissions: [],
+      },
+    })
+
+    await useDesktopSessionStore.getState().sendMessage("new request")
+
+    expect(sendPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: "session-1",
+      content: "new request",
+    })
+    expect(editLatestPrompt).not.toHaveBeenCalled()
+  })
+
+  it("reuses the same input id when an uncertain send is retried", async () => {
+    const sendPrompt = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce(undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sending: false,
+      error: null,
+      pendingPromptSubmission: null,
+    })
+
+    await expect(useDesktopSessionStore.getState().sendMessage("retry me")).rejects.toThrow(
+      "response lost"
+    )
+    await useDesktopSessionStore.getState().sendMessage("retry me")
+
+    expect(sendPrompt).toHaveBeenCalledTimes(2)
+    expect(sendPrompt.mock.calls[1]?.[0].id).toBe(sendPrompt.mock.calls[0]?.[0].id)
+    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toBeNull()
+  })
+
+  it("includes the selected source message when explicitly editing", async () => {
+    const editLatestPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: { sessions: { editLatestPrompt } },
+    })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1", sending: false, error: null })
+
+    await useDesktopSessionStore.getState().editLatestMessage("message-1", "replacement")
+
+    expect(editLatestPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: "session-1",
+      sourceMessageId: "message-1",
+      content: "replacement",
+    })
+  })
+
+  it("reuses the same edit id when an uncertain edit is retried", async () => {
+    const editLatestPrompt = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce(undefined)
+    vi.stubGlobal("window", {
+      desktop: { sessions: { editLatestPrompt } },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sending: false,
+      error: null,
+      pendingPromptEdit: null,
+    })
+
+    await expect(
+      useDesktopSessionStore.getState().editLatestMessage("message-1", "replacement")
+    ).rejects.toThrow("response lost")
+    await useDesktopSessionStore.getState().editLatestMessage("message-1", "replacement")
+
+    expect(editLatestPrompt).toHaveBeenCalledTimes(2)
+    expect(editLatestPrompt.mock.calls[1]?.[0].id).toBe(editLatestPrompt.mock.calls[0]?.[0].id)
+    expect(useDesktopSessionStore.getState().pendingPromptEdit).toBeNull()
+  })
+
+  it("binds stop to the active run visible at click time", async () => {
+    const interrupt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { interrupt } } })
+    useDesktopSessionStore.setState((state) => ({
+      activeSessionId: "session-1",
+      sessionView: state.sessionView
+        ? {
+            ...state.sessionView,
+            runs: [
+              {
+                id: "run-at-click",
+                sessionId: "session-1",
+                status: "running",
+                metadata: {},
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            ],
+          }
+        : null,
+    }))
+
+    await useDesktopSessionStore.getState().interrupt()
+
+    expect(interrupt).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      expectedRunId: "run-at-click",
     })
   })
 })

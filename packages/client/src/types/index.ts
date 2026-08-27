@@ -94,7 +94,10 @@ export interface ForkClientSessionInput {
 }
 
 export interface EditLatestClientPromptInput {
+  id: string;
   content: string;
+  sourceMessageId: string;
+  metadata?: Record<string, unknown>;
 }
 
 /** `POST /sessions/:id/prompts` 请求体。 */
@@ -351,7 +354,13 @@ export interface PluginInfo {
   activation: "inactive" | "active" | "partial" | "reload-required";
   /** Installed-state view. Live Tool Host state belongs to the owning Agent runtime. */
   toolRuntime?: {
-    state: "inactive" | "reload-required" | "starting" | "active" | "degraded" | "error";
+    state:
+      | "inactive"
+      | "reload-required"
+      | "starting"
+      | "active"
+      | "degraded"
+      | "error";
     declaredEntries: number;
     activatableEntries: number;
     hostCount: number;
@@ -361,7 +370,13 @@ export interface PluginInfo {
   };
   inventory: Record<string, number>;
   permissions: { requested: string[]; approved: string[]; missing: string[] };
-  diagnostics: Array<{ severity: "info" | "warning" | "error"; phase: string; code: string; message: string; path?: string }>;
+  diagnostics: Array<{
+    severity: "info" | "warning" | "error";
+    phase: string;
+    code: string;
+    message: string;
+    path?: string;
+  }>;
 }
 
 export interface AgentPersonaInfo {

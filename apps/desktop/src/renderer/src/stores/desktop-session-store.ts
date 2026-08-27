@@ -56,6 +56,13 @@ interface DesktopSessionState {
   sessionView: DesktopSessionView | null
   openingSession: boolean
   sending: boolean
+  pendingPromptSubmission: { id: string; sessionId: string; content: string } | null
+  pendingPromptEdit: {
+    id: string
+    sessionId: string
+    sourceMessageId: string
+    content: string
+  } | null
   initialize: () => Promise<void>
   refreshBootstrap: () => Promise<void>
   startNewConversation: () => Promise<void>
@@ -89,7 +96,7 @@ interface DesktopSessionState {
   deleteSession: (sessionId: string) => Promise<void>
   startSession: (content: string, options?: SubmitPromptOptions) => Promise<void>
   sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
-  editLatestMessage: (content: string) => Promise<void>
+  editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
   interrupt: () => Promise<void>
   replyPermission: (
     permissionId: string,
@@ -124,6 +131,8 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   sessionView: null,
   openingSession: false,
   sending: false,
+  pendingPromptSubmission: null,
+  pendingPromptEdit: null,
 
   async initialize() {
     if (get().loadStatus === "loading" || get().loadStatus === "ready") return
@@ -824,6 +833,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       return
     }
 
+    const promptSubmissionId = globalThis.crypto.randomUUID()
     set({ sending: true, error: null })
     try {
       const sessionInput: CreateDesktopSessionInput =
@@ -845,6 +855,15 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         activeSessionId: session.id,
         sessions: upsertSession(state.sessions, session),
         openingSession: true,
+        ...(!options?.commandLine
+          ? {
+              pendingPromptSubmission: {
+                id: promptSubmissionId,
+                sessionId: session.id,
+                content: prompt,
+              },
+            }
+          : {}),
       }))
       writePersistedActiveSessionId(session.id)
       const view = await window.desktop.sessions.open(session.id)
@@ -861,7 +880,17 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           line: options.commandLine,
         })
       } else {
-        await window.desktop.sessions.sendPrompt({ sessionId: session.id, content: prompt })
+        await window.desktop.sessions.sendPrompt({
+          id: promptSubmissionId,
+          sessionId: session.id,
+          content: prompt,
+        })
+        set((state) => ({
+          pendingPromptSubmission:
+            state.pendingPromptSubmission?.id === promptSubmissionId
+              ? null
+              : state.pendingPromptSubmission,
+        }))
       }
       const title = formatSessionTitle(prompt)
       set((state) => {
@@ -890,13 +919,28 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const prompt = content.trim()
     const sessionId = get().activeSessionId
     if (!prompt || !sessionId || get().sending) return
-    set({ sending: true, error: null })
+    const pending = get().pendingPromptSubmission
+    const submission =
+      pending?.sessionId === sessionId && pending.content === prompt
+        ? pending
+        : { id: globalThis.crypto.randomUUID(), sessionId, content: prompt }
+    set({ sending: true, error: null, pendingPromptSubmission: submission })
     try {
       if (options?.commandLine) {
         await window.desktop.sessions.invokeCommand({ sessionId, line: options.commandLine })
       } else {
-        await window.desktop.sessions.sendPrompt({ sessionId, content: prompt })
+        await window.desktop.sessions.sendPrompt({
+          id: submission.id,
+          sessionId,
+          content: prompt,
+        })
       }
+      set((state) => ({
+        pendingPromptSubmission:
+          state.pendingPromptSubmission?.id === submission.id
+            ? null
+            : state.pendingPromptSubmission,
+      }))
     } catch (error) {
       set({ error: errorMessage(error) })
       throw error
@@ -906,13 +950,28 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     }
   },
 
-  async editLatestMessage(content) {
+  async editLatestMessage(sourceMessageId, content) {
     const prompt = content.trim()
     const sessionId = get().activeSessionId
-    if (!prompt || !sessionId || get().sending) return
-    set({ sending: true, error: null })
+    if (!prompt || !sourceMessageId || !sessionId || get().sending) return
+    const pending = get().pendingPromptEdit
+    const edit =
+      pending?.sessionId === sessionId &&
+      pending.sourceMessageId === sourceMessageId &&
+      pending.content === prompt
+        ? pending
+        : { id: crypto.randomUUID(), sessionId, sourceMessageId, content: prompt }
+    set({ sending: true, error: null, pendingPromptEdit: edit })
     try {
-      await window.desktop.sessions.editLatestPrompt({ sessionId, content: prompt })
+      await window.desktop.sessions.editLatestPrompt({
+        id: edit.id,
+        sessionId,
+        content: prompt,
+        sourceMessageId,
+      })
+      set((state) => ({
+        pendingPromptEdit: state.pendingPromptEdit?.id === edit.id ? null : state.pendingPromptEdit,
+      }))
     } catch (error) {
       set({ error: errorMessage(error) })
       throw error
@@ -925,8 +984,15 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   async interrupt() {
     const sessionId = get().activeSessionId
     if (!sessionId) return
+    const visibleRuns = get().sessionView?.runs ?? []
+    const expectedRunId =
+      visibleRuns.find((run) => run.status === "running")?.id ??
+      visibleRuns.find((run) => run.status === "pending")?.id
     try {
-      await window.desktop.sessions.interrupt(sessionId)
+      await window.desktop.sessions.interrupt({
+        sessionId,
+        ...(expectedRunId ? { expectedRunId } : {}),
+      })
     } catch (error) {
       set({ error: errorMessage(error) })
     }

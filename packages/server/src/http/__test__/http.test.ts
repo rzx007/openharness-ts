@@ -1802,6 +1802,7 @@ describe("OpenHarnessHttpServer", () => {
     const daemonRunId = "wf-daemon-owned";
     try {
       const first = new OpenHarnessHttpServer({ storePath });
+      await first.application.ready();
       const parent = first.store.createSession({
         id: "parent",
         cwd: projectCwd,

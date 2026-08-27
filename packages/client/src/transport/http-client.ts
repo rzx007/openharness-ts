@@ -1050,12 +1050,13 @@ export class OpenHarnessClient {
   /** `POST /sessions/:id/interrupt` — 中断当前/排队中的 run。 */
   async interruptSession(
     sessionId: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; expectedRunId?: string } = {},
   ): Promise<InterruptSessionResponse> {
     return await this.request<InterruptSessionResponse>(
       `/sessions/${encodeURIComponent(sessionId)}/interrupt`,
       {
         method: "POST",
+        body: options.expectedRunId ? { expectedRunId: options.expectedRunId } : undefined,
         signal: options.signal,
       },
     );

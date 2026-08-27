@@ -49,6 +49,21 @@ describe("job tools", () => {
     });
   });
 
+  it("treats empty kind and status arrays as omitted filters", async () => {
+    const list = vi.fn(async () => [snapshot]);
+    const result = await jobListTool.execute({
+      kinds: [],
+      statuses: [],
+      limit: 20,
+    }, context({ list }));
+
+    expect(list).toHaveBeenCalledWith({ sessionId: "session-1", limit: 20 });
+    expect(payload(result)).toMatchObject({
+      jobs: [{ id: "terminal-1" }],
+      window: { limit: 20, returned: 1, possiblyTruncated: false },
+    });
+  });
+
   it("forwards read cursors and output limits", async () => {
     const read = vi.fn(async () => ({ text: "next", cursor: 4, truncated: false, snapshot }));
     await jobReadTool.execute({ jobId: "terminal-1", after: 3, maxChars: 40 }, context({ read }));

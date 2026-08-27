@@ -79,8 +79,8 @@ export function filterJobSnapshots(
   }
 
   const filtered = [...jobs]
-    .filter((job) => !input.kinds || input.kinds.includes(job.kind))
-    .filter((job) => !input.statuses || input.statuses.includes(job.status))
+    .filter((job) => !input.kinds?.length || input.kinds.includes(job.kind))
+    .filter((job) => !input.statuses?.length || input.statuses.includes(job.status))
     .filter((job) => input.includeFinished !== false || !isTerminalJobStatus(job.status))
     .filter((job) => input.startedAfter === undefined || job.startedAt >= input.startedAfter)
     .filter((job) => input.startedBefore === undefined || job.startedAt <= input.startedBefore)

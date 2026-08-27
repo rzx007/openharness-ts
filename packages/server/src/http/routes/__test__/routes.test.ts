@@ -40,7 +40,12 @@ function daemonControl(overrides: Record<string, unknown> = {}) {
     sessionExists: () => true,
     inspectRuntimeHooks: async () => [],
     inspectRun: () => undefined,
-    listProjectionDiagnostics: () => ({ settlements: [], pending: 0, diagnosticOk: true, includeContent: false }),
+    listProjectionDiagnostics: () => ({
+      settlements: [],
+      pending: 0,
+      diagnosticOk: true,
+      includeContent: false,
+    }),
     ...overrides,
   };
 }
@@ -572,6 +577,95 @@ describe("session routes", () => {
 });
 
 describe("run execution routes", () => {
+  it("requires and forwards the exact message selected for prompt editing", async () => {
+    const editLatestPrompt = vi.fn(() => ({ input: { id: "edited-input" } }));
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt: vi.fn(),
+        editLatestPrompt,
+        resumeRun: vi.fn(),
+        interruptSession: vi.fn(() => ({
+          interrupted: false,
+          queuedRunIds: [],
+        })),
+      },
+      traces: { get: () => "trace-edit" },
+    });
+
+    const missingSource = await app.request("/s1/prompts/latest/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "edit-1", content: "replacement" }),
+    });
+    expect(missingSource.status).toBe(400);
+    expect(editLatestPrompt).not.toHaveBeenCalled();
+
+    const response = await app.request("/s1/prompts/latest/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "edit-1",
+        content: "replacement",
+        sourceMessageId: "message-1",
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(editLatestPrompt).toHaveBeenCalledWith("s1", {
+      id: "edit-1",
+      content: "replacement",
+      sourceMessageId: "message-1",
+      traceId: "trace-edit",
+    });
+  });
+
+  it("scopes an interrupt to the run that was visible when stop was clicked", async () => {
+    const interruptSession = vi.fn(() => ({
+      interrupted: true,
+      queuedRunIds: [],
+    }));
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt: vi.fn(),
+        editLatestPrompt: vi.fn(),
+        resumeRun: vi.fn(),
+        interruptSession,
+      },
+      traces: { get: () => "trace-stop" },
+    });
+
+    const response = await app.request("/s1/interrupt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRunId: "run-before-click" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(interruptSession).toHaveBeenCalledWith("s1", "run-before-click");
+  });
+
+  it("rejects a malformed scoped interrupt instead of falling back to interrupt-all", async () => {
+    const interruptSession = vi.fn();
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt: vi.fn(),
+        editLatestPrompt: vi.fn(),
+        resumeRun: vi.fn(),
+        interruptSession,
+      },
+      traces: { get: () => "trace-stop" },
+    });
+
+    const response = await app.request("/s1/interrupt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRunId: 123 }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(interruptSession).not.toHaveBeenCalled();
+  });
+
   it("admits prompts with trace metadata", async () => {
     const admitPromptAndMaybeRun = vi.fn(() => ({
       input: {

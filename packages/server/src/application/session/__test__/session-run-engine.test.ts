@@ -1,4 +1,7 @@
-import { AgentRunNotAcceptingInputError, type AgentRunHandle } from "@openharness/core";
+import {
+  AgentRunNotAcceptingInputError,
+  type AgentRunHandle,
+} from "@openharness/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionRunEngine } from "../session-run-engine.js";
@@ -26,7 +29,10 @@ describe("SessionRunEngine", () => {
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
     });
 
-    const root = await engine.admitPromptAndMaybeRun("s1", { content: "hello", traceId: "trace-1" });
+    const root = await engine.admitPromptAndMaybeRun("s1", {
+      content: "hello",
+      traceId: "trace-1",
+    });
     await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
     const steered = await engine.admitPromptAndMaybeRun("s1", {
       id: "steer-1",
@@ -38,14 +44,18 @@ describe("SessionRunEngine", () => {
 
     expect(root.queue_state).toBe("running");
     expect(steered.run?.id).toBe(root.run?.id);
-    await expect(engine.admitPromptAndMaybeRun("s1", {
-      id: "steer-1",
-      content: "nudge",
-      delivery: "steer",
-      traceId: "retry-trace",
-    })).resolves.toMatchObject({ run: { id: root.run?.id } });
+    await expect(
+      engine.admitPromptAndMaybeRun("s1", {
+        id: "steer-1",
+        content: "nudge",
+        delivery: "steer",
+        traceId: "retry-trace",
+      }),
+    ).resolves.toMatchObject({ run: { id: root.run?.id } });
     expect(steer).toHaveBeenCalledOnce();
-    expect(steer).toHaveBeenCalledWith(expect.objectContaining({ id: "steer-1", content: "nudge" }));
+    expect(steer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "steer-1", content: "nudge" }),
+    );
     pending.resolve();
     await engine.waitForRuns([root.run!.id]);
   });
@@ -53,7 +63,11 @@ describe("SessionRunEngine", () => {
   it("shares one pending delivery for concurrent requests with the same input id", async () => {
     const store = createStore();
     const runDone = deferred<void>();
-    const delivery = deferred<{ sessionId: string; inputId: string; runId: string }>();
+    const delivery = deferred<{
+      sessionId: string;
+      inputId: string;
+      runId: string;
+    }>();
     const steer = vi.fn(async (input) => {
       store.bindInputToRun(input.id!, "r1");
       return await delivery.promise;
@@ -98,11 +112,17 @@ describe("SessionRunEngine", () => {
   it("terminalizes a steer input interrupted before delivery", async () => {
     const store = createStore();
     const runDone = deferred<void>();
-    const delivery = deferred<{ sessionId: string; inputId: string; runId: string }>();
+    const delivery = deferred<{
+      sessionId: string;
+      inputId: string;
+      runId: string;
+    }>();
     const handle = runHandle(
       runDone.promise,
       vi.fn(async () => await delivery.promise),
-      vi.fn(async () => delivery.reject(new AgentRunNotAcceptingInputError("r1"))),
+      vi.fn(async () =>
+        delivery.reject(new AgentRunNotAcceptingInputError("r1")),
+      ),
     );
     const runExecutor = {
       execute: vi.fn(async (_input, context) => {
@@ -132,11 +152,13 @@ describe("SessionRunEngine", () => {
       status: "interrupted",
       error: "Steered input interrupted",
     });
-    await expect(engine.admitPromptAndMaybeRun("s1", {
-      id: "interrupted-steer",
-      content: "stop this",
-      delivery: "steer",
-    })).resolves.toMatchObject({ run: { status: "interrupted" } });
+    await expect(
+      engine.admitPromptAndMaybeRun("s1", {
+        id: "interrupted-steer",
+        content: "stop this",
+        delivery: "steer",
+      }),
+    ).resolves.toMatchObject({ run: { status: "interrupted" } });
   });
 
   it("returns an existing prompt/run for an identical request id", async () => {
@@ -147,8 +169,14 @@ describe("SessionRunEngine", () => {
       runExecutor: {} as any,
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
     });
-    const first = await engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
-    const second = await engine.admitPromptAndMaybeRun("s1", { id: "fixed", content: "hello" });
+    const first = await engine.admitPromptAndMaybeRun("s1", {
+      id: "fixed",
+      content: "hello",
+    });
+    const second = await engine.admitPromptAndMaybeRun("s1", {
+      id: "fixed",
+      content: "hello",
+    });
     expect(second.input).toBe(first.input);
   });
 
@@ -184,6 +212,96 @@ describe("SessionRunEngine", () => {
     });
     await engine.waitForRuns([admitted.run!.id]);
     expect(runExecutor.execute).toHaveBeenCalledOnce();
+  });
+
+  it("atomically replaces the transcript before enqueuing edited work", async () => {
+    const store = createStore();
+    const runExecutor = { execute: vi.fn(async () => {}) };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    const admitted = engine.replaceTranscriptAndAdmitPrompt(
+      "s1",
+      [{ role: "assistant", parts: [{ type: "text", text: "kept" }] }],
+      { id: "edited-input", content: "replacement", traceId: "trace-edit" },
+    );
+
+    expect(store.replaceTranscriptAndAdmitPrompt).toHaveBeenCalledWith({
+      transcript: {
+        sessionId: "s1",
+        messages: [
+          { role: "assistant", parts: [{ type: "text", text: "kept" }] },
+        ],
+      },
+      admission: {
+        prompt: expect.objectContaining({
+          id: "edited-input",
+          sessionId: "s1",
+          delivery: "queue",
+          content: "replacement",
+        }),
+        run: { metadata: { traceId: "trace-edit" } },
+      },
+      createRun: true,
+    });
+    expect(admitted).toMatchObject({
+      input: { id: "edited-input" },
+      run: { inputId: "edited-input" },
+      queue_state: "running",
+    });
+    await engine.waitForRuns([admitted.run!.id]);
+  });
+
+  it("interrupts only the selected active run and preserves queued work", async () => {
+    const store = createStore();
+    const activeDone = deferred<void>();
+    const handle = runHandle(
+      activeDone.promise,
+      vi.fn(),
+      vi.fn(async () => activeDone.resolve()),
+    );
+    let execution = 0;
+    const runExecutor = {
+      execute: vi.fn(async (_input, context) => {
+        execution += 1;
+        if (execution === 1) {
+          await context.registerHandle(handle);
+          await handle.result;
+        }
+      }),
+    };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    const active = await engine.admitPromptAndMaybeRun("s1", {
+      content: "active",
+    });
+    const queued = await engine.admitPromptAndMaybeRun("s1", {
+      content: "queued",
+    });
+    await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
+
+    expect(engine.interruptRun("s1", active.run!.id)).toMatchObject({
+      activeRunId: active.run!.id,
+      queuedRunIds: [],
+      interrupted: true,
+    });
+    await vi.waitFor(() =>
+      expect(runExecutor.execute).toHaveBeenCalledTimes(2),
+    );
+    await engine.waitForRuns([active.run!.id, queued.run!.id]);
+    expect(store.updateRun).not.toHaveBeenCalledWith(
+      queued.run!.id,
+      expect.objectContaining({ status: "interrupted" }),
+    );
   });
 
   it("queues a durable replacement run when a late steer is rejected", async () => {
@@ -233,7 +351,9 @@ describe("SessionRunEngine", () => {
     });
 
     pending.resolve();
-    await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(runExecutor.execute).toHaveBeenCalledTimes(2),
+    );
   });
 
   it("stops admission, interrupts the active lane, and never starts queued work during shutdown", async () => {
@@ -265,8 +385,9 @@ describe("SessionRunEngine", () => {
 
     expect(runExecutor.execute).toHaveBeenCalledOnce();
     expect(handle.interrupt).toHaveBeenCalledWith("Daemon shutting down");
-    await expect(engine.admitPromptAndMaybeRun("s1", { content: "too late" }))
-      .rejects.toThrow("stopping");
+    await expect(
+      engine.admitPromptAndMaybeRun("s1", { content: "too late" }),
+    ).rejects.toThrow("stopping");
   });
 });
 
@@ -277,20 +398,26 @@ function createStore() {
   let inputCount = 0;
   let runCount = 0;
   const admitPrompt = vi.fn((input) => {
-      const row = {
-        ...input,
-        id: input.id ?? `i${++inputCount}`,
-        delivery: input.delivery ?? "queue",
-        createdAt: 1,
-      };
-      inputs.set(row.id, row);
-      return row;
-    });
+    const row = {
+      ...input,
+      id: input.id ?? `i${++inputCount}`,
+      delivery: input.delivery ?? "queue",
+      createdAt: 1,
+    };
+    inputs.set(row.id, row);
+    return row;
+  });
   const createRun = vi.fn((input) => {
-      const row = { ...input, id: `r${++runCount}`, status: "pending", createdAt: 1, updatedAt: 1 };
-      runs.set(row.id, row);
-      return row;
-    });
+    const row = {
+      ...input,
+      id: `r${++runCount}`,
+      status: "pending",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    runs.set(row.id, row);
+    return row;
+  });
   return {
     transaction: <T>(work: () => T) => work(),
     admitPrompt,
@@ -303,6 +430,27 @@ function createStore() {
         metadata: input.run?.metadata,
       });
       return { input: admitted, run };
+    }),
+    replaceTranscriptAndAdmitPrompt: vi.fn((input) => {
+      if (input.createRun) {
+        const admitted = admitPrompt({
+          ...input.admission.prompt,
+          delivery: "queue",
+        });
+        const run = createRun({
+          id: input.admission.run?.id,
+          sessionId: admitted.sessionId,
+          inputId: admitted.id,
+          metadata: input.admission.run?.metadata,
+        });
+        return {
+          transcript: { messages: [], parts: [] },
+          input: admitted,
+          run,
+        };
+      }
+      const admitted = admitPrompt(input.admission.prompt);
+      return { transcript: { messages: [], parts: [] }, input: admitted };
     }),
     getInput: vi.fn((id) => inputs.get(id)),
     createRun,
@@ -317,7 +465,8 @@ function createStore() {
       return run;
     }),
     appendEvent: vi.fn(),
-    bindInputToRun: (inputId: string, runId: string) => inputOwners.set(inputId, runId),
+    bindInputToRun: (inputId: string, runId: string) =>
+      inputOwners.set(inputId, runId),
   };
 }
 
@@ -346,6 +495,9 @@ function runHandle(
 function deferred<T>() {
   let resolve!: (value?: T) => void;
   let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
   return { promise, resolve, reject };
 }

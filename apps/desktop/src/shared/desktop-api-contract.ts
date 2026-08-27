@@ -19,6 +19,7 @@ import type {
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
+  InterruptDesktopSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
@@ -190,7 +191,7 @@ export type DesktopAPI = {
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
     invokeCommand: (input: InvokeDesktopCommandInput) => Promise<void>
     editLatestPrompt: (input: EditLatestDesktopPromptInput) => Promise<void>
-    interrupt: (sessionId: string) => Promise<void>
+    interrupt: (input: InterruptDesktopSessionInput) => Promise<void>
     replyPermission: (input: ReplyDesktopPermissionInput) => Promise<void>
     setDefaultModel: (input: SetDefaultDesktopModelInput) => Promise<DesktopBootstrapData>
     setDefaultPermissionMode: (

@@ -1570,6 +1570,34 @@ export class SessionStore {
     });
   }
 
+  /**
+   * Atomically replaces the visible transcript and admits the replacement
+   * prompt. A daemon crash can therefore never persist only the destructive
+   * half of an edit.
+   */
+  replaceTranscriptAndAdmitPrompt(input: {
+    transcript: ReplaceTranscriptInput;
+    admission: AdmitPromptWithRunInput;
+    createRun: boolean;
+  }): {
+    transcript: {
+      messages: SessionMessageRecord[];
+      parts: SessionMessagePartRecord[];
+    };
+    input: SessionInputRecord;
+    run?: SessionRunRecord;
+  } {
+    return this.transaction(() => {
+      const transcript = this.replaceTranscript(input.transcript);
+      if (input.createRun) {
+        const admitted = this.admitPromptWithRun(input.admission);
+        return { transcript, input: admitted.input, run: admitted.run };
+      }
+      const admitted = this.admitPrompt(input.admission.prompt);
+      return { transcript, input: admitted };
+    });
+  }
+
   /** Respect renamed titles; use the first prompt only for initial placeholder titles. */
   resolveSessionListTitle(sessionId: string): string {
     const session = assertSession(this.state, sessionId);
@@ -2169,16 +2197,23 @@ export class SessionStore {
 
   createSessionTask(input: CreateSessionTaskInput): SessionExecutionRecord {
     const session = assertSession(this.state, input.sessionId);
-    if ((input.requestNamespace === undefined) !== (input.requestId === undefined)) {
-      throw new Error("Session task requestNamespace and requestId must be provided together");
+    if (
+      (input.requestNamespace === undefined) !==
+      (input.requestId === undefined)
+    ) {
+      throw new Error(
+        "Session task requestNamespace and requestId must be provided together",
+      );
     }
     if (input.requestNamespace && input.requestId) {
       const existing = Object.values(this.state.tasks).find(
-        (task) => task.sessionId === input.sessionId &&
+        (task) =>
+          task.sessionId === input.sessionId &&
           task.requestNamespace === input.requestNamespace &&
           task.requestId === input.requestId,
       );
-      if (existing) throw new Error(`Session task request already exists: ${existing.id}`);
+      if (existing)
+        throw new Error(`Session task request already exists: ${existing.id}`);
     }
     const id = input.id ?? randomUUID();
     if (this.state.tasks[id])
@@ -2207,7 +2242,9 @@ export class SessionStore {
     const task: SessionExecutionRecord = {
       id,
       sessionId: input.sessionId,
-      ...(input.requestNamespace ? { requestNamespace: input.requestNamespace } : {}),
+      ...(input.requestNamespace
+        ? { requestNamespace: input.requestNamespace }
+        : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(input.childSessionId ? { childSessionId: input.childSessionId } : {}),
       ...(input.runId ? { runId: input.runId } : {}),
@@ -2217,7 +2254,9 @@ export class SessionStore {
       cwd: resolve(input.cwd),
       metadata: input.metadata ?? {},
       createdAt: timestamp,
-      ...((input.status ?? "running") === "running" ? { startedAt: timestamp } : {}),
+      ...((input.status ?? "running") === "running"
+        ? { startedAt: timestamp }
+        : {}),
       updatedAt: timestamp,
     };
     this.state.tasks[id] = task;
@@ -2235,12 +2274,15 @@ export class SessionStore {
   }
 
   /** Atomically reserves one durable task for a producer request. */
-  reserveSessionTask(input: CreateSessionTaskInput & {
-    requestNamespace: string;
-    requestId: string;
-  }): { task: SessionExecutionRecord; created: boolean } {
+  reserveSessionTask(
+    input: CreateSessionTaskInput & {
+      requestNamespace: string;
+      requestId: string;
+    },
+  ): { task: SessionExecutionRecord; created: boolean } {
     const existing = Object.values(this.state.tasks).find(
-      (task) => task.sessionId === input.sessionId &&
+      (task) =>
+        task.sessionId === input.sessionId &&
         task.requestNamespace === input.requestNamespace &&
         task.requestId === input.requestId,
     );

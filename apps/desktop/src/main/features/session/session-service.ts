@@ -47,6 +47,7 @@ import type {
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
+  InterruptDesktopSessionInput,
   OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
@@ -371,10 +372,22 @@ class DesktopSessionService {
 
   /** 往已 attach 的会话排队一句用户输入。结果仍从刚才那条 SSE 订阅回来。 */
   async sendPrompt(input: SendDesktopPromptInput): Promise<void> {
+    const id = requireString(input.id, "输入 ID")
     const sessionId = requireString(input.sessionId, "会话 ID")
     const content = requireString(input.content, "消息内容")
     const client = await this.getClient()
-    await client.admitPrompt(sessionId, { content, delivery: "queue" })
+    await client.admitPrompt(sessionId, {
+      id,
+      content,
+      delivery: "queue",
+      metadata: {
+        origin: {
+          client: "desktop",
+          component: "composer",
+          action: "append_prompt",
+        },
+      },
+    })
   }
 
   async invokeCommand(input: InvokeDesktopCommandInput): Promise<void> {
@@ -385,10 +398,23 @@ class DesktopSessionService {
   }
 
   async editLatestPrompt(input: EditLatestDesktopPromptInput): Promise<void> {
+    const id = requireString(input.id, "编辑请求 ID")
     const sessionId = requireString(input.sessionId, "会话 ID")
     const content = requireString(input.content, "消息内容")
+    const sourceMessageId = requireString(input.sourceMessageId, "原消息 ID")
     const client = await this.getClient()
-    await client.editLatestPrompt(sessionId, { content })
+    await client.editLatestPrompt(sessionId, {
+      id,
+      content,
+      sourceMessageId,
+      metadata: {
+        origin: {
+          client: "desktop",
+          component: "latest-message-editor",
+          action: "edit_latest_prompt",
+        },
+      },
+    })
   }
 
   async forkSession(input: ForkDesktopSessionInput): Promise<DesktopSessionRecord> {
@@ -402,10 +428,16 @@ class DesktopSessionService {
     )
   }
 
-  async interruptSession(sessionIdInput: string): Promise<void> {
-    const sessionId = requireString(sessionIdInput, "会话 ID")
+  async interruptSession(input: InterruptDesktopSessionInput): Promise<void> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const expectedRunId =
+      input.expectedRunId === undefined
+        ? undefined
+        : requireString(input.expectedRunId, "预期运行 ID")
     const client = await this.getClient()
-    await client.interruptSession(sessionId)
+    await client.interruptSession(sessionId, {
+      ...(expectedRunId ? { expectedRunId } : {}),
+    })
   }
 
   async replyPermission(input: ReplyDesktopPermissionInput): Promise<void> {

@@ -1,6 +1,4 @@
-import {
-  type SessionStore,
-} from "@openharness/services";
+import { type SessionStore } from "@openharness/services";
 import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
@@ -55,7 +53,10 @@ export interface ForkSessionCommand {
 }
 
 export interface EditLatestPromptCommand {
+  id: string;
   content: string;
+  sourceMessageId: string;
+  metadata?: Record<string, unknown>;
   traceId: string;
 }
 
@@ -179,45 +180,74 @@ export class SessionApplicationService {
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const content = input.content.trim();
     if (!content) throw new SessionApplicationError(400, "content is required");
-    if (this.context.runEngine.hasWork(sessionId)) {
-      throw new SessionApplicationError(
-        409,
-        "Wait for the active session run before editing the latest prompt",
-      );
-    }
-    const latestUserMessage = [...this.context.store.listMessages(sessionId)]
-      .reverse()
-      .find((message) => message.role === "user");
-    if (!latestUserMessage) {
-      throw new SessionApplicationError(
-        409,
-        "No user prompt is available to edit",
-      );
-    }
-
     const lease = this.enterSessionOperation(session);
     try {
+      const existingInput = this.context.store.getInput(input.id);
+      if (existingInput) {
+        const edit = isRecord(existingInput.metadata.edit)
+          ? existingInput.metadata.edit
+          : undefined;
+        if (
+          existingInput.sessionId !== sessionId ||
+          existingInput.content !== content ||
+          edit?.kind !== "latest_prompt" ||
+          edit.sourceMessageId !== input.sourceMessageId
+        ) {
+          throw new SessionApplicationError(
+            409,
+            `Prompt id is already used: ${input.id}`,
+          );
+        }
+        return promptResult(this.context.store, existingInput);
+      }
+      if (this.context.runEngine.hasWork(sessionId)) {
+        throw new SessionApplicationError(
+          409,
+          "Wait for the active session run before editing the latest prompt",
+        );
+      }
+      if (this.context.liveChildren.has(sessionId)) {
+        throw new SessionApplicationError(
+          409,
+          "Editing a live child session is not supported",
+        );
+      }
+      const latestUserMessage = [...this.context.store.listMessages(sessionId)]
+        .reverse()
+        .find((message) => message.role === "user");
+      if (!latestUserMessage) {
+        throw new SessionApplicationError(
+          409,
+          "No user prompt is available to edit",
+        );
+      }
+      if (latestUserMessage.id !== input.sourceMessageId) {
+        throw new SessionApplicationError(
+          409,
+          "The prompt selected for editing is no longer the latest user message",
+        );
+      }
       const messages = this.context.store
         .listMessages(sessionId)
         .filter((message) => message.seq < latestUserMessage.seq);
       const parts = this.context.store.listMessageParts(sessionId);
-      const before = this.context.events.checkpoint();
-      this.context.store.replaceTranscript({
-        sessionId,
-        messages: copyTranscript(messages, parts),
-      });
       await this.context.agentPool.close(sessionId);
-      this.context.events.publishSince(before);
-      return await this.admitPromptWork(sessionId, {
-        content,
-        traceId: input.traceId,
-        metadata: {
-          edit: {
-            kind: "latest_prompt",
-            sourceMessageId: latestUserMessage.id,
+      return this.context.runEngine.replaceTranscriptAndAdmitPrompt(
+        sessionId,
+        copyTranscript(messages, parts),
+        {
+          id: input.id,
+          content,
+          traceId: input.traceId,
+          metadata: {
+            ...(input.metadata ?? {}),
+            edit: {
+              kind: "latest_prompt",
+              sourceMessageId: latestUserMessage.id,
+            },
           },
         },
-      });
+      );
     } finally {
       lease.release();
     }
@@ -476,8 +506,11 @@ export class SessionApplicationService {
 
   async interruptSession(
     sessionId: string,
+    expectedRunId?: string,
   ): Promise<ReturnType<SessionRunEngine["interruptSession"]>> {
     this.assertReady();
+    if (expectedRunId)
+      return this.context.runEngine.interruptRun(sessionId, expectedRunId);
     const lane = this.context.runEngine.interruptSession(sessionId);
     const targets = [sessionId, ...this.descendantSessionIds(sessionId)];
     const childInterrupted = (

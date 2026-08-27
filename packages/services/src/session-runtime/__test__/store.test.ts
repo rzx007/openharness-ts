@@ -9,10 +9,30 @@ import { SessionStore, type SessionStoreOptions } from "../store.js";
 import { createDurableEventRegistry } from "../event-registry.js";
 
 const fixtureEventRegistry = createDurableEventRegistry([
-  { type: "daemon.heartbeat", currentVersion: 1, scope: "global", validate: () => undefined },
-  { type: "daemon.legacy", currentVersion: 1, scope: "global", validate: () => undefined },
-  { type: "daemon.current", currentVersion: 1, scope: "global", validate: () => undefined },
-  { type: "daemon.after-restart", currentVersion: 1, scope: "session", validate: () => undefined },
+  {
+    type: "daemon.heartbeat",
+    currentVersion: 1,
+    scope: "global",
+    validate: () => undefined,
+  },
+  {
+    type: "daemon.legacy",
+    currentVersion: 1,
+    scope: "global",
+    validate: () => undefined,
+  },
+  {
+    type: "daemon.current",
+    currentVersion: 1,
+    scope: "global",
+    validate: () => undefined,
+  },
+  {
+    type: "daemon.after-restart",
+    currentVersion: 1,
+    scope: "session",
+    validate: () => undefined,
+  },
 ]);
 
 function withStore(
@@ -26,14 +46,23 @@ function withStore(
     test(store, path);
   } finally {
     store.close();
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    });
   }
 }
 
 describe("SessionStore", () => {
   it("reserves one durable pending task for repeated producer requests", () => {
     withStore((store, path) => {
-      store.createSession({ id: "session-1", cwd: process.cwd(), model: "test" });
+      store.createSession({
+        id: "session-1",
+        cwd: process.cwd(),
+        model: "test",
+      });
       const input = {
         id: "task-reserved",
         sessionId: "session-1",
@@ -48,9 +77,15 @@ describe("SessionStore", () => {
       const first = store.reserveSessionTask(input);
       const retry = store.reserveSessionTask({ ...input, id: "task-ignored" });
 
-      expect(first).toMatchObject({ created: true, task: { id: "task-reserved", status: "pending" } });
+      expect(first).toMatchObject({
+        created: true,
+        task: { id: "task-reserved", status: "pending" },
+      });
       expect(first.task).not.toHaveProperty("startedAt");
-      expect(retry).toMatchObject({ created: false, task: { id: "task-reserved" } });
+      expect(retry).toMatchObject({
+        created: false,
+        task: { id: "task-reserved" },
+      });
       expect(store.listSessionTasks("session-1")).toHaveLength(1);
 
       expect(store.getSessionTask("task-reserved")).toMatchObject({
@@ -66,8 +101,9 @@ describe("SessionStore", () => {
         requestNamespace: "tool",
         requestId: "tool:call-1",
       });
-      expect(reloaded.reserveSessionTask({ ...input, id: "task-after-restart" }))
-        .toMatchObject({ created: false, task: { id: "task-reserved" } });
+      expect(
+        reloaded.reserveSessionTask({ ...input, id: "task-after-restart" }),
+      ).toMatchObject({ created: false, task: { id: "task-reserved" } });
       reloaded.updateSessionTask("task-reserved", {
         status: "interrupted",
         metadata: { admissionPhase: "runtime_missing" },
@@ -79,15 +115,20 @@ describe("SessionStore", () => {
         requestNamespace: "tool",
         requestId: "tool:call-1",
       });
-      expect(verified.reserveSessionTask({ ...input, id: "task-after-reconcile" }))
-        .toMatchObject({ created: false, task: { id: "task-reserved" } });
+      expect(
+        verified.reserveSessionTask({ ...input, id: "task-after-reconcile" }),
+      ).toMatchObject({ created: false, task: { id: "task-reserved" } });
       verified.close();
     });
   });
 
   it("does not confirm a pending task after it has been stopped", () => {
     withStore((store) => {
-      store.createSession({ id: "session-1", cwd: process.cwd(), model: "test" });
+      store.createSession({
+        id: "session-1",
+        cwd: process.cwd(),
+        model: "test",
+      });
       store.reserveSessionTask({
         id: "task-raced",
         sessionId: "session-1",
@@ -460,10 +501,12 @@ describe("SessionStore", () => {
         END;
       `);
 
-      expect(() => store.admitPromptWithRun({
-        prompt: { id: "atomic-input", sessionId: "s1", content: "hello" },
-        run: { id: "atomic-run", metadata: { traceId: "trace-atomic" } },
-      })).toThrow("forced run insert failure");
+      expect(() =>
+        store.admitPromptWithRun({
+          prompt: { id: "atomic-input", sessionId: "s1", content: "hello" },
+          run: { id: "atomic-run", metadata: { traceId: "trace-atomic" } },
+        }),
+      ).toThrow("forced run insert failure");
 
       expect(store.getInput("atomic-input")).toBeUndefined();
       expect(store.getRun("atomic-run")).toBeUndefined();
@@ -492,6 +535,66 @@ describe("SessionStore", () => {
     });
   });
 
+  it("rolls back transcript replacement when replacement prompt admission fails", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const original = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "user",
+      });
+      store.upsertMessagePart({
+        id: "p1",
+        sessionId: "s1",
+        messageId: original.id,
+        type: "text",
+        status: "completed",
+        text: "original prompt",
+      });
+      const database = (store as any).database as Database.Database;
+      database.exec(`
+        CREATE TRIGGER fail_edit_run_insert
+        BEFORE INSERT ON session_run
+        BEGIN
+          SELECT RAISE(ABORT, 'forced edit run failure');
+        END;
+      `);
+
+      expect(() =>
+        store.replaceTranscriptAndAdmitPrompt({
+          transcript: { sessionId: "s1", messages: [] },
+          admission: {
+            prompt: {
+              id: "replacement-input",
+              sessionId: "s1",
+              content: "replacement",
+            },
+            run: { id: "replacement-run" },
+          },
+          createRun: true,
+        }),
+      ).toThrow("forced edit run failure");
+
+      expect(store.listMessages("s1")).toEqual([
+        expect.objectContaining({ id: "m1" }),
+      ]);
+      expect(store.listMessageParts("s1")).toEqual([
+        expect.objectContaining({ id: "p1", text: "original prompt" }),
+      ]);
+      expect(store.getInput("replacement-input")).toBeUndefined();
+      expect(store.getRun("replacement-run")).toBeUndefined();
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.listMessages("s1")).toEqual([
+        expect.objectContaining({ id: "m1" }),
+      ]);
+      expect(reloaded.listMessageParts("s1")).toEqual([
+        expect.objectContaining({ id: "p1", text: "original prompt" }),
+      ]);
+      reloaded.close();
+    });
+  });
+
   it("terminalizes only inputs that have no durable run ownership", () => {
     withStore((store, path) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
@@ -507,7 +610,10 @@ describe("SessionStore", () => {
         delivery: "steer",
         content: "promoted",
       });
-      const promotedRun = store.createRun({ id: "promoted-run", sessionId: "s1" });
+      const promotedRun = store.createRun({
+        id: "promoted-run",
+        sessionId: "s1",
+      });
       store.createMessage({
         id: "promoted-message",
         sessionId: "s1",
@@ -552,32 +658,35 @@ describe("SessionStore", () => {
   });
 
   it("replays monotonic events by cursor and session", () => {
-    withStore((store) => {
-      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const cursor = store.listEvents().at(-1)!.seq;
-      store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
-      store.admitPrompt({ sessionId: "s1", content: "wake" });
-      store.appendEvent({ type: "daemon.heartbeat", payload: { ok: true } });
+    withStore(
+      (store) => {
+        store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+        const cursor = store.listEvents().at(-1)!.seq;
+        store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
+        store.admitPrompt({ sessionId: "s1", content: "wake" });
+        store.appendEvent({ type: "daemon.heartbeat", payload: { ok: true } });
 
-      expect(store.listEvents().map((event) => event.seq)).toEqual([
-        1, 2, 3, 4,
-      ]);
-      expect(store.listEvents().map((event) => event.schemaVersion)).toEqual([
-        1, 1, 1, 1,
-      ]);
-      expect(
-        store.listEvents({ afterSeq: cursor }).map((event) => event.type),
-      ).toEqual([
-        "session.created",
-        "session.input.admitted",
-        "daemon.heartbeat",
-      ]);
-      expect(
-        store
-          .listEvents({ afterSeq: cursor, sessionId: "s1" })
-          .map((event) => event.type),
-      ).toEqual(["session.input.admitted", "daemon.heartbeat"]);
-    }, { eventRegistry: fixtureEventRegistry });
+        expect(store.listEvents().map((event) => event.seq)).toEqual([
+          1, 2, 3, 4,
+        ]);
+        expect(store.listEvents().map((event) => event.schemaVersion)).toEqual([
+          1, 1, 1, 1,
+        ]);
+        expect(
+          store.listEvents({ afterSeq: cursor }).map((event) => event.type),
+        ).toEqual([
+          "session.created",
+          "session.input.admitted",
+          "daemon.heartbeat",
+        ]);
+        expect(
+          store
+            .listEvents({ afterSeq: cursor, sessionId: "s1" })
+            .map((event) => event.type),
+        ).toEqual(["session.input.admitted", "daemon.heartbeat"]);
+      },
+      { eventRegistry: fixtureEventRegistry },
+    );
   });
 
   it("rejects databases without the current storage format marker", () => {
@@ -600,8 +709,9 @@ describe("SessionStore", () => {
       `);
       legacy.close();
 
-      expect(() => new SessionStore({ path, eventRegistry: fixtureEventRegistry }))
-        .toThrow("Existing databases are not upgraded");
+      expect(
+        () => new SessionStore({ path, eventRegistry: fixtureEventRegistry }),
+      ).toThrow("Existing databases are not upgraded");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -620,16 +730,20 @@ describe("SessionStore", () => {
       };
       const created = store.createProjectionSettlement(input);
       expect(store.createProjectionSettlement(input)).toEqual(created);
-      expect(() => store.createProjectionSettlement({
-        ...input,
-        action: "compensate-child",
-      })).toThrow("Projection settlement identity conflict");
+      expect(() =>
+        store.createProjectionSettlement({
+          ...input,
+          action: "compensate-child",
+        }),
+      ).toThrow("Projection settlement identity conflict");
 
       expect(store.markProjectionSettlementRetrying(created.id)).toMatchObject({
         status: "retrying",
         attemptCount: 1,
       });
-      expect(store.failProjectionSettlement(created.id, "still unavailable", 123)).toMatchObject({
+      expect(
+        store.failProjectionSettlement(created.id, "still unavailable", 123),
+      ).toMatchObject({
         status: "pending",
         attemptCount: 1,
         lastError: "still unavailable",
@@ -647,12 +761,16 @@ describe("SessionStore", () => {
       store.close();
 
       const reloaded = new SessionStore({ path });
-      expect(reloaded.listProjectionSettlements({
-        projector: input.projector,
-        rootSessionId: input.rootSessionId,
-        status: "resolved",
-      })).toHaveLength(1);
-      expect(reloaded.listProjectionSettlements({ status: ["pending", "retrying"] })).toEqual([]);
+      expect(
+        reloaded.listProjectionSettlements({
+          projector: input.projector,
+          rootSessionId: input.rootSessionId,
+          status: "resolved",
+        }),
+      ).toHaveLength(1);
+      expect(
+        reloaded.listProjectionSettlements({ status: ["pending", "retrying"] }),
+      ).toEqual([]);
       reloaded.close();
     });
   });
@@ -1041,7 +1159,10 @@ describe("SessionStore", () => {
       });
       store.close();
 
-      const reloaded = new SessionStore({ path, eventRegistry: fixtureEventRegistry });
+      const reloaded = new SessionStore({
+        path,
+        eventRegistry: fixtureEventRegistry,
+      });
       const durable = reloaded.appendEvent({
         type: "daemon.after-restart",
         sessionId: "s1",
@@ -1159,13 +1280,15 @@ describe("SessionStore", () => {
 
       const reloaded = new SessionStore({ path });
       expect(reloaded.getRun("r1")!.status).toBe("completed");
-      expect(reloaded.listRunAttempts("r1")).toMatchObject([{
-        id: "attempt-r1-1",
-        sequence: 1,
-        status: "completed",
-        provider: "openrouter",
-        model: "m",
-      }]);
+      expect(reloaded.listRunAttempts("r1")).toMatchObject([
+        {
+          id: "attempt-r1-1",
+          sequence: 1,
+          status: "completed",
+          provider: "openrouter",
+          model: "m",
+        },
+      ]);
       expect(reloaded.listMessageParts("s1")).toMatchObject([
         {
           id: "part-tool",
@@ -1201,13 +1324,26 @@ describe("SessionStore", () => {
   it("records multiple logical provider attempts under one run with independent identities", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
-      const input = store.admitPrompt({ id: "i1", sessionId: "s1", content: "retry me" });
+      const input = store.admitPrompt({
+        id: "i1",
+        sessionId: "s1",
+        content: "retry me",
+      });
       store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
       store.updateRun("r1", { status: "running" });
 
-      const first = store.createRunAttempt({ id: "attempt-1", runId: "r1", provider: "p", model: "m" });
+      const first = store.createRunAttempt({
+        id: "attempt-1",
+        runId: "r1",
+        provider: "p",
+        model: "m",
+      });
       store.updateRunAttempt(first.id, { status: "running" });
-      store.updateRunAttempt(first.id, { status: "failed", errorKind: "provider", error: "fallback" });
+      store.updateRunAttempt(first.id, {
+        status: "failed",
+        errorKind: "provider",
+        error: "fallback",
+      });
       const second = store.createRunAttempt({
         id: "attempt-2",
         runId: "r1",
@@ -1216,12 +1352,28 @@ describe("SessionStore", () => {
         retryReason: "primary provider failed",
       });
       store.updateRunAttempt(second.id, { status: "running" });
-      store.updateRunAttempt(second.id, { status: "completed", inputTokens: 10, outputTokens: 4 });
+      store.updateRunAttempt(second.id, {
+        status: "completed",
+        inputTokens: 10,
+        outputTokens: 4,
+      });
       store.updateRun("r1", { status: "completed" });
 
       expect(store.listRunAttempts("r1")).toMatchObject([
-        { id: "attempt-1", runId: "r1", sequence: 1, status: "failed", provider: "p" },
-        { id: "attempt-2", runId: "r1", sequence: 2, status: "completed", provider: "backup" },
+        {
+          id: "attempt-1",
+          runId: "r1",
+          sequence: 1,
+          status: "failed",
+          provider: "p",
+        },
+        {
+          id: "attempt-2",
+          runId: "r1",
+          sequence: 2,
+          status: "completed",
+          provider: "backup",
+        },
       ]);
     });
   });
@@ -1235,7 +1387,10 @@ describe("SessionStore", () => {
         content: "hello",
       });
       store.createRun({ id: "r1", sessionId: "s1", inputId: input.id });
-      const attempt = store.createRunAttempt({ id: "attempt-r1-1", runId: "r1" });
+      const attempt = store.createRunAttempt({
+        id: "attempt-r1-1",
+        runId: "r1",
+      });
       store.updateRunAttempt(attempt.id, { status: "running" });
       const message = store.createMessage({
         id: "m1",
@@ -1287,14 +1442,22 @@ describe("SessionStore", () => {
         { id: "r1", status: "interrupted" },
       ]);
       expect(snapshot.attempts).toMatchObject([
-        { id: "attempt-r1-1", runId: "r1", status: "cancelled", errorKind: "interrupted" },
+        {
+          id: "attempt-r1-1",
+          runId: "r1",
+          status: "cancelled",
+          errorKind: "interrupted",
+        },
       ]);
       expect(
         snapshot.parts
           .filter((part) => part.messageId === "m2")
           .map((part) => part.status),
       ).toEqual(["interrupted", "failed"]);
-      expect(snapshot.parts.find((part) => part.id === "part-running-tool")?.metadata).toMatchObject({
+      expect(
+        snapshot.parts.find((part) => part.id === "part-running-tool")
+          ?.metadata,
+      ).toMatchObject({
         toolCallId: "tool-1",
         toolAttemptId: "tool_attempt_tool-1_1",
         failureKind: "unknown_outcome",
@@ -1499,23 +1662,26 @@ describe("SessionStore", () => {
         const second = store.inspectProject(secondPath);
         const database = new Database(databasePath);
         try {
-          database.prepare("UPDATE project SET created_at = ?, last_opened_at = ? WHERE id = ?").run(
-            100,
-            100,
-            first.id,
-          );
-          database.prepare("UPDATE project SET created_at = ?, last_opened_at = ? WHERE id = ?").run(
-            200,
-            200,
-            second.id,
-          );
+          database
+            .prepare(
+              "UPDATE project SET created_at = ?, last_opened_at = ? WHERE id = ?",
+            )
+            .run(100, 100, first.id);
+          database
+            .prepare(
+              "UPDATE project SET created_at = ?, last_opened_at = ? WHERE id = ?",
+            )
+            .run(200, 200, second.id);
         } finally {
           database.close();
         }
 
         store.inspectProject(firstPath);
 
-        expect(store.listProjects().map((project) => project.id)).toEqual([second.id, first.id]);
+        expect(store.listProjects().map((project) => project.id)).toEqual([
+          second.id,
+          first.id,
+        ]);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

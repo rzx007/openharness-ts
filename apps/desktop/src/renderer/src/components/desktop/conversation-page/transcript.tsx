@@ -34,7 +34,7 @@ export function ConversationTranscript({
   runs: DesktopSessionRun[]
   running: boolean
   canEditLastUserMessage: boolean
-  onEditLastUserMessage: (content: string) => void
+  onEditLastUserMessage: (sourceMessageId: string, content: string) => void
   onCopyAssistantMessage: (content: string) => void
   onForkAssistantMessage?: (messageId: string) => void
   onOpenFile: (path: string, line?: number) => void
@@ -92,22 +92,18 @@ export function ConversationTranscript({
             entry.turn.runIds.includes(run.id) ||
             (Boolean(run.inputId) && run.inputId === entry.turn.inputId)
         )
+        const userMessage = entry.turn.userMessage
         return (
           <Fragment key={entry.turn.id}>
-            {entry.turn.userMessage ? (
-              <MessageScrollerItem
-                messageId={entry.turn.userMessage.id}
-                scrollAnchor
-                className="pt-2"
-              >
+            {userMessage ? (
+              <MessageScrollerItem messageId={userMessage.id} scrollAnchor className="pt-2">
                 <MessageBlock
-                  message={entry.turn.userMessage}
+                  message={userMessage}
                   parts={entry.turn.userParts}
                   streaming={false}
                   userActions={{
-                    canEdit:
-                      canEditLastUserMessage && entry.turn.userMessage.id === lastUserMessage?.id,
-                    onEdit: onEditLastUserMessage,
+                    canEdit: canEditLastUserMessage && userMessage.id === lastUserMessage?.id,
+                    onEdit: (content) => onEditLastUserMessage(userMessage.id, content),
                   }}
                   onOpenFile={onOpenFile}
                   canOpenReview={canOpenReview}
