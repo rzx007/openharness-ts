@@ -361,8 +361,8 @@ apps/desktop/src/renderer/src/stores/
 ### Action 文件
 
 - `bootstrap-actions.ts`：初始化、refresh bootstrap、daemon 事件挂接；
-- `project-details-coordinator.ts`：项目选择与项目详情 generation 的共享所有者，供 `project-actions.ts` 和 `session-actions.ts` 注入使用；
-- `project-actions.ts`：项目选择、Git 状态、branch 和项目设置；旧 choose/select/refresh/checkout/create branch 返回不得覆盖更新意图；
+- `project-details-coordinator.ts`：项目选择与项目详情 generation 的共享所有者，供 `project-actions.ts` 和 `session-actions.ts` 注入使用；打开会话本身也必须推进项目选择 generation，使更早的 chooser 失效；
+- `project-actions.ts`：项目选择、Git 状态、branch 和项目设置；旧 choose/select/refresh/checkout/create branch 返回不得覆盖更新意图，失去详情 generation 的迟到失败只能清理自身 operation，不能成为当前项目的可见错误；
 - `project-git-scheduler.ts`：合并短时间内重复的 Git 刷新请求，并在 store 监听解绑时取消未执行工作；
 - `session-actions.ts`：新会话入口、创建、打开、fork、rename、pin、archive、delete；默认模型和权限模式使用同一总顺序写入，打开会话 inspect 共享项目详情所有权，首条 slash command 必须等待 primary open 成功；
 - `prompt-actions.ts`：发送、命令、编辑、停止、授权回复；

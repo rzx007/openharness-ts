@@ -394,6 +394,96 @@ describe("desktop session store project order", () => {
     })
   })
 
+  it("does not surface a stale refresh failure after a newer checkout succeeds", async () => {
+    const project = {
+      id: "project-stale-refresh-error",
+      name: "Project Stale Refresh Error",
+      path: "D:\\code\\project-stale-refresh-error",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    let rejectRefresh!: (error: Error) => void
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject: vi.fn(
+            () =>
+              new Promise<ReturnType<typeof projectDetails>>((_resolve, reject) => {
+                rejectRefresh = reject
+              })
+          ),
+          checkoutBranch: vi.fn(async () => projectDetails(project, "feature/new")),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      workspaceMode: "project",
+      selectedProject: project,
+      selectedProjectGit: true,
+      selectedProjectGitCheckedAt: null,
+      branch: "main",
+      branches: ["main"],
+      projectOperations: {},
+    })
+
+    const refresh = useDesktopSessionStore.getState().refreshSelectedProjectGit({ force: true })
+    await useDesktopSessionStore.getState().checkoutBranch("feature/new")
+    rejectRefresh(new Error("stale refresh failed"))
+    await refresh
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      branch: "feature/new",
+      branches: ["feature/new"],
+    })
+    expect(useDesktopSessionStore.getState().projectOperations[project.id]).toBeUndefined()
+  })
+
+  it("does not surface a stale checkout failure after a newer refresh succeeds", async () => {
+    const project = {
+      id: "project-stale-checkout-error",
+      name: "Project Stale Checkout Error",
+      path: "D:\\code\\project-stale-checkout-error",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    let rejectCheckout!: (error: Error) => void
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          checkoutBranch: vi.fn(
+            () =>
+              new Promise<ReturnType<typeof projectDetails>>((_resolve, reject) => {
+                rejectCheckout = reject
+              })
+          ),
+          inspectProject: vi.fn(async () => projectDetails(project, "feature/refreshed")),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      workspaceMode: "project",
+      selectedProject: project,
+      selectedProjectGit: true,
+      selectedProjectGitCheckedAt: null,
+      branch: "main",
+      branches: ["main"],
+      projectOperations: {},
+    })
+
+    const checkout = useDesktopSessionStore.getState().checkoutBranch("feature/stale")
+    await useDesktopSessionStore.getState().refreshSelectedProjectGit({ force: true })
+    rejectCheckout(new Error("stale checkout failed"))
+    await checkout
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      branch: "feature/refreshed",
+      branches: ["feature/refreshed"],
+    })
+    expect(useDesktopSessionStore.getState().projectOperations[project.id]).toBeUndefined()
+  })
+
   it("does not let a late chooser replace a newer explicit project selection", async () => {
     const projectA = {
       id: "project-choose-a",

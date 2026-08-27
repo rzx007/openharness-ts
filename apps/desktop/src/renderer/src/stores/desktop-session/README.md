@@ -40,8 +40,8 @@
 | `session-view-actions.ts` | 把已接受的 SSE 快照写入目录、导航和对应会话 runtime；这是状态写入动作，不发 IPC。 |
 | `pending-prompt-state.ts` | 决定 prompt 放在 transcript 还是 queue，并清理已被 SSE input/run 确认的本地覆盖。 |
 | `bootstrap-actions.ts` | 初始化、刷新 bootstrap 数据和 daemon 状态事件。 |
-| `project-details-coordinator.ts` | 管理项目选择和每个项目详情的 generation（每次新意图递增的版本号）；`project-actions.ts` 与 `session-actions.ts` 共用它，旧 chooser、refresh、分支或打开会话 inspect 都不能覆盖新结果。 |
-| `project-actions.ts` | 选项目、读取 Git、分支和项目设置；详情写入先向 coordinator 领取 generation，失败只写到该项目的 operation 桶。 |
+| `project-details-coordinator.ts` | 管理项目选择和每个项目详情的 generation（每次新意图递增的版本号）；`project-actions.ts` 与 `session-actions.ts` 共用它。打开会话也会领取项目选择所有权，旧 chooser、refresh、分支或打开会话 inspect 都不能覆盖新结果。 |
+| `project-actions.ts` | 选项目、读取 Git、分支和项目设置；详情写入先向 coordinator 领取 generation。只有仍拥有最新 generation 的失败才写到项目 operation 桶，过期请求只清理自己，不能在新操作成功后显示旧错误。 |
 | `project-git-scheduler.ts` | 对 Git 刷新做延迟合并；在最后一个 store 监听解绑时取消尚未执行的刷新。 |
 | `session-actions.ts` | 新会话、打开、fork、重命名、置顶、归档和删除；管理 primary 导航所有权，按用户总顺序写入默认模型和权限模式，并提供不改变导航的 resync。 |
 | `prompt-actions.ts` | 普通发送、命令、编辑、停止和授权回复。 |

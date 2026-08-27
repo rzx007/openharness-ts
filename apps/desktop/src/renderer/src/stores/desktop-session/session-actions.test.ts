@@ -8,7 +8,12 @@ import {
   selectNewConversationSending,
   selectSessionComposerError,
 } from "./selectors"
-import { refreshedBootstrap, resetDesktopSessionStore, sessionRuntime } from "./store-test-fixtures"
+import {
+  projectDetails,
+  refreshedBootstrap,
+  resetDesktopSessionStore,
+  sessionRuntime,
+} from "./store-test-fixtures"
 import { attachDesktopSessionEvents, useDesktopSessionStore } from "./store"
 import type { DesktopSessionRuntime } from "./types"
 
@@ -1060,6 +1065,63 @@ describe("desktop session actions", () => {
       selectedProject: project,
       branch: "feature/new",
       branches: ["feature/new"],
+    })
+  })
+
+  it("does not let a late project chooser replace the project owned by an opened session", async () => {
+    const projectA = {
+      id: "project-late-chooser-a",
+      name: "Project Late Chooser A",
+      path: "D:\\code\\project-late-chooser-a",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const projectB = {
+      id: "project-open-owner-b",
+      name: "Project Open Owner B",
+      path: "D:\\code\\project-open-owner-b",
+      lastOpenedAt: 200,
+      available: true,
+    }
+    const view = emptySessionView("session-project-owner-b")
+    view.session = {
+      ...view.session,
+      projectId: projectB.id,
+      workspaceMode: "project",
+      cwd: projectB.path,
+    }
+    let resolveChoose!: (value: ReturnType<typeof projectDetails>) => void
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          chooseProject: vi.fn(
+            () =>
+              new Promise<ReturnType<typeof projectDetails>>((resolve) => {
+                resolveChoose = resolve
+              })
+          ),
+          open: vi.fn(async () => view),
+          inspectProject: vi.fn(async () => projectDetails(projectB, "branch-b")),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [projectA, projectB],
+      selectedProject: projectA,
+      projectOperations: {},
+      appOperations: {},
+    })
+
+    const choosing = useDesktopSessionStore.getState().chooseProject()
+    await useDesktopSessionStore.getState().openSession(view.session.id)
+    resolveChoose(projectDetails(projectA, "branch-a"))
+    await choosing
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: view.session.id,
+      selectedProject: projectB,
+      branch: "branch-b",
+      branches: ["branch-b"],
     })
   })
 

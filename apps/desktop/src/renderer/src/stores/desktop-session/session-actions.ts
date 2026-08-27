@@ -53,6 +53,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     return primaryNavigationGeneration
   }
   const openPrimarySession = async (sessionId: string): Promise<OpenSessionResult> => {
+    const projectSelectionGeneration = projectDetailsCoordinator.beginSelection()
     const operationId = globalThis.crypto.randomUUID()
     set((state) => {
       const previousActiveSessionId = state.activeSessionId
@@ -110,8 +111,11 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
         snapshotApplied = true
         const workspace = resolveSessionWorkspace(state.projects, view.session)
+        const ownsProjectSelection = projectDetailsCoordinator.ownsSelection(
+          projectSelectionGeneration
+        )
         return {
-          ...workspace,
+          ...(ownsProjectSelection ? workspace : {}),
           sessionView: view,
           selectedModel: view.session.model,
           selectedProvider: sessionProvider(view.session, state.defaultProvider),
@@ -134,7 +138,10 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
       writePersistedActiveSessionId(sessionId)
       const workspace = resolveSessionWorkspace(get().projects, view.session)
-      if (workspace.selectedProject) {
+      if (
+        workspace.selectedProject &&
+        projectDetailsCoordinator.ownsSelection(projectSelectionGeneration)
+      ) {
         const projectId = workspace.selectedProject.id
         const projectDetailsGeneration = projectDetailsCoordinator.beginDetails(projectId)
         try {

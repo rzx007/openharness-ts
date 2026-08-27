@@ -110,6 +110,10 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           appOperations: removeScopedOperation(state.appOperations, operationId),
         }))
       } catch (error) {
+        if (!projectDetailsCoordinator.ownsSelection(selectionGeneration)) {
+          finishAppOperation(operationId)
+          return
+        }
         failAppOperation(operationId, error)
         throw error
       }
@@ -151,6 +155,13 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           ),
         }))
       } catch (error) {
+        if (
+          !projectDetailsCoordinator.ownsSelection(selectionGeneration) ||
+          !ownsProjectDetails(project.id, gitGeneration)
+        ) {
+          finishProjectOperation(project.id, operationId)
+          return
+        }
         failProjectOperation(project.id, operationId, error)
         throw error
       }
@@ -213,15 +224,17 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
         }))
         return git
       } catch (error) {
-        failProjectOperation(selectedProject.id, operationId, error)
-        if (ownsProjectDetails(selectedProject.id, gitGeneration)) {
-          set({
-            selectedProjectGit: false,
-            selectedProjectGitCheckedAt: Date.now(),
-            branch: null,
-            branches: [],
-          })
+        if (!ownsProjectDetails(selectedProject.id, gitGeneration)) {
+          finishProjectOperation(selectedProject.id, operationId)
+          return get().selectedProjectGit
         }
+        failProjectOperation(selectedProject.id, operationId, error)
+        set({
+          selectedProjectGit: false,
+          selectedProjectGitCheckedAt: Date.now(),
+          branch: null,
+          branches: [],
+        })
         return false
       }
     },
@@ -247,7 +260,8 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           ) {
             set((state) => projectDetailsState(state, details))
           }
-        }
+        },
+        () => ownsProjectDetails(selectedProject.id, gitGeneration)
       )
     },
 
@@ -272,7 +286,8 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           ) {
             set((state) => projectDetailsState(state, details))
           }
-        }
+        },
+        () => ownsProjectDetails(selectedProject.id, gitGeneration)
       )
     },
 
@@ -423,20 +438,24 @@ function projectOperation(
   return { id, kind: "project-action", sessionId: null, projectId, target, startedAt: Date.now() }
 }
 
-async function withProjectOperation<T>(
+async function withProjectOperation(
   project: DesktopProject,
   target: string,
   begin: (projectId: string, target: string) => string,
   finish: (projectId: string, operationId: string) => void,
   fail: (projectId: string, operationId: string, error: unknown) => void,
-  action: (operationId: string) => Promise<T>
-): Promise<T> {
+  action: (operationId: string) => Promise<void>,
+  ownsFailure: () => boolean = () => true
+): Promise<void> {
   const operationId = begin(project.id, target)
   try {
-    const result = await action(operationId)
+    await action(operationId)
     finish(project.id, operationId)
-    return result
   } catch (error) {
+    if (!ownsFailure()) {
+      finish(project.id, operationId)
+      return
+    }
     fail(project.id, operationId, error)
     throw error
   }
