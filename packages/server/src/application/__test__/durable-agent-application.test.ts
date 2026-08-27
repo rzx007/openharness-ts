@@ -152,6 +152,7 @@ describe("DaemonApplication", () => {
       await application.sessions.awaitRun(session.id, admission.run!.id);
 
       const created = await backgroundShellHost!.create({
+        requestId: "tool:durable-shell-test",
         cwd: session.cwd,
         sessionId: session.id,
         command: `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`,

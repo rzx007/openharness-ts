@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 
 import type { Settings } from "@openharness/core";
+import type { SessionExecutionRecord, SessionStatus, SessionTaskStatus } from "@openharness/protocol";
 
 import type {
   DetachedProcessExecution,
@@ -15,10 +17,16 @@ type ProcessSupervisor = DetachedProcessSupervisor;
 type TaskScope = { cwd: string; sessionId?: string };
 
 interface BackgroundShellStore {
-  getSession(sessionId: string): { cwd: string } | undefined;
+  getSession(sessionId: string): { cwd: string; status: SessionStatus } | undefined;
+  listSessions(options?: { includeArchived?: boolean }): Array<{
+    id: string;
+    cwd: string;
+    status: SessionStatus;
+  }>;
   listSessionTasks(sessionId: string): Array<{
     id: string;
     sessionId: string;
+    type: string;
     status: string;
     output?: string;
     metadata: Record<string, unknown>;
@@ -26,6 +34,7 @@ interface BackgroundShellStore {
   getSessionTask(taskId: string): {
     id: string;
     sessionId: string;
+    status?: string;
     output?: string;
     metadata: Record<string, unknown>;
   } | undefined;
@@ -37,11 +46,33 @@ interface BackgroundShellStore {
     cwd: string;
     metadata: Record<string, unknown>;
   }): unknown;
+  reserveSessionTask(input: {
+    id: string;
+    sessionId: string;
+    requestNamespace: string;
+    requestId: string;
+    type: string;
+    description: string;
+    cwd: string;
+    metadata: Record<string, unknown>;
+  }): { task: SessionExecutionRecord; created: boolean };
+  transitionPendingSessionTask(taskId: string, input: {
+    status?: SessionTaskStatus;
+    output?: string;
+    error?: string;
+    metadata?: Record<string, unknown>;
+  }): { task: SessionExecutionRecord; transitioned: boolean };
+  updateSessionTask(taskId: string, input: {
+    status?: SessionTaskStatus;
+    output?: string;
+    error?: string;
+    metadata?: Record<string, unknown>;
+  }): SessionExecutionRecord;
 }
 
 export class BackgroundShellError extends ApplicationError {
   constructor(
-    status: 400 | 404,
+    status: 400 | 404 | 409,
     message: string,
   ) {
     super(status, message);
@@ -53,7 +84,7 @@ export interface BackgroundShellServiceContext {
   store: BackgroundShellStore;
   executionProjector: Pick<
     SessionExecutionProjector,
-    "projectProcessExecutions" | "syncPersistentExecution" | "trackProcessExecution"
+    "syncPersistentExecution" | "trackProcessExecution"
   >;
   getDetachedProcessSupervisor(scope: TaskScope): ProcessSupervisor;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
@@ -63,11 +94,62 @@ export interface BackgroundShellServiceContext {
 export class BackgroundShellService {
   constructor(private readonly context: BackgroundShellServiceContext) {}
 
+  /** Reattach live process projections and terminalize rows whose runtime owner is gone. */
+  async reconcileActiveTasks(reason = "Daemon restarted and the task runtime is unavailable"): Promise<number> {
+    let reconciled = 0;
+    const before = this.context.events.checkpoint();
+    for (const session of this.context.store.listSessions({ includeArchived: true })) {
+      const manager = this.context.getDetachedProcessSupervisor({
+        cwd: session.cwd,
+        sessionId: session.id,
+      });
+      for (const task of this.context.store.listSessionTasks(session.id)) {
+        const isDetached = task.type === "shell" || task.metadata.executionBackend === "detached_process";
+        const runtime = isDetached ? manager.getExecution(runtimeExecutionId(task)) : undefined;
+        const active = task.status === "pending" || task.status === "running";
+        if (!active) {
+          if (runtime && (runtime.status === "pending" || runtime.status === "running")) {
+            try {
+              await manager.stopExecution(runtime.id);
+              this.context.store.updateSessionTask(task.id, {
+                metadata: { admissionPhase: "orphan_runtime_stopped" },
+              });
+            } catch (error) {
+              this.context.store.updateSessionTask(task.id, {
+                metadata: {
+                  admissionPhase: "orphan_runtime_stop_failed",
+                  reconciliationError: errorMessage(error),
+                },
+              });
+            }
+            reconciled += 1;
+          }
+          continue;
+        }
+        if (runtime) {
+          this.context.executionProjector.trackProcessExecution(manager, runtime.id);
+          this.context.executionProjector.syncPersistentExecution(runtime, manager, task.id);
+          this.context.store.updateSessionTask(task.id, {
+            metadata: { admissionPhase: "recovered_live" },
+          });
+        } else {
+          this.context.store.updateSessionTask(task.id, {
+            status: "interrupted",
+            error: reason,
+            metadata: { admissionPhase: "runtime_missing" },
+          });
+        }
+        reconciled += 1;
+      }
+    }
+    this.context.events.publishSince(before);
+    return reconciled;
+  }
+
   list(input: { cwd?: string; sessionId?: string; status?: string }): { executions: unknown[] } {
     const scope = this.resolveScope(input);
     const manager = this.context.getDetachedProcessSupervisor(scope);
     if (scope.sessionId) {
-      this.context.executionProjector.projectProcessExecutions(scope.sessionId, manager);
       const tasks = this.context.store.listSessionTasks(scope.sessionId);
       return { executions: input.status ? tasks.filter((task) => task.status === input.status) : tasks };
     }
@@ -75,71 +157,126 @@ export class BackgroundShellService {
   }
 
   async create(input: {
+    /** Stable identity for one logical creation request. */
+    requestId: string;
     cwd?: string;
     sessionId?: string;
     command: string;
     description?: string;
     settings?: Settings;
     origin?: "http" | "tool";
-  }): Promise<{ execution: DetachedProcessExecution }> {
-    const scope = this.resolveScope(input);
+  }): Promise<{ execution: DetachedProcessExecution | SessionExecutionRecord; created: boolean }> {
+    const scope = this.resolveScope(input, { requireActiveSession: true });
+    const requestId = input.requestId.trim();
+    if (!requestId) throw new BackgroundShellError(400, "requestId is required");
     const command = input.command.trim();
     if (!command) throw new BackgroundShellError(400, "command is required");
     const description = input.description?.trim() || command;
-    const id = scope.sessionId ? `task_${randomUUID()}` : undefined;
     const manager = this.context.getDetachedProcessSupervisor(scope);
-    const task = await manager.startShellExecution({
-      ...(id ? { id } : {}),
+    if (!scope.sessionId) {
+      const execution = await manager.startShellExecution({
+        command,
+        description,
+        cwd: scope.cwd,
+        ...(input.settings ? { settings: input.settings } : {}),
+      });
+      return { execution, created: true };
+    }
+
+    const requestNamespace = input.origin ?? "http";
+    const requestFingerprint = shellRequestFingerprint({
+      cwd: scope.cwd,
       command,
       description,
-      cwd: scope.cwd,
-      ...(scope.sessionId ? { sessionId: scope.sessionId } : {}),
-      ...(input.settings ? { settings: input.settings } : {}),
+      settings: input.settings,
     });
-    if (scope.sessionId) {
-      try {
-        const before = this.context.events.checkpoint();
-        this.context.store.createSessionTask({
-          id: task.id,
-          sessionId: scope.sessionId,
-          type: task.type,
-          description: task.description,
-          cwd: task.cwd,
-          metadata: {
-            origin: input.origin ?? "http",
-            executionBackend: "detached_process",
-            runtimeExecutionId: task.id,
-          },
-        });
-        this.context.executionProjector.trackProcessExecution(manager, task.id);
-        this.context.executionProjector.syncPersistentExecution(task, manager);
-        this.context.events.publishSince(before);
-      } catch (error) {
-        try {
-          const stopped = await manager.stopExecution(task.id);
-          try {
-            this.context.executionProjector.syncPersistentExecution(stopped, manager);
-          } catch {
-            // Process cleanup succeeded. A missing/broken projection must not hide that fact.
-          }
-        } catch (cleanupError) {
-          throw new Error(
-            `Failed to project created session task ${task.id}: ${errorMessage(error)}; ` +
-            `cleanup failed: ${errorMessage(cleanupError)}`,
-            { cause: error },
-          );
-        }
-        throw error;
+    let eventCursor = this.context.events.checkpoint();
+    const reservation = this.context.store.reserveSessionTask({
+      id: `task_${randomUUID()}`,
+      sessionId: scope.sessionId,
+      requestNamespace,
+      requestId,
+      type: "shell",
+      description,
+      cwd: scope.cwd,
+      metadata: {
+        origin: requestNamespace,
+        admissionPhase: "reserved",
+        requestFingerprint,
+        executionBackend: "detached_process",
+      },
+    });
+    this.context.events.publishSince(eventCursor);
+    eventCursor = this.context.events.checkpoint();
+    if (!reservation.created) {
+      if (reservation.task.metadata.requestFingerprint !== requestFingerprint) {
+        throw new BackgroundShellError(409, `Background shell request identity conflict: ${requestId}`);
       }
+      const runtime = manager.getExecution(reservation.task.id);
+      const admissionPhase = reservation.task.metadata.admissionPhase;
+      if (runtime && (admissionPhase === "reserved" || admissionPhase === "dispatching")) {
+        // The first caller is still starting this exact runtime. Re-entering the
+        // supervisor by id joins its in-flight promise, including its failure.
+        const execution = await manager.startShellExecution({
+          id: reservation.task.id,
+          command,
+          description,
+          cwd: scope.cwd,
+          sessionId: scope.sessionId,
+          ...(input.settings ? { settings: input.settings } : {}),
+        });
+        return { execution, created: false };
+      }
+      return { execution: runtime ?? reservation.task, created: false };
     }
-    return { execution: task };
+
+    this.context.store.updateSessionTask(reservation.task.id, {
+      metadata: { admissionPhase: "dispatching" },
+    });
+    this.context.events.publishSince(eventCursor);
+    eventCursor = this.context.events.checkpoint();
+    let task: DetachedProcessExecution;
+    try {
+      task = await manager.startShellExecution({
+        id: reservation.task.id,
+        command,
+        description,
+        cwd: scope.cwd,
+        sessionId: scope.sessionId,
+        ...(input.settings ? { settings: input.settings } : {}),
+      });
+    } catch (error) {
+      this.context.store.transitionPendingSessionTask(reservation.task.id, {
+        status: "failed",
+        error: errorMessage(error),
+        metadata: { admissionPhase: "failed" },
+      });
+      this.context.events.publishSince(eventCursor);
+      throw error;
+    }
+    const confirmation = this.context.store.transitionPendingSessionTask(task.id, {
+      status: processTaskStatus(task.status),
+      metadata: {
+        admissionPhase: "confirmed",
+        runtimeExecutionId: task.id,
+      },
+    });
+    if (!confirmation.transitioned && confirmation.task.status === "stopped" && task.status !== "stopped") {
+      task = await manager.stopExecution(task.id);
+      this.context.store.updateSessionTask(task.id, {
+        metadata: { admissionPhase: "cancelled_before_start" },
+      });
+    }
+    this.context.executionProjector.trackProcessExecution(manager, task.id);
+    this.context.executionProjector.syncPersistentExecution(task, manager);
+    this.context.events.publishSince(eventCursor);
+    return { execution: task, created: true };
   }
 
   get(taskId: string, input: { cwd?: string; sessionId?: string }): { execution: unknown; output?: string } {
     const scope = this.resolveScope(input);
     const manager = this.context.getDetachedProcessSupervisor(scope);
     if (scope.sessionId) {
-      this.context.executionProjector.projectProcessExecutions(scope.sessionId, manager);
       const task = this.context.store.getSessionTask(taskId);
       if (!task || task.sessionId !== scope.sessionId) {
         throw new BackgroundShellError(404, `Task not found: ${taskId}`);
@@ -168,7 +305,6 @@ export class BackgroundShellService {
   async stop(taskId: string, input: { cwd?: string; sessionId?: string }): Promise<{ execution: unknown }> {
     const scope = this.resolveScope(input);
     const manager = this.context.getDetachedProcessSupervisor(scope);
-    if (scope.sessionId) this.context.executionProjector.projectProcessExecutions(scope.sessionId, manager);
     const persisted = scope.sessionId ? this.context.store.getSessionTask(taskId) : undefined;
     const managerTaskId = persisted ? runtimeExecutionId(persisted) : taskId;
     const task = await manager.stopExecution(managerTaskId);
@@ -178,16 +314,51 @@ export class BackgroundShellService {
     return { execution: task };
   }
 
-  private resolveScope(input: { cwd?: string; sessionId?: string }): TaskScope {
+  private resolveScope(
+    input: { cwd?: string; sessionId?: string },
+    options: { requireActiveSession?: boolean } = {},
+  ): TaskScope {
     let cwd = input.cwd;
     if (input.sessionId) {
       const session = this.context.store.getSession(input.sessionId);
       if (!session) throw new BackgroundShellError(404, "Session not found");
-      cwd = cwd ?? session.cwd;
+      if (options.requireActiveSession && (session.status === "closing" || session.status === "archived")) {
+        throw new BackgroundShellError(409, `Session is not accepting new work: ${input.sessionId}`);
+      }
+      if (cwd && resolve(cwd) !== resolve(session.cwd)) {
+        throw new BackgroundShellError(409, "Background shell cwd mismatch");
+      }
+      // A session-scoped process is always owned by the supervisor for the session's
+      // persisted cwd. Callers cannot move it into another supervisor namespace.
+      cwd = session.cwd;
     }
     if (!cwd) throw new BackgroundShellError(400, "cwd or sessionId is required");
     return { cwd, ...(input.sessionId ? { sessionId: input.sessionId } : {}) };
   }
+}
+
+function shellRequestFingerprint(input: {
+  cwd: string;
+  command: string;
+  description: string;
+  settings?: Settings;
+}): string {
+  return createHash("sha256").update(stableJson(input)).digest("hex");
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
+}
+
+function processTaskStatus(status: DetachedProcessExecution["status"]): SessionTaskStatus {
+  return status;
 }
 
 function runtimeExecutionId(task: { id: string; metadata: Record<string, unknown> }): string {

@@ -162,6 +162,9 @@ export interface SessionRunAttemptRecord {
 export interface SessionExecutionRecord {
   id: string;
   sessionId: string;
+  /** Producer namespace plus requestId uniquely identify one logical admission. */
+  requestNamespace?: string;
+  requestId?: string;
   childSessionId?: string;
   runId?: string;
   type: string;
@@ -485,6 +488,9 @@ export interface CreateSessionTaskInput {
   type: string;
   description: string;
   cwd: string;
+  status?: SessionTaskStatus;
+  requestNamespace?: string;
+  requestId?: string;
   metadata?: Record<string, unknown>;
 }
 

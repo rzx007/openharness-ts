@@ -24,10 +24,6 @@ import type { TerminalSessionInfo } from "@openharness/terminal";
 
 import type { DaemonTerminalService } from "../terminal/index.js";
 
-interface JobTaskProjection {
-  list(input: { sessionId: string }): { executions: unknown[] };
-}
-
 interface JobSessionStore {
   getSession(sessionId: string): SessionRecord | undefined;
   listSessionTasks(sessionId: string): SessionExecutionRecord[];
@@ -35,6 +31,7 @@ interface JobSessionStore {
   updateSessionTask(taskId: string, input: {
     status: "stopped";
     output?: string;
+    metadata?: Record<string, unknown>;
   }): SessionExecutionRecord;
   waitForSessionTaskChange?(taskId: string, after: number, options: {
     timeoutMs: number;
@@ -54,7 +51,6 @@ export class DaemonJobService {
   constructor(
     private readonly store: JobSessionStore,
     private readonly terminals: DaemonTerminalService,
-    private readonly backgroundShells: JobTaskProjection,
     private readonly getDetachedProcessSupervisor: (
       scope: { cwd: string; sessionId: string },
     ) => JobExecutionRuntime,
@@ -76,7 +72,6 @@ export class DaemonJobService {
 
   async list(input: JobListRequest): Promise<JobSnapshot[]> {
     const session = this.requireSession(input.sessionId);
-    this.backgroundShells.list({ sessionId: session.id });
     const terminals = await this.terminals.list({ sessionId: session.id, source: "agent" });
     const tasks = this.store.listSessionTasks(session.id);
     const workflows = this.workflows
@@ -199,6 +194,13 @@ export class DaemonJobService {
       return terminalSnapshot(await this.terminals.get(source.value.id));
     }
     if (source.kind === "task") {
+      if (source.value.status === "pending") {
+        const stopped = this.store.updateSessionTask(source.value.id, {
+          status: "stopped",
+          metadata: { admissionPhase: "cancelled_before_start" },
+        });
+        return taskSnapshot(stopped);
+      }
       const runtime = this.runtimeFor(source.value);
       await runtime.stopExecution(runtimeExecutionId(source.value));
       let output: string | undefined;
@@ -236,8 +238,21 @@ export class DaemonJobService {
   }
 
   private owned<T extends { sessionId: string }>(session: SessionRecord, input: T): T {
-    if (input.sessionId !== session.id) throw new Error("Job owner session mismatch.");
+    if (!this.isSessionInTree(session.id, input.sessionId)) {
+      throw new Error("Job owner session mismatch.");
+    }
     return input;
+  }
+
+  private isSessionInTree(rootSessionId: string, candidateSessionId: string): boolean {
+    let current = this.store.getSession(candidateSessionId);
+    const visited = new Set<string>();
+    while (current && !visited.has(current.id)) {
+      if (current.id === rootSessionId) return true;
+      visited.add(current.id);
+      current = current.parentId ? this.store.getSession(current.parentId) : undefined;
+    }
+    return false;
   }
 
   private requireSession(sessionId: string): SessionRecord {
@@ -268,7 +283,6 @@ export class DaemonJobService {
     | { kind: "workflow"; value: WorkflowRunSnapshot; cwd: string; repository: WorkflowRunRepository }
   > {
     this.requireSession(sessionId);
-    this.backgroundShells.list({ sessionId });
     const terminal = (await this.terminals.list({ sessionId, source: "agent" }))
       .find((candidate) => candidate.id === jobId);
     if (terminal) return { kind: "terminal", value: terminal };

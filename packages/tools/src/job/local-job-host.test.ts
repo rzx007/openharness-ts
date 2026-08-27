@@ -12,21 +12,97 @@ import {
   createWorkflowRunSnapshot,
   FileWorkflowRunRepository,
 } from "@openharness/coordinator";
-import { resetExecutionRuntimes } from "@openharness/services/executions";
+import { getDetachedProcessSupervisor, resetExecutionRuntimes } from "@openharness/services/executions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LocalAgentJobHost } from "./local-job-host.js";
 
 const createdDirectories: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const cwd of createdDirectories.splice(0)) {
+    await getDetachedProcessSupervisor({ cwd, sessionId: "session-1" }).aclose();
     resetExecutionRuntimes({ cwd, sessionId: "session-1" });
-    rmSync(cwd, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
 describe("LocalAgentJobHost adapter", () => {
+  it("returns one shell job for concurrent retries of the same creation request", async () => {
+    const cwd = temporaryDirectory();
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const input = {
+      requestId: "tool:call-1",
+      cwd,
+      sessionId: "session-1",
+      command: `${JSON.stringify(process.execPath)} -e "process.stdout.write('ok')"`,
+      description: "print once",
+    };
+
+    const [first, retry] = await Promise.all([host.create(input), host.create(input)]);
+
+    expect(retry).toEqual(first);
+    await expect(host.list({ sessionId: "session-1", kinds: ["shell"] }))
+      .resolves.toHaveLength(1);
+    await host.wait({ sessionId: "session-1", jobId: first.jobId, timeoutMs: 2_000 });
+  });
+
+  it("prunes expired settled creation requests", async () => {
+    const cwd = temporaryDirectory();
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const requests = (host as any).shellRequests as Map<string, any>;
+    requests.set("expired", {
+      fingerprint: "old",
+      result: Promise.resolve({ jobId: "old", label: "old" }),
+      createdAt: Date.now() - 700_000,
+      settledAt: Date.now() - 700_000,
+    });
+
+    const created = await host.create({
+      requestId: "fresh",
+      cwd,
+      sessionId: "session-1",
+      command: `${JSON.stringify(process.execPath)} -e "0"`,
+      description: "fresh",
+    });
+
+    expect(requests.has("expired")).toBe(false);
+    await host.wait({ sessionId: "session-1", jobId: created.jobId, timeoutMs: 2_000 });
+  });
+
+  it("rejects reusing a creation request identity with different parameters", async () => {
+    const cwd = temporaryDirectory();
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const common = {
+      requestId: "tool:call-conflict",
+      cwd,
+      sessionId: "session-1",
+      description: "server",
+    };
+
+    const first = await host.create({ ...common, command: `${JSON.stringify(process.execPath)} -e "0"` });
+    await expect(host.create({ ...common, command: `${JSON.stringify(process.execPath)} -e "1"` }))
+      .rejects.toThrow("request identity conflict");
+    await host.wait({ sessionId: "session-1", jobId: first.jobId, timeoutMs: 2_000 });
+  });
+
+  it("rejects reusing a creation request identity with different settings", async () => {
+    const cwd = temporaryDirectory();
+    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const common = {
+      requestId: "tool:settings-conflict",
+      cwd,
+      sessionId: "session-1",
+      command: `${JSON.stringify(process.execPath)} -e "0"`,
+      description: "server",
+    };
+
+    const first = await host.create({ ...common, settings: { model: "first" } as any });
+    await expect(host.create({ ...common, settings: { model: "second" } as any }))
+      .rejects.toThrow("request identity conflict");
+    await host.wait({ sessionId: "session-1", jobId: first.jobId, timeoutMs: 2_000 });
+  });
+
   it("lists, sends to, and waits for a framework child", async () => {
     const cwd = temporaryDirectory();
     let state: AgentChildHandle["state"] = "running";

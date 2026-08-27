@@ -22,6 +22,8 @@ export interface McpAuthHost {
 /** Host-owned creation boundary for detached shell jobs. */
 export interface AgentBackgroundShellHost {
   create(input: {
+    /** Stable identity for one logical creation request; retries must reuse it. */
+    requestId: string;
     cwd: string;
     sessionId: string;
     command: string;
@@ -36,6 +38,10 @@ export interface AgentBackgroundShellHost {
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
+  /** Stable model-issued tool call identity. Retries of the same call reuse this value. */
+  toolCallId?: string;
+  /** Identity of this concrete execution attempt. */
+  toolAttemptId?: string;
   /** Lifetime of the owning session run; use for detached work that outlives this tool call. */
   runAbortSignal?: AbortSignal;
   /** Lifetime of this tool invocation, including its execution timeout. */

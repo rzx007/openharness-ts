@@ -26,11 +26,96 @@ function withStore(
     test(store, path);
   } finally {
     store.close();
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 
 describe("SessionStore", () => {
+  it("reserves one durable pending task for repeated producer requests", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "session-1", cwd: process.cwd(), model: "test" });
+      const input = {
+        id: "task-reserved",
+        sessionId: "session-1",
+        requestNamespace: "tool",
+        requestId: "tool:call-1",
+        type: "shell",
+        description: "dev server",
+        cwd: process.cwd(),
+        metadata: { requestFingerprint: "fingerprint-1" },
+      };
+
+      const first = store.reserveSessionTask(input);
+      const retry = store.reserveSessionTask({ ...input, id: "task-ignored" });
+
+      expect(first).toMatchObject({ created: true, task: { id: "task-reserved", status: "pending" } });
+      expect(first.task).not.toHaveProperty("startedAt");
+      expect(retry).toMatchObject({ created: false, task: { id: "task-reserved" } });
+      expect(store.listSessionTasks("session-1")).toHaveLength(1);
+
+      expect(store.getSessionTask("task-reserved")).toMatchObject({
+        status: "pending",
+        requestNamespace: "tool",
+        requestId: "tool:call-1",
+      });
+
+      store.close();
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getSessionTask("task-reserved")).toMatchObject({
+        status: "pending",
+        requestNamespace: "tool",
+        requestId: "tool:call-1",
+      });
+      expect(reloaded.reserveSessionTask({ ...input, id: "task-after-restart" }))
+        .toMatchObject({ created: false, task: { id: "task-reserved" } });
+      reloaded.updateSessionTask("task-reserved", {
+        status: "interrupted",
+        metadata: { admissionPhase: "runtime_missing" },
+      });
+      reloaded.close();
+
+      const verified = new SessionStore({ path });
+      expect(verified.getSessionTask("task-reserved")).toMatchObject({
+        requestNamespace: "tool",
+        requestId: "tool:call-1",
+      });
+      expect(verified.reserveSessionTask({ ...input, id: "task-after-reconcile" }))
+        .toMatchObject({ created: false, task: { id: "task-reserved" } });
+      verified.close();
+    });
+  });
+
+  it("does not confirm a pending task after it has been stopped", () => {
+    withStore((store) => {
+      store.createSession({ id: "session-1", cwd: process.cwd(), model: "test" });
+      store.reserveSessionTask({
+        id: "task-raced",
+        sessionId: "session-1",
+        requestNamespace: "http",
+        requestId: "request-raced",
+        type: "shell",
+        description: "dev server",
+        cwd: process.cwd(),
+        metadata: { admissionPhase: "reserved" },
+      });
+      store.updateSessionTask("task-raced", { status: "stopped" });
+
+      const result = store.transitionPendingSessionTask("task-raced", {
+        status: "running",
+        metadata: { admissionPhase: "confirmed" },
+      });
+
+      expect(result).toMatchObject({
+        transitioned: false,
+        task: { id: "task-raced", status: "stopped" },
+      });
+      expect(store.getSessionTask("task-raced")).toMatchObject({
+        status: "stopped",
+        metadata: { admissionPhase: "reserved" },
+      });
+    });
+  });
+
   it("stores Scheduled tasks and Agent run projections in SQLite", () => {
     withStore((store, path) => {
       const task = store.createScheduledTask({

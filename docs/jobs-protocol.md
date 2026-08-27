@@ -1,6 +1,6 @@
 # Jobs 统一后台任务协议
 
-> 状态：当前实现的权威契约，最后核对：2026-08-23。模型工具、HTTP client、slash command 与 TUI 已统一使用 Jobs 观察和控制长期工作。Terminal 自身设计见 [Desktop Terminal PTY Design](./desktop-terminal-pty-design.md)，daemon 总入口见 [Daemon Application Architecture](./daemon-application-architecture.md)。
+> 状态：当前实现的权威契约，最后核对：2026-08-27。模型工具、HTTP client、slash command 与 TUI 已统一使用 Jobs 观察和控制长期工作。Terminal 自身设计见 [Desktop Terminal PTY Design](./desktop-terminal-pty-design.md)，daemon 总入口见 [Daemon Application Architecture](./daemon-application-architecture.md)。
 
 ## 一句话解释
 
@@ -115,21 +115,26 @@ daemon Workflow 和 Session/Run 使用同一份 SQLite。独立 CLI 的 `FileWor
 ```text
 POST /background-shells 或 BackgroundShellCreate
   -> BackgroundShellService.create
-  -> DetachedProcessSupervisor shell
-  -> SessionExecutionRecord projection
+  -> 按 requestId 预留 pending SessionExecutionRecord 和 jobId
+  -> DetachedProcessSupervisor 按同一个 jobId 幂等启动 shell
+  -> 确认 running/completed/failed 并持续同步输出
   -> DaemonJobService.read
   -> { jobId, snapshot }
 ```
 
 每层的责任不同：
 
-- `BackgroundShellService.create` 校验 session/cwd 和命令，再让该 session 的 `DetachedProcessSupervisor` 启动 shell。
-- daemon 在创建 Agent 时按 session 注入 `AgentBackgroundShellHost`；它只负责把模型工具请求路由到 `BackgroundShellService.create`，并校验 owner session 与 cwd 没有越界。
+- `BackgroundShellService.create` 校验 session/cwd、命令和请求身份，先把 pending 记录写进 SQLite，再让该 session 的 `DetachedProcessSupervisor` 启动 shell。
+- daemon 注入的 `AgentBackgroundShellHost` 负责把模型工具请求路由到 `BackgroundShellService.create`。根 Agent 和其后代可以共用这个能力，但任务归真正发起调用的 session 所有，cwd 也必须等于该 session（包括 worktree session）的 cwd。
 - `DetachedProcessSupervisor` 持有真实进程句柄和输出；`SessionExecutionProjector` 把当前状态持续投影为 `SessionExecutionRecord`。
 - `SessionExecutionRecord` 是 daemon 内部的持久执行记录，不是公共 Task API。
 - `DaemonJobService.read` 把该记录转换成 `JobSnapshot`；HTTP 只返回标准 `{ jobId, snapshot }` receipt。
 
-创建成功以 durable projection 已写入为准：`BackgroundShellCreate` 一旦返回 `jobId`，同一 session 的 `JobRead` 和 `JobList` 必须立即可见。若进程已经启动但 projection 写入失败，应用服务会停止该进程并让创建调用失败，不能返回不可查询的 `jobId`。
+创建采用“先登记、后启动”：pending 记录一旦预留，同一 session 的 `JobRead`、`JobList`、`JobWait` 和 `JobCancel` 就能找到它。启动失败不会删除记录，而是写成 failed；取消发生在启动确认前时先写成 stopped，随后若进程恰好已经起来，创建协调者会立刻把它停掉。
+
+每次创建都有稳定请求身份。同一个 `(ownerSession, requestNamespace, requestId)` 只能对应一个 jobId：相同参数重试会返回原 Job，并等待同一个启动结果，不会再启动一个进程；同一请求身份配上不同命令、cwd、description 或执行设置会返回冲突。模型入口使用 `tool:<toolCallId>`；HTTP 调用方应发送 `Idempotency-Key`，服务把它转成 `http:<key>`。HTTP 未提供该头时会生成一次性请求号，此时调用方在响应丢失后无法安全地自行重试。
+
+daemon 启动时逐条核对 active task：运行句柄仍在就重新绑定同步；句柄不存在才写成 interrupted。`JobRead` 和 `JobList` 只读已存在的权威记录，不再在查询时偷偷创建投影。
 
 这个入口只创建 shell，不是通用 `JobCreate`。创建完成后，公共 client 只保留统一控制方法：
 
@@ -304,7 +309,7 @@ JobCancel({ jobId, reason: "no longer needed" })
 
 ### JobList
 
-列出当前 owner session 的工作。可用过滤包括 `kinds`、`statuses`、started/updated 起止时间、`includeFinished` 和 `limit`。调用前 daemon 会刷新 DetachedProcessSupervisor 到 durable task 的投影。
+列出当前 owner session 的工作。可用过滤包括 `kinds`、`statuses`、started/updated 起止时间、`includeFinished` 和 `limit`。daemon 在创建确认、运行状态变化和启动恢复时更新 durable task；`JobList` 本身不承担补写记录的职责。
 
 返回的是新快照数组，不是 live handle。排序按 `startedAt` 从新到旧。模型工具在没有传 `limit` 时默认只取最近 100 条，并返回 `window: { limit, returned, possiblyTruncated }`；`possiblyTruncated: true` 表示结果刚好占满窗口，调用方应增加过滤条件或显式调整 limit。这个窗口只限制本次返回，不删除 producer 保存的历史。底层 `AgentJobHost.list()` 仍以请求里的显式 `limit` 为准。
 

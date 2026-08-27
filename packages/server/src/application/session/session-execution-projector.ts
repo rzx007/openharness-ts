@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 
@@ -42,9 +40,8 @@ export interface ChildAgentRegistry {
 }
 
 export interface DetachedProcessRuntime {
-  listExecutions(status?: string): ExecutionInfo[];
   readOutput(executionId: string): string;
-  registerExecutionListener(listener: (execution: ExecutionInfo) => void): void;
+  registerExecutionListener(listener: (execution: ExecutionInfo) => void): () => void;
 }
 
 export type ChildAgentRegistryFactory = (scope: { cwd: string; sessionId: string }) => ChildAgentRegistry;
@@ -59,10 +56,6 @@ interface SessionTaskStore {
     cwd: string;
     metadata: Record<string, unknown>;
   }): unknown;
-  findSessionExecutionByRuntimeId(sessionId: string, runtimeExecutionId: string): {
-    id: string;
-    sessionId: string;
-  } | undefined;
   getSessionTask(taskId: string): {
     id: string;
     sessionId: string;
@@ -87,10 +80,11 @@ export interface SessionExecutionProjectorContext {
 
 /**
  * 为每个 session 生成 bridge：把 framework child Agent registry 与 store 的
- * SessionTask 持久化投影对齐。后台进程由 projectProcessExecutions 单独投影。
+ * SessionTask 持久化投影对齐。后台进程在持久化预留成功后显式接入监听。
  */
 export class SessionExecutionProjector {
   private readonly trackedTasks = new WeakMap<object, Set<string>>();
+  private readonly taskUnsubscribers = new WeakMap<object, Map<string, () => void>>();
 
   constructor(private readonly context: SessionExecutionProjectorContext) {}
 
@@ -191,41 +185,25 @@ export class SessionExecutionProjector {
     };
   }
 
-  projectProcessExecutions(sessionId: string, runtime: DetachedProcessRuntime): void {
-    for (const task of runtime.listExecutions()) {
-      const persisted = this.context.store.findSessionExecutionByRuntimeId(sessionId, task.id);
-      if (!persisted) {
-        const sameId = this.context.store.getSessionTask(task.id);
-        this.context.store.createSessionTask({
-          id: sameId && sameId.sessionId !== sessionId ? `task_${randomUUID()}` : task.id,
-          sessionId,
-          childSessionId: typeof task.metadata.child_session_id === "string" ? task.metadata.child_session_id : undefined,
-          type: task.type,
-          description: task.description,
-          cwd: task.cwd,
-          metadata: { origin: "detached_process", executionBackend: "detached_process", runtimeExecutionId: task.id },
-        });
-      }
-      const durableTask = this.context.store.findSessionExecutionByRuntimeId(sessionId, task.id) ??
-        this.context.store.getSessionTask(task.id);
-      if (durableTask?.sessionId === sessionId) {
-        this.trackProcessExecution(runtime, task.id, durableTask.id);
-        this.syncPersistentExecution(task, runtime, durableTask.id);
-      }
-    }
-  }
-
   trackProcessExecution(runtime: DetachedProcessRuntime, taskId: string, durableTaskId = taskId): void {
     const tracked = this.trackedTasks.get(runtime as object) ?? new Set<string>();
     if (tracked.has(taskId)) return;
     tracked.add(taskId);
     this.trackedTasks.set(runtime as object, tracked);
-    runtime.registerExecutionListener((task) => {
+    const unregister = runtime.registerExecutionListener((task) => {
       if (task.id !== taskId) return;
       const persisted = this.context.store.getSessionTask(durableTaskId);
-      if (!persisted) return;
+      if (!persisted) {
+        if (isTerminalRuntimeStatus(task.status)) this.untrackProcessExecution(runtime, taskId);
+        return;
+      }
       this.syncPersistentExecution(task, runtime, durableTaskId);
     });
+    if (typeof unregister === "function") {
+      const unsubscribers = this.taskUnsubscribers.get(runtime as object) ?? new Map<string, () => void>();
+      unsubscribers.set(taskId, unregister);
+      this.taskUnsubscribers.set(runtime as object, unsubscribers);
+    }
   }
 
   syncPersistentExecution(task: ExecutionInfo, runtime: DetachedProcessRuntime, durableTaskId = task.id): void {
@@ -246,9 +224,21 @@ export class SessionExecutionProjector {
       ...(status === "failed" ? { error: output ?? "Task failed" } : {}),
     });
     this.context.events.publishSince(before);
+    if (isTerminalTaskStatus(status)) this.untrackProcessExecution(runtime, task.id);
+  }
+
+  private untrackProcessExecution(runtime: DetachedProcessRuntime, taskId: string): void {
+    const runtimeKey = runtime as object;
+    this.taskUnsubscribers.get(runtimeKey)?.get(taskId)?.();
+    this.taskUnsubscribers.get(runtimeKey)?.delete(taskId);
+    this.trackedTasks.get(runtimeKey)?.delete(taskId);
   }
 }
 
 function isTerminalTaskStatus(status: DurableTaskStatus): boolean {
+  return status === "completed" || status === "failed" || status === "stopped" || status === "interrupted";
+}
+
+function isTerminalRuntimeStatus(status: string): boolean {
   return status === "completed" || status === "failed" || status === "stopped" || status === "interrupted";
 }

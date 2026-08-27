@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import { isDeepStrictEqual } from "node:util";
 import { getTasksDir, type Settings } from "@openharness/core";
 import {
   createProcess,
@@ -49,6 +50,7 @@ export class DetachedProcessSupervisor {
   private readonly tasksDir: string;
   private taskSettings = new Map<string, Settings>();
   private taskPolicies = new Map<string, SandboxPolicy>();
+  private shellStartPromises = new Map<string, Promise<DetachedProcessExecution>>();
 
   constructor(tasksDir?: string) {
     // Lazily fall back to a temp dir if core paths are unavailable; callers in
@@ -84,7 +86,27 @@ export class DetachedProcessSupervisor {
     }
 
     const id = opts.id ?? `task_${++this.idCounter}`;
-    if (this.executions.has(id)) throw new Error(`Execution already exists: ${id}`);
+    const existing = this.executions.get(id);
+    if (existing) {
+      if (!this.matchesShellRequest(existing, opts)) {
+        throw new Error(`Execution request identity conflict: ${id}`);
+      }
+      const inFlight = this.shellStartPromises.get(id);
+      return inFlight ? await inFlight : existing;
+    }
+    const starting = this.startShellExecutionOnce(id, opts);
+    this.shellStartPromises.set(id, starting);
+    try {
+      return await starting;
+    } finally {
+      this.shellStartPromises.delete(id);
+    }
+  }
+
+  private async startShellExecutionOnce(
+    id: string,
+    opts: StartShellExecutionOptions,
+  ): Promise<DetachedProcessExecution> {
     const outputFile = join(this.tasksDir, `${id}.log`);
     const task: DetachedProcessExecution = {
       id,
@@ -125,6 +147,21 @@ export class DetachedProcessSupervisor {
       throw error;
     }
     return task;
+  }
+
+  private matchesShellRequest(
+    task: DetachedProcessExecution,
+    opts: StartShellExecutionOptions,
+  ): boolean {
+    return task.type === (opts.type ?? "shell") &&
+      task.description === opts.description &&
+      task.cwd === opts.cwd &&
+      task.sessionId === opts.sessionId &&
+      task.command === opts.command &&
+      isDeepStrictEqual(task.argv, opts.argv) &&
+      isDeepStrictEqual(task.env, opts.env) &&
+      isDeepStrictEqual(this.taskSettings.get(task.id), opts.settings) &&
+      isDeepStrictEqual(this.taskPolicies.get(task.id), opts.policy);
   }
 
   /**

@@ -2169,6 +2169,17 @@ export class SessionStore {
 
   createSessionTask(input: CreateSessionTaskInput): SessionExecutionRecord {
     const session = assertSession(this.state, input.sessionId);
+    if ((input.requestNamespace === undefined) !== (input.requestId === undefined)) {
+      throw new Error("Session task requestNamespace and requestId must be provided together");
+    }
+    if (input.requestNamespace && input.requestId) {
+      const existing = Object.values(this.state.tasks).find(
+        (task) => task.sessionId === input.sessionId &&
+          task.requestNamespace === input.requestNamespace &&
+          task.requestId === input.requestId,
+      );
+      if (existing) throw new Error(`Session task request already exists: ${existing.id}`);
+    }
     const id = input.id ?? randomUUID();
     if (this.state.tasks[id])
       throw new Error(`Session task already exists: ${id}`);
@@ -2196,15 +2207,17 @@ export class SessionStore {
     const task: SessionExecutionRecord = {
       id,
       sessionId: input.sessionId,
+      ...(input.requestNamespace ? { requestNamespace: input.requestNamespace } : {}),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(input.childSessionId ? { childSessionId: input.childSessionId } : {}),
       ...(input.runId ? { runId: input.runId } : {}),
       type: input.type,
-      status: "running",
+      status: input.status ?? "running",
       description: input.description,
       cwd: resolve(input.cwd),
       metadata: input.metadata ?? {},
       createdAt: timestamp,
-      startedAt: timestamp,
+      ...((input.status ?? "running") === "running" ? { startedAt: timestamp } : {}),
       updatedAt: timestamp,
     };
     this.state.tasks[id] = task;
@@ -2219,6 +2232,40 @@ export class SessionStore {
     this.save();
     this.notifySessionTask(id);
     return clone(task);
+  }
+
+  /** Atomically reserves one durable task for a producer request. */
+  reserveSessionTask(input: CreateSessionTaskInput & {
+    requestNamespace: string;
+    requestId: string;
+  }): { task: SessionExecutionRecord; created: boolean } {
+    const existing = Object.values(this.state.tasks).find(
+      (task) => task.sessionId === input.sessionId &&
+        task.requestNamespace === input.requestNamespace &&
+        task.requestId === input.requestId,
+    );
+    if (existing) return { task: clone(existing), created: false };
+    return {
+      task: this.createSessionTask({ ...input, status: "pending" }),
+      created: true,
+    };
+  }
+
+  /**
+   * Confirms or fails an admitted task only while it is still pending.
+   * The check and update are synchronous so a concurrent stop cannot be
+   * overwritten by a stale process-start result.
+   */
+  transitionPendingSessionTask(
+    taskId: string,
+    input: UpdateSessionTaskInput,
+  ): { task: SessionExecutionRecord; transitioned: boolean } {
+    const current = this.state.tasks[taskId];
+    if (!current) throw new Error(`Session task not found: ${taskId}`);
+    if (current.status !== "pending") {
+      return { task: clone(current), transitioned: false };
+    }
+    return { task: this.updateSessionTask(taskId, input), transitioned: true };
   }
 
   updateSessionTask(
@@ -2978,6 +3025,10 @@ export class SessionStore {
       const task: SessionExecutionRecord = {
         id: row.id as string,
         sessionId: row.session_id as string,
+        ...(row.request_namespace
+          ? { requestNamespace: row.request_namespace as string }
+          : {}),
+        ...(row.request_id ? { requestId: row.request_id as string } : {}),
         ...(row.child_session_id
           ? { childSessionId: row.child_session_id as string }
           : {}),
@@ -3269,8 +3320,13 @@ export class SessionStore {
     }
 
     const upsertTask = this.database.prepare(`
-      INSERT INTO session_task VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO session_task (
+        id, session_id, request_namespace, request_id, child_session_id, run_id, type,
+        status, description, cwd, output, error, metadata_json, created_at, started_at,
+        finished_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id,
+        request_namespace=excluded.request_namespace, request_id=excluded.request_id,
         child_session_id=excluded.child_session_id, run_id=excluded.run_id, type=excluded.type,
         status=excluded.status, description=excluded.description, cwd=excluded.cwd,
         output=excluded.output, error=excluded.error, metadata_json=excluded.metadata_json,
@@ -3283,6 +3339,8 @@ export class SessionStore {
         upsertTask.run(
           value.id,
           value.sessionId,
+          value.requestNamespace ?? null,
+          value.requestId ?? null,
           value.childSessionId ?? null,
           value.runId ?? null,
           value.type,

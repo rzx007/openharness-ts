@@ -5,7 +5,7 @@ import { createBackgroundShellRoutes } from "./background-shell.js";
 
 describe("background shell routes", () => {
   it("creates a shell and returns its normalized Job snapshot", async () => {
-    const create = vi.fn(async () => ({ execution: { id: "task-1" } }));
+    const create = vi.fn(async () => ({ execution: { id: "task-1" }, created: true }));
     const read = vi.fn(async () => ({
       text: "",
       cursor: 1,
@@ -26,12 +26,13 @@ describe("background shell routes", () => {
 
     const response = await app.request("/", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "Idempotency-Key": "request-1" },
       body: JSON.stringify({ sessionId: "s1", command: "  pnpm test  " }),
     });
 
     expect(response.status).toBe(201);
     expect(create).toHaveBeenCalledWith({
+      requestId: "http:request-1",
       sessionId: "s1",
       cwd: undefined,
       command: "pnpm test",
@@ -84,7 +85,7 @@ describe("background shell routes", () => {
     const stop = vi.fn(async () => ({ execution: { id: "task-1", status: "stopped" } }));
     const app = createBackgroundShellRoutes({
       backgroundShells: {
-        create: vi.fn(async () => ({ execution: { id: "task-1" } })),
+        create: vi.fn(async () => ({ execution: { id: "task-1" }, created: true })),
         stop,
       },
       jobs: {

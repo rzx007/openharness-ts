@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { Hono } from "hono";
 
 import type { JobReadResult } from "@openharness/protocol";
@@ -23,8 +25,10 @@ export function createBackgroundShellRoutes(context: BackgroundShellRoutesContex
     if (!sessionId) return errorResponse(400, "sessionId is required");
     if (!command) return errorResponse(400, "command is required");
     let execution: Awaited<ReturnType<BackgroundShellService["create"]>>["execution"];
+    let created = false;
     try {
-      ({ execution } = await context.backgroundShells.create({
+      ({ execution, created } = await context.backgroundShells.create({
+        requestId: httpRequestId(c.req.header("Idempotency-Key"), body.requestId),
         sessionId,
         cwd: typeof body.cwd === "string" ? body.cwd : undefined,
         command,
@@ -38,18 +42,25 @@ export function createBackgroundShellRoutes(context: BackgroundShellRoutesContex
       const result = await context.jobs.read({ sessionId, jobId: execution.id });
       return jsonResponse({ jobId: execution.id, snapshot: result.snapshot }, 201);
     } catch (error) {
-      try {
-        await context.backgroundShells.stop(execution.id, { sessionId });
-      } catch (cleanupError) {
-        return errorResponse(
-          500,
-          `Failed to normalize created background Job ${execution.id}: ${errorMessage(error)}; ` +
-          `cleanup failed: ${errorMessage(cleanupError)}`,
-        );
+      if (created) {
+        try {
+          await context.backgroundShells.stop(execution.id, { sessionId });
+        } catch (cleanupError) {
+          return errorResponse(
+            500,
+            `Failed to normalize created background Job ${execution.id}: ${errorMessage(error)}; ` +
+            `cleanup failed: ${errorMessage(cleanupError)}`,
+          );
+        }
       }
       return errorResponse(500, errorMessage(error));
     }
   });
+}
+
+function httpRequestId(headerValue: string | undefined, bodyValue: unknown): string {
+  const supplied = headerValue?.trim() || (typeof bodyValue === "string" ? bodyValue.trim() : "");
+  return `http:${supplied || randomUUID()}`;
 }
 
 function errorMessage(error: unknown): string {

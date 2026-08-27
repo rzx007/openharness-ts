@@ -28,9 +28,11 @@ export const backgroundShellCreateTool: ToolDefinition = {
 
     if (!context.sessionId) return failed("Background shell jobs require a durable session.");
     if (!context.backgroundShell) return failed("Background shell host is not configured.");
+    if (!context.toolCallId) return failed("Background shell request identity is not configured.");
 
     try {
       const created = await context.backgroundShell.create({
+        requestId: `tool:${context.toolCallId}`,
         command: command.value,
         description: description.value,
         cwd: context.cwd,

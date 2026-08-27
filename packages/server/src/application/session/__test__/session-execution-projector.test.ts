@@ -6,7 +6,6 @@ function createContext() {
   return {
     store: {
       createSessionTask: vi.fn(),
-      findSessionExecutionByRuntimeId: vi.fn(),
       getSessionTask: vi.fn(),
       updateSessionTask: vi.fn(),
     },
@@ -24,7 +23,7 @@ function createTaskManager(overrides: Partial<ChildAgentRegistry & DetachedProce
     listExecutions: vi.fn(() => []),
     readOutput: vi.fn(() => "output"),
     registerChildExecution: vi.fn(),
-    registerExecutionListener: vi.fn(),
+    registerExecutionListener: vi.fn(() => () => undefined),
     ...overrides,
   };
 }
@@ -96,77 +95,6 @@ describe("SessionExecutionProjector", () => {
     });
   });
 
-  it("projects task manager tasks into durable session tasks", () => {
-    const context = createContext();
-    const manager = createTaskManager({
-      listExecutions: vi.fn(() => [{
-        id: "task-1",
-        type: "shell",
-        status: "running",
-        description: "npm test",
-        cwd: "/repo",
-        metadata: { child_session_id: "child-1" },
-      }]),
-    });
-    context.store.findSessionExecutionByRuntimeId
-      .mockReturnValueOnce(undefined)
-      .mockReturnValue({ id: "task-1", sessionId: "s1" });
-    context.store.getSessionTask.mockReturnValue(undefined);
-    const bridge = new SessionExecutionProjector(context);
-
-    bridge.projectProcessExecutions("s1", manager);
-
-    expect(context.store.createSessionTask).toHaveBeenCalledWith({
-      id: "task-1",
-      sessionId: "s1",
-      childSessionId: "child-1",
-      type: "shell",
-      description: "npm test",
-      cwd: "/repo",
-      metadata: { origin: "detached_process", executionBackend: "detached_process", runtimeExecutionId: "task-1" },
-    });
-    expect(context.store.updateSessionTask).toHaveBeenCalledWith("task-1", {
-      status: "running",
-      output: "output",
-    });
-    expect(context.events.publishSince).toHaveBeenCalledWith(4);
-  });
-
-  it("keeps collision-renamed durable tasks synced by their durable id", () => {
-    const context = createContext();
-    const liveTask = {
-      id: "task-1",
-      type: "shell",
-      status: "running",
-      description: "npm test",
-      cwd: "/repo",
-      metadata: {},
-    };
-    let listener: ((task: typeof liveTask) => void) | undefined;
-    const manager = createTaskManager({
-      listExecutions: vi.fn(() => [liveTask]),
-      registerExecutionListener: vi.fn((next) => { listener = next as (task: typeof liveTask) => void; }),
-    });
-    context.store.findSessionExecutionByRuntimeId
-      .mockReturnValueOnce(undefined)
-      .mockReturnValue({ id: "durable-1", sessionId: "s1" });
-    context.store.getSessionTask.mockImplementation((id: string) =>
-      id === "task-1"
-        ? { id, sessionId: "other", status: "running" }
-        : { id, sessionId: "s1", status: "running" });
-    const bridge = new SessionExecutionProjector(context);
-
-    bridge.projectProcessExecutions("s1", manager);
-    context.store.updateSessionTask.mockClear();
-    listener?.({ ...liveTask, status: "completed" });
-
-    expect(context.store.getSessionTask).toHaveBeenLastCalledWith("durable-1");
-    expect(context.store.updateSessionTask).toHaveBeenCalledWith("durable-1", {
-      status: "completed",
-      output: "output",
-    });
-  });
-
   it("syncs failed task output into durable state", () => {
     const context = createContext();
     const manager = createTaskManager({
@@ -189,6 +117,38 @@ describe("SessionExecutionProjector", () => {
       error: "boom",
     });
     expect(context.events.publishSince).toHaveBeenCalledWith(4);
+  });
+
+  it("unregisters a process listener after the task reaches a terminal state", () => {
+    const context = createContext();
+    context.store.getSessionTask.mockReturnValue({
+      id: "task-1",
+      sessionId: "s1",
+      status: "running",
+    });
+    let listener!: (task: any) => void;
+    const unregister = vi.fn();
+    const manager = createTaskManager({
+      registerExecutionListener: vi.fn((next) => {
+        listener = next;
+        return unregister;
+      }),
+    });
+    const bridge = new SessionExecutionProjector(context);
+    bridge.trackProcessExecution(manager, "task-1");
+
+    listener({
+      id: "task-1",
+      type: "shell",
+      status: "completed",
+      description: "npm test",
+      cwd: "/repo",
+      metadata: {},
+    });
+
+    expect(unregister).toHaveBeenCalledOnce();
+    bridge.trackProcessExecution(manager, "task-1");
+    expect(manager.registerExecutionListener).toHaveBeenCalledTimes(2);
   });
 
   it("does not regress a durable terminal task from a stale live running snapshot", () => {

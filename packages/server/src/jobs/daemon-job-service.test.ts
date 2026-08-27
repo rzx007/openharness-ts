@@ -37,10 +37,9 @@ const task: SessionExecutionRecord = {
 
 describe("DaemonJobService", () => {
   it("projects owned terminals and durable tasks into one list", async () => {
-    const { service, projection } = createService();
+    const { service } = createService();
     const jobs = await service.list({ sessionId: "session-1" });
 
-    expect(projection.list).toHaveBeenCalledWith({ sessionId: "session-1" });
     expect(jobs).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "terminal-1", kind: "terminal", ownerSession: "session-1" }),
       expect.objectContaining({ id: "task-1", kind: "agent", ownerSession: "session-1" }),
@@ -118,6 +117,46 @@ describe("DaemonJobService", () => {
       );
     },
   );
+
+  it("cancels a reserved shell before a runtime process exists", async () => {
+    const pending = {
+      ...task,
+      type: "shell",
+      status: "pending" as const,
+      metadata: { admissionPhase: "dispatching" },
+    };
+    const { service, store, manager } = createService(pending);
+
+    await expect(service.cancel({
+      sessionId: "session-1",
+      jobId: pending.id,
+      reason: "no longer needed",
+    })).resolves.toMatchObject({
+      id: pending.id,
+      status: "killed",
+      metadata: { admissionPhase: "cancelled_before_start" },
+    });
+    expect(manager.stopExecution).not.toHaveBeenCalled();
+    expect(store.updateSessionTask).toHaveBeenCalledWith(pending.id, {
+      status: "stopped",
+      metadata: { admissionPhase: "cancelled_before_start" },
+    });
+  });
+
+  it("lets an inherited root host operate on a descendant's own jobs", async () => {
+    const childTask = { ...task, sessionId: "child-1" };
+    const { service, store } = createService(childTask);
+    store.getSession.mockImplementation((id: string) => {
+      if (id === "session-1") return { id, cwd: "/repo" } as any;
+      if (id === "child-1") return { id, parentId: "session-1", cwd: "/repo/worktree" } as any;
+      return undefined;
+    });
+    const host = service.createAgentHost({ id: "session-1" } as any);
+
+    await expect(host.list({ sessionId: "child-1" })).resolves.toContainEqual(
+      expect.objectContaining({ id: childTask.id, ownerSession: "child-1" }),
+    );
+  });
 
   it("cancels a Workflow by stopping child-agent workers, not only detached processes", async () => {
     const {
@@ -235,9 +274,6 @@ function createService(
     close: vi.fn(),
     wait: vi.fn(),
   };
-  const projection = {
-    list: vi.fn(() => ({ executions: [projectedTask] })),
-  };
   const manager = overrides.processes ?? {
     readOutput: vi.fn(() => "task output"),
     writeInput: vi.fn(async () => undefined),
@@ -248,14 +284,12 @@ function createService(
     service: new DaemonJobService(
       store as any,
       terminals as any,
-      projection,
       () => manager,
       () => childAgents,
       (overrides.workflows ?? { list: () => [], load: () => undefined }) as any,
     ),
     store,
     terminals,
-    projection,
     manager,
     childAgents,
   };

@@ -28,6 +28,7 @@ describe("BackgroundShellCreate", () => {
       {
         cwd: "/repo",
         sessionId: "session-1",
+        toolCallId: "call-1",
         settings: { model: "test" } as any,
         backgroundShell: { create },
       },
@@ -41,12 +42,31 @@ describe("BackgroundShellCreate", () => {
       jobId: "task-durable",
     });
     expect(create).toHaveBeenCalledWith({
+      requestId: "tool:call-1",
       cwd: "/repo",
       sessionId: "session-1",
       command: 'node -e "process.stdout.write(\'ok\')"',
       description: "print output",
       settings: { model: "test" },
     });
+  });
+
+  it("fails before launching when the tool call has no stable identity", async () => {
+    const create = vi.fn();
+    const result = await backgroundShellCreateTool.execute(
+      { description: "server", command: "npm run dev" },
+      {
+        cwd: "/repo",
+        sessionId: "session-1",
+        backgroundShell: { create },
+      },
+    );
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ text: "Background shell request identity is not configured." }],
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("fails before launching when no host is configured", async () => {

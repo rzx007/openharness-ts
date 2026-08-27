@@ -108,6 +108,52 @@ describe("scoped DetachedProcessSupervisor", () => {
 });
 
 describe("DetachedProcessSupervisor real execution", () => {
+  it("starts one process for concurrent requests with the same explicit job id", async () => {
+    const mgr = makeManager();
+    const options = {
+      id: "task-idempotent",
+      argv: [NODE, "-e", "setTimeout(() => process.stdout.write('once'), 50)"],
+      description: "idempotent shell",
+      cwd: process.cwd(),
+      sessionId: "session-1",
+    };
+
+    const [first, retry] = await Promise.all([
+      mgr.startShellExecution(options),
+      mgr.startShellExecution(options),
+    ]);
+
+    expect(retry).toBe(first);
+    expect(mgr.listExecutions()).toHaveLength(1);
+    await waitFor(() => mgr.getExecution(first.id)?.status === "completed");
+    expect(mgr.readOutput(first.id)).toContain("once");
+  });
+
+  it("returns a completed task when its exact start request is retried", async () => {
+    const mgr = makeManager();
+    const options = {
+      id: "task-short-retry",
+      argv: [NODE, "-e", "process.stdout.write('done')"],
+      description: "short shell",
+      cwd: process.cwd(),
+    };
+    const first = await mgr.startShellExecution(options);
+    await waitFor(() => mgr.getExecution(first.id)?.status === "completed");
+
+    await expect(mgr.startShellExecution(options)).resolves.toBe(first);
+    expect(mgr.listExecutions()).toHaveLength(1);
+  });
+
+  it("rejects a reused job id when immutable start parameters differ", async () => {
+    const mgr = makeManager();
+    const common = { id: "task-conflict", description: "shell", cwd: process.cwd() };
+    const first = await mgr.startShellExecution({ ...common, argv: [NODE, "-e", "0"] });
+
+    await expect(mgr.startShellExecution({ ...common, argv: [NODE, "-e", "1"] }))
+      .rejects.toThrow("request identity conflict");
+    await waitFor(() => mgr.getExecution(first.id)?.status === "completed");
+  });
+
   it("records a failed task and rejects when strict Docker sandbox is unavailable", async () => {
     const mgr = makeManager();
     await expect(mgr.startShellExecution({

@@ -175,7 +175,7 @@ JobCancel(jobId) -> AgentJobHost.cancel()
 Workflow -> spawn framework child -> await/stop the same child backend
 ```
 
-`BackgroundShellCreate` 只创建后台 shell Job。工具通过宿主注入的 `AgentBackgroundShellHost` 发起创建；daemon 将它路由到 `BackgroundShellService`，由服务启动 `DetachedProcessSupervisor` 进程并同步写入 durable execution。工具层不直接取得进程 supervisor。child Agent 由 `Agent` 创建，并通过 framework child handle 运行。daemon 可以把 `child.*` 事件投影为 durable execution，供 UI、恢复和审计使用，但该投影不再是 framework child 完成一轮执行的前置条件。
+`BackgroundShellCreate` 只创建后台 shell Job。工具通过宿主注入的 `AgentBackgroundShellHost` 发起创建，并把稳定的 `toolCallId` 作为请求身份；daemon 将它路由到 `BackgroundShellService`。服务先预留 pending durable execution 和 jobId，再让 `DetachedProcessSupervisor` 按同一个 jobId 幂等启动进程。工具层不直接取得进程 supervisor。child Agent 由 `Agent` 创建，并通过 framework child handle 运行。daemon 可以把 `child.*` 事件投影为 durable execution，供 UI、恢复和审计使用，但该投影不再是 framework child 完成一轮执行的前置条件。
 
 ## 两种应用形态
 

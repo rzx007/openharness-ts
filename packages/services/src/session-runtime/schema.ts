@@ -291,6 +291,8 @@ export const sessionTasks = sqliteTable(
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id").notNull(),
+    requestNamespace: text("request_namespace"),
+    requestId: text("request_id"),
     childSessionId: text("child_session_id"),
     runId: text("run_id"),
     type: text("type").notNull(),
@@ -307,6 +309,11 @@ export const sessionTasks = sqliteTable(
   },
   (table) => [
     index("session_task_session_idx").on(table.sessionId, table.createdAt),
+    uniqueIndex("session_task_request_identity_idx").on(
+      table.sessionId,
+      table.requestNamespace,
+      table.requestId,
+    ),
   ],
 );
 

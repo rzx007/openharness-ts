@@ -381,6 +381,8 @@ export interface HookInfo {
 
 /** `POST /background-shells` 请求体。 */
 export interface CreateBackgroundShellInput {
+  /** Stable caller identity for safe retries of one logical creation request. */
+  requestId?: string;
   sessionId: string;
   command: string;
   cwd?: string;

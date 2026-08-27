@@ -178,7 +178,6 @@ export class DaemonApplication implements DurableAgentApplication {
       recoverProjectionSettlements(store);
       store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
       store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
-      store.interruptActiveSessionTasks(DAEMON_RESTART_TASK_REASON);
       store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
       store.finalizeClosingSessions();
 
@@ -221,7 +220,6 @@ export class DaemonApplication implements DurableAgentApplication {
       this.jobs = new DaemonJobService(
         store,
         this.terminals,
-        this.backgroundShells,
         (scope) => getDetachedProcessSupervisor(scope),
         (scope) => getChildAgentExecutionRegistry(scope),
         this.workflows,
@@ -243,10 +241,14 @@ export class DaemonApplication implements DurableAgentApplication {
           options.createBackgroundShellHost ??
           ((session) => ({
             create: async (input) => {
-              if (input.sessionId !== session.id) throw new Error("Background shell owner session mismatch.");
-              if (input.cwd !== session.cwd) throw new Error("Background shell cwd mismatch.");
+              const owner = store.getSession(input.sessionId);
+              if (!owner || owner.status === "archived" || !isSessionInTree(store, session.id, owner.id)) {
+                throw new Error("Background shell owner session mismatch.");
+              }
+              if (input.cwd !== owner.cwd) throw new Error("Background shell cwd mismatch.");
               const { execution } = await this.backgroundShells.create({
-                sessionId: session.id,
+                sessionId: owner.id,
+                requestId: input.requestId,
                 command: input.command,
                 description: input.description,
                 settings: input.settings,
@@ -325,12 +327,26 @@ export class DaemonApplication implements DurableAgentApplication {
         postRunMaintenance,
       });
       // 每个会话一条车道：收下 prompt、排队、interrupt。HTTP 202 之后工作在这里继续。
+      /**
+       * 运行引擎服务：
+       * 1. 管理会话的运行队列（如收下 prompt、排队、interrupt）
+       * 2. 处理会话的运行状态（如运行中、中断、完成）
+       * 3. 与其他服务交互（如会话管理、日志记录）
+       * 4. 提供运行引擎相关的查询和操作接口
+       */
       this.runEngine = new SessionRunEngine({
         store,
         agentPool: this.agentPool,
         runExecutor,
         events: this.eventPublisher,
       });
+      /**
+       * 控制服务：
+       * 1. 接收控制命令（如停止、重启）
+       * 2. 管理会话状态（如暂停、恢复）
+       * 3. 处理会话生命周期事件
+       * 4. 与其他服务交互（如会话管理、日志记录）
+       */
       this.control = new DaemonControlService({
         store,
         runEngine: this.runEngine,
@@ -339,6 +355,12 @@ export class DaemonApplication implements DurableAgentApplication {
         startedAt: Date.now(),
         sseClientCount: () => this.events.subscriberCount,
       });
+      /**
+       * 维护服务：
+       * 1. 定期检查和清理会话数据
+       * 2. 处理会话的自动维护任务
+       * 3. 与其他服务交互（如会话管理、日志记录）
+       */
       this.maintenance = new SessionMaintenanceService({
         store,
         runEngine: this.runEngine,
@@ -347,7 +369,13 @@ export class DaemonApplication implements DurableAgentApplication {
         operationGate: this.operationGate,
         events: this.eventPublisher,
       });
-      // HTTP / 桌面看到的会话 API：建会话、admitPrompt、停、改模型，都从这里进。
+      /**
+       * 会话服务：
+       * 1. 管理会话的生命周期（创建、销毁、状态管理）
+       * 2. 处理会话的输入和输出（如消息接收、发送）
+       * 3. 与其他服务交互（如控制服务、维护服务）
+       * 4. 提供会话相关的查询和操作接口
+       */
       this.sessions = new SessionApplicationService({
         store,
         runEngine: this.runEngine,
@@ -357,11 +385,25 @@ export class DaemonApplication implements DurableAgentApplication {
         events: this.eventPublisher,
         assertReady: () => this.assertReady(),
       });
+      /**
+       * 通道服务：
+       * 1. 管理会话的通信通道（如 SSE、WebSocket）
+       * 2. 处理消息的传递和路由
+       * 3. 与其他服务交互（如会话管理、日志记录）
+       * 4. 提供通道相关的管理和监控功能
+       */
       this.channels = new ChannelApplicationService({
         store,
         sessions: this.sessions,
         log: options.log,
       });
+      /**
+       * 定时任务服务：
+       * 1. 管理定时任务的创建、更新和删除
+       * 2. 处理定时任务的执行和调度
+       * 3. 与其他服务交互（如会话管理、日志记录）
+       * 4. 提供定时任务相关的查询和操作接口
+       */
       this.schedules = new ScheduledTaskService({
         store,
         // 定时任务不是另一套执行器：到期后也是 admitPrompt，走上面同一条 Agent 车道。
@@ -371,18 +413,18 @@ export class DaemonApplication implements DurableAgentApplication {
             task.destination === "standalone" && !projectCwd;
           let executionCwd = outsideProject
             ? await allocateScheduledOutsideProjectWorkspace(
-                options.outsideProjectWorkspaceRoot,
-                scheduledRun.id,
-              )
+              options.outsideProjectWorkspaceRoot,
+              scheduledRun.id,
+            )
             : projectCwd;
           let worktree:
             | {
-                manager: ReturnType<typeof createChildAgentWorktreeManager>;
-                slug: string;
-                path: string;
-                branch: string;
-                created: boolean;
-              }
+              manager: ReturnType<typeof createChildAgentWorktreeManager>;
+              slug: string;
+              path: string;
+              branch: string;
+              created: boolean;
+            }
             | undefined;
           if (task.executionMode === "worktree") {
             if (!projectCwd)
@@ -475,11 +517,11 @@ export class DaemonApplication implements DurableAgentApplication {
                     executionMode: task.executionMode,
                     ...(worktree
                       ? {
-                          worktree: {
-                            path: worktree.path,
-                            branch: worktree.branch,
-                          },
-                        }
+                        worktree: {
+                          path: worktree.path,
+                          branch: worktree.branch,
+                        },
+                      }
                       : {}),
                   },
                 },
@@ -519,35 +561,50 @@ export class DaemonApplication implements DurableAgentApplication {
             };
           } finally {
             if (outsideProject && !session && executionCwd) {
-              await rmdir(executionCwd).catch(() => {});
+              await rmdir(executionCwd).catch(() => { });
             }
             if (worktree?.created) {
               const hasChanges = await worktree.manager
                 .hasChanges(worktree.slug)
                 .catch(() => true);
               if (!hasChanges) {
-                await worktree.manager.remove(worktree.slug).catch(() => {});
+                await worktree.manager.remove(worktree.slug).catch(() => { });
               }
             }
           }
         },
       });
+      /**
+       * 查询服务：
+       * 1. 提供会话数据的查询和检索功能
+       * 2. 支持复杂的查询条件和排序
+       * 3. 与其他服务交互（如会话管理、日志记录）
+       * 4. 提供查询相关的统计和分析功能
+       */
       this.queries = new SessionQueryService(store);
+      /**
+       * 后台进程服务：
+       * 1. 管理后台进程的生命周期（创建、销毁、状态管理）
+       * 2. 处理后台进程的输入和输出（如消息接收、发送）
+       * 3. 与其他服务交互（如会话管理、日志记录）
+       * 4. 提供后台进程相关的查询和操作接口
+       */
       // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
-      this.startupRecovery = recoverInterruptedWorkflows({
-        workflows: this.workflows,
-      }).then(
-        () => {
-          if (this.readyState === "starting") this.readyState = "ready";
-        },
-        (error) => {
-          this.readyState = "failed";
-          clearInterval(this.ownerHeartbeat);
-          store.releaseApplicationOwner(this.ownerLease);
-          throw error;
-        },
-      );
-      void this.startupRecovery.catch(() => {});
+      this.startupRecovery = this.backgroundShells
+        .reconcileActiveTasks(DAEMON_RESTART_TASK_REASON)
+        .then(() => recoverInterruptedWorkflows({ workflows: this.workflows }))
+        .then(
+          () => {
+            if (this.readyState === "starting") this.readyState = "ready";
+          },
+          (error) => {
+            this.readyState = "failed";
+            clearInterval(this.ownerHeartbeat);
+            store.releaseApplicationOwner(this.ownerLease);
+            throw error;
+          },
+        );
+      void this.startupRecovery.catch(() => { });
     } catch (error) {
       clearInterval(this.ownerHeartbeat);
       store.releaseApplicationOwner(this.ownerLease);
@@ -671,6 +728,21 @@ async function allocateScheduledOutsideProjectWorkspace(
   const workspace = join(root, day, `scheduled-${runId}`);
   await mkdir(workspace, { recursive: true });
   return workspace;
+}
+
+function isSessionInTree(
+  store: { getSession(sessionId: string): SessionRecord | undefined },
+  rootSessionId: string,
+  candidateSessionId: string,
+): boolean {
+  let current = store.getSession(candidateSessionId);
+  const visited = new Set<string>();
+  while (current && !visited.has(current.id)) {
+    if (current.id === rootSessionId) return true;
+    visited.add(current.id);
+    current = current.parentId ? store.getSession(current.parentId) : undefined;
+  }
+  return false;
 }
 
 /**

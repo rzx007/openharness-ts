@@ -470,6 +470,7 @@ describe("OpenHarnessClient", () => {
 
     await expect(
       client.createBackgroundShell({
+        requestId: "request-1",
         sessionId: "s1",
         command: "pnpm test",
         description: "tests",
@@ -479,6 +480,7 @@ describe("OpenHarnessClient", () => {
     expect(calls[0]?.init).toMatchObject({
       method: "POST",
       body: JSON.stringify({
+        requestId: "request-1",
         sessionId: "s1",
         command: "pnpm test",
         description: "tests",

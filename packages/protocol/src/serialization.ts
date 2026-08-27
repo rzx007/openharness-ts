@@ -241,7 +241,7 @@ function validateTask(value: unknown, path: string): SessionExecutionRecord {
   for (const field of ["id", "sessionId", "type", "description", "cwd"] as const) {
     stringField(item, field, path);
   }
-  for (const field of ["childSessionId", "runId", "output", "error"] as const) {
+  for (const field of ["childSessionId", "runId", "requestNamespace", "requestId", "output", "error"] as const) {
     optionalString(item, field, path);
   }
   enumField(item, "status", path, ["pending", "running", "completed", "failed", "stopped", "interrupted"] as const);

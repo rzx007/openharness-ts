@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 import type {
   AgentBackgroundShellHost,
   AgentChildDirectory,
@@ -33,6 +35,8 @@ import {
 
 const DEFAULT_OUTPUT_LIMIT = 12_000;
 const POLL_INTERVAL_MS = 50;
+const SHELL_REQUEST_RETENTION_MS = 10 * 60_000;
+const MAX_SETTLED_SHELL_REQUESTS = 1_000;
 
 interface ChildObservation {
   handle: AgentChildHandle;
@@ -52,6 +56,12 @@ export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost
   private readonly processes: DetachedProcessSupervisor;
   private readonly workflows: FileWorkflowRunRepository;
   private readonly childObservations = new Map<string, ChildObservation>();
+  private readonly shellRequests = new Map<string, {
+    fingerprint: string;
+    result: Promise<{ jobId: string; label: string }>;
+    createdAt: number;
+    settledAt?: number;
+  }>();
 
   constructor(
     private readonly cwd: string,
@@ -65,14 +75,57 @@ export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost
   async create(input: Parameters<AgentBackgroundShellHost["create"]>[0]): Promise<{ jobId: string; label: string }> {
     this.assertOwner(input.sessionId);
     if (input.cwd !== this.cwd) throw new Error("Background shell cwd mismatch.");
-    const execution = await this.processes.startShellExecution({
+    this.pruneShellRequests();
+    const fingerprint = createHash("sha256").update(stableJson({
+      cwd: input.cwd,
+      command: input.command,
+      description: input.description,
+      settings: input.settings,
+    })).digest("hex");
+    const existing = this.shellRequests.get(input.requestId);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new Error(`Background shell request identity conflict: ${input.requestId}`);
+      }
+      return await existing.result;
+    }
+    const jobId = `task_${randomUUID()}`;
+    const result = this.processes.startShellExecution({
+      id: jobId,
       command: input.command,
       description: input.description,
       cwd: input.cwd,
       sessionId: input.sessionId,
       settings: input.settings,
-    });
-    return { jobId: execution.id, label: execution.description };
+    }).then((execution) => ({ jobId: execution.id, label: execution.description }));
+    const entry = { fingerprint, result, createdAt: Date.now(), settledAt: undefined as number | undefined };
+    this.shellRequests.set(input.requestId, entry);
+    void result.then(
+      () => {
+        entry.settledAt = Date.now();
+        this.pruneShellRequests();
+      },
+      () => {
+        entry.settledAt = Date.now();
+        this.pruneShellRequests();
+      },
+    );
+    return await result;
+  }
+
+  private pruneShellRequests(): void {
+    const cutoff = Date.now() - SHELL_REQUEST_RETENTION_MS;
+    for (const [requestId, entry] of this.shellRequests) {
+      if (entry.settledAt !== undefined && entry.settledAt < cutoff) {
+        this.shellRequests.delete(requestId);
+      }
+    }
+    const settled = [...this.shellRequests.entries()]
+      .filter(([, entry]) => entry.settledAt !== undefined)
+      .sort((left, right) => left[1].settledAt! - right[1].settledAt!);
+    for (let index = 0; index < settled.length - MAX_SETTLED_SHELL_REQUESTS; index += 1) {
+      this.shellRequests.delete(settled[index]![0]);
+    }
   }
 
   async list(input: JobListRequest): Promise<JobSnapshot[]> {
@@ -296,6 +349,17 @@ export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost
   private assertOwner(sessionId: string): void {
     if (sessionId !== this.ownerSession) throw new Error("Job owner session mismatch.");
   }
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
 }
 
 function childStatus(child: ChildObservation): JobStatus {
