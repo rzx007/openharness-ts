@@ -1,10 +1,17 @@
 import { create } from "zustand"
 
+import { createInitialRuntimeState } from "./desktop-session/initial-state"
+import type {
+  DesktopSessionState,
+  PendingPromptEdit,
+  PendingPromptSubmission,
+  QueuedPromptAction,
+  SubmitPromptOptions,
+} from "./desktop-session/types"
 import type {
   CreateDesktopSessionInput,
   DesktopBootstrapData,
   DesktopDaemonStatus,
-  DesktopModel,
   DesktopPermissionMode,
   DesktopProject,
   DesktopSessionRecord,
@@ -12,36 +19,11 @@ import type {
   DesktopWorkspaceMode,
 } from "@shared/session-types"
 
-type LoadStatus = "idle" | "loading" | "ready" | "error"
-
 const persistedActiveSessionKey = "openharness.desktop.active-session.v1"
 const selectedProjectGitRefreshTtlMs = 5_000
 const selectedProjectGitRefreshDelayMs = 750
 
 let selectedProjectGitRefreshTimer: ReturnType<typeof setTimeout> | null = null
-
-interface SubmitPromptOptions {
-  commandLine?: string
-}
-
-interface PendingPromptSubmission {
-  id: string
-  sessionId: string
-  content: string
-  createdAt: number
-  phase: "submitting" | "accepted" | "failed"
-  placement: "transcript" | "queue"
-  error?: string
-}
-
-export interface QueuedPromptAction {
-  sessionId: string
-  inputId: string
-  runId: string
-  kind: "promote" | "cancel"
-  phase: "pending" | "acknowledged" | "failed"
-  error?: string
-}
 
 const initialDaemonStatus: DesktopDaemonStatus = {
   phase: "idle",
@@ -50,89 +32,6 @@ const initialDaemonStatus: DesktopDaemonStatus = {
 }
 
 let daemonStatusEventsAttached = false
-
-interface DesktopSessionState {
-  loadStatus: LoadStatus
-  daemonStatus: DesktopDaemonStatus
-  error: string | null
-  projects: DesktopProject[]
-  sessions: DesktopSessionRecord[]
-  archivedSessions: DesktopSessionRecord[]
-  models: DesktopModel[]
-  defaultModel: string | null
-  defaultProvider: string | null
-  defaultPermissionMode: DesktopPermissionMode
-  selectedModel: string | null
-  selectedProvider: string | null
-  selectedPermissionMode: DesktopPermissionMode
-  workspaceMode: DesktopWorkspaceMode
-  selectedProject: DesktopProject | null
-  selectedProjectGit: boolean
-  selectedProjectGitCheckedAt: number | null
-  branch: string | null
-  branches: string[]
-  activeSessionId: string | null
-  sessionView: DesktopSessionView | null
-  openingSession: boolean
-  sending: boolean
-  pendingPromptSubmissions: Record<string, PendingPromptSubmission>
-  sendingOperationId: string | null
-  pendingPromptEdit: {
-    id: string
-    sessionId: string
-    sourceMessageId: string
-    content: string
-  } | null
-  queuedPromptActions: Record<string, QueuedPromptAction>
-  initialize: () => Promise<void>
-  refreshBootstrap: () => Promise<void>
-  startNewConversation: () => Promise<void>
-  chooseProject: () => Promise<void>
-  selectProject: (project: DesktopProject) => Promise<void>
-  selectOutsideProject: () => void
-  refreshSelectedProjectGit: (options?: { force?: boolean }) => Promise<boolean>
-  checkoutBranch: (branch: string) => Promise<void>
-  createAndCheckoutBranch: (branch: string) => Promise<void>
-  renameProject: (path: string, name: string) => Promise<void>
-  togglePinProject: (path: string) => Promise<void>
-  setProjectDefaultShell: (path: string, shell: string | null) => Promise<void>
-  removeProject: (path: string) => Promise<void>
-  rebindProject: (projectId: string) => Promise<void>
-  selectModel: (model: DesktopModel) => Promise<void>
-  selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>
-  updateSessionModel: (sessionId: string, model: DesktopModel) => Promise<void>
-  updateSessionPermissionMode: (
-    sessionId: string,
-    permissionMode: DesktopPermissionMode
-  ) => Promise<void>
-  openSession: (sessionId: string) => Promise<void>
-  startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
-  forkSession: (
-    sessionId: string,
-    options?: { beforeMessageId?: string; afterMessageId?: string }
-  ) => Promise<DesktopSessionRecord>
-  renameSession: (sessionId: string, title: string) => Promise<void>
-  togglePinSession: (sessionId: string) => Promise<void>
-  archiveSession: (sessionId: string) => Promise<void>
-  deleteSession: (sessionId: string) => Promise<void>
-  startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
-  sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
-  editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
-  promoteQueuedPrompt: (
-    inputId: string,
-    queuedRunId: string,
-    expectedActiveRunId: string
-  ) => Promise<void>
-  cancelQueuedPrompt: (inputId: string, queuedRunId: string) => Promise<void>
-  interrupt: () => Promise<void>
-  replyPermission: (
-    permissionId: string,
-    status: "approved" | "denied",
-    decision?: "once" | "session"
-  ) => Promise<void>
-  applySessionUpdate: (view: DesktopSessionView) => void
-  clearError: () => void
-}
 
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => ({
   loadStatus: "idle",
@@ -162,6 +61,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   sendingOperationId: null,
   pendingPromptEdit: null,
   queuedPromptActions: {},
+  ...createInitialRuntimeState(),
 
   async initialize() {
     if (get().loadStatus === "loading" || get().loadStatus === "ready") return
@@ -879,7 +779,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     }
   },
 
-  async startSession(content, options) {
+  async startSession(content: string, options?: SubmitPromptOptions) {
     const prompt = content.trim()
     const {
       selectedProject,
@@ -1037,7 +937,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     return startedSessionId
   },
 
-  async sendMessage(content, options) {
+  async sendMessage(content: string, options?: SubmitPromptOptions) {
     const prompt = content.trim()
     const sessionId = get().activeSessionId
     if (!prompt || !sessionId || get().sending) return
@@ -1144,7 +1044,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     const sessionId = get().activeSessionId
     if (!prompt || !sourceMessageId || !sessionId || get().sending) return
     const pending = get().pendingPromptEdit
-    const edit =
+    const edit: PendingPromptEdit =
       pending?.sessionId === sessionId &&
       pending.sourceMessageId === sourceMessageId &&
       pending.content === prompt

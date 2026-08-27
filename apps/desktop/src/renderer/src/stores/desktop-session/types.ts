@@ -1,0 +1,158 @@
+import type {
+  DesktopDaemonStatus,
+  DesktopModel,
+  DesktopPermissionMode,
+  DesktopProject,
+  DesktopSessionRecord,
+  DesktopSessionView,
+  DesktopWorkspaceMode,
+} from "@shared/session-types"
+
+export type LoadStatus = "idle" | "loading" | "ready" | "error"
+
+export interface SubmitPromptOptions {
+  commandLine?: string
+}
+
+export interface PendingPromptSubmission {
+  id: string
+  sessionId: string
+  content: string
+  createdAt: number
+  phase: "submitting" | "accepted" | "failed"
+  placement: "transcript" | "queue"
+  error?: string
+}
+
+export interface PendingPromptEdit {
+  id: string
+  sessionId: string
+  sourceMessageId: string
+  content: string
+}
+
+export interface QueuedPromptAction {
+  sessionId: string
+  inputId: string
+  runId: string
+  kind: "promote" | "cancel"
+  phase: "pending" | "acknowledged" | "failed"
+  error?: string
+}
+
+export type DesktopOperationPhase = "pending" | "acknowledged" | "failed"
+
+export type DesktopOperationKind =
+  | "create-session"
+  | "open-session"
+  | "send-prompt"
+  | "invoke-command"
+  | "edit-prompt"
+  | "promote-prompt"
+  | "cancel-prompt"
+  | "interrupt-run"
+  | "reply-permission"
+  | "project-action"
+
+export interface DesktopOperation {
+  id: string
+  kind: DesktopOperationKind
+  phase: DesktopOperationPhase
+  sessionId: string | null
+  projectId?: string
+  startedAt: number
+  finishedAt?: number
+  error?: string
+}
+
+export interface DesktopSessionRuntime {
+  operations: Record<string, DesktopOperation>
+  pendingPromptSubmissions: Record<string, PendingPromptSubmission>
+  pendingPromptEdit: PendingPromptEdit | null
+  queuedPromptActions: Record<string, QueuedPromptAction>
+}
+
+export interface DesktopRuntimeState {
+  appOperations: Record<string, DesktopOperation>
+  projectOperations: Record<string, Record<string, DesktopOperation>>
+  newConversationRuntime: DesktopSessionRuntime
+  sessionRuntimes: Record<string, DesktopSessionRuntime>
+}
+
+export interface DesktopSessionState extends DesktopRuntimeState {
+  loadStatus: LoadStatus
+  daemonStatus: DesktopDaemonStatus
+  error: string | null
+  projects: DesktopProject[]
+  sessions: DesktopSessionRecord[]
+  archivedSessions: DesktopSessionRecord[]
+  models: DesktopModel[]
+  defaultModel: string | null
+  defaultProvider: string | null
+  defaultPermissionMode: DesktopPermissionMode
+  selectedModel: string | null
+  selectedProvider: string | null
+  selectedPermissionMode: DesktopPermissionMode
+  workspaceMode: DesktopWorkspaceMode
+  selectedProject: DesktopProject | null
+  selectedProjectGit: boolean
+  selectedProjectGitCheckedAt: number | null
+  branch: string | null
+  branches: string[]
+  activeSessionId: string | null
+  sessionView: DesktopSessionView | null
+  openingSession: boolean
+  sending: boolean
+  pendingPromptSubmissions: Record<string, PendingPromptSubmission>
+  sendingOperationId: string | null
+  pendingPromptEdit: PendingPromptEdit | null
+  queuedPromptActions: Record<string, QueuedPromptAction>
+  initialize: () => Promise<void>
+  refreshBootstrap: () => Promise<void>
+  startNewConversation: () => Promise<void>
+  chooseProject: () => Promise<void>
+  selectProject: (project: DesktopProject) => Promise<void>
+  selectOutsideProject: () => void
+  refreshSelectedProjectGit: (options?: { force?: boolean }) => Promise<boolean>
+  checkoutBranch: (branch: string) => Promise<void>
+  createAndCheckoutBranch: (branch: string) => Promise<void>
+  renameProject: (path: string, name: string) => Promise<void>
+  togglePinProject: (path: string) => Promise<void>
+  setProjectDefaultShell: (path: string, shell: string | null) => Promise<void>
+  removeProject: (path: string) => Promise<void>
+  rebindProject: (projectId: string) => Promise<void>
+  selectModel: (model: DesktopModel) => Promise<void>
+  selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>
+  updateSessionModel: (sessionId: string, model: DesktopModel) => Promise<void>
+  updateSessionPermissionMode: (
+    sessionId: string,
+    permissionMode: DesktopPermissionMode
+  ) => Promise<void>
+  openSession: (sessionId: string) => Promise<void>
+  startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
+  forkSession: (
+    sessionId: string,
+    options?: { beforeMessageId?: string; afterMessageId?: string }
+  ) => Promise<DesktopSessionRecord>
+  renameSession: (sessionId: string, title: string) => Promise<void>
+  togglePinSession: (sessionId: string) => Promise<void>
+  archiveSession: (sessionId: string) => Promise<void>
+  deleteSession: (sessionId: string) => Promise<void>
+  startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
+  sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
+  editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
+  promoteQueuedPrompt: (
+    inputId: string,
+    queuedRunId: string,
+    expectedActiveRunId: string
+  ) => Promise<void>
+  cancelQueuedPrompt: (inputId: string, queuedRunId: string) => Promise<void>
+  interrupt: () => Promise<void>
+  replyPermission: (
+    permissionId: string,
+    status: "approved" | "denied",
+    decision?: "once" | "session"
+  ) => Promise<void>
+  applySessionUpdate: (view: DesktopSessionView) => void
+  clearError: () => void
+}
