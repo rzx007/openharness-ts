@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopSessionView } from "@shared/session-types"
 import { useDesktopSessionStore } from "../desktop-session-store"
+import { beginOperation, createEmptySessionRuntime } from "./operation-state"
 
 function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
   return {
@@ -110,6 +111,94 @@ describe("desktop session actions", () => {
     await opening
 
     expect(useDesktopSessionStore.getState().sessionView?.cursor).toBe(5)
+  })
+
+  it("projects the reopened session runtime into the legacy prompt mirror", async () => {
+    const oldRuntime = {
+      ...createEmptySessionRuntime(),
+      pendingPromptSubmissions: {
+        "input-old": {
+          id: "input-old",
+          sessionId: "session-old",
+          content: "old prompt",
+          createdAt: 1,
+          phase: "failed" as const,
+          placement: "transcript" as const,
+          error: "old error",
+        },
+      },
+    }
+    const reopenedRuntime = beginOperation(
+      {
+        ...createEmptySessionRuntime(),
+        pendingPromptSubmissions: {
+          "input-new": {
+            id: "input-new",
+            sessionId: "session-new",
+            content: "new prompt",
+            createdAt: 2,
+            phase: "submitting",
+            placement: "queue",
+          },
+        },
+        pendingPromptEdit: {
+          id: "edit-new",
+          sessionId: "session-new",
+          sourceMessageId: "message-new",
+          content: "edited prompt",
+        },
+        queuedPromptActions: {
+          "session-new:run-new": {
+            sessionId: "session-new",
+            inputId: "input-queued",
+            runId: "run-new",
+            kind: "cancel",
+            phase: "failed",
+            error: "cancel error",
+          },
+        },
+      },
+      {
+        id: "input-new",
+        kind: "send-prompt",
+        sessionId: "session-new",
+        startedAt: 2,
+      }
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId, 1))
+    vi.stubGlobal("window", { desktop: { sessions: { open } } })
+    resetNewConversationState()
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-old",
+      sessionView: emptySessionView("session-old", 1),
+      sending: false,
+      sendingOperationId: null,
+      pendingPromptSubmissions: oldRuntime.pendingPromptSubmissions,
+      pendingPromptEdit: oldRuntime.pendingPromptEdit,
+      queuedPromptActions: oldRuntime.queuedPromptActions,
+      sessionRuntimes: {
+        "session-old": oldRuntime,
+        "session-new": reopenedRuntime,
+      },
+    })
+
+    await useDesktopSessionStore.getState().openSession("session-new")
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: "session-new",
+      sending: true,
+      sendingOperationId: "input-new",
+      pendingPromptSubmissions: {
+        "input-new": expect.objectContaining({ content: "new prompt", phase: "submitting" }),
+      },
+      pendingPromptEdit: expect.objectContaining({ id: "edit-new" }),
+      queuedPromptActions: {
+        "session-new:run-new": expect.objectContaining({ phase: "failed" }),
+      },
+    })
+    expect(useDesktopSessionStore.getState().pendingPromptSubmissions).not.toHaveProperty(
+      "input-old"
+    )
   })
 
   it("only lets the latest same-session open request apply its snapshot", async () => {

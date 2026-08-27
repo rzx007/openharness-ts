@@ -36,3 +36,25 @@
 ## 提交
 
 实现提交：待本任务提交后补充。
+
+## 审查修复第 1 轮：兼容镜像回填
+
+### RED
+
+1. IPC `sendPrompt` 仍在 pending、而 SSE view 尚未包含该 input 时，`applySessionUpdate` 会把顶层 `sending` 和 submission 镜像错误清空。
+2. 从旧会话切换并重新打开具有 pending、failed runtime 的会话时，顶层 submission、edit、queued action 与 sending 镜像仍沿用旧会话。
+3. 已确认 input 的 SSE 到达后，镜像必须才被清理；不能由 IPC 或不含 input 的 SSE 提前清理。
+
+### GREEN
+
+- 在 `operation-state.ts` 提供纯函数 `projectRuntimeToLegacyMirror`：从指定 runtime 投影 `sending`、`sendingOperationId`、submission、edit 与 queued action。pending 的 send、invoke-command、edit operation 保持 composer 锁定；new conversation 的 create-session 在显式 opt-in 时也保持锁定。
+- `applySessionUpdate`、`openPrimarySession` 的开始、snapshot、失败路径，以及 prompt/queued action 的 runtime replace 入口均改为复用该投影，避免兼容字段各自更新而漂移。
+- 新增覆盖未确认 SSE、重新打开目标会话的 pending/failed runtime，以及确认 SSE 才清镜像的测试。
+
+### 本轮验证
+
+- 定向 RED 后 GREEN：`prompt-actions.test.ts` 与 `session-actions.test.ts`，22/22 通过。
+- Desktop 全量 Vitest：33 个测试文件、197 个测试通过。
+- Web TypeScript：`tsc --noEmit -p tsconfig.web.json --composite false` 通过。
+- 本轮修改文件 ESLint 与 `git diff --check` 通过。
+- Node TypeScript 仍因工作区现有 `drizzle-orm/better-sqlite3` 类型入口缺失而失败，未改动该无关依赖问题。

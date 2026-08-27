@@ -4,6 +4,7 @@ import {
   beginOperation,
   createEmptySessionRuntime,
   failOperation,
+  projectRuntimeToLegacyMirror,
   removeOperation,
 } from "./operation-state"
 import { queuedPromptActionConfirmed, queuedPromptActionKey } from "./pending-prompt-state"
@@ -147,7 +148,7 @@ export function createQueuedPromptActions(
       if (state.activeSessionId !== sessionId) return next
       return {
         ...next,
-        queuedPromptActions: runtime.queuedPromptActions,
+        ...projectRuntimeToLegacyMirror(runtime),
         error: activeError ?? null,
       }
     })

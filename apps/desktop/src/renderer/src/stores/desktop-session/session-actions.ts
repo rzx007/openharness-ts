@@ -17,11 +17,10 @@ import {
   bindOperationToSession,
   createEmptySessionRuntime,
   failOperation,
+  projectRuntimeToLegacyMirror,
   removeOperation,
 } from "./operation-state"
 import {
-  reconcilePendingPromptSubmissions,
-  reconcileQueuedPromptActions,
   removePendingPromptSubmission,
   updatePendingPromptSubmission,
 } from "./pending-prompt-state"
@@ -50,23 +49,22 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   const openPrimarySession = async (sessionId: string): Promise<OpenSessionResult> => {
     const operationId = globalThis.crypto.randomUUID()
     set((state) => {
-      const switchingSessions = state.activeSessionId !== sessionId
       const runtime = state.sessionRuntimes[sessionId] ?? createEmptySessionRuntime()
+      const openingRuntime = beginOperation(abandonOpenSessionOperations(runtime), {
+        id: operationId,
+        kind: "open-session",
+        sessionId,
+        startedAt: Date.now(),
+      })
       return {
         activeSessionId: sessionId,
         sessionView: null,
         openingSession: true,
-        sending: switchingSessions ? false : state.sending,
-        sendingOperationId: switchingSessions ? null : state.sendingOperationId,
+        ...projectRuntimeToLegacyMirror(openingRuntime),
         error: null,
         sessionRuntimes: {
           ...state.sessionRuntimes,
-          [sessionId]: beginOperation(abandonOpenSessionOperations(runtime), {
-            id: operationId,
-            kind: "open-session",
-            sessionId,
-            startedAt: Date.now(),
-          }),
+          [sessionId]: openingRuntime,
         },
       }
     })
@@ -85,6 +83,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         if (acceptedView !== view) {
           return {
             openingSession: false,
+            ...projectRuntimeToLegacyMirror(settledRuntime),
             sessionRuntimes: {
               ...state.sessionRuntimes,
               [sessionId]: settledRuntime,
@@ -97,11 +96,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         return {
           ...workspace,
           sessionView: view,
-          pendingPromptSubmissions: reconcilePendingPromptSubmissions(
-            state.pendingPromptSubmissions,
-            view
-          ),
-          queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
+          ...projectRuntimeToLegacyMirror(settledRuntime),
           openingSession: false,
           selectedModel: view.session.model,
           selectedProvider: sessionProvider(view.session, state.defaultProvider),
@@ -160,13 +155,15 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         }
         failed = true
         clearPersistedActiveSessionId()
+        const failedRuntime = failOperation(runtime, operationId, errorMessage(error), Date.now())
         return {
           openingSession: false,
           error: errorMessage(error),
           sessionRuntimes: {
             ...state.sessionRuntimes,
-            [sessionId]: failOperation(runtime, operationId, errorMessage(error), Date.now()),
+            [sessionId]: failedRuntime,
           },
+          ...projectRuntimeToLegacyMirror(failedRuntime),
         }
       })
       return failed ? "failed" : "cancelled"
@@ -178,17 +175,18 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       advancePrimaryNavigation()
       await window.desktop.sessions.close()
       clearPersistedActiveSessionId()
-      set({
+      set((state) => ({
+        ...projectRuntimeToLegacyMirror(state.newConversationRuntime, {
+          includeCreateSession: true,
+        }),
         activeSessionId: null,
         sessionView: null,
-        selectedModel: get().defaultModel,
-        selectedProvider: get().defaultProvider,
-        selectedPermissionMode: get().defaultPermissionMode,
+        selectedModel: state.defaultModel,
+        selectedProvider: state.defaultProvider,
+        selectedPermissionMode: state.defaultPermissionMode,
         openingSession: false,
-        sending: false,
-        sendingOperationId: null,
         error: null,
-      })
+      }))
     },
 
     async selectModel(model) {
@@ -315,12 +313,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       await window.desktop.sessions.close()
       clearPersistedActiveSessionId()
       const workspace = resolveSessionWorkspace(get().projects, session)
-      set({
+      set((state) => ({
+        ...projectRuntimeToLegacyMirror(state.newConversationRuntime, {
+          includeCreateSession: true,
+        }),
         activeSessionId: null,
         sessionView: null,
         openingSession: false,
-        sending: false,
-        sendingOperationId: null,
         ...workspace,
         selectedModel: session.model,
         selectedProvider: sessionProvider(session, get().defaultProvider),
@@ -330,7 +329,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         branch: null,
         branches: [],
         error: null,
-      })
+      }))
       if (workspace.selectedProject) await get().selectProject(workspace.selectedProject)
     },
 

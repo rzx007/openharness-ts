@@ -4,6 +4,7 @@ import {
   beginOperation,
   createEmptySessionRuntime,
   failOperation,
+  projectRuntimeToLegacyMirror,
   removeOperation,
 } from "./operation-state"
 import { classifyPromptPlacement, updatePendingPromptSubmission } from "./pending-prompt-state"
@@ -286,11 +287,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       if (state.activeSessionId !== sessionId) return next
       return {
         ...next,
-        sending: hasPendingComposerOperation(runtime),
-        sendingOperationId: activeComposerOperationId(runtime),
-        pendingPromptSubmissions: runtime.pendingPromptSubmissions,
-        pendingPromptEdit: runtime.pendingPromptEdit,
-        queuedPromptActions: runtime.queuedPromptActions,
+        ...projectRuntimeToLegacyMirror(runtime),
         error: activeError ?? null,
       }
     })
@@ -315,27 +312,5 @@ function promptSubmissionConfirmed(
       state.sessionView?.session.id === sessionId &&
       state.sessionView.inputs.some((input) => input.id === inputId)
     )
-  )
-}
-
-function hasPendingComposerOperation(runtime: DesktopSessionRuntime): boolean {
-  return Object.values(runtime.operations).some(
-    (operation) =>
-      operation.phase === "pending" &&
-      (operation.kind === "send-prompt" ||
-        operation.kind === "invoke-command" ||
-        operation.kind === "edit-prompt")
-  )
-}
-
-function activeComposerOperationId(runtime: DesktopSessionRuntime): string | null {
-  return (
-    Object.values(runtime.operations).find(
-      (operation) =>
-        operation.phase === "pending" &&
-        (operation.kind === "send-prompt" ||
-          operation.kind === "invoke-command" ||
-          operation.kind === "edit-prompt")
-    )?.id ?? null
   )
 }

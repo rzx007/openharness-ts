@@ -12,7 +12,10 @@ import {
   upsertSession,
 } from "./desktop-session/helpers"
 import { createInitialRuntimeState } from "./desktop-session/initial-state"
-import { createEmptySessionRuntime } from "./desktop-session/operation-state"
+import {
+  createEmptySessionRuntime,
+  projectRuntimeToLegacyMirror,
+} from "./desktop-session/operation-state"
 import {
   acceptActiveSessionView,
   reconcileRuntimeWithView,
@@ -97,11 +100,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         sessionView: { ...view, session },
         // These top-level fields remain a temporary compatibility mirror until task 6
         // migrates the conversation components to session runtime selectors.
-        pendingPromptSubmissions: runtime.pendingPromptSubmissions,
-        pendingPromptEdit: runtime.pendingPromptEdit,
-        queuedPromptActions: runtime.queuedPromptActions,
-        sending: false,
-        sendingOperationId: null,
+        ...projectRuntimeToLegacyMirror(runtime),
         sessionRuntimes: { ...state.sessionRuntimes, [view.session.id]: runtime },
         openingSession: false,
         selectedModel: session.model,

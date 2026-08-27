@@ -48,6 +48,47 @@ describe("prompt actions session runtime", () => {
     vi.unstubAllGlobals()
   })
 
+  it("keeps the legacy composer mirror pending until SSE confirms the submitted input", async () => {
+    let resolveSend!: () => void
+    const sendPrompt = vi.fn<
+      (input: { id: string; sessionId: string; content: string }) => Promise<void>
+    >(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: null,
+      sending: false,
+      sendingOperationId: null,
+      pendingPromptSubmissions: {},
+      pendingPromptEdit: null,
+      queuedPromptActions: {},
+      sessionRuntimes: { "session-1": createEmptySessionRuntime() },
+    })
+
+    const request = useDesktopSessionStore.getState().sendMessage("pending")
+    const inputId = sendPrompt.mock.calls[0]![0].id
+    useDesktopSessionStore.getState().applySessionUpdate({
+      ...viewContainingInput("session-1", inputId, 1),
+      inputs: [],
+    })
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      sending: true,
+      sendingOperationId: inputId,
+      pendingPromptSubmissions: {
+        [inputId]: expect.objectContaining({ phase: "submitting", content: "pending" }),
+      },
+    })
+
+    resolveSend()
+    await request
+  })
+
   it("keeps an old session send from settling the new session runtime", async () => {
     let resolveOld!: () => void
     let resolveNew!: () => void
@@ -105,6 +146,12 @@ describe("prompt actions session runtime", () => {
     useDesktopSessionStore
       .getState()
       .applySessionUpdate(viewContainingInput("session-1", inputId, 1))
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      sending: false,
+      sendingOperationId: null,
+      pendingPromptSubmissions: {},
+    })
     rejectSend(new Error("response lost"))
 
     await expect(request).resolves.toBeUndefined()

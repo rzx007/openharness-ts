@@ -1,11 +1,40 @@
 import type { DesktopOperation, DesktopSessionRuntime } from "./types"
 
+export interface LegacySessionRuntimeMirror {
+  sending: boolean
+  sendingOperationId: string | null
+  pendingPromptSubmissions: DesktopSessionRuntime["pendingPromptSubmissions"]
+  pendingPromptEdit: DesktopSessionRuntime["pendingPromptEdit"]
+  queuedPromptActions: DesktopSessionRuntime["queuedPromptActions"]
+}
+
 export function createEmptySessionRuntime(): DesktopSessionRuntime {
   return {
     operations: {},
     pendingPromptSubmissions: {},
     pendingPromptEdit: null,
     queuedPromptActions: {},
+  }
+}
+
+export function projectRuntimeToLegacyMirror(
+  runtime: DesktopSessionRuntime,
+  options: { includeCreateSession?: boolean } = {}
+): LegacySessionRuntimeMirror {
+  const composerOperation = Object.values(runtime.operations).find(
+    (operation) =>
+      operation.phase === "pending" &&
+      (operation.kind === "send-prompt" ||
+        operation.kind === "invoke-command" ||
+        operation.kind === "edit-prompt" ||
+        (options.includeCreateSession && operation.kind === "create-session"))
+  )
+  return {
+    sending: Boolean(composerOperation),
+    sendingOperationId: composerOperation?.id ?? null,
+    pendingPromptSubmissions: runtime.pendingPromptSubmissions,
+    pendingPromptEdit: runtime.pendingPromptEdit,
+    queuedPromptActions: runtime.queuedPromptActions,
   }
 }
 
