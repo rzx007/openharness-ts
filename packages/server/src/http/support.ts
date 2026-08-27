@@ -3,6 +3,7 @@ import {
   type ProtocolError,
 } from "@openharness/protocol";
 import type { Context } from "hono";
+import { isAttachmentError } from "@openharness/services";
 import {
   APPLICATION_ERROR_HTTP_STATUS,
   ApplicationError,
@@ -106,6 +107,22 @@ export function jsonResponse(body: unknown, status = 200): Response {
 
 export function errorResponse(status: number, message: string): Response {
   return jsonResponse({ error: message }, status);
+}
+
+const ATTACHMENT_ERROR_HTTP_STATUS = {
+  attachment_invalid_request: 400,
+  attachment_too_large: 413,
+  attachment_not_found: 404,
+  attachment_not_ready: 409,
+  attachment_aborted: 408,
+  attachment_storage_failed: 500,
+} as const;
+
+export function attachmentErrorResponse(error: unknown): Response {
+  if (!isAttachmentError(error)) {
+    return errorResponse(500, "Attachment request failed");
+  }
+  return errorResponse(ATTACHMENT_ERROR_HTTP_STATUS[error.code], error.message);
 }
 
 /** Application error code 到 HTTP status 的唯一转换位置。 */
