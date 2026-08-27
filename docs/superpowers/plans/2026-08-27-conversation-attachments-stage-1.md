@@ -8,7 +8,7 @@
 
 **技术栈：** TypeScript、Node.js 22/24 Web Streams、Node `crypto`/`fs`、SQLite/Drizzle、Hono、Vitest、pnpm workspace。
 
-**执行状态：已完成（2026-08-28）。** 阶段 1 已落地到分支 `codex/conversation-attachments-stage-1`。最终验收覆盖 protocol 31、services 156、server 316、client 62，共 565 个测试；四包类型检查均为 exit 0，全仓库类型任务 57/57 通过，Drizzle migration 检查通过。公开能力为 `features.attachments: 1`，数据库 migration 为 `0013_attachments`，上传模式为 `POST /attachments` 原始请求体 + `X-OpenHarness-Filename`，capabilities 中公布 `uploadModes: ["single"]` 和实际 limits。
+**执行状态：已完成（2026-08-28）。** 阶段 1 已落地到分支 `codex/conversation-attachments-stage-1`。最终验收覆盖 protocol 31、services 162、server 317、client 62，共 572 个测试；四包类型检查均为 exit 0，全仓库类型任务 57/57 通过，Drizzle migration 检查通过。公开能力为 `features.attachments: 1`，数据库 migration 为 `0013_attachments`，上传模式为 `POST /attachments` 原始请求体 + `X-OpenHarness-Filename`，capabilities 中公布 `uploadModes: ["single"]` 和实际 limits。
 
 ---
 
@@ -27,7 +27,7 @@ X-OpenHarness-Filename: screenshot.png
 <raw file bytes>
 ```
 
-`Content-Length` 是可选的提前校验信息；服务端始终以实际流式计数为准。阶段 1 的单文件上传可接收到 `maxBytesPerFile`，`resumableThresholdBytes` 只是后续 Client 选择传输方式的能力提示，阶段 7 再接入可恢复上传会话。上传成功返回 `201` 和公共 `AttachmentAssetRecord`。
+`Content-Length` 是可选的提前校验信息；服务端始终以实际流式计数为准。阶段 1 的单文件上传可接收到 `maxBytesPerFile`，`resumableThresholdBytes` 只是后续 Client 选择传输方式的能力提示，阶段 8 再接入可恢复上传会话。上传成功返回 `201` 和公共 `AttachmentAssetRecord`。
 
 阶段 1 的删除是逻辑删除：记录进入 `deleted`，读取接口返回 404，Blob 暂不物理删除。引用保护和 GC 分别在阶段 2、阶段 7 完成。
 
@@ -381,7 +381,7 @@ expect(first.sizeBytes).toBe(11);
 6. `link(stagingPath, finalPath)`，`EEXIST` 视为去重成功；最后删除 staging；
 7. 返回 `{ sha256, sizeBytes, mediaType, deduplicated }`。
 
-不要使用用户文件名拼路径。hash 入参必须匹配 `/^[a-f0-9]{64}$/`。读取用 `createReadStream(path, { start, end })` 并通过 `Readable.toWeb()` 返回 Web stream。
+不要使用用户文件名拼路径。hash 入参必须匹配 `/^[a-f0-9]{64}$/`。读取先异步打开文件并核对它是普通文件且大小与数据库一致，通过后再从 `FileHandle` 创建读取流并转换为 Web stream；底层读取错误统一改写为不包含真实路径的存储错误。
 
 - [x] **步骤 4：实现 staging 恢复**
 
@@ -389,10 +389,14 @@ expect(first.sizeBytes).toBe(11);
 recoverStaging(options: {
   activeNames: ReadonlySet<string>;
   olderThan: number;
-}): Promise<{ removed: string[]; retained: string[] }>;
+}): Promise<{
+  removed: string[];
+  retained: string[];
+  recoverable: string[];
+}>;
 ```
 
-只枚举 `staging` 的直接普通文件；删除 mtime 小于阈值且不在 activeNames 的 `.part`。符号链接、目录和无法识别项只报告 retained，不递归处理。
+只枚举 `staging` 的直接普通文件；删除 mtime 小于阈值且不在 activeNames 的 `.part`。`recoverable` 只包含仍存在且未过期的普通 `.part` 文件。符号链接、目录和无法识别项只报告 `retained`，不进入 `recoverable`，也不递归处理。
 
 - [x] **步骤 5：运行 Blob Store 测试**
 
@@ -763,6 +767,7 @@ git commit -m "docs: record attachment stage one completion"
 - Provider 原生图片 content block：阶段 4。
 - `@arcships/light-ocr`、`LocalOcrService`、`ImageToText` 改造：阶段 5。
 - PDF document engine、文本/代码 extractor、Agent mount：阶段 6。
-- resumable upload、配额预留、GC、备份 manifest：阶段 7。
+- GC 与备份 manifest：阶段 7。
+- resumable upload、配额预留和文件夹上传：阶段 8。
 
 这些边界不代表先做一个临时附件方案；阶段 1 的资产 ID、Blob 路径、公开投影、错误码、limits 和 HTTP 读取语义会被后续阶段直接复用。

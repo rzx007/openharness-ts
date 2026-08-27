@@ -95,5 +95,18 @@ describe("protocol capabilities", () => {
         attachments: { ...base.attachments, uploadModes: ["multipart"] },
       }),
     ).toThrow("uploadModes");
+    for (const uploadModes of [
+      ["resumable"],
+      ["resumable", "single"],
+      ["single", "single"],
+      ["single", "resumable", "single"],
+    ]) {
+      expect(() =>
+        parseServerCapabilities({
+          ...base,
+          attachments: { ...base.attachments, uploadModes },
+        }),
+      ).toThrow("uploadModes");
+    }
   });
 });

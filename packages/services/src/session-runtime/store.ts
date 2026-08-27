@@ -231,6 +231,16 @@ export class SessionStore {
     input: CreateImportingAttachmentInput,
   ): AttachmentAssetRecord {
     const timestamp = input.createdAt ?? now();
+    parseAttachmentAssetRecord({
+      id: input.id,
+      displayName: input.displayName,
+      ...(input.declaredMediaType
+        ? { declaredMediaType: input.declaredMediaType }
+        : {}),
+      status: "importing",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
     this.database
       .prepare(
         `INSERT INTO attachment_asset (
@@ -253,6 +263,16 @@ export class SessionStore {
     id: string,
     input: MarkAttachmentReadyInput,
   ): AttachmentAssetRecord {
+    const current = this.attachmentForTransition(id, "importing");
+    const updatedAt = input.updatedAt ?? now();
+    parseAttachmentAssetRecord({
+      ...current,
+      sha256: input.sha256,
+      sizeBytes: input.sizeBytes,
+      mediaType: input.mediaType,
+      status: "ready",
+      updatedAt,
+    });
     const result = this.database
       .prepare(
         `UPDATE attachment_asset
@@ -264,7 +284,7 @@ export class SessionStore {
         input.sha256,
         input.sizeBytes,
         input.mediaType,
-        input.updatedAt ?? now(),
+        updatedAt,
         id,
       );
     if (result.changes !== 1) {
@@ -278,6 +298,13 @@ export class SessionStore {
     failureCode: string,
     updatedAt = now(),
   ): AttachmentAssetRecord {
+    const current = this.attachmentForTransition(id, "importing");
+    parseAttachmentAssetRecord({
+      ...current,
+      status: "failed",
+      failureCode,
+      updatedAt,
+    });
     const result = this.database
       .prepare(
         `UPDATE attachment_asset
@@ -334,6 +361,13 @@ export class SessionStore {
   }
 
   softDeleteAttachment(id: string, deletedAt = now()): AttachmentAssetRecord {
+    const current = this.attachmentForTransition(id, "ready");
+    parseAttachmentAssetRecord({
+      ...current,
+      status: "deleted",
+      deletedAt,
+      updatedAt: deletedAt,
+    });
     const result = this.database
       .prepare(
         `UPDATE attachment_asset
@@ -354,6 +388,17 @@ export class SessionStore {
           `Attachment ${id} expected ${expected} status, received ${current.status}`,
         )
       : new Error(`Attachment ${id} was not found; expected ${expected} status`);
+  }
+
+  private attachmentForTransition(
+    id: string,
+    expected: AttachmentAssetRecord["status"],
+  ): AttachmentAssetRecord {
+    const current = this.getAttachment(id, { includeDeleted: true });
+    if (!current || current.status !== expected) {
+      throw this.attachmentTransitionError(id, expected);
+    }
+    return current;
   }
 
   listProjects(options: { includeArchived?: boolean } = {}): ProjectRecord[] {

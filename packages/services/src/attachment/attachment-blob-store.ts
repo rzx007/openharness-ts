@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import {
   link,
   lstat,
@@ -52,6 +51,7 @@ export interface RecoverStagingOptions {
 export interface RecoverStagingResult {
   removed: string[];
   retained: string[];
+  recoverable: string[];
 }
 
 export class AttachmentBlobStore {
@@ -126,6 +126,7 @@ export class AttachmentBlobStore {
       const mediaType = sniffAttachmentMediaType(
         prefix.subarray(0, prefixLength),
         input.declaredMediaType,
+        sizeBytes === prefixLength,
       );
       const bucket = join(this.blobsRoot, sha256.slice(0, 2));
       const blobPath = join(bucket, sha256);
@@ -157,8 +158,16 @@ export class AttachmentBlobStore {
     }
   }
 
-  open(sha256: string, range: AttachmentBlobRange = {}): ReadableStream<Uint8Array> {
+  async open(
+    sha256: string,
+    expectedSizeBytes: number,
+    range: AttachmentBlobRange = {},
+  ): Promise<ReadableStream<Uint8Array>> {
     validateSha256(sha256);
+    const expectedSize = optionalNonNegativeSafeInteger(
+      expectedSizeBytes,
+      "expectedSizeBytes",
+    )!;
     const start = optionalNonNegativeSafeInteger(range.start, "range.start");
     const end = optionalNonNegativeSafeInteger(range.end, "range.end");
     if (start !== undefined && end !== undefined && end < start) {
@@ -167,14 +176,30 @@ export class AttachmentBlobStore {
         "range.end must not be less than range.start",
       );
     }
-    const stream = createReadStream(
-      join(this.blobsRoot, sha256.slice(0, 2), sha256),
-      {
+    let handle: FileHandle | undefined;
+    try {
+      handle = await open(
+        join(this.blobsRoot, sha256.slice(0, 2), sha256),
+        "r",
+      );
+      const stats = await handle.stat();
+      if (!stats.isFile() || stats.size !== expectedSize) {
+        throw attachmentBytesUnavailable();
+      }
+      const stream = handle.createReadStream({
         ...(start !== undefined ? { start } : {}),
         ...(end !== undefined ? { end } : {}),
-      },
-    );
-    return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+        autoClose: true,
+      });
+      handle = undefined;
+      return normalizeBlobReadErrors(
+        Readable.toWeb(stream) as ReadableStream<Uint8Array>,
+      );
+    } catch (error) {
+      await handle?.close().catch(() => undefined);
+      if (isAttachmentError(error)) throw error;
+      throw attachmentBytesUnavailable();
+    }
   }
 
   async recoverStaging(
@@ -183,27 +208,30 @@ export class AttachmentBlobStore {
     await this.initialize();
     const removed: string[] = [];
     const retained: string[] = [];
+    const recoverable: string[] = [];
     const entries = await readdir(this.stagingRoot, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      if (
-        options.activeNames.has(entry.name) ||
-        !entry.name.endsWith(".part") ||
-        !entry.isFile()
-      ) {
+      if (!entry.name.endsWith(".part") || !entry.isFile()) {
         retained.push(entry.name);
+        continue;
+      }
+      if (options.activeNames.has(entry.name)) {
+        retained.push(entry.name);
+        recoverable.push(entry.name);
         continue;
       }
       const path = join(this.stagingRoot, entry.name);
       const stats = await lstat(path);
       if (stats.mtimeMs >= options.olderThan) {
         retained.push(entry.name);
+        recoverable.push(entry.name);
         continue;
       }
       await unlink(path);
       removed.push(entry.name);
     }
-    return { removed, retained };
+    return { removed, retained, recoverable };
   }
 
   stagingCutoff(maxAgeMs: number): number {
@@ -301,4 +329,32 @@ function nodeErrorCode(error: unknown): string | undefined {
   return error && typeof error === "object" && "code" in error
     ? String(error.code)
     : undefined;
+}
+
+function attachmentBytesUnavailable(): AttachmentError {
+  return new AttachmentError(
+    "attachment_storage_failed",
+    "attachment bytes are unavailable",
+    true,
+  );
+}
+
+function normalizeBlobReadErrors(
+  source: ReadableStream<Uint8Array>,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await reader.read();
+        if (result.done) controller.close();
+        else controller.enqueue(result.value);
+      } catch {
+        controller.error(attachmentBytesUnavailable());
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason).catch(() => undefined);
+    },
+  });
 }

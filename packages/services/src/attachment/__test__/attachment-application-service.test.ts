@@ -104,7 +104,7 @@ describe("AttachmentApplicationService", () => {
         status: "ready",
         sha256: first.sha256,
       });
-      const opened = service.openContent(first.id);
+      const opened = await service.openContent(first.id);
       expect(opened.sha256).toBe(first.sha256);
       expect(
         existsSync(
@@ -161,7 +161,7 @@ describe("AttachmentApplicationService", () => {
 
       expect(service.delete(asset.id).status).toBe("deleted");
       expect(() => service.get(asset.id)).toThrow("attachment_not_found");
-      expect(() => service.openContent(asset.id)).toThrow(
+      await expect(service.openContent(asset.id)).rejects.toThrow(
         "attachment_not_found",
       );
     } finally {
@@ -180,6 +180,7 @@ describe("AttachmentApplicationService", () => {
     utimesSync(join(staging, "att_interrupted.part"), 1, 1);
     writeFileSync(join(staging, "att_current.part"), "partial");
     utimesSync(join(staging, "att_current.part"), 9, 9);
+    mkdirSync(join(staging, "att_unsafe.part"));
     store.createImportingAttachment({
       id: "att_interrupted",
       displayName: "partial.bin",
@@ -198,6 +199,12 @@ describe("AttachmentApplicationService", () => {
       stagingName: "att_missing.part",
       createdAt: 9_000,
     });
+    store.createImportingAttachment({
+      id: "att_unsafe",
+      displayName: "unsafe.bin",
+      stagingName: "att_unsafe.part",
+      createdAt: 9_000,
+    });
 
     try {
       const result = await service.recover();
@@ -214,10 +221,19 @@ describe("AttachmentApplicationService", () => {
         status: "failed",
         failureCode: "attachment_storage_failed",
       });
+      expect(store.getAttachment("att_unsafe")).toMatchObject({
+        status: "failed",
+        failureCode: "attachment_storage_failed",
+      });
       expect(result).toEqual({
-        failedImportIds: ["att_interrupted", "att_current", "att_missing"],
+        failedImportIds: [
+          "att_interrupted",
+          "att_current",
+          "att_missing",
+          "att_unsafe",
+        ],
         removedStagingNames: ["att_interrupted.part"],
-        retainedStagingNames: ["att_current.part"],
+        retainedStagingNames: ["att_current.part", "att_unsafe.part"],
       });
       expect(existsSync(join(staging, "att_interrupted.part"))).toBe(false);
       expect(existsSync(join(staging, "att_current.part"))).toBe(true);

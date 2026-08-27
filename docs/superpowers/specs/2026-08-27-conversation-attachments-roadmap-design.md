@@ -197,26 +197,22 @@ Transcript Projection + SSE
 
 ## 数据模型
 
-### AttachmentAssetRecord
+### 公共 AttachmentAssetRecord
+
+这是 daemon、Client SDK 和后续消息引用共同使用的稳定公共投影。阶段 1 已按此契约落地；内部磁盘位置、staging 名称和扫描器细节不得进入该对象。
 
 ```ts
-type AttachmentAssetStatus =
-  | "importing"
-  | "ready"
-  | "rejected"
-  | "quarantined"
-  | "deleted"
+type AttachmentAssetStatus = "importing" | "ready" | "failed" | "deleted"
 
 interface AttachmentAssetRecord {
   id: string
-  sha256: string
-  filename: string
-  mediaType: string
-  detectedMediaType: string
-  sizeBytes: number
+  displayName: string
+  declaredMediaType?: string
+  mediaType?: string
+  sizeBytes?: number
+  sha256?: string
   status: AttachmentAssetStatus
-  storageKey: string
-  metadata: Record<string, unknown>
+  failureCode?: string
   createdAt: number
   updatedAt: number
   deletedAt?: number
@@ -225,11 +221,16 @@ interface AttachmentAssetRecord {
 
 约束：
 
-- `sha256 + sizeBytes` 用于内容寻址和去重检查。
-- `filename` 只用于展示，不参与存储路径拼接。
-- `mediaType` 是 Client 声明值，`detectedMediaType` 是 daemon 检测值；路由使用检测值。
+- `displayName` 只用于展示，不参与存储路径拼接；它对应早期草案中的 `filename`。
+- `declaredMediaType` 是 Client 声明值，`mediaType` 是 daemon 检测后的可信值；它们分别对应早期草案中的 `mediaType` 与 `detectedMediaType`。
+- `sha256 + sizeBytes` 在 `ready` 和 `deleted` 状态必填，用于内容寻址和去重检查；导入期间可以缺省。
+- 导入拒绝统一表示为 `failed + failureCode`，不再使用含义重叠的 `rejected`。
 - `ready` 后的 blob 不允许覆盖。
 - `deleted` 是逻辑删除，物理回收由 GC 在确认无引用、无活跃 run 后执行。
+
+### 内部资产存储状态
+
+数据库可以在公共投影之外保存 `stagingName`、内容寻址得到的 Blob 相对键、扫描状态和扫描器元数据。Blob 相对键由 `sha256` 派生，当前不单独暴露 `storageKey`，更不能返回真实磁盘路径。未来病毒扫描命中时，内部状态使用 `scanStatus: "quarantined"` 阻止引用和下载；在协议没有新增版本与 capability（能力声明）前，公共投影仍返回 `failed` 和稳定的 `failureCode`。若未来确实需要把 `quarantined` 变成公共状态，必须作为显式协议升级处理，不能静默扩大当前枚举。
 
 ### SessionInputAttachmentRecord
 

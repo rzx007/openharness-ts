@@ -1,5 +1,4 @@
 const OCTET_STREAM = "application/octet-stream";
-const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 const SIGNATURES: ReadonlyArray<{
   mediaType: string;
@@ -42,6 +41,7 @@ const SIGNATURES: ReadonlyArray<{
 export function sniffAttachmentMediaType(
   prefix: Uint8Array,
   declaredMediaType?: string,
+  prefixIsComplete = true,
 ): string {
   for (const signature of SIGNATURES) {
     if (signature.matches(prefix)) return signature.mediaType;
@@ -51,7 +51,8 @@ export function sniffAttachmentMediaType(
   const declared = normalizeDeclaredTextMediaType(declaredMediaType);
   if (!declared) return OCTET_STREAM;
   try {
-    UTF8_DECODER.decode(prefix);
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    decoder.decode(prefix, { stream: !prefixIsComplete });
     return declared;
   } catch {
     return OCTET_STREAM;

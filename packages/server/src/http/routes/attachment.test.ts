@@ -42,7 +42,7 @@ function createService(
     limits: { ...DEFAULT_ATTACHMENT_LIMITS, maxBytesPerFile: 8 },
     import: vi.fn(async () => asset),
     get: vi.fn(() => asset),
-    openContent: vi.fn((_id, range = {}) => ({
+    openContent: vi.fn(async (_id, range = {}) => ({
       asset,
       sha256: asset.sha256!,
       sizeBytes: asset.sizeBytes!,
@@ -225,6 +225,28 @@ describe("attachment routes", () => {
       error:
         "attachment_storage_failed: attachment metadata is unavailable",
     });
+  });
+
+  it("maps content preflight failures before sending download headers", async () => {
+    const localPath = "C:\\private\\attachments\\blobs\\aa\\secret";
+    const app = createAttachmentRoutes(
+      createService({
+        openContent: vi.fn(async () => {
+          throw new AttachmentError(
+            "attachment_storage_failed",
+            "attachment bytes are unavailable",
+            true,
+          );
+        }),
+      }),
+    );
+
+    const response = await app.request("/att_test/content");
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-disposition")).toBeNull();
+    const body = await response.text();
+    expect(body).not.toContain(localPath);
+    expect(body).toContain("attachment bytes are unavailable");
   });
 
   it("generates a CRLF-safe RFC 5987 content disposition", () => {

@@ -5,6 +5,8 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  truncateSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -87,6 +89,20 @@ describe("AttachmentBlobStore", () => {
     expect(readdirSync(join(root, "staging"))).toEqual([]);
   });
 
+  it("keeps text detection when UTF-8 crosses the inspection boundary", async () => {
+    const { store } = createStore();
+    const content = bytes(`${"a".repeat(4_099)}世`);
+
+    const result = await store.import({
+      uploadId: "att-utf8-boundary",
+      content: streamOf([content]),
+      declaredMediaType: "text/plain",
+      maxBytes: content.byteLength,
+    });
+
+    expect(result.mediaType).toBe("text/plain");
+  });
+
   it("deduplicates identical bytes without creating a second blob", async () => {
     const { root, store } = createStore();
     const first = await store.import({
@@ -154,12 +170,46 @@ describe("AttachmentBlobStore", () => {
       maxBytes: 32,
     });
 
-    const content = await readAll(store.open(imported.sha256, { start: 2, end: 5 }));
+    const content = await readAll(
+      await store.open(imported.sha256, imported.sizeBytes, { start: 2, end: 5 }),
+    );
     expect(new TextDecoder().decode(content)).toBe("2345");
-    expect(() => store.open("../store.db")).toThrow("attachment_invalid_request");
-    expect(() => store.open(imported.sha256, { start: 5, end: 2 })).toThrow(
+    await expect(store.open("../store.db", imported.sizeBytes)).rejects.toThrow(
       "attachment_invalid_request",
     );
+    await expect(
+      store.open(imported.sha256, imported.sizeBytes, { start: 5, end: 2 }),
+    ).rejects.toThrow("attachment_invalid_request");
+  });
+
+  it("rejects missing or truncated blobs before exposing a stream", async () => {
+    const { root, store } = createStore();
+    const imported = await store.import({
+      uploadId: "att-corrupt",
+      content: streamOf([bytes("private content")]),
+      maxBytes: 32,
+    });
+    const blobPath = join(
+      root,
+      "blobs",
+      imported.sha256.slice(0, 2),
+      imported.sha256,
+    );
+
+    truncateSync(blobPath, 3);
+    const truncated = await store
+      .open(imported.sha256, imported.sizeBytes)
+      .catch((error: unknown) => error);
+    expect(truncated).toMatchObject({ code: "attachment_storage_failed" });
+    expect(String(truncated)).toContain("attachment bytes are unavailable");
+    expect(String(truncated)).not.toContain(root);
+
+    unlinkSync(blobPath);
+    const missing = await store.open(imported.sha256, imported.sizeBytes).catch(
+      (error: unknown) => error,
+    );
+    expect(missing).toMatchObject({ code: "attachment_storage_failed" });
+    expect(String(missing)).not.toContain(root);
   });
 
   it("removes only expired unowned staging files", async () => {
@@ -183,6 +233,9 @@ describe("AttachmentBlobStore", () => {
     expect(result.removed).toEqual(["expired.part"]);
     expect(result.retained.sort()).toEqual(
       ["active.part", "diagnostic.txt", "fresh.part"].sort(),
+    );
+    expect(result.recoverable.sort()).toEqual(
+      ["active.part", "fresh.part"].sort(),
     );
     expect(readdirSync(staging).sort()).toEqual(
       ["active.part", "diagnostic.txt", "fresh.part"].sort(),

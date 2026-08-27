@@ -45,6 +45,29 @@ describe("sniffAttachmentMediaType", () => {
     ).toBe("application/octet-stream");
   });
 
+  it("accepts a truncated inspection prefix ending inside a valid UTF-8 character", () => {
+    const prefix = new Uint8Array(4_100);
+    prefix.fill(0x61);
+    prefix[4_099] = 0xe4;
+
+    expect(sniffAttachmentMediaType(prefix, "text/plain", false)).toBe(
+      "text/plain",
+    );
+    expect(sniffAttachmentMediaType(prefix, "text/plain", true)).toBe(
+      "application/octet-stream",
+    );
+  });
+
+  it("still rejects malformed UTF-8 before the end of a truncated prefix", () => {
+    expect(
+      sniffAttachmentMediaType(
+        Uint8Array.from([0x61, 0xc3, 0x28, 0x62]),
+        "text/plain",
+        false,
+      ),
+    ).toBe("application/octet-stream");
+  });
+
   it("uses application/octet-stream for empty or unknown content", () => {
     expect(sniffAttachmentMediaType(new Uint8Array(), "text/plain")).toBe(
       "application/octet-stream",

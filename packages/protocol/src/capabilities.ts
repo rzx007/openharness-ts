@@ -18,7 +18,7 @@ export type AttachmentUploadMode = "single" | "resumable";
 
 export interface AttachmentTransferCapabilities {
   limits: AttachmentLimits;
-  uploadModes: readonly AttachmentUploadMode[];
+  uploadModes: readonly ["single"] | readonly ["single", "resumable"];
 }
 
 export interface ClientProtocolSupport {
@@ -87,18 +87,16 @@ function parseAttachmentTransferCapabilities(
   if (!Array.isArray(value.uploadModes) || value.uploadModes.length === 0) {
     throw new Error("attachments.uploadModes must be a non-empty array");
   }
-  const uploadModes: AttachmentUploadMode[] = [];
-  for (const mode of value.uploadModes) {
-    if (mode !== "single" && mode !== "resumable") {
-      throw new Error(
-        "attachments.uploadModes entries must be single or resumable",
-      );
-    }
-    if (uploadModes.includes(mode)) {
-      throw new Error("attachments.uploadModes must not contain duplicates");
-    }
-    uploadModes.push(mode);
+  if (
+    value.uploadModes[0] !== "single" ||
+    value.uploadModes.length > 2 ||
+    (value.uploadModes.length === 2 && value.uploadModes[1] !== "resumable")
+  ) {
+    throw new Error(
+      'attachments.uploadModes must be ["single"] or ["single", "resumable"]',
+    );
   }
+  const uploadModes = value.uploadModes as ["single"] | ["single", "resumable"];
   return {
     limits: parseAttachmentLimits(value.limits),
     uploadModes,

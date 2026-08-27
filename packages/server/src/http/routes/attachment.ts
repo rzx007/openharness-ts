@@ -57,7 +57,7 @@ export function createAttachmentRoutes(
         return attachmentErrorResponse(error);
       }
     })
-    .get("/:id/content", (c) => {
+    .get("/:id/content", async (c) => {
       try {
         const asset = attachments.get(c.req.param("id"));
         assertReadyAsset(asset);
@@ -74,7 +74,7 @@ export function createAttachmentRoutes(
           return rangeNotSatisfiable(asset.sizeBytes);
         }
 
-        const opened = attachments.openContent(asset.id, range ?? {});
+        const opened = await attachments.openContent(asset.id, range ?? {});
         const start = range?.start ?? 0;
         const end = range?.end ?? Math.max(0, asset.sizeBytes - 1);
         const length = range ? end - start + 1 : asset.sizeBytes;

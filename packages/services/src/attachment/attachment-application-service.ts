@@ -106,10 +106,10 @@ export class AttachmentApplicationService {
     return asset;
   }
 
-  openContent(
+  async openContent(
     id: string,
     range: AttachmentBlobRange = {},
-  ): OpenAttachmentContentResult {
+  ): Promise<OpenAttachmentContentResult> {
     const asset = this.get(id);
     if (
       asset.status !== "ready" ||
@@ -127,7 +127,7 @@ export class AttachmentApplicationService {
       sha256: asset.sha256,
       sizeBytes: asset.sizeBytes,
       mediaType: asset.mediaType,
-      content: this.blobs.open(asset.sha256, range),
+      content: await this.blobs.open(asset.sha256, asset.sizeBytes, range),
     };
   }
 
@@ -148,12 +148,12 @@ export class AttachmentApplicationService {
       activeNames: new Set(),
       olderThan: this.blobs.stagingCutoff(this.limits.stagingTtlMs),
     });
-    const retainedStagingNames = new Set(staging.retained);
+    const recoverableStagingNames = new Set(staging.recoverable);
     const failedImportIds: string[] = [];
     for (const asset of importing) {
       this.store.failAttachmentImport(
         asset.id,
-        retainedStagingNames.has(asset.stagingName)
+        recoverableStagingNames.has(asset.stagingName)
           ? "attachment_aborted"
           : "attachment_storage_failed",
         this.now(),

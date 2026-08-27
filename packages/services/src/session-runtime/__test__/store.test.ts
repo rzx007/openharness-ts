@@ -1,8 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { describe, expect, it } from "vitest";
 
 import { SessionStore, type SessionStoreOptions } from "../store.js";
@@ -56,6 +66,99 @@ function withStore(
 }
 
 describe("SessionStore", () => {
+  it("migrates a real 0012 database to 0013 without losing prior data", () => {
+    const root = mkdtempSync(join(tmpdir(), "ohs-migration-0012-"));
+    const path = join(root, "store.db");
+    const source = fileURLToPath(new URL("../migrations", import.meta.url));
+    const oldMigrations = join(root, "migrations");
+    mkdirSync(join(oldMigrations, "meta"), { recursive: true });
+    for (let index = 0; index <= 12; index += 1) {
+      const name = readFileSync(join(source, "meta", "_journal.json"), "utf8");
+      const journal = JSON.parse(name) as {
+        entries: Array<{ idx: number; tag: string }>;
+      };
+      const entry = journal.entries.find((candidate) => candidate.idx === index)!;
+      copyFileSync(
+        join(source, `${entry.tag}.sql`),
+        join(oldMigrations, `${entry.tag}.sql`),
+      );
+    }
+    const journal = JSON.parse(
+      readFileSync(join(source, "meta", "_journal.json"), "utf8"),
+    ) as { entries: Array<{ idx: number }>; [key: string]: unknown };
+    writeFileSync(
+      join(oldMigrations, "meta", "_journal.json"),
+      JSON.stringify({
+        ...journal,
+        entries: journal.entries.filter((entry) => entry.idx <= 12),
+      }),
+    );
+
+    try {
+      const legacy = new Database(path);
+      migrate(drizzle(legacy), { migrationsFolder: oldMigrations });
+      legacy
+        .prepare(
+          `INSERT INTO session (
+            id, cwd, title, model, status, metadata_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "session-before-attachments",
+          "D:/legacy",
+          "Before attachments",
+          "test-model",
+          "idle",
+          "{}",
+          10,
+          11,
+        );
+      expect(
+        legacy
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attachment_asset'",
+          )
+          .get(),
+      ).toBeUndefined();
+      legacy.close();
+
+      const migrated = new SessionStore({ path });
+      expect(migrated.getSession("session-before-attachments")).toMatchObject({
+        id: "session-before-attachments",
+        title: "Before attachments",
+      });
+      migrated.createImportingAttachment({
+        id: "att-after-migration",
+        displayName: "after.txt",
+        stagingName: "att-after-migration.part",
+        createdAt: 12,
+      });
+      migrated.close();
+
+      const reopened = new SessionStore({ path });
+      expect(reopened.getSession("session-before-attachments")).toBeDefined();
+      expect(reopened.getAttachment("att-after-migration")).toMatchObject({
+        status: "importing",
+      });
+      reopened.close();
+
+      const verified = new Database(path, { readonly: true });
+      expect(
+        verified
+          .prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations")
+          .get(),
+      ).toEqual({ count: 14 });
+      verified.close();
+    } finally {
+      rmSync(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("persists an attachment from importing to ready", () => {
     withStore((store, path) => {
       const importing = store.createImportingAttachment({
@@ -173,6 +276,51 @@ describe("SessionStore", () => {
       expect(() => store.softDeleteAttachment("att-delete", 304)).toThrow(
         "expected ready",
       );
+    });
+  });
+
+  it("validates attachment transitions before changing durable state", () => {
+    withStore((store) => {
+      store.createImportingAttachment({
+        id: "att-invalid-ready",
+        displayName: "a.txt",
+        stagingName: "att-invalid-ready.part",
+        createdAt: 400,
+      });
+      expect(() =>
+        store.markAttachmentReady("att-invalid-ready", {
+          sha256: "not-a-sha",
+          sizeBytes: -1,
+          mediaType: "",
+          updatedAt: 401,
+        }),
+      ).toThrow();
+      expect(store.getAttachment("att-invalid-ready")).toMatchObject({
+        status: "importing",
+        updatedAt: 400,
+      });
+
+      expect(() =>
+        store.failAttachmentImport("att-invalid-ready", "", 402),
+      ).toThrow("failureCode");
+      expect(store.getAttachment("att-invalid-ready")).toMatchObject({
+        status: "importing",
+        updatedAt: 400,
+      });
+
+      store.markAttachmentReady("att-invalid-ready", {
+        sha256: "d".repeat(64),
+        sizeBytes: 1,
+        mediaType: "text/plain",
+        updatedAt: 403,
+      });
+      expect(() =>
+        store.softDeleteAttachment("att-invalid-ready", -1),
+      ).toThrow("non-negative safe integer");
+      expect(store.getAttachment("att-invalid-ready")).toMatchObject({
+        status: "ready",
+        updatedAt: 403,
+      });
     });
   });
 
