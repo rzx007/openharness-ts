@@ -29,9 +29,12 @@ export function projectRuntimeToLegacyMirror(
         operation.kind === "edit-prompt" ||
         (options.includeCreateSession && operation.kind === "create-session"))
   )
+  const submittingPrompt = Object.values(runtime.pendingPromptSubmissions).find(
+    (submission) => submission.phase === "submitting"
+  )
   return {
-    sending: Boolean(composerOperation),
-    sendingOperationId: composerOperation?.id ?? null,
+    sending: Boolean(composerOperation ?? submittingPrompt),
+    sendingOperationId: composerOperation?.id ?? submittingPrompt?.id ?? null,
     pendingPromptSubmissions: runtime.pendingPromptSubmissions,
     pendingPromptEdit: runtime.pendingPromptEdit,
     queuedPromptActions: runtime.queuedPromptActions,

@@ -58,3 +58,24 @@
 - Web TypeScript：`tsc --noEmit -p tsconfig.web.json --composite false` 通过。
 - 本轮修改文件 ESLint 与 `git diff --check` 通过。
 - Node TypeScript 仍因工作区现有 `drizzle-orm/better-sqlite3` 类型入口缺失而失败，未改动该无关依赖问题。
+
+## 审查修复第 2 轮：首条发送锁与新会话导航代际
+
+### RED
+
+1. 新建会话的首条普通 prompt 在 create/open 完成后只保留 `submitting` submission，因没有 pending send operation，兼容 `sending` 镜像在 IPC 仍 pending 时提前变为 `false`。
+2. create 尚未返回时进入新空白页或“从会话开始”，页面继续投影旧 `newConversationRuntime`；旧 create 回包只凭 operation ID 判断所有权，会重新抢占 primary 页面。
+
+### GREEN
+
+- `projectRuntimeToLegacyMirror` 将仍为 `submitting` 的普通 submission 也视作 composer busy，并使用其 input ID 作为稳定 `sendingOperationId`；IPC 结算或 SSE 以该 input ID 确认后按既有生命周期解除锁定。
+- `startSession` 捕获创建时的 primary navigation generation。create 回包必须同时拥有相同代际、自己的 operation 和自己的镜像 ID，才能设为 active 并打开 primary snapshot。
+- `startNewConversation` 与 `startConversationFrom` 现在建立新的空 `newConversationRuntime` 并从它投影兼容镜像。失去页面所有权的旧 create 仍可在后台把首条 prompt 写入自己的目标 session runtime，但不写当前页面镜像，也不打开 primary session。
+- 首条 prompt、命令、成功、失败和 finally 路径按目标 session runtime 更新镜像，防止后台旧请求污染新页面。
+
+### 本轮验证
+
+- TDD 定向 RED：`session-actions.test.ts` 的三个新回归均按预期失败；最小修复后 GREEN，19/19 通过。
+- Desktop 全量 Vitest：33 个测试文件、200 个测试通过。
+- Web TypeScript：`tsc --noEmit -p tsconfig.web.json --composite false` 通过。
+- 本轮修改文件 ESLint、Prettier 与 `git diff --check` 通过。

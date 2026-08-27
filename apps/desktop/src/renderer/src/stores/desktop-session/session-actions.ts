@@ -175,8 +175,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       advancePrimaryNavigation()
       await window.desktop.sessions.close()
       clearPersistedActiveSessionId()
+      const newConversationRuntime = createEmptySessionRuntime()
       set((state) => ({
-        ...projectRuntimeToLegacyMirror(state.newConversationRuntime, {
+        ...projectRuntimeToLegacyMirror(newConversationRuntime, {
           includeCreateSession: true,
         }),
         activeSessionId: null,
@@ -186,6 +187,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         selectedPermissionMode: state.defaultPermissionMode,
         openingSession: false,
         error: null,
+        newConversationRuntime,
       }))
     },
 
@@ -313,8 +315,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       await window.desktop.sessions.close()
       clearPersistedActiveSessionId()
       const workspace = resolveSessionWorkspace(get().projects, session)
-      set((state) => ({
-        ...projectRuntimeToLegacyMirror(state.newConversationRuntime, {
+      const newConversationRuntime = createEmptySessionRuntime()
+      set(() => ({
+        ...projectRuntimeToLegacyMirror(newConversationRuntime, {
           includeCreateSession: true,
         }),
         activeSessionId: null,
@@ -329,6 +332,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         branch: null,
         branches: [],
         error: null,
+        newConversationRuntime,
       }))
       if (workspace.selectedProject) await get().selectProject(workspace.selectedProject)
     },
@@ -525,19 +529,23 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       }
 
       const promptSubmissionId = globalThis.crypto.randomUUID()
+      const navigationOwnerGeneration = primaryNavigationGeneration
+      const createOperation = {
+        id: promptSubmissionId,
+        kind: "create-session" as const,
+        sessionId: null,
+        startedAt: Date.now(),
+      }
       let commandOperationId: string | null = null
       let startedSessionId: string | null = null
-      set((state) => ({
-        sending: true,
-        sendingOperationId: promptSubmissionId,
-        error: null,
-        newConversationRuntime: beginOperation(state.newConversationRuntime, {
-          id: promptSubmissionId,
-          kind: "create-session",
-          sessionId: null,
-          startedAt: Date.now(),
-        }),
-      }))
+      set((state) => {
+        const newConversationRuntime = beginOperation(state.newConversationRuntime, createOperation)
+        return {
+          ...projectRuntimeToLegacyMirror(newConversationRuntime, { includeCreateSession: true }),
+          error: null,
+          newConversationRuntime,
+        }
+      })
       try {
         const sessionInput: CreateDesktopSessionInput =
           workspaceMode === "project" && selectedProject
@@ -567,16 +575,27 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             }
         let ownsCurrentPage = false
         set((state) => {
-          ownsCurrentPage =
-            state.sendingOperationId === promptSubmissionId &&
+          const ownsNewConversationRuntime =
             state.newConversationRuntime.operations[promptSubmissionId]?.phase === "pending"
+          ownsCurrentPage =
+            navigationOwnerGeneration === primaryNavigationGeneration &&
+            state.sendingOperationId === promptSubmissionId &&
+            ownsNewConversationRuntime
           if (ownsCurrentPage) advancePrimaryNavigation()
-          const bound = bindOperationToSession(
-            state.newConversationRuntime,
-            state.sessionRuntimes[session.id] ?? createEmptySessionRuntime(),
-            promptSubmissionId,
-            session.id
-          )
+          const bound = ownsNewConversationRuntime
+            ? bindOperationToSession(
+                state.newConversationRuntime,
+                state.sessionRuntimes[session.id] ?? createEmptySessionRuntime(),
+                promptSubmissionId,
+                session.id
+              )
+            : {
+                source: state.newConversationRuntime,
+                target: beginOperation(
+                  state.sessionRuntimes[session.id] ?? createEmptySessionRuntime(),
+                  createOperation
+                ),
+              }
           const runtime = firstSubmission
             ? {
                 ...bound.target,
@@ -598,14 +617,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               ? {
                   activeSessionId: session.id,
                   openingSession: true,
-                }
-              : {}),
-            ...(firstSubmission
-              ? {
-                  pendingPromptSubmissions: {
-                    ...state.pendingPromptSubmissions,
-                    [promptSubmissionId]: firstSubmission,
-                  },
+                  ...projectRuntimeToLegacyMirror(acknowledgedRuntime),
                 }
               : {}),
           }
@@ -615,28 +627,45 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           if (openResult !== "failed") {
             const invokeCommandOperationId = globalThis.crypto.randomUUID()
             commandOperationId = invokeCommandOperationId
-            set((state) => ({
-              sessionRuntimes: updateSessionRuntime(state.sessionRuntimes, session.id, (runtime) =>
-                beginOperation(runtime, {
-                  id: invokeCommandOperationId,
-                  kind: "invoke-command",
-                  sessionId: session.id,
-                  startedAt: Date.now(),
-                })
-              ),
-            }))
+            set((state) => {
+              const sessionRuntimes = updateSessionRuntime(
+                state.sessionRuntimes,
+                session.id,
+                (runtime) =>
+                  beginOperation(runtime, {
+                    id: invokeCommandOperationId,
+                    kind: "invoke-command",
+                    sessionId: session.id,
+                    startedAt: Date.now(),
+                  })
+              )
+              const runtime = sessionRuntimes[session.id]
+              return {
+                sessionRuntimes,
+                ...(state.activeSessionId === session.id && runtime
+                  ? projectRuntimeToLegacyMirror(runtime)
+                  : {}),
+              }
+            })
             await window.desktop.sessions.invokeCommand({
               sessionId: session.id,
               line: options.commandLine,
             })
             if (commandOperationId) {
-              set((state) => ({
-                sessionRuntimes: updateSessionRuntime(
+              set((state) => {
+                const sessionRuntimes = updateSessionRuntime(
                   state.sessionRuntimes,
                   session.id,
                   (runtime) => removeOperation(runtime, invokeCommandOperationId)
-                ),
-              }))
+                )
+                const runtime = sessionRuntimes[session.id]
+                return {
+                  sessionRuntimes,
+                  ...(state.activeSessionId === session.id && runtime
+                    ? projectRuntimeToLegacyMirror(runtime)
+                    : {}),
+                }
+              })
             }
           }
         } else {
@@ -645,21 +674,27 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             sessionId: session.id,
             content: prompt,
           })
-          set((state) => ({
-            pendingPromptSubmissions: updatePendingPromptSubmission(
-              state.pendingPromptSubmissions,
-              promptSubmissionId,
-              (submission) => ({ ...submission, phase: "accepted", error: undefined })
-            ),
-            sessionRuntimes: updateSessionRuntime(state.sessionRuntimes, session.id, (runtime) => ({
-              ...runtime,
-              pendingPromptSubmissions: updatePendingPromptSubmission(
-                runtime.pendingPromptSubmissions,
-                promptSubmissionId,
-                (submission) => ({ ...submission, phase: "accepted", error: undefined })
-              ),
-            })),
-          }))
+          set((state) => {
+            const sessionRuntimes = updateSessionRuntime(
+              state.sessionRuntimes,
+              session.id,
+              (runtime) => ({
+                ...runtime,
+                pendingPromptSubmissions: updatePendingPromptSubmission(
+                  runtime.pendingPromptSubmissions,
+                  promptSubmissionId,
+                  (submission) => ({ ...submission, phase: "accepted", error: undefined })
+                ),
+              })
+            )
+            const runtime = sessionRuntimes[session.id]
+            return {
+              sessionRuntimes,
+              ...(state.activeSessionId === session.id && runtime
+                ? projectRuntimeToLegacyMirror(runtime)
+                : {}),
+            }
+          })
         }
         const title = formatSessionTitle(prompt)
         set((state) => {
@@ -679,17 +714,22 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       } catch (error) {
         const message = errorMessage(error)
         const currentState = get()
+        const currentSessionRuntime = startedSessionId
+          ? currentState.sessionRuntimes[startedSessionId]
+          : null
         const confirmed =
           !options?.commandLine &&
-          (!currentState.pendingPromptSubmissions[promptSubmissionId] ||
-            sessionViewContainsInput(currentState.sessionView, promptSubmissionId))
-        set((state) => ({
-          openingSession: state.activeSessionId === startedSessionId ? false : state.openingSession,
-          error: commandOperationId ? message : startedSessionId ? state.error : message,
-          newConversationRuntime: startedSessionId
-            ? state.newConversationRuntime
-            : failOperation(state.newConversationRuntime, promptSubmissionId, message, Date.now()),
-          sessionRuntimes: startedSessionId
+          Boolean(
+            !currentSessionRuntime?.pendingPromptSubmissions[promptSubmissionId] ||
+            (currentState.activeSessionId === startedSessionId &&
+              sessionViewContainsInput(currentState.sessionView, promptSubmissionId))
+          )
+        set((state) => {
+          const ownsNewConversation =
+            navigationOwnerGeneration === primaryNavigationGeneration &&
+            state.sendingOperationId === promptSubmissionId &&
+            state.newConversationRuntime.operations[promptSubmissionId]?.phase === "pending"
+          const sessionRuntimes = startedSessionId
             ? updateSessionRuntime(state.sessionRuntimes, startedSessionId, (runtime) => {
                 if (commandOperationId) {
                   return failOperation(runtime, commandOperationId, message, Date.now())
@@ -708,23 +748,44 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                       ),
                 }
               })
-            : state.sessionRuntimes,
-          pendingPromptSubmissions: confirmed
-            ? removePendingPromptSubmission(state.pendingPromptSubmissions, promptSubmissionId)
-            : updatePendingPromptSubmission(
-                state.pendingPromptSubmissions,
-                promptSubmissionId,
-                (submission) => ({ ...submission, phase: "failed", error: message })
-              ),
-        }))
+            : state.sessionRuntimes
+          const runtime = startedSessionId ? sessionRuntimes[startedSessionId] : null
+          const isActiveStartedSession = Boolean(
+            startedSessionId && state.activeSessionId === startedSessionId
+          )
+          const newConversationRuntime = ownsNewConversation
+            ? failOperation(state.newConversationRuntime, promptSubmissionId, message, Date.now())
+            : state.newConversationRuntime
+          return {
+            openingSession: isActiveStartedSession ? false : state.openingSession,
+            error:
+              (commandOperationId && isActiveStartedSession) ||
+              (!startedSessionId && ownsNewConversation)
+                ? message
+                : state.error,
+            newConversationRuntime,
+            sessionRuntimes,
+            ...(isActiveStartedSession && runtime ? projectRuntimeToLegacyMirror(runtime) : {}),
+            ...(!startedSessionId && ownsNewConversation
+              ? projectRuntimeToLegacyMirror(newConversationRuntime, { includeCreateSession: true })
+              : {}),
+          }
+        })
         if (confirmed) return startedSessionId
         throw error
       } finally {
-        set((state) =>
-          state.sendingOperationId === promptSubmissionId
-            ? { sending: false, sendingOperationId: null }
-            : state
-        )
+        set((state) => {
+          const activeRuntime = startedSessionId ? state.sessionRuntimes[startedSessionId] : null
+          if (startedSessionId && state.activeSessionId === startedSessionId && activeRuntime) {
+            return projectRuntimeToLegacyMirror(activeRuntime)
+          }
+          if (state.sendingOperationId === promptSubmissionId) {
+            return projectRuntimeToLegacyMirror(state.newConversationRuntime, {
+              includeCreateSession: true,
+            })
+          }
+          return state
+        })
         context.scheduleSelectedProjectGitRefresh(true)
       }
       return startedSessionId

@@ -93,6 +93,165 @@ describe("desktop session actions", () => {
     expect(open).toHaveBeenCalledWith("session-b")
   })
 
+  it("keeps the first prompt composer-locked until its IPC settles or SSE confirms it", async () => {
+    const session = emptySessionView("session-created").session
+    let resolvePrompt!: () => void
+    const sendPrompt = vi.fn<
+      (input: { id: string; sessionId: string; content: string }) => Promise<void>
+    >(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePrompt = resolve
+        })
+    )
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async (sessionId: string) => emptySessionView(sessionId, 1)),
+          sendPrompt,
+        },
+      },
+    })
+    resetNewConversationState()
+
+    const starting = useDesktopSessionStore.getState().startSession("first prompt")
+    await vi.waitFor(() => expect(sendPrompt).toHaveBeenCalledOnce())
+    const inputId = sendPrompt.mock.calls[0]![0].id
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: session.id,
+      sending: true,
+      sendingOperationId: inputId,
+    })
+
+    useDesktopSessionStore.getState().applySessionUpdate(emptySessionView(session.id, 2))
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      sending: true,
+      sendingOperationId: inputId,
+    })
+
+    resolvePrompt()
+    await starting
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      sending: false,
+      sendingOperationId: null,
+      pendingPromptSubmissions: {
+        [inputId]: expect.objectContaining({ phase: "accepted" }),
+      },
+    })
+
+    const confirmed = emptySessionView(session.id, 3)
+    confirmed.inputs = [{ id: inputId }] as DesktopSessionView["inputs"]
+    useDesktopSessionStore.getState().applySessionUpdate(confirmed)
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      sending: false,
+      sendingOperationId: null,
+      pendingPromptSubmissions: {},
+    })
+  })
+
+  it("keeps a new blank conversation writable when an older create resolves", async () => {
+    const oldSession = emptySessionView("session-old").session
+    const newSession = emptySessionView("session-new").session
+    const createResolvers: Array<(session: typeof oldSession) => void> = []
+    const create = vi.fn(
+      () =>
+        new Promise<typeof oldSession>((resolve) => {
+          createResolvers.push(resolve)
+        })
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId, 1))
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: { sessions: { create, open, sendPrompt, close: vi.fn(async () => undefined) } },
+    })
+    resetNewConversationState()
+
+    const oldStarting = useDesktopSessionStore.getState().startSession("old prompt")
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    await useDesktopSessionStore.getState().startNewConversation()
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: null,
+      sending: false,
+      sendingOperationId: null,
+      newConversationRuntime: { operations: {} },
+    })
+
+    const newStarting = useDesktopSessionStore.getState().startSession("new prompt")
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+    const newOperationId = useDesktopSessionStore.getState().sendingOperationId
+
+    createResolvers[0]!(oldSession)
+    await oldStarting
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: null,
+      sending: true,
+      sendingOperationId: newOperationId,
+      pendingPromptSubmissions: {},
+    })
+    expect(open).not.toHaveBeenCalledWith(oldSession.id)
+    expect(sendPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: oldSession.id,
+      content: "old prompt",
+    })
+
+    createResolvers[1]!(newSession)
+    await newStarting
+  })
+
+  it("does not let a pending create reclaim a conversation started from another session", async () => {
+    const created = emptySessionView("session-created").session
+    const source = emptySessionView("session-source").session
+    let resolveCreate!: (session: typeof created) => void
+    const create = vi.fn(
+      () =>
+        new Promise<typeof created>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId, 1))
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create,
+          open,
+          sendPrompt: vi.fn(async () => undefined),
+          close: vi.fn(async () => undefined),
+        },
+      },
+    })
+    resetNewConversationState()
+
+    const starting = useDesktopSessionStore.getState().startSession("older prompt")
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce())
+    await useDesktopSessionStore.getState().startConversationFrom(source)
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: null,
+      sending: false,
+      sendingOperationId: null,
+      newConversationRuntime: { operations: {} },
+      selectedModel: source.model,
+    })
+
+    resolveCreate(created)
+    await starting
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: null,
+      sessionView: null,
+      sending: false,
+    })
+    expect(open).not.toHaveBeenCalledWith(created.id)
+  })
+
   it("does not let an older open snapshot replace a newer SSE view", async () => {
     let resolveOpen!: (view: DesktopSessionView) => void
     const open = vi.fn(
