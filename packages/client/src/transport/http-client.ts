@@ -65,6 +65,9 @@ import type {
   StartDreamResponse,
   UpdateClientSessionInput,
   UpdateScheduledTaskInput,
+  UploadAttachmentInput,
+  DownloadAttachmentOptions,
+  AttachmentAssetRecord,
 } from "../types/index.js";
 import type {
   JobKind,
@@ -100,6 +103,7 @@ import {
   decodeTerminalSessionInfo,
   ProtocolDataError,
   parseServerCapabilities,
+  parseAttachmentAssetRecord,
 } from "@openharness/protocol";
 
 let promptRequestCounter = 0;
@@ -221,6 +225,63 @@ export class OpenHarnessClient {
       );
     }
     return capabilities;
+  }
+
+  /** `POST /attachments` — upload bytes without JSON or multipart buffering. */
+  async uploadAttachment(
+    input: UploadAttachmentInput,
+  ): Promise<AttachmentAssetRecord> {
+    const headers = this.headers();
+    headers["x-openharness-filename"] = encodeURIComponent(input.displayName);
+    if (input.mediaType) headers["content-type"] = input.mediaType;
+    const init: RequestInit & { duplex?: "half" } = {
+      method: "POST",
+      headers,
+      body: input.body as RequestInit["body"],
+      signal: input.signal,
+    };
+    if (isReadableStream(input.body)) init.duplex = "half";
+    const response = await this.fetchImpl(`${this.baseUrl}/attachments`, init);
+    if (!response.ok) await this.throwResponseError(response);
+    return parseAttachmentAssetRecord(await response.json());
+  }
+
+  async getAttachment(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AttachmentAssetRecord> {
+    const value = await this.request<unknown>(
+      `/attachments/${encodeURIComponent(id)}`,
+      { signal: options.signal },
+    );
+    return parseAttachmentAssetRecord(value);
+  }
+
+  /** Returns the raw response so callers can consume the body as a stream. */
+  async downloadAttachment(
+    id: string,
+    options: DownloadAttachmentOptions = {},
+  ): Promise<Response> {
+    const range = attachmentRangeHeader(options.range);
+    const headers = this.headers();
+    if (range) headers.range = range;
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/attachments/${encodeURIComponent(id)}/content`,
+      { method: "GET", headers, signal: options.signal },
+    );
+    if (!response.ok) await this.throwResponseError(response);
+    return response;
+  }
+
+  async deleteAttachment(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AttachmentAssetRecord> {
+    const value = await this.request<unknown>(
+      `/attachments/${encodeURIComponent(id)}`,
+      { method: "DELETE", signal: options.signal },
+    );
+    return parseAttachmentAssetRecord(value);
   }
 
   async handleChannelMessage(
@@ -1558,6 +1619,47 @@ export class OpenHarnessClient {
           ? body.message
           : `OpenHarness API request failed with ${response.status}`;
     throw new OpenHarnessApiError(message, response.status, body);
+  }
+}
+
+function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return (
+    typeof ReadableStream !== "undefined" && value instanceof ReadableStream
+  );
+}
+
+function attachmentRangeHeader(
+  range: DownloadAttachmentOptions["range"],
+): string | undefined {
+  if (!range) return undefined;
+  const { start, end, suffixBytes } = range;
+  if (suffixBytes !== undefined) {
+    if (start !== undefined || end !== undefined) {
+      throw new Error("suffixBytes cannot be combined with start or end");
+    }
+    assertPositiveSafeInteger(suffixBytes, "suffixBytes");
+    return `bytes=-${suffixBytes}`;
+  }
+  if (start === undefined && end === undefined) return undefined;
+  if (start === undefined) {
+    throw new Error("range start is required when end is provided");
+  }
+  assertNonNegativeSafeInteger(start, "start");
+  if (end === undefined) return `bytes=${start}-`;
+  assertNonNegativeSafeInteger(end, "end");
+  if (end < start) throw new Error("range end must not be less than start");
+  return `bytes=${start}-${end}`;
+}
+
+function assertNonNegativeSafeInteger(value: number, field: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative safe integer`);
+  }
+}
+
+function assertPositiveSafeInteger(value: number, field: string): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${field} must be a positive safe integer`);
   }
 }
 

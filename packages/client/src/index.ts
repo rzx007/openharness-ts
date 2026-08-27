@@ -14,6 +14,7 @@ export {
   streamServerSentEvents,
 } from "./transport/index.js";
 export type {
+  AttachmentAssetRecord,
   ClientProtocolSupport,
   ProtocolCompatibility,
   ServerCapabilities,
@@ -126,6 +127,8 @@ export type {
   StartDreamResponse,
   SyncEventUpdate,
   UpdateClientSessionInput,
+  UploadAttachmentInput,
+  DownloadAttachmentOptions,
 } from "./types/index.js";
 export type { SessionMessageWithParts } from "./state/index.js";
 export type {

@@ -32,6 +32,169 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 }
 
 describe("OpenHarnessClient", () => {
+  it("uploads, reads, downloads and deletes attachments with raw bodies", async () => {
+    const calls: Array<{ url: string; init: RequestInit & { duplex?: string } }> = [];
+    const ready = {
+      id: "att_test",
+      displayName: "截图.png",
+      mediaType: "image/png",
+      sizeBytes: 3,
+      sha256: "a".repeat(64),
+      status: "ready",
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url).endsWith("/content")) {
+        return new Response(Uint8Array.of(1, 2, 3));
+      }
+      return jsonResponse(
+        init?.method === "DELETE"
+          ? { ...ready, status: "deleted", deletedAt: 3 }
+          : ready,
+        init?.method === "POST" ? 201 : 200,
+      );
+    };
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      token: "tok",
+      fetch: fetchImpl as typeof fetch,
+    });
+    const body = new Blob([Uint8Array.of(1, 2, 3)]);
+
+    await expect(
+      client.uploadAttachment({
+        displayName: "截图.png",
+        mediaType: "image/png",
+        body,
+      }),
+    ).resolves.toEqual(ready);
+    await expect(client.getAttachment("att_test")).resolves.toEqual(ready);
+    const downloaded = await client.downloadAttachment("att_test", {
+      range: { start: 1, end: 2 },
+    });
+    expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(
+      Uint8Array.of(1, 2, 3),
+    );
+    await expect(client.deleteAttachment("att_test")).resolves.toMatchObject({
+      status: "deleted",
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST http://daemon.test/attachments",
+      "GET http://daemon.test/attachments/att_test",
+      "GET http://daemon.test/attachments/att_test/content",
+      "DELETE http://daemon.test/attachments/att_test",
+    ]);
+    expect(calls[0]!.init.body).toBe(body);
+    const uploadHeaders = new Headers(calls[0]!.init.headers);
+    expect(uploadHeaders.get("authorization")).toBe("Bearer tok");
+    expect(uploadHeaders.get("content-type")).toBe("image/png");
+    expect(uploadHeaders.get("x-openharness-filename")).toBe(
+      encodeURIComponent("截图.png"),
+    );
+    expect(uploadHeaders.has("content-length")).toBe(false);
+    expect(new Headers(calls[2]!.init.headers).get("range")).toBe("bytes=1-2");
+  });
+
+  it("sets duplex only for ReadableStream attachment uploads", async () => {
+    const calls: Array<RequestInit & { duplex?: string }> = [];
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: (async (_url, init) => {
+        calls.push(init ?? {});
+        return jsonResponse({
+          id: "att_stream",
+          displayName: "stream.bin",
+          mediaType: "application/octet-stream",
+          sizeBytes: 0,
+          sha256: "b".repeat(64),
+          status: "ready",
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }) as typeof fetch,
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+
+    await client.uploadAttachment({ displayName: "stream.bin", body: stream });
+
+    expect(calls[0]!.body).toBe(stream);
+    expect(calls[0]!.duplex).toBe("half");
+  });
+
+  it("validates attachment ranges before issuing a request", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: fetchImpl,
+    });
+
+    await expect(
+      client.downloadAttachment("att_test", {
+        range: { start: 0, suffixBytes: 2 },
+      }),
+    ).rejects.toThrow("suffixBytes");
+    await expect(
+      client.downloadAttachment("att_test", { range: { start: -1 } }),
+    ).rejects.toThrow("start");
+    await expect(
+      client.downloadAttachment("att_test", { range: { start: 5, end: 2 } }),
+    ).rejects.toThrow("end");
+    await expect(
+      client.downloadAttachment("att_test", { range: { end: 2 } }),
+    ).rejects.toThrow("start");
+    await expect(
+      client.downloadAttachment("att_test", { range: { suffixBytes: 0 } }),
+    ).rejects.toThrow("suffixBytes");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("builds open-ended and suffix attachment ranges", async () => {
+    const ranges: Array<string | null> = [];
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: (async (_url, init) => {
+        ranges.push(new Headers(init?.headers).get("range"));
+        return new Response(Uint8Array.of(1));
+      }) as typeof fetch,
+    });
+
+    await client.downloadAttachment("att_test", { range: { start: 4 } });
+    await client.downloadAttachment("att_test", {
+      range: { suffixBytes: 3 },
+    });
+
+    expect(ranges).toEqual(["bytes=4-", "bytes=-3"]);
+  });
+
+  it("keeps attachment HTTP errors as OpenHarnessApiError", async () => {
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: (async () =>
+        jsonResponse({ error: "attachment_too_large: limit exceeded" }, 413)) as typeof fetch,
+    });
+
+    await expect(
+      client.uploadAttachment({
+        displayName: "large.bin",
+        body: new Blob([Uint8Array.of(1)]),
+      }),
+    ).rejects.toMatchObject({
+      name: "OpenHarnessApiError",
+      status: 413,
+      body: { error: "attachment_too_large: limit exceeded" },
+    });
+  });
+
   it("does not expose the removed public Task CRUD methods", () => {
     const client = new OpenHarnessClient({
       baseUrl: "http://127.0.0.1:3456",

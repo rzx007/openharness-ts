@@ -7,6 +7,7 @@
 
 import type {
   AdmitPromptInput,
+  AttachmentAssetRecord,
   CreateScheduledTaskInput,
   CreateSessionInput,
   InputDelivery,
@@ -29,6 +30,7 @@ import type {
 } from "@openharness/protocol";
 
 export type {
+  AttachmentAssetRecord,
   CreateScheduledTaskInput,
   InputDelivery,
   PermissionRequestRecord,
@@ -47,6 +49,22 @@ export type {
   SessionStateSnapshot,
   ListMessagePartsOptions,
 };
+
+export interface UploadAttachmentInput {
+  displayName: string;
+  mediaType?: string;
+  body: Blob | ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>;
+  signal?: AbortSignal;
+}
+
+export interface DownloadAttachmentOptions {
+  range?: {
+    start?: number;
+    end?: number;
+    suffixBytes?: number;
+  };
+  signal?: AbortSignal;
+}
 
 export interface ScheduledTaskStatusSummary {
   running: true;
