@@ -32,7 +32,7 @@
 | --- | --- |
 | `types.ts` | 共享状态、运行态、operation 和动作接口的唯一类型来源。 |
 | `initial-state.ts` | 创建初始字段与空 runtime；不注册事件、不读 `localStorage`、不调用 IPC。 |
-| `store.ts` | 组合各 action creator，创建唯一 store，并按引用计数挂接/释放 daemon 与会话 SSE 监听；从 0 个监听重新变为 1 个时，会为当前 active 会话补一次快照。 |
+| `store.ts` | 组合各 action creator，创建唯一 store，并按引用计数挂接/释放 daemon 与会话 SSE 监听；从 0 个监听重新变为 1 个时，调用专用 resync 为当前 active 会话补快照，不改变用户导航所有权。 |
 | `selectors.ts` | 从当前会话和 runtime 推导页面可用的 sending、opening、局部错误和队列动作。 |
 | `operation-state.ts` | 以 operation ID 创建、确认、失败、删除或从新会话 runtime 绑定到真实会话 runtime。 |
 | `error-state.ts` | 规范错误文本，并维护应用/项目范围 operation 的失败与清理。 |
@@ -40,9 +40,10 @@
 | `session-view-actions.ts` | 把已接受的 SSE 快照写入目录、导航和对应会话 runtime；这是状态写入动作，不发 IPC。 |
 | `pending-prompt-state.ts` | 决定 prompt 放在 transcript 还是 queue，并清理已被 SSE input/run 确认的本地覆盖。 |
 | `bootstrap-actions.ts` | 初始化、刷新 bootstrap 数据和 daemon 状态事件。 |
-| `project-actions.ts` | 选项目、读取 Git、分支和项目设置；同一项目的 Git 详情写入使用 generation（每次新意图递增的版本号），旧返回不能覆盖新分支。失败只写到该项目的 operation 桶。 |
+| `project-details-coordinator.ts` | 管理项目选择和每个项目详情的 generation（每次新意图递增的版本号）；`project-actions.ts` 与 `session-actions.ts` 共用它，旧 chooser、refresh、分支或打开会话 inspect 都不能覆盖新结果。 |
+| `project-actions.ts` | 选项目、读取 Git、分支和项目设置；详情写入先向 coordinator 领取 generation，失败只写到该项目的 operation 桶。 |
 | `project-git-scheduler.ts` | 对 Git 刷新做延迟合并；在最后一个 store 监听解绑时取消尚未执行的刷新。 |
-| `session-actions.ts` | 新会话、打开、fork、重命名、置顶、归档和删除；管理 primary 导航所有权，并按最新意图顺序写入默认模型和权限模式。 |
+| `session-actions.ts` | 新会话、打开、fork、重命名、置顶、归档和删除；管理 primary 导航所有权，按用户总顺序写入默认模型和权限模式，并提供不改变导航的 resync。 |
 | `prompt-actions.ts` | 普通发送、命令、编辑、停止和授权回复。 |
 | `queued-prompt-actions.ts` | 提升或取消某一条已进入服务端队列的消息。 |
 | `persistence.ts` | 安全读写 active session 的 `localStorage`；存储失败不会阻断聊天。 |
@@ -80,7 +81,7 @@
 
 ## Primary SSE 所有权与会话切换
 
-renderer 只有一处订阅入口：`store.ts` 的 `attachDesktopSessionEvents`。第一个调用者注册 `sessions.onUpdated`，后续调用只增加计数；最后一个清理函数解除订阅并取消 Git 刷新，因而不会留下重复监听。若曾全部解绑，下一次从 0 变为 1 时会对仍是 active 的会话调用一次 `sessions.open` 补快照；同一轮的第二个引用不会重复打开。
+renderer 只有一处订阅入口：`store.ts` 的 `attachDesktopSessionEvents`。第一个调用者注册 `sessions.onUpdated`，后续调用只增加计数；最后一个清理函数解除订阅并取消 Git 刷新，因而不会留下重复监听。若曾全部解绑，下一次从 0 变为 1 时调用 `resyncActiveSessionSnapshot` 对仍是 active 的会话补快照；它不会推进导航代次、不会替换在途 `open-session`，同一轮的第二个引用也不会重复打开。
 
 打开会话的流程如下：
 
@@ -119,7 +120,7 @@ operation 的阶段是 `pending`、`acknowledged`、`failed`。
 - [ ] 共享类型只放在 `types.ts`；初始字段放在 `initial-state.ts`。
 - [ ] 纯判断、cursor、placement 或对账规则放到对应 `*-state.ts`；不要把它们复制进 action 或组件。
 - [ ] 需要 IPC 的用户动作放到职责相符的 `*-actions.ts`，通过 `set/get` 更新 store，不直接调用另一个 action 模块内部函数。
-- [ ] 每个异步动作使用稳定 operation ID，并只确认、失败或删除自己的 ID。
+- [ ] 每个异步动作使用稳定 operation ID，并只确认、失败或删除自己的 ID；跨模型/权限的默认设置和跨入口的项目详情必须共用最新意图协调器。
 - [ ] 会影响页面 pending/error 的规则增加到 `selectors.ts`；组件不遍历 operation 表自己拼规则。
 - [ ] 需要 SSE 确认时，同时覆盖「IPC 先到」「SSE 先到」「切换会话后返回」测试。
 - [ ] 新文件保持依赖向上：`types` 与纯状态模块不导入 action 或 store；action 由 `store.ts` 组合，兼容入口和组件只消费它们。

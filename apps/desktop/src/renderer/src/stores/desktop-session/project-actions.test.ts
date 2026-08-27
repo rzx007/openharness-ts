@@ -393,6 +393,93 @@ describe("desktop session store project order", () => {
       branches: ["feature/new"],
     })
   })
+
+  it("does not let a late chooser replace a newer explicit project selection", async () => {
+    const projectA = {
+      id: "project-choose-a",
+      name: "Project Choose A",
+      path: "D:\\code\\project-choose-a",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const projectB = {
+      id: "project-select-b",
+      name: "Project Select B",
+      path: "D:\\code\\project-select-b",
+      lastOpenedAt: 200,
+      available: true,
+    }
+    let resolveChoose!: (value: ReturnType<typeof projectDetails>) => void
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          chooseProject: vi.fn(
+            () =>
+              new Promise<ReturnType<typeof projectDetails>>((resolve) => (resolveChoose = resolve))
+          ),
+          inspectProject: vi.fn(async () => projectDetails(projectB, "branch-b")),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({ projects: [projectA, projectB], projectOperations: {} })
+
+    const choosing = useDesktopSessionStore.getState().chooseProject()
+    await useDesktopSessionStore.getState().selectProject(projectB)
+    resolveChoose(projectDetails(projectA, "branch-a"))
+    await choosing
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedProject: projectB,
+      branch: "branch-b",
+      branches: ["branch-b"],
+    })
+  })
+
+  it("does not let the first of two forced refreshes overwrite the second", async () => {
+    const project = {
+      id: "project-refresh-order",
+      name: "Project Refresh Order",
+      path: "D:\\code\\project-refresh-order",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const resolvers: Array<(value: ReturnType<typeof projectDetails>) => void> = []
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject: vi.fn(
+            () =>
+              new Promise<ReturnType<typeof projectDetails>>((resolve) => {
+                resolvers.push(resolve)
+              })
+          ),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      workspaceMode: "project",
+      selectedProject: project,
+      selectedProjectGit: true,
+      selectedProjectGitCheckedAt: null,
+      branch: "main",
+      branches: ["main"],
+      projectOperations: {},
+    })
+
+    const first = useDesktopSessionStore.getState().refreshSelectedProjectGit({ force: true })
+    const second = useDesktopSessionStore.getState().refreshSelectedProjectGit({ force: true })
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+    resolvers[1]!(projectDetails(project, "newer"))
+    await second
+    resolvers[0]!(projectDetails(project, "older"))
+    await first
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      branch: "newer",
+      branches: ["newer"],
+    })
+  })
 })
 
 describe("desktop session store bootstrap operations", () => {

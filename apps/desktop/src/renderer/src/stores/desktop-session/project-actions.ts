@@ -17,15 +17,10 @@ import type {
 const selectedProjectGitRefreshTtlMs = 5_000
 
 export function createProjectActions(context: DesktopStoreContext): ProjectActions {
-  const { get, set } = context
-  const projectGitGenerations = new Map<string, number>()
-  const advanceProjectGitGeneration = (projectId: string): number => {
-    const generation = (projectGitGenerations.get(projectId) ?? 0) + 1
-    projectGitGenerations.set(projectId, generation)
-    return generation
-  }
-  const ownsProjectGitGeneration = (projectId: string, generation: number): boolean =>
-    projectGitGenerations.get(projectId) === generation && get().selectedProject?.id === projectId
+  const { get, set, projectDetailsCoordinator } = context
+  const ownsProjectDetails = (projectId: string, generation: number): boolean =>
+    projectDetailsCoordinator.ownsDetails(projectId, generation) &&
+    get().selectedProject?.id === projectId
 
   const beginAppOperation = (target: string): string => {
     const operationId = globalThis.crypto.randomUUID()
@@ -91,13 +86,19 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
 
   return {
     async chooseProject() {
+      const selectionGeneration = projectDetailsCoordinator.beginSelection()
       const operationId = beginAppOperation("choose-project")
       try {
         const details = await window.desktop.sessions.chooseProject()
+        if (!projectDetailsCoordinator.ownsSelection(selectionGeneration)) {
+          finishAppOperation(operationId)
+          return
+        }
         if (!details) {
           finishAppOperation(operationId)
           return
         }
+        projectDetailsCoordinator.beginDetails(details.project.id)
         set((state) => ({
           projects: upsertProject(state.projects, details.project),
           workspaceMode: "project",
@@ -115,7 +116,8 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
     },
 
     async selectProject(project) {
-      const gitGeneration = advanceProjectGitGeneration(project.id)
+      const selectionGeneration = projectDetailsCoordinator.beginSelection()
+      const gitGeneration = projectDetailsCoordinator.beginDetails(project.id)
       set({
         selectedProject: project,
         workspaceMode: "project",
@@ -129,7 +131,8 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
         const details = await window.desktop.sessions.inspectProject(project.path)
         if (
           !isCurrentProjectOperation(project.id, operationId) ||
-          !ownsProjectGitGeneration(project.id, gitGeneration)
+          !projectDetailsCoordinator.ownsSelection(selectionGeneration) ||
+          !ownsProjectDetails(project.id, gitGeneration)
         ) {
           finishProjectOperation(project.id, operationId)
           return
@@ -154,6 +157,7 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
     },
 
     selectOutsideProject() {
+      projectDetailsCoordinator.beginSelection()
       set({
         workspaceMode: "outside_project",
         selectedProject: null,
@@ -182,13 +186,13 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
       ) {
         return get().selectedProjectGit
       }
-      const gitGeneration = advanceProjectGitGeneration(selectedProject.id)
+      const gitGeneration = projectDetailsCoordinator.beginDetails(selectedProject.id)
       const operationId = beginProjectOperation(selectedProject.id, "refresh-project-git")
       try {
         const details = await window.desktop.sessions.inspectProject(selectedProject.path)
         if (
           !isCurrentProjectOperation(selectedProject.id, operationId) ||
-          !ownsProjectGitGeneration(selectedProject.id, gitGeneration)
+          !ownsProjectDetails(selectedProject.id, gitGeneration)
         ) {
           finishProjectOperation(selectedProject.id, operationId)
           return get().selectedProjectGit
@@ -210,7 +214,7 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
         return git
       } catch (error) {
         failProjectOperation(selectedProject.id, operationId, error)
-        if (ownsProjectGitGeneration(selectedProject.id, gitGeneration)) {
+        if (ownsProjectDetails(selectedProject.id, gitGeneration)) {
           set({
             selectedProjectGit: false,
             selectedProjectGitCheckedAt: Date.now(),
@@ -225,7 +229,7 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
     async checkoutBranch(branch) {
       const selectedProject = get().selectedProject
       if (!selectedProject) return
-      const gitGeneration = advanceProjectGitGeneration(selectedProject.id)
+      const gitGeneration = projectDetailsCoordinator.beginDetails(selectedProject.id)
       await withProjectOperation(
         selectedProject,
         "checkout-branch",
@@ -239,7 +243,7 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           })
           if (
             isCurrentProjectOperation(selectedProject.id, operationId) &&
-            ownsProjectGitGeneration(selectedProject.id, gitGeneration)
+            ownsProjectDetails(selectedProject.id, gitGeneration)
           ) {
             set((state) => projectDetailsState(state, details))
           }
@@ -250,7 +254,7 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
     async createAndCheckoutBranch(branch) {
       const selectedProject = get().selectedProject
       if (!selectedProject) return
-      const gitGeneration = advanceProjectGitGeneration(selectedProject.id)
+      const gitGeneration = projectDetailsCoordinator.beginDetails(selectedProject.id)
       await withProjectOperation(
         selectedProject,
         "create-branch",
@@ -264,7 +268,7 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           })
           if (
             isCurrentProjectOperation(selectedProject.id, operationId) &&
-            ownsProjectGitGeneration(selectedProject.id, gitGeneration)
+            ownsProjectDetails(selectedProject.id, gitGeneration)
           ) {
             set((state) => projectDetailsState(state, details))
           }

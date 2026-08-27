@@ -9,7 +9,7 @@ import {
   selectSessionComposerError,
 } from "./selectors"
 import { refreshedBootstrap, resetDesktopSessionStore, sessionRuntime } from "./store-test-fixtures"
-import { useDesktopSessionStore } from "./store"
+import { attachDesktopSessionEvents, useDesktopSessionStore } from "./store"
 import type { DesktopSessionRuntime } from "./types"
 
 function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
@@ -876,6 +876,190 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState()).toMatchObject({
       selectedPermissionMode: "full_auto",
       defaultPermissionMode: "full_auto",
+    })
+  })
+
+  it("serializes a model selection before a later permission selection and keeps both fields", async () => {
+    let resolveModel!: (value: typeof refreshedBootstrap) => void
+    let resolvePermission!: (value: typeof refreshedBootstrap) => void
+    const setDefaultModel = vi.fn(
+      () => new Promise<typeof refreshedBootstrap>((resolve) => (resolveModel = resolve))
+    )
+    const setDefaultPermissionMode = vi.fn(
+      () => new Promise<typeof refreshedBootstrap>((resolve) => (resolvePermission = resolve))
+    )
+    vi.stubGlobal("window", {
+      desktop: { sessions: { setDefaultModel, setDefaultPermissionMode } },
+    })
+    resetNewConversationState()
+
+    const model = useDesktopSessionStore.getState().selectModel({
+      id: "model-a",
+      label: "Model A",
+      provider: "Provider A",
+      providerName: "provider-a",
+    })
+    const permission = useDesktopSessionStore.getState().selectPermissionMode("full_auto")
+    await vi.waitFor(() => expect(setDefaultModel).toHaveBeenCalledOnce())
+    expect(setDefaultPermissionMode).not.toHaveBeenCalled()
+    resolveModel({
+      ...refreshedBootstrap,
+      defaultModel: "model-a",
+      defaultProvider: "provider-a",
+      defaultPermissionMode: "default",
+    })
+    await vi.waitFor(() => expect(setDefaultPermissionMode).toHaveBeenCalledOnce())
+    resolvePermission({
+      ...refreshedBootstrap,
+      defaultModel: "model-a",
+      defaultProvider: "provider-a",
+      defaultPermissionMode: "full_auto",
+    })
+    await Promise.all([model, permission])
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedModel: "model-a",
+      selectedProvider: "provider-a",
+      defaultModel: "model-a",
+      defaultProvider: "provider-a",
+      selectedPermissionMode: "full_auto",
+      defaultPermissionMode: "full_auto",
+    })
+  })
+
+  it("serializes a permission selection before a later model selection and keeps both fields", async () => {
+    let resolvePermission!: (value: typeof refreshedBootstrap) => void
+    let resolveModel!: (value: typeof refreshedBootstrap) => void
+    const setDefaultPermissionMode = vi.fn(
+      () => new Promise<typeof refreshedBootstrap>((resolve) => (resolvePermission = resolve))
+    )
+    const setDefaultModel = vi.fn(
+      () => new Promise<typeof refreshedBootstrap>((resolve) => (resolveModel = resolve))
+    )
+    vi.stubGlobal("window", {
+      desktop: { sessions: { setDefaultModel, setDefaultPermissionMode } },
+    })
+    resetNewConversationState()
+
+    const permission = useDesktopSessionStore.getState().selectPermissionMode("plan")
+    const model = useDesktopSessionStore.getState().selectModel({
+      id: "model-b",
+      label: "Model B",
+      provider: "Provider B",
+      providerName: "provider-b",
+    })
+    await vi.waitFor(() => expect(setDefaultPermissionMode).toHaveBeenCalledOnce())
+    expect(setDefaultModel).not.toHaveBeenCalled()
+    resolvePermission({ ...refreshedBootstrap, defaultPermissionMode: "plan" })
+    await vi.waitFor(() => expect(setDefaultModel).toHaveBeenCalledOnce())
+    resolveModel({
+      ...refreshedBootstrap,
+      defaultModel: "model-b",
+      defaultProvider: "provider-b",
+      defaultPermissionMode: "plan",
+    })
+    await Promise.all([permission, model])
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedModel: "model-b",
+      selectedProvider: "provider-b",
+      defaultModel: "model-b",
+      defaultProvider: "provider-b",
+      selectedPermissionMode: "plan",
+      defaultPermissionMode: "plan",
+    })
+  })
+
+  it("does not replace a pending first-command open while event listeners reattach", async () => {
+    const session = emptySessionView("session-reattach-command").session
+    let resolveOpen!: (view: DesktopSessionView) => void
+    const open = vi.fn(() => new Promise<DesktopSessionView>((resolve) => (resolveOpen = resolve)))
+    const invokeCommand = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open,
+          invokeCommand,
+          onUpdated: vi.fn(() => () => undefined),
+          onDaemonStatusChanged: vi.fn(() => () => undefined),
+        },
+      },
+    })
+    resetNewConversationState()
+
+    const start = useDesktopSessionStore
+      .getState()
+      .startSession("/compact", { commandLine: "/compact" })
+    await vi.waitFor(() => expect(open).toHaveBeenCalledOnce())
+    const detach = attachDesktopSessionEvents()
+    detach()
+    const reattach = attachDesktopSessionEvents()
+    expect(open).toHaveBeenCalledOnce()
+
+    resolveOpen(emptySessionView(session.id))
+    await expect(start).resolves.toBe(session.id)
+    expect(invokeCommand).toHaveBeenCalledWith({ sessionId: session.id, line: "/compact" })
+    reattach()
+  })
+
+  it("does not let an open-side project inspection overwrite a later checkout", async () => {
+    const project = {
+      id: "project-open-checkout",
+      name: "Project Open Checkout",
+      path: "D:\\code\\project-open-checkout",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const view = emptySessionView("session-open-checkout")
+    view.session = {
+      ...view.session,
+      projectId: project.id,
+      workspaceMode: "project",
+      cwd: project.path,
+    }
+    let resolveInspect!: (value: {
+      project: typeof project
+      git: boolean
+      branch: string
+      branches: string[]
+    }) => void
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          open: vi.fn(async () => view),
+          inspectProject: vi.fn(
+            () =>
+              new Promise((resolve) => {
+                resolveInspect = resolve
+              })
+          ),
+          checkoutBranch: vi.fn(async () => ({
+            project,
+            git: true,
+            branch: "feature/new",
+            branches: ["feature/new"],
+          })),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      selectedProject: project,
+      workspaceMode: "project",
+      projectOperations: {},
+    })
+
+    const opening = useDesktopSessionStore.getState().openSession(view.session.id)
+    await vi.waitFor(() => expect(resolveInspect).toBeTypeOf("function"))
+    await useDesktopSessionStore.getState().checkoutBranch("feature/new")
+    resolveInspect({ project, git: true, branch: "main", branches: ["main"] })
+    await opening
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedProject: project,
+      branch: "feature/new",
+      branches: ["feature/new"],
     })
   })
 

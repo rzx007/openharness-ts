@@ -44,12 +44,10 @@ interface SessionActionsContext extends DesktopStoreContext {
 type OpenSessionResult = "applied" | "cancelled" | "failed"
 
 export function createSessionActions(context: SessionActionsContext): SessionActions {
-  const { get, set } = context
+  const { get, set, projectDetailsCoordinator } = context
   let primaryNavigationGeneration = 0
-  let defaultModelGeneration = 0
-  let defaultPermissionModeGeneration = 0
-  let defaultModelWrite: Promise<void> = Promise.resolve()
-  let defaultPermissionModeWrite: Promise<void> = Promise.resolve()
+  let defaultSettingsGeneration = 0
+  let defaultSettingsWrite: Promise<void> = Promise.resolve()
   const advancePrimaryNavigation = (): number => {
     primaryNavigationGeneration += 1
     return primaryNavigationGeneration
@@ -137,11 +135,18 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       writePersistedActiveSessionId(sessionId)
       const workspace = resolveSessionWorkspace(get().projects, view.session)
       if (workspace.selectedProject) {
+        const projectId = workspace.selectedProject.id
+        const projectDetailsGeneration = projectDetailsCoordinator.beginDetails(projectId)
         try {
           const details = await window.desktop.sessions.inspectProject(
             workspace.selectedProject.path
           )
-          if (get().activeSessionId !== sessionId) return "cancelled"
+          if (
+            get().activeSessionId !== sessionId ||
+            get().selectedProject?.id !== projectId ||
+            !projectDetailsCoordinator.ownsDetails(projectId, projectDetailsGeneration)
+          )
+            return "cancelled"
           set((state) => ({
             projects: upsertProject(state.projects, details.project),
             selectedProject: details.project,
@@ -151,7 +156,11 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             branches: details.branches ?? [],
           }))
         } catch {
-          if (get().activeSessionId === sessionId) {
+          if (
+            get().activeSessionId === sessionId &&
+            get().selectedProject?.id === projectId &&
+            projectDetailsCoordinator.ownsDetails(projectId, projectDetailsGeneration)
+          ) {
             set({
               selectedProjectGit: false,
               selectedProjectGitCheckedAt: Date.now(),
@@ -210,7 +219,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     },
 
     async selectModel(model) {
-      const generation = ++defaultModelGeneration
+      const generation = ++defaultSettingsGeneration
       set({
         selectedModel: model.id,
         selectedProvider: model.providerName,
@@ -218,18 +227,18 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         defaultProvider: model.providerName,
       })
       try {
-        const request = defaultModelWrite.then(() =>
+        const request = defaultSettingsWrite.then(() =>
           window.desktop.sessions.setDefaultModel({
             model: model.id,
             provider: model.providerName,
           })
         )
-        defaultModelWrite = request.then(
+        defaultSettingsWrite = request.then(
           () => undefined,
           () => undefined
         )
         const data = await request
-        if (generation !== defaultModelGeneration) return
+        if (generation !== defaultSettingsGeneration) return
         set((state) =>
           applyBootstrapData(
             data,
@@ -240,26 +249,26 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           )
         )
       } catch {
-        if (generation !== defaultModelGeneration) return
+        if (generation !== defaultSettingsGeneration) return
       }
     },
 
     async selectPermissionMode(permissionMode) {
-      const generation = ++defaultPermissionModeGeneration
+      const generation = ++defaultSettingsGeneration
       set({
         selectedPermissionMode: permissionMode,
         defaultPermissionMode: permissionMode,
       })
       try {
-        const request = defaultPermissionModeWrite.then(() =>
+        const request = defaultSettingsWrite.then(() =>
           window.desktop.sessions.setDefaultPermissionMode({ permissionMode })
         )
-        defaultPermissionModeWrite = request.then(
+        defaultSettingsWrite = request.then(
           () => undefined,
           () => undefined
         )
         const data = await request
-        if (generation !== defaultPermissionModeGeneration) return
+        if (generation !== defaultSettingsGeneration) return
         set((state) => ({
           ...applyBootstrapData(
             data,
@@ -272,7 +281,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           defaultPermissionMode: permissionMode,
         }))
       } catch {
-        if (generation !== defaultPermissionModeGeneration) return
+        if (generation !== defaultSettingsGeneration) return
       }
     },
 
@@ -318,6 +327,24 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       if (!sessionId) return
       advancePrimaryNavigation()
       await openPrimarySession(sessionId)
+    },
+
+    async resyncActiveSessionSnapshot() {
+      const sessionId = get().activeSessionId
+      if (!sessionId) return
+      const runtime = get().sessionRuntimes[sessionId]
+      if (
+        Object.values(runtime?.operations ?? {}).some(
+          (operation) => operation.kind === "open-session" && operation.phase === "pending"
+        )
+      )
+        return
+      try {
+        const view = await window.desktop.sessions.open(sessionId)
+        if (get().activeSessionId === sessionId) get().applySessionUpdate(view)
+      } catch {
+        // A resync is only a recovery read. It must not replace a user-owned open error.
+      }
     },
 
     async startConversationFrom(session) {

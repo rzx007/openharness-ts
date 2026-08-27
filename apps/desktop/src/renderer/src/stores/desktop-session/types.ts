@@ -8,6 +8,7 @@ import type {
   DesktopWorkspaceMode,
 } from "@shared/session-types"
 import type { StoreApi } from "zustand"
+import type { ProjectDetailsCoordinator } from "./project-details-coordinator"
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error"
 
@@ -110,6 +111,7 @@ export interface SessionActions {
     permissionMode: DesktopPermissionMode
   ) => Promise<void>
   openSession: (sessionId: string) => Promise<void>
+  resyncActiveSessionSnapshot: () => Promise<void>
   startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
   forkSession: (
     sessionId: string,
@@ -176,4 +178,5 @@ export interface DesktopSessionState
 export interface DesktopStoreContext {
   set: StoreApi<DesktopSessionState>["setState"]
   get: StoreApi<DesktopSessionState>["getState"]
+  projectDetailsCoordinator: ProjectDetailsCoordinator
 }

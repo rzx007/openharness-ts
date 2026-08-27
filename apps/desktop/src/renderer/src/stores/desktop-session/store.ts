@@ -3,6 +3,7 @@ import { create } from "zustand"
 import { attachDesktopDaemonStatusEvents, createBootstrapActions } from "./bootstrap-actions"
 import { createInitialState } from "./initial-state"
 import { createProjectActions } from "./project-actions"
+import { createProjectDetailsCoordinator } from "./project-details-coordinator"
 import { createSelectedProjectGitRefreshScheduler } from "./project-git-scheduler"
 import { createPromptActions } from "./prompt-actions"
 import { createQueuedPromptActions } from "./queued-prompt-actions"
@@ -17,11 +18,13 @@ const selectedProjectGitRefreshScheduler = createSelectedProjectGitRefreshSchedu
 let desktopSessionEventSubscriptionCount = 0
 let detachDesktopSessionUpdates: (() => void) | null = null
 let detachDesktopDaemonStatus: (() => void) | null = null
+const projectDetailsCoordinator = createProjectDetailsCoordinator()
 
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => {
   const context = {
     set,
     get,
+    projectDetailsCoordinator,
     scheduleSelectedProjectGitRefresh: selectedProjectGitRefreshScheduler.schedule,
   }
 
@@ -41,13 +44,14 @@ export function attachDesktopSessionEvents(): () => void {
     detachDesktopDaemonStatus = attachDesktopDaemonStatusEvents({
       set: useDesktopSessionStore.setState,
       get: useDesktopSessionStore.getState,
+      projectDetailsCoordinator,
     })
     detachDesktopSessionUpdates = window.desktop.sessions.onUpdated((view) => {
       useDesktopSessionStore.getState().applySessionUpdate(view)
     })
     const activeSessionId = useDesktopSessionStore.getState().activeSessionId
     if (activeSessionId && typeof window.desktop.sessions.open === "function") {
-      void useDesktopSessionStore.getState().openSession(activeSessionId)
+      void useDesktopSessionStore.getState().resyncActiveSessionSnapshot()
     }
   }
   desktopSessionEventSubscriptionCount += 1

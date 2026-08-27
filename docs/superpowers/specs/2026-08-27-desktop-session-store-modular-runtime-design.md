@@ -308,6 +308,7 @@ apps/desktop/src/renderer/src/stores/
    ├─ pending-prompt-state.ts
    ├─ bootstrap-actions.ts
    ├─ project-actions.ts
+   ├─ project-details-coordinator.ts
    ├─ project-git-scheduler.ts
    ├─ session-actions.ts
    ├─ prompt-actions.ts
@@ -360,9 +361,10 @@ apps/desktop/src/renderer/src/stores/
 ### Action 文件
 
 - `bootstrap-actions.ts`：初始化、refresh bootstrap、daemon 事件挂接；
-- `project-actions.ts`：项目选择、Git 状态、branch 和项目设置；同一项目的详情写入以 generation 串起，旧 refresh/select/checkout/create branch 返回不得覆盖更新意图；
+- `project-details-coordinator.ts`：项目选择与项目详情 generation 的共享所有者，供 `project-actions.ts` 和 `session-actions.ts` 注入使用；
+- `project-actions.ts`：项目选择、Git 状态、branch 和项目设置；旧 choose/select/refresh/checkout/create branch 返回不得覆盖更新意图；
 - `project-git-scheduler.ts`：合并短时间内重复的 Git 刷新请求，并在 store 监听解绑时取消未执行工作；
-- `session-actions.ts`：新会话入口、创建、打开、fork、rename、pin、archive、delete；默认模型和权限模式按各自最新意图顺序写入，首条 slash command 必须等待 primary open 成功；
+- `session-actions.ts`：新会话入口、创建、打开、fork、rename、pin、archive、delete；默认模型和权限模式使用同一总顺序写入，打开会话 inspect 共享项目详情所有权，首条 slash command 必须等待 primary open 成功；
 - `prompt-actions.ts`：发送、命令、编辑、停止、授权回复；
 - `queued-prompt-actions.ts`：提升和取消排队消息。
 
@@ -465,7 +467,8 @@ desktop-session/
 - 打开 A 后立即打开 B，A 的迟到 snapshot 不覆盖 B；
 - 创建 A 期间用户打开 B，A 不抢 primary 订阅；
 - renderer 监听全部解绑期间错过终态后，重新从 0→1 挂接会补 active session snapshot，且第二个引用不重复 open；
-- 默认模型/权限与项目 Git 请求乱序返回时，最终 UI 和服务端写入保持最新意图；
+- 默认模型/权限使用同一写入队列，项目 Git 请求由共享 coordinator 判定最新意图；完整 bootstrap 响应或旧详情均不能覆盖另一个字段或入口的更新；
+- resync 不调用用户导航 `openSession`，在途 primary open 继续拥有其成功/失败和首条 slash command 的结果；
 - 后台首条命令成功后回收 create/invoke operation，命令失败只保留最新可见项；
 - 旧会话发送结束不清理新会话 sending；
 - 普通消息不闪入 PendingPromptQueue；
