@@ -98,7 +98,7 @@ function SkillCommandMenuItem({
       onMouseDown={(event) => event.preventDefault()}
       onClick={onSelect}
       className={cn(
-        "h-9 w-full justify-start gap-2 rounded-lg px-2 text-left font-normal",
+        "h-7.5 w-full justify-start gap-2 rounded-lg px-2 text-left font-normal",
         highlighted && "bg-muted text-foreground"
       )}
     >
