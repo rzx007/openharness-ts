@@ -61,4 +61,4 @@
 - Desktop 全量 `pnpm test`、`pnpm lint`、Web `tsc --noEmit -p tsconfig.web.json --composite false --pretty false` 通过。
 - `git diff --check` 通过。
 
-修复提交待回填。
+审查修复提交：`00fcb56`（`fix(desktop): 修复会话动作所有权竞态`）。
