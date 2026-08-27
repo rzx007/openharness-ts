@@ -1,18 +1,28 @@
 import type { DesktopProject } from "@shared/session-types"
 
-import { beginScopedOperation, errorMessage, failScopedOperation, removeScopedOperation } from "./error-state"
+import {
+  beginScopedOperation,
+  errorMessage,
+  failScopedOperation,
+  removeScopedOperation,
+} from "./error-state"
 import { samePath, upsertProject } from "./helpers"
-import type { DesktopOperation, DesktopStoreContext, ProjectActions } from "./types"
+import type {
+  DesktopOperation,
+  DesktopSessionState,
+  DesktopStoreContext,
+  ProjectActions,
+} from "./types"
 
 const selectedProjectGitRefreshTtlMs = 5_000
 
 export function createProjectActions(context: DesktopStoreContext): ProjectActions {
   const { get, set } = context
 
-  const beginAppOperation = (): string => {
+  const beginAppOperation = (target: string): string => {
     const operationId = globalThis.crypto.randomUUID()
     set((state) => ({
-      appOperations: beginScopedOperation(state.appOperations, appOperation(operationId)),
+      appOperations: beginScopedOperation(state.appOperations, appOperation(operationId, target)),
     }))
     return operationId
   }
@@ -31,14 +41,14 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
       ),
     }))
   }
-  const beginProjectOperation = (projectId: string): string => {
+  const beginProjectOperation = (projectId: string, target: string): string => {
     const operationId = globalThis.crypto.randomUUID()
     set((state) => ({
       projectOperations: {
         ...state.projectOperations,
         [projectId]: beginScopedOperation(
           state.projectOperations[projectId] ?? {},
-          projectOperation(operationId, projectId)
+          projectOperation(operationId, projectId, target)
         ),
       },
     }))
@@ -46,13 +56,11 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
   }
   const finishProjectOperation = (projectId: string, operationId: string): void => {
     set((state) => ({
-      projectOperations: {
-        ...state.projectOperations,
-        [projectId]: removeScopedOperation(
-          state.projectOperations[projectId] ?? {},
-          operationId
-        ),
-      },
+      projectOperations: replaceProjectOperationBucket(
+        state.projectOperations,
+        projectId,
+        removeScopedOperation(state.projectOperations[projectId] ?? {}, operationId)
+      ),
     }))
   }
   const failProjectOperation = (projectId: string, operationId: string, error: unknown): void => {
@@ -68,10 +76,14 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
       },
     }))
   }
+  const isCurrentProjectOperation = (projectId: string, operationId: string): boolean => {
+    const operation = get().projectOperations[projectId]?.[operationId]
+    return get().selectedProject?.id === projectId && operation?.phase === "pending"
+  }
 
   return {
     async chooseProject() {
-      const operationId = beginAppOperation()
+      const operationId = beginAppOperation("choose-project")
       try {
         const details = await window.desktop.sessions.chooseProject()
         if (!details) {
@@ -103,9 +115,13 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
         branch: null,
         branches: [],
       })
-      const operationId = beginProjectOperation(project.id)
+      const operationId = beginProjectOperation(project.id, "select-project")
       try {
         const details = await window.desktop.sessions.inspectProject(project.path)
+        if (!isCurrentProjectOperation(project.id, operationId)) {
+          finishProjectOperation(project.id, operationId)
+          return
+        }
         set((state) => ({
           projects: upsertProject(state.projects, details.project),
           selectedProject: details.project,
@@ -113,10 +129,11 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           selectedProjectGitCheckedAt: Date.now(),
           branch: details.branch,
           branches: details.branches ?? [],
-          projectOperations: {
-            ...state.projectOperations,
-            [project.id]: removeScopedOperation(state.projectOperations[project.id] ?? {}, operationId),
-          },
+          projectOperations: replaceProjectOperationBucket(
+            state.projectOperations,
+            project.id,
+            removeScopedOperation(state.projectOperations[project.id] ?? {}, operationId)
+          ),
         }))
       } catch (error) {
         failProjectOperation(project.id, operationId, error)
@@ -153,10 +170,10 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
       ) {
         return get().selectedProjectGit
       }
-      const operationId = beginProjectOperation(selectedProject.id)
+      const operationId = beginProjectOperation(selectedProject.id, "refresh-project-git")
       try {
         const details = await window.desktop.sessions.inspectProject(selectedProject.path)
-        if (!samePath(get().selectedProject?.path ?? "", selectedProject.path)) {
+        if (!isCurrentProjectOperation(selectedProject.id, operationId)) {
           finishProjectOperation(selectedProject.id, operationId)
           return get().selectedProjectGit
         }
@@ -168,13 +185,11 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
           selectedProjectGitCheckedAt: Date.now(),
           branch: details.branch,
           branches: details.branches ?? [],
-          projectOperations: {
-            ...state.projectOperations,
-            [selectedProject.id]: removeScopedOperation(
-              state.projectOperations[selectedProject.id] ?? {},
-              operationId
-            ),
-          },
+          projectOperations: replaceProjectOperationBucket(
+            state.projectOperations,
+            selectedProject.id,
+            removeScopedOperation(state.projectOperations[selectedProject.id] ?? {}, operationId)
+          ),
         }))
         return git
       } catch (error) {
@@ -194,19 +209,43 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
     async checkoutBranch(branch) {
       const selectedProject = get().selectedProject
       if (!selectedProject) return
-      await withProjectOperation(selectedProject, beginProjectOperation, finishProjectOperation, failProjectOperation, async () => {
-        const details = await window.desktop.sessions.checkoutBranch({ path: selectedProject.path, branch })
-        set((state) => projectDetailsState(state, details))
-      })
+      await withProjectOperation(
+        selectedProject,
+        "checkout-branch",
+        beginProjectOperation,
+        finishProjectOperation,
+        failProjectOperation,
+        async (operationId) => {
+          const details = await window.desktop.sessions.checkoutBranch({
+            path: selectedProject.path,
+            branch,
+          })
+          if (isCurrentProjectOperation(selectedProject.id, operationId)) {
+            set((state) => projectDetailsState(state, details))
+          }
+        }
+      )
     },
 
     async createAndCheckoutBranch(branch) {
       const selectedProject = get().selectedProject
       if (!selectedProject) return
-      await withProjectOperation(selectedProject, beginProjectOperation, finishProjectOperation, failProjectOperation, async () => {
-        const details = await window.desktop.sessions.createBranch({ path: selectedProject.path, branch })
-        set((state) => projectDetailsState(state, details))
-      })
+      await withProjectOperation(
+        selectedProject,
+        "create-branch",
+        beginProjectOperation,
+        finishProjectOperation,
+        failProjectOperation,
+        async (operationId) => {
+          const details = await window.desktop.sessions.createBranch({
+            path: selectedProject.path,
+            branch,
+          })
+          if (isCurrentProjectOperation(selectedProject.id, operationId)) {
+            set((state) => projectDetailsState(state, details))
+          }
+        }
+      )
     },
 
     async renameProject(path, name) {
@@ -214,109 +253,159 @@ export function createProjectActions(context: DesktopStoreContext): ProjectActio
       if (!normalizedName) return
       const existing = get().projects.find((project) => samePath(project.path, path))
       if (!existing) return
-      await withProjectOperation(existing, beginProjectOperation, finishProjectOperation, failProjectOperation, async () => {
-        const project = await window.desktop.sessions.renameProject({ projectId: existing.id, name: normalizedName })
-        set((state) => ({
-          projects: upsertProject(state.projects, project),
-          selectedProject: samePath(state.selectedProject?.path ?? "", path)
-            ? project
-            : state.selectedProject,
-        }))
-      })
+      await withProjectOperation(
+        existing,
+        "rename-project",
+        beginProjectOperation,
+        finishProjectOperation,
+        failProjectOperation,
+        async () => {
+          const project = await window.desktop.sessions.renameProject({
+            projectId: existing.id,
+            name: normalizedName,
+          })
+          set((state) => ({
+            projects: upsertProject(state.projects, project),
+            selectedProject: samePath(state.selectedProject?.path ?? "", path)
+              ? project
+              : state.selectedProject,
+          }))
+        }
+      )
     },
 
     async togglePinProject(path) {
       const existing = get().projects.find((project) => samePath(project.path, path))
       if (!existing) return
-      await withProjectOperation(existing, beginProjectOperation, finishProjectOperation, failProjectOperation, async () => {
-        const project = await window.desktop.sessions.setProjectPinned({
-          projectId: existing.id,
-          pinned: !existing.pinnedAt,
-        })
-        set((state) => ({
-          projects: upsertProject(state.projects, project),
-          selectedProject: samePath(state.selectedProject?.path ?? "", path)
-            ? project
-            : state.selectedProject,
-        }))
-      })
+      await withProjectOperation(
+        existing,
+        "toggle-pin-project",
+        beginProjectOperation,
+        finishProjectOperation,
+        failProjectOperation,
+        async () => {
+          const project = await window.desktop.sessions.setProjectPinned({
+            projectId: existing.id,
+            pinned: !existing.pinnedAt,
+          })
+          set((state) => ({
+            projects: upsertProject(state.projects, project),
+            selectedProject: samePath(state.selectedProject?.path ?? "", path)
+              ? project
+              : state.selectedProject,
+          }))
+        }
+      )
     },
 
     async setProjectDefaultShell(path, shell) {
       const existing = get().projects.find((project) => samePath(project.path, path))
       if (!existing) return
       const normalizedShell = shell?.replace(/\s+/g, " ").trim() || null
-      await withProjectOperation(existing, beginProjectOperation, finishProjectOperation, failProjectOperation, async () => {
-        const project = await window.desktop.sessions.setProjectDefaultShell({
-          projectId: existing.id,
-          shell: normalizedShell,
-        })
-        set((state) => ({
-          projects: upsertProject(state.projects, project),
-          selectedProject: samePath(state.selectedProject?.path ?? "", path)
-            ? project
-            : state.selectedProject,
-        }))
-      })
+      await withProjectOperation(
+        existing,
+        "set-project-default-shell",
+        beginProjectOperation,
+        finishProjectOperation,
+        failProjectOperation,
+        async () => {
+          const project = await window.desktop.sessions.setProjectDefaultShell({
+            projectId: existing.id,
+            shell: normalizedShell,
+          })
+          set((state) => ({
+            projects: upsertProject(state.projects, project),
+            selectedProject: samePath(state.selectedProject?.path ?? "", path)
+              ? project
+              : state.selectedProject,
+          }))
+        }
+      )
     },
 
     async removeProject(path) {
       const existing = get().projects.find((project) => samePath(project.path, path))
       if (!existing) return
-      await withProjectOperation(existing, beginProjectOperation, finishProjectOperation, failProjectOperation, async () => {
-        await window.desktop.sessions.removeProject(existing.id)
-        set((state) => {
-          const projects = state.projects.filter((project) => !samePath(project.path, path))
-          const removedSelected = samePath(state.selectedProject?.path ?? "", path)
-          return {
-            projects,
-            selectedProject: removedSelected ? (projects[0] ?? null) : state.selectedProject,
-            workspaceMode:
-              removedSelected && projects.length === 0 ? "outside_project" : state.workspaceMode,
-            selectedProjectGit: removedSelected ? false : state.selectedProjectGit,
-            selectedProjectGitCheckedAt: removedSelected ? null : state.selectedProjectGitCheckedAt,
-            branch: removedSelected ? null : state.branch,
-            branches: removedSelected ? [] : state.branches,
-          }
-        })
-        const project = get().selectedProject
-        if (project) await get().selectProject(project).catch(() => undefined)
-      })
+      await withProjectOperation(
+        existing,
+        "remove-project",
+        beginProjectOperation,
+        finishProjectOperation,
+        failProjectOperation,
+        async () => {
+          await window.desktop.sessions.removeProject(existing.id)
+          set((state) => {
+            const projects = state.projects.filter((project) => !samePath(project.path, path))
+            const removedSelected = samePath(state.selectedProject?.path ?? "", path)
+            return {
+              projects,
+              selectedProject: removedSelected ? (projects[0] ?? null) : state.selectedProject,
+              workspaceMode:
+                removedSelected && projects.length === 0 ? "outside_project" : state.workspaceMode,
+              selectedProjectGit: removedSelected ? false : state.selectedProjectGit,
+              selectedProjectGitCheckedAt: removedSelected
+                ? null
+                : state.selectedProjectGitCheckedAt,
+              branch: removedSelected ? null : state.branch,
+              branches: removedSelected ? [] : state.branches,
+              projectOperations: removeProjectOperationBucket(state.projectOperations, existing.id),
+            }
+          })
+          const project = get().selectedProject
+          if (project)
+            await get()
+              .selectProject(project)
+              .catch(() => undefined)
+        }
+      )
     },
 
     async rebindProject(projectId) {
       const existing = get().projects.find((project) => project.id === projectId)
       if (!existing) return
-      await withProjectOperation(existing, beginProjectOperation, finishProjectOperation, failProjectOperation, async () => {
-        const project = await window.desktop.sessions.rebindProject(projectId)
-        if (!project) return
-        set((state) => ({
-          projects: upsertProject(state.projects, project),
-          selectedProject: state.selectedProject?.id === projectId ? project : state.selectedProject,
-        }))
-      })
+      await withProjectOperation(
+        existing,
+        "rebind-project",
+        beginProjectOperation,
+        finishProjectOperation,
+        failProjectOperation,
+        async () => {
+          const project = await window.desktop.sessions.rebindProject(projectId)
+          if (!project) return
+          set((state) => ({
+            projects: upsertProject(state.projects, project),
+            selectedProject:
+              state.selectedProject?.id === projectId ? project : state.selectedProject,
+          }))
+        }
+      )
     },
   }
 }
 
-function appOperation(id: string): Omit<DesktopOperation, "phase"> {
-  return { id, kind: "project-action", sessionId: null, startedAt: Date.now() }
+function appOperation(id: string, target: string): Omit<DesktopOperation, "phase"> {
+  return { id, kind: "project-action", sessionId: null, target, startedAt: Date.now() }
 }
 
-function projectOperation(id: string, projectId: string): Omit<DesktopOperation, "phase"> {
-  return { id, kind: "project-action", sessionId: null, projectId, startedAt: Date.now() }
+function projectOperation(
+  id: string,
+  projectId: string,
+  target: string
+): Omit<DesktopOperation, "phase"> {
+  return { id, kind: "project-action", sessionId: null, projectId, target, startedAt: Date.now() }
 }
 
 async function withProjectOperation<T>(
   project: DesktopProject,
-  begin: (projectId: string) => string,
+  target: string,
+  begin: (projectId: string, target: string) => string,
   finish: (projectId: string, operationId: string) => void,
   fail: (projectId: string, operationId: string, error: unknown) => void,
-  action: () => Promise<T>
+  action: (operationId: string) => Promise<T>
 ): Promise<T> {
-  const operationId = begin(project.id)
+  const operationId = begin(project.id, target)
   try {
-    const result = await action()
+    const result = await action(operationId)
     finish(project.id, operationId)
     return result
   } catch (error) {
@@ -325,10 +414,37 @@ async function withProjectOperation<T>(
   }
 }
 
+function replaceProjectOperationBucket(
+  projectOperations: Record<string, Record<string, DesktopOperation>>,
+  projectId: string,
+  operations: Record<string, DesktopOperation>
+): Record<string, Record<string, DesktopOperation>> {
+  if (Object.keys(operations).length > 0) return { ...projectOperations, [projectId]: operations }
+  return removeProjectOperationBucket(projectOperations, projectId)
+}
+
+function removeProjectOperationBucket(
+  projectOperations: Record<string, Record<string, DesktopOperation>>,
+  projectId: string
+): Record<string, Record<string, DesktopOperation>> {
+  if (!projectOperations[projectId]) return projectOperations
+  const remaining = { ...projectOperations }
+  delete remaining[projectId]
+  return remaining
+}
+
 function projectDetailsState(
   state: { projects: DesktopProject[] },
   details: Awaited<ReturnType<typeof window.desktop.sessions.inspectProject>>
-) {
+): Pick<
+  DesktopSessionState,
+  | "projects"
+  | "selectedProject"
+  | "selectedProjectGit"
+  | "selectedProjectGitCheckedAt"
+  | "branch"
+  | "branches"
+> {
   return {
     projects: upsertProject(state.projects, details.project),
     selectedProject: details.project,

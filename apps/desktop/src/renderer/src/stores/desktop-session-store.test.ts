@@ -5,6 +5,21 @@ import { createEmptySessionRuntime } from "./desktop-session/operation-state"
 import type { QueuedPromptAction } from "./desktop-session-store"
 import { useDesktopSessionStore } from "./desktop-session-store"
 
+type TestProject = {
+  id: string
+  name: string
+  path: string
+  lastOpenedAt: number
+  available: boolean
+}
+
+type TestProjectDetails = {
+  project: TestProject
+  git: boolean
+  branch: string | null
+  branches: string[]
+}
+
 const refreshedBootstrap: DesktopBootstrapData = {
   connected: true,
   projects: [],
@@ -51,6 +66,15 @@ function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
     runs: [],
     tasks: [],
     permissions: [],
+  }
+}
+
+function projectDetails(project: TestProject, branch: string | null = null): TestProjectDetails {
+  return {
+    project,
+    git: Boolean(branch),
+    branch,
+    branches: branch ? [branch] : [],
   }
 }
 
@@ -227,9 +251,234 @@ describe("desktop session store project order", () => {
     )
 
     expect(useDesktopSessionStore.getState().sessionRuntimes.s1?.operations).toEqual({})
-    expect(Object.values(useDesktopSessionStore.getState().projectOperations[project.id] ?? {})).toContainEqual(
-      expect.objectContaining({ phase: "failed", error: "project unavailable" })
+    expect(
+      Object.values(useDesktopSessionStore.getState().projectOperations[project.id] ?? {})
+    ).toContainEqual(expect.objectContaining({ phase: "failed", error: "project unavailable" }))
+  })
+
+  it("clears only a retried action's failure after that action succeeds", async () => {
+    const project = {
+      id: "project-retry",
+      name: "Retry Project",
+      path: "D:\\code\\project-retry",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const inspectProject = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("inspect unavailable"))
+      .mockResolvedValueOnce(projectDetails(project, "main"))
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject,
+          checkoutBranch: vi.fn(async () => {
+            throw new Error("checkout unavailable")
+          }),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      selectedProject: project,
+      projectOperations: {},
+    })
+
+    await expect(useDesktopSessionStore.getState().checkoutBranch("feature/retry")).rejects.toThrow(
+      "checkout unavailable"
     )
+    await expect(useDesktopSessionStore.getState().selectProject(project)).rejects.toThrow(
+      "inspect unavailable"
+    )
+    await useDesktopSessionStore.getState().selectProject(project)
+
+    const operations = Object.values(
+      useDesktopSessionStore.getState().projectOperations[project.id] ?? {}
+    )
+    expect(operations).toHaveLength(1)
+    expect(operations[0]).toMatchObject({ phase: "failed", error: "checkout unavailable" })
+  })
+
+  it("clears a removed project's operation bucket", async () => {
+    const project = {
+      id: "project-remove",
+      name: "Removed Project",
+      path: "D:\\code\\project-remove",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    vi.stubGlobal("window", {
+      desktop: { sessions: { removeProject: vi.fn(async () => undefined) } },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      selectedProject: null,
+      projectOperations: {},
+    })
+
+    await useDesktopSessionStore.getState().removeProject(project.path)
+
+    expect(useDesktopSessionStore.getState().projectOperations[project.id]).toBeUndefined()
+  })
+
+  it("does not let a late project selection replace the newer selection", async () => {
+    const projectA = {
+      id: "project-a",
+      name: "Project A",
+      path: "D:\\code\\project-a",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    const projectB = {
+      id: "project-b",
+      name: "Project B",
+      path: "D:\\code\\project-b",
+      lastOpenedAt: 200,
+      available: true,
+    }
+    let resolveA!: (value: ReturnType<typeof projectDetails>) => void
+    let resolveB!: (value: ReturnType<typeof projectDetails>) => void
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject: vi.fn(
+            (path: string) =>
+              new Promise((resolve) => {
+                if (path === projectA.path) resolveA = resolve
+                else resolveB = resolve
+              })
+          ),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({ projects: [projectA, projectB], projectOperations: {} })
+
+    const selectingA = useDesktopSessionStore.getState().selectProject(projectA)
+    const selectingB = useDesktopSessionStore.getState().selectProject(projectB)
+    resolveB(projectDetails(projectB, "branch-b"))
+    await selectingB
+    resolveA(projectDetails(projectA, "branch-a"))
+    await selectingA
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedProject: projectB,
+      branch: "branch-b",
+      branches: ["branch-b"],
+    })
+  })
+
+  it.each([
+    ["checkoutBranch", "checkoutBranch"],
+    ["createAndCheckoutBranch", "createBranch"],
+  ] as const)(
+    "does not let a late %s response replace the current project",
+    async (action, ipcMethod): Promise<void> => {
+      const projectA = {
+        id: "project-branch-a",
+        name: "Project Branch A",
+        path: "D:\\code\\project-branch-a",
+        lastOpenedAt: 100,
+        available: true,
+      }
+      const projectB = {
+        id: "project-branch-b",
+        name: "Project Branch B",
+        path: "D:\\code\\project-branch-b",
+        lastOpenedAt: 200,
+        available: true,
+      }
+      let resolveBranch!: (value: ReturnType<typeof projectDetails>) => void
+      vi.stubGlobal("window", {
+        desktop: {
+          sessions: {
+            inspectProject: vi.fn(async () => projectDetails(projectB, "branch-b")),
+            [ipcMethod]: vi.fn(
+              () =>
+                new Promise((resolve) => {
+                  resolveBranch = resolve
+                })
+            ),
+          },
+        },
+      })
+      useDesktopSessionStore.setState({
+        projects: [projectA, projectB],
+        selectedProject: projectA,
+        branch: "branch-a",
+        branches: ["branch-a"],
+        projectOperations: {},
+      })
+
+      const changingBranch = useDesktopSessionStore.getState()[action]("feature/late")
+      await useDesktopSessionStore.getState().selectProject(projectB)
+      resolveBranch(projectDetails(projectA, "feature/late"))
+      await changingBranch
+
+      expect(useDesktopSessionStore.getState()).toMatchObject({
+        selectedProject: projectB,
+        branch: "branch-b",
+        branches: ["branch-b"],
+      })
+    }
+  )
+})
+
+describe("desktop session store bootstrap operations", () => {
+  it("records a refresh bootstrap failure in app operations", async () => {
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          bootstrap: vi.fn(async () => {
+            throw new Error("bootstrap refresh unavailable")
+          }),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({ appOperations: {} })
+
+    await expect(useDesktopSessionStore.getState().refreshBootstrap()).rejects.toThrow(
+      "bootstrap refresh unavailable"
+    )
+
+    expect(Object.values(useDesktopSessionStore.getState().appOperations)).toContainEqual(
+      expect.objectContaining({ phase: "failed", error: "bootstrap refresh unavailable" })
+    )
+  })
+
+  it("keeps initialize's app operation until a restored session fails", async () => {
+    const restoredSession = emptySessionView("restored-session").session
+    const openSession = useDesktopSessionStore.getState().openSession
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn(() => restoredSession.id),
+      removeItem: vi.fn(),
+    })
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          daemonStatus: vi.fn(async () => ({ phase: "ready", message: "ready", updatedAt: 1 })),
+          bootstrap: vi.fn(async () => ({ ...refreshedBootstrap, sessions: [restoredSession] })),
+          onDaemonStatusChanged: vi.fn(),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      loadStatus: "idle",
+      appOperations: {},
+      openSession: vi.fn(async () => {
+        throw new Error("restore unavailable")
+      }),
+    })
+
+    try {
+      await useDesktopSessionStore.getState().initialize()
+
+      expect(Object.values(useDesktopSessionStore.getState().appOperations)).toContainEqual(
+        expect.objectContaining({ phase: "failed", error: "restore unavailable" })
+      )
+    } finally {
+      useDesktopSessionStore.setState({ openSession })
+      vi.unstubAllGlobals()
+    }
   })
 })
 

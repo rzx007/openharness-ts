@@ -61,6 +61,7 @@ export interface DesktopOperation {
   phase: DesktopOperationPhase
   sessionId: string | null
   projectId?: string
+  target?: string
   startedAt: number
   finishedAt?: number
   error?: string

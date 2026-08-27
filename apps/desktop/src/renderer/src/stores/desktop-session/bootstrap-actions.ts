@@ -5,12 +5,14 @@ import type {
   DesktopWorkspaceMode,
 } from "@shared/session-types"
 
-import { beginScopedOperation, errorMessage, failScopedOperation, removeScopedOperation } from "./error-state"
-import { resolveInitialProject, sortSessions } from "./helpers"
 import {
-  clearPersistedActiveSessionId,
-  readPersistedActiveSessionId,
-} from "./persistence"
+  beginScopedOperation,
+  errorMessage,
+  failScopedOperation,
+  removeScopedOperation,
+} from "./error-state"
+import { resolveInitialProject, sortSessions } from "./helpers"
+import { clearPersistedActiveSessionId, readPersistedActiveSessionId } from "./persistence"
 import type { BootstrapActions, DesktopSessionState, DesktopStoreContext } from "./types"
 
 const initialDaemonStatus: DesktopDaemonStatus = {
@@ -44,6 +46,7 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
           id: operationId,
           kind: "project-action",
           sessionId: null,
+          target: "initialize",
           startedAt: Date.now(),
         }),
       }))
@@ -62,7 +65,7 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
         const sessions = sortSessions(data.sessions)
         const archivedSessions = sortSessions(data.archivedSessions)
         const persistedSessionId = readPersistedActiveSessionId()
-        set((state) => ({
+        set({
           loadStatus: "ready",
           daemonStatus: latestDaemonStatus,
           projects: data.projects,
@@ -80,14 +83,19 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
           selectedProjectGit: false,
           selectedProjectGitCheckedAt: null,
           branches: [],
-          appOperations: removeScopedOperation(state.appOperations, operationId),
-        }))
-        if (selectedProject) await get().selectProject(selectedProject).catch(() => undefined)
+        })
+        if (selectedProject)
+          await get()
+            .selectProject(selectedProject)
+            .catch(() => undefined)
         if (persistedSessionId && sessions.some((session) => session.id === persistedSessionId)) {
           await get().openSession(persistedSessionId)
         } else if (persistedSessionId) {
           clearPersistedActiveSessionId()
         }
+        set((state) => ({
+          appOperations: removeScopedOperation(state.appOperations, operationId),
+        }))
       } catch (error) {
         const daemonStatus = await window.desktop.sessions
           .daemonStatus()
@@ -102,17 +110,40 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
     },
 
     async refreshBootstrap() {
-      const data = await window.desktop.sessions.bootstrap()
+      const operationId = globalThis.crypto.randomUUID()
       set((state) => ({
-        ...applyBootstrapData(data, state.selectedProject, state.workspaceMode, null, null),
-        ...(state.activeSessionId
-          ? {
-              selectedModel: state.selectedModel,
-              selectedProvider: state.selectedProvider,
-              selectedPermissionMode: state.selectedPermissionMode,
-            }
-          : {}),
+        appOperations: beginScopedOperation(state.appOperations, {
+          id: operationId,
+          kind: "project-action",
+          sessionId: null,
+          target: "refresh-bootstrap",
+          startedAt: Date.now(),
+        }),
       }))
+      try {
+        const data = await window.desktop.sessions.bootstrap()
+        set((state) => ({
+          ...applyBootstrapData(data, state.selectedProject, state.workspaceMode, null, null),
+          ...(state.activeSessionId
+            ? {
+                selectedModel: state.selectedModel,
+                selectedProvider: state.selectedProvider,
+                selectedPermissionMode: state.selectedPermissionMode,
+              }
+            : {}),
+          appOperations: removeScopedOperation(state.appOperations, operationId),
+        }))
+      } catch (error) {
+        set((state) => ({
+          appOperations: failScopedOperation(
+            state.appOperations,
+            operationId,
+            errorMessage(error),
+            Date.now()
+          ),
+        }))
+        throw error
+      }
     },
   }
 }

@@ -11,7 +11,10 @@ export function beginScopedOperation(
   operations: Record<string, DesktopOperation>,
   operation: Omit<DesktopOperation, "phase">
 ): Record<string, DesktopOperation> {
-  return { ...operations, [operation.id]: { ...operation, phase: "pending" } }
+  return {
+    ...removeFailedOperationsForTarget(operations, operation),
+    [operation.id]: { ...operation, phase: "pending" },
+  }
 }
 
 export function failScopedOperation(
@@ -32,8 +35,23 @@ export function removeScopedOperation(
   operations: Record<string, DesktopOperation>,
   operationId: string
 ): Record<string, DesktopOperation> {
-  if (!operations[operationId]) return operations
+  const operation = operations[operationId]
+  if (!operation) return operations
   const remaining = { ...operations }
   delete remaining[operationId]
-  return remaining
+  return removeFailedOperationsForTarget(remaining, operation)
+}
+
+function removeFailedOperationsForTarget(
+  operations: Record<string, DesktopOperation>,
+  target: Pick<DesktopOperation, "kind" | "target">
+): Record<string, DesktopOperation> {
+  return Object.fromEntries(
+    Object.entries(operations).filter(
+      ([, operation]) =>
+        operation.phase !== "failed" ||
+        operation.kind !== target.kind ||
+        operation.target !== target.target
+    )
+  )
 }
