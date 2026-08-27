@@ -28,7 +28,17 @@ interface PendingPromptSubmission {
   id: string
   sessionId: string
   content: string
+  createdAt: number
   phase: "submitting" | "accepted" | "failed"
+  error?: string
+}
+
+export interface QueuedPromptAction {
+  sessionId: string
+  inputId: string
+  runId: string
+  kind: "promote" | "cancel"
+  phase: "pending" | "acknowledged" | "failed"
   error?: string
 }
 
@@ -64,14 +74,15 @@ interface DesktopSessionState {
   sessionView: DesktopSessionView | null
   openingSession: boolean
   sending: boolean
-  pendingPromptSubmission: PendingPromptSubmission | null
+  pendingPromptSubmissions: Record<string, PendingPromptSubmission>
+  sendingOperationId: string | null
   pendingPromptEdit: {
     id: string
     sessionId: string
     sourceMessageId: string
     content: string
   } | null
-  pendingPromptActionId: string | null
+  queuedPromptActions: Record<string, QueuedPromptAction>
   initialize: () => Promise<void>
   refreshBootstrap: () => Promise<void>
   startNewConversation: () => Promise<void>
@@ -103,7 +114,7 @@ interface DesktopSessionState {
   togglePinSession: (sessionId: string) => Promise<void>
   archiveSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
-  startSession: (content: string, options?: SubmitPromptOptions) => Promise<void>
+  startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
   sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
   editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
   promoteQueuedPrompt: (
@@ -146,9 +157,10 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   sessionView: null,
   openingSession: false,
   sending: false,
-  pendingPromptSubmission: null,
+  pendingPromptSubmissions: {},
+  sendingOperationId: null,
   pendingPromptEdit: null,
-  pendingPromptActionId: null,
+  queuedPromptActions: {},
 
   async initialize() {
     if (get().loadStatus === "loading" || get().loadStatus === "ready") return
@@ -236,6 +248,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       selectedPermissionMode: get().defaultPermissionMode,
       openingSession: false,
       sending: false,
+      sendingOperationId: null,
       error: null,
     })
   },
@@ -614,15 +627,35 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   async openSession(sessionId) {
     if (!sessionId) return
-    set({ activeSessionId: sessionId, sessionView: null, openingSession: true, error: null })
+    set((state) => {
+      const switchingSessions = state.activeSessionId !== sessionId
+      return {
+        activeSessionId: sessionId,
+        sessionView: null,
+        openingSession: true,
+        sending: switchingSessions ? false : state.sending,
+        sendingOperationId: switchingSessions ? null : state.sendingOperationId,
+        error: null,
+      }
+    })
     try {
       const view = await window.desktop.sessions.open(sessionId)
       if (get().activeSessionId !== sessionId) return
+      const current = get().sessionView
+      if (current?.session.id === sessionId && view.cursor < current.cursor) {
+        set({ openingSession: false })
+        return
+      }
       writePersistedActiveSessionId(sessionId)
       const workspace = resolveSessionWorkspace(get().projects, view.session)
       set((state) => ({
         ...workspace,
         sessionView: view,
+        pendingPromptSubmissions: reconcilePendingPromptSubmissions(
+          state.pendingPromptSubmissions,
+          view
+        ),
+        queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
         openingSession: false,
         selectedModel: view.session.model,
         selectedProvider: sessionProvider(view.session, state.defaultProvider),
@@ -678,6 +711,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       sessionView: null,
       openingSession: false,
       sending: false,
+      sendingOperationId: null,
       ...workspace,
       selectedModel: session.model,
       selectedProvider: sessionProvider(session, get().defaultProvider),
@@ -765,8 +799,17 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         archivedSessions: upsertSession(state.archivedSessions, archived),
         activeSessionId: isActive ? null : state.activeSessionId,
         sessionView: isActive ? null : state.sessionView,
-        openingSession: false,
-        sending: false,
+        pendingPromptSubmissions: filterPendingPromptSubmissions(
+          state.pendingPromptSubmissions,
+          (submission) => submission.sessionId !== sessionId
+        ),
+        queuedPromptActions: filterQueuedPromptActions(
+          state.queuedPromptActions,
+          (action) => action.sessionId !== sessionId
+        ),
+        openingSession: isActive ? false : state.openingSession,
+        sending: isActive ? false : state.sending,
+        sendingOperationId: isActive ? null : state.sendingOperationId,
         selectedModel: isActive ? existing.model : state.selectedModel,
         selectedProvider: isActive
           ? sessionProvider(existing, state.defaultProvider)
@@ -804,8 +847,17 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         activeSessionId: isActive ? null : state.activeSessionId,
         sessionView:
           state.sessionView && deleted.has(state.sessionView.session.id) ? null : state.sessionView,
+        pendingPromptSubmissions: filterPendingPromptSubmissions(
+          state.pendingPromptSubmissions,
+          (submission) => !deleted.has(submission.sessionId)
+        ),
+        queuedPromptActions: filterQueuedPromptActions(
+          state.queuedPromptActions,
+          (action) => !deleted.has(action.sessionId)
+        ),
         openingSession: isActive ? false : state.openingSession,
         sending: isActive ? false : state.sending,
+        sendingOperationId: isActive ? null : state.sendingOperationId,
         selectedModel: isActive ? existing.model : state.selectedModel,
         selectedProvider: isActive
           ? sessionProvider(existing, state.defaultProvider)
@@ -839,18 +891,19 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     } = get()
     const model = selectedModel ?? defaultModel
     const provider = selectedProvider ?? defaultProvider
-    if (!prompt || get().sending) return
+    if (!prompt || get().sending) return null
     if (workspaceMode === "project" && !selectedProject) {
       set({ error: "请先选择一个项目目录。" })
-      return
+      return null
     }
     if (!model) {
       set({ error: "没有可用模型，请先配置模型。" })
-      return
+      return null
     }
 
     const promptSubmissionId = globalThis.crypto.randomUUID()
-    set({ sending: true, error: null })
+    let startedSessionId: string | null = null
+    set({ sending: true, sendingOperationId: promptSubmissionId, error: null })
     try {
       const sessionInput: CreateDesktopSessionInput =
         workspaceMode === "project" && selectedProject
@@ -867,30 +920,56 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
               permissionMode: selectedPermissionMode,
             }
       const session = await window.desktop.sessions.create(sessionInput)
-      set((state) => ({
-        activeSessionId: session.id,
-        sessions: upsertSession(state.sessions, session),
-        openingSession: true,
-        ...(!options?.commandLine
-          ? {
-              pendingPromptSubmission: {
-                id: promptSubmissionId,
-                sessionId: session.id,
-                content: prompt,
-                phase: "submitting",
-              },
-            }
-          : {}),
-      }))
-      writePersistedActiveSessionId(session.id)
-      const view = await window.desktop.sessions.open(session.id)
-      set((state) => ({
-        sessionView: view,
-        openingSession: false,
-        selectedModel: view.session.model,
-        selectedProvider: sessionProvider(view.session, provider),
-        selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
-      }))
+      startedSessionId = session.id
+      set((state) => {
+        const ownsCurrentPage = state.sendingOperationId === promptSubmissionId
+        return {
+          sessions: upsertSession(state.sessions, session),
+          ...(ownsCurrentPage
+            ? {
+                activeSessionId: session.id,
+                openingSession: true,
+              }
+            : {}),
+          ...(!options?.commandLine
+            ? {
+                pendingPromptSubmissions: {
+                  ...state.pendingPromptSubmissions,
+                  [promptSubmissionId]: {
+                    id: promptSubmissionId,
+                    sessionId: session.id,
+                    content: prompt,
+                    createdAt: Date.now(),
+                    phase: "submitting",
+                  },
+                },
+              }
+            : {}),
+        }
+      })
+      if (get().sendingOperationId === promptSubmissionId) {
+        writePersistedActiveSessionId(session.id)
+        const view = await window.desktop.sessions.open(session.id)
+        set((state) =>
+          state.activeSessionId === session.id
+            ? {
+                sessionView: newerSessionView(state.sessionView, view),
+                pendingPromptSubmissions: reconcilePendingPromptSubmissions(
+                  state.pendingPromptSubmissions,
+                  view
+                ),
+                queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
+                openingSession: false,
+                selectedModel: view.session.model,
+                selectedProvider: sessionProvider(view.session, provider),
+                selectedPermissionMode: sessionPermissionMode(
+                  view.session,
+                  state.defaultPermissionMode
+                ),
+              }
+            : state
+        )
+      }
       if (options?.commandLine) {
         await window.desktop.sessions.invokeCommand({
           sessionId: session.id,
@@ -903,14 +982,16 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           content: prompt,
         })
         set((state) => ({
-          pendingPromptSubmission:
-            state.pendingPromptSubmission?.id === promptSubmissionId
-              ? { ...state.pendingPromptSubmission, phase: "accepted", error: undefined }
-              : state.pendingPromptSubmission,
+          pendingPromptSubmissions: updatePendingPromptSubmission(
+            state.pendingPromptSubmissions,
+            promptSubmissionId,
+            (submission) => ({ ...submission, phase: "accepted", error: undefined })
+          ),
         }))
       }
       const title = formatSessionTitle(prompt)
       set((state) => {
+        if (!state.sessions.some((candidate) => candidate.id === session.id)) return state
         const titledSession = { ...session, title, updatedAt: Date.now() }
         return {
           sessions: upsertSession(state.sessions, titledSession),
@@ -924,57 +1005,125 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         }
       })
     } catch (error) {
-      set({ openingSession: false, error: errorMessage(error) })
+      const message = errorMessage(error)
+      const currentState = get()
+      const confirmed =
+        !options?.commandLine &&
+        (!currentState.pendingPromptSubmissions[promptSubmissionId] ||
+          sessionViewContainsInput(currentState.sessionView, promptSubmissionId))
+      set((state) => ({
+        openingSession: state.activeSessionId === startedSessionId ? false : state.openingSession,
+        error: state.activeSessionId === startedSessionId && !confirmed ? message : state.error,
+        pendingPromptSubmissions: confirmed
+          ? removePendingPromptSubmission(state.pendingPromptSubmissions, promptSubmissionId)
+          : updatePendingPromptSubmission(
+              state.pendingPromptSubmissions,
+              promptSubmissionId,
+              (submission) => ({ ...submission, phase: "failed", error: message })
+            ),
+      }))
+      if (confirmed) return startedSessionId
       throw error
     } finally {
-      set({ sending: false })
+      set((state) =>
+        state.sendingOperationId === promptSubmissionId
+          ? { sending: false, sendingOperationId: null }
+          : state
+      )
       scheduleSelectedProjectGitRefresh(true)
     }
+    return startedSessionId
   },
 
   async sendMessage(content, options) {
     const prompt = content.trim()
     const sessionId = get().activeSessionId
     if (!prompt || !sessionId || get().sending) return
-    const pending = get().pendingPromptSubmission
-    const submission: PendingPromptSubmission =
-      pending?.sessionId === sessionId && pending.content === prompt
-        ? { ...pending, phase: "submitting", error: undefined }
-        : {
-            id: globalThis.crypto.randomUUID(),
-            sessionId,
-            content: prompt,
-            phase: "submitting",
-          }
-    set({ sending: true, error: null, pendingPromptSubmission: submission })
-    try {
-      if (options?.commandLine) {
+    if (options?.commandLine) {
+      const operationId = globalThis.crypto.randomUUID()
+      set({ sending: true, sendingOperationId: operationId, error: null })
+      try {
         await window.desktop.sessions.invokeCommand({ sessionId, line: options.commandLine })
-      } else {
-        await window.desktop.sessions.sendPrompt({
-          id: submission.id,
+      } catch (error) {
+        set((state) => ({
+          error: state.activeSessionId === sessionId ? errorMessage(error) : state.error,
+        }))
+        throw error
+      } finally {
+        set((state) =>
+          state.sendingOperationId === operationId
+            ? { sending: false, sendingOperationId: null }
+            : state
+        )
+        scheduleSelectedProjectGitRefresh(true)
+      }
+      return
+    }
+    const pending = Object.values(get().pendingPromptSubmissions).find(
+      (submission) =>
+        submission.sessionId === sessionId &&
+        submission.content === prompt &&
+        submission.phase === "failed"
+    )
+    const submission: PendingPromptSubmission = pending
+      ? { ...pending, phase: "submitting", error: undefined }
+      : {
+          id: globalThis.crypto.randomUUID(),
           sessionId,
           content: prompt,
-        })
-      }
+          createdAt: Date.now(),
+          phase: "submitting",
+        }
+    set((state) => ({
+      sending: true,
+      sendingOperationId: submission.id,
+      error: null,
+      pendingPromptSubmissions: {
+        ...state.pendingPromptSubmissions,
+        [submission.id]: submission,
+      },
+    }))
+    try {
+      await window.desktop.sessions.sendPrompt({
+        id: submission.id,
+        sessionId,
+        content: prompt,
+      })
       set((state) => ({
-        pendingPromptSubmission:
-          state.pendingPromptSubmission?.id === submission.id
-            ? { ...state.pendingPromptSubmission, phase: "accepted", error: undefined }
-            : state.pendingPromptSubmission,
+        pendingPromptSubmissions: updatePendingPromptSubmission(
+          state.pendingPromptSubmissions,
+          submission.id,
+          (pendingSubmission) => ({
+            ...pendingSubmission,
+            phase: "accepted",
+            error: undefined,
+          })
+        ),
       }))
     } catch (error) {
       const message = errorMessage(error)
+      const currentState = get()
+      const confirmed =
+        !currentState.pendingPromptSubmissions[submission.id] ||
+        sessionViewContainsInput(currentState.sessionView, submission.id)
       set((state) => ({
-        error: message,
-        pendingPromptSubmission:
-          state.pendingPromptSubmission?.id === submission.id
-            ? { ...state.pendingPromptSubmission, phase: "failed", error: message }
-            : state.pendingPromptSubmission,
+        error: state.activeSessionId === sessionId && !confirmed ? message : state.error,
+        pendingPromptSubmissions: confirmed
+          ? removePendingPromptSubmission(state.pendingPromptSubmissions, submission.id)
+          : updatePendingPromptSubmission(
+              state.pendingPromptSubmissions,
+              submission.id,
+              (pendingSubmission) => ({ ...pendingSubmission, phase: "failed", error: message })
+            ),
       }))
+      if (confirmed) return
       throw error
     } finally {
-      set({ sending: false })
+      set((state) =>
+        state.sendingOperationId === submission.id
+          ? { sending: false, sendingOperationId: null }
+          : state
+      )
       scheduleSelectedProjectGitRefresh(true)
     }
   },
@@ -990,7 +1139,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
       pending.content === prompt
         ? pending
         : { id: crypto.randomUUID(), sessionId, sourceMessageId, content: prompt }
-    set({ sending: true, error: null, pendingPromptEdit: edit })
+    set({ sending: true, sendingOperationId: edit.id, error: null, pendingPromptEdit: edit })
     try {
       await window.desktop.sessions.editLatestPrompt({
         id: edit.id,
@@ -1002,10 +1151,14 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         pendingPromptEdit: state.pendingPromptEdit?.id === edit.id ? null : state.pendingPromptEdit,
       }))
     } catch (error) {
-      set({ error: errorMessage(error) })
+      set((state) => ({
+        error: state.activeSessionId === sessionId ? errorMessage(error) : state.error,
+      }))
       throw error
     } finally {
-      set({ sending: false })
+      set((state) =>
+        state.sendingOperationId === edit.id ? { sending: false, sendingOperationId: null } : state
+      )
       scheduleSelectedProjectGitRefresh(true)
     }
   },
@@ -1013,9 +1166,19 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   async promoteQueuedPrompt(inputId, queuedRunId, expectedActiveRunId) {
     const sessionId = get().activeSessionId
     if (!sessionId || !inputId || !queuedRunId || !expectedActiveRunId) return
-    const actionId = `promote:${inputId}`
-    if (get().pendingPromptActionId) return
-    set({ pendingPromptActionId: actionId, error: null })
+    const actionKey = queuedPromptActionKey(sessionId, queuedRunId)
+    if (get().queuedPromptActions[actionKey]?.phase === "pending") return
+    const action: QueuedPromptAction = {
+      sessionId,
+      inputId,
+      runId: queuedRunId,
+      kind: "promote",
+      phase: "pending",
+    }
+    set((state) => ({
+      queuedPromptActions: { ...state.queuedPromptActions, [actionKey]: action },
+      error: null,
+    }))
     try {
       await window.desktop.sessions.promoteQueuedPrompt({
         sessionId,
@@ -1023,31 +1186,75 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         queuedRunId,
         expectedActiveRunId,
       })
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    } finally {
       set((state) => ({
-        pendingPromptActionId:
-          state.pendingPromptActionId === actionId ? null : state.pendingPromptActionId,
+        queuedPromptActions: settleQueuedPromptAction(
+          state.queuedPromptActions,
+          actionKey,
+          action,
+          state.sessionView
+        ),
       }))
+    } catch (error) {
+      const message = queuedPromptActionError("promote", error)
+      set((state) => {
+        const confirmed =
+          !state.queuedPromptActions[actionKey] ||
+          queuedPromptActionConfirmed(state.sessionView, action)
+        return {
+          queuedPromptActions: confirmed
+            ? removeQueuedPromptAction(state.queuedPromptActions, actionKey)
+            : {
+                ...state.queuedPromptActions,
+                [actionKey]: { ...action, phase: "failed", error: message },
+              },
+          error: state.activeSessionId === sessionId && !confirmed ? message : state.error,
+        }
+      })
     }
   },
 
   async cancelQueuedPrompt(inputId, queuedRunId) {
     const sessionId = get().activeSessionId
     if (!sessionId || !inputId || !queuedRunId) return
-    const actionId = `cancel:${inputId}`
-    if (get().pendingPromptActionId) return
-    set({ pendingPromptActionId: actionId, error: null })
+    const actionKey = queuedPromptActionKey(sessionId, queuedRunId)
+    if (get().queuedPromptActions[actionKey]?.phase === "pending") return
+    const action: QueuedPromptAction = {
+      sessionId,
+      inputId,
+      runId: queuedRunId,
+      kind: "cancel",
+      phase: "pending",
+    }
+    set((state) => ({
+      queuedPromptActions: { ...state.queuedPromptActions, [actionKey]: action },
+      error: null,
+    }))
     try {
       await window.desktop.sessions.cancelQueuedPrompt({ sessionId, inputId, queuedRunId })
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    } finally {
       set((state) => ({
-        pendingPromptActionId:
-          state.pendingPromptActionId === actionId ? null : state.pendingPromptActionId,
+        queuedPromptActions: settleQueuedPromptAction(
+          state.queuedPromptActions,
+          actionKey,
+          action,
+          state.sessionView
+        ),
       }))
+    } catch (error) {
+      const message = queuedPromptActionError("cancel", error)
+      set((state) => {
+        const confirmed =
+          !state.queuedPromptActions[actionKey] ||
+          queuedPromptActionConfirmed(state.sessionView, action)
+        return {
+          queuedPromptActions: confirmed
+            ? removeQueuedPromptAction(state.queuedPromptActions, actionKey)
+            : {
+                ...state.queuedPromptActions,
+                [actionKey]: { ...action, phase: "failed", error: message },
+              },
+          error: state.activeSessionId === sessionId && !confirmed ? message : state.error,
+        }
+      })
     }
   },
 
@@ -1093,11 +1300,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
       return {
         sessionView: { ...view, session },
-        pendingPromptSubmission:
-          state.pendingPromptSubmission?.sessionId === view.session.id &&
-          view.inputs.some((input) => input.id === state.pendingPromptSubmission?.id)
-            ? null
-            : state.pendingPromptSubmission,
+        pendingPromptSubmissions: reconcilePendingPromptSubmissions(
+          state.pendingPromptSubmissions,
+          view
+        ),
+        queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
         openingSession: false,
         selectedModel: session.model,
         selectedProvider: sessionProvider(session, state.defaultProvider),
@@ -1125,6 +1332,134 @@ export function attachDesktopSessionEvents(): () => void {
   return window.desktop.sessions.onUpdated((view) => {
     useDesktopSessionStore.getState().applySessionUpdate(view)
   })
+}
+
+function queuedPromptActionKey(sessionId: string, runId: string): string {
+  return `${sessionId}:${runId}`
+}
+
+function updatePendingPromptSubmission(
+  submissions: Record<string, PendingPromptSubmission>,
+  submissionId: string,
+  update: (submission: PendingPromptSubmission) => PendingPromptSubmission
+): Record<string, PendingPromptSubmission> {
+  const submission = submissions[submissionId]
+  return submission ? { ...submissions, [submissionId]: update(submission) } : submissions
+}
+
+function removePendingPromptSubmission(
+  submissions: Record<string, PendingPromptSubmission>,
+  submissionId: string
+): Record<string, PendingPromptSubmission> {
+  if (!submissions[submissionId]) return submissions
+  const remaining = { ...submissions }
+  delete remaining[submissionId]
+  return remaining
+}
+
+function reconcilePendingPromptSubmissions(
+  submissions: Record<string, PendingPromptSubmission>,
+  view: DesktopSessionView
+): Record<string, PendingPromptSubmission> {
+  const confirmedInputIds = new Set(view.inputs.map((input) => input.id))
+  return Object.fromEntries(
+    Object.entries(submissions).filter(
+      ([id, submission]) => submission.sessionId !== view.session.id || !confirmedInputIds.has(id)
+    )
+  )
+}
+
+function filterPendingPromptSubmissions(
+  submissions: Record<string, PendingPromptSubmission>,
+  keep: (submission: PendingPromptSubmission) => boolean
+): Record<string, PendingPromptSubmission> {
+  return Object.fromEntries(
+    Object.entries(submissions).filter(([, submission]) => keep(submission))
+  )
+}
+
+function sessionViewContainsInput(view: DesktopSessionView | null, inputId: string): boolean {
+  return Boolean(view?.inputs.some((input) => input.id === inputId))
+}
+
+function newerSessionView(
+  current: DesktopSessionView | null,
+  candidate: DesktopSessionView
+): DesktopSessionView {
+  return current?.session.id === candidate.session.id && current.cursor > candidate.cursor
+    ? current
+    : candidate
+}
+
+function settleQueuedPromptAction(
+  actions: Record<string, QueuedPromptAction>,
+  actionKey: string,
+  expected: QueuedPromptAction,
+  view: DesktopSessionView | null
+): Record<string, QueuedPromptAction> {
+  const current = actions[actionKey]
+  if (!current || current.kind !== expected.kind || current.inputId !== expected.inputId) {
+    return actions
+  }
+  if (view?.session.id === expected.sessionId) {
+    const run = view.runs.find((candidate) => candidate.id === expected.runId)
+    if (run && run.status !== "pending") {
+      const remaining = { ...actions }
+      delete remaining[actionKey]
+      return remaining
+    }
+  }
+  return {
+    ...actions,
+    [actionKey]: { ...current, phase: "acknowledged", error: undefined },
+  }
+}
+
+function removeQueuedPromptAction(
+  actions: Record<string, QueuedPromptAction>,
+  actionKey: string
+): Record<string, QueuedPromptAction> {
+  if (!actions[actionKey]) return actions
+  const remaining = { ...actions }
+  delete remaining[actionKey]
+  return remaining
+}
+
+function queuedPromptActionConfirmed(
+  view: DesktopSessionView | null,
+  action: QueuedPromptAction
+): boolean {
+  if (view?.session.id !== action.sessionId) return false
+  const run = view.runs.find((candidate) => candidate.id === action.runId)
+  return Boolean(run && run.status !== "pending")
+}
+
+function filterQueuedPromptActions(
+  actions: Record<string, QueuedPromptAction>,
+  keep: (action: QueuedPromptAction) => boolean
+): Record<string, QueuedPromptAction> {
+  return Object.fromEntries(Object.entries(actions).filter(([, action]) => keep(action)))
+}
+
+function reconcileQueuedPromptActions(
+  actions: Record<string, QueuedPromptAction>,
+  view: DesktopSessionView
+): Record<string, QueuedPromptAction> {
+  return Object.fromEntries(
+    Object.entries(actions).filter(([, action]) => {
+      if (action.sessionId !== view.session.id) return true
+      const run = view.runs.find((candidate) => candidate.id === action.runId)
+      return run?.status === "pending"
+    })
+  )
+}
+
+function queuedPromptActionError(kind: "promote" | "cancel", error: unknown): string {
+  const message = errorMessage(error)
+  if (kind === "promote" && /active run|当前运行|target run|409/i.test(message)) {
+    return "当前回答已经切换，这条消息仍保留在待处理队列中。"
+  }
+  return kind === "promote" ? `调整方向失败：${message}` : `删除失败：${message}`
 }
 
 function ensureDesktopDaemonStatusEvents(): void {

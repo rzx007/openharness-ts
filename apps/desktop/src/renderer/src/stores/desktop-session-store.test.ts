@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { DesktopBootstrapData } from "@shared/session-types"
+import type { DesktopBootstrapData, DesktopSessionView } from "@shared/session-types"
 import { useDesktopSessionStore } from "./desktop-session-store"
 
 const refreshedBootstrap: DesktopBootstrapData = {
@@ -19,6 +19,37 @@ const refreshedBootstrap: DesktopBootstrapData = {
   defaultModel: "deepseek-chat",
   defaultProvider: "deepseek",
   defaultPermissionMode: "default",
+}
+
+function onlyPendingPromptSubmission(): ReturnType<
+  typeof useDesktopSessionStore.getState
+>["pendingPromptSubmissions"][string] {
+  const submissions = Object.values(useDesktopSessionStore.getState().pendingPromptSubmissions)
+  expect(submissions).toHaveLength(1)
+  return submissions[0]!
+}
+
+function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
+  return {
+    cursor,
+    syncStatus: "connected",
+    session: {
+      id: sessionId,
+      cwd: "D:\\repo",
+      title: "test",
+      model: "test-model",
+      status: "idle",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    inputs: [],
+    messages: [],
+    parts: [],
+    runs: [],
+    tasks: [],
+    permissions: [],
+  }
 }
 
 describe("desktop session store provider refresh", () => {
@@ -350,6 +381,265 @@ describe("desktop session store outside-project mode", () => {
     })
   })
 
+  it("marks the first prompt as failed when the new session rejects it", async () => {
+    const session = {
+      id: "session-first-prompt-fails",
+      projectId: "auto-generated-workspace-project",
+      workspaceMode: "outside_project" as const,
+      cwd: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-08-24\\x2",
+      title: "",
+      model: "deepseek-chat",
+      status: "idle" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => ({
+            cursor: 0,
+            syncStatus: "connected" as const,
+            session,
+            inputs: [],
+            messages: [],
+            parts: [],
+            runs: [],
+            tasks: [],
+            permissions: [],
+          })),
+          sendPrompt: vi.fn(async () => {
+            throw new Error("发送失败")
+          }),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [],
+      archivedSessions: [],
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedModel: "deepseek-chat",
+      selectedProvider: "deepseek",
+      defaultModel: "deepseek-chat",
+      defaultProvider: "deepseek",
+      selectedPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+      pendingPromptSubmissions: {},
+      sending: false,
+      openingSession: false,
+      error: null,
+    })
+
+    await expect(useDesktopSessionStore.getState().startSession("第一条消息")).rejects.toThrow(
+      "发送失败"
+    )
+
+    expect(onlyPendingPromptSubmission()).toMatchObject({
+      sessionId: session.id,
+      content: "第一条消息",
+      phase: "failed",
+      error: "发送失败",
+    })
+  })
+
+  it("reconciles local prompt state when reopening a session snapshot", async () => {
+    const view = emptySessionView("session-reopen", 4)
+    view.inputs = [
+      {
+        id: "input-confirmed",
+        sessionId: "session-reopen",
+        seq: 1,
+        delivery: "queue",
+        content: "confirmed",
+        metadata: {},
+        createdAt: 1,
+      },
+    ]
+    view.runs = [
+      {
+        id: "run-finished",
+        sessionId: "session-reopen",
+        inputId: "input-confirmed",
+        status: "interrupted",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ]
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          open: vi.fn(async () => view),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: null,
+      sessionView: null,
+      openingSession: false,
+      sending: false,
+      pendingPromptSubmissions: {
+        "input-confirmed": {
+          id: "input-confirmed",
+          sessionId: "session-reopen",
+          content: "confirmed",
+          createdAt: 1,
+          phase: "accepted",
+        },
+      },
+      queuedPromptActions: {
+        "session-reopen:run-finished": {
+          sessionId: "session-reopen",
+          inputId: "input-confirmed",
+          runId: "run-finished",
+          kind: "promote",
+          phase: "acknowledged",
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().openSession("session-reopen")
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      pendingPromptSubmissions: {},
+      queuedPromptActions: {},
+    })
+  })
+
+  it("does not let a late new-session snapshot overwrite a session opened afterward", async () => {
+    const sessionA = emptySessionView("session-a").session
+    const viewA = { ...emptySessionView("session-a", 1), session: sessionA }
+    const viewB = emptySessionView("session-b", 2)
+    let resolveViewA!: (view: DesktopSessionView) => void
+    const open = vi.fn((sessionId: string) =>
+      sessionId === "session-a"
+        ? new Promise<DesktopSessionView>((resolve) => {
+            resolveViewA = resolve
+          })
+        : Promise.resolve(viewB)
+    )
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => sessionA),
+          open,
+          sendPrompt: vi.fn(async () => undefined),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [],
+      archivedSessions: [],
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedModel: "test-model",
+      selectedProvider: null,
+      defaultModel: "test-model",
+      defaultProvider: null,
+      selectedPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+      pendingPromptSubmissions: {},
+      sending: false,
+      openingSession: false,
+      error: null,
+    })
+
+    const starting = useDesktopSessionStore.getState().startSession("start A")
+    await vi.waitFor(() => expect(open).toHaveBeenCalledWith("session-a"))
+    await useDesktopSessionStore.getState().openSession("session-b")
+    resolveViewA(viewA)
+    await starting
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: "session-b",
+      sessionView: { session: { id: "session-b" }, cursor: 2 },
+    })
+  })
+
+  it("does not let a late session creation steal the session selected afterward", async () => {
+    const sessionA = emptySessionView("session-a").session
+    let resolveCreate!: (session: typeof sessionA) => void
+    const create = vi.fn(
+      () =>
+        new Promise<typeof sessionA>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId, 1))
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create,
+          open,
+          sendPrompt: vi.fn(async () => undefined),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [],
+      archivedSessions: [],
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedModel: "test-model",
+      selectedProvider: null,
+      defaultModel: "test-model",
+      defaultProvider: null,
+      selectedPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+      pendingPromptSubmissions: {},
+      sending: false,
+      openingSession: false,
+      error: null,
+    })
+
+    const starting = useDesktopSessionStore.getState().startSession("start A")
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce())
+    await useDesktopSessionStore.getState().openSession("session-b")
+    resolveCreate(sessionA)
+    await starting
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: "session-b",
+      sessionView: { session: { id: "session-b" } },
+    })
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(open).toHaveBeenCalledWith("session-b")
+  })
+
+  it("does not let an older open snapshot overwrite a newer session event", async () => {
+    let resolveOpen!: (view: DesktopSessionView) => void
+    const open = vi.fn(
+      () =>
+        new Promise<DesktopSessionView>((resolve) => {
+          resolveOpen = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { open } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: null,
+      sessionView: null,
+      openingSession: false,
+      sending: false,
+      error: null,
+    })
+
+    const opening = useDesktopSessionStore.getState().openSession("session-1")
+    await vi.waitFor(() => expect(open).toHaveBeenCalledWith("session-1"))
+    useDesktopSessionStore.getState().applySessionUpdate(emptySessionView("session-1", 5))
+    resolveOpen(emptySessionView("session-1", 4))
+    await opening
+
+    expect(useDesktopSessionStore.getState().sessionView?.cursor).toBe(5)
+  })
+
   it("keeps the internal xN workspace hidden after opening a session and starting a new one", async () => {
     const session = {
       id: "session-outside-project",
@@ -480,6 +770,61 @@ describe("desktop session store prompt intent boundaries", () => {
     expect(editLatestPrompt).not.toHaveBeenCalled()
   })
 
+  it("does not leave a normal prompt placeholder for a slash command", async () => {
+    const invokeCommand = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          invokeCommand,
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sending: false,
+      pendingPromptSubmissions: {},
+      error: null,
+    })
+
+    await useDesktopSessionStore.getState().sendMessage("/compact", { commandLine: "/compact" })
+
+    expect(invokeCommand).toHaveBeenCalledWith({ sessionId: "session-1", line: "/compact" })
+    expect(useDesktopSessionStore.getState().pendingPromptSubmissions).toEqual({})
+  })
+
+  it("does not let an old session request clear a newer session sending state", async () => {
+    let resolveOld!: () => void
+    let resolveNew!: () => void
+    const sendPrompt = vi.fn(({ content }: { content: string }) => {
+      return new Promise<void>((resolve) => {
+        if (content === "old request") resolveOld = resolve
+        else resolveNew = resolve
+      })
+    })
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-old",
+      sending: false,
+      pendingPromptSubmissions: {},
+      error: null,
+    })
+
+    const oldRequest = useDesktopSessionStore.getState().sendMessage("old request")
+    useDesktopSessionStore.setState({ activeSessionId: "session-new", sending: false })
+    const newRequest = useDesktopSessionStore.getState().sendMessage("new request")
+
+    resolveOld()
+    await oldRequest
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: "session-new",
+      sending: true,
+    })
+
+    resolveNew()
+    await newRequest
+    expect(useDesktopSessionStore.getState().sending).toBe(false)
+  })
+
   it("keeps a successful submission visible until the session stream confirms it", async () => {
     let resolveSend!: () => void
     const sendPrompt = vi.fn(
@@ -493,12 +838,12 @@ describe("desktop session store prompt intent boundaries", () => {
       activeSessionId: "session-1",
       sending: false,
       error: null,
-      pendingPromptSubmission: null,
+      pendingPromptSubmissions: {},
     })
 
     const request = useDesktopSessionStore.getState().sendMessage("new request")
 
-    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toMatchObject({
+    expect(onlyPendingPromptSubmission()).toMatchObject({
       sessionId: "session-1",
       content: "new request",
       phase: "submitting",
@@ -507,10 +852,99 @@ describe("desktop session store prompt intent boundaries", () => {
     resolveSend()
     await request
 
-    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toMatchObject({
+    expect(onlyPendingPromptSubmission()).toMatchObject({
       sessionId: "session-1",
       content: "new request",
       phase: "accepted",
+    })
+  })
+
+  it("keeps multiple accepted submissions until each one is confirmed", async () => {
+    const sendPrompt = vi.fn(async (input: { id: string; sessionId: string; content: string }) => {
+      void input
+    })
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: emptySessionView("session-1"),
+      sending: false,
+      pendingPromptSubmissions: {},
+      error: null,
+    })
+
+    await useDesktopSessionStore.getState().sendMessage("first request")
+    await useDesktopSessionStore.getState().sendMessage("second request")
+
+    const firstCall = sendPrompt.mock.calls[0]!
+    const secondCall = sendPrompt.mock.calls[1]!
+    expect(Object.values(useDesktopSessionStore.getState().pendingPromptSubmissions)).toHaveLength(
+      2
+    )
+
+    useDesktopSessionStore.getState().applySessionUpdate({
+      ...emptySessionView("session-1", 1),
+      inputs: [
+        {
+          id: firstCall[0].id,
+          sessionId: "session-1",
+          seq: 1,
+          delivery: "queue",
+          content: "first request",
+          metadata: {},
+          createdAt: 1,
+        },
+      ],
+    })
+
+    expect(Object.keys(useDesktopSessionStore.getState().pendingPromptSubmissions)).toEqual([
+      secondCall[0].id,
+    ])
+  })
+
+  it("treats an SSE-confirmed submission as successful when the IPC response is lost", async () => {
+    let rejectSend!: (error: Error) => void
+    const sendPrompt = vi.fn((input: { id: string; sessionId: string; content: string }) => {
+      void input
+      return new Promise<void>((_resolve, reject) => {
+        rejectSend = reject
+      })
+    })
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: emptySessionView("session-1"),
+      sending: false,
+      pendingPromptSubmissions: {},
+      error: null,
+    })
+
+    const request = useDesktopSessionStore.getState().sendMessage("confirmed request")
+    const inputId = sendPrompt.mock.calls[0]![0].id
+    useDesktopSessionStore.getState().applySessionUpdate({
+      ...emptySessionView("session-1", 1),
+      inputs: [
+        {
+          id: inputId,
+          sessionId: "session-1",
+          seq: 1,
+          delivery: "queue",
+          content: "confirmed request",
+          metadata: {},
+          createdAt: 1,
+        },
+      ],
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-2",
+      sessionView: emptySessionView("session-2", 1),
+      error: null,
+    })
+    rejectSend(new Error("response lost"))
+
+    await expect(request).resolves.toBeUndefined()
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      pendingPromptSubmissions: {},
+      error: null,
     })
   })
 
@@ -524,7 +958,7 @@ describe("desktop session store prompt intent boundaries", () => {
       activeSessionId: "session-1",
       sending: false,
       error: null,
-      pendingPromptSubmission: null,
+      pendingPromptSubmissions: {},
     })
 
     await expect(useDesktopSessionStore.getState().sendMessage("retry me")).rejects.toThrow(
@@ -534,7 +968,7 @@ describe("desktop session store prompt intent boundaries", () => {
 
     expect(sendPrompt).toHaveBeenCalledTimes(2)
     expect(sendPrompt.mock.calls[1]?.[0].id).toBe(sendPrompt.mock.calls[0]?.[0].id)
-    expect(useDesktopSessionStore.getState().pendingPromptSubmission).toMatchObject({
+    expect(onlyPendingPromptSubmission()).toMatchObject({
       content: "retry me",
       phase: "accepted",
     })
@@ -582,6 +1016,53 @@ describe("desktop session store prompt intent boundaries", () => {
     expect(useDesktopSessionStore.getState().pendingPromptEdit).toBeNull()
   })
 
+  it("does not let an old edit settle a newer session send", async () => {
+    let resolveEdit!: () => void
+    let resolveSend!: () => void
+    const editLatestPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveEdit = resolve
+        })
+    )
+    const sendPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    vi.stubGlobal("window", {
+      desktop: { sessions: { editLatestPrompt, sendPrompt } },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sending: false,
+      sendingOperationId: null,
+      pendingPromptSubmissions: {},
+      pendingPromptEdit: null,
+      error: null,
+    })
+
+    const editing = useDesktopSessionStore.getState().editLatestMessage("message-1", "replacement")
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-2",
+      sending: false,
+      sendingOperationId: null,
+    })
+    const sending = useDesktopSessionStore.getState().sendMessage("new session request")
+
+    resolveEdit()
+    await editing
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: "session-2",
+      sending: true,
+    })
+
+    resolveSend()
+    await sending
+    expect(useDesktopSessionStore.getState().sending).toBe(false)
+  })
+
   it("binds stop to the active run visible at click time", async () => {
     const interrupt = vi.fn(async () => undefined)
     vi.stubGlobal("window", { desktop: { sessions: { interrupt } } })
@@ -620,7 +1101,7 @@ describe("desktop session store prompt intent boundaries", () => {
     })
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
-      pendingPromptActionId: null,
+      queuedPromptActions: {},
       error: null,
     })
 
@@ -640,6 +1121,203 @@ describe("desktop session store prompt intent boundaries", () => {
       inputId: "input-other",
       queuedRunId: "run-other",
     })
-    expect(useDesktopSessionStore.getState().pendingPromptActionId).toBeNull()
+    expect(Object.values(useDesktopSessionStore.getState().queuedPromptActions)).toEqual([
+      expect.objectContaining({ runId: "run-queued", phase: "acknowledged" }),
+      expect.objectContaining({ runId: "run-other", phase: "acknowledged" }),
+    ])
+  })
+
+  it("keeps a promoted run acknowledged until the session stream confirms it", async () => {
+    let resolvePromote!: () => void
+    const promoteQueuedPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePromote = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { promoteQueuedPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: emptySessionView("session-1"),
+      error: null,
+      queuedPromptActions: {},
+    })
+
+    const request = useDesktopSessionStore
+      .getState()
+      .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
+
+    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+      "session-1:run-queued": {
+        sessionId: "session-1",
+        runId: "run-queued",
+        kind: "promote",
+        phase: "pending",
+      },
+    })
+
+    resolvePromote()
+    await request
+
+    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+      "session-1:run-queued": {
+        sessionId: "session-1",
+        runId: "run-queued",
+        kind: "promote",
+        phase: "acknowledged",
+      },
+    })
+  })
+
+  it("does not report an action failure after SSE already confirmed it", async () => {
+    let rejectPromote!: (error: Error) => void
+    const promoteQueuedPrompt = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectPromote = reject
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { promoteQueuedPrompt } } })
+    const pendingView = emptySessionView("session-1", 1)
+    pendingView.runs = [
+      {
+        id: "run-queued",
+        sessionId: "session-1",
+        inputId: "input-queued",
+        status: "pending",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: pendingView,
+      error: null,
+      queuedPromptActions: {},
+    })
+
+    const request = useDesktopSessionStore
+      .getState()
+      .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
+    useDesktopSessionStore.getState().applySessionUpdate({
+      ...pendingView,
+      cursor: 2,
+      runs: [{ ...pendingView.runs[0], status: "interrupted", updatedAt: 2 }],
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-2",
+      sessionView: emptySessionView("session-2", 1),
+      error: null,
+    })
+    rejectPromote(new Error("response lost"))
+    await request
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      queuedPromptActions: {},
+      error: null,
+    })
+  })
+
+  it("keeps an action failure on its queued run with a readable message", async () => {
+    const promoteQueuedPrompt = vi.fn(async () => {
+      throw new Error("Active run changed")
+    })
+    vi.stubGlobal("window", { desktop: { sessions: { promoteQueuedPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: emptySessionView("session-1"),
+      error: null,
+      queuedPromptActions: {},
+    })
+
+    await useDesktopSessionStore
+      .getState()
+      .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
+
+    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+      "session-1:run-queued": {
+        phase: "failed",
+        error: "当前回答已经切换，这条消息仍保留在待处理队列中。",
+      },
+    })
+  })
+
+  it("does not leak an old session action error into the newly opened session", async () => {
+    let rejectPromote!: (error: Error) => void
+    const promoteQueuedPrompt = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectPromote = reject
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { promoteQueuedPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: emptySessionView("session-1"),
+      error: null,
+      queuedPromptActions: {},
+    })
+
+    const request = useDesktopSessionStore
+      .getState()
+      .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
+    useDesktopSessionStore.setState({ activeSessionId: "session-2", error: null })
+    rejectPromote(new Error("Active run changed"))
+    await request
+
+    expect(useDesktopSessionStore.getState().error).toBeNull()
+    expect(useDesktopSessionStore.getState().queuedPromptActions).toMatchObject({
+      "session-1:run-queued": { phase: "failed" },
+    })
+  })
+
+  it("clears an acknowledged queue action when SSE reports the run terminal", () => {
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      queuedPromptActions: {
+        "session-1:run-queued": {
+          sessionId: "session-1",
+          inputId: "input-queued",
+          runId: "run-queued",
+          kind: "promote",
+          phase: "acknowledged",
+        },
+      },
+      sessionView: null,
+    })
+
+    useDesktopSessionStore.getState().applySessionUpdate({
+      cursor: 9,
+      syncStatus: "connected",
+      session: {
+        id: "session-1",
+        cwd: "D:\\repo",
+        title: "test",
+        model: "test-model",
+        status: "running",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 9,
+      },
+      inputs: [],
+      messages: [],
+      parts: [],
+      runs: [
+        {
+          id: "run-queued",
+          sessionId: "session-1",
+          inputId: "input-queued",
+          status: "interrupted",
+          metadata: {},
+          createdAt: 2,
+          updatedAt: 9,
+        },
+      ],
+      tasks: [],
+      permissions: [],
+    })
+
+    expect(useDesktopSessionStore.getState().queuedPromptActions).toEqual({})
   })
 })

@@ -27,6 +27,7 @@ import { SessionMoreMenu } from "./session-more-menu"
 import { useSessionActionDialogs } from "./session-action-dialogs"
 import { ConversationTranscript } from "./transcript"
 import type { AddToComposerEventDetail, ConversationPaneProps } from "./types"
+import { resolveDraftAfterSubmission } from "./draft-submission"
 import { appendDraftText, resolveModelLabel } from "./utils"
 
 function ConversationPane({
@@ -65,10 +66,8 @@ function ConversationPane({
   const editLatestMessage = useDesktopSessionStore((state) => state.editLatestMessage)
   const promoteQueuedPrompt = useDesktopSessionStore((state) => state.promoteQueuedPrompt)
   const cancelQueuedPrompt = useDesktopSessionStore((state) => state.cancelQueuedPrompt)
-  const pendingPromptActionId = useDesktopSessionStore((state) => state.pendingPromptActionId)
-  const pendingPromptSubmission = useDesktopSessionStore(
-    (state) => state.pendingPromptSubmission
-  )
+  const queuedPromptActions = useDesktopSessionStore((state) => state.queuedPromptActions)
+  const pendingPromptSubmissions = useDesktopSessionStore((state) => state.pendingPromptSubmissions)
   const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
@@ -90,11 +89,16 @@ function ConversationPane({
   const submitDraft = async (): Promise<void> => {
     const content = draft.trim()
     if (!content || sending || archived) return
+    const submittedSessionId = activeSessionId
     const commandLine = skillCommandInvocationLine(content, skillCommands) ?? undefined
     try {
+      let completedSessionId = submittedSessionId
       if (hasSession) await sendMessage(content, { commandLine })
-      else await startSession(content, { commandLine })
-      setDraft("")
+      else completedSessionId = await startSession(content, { commandLine })
+      const currentSessionId = useDesktopSessionStore.getState().activeSessionId
+      setDraft((current) =>
+        resolveDraftAfterSubmission(current, content, completedSessionId, currentSessionId)
+      )
     } catch {
       // The store keeps the error and the draft stays available for retry.
     }
@@ -113,7 +117,8 @@ function ConversationPane({
     .sort((left, right) => left.createdAt - right.createdAt)
     .flatMap((run) => {
       const input = sessionView?.inputs.find((candidate) => candidate.id === run.inputId)
-      return input ? [{ input, run }] : []
+      const action = queuedPromptActions[`${run.sessionId}:${run.id}`]
+      return input ? [{ input, run, ...(action ? { action } : {}) }] : []
     })
   const pendingPermissions =
     sessionView?.permissions.filter((permission) => permission.status === "pending") ?? []
@@ -331,12 +336,9 @@ function ConversationPane({
               <PendingPromptQueue
                 prompts={pendingPrompts}
                 activeRunId={activeRun?.id}
-                actionId={pendingPromptActionId}
-                localSubmission={
-                  pendingPromptSubmission?.sessionId === activeSessionId
-                    ? pendingPromptSubmission
-                    : null
-                }
+                localSubmissions={Object.values(pendingPromptSubmissions)
+                  .filter((submission) => submission.sessionId === activeSessionId)
+                  .sort((left, right) => left.createdAt - right.createdAt)}
                 onPromote={(inputId, queuedRunId) => {
                   if (activeRun) void promoteQueuedPrompt(inputId, queuedRunId, activeRun.id)
                 }}

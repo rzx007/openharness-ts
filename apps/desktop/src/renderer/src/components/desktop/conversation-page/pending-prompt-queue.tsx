@@ -15,6 +15,11 @@ import type { DesktopSessionInput, DesktopSessionRun } from "@shared/session-typ
 interface PendingPrompt {
   input: DesktopSessionInput
   run: DesktopSessionRun
+  action?: {
+    kind: "promote" | "cancel"
+    phase: "pending" | "acknowledged" | "failed"
+    error?: string
+  }
 }
 
 interface LocalPendingSubmission {
@@ -28,49 +33,64 @@ interface LocalPendingSubmission {
 export function PendingPromptQueue({
   prompts,
   activeRunId,
-  actionId,
-  localSubmission,
+  localSubmissions = [],
   onPromote,
   onCancel,
 }: {
   prompts: PendingPrompt[]
   activeRunId?: string
-  actionId: string | null
-  localSubmission?: LocalPendingSubmission | null
+  localSubmissions?: LocalPendingSubmission[]
   onPromote: (inputId: string, queuedRunId: string) => void
   onCancel: (inputId: string, queuedRunId: string) => void
 }): React.JSX.Element | null {
-  const visibleLocalSubmission =
-    localSubmission &&
-    localSubmission.phase !== "failed" &&
-    !prompts.some(({ input }) => input.id === localSubmission.id)
-      ? localSubmission
-      : null
-  if (prompts.length === 0 && !visibleLocalSubmission) return null
+  const authorityInputIds = new Set(prompts.map(({ input }) => input.id))
+  const visibleLocalSubmissions = localSubmissions.filter(
+    (submission) => !authorityInputIds.has(submission.id)
+  )
+  const visiblePrompts = prompts.filter(({ action }) => action?.phase !== "acknowledged")
+  if (visiblePrompts.length === 0 && visibleLocalSubmissions.length === 0) return null
 
   return (
     <ItemGroup className="gap-1.5" aria-label="待处理消息">
-      {visibleLocalSubmission ? (
-        <Item key={visibleLocalSubmission.id} variant="outline" size="xs" className="bg-background/95">
+      {visibleLocalSubmissions.map((visibleLocalSubmission) => (
+        <Item
+          key={visibleLocalSubmission.id}
+          variant="outline"
+          size="xs"
+          className="bg-background/95"
+        >
           <ItemMedia aria-hidden>
-            <Spinner className="size-3.5" />
+            {visibleLocalSubmission.phase === "failed" ? (
+              <span className="text-xs font-semibold text-destructive">!</span>
+            ) : (
+              <Spinner className="size-3.5" />
+            )}
           </ItemMedia>
           <ItemContent className="min-w-0">
             <ItemTitle className="max-w-full truncate font-normal">
               {visibleLocalSubmission.content}
             </ItemTitle>
+            {visibleLocalSubmission.phase === "failed" && visibleLocalSubmission.error ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {visibleLocalSubmission.error}
+              </p>
+            ) : null}
           </ItemContent>
           <ItemActions>
             <span className="text-xs text-muted-foreground">
-              {visibleLocalSubmission.phase === "submitting" ? "正在发送" : "等待处理"}
+              {visibleLocalSubmission.phase === "submitting"
+                ? "正在发送"
+                : visibleLocalSubmission.phase === "accepted"
+                  ? "等待处理"
+                  : "发送失败"}
             </span>
           </ItemActions>
         </Item>
-      ) : null}
-      {prompts.map(({ input, run }) => {
-        const promoting = actionId === `promote:${input.id}`
-        const cancelling = actionId === `cancel:${input.id}`
-        const busy = actionId !== null
+      ))}
+      {visiblePrompts.map(({ input, run, action }) => {
+        const promoting = action?.kind === "promote" && action.phase === "pending"
+        const cancelling = action?.kind === "cancel" && action.phase === "pending"
+        const busy = action?.phase === "pending"
         return (
           <Item key={run.id} variant="outline" size="xs" className="bg-background/95">
             <ItemMedia aria-hidden>
@@ -78,6 +98,11 @@ export function PendingPromptQueue({
             </ItemMedia>
             <ItemContent className="min-w-0">
               <ItemTitle className="max-w-full truncate font-normal">{input.content}</ItemTitle>
+              {action?.phase === "failed" && action.error ? (
+                <p role="alert" className="text-xs leading-snug text-destructive">
+                  {action.error}
+                </p>
+              ) : null}
             </ItemContent>
             <ItemActions>
               <Button

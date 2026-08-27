@@ -10,13 +10,14 @@ describe("PendingPromptQueue", () => {
       createElement(PendingPromptQueue, {
         prompts: [],
         activeRunId: "run-active",
-        actionId: null,
-        localSubmission: {
-          id: "input-local",
-          sessionId: "session-1",
-          content: "new request",
-          phase: "submitting",
-        },
+        localSubmissions: [
+          {
+            id: "input-local",
+            sessionId: "session-1",
+            content: "new request",
+            phase: "submitting",
+          },
+        ],
         onPromote: vi.fn(),
         onCancel: vi.fn(),
       })
@@ -24,5 +25,110 @@ describe("PendingPromptQueue", () => {
 
     expect(html).toContain("new request")
     expect(html).toContain("正在发送")
+  })
+
+  it("shows the error when a local submission fails", () => {
+    const html = renderToStaticMarkup(
+      createElement(PendingPromptQueue, {
+        prompts: [],
+        activeRunId: "run-active",
+        localSubmissions: [
+          {
+            id: "input-failed",
+            sessionId: "session-1",
+            content: "new request",
+            phase: "failed",
+            error: "网络连接已断开",
+          },
+        ],
+        onPromote: vi.fn(),
+        onCancel: vi.fn(),
+      })
+    )
+
+    expect(html).toContain("new request")
+    expect(html).toContain("发送失败")
+    expect(html).toContain("网络连接已断开")
+  })
+
+  it("keeps a failed action visible with an inline error", () => {
+    const prompt = {
+      input: {
+        id: "input-queued",
+        sessionId: "session-1",
+        seq: 2,
+        delivery: "queue" as const,
+        content: "change direction",
+        metadata: {},
+        createdAt: 2,
+      },
+      run: {
+        id: "run-queued",
+        sessionId: "session-1",
+        inputId: "input-queued",
+        status: "pending" as const,
+        metadata: {},
+        createdAt: 2,
+        updatedAt: 2,
+      },
+      action: {
+        sessionId: "session-1",
+        inputId: "input-queued",
+        runId: "run-queued",
+        kind: "promote" as const,
+        phase: "failed" as const,
+        error: "当前回答已经切换",
+      },
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(PendingPromptQueue, {
+        prompts: [prompt],
+        activeRunId: "run-active",
+        onPromote: vi.fn(),
+        onCancel: vi.fn(),
+      })
+    )
+
+    expect(html).toContain("change direction")
+    expect(html).toContain("当前回答已经切换")
+  })
+
+  it("hides an acknowledged action before the session stream catches up", () => {
+    const html = renderToStaticMarkup(
+      createElement(PendingPromptQueue, {
+        prompts: [
+          {
+            input: {
+              id: "input-queued",
+              sessionId: "session-1",
+              seq: 2,
+              delivery: "queue" as const,
+              content: "already promoted",
+              metadata: {},
+              createdAt: 2,
+            },
+            run: {
+              id: "run-queued",
+              sessionId: "session-1",
+              inputId: "input-queued",
+              status: "pending" as const,
+              metadata: {},
+              createdAt: 2,
+              updatedAt: 2,
+            },
+            action: {
+              kind: "promote" as const,
+              phase: "acknowledged" as const,
+            },
+          },
+        ],
+        activeRunId: "run-active",
+        onPromote: vi.fn(),
+        onCancel: vi.fn(),
+      })
+    )
+
+    expect(html).not.toContain("already promoted")
   })
 })
