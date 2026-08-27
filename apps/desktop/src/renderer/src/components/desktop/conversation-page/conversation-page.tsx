@@ -24,6 +24,7 @@ import {
 } from "@renderer/stores/desktop-session/selectors"
 import { Composer } from "./composer"
 import { PendingPromptQueue } from "./pending-prompt-queue"
+import { mergeOptimisticTranscript } from "./optimistic-transcript"
 import {
   skillCommandInvocationLine,
   toComposerSkillCommands,
@@ -138,6 +139,14 @@ function ConversationPane({
     })
   const pendingPermissions =
     sessionView?.permissions.filter((permission) => permission.status === "pending") ?? []
+  const localPromptSubmissions = Object.values(pendingPromptSubmissions)
+    .filter((submission) => submission.sessionId === activeSessionId)
+    .sort((left, right) => left.createdAt - right.createdAt)
+  const transcript = mergeOptimisticTranscript(
+    sessionView?.messages ?? [],
+    sessionView?.parts ?? [],
+    localPromptSubmissions
+  )
   const hasAgentTasks = Boolean(
     sessionView?.tasks.some((task) => task.type === "agent" && task.childSessionId)
   )
@@ -299,8 +308,8 @@ function ConversationPane({
                     </MessageScrollerItem>
                   ) : (
                     <ConversationTranscript
-                      messages={sessionView?.messages ?? []}
-                      parts={sessionView?.parts ?? []}
+                      messages={transcript.messages}
+                      parts={transcript.parts}
                       runs={sessionView?.runs ?? []}
                       running={running}
                       canEditLastUserMessage={!archived && !running && !sending}
@@ -356,9 +365,7 @@ function ConversationPane({
               <PendingPromptQueue
                 prompts={pendingPrompts}
                 activeRunId={activeRun?.id}
-                localSubmissions={Object.values(pendingPromptSubmissions)
-                  .filter((submission) => submission.sessionId === activeSessionId)
-                  .sort((left, right) => left.createdAt - right.createdAt)}
+                localSubmissions={localPromptSubmissions}
                 onPromote={(inputId, queuedRunId) => {
                   if (activeRun) void promoteQueuedPrompt(inputId, queuedRunId, activeRun.id)
                 }}
