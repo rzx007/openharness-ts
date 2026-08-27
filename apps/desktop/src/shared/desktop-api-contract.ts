@@ -79,6 +79,7 @@ import type {
   DesktopPluginContextInput,
   DesktopPluginSnapshot,
 } from "./plugin-types"
+import type { DesktopSettingsSnapshot, UpdateDesktopWorkStyleInput } from "./settings-types"
 
 export type DesktopAPI = {
   app: {
@@ -153,6 +154,10 @@ export type DesktopAPI = {
     createCustom: (input: CreateDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
     updateCustom: (input: UpdateDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
     removeCustom: (input: RemoveDesktopCustomProviderInput) => Promise<DesktopProviderSnapshot>
+  }
+  settings: {
+    snapshot: () => Promise<DesktopSettingsSnapshot>
+    updateWorkStyle: (input: UpdateDesktopWorkStyleInput) => Promise<DesktopSettingsSnapshot>
   }
   plugins: {
     snapshot: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>

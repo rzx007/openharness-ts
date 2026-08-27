@@ -6,6 +6,7 @@ import { pluginIpcContribution } from "./plugin/ipc"
 import { providerIpcContribution } from "./provider/ipc"
 import { sessionIpcContribution } from "./session/ipc"
 import { scheduleIpcContribution } from "./schedule/ipc"
+import { settingsIpcContribution } from "./settings/ipc"
 import { terminalIpcContribution } from "./terminal/ipc"
 import { trayIpcContribution } from "./tray/ipc"
 import { windowControlsIpcContribution } from "./window-controls/ipc"
@@ -21,6 +22,7 @@ export const allIpcContributions: IpcContribution[] = [
   gitIpcContribution,
   sessionIpcContribution,
   scheduleIpcContribution,
+  settingsIpcContribution,
   terminalIpcContribution,
   workspaceIpcContribution,
 ]

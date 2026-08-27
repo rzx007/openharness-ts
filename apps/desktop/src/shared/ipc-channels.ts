@@ -71,6 +71,7 @@ import type {
   DesktopPluginContextInput,
   DesktopPluginSnapshot,
 } from "./plugin-types"
+import type { DesktopSettingsSnapshot, UpdateDesktopWorkStyleInput } from "./settings-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -170,6 +171,9 @@ export const IpcChannels = {
   pluginDisable: "plugin:disable",
   pluginUninstall: "plugin:uninstall",
   pluginReload: "plugin:reload",
+
+  settingsSnapshot: "settings:snapshot",
+  settingsUpdateWorkStyle: "settings:update-work-style",
 } as const
 
 export const IpcEvents = {
@@ -241,6 +245,12 @@ export interface IpcInvokeMap {
   [IpcChannels.petGetState]: { args: []; result: PetState }
   [IpcChannels.petSetAlwaysOnTop]: { args: [value: boolean]; result: PetState }
   [IpcChannels.petSetIgnoreMouseEvents]: { args: [value: boolean]; result: PetState }
+
+  [IpcChannels.settingsSnapshot]: { args: []; result: DesktopSettingsSnapshot }
+  [IpcChannels.settingsUpdateWorkStyle]: {
+    args: [input: UpdateDesktopWorkStyleInput]
+    result: DesktopSettingsSnapshot
+  }
 
   [IpcChannels.sessionBootstrap]: { args: []; result: DesktopBootstrapData }
   [IpcChannels.sessionDaemonStatus]: { args: []; result: DesktopDaemonStatus }

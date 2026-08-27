@@ -1,10 +1,21 @@
 import { ChevronDown, Code2, MonitorCog, SlidersHorizontal, TerminalSquare } from "lucide-react"
+import { useEffect, useState } from "react"
 import { Button } from "@renderer/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@renderer/components/ui/select"
 import { Separator } from "@renderer/components/ui/separator"
 import { Switch } from "@renderer/components/ui/switch"
 import { ProviderSettings } from "./provider-settings"
+import { isDesktopWorkStyle } from "@shared/settings-types"
+import type { DesktopWorkStyle } from "@shared/settings-types"
 
 type SettingsContentProps = {
   selectedSection: string
@@ -18,7 +29,7 @@ export function SettingsContent({ selectedSection }: SettingsContentProps): Reac
           <h1 className="font-heading text-xl tracking-tight">{selectedSection}</h1>
           <p className="text-sm text-muted-foreground">
             {selectedSection === "常规"
-              ? "调整 OpenHarness 的默认工作方式。当前页面仅展示静态效果，暂不会写入配置。"
+              ? "调整 OpenHarness 的默认工作方式。工作风格会保存到全局配置，并用于后续任务。"
               : selectedSection === "供应商"
                 ? "连接模型服务和开发工具订阅，选择 OpenHarness 默认使用的供应商。"
                 : `${selectedSection}页面将在后续迭代中接入。`}
@@ -71,6 +82,12 @@ function GeneralSettings(): React.JSX.Element {
       </SettingsSection>
 
       <SettingsSection title="常规">
+        <SettingRow
+          title="工作风格"
+          description="务实会在开工和关键节点简要同步；高效会直接执行，只在需要你决定、遇到风险或完成时回复。两种风格都会完整调查、修改和验证。"
+          control={<WorkStyleControl />}
+        />
+        <Separator />
         <SettingRow
           title="默认文件打开目标"
           description="选择打开代码文件和文件夹时使用的应用"
@@ -135,6 +152,77 @@ function GeneralSettings(): React.JSX.Element {
       </SettingsSection>
     </div>
   )
+}
+
+function WorkStyleControl(): React.JSX.Element {
+  const [style, setStyle] = useState<DesktopWorkStyle>("practical")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.desktop.settings
+      .snapshot()
+      .then((snapshot) => {
+        if (!cancelled) setStyle(snapshot.workStyle)
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setError(errorMessage(loadError))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const update = (nextStyle: DesktopWorkStyle): void => {
+    if (saving || nextStyle === style) return
+    const previous = style
+    setStyle(nextStyle)
+    setSaving(true)
+    setError(null)
+    void window.desktop.settings
+      .updateWorkStyle({ workStyle: nextStyle })
+      .then((snapshot) => setStyle(snapshot.workStyle))
+      .catch((saveError: unknown) => {
+        setStyle(previous)
+        setError(errorMessage(saveError))
+      })
+      .finally(() => setSaving(false))
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      <Select
+        value={style}
+        onValueChange={(value) => {
+          if (isDesktopWorkStyle(value)) update(value)
+        }}
+      >
+        <SelectTrigger aria-label="工作风格" disabled={loading || saving} className="min-w-28">
+          <SelectValue>{style === "practical" ? "务实" : "高效"}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="practical">务实</SelectItem>
+            <SelectItem value="efficient">高效</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      {error ? (
+        <p role="alert" className="max-w-56 text-right text-[11px] text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function SettingsSection({

@@ -132,6 +132,11 @@ export const desktopAPI = {
     removeCustom: (input: IpcInvokeMap[typeof IpcChannels.providerCustomRemove]["args"][0]) =>
       invoke(IpcChannels.providerCustomRemove, input),
   },
+  settings: {
+    snapshot: () => invoke(IpcChannels.settingsSnapshot),
+    updateWorkStyle: (input: IpcInvokeMap[typeof IpcChannels.settingsUpdateWorkStyle]["args"][0]) =>
+      invoke(IpcChannels.settingsUpdateWorkStyle, input),
+  },
   plugins: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>
       invoke(IpcChannels.pluginSnapshot, input),
