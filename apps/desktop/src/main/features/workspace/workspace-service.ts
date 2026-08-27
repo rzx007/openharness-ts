@@ -23,7 +23,6 @@ const ignoredDirectories = new Set([
   "node_modules",
   "out",
 ])
-const maxEntries = 5_000
 const maxFileBytes = 1_250_000
 const textDecoder = new TextDecoder("utf-8", { fatal: false })
 
@@ -31,14 +30,8 @@ class WorkspaceService {
   async listFiles(input: WorkspaceListFilesInput): Promise<WorkspaceListFilesResult> {
     const rootPath = await resolveDirectory(input.rootPath)
     const entries: WorkspaceFileEntry[] = []
-    let truncated = false
 
     const visit = async (directory: string): Promise<void> => {
-      if (entries.length >= maxEntries) {
-        truncated = true
-        return
-      }
-
       const children = await readdir(directory, { withFileTypes: true })
       children.sort((left, right) => {
         if (left.isDirectory() !== right.isDirectory()) return left.isDirectory() ? -1 : 1
@@ -46,10 +39,6 @@ class WorkspaceService {
       })
 
       for (const child of children) {
-        if (entries.length >= maxEntries) {
-          truncated = true
-          return
-        }
         if (child.name.startsWith(".") && ignoredDirectories.has(child.name)) continue
         if (child.isDirectory() && ignoredDirectories.has(child.name)) continue
         if (child.isSymbolicLink()) continue
@@ -76,7 +65,7 @@ class WorkspaceService {
     }
 
     await visit(rootPath)
-    return { rootPath, entries, truncated }
+    return { rootPath, entries }
   }
 
   async readFile(input: WorkspaceReadFileInput): Promise<WorkspaceReadFileResult> {

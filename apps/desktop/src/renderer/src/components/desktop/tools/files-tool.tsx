@@ -431,11 +431,6 @@ export function FilesTool({
                 onSelect={(path) => void openFile(path)}
                 onActionError={(actionError) => setError(errorMessage(actionError))}
               />
-              {listing.truncated && (
-                <p className="shrink-0 border-t border-border/45 px-3 py-2 text-[11px] text-ui-muted">
-                  文件较多，仅显示前 5000 项。
-                </p>
-              )}
             </div>
           </Panel>
         </Group>

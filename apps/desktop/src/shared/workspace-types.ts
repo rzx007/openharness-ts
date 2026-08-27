@@ -11,7 +11,6 @@ export interface WorkspaceFileEntry {
 export interface WorkspaceListFilesResult {
   rootPath: string
   entries: WorkspaceFileEntry[]
-  truncated: boolean
 }
 
 export interface WorkspaceReadFileInput {
