@@ -18,7 +18,10 @@ export type {
   ProtocolCompatibility,
   ServerCapabilities,
 } from "@openharness/protocol";
-export { checkProtocolCompatibility, supportsFeature } from "@openharness/protocol";
+export {
+  checkProtocolCompatibility,
+  supportsFeature,
+} from "@openharness/protocol";
 export {
   applyEvent,
   applyEvents,
@@ -61,6 +64,8 @@ export type {
   CommandKind,
   CommandSource,
   CompactSessionResponse,
+  CancelQueuedClientPromptInput,
+  CancelQueuedPromptResponse,
   CreateBackgroundShellInput,
   CreateBackgroundShellResult,
   CreateScheduledTaskInput,
@@ -95,6 +100,8 @@ export type {
   PermissionRequestRecord,
   PermissionStatus,
   PluginInfo,
+  PromoteQueuedClientPromptInput,
+  PromoteQueuedPromptResponse,
   PromptResponse,
   ProviderInfo,
   CustomProviderInput,

@@ -66,6 +66,15 @@ export interface ResumeSessionRunCommand {
   traceId: string;
 }
 
+export interface PromoteQueuedPromptCommand {
+  queuedRunId: string;
+  expectedActiveRunId: string;
+}
+
+export interface CancelQueuedPromptCommand {
+  queuedRunId: string;
+}
+
 export type ResumeSessionRunResult = AdmitPromptResult & {
   source_run: NonNullable<ReturnType<SessionStore["getRun"]>>;
 };
@@ -523,6 +532,153 @@ export class SessionApplicationService {
     return childInterrupted && !lane.interrupted
       ? { ...lane, interrupted: true }
       : lane;
+  }
+
+  async promoteQueuedPrompt(
+    sessionId: string,
+    inputId: string,
+    command: PromoteQueuedPromptCommand,
+  ): Promise<
+    NonNullable<Awaited<ReturnType<SessionRunEngine["promoteQueuedRun"]>>>
+  > {
+    this.assertReady();
+    const session = this.context.store.getSession(sessionId);
+    if (!session)
+      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    const lease = this.enterSessionOperation(session);
+    try {
+      const input = this.context.store.getInput(inputId);
+      const queuedRun = this.context.store.getRun(command.queuedRunId);
+      if (!input || input.sessionId !== sessionId) {
+        throw new SessionApplicationError(404, `Prompt not found: ${inputId}`);
+      }
+      if (!queuedRun || queuedRun.sessionId !== sessionId) {
+        throw new SessionApplicationError(
+          404,
+          `Session run not found: ${command.queuedRunId}`,
+        );
+      }
+      const promotion = isRecord(queuedRun.metadata.promotion)
+        ? queuedRun.metadata.promotion
+        : undefined;
+      if (
+        queuedRun.status === "interrupted" &&
+        promotion?.kind === "steered" &&
+        promotion.inputId === inputId &&
+        typeof promotion.activeRunId === "string"
+      ) {
+        const activeRun = this.context.store.getRun(promotion.activeRunId);
+        if (!activeRun) {
+          throw new SessionApplicationError(
+            409,
+            "The promoted prompt no longer has its target run",
+          );
+        }
+        return { input, queued_run: queuedRun, active_run: activeRun };
+      }
+      if (
+        input.delivery !== "queue" ||
+        queuedRun.inputId !== inputId ||
+        queuedRun.status !== "pending"
+      ) {
+        throw new SessionApplicationError(
+          409,
+          "The selected prompt is no longer waiting in the queue",
+        );
+      }
+      if (
+        this.context.runEngine.activeRunId(sessionId) !==
+        command.expectedActiveRunId
+      ) {
+        throw new SessionApplicationError(
+          409,
+          "The active run changed before the prompt could be promoted",
+        );
+      }
+      const promoted = await this.context.runEngine.promoteQueuedRun(
+        sessionId,
+        inputId,
+        command.queuedRunId,
+        command.expectedActiveRunId,
+      );
+      if (!promoted) {
+        throw new SessionApplicationError(
+          409,
+          "The prompt or active run changed before promotion completed",
+        );
+      }
+      return promoted;
+    } finally {
+      lease.release();
+    }
+  }
+
+  async cancelQueuedPrompt(
+    sessionId: string,
+    inputId: string,
+    command: CancelQueuedPromptCommand,
+  ): Promise<{
+    input: NonNullable<ReturnType<SessionStore["getInput"]>>;
+    run: NonNullable<ReturnType<SessionStore["getRun"]>>;
+  }> {
+    this.assertReady();
+    const session = this.context.store.getSession(sessionId);
+    if (!session)
+      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    const lease = this.enterSessionOperation(session);
+    try {
+      const input = this.context.store.getInput(inputId);
+      let run = this.context.store.getRun(command.queuedRunId);
+      if (!input || input.sessionId !== sessionId) {
+        throw new SessionApplicationError(404, `Prompt not found: ${inputId}`);
+      }
+      if (!run || run.sessionId !== sessionId || run.inputId !== inputId) {
+        throw new SessionApplicationError(
+          404,
+          `Queued run not found: ${command.queuedRunId}`,
+        );
+      }
+      const cancellation = isRecord(run.metadata.cancellation)
+        ? run.metadata.cancellation
+        : undefined;
+      if (
+        run.status === "interrupted" &&
+        cancellation?.kind === "user_cancelled_pending"
+      ) {
+        return { input, run };
+      }
+      if (run.status !== "pending") {
+        throw new SessionApplicationError(
+          409,
+          "The selected prompt is no longer waiting in the queue",
+        );
+      }
+      const interrupted = this.context.runEngine.interruptQueuedRun(
+        sessionId,
+        command.queuedRunId,
+        "Queued prompt cancelled by the user",
+      );
+      if (!interrupted.queuedRunIds.includes(command.queuedRunId)) {
+        throw new SessionApplicationError(
+          409,
+          "The queued prompt changed before it could be cancelled",
+        );
+      }
+      const before = this.context.events.checkpoint();
+      run = this.context.store.updateRun(command.queuedRunId, {
+        metadata: {
+          cancellation: {
+            kind: "user_cancelled_pending",
+            inputId,
+            cancelledAt: Date.now(),
+          },
+        },
+      });
+      this.context.events.publishSince(before);
+      return { input, run };
+    } finally {
+      lease.release();
+    }
   }
 
   async awaitRun(

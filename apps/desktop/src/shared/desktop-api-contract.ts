@@ -20,6 +20,8 @@ import type {
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
+  PromoteDesktopQueuedPromptInput,
+  CancelDesktopQueuedPromptInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
@@ -191,6 +193,8 @@ export type DesktopAPI = {
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
     invokeCommand: (input: InvokeDesktopCommandInput) => Promise<void>
     editLatestPrompt: (input: EditLatestDesktopPromptInput) => Promise<void>
+    promoteQueuedPrompt: (input: PromoteDesktopQueuedPromptInput) => Promise<void>
+    cancelQueuedPrompt: (input: CancelDesktopQueuedPromptInput) => Promise<void>
     interrupt: (input: InterruptDesktopSessionInput) => Promise<void>
     replyPermission: (input: ReplyDesktopPermissionInput) => Promise<void>
     setDefaultModel: (input: SetDefaultDesktopModelInput) => Promise<DesktopBootstrapData>

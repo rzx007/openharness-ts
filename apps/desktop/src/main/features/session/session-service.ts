@@ -48,6 +48,8 @@ import type {
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
+  PromoteDesktopQueuedPromptInput,
+  CancelDesktopQueuedPromptInput,
   OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
@@ -415,6 +417,26 @@ class DesktopSessionService {
         },
       },
     })
+  }
+
+  async promoteQueuedPrompt(input: PromoteDesktopQueuedPromptInput): Promise<void> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const inputId = requireString(input.inputId, "输入 ID")
+    const queuedRunId = requireString(input.queuedRunId, "排队运行 ID")
+    const expectedActiveRunId = requireString(input.expectedActiveRunId, "当前运行 ID")
+    const client = await this.getClient()
+    await client.promoteQueuedPrompt(sessionId, inputId, {
+      queuedRunId,
+      expectedActiveRunId,
+    })
+  }
+
+  async cancelQueuedPrompt(input: CancelDesktopQueuedPromptInput): Promise<void> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const inputId = requireString(input.inputId, "输入 ID")
+    const queuedRunId = requireString(input.queuedRunId, "排队运行 ID")
+    const client = await this.getClient()
+    await client.cancelQueuedPrompt(sessionId, inputId, { queuedRunId })
   }
 
   async forkSession(input: ForkDesktopSessionInput): Promise<DesktopSessionRecord> {

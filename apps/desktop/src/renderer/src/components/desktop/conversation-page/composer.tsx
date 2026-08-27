@@ -61,7 +61,7 @@ export function Composer({
   const allowSubmit = canSubmit ?? Boolean(draft.trim())
 
   const submit = (): void => {
-    if (sending || running || !allowSubmit) return
+    if (sending || !allowSubmit) return
     onSubmit()
   }
 

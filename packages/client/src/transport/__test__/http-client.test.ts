@@ -771,6 +771,37 @@ describe("OpenHarnessClient", () => {
     expect(body.id).toEqual(expect.any(String));
   });
 
+  it("targets one durable queued prompt for promotion and cancellation", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return jsonResponse({ ok: true });
+      },
+    });
+
+    await client.promoteQueuedPrompt("s1", "input 1", {
+      queuedRunId: "queued-run",
+      expectedActiveRunId: "active-run",
+    });
+    await client.cancelQueuedPrompt("s1", "input 2", {
+      queuedRunId: "other-run",
+    });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://daemon.test/sessions/s1/prompts/input%201/promote",
+      "http://daemon.test/sessions/s1/prompts/input%202/cancel",
+    ]);
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      queuedRunId: "queued-run",
+      expectedActiveRunId: "active-run",
+    });
+    expect(JSON.parse(String(calls[1]!.init.body))).toEqual({
+      queuedRunId: "other-run",
+    });
+  });
+
   it("uses exponential reconnect delay until the stream recovers", async () => {
     vi.useFakeTimers();
     const controller = new AbortController();

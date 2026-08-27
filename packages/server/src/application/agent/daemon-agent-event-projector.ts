@@ -17,7 +17,7 @@ import type {
   SessionExecutionProjector,
 } from "../session/session-execution-projector.js";
 import type { ActiveTranscriptProjectionState, SessionTranscriptProjection } from "../session/transcript-projection.js";
-import { jsonEqual, withoutTraceId } from "../support.js";
+import { isRecord, jsonEqual, withoutTraceId } from "../support.js";
 import {
   decodeDaemonAgentSettlement,
   projectionSettlementInput,
@@ -231,7 +231,7 @@ export class DaemonAgentEventProjector {
     const sessionId = event.context.sessionId;
     const inputId = required(event.context.inputId, "inputId", event.type);
     const content = contentToText(event.data.content);
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       ...event.data.metadata,
       ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
     };
@@ -250,13 +250,35 @@ export class DaemonAgentEventProjector {
             content,
             metadata,
           });
-        } else if (
-          input.sessionId !== sessionId ||
-          input.content !== content ||
-          input.delivery !== event.data.delivery ||
-          !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))
-        ) {
-          throw new Error(`Agent input identity conflict: ${inputId}`);
+        } else {
+          const promotion = isRecord(metadata.promotion) ? metadata.promotion : undefined;
+          const queuedRun = typeof promotion?.queuedRunId === "string"
+            ? this.context.store.getRun(promotion.queuedRunId)
+            : undefined;
+          const baseMetadata = { ...metadata };
+          delete baseMetadata.promotion;
+          const queuedPromptPromotion =
+            input.sessionId === sessionId &&
+            input.content === content &&
+            input.delivery === "queue" &&
+            event.data.delivery === "steer" &&
+            promotion?.kind === "queued_prompt" &&
+            promotion.expectedActiveRunId === runId &&
+            queuedRun?.sessionId === sessionId &&
+            queuedRun.inputId === inputId &&
+            queuedRun.status === "pending" &&
+            jsonEqual(withoutTraceId(input.metadata), withoutTraceId(baseMetadata));
+          if (
+            !queuedPromptPromotion &&
+            (
+              input.sessionId !== sessionId ||
+              input.content !== content ||
+              input.delivery !== event.data.delivery ||
+              !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))
+            )
+          ) {
+            throw new Error(`Agent input identity conflict: ${inputId}`);
+          }
         }
 
         if (transcript && event.data.delivery === "steer") {

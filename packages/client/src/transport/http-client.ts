@@ -10,6 +10,8 @@ import type {
   CommandCatalogEntry,
   CreateClientSessionInput,
   EditLatestClientPromptInput,
+  CancelQueuedClientPromptInput,
+  CancelQueuedPromptResponse,
   EventSyncOptions,
   ForkClientSessionInput,
   InterruptSessionResponse,
@@ -41,6 +43,8 @@ import type {
   OpenHarnessServerHealth,
   PermissionRequestRecord,
   PluginInfo,
+  PromoteQueuedClientPromptInput,
+  PromoteQueuedPromptResponse,
   PromptResponse,
   ResumeInterruptedRunInput,
   ResumeInterruptedRunResponse,
@@ -635,12 +639,27 @@ export class OpenHarnessClient {
     );
   }
 
-  async installLocalPlugin(input: { cwd: string; sourcePath: string; scope: "user" | "project" | "local"; approvedPermissions: string[]; link?: boolean }): Promise<{ message: string }> {
-    return await this.request<{ message: string }>(input.link ? "/plugins/link-local" : "/plugins/install-local", { method: "POST", body: input });
+  async installLocalPlugin(input: {
+    cwd: string;
+    sourcePath: string;
+    scope: "user" | "project" | "local";
+    approvedPermissions: string[];
+    link?: boolean;
+  }): Promise<{ message: string }> {
+    return await this.request<{ message: string }>(
+      input.link ? "/plugins/link-local" : "/plugins/install-local",
+      { method: "POST", body: input },
+    );
   }
 
-  async uninstallPlugin(id: string, input: { cwd: string }): Promise<{ message: string }> {
-    return await this.request<{ message: string }>(`/plugins/${encodeURIComponent(id)}`, { method: "DELETE", body: input });
+  async uninstallPlugin(
+    id: string,
+    input: { cwd: string },
+  ): Promise<{ message: string }> {
+    return await this.request<{ message: string }>(
+      `/plugins/${encodeURIComponent(id)}`,
+      { method: "DELETE", body: input },
+    );
   }
 
   /** `POST /plugins/reload` */
@@ -1008,6 +1027,32 @@ export class OpenHarnessClient {
     );
   }
 
+  /** Promote one durable queued prompt into the exact active run. */
+  async promoteQueuedPrompt(
+    sessionId: string,
+    inputId: string,
+    input: PromoteQueuedClientPromptInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<PromoteQueuedPromptResponse> {
+    return await this.request<PromoteQueuedPromptResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/prompts/${encodeURIComponent(inputId)}/promote`,
+      { method: "POST", body: input, signal: options.signal },
+    );
+  }
+
+  /** Cancel one durable prompt that is still waiting in the run queue. */
+  async cancelQueuedPrompt(
+    sessionId: string,
+    inputId: string,
+    input: CancelQueuedClientPromptInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CancelQueuedPromptResponse> {
+    return await this.request<CancelQueuedPromptResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/prompts/${encodeURIComponent(inputId)}/cancel`,
+      { method: "POST", body: input, signal: options.signal },
+    );
+  }
+
   /**
    * `POST /sessions/:id/runs/:runId/resume` — 显式重放一次中断 run 的原始 prompt。
    * 不会继续旧 provider stream；服务端会创建一个带恢复溯源的新 input/run。
@@ -1056,7 +1101,9 @@ export class OpenHarnessClient {
       `/sessions/${encodeURIComponent(sessionId)}/interrupt`,
       {
         method: "POST",
-        body: options.expectedRunId ? { expectedRunId: options.expectedRunId } : undefined,
+        body: options.expectedRunId
+          ? { expectedRunId: options.expectedRunId }
+          : undefined,
         signal: options.signal,
       },
     );

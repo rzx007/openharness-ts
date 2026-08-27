@@ -100,6 +100,26 @@ export interface EditLatestClientPromptInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface PromoteQueuedClientPromptInput {
+  queuedRunId: string;
+  expectedActiveRunId: string;
+}
+
+export interface CancelQueuedClientPromptInput {
+  queuedRunId: string;
+}
+
+export interface PromoteQueuedPromptResponse {
+  input: SessionInputRecord;
+  queued_run: SessionRunRecord;
+  active_run: SessionRunRecord;
+}
+
+export interface CancelQueuedPromptResponse {
+  input: SessionInputRecord;
+  run: SessionRunRecord;
+}
+
 /** `POST /sessions/:id/prompts` 请求体。 */
 export interface AdmitClientPromptInput {
   id?: string;

@@ -233,6 +233,19 @@ export interface InterruptDesktopSessionInput {
   expectedRunId?: string
 }
 
+export interface PromoteDesktopQueuedPromptInput {
+  sessionId: string
+  inputId: string
+  queuedRunId: string
+  expectedActiveRunId: string
+}
+
+export interface CancelDesktopQueuedPromptInput {
+  sessionId: string
+  inputId: string
+  queuedRunId: string
+}
+
 export interface ForkDesktopSessionInput {
   sessionId: string
   beforeMessageId?: string

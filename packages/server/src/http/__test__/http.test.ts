@@ -2770,7 +2770,17 @@ describe("OpenHarnessHttpServer", () => {
           async list() {
             return {
               plugins: [
-                { identity: { id: "demo", name: "demo", version: "1.0.0" }, origin: "native", scope: "user", enabled: true, installation: "installed", activation: "active", inventory: { skills: 1 }, permissions: { requested: [], approved: [], missing: [] }, diagnostics: [] },
+                {
+                  identity: { id: "demo", name: "demo", version: "1.0.0" },
+                  origin: "native",
+                  scope: "user",
+                  enabled: true,
+                  installation: "installed",
+                  activation: "active",
+                  inventory: { skills: 1 },
+                  permissions: { requested: [], approved: [], missing: [] },
+                  diagnostics: [],
+                },
               ],
               warnings: [],
             };
@@ -4468,6 +4478,106 @@ describe("OpenHarnessHttpServer", () => {
             (event.payload?.run as { status?: string } | undefined)?.status ===
               "completed",
         );
+      },
+      { runtimeFactory },
+    );
+  });
+
+  it("promotes a durable queued prompt into the active run without executing it twice", async () => {
+    const release = deferred();
+    let executionCount = 0;
+    let steeredContent = "";
+    const runtimeFactory: TestAgentProgramFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(input) {
+            executionCount += 1;
+            steeredContent = (await input.waitForSteer()).content;
+            await release.promise;
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(
+      async ({ baseUrl, token }) => {
+        const headers = { ...auth(token), "content-type": "application/json" };
+        await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m" }),
+        });
+        const active = (await (
+          await fetch(`${baseUrl}/sessions/s1/prompts`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ content: "active" }),
+          })
+        ).json()) as { run: { id: string } };
+        await waitForEvent(
+          baseUrl,
+          token,
+          (event) =>
+            event.type === "session.run.updated" &&
+            (event.payload?.run as { id?: string; status?: string } | undefined)
+              ?.id === active.run.id &&
+            (event.payload?.run as { status?: string } | undefined)?.status ===
+              "running",
+        );
+        const queued = (await (
+          await fetch(`${baseUrl}/sessions/s1/prompts`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ id: "queued-input", content: "adjust now" }),
+          })
+        ).json()) as { input: { id: string }; run: { id: string } };
+
+        const response = await fetch(
+          `${baseUrl}/sessions/s1/prompts/${queued.input.id}/promote`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              queuedRunId: queued.run.id,
+              expectedActiveRunId: active.run.id,
+            }),
+          },
+        );
+        const promoted = (await response.json()) as {
+          queued_run: {
+            id: string;
+            status: string;
+            metadata: Record<string, unknown>;
+          };
+          active_run: { id: string };
+        };
+        expect(response.status).toBe(200);
+        expect(promoted).toMatchObject({
+          queued_run: {
+            id: queued.run.id,
+            status: "interrupted",
+            metadata: {
+              promotion: { kind: "steered", activeRunId: active.run.id },
+            },
+          },
+          active_run: { id: active.run.id },
+        });
+        expect(steeredContent).toBe("adjust now");
+        expect(executionCount).toBe(1);
+
+        release.resolve();
+        await waitForEvent(
+          baseUrl,
+          token,
+          (event) =>
+            event.type === "session.run.updated" &&
+            (event.payload?.run as { id?: string; status?: string } | undefined)
+              ?.id === active.run.id &&
+            (event.payload?.run as { status?: string } | undefined)?.status ===
+              "completed",
+        );
+        expect(executionCount).toBe(1);
       },
       { runtimeFactory },
     );

@@ -39,6 +39,12 @@ export type AwaitSessionRunResult = {
   error?: string;
 };
 
+export type PromoteQueuedRunResult = {
+  input: NonNullable<ReturnType<SessionStore["getInput"]>>;
+  queued_run: NonNullable<ReturnType<SessionStore["getRun"]>>;
+  active_run: NonNullable<ReturnType<SessionStore["getRun"]>>;
+};
+
 export interface SessionRunEngineContext {
   store: SessionStore;
   agentPool: AgentPool;
@@ -79,6 +85,63 @@ export class SessionRunEngine {
 
   hasWork(sessionId: string): boolean {
     return this.runCoordinator.hasWork(sessionId);
+  }
+
+  async promoteQueuedRun(
+    sessionId: string,
+    inputId: string,
+    queuedRunId: string,
+    expectedActiveRunId: string,
+  ): Promise<PromoteQueuedRunResult | undefined> {
+    if (!this.accepting) throw new Error("Session run engine is stopping");
+    const input = this.context.store.getInput(inputId);
+    const queuedRun = this.context.store.getRun(queuedRunId);
+    if (!input || !queuedRun) return undefined;
+    const promoted = this.runCoordinator.promoteQueuedRun(
+      sessionId,
+      queuedRunId,
+      expectedActiveRunId,
+      {
+        id: input.id,
+        content: input.content,
+        delivery: "steer",
+        traceId: normalizeTraceId(input.metadata.traceId),
+        metadata: {
+          ...input.metadata,
+          promotion: {
+            kind: "queued_prompt",
+            queuedRunId,
+            expectedActiveRunId,
+          },
+        },
+      },
+    );
+    if (!promoted.promoted) return undefined;
+    await promoted.delivery;
+
+    const before = this.context.events.checkpoint();
+    const promotedAt = Date.now();
+    const updatedQueuedRun = this.context.store.updateRun(queuedRunId, {
+      status: "interrupted",
+      error: "Queued prompt was promoted into the active run",
+      metadata: {
+        promotion: {
+          kind: "steered",
+          inputId,
+          queuedRunId,
+          activeRunId: expectedActiveRunId,
+          promotedAt,
+        },
+      },
+    });
+    this.context.events.publishSince(before);
+    const activeRun = this.context.store.getRun(expectedActiveRunId);
+    if (!activeRun || activeRun.sessionId !== sessionId) {
+      throw new Error(
+        `Promoted prompt active run was not found: ${expectedActiveRunId}`,
+      );
+    }
+    return { input, queued_run: updatedQueuedRun, active_run: activeRun };
   }
 
   hasAnyActiveRuns(): boolean {
@@ -423,6 +486,40 @@ export class SessionRunEngine {
             queuedRunIds: result.queuedRunIds,
             reason: reason ?? "Run interrupted",
             scoped: true,
+          },
+        });
+      });
+      this.context.events.publishSince(before);
+    }
+    return result;
+  }
+
+  interruptQueuedRun(
+    sessionId: string,
+    runId: string,
+    reason?: string,
+  ): ReturnType<SessionRunCoordinator["interruptQueuedRun"]> {
+    const before = this.context.events.checkpoint();
+    const result = this.runCoordinator.interruptQueuedRun(
+      sessionId,
+      runId,
+      reason,
+    );
+    if (result.queuedRunIds.includes(runId)) {
+      this.context.store.transaction(() => {
+        this.context.store.updateRun(runId, {
+          status: "interrupted",
+          error: reason ?? "Queued run interrupted",
+        });
+        this.context.store.appendEvent({
+          type: "session.run.interrupt_requested",
+          sessionId,
+          payload: {
+            runId,
+            queuedRunIds: [runId],
+            reason: reason ?? "Queued run interrupted",
+            scoped: true,
+            queuedOnly: true,
           },
         });
       });

@@ -16,7 +16,12 @@ import type { SessionApplicationService } from "../../application/session/sessio
 export interface RunExecutionRoutesContext {
   application: Pick<
     SessionApplicationService,
-    "admitPrompt" | "editLatestPrompt" | "interruptSession" | "resumeRun"
+    | "admitPrompt"
+    | "cancelQueuedPrompt"
+    | "editLatestPrompt"
+    | "interruptSession"
+    | "promoteQueuedPrompt"
+    | "resumeRun"
   >;
   traces: Pick<RequestTraceRegistry, "get">;
 }
@@ -73,6 +78,56 @@ export function createRunExecutionRoutes(
           traceId: context.traces.get(c.req.raw),
         });
         return jsonResponse(admitted, 202);
+      } catch (error) {
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
+        );
+      }
+    })
+    .post("/:sessionId/prompts/:inputId/promote", async (c) => {
+      const sessionId = c.req.param("sessionId");
+      const inputId = c.req.param("inputId");
+      if (!sessionId || !inputId)
+        return errorResponse(400, "sessionId and inputId are required");
+      const body = await readJson(c);
+      if (typeof body.queuedRunId !== "string" || !body.queuedRunId.trim())
+        return errorResponse(400, "queuedRunId is required");
+      if (
+        typeof body.expectedActiveRunId !== "string" ||
+        !body.expectedActiveRunId.trim()
+      )
+        return errorResponse(400, "expectedActiveRunId is required");
+      try {
+        return jsonResponse(
+          await context.application.promoteQueuedPrompt(sessionId, inputId, {
+            queuedRunId: body.queuedRunId,
+            expectedActiveRunId: body.expectedActiveRunId,
+          }),
+          200,
+        );
+      } catch (error) {
+        return applicationErrorResponse(
+          error,
+          sessionMutationErrorStatus(error),
+        );
+      }
+    })
+    .post("/:sessionId/prompts/:inputId/cancel", async (c) => {
+      const sessionId = c.req.param("sessionId");
+      const inputId = c.req.param("inputId");
+      if (!sessionId || !inputId)
+        return errorResponse(400, "sessionId and inputId are required");
+      const body = await readJson(c);
+      if (typeof body.queuedRunId !== "string" || !body.queuedRunId.trim())
+        return errorResponse(400, "queuedRunId is required");
+      try {
+        return jsonResponse(
+          await context.application.cancelQueuedPrompt(sessionId, inputId, {
+            queuedRunId: body.queuedRunId,
+          }),
+          200,
+        );
       } catch (error) {
         return applicationErrorResponse(
           error,

@@ -37,6 +37,15 @@ export type SteerSessionResult =
   | { merged: false }
   | { merged: true; activeRunId: string; delivery: Promise<{ runId: string }> };
 
+export type PromoteQueuedRunResult =
+  | { promoted: false; reason: "active_run_changed" | "queued_run_changed" }
+  | {
+      promoted: true;
+      activeRunId: string;
+      queuedRunId: string;
+      delivery: Promise<{ runId: string }>;
+    };
+
 export interface InterruptSessionResult {
   activeRunId?: string;
   queuedRunIds: string[];
@@ -45,6 +54,7 @@ export interface InterruptSessionResult {
 
 interface PendingSteerRequest {
   input: AgentSteerInput;
+  recoverRejected: boolean;
   resolve(value: { runId: string }): void;
   reject(error: unknown): void;
 }
@@ -87,7 +97,11 @@ export class SessionRunCoordinator {
     };
   }
 
-  steer(sessionId: string, input: AgentSteerInput): SteerSessionResult {
+  steer(
+    sessionId: string,
+    input: AgentSteerInput,
+    options: { recoverRejected?: boolean } = {},
+  ): SteerSessionResult {
     const lane = this.lanes.get(sessionId);
     if (!lane?.active || !lane.active.acceptingSteers) return { merged: false };
     let resolve!: PendingSteerRequest["resolve"];
@@ -97,11 +111,68 @@ export class SessionRunCoordinator {
       reject = fail;
     });
     void delivery.catch(() => {});
-    const request = { input, resolve, reject };
+    const request = {
+      input,
+      recoverRejected: options.recoverRejected ?? true,
+      resolve,
+      reject,
+    };
     lane.active.pendingSteers.push(request);
     lane.active.steerRequests.add(request);
     this.flushSteers(lane.active);
     return { merged: true, activeRunId: lane.active.runId, delivery };
+  }
+
+  promoteQueuedRun(
+    sessionId: string,
+    queuedRunId: string,
+    expectedActiveRunId: string,
+    input: AgentSteerInput,
+  ): PromoteQueuedRunResult {
+    const lane = this.lanes.get(sessionId);
+    if (
+      !lane?.active ||
+      lane.active.runId !== expectedActiveRunId ||
+      !lane.active.acceptingSteers
+    ) {
+      return { promoted: false, reason: "active_run_changed" };
+    }
+    const queuedIndex = lane.queue.findIndex(
+      (task) => task.runId === queuedRunId,
+    );
+    if (queuedIndex < 0) {
+      return { promoted: false, reason: "queued_run_changed" };
+    }
+    const queuedTask = lane.queue.splice(queuedIndex, 1)[0]!;
+    const steered = this.steer(sessionId, input, { recoverRejected: false });
+    if (!steered.merged || steered.activeRunId !== expectedActiveRunId) {
+      this.restoreQueuedTask(lane, queuedTask, queuedIndex);
+      return { promoted: false, reason: "active_run_changed" };
+    }
+    const delivery = steered.delivery
+      .then((receipt) => {
+        if (receipt.runId !== expectedActiveRunId) {
+          throw new Error(
+            `Steer was delivered to an unexpected run: ${receipt.runId}`,
+          );
+        }
+        this.rejectQueuedTask(
+          queuedTask,
+          "Queued run promoted into the active run",
+        );
+        return receipt;
+      })
+      .catch((error) => {
+        this.restoreQueuedTask(lane, queuedTask, queuedIndex);
+        throw error;
+      });
+    void delivery.catch(() => {});
+    return {
+      promoted: true,
+      activeRunId: expectedActiveRunId,
+      queuedRunId,
+      delivery,
+    };
   }
 
   interrupt(sessionId: string, reason?: string): InterruptSessionResult {
@@ -177,6 +248,30 @@ export class SessionRunCoordinator {
     };
   }
 
+  interruptQueuedRun(
+    sessionId: string,
+    runId: string,
+    reason?: string,
+  ): InterruptSessionResult {
+    const lane = this.lanes.get(sessionId);
+    if (!lane) return { queuedRunIds: [], interrupted: false };
+    const queuedIndex = lane.queue.findIndex((task) => task.runId === runId);
+    if (queuedIndex < 0) {
+      return {
+        ...(lane.active ? { activeRunId: lane.active.runId } : {}),
+        queuedRunIds: [],
+        interrupted: false,
+      };
+    }
+    const [task] = lane.queue.splice(queuedIndex, 1);
+    if (task) this.rejectQueuedTask(task, reason ?? "Queued run interrupted");
+    return {
+      ...(lane.active ? { activeRunId: lane.active.runId } : {}),
+      queuedRunIds: [runId],
+      interrupted: true,
+    };
+  }
+
   activeRunId(sessionId: string): string | undefined {
     return this.lanes.get(sessionId)?.active?.runId;
   }
@@ -203,6 +298,26 @@ export class SessionRunCoordinator {
       this.lanes.set(sessionId, lane);
     }
     return lane;
+  }
+
+  private rejectQueuedTask(task: RunTask, message: string): void {
+    const error = new RunInterruptedError(message);
+    task.controller.abort(message);
+    this.rejectSteers(task, error);
+    task.reject(error);
+  }
+
+  private restoreQueuedTask(
+    lane: SessionLane,
+    task: RunTask,
+    preferredIndex: number,
+  ): void {
+    this.lanes.set(task.sessionId, lane);
+    if (lane.active) {
+      lane.queue.splice(Math.min(preferredIndex, lane.queue.length), 0, task);
+      return;
+    }
+    this.startTask(lane, task);
   }
 
   private createTask(options: EnqueueRunOptions): RunTask {
@@ -284,10 +399,12 @@ export class SessionRunCoordinator {
               request.reject(interrupted);
               throw interrupted;
             }
-            if (
-              !(error instanceof AgentRunNotAcceptingInputError) ||
-              !task.onSteerRejected
-            ) {
+            if (error instanceof AgentRunNotAcceptingInputError) {
+              if (!request.recoverRejected || !task.onSteerRejected) {
+                request.reject(error);
+                continue;
+              }
+            } else {
               request.reject(error);
               throw error;
             }
@@ -333,7 +450,7 @@ export class SessionRunCoordinator {
     const error = new AgentRunNotAcceptingInputError(task.runId);
     for (const request of pending) {
       try {
-        if (!task.onSteerRejected) {
+        if (!request.recoverRejected || !task.onSteerRejected) {
           request.reject(error);
           continue;
         }

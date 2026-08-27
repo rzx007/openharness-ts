@@ -304,6 +304,73 @@ describe("SessionRunEngine", () => {
     );
   });
 
+  it("promotes a durable queued prompt into the exact active run", async () => {
+    const store = createStore();
+    const activeDone = deferred<void>();
+    const steer = vi.fn(async (input) => {
+      store.bindInputToRun(input.id!, "r1");
+      return { sessionId: "s1", inputId: input.id!, runId: "r1" };
+    });
+    const handle = runHandle(activeDone.promise, steer);
+    let execution = 0;
+    const runExecutor = {
+      execute: vi.fn(async (_input, context) => {
+        execution += 1;
+        if (execution === 1) {
+          await context.registerHandle(handle);
+          await handle.result;
+        }
+      }),
+    };
+    const events = { checkpoint: vi.fn(() => 1), publishSince: vi.fn() };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events,
+    });
+    const active = await engine.admitPromptAndMaybeRun("s1", {
+      content: "active",
+    });
+    const queued = await engine.admitPromptAndMaybeRun("s1", {
+      id: "queued-input",
+      content: "adjust direction",
+    });
+    await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
+
+    await expect(
+      engine.promoteQueuedRun(
+        "s1",
+        "queued-input",
+        queued.run!.id,
+        active.run!.id,
+      ),
+    ).resolves.toMatchObject({
+      input: { id: "queued-input" },
+      queued_run: {
+        id: queued.run!.id,
+        status: "interrupted",
+        metadata: {
+          promotion: {
+            kind: "steered",
+            activeRunId: active.run!.id,
+          },
+        },
+      },
+      active_run: { id: active.run!.id },
+    });
+    expect(steer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "queued-input",
+        content: "adjust direction",
+        delivery: "steer",
+      }),
+    );
+    expect(runExecutor.execute).toHaveBeenCalledOnce();
+    activeDone.resolve();
+    await engine.waitForRuns([active.run!.id]);
+  });
+
   it("queues a durable replacement run when a late steer is rejected", async () => {
     const store = createStore();
     const pending = deferred<void>();

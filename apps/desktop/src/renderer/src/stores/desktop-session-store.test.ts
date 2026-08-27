@@ -574,4 +574,35 @@ describe("desktop session store prompt intent boundaries", () => {
       expectedRunId: "run-at-click",
     })
   })
+
+  it("promotes and cancels the exact durable queued prompt", async () => {
+    const promoteQueuedPrompt = vi.fn(async () => undefined)
+    const cancelQueuedPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: { sessions: { promoteQueuedPrompt, cancelQueuedPrompt } },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      pendingPromptActionId: null,
+      error: null,
+    })
+
+    await useDesktopSessionStore
+      .getState()
+      .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
+    await useDesktopSessionStore.getState().cancelQueuedPrompt("input-other", "run-other")
+
+    expect(promoteQueuedPrompt).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      inputId: "input-queued",
+      queuedRunId: "run-queued",
+      expectedActiveRunId: "run-active",
+    })
+    expect(cancelQueuedPrompt).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      inputId: "input-other",
+      queuedRunId: "run-other",
+    })
+    expect(useDesktopSessionStore.getState().pendingPromptActionId).toBeNull()
+  })
 })

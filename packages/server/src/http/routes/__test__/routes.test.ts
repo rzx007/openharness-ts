@@ -577,6 +577,53 @@ describe("session routes", () => {
 });
 
 describe("run execution routes", () => {
+  it("promotes and cancels one exact queued prompt", async () => {
+    const promoteQueuedPrompt = vi.fn(() => ({
+      input: { id: "input-queued" },
+      queued_run: { id: "run-queued", status: "interrupted" },
+      active_run: { id: "run-active", status: "running" },
+    }));
+    const cancelQueuedPrompt = vi.fn(() => ({
+      input: { id: "input-other" },
+      run: { id: "run-other", status: "interrupted" },
+    }));
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt: vi.fn(),
+        cancelQueuedPrompt,
+        editLatestPrompt: vi.fn(),
+        interruptSession: vi.fn(),
+        promoteQueuedPrompt,
+        resumeRun: vi.fn(),
+      },
+      traces: { get: () => "trace-queue-action" },
+    });
+
+    const promoted = await app.request("/s1/prompts/input-queued/promote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        queuedRunId: "run-queued",
+        expectedActiveRunId: "run-active",
+      }),
+    });
+    const cancelled = await app.request("/s1/prompts/input-other/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ queuedRunId: "run-other" }),
+    });
+
+    expect(promoted.status).toBe(200);
+    expect(cancelled.status).toBe(200);
+    expect(promoteQueuedPrompt).toHaveBeenCalledWith("s1", "input-queued", {
+      queuedRunId: "run-queued",
+      expectedActiveRunId: "run-active",
+    });
+    expect(cancelQueuedPrompt).toHaveBeenCalledWith("s1", "input-other", {
+      queuedRunId: "run-other",
+    });
+  });
+
   it("requires and forwards the exact message selected for prompt editing", async () => {
     const editLatestPrompt = vi.fn(() => ({ input: { id: "edited-input" } }));
     const app = createRunExecutionRoutes({

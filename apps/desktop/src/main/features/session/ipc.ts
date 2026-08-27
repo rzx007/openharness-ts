@@ -8,6 +8,8 @@ import type {
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
+  PromoteDesktopQueuedPromptInput,
+  CancelDesktopQueuedPromptInput,
   OpenDesktopAuxSessionInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
@@ -128,6 +130,16 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionEditLatestPrompt,
         handler: (_event, input) =>
           desktopSessionService.editLatestPrompt(input as EditLatestDesktopPromptInput),
+      },
+      {
+        channel: IpcChannels.sessionPromoteQueuedPrompt,
+        handler: (_event, input) =>
+          desktopSessionService.promoteQueuedPrompt(input as PromoteDesktopQueuedPromptInput),
+      },
+      {
+        channel: IpcChannels.sessionCancelQueuedPrompt,
+        handler: (_event, input) =>
+          desktopSessionService.cancelQueuedPrompt(input as CancelDesktopQueuedPromptInput),
       },
       {
         channel: IpcChannels.sessionInterrupt,

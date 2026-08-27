@@ -185,6 +185,12 @@ export const desktopAPI = {
     editLatestPrompt: (
       input: IpcInvokeMap[typeof IpcChannels.sessionEditLatestPrompt]["args"][0]
     ) => invoke(IpcChannels.sessionEditLatestPrompt, input),
+    promoteQueuedPrompt: (
+      input: IpcInvokeMap[typeof IpcChannels.sessionPromoteQueuedPrompt]["args"][0]
+    ) => invoke(IpcChannels.sessionPromoteQueuedPrompt, input),
+    cancelQueuedPrompt: (
+      input: IpcInvokeMap[typeof IpcChannels.sessionCancelQueuedPrompt]["args"][0]
+    ) => invoke(IpcChannels.sessionCancelQueuedPrompt, input),
     interrupt: (input: IpcInvokeMap[typeof IpcChannels.sessionInterrupt]["args"][0]) =>
       invoke(IpcChannels.sessionInterrupt, input),
     replyPermission: (input: IpcInvokeMap[typeof IpcChannels.sessionReplyPermission]["args"][0]) =>

@@ -13,6 +13,7 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import { Composer } from "./composer"
+import { PendingPromptQueue } from "./pending-prompt-queue"
 import {
   skillCommandInvocationLine,
   toComposerSkillCommands,
@@ -62,6 +63,9 @@ function ConversationPane({
   const startSession = useDesktopSessionStore((state) => state.startSession)
   const sendMessage = useDesktopSessionStore((state) => state.sendMessage)
   const editLatestMessage = useDesktopSessionStore((state) => state.editLatestMessage)
+  const promoteQueuedPrompt = useDesktopSessionStore((state) => state.promoteQueuedPrompt)
+  const cancelQueuedPrompt = useDesktopSessionStore((state) => state.cancelQueuedPrompt)
+  const pendingPromptActionId = useDesktopSessionStore((state) => state.pendingPromptActionId)
   const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
@@ -100,6 +104,14 @@ function ConversationPane({
     sessionView?.runs.some((run) => run.status === "pending" || run.status === "running") ||
     sessionView?.session.status === "running"
   )
+  const activeRun = sessionView?.runs.find((run) => run.status === "running")
+  const pendingPrompts = (sessionView?.runs ?? [])
+    .filter((run) => run.status === "pending" && run.inputId)
+    .sort((left, right) => left.createdAt - right.createdAt)
+    .flatMap((run) => {
+      const input = sessionView?.inputs.find((candidate) => candidate.id === run.inputId)
+      return input ? [{ input, run }] : []
+    })
   const pendingPermissions =
     sessionView?.permissions.filter((permission) => permission.status === "pending") ?? []
   const hasAgentTasks = Boolean(
@@ -312,30 +324,40 @@ function ConversationPane({
               {"此会话已归档，只能查看历史内容"}
             </div>
           ) : (
-            <Composer
-              id="message-composer"
-              className="mx-auto mb-5 w-[min(760px,calc(100%-32px))] shrink-0"
-              draft={draft}
-              sending={sending}
-              running={running}
-              models={models}
-              selectedModel={currentModel}
-              selectedProvider={selectedProvider}
-              modelLabel={modelLabel}
-              permissionMode={selectedPermissionMode}
-              skillCommands={skillCommands}
-              canSubmit={Boolean(draft.trim())}
-              onDraftChange={setDraft}
-              onSubmit={() => void submitDraft()}
-              onInterrupt={() => void interrupt()}
-              onSelectModel={(model) => {
-                if (activeSessionId) void updateSessionModel(activeSessionId, model)
-              }}
-              onSelectPermissionMode={(permissionMode) => {
-                if (activeSessionId)
-                  void updateSessionPermissionMode(activeSessionId, permissionMode)
-              }}
-            />
+            <div className="mx-auto mb-5 flex w-[min(760px,calc(100%-32px))] shrink-0 flex-col gap-2">
+              <PendingPromptQueue
+                prompts={pendingPrompts}
+                activeRunId={activeRun?.id}
+                actionId={pendingPromptActionId}
+                onPromote={(inputId, queuedRunId) => {
+                  if (activeRun) void promoteQueuedPrompt(inputId, queuedRunId, activeRun.id)
+                }}
+                onCancel={(inputId, queuedRunId) => void cancelQueuedPrompt(inputId, queuedRunId)}
+              />
+              <Composer
+                id="message-composer"
+                draft={draft}
+                sending={sending}
+                running={Boolean(activeRun)}
+                models={models}
+                selectedModel={currentModel}
+                selectedProvider={selectedProvider}
+                modelLabel={modelLabel}
+                permissionMode={selectedPermissionMode}
+                skillCommands={skillCommands}
+                canSubmit={Boolean(draft.trim())}
+                onDraftChange={setDraft}
+                onSubmit={() => void submitDraft()}
+                onInterrupt={() => void interrupt()}
+                onSelectModel={(model) => {
+                  if (activeSessionId) void updateSessionModel(activeSessionId, model)
+                }}
+                onSelectPermissionMode={(permissionMode) => {
+                  if (activeSessionId)
+                    void updateSessionPermissionMode(activeSessionId, permissionMode)
+                }}
+              />
+            </div>
           )}
         </>
       )}

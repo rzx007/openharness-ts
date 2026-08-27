@@ -13,6 +13,8 @@ import type {
   ForkDesktopSessionInput,
   InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
+  PromoteDesktopQueuedPromptInput,
+  CancelDesktopQueuedPromptInput,
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
@@ -119,6 +121,8 @@ export const IpcChannels = {
   sessionSendPrompt: "session:send-prompt",
   sessionInvokeCommand: "session:invoke-command",
   sessionEditLatestPrompt: "session:edit-latest-prompt",
+  sessionPromoteQueuedPrompt: "session:promote-queued-prompt",
+  sessionCancelQueuedPrompt: "session:cancel-queued-prompt",
   sessionInterrupt: "session:interrupt",
   sessionReplyPermission: "session:reply-permission",
   sessionSetDefaultModel: "session:set-default-model",
@@ -308,6 +312,14 @@ export interface IpcInvokeMap {
   [IpcChannels.sessionInvokeCommand]: { args: [input: InvokeDesktopCommandInput]; result: void }
   [IpcChannels.sessionEditLatestPrompt]: {
     args: [input: EditLatestDesktopPromptInput]
+    result: void
+  }
+  [IpcChannels.sessionPromoteQueuedPrompt]: {
+    args: [input: PromoteDesktopQueuedPromptInput]
+    result: void
+  }
+  [IpcChannels.sessionCancelQueuedPrompt]: {
+    args: [input: CancelDesktopQueuedPromptInput]
     result: void
   }
   [IpcChannels.sessionInterrupt]: { args: [input: InterruptDesktopSessionInput]; result: void }

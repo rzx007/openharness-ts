@@ -63,6 +63,7 @@ interface DesktopSessionState {
     sourceMessageId: string
     content: string
   } | null
+  pendingPromptActionId: string | null
   initialize: () => Promise<void>
   refreshBootstrap: () => Promise<void>
   startNewConversation: () => Promise<void>
@@ -97,6 +98,12 @@ interface DesktopSessionState {
   startSession: (content: string, options?: SubmitPromptOptions) => Promise<void>
   sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
   editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
+  promoteQueuedPrompt: (
+    inputId: string,
+    queuedRunId: string,
+    expectedActiveRunId: string
+  ) => Promise<void>
+  cancelQueuedPrompt: (inputId: string, queuedRunId: string) => Promise<void>
   interrupt: () => Promise<void>
   replyPermission: (
     permissionId: string,
@@ -133,6 +140,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   sending: false,
   pendingPromptSubmission: null,
   pendingPromptEdit: null,
+  pendingPromptActionId: null,
 
   async initialize() {
     if (get().loadStatus === "loading" || get().loadStatus === "ready") return
@@ -978,6 +986,47 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     } finally {
       set({ sending: false })
       scheduleSelectedProjectGitRefresh(true)
+    }
+  },
+
+  async promoteQueuedPrompt(inputId, queuedRunId, expectedActiveRunId) {
+    const sessionId = get().activeSessionId
+    if (!sessionId || !inputId || !queuedRunId || !expectedActiveRunId) return
+    const actionId = `promote:${inputId}`
+    if (get().pendingPromptActionId) return
+    set({ pendingPromptActionId: actionId, error: null })
+    try {
+      await window.desktop.sessions.promoteQueuedPrompt({
+        sessionId,
+        inputId,
+        queuedRunId,
+        expectedActiveRunId,
+      })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    } finally {
+      set((state) => ({
+        pendingPromptActionId:
+          state.pendingPromptActionId === actionId ? null : state.pendingPromptActionId,
+      }))
+    }
+  },
+
+  async cancelQueuedPrompt(inputId, queuedRunId) {
+    const sessionId = get().activeSessionId
+    if (!sessionId || !inputId || !queuedRunId) return
+    const actionId = `cancel:${inputId}`
+    if (get().pendingPromptActionId) return
+    set({ pendingPromptActionId: actionId, error: null })
+    try {
+      await window.desktop.sessions.cancelQueuedPrompt({ sessionId, inputId, queuedRunId })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    } finally {
+      set((state) => ({
+        pendingPromptActionId:
+          state.pendingPromptActionId === actionId ? null : state.pendingPromptActionId,
+      }))
     }
   },
 
