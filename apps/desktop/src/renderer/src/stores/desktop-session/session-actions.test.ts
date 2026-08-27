@@ -197,6 +197,35 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState().sessions).toContainEqual(forked)
   })
 
+  it("does not let a late fork steal the primary subscription after A/B/A navigation", async () => {
+    const source = emptySessionView("session-a").session
+    const forked = { ...emptySessionView("session-fork").session, title: "forked" }
+    let resolveFork!: (session: typeof forked) => void
+    const fork = vi.fn(
+      () =>
+        new Promise<typeof forked>((resolve) => {
+          resolveFork = resolve
+        })
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId, 1))
+    vi.stubGlobal("window", { desktop: { sessions: { fork, open } } })
+    resetNewConversationState()
+    useDesktopSessionStore.setState({ sessions: [source], activeSessionId: source.id })
+
+    const forking = useDesktopSessionStore.getState().forkSession(source.id)
+    await vi.waitFor(() => expect(fork).toHaveBeenCalledOnce())
+    await useDesktopSessionStore.getState().openSession("session-b")
+    await useDesktopSessionStore.getState().openSession(source.id)
+    resolveFork(forked)
+    await forking
+
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(open).toHaveBeenNthCalledWith(1, "session-b")
+    expect(open).toHaveBeenNthCalledWith(2, source.id)
+    expect(useDesktopSessionStore.getState().activeSessionId).toBe(source.id)
+    expect(useDesktopSessionStore.getState().sessions).toContainEqual(forked)
+  })
+
   it("keeps create acknowledged and records the first prompt failure on its submission", async () => {
     const session = emptySessionView("session-created").session
     let resolveCreate!: (value: typeof session) => void
@@ -279,6 +308,50 @@ describe("desktop session actions", () => {
         error: "first command failed",
       })
     )
+  })
+
+  it("records the first slash-command failure after its active open snapshot", async () => {
+    const session = emptySessionView("session-active-command").session
+    const snapshot = emptySessionView(session.id)
+    snapshot.inputs = [{ id: "00000000-0000-4000-8000-000000000002" }] as DesktopSessionView["inputs"]
+    const open = vi.fn(async () => snapshot)
+    const randomUUID = vi
+      .spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000002")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000003")
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open,
+          invokeCommand: vi.fn(async () => {
+            throw new Error("active command failed")
+          }),
+        },
+      },
+    })
+    resetNewConversationState()
+
+    await expect(
+      useDesktopSessionStore.getState().startSession("/compact", { commandLine: "/compact" })
+    ).rejects.toThrow("active command failed")
+
+    expect(open).toHaveBeenCalledWith(session.id)
+    const operations = Object.values(
+      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations ?? {}
+    )
+    expect(operations).toContainEqual(
+      expect.objectContaining({
+        kind: "invoke-command",
+        phase: "failed",
+        error: "active command failed",
+      })
+    )
+    expect(operations).not.toContainEqual(
+      expect.objectContaining({ kind: "create-session", phase: "failed" })
+    )
+    randomUUID.mockRestore()
   })
 
   it("binds the first submission and create operation to the created session runtime", async () => {

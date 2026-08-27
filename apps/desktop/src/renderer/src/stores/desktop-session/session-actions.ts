@@ -40,9 +40,15 @@ interface SessionActionsContext extends DesktopStoreContext {
 
 export function createSessionActions(context: SessionActionsContext): SessionActions {
   const { get, set } = context
+  let primaryNavigationGeneration = 0
+  const advancePrimaryNavigation = () => {
+    primaryNavigationGeneration += 1
+    return primaryNavigationGeneration
+  }
 
   return {
     async startNewConversation() {
+      advancePrimaryNavigation()
       await window.desktop.sessions.close()
       clearPersistedActiveSessionId()
       set({
@@ -173,6 +179,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
     async openSession(sessionId) {
       if (!sessionId) return
+      advancePrimaryNavigation()
       const operationId = globalThis.crypto.randomUUID()
       set((state) => {
         const switchingSessions = state.activeSessionId !== sessionId
@@ -306,6 +313,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     },
 
     async startConversationFrom(session) {
+      advancePrimaryNavigation()
       await window.desktop.sessions.close()
       clearPersistedActiveSessionId()
       const workspace = resolveSessionWorkspace(get().projects, session)
@@ -331,6 +339,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     async forkSession(sessionId, options) {
       if (!sessionId) throw new Error("会话 ID 不能为空")
       const navigationOwnerSessionId = get().activeSessionId
+      const navigationOwnerGeneration = primaryNavigationGeneration
       try {
         const session = await window.desktop.sessions.fork({
           sessionId,
@@ -342,7 +351,10 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           archivedSessions: state.archivedSessions.filter((item) => item.id !== session.id),
           error: null,
         }))
-        if (get().activeSessionId === navigationOwnerSessionId) {
+        if (
+          primaryNavigationGeneration === navigationOwnerGeneration &&
+          get().activeSessionId === navigationOwnerSessionId
+        ) {
           await get().openSession(session.id)
         }
         return session
@@ -399,6 +411,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       try {
         const archived = await window.desktop.sessions.archive(sessionId)
         const isActive = get().activeSessionId === sessionId
+        if (isActive) advancePrimaryNavigation()
         set((state) => ({
           ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
           sessions: state.sessions.filter((session) => session.id !== sessionId),
@@ -447,6 +460,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         const deleted = new Set(deletedSessionIds)
         const activeSessionId = get().activeSessionId
         const isActive = activeSessionId !== null && deleted.has(activeSessionId)
+        if (isActive) advancePrimaryNavigation()
         set((state) => ({
           ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
           sessions: state.sessions.filter((session) => !deleted.has(session.id)),
@@ -512,7 +526,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       }
 
       const promptSubmissionId = globalThis.crypto.randomUUID()
-      const commandOperationId = options?.commandLine ? globalThis.crypto.randomUUID() : null
+      let commandOperationId: string | null = null
       let startedSessionId: string | null = null
       set((state) => ({
         sending: true,
@@ -557,6 +571,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           ownsCurrentPage =
             state.sendingOperationId === promptSubmissionId &&
             state.newConversationRuntime.operations[promptSubmissionId]?.phase === "pending"
+          if (ownsCurrentPage) advancePrimaryNavigation()
           const bound = bindOperationToSession(
             state.newConversationRuntime,
             state.sessionRuntimes[session.id] ?? createEmptySessionRuntime(),
@@ -573,20 +588,12 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               }
             : bound.target
           const acknowledgedRuntime = acknowledgeOperation(runtime, promptSubmissionId, Date.now())
-          const initializedRuntime = commandOperationId
-            ? beginOperation(acknowledgedRuntime, {
-                id: commandOperationId,
-                kind: "invoke-command",
-                sessionId: session.id,
-                startedAt: Date.now(),
-              })
-            : acknowledgedRuntime
           return {
             sessions: upsertSession(state.sessions, session),
             newConversationRuntime: bound.source,
             sessionRuntimes: {
               ...state.sessionRuntimes,
-              [session.id]: initializedRuntime,
+              [session.id]: acknowledgedRuntime,
             },
             ...(ownsCurrentPage
               ? {
@@ -606,6 +613,18 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         })
         if (ownsCurrentPage) await get().openSession(session.id)
         if (options?.commandLine) {
+          const invokeCommandOperationId = globalThis.crypto.randomUUID()
+          commandOperationId = invokeCommandOperationId
+          set((state) => ({
+            sessionRuntimes: updateSessionRuntime(state.sessionRuntimes, session.id, (runtime) =>
+              beginOperation(runtime, {
+                id: invokeCommandOperationId,
+                kind: "invoke-command",
+                sessionId: session.id,
+                startedAt: Date.now(),
+              })
+            ),
+          }))
           await window.desktop.sessions.invokeCommand({
             sessionId: session.id,
             line: options.commandLine,
@@ -613,7 +632,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           if (commandOperationId) {
             set((state) => ({
               sessionRuntimes: updateSessionRuntime(state.sessionRuntimes, session.id, (runtime) =>
-                removeOperation(runtime, commandOperationId)
+                removeOperation(runtime, invokeCommandOperationId)
               ),
             }))
           }
