@@ -109,7 +109,11 @@ export class DaemonAgentEventProjector {
         await this.startRun(event);
         return;
       case "output.text.delta":
-        this.projectStream(event, { type: "text_delta", delta: event.data.delta });
+        this.projectStream(event, {
+          type: "text_delta",
+          delta: event.data.delta,
+          ...(event.data.phase ? { phase: event.data.phase } : {}),
+        });
         return;
       case "output.turn.completed":
         this.projectStream(event, { type: "complete", stopReason: event.data.stopReason });

@@ -40,10 +40,12 @@ export function transcriptToAgentMessages(
         input: part.input ?? {},
       }));
     const text = textFromParts(messageParts);
+    const phase = assistantPhaseFromParts(messageParts);
     if (text || toolUses.length > 0) {
       output.push({
         type: "assistant",
         content: text,
+        ...(phase ? { phase } : {}),
         ...(toolUses.length > 0 ? { toolUses } : {}),
       });
     }
@@ -81,7 +83,12 @@ export function agentMessagesToTranscript(messages: Message[]): ReplaceTranscrip
     if (message.type === "assistant") {
       const transcriptParts: ReplaceTranscriptPartInput[] = [];
       if (message.content) {
-        transcriptParts.push({ type: "text", status: "completed", text: message.content });
+        transcriptParts.push({
+          type: "text",
+          status: "completed",
+          text: message.content,
+          ...(message.phase ? { metadata: { phase: message.phase } } : {}),
+        });
       }
       for (const toolUse of message.toolUses ?? []) {
         transcriptParts.push({
@@ -127,6 +134,16 @@ export function agentMessagesToTranscript(messages: Message[]): ReplaceTranscrip
     }
   }
   return output;
+}
+
+function assistantPhaseFromParts(
+  parts: SessionMessagePartRecord[],
+): Extract<Message, { type: "assistant" }>["phase"] {
+  for (const part of parts) {
+    const phase = part.metadata.phase;
+    if (phase === "commentary" || phase === "final_answer") return phase;
+  }
+  return undefined;
 }
 
 function textFromParts(parts: SessionMessagePartRecord[]): string {

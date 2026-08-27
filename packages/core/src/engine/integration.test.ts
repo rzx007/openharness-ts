@@ -106,6 +106,7 @@ describe("Integration: Full Agent Loop", () => {
     expect(history).toHaveLength(2);
     expect(history[0]!.type).toBe("user");
     expect(history[1]!.type).toBe("assistant");
+    expect(history[1]).toMatchObject({ phase: "final_answer" });
   });
 
   it("multi turn: user → API tool_use → execute → API text → complete", async () => {
@@ -148,6 +149,8 @@ describe("Integration: Full Agent Loop", () => {
     expect(history[1]!.type).toBe("assistant");
     expect(history[2]!.type).toBe("tool_result");
     expect(history[3]!.type).toBe("assistant");
+    expect(history[1]).toMatchObject({ phase: "commentary" });
+    expect(history[3]).toMatchObject({ phase: "final_answer" });
   });
 
   it("uses the configured cwd for tool execution context", async () => {

@@ -11,8 +11,11 @@ export interface UserMessage {
 export interface AssistantMessage {
   type: "assistant";
   content: string;
+  phase?: AssistantMessagePhase;
   toolUses?: ToolUseBlock[];
 }
+
+export type AssistantMessagePhase = "commentary" | "final_answer";
 
 export interface ToolResultMessage {
   type: "tool_result";

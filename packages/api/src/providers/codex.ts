@@ -105,19 +105,33 @@ export class CodexSubscriptionClient implements StreamingMessageClient {
     }
 
     const toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+    const outputPhases = new Map<string, "commentary" | "final_answer">();
     let usage = { inputTokens: 0, outputTokens: 0 };
     let stopReason = "end_turn";
 
     for await (const event of iterSseEvents(response.body)) {
       const eventType = event.type;
-      if (eventType === "response.output_text.delta") {
+      if (eventType === "response.output_item.added") {
+        const item = event.item;
+        if (isRecord(item) && typeof item.id === "string") {
+          const phase = assistantPhase(item.phase);
+          if (phase) outputPhases.set(item.id, phase);
+        }
+      } else if (eventType === "response.output_text.delta") {
         const delta = event.delta;
         if (typeof delta === "string" && delta) {
-          yield { type: "text_delta", delta };
+          const itemId = typeof event.item_id === "string" ? event.item_id : "";
+          const phase = outputPhases.get(itemId);
+          yield { type: "text_delta", delta, ...(phase ? { phase } : {}) };
         }
       } else if (eventType === "response.output_item.done") {
         const item = event.item;
-        if (!isRecord(item) || item.type !== "function_call") continue;
+        if (!isRecord(item)) continue;
+        if (typeof item.id === "string") {
+          const phase = assistantPhase(item.phase);
+          if (phase) outputPhases.set(item.id, phase);
+        }
+        if (item.type !== "function_call") continue;
         const callId = typeof item.call_id === "string" ? item.call_id : "";
         const name = typeof item.name === "string" ? item.name : "";
         if (!callId || !name) continue;
@@ -194,6 +208,7 @@ async function convertMessagesToCodex(messages: Message[]): Promise<Array<Record
           type: "message",
           role: "assistant",
           content: [{ type: "output_text", text: msg.content, annotations: [] }],
+          ...(msg.phase ? { phase: msg.phase } : {}),
         });
       }
       for (const toolUse of msg.toolUses ?? []) {
@@ -315,6 +330,10 @@ function parseArguments(value: unknown): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function assistantPhase(value: unknown): "commentary" | "final_answer" | undefined {
+  return value === "commentary" || value === "final_answer" ? value : undefined;
 }
 
 function usageFromResponse(response: Record<string, unknown>): { inputTokens: number; outputTokens: number } {

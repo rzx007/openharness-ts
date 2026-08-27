@@ -1,4 +1,5 @@
 import type { StreamEvent } from "@openharness/core";
+import type { AssistantMessagePhase } from "@openharness/core";
 import type { SessionStore } from "@openharness/services";
 import type {
   SessionEventRecord,
@@ -20,6 +21,7 @@ export type ActiveTranscriptProjectionState = {
   assistantMessageId?: string;
   assistantTurnCompleted: boolean;
   activeTextPartId?: string;
+  activeTextPhase?: AssistantMessagePhase;
   toolParts: Map<string, ActiveToolPart>;
 };
 
@@ -110,8 +112,10 @@ export class SessionTranscriptProjection {
             type: "text",
             status: "running",
             text: "",
+            ...(event.phase ? { metadata: { phase: event.phase } } : {}),
           });
           state.activeTextPartId = part.id;
+          state.activeTextPhase = event.phase;
         }
         return {
           liveEvent: this.store.appendMessagePartDelta({
@@ -124,7 +128,7 @@ export class SessionTranscriptProjection {
         };
       }
       case "tool_use_start": {
-        this.completeOpenTextPart(state, "completed");
+        this.completeOpenTextPart(state, "completed", "commentary");
         const messageId = this.ensureAssistantMessage(state, true);
         const part = this.store.upsertMessagePart({
           id: event.toolUse.id,
@@ -178,7 +182,11 @@ export class SessionTranscriptProjection {
         return {};
       }
       case "complete": {
-        this.completeOpenTextPart(state, "completed");
+        this.completeOpenTextPart(
+          state,
+          "completed",
+          state.activeTextPhase ?? "final_answer",
+        );
         state.assistantTurnCompleted = true;
         this.store.updateRun(state.runId, { metadata: { stopReason: event.stopReason } });
         return {};
@@ -201,6 +209,7 @@ export class SessionTranscriptProjection {
   completeOpenTextPart(
     state: ActiveTranscriptProjectionState,
     status: Extract<SessionMessagePartStatus, "completed" | "failed" | "interrupted">,
+    phase?: AssistantMessagePhase,
   ): void {
     if (!state.assistantMessageId || !state.activeTextPartId) return;
     this.store.upsertMessagePart({
@@ -209,8 +218,10 @@ export class SessionTranscriptProjection {
       messageId: state.assistantMessageId,
       type: "text",
       status,
+      ...(phase ? { metadata: { phase } } : {}),
     });
     delete state.activeTextPartId;
+    delete state.activeTextPhase;
   }
 
   /** Closes parts left running when event delivery fails before terminal events are projected. */

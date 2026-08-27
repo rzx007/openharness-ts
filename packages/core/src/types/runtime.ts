@@ -248,7 +248,7 @@ export type AgentEventInput =
       type: "run.interrupted";
       data: { error: AgentSerializedError; output?: string };
     }
-  | { type: "output.text.delta"; data: { delta: string } }
+  | { type: "output.text.delta"; data: { delta: string; phase?: import("./messages").AssistantMessagePhase } }
   | { type: "output.turn.completed"; data: { stopReason: string } }
   | {
       type: "tool.started";

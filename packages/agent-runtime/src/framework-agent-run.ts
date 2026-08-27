@@ -251,7 +251,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
     if (event.type === "text_delta") {
       await this.emit({
         type: "output.text.delta",
-        data: { delta: event.delta },
+        data: { delta: event.delta, ...(event.phase ? { phase: event.phase } : {}) },
       });
     } else if (event.type === "complete") {
       await this.emit({

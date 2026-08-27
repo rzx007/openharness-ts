@@ -3,12 +3,31 @@ import { describe, expect, it } from "vitest"
 import type { DesktopSessionPart } from "@shared/session-types"
 
 import {
+  buildAssistantContent,
   collectChangedFiles,
   parseFileReference,
   parseInlineFileReference,
 } from "./message-render-model"
 
 describe("message render model", () => {
+  it("preserves commentary and final-answer phase metadata", () => {
+    const part = {
+      ...toolPart("Read", {}),
+      type: "text" as const,
+      text: "I will inspect it.",
+      metadata: { phase: "commentary" },
+    }
+
+    expect(buildAssistantContent([part])).toEqual([
+      {
+        id: "part-1",
+        type: "markdown",
+        text: "I will inspect it.",
+        phase: "commentary",
+      },
+    ])
+  })
+
   it("recognizes project files but rejects web links", () => {
     expect(parseFileReference("apps/desktop/src/App.tsx:42")).toEqual({
       path: "apps/desktop/src/App.tsx",

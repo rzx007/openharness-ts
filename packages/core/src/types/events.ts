@@ -1,9 +1,11 @@
 import type { ContentBlock } from "./messages";
+import type { AssistantMessagePhase } from "./messages";
 import type { UsageSnapshot } from "./usage";
 
 export interface TextDeltaEvent {
   type: "text_delta";
   delta: string;
+  phase?: AssistantMessagePhase;
 }
 
 export interface ToolUseStartEvent {

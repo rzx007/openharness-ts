@@ -3,6 +3,7 @@ export type {
   SystemMessage,
   UserMessage,
   AssistantMessage,
+  AssistantMessagePhase,
   ToolResultMessage,
   TextBlock,
   ImageBlock,

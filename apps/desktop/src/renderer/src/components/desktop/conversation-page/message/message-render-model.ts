@@ -1,7 +1,7 @@
 import type { DesktopSessionPart } from "@shared/session-types"
 
 export type AssistantContentUnit =
-  | { id: string; type: "markdown"; text: string }
+  | { id: string; type: "markdown"; text: string; phase?: "commentary" | "final_answer" }
   | { id: string; type: "reasoning"; text: string }
   | { id: string; type: "tool"; call: DesktopSessionPart; result?: DesktopSessionPart }
   | { id: string; type: "error"; text: string }
@@ -32,7 +32,10 @@ export function buildAssistantContent(parts: DesktopSessionPart[]): AssistantCon
     if (part.type === "text" && part.text) {
       const previous = units.at(-1)
       if (previous?.type === "markdown") previous.text += part.text
-      else if (part.text.trim()) units.push({ id: part.id, type: "markdown", text: part.text })
+      else if (part.text.trim()) {
+        const phase = assistantPhase(part.metadata.phase)
+        units.push({ id: part.id, type: "markdown", text: part.text, ...(phase ? { phase } : {}) })
+      }
       continue
     }
     if (part.type === "reasoning" && part.text) {
@@ -53,6 +56,10 @@ export function buildAssistantContent(parts: DesktopSessionPart[]): AssistantCon
     }
   }
   return units
+}
+
+function assistantPhase(value: unknown): "commentary" | "final_answer" | undefined {
+  return value === "commentary" || value === "final_answer" ? value : undefined
 }
 
 export function parseFileReference(value: string): FileReference | null {

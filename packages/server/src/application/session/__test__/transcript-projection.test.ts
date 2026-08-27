@@ -63,6 +63,41 @@ describe("SessionTranscriptProjection", () => {
     });
   });
 
+  it("marks a preamble before tools as commentary", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", "hello");
+
+    projection.projectStreamEvent(state, { type: "text_delta", delta: "I will inspect it." });
+    projection.projectStreamEvent(state, {
+      type: "tool_use_start",
+      toolUse: { id: "tool-1", name: "Read", input: { path: "package.json" } },
+    });
+
+    expect(store.upsertMessagePart).toHaveBeenCalledWith(expect.objectContaining({
+      id: "p2",
+      type: "text",
+      status: "completed",
+      metadata: { phase: "commentary" },
+    }));
+  });
+
+  it("marks a tool-free completed response as the final answer", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", "hello");
+
+    projection.projectStreamEvent(state, { type: "text_delta", delta: "Done." });
+    projection.projectStreamEvent(state, { type: "complete", stopReason: "stop" });
+
+    expect(store.upsertMessagePart).toHaveBeenCalledWith(expect.objectContaining({
+      id: "p2",
+      type: "text",
+      status: "completed",
+      metadata: { phase: "final_answer" },
+    }));
+  });
+
   it("keeps tool names available when completing tool parts", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store);

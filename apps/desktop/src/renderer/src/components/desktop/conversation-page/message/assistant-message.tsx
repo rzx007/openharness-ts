@@ -73,6 +73,7 @@ export function AssistantMessage({
             <AssistantMarkdown
               key={unit.id}
               text={unit.text}
+              phase={unit.phase}
               streaming={streaming && index === blocks.length - 1}
               onOpenFile={onOpenFile}
             />
@@ -113,17 +114,19 @@ export function AssistantMessage({
 
 function AssistantMarkdown({
   text,
+  phase,
   streaming,
   onOpenFile,
 }: {
   text: string
+  phase?: "commentary" | "final_answer"
   streaming: boolean
   onOpenFile: (path: string, line?: number) => void
 }): React.JSX.Element {
   const components = useMemo(() => createStreamdownComponents({ onOpenFile }), [onOpenFile])
 
   return (
-    <div className="assistant-markdown min-w-0">
+    <div className="assistant-markdown min-w-0" data-phase={phase}>
       <Streamdown
         className="desktop-streamdown space-y-0"
         animated

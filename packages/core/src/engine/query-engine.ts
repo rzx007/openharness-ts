@@ -343,6 +343,7 @@ export class QueryEngine implements IQueryEngine {
       });
 
       let assistantText = "";
+      let assistantPhase: import("../types/messages").AssistantMessagePhase | undefined;
       const toolUses: ToolUseBlock[] = [];
       let stopReason = "end_turn";
 
@@ -352,6 +353,7 @@ export class QueryEngine implements IQueryEngine {
 
         if (event.type === "text_delta") {
           assistantText += event.delta;
+          assistantPhase = event.phase ?? assistantPhase;
         } else if (event.type === "tool_use_start") {
           toolUses.push(event.toolUse);
         } else if (event.type === "usage") {
@@ -374,6 +376,7 @@ export class QueryEngine implements IQueryEngine {
         this.messages.push({
           type: "assistant",
           content: assistantText,
+          phase: assistantPhase ?? (toolUses.length > 0 ? "commentary" : "final_answer"),
           toolUses: toolUses.length > 0 ? toolUses : undefined,
         });
       }
