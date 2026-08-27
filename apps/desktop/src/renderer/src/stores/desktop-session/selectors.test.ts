@@ -5,6 +5,7 @@ import {
   selectActiveSessionOpening,
   selectActiveSessionPromptSubmissions,
   selectActiveSessionSending,
+  selectAppOperationError,
   selectNewConversationError,
   selectNewConversationSending,
   selectProjectOperationError,
@@ -75,7 +76,7 @@ describe("desktop session selectors", () => {
           operations: {
             "send-a": {
               id: "send-a",
-              kind: "send-prompt",
+              kind: "invoke-command",
               phase: "failed",
               sessionId: "session-a",
               startedAt: 1,
@@ -92,7 +93,7 @@ describe("desktop session selectors", () => {
     expect(selectSessionComposerError(state, "session-b")).toBeNull()
   })
 
-  it("prefers a submission error over its duplicate operation error", () => {
+  it("leaves a failed prompt submission to its inline owner", () => {
     const state = stateWith({
       sessionRuntimes: {
         "session-a": {
@@ -123,7 +124,37 @@ describe("desktop session selectors", () => {
       },
     })
 
-    expect(selectSessionComposerError(state, "session-a")).toBe("submission error")
+    expect(selectSessionComposerError(state, "session-a")).toBeNull()
+  })
+
+  it.each([
+    "open-session",
+    "invoke-command",
+    "edit-prompt",
+    "interrupt-run",
+    "reply-permission",
+  ] as const)("selects a failed %s operation for its active session owner", (kind) => {
+    const state = stateWith({
+      activeSessionId: "session-a",
+      sessionRuntimes: {
+        "session-a": {
+          ...createEmptySessionRuntime(),
+          operations: {
+            operation: {
+              id: "operation",
+              kind,
+              phase: "failed",
+              sessionId: "session-a",
+              startedAt: 1,
+              finishedAt: 2,
+              error: `${kind} failed`,
+            },
+          },
+        },
+      },
+    })
+
+    expect(selectSessionComposerError(state, "session-a")).toBe(`${kind} failed`)
   })
 
   it("selects opening, prompt submissions, and scope-specific errors", () => {
@@ -189,5 +220,44 @@ describe("desktop session selectors", () => {
     )
     expect(selectNewConversationError(state)).toBe("cannot create")
     expect(selectProjectOperationError(state, "project-a")).toBe("cannot inspect project")
+  })
+
+  it("selects bootstrap and project-picker errors for the app owner", () => {
+    const state = stateWith({
+      appOperations: {
+        initialize: {
+          id: "initialize",
+          kind: "project-action",
+          phase: "failed",
+          sessionId: null,
+          target: "initialize",
+          startedAt: 1,
+          finishedAt: 2,
+          error: "bootstrap failed",
+        },
+        choose: {
+          id: "choose",
+          kind: "project-action",
+          phase: "failed",
+          sessionId: null,
+          target: "choose-project",
+          startedAt: 3,
+          finishedAt: 4,
+          error: "project picker failed",
+        },
+        refresh: {
+          id: "refresh",
+          kind: "project-action",
+          phase: "failed",
+          sessionId: null,
+          target: "refresh-bootstrap",
+          startedAt: 5,
+          finishedAt: 6,
+          error: "settings refresh failed",
+        },
+      },
+    })
+
+    expect(selectAppOperationError(state)).toBe("project picker failed")
   })
 })

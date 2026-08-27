@@ -14,10 +14,13 @@ import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import {
   selectActiveSessionOpening,
+  selectActiveSessionComposerError,
   selectActiveSessionPromptSubmissions,
   selectActiveSessionQueuedPromptActions,
   selectActiveSessionSending,
+  selectNewConversationError,
   selectNewConversationSending,
+  selectProjectOperationError,
 } from "@renderer/stores/desktop-session/selectors"
 import { Composer } from "./composer"
 import { PendingPromptQueue } from "./pending-prompt-queue"
@@ -32,6 +35,7 @@ import { PermissionCard } from "./message-block"
 import { ProjectInfoButton } from "./project-info-popover"
 import { SessionMoreMenu } from "./session-more-menu"
 import { useSessionActionDialogs } from "./session-action-dialogs"
+import { ScopedOperationError } from "./scoped-operation-errors"
 import { ConversationTranscript } from "./transcript"
 import type { AddToComposerEventDetail, ConversationPaneProps } from "./types"
 import { resolveDraftAfterSubmission } from "./draft-submission"
@@ -54,6 +58,8 @@ function ConversationPane({
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
   const openingSession = useDesktopSessionStore(selectActiveSessionOpening)
+  const activeSessionError = useDesktopSessionStore(selectActiveSessionComposerError)
+  const newConversationError = useDesktopSessionStore(selectNewConversationError)
   const activeSessionSending = useDesktopSessionStore(selectActiveSessionSending)
   const newConversationSending = useDesktopSessionStore(selectNewConversationSending)
   const models = useDesktopSessionStore((state) => state.models)
@@ -62,6 +68,9 @@ function ConversationPane({
   const selectedPermissionMode = useDesktopSessionStore((state) => state.selectedPermissionMode)
   const workspaceMode = useDesktopSessionStore((state) => state.workspaceMode)
   const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
+  const selectedProjectOperationError = useDesktopSessionStore((state) =>
+    selectProjectOperationError(state, state.selectedProject?.id ?? null)
+  )
   const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const branch = useDesktopSessionStore((state) => state.branch)
   const branches = useDesktopSessionStore((state) => state.branches)
@@ -258,6 +267,8 @@ function ConversationPane({
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
           selectedPermissionMode={selectedPermissionMode}
+          operationError={newConversationError}
+          projectOperationError={selectedProjectOperationError}
           skillCommands={skillCommands}
           panelOpen={panelOpen}
           onDraftChange={setDraft}
@@ -342,6 +353,8 @@ function ConversationPane({
             </div>
           ) : (
             <div className="mx-auto mb-5 flex w-[min(760px,calc(100%-32px))] shrink-0 flex-col gap-2">
+              <ScopedOperationError error={activeSessionError} />
+              <ScopedOperationError error={selectedProjectOperationError} />
               <PendingPromptQueue
                 prompts={pendingPrompts}
                 activeRunId={activeRun?.id}

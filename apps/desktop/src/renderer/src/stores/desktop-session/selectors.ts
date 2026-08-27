@@ -4,7 +4,6 @@ import type {
   DesktopOperationKind,
   DesktopSessionRuntime,
   DesktopSessionState,
-  PendingPromptSubmission,
 } from "./types"
 
 const emptySessionRuntime = createEmptySessionRuntime()
@@ -13,6 +12,14 @@ const composerOperationKinds = new Set<DesktopOperationKind>([
   "send-prompt",
   "invoke-command",
   "edit-prompt",
+])
+
+const sessionErrorOperationKinds = new Set<DesktopOperationKind>([
+  "open-session",
+  "invoke-command",
+  "edit-prompt",
+  "interrupt-run",
+  "reply-permission",
 ])
 
 export function selectDaemonStatus(
@@ -93,11 +100,8 @@ export function selectSessionComposerError(
   sessionId: string
 ): string | null {
   const runtime = selectSessionRuntime(state, sessionId)
-  return (
-    selectLatestSubmissionError(runtime) ??
-    selectLatestOperationError(runtime.operations, (operation) =>
-      composerOperationKinds.has(operation.kind)
-    )
+  return selectLatestOperationError(runtime.operations, (operation) =>
+    sessionErrorOperationKinds.has(operation.kind)
   )
 }
 
@@ -109,6 +113,13 @@ export function selectNewConversationError(state: DesktopSessionState): string |
   return selectLatestOperationError(
     state.newConversationRuntime.operations,
     (operation) => operation.kind === "create-session"
+  )
+}
+
+export function selectAppOperationError(state: DesktopSessionState): string | null {
+  return selectLatestOperationError(
+    state.appOperations,
+    (operation) => operation.target === "initialize" || operation.target === "choose-project"
   )
 }
 
@@ -140,20 +151,6 @@ function hasPendingOperation(
       operation.phase === "pending" &&
       (typeof kind === "function" ? kind(operation.kind) : operation.kind === kind)
   )
-}
-
-function selectLatestSubmissionError(runtime: DesktopSessionRuntime): string | null {
-  let latest: PendingPromptSubmission | null = null
-  for (const submission of Object.values(runtime.pendingPromptSubmissions)) {
-    if (
-      submission.phase === "failed" &&
-      submission.error &&
-      (!latest || submission.createdAt >= latest.createdAt)
-    ) {
-      latest = submission
-    }
-  }
-  return latest?.error ?? null
 }
 
 function selectLatestOperationError(

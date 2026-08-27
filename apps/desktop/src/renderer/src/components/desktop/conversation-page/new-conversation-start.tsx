@@ -17,6 +17,7 @@ import type {
 import { Composer } from "./composer"
 import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
+import { ScopedOperationError } from "./scoped-operation-errors"
 import type { LoadStatus, StartPicker } from "./types"
 import { resolveModelLabel } from "./utils"
 
@@ -35,6 +36,8 @@ export function NewConversationStart({
   selectedModel,
   selectedProvider,
   selectedPermissionMode,
+  operationError,
+  projectOperationError,
   skillCommands,
   panelOpen,
   onDraftChange,
@@ -62,6 +65,8 @@ export function NewConversationStart({
   selectedModel: string | null
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
+  operationError: string | null
+  projectOperationError: string | null
   skillCommands: ComposerSkillCommand[]
   panelOpen: boolean
   onDraftChange: (value: string) => void
@@ -141,6 +146,10 @@ export function NewConversationStart({
         ) : null}
 
         <div className="relative w-full min-w-0">
+          <div className="mx-3 mb-2 space-y-2">
+            <ScopedOperationError error={projectOperationError} />
+            <ScopedOperationError error={operationError} />
+          </div>
           <div className="mx-3 flex h-10 min-w-0 items-center gap-0.5 overflow-hidden rounded-t-2xl bg-muted-foreground/5 px-2.5 pt-1">
             <div className="min-w-0">
               <Popover
