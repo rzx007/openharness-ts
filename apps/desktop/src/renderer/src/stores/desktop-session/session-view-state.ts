@@ -1,5 +1,8 @@
 import type { DesktopSessionView } from "@shared/session-types"
-import { reconcilePendingPromptSubmissions, reconcileQueuedPromptActions } from "./pending-prompt-state"
+import {
+  reconcilePendingPromptSubmissions,
+  reconcileQueuedPromptActions,
+} from "./pending-prompt-state"
 import type { DesktopSessionRuntime } from "./types"
 
 export function acceptActiveSessionView(
@@ -8,7 +11,8 @@ export function acceptActiveSessionView(
   incoming: DesktopSessionView
 ): DesktopSessionView | null {
   if (activeSessionId !== incoming.session.id) return current
-  if (current?.session.id === incoming.session.id && current.cursor > incoming.cursor) return current
+  if (current?.session.id === incoming.session.id && current.cursor > incoming.cursor)
+    return current
   return incoming
 }
 
@@ -25,7 +29,10 @@ export function reconcileRuntimeWithView(
     operations: Object.fromEntries(
       Object.entries(runtime.operations).filter(
         ([operationId, operation]) =>
-          operation.sessionId !== view.session.id || !confirmedEntityIds.has(operationId)
+          operation.sessionId !== view.session.id ||
+          (!confirmedEntityIds.has(operationId) &&
+            operation.kind !== "open-session" &&
+            operation.kind !== "create-session")
       )
     ),
     pendingPromptSubmissions: reconcilePendingPromptSubmissions(

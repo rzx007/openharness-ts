@@ -100,7 +100,30 @@ export interface ProjectActions {
   rebindProject: (projectId: string) => Promise<void>
 }
 
-export interface DesktopSessionState extends DesktopRuntimeState, BootstrapActions, ProjectActions {
+export interface SessionActions {
+  startNewConversation: () => Promise<void>
+  selectModel: (model: DesktopModel) => Promise<void>
+  selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>
+  updateSessionModel: (sessionId: string, model: DesktopModel) => Promise<void>
+  updateSessionPermissionMode: (
+    sessionId: string,
+    permissionMode: DesktopPermissionMode
+  ) => Promise<void>
+  openSession: (sessionId: string) => Promise<void>
+  startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
+  forkSession: (
+    sessionId: string,
+    options?: { beforeMessageId?: string; afterMessageId?: string }
+  ) => Promise<DesktopSessionRecord>
+  renameSession: (sessionId: string, title: string) => Promise<void>
+  togglePinSession: (sessionId: string) => Promise<void>
+  archiveSession: (sessionId: string) => Promise<void>
+  deleteSession: (sessionId: string) => Promise<void>
+  startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
+}
+
+export interface DesktopSessionState
+  extends DesktopRuntimeState, BootstrapActions, ProjectActions, SessionActions {
   loadStatus: LoadStatus
   daemonStatus: DesktopDaemonStatus
   error: string | null
@@ -128,25 +151,6 @@ export interface DesktopSessionState extends DesktopRuntimeState, BootstrapActio
   sendingOperationId: string | null
   pendingPromptEdit: PendingPromptEdit | null
   queuedPromptActions: Record<string, QueuedPromptAction>
-  startNewConversation: () => Promise<void>
-  selectModel: (model: DesktopModel) => Promise<void>
-  selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>
-  updateSessionModel: (sessionId: string, model: DesktopModel) => Promise<void>
-  updateSessionPermissionMode: (
-    sessionId: string,
-    permissionMode: DesktopPermissionMode
-  ) => Promise<void>
-  openSession: (sessionId: string) => Promise<void>
-  startConversationFrom: (session: DesktopSessionRecord) => Promise<void>
-  forkSession: (
-    sessionId: string,
-    options?: { beforeMessageId?: string; afterMessageId?: string }
-  ) => Promise<DesktopSessionRecord>
-  renameSession: (sessionId: string, title: string) => Promise<void>
-  togglePinSession: (sessionId: string) => Promise<void>
-  archiveSession: (sessionId: string) => Promise<void>
-  deleteSession: (sessionId: string) => Promise<void>
-  startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
   sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
   editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
   promoteQueuedPrompt: (

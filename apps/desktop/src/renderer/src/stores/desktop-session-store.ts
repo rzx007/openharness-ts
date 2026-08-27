@@ -1,19 +1,14 @@
 import { create } from "zustand"
 
 import {
-  applyBootstrapData,
   attachDesktopDaemonStatusEvents,
   createBootstrapActions,
   createInitialDaemonStatus,
 } from "./desktop-session/bootstrap-actions"
 import {
-  formatSessionTitle,
   isPlaceholderTitle,
-  isSessionPinned,
-  resolveSessionWorkspace,
   sessionPermissionMode,
   sessionProvider,
-  upsertProject,
   upsertSession,
 } from "./desktop-session/helpers"
 import { createInitialRuntimeState } from "./desktop-session/initial-state"
@@ -26,8 +21,12 @@ import {
   removePendingPromptSubmission,
   updatePendingPromptSubmission,
 } from "./desktop-session/pending-prompt-state"
-import { acceptActiveSessionView } from "./desktop-session/session-view-state"
+import {
+  acceptActiveSessionView,
+  reconcileRuntimeWithView,
+} from "./desktop-session/session-view-state"
 import { createProjectActions } from "./desktop-session/project-actions"
+import { createSessionActions } from "./desktop-session/session-actions"
 import {
   clearPersistedActiveSessionId,
   writePersistedActiveSessionId,
@@ -40,10 +39,7 @@ import type {
   QueuedPromptAction,
   SubmitPromptOptions,
 } from "./desktop-session/types"
-import type {
-  CreateDesktopSessionInput,
-  DesktopSessionView,
-} from "@shared/session-types"
+import type { DesktopSessionView } from "@shared/session-types"
 
 export type { QueuedPromptAction } from "./desktop-session/types"
 export { isSessionPinned } from "./desktop-session/helpers"
@@ -84,545 +80,11 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
   ...createBootstrapActions({ set, get }),
   ...createProjectActions({ set, get }),
 
-  async startNewConversation() {
-    await window.desktop.sessions.close()
-    clearPersistedActiveSessionId()
-    set({
-      activeSessionId: null,
-      sessionView: null,
-      selectedModel: get().defaultModel,
-      selectedProvider: get().defaultProvider,
-      selectedPermissionMode: get().defaultPermissionMode,
-      openingSession: false,
-      sending: false,
-      sendingOperationId: null,
-      error: null,
-    })
-  },
-
-  async selectModel(model) {
-    const previousModel = get().selectedModel
-    const previousProvider = get().selectedProvider
-    set({
-      selectedModel: model.id,
-      selectedProvider: model.providerName,
-      defaultModel: model.id,
-      defaultProvider: model.providerName,
-      error: null,
-    })
-    try {
-      const data = await window.desktop.sessions.setDefaultModel({
-        model: model.id,
-        provider: model.providerName,
-      })
-      set((state) =>
-        applyBootstrapData(
-          data,
-          state.selectedProject,
-          state.workspaceMode,
-          model.id,
-          model.providerName
-        )
-      )
-    } catch (error) {
-      set({
-        selectedModel: previousModel,
-        selectedProvider: previousProvider,
-        defaultModel: previousModel,
-        defaultProvider: previousProvider,
-        error: errorMessage(error),
-      })
-    }
-  },
-
-  async selectPermissionMode(permissionMode) {
-    const previous = get().selectedPermissionMode
-    set({
-      selectedPermissionMode: permissionMode,
-      defaultPermissionMode: permissionMode,
-      error: null,
-    })
-    try {
-      const data = await window.desktop.sessions.setDefaultPermissionMode({ permissionMode })
-      set((state) => ({
-        ...applyBootstrapData(
-          data,
-          state.selectedProject,
-          state.workspaceMode,
-          state.selectedModel,
-          state.selectedProvider
-        ),
-        selectedPermissionMode: data.defaultPermissionMode,
-      }))
-    } catch (error) {
-      set({
-        selectedPermissionMode: previous,
-        defaultPermissionMode: previous,
-        error: errorMessage(error),
-      })
-    }
-  },
-
-  async updateSessionModel(sessionId, model) {
-    try {
-      const session = await window.desktop.sessions.updateModel({
-        sessionId,
-        model: model.id,
-        provider: model.providerName,
-      })
-      set((state) => ({
-        sessions: upsertSession(state.sessions, session),
-        selectedModel: state.activeSessionId === sessionId ? session.model : state.selectedModel,
-        selectedProvider:
-          state.activeSessionId === sessionId
-            ? sessionProvider(session, model.providerName)
-            : state.selectedProvider,
-        sessionView:
-          state.sessionView?.session.id === sessionId
-            ? { ...state.sessionView, session }
-            : state.sessionView,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async updateSessionPermissionMode(sessionId, permissionMode) {
-    try {
-      const session = await window.desktop.sessions.updatePermissionMode({
-        sessionId,
-        permissionMode,
-      })
-      set((state) => ({
-        sessions: upsertSession(state.sessions, session),
-        selectedPermissionMode:
-          state.activeSessionId === sessionId
-            ? sessionPermissionMode(session)
-            : state.selectedPermissionMode,
-        sessionView:
-          state.sessionView?.session.id === sessionId
-            ? { ...state.sessionView, session }
-            : state.sessionView,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async openSession(sessionId) {
-    if (!sessionId) return
-    set((state) => {
-      const switchingSessions = state.activeSessionId !== sessionId
-      return {
-        activeSessionId: sessionId,
-        sessionView: null,
-        openingSession: true,
-        sending: switchingSessions ? false : state.sending,
-        sendingOperationId: switchingSessions ? null : state.sendingOperationId,
-        error: null,
-      }
-    })
-    try {
-      const view = await window.desktop.sessions.open(sessionId)
-      if (get().activeSessionId !== sessionId) return
-      const current = get().sessionView
-      if (current?.session.id === sessionId && view.cursor < current.cursor) {
-        set({ openingSession: false })
-        return
-      }
-      writePersistedActiveSessionId(sessionId)
-      const workspace = resolveSessionWorkspace(get().projects, view.session)
-      set((state) => ({
-        ...workspace,
-        sessionView: view,
-        pendingPromptSubmissions: reconcilePendingPromptSubmissions(
-          state.pendingPromptSubmissions,
-          view
-        ),
-        queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
-        openingSession: false,
-        selectedModel: view.session.model,
-        selectedProvider: sessionProvider(view.session, state.defaultProvider),
-        selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
-        sessions:
-          view.session.status === "archived"
-            ? state.sessions.filter((session) => session.id !== view.session.id)
-            : upsertSession(state.sessions, view.session),
-        archivedSessions:
-          view.session.status === "archived"
-            ? upsertSession(state.archivedSessions, view.session)
-            : state.archivedSessions,
-      }))
-      if (workspace.selectedProject) {
-        try {
-          const details = await window.desktop.sessions.inspectProject(
-            workspace.selectedProject.path
-          )
-          if (get().activeSessionId !== sessionId) return
-          set((state) => ({
-            projects: upsertProject(state.projects, details.project),
-            selectedProject: details.project,
-            selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
-            selectedProjectGitCheckedAt: Date.now(),
-            branch: details.branch,
-            branches: details.branches ?? [],
-          }))
-        } catch {
-          if (get().activeSessionId === sessionId) {
-            set({
-              selectedProjectGit: false,
-              selectedProjectGitCheckedAt: Date.now(),
-              branch: null,
-              branches: [],
-            })
-          }
-        }
-      }
-    } catch (error) {
-      if (get().activeSessionId === sessionId) {
-        clearPersistedActiveSessionId()
-        set({ openingSession: false, error: errorMessage(error) })
-      }
-    }
-  },
-
-  async startConversationFrom(session) {
-    await window.desktop.sessions.close()
-    clearPersistedActiveSessionId()
-    const workspace = resolveSessionWorkspace(get().projects, session)
-    set({
-      activeSessionId: null,
-      sessionView: null,
-      openingSession: false,
-      sending: false,
-      sendingOperationId: null,
-      ...workspace,
-      selectedModel: session.model,
-      selectedProvider: sessionProvider(session, get().defaultProvider),
-      selectedPermissionMode: sessionPermissionMode(session, get().defaultPermissionMode),
-      selectedProjectGit: false,
-      selectedProjectGitCheckedAt: null,
-      branch: null,
-      branches: [],
-      error: null,
-    })
-    if (workspace.selectedProject) await get().selectProject(workspace.selectedProject)
-  },
-
-  async forkSession(sessionId, options) {
-    if (!sessionId) throw new Error("会话 ID 不能为空")
-    try {
-      const session = await window.desktop.sessions.fork({
-        sessionId,
-        ...(options?.beforeMessageId ? { beforeMessageId: options.beforeMessageId } : {}),
-        ...(options?.afterMessageId ? { afterMessageId: options.afterMessageId } : {}),
-      })
-      set((state) => ({
-        sessions: upsertSession(state.sessions, session),
-        archivedSessions: state.archivedSessions.filter((item) => item.id !== session.id),
-        error: null,
-      }))
-      await get().openSession(session.id)
-      return session
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async renameSession(sessionId, title) {
-    const normalizedTitle = title.replace(/\s+/g, " ").trim()
-    if (!normalizedTitle) return
-    try {
-      const session = await window.desktop.sessions.rename({ sessionId, title: normalizedTitle })
-      set((state) => ({
-        sessions: upsertSession(state.sessions, session),
-        sessionView:
-          state.sessionView?.session.id === sessionId
-            ? { ...state.sessionView, session }
-            : state.sessionView,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async togglePinSession(sessionId) {
-    const existing = get().sessions.find((session) => session.id === sessionId)
-    if (!existing) return
-    try {
-      const session = await window.desktop.sessions.setPinned({
-        sessionId,
-        pinned: !isSessionPinned(existing),
-      })
-      set((state) => ({
-        sessions: upsertSession(state.sessions, session),
-        sessionView:
-          state.sessionView?.session.id === sessionId
-            ? { ...state.sessionView, session }
-            : state.sessionView,
-        error: null,
-      }))
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async archiveSession(sessionId) {
-    const existing = get().sessions.find((session) => session.id === sessionId)
-    if (!existing) return
-    try {
-      const archived = await window.desktop.sessions.archive(sessionId)
-      const isActive = get().activeSessionId === sessionId
-      set((state) => ({
-        ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
-        sessions: state.sessions.filter((session) => session.id !== sessionId),
-        archivedSessions: upsertSession(state.archivedSessions, archived),
-        activeSessionId: isActive ? null : state.activeSessionId,
-        sessionView: isActive ? null : state.sessionView,
-        pendingPromptSubmissions: filterPendingPromptSubmissions(
-          state.pendingPromptSubmissions,
-          (submission) => submission.sessionId !== sessionId
-        ),
-        queuedPromptActions: filterQueuedPromptActions(
-          state.queuedPromptActions,
-          (action) => action.sessionId !== sessionId
-        ),
-        openingSession: isActive ? false : state.openingSession,
-        sending: isActive ? false : state.sending,
-        sendingOperationId: isActive ? null : state.sendingOperationId,
-        selectedModel: isActive ? existing.model : state.selectedModel,
-        selectedProvider: isActive
-          ? sessionProvider(existing, state.defaultProvider)
-          : state.selectedProvider,
-        selectedPermissionMode: isActive
-          ? sessionPermissionMode(existing, state.defaultPermissionMode)
-          : state.selectedPermissionMode,
-        error: null,
-      }))
-      if (isActive) {
-        clearPersistedActiveSessionId()
-        const project = get().selectedProject
-        if (project) await get().selectProject(project)
-      }
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async deleteSession(sessionId) {
-    const existing =
-      get().sessions.find((session) => session.id === sessionId) ??
-      get().archivedSessions.find((session) => session.id === sessionId)
-    if (!existing) return
-    try {
-      const deletedSessionIds = await window.desktop.sessions.delete(sessionId)
-      const deleted = new Set(deletedSessionIds)
-      const activeSessionId = get().activeSessionId
-      const isActive = activeSessionId !== null && deleted.has(activeSessionId)
-      set((state) => ({
-        ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
-        sessions: state.sessions.filter((session) => !deleted.has(session.id)),
-        archivedSessions: state.archivedSessions.filter((session) => !deleted.has(session.id)),
-        activeSessionId: isActive ? null : state.activeSessionId,
-        sessionView:
-          state.sessionView && deleted.has(state.sessionView.session.id) ? null : state.sessionView,
-        pendingPromptSubmissions: filterPendingPromptSubmissions(
-          state.pendingPromptSubmissions,
-          (submission) => !deleted.has(submission.sessionId)
-        ),
-        queuedPromptActions: filterQueuedPromptActions(
-          state.queuedPromptActions,
-          (action) => !deleted.has(action.sessionId)
-        ),
-        openingSession: isActive ? false : state.openingSession,
-        sending: isActive ? false : state.sending,
-        sendingOperationId: isActive ? null : state.sendingOperationId,
-        selectedModel: isActive ? existing.model : state.selectedModel,
-        selectedProvider: isActive
-          ? sessionProvider(existing, state.defaultProvider)
-          : state.selectedProvider,
-        selectedPermissionMode: isActive
-          ? sessionPermissionMode(existing, state.defaultPermissionMode)
-          : state.selectedPermissionMode,
-        error: null,
-      }))
-      if (isActive) {
-        clearPersistedActiveSessionId()
-        const project = get().selectedProject
-        if (project) await get().selectProject(project)
-      }
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      throw error
-    }
-  },
-
-  async startSession(content: string, options?: SubmitPromptOptions) {
-    const prompt = content.trim()
-    const {
-      selectedProject,
-      workspaceMode,
-      selectedModel,
-      selectedProvider,
-      defaultModel,
-      defaultProvider,
-      selectedPermissionMode,
-    } = get()
-    const model = selectedModel ?? defaultModel
-    const provider = selectedProvider ?? defaultProvider
-    if (!prompt || get().sending) return null
-    if (workspaceMode === "project" && !selectedProject) {
-      set({ error: "请先选择一个项目目录。" })
-      return null
-    }
-    if (!model) {
-      set({ error: "没有可用模型，请先配置模型。" })
-      return null
-    }
-
-    const promptSubmissionId = globalThis.crypto.randomUUID()
-    let startedSessionId: string | null = null
-    set({ sending: true, sendingOperationId: promptSubmissionId, error: null })
-    try {
-      const sessionInput: CreateDesktopSessionInput =
-        workspaceMode === "project" && selectedProject
-          ? {
-              projectId: selectedProject.id,
-              cwd: selectedProject.path,
-              model,
-              ...(provider ? { provider } : {}),
-              permissionMode: selectedPermissionMode,
-            }
-          : {
-              model,
-              ...(provider ? { provider } : {}),
-              permissionMode: selectedPermissionMode,
-            }
-      const session = await window.desktop.sessions.create(sessionInput)
-      startedSessionId = session.id
-      set((state) => {
-        const ownsCurrentPage = state.sendingOperationId === promptSubmissionId
-        return {
-          sessions: upsertSession(state.sessions, session),
-          ...(ownsCurrentPage
-            ? {
-                activeSessionId: session.id,
-                openingSession: true,
-              }
-            : {}),
-          ...(!options?.commandLine
-            ? {
-                pendingPromptSubmissions: {
-                  ...state.pendingPromptSubmissions,
-                  [promptSubmissionId]: {
-                    id: promptSubmissionId,
-                    sessionId: session.id,
-                    content: prompt,
-                    createdAt: Date.now(),
-                    phase: "submitting",
-                    placement: "transcript",
-                  },
-                },
-              }
-            : {}),
-        }
-      })
-      if (get().sendingOperationId === promptSubmissionId) {
-        writePersistedActiveSessionId(session.id)
-        const view = await window.desktop.sessions.open(session.id)
-        set((state) =>
-          state.activeSessionId === session.id
-            ? {
-                sessionView: acceptActiveSessionView(state.activeSessionId, state.sessionView, view),
-                pendingPromptSubmissions: reconcilePendingPromptSubmissions(
-                  state.pendingPromptSubmissions,
-                  view
-                ),
-                queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
-                openingSession: false,
-                selectedModel: view.session.model,
-                selectedProvider: sessionProvider(view.session, provider),
-                selectedPermissionMode: sessionPermissionMode(
-                  view.session,
-                  state.defaultPermissionMode
-                ),
-              }
-            : state
-        )
-      }
-      if (options?.commandLine) {
-        await window.desktop.sessions.invokeCommand({
-          sessionId: session.id,
-          line: options.commandLine,
-        })
-      } else {
-        await window.desktop.sessions.sendPrompt({
-          id: promptSubmissionId,
-          sessionId: session.id,
-          content: prompt,
-        })
-        set((state) => ({
-          pendingPromptSubmissions: updatePendingPromptSubmission(
-            state.pendingPromptSubmissions,
-            promptSubmissionId,
-            (submission) => ({ ...submission, phase: "accepted", error: undefined })
-          ),
-        }))
-      }
-      const title = formatSessionTitle(prompt)
-      set((state) => {
-        if (!state.sessions.some((candidate) => candidate.id === session.id)) return state
-        const titledSession = { ...session, title, updatedAt: Date.now() }
-        return {
-          sessions: upsertSession(state.sessions, titledSession),
-          sessionView:
-            state.sessionView?.session.id === session.id
-              ? {
-                  ...state.sessionView,
-                  session: { ...state.sessionView.session, title },
-                }
-              : state.sessionView,
-        }
-      })
-    } catch (error) {
-      const message = errorMessage(error)
-      const currentState = get()
-      const confirmed =
-        !options?.commandLine &&
-        (!currentState.pendingPromptSubmissions[promptSubmissionId] ||
-          sessionViewContainsInput(currentState.sessionView, promptSubmissionId))
-      set((state) => ({
-        openingSession: state.activeSessionId === startedSessionId ? false : state.openingSession,
-        error: state.activeSessionId === startedSessionId && !confirmed ? message : state.error,
-        pendingPromptSubmissions: confirmed
-          ? removePendingPromptSubmission(state.pendingPromptSubmissions, promptSubmissionId)
-          : updatePendingPromptSubmission(
-              state.pendingPromptSubmissions,
-              promptSubmissionId,
-              (submission) => ({ ...submission, phase: "failed", error: message })
-            ),
-      }))
-      if (confirmed) return startedSessionId
-      throw error
-    } finally {
-      set((state) =>
-        state.sendingOperationId === promptSubmissionId
-          ? { sending: false, sendingOperationId: null }
-          : state
-      )
-      scheduleSelectedProjectGitRefresh(true)
-    }
-    return startedSessionId
-  },
+  ...createSessionActions({
+    set,
+    get,
+    scheduleSelectedProjectGitRefresh,
+  }),
 
   async sendMessage(content: string, options?: SubmitPromptOptions) {
     const prompt = content.trim()
@@ -905,6 +367,17 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
           view
         ),
         queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
+        ...(state.sessionRuntimes[view.session.id]
+          ? {
+              sessionRuntimes: {
+                ...state.sessionRuntimes,
+                [view.session.id]: reconcileRuntimeWithView(
+                  state.sessionRuntimes[view.session.id],
+                  view
+                ),
+              },
+            }
+          : {}),
         openingSession: false,
         selectedModel: session.model,
         selectedProvider: sessionProvider(session, state.defaultProvider),
@@ -935,15 +408,6 @@ export function attachDesktopSessionEvents(): () => void {
   return window.desktop.sessions.onUpdated((view) => {
     useDesktopSessionStore.getState().applySessionUpdate(view)
   })
-}
-
-function filterPendingPromptSubmissions(
-  submissions: Record<string, PendingPromptSubmission>,
-  keep: (submission: PendingPromptSubmission) => boolean
-): Record<string, PendingPromptSubmission> {
-  return Object.fromEntries(
-    Object.entries(submissions).filter(([, submission]) => keep(submission))
-  )
 }
 
 function sessionViewContainsInput(view: DesktopSessionView | null, inputId: string): boolean {
@@ -982,13 +446,6 @@ function removeQueuedPromptAction(
   const remaining = { ...actions }
   delete remaining[actionKey]
   return remaining
-}
-
-function filterQueuedPromptActions(
-  actions: Record<string, QueuedPromptAction>,
-  keep: (action: QueuedPromptAction) => boolean
-): Record<string, QueuedPromptAction> {
-  return Object.fromEntries(Object.entries(actions).filter(([, action]) => keep(action)))
 }
 
 function queuedPromptActionError(kind: "promote" | "cancel", error: unknown): string {
