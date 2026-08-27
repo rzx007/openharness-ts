@@ -6,7 +6,11 @@ import {
   failOperation,
   removeOperation,
 } from "./operation-state"
-import { classifyPromptPlacement, updatePendingPromptSubmission } from "./pending-prompt-state"
+import {
+  classifyPromptPlacement,
+  removePendingPromptSubmission,
+  updatePendingPromptSubmission,
+} from "./pending-prompt-state"
 import type {
   DesktopSessionRuntime,
   DesktopStoreContext,
@@ -73,8 +77,9 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
           sessionId,
           content: prompt,
         })
+        const keepLocalAcknowledgement = get().activeSessionId === sessionId
         replaceRuntime(sessionId, (currentRuntime) =>
-          acknowledgeOperation(
+          settleSubmittedPrompt(
             {
               ...currentRuntime,
               pendingPromptSubmissions: updatePendingPromptSubmission(
@@ -88,7 +93,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
               ),
             },
             submission.id,
-            Date.now()
+            keepLocalAcknowledgement
           )
         )
       } catch (error) {
@@ -209,6 +214,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       const sessionId = get().activeSessionId
       if (!sessionId || !permissionId) return
       const operationId = `${sessionId}:${permissionId}`
+      if (getSessionRuntime(get(), sessionId).operations[operationId]?.phase === "pending") return
       replaceRuntime(sessionId, (runtime) =>
         beginOperation(runtime, {
           id: operationId,
@@ -290,5 +296,24 @@ function promptSubmissionConfirmed(
       state.sessionView?.session.id === sessionId &&
       state.sessionView.inputs.some((input) => input.id === inputId)
     )
+  )
+}
+
+function settleSubmittedPrompt(
+  runtime: DesktopSessionRuntime,
+  submissionId: string,
+  keepLocalAcknowledgement: boolean
+): DesktopSessionRuntime {
+  const acknowledged = acknowledgeOperation(runtime, submissionId, Date.now())
+  if (keepLocalAcknowledgement) return acknowledged
+  return removeOperation(
+    {
+      ...acknowledged,
+      pendingPromptSubmissions: removePendingPromptSubmission(
+        acknowledged.pendingPromptSubmissions,
+        submissionId
+      ),
+    },
+    submissionId
   )
 }

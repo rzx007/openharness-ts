@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest"
 import { createEmptySessionRuntime } from "./operation-state"
 import {
   selectActiveSessionOpening,
+  selectActiveSessionPermissionReplies,
+  selectPermissionReplyError,
+  selectPermissionReplyPending,
   selectActiveSessionPromptSubmissions,
   selectActiveSessionSending,
   selectAppOperationError,
@@ -127,35 +130,70 @@ describe("desktop session selectors", () => {
     expect(selectSessionComposerError(state, "session-a")).toBeNull()
   })
 
-  it.each([
-    "open-session",
-    "invoke-command",
-    "edit-prompt",
-    "interrupt-run",
-    "reply-permission",
-  ] as const)("selects a failed %s operation for its active session owner", (kind) => {
+  it("selects pending and failed replies for one permission only", () => {
     const state = stateWith({
-      activeSessionId: "session-a",
       sessionRuntimes: {
         "session-a": {
           ...createEmptySessionRuntime(),
           operations: {
-            operation: {
-              id: "operation",
-              kind,
+            "session-a:permission-pending": {
+              id: "session-a:permission-pending",
+              kind: "reply-permission",
+              phase: "pending",
+              sessionId: "session-a",
+              target: "permission-pending",
+              startedAt: 1,
+            },
+            "session-a:permission-failed": {
+              id: "session-a:permission-failed",
+              kind: "reply-permission",
               phase: "failed",
               sessionId: "session-a",
+              target: "permission-failed",
               startedAt: 1,
               finishedAt: 2,
-              error: `${kind} failed`,
+              error: "授权回复失败",
             },
           },
         },
       },
     })
 
-    expect(selectSessionComposerError(state, "session-a")).toBe(`${kind} failed`)
+    expect(selectPermissionReplyPending(state, "session-a", "permission-pending")).toBe(true)
+    expect(selectPermissionReplyPending(state, "session-a", "permission-failed")).toBe(false)
+    expect(selectPermissionReplyError(state, "session-a", "permission-failed")).toBe("授权回复失败")
+    expect(selectPermissionReplyError(state, "session-a", "permission-pending")).toBeNull()
+    expect(selectActiveSessionPermissionReplies(state)).toBe(
+      selectActiveSessionPermissionReplies(state)
+    )
   })
+
+  it.each(["open-session", "invoke-command", "edit-prompt", "interrupt-run"] as const)(
+    "selects a failed %s operation for its active session owner",
+    (kind) => {
+      const state = stateWith({
+        activeSessionId: "session-a",
+        sessionRuntimes: {
+          "session-a": {
+            ...createEmptySessionRuntime(),
+            operations: {
+              operation: {
+                id: "operation",
+                kind,
+                phase: "failed",
+                sessionId: "session-a",
+                startedAt: 1,
+                finishedAt: 2,
+                error: `${kind} failed`,
+              },
+            },
+          },
+        },
+      })
+
+      expect(selectSessionComposerError(state, "session-a")).toBe(`${kind} failed`)
+    }
+  )
 
   it("selects opening, prompt submissions, and scope-specific errors", () => {
     const state = stateWith({

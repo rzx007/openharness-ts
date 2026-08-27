@@ -1,4 +1,5 @@
-import { createInitialDaemonStatus } from "./bootstrap-actions"
+import type { DesktopDaemonStatus } from "@shared/session-types"
+
 import { createEmptySessionRuntime } from "./operation-state"
 import type {
   BootstrapActions,
@@ -9,6 +10,16 @@ import type {
   QueuedPromptActions,
   SessionActions,
 } from "./types"
+
+const initialDaemonStatus: DesktopDaemonStatus = {
+  phase: "idle",
+  message: "等待连接 daemon",
+  updatedAt: Date.now(),
+}
+
+function createInitialDaemonStatus(): DesktopDaemonStatus {
+  return initialDaemonStatus
+}
 
 export function createInitialRuntimeState(): DesktopRuntimeState {
   return {

@@ -92,7 +92,7 @@ describe("prompt actions session runtime", () => {
     await request
   })
 
-  it("keeps an old session send from settling the new session runtime", async () => {
+  it("cleans an acknowledged send after its session loses the primary stream", async () => {
     let resolveOld!: () => void
     let resolveNew!: () => void
     const sendPrompt = vi.fn(
@@ -120,11 +120,37 @@ describe("prompt actions session runtime", () => {
     await oldRequest
 
     const runtimes = useDesktopSessionStore.getState().sessionRuntimes
-    expect(Object.values(runtimes["session-old"]!.operations)).toHaveLength(1)
+    expect(runtimes["session-old"]!.operations).toEqual({})
+    expect(runtimes["session-old"]!.pendingPromptSubmissions).toEqual({})
     expect(Object.values(runtimes["session-new"]!.operations)).toHaveLength(1)
 
     resolveNew()
     await newRequest
+  })
+
+  it("does not submit a second reply while the same permission is pending", async () => {
+    let resolveReply!: () => void
+    const replyPermission = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveReply = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { replyPermission } } })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+
+    const firstReply = useDesktopSessionStore.getState().replyPermission("permission-1", "approved")
+    const secondReply = useDesktopSessionStore.getState().replyPermission("permission-1", "denied")
+
+    expect(replyPermission).toHaveBeenCalledOnce()
+    expect(replyPermission).toHaveBeenCalledWith({
+      permissionId: "permission-1",
+      status: "approved",
+      decision: "once",
+    })
+
+    resolveReply()
+    await Promise.all([firstReply, secondReply])
   })
 
   it("treats an SSE-confirmed input as success when IPC rejects later", async () => {
@@ -762,6 +788,31 @@ describe("desktop session store prompt intent boundaries", () => {
         phase: "acknowledged",
       },
     })
+  })
+
+  it("cleans an acknowledged queue action after its session loses the primary stream", async () => {
+    let resolvePromote!: () => void
+    const promoteQueuedPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePromote = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { promoteQueuedPrompt } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: emptySessionView("session-1"),
+    })
+
+    const request = useDesktopSessionStore
+      .getState()
+      .promoteQueuedPrompt("input-queued", "run-queued", "run-active")
+    useDesktopSessionStore.setState({ activeSessionId: "session-2" })
+    resolvePromote()
+    await request
+
+    expect(sessionRuntime("session-1").queuedPromptActions).toEqual({})
+    expect(sessionRuntime("session-1").operations).toEqual({})
   })
 
   it("does not report an action failure after SSE already confirmed it", async () => {

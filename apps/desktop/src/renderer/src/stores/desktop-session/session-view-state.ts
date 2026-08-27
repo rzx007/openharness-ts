@@ -45,6 +45,27 @@ export function reconcileRuntimeWithView(
   }
 }
 
+export function releaseAcknowledgedRuntime(runtime: DesktopSessionRuntime): DesktopSessionRuntime {
+  return {
+    ...runtime,
+    operations: Object.fromEntries(
+      Object.entries(runtime.operations).filter(
+        ([, operation]) => operation.phase !== "acknowledged"
+      )
+    ),
+    pendingPromptSubmissions: Object.fromEntries(
+      Object.entries(runtime.pendingPromptSubmissions).filter(
+        ([, submission]) => submission.phase !== "accepted"
+      )
+    ),
+    queuedPromptActions: Object.fromEntries(
+      Object.entries(runtime.queuedPromptActions).filter(
+        ([, action]) => action.phase !== "acknowledged"
+      )
+    ),
+  }
+}
+
 function operationConfirmedByView(
   operation: DesktopOperation,
   operationId: string,

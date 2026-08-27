@@ -202,7 +202,7 @@ describe("desktop session actions", () => {
     await newStarting
   })
 
-  it("binds a background create to its session so its later snapshot clears the operation", async () => {
+  it("cleans a background create after its first prompt is accepted", async () => {
     const session = emptySessionView("session-background").session
     let resolveCreate!: (created: DesktopSessionView["session"]) => void
     const create = vi.fn(
@@ -231,24 +231,13 @@ describe("desktop session actions", () => {
     await starting
 
     const backgroundRuntime = useDesktopSessionStore.getState().sessionRuntimes[session.id]
-    expect(Object.values(backgroundRuntime?.operations ?? {})).toContainEqual(
-      expect.objectContaining({
-        kind: "create-session",
-        sessionId: session.id,
-        phase: "acknowledged",
-      })
-    )
+    expect(backgroundRuntime?.operations).toEqual({})
+    expect(backgroundRuntime?.pendingPromptSubmissions).toEqual({})
     expect(useDesktopSessionStore.getState()).toMatchObject({
       activeSessionId: null,
       newConversationRuntime: { operations: {} },
     })
     expect(selectNewConversationSending(useDesktopSessionStore.getState())).toBe(false)
-
-    await useDesktopSessionStore.getState().openSession(session.id)
-
-    expect(
-      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations
-    ).not.toContainEqual(expect.objectContaining({ kind: "create-session" }))
   })
 
   it("does not let a pending create reclaim a conversation started from another session", async () => {
@@ -1128,6 +1117,8 @@ describe("desktop session store outside-project mode", () => {
       activeSessionId: "session-b",
       sessionView: { session: { id: "session-b" }, cursor: 2 },
     })
+    expect(sessionRuntime("session-a").operations).toEqual({})
+    expect(sessionRuntime("session-a").pendingPromptSubmissions).toEqual({})
   })
 
   it("keeps the internal xN workspace hidden after opening a session and starting a new one", async () => {

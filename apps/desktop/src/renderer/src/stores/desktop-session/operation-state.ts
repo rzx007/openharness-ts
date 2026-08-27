@@ -15,7 +15,10 @@ export function beginOperation(
 ): DesktopSessionRuntime {
   const operations = Object.fromEntries(
     Object.entries(runtime.operations).filter(
-      ([, operation]) => operation.phase !== "failed" || operation.kind !== input.kind
+      ([, operation]) =>
+        operation.phase !== "failed" ||
+        operation.kind !== input.kind ||
+        operation.target !== input.target
     )
   )
   return {

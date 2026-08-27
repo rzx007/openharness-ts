@@ -332,10 +332,14 @@ function MessageActionButton({
 export function PermissionCard({
   permission,
   onReply,
+  replyPending = false,
+  replyError = null,
   className,
 }: {
   permission: DesktopPermissionRequest
   onReply: (status: "approved" | "denied", decision?: "once" | "session") => void
+  replyPending?: boolean
+  replyError?: string | null
   className?: string
 }): React.JSX.Element {
   return (
@@ -350,11 +354,17 @@ export function PermissionCard({
             {"OpenHarness 请求运行 "}
             {permission.toolName}
           </p>
+          {replyError ? (
+            <p role="alert" className="mt-1 text-xs leading-snug text-destructive">
+              {replyError}
+            </p>
+          ) : null}
         </div>
         <Button
           type="button"
           variant="ghost"
           className="text-xs text-muted-foreground"
+          disabled={replyPending}
           onClick={() => onReply("denied")}
         >
           拒绝
@@ -363,9 +373,10 @@ export function PermissionCard({
           type="button"
           variant="outline"
           className="text-xs"
+          disabled={replyPending}
           onClick={() => onReply("approved", "once")}
         >
-          允许
+          {replyPending ? "正在提交" : "允许"}
         </Button>
       </div>
     </section>

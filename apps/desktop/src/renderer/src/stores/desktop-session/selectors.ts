@@ -7,6 +7,10 @@ import type {
 } from "./types"
 
 const emptySessionRuntime = createEmptySessionRuntime()
+const permissionReplyStatesByOperations = new WeakMap<
+  Record<string, DesktopOperation>,
+  Record<string, PermissionReplyState>
+>()
 
 const composerOperationKinds = new Set<DesktopOperationKind>([
   "send-prompt",
@@ -19,8 +23,12 @@ const sessionErrorOperationKinds = new Set<DesktopOperationKind>([
   "invoke-command",
   "edit-prompt",
   "interrupt-run",
-  "reply-permission",
 ])
+
+export interface PermissionReplyState {
+  pending: boolean
+  error: string | null
+}
 
 export function selectDaemonStatus(
   state: DesktopSessionState
@@ -95,6 +103,41 @@ export function selectActiveSessionQueuedPromptActions(
   return selectActiveSessionRuntime(state).queuedPromptActions
 }
 
+export function selectPermissionReplyPending(
+  state: DesktopSessionState,
+  sessionId: string,
+  permissionId: string
+): boolean {
+  return selectPermissionReplyOperation(state, sessionId, permissionId)?.phase === "pending"
+}
+
+export function selectPermissionReplyError(
+  state: DesktopSessionState,
+  sessionId: string,
+  permissionId: string
+): string | null {
+  const operation = selectPermissionReplyOperation(state, sessionId, permissionId)
+  return operation?.phase === "failed" ? (operation.error ?? null) : null
+}
+
+export function selectActiveSessionPermissionReplies(
+  state: DesktopSessionState
+): Record<string, PermissionReplyState> {
+  const operations = selectActiveSessionRuntime(state).operations
+  const cached = permissionReplyStatesByOperations.get(operations)
+  if (cached) return cached
+  const replies: Record<string, PermissionReplyState> = {}
+  for (const operation of Object.values(operations)) {
+    if (operation.kind !== "reply-permission" || !operation.target) continue
+    replies[operation.target] = {
+      pending: operation.phase === "pending",
+      error: operation.phase === "failed" ? (operation.error ?? null) : null,
+    }
+  }
+  permissionReplyStatesByOperations.set(operations, replies)
+  return replies
+}
+
 export function selectSessionComposerError(
   state: DesktopSessionState,
   sessionId: string
@@ -134,6 +177,17 @@ export function selectProjectOperationError(
 
 function hasPendingComposerOperation(runtime: DesktopSessionRuntime): boolean {
   return hasPendingOperation(runtime, (kind) => composerOperationKinds.has(kind))
+}
+
+function selectPermissionReplyOperation(
+  state: DesktopSessionState,
+  sessionId: string,
+  permissionId: string
+): DesktopOperation | undefined {
+  const operation = selectSessionRuntime(state, sessionId).operations[
+    `${sessionId}:${permissionId}`
+  ]
+  return operation?.kind === "reply-permission" ? operation : undefined
 }
 
 function hasSubmittingPrompt(runtime: DesktopSessionRuntime): boolean {

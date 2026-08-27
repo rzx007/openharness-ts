@@ -304,14 +304,17 @@ apps/desktop/src/renderer/src/stores/
    ├─ operation-state.ts
    ├─ error-state.ts
    ├─ session-view-state.ts
+   ├─ session-view-actions.ts
    ├─ pending-prompt-state.ts
    ├─ bootstrap-actions.ts
    ├─ project-actions.ts
+   ├─ project-git-scheduler.ts
    ├─ session-actions.ts
    ├─ prompt-actions.ts
    ├─ queued-prompt-actions.ts
    ├─ persistence.ts
-   └─ helpers.ts
+   ├─ helpers.ts
+   └─ store-test-fixtures.ts（仅测试）
 ```
 
 ### `desktop-session-store.ts`
@@ -346,6 +349,10 @@ apps/desktop/src/renderer/src/stores/
 
 提供 cursor 比较、active session 校验、snapshot/SSE 应用和 runtime 对账入口。这里决定权威 view 是否可以接管，不发起 IPC。
 
+### `session-view-actions.ts`
+
+承接已接收的 SSE 快照，写入目录、导航和对应 session runtime。它调用 `session-view-state.ts` 的纯规则，不发起 IPC。
+
 ### `pending-prompt-state.ts`
 
 提供 submission placement 分类、重试复用、SSE 确认、PendingPromptQueue 展示模型和 queued action 对账纯函数。
@@ -354,6 +361,7 @@ apps/desktop/src/renderer/src/stores/
 
 - `bootstrap-actions.ts`：初始化、refresh bootstrap、daemon 事件挂接；
 - `project-actions.ts`：项目选择、Git 状态、branch 和项目设置；
+- `project-git-scheduler.ts`：合并短时间内重复的 Git 刷新请求，并在 store 监听解绑时取消未执行工作；
 - `session-actions.ts`：新会话入口、创建、打开、fork、rename、pin、archive、delete；
 - `prompt-actions.ts`：发送、命令、编辑、停止、授权回复；
 - `queued-prompt-actions.ts`：提升和取消排队消息。
@@ -368,6 +376,10 @@ Action 文件负责调用 IPC，并使用纯状态模块更新 store。它们不
 
 只放真正跨模块、无状态、没有更明确归属的工具，例如 session title 格式化和稳定排序。错误处理属于 `error-state.ts`，cursor 处理属于 `session-view-state.ts`，不能都塞回 helpers。
 
+### `store-test-fixtures.ts`
+
+仅供测试构造稳定 session、bootstrap 数据和 renderer mock，不参与生产代码依赖方向。
+
 ## 依赖方向
 
 建议依赖方向如下：
@@ -375,9 +387,9 @@ Action 文件负责调用 IPC，并使用纯状态模块更新 store。它们不
 ```text
 types
   ↑
-initial-state / operation-state / error-state / session-view-state / pending-prompt-state / persistence
+initial-state / operation-state / error-state / session-view-state / pending-prompt-state / persistence / project-git-scheduler
   ↑
-bootstrap-actions / project-actions / session-actions / prompt-actions / queued-prompt-actions
+bootstrap-actions / project-actions / session-actions / prompt-actions / queued-prompt-actions / session-view-actions
   ↑
 store
   ↑

@@ -60,8 +60,15 @@ export function createQueuedPromptActions(
           queuedRunId,
           expectedActiveRunId,
         })
+        const keepLocalAcknowledgement = get().activeSessionId === sessionId
         replaceRuntime(sessionId, actionKey, action, (runtime) =>
-          settleAcknowledgedAction(runtime, actionKey, action, get().sessionView)
+          settleAcknowledgedAction(
+            runtime,
+            actionKey,
+            action,
+            get().sessionView,
+            keepLocalAcknowledgement
+          )
         )
       } catch (error) {
         const message = queuedPromptActionError("promote", error)
@@ -107,8 +114,15 @@ export function createQueuedPromptActions(
       )
       try {
         await window.desktop.sessions.cancelQueuedPrompt({ sessionId, inputId, queuedRunId })
+        const keepLocalAcknowledgement = get().activeSessionId === sessionId
         replaceRuntime(sessionId, actionKey, action, (runtime) =>
-          settleAcknowledgedAction(runtime, actionKey, action, get().sessionView)
+          settleAcknowledgedAction(
+            runtime,
+            actionKey,
+            action,
+            get().sessionView,
+            keepLocalAcknowledgement
+          )
         )
       } catch (error) {
         const message = queuedPromptActionError("cancel", error)
@@ -148,11 +162,13 @@ function settleAcknowledgedAction(
   runtime: DesktopSessionRuntime,
   actionKey: string,
   action: QueuedPromptAction,
-  view: import("@shared/session-types").DesktopSessionView | null
+  view: import("@shared/session-types").DesktopSessionView | null,
+  keepLocalAcknowledgement: boolean
 ): DesktopSessionRuntime {
   const current = runtime.queuedPromptActions[actionKey]
   if (!current || current.kind !== action.kind || current.inputId !== action.inputId) return runtime
   if (queuedPromptActionConfirmed(view, action)) return removeActionAndOperation(runtime, actionKey)
+  if (!keepLocalAcknowledgement) return removeActionAndOperation(runtime, actionKey)
   return acknowledgeOperation(
     {
       ...runtime,

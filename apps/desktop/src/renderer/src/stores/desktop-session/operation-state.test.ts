@@ -10,7 +10,7 @@ import {
 } from "./operation-state"
 
 describe("desktop session operation state", () => {
-  it("replaces all failed operations of the retried kind without clearing another kind", () => {
+  it("replaces only the failed operation with the retried target", () => {
     const runtime = {
       ...createEmptySessionRuntime(),
       operations: {
@@ -50,13 +50,13 @@ describe("desktop session operation state", () => {
       id: "edit-new",
       kind: "edit-prompt",
       sessionId: "session-1",
-      target: "message-3",
+      target: "message-1",
       startedAt: 3,
     })
 
     expect(next.operations).toHaveProperty("send-old")
     expect(next.operations).not.toHaveProperty("edit-old")
-    expect(next.operations).not.toHaveProperty("edit-other")
+    expect(next.operations).toHaveProperty("edit-other")
     expect(next.operations["edit-new"]?.phase).toBe("pending")
   })
 

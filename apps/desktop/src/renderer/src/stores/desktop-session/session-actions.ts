@@ -24,9 +24,14 @@ import {
   updatePendingPromptSubmission,
 } from "./pending-prompt-state"
 import { clearPersistedActiveSessionId, writePersistedActiveSessionId } from "./persistence"
-import { acceptActiveSessionView, reconcileRuntimeWithView } from "./session-view-state"
+import {
+  acceptActiveSessionView,
+  reconcileRuntimeWithView,
+  releaseAcknowledgedRuntime,
+} from "./session-view-state"
 import type {
   DesktopSessionRuntime,
+  DesktopSessionState,
   DesktopStoreContext,
   PendingPromptSubmission,
   SessionActions,
@@ -48,6 +53,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   const openPrimarySession = async (sessionId: string): Promise<OpenSessionResult> => {
     const operationId = globalThis.crypto.randomUUID()
     set((state) => {
+      const previousActiveSessionId = state.activeSessionId
       const runtime = state.sessionRuntimes[sessionId] ?? createEmptySessionRuntime()
       const openingRuntime = beginOperation(abandonOpenSessionOperations(runtime), {
         id: operationId,
@@ -60,6 +66,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         sessionView: null,
         sessionRuntimes: {
           ...state.sessionRuntimes,
+          ...(previousActiveSessionId && previousActiveSessionId !== sessionId
+            ? {
+                [previousActiveSessionId]: releaseAcknowledgedRuntime(
+                  state.sessionRuntimes[previousActiveSessionId] ?? createEmptySessionRuntime()
+                ),
+              }
+            : {}),
           [sessionId]: openingRuntime,
         },
       }
@@ -70,8 +83,16 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       set((state) => {
         const runtime = state.sessionRuntimes[sessionId]
         const operation = runtime?.operations[operationId]
-        if (state.activeSessionId !== sessionId || !operation || operation.phase !== "pending") {
+        if (!operation || operation.phase !== "pending") {
           return state
+        }
+        if (state.activeSessionId !== sessionId) {
+          return {
+            sessionRuntimes: {
+              ...state.sessionRuntimes,
+              [sessionId]: removeOperation(runtime, operationId),
+            },
+          }
         }
 
         const acceptedView = acceptActiveSessionView(state.activeSessionId, state.sessionView, view)
@@ -142,8 +163,16 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       set((state) => {
         const runtime = state.sessionRuntimes[sessionId]
         const operation = runtime?.operations[operationId]
-        if (state.activeSessionId !== sessionId || !operation || operation.phase !== "pending") {
+        if (!operation || operation.phase !== "pending") {
           return state
+        }
+        if (state.activeSessionId !== sessionId) {
+          return {
+            sessionRuntimes: {
+              ...state.sessionRuntimes,
+              [sessionId]: removeOperation(runtime, operationId),
+            },
+          }
         }
         failed = true
         clearPersistedActiveSessionId()
@@ -172,6 +201,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         selectedProvider: state.defaultProvider,
         selectedPermissionMode: state.defaultPermissionMode,
         newConversationRuntime,
+        sessionRuntimes: releaseActiveSessionAcknowledgements(state),
       }))
     },
 
@@ -284,7 +314,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       clearPersistedActiveSessionId()
       const workspace = resolveSessionWorkspace(get().projects, session)
       const newConversationRuntime = createEmptySessionRuntime()
-      set(() => ({
+      set((state) => ({
         activeSessionId: null,
         sessionView: null,
         ...workspace,
@@ -296,6 +326,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         branch: null,
         branches: [],
         newConversationRuntime,
+        sessionRuntimes: releaseActiveSessionAcknowledgements(state),
       }))
       if (workspace.selectedProject) await get().selectProject(workspace.selectedProject)
     },
@@ -571,18 +602,33 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             sessionId: session.id,
             content: prompt,
           })
+          const keepLocalAcknowledgement = get().activeSessionId === session.id
           set((state) => {
             const sessionRuntimes = updateSessionRuntime(
               state.sessionRuntimes,
               session.id,
-              (runtime) => ({
-                ...runtime,
-                pendingPromptSubmissions: updatePendingPromptSubmission(
-                  runtime.pendingPromptSubmissions,
-                  promptSubmissionId,
-                  (submission) => ({ ...submission, phase: "accepted", error: undefined })
-                ),
-              })
+              (runtime) => {
+                const acceptedRuntime = {
+                  ...runtime,
+                  pendingPromptSubmissions: updatePendingPromptSubmission(
+                    runtime.pendingPromptSubmissions,
+                    promptSubmissionId,
+                    (submission) => ({ ...submission, phase: "accepted", error: undefined })
+                  ),
+                }
+                return keepLocalAcknowledgement
+                  ? acceptedRuntime
+                  : removeOperation(
+                      {
+                        ...acceptedRuntime,
+                        pendingPromptSubmissions: removePendingPromptSubmission(
+                          acceptedRuntime.pendingPromptSubmissions,
+                          promptSubmissionId
+                        ),
+                      },
+                      promptSubmissionId
+                    )
+              }
             )
             return { sessionRuntimes }
           })
@@ -687,4 +733,17 @@ function abandonOpenSessionOperations(runtime: DesktopSessionRuntime): DesktopSe
 
 function sessionViewContainsInput(view: DesktopSessionView | null, inputId: string): boolean {
   return Boolean(view?.inputs.some((input) => input.id === inputId))
+}
+
+function releaseActiveSessionAcknowledgements(
+  state: Pick<DesktopSessionState, "activeSessionId" | "sessionRuntimes">
+): DesktopSessionState["sessionRuntimes"] {
+  const sessionId = state.activeSessionId
+  if (!sessionId) return state.sessionRuntimes
+  return {
+    ...state.sessionRuntimes,
+    [sessionId]: releaseAcknowledgedRuntime(
+      state.sessionRuntimes[sessionId] ?? createEmptySessionRuntime()
+    ),
+  }
 }

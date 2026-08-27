@@ -15,6 +15,7 @@ import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import {
   selectActiveSessionOpening,
   selectActiveSessionComposerError,
+  selectActiveSessionPermissionReplies,
   selectActiveSessionPromptSubmissions,
   selectActiveSessionQueuedPromptActions,
   selectActiveSessionSending,
@@ -81,6 +82,7 @@ function ConversationPane({
   const cancelQueuedPrompt = useDesktopSessionStore((state) => state.cancelQueuedPrompt)
   const queuedPromptActions = useDesktopSessionStore(selectActiveSessionQueuedPromptActions)
   const pendingPromptSubmissions = useDesktopSessionStore(selectActiveSessionPromptSubmissions)
+  const permissionReplies = useDesktopSessionStore(selectActiveSessionPermissionReplies)
   const forkSession = useDesktopSessionStore((state) => state.forkSession)
   const chooseProject = useDesktopSessionStore((state) => state.chooseProject)
   const selectProject = useDesktopSessionStore((state) => state.selectProject)
@@ -333,6 +335,8 @@ function ConversationPane({
                     key={permission.id}
                     permission={permission}
                     className="mt-0"
+                    replyPending={permissionReplies[permission.id]?.pending}
+                    replyError={permissionReplies[permission.id]?.error}
                     onReply={(status, decision) =>
                       void replyPermission(permission.id, status, decision)
                     }

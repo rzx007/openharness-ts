@@ -1,6 +1,5 @@
 import type {
   DesktopBootstrapData,
-  DesktopDaemonStatus,
   DesktopProject,
   DesktopWorkspaceMode,
 } from "@shared/session-types"
@@ -14,16 +13,6 @@ import {
 import { resolveInitialProject, sortSessions } from "./helpers"
 import { clearPersistedActiveSessionId, readPersistedActiveSessionId } from "./persistence"
 import type { BootstrapActions, DesktopSessionState, DesktopStoreContext } from "./types"
-
-const initialDaemonStatus: DesktopDaemonStatus = {
-  phase: "idle",
-  message: "等待连接 daemon",
-  updatedAt: Date.now(),
-}
-
-export function createInitialDaemonStatus(): DesktopDaemonStatus {
-  return initialDaemonStatus
-}
 
 export function createBootstrapActions(context: DesktopStoreContext): BootstrapActions {
   const { get, set } = context
