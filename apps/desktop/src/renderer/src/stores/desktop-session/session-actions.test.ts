@@ -226,6 +226,107 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState().sessions).toContainEqual(forked)
   })
 
+  it("invalidates a pending fork when archiving its current primary session", async () => {
+    const source = emptySessionView("session-a").session
+    const archived = { ...source, status: "archived" as const }
+    const forked = emptySessionView("session-fork").session
+    let resolveFork!: (session: typeof forked) => void
+    let resolveArchive!: (session: typeof archived) => void
+    const fork = vi.fn(
+      () =>
+        new Promise<typeof forked>((resolve) => {
+          resolveFork = resolve
+        })
+    )
+    const archive = vi.fn(
+      () =>
+        new Promise<typeof archived>((resolve) => {
+          resolveArchive = resolve
+        })
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId))
+    vi.stubGlobal("window", { desktop: { sessions: { fork, archive, open } } })
+    resetNewConversationState()
+    useDesktopSessionStore.setState({ sessions: [source], activeSessionId: source.id })
+
+    const forking = useDesktopSessionStore.getState().forkSession(source.id)
+    await vi.waitFor(() => expect(fork).toHaveBeenCalledOnce())
+    const archiving = useDesktopSessionStore.getState().archiveSession(source.id)
+    await vi.waitFor(() => expect(archive).toHaveBeenCalledWith(source.id))
+    resolveFork(forked)
+    await forking
+    resolveArchive(archived)
+    await archiving
+
+    expect(open).not.toHaveBeenCalled()
+    expect(useDesktopSessionStore.getState().activeSessionId).toBeNull()
+  })
+
+  it("invalidates a pending fork when deleting its current primary session", async () => {
+    const source = emptySessionView("session-a").session
+    const forked = emptySessionView("session-fork").session
+    let resolveFork!: (session: typeof forked) => void
+    let resolveDelete!: (sessionIds: string[]) => void
+    const fork = vi.fn(
+      () =>
+        new Promise<typeof forked>((resolve) => {
+          resolveFork = resolve
+        })
+    )
+    const remove = vi.fn(
+      () =>
+        new Promise<string[]>((resolve) => {
+          resolveDelete = resolve
+        })
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId))
+    vi.stubGlobal("window", { desktop: { sessions: { fork, delete: remove, open } } })
+    resetNewConversationState()
+    useDesktopSessionStore.setState({ sessions: [source], activeSessionId: source.id })
+
+    const forking = useDesktopSessionStore.getState().forkSession(source.id)
+    await vi.waitFor(() => expect(fork).toHaveBeenCalledOnce())
+    const deleting = useDesktopSessionStore.getState().deleteSession(source.id)
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledWith(source.id))
+    resolveFork(forked)
+    await forking
+    resolveDelete([source.id])
+    await deleting
+
+    expect(open).not.toHaveBeenCalled()
+    expect(useDesktopSessionStore.getState().activeSessionId).toBeNull()
+  })
+
+  it("does not restore fork navigation ownership after a current-session archive fails", async () => {
+    const source = emptySessionView("session-a").session
+    const forked = emptySessionView("session-fork").session
+    let resolveFork!: (session: typeof forked) => void
+    const fork = vi.fn(
+      () =>
+        new Promise<typeof forked>((resolve) => {
+          resolveFork = resolve
+        })
+    )
+    const archive = vi.fn(async () => {
+      throw new Error("archive failed")
+    })
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId))
+    vi.stubGlobal("window", { desktop: { sessions: { fork, archive, open } } })
+    resetNewConversationState()
+    useDesktopSessionStore.setState({ sessions: [source], activeSessionId: source.id })
+
+    const forking = useDesktopSessionStore.getState().forkSession(source.id)
+    await vi.waitFor(() => expect(fork).toHaveBeenCalledOnce())
+    const archiving = useDesktopSessionStore.getState().archiveSession(source.id)
+    await vi.waitFor(() => expect(archive).toHaveBeenCalledWith(source.id))
+    resolveFork(forked)
+    await forking
+    await expect(archiving).rejects.toThrow("archive failed")
+
+    expect(open).not.toHaveBeenCalled()
+    expect(useDesktopSessionStore.getState().activeSessionId).toBe(source.id)
+  })
+
   it("keeps create acknowledged and records the first prompt failure on its submission", async () => {
     const session = emptySessionView("session-created").session
     let resolveCreate!: (value: typeof session) => void
@@ -313,7 +414,9 @@ describe("desktop session actions", () => {
   it("records the first slash-command failure after its active open snapshot", async () => {
     const session = emptySessionView("session-active-command").session
     const snapshot = emptySessionView(session.id)
-    snapshot.inputs = [{ id: "00000000-0000-4000-8000-000000000002" }] as DesktopSessionView["inputs"]
+    snapshot.inputs = [
+      { id: "00000000-0000-4000-8000-000000000002" },
+    ] as DesktopSessionView["inputs"]
     const open = vi.fn(async () => snapshot)
     const randomUUID = vi
       .spyOn(globalThis.crypto, "randomUUID")
@@ -351,7 +454,77 @@ describe("desktop session actions", () => {
     expect(operations).not.toContainEqual(
       expect.objectContaining({ kind: "create-session", phase: "failed" })
     )
+    expect(useDesktopSessionStore.getState().error).toBe("active command failed")
     randomUUID.mockRestore()
+  })
+
+  it("does not invoke the first slash command when its active open fails", async () => {
+    const session = emptySessionView("session-open-failure").session
+    const invokeCommand = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => {
+            throw new Error("open snapshot failed")
+          }),
+          invokeCommand,
+        },
+      },
+    })
+    resetNewConversationState()
+
+    await expect(
+      useDesktopSessionStore.getState().startSession("/compact", { commandLine: "/compact" })
+    ).resolves.toBe(session.id)
+
+    expect(invokeCommand).not.toHaveBeenCalled()
+    expect(useDesktopSessionStore.getState().error).toBe("open snapshot failed")
+    const operations = Object.values(
+      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations ?? {}
+    )
+    expect(operations).toContainEqual(
+      expect.objectContaining({ kind: "create-session", phase: "acknowledged" })
+    )
+    expect(operations).not.toContainEqual(expect.objectContaining({ kind: "invoke-command" }))
+  })
+
+  it("runs a cancelled active slash command in the background without reclaiming primary", async () => {
+    const session = emptySessionView("session-command").session
+    let resolveCreatedOpen!: (view: DesktopSessionView) => void
+    const open = vi.fn((sessionId: string) => {
+      if (sessionId === session.id) {
+        return new Promise<DesktopSessionView>((resolve) => {
+          resolveCreatedOpen = resolve
+        })
+      }
+      return Promise.resolve(emptySessionView(sessionId, 1))
+    })
+    const invokeCommand = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open,
+          invokeCommand,
+        },
+      },
+    })
+    resetNewConversationState()
+
+    const starting = useDesktopSessionStore
+      .getState()
+      .startSession("/compact", { commandLine: "/compact" })
+    await vi.waitFor(() => expect(open).toHaveBeenCalledWith(session.id))
+    await useDesktopSessionStore.getState().openSession("session-b")
+    resolveCreatedOpen(emptySessionView(session.id))
+    await starting
+
+    expect(invokeCommand).toHaveBeenCalledWith({ sessionId: session.id, line: "/compact" })
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: "session-b",
+      sessionView: { session: { id: "session-b" } },
+    })
   })
 
   it("binds the first submission and create operation to the created session runtime", async () => {

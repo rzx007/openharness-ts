@@ -38,12 +38,139 @@ interface SessionActionsContext extends DesktopStoreContext {
   scheduleSelectedProjectGitRefresh: (force: boolean) => void
 }
 
+type OpenSessionResult = "applied" | "cancelled" | "failed"
+
 export function createSessionActions(context: SessionActionsContext): SessionActions {
   const { get, set } = context
   let primaryNavigationGeneration = 0
-  const advancePrimaryNavigation = () => {
+  const advancePrimaryNavigation = (): number => {
     primaryNavigationGeneration += 1
     return primaryNavigationGeneration
+  }
+  const openPrimarySession = async (sessionId: string): Promise<OpenSessionResult> => {
+    const operationId = globalThis.crypto.randomUUID()
+    set((state) => {
+      const switchingSessions = state.activeSessionId !== sessionId
+      const runtime = state.sessionRuntimes[sessionId] ?? createEmptySessionRuntime()
+      return {
+        activeSessionId: sessionId,
+        sessionView: null,
+        openingSession: true,
+        sending: switchingSessions ? false : state.sending,
+        sendingOperationId: switchingSessions ? null : state.sendingOperationId,
+        error: null,
+        sessionRuntimes: {
+          ...state.sessionRuntimes,
+          [sessionId]: beginOperation(abandonOpenSessionOperations(runtime), {
+            id: operationId,
+            kind: "open-session",
+            sessionId,
+            startedAt: Date.now(),
+          }),
+        },
+      }
+    })
+    try {
+      const view = await window.desktop.sessions.open(sessionId)
+      let snapshotApplied = false
+      set((state) => {
+        const runtime = state.sessionRuntimes[sessionId]
+        const operation = runtime?.operations[operationId]
+        if (state.activeSessionId !== sessionId || !operation || operation.phase !== "pending") {
+          return state
+        }
+
+        const acceptedView = acceptActiveSessionView(state.activeSessionId, state.sessionView, view)
+        const settledRuntime = reconcileRuntimeWithView(removeOperation(runtime, operationId), view)
+        if (acceptedView !== view) {
+          return {
+            openingSession: false,
+            sessionRuntimes: {
+              ...state.sessionRuntimes,
+              [sessionId]: settledRuntime,
+            },
+          }
+        }
+
+        snapshotApplied = true
+        const workspace = resolveSessionWorkspace(state.projects, view.session)
+        return {
+          ...workspace,
+          sessionView: view,
+          pendingPromptSubmissions: reconcilePendingPromptSubmissions(
+            state.pendingPromptSubmissions,
+            view
+          ),
+          queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
+          openingSession: false,
+          selectedModel: view.session.model,
+          selectedProvider: sessionProvider(view.session, state.defaultProvider),
+          selectedPermissionMode: sessionPermissionMode(view.session, state.defaultPermissionMode),
+          sessions:
+            view.session.status === "archived"
+              ? state.sessions.filter((session) => session.id !== view.session.id)
+              : upsertSession(state.sessions, view.session),
+          archivedSessions:
+            view.session.status === "archived"
+              ? upsertSession(state.archivedSessions, view.session)
+              : state.archivedSessions,
+          sessionRuntimes: {
+            ...state.sessionRuntimes,
+            [sessionId]: settledRuntime,
+          },
+        }
+      })
+      if (!snapshotApplied) return "cancelled"
+
+      writePersistedActiveSessionId(sessionId)
+      const workspace = resolveSessionWorkspace(get().projects, view.session)
+      if (workspace.selectedProject) {
+        try {
+          const details = await window.desktop.sessions.inspectProject(
+            workspace.selectedProject.path
+          )
+          if (get().activeSessionId !== sessionId) return "cancelled"
+          set((state) => ({
+            projects: upsertProject(state.projects, details.project),
+            selectedProject: details.project,
+            selectedProjectGit: details.git ?? Boolean(details.branch || details.branches?.length),
+            selectedProjectGitCheckedAt: Date.now(),
+            branch: details.branch,
+            branches: details.branches ?? [],
+          }))
+        } catch {
+          if (get().activeSessionId === sessionId) {
+            set({
+              selectedProjectGit: false,
+              selectedProjectGitCheckedAt: Date.now(),
+              branch: null,
+              branches: [],
+            })
+          }
+        }
+      }
+      return "applied"
+    } catch (error) {
+      let failed = false
+      set((state) => {
+        const runtime = state.sessionRuntimes[sessionId]
+        const operation = runtime?.operations[operationId]
+        if (state.activeSessionId !== sessionId || !operation || operation.phase !== "pending") {
+          return state
+        }
+        failed = true
+        clearPersistedActiveSessionId()
+        return {
+          openingSession: false,
+          error: errorMessage(error),
+          sessionRuntimes: {
+            ...state.sessionRuntimes,
+            [sessionId]: failOperation(runtime, operationId, errorMessage(error), Date.now()),
+          },
+        }
+      })
+      return failed ? "failed" : "cancelled"
+    }
   }
 
   return {
@@ -180,136 +307,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     async openSession(sessionId) {
       if (!sessionId) return
       advancePrimaryNavigation()
-      const operationId = globalThis.crypto.randomUUID()
-      set((state) => {
-        const switchingSessions = state.activeSessionId !== sessionId
-        const runtime = state.sessionRuntimes[sessionId] ?? createEmptySessionRuntime()
-        return {
-          activeSessionId: sessionId,
-          sessionView: null,
-          openingSession: true,
-          sending: switchingSessions ? false : state.sending,
-          sendingOperationId: switchingSessions ? null : state.sendingOperationId,
-          error: null,
-          sessionRuntimes: {
-            ...state.sessionRuntimes,
-            [sessionId]: beginOperation(abandonOpenSessionOperations(runtime), {
-              id: operationId,
-              kind: "open-session",
-              sessionId,
-              startedAt: Date.now(),
-            }),
-          },
-        }
-      })
-      try {
-        const view = await window.desktop.sessions.open(sessionId)
-        let snapshotApplied = false
-        set((state) => {
-          const runtime = state.sessionRuntimes[sessionId]
-          const operation = runtime?.operations[operationId]
-          if (state.activeSessionId !== sessionId || !operation || operation.phase !== "pending") {
-            return state
-          }
-
-          const acceptedView = acceptActiveSessionView(
-            state.activeSessionId,
-            state.sessionView,
-            view
-          )
-          const settledRuntime = reconcileRuntimeWithView(
-            removeOperation(runtime, operationId),
-            view
-          )
-          if (acceptedView !== view) {
-            return {
-              openingSession: false,
-              sessionRuntimes: {
-                ...state.sessionRuntimes,
-                [sessionId]: settledRuntime,
-              },
-            }
-          }
-
-          snapshotApplied = true
-          const workspace = resolveSessionWorkspace(state.projects, view.session)
-          return {
-            ...workspace,
-            sessionView: view,
-            pendingPromptSubmissions: reconcilePendingPromptSubmissions(
-              state.pendingPromptSubmissions,
-              view
-            ),
-            queuedPromptActions: reconcileQueuedPromptActions(state.queuedPromptActions, view),
-            openingSession: false,
-            selectedModel: view.session.model,
-            selectedProvider: sessionProvider(view.session, state.defaultProvider),
-            selectedPermissionMode: sessionPermissionMode(
-              view.session,
-              state.defaultPermissionMode
-            ),
-            sessions:
-              view.session.status === "archived"
-                ? state.sessions.filter((session) => session.id !== view.session.id)
-                : upsertSession(state.sessions, view.session),
-            archivedSessions:
-              view.session.status === "archived"
-                ? upsertSession(state.archivedSessions, view.session)
-                : state.archivedSessions,
-            sessionRuntimes: {
-              ...state.sessionRuntimes,
-              [sessionId]: settledRuntime,
-            },
-          }
-        })
-        if (!snapshotApplied) return
-
-        writePersistedActiveSessionId(sessionId)
-        const workspace = resolveSessionWorkspace(get().projects, view.session)
-        if (workspace.selectedProject) {
-          try {
-            const details = await window.desktop.sessions.inspectProject(
-              workspace.selectedProject.path
-            )
-            if (get().activeSessionId !== sessionId) return
-            set((state) => ({
-              projects: upsertProject(state.projects, details.project),
-              selectedProject: details.project,
-              selectedProjectGit:
-                details.git ?? Boolean(details.branch || details.branches?.length),
-              selectedProjectGitCheckedAt: Date.now(),
-              branch: details.branch,
-              branches: details.branches ?? [],
-            }))
-          } catch {
-            if (get().activeSessionId === sessionId) {
-              set({
-                selectedProjectGit: false,
-                selectedProjectGitCheckedAt: Date.now(),
-                branch: null,
-                branches: [],
-              })
-            }
-          }
-        }
-      } catch (error) {
-        set((state) => {
-          const runtime = state.sessionRuntimes[sessionId]
-          const operation = runtime?.operations[operationId]
-          if (state.activeSessionId !== sessionId || !operation || operation.phase !== "pending") {
-            return state
-          }
-          clearPersistedActiveSessionId()
-          return {
-            openingSession: false,
-            error: errorMessage(error),
-            sessionRuntimes: {
-              ...state.sessionRuntimes,
-              [sessionId]: failOperation(runtime, operationId, errorMessage(error), Date.now()),
-            },
-          }
-        })
-      }
+      await openPrimarySession(sessionId)
     },
 
     async startConversationFrom(session) {
@@ -408,10 +406,11 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     async archiveSession(sessionId) {
       const existing = get().sessions.find((session) => session.id === sessionId)
       if (!existing) return
+      const invalidatesPrimaryNavigation = get().activeSessionId === sessionId
+      if (invalidatesPrimaryNavigation) advancePrimaryNavigation()
       try {
         const archived = await window.desktop.sessions.archive(sessionId)
         const isActive = get().activeSessionId === sessionId
-        if (isActive) advancePrimaryNavigation()
         set((state) => ({
           ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
           sessions: state.sessions.filter((session) => session.id !== sessionId),
@@ -455,12 +454,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         get().sessions.find((session) => session.id === sessionId) ??
         get().archivedSessions.find((session) => session.id === sessionId)
       if (!existing) return
+      const invalidatesPrimaryNavigation = get().activeSessionId === sessionId
+      if (invalidatesPrimaryNavigation) advancePrimaryNavigation()
       try {
         const deletedSessionIds = await window.desktop.sessions.delete(sessionId)
         const deleted = new Set(deletedSessionIds)
         const activeSessionId = get().activeSessionId
         const isActive = activeSessionId !== null && deleted.has(activeSessionId)
-        if (isActive) advancePrimaryNavigation()
         set((state) => ({
           ...(isActive ? resolveSessionWorkspace(state.projects, existing) : {}),
           sessions: state.sessions.filter((session) => !deleted.has(session.id)),
@@ -611,30 +611,34 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               : {}),
           }
         })
-        if (ownsCurrentPage) await get().openSession(session.id)
+        const openResult = ownsCurrentPage ? await openPrimarySession(session.id) : "cancelled"
         if (options?.commandLine) {
-          const invokeCommandOperationId = globalThis.crypto.randomUUID()
-          commandOperationId = invokeCommandOperationId
-          set((state) => ({
-            sessionRuntimes: updateSessionRuntime(state.sessionRuntimes, session.id, (runtime) =>
-              beginOperation(runtime, {
-                id: invokeCommandOperationId,
-                kind: "invoke-command",
-                sessionId: session.id,
-                startedAt: Date.now(),
-              })
-            ),
-          }))
-          await window.desktop.sessions.invokeCommand({
-            sessionId: session.id,
-            line: options.commandLine,
-          })
-          if (commandOperationId) {
+          if (openResult !== "failed") {
+            const invokeCommandOperationId = globalThis.crypto.randomUUID()
+            commandOperationId = invokeCommandOperationId
             set((state) => ({
               sessionRuntimes: updateSessionRuntime(state.sessionRuntimes, session.id, (runtime) =>
-                removeOperation(runtime, invokeCommandOperationId)
+                beginOperation(runtime, {
+                  id: invokeCommandOperationId,
+                  kind: "invoke-command",
+                  sessionId: session.id,
+                  startedAt: Date.now(),
+                })
               ),
             }))
+            await window.desktop.sessions.invokeCommand({
+              sessionId: session.id,
+              line: options.commandLine,
+            })
+            if (commandOperationId) {
+              set((state) => ({
+                sessionRuntimes: updateSessionRuntime(
+                  state.sessionRuntimes,
+                  session.id,
+                  (runtime) => removeOperation(runtime, invokeCommandOperationId)
+                ),
+              }))
+            }
           }
         } else {
           await window.desktop.sessions.sendPrompt({
@@ -682,7 +686,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             sessionViewContainsInput(currentState.sessionView, promptSubmissionId))
         set((state) => ({
           openingSession: state.activeSessionId === startedSessionId ? false : state.openingSession,
-          error: startedSessionId ? state.error : message,
+          error: commandOperationId ? message : startedSessionId ? state.error : message,
           newConversationRuntime: startedSessionId
             ? state.newConversationRuntime
             : failOperation(state.newConversationRuntime, promptSubmissionId, message, Date.now()),
