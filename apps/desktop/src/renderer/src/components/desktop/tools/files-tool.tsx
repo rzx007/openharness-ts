@@ -23,6 +23,7 @@ import {
   type ContextMenuAnchorRect,
   type ContextMenuItem,
 } from "@pierre/trees"
+
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
 import { Group, Panel, usePanelRef } from "react-resizable-panels"
 
@@ -399,7 +400,7 @@ export function FilesTool({
               searchMatches={searchMatches}
               targetLine={
                 openRequest &&
-                toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
+                  toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
                   ? openRequest.line
                   : undefined
               }

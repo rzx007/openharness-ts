@@ -182,6 +182,14 @@ function UserMessageBlock({
       <MessageContent className="items-end">
         <UserMessageBubble content={content} />
         <MessageToolbar align="end" timestamp={timestamp}>
+          {content.trim() ? (
+            <MessageActionButton
+              label="复制消息"
+              onClick={() => void window.desktop.clipboard.writeText(content)}
+            >
+              <Copy />
+            </MessageActionButton>
+          ) : null}
           {canEdit ? (
             <MessageActionButton label="重新编辑" onClick={() => setEditing(true)}>
               <PencilLine />
