@@ -135,8 +135,8 @@ it("parses a ready attachment asset without storage details", () => {
 ```ts
 export type AttachmentAssetStatus = "importing" | "ready" | "failed" | "deleted";
 export type AttachmentIntent = "auto" | "vision" | "ocr" | "document" | "tool_resource" | "workspace_reference";
-export type AttachmentRepresentationStatus = "pending" | "running" | "ready" | "failed";
-export type AttachmentRepresentationKind = "thumbnail" | "ocr_text" | "plain_text" | "pdf_page" | "archive_manifest";
+export type AttachmentRepresentationStatus = "pending" | "running" | "completed" | "failed";
+export type AttachmentRepresentationKind = "thumbnail" | "ocr_text" | "plain_text" | "pdf_text" | "pdf_page_image" | "archive_manifest" | "directory_manifest";
 
 export interface AttachmentAssetRecord {
   id: string;

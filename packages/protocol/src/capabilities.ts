@@ -1,3 +1,8 @@
+import {
+  parseAttachmentLimits,
+  type AttachmentLimits,
+} from "./attachment.js";
+
 export interface ProtocolVersion {
   version: number;
 }
@@ -6,6 +11,14 @@ export interface ServerCapabilities {
   serverVersion: string;
   protocol: ProtocolVersion;
   features: Record<string, number>;
+  attachments?: AttachmentTransferCapabilities;
+}
+
+export type AttachmentUploadMode = "single" | "resumable";
+
+export interface AttachmentTransferCapabilities {
+  limits: AttachmentLimits;
+  uploadModes: readonly AttachmentUploadMode[];
 }
 
 export interface ClientProtocolSupport {
@@ -27,7 +40,13 @@ export function parseServerCapabilities(value: unknown): ServerCapabilities {
   for (const [name, version] of Object.entries(value.features)) {
     features[name] = positiveInteger(version, `features.${name}`);
   }
-  return { serverVersion: value.serverVersion, protocol: { version }, features };
+  const attachments = parseAttachmentTransferCapabilities(value.attachments);
+  return {
+    serverVersion: value.serverVersion,
+    protocol: { version },
+    features,
+    ...(attachments ? { attachments } : {}),
+  };
 }
 
 export function checkProtocolCompatibility(
@@ -58,4 +77,30 @@ function positiveInteger(value: unknown, field: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseAttachmentTransferCapabilities(
+  value: unknown,
+): AttachmentTransferCapabilities | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("attachments must be an object");
+  if (!Array.isArray(value.uploadModes) || value.uploadModes.length === 0) {
+    throw new Error("attachments.uploadModes must be a non-empty array");
+  }
+  const uploadModes: AttachmentUploadMode[] = [];
+  for (const mode of value.uploadModes) {
+    if (mode !== "single" && mode !== "resumable") {
+      throw new Error(
+        "attachments.uploadModes entries must be single or resumable",
+      );
+    }
+    if (uploadModes.includes(mode)) {
+      throw new Error("attachments.uploadModes must not contain duplicates");
+    }
+    uploadModes.push(mode);
+  }
+  return {
+    limits: parseAttachmentLimits(value.limits),
+    uploadModes,
+  };
 }

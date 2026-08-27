@@ -31,4 +31,69 @@ describe("protocol capabilities", () => {
       features: { jobs: 0 },
     })).toThrow("features.jobs");
   });
+
+  it("keeps old capability responses compatible when attachments are absent", () => {
+    expect(server.attachments).toBeUndefined();
+  });
+
+  it("parses attachment transfer capabilities", () => {
+    const capabilities = parseServerCapabilities({
+      serverVersion: "0.4.0",
+      protocol: { version: 2 },
+      features: { attachments: 1 },
+      attachments: {
+        limits: {
+          maxFilesPerPrompt: 20,
+          maxBytesPerFile: 104_857_600,
+          maxBytesPerPrompt: 262_144_000,
+          maxSessionReferencedBytes: 2_147_483_648,
+          resumableThresholdBytes: 26_214_400,
+          uploadSessionTtlMs: 86_400_000,
+          stagingTtlMs: 86_400_000,
+        },
+        uploadModes: ["single"],
+      },
+    });
+
+    expect(capabilities.attachments).toEqual({
+      limits: expect.objectContaining({ maxBytesPerFile: 104_857_600 }),
+      uploadModes: ["single"],
+    });
+  });
+
+  it("rejects malformed attachment limits and upload modes", () => {
+    const base = {
+      serverVersion: "0.4.0",
+      protocol: { version: 2 },
+      features: { attachments: 1 },
+      attachments: {
+        limits: {
+          maxFilesPerPrompt: 20,
+          maxBytesPerFile: 104_857_600,
+          maxBytesPerPrompt: 262_144_000,
+          maxSessionReferencedBytes: 2_147_483_648,
+          resumableThresholdBytes: 26_214_400,
+          uploadSessionTtlMs: 86_400_000,
+          stagingTtlMs: 86_400_000,
+        },
+        uploadModes: ["single"],
+      },
+    };
+
+    expect(() =>
+      parseServerCapabilities({
+        ...base,
+        attachments: {
+          ...base.attachments,
+          limits: { ...base.attachments.limits, maxBytesPerFile: 0 },
+        },
+      }),
+    ).toThrow("maxBytesPerFile");
+    expect(() =>
+      parseServerCapabilities({
+        ...base,
+        attachments: { ...base.attachments, uploadModes: ["multipart"] },
+      }),
+    ).toThrow("uploadModes");
+  });
 });
