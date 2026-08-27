@@ -73,6 +73,31 @@ export const sessionInputs = sqliteTable(
   ],
 );
 
+export const attachmentAssets = sqliteTable(
+  "attachment_asset",
+  {
+    id: text("id").primaryKey(),
+    displayName: text("display_name").notNull(),
+    declaredMediaType: text("declared_media_type"),
+    mediaType: text("media_type"),
+    sizeBytes: integer("size_bytes"),
+    sha256: text("sha256"),
+    status: text("status").notNull(),
+    stagingName: text("staging_name"),
+    failureCode: text("failure_code"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    deletedAt: integer("deleted_at"),
+  },
+  (table) => [
+    index("attachment_asset_hash_status_idx").on(table.sha256, table.status),
+    index("attachment_asset_status_updated_idx").on(
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
 export const sessionMessages = sqliteTable(
   "session_message",
   {

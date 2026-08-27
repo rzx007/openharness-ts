@@ -56,6 +56,126 @@ function withStore(
 }
 
 describe("SessionStore", () => {
+  it("persists an attachment from importing to ready", () => {
+    withStore((store, path) => {
+      const importing = store.createImportingAttachment({
+        id: "att-ready",
+        displayName: "截图.png",
+        declaredMediaType: "image/png",
+        stagingName: "att-ready.part",
+        createdAt: 100,
+      });
+
+      expect(importing).toEqual({
+        id: "att-ready",
+        displayName: "截图.png",
+        declaredMediaType: "image/png",
+        status: "importing",
+        createdAt: 100,
+        updatedAt: 100,
+      });
+      expect(store.listImportingAttachments()).toEqual([
+        expect.objectContaining({
+          id: "att-ready",
+          stagingName: "att-ready.part",
+        }),
+      ]);
+
+      const ready = store.markAttachmentReady("att-ready", {
+        sha256: "a".repeat(64),
+        sizeBytes: 8,
+        mediaType: "image/png",
+        updatedAt: 101,
+      });
+      expect(ready).toEqual({
+        id: "att-ready",
+        displayName: "截图.png",
+        declaredMediaType: "image/png",
+        mediaType: "image/png",
+        sizeBytes: 8,
+        sha256: "a".repeat(64),
+        status: "ready",
+        createdAt: 100,
+        updatedAt: 101,
+      });
+      expect(store.findReadyAttachmentByHash("a".repeat(64))).toEqual(ready);
+      expect(store.listImportingAttachments()).toEqual([]);
+
+      store.close();
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getAttachment("att-ready")).toEqual(ready);
+      reloaded.close();
+    });
+  });
+
+  it("records a failed attachment import without exposing staging metadata", () => {
+    withStore((store) => {
+      store.createImportingAttachment({
+        id: "att-failed",
+        displayName: "broken.png",
+        stagingName: "att-failed.part",
+        createdAt: 200,
+      });
+
+      expect(
+        store.failAttachmentImport(
+          "att-failed",
+          "attachment_storage_failed",
+          201,
+        ),
+      ).toEqual({
+        id: "att-failed",
+        displayName: "broken.png",
+        status: "failed",
+        failureCode: "attachment_storage_failed",
+        createdAt: 200,
+        updatedAt: 201,
+      });
+      expect(store.listImportingAttachments()).toEqual([]);
+    });
+  });
+
+  it("enforces attachment state transitions and hides deleted assets", () => {
+    withStore((store) => {
+      store.createImportingAttachment({
+        id: "att-delete",
+        displayName: "a.txt",
+        declaredMediaType: "text/plain",
+        stagingName: "att-delete.part",
+        createdAt: 300,
+      });
+      store.markAttachmentReady("att-delete", {
+        sha256: "b".repeat(64),
+        sizeBytes: 1,
+        mediaType: "text/plain",
+        updatedAt: 301,
+      });
+
+      expect(() =>
+        store.markAttachmentReady("att-delete", {
+          sha256: "c".repeat(64),
+          sizeBytes: 2,
+          mediaType: "text/plain",
+          updatedAt: 302,
+        }),
+      ).toThrow("expected importing");
+
+      const deleted = store.softDeleteAttachment("att-delete", 303);
+      expect(deleted).toMatchObject({
+        id: "att-delete",
+        status: "deleted",
+        deletedAt: 303,
+      });
+      expect(store.getAttachment("att-delete")).toBeUndefined();
+      expect(
+        store.getAttachment("att-delete", { includeDeleted: true }),
+      ).toEqual(deleted);
+      expect(() => store.softDeleteAttachment("att-delete", 304)).toThrow(
+        "expected ready",
+      );
+    });
+  });
+
   it("reserves one durable pending task for repeated producer requests", () => {
     withStore((store, path) => {
       store.createSession({

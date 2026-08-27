@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { parseAttachmentAssetRecord } from "@openharness/protocol";
 
 import type {
   AdmitPromptInput,
@@ -55,6 +56,7 @@ import type {
   ExternalConversationRecord,
   ChannelDeliveryRecord,
   ChannelDeliveryStatus,
+  AttachmentAssetRecord,
 } from "@openharness/protocol";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
 import {
@@ -118,6 +120,25 @@ export interface ApplicationOwnerLease {
   generation: number;
   startedAt: number;
   heartbeatAt: number;
+}
+
+export interface CreateImportingAttachmentInput {
+  id: string;
+  displayName: string;
+  declaredMediaType?: string;
+  stagingName: string;
+  createdAt?: number;
+}
+
+export interface MarkAttachmentReadyInput {
+  sha256: string;
+  sizeBytes: number;
+  mediaType: string;
+  updatedAt?: number;
+}
+
+export interface ImportingAttachmentRecord extends AttachmentAssetRecord {
+  stagingName: string;
 }
 
 export class ApplicationOwnerConflictError extends Error {
@@ -204,6 +225,135 @@ export class SessionStore {
       this.database.close();
       this.closed = true;
     }
+  }
+
+  createImportingAttachment(
+    input: CreateImportingAttachmentInput,
+  ): AttachmentAssetRecord {
+    const timestamp = input.createdAt ?? now();
+    this.database
+      .prepare(
+        `INSERT INTO attachment_asset (
+          id, display_name, declared_media_type, status, staging_name,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, 'importing', ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        input.displayName,
+        input.declaredMediaType ?? null,
+        input.stagingName,
+        timestamp,
+        timestamp,
+      );
+    return this.getAttachment(input.id, { includeDeleted: true })!;
+  }
+
+  markAttachmentReady(
+    id: string,
+    input: MarkAttachmentReadyInput,
+  ): AttachmentAssetRecord {
+    const result = this.database
+      .prepare(
+        `UPDATE attachment_asset
+         SET sha256 = ?, size_bytes = ?, media_type = ?, status = 'ready',
+             staging_name = NULL, failure_code = NULL, updated_at = ?
+         WHERE id = ? AND status = 'importing'`,
+      )
+      .run(
+        input.sha256,
+        input.sizeBytes,
+        input.mediaType,
+        input.updatedAt ?? now(),
+        id,
+      );
+    if (result.changes !== 1) {
+      throw this.attachmentTransitionError(id, "importing");
+    }
+    return this.getAttachment(id, { includeDeleted: true })!;
+  }
+
+  failAttachmentImport(
+    id: string,
+    failureCode: string,
+    updatedAt = now(),
+  ): AttachmentAssetRecord {
+    const result = this.database
+      .prepare(
+        `UPDATE attachment_asset
+         SET status = 'failed', staging_name = NULL, failure_code = ?,
+             updated_at = ?
+         WHERE id = ? AND status = 'importing'`,
+      )
+      .run(failureCode, updatedAt, id);
+    if (result.changes !== 1) {
+      throw this.attachmentTransitionError(id, "importing");
+    }
+    return this.getAttachment(id, { includeDeleted: true })!;
+  }
+
+  getAttachment(
+    id: string,
+    options: { includeDeleted?: boolean } = {},
+  ): AttachmentAssetRecord | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT * FROM attachment_asset WHERE id = ?${
+          options.includeDeleted ? "" : " AND status != 'deleted'"
+        }`,
+      )
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? attachmentAssetFromRow(row) : undefined;
+  }
+
+  findReadyAttachmentByHash(
+    sha256: string,
+  ): AttachmentAssetRecord | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT * FROM attachment_asset
+         WHERE sha256 = ? AND status = 'ready'
+         ORDER BY created_at, id LIMIT 1`,
+      )
+      .get(sha256) as Record<string, unknown> | undefined;
+    return row ? attachmentAssetFromRow(row) : undefined;
+  }
+
+  listImportingAttachments(): ImportingAttachmentRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM attachment_asset
+         WHERE status = 'importing'
+         ORDER BY created_at, id`,
+      )
+      .all() as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      ...attachmentAssetFromRow(row),
+      stagingName: String(row.staging_name),
+    }));
+  }
+
+  softDeleteAttachment(id: string, deletedAt = now()): AttachmentAssetRecord {
+    const result = this.database
+      .prepare(
+        `UPDATE attachment_asset
+         SET status = 'deleted', deleted_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'ready'`,
+      )
+      .run(deletedAt, deletedAt, id);
+    if (result.changes !== 1) {
+      throw this.attachmentTransitionError(id, "ready");
+    }
+    return this.getAttachment(id, { includeDeleted: true })!;
+  }
+
+  private attachmentTransitionError(id: string, expected: string): Error {
+    const current = this.getAttachment(id, { includeDeleted: true });
+    return current
+      ? new Error(
+          `Attachment ${id} expected ${expected} status, received ${current.status}`,
+        )
+      : new Error(`Attachment ${id} was not found; expected ${expected} status`);
   }
 
   listProjects(options: { includeArchived?: boolean } = {}): ProjectRecord[] {
@@ -3477,6 +3627,34 @@ function withoutUndefined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
   ) as Partial<T>;
+}
+
+function attachmentAssetFromRow(
+  row: Record<string, unknown>,
+): AttachmentAssetRecord {
+  return parseAttachmentAssetRecord({
+    id: row.id,
+    displayName: row.display_name,
+    ...(typeof row.declared_media_type === "string"
+      ? { declaredMediaType: row.declared_media_type }
+      : {}),
+    ...(typeof row.media_type === "string"
+      ? { mediaType: row.media_type }
+      : {}),
+    ...(typeof row.size_bytes === "number"
+      ? { sizeBytes: row.size_bytes }
+      : {}),
+    ...(typeof row.sha256 === "string" ? { sha256: row.sha256 } : {}),
+    status: row.status,
+    ...(typeof row.failure_code === "string"
+      ? { failureCode: row.failure_code }
+      : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(typeof row.deleted_at === "number"
+      ? { deletedAt: row.deleted_at }
+      : {}),
+  });
 }
 
 function externalConversationFromRow(
