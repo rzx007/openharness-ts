@@ -1,6 +1,16 @@
 import { create } from "zustand"
 
 import { createInitialRuntimeState } from "./desktop-session/initial-state"
+import {
+  classifyPromptPlacement,
+  queuedPromptActionConfirmed,
+  queuedPromptActionKey,
+  reconcilePendingPromptSubmissions,
+  reconcileQueuedPromptActions,
+  removePendingPromptSubmission,
+  updatePendingPromptSubmission,
+} from "./desktop-session/pending-prompt-state"
+import { acceptActiveSessionView } from "./desktop-session/session-view-state"
 import type {
   DesktopSessionState,
   PendingPromptEdit,
@@ -857,7 +867,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         set((state) =>
           state.activeSessionId === session.id
             ? {
-                sessionView: newerSessionView(state.sessionView, view),
+                sessionView: acceptActiveSessionView(state.activeSessionId, state.sessionView, view),
                 pendingPromptSubmissions: reconcilePendingPromptSubmissions(
                   state.pendingPromptSubmissions,
                   view
@@ -970,13 +980,16 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
         submission.content === prompt &&
         submission.phase === "failed"
     )
-    const hasUnconfirmedSubmission = Object.values(currentState.pendingPromptSubmissions).some(
-      (submission) => submission.sessionId === sessionId && submission.phase !== "failed"
+    const placement = classifyPromptPlacement(
+      currentState.sessionView,
+      {
+        operations: {},
+        pendingPromptSubmissions: currentState.pendingPromptSubmissions,
+        pendingPromptEdit: null,
+        queuedPromptActions: currentState.queuedPromptActions,
+      },
+      sessionId
     )
-    const placement =
-      sessionViewHasInFlightRun(currentState.sessionView, sessionId) || hasUnconfirmedSubmission
-        ? "queue"
-        : "transcript"
     const submission: PendingPromptSubmission = pending
       ? { ...pending, phase: "submitting", error: undefined }
       : {
@@ -1198,8 +1211,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 
   applySessionUpdate(view) {
     const current = get().sessionView
-    if (get().activeSessionId !== view.session.id) return
-    if (current && view.cursor < current.cursor) return
+    if (acceptActiveSessionView(get().activeSessionId, current, view) !== view) return
     if (view.session.status === "archived") clearPersistedActiveSessionId()
     else writePersistedActiveSessionId(view.session.id)
     set((state) => {
@@ -1247,49 +1259,6 @@ export function attachDesktopSessionEvents(): () => void {
   })
 }
 
-function queuedPromptActionKey(sessionId: string, runId: string): string {
-  return `${sessionId}:${runId}`
-}
-
-function sessionViewHasInFlightRun(view: DesktopSessionView | null, sessionId: string): boolean {
-  if (!view || view.session.id !== sessionId) return false
-  return (
-    view.session.status === "running" ||
-    view.runs.some((run) => run.status === "pending" || run.status === "running")
-  )
-}
-
-function updatePendingPromptSubmission(
-  submissions: Record<string, PendingPromptSubmission>,
-  submissionId: string,
-  update: (submission: PendingPromptSubmission) => PendingPromptSubmission
-): Record<string, PendingPromptSubmission> {
-  const submission = submissions[submissionId]
-  return submission ? { ...submissions, [submissionId]: update(submission) } : submissions
-}
-
-function removePendingPromptSubmission(
-  submissions: Record<string, PendingPromptSubmission>,
-  submissionId: string
-): Record<string, PendingPromptSubmission> {
-  if (!submissions[submissionId]) return submissions
-  const remaining = { ...submissions }
-  delete remaining[submissionId]
-  return remaining
-}
-
-function reconcilePendingPromptSubmissions(
-  submissions: Record<string, PendingPromptSubmission>,
-  view: DesktopSessionView
-): Record<string, PendingPromptSubmission> {
-  const confirmedInputIds = new Set(view.inputs.map((input) => input.id))
-  return Object.fromEntries(
-    Object.entries(submissions).filter(
-      ([id, submission]) => submission.sessionId !== view.session.id || !confirmedInputIds.has(id)
-    )
-  )
-}
-
 function filterPendingPromptSubmissions(
   submissions: Record<string, PendingPromptSubmission>,
   keep: (submission: PendingPromptSubmission) => boolean
@@ -1301,15 +1270,6 @@ function filterPendingPromptSubmissions(
 
 function sessionViewContainsInput(view: DesktopSessionView | null, inputId: string): boolean {
   return Boolean(view?.inputs.some((input) => input.id === inputId))
-}
-
-function newerSessionView(
-  current: DesktopSessionView | null,
-  candidate: DesktopSessionView
-): DesktopSessionView {
-  return current?.session.id === candidate.session.id && current.cursor > candidate.cursor
-    ? current
-    : candidate
 }
 
 function settleQueuedPromptAction(
@@ -1346,33 +1306,11 @@ function removeQueuedPromptAction(
   return remaining
 }
 
-function queuedPromptActionConfirmed(
-  view: DesktopSessionView | null,
-  action: QueuedPromptAction
-): boolean {
-  if (view?.session.id !== action.sessionId) return false
-  const run = view.runs.find((candidate) => candidate.id === action.runId)
-  return Boolean(run && run.status !== "pending")
-}
-
 function filterQueuedPromptActions(
   actions: Record<string, QueuedPromptAction>,
   keep: (action: QueuedPromptAction) => boolean
 ): Record<string, QueuedPromptAction> {
   return Object.fromEntries(Object.entries(actions).filter(([, action]) => keep(action)))
-}
-
-function reconcileQueuedPromptActions(
-  actions: Record<string, QueuedPromptAction>,
-  view: DesktopSessionView
-): Record<string, QueuedPromptAction> {
-  return Object.fromEntries(
-    Object.entries(actions).filter(([, action]) => {
-      if (action.sessionId !== view.session.id) return true
-      const run = view.runs.find((candidate) => candidate.id === action.runId)
-      return run?.status === "pending"
-    })
-  )
 }
 
 function queuedPromptActionError(kind: "promote" | "cancel", error: unknown): string {

@@ -1,0 +1,145 @@
+import { describe, expect, it } from "vitest"
+
+import type { DesktopSessionView } from "@shared/session-types"
+import { createEmptySessionRuntime } from "./operation-state"
+import {
+  classifyPromptPlacement,
+  queuedPromptActionConfirmed,
+  queuedPromptActionKey,
+  reconcilePendingPromptSubmissions,
+  reconcileQueuedPromptActions,
+  removePendingPromptSubmission,
+  updatePendingPromptSubmission,
+} from "./pending-prompt-state"
+
+function emptySessionView(sessionId: string): DesktopSessionView {
+  return {
+    cursor: 0,
+    syncStatus: "connected",
+    session: {
+      id: sessionId,
+      cwd: "D:\\repo",
+      title: "test",
+      model: "test-model",
+      status: "idle",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    inputs: [],
+    messages: [],
+    parts: [],
+    runs: [],
+    tasks: [],
+    permissions: [],
+  }
+}
+
+describe("desktop pending prompt state", () => {
+  it("classifies a second unconfirmed prompt as queued", () => {
+    const runtime = createEmptySessionRuntime()
+    runtime.pendingPromptSubmissions["input-1"] = {
+      id: "input-1",
+      sessionId: "s1",
+      content: "first",
+      createdAt: 1,
+      phase: "accepted",
+      placement: "transcript",
+    }
+
+    expect(classifyPromptPlacement(null, runtime, "s1")).toBe("queue")
+  })
+
+  it("queues a prompt when the authoritative view has a pending run", () => {
+    const view = emptySessionView("s1")
+    view.runs.push({
+      id: "run-1",
+      sessionId: "s1",
+      status: "pending",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    expect(classifyPromptPlacement(view, createEmptySessionRuntime(), "s1")).toBe("queue")
+  })
+
+  it("does not count a failed submission as in flight", () => {
+    const runtime = createEmptySessionRuntime()
+    runtime.pendingPromptSubmissions["input-1"] = {
+      id: "input-1",
+      sessionId: "s1",
+      content: "failed",
+      createdAt: 1,
+      phase: "failed",
+      placement: "transcript",
+      error: "request failed",
+    }
+
+    expect(classifyPromptPlacement(null, runtime, "s1")).toBe("transcript")
+  })
+
+  it("updates, removes, and reconciles only submissions confirmed by the matching view", () => {
+    const submissions = {
+      "input-1": {
+        id: "input-1",
+        sessionId: "s1",
+        content: "first",
+        createdAt: 1,
+        phase: "submitting" as const,
+        placement: "transcript" as const,
+      },
+      "input-2": {
+        id: "input-2",
+        sessionId: "s2",
+        content: "background",
+        createdAt: 2,
+        phase: "accepted" as const,
+        placement: "queue" as const,
+      },
+    }
+    const updated = updatePendingPromptSubmission(submissions, "input-1", (submission) => ({
+      ...submission,
+      phase: "accepted",
+    }))
+    const view = emptySessionView("s1")
+    view.inputs.push({
+      id: "input-1",
+      sessionId: "s1",
+      seq: 1,
+      delivery: "steer",
+      content: "first",
+      metadata: {},
+      createdAt: 1,
+    })
+
+    expect(updated["input-1"]?.phase).toBe("accepted")
+    expect(removePendingPromptSubmission(updated, "input-1")).not.toHaveProperty("input-1")
+    expect(reconcilePendingPromptSubmissions(updated, view)).toEqual({
+      "input-2": submissions["input-2"],
+    })
+  })
+
+  it("reconciles queued actions after their run is no longer pending", () => {
+    const action = {
+      sessionId: "s1",
+      inputId: "input-1",
+      runId: "run-1",
+      kind: "promote" as const,
+      phase: "acknowledged" as const,
+    }
+    const view = emptySessionView("s1")
+    view.runs.push({
+      id: "run-1",
+      sessionId: "s1",
+      status: "interrupted",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 2,
+    })
+
+    expect(queuedPromptActionKey("s1", "run-1")).toBe("s1:run-1")
+    expect(queuedPromptActionConfirmed(view, action)).toBe(true)
+    expect(reconcileQueuedPromptActions({ "s1:run-1": action }, view)).toEqual({})
+  })
+})
