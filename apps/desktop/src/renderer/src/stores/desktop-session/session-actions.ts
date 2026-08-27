@@ -46,6 +46,10 @@ type OpenSessionResult = "applied" | "cancelled" | "failed"
 export function createSessionActions(context: SessionActionsContext): SessionActions {
   const { get, set } = context
   let primaryNavigationGeneration = 0
+  let defaultModelGeneration = 0
+  let defaultPermissionModeGeneration = 0
+  let defaultModelWrite: Promise<void> = Promise.resolve()
+  let defaultPermissionModeWrite: Promise<void> = Promise.resolve()
   const advancePrimaryNavigation = (): number => {
     primaryNavigationGeneration += 1
     return primaryNavigationGeneration
@@ -206,8 +210,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     },
 
     async selectModel(model) {
-      const previousModel = get().selectedModel
-      const previousProvider = get().selectedProvider
+      const generation = ++defaultModelGeneration
       set({
         selectedModel: model.id,
         selectedProvider: model.providerName,
@@ -215,10 +218,18 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         defaultProvider: model.providerName,
       })
       try {
-        const data = await window.desktop.sessions.setDefaultModel({
-          model: model.id,
-          provider: model.providerName,
-        })
+        const request = defaultModelWrite.then(() =>
+          window.desktop.sessions.setDefaultModel({
+            model: model.id,
+            provider: model.providerName,
+          })
+        )
+        defaultModelWrite = request.then(
+          () => undefined,
+          () => undefined
+        )
+        const data = await request
+        if (generation !== defaultModelGeneration) return
         set((state) =>
           applyBootstrapData(
             data,
@@ -229,23 +240,26 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           )
         )
       } catch {
-        set({
-          selectedModel: previousModel,
-          selectedProvider: previousProvider,
-          defaultModel: previousModel,
-          defaultProvider: previousProvider,
-        })
+        if (generation !== defaultModelGeneration) return
       }
     },
 
     async selectPermissionMode(permissionMode) {
-      const previous = get().selectedPermissionMode
+      const generation = ++defaultPermissionModeGeneration
       set({
         selectedPermissionMode: permissionMode,
         defaultPermissionMode: permissionMode,
       })
       try {
-        const data = await window.desktop.sessions.setDefaultPermissionMode({ permissionMode })
+        const request = defaultPermissionModeWrite.then(() =>
+          window.desktop.sessions.setDefaultPermissionMode({ permissionMode })
+        )
+        defaultPermissionModeWrite = request.then(
+          () => undefined,
+          () => undefined
+        )
+        const data = await request
+        if (generation !== defaultPermissionModeGeneration) return
         set((state) => ({
           ...applyBootstrapData(
             data,
@@ -254,13 +268,11 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             state.selectedModel,
             state.selectedProvider
           ),
-          selectedPermissionMode: data.defaultPermissionMode,
+          selectedPermissionMode: permissionMode,
+          defaultPermissionMode: permissionMode,
         }))
       } catch {
-        set({
-          selectedPermissionMode: previous,
-          defaultPermissionMode: previous,
-        })
+        if (generation !== defaultPermissionModeGeneration) return
       }
     },
 
@@ -564,37 +576,48 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         })
         const openResult = ownsCurrentPage ? await openPrimarySession(session.id) : "cancelled"
         if (options?.commandLine) {
-          if (openResult !== "failed") {
-            const invokeCommandOperationId = globalThis.crypto.randomUUID()
-            commandOperationId = invokeCommandOperationId
+          if (openResult === "failed") {
+            const openError = Object.values(
+              get().sessionRuntimes[session.id]?.operations ?? {}
+            ).find((operation) => operation.kind === "open-session" && operation.phase === "failed")
+            throw new Error(openError?.error ?? "无法打开新会话")
+          }
+          const invokeCommandOperationId = globalThis.crypto.randomUUID()
+          commandOperationId = invokeCommandOperationId
+          set((state) => {
+            const sessionRuntimes = updateSessionRuntime(
+              state.sessionRuntimes,
+              session.id,
+              (runtime) =>
+                beginOperation(runtime, {
+                  id: invokeCommandOperationId,
+                  kind: "invoke-command",
+                  sessionId: session.id,
+                  target: options.commandLine,
+                  startedAt: Date.now(),
+                })
+            )
+            return { sessionRuntimes }
+          })
+          await window.desktop.sessions.invokeCommand({
+            sessionId: session.id,
+            line: options.commandLine,
+          })
+          if (commandOperationId) {
             set((state) => {
+              const backgroundCommand = get().activeSessionId !== session.id
               const sessionRuntimes = updateSessionRuntime(
                 state.sessionRuntimes,
                 session.id,
-                (runtime) =>
-                  beginOperation(runtime, {
-                    id: invokeCommandOperationId,
-                    kind: "invoke-command",
-                    sessionId: session.id,
-                    startedAt: Date.now(),
-                  })
+                (runtime) => {
+                  const afterCommand = removeOperation(runtime, invokeCommandOperationId)
+                  return backgroundCommand
+                    ? removeOperation(afterCommand, promptSubmissionId)
+                    : afterCommand
+                }
               )
               return { sessionRuntimes }
             })
-            await window.desktop.sessions.invokeCommand({
-              sessionId: session.id,
-              line: options.commandLine,
-            })
-            if (commandOperationId) {
-              set((state) => {
-                const sessionRuntimes = updateSessionRuntime(
-                  state.sessionRuntimes,
-                  session.id,
-                  (runtime) => removeOperation(runtime, invokeCommandOperationId)
-                )
-                return { sessionRuntimes }
-              })
-            }
           }
         } else {
           await window.desktop.sessions.sendPrompt({

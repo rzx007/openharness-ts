@@ -32,7 +32,7 @@
 | --- | --- |
 | `types.ts` | 共享状态、运行态、operation 和动作接口的唯一类型来源。 |
 | `initial-state.ts` | 创建初始字段与空 runtime；不注册事件、不读 `localStorage`、不调用 IPC。 |
-| `store.ts` | 组合各 action creator，创建唯一 store，并按引用计数挂接/释放 daemon 与会话 SSE 监听。 |
+| `store.ts` | 组合各 action creator，创建唯一 store，并按引用计数挂接/释放 daemon 与会话 SSE 监听；从 0 个监听重新变为 1 个时，会为当前 active 会话补一次快照。 |
 | `selectors.ts` | 从当前会话和 runtime 推导页面可用的 sending、opening、局部错误和队列动作。 |
 | `operation-state.ts` | 以 operation ID 创建、确认、失败、删除或从新会话 runtime 绑定到真实会话 runtime。 |
 | `error-state.ts` | 规范错误文本，并维护应用/项目范围 operation 的失败与清理。 |
@@ -40,9 +40,9 @@
 | `session-view-actions.ts` | 把已接受的 SSE 快照写入目录、导航和对应会话 runtime；这是状态写入动作，不发 IPC。 |
 | `pending-prompt-state.ts` | 决定 prompt 放在 transcript 还是 queue，并清理已被 SSE input/run 确认的本地覆盖。 |
 | `bootstrap-actions.ts` | 初始化、刷新 bootstrap 数据和 daemon 状态事件。 |
-| `project-actions.ts` | 选项目、读取 Git、分支和项目设置；失败只写到该项目的 operation 桶。 |
+| `project-actions.ts` | 选项目、读取 Git、分支和项目设置；同一项目的 Git 详情写入使用 generation（每次新意图递增的版本号），旧返回不能覆盖新分支。失败只写到该项目的 operation 桶。 |
 | `project-git-scheduler.ts` | 对 Git 刷新做延迟合并；在最后一个 store 监听解绑时取消尚未执行的刷新。 |
-| `session-actions.ts` | 新会话、打开、fork、重命名、置顶、归档和删除；管理 primary 导航所有权。 |
+| `session-actions.ts` | 新会话、打开、fork、重命名、置顶、归档和删除；管理 primary 导航所有权，并按最新意图顺序写入默认模型和权限模式。 |
 | `prompt-actions.ts` | 普通发送、命令、编辑、停止和授权回复。 |
 | `queued-prompt-actions.ts` | 提升或取消某一条已进入服务端队列的消息。 |
 | `persistence.ts` | 安全读写 active session 的 `localStorage`；存储失败不会阻断聊天。 |
@@ -56,7 +56,7 @@
 1. **入口 → 创建。** `session-actions.ts` 先在 `newConversationRuntime.operations` 写入 `create-session`，随后调用 `sessions.create`。
 2. **调用返回 → 绑定状态。** main process 返回真实 `sessionId` 后，创建 operation 从 `newConversationRuntime` 原子移动到 `sessionRuntimes[sessionId]`；首条普通消息同时写为 `placement: transcript` 的本地 submission。
 3. **是否接管页面 → 打开 primary。** 只有这次创建仍拥有当前导航代次时，才调用 `sessions.open(sessionId)`，并把返回 snapshot 写到 `activeSessionId/sessionView`；用户期间改去别的会话时，首条消息仍会发送，但不会抢回 primary。
-4. **发送 → 等待 SSE。** 普通首条消息调用 `sendPrompt` 后标成 `accepted`；命令则调用 `invokeCommand`。IPC 只表示请求已接收，不能伪造 cursor 或 transcript。
+4. **发送 → 等待 SSE。** 普通首条消息调用 `sendPrompt` 后标成 `accepted`；首条命令只有 primary snapshot 成功写入后才调用 `invokeCommand`。打开失败会把错误留在新 session 的 `open-session` owner、向 composer 返回失败并保留草稿。IPC 只表示请求已接收，不能伪造 cursor 或 transcript。
 5. **SSE 返回 → 清理。** `applySessionUpdate` 接受同会话、cursor 不倒退的快照；`reconcileRuntimeWithView` 按 input/run ID 清掉已经确认的 submission 与 operation。
 6. **失败 → 留给所属页面。** 创建尚未返回 session 时，失败写回 `newConversationRuntime`；已拿到 session 后，失败写到对应 `sessionRuntimes[sessionId]`。SSE 已确认首条消息时，迟到的 IPC 失败不改写为失败。
 
@@ -80,7 +80,7 @@
 
 ## Primary SSE 所有权与会话切换
 
-renderer 只有一处订阅入口：`store.ts` 的 `attachDesktopSessionEvents`。第一个调用者注册 `sessions.onUpdated`，后续调用只增加计数；最后一个清理函数解除订阅并取消 Git 刷新，因而不会留下重复监听。
+renderer 只有一处订阅入口：`store.ts` 的 `attachDesktopSessionEvents`。第一个调用者注册 `sessions.onUpdated`，后续调用只增加计数；最后一个清理函数解除订阅并取消 Git 刷新，因而不会留下重复监听。若曾全部解绑，下一次从 0 变为 1 时会对仍是 active 的会话调用一次 `sessions.open` 补快照；同一轮的第二个引用不会重复打开。
 
 打开会话的流程如下：
 
@@ -111,7 +111,7 @@ operation 的阶段是 `pending`、`acknowledged`、`failed`。
 | `acknowledged` | IPC 接收成功但仍要等 SSE 证实结果时。 | SSE 对账到稳定 ID 后删除。 |
 | `failed` | IPC 失败且 SSE 尚未证明成功时。 | 错误留在最具体的 owner，重试同类动作会清掉旧失败；成功或明确清理时移除。 |
 
-完成后不需要 SSE 的操作（例如命令、编辑、停止、授权回复和项目动作）在 IPC 完成时删除。失败操作不进入全局 `error`：应用失败在 `appOperations`，项目失败在 `projectOperations[projectId]`，新会话失败在 `newConversationRuntime`，会话失败在 `sessionRuntimes[sessionId]`，prompt/排队项的错误跟随各自实体。这样切换会话不会串错错误。
+完成后不需要 SSE 的操作（例如命令、编辑、停止、授权回复和项目动作）在 IPC 完成时删除。后台创建的首命令成功后，创建和命令 operation 一起删除；失败的 `invoke-command` 只保留当前会话最新一条，避免不同命令无限堆积，同时 selector 仍能显示最新错误。失败操作不进入全局 `error`：应用失败在 `appOperations`，项目失败在 `projectOperations[projectId]`，新会话失败在 `newConversationRuntime`，会话失败在 `sessionRuntimes[sessionId]`，prompt/排队项的错误跟随各自实体。这样切换会话不会串错错误。
 
 ## 新增状态或动作的放置检查清单
 

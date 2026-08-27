@@ -45,6 +45,10 @@ export function attachDesktopSessionEvents(): () => void {
     detachDesktopSessionUpdates = window.desktop.sessions.onUpdated((view) => {
       useDesktopSessionStore.getState().applySessionUpdate(view)
     })
+    const activeSessionId = useDesktopSessionStore.getState().activeSessionId
+    if (activeSessionId && typeof window.desktop.sessions.open === "function") {
+      void useDesktopSessionStore.getState().openSession(activeSessionId)
+    }
   }
   desktopSessionEventSubscriptionCount += 1
 

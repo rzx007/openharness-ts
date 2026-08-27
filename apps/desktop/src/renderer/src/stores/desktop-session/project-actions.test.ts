@@ -347,6 +347,52 @@ describe("desktop session store project order", () => {
       })
     }
   )
+
+  it("does not let an older refresh overwrite a newer checkout for the selected project", async () => {
+    const project = {
+      id: "project-refresh-checkout",
+      name: "Project Refresh Checkout",
+      path: "D:\\code\\project-refresh-checkout",
+      lastOpenedAt: 100,
+      available: true,
+    }
+    let resolveRefresh!: (value: ReturnType<typeof projectDetails>) => void
+    const inspectProject = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof projectDetails>>((resolve) => {
+          resolveRefresh = resolve
+        })
+    )
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          inspectProject,
+          checkoutBranch: vi.fn(async () => projectDetails(project, "feature/new")),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [project],
+      workspaceMode: "project",
+      selectedProject: project,
+      selectedProjectGit: true,
+      selectedProjectGitCheckedAt: null,
+      branch: "main",
+      branches: ["main"],
+      projectOperations: {},
+    })
+
+    const refresh = useDesktopSessionStore.getState().refreshSelectedProjectGit({ force: true })
+    await useDesktopSessionStore.getState().checkoutBranch("feature/new")
+    resolveRefresh(projectDetails(project, "main"))
+    await refresh
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedProject: project,
+      branch: "feature/new",
+      branches: ["feature/new"],
+    })
+  })
 })
 
 describe("desktop session store bootstrap operations", () => {

@@ -96,6 +96,30 @@ describe("desktop session store event lifecycle", () => {
     expect(unsubscribeSession).toHaveBeenCalledTimes(2)
     expect(unsubscribeDaemon).toHaveBeenCalledTimes(2)
   })
+
+  it("resnapshots the active session after the final listener reattaches", async () => {
+    const sessionSubscribers = new Set<(view: ReturnType<typeof emptySessionView>) => void>()
+    const onUpdated = vi.fn((listener: (view: ReturnType<typeof emptySessionView>) => void) => {
+      sessionSubscribers.add(listener)
+      return () => sessionSubscribers.delete(listener)
+    })
+    const onDaemonStatusChanged = vi.fn(() => () => undefined)
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId, 2))
+    vi.stubGlobal("window", { desktop: { sessions: { onUpdated, onDaemonStatusChanged, open } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      sessionView: emptySessionView("session-1", 1),
+    })
+
+    const firstCleanup = attachDesktopSessionEvents()
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1))
+    firstCleanup()
+    const secondCleanup = attachDesktopSessionEvents()
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(2))
+
+    expect(useDesktopSessionStore.getState().sessionView?.cursor).toBe(2)
+    secondCleanup()
+  })
 })
 
 describe("desktop session store integration races", () => {

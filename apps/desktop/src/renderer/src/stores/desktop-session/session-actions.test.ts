@@ -8,7 +8,7 @@ import {
   selectNewConversationSending,
   selectSessionComposerError,
 } from "./selectors"
-import { resetDesktopSessionStore, sessionRuntime } from "./store-test-fixtures"
+import { refreshedBootstrap, resetDesktopSessionStore, sessionRuntime } from "./store-test-fixtures"
 import { useDesktopSessionStore } from "./store"
 import type { DesktopSessionRuntime } from "./types"
 
@@ -735,7 +735,7 @@ describe("desktop session actions", () => {
     randomUUID.mockRestore()
   })
 
-  it("does not invoke the first slash command when its active open fails", async () => {
+  it("rejects the first slash command when its active open fails and leaves the command uninvoked", async () => {
     const session = emptySessionView("session-open-failure").session
     const invokeCommand = vi.fn(async () => undefined)
     vi.stubGlobal("window", {
@@ -753,7 +753,7 @@ describe("desktop session actions", () => {
 
     await expect(
       useDesktopSessionStore.getState().startSession("/compact", { commandLine: "/compact" })
-    ).resolves.toBe(session.id)
+    ).rejects.toThrow("open snapshot failed")
 
     expect(invokeCommand).not.toHaveBeenCalled()
     const operations = Object.values(
@@ -807,6 +807,75 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState()).toMatchObject({
       activeSessionId: "session-b",
       sessionView: { session: { id: "session-b" } },
+    })
+    expect(sessionRuntime(session.id).operations).toEqual({})
+  })
+
+  it("keeps the latest selected model when an older default-model request fails late", async () => {
+    let rejectFirst!: (error: Error) => void
+    let resolveSecond!: (value: typeof refreshedBootstrap) => void
+    const setDefaultModel = vi.fn(
+      () =>
+        new Promise<typeof refreshedBootstrap>((resolve, reject) => {
+          if (setDefaultModel.mock.calls.length === 1) rejectFirst = reject
+          else resolveSecond = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { setDefaultModel } } })
+    resetNewConversationState()
+    const first = useDesktopSessionStore.getState().selectModel({
+      id: "model-a",
+      label: "Model A",
+      provider: "Provider A",
+      providerName: "provider-a",
+    })
+    const second = useDesktopSessionStore.getState().selectModel({
+      id: "model-b",
+      label: "Model B",
+      provider: "Provider B",
+      providerName: "provider-b",
+    })
+
+    await vi.waitFor(() => expect(setDefaultModel).toHaveBeenCalledTimes(1))
+    rejectFirst(new Error("first model failed"))
+    await first
+    await vi.waitFor(() => expect(setDefaultModel).toHaveBeenCalledTimes(2))
+    resolveSecond({ ...refreshedBootstrap, defaultModel: "model-b", defaultProvider: "provider-b" })
+    await second
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedModel: "model-b",
+      selectedProvider: "provider-b",
+      defaultModel: "model-b",
+      defaultProvider: "provider-b",
+    })
+  })
+
+  it("keeps the latest permission mode when an older request succeeds late", async () => {
+    let resolveFirst!: (value: typeof refreshedBootstrap) => void
+    let resolveSecond!: (value: typeof refreshedBootstrap) => void
+    const setDefaultPermissionMode = vi.fn(
+      () =>
+        new Promise<typeof refreshedBootstrap>((resolve) => {
+          if (setDefaultPermissionMode.mock.calls.length === 1) resolveFirst = resolve
+          else resolveSecond = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { setDefaultPermissionMode } } })
+    resetNewConversationState()
+    const first = useDesktopSessionStore.getState().selectPermissionMode("plan")
+    const second = useDesktopSessionStore.getState().selectPermissionMode("full_auto")
+
+    await vi.waitFor(() => expect(setDefaultPermissionMode).toHaveBeenCalledTimes(1))
+    resolveFirst({ ...refreshedBootstrap, defaultPermissionMode: "plan" })
+    await first
+    await vi.waitFor(() => expect(setDefaultPermissionMode).toHaveBeenCalledTimes(2))
+    resolveSecond({ ...refreshedBootstrap, defaultPermissionMode: "full_auto" })
+    await second
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      selectedPermissionMode: "full_auto",
+      defaultPermissionMode: "full_auto",
     })
   })
 

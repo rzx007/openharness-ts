@@ -12,4 +12,8 @@ describe("resolveDraftAfterSubmission", () => {
       "request"
     )
   })
+
+  it("keeps the draft when a new-session submission did not produce a session id", () => {
+    expect(resolveDraftAfterSubmission("/compact", "/compact", null, null)).toBe("/compact")
+  })
 })

@@ -4,7 +4,9 @@ export function resolveDraftAfterSubmission(
   completedSessionId: string | null,
   currentSessionId: string | null
 ): string {
-  return currentDraft.trim() === submittedContent && currentSessionId === completedSessionId
+  return completedSessionId !== null &&
+    currentDraft.trim() === submittedContent &&
+    currentSessionId === completedSessionId
     ? ""
     : currentDraft
 }
